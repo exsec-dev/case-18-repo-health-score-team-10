@@ -10,6 +10,7 @@
 // кап total ≤ 49 (§5/В2-8). Все числа — константы model.ts.
 import type { Database } from "bun:sqlite";
 import { categoryOf } from "../collectors/facts";
+import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
 import { DerivedMetrics, deriveMetrics } from "./derived";
 import {
   CI_CONFIG_ONLY_FACTOR,
@@ -205,13 +206,8 @@ export function compute(
 // ---------- категории ----------
 
 function scoreDocumentation(ok: Map<string, unknown>, _derived: DerivedMetrics): CategoryScore {
-  const presence = ok.get("docs.presence") as
-    | { readme?: unknown; license?: unknown; contributing?: unknown; codeowners?: unknown }
-    | undefined;
-  const readme = ok.get("docs.readme") as
-    | { bytes?: unknown; flags?: { install?: unknown; build?: unknown; test?: unknown }; present?: undefined }
-    | { present?: boolean; bytes?: undefined; flags?: undefined }
-    | undefined;
+  const presence = ok.get("docs.presence") as DocsPresenceValue | undefined;
+  const readme = ok.get("docs.readme") as DocsReadmeValue | undefined;
   if (!presence) {
     return { score: null, no_data: "git channel no-data", submetrics: {} };
   }
@@ -219,7 +215,7 @@ function scoreDocumentation(ok: Map<string, unknown>, _derived: DerivedMetrics):
   let quality = 0;
   if (hasReadme && readme && !("present" in readme)) {
     const bytesScore = anchorScore(README_BYTES, num(readme.bytes) ?? 0);
-    const flags = (readme as { flags?: { install?: unknown; build?: unknown; test?: unknown } }).flags ?? {};
+    const flags = readme.flags ?? {};
     const sectionsScore =
       ((flags.install === true ? 1 : 0) + (flags.build === true ? 1 : 0) + (flags.test === true ? 1 : 0)) / 3;
     quality = README_QUALITY_SPLIT.bytes * bytesScore + README_QUALITY_SPLIT.sections * sectionsScore;
@@ -296,9 +292,7 @@ function scoreCicd(ok: Map<string, unknown>): CategoryScore {
 }
 
 function scoreSecurity(ok: Map<string, unknown>): CategoryScore {
-  const appsec = ok.get("appsec.findings") as
-    | { severity_counts?: Record<string, unknown>; resolved_share?: unknown; secrets_critical?: unknown }
-    | undefined;
+  const appsec = ok.get("appsec.findings") as AppsecFindingsValue | undefined;
   if (!appsec) {
     return { score: null, no_data: "AppSec data unavailable (public mode; own-repo scenario — В4)", submetrics: {} };
   }

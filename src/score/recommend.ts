@@ -8,6 +8,7 @@
 // Порядок: числовые Δ desc → активационные по весу категории desc →
 // скор-правила. LLM (В5) ничего не решает — только формулировки.
 import type { Database } from "bun:sqlite";
+import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
 import {
   CATEGORY_WEIGHTS,
   CategoryKey,
@@ -68,9 +69,7 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
   // ---------- presence-правила (числовой Δ на замороженном векторе) ----------
   const Wdoc = CATEGORY_WEIGHTS.documentation / 100;
   const doc = SUBWEIGHTS.documentation;
-  const presence_ = ok.get("docs.presence") as
-    | { readme?: unknown; license?: unknown; contributing?: unknown; codeowners?: unknown }
-    | undefined;
+  const presence_ = ok.get("docs.presence") as DocsPresenceValue | undefined;
   if (presence_) {
     if (presence_.license !== true) {
       const d = Wdoc * doc.license * 100;
@@ -84,16 +83,14 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
       const d = Wdoc * doc.codeowners * 100;
       presence.push(mk("codeowners-missing", "Нет CODEOWNERS — код без ответственных", "Добавьте CODEOWNERS с владельцами каталогов", ["docs.presence"], d));
     }
-    const readme = ok.get("docs.readme") as
-      | { bytes?: unknown; flags?: { install?: unknown; build?: unknown; test?: unknown }; present?: boolean }
-      | undefined;
+    const readme = ok.get("docs.readme") as DocsReadmeValue | undefined;
     if (presence_.readme !== true) {
       // обещание: минимальный README (присутствие + bytes-скор <500Б, без секций)
       const gain = README_SPLIT.presence + README_SPLIT.quality * (README_QUALITY_SPLIT.bytes * anchorScore(README_BYTES, 0));
       const d = Wdoc * doc.readme * gain * 100;
       presence.push(mk("readme-missing", "В репозитории нет README", "Добавьте README с описанием проекта и базовыми инструкциями", ["docs.presence", "docs.readme"], d));
     } else if (readme && (readme as { present?: boolean }).present !== false) {
-      const flags = (readme as { flags?: { install?: unknown; build?: unknown; test?: unknown } }).flags ?? {};
+      const flags = readme.flags ?? {};
       const missing = ["install", "build", "test"].filter((k) => flags[k as keyof typeof flags] !== true);
       if (missing.length > 0) {
         const d = Wdoc * doc.readme * README_SPLIT.quality * README_QUALITY_SPLIT.sections * (missing.length / 3) * 100;
@@ -170,9 +167,7 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
       );
     }
   }
-  const appsec = ok.get("appsec.findings") as
-    | { severity_counts?: Record<string, unknown>; secrets_critical?: unknown }
-    | undefined;
+  const appsec = ok.get("appsec.findings") as AppsecFindingsValue | undefined;
   if (appsec) {
     const crit = (appsec.severity_counts?.critical as number | undefined) ?? 0;
     if (appsec.secrets_critical === true || crit > 0) {

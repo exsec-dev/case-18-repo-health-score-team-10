@@ -16,9 +16,21 @@ import type { CloneLimits, ScanCloneLimits } from "../config";
 
 export type CloneFailReason = "timeout" | "disk" | "git";
 
-export type CloneOutcome =
-  | { ok: true; dir: string; bytes: number; elapsedMs: number }
-  | { ok: false; reason: CloneFailReason; detail: string; elapsedMs: number };
+export interface CloneSuccess {
+  ok: true;
+  dir: string;
+  bytes: number;
+  elapsedMs: number;
+}
+
+export interface CloneFailure {
+  ok: false;
+  reason: CloneFailReason;
+  detail: string;
+  elapsedMs: number;
+}
+
+export type CloneOutcome = CloneSuccess | CloneFailure;
 
 interface ExecResult {
   stdout: string;
@@ -133,9 +145,12 @@ export function truncateSinceIso(sinceMonths: number, now: Date = new Date()): s
   return d.toISOString();
 }
 
-export type DegradeCloneOutcome =
-  | { ok: true; dir: string; bytes: number; elapsedMs: number; historyTruncatedSince: string | null }
-  | { ok: false; reason: CloneFailReason; detail: string; elapsedMs: number };
+/** Успех деградационного клона: история усечена с даты (null = не усекалась). */
+export interface DegradeCloneSuccess extends CloneSuccess {
+  historyTruncatedSince: string | null;
+}
+
+export type DegradeCloneOutcome = DegradeCloneSuccess | CloneFailure;
 
 /**
  * Клон с деградационным ярусом (§5.7): полный клон (500МБ/10мин из
