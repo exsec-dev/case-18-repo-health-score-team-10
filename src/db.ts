@@ -1,7 +1,9 @@
 // db.ts — SQLite (bun:sqlite) — единственный стор: кэш собранных
 // данных + история сканов + очередь jobs. Tri-state в NULL-семантике:
-// score NULL = «нет данных» (не «плохо»). Схема v1 — миграций нет,
-// дев-стенд: удалить data/repo-health.db = пересоздать.
+// score NULL = «нет данных» (не «плохо»). Схема v1.1 (В1/Б4): facts
+// расширен status/source/collected_at (решение 15.09), jobs —
+// UNIQUE(repo_id)+status+lease_until. Миграций нет: удалить
+// data/repo-health.db = пересоздать.
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -23,14 +25,17 @@ CREATE TABLE IF NOT EXISTS scans (
   repo_id INTEGER NOT NULL REFERENCES repos(id),
   started_at TEXT NOT NULL,
   finished_at TEXT,
-  status TEXT NOT NULL DEFAULT 'queued', -- queued|running|done|failed|no-data
+  status TEXT NOT NULL DEFAULT 'queued', -- queued|running|ok|partial|bad
   trigger TEXT NOT NULL DEFAULT 'periodic' -- periodic|user|probe
 );
 CREATE TABLE IF NOT EXISTS facts (
   scan_id INTEGER NOT NULL REFERENCES scans(id),
   category TEXT NOT NULL,     -- documentation|cicd|security|activity|issues|code|meta
-  key TEXT NOT NULL,
+  key TEXT NOT NULL,          -- kind целиком: docs.presence, cicd.runs, ...
   value TEXT NOT NULL,        -- JSON: число|строка|объект — весь доказательный слой
+  status TEXT NOT NULL DEFAULT 'ok', -- ok|no-data|bad (no-data reason — внутри value)
+  source TEXT NOT NULL,       -- git | rest:issues | rest:comments | ...
+  collected_at TEXT NOT NULL, -- UTC ISO 8601
   PRIMARY KEY (scan_id, category, key)
 );
 CREATE TABLE IF NOT EXISTS scores (
@@ -41,8 +46,10 @@ CREATE TABLE IF NOT EXISTS scores (
 );
 CREATE TABLE IF NOT EXISTS jobs (
   id INTEGER PRIMARY KEY,
-  repo_id INTEGER NOT NULL REFERENCES repos(id),
-  claimed_at TEXT
+  repo_id INTEGER NOT NULL UNIQUE REFERENCES repos(id),
+  status TEXT NOT NULL DEFAULT 'queued', -- queued|running|done|failed
+  claimed_at TEXT,
+  lease_until TEXT            -- механика claim-loop — В4
 );
 CREATE TABLE IF NOT EXISTS recommendations (
   scan_id INTEGER NOT NULL REFERENCES scans(id),
@@ -61,6 +68,7 @@ export function openDb(config: Config): Database {
   mkdirSync(config.dataDir, { recursive: true });
   const db = new Database(join(config.dataDir, "repo-health.db"), { create: true });
   db.exec("PRAGMA journal_mode = WAL;");
+  db.exec("PRAGMA busy_timeout = 5000;");
   db.exec(SCHEMA);
   return db;
 }
