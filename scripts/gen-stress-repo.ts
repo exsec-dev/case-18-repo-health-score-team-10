@@ -7,7 +7,7 @@
 //     [--blob-size 100] [--todo 50] [--out DIR] [--push REMOTE]
 //
 // --push: run on a machine whose ssh key may push to the remote, e.g.
-//   --push ssh://ssh.sourcecraft.dev/lct-hackaton-2026/case-18-stress-repo.git
+//   --push ssh://ssh.sourcecraft.dev/kibitkina-p/case-18-stress-repo.git
 //
 // No cleanup by default: the generated dir path is printed (delete manually).
 
