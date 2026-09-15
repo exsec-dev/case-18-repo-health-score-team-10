@@ -37,7 +37,8 @@ const RECOMMENDATIONS_DDL = `CREATE TABLE IF NOT EXISTS recommendations (
   expected_impact TEXT,       -- "+3.8 Score (по одному)" | "Score появится (coverage X→Y)" | текст
   delta_score REAL,           -- числовой Δ только у presence-правил (§8)
   opens_category TEXT,        -- категория активационной рекомендации
-  source TEXT NOT NULL DEFAULT 'rule' -- rule|llm
+  source TEXT NOT NULL DEFAULT 'rule', -- rule|llm
+  PRIMARY KEY (scan_id, model_version, rule_id)
 );`;
 
 const SCHEMA = `
