@@ -109,6 +109,9 @@ describe("collectRestFacts: факты из живых форм", () => {
     expect(v("issues.stats").open).toBe(3); // фиксстура issues-open: 3 записи
     expect(v("issues.stats").closed).toBe(2);
     expect(v("issues.stats").stale_90d).toBeGreaterThanOrEqual(0);
+    // фиксстура issues-closed: completed_at есть → медиана считается без fallback
+    expect(v("issues.stats").median_close_days).toBeGreaterThanOrEqual(0);
+    expect(v("issues.stats").close_date_note).toBeUndefined();
     expect(v("activity.rest").contributors).toBe(1);
     expect(v("activity.rest").releases).toBe(2);
     expect(v("cicd.runs").last_status).toBe("success");

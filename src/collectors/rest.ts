@@ -260,9 +260,16 @@ export async function collectRestFacts(
       const u = isoMs(i["updated_at"]);
       return u !== null && now.getTime() - u > staleMs;
     }).length;
+    // completed_at есть не у всех закрытых (manytask: НЕТ ни у одного,
+    // dozzle-plus: есть) — fallback на updated_at с пометкой в факте
+    let fallbackCloses = 0;
     const closeDays = closedIssues
       .map((i) => {
-        const c = isoMs(i["completed_at"]);
+        let c = isoMs(i["completed_at"]);
+        if (c === null) {
+          c = isoMs(i["updated_at"]);
+          if (c !== null) fallbackCloses++;
+        }
         const a = isoMs(i["created_at"]);
         return c !== null && a !== null && c >= a ? (c - a) / 86400000 : null;
       })
@@ -276,6 +283,9 @@ export async function collectRestFacts(
           median_close_days: median(closeDays.map((d) => Math.round(d * 10) / 10)),
           stale_90d: stale90,
           fetched_count: openIssues.length + closedIssues.length,
+          ...(fallbackCloses > 0
+            ? { close_date_note: `completed_at missing on ${fallbackCloses}/${closedIssues.length} closed — used updated_at fallback` }
+            : {}),
         },
         "rest:issues",
         nowIso,
