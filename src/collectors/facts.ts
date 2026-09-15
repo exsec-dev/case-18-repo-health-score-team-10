@@ -38,24 +38,33 @@ export function categoryOf(kind: string): string {
   return KIND_CATEGORIES[prefix] ?? "meta";
 }
 
-/** Мини-реестр kinds В1 (план, раздел «Контракты»). Формы значений: */
+/** Мини-реестр kinds В1+В2 (план, раздел «Контракты»). Формы значений: */
 export const KINDS = {
   // булевы ok-факты; подтверждённое ОТСУТСТВИЕ файла = данные, НЕ no-data
   "docs.presence": "{readme,license,contributing,codeowners}: boolean",
-  "docs.readme": "{bytes,sections} | {present:false} когда README нет",
+  // flags — словарь секций RU+EN §7.4 (install/build/test)
+  "docs.readme": "{bytes,sections,flags:{install,build,test}} | {present:false} когда README нет",
   "tree.stats": "{top_level:[{name,type}],file_count,bytes,loc}",
-  // полный список .sourcecraft/** (канон CI-детекта) + признак ci.yaml
-  "cicd.configs": "{paths:[...],has_ci_yaml:boolean} — пустой paths = ок",
+  // полный список .sourcecraft/** (канон CI-детекта) + has_ci_yaml +
+  // has_steps (§7.4: ≥1 task с ≥1 непустой командой script/cube);
+  // steps_note при неудачном парсинге ci.yaml
+  "cicd.configs": "{paths:[...],has_ci_yaml:boolean,has_steps:boolean,steps_note?} — пустой paths = ок",
   "cicd.runs": "{last_status,success_rate,duration_p50,runs_count} | no-data",
   // событийный JSON: author+committer (имя+email+дата UTC) + robot per-commit
   "activity.git.timeline": "{events:[{sha,author,committer,robot,robot_reasons}]}",
+  // history_truncated_since — только у деградационного клона (§5.7)
   "activity.git.summary":
-    "{commits,authors,committers,robot_commits,robot_ratio,first_committed_at,last_committed_at}",
-  "activity.rest": "{contributors,releases,pulls_open,latest_release_at?,fetched_note?}",
+    "{commits,authors,committers,robot_commits,robot_ratio,first_committed_at,last_committed_at,history_truncated_since?}",
+  // событийные даты (§7.4): топ-50 недавних pulls created_at /
+  // релизов released_at desc — источник pulls_90d/releases_12m
+  "activity.rest": "{contributors,releases,pulls_open,latest_release_at?,pulls_created_at:[...],releases_released_at:[...],fetched_note?}",
   "issues.stats":
     "{open,closed,median_close_days,stale_90d,fetched_count}",
   "issues.comments_sample":
     "{issues,with_comments,median_first_comment_delay_hours,delays_hours:[...]}",
+  // семантика (сверено с кодом В1, uikit 21+6=27): count — только TODO,
+  // fixme — только FIXME, older_180d — по ВСЕМ маркерам (TODO+FIXME,
+  // blame-бюджет ≤ blamed_files файлов из todo_files)
   "code.todo": "{count,fixme,older_180d,todo_files,blamed_files}",
 } as const;
 

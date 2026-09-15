@@ -36,7 +36,7 @@ const restOk = (slug: string): RestCollectResult => ({
     okFact("issues.stats", { open: 1, closed: 2 }, "rest:issues"),
     okFact("cicd.runs", { last_status: null }, "rest:cicd"),
   ],
-  repoMeta: { org: "o", repo: slug.split("/")[1] ?? "", title: "T", language: "Go", likes: 25, lastActivityAt: "2026-09-15T00:00:00Z" },
+  repoMeta: { org: "o", repo: slug.split("/")[1] ?? "", title: "T", language: "Go", likes: 25, lastActivityAt: "2026-09-15T00:00:00Z", forks: 3, reactionCounts: [{ type: "positive_high", count: 5 }] },
   channelErrors: [],
 });
 const rest403Runs = (slug: string): RestCollectResult => ({

@@ -1,28 +1,18 @@
-// git.ts — git-коллектор (план В1, контракт): cloneBare с watchdog
-// (du-поллинг + таймаут, tree-kill через setsid-группу), extractFacts
-// из bare-клона, cleanup в finally на стороне вызывающего (закон 3:
-// клон в tmp → метрики → rm; в БД только факты).
+// git.ts — git-коллектор (план В1 + расширения В2/Б1): cloneBare с
+// watchdog (du-поллинг + таймаут, tree-kill через setsid-группу) +
+// деградационная попытка --shallow-since (§5.7 методики), extractFacts
+// из bare-клона (флаги секций README, has_steps ci.yaml,
+// history_truncated_since), cleanup в finally на стороне вызывающего
+// (закон 3: клон в tmp → метрики → rm; в БД только факты).
 // Tri-state: клон не удался/пустой → факты no-data, не bad.
+// Лимиты — из Config.scan (src/config.ts), не константами здесь.
 import { execFile, execFile as execFileCb } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Fact, GIT_KINDS, noDataFact, okFact } from "./facts";
-
-export interface CloneLimits {
-  /** таймаут субпроцесса клонирования */
-  timeoutMs: number;
-  /** диск-бюджет: размер bare .git (du) */
-  maxBytes: number;
-  /** интервал du-поллинга watchdog'а */
-  pollMs: number;
-}
-
-export const DEFAULT_CLONE_LIMITS: CloneLimits = {
-  timeoutMs: 10 * 60_000,
-  maxBytes: 500 * 1024 * 1024,
-  pollMs: 5_000,
-};
+import { parseYamlSubset } from "./yamlmini";
+import type { CloneLimits, ScanCloneLimits } from "../config";
 
 export type CloneFailReason = "timeout" | "disk" | "git";
 
@@ -86,17 +76,20 @@ const HAVE_SETSID = Boolean(Bun.which("setsid"));
  * каждые pollMs du-поллинг размера (maxBytes) + проверка таймаута;
  * пробой → kill группы процессов + rm + {ok:false}. Успех → путь клона
  * (очистка — cleanupClone(dir) в finally вызывающего).
+ * opts.shallowSince — деградационный режим (--shallow-since, §5.7).
  */
 export async function cloneBare(
   url: string,
   tmpDir: string = tmpdir(),
-  limits: CloneLimits = DEFAULT_CLONE_LIMITS,
+  limits: CloneLimits,
+  opts: { shallowSince?: string } = {},
 ): Promise<CloneOutcome> {
   const dir = mkdtempSync(join(tmpDir, "rh-clone-"));
   const started = Date.now();
-  const cmd = HAVE_SETSID
-    ? ["setsid", "git", "clone", "--bare", url, dir]
-    : ["git", "clone", "--bare", url, dir];
+  const gitArgs = ["clone", "--bare"];
+  if (opts.shallowSince) gitArgs.push(`--shallow-since=${opts.shallowSince}`);
+  gitArgs.push(url, dir);
+  const cmd = HAVE_SETSID ? ["setsid", "git", ...gitArgs] : ["git", ...gitArgs];
   const proc = Bun.spawn({ cmd, stdout: "ignore", stderr: "pipe", stdin: "ignore",
     env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "/bin/true" } });
   let bytes = 0;
@@ -133,6 +126,45 @@ export async function cloneBare(
   return { ok: true, dir, bytes, elapsedMs: Date.now() - started };
 }
 
+/** Дата отсечения истории (календарные месяцы назад) — значение history_truncated_since. */
+export function truncateSinceIso(sinceMonths: number, now: Date = new Date()): string {
+  const d = new Date(now.getTime());
+  d.setMonth(d.getMonth() - sinceMonths);
+  return d.toISOString();
+}
+
+export type DegradeCloneOutcome =
+  | { ok: true; dir: string; bytes: number; elapsedMs: number; historyTruncatedSince: string | null }
+  | { ok: false; reason: CloneFailReason; detail: string; elapsedMs: number };
+
+/**
+ * Клон с деградационным ярусом (§5.7): полный клон (500МБ/10мин из
+ * конфига) → при пробое timeout/disk вторая попытка --shallow-since=
+ * <N>.months на бюджете деградации (2000МБ/20мин) + флаг усечённой
+ * истории. git-ошибка деградацией не лечится — отдаётся как есть.
+ */
+export async function cloneWithDegrade(url: string, tmpDir: string = tmpdir(), limits: ScanCloneLimits): Promise<DegradeCloneOutcome> {
+  const first = await cloneBare(url, tmpDir, limits);
+  if (first.ok || first.reason === "git") {
+    return first.ok ? { ...first, historyTruncatedSince: null } : first;
+  }
+  const second = await cloneBare(
+    url,
+    tmpDir,
+    { timeoutMs: limits.degrade.timeoutMs, maxBytes: limits.degrade.maxBytes, pollMs: limits.pollMs },
+    { shallowSince: `${limits.degrade.sinceMonths}.months` },
+  );
+  if (second.ok) {
+    return { ...second, historyTruncatedSince: truncateSinceIso(limits.degrade.sinceMonths) };
+  }
+  return {
+    ok: false,
+    reason: second.reason,
+    detail: `full clone failed (${first.reason}: ${first.detail}); degrade attempt failed (${second.reason}: ${second.detail})`,
+    elapsedMs: first.elapsedMs + second.elapsedMs,
+  };
+}
+
 /** Закон 3: клон удаляется сразу после извлечения фактов. */
 export function cleanupClone(dir: string): void {
   rmSync(dir, { recursive: true, force: true });
@@ -143,7 +175,8 @@ export function gitFactsNoData(reason: "limits" | "empty" | "other", detail: str
   return GIT_KINDS.map((k) => noDataFact(k, reason, "git", detail, collectedAt));
 }
 
-// ---------- robot-эвристика v1 (план В1; сменяема — сырьё хранится полностью) ----------
+// ---------- robot-эвристика v1 (план В1; сменяема — сырьё хранится полностью;
+// В2/score считает по robot2, v1-флаги в фактах игнорируются) ----------
 
 /** Паттерн: committer name+email содержит robot|sync|bot|-github (case-insensitive). */
 export function isRobotPattern(committerName: string, committerEmail: string): boolean {
@@ -221,6 +254,73 @@ export function robotIntervalFlags(events: { ts: number }[]): boolean[] {
     i = Math.max(j, i + 1);
   }
   return flags;
+}
+
+// ---------- флаги секций README (§7.4; словарь RU+EN) ----------
+
+const SECTION_DICT: Record<"install" | "build" | "test", string[]> = {
+  install: ["установка", "install", "getting started", "быстрый старт", "setup", "запуск"],
+  build: ["сборка", "build"],
+  test: ["тесты", "testing", "tests", "запуск тестов"],
+};
+
+function headingMatchesWord(heading: string, word: string): boolean {
+  const re = new RegExp(`(?<![\\p{L}\\p{N}_])${word.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+")}(?![\\p{L}\\p{N}_])`, "iu");
+  return re.test(heading);
+}
+
+/** Флаги {install, build, test} по заголовкам README (RU+EN словарь §7.4). */
+export function readmeSectionFlags(text: string): { install: boolean; build: boolean; test: boolean } {
+  const flags = { install: false, build: false, test: false };
+  const headings = text.match(/^[ \t]{0,3}#{1,6} \S.*$/gm) ?? [];
+  for (const hRaw of headings) {
+    const h = hRaw.replace(/^[ \t]{0,3}#{1,6}\s+/, "").trim().toLowerCase();
+    // коллизия словаря: «Запуск тестов» (test) содержит «Запуск» (install) —
+    // фраза приоритетнее одиночного слова
+    const testPhrase = SECTION_DICT.test.filter((w) => w.includes(" ")).some((w) => headingMatchesWord(h, w));
+    for (const cat of ["install", "build", "test"] as const) {
+      for (const word of SECTION_DICT[cat]) {
+        if (word.includes(" ")) continue; // фразы ниже отдельно
+        if (cat === "install" && testPhrase) continue;
+        if (headingMatchesWord(h, word)) {
+          flags[cat] = true;
+          break;
+        }
+      }
+      if (!testPhrase) {
+        for (const word of SECTION_DICT[cat].filter((w) => w.includes(" "))) {
+          if (headingMatchesWord(h, word)) flags[cat] = true;
+        }
+      } else if (cat === "test") {
+        flags.test = true;
+      }
+    }
+  }
+  return flags;
+}
+
+// ---------- has_steps ci.yaml (§7.4: ≥1 task с ≥1 непустой командой) ----------
+
+/**
+ * has_steps по распарсенному ci.yaml: ≥1 task, у которого task.cubes[].
+ * script или task.script содержит ≥1 непустую команду. Форма — наш
+ * .sourcecraft/ci.yaml (tasks[].cubes[].script[]).
+ */
+export function ciHasSteps(parsed: unknown): boolean {
+  const tasks = (parsed as { tasks?: unknown } | null)?.tasks;
+  if (!Array.isArray(tasks)) return false;
+  const nonEmpty = (s: unknown): boolean => Array.isArray(s) && s.some((cmd) => typeof cmd === "string" && cmd.trim() !== "");
+  for (const t of tasks) {
+    if (!t || typeof t !== "object") continue;
+    const task = t as { script?: unknown; cubes?: unknown };
+    if (nonEmpty(task.script)) return true;
+    if (Array.isArray(task.cubes)) {
+      for (const c of task.cubes) {
+        if (c && typeof c === "object" && nonEmpty((c as { script?: unknown }).script)) return true;
+      }
+    }
+  }
+  return false;
 }
 
 // ---------- извлечение фактов ----------
@@ -303,12 +403,14 @@ interface TodoOccurrence {
 }
 
 export interface ExtractOptions {
-  /** общий бюджет извлечения (по умолчанию 10 мин, как у клона) */
+  /** максимум файлов, прогоняемых через blame (Config.scan.extract) */
+  maxBlameFiles: number;
+  /** максимальный размер текстового файла для LOC/TODO (Config.scan.extract) */
+  textCapBytes: number;
+  /** общий бюджет извлечения; отсутствует = без дедлайна */
   deadlineMs?: number;
-  /** максимум файлов, прогоняемых через blame (анти-патология) */
-  maxBlameFiles?: number;
-  /** максимальный размер текстового файла для LOC/TODO (байты) */
-  textFileCapBytes?: number;
+  /** дата отсечения деградационного клона → history_truncated_since */
+  historyTruncatedSince?: string;
   now?: Date;
 }
 
@@ -316,13 +418,13 @@ export interface ExtractOptions {
  * Извлекает факты из bare-клона (контракт: extractFacts(clone) → Fact[]).
  * Все даты нормализуются в UTC ISO 8601; source="git".
  */
-export async function extractFacts(cloneDir: string, opts: ExtractOptions = {}): Promise<Fact[]> {
+export async function extractFacts(cloneDir: string, opts: ExtractOptions): Promise<Fact[]> {
   const started = Date.now();
-  const deadline = started + (opts.deadlineMs ?? DEFAULT_CLONE_LIMITS.timeoutMs);
+  const deadline = opts.deadlineMs !== undefined ? started + opts.deadlineMs : Infinity;
   const now = opts.now ?? new Date();
   const nowIso = now.toISOString();
-  const textCap = opts.textFileCapBytes ?? 1_000_000;
-  const maxBlameFiles = opts.maxBlameFiles ?? 200;
+  const textCap = opts.textCapBytes;
+  const maxBlameFiles = opts.maxBlameFiles;
   const git = (args: string[], timeoutMs = 120_000) =>
     execGit(["--git-dir", cloneDir, ...args], { timeoutMs });
 
@@ -381,6 +483,7 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions = {}):
       robot_ratio: events.length ? round3(robotCommits / events.length) : null,
       first_committed_at: committedTs.length ? new Date(committedTs[0]!).toISOString() : null,
       last_committed_at: committedTs.length ? new Date(committedTs[committedTs.length - 1]!).toISOString() : null,
+      ...(opts.historyTruncatedSince ? { history_truncated_since: opts.historyTruncatedSince } : {}),
     },
     "git",
     nowIso,
@@ -407,16 +510,28 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions = {}):
     topLevel.push({ name: rec.slice(rec.indexOf("\t") + 1), type: parts[1] ?? "" });
   }
 
-  // --- 3. CI-конфиги (канон: полный список .sourcecraft/**) ---
+  // --- 3. CI-конфиги (канон: полный список .sourcecraft/** + has_steps) ---
   const scPaths = blobs.map((b) => b.path).filter((p) => p.startsWith(".sourcecraft/")).sort();
+  const hasCiYaml = scPaths.includes(".sourcecraft/ci.yaml");
+  let hasSteps = false;
+  let stepsNote: string | undefined;
+  if (hasCiYaml) {
+    const ciBlob = blobs.find((b) => b.path === ".sourcecraft/ci.yaml")!;
+    try {
+      const content = await git(["cat-file", "blob", ciBlob.sha]);
+      hasSteps = ciHasSteps(parseYamlSubset(content.stdout));
+    } catch (e) {
+      stepsNote = `ci.yaml parse failed: ${String((e as Error).message).slice(0, 80)}`;
+    }
+  }
   const cicdConfigsFact = okFact(
     "cicd.configs",
-    { paths: scPaths, has_ci_yaml: scPaths.includes(".sourcecraft/ci.yaml") },
+    { paths: scPaths, has_ci_yaml: hasCiYaml, has_steps: hasSteps, ...(stepsNote ? { steps_note: stepsNote } : {}) },
     "git",
     nowIso,
   );
 
-  // --- 4. документация ---
+  // --- 4. документация (+ флаги секций README, §7.4) ---
   const rootNames = topLevel.map((t) => t.name);
   const hasRoot = (re: RegExp) => rootNames.some((n) => re.test(n));
   const docsPresenceFact = okFact(
@@ -436,7 +551,7 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions = {}):
     const content = await git(["cat-file", "blob", readmeBlob.sha]);
     const text = content.stdout;
     const sections = (text.match(/^[ \t]{0,3}#{1,6} \S.*$/gm) ?? []).length;
-    readmeFact = okFact("docs.readme", { bytes: readmeBlob.size, sections }, "git", nowIso);
+    readmeFact = okFact("docs.readme", { bytes: readmeBlob.size, sections, flags: readmeSectionFlags(text) }, "git", nowIso);
   } else {
     readmeFact = okFact("docs.readme", { present: false }, "git", nowIso);
   }

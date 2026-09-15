@@ -192,3 +192,32 @@ describe("collectRestFacts: факты из живых форм", () => {
     expect(val.delays_hours[0]).toBe(2);
   });
 });
+
+describe("В2/Б1: расширения — событийные даты, forks/reaction_counts, без rating", () => {
+  test("activity.rest несёт pulls_created_at / releases_released_at (топ-N desc)", async () => {
+    const client = fullOkClient();
+    const out = await collectRestFacts(client, "o/r", { commentsTopN: 0 });
+    const act = out.facts.find((f) => f.key === "activity.rest")!.value as Record<string, unknown>;
+    const pullsDates = act.pulls_created_at as string[];
+    const relDates = act.releases_released_at as string[];
+    expect(Array.isArray(pullsDates) && pullsDates.length).toBeGreaterThan(0);
+    expect(Array.isArray(relDates) && relDates.length).toBeGreaterThan(0);
+    // desc-порядок (клиентская сортировка поверх серверной)
+    expect([...pullsDates].sort((a, b) => (a < b ? 1 : -1))).toEqual(pullsDates);
+    // фиксстура releases: released_at 2026-09-03 / 2026-09-01
+    expect(relDates[0]).toMatch(/^2026-09-03/);
+  });
+
+  test("repoMeta: forks из counters (строка→int), reaction_counts с count-строкой", async () => {
+    const client = fullOkClient();
+    const out = await collectRestFacts(client, "o/r", { commentsTopN: 0 });
+    expect(out.repoMeta!.forks).toBe(0); // фиксстура repo.json: counters.forks = "0"
+    expect(out.repoMeta!.reactionCounts).toEqual([{ type: "positive_high", count: 5 }]); // count = "5"
+  });
+
+  test("rating-эндпоинт сканом НЕ запрашивается (В2, экономия)", async () => {
+    const client = fullOkClient();
+    await collectRestFacts(client, "o/r", { commentsTopN: 0 });
+    expect(client.calls.some((p) => p.includes("/rating"))).toBe(false);
+  });
+});

@@ -1,11 +1,18 @@
-// rest.ts — REST-коллекторы (Б3, план В1): fetchResource (пагинация ≤5
-// стр, классификация ошибок access/bad-channel/other, инвентаризационный
-// колбэк) + collectRestFacts → факты issues/activity/cicd + мета репо.
+// rest.ts — REST-коллекторы (Б3 план В1 + расширения В2/Б1): fetchResource
+// (пагинация ≤5 стр, классификация ошибок access/bad-channel/other,
+// инвентаризационный колбэк) + collectRestFacts → факты issues/activity/
+// cicd + мета репо. В2: activity.rest несёт событийные даты (pulls
+// created_at, releases released_at — источник pulls_90d/releases_12m),
+// мета — forks + reaction_counts; rating-эндпоинт сканом НЕ запрашивается
+// (мой реактив, экономия 14 запросов на выборку).
 // Живые формы заземлены зондом 15.09 (scripts/probe-rest.ts): списки в
 // ключах issues/issue_comments/pull_requests/contributors/releases/runs,
 // закрытие issue = completed_at, статус — объект {slug}, counters — строки.
 import { Fact, badChannelFact, noDataFact, okFact } from "./facts";
 import { ScClient } from "./http";
+
+/** кап событийных дат в activity.rest (анкеры pulls ≥30 / releases ≥6 — выше бесполезно) */
+const RECENT_DATES_TOP_N = 50;
 
 export type RestResourceName =
   | "repo"
@@ -63,7 +70,10 @@ function resourcePath(resource: RestResourceName, slug: string, args: PathArgs):
     case "issues-closed":
       return { path: `/repos/${slug}/issues?filter=status%3Dclosed&sort_by=-updated_at&page_size=${ps}`, list: true };
     case "pulls-open":
-      return { path: `/repos/${slug}/pulls?filter=status%3Dopen&page_size=${ps}`, list: true };
+    case "pulls-open":
+      // sort_by=-created_at: недавние первыми (для pulls_90d); даты ещё
+      // раз сортируются клиентски — устойчиво к игнору сервером
+      return { path: `/repos/${slug}/pulls?filter=status%3Dopen&sort_by=-created_at&page_size=${ps}`, list: true };
     case "contributors":
       return { path: `/repos/${slug}/contributors?page_size=${ps}`, list: true };
     case "releases":
@@ -173,6 +183,10 @@ export interface RepoMeta {
   language: string | null;
   likes: number | null;
   lastActivityAt: string | null;
+  /** counters.forks — строка в API, parseInt (В2/Б1, дисплей) */
+  forks: number | null;
+  /** rating.reaction_counts[{type,count}] — count строка, нормализуем (дисплей) */
+  reactionCounts: { type: string; count: number }[] | null;
 }
 
 function repoMetaFrom(slug: string, body: Record<string, unknown>): RepoMeta {
@@ -182,6 +196,22 @@ function repoMetaFrom(slug: string, body: Record<string, unknown>): RepoMeta {
     typeof language === "string" ? language : language && typeof language === "object" ? asString((language as Record<string, unknown>)["name"]) : null;
   const rating = body["rating"] as Record<string, unknown> | undefined;
   const ratingValue = typeof rating?.["value"] === "number" ? rating["value"] : null;
+  const counters = body["counters"] as Record<string, unknown> | undefined;
+  const forksRaw = counters?.["forks"];
+  const forks = typeof forksRaw === "string" ? parseInt(forksRaw, 10) : typeof forksRaw === "number" ? forksRaw : null;
+  const rcRaw = rating?.["reaction_counts"];
+  const reactionCounts = Array.isArray(rcRaw)
+    ? rcRaw
+        .map((x): { type: string; count: number } | null => {
+          if (!x || typeof x !== "object") return null;
+          const o = x as Record<string, unknown>;
+          const type = asString(o["type"]);
+          const cnt = typeof o["count"] === "string" ? parseInt(o["count"], 10) : typeof o["count"] === "number" ? o["count"] : NaN;
+          if (type === null || !Number.isFinite(cnt)) return null;
+          return { type, count: cnt };
+        })
+        .filter((x): x is { type: string; count: number } => x !== null)
+    : null;
   return {
     org: org ?? "",
     repo: repo ?? "",
@@ -189,6 +219,8 @@ function repoMetaFrom(slug: string, body: Record<string, unknown>): RepoMeta {
     language: langName,
     likes: ratingValue !== null ? Math.round(ratingValue) : null,
     lastActivityAt: asString(body["last_updated"]),
+    forks: forks !== null && Number.isFinite(forks) ? forks : null,
+    reactionCounts: reactionCounts && reactionCounts.length > 0 ? reactionCounts : null,
   };
 }
 
@@ -211,10 +243,11 @@ export interface RestCollectResult {
 
 /**
  * REST-коллектор одного репо: repo-мета + issues.stats +
- * issues.comments_sample (топ-N свежих issues) + activity.rest + cicd.runs.
+ * issues.comments_sample (топ-N свежих issues) + activity.rest
+ * (событийные даты pulls/releases, §7.4) + cicd.runs.
  * 401/403 → no-data reason=access; 429/5xx/сеть → bad-channel факт
- * (риск-факт скана, скан не валится). rating запрашивается для
- * инвентаризации (мой реактив — непокорректный источник рейтинга репо).
+ * (риск-факт скана, скан не валится). rating-эндпоинт НЕ запрашивается
+ * (мой реактив — не рейтинг репо; В2, экономия запросов).
  */
 export async function collectRestFacts(
   client: ScClient,
@@ -239,12 +272,6 @@ export async function collectRestFacts(
     repoMeta = repoMetaFrom(slug, repoRes.firstPage as Record<string, unknown>);
   } else {
     channelErrors.push({ resource: "repo", kind: repoRes.kind, status: repoRes.status, detail: repoRes.detail });
-  }
-
-  // rating: только инвентаризация (мой реактив — не рейтинг репо)
-  const ratingRes = await fetchResource(client, slug, "rating", { ...frOpts, pageSize: 1, maxPages: 1 });
-  if (ratingRes.kind !== "ok") {
-    channelErrors.push({ resource: "rating", kind: ratingRes.kind, status: ratingRes.status, detail: ratingRes.detail });
   }
 
   // issues: открытые (сортировка -created_at — топ свежих для comments)
@@ -351,15 +378,28 @@ export async function collectRestFacts(
     }
   }
 
-  // activity.rest: contributors / releases / pulls_open
+  // activity.rest: contributors / releases / pulls_open + событийные даты
   const contribRes = await fetchResource(client, slug, "contributors", frOpts);
   const relRes = await fetchResource(client, slug, "releases", frOpts);
   const pullsRes = await fetchResource(client, slug, "pulls-open", frOpts);
   if (contribRes.kind === "ok" && relRes.kind === "ok" && pullsRes.kind === "ok") {
     const latest = relRes.items.find((r) => r["is_latest"] === true) ?? relRes.items[0];
     const latestAt = latest ? asString(latest["released_at"]) : null;
+    // событийные даты (§7.4): топ-N недавних pulls created_at и релизов
+    // released_at desc — источник pulls_90d/releases_12m в score-слое
+    const pullsCreatedAt = pullsRes.items
+      .map((p) => asString(p["created_at"]))
+      .filter((x): x is string => x !== null)
+      .sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))
+      .slice(0, RECENT_DATES_TOP_N);
+    const releasesReleasedAt = relRes.items
+      .map((r) => asString(r["released_at"]))
+      .filter((x): x is string => x !== null)
+      .sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))
+      .slice(0, RECENT_DATES_TOP_N);
     const notes: string[] = [];
     if (contribRes.pages >= (opts.maxPagesPerResource ?? 5)) notes.push(`contributors capped at ${contribRes.items.length}`);
+    if (pullsRes.items.length >= (opts.maxPagesPerResource ?? 5) * (opts.pageSize ?? 100)) notes.push(`pulls capped at ${pullsRes.items.length}`);
     facts.push(
       okFact(
         "activity.rest",
@@ -368,6 +408,8 @@ export async function collectRestFacts(
           releases: relRes.items.length,
           pulls_open: pullsRes.items.length,
           latest_release_at: latestAt,
+          pulls_created_at: pullsCreatedAt,
+          releases_released_at: releasesReleasedAt,
           ...(notes.length ? { fetched_note: notes.join("; ") } : {}),
         },
         "rest:activity",

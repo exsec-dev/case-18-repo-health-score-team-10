@@ -16,8 +16,8 @@ const config = loadConfig();
 const db = openDb(config);
 const client = makeScClient({
   token: config.sourcecraftToken,
-  minIntervalMs: 50,
-  maxRequests: Number(process.env.SCAN_BUDGET ?? 1000),
+  minIntervalMs: config.scan.rest.minIntervalMs,
+  maxRequests: config.scan.rest.budget,
 });
 
 const result = await runScan({ db, scClient: client }, slug, { trigger: process.env.SCAN_TRIGGER ?? "user" });

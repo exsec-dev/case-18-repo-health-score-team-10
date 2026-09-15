@@ -22,8 +22,10 @@ describe("boot", () => {
   test("db: scores.total допускает NULL (tri-state: нет данных ≠ плохо)", () => {
     db.exec("INSERT INTO repos (org_slug, repo_slug) VALUES ('org', 'repo')");
     db.exec("INSERT INTO scans (repo_id, started_at) VALUES (1, '2026-09-15')");
-    db.exec("INSERT INTO scores (scan_id, breakdown, formula_version) VALUES (1, '{}', 'v0')");
-    const row = db.query("SELECT total FROM scores WHERE scan_id = 1").get() as { total: number | null };
+    db.exec(
+      "INSERT INTO scores (scan_id, model_version, repo_id, mode, total, coverage, categories, no_data, stale, computed_at) VALUES (1, 'test', 1, 'public', NULL, 0, '{}', '[]', '[]', '2026-09-15T00:00:00Z')",
+    );
+    const row = db.query("SELECT total FROM scores WHERE scan_id = 1 AND model_version = 'test'").get() as { total: number | null };
     expect(row.total).toBeNull();
   });
 
