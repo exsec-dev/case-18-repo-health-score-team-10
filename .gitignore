@@ -1,0 +1,8 @@
+.env
+node_modules/
+data/
+*.db
+*.db-wal
+*.db-shm
+.tmp-*
+reports/shots/
