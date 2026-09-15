@@ -1,0 +1,21 @@
+{
+ "issue_comments": [
+  {
+   "id": "0198cc08-69dd-7dd7-b8a9-097d37aede37",
+   "body": "you can use [reuseExisting](https://testplane.io/docs/v8/config/dev-server/#reuseexisting) option for external server",
+   "author": {
+    "id": "019862f5-2779-713f-a147-7f136948cc62",
+    "slug": "1658415-github"
+   },
+   "updated_by": {
+    "id": "01971bf5-7bca-7cb7-bcdf-29cbdb04d7ec",
+    "slug": "sipayrt"
+   },
+   "created_at": "2025-08-20T11:49:26Z",
+   "updated_at": "2025-08-20T11:49:26Z",
+   "reactions": {},
+   "attachments": []
+  }
+ ],
+ "next_page_token": ""
+}

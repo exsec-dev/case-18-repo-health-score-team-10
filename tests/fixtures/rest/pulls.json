@@ -1,0 +1,107 @@
+{
+ "pull_requests": [
+  {
+   "id": "019fe2ad-6a69-77b7-8db5-ffb766211f10",
+   "slug": "1",
+   "author": {
+    "id": "019ac2ae-b2d2-7947-a3d8-206710960225",
+    "slug": "k-5-45mm"
+   },
+   "updated_by": {
+    "id": "019ac2ae-b2d2-7947-a3d8-206710960225",
+    "slug": "k-5-45mm"
+   },
+   "title": "ci: require code review for pull requests",
+   "description": "",
+   "repository": {
+    "id": "019fdbe8-611e-74ae-9b33-d157bb49533d",
+    "slug": "dozzle-plus",
+    "organization": {
+     "id": "019ac2ae-cb42-7174-9e26-e19d2a7771d7",
+     "slug": "k-5-45mm"
+    }
+   },
+   "merge_info": {
+    "merger": {
+     "id": "019ac2ae-b2d2-7947-a3d8-206710960225",
+     "slug": "k-5-45mm"
+    },
+    "merge_parameters": {
+     "rebase": false,
+     "squash": false
+    },
+    "target_commit_hash": "a0d38f6846c3552ccee4f8397d7813e17cd4f034",
+    "merge_commit_hash": "16b9fdb75dc9bf71060e274b413eb64dfefa3964"
+   },
+   "source_branch": "chore/code-review-policy",
+   "target_branch": "main",
+   "status": "merged",
+   "created_at": "2026-08-08T18:40:43.625506Z",
+   "updated_at": "2026-08-08T18:41:42.158674Z",
+   "linked_issues": [],
+   "labels": [],
+   "source": {
+    "label": "k-5-45mm/dozzle-plus:chore/code-review-policy",
+    "ref": "chore/code-review-policy",
+    "sha": "4f1a1331e7af5742efcd5bc74449041035df2b89"
+   },
+   "target": {
+    "label": "k-5-45mm/dozzle-plus:main",
+    "ref": "main",
+    "sha": "a0d38f6846c3552ccee4f8397d7813e17cd4f034"
+   }
+  },
+  {
+   "id": "019fe2be-de75-79f2-a853-91057552257f",
+   "slug": "2",
+   "author": {
+    "id": "019ac2ae-b2d2-7947-a3d8-206710960225",
+    "slug": "k-5-45mm"
+   },
+   "updated_by": {
+    "id": "019ac2ae-b2d2-7947-a3d8-206710960225",
+    "slug": "k-5-45mm"
+   },
+   "title": "ci: release trivy image independently",
+   "description": "Краткое описание изменений: Данный pull request разделяет процесс сборки и публикации Docker-образов Dozzle Plus на два независимых конвейера. Ранее единый pipeline собирал и публиковал как основной образ `dozzle-plus`, так и образ с Trivy-сканером `dozzle-plus-trivy` при создании тега `v*`. Теперь введен новый механизм, при котором тег `v*` запускает сборку только основного образа, а новый тег `trivy-v*` — только Trivy-образа. Это позволяет выпускать версии компонентов независимо друг от друга, что упрощает процесс релизов и снижает время сборки. Соответствующая документация в `README.md` была обновлена для отражения новой логики работы CI/CD.\n\nОсновные изменения:\n- **Разделение CI-пайплайна**: В файле `.sourcecraft/ci.yaml` существующий workflow `build-and-push` был переименован (задача `publish-dozzle-plus-images` → `publish-dozzle-plus-image`) и теперь собирает только основной образ. Добавлен новый workflow `build-and-push-trivy`, который полностью повторяет логику сборки, но для Trivy-образа, включая подготовку сертификатов, получение IAM-токена и публикацию в registry.\n- **Обновление триггеров**: В `.sourcecraft/ci.yaml` секция `on.push` теперь содержит два отдельных триггера: один для тегов `v*` (основной образ) и второй для тегов `trivy-v*` (Trivy-образ).\n- **Обновление политики веток**: В `.sourcecraft/branches.yaml` правило для защиты тегов расширено: помимо `v**` теперь также защищены теги, соответствующие шаблону `trivy-v**`.\n- **Обновление документации**: В `README.md` раздел CI/CD переписан для описания новой схемы: тег `v*` собирает только `dozzle-plus`, тег `trivy-v*` собирает только `dozzle-plus-trivy`. Добавлена инструкция по выпуску Trivy-версии, а также уточнено, что для Trivy-образа версия пакета извлекается из тега без префикса `trivy-`.\n- **Исправление версионирования**: В новом workflow `build-and-push-trivy` корректно обрабатывается версия пакета: из тега `trivy-v1.1` извлекается `1.1`, которая приводится к формату `1.1.0` для `package.json`.",
+   "repository": {
+    "id": "019fdbe8-611e-74ae-9b33-d157bb49533d",
+    "slug": "dozzle-plus",
+    "organization": {
+     "id": "019ac2ae-cb42-7174-9e26-e19d2a7771d7",
+     "slug": "k-5-45mm"
+    }
+   },
+   "merge_info": {
+    "merger": {
+     "id": "019ac2ae-b2d2-7947-a3d8-206710960225",
+     "slug": "k-5-45mm"
+    },
+    "merge_parameters": {
+     "rebase": false,
+     "squash": false
+    },
+    "target_commit_hash": "16b9fdb75dc9bf71060e274b413eb64dfefa3964",
+    "merge_commit_hash": "8749e122573f369a07c7ac563e928aaf7ad984f4"
+   },
+   "source_branch": "ci/split-trivy-release",
+   "target_branch": "main",
+   "status": "merged",
+   "created_at": "2026-08-08T18:59:47.445652Z",
+   "updated_at": "2026-08-08T19:00:31.397385Z",
+   "linked_issues": [],
+   "labels": [],
+   "source": {
+    "label": "k-5-45mm/dozzle-plus:ci/split-trivy-release",
+    "ref": "ci/split-trivy-release",
+    "sha": "59e45053d62a764c9139cab8336b9c260efb68e8"
+   },
+   "target": {
+    "label": "k-5-45mm/dozzle-plus:main",
+    "ref": "main",
+    "sha": "16b9fdb75dc9bf71060e274b413eb64dfefa3964"
+   }
+  }
+ ],
+ "next_page_token": null
+}

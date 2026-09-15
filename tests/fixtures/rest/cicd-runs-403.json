@@ -1,0 +1,5 @@
+{
+ "error_code": "AccessDenied",
+ "message": "Access denied for entity <nil> on resource id:\"137629655640353063\"  type:\"src.repository\" and permission src.repositories.listCIFlux",
+ "request_id": "0ebeba66-07d5-96ed-7c12-8ceb2a238b85"
+}
