@@ -1,0 +1,176 @@
+// derived.ts — derived-метрики §7.3 из фактов (без re-clone): вход =
+// карта kind → value только ОК-фактов (bad-channel уже замещён stale-
+// историей в compute), выход — сырые числа для score-модели и показа
+// (mirror_likeness — показ, без веса). Robot-истина — robot2
+// (v1-флаги в фактах игнорируются, Q18).
+import { robot2Flags } from "./robot2";
+
+export interface TimelineEventValue {
+  sha: string;
+  author: { name: string; email: string; date: string };
+  committer: { name: string; email: string; date: string };
+  robot?: boolean;
+  robot_reasons?: string[];
+}
+
+export interface DerivedMetrics {
+  // --- git-канал (null = канал no-data) ---
+  humanCommits: number | null;
+  commits90d: number | null;
+  commits365d: number | null;
+  /** commits/мес := commits_90d/3 (human не-sync, author-даты, §3) */
+  commitsPerMonth: number | null;
+  activeMonths: number | null;
+  contributorsActive90d: number | null;
+  /** ts последнего НЕ-sync НЕ-robot author-коммита (freshness) */
+  lastHumanCommitTs: number | null;
+  syncBursts: number | null;
+  robotRatioV2: number | null;
+  /** показ (§7.3): доля sync + authors/committers — без веса */
+  mirrorLikeness: { sync_share: number; authors: number; committers: number } | null;
+  /** авторы всего (пол 0.2 у соло) — все author-emails таймлайна */
+  contributorsTotal: number | null;
+  // --- issues ---
+  staleShare: number | null;
+  resolutionRatio: number | null;
+  // --- code ---
+  todoTotal: number | null;
+  /** маркеров на KLOC (loc=null при дедлайне → null) */
+  todoDensityPerKloc: number | null;
+  oldShare: number | null;
+  rootEntries: number | null;
+  // --- rest ---
+  pulls90d: number | null;
+  releases12m: number | null;
+}
+
+const DAY_MS = 24 * 3600_000;
+
+function tsOf(iso: unknown): number | null {
+  if (typeof iso !== "string" || iso === "") return null;
+  const t = Date.parse(iso);
+  return Number.isNaN(t) ? null : t;
+}
+
+function countRecent(dates: unknown[], now: Date, windowDays: number): number {
+  const from = now.getTime() - windowDays * DAY_MS;
+  return dates.filter((d) => {
+    const t = tsOf(d);
+    return t !== null && t >= from && t <= now.getTime() + DAY_MS;
+  }).length;
+}
+
+/**
+ * Карта kind → value ОК-фактов. Читает activity.git.timeline/summary,
+ * issues.stats, code.todo, tree.stats, activity.rest.
+ */
+export function deriveMetrics(ok: Map<string, unknown>, now: Date): DerivedMetrics {
+  // --- git: robot2 → human-множество ---
+  const timeline = ok.get("activity.git.timeline") as { events?: TimelineEventValue[] } | undefined;
+  const events = Array.isArray(timeline?.events) ? timeline!.events! : null;
+  if (events) {
+    const { flags, bursts } = robot2Flags(events);
+    const humanTs: number[] = [];
+    const humanEmails = new Set<string>();
+    const activeMonth = new Set<string>();
+    let syncCount = 0;
+    let robotCount = 0;
+    const authorsAll = new Set<string>();
+    const committersAll = new Set<string>();
+    events.forEach((e, i) => {
+      const email = (e.author?.email ?? "").toLowerCase();
+      if (email) authorsAll.add(email);
+      const cEmail = (e.committer?.email ?? "").toLowerCase();
+      if (cEmail) committersAll.add(cEmail);
+      const excluded = flags[i]!.robot || flags[i]!.sync;
+      if (flags[i]!.sync) syncCount++;
+      if (flags[i]!.robot) robotCount++;
+      const at = tsOf(e.author?.date);
+      if (excluded || at === null) return;
+      humanTs.push(at);
+      if (email) humanEmails.add(email);
+      activeMonth.add(new Date(at).toISOString().slice(0, 7));
+    });
+    const from90 = now.getTime() - 90 * DAY_MS;
+    const from365 = now.getTime() - 365 * DAY_MS;
+    const commits90d = humanTs.filter((t) => t >= from90).length;
+    const contributorsActive90d = new Set(
+      events
+        .map((e, i) => ({ e, f: flags[i]! }))
+        .filter(({ e, f }) => {
+          if (f.robot || f.sync) return false;
+          const at = tsOf(e.author?.date);
+          return at !== null && at >= from90;
+        })
+        .map(({ e }) => (e.author?.email ?? "").toLowerCase())
+        .filter((x) => x !== ""),
+    ).size;
+    const lastHuman = humanTs.length ? Math.max(...humanTs) : null;
+    return {
+      humanCommits: humanTs.length,
+      commits90d,
+      commits365d: humanTs.filter((t) => t >= from365).length,
+      commitsPerMonth: commits90d / 3,
+      activeMonths: activeMonth.size,
+      contributorsActive90d,
+      lastHumanCommitTs: lastHuman,
+      syncBursts: bursts,
+      robotRatioV2: events.length ? round3(robotCount / events.length) : null,
+      mirrorLikeness: {
+        sync_share: events.length ? round3(syncCount / events.length) : 0,
+        authors: authorsAll.size,
+        committers: committersAll.size,
+      },
+      contributorsTotal: authorsAll.size,
+      ...issuesCodeRest(ok, now),
+    };
+  }
+  return {
+    humanCommits: null,
+    commits90d: null,
+    commits365d: null,
+    commitsPerMonth: null,
+    activeMonths: null,
+    contributorsActive90d: null,
+    lastHumanCommitTs: null,
+    syncBursts: null,
+    robotRatioV2: null,
+    mirrorLikeness: null,
+    contributorsTotal: null,
+    ...issuesCodeRest(ok, now),
+  };
+}
+
+function issuesCodeRest(ok: Map<string, unknown>, now: Date): Pick<DerivedMetrics, "staleShare" | "resolutionRatio" | "todoTotal" | "todoDensityPerKloc" | "oldShare" | "rootEntries" | "pulls90d" | "releases12m"> {
+  // issues.stats
+  const stats = ok.get("issues.stats") as { open?: unknown; closed?: unknown; stale_90d?: unknown } | undefined;
+  const open = typeof stats?.open === "number" ? stats.open : null;
+  const closed = typeof stats?.closed === "number" ? stats.closed : null;
+  const stale90 = typeof stats?.stale_90d === "number" ? stats.stale_90d : null;
+  const staleShare = open !== null && open > 0 && stale90 !== null ? stale90 / open : null;
+  const resolutionRatio = open !== null && closed !== null && open + closed > 0 ? closed / (open + closed) : null;
+
+  // code.todo + tree.stats
+  const todo = ok.get("code.todo") as { count?: unknown; fixme?: unknown; older_180d?: unknown; todo_files?: unknown; blamed_files?: unknown } | undefined;
+  const count = typeof todo?.count === "number" ? todo.count : null;
+  const fixme = typeof todo?.fixme === "number" ? todo.fixme : null;
+  const older = typeof todo?.older_180d === "number" ? todo.older_180d : null;
+  const todoTotal = count !== null && fixme !== null ? count + fixme : null;
+  const tree = ok.get("tree.stats") as { top_level?: unknown[]; loc?: unknown } | undefined;
+  const loc = typeof tree?.loc === "number" ? tree.loc : null;
+  const todoDensityPerKloc = todoTotal !== null && loc !== null && loc > 0 ? (todoTotal / loc) * 1000 : null;
+  const blamed = typeof todo?.blamed_files === "number" ? todo.blamed_files : null;
+  const oldShare = todoTotal !== null && todoTotal > 0 && older !== null && blamed !== null && blamed > 0 ? older / todoTotal : null;
+  const rootEntries = Array.isArray(tree?.top_level) ? tree!.top_level!.length : null;
+
+  // activity.rest (событийные даты §7.4)
+  const rest = ok.get("activity.rest") as { pulls_created_at?: unknown; releases_released_at?: unknown } | undefined;
+  const pulls90d = Array.isArray(rest?.pulls_created_at) ? countRecent(rest!.pulls_created_at!, now, 90) : null;
+  const releases12m = Array.isArray(rest?.releases_released_at) ? countRecent(rest!.releases_released_at!, now, 365) : null;
+
+  return { staleShare, resolutionRatio, todoTotal, todoDensityPerKloc, oldShare, rootEntries, pulls90d, releases12m };
+}
+
+function round3(x: number): number {
+  return Math.round(x * 1000) / 1000;
+}
