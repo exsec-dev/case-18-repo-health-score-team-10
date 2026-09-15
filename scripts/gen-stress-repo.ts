@@ -95,7 +95,9 @@ function buildStream(o: Opts): Buffer {
 
   const startSec = Math.floor(Date.now() / 1000) - THREE_YEARS_SEC;
   const step = Math.max(1, Math.floor(THREE_YEARS_SEC / Math.max(1, o.commits)));
-  const batchEvery = 100; // one file-bearing commit per 100 bulk commits
+  // масштабируем интервал файловых коммитов: на больших профилях — раз в 100,
+  // на маленьких (тесты) — чаще, иначе файлы не прикрепляются вовсе
+  const batchEvery = Math.max(1, Math.min(100, Math.floor(o.commits / 10)));
   const batchCount = Math.max(1, Math.floor(o.commits / batchEvery) - 1);
   const batchSize = Math.max(1, Math.ceil(o.files / batchCount));
   let fileIdx = 0;
@@ -146,9 +148,11 @@ function main() {
     .split("\n")
     .filter(Boolean).length;
   const size = spawnSync("du", ["-sh", join(dir, ".git")], { encoding: "utf8" }).stdout.trim();
-  const todoFiles = git(dir, "grep", "-l", "-E", "TODO|FIXME", "HEAD")
-    .split("\n")
-    .filter(Boolean).length;
+  // git grep выходит с 1 при нуле совпадений — это не ошибка
+  const todoOut = spawnSync("git", ["grep", "-l", "-E", "TODO|FIXME", "HEAD"], { cwd: dir, encoding: "utf8" });
+  if (todoOut.error) throw todoOut.error;
+  if (todoOut.status !== 0 && todoOut.status !== 1) throw new Error(`git grep failed: ${todoOut.stderr}`);
+  const todoFiles = todoOut.stdout.split("\n").filter(Boolean).length;
 
   console.log(`готово за ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   console.log(`  директория: ${dir}`);
