@@ -1,6 +1,7 @@
 // Read-only probe for the documented SourceCraft AppSec PR-comment surface.
 // It deliberately never prints comment bodies, hunks, identifiers, paths, or
 // the authorization token: only aggregate counters are emitted.
+export {};
 
 const [repoSlug, pullRequestSlug] = process.argv.slice(2);
 if (!repoSlug || !pullRequestSlug || !repoSlug.includes("/")) {

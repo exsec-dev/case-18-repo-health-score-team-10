@@ -4,6 +4,7 @@
 // пустого репо). Внешний канал фейкован локальным file://-репо — сети нет.
 import { afterAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
+import { randomFillSync } from "node:crypto";
 import { existsSync, mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -238,8 +239,27 @@ describe("extractFacts (локальный bare-клон, без сети)", () 
     rmSync(big, { recursive: true, force: true });
   });
 
-  test("cloneBare: диск-бюджет → abort reason=disk", async () => {
-    const out = await cloneBare(`file://${src}`, work, { timeoutMs: 120_000, maxBytes: 100, pollMs: 10 });
+  test("cloneBare: диск-бюджет → abort reason=disk (несжимаемый источник ~10МБ, бюджет 1МБ)", async () => {
+    // Крошечный клон успевает завершиться до первого du-poll на быстрой
+    // машине (флейк, ERROR_LOG 16.09) — несжимаемый_payload гарантирует,
+    // что poll застаёт передачу в разгаре: 10МБ > бюджета 1МБ.
+    const bigDisk = mkdtempSync(join(tmpdir(), "rh-fixture-disk-"));
+    git(bigDisk, ["init", "-q", "-b", "main"]);
+    git(bigDisk, ["config", "user.name", "B"]);
+    git(bigDisk, ["config", "user.email", "b@x.y"]);
+    const chunk = Buffer.alloc(512 * 1024);
+    for (let i = 0; i < 20; i++) {
+      randomFillSync(chunk);
+      writeFileSync(join(bigDisk, `blob${i}.bin`), chunk);
+    }
+    git(bigDisk, ["add", "-A"]);
+    git(bigDisk, ["commit", "-q", "-m", "bulk"]);
+    const out = await cloneBare(`file://${bigDisk}`, work, {
+      timeoutMs: 120_000,
+      maxBytes: 1024 * 1024,
+      pollMs: 10,
+    });
+    rmSync(bigDisk, { recursive: true, force: true });
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.reason).toBe("disk");
