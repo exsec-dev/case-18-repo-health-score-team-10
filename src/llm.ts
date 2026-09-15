@@ -1,4 +1,4 @@
-// llm.ts — CallLlm-шов (перенос dndy-паттерна): провайдер выбирается
+// llm.ts — CallLlm-шов: провайдер выбирается
 // конфигом, пер-channel переопределение — аргументом. Wall-clock фуз и
 // честные ошибки; fail-soft остаётся за вызывающим.
 import type { Config } from "./config";
@@ -32,8 +32,8 @@ function requireKey(config: Config): string {
   return key;
 }
 
-// z.ai — OpenAI-совместимый чат-эндпоинт (перенос из dndy, упрощён:
-// без tools/стрима — для текстовых ролей их не нужно).
+// z.ai — OpenAI-совместимый чат-эндпоинт (упрощён: без tools/стрима —
+// для текстовых ролей не нужно).
 async function callZai(config: Config, opts: Parameters<CallLlm>[0]): Promise<LlmResult> {
   const key = requireKey(config);
   const model = opts.role === "side" ? config.llm.sideModel : config.llm.mainModel;
@@ -93,7 +93,7 @@ async function callYandex(config: Config, opts: Parameters<CallLlm>[0]): Promise
 }
 
 export function makeLlm(config: Config, override?: (role: "main" | "side") => CallLlm): CallLlm {
-  // override — пер-channel шов для тестов (прецедент dndy)
+  // override — пер-channel шов для тестов/фейков (роль → свой вызов)
   if (override) return (opts) => override(opts.role ?? "main")(opts);
   return (opts) => (config.llm.provider === "yandex" ? callYandex(config, opts) : callZai(config, opts));
 }

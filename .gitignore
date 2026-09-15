@@ -6,3 +6,4 @@ data/
 *.db-shm
 .tmp-*
 reports/shots/
+.idea/
