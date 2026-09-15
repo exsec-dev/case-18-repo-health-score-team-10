@@ -32,7 +32,7 @@ https://git@git.sourcecraft.dev/{org}/{repo}.git
 | [gravity-ui/uikit](https://sourcecraft.dev/gravity-ui/uikit) | TSX | 15.09.2026 | Y/Y | активное зеркало TS (2035 MR); ci-no проверен клоном |
 | [testplane/testplane](https://sourcecraft.dev/testplane/testplane) | TypeScript | 14.09.2026 | Y/Y | активное TS-зеркало без SC-CI |
 | [manytask/manytask](https://sourcecraft.dev/manytask/manytask) | Python | 15.09.2026 | Y/Y | маленький активный без CI |
-| [bayselonarrend/openintegrations](https://sourcecraft.dev/bayselonarrend/openintegrations) | 1C | 15.09.2026 | Y/Y | большой: ~19K файлов, ~195МБ (граница «крупного» ТЗ — 10K файлов) |
+| [bayselonarrend/openintegrations](https://sourcecraft.dev/bayselonarrend/openintegrations) | 1C | 15.09.2026 | Y/Y | большой: ~19K файлов, ~195МБ рабочая копия (голый клон .git ≈ 776МБ — CONTEXT); граница «крупного» ТЗ — 10K файлов |
 | [mairamscpsl/parser-tekstov-osetinskogo-iazyka](https://sourcecraft.dev/mairamscpsl/parser-tekstov-osetinskogo-iazyka) | Python | 26.03.2026 | **N**/N | нет README — кейс «документация отсутствует» |
 | [plusovichki/priplusnutaya-laba-1](https://sourcecraft.dev/plusovichki/priplusnutaya-laba-1) | C++ | 08.04.2026 | Y/N | студенческая лаба (10 файлов) — низ здоровья честный |
 | [raph/its-wednesday-my-dudes](https://sourcecraft.dev/raph/its-wednesday-my-dudes) | — | 01.10.2025 | Y/N | мем-репо (README-only) — анти-паттерн «звёздность ≠ здоровье» |
