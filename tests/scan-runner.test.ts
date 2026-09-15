@@ -162,3 +162,36 @@ describe("runScan: статусы и три-state", () => {
     void ([] as Fact[]);
   });
 });
+
+describe("В2/Б5: score-hook — конец скана пишет scores/recommendations", () => {
+  test("runScan с полными фейк-каналами → строки scores и recommendations на месте", async () => {
+    const facts: Fact[] = [
+      okFact("activity.git.timeline", { events: [{ sha: "a1", author: { name: "A", email: "a@x.y", date: "2026-09-10T00:00:00Z" }, committer: { name: "A", email: "a@x.y", date: "2026-09-10T00:00:00Z" } }] }, "git"),
+      okFact("activity.git.summary", { commits: 1, authors: 1, committers: 1, robot_commits: 0, robot_ratio: 0 }, "git"),
+      okFact("docs.presence", { readme: true, license: false, contributing: false, codeowners: false }, "git"),
+      okFact("docs.readme", { bytes: 3000, sections: 2, flags: { install: true, build: false, test: false } }, "git"),
+      okFact("tree.stats", { top_level: [{ name: "src", type: "tree" }], file_count: 5, bytes: 1000, loc: 400 }, "git"),
+      okFact("cicd.configs", { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: true }, "git"),
+      noDataFact("cicd.runs", "access", "rest:cicd", "403"),
+      okFact("code.todo", { count: 1, fixme: 0, older_180d: 0, todo_files: 1, blamed_files: 1 }, "git"),
+      okFact("issues.stats", { open: 0, closed: 0, median_close_days: null, stale_90d: 0, fetched_count: 0 }, "rest:issues"),
+      okFact("issues.comments_sample", { issues: 0, with_comments: 0, median_first_comment_delay_hours: null, delays_hours: [] }, "rest:comments"),
+      okFact("activity.rest", { contributors: 1, releases: 0, pulls_open: 0, pulls_created_at: [], releases_released_at: [] }, "rest:activity"),
+    ];
+    const deps: ScanDeps = {
+      db,
+      scClient: null,
+      collectGit: async () => ({ facts: facts.filter((f) => f.source === "git") }),
+      collectRest: async () => ({ facts: facts.filter((f) => f.source.startsWith("rest")), repoMeta: null, channelErrors: [{ resource: "cicd-runs", kind: "access", status: 403 }] }),
+    };
+    const res = await runScan(deps, "hook/repo");
+    expect(res.score).not.toBeNull();
+    expect(res.score!.total).not.toBeNull();
+    const row = db.query("SELECT total, model_version FROM scores WHERE scan_id = ?").get(res.scanId) as { total: number; model_version: string };
+    expect(row.model_version).toBe("2.0.0-m2");
+    expect(row.total).toBe(Math.round(res.score!.total!));
+    const recs = db.query("SELECT rule_id FROM recommendations WHERE scan_id = ? ORDER BY priority").all(res.scanId) as { rule_id: string }[];
+    expect(recs.map((r) => r.rule_id)).toContain("start-tracker");
+    expect(recs.map((r) => r.rule_id)).toContain("license-missing");
+  });
+});

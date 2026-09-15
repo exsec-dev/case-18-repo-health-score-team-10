@@ -14,6 +14,8 @@ import { cloneWithDegrade, cleanupClone, extractFacts, gitFactsNoData } from "..
 import { ScClient } from "../collectors/http";
 import { RestCollectResult, collectRestFacts } from "../collectors/rest";
 import { DEFAULT_SCAN, ScanCloneLimits, ScanConfig } from "../config";
+import { compute, writeScores } from "../score/compute";
+import { recommend, writeRecommendations } from "../score/recommend";
 
 export interface GitChannelOutcome {
   facts: Fact[];
@@ -47,6 +49,8 @@ export interface ScanResult {
   finishedAt: string;
   counts: { ok: number; noData: number; bad: number };
   channels: { git: string; rest: string };
+  /** score-hook итог (null = хук не смог — факты записаны, скан не роняется) */
+  score: { total: number | null; coverage: number } | null;
   elapsedMs: number;
 }
 
@@ -212,6 +216,19 @@ export async function runScan(deps: ScanDeps, slug: string, opts: { trigger?: st
   deps.db.query("UPDATE scans SET status = ?, finished_at = ? WHERE id = ?").run(status, finishedAt, scanId);
   deps.db.query("UPDATE jobs SET status = ?, lease_until = NULL WHERE repo_id = ?").run(status === "bad" ? "failed" : "done", repoId);
 
+  // --- score-hook (В2/Б5): конец скана → compute + recommend; сбой хука
+  // не роняет скан (факты уже записаны, скор пересчитается CLI/пересканом)
+  let scoreSummary: { total: number | null; coverage: number } | null = null;
+  try {
+    const scores = compute(deps.db, scanId, "public");
+    writeScores(deps.db, scores);
+    const recs = recommend(deps.db, scanId, { scores });
+    writeRecommendations(deps.db, scanId, scores.modelVersion, recs);
+    scoreSummary = { total: scores.total, coverage: scores.coverage };
+  } catch (e) {
+    console.error(`[scan ${scanId}] score hook failed: ${String((e as Error).message).slice(0, 200)}`);
+  }
+
   return {
     scanId,
     repoId,
@@ -220,6 +237,7 @@ export async function runScan(deps: ScanDeps, slug: string, opts: { trigger?: st
     finishedAt,
     counts,
     channels: { git: gitChannel, rest: restChannel },
+    score: scoreSummary,
     elapsedMs: Date.now() - t0,
   };
 }
