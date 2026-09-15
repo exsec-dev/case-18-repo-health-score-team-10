@@ -1,0 +1,1000 @@
+{
+ "repositories": [
+  {
+   "id": "019a59a8-da5d-7195-87dc-b66087876e5c",
+   "name": "divkit",
+   "default_branch": "main",
+   "organization": {
+    "id": "01989b9d-b52e-77b9-b54f-a665c42c48f2",
+    "slug": "divkit"
+   },
+   "slug": "divkit",
+   "template_type": "not_a_template",
+   "is_empty": false,
+   "description": "DivKit is an open source Server-Driven UI (SDUI) framework. SDUI is a an emerging technique that leverage the server to build the user interfaces of their mobile app",
+   "visibility": "public",
+   "logo": {
+    "url": "https://storage.yandexcloud.net/yc-sourcecraft-user-uploads/59287a5d-f2b6-4db8-a37a-8a393f66e70b"
+   },
+   "clone_url": {
+    "https": "https://git@git.sourcecraft.dev/divkit/divkit.git",
+    "ssh": "ssh://ssh.sourcecraft.dev/divkit/divkit.git"
+   },
+   "web_url": "https://sourcecraft.dev/divkit/divkit",
+   "links": [
+    {
+     "link": "https://github.com/divkit/divkit",
+     "type": "default"
+    }
+   ],
+   "counters": {
+    "forks": "6",
+    "pull_requests": "45",
+    "issues": "0",
+    "tags": "160",
+    "branches": "138"
+   },
+   "last_updated": "2026-09-15T17:31:16.513755Z",
+   "language": {
+    "name": "Kotlin",
+    "color": "#A97BFF"
+   },
+   "rating": {
+    "value": 4061.5,
+    "percentile": 1,
+    "reaction_counts": [
+     {
+      "type": "positive_low",
+      "count": "14"
+     },
+     {
+      "type": "positive_medium",
+      "count": "3"
+     },
+     {
+      "type": "positive_high",
+      "count": "7"
+     }
+    ]
+   }
+  },
+  {
+   "id": "019b6923-732b-7984-9aee-76f92a729859",
+   "name": "linux-kernel-defence-map",
+   "default_branch": "master",
+   "organization": {
+    "id": "01971bf5-8935-71b6-b34e-6047280c6865",
+    "slug": "a13xp0p0v"
+   },
+   "slug": "linux-kernel-defence-map",
+   "template_type": "not_a_template",
+   "is_empty": false,
+   "description": "Linux Kernel Defence Map shows the relationships between vulnerability classes, exploitation techniques, bug detection mechanisms, and defence technologies",
+   "visibility": "public",
+   "logo": {
+    "url": "https://storage.yandexcloud.net/yc-sourcecraft-user-uploads/65378983-19bd-4d49-88fe-10969b3d4b8b"
+   },
+   "clone_url": {
+    "https": "https://git@git.sourcecraft.dev/a13xp0p0v/linux-kernel-defence-map.git",
+    "ssh": "ssh://ssh.sourcecraft.dev/a13xp0p0v/linux-kernel-defence-map.git"
+   },
+   "web_url": "https://sourcecraft.dev/a13xp0p0v/linux-kernel-defence-map",
+   "links": [],
+   "counters": {
+    "forks": "0",
+    "pull_requests": "5",
+    "issues": "0",
+    "tags": "11",
+    "branches": "2"
+   },
+   "last_updated": "2026-05-24T20:05:38.132351Z",
+   "rating": {
+    "value": 3488,
+    "percentile": 1,
+    "reaction_counts": [
+     {
+      "type": "positive_low",
+      "count": "3"
+     },
+     {
+      "type": "positive_high",
+      "count": "1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "019b6925-f05f-7c6f-978e-24a2009566f9",
+   "name": "kernel-hardening-checker",
+   "default_branch": "master",
+   "organization": {
+    "id": "01971bf5-8935-71b6-b34e-6047280c6865",
+    "slug": "a13xp0p0v"
+   },
+   "slug": "kernel-hardening-checker",
+   "template_type": "not_a_template",
+   "is_empty": false,
+   "description": "A tool for checking the security hardening options of the Linux kernel",
+   "visibility": "public",
+   "logo": {
+    "url": "https://storage.yandexcloud.net/yc-sourcecraft-user-uploads/feae6e54-5b15-407b-aecc-1f8a86367693"
+   },
+   "clone_url": {
+    "https": "https://git@git.sourcecraft.dev/a13xp0p0v/kernel-hardening-checker.git",
+    "ssh": "ssh://ssh.sourcecraft.dev/a13xp0p0v/kernel-hardening-checker.git"
+   },
+   "web_url": "https://sourcecraft.dev/a13xp0p0v/kernel-hardening-checker",
+   "links": [],
+   "counters": {
+    "forks": "1",
+    "pull_requests": "97",
+    "issues": "0",
+    "tags": "14",
+    "branches": "2"
+   },
+   "last_updated": "2026-09-12T23:22:29.894623Z",
+   "language": {
+    "name": "Python",
+    "color": "#3572A5"
+   },
+   "rating": {
+    "value": 3204,
+    "percentile": 1,
+    "reaction_counts": [
+     {
+      "type": "positive_low",
+      "count": "1"
+     },
+     {
+      "type": "positive_high",
+      "count": "1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "019884d6-7b74-75d1-8e19-8941310101c6",
+   "name": "datalens",
+   "default_branch": "main",
+   "organization": {
+    "id": "019884a1-0ffa-7b4e-87d0-096d5fe8ae5a",
+    "slug": "datalens"
+   },
+   "slug": "datalens",
+   "template_type": "not_a_template",
+   "is_empty": false,
+   "description": "A modern, scalable analytics system",
+   "visibility": "public",
+   "logo": {
+    "url": "https://storage.yandexcloud.net/yc-sourcecraft-user-uploads/617fb2ff-bfd3-4308-9a89-fe4f8f963500"
+   },
+   "clone_url": {
+    "https": "https://git@git.sourcecraft.dev/datalens/datalens.git",
+    "ssh": "ssh://ssh.sourcecraft.dev/datalens/datalens.git"
+   },
+   "web_url": "https://sourcecraft.dev/datalens/datalens",
+   "links": [
+    {
+     "link": "https://github.com/datalens-tech/datalens",
+     "type": "default"
+    }
+   ],
+   "counters": {
+    "forks": "0",
+    "pull_requests": "0",
+    "issues": "0",
+    "tags": "40",
+    "branches": "5"
+   },
+   "last_updated": "2026-07-27T14:02:26.964502Z",
+   "language": {
+    "name": "Shell",
+    "color": "#89e051"
+   },
+   "rating": {
+    "value": 2591.5,
+    "percentile": 1,
+    "reaction_counts": [
+     {
+      "type": "positive_low",
+      "count": "4"
+     },
+     {
+      "type": "positive_medium",
+      "count": "2"
+     },
+     {
+      "type": "positive_high",
+      "count": "8"
+     }
+    ]
+   }
+  },
+  {
+   "id": "019b28d3-8794-7b4a-943d-44e745a38d9b",
+   "name": "libmdbx",
+   "default_branch": "master",
+   "organization": {
+    "id": "0198e7dc-229d-7ead-bf0b-cc0cc8b7c1df",
+    "slug": "dqdkfa"
+   },
+   "slug": "libmdbx",
+   "template_type": "not_a_template",
+   "is_empty": false,
+   "description": "★ Быстрый транзакционный движок хранения ключ-значение ★ Превосходит легендарную LMDB по надежности, возможностям и производительности ★ Используется в сотнях открытых проектах, в том числе в Ethereum.",
+   "visibility": "public",
+   "logo": {
+    "url": "https://storage.yandexcloud.net/yc-sourcecraft-user-uploads/ccedd562-94e2-4279-8bf7-05812ba8b0e9"
+   },
+   "clone_url": {
+    "https": "https://git@git.sourcecraft.dev/dqdkfa/libmdbx.git",
+    "ssh": "ssh://ssh.sourcecraft.dev/dqdkfa/libmdbx.git"
+   },
+   "web_url": "https://sourcecraft.dev/dqdkfa/libmdbx",
+   "links": [
+    {
+     "link": "https://libmdbx.dqdkfa.ru",
+     "type": "default"
+    },
+    {
+     "link": "https://t.me/libmdbx",
+     "type": "telegram"
+    },
+    {
+     "link": "https://max.ru/join/dKckvyuARxp1vRK-wnPur8zYCEkbR3OUOmpPWkWxp78",
+     "type": "social_network"
+    }
+   ],
+   "counters": {
+    "forks": "1",
+    "pull_requests": "35",
+    "issues": "3",
+    "tags": "6",
+    "branches": "8"
+   },
+   "last_updated": "2026-09-14T18:32:20.009848Z",
+   "language": {
+    "name": "C",
+    "color": "#555555"
+   },
+   "rating": {
+    "value": 2008.5,
+    "percentile": 1,
+    "reaction_counts": [
+     {
+      "type": "positive_low",
+      "count": "16"
+     },
+     {
+      "type": "positive_medium",
+      "count": "2"
+     },
+     {
+      "type": "positive_high",
+      "count": "6"
+     }
+    ]
+   }
+  },
+  {
+   "id": "019c7c7d-ec8d-7b4e-bb02-03e47dde8dc8",
+   "name": "uikit",
+   "default_branch": "main",
+   "organization": {
+    "id": "0198eb5e-0524-767f-91ec-4ab7041e1c9a",
+    "slug": "gravity-ui"
+   },
+   "slug": "uikit",
+   "template_type": "not_a_template",
+   "is_empty": false,
+   "description": "",
+   "visibility": "public",
+   "clone_url": {
+    "https": "https://git@git.sourcecraft.dev/gravity-ui/uikit.git",
+    "ssh": "ssh://ssh.sourcecraft.dev/gravity-ui/uikit.git"
+   },
+   "web_url": "https://sourcecraft.dev/gravity-ui/uikit",
+   "links": [],
+   "counters": {
+    "forks": "0",
+    "pull_requests": "2035",
+    "issues": "0",
+    "tags": "324",
+    "branches": "121"
+   },
+   "last_updated": "2026-09-15T17:46:24.531943Z",
+   "language": {
+    "name": "TSX",
+    "color": "#3178c6"
+   },
+   "rating": {
+    "value": 1606.5,
+    "percentile": 1,
+    "reaction_counts": [
+     {
+      "type": "positive_low",
+      "count": "6"
+     },
+     {
+      "type": "positive_high",
+      "count": "6"
+     }
+    ]
+   }
+  },
+  {
+   "id": "0198cbff-bb45-7ad8-843f-1b2176048cbf",
+   "name": "testplane",
+   "default_branch": "master",
+   "organization": {
+    "id": "01987b45-692e-7438-bd3d-34d7c889d931",
+    "slug": "testplane"
+   },
+   "slug": "testplane",
+   "template_type": "not_a_template",
+   "is_empty": false,
+   "description": "Testplane (ex-hermione) browser test runner based on mocha and wdio",
+   "visibility": "public",
+   "logo": {
+    "url": "https://storage.yandexcloud.net/yc-sourcecraft-user-uploads/d45bf1ed-03e4-434b-90a4-49795ac5a342"
+   },
+   "clone_url": {
+    "https": "https://git@git.sourcecraft.dev/testplane/testplane.git",
+    "ssh": "ssh://ssh.sourcecraft.dev/testplane/testplane.git"
+   },
+   "web_url": "https://sourcecraft.dev/testplane/testplane",
+   "links": [],
+   "counters": {
+    "forks": "2",
+    "pull_requests": "922",
+    "issues": "0",
+    "tags": "481",
+    "branches": "74"
+   },
+   "last_updated": "2026-09-14T20:05:17.493307Z",
+   "language": {
+    "name": "TypeScript",
+    "color": "#3178c6"
+   },
+   "rating": {
+    "value": 1294.5,
+    "percentile": 1,
+    "reaction_counts": [
+     {
+      "type": "positive_low",
+      "count": "2"
+     },
+     {
+      "type": "positive_medium",
+      "count": "1"
+     },
+     {
+      "type": "positive_high",
+      "count": "9"
+     }
+    ]
+   }
+  },
+  {
+   "id": "019ce04d-aec0-7e85-a138-9b96ef10eeee",
+   "name": "openintegrations",
+   "default_branch": "main",
+   "organization": {
+    "id": "0199136f-55b6-7000-8123-73b71825075d",
+    "slug": "bayselonarrend"
+   },
+   "slug": "openintegrations",
+   "template_type": "not_a_template",
+   "is_empty": false,
+   "description": "Набор инструментов интеграции с популярными сервисами и технологиями для 1С:Предприятие, OneScript и CLI+MCP (Telegram, VK, Bitrix24, Google, Яндекс, S3, PostgreSQL, SQLite, MySQL и др.)",
+   "visibility": "public",
+   "logo": {
+    "url": "https://storage.yandexcloud.net/yc-sourcecraft-user-uploads/b95a5bfc-d173-4361-b7eb-0bcd9e56ca2b"
+   },
+   "clone_url": {
+    "https": "https://git@git.sourcecraft.dev/bayselonarrend/openintegrations.git",
+    "ssh": "ssh://ssh.sourcecraft.dev/bayselonarrend/openintegrations.git"
+   },
+   "web_url": "https://sourcecraft.dev/bayselonarrend/openintegrations",
+   "links": [
+    {
+     "link": "https://openintegrations.dev/",
+     "type": "default"
+    },
+    {
+     "link": "https://github.com/Bayselonarrend/OpenIntegrations",
+     "type": "default"
+    },
+    {
+     "link": "https://boosty.to/bayselonarrend",
+     "type": "default"
+    }
+   ],
+   "counters": {
+    "forks": "0",
+    "pull_requests": "43",
+    "issues": "0",
+    "tags": "48",
+    "branches": "3"
+   },
+   "last_updated": "2026-09-15T16:09:03.668118Z",
+   "language": {
+    "name": "1C Enterprise",
+    "color": "#814CCC"
+   },
+   "rating": {
+    "value": 1020,
+    "percentile": 1,
+    "reaction_counts": [
+     {
+      "type": "positive_low",
+      "count": "3"
+     },
+     {
+      "type": "positive_medium",
+      "count": "1"
+     },
+     {
+      "type": "positive_high",
+      "count": "1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "019862f2-28ce-7894-8657-0b04929f5f61",
+   "name": "bem-method",
+   "default_branch": "bem-info-data",
+   "organization": {
+    "id": "019862e4-07cc-7153-9d8b-787af0901019",
+    "slug": "block-element-modifier"
+   },
+   "slug": "bem-method",
+   "template_type": "not_a_template",
+   "is_empty": false,
+   "description": "BEM — a methodology how to develop web projects applicable for any technology",
+   "visibility": "public",
+   "logo": {
+    "url": "https://storage.yandexcloud.net/yc-sourcecraft-user-uploads/f9429e99-0a74-48ca-b9b2-1a578fcb5d13"
+   },
+   "clone_url": {
+    "https": "https://git@git.sourcecraft.dev/block-element-modifier/bem-method.git",
+    "ssh": "ssh://ssh.sourcecraft.dev/block-element-modifier/bem-method.git"
+   },
+   "web_url": "https://sourcecraft.dev/block-element-modifier/bem-method",
+   "links": [],
+   "counters": {
+    "forks": "0",
+    "pull_requests": "532",
+    "issues": "0",
+    "tags": "0",
+    "branches": "22"
+   },
+   "last_updated": "2026-06-30T12:12:51.173105Z",
+   "rating": {
+    "value": 910.5,
+    "percentile": 1,
+    "reaction_counts": [
+     {
+      "type": "positive_low",
+      "count": "1"
+     },
+     {
+      "type": "positive_high",
+      "count": "1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "019a72c1-1dc5-7ded-858f-449bf405dd23",
+   "name": "diktat",
+   "default_branch": "master",
+   "organization": {
+    "id": "01971bf5-8442-70cb-bb0a-624162caa91c",
+    "slug": "akuleshov7"
+   },
+   "slug": "diktat",
+   "template_type": "not_a_template",
+   "is_empty": false,
+   "description": "Strict coding standard for Kotlin and a custom set of rules for detecting code smells, code style issues and bugs",
+   "visibility": "public",
+   "logo": {
+    "url": "https://storage.yandexcloud.net/yc-sourcecraft-user-uploads/ac69cdd3-9865-4a75-9f78-bd2022c216bd"
+   },
+   "clone_url": {
+    "https": "https://git@git.sourcecraft.dev/akuleshov7/diktat.git",
+    "ssh": "ssh://ssh.sourcecraft.dev/akuleshov7/diktat.git"
+   },
+   "web_url": "https://sourcecraft.dev/akuleshov7/diktat",
+   "links": [],
+   "counters": {
+    "forks": "0",
+    "pull_requests": "1170",
+    "issues": "0",
+    "tags": "47",
+    "branches": "27"
+   },
+   "last_updated": "2025-11-11T11:51:42.435300Z",
+   "language": {
+    "name": "Kotlin",
+    "color": "#A97BFF"
+   },
+   "rating": {
+    "value": 870,
+    "percentile": 1,
+    "reaction_counts": [
+     {
+      "type": "positive_medium",
+      "count": "1"
+     },
+     {
+      "type": "positive_high",
+      "count": "4"
+     }
+    ]
+   }
+  },
+  {
+   "id": "019a72c5-b656-7c54-b26e-662ff2911288",
+   "name": "ktoml",
+   "default_branch": "main",
+   "organization": {
+    "id": "01971bf5-8442-70cb-bb0a-624162caa91c",
+    "slug": "akuleshov7"
+   },
+   "slug": "ktoml",
+   "template_type": "not_a_template",
+   "is_empty": false,
+   "description": "Kotlin Multiplatform parser and compile-time serializer/deserializer for TOML format (Fully Native, JS, JVM) based on KxS",
+   "visibility": "public",
+   "logo": {
+    "url": "https://storage.yandexcloud.net/yc-sourcecraft-user-uploads/96a5f263-0705-485f-b28c-9127e5564477"
+   },
+   "clone_url": {
+    "https": "https://git@git.sourcecraft.dev/akuleshov7/ktoml.git",
+    "ssh": "ssh://ssh.sourcecraft.dev/akuleshov7/ktoml.git"
+   },
+   "web_url": "https://sourcecraft.dev/akuleshov7/ktoml",
+   "links": [],
+   "counters": {
+    "forks": "1",
+    "pull_requests": "217",
+    "issues": "0",
+    "tags": "23",
+    "branches": "11"
+   },
+   "last_updated": "2025-12-09T23:59:06.003196Z",
+   "language": {
+    "name": "Kotlin",
+    "color": "#A97BFF"
+   },
+   "rating": {
+    "value": 813,
+    "percentile": 1,
+    "reaction_counts": [
+     {
+      "type": "positive_high",
+      "count": "3"
+     }
+    ]
+   }
+  },
+  {
+   "id": "019b6929-c35e-7b0f-813d-d4b8abbed7cf",
+   "name": "kernel-hack-drill",
+   "default_branch": "master",
+   "organization": {
+    "id": "01971bf5-8935-71b6-b34e-6047280c6865",
+    "slug": "a13xp0p0v"
+   },
+   "slug": "kernel-hack-drill",
+   "template_type": "not_a_template",
+   "is_empty": false,
+   "description": "Linux kernel exploitation experiments",
+   "visibility": "public",
+   "logo": {
+    "url": "https://storage.yandexcloud.net/yc-sourcecraft-user-uploads/3082995f-e785-47a6-9e95-48fee14c5ade"
+   },
+   "clone_url": {
+    "https": "https://git@git.sourcecraft.dev/a13xp0p0v/kernel-hack-drill.git",
+    "ssh": "ssh://ssh.sourcecraft.dev/a13xp0p0v/kernel-hack-drill.git"
+   },
+   "web_url": "https://sourcecraft.dev/a13xp0p0v/kernel-hack-drill",
+   "links": [],
+   "counters": {
+    "forks": "0",
+    "pull_requests": "12",
+    "issues": "0",
+    "tags": "0",
+    "branches": "1"
+   },
+   "last_updated": "2026-08-16T16:19:14.533989Z",
+   "language": {
+    "name": "C",
+    "color": "#555555"
+   },
+   "rating": {
+    "value": 650,
+    "percentile": 1,
+    "reaction_counts": [
+     {
+      "type": "positive_high",
+      "count": "1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "019c7c7a-7958-7a06-b1dd-4d2cd986a67b",
+   "name": "markdown-editor",
+   "default_branch": "main",
+   "organization": {
+    "id": "0198eb5e-0524-767f-91ec-4ab7041e1c9a",
+    "slug": "gravity-ui"
+   },
+   "slug": "markdown-editor",
+   "template_type": "not_a_template",
+   "is_empty": false,
+   "description": "Markdown wysiwyg and markup editor",
+   "visibility": "public",
+   "clone_url": {
+    "https": "https://git@git.sourcecraft.dev/gravity-ui/markdown-editor.git",
+    "ssh": "ssh://ssh.sourcecraft.dev/gravity-ui/markdown-editor.git"
+   },
+   "web_url": "https://sourcecraft.dev/gravity-ui/markdown-editor",
+   "links": [],
+   "counters": {
+    "forks": "0",
+    "pull_requests": "884",
+    "issues": "0",
+    "tags": "216",
+    "branches": "57"
+   },
+   "last_updated": "2026-09-15T15:09:36.402980Z",
+   "language": {
+    "name": "TypeScript",
+    "color": "#3178c6"
+   },
+   "rating": {
+    "value": 626.5,
+    "percentile": 1,
+    "reaction_counts": [
+     {
+      "type": "positive_medium",
+      "count": "1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "019b692b-4e93-7639-955f-b9449f152744",
+   "name": "kernel-build-containers",
+   "default_branch": "master",
+   "organization": {
+    "id": "01971bf5-8935-71b6-b34e-6047280c6865",
+    "slug": "a13xp0p0v"
+   },
+   "slug": "kernel-build-containers",
+   "template_type": "not_a_template",
+   "is_empty": false,
+   "description": "A tool for building the Linux kernel or other software with many different compilers in Docker/Podman containers",
+   "visibility": "public",
+   "logo": {
+    "url": "https://storage.yandexcloud.net/yc-sourcecraft-user-uploads/a802805d-445f-4ff3-8e45-a9973f7020bf"
+   },
+   "clone_url": {
+    "https": "https://git@git.sourcecraft.dev/a13xp0p0v/kernel-build-containers.git",
+    "ssh": "ssh://ssh.sourcecraft.dev/a13xp0p0v/kernel-build-containers.git"
+   },
+   "web_url": "https://sourcecraft.dev/a13xp0p0v/kernel-build-containers",
+   "links": [],
+   "counters": {
+    "forks": "0",
+    "pull_requests": "23",
+    "issues": "0",
+    "tags": "3",
+    "branches": "1"
+   },
+   "last_updated": "2026-08-29T16:14:25.443464Z",
+   "language": {
+    "name": "Shell",
+    "color": "#89e051"
+   },
+   "rating": {
+    "value": 419,
+    "percentile": 1,
+    "reaction_counts": [
+     {
+      "type": "positive_high",
+      "count": "1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "019b28b1-5470-7954-a489-cac93d050110",
+   "name": "reopenldap",
+   "default_branch": "master",
+   "organization": {
+    "id": "0198e7dc-229d-7ead-bf0b-cc0cc8b7c1df",
+    "slug": "dqdkfa"
+   },
+   "slug": "reopenldap",
+   "template_type": "not_a_template",
+   "is_empty": false,
+   "description": "Production-ready replacement for OpenLDAP with robust multi-master replication (MegaFon).",
+   "visibility": "public",
+   "clone_url": {
+    "https": "https://git@git.sourcecraft.dev/dqdkfa/reopenldap.git",
+    "ssh": "ssh://ssh.sourcecraft.dev/dqdkfa/reopenldap.git"
+   },
+   "web_url": "https://sourcecraft.dev/dqdkfa/reopenldap",
+   "links": [],
+   "counters": {
+    "forks": "0",
+    "pull_requests": "15",
+    "issues": "0",
+    "tags": "20",
+    "branches": "3"
+   },
+   "last_updated": "2026-08-10T08:47:06.665711Z",
+   "language": {
+    "name": "C",
+    "color": "#555555"
+   },
+   "rating": {
+    "value": 395.5,
+    "percentile": 1,
+    "reaction_counts": [
+     {
+      "type": "positive_low",
+      "count": "1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "0199710b-68a0-7e20-9933-a68483f8bccd",
+   "name": "annet",
+   "default_branch": "main",
+   "organization": {
+    "id": "01996210-25e9-78b9-8116-1fbe23d31481",
+    "slug": "annetutil"
+   },
+   "slug": "annet",
+   "template_type": "not_a_template",
+   "is_empty": false,
+   "description": "Configuration generation and deploying utility for network equipment",
+   "visibility": "public",
+   "clone_url": {
+    "https": "https://git@git.sourcecraft.dev/annetutil/annet.git",
+    "ssh": "ssh://ssh.sourcecraft.dev/annetutil/annet.git"
+   },
+   "web_url": "https://sourcecraft.dev/annetutil/annet",
+   "links": [],
+   "counters": {
+    "forks": "0",
+    "pull_requests": "0",
+    "issues": "0",
+    "tags": "141",
+    "branches": "35"
+   },
+   "last_updated": "2026-08-12T15:46:14.550255Z",
+   "language": {
+    "name": "Python",
+    "color": "#3572A5"
+   },
+   "rating": {
+    "value": 302,
+    "percentile": 1,
+    "reaction_counts": [
+     {
+      "type": "positive_low",
+      "count": "1"
+     },
+     {
+      "type": "positive_medium",
+      "count": "1"
+     },
+     {
+      "type": "positive_high",
+      "count": "3"
+     }
+    ]
+   }
+  },
+  {
+   "id": "019884e4-d43a-70db-ac5e-21698104194b",
+   "name": "datalens-ui",
+   "default_branch": "main",
+   "organization": {
+    "id": "019884a1-0ffa-7b4e-87d0-096d5fe8ae5a",
+    "slug": "datalens"
+   },
+   "slug": "datalens-ui",
+   "template_type": "not_a_template",
+   "is_empty": false,
+   "description": "User interface for DataLens",
+   "visibility": "public",
+   "logo": {
+    "url": "https://storage.yandexcloud.net/yc-sourcecraft-user-uploads/e1af138c-195e-4f28-8b3b-e546b6987c16"
+   },
+   "clone_url": {
+    "https": "https://git@git.sourcecraft.dev/datalens/datalens-ui.git",
+    "ssh": "ssh://ssh.sourcecraft.dev/datalens/datalens-ui.git"
+   },
+   "web_url": "https://sourcecraft.dev/datalens/datalens-ui",
+   "links": [],
+   "counters": {
+    "forks": "0",
+    "pull_requests": "0",
+    "issues": "0",
+    "tags": "2343",
+    "branches": "2400"
+   },
+   "last_updated": "2026-08-01T14:21:24.476500Z",
+   "language": {
+    "name": "TypeScript",
+    "color": "#3178c6"
+   },
+   "rating": {
+    "value": 265,
+    "percentile": 1,
+    "reaction_counts": [
+     {
+      "type": "positive_low",
+      "count": "1"
+     },
+     {
+      "type": "positive_high",
+      "count": "3"
+     }
+    ]
+   }
+  },
+  {
+   "id": "019c7c77-32b2-7a61-8d67-00e51b3c0bbb",
+   "name": "aikit",
+   "default_branch": "main",
+   "organization": {
+    "id": "0198eb5e-0524-767f-91ec-4ab7041e1c9a",
+    "slug": "gravity-ui"
+   },
+   "slug": "aikit",
+   "template_type": "not_a_template",
+   "is_empty": false,
+   "description": "A comprehensive, SDK-agnostic UI library built on Atomic Design principles. Create beautiful, accessible AI chat experiences with full TypeScript support, theming, and extensive customization options.",
+   "visibility": "public",
+   "clone_url": {
+    "https": "https://git@git.sourcecraft.dev/gravity-ui/aikit.git",
+    "ssh": "ssh://ssh.sourcecraft.dev/gravity-ui/aikit.git"
+   },
+   "web_url": "https://sourcecraft.dev/gravity-ui/aikit",
+   "links": [],
+   "counters": {
+    "forks": "0",
+    "pull_requests": "106",
+    "issues": "0",
+    "tags": "33",
+    "branches": "25"
+   },
+   "last_updated": "2026-04-29T19:24:04.254374Z",
+   "language": {
+    "name": "TSX",
+    "color": "#3178c6"
+   },
+   "rating": {
+    "value": 248,
+    "percentile": 1,
+    "reaction_counts": [
+     {
+      "type": "positive_low",
+      "count": "2"
+     },
+     {
+      "type": "positive_medium",
+      "count": "1"
+     },
+     {
+      "type": "positive_high",
+      "count": "1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "019862fa-afa0-7358-99a1-2668a3128b00",
+   "name": "coa",
+   "default_branch": "master",
+   "organization": {
+    "id": "01971bf5-8442-7ad4-9cf8-10641e2c4ffc",
+    "slug": "veged"
+   },
+   "slug": "coa",
+   "template_type": "not_a_template",
+   "is_empty": false,
+   "description": "Command-Option-Argument: Get more from defining your command line interface",
+   "visibility": "public",
+   "clone_url": {
+    "https": "https://git@git.sourcecraft.dev/veged/coa.git",
+    "ssh": "ssh://ssh.sourcecraft.dev/veged/coa.git"
+   },
+   "web_url": "https://sourcecraft.dev/veged/coa",
+   "links": [],
+   "counters": {
+    "forks": "0",
+    "pull_requests": "46",
+    "issues": "0",
+    "tags": "20",
+    "branches": "5"
+   },
+   "last_updated": "2026-06-30T12:15:27.735221Z",
+   "language": {
+    "name": "JavaScript",
+    "color": "#f1e05a"
+   },
+   "rating": {
+    "value": 216.5,
+    "percentile": 1,
+    "reaction_counts": [
+     {
+      "type": "positive_low",
+      "count": "1"
+     },
+     {
+      "type": "positive_medium",
+      "count": "1"
+     }
+    ]
+   }
+  },
+  {
+   "id": "019c7c79-7ef1-7b22-b0c3-d7de5196169a",
+   "name": "graph",
+   "default_branch": "main",
+   "organization": {
+    "id": "0198eb5e-0524-767f-91ec-4ab7041e1c9a",
+    "slug": "gravity-ui"
+   },
+   "slug": "graph",
+   "template_type": "not_a_template",
+   "is_empty": false,
+   "description": "",
+   "visibility": "public",
+   "clone_url": {
+    "https": "https://git@git.sourcecraft.dev/gravity-ui/graph.git",
+    "ssh": "ssh://ssh.sourcecraft.dev/gravity-ui/graph.git"
+   },
+   "web_url": "https://sourcecraft.dev/gravity-ui/graph",
+   "links": [],
+   "counters": {
+    "forks": "0",
+    "pull_requests": "208",
+    "issues": "0",
+    "tags": "57",
+    "branches": "73"
+   },
+   "last_updated": "2026-07-26T07:38:16.768985Z",
+   "language": {
+    "name": "TypeScript",
+    "color": "#3178c6"
+   },
+   "rating": {
+    "value": 212.5,
+    "percentile": 1,
+    "reaction_counts": [
+     {
+      "type": "positive_low",
+      "count": "2"
+     },
+     {
+      "type": "positive_high",
+      "count": "1"
+     }
+    ]
+   }
+  }
+ ],
+ "next_page_token": "g6dDb2x1bW5zkoOkTmFtZaZyYXRpbmepRGlyZWN0aW9uw6VWYWx1ZctAapAAAAAAAIOkTmFtZaFfqURpcmVjdGlvbsKlVmFsdWXPAZKdjeQArQypRGlyZWN0aW9uwqpDbG91ZFRva2VuwA"
+}
