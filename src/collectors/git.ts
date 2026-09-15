@@ -301,22 +301,42 @@ export function readmeSectionFlags(text: string): { install: boolean; build: boo
 
 // ---------- has_steps ci.yaml (§7.4: ≥1 task с ≥1 непустой командой) ----------
 
+/** Непустая команда script: строкока или блочный скаляр yamlmini ({__block}). */
+function nonEmptyCommand(cmd: unknown): boolean {
+  if (typeof cmd === "string") return cmd.trim() !== "";
+  if (cmd && typeof cmd === "object" && "__block" in (cmd as Record<string, unknown>)) {
+    return String((cmd as { __block: unknown }).__block ?? "").trim() !== "";
+  }
+  return false;
+}
+
 /**
- * has_steps по распарсенному ci.yaml: ≥1 task, у которого task.cubes[].
- * script или task.script содержит ≥1 непустую команду. Форма — наш
- * .sourcecraft/ci.yaml (tasks[].cubes[].script[]).
+ * has_steps по распарсенному ci.yaml (§7.4): ≥1 task с ≥1 непустой
+ * командой script (task.script[] или task.cubes[].script[]). Живые
+ * формы (ERROR_LOG 15.09, В2): задачи живут и в верхнем tasks, и в
+ * workflows.<name>.tasks; команды — строки И блочные скаляры «- |».
+ * Кубы с action/image без script НЕ считаются (анти-пустышка: заявлен
+ * именно выполняемый script; см. отчёт В2 — решение воркера).
  */
 export function ciHasSteps(parsed: unknown): boolean {
-  const tasks = (parsed as { tasks?: unknown } | null)?.tasks;
-  if (!Array.isArray(tasks)) return false;
-  const nonEmpty = (s: unknown): boolean => Array.isArray(s) && s.some((cmd) => typeof cmd === "string" && cmd.trim() !== "");
+  const root = parsed as { tasks?: unknown; workflows?: Record<string, unknown> } | null;
+  const tasks: unknown[] = [];
+  if (Array.isArray(root?.tasks)) tasks.push(...root.tasks);
+  if (root?.workflows && typeof root.workflows === "object") {
+    for (const wf of Object.values(root.workflows)) {
+      if (wf && typeof wf === "object" && Array.isArray((wf as { tasks?: unknown }).tasks)) {
+        tasks.push(...((wf as { tasks: unknown[] }).tasks));
+      }
+    }
+  }
+  const scriptNonEmpty = (s: unknown): boolean => Array.isArray(s) && s.some(nonEmptyCommand);
   for (const t of tasks) {
     if (!t || typeof t !== "object") continue;
     const task = t as { script?: unknown; cubes?: unknown };
-    if (nonEmpty(task.script)) return true;
+    if (scriptNonEmpty(task.script)) return true;
     if (Array.isArray(task.cubes)) {
       for (const c of task.cubes) {
-        if (c && typeof c === "object" && nonEmpty((c as { script?: unknown }).script)) return true;
+        if (c && typeof c === "object" && scriptNonEmpty((c as { script?: unknown }).script)) return true;
       }
     }
   }

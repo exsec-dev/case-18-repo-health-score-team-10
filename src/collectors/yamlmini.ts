@@ -37,6 +37,27 @@ function parseBlock(lines: Line[], i: number, indent: number): { value: unknown;
   return parseMapping(lines, i, indent);
 }
 
+const BLOCK_INDICATOR = /^(?:\||>)[+-]?$/;
+
+/**
+ * Блочный скаляр (| / |- / > …): все следующие строки с отступом глубже
+ * minIndent — тело; значение {__block: text}. Живой кейс: script-кубы
+ * ci.yaml платформы (cloudapp-hugo: `- |` + многострочные команды).
+ */
+function parseBlockScalar(lines: Line[], start: number, minIndent: number): { value: { __block: string }; next: number } {
+  if (start >= lines.length || lines[start]!.indent <= minIndent) {
+    return { value: { __block: "" }, next: start };
+  }
+  const contentIndent = lines[start]!.indent;
+  const parts: string[] = [];
+  let j = start;
+  while (j < lines.length && lines[j]!.indent >= contentIndent) {
+    parts.push(lines[j]!.text);
+    j++;
+  }
+  return { value: { __block: parts.join("\n") }, next: j };
+}
+
 function parseSequence(lines: Line[], i: number, indent: number): { value: unknown[]; next: number } {
   const out: unknown[] = [];
   while (i < lines.length && lines[i]!.indent === indent && (lines[i]!.text.startsWith("- ") || lines[i]!.text === "-")) {
@@ -51,6 +72,11 @@ function parseSequence(lines: Line[], i: number, indent: number): { value: unkno
         out.push(null);
         i++;
       }
+    } else if (BLOCK_INDICATOR.test(rest)) {
+      // «- |» — блочный скаляр как элемент последовательности
+      const r = parseBlockScalar(lines, i + 1, indent);
+      out.push(r.value);
+      i = r.next;
     } else if (isInlineMappingStart(rest)) {
       // «- key: value» — первая пара отображения, продолжение глубже
       const sub: Line[] = [{ indent: indent + 2, text: rest }];
@@ -85,6 +111,11 @@ function parseMapping(lines: Line[], i: number, indent: number): { value: Record
         out[key] = null;
         i++;
       }
+    } else if (BLOCK_INDICATOR.test(inline)) {
+      // «key: |» — блочный скаляр как значение ключа
+      const r = parseBlockScalar(lines, i + 1, indent);
+      out[key] = r.value;
+      i = r.next;
     } else {
       out[key] = parseScalar(inline);
       i++;

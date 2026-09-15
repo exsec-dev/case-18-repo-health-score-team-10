@@ -385,3 +385,20 @@ describe("В2/Б1: has_steps (ci.yaml, §7.4)", () => {
     }
   });
 });
+
+describe("В2/Б1 доп: has_steps на ЖИВЫХ формах платформы (фиксстуры 15.09)", () => {
+  // сюрприз ERROR_LOG В2: канон ci.yaml = workflows.<name>.tasks (без
+  // верхнего tasks) + блочные скаляры «- |» в script + action-кубы
+  test("cloudapp-hugo / datahint / dozzle-plus (workflows.tasks + блоки) → has_steps=true", () => {
+    for (const name of ["cloudapp-hugo", "datahint", "dozzle-plus"]) {
+      const parsed = parseYamlSubset(readFileSync(`tests/fixtures/ci/${name}.yaml`, "utf8"));
+      expect(ciHasSteps(parsed), name).toBe(true);
+    }
+  });
+
+  test("блочный скаляр парсится в {__block}, пустой блок ≠ команда", () => {
+    const parsed = parseYamlSubset("script:\n  - |\n    echo hi\n") as { script: { __block: string }[] };
+    expect(parsed.script[0]!.__block).toContain("echo hi");
+    expect(ciHasSteps(parseYamlSubset("workflows:\n  w:\n    tasks:\n      - name: t\n        cubes:\n          - name: c\n            script:\n              - |\n"))).toBe(false);
+  });
+});
