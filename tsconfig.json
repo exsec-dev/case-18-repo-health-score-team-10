@@ -3,10 +3,12 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
     "types": ["bun-types"]
   },
-  "include": ["src/**/*.ts", "scripts/**/*.ts", "tests/**/*.ts"]
+  "include": ["src/**/*.ts", "src/**/*.tsx", "scripts/**/*.ts", "tests/**/*.ts"]
 }
