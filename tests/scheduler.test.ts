@@ -23,7 +23,8 @@ import {
   returnRepo,
   type ClaimedJob,
 } from "../src/jobs/scheduler";
-import { upsertRepo, type ScanResult } from "../src/jobs/runner";
+import { upsertRepo, type ScanDeps, type ScanResult } from "../src/jobs/runner";
+import { makeScClient } from "../src/collectors/http";
 
 const dir = mkdtempSync(join(tmpdir(), "rh-sched-"));
 const db: Database = openDb({ ...loadConfig(), dataDir: dir });
@@ -71,12 +72,12 @@ describe("claim-loop: лизы и приоритеты", () => {
   test("enqueue → claim: NULL-lease матчится, лиз ставится, повторный claim — другая job", () => {
     const a = seedRepo("cl", "a");
     const b = seedRepo("cl", "b");
-    const j1 = enqueueScan(db, a, { mode: "public", triggerKind: "periodic" });
-    const j2 = enqueueScan(db, b, { mode: "public", triggerKind: "periodic" });
+    const j1 = enqueueScan(db, a, { triggerKind: "periodic" });
+    const j2 = enqueueScan(db, b, { triggerKind: "periodic" });
     const now = new Date("2026-09-18T00:00:00Z");
     const first = claimNext(db, now, 60_000);
     expect(first?.slug).toBe("cl/a");
-    expect(first?.mode).toBe("public");
+    expect(first?.userId).toBeNull();
     // лиз поставлен и живёт: строка больше не заявляется
     expect(claimNext(db, new Date(now.getTime() + 30_000), 60_000)?.slug).toBe("cl/b");
     expect(claimNext(db, new Date(now.getTime() + 30_000), 60_000)).toBeNull();
@@ -90,12 +91,11 @@ describe("claim-loop: лизы и приоритеты", () => {
   test("юзерская заявка встаёт вперёд периодической", () => {
     const c = seedRepo("cl", "c");
     const d = seedRepo("cl", "d");
-    enqueueScan(db, c, { mode: "public", triggerKind: "periodic" });
+    enqueueScan(db, c, { triggerKind: "periodic" });
     const userId = (db.query("INSERT INTO users (ya_id, login, created_at, last_login_at) VALUES ('ya-1', 'u', '2026', '2026')").run(), Number((db.query("SELECT id FROM users WHERE ya_id = 'ya-1'").get() as { id: number }).id));
-    const userJob = enqueueScan(db, d, { mode: "own", userId, triggerKind: "user" });
+    const userJob = enqueueScan(db, d, { userId, triggerKind: "user" });
     const claimed = claimNext(db);
     expect(claimed?.id).toBe(userJob);
-    expect(claimed?.mode).toBe("own");
     expect(claimed?.userId).toBe(userId);
     finishJob(db, claimed!.id, "done");
     const periodic = claimNext(db);
@@ -108,8 +108,8 @@ describe("claim-loop: лизы и приоритеты", () => {
 
   test("finishJob по id: очередь допускает несколько строк одного репо", () => {
     const e = seedRepo("cl", "e");
-    const j1 = enqueueScan(db, e, { mode: "public" });
-    const j2 = enqueueScan(db, e, { mode: "own", triggerKind: "user" });
+    const j1 = enqueueScan(db, e, {});
+    const j2 = enqueueScan(db, e, { triggerKind: "user" });
     expect(j1).not.toBe(j2);
     finishJob(db, j1, "done");
     expect((db.query("SELECT status FROM jobs WHERE id = ?").get(j2) as { status: string }).status).toBe("queued");
@@ -208,17 +208,19 @@ describe("ночной каталог: дифф, форс, эвикция", () =
   });
 });
 
-describe("processJob: repo-сигнал эвикции и own-режим", () => {
-  const config = { ...loadConfig(), scan: DEFAULT_SCAN };
+describe("processJob: repo-сигнал эвикции и заявки юзеров (К3)", () => {
+  // герметично (M10): APP_SECRET инъектируется в конфиг теста, не из .env
+  const base = loadConfig();
+  const config = { ...base, scan: DEFAULT_SCAN, auth: { ...base.auth, appSecret: "test-app-secret" } };
 
   function fakeWorker(runScanImpl: (slug: string, opts: Record<string, unknown>) => Partial<ScanResult>) {
-    const calls: { slug: string; opts: Record<string, unknown> }[] = [];
+    const calls: { slug: string; opts: Record<string, unknown>; deps: ScanDeps }[] = [];
     const deps = {
       db,
       config,
-      scClient: null,
-      runScan: (async (d: unknown, slug: string, opts: Record<string, unknown>) => {
-        calls.push({ slug, opts });
+      serverClient: () => null,
+      runScan: (async (d: ScanDeps, slug: string, opts: Record<string, unknown>) => {
+        calls.push({ slug, opts, deps: d });
         return { scanId: 1, repoId: 1, status: "ok", ...runScanImpl(slug, opts) } as ScanResult;
       }) as typeof import("../src/jobs/runner").runScan,
     };
@@ -228,7 +230,7 @@ describe("processJob: repo-сигнал эвикции и own-режим", () =>
   test("repoAccess gone (repo-GET 403/404) → эвикция; канальные cicd-403 не эвиктят", async () => {
     const g = seedRepo("pj", "gone-repo");
     const { deps } = fakeWorker(() => ({ repoAccess: "gone" }));
-    const out = await processJob(deps, { id: 1, repoId: g, slug: "pj/gone-repo", mode: "public", userId: null, triggerKind: "periodic" });
+    const out = await processJob(deps, { id: 1, repoId: g, slug: "pj/gone-repo", userId: null, triggerKind: "periodic" });
     expect(out).toBe("gone");
     const row = db.query("SELECT rating_active, evict_reason FROM repos WHERE id = ?").get(g) as { rating_active: number; evict_reason: string };
     expect(row.rating_active).toBe(0);
@@ -237,24 +239,65 @@ describe("processJob: repo-сигнал эвикции и own-режим", () =>
     // cicd-403: repoAccess ok (репо-GET прошёл) — эвикции нет
     const s = seedRepo("pj", "cicd-403");
     const { deps: d2 } = fakeWorker(() => ({ repoAccess: "ok" }));
-    const out2 = await processJob(d2, { id: 2, repoId: s, slug: "pj/cicd-403", mode: "public", userId: null, triggerKind: "periodic" });
+    const out2 = await processJob(d2, { id: 2, repoId: s, slug: "pj/cicd-403", userId: null, triggerKind: "periodic" });
     expect(out2).not.toBe("gone");
     expect((db.query("SELECT rating_active FROM repos WHERE id = ?").get(s) as { rating_active: number }).rating_active).toBe(1);
   });
 
-  test("own-режим: userToken пробрасывается из PAT; без PAT — null", async () => {
+  test("заявка юзера: автор и PAT пробрасываются в runScan; без PAT — null", async () => {
     db.query("INSERT OR REPLACE INTO users (ya_id, login, created_at, last_login_at) VALUES ('ya-2', 'u2', '2026', '2026')").run();
     const uid = (db.query("SELECT id FROM users WHERE ya_id = 'ya-2'").get() as { id: number }).id;
     const { deps, calls } = fakeWorker(() => ({ repoAccess: "ok" }));
-    const job: ClaimedJob = { id: 3, repoId: 1, slug: "pj/own", mode: "own", userId: uid, triggerKind: "user" };
-    // PAT нет (getPat реальный, APP_SECRET из env теста) → userToken null
+    const job: ClaimedJob = { id: 3, repoId: 1, slug: "pj/own", userId: uid, triggerKind: "user" };
+    // PAT нет (getPat реальный, APP_SECRET инъектирован в конфиг) → userToken null
     await processJob(deps, job);
-    expect(calls[0]!.opts["mode"]).toBe("own");
+    expect(calls[0]!.opts["userId"]).toBe(uid);
     expect(calls[0]!.opts["userToken"]).toBeNull();
     // сохраняем PAT через шов настроек окружения — проверяем проброс
     const withPat = { ...deps, getPat: () => "user-pat-value" };
     calls.length = 0;
     await processJob(withPat, job);
     expect(calls[0]!.opts["userToken"]).toBe("user-pat-value");
+  });
+
+  test("H1: repo-GET 403/404 у заявки юзера НЕ эвиктирует; у периодики — эвиктирует", async () => {
+    const r = seedRepo("pj", "popular");
+    const { deps } = fakeWorker(() => ({ repoAccess: "gone" }));
+    const out = await processJob({ ...deps, getPat: () => "narrow-pat" }, { id: 4, repoId: r, slug: "pj/popular", userId: 1, triggerKind: "user" });
+    expect(out).not.toBe("gone");
+    expect((db.query("SELECT rating_active FROM repos WHERE id = ?").get(r) as { rating_active: number }).rating_active).toBe(1);
+    const out2 = await processJob(deps, { id: 5, repoId: r, slug: "pj/popular", userId: null, triggerKind: "periodic" });
+    expect(out2).toBe("gone");
+    returnRepo(db, r);
+  });
+
+  test("H2: фабрика серверного клиента — новый клиент и бюджет на каждую задачу", async () => {
+    const mock = Bun.serve({ port: 0, fetch: () => Response.json({}) });
+    try {
+      const made: ScClient[] = [];
+      const serverClient = () => {
+        const c = makeScClient({ token: "x", baseUrl: `http://127.0.0.1:${mock.port}`, minIntervalMs: 0, maxRequests: 3 });
+        made.push(c);
+        return c;
+      };
+      const statuses: number[][] = [];
+      const burn = (async (d: ScanDeps) => {
+        const got: number[] = [];
+        for (let i = 0; i < 4; i++) got.push((await d.scClient!.get("/repos/o/r")).status);
+        statuses.push(got);
+        return { scanId: 1, repoId: 1, status: "ok", repoAccess: "ok" } as ScanResult;
+      }) as typeof import("../src/jobs/runner").runScan;
+      const w = { db, config, serverClient, runScan: burn };
+      await processJob(w, { id: 6, repoId: 1, slug: "o/r", userId: null, triggerKind: "periodic" });
+      await processJob(w, { id: 7, repoId: 1, slug: "o/r", userId: null, triggerKind: "periodic" });
+      expect(made).toHaveLength(2);
+      // бюджет исчерпан ВНУТРИ первой задачи, вторая начинает с полным
+      expect(statuses).toEqual([
+        [200, 200, 200, 0],
+        [200, 200, 200, 0],
+      ]);
+    } finally {
+      mock.stop(true);
+    }
   });
 });

@@ -6,6 +6,8 @@
 // без сети. Чужие/недоступные репо не запрашиваются вовсе (ТЗ 5).
 import type { Database } from "bun:sqlite";
 import { ScClient } from "../collectors/http";
+import { upsertRepo } from "../jobs/runner";
+import { enqueueScan } from "../jobs/scheduler";
 
 export interface MyRepoEntry {
   org: string;
@@ -94,4 +96,38 @@ export async function listMyRepos(db: Database, client: ScClient, opts: { maxPag
     token = next;
   }
   return { ok: true, username: who.username, entries };
+}
+
+// ---------- запуск анализа юзером (В4.1, К3) ----------
+
+export interface UserScanResponse {
+  status: number;
+  body: Record<string, unknown>;
+}
+
+/**
+ * POST /api/me/repos/:org/:repo/scan без HTTP-слоя: до постановки —
+ * repo-GET с PAT юзера. 200 → upsert repos (visibility из ответа) →
+ * заявка → 202; 403/404 → 403 no_access (строки repos нет); 401 → 401
+ * pat_expired; 0/429/5xx → 503 check_failed.
+ */
+export async function requestUserScan(db: Database, client: ScClient, userId: number, org: string, repo: string): Promise<UserScanResponse> {
+  const res = await client.get(`/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`);
+  if (res.status === 403 || res.status === 404) {
+    return { status: 403, body: { error: { code: "no_access", message: `ваш PAT не даёт доступа к ${org}/${repo}` } } };
+  }
+  if (res.status === 401) {
+    return { status: 401, body: { error: { code: "pat_expired", message: "SourceCraft отклонил PAT — обновите токен в кабинете" } } };
+  }
+  if (res.status !== 200) {
+    return { status: 503, body: { error: { code: "check_failed", message: `не удалось проверить доступ к ${org}/${repo} (HTTP ${res.status})` } } };
+  }
+  const body = res.json as { visibility?: unknown; name?: unknown } | null;
+  const visibility = typeof body?.visibility === "string" ? body.visibility : null;
+  const repoId = upsertRepo(db, org, repo, {
+    title: typeof body?.name === "string" ? body.name : null,
+    ...(visibility !== null ? { visibility } : {}),
+  });
+  const jobId = enqueueScan(db, repoId, { userId, triggerKind: "user" });
+  return { status: 202, body: { queued: true, jobId, slug: `${org}/${repo}` } };
 }

@@ -1,10 +1,11 @@
-// runner.ts — конвейер scan-job (Б4 В1 + В2/Б1 + В4/Б3 режимы):
-// постановка репо → прогон коллекторов (git + REST [+ AppSec в own])
+// runner.ts — конвейер scan-job (Б4 В1 + В2/Б1 + В4.1/К3):
+// постановка репо → прогон коллекторов (git + REST [+ AppSec с PAT])
 // → факты со scan_id → статус/время (ТЗ: фиксация статуса и времени
 // последнего анализа). Воркер stateless: зависимости инъектятся,
-// повторный скан = новый scan. Режимы (В4): public — серверный токен,
-// без AppSec; own — юзерский PAT (REST видит свои раны, AppSec-канал
-// официальным API). Статусы скана: ok = все факты ok; partial = ядро
+// повторный скан = новый scan. Один конвейер (В4.1): режима нет —
+// скан отличается только токеном: userToken (PAT автора) → REST и git с
+// правами юзера + AppSec-канал; иначе серверный токен, AppSec не
+// собирается. Автор пишется в scans.user_id (NULL у периодики). Статусы скана: ok = все факты ok; partial = ядро
 // собрано, но есть no-data/bad факты; bad = фатал воркера или ВСЕ
 // каналы bad-channel. no-data живёт ТОЛЬКО в фактах. repo-сигнал
 // (repo-GET 404/403) поднимается наверх для эвикции (канальные 403
@@ -17,8 +18,6 @@ import { RestCollectResult, collectRestFacts } from "../collectors/rest";
 import { AppsecClient, collectAppsec, makeAppsecClient } from "../collectors/appsec";
 import { DEFAULT_SCAN, ScanCloneLimits, ScanConfig } from "../config";
 import { compute, writeScores } from "../score/compute";
-
-type ScoreMode = "public" | "own";
 import { recommend, writeRecommendations } from "../score/recommend";
 
 export interface GitChannelOutcome {
@@ -30,11 +29,11 @@ export interface GitChannelOutcome {
 
 export interface ScanDeps {
   db: Database;
-  /** REST-клиент публичного режима; null → REST-канал честно no-data (токена нет) */
+  /** серверный REST-клиент (скан без userToken); null → REST-канал честно no-data (токена нет) */
   scClient: ScClient | null;
-  /** REST-клиент own-режима (юзерский PAT); нет ни его, ни userToken → own без REST */
-  ownScClient?: ScClient | null;
-  /** AppSec-клиент own-режима (PAT → клиент); дефолт — официальный API с интервалом конфига */
+  /** REST-клиент PAT автора (шов тестов/бюджета); дефолт — клиент из userToken */
+  userScClient?: ScClient | null;
+  /** AppSec-клиент (PAT → клиент); дефолт — официальный API с интервалом конфига */
   appsecClient?: (pat: string) => AppsecClient;
   /** лимиты клона + деградационный ярус (Config.scan: clone + degrade) */
   cloneLimits?: ScanCloneLimits;
@@ -55,9 +54,9 @@ export interface ScanDeps {
 
 export interface ScanOptions {
   trigger?: string;
-  /** режим скора: public (4 категории — В4/Б4) | own (6 категорий) */
-  mode?: ScoreMode;
-  /** юзерский PAT (own-режим): REST-коллекторы и AppSec с правами юзера */
+  /** автор скана (users.id) → scans.user_id; NULL = периодика/серверный токен */
+  userId?: number | null;
+  /** PAT автора: REST/git с его правами + AppSec-канал; нет → серверный токен, без AppSec */
   userToken?: string | null;
 }
 
@@ -69,7 +68,7 @@ export interface ScanResult {
   finishedAt: string;
   counts: { ok: number; noData: number; bad: number };
   channels: { git: string; rest: string; appsec: string };
-  /** repo-GET 404/403 = репо пропал для нас (эвикция); канальные 403 тут ни при чём */
+  /** repo-GET 404/403 токена скана; эвикция — только у сканов без автора (К3); канальные 403 тут ни при чём */
   repoAccess: "ok" | "gone" | "unknown";
   /** score-hook итог (null = хук не смог — факты записаны, скан не роняется) */
   score: { totalRating: number | null; coverageRating: number; totalFull: number | null; coverageFull: number } | null;
@@ -79,7 +78,7 @@ export interface ScanResult {
 const DEFAULT_GIT_URL = (org: string, repo: string) => `https://git@git.sourcecraft.dev/${org}/${repo}.git`;
 
 /**
- * Git-URL own-режима с PAT (дока PAT: `git clone https://anyname:<PAT>@…`):
+ * Git-URL скана с PAT (дока PAT: `git clone https://anyname:<PAT>@…`):
  * свой репо бывает приватным — анонимный клон падает с Authentication
  * failed (найдено живой приёмкой В4: наш репо приватный). Креды в URL
  * существуют только внутри процесса; stderr git скраббится (git.ts).
@@ -162,7 +161,7 @@ function insertFacts(db: Database, scanId: number, facts: Fact[]): void {
  * риск-факты; статус скана пересчитывается по фактам.
  */
 export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = {}): Promise<ScanResult> {
-  const mode = opts.mode ?? "public";
+  const userToken = opts.userToken ? opts.userToken : null;
   const started = new Date();
   const startedAt = started.toISOString();
   const t0 = Date.now();
@@ -173,11 +172,12 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
 
   const limits = deps.cloneLimits ?? scanCloneLimitsOf(DEFAULT_SCAN);
   const extract = deps.extract ?? DEFAULT_SCAN.extract;
-  // own с PAT → клон с кредами (депс-шов остаётся главнее для тестов)
-  const gitUrlOf =
-    deps.gitUrl ?? (mode === "own" && opts.userToken ? (org: string, repo: string) => patGitUrl(opts.userToken!, org, repo) : DEFAULT_GIT_URL);
+  // скан с PAT → клон с кредами (депс-шов остаётся главнее для тестов)
+  const gitUrlOf = deps.gitUrl ?? (userToken ? (org: string, repo: string) => patGitUrl(userToken, org, repo) : DEFAULT_GIT_URL);
   const repoId = upsertRepo(deps.db, org, repo);
-  const scan = deps.db.query("INSERT INTO scans (repo_id, started_at, status, trigger) VALUES (?, ?, 'running', ?)").run(repoId, startedAt, opts.trigger ?? "probe");
+  const scan = deps.db
+    .query("INSERT INTO scans (repo_id, started_at, status, trigger, user_id) VALUES (?, ?, 'running', ?, ?)")
+    .run(repoId, startedAt, opts.trigger ?? "probe", opts.userId ?? null);
   const scanId = Number(scan.lastInsertRowid);
 
   let gitChannel = "ok";
@@ -187,12 +187,11 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
   let workerFatal: string | null = null;
   const facts: Fact[] = [];
 
-  // REST-клиалент режима: own → юзерский PAT (свой шов или токен),
-  // public → серверный. own без PAT → REST честно no-data(access).
-  const restClient: ScClient | null =
-    mode === "own"
-      ? (deps.ownScClient ?? (opts.userToken ? makeScClient({ token: opts.userToken, minIntervalMs: DEFAULT_SCAN.rest.minIntervalMs }) : null))
-      : deps.scClient;
+  // REST-клиент (К3): userToken → PAT автора (шов или новый клиент),
+  // иначе серверный; ни того ни другого → REST честно no-data(access)
+  const restClient: ScClient | null = userToken
+    ? (deps.userScClient ?? makeScClient({ token: userToken, minIntervalMs: DEFAULT_SCAN.rest.minIntervalMs }))
+    : deps.scClient;
 
   try {
     // --- git-канал (с деградационным ярусом §5.7; тогл конфига — одна попытка) ---
@@ -243,9 +242,9 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
       if (out.channelErrors.length > 0) restChannel = `errors(${out.channelErrors.map((c) => c.kind).join(",")})`;
       if (out.repoMeta) upsertRepo(deps.db, org, repo, repoMetaToUpsert(out.repoMeta));
     } else if (restClient === null) {
-      restChannel = mode === "own" ? "no-data(no-pat)" : "no-data(no-token)";
+      restChannel = "no-data(no-token)";
       for (const kind of ["issues.stats", "issues.comments_sample", "activity.rest", "cicd.runs"]) {
-        facts.push(noDataFact(kind, "access", "rest", mode === "own" ? "own scan without PAT" : "no SOURCECRAFT_TOKEN", startedAt));
+        facts.push(noDataFact(kind, "access", "rest", "no SOURCECRAFT_TOKEN", startedAt));
       }
     } else {
       const out = await collectRestFacts(restClient, slug, { commentsTopN: deps.commentsTopN ?? DEFAULT_SCAN.extract.commentsTopN });
@@ -268,30 +267,21 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
           ? "unknown"
           : "ok";
 
-    // --- AppSec-канал (только own-режим: право даёт PAT юзера, не публичность) ---
-    if (mode === "own") {
-      if (!opts.userToken && !deps.ownScClient) {
-        appsecChannel = "no-data(no-pat)";
-        facts.push(noDataFact("appsec.findings", "access", "appsec:api", "own scan without PAT", startedAt));
+    // --- AppSec-канал (только с PAT автора: право даёт PAT, не публичность).
+    // Скан без PAT факт не пишет — compute берёт последний ok-факт из
+    // более раннего скана с PAT (фолбэк каналов, К1)
+    if (userToken && restClient) {
+      const collect = deps.collectAppsec ?? collectAppsec;
+      const appsec = deps.appsecClient
+        ? deps.appsecClient(userToken)
+        : makeAppsecClient({ token: userToken, minIntervalMs: deps.appsecMinIntervalMs ?? DEFAULT_SCAN.rest.appsecMinIntervalMs });
+      const out = await collect(restClient, appsec, slug);
+      if (out.fact) {
+        facts.push(out.fact);
+        appsecChannel = "ok";
       } else {
-        const collect = deps.collectAppsec ?? collectAppsec;
-        const appsec = deps.appsecClient
-          ? deps.appsecClient(opts.userToken ?? "")
-          : makeAppsecClient({ token: opts.userToken ?? "", minIntervalMs: deps.appsecMinIntervalMs ?? DEFAULT_SCAN.rest.appsecMinIntervalMs });
-        const restForAppsec = restClient ?? deps.scClient;
-        if (restForAppsec === null) {
-          appsecChannel = "no-data(no-rest)";
-          facts.push(noDataFact("appsec.findings", "access", "appsec:api", "no REST client for gitRepo lookup", startedAt));
-        } else {
-          const out = await collect(restForAppsec, appsec, slug);
-          if (out.fact) {
-            facts.push(out.fact);
-            appsecChannel = "ok";
-          } else {
-            appsecChannel = `no-data(${out.noData?.reason ?? "other"})`;
-            facts.push(noDataFact("appsec.findings", (out.noData?.reason as "access" | "no-scan" | "incomplete") ?? "other", "appsec:api", out.noData?.detail ?? "", startedAt));
-          }
-        }
+        appsecChannel = `no-data(${out.noData?.reason ?? "other"})`;
+        facts.push(noDataFact("appsec.findings", (out.noData?.reason as "access" | "no-scan" | "incomplete") ?? "other", "appsec:api", out.noData?.detail ?? "", startedAt));
       }
     }
   } catch (e) {

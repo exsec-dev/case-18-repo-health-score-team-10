@@ -9,6 +9,10 @@
 // ложно — потому IS NULL OR). Воркер-луп живёт в процессе сервера,
 // одну job за раз (tmp-диск стенда конечен); лиз истёк → job снова
 // доступен (упавший воркер не блокирует очередь).
+// В4.1 (К3): режима у job нет — автор (user_id) определяет токен скана;
+// эвикция только у задач без автора (периодика, серверный токен);
+// серверный REST-клиент — фабрика: новый бюджет на каждую задачу и на
+// каждый ночной обход (H2).
 import type { Database } from "bun:sqlite";
 import { enumerateCatalog, type CatalogResult } from "../collectors/catalog";
 import type { ScClient } from "../collectors/http";
@@ -23,7 +27,7 @@ export interface ClaimedJob {
   id: number;
   repoId: number;
   slug: string;
-  mode: "public" | "own";
+  /** автор заявки; null = периодика (серверный токен) */
   userId: number | null;
   triggerKind: string;
 }
@@ -32,13 +36,11 @@ export interface ClaimedJob {
 export function enqueueScan(
   db: Database,
   repoId: number,
-  opts: { mode?: "public" | "own"; userId?: number | null; triggerKind?: "periodic" | "user" } = {},
+  opts: { userId?: number | null; triggerKind?: "periodic" | "user" } = {},
 ): number {
   const r = db
-    .query(
-      `INSERT INTO jobs (repo_id, status, mode, user_id, trigger_kind) VALUES (?, 'queued', ?, ?, ?)`,
-    )
-    .run(repoId, opts.mode ?? "public", opts.userId ?? null, opts.triggerKind ?? "periodic");
+    .query(`INSERT INTO jobs (repo_id, status, user_id, trigger_kind) VALUES (?, 'queued', ?, ?)`)
+    .run(repoId, opts.userId ?? null, opts.triggerKind ?? "periodic");
   return Number(r.lastInsertRowid);
 }
 
@@ -61,9 +63,9 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 30 * 60_000)
          ORDER BY CASE trigger_kind WHEN 'user' THEN 0 ELSE 1 END, id
          LIMIT 1
        )
-       RETURNING id, repo_id, mode, user_id, trigger_kind`,
+       RETURNING id, repo_id, user_id, trigger_kind`,
     )
-    .get(nowIso, leaseIso, nowIso) as { id: number; repo_id: number; mode: string; user_id: number | null; trigger_kind: string } | null;
+    .get(nowIso, leaseIso, nowIso) as { id: number; repo_id: number; user_id: number | null; trigger_kind: string } | null;
   if (!claimed) return null;
   const repo = db.query("SELECT org_slug, repo_slug FROM repos WHERE id = ?").get(claimed.repo_id) as
     | { org_slug: string; repo_slug: string }
@@ -73,7 +75,6 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 30 * 60_000)
     id: claimed.id,
     repoId: claimed.repo_id,
     slug: `${repo.org_slug}/${repo.repo_slug}`,
-    mode: claimed.mode === "own" ? "own" : "public",
     userId: claimed.user_id,
     triggerKind: claimed.trigger_kind,
   };
@@ -156,13 +157,13 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
     });
     seenRepoIds.add(repoId);
     if (!existing) {
-      enqueueScan(db, repoId, { mode: "public", triggerKind: "periodic" });
+      enqueueScan(db, repoId, { triggerKind: "periodic" });
       enqueued.push({ slug, reason: "new" });
       continue;
     }
     if (existing.last_activity_at === null && entry.last_updated !== null) {
       // строка была без даты (ручной ввод слага) — теперь дата есть: это «изменившийся»
-      enqueueScan(db, repoId, { mode: "public", triggerKind: "periodic" });
+      enqueueScan(db, repoId, { triggerKind: "periodic" });
       enqueued.push({ slug, reason: "changed" });
       continue;
     }
@@ -172,7 +173,7 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
       .get(repoId) as { status: string } | null;
     const retryFailed = lastJob?.status === "failed";
     if (fullRescan || changed || retryFailed) {
-      enqueueScan(db, repoId, { mode: "public", triggerKind: "periodic" });
+      enqueueScan(db, repoId, { triggerKind: "periodic" });
       enqueued.push({ slug, reason: fullRescan ? "forced" : changed ? "changed" : "retry-failed" });
     }
   }
@@ -219,46 +220,45 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
 export interface WorkerDeps {
   db: Database;
   config: Config;
-  /** серверный REST-клиент (публичный режим) */
-  scClient: ScClient | null;
+  /** фабрика серверного REST-клиента: новый клиент (бюджет Config.scan.rest.budget) на каждую задачу; null = токена нет */
+  serverClient: () => ScClient | null;
   /** швы для тестов */
   runScan?: typeof runScan;
   getPat?: typeof getPat;
 }
 
 /**
- * Исполнить заявленную job: own → PAT юзера + его настройки бюджетов,
- * public → серверный токен. repo-сигнал 'gone' (repo-GET 404/403) →
- * эвикция; канальные 403 cicd/runs — НЕ эвикция (обрабатываются в
- * фактах как no-data access).
+ * Исполнить заявленную job: заявка юзера → PAT автора (+ его настройки
+ * бюджетов), периодика → серверный токен (новый клиент на задачу, H2).
+ * repo-сигнал 'gone' (repo-GET 404/403) → эвикция ТОЛЬКО у задач без
+ * автора (К3): 403 на PAT юзера говорит о правах PAT, не о репо (H1).
+ * Канальные 403 cicd/runs — не эвикция (no-data access в фактах).
  */
 export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<ScanResult | "gone"> {
   const pat =
-    job.mode === "own" && job.userId !== null && deps.config.auth.appSecret
+    job.userId !== null && deps.config.auth.appSecret
       ? (deps.getPat ?? getPat)(deps.db, deps.config.auth.appSecret, job.userId)
       : null;
-  // own-режим: бюджеты юзера — третий слой конфига (решение 15.09)
+  // заявка юзера: бюджеты юзера — третий слой конфига (решение 15.09)
   const limits =
-    job.mode === "own" && job.userId !== null
+    job.userId !== null
       ? effectiveCloneLimits(deps.config.scan, readUserScanSettings(deps.db, job.userId))
       : scanCloneLimitsOf(deps.config.scan);
-  const scan = (deps.runScan ?? runScan)(
+  const result = await (deps.runScan ?? runScan)(
     {
       db: deps.db,
-      scClient: deps.scClient,
+      scClient: deps.serverClient(),
       cloneLimits: limits,
-      ownScClient:
-        job.mode === "own" && pat
-          ? makeScClient({ token: pat, minIntervalMs: deps.config.scan.rest.minIntervalMs, maxRequests: deps.config.scan.rest.budget })
-          : undefined,
+      userScClient: pat
+        ? makeScClient({ token: pat, minIntervalMs: deps.config.scan.rest.minIntervalMs, maxRequests: deps.config.scan.rest.budget })
+        : undefined,
       appsecClient: (p: string) => makeAppsecClient({ token: p, minIntervalMs: deps.config.scan.rest.appsecMinIntervalMs }),
       appsecMinIntervalMs: deps.config.scan.rest.appsecMinIntervalMs,
     },
     job.slug,
-    { mode: job.mode, userToken: pat, trigger: job.triggerKind },
+    { userId: job.userId, userToken: pat, trigger: job.triggerKind },
   );
-  const result = await scan;
-  if (result.repoAccess === "gone") {
+  if (result.repoAccess === "gone" && job.userId === null) {
     evictRepo(deps.db, job.repoId, `repo GET 404/403 at scan ${result.scanId}`);
     return "gone";
   }
@@ -295,8 +295,10 @@ export function startWorkerLoop(deps: WorkerDeps, pollMs = 5000): () => void {
  * дизайн продукта, но оператор должен успеть это увидеть/отключить).
  * Расписание объясняется конфигурацией — раздел в отчёте воркера.
  */
-export function startScheduler(db: Database, client: ScClient | null, config: Config): () => void {
+export function startScheduler(db: Database, serverClient: () => ScClient | null, config: Config): () => void {
   const run = async () => {
+    // новый клиент (и бюджет) на каждый обход — H2
+    const client = serverClient();
     if (!client) return; // без серверного токена каталог не читается
     try {
       const result = await nightlyCatalog(db, client, {

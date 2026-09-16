@@ -164,6 +164,59 @@ describe("runScan: статусы и три-state", () => {
   });
 });
 
+describe("В4.1/К3: один конвейер — токен определяет каналы", () => {
+  const appsecFact = okFact("appsec.findings", { severity_counts: { critical: 0, high: 0, medium: 0, low: 0 }, resolved_share: 1, secrets_critical: false }, "appsec:api");
+
+  test("скан с PAT: автор в scans.user_id, REST на клиенте PAT, AppSec собирается", async () => {
+    db.query("INSERT OR IGNORE INTO users (id, ya_id, login, created_at, last_login_at) VALUES (77, 'ya-77', 'u77', '2026', '2026')").run();
+    const used: string[] = [];
+    const patClient = { get: async (p: string) => (used.push(`pat:${p}`), { status: 200, json: { id: "1" }, bodyText: "" }), requestCount: () => used.length };
+    const serverClient = { get: async (p: string) => (used.push(`server:${p}`), { status: 200, json: {}, bodyText: "" }), requestCount: () => 0 };
+    let appsecToken = null as string | null;
+    const r = await runScan(
+      {
+        db,
+        scClient: serverClient,
+        userScClient: patClient,
+        collectGit: async () => gitOk(),
+        appsecClient: (pat) => ((appsecToken = pat), { get: async () => ({ status: 200, json: null }), requestCount: () => 0 }),
+        collectAppsec: async (rest) => {
+          await rest.get("/repos/o/with-pat");
+          return { fact: appsecFact, noData: null };
+        },
+      },
+      "o/with-pat",
+      { userId: 77, userToken: "pat-value", trigger: "user" },
+    );
+    expect(r.channels.appsec).toBe("ok");
+    expect(appsecToken).toBe("pat-value");
+    expect(used.length).toBeGreaterThan(0);
+    expect(used.every((u) => u.startsWith("pat:"))).toBe(true);
+    const scan = db.query("SELECT user_id FROM scans WHERE id = ?").get(r.scanId) as { user_id: number | null };
+    expect(scan.user_id).toBe(77);
+    const fact = db.query("SELECT status FROM facts WHERE scan_id = ? AND key = 'appsec.findings'").get(r.scanId) as { status: string };
+    expect(fact.status).toBe("ok");
+  });
+
+  test("скан без PAT: серверный клиент, AppSec не собирается, автор NULL", async () => {
+    let appsecCalled = false;
+    const r = await runScan(
+      {
+        db,
+        scClient: null,
+        collectGit: async () => gitOk(),
+        collectAppsec: async () => ((appsecCalled = true), { fact: appsecFact, noData: null }),
+      },
+      "o/no-pat",
+      { trigger: "periodic" },
+    );
+    expect(appsecCalled).toBe(false);
+    expect(r.channels.appsec).toBe("skipped");
+    expect((db.query("SELECT user_id FROM scans WHERE id = ?").get(r.scanId) as { user_id: number | null }).user_id).toBeNull();
+    expect(db.query("SELECT 1 FROM facts WHERE scan_id = ? AND key = 'appsec.findings'").get(r.scanId)).toBeNull();
+  });
+});
+
 describe("В2/Б5: score-hook — конец скана пишет scores/recommendations", () => {
   test("runScan с полными фейк-каналами → строки scores и recommendations на месте", async () => {
     const facts: Fact[] = [

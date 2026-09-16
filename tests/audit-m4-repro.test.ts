@@ -17,7 +17,7 @@ import { makeScClient } from "../src/collectors/http";
 import { createSession, SESSION_COOKIE, upsertUser } from "../src/auth/session";
 import { effectiveCloneLimits, parseUserScanSettings, UNLIMITED_TIMEOUT_MS } from "../src/auth/settings";
 import { runScan, type ScanDeps, type ScanOptions } from "../src/jobs/runner";
-import { claimNext, enqueueScan, nightlyCatalog, processJob } from "../src/jobs/scheduler";
+import { claimNext, enqueueScan, processJob, startScheduler } from "../src/jobs/scheduler";
 import { MODEL_VERSION } from "../src/score/model";
 import { seedScan, seedScore, type ApiTestDb } from "./api-fixtures";
 
@@ -97,7 +97,8 @@ describe("C1: own-результаты не привязаны к пользов
     30_000,
   );
 
-  repro("scores/scans хранят автора own-скана (иначе «последний own» — чей угодно)", () => {
+  // закрыто Б2 (К3): scans.user_id — автор скана
+  test("scores/scans хранят автора own-скана (иначе «последний own» — чей угодно)", () => {
     const { t } = tempDb();
     const cols = (table: string) => (t.db.query(`PRAGMA table_info(${table})`).all() as { name: string }[]).map((c) => c.name);
     const hasOwner = cols("scores").includes("user_id") || cols("scans").includes("user_id");
@@ -108,11 +109,13 @@ describe("C1: own-результаты не привязаны к пользов
 
 // ---------------------------------------------------------------------------
 describe("H1: own-скан с узким PAT эвиктирует публичный репо", () => {
-  repro("403 на repo-GET по PAT юзера НЕ снимает чужой публичный репо с рейтинга", async () => {
+  // закрыто Б2 (К3): эвикция только у задач без автора (периодика)
+  test("403 на repo-GET по PAT юзера НЕ снимает чужой публичный репо с рейтинга", async () => {
     const { t } = tempDb();
     const user = upsertUser(t.db, "ya-griefer", "griefer");
     const repoId = insertRepo(t.db, "popular", "project", "public");
-    const config: Config = { ...loadConfig(), auth: { ...loadConfig().auth, appSecret: "audit-test-secret" } };
+    const base = loadConfig();
+    const config: Config = { ...base, auth: { ...base.auth, appSecret: "audit-test-secret" } };
 
     // настоящий runScan; фейки — только сетевые каналы (git ок, REST: repo-GET 403 по PAT юзера)
     const realRunScan = (d: ScanDeps, slug: string, o: ScanOptions) =>
@@ -130,10 +133,10 @@ describe("H1: own-скан с узким PAT эвиктирует публичн
         slug,
         o,
       );
-    const jobId = enqueueScan(t.db, repoId, { mode: "own", userId: user, triggerKind: "user" });
+    const jobId = enqueueScan(t.db, repoId, { userId: user, triggerKind: "user" });
     const job = claimNext(t.db)!;
     expect(job.id).toBe(jobId);
-    await processJob({ db: t.db, config, scClient: null, runScan: realRunScan as typeof runScan, getPat: () => "narrow-pat" }, job);
+    await processJob({ db: t.db, config, serverClient: () => null, runScan: realRunScan as typeof runScan, getPat: () => "narrow-pat" }, job);
 
     const row = t.db.query("SELECT rating_active FROM repos WHERE id = ?").get(repoId) as { rating_active: number };
     t.close();
@@ -143,37 +146,59 @@ describe("H1: own-скан с узким PAT эвиктирует публичн
 
 // ---------------------------------------------------------------------------
 describe("H2: серверный REST-клиент с бюджетом на весь процесс", () => {
-  repro("после budget запросов сканов ночной обход каталога всё ещё работает", async () => {
+  // закрыто Б2 (К3): фабрика serverClient() в воркере и планировщике — новый
+  // клиент с бюджетом на задачу/обход. Утверждение сохранено: после задач,
+  // исчерпавших budget запросов, ночной обход каталога работает.
+  test("после budget запросов сканов ночной обход каталога всё ещё работает", async () => {
     const mock = Bun.serve({
       port: 0,
       fetch(req) {
         const url = new URL(req.url);
         if (url.pathname === "/repos") {
           return Response.json({
-            repositories: [{ organization: { slug: "o" }, slug: "r", name: "r", visibility: "public", last_updated: "2026-09-01T00:00:00Z", language: null, rating: null }],
+            repositories: [{ organization: { slug: "cat" }, slug: "fresh", name: "fresh", visibility: "public", last_updated: "2026-09-01T00:00:00Z", language: null, rating: null }],
             next_page_token: "",
           });
         }
         return Response.json({});
       },
     });
+    const { t } = tempDb();
+    let stop = () => {};
     try {
-      const config = loadConfig();
-      // ровно как src/server.ts:254-256 (интервал обнулён ради скорости теста)
-      const serverClient = makeScClient({
-        token: "x",
-        baseUrl: `http://127.0.0.1:${mock.port}`,
-        minIntervalMs: 0,
-        maxRequests: config.scan.rest.budget,
-      });
-      // публичные сканы воркера: ~23 REST-запроса на репо (приёмка В4: 322 на 14 репо)
-      // → бюджет 1000 = ~43 скана с момента старта сервера
-      for (let i = 0; i < config.scan.rest.budget; i++) await serverClient.get("/repos/o/r");
-      const { t } = tempDb();
-      const nightly = await nightlyCatalog(t.db, serverClient);
-      t.close();
-      expect({ ok: nightly.ok, error: nightly.error }).toEqual({ ok: true, error: undefined });
+      const base = loadConfig();
+      // бюджет уменьшен ради скорости теста; смысл тот же, что у 1000
+      const config: Config = {
+        ...base,
+        scan: { ...base.scan, rest: { ...base.scan.rest, budget: 50 } },
+        scheduler: { ...base.scheduler, startDelayMs: 1, intervalMs: 24 * 3600_000 },
+      };
+      // ровно как src/server.ts: фабрика клиента (интервал обнулён ради скорости теста)
+      const serverClient = () =>
+        makeScClient({ token: "x", baseUrl: `http://127.0.0.1:${mock.port}`, minIntervalMs: 0, maxRequests: config.scan.rest.budget });
+      const repoId = insertRepo(t.db, "o", "r", "public");
+      // публичные сканы воркера выбирают весь бюджет своих клиентов
+      let lastStatus = -1;
+      const burn = (async (d: ScanDeps) => {
+        for (let i = 0; i <= config.scan.rest.budget; i++) lastStatus = (await d.scClient!.get("/repos/o/r")).status;
+        return { scanId: 0, repoId, status: "ok", repoAccess: "ok" } as unknown as Awaited<ReturnType<typeof runScan>>;
+      }) as typeof runScan;
+      for (let i = 0; i < 2; i++) {
+        enqueueScan(t.db, repoId, { triggerKind: "periodic" });
+        await processJob({ db: t.db, config, serverClient, runScan: burn }, claimNext(t.db)!);
+      }
+      expect(lastStatus).toBe(0); // задача упёрлась в свой бюджет
+      // ночной обход планировщика сервера
+      stop = startScheduler(t.db, serverClient, config);
+      let seen = false;
+      for (let i = 0; i < 50 && !seen; i++) {
+        await Bun.sleep(40);
+        seen = t.db.query("SELECT 1 FROM repos WHERE org_slug = 'cat' AND repo_slug = 'fresh'").get() !== null;
+      }
+      expect(seen).toBe(true);
     } finally {
+      stop();
+      t.close();
       mock.stop(true);
     }
   });
@@ -243,9 +268,9 @@ describe("H4: DoS одним пользователем", () => {
     const user = upsertUser(t.db, "ya-spammer", "spammer");
     const other = insertRepo(t.db, "some", "periodic", "public");
     const target = insertRepo(t.db, "huge", "repo", "public");
-    enqueueScan(t.db, other, { mode: "public", triggerKind: "periodic" }); // стоит первым
+    enqueueScan(t.db, other, { triggerKind: "periodic" }); // стоит первым
     // как POST /api/me/repos/huge/repo/scan × 50 (маршрут зовёт enqueueScan без проверок)
-    for (let i = 0; i < 50; i++) enqueueScan(t.db, target, { mode: "own", userId: user, triggerKind: "user" });
+    for (let i = 0; i < 50; i++) enqueueScan(t.db, target, { userId: user, triggerKind: "user" });
     const queued = (t.db.query("SELECT COUNT(*) AS c FROM jobs WHERE repo_id = ? AND status = 'queued'").get(target) as { c: number }).c;
     // сколько заявок пройдёт раньше периодической job, стоявшей первой
     let before = 0;

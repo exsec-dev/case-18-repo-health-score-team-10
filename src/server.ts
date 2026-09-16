@@ -8,10 +8,9 @@
 import { loadConfig } from "./config";
 import { openDb } from "./db";
 import { getMeta, getRepoCard, listRepos, parseReposQuery } from "./api/repos";
-import { listMyRepos } from "./api/me";
+import { listMyRepos, requestUserScan } from "./api/me";
 import { renderRepoReport } from "./report/markdown";
-import { upsertRepo } from "./jobs/runner";
-import { enqueueScan, startScheduler, startWorkerLoop } from "./jobs/scheduler";
+import { startScheduler, startWorkerLoop } from "./jobs/scheduler";
 import {
   clearSessionCookieHeader,
   createSession,
@@ -228,16 +227,18 @@ const server = Bun.serve({
       if (req.method !== "POST") {
         return Response.json({ error: { code: "bad_query", message: "ожидался POST" } }, { status: 405 });
       }
-      if (!userClient(user.userId)) {
+      const client = userClient(user.userId);
+      if (!client) {
         return Response.json({ error: { code: "no_pat", message: "сначала сохраните PAT SourceCraft" } }, { status: 409 });
       }
       const { org, repo } = req.params;
       if (!/^[a-z0-9_.-]+$/i.test(org ?? "") || !/^[a-z0-9_.-]+$/i.test(repo ?? "")) {
         return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
       }
-      const repoId = upsertRepo(db, org, repo);
-      const jobId = enqueueScan(db, repoId, { mode: "own", userId: user.userId, triggerKind: "user" });
-      return Response.json({ queued: true, jobId, slug: `${org}/${repo}` }, { status: 202 });
+      // H1/LOW-3 (К3): до постановки — repo-GET с PAT юзера; строка repos
+      // и заявка появляются только при подтверждённом доступе
+      const out = await requestUserScan(db, client, user.userId, org, repo);
+      return Response.json(out.body, { status: out.status });
     },
     // неизвестный /api/* обязан остаться JSON-404, а не отдать HTML
     "/api/*": () => notFound("неизвестный endpoint"),
@@ -251,11 +252,14 @@ const server = Bun.serve({
 });
 
 // --- периодика (В4/Б3): воркер очереди + ночной обход каталога ---
-const serverScClient = config.sourcecraftToken
-  ? makeScClient({ token: config.sourcecraftToken, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: config.scan.rest.budget })
-  : null;
-startWorkerLoop({ db, config, scClient: serverScClient });
-startScheduler(db, serverScClient, config);
+// H2 (К3): клиента на процесс нет — фабрика выдаёт новый клиент с полным
+// бюджетом на каждую задачу воркера и на каждый ночной обход
+const serverClient = () =>
+  config.sourcecraftToken
+    ? makeScClient({ token: config.sourcecraftToken, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: config.scan.rest.budget })
+    : null;
+startWorkerLoop({ db, config, serverClient });
+startScheduler(db, serverClient, config);
 
 console.log(`repo-health слушает http://127.0.0.1:${server.port}`);
 console.log(`  llm: ${config.llm.provider} (main=${config.llm.mainModel}, side=${config.llm.sideModel})`);

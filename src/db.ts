@@ -20,7 +20,7 @@
 // coverage_full — 6 категорий); колонок mode/total/coverage нет.
 // scores/recommendations — производные таблицы: старая форма
 // пересоздаётся, затем пересчёт scripts/rescore-m4.ts (прецедент
-// v1.1→v1.2). recommendations += channel.
+// v1.1→v1.2). recommendations += channel; scans += user_id (автор скана).
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -76,7 +76,8 @@ CREATE TABLE IF NOT EXISTS scans (
   started_at TEXT NOT NULL,
   finished_at TEXT,
   status TEXT NOT NULL DEFAULT 'queued', -- queued|running|ok|partial|bad
-  trigger TEXT NOT NULL DEFAULT 'periodic' -- periodic|user|probe
+  trigger TEXT NOT NULL DEFAULT 'periodic', -- periodic|user|probe
+  user_id INTEGER               -- автор скана (users.id); NULL = периодика/серверный токен (v1.5, К3)
 );
 CREATE TABLE IF NOT EXISTS facts (
   scan_id INTEGER NOT NULL REFERENCES scans(id),
@@ -173,6 +174,7 @@ export function openDb(config: Config): Database {
     db.exec(RECOMMENDATIONS_DDL);
     db.exec("CREATE INDEX IF NOT EXISTS idx_scores_repo ON scores(repo_id, model_version)");
   }
+  ensureColumn(db, "scans", "user_id", "INTEGER");
   // v1.3 → v1.4 (В4): изоляция own/public и эвикция
   ensureColumn(db, "repos", "rating_active", "INTEGER NOT NULL DEFAULT 1");
   ensureColumn(db, "repos", "visibility", "TEXT NOT NULL DEFAULT 'public'");
