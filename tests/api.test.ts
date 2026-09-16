@@ -319,6 +319,76 @@ describe("карточка репозитория", () => {
   });
 });
 
+describe("изоляция own/public и эвикция (В4/Б4)", () => {
+  const iso: ApiTestDb = makeApiDb();
+  afterAll(() => iso.close());
+
+  test("own-скор не вытесняет публичный и не попадает в рейтинг", () => {
+    const repoId = seedRepo(iso, { org: "iso", repo: "dual", language: "Go", likes: 10 });
+    const scan1 = seedScan(iso, repoId, { status: "ok" });
+    seedScore(iso, repoId, scan1, { total: 70, mode: "public" });
+    // позже появился own-скор с другим числом
+    const scan2 = seedScan(iso, repoId, { status: "ok" });
+    seedScore(iso, repoId, scan2, { total: 95, mode: "own" });
+    // рейтинг: только публичный скор
+    const rating = listRepos(iso.db, q());
+    expect(rating.items.map((i) => `${i.org}/${i.repo}`)).toEqual(["iso/dual"]);
+    expect(rating.items[0]!.score).toBe(70);
+    // публичная карточка: публичный скор
+    const pub = getRepoCard(iso.db, "iso", "dual")!;
+    expect(pub.score!.total).toBe(70);
+    expect(pub.score!.mode).toBe("public");
+    // own-карточка: последний own-скор
+    const own = getRepoCard(iso.db, "iso", "dual", { mode: "own" })!;
+    expect(own.score!.total).toBe(95);
+    expect(own.score!.mode).toBe("own");
+    // own-скор стёрт из БД — публичная карточка жива (изоляция в обе стороны)
+    iso.db.query("DELETE FROM scores WHERE mode = 'own'").run();
+    expect(getRepoCard(iso.db, "iso", "dual")!.score!.total).toBe(70);
+    expect(getRepoCard(iso.db, "iso", "dual", { mode: "own" })!.score).toBeNull();
+  });
+
+  test("эвикция (rating_active=0) убирает из рейтинга, карточка остаётся; приватность — так же", () => {
+    const repoId = seedRepo(iso, { org: "iso", repo: "evicted", language: "Go", likes: 5 });
+    const scanId = seedScan(iso, repoId, { status: "ok" });
+    seedScore(iso, repoId, scanId, { total: 55, mode: "public" });
+    expect(listRepos(iso.db, q()).total).toBe(2);
+    iso.db.query("UPDATE repos SET rating_active = 0 WHERE repo_slug = 'evicted'").run();
+    const rating = listRepos(iso.db, q());
+    expect(names(rating.items)).toEqual(["iso/dual"]);
+    // публичная карточка эвиктированного не отдаётся (вне рейтинга), own — отдаётся
+    expect(getRepoCard(iso.db, "iso", "evicted")).toBeNull();
+    expect(getRepoCard(iso.db, "iso", "evicted", { mode: "own" })!.repo.repo).toBe("evicted");
+    // возврат флагом
+    iso.db.query("UPDATE repos SET rating_active = 1 WHERE repo_slug = 'evicted'").run();
+    expect(listRepos(iso.db, q()).total).toBe(2);
+    // приватный репо — не в публичном рейтинге и без публичной карточки
+    iso.db.query("UPDATE repos SET visibility = 'private' WHERE repo_slug = 'evicted'").run();
+    expect(listRepos(iso.db, q()).total).toBe(1);
+    expect(getRepoCard(iso.db, "iso", "evicted")).toBeNull();
+    expect(getRepoCard(iso.db, "iso", "evicted", { mode: "own" })!.repo.repo).toBe("evicted");
+    // эвикция чужих скоров нейтральна: у dual ничего не поменялось
+    expect(getRepoCard(iso.db, "iso", "dual")!.score!.total).toBe(70);
+  });
+
+  test("code_empty маркер доезжает до карточки (Score 0 как данные)", () => {
+    const repoId = seedRepo(iso, { org: "iso", repo: "empty-code" });
+    const scanId = seedScan(iso, repoId, { status: "partial" });
+    seedScore(iso, repoId, scanId, { total: 0, coverage: 1 });
+    iso.db.query("UPDATE scores SET code_empty = 1 WHERE scan_id = ?").run(scanId);
+    const card = getRepoCard(iso.db, "iso", "empty-code")!;
+    expect(card.score!.total).toBe(0);
+    expect(card.markers.codeEmpty).toBe(true);
+    // NULL-скор (недостаточно данных) маркером не обладает
+    const nullRepo = seedRepo(iso, { org: "iso", repo: "null-score" });
+    const nullScan = seedScan(iso, nullRepo, { status: "partial" });
+    seedScore(iso, nullRepo, nullScan, { total: null, coverage: 0.2 });
+    const nullCard = getRepoCard(iso.db, "iso", "null-score")!;
+    expect(nullCard.score!.total).toBeNull();
+    expect(nullCard.markers.codeEmpty).toBe(false);
+  });
+});
+
 describe("мета", () => {
   test("версия модели, шесть категорий с русскими именами и весами, порог NULL", () => {
     const meta = getMeta(t.db);

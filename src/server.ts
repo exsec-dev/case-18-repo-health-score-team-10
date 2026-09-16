@@ -202,6 +202,15 @@ const server = Bun.serve({
       }
       return Response.json({ username: result.username, entries: result.entries });
     },
+    "/api/me/repos/:org/:repo": (req) => {
+      const user = sessionOf(req);
+      if (!user) return unauthorized();
+      // own-карточка: последний own-скор (6 категорий, Security с фактами);
+      // приватные/эвиктированные репо читаемы — личная страница юзера
+      const card = getRepoCard(db, req.params.org, req.params.repo, { mode: "own" });
+      if (!card) return notFound(`репозиторий ${req.params.org}/${req.params.repo} не найден`);
+      return Response.json(card);
+    },
     "/api/me/repos/:org/:repo/scan": async (req) => {
       const user = sessionOf(req);
       if (!user) return unauthorized();

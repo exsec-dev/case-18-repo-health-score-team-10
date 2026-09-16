@@ -161,6 +161,9 @@ interface RatingRow {
 // Одна строка на репозиторий: последний скан, у которого ЕСТЬ скоры
 // текущей модели. «Последний» — по scan_id, а не по датам: id монотонен,
 // а даты скана могут идти вразнобой (пересканы, восстановление БД).
+// Изоляция own/public (В4/Б4): публичный контракт читает ТОЛЬКО
+// mode='public' AND rating_active=1 AND visibility='public' — own-скор
+// никогда не вытесняет публичный и не попадает в рейтинг.
 const RATING_SQL = `
 SELECT r.org_slug, r.repo_slug, r.title, r.language, r.likes, r.forks, r.last_activity_at,
        sc.total, sc.coverage, sc.categories, sc.stale, sc.model_version,
@@ -169,8 +172,11 @@ FROM scores sc
 JOIN repos r ON r.id = sc.repo_id
 JOIN scans s ON s.id = sc.scan_id
 WHERE sc.model_version = ?
+  AND sc.mode = 'public'
+  AND r.rating_active = 1
+  AND r.visibility = 'public'
   AND sc.scan_id = (SELECT MAX(sc2.scan_id) FROM scores sc2
-                    WHERE sc2.repo_id = sc.repo_id AND sc2.model_version = ?)`;
+                    WHERE sc2.repo_id = sc.repo_id AND sc2.model_version = ? AND sc2.mode = 'public')`;
 
 function toRatingItem(row: RatingRow): RatingItem {
   const cats = JSON.parse(row.categories) as Record<string, CategoryScore>;
@@ -294,6 +300,8 @@ export interface CardMarkers {
   ciConfigOnlyCap: boolean;
   /** часть фактов взята из истории при сбое канала */
   staleFacts: boolean;
+  /** без-кодовое репо (Q&A №13): Score 0 как данные «проекта нет», не NULL */
+  codeEmpty: boolean;
 }
 
 export interface CardScan {
@@ -421,6 +429,7 @@ interface ScoreRow {
   stale: string;
   computed_at: string;
   derived: string | null;
+  code_empty: number | null;
 }
 
 interface FactRow {
@@ -445,11 +454,18 @@ interface RecRow {
 }
 
 /** null = репозитория нет в каталоге (404). Есть репо без скана — это 200. */
-export function getRepoCard(db: Database, org: string, repo: string): RepoCard | null {
+export function getRepoCard(db: Database, org: string, repo: string, opts: { mode?: "public" | "own" } = {}): RepoCard | null {
+  const mode = opts.mode ?? "public";
   const r = db
-    .query("SELECT id, org_slug, repo_slug, title, language, likes, forks, last_activity_at FROM repos WHERE org_slug = ? AND repo_slug = ?")
-    .get(org, repo) as RepoRow | null;
+    .query(
+      "SELECT id, org_slug, repo_slug, title, language, likes, forks, last_activity_at, rating_active, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?",
+    )
+    .get(org, repo) as (RepoRow & { rating_active: number; visibility: string }) | null;
   if (!r) return null;
+  // публичная поверхность = активный рейтинг публичных репо: эвиктированное
+  // (пропало/приватизовано) ведёт себя как отсутствующее (404); own-режим
+  // читает репо без ограничений — личная страница юзера
+  if (mode === "public" && (r.rating_active !== 1 || r.visibility !== "public")) return null;
 
   const cardRepo: CardRepo = {
     org: r.org_slug,
@@ -463,18 +479,32 @@ export function getRepoCard(db: Database, org: string, repo: string): RepoCard |
     webUrl: `https://sourcecraft.dev/${r.org_slug}/${r.repo_slug}`,
   };
 
-  const scoreRow = db
-    .query(
-      `SELECT scan_id, model_version, mode, total, coverage, categories, no_data, stale, computed_at, derived
-       FROM scores WHERE repo_id = ? AND model_version = ? ORDER BY scan_id DESC LIMIT 1`,
-    )
-    .get(r.id, MODEL_VERSION) as ScoreRow | null;
+  // изоляция own/public: публичная карточка — только публичные скоры
+  // активного рейтинга; own-карточка — последний own-скор (приватные
+  // и эвиктированные репо здесь читаемы — это личная страница юзера)
+  const scoreRow =
+    mode === "own"
+      ? (db
+          .query(
+            `SELECT scan_id, model_version, mode, total, coverage, categories, no_data, stale, computed_at, derived, code_empty
+             FROM scores WHERE repo_id = ? AND model_version = ? AND mode = 'own' ORDER BY scan_id DESC LIMIT 1`,
+          )
+          .get(r.id, MODEL_VERSION) as ScoreRow | null)
+      : (db
+          .query(
+            `SELECT sc.scan_id, sc.model_version, sc.mode, sc.total, sc.coverage, sc.categories, sc.no_data, sc.stale, sc.computed_at, sc.derived, sc.code_empty
+             FROM scores sc JOIN repos r2 ON r2.id = sc.repo_id
+             WHERE sc.repo_id = ? AND sc.model_version = ? AND sc.mode = 'public'
+               AND r2.rating_active = 1 AND r2.visibility = 'public'
+             ORDER BY sc.scan_id DESC LIMIT 1`,
+          )
+          .get(r.id, MODEL_VERSION) as ScoreRow | null);
 
   if (!scoreRow) {
     // «в каталоге, ещё не сканировали» — штатное состояние, не ошибка
     return {
       repo: cardRepo,
-      markers: { historyTruncatedSince: null, ciConfigOnlyCap: false, staleFacts: false },
+      markers: { historyTruncatedSince: null, ciConfigOnlyCap: false, staleFacts: false, codeEmpty: false },
       scan: null,
       score: null,
       derived: null,
@@ -565,6 +595,7 @@ export function getRepoCard(db: Database, org: string, repo: string): RepoCard |
     historyTruncatedSince: typeof summaryValue?.history_truncated_since === "string" ? summaryValue.history_truncated_since : null,
     ciConfigOnlyCap: cicdNoData.includes("config-only cap"),
     staleFacts: Array.isArray(stale) && stale.length > 0,
+    codeEmpty: scoreRow.code_empty === 1,
   };
 
   return {

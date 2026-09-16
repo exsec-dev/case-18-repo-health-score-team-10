@@ -2,7 +2,15 @@
 // случаи; чистая функция, все числа фиксированы и меняются только со
 // сменой MODEL_VERSION — воспроизводимость, жюри 13.2.2). Анкеры
 // откалиброваны по живой выборке (драфт В2, Приложение А) и заморожены.
-export const MODEL_VERSION = "2.0.0-m2";
+export const MODEL_VERSION = "3.0.0-m4";
+
+/**
+ * Публичный рейтинг = 4 категории (17.09, Алексей, Q&A №1: «в общий
+ * рейтинг CI/CD и Security метрики вкладывать нельзя»): CI и Security
+ * считаются только в own-режиме (токен юзера). Публичный доступный
+ * максимум весов = 15+15+15+20 = 65 → PUBLIC_MAX.
+ */
+export const PUBLIC_CATEGORIES: CategoryKey[] = ["documentation", "activity", "issues", "code"];
 
 /** noreply-домены автоматизации (§7.2; список — часть модели). */
 export const NOREPLY_DOMAINS: string[] = ["github.com", "users.noreply.github.com", "noreply.github.com"];
@@ -195,8 +203,8 @@ export const SECRETS_CRITICAL_TOTAL_CAP = 49;
 /** severity-веса плотности на 10К LOC. */
 export const SEVERITY_WEIGHTS = { critical: 8, high: 4, medium: 2, low: 1 } as const;
 
-/** режимный максимум coverage: публично Security no-data у всех → 0.8; свой репо — 1.0. */
-export const COVERAGE_MODE_MAX: Record<"public" | "own", number> = { public: 0.8, own: 1.0 };
+/** режимный максимум coverage: публично 4 категории = 65 весов; свой репо — все 6 = 1.0 (В4/Б4). */
+export const COVERAGE_MODE_MAX: Record<"public" | "own", number> = { public: 0.65, own: 1.0 };
 
 /** coverage ниже порога → Score = NULL («недостаточно данных», В2-6). */
 export const COVERAGE_NULL_BELOW = 0.4;

@@ -59,24 +59,38 @@ describe("compute: здоровое репо (ручная арифметика)
   const t: TestDb = makeDb();
   afterAll(() => t.close());
 
-  test("категории/coverage/total", () => {
+  test("категории/coverage/total: публично 4 категории (3.0.0-m4, Q&A №1)", () => {
     const scanId = seedScan(t, healthyFacts());
     const s = compute(t.db, scanId, "public", { now: NOW });
     // документация: readme 0.3+0.7·(0.5·0.72917+0.5·1)=0.90521; (0.45·0.90521+0.25+0.15)/0.85→0.80734
     expect(s.categories.documentation.score!).toBeCloseTo(80.734, 2);
-    expect(s.categories.cicd.score!).toBeCloseTo(100, 10);
     // активность: 0.35·1 + 0.25·0.48756 + 0.2·0.39085 + 0.1·0.63755 + 0.1·0.84115 = 0.69793
     expect(s.categories.activity.score!).toBeCloseTo(69.793, 2);
     // issues: 0.3·0.9 + 0.3·0.91 + 0.3·0.85 + 0.1·0.9625 = 0.89425
     expect(s.categories.issues.score!).toBeCloseTo(89.425, 2);
     // code: 0.4·0.976 + 0.35·0.75 + 0.25·1 = 0.9029
     expect(s.categories.code.score!).toBeCloseTo(90.29, 2);
+    // CI/Security исключены режимом (не считаются, не занижаются)
+    expect(s.categories.cicd.score).toBeNull();
+    expect(s.categories.cicd.no_data).toContain("excluded from public rating");
     expect(s.categories.security.score).toBeNull();
-    expect(s.coverage).toBe(1.0); // (15+15+15+15+20)/100 / 0.8
-    // (15·80.734 + 15·100 + 15·69.793 + 15·89.425 + 20·90.29)/80 = 86.31
-    expect(s.total!).toBeCloseTo(86.31, 1);
-    expect(s.modelVersion).toBe("2.0.0-m2");
+    expect(s.categories.security.no_data).toContain("excluded from public rating");
+    expect(s.coverage).toBe(1.0); // (15+15+15+20)/100 / 0.65
+    // (15·80.734 + 15·69.793 + 15·89.425 + 20·90.29)/65 = 83.155
+    expect(s.total!).toBeCloseTo(83.16, 1);
+    expect(s.modelVersion).toBe("3.0.0-m4");
+    expect(s.codeEmpty).toBe(false);
     expect(s.stale).toEqual([]);
+  });
+
+  test("own-режим: 6 категорий, CI/Security считаются; coverage max 1.0", () => {
+    const scanId = seedScan(t, healthyFacts());
+    const s = compute(t.db, scanId, "own", { now: NOW });
+    expect(s.categories.cicd.score!).toBeCloseTo(100, 10);
+    expect(s.categories.security.score).toBeNull(); // AppSec-факта нет
+    expect(s.coverage).toBeCloseTo(0.8, 10); // (15·5+20)/100 / 1.0 — Security no-data
+    // (15·80.734 + 15·100 + 15·69.793 + 15·89.425 + 20·90.29)/65 = 86.31
+    expect(s.total!).toBeCloseTo(86.31, 1);
   });
 
   test("Issues 0/0 = данные: скор = вычислимый минимум (≈6), coverage не страдает", () => {
@@ -87,16 +101,34 @@ describe("compute: здоровое репо (ручная арифметика)
     expect(s.noData.some((x) => x.startsWith("issues:"))).toBe(false);
   });
 
-  test("CI конфиг без прогонов: потолок 50 (§5.1); без ci.yaml → 0", () => {
+  test("CI конфиг без прогонов: потолок 50 (§5.1, own-режим); без ci.yaml → 0", () => {
     const capped = seedScan(t, withFacts(healthyFacts(), { key: "cicd.runs", value: { reason: "access" }, status: "no-data" }));
-    const s1 = compute(t.db, capped, "public", { now: NOW });
+    const s1 = compute(t.db, capped, "own", { now: NOW });
     expect(s1.categories.cicd.score!).toBe(50);
     // (6905.08 − 1500 + 750)/80 = 76.94
     expect(s1.total!).toBeCloseTo(76.94, 1);
 
     const noYaml = seedScan(t, withFacts(healthyFacts(), { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } }));
-    const s2 = compute(t.db, noYaml, "public", { now: NOW });
+    const s2 = compute(t.db, noYaml, "own", { now: NOW });
     expect(s2.categories.cicd.score!).toBe(0);
+    // публичный режим: CI исключён — потолки не видны вовсе
+    const pub = compute(t.db, capped, "public", { now: NOW });
+    expect(pub.categories.cicd.score).toBeNull();
+    expect(pub.total!).toBeCloseTo(83.16, 1);
+  });
+
+  test("code_empty (Q&A №13): file_count=0/loc=0 при ok-фактах → Score 0 как данные", () => {
+    const empty = seedScan(t, withFacts(healthyFacts(), { key: "tree.stats", value: { top_level: [], file_count: 0, bytes: 0, loc: 0 } }));
+    const s = compute(t.db, empty, "public", { now: NOW });
+    expect(s.codeEmpty).toBe(true);
+    expect(s.total).toBe(0); // «проекта нет» — данные, не NULL
+    expect(s.noData.filter((x) => x.startsWith("security") || x.startsWith("cicd")).length).toBe(2);
+    const emptyLoc = seedScan(t, withFacts(healthyFacts(), { key: "tree.stats", value: { top_level: [{ name: "x", type: "tree" }], file_count: 3, bytes: 10, loc: 0 } }));
+    expect(compute(t.db, emptyLoc, "public", { now: NOW }).total).toBe(0);
+    // no-data tree.stats (клон не удался) — это НЕ code_empty
+    const nodata = seedScan(t, withFacts(healthyFacts(), { key: "tree.stats", value: { reason: "limits" }, status: "no-data" }));
+    const s3 = compute(t.db, nodata, "public", { now: NOW });
+    expect(s3.codeEmpty).toBe(false);
   });
 
   test("Security с AppSec-фактом: критичные secrets → кап total ≤ 49; resolved → Score ↑", () => {
@@ -107,10 +139,10 @@ describe("compute: здоровое репо (ручная арифметика)
         value: { severity_counts: { critical: 2, high: 0, medium: 0, low: 0 }, resolved_share: 0, secrets_critical: true },
       }),
     );
-    const s1 = compute(t.db, crit, "public", { now: NOW });
+    const s1 = compute(t.db, crit, "own", { now: NOW });
     expect(s1.categories.security.score!).toBeCloseTo(39, 1); // 0.5·0.72 + 0.3·0.1 + 0.2·0
     expect(s1.total!).toBeLessThanOrEqual(49);
-    expect(s1.coverage).toBe(1.0); // 100/80 → clamp
+    expect(s1.coverage).toBe(1.0); // 100/100 → clamp
 
     const fixed = seedScan(
       t,
@@ -119,9 +151,13 @@ describe("compute: здоровое репо (ручная арифметика)
         value: { severity_counts: { critical: 0, high: 0, medium: 0, low: 0 }, resolved_share: 0.9, secrets_critical: false },
       }),
     );
-    const s2 = compute(t.db, fixed, "public", { now: NOW });
+    const s2 = compute(t.db, fixed, "own", { now: NOW });
     expect(s2.categories.security.score!).toBeCloseTo(98.5, 1); // 0.5 + 0.3·0.95 + 0.2
     expect(s2.total!).toBeGreaterThan(s1.total!);
+    // публично тот же факт невидим: Security исключена, total не капится и не растёт
+    const pubCrit = compute(t.db, crit, "public", { now: NOW });
+    expect(pubCrit.total!).toBeCloseTo(83.16, 1);
+    expect(pubCrit.categories.security.score).toBeNull();
   });
 
   test("bad-channel: stale-факты последнего успешного kind, Score не двигается (§5.6)", () => {
@@ -148,7 +184,7 @@ describe("compute: здоровое репо (ручная арифметика)
     const fresh = makeDb();
     try {
       const scan3 = seedScan(fresh, withFacts(healthyFacts(), { key: "cicd.runs", value: { reason: "bad-channel" }, status: "bad" }));
-      const s3 = compute(fresh.db, scan3, "public", { now: NOW });
+      const s3 = compute(fresh.db, scan3, "own", { now: NOW });
       expect(s3.categories.cicd.score!).toBe(50); // конфиг-кап
       expect(s3.stale).toEqual([]);
     } finally {
@@ -181,7 +217,7 @@ describe("compute: здоровое репо (ручная арифметика)
     expect(c1).toBe(1);
     writeScores(t.db, { ...s, modelVersion: "9.9.9-test" });
     const rows = t.db.query("SELECT model_version FROM scores WHERE scan_id = ? ORDER BY model_version").all(scanId) as { model_version: string }[];
-    expect(rows.map((r) => r.model_version)).toEqual(["2.0.0-m2", "9.9.9-test"]);
+    expect(rows.map((r) => r.model_version)).toEqual(["3.0.0-m4", "9.9.9-test"]);
     // immutable: старые строки не перезаписаны
     t.db.exec("DELETE FROM scores WHERE model_version = '9.9.9-test'");
   });

@@ -189,7 +189,7 @@ describe("В2/Б5: score-hook — конец скана пишет scores/recomm
     expect(res.score).not.toBeNull();
     expect(res.score!.total).not.toBeNull();
     const row = db.query("SELECT total, model_version FROM scores WHERE scan_id = ?").get(res.scanId) as { total: number; model_version: string };
-    expect(row.model_version).toBe("2.0.0-m2");
+    expect(row.model_version).toBe("3.0.0-m4");
     expect(row.total).toBe(Math.round(res.score!.total!));
     const recs = db.query("SELECT rule_id FROM recommendations WHERE scan_id = ? ORDER BY priority").all(res.scanId) as { rule_id: string }[];
     expect(recs.map((r) => r.rule_id)).toContain("start-tracker");

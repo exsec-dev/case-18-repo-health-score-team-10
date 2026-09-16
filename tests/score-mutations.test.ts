@@ -1,7 +1,8 @@
-// score-mutations.test.ts — Б5: контрольные сценарии-инварианты §9
+// score-mutations.test.ts — Б5+В4/Б4: контрольные сценарии-инварианты §9
 // (мутации фактов на JSON-фикстурах, без сети и клонов). ε=1e-9 на
 // монотонности; шкала каждой мутации — как в таблице §9 (категория
-// для CI/CD, total для остальных) — см. комментарии.
+// для CI/CD, total для остальных) — см. комментарии. В4: CI/Security
+// — own-режим; добавлены инварианты code_empty и изоляции public.
 import { afterAll, describe, expect, test } from "bun:test";
 import { compute } from "../src/score/compute";
 import { NOW, TestDb, healthyFacts, makeDb, seedScan, withFacts, FactSpec } from "./score-fixtures";
@@ -9,29 +10,31 @@ import { NOW, TestDb, healthyFacts, makeDb, seedScan, withFacts, FactSpec } from
 const t: TestDb = makeDb();
 afterAll(() => t.close());
 
-const totalOf = (facts: FactSpec[]): number | null => compute(t.db, seedScan(t, facts), "public", { now: NOW }).total;
-const catOf = (facts: FactSpec[], key: string): number | null => compute(t.db, seedScan(t, facts), "public", { now: NOW }).categories[key as keyof ReturnType<typeof compute>["categories"]].score;
+// В4/Б4: CI/Security считаются только в own-режиме — их мутации
+// прогоняем own; остальные (анти-накрутка, Issues, каналы) — public.
+const totalOf = (facts: FactSpec[], mode: "public" | "own" = "public"): number | null => compute(t.db, seedScan(t, facts), mode, { now: NOW }).total;
+const catOf = (facts: FactSpec[], key: string, mode: "public" | "own" = "public"): number | null => compute(t.db, seedScan(t, facts), mode, { now: NOW }).categories[key as keyof ReturnType<typeof compute>["categories"]].score;
 
-describe("§9 Security", () => {
-  test("+критичная SAST/secrets-находка → Security ↓ заметно, total капится 49", () => {
-    const base = totalOf(healthyFacts())!;
-    const attacked = compute(
-      t.db,
-      seedScan(t, withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0, secrets_critical: true } })),
-      "public",
-      { now: NOW },
-    );
+describe("§9 Security (own-режим, В4)", () => {
+  test("+критичная SAST/secrets-находка → Security ↓ заметно, total капится 49; публичный total НЕ тронут", () => {
+    const base = totalOf(healthyFacts(), "own")!;
+    const attackedFacts = withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0, secrets_critical: true } });
+    const attacked = compute(t.db, seedScan(t, attackedFacts), "own", { now: NOW });
     expect(attacked.categories.security.score!).toBeLessThan(30); // ↓ заметно
     expect(attacked.total!).toBeLessThanOrEqual(49); // жёсткий кап (В2-8)
     expect(attacked.total!).toBeLessThan(base);
+    // изоляция (В4/Б4): тот же факт публично не влияет — 4 категории
+    const pubBefore = totalOf(healthyFacts())!;
+    const pubAfter = totalOf(attackedFacts)!;
+    expect(pubAfter).toBe(pubBefore);
   });
 
   test("SAST crit → resolved → Security ↑, Score ↑", () => {
-    const dirty = totalOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0, secrets_critical: false } }))!;
-    const clean = totalOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0.95, secrets_critical: false } }))!;
+    const dirty = totalOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0, secrets_critical: false } }), "own")!;
+    const clean = totalOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0.95, secrets_critical: false } }), "own")!;
     expect(clean).toBeGreaterThan(dirty);
-    const catDirty = catOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0, secrets_critical: false } }), "security")!;
-    const catClean = catOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0.95, secrets_critical: false } }), "security")!;
+    const catDirty = catOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0, secrets_critical: false } }), "security", "own")!;
+    const catClean = catOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0.95, secrets_critical: false } }), "security", "own")!;
     expect(catClean).toBeGreaterThan(catDirty);
   });
 });
@@ -66,34 +69,45 @@ describe("§9 Issues: монотонность (ε=1e-9, Q14)", () => {
   });
 });
 
-describe("§9 CI/CD", () => {
+describe("§9 CI/CD (own-режим, В4)", () => {
   test("cicd.runs 403 (no-data) = отсутствию поля: Score совпадает", () => {
-    const with403 = totalOf(withFacts(healthyFacts(), { key: "cicd.runs", value: { reason: "access" }, status: "no-data" }))!;
-    const withoutRuns = totalOf(healthyFacts().filter((f) => f.key !== "cicd.runs"))!;
+    const with403 = totalOf(withFacts(healthyFacts(), { key: "cicd.runs", value: { reason: "access" }, status: "no-data" }), "own")!;
+    const withoutRuns = totalOf(healthyFacts().filter((f) => f.key !== "cicd.runs"), "own")!;
     expect(with403).toBe(withoutRuns);
   });
 
   test("зелёные прогоны → 50% красные: CI/CD ↓ ≥ 15 пунктов", () => {
-    const green = catOf(withFacts(healthyFacts(), { key: "cicd.runs", value: { last_status: "success", success_rate: 1.0, duration_p50: 120, runs_count: 20 } }), "cicd")!;
-    const red = catOf(withFacts(healthyFacts(), { key: "cicd.runs", value: { last_status: "failed", success_rate: 0.5, duration_p50: 120, runs_count: 20 } }), "cicd")!;
+    const green = catOf(withFacts(healthyFacts(), { key: "cicd.runs", value: { last_status: "success", success_rate: 1.0, duration_p50: 120, runs_count: 20 } }), "cicd", "own")!;
+    const red = catOf(withFacts(healthyFacts(), { key: "cicd.runs", value: { last_status: "failed", success_rate: 0.5, duration_p50: 120, runs_count: 20 } }), "cicd", "own")!;
     expect(green - red).toBeGreaterThanOrEqual(15);
   });
 
-  test("ci.yaml с echo-шагом добавлен: CI = 50 ровно; total +9.375 публично (номинал 7.5 × перенормировку 1/0.8)", () => {
-    // драфт §9 обещает «total +7.5» — это НОМИНАЛЬНЫЙ вектор (15%×50);
-    // фактический публичный сдвиг = 15×50/80 = 9.375 из-за выброшенного
-    // веса Security (§4 перенормировка) — см. отчёт воркера: отклонение числа,
-    // не семантики; recommend обещает номинальные +7.5 по §8
+  test("ci.yaml с echo-шагом добавлен: CI = 50 ровно; total +7.03 в own (номинал 7.5 × перенормировку 5/0.8·... фактич. 15·50/80)", () => {
+    // драфт §9 обещает «total +7.5» — НОМИНАЛЬНЫЙ вектор (15%×50);
+    // фактический own-сдвиг = 15×50/80 = 9.375 с полными данными, с runs403
+    // (CI=50 вместо 0, веса 80) — считаем ручной арифметикой ниже.
     const runs403: FactSpec = { key: "cicd.runs", value: { reason: "access" }, status: "no-data" };
-    const before = totalOf(withFacts(healthyFacts(), runs403, { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } }))!;
+    const before = totalOf(withFacts(healthyFacts(), runs403, { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } }), "own")!;
     const afterFacts = withFacts(
       healthyFacts(),
       runs403,
       { key: "cicd.configs", value: { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: true } },
     );
-    const s = compute(t.db, seedScan(t, afterFacts), "public", { now: NOW });
+    const s = compute(t.db, seedScan(t, afterFacts), "own", { now: NOW });
     expect(s.categories.cicd.score!).toBe(50);
-    expect(s.total! - before).toBeCloseTo(9.375, 10);
+    expect(s.total! - before).toBeCloseTo(9.375, 10); // 15·(50−0)/80
+  });
+
+  test("инвариант изоляции (В4/Б4): CI/Security-мутации НЕ двигают публичный total", () => {
+    const runs403: FactSpec = { key: "cicd.runs", value: { reason: "access" }, status: "no-data" };
+    const noCi = withFacts(healthyFacts(), runs403, { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } });
+    const withCi = withFacts(healthyFacts(), runs403, { key: "cicd.configs", value: { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: true } });
+    const withSec = withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 9, high: 9, medium: 9, low: 9 }, resolved_share: 0, secrets_critical: true } });
+    const pubBase = totalOf(noCi)!;
+    expect(totalOf(withCi)!).toBe(pubBase); // CI не влияет публично
+    expect(totalOf(withSec)!).toBe(pubBase); // Security не влияет публично
+    // при этом own-режим их видит
+    expect(totalOf(withCi, "own")!).toBeGreaterThan(totalOf(noCi, "own")!);
   });
 });
 

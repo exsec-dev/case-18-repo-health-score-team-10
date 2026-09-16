@@ -100,7 +100,10 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
     }
   }
   const cicdCfg = ok.get("cicd.configs") as { has_ci_yaml?: unknown; has_steps?: unknown } | undefined;
-  if (cicdCfg && !(cicdCfg.has_ci_yaml === true && cicdCfg.has_steps === true)) {
+  // CI-правила — только own-режим (В4/Б4: публичный рейтинг = 4 категории,
+  // ΔScore по CI-весу в публичном total не исполняется — обещание без
+  // исполнения не выдаём)
+  if (mode === "own" && cicdCfg && !(cicdCfg.has_ci_yaml === true && cicdCfg.has_steps === true)) {
     const runs = ok.get("cicd.runs") as { runs_count?: unknown; success_rate?: unknown; duration_p50?: unknown } | undefined;
     let deltaCat: number;
     let impact: string;
@@ -136,25 +139,26 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
     );
   }
   if (!ok.has("appsec.findings")) {
-    const covNow = scores.coverage;
-    const covAfter = Math.min(1, covNow + CATEGORY_WEIGHTS.security / 100 / 0.8);
+    // В4/Б4 (парковка В3 закрыта): вместо пустого «coverage 1.00→1.00» —
+    // честный текст про режимы. Публично Security исключена (Q&A №1),
+    // категория возвращается только в оценке своего репо с PAT.
     const impact =
-      scores.total === null && covAfter >= 0.4
-        ? `Score появится (coverage ${covNow.toFixed(2)}→${covAfter.toFixed(2)})`
-        : `coverage ${covNow.toFixed(2)}→${covAfter.toFixed(2)} — категория Security 20%`;
+      mode === "own"
+        ? "AppSec-данные недоступны: проверьте права PAT (src.repositories.useAppSecScan) и завершённость скана — Security заработает"
+        : "Security доступна в режиме своего репо: вес 20% вернётся в расчёт после входа и анализа с вашим PAT";
     activation.push(
       act("connect-appsec", "security", "Security без данных: AppSec SourceCraft не подключён (публичный режим)", "Подключите AppSec (сценарий своего репо) — SAST/SCA/secrets закроют 20% Score", ["appsec.findings"], impact),
     );
   }
   const runsFact = ok.get("cicd.runs");
-  if (!runsFact && cicdCfg?.has_ci_yaml === true && cicdCfg?.has_steps === true) {
+  if (mode === "own" && !runsFact && cicdCfg?.has_ci_yaml === true && cicdCfg?.has_steps === true) {
     activation.push(
       act("grant-ci-runs", "cicd", "CI заявлен, но статусы прогонов недоступны (403 для чужих репо)", "Дайте доступ к прогонам CI (свой репо / права токена) — доказательства вместо потолка", ["cicd.runs", "cicd.configs"], "CI/CD: 50 → до 100 по фактическим прогонам"),
     );
   }
 
   // ---------- скор-правила (после появления данных; влияние текстом) ----------
-  if (runsFact && typeof (runsFact as { runs_count?: unknown }).runs_count === "number" && (runsFact as { runs_count?: number }).runs_count! > 0) {
+  if (mode === "own" && runsFact && typeof (runsFact as { runs_count?: unknown }).runs_count === "number" && (runsFact as { runs_count?: number }).runs_count! > 0) {
     const rf = runsFact as { last_status?: unknown; success_rate?: unknown; duration_p50?: unknown };
     if (rf.last_status !== "success" || (typeof rf.success_rate === "number" && rf.success_rate < 0.9)) {
       scoreRules.push(

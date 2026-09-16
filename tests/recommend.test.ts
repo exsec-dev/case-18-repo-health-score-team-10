@@ -49,17 +49,19 @@ describe("presence-правила: числовой Δ на замороженн
     expect(rec.deltaScore!).toBeCloseTo(1.575, 4);
   });
 
-  test("нет CI (публично, раны 403) → +7.5; ci.yaml без шагов → тот же Δ, другой rule_id", () => {
+  test("нет CI (own-режим, раны 403) → +7.5; публично CI-правил нет (В4)", () => {
     const noCi = seedScan(t, withFacts(healthyFacts(), { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } }, { key: "cicd.runs", value: { reason: "access" }, status: "no-data" }));
-    const rec1 = recommend(t.db, noCi, { now: NOW }).find((r) => r.ruleId === "ci-missing")!;
+    const rec1 = recommend(t.db, noCi, { mode: "own", now: NOW }).find((r) => r.ruleId === "ci-missing")!;
     expect(rec1.deltaScore).toBeCloseTo(7.5, 10);
     expect(rec1.expectedImpact).toContain("50/100");
+    // публично CI исключён — ни presence, ни активационных по CI
+    expect(recommend(t.db, noCi, { now: NOW }).some((r) => ["ci-missing", "ci-no-steps", "grant-ci-runs"].includes(r.ruleId))).toBe(false);
 
     const noSteps = seedScan(t, withFacts(healthyFacts(), { key: "cicd.configs", value: { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: false } }, { key: "cicd.runs", value: { reason: "access" }, status: "no-data" }));
-    const rec2 = recommend(t.db, noSteps, { now: NOW }).find((r) => r.ruleId === "ci-no-steps")!;
+    const rec2 = recommend(t.db, noSteps, { mode: "own", now: NOW }).find((r) => r.ruleId === "ci-no-steps")!;
     expect(rec2.deltaScore).toBeCloseTo(7.5, 10);
     // активационная «дайте доступ к прогонам» не путается с presence
-    const ids = recommend(t.db, noSteps, { now: NOW }).map((r) => r.ruleId);
+    const ids = recommend(t.db, noSteps, { mode: "own", now: NOW }).map((r) => r.ruleId);
     expect(ids).not.toContain("grant-ci-runs"); // шагов нет — активировать нечего
   });
 });
@@ -82,16 +84,22 @@ describe("активационная ветка (без числа)", () => {
     expect(recs.findIndex((r) => r.ruleId === "license-missing")).toBeLessThan(recs.indexOf(tracker));
   });
 
-  test("connect-appsec: coverage X→Y текстом; grant-ci-runs при конфиге со шагами и 403", () => {
+  test("connect-appsec (В4, парковка В3 закрыта): честный текст режима вместо пустого coverage", () => {
     const scanId = seedScan(t, withFacts(healthyFacts(), { key: "cicd.runs", value: { reason: "access" }, status: "no-data" }));
-    const recs = recommend(t.db, scanId, { now: NOW });
-    const appsec = recs.find((r) => r.ruleId === "connect-appsec")!;
-    expect(appsec.expectedImpact).toMatch(/coverage 1\.00→1\.00/);
-    const grant = recs.find((r) => r.ruleId === "grant-ci-runs")!;
+    const pub = recommend(t.db, scanId, { now: NOW });
+    const appsec = pub.find((r) => r.ruleId === "connect-appsec")!;
+    expect(appsec.expectedImpact).toContain("Security доступна в режиме своего репо");
+    expect(appsec.expectedImpact).not.toMatch(/coverage 1\.00→1\.00/); // пустой текст В3 умер
+    // grant-ci-runs — own-режим (публично CI исключён)
+    expect(pub.some((r) => r.ruleId === "grant-ci-runs")).toBe(false);
+    const own = recommend(t.db, scanId, { mode: "own", now: NOW });
+    const grant = own.find((r) => r.ruleId === "grant-ci-runs")!;
     expect(grant.opensCategory).toBe("cicd");
     expect(grant.deltaScore).toBeNull();
     // порядок активационных по весу: security (20) раньше cicd (15)
-    expect(recs.indexOf(appsec)).toBeLessThan(recs.indexOf(grant));
+    const ownAppsec = own.find((r) => r.ruleId === "connect-appsec")!;
+    expect(ownAppsec.expectedImpact).toContain("права PAT");
+    expect(own.indexOf(ownAppsec)).toBeLessThan(own.indexOf(grant));
   });
 
   test("AppSec-факт есть → connect-appsec не летит; критичные → скор-правило", () => {
@@ -116,7 +124,7 @@ describe("скор-правила (по данным)", () => {
         { key: "code.todo", value: { count: 14, fixme: 6, older_180d: 9, todo_files: 10, blamed_files: 10 } },
       ),
     );
-    const ids = recommend(t.db, scanId, { now: NOW }).map((r) => r.ruleId);
+    const ids = recommend(t.db, scanId, { mode: "own", now: NOW }).map((r) => r.ruleId);
     expect(ids).toContain("fix-red-runs");
     expect(ids).toContain("speed-up-pipeline");
     expect(ids).toContain("reduce-stale-issues");
@@ -144,7 +152,7 @@ describe("порядок и запись", () => {
         { key: "issues.stats", value: { open: 0, closed: 0, median_close_days: null, stale_90d: 0, fetched_count: 0 } },
       ),
     );
-    const ids = recommend(t.db, scanId, { now: NOW }).map((r) => r.ruleId);
+    const ids = recommend(t.db, scanId, { mode: "own", now: NOW }).map((r) => r.ruleId);
     expect(ids.slice(0, 6)).toEqual([
       "ci-missing", // 7.5
       "license-missing", // 3.75
@@ -154,8 +162,12 @@ describe("порядок и запись", () => {
       "connect-appsec", // активационные: security 20
     ]);
     expect(ids[6]).toBe("start-tracker"); // issues 15
+    // публично тот же скан: CI-строк нет, порядок сохранён
+    const pubIds = recommend(t.db, scanId, { now: NOW }).map((r) => r.ruleId);
+    expect(pubIds.slice(0, 4)).toEqual(["license-missing", "readme-missing", "codeowners-missing", "contributing-missing"]);
+    expect(pubIds[4]).toBe("connect-appsec");
     // приоритеты последовательны
-    const recs = recommend(t.db, scanId, { now: NOW });
+    const recs = recommend(t.db, scanId, { mode: "own", now: NOW });
     expect(recs.map((r) => r.priority)).toEqual(recs.map((_, i) => i + 1));
   });
 

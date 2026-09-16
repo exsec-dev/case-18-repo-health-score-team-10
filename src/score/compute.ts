@@ -27,6 +27,7 @@ import {
   OLD_SHARE,
   PASS_RATE,
   PULLS_90D,
+  PUBLIC_CATEGORIES,
   README_BYTES,
   README_QUALITY_SPLIT,
   README_SPLIT,
@@ -74,6 +75,8 @@ export interface Scores {
   derived: DerivedMetrics;
   noData: string[];
   stale: string[];
+  /** без-кодовое репо (Q&A №13): file_count/loc = 0 при ok-фактах — Score 0 как данные («проекта нет»), не NULL */
+  codeEmpty: boolean;
   computedAt: string;
 }
 
@@ -158,10 +161,14 @@ export function compute(
   }
 
   const derived = deriveMetrics(ok, now);
+  // публичный режим = 4 категории (В4/Б4, Q&A №1): CI/Security не
+  // считаются вовсе — не «выброшены за no-data», а исключены режимом;
+  // перечислены в noData с объяснением (честность витрины закона 2)
+  const excluded = mode === "public";
   const categories = {
     documentation: scoreDocumentation(ok, derived),
-    cicd: scoreCicd(ok),
-    security: scoreSecurity(ok),
+    cicd: excluded ? excludedCategory("cicd") : scoreCicd(ok),
+    security: excluded ? excludedCategory("security") : scoreSecurity(ok),
     activity: scoreActivity(derived, now),
     issues: scoreIssues(ok, derived),
     code: scoreCode(derived),
@@ -169,6 +176,11 @@ export function compute(
   for (const [k, cat] of Object.entries(categories)) {
     if (staleCats.has(k)) cat.stale = true;
   }
+
+  // без-кодовое репо (Q&A №13): ok-факты говорят file_count=0/loc=0 —
+  // «проекта нет» = Score 0 как данные, не NULL и не no-data
+  const tree = ok.get("tree.stats") as { file_count?: unknown; loc?: unknown } | undefined;
+  const codeEmpty = tree !== undefined && ((typeof tree.file_count === "number" && tree.file_count === 0) || (typeof tree.loc === "number" && tree.loc === 0));
 
   let dataWeight = 0;
   let acc = 0;
@@ -184,11 +196,17 @@ export function compute(
   }
   const coverage = Math.min(1, dataWeight / 100 / COVERAGE_MODE_MAX[mode]);
   let total: number | null = null;
-  if (coverage >= COVERAGE_NULL_BELOW && dataWeight > 0) {
+  if (codeEmpty) {
+    total = 0;
+  } else if (coverage >= COVERAGE_NULL_BELOW && dataWeight > 0) {
     total = (acc / dataWeight) * 100;
-    const appsec = ok.get("appsec.findings") as { secrets_critical?: unknown } | undefined;
-    if (appsec?.secrets_critical === true) {
-      total = Math.min(total, SECRETS_CRITICAL_TOTAL_CAP);
+    // кап критичных secrets — только own-режим: публично Security исключена
+    // и её факты не влияют на публичный total (инвариант изоляции В4/Б4)
+    if (mode === "own") {
+      const appsec = ok.get("appsec.findings") as { secrets_critical?: unknown } | undefined;
+      if (appsec?.secrets_critical === true) {
+        total = Math.min(total, SECRETS_CRITICAL_TOTAL_CAP);
+      }
     }
   }
 
@@ -203,8 +221,18 @@ export function compute(
     derived,
     noData,
     stale,
+    codeEmpty,
     computedAt: now.toISOString(),
   };
+}
+
+/** Исключённая режимом категория (публичный рейтинг, В4/Б4). */
+function excludedCategory(key: "cicd" | "security"): CategoryScore {
+  const who =
+    key === "security"
+      ? "Security считается в режиме своего репо (доступ к AppSec даёт PAT, не публичность)"
+      : "CI/CD считается в режиме своего репо (статусы прогонов видны токену с правами)";
+  return { score: null, no_data: `excluded from public rating — ${who}`, submetrics: {} };
 }
 
 // ---------- категории ----------
@@ -427,8 +455,8 @@ function scoreCode(derived: DerivedMetrics): CategoryScore {
 export function writeScores(db: Database, s: Scores): void {
   db.query(
     `INSERT OR REPLACE INTO scores
-       (scan_id, model_version, repo_id, mode, total, coverage, categories, no_data, stale, computed_at, derived)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (scan_id, model_version, repo_id, mode, total, coverage, categories, no_data, stale, computed_at, derived, code_empty)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     s.scanId,
     s.modelVersion,
@@ -441,5 +469,6 @@ export function writeScores(db: Database, s: Scores): void {
     JSON.stringify(s.stale),
     s.computedAt,
     JSON.stringify(s.derived),
+    s.codeEmpty ? 1 : 0,
   );
 }
