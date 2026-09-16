@@ -1,7 +1,8 @@
-// scan-runner.test.ts — Б4: конвейер scan-job на фейк-каналах (git/REST
-// инъектятся целиком — сетевых вызовов нет): статусы ok/partial/bad,
-// факты со scan_id/status/source/collected_at, повторный скан = новый
-// scan_id, job-строка одна на репо (UNIQUE).
+// scan-runner.test.ts — Б4+В4/Б3: конвейер scan-job на фейк-каналах
+// (git/REST инъектятся целиком — сетевых вызовов нет): статусы
+// ok/partial/bad, факты со scan_id/status/source/collected_at,
+// повторный скан = новый scan_id; очередь (jobs) с В4/Б3 отделена от
+// runScan и живёт в scheduler (enqueued отдельно, без UNIQUE(repo_id)).
 import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -37,7 +38,7 @@ const restOk = (slug: string): RestCollectResult => ({
     okFact("issues.stats", { open: 1, closed: 2 }, "rest:issues"),
     okFact("cicd.runs", { last_status: null }, "rest:cicd"),
   ],
-  repoMeta: { org: "o", repo: slug.split("/")[1] ?? "", title: "T", language: "Go", likes: 25, lastActivityAt: "2026-09-15T00:00:00Z", forks: 3, reactionCounts: [{ type: "positive_high", count: 5 }] },
+  repoMeta: { org: "o", repo: slug.split("/")[1] ?? "", title: "T", language: "Go", likes: 25, lastActivityAt: "2026-09-15T00:00:00Z", forks: 3, reactionCounts: [{ type: "positive_high", count: 5 }], visibility: "public" },
   channelErrors: [],
 });
 const rest403Runs = (slug: string): RestCollectResult => ({
@@ -88,9 +89,9 @@ describe("runScan: статусы и три-state", () => {
     expect(repo["title"]).toBe("T");
     expect(repo["likes"]).toBe(25);
     expect(repo["language"]).toBe("Go");
-    // job-строка done
-    const job = db.query("SELECT * FROM jobs WHERE repo_id = ?").get(r.repoId) as Record<string, unknown>;
-    expect(job["status"]).toBe("done");
+    // В4/Б3: очередь отделена от runScan (jobs — scheduler/enqueueScan)
+    const jobs = db.query("SELECT COUNT(*) c FROM jobs WHERE repo_id = ?").get(r.repoId) as { c: number };
+    expect(jobs.c).toBe(0);
     // scan закрыт временем
     const scan = db.query("SELECT * FROM scans WHERE id = ?").get(r.scanId) as Record<string, unknown>;
     expect(scan["status"]).toBe("ok");
@@ -112,11 +113,10 @@ describe("runScan: статусы и три-state", () => {
     expect(JSON.parse(String(runs["value"])).reason).toBe("access");
   });
 
-  test("git fatal + весь REST bad-channel → bad; job failed", async () => {
+  test("git fatal + весь REST bad-channel → bad; repo-сигнал неизвестен", async () => {
     const r = await runScan(deps(gitLimits, restDead), "o/doom");
     expect(r.status).toBe("bad");
-    const job = db.query("SELECT status FROM jobs WHERE repo_id = ?").get(r.repoId) as Record<string, unknown>;
-    expect(job["status"]).toBe("failed");
+    expect(r.repoAccess).toBe("unknown"); // REST мёртв — репо-GET не состоялся
   });
 
   test("REST нет токена → rest no-data, git ok → partial", async () => {
@@ -139,9 +139,9 @@ describe("runScan: статусы и три-state", () => {
     const n2 = db.query("SELECT COUNT(*) c FROM facts WHERE scan_id = ?").get(r2.scanId) as { c: number };
     expect(n1.c).toBe(4);
     expect(n2.c).toBe(4);
-    // одна job-строка на репо
+    // В4/Б3: очередь без UNIQUE — строки создаются enqueueScan'ом, не сканом
     const jobs = db.query("SELECT COUNT(*) c FROM jobs WHERE repo_id = ?").get(r1.repoId) as { c: number };
-    expect(jobs.c).toBe(1);
+    expect(jobs.c).toBe(0);
   });
 
   test("fatal воркера ловится: канал кидает — скан bad, не бросает", async () => {

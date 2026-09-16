@@ -1,0 +1,318 @@
+// scheduler.ts — периодика В4/Б3: claim-loop по jobs, ночной обход
+// каталога (источник диффа last_updated и эвикции), форс-полный тогл,
+// эвикция ТОЛЬКО по repo-уровневым сигналам (Q&A №16). Расписание =
+// конфигурация (ТЗ §6): интервал Config.scheduler.intervalMs (сутки
+// по умолчанию), форс SCHEDULER_FULL_RESCAN, потолок страниц
+// Config.scan.catalog.maxPages. Инкрементальность: в очередь ставятся
+// только изменившиеся (last_updated ≠ repos.last_activity_at) и новые
+// репо — «умный рескан» 17.09. NULL-lease матчится (SQLite NULL<now
+// ложно — потому IS NULL OR). Воркер-луп живёт в процессе сервера,
+// одну job за раз (tmp-диск стенда конечен); лиз истёк → job снова
+// доступен (упавший воркер не блокирует очередь).
+import type { Database } from "bun:sqlite";
+import { enumerateCatalog, type CatalogResult } from "../collectors/catalog";
+import type { ScClient } from "../collectors/http";
+import { upsertRepo, runScan, scanCloneLimitsOf, type ScanResult } from "./runner";
+import { getPat } from "../auth/pat";
+import { readUserScanSettings, effectiveCloneLimits } from "../auth/settings";
+import { makeScClient } from "../collectors/http";
+import { makeAppsecClient } from "../collectors/appsec";
+import type { Config } from "../config";
+
+export interface ClaimedJob {
+  id: number;
+  repoId: number;
+  slug: string;
+  mode: "public" | "own";
+  userId: number | null;
+  triggerKind: string;
+}
+
+/** Постановка скана в очередь (новая строка; jobs без UNIQUE с v1.4). */
+export function enqueueScan(
+  db: Database,
+  repoId: number,
+  opts: { mode?: "public" | "own"; userId?: number | null; triggerKind?: "periodic" | "user" } = {},
+): number {
+  const r = db
+    .query(
+      `INSERT INTO jobs (repo_id, status, mode, user_id, trigger_kind) VALUES (?, 'queued', ?, ?, ?)`,
+    )
+    .run(repoId, opts.mode ?? "public", opts.userId ?? null, opts.triggerKind ?? "periodic");
+  return Number(r.lastInsertRowid);
+}
+
+/**
+ * Заявить одну job: атомарный UPDATE … WHERE (lease_until IS NULL OR
+ * lease_until < now) — NULL-lease обязан матчиться (контракт плана);
+ * истёкший лиз running-строки тоже матчится (упавший воркер).
+ * Юзерские заявки — вперёд периодических (UX: свой репо не ждёт ночи).
+ */
+export function claimNext(db: Database, now = new Date(), leaseMs = 30 * 60_000): ClaimedJob | null {
+  const nowIso = now.toISOString();
+  const leaseIso = new Date(now.getTime() + leaseMs).toISOString();
+  const claimed = db
+    .query(
+      `UPDATE jobs SET status = 'running', claimed_at = ?, lease_until = ?
+       WHERE id = (
+         SELECT id FROM jobs
+         WHERE (lease_until IS NULL OR lease_until < ?)
+           AND status IN ('queued', 'running')
+         ORDER BY CASE trigger_kind WHEN 'user' THEN 0 ELSE 1 END, id
+         LIMIT 1
+       )
+       RETURNING id, repo_id, mode, user_id, trigger_kind`,
+    )
+    .get(nowIso, leaseIso, nowIso) as { id: number; repo_id: number; mode: string; user_id: number | null; trigger_kind: string } | null;
+  if (!claimed) return null;
+  const repo = db.query("SELECT org_slug, repo_slug FROM repos WHERE id = ?").get(claimed.repo_id) as
+    | { org_slug: string; repo_slug: string }
+    | null;
+  if (!repo) return null;
+  return {
+    id: claimed.id,
+    repoId: claimed.repo_id,
+    slug: `${repo.org_slug}/${repo.repo_slug}`,
+    mode: claimed.mode === "own" ? "own" : "public",
+    userId: claimed.user_id,
+    triggerKind: claimed.trigger_kind,
+  };
+}
+
+/** Завершение job (по id, не по repo — очередь больше одной строки на репо). */
+export function finishJob(db: Database, jobId: number, status: "done" | "failed"): void {
+  db.query("UPDATE jobs SET status = ?, lease_until = NULL WHERE id = ?").run(status, jobId);
+}
+
+// ---------- эвикция (Q&A №16) ----------
+
+/** repo-уровневый сигнал (repo-GET 404/403, исчезновение из каталога). */
+export function evictRepo(db: Database, repoId: number, reason: string): void {
+  db.query("UPDATE repos SET rating_active = 0, evict_reason = ? WHERE id = ?").run(reason, repoId);
+}
+
+/** Возврат флагом (закон 6: не удаляем) — репо снова в рейтинге. */
+export function returnRepo(db: Database, repoId: number): void {
+  db.query("UPDATE repos SET rating_active = 1, evict_reason = NULL WHERE id = ?").run(repoId);
+}
+
+// ---------- ночной обход каталога ----------
+
+export interface NightlyEnqueued {
+  slug: string;
+  reason: "new" | "changed" | "forced" | "retry-failed";
+}
+
+export interface NightlyResult {
+  ok: boolean;
+  pages: number;
+  entriesSeen: number;
+  enqueued: NightlyEnqueued[];
+  evicted: string[];
+  returned: string[];
+  /** каталог дочитан до конца? если нет — эвикция НЕ выполнялась (неполный каталог не доказывает исчезновение) */
+  catalogComplete: boolean;
+  error?: string;
+}
+
+export interface NightlyOptions {
+  maxPages?: number;
+  fullRescan?: boolean;
+  now?: Date;
+}
+
+/**
+ * Полный обход каталога: дифф last_updated → очередь изменившихся,
+ * постановка новых, эвикция исчезнувших (только public-строки нашей
+ * таблицы; приватные own-репо в публичном каталоге и не ждутся).
+ * Второй прогон при неизменном каталоге не ставит в очередь ничего —
+ * приёмочный инвариант Б6.
+ */
+export async function nightlyCatalog(db: Database, client: ScClient, opts: NightlyOptions = {}): Promise<NightlyResult> {
+  const fullRescan = opts.fullRescan ?? false;
+  const now = opts.now ?? new Date();
+  const catalog: CatalogResult = await enumerateCatalog(client, { maxPages: opts.maxPages });
+  if (!catalog.ok && catalog.pages === 0) {
+    return { ok: false, pages: 0, entriesSeen: 0, enqueued: [], evicted: [], returned: [], catalogComplete: false, error: catalog.error?.detail ?? "catalog failed" };
+  }
+
+  const enqueued: NightlyEnqueued[] = [];
+  const seenRepoIds = new Set<number>();
+  const seenSlugs = new Set<string>();
+
+  for (const entry of catalog.entries) {
+    const slug = `${entry.org}/${entry.repo}`;
+    seenSlugs.add(slug);
+    const existing = db.query("SELECT id, last_activity_at FROM repos WHERE org_slug = ? AND repo_slug = ?").get(entry.org, entry.repo) as
+      | { id: number; last_activity_at: string | null }
+      | null;
+    // upsert мета каталога (language/likes/дата — свежие всегда)
+    const repoId = upsertRepo(db, entry.org, entry.repo, {
+      title: entry.name,
+      language: entry.language,
+      likes: entry.likes,
+      lastActivityAt: entry.last_updated,
+      visibility: entry.visibility ?? "public",
+    });
+    seenRepoIds.add(repoId);
+    if (!existing) {
+      enqueueScan(db, repoId, { mode: "public", triggerKind: "periodic" });
+      enqueued.push({ slug, reason: "new" });
+      continue;
+    }
+    if (existing.last_activity_at === null && entry.last_updated !== null) {
+      // строка была без даты (ручной ввод слага) — теперь дата есть: это «изменившийся»
+      enqueueScan(db, repoId, { mode: "public", triggerKind: "periodic" });
+      enqueued.push({ slug, reason: "changed" });
+      continue;
+    }
+    const changed = entry.last_updated !== existing.last_activity_at;
+    const lastJob = db
+      .query("SELECT status FROM jobs WHERE repo_id = ? ORDER BY id DESC LIMIT 1")
+      .get(repoId) as { status: string } | null;
+    const retryFailed = lastJob?.status === "failed";
+    if (fullRescan || changed || retryFailed) {
+      enqueueScan(db, repoId, { mode: "public", triggerKind: "periodic" });
+      enqueued.push({ slug, reason: fullRescan ? "forced" : changed ? "changed" : "retry-failed" });
+    }
+  }
+
+  // возврат ранее эвиктированных, вернувшихся в каталог
+  const returned: string[] = [];
+  for (const id of seenRepoIds) {
+    const row = db.query("SELECT rating_active, org_slug, repo_slug FROM repos WHERE id = ?").get(id) as
+      | { rating_active: number; org_slug: string; repo_slug: string }
+      | null;
+    if (row && row.rating_active === 0) {
+      returnRepo(db, id);
+      returned.push(`${row.org_slug}/${row.repo_slug}`);
+    }
+  }
+
+  // эвикция: только полным каталогом и только public-строки
+  const evicted: string[] = [];
+  if (!catalog.truncated) {
+    const candidates = db
+      .query("SELECT id, org_slug, repo_slug FROM repos WHERE rating_active = 1 AND visibility = 'public'")
+      .all() as { id: number; org_slug: string; repo_slug: string }[];
+    for (const row of candidates) {
+      if (!seenSlugs.has(`${row.org_slug}/${row.repo_slug}`)) {
+        evictRepo(db, row.id, "disappeared from public catalog");
+        evicted.push(`${row.org_slug}/${row.repo_slug}`);
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    pages: catalog.pages,
+    entriesSeen: catalog.entries.length,
+    enqueued,
+    evicted,
+    returned,
+    catalogComplete: !catalog.truncated,
+  };
+}
+
+// ---------- исполнение заявленной job ----------
+
+export interface WorkerDeps {
+  db: Database;
+  config: Config;
+  /** серверный REST-клиент (публичный режим) */
+  scClient: ScClient | null;
+  /** швы для тестов */
+  runScan?: typeof runScan;
+  getPat?: typeof getPat;
+}
+
+/**
+ * Исполнить заявленную job: own → PAT юзера + его настройки бюджетов,
+ * public → серверный токен. repo-сигнал 'gone' (repo-GET 404/403) →
+ * эвикция; канальные 403 cicd/runs — НЕ эвикция (обрабатываются в
+ * фактах как no-data access).
+ */
+export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<ScanResult | "gone"> {
+  const pat =
+    job.mode === "own" && job.userId !== null && deps.config.auth.appSecret
+      ? (deps.getPat ?? getPat)(deps.db, deps.config.auth.appSecret, job.userId)
+      : null;
+  // own-режим: бюджеты юзера — третий слой конфига (решение 15.09)
+  const limits =
+    job.mode === "own" && job.userId !== null
+      ? effectiveCloneLimits(deps.config.scan, readUserScanSettings(deps.db, job.userId))
+      : scanCloneLimitsOf(deps.config.scan);
+  const scan = (deps.runScan ?? runScan)(
+    {
+      db: deps.db,
+      scClient: deps.scClient,
+      cloneLimits: limits,
+      ownScClient:
+        job.mode === "own" && pat
+          ? makeScClient({ token: pat, minIntervalMs: deps.config.scan.rest.minIntervalMs, maxRequests: deps.config.scan.rest.budget })
+          : undefined,
+      appsecClient: (p: string) => makeAppsecClient({ token: p, minIntervalMs: deps.config.scan.rest.appsecMinIntervalMs }),
+      appsecMinIntervalMs: deps.config.scan.rest.appsecMinIntervalMs,
+    },
+    job.slug,
+    { mode: job.mode, userToken: pat, trigger: job.triggerKind },
+  );
+  const result = await scan;
+  if (result.repoAccess === "gone") {
+    evictRepo(deps.db, job.repoId, `repo GET 404/403 at scan ${result.scanId}`);
+    return "gone";
+  }
+  return result;
+}
+
+// ---------- циклы процесса сервера ----------
+
+/** Воркер-луп: одна job за раз; ошибки не останавливают цикл. */
+export function startWorkerLoop(deps: WorkerDeps, pollMs = 5000): () => void {
+  let busy = false;
+  const timer = setInterval(async () => {
+    if (busy) return;
+    const job = claimNext(deps.db, new Date(), deps.config.scheduler.leaseMs);
+    if (!job) return;
+    busy = true;
+    try {
+      const result = await processJob(deps, job);
+      finishJob(deps.db, job.id, result === "gone" || result.status === "bad" ? "failed" : "done");
+    } catch (e) {
+      console.error(`[worker] job ${job.id} (${job.slug}) crashed: ${String((e as Error).message).slice(0, 200)}`);
+      finishJob(deps.db, job.id, "failed");
+    } finally {
+      busy = false;
+    }
+  }, pollMs);
+  return () => clearInterval(timer);
+}
+
+/**
+ * Планировщик ночного обхода: интервал из конфига (сутки по умолчанию),
+// первый тик — сразу (стенд поднимается с пустой очередью). Расписание
+// объясняется конфигурацией (ТЗ §6) — см. отчёт воркера.
+ */
+export function startScheduler(db: Database, client: ScClient | null, config: Config): () => void {
+  const run = async () => {
+    if (!client) return; // без серверного токена каталог не читается
+    try {
+      const result = await nightlyCatalog(db, client, {
+        maxPages: config.scan.catalog.maxPages,
+        fullRescan: config.scheduler.fullRescan,
+      });
+      if (!result.ok) {
+        console.error(`[scheduler] catalog walk failed: ${result.error ?? "unknown"}`);
+        return;
+      }
+      console.log(
+        `[scheduler] catalog: ${result.pages} pages, ${result.entriesSeen} repos; queued ${result.enqueued.length} (${result.enqueued.filter((e) => e.reason === "new").length} new), evicted ${result.evicted.length}, returned ${result.returned.length}${result.catalogComplete ? "" : "; catalog INCOMPLETE - eviction skipped"}`,
+      );
+    } catch (e) {
+      console.error(`[scheduler] crashed: ${String((e as Error).message).slice(0, 200)}`);
+    }
+  };
+  void run();
+  const timer = setInterval(() => void run(), config.scheduler.intervalMs);
+  return () => clearInterval(timer);
+}

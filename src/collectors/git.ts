@@ -163,6 +163,11 @@ export async function cloneWithDegrade(url: string, tmpDir: string = tmpdir(), l
   if (first.ok || first.reason === "git") {
     return first.ok ? { ...first, historyTruncatedSince: null } : first;
   }
+  // тогл конфига (В4): ярус выключен — деградационной попытки нет,
+  // пробой первой отдаётся наверх как есть
+  if (limits.degrade.enabled === false) {
+    return { ...first, detail: `full clone failed (${first.reason}: ${first.detail}); degrade tier disabled by config` };
+  }
   const second = await cloneBare(
     url,
     tmpDir,

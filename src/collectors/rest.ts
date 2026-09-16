@@ -187,6 +187,8 @@ export interface RepoMeta {
   forks: number | null;
   /** rating.reaction_counts[{type,count}] — count строка, нормализуем (дисплей) */
   reactionCounts: { type: string; count: number }[] | null;
+  /** visibility из repo-GET (public|private) — изоляция рейтинга (В4/Б4) */
+  visibility: string | null;
 }
 
 function repoMetaFrom(slug: string, body: Record<string, unknown>): RepoMeta {
@@ -221,6 +223,7 @@ function repoMetaFrom(slug: string, body: Record<string, unknown>): RepoMeta {
     lastActivityAt: asString(body["last_updated"]),
     forks: forks !== null && Number.isFinite(forks) ? forks : null,
     reactionCounts: reactionCounts && reactionCounts.length > 0 ? reactionCounts : null,
+    visibility: asString(body["visibility"]),
   };
 }
 

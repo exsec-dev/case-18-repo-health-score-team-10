@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS facts (
 ${SCORES_DDL}
 CREATE TABLE IF NOT EXISTS jobs (
   id INTEGER PRIMARY KEY,
-  repo_id INTEGER NOT NULL UNIQUE REFERENCES repos(id),
+  repo_id INTEGER NOT NULL REFERENCES repos(id),
   status TEXT NOT NULL DEFAULT 'queued', -- queued|running|done|failed
   claimed_at TEXT,
   lease_until TEXT,             -- механика claim-loop (В4): NULL-lease матчится
@@ -115,6 +115,7 @@ CREATE TABLE IF NOT EXISTS user_settings (
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_unclaimed ON jobs(claimed_at) WHERE claimed_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_jobs_claim ON jobs(status, id);
 CREATE INDEX IF NOT EXISTS idx_repos_language ON repos(language);
 CREATE INDEX IF NOT EXISTS idx_scores_repo ON scores(repo_id, model_version);
 `;
@@ -156,9 +157,20 @@ export function openDb(config: Config): Database {
   // v1.3 → v1.4 (В4): изоляция own/public и эвикция
   ensureColumn(db, "repos", "rating_active", "INTEGER NOT NULL DEFAULT 1");
   ensureColumn(db, "repos", "visibility", "TEXT NOT NULL DEFAULT 'public'");
+  ensureColumn(db, "repos", "evict_reason", "TEXT");
   ensureColumn(db, "jobs", "mode", "TEXT NOT NULL DEFAULT 'public'");
   ensureColumn(db, "jobs", "user_id", "INTEGER");
   ensureColumn(db, "jobs", "trigger_kind", "TEXT NOT NULL DEFAULT 'periodic'");
   ensureColumn(db, "scores", "code_empty", "INTEGER");
+  // v1.4: jobs UNIQUE(repo_id) (В1) мешает очереди — свой и публичный
+  // скан одного репо стоят одновременно; очередь пересоздаём без UNIQUE
+  // (строки jobs транзитны, данные не теряются: scans/scores независимы)
+  const jobsDdl = (db.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jobs'").get() as { sql: string } | null)?.sql ?? "";
+  if (jobsDdl.includes("UNIQUE")) {
+    db.exec("ALTER TABLE jobs RENAME TO jobs_v1_rebuild");
+    db.exec(SCHEMA); // создаёт новую jobs без UNIQUE + индексы
+    db.exec("INSERT INTO jobs (repo_id, status, claimed_at, lease_until) SELECT repo_id, status, claimed_at, lease_until FROM jobs_v1_rebuild");
+    db.exec("DROP TABLE jobs_v1_rebuild");
+  }
   return db;
 }

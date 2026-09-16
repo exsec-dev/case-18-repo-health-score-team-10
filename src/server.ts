@@ -10,6 +10,8 @@ import { openDb } from "./db";
 import { getMeta, getRepoCard, listRepos, parseReposQuery } from "./api/repos";
 import { listMyRepos } from "./api/me";
 import { renderRepoReport } from "./report/markdown";
+import { upsertRepo } from "./jobs/runner";
+import { enqueueScan, startScheduler, startWorkerLoop } from "./jobs/scheduler";
 import {
   clearSessionCookieHeader,
   createSession,
@@ -200,6 +202,23 @@ const server = Bun.serve({
       }
       return Response.json({ username: result.username, entries: result.entries });
     },
+    "/api/me/repos/:org/:repo/scan": async (req) => {
+      const user = sessionOf(req);
+      if (!user) return unauthorized();
+      if (req.method !== "POST") {
+        return Response.json({ error: { code: "bad_query", message: "ожидался POST" } }, { status: 405 });
+      }
+      if (!userClient(user.userId)) {
+        return Response.json({ error: { code: "no_pat", message: "сначала сохраните PAT SourceCraft" } }, { status: 409 });
+      }
+      const { org, repo } = req.params;
+      if (!/^[a-z0-9_.-]+$/i.test(org ?? "") || !/^[a-z0-9_.-]+$/i.test(repo ?? "")) {
+        return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
+      }
+      const repoId = upsertRepo(db, org, repo);
+      const jobId = enqueueScan(db, repoId, { mode: "own", userId: user.userId, triggerKind: "user" });
+      return Response.json({ queued: true, jobId, slug: `${org}/${repo}` }, { status: 202 });
+    },
     // неизвестный /api/* обязан остаться JSON-404, а не отдать HTML
     "/api/*": () => notFound("неизвестный endpoint"),
     // catch-all фронтенда: маршруты /repo/{org}/{repo} живут в History API,
@@ -211,6 +230,14 @@ const server = Bun.serve({
   },
 });
 
+// --- периодика (В4/Б3): воркер очереди + ночной обход каталога ---
+const serverScClient = config.sourcecraftToken
+  ? makeScClient({ token: config.sourcecraftToken, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: config.scan.rest.budget })
+  : null;
+startWorkerLoop({ db, config, scClient: serverScClient });
+startScheduler(db, serverScClient, config);
+
 console.log(`repo-health слушает http://127.0.0.1:${server.port}`);
 console.log(`  llm: ${config.llm.provider} (main=${config.llm.mainModel}, side=${config.llm.sideModel})`);
 console.log(`  sourcecraft token: ${config.sourcecraftToken ? "есть" : "НЕТ (зонд 401)"}`);
+console.log(`  scheduler: интервал ${Math.round(config.scheduler.intervalMs / 60000)} мин, форс-полный ${config.scheduler.fullRescan ? "ВКЛ" : "выкл"}`);
