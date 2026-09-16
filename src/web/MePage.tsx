@@ -2,7 +2,7 @@
 // Я ID (UX), PAT SourceCraft (права на данные). Секции: PAT-окно
 // github-style (вставка → живая проверка → зашифрованное хранение,
 // замена/удаление), «мои репозитории» (PAT + ручной ввод слага —
-// спискового юзерского эндпоинта в доках нет), запуск own-анализа с
+// спискового юзерского эндпоинта в доках нет), запуск анализа с
 // очередью и опросом статуса, настройки бюджетов скана (тогл-дефолт,
 // значения, «снять лимит» — решение 15.09; секция расширяема под
 // LLM-оп-ин В5). Токен НИКОГДА не возвращается API и не логируется.
@@ -19,7 +19,7 @@ import {
   type AsyncState,
 } from "./api";
 import { fmtDateTime, fmtScore } from "./format";
-import { linkProps, meRepoHref } from "./router";
+import { linkProps, repoHref } from "./router";
 
 const SLUG_RE = /^[a-z0-9_.-]+\/[a-z0-9_.-]+$/i;
 
@@ -92,8 +92,9 @@ function LoginOffer() {
           Войти через Я ID
         </Button>
         <Text color="secondary">
-          Публичный рейтинг работает и без входа — ссылка «Рейтинг» в шапке. Security и CI/CD считаются только
-          здесь: в общий рейтинг они не вкладываются (требование организаторов).
+          Публичный рейтинг работает и без входа — ссылка «Рейтинг» в шапке. Блоки CI/CD и Security на карточке
+          репозитория видны только тем, у кого есть к ним доступ на SourceCraft; в общий рейтинг они не
+          вкладываются (требование организаторов).
         </Text>
       </Flex>
     </Card>
@@ -223,9 +224,7 @@ function MyReposSection() {
       let since = 0;
       try {
         const [org, repo] = slug.split("/");
-        const card = await fetchJson<RepoCard>(
-          `/api/me/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`,
-        );
+        const card = await fetchJson<RepoCard>(`/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`);
         since = card.scan?.id ?? 0;
       } catch {
         /* карточки может ещё не быть — значит since = 0 */
@@ -254,9 +253,7 @@ function MyReposSection() {
         }
         try {
           const [org, repo] = slug.split("/");
-          const card = await fetchJson<RepoCard>(
-            `/api/me/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`,
-          );
+          const card = await fetchJson<RepoCard>(`/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`);
           if (card.scan && card.scan.id > job.sinceScanId) {
             if (card.scan.finishedAt && card.scan.status !== "running") {
               setJobs((prev) => {
@@ -312,7 +309,7 @@ function MyReposSection() {
                 title={entry.title}
                 language={entry.language}
                 lastActivityAt={entry.lastActivityAt}
-                ownScore={entry.score}
+                score={entry.score}
                 lastScanAt={entry.lastScanAt}
                 job={job ?? null}
                 onScan={() => void startScan(`${entry.org}/${entry.repo}`)}
@@ -356,7 +353,7 @@ function RepoRow(props: {
   title: string | null;
   language: string | null;
   lastActivityAt: string | null;
-  ownScore: number | null;
+  score: number | null;
   lastScanAt: string | null;
   job: ScanJobState | null;
   onScan: () => void;
@@ -365,7 +362,7 @@ function RepoRow(props: {
   return (
     <Flex gap={4} alignItems="center" wrap style={{ borderTop: "1px solid var(--g-color-line-generic)", paddingTop: "var(--g-spacing-3)" }}>
       <Flex direction="column" gap={1} style={{ minWidth: 220, flex: 1 }}>
-        <Link {...linkProps(meRepoHref(org, repo))}>
+        <Link {...linkProps(repoHref(org, repo))}>
           {org}/{repo}
         </Link>
         <Text color="secondary">
@@ -376,16 +373,16 @@ function RepoRow(props: {
       </Flex>
       {job ? (
         <Label theme="info">{job.phase === "queued" ? "в очереди…" : "сканируется…"}</Label>
-      ) : props.ownScore !== null ? (
+      ) : props.score !== null ? (
         <Flex gap={2} alignItems="center">
-          <Text variant="subheader-2">{fmtScore(props.ownScore)}</Text>
-          <Text color="secondary">/ 100 own{props.lastScanAt ? ` · ${fmtDateTime(props.lastScanAt)}` : ""}</Text>
+          <Text variant="subheader-2">{fmtScore(props.score)}</Text>
+          <Text color="secondary">/ 100 в рейтинге{props.lastScanAt ? ` · ${fmtDateTime(props.lastScanAt)}` : ""}</Text>
         </Flex>
       ) : (
         <Label theme="unknown">ещё не анализировали</Label>
       )}
-      <Button size="m" view={props.ownScore !== null ? "outlined" : "action"} onClick={props.onScan} disabled={job !== null}>
-        {props.ownScore !== null ? "Пересканировать" : "Анализировать"}
+      <Button size="m" view={props.score !== null ? "outlined" : "action"} onClick={props.onScan} disabled={job !== null}>
+        {props.score !== null ? "Обновить анализ" : "Анализировать"}
       </Button>
     </Flex>
   );

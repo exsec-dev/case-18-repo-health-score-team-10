@@ -10,7 +10,7 @@ import { useJson } from "./api";
 import { MePage } from "./MePage";
 import { Rating } from "./Rating";
 import { RepoPage } from "./RepoPage";
-import { linkProps, meRepoHref, useRoute } from "./router";
+import { linkProps, useRoute } from "./router";
 
 export function App() {
   const route = useRoute();
@@ -25,23 +25,21 @@ export function App() {
           <Text variant="subheader-3">SourceCraft Repo Health</Text>
         </Link>
         <Link {...linkProps("/me")}>
-          <Text color={route.kind === "me" || route.kind === "me-repo" ? "primary" : "secondary"}>
+          <Text color={route.kind === "me" ? "primary" : "secondary"}>
             {me.state.kind === "ok" && me.state.data.login !== null ? `Мой кабинет (${me.state.data.login})` : "Мой кабинет"}
           </Text>
         </Link>
         {route.kind === "repo" && <Text color="secondary">{route.org}/{route.repo}</Text>}
-        {route.kind === "me-repo" && <Text color="secondary">{route.org}/{route.repo} — свой репо</Text>}
       </Flex>
 
       {route.kind === "rating" && <Rating search={route.search} meta={metaData} />}
       {route.kind === "repo" && <RepoPage org={route.org} repo={route.repo} meta={metaData} />}
       {route.kind === "me" && <MePage />}
-      {route.kind === "me-repo" && <RepoPage org={route.org} repo={route.repo} meta={metaData} own />}
       {route.kind === "not-found" && (
         <Alert
           theme="warning"
           title="Страница не найдена"
-          message={`Адрес ${route.path} не соответствует ни одному экрану. Рейтинг живёт на «/», карточка — на «/repo/{org}/{repo}», свой репо — на «${meRepoHref("org", "repo")}».`}
+          message={`Адрес ${route.path} не соответствует ни одному экрану. Рейтинг живёт на «/», карточка репозитория — на «/repo/{org}/{repo}», кабинет — на «/me».`}
         />
       )}
     </Flex>

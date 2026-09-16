@@ -1,16 +1,20 @@
-// RepoPage.tsx — карточка репозитория (план §5): Score, шесть категорий
-// с раскрытием submetrics, маркеры и рекомендации с доказательствами.
+// RepoPage.tsx — единая карточка репозитория (план §5 В3 + К2 В4.1):
+// Score в рейтинге и полный Score, шесть категорий с раскрытием
+// submetrics, маркеры и рекомендации с доказательствами. Состав ответа
+// собирает сервер по доступу зрителя: закрытые ему блоки CI/Security
+// приходят без чисел и показываются заглушкой по причине доступа.
 // Главное правило экрана — трекер-закон в UI: ни одной фразы без факта
 // либо без честного объяснения, почему факта нет.
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Alert, Button, Card, Disclosure, Flex, Label, Link, Loader, Progress, Text } from "@gravity-ui/uikit";
 import type { CardCategory } from "../api/repos";
-import type { MetaResponse, RepoCard } from "./api";
-import { useJson } from "./api";
+import type { MeResponse, MetaResponse, RepoCard } from "./api";
+import { fetchJson, mutateJson, useJson } from "./api";
 import {
   NO_DATA,
   NO_SCORE,
   SECURITY_PUBLIC_NOTE,
+  accessLockText,
   fmtCoverage,
   fmtDate,
   fmtDateTime,
@@ -27,11 +31,11 @@ type Category = CardCategory;
 type Evidence = Card["evidence"][number];
 type Recommendation = Card["recommendations"][number];
 
-export function RepoPage({ org, repo, meta, own = false }: { org: string; repo: string; meta: MetaResponse | null; own?: boolean }) {
-  // own-режим (В4/Б5): карточка своего репо — 6 категорий, Security с
-  // фактами AppSec, CI-раны; адрес отдельный, публичный скор не трогается
-  const base = own ? `/api/me/repos` : `/api/repos`;
-  const { state, reload } = useJson<Card>(`${base}/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`);
+export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta: MetaResponse | null }) {
+  const cardUrl = `/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`;
+  const { state, reload } = useJson<Card>(cardUrl);
+  const me = useJson<MeResponse>("/api/me");
+  const canRefresh = me.state.kind === "ok" && me.state.data.login !== null && me.state.data.hasPat;
 
   if (state.kind === "loading") {
     return (
@@ -43,23 +47,18 @@ export function RepoPage({ org, repo, meta, own = false }: { org: string; repo: 
   }
   if (state.kind === "error") {
     return (
-      <Alert
-        theme={own ? "normal" : "danger"}
-        title={own ? `Свой репозиторий ${org}/${repo} ещё не анализировался` : `Не удалось открыть ${org}/${repo}`}
-        message={
-          own
-            ? "Own-оценка появляется после первого анализа из «Моего кабинета»: там же вход Я ID и окно PAT."
-            : state.message
-        }
-        actions={own ? [] : [{ text: "Повторить", handler: reload }]}
-      />
+      <Flex direction="column" gap={4}>
+        <Alert theme="danger" title={`Не удалось открыть ${org}/${repo}`} message={state.message} actions={[{ text: "Повторить", handler: reload }]} />
+        {canRefresh && <RefreshAnalysis org={org} repo={repo} cardUrl={cardUrl} sinceScanId={0} onDone={reload} />}
+      </Flex>
     );
   }
 
   const card = state.data;
   return (
     <Flex direction="column" gap={6}>
-      <Header card={card} own={own} />
+      <Header card={card} />
+      {canRefresh && <RefreshAnalysis org={org} repo={repo} cardUrl={cardUrl} sinceScanId={card.scan?.id ?? 0} onDone={reload} />}
       {card.score === null ? (
         <Alert
           theme="normal"
@@ -69,19 +68,67 @@ export function RepoPage({ org, repo, meta, own = false }: { org: string; repo: 
       ) : (
         <>
           <ScoreBlock card={card} meta={meta} />
-          <Categories card={card} meta={meta} securityNote={own ? ownSecurityNote(card) : undefined} />
+          <Categories card={card} meta={meta} />
           <Markers card={card} />
           <Recommendations card={card} />
-          {own ? (
-            <Text color="secondary">
-              MD-выгрузка — у публичной карточки ({`${org}/${repo}`}); own-оценка живёт в интерфейсе и API
-              GET /api/me/repos/org/repo.
-            </Text>
-          ) : (
-            <ReportLink org={org} repo={repo} />
-          )}
+          <ReportLink org={org} repo={repo} />
         </>
       )}
+    </Flex>
+  );
+}
+
+/**
+ * «Обновить анализ» — зрителю с сессией и PAT (К2). Сервер проверяет доступ
+ * PAT до постановки (К3); ответ показывается как есть, опрос карточки — до
+ * появления нового завершённого скана.
+ */
+function RefreshAnalysis({ org, repo, cardUrl, sinceScanId, onDone }: { org: string; repo: string; cardUrl: string; sinceScanId: number; onDone: () => void }) {
+  const [phase, setPhase] = useState<"idle" | "sending" | "queued">("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (phase !== "queued") return;
+    const started = Date.now();
+    const timer = setInterval(async () => {
+      if (Date.now() - started > 60 * 60_000) {
+        setPhase("idle");
+        return;
+      }
+      try {
+        const card = await fetchJson<Card>(cardUrl);
+        if (card.scan && card.scan.id > sinceScanId && card.scan.finishedAt && card.scan.status !== "running") {
+          setPhase("idle");
+          onDone();
+        }
+      } catch {
+        /* карточки ещё нет — следующий тик */
+      }
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [phase, cardUrl, sinceScanId, onDone]);
+
+  async function start() {
+    setPhase("sending");
+    setError(null);
+    try {
+      await mutateJson(`/api/me/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/scan`, "POST");
+      setPhase("queued");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setPhase("idle");
+    }
+  }
+
+  return (
+    <Flex direction="column" gap={2} alignItems="flex-start">
+      <Flex gap={3} alignItems="center" wrap>
+        <Button view="outlined" size="m" onClick={start} loading={phase === "sending"} disabled={phase !== "idle"}>
+          Обновить анализ
+        </Button>
+        {phase === "queued" && <Label theme="info">анализ в очереди — карточка обновится после скана</Label>}
+      </Flex>
+      {error && <Alert theme="danger" title="Анализ не запущен" message={error} />}
     </Flex>
   );
 }
@@ -101,7 +148,7 @@ function ReportLink({ org, repo }: { org: string; repo: string }) {
   );
 }
 
-function Header({ card, own = false }: { card: Card; own?: boolean }) {
+function Header({ card }: { card: Card }) {
   const { repo: r, scan, score } = card;
   return (
     <Flex direction="column" gap={2}>
@@ -124,10 +171,15 @@ function Header({ card, own = false }: { card: Card; own?: boolean }) {
         {scan
           ? `Просканирован ${fmtDateTime(scan.finishedAt ?? scan.startedAt)}, скан #${scan.id} (${scanStatusText(scan.status)}, запуск: ${scan.trigger})`
           : "Скана ещё не было"}
-        {score ? `, модель ${score.modelVersion}, режим ${own ? "свой репо (6 категорий)" : "публичный (4 категории)"}` : ""}
+        {score ? `, модель ${score.modelVersion}` : ""}
       </Text>
     </Flex>
   );
+}
+
+/** Причина закрытия полного итога: первый закрытый канал (CI, затем Security). */
+function fullLockReason(card: Card): string | null {
+  return accessLockText(card.access.cicd) ?? accessLockText(card.access.appsec);
 }
 
 function ScoreBlock({ card, meta }: { card: Card; meta: MetaResponse | null }) {
@@ -135,42 +187,61 @@ function ScoreBlock({ card, meta }: { card: Card; meta: MetaResponse | null }) {
   const threshold = meta ? fmtCoverage(meta.coverageNullBelow) : "порога";
   return (
     <Card view="outlined" style={{ padding: "var(--g-spacing-6)" }}>
-      <Flex gap={6} alignItems="center" wrap>
-        <Flex direction="column" gap={1} alignItems="center" style={{ minWidth: 160 }}>
-          {score.totalRating === null ? (
-            <Label theme="unknown" size="m">
-              {NO_SCORE}
-            </Label>
-          ) : (
-            <>
-              <Text variant="display-3">{fmtScore(score.totalRating)}</Text>
-              <Text color="secondary">из 100</Text>
-            </>
-          )}
-        </Flex>
-        <Flex direction="column" gap={2} style={{ flex: 1, minWidth: 320 }}>
-          <Text>
-            Покрытие данными — {fmtCoverage(score.coverageRating)}
-            {meta ? ` (ниже ${threshold} Score не выставляется: без данных честного числа нет)` : ""}.
-          </Text>
-          <Progress value={Math.round(score.coverageRating * 100)} size="s" theme="info" />
-          {score.noData.length > 0 && (
-            <Flex direction="column" gap={1}>
-              <Text color="secondary">Каких данных не хватило:</Text>
-              {score.noData.map((raw) => (
-                <Text key={raw} color="secondary">
-                  • {humanNoData(raw)}
-                </Text>
-              ))}
+      <Flex direction="column" gap={4}>
+        <Flex gap={6} alignItems="flex-start" wrap>
+          <ScoreTile title="Score в рейтинге (4 категории)" total={score.totalRating} coverage={score.coverageRating} />
+          {score.fullLocked ? (
+            <Flex direction="column" gap={1} style={{ minWidth: 220, maxWidth: 360 }}>
+              <Text color="secondary">Полный Score (с CI и Security)</Text>
+              <Label theme="unknown" size="m">
+                закрыто
+              </Label>
+              <Text color="secondary">{fullLockReason(card)}</Text>
             </Flex>
+          ) : (
+            <ScoreTile title="Полный Score (с CI и Security)" total={score.totalFull} coverage={score.coverageFull ?? 0} />
           )}
         </Flex>
+        <Text color="secondary">
+          {meta ? `При покрытии данными ниже ${threshold} Score не выставляется: без данных честного числа нет. ` : ""}В рейтинге
+          сравниваются только 4 категории; CI и Security видны участникам репозитория с доступом к этим данным.
+        </Text>
+        {score.noData.length > 0 && (
+          <Flex direction="column" gap={1}>
+            <Text color="secondary">Каких данных не хватило:</Text>
+            {score.noData.map((raw) => (
+              <Text key={raw} color="secondary">
+                • {humanNoData(raw)}
+              </Text>
+            ))}
+          </Flex>
+        )}
       </Flex>
     </Card>
   );
 }
 
-function Categories({ card, meta, securityNote }: { card: Card; meta: MetaResponse | null; securityNote?: string }) {
+function ScoreTile({ title, total, coverage }: { title: string; total: number | null; coverage: number }) {
+  return (
+    <Flex direction="column" gap={1} style={{ minWidth: 220 }}>
+      <Text color="secondary">{title}</Text>
+      {total === null ? (
+        <Label theme="unknown" size="m">
+          {NO_SCORE}
+        </Label>
+      ) : (
+        <Flex gap={2} alignItems="baseline">
+          <Text variant="display-3">{fmtScore(total)}</Text>
+          <Text color="secondary">из 100</Text>
+        </Flex>
+      )}
+      <Text color="secondary">покрытие данными — {fmtCoverage(coverage)}</Text>
+      <Progress value={Math.round(coverage * 100)} size="s" theme="info" />
+    </Flex>
+  );
+}
+
+function Categories({ card, meta }: { card: Card; meta: MetaResponse | null }) {
   const score = card.score!;
   const entries = Object.entries(score.categories) as [string, Category][];
   // фактический вклад после перенормировки: вес категории делится на сумму
@@ -191,7 +262,9 @@ function Categories({ card, meta, securityNote }: { card: Card; meta: MetaRespon
                 {titleOf(key)}
               </Text>
               <div style={{ flex: 1, minWidth: 200 }}>
-                {cat.score === null ? (
+                {cat.locked !== undefined ? (
+                  <Text color="secondary">закрыто</Text>
+                ) : cat.score === null ? (
                   <Text color="secondary">{NO_DATA}</Text>
                 ) : (
                   <Progress value={Math.round(cat.score)} size="s" theme="info" />
@@ -209,13 +282,10 @@ function Categories({ card, meta, securityNote }: { card: Card; meta: MetaRespon
               {cat.stale && <Label theme="warning">факты из истории</Label>}
             </Flex>
 
-            {cat.score === null && (
+            {cat.locked !== undefined && <Text color="secondary">{accessLockText(cat.locked)}</Text>}
+            {cat.locked === undefined && cat.score === null && (
               <Text color="secondary">
-                {key === "security" && securityNote !== undefined
-                  ? securityNote
-                  : key === "security"
-                    ? SECURITY_PUBLIC_NOTE
-                    : humanNoData(`${key}: ${cat.no_data ?? ""}`)}{" "}
+                {key === "security" ? securityNote(card) : humanNoData(`${key}: ${cat.no_data ?? ""}`)}{" "}
                 Категория не снизила Score: её вес выброшен, остальные перенормированы.
               </Text>
             )}
@@ -481,18 +551,18 @@ function submetricTitle(category: string, sub: string): string {
   return SUBMETRIC_TITLES[`${category}.${sub}`] ?? sub;
 }
 
-/** Причина no-data Security в own-режиме — из факта appsec.findings (честный tri-state). */
-function ownSecurityNote(card: Card): string {
+/** Причина no-data Security при открытом канале — из факта appsec.findings (честный tri-state). */
+function securityNote(card: Card): string {
   const fact = card.evidence.find((e) => e.key === "appsec.findings");
   const reason = fact && fact.status === "no-data" ? (fact.value as { reason?: string }).reason : undefined;
   if (reason === "access") {
-    return "AppSec этого репозитория недоступен токену: право src.repositories.useAppSecScan не выдано. Это отсутствие данных, не ноль — вес категории выброшен.";
+    return "AppSec этого репозитория недоступен токену скана: право src.repositories.useAppSecScan не выдано. Это отсутствие данных, не ноль — вес категории выброшен.";
   }
   if (reason === "no-scan") {
-    return "Завершённого скана AppSec нет (не запускался или идёт right now). Это отсутствие данных, не ноль.";
+    return "Завершённого скана AppSec нет (не запускался или ещё идёт). Это отсутствие данных, не ноль.";
   }
   if (reason === "incomplete") {
     return "AppSec API ответил неполно (канал/пагинация). Ошибка — не отсутствие уязвимостей: вес категории выброшен до успешного пересбора.";
   }
-  return "AppSec-данных нет: сохраните PAT в «Моем кабинете» — Security считается только с правами вашего токена.";
+  return SECURITY_PUBLIC_NOTE;
 }

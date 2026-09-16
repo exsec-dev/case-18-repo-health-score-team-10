@@ -30,7 +30,9 @@ describe("router: разбор маршрутов", () => {
     expect(parseRoute("/repo/%E0%A4%A/x")).toEqual({ kind: "repo", org: "%E0%A4%A", repo: "x" });
   });
 
-  test("прочее — not-found", () => {
+  test("прочее — not-found; /me/repo/... удалён без перенаправления (В4.1, К2)", () => {
+    expect(parseRoute("/me")).toEqual({ kind: "me" });
+    expect(parseRoute("/me/repo/x/y")).toEqual({ kind: "not-found", path: "/me/repo/x/y" });
     expect(parseRoute("/repo/only-org")).toMatchObject({ kind: "not-found" });
     expect(parseRoute("/unknown/page")).toMatchObject({ kind: "not-found" });
   });

@@ -3,9 +3,11 @@
 // остаётся приёмке HQ), PAT = SOURCECRAFT_TOKEN как юзерский (валидный
 // PAT с правами на наш репо — инструкция промпта). Полный цикл по HTTP:
 // PUT /api/me/pat (живая проверка GET /user) → GET /api/me/repos (живой
-// /orgs/{username}/repos) → POST scan → воркер сервера исполняет own-скан
-// (git + REST на PAT + AppSec официальный API) → GET own-карточка
-// (6 категорий, Security с фактами, CI-раны, рекомендации).
+// /orgs/{username}/repos) → POST scan (предпроверка доступа PAT, К3) →
+// воркер сервера исполняет скан с PAT (git + REST на PAT + AppSec
+// официальный API) → GET единой карточки зрителем с PAT (В4.1, К2: оба
+// итога, Security с фактами, CI-раны, рекомендации) и анонимом (без
+// CI/Security).
 // Проверка «PAT не утечки»: ответы всех me-эндпоинтов не содержат
 // значения токена (только маска/отсутствие).
 // Запуск ПОСЛЕ rescan-m2 и ПОДНЯТОГО сервера: bun scripts/acceptance-own.ts <port>
@@ -68,14 +70,14 @@ async function main() {
   const t0 = Date.now();
   let since = 0;
   try {
-    const pre = await j(`/api/me/repos/${enc}`);
+    const pre = await j(`/api/repos/${enc}`);
     since = pre.json?.scan?.id ?? 0;
   } catch {}
   console.log(`ждём скан новее #${since}…`);
   let card: any = null;
   for (;;) {
     await new Promise((r) => setTimeout(r, 5000));
-    const res = await j(`/api/me/repos/${enc}`);
+    const res = await j(`/api/repos/${enc}`);
     const scanInfo = res.json?.scan;
     if (res.status === 200 && scanInfo && scanInfo.id > since && scanInfo.status !== "running" && scanInfo.finishedAt) {
       card = res.json;
@@ -90,9 +92,9 @@ async function main() {
 
   // 6) итоговая карточка: 6 категорий, Security, CI, рекомендации
   const cats = card.score.categories as Record<string, { score: number | null; no_data?: string }>;
-  console.log(`\nown-карточка ${SLUG}:`);
-  console.log(`  scan #${card.scan.id} ${card.scan.status} (${card.scan.trigger}), модель ${card.score.modelVersion}, режим ${card.score.mode}`);
-  console.log(`  Score=${card.score.total} coverage=${card.score.coverage}`);
+  console.log(`\nкарточка ${SLUG} (зритель с PAT):`);
+  console.log(`  scan #${card.scan.id} ${card.scan.status} (${card.scan.trigger}), модель ${card.score.modelVersion}, доступ ${JSON.stringify(card.access)}`);
+  console.log(`  Score в рейтинге=${card.score.totalRating} (cov ${card.score.coverageRating}); полный=${card.score.totalFull} (cov ${card.score.coverageFull})`);
   for (const key of ["documentation", "cicd", "security", "activity", "issues", "code"]) {
     const c = cats[key];
     console.log(`  ${key.padEnd(13)} ${c?.score === null || c?.score === undefined ? "no-data" : String(Math.round(c.score)).padStart(3)}${c?.no_data ? `  (${c.no_data.slice(0, 60)})` : ""}`);
@@ -108,12 +110,13 @@ async function main() {
   console.log(`  cicd.runs: ${runs?.status} ${JSON.stringify(runs?.value)}`);
   console.log(`  рекомендации (${card.recommendations.length}): ${card.recommendations.slice(0, 4).map((r: any) => r.ruleId).join(", ")}`);
 
-  // 7) изоляция: публичная карточка нашего репо не вытеснена own-скором
-  const pub = await j(`/api/repos/${enc}`);
-  console.log(`\nизоляция: публичная карточка → ${pub.status} mode=${pub.json?.score?.mode ?? "-"} total=${pub.json?.score?.total ?? "-"}`);
+  // 7) аноним: та же карточка без cookie — CI/Security закрыты (приватный репо → 404)
+  const anon = await fetch(`${BASE}/api/repos/${enc}`);
+  const anonText = await anon.text();
+  console.log(`\nаноним: карточка → ${anon.status}; утечка CI/Security: ${anonText.includes("severity_counts") || anonText.includes("runs_count") ? "ДА — ПРОВАЛ" : "нет"}`);
 
   // 8) PAT не утечки: ответы me-поверхности не содержат значения токена
-  const surfaces = ["/api/me", "/api/me/repos", "/api/me/settings", `/api/me/repos/${enc}`];
+  const surfaces = ["/api/me", "/api/me/repos", "/api/me/settings", `/api/repos/${enc}`];
   let leaked = false;
   for (const s of surfaces) {
     const res = await j(s);
@@ -122,7 +125,7 @@ async function main() {
       console.error(`УТЕЧКА: ${s} содержит PAT`);
     }
   }
-  console.log(leaked ? "ПАТ УТЕК — ПРОВАЛ" : "PAT не утечки: 4 me-поверхности чисты (значение отсутствует в ответах)");
+  console.log(leaked ? "ПАТ УТЕК — ПРОВАЛ" : "PAT не утечки: 4 поверхности чисты (значение отсутствует в ответах)");
   if (leaked) process.exit(1);
   console.log("\nown-сценарий принят");
 }

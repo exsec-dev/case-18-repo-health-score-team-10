@@ -80,6 +80,14 @@ describe("роуты единой карточки (К2)", () => {
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("not_found");
   });
 
+  test("/me/repo/x/y — фронт-бандл (роутер отдаёт not-found), а не карточка", async () => {
+    const res = await fetch(`${base}/me/repo/pub/repo`, asStranger);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("text/html");
+    const html = await res.text();
+    for (const leak of ["severity_counts", "runs_count", "totalRating"]) expect(html).not.toContain(leak);
+  });
+
   test("приватный репо: аноним и вошедший без PAT получают 404 без данных (карточка и .md)", async () => {
     for (const init of [{}, asStranger]) {
       for (const path of ["/api/repos/acme/secret-repo", "/api/repos/acme/secret-repo/report.md"]) {
