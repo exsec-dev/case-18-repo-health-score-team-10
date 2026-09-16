@@ -2,7 +2,38 @@
 // дефолты в коде, env-override чистой функцией scanFromEnv (инъекция,
 // не файлы), fail-soft на мусорных значениях.
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_SCAN, scanFromEnv } from "../src/config";
+import { DEFAULT_SCAN, defaultLeaseMs, loadConfig, scanFromEnv } from "../src/config";
+
+describe("очередь, лиз и доступ (В4.1, К2/К4)", () => {
+  test("дефолты: лиз = клон + деградация + 15 мин (60 мин); 10 заявок/час; 3 попытки; кэш доступа 15 мин", () => {
+    expect(defaultLeaseMs(DEFAULT_SCAN)).toBe(60 * 60_000);
+    const keys = ["SCHEDULER_LEASE_MS", "QUEUE_USER_SCANS_PER_HOUR", "QUEUE_MAX_ATTEMPTS", "ACCESS_CACHE_TTL_MS", "SCAN_CLONE_TIMEOUT_MS", "SCAN_DEGRADE_TIMEOUT_MS"];
+    const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+    try {
+      // пустая строка env = «не задано» (fail-soft) — перекрывает и .env
+      for (const k of keys) process.env[k] = "";
+      const cfg = loadConfig();
+      expect(cfg.scheduler.leaseMs).toBe(60 * 60_000);
+      expect(cfg.queue).toEqual({ userScansPerHour: 10, maxAttempts: 3 });
+      expect(cfg.access.cacheTtlMs).toBe(15 * 60_000);
+      process.env.QUEUE_USER_SCANS_PER_HOUR = "4";
+      process.env.QUEUE_MAX_ATTEMPTS = "5";
+      process.env.ACCESS_CACHE_TTL_MS = "1000";
+      process.env.SCAN_CLONE_TIMEOUT_MS = String(60_000);
+      const env = loadConfig();
+      expect(env.queue).toEqual({ userScansPerHour: 4, maxAttempts: 5 });
+      expect(env.access.cacheTtlMs).toBe(1000);
+      expect(env.scheduler.leaseMs).toBe(60_000 + 25 * 60_000 + 15 * 60_000);
+      process.env.SCHEDULER_LEASE_MS = "12345";
+      expect(loadConfig().scheduler.leaseMs).toBe(12345);
+    } finally {
+      for (const k of keys) {
+        if (saved[k] === undefined) delete process.env[k];
+        else process.env[k] = saved[k];
+      }
+    }
+  });
+});
 
 describe("scanFromEnv: слои дефолты ← env", () => {
   test("дефолты без env", () => {

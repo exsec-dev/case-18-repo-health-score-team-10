@@ -98,7 +98,9 @@ CREATE TABLE IF NOT EXISTS jobs (
   lease_until TEXT,             -- механика claim-loop (В4): NULL-lease матчится
   mode TEXT NOT NULL DEFAULT 'public', -- public|own (own = юзерский PAT)
   user_id INTEGER,              -- чей PAT для own-режима (users.id)
-  trigger_kind TEXT NOT NULL DEFAULT 'periodic' -- periodic|user
+  trigger_kind TEXT NOT NULL DEFAULT 'periodic', -- periodic|user
+  attempts INTEGER NOT NULL DEFAULT 0, -- +1 при claim; предел Config.queue.maxAttempts (v1.5, К4)
+  created_at TEXT               -- время постановки: лимит частоты юзерских заявок (v1.5, К4)
 );
 ${RECOMMENDATIONS_DDL}
 CREATE TABLE IF NOT EXISTS users (
@@ -182,6 +184,9 @@ export function openDb(config: Config): Database {
   ensureColumn(db, "jobs", "mode", "TEXT NOT NULL DEFAULT 'public'");
   ensureColumn(db, "jobs", "user_id", "INTEGER");
   ensureColumn(db, "jobs", "trigger_kind", "TEXT NOT NULL DEFAULT 'periodic'");
+  // v1.5 (В4.1, К4): попытки и время постановки
+  ensureColumn(db, "jobs", "attempts", "INTEGER NOT NULL DEFAULT 0");
+  ensureColumn(db, "jobs", "created_at", "TEXT");
   ensureColumn(db, "scores", "code_empty", "INTEGER");
   // v1.4: jobs UNIQUE(repo_id) (В1) мешает очереди — свой и публичный
   // скан одного репо стоят одновременно; очередь пересоздаём без UNIQUE

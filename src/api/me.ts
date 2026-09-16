@@ -7,7 +7,8 @@
 import type { Database } from "bun:sqlite";
 import { ScClient } from "../collectors/http";
 import { upsertRepo } from "../jobs/runner";
-import { enqueueScan } from "../jobs/scheduler";
+import { countRecentUserJobs, enqueueScan, findActiveUserJob } from "../jobs/scheduler";
+import type { QueueConfig } from "../config";
 
 export interface MyRepoEntry {
   org: string;
@@ -106,12 +107,33 @@ export interface UserScanResponse {
 }
 
 /**
- * POST /api/me/repos/:org/:repo/scan без HTTP-слоя: до постановки —
- * repo-GET с PAT юзера. 200 → upsert repos (visibility из ответа) →
- * заявка → 202; 403/404 → 403 no_access (строки repos нет); 401 → 401
- * pat_expired; 0/429/5xx → 503 check_failed.
+ * POST /api/me/repos/:org/:repo/scan без HTTP-слоя. К4 (дёшево, без сети):
+ * активная заявка того же (юзер, репо) → 202 deduplicated; лимит частоты
+ * исчерпан → 429 rate_limited. К3: до постановки — repo-GET с PAT юзера.
+ * 200 → upsert repos (visibility из ответа) → заявка → 202; 403/404 →
+ * 403 no_access (строки repos нет); 401 → 401 pat_expired; 0/429/5xx →
+ * 503 check_failed.
  */
-export async function requestUserScan(db: Database, client: ScClient, userId: number, org: string, repo: string): Promise<UserScanResponse> {
+export async function requestUserScan(
+  db: Database,
+  client: ScClient,
+  userId: number,
+  org: string,
+  repo: string,
+  queue: QueueConfig,
+  now = new Date(),
+): Promise<UserScanResponse> {
+  const existing = db.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number } | null;
+  const active = existing ? findActiveUserJob(db, userId, existing.id) : null;
+  if (active !== null) {
+    return { status: 202, body: { queued: true, jobId: active, slug: `${org}/${repo}`, deduplicated: true } };
+  }
+  if (countRecentUserJobs(db, userId, now) >= queue.userScansPerHour) {
+    return {
+      status: 429,
+      body: { error: { code: "rate_limited", message: `не больше ${queue.userScansPerHour} запусков анализа в час — попробуйте позже` } },
+    };
+  }
   const res = await client.get(`/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`);
   if (res.status === 403 || res.status === 404) {
     return { status: 403, body: { error: { code: "no_access", message: `ваш PAT не даёт доступа к ${org}/${repo}` } } };
@@ -128,6 +150,6 @@ export async function requestUserScan(db: Database, client: ScClient, userId: nu
     title: typeof body?.name === "string" ? body.name : null,
     ...(visibility !== null ? { visibility } : {}),
   });
-  const jobId = enqueueScan(db, repoId, { userId, triggerKind: "user" });
-  return { status: 202, body: { queued: true, jobId, slug: `${org}/${repo}` } };
+  const jobId = enqueueScan(db, repoId, { userId, triggerKind: "user", now });
+  return { status: 202, body: { queued: true, jobId, slug: `${org}/${repo}`, deduplicated: false } };
 }

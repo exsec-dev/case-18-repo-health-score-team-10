@@ -43,7 +43,7 @@ let drained = 0;
 for (;;) {
   const job = claimNext(db);
   if (!job) break;
-  finishJob(db, job.id, "done");
+  finishJob(db, job.id, job.claimedAt, "done");
   drained++;
 }
 console.log(`очередь после прогона 1: ${drained} jobs закрыты (без исполнения сканов)`);

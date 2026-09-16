@@ -255,7 +255,7 @@ const server = Bun.serve({
       }
       // H1/LOW-3 (К3): до постановки — repo-GET с PAT юзера; строка repos
       // и заявка появляются только при подтверждённом доступе
-      const out = await requestUserScan(db, client, user.userId, org, repo);
+      const out = await requestUserScan(db, client, user.userId, org, repo, config.queue);
       return Response.json(out.body, { status: out.status });
     },
     // неизвестный /api/* обязан остаться JSON-404, а не отдать HTML

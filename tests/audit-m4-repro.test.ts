@@ -272,7 +272,8 @@ describe("H4: DoS одним пользователем", () => {
     expect(limits.timeoutMs).toBeLessThanOrEqual(UNLIMITED_TIMEOUT_MS); // потолок «6 ч» из settings.ts
   });
 
-  repro("повторные заявки одного юзера на один репо не множат очередь и не отодвигают периодику", () => {
+  // закрыто Б5 (К4): дедуп (user, repo) + чередование юзерских и периодических
+  test("повторные заявки одного юзера на один репо не множат очередь и не отодвигают периодику", () => {
     const { t } = tempDb();
     const user = upsertUser(t.db, "ya-spammer", "spammer");
     const other = insertRepo(t.db, "some", "periodic", "public");

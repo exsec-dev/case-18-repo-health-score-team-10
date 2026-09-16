@@ -15,14 +15,19 @@ import { openDb } from "../src/db";
 import type { ScClient, ScResponse } from "../src/collectors/http";
 import {
   claimNext,
+  countRecentUserJobs,
   enqueueScan,
   evictRepo,
+  findActiveUserJob,
   finishJob,
   nightlyCatalog,
   processJob,
+  renewLease,
   returnRepo,
+  startWorkerLoop,
   type ClaimedJob,
 } from "../src/jobs/scheduler";
+import { requestUserScan } from "../src/api/me";
 import { upsertRepo, type ScanDeps, type ScanResult } from "../src/jobs/runner";
 import { makeScClient } from "../src/collectors/http";
 
@@ -73,19 +78,25 @@ describe("claim-loop: лизы и приоритеты", () => {
     const a = seedRepo("cl", "a");
     const b = seedRepo("cl", "b");
     const j1 = enqueueScan(db, a, { triggerKind: "periodic" });
-    const j2 = enqueueScan(db, b, { triggerKind: "periodic" });
+    enqueueScan(db, b, { triggerKind: "periodic" });
     const now = new Date("2026-09-18T00:00:00Z");
     const first = claimNext(db, now, 60_000);
     expect(first?.slug).toBe("cl/a");
     expect(first?.userId).toBeNull();
+    expect(first?.attempts).toBe(1);
     // лиз поставлен и живёт: строка больше не заявляется
-    expect(claimNext(db, new Date(now.getTime() + 30_000), 60_000)?.slug).toBe("cl/b");
+    const second = claimNext(db, new Date(now.getTime() + 30_000), 60_000);
+    expect(second?.slug).toBe("cl/b");
     expect(claimNext(db, new Date(now.getTime() + 30_000), 60_000)).toBeNull();
-    // истёкший лиз (упавший воркер) → job снова доступна
+    // истёкший лиз (упавший воркер) → job снова доступна, попытка №2
     const revived = claimNext(db, new Date(now.getTime() + 120_000), 60_000);
     expect(revived?.id).toBe(j1);
-    finishJob(db, j1, "done");
-    finishJob(db, j2, "done");
+    expect(revived?.attempts).toBe(2);
+    // finishJob прежней заявки (claimed_at первой попытки) — no-op (К4)
+    expect(finishJob(db, j1, first!.claimedAt, "failed")).toBe(false);
+    expect((db.query("SELECT status FROM jobs WHERE id = ?").get(j1) as { status: string }).status).toBe("running");
+    expect(finishJob(db, j1, revived!.claimedAt, "done")).toBe(true);
+    expect(finishJob(db, second!.id, second!.claimedAt, "done")).toBe(true);
   });
 
   test("юзерская заявка встаёт вперёд периодической", () => {
@@ -94,28 +105,151 @@ describe("claim-loop: лизы и приоритеты", () => {
     enqueueScan(db, c, { triggerKind: "periodic" });
     const userId = (db.query("INSERT INTO users (ya_id, login, created_at, last_login_at) VALUES ('ya-1', 'u', '2026', '2026')").run(), Number((db.query("SELECT id FROM users WHERE ya_id = 'ya-1'").get() as { id: number }).id));
     const userJob = enqueueScan(db, d, { userId, triggerKind: "user" });
-    const claimed = claimNext(db);
+    const claimed = claimNext(db, new Date("2026-09-19T00:00:00Z"));
     expect(claimed?.id).toBe(userJob);
     expect(claimed?.userId).toBe(userId);
-    finishJob(db, claimed!.id, "done");
-    const periodic = claimNext(db);
+    finishJob(db, claimed!.id, claimed!.claimedAt, "done");
+    const periodic = claimNext(db, new Date("2026-09-19T00:01:00Z"));
     expect(periodic?.slug).toBe("cl/c");
-    finishJob(db, periodic!.id, "done");
+    finishJob(db, periodic!.id, periodic!.claimedAt, "done");
     // чистим за собой: дальше каталог-тесты видят чистую таблицу repos
     db.query("DELETE FROM jobs WHERE repo_id IN (SELECT id FROM repos WHERE org_slug = 'cl')").run();
     db.query("DELETE FROM repos WHERE org_slug = 'cl'").run();
   });
 
-  test("finishJob по id: очередь допускает несколько строк одного репо", () => {
+  test("finishJob по (id, claimed_at): очередь допускает несколько строк одного репо", () => {
     const e = seedRepo("cl", "e");
     const j1 = enqueueScan(db, e, {});
     const j2 = enqueueScan(db, e, { triggerKind: "user" });
     expect(j1).not.toBe(j2);
-    finishJob(db, j1, "done");
-    expect((db.query("SELECT status FROM jobs WHERE id = ?").get(j2) as { status: string }).status).toBe("queued");
-    finishJob(db, j2, "failed");
+    const c1 = claimNext(db, new Date("2026-09-20T00:00:00Z"))!;
+    const other = c1.id === j1 ? j2 : j1;
+    finishJob(db, c1.id, c1.claimedAt, "done");
+    expect((db.query("SELECT status FROM jobs WHERE id = ?").get(other) as { status: string }).status).toBe("queued");
     db.query("DELETE FROM jobs WHERE repo_id IN (SELECT id FROM repos WHERE org_slug = 'cl')").run();
     db.query("DELETE FROM repos WHERE org_slug = 'cl'").run();
+  });
+});
+
+describe("очередь: анти-абьюз (К4 В4.1)", () => {
+  // своя БД: чередование читает «последнюю заявленную» по всей таблице
+  const qdir = mkdtempSync(join(tmpdir(), "rh-queue-"));
+  const q: Database = openDb({ ...loadConfig(), dataDir: qdir });
+  afterAll(() => {
+    q.close();
+    rmSync(qdir, { recursive: true, force: true });
+  });
+  const repo = (slug: string) => {
+    q.query("INSERT OR IGNORE INTO repos (org_slug, repo_slug) VALUES ('q', ?)").run(slug);
+    return (q.query("SELECT id FROM repos WHERE org_slug = 'q' AND repo_slug = ?").get(slug) as { id: number }).id;
+  };
+  const user = (ya: string) => {
+    q.query("INSERT OR IGNORE INTO users (ya_id, login, created_at, last_login_at) VALUES (?, ?, '2026', '2026')").run(ya, ya);
+    return (q.query("SELECT id FROM users WHERE ya_id = ?").get(ya) as { id: number }).id;
+  };
+  const clear = () => q.query("DELETE FROM jobs").run();
+
+  test("дедуп: активная заявка (user, repo) возвращается, новая не создаётся; после завершения — новая", () => {
+    clear();
+    const u = user("dedup");
+    const r = repo("dedup");
+    const j1 = enqueueScan(q, r, { userId: u, triggerKind: "user" });
+    expect(enqueueScan(q, r, { userId: u, triggerKind: "user" })).toBe(j1);
+    // другой юзер на тот же репо — своя заявка
+    expect(enqueueScan(q, r, { userId: user("other"), triggerKind: "user" })).not.toBe(j1);
+    const claimed = claimNext(q, new Date("2026-09-18T00:00:00Z"))!;
+    expect(claimed.id).toBe(j1);
+    expect(enqueueScan(q, r, { userId: u, triggerKind: "user" })).toBe(j1); // running — тоже активна
+    finishJob(q, j1, claimed.claimedAt, "done");
+    expect(enqueueScan(q, r, { userId: u, triggerKind: "user" })).not.toBe(j1);
+    expect(findActiveUserJob(q, u, r)).not.toBeNull();
+  });
+
+  test("лимит частоты: 11-я новая заявка за час → 429; дубли не считаются; окно скользящее", async () => {
+    clear();
+    const u = user("rate");
+    const queue = { userScansPerHour: 10, maxAttempts: 3 };
+    const ok = { get: async () => ({ status: 200, json: { visibility: "public" }, bodyText: "" }), requestCount: () => 0 };
+    const now = new Date("2026-09-18T10:00:00Z");
+    for (let i = 0; i < 10; i++) {
+      const out = await requestUserScan(q, ok, u, "q", `rate-${i}`, queue, now);
+      expect(out.status).toBe(202);
+      expect(out.body["deduplicated"]).toBe(false);
+      // повтор той же заявки — дубль: 202 deduplicated, счётчик не растёт
+      const dup = await requestUserScan(q, ok, u, "q", `rate-${i}`, queue, now);
+      expect(dup.status).toBe(202);
+      expect(dup.body["deduplicated"]).toBe(true);
+    }
+    expect(countRecentUserJobs(q, u, now)).toBe(10);
+    const eleventh = await requestUserScan(q, ok, u, "q", "rate-10", queue, now);
+    expect(eleventh.status).toBe(429);
+    expect((eleventh.body["error"] as { code: string }).code).toBe("rate_limited");
+    expect(q.query("SELECT 1 FROM repos WHERE org_slug = 'q' AND repo_slug = 'rate-10'").get()).toBeNull();
+    // через час окно освободилось
+    const later = await requestUserScan(q, ok, u, "q", "rate-10", queue, new Date(now.getTime() + 3600_001));
+    expect(later.status).toBe(202);
+  });
+
+  test("чередование: после юзерской заявки берётся периодическая, если она есть", () => {
+    clear();
+    const u = user("alt");
+    const periodic = [repo("p1"), repo("p2")].map((r) => enqueueScan(q, r, { triggerKind: "periodic" }));
+    const users = [repo("u1"), repo("u2"), repo("u3")].map((r) => enqueueScan(q, r, { userId: u, triggerKind: "user" }));
+    const order: number[] = [];
+    let t = Date.parse("2026-09-18T00:00:00Z");
+    for (let job = claimNext(q, new Date(t)); job; job = claimNext(q, new Date((t += 1000)))) order.push(job.id);
+    expect(order).toEqual([users[0], periodic[0], users[1], periodic[1], users[2]]);
+  });
+
+  test("attempts: +1 при claim; исчерпавшая попытки job переводится в failed и не заявляется", () => {
+    clear();
+    const r = repo("poison");
+    const id = enqueueScan(q, r, { triggerKind: "periodic" });
+    let t = Date.parse("2026-09-18T00:00:00Z");
+    for (let i = 1; i <= 3; i++) {
+      const job = claimNext(q, new Date(t), 1000, { maxAttempts: 3 });
+      expect(job?.id).toBe(id);
+      expect(job?.attempts).toBe(i);
+      t += 5000; // лиз истёк — воркер «упал»
+    }
+    expect(claimNext(q, new Date(t), 1000, { maxAttempts: 3 })).toBeNull();
+    expect((q.query("SELECT status, attempts FROM jobs WHERE id = ?").get(id) as { status: string; attempts: number })).toEqual({ status: "failed", attempts: 3 });
+  });
+
+  test("лиз: renewLease продлевает только свою заявку; воркер-луп продлевает каждые leaseMs/3", async () => {
+    clear();
+    const r = repo("lease");
+    const id = enqueueScan(q, r, { triggerKind: "periodic" });
+    const job = claimNext(q, new Date("2026-09-18T00:00:00Z"), 60_000)!;
+    expect(renewLease(q, id, "1999-01-01T00:00:00.000Z", 60_000)).toBe(false);
+    expect(renewLease(q, id, job.claimedAt, 10 * 60_000, new Date("2026-09-18T00:00:30Z"))).toBe(true);
+    expect((q.query("SELECT lease_until FROM jobs WHERE id = ?").get(id) as { lease_until: string }).lease_until).toBe("2026-09-18T00:10:30.000Z");
+    finishJob(q, id, job.claimedAt, "done");
+
+    // воркер-луп: скан дольше лиза — лиз продлевается, job не перезаявляется
+    enqueueScan(q, repo("lease-loop"), { triggerKind: "periodic" });
+    const base = loadConfig();
+    const leases: string[] = [];
+    let finish: () => void = () => {};
+    const done = new Promise<void>((res) => (finish = res));
+    const slow = (async () => {
+      for (let i = 0; i < 6; i++) {
+        await Bun.sleep(50);
+        const row = q.query("SELECT lease_until FROM jobs WHERE status = 'running'").get() as { lease_until: string } | null;
+        if (row) leases.push(row.lease_until);
+      }
+      finish();
+      return { scanId: 1, repoId: 1, status: "ok", repoAccess: "ok" } as ScanResult;
+    }) as unknown as typeof import("../src/jobs/runner").runScan;
+    const stop = startWorkerLoop(
+      { db: q, config: { ...base, scheduler: { ...base.scheduler, leaseMs: 150 } }, serverClient: () => null, runScan: slow },
+      5,
+    );
+    await done;
+    await Bun.sleep(30);
+    stop();
+    expect(new Set(leases).size).toBeGreaterThan(1); // lease_until сдвигался во время скана
+    expect((q.query("SELECT status, attempts FROM jobs WHERE repo_id = ?").get(repo("lease-loop")) as { status: string; attempts: number })).toEqual({ status: "done", attempts: 1 });
   });
 });
 
@@ -230,7 +364,7 @@ describe("processJob: repo-сигнал эвикции и заявки юзер�
   test("repoAccess gone (repo-GET 403/404) → эвикция; канальные cicd-403 не эвиктят", async () => {
     const g = seedRepo("pj", "gone-repo");
     const { deps } = fakeWorker(() => ({ repoAccess: "gone" }));
-    const out = await processJob(deps, { id: 1, repoId: g, slug: "pj/gone-repo", userId: null, triggerKind: "periodic" });
+    const out = await processJob(deps, { id: 1, repoId: g, slug: "pj/gone-repo", userId: null, triggerKind: "periodic", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 });
     expect(out).toBe("gone");
     const row = db.query("SELECT rating_active, evict_reason FROM repos WHERE id = ?").get(g) as { rating_active: number; evict_reason: string };
     expect(row.rating_active).toBe(0);
@@ -239,7 +373,7 @@ describe("processJob: repo-сигнал эвикции и заявки юзер�
     // cicd-403: repoAccess ok (репо-GET прошёл) — эвикции нет
     const s = seedRepo("pj", "cicd-403");
     const { deps: d2 } = fakeWorker(() => ({ repoAccess: "ok" }));
-    const out2 = await processJob(d2, { id: 2, repoId: s, slug: "pj/cicd-403", userId: null, triggerKind: "periodic" });
+    const out2 = await processJob(d2, { id: 2, repoId: s, slug: "pj/cicd-403", userId: null, triggerKind: "periodic", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 });
     expect(out2).not.toBe("gone");
     expect((db.query("SELECT rating_active FROM repos WHERE id = ?").get(s) as { rating_active: number }).rating_active).toBe(1);
   });
@@ -248,7 +382,7 @@ describe("processJob: repo-сигнал эвикции и заявки юзер�
     db.query("INSERT OR REPLACE INTO users (ya_id, login, created_at, last_login_at) VALUES ('ya-2', 'u2', '2026', '2026')").run();
     const uid = (db.query("SELECT id FROM users WHERE ya_id = 'ya-2'").get() as { id: number }).id;
     const { deps, calls } = fakeWorker(() => ({ repoAccess: "ok" }));
-    const job: ClaimedJob = { id: 3, repoId: 1, slug: "pj/own", userId: uid, triggerKind: "user" };
+    const job: ClaimedJob = { id: 3, repoId: 1, slug: "pj/own", userId: uid, triggerKind: "user", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 };
     // PAT нет (getPat реальный, APP_SECRET инъектирован в конфиг) → userToken null
     await processJob(deps, job);
     expect(calls[0]!.opts["userId"]).toBe(uid);
@@ -263,10 +397,10 @@ describe("processJob: repo-сигнал эвикции и заявки юзер�
   test("H1: repo-GET 403/404 у заявки юзера НЕ эвиктирует; у периодики — эвиктирует", async () => {
     const r = seedRepo("pj", "popular");
     const { deps } = fakeWorker(() => ({ repoAccess: "gone" }));
-    const out = await processJob({ ...deps, getPat: () => "narrow-pat" }, { id: 4, repoId: r, slug: "pj/popular", userId: 1, triggerKind: "user" });
+    const out = await processJob({ ...deps, getPat: () => "narrow-pat" }, { id: 4, repoId: r, slug: "pj/popular", userId: 1, triggerKind: "user", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 });
     expect(out).not.toBe("gone");
     expect((db.query("SELECT rating_active FROM repos WHERE id = ?").get(r) as { rating_active: number }).rating_active).toBe(1);
-    const out2 = await processJob(deps, { id: 5, repoId: r, slug: "pj/popular", userId: null, triggerKind: "periodic" });
+    const out2 = await processJob(deps, { id: 5, repoId: r, slug: "pj/popular", userId: null, triggerKind: "periodic", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 });
     expect(out2).toBe("gone");
     returnRepo(db, r);
   });
@@ -288,8 +422,8 @@ describe("processJob: repo-сигнал эвикции и заявки юзер�
         return { scanId: 1, repoId: 1, status: "ok", repoAccess: "ok" } as ScanResult;
       }) as typeof import("../src/jobs/runner").runScan;
       const w = { db, config, serverClient, runScan: burn };
-      await processJob(w, { id: 6, repoId: 1, slug: "o/r", userId: null, triggerKind: "periodic" });
-      await processJob(w, { id: 7, repoId: 1, slug: "o/r", userId: null, triggerKind: "periodic" });
+      await processJob(w, { id: 6, repoId: 1, slug: "o/r", userId: null, triggerKind: "periodic", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 });
+      await processJob(w, { id: 7, repoId: 1, slug: "o/r", userId: null, triggerKind: "periodic", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 });
       expect(made).toHaveLength(2);
       // бюджет исчерпан ВНУТРИ первой задачи, вторая начинает с полным
       expect(statuses).toEqual([

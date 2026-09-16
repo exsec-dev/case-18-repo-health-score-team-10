@@ -30,42 +30,96 @@ export interface ClaimedJob {
   /** автор заявки; null = периодика (серверный токен) */
   userId: number | null;
   triggerKind: string;
+  /** метка заявки: продление лиза и finishJob — только своей заявки (К4) */
+  claimedAt: string;
+  /** номер попытки (после инкремента при claim) */
+  attempts: number;
 }
 
-/** Постановка скана в очередь (новая строка; jobs без UNIQUE с v1.4). */
+/** Активная (queued/running) заявка юзера на репо — для дедупа (К4). */
+export function findActiveUserJob(db: Database, userId: number, repoId: number): number | null {
+  const row = db
+    .query("SELECT id FROM jobs WHERE user_id = ? AND repo_id = ? AND status IN ('queued', 'running') ORDER BY id LIMIT 1")
+    .get(userId, repoId) as { id: number } | null;
+  return row ? row.id : null;
+}
+
+/** Новых юзерских заявок за скользящий час (дубли строк не создают — не считаются). */
+export function countRecentUserJobs(db: Database, userId: number, now = new Date()): number {
+  const since = new Date(now.getTime() - 3600_000).toISOString();
+  return (
+    db.query("SELECT COUNT(*) AS c FROM jobs WHERE user_id = ? AND trigger_kind = 'user' AND created_at > ?").get(userId, since) as {
+      c: number;
+    }
+  ).c;
+}
+
+/**
+ * Постановка скана в очередь (jobs без UNIQUE с v1.4). Заявка юзера (К4):
+ * при активной queued/running заявке того же (user, repo) новая не
+ * создаётся — возвращается id существующей.
+ */
 export function enqueueScan(
   db: Database,
   repoId: number,
-  opts: { userId?: number | null; triggerKind?: "periodic" | "user" } = {},
+  opts: { userId?: number | null; triggerKind?: "periodic" | "user"; now?: Date } = {},
 ): number {
+  if (opts.userId !== undefined && opts.userId !== null) {
+    const active = findActiveUserJob(db, opts.userId, repoId);
+    if (active !== null) return active;
+  }
   const r = db
-    .query(`INSERT INTO jobs (repo_id, status, user_id, trigger_kind) VALUES (?, 'queued', ?, ?)`)
-    .run(repoId, opts.userId ?? null, opts.triggerKind ?? "periodic");
+    .query(`INSERT INTO jobs (repo_id, status, user_id, trigger_kind, created_at) VALUES (?, 'queued', ?, ?, ?)`)
+    .run(repoId, opts.userId ?? null, opts.triggerKind ?? "periodic", (opts.now ?? new Date()).toISOString());
   return Number(r.lastInsertRowid);
+}
+
+export interface ClaimOptions {
+  /** предел попыток (Config.queue.maxAttempts): достигнут → failed, не заявляется */
+  maxAttempts?: number;
 }
 
 /**
  * Заявить одну job: атомарный UPDATE … WHERE (lease_until IS NULL OR
  * lease_until < now) — NULL-lease обязан матчиться (контракт плана);
  * истёкший лиз running-строки тоже матчится (упавший воркер).
- * Юзерские заявки — вперёд периодических (UX: свой репо не ждёт ночи).
+ * К4: attempts +1 при claim; исчерпавшие попытки → failed. Чередование:
+ * если последняя заявленная (по claimed_at) была юзерской, а в очереди
+ * есть периодическая — берётся периодическая; иначе юзерские вперёд.
  */
-export function claimNext(db: Database, now = new Date(), leaseMs = 30 * 60_000): ClaimedJob | null {
+export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000, opts: ClaimOptions = {}): ClaimedJob | null {
+  const maxAttempts = opts.maxAttempts ?? 3;
   const nowIso = now.toISOString();
   const leaseIso = new Date(now.getTime() + leaseMs).toISOString();
+  db.query(
+    `UPDATE jobs SET status = 'failed', lease_until = NULL
+     WHERE status IN ('queued', 'running') AND attempts >= ? AND (lease_until IS NULL OR lease_until < ?)`,
+  ).run(maxAttempts, nowIso);
+  const last = db
+    .query("SELECT trigger_kind FROM jobs WHERE claimed_at IS NOT NULL ORDER BY claimed_at DESC, id DESC LIMIT 1")
+    .get() as { trigger_kind: string } | null;
+  const first = last?.trigger_kind === "user" ? "periodic" : "user";
   const claimed = db
     .query(
-      `UPDATE jobs SET status = 'running', claimed_at = ?, lease_until = ?
+      `UPDATE jobs SET status = 'running', claimed_at = ?, lease_until = ?, attempts = attempts + 1
        WHERE id = (
          SELECT id FROM jobs
          WHERE (lease_until IS NULL OR lease_until < ?)
            AND status IN ('queued', 'running')
-         ORDER BY CASE trigger_kind WHEN 'user' THEN 0 ELSE 1 END, id
+           AND attempts < ?
+         ORDER BY CASE trigger_kind WHEN ? THEN 0 ELSE 1 END, id
          LIMIT 1
        )
-       RETURNING id, repo_id, user_id, trigger_kind`,
+       RETURNING id, repo_id, user_id, trigger_kind, claimed_at, attempts`,
     )
-    .get(nowIso, leaseIso, nowIso) as { id: number; repo_id: number; user_id: number | null; trigger_kind: string } | null;
+    .get(nowIso, leaseIso, nowIso, maxAttempts, first) as {
+    id: number;
+    repo_id: number;
+    user_id: number | null;
+    trigger_kind: string;
+    claimed_at: string;
+    attempts: number;
+  } | null;
   if (!claimed) return null;
   const repo = db.query("SELECT org_slug, repo_slug FROM repos WHERE id = ?").get(claimed.repo_id) as
     | { org_slug: string; repo_slug: string }
@@ -77,12 +131,26 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 30 * 60_000)
     slug: `${repo.org_slug}/${repo.repo_slug}`,
     userId: claimed.user_id,
     triggerKind: claimed.trigger_kind,
+    claimedAt: claimed.claimed_at,
+    attempts: claimed.attempts,
   };
 }
 
-/** Завершение job (по id, не по repo — очередь больше одной строки на репо). */
-export function finishJob(db: Database, jobId: number, status: "done" | "failed"): void {
-  db.query("UPDATE jobs SET status = ?, lease_until = NULL WHERE id = ?").run(status, jobId);
+/** Продление лиза своей заявки (К4): чужой/перезаявленный claimed_at — no-op. */
+export function renewLease(db: Database, jobId: number, claimedAt: string, leaseMs: number, now = new Date()): boolean {
+  const r = db
+    .query("UPDATE jobs SET lease_until = ? WHERE id = ? AND claimed_at = ? AND status = 'running'")
+    .run(new Date(now.getTime() + leaseMs).toISOString(), jobId, claimedAt);
+  return r.changes > 0;
+}
+
+/**
+ * Завершение job (К4): только своей заявки — WHERE id AND claimed_at;
+ * воркер с истёкшим лизом, чью job перезаявили, чужой прогон не закрывает.
+ */
+export function finishJob(db: Database, jobId: number, claimedAt: string, status: "done" | "failed"): boolean {
+  const r = db.query("UPDATE jobs SET status = ?, lease_until = NULL WHERE id = ? AND claimed_at = ?").run(status, jobId, claimedAt);
+  return r.changes > 0;
 }
 
 // ---------- эвикция (Q&A №16) ----------
@@ -267,21 +335,30 @@ export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<Sca
 
 // ---------- циклы процесса сервера ----------
 
-/** Воркер-луп: одна job за раз; ошибки не останавливают цикл. */
+/** Воркер-луп: одна job за раз; ошибки не останавливают цикл; лиз продлевается каждые leaseMs/3 (К4). */
 export function startWorkerLoop(deps: WorkerDeps, pollMs = 5000): () => void {
   let busy = false;
+  const leaseMs = deps.config.scheduler.leaseMs;
   const timer = setInterval(async () => {
     if (busy) return;
-    const job = claimNext(deps.db, new Date(), deps.config.scheduler.leaseMs);
+    const job = claimNext(deps.db, new Date(), leaseMs, { maxAttempts: deps.config.queue.maxAttempts });
     if (!job) return;
     busy = true;
+    const heartbeat = setInterval(() => {
+      try {
+        renewLease(deps.db, job.id, job.claimedAt, leaseMs);
+      } catch (e) {
+        console.error(`[worker] job ${job.id} lease renew failed: ${String((e as Error).message).slice(0, 200)}`);
+      }
+    }, Math.max(1, Math.floor(leaseMs / 3)));
     try {
       const result = await processJob(deps, job);
-      finishJob(deps.db, job.id, result === "gone" || result.status === "bad" ? "failed" : "done");
+      finishJob(deps.db, job.id, job.claimedAt, result === "gone" || result.status === "bad" ? "failed" : "done");
     } catch (e) {
       console.error(`[worker] job ${job.id} (${job.slug}) crashed: ${String((e as Error).message).slice(0, 200)}`);
-      finishJob(deps.db, job.id, "failed");
+      finishJob(deps.db, job.id, job.claimedAt, "failed");
     } finally {
+      clearInterval(heartbeat);
       busy = false;
     }
   }, pollMs);

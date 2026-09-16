@@ -32,6 +32,8 @@ function statusClient(status: number, json: unknown = null): ScClient & { paths:
   };
 }
 
+const QUEUE = { userScansPerHour: 100, maxAttempts: 3 };
+
 const repoRow = (org: string, repo: string) =>
   db.query("SELECT id, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number; visibility: string } | null;
 const jobsOf = (userId: number) => (db.query("SELECT COUNT(*) AS c FROM jobs WHERE user_id = ?").get(userId) as { c: number }).c;
@@ -41,7 +43,7 @@ describe("requestUserScan: предпроверка доступа PAT (К3)", (
 
   test("200 → upsert repos (visibility из ответа) → заявка → 202", async () => {
     const client = statusClient(200, { id: "42", name: "Secret", visibility: "private" });
-    const out = await requestUserScan(db, client, user, "acme", "secret");
+    const out = await requestUserScan(db, client, user, "acme", "secret", QUEUE);
     expect(out.status).toBe(202);
     expect(out.body).toMatchObject({ queued: true, slug: "acme/secret" });
     expect(client.paths).toEqual(["/repos/acme/secret"]);
@@ -60,7 +62,7 @@ describe("requestUserScan: предпроверка доступа PAT (К3)", (
       [403, "forbidden"],
       [404, "missing"],
     ] as const) {
-      const out = await requestUserScan(db, statusClient(status), user, "other", slug);
+      const out = await requestUserScan(db, statusClient(status), user, "other", slug, QUEUE);
       expect(out.status).toBe(403);
       expect((out.body["error"] as { code: string }).code).toBe("no_access");
       expect(repoRow("other", slug)).toBeNull();
@@ -70,11 +72,11 @@ describe("requestUserScan: предпроверка доступа PAT (К3)", (
 
   test("401 → 401 pat_expired; 0/429/5xx → 503 check_failed; без постановки", async () => {
     const before = jobsOf(user);
-    const expired = await requestUserScan(db, statusClient(401), user, "x", "expired");
+    const expired = await requestUserScan(db, statusClient(401), user, "x", "expired", QUEUE);
     expect(expired.status).toBe(401);
     expect((expired.body["error"] as { code: string }).code).toBe("pat_expired");
     for (const status of [0, 429, 500, 503]) {
-      const out = await requestUserScan(db, statusClient(status), user, "x", `flaky-${status}`);
+      const out = await requestUserScan(db, statusClient(status), user, "x", `flaky-${status}`, QUEUE);
       expect(out.status).toBe(503);
       expect((out.body["error"] as { code: string }).code).toBe("check_failed");
       expect(repoRow("x", `flaky-${status}`)).toBeNull();

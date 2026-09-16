@@ -63,12 +63,20 @@ export interface SchedulerConfig {
   intervalMs: number;
   /** форс-полный рескан: игнорировать дифф last_updated, поставить все репо */
   fullRescan: boolean;
-  /** лиз job'а: время, на которое job закрепляется за воркером */
+  /** лиз job'а: время, на которое job закрепляется за воркером; дефолт (К4) =
+   *  clone.timeout + degrade.timeout + 15 мин (60 мин), воркер продлевает каждые leaseMs/3 */
   leaseMs: number;
   /** задержка первого обхода после старта сервера: окно управления стендом
    *  (обход с живым токеном ставит в очередь первый скан всего каталога —
    *  это дизайн продукта, но оператор обязан успеть это видеть/отключить) */
   startDelayMs: number;
+}
+
+export interface QueueConfig {
+  /** новых юзерских заявок за скользящий час на юзера (К4 В4.1): 10, env QUEUE_USER_SCANS_PER_HOUR */
+  userScansPerHour: number;
+  /** предел попыток job: достигнут → failed без claim (К4): 3, env QUEUE_MAX_ATTEMPTS */
+  maxAttempts: number;
 }
 
 export interface AccessConfig {
@@ -83,6 +91,7 @@ export interface Config {
   auth: AuthConfig;
   scheduler: SchedulerConfig;
   access: AccessConfig;
+  queue: QueueConfig;
   llm: {
     provider: "yandex" | "zai";
     mainModel: string;
@@ -153,8 +162,14 @@ export function scanFromEnv(env: Record<string, string>): ScanConfig {
   };
 }
 
+/** Дефолт лиза (К4): худший скан (клон + деградационный ярус) + 15 мин запаса. */
+export function defaultLeaseMs(scan: ScanConfig): number {
+  return scan.clone.timeoutMs + scan.degrade.timeoutMs + 15 * 60_000;
+}
+
 export function loadConfig(): Config {
   const env = { ...envFile(), ...process.env } as Record<string, string>;
+  const scan = scanFromEnv(env);
   const provider = env.LLM_PROVIDER === "zai" ? "zai" : "yandex";
   const mainModel = env.MAIN_MODEL ?? (provider === "yandex" ? "yandexgpt" : "glm-5.3");
   return {
@@ -170,11 +185,15 @@ export function loadConfig(): Config {
     scheduler: {
       intervalMs: envInt(env, "SCHEDULER_INTERVAL_MS") ?? 24 * 60 * 60_000,
       fullRescan: envBool(env, "SCHEDULER_FULL_RESCAN") ?? false,
-      leaseMs: envInt(env, "SCHEDULER_LEASE_MS") ?? 30 * 60_000,
+      leaseMs: envInt(env, "SCHEDULER_LEASE_MS") ?? defaultLeaseMs(scan),
       startDelayMs: envInt(env, "SCHEDULER_START_DELAY_MS") ?? 5 * 60_000,
     },
     access: {
       cacheTtlMs: envInt(env, "ACCESS_CACHE_TTL_MS") ?? 15 * 60_000,
+    },
+    queue: {
+      userScansPerHour: envInt(env, "QUEUE_USER_SCANS_PER_HOUR") ?? 10,
+      maxAttempts: envInt(env, "QUEUE_MAX_ATTEMPTS") ?? 3,
     },
     llm: {
       provider,
@@ -184,6 +203,6 @@ export function loadConfig(): Config {
       yandexFolderId: env.YAGPT_FOLDER_ID ?? null,
       zaiApiKey: env.ZAI_API_KEY ?? null,
     },
-    scan: scanFromEnv(env),
+    scan,
   };
 }
