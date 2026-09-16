@@ -296,7 +296,7 @@ describe("В2/Б1: деградационная попытка cloneWithDegrade 
       ...LIMITS,
       pollMs: 5,
       timeoutMs: 1,
-      degrade: { sinceMonths: 13, timeoutMs: 60_000, maxBytes: 500 * 1024 * 1024 },
+      degrade: { sinceMonths: 13, timeoutMs: 60_000, maxBytes: 500 * 1024 * 1024, enabled: true },
     });
     expect(out.ok).toBe(true);
     if (!out.ok) return;
@@ -321,7 +321,7 @@ describe("В2/Б1: деградационная попытка cloneWithDegrade 
       ...LIMITS,
       pollMs: 5,
       timeoutMs: 1,
-      degrade: { sinceMonths: 13, timeoutMs: 1, maxBytes: 500 * 1024 * 1024 },
+      degrade: { sinceMonths: 13, timeoutMs: 1, maxBytes: 500 * 1024 * 1024, enabled: true },
     });
     expect(both.ok).toBe(false);
     if (both.ok) return;
@@ -331,7 +331,7 @@ describe("В2/Б1: деградационная попытка cloneWithDegrade 
 
     const gitErr = await cloneWithDegrade("file:///nonexistent/rh-nowhere.git", work, {
       ...LIMITS,
-      degrade: { sinceMonths: 13, timeoutMs: 30_000, maxBytes: 500 * 1024 * 1024 },
+      degrade: { sinceMonths: 13, timeoutMs: 30_000, maxBytes: 500 * 1024 * 1024, enabled: true },
     });
     expect(gitErr.ok).toBe(false);
     if (gitErr.ok) return;

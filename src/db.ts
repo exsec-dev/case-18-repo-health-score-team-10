@@ -1,6 +1,7 @@
 // db.ts — SQLite (bun:sqlite) — единственный стор: кэш собранных
-// данных + история сканов + очередь jobs + scores/recommendations.
-// Tri-state в NULL-семантике: score NULL = «нет данных» (не «плохо»).
+// данных + история сканов + очередь jobs + scores/recommendations +
+// (v1.4, В4) пользователи Я ID/сессии/PAT/настройки. Tri-state в
+// NULL-семантике: score NULL = «нет данных» (не «плохо»).
 // Схема v1.2 (В2/Б1): repos += forks/reaction_counts; scores —
 // immutable строки (scan_id+model_version PK, INSERT OR REPLACE);
 // recommendations — PK (scan_id, model_version, rule_id). Старые
@@ -10,6 +11,10 @@
 // Схема v1.3 (В3/Б1): scores += derived (JSON DerivedMetrics) —
 // аддитивный ALTER, чтобы страница репо показывала те же производные
 // числа, из которых посчитан Score этой строки, не вызывая compute.
+// Схема v1.4 (В4): users/sessions/user_tokens/user_settings; repos +=
+// rating_active (эвикция — не удаление, закон 6) и visibility;
+// jobs += mode/user_id (own-сканы с юзерским PAT); scores +=
+// code_empty (Score 0 «проекта нет» — данные, не NULL).
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -79,9 +84,36 @@ CREATE TABLE IF NOT EXISTS jobs (
   repo_id INTEGER NOT NULL UNIQUE REFERENCES repos(id),
   status TEXT NOT NULL DEFAULT 'queued', -- queued|running|done|failed
   claimed_at TEXT,
-  lease_until TEXT            -- механика claim-loop — В4
+  lease_until TEXT,             -- механика claim-loop (В4): NULL-lease матчится
+  mode TEXT NOT NULL DEFAULT 'public', -- public|own (own = юзерский PAT)
+  user_id INTEGER,              -- чей PAT для own-режима (users.id)
+  trigger_kind TEXT NOT NULL DEFAULT 'periodic' -- periodic|user
 );
 ${RECOMMENDATIONS_DDL}
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY,
+  ya_id TEXT NOT NULL UNIQUE,   -- Я ID (строка: платформа отдаёт число)
+  login TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_login_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  token_hash TEXT PRIMARY KEY,  -- sha256 случайного токена из cookie
+  user_id INTEGER NOT NULL REFERENCES users(id),
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL      -- истёкшая сессия = аноним
+);
+CREATE TABLE IF NOT EXISTS user_tokens (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id),
+  pat_enc TEXT NOT NULL,        -- AES-256-GCM: iv|ciphertext|tag (base64)
+  checked_at TEXT NOT NULL,     -- последняя живая проверка GET /user
+  created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS user_settings (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id),
+  scan TEXT NOT NULL,           -- JSON UserScanSettings (третий слой конфига)
+  updated_at TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_jobs_unclaimed ON jobs(claimed_at) WHERE claimed_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_repos_language ON repos(language);
 CREATE INDEX IF NOT EXISTS idx_scores_repo ON scores(repo_id, model_version);
@@ -121,5 +153,12 @@ export function openDb(config: Config): Database {
   // v1.2 → v1.3: derived-метрики строки скоров (NULL у строк старых
   // прогонов — пересчёт scripts/score.ts заполняет последний скан)
   ensureColumn(db, "scores", "derived", "TEXT");
+  // v1.3 → v1.4 (В4): изоляция own/public и эвикция
+  ensureColumn(db, "repos", "rating_active", "INTEGER NOT NULL DEFAULT 1");
+  ensureColumn(db, "repos", "visibility", "TEXT NOT NULL DEFAULT 'public'");
+  ensureColumn(db, "jobs", "mode", "TEXT NOT NULL DEFAULT 'public'");
+  ensureColumn(db, "jobs", "user_id", "INTEGER");
+  ensureColumn(db, "jobs", "trigger_kind", "TEXT NOT NULL DEFAULT 'periodic'");
+  ensureColumn(db, "scores", "code_empty", "INTEGER");
   return db;
 }

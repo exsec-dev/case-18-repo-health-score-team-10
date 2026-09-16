@@ -36,12 +36,21 @@ describe("scanFromEnv: слои дефолты ← env", () => {
     expect(cfg.catalog.maxPages).toBe(DEFAULT_SCAN.catalog.maxPages);
   });
 
-  test("дефолты соответствуют решениям канвы (500МБ/10мин + 2000МБ/20мин/13мес)", () => {
-    expect(DEFAULT_SCAN.clone.maxBytes).toBe(500 * 1024 * 1024);
-    expect(DEFAULT_SCAN.clone.timeoutMs).toBe(10 * 60_000);
-    expect(DEFAULT_SCAN.degrade.maxBytes).toBe(2000 * 1024 * 1024);
-    expect(DEFAULT_SCAN.degrade.timeoutMs).toBe(20 * 60_000);
+  test("дефолты соответствуют RESOLVED 17.09 (1.5ГБ/20мин + деградация 2.5ГБ/25мин ВКЛ)", () => {
+    expect(DEFAULT_SCAN.clone.maxBytes).toBe(1.5 * 1024 * 1024 * 1024);
+    expect(DEFAULT_SCAN.clone.timeoutMs).toBe(20 * 60_000);
+    expect(DEFAULT_SCAN.degrade.maxBytes).toBe(2.5 * 1024 * 1024 * 1024);
+    expect(DEFAULT_SCAN.degrade.timeoutMs).toBe(25 * 60_000);
     expect(DEFAULT_SCAN.degrade.sinceMonths).toBe(13);
+    expect(DEFAULT_SCAN.degrade.enabled).toBe(true);
+    expect(DEFAULT_SCAN.rest.appsecMinIntervalMs).toBe(100);
     expect(DEFAULT_SCAN.extract).toEqual({ maxBlameFiles: 200, textCapBytes: 1_000_000, commentsTopN: 50 });
+  });
+
+  test("тогл деградации и appsec-интервал пробиваются env (В4)", () => {
+    const cfg = scanFromEnv({ SCAN_DEGRADE_ENABLED: "false", SCAN_APPSEC_MIN_INTERVAL_MS: "250" });
+    expect(cfg.degrade.enabled).toBe(false);
+    expect(cfg.rest.appsecMinIntervalMs).toBe(250);
+    expect(scanFromEnv({ SCAN_DEGRADE_ENABLED: "мусор" }).degrade.enabled).toBe(true);
   });
 });

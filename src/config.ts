@@ -18,6 +18,8 @@ export interface DegradeLimits {
   sinceMonths: number;
   timeoutMs: number;
   maxBytes: number;
+  /** ярус включён (RESOLVED 17.09, Алексей: 2.5ГБ/25мин по умолчанию ВКЛ) */
+  enabled: boolean;
 }
 
 /** Лимиты git-канала: первая попытка + деградационный ярус (§5.7). */
@@ -28,24 +30,49 @@ export interface ScanCloneLimits extends CloneLimits {
 export interface ScanConfig {
   clone: CloneLimits;
   degrade: DegradeLimits;
-  rest: { budget: number; minIntervalMs: number };
+  rest: { budget: number; minIntervalMs: number; appsecMinIntervalMs: number };
   catalog: { maxPages: number };
   extract: { maxBlameFiles: number; textCapBytes: number; commentsTopN: number };
 }
 
+/**
+ * Ярусы бюджета клона — RESOLVED 17.09 (Алексей): первый 1.5ГБ/20мин,
+ * деградация 2.5ГБ/25мин ВКЛ (зонд опроверг «потолок 1ГБ»: divkit
+ * 1.39ГБ проходит первым ярусом целиком). AppSec-интервал ≥100мс —
+ * лимиты частоты в доке SCS API не определены, бережность наша.
+ */
 export const DEFAULT_SCAN: ScanConfig = {
-  clone: { timeoutMs: 10 * 60_000, maxBytes: 500 * 1024 * 1024, pollMs: 5_000 },
-  // деградационный ярус 2000МБ/20мин (Алексей 15.09: 700 слишком близко к 500)
-  degrade: { sinceMonths: 13, timeoutMs: 20 * 60_000, maxBytes: 2000 * 1024 * 1024 },
-  rest: { budget: 1000, minIntervalMs: 50 },
+  clone: { timeoutMs: 20 * 60_000, maxBytes: 1.5 * 1024 * 1024 * 1024, pollMs: 5_000 },
+  degrade: { sinceMonths: 13, timeoutMs: 25 * 60_000, maxBytes: 2.5 * 1024 * 1024 * 1024, enabled: true },
+  rest: { budget: 1000, minIntervalMs: 50, appsecMinIntervalMs: 100 },
   catalog: { maxPages: 100 },
   extract: { maxBlameFiles: 200, textCapBytes: 1_000_000, commentsTopN: 50 },
 };
+
+export interface AuthConfig {
+  yaClientId: string | null;
+  yaClientSecret: string | null;
+  /** redirect URI приложения Я ID (стенд: http://localhost:8418/auth/ya/callback) */
+  redirect: string;
+  /** ключ подписи сессий и шифрования PAT (AES-256-GCM) */
+  appSecret: string | null;
+}
+
+export interface SchedulerConfig {
+  /** интервал ночного обхода каталога (сутки по умолчанию, ТЗ §6) */
+  intervalMs: number;
+  /** форс-полный рескан: игнорировать дифф last_updated, поставить все репо */
+  fullRescan: boolean;
+  /** лиз job'а: время, на которое job закрепляется за воркером */
+  leaseMs: number;
+}
 
 export interface Config {
   port: number;
   dataDir: string;
   sourcecraftToken: string | null;
+  auth: AuthConfig;
+  scheduler: SchedulerConfig;
   llm: {
     provider: "yandex" | "zai";
     mainModel: string;
@@ -81,6 +108,16 @@ function envInt(env: Record<string, string>, name: string): number | null {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : null;
 }
 
+/** Явные true/false/1/0; мусор → null = дефолт (fail-soft, как envInt). */
+function envBool(env: Record<string, string>, name: string): boolean | null {
+  const raw = env[name];
+  if (raw === undefined || raw === "") return null;
+  const v = raw.toLowerCase();
+  if (v === "1" || v === "true") return true;
+  if (v === "0" || v === "false") return false;
+  return null;
+}
+
 /** Чистая функция env → ScanConfig (тесты инъекцией, не файлами). */
 export function scanFromEnv(env: Record<string, string>): ScanConfig {
   const d = DEFAULT_SCAN;
@@ -94,10 +131,12 @@ export function scanFromEnv(env: Record<string, string>): ScanConfig {
       sinceMonths: d.degrade.sinceMonths,
       timeoutMs: envInt(env, "SCAN_DEGRADE_TIMEOUT_MS") ?? d.degrade.timeoutMs,
       maxBytes: envInt(env, "SCAN_DEGRADE_MAX_BYTES") ?? d.degrade.maxBytes,
+      enabled: envBool(env, "SCAN_DEGRADE_ENABLED") ?? d.degrade.enabled,
     },
     rest: {
       budget: envInt(env, "SCAN_BUDGET") ?? d.rest.budget,
       minIntervalMs: d.rest.minIntervalMs,
+      appsecMinIntervalMs: envInt(env, "SCAN_APPSEC_MIN_INTERVAL_MS") ?? d.rest.appsecMinIntervalMs,
     },
     catalog: { maxPages: envInt(env, "SCAN_CATALOG_MAX_PAGES") ?? d.catalog.maxPages },
     extract: { ...d.extract },
@@ -112,6 +151,17 @@ export function loadConfig(): Config {
     port: Number(env.PORT) > 0 ? Number(env.PORT) : 8418,
     dataDir: env.DATA_DIR ?? "data",
     sourcecraftToken: env.SOURCECRAFT_TOKEN ?? null,
+    auth: {
+      yaClientId: env.YA_CLIENT_ID ?? null,
+      yaClientSecret: env.YA_CLIENT_SECRET ?? null,
+      redirect: env.YA_REDIRECT_URI ?? "http://localhost:8418/auth/ya/callback",
+      appSecret: env.APP_SECRET ?? null,
+    },
+    scheduler: {
+      intervalMs: envInt(env, "SCHEDULER_INTERVAL_MS") ?? 24 * 60 * 60_000,
+      fullRescan: envBool(env, "SCHEDULER_FULL_RESCAN") ?? false,
+      leaseMs: envInt(env, "SCHEDULER_LEASE_MS") ?? 30 * 60_000,
+    },
     llm: {
       provider,
       mainModel,
