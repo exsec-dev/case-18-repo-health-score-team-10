@@ -180,9 +180,24 @@ export async function cloneWithDegrade(url: string, tmpDir: string = tmpdir(), l
   };
 }
 
-/** Закон 3: клон удаляется сразу после извлечения фактов. */
-export function cleanupClone(dir: string): void {
-  rmSync(dir, { recursive: true, force: true });
+/**
+ * Закон 3: клон удаляется сразу после извлечения фактов.
+ * Fail-soft (ERROR_LOG 16.09): Windows держит дескрипторы убитых
+ * git-субпроцессов и отдаёт EBUSY — сбой УБОРКИ не должен рушить
+ * успешный сбор. Ретраи с паузой, затем возврат ошибки вызывающему
+ * (каталог остаётся ОС; следующий скан кладёт клон в новый mkdtemp).
+ */
+export function cleanupClone(dir: string, attempts = 3, pauseMs = 250): string | null {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: pauseMs });
+      return null;
+    } catch (e) {
+      if (i === attempts - 1) return String((e as Error).message).slice(0, 160);
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, pauseMs);
+    }
+  }
+  return null;
 }
 
 /** Полный набор git-фактов как no-data (клон не удался/пустой). */

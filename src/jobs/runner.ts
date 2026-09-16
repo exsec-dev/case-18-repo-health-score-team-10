@@ -98,6 +98,18 @@ function upsertRepo(
   return row.id;
 }
 
+/**
+ * Аварийный fallback ДОПОЛНЯЕТ набор, но НЕ затирает уже собранные
+ * факты того же kind (insertFacts пишет INSERT OR REPLACE по PK
+ * scan_id+category+key). ERROR_LOG 16.09: сбой уборки клона после
+ * успешного extractFacts подменял живые git-факты на no-data и
+ * обнулял Score репозитория.
+ */
+export function fillMissingFacts(collected: Fact[], fallback: Fact[]): Fact[] {
+  const have = new Set(collected.map((f) => f.key));
+  return fallback.filter((f) => !have.has(f.key));
+}
+
 function insertFacts(db: Database, scanId: number, facts: Fact[]): void {
   const stmt = db.query(
     `INSERT OR REPLACE INTO facts (scan_id, category, key, value, status, source, collected_at)
@@ -160,7 +172,10 @@ export async function runScan(deps: ScanDeps, slug: string, opts: { trigger?: st
               })),
             );
           } finally {
-            cleanupClone(clone.dir); // закон 3: клон удаляется всегда
+            // закон 3: клон удаляется всегда; сбой уборки — fail-soft
+            // (ERROR_LOG 16.09: EBUSY рушил успешно собранный канал)
+            const cleanupError = cleanupClone(clone.dir);
+            if (cleanupError) console.error(`[scan ${scanId}] cleanup ${clone.dir}: ${cleanupError}`);
           }
         } else {
           const reason = clone.reason === "git" ? "other" : "limits";
@@ -170,7 +185,7 @@ export async function runScan(deps: ScanDeps, slug: string, opts: { trigger?: st
       }
     } catch (e) {
       gitChannel = "fatal";
-      facts.push(...gitFactsNoData("other", String((e as Error).message).slice(0, 160), startedAt));
+      facts.push(...fillMissingFacts(facts, gitFactsNoData("other", String((e as Error).message).slice(0, 160), startedAt)));
     }
 
     // --- REST-канал ---

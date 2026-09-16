@@ -3,13 +3,14 @@
 // факты со scan_id/status/source/collected_at, повторный скан = новый
 // scan_id, job-строка одна на репо (UNIQUE).
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config";
 import { openDb } from "../src/db";
-import { runScan, GitChannelOutcome, ScanDeps } from "../src/jobs/runner";
+import { fillMissingFacts, runScan, GitChannelOutcome, ScanDeps } from "../src/jobs/runner";
 import { okFact, noDataFact, badChannelFact, Fact } from "../src/collectors/facts";
+import { cleanupClone, gitFactsNoData } from "../src/collectors/git";
 import type { Database } from "bun:sqlite";
 import type { RestCollectResult } from "../src/collectors/rest";
 
@@ -193,5 +194,42 @@ describe("В2/Б5: score-hook — конец скана пишет scores/recomm
     const recs = db.query("SELECT rule_id FROM recommendations WHERE scan_id = ? ORDER BY priority").all(res.scanId) as { rule_id: string }[];
     expect(recs.map((r) => r.rule_id)).toContain("start-tracker");
     expect(recs.map((r) => r.rule_id)).toContain("license-missing");
+  });
+});
+
+// ERROR_LOG 16.09: сбой уборки клона не должен разрушать успешный
+// git-канал. Два инварианта отдельно — путь «rm бросил после
+// extractFacts» не воспроизводится портируемо, поэтому проверяем
+// механизмы, из которых он был собран.
+describe("EBUSY-регрессия (16.09): уборка клона не рушит собранное", () => {
+  test("fillMissingFacts: fallback дополняет, но не затирает собранные kind'ы", () => {
+    const collected: Fact[] = [
+      okFact("activity.git.summary", { commits: 42 }, "git"),
+      okFact("docs.presence", { readme: true }, "git"),
+    ];
+    const fallback = gitFactsNoData("other", "EBUSY: resource busy or locked");
+    const added = fillMissingFacts(collected, fallback);
+
+    const addedKinds = added.map((f) => f.key);
+    expect(addedKinds).not.toContain("activity.git.summary");
+    expect(addedKinds).not.toContain("docs.presence");
+    expect(addedKinds).toContain("code.todo"); // не собранный kind — дополняется
+    expect(added.every((f) => f.status === "no-data")).toBe(true);
+    // объединение: живые факты на месте, дублей по kind нет
+    const merged = [...collected, ...added];
+    expect(new Set(merged.map((f) => f.key)).size).toBe(merged.length);
+    expect(merged.find((f) => f.key === "activity.git.summary")!.status).toBe("ok");
+  });
+
+  test("cleanupClone: удаляет каталог, возвращает null; ошибку отдаёт значением, не исключением", () => {
+    const victim = mkdtempSync(join(tmpdir(), "rh-cleanup-"));
+    writeFileSync(join(victim, "HEAD"), "ref: refs/heads/main\n");
+    expect(cleanupClone(victim)).toBeNull();
+    expect(existsSync(victim)).toBe(false);
+    // повторная уборка уже удалённого — не ошибка (force)
+    expect(cleanupClone(victim)).toBeNull();
+    // заведомо невалидный путь: строка-диагностика вместо throw
+    const err = cleanupClone("\0:invalid", 1, 1);
+    expect(typeof err).toBe("string");
   });
 });
