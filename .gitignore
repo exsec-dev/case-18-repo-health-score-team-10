@@ -7,3 +7,4 @@ data/
 .tmp-*
 reports/shots/
 .idea/
+package-lock.json
