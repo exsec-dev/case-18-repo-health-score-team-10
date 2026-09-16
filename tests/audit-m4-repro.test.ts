@@ -1,9 +1,11 @@
 // audit-m4-repro.test.ts — воспроизведение CRITICAL/HIGH находок аудит-пары
 // В4 (reports/2026-09-17-m4-audit-pair.md). Каждый тест описывает
-// ПРАВИЛЬНОЕ поведение, поэтому на текущем коде он красный.
-// По умолчанию тесты помечены test.failing: набор зелёный, пока баг жив,
-// и «краснеет», как только баг починен, — сигнал снять пометку.
-// Строгий режим (видно реальные падения): AUDIT_STRICT=1 bun test tests/audit-m4-repro.test.ts
+// ПРАВИЛЬНОЕ поведение. До хотфикса В4.1 тесты были помечены test.failing
+// (набор зелёный, пока баг жив); в В4.1 все находки закрыты, пометки сняты
+// (Б2–Б6) — тесты обычные и зелёные в обоих режимах. Адаптации под
+// контракты К1–К5 сохраняют утверждение находки (комментарии у тестов).
+// Строгий режим оставлен для совместимости команды приёмки:
+// AUDIT_STRICT=1 bun test tests/audit-m4-repro.test.ts
 // Сети нет: сервер без токенов, REST/каталог — локальный мок, git/AppSec — фейки.
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
@@ -20,7 +22,6 @@ import { claimNext, enqueueScan, processJob, startScheduler } from "../src/jobs/
 import { MODEL_VERSION } from "../src/score/model";
 import { seedScan, seedScore, type ApiTestDb } from "./api-fixtures";
 
-const repro = process.env.AUDIT_STRICT ? test : test.failing;
 const ROOT = join(import.meta.dir, "..");
 const cleanups: (() => void)[] = [];
 afterAll(() => {
