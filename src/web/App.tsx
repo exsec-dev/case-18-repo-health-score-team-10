@@ -26,7 +26,7 @@ export function App() {
         </Link>
         <Link {...linkProps("/me")}>
           <Text color={route.kind === "me" || route.kind === "me-repo" ? "primary" : "secondary"}>
-            {me.state.kind === "ok" ? `Мой кабинет (${me.state.data.login})` : "Мой кабинет"}
+            {me.state.kind === "ok" && me.state.data.login !== null ? `Мой кабинет (${me.state.data.login})` : "Мой кабинет"}
           </Text>
         </Link>
         {route.kind === "repo" && <Text color="secondary">{route.org}/{route.repo}</Text>}

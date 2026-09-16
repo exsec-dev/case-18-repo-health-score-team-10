@@ -4,7 +4,7 @@
 import { loadConfig } from "../src/config";
 import { openDb } from "../src/db";
 import { makeScClient } from "../src/collectors/http";
-import { runScan } from "../src/jobs/runner";
+import { runScan, scanCloneLimitsOf } from "../src/jobs/runner";
 
 const slug = process.argv[2];
 if (!slug || !/^[a-z0-9_.-]+\/[a-z0-9_.-]+$/i.test(slug)) {
@@ -20,7 +20,11 @@ const client = makeScClient({
   maxRequests: config.scan.rest.budget,
 });
 
-const result = await runScan({ db, scClient: client }, slug, { trigger: process.env.SCAN_TRIGGER ?? "user" });
+const result = await runScan(
+  { db, scClient: client, cloneLimits: scanCloneLimitsOf(config.scan), appsecMinIntervalMs: config.scan.rest.appsecMinIntervalMs },
+  slug,
+  { trigger: process.env.SCAN_TRIGGER ?? "user" },
+);
 
 console.log(`scan_id=${result.scanId} repo_id=${result.repoId} status=${result.status}`);
 console.log(`  facts: ok=${result.counts.ok} no-data=${result.counts.noData} bad=${result.counts.bad}`);

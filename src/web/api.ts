@@ -8,7 +8,8 @@ import type { MyRepoEntry } from "../api/me";
 export type { MetaResponse, RatingResponse, RepoCard, MyRepoEntry };
 
 export interface MeResponse {
-  login: string;
+  /** null = аноним (зонд шапки отдаёт 200 и без сессии) */
+  login: string | null;
   hasPat: boolean;
   patCheckedAt: string | null;
 }

@@ -134,8 +134,11 @@ const server = Bun.serve({
     },
     // ---------- /api/me: аккаунт, PAT-окно, настройки, мои репо ----------
     "/api/me": (req) => {
+      // фоновый зонд шапки: аноним — это 200 с login:null, а не 401 —
+      // браузер логирует каждый не-2xx в консоль, а чистая консоль —
+      // критерий cdp-харнесса В3; остальные me-эндпоинты остаются 401
       const user = sessionOf(req);
-      if (!user) return unauthorized();
+      if (!user) return Response.json({ login: null, hasPat: false, patCheckedAt: null });
       const meta = config.auth.appSecret ? patMeta(db, user.userId) : null;
       return Response.json({
         login: user.login,
@@ -175,7 +178,15 @@ const server = Bun.serve({
       const user = sessionOf(req);
       if (!user) return unauthorized();
       if (req.method === "GET") {
-        return Response.json({ scan: readUserScanSettings(db, user.userId) });
+        return Response.json({
+          scan: readUserScanSettings(db, user.userId),
+          // серверные дефолты для показа рядом с настройками (ярусы RESOLVED 17.09)
+          defaults: {
+            maxBytes: config.scan.clone.maxBytes,
+            timeoutMs: config.scan.clone.timeoutMs,
+            degrade: { enabled: config.scan.degrade.enabled, maxBytes: config.scan.degrade.maxBytes, timeoutMs: config.scan.degrade.timeoutMs },
+          },
+        });
       }
       if (req.method === "PUT") {
         const body = (await req.json().catch(() => null)) as { scan?: unknown } | null;

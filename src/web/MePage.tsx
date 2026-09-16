@@ -54,6 +54,9 @@ export function MePage() {
     return <LoginOffer />;
   }
   const data = me.state.data;
+  if (data.login === null) {
+    return <LoginOffer />;
+  }
   return (
     <Flex direction="column" gap={6}>
       <Flex direction="column" gap={1}>

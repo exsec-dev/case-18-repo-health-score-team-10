@@ -76,25 +76,35 @@ export interface ScanResult {
 
 const DEFAULT_GIT_URL = (org: string, repo: string) => `https://git@git.sourcecraft.dev/${org}/${repo}.git`;
 
+/**
+ * Git-URL own-режима с PAT (дока PAT: `git clone https://anyname:<PAT>@…`):
+ * свой репо бывает приватным — анонимный клон падает с Authentication
+ * failed (найдено живой приёмкой В4: наш репо приватный). Креды в URL
+ * существуют только внутри процесса; stderr git скраббится (git.ts).
+ */
+const patGitUrl = (pat: string, org: string, repo: string) => `https://repo-health:${encodeURIComponent(pat)}@git.sourcecraft.dev/${org}/${repo}.git`;
+
 /** ScanConfig → лимиты шва cloneLimits (clone + degrade одним объектом). */
 export function scanCloneLimitsOf(scan: ScanConfig): ScanCloneLimits {
   return { ...scan.clone, degrade: scan.degrade };
 }
 
-export function upsertRepo(
-  db: Database,
-  org: string,
-  repo: string,
-  meta: {
-    title?: string | null;
-    language?: string | null;
-    likes?: number | null;
-    lastActivityAt?: string | null;
-    forks?: number | null;
-    reactionCounts?: { type: string; count: number }[] | null;
-    visibility?: string | null;
-  } = {},
-): number {
+export interface RepoUpsertMeta {
+  title?: string | null;
+  language?: string | null;
+  likes?: number | null;
+  lastActivityAt?: string | null;
+  forks?: number | null;
+  reactionCounts?: { type: string; count: number }[] | null;
+  /** явно переданная видимость; БЕЗ ключа существующая строка не трогается
+   *  (живая приёмка В4: upsert без меты перезаписывал 'private' на 'public') */
+  visibility?: string | null;
+}
+
+export function upsertRepo(db: Database, org: string, repo: string, meta: RepoUpsertMeta = {}): number {
+  // новая строка без меты получает дефолт 'public' (строки В1–В3 — каталог),
+  // но UPDATE-ветка меняет visibility ТОЛЬКО когда мета принесла значение
+  const updateVisibility = "visibility" in meta ? "visibility = excluded.visibility," : "";
   db.query(
     `INSERT INTO repos (org_slug, repo_slug, title, language, likes, last_activity_at, forks, reaction_counts, visibility)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -105,7 +115,8 @@ export function upsertRepo(
        last_activity_at = COALESCE(excluded.last_activity_at, last_activity_at),
        forks = COALESCE(excluded.forks, forks),
        reaction_counts = COALESCE(excluded.reaction_counts, reaction_counts),
-       visibility = COALESCE(excluded.visibility, visibility)`,
+       ${updateVisibility}
+       id = id`,
   ).run(
     org,
     repo,
@@ -115,8 +126,6 @@ export function upsertRepo(
     meta.lastActivityAt ?? null,
     meta.forks ?? null,
     meta.reactionCounts ? JSON.stringify(meta.reactionCounts) : null,
-    // неизвестная видимость = public (каталог/REST публичных сканов В1–В3);
-    // own-скан приватного принесёт реальное значение из repo-GET
     meta.visibility ?? "public",
   );
   const row = db.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number };
@@ -162,6 +171,9 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
 
   const limits = deps.cloneLimits ?? scanCloneLimitsOf(DEFAULT_SCAN);
   const extract = deps.extract ?? DEFAULT_SCAN.extract;
+  // own с PAT → клон с кредами (депс-шов остаётся главнее для тестов)
+  const gitUrlOf =
+    deps.gitUrl ?? (mode === "own" && opts.userToken ? (org: string, repo: string) => patGitUrl(opts.userToken!, org, repo) : DEFAULT_GIT_URL);
   const repoId = upsertRepo(deps.db, org, repo);
   const scan = deps.db.query("INSERT INTO scans (repo_id, started_at, status, trigger) VALUES (?, ?, 'running', ?)").run(repoId, startedAt, opts.trigger ?? "probe");
   const scanId = Number(scan.lastInsertRowid);
@@ -188,7 +200,7 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
         facts.push(...out.facts);
         if (out.failure) gitChannel = `no-data(${out.failure})`;
       } else {
-        const url = (deps.gitUrl ?? DEFAULT_GIT_URL)(org, repo);
+        const url = gitUrlOf(org, repo);
         const clone = await cloneWithDegrade(url, undefined, limits);
         if (clone.ok) {
           gitChannel = clone.historyTruncatedSince ? "ok(degraded)" : "ok";

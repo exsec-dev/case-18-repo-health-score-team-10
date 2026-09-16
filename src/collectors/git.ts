@@ -90,6 +90,14 @@ const HAVE_SETSID = Boolean(Bun.which("setsid"));
  * (очистка — cleanupClone(dir) в finally вызывающего).
  * opts.shallowSince — деградационный режим (--shallow-since, §5.7).
  */
+/**
+ * Креды из URL (https://user:pat@host) не едут в детали ошибок/факты:
+ * git печатает URL в stderr — PAT юзера не должен попадать в БД.
+ */
+export function scrubCredentials(text: string): string {
+  return text.replace(/(https?:\/\/)[^@\/\s]+@/g, "$1***@");
+}
+
 export async function cloneBare(
   url: string,
   tmpDir: string = tmpdir(),
@@ -132,7 +140,7 @@ export async function cloneBare(
       /* stdout/stderr ignore */
     }
     rmSync(dir, { recursive: true, force: true });
-    return { ok: false, reason: "git", detail: stderr || `git clone exited ${code}`, elapsedMs: Date.now() - started };
+    return { ok: false, reason: "git", detail: scrubCredentials(stderr) || `git clone exited ${code}`, elapsedMs: Date.now() - started };
   }
   bytes = await duBytes(dir);
   return { ok: true, dir, bytes, elapsedMs: Date.now() - started };

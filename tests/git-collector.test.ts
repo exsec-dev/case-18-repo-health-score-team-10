@@ -8,7 +8,7 @@ import { randomFillSync } from "node:crypto";
 import { existsSync, mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cloneBare, cloneWithDegrade, cleanupClone, extractFacts, isRobotPattern, robotIntervalFlags, readmeSectionFlags, ciHasSteps } from "../src/collectors/git";
+import { cloneBare, cloneWithDegrade, cleanupClone, extractFacts, isRobotPattern, robotIntervalFlags, readmeSectionFlags, ciHasSteps, scrubCredentials } from "../src/collectors/git";
 import { parseYamlSubset } from "../src/collectors/yamlmini";
 import { Fact } from "../src/collectors/facts";
 
@@ -420,5 +420,16 @@ describe("В2/Б1 доп: has_steps на ЖИВЫХ формах платфор�
     const parsed = parseYamlSubset("script:\n  - |\n    echo hi\n") as { script: { __block: string }[] };
     expect(parsed.script[0]!.__block).toContain("echo hi");
     expect(ciHasSteps(parseYamlSubset("workflows:\n  w:\n    tasks:\n      - name: t\n        cubes:\n          - name: c\n            script:\n              - |\n"))).toBe(false);
+  });
+});
+
+describe("scrubCredentials (В4/Б6: PAT не едет в детали ошибок git)", () => {
+  test("креды https://user:pat@ хоста вырезаются из stderr-подобных строк", () => {
+    const dirty = "fatal: Authentication failed for 'https://repo-health:pat-secret%40x@git.sourcecraft.dev/o/r.git/'";
+    const clean = scrubCredentials(dirty);
+    expect(clean).not.toContain("pat-secret");
+    expect(clean).toContain("https://***@git.sourcecraft.dev/o/r.git/");
+    expect(scrubCredentials("no credentials here")).toBe("no credentials here");
+    expect(scrubCredentials("https://git@git.sourcecraft.dev/x")).toBe("https://***@git.sourcecraft.dev/x");
   });
 });
