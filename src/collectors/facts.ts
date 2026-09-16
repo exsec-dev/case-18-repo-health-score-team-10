@@ -5,8 +5,10 @@
 // документируется на месте, В2 расширит.
 export type FactStatus = "ok" | "no-data" | "bad";
 
-/** no-data reason — ключ внутри value-JSON (отдельной колонки нет). */
-export type NoDataReason = "access" | "limits" | "empty" | "other";
+/** no-data reason — ключ внутри value-JSON (отдельной колонки нет).
+ *  В4/Б2: no-scan/incomplete — ветки AppSec (скана нет/не завершён,
+ *  неполный ответ ≠ отсутствие уязвимостей). */
+export type NoDataReason = "access" | "limits" | "empty" | "no-scan" | "incomplete" | "other";
 
 export interface Fact {
   /** kind целиком, напр. "docs.presence" */
@@ -27,6 +29,7 @@ const KIND_CATEGORIES: Record<string, string> = {
   docs: "documentation",
   cicd: "cicd",
   security: "security",
+  appsec: "security", // appsec.findings (В4/Б2) — категория Security
   activity: "activity",
   issues: "issues",
   code: "code",
@@ -66,6 +69,11 @@ export const KINDS = {
   // fixme — только FIXME, older_180d — по ВСЕМ маркерам (TODO+FIXME,
   // blame-бюджет ≤ blamed_files файлов из todo_files)
   "code.todo": "{count,fixme,older_180d,todo_files,blamed_files}",
+  // В4/Б2 — официальный AppSec API (только агрегаты и стабильные id;
+  // severity_counts классифицирует ПЛАТФОРМА именованными фильтрами,
+  // числовые severity хранятся как raw без декодирования)
+  "appsec.findings":
+    "{severity_counts,resolved_share,secrets_critical,backlog:{open_groups,open_findings,engines,severity_raw_counts},provenance:{scan_uuid,commit_hash,time_finished,group_ids}} | no-data{reason}",
 } as const;
 
 export type Kind = keyof typeof KINDS;

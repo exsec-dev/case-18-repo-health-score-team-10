@@ -1,0 +1,31 @@
+{
+ "note": "scan finished with zero defect groups = ok fact with zero counts (\u043f\u0443\u0441\u0442\u043e\u0439 \u0441\u043a\u0430\u043d \u2260 \u043d\u0435\u0442 \u0441\u043a\u0430\u043d\u0430)",
+ "repoId": "aaaa-empty-0001",
+ "scansLatest": {
+  "id": 2,
+  "uuid": "empty-scan-uuid-0001",
+  "status": 1,
+  "commitHash": "e000000000000000000000000000000000000001",
+  "timeStarted": 1789570159277,
+  "timeFinished": 1789570610046,
+  "isLatest": true,
+  "gitReferenceName": null,
+  "pullRequestId": null,
+  "newDelta": 0,
+  "closedDelta": 0,
+  "totalDefectGroups": 0,
+  "foundDefectGroups": 0,
+  "openDefectGroups": 0
+ },
+ "defectGroupsPage": {
+  "data": [],
+  "nextPageToken": "",
+  "totalSize": 0
+ },
+ "severityFilterTotalSize": {
+  "CRITICAL": 0,
+  "HIGH": 0,
+  "MEDIUM": 0,
+  "LOW": 0
+ }
+}

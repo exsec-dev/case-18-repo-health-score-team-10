@@ -1,0 +1,15 @@
+{
+ "note": "scan started but not finished: timeFinished null \u2192 no-data no-scan (NOT 'no findings')",
+ "repoId": "dddd-run-0004",
+ "scansLatest": {
+  "id": 4,
+  "uuid": "run-scan-uuid-0004",
+  "status": 0,
+  "commitHash": "u000000000000000000000000000000000000004",
+  "timeStarted": 1789570159277,
+  "timeFinished": null,
+  "isLatest": true,
+  "gitReferenceName": null,
+  "pullRequestId": null
+ }
+}

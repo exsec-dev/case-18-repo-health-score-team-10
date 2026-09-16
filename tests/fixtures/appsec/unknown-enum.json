@@ -1,0 +1,62 @@
+{
+ "note": "unknown numeric status/severity, string severity, null numerics, extra fields \u2014 allowlist survives",
+ "repoId": "eeee-weird-0006",
+ "scansLatest": {
+  "id": 5,
+  "uuid": "weird-scan-uuid-0006",
+  "status": 999,
+  "commitHash": null,
+  "timeStarted": 1789570159277,
+  "timeFinished": 1789570610046,
+  "isLatest": false,
+  "gitReferenceName": "refs/heads/main",
+  "pullRequestId": null,
+  "openDefectGroups": null,
+  "totalDefectGroups": null,
+  "futureField": {
+   "x": 1
+  }
+ },
+ "defectGroupsPage": {
+  "data": [
+   {
+    "id": 99,
+    "ruleName": "Weird Rule",
+    "codeBlock": "",
+    "fileName": "sanitized",
+    "latestCommit": "w000000000000000000000000000000000000005",
+    "latestTimeFound": 1789570186053,
+    "gitRepo": "143138653021974842",
+    "status": 777,
+    "severity": "HIGH",
+    "cvssScore": null,
+    "engine": "FutureEngine",
+    "neuroTriageUuid": null,
+    "neuroScore": 42,
+    "firstCommit": null,
+    "firstTimeFound": null,
+    "uuid": "weird-uuid-0005",
+    "ruleId": "weird-rule",
+    "findingsCount": 3,
+    "publicId": 99,
+    "fixOperationUuid": null,
+    "engineType": 99,
+    "extraField": {
+     "nested": true
+    }
+   }
+  ],
+  "nextPageToken": "",
+  "totalSize": 1,
+  "unlistedExtra": [
+   1,
+   2
+  ]
+ },
+ "severityFilterTotalSize": {
+  "CRITICAL": 0,
+  "HIGH": 1,
+  "MEDIUM": 0,
+  "LOW": 0
+ }
+}

@@ -1,0 +1,8 @@
+{
+ "note": "unauthorized PAT",
+ "repoId": "cccc-401-0003",
+ "scansLatestStatus": 401,
+ "scansLatestBody": {
+  "error": "Unauthorized"
+ }
+}

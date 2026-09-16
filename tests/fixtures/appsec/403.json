@@ -1,0 +1,8 @@
+{
+ "note": "live shape 17.09: examples/appsec-analysis \u2014 public repo, no right (Q&A: public does not grant rights)",
+ "repoId": "019abd1b-5124-759a-90bd-7a0ffbb97fb8",
+ "scansLatestStatus": 403,
+ "scansLatestBody": {
+  "error": "Insufficient permissions for identifiers=[RepositoryIdentifiers(gitRepo=019abd1b-5124-759a-90bd-7a0ffbb97fb8, repoPublicUuid=)]"
+ }
+}
