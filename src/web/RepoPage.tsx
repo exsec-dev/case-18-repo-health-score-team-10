@@ -22,6 +22,7 @@ import {
   fmtNumber,
   fmtScore,
   fmtSubmetric,
+  gitLimitsText,
   scanStatusText,
 } from "./format";
 import { linkProps } from "./router";
@@ -327,6 +328,9 @@ function Markers({ card }: { card: Card }) {
       label: "факты из истории",
       text: "Часть источников ответила сбоем канала, поэтому в расчёт пошли последние успешные факты предыдущих сканов. Сбой трубы — не отсутствие данных, и он не превращается в премию или штраф.",
     });
+  }
+  if (m.gitLimits) {
+    rows.push({ key: "git-limits", label: "репозиторий больше лимита сервиса", text: gitLimitsText(m.gitLimits) });
   }
   if (m.historyTruncatedSince) {
     rows.push({

@@ -19,12 +19,6 @@ export interface MyReposResponse {
   entries: MyRepoEntry[];
 }
 
-export interface ScanSettings {
-  useDefaults: boolean;
-  maxBytes: number | null;
-  timeoutMs: number | null;
-}
-
 export async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(url, { signal });
   if (!res.ok) {

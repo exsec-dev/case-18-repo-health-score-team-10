@@ -29,7 +29,6 @@ import {
 } from "./auth/session";
 import { deletePat, getPat, patMeta, storePat } from "./auth/pat";
 import { buildAuthUrl, exchangeCode } from "./auth/ya";
-import { parseUserScanSettings, readUserScanSettings, writeUserScanSettings } from "./auth/settings";
 import { makeScClient } from "./collectors/http";
 import index from "./web/index.html";
 
@@ -100,14 +99,14 @@ const server = Bun.serve({
     },
     // единая карточка (К2): состав ответа — по доступу зрителя из cookie
     "/api/repos/:org/:repo": async (req) => {
-      const card = await getRepoCardForViewer(db, req.params.org, req.params.repo, viewerAccess(req));
+      const card = await getRepoCardForViewer(db, req.params.org, req.params.repo, viewerAccess(req), { limits: config.scan });
       if (!card) return notFound(`репозиторий ${req.params.org}/${req.params.repo} не найден в каталоге`);
       return Response.json(card);
     },
     "/api/repos/:org/:repo/report.md": async (req) => {
       const { org, repo } = req.params;
       // тот же сборщик карточки с тем же зрителем (К2)
-      const card = await getRepoCardForViewer(db, org, repo, viewerAccess(req));
+      const card = await getRepoCardForViewer(db, org, repo, viewerAccess(req), { limits: config.scan });
       if (!card) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
       return new Response(renderRepoReport(card), {
         headers: {
@@ -156,7 +155,7 @@ const server = Bun.serve({
         headers: { location: "/me", "set-cookie": sessionCookieHeader(config.auth.appSecret, cookie, SESSION_TTL_MS) },
       });
     },
-    // ---------- /api/me: аккаунт, PAT-окно, настройки, мои репо ----------
+    // ---------- /api/me: аккаунт, PAT-окно, мои репо (настройки бюджетов удалены — К5) ----------
     "/api/me": (req) => {
       // фоновый зонд шапки: аноним — это 200 с login:null, а не 401 —
       // браузер логирует каждый не-2xx в консоль, а чистая консоль —
@@ -199,29 +198,6 @@ const server = Bun.serve({
         return Response.json({ ok: true });
       }
       return Response.json({ error: { code: "bad_query", message: "ожидался PUT или DELETE" } }, { status: 405 });
-    },
-    "/api/me/settings": async (req) => {
-      const user = sessionOf(req);
-      if (!user) return unauthorized();
-      if (req.method === "GET") {
-        return Response.json({
-          scan: readUserScanSettings(db, user.userId),
-          // серверные дефолты для показа рядом с настройками (ярусы RESOLVED 17.09)
-          defaults: {
-            maxBytes: config.scan.clone.maxBytes,
-            timeoutMs: config.scan.clone.timeoutMs,
-            degrade: { enabled: config.scan.degrade.enabled, maxBytes: config.scan.degrade.maxBytes, timeoutMs: config.scan.degrade.timeoutMs },
-          },
-        });
-      }
-      if (req.method === "PUT") {
-        const body = (await req.json().catch(() => null)) as { scan?: unknown } | null;
-        const parsed = parseUserScanSettings(body?.scan);
-        if (!parsed.ok) return badQuery(parsed.message);
-        writeUserScanSettings(db, user.userId, parsed.settings);
-        return Response.json({ ok: true, scan: parsed.settings });
-      }
-      return Response.json({ error: { code: "bad_query", message: "ожидался GET или PUT" } }, { status: 405 });
     },
     "/api/me/repos": async (req) => {
       const user = sessionOf(req);

@@ -124,7 +124,7 @@ CREATE TABLE IF NOT EXISTS user_tokens (
 );
 CREATE TABLE IF NOT EXISTS user_settings (
   user_id INTEGER PRIMARY KEY REFERENCES users(id),
-  scan TEXT NOT NULL,           -- JSON UserScanSettings (третий слой конфига)
+  scan TEXT NOT NULL,           -- JSON; бюджеты скана из GUI удалены (К5 В4.1), таблица оставлена под В5
   updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_unclaimed ON jobs(claimed_at) WHERE claimed_at IS NULL;

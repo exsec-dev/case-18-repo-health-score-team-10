@@ -116,7 +116,7 @@ async function main() {
   console.log(`\nаноним: карточка → ${anon.status}; утечка CI/Security: ${anonText.includes("severity_counts") || anonText.includes("runs_count") ? "ДА — ПРОВАЛ" : "нет"}`);
 
   // 8) PAT не утечки: ответы me-поверхности не содержат значения токена
-  const surfaces = ["/api/me", "/api/me/repos", "/api/me/settings", `/api/repos/${enc}`];
+  const surfaces = ["/api/me", "/api/me/repos", `/api/repos/${enc}`];
   let leaked = false;
   for (const s of surfaces) {
     const res = await j(s);
@@ -125,7 +125,7 @@ async function main() {
       console.error(`УТЕЧКА: ${s} содержит PAT`);
     }
   }
-  console.log(leaked ? "ПАТ УТЕК — ПРОВАЛ" : "PAT не утечки: 4 поверхности чисты (значение отсутствует в ответах)");
+  console.log(leaked ? "ПАТ УТЕК — ПРОВАЛ" : "PAT не утечки: 3 поверхности чисты (значение отсутствует в ответах)");
   if (leaked) process.exit(1);
   console.log("\nown-сценарий принят");
 }

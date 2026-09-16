@@ -8,6 +8,8 @@
 import type { Database } from "bun:sqlite";
 import { CHANNEL_FALLBACK_KINDS, READ_KINDS, type CategoryScore } from "../score/compute";
 import { NO_PAT_ACCESS, type AccessRepo, type AccessResult, type ChannelAccess } from "../auth/access";
+import { DEFAULT_SCAN, type ScanConfig } from "../config";
+import type { GitLimitsMarker } from "../web/format";
 import type { DerivedMetrics } from "../score/derived";
 import { CATEGORY_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, MODEL_VERSION } from "../score/model";
 
@@ -311,6 +313,8 @@ export interface CardMarkers {
   staleFacts: boolean;
   /** без-кодовое репо (Q&A №13): Score 0 как данные «проекта нет», не NULL */
   codeEmpty: boolean;
+  /** git-канал упёрся в лимиты оператора (факт no-data(limits)) — лимиты для текста причины (К5); иначе null */
+  gitLimits: GitLimitsMarker | null;
 }
 
 export interface CardScan {
@@ -510,13 +514,14 @@ export async function getRepoCardForViewer(
   org: string,
   repo: string,
   resolve: (repo: AccessRepo) => Promise<AccessResult>,
+  opts: { limits?: ScanConfig } = {},
 ): Promise<RepoCard | null> {
   const r = findRepoRow(db, org, repo);
   if (!r) return null;
   // эвиктированный публичный — 404 всем, проверять доступ незачем
   if (r.visibility === "public" && r.rating_active !== 1) return null;
   const access = await resolve({ id: r.id, org: r.org_slug, repo: r.repo_slug, visibility: r.visibility });
-  return getRepoCard(db, org, repo, { access });
+  return getRepoCard(db, org, repo, { access, limits: opts.limits });
 }
 
 /**
@@ -524,7 +529,12 @@ export async function getRepoCardForViewer(
  * null = репозитория нет или он не виден зрителю (404). Есть репо без
  * скана — это 200.
  */
-export function getRepoCard(db: Database, org: string, repo: string, opts: { access?: AccessResult } = {}): RepoCard | null {
+export function getRepoCard(
+  db: Database,
+  org: string,
+  repo: string,
+  opts: { access?: AccessResult; limits?: ScanConfig } = {},
+): RepoCard | null {
   const access = opts.access ?? NO_PAT_ACCESS;
   const r = findRepoRow(db, org, repo);
   if (!r) return null;
@@ -562,7 +572,7 @@ export function getRepoCard(db: Database, org: string, repo: string, opts: { acc
     return {
       repo: cardRepo,
       access: cardAccess,
-      markers: { historyTruncatedSince: null, ciConfigOnlyCap: false, staleFacts: false, codeEmpty: false },
+      markers: { historyTruncatedSince: null, ciConfigOnlyCap: false, staleFacts: false, codeEmpty: false, gitLimits: null },
       scan: null,
       score: null,
       derived: null,
@@ -672,6 +682,7 @@ export function getRepoCard(db: Database, org: string, repo: string, opts: { acc
     ciConfigOnlyCap: ciOpen && cicdNoData.includes("config-only cap"),
     staleFacts: Array.isArray(stale) && stale.length > 0,
     codeEmpty: scoreRow.code_empty === 1,
+    gitLimits: gitLimitsHit(factRows) ? gitLimitsOf(opts.limits ?? DEFAULT_SCAN) : null,
   };
 
   return {
@@ -685,6 +696,22 @@ export function getRepoCard(db: Database, org: string, repo: string, opts: { acc
     derived: scoreRow.derived === null ? null : (JSON.parse(scoreRow.derived) as DerivedMetrics),
     recommendations,
     evidence,
+  };
+}
+
+/** Git-канал упёрся в лимиты: git-факт со статусом no-data и reason=limits. */
+function gitLimitsHit(facts: FactRow[]): boolean {
+  return facts.some((f) => f.source === "git" && f.status === "no-data" && (JSON.parse(f.value) as { reason?: unknown }).reason === "limits");
+}
+
+function gitLimitsOf(scan: ScanConfig): GitLimitsMarker {
+  return {
+    cloneMaxBytes: scan.clone.maxBytes,
+    cloneTimeoutMs: scan.clone.timeoutMs,
+    degradeEnabled: scan.degrade.enabled,
+    degradeSinceMonths: scan.degrade.sinceMonths,
+    degradeMaxBytes: scan.degrade.maxBytes,
+    degradeTimeoutMs: scan.degrade.timeoutMs,
   };
 }
 

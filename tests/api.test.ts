@@ -13,6 +13,7 @@ import {
 import { MODEL_VERSION } from "../src/score/model";
 import { renderRepoReport } from "../src/report/markdown";
 import type { AccessResult } from "../src/auth/access";
+import { DEFAULT_SCAN } from "../src/config";
 import {
   cardFacts,
   makeApiDb,
@@ -527,6 +528,39 @@ describe("единая карточка: матрица доступа зрит�
     const fullMd = renderRepoReport(view({ cicd: "granted", appsec: "granted", repo: "granted" })!);
     expect(fullMd).toContain("Полный Score (с CI и Security): 49 из 100");
     expect(fullMd).toContain("runs_count");
+  });
+});
+
+describe("пробой лимитов клона (К5)", () => {
+  const l: ApiTestDb = makeApiDb();
+  afterAll(() => l.close());
+
+  test("git no-data(limits) → маркер с лимитами оператора и причина человеческими словами (карточка и MD)", () => {
+    const repoId = seedRepo(l, { org: "big", repo: "mono" });
+    const scanId = seedScan(l, repoId, {
+      status: "partial",
+      facts: [
+        { key: "tree.stats", source: "git", status: "no-data", value: { reason: "limits", detail: "disk" } },
+        { key: "issues.stats", source: "rest:issues", value: { open: 1, closed: 1, median_close_days: 3, stale_90d: 0, fetched_count: 2 } },
+      ],
+    });
+    seedScore(l, repoId, scanId, { total: null, coverage: 0.2 });
+    const card = getRepoCard(l.db, "big", "mono")!;
+    expect(card.markers.gitLimits).toEqual({
+      cloneMaxBytes: 1.5 * 1024 ** 3,
+      cloneTimeoutMs: 20 * 60_000,
+      degradeEnabled: true,
+      degradeSinceMonths: 13,
+      degradeMaxBytes: 2.5 * 1024 ** 3,
+      degradeTimeoutMs: 25 * 60_000,
+    });
+    const md = renderRepoReport(card);
+    expect(md).toContain("Репозиторий больше лимита сервиса: полный клон больше 1.5 ГБ или дольше 20 мин, 13 месяцев истории — больше 2.5 ГБ или дольше 25 мин");
+    // лимиты — оператора из переданного конфига, не пользовательские
+    const custom = getRepoCard(l.db, "big", "mono", { limits: { ...DEFAULT_SCAN, clone: { ...DEFAULT_SCAN.clone, maxBytes: 512 * 1024 ** 2 } } })!;
+    expect(custom.markers.gitLimits!.cloneMaxBytes).toBe(512 * 1024 ** 2);
+    // без пробоя маркера нет
+    expect(getRepoCard(c.db, "card", "sample")!.markers.gitLimits).toBeNull();
   });
 });
 

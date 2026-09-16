@@ -24,8 +24,6 @@ import {
   verifySigned,
 } from "../src/auth/session";
 import { decryptPat, deletePat, encryptPat, getPat, patMeta, storePat } from "../src/auth/pat";
-import { effectiveCloneLimits, parseUserScanSettings, readUserScanSettings, writeUserScanSettings } from "../src/auth/settings";
-import { DEFAULT_SCAN } from "../src/config";
 
 const dir = mkdtempSync(join(tmpdir(), "rh-auth-"));
 const db: Database = openDb({ ...loadConfig(), dataDir: dir });
@@ -154,36 +152,3 @@ describe("PAT: AES-256-GCM хранение", () => {
   });
 });
 
-describe("настройки: третий слой конфига", () => {
-  test("parseUserScanSettings: валидация полей", () => {
-    expect(parseUserScanSettings({ useDefaults: true, maxBytes: null, timeoutMs: null }).ok).toBe(true);
-    expect(parseUserScanSettings({ useDefaults: false, maxBytes: 3_000_000_000, timeoutMs: 900_000 }).ok).toBe(true);
-    expect(parseUserScanSettings(null).ok).toBe(false);
-    expect(parseUserScanSettings({ useDefaults: "да", maxBytes: null, timeoutMs: null }).ok).toBe(false);
-    expect(parseUserScanSettings({ useDefaults: true, maxBytes: -5, timeoutMs: null }).ok).toBe(false);
-    expect(parseUserScanSettings({ useDefaults: true, maxBytes: "1ГБ", timeoutMs: null }).ok).toBe(false);
-  });
-
-  test("effectiveCloneLimits: тогл-дефолт / значения / «снять лимит»", () => {
-    expect(effectiveCloneLimits(DEFAULT_SCAN, { useDefaults: true, maxBytes: 1, timeoutMs: 1 })).toEqual({
-      ...DEFAULT_SCAN.clone,
-      degrade: DEFAULT_SCAN.degrade,
-    });
-    const custom = effectiveCloneLimits(DEFAULT_SCAN, { useDefaults: false, maxBytes: 3_000_000_000, timeoutMs: 900_000 });
-    expect(custom.maxBytes).toBe(3_000_000_000);
-    expect(custom.timeoutMs).toBe(900_000);
-    expect(custom.degrade).toEqual(DEFAULT_SCAN.degrade); // деградация — серверное, не юзерское
-    const unlimited = effectiveCloneLimits(DEFAULT_SCAN, { useDefaults: false, maxBytes: null, timeoutMs: null });
-    expect(unlimited.maxBytes).toBe(Number.MAX_SAFE_INTEGER);
-    expect(unlimited.timeoutMs).toBeGreaterThan(DEFAULT_SCAN.degrade.timeoutMs);
-  });
-
-  test("write/read roundtrip; мусор в БД → дефолт (fail-soft)", () => {
-    const userId = upsertUser(db, "ya-4", "dave");
-    expect(readUserScanSettings(db, userId)).toEqual({ useDefaults: true, maxBytes: null, timeoutMs: null });
-    writeUserScanSettings(db, userId, { useDefaults: false, maxBytes: 1e10, timeoutMs: null });
-    expect(readUserScanSettings(db, userId)).toEqual({ useDefaults: false, maxBytes: 1e10, timeoutMs: null });
-    db.query("UPDATE user_settings SET scan = 'мусор' WHERE user_id = ?").run(userId);
-    expect(readUserScanSettings(db, userId).useDefaults).toBe(true);
-  });
-});

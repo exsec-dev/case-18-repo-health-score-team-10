@@ -3,16 +3,15 @@
 // github-style (вставка → живая проверка → зашифрованное хранение,
 // замена/удаление), «мои репозитории» (PAT + ручной ввод слага —
 // спискового юзерского эндпоинта в доках нет), запуск анализа с
-// очередью и опросом статуса, настройки бюджетов скана (тогл-дефолт,
-// значения, «снять лимит» — решение 15.09; секция расширяема под
-// LLM-оп-ин В5). Токен НИКОГДА не возвращается API и не логируется.
+// очередью и опросом статуса. Секция «Бюджеты скана» удалена (К5 В4.1,
+// PENDING Алексей): лимиты скана — только оператор. Ссылки ведут на
+// единую карточку /repo/... Токен НИКОГДА не возвращается API и не логируется.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Flex, Label, Link, Loader, Switch, Text, TextInput } from "@gravity-ui/uikit";
+import { Alert, Button, Card, Flex, Label, Link, Loader, Text, TextInput } from "@gravity-ui/uikit";
 import {
   MeResponse,
   MyReposResponse,
   RepoCard,
-  ScanSettings,
   fetchJson,
   mutateJson,
   useJson,
@@ -22,20 +21,6 @@ import { fmtDateTime, fmtScore } from "./format";
 import { linkProps, repoHref } from "./router";
 
 const SLUG_RE = /^[a-z0-9_.-]+\/[a-z0-9_.-]+$/i;
-
-/** Форматирование бюджетов: человекочетаемые МБ/ГБ и минуты. */
-export function fmtBytes(bytes: number | null): string {
-  if (bytes === null) return "без лимита";
-  const gb = bytes / 1024 / 1024 / 1024;
-  if (gb >= 1) return `${Math.round(gb * 100) / 100} ГБ`;
-  return `${Math.round(bytes / 1024 / 1024)} МБ`;
-}
-
-function fmtMinutes(ms: number | null): string {
-  if (ms === null) return "без лимита";
-  const min = ms / 60_000;
-  return min >= 60 ? `${Math.round((min / 60) * 10) / 10} ч` : `${Math.round(min)} мин`;
-}
 
 type ScanJobState = { sinceScanId: number; startedAt: number; seenScanId: number | null; phase: "queued" | "running" };
 
@@ -70,7 +55,6 @@ export function MePage() {
       </Flex>
       <PatSection key={data.patCheckedAt ?? "no-pat"} hasPat={data.hasPat} checkedAt={data.patCheckedAt} onChanged={() => void me.reload()} />
       {data.hasPat && <MyReposSection />}
-      <SettingsSection />
     </Flex>
   );
 }
@@ -385,114 +369,6 @@ function RepoRow(props: {
         {props.score !== null ? "Обновить анализ" : "Анализировать"}
       </Button>
     </Flex>
-  );
-}
-
-// ---------- настройки бюджетов (третий слой конфига, решение 15.09) ----------
-
-interface SettingsResponse {
-  scan: ScanSettings;
-  defaults: { maxBytes: number; timeoutMs: number; degrade: { enabled: boolean; maxBytes: number; timeoutMs: number } };
-}
-
-function SettingsSection() {
-  const settings = useJson<SettingsResponse>("/api/me/settings");
-  if (settings.state.kind === "loading") return null;
-  if (settings.state.kind === "error") return null; // без сессии секции нет
-
-  return <SettingsForm key={JSON.stringify(settings.state.data.scan)} initial={settings.state.data} reload={settings.reload} />;
-}
-
-function SettingsForm({ initial, reload }: { initial: SettingsResponse; reload: () => void }) {
-  const [useDefaults, setUseDefaults] = useState(initial.scan.useDefaults);
-  // пустое поле = снять лимит (null); числа вводятся в МБ/мин
-  const [mb, setMb] = useState(initial.scan.maxBytes === null ? "" : String(Math.round(initial.scan.maxBytes / 1024 / 1024)));
-  const [minutes, setMinutes] = useState(initial.scan.timeoutMs === null ? "" : String(Math.round(initial.scan.timeoutMs / 60_000)));
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-
-  async function save() {
-    setBusy(true);
-    setError(null);
-    setSaved(false);
-    try {
-      const maxBytes = mb === "" ? null : Math.round(Number(mb) * 1024 * 1024);
-      const timeoutMs = minutes === "" ? null : Math.round(Number(minutes) * 60_000);
-      if (maxBytes !== null && (!Number.isFinite(maxBytes) || maxBytes <= 0)) throw new Error("размер: ожидается число МБ > 0");
-      if (timeoutMs !== null && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) throw new Error("таймаут: ожидается число минут > 0");
-      await mutateJson("/api/me/settings", "PUT", { scan: { useDefaults, maxBytes, timeoutMs } });
-      setSaved(true);
-      reload();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <Card view="outlined" style={{ padding: "var(--g-spacing-5)" }}>
-      <Flex direction="column" gap={4}>
-        <Flex direction="column" gap={1}>
-          <Text variant="subheader-2">Бюджеты скана</Text>
-          <Text color="secondary">
-            Первая попытка клонирования: серверный дефолт {fmtBytes(initial.defaults.maxBytes)} /{" "}
-            {fmtMinutes(initial.defaults.timeoutMs)}; деградационный ярус {fmtBytes(initial.defaults.degrade.maxBytes)} /{" "}
-            {fmtMinutes(initial.defaults.degrade.timeoutMs)}{" "}
-            {initial.defaults.degrade.enabled ? "(включён)" : "(выключен)"}. Владелец большого репозитория может
-            поднять свои лимиты или снять их — цена известна заранее.
-          </Text>
-        </Flex>
-        <Flex gap={6} alignItems="center" wrap>
-          <Switch
-            checked={useDefaults}
-            onUpdate={(v) => {
-              setUseDefaults(v);
-              setSaved(false);
-            }}
-            content="Использовать серверные дефолты"
-            size="m"
-          />
-          {!useDefaults && (
-            <Flex gap={3} wrap alignItems="flex-end">
-              <TextInput
-                label="Диск-бюджет, МБ"
-                placeholder="без лимита"
-                value={mb}
-                onUpdate={(v) => {
-                  setMb(v.trim());
-                  setSaved(false);
-                }}
-                hasClear
-                size="m"
-                style={{ width: 180 }}
-              />
-              <TextInput
-                label="Таймаут, мин"
-                placeholder="без лимита"
-                value={minutes}
-                onUpdate={(v) => {
-                  setMinutes(v.trim());
-                  setSaved(false);
-                }}
-                hasClear
-                size="m"
-                style={{ width: 160 }}
-              />
-              <Text color="secondary">пустое поле = «снять лимит»</Text>
-            </Flex>
-          )}
-        </Flex>
-        <Flex gap={3} alignItems="center">
-          <Button view="action" size="m" onClick={save} loading={busy} disabled={busy}>
-            Сохранить
-          </Button>
-          {saved && <Label theme="success">сохранено — действует на новые сканы</Label>}
-        </Flex>
-        {error && <Alert theme="danger" title="Настройки не сохранены" message={error} />}
-      </Flex>
-    </Card>
   );
 }
 

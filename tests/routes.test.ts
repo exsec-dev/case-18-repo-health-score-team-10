@@ -80,6 +80,14 @@ describe("роуты единой карточки (К2)", () => {
     expect(((await res.json()) as { error: { code: string } }).error.code).toBe("not_found");
   });
 
+  test("GET/PUT /api/me/settings удалены (К5) → JSON-404", async () => {
+    for (const method of ["GET", "PUT"]) {
+      const res = await fetch(`${base}/api/me/settings`, { ...asStranger, method, body: method === "PUT" ? "{}" : undefined });
+      expect(res.status).toBe(404);
+      expect(res.headers.get("content-type")).toContain("application/json");
+    }
+  });
+
   test("/me/repo/x/y — фронт-бандл (роутер отдаёт not-found), а не карточка", async () => {
     const res = await fetch(`${base}/me/repo/pub/repo`, asStranger);
     expect(res.status).toBe(200);

@@ -14,7 +14,7 @@ import {
 } from "../api/repos";
 import { COVERAGE_NULL_BELOW, type CategoryKey } from "../score/model";
 // копии про Security и заглушки доступа — одни и те же на странице и в отчёте
-import { SECURITY_PUBLIC_NOTE, accessLockText } from "../web/format";
+import { SECURITY_PUBLIC_NOTE, accessLockText, gitLimitsText } from "../web/format";
 
 export { SECURITY_PUBLIC_NOTE };
 
@@ -54,6 +54,7 @@ function headerSection(card: RepoCard): string[] {
 function summarySection(card: RepoCard): string[] {
   const out = ["## Итог", ""];
   const score = card.score;
+  if (card.markers.gitLimits) out.push(gitLimitsText(card.markers.gitLimits), "");
   if (!score) {
     out.push(
       "Репозиторий есть в каталоге, но ещё не сканировался — фактов нет, поэтому нет и Score.",

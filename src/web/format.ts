@@ -80,6 +80,41 @@ export const ACCESS_LOCK_TEXT: Record<"no-pat" | "denied" | "pat-expired" | "che
   "check-failed": "Не удалось проверить доступ к этим данным — попробуйте открыть карточку позже.",
 };
 
+/** Размер человекочитаемо: ГБ с двумя знаками или МБ. */
+export function fmtBytes(bytes: number): string {
+  const gb = bytes / 1024 / 1024 / 1024;
+  if (gb >= 1) return `${Math.round(gb * 100) / 100} ГБ`;
+  return `${Math.round(bytes / 1024 / 1024)} МБ`;
+}
+
+/** Длительность человекочитаемо: часы или минуты. */
+export function fmtMinutes(ms: number): string {
+  const min = ms / 60_000;
+  return min >= 60 ? `${Math.round((min / 60) * 10) / 10} ч` : `${Math.round(min)} мин`;
+}
+
+/** Лимиты клона оператора на момент показа (К5): только код ← env, без пользовательских настроек. */
+export interface GitLimitsMarker {
+  cloneMaxBytes: number;
+  cloneTimeoutMs: number;
+  degradeEnabled: boolean;
+  degradeSinceMonths: number;
+  degradeMaxBytes: number;
+  degradeTimeoutMs: number;
+}
+
+/** Причина пробоя лимитов клона человеческими словами (одна строка — страница и MD). */
+export function gitLimitsText(l: GitLimitsMarker): string {
+  const full = `полный клон больше ${fmtBytes(l.cloneMaxBytes)} или дольше ${fmtMinutes(l.cloneTimeoutMs)}`;
+  const degrade = l.degradeEnabled
+    ? `, ${l.degradeSinceMonths} месяцев истории — больше ${fmtBytes(l.degradeMaxBytes)} или дольше ${fmtMinutes(l.degradeTimeoutMs)}`
+    : "";
+  return (
+    `Репозиторий больше лимита сервиса: ${full}${degrade}. ` +
+    "Git-метрики (документация, активность, код) — нет данных; Score не занижен, их вес выброшен. Лимиты задаёт оператор сервиса."
+  );
+}
+
 /** Текст заглушки по доступу; granted → null (заглушки нет). */
 export function accessLockText(access: string | undefined): string | null {
   if (access === undefined || access === "granted") return null;

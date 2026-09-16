@@ -18,7 +18,6 @@ import { enumerateCatalog, type CatalogResult } from "../collectors/catalog";
 import type { ScClient } from "../collectors/http";
 import { upsertRepo, runScan, scanCloneLimitsOf, type ScanResult } from "./runner";
 import { getPat } from "../auth/pat";
-import { readUserScanSettings, effectiveCloneLimits } from "../auth/settings";
 import { makeScClient } from "../collectors/http";
 import { makeAppsecClient } from "../collectors/appsec";
 import type { Config } from "../config";
@@ -296,8 +295,9 @@ export interface WorkerDeps {
 }
 
 /**
- * Исполнить заявленную job: заявка юзера → PAT автора (+ его настройки
- * бюджетов), периодика → серверный токен (новый клиент на задачу, H2).
+ * Исполнить заявленную job: заявка юзера → PAT автора, периодика →
+ * серверный токен (новый клиент на задачу, H2). Лимиты клона — только
+ * оператора (К5): scanCloneLimitsOf(Config.scan) для всех сканов.
  * repo-сигнал 'gone' (repo-GET 404/403) → эвикция ТОЛЬКО у задач без
  * автора (К3): 403 на PAT юзера говорит о правах PAT, не о репо (H1).
  * Канальные 403 cicd/runs — не эвикция (no-data access в фактах).
@@ -307,11 +307,7 @@ export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<Sca
     job.userId !== null && deps.config.auth.appSecret
       ? (deps.getPat ?? getPat)(deps.db, deps.config.auth.appSecret, job.userId)
       : null;
-  // заявка юзера: бюджеты юзера — третий слой конфига (решение 15.09)
-  const limits =
-    job.userId !== null
-      ? effectiveCloneLimits(deps.config.scan, readUserScanSettings(deps.db, job.userId))
-      : scanCloneLimitsOf(deps.config.scan);
+  const limits = scanCloneLimitsOf(deps.config.scan);
   const result = await (deps.runScan ?? runScan)(
     {
       db: deps.db,

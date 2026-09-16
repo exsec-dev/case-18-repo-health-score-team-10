@@ -15,8 +15,7 @@ import { openDb } from "../src/db";
 import { okFact } from "../src/collectors/facts";
 import { makeScClient } from "../src/collectors/http";
 import { createSession, SESSION_COOKIE, upsertUser } from "../src/auth/session";
-import { effectiveCloneLimits, parseUserScanSettings, UNLIMITED_TIMEOUT_MS } from "../src/auth/settings";
-import { runScan, type ScanDeps, type ScanOptions } from "../src/jobs/runner";
+import { runScan, scanCloneLimitsOf, type ScanDeps, type ScanOptions } from "../src/jobs/runner";
 import { claimNext, enqueueScan, processJob, startScheduler } from "../src/jobs/scheduler";
 import { MODEL_VERSION } from "../src/score/model";
 import { seedScan, seedScore, type ApiTestDb } from "./api-fixtures";
@@ -264,12 +263,32 @@ describe("H3: rescore-m4.ts затирает own-скоры", () => {
 
 // ---------------------------------------------------------------------------
 describe("H4: DoS одним пользователем", () => {
-  repro("«снять лимит» не обходится явным числом: таймаут клона ≤ серверного потолка", () => {
-    const parsed = parseUserScanSettings({ useDefaults: false, maxBytes: null, timeoutMs: 1e300 });
-    expect(parsed.ok).toBe(true); // валидатор принимает
-    if (!parsed.ok) return;
-    const limits = effectiveCloneLimits(loadConfig().scan, parsed.settings);
-    expect(limits.timeoutMs).toBeLessThanOrEqual(UNLIMITED_TIMEOUT_MS); // потолок «6 ч» из settings.ts
+  // закрыто Б5 (К5, PENDING Алексей): пользовательских бюджетов нет — модуль
+  // settings и GUI удалены; утверждение сохранено: даже «снятый лимит»,
+  // записанный в user_settings явным числом, не доезжает до клона — заявка
+  // юзера сканируется лимитами оператора (≤ серверного потолка)
+  test("«снять лимит» не обходится явным числом: таймаут клона ≤ серверного потолка", async () => {
+    const { t } = tempDb();
+    const user = upsertUser(t.db, "ya-unlimited", "unlimited");
+    const repoId = insertRepo(t.db, "huge", "limits", "public");
+    t.db
+      .query("INSERT INTO user_settings (user_id, scan, updated_at) VALUES (?, ?, ?)")
+      .run(user, JSON.stringify({ useDefaults: false, maxBytes: null, timeoutMs: 1e300 }), new Date().toISOString());
+    const base = loadConfig();
+    const config: Config = { ...base, auth: { ...base.auth, appSecret: "audit-test-secret" } };
+    let limits: ScanDeps["cloneLimits"];
+    const capture = (async (d: ScanDeps) => {
+      limits = d.cloneLimits;
+      return { scanId: 0, repoId, status: "ok", repoAccess: "ok" } as unknown as Awaited<ReturnType<typeof runScan>>;
+    }) as typeof runScan;
+    enqueueScan(t.db, repoId, { userId: user, triggerKind: "user" });
+    await processJob({ db: t.db, config, serverClient: () => null, runScan: capture, getPat: () => "pat" }, claimNext(t.db)!);
+    t.close();
+    const serverCeiling = Math.max(config.scan.clone.timeoutMs, config.scan.degrade.timeoutMs);
+    expect(limits!.timeoutMs).toBeLessThanOrEqual(serverCeiling);
+    expect(limits).toEqual(scanCloneLimitsOf(config.scan));
+    // модуль пользовательских бюджетов удалён
+    expect(await Bun.file(join(ROOT, "src/auth/settings.ts")).exists()).toBe(false);
   });
 
   // закрыто Б5 (К4): дедуп (user, repo) + чередование юзерских и периодических
