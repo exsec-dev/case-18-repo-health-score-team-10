@@ -15,8 +15,8 @@ export interface MyRepoEntry {
   title: string | null;
   language: string | null;
   lastActivityAt: string | null;
-  /** есть ли в нашей БД own-скор по этому репо (для бейджа в UI) */
-  ownScore: number | null;
+  /** Score в рейтинге (total_rating) последнего скана репо в нашей БД; null = не анализировался */
+  score: number | null;
   lastScanAt: string | null;
 }
 
@@ -87,7 +87,7 @@ export async function listMyRepos(db: Database, client: ScClient, opts: { maxPag
         title: typeof raw.name === "string" ? raw.name : null,
         language,
         lastActivityAt: typeof raw.last_updated === "string" ? raw.last_updated : null,
-        ownScore: known ? known.total : null,
+        score: known ? known.total : null,
         lastScanAt: known ? known.finished_at : null,
       });
     }

@@ -312,7 +312,7 @@ function MyReposSection() {
                 title={entry.title}
                 language={entry.language}
                 lastActivityAt={entry.lastActivityAt}
-                ownScore={entry.ownScore}
+                ownScore={entry.score}
                 lastScanAt={entry.lastScanAt}
                 job={job ?? null}
                 onScan={() => void startScan(`${entry.org}/${entry.repo}`)}

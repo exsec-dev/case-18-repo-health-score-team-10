@@ -7,7 +7,9 @@
 // рейтинга появляются исключительно сканом.
 import { loadConfig } from "./config";
 import { openDb } from "./db";
-import { getMeta, getRepoCard, listRepos, parseReposQuery } from "./api/repos";
+import { getMeta, getRepoCardForViewer, listRepos, parseReposQuery } from "./api/repos";
+import { makeAccessCache, resolveAccess, type AccessRepo, type AccessResult } from "./auth/access";
+import { makeAppsecClient } from "./collectors/appsec";
 import { listMyRepos, requestUserScan } from "./api/me";
 import { renderRepoReport } from "./report/markdown";
 import { startScheduler, startWorkerLoop } from "./jobs/scheduler";
@@ -55,6 +57,27 @@ function userClient(userId: number) {
   return makeScClient({ token: pat, minIntervalMs: config.scan.rest.minIntervalMs });
 }
 
+// К2: доступ зрителя к каналам карточки — прямые чтения PAT зрителя с
+// кэшем в памяти процесса (TTL Config.access.cacheTtlMs)
+const accessCache = makeAccessCache(config.access.cacheTtlMs);
+
+/** Резолвер доступа зрителя запроса (аноним / без PAT → no-pat без запросов). */
+function viewerAccess(req: Request): (repo: AccessRepo) => Promise<AccessResult> {
+  const user = sessionOf(req);
+  return (repo) => {
+    const pat = user && config.auth.appSecret ? getPat(db, config.auth.appSecret, user.userId) : null;
+    return resolveAccess(
+      {
+        restClient: (token) => makeScClient({ token, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 4 }),
+        appsecClient: (token) => makeAppsecClient({ token, minIntervalMs: config.scan.rest.appsecMinIntervalMs, maxRequests: 2, timeoutMs: 10_000 }),
+        cache: accessCache,
+      },
+      user ? { userId: user.userId, pat } : null,
+      repo,
+    );
+  };
+}
+
 /** config.auth → креды Я ID (имена полей разъезжаются — склеиваем в одном месте). */
 const yaCreds = () => ({
   clientId: config.auth.yaClientId,
@@ -75,14 +98,16 @@ const server = Bun.serve({
       if (!parsed.ok) return badQuery(parsed.message);
       return Response.json(listRepos(db, parsed.query));
     },
-    "/api/repos/:org/:repo": (req) => {
-      const card = getRepoCard(db, req.params.org, req.params.repo);
+    // единая карточка (К2): состав ответа — по доступу зрителя из cookie
+    "/api/repos/:org/:repo": async (req) => {
+      const card = await getRepoCardForViewer(db, req.params.org, req.params.repo, viewerAccess(req));
       if (!card) return notFound(`репозиторий ${req.params.org}/${req.params.repo} не найден в каталоге`);
       return Response.json(card);
     },
-    "/api/repos/:org/:repo/report.md": (req) => {
+    "/api/repos/:org/:repo/report.md": async (req) => {
       const { org, repo } = req.params;
-      const card = getRepoCard(db, org, repo);
+      // тот же сборщик карточки с тем же зрителем (К2)
+      const card = await getRepoCardForViewer(db, org, repo, viewerAccess(req));
       if (!card) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
       return new Response(renderRepoReport(card), {
         headers: {
@@ -164,11 +189,13 @@ const server = Bun.serve({
           );
         }
         storePat(db, config.auth.appSecret!, user.userId, body.token);
+        accessCache.clearUser(user.userId); // новый PAT — новые права
         const username = (who.json as { username?: unknown } | null)?.username ?? null;
         return Response.json({ ok: true, tokenOwner: typeof username === "string" ? username : null });
       }
       if (req.method === "DELETE") {
         deletePat(db, user.userId);
+        accessCache.clearUser(user.userId);
         return Response.json({ ok: true });
       }
       return Response.json({ error: { code: "bad_query", message: "ожидался PUT или DELETE" } }, { status: 405 });
@@ -211,15 +238,6 @@ const server = Bun.serve({
         return Response.json({ error: { code: "bad_token", message: result.error } }, { status: 400 });
       }
       return Response.json({ username: result.username, entries: result.entries });
-    },
-    "/api/me/repos/:org/:repo": (req) => {
-      const user = sessionOf(req);
-      if (!user) return unauthorized();
-      // own-карточка: последний own-скор (6 категорий, Security с фактами);
-      // приватные/эвиктированные репо читаемы — личная страница юзера
-      const card = getRepoCard(db, req.params.org, req.params.repo, { mode: "own" });
-      if (!card) return notFound(`репозиторий ${req.params.org}/${req.params.repo} не найден`);
-      return Response.json(card);
     },
     "/api/me/repos/:org/:repo/scan": async (req) => {
       const user = sessionOf(req);

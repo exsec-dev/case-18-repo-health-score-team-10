@@ -13,11 +13,10 @@ import {
   type RepoCard,
 } from "../api/repos";
 import { COVERAGE_NULL_BELOW, type CategoryKey } from "../score/model";
+// копии про Security и заглушки доступа — одни и те же на странице и в отчёте
+import { SECURITY_PUBLIC_NOTE, accessLockText } from "../web/format";
 
-/** Копия про Security — одна и та же на странице и в отчёте (STOP §4 плана). */
-export const SECURITY_PUBLIC_NOTE =
-  "Security считается только для репозиториев с доступом к их AppSec; " +
-  "в публичном режиме категория исключена с перенормировкой, а не занижена.";
+export { SECURITY_PUBLIC_NOTE };
 
 const NO_DATA = "нет данных";
 
@@ -111,6 +110,9 @@ function summarySection(card: RepoCard): string[] {
 /** Полный Score (6 категорий) — отдельной строкой; NULL — честно «недостаточно данных». */
 function fullScoreLine(card: RepoCard): string[] {
   const score = card.score!;
+  if (score.fullLocked) {
+    return ["Полный Score (с CI и Security) виден зрителю с доступом к CI и Security этого репозитория."];
+  }
   if (score.totalFull === null || score.coverageFull === null) {
     return ["Полный Score (с CI и Security): недостаточно данных для оценки."];
   }
@@ -131,7 +133,7 @@ function categoriesTable(card: RepoCard): string[] {
   ];
   for (const [key, cat] of entries) {
     const contribution = cat.score === null ? "0%" : `${Math.round((cat.weight / Math.max(1, dataWeight)) * 100)}%`;
-    const status = cat.score === null ? NO_DATA : cat.stale ? "данные из истории (stale)" : "данные есть";
+    const status = cat.locked !== undefined ? "закрыто доступом" : cat.score === null ? NO_DATA : cat.stale ? "данные из истории (stale)" : "данные есть";
     out.push(`| ${CATEGORY_TITLES[key]} | ${cat.weight}% | ${cat.score === null ? "—" : round(cat.score)} | ${contribution} | ${status} |`);
   }
   out.push("");
@@ -144,7 +146,12 @@ function categoriesDetail(card: RepoCard): string[] {
   if (!card.score) return [];
   const out = ["## Разбор по категориям", ""];
   for (const [key, cat] of categoryEntries(card)) {
-    out.push(`### ${CATEGORY_TITLES[key]} — ${cat.score === null ? NO_DATA : `${round(cat.score)} / 100`}`, "");
+    const lock = accessLockText(cat.locked);
+    out.push(`### ${CATEGORY_TITLES[key]} — ${lock !== null ? "закрыто" : cat.score === null ? NO_DATA : `${round(cat.score)} / 100`}`, "");
+    if (lock !== null) {
+      out.push(lock, "", "Score в рейтинге эту категорию не учитывает.", "");
+      continue;
+    }
     if (cat.score === null) {
       out.push(key === "security" ? SECURITY_PUBLIC_NOTE : humanNoData(`${key}: ${cat.no_data ?? ""}`), "");
       out.push("Категория не снизила Score: её вес выброшен, веса остальных категорий перенормированы.", "");
@@ -249,7 +256,7 @@ function methodSection(card: RepoCard): string[] {
     `- **Веса категорий (номинальные):** ${weights}. Score — взвешенное среднее баллов категорий, у которых есть данные.`,
     "- **Перенормировка (tri-state):** категория без данных не получает ноль — её вес выбрасывается, а веса остальных пересчитываются. Отсутствие данных никогда не ухудшает Score.",
     `- **Порог «недостаточно данных»:** при покрытии ниже ${pct(COVERAGE_NULL_BELOW)} Score не выставляется вовсе (значение NULL), потому что честного числа на таких данных нет.`,
-    `- **Security в публичном режиме:** ${SECURITY_PUBLIC_NOTE}`,
+    `- **CI/CD и Security:** в Score в рейтинге не входят (4 категории); полный Score с ними виден зрителю с доступом к этим данным. ${SECURITY_PUBLIC_NOTE}`,
     "- **Что это НЕ значит:** Score не измеряет популярность (лайки и форки в формулу не входят), не оценивает качество кода по существу и не заменяет ревью. Он измеряет наблюдаемые признаки здоровья репозитория теми данными, которые доступны публично.",
     "- **Ограничения методики:** часть сигналов недоступна снаружи (статусы CI чужих репозиториев, AppSec без права доступа), крупные репозитории читаются деградационным ярусом с усечённой историей, а активность зеркал занижается детектором роботов не полностью.",
     `- **Методика целиком:** ${METHODOLOGY_PATH} (раздел §12 — известные ограничения).`,

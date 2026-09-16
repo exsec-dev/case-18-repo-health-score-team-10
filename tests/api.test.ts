@@ -11,6 +11,8 @@ import {
   type ReposQuery,
 } from "../src/api/repos";
 import { MODEL_VERSION } from "../src/score/model";
+import { renderRepoReport } from "../src/report/markdown";
+import type { AccessResult } from "../src/auth/access";
 import {
   cardFacts,
   makeApiDb,
@@ -33,6 +35,8 @@ afterAll(() => {
 });
 
 const q = (patch: Partial<ReposQuery> = {}): ReposQuery => ({ ...DEFAULT_QUERY, ...patch });
+/** зритель с доступом ко всем каналам (К2) */
+const GRANTED: AccessResult = { cicd: "granted", appsec: "granted", repo: "granted" };
 const names = (items: { org: string; repo: string }[]): string[] => items.map((i) => `${i.org}/${i.repo}`);
 
 describe("рейтинг: выборка строк", () => {
@@ -235,7 +239,8 @@ describe("карточка репозитория", () => {
   seedScore(c, repoId, scanId, { total: 67, stale: ["issues.stats"] });
   seedRecommendation(c, scanId, { ruleId: "contributing-missing", priority: 1, factRef: "docs.presence", deltaScore: 2.25, expectedImpact: "+2.3 Score (по одному)" });
   seedRecommendation(c, scanId, { ruleId: "connect-appsec", priority: 2, factRef: "appsec.findings", opensCategory: "security", expectedImpact: "coverage 1.00→1.00 — категория Security 20%" });
-  const card = getRepoCard(c.db, "card", "sample")!;
+  // полный состав карточки — у зрителя с доступом к каналам; матрица доступа — ниже
+  const card = getRepoCard(c.db, "card", "sample", { access: GRANTED })!;
 
   test("шапка и синтезированный webUrl", () => {
     expect(card.repo).toMatchObject({ org: "card", repo: "sample", title: "card sample", language: "Go", likes: 7, forks: 2 });
@@ -338,7 +343,7 @@ describe("изоляция own/public и эвикция (В4/Б4)", () => {
     expect(rating.items[0]!.categories.cicd).toBeNull();
     expect(rating.items[0]!.categories.security).toBeNull();
     // карточка: оба итога последнего скана
-    const card = getRepoCard(iso.db, "iso", "dual")!;
+    const card = getRepoCard(iso.db, "iso", "dual", { access: GRANTED })!;
     expect(card.score!.totalRating).toBe(70);
     expect(card.score!.totalFull).toBe(95);
   });
@@ -362,17 +367,18 @@ describe("изоляция own/public и эвикция (В4/Б4)", () => {
     iso.db.query("UPDATE repos SET rating_active = 0 WHERE repo_slug = 'evicted'").run();
     const rating = listRepos(iso.db, q());
     expect(names(rating.items)).toEqual(["iso/dual"]);
-    // публичная карточка эвиктированного не отдаётся (вне рейтинга), own — отдаётся
+    // эвиктированный публичный — 404 всем, даже зрителю с доступом (К2)
     expect(getRepoCard(iso.db, "iso", "evicted")).toBeNull();
-    expect(getRepoCard(iso.db, "iso", "evicted", { mode: "own" })!.repo.repo).toBe("evicted");
+    expect(getRepoCard(iso.db, "iso", "evicted", { access: GRANTED })).toBeNull();
     // возврат флагом
     iso.db.query("UPDATE repos SET rating_active = 1 WHERE repo_slug = 'evicted'").run();
     expect(listRepos(iso.db, q()).total).toBe(2);
-    // приватный репо — не в публичном рейтинге и без публичной карточки
+    // приватный репо — не в рейтинге; карточка только при repo = granted
     iso.db.query("UPDATE repos SET visibility = 'private' WHERE repo_slug = 'evicted'").run();
     expect(listRepos(iso.db, q()).total).toBe(1);
     expect(getRepoCard(iso.db, "iso", "evicted")).toBeNull();
-    expect(getRepoCard(iso.db, "iso", "evicted", { mode: "own" })!.repo.repo).toBe("evicted");
+    expect(getRepoCard(iso.db, "iso", "evicted", { access: { ...GRANTED, repo: "denied" } })).toBeNull();
+    expect(getRepoCard(iso.db, "iso", "evicted", { access: GRANTED })!.repo.repo).toBe("evicted");
     // эвикция чужих скоров нейтральна: у dual ничего не поменялось
     expect(getRepoCard(iso.db, "iso", "dual")!.score!.totalRating).toBe(70);
   });
@@ -392,6 +398,135 @@ describe("изоляция own/public и эвикция (В4/Б4)", () => {
     const nullCard = getRepoCard(iso.db, "iso", "null-score")!;
     expect(nullCard.score!.totalRating).toBeNull();
     expect(nullCard.markers.codeEmpty).toBe(false);
+  });
+});
+
+describe("единая карточка: матрица доступа зрителя (К2)", () => {
+  const m: ApiTestDb = makeApiDb();
+  afterAll(() => m.close());
+  const RUNS = { last_status: "failed", success_rate: 0.5, duration_p50: 1500, runs_count: 41 };
+  const APPSEC = { severity_counts: { critical: 1, high: 2, medium: 3, low: 4 }, resolved_share: 0.5, secrets_critical: true, provenance: { commit_hash: "deadbeef" } };
+  const seedFull = (org: string, repo: string, visibility = "public") => {
+    const repoId = seedRepo(m, { org, repo, language: "Go" });
+    m.db.query("UPDATE repos SET visibility = ? WHERE id = ?").run(visibility, repoId);
+    const facts = cardFacts().map((f) => (f.key === "cicd.runs" ? { key: "cicd.runs", source: "rest:cicd", value: RUNS } : f));
+    const scanId = seedScan(m, repoId, { trigger: "user", facts: [...facts, { key: "appsec.findings", source: "appsec:api", value: APPSEC }] });
+    seedScore(m, repoId, scanId, {
+      total: 61,
+      totalFull: 49,
+      coverageFull: 1,
+      categories: {
+        cicd: { score: 47, submetrics: { pass_rate: { score: 0.4, value: 0.5 } } },
+        security: { score: 39, submetrics: { secrets: { score: 0, value: true } } },
+      },
+      noData: ["cicd: ci runs no-data (access/absent) — config-only cap 50"],
+      stale: ["cicd.runs", "appsec.findings", "issues.stats"],
+    });
+    seedRecommendation(m, scanId, { ruleId: "license-missing", priority: 1, factRef: "docs.presence", deltaScore: 3.75 });
+    seedRecommendation(m, scanId, { ruleId: "fix-red-runs", priority: 2, factRef: "cicd.runs", channel: "cicd" });
+    seedRecommendation(m, scanId, { ruleId: "appsec-critical", priority: 3, factRef: "appsec.findings", channel: "appsec" });
+    return scanId;
+  };
+  seedFull("mx", "pub");
+  seedFull("mx", "priv", "private");
+  seedFull("mx", "gone");
+  m.db.query("UPDATE repos SET rating_active = 0 WHERE repo_slug = 'gone'").run();
+
+  const view = (a: AccessResult, repo = "pub") => getRepoCard(m.db, "mx", repo, { access: a });
+  const rules = (card: ReturnType<typeof view>) => card!.recommendations.map((r) => r.ruleId);
+  const keys = (card: ReturnType<typeof view>) => card!.evidence.map((e) => e.key);
+  const ANON: AccessResult = { cicd: "no-pat", appsec: "no-pat", repo: "no-pat" };
+
+  test("аноним: Score в рейтинге есть; полного итога, чисел и фактов CI/Security нет — во всём JSON", () => {
+    const card = view(ANON)!;
+    expect(card.access).toEqual({ cicd: "no-pat", appsec: "no-pat" });
+    expect(card.score!.totalRating).toBe(61);
+    expect(card.score!.totalFull).toBeNull();
+    expect(card.score!.coverageFull).toBeNull();
+    expect(card.score!.fullLocked).toBe(true);
+    expect(card.score!.categories.cicd).toEqual({ score: null, submetrics: {}, locked: "no-pat", weight: 15 });
+    expect(card.score!.categories.security).toEqual({ score: null, submetrics: {}, locked: "no-pat", weight: 20 });
+    expect(rules(card)).toEqual(["license-missing"]);
+    expect(keys(card)).not.toContain("cicd.runs");
+    expect(keys(card)).not.toContain("cicd.configs");
+    expect(keys(card)).not.toContain("appsec.findings");
+    expect(card.score!.stale).toEqual(["issues.stats"]);
+    expect(card.score!.noData.some((x) => x.startsWith("cicd"))).toBe(false);
+    expect(card.markers.ciConfigOnlyCap).toBe(false);
+    const json = JSON.stringify(card);
+    for (const leak of ["severity_counts", "runs_count", "secrets_critical", "deadbeef", "fix-red-runs", "appsec-critical", "config-only cap"]) {
+      expect(json).not.toContain(leak);
+    }
+  });
+
+  test("вошедший без PAT и с отказом (denied/pat-expired/check-failed): так же закрыто, причина в locked", () => {
+    for (const reason of ["no-pat", "denied", "pat-expired", "check-failed"] as const) {
+      const card = view({ cicd: reason, appsec: reason, repo: "granted" })!;
+      expect(card.score!.categories.cicd.locked).toBe(reason);
+      expect(card.score!.categories.security.locked).toBe(reason);
+      expect(card.score!.totalFull).toBeNull();
+      expect(JSON.stringify(card)).not.toContain("runs_count");
+    }
+  });
+
+  test("только CI: CI-блок, раны и CI-правила; Security закрыта; полного итога нет", () => {
+    const card = view({ cicd: "granted", appsec: "denied", repo: "granted" })!;
+    expect(card.score!.categories.cicd.score).toBe(47);
+    expect(card.score!.categories.cicd.locked).toBeUndefined();
+    expect(card.score!.categories.security.locked).toBe("denied");
+    expect(card.score!.fullLocked).toBe(true);
+    expect(card.score!.totalFull).toBeNull();
+    expect(rules(card)).toEqual(["license-missing", "fix-red-runs"]);
+    expect(keys(card)).toContain("cicd.runs");
+    expect(keys(card)).not.toContain("appsec.findings");
+    const json = JSON.stringify(card);
+    expect(json).toContain("runs_count");
+    expect(json).not.toContain("severity_counts");
+  });
+
+  test("только Security: AppSec-блок и правила; CI закрыт; полного итога нет", () => {
+    const card = view({ cicd: "denied", appsec: "granted", repo: "granted" })!;
+    expect(card.score!.categories.security.score).toBe(39);
+    expect(card.score!.categories.cicd.locked).toBe("denied");
+    expect(card.score!.totalFull).toBeNull();
+    expect(rules(card)).toEqual(["license-missing", "appsec-critical"]);
+    const json = JSON.stringify(card);
+    expect(json).toContain("severity_counts");
+    expect(json).not.toContain("runs_count");
+  });
+
+  test("оба канала: полный итог и всё содержимое", () => {
+    const card = view({ cicd: "granted", appsec: "granted", repo: "granted" })!;
+    expect(card.score!.fullLocked).toBe(false);
+    expect(card.score!.totalFull).toBe(49);
+    expect(card.score!.coverageFull).toBe(1);
+    expect(rules(card)).toEqual(["license-missing", "fix-red-runs", "appsec-critical"]);
+    expect(new Set(card.score!.stale)).toEqual(new Set(["cicd.runs", "appsec.findings", "issues.stats"]));
+  });
+
+  test("приватный: без доступа к repo — 404 (null) всем; с доступом — карточка по каналам", () => {
+    expect(view(ANON, "priv")).toBeNull();
+    expect(view({ cicd: "denied", appsec: "denied", repo: "denied" }, "priv")).toBeNull();
+    expect(view({ cicd: "check-failed", appsec: "check-failed", repo: "check-failed" }, "priv")).toBeNull();
+    const card = view({ cicd: "granted", appsec: "denied", repo: "granted" }, "priv")!;
+    expect(card.score!.totalRating).toBe(61);
+    expect(card.score!.categories.security.locked).toBe("denied");
+  });
+
+  test("эвиктированный публичный — 404 всем", () => {
+    expect(view(ANON, "gone")).toBeNull();
+    expect(view({ cicd: "granted", appsec: "granted", repo: "granted" }, "gone")).toBeNull();
+  });
+
+  test("MD-отчёт строится тем же сборщиком и следует тем же правилам", () => {
+    const anonMd = renderRepoReport(view(ANON)!);
+    for (const leak of ["severity_counts", "runs_count", "fix-red-runs", "appsec-critical", "Полный Score (с CI и Security): 49"]) {
+      expect(anonMd).not.toContain(leak);
+    }
+    expect(anonMd).toContain("войдите и добавьте PAT");
+    const fullMd = renderRepoReport(view({ cicd: "granted", appsec: "granted", repo: "granted" })!);
+    expect(fullMd).toContain("Полный Score (с CI и Security): 49 из 100");
+    expect(fullMd).toContain("runs_count");
   });
 });
 

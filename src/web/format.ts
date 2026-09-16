@@ -61,10 +61,27 @@ export function scanStatusText(status: string): string {
 }
 
 /**
- * Единая копия про Security в публичном режиме (STOP §4 плана): категория
+ * Единая копия про Security без данных (STOP §4 плана): категория
  * исключена с перенормировкой, а не занижена — доступ к AppSec даётся
- * правом, а не публичностью репозитория.
+ * правом, а не публичностью репозитория. Одна строка на странице и в MD.
  */
 export const SECURITY_PUBLIC_NOTE =
-  "Security считается только для репозиториев с доступом к их AppSec; " +
-  "в публичном режиме категория исключена с перенормировкой, а не занижена.";
+  "Security считается только по данным AppSec SourceCraft, доступным по правам; " +
+  "без них категория исключена с перенормировкой, а не занижена.";
+
+/**
+ * Заглушки закрытых зрителю каналов (К2 В4.1) по причине доступа. Ключи —
+ * ChannelAccess без "granted". Строка — одна для страницы и MD-отчёта.
+ */
+export const ACCESS_LOCK_TEXT: Record<"no-pat" | "denied" | "pat-expired" | "check-failed", string> = {
+  "no-pat": "Данные видны участникам репозитория: войдите и добавьте PAT SourceCraft в «Моём кабинете».",
+  denied: "Ваш PAT не даёт доступа к этим данным репозитория.",
+  "pat-expired": "SourceCraft отклонил ваш PAT — обновите PAT в «Моём кабинете».",
+  "check-failed": "Не удалось проверить доступ к этим данным — попробуйте открыть карточку позже.",
+};
+
+/** Текст заглушки по доступу; granted → null (заглушки нет). */
+export function accessLockText(access: string | undefined): string | null {
+  if (access === undefined || access === "granted") return null;
+  return ACCESS_LOCK_TEXT[access as keyof typeof ACCESS_LOCK_TEXT] ?? ACCESS_LOCK_TEXT["check-failed"];
+}

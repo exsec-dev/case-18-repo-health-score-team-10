@@ -7,6 +7,7 @@
 // лучшим или худшим результатом в зависимости от направления сортировки.
 import type { Database } from "bun:sqlite";
 import { CHANNEL_FALLBACK_KINDS, READ_KINDS, type CategoryScore } from "../score/compute";
+import { NO_PAT_ACCESS, type AccessRepo, type AccessResult, type ChannelAccess } from "../auth/access";
 import type { DerivedMetrics } from "../score/derived";
 import { CATEGORY_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, MODEL_VERSION } from "../score/model";
 
@@ -323,15 +324,19 @@ export interface CardScan {
 export interface CardCategory extends CategoryScore {
   /** номинальный вес модели: страница объясняет перенормировку, а не только результат */
   weight: number;
+  /** канал закрыт зрителю (К2): чисел и подметрик нет, причина — для заглушки */
+  locked?: ChannelAccess;
 }
 
 export interface CardScore {
   /** Score в рейтинге (4 категории) — всем */
   totalRating: number | null;
   coverageRating: number;
-  /** Полный Score (6 категорий, кап 49) */
+  /** Полный Score (6 категорий, кап 49) — только при доступе к CI и Security, иначе null */
   totalFull: number | null;
   coverageFull: number | null;
+  /** true = зрителю закрыт хотя бы один из каналов CI/Security — полный итог не показывается */
+  fullLocked: boolean;
   modelVersion: string;
   computedAt: string;
   noData: string[];
@@ -380,8 +385,15 @@ export interface CardEvidence {
   value: unknown;
 }
 
+/** Доступ зрителя к каналам — для плашек UI (К2). */
+export interface CardAccess {
+  cicd: ChannelAccess;
+  appsec: ChannelAccess;
+}
+
 export interface RepoCard {
   repo: CardRepo;
+  access: CardAccess;
   markers: CardMarkers;
   scan: CardScan | null;
   score: CardScore | null;
@@ -389,6 +401,10 @@ export interface RepoCard {
   recommendations: CardRecommendation[];
   evidence: CardEvidence[];
 }
+
+/** Факты каналов с правами (К2): не едут в ответ зрителю без доступа. */
+export const CICD_KINDS = ["cicd.runs", "cicd.configs"];
+export const APPSEC_KINDS = ["appsec.findings"];
 
 /** Кап значения факта в ответе: форма усечения одна для всех фактов. */
 const VALUE_CAP_BYTES = 4096;
@@ -454,6 +470,7 @@ interface FactRow {
 }
 
 interface RecRow {
+  channel: string | null;
   rule_id: string;
   priority: number;
   problem: string;
@@ -465,19 +482,56 @@ interface RecRow {
   source: string;
 }
 
-/** null = репозитория нет в каталоге (404). Есть репо без скана — это 200. */
-export function getRepoCard(db: Database, org: string, repo: string, opts: { mode?: "public" | "own" } = {}): RepoCard | null {
-  const mode = opts.mode ?? "public";
-  const r = db
+type CardRepoRow = RepoRow & { rating_active: number; visibility: string };
+
+function findRepoRow(db: Database, org: string, repo: string): CardRepoRow | null {
+  return db
     .query(
       "SELECT id, org_slug, repo_slug, title, language, likes, forks, last_activity_at, rating_active, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?",
     )
-    .get(org, repo) as (RepoRow & { rating_active: number; visibility: string }) | null;
+    .get(org, repo) as CardRepoRow | null;
+}
+
+/**
+ * Видимость карточки (К2): публичный активный — всем; эвиктированный
+ * публичный — 404 всем; не публичный — только при repo = granted.
+ */
+function cardVisible(r: CardRepoRow, access: AccessResult): boolean {
+  if (r.visibility === "public") return r.rating_active === 1;
+  return access.repo === "granted";
+}
+
+/**
+ * Карточка для зрителя: проверка доступа (сеть — только у зрителя с PAT,
+ * и только когда карточка вообще может быть показана) → сборка. null = 404.
+ */
+export async function getRepoCardForViewer(
+  db: Database,
+  org: string,
+  repo: string,
+  resolve: (repo: AccessRepo) => Promise<AccessResult>,
+): Promise<RepoCard | null> {
+  const r = findRepoRow(db, org, repo);
   if (!r) return null;
-  // публичная поверхность = активный рейтинг публичных репо: эвиктированное
-  // (пропало/приватизовано) ведёт себя как отсутствующее (404); own-режим
-  // читает репо без ограничений — личная страница юзера
-  if (mode === "public" && (r.rating_active !== 1 || r.visibility !== "public")) return null;
+  // эвиктированный публичный — 404 всем, проверять доступ незачем
+  if (r.visibility === "public" && r.rating_active !== 1) return null;
+  const access = await resolve({ id: r.id, org: r.org_slug, repo: r.repo_slug, visibility: r.visibility });
+  return getRepoCard(db, org, repo, { access });
+}
+
+/**
+ * Единая карточка (К2), собранная по доступу зрителя (дефолт — аноним).
+ * null = репозитория нет или он не виден зрителю (404). Есть репо без
+ * скана — это 200.
+ */
+export function getRepoCard(db: Database, org: string, repo: string, opts: { access?: AccessResult } = {}): RepoCard | null {
+  const access = opts.access ?? NO_PAT_ACCESS;
+  const r = findRepoRow(db, org, repo);
+  if (!r) return null;
+  if (!cardVisible(r, access)) return null;
+  const ciOpen = access.cicd === "granted";
+  const secOpen = access.appsec === "granted";
+  const cardAccess: CardAccess = { cicd: access.cicd, appsec: access.appsec };
 
   const cardRepo: CardRepo = {
     org: r.org_slug,
@@ -507,6 +561,7 @@ export function getRepoCard(db: Database, org: string, repo: string, opts: { mod
     // «в каталоге, ещё не сканировали» — штатное состояние, не ошибка
     return {
       repo: cardRepo,
+      access: cardAccess,
       markers: { historyTruncatedSince: null, ciConfigOnlyCap: false, staleFacts: false, codeEmpty: false },
       scan: null,
       score: null,
@@ -522,35 +577,52 @@ export function getRepoCard(db: Database, org: string, repo: string, opts: { mod
     | { id: number; started_at: string; finished_at: string | null; status: string; trigger: string }
     | null;
 
+  // закрытые зрителю каналы: ни чисел, ни подметрик, ни фактов, ни правил
+  const lockOf: Partial<Record<CategoryKey, ChannelAccess>> = {};
+  if (!ciOpen) lockOf.cicd = access.cicd;
+  if (!secOpen) lockOf.security = access.appsec;
+  const closedKinds = new Set<string>([...(ciOpen ? [] : CICD_KINDS), ...(secOpen ? [] : APPSEC_KINDS)]);
+  const closedChannels = new Set<string>([...(ciOpen ? [] : ["cicd"]), ...(secOpen ? [] : ["appsec"])]);
+
   const rawCats = JSON.parse(scoreRow.categories) as Record<string, CategoryScore>;
   const categories = {} as Record<CategoryKey, CardCategory>;
   for (const key of CATEGORY_ORDER) {
+    const locked = lockOf[key];
+    if (locked !== undefined) {
+      categories[key] = { score: null, submetrics: {}, locked, weight: CATEGORY_WEIGHTS[key] };
+      continue;
+    }
     const cat = rawCats[key] ?? { score: null, submetrics: {} };
     categories[key] = { ...cat, weight: CATEGORY_WEIGHTS[key] };
   }
-  const stale = JSON.parse(scoreRow.stale) as string[];
+  const stale = (JSON.parse(scoreRow.stale) as string[]).filter((k) => !closedKinds.has(k));
+  const fullOpen = ciOpen && secOpen;
   const score: CardScore = {
     totalRating: scoreRow.total_rating,
     coverageRating: scoreRow.coverage_rating,
-    totalFull: scoreRow.total_full,
-    coverageFull: scoreRow.coverage_full,
+    totalFull: fullOpen ? scoreRow.total_full : null,
+    coverageFull: fullOpen ? scoreRow.coverage_full : null,
+    fullLocked: !fullOpen,
     modelVersion: scoreRow.model_version,
     computedAt: scoreRow.computed_at,
-    noData: JSON.parse(scoreRow.no_data) as string[],
+    // причины no-data закрытых категорий — тоже данные канала (напр. «config-only cap»)
+    noData: (JSON.parse(scoreRow.no_data) as string[]).filter((raw) => lockOf[raw.split(":")[0] as CategoryKey] === undefined),
     stale,
     categories,
   };
 
-  const recRows = db
-    .query(
-      `SELECT rule_id, priority, problem, action, fact_ref, expected_impact, delta_score, opens_category, source
-       FROM recommendations WHERE scan_id = ? AND model_version = ? ORDER BY priority ASC`,
-    )
-    .all(scoreRow.scan_id, MODEL_VERSION) as RecRow[];
+  const recRows = (
+    db
+      .query(
+        `SELECT rule_id, priority, problem, action, fact_ref, expected_impact, delta_score, opens_category, source, channel
+         FROM recommendations WHERE scan_id = ? AND model_version = ? ORDER BY priority ASC`,
+      )
+      .all(scoreRow.scan_id, MODEL_VERSION) as RecRow[]
+  ).filter((rec) => rec.channel === null || !closedChannels.has(rec.channel));
 
-  const factRows = db
-    .query("SELECT key, category, value, status, source, collected_at FROM facts WHERE scan_id = ?")
-    .all(scoreRow.scan_id) as FactRow[];
+  const factRows = (
+    db.query("SELECT key, category, value, status, source, collected_at FROM facts WHERE scan_id = ?").all(scoreRow.scan_id) as FactRow[]
+  ).filter((f) => !closedKinds.has(f.key));
   const factByKey = new Map(factRows.map((f) => [f.key, f]));
 
   const refKeys = new Set<string>();
@@ -597,13 +669,14 @@ export function getRepoCard(db: Database, org: string, repo: string, opts: { mod
   const cicdNoData = categories.cicd.no_data ?? "";
   const markers: CardMarkers = {
     historyTruncatedSince: typeof summaryValue?.history_truncated_since === "string" ? summaryValue.history_truncated_since : null,
-    ciConfigOnlyCap: cicdNoData.includes("config-only cap"),
+    ciConfigOnlyCap: ciOpen && cicdNoData.includes("config-only cap"),
     staleFacts: Array.isArray(stale) && stale.length > 0,
     codeEmpty: scoreRow.code_empty === 1,
   };
 
   return {
     repo: cardRepo,
+    access: cardAccess,
     markers,
     scan: scanRow
       ? { id: scanRow.id, startedAt: scanRow.started_at, finishedAt: scanRow.finished_at, status: scanRow.status, trigger: scanRow.trigger }

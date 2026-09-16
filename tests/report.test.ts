@@ -45,7 +45,9 @@ seedRecommendation(t, scoredScan, {
   opensCategory: "security",
   expectedImpact: "coverage 1.00→1.00 — категория Security 20%",
 });
-const md = renderRepoReport(getRepoCard(t.db, "report", "sample")!);
+// отчёт зрителя с доступом к каналам: полный разбор (матрица доступа — api.test.ts)
+const GRANTED = { cicd: "granted", appsec: "granted", repo: "granted" } as const;
+const md = renderRepoReport(getRepoCard(t.db, "report", "sample", { access: GRANTED })!);
 
 describe("MD-отчёт: структура", () => {
   test("семь разделов плана §6 на месте", () => {
@@ -73,6 +75,7 @@ describe("MD-отчёт: структура", () => {
 describe("MD-отчёт: числа и tri-state", () => {
   test("Score и покрытие в итоге", () => {
     expect(md).toContain("**Score в рейтинге (4 категории): 67 из 100**");
+    expect(md).toContain("Полный Score (с CI и Security): 67 из 100 при покрытии данными 80%");
     expect(md).toContain("покрытии данными 100%");
   });
 
@@ -86,7 +89,7 @@ describe("MD-отчёт: числа и tri-state", () => {
   });
 
   test("Security объясняется доступом, а не «данных нет по неизвестной причине»", () => {
-    expect(md).toContain("в публичном режиме категория исключена с перенормировкой, а не занижена");
+    expect(md).toContain("без них категория исключена с перенормировкой, а не занижена");
     expect(md).toContain("Категория не снизила Score");
   });
 
@@ -146,7 +149,7 @@ describe("MD-отчёт: репозитории без Score", () => {
         code: { score: null, no_data: "git channel no-data", submetrics: {} },
       },
     });
-    const dark = renderRepoReport(getRepoCard(t.db, "report", "dark")!);
+    const dark = renderRepoReport(getRepoCard(t.db, "report", "dark", { access: GRANTED })!);
     expect(dark).toContain("**Недостаточно данных для оценки.**");
     expect(dark).toContain("Покрытие данными — 38% при пороге 40%");
     expect(dark).toContain("git-канал не отдал данные");

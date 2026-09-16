@@ -71,12 +71,18 @@ export interface SchedulerConfig {
   startDelayMs: number;
 }
 
+export interface AccessConfig {
+  /** TTL кэша проверок доступа зрителя (К2 В4.1): 15 мин по умолчанию, env ACCESS_CACHE_TTL_MS */
+  cacheTtlMs: number;
+}
+
 export interface Config {
   port: number;
   dataDir: string;
   sourcecraftToken: string | null;
   auth: AuthConfig;
   scheduler: SchedulerConfig;
+  access: AccessConfig;
   llm: {
     provider: "yandex" | "zai";
     mainModel: string;
@@ -166,6 +172,9 @@ export function loadConfig(): Config {
       fullRescan: envBool(env, "SCHEDULER_FULL_RESCAN") ?? false,
       leaseMs: envInt(env, "SCHEDULER_LEASE_MS") ?? 30 * 60_000,
       startDelayMs: envInt(env, "SCHEDULER_START_DELAY_MS") ?? 5 * 60_000,
+    },
+    access: {
+      cacheTtlMs: envInt(env, "ACCESS_CACHE_TTL_MS") ?? 15 * 60_000,
     },
     llm: {
       provider,

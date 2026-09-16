@@ -45,7 +45,9 @@ const APPSEC_VALUE = { severity_counts: { critical: 2, high: 7, medium: 74, low:
 
 // ---------------------------------------------------------------------------
 describe("C1: own-результаты не привязаны к пользователю", () => {
-  repro(
+  // закрыто Б3 (К2): роут own-карточки удалён, единая карточка приватного
+  // репо без подтверждённого доступа — 404
+  test(
     "чужой пользователь (свой Я ID, без PAT, без прав) НЕ получает own-карточку приватного репо",
     async () => {
       const { dir, t } = tempDb();
@@ -60,7 +62,7 @@ describe("C1: own-результаты не привязаны к пользов
       t.close();
 
       const port = 41000 + Math.floor(Math.random() * 9000);
-      const server = Bun.spawn(["bun", "run", join(ROOT, "src/server.ts")], {
+      const server = Bun.spawn([process.execPath, "run", join(ROOT, "src/server.ts")], {
         cwd: ROOT,
         env: {
           ...process.env,
@@ -87,8 +89,14 @@ describe("C1: own-результаты не привязаны к пользов
           headers: { cookie: `${SESSION_COOKIE}=${strangerCookie}` },
         });
         const body = await res.text();
+        // единая карточка того же репо тем же зрителем
+        const unified = await fetch(`${base}/api/repos/acme/secret-repo`, {
+          headers: { cookie: `${SESSION_COOKIE}=${strangerCookie}` },
+        });
+        const unifiedBody = await unified.text();
         // правильно: отказ (403/404) и ни байта данных AppSec владельца
         expect({ ok: res.ok, leaksAppsec: body.includes("severity_counts") }).toEqual({ ok: false, leaksAppsec: false });
+        expect({ ok: unified.ok, leaksAppsec: unifiedBody.includes("severity_counts") }).toEqual({ ok: false, leaksAppsec: false });
       } finally {
         server.kill();
         await server.exited;
@@ -210,7 +218,8 @@ describe("H3: rescore-m4.ts затирает own-скоры", () => {
   // итогами. Утверждение находки сохранено: пересчёт не теряет данных
   // скана с PAT (строка на каждый скан, полный итог с Security на месте) и
   // не выносит его AppSec-факты на карточку зрителя без доступа.
-  repro(
+  // закрыто Б1 (хранение) + Б3 (карточка по доступу зрителя)
+  test(
     "пересчёт не теряет оценку скана с PAT и не выносит его факты на публичную карточку",
     async () => {
       const { dir, t } = tempDb();
