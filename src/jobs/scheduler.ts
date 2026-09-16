@@ -289,9 +289,11 @@ export function startWorkerLoop(deps: WorkerDeps, pollMs = 5000): () => void {
 }
 
 /**
- * Планировщик ночного обхода: интервал из конфига (сутки по умолчанию),
-// первый тик — сразу (стенд поднимается с пустой очередью). Расписание
-// объясняется конфигурацией (ТЗ §6) — см. отчёт воркера.
+ * Планировщик обхода каталога: интервал из конфига (сутки по умолчанию,
+ * ТЗ §6); первый обход — через startDelayMs (окно управления стендом:
+ * обход с живым токеном ставит первый скан всего каталога в очередь —
+ * дизайн продукта, но оператор должен успеть это увидеть/отключить).
+ * Расписание объясняется конфигурацией — раздел в отчёте воркера.
  */
 export function startScheduler(db: Database, client: ScClient | null, config: Config): () => void {
   const run = async () => {
@@ -312,7 +314,10 @@ export function startScheduler(db: Database, client: ScClient | null, config: Co
       console.error(`[scheduler] crashed: ${String((e as Error).message).slice(0, 200)}`);
     }
   };
-  void run();
+  const first = setTimeout(() => void run(), config.scheduler.startDelayMs);
   const timer = setInterval(() => void run(), config.scheduler.intervalMs);
-  return () => clearInterval(timer);
+  return () => {
+    clearTimeout(first);
+    clearInterval(timer);
+  };
 }

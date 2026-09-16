@@ -27,8 +27,11 @@ type Category = CardCategory;
 type Evidence = Card["evidence"][number];
 type Recommendation = Card["recommendations"][number];
 
-export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta: MetaResponse | null }) {
-  const { state, reload } = useJson<Card>(`/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`);
+export function RepoPage({ org, repo, meta, own = false }: { org: string; repo: string; meta: MetaResponse | null; own?: boolean }) {
+  // own-режим (В4/Б5): карточка своего репо — 6 категорий, Security с
+  // фактами AppSec, CI-раны; адрес отдельный, публичный скор не трогается
+  const base = own ? `/api/me/repos` : `/api/repos`;
+  const { state, reload } = useJson<Card>(`${base}/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`);
 
   if (state.kind === "loading") {
     return (
@@ -41,10 +44,14 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   if (state.kind === "error") {
     return (
       <Alert
-        theme="danger"
-        title={`Не удалось открыть ${org}/${repo}`}
-        message={state.message}
-        actions={[{ text: "Повторить", handler: reload }]}
+        theme={own ? "normal" : "danger"}
+        title={own ? `Свой репозиторий ${org}/${repo} ещё не анализировался` : `Не удалось открыть ${org}/${repo}`}
+        message={
+          own
+            ? "Own-оценка появляется после первого анализа из «Моего кабинета»: там же вход Я ID и окно PAT."
+            : state.message
+        }
+        actions={own ? [] : [{ text: "Повторить", handler: reload }]}
       />
     );
   }
@@ -52,7 +59,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   const card = state.data;
   return (
     <Flex direction="column" gap={6}>
-      <Header card={card} />
+      <Header card={card} own={own} />
       {card.score === null ? (
         <Alert
           theme="normal"
@@ -62,10 +69,17 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
       ) : (
         <>
           <ScoreBlock card={card} meta={meta} />
-          <Categories card={card} meta={meta} />
+          <Categories card={card} meta={meta} securityNote={own ? ownSecurityNote(card) : undefined} />
           <Markers card={card} />
           <Recommendations card={card} />
-          <ReportLink org={org} repo={repo} />
+          {own ? (
+            <Text color="secondary">
+              MD-выгрузка — у публичной карточки ({`${org}/${repo}`}); own-оценка живёт в интерфейсе и API
+              GET /api/me/repos/org/repo.
+            </Text>
+          ) : (
+            <ReportLink org={org} repo={repo} />
+          )}
         </>
       )}
     </Flex>
@@ -87,7 +101,7 @@ function ReportLink({ org, repo }: { org: string; repo: string }) {
   );
 }
 
-function Header({ card }: { card: Card }) {
+function Header({ card, own = false }: { card: Card; own?: boolean }) {
   const { repo: r, scan, score } = card;
   return (
     <Flex direction="column" gap={2}>
@@ -110,7 +124,7 @@ function Header({ card }: { card: Card }) {
         {scan
           ? `Просканирован ${fmtDateTime(scan.finishedAt ?? scan.startedAt)}, скан #${scan.id} (${scanStatusText(scan.status)}, запуск: ${scan.trigger})`
           : "Скана ещё не было"}
-        {score ? `, модель ${score.modelVersion}, режим ${score.mode}` : ""}
+        {score ? `, модель ${score.modelVersion}, режим ${own ? "свой репо (6 категорий)" : "публичный (4 категории)"}` : ""}
       </Text>
     </Flex>
   );
@@ -156,7 +170,7 @@ function ScoreBlock({ card, meta }: { card: Card; meta: MetaResponse | null }) {
   );
 }
 
-function Categories({ card, meta }: { card: Card; meta: MetaResponse | null }) {
+function Categories({ card, meta, securityNote }: { card: Card; meta: MetaResponse | null; securityNote?: string }) {
   const score = card.score!;
   const entries = Object.entries(score.categories) as [string, Category][];
   // фактический вклад после перенормировки: вес категории делится на сумму
@@ -197,8 +211,12 @@ function Categories({ card, meta }: { card: Card; meta: MetaResponse | null }) {
 
             {cat.score === null && (
               <Text color="secondary">
-                {key === "security" ? SECURITY_PUBLIC_NOTE : humanNoData(`${key}: ${cat.no_data ?? ""}`)} Категория не
-                снизила Score: её вес выброшен, остальные перенормированы.
+                {key === "security" && securityNote !== undefined
+                  ? securityNote
+                  : key === "security"
+                    ? SECURITY_PUBLIC_NOTE
+                    : humanNoData(`${key}: ${cat.no_data ?? ""}`)}{" "}
+                Категория не снизила Score: её вес выброшен, остальные перенормированы.
               </Text>
             )}
             {cat.score !== null && cat.no_data && <Text color="secondary">{humanNoData(`${key}: ${cat.no_data}`)}</Text>}
@@ -461,4 +479,20 @@ const SUBMETRIC_TITLES: Record<string, string> = {
 
 function submetricTitle(category: string, sub: string): string {
   return SUBMETRIC_TITLES[`${category}.${sub}`] ?? sub;
+}
+
+/** Причина no-data Security в own-режиме — из факта appsec.findings (честный tri-state). */
+function ownSecurityNote(card: Card): string {
+  const fact = card.evidence.find((e) => e.key === "appsec.findings");
+  const reason = fact && fact.status === "no-data" ? (fact.value as { reason?: string }).reason : undefined;
+  if (reason === "access") {
+    return "AppSec этого репозитория недоступен токену: право src.repositories.useAppSecScan не выдано. Это отсутствие данных, не ноль — вес категории выброшен.";
+  }
+  if (reason === "no-scan") {
+    return "Завершённого скана AppSec нет (не запускался или идёт right now). Это отсутствие данных, не ноль.";
+  }
+  if (reason === "incomplete") {
+    return "AppSec API ответил неполно (канал/пагинация). Ошибка — не отсутствие уязвимостей: вес категории выброшен до успешного пересбора.";
+  }
+  return "AppSec-данных нет: сохраните PAT в «Моем кабинете» — Security считается только с правами вашего токена.";
 }

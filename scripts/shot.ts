@@ -157,6 +157,12 @@ await shoot("rating", `${base}/?sort=score&order=desc`, {
   "колонка Score": "document.body.innerText.includes('Score') ? 1 : 0",
 });
 
+// В4: «Мой кабинет» без сессии — витрина слоёв (Я ID → PAT) и входа
+await shoot("me", `${base}/me`, {
+  "заголовок кабинета": `document.querySelectorAll('h1').length`,
+  "кнопка входа Я ID": `[...document.querySelectorAll('a,button')].filter((n) => n.textContent?.includes("Войти через Я ID")).length`,
+});
+
 await shoot("repo", `${base}/repo/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`, {
   "блок Score": "document.body.innerText.includes('из 100') ? 1 : 0",
   "категории": "document.body.innerText.includes('Категории') ? 1 : 0",

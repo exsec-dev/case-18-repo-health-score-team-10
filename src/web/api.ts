@@ -3,8 +3,26 @@
 // бандл фронтенда не утекает ни строчки серверного кода (типы стираются).
 import { useCallback, useEffect, useState } from "react";
 import type { ApiError, MetaResponse, RatingResponse, RepoCard } from "../api/repos";
+import type { MyRepoEntry } from "../api/me";
 
-export type { MetaResponse, RatingResponse, RepoCard };
+export type { MetaResponse, RatingResponse, RepoCard, MyRepoEntry };
+
+export interface MeResponse {
+  login: string;
+  hasPat: boolean;
+  patCheckedAt: string | null;
+}
+
+export interface MyReposResponse {
+  username: string;
+  entries: MyRepoEntry[];
+}
+
+export interface ScanSettings {
+  useDefaults: boolean;
+  maxBytes: number | null;
+  timeoutMs: number | null;
+}
 
 export async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(url, { signal });
@@ -15,6 +33,20 @@ export async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T
     throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
   }
   return (await res.json()) as T;
+}
+
+/** Мутации me-поверхности: PUT/DELETE/POST с телом и текстом ошибки сервера. */
+export async function mutateJson<T>(url: string, method: string, body?: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method,
+    headers: body === undefined ? undefined : { "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const data = (await res.json().catch(() => null)) as (T & ApiError) | null;
+  if (!res.ok) {
+    throw new Error(data?.error?.message ?? `HTTP ${res.status}`);
+  }
+  return data as T;
 }
 
 export type AsyncState<T> = { kind: "loading" } | { kind: "ok"; data: T } | { kind: "error"; message: string };

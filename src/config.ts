@@ -65,6 +65,10 @@ export interface SchedulerConfig {
   fullRescan: boolean;
   /** лиз job'а: время, на которое job закрепляется за воркером */
   leaseMs: number;
+  /** задержка первого обхода после старта сервера: окно управления стендом
+   *  (обход с живым токеном ставит в очередь первый скан всего каталога —
+   *  это дизайн продукта, но оператор обязан успеть это видеть/отключить) */
+  startDelayMs: number;
 }
 
 export interface Config {
@@ -161,6 +165,7 @@ export function loadConfig(): Config {
       intervalMs: envInt(env, "SCHEDULER_INTERVAL_MS") ?? 24 * 60 * 60_000,
       fullRescan: envBool(env, "SCHEDULER_FULL_RESCAN") ?? false,
       leaseMs: envInt(env, "SCHEDULER_LEASE_MS") ?? 30 * 60_000,
+      startDelayMs: envInt(env, "SCHEDULER_START_DELAY_MS") ?? 5 * 60_000,
     },
     llm: {
       provider,
