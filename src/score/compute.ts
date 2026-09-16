@@ -70,15 +70,19 @@ export interface Scores {
   total: number | null;
   coverage: number;
   categories: Record<CategoryKey, CategoryScore>;
-  /** derived-показатели (§7.3) — для отображения, не в БД */
+  /** derived-показатели (§7.3) — для отображения; в БД с v1.3 (scores.derived) */
   derived: DerivedMetrics;
   noData: string[];
   stale: string[];
   computedAt: string;
 }
 
-/** Kinds, которые читает compute (для bad-channel замещения историей). */
-const READ_KINDS = [
+/**
+ * Kinds, которые читает compute (для bad-channel замещения историей).
+ * Экспортируется: read-API строит по нему доказательную базу карточки —
+ * дубль списка в API молча разошёлся бы при смене model_version.
+ */
+export const READ_KINDS = [
   "activity.git.timeline",
   "activity.git.summary",
   "docs.presence",
@@ -423,8 +427,8 @@ function scoreCode(derived: DerivedMetrics): CategoryScore {
 export function writeScores(db: Database, s: Scores): void {
   db.query(
     `INSERT OR REPLACE INTO scores
-       (scan_id, model_version, repo_id, mode, total, coverage, categories, no_data, stale, computed_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (scan_id, model_version, repo_id, mode, total, coverage, categories, no_data, stale, computed_at, derived)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     s.scanId,
     s.modelVersion,
@@ -436,5 +440,6 @@ export function writeScores(db: Database, s: Scores): void {
     JSON.stringify(s.noData),
     JSON.stringify(s.stale),
     s.computedAt,
+    JSON.stringify(s.derived),
   );
 }

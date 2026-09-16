@@ -7,6 +7,9 @@
 // формы scores/recommendations (v1.1) пересоздаются (производные
 // данные, пересчёт восстанавливает); repos-колонки добавляются
 // ALTER'ом (каталог не теряется).
+// Схема v1.3 (В3/Б1): scores += derived (JSON DerivedMetrics) —
+// аддитивный ALTER, чтобы страница репо показывала те же производные
+// числа, из которых посчитан Score этой строки, не вызывая compute.
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -115,5 +118,8 @@ export function openDb(config: Config): Database {
     db.exec("DROP TABLE IF EXISTS recommendations");
     db.exec(RECOMMENDATIONS_DDL);
   }
+  // v1.2 → v1.3: derived-метрики строки скоров (NULL у строк старых
+  // прогонов — пересчёт scripts/score.ts заполняет последний скан)
+  ensureColumn(db, "scores", "derived", "TEXT");
   return db;
 }

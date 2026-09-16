@@ -1,0 +1,42 @@
+// api.ts — тонкий слой доступа к read-API. Типы берутся из серверного
+// модуля import type'ом: одна форма данных на обе стороны, при этом в
+// бандл фронтенда не утекает ни строчки серверного кода (типы стираются).
+import { useCallback, useEffect, useState } from "react";
+import type { ApiError, MetaResponse, RatingResponse, RepoCard } from "../api/repos";
+
+export type { MetaResponse, RatingResponse, RepoCard };
+
+export async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(url, { signal });
+  if (!res.ok) {
+    // сервер отвечает ошибкой в контракте {error:{code,message}} — показываем
+    // именно её текст, а не безликое «HTTP 400»
+    const body = (await res.json().catch(() => null)) as ApiError | null;
+    throw new Error(body?.error?.message ?? `HTTP ${res.status}`);
+  }
+  return (await res.json()) as T;
+}
+
+export type AsyncState<T> = { kind: "loading" } | { kind: "ok"; data: T } | { kind: "error"; message: string };
+
+/** Загрузка по URL с отменой устаревшего запроса и ручным повтором. */
+export function useJson<T>(url: string): { state: AsyncState<T>; reload: () => void } {
+  const [state, setState] = useState<AsyncState<T>>({ kind: "loading" });
+  const [attempt, setAttempt] = useState(0);
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    setState({ kind: "loading" });
+    fetchJson<T>(url, ctrl.signal)
+      .then((data) => setState({ kind: "ok", data }))
+      .catch((e: unknown) => {
+        // отмена — это не ошибка показа: пришёл более свежий запрос
+        if (ctrl.signal.aborted) return;
+        setState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+      });
+    return () => ctrl.abort();
+  }, [url, attempt]);
+
+  const reload = useCallback(() => setAttempt((n) => n + 1), []);
+  return { state, reload };
+}

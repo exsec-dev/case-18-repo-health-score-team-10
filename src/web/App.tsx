@@ -1,39 +1,37 @@
-// App.tsx — В3-скаффолд: оболочка страницы + живой /api/health.
-// Рейтинг и страница репо растут здесь (В3).
-import { Flex, Label, Link, Loader, Text } from "@gravity-ui/uikit";
-import { useEffect, useState } from "react";
-
-type Health = { ok: boolean; repos: number; llmProvider: string };
-type HealthState = { kind: "loading" } | { kind: "ok"; health: Health } | { kind: "error"; message: string };
+// App.tsx — оболочка приложения и развилка маршрутов (History API,
+// src/web/router.ts). Мета грузится один раз на всё приложение: версия
+// модели, имена и веса категорий, порог NULL приходят с сервера, чтобы
+// экран и методика не разъезжались при смене model_version.
+import { Alert, Flex, Link, Text } from "@gravity-ui/uikit";
+import type { MetaResponse } from "./api";
+import { useJson } from "./api";
+import { Rating } from "./Rating";
+import { RepoPage } from "./RepoPage";
+import { linkProps, useRoute } from "./router";
 
 export function App() {
-  const [state, setState] = useState<HealthState>({ kind: "loading" });
-
-  useEffect(() => {
-    fetch("/api/health")
-      .then((r) => (r.ok ? (r.json() as Promise<Health>) : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((health) => setState({ kind: "ok", health }))
-      .catch((e: unknown) => setState({ kind: "error", message: e instanceof Error ? e.message : String(e) }));
-  }, []);
+  const route = useRoute();
+  const meta = useJson<MetaResponse>("/api/meta");
+  const metaData = meta.state.kind === "ok" ? meta.state.data : null;
 
   return (
-    <Flex direction="column" gap={4} style={{ padding: "var(--g-spacing-8)", maxWidth: 960, margin: "0 auto" }}>
-      <Text variant="header-2" as="h1">
-        SourceCraft Repo Health
-      </Text>
-      <Text color="secondary">В3 — скаффолд. Рейтинг и страницы анализа появятся здесь.</Text>
-      <Flex gap={2} alignItems="center">
-        {state.kind === "loading" && <Loader size="s" />}
-        {state.kind === "ok" && (
-          <>
-            <Label theme="success">сервер жив</Label>
-            <Label theme="normal">репо в БД: {state.health.repos}</Label>
-            <Label theme="info">llm: {state.health.llmProvider}</Label>
-          </>
-        )}
-        {state.kind === "error" && <Label theme="danger">health: {state.message}</Label>}
-        <Link href="/api/health">/api/health</Link>
+    <Flex direction="column" gap={5} style={{ padding: "var(--g-spacing-8)", maxWidth: 1280, margin: "0 auto" }}>
+      <Flex gap={4} alignItems="baseline">
+        <Link {...linkProps("/")}>
+          <Text variant="subheader-3">SourceCraft Repo Health</Text>
+        </Link>
+        {route.kind === "repo" && <Text color="secondary">{route.org}/{route.repo}</Text>}
       </Flex>
+
+      {route.kind === "rating" && <Rating search={route.search} meta={metaData} />}
+      {route.kind === "repo" && <RepoPage org={route.org} repo={route.repo} meta={metaData} />}
+      {route.kind === "not-found" && (
+        <Alert
+          theme="warning"
+          title="Страница не найдена"
+          message={`Адрес ${route.path} не соответствует ни одному экрану. Рейтинг живёт на «/», карточка — на «/repo/{org}/{repo}».`}
+        />
+      )}
     </Flex>
   );
 }

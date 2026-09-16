@@ -1,0 +1,614 @@
+// repos.ts — read-API В3: чистые функции чтения БД (рейтинг, карточка,
+// мета). Сети нет и быть не может — UI живёт на том, что уже посчитал
+// скан. Сортировка/фильтрация/пагинация/фасеты считаются здесь, а не на
+// клиенте (решение канвы «г»): рейтинг сразу является контрактом данных.
+// Tri-state (закон 2): Score = NULL не участвует в ранжировании вообще —
+// такие репо уезжают в отдельный массив, иначе «нет данных» оказалось бы
+// лучшим или худшим результатом в зависимости от направления сортировки.
+import type { Database } from "bun:sqlite";
+import { READ_KINDS, type CategoryScore } from "../score/compute";
+import type { DerivedMetrics } from "../score/derived";
+import { CATEGORY_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, MODEL_VERSION } from "../score/model";
+
+// ---------- общие формы ----------
+
+export const CATEGORY_TITLES: Record<CategoryKey, string> = {
+  documentation: "Документация",
+  cicd: "CI/CD",
+  security: "Security",
+  activity: "Активность",
+  issues: "Issues",
+  code: "Code health",
+};
+
+/** Порядок категорий на всех поверхностях — вес модели, затем ключ. */
+export const CATEGORY_ORDER: CategoryKey[] = ["documentation", "cicd", "security", "activity", "issues", "code"];
+
+/** Путь к методике в репозитории (строка, не URL): футер и MD ссылаются сюда. */
+export const METHODOLOGY_PATH = "reports/2026-09-15-m2-methodology-draft.md";
+
+export interface ApiError {
+  error: { code: "bad_query" | "not_found"; message: string };
+}
+
+export interface RatingItem {
+  org: string;
+  repo: string;
+  title: string | null;
+  language: string | null;
+  score: number | null;
+  coverage: number;
+  categories: Record<CategoryKey, number | null>;
+  likes: number | null;
+  forks: number | null;
+  lastActivityAt: string | null;
+  scannedAt: string | null;
+  scanStatus: string;
+  /** часть фактов взята из истории при сбое канала (§5.6) — НЕ «давность скана» */
+  staleFacts: boolean;
+  modelVersion: string;
+}
+
+export interface LanguageFacet {
+  language: string | null;
+  count: number;
+}
+
+export interface RatingResponse {
+  items: RatingItem[];
+  /** Score = NULL: вне ранжирования и вне пагинации (закон 2) */
+  nullItems: RatingItem[];
+  page: number;
+  perPage: number;
+  total: number;
+  totalPages: number;
+  nulls: number;
+  facets: { languages: LanguageFacet[] };
+  generatedAt: string;
+}
+
+export type SortKey = "score" | "likes" | "activity" | "coverage" | "name";
+export type SortOrder = "desc" | "asc";
+
+export interface ReposQuery {
+  sort: SortKey;
+  order: SortOrder;
+  /** undefined = фильтра нет; null = «язык не определён» (lang= пустым) */
+  lang?: string | null;
+  q?: string;
+  page: number;
+  perPage: number;
+}
+
+const SORT_KEYS: SortKey[] = ["score", "likes", "activity", "coverage", "name"];
+
+export const DEFAULT_QUERY: ReposQuery = { sort: "score", order: "desc", page: 1, perPage: 25 };
+
+export type ParseResult = { ok: true; query: ReposQuery } | { ok: false; message: string };
+
+/**
+ * Неизвестный параметр игнорируется, неверное ЗНАЧЕНИЕ известного — 400:
+ * тихо показать не то, что просили, хуже явной ошибки.
+ */
+export function parseReposQuery(params: URLSearchParams): ParseResult {
+  const query: ReposQuery = { ...DEFAULT_QUERY };
+
+  const sort = params.get("sort");
+  if (sort !== null) {
+    if (!SORT_KEYS.includes(sort as SortKey)) {
+      return { ok: false, message: `sort: ожидается одно из ${SORT_KEYS.join("|")}, получено "${sort}"` };
+    }
+    query.sort = sort as SortKey;
+  }
+
+  const order = params.get("order");
+  if (order !== null) {
+    if (order !== "desc" && order !== "asc") {
+      return { ok: false, message: `order: ожидается desc|asc, получено "${order}"` };
+    }
+    query.order = order;
+  }
+
+  if (params.has("lang")) {
+    const lang = params.get("lang")!;
+    query.lang = lang === "" ? null : lang;
+  }
+
+  if (params.has("q")) {
+    const q = params.get("q")!;
+    if (q !== "") query.q = q;
+  }
+
+  const page = params.get("page");
+  if (page !== null) {
+    const n = Number(page);
+    if (!Number.isInteger(n) || n < 1) return { ok: false, message: `page: ожидается целое ≥ 1, получено "${page}"` };
+    query.page = n;
+  }
+
+  const perPage = params.get("per_page");
+  if (perPage !== null) {
+    const n = Number(perPage);
+    if (!Number.isInteger(n) || n < 1 || n > 100) {
+      return { ok: false, message: `per_page: ожидается целое 1…100, получено "${perPage}"` };
+    }
+    query.perPage = n;
+  }
+
+  return { ok: true, query };
+}
+
+// ---------- рейтинг ----------
+
+interface RatingRow {
+  org_slug: string;
+  repo_slug: string;
+  title: string | null;
+  language: string | null;
+  likes: number | null;
+  forks: number | null;
+  last_activity_at: string | null;
+  total: number | null;
+  coverage: number;
+  categories: string;
+  stale: string;
+  model_version: string;
+  scan_status: string;
+  started_at: string;
+  finished_at: string | null;
+}
+
+// Одна строка на репозиторий: последний скан, у которого ЕСТЬ скоры
+// текущей модели. «Последний» — по scan_id, а не по датам: id монотонен,
+// а даты скана могут идти вразнобой (пересканы, восстановление БД).
+const RATING_SQL = `
+SELECT r.org_slug, r.repo_slug, r.title, r.language, r.likes, r.forks, r.last_activity_at,
+       sc.total, sc.coverage, sc.categories, sc.stale, sc.model_version,
+       s.status AS scan_status, s.started_at, s.finished_at
+FROM scores sc
+JOIN repos r ON r.id = sc.repo_id
+JOIN scans s ON s.id = sc.scan_id
+WHERE sc.model_version = ?
+  AND sc.scan_id = (SELECT MAX(sc2.scan_id) FROM scores sc2
+                    WHERE sc2.repo_id = sc.repo_id AND sc2.model_version = ?)`;
+
+function toRatingItem(row: RatingRow): RatingItem {
+  const cats = JSON.parse(row.categories) as Record<string, CategoryScore>;
+  const categories = {} as Record<CategoryKey, number | null>;
+  for (const key of CATEGORY_ORDER) categories[key] = cats[key]?.score ?? null;
+  const stale = JSON.parse(row.stale) as string[];
+  return {
+    org: row.org_slug,
+    repo: row.repo_slug,
+    title: row.title,
+    language: row.language,
+    score: row.total,
+    coverage: row.coverage,
+    categories,
+    likes: row.likes,
+    forks: row.forks,
+    lastActivityAt: row.last_activity_at,
+    scannedAt: row.finished_at ?? row.started_at,
+    scanStatus: row.scan_status,
+    staleFacts: Array.isArray(stale) && stale.length > 0,
+    modelVersion: row.model_version,
+  };
+}
+
+const fullName = (i: RatingItem): string => `${i.org}/${i.repo}`;
+
+/** Ключ сортировки; null = значения нет (всегда в хвосте, при любом order). */
+function sortValue(item: RatingItem, sort: SortKey): number | string | null {
+  switch (sort) {
+    case "score":
+      return item.score;
+    case "likes":
+      return item.likes;
+    case "activity":
+      return item.lastActivityAt;
+    case "coverage":
+      return item.coverage;
+    case "name":
+      return fullName(item);
+  }
+}
+
+function compareItems(a: RatingItem, b: RatingItem, sort: SortKey, order: SortOrder): number {
+  const av = sortValue(a, sort);
+  const bv = sortValue(b, sort);
+  // NULL не «маленькое» и не «большое» — оно вне шкалы, поэтому всегда
+  // в хвосте: иначе смена order делала бы «нет данных» лидером рейтинга
+  if (av === null && bv === null) return fullName(a).localeCompare(fullName(b));
+  if (av === null) return 1;
+  if (bv === null) return -1;
+  let cmp: number;
+  if (typeof av === "string" && typeof bv === "string") cmp = av.localeCompare(bv);
+  else cmp = (av as number) - (bv as number);
+  if (order === "desc") cmp = -cmp;
+  // равные значения — по org/repo: пагинация не «дышит» между страницами
+  return cmp !== 0 ? cmp : fullName(a).localeCompare(fullName(b));
+}
+
+function matchesQ(item: RatingItem, q: string): boolean {
+  const needle = q.toLowerCase();
+  return (
+    item.org.toLowerCase().includes(needle) ||
+    item.repo.toLowerCase().includes(needle) ||
+    (item.title ?? "").toLowerCase().includes(needle)
+  );
+}
+
+export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } = {}): RatingResponse {
+  const rows = db.query(RATING_SQL).all(MODEL_VERSION, MODEL_VERSION) as RatingRow[];
+  const all = rows.map(toRatingItem);
+
+  // фасеты считаются БЕЗ фильтра языка (иначе выбранный язык схлопывает
+  // список выбора и из него некуда вернуться), но С учётом поиска
+  const byQ = query.q === undefined ? all : all.filter((i) => matchesQ(i, query.q!));
+  const counts = new Map<string | null, number>();
+  for (const item of byQ) counts.set(item.language, (counts.get(item.language) ?? 0) + 1);
+  const languages: LanguageFacet[] = [...counts.entries()]
+    .map(([language, count]) => ({ language, count }))
+    .sort((a, b) => b.count - a.count || (a.language ?? "￿").localeCompare(b.language ?? "￿"));
+
+  const filtered = query.lang === undefined ? byQ : byQ.filter((i) => i.language === query.lang);
+  const scored = filtered.filter((i) => i.score !== null);
+  const nullItems = filtered
+    .filter((i) => i.score === null)
+    .sort((a, b) => fullName(a).localeCompare(fullName(b)));
+  scored.sort((a, b) => compareItems(a, b, query.sort, query.order));
+
+  const total = scored.length;
+  const totalPages = Math.max(1, Math.ceil(total / query.perPage));
+  const from = (query.page - 1) * query.perPage;
+  return {
+    items: scored.slice(from, from + query.perPage),
+    nullItems,
+    page: query.page,
+    perPage: query.perPage,
+    total,
+    totalPages,
+    nulls: nullItems.length,
+    facets: { languages },
+    generatedAt: (opts.now ?? new Date()).toISOString(),
+  };
+}
+
+// ---------- карточка репозитория ----------
+
+export interface CardRepo {
+  org: string;
+  repo: string;
+  title: string | null;
+  language: string | null;
+  likes: number | null;
+  forks: number | null;
+  lastActivityAt: string | null;
+  webUrl: string;
+}
+
+export interface CardMarkers {
+  /** деградационный ярус: история видна только с этой даты (§5.7) */
+  historyTruncatedSince: string | null;
+  /** CI заявлен конфигом, прогоны недоступны — потолок категории 50 */
+  ciConfigOnlyCap: boolean;
+  /** часть фактов взята из истории при сбое канала */
+  staleFacts: boolean;
+}
+
+export interface CardScan {
+  id: number;
+  startedAt: string;
+  finishedAt: string | null;
+  status: string;
+  trigger: string;
+}
+
+export interface CardCategory extends CategoryScore {
+  /** номинальный вес модели: страница объясняет перенормировку, а не только результат */
+  weight: number;
+}
+
+export interface CardScore {
+  total: number | null;
+  coverage: number;
+  mode: string;
+  modelVersion: string;
+  computedAt: string;
+  noData: string[];
+  stale: string[];
+  categories: Record<CategoryKey, CardCategory>;
+}
+
+/** Чип рекомендации: `missing` = факта нет по построению (см. объяснение в UI). */
+export interface CardFactRef {
+  key: string;
+  missing: boolean;
+}
+
+export interface CardRecommendation {
+  ruleId: string;
+  kind: string;
+  priority: number;
+  problem: string;
+  action: string;
+  factRefs: CardFactRef[];
+  expectedImpact: string | null;
+  deltaScore: number | null;
+  opensCategory: string | null;
+  source: string;
+}
+
+export interface TruncatedValue {
+  truncated: true;
+  bytes: number;
+  preview: string;
+}
+
+export interface TimelineAggregate {
+  events: number;
+  first: string | null;
+  last: string | null;
+  truncated: true;
+}
+
+export interface CardEvidence {
+  key: string;
+  category: string;
+  status: string;
+  source: string;
+  collectedAt: string;
+  value: unknown;
+}
+
+export interface RepoCard {
+  repo: CardRepo;
+  markers: CardMarkers;
+  scan: CardScan | null;
+  score: CardScore | null;
+  derived: DerivedMetrics | null;
+  recommendations: CardRecommendation[];
+  evidence: CardEvidence[];
+}
+
+/** Кап значения факта в ответе: форма усечения одна для всех фактов. */
+const VALUE_CAP_BYTES = 4096;
+const PREVIEW_CHARS = 512;
+
+function capValue(value: unknown): unknown | TruncatedValue {
+  const json = JSON.stringify(value) ?? "null";
+  const bytes = Buffer.byteLength(json, "utf8");
+  if (bytes <= VALUE_CAP_BYTES) return value;
+  return { truncated: true, bytes, preview: json.slice(0, PREVIEW_CHARS) };
+}
+
+/** Сырьё коммитов в ответ не едет никогда (объём + закон 3 «код не храним»). */
+function timelineAggregate(value: unknown): TimelineAggregate {
+  const events = (value as { events?: { author?: { date?: string } }[] } | null)?.events;
+  if (!Array.isArray(events) || events.length === 0) {
+    return { events: 0, first: null, last: null, truncated: true };
+  }
+  let first: string | null = null;
+  let last: string | null = null;
+  for (const e of events) {
+    const d = e.author?.date;
+    if (typeof d !== "string" || d === "") continue;
+    if (first === null || d < first) first = d;
+    if (last === null || d > last) last = d;
+  }
+  return { events: events.length, first, last, truncated: true };
+}
+
+interface RepoRow {
+  id: number;
+  org_slug: string;
+  repo_slug: string;
+  title: string | null;
+  language: string | null;
+  likes: number | null;
+  forks: number | null;
+  last_activity_at: string | null;
+}
+
+interface ScoreRow {
+  scan_id: number;
+  model_version: string;
+  mode: string;
+  total: number | null;
+  coverage: number;
+  categories: string;
+  no_data: string;
+  stale: string;
+  computed_at: string;
+  derived: string | null;
+}
+
+interface FactRow {
+  key: string;
+  category: string;
+  value: string;
+  status: string;
+  source: string;
+  collected_at: string;
+}
+
+interface RecRow {
+  rule_id: string;
+  priority: number;
+  problem: string;
+  action: string;
+  fact_ref: string;
+  expected_impact: string | null;
+  delta_score: number | null;
+  opens_category: string | null;
+  source: string;
+}
+
+/** null = репозитория нет в каталоге (404). Есть репо без скана — это 200. */
+export function getRepoCard(db: Database, org: string, repo: string): RepoCard | null {
+  const r = db
+    .query("SELECT id, org_slug, repo_slug, title, language, likes, forks, last_activity_at FROM repos WHERE org_slug = ? AND repo_slug = ?")
+    .get(org, repo) as RepoRow | null;
+  if (!r) return null;
+
+  const cardRepo: CardRepo = {
+    org: r.org_slug,
+    repo: r.repo_slug,
+    title: r.title,
+    language: r.language,
+    likes: r.likes,
+    forks: r.forks,
+    lastActivityAt: r.last_activity_at,
+    // колонки в схеме нет — шаблон платформы, заводить колонку ради него незачем
+    webUrl: `https://sourcecraft.dev/${r.org_slug}/${r.repo_slug}`,
+  };
+
+  const scoreRow = db
+    .query(
+      `SELECT scan_id, model_version, mode, total, coverage, categories, no_data, stale, computed_at, derived
+       FROM scores WHERE repo_id = ? AND model_version = ? ORDER BY scan_id DESC LIMIT 1`,
+    )
+    .get(r.id, MODEL_VERSION) as ScoreRow | null;
+
+  if (!scoreRow) {
+    // «в каталоге, ещё не сканировали» — штатное состояние, не ошибка
+    return {
+      repo: cardRepo,
+      markers: { historyTruncatedSince: null, ciConfigOnlyCap: false, staleFacts: false },
+      scan: null,
+      score: null,
+      derived: null,
+      recommendations: [],
+      evidence: [],
+    };
+  }
+
+  const scanRow = db
+    .query("SELECT id, started_at, finished_at, status, trigger FROM scans WHERE id = ?")
+    .get(scoreRow.scan_id) as
+    | { id: number; started_at: string; finished_at: string | null; status: string; trigger: string }
+    | null;
+
+  const rawCats = JSON.parse(scoreRow.categories) as Record<string, CategoryScore>;
+  const categories = {} as Record<CategoryKey, CardCategory>;
+  for (const key of CATEGORY_ORDER) {
+    const cat = rawCats[key] ?? { score: null, submetrics: {} };
+    categories[key] = { ...cat, weight: CATEGORY_WEIGHTS[key] };
+  }
+  const stale = JSON.parse(scoreRow.stale) as string[];
+  const score: CardScore = {
+    total: scoreRow.total,
+    coverage: scoreRow.coverage,
+    mode: scoreRow.mode,
+    modelVersion: scoreRow.model_version,
+    computedAt: scoreRow.computed_at,
+    noData: JSON.parse(scoreRow.no_data) as string[],
+    stale,
+    categories,
+  };
+
+  const recRows = db
+    .query(
+      `SELECT rule_id, priority, problem, action, fact_ref, expected_impact, delta_score, opens_category, source
+       FROM recommendations WHERE scan_id = ? AND model_version = ? ORDER BY priority ASC`,
+    )
+    .all(scoreRow.scan_id, MODEL_VERSION) as RecRow[];
+
+  const factRows = db
+    .query("SELECT key, category, value, status, source, collected_at FROM facts WHERE scan_id = ?")
+    .all(scoreRow.scan_id) as FactRow[];
+  const factByKey = new Map(factRows.map((f) => [f.key, f]));
+
+  const refKeys = new Set<string>();
+  for (const rec of recRows) {
+    for (const ref of rec.fact_ref.split(",")) {
+      const key = ref.trim();
+      if (key !== "") refKeys.add(key);
+    }
+  }
+
+  const recommendations: CardRecommendation[] = recRows.map((rec) => ({
+    ruleId: rec.rule_id,
+    kind: ruleKind(rec),
+    priority: rec.priority,
+    problem: rec.problem,
+    action: rec.action,
+    factRefs: rec.fact_ref
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s !== "")
+      // missing = факта нет по построению (публичный appsec.findings) —
+      // UI обязан объяснить причину, а не догадываться о ней сам
+      .map((key) => ({ key, missing: !factByKey.has(key) })),
+    expectedImpact: rec.expected_impact,
+    deltaScore: rec.delta_score,
+    opensCategory: rec.opens_category,
+    source: rec.source,
+  }));
+
+  // адресуемые факты: те, на которые ссылаются рекомендации, плюс те,
+  // что читает compute — сырьё остальных в ответ не едет
+  const addressable = new Set<string>([...refKeys, ...READ_KINDS]);
+  const evidence: CardEvidence[] = factRows
+    .filter((f) => addressable.has(f.key))
+    .map((f) => {
+      const parsed = JSON.parse(f.value) as unknown;
+      const value = f.key === "activity.git.timeline" ? timelineAggregate(parsed) : capValue(parsed);
+      return { key: f.key, category: f.category, status: f.status, source: f.source, collectedAt: f.collected_at, value };
+    })
+    .sort((a, b) => a.key.localeCompare(b.key));
+
+  const summary = factByKey.get("activity.git.summary");
+  const summaryValue = summary && summary.status === "ok" ? (JSON.parse(summary.value) as { history_truncated_since?: unknown }) : null;
+  const cicdNoData = categories.cicd.no_data ?? "";
+  const markers: CardMarkers = {
+    historyTruncatedSince: typeof summaryValue?.history_truncated_since === "string" ? summaryValue.history_truncated_since : null,
+    ciConfigOnlyCap: cicdNoData.includes("config-only cap"),
+    staleFacts: Array.isArray(stale) && stale.length > 0,
+  };
+
+  return {
+    repo: cardRepo,
+    markers,
+    scan: scanRow
+      ? { id: scanRow.id, startedAt: scanRow.started_at, finishedAt: scanRow.finished_at, status: scanRow.status, trigger: scanRow.trigger }
+      : null,
+    score,
+    derived: scoreRow.derived === null ? null : (JSON.parse(scoreRow.derived) as DerivedMetrics),
+    recommendations,
+    evidence,
+  };
+}
+
+/** Вид правила в БД не хранится — он однозначно восстановим по полям. */
+function ruleKind(rec: RecRow): CardRecommendation["kind"] {
+  if (rec.delta_score !== null) return "presence";
+  if (rec.opens_category !== null) return "activation";
+  return "score";
+}
+
+// ---------- мета ----------
+
+export interface MetaResponse {
+  modelVersion: string;
+  categories: { key: CategoryKey; title: string; weight: number }[];
+  coverageNullBelow: number;
+  repos: { scored: number; nullScore: number };
+  methodology: string;
+  generatedAt: string;
+}
+
+export function getMeta(db: Database, opts: { now?: Date } = {}): MetaResponse {
+  const rows = db.query(RATING_SQL).all(MODEL_VERSION, MODEL_VERSION) as RatingRow[];
+  return {
+    modelVersion: MODEL_VERSION,
+    categories: CATEGORY_ORDER.map((key) => ({ key, title: CATEGORY_TITLES[key], weight: CATEGORY_WEIGHTS[key] })),
+    coverageNullBelow: COVERAGE_NULL_BELOW,
+    repos: {
+      scored: rows.filter((r) => r.total !== null).length,
+      nullScore: rows.filter((r) => r.total === null).length,
+    },
+    methodology: METHODOLOGY_PATH,
+    generatedAt: (opts.now ?? new Date()).toISOString(),
+  };
+}
