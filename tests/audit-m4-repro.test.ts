@@ -18,6 +18,7 @@ import { createSession, SESSION_COOKIE, upsertUser } from "../src/auth/session";
 import { effectiveCloneLimits, parseUserScanSettings, UNLIMITED_TIMEOUT_MS } from "../src/auth/settings";
 import { runScan, type ScanDeps, type ScanOptions } from "../src/jobs/runner";
 import { claimNext, enqueueScan, nightlyCatalog, processJob } from "../src/jobs/scheduler";
+import { MODEL_VERSION } from "../src/score/model";
 import { seedScan, seedScore, type ApiTestDb } from "./api-fixtures";
 
 const repro = process.env.AUDIT_STRICT ? test : test.failing;
@@ -53,7 +54,7 @@ describe("C1: own-результаты не привязаны к пользов
       const stranger = upsertUser(t.db, "ya-stranger", "stranger");
       const repoId = insertRepo(t.db, "acme", "secret-repo", "private");
       const scanId = seedScan(t, repoId, { facts: [{ key: "appsec.findings", value: APPSEC_VALUE }] });
-      seedScore(t, repoId, scanId, { total: 42, mode: "own" }); // скан владельца на его PAT
+      seedScore(t, repoId, scanId, { total: 42 }); // скан владельца на его PAT
       createSession(t.db, secret, owner);
       const strangerCookie = createSession(t.db, secret, stranger);
       t.close();
@@ -180,24 +181,28 @@ describe("H2: серверный REST-клиент с бюджетом на ве
 
 // ---------------------------------------------------------------------------
 describe("H3: rescore-m4.ts затирает own-скоры", () => {
+  // В4.1 (К1): режима в хранении нет — одна строка оценки на скан с двумя
+  // итогами. Утверждение находки сохранено: пересчёт не теряет данных
+  // скана с PAT (строка на каждый скан, полный итог с Security на месте) и
+  // не выносит его AppSec-факты на карточку зрителя без доступа.
   repro(
-    "пересчёт не превращает own-скан в публичный и не выносит его факты на публичную карточку",
+    "пересчёт не теряет оценку скана с PAT и не выносит его факты на публичную карточку",
     async () => {
       const { dir, t } = tempDb();
       const repoId = insertRepo(t.db, "pub", "repo", "public");
       const publicScan = seedScan(t, repoId, { facts: [{ key: "tree.stats", value: { file_count: 10, loc: 500 } }] });
-      seedScore(t, repoId, publicScan, { total: 60, mode: "public" });
-      // позже пользователь сделал own-скан на своём PAT (AppSec-данные)
+      seedScore(t, repoId, publicScan, { total: 60 });
+      // позже пользователь сделал скан на своём PAT (AppSec-данные)
       const ownScan = seedScan(t, repoId, {
         facts: [
           { key: "tree.stats", value: { file_count: 10, loc: 500 } },
           { key: "appsec.findings", value: APPSEC_VALUE },
         ],
       });
-      seedScore(t, repoId, ownScan, { total: 90, mode: "own" });
+      seedScore(t, repoId, ownScan, { total: 90 });
       t.close();
 
-      const proc = Bun.spawn(["bun", join(ROOT, "scripts/rescore-m4.ts")], {
+      const proc = Bun.spawn([process.execPath, join(ROOT, "scripts/rescore-m4.ts")], {
         cwd: ROOT,
         env: { ...process.env, DATA_DIR: dir, SOURCECRAFT_TOKEN: "" },
         stdout: "ignore",
@@ -206,14 +211,18 @@ describe("H3: rescore-m4.ts затирает own-скоры", () => {
       expect(await proc.exited).toBe(0);
 
       const db = openDb({ ...loadConfig(), dataDir: dir });
-      const ownRow = db.query("SELECT mode FROM scores WHERE scan_id = ?").get(ownScan) as { mode: string };
+      const scans = (db.query("SELECT COUNT(*) AS c FROM scans").get() as { c: number }).c;
+      const rows = (db.query("SELECT COUNT(*) AS c FROM scores WHERE model_version = ?").get(MODEL_VERSION) as { c: number }).c;
+      const ownRow = db.query("SELECT categories FROM scores WHERE scan_id = ?").get(ownScan) as { categories: string };
+      const ownSecurity = (JSON.parse(ownRow.categories) as { security: { score: number | null } }).security.score;
       const { getRepoCard } = await import("../src/api/repos");
       const card = getRepoCard(db, "pub", "repo")!;
       db.close();
-      expect({ ownRowMode: ownRow.mode, publicCardShowsAppsec: card.evidence.some((e) => e.key === "appsec.findings") }).toEqual({
-        ownRowMode: "own",
-        publicCardShowsAppsec: false,
-      });
+      expect({
+        rowsPerScan: rows === scans,
+        userScanKeepsSecurity: ownSecurity !== null,
+        publicCardShowsAppsec: card.evidence.some((e) => e.key === "appsec.findings"),
+      }).toEqual({ rowsPerScan: true, userScanKeepsSecurity: true, publicCardShowsAppsec: false });
     },
     30_000,
   );

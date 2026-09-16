@@ -84,9 +84,12 @@ export function seedScan(t: ApiTestDb, repoId: number, spec: ScanSpec = {}): num
 }
 
 export interface ScoreSpec {
+  /** Score в рейтинге (total_rating) */
   total: number | null;
   coverage?: number;
-  mode?: string;
+  /** полный Score (total_full); дефолт = total */
+  totalFull?: number | null;
+  coverageFull?: number;
   categories?: Partial<Record<CategoryKey, unknown>>;
   noData?: string[];
   stale?: string[];
@@ -100,7 +103,7 @@ export function defaultCategories(): Record<CategoryKey, unknown> {
   return {
     documentation: { score: 60, submetrics: { readme: { score: 0.72, value: { bytes: 8000 } }, license: { score: 1 } } },
     cicd: { score: 50, no_data: "ci runs no-data (access/absent) — config-only cap 50", submetrics: { config: { score: 1 } } },
-    security: { score: null, no_data: "AppSec data unavailable (public mode; own-repo scenario — В4)", submetrics: {} },
+    security: { score: null, no_data: "AppSec data unavailable (no AppSec access or no finished scan)", submetrics: {} },
     activity: { score: 70, submetrics: { fresh: { score: 0.9, value: 1789481810000 } } },
     issues: { score: 40, submetrics: { stale: { score: 0.4, value: 0.5 } } },
     code: { score: 80, submetrics: { density: { score: 0.8, value: 1.2 } } },
@@ -111,18 +114,19 @@ export function seedScore(t: ApiTestDb, repoId: number, scanId: number, spec: Sc
   t.db
     .query(
       `INSERT OR REPLACE INTO scores
-         (scan_id, model_version, repo_id, mode, total, coverage, categories, no_data, stale, computed_at, derived)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (scan_id, model_version, repo_id, total_rating, coverage_rating, total_full, coverage_full, categories, no_data, stale, computed_at, derived)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       scanId,
       spec.modelVersion ?? MODEL_VERSION,
       repoId,
-      spec.mode ?? "public",
       spec.total,
       spec.coverage ?? 1,
+      spec.totalFull === undefined ? spec.total : spec.totalFull,
+      spec.coverageFull ?? 0.8,
       JSON.stringify({ ...defaultCategories(), ...(spec.categories ?? {}) }),
-      JSON.stringify(spec.noData ?? ["security: AppSec data unavailable (public mode; own-repo scenario — В4)"]),
+      JSON.stringify(spec.noData ?? ["security: AppSec data unavailable (no AppSec access or no finished scan)"]),
       JSON.stringify(spec.stale ?? []),
       spec.computedAt ?? NOW.toISOString(),
       spec.derived === undefined ? JSON.stringify({ commitsPerMonth: 12, mirrorLikeness: null }) : JSON.stringify(spec.derived),
@@ -138,14 +142,15 @@ export interface RecSpec {
   expectedImpact?: string | null;
   deltaScore?: number | null;
   opensCategory?: string | null;
+  channel?: "cicd" | "appsec" | null;
 }
 
 export function seedRecommendation(t: ApiTestDb, scanId: number, spec: RecSpec): void {
   t.db
     .query(
       `INSERT OR REPLACE INTO recommendations
-         (scan_id, model_version, rule_id, priority, problem, action, fact_ref, expected_impact, delta_score, opens_category, source)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'rule')`,
+         (scan_id, model_version, rule_id, priority, problem, action, fact_ref, expected_impact, delta_score, opens_category, source, channel)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'rule', ?)`,
     )
     .run(
       scanId,
@@ -158,6 +163,7 @@ export function seedRecommendation(t: ApiTestDb, scanId: number, spec: RecSpec):
       spec.expectedImpact ?? null,
       spec.deltaScore ?? null,
       spec.opensCategory ?? null,
+      spec.channel ?? null,
     );
 }
 

@@ -16,7 +16,9 @@ import { ScClient, makeScClient } from "../collectors/http";
 import { RestCollectResult, collectRestFacts } from "../collectors/rest";
 import { AppsecClient, collectAppsec, makeAppsecClient } from "../collectors/appsec";
 import { DEFAULT_SCAN, ScanCloneLimits, ScanConfig } from "../config";
-import { compute, writeScores, ScoreMode } from "../score/compute";
+import { compute, writeScores } from "../score/compute";
+
+type ScoreMode = "public" | "own";
 import { recommend, writeRecommendations } from "../score/recommend";
 
 export interface GitChannelOutcome {
@@ -70,7 +72,7 @@ export interface ScanResult {
   /** repo-GET 404/403 = репо пропал для нас (эвикция); канальные 403 тут ни при чём */
   repoAccess: "ok" | "gone" | "unknown";
   /** score-hook итог (null = хук не смог — факты записаны, скан не роняется) */
-  score: { total: number | null; coverage: number } | null;
+  score: { totalRating: number | null; coverageRating: number; totalFull: number | null; coverageFull: number } | null;
   elapsedMs: number;
 }
 
@@ -319,13 +321,13 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
 
   // --- score-hook (В2/Б5): конец скана → compute + recommend; сбой хука
   // не роняет скан (факты уже записаны, скор пересчитается CLI/пересканом)
-  let scoreSummary: { total: number | null; coverage: number } | null = null;
+  let scoreSummary: ScanResult["score"] = null;
   try {
-    const scores = compute(deps.db, scanId, mode);
+    const scores = compute(deps.db, scanId);
     writeScores(deps.db, scores);
-    const recs = recommend(deps.db, scanId, { mode, scores });
+    const recs = recommend(deps.db, scanId, { scores });
     writeRecommendations(deps.db, scanId, scores.modelVersion, recs);
-    scoreSummary = { total: scores.total, coverage: scores.coverage };
+    scoreSummary = { totalRating: scores.totalRating, coverageRating: scores.coverageRating, totalFull: scores.totalFull, coverageFull: scores.coverageFull };
   } catch (e) {
     console.error(`[scan ${scanId}] score hook failed: ${String((e as Error).message).slice(0, 200)}`);
   }

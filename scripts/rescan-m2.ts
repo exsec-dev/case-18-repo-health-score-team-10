@@ -45,7 +45,7 @@ for (const slug of REPOS) {
       slug,
       { trigger: "user" },
     );
-    const score = res.score ? `score=${res.score.total ?? "NULL"} cov=${res.score.coverage.toFixed(2)}` : "score=HOOK-FAIL";
+    const score = res.score ? `score=${res.score.totalRating ?? "NULL"} cov=${res.score.coverageRating.toFixed(2)}` : "score=HOOK-FAIL";
     console.log(
       `[ok] ${slug} scan=${res.scanId} ${res.status} git=${res.channels.git} facts=${res.counts.ok}/${res.counts.noData}/${res.counts.bad} ${score} req=${client.requestCount()} ${Math.round((Date.now() - t0) / 1000)}s`,
     );

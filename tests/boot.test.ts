@@ -19,14 +19,15 @@ describe("boot", () => {
     expect(c.c).toBe(0);
   });
 
-  test("db: scores.total допускает NULL (tri-state: нет данных ≠ плохо)", () => {
+  test("db: scores.total_rating/total_full допускают NULL (tri-state: нет данных ≠ плохо)", () => {
     db.exec("INSERT INTO repos (org_slug, repo_slug) VALUES ('org', 'repo')");
     db.exec("INSERT INTO scans (repo_id, started_at) VALUES (1, '2026-09-15')");
     db.exec(
-      "INSERT INTO scores (scan_id, model_version, repo_id, mode, total, coverage, categories, no_data, stale, computed_at) VALUES (1, 'test', 1, 'public', NULL, 0, '{}', '[]', '[]', '2026-09-15T00:00:00Z')",
+      "INSERT INTO scores (scan_id, model_version, repo_id, total_rating, coverage_rating, total_full, coverage_full, categories, no_data, stale, computed_at) VALUES (1, 'test', 1, NULL, 0, NULL, 0, '{}', '[]', '[]', '2026-09-15T00:00:00Z')",
     );
-    const row = db.query("SELECT total FROM scores WHERE scan_id = 1 AND model_version = 'test'").get() as { total: number | null };
-    expect(row.total).toBeNull();
+    const row = db.query("SELECT total_rating, total_full FROM scores WHERE scan_id = 1 AND model_version = 'test'").get() as { total_rating: number | null; total_full: number | null };
+    expect(row.total_rating).toBeNull();
+    expect(row.total_full).toBeNull();
   });
 
   test("jobs: индекс незаклейменных работает", () => {

@@ -187,10 +187,13 @@ describe("В2/Б5: score-hook — конец скана пишет scores/recomm
     };
     const res = await runScan(deps, "hook/repo");
     expect(res.score).not.toBeNull();
-    expect(res.score!.total).not.toBeNull();
-    const row = db.query("SELECT total, model_version FROM scores WHERE scan_id = ?").get(res.scanId) as { total: number; model_version: string };
-    expect(row.model_version).toBe("3.0.0-m4");
-    expect(row.total).toBe(Math.round(res.score!.total!));
+    expect(res.score!.totalRating).not.toBeNull();
+    // В4.1 (К1): одна строка оценки на скан с двумя итогами
+    const rows = db.query("SELECT total_rating, total_full, model_version FROM scores WHERE scan_id = ?").all(res.scanId) as { total_rating: number; total_full: number; model_version: string }[];
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.model_version).toBe("3.0.0-m4");
+    expect(rows[0]!.total_rating).toBe(Math.round(res.score!.totalRating!));
+    expect(rows[0]!.total_full).toBe(Math.round(res.score!.totalFull!));
     const recs = db.query("SELECT rule_id FROM recommendations WHERE scan_id = ? ORDER BY priority").all(res.scanId) as { rule_id: string }[];
     expect(recs.map((r) => r.rule_id)).toContain("start-tracker");
     expect(recs.map((r) => r.rule_id)).toContain("license-missing");

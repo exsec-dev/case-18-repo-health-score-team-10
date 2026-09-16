@@ -1,13 +1,14 @@
 // compute.ts — детерминированный расчёт Score из фактов (§1, §4, §5):
-// compute(db, scan_id, mode) → Scores. Tri-state: no-data субметрика
-// → перенормировка внутри категории; категория целиком no-data → вес
-// выбрасывается; coverage = Σ весов с данными / режимный максимум
-// (публично 0.8 — Security no-data у всех); coverage < 0.4 → total
-// NULL. Bad-channel (статус bad, §5.6): факты канала НЕ выбрасываются
-// — берутся последние успешные того же kind (гранулярность по kind) +
-// маркер stale; успешной истории нет → no-data. Robot-флаги v1 в
-// фактах игнорируются — истина robot2 (derived). Критичные secrets →
-// кап total ≤ 49 (§5/В2-8). Все числа — константы model.ts.
+// compute(db, scan_id) → Scores с двумя итогами (В4.1/К1): «в рейтинге»
+// (4 категории, максимум 0.65) и «полный» (6 категорий, максимум 1.0).
+// Tri-state: no-data субметрика → перенормировка внутри категории;
+// категория целиком no-data → вес выбрасывается; coverage = Σ весов с
+// данными / максимум набора; coverage < 0.4 → итог NULL. Bad-channel
+// (статус bad, §5.6): берутся последние успешные факты того же kind +
+// маркер stale; для каналов с правами (cicd.runs, appsec.findings) — при
+// любом не-ok. Robot-флаги v1 игнорируются — истина robot2 (derived).
+// Критичные secrets → кап полного итога ≤ 49 (§5/В2-8). Все числа —
+// константы model.ts.
 import type { Database } from "bun:sqlite";
 import { categoryOf } from "../collectors/facts";
 import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
@@ -46,8 +47,6 @@ import {
   contributorsScore,
 } from "./model";
 
-export type ScoreMode = "public" | "own";
-
 export interface SubmetricScore {
   score: number | null;
   value?: unknown;
@@ -62,14 +61,23 @@ export interface CategoryScore {
   submetrics: Record<string, SubmetricScore>;
 }
 
+/**
+ * Один анализ — одна оценка с двумя итогами (В4.1, К1): «в рейтинге»
+ * (4 публичные категории, максимум 0.65, без капа) и «полный» (6
+ * категорий, максимум 1.0, кап 49 за критичные secrets). Режим — свойство
+ * показа, а не хранения.
+ */
 export interface Scores {
   scanId: number;
   repoId: number;
   modelVersion: string;
-  mode: ScoreMode;
-  /** NULL = недостаточно данных (coverage < 0.4) — не «плохо» */
-  total: number | null;
-  coverage: number;
+  /** Score в рейтинге (4 категории); NULL = coverageRating < 0.4 — не «плохо» */
+  totalRating: number | null;
+  coverageRating: number;
+  /** Полный Score (6 категорий, кап 49); NULL = coverageFull < 0.4 */
+  totalFull: number | null;
+  coverageFull: number;
+  /** все 6 категорий; CI/Security — со своими данными (или no-data) */
   categories: Record<CategoryKey, CategoryScore>;
   /** derived-показатели (§7.3) — для отображения; в БД с v1.3 (scores.derived) */
   derived: DerivedMetrics;
@@ -116,18 +124,28 @@ function weighted(subs: [number, number | null][]): number | null {
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
-export function compute(
-  db: Database,
-  scanId: number,
-  mode: ScoreMode,
-  opts: { now?: Date } = {},
-): Scores {
-  const now = opts.now ?? new Date();
-  const scan = db.query("SELECT repo_id FROM scans WHERE id = ?").get(scanId) as { repo_id: number } | null;
-  if (!scan) throw new Error(`scan ${scanId} not found`);
-  const repoId = scan.repo_id;
+/**
+ * Каналы с правами зрителя (К1): для них факт «не ok» (no-data, bad или
+ * отсутствие строки) замещается последним ok-фактом того же kind из
+ * более раннего скана репо — скан без PAT (периодика) не стирает CI и
+ * Security, собранные сканом с PAT участника. Показ защищён проверкой
+ * доступа зрителя (К2): данные чужого PAT видит только тот, у кого есть
+ * доступ к тому же каналу.
+ */
+export const CHANNEL_FALLBACK_KINDS = ["cicd.runs", "appsec.findings"];
 
-  // факты скана + bad-channel → последние успешные того же kind (§5.6)
+export interface EffectiveFacts {
+  ok: Map<string, unknown>;
+  stale: string[];
+  staleCats: Set<string>;
+}
+
+/**
+ * Факты скана с замещением историей: bad → последний ok того же kind
+ * (§5.6, все kinds); для CHANNEL_FALLBACK_KINDS — любой не-ok. Общая
+ * точка compute и recommend (рекомендации не противоречат Score).
+ */
+export function effectiveFacts(db: Database, scanId: number, repoId: number): EffectiveFacts {
   const rows = db.query("SELECT key, value, status FROM facts WHERE scan_id = ?").all(scanId) as {
     key: string;
     value: string;
@@ -138,37 +156,42 @@ export function compute(
   const staleCats = new Set<string>();
   for (const kind of READ_KINDS) {
     const row = rows.find((r) => r.key === kind);
-    if (!row) continue;
-    if (row.status === "ok") {
+    if (row && row.status === "ok") {
       ok.set(kind, JSON.parse(row.value));
       continue;
     }
-    if (row.status === "bad") {
-      const prev = db
-        .query(
-          `SELECT f.value FROM facts f JOIN scans s ON s.id = f.scan_id
-           WHERE f.key = ? AND f.status = 'ok' AND s.repo_id = ? AND f.scan_id < ?
-           ORDER BY f.scan_id DESC LIMIT 1`,
-        )
-        .get(kind, repoId, scanId) as { value: string } | null;
-      if (prev) {
-        ok.set(kind, JSON.parse(prev.value));
-        stale.push(kind);
-        staleCats.add(categoryOf(kind));
-      }
+    const channel = CHANNEL_FALLBACK_KINDS.includes(kind);
+    if (!channel && (!row || row.status !== "bad")) continue;
+    const prev = db
+      .query(
+        `SELECT f.value FROM facts f JOIN scans s ON s.id = f.scan_id
+         WHERE f.key = ? AND f.status = 'ok' AND s.repo_id = ? AND f.scan_id < ?
+         ORDER BY f.scan_id DESC LIMIT 1`,
+      )
+      .get(kind, repoId, scanId) as { value: string } | null;
+    if (prev) {
+      ok.set(kind, JSON.parse(prev.value));
+      stale.push(kind);
+      staleCats.add(categoryOf(kind));
     }
-    // no-data / bad без истории → kind отсутствует в ok → no-data субметрик
+    // без истории → kind отсутствует в ok → no-data субметрик
   }
+  return { ok, stale, staleCats };
+}
+
+export function compute(db: Database, scanId: number, opts: { now?: Date } = {}): Scores {
+  const now = opts.now ?? new Date();
+  const scan = db.query("SELECT repo_id FROM scans WHERE id = ?").get(scanId) as { repo_id: number } | null;
+  if (!scan) throw new Error(`scan ${scanId} not found`);
+  const repoId = scan.repo_id;
+
+  const { ok, stale, staleCats } = effectiveFacts(db, scanId, repoId);
 
   const derived = deriveMetrics(ok, now);
-  // публичный режим = 4 категории (В4/Б4, Q&A №1): CI/Security не
-  // считаются вовсе — не «выброшены за no-data», а исключены режимом;
-  // перечислены в noData с объяснением (честность витрины закона 2)
-  const excluded = mode === "public";
   const categories = {
     documentation: scoreDocumentation(ok, derived),
-    cicd: excluded ? excludedCategory("cicd") : scoreCicd(ok),
-    security: excluded ? excludedCategory("security") : scoreSecurity(ok),
+    cicd: scoreCicd(ok),
+    security: scoreSecurity(ok),
     activity: scoreActivity(derived, now),
     issues: scoreIssues(ok, derived),
     code: scoreCode(derived),
@@ -182,41 +205,50 @@ export function compute(
   const tree = ok.get("tree.stats") as { file_count?: unknown; loc?: unknown } | undefined;
   const codeEmpty = tree !== undefined && ((typeof tree.file_count === "number" && tree.file_count === 0) || (typeof tree.loc === "number" && tree.loc === 0));
 
-  let dataWeight = 0;
-  let acc = 0;
+  const allKeys = Object.keys(categories) as CategoryKey[];
   const noData: string[] = [];
-  for (const key of Object.keys(categories) as CategoryKey[]) {
+  for (const key of allKeys) {
     const cat = categories[key]!;
-    if (cat.score === null) {
-      noData.push(`${key}: ${cat.no_data ?? "no data"}`);
-      continue;
-    }
-    dataWeight += CATEGORY_WEIGHTS[key];
-    acc += (cat.score / 100) * CATEGORY_WEIGHTS[key];
+    if (cat.score === null) noData.push(`${key}: ${cat.no_data ?? "no data"}`);
   }
-  const coverage = Math.min(1, dataWeight / 100 / COVERAGE_MODE_MAX[mode]);
-  let total: number | null = null;
-  if (codeEmpty) {
-    total = 0;
-  } else if (coverage >= COVERAGE_NULL_BELOW && dataWeight > 0) {
-    total = (acc / dataWeight) * 100;
-    // кап критичных secrets — только own-режим: публично Security исключена
-    // и её факты не влияют на публичный total (инвариант изоляции В4/Б4)
-    if (mode === "own") {
-      const appsec = ok.get("appsec.findings") as { secrets_critical?: unknown } | undefined;
-      if (appsec?.secrets_critical === true) {
-        total = Math.min(total, SECRETS_CRITICAL_TOTAL_CAP);
+
+  // итог по набору категорий: взвешенное среднее с перенормировкой
+  const totalOf = (keys: CategoryKey[], coverageMax: number, capSecrets: boolean) => {
+    let dataWeight = 0;
+    let acc = 0;
+    for (const key of keys) {
+      const cat = categories[key]!;
+      if (cat.score === null) continue;
+      dataWeight += CATEGORY_WEIGHTS[key];
+      acc += (cat.score / 100) * CATEGORY_WEIGHTS[key];
+    }
+    const coverage = Math.min(1, dataWeight / 100 / coverageMax);
+    let total: number | null = null;
+    if (codeEmpty) {
+      total = 0;
+    } else if (coverage >= COVERAGE_NULL_BELOW && dataWeight > 0) {
+      total = (acc / dataWeight) * 100;
+      if (capSecrets) {
+        const appsec = ok.get("appsec.findings") as { secrets_critical?: unknown } | undefined;
+        if (appsec?.secrets_critical === true) total = Math.min(total, SECRETS_CRITICAL_TOTAL_CAP);
       }
     }
-  }
+    return { total, coverage };
+  };
+  // в рейтинге: 4 публичные категории (Q&A №1); кап 49 НЕ применяется —
+  // Security в рейтинг не входит и на него не влияет (инвариант изоляции)
+  const rating = totalOf(PUBLIC_CATEGORIES, COVERAGE_MODE_MAX.public, false);
+  // полный: все 6 категорий, кап 49 за критичные secrets
+  const full = totalOf(allKeys, COVERAGE_MODE_MAX.own, true);
 
   return {
     scanId,
     repoId,
     modelVersion: MODEL_VERSION,
-    mode,
-    total,
-    coverage,
+    totalRating: rating.total,
+    coverageRating: rating.coverage,
+    totalFull: full.total,
+    coverageFull: full.coverage,
     categories,
     derived,
     noData,
@@ -224,15 +256,6 @@ export function compute(
     codeEmpty,
     computedAt: now.toISOString(),
   };
-}
-
-/** Исключённая режимом категория (публичный рейтинг, В4/Б4). */
-function excludedCategory(key: "cicd" | "security"): CategoryScore {
-  const who =
-    key === "security"
-      ? "Security считается в режиме своего репо (доступ к AppSec даёт PAT, не публичность)"
-      : "CI/CD считается в режиме своего репо (статусы прогонов видны токену с правами)";
-  return { score: null, no_data: `excluded from public rating — ${who}`, submetrics: {} };
 }
 
 // ---------- категории ----------
@@ -326,7 +349,7 @@ function scoreCicd(ok: Map<string, unknown>): CategoryScore {
 function scoreSecurity(ok: Map<string, unknown>): CategoryScore {
   const appsec = ok.get("appsec.findings") as AppsecFindingsValue | undefined;
   if (!appsec) {
-    return { score: null, no_data: "AppSec data unavailable (public mode; own-repo scenario — В4)", submetrics: {} };
+    return { score: null, no_data: "AppSec data unavailable (no AppSec access or no finished scan)", submetrics: {} };
   }
   const tree = ok.get("tree.stats") as { loc?: unknown } | undefined;
   const loc = num(tree?.loc);
@@ -452,18 +475,23 @@ function scoreCode(derived: DerivedMetrics): CategoryScore {
 
 // ---------- запись (immutable: PK scan_id+model_version, идемпотентно) ----------
 
+const roundTotal = (x: number | null): number | null => (x === null ? null : Math.round(x));
+const roundCoverage = (x: number): number => Math.round(x * 1000) / 1000;
+
 export function writeScores(db: Database, s: Scores): void {
   db.query(
     `INSERT OR REPLACE INTO scores
-       (scan_id, model_version, repo_id, mode, total, coverage, categories, no_data, stale, computed_at, derived, code_empty)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       (scan_id, model_version, repo_id, total_rating, coverage_rating, total_full, coverage_full,
+        categories, no_data, stale, computed_at, derived, code_empty)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     s.scanId,
     s.modelVersion,
     s.repoId,
-    s.mode,
-    s.total === null ? null : Math.round(s.total),
-    Math.round(s.coverage * 1000) / 1000,
+    roundTotal(s.totalRating),
+    roundCoverage(s.coverageRating),
+    roundTotal(s.totalFull),
+    roundCoverage(s.coverageFull),
     JSON.stringify(s.categories),
     JSON.stringify(s.noData),
     JSON.stringify(s.stale),

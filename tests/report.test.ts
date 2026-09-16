@@ -62,17 +62,17 @@ describe("MD-отчёт: структура", () => {
     }
   });
 
-  test("шапка: ссылка на репозиторий, скан, версия модели и режим", () => {
+  test("шапка: ссылка на репозиторий, скан, версия модели (режима больше нет — К1)", () => {
     expect(md).toContain("https://sourcecraft.dev/report/sample");
     expect(md).toContain(`#${scoredScan} от 2026-09-16`);
     expect(md).toContain("3.0.0-m4");
-    expect(md).toContain("режим: public");
+    expect(md).not.toContain("режим:");
   });
 });
 
 describe("MD-отчёт: числа и tri-state", () => {
   test("Score и покрытие в итоге", () => {
-    expect(md).toContain("**Score: 67 из 100**");
+    expect(md).toContain("**Score в рейтинге (4 категории): 67 из 100**");
     expect(md).toContain("покрытии данными 100%");
   });
 
@@ -137,7 +137,7 @@ describe("MD-отчёт: репозитории без Score", () => {
       total: null,
       coverage: 0.375,
       noData: [
-        "security: AppSec data unavailable (public mode; own-repo scenario — В4)",
+        "security: AppSec data unavailable (no AppSec access or no finished scan)",
         "documentation: git channel no-data",
         "code: git channel no-data",
       ],

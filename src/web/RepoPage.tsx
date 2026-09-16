@@ -137,23 +137,23 @@ function ScoreBlock({ card, meta }: { card: Card; meta: MetaResponse | null }) {
     <Card view="outlined" style={{ padding: "var(--g-spacing-6)" }}>
       <Flex gap={6} alignItems="center" wrap>
         <Flex direction="column" gap={1} alignItems="center" style={{ minWidth: 160 }}>
-          {score.total === null ? (
+          {score.totalRating === null ? (
             <Label theme="unknown" size="m">
               {NO_SCORE}
             </Label>
           ) : (
             <>
-              <Text variant="display-3">{fmtScore(score.total)}</Text>
+              <Text variant="display-3">{fmtScore(score.totalRating)}</Text>
               <Text color="secondary">из 100</Text>
             </>
           )}
         </Flex>
         <Flex direction="column" gap={2} style={{ flex: 1, minWidth: 320 }}>
           <Text>
-            Покрытие данными — {fmtCoverage(score.coverage)}
+            Покрытие данными — {fmtCoverage(score.coverageRating)}
             {meta ? ` (ниже ${threshold} Score не выставляется: без данных честного числа нет)` : ""}.
           </Text>
-          <Progress value={Math.round(score.coverage * 100)} size="s" theme="info" />
+          <Progress value={Math.round(score.coverageRating * 100)} size="s" theme="info" />
           {score.noData.length > 0 && (
             <Flex direction="column" gap={1}>
               <Text color="secondary">Каких данных не хватило:</Text>

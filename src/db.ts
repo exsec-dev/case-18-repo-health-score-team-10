@@ -15,6 +15,12 @@
 // rating_active (эвикция — не удаление, закон 6) и visibility;
 // jobs += mode/user_id (own-сканы с юзерским PAT); scores +=
 // code_empty (Score 0 «проекта нет» — данные, не NULL).
+// Схема v1.5 (В4.1, К1/К3): один анализ — одна строка оценки с двумя
+// итогами (total_rating/coverage_rating — 4 категории; total_full/
+// coverage_full — 6 категорий); колонок mode/total/coverage нет.
+// scores/recommendations — производные таблицы: старая форма
+// пересоздаётся, затем пересчёт scripts/rescore-m4.ts (прецедент
+// v1.1→v1.2). recommendations += channel.
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -24,13 +30,16 @@ const SCORES_DDL = `CREATE TABLE IF NOT EXISTS scores (
   scan_id INTEGER NOT NULL REFERENCES scans(id),
   model_version TEXT NOT NULL,
   repo_id INTEGER NOT NULL,
-  mode TEXT NOT NULL,             -- public | own
-  total INTEGER,                  -- NULL = нет данных (tri-state)
-  coverage REAL NOT NULL,
-  categories TEXT NOT NULL,       -- JSON: категория → {score|NULL, submetrics, stale}
+  total_rating INTEGER,           -- Score в рейтинге (4 категории); NULL = нет данных (tri-state)
+  coverage_rating REAL NOT NULL,
+  total_full INTEGER,             -- полный Score (6 категорий, кап 49); NULL = нет данных
+  coverage_full REAL NOT NULL,
+  categories TEXT NOT NULL,       -- JSON: все 6 категорий → {score|NULL, submetrics, stale}
   no_data TEXT NOT NULL,          -- JSON: список no-data причин
   stale TEXT NOT NULL,            -- JSON: список stale-фактов (bad-channel, §5.6)
   computed_at TEXT NOT NULL,
+  derived TEXT,                   -- JSON DerivedMetrics (v1.3)
+  code_empty INTEGER,             -- Score 0 «проекта нет» (v1.4)
   PRIMARY KEY (scan_id, model_version)
 );`;
 
@@ -46,6 +55,7 @@ const RECOMMENDATIONS_DDL = `CREATE TABLE IF NOT EXISTS recommendations (
   delta_score REAL,           -- числовой Δ только у presence-правил (§8)
   opens_category TEXT,        -- категория активационной рекомендации
   source TEXT NOT NULL DEFAULT 'rule', -- rule|llm
+  channel TEXT,               -- cicd | appsec | NULL = публичное правило (фильтр по доступу зрителя, v1.5)
   PRIMARY KEY (scan_id, model_version, rule_id)
 );`;
 
@@ -154,6 +164,15 @@ export function openDb(config: Config): Database {
   // v1.2 → v1.3: derived-метрики строки скоров (NULL у строк старых
   // прогонов — пересчёт scripts/score.ts заполняет последний скан)
   ensureColumn(db, "scores", "derived", "TEXT");
+  // v1.4 → v1.5 (В4.1): scores с двумя итогами, recommendations с каналом —
+  // производные таблицы пересоздаются (данные восстанавливает rescore-m4.ts)
+  if (!columnsOf(db, "scores").has("total_rating") || !columnsOf(db, "recommendations").has("channel")) {
+    db.exec("DROP TABLE IF EXISTS scores");
+    db.exec("DROP TABLE IF EXISTS recommendations");
+    db.exec(SCORES_DDL);
+    db.exec(RECOMMENDATIONS_DDL);
+    db.exec("CREATE INDEX IF NOT EXISTS idx_scores_repo ON scores(repo_id, model_version)");
+  }
   // v1.3 → v1.4 (В4): изоляция own/public и эвикция
   ensureColumn(db, "repos", "rating_active", "INTEGER NOT NULL DEFAULT 1");
   ensureColumn(db, "repos", "visibility", "TEXT NOT NULL DEFAULT 'public'");

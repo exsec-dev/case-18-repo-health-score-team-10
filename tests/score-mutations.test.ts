@@ -10,19 +10,22 @@ import { NOW, TestDb, healthyFacts, makeDb, seedScan, withFacts, FactSpec } from
 const t: TestDb = makeDb();
 afterAll(() => t.close());
 
-// В4/Б4: CI/Security считаются только в own-режиме — их мутации
-// прогоняем own; остальные (анти-накрутка, Issues, каналы) — public.
-const totalOf = (facts: FactSpec[], mode: "public" | "own" = "public"): number | null => compute(t.db, seedScan(t, facts), mode, { now: NOW }).total;
-const catOf = (facts: FactSpec[], key: string, mode: "public" | "own" = "public"): number | null => compute(t.db, seedScan(t, facts), mode, { now: NOW }).categories[key as keyof ReturnType<typeof compute>["categories"]].score;
+// В4.1 (К1): один скан — два итога. CI/Security входят только в полный
+// итог — их мутации меряем по нему ("full"); остальные (анти-накрутка,
+// Issues, каналы) — по Score в рейтинге ("rating").
+type Total = "rating" | "full";
+const pick = (s: ReturnType<typeof compute>, which: Total): number | null => (which === "full" ? s.totalFull : s.totalRating);
+const totalOf = (facts: FactSpec[], which: Total = "rating"): number | null => pick(compute(t.db, seedScan(t, facts), { now: NOW }), which);
+const catOf = (facts: FactSpec[], key: string): number | null => compute(t.db, seedScan(t, facts), { now: NOW }).categories[key as keyof ReturnType<typeof compute>["categories"]].score;
 
-describe("§9 Security (own-режим, В4)", () => {
+describe("§9 Security (полный итог, В4.1)", () => {
   test("+критичная SAST/secrets-находка → Security ↓ заметно, total капится 49; публичный total НЕ тронут", () => {
-    const base = totalOf(healthyFacts(), "own")!;
+    const base = totalOf(healthyFacts(), "full")!;
     const attackedFacts = withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0, secrets_critical: true } });
-    const attacked = compute(t.db, seedScan(t, attackedFacts), "own", { now: NOW });
+    const attacked = compute(t.db, seedScan(t, attackedFacts), { now: NOW });
     expect(attacked.categories.security.score!).toBeLessThan(30); // ↓ заметно
-    expect(attacked.total!).toBeLessThanOrEqual(49); // жёсткий кап (В2-8)
-    expect(attacked.total!).toBeLessThan(base);
+    expect(attacked.totalFull!).toBeLessThanOrEqual(49); // жёсткий кап (В2-8)
+    expect(attacked.totalFull!).toBeLessThan(base);
     // изоляция (В4/Б4): тот же факт публично не влияет — 4 категории
     const pubBefore = totalOf(healthyFacts())!;
     const pubAfter = totalOf(attackedFacts)!;
@@ -30,11 +33,11 @@ describe("§9 Security (own-режим, В4)", () => {
   });
 
   test("SAST crit → resolved → Security ↑, Score ↑", () => {
-    const dirty = totalOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0, secrets_critical: false } }), "own")!;
-    const clean = totalOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0.95, secrets_critical: false } }), "own")!;
+    const dirty = totalOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0, secrets_critical: false } }), "full")!;
+    const clean = totalOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0.95, secrets_critical: false } }), "full")!;
     expect(clean).toBeGreaterThan(dirty);
-    const catDirty = catOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0, secrets_critical: false } }), "security", "own")!;
-    const catClean = catOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0.95, secrets_critical: false } }), "security", "own")!;
+    const catDirty = catOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0, secrets_critical: false } }), "security")!;
+    const catClean = catOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0.95, secrets_critical: false } }), "security")!;
     expect(catClean).toBeGreaterThan(catDirty);
   });
 });
@@ -69,16 +72,16 @@ describe("§9 Issues: монотонность (ε=1e-9, Q14)", () => {
   });
 });
 
-describe("§9 CI/CD (own-режим, В4)", () => {
+describe("§9 CI/CD (полный итог, В4.1)", () => {
   test("cicd.runs 403 (no-data) = отсутствию поля: Score совпадает", () => {
-    const with403 = totalOf(withFacts(healthyFacts(), { key: "cicd.runs", value: { reason: "access" }, status: "no-data" }), "own")!;
-    const withoutRuns = totalOf(healthyFacts().filter((f) => f.key !== "cicd.runs"), "own")!;
+    const with403 = totalOf(withFacts(healthyFacts(), { key: "cicd.runs", value: { reason: "access" }, status: "no-data" }), "full")!;
+    const withoutRuns = totalOf(healthyFacts().filter((f) => f.key !== "cicd.runs"), "full")!;
     expect(with403).toBe(withoutRuns);
   });
 
   test("зелёные прогоны → 50% красные: CI/CD ↓ ≥ 15 пунктов", () => {
-    const green = catOf(withFacts(healthyFacts(), { key: "cicd.runs", value: { last_status: "success", success_rate: 1.0, duration_p50: 120, runs_count: 20 } }), "cicd", "own")!;
-    const red = catOf(withFacts(healthyFacts(), { key: "cicd.runs", value: { last_status: "failed", success_rate: 0.5, duration_p50: 120, runs_count: 20 } }), "cicd", "own")!;
+    const green = catOf(withFacts(healthyFacts(), { key: "cicd.runs", value: { last_status: "success", success_rate: 1.0, duration_p50: 120, runs_count: 20 } }), "cicd")!;
+    const red = catOf(withFacts(healthyFacts(), { key: "cicd.runs", value: { last_status: "failed", success_rate: 0.5, duration_p50: 120, runs_count: 20 } }), "cicd")!;
     expect(green - red).toBeGreaterThanOrEqual(15);
   });
 
@@ -87,15 +90,15 @@ describe("§9 CI/CD (own-режим, В4)", () => {
     // фактический own-сдвиг = 15×50/80 = 9.375 с полными данными, с runs403
     // (CI=50 вместо 0, веса 80) — считаем ручной арифметикой ниже.
     const runs403: FactSpec = { key: "cicd.runs", value: { reason: "access" }, status: "no-data" };
-    const before = totalOf(withFacts(healthyFacts(), runs403, { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } }), "own")!;
+    const before = totalOf(withFacts(healthyFacts(), runs403, { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } }), "full")!;
     const afterFacts = withFacts(
       healthyFacts(),
       runs403,
       { key: "cicd.configs", value: { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: true } },
     );
-    const s = compute(t.db, seedScan(t, afterFacts), "own", { now: NOW });
+    const s = compute(t.db, seedScan(t, afterFacts), { now: NOW });
     expect(s.categories.cicd.score!).toBe(50);
-    expect(s.total! - before).toBeCloseTo(9.375, 10); // 15·(50−0)/80
+    expect(s.totalFull! - before).toBeCloseTo(9.375, 10); // 15·(50−0)/80
   });
 
   test("инвариант изоляции (В4/Б4): CI/Security-мутации НЕ двигают публичный total", () => {
@@ -107,7 +110,7 @@ describe("§9 CI/CD (own-режим, В4)", () => {
     expect(totalOf(withCi)!).toBe(pubBase); // CI не влияет публично
     expect(totalOf(withSec)!).toBe(pubBase); // Security не влияет публично
     // при этом own-режим их видит
-    expect(totalOf(withCi, "own")!).toBeGreaterThan(totalOf(noCi, "own")!);
+    expect(totalOf(withCi, "full")!).toBeGreaterThan(totalOf(noCi, "full")!);
   });
 });
 
@@ -131,9 +134,9 @@ describe("§9 анти-накрутка", () => {
 
   test("likes ×100: Score не меняется", () => {
     const scanId = seedScan(t, healthyFacts());
-    const before = compute(t.db, scanId, "public", { now: NOW }).total;
-    t.db.exec(`UPDATE repos SET likes = likes * 100 WHERE id = ${t.repoId}`);
-    const after = compute(t.db, scanId, "public", { now: NOW }).total;
+    const before = compute(t.db, scanId, { now: NOW }).totalRating;
+    t.db.exec("UPDATE repos SET likes = COALESCE(likes, 1) * 100");
+    const after = compute(t.db, scanId, { now: NOW }).totalRating;
     expect(after).toBe(before);
   });
 
@@ -160,7 +163,8 @@ describe("§9 анти-накрутка", () => {
 describe("§9 устойчивость канала", () => {
   test("issues-канал 429 (bad-channel) со историей: Score не меняется, stale-маркер", () => {
     const scan1 = seedScan(t, healthyFacts(), 3);
-    const base = compute(t.db, scan1, "public", { now: NOW });
+    const repoId = (t.db.query("SELECT repo_id FROM scans WHERE id = ?").get(scan1) as { repo_id: number }).repo_id;
+    const base = compute(t.db, scan1, { now: NOW });
     const scan2 = seedScan(
       t,
       withFacts(
@@ -168,16 +172,18 @@ describe("§9 устойчивость канала", () => {
         { key: "issues.stats", value: { reason: "bad-channel" }, status: "bad" },
         { key: "issues.comments_sample", value: { reason: "bad-channel" }, status: "bad" },
       ),
+      0,
+      repoId,
     );
-    const s2 = compute(t.db, scan2, "public", { now: NOW });
-    expect(s2.total!).toBeCloseTo(base.total!, 9);
+    const s2 = compute(t.db, scan2, { now: NOW });
+    expect(s2.totalRating!).toBeCloseTo(base.totalRating!, 9);
     expect(s2.categories.issues.stale).toBe(true);
     expect(new Set(s2.stale)).toEqual(new Set(["issues.stats", "issues.comments_sample"]));
   });
 
   test("coverage < 0.4 → Score NULL + объяснение каких данных не хватило", () => {
-    const s = compute(t.db, seedScan(t, [{ key: "activity.rest", value: { contributors: 1, releases: 0, pulls_open: 0, pulls_created_at: [], releases_released_at: [] } }]), "public", { now: NOW });
-    expect(s.total).toBeNull();
+    const s = compute(t.db, seedScan(t, [{ key: "activity.rest", value: { contributors: 1, releases: 0, pulls_open: 0, pulls_created_at: [], releases_released_at: [] } }]), { now: NOW });
+    expect(s.totalRating).toBeNull();
     expect(s.noData.length).toBeGreaterThanOrEqual(4); // каких данных не хватило
   });
 });

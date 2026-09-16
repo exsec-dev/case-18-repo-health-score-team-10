@@ -1,6 +1,6 @@
 // score.ts — CLI пересчёта (В2/Б5): bun scripts/score.ts <org/repo> —
-// последний скан слага → compute(mode public) + recommend → запись
-// (идемпотентно при том же model_version; смена модели = новые строки).
+// последний скан слага → compute (оба итога, В4.1/К1) + recommend →
+// запись (идемпотентно при том же model_version; смена модели = новые строки).
 import { loadConfig } from "../src/config";
 import { openDb } from "../src/db";
 import { compute, writeScores } from "../src/score/compute";
@@ -28,19 +28,20 @@ if (!scan) {
   process.exit(1);
 }
 
-const scores = compute(db, scan.id, "public");
+const scores = compute(db, scan.id);
 writeScores(db, scores);
 const recs = recommend(db, scan.id, { scores });
 writeRecommendations(db, scan.id, scores.modelVersion, recs);
 
-console.log(`scan_id=${scan.id} model=${scores.modelVersion} mode=${scores.mode}`);
-console.log(`Score=${scores.total === null ? "NULL" : Math.round(scores.total)} coverage=${scores.coverage.toFixed(2)} stale=[${scores.stale.join(",")}]`);
+const fmt = (x: number | null) => (x === null ? "NULL" : String(Math.round(x)));
+console.log(`scan_id=${scan.id} model=${scores.modelVersion}`);
+console.log(`Score (rating, 4 cat)=${fmt(scores.totalRating)} coverage=${scores.coverageRating.toFixed(2)}; Score (full, 6 cat)=${fmt(scores.totalFull)} coverage=${scores.coverageFull.toFixed(2)} stale=[${scores.stale.join(",")}]`);
 for (const [key, cat] of Object.entries(scores.categories)) {
   const val = cat.score === null ? "no-data" : cat.score.toFixed(1);
   const mark = cat.stale ? " (stale)" : "";
   console.log(`  ${key.padEnd(13)} ${val.padStart(5)}${mark}`);
 }
-if (scores.total === null) {
+if (scores.totalRating === null || scores.totalFull === null) {
   console.log(`  NULL: ${scores.noData.join("; ")}`);
 }
 console.log(`recommendations: ${recs.length}`);

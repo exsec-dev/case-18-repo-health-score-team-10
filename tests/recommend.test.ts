@@ -19,6 +19,9 @@ describe("presence-правила: числовой Δ на замороженн
     expect(recs[0]!.kind).toBe("presence");
     expect(recs[1]!.kind).toBe("activation");
     expect(recs[1]!.deltaScore).toBeNull();
+    // В4.1 (К1): публичные правила без канала, AppSec-активация — канал appsec
+    expect(recs[0]!.channel).toBeNull();
+    expect(recs[1]!.channel).toBe("appsec");
   });
 
   test("нет лицензии → Δ = 0.15·0.25·100 = 3.75 числом", () => {
@@ -49,19 +52,23 @@ describe("presence-правила: числовой Δ на замороженн
     expect(rec.deltaScore!).toBeCloseTo(1.575, 4);
   });
 
-  test("нет CI (own-режим, раны 403) → +7.5; публично CI-правил нет (В4)", () => {
+  test("нет CI (раны 403) → +7.5 полного Score; CI-правила помечены каналом cicd (В4.1)", () => {
     const noCi = seedScan(t, withFacts(healthyFacts(), { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } }, { key: "cicd.runs", value: { reason: "access" }, status: "no-data" }));
-    const rec1 = recommend(t.db, noCi, { mode: "own", now: NOW }).find((r) => r.ruleId === "ci-missing")!;
+    const rec1 = recommend(t.db, noCi, { now: NOW }).find((r) => r.ruleId === "ci-missing")!;
     expect(rec1.deltaScore).toBeCloseTo(7.5, 10);
     expect(rec1.expectedImpact).toContain("50/100");
-    // публично CI исключён — ни presence, ни активационных по CI
-    expect(recommend(t.db, noCi, { now: NOW }).some((r) => ["ci-missing", "ci-no-steps", "grant-ci-runs"].includes(r.ruleId))).toBe(false);
+    expect(rec1.expectedImpact).toContain("полного Score");
+    // CI-правила существуют в одной выдаче, но только с каналом cicd —
+    // карточка скрывает их от зрителя без доступа к CI (К2)
+    const ciRules = recommend(t.db, noCi, { now: NOW }).filter((r) => ["ci-missing", "ci-no-steps", "grant-ci-runs"].includes(r.ruleId));
+    expect(ciRules.length).toBeGreaterThan(0);
+    expect(ciRules.every((r) => r.channel === "cicd")).toBe(true);
 
     const noSteps = seedScan(t, withFacts(healthyFacts(), { key: "cicd.configs", value: { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: false } }, { key: "cicd.runs", value: { reason: "access" }, status: "no-data" }));
-    const rec2 = recommend(t.db, noSteps, { mode: "own", now: NOW }).find((r) => r.ruleId === "ci-no-steps")!;
+    const rec2 = recommend(t.db, noSteps, { now: NOW }).find((r) => r.ruleId === "ci-no-steps")!;
     expect(rec2.deltaScore).toBeCloseTo(7.5, 10);
     // активационная «дайте доступ к прогонам» не путается с presence
-    const ids = recommend(t.db, noSteps, { mode: "own", now: NOW }).map((r) => r.ruleId);
+    const ids = recommend(t.db, noSteps, { now: NOW }).map((r) => r.ruleId);
     expect(ids).not.toContain("grant-ci-runs"); // шагов нет — активировать нечего
   });
 });
@@ -84,22 +91,20 @@ describe("активационная ветка (без числа)", () => {
     expect(recs.findIndex((r) => r.ruleId === "license-missing")).toBeLessThan(recs.indexOf(tracker));
   });
 
-  test("connect-appsec (В4, парковка В3 закрыта): честный текст режима вместо пустого coverage", () => {
+  test("connect-appsec (В4.1): нейтральный текст без «публичного режима», канал appsec", () => {
     const scanId = seedScan(t, withFacts(healthyFacts(), { key: "cicd.runs", value: { reason: "access" }, status: "no-data" }));
-    const pub = recommend(t.db, scanId, { now: NOW });
-    const appsec = pub.find((r) => r.ruleId === "connect-appsec")!;
-    expect(appsec.expectedImpact).toContain("Security доступна в режиме своего репо");
+    const recs = recommend(t.db, scanId, { now: NOW });
+    const appsec = recs.find((r) => r.ruleId === "connect-appsec")!;
+    expect(appsec.channel).toBe("appsec");
+    expect(appsec.expectedImpact).toContain("src.repositories.useAppSecScan");
     expect(appsec.expectedImpact).not.toMatch(/coverage 1\.00→1\.00/); // пустой текст В3 умер
-    // grant-ci-runs — own-режим (публично CI исключён)
-    expect(pub.some((r) => r.ruleId === "grant-ci-runs")).toBe(false);
-    const own = recommend(t.db, scanId, { mode: "own", now: NOW });
-    const grant = own.find((r) => r.ruleId === "grant-ci-runs")!;
+    expect(`${appsec.problem} ${appsec.action} ${appsec.expectedImpact}`).not.toMatch(/публичн|своего репо/i);
+    const grant = recs.find((r) => r.ruleId === "grant-ci-runs")!;
+    expect(grant.channel).toBe("cicd");
     expect(grant.opensCategory).toBe("cicd");
     expect(grant.deltaScore).toBeNull();
     // порядок активационных по весу: security (20) раньше cicd (15)
-    const ownAppsec = own.find((r) => r.ruleId === "connect-appsec")!;
-    expect(ownAppsec.expectedImpact).toContain("права PAT");
-    expect(own.indexOf(ownAppsec)).toBeLessThan(own.indexOf(grant));
+    expect(recs.indexOf(appsec)).toBeLessThan(recs.indexOf(grant));
   });
 
   test("AppSec-факт есть → connect-appsec не летит; критичные → скор-правило", () => {
@@ -109,7 +114,7 @@ describe("активационная ветка (без числа)", () => {
     );
     const recs = recommend(t.db, scanId, { now: NOW });
     expect(recs.some((r) => r.ruleId === "connect-appsec")).toBe(false);
-    expect(recs.some((r) => r.ruleId === "appsec-critical")).toBe(true);
+    expect(recs.find((r) => r.ruleId === "appsec-critical")!.channel).toBe("appsec");
   });
 });
 
@@ -124,7 +129,7 @@ describe("скор-правила (по данным)", () => {
         { key: "code.todo", value: { count: 14, fixme: 6, older_180d: 9, todo_files: 10, blamed_files: 10 } },
       ),
     );
-    const ids = recommend(t.db, scanId, { mode: "own", now: NOW }).map((r) => r.ruleId);
+    const ids = recommend(t.db, scanId, { now: NOW }).map((r) => r.ruleId);
     expect(ids).toContain("fix-red-runs");
     expect(ids).toContain("speed-up-pipeline");
     expect(ids).toContain("reduce-stale-issues");
@@ -152,7 +157,7 @@ describe("порядок и запись", () => {
         { key: "issues.stats", value: { open: 0, closed: 0, median_close_days: null, stale_90d: 0, fetched_count: 0 } },
       ),
     );
-    const ids = recommend(t.db, scanId, { mode: "own", now: NOW }).map((r) => r.ruleId);
+    const ids = recommend(t.db, scanId, { now: NOW }).map((r) => r.ruleId);
     expect(ids.slice(0, 6)).toEqual([
       "ci-missing", // 7.5
       "license-missing", // 3.75
@@ -162,21 +167,26 @@ describe("порядок и запись", () => {
       "connect-appsec", // активационные: security 20
     ]);
     expect(ids[6]).toBe("start-tracker"); // issues 15
-    // публично тот же скан: CI-строк нет, порядок сохранён
-    const pubIds = recommend(t.db, scanId, { now: NOW }).map((r) => r.ruleId);
+    // зритель без доступа к каналам (фильтр карточки по channel): порядок сохранён
+    const pubIds = recommend(t.db, scanId, { now: NOW }).filter((r) => r.channel === null).map((r) => r.ruleId);
     expect(pubIds.slice(0, 4)).toEqual(["license-missing", "readme-missing", "codeowners-missing", "contributing-missing"]);
-    expect(pubIds[4]).toBe("connect-appsec");
+    expect(pubIds[4]).toBe("start-tracker");
     // приоритеты последовательны
-    const recs = recommend(t.db, scanId, { mode: "own", now: NOW });
+    const recs = recommend(t.db, scanId, { now: NOW });
     expect(recs.map((r) => r.priority)).toEqual(recs.map((_, i) => i + 1));
   });
 
-  test("writeRecommendations идемпотентен (PK scan+version+rule)", () => {
+  test("writeRecommendations идемпотентен и заменяет выдачу скана целиком; channel пишется", () => {
     const scanId = seedScan(t, healthyFacts());
     const recs = recommend(t.db, scanId, { now: NOW });
     writeRecommendations(t.db, scanId, "2.0.0-m2", recs);
     writeRecommendations(t.db, scanId, "2.0.0-m2", recs);
     const c = (t.db.query("SELECT COUNT(*) AS c FROM recommendations WHERE scan_id = ?").get(scanId) as { c: number }).c;
     expect(c).toBe(recs.length);
+    const ch = t.db.query("SELECT channel FROM recommendations WHERE scan_id = ? AND rule_id = 'connect-appsec'").get(scanId) as { channel: string };
+    expect(ch.channel).toBe("appsec");
+    writeRecommendations(t.db, scanId, "2.0.0-m2", recs.slice(0, 1));
+    const c2 = (t.db.query("SELECT COUNT(*) AS c FROM recommendations WHERE scan_id = ?").get(scanId) as { c: number }).c;
+    expect(c2).toBe(1);
   });
 });

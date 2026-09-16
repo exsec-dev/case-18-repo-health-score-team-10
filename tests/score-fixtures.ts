@@ -74,10 +74,22 @@ export function makeDb(): TestDb {
   return { db, repoId, close: () => { db.close(); rmSync(dir, { recursive: true, force: true }); } };
 }
 
-/** Скан с фактами (по умолчанию ok; status/bad — мутациями). */
-export function seedScan(t: TestDb, facts: FactSpec[], startedDaysAgo = 0): number {
+let isolatedRepoSeq = 0;
+
+/**
+ * Скан с фактами (по умолчанию ok; status/bad — мутациями). В4.1 (К1):
+ * каналы cicd.runs/appsec.findings замещаются историей репо при любом
+ * не-ok, поэтому по умолчанию каждый скан живёт в СВОЁМ репо (мутации
+ * независимы); историю одного репо тесты задают явно через repoId.
+ */
+export function seedScan(t: TestDb, facts: FactSpec[], startedDaysAgo = 0, repoId?: number): number {
   const started = iso(NOW.getTime() - startedDaysAgo * DAY - 3600_000);
-  const r = t.db.query("INSERT INTO scans (repo_id, started_at, status, finished_at, trigger) VALUES (?, ?, 'ok', ?, 'test')").run(t.repoId, started, started);
+  let targetRepo = repoId;
+  if (targetRepo === undefined) {
+    const repo = t.db.query("INSERT INTO repos (org_slug, repo_slug) VALUES ('t', ?)").run(`isolated-${++isolatedRepoSeq}`);
+    targetRepo = Number(repo.lastInsertRowid);
+  }
+  const r = t.db.query("INSERT INTO scans (repo_id, started_at, status, finished_at, trigger) VALUES (?, ?, 'ok', ?, 'test')").run(targetRepo, started, started);
   const scanId = Number(r.lastInsertRowid);
   const stmt = t.db.query(
     "INSERT OR REPLACE INTO facts (scan_id, category, key, value, status, source, collected_at) VALUES (?, ?, ?, ?, ?, ?, ?)",

@@ -55,7 +55,7 @@ describe("рейтинг: выборка строк", () => {
 
     const item = listRepos(t.db, q()).items.find((i) => i.repo === "by-id");
     expect(item?.score).toBe(88);
-    expect(getRepoCard(t.db, "z-order", "by-id")?.score?.total).toBe(88);
+    expect(getRepoCard(t.db, "z-order", "by-id")?.score?.totalRating).toBe(88);
 
     t.db.query("DELETE FROM scores WHERE repo_id = ?").run(repoId);
     t.db.query("DELETE FROM scans WHERE repo_id = ?").run(repoId);
@@ -244,7 +244,7 @@ describe("карточка репозитория", () => {
 
   test("скан и скор со всеми полями показа", () => {
     expect(card.scan).toMatchObject({ id: scanId, status: "partial", trigger: "user" });
-    expect(card.score?.total).toBe(67);
+    expect(card.score?.totalRating).toBe(67);
     expect(card.score?.modelVersion).toBe(MODEL_VERSION);
     expect(card.score?.noData[0]).toContain("security");
     expect(card.derived).toMatchObject({ commitsPerMonth: 12 });
@@ -323,35 +323,41 @@ describe("изоляция own/public и эвикция (В4/Б4)", () => {
   const iso: ApiTestDb = makeApiDb();
   afterAll(() => iso.close());
 
-  test("own-скор не вытесняет публичный и не попадает в рейтинг", () => {
+  test("одна строка оценки на скан (К1): рейтинг и карточка — последний скан; рейтинг без CI/Security", () => {
     const repoId = seedRepo(iso, { org: "iso", repo: "dual", language: "Go", likes: 10 });
     const scan1 = seedScan(iso, repoId, { status: "ok" });
-    seedScore(iso, repoId, scan1, { total: 70, mode: "public" });
-    // позже появился own-скор с другим числом
-    const scan2 = seedScan(iso, repoId, { status: "ok" });
-    seedScore(iso, repoId, scan2, { total: 95, mode: "own" });
-    // рейтинг: только публичный скор
+    seedScore(iso, repoId, scan1, { total: 60, totalFull: 58 });
+    // позже — скан участника с PAT: тот же репо, новая строка с двумя итогами
+    const scan2 = seedScan(iso, repoId, { status: "ok", trigger: "user" });
+    seedScore(iso, repoId, scan2, { total: 70, totalFull: 95 });
+    expect((iso.db.query("SELECT COUNT(*) AS c FROM scores WHERE scan_id = ?").get(scan2) as { c: number }).c).toBe(1);
+    // рейтинг: total_rating последнего скана; категории каналов с правами не публикуются
     const rating = listRepos(iso.db, q());
     expect(rating.items.map((i) => `${i.org}/${i.repo}`)).toEqual(["iso/dual"]);
     expect(rating.items[0]!.score).toBe(70);
-    // публичная карточка: публичный скор
-    const pub = getRepoCard(iso.db, "iso", "dual")!;
-    expect(pub.score!.total).toBe(70);
-    expect(pub.score!.mode).toBe("public");
-    // own-карточка: последний own-скор
-    const own = getRepoCard(iso.db, "iso", "dual", { mode: "own" })!;
-    expect(own.score!.total).toBe(95);
-    expect(own.score!.mode).toBe("own");
-    // own-скор стёрт из БД — публичная карточка жива (изоляция в обе стороны)
-    iso.db.query("DELETE FROM scores WHERE mode = 'own'").run();
-    expect(getRepoCard(iso.db, "iso", "dual")!.score!.total).toBe(70);
-    expect(getRepoCard(iso.db, "iso", "dual", { mode: "own" })!.score).toBeNull();
+    expect(rating.items[0]!.categories.cicd).toBeNull();
+    expect(rating.items[0]!.categories.security).toBeNull();
+    // карточка: оба итога последнего скана
+    const card = getRepoCard(iso.db, "iso", "dual")!;
+    expect(card.score!.totalRating).toBe(70);
+    expect(card.score!.totalFull).toBe(95);
+  });
+
+  test("stale-маркер рейтинга не выдаёт фолбэк каналов с правами", () => {
+    const repoId = seedRepo(iso, { org: "iso", repo: "stale-ch", language: "Go" });
+    const scanId = seedScan(iso, repoId, { status: "ok" });
+    seedScore(iso, repoId, scanId, { total: 40, stale: ["cicd.runs", "appsec.findings"] });
+    const item = listRepos(iso.db, q()).items.find((i) => i.repo === "stale-ch")!;
+    expect(item.staleFacts).toBe(false);
+    iso.db.query("DELETE FROM scores WHERE repo_id = ?").run(repoId);
+    iso.db.query("DELETE FROM scans WHERE repo_id = ?").run(repoId);
+    iso.db.query("DELETE FROM repos WHERE id = ?").run(repoId);
   });
 
   test("эвикция (rating_active=0) убирает из рейтинга, карточка остаётся; приватность — так же", () => {
     const repoId = seedRepo(iso, { org: "iso", repo: "evicted", language: "Go", likes: 5 });
     const scanId = seedScan(iso, repoId, { status: "ok" });
-    seedScore(iso, repoId, scanId, { total: 55, mode: "public" });
+    seedScore(iso, repoId, scanId, { total: 55 });
     expect(listRepos(iso.db, q()).total).toBe(2);
     iso.db.query("UPDATE repos SET rating_active = 0 WHERE repo_slug = 'evicted'").run();
     const rating = listRepos(iso.db, q());
@@ -368,7 +374,7 @@ describe("изоляция own/public и эвикция (В4/Б4)", () => {
     expect(getRepoCard(iso.db, "iso", "evicted")).toBeNull();
     expect(getRepoCard(iso.db, "iso", "evicted", { mode: "own" })!.repo.repo).toBe("evicted");
     // эвикция чужих скоров нейтральна: у dual ничего не поменялось
-    expect(getRepoCard(iso.db, "iso", "dual")!.score!.total).toBe(70);
+    expect(getRepoCard(iso.db, "iso", "dual")!.score!.totalRating).toBe(70);
   });
 
   test("code_empty маркер доезжает до карточки (Score 0 как данные)", () => {
@@ -377,14 +383,14 @@ describe("изоляция own/public и эвикция (В4/Б4)", () => {
     seedScore(iso, repoId, scanId, { total: 0, coverage: 1 });
     iso.db.query("UPDATE scores SET code_empty = 1 WHERE scan_id = ?").run(scanId);
     const card = getRepoCard(iso.db, "iso", "empty-code")!;
-    expect(card.score!.total).toBe(0);
+    expect(card.score!.totalRating).toBe(0);
     expect(card.markers.codeEmpty).toBe(true);
     // NULL-скор (недостаточно данных) маркером не обладает
     const nullRepo = seedRepo(iso, { org: "iso", repo: "null-score" });
     const nullScan = seedScan(iso, nullRepo, { status: "partial" });
     seedScore(iso, nullRepo, nullScan, { total: null, coverage: 0.2 });
     const nullCard = getRepoCard(iso.db, "iso", "null-score")!;
-    expect(nullCard.score!.total).toBeNull();
+    expect(nullCard.score!.totalRating).toBeNull();
     expect(nullCard.markers.codeEmpty).toBe(false);
   });
 });

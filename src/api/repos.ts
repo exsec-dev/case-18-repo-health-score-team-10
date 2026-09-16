@@ -6,7 +6,7 @@
 // такие репо уезжают в отдельный массив, иначе «нет данных» оказалось бы
 // лучшим или худшим результатом в зависимости от направления сортировки.
 import type { Database } from "bun:sqlite";
-import { READ_KINDS, type CategoryScore } from "../score/compute";
+import { CHANNEL_FALLBACK_KINDS, READ_KINDS, type CategoryScore } from "../score/compute";
 import type { DerivedMetrics } from "../score/derived";
 import { CATEGORY_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, MODEL_VERSION } from "../score/model";
 
@@ -36,8 +36,11 @@ export interface RatingItem {
   repo: string;
   title: string | null;
   language: string | null;
+  /** Score в рейтинге (4 категории, total_rating) */
   score: number | null;
+  /** coverage_rating */
   coverage: number;
+  /** CI/Security в рейтинг не входят — всегда null (данные каналов с правами не публикуются) */
   categories: Record<CategoryKey, number | null>;
   likes: number | null;
   forks: number | null;
@@ -161,28 +164,33 @@ interface RatingRow {
 // Одна строка на репозиторий: последний скан, у которого ЕСТЬ скоры
 // текущей модели. «Последний» — по scan_id, а не по датам: id монотонен,
 // а даты скана могут идти вразнобой (пересканы, восстановление БД).
-// Изоляция own/public (В4/Б4): публичный контракт читает ТОЛЬКО
-// mode='public' AND rating_active=1 AND visibility='public' — own-скор
-// никогда не вытесняет публичный и не попадает в рейтинг.
+// В4.1 (К1/К2): одна строка оценки на скан; рейтинг читает total_rating /
+// coverage_rating (4 категории — CI и Security в рейтинг не входят) и
+// только rating_active=1 AND visibility='public'. Проверок доступа нет.
 const RATING_SQL = `
 SELECT r.org_slug, r.repo_slug, r.title, r.language, r.likes, r.forks, r.last_activity_at,
-       sc.total, sc.coverage, sc.categories, sc.stale, sc.model_version,
+       sc.total_rating AS total, sc.coverage_rating AS coverage, sc.categories, sc.stale, sc.model_version,
        s.status AS scan_status, s.started_at, s.finished_at
 FROM scores sc
 JOIN repos r ON r.id = sc.repo_id
 JOIN scans s ON s.id = sc.scan_id
 WHERE sc.model_version = ?
-  AND sc.mode = 'public'
   AND r.rating_active = 1
   AND r.visibility = 'public'
   AND sc.scan_id = (SELECT MAX(sc2.scan_id) FROM scores sc2
-                    WHERE sc2.repo_id = sc.repo_id AND sc2.model_version = ? AND sc2.mode = 'public')`;
+                    WHERE sc2.repo_id = sc.repo_id AND sc2.model_version = ?)`;
+
+/** Категории каналов с правами зрителя (К2): в рейтинге и без доступа — закрыты. */
+export const CHANNEL_CATEGORIES: CategoryKey[] = ["cicd", "security"];
 
 function toRatingItem(row: RatingRow): RatingItem {
   const cats = JSON.parse(row.categories) as Record<string, CategoryScore>;
   const categories = {} as Record<CategoryKey, number | null>;
-  for (const key of CATEGORY_ORDER) categories[key] = cats[key]?.score ?? null;
-  const stale = JSON.parse(row.stale) as string[];
+  for (const key of CATEGORY_ORDER) {
+    categories[key] = CHANNEL_CATEGORIES.includes(key) ? null : (cats[key]?.score ?? null);
+  }
+  // stale-маркер рейтинга — только по фактам, которые входят в рейтинг
+  const stale = (JSON.parse(row.stale) as string[]).filter((k) => !CHANNEL_FALLBACK_KINDS.includes(k));
   return {
     org: row.org_slug,
     repo: row.repo_slug,
@@ -318,9 +326,12 @@ export interface CardCategory extends CategoryScore {
 }
 
 export interface CardScore {
-  total: number | null;
-  coverage: number;
-  mode: string;
+  /** Score в рейтинге (4 категории) — всем */
+  totalRating: number | null;
+  coverageRating: number;
+  /** Полный Score (6 категорий, кап 49) */
+  totalFull: number | null;
+  coverageFull: number | null;
   modelVersion: string;
   computedAt: string;
   noData: string[];
@@ -421,9 +432,10 @@ interface RepoRow {
 interface ScoreRow {
   scan_id: number;
   model_version: string;
-  mode: string;
-  total: number | null;
-  coverage: number;
+  total_rating: number | null;
+  coverage_rating: number;
+  total_full: number | null;
+  coverage_full: number;
   categories: string;
   no_data: string;
   stale: string;
@@ -482,23 +494,14 @@ export function getRepoCard(db: Database, org: string, repo: string, opts: { mod
   // изоляция own/public: публичная карточка — только публичные скоры
   // активного рейтинга; own-карточка — последний own-скор (приватные
   // и эвиктированные репо здесь читаемы — это личная страница юзера)
-  const scoreRow =
-    mode === "own"
-      ? (db
-          .query(
-            `SELECT scan_id, model_version, mode, total, coverage, categories, no_data, stale, computed_at, derived, code_empty
-             FROM scores WHERE repo_id = ? AND model_version = ? AND mode = 'own' ORDER BY scan_id DESC LIMIT 1`,
-          )
-          .get(r.id, MODEL_VERSION) as ScoreRow | null)
-      : (db
-          .query(
-            `SELECT sc.scan_id, sc.model_version, sc.mode, sc.total, sc.coverage, sc.categories, sc.no_data, sc.stale, sc.computed_at, sc.derived, sc.code_empty
-             FROM scores sc JOIN repos r2 ON r2.id = sc.repo_id
-             WHERE sc.repo_id = ? AND sc.model_version = ? AND sc.mode = 'public'
-               AND r2.rating_active = 1 AND r2.visibility = 'public'
-             ORDER BY sc.scan_id DESC LIMIT 1`,
-          )
-          .get(r.id, MODEL_VERSION) as ScoreRow | null);
+  // одна строка оценки на скан (К1): карточка — последний скан репо
+  const scoreRow = db
+    .query(
+      `SELECT scan_id, model_version, total_rating, coverage_rating, total_full, coverage_full,
+              categories, no_data, stale, computed_at, derived, code_empty
+       FROM scores WHERE repo_id = ? AND model_version = ? ORDER BY scan_id DESC LIMIT 1`,
+    )
+    .get(r.id, MODEL_VERSION) as ScoreRow | null;
 
   if (!scoreRow) {
     // «в каталоге, ещё не сканировали» — штатное состояние, не ошибка
@@ -527,9 +530,10 @@ export function getRepoCard(db: Database, org: string, repo: string, opts: { mod
   }
   const stale = JSON.parse(scoreRow.stale) as string[];
   const score: CardScore = {
-    total: scoreRow.total,
-    coverage: scoreRow.coverage,
-    mode: scoreRow.mode,
+    totalRating: scoreRow.total_rating,
+    coverageRating: scoreRow.coverage_rating,
+    totalFull: scoreRow.total_full,
+    coverageFull: scoreRow.coverage_full,
     modelVersion: scoreRow.model_version,
     computedAt: scoreRow.computed_at,
     noData: JSON.parse(scoreRow.no_data) as string[],

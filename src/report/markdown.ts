@@ -42,7 +42,7 @@ function headerSection(card: RepoCard): string[] {
   out.push(
     `- Репозиторий: ${repo.webUrl}`,
     `- Скан: ${scan ? `#${scan.id} от ${fmtDateTime(scan.finishedAt ?? scan.startedAt)} (статус ${scan.status}, запуск ${scan.trigger})` : "не выполнялся"}`,
-    `- Модель: ${score ? score.modelVersion : "—"}; режим: ${score ? score.mode : "—"}`,
+    `- Модель: ${score ? score.modelVersion : "—"}`,
     `- Язык: ${repo.language ?? "не определён"}; лайки: ${num(repo.likes)}; форки: ${num(repo.forks)}`,
     `- Последняя активность: ${fmtDate(repo.lastActivityAt)}`,
     "",
@@ -63,9 +63,9 @@ function summarySection(card: RepoCard): string[] {
     );
     return out;
   }
-  if (score.total === null) {
+  if (score.totalRating === null) {
     out.push(
-      `**Недостаточно данных для оценки.** Покрытие данными — ${pct(score.coverage)} при пороге ${pct(COVERAGE_NULL_BELOW)}.`,
+      `**Недостаточно данных для оценки.** Покрытие данными — ${pct(score.coverageRating)} при пороге ${pct(COVERAGE_NULL_BELOW)}.`,
       "",
       "Это не ноль и не плохая оценка: при таком покрытии честного числа не существует.",
       "",
@@ -84,10 +84,11 @@ function summarySection(card: RepoCard): string[] {
   const top = withDelta.length > 0 ? withDelta.reduce((a, b) => ((a.deltaScore ?? 0) >= (b.deltaScore ?? 0) ? a : b)) : null;
 
   out.push(
-    `**Score: ${Math.round(score.total)} из 100** при покрытии данными ${pct(score.coverage)}` +
+    `**Score в рейтинге (4 категории): ${Math.round(score.totalRating)} из 100** при покрытии данными ${pct(score.coverageRating)}` +
       `${card.markers.staleFacts ? " (часть фактов взята из истории при сбое канала)" : ""}.`,
     "",
   );
+  out.push(...fullScoreLine(card), "");
   if (best && worst) {
     out.push(
       `Сильнее всего — ${CATEGORY_TITLES[best[0]]} (${round(best[1].score)}), слабее всего — ` +
@@ -105,6 +106,15 @@ function summarySection(card: RepoCard): string[] {
     out.push(...score.noData.map((raw) => `- ${humanNoData(raw)}`), "");
   }
   return out;
+}
+
+/** Полный Score (6 категорий) — отдельной строкой; NULL — честно «недостаточно данных». */
+function fullScoreLine(card: RepoCard): string[] {
+  const score = card.score!;
+  if (score.totalFull === null || score.coverageFull === null) {
+    return ["Полный Score (с CI и Security): недостаточно данных для оценки."];
+  }
+  return [`Полный Score (с CI и Security): ${Math.round(score.totalFull)} из 100 при покрытии данными ${pct(score.coverageFull)}.`];
 }
 
 // ---------- 3. таблица категорий ----------

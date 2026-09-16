@@ -72,10 +72,10 @@ export async function listMyRepos(db: Database, client: ScClient, opts: { maxPag
         typeof raw.language === "string" ? raw.language : typeof raw.language?.name === "string" ? raw.language.name : null;
       const known = db
         .query(
-          `SELECT sc.total, s.finished_at FROM scores sc
+          `SELECT sc.total_rating AS total, s.finished_at FROM scores sc
            JOIN repos r ON r.id = sc.repo_id
            LEFT JOIN scans s ON s.id = sc.scan_id
-           WHERE r.org_slug = ? AND r.repo_slug = ? AND sc.mode = 'own'
+           WHERE r.org_slug = ? AND r.repo_slug = ?
            ORDER BY sc.scan_id DESC LIMIT 1`,
         )
         .get(org, repo) as { total: number | null; finished_at: string | null } | null;
