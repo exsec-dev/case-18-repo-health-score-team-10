@@ -111,29 +111,38 @@ body {
   min-width: 0;
   height: 40px;
   padding-inline: 2px;
+  border-radius: var(--gn-aside-header-item-expanded-radius, 8px);
   color: var(--g-color-text-primary);
 }
 
-/* тултип иконки узкого rail: якорь — от иконки до края rail (8 + 48 = 56),
- * тогда ActionTooltip встает в 4px от rail, как у SourceCraft */
+/* тултип иконки узкого rail: якорь равен доступной ширине между полями
+ * AsideHeader (56 - 8 - 8 = 40), поэтому hover не упирается в правый край */
 .rh-rail-anchor {
-  width: 48px;
+  width: 40px;
 }
 
-/* название продукта в rail — плотнее, как вордмарк SourceCraft */
+/* название продукта в rail — 20px задаёт logo.textSize, здесь вес вордмарка */
 .rh-rail [class*="gn-logo__logo"] {
   font-weight: 600;
 }
 
-/* затемнение под подписями (MultipleTooltip::before у SourceCraft) */
+/* затемнение под подписями (MultipleTooltip::before у SourceCraft). Сам
+ * контейнер обрезает размытие по левой границе: фон не попадает на rail. */
 .rh-rail-backdrop {
   position: fixed;
   z-index: 999;
   width: 240px;
-  background: linear-gradient(90deg, var(--g-color-base-background) 50%, transparent);
-  filter: blur(16px);
+  overflow: hidden;
   opacity: 0.7;
   pointer-events: none;
+}
+
+.rh-rail-backdrop::before {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, var(--g-color-base-background) 50%, transparent);
+  content: "";
+  filter: blur(16px);
 }
 
 .rh-rail_compact .rh-rail-user__text {
@@ -144,6 +153,8 @@ body {
  * SourceCraft); цвета — плавающие поверхности темы */
 .rh-rail-item {
   position: relative;
+  width: 40px;
+  height: 40px;
 }
 
 /* геометрия MultipleTooltip SourceCraft: 13/18, отступы 8×12, радиус s;

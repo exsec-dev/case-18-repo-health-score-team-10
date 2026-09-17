@@ -74,6 +74,7 @@ export function Shell({ section, me, children }: { section: Section; me: MeRespo
         text: PRODUCT_NAME,
         icon: HealthCraftMark,
         iconSize: 26,
+        textSize: 20,
         href: "/",
         "aria-label": `${PRODUCT_NAME} — к рейтингу`,
         onClick: (e) => followLink(e, "/"),
@@ -246,7 +247,7 @@ function RailFooter({ me, compact }: { me: MeResponse | null; compact: boolean }
         />
       )}
       <div className={compact ? "rh-rail-account rh-rail-account_compact" : "rh-rail-account"}>
-        {me?.login ? <RailUser me={me} compact={compact} /> : <LoginButton compact={compact} />}
+        {me?.login ? <RailUser me={me} /> : <LoginButton compact={compact} />}
       </div>
     </>
   );
@@ -308,10 +309,10 @@ function switchTheme(setTheme: (next: AppTheme) => void, next: AppTheme): void {
  * (и в «Личном кабинете»). Аватар 32px стоит на оси иконок rail в обоих
  * видах, высота блока одна — при раскрытии ничего не прыгает.
  */
-function RailUser({ me, compact }: { me: MeResponse; compact: boolean }) {
+function RailUser({ me }: { me: MeResponse }) {
   const login = me.login!;
   const name = displayName(me);
-  const block = (
+  return (
     <div className="rh-rail-user">
       <UserAvatar me={me} size="m" />
       <Flex direction="column" className="rh-rail-user__text">
@@ -325,13 +326,6 @@ function RailUser({ me, compact }: { me: MeResponse; compact: boolean }) {
         )}
       </Flex>
     </div>
-  );
-  return compact ? (
-    <ActionTooltip title={name} description={name !== login ? login : undefined} placement="right">
-      {block}
-    </ActionTooltip>
-  ) : (
-    block
   );
 }
 
