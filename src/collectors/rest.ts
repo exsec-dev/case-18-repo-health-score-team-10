@@ -348,9 +348,9 @@ export async function collectRestFacts(
         }
       }
     }
-    if (commentsErrors > 0 && commentsErrors === top.length && top.length > 0) {
-      // ВСЕ комментарии легли в bad-channel — канал мёртв
-      facts.push(badChannelFact("issues.comments_sample", "rest:comments", `all ${top.length} comment fetches failed`, nowIso));
+    if (commentsErrors > 0) {
+      // круг 2 (LOW-4): любой сбой выборки — урезанная выборка не выдаётся за данные
+      facts.push(badChannelFact("issues.comments_sample", "rest:comments", `${commentsErrors} of ${top.length} comment fetches failed`, nowIso));
     } else {
       facts.push(
         okFact(

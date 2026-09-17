@@ -2,7 +2,7 @@
 // дефолты в коде, env-override чистой функцией scanFromEnv (инъекция,
 // не файлы), fail-soft на мусорных значениях.
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_SCAN, defaultLeaseMs, loadConfig, scanFromEnv } from "../src/config";
+import { apiBaseFromEnv, DEFAULT_SCAN, defaultLeaseMs, loadConfig, scanFromEnv } from "../src/config";
 
 describe("очередь, лиз и доступ (В4.1, К2/К4)", () => {
   test("дефолты: лиз = клон + деградация + 15 мин (60 мин); 10 заявок/час; 3 попытки; кэш доступа 15 мин", () => {
@@ -83,5 +83,19 @@ describe("scanFromEnv: слои дефолты ← env", () => {
     expect(cfg.degrade.enabled).toBe(false);
     expect(cfg.rest.appsecMinIntervalMs).toBe(250);
     expect(scanFromEnv({ SCAN_DEGRADE_ENABLED: "мусор" }).degrade.enabled).toBe(true);
+  });
+});
+
+describe("круг 2 (LOW-11): адреса API только https (кроме localhost)", () => {
+  test("https и http://localhost|127.0.0.1 принимаются; http на внешний хост и мусор — дефолт", () => {
+    const d = "https://api.sourcecraft.tech";
+    const v = (raw: string) => apiBaseFromEnv({ X: raw }, "X", d);
+    expect(v("https://mirror.example/api/")).toBe("https://mirror.example/api");
+    expect(v("http://127.0.0.1:4010")).toBe("http://127.0.0.1:4010");
+    expect(v("http://localhost:4010")).toBe("http://localhost:4010");
+    expect(v("http://evil.example")).toBe(d);
+    expect(v("ftp://127.0.0.1")).toBe(d);
+    expect(v("not a url")).toBe(d);
+    expect(apiBaseFromEnv({}, "X", d)).toBe(d);
   });
 });

@@ -105,6 +105,18 @@ const patGitUrl = (base: string, pat: string, org: string, repo: string) => {
   return u.toString();
 };
 
+/**
+ * Причина no-data git-канала при неудачном клоне (круг 2, С5): limits —
+ * только свойство репо: пробой диск-бюджета или таймаут периодического
+ * скана; таймаут скана по PAT юзера (медленный/троттлимый токен) и ошибка
+ * git — other.
+ */
+export function gitFailureReason(cloneReason: "timeout" | "disk" | "git", userScan: boolean): "limits" | "other" {
+  if (cloneReason === "disk") return "limits";
+  if (cloneReason === "timeout" && !userScan) return "limits";
+  return "other";
+}
+
 /** ScanConfig → лимиты шва cloneLimits (clone + degrade одним объектом). */
 export function scanCloneLimitsOf(scan: ScanConfig): ScanCloneLimits {
   return { ...scan.clone, degrade: scan.degrade };
@@ -249,7 +261,7 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
             if (cleanupError) console.error(`[scan ${scanId}] cleanup ${clone.dir}: ${cleanupError}`);
           }
         } else {
-          const reason = clone.reason === "git" ? "other" : "limits";
+          const reason = gitFailureReason(clone.reason, userToken !== null);
           gitChannel = `no-data(${reason})`;
           facts.push(...gitFactsNoData(reason, clone.detail, startedAt));
         }
@@ -348,7 +360,7 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
   try {
     const scores = compute(deps.db, scanId);
     const recs = recommend(deps.db, scanId, { scores });
-    eligible = workerFatal === null && ratingEligible(facts);
+    eligible = ratingEligible(facts, { status, userId: opts.userId ?? null });
     deps.db.transaction(() => {
       writeScores(deps.db, scores);
       writeRecommendations(deps.db, scanId, scores.modelVersion, recs);

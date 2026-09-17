@@ -148,7 +148,11 @@ async function resolveUncached(deps: AccessDeps, viewer: { userId: number; pat: 
   const pat = viewer.pat;
   const now = deps.now ? deps.now() : Date.now();
   const cached = (channel: AccessChannel) => deps.cache.get(viewer.userId, repo.id, channel, now);
-  const store = (channel: AccessChannel, value: ChannelAccess) => deps.cache.set(viewer.userId, repo.id, channel, value, now, gen);
+  const store = (channel: AccessChannel, value: ChannelAccess) => {
+    // круг 2 (LOW-9): сбой проверки доступа к приватному репо не кэшируется — иначе 60 с 404 владельцу
+    if (channel === "repo" && value === "check-failed") return;
+    deps.cache.set(viewer.userId, repo.id, channel, value, now, gen);
+  };
   const slugPath = `/repos/${encodeURIComponent(repo.org)}/${encodeURIComponent(repo.repo)}`;
 
   let rest: ScClient | null = null;
@@ -191,9 +195,11 @@ async function resolveUncached(deps: AccessDeps, viewer: { userId: number; pat: 
       appsec = "check-failed"; // форма ответа неожиданная — не знание о правах
     } else {
       const res = await deps.appsecClient(pat).get("/v1/scans/latest", { gitRepo: r.id });
-      // Ф1.4: 404 «скана ещё нет» при подтверждённом repo-GET — доступ есть
-      // (коллектор тот же 404 честно пишет no-data no-scan)
-      appsec = res.status === 404 ? "granted" : accessFromStatus(res.status);
+      // Ф1.4 + круг 2 (LOW-5): 404 «скана ещё нет» считается доступом только
+      // при другом подтверждении прав PAT — CI granted или приватный репо с
+      // repo granted; иначе 404 — отказ (живой зонд чужим PAT — Ф2.6)
+      const corroborated = cicd === "granted" || (!isPublic && repoAccess === "granted");
+      appsec = res.status === 404 ? (corroborated ? "granted" : "denied") : accessFromStatus(res.status);
     }
     store("appsec", appsec);
   }

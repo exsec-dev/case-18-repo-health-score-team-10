@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config";
 import { openDb } from "../src/db";
-import { fillMissingFacts, runScan, GitChannelOutcome, ScanDeps } from "../src/jobs/runner";
+import { fillMissingFacts, gitFailureReason, runScan, GitChannelOutcome, ScanDeps } from "../src/jobs/runner";
 import { okFact, noDataFact, badChannelFact, Fact } from "../src/collectors/facts";
 import { cleanupClone, gitFactsNoData } from "../src/collectors/git";
 import type { Database } from "bun:sqlite";
@@ -289,5 +289,13 @@ describe("EBUSY-регрессия (16.09): уборка клона не руш�
     // заведомо невалидный путь: строка-диагностика вместо throw
     const err = cleanupClone("\0:invalid", 1, 1);
     expect(typeof err).toBe("string");
+  });
+});
+
+describe("круг 2 (С5): причина сбоя клона", () => {
+  test("disk → limits всегда; timeout → limits только у периодического скана; git → other", () => {
+    expect([gitFailureReason("disk", false), gitFailureReason("disk", true)]).toEqual(["limits", "limits"]);
+    expect([gitFailureReason("timeout", false), gitFailureReason("timeout", true)]).toEqual(["limits", "other"]);
+    expect([gitFailureReason("git", false), gitFailureReason("git", true)]).toEqual(["other", "other"]);
   });
 });

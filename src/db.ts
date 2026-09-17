@@ -237,7 +237,7 @@ export function openDb(config: Config): Database {
   ensureColumn(db, "scans", "user_id", "INTEGER");
   // В4.1-fix (К-Ф1.1): пригодность — тем же правилом, что скор-хук, одним UPDATE
   if (ensureColumn(db, "scans", "rating_eligible", "INTEGER NOT NULL DEFAULT 0")) {
-    db.exec(`UPDATE scans SET rating_eligible = CASE WHEN ${ratingEligibleSql("scans.id")} THEN 1 ELSE 0 END`);
+    db.exec(`UPDATE scans SET rating_eligible = CASE WHEN ${ratingEligibleSql("scans")} THEN 1 ELSE 0 END`);
   }
   // В4.1-fix (Ф1.11): публичный статус по фактам
   if (ensureColumn(db, "scans", "public_status", "TEXT")) {

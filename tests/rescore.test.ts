@@ -88,6 +88,13 @@ describe("rescoreAll (Ф1.9)", () => {
     expect(needsRescore(db)).toBe(false);
     setMetaValue(db, "derived_version", String(DERIVED_VERSION - 1));
     expect(needsRescore(db)).toBe(true);
+    // круг 2 (LOW-10): версия свежая, но есть завершённые сканы без public_status (старый процесс)
+    rescoreAll(db);
+    expect(needsRescore(db)).toBe(false);
+    db.exec("UPDATE scans SET public_status = NULL WHERE status = 'ok'");
+    expect(needsRescore(db)).toBe(true);
+    rescoreAll(db);
+    expect(needsRescore(db)).toBe(false);
     db.close();
   });
 });

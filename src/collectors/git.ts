@@ -497,7 +497,18 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
     branch = (await git(["symbolic-ref", "--short", "HEAD"])).stdout.trim() || "HEAD";
     await git(["rev-parse", "--verify", `${branch}^{commit}`]);
   } catch (e) {
-    return gitFactsNoData("empty", `no commits at HEAD (${String((e as Error).message).slice(0, 120)})`, nowIso);
+    // круг 2 (С5): empty — только однозначное «нет коммитов» (клон читается и
+    // в нём нет ни одного объекта-коммита); иное исключение — other
+    const detail = String((e as Error).message).slice(0, 120);
+    let noCommits = false;
+    try {
+      noCommits = (await git(["rev-list", "--all", "--max-count=1"])).stdout.trim() === "";
+    } catch {
+      noCommits = false;
+    }
+    return noCommits
+      ? gitFactsNoData("empty", `no commits at HEAD (${detail})`, nowIso)
+      : gitFactsNoData("other", `HEAD unreadable (${detail})`, nowIso);
   }
 
   // --- 1. событийный git-таймлайн ---

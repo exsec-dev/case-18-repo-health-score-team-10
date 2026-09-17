@@ -110,6 +110,25 @@ export const DEFAULT_API: ApiConfig = {
   gitBase: "https://git.sourcecraft.dev",
 };
 
+/**
+ * Адрес API из env (круг 2, LOW-11): только https://, кроме localhost и
+ * 127.0.0.1 (тестовые моки). Иное значение — дефолт и предупреждение с
+ * именем переменной (значение не печатается: в нём могут быть креды).
+ */
+export function apiBaseFromEnv(env: Record<string, string>, name: string, fallback: string): string {
+  const raw = env[name];
+  if (raw === undefined || raw === "") return fallback;
+  try {
+    const url = new URL(raw);
+    const local = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+    if (url.protocol === "https:" || (url.protocol === "http:" && local)) return raw.replace(/\/+$/, "");
+  } catch {
+    /* не URL */
+  }
+  console.error(`[config] ${name}: only https:// (or http://localhost / http://127.0.0.1) is allowed; using the default`);
+  return fallback;
+}
+
 export interface Config {
   port: number;
   api: ApiConfig;
@@ -204,9 +223,9 @@ export function loadConfig(): Config {
     port: Number(env.PORT) > 0 ? Number(env.PORT) : 8418,
     dataDir: env.DATA_DIR ?? "data",
     api: {
-      restBase: env.SOURCECRAFT_API_BASE || DEFAULT_API.restBase,
-      appsecBase: env.APPSEC_API_BASE || DEFAULT_API.appsecBase,
-      gitBase: env.SOURCECRAFT_GIT_BASE || DEFAULT_API.gitBase,
+      restBase: apiBaseFromEnv(env, "SOURCECRAFT_API_BASE", DEFAULT_API.restBase),
+      appsecBase: apiBaseFromEnv(env, "APPSEC_API_BASE", DEFAULT_API.appsecBase),
+      gitBase: apiBaseFromEnv(env, "SOURCECRAFT_GIT_BASE", DEFAULT_API.gitBase),
     },
     sourcecraftToken: env.SOURCECRAFT_TOKEN ?? null,
     auth: {

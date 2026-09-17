@@ -11,13 +11,13 @@
 // старт сервера видит устаревшую версию и пересчитывает синхронно до
 // Bun.serve — рейтинг не бывает пуст или смешан после выкладки.
 import type { Database } from "bun:sqlite";
-import { compute, ratingEligible, writeScores, type Scores } from "./compute";
+import { compute, migrateEligibility, ratingEligible, writeScores, type Scores } from "./compute";
 import { MODEL_VERSION } from "./model";
 import { recommend, writeRecommendations } from "./recommend";
 import { getMetaValue, setMetaValue } from "../db";
 
 /** Версия производных данных (scores/recommendations/rating_eligible) при неизменной MODEL_VERSION. */
-export const DERIVED_VERSION = 1;
+export const DERIVED_VERSION = 2;
 
 export interface RescoreOptions {
   /** лог прогресса (сервер — console.log) */
@@ -45,7 +45,10 @@ export function needsRescore(db: Database): boolean {
   const scans = (db.query("SELECT COUNT(*) AS c FROM scans WHERE status NOT IN ('running', 'queued')").get() as { c: number }).c;
   if (scans === 0) return false;
   const rows = (db.query("SELECT COUNT(*) AS c FROM scores WHERE model_version = ?").get(MODEL_VERSION) as { c: number }).c;
-  return rows === 0;
+  if (rows === 0) return true;
+  // круг 2 (LOW-10): следы старого процесса — завершённые сканы без public_status
+  const legacy = db.query("SELECT 1 FROM scans WHERE public_status IS NULL AND status NOT IN ('running', 'queued') LIMIT 1").get();
+  return legacy !== null;
 }
 
 export function rescoreAll(db: Database, opts: RescoreOptions = {}): RescoreResult {
@@ -53,15 +56,27 @@ export function rescoreAll(db: Database, opts: RescoreOptions = {}): RescoreResu
   const every = Math.max(1, opts.progressEvery ?? 200);
   const scans = db
     .query(
-      `SELECT s.id, s.repo_id, s.started_at, s.finished_at, s.status, r.org_slug, r.repo_slug
+      `SELECT s.id, s.repo_id, s.started_at, s.finished_at, s.status, s.user_id, r.org_slug, r.repo_slug
        FROM scans s JOIN repos r ON r.id = s.repo_id
        ORDER BY s.id`,
     )
-    .all() as { id: number; repo_id: number; started_at: string; finished_at: string | null; status: string; org_slug: string; repo_slug: string }[];
-  const factsOf = db.query("SELECT key, status, value FROM facts WHERE scan_id = ?");
+    .all() as {
+    id: number;
+    repo_id: number;
+    started_at: string;
+    finished_at: string | null;
+    status: string;
+    user_id: number | null;
+    org_slug: string;
+    repo_slug: string;
+  }[];
+  const factsOf = db.query("SELECT key, status, source, value FROM facts WHERE scan_id = ?");
   const result: RescoreResult = { scans: 0, skipped: 0, ratingScored: 0, ratingNull: 0, eligible: 0 };
   const total = scans.length;
   log(`rescore ${MODEL_VERSION} (derived v${DERIVED_VERSION}): ${total} scans${opts.dry ? " (dry)" : ""}`);
+  // круг 2 (LOW-1/LOW-10): одно правило пригодности для всех сканов (включая
+  // running старого процесса) и public_status следов старого процесса
+  if (!opts.dry) migrateEligibility(db);
   for (const scan of scans) {
     if (scan.status === "running" || scan.status === "queued") {
       result.skipped++;
@@ -69,7 +84,10 @@ export function rescoreAll(db: Database, opts: RescoreOptions = {}): RescoreResu
     }
     const now = new Date(scan.finished_at ?? scan.started_at);
     const scores = compute(db, scan.id, { now: Number.isNaN(now.getTime()) ? new Date() : now });
-    const eligible = ratingEligible(factsOf.all(scan.id) as { key: string; status: string; value: string }[]);
+    const eligible = ratingEligible(factsOf.all(scan.id) as { key: string; status: string; source: string; value: string }[], {
+      status: scan.status,
+      userId: scan.user_id,
+    });
     if (!opts.dry) {
       db.transaction(() => {
         writeScores(db, scores);

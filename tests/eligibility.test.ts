@@ -40,15 +40,22 @@ const healthy = (): Fact[] => healthyFacts().map((f) => okFact(f.key, f.value, S
 const asSpec = (f: Fact): FactSpec => ({ key: f.key, value: f.value, status: f.status, source: f.source });
 const replace = (facts: Fact[], ...patch: Fact[]): Fact[] => [...facts.filter((f) => !patch.some((p) => p.key === f.key)), ...patch];
 
-const CASES: [string, Fact[], boolean][] = [
-  ["все публичные факты ok", healthy(), true],
-  ["нет факта публичного kind", healthy().filter((f) => f.key !== "code.todo"), false],
-  ["bad у публичного факта", replace(healthy(), { ...noDataFact("activity.rest", "other", "rest:activity"), status: "bad" }), false],
-  ["no-data access", replace(healthy(), noDataFact("issues.stats", "access", "rest:issues")), false],
-  ["no-data other", replace(healthy(), noDataFact("docs.presence", "other", "git")), false],
-  ["no-data limits (репо больше лимита)", replace(healthy(), noDataFact("tree.stats", "limits", "git")), true],
-  ["no-data empty (пустой репо)", replace(healthy(), noDataFact("docs.readme", "empty", "git")), true],
-  ["каналы CI/Security не влияют", replace(healthy(), noDataFact("cicd.runs", "access", "rest:cicd"), noDataFact("appsec.findings", "access", "appsec:api")), true],
+type Case = [string, Fact[], { status: string; userId: number | null }, boolean];
+const PERIODIC = { status: "partial", userId: null };
+const CASES: Case[] = [
+  ["все публичные факты ok", healthy(), PERIODIC, true],
+  ["нет факта публичного kind", healthy().filter((f) => f.key !== "code.todo"), PERIODIC, false],
+  ["bad у публичного факта", replace(healthy(), { ...noDataFact("activity.rest", "other", "rest:activity"), status: "bad" }), PERIODIC, false],
+  ["no-data access", replace(healthy(), noDataFact("issues.stats", "access", "rest:issues")), PERIODIC, false],
+  ["no-data other", replace(healthy(), noDataFact("docs.presence", "other", "git")), PERIODIC, false],
+  ["no-data limits (репо больше лимита)", replace(healthy(), noDataFact("tree.stats", "limits", "git")), PERIODIC, true],
+  ["no-data empty (пустой репо)", replace(healthy(), noDataFact("docs.readme", "empty", "git")), PERIODIC, true],
+  ["каналы CI/Security не влияют", replace(healthy(), noDataFact("cicd.runs", "access", "rest:cicd"), noDataFact("appsec.findings", "access", "appsec:api")), PERIODIC, true],
+  // круг 2 (LOW-1): статус скана bad — непригоден при любых фактах
+  ["status bad", healthy(), { status: "bad", userId: null }, false],
+  // круг 2 (С5): юзерский скан с любым no-data git-фактом — непригоден
+  ["юзерский скан, git no-data limits", replace(healthy(), noDataFact("tree.stats", "limits", "git")), { status: "partial", userId: 1 }, false],
+  ["юзерский скан, всё ok", healthy(), { status: "ok", userId: 1 }, true],
 ];
 
 describe("правило пригодности (К-Ф1.1)", () => {
@@ -62,10 +69,10 @@ describe("правило пригодности (К-Ф1.1)", () => {
     const t = makeApiDb();
     cleanups.push(t.close);
     const repoId = seedRepo(t, { org: "e", repo: "rule" });
-    for (const [name, facts, expected] of CASES) {
-      expect({ name, ts: ratingEligible(facts) }).toEqual({ name, ts: expected });
-      const scanId = seedScan(t, repoId, { facts: facts.map(asSpec) });
-      const row = t.db.query(`SELECT CASE WHEN ${ratingEligibleSql("?")} THEN 1 ELSE 0 END AS e`).get(scanId) as { e: number };
+    for (const [name, facts, scan, expected] of CASES) {
+      expect({ name, ts: ratingEligible(facts, scan) }).toEqual({ name, ts: expected });
+      const scanId = seedScan(t, repoId, { facts: facts.map(asSpec), status: scan.status, userId: scan.userId });
+      const row = t.db.query(`SELECT CASE WHEN ${ratingEligibleSql("s")} THEN 1 ELSE 0 END AS e FROM scans s WHERE s.id = ?`).get(scanId) as { e: number };
       expect({ name, sql: row.e === 1 }).toEqual({ name, sql: expected });
     }
   });
@@ -76,17 +83,16 @@ describe("правило пригодности (К-Ф1.1)", () => {
     let db = openDb(cfg);
     const t = { db, close: () => db.close() };
     const repoId = seedRepo(t, { org: "e", repo: "migrate" });
-    const ids = CASES.map(([, facts]) => seedScan(t, repoId, { facts: facts.map(asSpec), status: "partial" }));
-    db.exec("UPDATE scans SET status = 'bad' WHERE id = " + ids[2]);
+    CASES.forEach(([, facts, scan]) => seedScan(t, repoId, { facts: facts.map(asSpec), status: scan.status, userId: scan.userId }));
     db.exec("ALTER TABLE scans DROP COLUMN rating_eligible");
     db.exec("ALTER TABLE scans DROP COLUMN public_status");
     db.close();
     db = openDb(cfg);
     const rows = db.query("SELECT id, rating_eligible, public_status FROM scans ORDER BY id").all() as { id: number; rating_eligible: number; public_status: string }[];
     db.close();
-    expect(rows.map((r) => r.rating_eligible === 1)).toEqual(CASES.map(([, , e]) => e));
+    expect(rows.map((r) => r.rating_eligible === 1)).toEqual(CASES.map(([, , , e]) => e));
     // публичный статус: все публичные ok → ok (даже если каналы no-data); bad скан → bad; иначе partial
-    expect(rows.map((r) => r.public_status)).toEqual(["ok", "ok", "bad", "partial", "partial", "partial", "partial", "ok"]);
+    expect(rows.map((r) => r.public_status)).toEqual(["ok", "ok", "partial", "partial", "partial", "partial", "partial", "ok", "bad", "partial", "ok"]);
   });
 
   test("индексы scans(repo_id, id) и jobs(status, claimed_at) (Ф1.12)", () => {

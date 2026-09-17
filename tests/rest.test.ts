@@ -193,6 +193,26 @@ describe("collectRestFacts: факты из живых форм", () => {
   });
 });
 
+describe("круг 2 (LOW-4): частичный сбой выборки комментариев", () => {
+  test("один из комментарийных запросов 429 → issues.comments_sample bad, а не урезанный ok", async () => {
+    let n = 0;
+    const client = routerClient([
+      [(p) => get(p) === "/repos/o/r", ok(repoFx)],
+      [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Dopen"), ok(issuesOpenFx)],
+      [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Dclosed"), ok(issuesClosedFx)],
+      [(p) => get(p) === "/repos/o/r/contributors", ok(contributorsFx)],
+      [(p) => get(p) === "/repos/o/r/releases", ok(releasesFx)],
+      [(p) => get(p) === "/repos/o/r/pulls", ok(pullsFx)],
+      [(p) => get(p) === "/repos/o/r/cicd/runs", ok(runsOwnFx)],
+      [(p) => p.includes("/comments"), () => (++n === 1 ? { status: 429, json: null, bodyText: "" } : ok(commentsFx))],
+    ]);
+    const out = await collectRestFacts(client, "o/r", { commentsTopN: 3 });
+    const sample = out.facts.find((f) => f.key === "issues.comments_sample")!;
+    expect(n).toBeGreaterThan(1);
+    expect(sample.status).toBe("bad");
+  });
+});
+
 describe("В2/Б1: расширения — событийные даты, forks/reaction_counts, без rating", () => {
   test("activity.rest несёт pulls_created_at / releases_released_at (топ-N desc)", async () => {
     const client = fullOkClient();

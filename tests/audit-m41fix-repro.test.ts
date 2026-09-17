@@ -243,7 +243,8 @@ describe("С4: Δ канальных правил не раскрывает Secu
 
 // ---------------------------------------------------------------------------
 describe("С5: временные сбои git не делают скан пригодным", () => {
-  repro("юзерский скан с no-data git-фактами (limits) непригоден", async () => {
+  // закрыто Б10 (мех. 4, 5)
+  test("юзерский скан с no-data git-фактами (limits) непригоден", async () => {
     const db = tempDb();
     const user = upsertUser(db, "ya-slow-pat", "slowpat");
     const facts = [...gitFactsNoData("limits", "clone exceeded timeout"), ...healthy().filter((f) => f.source !== "git")];
@@ -252,7 +253,8 @@ describe("С5: временные сбои git не делают скан при
     expect({ result: res.ratingEligible, stored: row.rating_eligible }).toEqual({ result: false, stored: 0 });
   });
 
-  repro("исключение symbolic-ref/rev-parse, не означающее «нет коммитов», — no-data other, а не empty", async () => {
+  // закрыто Б10 (мех. 4)
+  test("исключение symbolic-ref/rev-parse, не означающее «нет коммитов», — no-data other, а не empty", async () => {
     const missing = join(tmpdir(), `rh-no-such-clone-${Date.now()}`);
     const facts = await extractFacts(missing, { maxBlameFiles: 10, textCapBytes: 10_000 });
     expect([...new Set(facts.map((f) => (f.value as { reason?: string }).reason))]).toEqual(["other"]);

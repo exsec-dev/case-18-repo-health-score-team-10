@@ -124,8 +124,17 @@ const INELIGIBLE_NO_DATA_REASONS = ["access", "other"];
 export interface EligibilityFact {
   key: string;
   status: string;
+  /** git | rest:* | appsec:api — правило юзерского скана смотрит git-факты (круг 2, С5) */
+  source: string;
   /** значение факта: объект или JSON-строка из БД */
   value: unknown;
+}
+
+/** Строка скана для правила пригодности: статус и автор. */
+export interface EligibilityScan {
+  status: string;
+  /** автор (users.id); null — периодический скан серверным токеном */
+  userId: number | null;
 }
 
 function noDataReason(value: unknown): unknown {
@@ -145,10 +154,16 @@ function noDataReason(value: unknown): unknown {
  * «Каталог, видимость и карточка» (4)): скан непригоден, если хоть один
  * факт PUBLIC_KINDS отсутствует, или status='bad', или no-data с причиной
  * access/other; no-data limits и причины, описывающие сам репо (пустой
- * репо), — пригоден. Одинаково для периодических и пользовательских,
- * публичных и приватных. SQL-эквивалент — ratingEligibleSql.
+ * репо), — пригоден. Одинаково для публичных и приватных.
+ * Круг 2 (LOW-1, одно определение в хуке, rescoreAll и миграции): скан со
+ * status bad (или незавершённый) непригоден; С5: юзерский скан (с автором)
+ * с любым no-data git-фактом непригоден — медленный/узкий PAT не
+ * выдаёт «репо больше лимита» за свойство репо. SQL-эквивалент —
+ * ratingEligibleSql.
  */
-export function ratingEligible(facts: EligibilityFact[]): boolean {
+export function ratingEligible(facts: EligibilityFact[], scan: EligibilityScan): boolean {
+  if (scan.status === "bad" || scan.status === "running" || scan.status === "queued") return false;
+  if (scan.userId !== null && facts.some((f) => f.source === "git" && f.status === "no-data")) return false;
   const byKey = new Map(facts.map((f) => [f.key, f]));
   for (const kind of PUBLIC_KINDS) {
     const f = byKey.get(kind);
@@ -161,14 +176,23 @@ export function ratingEligible(facts: EligibilityFact[]): boolean {
 
 const sqlList = (items: string[]) => items.map((k) => `'${k}'`).join(", ");
 
-/** SQL-эквивалент ratingEligible: выражение 0/1 для скана `scanIdExpr` (миграция openDb). */
-export function ratingEligibleSql(scanIdExpr: string): string {
-  return `(SELECT COUNT(*) FROM facts f
-            WHERE f.scan_id = ${scanIdExpr}
+/** SQL-эквивалент ratingEligible: логическое выражение для строки scans с алиасом `scanAlias` (id, status, user_id). */
+export function ratingEligibleSql(scanAlias: string): string {
+  return `(${scanAlias}.status NOT IN ('bad', 'running', 'queued')
+          AND (${scanAlias}.user_id IS NULL OR NOT EXISTS (
+            SELECT 1 FROM facts fg WHERE fg.scan_id = ${scanAlias}.id AND fg.source = 'git' AND fg.status = 'no-data'))
+          AND (SELECT COUNT(*) FROM facts f
+            WHERE f.scan_id = ${scanAlias}.id
               AND f.key IN (${sqlList(PUBLIC_KINDS)})
               AND f.status <> 'bad'
               AND NOT (f.status = 'no-data' AND COALESCE(json_extract(f.value, '$.reason'), '') IN (${sqlList(INELIGIBLE_NO_DATA_REASONS)}))
-          ) = ${PUBLIC_KINDS.length}`;
+          ) = ${PUBLIC_KINDS.length})`;
+}
+
+/** Повторная миграция пригодности всех сканов одним UPDATE (круг 2: derived_version 2) + public_status следов старого процесса. */
+export function migrateEligibility(db: Database): void {
+  db.exec(`UPDATE scans SET rating_eligible = CASE WHEN ${ratingEligibleSql("scans")} THEN 1 ELSE 0 END`);
+  db.exec(`UPDATE scans SET public_status = ${publicStatusSql("scans")} WHERE public_status IS NULL AND status NOT IN ('running', 'queued')`);
 }
 
 export interface StatusFact {

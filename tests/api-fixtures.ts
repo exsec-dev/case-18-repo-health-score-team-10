@@ -69,13 +69,15 @@ export interface ScanSpec {
   ratingEligible?: boolean;
   /** scans.public_status (Ф1.11); дефолт = status */
   publicStatus?: string;
+  /** scans.user_id — автор скана; дефолт NULL (периодика) */
+  userId?: number | null;
 }
 
 /** Скан + факты. id растут независимо от дат — «последний» определяется по id. */
 export function seedScan(t: ApiTestDb, repoId: number, spec: ScanSpec = {}): number {
   const started = spec.startedAt ?? NOW.toISOString();
   const r = t.db
-    .query("INSERT INTO scans (repo_id, started_at, finished_at, status, public_status, trigger, rating_eligible) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .query("INSERT INTO scans (repo_id, started_at, finished_at, status, public_status, trigger, rating_eligible, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
     .run(
       repoId,
       started,
@@ -84,6 +86,7 @@ export function seedScan(t: ApiTestDb, repoId: number, spec: ScanSpec = {}): num
       spec.publicStatus ?? spec.status ?? "ok",
       spec.trigger ?? "test",
       spec.ratingEligible === false ? 0 : 1,
+      spec.userId ?? null,
     );
   const scanId = Number(r.lastInsertRowid);
   const stmt = t.db.query(

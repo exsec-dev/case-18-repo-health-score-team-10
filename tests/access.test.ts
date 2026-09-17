@@ -87,8 +87,10 @@ describe("семантика ответа (К2)", () => {
   test("все пять состояний по каналам из ответов платформы", async () => {
     const cases: [Partial<{ runs: number; repo: number; appsec: number }>, { cicd: ChannelAccess; appsec: ChannelAccess }][] = [
       [{ runs: 403, appsec: 403 }, { cicd: "denied", appsec: "denied" }],
-      // Ф1.4: AppSec 404 при repo-GET 200 — «скана ещё нет», доступ есть
-      [{ runs: 404, appsec: 404 }, { cicd: "denied", appsec: "granted" }],
+      // Ф1.4 + круг 2 (LOW-5): AppSec 404 «скана нет» — доступ только при
+      // подтверждении прав другим чтением (CI granted); без него — отказ
+      [{ runs: 404, appsec: 404 }, { cicd: "denied", appsec: "denied" }],
+      [{ runs: 200, appsec: 404 }, { cicd: "granted", appsec: "granted" }],
       [{ runs: 401, repo: 401 }, { cicd: "pat-expired", appsec: "pat-expired" }],
       [{ runs: 429, appsec: 429 }, { cicd: "check-failed", appsec: "check-failed" }],
       [{ runs: 0, repo: 0 }, { cicd: "check-failed", appsec: "check-failed" }],
@@ -101,6 +103,20 @@ describe("семантика ответа (К2)", () => {
       const r = await resolveAccess(f.deps, viewer("pat"), PUBLIC);
       expect({ cicd: r.cicd, appsec: r.appsec }).toEqual(expected);
     }
+  });
+
+  test("круг 2 (LOW-5): приватный репо с repo granted — AppSec 404 → granted даже без CI", async () => {
+    const f = fake();
+    f.set({ runs: 403, appsec: 404 });
+    expect(await resolveAccess(f.deps, viewer("pat"), PRIVATE)).toEqual({ cicd: "denied", appsec: "granted", repo: "granted" });
+  });
+
+  test("круг 2 (LOW-9): check-failed канала repo не кэшируется — следующий показ проверяет снова", async () => {
+    const f = fake();
+    f.set({ repo: 503 });
+    expect((await resolveAccess(f.deps, viewer("pat"), PRIVATE)).repo).toBe("check-failed");
+    f.set({ repo: 200 });
+    expect((await resolveAccess(f.deps, viewer("pat"), PRIVATE)).repo).toBe("granted");
   });
 
   test("repo-GET 200 без id → Security check-failed (не знание о правах)", async () => {
