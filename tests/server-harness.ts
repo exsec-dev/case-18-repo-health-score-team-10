@@ -78,7 +78,12 @@ export async function spawnServer(opts: {
   seedMeta?: boolean;
 }): Promise<SpawnedServer> {
   if (opts.seedMeta !== false) seedCurrentMeta(opts.dataDir);
-  const port = 41000 + Math.floor(Math.random() * 18000);
+  // ОС выбирает свободный порт; случайный номер давал редкие коллизии между
+  // параллельными test-worker процессами на Windows.
+  const portProbe = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response(null, { status: 503 }) });
+  const port = portProbe.port;
+  portProbe.stop(true);
+  if (port === undefined) throw new Error("OS did not allocate a port for the test server");
   const base = `http://127.0.0.1:${port}`;
   const proc = Bun.spawn([process.execPath, "run", join(ROOT, "src/server.ts")], {
     cwd: ROOT,
@@ -98,13 +103,25 @@ export async function spawnServer(opts: {
       ...(opts.env ?? {}),
     },
     stdout: "ignore",
-    stderr: "ignore",
+    stderr: "pipe",
   });
-  for (let i = 0; i < 200; i++) {
+  const stderrText = new Response(proc.stderr).text();
+  let ready = false;
+  for (let i = 0; i < 600; i++) {
     try {
-      if ((await fetch(`${base}/api/health`)).ok) break;
+      if ((await fetch(`${base}/api/health`)).ok) {
+        ready = true;
+        break;
+      }
     } catch {}
+    if (proc.exitCode !== null) break;
     await Bun.sleep(100);
+  }
+  if (!ready) {
+    if (proc.exitCode === null) proc.kill();
+    const code = await proc.exited;
+    const detail = (await stderrText.catch(() => "")).trim().slice(-1000);
+    throw new Error(`test server did not become ready (exit ${code})${detail ? `: ${detail}` : ""}`);
   }
   return {
     base,
@@ -112,6 +129,7 @@ export async function spawnServer(opts: {
     stop: async () => {
       proc.kill();
       await proc.exited;
+      await stderrText.catch(() => "");
     },
   };
 }

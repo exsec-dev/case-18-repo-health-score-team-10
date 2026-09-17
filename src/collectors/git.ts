@@ -8,6 +8,7 @@
 // Лимиты — из Config.scan (src/config.ts), не константами здесь.
 import { execFile, execFile as execFileCb } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
+import { lstat, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Fact, GIT_KINDS, noDataFact, okFact } from "./facts";
@@ -70,15 +71,34 @@ function killTree(pid: number, killSelf: () => void): void {
   }
 }
 
-/** du -sb: размер каталога в байтах (0 при ошибке/отсутствии) — для watchdog. */
+const HAVE_DU = Boolean(Bun.which("du"));
+
+/** Размер каталога для watchdog: быстрый du, portable fallback для Windows. */
 async function duBytes(dir: string): Promise<number> {
-  return new Promise((resolve) => {
+  if (!HAVE_DU) return fsTreeBytes(dir);
+  const measured = await new Promise<number | null>((resolve) => {
     execFileCb("du", ["-sb", dir], { timeout: 30_000 }, (err, stdout) => {
-      if (err || !stdout) return resolve(0);
+      if (err || !stdout) return resolve(null);
       const n = parseInt(stdout.trim().split(/\s+/)[0] ?? "0", 10);
-      resolve(Number.isFinite(n) ? n : 0);
+      resolve(Number.isFinite(n) ? n : null);
     });
   });
+  return measured ?? fsTreeBytes(dir);
+}
+
+async function fsTreeBytes(path: string): Promise<number> {
+  try {
+    const info = await lstat(path);
+    if (!info.isDirectory()) return info.size;
+    const entries = await readdir(path, { withFileTypes: true });
+    let total = 0;
+    for (const entry of entries) total += await fsTreeBytes(join(path, entry.name));
+    return total;
+  } catch {
+    // Клон пишет дерево параллельно: исчезнувший между readdir/lstat файл
+    // будет учтён на следующем poll или в обязательном финальном замере.
+    return 0;
+  }
 }
 
 const HAVE_SETSID = Boolean(Bun.which("setsid"));
@@ -124,7 +144,7 @@ export async function cloneBare(
   if (breach !== null) {
     killTree(proc.pid, () => proc.kill("SIGKILL"));
     await proc.exited.catch(() => undefined);
-    rmSync(dir, { recursive: true, force: true });
+    await cleanupFailedClone(dir);
     const detail =
       breach === "disk"
         ? `bare clone ${bytes} B > budget ${limits.maxBytes} B (du-poll)`
@@ -139,11 +159,30 @@ export async function cloneBare(
     } catch {
       /* stdout/stderr ignore */
     }
-    rmSync(dir, { recursive: true, force: true });
+    await cleanupFailedClone(dir);
     return { ok: false, reason: "git", detail: scrubCredentials(stderr) || `git clone exited ${code}`, elapsedMs: Date.now() - started };
   }
   bytes = await duBytes(dir);
-  return { ok: true, dir, bytes, elapsedMs: Date.now() - started };
+  const elapsedMs = Date.now() - started;
+  // Быстрый локальный/сетевой клон может завершиться раньше первого poll.
+  // Финальный замер обязателен: бюджет — постусловие, а не только watchdog.
+  if (bytes > limits.maxBytes || elapsedMs > limits.timeoutMs) {
+    await cleanupFailedClone(dir);
+    return bytes > limits.maxBytes
+      ? {
+          ok: false,
+          reason: "disk",
+          detail: `bare clone ${bytes} B > budget ${limits.maxBytes} B (final-size)`,
+          elapsedMs,
+        }
+      : {
+          ok: false,
+          reason: "timeout",
+          detail: `clone completed in ${elapsedMs} ms > ${limits.timeoutMs} ms timeout`,
+          elapsedMs,
+        };
+  }
+  return { ok: true, dir, bytes, elapsedMs };
 }
 
 /** Дата отсечения истории (календарные месяцы назад) — значение history_truncated_since. */
@@ -211,6 +250,16 @@ export function cleanupClone(dir: string, attempts = 3, pauseMs = 250): string |
     }
   }
   return null;
+}
+
+/** Git for Windows может отпустить исходник/приёмник чуть позже выхода родителя. */
+async function cleanupFailedClone(dir: string): Promise<void> {
+  if (process.platform === "win32") await sleep(500);
+  const firstError = cleanupClone(dir, 5);
+  if (firstError !== null && process.platform === "win32") {
+    await sleep(500);
+    cleanupClone(dir, 5);
+  }
 }
 
 /** Полный набор git-фактов как no-data (клон не удался/пустой). */
