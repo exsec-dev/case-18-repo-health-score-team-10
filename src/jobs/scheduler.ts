@@ -101,6 +101,8 @@ export function enqueueScan(
 export interface ClaimOptions {
   /** предел попыток (Config.queue.maxAttempts): достигнут → failed, не заявляется */
   maxAttempts?: number;
+  /** ПОРТ S2: какую очередь обслуживает этот claim — user | rating */
+  queue?: "user" | "rating";
 }
 
 /**
@@ -123,10 +125,12 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
     `UPDATE jobs SET status = 'failed', lease_until = NULL
      WHERE status IN ('queued', 'running') AND attempts >= ? AND (lease_until IS NULL OR lease_until < ?)`,
   ).run(maxAttempts, nowIso);
-  const last = db
-    .query("SELECT trigger_kind FROM jobs WHERE claimed_at IS NOT NULL ORDER BY claimed_at DESC, id DESC LIMIT 1")
-    .get() as { trigger_kind: string } | null;
-  const first = last?.trigger_kind === "user" ? "periodic" : "user";
+  // ПОРТ hq-parallel (S2): очереди РАЗДЕЛЕНЫ (решение Алексея 17.09 —
+  // «всё лучшее от нас, сверху их капы»): claim обслуживает одну очередь
+  // 'user' | 'rating'; чередование удалено — изоляция интерактива от ночной
+  // волны заменяет честность перемеживания. Внутри user-очереди сохранён их
+  // круговой порядок между юзерами (Ф1.7); attempts (K4) неприкосновенны.
+  const queue = opts.queue ?? "user";
   const claimStmt = db.query(
       `UPDATE jobs SET status = 'running', claimed_at = ?, lease_until = ?, attempts = attempts + 1
        WHERE id = (
@@ -134,8 +138,8 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
          WHERE (lease_until IS NULL OR lease_until < ?)
            AND status IN ('queued', 'running')
            AND attempts < ?
-         ORDER BY CASE trigger_kind WHEN ? THEN 0 ELSE 1 END,
-                  (SELECT MAX(j2.claimed_at) FROM jobs j2 WHERE j2.user_id = jobs.user_id) IS NOT NULL,
+           AND (CASE WHEN ? = 'user' THEN trigger_kind = 'user' ELSE trigger_kind != 'user' END)
+         ORDER BY (SELECT MAX(j2.claimed_at) FROM jobs j2 WHERE j2.user_id = jobs.user_id) IS NOT NULL,
                   (SELECT MAX(j2.claimed_at) FROM jobs j2 WHERE j2.user_id = jobs.user_id) ASC,
                   id
          LIMIT 1
@@ -144,7 +148,7 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
   );
   // предохранитель цикла: каждая итерация переводит одну job в running или failed
   for (let guard = 0; guard < 1000; guard++) {
-    const claimed = claimStmt.get(nowIso, leaseIso, nowIso, maxAttempts, first) as {
+    const claimed = claimStmt.get(nowIso, leaseIso, nowIso, maxAttempts, queue) as {
       id: number;
       repo_id: number;
       user_id: number | null;
@@ -169,6 +173,17 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
     claimedAt: claimed.claimed_at,
     attempts: claimed.attempts,
   };
+  }
+  return null;
+}
+
+/** ПОРТ hq-parallel (S2/ищейка-3, фантомный claim): последовательный claim
+ *  по порядку очередей — следующая только если предыдущая пуста (map() клеймил
+ *  обе разом и вторая джоба повисала running без исполнителя на весь лиз). */
+export function claimAny(db: Database, order: Array<"user" | "rating">, now = new Date(), leaseMs = 60 * 60_000, opts: ClaimOptions = {}): ClaimedJob | null {
+  for (const queue of order) {
+    const job = claimNext(db, now, leaseMs, { ...opts, queue });
+    if (job !== null) return job;
   }
   return null;
 }
@@ -398,19 +413,36 @@ export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<Sca
 
 // ---------- циклы процесса сервера ----------
 
-/** Воркер-луп: одна job за раз; ошибки не останавливают цикл; лиз продлевается каждые leaseMs/3 (К4). */
-export function startWorkerLoop(deps: WorkerDeps, pollMs = 5000): () => void {
+/**
+ * Воркер-луп: одна job за раз; ошибки не останавливают цикл; лиз продлевается
+ * каждые leaseMs/3 (К4). ПОРТ hq-parallel (S2): очереди user|rating с ролями
+ * процесса — web = сервер + user-воркер (интерактив), rating = планировщик +
+ * rating-воркер (ночная волна), all = dev-обе-в-одном (user вперёд).
+ * Фоновый пересчёт истории крутит только rating-роль (web держит готовность).
+ */
+export function startWorkerLoop(deps: WorkerDeps, queues: { user?: boolean; rating?: boolean }, pollMs = 5000): () => void {
+  const order: Array<"user" | "rating"> = queues.user && queues.rating ? ["user", "rating"] : queues.user ? ["user"] : queues.rating ? ["rating"] : [];
+  if (order.length === 0) return () => {};
   let busy = false;
   const leaseMs = deps.config.scheduler.leaseMs;
   const timer = setInterval(async () => {
     if (busy) return;
-    const job = claimNext(deps.db, new Date(), leaseMs, { maxAttempts: deps.config.queue.maxAttempts });
+    // ПОРТ S2/ищейка-8: весь тик в броне — бросок БД не валит процесс
+    let job: ClaimedJob | null = null;
+    try {
+      job = claimAny(deps.db, order, new Date(), leaseMs, { maxAttempts: deps.config.queue.maxAttempts });
+    } catch (e) {
+      console.error(`[worker] claim failed: ${String((e as Error).message).slice(0, 200)}`);
+      return;
+    }
     if (!job) {
-      // очередь пуста — порция фонового пересчёта истории (круг 2, LOW-7)
-      try {
-        rescoreHistoryBatch(deps.db, { log: (m) => console.log(`[worker] ${m}`) });
-      } catch (e) {
-        console.error(`[worker] history rescore failed: ${String((e as Error).message).slice(0, 200)}`);
+      // обе наши очереди пусты — порция фонового пересчёта истории (LOW-7)
+      if (queues.rating) {
+        try {
+          rescoreHistoryBatch(deps.db, { log: (m) => console.log(`[worker] ${m}`) });
+        } catch (e) {
+          console.error(`[worker] history rescore failed: ${String((e as Error).message).slice(0, 200)}`);
+        }
       }
       return;
     }

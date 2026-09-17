@@ -184,7 +184,7 @@ describe("H2: серверный REST-клиент с бюджетом на ве
       }) as typeof runScan;
       for (let i = 0; i < 2; i++) {
         enqueueScan(t.db, repoId, { triggerKind: "periodic" });
-        await processJob({ db: t.db, config, serverClient, runScan: burn }, claimNext(t.db)!);
+        await processJob({ db: t.db, config, serverClient, runScan: burn }, claimNext(t.db, new Date(), 60 * 60_000, { queue: "rating" })!);
       }
       expect(lastStatus).toBe(0); // задача упёрлась в свой бюджет
       // ночной обход планировщика сервера

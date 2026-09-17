@@ -314,8 +314,19 @@ const serverClient = () =>
         timeoutMs: config.scan.rest.timeoutMs,
       })
     : null;
-startWorkerLoop({ db, config, serverClient });
-startScheduler(db, serverClient, config);
+// ПОРТ hq-parallel (S2): роли процесса — web = сервер + user-воркер,
+// rating = планировщик + rating-воркер, all = dev-всё-в-одном (user вперёд)
+const role = config.processRole;
+if (role === "web" || role === "all") {
+  startWorkerLoop({ db, config, serverClient }, { user: true, rating: role === "all" });
+}
+if (role === "rating" || role === "all") {
+  startScheduler(db, serverClient, config);
+  if (role === "rating") {
+    startWorkerLoop({ db, config, serverClient }, { rating: true });
+  }
+}
+console.log(`  role: ${role} (PROCESS_ROLE)`);
 
 // ПОРТ hq-parallel (S3): стартовый свип осиротевших клонов (после crash/OOM
 // их в tmp не подбирал никто) + явные сигналы — лог и упорядоченный выход
