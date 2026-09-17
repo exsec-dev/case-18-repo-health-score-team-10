@@ -29,6 +29,13 @@ afterAll(() => {
   for (const c of cleanups.reverse()) c();
 });
 
+// В4.1-fix (Ф1.14, LOW-12): обёртка строгого режима сохранена для
+// обратимости К5 — `git revert 380396f` (PENDING Алексея по H4) возвращает
+// тест H4 «снять лимит» в форме repro(...) из до-К5 версии; без этой
+// константы откат давал бы файл, который не компилируется. На HEAD не
+// используется: все находки В4 закрыты.
+const repro = process.env.AUDIT_STRICT ? test : test.failing;
+
 function tempDb(): { dir: string; t: ApiTestDb } {
   const dir = mkdtempSync(join(tmpdir(), "rh-audit-"));
   const db = openDb({ ...loadConfig(), dataDir: dir });

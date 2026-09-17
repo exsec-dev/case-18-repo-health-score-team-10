@@ -117,15 +117,18 @@ export interface RepoUpsertMeta {
   lastActivityAt?: string | null;
   forks?: number | null;
   reactionCounts?: { type: string; count: number }[] | null;
-  /** явно переданная видимость; БЕЗ ключа существующая строка не трогается
-   *  (живая приёмка В4: upsert без меты перезаписывал 'private' на 'public') */
+  /** явно переданная видимость; БЕЗ ключа (или null) существующая строка не трогается
+   *  (живая приёмка В4: upsert без меты перезаписывал 'private' на 'public');
+   *  новая строка без видимости — 'private' до подтверждения (Ф1.10, fail-closed) */
   visibility?: string | null;
 }
 
 export function upsertRepo(db: Database, org: string, repo: string, meta: RepoUpsertMeta = {}): number {
-  // новая строка без меты получает дефолт 'public' (строки В1–В3 — каталог),
-  // но UPDATE-ветка меняет visibility ТОЛЬКО когда мета принесла значение
-  const updateVisibility = "visibility" in meta ? "visibility = excluded.visibility," : "";
+  // Ф1.10 (fail-closed): новая строка без видимости — 'private' до подтверждения
+  // явным полем платформы; UPDATE-ветка меняет visibility ТОЛЬКО когда мета
+  // принесла значение
+  const hasVisibility = typeof meta.visibility === "string" && meta.visibility !== "";
+  const updateVisibility = hasVisibility ? "visibility = excluded.visibility," : "";
   db.query(
     `INSERT INTO repos (org_slug, repo_slug, title, language, likes, last_activity_at, forks, reaction_counts, visibility)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -147,7 +150,7 @@ export function upsertRepo(db: Database, org: string, repo: string, meta: RepoUp
     meta.lastActivityAt ?? null,
     meta.forks ?? null,
     meta.reactionCounts ? JSON.stringify(meta.reactionCounts) : null,
-    meta.visibility ?? "public",
+    hasVisibility ? (meta.visibility as string) : "private",
   );
   const row = db.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number };
   return row.id;
@@ -372,7 +375,8 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
   };
 }
 
-function repoMetaToUpsert(meta: NonNullable<RestCollectResult["repoMeta"]>) {
+/** Мета REST → upsert; видимость без значения не передаётся ключом (Ф1.10). */
+export function repoMetaToUpsert(meta: NonNullable<RestCollectResult["repoMeta"]>): RepoUpsertMeta {
   return {
     title: meta.title,
     language: meta.language,
@@ -380,6 +384,6 @@ function repoMetaToUpsert(meta: NonNullable<RestCollectResult["repoMeta"]>) {
     lastActivityAt: meta.lastActivityAt,
     forks: meta.forks,
     reactionCounts: meta.reactionCounts,
-    visibility: meta.visibility,
+    ...(typeof meta.visibility === "string" && meta.visibility !== "" ? { visibility: meta.visibility } : {}),
   };
 }

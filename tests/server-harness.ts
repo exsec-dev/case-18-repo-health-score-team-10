@@ -5,6 +5,9 @@
 // env запрещён: иначе зритель с PAT или юзерская заявка ушли бы на живые
 // сервисы. Не *.test.ts — bun test не подхватывает.
 import { join } from "node:path";
+import { loadConfig } from "../src/config";
+import { openDb, setMetaValue } from "../src/db";
+import { DERIVED_VERSION } from "../src/score/rescore";
 
 const ROOT = join(import.meta.dir, "..");
 
@@ -55,8 +58,26 @@ export interface SpawnedServer {
   stop(): Promise<void>;
 }
 
+/**
+ * Актуальные meta сид-БД (Ф1.9): без derived_version сервер при старте
+ * пересчитал бы сид-оценки моделью и затёр фикстуру.
+ */
+export function seedCurrentMeta(dataDir: string): void {
+  const db = openDb({ ...loadConfig(), dataDir });
+  setMetaValue(db, "derived_version", String(DERIVED_VERSION));
+  db.close();
+}
+
 /** Сервер во временном каталоге; мок обязателен (адреса API без него не задать). */
-export async function spawnServer(opts: { dataDir: string; mock: MockApi; appSecret?: string; env?: Record<string, string> }): Promise<SpawnedServer> {
+export async function spawnServer(opts: {
+  dataDir: string;
+  mock: MockApi;
+  appSecret?: string;
+  env?: Record<string, string>;
+  /** false — не сеять meta (тест пересчёта при старте) */
+  seedMeta?: boolean;
+}): Promise<SpawnedServer> {
+  if (opts.seedMeta !== false) seedCurrentMeta(opts.dataDir);
   const port = 41000 + Math.floor(Math.random() * 18000);
   const base = `http://127.0.0.1:${port}`;
   const proc = Bun.spawn([process.execPath, "run", join(ROOT, "src/server.ts")], {

@@ -30,10 +30,21 @@ import {
 import { deletePat, getPat, patMeta, storePat } from "./auth/pat";
 import { buildAuthUrl, exchangeCode } from "./auth/ya";
 import { makeScClient } from "./collectors/http";
+import { needsRescore, rescoreAll } from "./score/rescore";
 import index from "./web/index.html";
 
 const config = loadConfig();
 const db = openDb(config);
+
+// Ф1.9: оценки устарели (derived_version старее кода) или их нет при
+// непустых сканах (после миграции схемы) — синхронный пересчёт ДО Bun.serve:
+// рейтинг не отвечает пустым или смешанным. Прогресс — в лог.
+if (needsRescore(db)) {
+  const t0 = Date.now();
+  console.log("[startup] stored scores are outdated or missing: rescoring before serving");
+  rescoreAll(db, { log: (m) => console.log(`[startup] ${m}`), progressEvery: 200 });
+  console.log(`[startup] rescore finished in ${Math.round((Date.now() - t0) / 1000)} s`);
+}
 
 const badQuery = (message: string): Response =>
   Response.json({ error: { code: "bad_query", message } }, { status: 400 });

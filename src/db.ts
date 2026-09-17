@@ -26,11 +26,19 @@
 // скан) и public_status (статус по фактам публичных категорий — без
 // каналов CI/Security); обе колонки при добавлении заполняются одним
 // UPDATE по фактам; индексы scans(repo_id, id) и jobs(status, claimed_at).
+// Схема v1.6 (В4.1-fix, Ф1.9): таблица meta(key, value) — schema_version
+// (пишется и проверяется: БД новее кода → отказ открыть, защита от старого
+// процесса на мигрированной БД) и derived_version (src/score/rescore.ts);
+// jobs.mode убран из DDL и миграций (Ф1.15; в старых БД колонка остаётся,
+// не читается); jobs.status += refused.
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Config } from "./config";
 import { publicStatusSql, ratingEligibleSql } from "./score/compute";
+
+/** Версия схемы этого кода (Ф1.9): meta.schema_version. */
+export const SCHEMA_VERSION = "1.6";
 
 const SCORES_DDL = `CREATE TABLE IF NOT EXISTS scores (
   scan_id INTEGER NOT NULL REFERENCES scans(id),
@@ -104,8 +112,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   status TEXT NOT NULL DEFAULT 'queued', -- queued|running|done|failed|refused (refused = отказанная предпроверка PAT, Ф1.6)
   claimed_at TEXT,
   lease_until TEXT,             -- механика claim-loop (В4): NULL-lease матчится
-  mode TEXT NOT NULL DEFAULT 'public', -- public|own (own = юзерский PAT)
-  user_id INTEGER,              -- чей PAT для own-режима (users.id)
+  user_id INTEGER,              -- автор заявки (users.id): его PAT; NULL = периодика
   trigger_kind TEXT NOT NULL DEFAULT 'periodic', -- periodic|user
   attempts INTEGER NOT NULL DEFAULT 0, -- +1 при claim; предел Config.queue.maxAttempts (v1.5, К4)
   created_at TEXT               -- время постановки: лимит частоты юзерских заявок (v1.5, К4)
@@ -135,6 +142,10 @@ CREATE TABLE IF NOT EXISTS user_settings (
   scan TEXT NOT NULL,           -- JSON; бюджеты скана из GUI удалены (К5 В4.1), таблица оставлена под В5
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS meta (
+  key TEXT PRIMARY KEY,         -- schema_version | derived_version (Ф1.9)
+  value TEXT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS idx_jobs_unclaimed ON jobs(claimed_at) WHERE claimed_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_jobs_claim ON jobs(status, id);
 CREATE INDEX IF NOT EXISTS idx_repos_language ON repos(language);
@@ -161,11 +172,41 @@ function ensureColumn(db: Database, table: string, column: string, ddlType: stri
   return false;
 }
 
+/** "1.10" > "1.6": посегментное числовое сравнение версий схемы. */
+export function compareVersions(a: string, b: string): number {
+  const pa = a.split(".").map((x) => Number(x) || 0);
+  const pb = b.split(".").map((x) => Number(x) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (d !== 0) return d;
+  }
+  return 0;
+}
+
+export function getMetaValue(db: Database, key: string): string | null {
+  const exists = db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'meta'").get();
+  if (!exists) return null;
+  return (db.query("SELECT value FROM meta WHERE key = ?").get(key) as { value: string } | null)?.value ?? null;
+}
+
+export function setMetaValue(db: Database, key: string, value: string): void {
+  db.query("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, value);
+}
+
 export function openDb(config: Config): Database {
   mkdirSync(config.dataDir, { recursive: true });
   const db = new Database(join(config.dataDir, "repo-health.db"), { create: true });
-  db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA busy_timeout = 5000;");
+  // Ф1.9: БД мигрирована более новым кодом — этот процесс её не трогает
+  // (сценарий «старый процесс на той же БД», инцидент 16.09)
+  const stored = getMetaValue(db, "schema_version");
+  if (stored !== null && compareVersions(stored, SCHEMA_VERSION) > 0) {
+    db.close();
+    throw new Error(
+      `database schema v${stored} is newer than this code (v${SCHEMA_VERSION}): stop this process and run the current code (${config.dataDir})`,
+    );
+  }
+  db.exec("PRAGMA journal_mode = WAL;");
   db.exec(SCHEMA);
   // v1.1 → v1.2: repos-колонки В2 (forks/reaction_counts)
   ensureColumn(db, "repos", "forks", "INTEGER");
@@ -205,7 +246,6 @@ export function openDb(config: Config): Database {
   ensureColumn(db, "repos", "rating_active", "INTEGER NOT NULL DEFAULT 1");
   ensureColumn(db, "repos", "visibility", "TEXT NOT NULL DEFAULT 'public'");
   ensureColumn(db, "repos", "evict_reason", "TEXT");
-  ensureColumn(db, "jobs", "mode", "TEXT NOT NULL DEFAULT 'public'");
   ensureColumn(db, "jobs", "user_id", "INTEGER");
   ensureColumn(db, "jobs", "trigger_kind", "TEXT NOT NULL DEFAULT 'periodic'");
   // v1.5 (В4.1, К4): попытки и время постановки
@@ -223,5 +263,6 @@ export function openDb(config: Config): Database {
     db.exec("DROP TABLE jobs_v1_rebuild");
   }
   db.exec(LATE_INDEXES);
+  setMetaValue(db, "schema_version", SCHEMA_VERSION);
   return db;
 }
