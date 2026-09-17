@@ -245,7 +245,7 @@ describe("«мои репо» и заявка (К-Ф1.1)", () => {
       },
       requestCount: () => 0,
     };
-    const out = await listMyRepos(t.db, client);
+    const out = await listMyRepos(t.db, client, null);
     expect(out.entries.map((e) => [e.repo, e.score])).toEqual([["mine", 71]]);
   });
 
@@ -269,7 +269,7 @@ describe("«мои репо» и заявка (К-Ф1.1)", () => {
       },
       requestCount: () => 0,
     };
-    const out = await listMyRepos(t.db, client);
+    const out = await listMyRepos(t.db, client, null);
     expect(out.entries.map((e) => [e.repo, e.score, e.lastScanAt])).toEqual([
       ["secret", 44, "2026-09-11T00:00:00Z"],
       ["open", null, "2026-09-12T00:00:00Z"],

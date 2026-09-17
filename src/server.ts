@@ -10,9 +10,9 @@ import { openDb } from "./db";
 import { getMeta, getRepoCardForViewer, listRepos, parseReposQuery } from "./api/repos";
 import { makeAccessCache, resolveAccess, type AccessRepo, type AccessResult } from "./auth/access";
 import { makeAppsecClient } from "./collectors/appsec";
-import { listMyRepos, requestUserScan } from "./api/me";
+import { addFavorite, checkFavoriteAccess, isFavorite, listFavorites, listMyRepos, requestUserScan , myJobs, removeFavorite } from "./api/me";
 import { renderRepoReport } from "./report/markdown";
-import { schedulerHealthSnapshot, startScheduler, startWorkerLoop, sweepOrphanClones } from "./jobs/scheduler";
+import { enqueueScan, schedulerHealthSnapshot, startScheduler, startWorkerLoop, sweepOrphanClones } from "./jobs/scheduler";
 import {
   clearSessionCookieHeader,
   createSession,
@@ -259,17 +259,72 @@ const server = Bun.serve({
       const user = sessionOf(req);
       if (!user) return unauthorized();
       const client = userClient(user.userId);
-      if (!client) {
-        return Response.json(
-          { error: { code: "no_pat", message: "сначала сохраните PAT SourceCraft (окно на этой странице)" } },
-          { status: 409 },
-        );
-      }
-      const result = await listMyRepos(db, client);
+      // ПОРТ 5: union-список живёт и без PAT (заявки + избранное)
+      const result = await listMyRepos(db, client, user.userId);
       if (!result.ok) {
         return Response.json({ error: { code: "bad_token", message: result.error } }, { status: 400 });
       }
       return Response.json({ username: result.username, entries: result.entries });
+    },
+    // ПОРТ 5: панель заданий — колокольчик/«Мои задания» (диагноз UX «очереди не видно»)
+    "/api/me/jobs": (req) => {
+      const user = sessionOf(req);
+      if (!user) return unauthorized();
+      return Response.json(myJobs(db, user.userId));
+    },
+    "/api/me/favorites": (req) => {
+      const user = sessionOf(req);
+      if (!user) return unauthorized();
+      return Response.json({ entries: listFavorites(db, user.userId) });
+    },
+    "/api/me/favorites/:org/:repo": (req) => {
+      const user = sessionOf(req);
+      if (!user) return unauthorized();
+      const { org, repo } = req.params;
+      if (!/^[a-z0-9_.-]+$/i.test(org ?? "") || !/^[a-z0-9_.-]+$/i.test(repo ?? "")) {
+        return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
+      }
+      if (req.method === "PUT") {
+        addFavorite(db, user.userId, org, repo);
+        return Response.json({ ok: true, favorite: true });
+      }
+      if (req.method === "DELETE") {
+        removeFavorite(db, user.userId, org, repo);
+        return Response.json({ ok: true, favorite: false });
+      }
+      if (req.method === "GET") {
+        return Response.json({ favorite: isFavorite(db, user.userId, org, repo) });
+      }
+      return Response.json({ error: { code: "bad_query", message: "ожидался GET/PUT/DELETE" } }, { status: 405 });
+    },
+    "/api/me/favorites/:org/:repo/check": async (req) => {
+      const user = sessionOf(req);
+      if (!user) return unauthorized();
+      if (req.method !== "POST") {
+        return Response.json({ error: { code: "bad_query", message: "ожидался POST" } }, { status: 405 });
+      }
+      const { org, repo } = req.params;
+      if (!/^[a-z0-9_.-]+$/i.test(org ?? "") || !/^[a-z0-9_.-]+$/i.test(repo ?? "")) {
+        return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
+      }
+      if (!isFavorite(db, user.userId, org, repo)) {
+        return Response.json({ error: { code: "not_favorite", message: "сначала добавьте репозиторий в избранное" } }, { status: 404 });
+      }
+      const pat = config.auth.appSecret ? getPat(db, config.auth.appSecret, user.userId) : null;
+      if (!pat) {
+        return Response.json({ error: { code: "no_pat", message: "для проверки прав нужен PAT SourceCraft" } }, { status: 409 });
+      }
+      const rest = makeScClient({ token: pat, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 8, timeoutMs: config.scan.rest.timeoutMs });
+      const appsec = makeAppsecClient({ token: pat, minIntervalMs: config.scan.rest.appsecMinIntervalMs });
+      const result = await checkFavoriteAccess(db, user.userId, org, repo, {
+        restGet: (path: string) => rest.get(path).then((r) => ({ status: r.status, json: r.json })),
+        appsecLatest: (gitRepo: string) => appsec.get("/v1/scans/latest", { gitRepo }).then((r) => ({ status: r.status })),
+      }, (db2, userId2, org2, repo2) => {
+        const repoRow = db2.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org2, repo2) as { id: number } | null;
+        if (!repoRow) return null;
+        return enqueueScan(db2, repoRow.id, { userId: userId2, triggerKind: "user" });
+      });
+      return Response.json(result);
     },
     "/api/me/repos/:org/:repo/scan": async (req) => {
       const user = sessionOf(req);

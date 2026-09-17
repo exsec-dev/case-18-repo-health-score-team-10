@@ -7,7 +7,7 @@
 import { Alert, Flex, Link, Text } from "@gravity-ui/uikit";
 import type { MetaResponse } from "./api";
 import { useJson } from "./api";
-import { MePage } from "./MePage";
+import { JobsBell, MePage } from "./MePage";
 import { Rating } from "./Rating";
 import { RepoPage } from "./RepoPage";
 import { linkProps, useRoute } from "./router";
@@ -30,6 +30,12 @@ export function App() {
           </Text>
         </Link>
         {route.kind === "repo" && <Text color="secondary">{route.org}/{route.repo}</Text>}
+        {/* ПОРТ 5: колокольчик очереди — активные задания юзера с честной позицией */}
+        {me.state.kind === "ok" && me.state.data.login !== null && (
+          <Flex alignItems="center" style={{ marginLeft: "auto" }}>
+            <JobsBell />
+          </Flex>
+        )}
       </Flex>
 
       {route.kind === "rating" && <Rating search={route.search} meta={metaData} />}

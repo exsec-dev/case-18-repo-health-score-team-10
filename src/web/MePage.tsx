@@ -54,6 +54,7 @@ export function MePage() {
         </Text>
       </Flex>
       <PatSection key={data.patCheckedAt ?? "no-pat"} hasPat={data.hasPat} checkedAt={data.patCheckedAt} onChanged={() => void me.reload()} />
+      <CabinetJobs />
       {data.hasPat && <MyReposSection />}
     </Flex>
   );
@@ -376,4 +377,251 @@ function RepoRow(props: {
 export function useMe(): AsyncState<MeResponse> {
   const { state } = useJson<MeResponse>("/api/me");
   return state;
+}
+
+
+// ========== ПОРТ 5 (hq-parallel): панель заданий + избранное ==========
+
+interface JobsResponse {
+  active: import("../api/me").MyJob[];
+  recent: import("../api/me").MyJob[];
+}
+
+/** Опрос /api/me/jobs: чаще при активных (честная позиция вместо спиннера);
+ *  бэкофф ×2 до 5 мин на сбоях/401 после успешных данных — истёкшая сессия
+ *  не крутит вечный 20-секундный опрос (ищейка-7). */
+function useMyJobs(idleMs = 5000): { jobs: JobsResponse | null; reload: () => void } {
+  const [jobs, setJobs] = useState<JobsResponse | null>(null);
+  const [tick, setTick] = useState(0);
+  const hadData = useRef(false);
+  const reload = useCallback(() => setTick((x) => x + 1), []);
+  useEffect(() => {
+    let stop = false;
+    let timer: ReturnType<typeof setTimeout>;
+    let backoff = 1;
+    const poll = async () => {
+      let delay = idleMs;
+      try {
+        const res = await fetch("/api/me/jobs");
+        if (res.status === 401 && hadData.current) {
+          delay = Math.min(idleMs * backoff, 5 * 60_000);
+          backoff = Math.min(backoff * 2, 60);
+        } else if (res.ok) {
+          const data = (await res.json()) as JobsResponse;
+          if (!stop) {
+            setJobs(data);
+            hadData.current = true;
+            backoff = 1;
+            if (data.active.length > 0) delay = 3000;
+          }
+        }
+      } catch {
+        /* сеть — тихо */
+      }
+      if (!stop) timer = setTimeout(poll, delay);
+    };
+    void poll();
+    return () => {
+      stop = true;
+      clearTimeout(timer);
+    };
+  }, [tick, idleMs]);
+  return { jobs, reload };
+}
+
+function jobPhaseLabel(j: import("../api/me").MyJob): string {
+  if (j.phase === "queued") return j.queueAhead !== null && j.queueAhead > 0 ? `в очереди (${j.queueAhead + 1}-й) · перед вами ${j.queueAhead} скан(ов)` : "следующая в очереди";
+  if (j.phase === "running") return "сканируется…";
+  if (j.phase === "failed") return "ошибка";
+  if (j.phase === "refused") return "отклонена (лимит заявок)";
+  return "готово";
+}
+
+/** Колокольчик шапки: тихий в покое; «Задания ◷ N» с позициями; ⚠ с причиной. */
+export function JobsBell() {
+  const { jobs } = useMyJobs(20000);
+  const active = jobs?.active ?? [];
+  const failed = jobs?.recent.filter((j) => j.phase === "failed").length ?? 0;
+  if (active.length === 0 && failed === 0 && jobs !== null) return null;
+  return (
+    <details style={{ position: "relative" }}>
+      <summary style={{ cursor: "pointer", listStyle: "none", whiteSpace: "nowrap" }} title="ваши анализы в очереди">
+        <Label theme={active.length > 0 ? "info" : "danger"}>Задания {active.length > 0 ? `◷ ${active.length}` : `⚠ ${failed}`}</Label>
+      </summary>
+      <Card view="outlined" style={{ position: "absolute", right: 0, top: "100%", zIndex: 10, marginTop: "var(--g-spacing-2)", minWidth: 360, padding: "var(--g-spacing-4)" }}>
+        <Flex direction="column" gap={2}>
+          <Text variant="subheader-3">Ваши задания</Text>
+          {active.map((j) => (
+            <Text key={j.jobId} color="secondary">
+              <Text variant="code-1">{j.slug}</Text> — {jobPhaseLabel(j)}
+            </Text>
+          ))}
+          {active.length === 0 && <Text color="secondary">активных нет; последняя ошибка ниже</Text>}
+          {jobs?.recent
+            .filter((j) => j.phase === "failed")
+            .slice(0, 1)
+            .map((j) => (
+              <Text key={j.jobId} color="danger">
+                <Text variant="code-1">{j.slug}</Text> — {j.error ?? "ошибка"}
+              </Text>
+            ))}
+          <Link {...linkProps("/me")}>весь список — в кабинете</Link>
+        </Flex>
+      </Card>
+    </details>
+  );
+}
+
+/** Панель «Мои задания» кабинета: активные с позицией + последние с исходом. */
+function JobsPanel(props: { jobs: JobsResponse | null; reload: () => void }) {
+  const { jobs, reload } = props;
+  if (jobs === null) return null;
+  const { active, recent } = jobs;
+  if (active.length === 0 && recent.length === 0) return null;
+  return (
+    <Card view="outlined" style={{ padding: "var(--g-spacing-5)" }}>
+      <Flex direction="column" gap={3}>
+        <Flex direction="column" gap={1}>
+          <Text variant="subheader-2">Мои задания</Text>
+          <Text color="secondary">Интерактивная очередь отдельная от ночной волны рейтинга — ваши сканы не ждут чужих клонов.</Text>
+        </Flex>
+        {active.map((j) => (
+          <Flex key={j.jobId} gap={3} alignItems="center" wrap>
+            <Label theme={j.phase === "running" ? "info" : "unknown"}>{jobPhaseLabel(j)}</Label>
+            <Text>
+              <Text variant="code-1">{j.slug}</Text>
+            </Text>
+          </Flex>
+        ))}
+        {recent.length > 0 && (
+          <Flex direction="column" gap={2}>
+            <Text variant="subheader-3">Последние</Text>
+            {recent.map((j) => (
+              <Flex key={j.jobId} gap={3} alignItems="baseline" wrap>
+                <Label theme={j.phase === "failed" ? "danger" : j.phase === "refused" ? "unknown" : "success"}>{jobPhaseLabel(j)}</Label>
+                <Text>
+                  <Text variant="code-1">{j.slug}</Text>
+                  {j.error ? ` — ${j.error}` : ""}
+                </Text>
+              </Flex>
+            ))}
+          </Flex>
+        )}
+        <Button size="m" view="outlined" onClick={reload}>
+          Обновить
+        </Button>
+      </Flex>
+    </Card>
+  );
+}
+
+interface FavoritesResponse {
+  entries: import("../api/me").FavoriteEntry[];
+}
+
+function accessRow(access: import("../api/me").FavoriteEntry["access"]): string {
+  if (!access) return "права ещё не проверяли";
+  const mark = (v: boolean | null) => (v === null ? "?" : v ? "✓" : "✗");
+  return `клон ${mark(access.clone)} · CI ${mark(access.ci)} · Security ${mark(access.appsec)}${access.own ? " · ваш" : ""}`;
+}
+
+/** Избранное: сейвить что угодно; права-ряд по факту; кулдаун 6ч. */
+function FavoritesSection({ hasPat }: { hasPat: boolean }) {
+  const favs = useJson<FavoritesResponse>("/api/me/favorites");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [note, setNote] = useState<{ text: string; danger: boolean } | null>(null);
+  if (favs.state.kind === "loading") return null;
+  if (favs.state.kind === "error") {
+    return (
+      <Card view="outlined" style={{ padding: "var(--g-spacing-5)" }}>
+        <Alert theme="warning" title="Раздел избранного не загрузился" message={favs.state.message} />
+      </Card>
+    );
+  }
+  const entries = favs.state.data.entries;
+
+  const check = async (org: string, repo: string) => {
+    setBusy(`${org}/${repo}`);
+    setNote(null);
+    try {
+      const res = await mutateJson<{ access: import("../api/me").FavoriteEntry["access"]; enqueued: boolean }>(
+        `/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/check`,
+        "POST",
+      );
+      setNote({ text: `${org}/${repo}: ${accessRow(res.access)}${res.enqueued ? " — запущен анализ (не чаще раза в 6 часов)" : ""}`, danger: false });
+      favs.reload();
+    } catch (e) {
+      setNote({ text: e instanceof Error ? e.message : String(e), danger: true });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const remove = async (org: string, repo: string) => {
+    setBusy(`${org}/${repo}`);
+    try {
+      await mutateJson(`/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`, "DELETE");
+      favs.reload();
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <Card view="outlined" style={{ padding: "var(--g-spacing-5)" }}>
+      <Flex direction="column" gap={3}>
+        <Flex direction="column" gap={1}>
+          <Text variant="subheader-2">Избранное ★</Text>
+          <Text color="secondary">
+            Любой репозиторий — звёздочкой на его странице. «Проверить права» — живой запрос по вашему PAT;
+            свой репозиторий пересканируется автоматически, не чаще раза в 6 часов.
+          </Text>
+          <Text color="secondary">✓ право есть · ✗ права нет · ? проверка не удалась или неизвестно</Text>
+        </Flex>
+        {entries.length === 0 && <Text color="secondary">пока пусто — добавьте звёздочкой со страницы репозитория</Text>}
+        {entries.map((f) => (
+          <Flex key={f.org + "/" + f.repo} gap={3} alignItems="center" wrap style={{ borderTop: "1px solid var(--g-color-line-generic)", paddingTop: "var(--g-spacing-3)" }}>
+            <Flex direction="column" gap={1} style={{ minWidth: 220, flex: 1 }}>
+              <Text>
+                <Text variant="code-1">{f.org}/{f.repo}</Text>
+              </Text>
+              <Text color="secondary">
+                {accessRow(f.access)}
+                {f.lastCheckedAt ? ` · проверено ${fmtDateTime(f.lastCheckedAt)}` : ""}
+              </Text>
+            </Flex>
+            {hasPat && (
+              <Button size="m" view="outlined" disabled={busy !== null} onClick={() => void check(f.org, f.repo)}>
+                Проверить права
+              </Button>
+            )}
+            <Button size="m" view="flat" disabled={busy !== null} onClick={() => void remove(f.org, f.repo)}>
+              Убрать ★
+            </Button>
+          </Flex>
+        ))}
+        {note && note.danger && <Alert theme="danger" title="Проверка прав не получилась" message={note.text} />}
+        {note && !note.danger && <Text color="secondary">{note.text}</Text>}
+      </Flex>
+    </Card>
+  );
+}
+
+/** Кабинетный контур заданий: ОДИН источник для панели (и для строк списка
+ *  «моих репо» — статусы из серверных jobs, не useState; диагноз UX-2a). */
+function CabinetJobs() {
+  const { jobs, reload } = useMyJobs(5000);
+  return (
+    <Flex direction="column" gap={5}>
+      <JobsPanel jobs={jobs} reload={reload} />
+      <FavoritesGate jobsReload={reload} />
+    </Flex>
+  );
+}
+
+function FavoritesGate({ jobsReload }: { jobsReload: () => void }) {
+  void jobsReload;
+  const me = useMe();
+  const hasPat = me.kind === "ok" && me.data.hasPat;
+  return <FavoritesSection hasPat={hasPat} />;
 }
