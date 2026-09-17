@@ -186,3 +186,55 @@ describe("видимость fail-closed (Ф1.10) и jobs.mode (Ф1.15)", () => 
     expect(okFact("x.y", 1, "git").status).toBe("ok");
   });
 });
+
+describe("круг 2 (LOW-7): стартовый пересчёт только читаемых сканов, история — фоном; ошибки", () => {
+  test("scope startup: P, L и приватный не-bad; остальное — rescoreHistoryBatch по курсору", async () => {
+    const { rescoreHistoryBatch } = await import("../src/score/rescore");
+    const dir = tempDir();
+    const db = openDb({ ...loadConfig(), dataDir: dir });
+    const t = { db, close: () => db.close() };
+    const pub = seedRepo(t, { org: "st", repo: "pub" });
+    const old = seedScan(t, pub, { facts: healthySpecs(), startedAt: "2026-01-01T00:00:00Z" });
+    const p = seedScan(t, pub, { facts: healthySpecs(), startedAt: "2026-02-01T00:00:00Z" });
+    const l = seedScan(t, pub, { facts: healthySpecs().filter((f) => f.key !== "issues.stats"), startedAt: "2026-03-01T00:00:00Z" });
+    const priv = seedRepo(t, { org: "st", repo: "priv" });
+    db.query("UPDATE repos SET visibility = 'private' WHERE id = ?").run(priv);
+    const privOld = seedScan(t, priv, { facts: [], status: "partial", startedAt: "2026-01-01T00:00:00Z" });
+    const privNotBad = seedScan(t, priv, { facts: [], status: "partial", startedAt: "2026-02-01T00:00:00Z" });
+    const privBad = seedScan(t, priv, { facts: [], status: "bad", startedAt: "2026-03-01T00:00:00Z" });
+    const out = rescoreAll(db, { scope: "startup" });
+    const rowsOf = () => (db.query("SELECT scan_id FROM scores ORDER BY scan_id").all() as { scan_id: number }[]).map((r) => r.scan_id);
+    expect(out.fatal).toBe(0);
+    expect(rowsOf()).toEqual([p, l, privNotBad, privBad]);
+    expect(getMetaValue(db, "derived_version")).toBe(String(DERIVED_VERSION));
+    expect(getMetaValue(db, "history_rescore_cursor")).toBe("0");
+    let batches = 0;
+    while (rescoreHistoryBatch(db, { limit: 2 }) > 0) batches++;
+    expect(rowsOf()).toEqual([old, p, l, privOld, privNotBad, privBad].sort((a, b) => a - b));
+    expect(getMetaValue(db, "history_rescore_cursor")).toBeNull();
+    expect(batches).toBe(3);
+    db.close();
+  });
+
+  test("ошибка данных одного скана не валит пересчёт (derived_version пишется); ошибка схемы — стоп без derived_version", () => {
+    const dir = tempDir();
+    const db = openDb({ ...loadConfig(), dataDir: dir });
+    const t = { db, close: () => db.close() };
+    const repoId = seedRepo(t, { org: "err", repo: "r" });
+    seedScan(t, repoId, { facts: healthySpecs() });
+    const broken = seedScan(t, repoId, { facts: healthySpecs() });
+    db.query("UPDATE facts SET value = 'not json' WHERE scan_id = ? AND key = 'docs.presence'").run(broken);
+    const logs: string[] = [];
+    const out = rescoreAll(db, { log: (m) => logs.push(m) });
+    expect({ scans: out.scans, errors: out.errors, fatal: out.fatal }).toEqual({ scans: 1, errors: 1, fatal: 0 });
+    expect(logs.some((m) => m.includes(`scan ${broken}`))).toBe(true);
+    expect(getMetaValue(db, "derived_version")).toBe(String(DERIVED_VERSION));
+
+    db.query("DELETE FROM meta WHERE key = 'derived_version'").run();
+    db.exec("DROP TABLE recommendations");
+    const fatal = rescoreAll(db);
+    expect(fatal.fatal).toBe(1);
+    expect(getMetaValue(db, "derived_version")).toBeNull();
+    db.close();
+  });
+});

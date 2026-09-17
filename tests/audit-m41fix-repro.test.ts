@@ -3,8 +3,10 @@
 // владельца п.1 «правило карточки» и механические правки 1–15, TASK.md §2
 // «Аудит В4.1-fix → правило карточки и исправления»). Второй круг, Б7.
 // Каждый тест описывает ПРАВИЛЬНОЕ поведение и ассертит конкретное значение.
-// Пока находка жива — test.failing (набор зелёный); в строгом режиме красный:
-// AUDIT_STRICT=1 bun test tests/audit-m41fix-repro.test.ts
+// На Б7-коммите (27a2152) тесты были под test.failing (в строгом режиме —
+// красные); пометка снималась в блоке, закрывшем находку (Б8–Б10),
+// утверждения не менялись. Сейчас все тесты обычные; строгий режим — для
+// команды приёмки: AUDIT_STRICT=1 bun test tests/audit-m41fix-repro.test.ts
 // Сети нет: каналы скана — фейки, git — локальные каталоги.
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
@@ -23,8 +25,6 @@ import { runScan, type ScanDeps } from "../src/jobs/runner";
 import { claimNext, nightlyCatalog } from "../src/jobs/scheduler";
 import { CATEGORY_WEIGHTS, type CategoryKey } from "../src/score/model";
 import { healthyFacts } from "./score-fixtures";
-
-const repro = process.env.AUDIT_STRICT ? test : test.failing;
 
 const cleanups: (() => void)[] = [];
 afterAll(() => {

@@ -42,7 +42,9 @@ const db = openDb(config);
 if (needsRescore(db)) {
   const t0 = Date.now();
   console.log("[startup] stored scores are outdated or missing: rescoring before serving");
-  rescoreAll(db, { log: (m) => console.log(`[startup] ${m}`), progressEvery: 200 });
+  // круг 2 (LOW-7): до порта — только читаемые сканы (P, L, приватный не-bad), история — фоновым тиком воркера
+  const out = rescoreAll(db, { scope: "startup", log: (m) => console.log(`[startup] ${m}`), progressEvery: 200 });
+  if (out.fatal > 0) throw new Error("startup rescore stopped on a schema error (see log above)");
   console.log(`[startup] rescore finished in ${Math.round((Date.now() - t0) / 1000)} s`);
 }
 

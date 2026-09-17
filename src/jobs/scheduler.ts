@@ -21,6 +21,7 @@ import { getPat } from "../auth/pat";
 import { makeScClient } from "../collectors/http";
 import { makeAppsecClient } from "../collectors/appsec";
 import type { Config } from "../config";
+import { rescoreHistoryBatch } from "../score/rescore";
 
 export interface ClaimedJob {
   id: number;
@@ -401,7 +402,15 @@ export function startWorkerLoop(deps: WorkerDeps, pollMs = 5000): () => void {
   const timer = setInterval(async () => {
     if (busy) return;
     const job = claimNext(deps.db, new Date(), leaseMs, { maxAttempts: deps.config.queue.maxAttempts });
-    if (!job) return;
+    if (!job) {
+      // очередь пуста — порция фонового пересчёта истории (круг 2, LOW-7)
+      try {
+        rescoreHistoryBatch(deps.db, { log: (m) => console.log(`[worker] ${m}`) });
+      } catch (e) {
+        console.error(`[worker] history rescore failed: ${String((e as Error).message).slice(0, 200)}`);
+      }
+      return;
+    }
     busy = true;
     const heartbeat = setInterval(() => {
       try {
