@@ -98,7 +98,7 @@ function summarySection(card: RepoCard): string[] {
   }
   out.push(
     `Рекомендаций: ${card.recommendations.length}` +
-      `${top ? `; наибольший измеримый прирост даёт «${top.problem}» (+${round(top.deltaScore)} Score)` : ""}.`,
+      `${top ? `; наибольший измеримый прирост даёт «${top.problem}» (${top.expectedImpact ?? `+${round(top.deltaScore)}`})` : ""}.`,
     "",
   );
   if (score.noData.length > 0) {
@@ -201,7 +201,8 @@ function recommendationsSection(card: RepoCard): string[] {
 }
 
 function impact(rec: CardRecommendation): string {
-  if (rec.deltaScore !== null) return `+${round(rec.deltaScore)} Score${rec.expectedImpact ? ` — ${rec.expectedImpact}` : ""}`;
+  // К-Ф1.2: текст прироста уже содержит итог, к которому он относится («+N.N к Score в рейтинге»)
+  if (rec.deltaScore !== null) return rec.expectedImpact ?? `+${round(rec.deltaScore)}`;
   if (rec.opensCategory) return `откроет категорию${rec.expectedImpact ? ` — ${rec.expectedImpact}` : ""}`;
   return rec.expectedImpact ?? "улучшение по уже собранным данным";
 }

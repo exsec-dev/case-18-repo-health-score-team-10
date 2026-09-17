@@ -93,7 +93,8 @@ describe("Ф1.1 (HIGH-1): из какого скана рейтинг", () => {
 
 // ---------------------------------------------------------------------------
 describe("Ф1.2 (LOW-1): реальный прирост рекомендаций", () => {
-  repro("Δ license-missing к Score в рейтинге = реальный прирост итога", () => {
+  // закрыто Б2 (К-Ф1.2): computeFromFacts на подменённых фактах
+  test("Δ license-missing к Score в рейтинге = реальный прирост итога", () => {
     const t = makeDb();
     cleanups.push(t.close);
     const noLicense = withFacts(healthyFacts(), { key: "docs.presence", value: { readme: true, license: false, contributing: true, codeowners: false } });
@@ -109,7 +110,8 @@ describe("Ф1.2 (LOW-1): реальный прирост рекомендаци�
 
 // ---------------------------------------------------------------------------
 describe("Ф1.3 (MED-1): номера рекомендаций после фильтра каналов", () => {
-  repro("аноним видит номера 1..N без пропусков (карточка и MD)", () => {
+  // закрыто Б2 (Ф1.3): перенумерация после фильтра каналов
+  test("аноним видит номера 1..N без пропусков (карточка и MD)", () => {
     const t = makeApiDb();
     cleanups.push(t.close);
     const repoId = seedRepo(t, { org: "pub", repo: "numbers" });

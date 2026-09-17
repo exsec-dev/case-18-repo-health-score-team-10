@@ -1,16 +1,28 @@
-// recommend.test.ts — Б4: движок рекомендаций (§8): presence-Δ на
-// замороженном весовом векторе (числа из model, не хардкод),
+// recommend.test.ts — Б4: движок рекомендаций (§8): presence-Δ — реальный
+// прирост итога (В4.1-fix, К-Ф1.2: разность compute на подменённых фактах),
 // активационная ветка без числа (0/0-issues, AppSec, CI-раны),
 // порядок выдачи (Δ desc → активационные по весу категории desc),
 // идемпотентность записи.
 import { afterAll, describe, expect, test } from "bun:test";
 import { recommend, writeRecommendations } from "../src/score/recommend";
-import { NOW, TestDb, healthyFacts, makeDb, seedScan, withFacts } from "./score-fixtures";
+import { compute } from "../src/score/compute";
+import { FactSpec, NOW, TestDb, healthyFacts, makeDb, seedScan, withFacts } from "./score-fixtures";
 
 const t: TestDb = makeDb();
 afterAll(() => t.close());
 
-describe("presence-правила: числовой Δ на замороженных весах", () => {
+/** Реальный прирост: итог скана с подменёнными фактами − итог исходного (оба — compute, каждый в своём репо). */
+function realGain(before: FactSpec[], after: FactSpec[], scope: "rating" | "full"): number {
+  const pick = (id: number) => {
+    const s = compute(t.db, id, { now: NOW });
+    return scope === "rating" ? s.totalRating! : s.totalFull!;
+  };
+  return Math.round((pick(seedScan(t, after)) - pick(seedScan(t, before))) * 10000) / 10000;
+}
+
+const NO_RUNS: FactSpec = { key: "cicd.runs", value: { reason: "access" }, status: "no-data" };
+
+describe("presence-правила: реальный прирост итога (К-Ф1.2)", () => {
   test("здоровое репо: presence-правил нет, только connect-appsec", () => {
     const scanId = seedScan(t, healthyFacts());
     const recs = recommend(t.db, scanId, { now: NOW });
@@ -24,52 +36,85 @@ describe("presence-правила: числовой Δ на замороженн
     expect(recs[1]!.channel).toBe("appsec");
   });
 
-  test("нет лицензии → Δ = 0.15·0.25·100 = 3.75 числом", () => {
-    const scanId = seedScan(t, withFacts(healthyFacts(), { key: "docs.presence", value: { readme: true, license: false, contributing: true, codeowners: true } }));
-    const rec = recommend(t.db, scanId, { now: NOW }).find((r) => r.ruleId === "license-missing")!;
-    expect(rec.deltaScore).toBeCloseTo(3.75, 10);
-    expect(rec.expectedImpact).toContain("+3.8 Score (по одному)");
+  test("нет лицензии → Δ к Score в рейтинге = реальный прирост (перенормировка 0.65, не номинальные 3.75)", () => {
+    const base = withFacts(healthyFacts(), { key: "docs.presence", value: { readme: true, license: false, contributing: true, codeowners: true } });
+    const fixed = withFacts(healthyFacts(), { key: "docs.presence", value: { readme: true, license: true, contributing: true, codeowners: true } });
+    const rec = recommend(t.db, seedScan(t, base), { now: NOW }).find((r) => r.ruleId === "license-missing")!;
+    const gain = realGain(base, fixed, "rating");
+    expect(rec.deltaScore).toBe(gain);
+    expect(gain).toBeCloseTo(3.75 / 0.65, 3); // 4 публичные категории с полным покрытием
+    expect(rec.expectedImpact).toBe(`+${gain.toFixed(1)} к Score в рейтинге`);
     expect(rec.factRefs).toContain("docs.presence");
   });
 
-  test("нет README → Δ = 0.15·0.45·0.37·100 ≈ 2.5 (минимальный README)", () => {
-    const scanId = seedScan(
-      t,
-      withFacts(
-        healthyFacts(),
-        { key: "docs.presence", value: { readme: false, license: true, contributing: true, codeowners: true } },
-        { key: "docs.readme", value: { present: false } },
-      ),
+  test("нет README → подмена «README есть, 0 байт, без секций»", () => {
+    const base = withFacts(
+      healthyFacts(),
+      { key: "docs.presence", value: { readme: false, license: true, contributing: true, codeowners: true } },
+      { key: "docs.readme", value: { present: false } },
     );
-    const rec = recommend(t.db, scanId, { now: NOW }).find((r) => r.ruleId === "readme-missing")!;
-    expect(rec.deltaScore!).toBeCloseTo(2.4975, 4);
+    const fixed = withFacts(
+      healthyFacts(),
+      { key: "docs.presence", value: { readme: true, license: true, contributing: true, codeowners: true } },
+      { key: "docs.readme", value: { present: true, bytes: 0, flags: {} } },
+    );
+    const rec = recommend(t.db, seedScan(t, base), { now: NOW }).find((r) => r.ruleId === "readme-missing")!;
+    expect(rec.deltaScore).toBe(realGain(base, fixed, "rating"));
+    expect(rec.deltaScore!).toBeGreaterThan(0);
   });
 
-  test("README без 2 секций из 3 → Δ за долю секций (2/3)", () => {
-    const scanId = seedScan(t, withFacts(healthyFacts(), { key: "docs.readme", value: { bytes: 8000, sections: 5, flags: { install: true, build: false, test: false } } }));
-    const rec = recommend(t.db, scanId, { now: NOW }).find((r) => r.ruleId === "readme-sections-missing")!;
-    // 0.15·0.45·0.7·0.5·(2/3)·100 = 1.575
-    expect(rec.deltaScore!).toBeCloseTo(1.575, 4);
+  test("README без 2 секций из 3 → подмена недостающих флагов", () => {
+    const base = withFacts(healthyFacts(), { key: "docs.readme", value: { bytes: 8000, sections: 5, flags: { install: true, build: false, test: false } } });
+    const fixed = withFacts(healthyFacts(), { key: "docs.readme", value: { bytes: 8000, sections: 5, flags: { install: true, build: true, test: true } } });
+    const rec = recommend(t.db, seedScan(t, base), { now: NOW }).find((r) => r.ruleId === "readme-sections-missing")!;
+    expect(rec.deltaScore).toBe(realGain(base, fixed, "rating"));
+    expect(rec.deltaScore!).toBeGreaterThan(0);
   });
 
-  test("нет CI (раны 403) → +7.5 полного Score; CI-правила помечены каналом cicd (В4.1)", () => {
-    const noCi = seedScan(t, withFacts(healthyFacts(), { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } }, { key: "cicd.runs", value: { reason: "access" }, status: "no-data" }));
+  test("нет CI / ci.yaml без шагов → Δ к полному Score; CI-правила помечены каналом cicd", () => {
+    const noCiFacts = withFacts(healthyFacts(), { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } }, NO_RUNS);
+    const noCi = seedScan(t, noCiFacts);
     const rec1 = recommend(t.db, noCi, { now: NOW }).find((r) => r.ruleId === "ci-missing")!;
-    expect(rec1.deltaScore).toBeCloseTo(7.5, 10);
-    expect(rec1.expectedImpact).toContain("50/100");
-    expect(rec1.expectedImpact).toContain("полного Score");
+    expect(rec1.deltaScore).toBe(realGain(noCiFacts, withFacts(noCiFacts, { key: "cicd.configs", value: { has_ci_yaml: true, has_steps: true } }), "full"));
+    expect(rec1.deltaScore!).toBeGreaterThan(0);
+    expect(rec1.expectedImpact).toBe(`+${rec1.deltaScore!.toFixed(1)} к полному Score`);
     // CI-правила существуют в одной выдаче, но только с каналом cicd —
     // карточка скрывает их от зрителя без доступа к CI (К2)
     const ciRules = recommend(t.db, noCi, { now: NOW }).filter((r) => ["ci-missing", "ci-no-steps", "grant-ci-runs"].includes(r.ruleId));
     expect(ciRules.length).toBeGreaterThan(0);
     expect(ciRules.every((r) => r.channel === "cicd")).toBe(true);
 
-    const noSteps = seedScan(t, withFacts(healthyFacts(), { key: "cicd.configs", value: { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: false } }, { key: "cicd.runs", value: { reason: "access" }, status: "no-data" }));
+    const noStepsFacts = withFacts(healthyFacts(), { key: "cicd.configs", value: { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: false } }, NO_RUNS);
+    const noSteps = seedScan(t, noStepsFacts);
     const rec2 = recommend(t.db, noSteps, { now: NOW }).find((r) => r.ruleId === "ci-no-steps")!;
-    expect(rec2.deltaScore).toBeCloseTo(7.5, 10);
+    const fixedSteps = withFacts(noStepsFacts, { key: "cicd.configs", value: { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: true } });
+    expect(rec2.deltaScore).toBe(realGain(noStepsFacts, fixedSteps, "full"));
     // активационная «дайте доступ к прогонам» не путается с presence
     const ids = recommend(t.db, noSteps, { now: NOW }).map((r) => r.ruleId);
     expect(ids).not.toContain("grant-ci-runs"); // шагов нет — активировать нечего
+  });
+
+  test("Δ = 0 с причиной: кап 49 (только полный), нет кода, итог NULL", () => {
+    const capped = withFacts(
+      healthyFacts(),
+      { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } },
+      { key: "appsec.findings", value: { severity_counts: { critical: 0, high: 0, medium: 0, low: 0 }, resolved_share: 1, secrets_critical: true } },
+    );
+    const ci = recommend(t.db, seedScan(t, capped), { now: NOW }).find((r) => r.ruleId === "ci-missing")!;
+    expect({ delta: ci.deltaScore, impact: ci.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к полному Score — упирается в кап 49" });
+
+    const empty = withFacts(
+      healthyFacts(),
+      { key: "tree.stats", value: { top_level: [], file_count: 0, bytes: 0, loc: 0 } },
+      { key: "docs.presence", value: { readme: true, license: false, contributing: true, codeowners: true } },
+    );
+    const lic = recommend(t.db, seedScan(t, empty), { now: NOW }).find((r) => r.ruleId === "license-missing")!;
+    expect({ delta: lic.deltaScore, impact: lic.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к Score в рейтинге — в репозитории нет кода" });
+
+    // только git-документация: покрытие рейтинга < 0.4 → итог NULL
+    const sparse: FactSpec[] = [{ key: "docs.presence", value: { readme: true, license: false, contributing: true, codeowners: true } }];
+    const nul = recommend(t.db, seedScan(t, sparse), { now: NOW }).find((r) => r.ruleId === "license-missing")!;
+    expect({ delta: nul.deltaScore, impact: nul.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к Score в рейтинге — итог появится при большем покрытии" });
   });
 });
 
@@ -157,20 +202,17 @@ describe("порядок и запись", () => {
         { key: "issues.stats", value: { open: 0, closed: 0, median_close_days: null, stale_90d: 0, fetched_count: 0 } },
       ),
     );
-    const ids = recommend(t.db, scanId, { now: NOW }).map((r) => r.ruleId);
-    expect(ids.slice(0, 6)).toEqual([
-      "ci-missing", // 7.5
-      "license-missing", // 3.75
-      "readme-missing", // 2.4975
-      "codeowners-missing", // 2.25, tie → alphabetical
-      "contributing-missing", // 2.25
-      "connect-appsec", // активационные: security 20
-    ]);
+    const all = recommend(t.db, scanId, { now: NOW });
+    const ids = all.map((r) => r.ruleId);
+    const presence = all.filter((r) => r.kind === "presence");
+    // К-Ф1.2: presence — по реальному Δ убыв., затем rule_id
+    const expected = [...presence].sort((a, b) => b.deltaScore! - a.deltaScore! || a.ruleId.localeCompare(b.ruleId)).map((r) => r.ruleId);
+    expect(presence.map((r) => r.ruleId)).toEqual(expected);
+    expect(new Set(expected)).toEqual(new Set(["ci-missing", "license-missing", "readme-missing", "codeowners-missing", "contributing-missing"]));
+    // равные Δ (codeowners и contributing — один подвес) идут по rule_id
+    expect(ids.indexOf("codeowners-missing")).toBe(ids.indexOf("contributing-missing") - 1);
+    expect(ids[5]).toBe("connect-appsec"); // активационные: security 20
     expect(ids[6]).toBe("start-tracker"); // issues 15
-    // зритель без доступа к каналам (фильтр карточки по channel): порядок сохранён
-    const pubIds = recommend(t.db, scanId, { now: NOW }).filter((r) => r.channel === null).map((r) => r.ruleId);
-    expect(pubIds.slice(0, 4)).toEqual(["license-missing", "readme-missing", "codeowners-missing", "contributing-missing"]);
-    expect(pubIds[4]).toBe("start-tracker");
     // приоритеты последовательны
     const recs = recommend(t.db, scanId, { now: NOW });
     expect(recs.map((r) => r.priority)).toEqual(recs.map((_, i) => i + 1));

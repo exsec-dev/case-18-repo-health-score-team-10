@@ -675,10 +675,12 @@ export function getRepoCard(
     }
   }
 
-  const recommendations: CardRecommendation[] = recRows.map((rec) => ({
+  // Ф1.3: номера 1..N после фильтра каналов, в исходном порядке — по пропускам
+  // в нумерации не восстановить, что правила закрытых каналов существуют
+  const recommendations: CardRecommendation[] = recRows.map((rec, index) => ({
     ruleId: rec.rule_id,
     kind: ruleKind(rec),
-    priority: rec.priority,
+    priority: index + 1,
     problem: rec.problem,
     action: rec.action,
     factRefs: rec.fact_ref

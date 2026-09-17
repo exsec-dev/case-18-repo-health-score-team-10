@@ -277,9 +277,28 @@ export function compute(db: Database, scanId: number, opts: { now?: Date } = {})
   const now = opts.now ?? new Date();
   const scan = db.query("SELECT repo_id FROM scans WHERE id = ?").get(scanId) as { repo_id: number } | null;
   if (!scan) throw new Error(`scan ${scanId} not found`);
-  const repoId = scan.repo_id;
+  const eff = effectiveFacts(db, scanId, scan.repo_id);
+  return computeFromFacts(eff.ok, { scanId, repoId: scan.repo_id, stale: eff.stale, staleCats: eff.staleCats }, now);
+}
 
-  const { ok, stale, staleCats } = effectiveFacts(db, scanId, repoId);
+/** Происхождение фактов для computeFromFacts: идентификаторы скана и маркеры замещения историей. */
+export interface ComputeInput {
+  scanId: number;
+  repoId: number;
+  /** kinds, взятые из истории (effectiveFacts) */
+  stale?: string[];
+  staleCats?: Set<string>;
+}
+
+/**
+ * Чистый расчёт Score из эффективных фактов (В4.1-fix, К-Ф1.2): без БД.
+ * compute = effectiveFacts + computeFromFacts; recommend считает реальный
+ * прирост правила вторым вызовом на подменённых фактах.
+ */
+export function computeFromFacts(ok: Map<string, unknown>, input: ComputeInput, now: Date): Scores {
+  const { scanId, repoId } = input;
+  const stale = input.stale ?? [];
+  const staleCats = input.staleCats ?? new Set<string>();
 
   const derived = deriveMetrics(ok, now);
   const categories = {

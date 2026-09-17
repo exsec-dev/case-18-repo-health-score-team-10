@@ -1,30 +1,21 @@
 // recommend.ts — детерминированный движок рекомендаций (§8, ТЗ 3.3):
 // правило = (условие на фактах → шаблон), каждая фраза привязана к
-// fact_refs. Числовой ΔScore — ТОЛЬКО у presence-правил, считается на
-// замороженном номинальном весовом векторе (без перенормировки —
-// обещание не съедается перестройкой весов; показывается «по одному»,
-// капы неаддитивны). Активационные — отдельная ветка без числа:
+// fact_refs. Числовой ΔScore — ТОЛЬКО у presence-правил. В4.1-fix (К-Ф1.2):
+// реальный прирост итога — разность computeFromFacts на подменённых фактах
+// и на фактах скана, с фактической перенормировкой и капом 49 (решение
+// Екатерины 17.09 «Прирост в рекомендациях — реальная цифра»); прежний
+// номинальный вектор 100 отменён. Активационные — отдельная ветка без числа:
 // приоритет «открывает категорию», Δ от NULL — текстом coverage X→Y.
 // Порядок: числовые Δ desc → активационные по весу категории desc →
 // скор-правила. LLM (В5) ничего не решает — только формулировки.
 // В4.1 (К1): одна выдача на скан; правило несёт channel (cicd | appsec |
 // null = публичное) — карточка отфильтровывает правила закрытых зрителю
 // каналов. Δ правил с channel относится к полному Score, остальных — к
-// Score в рейтинге (числа — номинальный вектор, как и раньше).
+// Score в рейтинге.
 import type { Database } from "bun:sqlite";
 import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
-import {
-  CATEGORY_WEIGHTS,
-  CategoryKey,
-  CI_CONFIG_ONLY_FACTOR,
-  PASS_RATE,
-  README_BYTES,
-  README_QUALITY_SPLIT,
-  README_SPLIT,
-  SUBWEIGHTS,
-  anchorScore,
-} from "./model";
-import { compute, effectiveFacts, Scores } from "./compute";
+import { CATEGORY_WEIGHTS, CategoryKey, SECRETS_CRITICAL_TOTAL_CAP } from "./model";
+import { compute, computeFromFacts, effectiveFacts, Scores } from "./compute";
 
 /** Канал правила: данные, видимые только зрителю с доступом (К2). */
 export type RecommendationChannel = "cicd" | "appsec";
@@ -50,47 +41,80 @@ export interface RecommendOptions {
 }
 
 const round1 = (x: number): number => Math.round(x * 10) / 10;
+const round4 = (x: number): number => Math.round(x * 10000) / 10000;
 
 export function recommend(db: Database, scanId: number, opts: RecommendOptions = {}): Recommendation[] {
   const scores = opts.scores ?? compute(db, scanId, { now: opts.now });
   // те же факты, из которых посчитан Score (включая замещение историей):
   // рекомендация не противоречит числу на карточке
-  const ok = effectiveFacts(db, scanId, scores.repoId).ok;
+  const eff = effectiveFacts(db, scanId, scores.repoId);
+  const ok = eff.ok;
 
   const presence: Recommendation[] = [];
   const activation: Recommendation[] = [];
   const scoreRules: Recommendation[] = [];
 
-  // ---------- presence-правила (числовой Δ на замороженном векторе) ----------
-  const Wdoc = CATEGORY_WEIGHTS.documentation / 100;
-  const doc = SUBWEIGHTS.documentation;
+  // ---------- presence-правила (реальный Δ итога, К-Ф1.2) ----------
+  // Δ = итог на подменённых фактах − итог на фактах скана: правила без
+  // канала — к Score в рейтинге (4 категории, фактическая перенормировка),
+  // канальные — к полному Score (кап 49 учитывается). Один вызов
+  // computeFromFacts на правило; подмены — таблица плана К-Ф1.2.
+  const now = opts.now ?? new Date(scores.computedAt);
+  const input = { scanId, repoId: scores.repoId, stale: eff.stale, staleCats: eff.staleCats };
+  const base = computeFromFacts(ok, input, now);
+  const secretsCritical = (ok.get("appsec.findings") as { secrets_critical?: unknown } | undefined)?.secrets_critical === true;
+  const realDelta = (channel: RecommendationChannel | null, patch: (facts: Map<string, unknown>) => void): { delta: number; reason: string | null } => {
+    const facts = new Map(ok);
+    patch(facts);
+    const after = computeFromFacts(facts, input, now);
+    const pick = (s: Scores) => (channel === null ? s.totalRating : s.totalFull);
+    if (base.codeEmpty) return { delta: 0, reason: "в репозитории нет кода" };
+    const b = pick(base);
+    const a = pick(after);
+    if (b === null || a === null) return { delta: 0, reason: "итог появится при большем покрытии" };
+    const delta = round4(a - b);
+    if (delta === 0 && channel !== null && secretsCritical && b >= SECRETS_CRITICAL_TOTAL_CAP) return { delta: 0, reason: "упирается в кап 49" };
+    return { delta, reason: null };
+  };
+  const presenceRule = (
+    ruleId: string,
+    problem: string,
+    action: string,
+    factRefs: string[],
+    patch: (facts: Map<string, unknown>) => void,
+    channel: RecommendationChannel | null = null,
+  ) => presence.push(mk(ruleId, problem, action, factRefs, realDelta(channel, patch), channel));
+  const withPresence = (field: keyof DocsPresenceValue) => (facts: Map<string, unknown>) => {
+    facts.set("docs.presence", { ...(facts.get("docs.presence") as DocsPresenceValue), [field]: true });
+  };
+
   const presence_ = ok.get("docs.presence") as DocsPresenceValue | undefined;
   if (presence_) {
     if (presence_.license !== true) {
-      const d = Wdoc * doc.license * 100;
-      presence.push(mk("license-missing", "В репозитории нет файла лицензии", "Добавьте LICENSE (MIT/Apache-2.0) в корень — лицензия условие переиспользования", ["docs.presence"], d));
+      presenceRule("license-missing", "В репозитории нет файла лицензии", "Добавьте LICENSE (MIT/Apache-2.0) в корень — лицензия условие переиспользования", ["docs.presence"], withPresence("license"));
     }
     if (presence_.contributing !== true) {
-      const d = Wdoc * doc.contributing * 100;
-      presence.push(mk("contributing-missing", "Нет CONTRIBUTING — как вносить правки не описано", "Добавьте CONTRIBUTING.md с процессом контрибуции", ["docs.presence"], d));
+      presenceRule("contributing-missing", "Нет CONTRIBUTING — как вносить правки не описано", "Добавьте CONTRIBUTING.md с процессом контрибуции", ["docs.presence"], withPresence("contributing"));
     }
     if (presence_.codeowners !== true) {
-      const d = Wdoc * doc.codeowners * 100;
-      presence.push(mk("codeowners-missing", "Нет CODEOWNERS — код без ответственных", "Добавьте CODEOWNERS с владельцами каталогов", ["docs.presence"], d));
+      presenceRule("codeowners-missing", "Нет CODEOWNERS — код без ответственных", "Добавьте CODEOWNERS с владельцами каталогов", ["docs.presence"], withPresence("codeowners"));
     }
     const readme = ok.get("docs.readme") as DocsReadmeValue | undefined;
     if (presence_.readme !== true) {
-      // обещание: минимальный README (присутствие + bytes-скор <500Б, без секций)
-      const gain = README_SPLIT.presence + README_SPLIT.quality * (README_QUALITY_SPLIT.bytes * anchorScore(README_BYTES, 0));
-      const d = Wdoc * doc.readme * gain * 100;
-      presence.push(mk("readme-missing", "В репозитории нет README", "Добавьте README с описанием проекта и базовыми инструкциями", ["docs.presence", "docs.readme"], d));
+      // обещание: README появился (подмена К-Ф1.2 — присутствие без объёма и секций)
+      presenceRule("readme-missing", "В репозитории нет README", "Добавьте README с описанием проекта и базовыми инструкциями", ["docs.presence", "docs.readme"], (facts) => {
+        withPresence("readme")(facts);
+        facts.set("docs.readme", { present: true, bytes: 0, flags: {} });
+      });
     } else if (readme && (readme as { present?: boolean }).present !== false) {
       const flags = readme.flags ?? {};
       const missing = ["install", "build", "test"].filter((k) => flags[k as keyof typeof flags] !== true);
       if (missing.length > 0) {
-        const d = Wdoc * doc.readme * README_SPLIT.quality * README_QUALITY_SPLIT.sections * (missing.length / 3) * 100;
         const names = missing.map((k) => ({ install: "запуска/установки", build: "сборки", test: "тестов" })[k]).join("/");
-        presence.push(mk("readme-sections-missing", `README без инструкции ${names}`, `Добавьте секцию ${names} в README (заголовки Install/Build/Test или Установка/Сборка/Тесты)`, ["docs.readme"], d));
+        presenceRule("readme-sections-missing", `README без инструкции ${names}`, `Добавьте секцию ${names} в README (заголовки Install/Build/Test или Установка/Сборка/Тесты)`, ["docs.readme"], (facts) => {
+          const current = facts.get("docs.readme") as { flags?: Record<string, unknown> };
+          facts.set("docs.readme", { ...current, flags: { ...(current.flags ?? {}), ...Object.fromEntries(missing.map((k) => [k, true])) } });
+        });
       }
     }
   }
@@ -98,31 +122,18 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
   // CI-правила — канал cicd: Δ по CI-весу исполняется только в полном
   // Score, поэтому правило видит лишь зритель с доступом к CI (К2)
   if (cicdCfg && !(cicdCfg.has_ci_yaml === true && cicdCfg.has_steps === true)) {
-    const runs = ok.get("cicd.runs") as { runs_count?: unknown; success_rate?: unknown; duration_p50?: unknown } | undefined;
-    let deltaCat: number;
-    let impact: string;
-    if (runs && (typeof runs.runs_count === "number" ? runs.runs_count : 0) > 0) {
-      const p = typeof runs.success_rate === "number" ? anchorScore(PASS_RATE, runs.success_rate) : 0;
-      const d = typeof runs.duration_p50 === "number" ? 1 : 0;
-      deltaCat = SUBWEIGHTS.cicd.config + SUBWEIGHTS.cicd.pass_rate * p + SUBWEIGHTS.cicd.duration * d;
-      impact = "прогоны уже видны — конфиг докроет категорию";
-    } else {
-      deltaCat = CI_CONFIG_ONLY_FACTOR; // 0 → потолок 50 (§5.1)
-      impact = "конфиг со шагами = 50/100 даже без видимых прогонов";
-    }
-    const d = (CATEGORY_WEIGHTS.cicd / 100) * deltaCat * 100;
-    presence.push(
-      mk(
-        cicdCfg.has_ci_yaml === true ? "ci-no-steps" : "ci-missing",
-        cicdCfg.has_ci_yaml === true ? "ci.yaml есть, но без шагов — CI фактически не заявлен" : "CI не заявлен: нет .sourcecraft/ci.yaml",
-        cicdCfg.has_ci_yaml === true
-          ? "Добавьте в ci.yaml хотя бы один task с непустой командой (build/test)"
-          : "Добавьте .sourcecraft/ci.yaml с task и командой (образец — ci.yaml этого проекта)",
-        ["cicd.configs"],
-        d,
-        impact,
-        "cicd",
-      ),
+    const hasYaml = cicdCfg.has_ci_yaml === true;
+    presenceRule(
+      hasYaml ? "ci-no-steps" : "ci-missing",
+      hasYaml ? "ci.yaml есть, но без шагов — CI фактически не заявлен" : "CI не заявлен: нет .sourcecraft/ci.yaml",
+      hasYaml
+        ? "Добавьте в ci.yaml хотя бы один task с непустой командой (build/test)"
+        : "Добавьте .sourcecraft/ci.yaml с task и командой (образец — ci.yaml этого проекта)",
+      ["cicd.configs"],
+      (facts) => {
+        facts.set("cicd.configs", hasYaml ? { ...(facts.get("cicd.configs") as object), has_steps: true } : { has_ci_yaml: true, has_steps: true });
+      },
+      "cicd",
     );
   }
 
@@ -204,7 +215,7 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
     }
   }
 
-  // ---------- порядок (§8): числовые Δ desc → активационные по весу desc ----------
+  // ---------- порядок (§8): реальный Δ desc (затем rule_id) → активационные по весу desc ----------
   presence.sort((a, b) => (b.deltaScore ?? 0) - (a.deltaScore ?? 0) || a.ruleId.localeCompare(b.ruleId));
   activation.sort((a, b) => CATEGORY_WEIGHTS[b.opensCategory ?? "issues"] - CATEGORY_WEIGHTS[a.opensCategory ?? "issues"] || a.ruleId.localeCompare(b.ruleId));
   const all = [...presence, ...activation, ...scoreRules];
@@ -217,12 +228,11 @@ function mk(
   problem: string,
   action: string,
   factRefs: string[],
-  deltaScore: number,
-  note?: string,
+  real: { delta: number; reason: string | null },
   channel: RecommendationChannel | null = null,
 ): Recommendation {
-  // Δ канального правила — к полному Score, публичного — к Score в рейтинге
-  const scope = channel === null ? "Score" : "полного Score";
+  // Δ канального правила — к полному Score, публичного — к Score в рейтинге (К-Ф1.2)
+  const scope = channel === null ? "к Score в рейтинге" : "к полному Score";
   return {
     ruleId,
     kind: "presence",
@@ -230,8 +240,8 @@ function mk(
     problem,
     action,
     factRefs,
-    expectedImpact: `+${round1(deltaScore)} ${scope} (по одному)${note ? ` — ${note}` : ""}`,
-    deltaScore: Math.round(deltaScore * 10000) / 10000,
+    expectedImpact: `+${real.delta.toFixed(1)} ${scope}${real.reason ? ` — ${real.reason}` : ""}`,
+    deltaScore: real.delta,
     opensCategory: null,
     channel,
   };
