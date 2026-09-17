@@ -314,9 +314,10 @@ export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<Sca
       scClient: deps.serverClient(),
       cloneLimits: limits,
       userScClient: pat
-        ? makeScClient({ token: pat, minIntervalMs: deps.config.scan.rest.minIntervalMs, maxRequests: deps.config.scan.rest.budget })
+        ? makeScClient({ token: pat, baseUrl: deps.config.api.restBase, minIntervalMs: deps.config.scan.rest.minIntervalMs, maxRequests: deps.config.scan.rest.budget })
         : undefined,
-      appsecClient: (p: string) => makeAppsecClient({ token: p, minIntervalMs: deps.config.scan.rest.appsecMinIntervalMs }),
+      appsecClient: (p: string) => makeAppsecClient({ token: p, baseUrl: deps.config.api.appsecBase, minIntervalMs: deps.config.scan.rest.appsecMinIntervalMs }),
+      gitBase: deps.config.api.gitBase,
       appsecMinIntervalMs: deps.config.scan.rest.appsecMinIntervalMs,
     },
     job.slug,

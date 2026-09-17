@@ -45,6 +45,8 @@ export interface ScanDeps {
   appsecMinIntervalMs?: number;
   /** git-URL репо (дефолт: анонимный https git-хост, контракт плана) */
   gitUrl?: (org: string, repo: string) => string;
+  /** git-хост (Config.api.gitBase; шов тестовых серверов, Ф1.13) */
+  gitBase?: string;
   /** швы для тестов: подмена каналов целиком */
   collectGit?: (org: string, repo: string, limits: ScanCloneLimits) => Promise<GitChannelOutcome>;
   collectRest?: (slug: string) => Promise<RestCollectResult>;
@@ -75,7 +77,13 @@ export interface ScanResult {
   elapsedMs: number;
 }
 
-const DEFAULT_GIT_URL = (org: string, repo: string) => `https://git@git.sourcecraft.dev/${org}/${repo}.git`;
+const DEFAULT_GIT_BASE = "https://git.sourcecraft.dev";
+
+const anonGitUrl = (base: string, org: string, repo: string) => {
+  const u = new URL(`${base.replace(/\/+$/, "")}/${org}/${repo}.git`);
+  u.username = "git";
+  return u.toString();
+};
 
 /**
  * Git-URL скана с PAT (дока PAT: `git clone https://anyname:<PAT>@…`):
@@ -83,7 +91,12 @@ const DEFAULT_GIT_URL = (org: string, repo: string) => `https://git@git.sourcecr
  * failed (найдено живой приёмкой В4: наш репо приватный). Креды в URL
  * существуют только внутри процесса; stderr git скраббится (git.ts).
  */
-const patGitUrl = (pat: string, org: string, repo: string) => `https://repo-health:${encodeURIComponent(pat)}@git.sourcecraft.dev/${org}/${repo}.git`;
+const patGitUrl = (base: string, pat: string, org: string, repo: string) => {
+  const u = new URL(`${base.replace(/\/+$/, "")}/${org}/${repo}.git`);
+  u.username = "repo-health";
+  u.password = encodeURIComponent(pat);
+  return u.toString();
+};
 
 /** ScanConfig → лимиты шва cloneLimits (clone + degrade одним объектом). */
 export function scanCloneLimitsOf(scan: ScanConfig): ScanCloneLimits {
@@ -173,7 +186,10 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
   const limits = deps.cloneLimits ?? scanCloneLimitsOf(DEFAULT_SCAN);
   const extract = deps.extract ?? DEFAULT_SCAN.extract;
   // скан с PAT → клон с кредами (депс-шов остаётся главнее для тестов)
-  const gitUrlOf = deps.gitUrl ?? (userToken ? (org: string, repo: string) => patGitUrl(userToken, org, repo) : DEFAULT_GIT_URL);
+  const gitBase = deps.gitBase ?? DEFAULT_GIT_BASE;
+  const gitUrlOf =
+    deps.gitUrl ??
+    (userToken ? (org: string, repo: string) => patGitUrl(gitBase, userToken, org, repo) : (org: string, repo: string) => anonGitUrl(gitBase, org, repo));
   const repoId = upsertRepo(deps.db, org, repo);
   const scan = deps.db
     .query("INSERT INTO scans (repo_id, started_at, status, trigger, user_id) VALUES (?, ?, 'running', ?, ?)")

@@ -85,8 +85,27 @@ export interface AccessConfig {
   cacheTtlMs: number;
 }
 
+/** Адреса внешних API (В4.1-fix, Ф1.13): тестовый шов — серверы в тестах
+ *  указывают их на локальный мок; дефолты — боевые адреса. */
+export interface ApiConfig {
+  /** SourceCraft REST (env SOURCECRAFT_API_BASE) */
+  restBase: string;
+  /** AppSec API (env APPSEC_API_BASE) */
+  appsecBase: string;
+  /** git-хост клонов (env SOURCECRAFT_GIT_BASE) — расширение шва: юзерская
+   *  заявка в тестовом сервере иначе клонировала бы с живого хоста */
+  gitBase: string;
+}
+
+export const DEFAULT_API: ApiConfig = {
+  restBase: "https://api.sourcecraft.tech",
+  appsecBase: "https://appsec.sourcecraft.tech",
+  gitBase: "https://git.sourcecraft.dev",
+};
+
 export interface Config {
   port: number;
+  api: ApiConfig;
   dataDir: string;
   sourcecraftToken: string | null;
   auth: AuthConfig;
@@ -176,6 +195,11 @@ export function loadConfig(): Config {
   return {
     port: Number(env.PORT) > 0 ? Number(env.PORT) : 8418,
     dataDir: env.DATA_DIR ?? "data",
+    api: {
+      restBase: env.SOURCECRAFT_API_BASE || DEFAULT_API.restBase,
+      appsecBase: env.APPSEC_API_BASE || DEFAULT_API.appsecBase,
+      gitBase: env.SOURCECRAFT_GIT_BASE || DEFAULT_API.gitBase,
+    },
     sourcecraftToken: env.SOURCECRAFT_TOKEN ?? null,
     auth: {
       yaClientId: env.YA_CLIENT_ID ?? null,

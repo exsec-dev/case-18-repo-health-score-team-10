@@ -1,7 +1,8 @@
 // routes.test.ts — В4.1: HTTP-контракт роутов настоящего сервера (сервер во
 // временном каталоге, как C1 в audit-m4-repro). Сети нет: серверный токен
 // пустой, планировщик отложен на сутки, зритель без PAT — ноль живых
-// запросов. APP_SECRET инъектируется в env процесса (не из .env).
+// запросов. APP_SECRET инъектируется в env процесса (не из .env). В4.1-fix
+// (Ф1.13): адреса API — локальный мок со счётчиком (server-harness.ts).
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -10,13 +11,13 @@ import { loadConfig } from "../src/config";
 import { openDb } from "../src/db";
 import { createSession, SESSION_COOKIE, upsertUser } from "../src/auth/session";
 import { cardFacts, seedRecommendation, seedRepo, seedScan, seedScore, type ApiTestDb } from "./api-fixtures";
+import { spawnServer, startMockApi, type SpawnedServer } from "./server-harness";
 
-const ROOT = join(import.meta.dir, "..");
 const SECRET = "routes-test-secret";
 const dir = mkdtempSync(join(tmpdir(), "rh-routes-"));
-const port = 42000 + Math.floor(Math.random() * 8000);
-const base = `http://127.0.0.1:${port}`;
-let server: ReturnType<typeof Bun.spawn> | null = null;
+const mock = startMockApi();
+let base = "";
+let server: SpawnedServer | null = null;
 let strangerCookie = "";
 
 beforeAll(async () => {
@@ -39,34 +40,13 @@ beforeAll(async () => {
   strangerCookie = createSession(db, SECRET, stranger);
   db.close();
 
-  server = Bun.spawn([process.execPath, "run", join(ROOT, "src/server.ts")], {
-    cwd: ROOT,
-    env: {
-      ...process.env,
-      PORT: String(port),
-      DATA_DIR: dir,
-      APP_SECRET: SECRET,
-      SOURCECRAFT_TOKEN: "",
-      YA_CLIENT_ID: "",
-      YA_CLIENT_SECRET: "",
-      SCHEDULER_START_DELAY_MS: String(24 * 3600_000),
-    },
-    stdout: "ignore",
-    stderr: "ignore",
-  });
-  for (let i = 0; i < 150; i++) {
-    try {
-      if ((await fetch(`${base}/api/health`)).ok) break;
-    } catch {}
-    await Bun.sleep(100);
-  }
+  server = await spawnServer({ dataDir: dir, mock, appSecret: SECRET });
+  base = server.base;
 }, 30_000);
 
 afterAll(async () => {
-  if (server) {
-    server.kill();
-    await server.exited;
-  }
+  if (server) await server.stop();
+  mock.stop();
   rmSync(dir, { recursive: true, force: true });
 });
 

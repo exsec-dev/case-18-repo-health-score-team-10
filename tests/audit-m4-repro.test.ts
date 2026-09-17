@@ -21,6 +21,7 @@ import { runScan, scanCloneLimitsOf, type ScanDeps, type ScanOptions } from "../
 import { claimNext, enqueueScan, processJob, startScheduler } from "../src/jobs/scheduler";
 import { MODEL_VERSION } from "../src/score/model";
 import { seedScan, seedScore, type ApiTestDb } from "./api-fixtures";
+import { spawnServer, startMockApi } from "./server-harness";
 
 const ROOT = join(import.meta.dir, "..");
 const cleanups: (() => void)[] = [];
@@ -61,30 +62,11 @@ describe("C1: own-результаты не привязаны к пользов
       const strangerCookie = createSession(t.db, secret, stranger);
       t.close();
 
-      const port = 41000 + Math.floor(Math.random() * 9000);
-      const server = Bun.spawn([process.execPath, "run", join(ROOT, "src/server.ts")], {
-        cwd: ROOT,
-        env: {
-          ...process.env,
-          PORT: String(port),
-          DATA_DIR: dir,
-          APP_SECRET: secret,
-          SOURCECRAFT_TOKEN: "", // без серверного токена: ни каталога, ни REST
-          YA_CLIENT_ID: "",
-          YA_CLIENT_SECRET: "",
-          SCHEDULER_START_DELAY_MS: String(24 * 3600_000),
-        },
-        stdout: "ignore",
-        stderr: "ignore",
-      });
+      // В4.1-fix (Ф1.13): сервер без серверного токена, адреса API — локальный мок
+      const mock = startMockApi();
+      const server = await spawnServer({ dataDir: dir, mock, appSecret: secret });
       try {
-        const base = `http://127.0.0.1:${port}`;
-        for (let i = 0; i < 100; i++) {
-          try {
-            if ((await fetch(`${base}/api/me`)).ok) break;
-          } catch {}
-          await Bun.sleep(100);
-        }
+        const base = server.base;
         const res = await fetch(`${base}/api/me/repos/acme/secret-repo`, {
           headers: { cookie: `${SESSION_COOKIE}=${strangerCookie}` },
         });
@@ -97,9 +79,11 @@ describe("C1: own-результаты не привязаны к пользов
         // правильно: отказ (403/404) и ни байта данных AppSec владельца
         expect({ ok: res.ok, leaksAppsec: body.includes("severity_counts") }).toEqual({ ok: false, leaksAppsec: false });
         expect({ ok: unified.ok, leaksAppsec: unifiedBody.includes("severity_counts") }).toEqual({ ok: false, leaksAppsec: false });
+        // зритель без PAT: ни одного внешнего запроса
+        expect(mock.requests.length).toBe(0);
       } finally {
-        server.kill();
-        await server.exited;
+        await server.stop();
+        mock.stop();
       }
     },
     30_000,
