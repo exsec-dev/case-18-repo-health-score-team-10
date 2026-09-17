@@ -57,6 +57,13 @@ export function recordRefusedUserJob(db: Database, userId: number, now = new Dat
   return Number(r.lastInsertRowid);
 }
 
+/** Активных (queued/running) юзерских заявок юзера — предел Config.queue.userActiveMax (Ф1.7). */
+export function countActiveUserJobs(db: Database, userId: number): number {
+  return (
+    db.query("SELECT COUNT(*) AS c FROM jobs WHERE user_id = ? AND status IN ('queued', 'running')").get(userId) as { c: number }
+  ).c;
+}
+
 /** Новых юзерских заявок за скользящий час, включая отказанные предпроверки (дубли строк не создают — не считаются). */
 export function countRecentUserJobs(db: Database, userId: number, now = new Date()): number {
   const since = new Date(now.getTime() - 3600_000).toISOString();
@@ -99,6 +106,10 @@ export interface ClaimOptions {
  * К4: attempts +1 при claim; исчерпавшие попытки → failed. Чередование:
  * если последняя заявленная (по claimed_at) была юзерской, а в очереди
  * есть периодическая — берётся периодическая; иначе юзерские вперёд.
+ * В4.1-fix (Ф1.7): внутри юзерской половины — круговой порядок между
+ * юзерами: сперва юзеры без единой заявленной job, затем по давности их
+ * последней заявки (MAX claimed_at ASC), затем id. Ф1.12: job без строки
+ * repos → failed (попытки не сжигаются по истечении лиза), берётся следующая.
  */
 export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000, opts: ClaimOptions = {}): ClaimedJob | null {
   const maxAttempts = opts.maxAttempts ?? 3;
@@ -112,33 +123,40 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
     .query("SELECT trigger_kind FROM jobs WHERE claimed_at IS NOT NULL ORDER BY claimed_at DESC, id DESC LIMIT 1")
     .get() as { trigger_kind: string } | null;
   const first = last?.trigger_kind === "user" ? "periodic" : "user";
-  const claimed = db
-    .query(
+  const claimStmt = db.query(
       `UPDATE jobs SET status = 'running', claimed_at = ?, lease_until = ?, attempts = attempts + 1
        WHERE id = (
          SELECT id FROM jobs
          WHERE (lease_until IS NULL OR lease_until < ?)
            AND status IN ('queued', 'running')
            AND attempts < ?
-         ORDER BY CASE trigger_kind WHEN ? THEN 0 ELSE 1 END, id
+         ORDER BY CASE trigger_kind WHEN ? THEN 0 ELSE 1 END,
+                  (SELECT MAX(j2.claimed_at) FROM jobs j2 WHERE j2.user_id = jobs.user_id) IS NOT NULL,
+                  (SELECT MAX(j2.claimed_at) FROM jobs j2 WHERE j2.user_id = jobs.user_id) ASC,
+                  id
          LIMIT 1
        )
        RETURNING id, repo_id, user_id, trigger_kind, claimed_at, attempts`,
-    )
-    .get(nowIso, leaseIso, nowIso, maxAttempts, first) as {
-    id: number;
-    repo_id: number;
-    user_id: number | null;
-    trigger_kind: string;
-    claimed_at: string;
-    attempts: number;
-  } | null;
-  if (!claimed) return null;
-  const repo = db.query("SELECT org_slug, repo_slug FROM repos WHERE id = ?").get(claimed.repo_id) as
-    | { org_slug: string; repo_slug: string }
-    | null;
-  if (!repo) return null;
-  return {
+  );
+  // предохранитель цикла: каждая итерация переводит одну job в running или failed
+  for (let guard = 0; guard < 1000; guard++) {
+    const claimed = claimStmt.get(nowIso, leaseIso, nowIso, maxAttempts, first) as {
+      id: number;
+      repo_id: number;
+      user_id: number | null;
+      trigger_kind: string;
+      claimed_at: string;
+      attempts: number;
+    } | null;
+    if (!claimed) return null;
+    const repo = db.query("SELECT org_slug, repo_slug FROM repos WHERE id = ?").get(claimed.repo_id) as
+      | { org_slug: string; repo_slug: string }
+      | null;
+    if (!repo) {
+      db.query("UPDATE jobs SET status = 'failed', lease_until = NULL WHERE id = ?").run(claimed.id);
+      continue;
+    }
+    return {
     id: claimed.id,
     repoId: claimed.repo_id,
     slug: `${repo.org_slug}/${repo.repo_slug}`,
@@ -147,6 +165,8 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
     claimedAt: claimed.claimed_at,
     attempts: claimed.attempts,
   };
+  }
+  return null;
 }
 
 /** Продление лиза своей заявки (К4): чужой/перезаявленный claimed_at — no-op. */
@@ -315,12 +335,19 @@ export interface WorkerDeps {
  * repo-сигнал 'gone' (repo-GET 404/403) → эвикция ТОЛЬКО у задач без
  * автора (К3): 403 на PAT юзера говорит о правах PAT, не о репо (H1).
  * Канальные 403 cicd/runs — не эвикция (no-data access в фактах).
+ * В4.1-fix (Ф1.8): заявка юзера без читаемого PAT (удалён после постановки,
+ * нет APP_SECRET) → finishJob(failed) без скана; серверный токен юзерской
+ * заявке не достаётся никогда.
  */
-export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<ScanResult | "gone"> {
+export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<ScanResult | "gone" | "no-pat"> {
   const pat =
     job.userId !== null && deps.config.auth.appSecret
       ? (deps.getPat ?? getPat)(deps.db, deps.config.auth.appSecret, job.userId)
       : null;
+  if (job.userId !== null && !pat) {
+    finishJob(deps.db, job.id, job.claimedAt, "failed");
+    return "no-pat";
+  }
   const limits = scanCloneLimitsOf(deps.config.scan);
   const result = await (deps.runScan ?? runScan)(
     {
@@ -370,7 +397,7 @@ export function startWorkerLoop(deps: WorkerDeps, pollMs = 5000): () => void {
     }, Math.max(1, Math.floor(leaseMs / 3)));
     try {
       const result = await processJob(deps, job);
-      finishJob(deps.db, job.id, job.claimedAt, result === "gone" || result.status === "bad" ? "failed" : "done");
+      finishJob(deps.db, job.id, job.claimedAt, result === "gone" || result === "no-pat" || result.status === "bad" ? "failed" : "done");
     } catch (e) {
       console.error(`[worker] job ${job.id} (${job.slug}) crashed: ${String((e as Error).message).slice(0, 200)}`);
       finishJob(deps.db, job.id, job.claimedAt, "failed");

@@ -79,6 +79,8 @@ export interface QueueConfig {
   userScansPerHour: number;
   /** предел попыток job: достигнут → failed без claim (К4): 3, env QUEUE_MAX_ATTEMPTS */
   maxAttempts: number;
+  /** активных (queued/running) юзерских заявок на юзера, сверх — 429 too_many_active (В4.1-fix, Ф1.7): 2, env QUEUE_USER_ACTIVE_MAX */
+  userActiveMax: number;
 }
 
 export interface AccessConfig {
@@ -227,6 +229,7 @@ export function loadConfig(): Config {
     queue: {
       userScansPerHour: envInt(env, "QUEUE_USER_SCANS_PER_HOUR") ?? 10,
       maxAttempts: envInt(env, "QUEUE_MAX_ATTEMPTS") ?? 3,
+      userActiveMax: envInt(env, "QUEUE_USER_ACTIVE_MAX") ?? 2,
     },
     llm: {
       provider,

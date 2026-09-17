@@ -28,7 +28,7 @@ import {
   type ClaimedJob,
 } from "../src/jobs/scheduler";
 import { requestUserScan } from "../src/api/me";
-import { upsertRepo, type ScanDeps, type ScanResult } from "../src/jobs/runner";
+import { upsertRepo, type runScan, type ScanDeps, type ScanResult } from "../src/jobs/runner";
 import { makeScClient } from "../src/collectors/http";
 
 const dir = mkdtempSync(join(tmpdir(), "rh-sched-"));
@@ -168,7 +168,7 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
   test("лимит частоты: 11-я новая заявка за час → 429; дубли не считаются; окно скользящее", async () => {
     clear();
     const u = user("rate");
-    const queue = { userScansPerHour: 10, maxAttempts: 3 };
+    const queue = { userScansPerHour: 10, maxAttempts: 3, userActiveMax: 100 };
     const ok = { get: async () => ({ status: 200, json: { visibility: "public" }, bodyText: "" }), requestCount: () => 0 };
     const now = new Date("2026-09-18T10:00:00Z");
     for (let i = 0; i < 10; i++) {
@@ -250,6 +250,85 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
     stop();
     expect(new Set(leases).size).toBeGreaterThan(1); // lease_until сдвигался во время скана
     expect((q.query("SELECT status, attempts FROM jobs WHERE repo_id = ?").get(repo("lease-loop")) as { status: string; attempts: number })).toEqual({ status: "done", attempts: 1 });
+  });
+
+  describe("В4.1-fix: очередь без гонок и со справедливостью (Ф1.5, Ф1.7, Ф1.8, Ф1.12)", () => {
+    const okClient = { get: async () => ({ status: 200, json: { visibility: "public" }, bodyText: "" }), requestCount: () => 0 };
+
+    test("≤ userActiveMax активных заявок на юзера → 429 too_many_active; после завершения — снова можно", async () => {
+      clear();
+      const u = user("active-max");
+      const queue = { userScansPerHour: 100, maxAttempts: 3, userActiveMax: 2 };
+      expect((await requestUserScan(q, okClient, u, "am", "a", queue)).status).toBe(202);
+      expect((await requestUserScan(q, okClient, u, "am", "b", queue)).status).toBe(202);
+      // дубль активной заявки — по-прежнему 202 deduplicated (дедуп раньше предела)
+      const dup = await requestUserScan(q, okClient, u, "am", "a", queue);
+      expect({ status: dup.status, dedup: dup.body["deduplicated"] }).toEqual({ status: 202, dedup: true });
+      const third = await requestUserScan(q, okClient, u, "am", "c", queue);
+      expect(third.status).toBe(429);
+      expect((third.body["error"] as { code: string }).code).toBe("too_many_active");
+      const job = claimNext(q)!;
+      finishJob(q, job.id, job.claimedAt, "done");
+      expect((await requestUserScan(q, okClient, u, "am", "c", queue)).status).toBe(202);
+    });
+
+    test("параллельные POST одного репо: одна заявка, остальные — честный deduplicated", async () => {
+      clear();
+      const u = user("par-dup");
+      const slow = { get: async () => (await Bun.sleep(10), { status: 200, json: { visibility: "public" }, bodyText: "" }), requestCount: () => 0 };
+      const queue = { userScansPerHour: 100, maxAttempts: 3, userActiveMax: 100 };
+      const outs = await Promise.all([1, 2, 3].map(() => requestUserScan(q, slow, u, "pd", "same", queue)));
+      expect(outs.map((o) => o.body["deduplicated"]).sort()).toEqual([false, true, true]);
+      expect(new Set(outs.map((o) => o.body["jobId"])).size).toBe(1);
+    });
+
+    test("справедливость: юзер с 2 заявками не занимает юзерскую половину — второй юзер идёт между ними", () => {
+      clear();
+      const heavy = user("heavy");
+      const light = user("light");
+      const h1 = enqueueScan(q, repo("h1"), { userId: heavy, triggerKind: "user" });
+      const h2 = enqueueScan(q, repo("h2"), { userId: heavy, triggerKind: "user" });
+      const l1 = enqueueScan(q, repo("l1"), { userId: light, triggerKind: "user" });
+      const order: number[] = [];
+      let t = Date.parse("2026-09-18T00:00:00Z");
+      for (let job = claimNext(q, new Date(t)); job; job = claimNext(q, new Date((t += 1000)))) order.push(job.id);
+      expect(order).toEqual([h1, l1, h2]);
+    });
+
+    test("job без строки repos → failed, берётся следующая (попытки не сжигаются)", () => {
+      clear();
+      const orphan = q.query("INSERT INTO jobs (repo_id, status, trigger_kind, created_at) VALUES (999999, 'queued', 'periodic', ?)").run(new Date().toISOString());
+      const next = enqueueScan(q, repo("after-orphan"), { triggerKind: "periodic" });
+      const job = claimNext(q)!;
+      expect(job.id).toBe(next);
+      expect(q.query("SELECT status, attempts FROM jobs WHERE id = ?").get(Number(orphan.lastInsertRowid))).toEqual({ status: "failed", attempts: 1 });
+    });
+
+    test("юзерская job без PAT → failed без скана; периодика — серверным токеном как раньше", async () => {
+      clear();
+      const u = user("no-pat");
+      const base = loadConfig();
+      const config = { ...base, auth: { ...base.auth, appSecret: "scheduler-test-secret-0000000000000000" } };
+      let scans = 0;
+      let serverClients = 0;
+      const fakeScan = (async () => {
+        scans++;
+        return { scanId: 0, repoId: 0, status: "ok", repoAccess: "ok" };
+      }) as unknown as typeof runScan;
+      const serverClient = () => {
+        serverClients++;
+        return null;
+      };
+      const userJob = enqueueScan(q, repo("np-user"), { userId: u, triggerKind: "user" });
+      const claimedUser = claimNext(q)!;
+      expect(claimedUser.id).toBe(userJob);
+      expect(await processJob({ db: q, config, serverClient, runScan: fakeScan, getPat: () => null }, claimedUser)).toBe("no-pat");
+      expect(q.query("SELECT status FROM jobs WHERE id = ?").get(userJob)).toEqual({ status: "failed" });
+      expect({ scans, serverClients }).toEqual({ scans: 0, serverClients: 0 });
+      enqueueScan(q, repo("np-periodic"), { triggerKind: "periodic" });
+      await processJob({ db: q, config, serverClient, runScan: fakeScan, getPat: () => null }, claimNext(q)!);
+      expect({ scans, serverClients }).toEqual({ scans: 1, serverClients: 1 });
+    });
   });
 });
 
@@ -378,19 +457,18 @@ describe("processJob: repo-сигнал эвикции и заявки юзер�
     expect((db.query("SELECT rating_active FROM repos WHERE id = ?").get(s) as { rating_active: number }).rating_active).toBe(1);
   });
 
-  test("заявка юзера: автор и PAT пробрасываются в runScan; без PAT — null", async () => {
+  test("заявка юзера: автор и PAT пробрасываются в runScan; без PAT — скана нет (Ф1.8)", async () => {
     db.query("INSERT OR REPLACE INTO users (ya_id, login, created_at, last_login_at) VALUES ('ya-2', 'u2', '2026', '2026')").run();
     const uid = (db.query("SELECT id FROM users WHERE ya_id = 'ya-2'").get() as { id: number }).id;
     const { deps, calls } = fakeWorker(() => ({ repoAccess: "ok" }));
     const job: ClaimedJob = { id: 3, repoId: 1, slug: "pj/own", userId: uid, triggerKind: "user", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 };
-    // PAT нет (getPat реальный, APP_SECRET инъектирован в конфиг) → userToken null
-    await processJob(deps, job);
-    expect(calls[0]!.opts["userId"]).toBe(uid);
-    expect(calls[0]!.opts["userToken"]).toBeNull();
+    // PAT нет (getPat реальный, APP_SECRET инъектирован в конфиг) → failed без скана, серверный токен не берётся
+    expect(await processJob(deps, job)).toBe("no-pat");
+    expect(calls).toHaveLength(0);
     // сохраняем PAT через шов настроек окружения — проверяем проброс
     const withPat = { ...deps, getPat: () => "user-pat-value" };
-    calls.length = 0;
     await processJob(withPat, job);
+    expect(calls[0]!.opts["userId"]).toBe(uid);
     expect(calls[0]!.opts["userToken"]).toBe("user-pat-value");
   });
 

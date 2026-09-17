@@ -9,7 +9,7 @@ import { ScClient } from "../collectors/http";
 import { upsertRepo } from "../jobs/runner";
 import { LAST_ELIGIBLE_SCAN_SQL } from "./repos";
 import { MODEL_VERSION } from "../score/model";
-import { countRecentUserJobs, enqueueScan, findActiveUserJob, recordRefusedUserJob } from "../jobs/scheduler";
+import { countActiveUserJobs, countRecentUserJobs, enqueueScan, findActiveUserJob, recordRefusedUserJob } from "../jobs/scheduler";
 import type { QueueConfig } from "../config";
 
 export interface MyRepoEntry {
@@ -109,7 +109,10 @@ export interface UserScanResponse {
 }
 
 /**
- * POST /api/me/repos/:org/:repo/scan без HTTP-слоя. К4 (дёшево, без сети):
+ * POST /api/me/repos/:org/:repo/scan без HTTP-слоя. В4.1-fix (Ф1.5): дешёвые
+ * проверки до сети остаются, после repo-GET те же проверки повторяются в
+ * одной синхронной транзакции со вставкой (+ too_many_active, Ф1.7);
+ * deduplicated: true — только если заявка уже была. К4 (дёшево, без сети):
  * активная заявка того же (юзер, репо) → 202 deduplicated; лимит частоты
  * исчерпан → 429 rate_limited. К3: до постановки — repo-GET с PAT юзера.
  * 200 → upsert repos (visibility из ответа) → заявка → 202; 403/404 →
@@ -131,10 +134,7 @@ export async function requestUserScan(
     return { status: 202, body: { queued: true, jobId: active, slug: `${org}/${repo}`, deduplicated: true } };
   }
   if (countRecentUserJobs(db, userId, now) >= queue.userScansPerHour) {
-    return {
-      status: 429,
-      body: { error: { code: "rate_limited", message: `не больше ${queue.userScansPerHour} запусков анализа в час — попробуйте позже` } },
-    };
+    return rateLimited(queue);
   }
   const res = await client.get(`/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`);
   if (res.status === 403 || res.status === 404) {
@@ -150,15 +150,41 @@ export async function requestUserScan(
   }
   const body = res.json as { visibility?: unknown; name?: unknown } | null;
   const visibility = typeof body?.visibility === "string" ? body.visibility : null;
-  // К-Ф1.1: заявка вставляет только НОВУЮ строку (видимость из тела repo-GET
-  // или 'private' до подтверждения); существующую строку не обновляет —
-  // мету репо двигает только пригодный скан
-  const repoId =
-    existing?.id ??
-    upsertRepo(db, org, repo, {
-      title: typeof body?.name === "string" ? body.name : null,
-      visibility: visibility ?? "private",
-    });
-  const jobId = enqueueScan(db, repoId, { userId, triggerKind: "user", now });
-  return { status: 202, body: { queued: true, jobId, slug: `${org}/${repo}`, deduplicated: false } };
+  // Ф1.5: после сетевого await — одна синхронная транзакция: параллельные
+  // запросы проходили дешёвую проверку до await все сразу; здесь проверки
+  // и вставка неделимы (дедуп → too_many_active → rate_limited → строка → job)
+  return db.transaction((): UserScanResponse => {
+    const row = db.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number } | null;
+    const dup = row ? findActiveUserJob(db, userId, row.id) : null;
+    if (dup !== null) {
+      return { status: 202, body: { queued: true, jobId: dup, slug: `${org}/${repo}`, deduplicated: true } };
+    }
+    if (countActiveUserJobs(db, userId) >= queue.userActiveMax) {
+      return {
+        status: 429,
+        body: { error: { code: "too_many_active", message: `не больше ${queue.userActiveMax} анализов в очереди одновременно — дождитесь завершения` } },
+      };
+    }
+    if (countRecentUserJobs(db, userId, now) >= queue.userScansPerHour) {
+      return rateLimited(queue);
+    }
+    // К-Ф1.1: заявка вставляет только НОВУЮ строку (видимость из тела repo-GET
+    // или 'private' до подтверждения); существующую строку не обновляет —
+    // мету репо двигает только пригодный скан
+    const repoId =
+      row?.id ??
+      upsertRepo(db, org, repo, {
+        title: typeof body?.name === "string" ? body.name : null,
+        visibility: visibility ?? "private",
+      });
+    const jobId = enqueueScan(db, repoId, { userId, triggerKind: "user", now });
+    return { status: 202, body: { queued: true, jobId, slug: `${org}/${repo}`, deduplicated: false } };
+  })();
+}
+
+function rateLimited(queue: QueueConfig): UserScanResponse {
+  return {
+    status: 429,
+    body: { error: { code: "rate_limited", message: `не больше ${queue.userScansPerHour} запусков анализа в час — попробуйте позже` } },
+  };
 }

@@ -157,7 +157,8 @@ describe("Ф1.4 (MED-2): AppSec scans/latest 404", () => {
 
 // ---------------------------------------------------------------------------
 describe("Ф1.5 (MED-3): лимит частоты без гонки", () => {
-  repro("5 параллельных POST при лимите 2/час → ровно 2 заявки", async () => {
+  // закрыто Б4 (Ф1.5)
+  test("5 параллельных POST при лимите 2/час → ровно 2 заявки", async () => {
     const db = tempDb();
     const user = upsertUser(db, "ya-racer", "racer");
     const slow: ScClient = {
@@ -180,7 +181,8 @@ describe("Ф1.5 (MED-3): лимит частоты без гонки", () => {
 
 // ---------------------------------------------------------------------------
 describe("Ф1.8 (MED-6): юзерская job без PAT", () => {
-  repro("job с автором без читаемого PAT → failed без скана, серверный токен не используется", async () => {
+  // закрыто Б4 (Ф1.8)
+  test("job с автором без читаемого PAT → failed без скана, серверный токен не используется", async () => {
     const db = tempDb();
     const user = upsertUser(db, "ya-gone-pat", "gonepat");
     db.query("INSERT INTO repos (org_slug, repo_slug, visibility) VALUES ('acme', 'private-repo', 'private')").run();

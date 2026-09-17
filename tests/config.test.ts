@@ -14,14 +14,14 @@ describe("очередь, лиз и доступ (В4.1, К2/К4)", () => {
       for (const k of keys) process.env[k] = "";
       const cfg = loadConfig();
       expect(cfg.scheduler.leaseMs).toBe(60 * 60_000);
-      expect(cfg.queue).toEqual({ userScansPerHour: 10, maxAttempts: 3 });
+      expect(cfg.queue).toEqual({ userScansPerHour: 10, maxAttempts: 3, userActiveMax: 2 });
       expect(cfg.access.cacheTtlMs).toBe(15 * 60_000);
       process.env.QUEUE_USER_SCANS_PER_HOUR = "4";
       process.env.QUEUE_MAX_ATTEMPTS = "5";
       process.env.ACCESS_CACHE_TTL_MS = "1000";
       process.env.SCAN_CLONE_TIMEOUT_MS = String(60_000);
       const env = loadConfig();
-      expect(env.queue).toEqual({ userScansPerHour: 4, maxAttempts: 5 });
+      expect(env.queue).toEqual({ userScansPerHour: 4, maxAttempts: 5, userActiveMax: 2 });
       expect(env.access.cacheTtlMs).toBe(1000);
       expect(env.scheduler.leaseMs).toBe(60_000 + 25 * 60_000 + 15 * 60_000);
       process.env.SCHEDULER_LEASE_MS = "12345";

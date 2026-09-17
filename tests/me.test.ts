@@ -32,7 +32,7 @@ function statusClient(status: number, json: unknown = null): ScClient & { paths:
   };
 }
 
-const QUEUE = { userScansPerHour: 100, maxAttempts: 3 };
+const QUEUE = { userScansPerHour: 100, maxAttempts: 3, userActiveMax: 100 };
 const refusedOf = (userId: number) =>
   (db.query("SELECT COUNT(*) AS c FROM jobs WHERE user_id = ? AND status = 'refused'").get(userId) as { c: number }).c;
 
@@ -77,7 +77,7 @@ describe("requestUserScan: предпроверка доступа PAT (К3)", (
 
   test("отказы учитываются лимитом частоты: после N отказов за час — 429 без сети", async () => {
     const u = upsertUser(db, "ya-prober", "prober");
-    const limit = { userScansPerHour: 3, maxAttempts: 3 };
+    const limit = { userScansPerHour: 3, maxAttempts: 3, userActiveMax: 100 };
     for (let i = 0; i < 3; i++) expect((await requestUserScan(db, statusClient(404), u, "enum", `slug-${i}`, limit)).status).toBe(403);
     const client = statusClient(200, { visibility: "public" });
     const out = await requestUserScan(db, client, u, "enum", "real", limit);
