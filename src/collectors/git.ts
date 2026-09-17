@@ -99,19 +99,32 @@ export function scrubCredentials(text: string): string {
 }
 
 export async function cloneBare(
-  url: string,
+  urlWithCreds: string,
   tmpDir: string = tmpdir(),
   limits: CloneLimits,
   opts: { shallowSince?: string } = {},
 ): Promise<CloneOutcome> {
   const dir = mkdtempSync(join(tmpDir, "rh-clone-"));
   const started = Date.now();
+  // ПОРТ hq-parallel (S1/security): креды НЕ едут в argv (world-readable
+  // /proc/<pid>/cmdline на всё время клона) — из URL в http-заголовок через
+  // env-конфиг git (GIT_CONFIG_*): environ читается только владельцем.
+  // Живой смоук паттерна: приватный клон 2.1МБ/1.9с (hq-parallel 738841e)
+  let cloneUrl = urlWithCreds;
+  const childEnv: Record<string, string> = { GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "/bin/true" };
+  const credMatch = urlWithCreds.match(/^(https:\/\/)([^@/\s]+)@(.+)$/);
+  if (credMatch) {
+    cloneUrl = `${credMatch[1]}${credMatch[3]}`;
+    childEnv.GIT_CONFIG_COUNT = "1";
+    childEnv.GIT_CONFIG_KEY_0 = "http.extraHeader";
+    childEnv.GIT_CONFIG_VALUE_0 = `Authorization: Basic ${Buffer.from(decodeURIComponent(credMatch[2]!)).toString("base64")}`;
+  }
   const gitArgs = ["clone", "--bare"];
   if (opts.shallowSince) gitArgs.push(`--shallow-since=${opts.shallowSince}`);
-  gitArgs.push(url, dir);
+  gitArgs.push(cloneUrl, dir);
   const cmd = HAVE_SETSID ? ["setsid", "git", ...gitArgs] : ["git", ...gitArgs];
   const proc = Bun.spawn({ cmd, stdout: "ignore", stderr: "pipe", stdin: "ignore",
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "/bin/true" } });
+    env: { ...process.env, ...childEnv } });
   let bytes = 0;
   let breach: "timeout" | "disk" | null = null;
   while (breach === null) {

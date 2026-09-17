@@ -34,6 +34,8 @@ import { needsRescore, rescoreAll } from "./score/rescore";
 import index from "./web/index.html";
 
 const config = loadConfig();
+const patProbes = new Map<number, number[]>();
+
 const db = openDb(config);
 
 // Ф1.9: оценки устарели (derived_version старее кода) или их нет при
@@ -192,6 +194,19 @@ const server = Bun.serve({
         return Response.json({ error: { code: "unconfigured", message: "APP_SECRET не задан: PAT хранить нельзя" } }, { status: 503 });
       }
       if (req.method === "PUT") {
+        // ПОРТ hq-parallel (S1/security): живая проба токена = оракул
+        // валидности PAT — окно на юзера (10/час), сервис не переборщик
+        const nowPut = Date.now();
+        const window = patProbes.get(user.userId) ?? [];
+        const fresh = window.filter((ts) => nowPut - ts < 60 * 60_000);
+        if (fresh.length >= 10) {
+          return Response.json(
+            { error: { code: "rate_limited", message: "Слишком много проверок токена — попробуйте через час" } },
+            { status: 429 },
+          );
+        }
+        fresh.push(nowPut);
+        patProbes.set(user.userId, fresh);
         const body = (await req.json().catch(() => null)) as { token?: unknown } | null;
         if (typeof body?.token !== "string" || body.token.length < 8) return badQuery("token: ожидается строка PAT");
         // живая проверка GET /user: 401 = токен отклонён платформой
