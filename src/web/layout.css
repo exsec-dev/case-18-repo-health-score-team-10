@@ -81,9 +81,9 @@ body {
   animation-duration: 0.25s;
 }
 
-/* блок аккаунта: колонка футера AsideHeader — 40px в узком rail и 220px в
- * широком, обе от x=8. Отступ 4px в обоих видах ставит аватар 32px и кнопку
- * 36px на ось иконок (x=28): при раскрытии ничего не сдвигается и не прыгает */
+/* блок аккаунта: hover-фон шириной как у FooterItem (38px в узком rail,
+ * вся доступная ширина в широком). Внутренний отступ оставляет аватар 32px
+ * и кнопку 36px на оси иконок (x=28): при раскрытии ничего не сдвигается */
 .rh-rail-account {
   box-sizing: border-box;
   display: flex;
@@ -107,12 +107,19 @@ body {
   align-items: center;
   gap: var(--g-spacing-3);
   box-sizing: border-box;
-  width: 100%;
+  width: calc(100% + 4px);
   min-width: 0;
   height: 40px;
-  padding-inline: 2px;
+  margin-inline: -2px;
+  padding-inline: var(--g-spacing-1);
   border-radius: var(--gn-aside-header-item-expanded-radius, 8px);
   color: var(--g-color-text-primary);
+}
+
+.rh-rail-account_compact .rh-rail-user {
+  width: calc(100% + 2px);
+  margin-inline: -1px;
+  padding-inline: 3px;
 }
 
 /* тултип иконки узкого rail: якорь равен доступной ширине между полями

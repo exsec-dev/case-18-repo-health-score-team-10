@@ -316,7 +316,7 @@ function RailUser({ me }: { me: MeResponse }) {
     <div className="rh-rail-user">
       <UserAvatar me={me} size="m" />
       <Flex direction="column" className="rh-rail-user__text">
-        <Text variant="subheader-2" ellipsis>
+        <Text variant="subheader-1" ellipsis>
           {name}
         </Text>
         {name !== login && (
