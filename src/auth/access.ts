@@ -8,8 +8,15 @@
 // Семантика ответа: 200 → granted; 403/404 → denied; 401 → pat-expired;
 // 0/429/5xx/таймаут → check-failed. Зритель без сессии/PAT → no-pat без
 // единого запроса. Кэш в памяти процесса: ключ (user, repo, channel), TTL
-// Config.access.cacheTtlMs; check-failed не кэшируется; смена/удаление
-// PAT сбрасывает записи юзера. Значение PAT не логируется и не хранится.
+// Config.access.cacheTtlMs; смена/удаление PAT сбрасывает записи юзера.
+// Значение PAT не логируется и не хранится.
+// В4.1-fix: AppSec scans/latest 404 при repo-GET 200 → granted (скана ещё
+// нет — право есть, Ф1.4); check-failed кэшируется на
+// Config.access.failedTtlMs (сбой ≠ результат, но и не повод долбить
+// платформу — Ф1.6); предел кэша Config.access.maxEntries с вытеснением
+// старейших; одновременные проверки (user, repo, поколение PAT) склеиваются
+// в один in-flight промис; поколение PAT (Ф1.12) — счётчик на юзера:
+// clearUser повышает, запись результата старого поколения отбрасывается.
 import type { AppsecClient } from "../collectors/appsec";
 import type { ScClient } from "../collectors/http";
 
@@ -41,14 +48,33 @@ export interface AccessRepo {
 
 export interface AccessCache {
   get(userId: number, repoId: number, channel: AccessChannel, now: number): ChannelAccess | null;
-  set(userId: number, repoId: number, channel: AccessChannel, value: ChannelAccess, now: number): void;
-  /** сброс при смене/удалении PAT (PUT/DELETE /api/me/pat) */
+  /** gen — поколение PAT на момент начала проверки: устаревшее поколение не пишется (Ф1.12) */
+  set(userId: number, repoId: number, channel: AccessChannel, value: ChannelAccess, now: number, gen?: number): void;
+  /** сброс при смене/удалении PAT (PUT/DELETE /api/me/pat): записи юзера удаляются, поколение +1 */
   clearUser(userId: number): void;
+  /** текущее поколение PAT юзера */
+  generation(userId: number): number;
+  /** число записей (предел maxEntries) */
+  size(): number;
+  /** склейка одновременных проверок: ключ (user, repo, поколение) → промис результата */
+  inflight: Map<string, Promise<AccessResult>>;
 }
 
-export function makeAccessCache(ttlMs: number): AccessCache {
+export interface AccessCacheOptions {
+  /** TTL check-failed (Config.access.failedTtlMs, дефолт 60 с) */
+  failedTtlMs?: number;
+  /** предел записей (Config.access.maxEntries, дефолт 10 000): сверх — вытеснение старейших */
+  maxEntries?: number;
+}
+
+export function makeAccessCache(ttlMs: number, opts: AccessCacheOptions = {}): AccessCache {
+  const failedTtlMs = opts.failedTtlMs ?? 60_000;
+  const maxEntries = Math.max(1, opts.maxEntries ?? 10_000);
+  // Map хранит порядок вставки: первая запись — старейшая
   const entries = new Map<string, { value: ChannelAccess; expiresAt: number }>();
+  const generations = new Map<number, number>();
   const key = (userId: number, repoId: number, channel: AccessChannel) => `${userId}:${repoId}:${channel}`;
+  const generation = (userId: number) => generations.get(userId) ?? 0;
   return {
     get(userId, repoId, channel, now) {
       const k = key(userId, repoId, channel);
@@ -60,15 +86,28 @@ export function makeAccessCache(ttlMs: number): AccessCache {
       }
       return e.value;
     },
-    set(userId, repoId, channel, value, now) {
-      // сбой проверки — не знание о правах: повторяем на следующем показе
-      if (value === "check-failed") return;
-      entries.set(key(userId, repoId, channel), { value, expiresAt: now + ttlMs });
+    set(userId, repoId, channel, value, now, gen) {
+      // результат проверки старым PAT после его смены — не знание о новых правах
+      if (gen !== undefined && gen !== generation(userId)) return;
+      // сбой проверки — не знание о правах: короткий TTL, чтобы не долбить платформу
+      const ttl = value === "check-failed" ? failedTtlMs : ttlMs;
+      const k = key(userId, repoId, channel);
+      entries.delete(k);
+      entries.set(k, { value, expiresAt: now + ttl });
+      while (entries.size > maxEntries) {
+        const oldest = entries.keys().next().value;
+        if (oldest === undefined) break;
+        entries.delete(oldest);
+      }
     },
     clearUser(userId) {
+      generations.set(userId, generation(userId) + 1);
       const prefix = `${userId}:`;
       for (const k of [...entries.keys()]) if (k.startsWith(prefix)) entries.delete(k);
     },
+    generation,
+    size: () => entries.size,
+    inflight: new Map(),
   };
 }
 
@@ -81,7 +120,7 @@ export interface AccessDeps {
   now?: () => number;
 }
 
-/** HTTP-статус чтения → доступ к каналу (контракт К2). */
+/** HTTP-статус чтения → доступ к каналу (контракт К2; AppSec 404 — отдельно, Ф1.4). */
 export function accessFromStatus(status: number): ChannelAccess {
   if (status === 200) return "granted";
   if (status === 403 || status === 404) return "denied";
@@ -91,10 +130,25 @@ export function accessFromStatus(status: number): ChannelAccess {
 
 export async function resolveAccess(deps: AccessDeps, viewer: AccessViewer | null, repo: AccessRepo): Promise<AccessResult> {
   if (!viewer || !viewer.pat) return { ...NO_PAT_ACCESS };
+  // Ф1.6: одновременные показы одному зрителю одного репо — одна проверка
+  const gen = deps.cache.generation(viewer.userId);
+  const flightKey = `${viewer.userId}:${repo.id}:${gen}`;
+  const running = deps.cache.inflight.get(flightKey);
+  if (running) return { ...(await running) };
+  const promise = resolveUncached(deps, { userId: viewer.userId, pat: viewer.pat }, repo, gen);
+  deps.cache.inflight.set(flightKey, promise);
+  try {
+    return { ...(await promise) };
+  } finally {
+    deps.cache.inflight.delete(flightKey);
+  }
+}
+
+async function resolveUncached(deps: AccessDeps, viewer: { userId: number; pat: string }, repo: AccessRepo, gen: number): Promise<AccessResult> {
   const pat = viewer.pat;
   const now = deps.now ? deps.now() : Date.now();
   const cached = (channel: AccessChannel) => deps.cache.get(viewer.userId, repo.id, channel, now);
-  const store = (channel: AccessChannel, value: ChannelAccess) => deps.cache.set(viewer.userId, repo.id, channel, value, now);
+  const store = (channel: AccessChannel, value: ChannelAccess) => deps.cache.set(viewer.userId, repo.id, channel, value, now, gen);
   const slugPath = `/repos/${encodeURIComponent(repo.org)}/${encodeURIComponent(repo.repo)}`;
 
   let rest: ScClient | null = null;
@@ -137,7 +191,9 @@ export async function resolveAccess(deps: AccessDeps, viewer: AccessViewer | nul
       appsec = "check-failed"; // форма ответа неожиданная — не знание о правах
     } else {
       const res = await deps.appsecClient(pat).get("/v1/scans/latest", { gitRepo: r.id });
-      appsec = accessFromStatus(res.status);
+      // Ф1.4: 404 «скана ещё нет» при подтверждённом repo-GET — доступ есть
+      // (коллектор тот же 404 честно пишет no-data no-scan)
+      appsec = res.status === 404 ? "granted" : accessFromStatus(res.status);
     }
     store("appsec", appsec);
   }

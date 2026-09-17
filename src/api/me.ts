@@ -9,7 +9,7 @@ import { ScClient } from "../collectors/http";
 import { upsertRepo } from "../jobs/runner";
 import { LAST_ELIGIBLE_SCAN_SQL } from "./repos";
 import { MODEL_VERSION } from "../score/model";
-import { countRecentUserJobs, enqueueScan, findActiveUserJob } from "../jobs/scheduler";
+import { countRecentUserJobs, enqueueScan, findActiveUserJob, recordRefusedUserJob } from "../jobs/scheduler";
 import type { QueueConfig } from "../config";
 
 export interface MyRepoEntry {
@@ -138,6 +138,8 @@ export async function requestUserScan(
   }
   const res = await client.get(`/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`);
   if (res.status === 403 || res.status === 404) {
+    // Ф1.6: отказ учитывается лимитом частоты — перебор чужих слагов не бесплатен
+    recordRefusedUserJob(db, userId, now);
     return { status: 403, body: { error: { code: "no_access", message: `ваш PAT не даёт доступа к ${org}/${repo}` } } };
   }
   if (res.status === 401) {

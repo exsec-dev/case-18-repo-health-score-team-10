@@ -33,6 +33,8 @@ function statusClient(status: number, json: unknown = null): ScClient & { paths:
 }
 
 const QUEUE = { userScansPerHour: 100, maxAttempts: 3 };
+const refusedOf = (userId: number) =>
+  (db.query("SELECT COUNT(*) AS c FROM jobs WHERE user_id = ? AND status = 'refused'").get(userId) as { c: number }).c;
 
 const repoRow = (org: string, repo: string) =>
   db.query("SELECT id, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number; visibility: string } | null;
@@ -56,8 +58,9 @@ describe("requestUserScan: предпроверка доступа PAT (К3)", (
     expect(job).toEqual({ user_id: user, trigger_kind: "user", status: "queued" });
   });
 
-  test("403 и 404 → 403 no_access; строка repos и заявка НЕ создаются", async () => {
+  test("403 и 404 → 403 no_access; строка repos и заявка НЕ создаются; отказ учтён строкой refused (Ф1.6)", async () => {
     const before = jobsOf(user);
+    const refusedBefore = refusedOf(user);
     for (const [status, slug] of [
       [403, "forbidden"],
       [404, "missing"],
@@ -67,7 +70,19 @@ describe("requestUserScan: предпроверка доступа PAT (К3)", (
       expect((out.body["error"] as { code: string }).code).toBe("no_access");
       expect(repoRow("other", slug)).toBeNull();
     }
-    expect(jobsOf(user)).toBe(before);
+    expect(refusedOf(user)).toBe(refusedBefore + 2);
+    // отказанные строки воркером не заявляются и в очереди не стоят
+    expect((db.query("SELECT COUNT(*) AS c FROM jobs WHERE user_id = ? AND status IN ('queued', 'running')").get(user) as { c: number }).c).toBe(before);
+  });
+
+  test("отказы учитываются лимитом частоты: после N отказов за час — 429 без сети", async () => {
+    const u = upsertUser(db, "ya-prober", "prober");
+    const limit = { userScansPerHour: 3, maxAttempts: 3 };
+    for (let i = 0; i < 3; i++) expect((await requestUserScan(db, statusClient(404), u, "enum", `slug-${i}`, limit)).status).toBe(403);
+    const client = statusClient(200, { visibility: "public" });
+    const out = await requestUserScan(db, client, u, "enum", "real", limit);
+    expect(out.status).toBe(429);
+    expect(client.paths).toEqual([]);
   });
 
   test("401 → 401 pat_expired; 0/429/5xx → 503 check_failed; без постановки", async () => {

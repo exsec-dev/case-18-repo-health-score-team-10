@@ -53,12 +53,13 @@ function sessionOf(req: Request) {
 function userClient(userId: number) {
   const pat = config.auth.appSecret ? getPat(db, config.auth.appSecret, userId) : null;
   if (!pat) return null;
-  return makeScClient({ token: pat, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs });
+  return makeScClient({ token: pat, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, timeoutMs: config.scan.rest.timeoutMs });
 }
 
 // К2: доступ зрителя к каналам карточки — прямые чтения PAT зрителя с
-// кэшем в памяти процесса (TTL Config.access.cacheTtlMs)
-const accessCache = makeAccessCache(config.access.cacheTtlMs);
+// кэшем в памяти процесса (TTL Config.access.cacheTtlMs; сбой — failedTtlMs;
+// предел maxEntries; склейка одновременных проверок и поколение PAT — Ф1.6/Ф1.12)
+const accessCache = makeAccessCache(config.access.cacheTtlMs, { failedTtlMs: config.access.failedTtlMs, maxEntries: config.access.maxEntries });
 
 /** Резолвер доступа зрителя запроса (аноним / без PAT → no-pat без запросов). */
 function viewerAccess(req: Request): (repo: AccessRepo) => Promise<AccessResult> {
@@ -67,7 +68,8 @@ function viewerAccess(req: Request): (repo: AccessRepo) => Promise<AccessResult>
     const pat = user && config.auth.appSecret ? getPat(db, config.auth.appSecret, user.userId) : null;
     return resolveAccess(
       {
-        restClient: (token) => makeScClient({ token, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 4 }),
+        restClient: (token) =>
+          makeScClient({ token, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 4, timeoutMs: config.scan.rest.timeoutMs }),
         appsecClient: (token) =>
           makeAppsecClient({ token, baseUrl: config.api.appsecBase, minIntervalMs: config.scan.rest.appsecMinIntervalMs, maxRequests: 2, timeoutMs: 10_000 }),
         cache: accessCache,
@@ -180,7 +182,13 @@ const server = Bun.serve({
         const body = (await req.json().catch(() => null)) as { token?: unknown } | null;
         if (typeof body?.token !== "string" || body.token.length < 8) return badQuery("token: ожидается строка PAT");
         // живая проверка GET /user: 401 = токен отклонён платформой
-        const probe = makeScClient({ token: body.token, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 2 });
+        const probe = makeScClient({
+          token: body.token,
+          baseUrl: config.api.restBase,
+          minIntervalMs: config.scan.rest.minIntervalMs,
+          maxRequests: 2,
+          timeoutMs: config.scan.rest.timeoutMs,
+        });
         const who = await probe.get("/user");
         if (who.status !== 200) {
           return Response.json(
@@ -251,7 +259,13 @@ const server = Bun.serve({
 // бюджетом на каждую задачу воркера и на каждый ночной обход
 const serverClient = () =>
   config.sourcecraftToken
-    ? makeScClient({ token: config.sourcecraftToken, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: config.scan.rest.budget })
+    ? makeScClient({
+        token: config.sourcecraftToken,
+        baseUrl: config.api.restBase,
+        minIntervalMs: config.scan.rest.minIntervalMs,
+        maxRequests: config.scan.rest.budget,
+        timeoutMs: config.scan.rest.timeoutMs,
+      })
     : null;
 startWorkerLoop({ db, config, serverClient });
 startScheduler(db, serverClient, config);

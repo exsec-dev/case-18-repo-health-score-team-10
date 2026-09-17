@@ -1,6 +1,7 @@
 // http.ts — общий живой клиент SourceCraft REST (каталог + ресурсные
 // коллекторы): токен из env (значение никогда не логируется), бережность
-// (интервал ≥50мс между запросами), счётчик запросов для бюджета зондов.
+// (интервал ≥50мс между запросами), счётчик запросов для бюджета зондов,
+// таймаут запроса (В4.1-fix, Ф1.6: зависший ответ платформы = status 0).
 // Сеть не бросается исключениями: сбой = status 0 + error-текст.
 export interface ScResponse {
   status: number;
@@ -20,6 +21,8 @@ export interface ScClientOptions {
   baseUrl?: string;
   minIntervalMs?: number;
   maxRequests?: number;
+  /** таймаут запроса (Config.scan.rest.timeoutMs, дефолт 10 с): истёк → status 0 (Ф1.6) */
+  timeoutMs?: number;
   onRequest?: (path: string, res: ScResponse) => void;
 }
 
@@ -27,6 +30,7 @@ export function makeScClient(opts: ScClientOptions): ScClient {
   const baseUrl = opts.baseUrl ?? "https://api.sourcecraft.tech";
   const minInterval = opts.minIntervalMs ?? 50;
   const maxRequests = opts.maxRequests ?? 1000;
+  const timeoutMs = opts.timeoutMs ?? 10_000;
   let count = 0;
   let lastAt = 0;
   return {
@@ -45,6 +49,7 @@ export function makeScClient(opts: ScClientOptions): ScClient {
             ...(opts.token ? { Authorization: `Bearer ${opts.token}` } : {}),
             Accept: "application/json",
           },
+          signal: AbortSignal.timeout(timeoutMs),
         });
         const bodyText = await r.text();
         let json: unknown = null;

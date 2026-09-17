@@ -43,7 +43,21 @@ export function findActiveUserJob(db: Database, userId: number, repoId: number):
   return row ? row.id : null;
 }
 
-/** Новых юзерских заявок за скользящий час (дубли строк не создают — не считаются). */
+/**
+ * Отказанная предпроверка доступа (repo-GET 403/404 по PAT, Ф1.6): строка jobs
+ * со status='refused' — воркером не заявляется (claimNext берёт только
+ * queued/running), но учитывается лимитом частоты. repo_id = 0: строка
+ * repos по отказу не создаётся (К3), а NOT NULL колонки требует значения
+ * (FK в SQLite не включены); ночной обход по repo_id её не видит.
+ */
+export function recordRefusedUserJob(db: Database, userId: number, now = new Date()): number {
+  const r = db
+    .query("INSERT INTO jobs (repo_id, status, user_id, trigger_kind, created_at) VALUES (0, 'refused', ?, 'user', ?)")
+    .run(userId, now.toISOString());
+  return Number(r.lastInsertRowid);
+}
+
+/** Новых юзерских заявок за скользящий час, включая отказанные предпроверки (дубли строк не создают — не считаются). */
 export function countRecentUserJobs(db: Database, userId: number, now = new Date()): number {
   const since = new Date(now.getTime() - 3600_000).toISOString();
   return (
@@ -314,7 +328,13 @@ export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<Sca
       scClient: deps.serverClient(),
       cloneLimits: limits,
       userScClient: pat
-        ? makeScClient({ token: pat, baseUrl: deps.config.api.restBase, minIntervalMs: deps.config.scan.rest.minIntervalMs, maxRequests: deps.config.scan.rest.budget })
+        ? makeScClient({
+            token: pat,
+            baseUrl: deps.config.api.restBase,
+            minIntervalMs: deps.config.scan.rest.minIntervalMs,
+            maxRequests: deps.config.scan.rest.budget,
+            timeoutMs: deps.config.scan.rest.timeoutMs,
+          })
         : undefined,
       appsecClient: (p: string) => makeAppsecClient({ token: p, baseUrl: deps.config.api.appsecBase, minIntervalMs: deps.config.scan.rest.appsecMinIntervalMs }),
       gitBase: deps.config.api.gitBase,

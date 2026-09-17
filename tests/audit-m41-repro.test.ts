@@ -136,7 +136,8 @@ describe("Ф1.3 (MED-1): номера рекомендаций после фил
 
 // ---------------------------------------------------------------------------
 describe("Ф1.4 (MED-2): AppSec scans/latest 404", () => {
-  repro("404 «скана нет» при repo-GET 200 → Security granted", async () => {
+  // закрыто Б3 (Ф1.4)
+  test("404 «скана нет» при repo-GET 200 → Security granted", async () => {
     const rest: ScClient = {
       async get(path: string) {
         if (path.endsWith("/cicd/runs?page_size=1")) return { status: 200, json: null, bodyText: "" };

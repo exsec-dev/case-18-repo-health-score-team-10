@@ -101,7 +101,7 @@ ${SCORES_DDL}
 CREATE TABLE IF NOT EXISTS jobs (
   id INTEGER PRIMARY KEY,
   repo_id INTEGER NOT NULL REFERENCES repos(id),
-  status TEXT NOT NULL DEFAULT 'queued', -- queued|running|done|failed
+  status TEXT NOT NULL DEFAULT 'queued', -- queued|running|done|failed|refused (refused = отказанная предпроверка PAT, Ф1.6)
   claimed_at TEXT,
   lease_until TEXT,             -- механика claim-loop (В4): NULL-lease матчится
   mode TEXT NOT NULL DEFAULT 'public', -- public|own (own = юзерский PAT)

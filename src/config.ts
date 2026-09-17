@@ -31,7 +31,8 @@ export interface ScanCloneLimits extends CloneLimits {
 export interface ScanConfig {
   clone: CloneLimits;
   degrade: DegradeLimits;
-  rest: { budget: number; minIntervalMs: number; appsecMinIntervalMs: number };
+  /** timeoutMs — таймаут REST-запроса (В4.1-fix, Ф1.6): истёк → status 0 */
+  rest: { budget: number; minIntervalMs: number; appsecMinIntervalMs: number; timeoutMs: number };
   catalog: { maxPages: number };
   extract: { maxBlameFiles: number; textCapBytes: number; commentsTopN: number };
 }
@@ -45,7 +46,7 @@ export interface ScanConfig {
 export const DEFAULT_SCAN: ScanConfig = {
   clone: { timeoutMs: 20 * 60_000, maxBytes: 1.5 * 1024 * 1024 * 1024, pollMs: 5_000 },
   degrade: { sinceMonths: 13, timeoutMs: 25 * 60_000, maxBytes: 2.5 * 1024 * 1024 * 1024, enabled: true },
-  rest: { budget: 1000, minIntervalMs: 50, appsecMinIntervalMs: 100 },
+  rest: { budget: 1000, minIntervalMs: 50, appsecMinIntervalMs: 100, timeoutMs: 10_000 },
   catalog: { maxPages: 100 },
   extract: { maxBlameFiles: 200, textCapBytes: 1_000_000, commentsTopN: 50 },
 };
@@ -83,6 +84,10 @@ export interface QueueConfig {
 export interface AccessConfig {
   /** TTL кэша проверок доступа зрителя (К2 В4.1): 15 мин по умолчанию, env ACCESS_CACHE_TTL_MS */
   cacheTtlMs: number;
+  /** TTL результата check-failed (В4.1-fix, Ф1.6; уточнение C1 «кэш 15 мин»: сбой ≠ результат): 60 с, env ACCESS_FAILED_TTL_MS */
+  failedTtlMs: number;
+  /** предел записей кэша доступа, сверх — вытеснение старейших (Ф1.6): 10 000, env ACCESS_CACHE_MAX_ENTRIES */
+  maxEntries: number;
 }
 
 /** Адреса внешних API (В4.1-fix, Ф1.13): тестовый шов — серверы в тестах
@@ -176,6 +181,7 @@ export function scanFromEnv(env: Record<string, string>): ScanConfig {
       budget: envInt(env, "SCAN_BUDGET") ?? d.rest.budget,
       minIntervalMs: d.rest.minIntervalMs,
       appsecMinIntervalMs: envInt(env, "SCAN_APPSEC_MIN_INTERVAL_MS") ?? d.rest.appsecMinIntervalMs,
+      timeoutMs: envInt(env, "SCAN_REST_TIMEOUT_MS") ?? d.rest.timeoutMs,
     },
     catalog: { maxPages: envInt(env, "SCAN_CATALOG_MAX_PAGES") ?? d.catalog.maxPages },
     extract: { ...d.extract },
@@ -215,6 +221,8 @@ export function loadConfig(): Config {
     },
     access: {
       cacheTtlMs: envInt(env, "ACCESS_CACHE_TTL_MS") ?? 15 * 60_000,
+      failedTtlMs: envInt(env, "ACCESS_FAILED_TTL_MS") ?? 60_000,
+      maxEntries: envInt(env, "ACCESS_CACHE_MAX_ENTRIES") ?? 10_000,
     },
     queue: {
       userScansPerHour: envInt(env, "QUEUE_USER_SCANS_PER_HOUR") ?? 10,
