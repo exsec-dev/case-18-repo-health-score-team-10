@@ -75,18 +75,36 @@ export function getSessionUser(db: Database, secret: string, cookieValue: string
   return { userId: row.user_id, login: row.login };
 }
 
+/** Дисплей-профиль пользователя: имя и id портрета Я ID (оба могут быть null). */
+export function userProfile(db: Database, userId: number): { displayName: string | null; avatarId: string | null } {
+  const row = db.query("SELECT display_name, avatar_id FROM users WHERE id = ?").get(userId) as
+    | { display_name: string | null; avatar_id: string | null }
+    | null;
+  return { displayName: row?.display_name ?? null, avatarId: row?.avatar_id ?? null };
+}
+
 /** Отзыв сессии (logout): строка удаляется, cookie становится пустой. */
 export function revokeSession(db: Database, secret: string, cookieValue: string | undefined): void {
   const token = verifySigned(secret, cookieValue);
   if (token !== null) db.query("DELETE FROM sessions WHERE token_hash = ?").run(sha256(token));
 }
 
-/** upsert пользователя по ya_id; возвращает id. */
-export function upsertUser(db: Database, yaId: string, login: string, now = new Date()): number {
+/**
+ * upsert пользователя по ya_id; возвращает id. Имя и портрет (дисплей) —
+ * каждый вход перезаписывает: отозванное право Я ID обнуляет их честно.
+ */
+export function upsertUser(
+  db: Database,
+  yaId: string,
+  login: string,
+  now = new Date(),
+  profile: { displayName?: string | null; avatarId?: string | null } = {},
+): number {
   db.query(
-    `INSERT INTO users (ya_id, login, created_at, last_login_at) VALUES (?, ?, ?, ?)
-     ON CONFLICT(ya_id) DO UPDATE SET login = excluded.login, last_login_at = excluded.last_login_at`,
-  ).run(yaId, login, now.toISOString(), now.toISOString());
+    `INSERT INTO users (ya_id, login, created_at, last_login_at, display_name, avatar_id) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(ya_id) DO UPDATE SET login = excluded.login, last_login_at = excluded.last_login_at,
+       display_name = excluded.display_name, avatar_id = excluded.avatar_id`,
+  ).run(yaId, login, now.toISOString(), now.toISOString(), profile.displayName ?? null, profile.avatarId ?? null);
   return (db.query("SELECT id FROM users WHERE ya_id = ?").get(yaId) as { id: number }).id;
 }
 

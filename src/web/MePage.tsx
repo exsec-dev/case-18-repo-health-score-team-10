@@ -1,26 +1,23 @@
-// MePage.tsx — «Мой кабинет» (В4/Б5): слои идентичности (Q4) — вход
-// Я ID (UX), PAT SourceCraft (права на данные). Секции: PAT-окно
-// github-style (вставка → живая проверка → зашифрованное хранение,
-// замена/удаление), «мои репозитории» (PAT + ручной ввод слага —
-// спискового юзерского эндпоинта в доках нет), запуск анализа с
-// очередью и опросом статуса. Секция «Бюджеты скана» удалена (К5 В4.1,
-// PENDING Алексей): лимиты скана — только оператор. Ссылки ведут на
-// единую карточку /repo/... Токен НИКОГДА не возвращается API и не логируется.
+// MePage.tsx — «Личный кабинет» (В4/Б5): слои идентичности (Q4) — вход
+// Я ID (UX), PAT SourceCraft (права на данные). Основная колонка — «мои
+// репозитории» (PAT + ручной ввод слага — спискового юзерского эндпоинта
+// в доках нет), запуск анализа с очередью и опросом статуса. Токен —
+// настройка, поэтому живёт в правой панели: вставка → живая проверка →
+// зашифрованное хранение, замена/удаление (удаление — с подтверждением).
+// Секция «Бюджеты скана» удалена (К5 В4.1, PENDING Алексей): лимиты скана —
+// только оператор. Ссылки ведут на единую карточку /repo/...
+// Токен НИКОГДА не возвращается API и не логируется.
+import { Clock, Code, Key, Person } from "@gravity-ui/icons";
+import { Alert, Button, Dialog, Flex, Label, Link, Spin, Text, TextInput, useToaster } from "@gravity-ui/uikit";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Alert, Button, Card, Flex, Label, Link, Loader, Text, TextInput } from "@gravity-ui/uikit";
-import {
-  MeResponse,
-  MyReposResponse,
-  RepoCard,
-  fetchJson,
-  mutateJson,
-  useJson,
-  type AsyncState,
-} from "./api";
+import { type MeResponse, type MyReposResponse, type RepoCard, fetchJson, mutateJson, useJson } from "./api";
 import { fmtDateTime, fmtScore } from "./format";
 import { linkProps, repoHref } from "./router";
+import { Page } from "./Shell";
+import { AsideSection, EmptyState, Meta, MetaItem, PageHeader, RepoAvatar, SkeletonRows } from "./ui";
 
 const SLUG_RE = /^[a-z0-9_.-]+\/[a-z0-9_.-]+$/i;
+const CRUMBS = [{ text: "Личный кабинет" }];
 
 type ScanJobState = { sinceScanId: number; startedAt: number; seenScanId: number | null; phase: "queued" | "running" };
 
@@ -29,69 +26,77 @@ export function MePage() {
 
   if (me.state.kind === "loading") {
     return (
-      <Flex gap={2} alignItems="center">
-        <Loader size="s" />
-        <Text color="secondary">Проверяем сессию…</Text>
-      </Flex>
+      <Page crumbs={CRUMBS}>
+        <SkeletonRows rows={4} height={56} />
+      </Page>
     );
   }
-  if (me.state.kind === "error") {
+  if (me.state.kind === "error" || me.state.data.login === null) {
     return <LoginOffer />;
   }
   const data = me.state.data;
-  if (data.login === null) {
-    return <LoginOffer />;
-  }
   return (
-    <Flex direction="column" gap={6}>
-      <Flex direction="column" gap={1}>
-        <Text variant="header-2" as="h1">
-          Мой кабинет
-        </Text>
-        <Text color="secondary">
-          Вы вошли как <Text variant="code-1">{data.login}</Text> (Я ID). Вход — это UX-слой; права на данные
-          даёт отдельный PAT SourceCraft, как на любом git-хостинге.
-        </Text>
-      </Flex>
-      <PatSection key={data.patCheckedAt ?? "no-pat"} hasPat={data.hasPat} checkedAt={data.patCheckedAt} onChanged={() => void me.reload()} />
-      {data.hasPat && <MyReposSection />}
-    </Flex>
+    <Page
+      crumbs={CRUMBS}
+      aside={<PatSection key={data.patCheckedAt ?? "no-pat"} hasPat={data.hasPat} checkedAt={data.patCheckedAt} onChanged={me.reload} />}
+    >
+      <PageHeader
+        title="Личный кабинет"
+        description={
+          <>
+            Вы вошли как <Text variant="code-inline-1">{data.login}</Text> (Я ID). Вход — это UX-слой; права на данные
+            даёт отдельный PAT SourceCraft, как на любом git-хостинге.
+          </>
+        }
+      />
+      {data.hasPat ? (
+        <MyReposSection />
+      ) : (
+        <EmptyState
+          icon={Key}
+          title="Добавьте токен, чтобы увидеть свои репозитории"
+          description="Персональный токен SourceCraft открывает ваш namespace, CI-раны и AppSec ваших репозиториев. Добавьте его в блоке «Токен доступа»."
+        />
+      )}
+    </Page>
   );
 }
 
 /** Не вошедшему — объяснение слоёв и кнопка входа (живой клик — приёмка HQ). */
 function LoginOffer() {
   return (
-    <Card view="outlined" style={{ padding: "var(--g-spacing-6)" }}>
-      <Flex direction="column" gap={4} alignItems="flex-start">
-        <Text variant="header-2" as="h1">
-          Анализ своего репозитория
-        </Text>
-        <Text color="secondary">
-          Сценарий «свой репо» состоит из двух слоёв: вход через Я ID (кто вы у нас) и персональный токен
-          SourceCraft (что платформа может вам показать — CI-раны и AppSec вашего репозитория). Токен создаётся
-          в SourceCraft: Домой → Доступ → Персональные токены доступа.
-        </Text>
-        <Button view="action" size="l" href="/auth/ya">
-          Войти через Я ID
-        </Button>
-        <Text color="secondary">
-          Публичный рейтинг работает и без входа — ссылка «Рейтинг» в шапке. Блоки CI/CD и Security на карточке
-          репозитория видны только тем, у кого есть к ним доступ на SourceCraft; в общий рейтинг они не
-          вкладываются (требование организаторов).
-        </Text>
-      </Flex>
-    </Card>
+    <Page
+      crumbs={CRUMBS}
+      aside={
+        <AsideSection title="Как это устроено">
+          <Text color="complementary">
+            Публичный рейтинг работает и без входа — раздел «Рейтинг». Блоки CI/CD и Security на карточке репозитория
+            видны только тем, у кого есть к ним доступ на SourceCraft; в общий рейтинг они не вкладываются.
+          </Text>
+        </AsideSection>
+      }
+    >
+      <PageHeader title="Личный кабинет" />
+      <EmptyState
+        icon={Person}
+        title="Анализ своего репозитория"
+        description="Сценарий «свой репо» состоит из двух слоёв: вход через Я ID (кто вы у нас) и персональный токен SourceCraft (что платформа может вам показать — CI-раны и AppSec вашего репозитория). Токен создаётся в SourceCraft: Домой → Доступ → Персональные токены доступа."
+        actions={[{ text: "Войти через Я ID", view: "action", size: "l", href: "/auth/ya" }]}
+      />
+    </Page>
   );
 }
 
-// ---------- PAT-окно (github-style: PUT проверяет живьём, DELETE убирает) ----------
+// ---------- токен (github-style: PUT проверяет живьём, DELETE убирает) ----------
 
 function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checkedAt: string | null; onChanged: () => void }) {
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [owner, setOwner] = useState<string | null>(null);
+  const [replacing, setReplacing] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const toaster = useToaster();
 
   async function save() {
     setBusy(true);
@@ -100,6 +105,7 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
       const res = await mutateJson<{ ok: boolean; tokenOwner: string | null }>("/api/me/pat", "PUT", { token });
       setOwner(res.tokenOwner);
       setToken("");
+      toaster.add({ name: "pat-saved", theme: "success", title: hasPat ? "Токен заменён" : "Токен сохранён" });
       onChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -114,80 +120,100 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
     try {
       await mutateJson("/api/me/pat", "DELETE");
       setOwner(null);
+      setConfirmDelete(false);
+      toaster.add({ name: "pat-deleted", theme: "info", title: "Токен удалён" });
       onChanged();
     } catch (e) {
+      setConfirmDelete(false);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
     }
   }
 
+  const tokenForm = (label: string, submit: string) => (
+    <Flex direction="column" gap={2}>
+      <TextInput
+        type="password"
+        size="m"
+        placeholder={label}
+        value={token}
+        onUpdate={setToken}
+        hasClear
+        autoComplete="off"
+        controlProps={{ "aria-label": label }}
+      />
+      <Button view="action" size="m" width="max" onClick={save} loading={busy} disabled={busy || token.length < 8}>
+        {submit}
+      </Button>
+    </Flex>
+  );
+
   return (
-    <Card view="outlined" style={{ padding: "var(--g-spacing-5)" }}>
-      <Flex direction="column" gap={3}>
-        <Flex gap={3} alignItems="center" wrap>
-          <Text variant="subheader-2">Токен SourceCraft (PAT)</Text>
-          {hasPat ? (
-            <Label theme="success">сохранён (проверен {fmtDateTime(checkedAt)})</Label>
+    <AsideSection title="Токен доступа">
+      {hasPat ? (
+        <Flex direction="column" gap={3}>
+          <Flex gap={2} alignItems="center" wrap>
+            <Label theme="success" size="xs">
+              сохранён
+            </Label>
+            <Text variant="body-short" color="secondary">
+              проверен {fmtDateTime(checkedAt)}
+            </Text>
+          </Flex>
+          {owner && <Text color="complementary">Токен принадлежит пользователю {owner}.</Text>}
+          <Text variant="body-short" color="secondary">
+            Токен хранится зашифрованным (AES-256-GCM) и никогда не возвращается обратно в браузер и не попадает в логи.
+            Замена и удаление — сразу действуют на новые сканы.
+          </Text>
+          {replacing ? (
+            tokenForm("Новый PAT", "Проверить и заменить")
           ) : (
-            <Label theme="warning">не задан — свои репозитории недоступны</Label>
+            <Flex gap={2}>
+              <Button view="normal" size="m" onClick={() => setReplacing(true)}>
+                Заменить
+              </Button>
+              <Button view="outlined-danger" size="m" onClick={() => setConfirmDelete(true)} disabled={busy}>
+                Удалить
+              </Button>
+            </Flex>
           )}
         </Flex>
-        {hasPat ? (
-          <Flex direction="column" gap={2} alignItems="flex-start">
-            {owner && <Text color="secondary">Токен принадлежит пользователю {owner}.</Text>}
-            <Text color="secondary">
-              Токен хранится зашифрованным (AES-256-GCM) и никогда не возвращается обратно в браузер и не
-              попадает в логи. Замена и удаление — сразу действуют на новые сканы.
+      ) : (
+        <Flex direction="column" gap={3}>
+          <Flex gap={2} alignItems="center" wrap>
+            <Label theme="warning" size="xs">
+              не задан
+            </Label>
+            <Text variant="body-short" color="secondary">
+              свои репозитории недоступны
             </Text>
-            <Flex gap={2} wrap>
-              <Button view="outlined" size="m" onClick={remove} loading={busy} disabled={busy}>
-                Удалить токен
-              </Button>
-            </Flex>
-            <Flex gap={2} wrap alignItems="flex-end">
-              <TextInput
-                type="password"
-                label="Заменить токен"
-                placeholder="вставьте новый PAT"
-                value={token}
-                onUpdate={setToken}
-                hasClear
-                size="m"
-                style={{ maxWidth: 360 }}
-              />
-              <Button view="action" size="m" onClick={save} loading={busy} disabled={busy || token.length < 8}>
-                Проверить и заменить
-              </Button>
-            </Flex>
           </Flex>
-        ) : (
-          <Flex direction="column" gap={2}>
-            <Text color="secondary">
-              SourceCraft: Домой → Доступ → Персональные токены доступа → Сгенерировать новый токен. Токен
-              показывается один раз — скопируйте его сразу. Перед сохранением мы проверяем его живым запросом
-              GET /user: неверный токен платформа отклонит, и он не сохранится.
-            </Text>
-            <Flex gap={2} wrap alignItems="flex-end">
-              <TextInput
-                type="password"
-                label="Персональный токен"
-                placeholder="SourceCraft PAT"
-                value={token}
-                onUpdate={setToken}
-                hasClear
-                size="m"
-                style={{ maxWidth: 360 }}
-              />
-              <Button view="action" size="m" onClick={save} loading={busy} disabled={busy || token.length < 8}>
-                Проверить и сохранить
-              </Button>
-            </Flex>
-          </Flex>
-        )}
-        {error && <Alert theme="danger" title="Токен не сохранён" message={error} />}
-      </Flex>
-    </Card>
+          <Text variant="body-short" color="complementary">
+            SourceCraft: Домой → Доступ → Персональные токены доступа → Сгенерировать новый токен. Токен показывается один
+            раз — скопируйте его сразу. Перед сохранением мы проверяем его живым запросом GET /user: неверный токен
+            платформа отклонит, и он не сохранится.
+          </Text>
+          {tokenForm("SourceCraft PAT", "Проверить и сохранить")}
+        </Flex>
+      )}
+      {error && <Alert theme="danger" view="outlined" size="s" title="Токен не сохранён" message={error} />}
+
+      <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)} size="s" aria-label="Удаление токена">
+        <Dialog.Header caption="Удалить токен?" />
+        <Dialog.Body>
+          <Text>Свои репозитории и запуск анализа станут недоступны, пока вы не добавите новый токен.</Text>
+        </Dialog.Body>
+        <Dialog.Footer
+          preset="danger"
+          textButtonApply="Удалить"
+          textButtonCancel="Отмена"
+          onClickButtonApply={() => void remove()}
+          onClickButtonCancel={() => setConfirmDelete(false)}
+          loading={busy}
+        />
+      </Dialog>
+    </AsideSection>
   );
 }
 
@@ -197,28 +223,30 @@ function MyReposSection() {
   const repos = useJson<MyReposResponse>("/api/me/repos");
   const [jobs, setJobs] = useState<Record<string, ScanJobState>>({});
   const [manualSlug, setManualSlug] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const toaster = useToaster();
   const reposReloadRef = useRef(repos.reload);
   reposReloadRef.current = repos.reload;
 
-  const startScan = useCallback(async (slug: string) => {
-    setError(null);
-    try {
-      // отсчёт: последний видимый скан, чтобы поймать появление нового
-      let since = 0;
+  const startScan = useCallback(
+    async (slug: string) => {
       try {
-        const [org, repo] = slug.split("/");
-        const card = await fetchJson<RepoCard>(`/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`);
-        since = card.scan?.id ?? 0;
-      } catch {
-        /* карточки может ещё не быть — значит since = 0 */
+        // отсчёт: последний видимый скан, чтобы поймать появление нового
+        let since = 0;
+        try {
+          const [org, repo] = slug.split("/");
+          const card = await fetchJson<RepoCard>(`/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`);
+          since = card.scan?.id ?? 0;
+        } catch {
+          /* карточки может ещё не быть — значит since = 0 */
+        }
+        await mutateJson(`/api/me/repos/${slug.split("/").map(encodeURIComponent).join("/")}/scan`, "POST");
+        setJobs((prev) => ({ ...prev, [slug]: { sinceScanId: since, startedAt: Date.now(), seenScanId: null, phase: "queued" } }));
+      } catch (e) {
+        toaster.add({ name: `scan-failed:${slug}`, theme: "danger", title: "Анализ не запущен", content: e instanceof Error ? e.message : String(e) });
       }
-      await mutateJson(`/api/me/repos/${slug.split("/").map(encodeURIComponent).join("/")}/scan`, "POST");
-      setJobs((prev) => ({ ...prev, [slug]: { sinceScanId: since, startedAt: Date.now(), seenScanId: null, phase: "queued" } }));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  }, []);
+    },
+    [toaster],
+  );
 
   // опрос статуса запущенных анализов: 3с, до 20 минут
   useEffect(() => {
@@ -245,6 +273,7 @@ function MyReposSection() {
                 delete next[slug];
                 return next;
               });
+              toaster.add({ name: `scan-done:${slug}`, theme: "success", title: "Анализ завершён", content: slug });
               reposReloadRef.current();
             } else {
               setJobs((prev) => ({ ...prev, [slug]: { ...job, seenScanId: card.scan!.id, phase: "running" } }));
@@ -256,124 +285,118 @@ function MyReposSection() {
       }
     }, 3000);
     return () => clearInterval(timer);
-  }, [jobs]);
+  }, [jobs, toaster]);
+
+  const slugError = manualSlug !== "" && !SLUG_RE.test(manualSlug) ? "формат: org/repo" : undefined;
 
   return (
-    <Card view="outlined" style={{ padding: "var(--g-spacing-5)" }}>
-      <Flex direction="column" gap={4}>
-        <Flex direction="column" gap={1}>
-          <Text variant="subheader-2">Мои репозитории</Text>
-          <Text color="secondary">
-            Список читается из вашего namespace на SourceCraft по токену. Свои репозитории можно добавить и
-            вручную — полем ниже: чужие и недоступные платформа сама не покажет.
-          </Text>
-        </Flex>
+    <Flex direction="column" gap={3}>
+      <Flex direction="column" gap={1}>
+        <Text variant="subheader-2" as="h2">
+          Мои репозитории
+        </Text>
+        <Text color="complementary">
+          Список читается из вашего namespace на SourceCraft по токену. Свои репозитории можно добавить и вручную: чужие
+          и недоступные платформа сама не покажет.
+        </Text>
+      </Flex>
 
-        {repos.state.kind === "loading" && (
-          <Flex gap={2} alignItems="center">
-            <Loader size="s" />
-            <Text color="secondary">Читаем namespace по токену…</Text>
-          </Flex>
-        )}
-        {repos.state.kind === "error" && <Alert theme="warning" title="Список не получился" message={repos.state.message} />}
-        {repos.state.kind === "ok" && repos.state.data.entries.length === 0 && (
-          <Text color="secondary">
-            В namespace <Text variant="code-1">{repos.state.data.username}</Text> публичных репозиториев нет —
-            добавьте свой слагом ниже.
-          </Text>
-        )}
-        {repos.state.kind === "ok" &&
-          repos.state.data.entries.map((entry) => {
-            const job = jobs[`${entry.org}/${entry.repo}`];
-            return (
-              <RepoRow
-                key={`${entry.org}/${entry.repo}`}
-                org={entry.org}
-                repo={entry.repo}
-                title={entry.title}
-                language={entry.language}
-                lastActivityAt={entry.lastActivityAt}
-                score={entry.score}
-                lastScanAt={entry.lastScanAt}
-                job={job ?? null}
-                onScan={() => void startScan(`${entry.org}/${entry.repo}`)}
-              />
-            );
-          })}
-
-        <Flex gap={2} wrap alignItems="flex-end">
+      <Flex gap={2} alignItems="flex-start" wrap>
+        <div style={{ flex: "1 1 240px", maxWidth: 360 }}>
           <TextInput
-            label="Добавить репозиторий"
+            size="m"
             placeholder="org/repo"
             value={manualSlug}
             onUpdate={(v) => setManualSlug(v.trim())}
             hasClear
-            size="m"
-            style={{ maxWidth: 280 }}
-            errorPlacement="inside"
-            errorMessage={manualSlug !== "" && !SLUG_RE.test(manualSlug) ? "формат: org/repo" : undefined}
+            controlProps={{ "aria-label": "Добавить репозиторий по слагу org/repo" }}
+            errorPlacement="outside"
+            validationState={slugError ? "invalid" : undefined}
+            errorMessage={slugError}
           />
-          <Button
-            view="outlined"
-            size="m"
-            disabled={!SLUG_RE.test(manualSlug)}
-            onClick={() => {
-              void startScan(manualSlug);
-              setManualSlug("");
-            }}
-          >
-            Запустить анализ
-          </Button>
-        </Flex>
-        {error && <Alert theme="danger" title="Анализ не запущен" message={error} />}
+        </div>
+        <Button
+          view="action"
+          size="m"
+          disabled={!SLUG_RE.test(manualSlug)}
+          onClick={() => {
+            void startScan(manualSlug);
+            setManualSlug("");
+          }}
+        >
+          Запустить анализ
+        </Button>
       </Flex>
-    </Card>
-  );
-}
 
-function RepoRow(props: {
-  org: string;
-  repo: string;
-  title: string | null;
-  language: string | null;
-  lastActivityAt: string | null;
-  score: number | null;
-  lastScanAt: string | null;
-  job: ScanJobState | null;
-  onScan: () => void;
-}) {
-  const { org, repo, job } = props;
-  return (
-    <Flex gap={4} alignItems="center" wrap style={{ borderTop: "1px solid var(--g-color-line-generic)", paddingTop: "var(--g-spacing-3)" }}>
-      <Flex direction="column" gap={1} style={{ minWidth: 220, flex: 1 }}>
-        <Link {...linkProps(repoHref(org, repo))}>
-          {org}/{repo}
-        </Link>
-        <Text color="secondary">
-          {props.title && props.title !== repo ? `${props.title} · ` : ""}
-          {props.language ?? "язык не определён"}
-          {props.lastActivityAt ? ` · активность ${fmtDateTime(props.lastActivityAt)}` : ""}
-        </Text>
-      </Flex>
-      {job ? (
-        <Label theme="info">{job.phase === "queued" ? "в очереди…" : "сканируется…"}</Label>
-      ) : props.score !== null ? (
-        <Flex gap={2} alignItems="center">
-          <Text variant="subheader-2">{fmtScore(props.score)}</Text>
-          <Text color="secondary">/ 100 в рейтинге{props.lastScanAt ? ` · ${fmtDateTime(props.lastScanAt)}` : ""}</Text>
-        </Flex>
-      ) : (
-        <Label theme="unknown">ещё не анализировали</Label>
+      {repos.state.kind === "loading" && <SkeletonRows rows={3} height={60} />}
+      {repos.state.kind === "error" && (
+        <Alert theme="warning" view="outlined" title="Список не получился" message={repos.state.message} actions={[{ text: "Повторить", handler: repos.reload }]} />
       )}
-      <Button size="m" view={props.score !== null ? "outlined" : "action"} onClick={props.onScan} disabled={job !== null}>
-        {props.score !== null ? "Обновить анализ" : "Анализировать"}
-      </Button>
+      {repos.state.kind === "ok" && repos.state.data.entries.length === 0 && (
+        <Text color="secondary">
+          В namespace <Text variant="code-inline-1">{repos.state.data.username}</Text> публичных репозиториев нет — добавьте
+          свой слагом выше.
+        </Text>
+      )}
+      {repos.state.kind === "ok" && repos.state.data.entries.length > 0 && (
+        <ul className="rh-list">
+          {repos.state.data.entries.map((entry) => {
+            const slug = `${entry.org}/${entry.repo}`;
+            return <RepoRow key={slug} entry={entry} job={jobs[slug] ?? null} onScan={() => void startScan(slug)} />;
+          })}
+        </ul>
+      )}
     </Flex>
   );
 }
 
-/** Заголовок шапки: логин/вход (App.tsx использует для чипа). */
-export function useMe(): AsyncState<MeResponse> {
-  const { state } = useJson<MeResponse>("/api/me");
-  return state;
+function RepoRow({ entry, job, onScan }: { entry: MyReposResponse["entries"][number]; job: ScanJobState | null; onScan: () => void }) {
+  const { org, repo } = entry;
+  const scored = entry.score !== null;
+  return (
+    <li className="rh-list__item">
+      <Flex gap={4} alignItems="center" wrap>
+        <RepoAvatar repo={repo} logoUrl={entry.logoUrl} size="m" />
+        <Flex direction="column" gap={1} style={{ flex: "1 1 240px", minWidth: 0 }}>
+          <Link {...linkProps(repoHref(org, repo))} view="primary">
+            <Text variant="subheader-2">
+              {org} / {repo}
+            </Text>
+          </Link>
+          {entry.title && entry.title !== repo && <Text color="complementary">{entry.title}</Text>}
+          <Meta>
+            <MetaItem icon={Code}>{entry.language ?? "язык не определён"}</MetaItem>
+            {entry.lastActivityAt && <MetaItem icon={Clock}>активность {fmtDateTime(entry.lastActivityAt)}</MetaItem>}
+          </Meta>
+        </Flex>
+
+        {job ? (
+          <Flex gap={2} alignItems="center">
+            <Spin size="xs" />
+            <Text color="complementary">{job.phase === "queued" ? "В очереди" : "Сканируется"}</Text>
+          </Flex>
+        ) : scored ? (
+          <Flex direction="column" alignItems="flex-end" gap={0}>
+            <Flex gap={1} alignItems="baseline">
+              <Text variant="subheader-3">{fmtScore(entry.score)}</Text>
+              <Text color="secondary">/ 100 в рейтинге</Text>
+            </Flex>
+            {entry.lastScanAt && (
+              <Text variant="body-short" color="secondary">
+                {fmtDateTime(entry.lastScanAt)}
+              </Text>
+            )}
+          </Flex>
+        ) : (
+          <Label theme="unknown" size="xs">
+            ещё не анализировали
+          </Label>
+        )}
+
+        <Button size="m" view={scored ? "normal" : "action"} onClick={onScan} disabled={job !== null}>
+          {scored ? "Обновить анализ" : "Анализировать"}
+        </Button>
+      </Flex>
+    </li>
+  );
 }

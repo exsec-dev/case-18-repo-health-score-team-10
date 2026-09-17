@@ -25,10 +25,12 @@ import {
   SESSION_COOKIE,
   sessionCookieHeader,
   SESSION_TTL_MS,
+  revokeSession,
   upsertUser,
+  userProfile,
 } from "./auth/session";
 import { deletePat, getPat, patMeta, storePat } from "./auth/pat";
-import { buildAuthUrl, exchangeCode } from "./auth/ya";
+import { buildAuthUrl, exchangeCode, yaAvatarUrl } from "./auth/ya";
 import { makeScClient } from "./collectors/http";
 import { needsRescore, rescoreAll } from "./score/rescore";
 import index from "./web/index.html";
@@ -145,6 +147,16 @@ const server = Bun.serve({
         return Response.json({ error: { code: "unconfigured", message: String((e as Error).message) } }, { status: 503 });
       }
     },
+    // выход: сессия отзывается в БД, cookie гасится; PAT пользователя остаётся
+    // (он привязан к аккаунту, а не к сессии). Только POST: SameSite=Lax не
+    // отдаёт cookie межсайтовому POST, выход чужой страницей невозможен
+    "/auth/logout": {
+      POST: (req) => {
+        if (!config.auth.appSecret) return new Response(null, { status: 204 });
+        revokeSession(db, config.auth.appSecret, parseCookies(req.headers.get("cookie"))[SESSION_COOKIE]);
+        return new Response(null, { status: 204, headers: { "set-cookie": sessionCookieHeader(config.auth.appSecret, "", 0) } });
+      },
+    },
     "/auth/ya/callback": async (req) => {
       const url = new URL(req.url);
       const errorParam = url.searchParams.get("error");
@@ -164,7 +176,8 @@ const server = Bun.serve({
       if (!exchanged.ok) {
         return Response.redirect(new URL(`/me?auth_error=${encodeURIComponent(exchanged.error.slice(0, 120))}`, url.origin), 302);
       }
-      const userId = upsertUser(db, exchanged.profile.yaId, exchanged.profile.login);
+      const { yaId, login, displayName, avatarId } = exchanged.profile;
+      const userId = upsertUser(db, yaId, login, new Date(), { displayName, avatarId });
       const cookie = createSession(db, config.auth.appSecret, userId);
       return new Response(null, {
         status: 302,
@@ -177,10 +190,13 @@ const server = Bun.serve({
       // браузер логирует каждый не-2xx в консоль, а чистая консоль —
       // критерий cdp-харнесса В3; остальные me-эндпоинты остаются 401
       const user = sessionOf(req);
-      if (!user) return Response.json({ login: null, hasPat: false, patCheckedAt: null });
+      if (!user) return Response.json({ login: null, displayName: null, avatarUrl: null, hasPat: false, patCheckedAt: null });
       const meta = config.auth.appSecret ? patMeta(db, user.userId) : null;
+      const profile = userProfile(db, user.userId);
       return Response.json({
         login: user.login,
+        displayName: profile.displayName,
+        avatarUrl: profile.avatarId ? yaAvatarUrl(profile.avatarId) : null,
         hasPat: meta?.hasPat === true,
         patCheckedAt: meta && meta.hasPat ? meta.checkedAt : null,
       });

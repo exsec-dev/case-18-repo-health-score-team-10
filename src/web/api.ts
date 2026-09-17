@@ -10,6 +10,10 @@ export type { MetaResponse, RatingResponse, RepoCard, MyRepoEntry };
 export interface MeResponse {
   /** null = аноним (зонд шапки отдаёт 200 и без сессии) */
   login: string | null;
+  /** имя из Я ID (право login:info); null — показываем логин */
+  displayName: string | null;
+  /** портрет Я ID (право login:avatar); null — инициалы */
+  avatarUrl: string | null;
   hasPat: boolean;
   patCheckedAt: string | null;
 }

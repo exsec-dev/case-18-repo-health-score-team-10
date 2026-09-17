@@ -59,9 +59,19 @@ describe("Я ID OAuth: URL и обмен кода", () => {
     const res = await exchangeCode(creds, "code", httpOk);
     expect(res.ok).toBe(true);
     if (res.ok) {
-      expect(res.profile).toEqual({ yaId: "12345", login: "alice" });
+      expect(res.profile).toEqual({ yaId: "12345", login: "alice", displayName: null, avatarId: null });
       expect(JSON.stringify(res)).not.toContain("ya-token");
     }
+  });
+
+  test("exchangeCode: имя и портрет из /info (права login:info, login:avatar); пустой портрет — null", async () => {
+    const withProfile = (json: Record<string, unknown>): YaHttp => ({ ...httpOk, getJson: async () => ({ status: 200, json }) });
+    const full = await exchangeCode(creds, "code", withProfile({ id: 1, login: "kate", display_name: "kate", real_name: "Екатерина Прожирко", default_avatar_id: "123/abc", is_avatar_empty: false }));
+    expect(full.ok && full.profile).toEqual({ yaId: "1", login: "kate", displayName: "Екатерина Прожирко", avatarId: "123/abc" });
+    const parts = await exchangeCode(creds, "code", withProfile({ id: 1, login: "kate", display_name: "kate", first_name: "Екатерина", last_name: "Прожирко" }));
+    expect(parts.ok && parts.profile.displayName).toBe("Екатерина Прожирко");
+    const empty = await exchangeCode(creds, "code", withProfile({ id: 1, login: "kate", real_name: "Екатерина", default_avatar_id: "0/0-0", is_avatar_empty: true }));
+    expect(empty.ok && empty.profile).toEqual({ yaId: "1", login: "kate", displayName: "Екатерина", avatarId: null });
   });
 
   test("exchangeCode: invalid_grant → ошибка текстом платформы", async () => {

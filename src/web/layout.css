@@ -1,0 +1,426 @@
+/* layout.css — раскладка каркаса и те паттерны SourceCraft, которых нет
+ * в uikit/navigation: режимы прокрутки страницы, разделённый список
+ * (Listing), мета-строка «иконка + текст», строка категории, блок
+ * аккаунта в rail. Только токены Gravity; числа — геометрия, снятая с
+ * sourcecraft.dev 17.09 (правая колонка 320, ActionBar 40, отступ 20).
+ * Префикс rh- — чтобы не пересечься с g-/gn- классами библиотек.
+ */
+
+/* ---------- документ: без отступов браузера и без прокрутки окна ---------- */
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+#root {
+  height: 100%;
+}
+
+/* скроллбары как у платформы: ручка/дорожка из токенов темы (sourcecraft.dev
+ * задаёт то же на .g-root; в стоковом uikit этого правила нет) */
+.g-root {
+  scrollbar-color: var(--g-color-scroll-handle) var(--g-color-scroll-track);
+}
+
+.g-root::-webkit-scrollbar,
+.g-root ::-webkit-scrollbar {
+  width: var(--g-scrollbar-width);
+  height: var(--g-scrollbar-width);
+  background: var(--g-color-scroll-track);
+}
+
+.g-root::-webkit-scrollbar-track,
+.g-root ::-webkit-scrollbar-track {
+  background: var(--g-color-scroll-track);
+}
+
+.g-root::-webkit-scrollbar-corner,
+.g-root ::-webkit-scrollbar-corner {
+  background: var(--g-color-scroll-corner);
+}
+
+.g-root::-webkit-scrollbar-thumb,
+.g-root ::-webkit-scrollbar-thumb {
+  background: var(--g-color-scroll-handle);
+}
+
+.g-root::-webkit-scrollbar-thumb:hover,
+.g-root ::-webkit-scrollbar-thumb:hover {
+  background: var(--g-color-scroll-handle-hover);
+}
+
+/* ---------- каркас ---------- */
+
+.rh-workspace {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-width: 0;
+  background: var(--g-color-base-background);
+}
+
+/* заголовки и абзацы страниц — без браузерных отступов: ритм задают Flex-gap
+ * и токены отступов (Text as="h1" отступы uikit не сбрасывает) */
+.rh-workspace :is(h1, h2, h3, p) {
+  margin: 0;
+}
+
+/* смена темы: собственные переходы компонентов выключены, экран перетекает
+ * целиком одним view transition (Shell.tsx, switchTheme) */
+.rh-theme-switching *,
+.rh-theme-switching *::before,
+.rh-theme-switching *::after {
+  transition: none !important;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 0.25s;
+}
+
+/* блок аккаунта: одна высота в узком и широком rail (без скачка при раскрытии) */
+.rh-rail-account {
+  box-sizing: border-box;
+  height: 66px;
+  padding: var(--g-spacing-2) 7px;
+  display: flex;
+  align-items: center;
+}
+
+.rh-rail-account_compact {
+  justify-content: center;
+}
+
+.rh-rail-account > * {
+  min-width: 0;
+  flex: 1;
+}
+
+.rh-rail-account_compact > * {
+  flex: none;
+}
+
+.rh-rail-user {
+  display: flex;
+  align-items: center;
+  gap: var(--g-spacing-3);
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 50px;
+  padding: var(--g-spacing-1);
+  border: 0;
+  border-radius: var(--g-border-radius-l);
+  outline: none;
+  background: none;
+  color: var(--g-color-text-primary);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rh-rail_compact .rh-rail-user__text {
+  display: none;
+}
+
+/* подписи всех разделов в узком rail — разом при наведении на меню (как у
+ * SourceCraft); цвета — плавающие поверхности темы */
+.rh-rail-item {
+  position: relative;
+}
+
+.rh-rail-tip {
+  position: fixed;
+  z-index: 1000;
+  padding: var(--g-spacing-2) var(--g-spacing-3);
+  border-radius: var(--g-border-radius-m);
+  background: var(--g-color-base-float-accent);
+  box-shadow: 0 2px 8px var(--g-color-sfx-shadow);
+  color: var(--g-color-text-primary);
+  font-family: var(--g-text-body-font-family);
+  font-size: var(--g-text-body-2-font-size);
+  line-height: var(--g-text-body-2-line-height);
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.rh-rail-tip_current {
+  background: var(--g-color-base-float-heavy);
+}
+
+.rh-rail-item:hover .rh-rail-tip {
+  background: var(--g-color-base-float-heavy);
+}
+
+.rh-rail-user:hover {
+  background: var(--g-color-base-simple-hover);
+}
+
+.rh-rail-user:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--g-color-line-focus);
+}
+
+/* ---------- страница: ActionBar + тело (основная колонка + правая панель) ---------- */
+
+.rh-page {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.rh-actionbar {
+  flex-shrink: 0;
+  background: var(--g-color-base-background);
+}
+
+.rh-actionbar__crumbs {
+  flex: 1;
+  min-width: 0;
+}
+
+.rh-page__body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.rh-page__main {
+  flex: 1;
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--g-spacing-5);
+}
+
+.rh-page__aside {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 320px;
+  padding: var(--g-spacing-5);
+  border-left: 1px solid var(--g-color-line-generic);
+}
+
+.rh-drawer {
+  box-sizing: border-box;
+  height: 100%;
+  padding: var(--g-spacing-5);
+  overflow-y: auto;
+  background: var(--g-color-base-background);
+}
+
+/* document: каждая колонка — свой контейнер прокрутки */
+.rh-page_document .rh-page__main,
+.rh-page_document .rh-page__aside {
+  overflow-y: auto;
+}
+
+/* fill: шапка и футер закреплены, прокручивается только содержимое между ними */
+.rh-page_fill .rh-page__main {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 0;
+  overflow: hidden;
+}
+
+.rh-page_fill .rh-page__aside {
+  overflow-y: auto;
+}
+
+.rh-fill__header,
+.rh-fill__footer {
+  flex-shrink: 0;
+}
+
+.rh-fill__footer {
+  padding: var(--g-spacing-3) 0;
+  border-top: 1px solid var(--g-color-line-generic);
+}
+
+.rh-fill__content {
+  flex: 1;
+  min-height: 0;
+  padding-bottom: var(--g-spacing-5);
+  overflow: auto;
+}
+
+/* таблица в fill прокручивает себя сама: заголовки остаются на месте.
+ * Стоковый uikit прячет скроллбар контейнера таблицы — здесь он нужен. */
+.rh-table-fill {
+  height: 100%;
+}
+
+.rh-fill__content:has(> .rh-table-fill) {
+  padding-bottom: 0;
+  overflow: hidden;
+}
+
+.rh-table-fill .g-table__scroll-container {
+  height: 100%;
+  scrollbar-width: auto;
+}
+
+.rh-table-fill .g-table__scroll-container::-webkit-scrollbar {
+  display: block;
+}
+
+.rh-table-fill thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--g-color-base-background);
+}
+
+.rh-table-fill thead th.g-table__cell_sticky_start,
+.rh-table-fill thead th.g-table__cell_sticky_end {
+  z-index: 3;
+}
+
+/* ---------- разделённый список (Listing у SourceCraft) ---------- */
+
+.rh-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--g-color-line-generic);
+}
+
+.rh-list__item {
+  padding: var(--g-spacing-3);
+  border-bottom: 1px solid var(--g-color-line-generic);
+}
+
+/* ---------- шапка карточки репозитория: аватар на высоту «название + мета» ---------- */
+
+.rh-repo-head {
+  display: flex;
+  align-items: stretch;
+  gap: var(--g-spacing-3);
+  min-width: 0;
+}
+
+/* ---------- мета-строка: иконка + вторичный текст ---------- */
+
+.rh-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--g-spacing-1) var(--g-spacing-3);
+  color: var(--g-color-text-secondary);
+}
+
+.rh-meta__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--g-spacing-1);
+}
+
+/* ---------- строка категории на карточке ---------- */
+
+.rh-category {
+  display: grid;
+  grid-template-columns: 16px minmax(120px, 180px) minmax(80px, 1fr) 40px minmax(96px, auto) auto;
+  align-items: center;
+  gap: var(--g-spacing-3);
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 44px;
+  padding: var(--g-spacing-2) var(--g-spacing-3);
+  border: 0;
+  border-radius: var(--g-border-radius-m);
+  outline: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+button.rh-category {
+  cursor: pointer;
+}
+
+button.rh-category:hover {
+  background: var(--g-color-base-simple-hover);
+}
+
+button.rh-category:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--g-color-line-focus);
+}
+
+.rh-category__value {
+  text-align: right;
+}
+
+.rh-subrows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-2);
+  padding: var(--g-spacing-1) var(--g-spacing-3) var(--g-spacing-3) calc(16px + var(--g-spacing-6));
+}
+
+.rh-subrow {
+  display: grid;
+  grid-template-columns: minmax(160px, 260px) 120px 1fr;
+  gap: var(--g-spacing-3);
+  align-items: baseline;
+}
+
+.rh-code {
+  margin: 0;
+  font-family: var(--g-text-code-font-family);
+  font-size: var(--g-text-code-1-font-size);
+  line-height: var(--g-text-code-1-line-height);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ---------- адаптив ---------- */
+
+@media (max-width: 1279px) {
+  /* document: колонки друг под другом, прокрутка одна — всего тела страницы */
+  .rh-page_document .rh-page__body {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .rh-page_document .rh-page__main,
+  .rh-page_document .rh-page__aside {
+    flex: none;
+    overflow: visible;
+  }
+
+  .rh-page_document .rh-page__aside {
+    width: auto;
+    border-top: 1px solid var(--g-color-line-generic);
+    border-left: 0;
+  }
+}
+
+@media (max-width: 767px) {
+  .rh-page__main,
+  .rh-page__aside {
+    padding: var(--g-spacing-4);
+  }
+
+  .rh-category {
+    grid-template-columns: 16px 1fr 40px;
+  }
+
+  .rh-category__bar,
+  .rh-category__weight,
+  .rh-category__tags {
+    display: none;
+  }
+
+  .rh-subrows {
+    padding-left: var(--g-spacing-3);
+  }
+
+  .rh-subrow {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+}

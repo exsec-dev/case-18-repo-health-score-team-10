@@ -42,7 +42,7 @@ beforeAll(async () => {
   const t: ApiTestDb = { db, close: () => db.close() };
   const repoId = seedRepo(t, { org: "pub", repo: "repo" });
   seedScore(t, repoId, seedScan(t, repoId, { facts: cardFacts() }), { total: 60 });
-  for (const name of ["active", "rate", "cache", "nopat"]) {
+  for (const name of ["active", "rate", "cache", "nopat", "leaving"]) {
     cookies[name] = createSession(db, SECRET, upsertUser(db, `ya-${name}`, name));
   }
   db.close();
@@ -69,6 +69,17 @@ const postScan = async (name: string | null, slug: string) => {
   const body = (await res.json()) as { deduplicated?: boolean; jobId?: number; error?: { code: string } };
   return { status: res.status, code: body.error?.code ?? null, deduplicated: body.deduplicated ?? null };
 };
+
+describe("POST /auth/logout — выход отзывает сессию (В4.5)", () => {
+  test("сессия жива → 204 с погашенной cookie → та же cookie больше не пользователь; GET не выходит", async () => {
+    expect(((await (await fetch(url("/api/me"), as("leaving"))).json()) as { login: string | null }).login).toBe("leaving");
+    expect((await fetch(url("/auth/logout"), as("leaving"))).status).not.toBe(204);
+    const res = await fetch(url("/auth/logout"), as("leaving", { method: "POST" }));
+    expect(res.status).toBe(204);
+    expect(res.headers.get("set-cookie")).toContain("Max-Age=0");
+    expect(((await (await fetch(url("/api/me"), as("leaving"))).json()) as { login: string | null }).login).toBeNull();
+  });
+});
 
 describe("POST /api/me/repos/:org/:repo/scan — коды ответа (Ф1.13)", () => {
   // первым тестом: воркер-луп сервера (опрос 5 с) ещё не успел заявить job

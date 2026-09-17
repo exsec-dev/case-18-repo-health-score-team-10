@@ -133,6 +133,8 @@ export interface RepoUpsertMeta {
    *  (живая приёмка В4: upsert без меты перезаписывал 'private' на 'public');
    *  новая строка без видимости — 'private' до подтверждения (Ф1.10, fail-closed) */
   visibility?: string | null;
+  /** logo.url платформы (дисплей); null не затирает сохранённый */
+  logoUrl?: string | null;
 }
 
 export function upsertRepo(db: Database, org: string, repo: string, meta: RepoUpsertMeta = {}): number {
@@ -142,8 +144,8 @@ export function upsertRepo(db: Database, org: string, repo: string, meta: RepoUp
   const hasVisibility = typeof meta.visibility === "string" && meta.visibility !== "";
   const updateVisibility = hasVisibility ? "visibility = excluded.visibility," : "";
   db.query(
-    `INSERT INTO repos (org_slug, repo_slug, title, language, likes, last_activity_at, forks, reaction_counts, visibility)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO repos (org_slug, repo_slug, title, language, likes, last_activity_at, forks, reaction_counts, visibility, logo_url)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(org_slug, repo_slug) DO UPDATE SET
        title = COALESCE(excluded.title, title),
        language = COALESCE(excluded.language, language),
@@ -151,6 +153,7 @@ export function upsertRepo(db: Database, org: string, repo: string, meta: RepoUp
        last_activity_at = COALESCE(excluded.last_activity_at, last_activity_at),
        forks = COALESCE(excluded.forks, forks),
        reaction_counts = COALESCE(excluded.reaction_counts, reaction_counts),
+       logo_url = COALESCE(excluded.logo_url, logo_url),
        ${updateVisibility}
        id = id`,
   ).run(
@@ -163,6 +166,7 @@ export function upsertRepo(db: Database, org: string, repo: string, meta: RepoUp
     meta.forks ?? null,
     meta.reactionCounts ? JSON.stringify(meta.reactionCounts) : null,
     hasVisibility ? (meta.visibility as string) : "private",
+    meta.logoUrl ?? null,
   );
   const row = db.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number };
   return row.id;
@@ -396,6 +400,7 @@ export function repoMetaToUpsert(meta: NonNullable<RestCollectResult["repoMeta"]
     lastActivityAt: meta.lastActivityAt,
     forks: meta.forks,
     reactionCounts: meta.reactionCounts,
+    logoUrl: meta.logoUrl,
     ...(typeof meta.visibility === "string" && meta.visibility !== "" ? { visibility: meta.visibility } : {}),
   };
 }

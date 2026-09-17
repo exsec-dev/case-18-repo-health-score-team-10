@@ -5,8 +5,31 @@
 // приходят без чисел и показываются заглушкой по причине доступа.
 // Главное правило экрана — трекер-закон в UI: ни одной фразы без факта
 // либо без честного объяснения, почему факта нет.
+// Раскладка как у страницы репозитория SourceCraft: действия в ActionBar,
+// содержимое во вкладках, итоговая оценка — в правой панели.
+import { ArrowDownToLine, ArrowUpRightFromSquare, Clock, Code, CodeFork, FileText, Heart, Lock, LogoMarkdown, SquareListUl } from "@gravity-ui/icons";
+import {
+  Alert,
+  ArrowToggle,
+  Button,
+  Card,
+  DefinitionList,
+  DropdownMenu,
+  Flex,
+  HelpMark,
+  Icon,
+  Label,
+  Popover,
+  Progress,
+  Spin,
+  Tab,
+  TabList,
+  TabPanel,
+  TabProvider,
+  Text,
+  useToaster,
+} from "@gravity-ui/uikit";
 import { useEffect, useState } from "react";
-import { Alert, Button, Card, Disclosure, Flex, Label, Link, Loader, Progress, Text } from "@gravity-ui/uikit";
 import type { CardCategory } from "../api/repos";
 import type { MeResponse, MetaResponse, RepoCard } from "./api";
 import { fetchJson, mutateJson, useJson } from "./api";
@@ -18,14 +41,17 @@ import {
   fmtCoverage,
   fmtDate,
   fmtDateTime,
+  fmtDelta,
   fmtFactValue,
   fmtNumber,
   fmtScore,
   fmtSubmetric,
   gitLimitsText,
   scanStatusText,
+  scanTriggerText,
 } from "./format";
-import { linkProps } from "./router";
+import { Page, type Crumb } from "./Shell";
+import { AsideSection, EmptyState, Meta, MetaItem, RepoAvatar, SkeletonRows } from "./ui";
 
 type Card = RepoCard;
 type Category = CardCategory;
@@ -37,56 +63,101 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   const { state, reload } = useJson<Card>(cardUrl);
   const me = useJson<MeResponse>("/api/me");
   const canRefresh = me.state.kind === "ok" && me.state.data.login !== null && me.state.data.hasPat;
+  const sinceScanId = state.kind === "ok" ? (state.data.scan?.id ?? 0) : 0;
+  const refresh = useRefreshAnalysis(org, repo, cardUrl, sinceScanId, reload);
+
+  const crumbs: Crumb[] = [{ text: "Рейтинг", href: "/" }, { text: `${org} / ${repo}` }];
+  const refreshButton = canRefresh && (
+    <Button view="action" size="m" onClick={refresh.start} disabled={refresh.phase !== "idle"} loading={refresh.phase === "sending"}>
+      {refresh.phase === "queued" && <Spin size="xs" />}
+      {refresh.phase === "queued" ? "Анализ в очереди" : "Обновить анализ"}
+    </Button>
+  );
 
   if (state.kind === "loading") {
     return (
-      <Flex gap={2} alignItems="center">
-        <Loader size="s" />
-        <Text color="secondary">Загружаем карточку…</Text>
-      </Flex>
+      <Page crumbs={crumbs} aside={<SkeletonRows rows={3} height={96} />}>
+        <Flex direction="column" gap={4}>
+          <SkeletonRows rows={1} height={48} />
+          <SkeletonRows rows={6} />
+        </Flex>
+      </Page>
     );
   }
   if (state.kind === "error") {
     return (
-      <Flex direction="column" gap={4}>
-        <Alert theme="danger" title={`Не удалось открыть ${org}/${repo}`} message={state.message} actions={[{ text: "Повторить", handler: reload }]} />
-        {canRefresh && <RefreshAnalysis org={org} repo={repo} cardUrl={cardUrl} sinceScanId={0} onDone={reload} />}
-      </Flex>
+      <Page crumbs={crumbs} actions={refreshButton}>
+        <Alert
+          theme="danger"
+          view="outlined"
+          title={`Не удалось открыть ${org}/${repo}`}
+          message={state.message}
+          actions={[{ text: "Повторить", handler: reload }]}
+        />
+      </Page>
     );
   }
 
   const card = state.data;
+  const reportHref = `${cardUrl}/report.md`;
+  const actions = (
+    <Flex gap={2} alignItems="center">
+      {card.score !== null && <ReportMenu mdHref={reportHref} />}
+      {refreshButton}
+    </Flex>
+  );
+
   return (
-    <Flex direction="column" gap={6}>
+    <Page crumbs={crumbs} actions={actions} aside={<ScoreAside card={card} meta={meta} />}>
       <Header card={card} />
-      {canRefresh && <RefreshAnalysis org={org} repo={repo} cardUrl={cardUrl} sinceScanId={card.scan?.id ?? 0} onDone={reload} />}
       {card.score === null ? (
-        <Alert
-          theme="normal"
+        <EmptyState
+          icon={SquareListUl}
           title="Репозиторий есть в каталоге, но ещё не сканировался"
-          message="Score появится после первого скана: его считает код по фактам, а фактов пока нет."
+          description="Score появится после первого скана: его считает код по фактам, а фактов пока нет."
         />
       ) : (
-        <>
-          <ScoreBlock card={card} meta={meta} />
-          <Categories card={card} meta={meta} />
+        <Flex direction="column" gap={4}>
           <Markers card={card} />
-          <Recommendations card={card} />
-          <ReportLink org={org} repo={repo} />
-        </>
+          <CardTabs card={card} meta={meta} />
+        </Flex>
       )}
-    </Flex>
+    </Page>
+  );
+}
+
+/**
+ * «Отчёт»: формат выбирается в меню. MD — тот же генератор, что рисует
+ * страницу (§2.3); PDF заложен в интерфейс, генератора пока нет — пункт
+ * виден, но ничего не делает.
+ */
+function ReportMenu({ mdHref }: { mdHref: string }) {
+  return (
+    <DropdownMenu
+      size="m"
+      popupProps={{ placement: "bottom-end" }}
+      renderSwitcher={(props) => (
+        <Button {...props} view="normal" size="m" aria-haspopup="menu">
+          <Icon data={ArrowDownToLine} size={16} />
+          Отчёт
+        </Button>
+      )}
+      items={[
+        { text: "Markdown (.md)", iconStart: <Icon data={LogoMarkdown} size={16} />, href: mdHref },
+        { text: "PDF (.pdf)", iconStart: <Icon data={FileText} size={16} />, action: () => {} },
+      ]}
+    />
   );
 }
 
 /**
  * «Обновить анализ» — зрителю с сессией и PAT (К2). Сервер проверяет доступ
  * PAT до постановки (К3); ответ показывается как есть, опрос карточки — до
- * появления нового завершённого скана.
+ * появления нового завершённого скана. Итог — тостом, как у платформы.
  */
-function RefreshAnalysis({ org, repo, cardUrl, sinceScanId, onDone }: { org: string; repo: string; cardUrl: string; sinceScanId: number; onDone: () => void }) {
+function useRefreshAnalysis(org: string, repo: string, cardUrl: string, sinceScanId: number, onDone: () => void) {
   const [phase, setPhase] = useState<"idle" | "sending" | "queued">("idle");
-  const [error, setError] = useState<string | null>(null);
+  const toaster = useToaster();
 
   useEffect(() => {
     if (phase !== "queued") return;
@@ -100,6 +171,7 @@ function RefreshAnalysis({ org, repo, cardUrl, sinceScanId, onDone }: { org: str
         const card = await fetchJson<Card>(cardUrl);
         if (card.scan && card.scan.id > sinceScanId && card.scan.finishedAt && card.scan.status !== "running") {
           setPhase("idle");
+          toaster.add({ name: `scan-done:${org}/${repo}`, theme: "success", title: "Анализ завершён", content: "Карточка обновлена по новому скану." });
           onDone();
         }
       } catch {
@@ -107,140 +179,215 @@ function RefreshAnalysis({ org, repo, cardUrl, sinceScanId, onDone }: { org: str
       }
     }, 5000);
     return () => clearInterval(timer);
-  }, [phase, cardUrl, sinceScanId, onDone]);
+  }, [phase, cardUrl, sinceScanId, onDone, toaster, org, repo]);
 
   async function start() {
     setPhase("sending");
-    setError(null);
     try {
       await mutateJson(`/api/me/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/scan`, "POST");
       setPhase("queued");
+      toaster.add({ name: `scan-queued:${org}/${repo}`, theme: "info", title: "Анализ в очереди", content: "Карточка обновится после скана." });
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
       setPhase("idle");
+      toaster.add({
+        name: `scan-failed:${org}/${repo}`,
+        theme: "danger",
+        title: "Анализ не запущен",
+        content: e instanceof Error ? e.message : String(e),
+      });
     }
   }
 
-  return (
-    <Flex direction="column" gap={2} alignItems="flex-start">
-      <Flex gap={3} alignItems="center" wrap>
-        <Button view="outlined" size="m" onClick={start} loading={phase === "sending"} disabled={phase !== "idle"}>
-          Обновить анализ
-        </Button>
-        {phase === "queued" && <Label theme="info">анализ в очереди — карточка обновится после скана</Label>}
-      </Flex>
-      {error && <Alert theme="danger" title="Анализ не запущен" message={error} />}
-    </Flex>
-  );
-}
-
-/** Кнопка выгрузки: ссылка на тот же генератор, что рисует страницу (§2.3). */
-function ReportLink({ org, repo }: { org: string; repo: string }) {
-  const href = `/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/report.md`;
-  return (
-    <Flex direction="column" gap={1} alignItems="flex-start">
-      <Button view="action" size="l" href={href}>
-        Скачать отчёт (MD)
-      </Button>
-      <Text color="secondary">
-        Полный разбор: категории, подметрики, все рекомендации с фактами и раздел об ограничениях методики.
-      </Text>
-    </Flex>
-  );
+  return { phase, start };
 }
 
 function Header({ card }: { card: Card }) {
-  const { repo: r, scan, score } = card;
+  const { repo: r } = card;
   return (
-    <Flex direction="column" gap={2}>
-      <Flex gap={3} alignItems="baseline" wrap>
-        <Text variant="header-2" as="h1">
-          {r.org}/{r.repo}
+    <div style={{ marginBottom: "var(--g-spacing-4)" }}>
+      {/* аватар l (42px) ровно на высоту блока «название 24 + мета 16» */}
+      <div className="rh-repo-head">
+        <RepoAvatar repo={r.repo} logoUrl={r.logoUrl} size="l" />
+        <Flex direction="column" justifyContent="space-between" style={{ minWidth: 0 }}>
+          <Flex gap={1} alignItems="center" style={{ minWidth: 0 }}>
+            <Text variant="header-1" as="h1" ellipsis>
+              {r.org} / {r.repo}
+            </Text>
+            <Button
+              view="flat-secondary"
+              size="s"
+              href={r.webUrl}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Открыть репозиторий на sourcecraft.dev"
+              title="Открыть на sourcecraft.dev"
+            >
+              <Icon data={ArrowUpRightFromSquare} size={14} />
+            </Button>
+          </Flex>
+          <Meta>
+            <MetaItem icon={Code} title="язык">
+              {r.language ?? "язык не определён"}
+            </MetaItem>
+            <MetaItem icon={Heart} title="лайки">
+              {fmtNumber(r.likes)}
+            </MetaItem>
+            <MetaItem icon={CodeFork} title="форки">
+              {fmtNumber(r.forks)}
+            </MetaItem>
+            <MetaItem icon={Clock} title="последняя активность">
+              активность {fmtDate(r.lastActivityAt)}
+            </MetaItem>
+          </Meta>
+        </Flex>
+      </div>
+      {r.title && r.title !== r.repo && (
+        <Text as="p" color="complementary" style={{ margin: "var(--g-spacing-2) 0 0" }}>
+          {r.title}
         </Text>
-        <Link href={r.webUrl} target="_blank" rel="noreferrer">
-          открыть на sourcecraft.dev
-        </Link>
-      </Flex>
-      {r.title && r.title !== r.repo && <Text color="secondary">{r.title}</Text>}
-      <Flex gap={2} wrap alignItems="center">
-        <Label theme="normal">язык: {r.language ?? "не определён"}</Label>
-        <Label theme="normal">лайки: {fmtNumber(r.likes)}</Label>
-        <Label theme="normal">форки: {fmtNumber(r.forks)}</Label>
-        <Label theme="normal">последняя активность: {fmtDate(r.lastActivityAt)}</Label>
-      </Flex>
-      <Text color="secondary">
-        {scan
-          ? `Просканирован ${fmtDateTime(scan.finishedAt ?? scan.startedAt)}, скан #${scan.id} (${scanStatusText(scan.status)}, запуск: ${scan.trigger})`
-          : "Скана ещё не было"}
-        {score ? `, модель ${score.modelVersion}` : ""}
-      </Text>
-    </Flex>
+      )}
+    </div>
   );
 }
+
+function CardTabs({ card, meta }: { card: Card; meta: MetaResponse | null }) {
+  const [tab, setTab] = useState("categories");
+  return (
+    <TabProvider value={tab} onUpdate={setTab}>
+      <TabList size="m">
+        <Tab value="categories">Категории</Tab>
+        <Tab value="recommendations" counter={card.recommendations.length}>
+          Рекомендации
+        </Tab>
+      </TabList>
+      <div style={{ paddingTop: "var(--g-spacing-3)" }}>
+        <TabPanel value="categories">
+          <Categories card={card} meta={meta} />
+        </TabPanel>
+        <TabPanel value="recommendations">
+          <Recommendations card={card} />
+        </TabPanel>
+      </div>
+    </TabProvider>
+  );
+}
+
+// ---------- правая панель: итог ----------
 
 /** Причина закрытия полного итога: первый закрытый канал (CI, затем Security). */
 function fullLockReason(card: Card): string | null {
   return accessLockText(card.access.cicd) ?? accessLockText(card.access.appsec);
 }
 
-function ScoreBlock({ card, meta }: { card: Card; meta: MetaResponse | null }) {
-  const score = card.score!;
+function ScoreAside({ card, meta }: { card: Card; meta: MetaResponse | null }) {
+  const { score, scan } = card;
   const threshold = meta ? fmtCoverage(meta.coverageNullBelow) : "порога";
   return (
-    <Card view="outlined" style={{ padding: "var(--g-spacing-6)" }}>
-      <Flex direction="column" gap={4}>
-        <Flex gap={6} alignItems="flex-start" wrap>
-          <ScoreTile title="Score в рейтинге (4 категории)" total={score.totalRating} coverage={score.coverageRating} />
-          {score.fullLocked ? (
-            <Flex direction="column" gap={1} style={{ minWidth: 220, maxWidth: 360 }}>
-              <Text color="secondary">Полный Score (с CI и Security)</Text>
-              <Label theme="unknown" size="m">
-                закрыто
-              </Label>
-              <Text color="secondary">{fullLockReason(card)}</Text>
-            </Flex>
-          ) : (
-            <ScoreTile title="Полный Score (с CI и Security)" total={score.totalFull} coverage={score.coverageFull ?? 0} />
-          )}
-        </Flex>
-        <Text color="secondary">
+    <>
+      {score && (
+        <Card view="outlined" style={{ padding: "var(--g-spacing-4)", marginBottom: "var(--g-spacing-4)" }}>
+          <Flex direction="column" gap={4}>
+            <ScoreFigure
+              title="Score в рейтинге"
+              help="Считают 4 категории: Документация, Активность, Issues, Code health. Так репозитории сравниваются в общем рейтинге."
+              total={score.totalRating}
+              coverage={score.coverageRating}
+            />
+            {score.fullLocked ? (
+              <Flex direction="column" gap={1}>
+                <Text color="secondary">Полный Score (с CI и Security)</Text>
+                <Flex gap={2} alignItems="center">
+                  <Icon data={Lock} size={16} />
+                  <Text variant="subheader-2">закрыто</Text>
+                </Flex>
+                <Text variant="body-short" color="complementary">
+                  {fullLockReason(card)}
+                </Text>
+              </Flex>
+            ) : (
+              <ScoreFigure
+                title="Полный Score (с CI и Security)"
+                help="Все 6 категорий. Виден участникам репозитория с доступом к данным CI и Security."
+                total={score.totalFull}
+                coverage={score.coverageFull ?? 0}
+              />
+            )}
+          </Flex>
+        </Card>
+      )}
+      {score && (
+        <Text as="p" variant="body-short" color="secondary" style={{ margin: "0 0 var(--g-spacing-6)" }}>
           {meta ? `При покрытии данными ниже ${threshold} Score не выставляется: без данных честного числа нет. ` : ""}В рейтинге
           сравниваются только 4 категории; CI и Security видны участникам репозитория с доступом к этим данным.
         </Text>
-        {score.noData.length > 0 && (
-          <Flex direction="column" gap={1}>
-            <Text color="secondary">Каких данных не хватило:</Text>
+      )}
+
+      {score && score.noData.length > 0 && (
+        <AsideSection title="Каких данных не хватило">
+          <Flex as="ul" direction="column" gap={2} style={{ margin: 0, paddingInlineStart: "var(--g-spacing-4)" }}>
             {score.noData.map((raw) => (
-              <Text key={raw} color="secondary">
-                • {humanNoData(raw)}
-              </Text>
+              <li key={raw}>
+                <Text color="complementary">{humanNoData(raw)}</Text>
+              </li>
             ))}
           </Flex>
+        </AsideSection>
+      )}
+
+      <AsideSection title="Скан">
+        {scan ? (
+          <DefinitionList nameMaxWidth={120}>
+            <DefinitionList.Item name="Завершён">{fmtDateTime(scan.finishedAt ?? scan.startedAt)}</DefinitionList.Item>
+            <DefinitionList.Item name="Статус">
+              <Label theme={scan.status === "ok" ? "success" : scan.status === "bad" ? "danger" : "warning"} size="xs">
+                {scanStatusText(scan.status)}
+              </Label>
+            </DefinitionList.Item>
+            <DefinitionList.Item name="Запуск">{scanTriggerText(scan.trigger)}</DefinitionList.Item>
+            <DefinitionList.Item name="Номер">#{scan.id}</DefinitionList.Item>
+            {score && <DefinitionList.Item name="Модель">{score.modelVersion}</DefinitionList.Item>}
+          </DefinitionList>
+        ) : (
+          <Text color="secondary">Скана ещё не было</Text>
         )}
-      </Flex>
-    </Card>
+      </AsideSection>
+    </>
   );
 }
 
-function ScoreTile({ title, total, coverage }: { title: string; total: number | null; coverage: number }) {
+function ScoreFigure({ title, help, total, coverage }: { title: string; help: string; total: number | null; coverage: number }) {
   return (
-    <Flex direction="column" gap={1} style={{ minWidth: 220 }}>
-      <Text color="secondary">{title}</Text>
+    <Flex direction="column" gap={1}>
+      <Flex gap={1} alignItems="center">
+        <Text color="secondary">{title}</Text>
+        <HelpMark iconSize="s" aria-label={`Что такое «${title}»`}>
+          {help}
+        </HelpMark>
+      </Flex>
       {total === null ? (
         <Label theme="unknown" size="m">
           {NO_SCORE}
         </Label>
       ) : (
         <Flex gap={2} alignItems="baseline">
-          <Text variant="display-3">{fmtScore(total)}</Text>
+          <Text variant="display-2">{fmtScore(total)}</Text>
           <Text color="secondary">из 100</Text>
         </Flex>
       )}
-      <Text color="secondary">покрытие данными — {fmtCoverage(coverage)}</Text>
-      <Progress value={Math.round(coverage * 100)} size="s" theme="info" />
+      <Flex justifyContent="space-between">
+        <Text variant="body-short" color="secondary">
+          Покрытие данными
+        </Text>
+        <Text variant="body-short">{fmtCoverage(coverage)}</Text>
+      </Flex>
+      <div style={{ width: "100%" }}>
+        <Progress value={Math.round(coverage * 100)} size="xs" theme="misc" />
+      </div>
     </Flex>
   );
 }
+
+// ---------- категории ----------
 
 function Categories({ card, meta }: { card: Card; meta: MetaResponse | null }) {
   const score = card.score!;
@@ -251,73 +398,113 @@ function Categories({ card, meta }: { card: Card; meta: MetaResponse | null }) {
   const titleOf = (key: string): string => meta?.categories.find((c) => c.key === key)?.title ?? key;
 
   return (
-    <Flex direction="column" gap={3}>
-      <Text variant="header-1" as="h2">
-        Категории
-      </Text>
+    <ul className="rh-list" style={{ borderTop: 0 }}>
       {entries.map(([key, cat]) => (
-        <Card key={key} view="outlined" style={{ padding: "var(--g-spacing-5)" }}>
-          <Flex direction="column" gap={3}>
-            <Flex gap={4} alignItems="center" wrap>
-              <Text variant="subheader-2" style={{ minWidth: 160 }}>
-                {titleOf(key)}
-              </Text>
-              <div style={{ flex: 1, minWidth: 200 }}>
-                {cat.locked !== undefined ? (
-                  <Text color="secondary">закрыто</Text>
-                ) : cat.score === null ? (
-                  <Text color="secondary">{NO_DATA}</Text>
-                ) : (
-                  <Progress value={Math.round(cat.score)} size="s" theme="info" />
-                )}
-              </div>
-              <Text variant="subheader-2" style={{ minWidth: 60, textAlign: "right" }}>
-                {cat.score === null ? "—" : fmtScore(cat.score)}
-              </Text>
-              <Label theme="normal" title="номинальный вес категории в модели">
-                вес {cat.weight}%
-              </Label>
-              <Label theme={cat.score === null ? "unknown" : "info"} title="вклад в итоговый Score после перенормировки">
-                вклад {cat.score === null ? "0%" : `${Math.round((cat.weight / Math.max(1, dataWeight)) * 100)}%`}
-              </Label>
-              {cat.stale && <Label theme="warning">факты из истории</Label>}
-            </Flex>
-
-            {cat.locked !== undefined && <Text color="secondary">{accessLockText(cat.locked)}</Text>}
-            {cat.locked === undefined && cat.score === null && (
-              <Text color="secondary">
-                {key === "security" ? securityNote(card) : humanNoData(`${key}: ${cat.no_data ?? ""}`)}{" "}
-                Категория не снизила Score: её вес выброшен, остальные перенормированы.
-              </Text>
-            )}
-            {cat.score !== null && cat.no_data && <Text color="secondary">{humanNoData(`${key}: ${cat.no_data}`)}</Text>}
-
-            {Object.keys(cat.submetrics).length > 0 && (
-              <Disclosure summary="Подметрики" size="m">
-                <Flex direction="column" gap={2} style={{ paddingTop: "var(--g-spacing-2)" }}>
-                  {Object.entries(cat.submetrics).map(([subKey, sub]) => (
-                    <Flex key={subKey} gap={3} alignItems="baseline" wrap>
-                      <Text style={{ minWidth: 220 }}>{submetricTitle(key, subKey)}</Text>
-                      <Text color="secondary" style={{ minWidth: 90 }}>
-                        {displayOnly(key, subKey)
-                          ? "показ, без веса"
-                          : sub.score === null
-                            ? NO_DATA
-                            : `${fmtSubmetric(sub.score)} / 100`}
-                      </Text>
-                      <Text color="secondary">значение: {fmtFactValue(sub.value)}</Text>
-                      {sub.note && <Text color="secondary">({sub.note})</Text>}
-                    </Flex>
-                  ))}
-                </Flex>
-              </Disclosure>
-            )}
-          </Flex>
-        </Card>
+        <CategoryRow
+          key={key}
+          categoryKey={key}
+          title={titleOf(key)}
+          cat={cat}
+          contribution={cat.score === null ? 0 : Math.round((cat.weight / Math.max(1, dataWeight)) * 100)}
+          card={card}
+        />
       ))}
-    </Flex>
+    </ul>
   );
 }
+
+function CategoryRow({ categoryKey: key, title, cat, contribution, card }: { categoryKey: string; title: string; cat: Category; contribution: number; card: Card }) {
+  const [open, setOpen] = useState(false);
+  const subs = Object.entries(cat.submetrics);
+  const expandable = subs.length > 0;
+
+  // причина закрытого канала уже написана в блоке Score правой панели — в строке
+  // повторяем её, только если она отличается (иначе один текст стоит трижды)
+  const lockNote = cat.locked !== undefined ? accessLockText(cat.locked) : null;
+  const note =
+    cat.locked !== undefined
+      ? lockNote === fullLockReason(card) && card.score?.fullLocked
+        ? null
+        : lockNote
+      : cat.score === null
+        ? `${key === "security" ? securityNote(card) : humanNoData(`${key}: ${cat.no_data ?? ""}`)} Категория не снизила Score: её вес выброшен, остальные перенормированы.`
+        : cat.no_data
+          ? humanNoData(`${key}: ${cat.no_data}`)
+          : null;
+
+  const row = (
+    <>
+      {expandable ? <ArrowToggle direction={open ? "bottom" : "right"} size={14} /> : <span />}
+      <Text variant="subheader-1" ellipsis>
+        {title}
+      </Text>
+      <span className="rh-category__bar">
+        {cat.locked !== undefined ? (
+          <Flex gap={1} alignItems="center">
+            <Icon data={Lock} size={14} />
+            <Text color="secondary" title={lockNote ?? undefined}>
+              закрыто
+            </Text>
+          </Flex>
+        ) : cat.score === null ? (
+          <Text color="secondary">{NO_DATA}</Text>
+        ) : (
+          <Progress value={Math.round(cat.score)} size="s" theme="misc" />
+        )}
+      </span>
+      <Text variant="subheader-2" className="rh-category__value">
+        {cat.score === null ? "—" : fmtScore(cat.score)}
+      </Text>
+      <Text variant="body-short" color="secondary" className="rh-category__weight" title="номинальный вес категории → вклад в итоговый Score после перенормировки">
+        вес {cat.weight}% → вклад {contribution}%
+      </Text>
+      <span className="rh-category__tags">
+        {cat.stale && (
+          <Label theme="warning" size="xs">
+            факты из истории
+          </Label>
+        )}
+      </span>
+    </>
+  );
+
+  return (
+    <li className="rh-list__item" style={{ padding: 0 }}>
+      {expandable ? (
+        <button type="button" className="rh-category" aria-expanded={open} onClick={() => setOpen(!open)}>
+          {row}
+        </button>
+      ) : (
+        <div className="rh-category">{row}</div>
+      )}
+      {note && (
+        <div style={{ padding: "0 var(--g-spacing-3) var(--g-spacing-3) calc(16px + var(--g-spacing-6))", marginTop: "calc(-1 * var(--g-spacing-1))" }}>
+          <Text variant="body-short" color="complementary">
+            {note}
+          </Text>
+        </div>
+      )}
+      {open && (
+        <div className="rh-subrows">
+          {subs.map(([subKey, sub]) => (
+            <div key={subKey} className="rh-subrow">
+              <Text>{submetricTitle(key, subKey)}</Text>
+              <Text color="complementary">
+                {displayOnly(key, subKey) ? "показ, без веса" : sub.score === null ? NO_DATA : `${fmtSubmetric(sub.score)} / 100`}
+              </Text>
+              <Text color="secondary" wordBreak="break-word">
+                значение: {fmtFactValue(sub.value)}
+                {sub.note ? ` (${sub.note})` : ""}
+              </Text>
+            </div>
+          ))}
+        </div>
+      )}
+    </li>
+  );
+}
+
+// ---------- маркеры расчёта ----------
 
 function Markers({ card }: { card: Card }) {
   const m = card.markers;
@@ -325,17 +512,17 @@ function Markers({ card }: { card: Card }) {
   if (m.staleFacts) {
     rows.push({
       key: "stale",
-      label: "факты из истории",
+      label: "Факты из истории",
       text: "Часть источников ответила сбоем канала, поэтому в расчёт пошли последние успешные факты предыдущих сканов. Сбой трубы — не отсутствие данных, и он не превращается в премию или штраф.",
     });
   }
   if (m.gitLimits) {
-    rows.push({ key: "git-limits", label: "репозиторий больше лимита сервиса", text: gitLimitsText(m.gitLimits) });
+    rows.push({ key: "git-limits", label: "Репозиторий больше лимита сервиса", text: gitLimitsText(m.gitLimits) });
   }
   if (m.historyTruncatedSince) {
     rows.push({
       key: "truncated",
-      label: "история усечена",
+      label: "История усечена",
       text: `Репозиторий слишком велик для полного клона, сработал деградационный ярус: git-история видна с ${fmtDate(m.historyTruncatedSince)}. Метрики активности и возраста TODO посчитаны по видимой части.`,
     });
   }
@@ -349,118 +536,108 @@ function Markers({ card }: { card: Card }) {
   if (rows.length === 0) return null;
 
   return (
-    <Flex direction="column" gap={3}>
-      <Text variant="header-1" as="h2">
-        Особенности расчёта
-      </Text>
+    <Flex direction="column" gap={2} role="region" aria-label="Особенности расчёта">
       {rows.map((row) => (
-        <Card key={row.key} view="filled" style={{ padding: "var(--g-spacing-4)" }}>
-          <Flex direction="column" gap={2} alignItems="flex-start">
-            <Label theme="warning">{row.label}</Label>
-            <Text color="secondary">{row.text}</Text>
-          </Flex>
-        </Card>
+        <Alert key={row.key} theme="warning" view="outlined" size="s" title={row.label} message={row.text} />
       ))}
     </Flex>
   );
 }
+
+// ---------- рекомендации ----------
 
 function Recommendations({ card }: { card: Card }) {
   const evidence = new Map(card.evidence.map((e) => [e.key, e]));
   if (card.recommendations.length === 0) {
     return (
-      <Flex direction="column" gap={2}>
-        <Text variant="header-1" as="h2">
-          Рекомендации
-        </Text>
-        <Text color="secondary">Правила движка не нашли, к чему придраться на текущих фактах.</Text>
-      </Flex>
+      <EmptyState
+        icon={SquareListUl}
+        title="Рекомендаций нет"
+        description="Правила движка не нашли, к чему придраться на текущих фактах."
+      />
     );
   }
   return (
     <Flex direction="column" gap={3}>
-      <Text variant="header-1" as="h2">
-        Рекомендации ({card.recommendations.length})
-      </Text>
-      <Text color="secondary">
+      <Text variant="body-short" color="secondary">
         Порядок задан движком правил: сперва измеримый прирост Score, затем то, что открывает закрытую категорию,
-        затем улучшения по уже собранным данным. Каждая строка раскрывается в факт, из которого она получена.
+        затем улучшения по уже собранным данным. Каждый факт открывается по клику.
       </Text>
-      {card.recommendations.map((rec) => (
-        <RecommendationCard key={rec.ruleId} rec={rec} evidence={evidence} />
-      ))}
+      <ul className="rh-list">
+        {card.recommendations.map((rec) => (
+          <RecommendationRow key={rec.ruleId} rec={rec} evidence={evidence} />
+        ))}
+      </ul>
     </Flex>
   );
 }
 
-function RecommendationCard({ rec, evidence }: { rec: Recommendation; evidence: Map<string, Evidence> }) {
-  const [openKey, setOpenKey] = useState<string | null>(null);
+function RecommendationRow({ rec, evidence }: { rec: Recommendation; evidence: Map<string, Evidence> }) {
   return (
-    <Card view="outlined" style={{ padding: "var(--g-spacing-5)" }}>
+    <li className="rh-list__item">
       <Flex direction="column" gap={2}>
-        <Flex gap={3} alignItems="center" wrap>
-          <Label theme="normal">#{rec.priority}</Label>
+        <Flex gap={2} alignItems="baseline" wrap>
+          <Text color="secondary">#{rec.priority}</Text>
           <Text variant="subheader-2">{rec.problem}</Text>
           {rec.deltaScore !== null ? (
-            <Label theme="success" title="прирост итогового Score, если выполнить только эту рекомендацию">
-              +{fmtNumber(rec.deltaScore)} Score
+            <Label theme="success" size="xs" title="прирост итогового Score, если выполнить только эту рекомендацию">
+              {fmtDelta(rec.deltaScore)} к Score
             </Label>
           ) : rec.opensCategory ? (
-            <Label theme="info" title="категория без данных станет считаемой">
+            <Label theme="info" size="xs" title="категория без данных станет считаемой">
               откроет категорию
             </Label>
           ) : null}
         </Flex>
         <Text>{rec.action}</Text>
-        {rec.expectedImpact && <Text color="secondary">Эффект: {rec.expectedImpact}</Text>}
+        {rec.expectedImpact && <Text color="complementary">Эффект: {rec.expectedImpact}</Text>}
         <Flex gap={2} wrap alignItems="center">
-          <Text color="secondary">основано на фактах:</Text>
+          <Text variant="body-short" color="secondary">
+            Основано на фактах:
+          </Text>
           {rec.factRefs.map((ref) => (
-            <Label
+            <Popover
               key={ref.key}
-              theme={ref.missing ? "unknown" : "info"}
-              interactive
-              onClick={() => setOpenKey(openKey === ref.key ? null : ref.key)}
+              trigger="click"
+              placement={["bottom-start", "top-start"]}
+              content={<FactProof factKey={ref.key} fact={evidence.get(ref.key)} />}
             >
-              {ref.key}
-            </Label>
+              <Label theme={ref.missing ? "unknown" : "info"} size="xs" interactive>
+                {ref.key}
+              </Label>
+            </Popover>
           ))}
         </Flex>
-        {openKey !== null && <FactProof factKey={openKey} fact={evidence.get(openKey)} />}
       </Flex>
-    </Card>
+    </li>
   );
 }
 
-/** Раскрытие чипа: значение факта либо объяснение, почему факта нет. */
+/** Содержимое поповера факта: значение либо объяснение, почему факта нет. */
 function FactProof({ factKey, fact }: { factKey: string; fact: Evidence | undefined }) {
   if (!fact) {
     return (
-      <Card view="filled" style={{ padding: "var(--g-spacing-4)" }}>
-        <Flex direction="column" gap={1}>
-          <Text variant="subheader-1">{factKey} — факта нет по построению</Text>
-          <Text color="secondary">{SECURITY_PUBLIC_NOTE}</Text>
-        </Flex>
-      </Card>
+      <Flex direction="column" gap={1} style={{ maxWidth: 420, padding: "var(--g-spacing-3)" }}>
+        <Text variant="subheader-1">{factKey} — факта нет по построению</Text>
+        <Text color="complementary">{SECURITY_PUBLIC_NOTE}</Text>
+      </Flex>
     );
   }
   return (
-    <Card view="filled" style={{ padding: "var(--g-spacing-4)" }}>
-      <Flex direction="column" gap={1}>
-        <Flex gap={2} wrap alignItems="center">
-          <Text variant="subheader-1">{fact.key}</Text>
-          <Label theme={fact.status === "ok" ? "success" : fact.status === "bad" ? "warning" : "unknown"}>
-            {factStatusText(fact.status)}
-          </Label>
-          <Text color="secondary">
-            источник {fact.source}, собрано {fmtDateTime(fact.collectedAt)}
-          </Text>
-        </Flex>
-        <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", font: "var(--g-text-code-1-font)" }}>
-          {fmtFactValue(fact.value)}
-        </pre>
+    <Flex direction="column" gap={2} style={{ maxWidth: 480, padding: "var(--g-spacing-3)" }}>
+      <Flex gap={2} wrap alignItems="center">
+        <Text variant="subheader-1">{fact.key}</Text>
+        <Label theme={fact.status === "ok" ? "success" : fact.status === "bad" ? "warning" : "unknown"} size="xs">
+          {factStatusText(fact.status)}
+        </Label>
       </Flex>
-    </Card>
+      <Text variant="body-short" color="secondary">
+        источник {fact.source}, собрано {fmtDateTime(fact.collectedAt)}
+      </Text>
+      <pre className="rh-code" style={{ maxHeight: 280, overflow: "auto" }}>
+        {fmtFactValue(fact.value)}
+      </pre>
+    </Flex>
   );
 }
 

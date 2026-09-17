@@ -60,6 +60,23 @@ export function scanStatusText(status: string): string {
   }
 }
 
+/** Кто запустил скан — словом, а не кодом очереди. */
+export function scanTriggerText(trigger: string): string {
+  switch (trigger) {
+    case "periodic":
+      return "по расписанию";
+    case "user":
+      return "вручную";
+    default:
+      return trigger;
+  }
+}
+
+/** Прирост Score — одним знаком после точки, как в тексте эффекта рекомендации. */
+export function fmtDelta(delta: number): string {
+  return `+${(Math.round(delta * 10) / 10).toFixed(1)}`;
+}
+
 /**
  * Единая копия про Security без данных (STOP §4 плана): категория
  * исключена с перенормировкой, а не занижена — доступ к AppSec даётся
@@ -74,9 +91,9 @@ export const SECURITY_PUBLIC_NOTE =
  * ChannelAccess без "granted". Строка — одна для страницы и MD-отчёта.
  */
 export const ACCESS_LOCK_TEXT: Record<"no-pat" | "denied" | "pat-expired" | "check-failed", string> = {
-  "no-pat": "Данные видны участникам репозитория: войдите и добавьте PAT SourceCraft в «Моём кабинете».",
+  "no-pat": "Данные видны участникам репозитория: войдите и добавьте PAT SourceCraft в «Личном кабинете».",
   denied: "Ваш PAT не даёт доступа к этим данным репозитория.",
-  "pat-expired": "SourceCraft отклонил ваш PAT — обновите PAT в «Моём кабинете».",
+  "pat-expired": "SourceCraft отклонил ваш PAT — обновите PAT в «Личном кабинете».",
   "check-failed": "Не удалось проверить доступ к этим данным — попробуйте открыть карточку позже.",
 };
 

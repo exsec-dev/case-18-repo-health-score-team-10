@@ -18,6 +18,8 @@ export interface MyRepoEntry {
   title: string | null;
   language: string | null;
   lastActivityAt: string | null;
+  /** logo.url платформы из ответа namespace (дисплей) */
+  logoUrl: string | null;
   /** Score в рейтинге (total_rating) последнего пригодного скана (приватный без него — последнего не-bad, круг 2); null = не оценивался */
   score: number | null;
   lastScanAt: string | null;
@@ -37,6 +39,7 @@ interface RawRepoEntry {
   name?: unknown;
   language?: { name?: unknown } | string | null;
   last_updated?: unknown;
+  logo?: { url?: unknown } | null;
 }
 
 /** GET /user по PAT: чей токен (username) — единственная живая проверка «мой». */
@@ -101,6 +104,7 @@ export async function listMyRepos(db: Database, client: ScClient, opts: { maxPag
         title: typeof raw.name === "string" ? raw.name : null,
         language,
         lastActivityAt: typeof raw.last_updated === "string" ? raw.last_updated : null,
+        logoUrl: typeof raw.logo?.url === "string" && raw.logo.url !== "" ? raw.logo.url : null,
         score: known ? known.total : null,
         lastScanAt: known ? known.finished_at : null,
       });

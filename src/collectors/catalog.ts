@@ -19,6 +19,8 @@ export interface CatalogEntry {
   default_branch: string | null;
   clone_url_https: string | null;
   web_url: string | null;
+  /** logo.url репозитория (картинка платформы; нет — null, UI рисует инициалы) */
+  logo_url: string | null;
 }
 
 export interface CatalogResult {
@@ -52,6 +54,7 @@ interface RawEntry {
   default_branch?: unknown;
   clone_url?: { https?: unknown };
   web_url?: unknown;
+  logo?: { url?: unknown } | null;
 }
 
 function parseEntry(e: RawEntry): CatalogEntry | null {
@@ -75,6 +78,7 @@ function parseEntry(e: RawEntry): CatalogEntry | null {
     default_branch: typeof e.default_branch === "string" ? e.default_branch : null,
     clone_url_https: typeof e.clone_url?.https === "string" ? e.clone_url.https : null,
     web_url: typeof e.web_url === "string" ? e.web_url : null,
+    logo_url: typeof e.logo?.url === "string" && e.logo.url !== "" ? e.logo.url : null,
   };
 }
 

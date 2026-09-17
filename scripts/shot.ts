@@ -16,8 +16,12 @@ const SLUG = process.argv[2] ?? "bayselonarrend/openintegrations";
 const SERVER_PORT = Number(process.env.SHOT_PORT ?? 8519);
 const CDP_PORT = Number(process.env.SHOT_CDP_PORT ?? 9519);
 const SHOTS_DIR = "reports/shots";
-/** Шрифты uikit грузит сам пакет (styles/fonts.css → @import) — не наш код. */
-const ALLOWED_EXTERNAL = ["fonts.googleapis.com", "fonts.gstatic.com"];
+/**
+ * Шрифты uikit грузит сам пакет (styles/fonts.css → @import) — не наш код.
+ * Аватары (17.09, В4.5): logo.url репозиториев SourceCraft и портреты Я ID —
+ * необязательные картинки, без сети UI показывает инициалы.
+ */
+const ALLOWED_EXTERNAL = ["fonts.googleapis.com", "fonts.gstatic.com", "storage.yandexcloud.net", "avatars.yandex.net"];
 
 function chromePath(): string | null {
   const candidates = [
@@ -157,7 +161,7 @@ await shoot("rating", `${base}/?sort=score&order=desc`, {
   "колонка Score": "document.body.innerText.includes('Score') ? 1 : 0",
 });
 
-// В4: «Мой кабинет» без сессии — витрина слоёв (Я ID → PAT) и входа
+// В4: «Личный кабинет» без сессии — витрина слоёв (Я ID → PAT) и входа
 await shoot("me", `${base}/me`, {
   "заголовок кабинета": `document.querySelectorAll('h1').length`,
   "кнопка входа Я ID": `[...document.querySelectorAll('a,button')].filter((n) => n.textContent?.includes("Войти через Я ID")).length`,
@@ -168,7 +172,8 @@ await shoot("repo", `${base}/repo/${encodeURIComponent(org)}/${encodeURIComponen
   "категории": "document.body.innerText.includes('Категории') ? 1 : 0",
   "рекомендации": "document.body.innerText.includes('Рекомендации') ? 1 : 0",
   "объяснение Security": "document.body.innerText.includes('исключена с перенормировкой') ? 1 : 0",
-  "кнопка отчёта": "document.querySelectorAll('a[href$=\"report.md\"]').length",
+  // «Отчёт» — меню форматов (MD, PDF): ссылка на report.md рендерится при открытии
+  "кнопка отчёта": "[...document.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'Отчёт').length",
 });
 
 // ---------- итог ----------

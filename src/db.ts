@@ -247,6 +247,11 @@ export function openDb(config: Config): Database {
   ensureColumn(db, "repos", "rating_active", "INTEGER NOT NULL DEFAULT 1");
   ensureColumn(db, "repos", "visibility", "TEXT NOT NULL DEFAULT 'public'");
   ensureColumn(db, "repos", "evict_reason", "TEXT");
+  // В4.5 (17.09): аватары — logo.url репозитория и портрет Я ID пользователя;
+  // колонки аддитивные (старый код их не читает), версия схемы не меняется
+  ensureColumn(db, "repos", "logo_url", "TEXT");
+  ensureColumn(db, "users", "display_name", "TEXT");
+  ensureColumn(db, "users", "avatar_id", "TEXT");
   ensureColumn(db, "jobs", "user_id", "INTEGER");
   ensureColumn(db, "jobs", "trigger_kind", "TEXT NOT NULL DEFAULT 'periodic'");
   // v1.5 (В4.1, К4): попытки и время постановки

@@ -1,25 +1,296 @@
-/* theme.css — единственное отступление от стоковой темы Gravity: фон.
+/* theme.css — палитра SourceCraft поверх стоковой темы Gravity.
  *
- * Зачем: sourcecraft.dev кладёт поверх стоковой темы Gravity свою
- * палитру на «cool grey» — в их бандле селектор .g-root_theme_dark
- * объявлен дважды, и побеждает второй, серый (#2d2c33). Стоковый
- * Gravity (наш пин 7.49.0, и он же последняя версия) даёт тёплый
- * тёмный #221d22 — рядом с платформой это читается как другой
- * продукт. Решение 16.09 (Екатерина): выровнять ТОЛЬКО фон.
+ * Зачем: sourcecraft.dev кладёт поверх Gravity свою полную семантическую
+ * палитру: нейтральный серый фон, монохромный бренд (белая action-кнопка
+ * в тёмной теме, чёрная в светлой), синие ссылки, свои info/positive/
+ * warning/danger. Стоковый Gravity — тёплый серый, жёлто-оранжевый бренд
+ * и ссылки: рядом с платформой это читается как другой продукт.
+ * Решение 17.09 (Екатерина): интерфейс практически идентичен SourceCraft,
+ * поэтому переопределяются ВСЕ семантические --g-color-* обеих тем
+ * (было 16.09: только фон #2d2c33 — платформа с тех пор перешла на #343434).
  *
- * Границы: переопределяется один семантический токен. Брендовые
- * токены SourceCraft (--g-color-private-brand-*), их логотип и
- * остальную палитру не трогаем — правило docs/ui/gravity-uikit.md.
- * Светлая тема совпадает со стоком (белый), поэтому её здесь нет.
- * Откат — удалить файл и его импорт в main.tsx.
+ * Границы: только семантические токены. --g-color-private-*,
+ * --g-color-brand-sourcecraft-red, логотип SourceCraft и бейджи лиг
+ * (лавры) не переносим — правило docs/ui/gravity-uikit.md.
  *
- * Значения сверены с живым CSS sourcecraft.dev 16.09.2026
- * (storage.yandexcloud.net/stable-sourcecraft-static/css/64203.*.css).
+ * Значения сняты с живого sourcecraft.dev 17.09.2026 (computed style
+ * .g-root в темах dark и light, отсортированы). Сверка при сомнении —
+ * тем же способом, отчёт reports/2026-09-17-ui-redesign-proposal.md.
+ *
+ * Специфичность обязана быть выше стоковой (.g-root.g-root_theme_*,
+ * 0-2-0): в dev Bun отдаёт стили россыпью, и этот файл может загрузиться
+ * раньше темы uikit (ERROR_LOG 16.09).
  */
+
 .g-root.g-root_theme_dark {
-  --g-color-base-background: #2d2c33;
+  --g-color-base-background: #343434;
+  --g-color-base-brand: #fff;
+  --g-color-base-brand-hover: #fff;
+  --g-color-base-danger-heavy: #ea5b58;
+  --g-color-base-danger-heavy-hover: #ef7f7d;
+  --g-color-base-danger-light: rgba(232, 73, 69, .2);
+  --g-color-base-danger-light-hover: rgba(232, 73, 69, .3);
+  --g-color-base-danger-medium: rgba(232, 73, 69, .5);
+  --g-color-base-danger-medium-hover: rgba(232, 73, 69, .7);
+  --g-color-base-float: #494949;
+  --g-color-base-float-accent: #4d4c52;
+  --g-color-base-float-accent-hover: #57565c;
+  --g-color-base-float-announcement: #4d4c52;
+  --g-color-base-float-heavy: #616166;
+  --g-color-base-float-hover: #545454;
+  --g-color-base-float-medium: #4d4c52;
+  --g-color-base-generic: rgba(255, 255, 255, .1);
+  --g-color-base-generic-accent: rgba(255, 255, 255, .15);
+  --g-color-base-generic-accent-disabled: rgba(255, 255, 255, .07);
+  --g-color-base-generic-hover: rgba(255, 255, 255, .15);
+  --g-color-base-generic-medium: rgba(255, 255, 255, .25);
+  --g-color-base-generic-medium-hover: rgba(255, 255, 255, .3);
+  --g-color-base-generic-ultralight: #313037;
+  --g-color-base-info-heavy: #638fff;
+  --g-color-base-info-heavy-hover: #86a8ff;
+  --g-color-base-info-light: rgba(82, 130, 255, .2);
+  --g-color-base-info-light-hover: rgba(82, 130, 255, .3);
+  --g-color-base-info-medium: rgba(82, 130, 255, .5);
+  --g-color-base-info-medium-hover: rgba(82, 130, 255, .7);
+  --g-color-base-light: rgba(255, 255, 255, .85);
+  --g-color-base-light-accent-disabled: rgba(255, 255, 255, .3);
+  --g-color-base-light-disabled: rgba(255, 255, 255, .15);
+  --g-color-base-light-hover: rgba(255, 255, 255, .7);
+  --g-color-base-light-simple-hover: rgba(255, 255, 255, .15);
+  --g-color-base-misc-heavy: #708da6;
+  --g-color-base-misc-heavy-hover: #90a6ba;
+  --g-color-base-misc-light: rgba(96, 128, 156, .2);
+  --g-color-base-misc-light-hover: rgba(96, 128, 156, .3);
+  --g-color-base-misc-medium: rgba(96, 128, 156, .5);
+  --g-color-base-misc-medium-hover: rgba(96, 128, 156, .7);
+  --g-color-base-modal: #343434;
+  --g-color-base-neutral-heavy: rgba(255, 255, 255, .55);
+  --g-color-base-neutral-heavy-hover: rgba(255, 255, 255, .65);
+  --g-color-base-neutral-light: rgba(255, 255, 255, .1);
+  --g-color-base-neutral-light-hover: rgba(255, 255, 255, .15);
+  --g-color-base-neutral-medium: rgba(255, 255, 255, .25);
+  --g-color-base-neutral-medium-hover: rgba(255, 255, 255, .35);
+  --g-color-base-positive-heavy: #6bbc68;
+  --g-color-base-positive-heavy-hover: #8ccb89;
+  --g-color-base-positive-light: rgba(91, 181, 87, .2);
+  --g-color-base-positive-light-hover: rgba(91, 181, 87, .3);
+  --g-color-base-positive-medium: rgba(91, 181, 87, .5);
+  --g-color-base-positive-medium-hover: rgba(91, 181, 87, .7);
+  --g-color-base-selection: rgba(255, 255, 255, .15);
+  --g-color-base-selection-hover: rgba(255, 255, 255, .2);
+  --g-color-base-simple-hover: rgba(255, 255, 255, .1);
+  --g-color-base-simple-hover-solid: #525252;
+  --g-color-base-utility-heavy: #9a63d1;
+  --g-color-base-utility-heavy-hover: #b186db;
+  --g-color-base-utility-light: rgba(143, 82, 204, .2);
+  --g-color-base-utility-light-hover: rgba(143, 82, 204, .4);
+  --g-color-base-utility-medium: rgba(143, 82, 204, .5);
+  --g-color-base-utility-medium-hover: rgba(143, 82, 204, .7);
+  --g-color-base-warning-heavy: #ffd01a;
+  --g-color-base-warning-heavy-hover: #ffdb4c;
+  --g-color-base-warning-light: rgba(255, 203, 0, .2);
+  --g-color-base-warning-light-hover: rgba(255, 203, 0, .3);
+  --g-color-base-warning-medium: rgba(255, 203, 0, .5);
+  --g-color-base-warning-medium-hover: rgba(255, 203, 0, .7);
+  --g-color-infographics-axis: #4d4c52;
+  --g-color-infographics-tooltip-bg: rgba(76, 75, 81, .95);
+  --g-color-line-brand: #fff;
+  --g-color-line-danger: rgba(232, 73, 69, .8);
+  --g-color-line-focus: rgba(96, 128, 156, .8);
+  --g-color-line-generic: rgba(255, 255, 255, .15);
+  --g-color-line-generic-accent: rgba(255, 255, 255, .15);
+  --g-color-line-generic-accent-hover: rgba(255, 255, 255, .3);
+  --g-color-line-generic-active: rgba(255, 255, 255, .3);
+  --g-color-line-generic-hover: rgba(255, 255, 255, .25);
+  --g-color-line-generic-solid: #4d4c52;
+  --g-color-line-info: rgba(82, 130, 255, .8);
+  --g-color-line-light: rgba(255, 255, 255, .5);
+  --g-color-line-misc: rgba(96, 128, 156, .8);
+  --g-color-line-positive: rgba(91, 181, 87, .8);
+  --g-color-line-utility: rgba(143, 82, 204, .8);
+  --g-color-line-warning: rgba(255, 203, 0, .8);
+  --g-color-scroll-corner: rgba(255, 255, 255, .15);
+  --g-color-scroll-handle: rgba(255, 255, 255, .15);
+  --g-color-scroll-handle-hover: rgba(255, 255, 255, .25);
+  --g-color-scroll-track: #343434;
+  --g-color-sfx-fade: rgba(255, 255, 255, .25);
+  --g-color-sfx-shadow: rgba(0, 0, 0, .2);
+  --g-color-sfx-shadow-heavy: rgba(0, 0, 0, .5);
+  --g-color-sfx-shadow-light: rgba(0, 0, 0, .2);
+  --g-color-sfx-veil: rgba(0, 0, 0, .6);
+  --g-color-text-brand: #fff;
+  --g-color-text-brand-contrast: rgba(0, 0, 0, .9);
+  --g-color-text-brand-heavy: #fff;
+  --g-color-text-complementary: rgba(255, 255, 255, .7);
+  --g-color-text-danger: #e84945;
+  --g-color-text-danger-heavy: #ea5b58;
+  --g-color-text-dark-complementary: rgba(0, 0, 0, .7);
+  --g-color-text-dark-hint: rgba(0, 0, 0, .3);
+  --g-color-text-dark-primary: rgba(0, 0, 0, .9);
+  --g-color-text-dark-secondary: rgba(0, 0, 0, .5);
+  --g-color-text-hint: rgba(255, 255, 255, .3);
+  --g-color-text-info: #5282ff;
+  --g-color-text-info-heavy: #638fff;
+  --g-color-text-inverted-complementary: rgba(0, 0, 0, .7);
+  --g-color-text-inverted-hint: rgba(0, 0, 0, .3);
+  --g-color-text-inverted-primary: rgba(0, 0, 0, .9);
+  --g-color-text-inverted-secondary: rgba(0, 0, 0, .5);
+  --g-color-text-light-complementary: rgba(255, 255, 255, .7);
+  --g-color-text-light-hint: rgba(255, 255, 255, .3);
+  --g-color-text-light-primary: rgba(255, 255, 255, .85);
+  --g-color-text-light-secondary: rgba(255, 255, 255, .5);
+  --g-color-text-link: #638fff;
+  --g-color-text-link-hover: #97b4ff;
+  --g-color-text-link-visited: #bc97e0;
+  --g-color-text-link-visited-hover: #ddcbf0;
+  --g-color-text-misc: #708da6;
+  --g-color-text-misc-heavy: #8099b0;
+  --g-color-text-positive: #5bb557;
+  --g-color-text-positive-heavy: #6bbc68;
+  --g-color-text-primary: rgba(255, 255, 255, .85);
+  --g-color-text-secondary: rgba(255, 255, 255, .5);
+  --g-color-text-utility: #9a63d1;
+  --g-color-text-utility-heavy: #a575d6;
+  --g-color-text-warning: #ffcb00;
+  --g-color-text-warning-heavy: #ffd01a;
+
+  /* навигация (@gravity-ui/navigation): rail светлее контента, как у платформы */
+  --gn-aside-header-collapsed-background-color: #3e3e3e;
+  --gn-aside-header-item-current-background-color: rgba(255, 255, 255, .15);
 }
 
-.g-root.g-root_theme_dark-hc {
-  --g-color-base-background: #222326;
+.g-root.g-root_theme_light {
+  --g-color-base-background: #fff;
+  --g-color-base-brand: #000;
+  --g-color-base-brand-hover: #030303;
+  --g-color-base-danger-heavy: #ea0805;
+  --g-color-base-danger-heavy-hover: #c0100f;
+  --g-color-base-danger-light: rgba(255, 4, 0, .15);
+  --g-color-base-danger-light-hover: rgba(255, 4, 0, .3);
+  --g-color-base-danger-medium: rgba(255, 4, 0, .3);
+  --g-color-base-danger-medium-hover: rgba(255, 4, 0, .5);
+  --g-color-base-float: #fff;
+  --g-color-base-float-accent: #fff;
+  --g-color-base-float-accent-hover: rgba(255, 255, 255, .85);
+  --g-color-base-float-announcement: #f0f3f5;
+  --g-color-base-float-heavy: #4c4c4c;
+  --g-color-base-float-hover: #f2f2f2;
+  --g-color-base-float-medium: #737373;
+  --g-color-base-generic: rgba(0, 0, 0, .05);
+  --g-color-base-generic-accent: rgba(0, 0, 0, .15);
+  --g-color-base-generic-accent-disabled: rgba(0, 0, 0, .07);
+  --g-color-base-generic-hover: rgba(0, 0, 0, .15);
+  --g-color-base-generic-medium: rgba(0, 0, 0, .15);
+  --g-color-base-generic-medium-hover: rgba(0, 0, 0, .25);
+  --g-color-base-generic-ultralight: #fafafa;
+  --g-color-base-info-heavy: #4e79eb;
+  --g-color-base-info-heavy-hover: #4768c2;
+  --g-color-base-info-light: rgba(82, 130, 255, .15);
+  --g-color-base-info-light-hover: rgba(82, 130, 255, .3);
+  --g-color-base-info-medium: rgba(82, 130, 255, .3);
+  --g-color-base-info-medium-hover: rgba(82, 130, 255, .5);
+  --g-color-base-light: #fff;
+  --g-color-base-light-accent-disabled: rgba(255, 255, 255, .3);
+  --g-color-base-light-disabled: rgba(255, 255, 255, .15);
+  --g-color-base-light-hover: rgba(255, 255, 255, .85);
+  --g-color-base-light-simple-hover: rgba(255, 255, 255, .15);
+  --g-color-base-misc-heavy: #657b8f;
+  --g-color-base-misc-heavy-hover: #586a7a;
+  --g-color-base-misc-light: rgba(107, 132, 153, .15);
+  --g-color-base-misc-light-hover: rgba(107, 132, 153, .3);
+  --g-color-base-misc-medium: rgba(107, 132, 153, .3);
+  --g-color-base-misc-medium-hover: rgba(107, 132, 153, .5);
+  --g-color-base-modal: #fff;
+  --g-color-base-neutral-heavy: rgba(0, 0, 0, .45);
+  --g-color-base-neutral-heavy-hover: rgba(0, 0, 0, .55);
+  --g-color-base-neutral-light: rgba(0, 0, 0, .05);
+  --g-color-base-neutral-light-hover: rgba(0, 0, 0, .1);
+  --g-color-base-neutral-medium: rgba(0, 0, 0, .2);
+  --g-color-base-neutral-medium-hover: rgba(0, 0, 0, .25);
+  --g-color-base-positive-heavy: #3ab935;
+  --g-color-base-positive-heavy-hover: #379a34;
+  --g-color-base-positive-light: rgba(59, 201, 53, .15);
+  --g-color-base-positive-light-hover: rgba(59, 201, 53, .3);
+  --g-color-base-positive-medium: rgba(59, 201, 53, .3);
+  --g-color-base-positive-medium-hover: rgba(59, 201, 53, .5);
+  --g-color-base-selection: rgba(0, 0, 0, .1);
+  --g-color-base-selection-hover: rgba(0, 0, 0, .15);
+  --g-color-base-simple-hover: rgba(0, 0, 0, .05);
+  --g-color-base-simple-hover-solid: #f2f2f2;
+  --g-color-base-utility-heavy: #854ebd;
+  --g-color-base-utility-heavy-hover: #72479e;
+  --g-color-base-utility-light: rgba(143, 82, 204, .15);
+  --g-color-base-utility-light-hover: rgba(143, 82, 204, .3);
+  --g-color-base-utility-medium: rgba(143, 82, 204, .3);
+  --g-color-base-utility-medium-hover: rgba(143, 82, 204, .5);
+  --g-color-base-warning-heavy: #ffdb4d;
+  --g-color-base-warning-heavy-hover: #d5b848;
+  --g-color-base-warning-light: rgba(255, 219, 77, .3);
+  --g-color-base-warning-light-hover: rgba(255, 219, 77, .5);
+  --g-color-base-warning-medium: rgba(255, 219, 77, .7);
+  --g-color-base-warning-medium-hover: rgba(255, 219, 77, .9);
+  --g-color-infographics-axis: #d9d9d9;
+  --g-color-infographics-tooltip-bg: rgba(255, 255, 255, .95);
+  --g-color-line-brand: #030303;
+  --g-color-line-danger: rgba(255, 4, 0, .8);
+  --g-color-line-focus: rgba(107, 132, 153, .8);
+  --g-color-line-generic: rgba(0, 0, 0, .1);
+  --g-color-line-generic-accent: rgba(0, 0, 0, .15);
+  --g-color-line-generic-accent-hover: rgba(0, 0, 0, .3);
+  --g-color-line-generic-active: rgba(0, 0, 0, .3);
+  --g-color-line-generic-hover: rgba(0, 0, 0, .15);
+  --g-color-line-generic-solid: #e5e5e5;
+  --g-color-line-info: rgba(82, 130, 255, .8);
+  --g-color-line-light: rgba(255, 255, 255, .5);
+  --g-color-line-misc: rgba(107, 132, 153, .8);
+  --g-color-line-positive: rgba(59, 201, 53, .8);
+  --g-color-line-utility: rgba(143, 82, 204, .8);
+  --g-color-line-warning: #eac94a;
+  --g-color-scroll-corner: rgba(0, 0, 0, .1);
+  --g-color-scroll-handle: rgba(0, 0, 0, .1);
+  --g-color-scroll-handle-hover: rgba(0, 0, 0, .15);
+  --g-color-scroll-track: #fff;
+  --g-color-sfx-fade: rgba(255, 255, 255, .3);
+  --g-color-sfx-shadow: rgba(0, 0, 0, .15);
+  --g-color-sfx-shadow-heavy: rgba(0, 0, 0, .5);
+  --g-color-sfx-shadow-light: rgba(0, 0, 0, .05);
+  --g-color-sfx-veil: rgba(0, 0, 0, .25);
+  --g-color-text-brand: #0a090a;
+  --g-color-text-brand-contrast: #fff;
+  --g-color-text-brand-heavy: #0a090a;
+  --g-color-text-complementary: rgba(0, 0, 0, .7);
+  --g-color-text-danger: #ea0805;
+  --g-color-text-danger-heavy: #c0100f;
+  --g-color-text-dark-complementary: rgba(0, 0, 0, .7);
+  --g-color-text-dark-hint: rgba(0, 0, 0, .3);
+  --g-color-text-dark-primary: rgba(0, 0, 0, .85);
+  --g-color-text-dark-secondary: rgba(0, 0, 0, .5);
+  --g-color-text-hint: rgba(0, 0, 0, .3);
+  --g-color-text-info: #4e79eb;
+  --g-color-text-info-heavy: #4768c2;
+  --g-color-text-inverted-complementary: rgba(255, 255, 255, .85);
+  --g-color-text-inverted-hint: rgba(255, 255, 255, .5);
+  --g-color-text-inverted-primary: #fff;
+  --g-color-text-inverted-secondary: rgba(255, 255, 255, .7);
+  --g-color-text-light-complementary: rgba(255, 255, 255, .85);
+  --g-color-text-light-hint: rgba(255, 255, 255, .5);
+  --g-color-text-light-primary: #fff;
+  --g-color-text-light-secondary: rgba(255, 255, 255, .7);
+  --g-color-text-link: #4e79eb;
+  --g-color-text-link-hover: #3f5799;
+  --g-color-text-link-visited: #8f52cc;
+  --g-color-text-link-visited-hover: #5e3f80;
+  --g-color-text-misc: #657b8f;
+  --g-color-text-misc-heavy: #586a7a;
+  --g-color-text-positive: #3ab935;
+  --g-color-text-positive-heavy: #379a34;
+  --g-color-text-primary: rgba(0, 0, 0, .85);
+  --g-color-text-secondary: rgba(0, 0, 0, .5);
+  --g-color-text-utility: #854ebd;
+  --g-color-text-utility-heavy: #72479e;
+  --g-color-text-warning: #c0a645;
+  --g-color-text-warning-heavy: #c0600f;
+
+  --gn-aside-header-collapsed-background-color: #f2f2f2;
+  --gn-aside-header-item-current-background-color: rgba(0, 0, 0, .1);
 }

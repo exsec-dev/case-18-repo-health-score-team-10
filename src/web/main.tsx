@@ -1,24 +1,39 @@
 // main.tsx — вход фронтенда: стили Gravity UI один раз, язык компонентов,
-// тема. Бандлит Bun (HTML-импорт в server.ts), отдельной сборки нет.
+// тема и тостер. Бандлит Bun (HTML-импорт в server.ts), отдельной сборки нет.
+// Стили @gravity-ui/navigation подтягивает сам пакет (CSS-импорты в его JS).
 import "@gravity-ui/uikit/styles/fonts.css";
 import "@gravity-ui/uikit/styles/styles.css";
-// после стилей uikit: перекрывает один токен фона (см. комментарий в файле)
+// после стилей uikit: палитра SourceCraft (см. комментарий в файле)
 import "./theme.css";
+import "./layout.css";
 
-import { configure, Lang, ThemeProvider } from "@gravity-ui/uikit";
+import { configure, Lang, ThemeProvider, Toaster, ToasterComponent, ToasterProvider } from "@gravity-ui/uikit";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { useAppTheme } from "./prefs";
 
 configure({ lang: Lang.Ru });
+
+const toaster = new Toaster();
+
+function Root() {
+  const [theme] = useAppTheme();
+  return (
+    <ThemeProvider theme={theme}>
+      <ToasterProvider toaster={toaster}>
+        <App />
+        <ToasterComponent />
+      </ToasterProvider>
+    </ThemeProvider>
+  );
+}
 
 const root = document.getElementById("root");
 if (!root) throw new Error("index.html: нет #root");
 
 createRoot(root).render(
   <StrictMode>
-    <ThemeProvider theme="system">
-      <App />
-    </ThemeProvider>
+    <Root />
   </StrictMode>,
 );

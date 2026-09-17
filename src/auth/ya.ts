@@ -14,6 +14,15 @@ export interface YaIdCredentials {
 export interface YaProfile {
   yaId: string;
   login: string;
+  /** ФИО для показа (real_name → first_name+last_name → display_name); нет права login:info — null */
+  displayName: string | null;
+  /** default_avatar_id портрета; право login:avatar не выдано или портрета нет — null */
+  avatarId: string | null;
+}
+
+/** URL портрета Я ID по id (islands-68 — квадрат 68px, хватает для 40px retina). */
+export function yaAvatarUrl(avatarId: string): string {
+  return `https://avatars.yandex.net/get-yapic/${encodeURIComponent(avatarId)}/islands-68`;
 }
 
 export type ExchangeResult =
@@ -91,9 +100,24 @@ export async function exchangeCode(creds: YaIdCredentials, code: string, http: Y
   } catch (e) {
     return { ok: false, error: `сеть Я ID (info): ${String((e as Error).message).slice(0, 120)}` };
   }
-  const info = infoRes.json as { id?: unknown; login?: unknown } | null;
+  const info = infoRes.json as {
+    id?: unknown;
+    login?: unknown;
+    display_name?: unknown;
+    real_name?: unknown;
+    first_name?: unknown;
+    last_name?: unknown;
+    default_avatar_id?: unknown;
+    is_avatar_empty?: unknown;
+  } | null;
   if (infoRes.status !== 200 || (typeof info?.id !== "number" && typeof info?.id !== "string") || typeof info?.login !== "string") {
     return { ok: false, error: `Я ID info: HTTP ${infoRes.status}, форма ответа неожиданна` };
   }
-  return { ok: true, profile: { yaId: String(info.id), login: info.login } };
+  // ФИО важнее публичного имени: display_name у Я ID по умолчанию равен логину
+  const str = (v: unknown): string | null => (typeof v === "string" && v.trim() !== "" ? v.trim() : null);
+  const fromParts = [str(info.first_name), str(info.last_name)].filter((v): v is string => v !== null).join(" ");
+  const name = str(info.real_name) ?? (fromParts !== "" ? fromParts : null) ?? str(info.display_name);
+  const avatarId =
+    typeof info.default_avatar_id === "string" && info.default_avatar_id !== "" && info.is_avatar_empty !== true ? info.default_avatar_id : null;
+  return { ok: true, profile: { yaId: String(info.id), login: info.login, displayName: name, avatarId } };
 }
