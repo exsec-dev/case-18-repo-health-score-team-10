@@ -5070,6 +5070,61 @@
         ]
       }
     },
+    "/repos": {
+      "get": {
+        "summary": "Discover All Public Repositories",
+        "description": "Lists repositories that are public and belong to a public organization and,\nwhen present, a public project. Deleted resources are excluded.\nRepositories are ordered by rating descending unless sort_by is specified.\nPagination does not provide a snapshot: changes to visibility or deletion\ncan affect subsequent pages. When sorting by rating, rating changes can\ncause repositories to be skipped or returned more than once.",
+        "operationId": "DiscoverRepositories",
+        "responses": {
+          "200": {
+            "description": "A successful response.",
+            "schema": {
+              "$ref": "#/definitions/DiscoverRepositoriesResponse"
+            }
+          },
+          "default": {
+            "description": "Both Client Errors (4xx) and Server Errors (5xx) are serialized into this scheme",
+            "schema": {
+              "$ref": "#/definitions/ApiErrorResponse"
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "filter",
+            "description": "Filter using QL language. An empty filter returns all public repositories.\nSupported field: created_at (repository creation time).\nSupported operators: =, >, >=, <, <=; combine conditions with AND or OR.\nUse parentheses when mixing AND and OR; nested parentheses are not supported.\n\nValues can be calendar dates (YYYY-MM-DD), quoted RFC3339 timestamps with a\ntimezone, or relative durations (for example, -1h, -7d, -2w, -1m, -1y).\nCalendar dates use UTC: equality selects the whole day, > starts at the next\nday, and <= includes the whole day. Timestamps compare exact instants.\nRelative durations are evaluated at each request; use absolute values to\nkeep filter boundaries unchanged while paginating.\n\nExamples:\n- created_at >= 2026-01-01 AND created_at < 2026-02-01\n- created_at >= \"2026-01-01T12:30:00Z\"",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "sort_by",
+            "description": "Ordering options: comma separated list of fields. Available fields:\ncreated_at, rating. Each field defaults to ascending order; prefix it with\n\"-\" for descending order, for example: \"-rating, created_at\".\nRedundant space characters are insignificant. Defaults to \"-rating\".\nRepositories without a rating are placed last in either direction.\nEqual values are ordered by an internal repository ID ascending.\nUse \"created_at\" or \"-created_at\" to traverse repositories in an order\nindependent of rating changes.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          },
+          {
+            "name": "page_size",
+            "description": "The maximum number of repositories to return, up to 100. Defaults to 20 when\nomitted or zero. The service may return fewer than this value.",
+            "in": "query",
+            "required": false,
+            "type": "string",
+            "format": "uint64"
+          },
+          {
+            "name": "page_token",
+            "description": "A page token, received from a previous call.\nProvide this to retrieve the subsequent page.\n\nWhen paginating, all other parameters must match\nthe call that provided the page token.",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "tags": [
+          "Repository"
+        ]
+      }
+    },
     "/repos/id:{repo_id}": {
       "get": {
         "summary": "Get Repository (By ID)",
@@ -12963,6 +13018,22 @@
         "outdated": {
           "type": "boolean",
           "description": "Indicates whether commented region has changed after initial comment publishing."
+        }
+      }
+    },
+    "DiscoverRepositoriesResponse": {
+      "type": "object",
+      "properties": {
+        "repositories": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "$ref": "#/definitions/Repository"
+          }
+        },
+        "next_page_token": {
+          "type": "string",
+          "description": "A token, which can be sent as `page_token` to retrieve the next page.\nIf this field is omitted, there are no subsequent pages."
         }
       }
     },
