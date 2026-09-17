@@ -7,7 +7,7 @@
 // либо без честного объяснения, почему факта нет.
 // Раскладка как у страницы репозитория SourceCraft: действия в ActionBar,
 // содержимое во вкладках, итоговая оценка — в правой панели.
-import { ArrowDownToLine, ArrowUpRightFromSquare, Clock, Code, CodeFork, FileText, Heart, Lock, LogoMarkdown, SquareListUl } from "@gravity-ui/icons";
+import { ArrowDownToLine, ArrowUpRightFromSquare, ChevronDown, Clock, CodeFork, FileText, Heart, Lock, LogoMarkdown, SquareListUl } from "@gravity-ui/icons";
 import {
   Alert,
   ArrowToggle,
@@ -49,9 +49,10 @@ import {
   gitLimitsText,
   scanStatusText,
   scanTriggerText,
+  scoreTheme,
 } from "./format";
 import { Page, type Crumb } from "./Shell";
-import { AsideSection, EmptyState, Meta, MetaItem, RepoAvatar, SkeletonRows } from "./ui";
+import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, SkeletonRows } from "./ui";
 
 type Card = RepoCard;
 type Category = CardCategory;
@@ -113,7 +114,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
       {card.score === null ? (
         <EmptyState
           icon={SquareListUl}
-          title="Репозиторий есть в каталоге, но ещё не сканировался"
+          title="Репозиторий есть в каталоге, но еще не сканировался"
           description="Score появится после первого скана: его считает код по фактам, а фактов пока нет."
         />
       ) : (
@@ -139,7 +140,8 @@ function ReportMenu({ mdHref }: { mdHref: string }) {
       renderSwitcher={(props) => (
         <Button {...props} view="normal" size="m" aria-haspopup="menu">
           <Icon data={ArrowDownToLine} size={16} />
-          Отчёт
+          Отчет
+          <Icon data={ChevronDown} size={16} />
         </Button>
       )}
       items={[
@@ -171,7 +173,7 @@ function useRefreshAnalysis(org: string, repo: string, cardUrl: string, sinceSca
         const card = await fetchJson<Card>(cardUrl);
         if (card.scan && card.scan.id > sinceScanId && card.scan.finishedAt && card.scan.status !== "running") {
           setPhase("idle");
-          toaster.add({ name: `scan-done:${org}/${repo}`, theme: "success", title: "Анализ завершён", content: "Карточка обновлена по новому скану." });
+          toaster.add({ name: `scan-done:${org}/${repo}`, theme: "success", title: "Анализ завершен", content: "Карточка обновлена по новому скану." });
           onDone();
         }
       } catch {
@@ -226,8 +228,8 @@ function Header({ card }: { card: Card }) {
             </Button>
           </Flex>
           <Meta>
-            <MetaItem icon={Code} title="язык">
-              {r.language ?? "язык не определён"}
+            <MetaItem title="язык">
+              <LanguageName name={r.language} color={r.languageColor} />
             </MetaItem>
             <MetaItem icon={Heart} title="лайки">
               {fmtNumber(r.likes)}
@@ -337,7 +339,7 @@ function ScoreAside({ card, meta }: { card: Card; meta: MetaResponse | null }) {
       <AsideSection title="Скан">
         {scan ? (
           <DefinitionList nameMaxWidth={120}>
-            <DefinitionList.Item name="Завершён">{fmtDateTime(scan.finishedAt ?? scan.startedAt)}</DefinitionList.Item>
+            <DefinitionList.Item name="Завершен">{fmtDateTime(scan.finishedAt ?? scan.startedAt)}</DefinitionList.Item>
             <DefinitionList.Item name="Статус">
               <Label theme={scan.status === "ok" ? "success" : scan.status === "bad" ? "danger" : "warning"} size="xs">
                 {scanStatusText(scan.status)}
@@ -348,7 +350,7 @@ function ScoreAside({ card, meta }: { card: Card; meta: MetaResponse | null }) {
             {score && <DefinitionList.Item name="Модель">{score.modelVersion}</DefinitionList.Item>}
           </DefinitionList>
         ) : (
-          <Text color="secondary">Скана ещё не было</Text>
+          <Text color="secondary">Скана еще не было</Text>
         )}
       </AsideSection>
     </>
@@ -427,7 +429,7 @@ function CategoryRow({ categoryKey: key, title, cat, contribution, card }: { cat
         ? null
         : lockNote
       : cat.score === null
-        ? `${key === "security" ? securityNote(card) : humanNoData(`${key}: ${cat.no_data ?? ""}`)} Категория не снизила Score: её вес выброшен, остальные перенормированы.`
+        ? `${key === "security" ? securityNote(card) : humanNoData(`${key}: ${cat.no_data ?? ""}`)} Категория не снизила Score: ее вес выброшен, остальные перенормированы.`
         : cat.no_data
           ? humanNoData(`${key}: ${cat.no_data}`)
           : null;
@@ -449,7 +451,7 @@ function CategoryRow({ categoryKey: key, title, cat, contribution, card }: { cat
         ) : cat.score === null ? (
           <Text color="secondary">{NO_DATA}</Text>
         ) : (
-          <Progress value={Math.round(cat.score)} size="s" theme="misc" />
+          <Progress value={Math.round(cat.score)} size="s" theme={scoreTheme(cat.score)} />
         )}
       </span>
       <Text variant="subheader-2" className="rh-category__value">
@@ -513,7 +515,7 @@ function Markers({ card }: { card: Card }) {
     rows.push({
       key: "stale",
       label: "Факты из истории",
-      text: "Часть источников ответила сбоем канала, поэтому в расчёт пошли последние успешные факты предыдущих сканов. Сбой трубы — не отсутствие данных, и он не превращается в премию или штраф.",
+      text: "Часть источников ответила сбоем канала, поэтому в расчет пошли последние успешные факты предыдущих сканов. Сбой трубы — не отсутствие данных, и он не превращается в премию или штраф.",
     });
   }
   if (m.gitLimits) {
@@ -530,13 +532,13 @@ function Markers({ card }: { card: Card }) {
     rows.push({
       key: "ci-cap",
       label: "CI заявлен, прогоны недоступны",
-      text: "Конфигурация CI в репозитории есть, но статусы прогонов закрыты правами (403 для чужих репозиториев). Заявленный CI даёт максимум 50 из 100 — доказательства дают прогоны.",
+      text: "Конфигурация CI в репозитории есть, но статусы прогонов закрыты правами (403 для чужих репозиториев). Заявленный CI дает максимум 50 из 100 — доказательства дают прогоны.",
     });
   }
   if (rows.length === 0) return null;
 
   return (
-    <Flex direction="column" gap={2} role="region" aria-label="Особенности расчёта">
+    <Flex direction="column" gap={2} role="region" aria-label="Особенности расчета">
       {rows.map((row) => (
         <Alert key={row.key} theme="warning" view="outlined" size="s" title={row.label} message={row.text} />
       ))}
@@ -666,7 +668,7 @@ export function humanNoData(raw: string): string {
   if (reason.startsWith("ci runs no-data")) {
     return `${prefix}прогоны CI недоступны (закрыты правами или их нет) — категория ограничена потолком 50.`;
   }
-  if (reason === "git channel no-data") return `${prefix}git-канал не отдал данные (клон не удался или упёрся в лимиты).`;
+  if (reason === "git channel no-data") return `${prefix}git-канал не отдал данные (клон не удался или уперся в лимиты).`;
   if (reason === "git+rest channels no-data") return `${prefix}ни git-, ни REST-канал не отдали данных.`;
   if (reason === "issues channel no-data") return `${prefix}данные трекера задач недоступны.`;
   return `${prefix}${reason || NO_DATA}`;
@@ -719,9 +721,9 @@ const SUBMETRIC_TITLES: Record<string, string> = {
   "activity.sync_bursts": "Всплески синхронизации",
   "issues.stale": "Доля зависших issues",
   "issues.close_days": "Медиана времени закрытия",
-  "issues.resolution": "Доля решённых",
+  "issues.resolution": "Доля решенных",
   "issues.first_resp": "Время до первого ответа",
-  "issues.tracker_unused": "Трекер не ведётся",
+  "issues.tracker_unused": "Трекер не ведется",
   "code.density": "Плотность TODO/FIXME",
   "code.old_share": "Доля старых TODO",
   "code.root": "Порядок в корне репозитория",
@@ -740,7 +742,7 @@ function securityNote(card: Card): string {
     return "AppSec этого репозитория недоступен токену скана: право src.repositories.useAppSecScan не выдано. Это отсутствие данных, не ноль — вес категории выброшен.";
   }
   if (reason === "no-scan") {
-    return "Завершённого скана AppSec нет (не запускался или ещё идёт). Это отсутствие данных, не ноль.";
+    return "Завершенного скана AppSec нет (не запускался или еще идет). Это отсутствие данных, не ноль.";
   }
   if (reason === "incomplete") {
     return "AppSec API ответил неполно (канал/пагинация). Ошибка — не отсутствие уязвимостей: вес категории выброшен до успешного пересбора.";

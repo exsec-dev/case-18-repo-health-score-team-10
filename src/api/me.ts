@@ -5,6 +5,7 @@
 // в UI. Функции чистые от HTTP-слоя сервера: клиент инъектится, тесты
 // без сети. Чужие/недоступные репо не запрашиваются вовсе (ТЗ 5).
 import type { Database } from "bun:sqlite";
+import { hexColor } from "../collectors/catalog";
 import { ScClient } from "../collectors/http";
 import { upsertRepo } from "../jobs/runner";
 import { LAST_ELIGIBLE_SCAN_SQL, LAST_NOT_BAD_SCAN_SQL } from "./repos";
@@ -20,6 +21,7 @@ export interface MyRepoEntry {
   lastActivityAt: string | null;
   /** logo.url платформы из ответа namespace (дисплей) */
   logoUrl: string | null;
+  languageColor: string | null;
   /** Score в рейтинге (total_rating) последнего пригодного скана (приватный без него — последнего не-bad, круг 2); null = не оценивался */
   score: number | null;
   lastScanAt: string | null;
@@ -37,7 +39,7 @@ interface RawRepoEntry {
   organization?: { slug?: unknown };
   slug?: unknown;
   name?: unknown;
-  language?: { name?: unknown } | string | null;
+  language?: { name?: unknown; color?: unknown } | string | null;
   last_updated?: unknown;
   logo?: { url?: unknown } | null;
 }
@@ -59,7 +61,7 @@ export async function fetchTokenUsername(client: ScClient): Promise<{ ok: true; 
 export async function listMyRepos(db: Database, client: ScClient, opts: { maxPages?: number } = {}): Promise<MyReposResult> {
   const who = await fetchTokenUsername(client);
   if (!who.ok) {
-    return { ok: false, username: null, entries: [], error: `токен отклонён (HTTP ${who.status})` };
+    return { ok: false, username: null, entries: [], error: `токен отклонен (HTTP ${who.status})` };
   }
   const maxPages = opts.maxPages ?? 5;
   const entries: MyRepoEntry[] = [];
@@ -105,6 +107,7 @@ export async function listMyRepos(db: Database, client: ScClient, opts: { maxPag
         language,
         lastActivityAt: typeof raw.last_updated === "string" ? raw.last_updated : null,
         logoUrl: typeof raw.logo?.url === "string" && raw.logo.url !== "" ? raw.logo.url : null,
+        languageColor: typeof raw.language === "object" && raw.language !== null ? hexColor(raw.language.color) : null,
         score: known ? known.total : null,
         lastScanAt: known ? known.finished_at : null,
       });
@@ -159,7 +162,7 @@ export async function requestUserScan(
   // 0/429/5xx) учитывается лимитом частоты — POST не усилитель запросов
   if (res.status !== 200) recordRefusedUserJob(db, userId, now);
   if (res.status === 403 || res.status === 404) {
-    return { status: 403, body: { error: { code: "no_access", message: `ваш PAT не даёт доступа к ${org}/${repo}` } } };
+    return { status: 403, body: { error: { code: "no_access", message: `ваш PAT не дает доступа к ${org}/${repo}` } } };
   }
   if (res.status === 401) {
     return { status: 401, body: { error: { code: "pat_expired", message: "SourceCraft отклонил PAT — обновите токен в кабинете" } } };

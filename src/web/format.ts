@@ -60,6 +60,20 @@ export function scanStatusText(status: string): string {
   }
 }
 
+/**
+ * Уровень Score для цвета полос (дисплей, не методика): ≥70 — хорошо,
+ * 40–69 — есть над чем работать, <40 — плохо. Нет данных — нейтрально
+ * (закон 2: отсутствие данных никогда не красное).
+ */
+export function scoreTheme(value: number | null | undefined): "success" | "warning" | "danger" | "misc" {
+  if (value === null || value === undefined) return "misc";
+  // уровень — по тому же округлённому числу, что видит зритель (69.6 показан как 70)
+  const shown = Math.round(value);
+  if (shown >= 70) return "success";
+  if (shown >= 40) return "warning";
+  return "danger";
+}
+
 /** Кто запустил скан — словом, а не кодом очереди. */
 export function scanTriggerText(trigger: string): string {
   switch (trigger) {
@@ -92,7 +106,7 @@ export const SECURITY_PUBLIC_NOTE =
  */
 export const ACCESS_LOCK_TEXT: Record<"no-pat" | "denied" | "pat-expired" | "check-failed", string> = {
   "no-pat": "Данные видны участникам репозитория: войдите и добавьте PAT SourceCraft в «Личном кабинете».",
-  denied: "Ваш PAT не даёт доступа к этим данным репозитория.",
+  denied: "Ваш PAT не дает доступа к этим данным репозитория.",
   "pat-expired": "SourceCraft отклонил ваш PAT — обновите PAT в «Личном кабинете».",
   "check-failed": "Не удалось проверить доступ к этим данным — попробуйте открыть карточку позже.",
 };
@@ -128,7 +142,7 @@ export function gitLimitsText(l: GitLimitsMarker): string {
     : "";
   return (
     `Репозиторий больше лимита сервиса: ${full}${degrade}. ` +
-    "Git-метрики (документация, активность, код) — нет данных; Score не занижен, их вес выброшен. Лимиты задаёт оператор сервиса."
+    "Git-метрики (документация, активность, код) — нет данных; Score не занижен, их вес выброшен. Лимиты задает оператор сервиса."
   );
 }
 

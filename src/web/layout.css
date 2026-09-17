@@ -81,28 +81,27 @@ body {
   animation-duration: 0.25s;
 }
 
-/* блок аккаунта: одна высота в узком и широком rail (без скачка при раскрытии) */
+/* блок аккаунта: колонка футера AsideHeader — 40px в узком rail и 220px в
+ * широком, обе от x=8. Отступ 4px в обоих видах ставит аватар 32px и кнопку
+ * 36px на ось иконок (x=28): при раскрытии ничего не сдвигается и не прыгает */
 .rh-rail-account {
   box-sizing: border-box;
-  height: 66px;
-  padding: var(--g-spacing-2) 7px;
   display: flex;
   align-items: center;
-}
-
-.rh-rail-account_compact {
-  justify-content: center;
+  height: 56px;
+  padding: var(--g-spacing-2) 2px;
 }
 
 .rh-rail-account > * {
-  min-width: 0;
   flex: 1;
+  min-width: 0;
 }
 
 .rh-rail-account_compact > * {
   flex: none;
 }
 
+/* кто вошёл: не кнопка и не ссылка — действия рядом явными кнопками */
 .rh-rail-user {
   display: flex;
   align-items: center;
@@ -110,16 +109,31 @@ body {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
-  height: 50px;
-  padding: var(--g-spacing-1);
-  border: 0;
-  border-radius: var(--g-border-radius-l);
-  outline: none;
-  background: none;
+  height: 40px;
+  padding-inline: 2px;
   color: var(--g-color-text-primary);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
+}
+
+/* тултип иконки узкого rail: якорь — от иконки до края rail (8 + 48 = 56),
+ * тогда ActionTooltip встает в 4px от rail, как у SourceCraft */
+.rh-rail-anchor {
+  width: 48px;
+}
+
+/* название продукта в rail — плотнее, как вордмарк SourceCraft */
+.rh-rail [class*="gn-logo__logo"] {
+  font-weight: 600;
+}
+
+/* затемнение под подписями (MultipleTooltip::before у SourceCraft) */
+.rh-rail-backdrop {
+  position: fixed;
+  z-index: 999;
+  width: 240px;
+  background: linear-gradient(90deg, var(--g-color-base-background) 50%, transparent);
+  filter: blur(16px);
+  opacity: 0.7;
+  pointer-events: none;
 }
 
 .rh-rail_compact .rh-rail-user__text {
@@ -132,28 +146,56 @@ body {
   position: relative;
 }
 
+/* геометрия MultipleTooltip SourceCraft: 13/18, отступы 8×12, радиус s;
+ * неактивные подписи на 12px правее, активная прижата к rail и светлее —
+ * при движении курсора сдвиг анимируется «лесенкой» */
 .rh-rail-tip {
   position: fixed;
   z-index: 1000;
+  max-width: 240px;
   padding: var(--g-spacing-2) var(--g-spacing-3);
-  border-radius: var(--g-border-radius-m);
-  background: var(--g-color-base-float-accent);
-  box-shadow: 0 2px 8px var(--g-color-sfx-shadow);
-  color: var(--g-color-text-primary);
+  border-radius: var(--g-border-radius-s);
+  background: var(--g-color-base-float-medium);
+  color: var(--g-color-text-light-primary);
   font-family: var(--g-text-body-font-family);
-  font-size: var(--g-text-body-2-font-size);
-  line-height: var(--g-text-body-2-line-height);
+  font-size: var(--g-text-body-1-font-size);
+  line-height: var(--g-text-body-1-line-height);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   pointer-events: none;
-  transform: translateY(-50%);
+  transform: translate(12px, -50%);
+  transition: transform 0.1s ease-in-out, background-color 0.1s ease-in-out;
+  animation: rh-rail-tip-in 0.1s ease-out;
 }
 
-.rh-rail-tip_current {
+.rh-rail-tip_active {
   background: var(--g-color-base-float-heavy);
+  transform: translate(0, -50%);
 }
 
-.rh-rail-item:hover .rh-rail-tip {
-  background: var(--g-color-base-float-heavy);
+@keyframes rh-rail-tip-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rh-rail-tip {
+    transition: none;
+    animation: none;
+  }
+}
+
+/* всплывающие подсказки не растягиваются по длине текста */
+.g-help-mark__popover,
+.g-action-tooltip,
+.g-tooltip {
+  max-width: 280px;
+}
+
+.g-help-mark__popover {
+  box-sizing: border-box;
 }
 
 .rh-rail-user:hover {
@@ -274,6 +316,11 @@ body {
   background: var(--g-color-base-background);
 }
 
+/* номер места: первая колонка без краевого отступа таблицы — цифра у края */
+.rh-table-fill .g-table__cell_edge-padding:first-child {
+  padding-inline-start: 0;
+}
+
 .rh-table-fill thead th.g-table__cell_sticky_start,
 .rh-table-fill thead th.g-table__cell_sticky_end {
   z-index: 3;
@@ -300,6 +347,22 @@ body {
   align-items: stretch;
   gap: var(--g-spacing-3);
   min-width: 0;
+}
+
+/* ---------- язык: цветная точка + название ---------- */
+
+.rh-lang {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.rh-lang__dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
 }
 
 /* ---------- мета-строка: иконка + вторичный текст ---------- */

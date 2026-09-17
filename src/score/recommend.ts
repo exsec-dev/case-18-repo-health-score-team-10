@@ -225,7 +225,7 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
   const stats = ok.get("issues.stats") as { open?: unknown; closed?: unknown } | undefined;
   if (pub && stats && (stats.open ?? 0) === 0 && (stats.closed ?? 0) === 0) {
     activation.push(
-      act("start-tracker", "issues", "Трекер не ведётся: 0 открытых и 0 закрытых issues", "Начните вести трекер issues (баги + планы) — источник метрик поддержки", ["issues.stats"], `Issues: скор с минимума категории (${ctx.issuesScore ?? 0}/100) до фактического по данным`),
+      act("start-tracker", "issues", "Трекер не ведется: 0 открытых и 0 закрытых issues", "Начните вести трекер issues (баги + планы) — источник метрик поддержки", ["issues.stats"], `Issues: скор с минимума категории (${ctx.issuesScore ?? 0}/100) до фактического по данным`),
     );
   }
   if (!ok.has("appsec.findings")) {
@@ -236,9 +236,9 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
         "connect-appsec",
         "security",
         "Security без данных: результатов AppSec SourceCraft по репозиторию нет",
-        "Подключите AppSec к репозиторию и дождитесь завершённого скана — SAST/SCA/secrets закроют 20% полного Score",
+        "Подключите AppSec к репозиторию и дождитесь завершенного скана — SAST/SCA/secrets закроют 20% полного Score",
         ["appsec.findings"],
-        "AppSec-данные недоступны: проверьте право PAT src.repositories.useAppSecScan и завершённость скана — Security заработает в полном Score",
+        "AppSec-данные недоступны: проверьте право PAT src.repositories.useAppSecScan и завершенность скана — Security заработает в полном Score",
         "appsec",
       ),
     );

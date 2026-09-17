@@ -45,6 +45,15 @@ export function AsideSection({ title, children }: { title: ReactNode; children: 
  * Аватар репозитория: logo.url платформы, а без него или при ошибке загрузки
  * (нет сети, битая ссылка) — инициалы: внешняя картинка не обязательна для UI.
  */
+/** Цвет инициалов по имени — стабильный, из спокойных семантических тонов темы. */
+const AVATAR_TONES = ["info", "utility", "positive", "misc"] as const;
+
+function avatarTone(name: string): (typeof AVATAR_TONES)[number] {
+  let h = 0;
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return AVATAR_TONES[h % AVATAR_TONES.length]!;
+}
+
 export function RepoAvatar({ repo, logoUrl, size }: { repo: string; logoUrl: string | null; size: AvatarSize }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -60,7 +69,24 @@ export function RepoAvatar({ repo, logoUrl, size }: { repo: string; logoUrl: str
   return logoUrl && !failed ? (
     <Avatar size={size} shape="square" imgUrl={logoUrl} alt="" loading="lazy" style={{ flexShrink: 0 }} />
   ) : (
-    <Avatar size={size} shape="square" text={repo} theme="normal" style={{ flexShrink: 0 }} />
+    <Avatar
+      size={size}
+      shape="square"
+      text={repo}
+      backgroundColor={`var(--g-color-base-${avatarTone(repo)}-light)`}
+      color={`var(--g-color-text-${avatarTone(repo)})`}
+      style={{ flexShrink: 0 }}
+    />
+  );
+}
+
+/** Язык с цветной точкой, как в списках SourceCraft; цвет — language.color платформы. */
+export function LanguageName({ name, color }: { name: string | null; color: string | null }) {
+  return (
+    <span className="rh-lang">
+      {color && <span className="rh-lang__dot" style={{ background: color }} aria-hidden="true" />}
+      {name ?? "язык не определен"}
+    </span>
   );
 }
 

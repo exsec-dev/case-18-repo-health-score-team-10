@@ -21,6 +21,8 @@ export interface CatalogEntry {
   web_url: string | null;
   /** logo.url репозитория (картинка платформы; нет — null, UI рисует инициалы) */
   logo_url: string | null;
+  /** language.color платформы (#rrggbb; дисплей — точка языка) */
+  language_color: string | null;
 }
 
 export interface CatalogResult {
@@ -45,7 +47,7 @@ interface RawEntry {
   organization?: { slug?: unknown };
   slug?: unknown;
   name?: unknown;
-  language?: { name?: unknown } | string | null;
+  language?: { name?: unknown; color?: unknown } | string | null;
   visibility?: unknown;
   description?: unknown;
   is_empty?: unknown;
@@ -55,6 +57,11 @@ interface RawEntry {
   clone_url?: { https?: unknown };
   web_url?: unknown;
   logo?: { url?: unknown } | null;
+}
+
+/** Цвет из API идёт в style — только #rgb/#rrggbb, иначе null. */
+export function hexColor(v: unknown): string | null {
+  return typeof v === "string" && /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(v) ? v : null;
 }
 
 function parseEntry(e: RawEntry): CatalogEntry | null {
@@ -79,6 +86,7 @@ function parseEntry(e: RawEntry): CatalogEntry | null {
     clone_url_https: typeof e.clone_url?.https === "string" ? e.clone_url.https : null,
     web_url: typeof e.web_url === "string" ? e.web_url : null,
     logo_url: typeof e.logo?.url === "string" && e.logo.url !== "" ? e.logo.url : null,
+    language_color: typeof e.language === "object" && e.language !== null ? hexColor(e.language.color) : null,
   };
 }
 

@@ -52,6 +52,8 @@ export interface RatingItem {
   lastActivityAt: string | null;
   /** logo.url платформы (дисплей); null — UI рисует инициалы */
   logoUrl: string | null;
+  /** language.color платформы (#rrggbb) — точка языка; null — без точки */
+  languageColor: string | null;
   scannedAt: string | null;
   scanStatus: string;
   /** часть фактов взята из истории при сбое канала (§5.6) — НЕ «давность скана» */
@@ -159,6 +161,7 @@ interface RatingRow {
   forks: number | null;
   last_activity_at: string | null;
   logo_url: string | null;
+  language_color: string | null;
   total: number | null;
   coverage: number;
   categories: string;
@@ -195,7 +198,7 @@ const LAST_SCAN_SQL = `(SELECT MAX(l2.id) FROM scans l2 WHERE l2.repo_id = r.id)
 // последнего скана L (круг 2, LOW-2: как карточка), статус — public_status;
 // только rating_active=1 AND visibility='public'. Проверок доступа нет.
 const RATING_SQL = `
-SELECT r.org_slug, r.repo_slug, r.title, r.language, r.likes, r.forks, r.last_activity_at, r.logo_url,
+SELECT r.org_slug, r.repo_slug, r.title, r.language, r.likes, r.forks, r.last_activity_at, r.logo_url, r.language_color,
        sc.total_rating AS total, sc.coverage_rating AS coverage, sc.categories, sc.stale, sc.model_version,
        COALESCE(l.public_status, l.status) AS scan_status, l.started_at, l.finished_at
 FROM scores sc
@@ -229,6 +232,7 @@ function toRatingItem(row: RatingRow): RatingItem {
     forks: row.forks,
     lastActivityAt: row.last_activity_at,
     logoUrl: row.logo_url,
+    languageColor: row.language_color,
     scannedAt: row.finished_at ?? row.started_at,
     scanStatus: row.scan_status,
     staleFacts: Array.isArray(stale) && stale.length > 0,
@@ -327,6 +331,7 @@ export interface CardRepo {
   lastActivityAt: string | null;
   /** logo.url платформы (дисплей); null — UI рисует инициалы */
   logoUrl: string | null;
+  languageColor: string | null;
   webUrl: string;
 }
 
@@ -474,6 +479,7 @@ interface RepoRow {
   forks: number | null;
   last_activity_at: string | null;
   logo_url: string | null;
+  language_color: string | null;
 }
 
 interface ScoreRow {
@@ -518,7 +524,7 @@ type CardRepoRow = RepoRow & { rating_active: number; visibility: string };
 function findRepoRow(db: Database, org: string, repo: string): CardRepoRow | null {
   return db
     .query(
-      "SELECT id, org_slug, repo_slug, title, language, likes, forks, last_activity_at, logo_url, rating_active, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?",
+      "SELECT id, org_slug, repo_slug, title, language, likes, forks, last_activity_at, logo_url, language_color, rating_active, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?",
     )
     .get(org, repo) as CardRepoRow | null;
 }
@@ -579,6 +585,7 @@ export function getRepoCard(
     forks: r.forks,
     lastActivityAt: r.last_activity_at,
     logoUrl: r.logo_url,
+    languageColor: r.language_color,
     // колонки в схеме нет — шаблон платформы, заводить колонку ради него незачем
     webUrl: `https://sourcecraft.dev/${r.org_slug}/${r.repo_slug}`,
   };

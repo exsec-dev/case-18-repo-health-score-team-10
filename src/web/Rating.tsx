@@ -27,11 +27,11 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import type { MetaResponse, RatingResponse } from "./api";
 import { useJson } from "./api";
-import { NO_SCORE, fmtCoverage, fmtDate, fmtNumber, fmtScore, scanStatusText } from "./format";
+import { NO_SCORE, fmtCoverage, fmtDate, fmtNumber, fmtScore, scanStatusText, scoreTheme } from "./format";
 import { useMediaQuery } from "./prefs";
 import { linkProps, navigate, repoHref } from "./router";
 import { Page } from "./Shell";
-import { AsideSection, EmptyState, PageHeader, RepoAvatar, SkeletonRows } from "./ui";
+import { AsideSection, EmptyState, LanguageName, PageHeader, RepoAvatar, SkeletonRows } from "./ui";
 
 type Item = RatingResponse["items"][number];
 
@@ -191,7 +191,7 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
         <>
           <PageHeader
             title="Рейтинг здоровья репозиториев"
-            description="Порядок задаёт Repo Health Score — воспроизводимая оценка, а не число лайков."
+            description="Порядок задает Repo Health Score — воспроизводимая оценка, а не число лайков."
           />
           {toolbar}
         </>
@@ -240,7 +240,7 @@ function NothingFound({ hasFilters }: { hasFilters: boolean }) {
     return (
       <EmptyState
         icon={SquareListUl}
-        title="Рейтинг ещё пуст"
+        title="Рейтинг еще пуст"
         description="Репозитории появятся здесь после первого обхода каталога и скана."
       />
     );
@@ -249,7 +249,7 @@ function NothingFound({ hasFilters }: { hasFilters: boolean }) {
     <EmptyState
       icon={Magnifier}
       title="Под фильтр ничего не подошло"
-      description="Ни один репозиторий выборки не совпал с поиском и языком. Данные при этом на месте — сброс фильтров вернёт полный рейтинг."
+      description="Ни один репозиторий выборки не совпал с поиском и языком. Данные при этом на месте — сброс фильтров вернет полный рейтинг."
       actions={[{ text: "Сбросить фильтры", view: "normal", onClick: () => navigate("/") }]}
     />
   );
@@ -320,7 +320,7 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
         </Text>
       </AsideSection>
 
-      <AsideSection title="Расчёт">
+      <AsideSection title="Расчет">
         <DefinitionList nameMaxWidth={160}>
           <DefinitionList.Item name="Порог оценки" note="Без данных честного числа нет: Score не выставляется, а не занижается.">
             покрытие от {fmtCoverage(meta.coverageNullBelow)}
@@ -343,7 +343,7 @@ function langOptions(data: RatingResponse | null): { value: string; content: str
     { value: LANG_ALL, content: "все" },
     ...facets.map((f) => ({
       value: f.language === null ? LANG_NONE : f.language,
-      content: `${f.language ?? "не определён"} (${f.count})`,
+      content: `${f.language ?? "не определен"} (${f.count})`,
     })),
   ];
 }
@@ -379,7 +379,7 @@ function RepoCell({ item }: { item: Item }) {
           </Text>
         </Link>
         <Text variant="body-short" color="secondary" ellipsis>
-          {[item.language ?? "язык не определён", item.title && item.title !== item.repo ? item.title : null].filter(Boolean).join(" · ")}
+          <LanguageName name={item.language} color={item.languageColor} />
         </Text>
       </Flex>
     </Flex>
@@ -399,7 +399,7 @@ function buildColumns(categories: MetaResponse["categories"], rankOffset: number
       id: "rank",
       name: "#",
       align: "end",
-      width: 48,
+      width: 36,
       sticky: "start",
       template: (_item: Item, index: number) => <Text color="secondary">{rankOffset + index + 1}</Text>,
     },
@@ -445,7 +445,7 @@ function ScoreCell({ item }: { item: Item }) {
         <Text variant="subheader-2">{fmtScore(item.score)}</Text>
       </Flex>
       <div style={{ width: 64 }}>
-        <Progress value={item.score} size="xs" theme="misc" />
+        <Progress value={item.score} size="xs" theme={scoreTheme(item.score)} />
       </div>
     </Flex>
   );

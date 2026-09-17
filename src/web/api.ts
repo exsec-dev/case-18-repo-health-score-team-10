@@ -23,6 +23,13 @@ export interface MyReposResponse {
   entries: MyRepoEntry[];
 }
 
+/** Выход: сервер отзывает сессию; дальше — полная перезагрузка на рейтинг (сбрасывает всё, что знала страница о зрителе). */
+export async function logout(): Promise<void> {
+  const res = await fetch("/auth/logout", { method: "POST" });
+  if (!res.ok) throw new Error(`сервер ответил HTTP ${res.status}`);
+  window.location.assign("/");
+}
+
 export async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(url, { signal });
   if (!res.ok) {

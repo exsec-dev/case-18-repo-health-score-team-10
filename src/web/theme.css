@@ -156,6 +156,7 @@
 
   /* навигация (@gravity-ui/navigation): rail светлее контента, как у платформы */
   --gn-aside-header-collapsed-background-color: #3e3e3e;
+  --gn-aside-header-expanded-background-color: #3e3e3e;
   --gn-aside-header-item-current-background-color: rgba(255, 255, 255, .15);
 }
 
@@ -292,5 +293,6 @@
   --g-color-text-warning-heavy: #c0600f;
 
   --gn-aside-header-collapsed-background-color: #f2f2f2;
+  --gn-aside-header-expanded-background-color: #f2f2f2;
   --gn-aside-header-item-current-background-color: rgba(0, 0, 0, .1);
 }

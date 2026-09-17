@@ -263,6 +263,7 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
       lastActivityAt: entry.last_updated,
       visibility: entry.visibility ?? "public",
       logoUrl: entry.logo_url,
+      languageColor: entry.language_color,
     });
     seenRepoIds.add(repoId);
     // не чаще раза за обход (дубли записей каталога)

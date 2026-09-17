@@ -250,6 +250,7 @@ export function openDb(config: Config): Database {
   // В4.5 (17.09): аватары — logo.url репозитория и портрет Я ID пользователя;
   // колонки аддитивные (старый код их не читает), версия схемы не меняется
   ensureColumn(db, "repos", "logo_url", "TEXT");
+  ensureColumn(db, "repos", "language_color", "TEXT");
   ensureColumn(db, "users", "display_name", "TEXT");
   ensureColumn(db, "users", "avatar_id", "TEXT");
   ensureColumn(db, "jobs", "user_id", "INTEGER");

@@ -7,14 +7,14 @@
 // Секция «Бюджеты скана» удалена (К5 В4.1, PENDING Алексей): лимиты скана —
 // только оператор. Ссылки ведут на единую карточку /repo/...
 // Токен НИКОГДА не возвращается API и не логируется.
-import { Clock, Code, Key, Person } from "@gravity-ui/icons";
-import { Alert, Button, Dialog, Flex, Label, Link, Spin, Text, TextInput, useToaster } from "@gravity-ui/uikit";
+import { ArrowRightFromSquare, Clock, Key, Person } from "@gravity-ui/icons";
+import { Alert, Button, Dialog, Flex, Icon, Label, Link, Spin, Text, TextInput, useToaster } from "@gravity-ui/uikit";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { type MeResponse, type MyReposResponse, type RepoCard, fetchJson, mutateJson, useJson } from "./api";
+import { type MeResponse, type MyReposResponse, type RepoCard, fetchJson, logout, mutateJson, useJson } from "./api";
 import { fmtDateTime, fmtScore } from "./format";
 import { linkProps, repoHref } from "./router";
-import { Page } from "./Shell";
-import { AsideSection, EmptyState, Meta, MetaItem, PageHeader, RepoAvatar, SkeletonRows } from "./ui";
+import { Page, UserAvatar, displayName, logoutFailedToast } from "./Shell";
+import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, SkeletonRows } from "./ui";
 
 const SLUG_RE = /^[a-z0-9_.-]+\/[a-z0-9_.-]+$/i;
 const CRUMBS = [{ text: "Личный кабинет" }];
@@ -38,14 +38,19 @@ export function MePage() {
   return (
     <Page
       crumbs={CRUMBS}
-      aside={<PatSection key={data.patCheckedAt ?? "no-pat"} hasPat={data.hasPat} checkedAt={data.patCheckedAt} onChanged={me.reload} />}
+      aside={
+        <>
+          <AccountSection me={data} />
+          <PatSection key={data.patCheckedAt ?? "no-pat"} hasPat={data.hasPat} checkedAt={data.patCheckedAt} onChanged={me.reload} />
+        </>
+      }
     >
       <PageHeader
         title="Личный кабинет"
         description={
           <>
             Вы вошли как <Text variant="code-inline-1">{data.login}</Text> (Я ID). Вход — это UX-слой; права на данные
-            даёт отдельный PAT SourceCraft, как на любом git-хостинге.
+            дает отдельный PAT SourceCraft, как на любом git-хостинге.
           </>
         }
       />
@@ -59,6 +64,34 @@ export function MePage() {
         />
       )}
     </Page>
+  );
+}
+
+/**
+ * «Аккаунт» — кто вошёл и выход. Здесь выход доступен всегда, в том числе при
+ * узком rail (там у аватара кнопки нет): кабинет — место настроек аккаунта.
+ */
+function AccountSection({ me }: { me: MeResponse }) {
+  const toaster = useToaster();
+  const name = displayName(me);
+  return (
+    <AsideSection title="Аккаунт">
+      <Flex gap={3} alignItems="center">
+        <UserAvatar me={me} />
+        <Flex direction="column" style={{ minWidth: 0 }}>
+          <Text variant="subheader-2" ellipsis>
+            {name}
+          </Text>
+          <Text color="secondary" ellipsis>
+            {name !== me.login ? me.login : "вход через Я ID"}
+          </Text>
+        </Flex>
+      </Flex>
+      <Button view="outlined" size="m" width="max" onClick={() => void logout().catch((e: unknown) => toaster.add(logoutFailedToast(e)))}>
+        <Icon data={ArrowRightFromSquare} size={16} />
+        Выйти
+      </Button>
+    </AsideSection>
   );
 }
 
@@ -80,7 +113,7 @@ function LoginOffer() {
       <EmptyState
         icon={Person}
         title="Анализ своего репозитория"
-        description="Сценарий «свой репо» состоит из двух слоёв: вход через Я ID (кто вы у нас) и персональный токен SourceCraft (что платформа может вам показать — CI-раны и AppSec вашего репозитория). Токен создаётся в SourceCraft: Домой → Доступ → Персональные токены доступа."
+        description="Сценарий «свой репо» состоит из двух слоев: вход через Я ID (кто вы у нас) и персональный токен SourceCraft (что платформа может вам показать — CI-раны и AppSec вашего репозитория). Токен создается в SourceCraft: Домой → Доступ → Персональные токены доступа."
         actions={[{ text: "Войти через Я ID", view: "action", size: "l", href: "/auth/ya" }]}
       />
     </Page>
@@ -105,7 +138,7 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
       const res = await mutateJson<{ ok: boolean; tokenOwner: string | null }>("/api/me/pat", "PUT", { token });
       setOwner(res.tokenOwner);
       setToken("");
-      toaster.add({ name: "pat-saved", theme: "success", title: hasPat ? "Токен заменён" : "Токен сохранён" });
+      toaster.add({ name: "pat-saved", theme: "success", title: hasPat ? "Токен заменен" : "Токен сохранен" });
       onChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -121,7 +154,7 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
       await mutateJson("/api/me/pat", "DELETE");
       setOwner(null);
       setConfirmDelete(false);
-      toaster.add({ name: "pat-deleted", theme: "info", title: "Токен удалён" });
+      toaster.add({ name: "pat-deleted", theme: "info", title: "Токен удален" });
       onChanged();
     } catch (e) {
       setConfirmDelete(false);
@@ -155,7 +188,7 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
         <Flex direction="column" gap={3}>
           <Flex gap={2} alignItems="center" wrap>
             <Label theme="success" size="xs">
-              сохранён
+              сохранен
             </Label>
             <Text variant="body-short" color="secondary">
               проверен {fmtDateTime(checkedAt)}
@@ -197,7 +230,7 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
           {tokenForm("SourceCraft PAT", "Проверить и сохранить")}
         </Flex>
       )}
-      {error && <Alert theme="danger" view="outlined" size="s" title="Токен не сохранён" message={error} />}
+      {error && <Alert theme="danger" view="outlined" size="s" title="Токен не сохранен" message={error} />}
 
       <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)} size="s" aria-label="Удаление токена">
         <Dialog.Header caption="Удалить токен?" />
@@ -273,7 +306,7 @@ function MyReposSection() {
                 delete next[slug];
                 return next;
               });
-              toaster.add({ name: `scan-done:${slug}`, theme: "success", title: "Анализ завершён", content: slug });
+              toaster.add({ name: `scan-done:${slug}`, theme: "success", title: "Анализ завершен", content: slug });
               reposReloadRef.current();
             } else {
               setJobs((prev) => ({ ...prev, [slug]: { ...job, seenScanId: card.scan!.id, phase: "running" } }));
@@ -365,7 +398,9 @@ function RepoRow({ entry, job, onScan }: { entry: MyReposResponse["entries"][num
           </Link>
           {entry.title && entry.title !== repo && <Text color="complementary">{entry.title}</Text>}
           <Meta>
-            <MetaItem icon={Code}>{entry.language ?? "язык не определён"}</MetaItem>
+            <MetaItem>
+              <LanguageName name={entry.language} color={entry.languageColor} />
+            </MetaItem>
             {entry.lastActivityAt && <MetaItem icon={Clock}>активность {fmtDateTime(entry.lastActivityAt)}</MetaItem>}
           </Meta>
         </Flex>
@@ -389,7 +424,7 @@ function RepoRow({ entry, job, onScan }: { entry: MyReposResponse["entries"][num
           </Flex>
         ) : (
           <Label theme="unknown" size="xs">
-            ещё не анализировали
+            еще не анализировали
           </Label>
         )}
 

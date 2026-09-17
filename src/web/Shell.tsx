@@ -13,12 +13,13 @@
 //     прокручивается только область между ними (таблица — сама, с
 //     закреплённой строкой заголовков); уже 1280px правая панель уходит в
 //     Drawer по кнопке в ActionBar — второй прокрутки на странице нет.
-import { ArrowRightFromSquare, ArrowRightToSquare, BookOpen, ChartColumn, CircleInfo, Gear, HeartPulse, Moon, Person, Sun } from "@gravity-ui/icons";
+import { ArrowRightFromSquare, ArrowRightToSquare, BookOpen, ChartColumn, CircleInfo, Gear, Moon, Person, Sun } from "@gravity-ui/icons";
 import { ActionBar, AsideHeader, FooterItem, type AsideHeaderItem } from "@gravity-ui/navigation";
-import { Avatar, Breadcrumbs, Button, Drawer, DropdownMenu, Flex, Icon, Text, useThemeValue, useToaster, type IconData } from "@gravity-ui/uikit";
+import { ActionTooltip, Avatar, Breadcrumbs, Button, Drawer, Flex, Icon, Text, useThemeValue, useToaster, type IconData } from "@gravity-ui/uikit";
 import { useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { flushSync } from "react-dom";
-import type { MeResponse } from "./api";
+import { logout, type MeResponse } from "./api";
+import { HealthCraftMark, PRODUCT_NAME } from "./logo";
 import { useAppTheme, useMediaQuery, useRailCompact, type AppTheme } from "./prefs";
 import { linkProps, navigate } from "./router";
 
@@ -50,11 +51,11 @@ export function Shell({ section, me, children }: { section: Section; me: MeRespo
     current: s.id === section,
     onItemClick: (_item, _collapsed, e) => followLink(e, s.href),
     // узкий rail: вместо одиночного тултипа — подписи всех разделов разом,
-    // как у SourceCraft (в navigation 6.6.0 такого режима нет)
+    // как MultipleTooltip у SourceCraft (в navigation 6.6.0 его нет)
     enableTooltip: false,
     itemWrapper: (params, makeItem, opts) =>
       opts.compact ? (
-        <RailItem title={s.title} current={s.id === section} open={tips.open} onEnter={tips.show} onLeave={tips.hide}>
+        <RailItem id={s.id} title={s.title} tips={tips} withBackdrop={s.id === SECTIONS[0]!.id}>
           {makeItem(params)}
         </RailItem>
       ) : (
@@ -70,11 +71,11 @@ export function Shell({ section, me, children }: { section: Section; me: MeRespo
       collapseTitle="Свернуть меню"
       expandTitle="Развернуть меню"
       logo={{
-        text: "Repo Health",
-        icon: HeartPulse,
-        iconSize: 24,
+        text: PRODUCT_NAME,
+        icon: HealthCraftMark,
+        iconSize: 26,
         href: "/",
-        "aria-label": "Repo Health — к рейтингу",
+        "aria-label": `${PRODUCT_NAME} — к рейтингу`,
         onClick: (e) => followLink(e, "/"),
       }}
       menuItems={menuItems}
@@ -86,54 +87,110 @@ export function Shell({ section, me, children }: { section: Section; me: MeRespo
 }
 
 /**
- * Подписи узкого rail: открыты, пока курсор над любым пунктом. Уход с пункта
- * закрывает с короткой задержкой — переход на соседний пункт её отменяет,
- * и подписи не мигают.
+ * Затемнение под подписями разделов — как ::before у MultipleTooltip
+ * SourceCraft: градиент от фона к прозрачному, размытие, прозрачность .7;
+ * накрывает подписи с полями 32px сверху и снизу.
  */
-function useRailTips() {
-  const [open, setOpen] = useState(false);
+function RailTipsBackdrop() {
+  const [box, setBox] = useState<{ left: number; top: number; height: number } | null>(null);
+  useLayoutEffect(() => {
+    const items = [...document.querySelectorAll(".rh-rail-item")].map((el) => el.getBoundingClientRect());
+    const rail = document.querySelector('[class*="aside-content"]')?.getBoundingClientRect();
+    if (items.length === 0 || !rail) return;
+    const top = Math.min(...items.map((r) => r.top)) - 32;
+    const bottom = Math.max(...items.map((r) => r.bottom)) + 32;
+    setBox({ left: rail.right, top, height: bottom - top });
+  }, []);
+  return box ? <div className="rh-rail-backdrop" style={{ left: box.left, top: box.top, height: box.height }} aria-hidden="true" /> : null;
+}
+
+/**
+ * Тултип иконки узкого rail — ActionTooltip uikit, тот же, что у нижних
+ * пунктов SourceCraft. Якорь — квадрат иконки: обёртка пункта в AsideHeader
+ * шире rail, и без неё тултип уезжает вправо.
+ */
+function RailIconTip({ title, compact, children }: { title: string; compact: boolean; children: ReactNode }) {
+  if (!compact) return <>{children}</>;
+  return (
+    <ActionTooltip title={title} placement="right">
+      <div className="rh-rail-anchor">{children}</div>
+    </ActionTooltip>
+  );
+}
+
+interface RailTips {
+  /** id пункта под курсором; null — подписи скрыты */
+  active: string | null;
+  show: (id: string) => void;
+  hide: () => void;
+}
+
+/**
+ * Подписи узкого rail: открыты, пока курсор над любым пунктом. Уход с пункта
+ * закрывает с короткой задержкой — переход на соседний её отменяет, и подписи
+ * не мигают, а активная «перешагивает» на новый пункт (лесенка).
+ */
+function useRailTips(): RailTips {
+  const [active, setActive] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cancel = () => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = null;
   };
   return {
-    open,
-    show: () => {
+    active,
+    show: (id) => {
       cancel();
-      setOpen(true);
+      setActive(id);
     },
     hide: () => {
       cancel();
-      timer.current = setTimeout(() => setOpen(false), 80);
+      timer.current = setTimeout(() => setActive(null), 80);
     },
   };
 }
 
 /**
  * Пункт узкого rail с подписью. Подпись — position: fixed по координатам
- * пункта: контейнеры AsideHeader обрезают всё, что шире 56px.
+ * пункта: контейнеры AsideHeader обрезают всё, что шире 56px. Активная
+ * (под курсором) подпись светлее и прижата к rail, остальные — на 12px
+ * правее; сдвиг анимируется, как у SourceCraft.
  */
-function RailItem(props: { title: string; current: boolean; open: boolean; onEnter: () => void; onLeave: () => void; children: ReactNode }) {
+function RailItem({
+  id,
+  title,
+  tips,
+  withBackdrop,
+  children,
+}: {
+  id: string;
+  title: string;
+  tips: RailTips;
+  /** затемнение рисует первый пункт: внутри rail оно в том же слое, что подписи, и ниже их */
+  withBackdrop: boolean;
+  children: ReactNode;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
+  const open = tips.active !== null;
   useLayoutEffect(() => {
-    if (!props.open || !ref.current) return;
+    if (!open || !ref.current) return;
     const r = ref.current.getBoundingClientRect();
     // от правого края самого rail: обёртка пункта в AsideHeader шире 56px
     const rail = ref.current.closest('[class*="aside-content"]')?.getBoundingClientRect();
-    setPos({ left: (rail?.right ?? r.right) + 8, top: r.top + r.height / 2 });
-  }, [props.open]);
+    setPos({ left: (rail?.right ?? r.right) + 14, top: r.top + r.height / 2 });
+  }, [open]);
   return (
-    <div ref={ref} className="rh-rail-item" onMouseEnter={props.onEnter} onMouseLeave={props.onLeave}>
-      {props.children}
-      {props.open && pos && (
+    <div ref={ref} className="rh-rail-item" onMouseEnter={() => tips.show(id)} onMouseLeave={tips.hide}>
+      {children}
+      {open && withBackdrop && <RailTipsBackdrop />}
+      {open && pos && (
         <span
-          className={props.current ? "rh-rail-tip rh-rail-tip_current" : "rh-rail-tip"}
+          className={tips.active === id ? "rh-rail-tip rh-rail-tip_active" : "rh-rail-tip"}
           style={{ left: pos.left, top: pos.top }}
           aria-hidden="true"
         >
-          {props.title}
+          {title}
         </span>
       )}
     </div>
@@ -151,18 +208,43 @@ function RailFooter({ me, compact }: { me: MeResponse | null; compact: boolean }
   const [, setTheme] = useAppTheme();
   const resolved = useThemeValue();
   const isDark = resolved === "dark" || resolved === "dark-hc";
+  const toaster = useToaster();
+  // узкий rail: вместо всплывающего пункта navigation — ActionTooltip, как у SourceCraft
+  const tip = (title: string) => ({
+    enableTooltip: false,
+    itemWrapper: (params: Parameters<NonNullable<AsideHeaderItem["itemWrapper"]>>[0], makeItem: (p: typeof params) => ReactNode) => (
+      <RailIconTip title={title} compact={compact}>
+        {makeItem(params)}
+      </RailIconTip>
+    ),
+  });
+  const themeTitle = isDark ? "Светлая тема" : "Темная тема";
 
   return (
     <>
-      {/* Документация и Настройки — ещё не сделаны: пункты есть, действия нет */}
-      <FooterItem id="docs" title="Документация" icon={BookOpen} />
-      <FooterItem id="settings" title="Настройки" icon={Gear} />
+      {/* Документация и Настройки — еще не сделаны: пункты есть, действия нет.
+          regularSize — строка 40px, как нижние пункты rail SourceCraft */}
+      <FooterItem id="docs" title="Документация" icon={BookOpen} regularSize {...tip("Документация")} />
+      <FooterItem id="settings" title="Настройки" icon={Gear} regularSize {...tip("Настройки")} />
       <FooterItem
         id="theme"
-        title={isDark ? "Светлая тема" : "Тёмная тема"}
+        title={themeTitle}
         icon={isDark ? Sun : Moon}
+        regularSize
+        {...tip(themeTitle)}
         onItemClick={() => switchTheme(setTheme, isDark ? "light" : "dark")}
       />
+      {/* выход — обычным пунктом под темой: виден всегда, без скрытых меню */}
+      {me?.login && (
+        <FooterItem
+          id="logout"
+          title="Выйти"
+          icon={ArrowRightFromSquare}
+          regularSize
+          {...tip("Выйти")}
+          onItemClick={() => void logout().catch((e: unknown) => toaster.add(logoutFailedToast(e)))}
+        />
+      )}
       <div className={compact ? "rh-rail-account rh-rail-account_compact" : "rh-rail-account"}>
         {me?.login ? <RailUser me={me} compact={compact} /> : <LoginButton compact={compact} />}
       </div>
@@ -180,6 +262,8 @@ function LoginButton({ compact }: { compact: boolean }) {
       href="/auth/ya"
       aria-label="Войти через Я ID"
       title={compact ? "Войти через Я ID" : undefined}
+      // узкий rail: квадрат 36×36 — ширина не зависит от колонки футера
+      style={compact ? { width: 36, flexShrink: 0 } : undefined}
     >
       <Icon data={ArrowRightToSquare} size={16} />
       {!compact && "Войти"}
@@ -214,65 +298,47 @@ function switchTheme(setTheme: (next: AppTheme) => void, next: AppTheme): void {
 }
 
 /**
- * Пользователь внизу rail: клик открывает меню (кабинет, выход) — как меню
- * пользователя SourceCraft. Высота блока одна в узком и широком rail.
+ * Пользователь внизу rail — кто вошел. Выход — пунктом «Выйти» над блоком
+ * (и в «Личном кабинете»). Аватар 32px стоит на оси иконок rail в обоих
+ * видах, высота блока одна — при раскрытии ничего не прыгает.
  */
 function RailUser({ me, compact }: { me: MeResponse; compact: boolean }) {
   const login = me.login!;
-  // display_name Я ID по умолчанию равен логину — такое «имя» не показываем дважды
-  const name = me.displayName && me.displayName !== login ? (shortName(me.displayName) ?? login) : login;
-  const toaster = useToaster();
-
-  async function logout() {
-    try {
-      const res = await fetch("/auth/logout", { method: "POST" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      window.location.assign("/");
-    } catch (e) {
-      toaster.add({ name: "logout-failed", theme: "danger", title: "Не удалось выйти", content: e instanceof Error ? e.message : String(e) });
-    }
-  }
-
+  const name = displayName(me);
   return (
-    <DropdownMenu
-      size="m"
-      popupProps={{ placement: ["right-end", "top-start"] }}
-      renderSwitcher={(props) => (
-        <button
-          type="button"
-          {...props}
-          className="rh-rail-user"
-          aria-label={`Меню пользователя ${login}`}
-          title={compact ? `${name} (${login})` : undefined}
-        >
-          <UserAvatar me={me} />
-          <Flex direction="column" className="rh-rail-user__text">
-            <Text variant="subheader-2" ellipsis>
-              {name}
-            </Text>
-            {name !== login && (
-              <Text color="secondary" ellipsis>
-                {login}
-              </Text>
-            )}
-          </Flex>
-        </button>
-      )}
-      items={[
-        { text: "Личный кабинет", iconStart: <Icon data={Person} size={16} />, action: () => navigate("/me") },
-        { text: "Выйти", iconStart: <Icon data={ArrowRightFromSquare} size={16} />, theme: "danger", action: () => void logout() },
-      ]}
-    />
+    <div className="rh-rail-user" title={compact ? (name === login ? login : `${name} (${login})`) : undefined}>
+      <UserAvatar me={me} size="m" />
+      <Flex direction="column" className="rh-rail-user__text">
+        <Text variant="subheader-2" ellipsis>
+          {name}
+        </Text>
+        {name !== login && (
+          <Text color="secondary" ellipsis>
+            {login}
+          </Text>
+        )}
+      </Flex>
+    </div>
   );
 }
 
-/** Один размер (l, 42px) в обоих видах rail — без скачка высоты при раскрытии. */
-function UserAvatar({ me }: { me: MeResponse }) {
+export function logoutFailedToast(e: unknown) {
+  return { name: "logout-failed", theme: "danger" as const, title: "Не удалось выйти", content: e instanceof Error ? e.message : String(e) };
+}
+
+/** Имя для показа: короткое ФИО, а если его нет (или оно равно логину Я ID) — логин. */
+export function displayName(me: MeResponse): string {
+  const login = me.login ?? "";
+  return me.displayName && me.displayName !== login ? (shortName(me.displayName) ?? login) : login;
+}
+
+/** Аватар пользователя: портрет Я ID или инициалы. */
+export function UserAvatar({ me, size = "l" }: { me: MeResponse; size?: "m" | "l" }) {
   const text = me.displayName ?? me.login ?? "?";
   return me.avatarUrl ? (
-    <Avatar size="l" shape="square" imgUrl={me.avatarUrl} alt="" style={{ flexShrink: 0 }} />
+    <Avatar size={size} shape="square" imgUrl={me.avatarUrl} alt="" style={{ flexShrink: 0 }} />
   ) : (
-    <Avatar size="l" shape="square" text={text} theme="normal" style={{ flexShrink: 0 }} />
+    <Avatar size={size} shape="square" text={text} theme="normal" style={{ flexShrink: 0 }} />
   );
 }
 

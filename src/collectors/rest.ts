@@ -9,6 +9,7 @@
 // ключах issues/issue_comments/pull_requests/contributors/releases/runs,
 // закрытие issue = completed_at, статус — объект {slug}, counters — строки.
 import { Fact, badChannelFact, noDataFact, okFact } from "./facts";
+import { hexColor } from "./catalog";
 import { ScClient } from "./http";
 
 /** кап событийных дат в activity.rest (анкеры pulls ≥30 / releases ≥6 — выше бесполезно) */
@@ -191,6 +192,8 @@ export interface RepoMeta {
   visibility: string | null;
   /** logo.url из repo-GET (дисплей: аватар репозитория) */
   logoUrl?: string | null;
+  /** language.color из repo-GET (дисплей) */
+  languageColor?: string | null;
 }
 
 function repoMetaFrom(slug: string, body: Record<string, unknown>): RepoMeta {
@@ -227,6 +230,7 @@ function repoMetaFrom(slug: string, body: Record<string, unknown>): RepoMeta {
     reactionCounts: reactionCounts && reactionCounts.length > 0 ? reactionCounts : null,
     visibility: asString(body["visibility"]),
     logoUrl: asString((body["logo"] as Record<string, unknown> | null | undefined)?.["url"]),
+    languageColor: language && typeof language === "object" ? hexColor((language as Record<string, unknown>)["color"]) : null,
   };
 }
 

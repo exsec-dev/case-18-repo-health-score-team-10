@@ -11,9 +11,18 @@ import { configure, Lang, ThemeProvider, Toaster, ToasterComponent, ToasterProvi
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { HEALTHCRAFT_MARK_SVG, PRODUCT_NAME } from "./logo";
 import { useAppTheme } from "./prefs";
 
 configure({ lang: Lang.Ru });
+
+// название и значок вкладки — из одного места с логотипом rail
+document.title = PRODUCT_NAME;
+const favicon = document.createElement("link");
+favicon.rel = "icon";
+favicon.type = "image/svg+xml";
+favicon.href = `data:image/svg+xml,${encodeURIComponent(HEALTHCRAFT_MARK_SVG)}`;
+document.head.appendChild(favicon);
 
 const toaster = new Toaster();
 
