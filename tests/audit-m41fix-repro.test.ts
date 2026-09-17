@@ -128,7 +128,8 @@ describe("Н1 (HIGH): claimNext на большой истории очеред�
 
 // ---------------------------------------------------------------------------
 describe("С1: канальная часть карточки и полный Score не из последнего скана вслепую", () => {
-  repro("скан с отозванным PAT не меняет CI/Security/полный Score участника; полный Score складывается из показанных категорий", async () => {
+  // закрыто Б9 (правило карточки)
+  test("скан с отозванным PAT не меняет CI/Security/полный Score участника; полный Score складывается из показанных категорий", async () => {
     const db = tempDb();
     const owner = upsertUser(db, "ya-owner", "owner");
     const stranger = upsertUser(db, "ya-revoked", "revoked");
@@ -159,7 +160,8 @@ describe("С1: канальная часть карточки и полный Sc
 
 // ---------------------------------------------------------------------------
 describe("С2: приватный репо без пригодного скана", () => {
-  repro("владелец видит оценку своего приватного репо и свои CI/Security, хотя трекер выключен (issues 404 → access)", async () => {
+  // закрыто Б9 (правило карточки: приватный без P — последний не-bad)
+  test("владелец видит оценку своего приватного репо и свои CI/Security, хотя трекер выключен (issues 404 → access)", async () => {
     const db = tempDb();
     const owner = upsertUser(db, "ya-private-owner", "powner");
     const facts = replace(
@@ -217,7 +219,8 @@ describe("С3: непригодный периодический скан пер
 
 // ---------------------------------------------------------------------------
 describe("С4: Δ канальных правил не раскрывает Security", () => {
-  repro("зритель с CI без AppSec не видит числа Δ CI-правила и текста про кап 49 (карточка и MD)", async () => {
+  // закрыто Б9 (мех. 3)
+  test("зритель с CI без AppSec не видит числа Δ CI-правила и текста про кап 49 (карточка и MD)", async () => {
     const db = tempDb();
     const owner = upsertUser(db, "ya-ci-only", "cionly");
     const noCi = replace(healthy(), okFact("cicd.configs", { paths: [], has_ci_yaml: false, has_steps: false }, "git"));

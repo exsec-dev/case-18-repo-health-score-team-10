@@ -40,6 +40,7 @@ seedRecommendation(t, scoredScan, {
 seedRecommendation(t, scoredScan, {
   ruleId: "connect-appsec",
   priority: 2,
+  channel: "appsec", // канальное правило: на карточке собирается движком на показанных фактах (круг 2)
   problem: "Security без данных: AppSec SourceCraft не подключён (публичный режим)",
   factRef: "appsec.findings",
   opensCategory: "security",
@@ -75,7 +76,8 @@ describe("MD-отчёт: структура", () => {
 describe("MD-отчёт: числа и tri-state", () => {
   test("Score и покрытие в итоге", () => {
     expect(md).toContain("**Score в рейтинге (4 категории): 67 из 100**");
-    expect(md).toContain("Полный Score (с CI и Security): 67 из 100 при покрытии данными 80%");
+    // круг 2: полный Score складывается из показанных категорий (60·15+50·15+70·15+40·15+80·20)/80 = 61
+    expect(md).toContain("Полный Score (с CI и Security): 61 из 100 при покрытии данными 80%");
     expect(md).toContain("покрытии данными 100%");
   });
 

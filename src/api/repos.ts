@@ -6,13 +6,14 @@
 // такие репо уезжают в отдельный массив, иначе «нет данных» оказалось бы
 // лучшим или худшим результатом в зависимости от направления сортировки.
 import type { Database } from "bun:sqlite";
-import { CHANNEL_KINDS, PUBLIC_KINDS, type CategoryScore } from "../score/compute";
+import { CHANNEL_KINDS, PUBLIC_KINDS, computeFromFacts, totalsFromCategories, type CategoryScore } from "../score/compute";
+import { orderRecommendations, recommendFromFacts, round4, type DeltaEvaluator } from "../score/recommend";
 import { categoryOf } from "../collectors/facts";
 import { NO_PAT_ACCESS, type AccessRepo, type AccessResult, type ChannelAccess } from "../auth/access";
 import { DEFAULT_SCAN, type ScanConfig } from "../config";
 import type { GitLimitsMarker } from "../web/format";
 import type { DerivedMetrics } from "../score/derived";
-import { CATEGORY_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, MODEL_VERSION } from "../score/model";
+import { CATEGORY_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, MODEL_VERSION, SECRETS_CRITICAL_TOTAL_CAP } from "../score/model";
 
 // ---------- общие формы ----------
 
@@ -175,17 +176,28 @@ interface RatingRow {
 export const LAST_ELIGIBLE_SCAN_SQL = `(SELECT MAX(sc2.scan_id) FROM scores sc2 JOIN scans s2 ON s2.id = sc2.scan_id
    WHERE sc2.repo_id = sc.repo_id AND sc2.model_version = ? AND s2.rating_eligible = 1)`;
 
+/**
+ * Приватный репо без пригодного скана (круг 2, С2): последний завершённый
+ * не-bad скан с оценкой текущей модели. Параметр — model_version.
+ */
+export const LAST_NOT_BAD_SCAN_SQL = `(SELECT MAX(sc2.scan_id) FROM scores sc2 JOIN scans s2 ON s2.id = sc2.scan_id
+   WHERE sc2.repo_id = sc.repo_id AND sc2.model_version = ? AND s2.status NOT IN ('bad', 'running', 'queued'))`;
+
+/** Последний скан репо (L): статус и время последнего анализа (ТЗ §3.4). Алиас репо — r. */
+const LAST_SCAN_SQL = `(SELECT MAX(l2.id) FROM scans l2 WHERE l2.repo_id = r.id)`;
+
 // В4.1 (К1/К2) + В4.1-fix (К-Ф1.1, Ф1.11): одна строка на репозиторий —
 // последний пригодный скан; рейтинг читает total_rating / coverage_rating
-// (4 категории — CI и Security в рейтинг не входят), статус — public_status;
+// (4 категории — CI и Security в рейтинг не входят); статус и время —
+// последнего скана L (круг 2, LOW-2: как карточка), статус — public_status;
 // только rating_active=1 AND visibility='public'. Проверок доступа нет.
 const RATING_SQL = `
 SELECT r.org_slug, r.repo_slug, r.title, r.language, r.likes, r.forks, r.last_activity_at,
        sc.total_rating AS total, sc.coverage_rating AS coverage, sc.categories, sc.stale, sc.model_version,
-       COALESCE(s.public_status, s.status) AS scan_status, s.started_at, s.finished_at
+       COALESCE(l.public_status, l.status) AS scan_status, l.started_at, l.finished_at
 FROM scores sc
 JOIN repos r ON r.id = sc.repo_id
-JOIN scans s ON s.id = sc.scan_id
+JOIN scans l ON l.id = ${LAST_SCAN_SQL}
 WHERE sc.model_version = ?
   AND r.rating_active = 1
   AND r.visibility = 'public'
@@ -563,18 +575,27 @@ export function getRepoCard(
     webUrl: `https://sourcecraft.dev/${r.org_slug}/${r.repo_slug}`,
   };
 
-  // В4.1-fix (К-Ф1.1): публичная часть — из последнего ПРИГОДНОГО скана (P);
-  // блок scan — последний скан репо (L: статус и время последнего анализа,
-  // ТЗ §3.4); канальная часть (CI, Security, полный итог, канальные
-  // рекомендации и факты) — последняя строка оценки (L + фолбэк каналов, К2).
+  // Правило карточки (круг 2, решение владельца 17.09; TASK.md §2 «Аудит
+  // В4.1-fix → правило карточки»):
+  //  - публичная часть (Score в рейтинге, 4 категории, публичные факты и
+  //    правила) — из последнего пригодного скана P; приватный репо без P —
+  //    из последнего не-bad скана (владелец видит оценку своего репо, ТЗ §5);
+  //  - CI — из последнего скана, где cicd.configs и cicd.runs собраны ok
+  //    (нет такого — последний с ok cicd.configs: потолок «только конфиг»);
+  //    Security — из последнего скана, где ok appsec.findings и tree.stats;
+  //    чужой сбойный скан их не трогает;
+  //  - полный Score и Δ канальных правил — на показе из показанных данных;
+  //  - блок scan — последний скан (статус без каналов и время анализа).
   const SCORE_COLS = `sc.scan_id, sc.model_version, sc.total_rating, sc.coverage_rating, sc.total_full, sc.coverage_full,
               sc.categories, sc.no_data, sc.stale, sc.computed_at, sc.derived, sc.code_empty`;
-  const lastScoreRow = db
-    .query(`SELECT ${SCORE_COLS} FROM scores sc WHERE sc.repo_id = ? AND sc.model_version = ? ORDER BY sc.scan_id DESC LIMIT 1`)
-    .get(r.id, MODEL_VERSION) as ScoreRow | null;
-  const publicRow = db
+  let publicRow = db
     .query(`SELECT ${SCORE_COLS} FROM scores sc WHERE sc.repo_id = ? AND sc.model_version = ? AND sc.scan_id = ${LAST_ELIGIBLE_SCAN_SQL}`)
     .get(r.id, MODEL_VERSION, MODEL_VERSION) as ScoreRow | null;
+  if (!publicRow && r.visibility !== "public") {
+    publicRow = db
+      .query(`SELECT ${SCORE_COLS} FROM scores sc WHERE sc.repo_id = ? AND sc.model_version = ? AND sc.scan_id = ${LAST_NOT_BAD_SCAN_SQL}`)
+      .get(r.id, MODEL_VERSION, MODEL_VERSION) as ScoreRow | null;
+  }
   const scanRow = db
     .query("SELECT id, started_at, finished_at, status, public_status, trigger FROM scans WHERE repo_id = ? ORDER BY id DESC LIMIT 1")
     .get(r.id) as
@@ -591,7 +612,7 @@ export function getRepoCard(
       }
     : null;
 
-  if (!publicRow || !lastScoreRow) {
+  if (!publicRow) {
     // «в каталоге, ещё не оценивали» (нет пригодного скана) — штатное состояние, не ошибка
     return {
       repo: cardRepo,
@@ -605,99 +626,129 @@ export function getRepoCard(
     };
   }
 
+  const factQuery = db.query("SELECT key, category, value, status, source, collected_at FROM facts WHERE scan_id = ?");
+  const publicFacts = (factQuery.all(publicRow.scan_id) as FactRow[]).filter((f) => !CHANNEL_KINDS.includes(f.key));
+
+  // канальные данные: каждый канал — из своего скана (см. правило выше)
+  const channel = channelSources(db, r.id);
+  const channelFacts = new Map<string, unknown>();
+  for (const f of [...channel.cicdFacts, ...channel.securityFacts]) if (f.status === "ok") channelFacts.set(f.key, JSON.parse(f.value));
+  const categoryOfFacts = (facts: Map<string, unknown>, key: "cicd" | "security"): CategoryScore =>
+    computeFromFacts(facts, { scanId: 0, repoId: r.id }, new Date(publicRow.computed_at)).categories[key];
+  const publicCats = JSON.parse(publicRow.categories) as Record<string, CategoryScore>;
+  const shownCats = {} as Record<CategoryKey, CategoryScore>;
+  for (const key of CATEGORY_ORDER) shownCats[key] = publicCats[key] ?? { score: null, submetrics: {} };
+  shownCats.cicd = categoryOfFacts(channelFacts, "cicd");
+  shownCats.security = categoryOfFacts(channelFacts, "security");
+  const secretsOf = (facts: Map<string, unknown>) => (facts.get("appsec.findings") as { secrets_critical?: unknown } | undefined)?.secrets_critical === true;
+  const codeEmpty = publicRow.code_empty === 1;
+  const fullTotals = totalsFromCategories(shownCats, { codeEmpty, secretsCritical: secretsOf(channelFacts) });
+
   // закрытые зрителю каналы: ни чисел, ни подметрик, ни фактов, ни правил
   const lockOf: Partial<Record<CategoryKey, ChannelAccess>> = {};
   if (!ciOpen) lockOf.cicd = access.cicd;
   if (!secOpen) lockOf.security = access.appsec;
-  const openChannelKinds = new Set<string>([...(ciOpen ? CICD_KINDS : []), ...(secOpen ? APPSEC_KINDS : [])]);
   const closedChannels = new Set<string>([...(ciOpen ? [] : ["cicd"]), ...(secOpen ? [] : ["appsec"])]);
-  const isChannelCategory = (key: string) => CHANNEL_CATEGORIES.includes(key as CategoryKey);
+  const fullOpen = ciOpen && secOpen;
 
-  const publicCats = JSON.parse(publicRow.categories) as Record<string, CategoryScore>;
-  const channelCats = JSON.parse(lastScoreRow.categories) as Record<string, CategoryScore>;
   const categories = {} as Record<CategoryKey, CardCategory>;
   for (const key of CATEGORY_ORDER) {
     const locked = lockOf[key];
-    if (locked !== undefined) {
-      categories[key] = { score: null, submetrics: {}, locked, weight: CATEGORY_WEIGHTS[key] };
-      continue;
-    }
-    const source = isChannelCategory(key) ? channelCats : publicCats;
-    const cat = source[key] ?? { score: null, submetrics: {} };
-    categories[key] = { ...cat, weight: CATEGORY_WEIGHTS[key] };
+    categories[key] =
+      locked !== undefined
+        ? { score: null, submetrics: {}, locked, weight: CATEGORY_WEIGHTS[key] }
+        : { ...shownCats[key], weight: CATEGORY_WEIGHTS[key] };
   }
-  const stale = [
-    ...(JSON.parse(publicRow.stale) as string[]).filter((k) => PUBLIC_KINDS.includes(k)),
-    ...(JSON.parse(lastScoreRow.stale) as string[]).filter((k) => openChannelKinds.has(k)),
-  ];
-  const categoryOfNoData = (raw: string) => raw.split(":")[0] as CategoryKey;
-  const fullOpen = ciOpen && secOpen;
+  const stale = (JSON.parse(publicRow.stale) as string[]).filter((k) => PUBLIC_KINDS.includes(k));
+  const isChannelCategory = (key: string) => CHANNEL_CATEGORIES.includes(key as CategoryKey);
   const score: CardScore = {
     totalRating: publicRow.total_rating,
     coverageRating: publicRow.coverage_rating,
-    totalFull: fullOpen ? lastScoreRow.total_full : null,
-    coverageFull: fullOpen ? lastScoreRow.coverage_full : null,
+    // полный Score складывается из показанных категорий (тот же totalsFromCategories, что compute)
+    totalFull: fullOpen ? roundTotal(fullTotals.totalFull) : null,
+    coverageFull: fullOpen ? Math.round(fullTotals.coverageFull * 1000) / 1000 : null,
     fullLocked: !fullOpen,
     modelVersion: publicRow.model_version,
     computedAt: publicRow.computed_at,
     // причины no-data закрытых категорий — тоже данные канала (напр. «config-only cap»)
     noData: [
-      ...(JSON.parse(publicRow.no_data) as string[]).filter((raw) => !isChannelCategory(categoryOfNoData(raw))),
-      ...(JSON.parse(lastScoreRow.no_data) as string[]).filter(
-        (raw) => isChannelCategory(categoryOfNoData(raw)) && lockOf[categoryOfNoData(raw)] === undefined,
+      ...(JSON.parse(publicRow.no_data) as string[]).filter((raw) => !isChannelCategory(raw.split(":")[0]!)),
+      ...CHANNEL_CATEGORIES.filter((key) => lockOf[key] === undefined && shownCats[key].score === null).map(
+        (key) => `${key}: ${shownCats[key].no_data ?? "no data"}`,
       ),
     ],
     stale,
     categories,
   };
 
+  // рекомендации: публичные — сохранённые правила P; канальные — движок на
+  // показанных канальных фактах с Δ к полному Score из показанных категорий
   const recQuery = db.query(
     `SELECT rule_id, priority, problem, action, fact_ref, expected_impact, delta_score, opens_category, source, channel
-     FROM recommendations WHERE scan_id = ? AND model_version = ? ORDER BY priority ASC`,
+     FROM recommendations WHERE scan_id = ? AND model_version = ? AND channel IS NULL ORDER BY priority ASC`,
   );
-  // публичные правила — из P, канальные — из строки канальной части; порядок — движка
-  const recRows = [
-    ...(recQuery.all(publicRow.scan_id, MODEL_VERSION) as RecRow[]).filter((rec) => rec.channel === null),
-    ...(recQuery.all(lastScoreRow.scan_id, MODEL_VERSION) as RecRow[]).filter((rec) => rec.channel !== null && !closedChannels.has(rec.channel)),
-  ].sort((a, b) => a.priority - b.priority);
-
-  const factQuery = db.query("SELECT key, category, value, status, source, collected_at FROM facts WHERE scan_id = ?");
-  const publicFacts = (factQuery.all(publicRow.scan_id) as FactRow[]).filter((f) => !CHANNEL_KINDS.includes(f.key));
-  const channelFacts = (factQuery.all(lastScoreRow.scan_id) as FactRow[]).filter((f) => openChannelKinds.has(f.key));
-  const factRows = [...publicFacts, ...channelFacts];
-  const factByKey = new Map(factRows.map((f) => [f.key, f]));
-
-  const refKeys = new Set<string>();
-  for (const rec of recRows) {
-    for (const ref of rec.fact_ref.split(",")) {
-      const key = ref.trim();
-      if (key !== "") refKeys.add(key);
-    }
-  }
-
-  // Ф1.3: номера 1..N после фильтра каналов, в исходном порядке — по пропускам
-  // в нумерации не восстановить, что правила закрытых каналов существуют
-  const recommendations: CardRecommendation[] = recRows.map((rec, index) => ({
+  const publicRecs: CardRecommendation[] = (recQuery.all(publicRow.scan_id, MODEL_VERSION) as RecRow[]).map((rec) => ({
     ruleId: rec.rule_id,
     kind: ruleKind(rec),
-    priority: index + 1,
+    priority: rec.priority,
     problem: rec.problem,
     action: rec.action,
-    factRefs: rec.fact_ref
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s !== "")
-      // missing = факта нет по построению (публичный appsec.findings) —
-      // UI обязан объяснить причину, а не догадываться о ней сам
-      .map((key) => ({ key, missing: !factByKey.has(key) })),
+    factRefs: splitRefs(rec.fact_ref).map((key) => ({ key, missing: false })),
     expectedImpact: rec.expected_impact,
     deltaScore: rec.delta_score,
     opensCategory: rec.opens_category,
     source: rec.source,
   }));
+  const baseFull = fullTotals.totalFull;
+  const channelDelta: DeltaEvaluator = (ruleChannel, patch) => {
+    if (ruleChannel === null) throw new Error("card: public rules come from the eligible scan");
+    const facts = new Map(channelFacts);
+    patch(facts);
+    const after = totalsFromCategories(
+      { ...shownCats, cicd: categoryOfFacts(facts, "cicd"), security: categoryOfFacts(facts, "security") },
+      { codeEmpty, secretsCritical: secretsOf(facts) },
+    ).totalFull;
+    if (codeEmpty) return { delta: 0, reason: "в репозитории нет кода" };
+    if (baseFull === null || after === null) return { delta: 0, reason: "итог появится при большем покрытии" };
+    const delta = round4(after - baseFull);
+    if (delta === 0 && secretsOf(channelFacts) && baseFull >= SECRETS_CRITICAL_TOTAL_CAP) return { delta: 0, reason: "упирается в кап 49" };
+    return { delta, reason: null };
+  };
+  const channelRecs: CardRecommendation[] = recommendFromFacts(channelFacts, {
+    delta: channelDelta,
+    issuesScore: shownCats.issues.score,
+    only: "channel",
+  })
+    .filter((rec) => rec.channel !== null && !closedChannels.has(rec.channel))
+    .map((rec) => {
+      // С4: Δ канального правила — числом только при доступе к обоим каналам
+      // (как полный Score): иначе число и причины (кап 49) раскрывали бы Security
+      const hidden = rec.kind === "presence" && !fullOpen;
+      return {
+        ruleId: rec.ruleId,
+        kind: rec.kind,
+        priority: rec.priority,
+        problem: rec.problem,
+        action: rec.action,
+        factRefs: rec.factRefs.map((key) => ({ key, missing: false })),
+        expectedImpact: hidden ? CHANNEL_DELTA_HIDDEN_TEXT : rec.expectedImpact,
+        deltaScore: hidden ? null : rec.deltaScore,
+        opensCategory: rec.opensCategory,
+        source: "rule",
+      };
+    });
+  // LOW-3: объединённая выдача — порядком движка, номера 1..N после фильтра (Ф1.3)
+  const recommendations = orderRecommendations(publicRecs, channelRecs);
+
+  const shownChannelFacts = [...(ciOpen ? channel.cicdFacts : []), ...(secOpen ? channel.securityFacts.filter((f) => f.key !== "tree.stats") : [])];
+  const factRows = [...publicFacts, ...shownChannelFacts];
+  const factByKey = new Map(factRows.map((f) => [f.key, f]));
+  // missing = факта нет по построению (публичный appsec.findings) — UI объясняет причину
+  for (const rec of recommendations) for (const ref of rec.factRefs) ref.missing = !factByKey.has(ref.key);
 
   // адресуемые факты: те, на которые ссылаются рекомендации, плюс те,
   // что читает compute — сырьё остальных в ответ не едет
+  const refKeys = recommendations.flatMap((rec) => rec.factRefs.map((ref) => ref.key));
   const addressable = new Set<string>([...refKeys, ...PUBLIC_KINDS, ...CHANNEL_KINDS]);
   const evidence: CardEvidence[] = factRows
     .filter((f) => addressable.has(f.key))
@@ -713,10 +764,10 @@ export function getRepoCard(
   const cicdNoData = categories.cicd.no_data ?? "";
   const markers: CardMarkers = {
     historyTruncatedSince: typeof summaryValue?.history_truncated_since === "string" ? summaryValue.history_truncated_since : null,
-    // маркер показанной CI-категории (она — из канальной части)
+    // маркер показанной CI-категории
     ciConfigOnlyCap: ciOpen && cicdNoData.includes("config-only cap"),
     staleFacts: stale.length > 0,
-    codeEmpty: publicRow.code_empty === 1,
+    codeEmpty,
     gitLimits: gitLimitsHit(publicFacts) ? gitLimitsOf(opts.limits ?? DEFAULT_SCAN) : null,
   };
 
@@ -729,6 +780,43 @@ export function getRepoCard(
     derived: publicRow.derived === null ? null : (JSON.parse(publicRow.derived) as DerivedMetrics),
     recommendations,
     evidence,
+  };
+}
+
+/** Текст канального presence-правила без числа (С4): Δ полного Score виден только при доступе к CI и Security. */
+export const CHANNEL_DELTA_HIDDEN_TEXT = "улучшит CI/CD — прирост полного Score виден при доступе к CI и Security";
+
+const roundTotal = (x: number | null): number | null => (x === null ? null : Math.round(x));
+const splitRefs = (raw: string): string[] =>
+  raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s !== "");
+
+/**
+ * Источники канальных данных карточки (круг 2): CI — последний скан с ok
+ * cicd.configs и ok cicd.runs, иначе последний с ok cicd.configs (потолок
+ * «только конфиг»); Security — последний скан с ok appsec.findings и ok
+ * tree.stats. Возвращаются факты этих kinds выбранного скана (в расчёт идут
+ * только ok; не-ok cicd.runs скана «только конфиг» — доказательство потолка).
+ */
+export function channelSources(db: Database, repoId: number): { cicdScanId: number | null; securityScanId: number | null; cicdFacts: FactRow[]; securityFacts: FactRow[] } {
+  const okIn = (kind: string) => `EXISTS (SELECT 1 FROM facts f WHERE f.scan_id = s.id AND f.key = '${kind}' AND f.status = 'ok')`;
+  const lastScan = (cond: string) =>
+    (db.query(`SELECT s.id FROM scans s WHERE s.repo_id = ? AND ${cond} ORDER BY s.id DESC LIMIT 1`).get(repoId) as { id: number } | null)?.id ?? null;
+  const cicdScanId = lastScan(`${okIn("cicd.configs")} AND ${okIn("cicd.runs")}`) ?? lastScan(okIn("cicd.configs"));
+  const securityScanId = lastScan(`${okIn("appsec.findings")} AND ${okIn("tree.stats")}`);
+  const okFacts = (scanId: number | null, kinds: string[]) =>
+    scanId === null
+      ? []
+      : (db
+          .query(`SELECT key, category, value, status, source, collected_at FROM facts WHERE scan_id = ? AND key IN (${kinds.map(() => "?").join(", ")})`)
+          .all(scanId, ...kinds) as FactRow[]);
+  return {
+    cicdScanId,
+    securityScanId,
+    cicdFacts: okFacts(cicdScanId, CICD_KINDS),
+    securityFacts: okFacts(securityScanId, [...APPSEC_KINDS, "tree.stats"]),
   };
 }
 

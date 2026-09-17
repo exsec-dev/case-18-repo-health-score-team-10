@@ -315,8 +315,8 @@ export function computeFromFacts(ok: Map<string, unknown>, input: ComputeInput, 
 
   // без-кодовое репо (Q&A №13): ok-факты говорят file_count=0/loc=0 —
   // «проекта нет» = Score 0 как данные, не NULL и не no-data
-  const tree = ok.get("tree.stats") as { file_count?: unknown; loc?: unknown } | undefined;
-  const codeEmpty = tree !== undefined && ((typeof tree.file_count === "number" && tree.file_count === 0) || (typeof tree.loc === "number" && tree.loc === 0));
+  const tree = ok.get("tree.stats") as { file_count?: unknown; loc?: unknown } | undefined | null;
+  const codeEmpty = tree !== undefined && tree !== null && ((typeof tree.file_count === "number" && tree.file_count === 0) || (typeof tree.loc === "number" && tree.loc === 0));
 
   const allKeys = Object.keys(categories) as CategoryKey[];
   const noData: string[] = [];
@@ -325,34 +325,10 @@ export function computeFromFacts(ok: Map<string, unknown>, input: ComputeInput, 
     if (cat.score === null) noData.push(`${key}: ${cat.no_data ?? "no data"}`);
   }
 
-  // итог по набору категорий: взвешенное среднее с перенормировкой
-  const totalOf = (keys: CategoryKey[], coverageMax: number, capSecrets: boolean) => {
-    let dataWeight = 0;
-    let acc = 0;
-    for (const key of keys) {
-      const cat = categories[key]!;
-      if (cat.score === null) continue;
-      dataWeight += CATEGORY_WEIGHTS[key];
-      acc += (cat.score / 100) * CATEGORY_WEIGHTS[key];
-    }
-    const coverage = Math.min(1, dataWeight / 100 / coverageMax);
-    let total: number | null = null;
-    if (codeEmpty) {
-      total = 0;
-    } else if (coverage >= COVERAGE_NULL_BELOW && dataWeight > 0) {
-      total = (acc / dataWeight) * 100;
-      if (capSecrets) {
-        const appsec = ok.get("appsec.findings") as { secrets_critical?: unknown } | undefined;
-        if (appsec?.secrets_critical === true) total = Math.min(total, SECRETS_CRITICAL_TOTAL_CAP);
-      }
-    }
-    return { total, coverage };
-  };
-  // в рейтинге: 4 публичные категории (Q&A №1); кап 49 НЕ применяется —
-  // Security в рейтинг не входит и на него не влияет (инвариант изоляции)
-  const rating = totalOf(PUBLIC_CATEGORIES, COVERAGE_MODE_MAX.public, false);
-  // полный: все 6 категорий, кап 49 за критичные secrets
-  const full = totalOf(allKeys, COVERAGE_MODE_MAX.own, true);
+  const appsecFact = ok.get("appsec.findings") as { secrets_critical?: unknown } | undefined | null;
+  const totals = totalsFromCategories(categories, { codeEmpty, secretsCritical: appsecFact?.secrets_critical === true });
+  const rating = { total: totals.totalRating, coverage: totals.coverageRating };
+  const full = { total: totals.totalFull, coverage: totals.coverageFull };
 
   return {
     scanId,
@@ -369,6 +345,41 @@ export function computeFromFacts(ok: Map<string, unknown>, input: ComputeInput, 
     codeEmpty,
     computedAt: now.toISOString(),
   };
+}
+
+/**
+ * Оба итога из готовых категорий (круг 2, правило карточки): взвешенное
+ * среднее с перенормировкой. В рейтинге — 4 публичные категории (Q&A №1),
+ * кап 49 не применяется; полный — 6 категорий, кап 49 за критичные secrets.
+ * compute и карточка (полный Score из показанных категорий) — одна формула.
+ */
+export function totalsFromCategories(
+  categories: Record<CategoryKey, { score: number | null }>,
+  flags: { codeEmpty: boolean; secretsCritical: boolean },
+): { totalRating: number | null; coverageRating: number; totalFull: number | null; coverageFull: number } {
+  const totalOf = (keys: CategoryKey[], coverageMax: number, capSecrets: boolean) => {
+    let dataWeight = 0;
+    let acc = 0;
+    for (const key of keys) {
+      const cat = categories[key];
+      if (!cat || cat.score === null) continue;
+      dataWeight += CATEGORY_WEIGHTS[key];
+      acc += (cat.score / 100) * CATEGORY_WEIGHTS[key];
+    }
+    const coverage = Math.min(1, dataWeight / 100 / coverageMax);
+    let total: number | null = null;
+    if (flags.codeEmpty) {
+      total = 0;
+    } else if (coverage >= COVERAGE_NULL_BELOW && dataWeight > 0) {
+      total = (acc / dataWeight) * 100;
+      if (capSecrets && flags.secretsCritical) total = Math.min(total, SECRETS_CRITICAL_TOTAL_CAP);
+    }
+    return { total, coverage };
+  };
+  const rating = totalOf(PUBLIC_CATEGORIES, COVERAGE_MODE_MAX.public, false);
+  // порядок суммирования — как у compute до круга 2 (числа с плавающей точкой бит-в-бит)
+  const full = totalOf(["documentation", "cicd", "security", "activity", "issues", "code"], COVERAGE_MODE_MAX.own, true);
+  return { totalRating: rating.total, coverageRating: rating.coverage, totalFull: full.total, coverageFull: full.coverage };
 }
 
 // ---------- категории ----------

@@ -11,6 +11,7 @@ import {
   type ReposQuery,
 } from "../src/api/repos";
 import { MODEL_VERSION } from "../src/score/model";
+import { computeFromFacts, totalsFromCategories } from "../src/score/compute";
 import { renderRepoReport } from "../src/report/markdown";
 import type { AccessResult } from "../src/auth/access";
 import { DEFAULT_SCAN } from "../src/config";
@@ -239,7 +240,7 @@ describe("карточка репозитория", () => {
   });
   seedScore(c, repoId, scanId, { total: 67, stale: ["issues.stats"] });
   seedRecommendation(c, scanId, { ruleId: "contributing-missing", priority: 1, factRef: "docs.presence", deltaScore: 2.25, expectedImpact: "+2.3 Score (по одному)" });
-  seedRecommendation(c, scanId, { ruleId: "connect-appsec", priority: 2, factRef: "appsec.findings", opensCategory: "security", expectedImpact: "coverage 1.00→1.00 — категория Security 20%" });
+  seedRecommendation(c, scanId, { ruleId: "connect-appsec", priority: 2, factRef: "appsec.findings", opensCategory: "security", expectedImpact: "coverage 1.00→1.00 — категория Security 20%", channel: "appsec" });
   // полный состав карточки — у зрителя с доступом к каналам; матрица доступа — ниже
   const card = getRepoCard(c.db, "card", "sample", { access: GRANTED })!;
 
@@ -269,8 +270,10 @@ describe("карточка репозитория", () => {
     expect(card.markers.staleFacts).toBe(true);
   });
 
-  test("рекомендации читаются из таблицы: source, порядок, fact_ref → factRefs", () => {
-    expect(card.recommendations.map((r) => r.ruleId)).toEqual(["contributing-missing", "connect-appsec"]);
+  test("рекомендации: публичные — из таблицы P, канальные — движком на показанных фактах; source, порядок, fact_ref → factRefs", () => {
+    // круг 2: раны CI недоступны (config-only) → grant-ci-runs; AppSec нет → connect-appsec
+    expect(card.recommendations.map((r) => r.ruleId)).toEqual(["contributing-missing", "connect-appsec", "grant-ci-runs"]);
+    expect(card.recommendations.map((r) => r.priority)).toEqual([1, 2, 3]);
     expect(card.recommendations[0]).toMatchObject({ kind: "presence", deltaScore: 2.25, source: "rule" });
     expect(card.recommendations[0]!.factRefs).toEqual([{ key: "docs.presence", missing: false }]);
     expect(card.recommendations[1]).toMatchObject({ kind: "activation", opensCategory: "security" });
@@ -343,10 +346,11 @@ describe("изоляция own/public и эвикция (В4/Б4)", () => {
     expect(rating.items[0]!.score).toBe(70);
     expect(rating.items[0]!.categories.cicd).toBeNull();
     expect(rating.items[0]!.categories.security).toBeNull();
-    // карточка: оба итога последнего скана
+    // карточка: Score в рейтинге последнего пригодного скана; полный Score — из
+    // показанных категорий (круг 2), а не сохранённый total_full
     const card = getRepoCard(iso.db, "iso", "dual", { access: GRANTED })!;
     expect(card.score!.totalRating).toBe(70);
-    expect(card.score!.totalFull).toBe(95);
+    expect(card.score!.totalFull).toBe(Math.round(totalsFromCategories(card.score!.categories, { codeEmpty: false, secretsCritical: false }).totalFull!));
   });
 
   test("stale-маркер рейтинга не выдаёт фолбэк каналов с правами", () => {
@@ -434,6 +438,17 @@ describe("единая карточка: матрица доступа зрит�
   m.db.query("UPDATE repos SET rating_active = 0 WHERE repo_slug = 'gone'").run();
 
   const view = (a: AccessResult, repo = "pub") => getRepoCard(m.db, "mx", repo, { access: a });
+  // круг 2: CI и Security считаются на показе из ok-фактов своих сканов
+  const channelCats = computeFromFacts(
+    new Map<string, unknown>([
+      ["cicd.configs", { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: true }],
+      ["cicd.runs", RUNS],
+      ["appsec.findings", APPSEC],
+      ["tree.stats", { top_level: [{ name: "src", type: "tree" }], file_count: 10, bytes: 1000, loc: 5000 }],
+    ]),
+    { scanId: 0, repoId: 0 },
+    new Date(),
+  ).categories;
   const rules = (card: ReturnType<typeof view>) => card!.recommendations.map((r) => r.ruleId);
   const keys = (card: ReturnType<typeof view>) => card!.evidence.map((e) => e.key);
   const ANON: AccessResult = { cicd: "no-pat", appsec: "no-pat", repo: "no-pat" };
@@ -472,12 +487,12 @@ describe("единая карточка: матрица доступа зрит�
 
   test("только CI: CI-блок, раны и CI-правила; Security закрыта; полного итога нет", () => {
     const card = view({ cicd: "granted", appsec: "denied", repo: "granted" })!;
-    expect(card.score!.categories.cicd.score).toBe(47);
+    expect(card.score!.categories.cicd.score).toBe(channelCats.cicd.score);
     expect(card.score!.categories.cicd.locked).toBeUndefined();
     expect(card.score!.categories.security.locked).toBe("denied");
     expect(card.score!.fullLocked).toBe(true);
     expect(card.score!.totalFull).toBeNull();
-    expect(rules(card)).toEqual(["license-missing", "fix-red-runs"]);
+    expect(rules(card)).toEqual(["license-missing", "fix-red-runs", "speed-up-pipeline"]);
     expect(keys(card)).toContain("cicd.runs");
     expect(keys(card)).not.toContain("appsec.findings");
     const json = JSON.stringify(card);
@@ -487,7 +502,7 @@ describe("единая карточка: матрица доступа зрит�
 
   test("только Security: AppSec-блок и правила; CI закрыт; полного итога нет", () => {
     const card = view({ cicd: "denied", appsec: "granted", repo: "granted" })!;
-    expect(card.score!.categories.security.score).toBe(39);
+    expect(card.score!.categories.security.score).toBe(channelCats.security.score);
     expect(card.score!.categories.cicd.locked).toBe("denied");
     expect(card.score!.totalFull).toBeNull();
     expect(rules(card)).toEqual(["license-missing", "appsec-critical"]);
@@ -501,8 +516,9 @@ describe("единая карточка: матрица доступа зрит�
     expect(card.score!.fullLocked).toBe(false);
     expect(card.score!.totalFull).toBe(49);
     expect(card.score!.coverageFull).toBe(1);
-    expect(rules(card)).toEqual(["license-missing", "fix-red-runs", "appsec-critical"]);
-    expect(new Set(card.score!.stale)).toEqual(new Set(["cicd.runs", "appsec.findings", "issues.stats"]));
+    expect(rules(card)).toEqual(["license-missing", "fix-red-runs", "speed-up-pipeline", "appsec-critical"]);
+    // канальные данные берутся из скана, где они собраны ok, — фолбэка «из истории» у них нет (круг 2)
+    expect(card.score!.stale).toEqual(["issues.stats"]);
   });
 
   test("приватный: без доступа к repo — 404 (null) всем; с доступом — карточка по каналам", () => {

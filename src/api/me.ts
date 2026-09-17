@@ -7,7 +7,7 @@
 import type { Database } from "bun:sqlite";
 import { ScClient } from "../collectors/http";
 import { upsertRepo } from "../jobs/runner";
-import { LAST_ELIGIBLE_SCAN_SQL } from "./repos";
+import { LAST_ELIGIBLE_SCAN_SQL, LAST_NOT_BAD_SCAN_SQL } from "./repos";
 import { MODEL_VERSION } from "../score/model";
 import { countActiveUserJobs, countRecentUserJobs, enqueueScan, findActiveUserJob, recordRefusedUserJob } from "../jobs/scheduler";
 import type { QueueConfig } from "../config";
@@ -18,7 +18,7 @@ export interface MyRepoEntry {
   title: string | null;
   language: string | null;
   lastActivityAt: string | null;
-  /** Score в рейтинге (total_rating) последнего пригодного скана репо в нашей БД (К-Ф1.1); null = не оценивался */
+  /** Score в рейтинге (total_rating) последнего пригодного скана (приватный без него — последнего не-bad, круг 2); null = не оценивался */
   score: number | null;
   lastScanAt: string | null;
 }
@@ -75,15 +75,26 @@ export async function listMyRepos(db: Database, client: ScClient, opts: { maxPag
       if (!repo) continue;
       const language =
         typeof raw.language === "string" ? raw.language : typeof raw.language?.name === "string" ? raw.language.name : null;
-      const known = db
-        .query(
-          `SELECT sc.total_rating AS total, s.finished_at FROM scores sc
-           JOIN repos r ON r.id = sc.repo_id
-           LEFT JOIN scans s ON s.id = sc.scan_id
-           WHERE r.org_slug = ? AND r.repo_slug = ? AND sc.model_version = ?
-             AND sc.scan_id = ${LAST_ELIGIBLE_SCAN_SQL}`,
-        )
-        .get(org, repo, MODEL_VERSION, MODEL_VERSION) as { total: number | null; finished_at: string | null } | null;
+      // Score — последний пригодный скан; приватный без него — последний не-bad
+      // (круг 2, С2, как карточка); время — последнего анализа L (LOW-2)
+      const scoreOf = (pick: string) =>
+        db
+          .query(
+            `SELECT sc.total_rating AS total FROM scores sc
+             JOIN repos r ON r.id = sc.repo_id
+             WHERE r.org_slug = ? AND r.repo_slug = ? AND sc.model_version = ? AND sc.scan_id = ${pick}`,
+          )
+          .get(org, repo, MODEL_VERSION, MODEL_VERSION) as { total: number | null } | null;
+      const row = db.query("SELECT id, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as
+        | { id: number; visibility: string }
+        | null;
+      const scored = row ? (scoreOf(LAST_ELIGIBLE_SCAN_SQL) ?? (row.visibility !== "public" ? scoreOf(LAST_NOT_BAD_SCAN_SQL) : null)) : null;
+      const lastScan = row
+        ? (db.query("SELECT finished_at, started_at FROM scans WHERE repo_id = ? ORDER BY id DESC LIMIT 1").get(row.id) as
+            | { finished_at: string | null; started_at: string }
+            | null)
+        : null;
+      const known = scored || lastScan ? { total: scored?.total ?? null, finished_at: lastScan ? (lastScan.finished_at ?? lastScan.started_at) : null } : null;
       entries.push({
         org,
         repo,

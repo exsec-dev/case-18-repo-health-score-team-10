@@ -12,6 +12,10 @@
 // null = публичное) — карточка отфильтровывает правила закрытых зрителю
 // каналов. Δ правил с channel относится к полному Score, остальных — к
 // Score в рейтинге.
+// В4.1-fix круг 2: движок — чистая recommendFromFacts(ok, ctx) с инъекцией
+// оценщика Δ; карточка собирает канальные правила на ПОКАЗАННЫХ фактах
+// (CI/Security из своих сканов) своим оценщиком; порядок — одна функция
+// orderRecommendations для движка и для объединённой выдачи карточки.
 import type { Database } from "bun:sqlite";
 import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
 import { CATEGORY_WEIGHTS, CategoryKey, SECRETS_CRITICAL_TOTAL_CAP } from "./model";
@@ -41,7 +45,81 @@ export interface RecommendOptions {
 }
 
 const round1 = (x: number): number => Math.round(x * 10) / 10;
-const round4 = (x: number): number => Math.round(x * 10000) / 10000;
+export const round4 = (x: number): number => Math.round(x * 10000) / 10000;
+
+/** Реальный прирост итога правила при подмене фактов (К-Ф1.2); reason — причина Δ = 0. */
+export type DeltaEvaluator = (
+  channel: RecommendationChannel | null,
+  patch: (facts: Map<string, unknown>) => void,
+) => { delta: number; reason: string | null };
+
+export interface RecommendFactsContext {
+  delta: DeltaEvaluator;
+  /** скор категории Issues — текст start-tracker */
+  issuesScore: number | null;
+  /** "channel" — только правила каналов CI/Security (карточка, круг 2) */
+  only?: "all" | "channel";
+}
+
+/** Порядок score-правил движка (§8) — общий для движка и объединённой выдачи карточки. */
+export const SCORE_RULE_ORDER = ["fix-red-runs", "speed-up-pipeline", "appsec-critical", "resolve-old-todos", "reduce-stale-issues", "speed-up-issue-close"];
+
+interface Orderable {
+  ruleId: string;
+  kind: string;
+  deltaScore: number | null;
+  opensCategory: string | null;
+  priority: number;
+}
+
+/**
+ * Порядок выдачи (§8, К-Ф1.2; круг 2 LOW-3). Вход — одна или несколько
+ * выдач, каждая уже в порядке движка (карточка: сохранённые правила P и
+ * канальные правила на показанных фактах). presence с числовым Δ — по Δ
+ * убыв., затем rule_id; presence со скрытым Δ (null) — после них по rule_id
+ * (позиция не раскрывает величину); активационные — по весу категории убыв.,
+ * rule_id; score-правила — слиянием выдач по порядку движка
+ * (SCORE_RULE_ORDER; правило вне списка сохраняет место в своей выдаче).
+ * Номера 1..N.
+ */
+export function orderRecommendations<T extends Orderable>(...lists: T[][]): T[] {
+  const all = lists.flat();
+  const presence = all.filter((r) => r.kind === "presence");
+  const activation = all.filter((r) => r.kind === "activation");
+  presence.sort((a, b) => {
+    if (a.deltaScore === null || b.deltaScore === null) {
+      if (a.deltaScore !== b.deltaScore) return a.deltaScore === null ? 1 : -1;
+      return a.ruleId.localeCompare(b.ruleId);
+    }
+    return b.deltaScore - a.deltaScore || a.ruleId.localeCompare(b.ruleId);
+  });
+  activation.sort(
+    (a, b) =>
+      CATEGORY_WEIGHTS[(b.opensCategory ?? "issues") as CategoryKey] - CATEGORY_WEIGHTS[(a.opensCategory ?? "issues") as CategoryKey] ||
+      a.ruleId.localeCompare(b.ruleId),
+  );
+  let scoreRules: T[] = [];
+  for (const list of lists) {
+    const next = list.filter((r) => r.kind === "score");
+    const merged: T[] = [];
+    let i = 0;
+    let j = 0;
+    while (i < scoreRules.length || j < next.length) {
+      if (j >= next.length) merged.push(scoreRules[i++]!);
+      else if (i >= scoreRules.length) merged.push(next[j++]!);
+      else {
+        const ra = SCORE_RULE_ORDER.indexOf(scoreRules[i]!.ruleId);
+        const rb = SCORE_RULE_ORDER.indexOf(next[j]!.ruleId);
+        if (ra !== -1 && rb !== -1 && rb < ra) merged.push(next[j++]!);
+        else merged.push(scoreRules[i++]!);
+      }
+    }
+    scoreRules = merged;
+  }
+  const out = [...presence, ...activation, ...scoreRules];
+  out.forEach((r, i) => (r.priority = i + 1));
+  return out;
+}
 
 export function recommend(db: Database, scanId: number, opts: RecommendOptions = {}): Recommendation[] {
   const scores = opts.scores ?? compute(db, scanId, { now: opts.now });
@@ -49,10 +127,6 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
   // рекомендация не противоречит числу на карточке
   const eff = effectiveFacts(db, scanId, scores.repoId);
   const ok = eff.ok;
-
-  const presence: Recommendation[] = [];
-  const activation: Recommendation[] = [];
-  const scoreRules: Recommendation[] = [];
 
   // ---------- presence-правила (реальный Δ итога, К-Ф1.2) ----------
   // Δ = итог на подменённых фактах − итог на фактах скана: правила без
@@ -76,6 +150,16 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
     if (delta === 0 && channel !== null && secretsCritical && b >= SECRETS_CRITICAL_TOTAL_CAP) return { delta: 0, reason: "упирается в кап 49" };
     return { delta, reason: null };
   };
+  return recommendFromFacts(ok, { delta: realDelta, issuesScore: scores.categories.issues.score });
+}
+
+/** Чистый движок правил на эффективных фактах (без БД). */
+export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFactsContext): Recommendation[] {
+  const pub = ctx.only !== "channel";
+  const realDelta = ctx.delta;
+  const presence: Recommendation[] = [];
+  const activation: Recommendation[] = [];
+  const scoreRules: Recommendation[] = [];
   const presenceRule = (
     ruleId: string,
     problem: string,
@@ -89,7 +173,7 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
   };
 
   const presence_ = ok.get("docs.presence") as DocsPresenceValue | undefined;
-  if (presence_) {
+  if (pub && presence_) {
     if (presence_.license !== true) {
       presenceRule("license-missing", "В репозитории нет файла лицензии", "Добавьте LICENSE (MIT/Apache-2.0) в корень — лицензия условие переиспользования", ["docs.presence"], withPresence("license"));
     }
@@ -139,9 +223,9 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
 
   // ---------- активационные (без числа; «открывает категорию») ----------
   const stats = ok.get("issues.stats") as { open?: unknown; closed?: unknown } | undefined;
-  if (stats && (stats.open ?? 0) === 0 && (stats.closed ?? 0) === 0) {
+  if (pub && stats && (stats.open ?? 0) === 0 && (stats.closed ?? 0) === 0) {
     activation.push(
-      act("start-tracker", "issues", "Трекер не ведётся: 0 открытых и 0 закрытых issues", "Начните вести трекер issues (баги + планы) — источник метрик поддержки", ["issues.stats"], `Issues: скор с минимума категории (${scores.categories.issues.score ?? 0}/100) до фактического по данным`),
+      act("start-tracker", "issues", "Трекер не ведётся: 0 открытых и 0 закрытых issues", "Начните вести трекер issues (баги + планы) — источник метрик поддержки", ["issues.stats"], `Issues: скор с минимума категории (${ctx.issuesScore ?? 0}/100) до фактического по данным`),
     );
   }
   if (!ok.has("appsec.findings")) {
@@ -190,7 +274,7 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
     }
   }
   const todo = ok.get("code.todo") as { older_180d?: unknown; count?: unknown; fixme?: unknown } | undefined;
-  if (todo) {
+  if (pub && todo) {
     const total = ((todo.count ?? 0) as number) + ((todo.fixme ?? 0) as number);
     const older = (todo.older_180d ?? 0) as number;
     if (total > 0 && older / total >= 0.3) {
@@ -201,7 +285,7 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
   }
   const statsFull = ok.get("issues.stats") as { open?: unknown; stale_90d?: unknown; median_close_days?: unknown } | undefined;
   const openCount = typeof statsFull?.open === "number" ? statsFull.open : 0;
-  if (statsFull && openCount > 0) {
+  if (pub && statsFull && openCount > 0) {
     const share = ((statsFull.stale_90d ?? 0) as number) / Math.max(1, openCount);
     if (share >= 0.5) {
       scoreRules.push(
@@ -215,12 +299,8 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
     }
   }
 
-  // ---------- порядок (§8): реальный Δ desc (затем rule_id) → активационные по весу desc ----------
-  presence.sort((a, b) => (b.deltaScore ?? 0) - (a.deltaScore ?? 0) || a.ruleId.localeCompare(b.ruleId));
-  activation.sort((a, b) => CATEGORY_WEIGHTS[b.opensCategory ?? "issues"] - CATEGORY_WEIGHTS[a.opensCategory ?? "issues"] || a.ruleId.localeCompare(b.ruleId));
-  const all = [...presence, ...activation, ...scoreRules];
-  all.forEach((r, i) => (r.priority = i + 1));
-  return all;
+  // ---------- порядок (§8): реальный Δ desc (затем rule_id) → активационные по весу desc → score ----------
+  return orderRecommendations([...presence, ...activation, ...scoreRules]);
 }
 
 function mk(

@@ -4,7 +4,7 @@
 // порядок выдачи (Δ desc → активационные по весу категории desc),
 // идемпотентность записи.
 import { afterAll, describe, expect, test } from "bun:test";
-import { recommend, writeRecommendations } from "../src/score/recommend";
+import { orderRecommendations, recommend, writeRecommendations } from "../src/score/recommend";
 import { compute } from "../src/score/compute";
 import { FactSpec, NOW, TestDb, healthyFacts, makeDb, seedScan, withFacts } from "./score-fixtures";
 
@@ -230,5 +230,20 @@ describe("порядок и запись", () => {
     writeRecommendations(t.db, scanId, "2.0.0-m2", recs.slice(0, 1));
     const c2 = (t.db.query("SELECT COUNT(*) AS c FROM recommendations WHERE scan_id = ?").get(scanId) as { c: number }).c;
     expect(c2).toBe(1);
+  });
+});
+
+describe("orderRecommendations (круг 2, LOW-3/С4)", () => {
+  const r = (ruleId: string, kind: string, deltaScore: number | null, opensCategory: string | null = null) => ({ ruleId, kind, deltaScore, opensCategory, priority: 0 });
+
+  test("две выдачи сливаются порядком движка: Δ↓, скрытый Δ после чисел, активационные по весу, score по движку; номера 1..N", () => {
+    const publicRecs = [r("license-missing", "presence", 5.8), r("start-tracker", "activation", null, "issues"), r("resolve-old-todos", "score", null)];
+    const channelRecs = [r("ci-missing", "presence", null), r("connect-appsec", "activation", null, "security"), r("fix-red-runs", "score", null)];
+    const out = orderRecommendations(publicRecs, channelRecs);
+    expect(out.map((x) => x.ruleId)).toEqual(["license-missing", "ci-missing", "connect-appsec", "start-tracker", "fix-red-runs", "resolve-old-todos"]);
+    expect(out.map((x) => x.priority)).toEqual([1, 2, 3, 4, 5, 6]);
+    // числовой Δ канального правила (оба канала открыты) встаёт по величине
+    const open = orderRecommendations([r("license-missing", "presence", 5.8)], [r("ci-missing", "presence", 7.5)]);
+    expect(open.map((x) => x.ruleId)).toEqual(["ci-missing", "license-missing"]);
   });
 });

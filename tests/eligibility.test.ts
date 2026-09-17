@@ -11,7 +11,7 @@ import { loadConfig } from "../src/config";
 import { openDb } from "../src/db";
 import { categoryOf, noDataFact, okFact, type Fact } from "../src/collectors/facts";
 import type { ScClient } from "../src/collectors/http";
-import { CHANNEL_KINDS, PUBLIC_KINDS, READ_KINDS, ratingEligible, ratingEligibleSql } from "../src/score/compute";
+import { CHANNEL_KINDS, PUBLIC_KINDS, READ_KINDS, ratingEligible, ratingEligibleSql, totalsFromCategories } from "../src/score/compute";
 import { runScan, type ScanDeps } from "../src/jobs/runner";
 import { upsertUser } from "../src/auth/session";
 import { listMyRepos, requestUserScan } from "../src/api/me";
@@ -155,13 +155,13 @@ describe("чтение: последний пригодный (P) и после�
     cicd: { score: cicd, submetrics: {} },
   });
 
-  test("рейтинг, мета и карточка: оценка из P; scan — L; канальная часть — последняя строка оценки", () => {
+  test("рейтинг, мета и карточка: оценка из P; scan и статус — L; CI — скан с ok-данными CI; полный Score — из показанных категорий", () => {
     const t = makeApiDb();
     cleanups.push(t.close);
     const repoId = seedRepo(t, { org: "pl", repo: "repo" });
     const p = seedScan(t, repoId, { status: "partial", publicStatus: "ok", facts: [{ key: "docs.presence", source: "git", value: { readme: true } }] });
     seedScore(t, repoId, p, { total: 60, totalFull: 50, categories: CATS(50, 61) });
-    seedRecommendation(t, p, { ruleId: "license-missing", priority: 1, factRef: "docs.presence" });
+    seedRecommendation(t, p, { ruleId: "license-missing", priority: 1, factRef: "docs.presence", deltaScore: 5.7692 });
     seedRecommendation(t, p, { ruleId: "fix-red-runs", priority: 2, factRef: "cicd.runs", channel: "cicd" });
     const l = seedScan(t, repoId, {
       status: "partial",
@@ -169,6 +169,7 @@ describe("чтение: последний пригодный (P) и после�
       ratingEligible: false,
       facts: [
         { key: "docs.presence", source: "git", status: "no-data", value: { reason: "other" } },
+        { key: "cicd.configs", source: "git", value: { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: true } },
         { key: "cicd.runs", source: "rest:cicd", value: { runs_count: 3, success_rate: 1, last_status: "success", duration_p50: 10 } },
       ],
     });
@@ -179,7 +180,8 @@ describe("чтение: последний пригодный (P) и после�
     const running = t.db.query("INSERT INTO scans (repo_id, started_at, status, public_status, trigger) VALUES (?, '2026-09-17T10:00:00Z', 'running', 'running', 'user')").run(repoId);
 
     const item = listRepos(t.db, DEFAULT_QUERY).items.find((i) => i.repo === "repo")!;
-    expect({ score: item.score, status: item.scanStatus }).toEqual({ score: 60, status: "ok" });
+    // круг 2 (LOW-2): статус и время — последнего скана, как в карточке
+    expect({ score: item.score, status: item.scanStatus }).toEqual({ score: 60, status: "running" });
     expect(getMeta(t.db).repos).toEqual({ scored: 1, nullScore: 0 });
 
     const granted = { cicd: "granted", appsec: "granted", repo: "granted" } as const;
@@ -190,8 +192,15 @@ describe("чтение: последний пригодный (P) и после�
       totalFull: card.score!.totalFull,
       docs: card.score!.categories.documentation.score,
       cicd: card.score!.categories.cicd.score,
-    }).toEqual({ totalRating: 60, totalFull: 70, docs: 61, cicd: 90 });
-    expect(card.recommendations.map((r) => r.ruleId).sort()).toEqual(["license-missing", "speed-up-pipeline"]);
+    }).toEqual({
+      totalRating: 60,
+      totalFull: Math.round(totalsFromCategories(card.score!.categories, { codeEmpty: false, secretsCritical: false }).totalFull!),
+      docs: 61,
+      cicd: 100, // посчитана из ok-фактов CI скана L (зелёные быстрые раны), не из сохранённой строки
+    });
+    // публичные правила — сохранённые P; канальные — движок на показанных фактах (раны зелёные: CI-правил нет; AppSec нет)
+    expect(card.recommendations.map((r) => r.ruleId)).toEqual(["license-missing", "connect-appsec"]);
+    expect(card.recommendations.map((r) => r.priority)).toEqual([1, 2]);
     const docs = card.evidence.find((e) => e.key === "docs.presence")!;
     expect(docs.status).toBe("ok");
     expect(card.evidence.find((e) => e.key === "cicd.runs")?.status).toBe("ok");
@@ -234,6 +243,33 @@ describe("«мои репо» и заявка (К-Ф1.1)", () => {
     expect(out.entries.map((e) => [e.repo, e.score])).toEqual([["mine", 71]]);
   });
 
+  test("listMyRepos (круг 2): приватный без пригодного скана — Score последнего не-bad; время — последнего анализа", async () => {
+    const t = makeApiDb();
+    cleanups.push(t.close);
+    const priv = seedRepo(t, { org: "me", repo: "secret" });
+    t.db.query("UPDATE repos SET visibility = 'private' WHERE id = ?").run(priv);
+    seedScore(t, priv, seedScan(t, priv, { ratingEligible: false, status: "partial", startedAt: "2026-09-10T00:00:00Z" }), { total: 44 });
+    seedScore(t, priv, seedScan(t, priv, { ratingEligible: false, status: "bad", startedAt: "2026-09-11T00:00:00Z" }), { total: null });
+    const pub = seedRepo(t, { org: "me", repo: "open" });
+    seedScore(t, pub, seedScan(t, pub, { ratingEligible: false, status: "partial", startedAt: "2026-09-12T00:00:00Z" }), { total: 33 });
+    const client: ScClient = {
+      async get(path: string) {
+        if (path === "/user") return { status: 200, json: { username: "me" }, bodyText: "" };
+        return {
+          status: 200,
+          json: { repositories: [{ organization: { slug: "me" }, slug: "secret" }, { organization: { slug: "me" }, slug: "open" }] },
+          bodyText: "",
+        };
+      },
+      requestCount: () => 0,
+    };
+    const out = await listMyRepos(t.db, client);
+    expect(out.entries.map((e) => [e.repo, e.score, e.lastScanAt])).toEqual([
+      ["secret", 44, "2026-09-11T00:00:00Z"],
+      ["open", null, "2026-09-12T00:00:00Z"],
+    ]);
+  });
+
   test("requestUserScan: существующая строка не обновляется; новая без visibility — private", async () => {
     const t = makeApiDb();
     cleanups.push(t.close);
@@ -250,4 +286,29 @@ describe("«мои репо» и заявка (К-Ф1.1)", () => {
 
 test("категории фактов фикстур (гигиена)", () => {
   expect(PUBLIC_KINDS.map(categoryOf)).not.toContain("meta");
+});
+
+describe("правило карточки (круг 2): источники каналов и приватный без P", () => {
+  test("CI без скана с ok-ранами — из последнего скана с ok-конфигом (потолок «только конфиг»); приватный только с bad-сканами — score null", () => {
+    const t = makeApiDb();
+    cleanups.push(t.close);
+    const repoId = seedRepo(t, { org: "ch", repo: "cfg" });
+    const s1 = seedScan(t, repoId, {
+      facts: [
+        { key: "cicd.configs", source: "git", value: { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: true } },
+        { key: "cicd.runs", source: "rest:cicd", status: "no-data", value: { reason: "access" } },
+      ],
+    });
+    seedScore(t, repoId, s1, { total: 50 });
+    const granted = { cicd: "granted", appsec: "granted", repo: "granted" } as const;
+    const card = getRepoCard(t.db, "ch", "cfg", { access: granted })!;
+    expect(card.score!.categories.cicd.score).toBe(50);
+    expect(card.markers.ciConfigOnlyCap).toBe(true);
+    expect(card.evidence.find((e) => e.key === "cicd.runs")?.status).toBe("no-data");
+
+    const priv = seedRepo(t, { org: "ch", repo: "badonly" });
+    t.db.query("UPDATE repos SET visibility = 'private' WHERE id = ?").run(priv);
+    seedScore(t, priv, seedScan(t, priv, { status: "bad", ratingEligible: false }), { total: null });
+    expect(getRepoCard(t.db, "ch", "badonly", { access: granted })!.score).toBeNull();
+  });
 });
