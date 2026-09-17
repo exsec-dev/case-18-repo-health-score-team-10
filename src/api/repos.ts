@@ -6,7 +6,8 @@
 // такие репо уезжают в отдельный массив, иначе «нет данных» оказалось бы
 // лучшим или худшим результатом в зависимости от направления сортировки.
 import type { Database } from "bun:sqlite";
-import { CHANNEL_FALLBACK_KINDS, READ_KINDS, type CategoryScore } from "../score/compute";
+import { CHANNEL_KINDS, PUBLIC_KINDS, type CategoryScore } from "../score/compute";
+import { categoryOf } from "../collectors/facts";
 import { NO_PAT_ACCESS, type AccessRepo, type AccessResult, type ChannelAccess } from "../auth/access";
 import { DEFAULT_SCAN, type ScanConfig } from "../config";
 import type { GitLimitsMarker } from "../web/format";
@@ -164,24 +165,31 @@ interface RatingRow {
   finished_at: string | null;
 }
 
-// Одна строка на репозиторий: последний скан, у которого ЕСТЬ скоры
-// текущей модели. «Последний» — по scan_id, а не по датам: id монотонен,
-// а даты скана могут идти вразнобой (пересканы, восстановление БД).
-// В4.1 (К1/К2): одна строка оценки на скан; рейтинг читает total_rating /
-// coverage_rating (4 категории — CI и Security в рейтинг не входят) и
+/**
+ * «Последний пригодный» скан (К-Ф1.1): последняя по scan_id строка оценки
+ * текущей модели у скана с rating_eligible = 1. Один подзапрос на все
+ * поверхности — рейтинг, фасеты, счётчики /api/meta, listMyRepos, публичная
+ * часть карточки и MD. «Последний» — по scan_id, а не по датам: id монотонен.
+ * Параметр — model_version.
+ */
+export const LAST_ELIGIBLE_SCAN_SQL = `(SELECT MAX(sc2.scan_id) FROM scores sc2 JOIN scans s2 ON s2.id = sc2.scan_id
+   WHERE sc2.repo_id = sc.repo_id AND sc2.model_version = ? AND s2.rating_eligible = 1)`;
+
+// В4.1 (К1/К2) + В4.1-fix (К-Ф1.1, Ф1.11): одна строка на репозиторий —
+// последний пригодный скан; рейтинг читает total_rating / coverage_rating
+// (4 категории — CI и Security в рейтинг не входят), статус — public_status;
 // только rating_active=1 AND visibility='public'. Проверок доступа нет.
 const RATING_SQL = `
 SELECT r.org_slug, r.repo_slug, r.title, r.language, r.likes, r.forks, r.last_activity_at,
        sc.total_rating AS total, sc.coverage_rating AS coverage, sc.categories, sc.stale, sc.model_version,
-       s.status AS scan_status, s.started_at, s.finished_at
+       COALESCE(s.public_status, s.status) AS scan_status, s.started_at, s.finished_at
 FROM scores sc
 JOIN repos r ON r.id = sc.repo_id
 JOIN scans s ON s.id = sc.scan_id
 WHERE sc.model_version = ?
   AND r.rating_active = 1
   AND r.visibility = 'public'
-  AND sc.scan_id = (SELECT MAX(sc2.scan_id) FROM scores sc2
-                    WHERE sc2.repo_id = sc.repo_id AND sc2.model_version = ?)`;
+  AND sc.scan_id = ${LAST_ELIGIBLE_SCAN_SQL}`;
 
 /** Категории каналов с правами зрителя (К2): в рейтинге и без доступа — закрыты. */
 export const CHANNEL_CATEGORIES: CategoryKey[] = ["cicd", "security"];
@@ -193,7 +201,7 @@ function toRatingItem(row: RatingRow): RatingItem {
     categories[key] = CHANNEL_CATEGORIES.includes(key) ? null : (cats[key]?.score ?? null);
   }
   // stale-маркер рейтинга — только по фактам, которые входят в рейтинг
-  const stale = (JSON.parse(row.stale) as string[]).filter((k) => !CHANNEL_FALLBACK_KINDS.includes(k));
+  const stale = (JSON.parse(row.stale) as string[]).filter((k) => PUBLIC_KINDS.includes(k));
   return {
     org: row.org_slug,
     repo: row.repo_slug,
@@ -406,9 +414,9 @@ export interface RepoCard {
   evidence: CardEvidence[];
 }
 
-/** Факты каналов с правами (К2): не едут в ответ зрителю без доступа. */
-export const CICD_KINDS = ["cicd.runs", "cicd.configs"];
-export const APPSEC_KINDS = ["appsec.findings"];
+/** Факты каналов с правами (К2): не едут в ответ зрителю без доступа — производные CHANNEL_KINDS (К-Ф1.1). */
+export const CICD_KINDS = CHANNEL_KINDS.filter((k) => categoryOf(k) === "cicd");
+export const APPSEC_KINDS = CHANNEL_KINDS.filter((k) => categoryOf(k) === "security");
 
 /** Кап значения факта в ответе: форма усечения одна для всех фактов. */
 const VALUE_CAP_BYTES = 4096;
@@ -555,25 +563,41 @@ export function getRepoCard(
     webUrl: `https://sourcecraft.dev/${r.org_slug}/${r.repo_slug}`,
   };
 
-  // изоляция own/public: публичная карточка — только публичные скоры
-  // активного рейтинга; own-карточка — последний own-скор (приватные
-  // и эвиктированные репо здесь читаемы — это личная страница юзера)
-  // одна строка оценки на скан (К1): карточка — последний скан репо
-  const scoreRow = db
-    .query(
-      `SELECT scan_id, model_version, total_rating, coverage_rating, total_full, coverage_full,
-              categories, no_data, stale, computed_at, derived, code_empty
-       FROM scores WHERE repo_id = ? AND model_version = ? ORDER BY scan_id DESC LIMIT 1`,
-    )
+  // В4.1-fix (К-Ф1.1): публичная часть — из последнего ПРИГОДНОГО скана (P);
+  // блок scan — последний скан репо (L: статус и время последнего анализа,
+  // ТЗ §3.4); канальная часть (CI, Security, полный итог, канальные
+  // рекомендации и факты) — последняя строка оценки (L + фолбэк каналов, К2).
+  const SCORE_COLS = `sc.scan_id, sc.model_version, sc.total_rating, sc.coverage_rating, sc.total_full, sc.coverage_full,
+              sc.categories, sc.no_data, sc.stale, sc.computed_at, sc.derived, sc.code_empty`;
+  const lastScoreRow = db
+    .query(`SELECT ${SCORE_COLS} FROM scores sc WHERE sc.repo_id = ? AND sc.model_version = ? ORDER BY sc.scan_id DESC LIMIT 1`)
     .get(r.id, MODEL_VERSION) as ScoreRow | null;
+  const publicRow = db
+    .query(`SELECT ${SCORE_COLS} FROM scores sc WHERE sc.repo_id = ? AND sc.model_version = ? AND sc.scan_id = ${LAST_ELIGIBLE_SCAN_SQL}`)
+    .get(r.id, MODEL_VERSION, MODEL_VERSION) as ScoreRow | null;
+  const scanRow = db
+    .query("SELECT id, started_at, finished_at, status, public_status, trigger FROM scans WHERE repo_id = ? ORDER BY id DESC LIMIT 1")
+    .get(r.id) as
+    | { id: number; started_at: string; finished_at: string | null; status: string; public_status: string | null; trigger: string }
+    | null;
+  // статус без каналов (Ф1.11) — всем
+  const scan: CardScan | null = scanRow
+    ? {
+        id: scanRow.id,
+        startedAt: scanRow.started_at,
+        finishedAt: scanRow.finished_at,
+        status: scanRow.public_status ?? scanRow.status,
+        trigger: scanRow.trigger,
+      }
+    : null;
 
-  if (!scoreRow) {
-    // «в каталоге, ещё не сканировали» — штатное состояние, не ошибка
+  if (!publicRow || !lastScoreRow) {
+    // «в каталоге, ещё не оценивали» (нет пригодного скана) — штатное состояние, не ошибка
     return {
       repo: cardRepo,
       access: cardAccess,
       markers: { historyTruncatedSince: null, ciConfigOnlyCap: false, staleFacts: false, codeEmpty: false, gitLimits: null },
-      scan: null,
+      scan,
       score: null,
       derived: null,
       recommendations: [],
@@ -581,20 +605,16 @@ export function getRepoCard(
     };
   }
 
-  const scanRow = db
-    .query("SELECT id, started_at, finished_at, status, trigger FROM scans WHERE id = ?")
-    .get(scoreRow.scan_id) as
-    | { id: number; started_at: string; finished_at: string | null; status: string; trigger: string }
-    | null;
-
   // закрытые зрителю каналы: ни чисел, ни подметрик, ни фактов, ни правил
   const lockOf: Partial<Record<CategoryKey, ChannelAccess>> = {};
   if (!ciOpen) lockOf.cicd = access.cicd;
   if (!secOpen) lockOf.security = access.appsec;
-  const closedKinds = new Set<string>([...(ciOpen ? [] : CICD_KINDS), ...(secOpen ? [] : APPSEC_KINDS)]);
+  const openChannelKinds = new Set<string>([...(ciOpen ? CICD_KINDS : []), ...(secOpen ? APPSEC_KINDS : [])]);
   const closedChannels = new Set<string>([...(ciOpen ? [] : ["cicd"]), ...(secOpen ? [] : ["appsec"])]);
+  const isChannelCategory = (key: string) => CHANNEL_CATEGORIES.includes(key as CategoryKey);
 
-  const rawCats = JSON.parse(scoreRow.categories) as Record<string, CategoryScore>;
+  const publicCats = JSON.parse(publicRow.categories) as Record<string, CategoryScore>;
+  const channelCats = JSON.parse(lastScoreRow.categories) as Record<string, CategoryScore>;
   const categories = {} as Record<CategoryKey, CardCategory>;
   for (const key of CATEGORY_ORDER) {
     const locked = lockOf[key];
@@ -602,37 +622,49 @@ export function getRepoCard(
       categories[key] = { score: null, submetrics: {}, locked, weight: CATEGORY_WEIGHTS[key] };
       continue;
     }
-    const cat = rawCats[key] ?? { score: null, submetrics: {} };
+    const source = isChannelCategory(key) ? channelCats : publicCats;
+    const cat = source[key] ?? { score: null, submetrics: {} };
     categories[key] = { ...cat, weight: CATEGORY_WEIGHTS[key] };
   }
-  const stale = (JSON.parse(scoreRow.stale) as string[]).filter((k) => !closedKinds.has(k));
+  const stale = [
+    ...(JSON.parse(publicRow.stale) as string[]).filter((k) => PUBLIC_KINDS.includes(k)),
+    ...(JSON.parse(lastScoreRow.stale) as string[]).filter((k) => openChannelKinds.has(k)),
+  ];
+  const categoryOfNoData = (raw: string) => raw.split(":")[0] as CategoryKey;
   const fullOpen = ciOpen && secOpen;
   const score: CardScore = {
-    totalRating: scoreRow.total_rating,
-    coverageRating: scoreRow.coverage_rating,
-    totalFull: fullOpen ? scoreRow.total_full : null,
-    coverageFull: fullOpen ? scoreRow.coverage_full : null,
+    totalRating: publicRow.total_rating,
+    coverageRating: publicRow.coverage_rating,
+    totalFull: fullOpen ? lastScoreRow.total_full : null,
+    coverageFull: fullOpen ? lastScoreRow.coverage_full : null,
     fullLocked: !fullOpen,
-    modelVersion: scoreRow.model_version,
-    computedAt: scoreRow.computed_at,
+    modelVersion: publicRow.model_version,
+    computedAt: publicRow.computed_at,
     // причины no-data закрытых категорий — тоже данные канала (напр. «config-only cap»)
-    noData: (JSON.parse(scoreRow.no_data) as string[]).filter((raw) => lockOf[raw.split(":")[0] as CategoryKey] === undefined),
+    noData: [
+      ...(JSON.parse(publicRow.no_data) as string[]).filter((raw) => !isChannelCategory(categoryOfNoData(raw))),
+      ...(JSON.parse(lastScoreRow.no_data) as string[]).filter(
+        (raw) => isChannelCategory(categoryOfNoData(raw)) && lockOf[categoryOfNoData(raw)] === undefined,
+      ),
+    ],
     stale,
     categories,
   };
 
-  const recRows = (
-    db
-      .query(
-        `SELECT rule_id, priority, problem, action, fact_ref, expected_impact, delta_score, opens_category, source, channel
-         FROM recommendations WHERE scan_id = ? AND model_version = ? ORDER BY priority ASC`,
-      )
-      .all(scoreRow.scan_id, MODEL_VERSION) as RecRow[]
-  ).filter((rec) => rec.channel === null || !closedChannels.has(rec.channel));
+  const recQuery = db.query(
+    `SELECT rule_id, priority, problem, action, fact_ref, expected_impact, delta_score, opens_category, source, channel
+     FROM recommendations WHERE scan_id = ? AND model_version = ? ORDER BY priority ASC`,
+  );
+  // публичные правила — из P, канальные — из строки канальной части; порядок — движка
+  const recRows = [
+    ...(recQuery.all(publicRow.scan_id, MODEL_VERSION) as RecRow[]).filter((rec) => rec.channel === null),
+    ...(recQuery.all(lastScoreRow.scan_id, MODEL_VERSION) as RecRow[]).filter((rec) => rec.channel !== null && !closedChannels.has(rec.channel)),
+  ].sort((a, b) => a.priority - b.priority);
 
-  const factRows = (
-    db.query("SELECT key, category, value, status, source, collected_at FROM facts WHERE scan_id = ?").all(scoreRow.scan_id) as FactRow[]
-  ).filter((f) => !closedKinds.has(f.key));
+  const factQuery = db.query("SELECT key, category, value, status, source, collected_at FROM facts WHERE scan_id = ?");
+  const publicFacts = (factQuery.all(publicRow.scan_id) as FactRow[]).filter((f) => !CHANNEL_KINDS.includes(f.key));
+  const channelFacts = (factQuery.all(lastScoreRow.scan_id) as FactRow[]).filter((f) => openChannelKinds.has(f.key));
+  const factRows = [...publicFacts, ...channelFacts];
   const factByKey = new Map(factRows.map((f) => [f.key, f]));
 
   const refKeys = new Set<string>();
@@ -664,7 +696,7 @@ export function getRepoCard(
 
   // адресуемые факты: те, на которые ссылаются рекомендации, плюс те,
   // что читает compute — сырьё остальных в ответ не едет
-  const addressable = new Set<string>([...refKeys, ...READ_KINDS]);
+  const addressable = new Set<string>([...refKeys, ...PUBLIC_KINDS, ...CHANNEL_KINDS]);
   const evidence: CardEvidence[] = factRows
     .filter((f) => addressable.has(f.key))
     .map((f) => {
@@ -679,21 +711,20 @@ export function getRepoCard(
   const cicdNoData = categories.cicd.no_data ?? "";
   const markers: CardMarkers = {
     historyTruncatedSince: typeof summaryValue?.history_truncated_since === "string" ? summaryValue.history_truncated_since : null,
+    // маркер показанной CI-категории (она — из канальной части)
     ciConfigOnlyCap: ciOpen && cicdNoData.includes("config-only cap"),
-    staleFacts: Array.isArray(stale) && stale.length > 0,
-    codeEmpty: scoreRow.code_empty === 1,
-    gitLimits: gitLimitsHit(factRows) ? gitLimitsOf(opts.limits ?? DEFAULT_SCAN) : null,
+    staleFacts: stale.length > 0,
+    codeEmpty: publicRow.code_empty === 1,
+    gitLimits: gitLimitsHit(publicFacts) ? gitLimitsOf(opts.limits ?? DEFAULT_SCAN) : null,
   };
 
   return {
     repo: cardRepo,
     access: cardAccess,
     markers,
-    scan: scanRow
-      ? { id: scanRow.id, startedAt: scanRow.started_at, finishedAt: scanRow.finished_at, status: scanRow.status, trigger: scanRow.trigger }
-      : null,
+    scan,
     score,
-    derived: scoreRow.derived === null ? null : (JSON.parse(scoreRow.derived) as DerivedMetrics),
+    derived: publicRow.derived === null ? null : (JSON.parse(publicRow.derived) as DerivedMetrics),
     recommendations,
     evidence,
   };

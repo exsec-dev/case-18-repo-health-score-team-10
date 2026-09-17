@@ -21,10 +21,16 @@
 // scores/recommendations — производные таблицы: старая форма
 // пересоздаётся, затем пересчёт scripts/rescore-m4.ts (прецедент
 // v1.1→v1.2). recommendations += channel; scans += user_id (автор скана).
+// В4.1-fix (К-Ф1.1, Ф1.11, Ф1.12): scans += rating_eligible (пригодность
+// для рейтинга: рейтинг и публичная часть карточки — последний пригодный
+// скан) и public_status (статус по фактам публичных категорий — без
+// каналов CI/Security); обе колонки при добавлении заполняются одним
+// UPDATE по фактам; индексы scans(repo_id, id) и jobs(status, claimed_at).
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Config } from "./config";
+import { publicStatusSql, ratingEligibleSql } from "./score/compute";
 
 const SCORES_DDL = `CREATE TABLE IF NOT EXISTS scores (
   scan_id INTEGER NOT NULL REFERENCES scans(id),
@@ -77,7 +83,9 @@ CREATE TABLE IF NOT EXISTS scans (
   finished_at TEXT,
   status TEXT NOT NULL DEFAULT 'queued', -- queued|running|ok|partial|bad
   trigger TEXT NOT NULL DEFAULT 'periodic', -- periodic|user|probe
-  user_id INTEGER               -- автор скана (users.id); NULL = периодика/серверный токен (v1.5, К3)
+  user_id INTEGER,              -- автор скана (users.id); NULL = периодика/серверный токен (v1.5, К3)
+  rating_eligible INTEGER NOT NULL DEFAULT 0, -- 1 = скан пригоден для рейтинга (ratingEligible; пишет скор-хук)
+  public_status TEXT            -- статус по фактам PUBLIC_KINDS (Ф1.11): показывается всем
 );
 CREATE TABLE IF NOT EXISTS facts (
   scan_id INTEGER NOT NULL REFERENCES scans(id),
@@ -133,16 +141,24 @@ CREATE INDEX IF NOT EXISTS idx_repos_language ON repos(language);
 CREATE INDEX IF NOT EXISTS idx_scores_repo ON scores(repo_id, model_version);
 `;
 
+// индексы колонок, которых у старых БД ещё нет в момент SCHEMA: создаются после миграций
+const LATE_INDEXES = `
+CREATE INDEX IF NOT EXISTS idx_scans_repo ON scans(repo_id, id);
+CREATE INDEX IF NOT EXISTS idx_jobs_status_claimed ON jobs(status, claimed_at);
+`;
+
 function columnsOf(db: Database, table: string): Set<string> {
   const rows = db.query(`PRAGMA table_info(${table})`).all() as { name: string }[];
   return new Set(rows.map((r) => r.name));
 }
 
-/** Добавить колонку, если таблица старой формы уже существует без неё. */
-function ensureColumn(db: Database, table: string, column: string, ddlType: string): void {
+/** Добавить колонку, если таблица старой формы уже существует без неё; true = добавлена. */
+function ensureColumn(db: Database, table: string, column: string, ddlType: string): boolean {
   if (!columnsOf(db, table).has(column)) {
     db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${ddlType}`);
+    return true;
   }
+  return false;
 }
 
 export function openDb(config: Config): Database {
@@ -177,6 +193,14 @@ export function openDb(config: Config): Database {
     db.exec("CREATE INDEX IF NOT EXISTS idx_scores_repo ON scores(repo_id, model_version)");
   }
   ensureColumn(db, "scans", "user_id", "INTEGER");
+  // В4.1-fix (К-Ф1.1): пригодность — тем же правилом, что скор-хук, одним UPDATE
+  if (ensureColumn(db, "scans", "rating_eligible", "INTEGER NOT NULL DEFAULT 0")) {
+    db.exec(`UPDATE scans SET rating_eligible = CASE WHEN ${ratingEligibleSql("scans.id")} THEN 1 ELSE 0 END`);
+  }
+  // В4.1-fix (Ф1.11): публичный статус по фактам
+  if (ensureColumn(db, "scans", "public_status", "TEXT")) {
+    db.exec(`UPDATE scans SET public_status = ${publicStatusSql("scans")}`);
+  }
   // v1.3 → v1.4 (В4): изоляция own/public и эвикция
   ensureColumn(db, "repos", "rating_active", "INTEGER NOT NULL DEFAULT 1");
   ensureColumn(db, "repos", "visibility", "TEXT NOT NULL DEFAULT 'public'");
@@ -198,5 +222,6 @@ export function openDb(config: Config): Database {
     db.exec("INSERT INTO jobs (repo_id, status, claimed_at, lease_until) SELECT repo_id, status, claimed_at, lease_until FROM jobs_v1_rebuild");
     db.exec("DROP TABLE jobs_v1_rebuild");
   }
+  db.exec(LATE_INDEXES);
   return db;
 }

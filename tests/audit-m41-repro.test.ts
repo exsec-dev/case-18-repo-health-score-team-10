@@ -54,7 +54,8 @@ const asFact = (f: { key: string; value: unknown }): Fact => okFact(f.key, f.val
 
 // ---------------------------------------------------------------------------
 describe("Ф1.1 (HIGH-1): из какого скана рейтинг", () => {
-  repro("юзерский скан с no-data(access) у публичного факта не меняет Score в рейтинге", async () => {
+  // закрыто Б1 (К-Ф1.1): рейтинг — последний пригодный скан, мета — только пригодным
+  test("юзерский скан с no-data(access) у публичного факта не меняет Score в рейтинге", async () => {
     const db = tempDb();
     db.query("INSERT INTO repos (org_slug, repo_slug, visibility) VALUES ('victim', 'public-repo', 'public')").run();
     const user = upsertUser(db, "ya-narrow", "narrow");

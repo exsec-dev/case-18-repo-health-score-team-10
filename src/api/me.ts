@@ -7,6 +7,8 @@
 import type { Database } from "bun:sqlite";
 import { ScClient } from "../collectors/http";
 import { upsertRepo } from "../jobs/runner";
+import { LAST_ELIGIBLE_SCAN_SQL } from "./repos";
+import { MODEL_VERSION } from "../score/model";
 import { countRecentUserJobs, enqueueScan, findActiveUserJob } from "../jobs/scheduler";
 import type { QueueConfig } from "../config";
 
@@ -16,7 +18,7 @@ export interface MyRepoEntry {
   title: string | null;
   language: string | null;
   lastActivityAt: string | null;
-  /** Score в рейтинге (total_rating) последнего скана репо в нашей БД; null = не анализировался */
+  /** Score в рейтинге (total_rating) последнего пригодного скана репо в нашей БД (К-Ф1.1); null = не оценивался */
   score: number | null;
   lastScanAt: string | null;
 }
@@ -78,10 +80,10 @@ export async function listMyRepos(db: Database, client: ScClient, opts: { maxPag
           `SELECT sc.total_rating AS total, s.finished_at FROM scores sc
            JOIN repos r ON r.id = sc.repo_id
            LEFT JOIN scans s ON s.id = sc.scan_id
-           WHERE r.org_slug = ? AND r.repo_slug = ?
-           ORDER BY sc.scan_id DESC LIMIT 1`,
+           WHERE r.org_slug = ? AND r.repo_slug = ? AND sc.model_version = ?
+             AND sc.scan_id = ${LAST_ELIGIBLE_SCAN_SQL}`,
         )
-        .get(org, repo) as { total: number | null; finished_at: string | null } | null;
+        .get(org, repo, MODEL_VERSION, MODEL_VERSION) as { total: number | null; finished_at: string | null } | null;
       entries.push({
         org,
         repo,
@@ -146,10 +148,15 @@ export async function requestUserScan(
   }
   const body = res.json as { visibility?: unknown; name?: unknown } | null;
   const visibility = typeof body?.visibility === "string" ? body.visibility : null;
-  const repoId = upsertRepo(db, org, repo, {
-    title: typeof body?.name === "string" ? body.name : null,
-    ...(visibility !== null ? { visibility } : {}),
-  });
+  // К-Ф1.1: заявка вставляет только НОВУЮ строку (видимость из тела repo-GET
+  // или 'private' до подтверждения); существующую строку не обновляет —
+  // мету репо двигает только пригодный скан
+  const repoId =
+    existing?.id ??
+    upsertRepo(db, org, repo, {
+      title: typeof body?.name === "string" ? body.name : null,
+      visibility: visibility ?? "private",
+    });
   const jobId = enqueueScan(db, repoId, { userId, triggerKind: "user", now });
   return { status: 202, body: { queued: true, jobId, slug: `${org}/${repo}`, deduplicated: false } };
 }

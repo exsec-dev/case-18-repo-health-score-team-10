@@ -65,14 +65,26 @@ export interface ScanSpec {
   status?: string;
   trigger?: string;
   facts?: FactSpec[];
+  /** scans.rating_eligible (К-Ф1.1); дефолт true — сид-скан с оценкой читается рейтингом */
+  ratingEligible?: boolean;
+  /** scans.public_status (Ф1.11); дефолт = status */
+  publicStatus?: string;
 }
 
 /** Скан + факты. id растут независимо от дат — «последний» определяется по id. */
 export function seedScan(t: ApiTestDb, repoId: number, spec: ScanSpec = {}): number {
   const started = spec.startedAt ?? NOW.toISOString();
   const r = t.db
-    .query("INSERT INTO scans (repo_id, started_at, finished_at, status, trigger) VALUES (?, ?, ?, ?, ?)")
-    .run(repoId, started, spec.finishedAt === undefined ? started : spec.finishedAt, spec.status ?? "ok", spec.trigger ?? "test");
+    .query("INSERT INTO scans (repo_id, started_at, finished_at, status, public_status, trigger, rating_eligible) VALUES (?, ?, ?, ?, ?, ?, ?)")
+    .run(
+      repoId,
+      started,
+      spec.finishedAt === undefined ? started : spec.finishedAt,
+      spec.status ?? "ok",
+      spec.publicStatus ?? spec.status ?? "ok",
+      spec.trigger ?? "test",
+      spec.ratingEligible === false ? 0 : 1,
+    );
   const scanId = Number(r.lastInsertRowid);
   const stmt = t.db.query(
     "INSERT OR REPLACE INTO facts (scan_id, category, key, value, status, source, collected_at) VALUES (?, ?, ?, ?, ?, ?, ?)",

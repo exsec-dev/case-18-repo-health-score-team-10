@@ -84,11 +84,13 @@ describe("runScan: статусы и три-state", () => {
       expect((row["collected_at"] as string)).toMatch(/^\d{4}-\d{2}-\d{2}T/);
       expect(typeof row["source"]).toBe("string");
     }
-    // мета репо из REST доехала в repos
+    // В4.1-fix (К-Ф1.1): набор фактов неполный (нет всех PUBLIC_KINDS) —
+    // скан непригоден: мета репо не применяется, видимость — применяется
+    // (мета пригодного скана — tests/eligibility.test.ts)
     const repo = db.query("SELECT * FROM repos WHERE repo_slug = 'alpha'").get() as Record<string, unknown>;
-    expect(repo["title"]).toBe("T");
-    expect(repo["likes"]).toBe(25);
-    expect(repo["language"]).toBe("Go");
+    expect(r.ratingEligible).toBe(false);
+    expect(repo["title"]).toBeNull();
+    expect(repo["visibility"]).toBe("public");
     // В4/Б3: очередь отделена от runScan (jobs — scheduler/enqueueScan)
     const jobs = db.query("SELECT COUNT(*) c FROM jobs WHERE repo_id = ?").get(r.repoId) as { c: number };
     expect(jobs.c).toBe(0);

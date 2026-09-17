@@ -10,6 +10,11 @@
 // каналы bad-channel. no-data живёт ТОЛЬКО в фактах. repo-сигнал
 // (repo-GET 404/403) поднимается наверх для эвикции (канальные 403
 // cicd/runs — НЕ эвикция, они штатны чужим).
+// В4.1-fix (К-Ф1.1): скор-хук пишет scans.rating_eligible; мета репо из
+// REST (title/language/likes/last_activity_at/…) применяется ПОСЛЕ хука и
+// только пригодным сканом — узкий PAT не двигает ни рейтинг, ни дату
+// активности; видимость применяет любой скан, если поле есть в ответе.
+// scans.public_status (Ф1.11) — статус по фактам публичных категорий.
 import type { Database } from "bun:sqlite";
 import { Fact, noDataFact } from "../collectors/facts";
 import { cloneWithDegrade, cleanupClone, extractFacts, gitFactsNoData } from "../collectors/git";
@@ -17,7 +22,7 @@ import { ScClient, makeScClient } from "../collectors/http";
 import { RestCollectResult, collectRestFacts } from "../collectors/rest";
 import { AppsecClient, collectAppsec, makeAppsecClient } from "../collectors/appsec";
 import { DEFAULT_SCAN, ScanCloneLimits, ScanConfig } from "../config";
-import { compute, writeScores } from "../score/compute";
+import { compute, PUBLIC_KINDS, ratingEligible, scanStatusOf, writeScores } from "../score/compute";
 import { recommend, writeRecommendations } from "../score/recommend";
 
 export interface GitChannelOutcome {
@@ -74,6 +79,8 @@ export interface ScanResult {
   repoAccess: "ok" | "gone" | "unknown";
   /** score-hook итог (null = хук не смог — факты записаны, скан не роняется) */
   score: { totalRating: number | null; coverageRating: number; totalFull: number | null; coverageFull: number } | null;
+  /** скан пригоден для рейтинга (К-Ф1.1): записан хуком в scans.rating_eligible */
+  ratingEligible: boolean;
   elapsedMs: number;
 }
 
@@ -192,7 +199,7 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
     (userToken ? (org: string, repo: string) => patGitUrl(gitBase, userToken, org, repo) : (org: string, repo: string) => anonGitUrl(gitBase, org, repo));
   const repoId = upsertRepo(deps.db, org, repo);
   const scan = deps.db
-    .query("INSERT INTO scans (repo_id, started_at, status, trigger, user_id) VALUES (?, ?, 'running', ?, ?)")
+    .query("INSERT INTO scans (repo_id, started_at, status, public_status, trigger, user_id) VALUES (?, ?, 'running', 'running', ?, ?)")
     .run(repoId, startedAt, opts.trigger ?? "probe", opts.userId ?? null);
   const scanId = Number(scan.lastInsertRowid);
 
@@ -202,6 +209,8 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
   let repoAccess: ScanResult["repoAccess"] = "unknown";
   let workerFatal: string | null = null;
   const facts: Fact[] = [];
+  // мета репо буферизуется до скор-хука (К-Ф1.1)
+  let repoMeta: RestCollectResult["repoMeta"] = null;
 
   // REST-клиент (К3): userToken → PAT автора (шов или новый клиент),
   // иначе серверный; ни того ни другого → REST честно no-data(access)
@@ -256,7 +265,6 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
       restChannelErrors = out.channelErrors;
       restRepoMeta = out.repoMeta;
       if (out.channelErrors.length > 0) restChannel = `errors(${out.channelErrors.map((c) => c.kind).join(",")})`;
-      if (out.repoMeta) upsertRepo(deps.db, org, repo, repoMetaToUpsert(out.repoMeta));
     } else if (restClient === null) {
       restChannel = "no-data(no-token)";
       for (const kind of ["issues.stats", "issues.comments_sample", "activity.rest", "cicd.runs"]) {
@@ -268,7 +276,11 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
       restChannelErrors = out.channelErrors;
       restRepoMeta = out.repoMeta;
       if (out.channelErrors.length > 0) restChannel = `errors(${out.channelErrors.map((c) => c.kind).join(",")})`;
-      if (out.repoMeta) upsertRepo(deps.db, org, repo, repoMetaToUpsert(out.repoMeta));
+    }
+    // видимость — свойство репо: применяет любой скан, если поле есть в ответе
+    repoMeta = restRepoMeta;
+    if (restRepoMeta && typeof restRepoMeta.visibility === "string") {
+      upsertRepo(deps.db, org, repo, { visibility: restRepoMeta.visibility });
     }
     // repo-сигнал эвикции: ТОЛЬКО ресурс repo (404/403 = репо пропал);
     // канальные 403 (cicd/runs чужих) — штатны и эвикцией не являются
@@ -314,25 +326,32 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
   }
   // «ядро» скана = ok-факты хотя бы из одного канала; ни одного ok-факта
   // (все каналы bad-channel или всё no-data) — ядра нет, скан bad
-  const gitHasOk = facts.some((f) => f.source === "git" && f.status === "ok");
-  const restHasOk = facts.some((f) => f.source.startsWith("rest:") && f.status === "ok");
-  let status: ScanResult["status"];
-  if (workerFatal) status = "bad";
-  else if (!gitHasOk && !restHasOk) status = "bad";
-  else if (counts.noData === 0 && counts.bad === 0) status = "ok";
-  else status = "partial";
+  const status: ScanResult["status"] = scanStatusOf(facts, workerFatal !== null);
+  // тот же алгоритм на фактах публичных категорий (Ф1.11): статус без каналов
+  const publicStatus = scanStatusOf(
+    facts.filter((f) => PUBLIC_KINDS.includes(f.key)),
+    workerFatal !== null,
+  );
 
   const finishedAt = new Date().toISOString();
-  deps.db.query("UPDATE scans SET status = ?, finished_at = ? WHERE id = ?").run(status, finishedAt, scanId);
+  deps.db.query("UPDATE scans SET status = ?, public_status = ?, finished_at = ? WHERE id = ?").run(status, publicStatus, finishedAt, scanId);
 
   // --- score-hook (В2/Б5): конец скана → compute + recommend; сбой хука
   // не роняет скан (факты уже записаны, скор пересчитается CLI/пересканом)
+  // К-Ф1.1: пригодность — по фактам скана; оценка, рекомендации, флаг
+  // пригодности и мета репо — одной транзакцией (хук упал → ничего из этого)
   let scoreSummary: ScanResult["score"] = null;
+  let eligible = false;
   try {
     const scores = compute(deps.db, scanId);
-    writeScores(deps.db, scores);
     const recs = recommend(deps.db, scanId, { scores });
-    writeRecommendations(deps.db, scanId, scores.modelVersion, recs);
+    eligible = workerFatal === null && ratingEligible(facts);
+    deps.db.transaction(() => {
+      writeScores(deps.db, scores);
+      writeRecommendations(deps.db, scanId, scores.modelVersion, recs);
+      deps.db.query("UPDATE scans SET rating_eligible = ? WHERE id = ?").run(eligible ? 1 : 0, scanId);
+      if (eligible && repoMeta) upsertRepo(deps.db, org, repo, repoMetaToUpsert(repoMeta));
+    })();
     scoreSummary = { totalRating: scores.totalRating, coverageRating: scores.coverageRating, totalFull: scores.totalFull, coverageFull: scores.coverageFull };
   } catch (e) {
     console.error(`[scan ${scanId}] score hook failed: ${String((e as Error).message).slice(0, 200)}`);
@@ -348,6 +367,7 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
     channels: { git: gitChannel, rest: restChannel, appsec: appsecChannel },
     repoAccess,
     score: scoreSummary,
+    ratingEligible: scoreSummary !== null && eligible,
     elapsedMs: Date.now() - t0,
   };
 }

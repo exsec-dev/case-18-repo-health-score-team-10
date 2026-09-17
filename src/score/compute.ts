@@ -108,6 +108,100 @@ export const READ_KINDS = [
   "appsec.findings",
 ];
 
+/**
+ * Kinds каналов с правами зрителя (В4.1-fix, К-Ф1.1): CI (конфиг и прогоны)
+ * и Security. Все фильтры карточки, рейтинга, stale, public_status и
+ * пригодности скана строятся только от CHANNEL_KINDS / PUBLIC_KINDS.
+ */
+export const CHANNEL_KINDS = ["cicd.configs", "cicd.runs", "appsec.findings"];
+
+/** Kinds публичных категорий (Score в рейтинге): READ_KINDS минус CHANNEL_KINDS. */
+export const PUBLIC_KINDS = READ_KINDS.filter((k) => !CHANNEL_KINDS.includes(k));
+
+/** Причины no-data, описывающие не репо, а права/сбой чтения — скан непригоден. */
+const INELIGIBLE_NO_DATA_REASONS = ["access", "other"];
+
+export interface EligibilityFact {
+  key: string;
+  status: string;
+  /** значение факта: объект или JSON-строка из БД */
+  value: unknown;
+}
+
+function noDataReason(value: unknown): unknown {
+  let v = value;
+  if (typeof v === "string") {
+    try {
+      v = JSON.parse(v);
+    } catch {
+      return null;
+    }
+  }
+  return v !== null && typeof v === "object" ? (v as { reason?: unknown }).reason ?? null : null;
+}
+
+/**
+ * Единое правило пригодности скана для рейтинга (К-Ф1.1; TASK.md §2
+ * «Каталог, видимость и карточка» (4)): скан непригоден, если хоть один
+ * факт PUBLIC_KINDS отсутствует, или status='bad', или no-data с причиной
+ * access/other; no-data limits и причины, описывающие сам репо (пустой
+ * репо), — пригоден. Одинаково для периодических и пользовательских,
+ * публичных и приватных. SQL-эквивалент — ratingEligibleSql.
+ */
+export function ratingEligible(facts: EligibilityFact[]): boolean {
+  const byKey = new Map(facts.map((f) => [f.key, f]));
+  for (const kind of PUBLIC_KINDS) {
+    const f = byKey.get(kind);
+    if (!f) return false;
+    if (f.status === "bad") return false;
+    if (f.status === "no-data" && INELIGIBLE_NO_DATA_REASONS.includes(String(noDataReason(f.value)))) return false;
+  }
+  return true;
+}
+
+const sqlList = (items: string[]) => items.map((k) => `'${k}'`).join(", ");
+
+/** SQL-эквивалент ratingEligible: выражение 0/1 для скана `scanIdExpr` (миграция openDb). */
+export function ratingEligibleSql(scanIdExpr: string): string {
+  return `(SELECT COUNT(*) FROM facts f
+            WHERE f.scan_id = ${scanIdExpr}
+              AND f.key IN (${sqlList(PUBLIC_KINDS)})
+              AND f.status <> 'bad'
+              AND NOT (f.status = 'no-data' AND COALESCE(json_extract(f.value, '$.reason'), '') IN (${sqlList(INELIGIBLE_NO_DATA_REASONS)}))
+          ) = ${PUBLIC_KINDS.length}`;
+}
+
+export interface StatusFact {
+  key: string;
+  status: string;
+  source: string;
+}
+
+/**
+ * Статус скана по фактам (runner): bad = фатал воркера или ни одного ok-факта
+ * git/REST; ok = все факты ok; иначе partial. Тот же алгоритм на фактах
+ * PUBLIC_KINDS даёт scans.public_status (Ф1.11).
+ */
+export function scanStatusOf(facts: StatusFact[], workerFatal: boolean): "ok" | "partial" | "bad" {
+  const gitHasOk = facts.some((f) => f.source === "git" && f.status === "ok");
+  const restHasOk = facts.some((f) => f.source.startsWith("rest:") && f.status === "ok");
+  if (workerFatal) return "bad";
+  if (!gitHasOk && !restHasOk) return "bad";
+  if (facts.every((f) => f.status === "ok")) return "ok";
+  return "partial";
+}
+
+/** SQL-эквивалент public_status для миграции (статус «bad» полного скана влечёт bad публичного). */
+export function publicStatusSql(scanAlias: string): string {
+  const pub = `f.scan_id = ${scanAlias}.id AND f.key IN (${sqlList(PUBLIC_KINDS)})`;
+  return `CASE
+    WHEN ${scanAlias}.status IN ('queued', 'running') THEN ${scanAlias}.status
+    WHEN ${scanAlias}.status = 'bad' THEN 'bad'
+    WHEN NOT EXISTS (SELECT 1 FROM facts f WHERE ${pub} AND f.status = 'ok' AND (f.source = 'git' OR f.source LIKE 'rest:%')) THEN 'bad'
+    WHEN EXISTS (SELECT 1 FROM facts f WHERE ${pub} AND f.status <> 'ok') THEN 'partial'
+    ELSE 'ok' END`;
+}
+
 const MONTH_MS = 30.44 * 24 * 3600_000;
 
 /** Взвешенное среднее с перенормировкой no-data (sw=0 → null). */
