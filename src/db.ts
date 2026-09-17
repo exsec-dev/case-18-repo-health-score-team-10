@@ -156,6 +156,7 @@ CREATE INDEX IF NOT EXISTS idx_scores_repo ON scores(repo_id, model_version);
 const LATE_INDEXES = `
 CREATE INDEX IF NOT EXISTS idx_scans_repo ON scans(repo_id, id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status_claimed ON jobs(status, claimed_at);
+CREATE INDEX IF NOT EXISTS idx_jobs_user_claimed ON jobs(user_id, claimed_at);
 `;
 
 function columnsOf(db: Database, table: string): Set<string> {

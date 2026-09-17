@@ -133,13 +133,17 @@ export async function requestUserScan(
   if (active !== null) {
     return { status: 202, body: { queued: true, jobId: active, slug: `${org}/${repo}`, deduplicated: true } };
   }
+  if (countActiveUserJobs(db, userId) >= queue.userActiveMax) {
+    return tooManyActive(queue);
+  }
   if (countRecentUserJobs(db, userId, now) >= queue.userScansPerHour) {
     return rateLimited(queue);
   }
   const res = await client.get(`/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`);
+  // Ф1.6 + круг 2 (LOW-6): любой неуспех предпроверки (403/404, 401,
+  // 0/429/5xx) учитывается лимитом частоты — POST не усилитель запросов
+  if (res.status !== 200) recordRefusedUserJob(db, userId, now);
   if (res.status === 403 || res.status === 404) {
-    // Ф1.6: отказ учитывается лимитом частоты — перебор чужих слагов не бесплатен
-    recordRefusedUserJob(db, userId, now);
     return { status: 403, body: { error: { code: "no_access", message: `ваш PAT не даёт доступа к ${org}/${repo}` } } };
   }
   if (res.status === 401) {
@@ -160,10 +164,7 @@ export async function requestUserScan(
       return { status: 202, body: { queued: true, jobId: dup, slug: `${org}/${repo}`, deduplicated: true } };
     }
     if (countActiveUserJobs(db, userId) >= queue.userActiveMax) {
-      return {
-        status: 429,
-        body: { error: { code: "too_many_active", message: `не больше ${queue.userActiveMax} анализов в очереди одновременно — дождитесь завершения` } },
-      };
+      return tooManyActive(queue);
     }
     if (countRecentUserJobs(db, userId, now) >= queue.userScansPerHour) {
       return rateLimited(queue);
@@ -180,6 +181,13 @@ export async function requestUserScan(
     const jobId = enqueueScan(db, repoId, { userId, triggerKind: "user", now });
     return { status: 202, body: { queued: true, jobId, slug: `${org}/${repo}`, deduplicated: false } };
   })();
+}
+
+function tooManyActive(queue: QueueConfig): UserScanResponse {
+  return {
+    status: 429,
+    body: { error: { code: "too_many_active", message: `не больше ${queue.userActiveMax} анализов в очереди одновременно — дождитесь завершения` } },
+  };
 }
 
 function rateLimited(queue: QueueConfig): UserScanResponse {

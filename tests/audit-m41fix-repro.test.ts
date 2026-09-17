@@ -87,7 +87,8 @@ function composedFull(categories: Record<CategoryKey, { score: number | null }>)
 
 // ---------------------------------------------------------------------------
 describe("Н1 (HIGH): claimNext на большой истории очереди", () => {
-  repro(
+  // закрыто Б8: индекс jobs(user_id, claimed_at)
+  test(
     "claimNext при 20k строк истории и 300 заявках в очереди — быстрее 100 мс",
     () => {
       const db = tempDb();
@@ -181,7 +182,8 @@ describe("С2: приватный репо без пригодного скан�
 
 // ---------------------------------------------------------------------------
 describe("С3: непригодный периодический скан перезапускается", () => {
-  repro("ночной обход ставит перескан репо, чей последний периодический скан непригоден (last_updated не менялся)", async () => {
+  // закрыто Б8 (мех. 2)
+  test("ночной обход ставит перескан репо, чей последний периодический скан непригоден (last_updated не менялся)", async () => {
     const db = tempDb();
     const last = "2026-09-01T00:00:00Z";
     db.query("INSERT INTO repos (org_slug, repo_slug, visibility, last_activity_at) VALUES ('cat', 'flaky', 'public', ?)").run(last);

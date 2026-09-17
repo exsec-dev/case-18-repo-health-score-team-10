@@ -373,6 +373,38 @@ describe("ночной каталог: дифф, форс, эвикция", () =
     db.query("DELETE FROM repos WHERE org_slug = 'rt'").run();
   });
 
+  test("retry-failed — только по периодическим job; юзерская job не навязывает и не маскирует перескан (круг 2, LOW-8)", async () => {
+    const pages = [{ repos: [repoOf("rf", "a", "2026-09-01T00:00:00Z"), repoOf("rf", "b", "2026-09-01T00:00:00Z")], next: null }];
+    await nightlyCatalog(db, catalogClient(pages), { now: new Date() });
+    const a = seedRepo("rf", "a", "2026-09-01T00:00:00Z");
+    const b = seedRepo("rf", "b", "2026-09-01T00:00:00Z");
+    db.query("INSERT OR IGNORE INTO users (ya_id, login, created_at, last_login_at) VALUES ('ya-rf', 'rf', '2026', '2026')").run();
+    const uid = (db.query("SELECT id FROM users WHERE ya_id = 'ya-rf'").get() as { id: number }).id;
+    // a: периодическая done, потом юзерская failed → перескана нет
+    db.query("UPDATE jobs SET status = 'done' WHERE repo_id IN (?, ?)").run(a, b);
+    db.query("INSERT INTO jobs (repo_id, status, user_id, trigger_kind, created_at) VALUES (?, 'failed', ?, 'user', '2026')").run(a, uid);
+    // b: периодическая failed, потом юзерская done → перескан
+    db.query("UPDATE jobs SET status = 'failed' WHERE repo_id = ? AND user_id IS NULL").run(b);
+    db.query("INSERT INTO jobs (repo_id, status, user_id, trigger_kind, created_at) VALUES (?, 'done', ?, 'user', '2026')").run(b, uid);
+    const r2 = await nightlyCatalog(db, catalogClient(pages), { now: new Date() });
+    expect(r2.enqueued).toEqual([{ slug: "rf/b", reason: "retry-failed" }]);
+    db.query("DELETE FROM jobs WHERE repo_id IN (?, ?)").run(a, b);
+    db.query("DELETE FROM repos WHERE org_slug = 'rf'").run();
+  });
+
+  test("retry-ineligible: не чаще раза за обход; пригодный последний периодический скан — без перескана (круг 2, С3)", async () => {
+    const r = seedRepo("ri", "dup", "2026-09-01T00:00:00Z");
+    const ok = seedRepo("ri", "fine", "2026-09-01T00:00:00Z");
+    db.query("INSERT INTO scans (repo_id, started_at, finished_at, status, trigger, rating_eligible) VALUES (?, '2026', '2026', 'partial', 'periodic', 0)").run(r);
+    db.query("INSERT INTO scans (repo_id, started_at, finished_at, status, trigger, rating_eligible) VALUES (?, '2026', '2026', 'ok', 'periodic', 1)").run(ok);
+    const pages = [{ repos: [repoOf("ri", "dup", "2026-09-01T00:00:00Z"), repoOf("ri", "dup", "2026-09-01T00:00:00Z"), repoOf("ri", "fine", "2026-09-01T00:00:00Z")], next: null }];
+    const out = await nightlyCatalog(db, catalogClient(pages), { now: new Date() });
+    expect(out.enqueued).toEqual([{ slug: "ri/dup", reason: "retry-ineligible" }]);
+    db.query("DELETE FROM jobs WHERE repo_id IN (?, ?)").run(r, ok);
+    db.query("DELETE FROM scans WHERE repo_id IN (?, ?)").run(r, ok);
+    db.query("DELETE FROM repos WHERE org_slug = 'ri'").run();
+  });
+
   test("эвикция пропавших из ПОЛНОГО каталога; неполный каталог не эвиктит; возврат флагом", async () => {
     const gone = seedRepo("ev", "gone", "2026-09-01T00:00:00Z");
     seedRepo("ev", "stay", "2026-09-01T00:00:00Z");

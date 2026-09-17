@@ -85,8 +85,9 @@ describe("requestUserScan: предпроверка доступа PAT (К3)", (
     expect(client.paths).toEqual([]);
   });
 
-  test("401 → 401 pat_expired; 0/429/5xx → 503 check_failed; без постановки", async () => {
+  test("401 → 401 pat_expired; 0/429/5xx → 503 check_failed; без постановки; отказ учтён строкой refused (круг 2, LOW-6)", async () => {
     const before = jobsOf(user);
+    const refusedBefore = refusedOf(user);
     const expired = await requestUserScan(db, statusClient(401), user, "x", "expired", QUEUE);
     expect(expired.status).toBe(401);
     expect((expired.body["error"] as { code: string }).code).toBe("pat_expired");
@@ -97,6 +98,21 @@ describe("requestUserScan: предпроверка доступа PAT (К3)", (
       expect(repoRow("x", `flaky-${status}`)).toBeNull();
     }
     expect(repoRow("x", "expired")).toBeNull();
-    expect(jobsOf(user)).toBe(before);
+    expect(refusedOf(user)).toBe(refusedBefore + 5);
+    expect(jobsOf(user)).toBe(before + 5); // только refused-строки
+    expect((db.query("SELECT COUNT(*) AS c FROM jobs WHERE user_id = ? AND status IN ('queued', 'running')").get(user) as { c: number }).c).toBe(1);
+  });
+
+  test("too_many_active проверяется до сети (круг 2, LOW-6)", async () => {
+    const u = upsertUser(db, "ya-active-cheap", "activecheap");
+    const limit = { userScansPerHour: 100, maxAttempts: 3, userActiveMax: 1 };
+    expect((await requestUserScan(db, statusClient(200, { visibility: "public" }), u, "cheap", "one", limit)).status).toBe(202);
+    const client = statusClient(200, { visibility: "public" });
+    const out = await requestUserScan(db, client, u, "cheap", "two", limit);
+    expect({ status: out.status, code: (out.body["error"] as { code: string }).code, requests: client.paths.length }).toEqual({
+      status: 429,
+      code: "too_many_active",
+      requests: 0,
+    });
   });
 });

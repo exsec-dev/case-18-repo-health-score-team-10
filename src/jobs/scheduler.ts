@@ -202,7 +202,8 @@ export function returnRepo(db: Database, repoId: number): void {
 
 export interface NightlyEnqueued {
   slug: string;
-  reason: "new" | "changed" | "forced" | "retry-failed";
+  /** retry-ineligible — последний завершённый периодический скан непригоден для рейтинга (С3, круг 2) */
+  reason: "new" | "changed" | "forced" | "retry-failed" | "retry-ineligible";
 }
 
 export interface NightlyResult {
@@ -229,6 +230,10 @@ export interface NightlyOptions {
  * таблицы; приватные own-репо в публичном каталоге и не ждутся).
  * Второй прогон при неизменном каталоге не ставит в очередь ничего —
  * приёмочный инвариант Б6.
+ * В4.1-fix круг 2 (С3, LOW-8): retry-failed — только по последней
+ * ПЕРИОДИЧЕСКОЙ job (юзерская не навязывает и не маскирует перескан);
+ * последний завершённый периодический скан непригоден → перескан
+ * (retry-ineligible), не чаще раза за обход.
  */
 export async function nightlyCatalog(db: Database, client: ScClient, opts: NightlyOptions = {}): Promise<NightlyResult> {
   const fullRescan = opts.fullRescan ?? false;
@@ -239,6 +244,7 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
   }
 
   const enqueued: NightlyEnqueued[] = [];
+  const enqueuedRepoIds = new Set<number>();
   const seenRepoIds = new Set<number>();
   const seenSlugs = new Set<string>();
 
@@ -257,25 +263,34 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
       visibility: entry.visibility ?? "public",
     });
     seenRepoIds.add(repoId);
+    // не чаще раза за обход (дубли записей каталога)
+    if (enqueuedRepoIds.has(repoId)) continue;
     if (!existing) {
+      enqueuedRepoIds.add(repoId);
       enqueueScan(db, repoId, { triggerKind: "periodic" });
       enqueued.push({ slug, reason: "new" });
       continue;
     }
     if (existing.last_activity_at === null && entry.last_updated !== null) {
       // строка была без даты (ручной ввод слага) — теперь дата есть: это «изменившийся»
+      enqueuedRepoIds.add(repoId);
       enqueueScan(db, repoId, { triggerKind: "periodic" });
       enqueued.push({ slug, reason: "changed" });
       continue;
     }
     const changed = entry.last_updated !== existing.last_activity_at;
     const lastJob = db
-      .query("SELECT status FROM jobs WHERE repo_id = ? ORDER BY id DESC LIMIT 1")
+      .query("SELECT status FROM jobs WHERE repo_id = ? AND user_id IS NULL ORDER BY id DESC LIMIT 1")
       .get(repoId) as { status: string } | null;
     const retryFailed = lastJob?.status === "failed";
-    if (fullRescan || changed || retryFailed) {
+    const lastPeriodicScan = db
+      .query("SELECT rating_eligible FROM scans WHERE repo_id = ? AND user_id IS NULL AND status NOT IN ('queued', 'running') ORDER BY id DESC LIMIT 1")
+      .get(repoId) as { rating_eligible: number } | null;
+    const retryIneligible = lastPeriodicScan !== null && lastPeriodicScan.rating_eligible !== 1;
+    if (fullRescan || changed || retryFailed || retryIneligible) {
+      enqueuedRepoIds.add(repoId);
       enqueueScan(db, repoId, { triggerKind: "periodic" });
-      enqueued.push({ slug, reason: fullRescan ? "forced" : changed ? "changed" : "retry-failed" });
+      enqueued.push({ slug, reason: fullRescan ? "forced" : changed ? "changed" : retryFailed ? "retry-failed" : "retry-ineligible" });
     }
   }
 

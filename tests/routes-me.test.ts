@@ -50,7 +50,7 @@ beforeAll(async () => {
     dataDir: dir,
     mock,
     appSecret: SECRET,
-    env: { QUEUE_USER_ACTIVE_MAX: "2", QUEUE_USER_SCANS_PER_HOUR: "3" },
+    env: { QUEUE_USER_ACTIVE_MAX: "2", QUEUE_USER_SCANS_PER_HOUR: "6" },
   });
 }, 30_000);
 
@@ -74,22 +74,26 @@ describe("POST /api/me/repos/:org/:repo/scan — коды ответа (Ф1.13)"
   // первым тестом: воркер-луп сервера (опрос 5 с) ещё не успел заявить job
   test("202, 202 deduplicated, 429 too_many_active, 403, 401, 503, 409, 401 без сессии", async () => {
     expect((await putPat("active", "pat-active-000000")).status).toBe(200);
-    // 401/503 предпроверки лимитом частоты не учитываются
+    // отказы предпроверки (401/503/403) учитываются лимитом частоты (круг 2, LOW-6)
     expect(await postScan("active", "own/expired")).toEqual({ status: 401, code: "pat_expired", deduplicated: null });
     expect(await postScan("active", "own/broken")).toEqual({ status: 503, code: "check_failed", deduplicated: null });
+    expect(await postScan("active", "own/forbidden")).toEqual({ status: 403, code: "no_access", deduplicated: null });
     expect(await postScan("active", "own/a1")).toEqual({ status: 202, code: null, deduplicated: false });
     expect(await postScan("active", "own/a1")).toEqual({ status: 202, code: null, deduplicated: true });
     expect(await postScan("active", "own/a2")).toEqual({ status: 202, code: null, deduplicated: false });
+    // too_many_active — до сети
+    const mark = mock.requests.length;
     expect(await postScan("active", "own/a3")).toEqual({ status: 429, code: "too_many_active", deduplicated: null });
-    expect(await postScan("active", "own/forbidden")).toEqual({ status: 403, code: "no_access", deduplicated: null });
+    expect(mock.requests.length).toBe(mark);
     expect(await postScan("nopat", "own/a1")).toEqual({ status: 409, code: "no_pat", deduplicated: null });
     expect(await postScan(null, "own/a1")).toEqual({ status: 401, code: "unauthorized", deduplicated: null });
   });
 
   test("429 rate_limited: отказанные предпроверки учитываются лимитом частоты", async () => {
     expect((await putPat("rate", "pat-rate-00000000")).status).toBe(200);
-    expect((await postScan("rate", "enum/forbidden")).status).toBe(403);
-    expect((await postScan("rate", "enum/missing")).status).toBe(403);
+    for (const slug of ["forbidden", "missing", "expired", "broken", "forbidden"]) {
+      expect((await postScan("rate", `enum/${slug}`)).status).not.toBe(202);
+    }
     expect(await postScan("rate", "enum/b1")).toEqual({ status: 202, code: null, deduplicated: false });
     const before = mock.requests.length;
     expect(await postScan("rate", "enum/b2")).toEqual({ status: 429, code: "rate_limited", deduplicated: null });
