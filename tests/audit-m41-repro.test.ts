@@ -1,9 +1,11 @@
 // audit-m41-repro.test.ts — воспроизведение находок аудит-пары В4.1
 // (reports/2026-09-17-m41-audit-pair.md; план reports/2026-09-17-fix-plan.md,
 // веха В4.1-fix, Б0). Каждый тест описывает ПРАВИЛЬНОЕ поведение (контракты
-// Части 3 плана) и ассертит конкретное значение. Пока находка жива, тест
-// помечен test.failing (набор зелёный); в строгом режиме — красный:
-// AUDIT_STRICT=1 bun test tests/audit-m41-repro.test.ts
+// Части 3 плана) и ассертит конкретное значение. На Б0-коммите тесты были
+// помечены test.failing (набор зелёный, в строгом режиме — красный); пометка
+// снималась в блоке, закрывшем находку (Б1–Б4), утверждения не ослаблялись.
+// Сейчас все тесты обычные и зелёные в обоих режимах; строгий режим оставлен
+// для команды приёмки: AUDIT_STRICT=1 bun test tests/audit-m41-repro.test.ts
 // Сети нет: каналы скана — фейки, REST/AppSec-клиенты — фейки.
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
@@ -26,8 +28,6 @@ import { compute } from "../src/score/compute";
 import { recommend } from "../src/score/recommend";
 import { healthyFacts, makeDb, seedScan as seedScoreScan, withFacts, NOW as SCORE_NOW } from "./score-fixtures";
 import { makeApiDb, seedRecommendation, seedRepo, seedScan, seedScore } from "./api-fixtures";
-
-const repro = process.env.AUDIT_STRICT ? test : test.failing;
 
 const cleanups: (() => void)[] = [];
 afterAll(() => {
