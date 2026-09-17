@@ -217,6 +217,7 @@ function Header({ card }: { card: Card }) {
             <Text variant="header-1" as="h1" ellipsis>
               {r.org} / {r.repo}
             </Text>
+            <FavoriteStar org={r.org} repo={r.repo} />
             <ActionTooltip title="Открыть на sourcecraft.dev">
               <Button
                 view="flat-secondary"
@@ -751,4 +752,57 @@ function securityNote(card: Card): string {
     return "AppSec API ответил неполно (канал/пагинация). Ошибка — не отсутствие уязвимостей: вес категории выброшен до успешного пересбора.";
   }
   return SECURITY_PUBLIC_NOTE;
+}
+
+
+// ========== ПОРТ 6 (hq-parallel): избранное на карточке ==========
+
+function FavoriteStar({ org, repo }: { org: string; repo: string }) {
+  const [state, setState] = useState<"loading" | "on" | "off" | "anon">("loading");
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let stop = false;
+    fetch(`/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`)
+      .then(async (res) => {
+        if (res.status === 401) {
+          if (!stop) setState("anon");
+          return;
+        }
+        const body = (await res.json()) as { favorite: boolean };
+        if (!stop) setState(body.favorite ? "on" : "off");
+      })
+      .catch(() => {
+        if (!stop) setState("anon");
+      });
+    return () => {
+      stop = true;
+    };
+  }, [org, repo]);
+  if (state === "loading") return null;
+  const toggle = async () => {
+    setError(null);
+    if (state === "anon") return; // задизейблена: подсказка в title
+    const next = state === "on" ? "off" : "on";
+    setState(next);
+    try {
+      await mutateJson(`/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`, next === "on" ? "PUT" : "DELETE");
+    } catch (e) {
+      setState(state); // откат — звезда не врёт
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+  return (
+    <Flex direction="column" gap={1}>
+      <Button
+        size="m"
+        view="flat"
+        disabled={state === "anon"}
+        title={state === "anon" ? "Войдите через Я ID, чтобы добавлять в избранное" : "в избранное: права проверятся в кабинете"}
+        onClick={() => void toggle()}
+      >
+        {state === "on" ? "★" : "☆"}
+      </Button>
+      {error && <Text color="danger">{error}</Text>}
+    </Flex>
+  );
 }

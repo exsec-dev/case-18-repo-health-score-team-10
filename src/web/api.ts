@@ -19,7 +19,7 @@ export interface MeResponse {
 }
 
 export interface MyReposResponse {
-  username: string;
+  username: string | null;
   entries: MyRepoEntry[];
 }
 

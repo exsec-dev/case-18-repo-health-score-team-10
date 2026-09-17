@@ -14,6 +14,9 @@
 // серверный REST-клиент — фабрика: новый бюджет на каждую задачу и на
 // каждый ночной обход (H2).
 import type { Database } from "bun:sqlite";
+import { rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { enumerateCatalog, type CatalogResult } from "../collectors/catalog";
 import type { ScClient } from "../collectors/http";
 import { upsertRepo, runScan, scanCloneLimitsOf, type ScanResult } from "./runner";
@@ -98,6 +101,8 @@ export function enqueueScan(
 export interface ClaimOptions {
   /** предел попыток (Config.queue.maxAttempts): достигнут → failed, не заявляется */
   maxAttempts?: number;
+  /** ПОРТ S2: какую очередь обслуживает этот claim — user | rating */
+  queue?: "user" | "rating";
 }
 
 /**
@@ -120,10 +125,12 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
     `UPDATE jobs SET status = 'failed', lease_until = NULL
      WHERE status IN ('queued', 'running') AND attempts >= ? AND (lease_until IS NULL OR lease_until < ?)`,
   ).run(maxAttempts, nowIso);
-  const last = db
-    .query("SELECT trigger_kind FROM jobs WHERE claimed_at IS NOT NULL ORDER BY claimed_at DESC, id DESC LIMIT 1")
-    .get() as { trigger_kind: string } | null;
-  const first = last?.trigger_kind === "user" ? "periodic" : "user";
+  // ПОРТ hq-parallel (S2): очереди РАЗДЕЛЕНЫ (решение Алексея 17.09 —
+  // «всё лучшее от нас, сверху их капы»): claim обслуживает одну очередь
+  // 'user' | 'rating'; чередование удалено — изоляция интерактива от ночной
+  // волны заменяет честность перемеживания. Внутри user-очереди сохранён их
+  // круговой порядок между юзерами (Ф1.7); attempts (K4) неприкосновенны.
+  const queue = opts.queue ?? "user";
   const claimStmt = db.query(
       `UPDATE jobs SET status = 'running', claimed_at = ?, lease_until = ?, attempts = attempts + 1
        WHERE id = (
@@ -131,8 +138,8 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
          WHERE (lease_until IS NULL OR lease_until < ?)
            AND status IN ('queued', 'running')
            AND attempts < ?
-         ORDER BY CASE trigger_kind WHEN ? THEN 0 ELSE 1 END,
-                  (SELECT MAX(j2.claimed_at) FROM jobs j2 WHERE j2.user_id = jobs.user_id) IS NOT NULL,
+           AND (CASE WHEN ? = 'user' THEN trigger_kind = 'user' ELSE trigger_kind != 'user' END)
+         ORDER BY (SELECT MAX(j2.claimed_at) FROM jobs j2 WHERE j2.user_id = jobs.user_id) IS NOT NULL,
                   (SELECT MAX(j2.claimed_at) FROM jobs j2 WHERE j2.user_id = jobs.user_id) ASC,
                   id
          LIMIT 1
@@ -141,7 +148,7 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
   );
   // предохранитель цикла: каждая итерация переводит одну job в running или failed
   for (let guard = 0; guard < 1000; guard++) {
-    const claimed = claimStmt.get(nowIso, leaseIso, nowIso, maxAttempts, first) as {
+    const claimed = claimStmt.get(nowIso, leaseIso, nowIso, maxAttempts, queue) as {
       id: number;
       repo_id: number;
       user_id: number | null;
@@ -166,6 +173,17 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
     claimedAt: claimed.claimed_at,
     attempts: claimed.attempts,
   };
+  }
+  return null;
+}
+
+/** ПОРТ hq-parallel (S2/ищейка-3, фантомный claim): последовательный claim
+ *  по порядку очередей — следующая только если предыдущая пуста (map() клеймил
+ *  обе разом и вторая джоба повисала running без исполнителя на весь лиз). */
+export function claimAny(db: Database, order: Array<"user" | "rating">, now = new Date(), leaseMs = 60 * 60_000, opts: ClaimOptions = {}): ClaimedJob | null {
+  for (const queue of order) {
+    const job = claimNext(db, now, leaseMs, { ...opts, queue });
+    if (job !== null) return job;
   }
   return null;
 }
@@ -397,19 +415,36 @@ export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<Sca
 
 // ---------- циклы процесса сервера ----------
 
-/** Воркер-луп: одна job за раз; ошибки не останавливают цикл; лиз продлевается каждые leaseMs/3 (К4). */
-export function startWorkerLoop(deps: WorkerDeps, pollMs = 5000): () => void {
+/**
+ * Воркер-луп: одна job за раз; ошибки не останавливают цикл; лиз продлевается
+ * каждые leaseMs/3 (К4). ПОРТ hq-parallel (S2): очереди user|rating с ролями
+ * процесса — web = сервер + user-воркер (интерактив), rating = планировщик +
+ * rating-воркер (ночная волна), all = dev-обе-в-одном (user вперёд).
+ * Фоновый пересчёт истории крутит только rating-роль (web держит готовность).
+ */
+export function startWorkerLoop(deps: WorkerDeps, queues: { user?: boolean; rating?: boolean }, pollMs = 5000): () => void {
+  const order: Array<"user" | "rating"> = queues.user && queues.rating ? ["user", "rating"] : queues.user ? ["user"] : queues.rating ? ["rating"] : [];
+  if (order.length === 0) return () => {};
   let busy = false;
   const leaseMs = deps.config.scheduler.leaseMs;
   const timer = setInterval(async () => {
     if (busy) return;
-    const job = claimNext(deps.db, new Date(), leaseMs, { maxAttempts: deps.config.queue.maxAttempts });
+    // ПОРТ S2/ищейка-8: весь тик в броне — бросок БД не валит процесс
+    let job: ClaimedJob | null = null;
+    try {
+      job = claimAny(deps.db, order, new Date(), leaseMs, { maxAttempts: deps.config.queue.maxAttempts });
+    } catch (e) {
+      console.error(`[worker] claim failed: ${String((e as Error).message).slice(0, 200)}`);
+      return;
+    }
     if (!job) {
-      // очередь пуста — порция фонового пересчёта истории (круг 2, LOW-7)
-      try {
-        rescoreHistoryBatch(deps.db, { log: (m) => console.log(`[worker] ${m}`) });
-      } catch (e) {
-        console.error(`[worker] history rescore failed: ${String((e as Error).message).slice(0, 200)}`);
+      // обе наши очереди пусты — порция фонового пересчёта истории (LOW-7)
+      if (queues.rating) {
+        try {
+          rescoreHistoryBatch(deps.db, { log: (m) => console.log(`[worker] ${m}`) });
+        } catch (e) {
+          console.error(`[worker] history rescore failed: ${String((e as Error).message).slice(0, 200)}`);
+        }
       }
       return;
     }
@@ -442,16 +477,57 @@ export function startWorkerLoop(deps: WorkerDeps, pollMs = 5000): () => void {
  * дизайн продукта, но оператор должен успеть это увидеть/отключить).
  * Расписание объясняется конфигурацией — раздел в отчёте воркера.
  */
+// ПОРТ hq-parallel (S3): реестр последнего обхода для /api/health —
+// «health зелёный при мёртвой периодике» больше не проходит незаметно
+const schedulerStateRef: { lastNightly: NightlyResult | { ok: false; error: string } | null } = { lastNightly: null };
+
+export function schedulerHealthSnapshot(): { lastNightly: NightlyResult | { ok: false; error: string } | null } {
+  return { lastNightly: schedulerStateRef.lastNightly };
+}
+
+/** ПОРТ hq-parallel (S3): свип осиротевших rh-clone-* (crash/OOM-убитые
+ *  клоны никто не подбирал — tmp тек до ENOSPC); старше часа — мёртвые. */
+export async function sweepOrphanClones(dir: string = tmpdir(), olderThanMs = 60 * 60_000): Promise<number> {
+  let removed = 0;
+  try {
+    const entries = Array.from(new Bun.Glob("rh-clone-*").scanSync({ cwd: dir, onlyFiles: false }));
+    const cutoff = Date.now() - olderThanMs;
+    for (const name of entries) {
+      const full = join(dir, name);
+      try {
+        const st = statSync(full);
+        if (st.mtimeMs < cutoff) {
+          rmSync(full, { recursive: true, force: true });
+          removed++;
+        }
+      } catch {
+        /* гонка с параллельным удалением — не страшно */
+      }
+    }
+  } catch {
+    /* tmp не читается — молча */
+  }
+  if (removed > 0) console.log(`[sweep] удалено осиротевших клонов: ${removed}`);
+  return removed;
+}
+
 export function startScheduler(db: Database, serverClient: () => ScClient | null, config: Config): () => void {
+  let walking = false; // ПОРТ S2: re-entrancy-гард (параллельные обходы дублировали волну)
   const run = async () => {
     // новый клиент (и бюджет) на каждый обход — H2
     const client = serverClient();
     if (!client) return; // без серверного токена каталог не читается
     try {
+      if (walking) {
+        console.warn("[scheduler] предыдущий обход ещё жив — запуск пропущен (ПОРТ S2)");
+        return;
+      }
+      walking = true;
       const result = await nightlyCatalog(db, client, {
         maxPages: config.scan.catalog.maxPages,
         fullRescan: config.scheduler.fullRescan,
       });
+      schedulerStateRef.lastNightly = result;
       if (!result.ok) {
         console.error(`[scheduler] catalog walk failed: ${result.error ?? "unknown"}`);
         return;
@@ -461,12 +537,16 @@ export function startScheduler(db: Database, serverClient: () => ScClient | null
       );
     } catch (e) {
       console.error(`[scheduler] crashed: ${String((e as Error).message).slice(0, 200)}`);
+    } finally {
+      walking = false;
     }
   };
   const first = setTimeout(() => void run(), config.scheduler.startDelayMs);
   const timer = setInterval(() => void run(), config.scheduler.intervalMs);
+  const sweepTimer = setInterval(() => void sweepOrphanClones(), 60 * 60_000); // ПОРТ S3
   return () => {
     clearTimeout(first);
     clearInterval(timer);
+    clearInterval(sweepTimer);
   };
 }

@@ -271,5 +271,17 @@ export function openDb(config: Config): Database {
   }
   db.exec(LATE_INDEXES);
   setMetaValue(db, "schema_version", SCHEMA_VERSION);
+  // ПОРТ 5 (hq-parallel): панель заданий (jobs.error — причина падения)
+  // и избранное (сейвить что угодно строкой слага; права-ряд по факту)
+  ensureColumn(db, "jobs", "error", "TEXT");
+  db.exec(`CREATE TABLE IF NOT EXISTS favorites (
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    org_slug TEXT NOT NULL,
+    repo_slug TEXT NOT NULL,
+    added_at TEXT NOT NULL,
+    last_access TEXT,
+    last_checked_at TEXT,
+    UNIQUE(user_id, org_slug, repo_slug)
+  )`);
   return db;
 }

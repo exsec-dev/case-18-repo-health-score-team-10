@@ -6,7 +6,7 @@
 import { CircleQuestion } from "@gravity-ui/icons";
 import type { MeResponse, MetaResponse } from "./api";
 import { useJson } from "./api";
-import { MePage } from "./MePage";
+import { JobsBell, MePage } from "./MePage";
 import { Rating } from "./Rating";
 import { RepoPage } from "./RepoPage";
 import { navigate, useRoute } from "./router";
@@ -24,7 +24,7 @@ export function App() {
   const section: Section = route.kind === "rating" || route.kind === "repo" ? "rating" : route.kind === "me" ? "me" : null;
 
   return (
-    <Shell section={section} me={meData}>
+    <Shell section={section} me={meData} globalActions={meData?.login ? <JobsBell /> : null}>
       {route.kind === "rating" && <Rating search={route.search} meta={metaData} />}
       {route.kind === "repo" && <RepoPage org={route.org} repo={route.repo} meta={metaData} />}
       {route.kind === "me" && <MePage />}

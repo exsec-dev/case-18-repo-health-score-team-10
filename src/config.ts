@@ -131,6 +131,8 @@ export function apiBaseFromEnv(env: Record<string, string>, name: string, fallba
 
 export interface Config {
   port: number;
+  /** ПОРТ S2: роль процесса — web | rating | all (очереди разделены) */
+  processRole: "web" | "rating" | "all";
   api: ApiConfig;
   dataDir: string;
   sourcecraftToken: string | null;
@@ -221,6 +223,9 @@ export function loadConfig(): Config {
   const mainModel = env.MAIN_MODEL ?? (provider === "yandex" ? "yandexgpt" : "glm-5.3");
   return {
     port: Number(env.PORT) > 0 ? Number(env.PORT) : 8418,
+    processRole: (["all", "web", "rating"] as const).includes(process.env.PROCESS_ROLE as "all" | "web" | "rating")
+      ? (process.env.PROCESS_ROLE as "all" | "web" | "rating")
+      : "all",
     dataDir: env.DATA_DIR ?? "data",
     api: {
       restBase: apiBaseFromEnv(env, "SOURCECRAFT_API_BASE", DEFAULT_API.restBase),

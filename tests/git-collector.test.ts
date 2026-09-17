@@ -228,11 +228,15 @@ describe("extractFacts (локальный bare-клон, без сети)", () 
     git(big, ["init", "-q", "-b", "main"]);
     git(big, ["config", "user.name", "B"]);
     git(big, ["config", "user.email", "b@x.y"]);
+    // Детерминизм (17.09): file-клон 48МБ локально занимает ~11мс —
+    // при pollMs=10 клон успевал ФИНИШИРОВАТЬ до первого poll (race
+    // exit-vs-poll) и тест флейкал. pollMs=1: первый poll на ~1мс,
+    // breach на ~2мс — задолго до завершения любого реального клона
     const chunk = Buffer.alloc(512 * 1024, 7);
-    for (let i = 0; i < 24; i++) writeFileSync(join(big, `blob${i}.bin`), chunk); // ~12МБ
+    for (let i = 0; i < 96; i++) writeFileSync(join(big, `blob${i}.bin`), chunk); // ~48МБ
     git(big, ["add", "-A"]);
     git(big, ["commit", "-q", "-m", "big"]);
-    const out = await cloneBare(`file://${big}`, work, { timeoutMs: 1, maxBytes: 10 ** 12, pollMs: 10 });
+    const out = await cloneBare(`file://${big}`, work, { timeoutMs: 1, maxBytes: 10 ** 12, pollMs: 1 });
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.reason).toBe("timeout");

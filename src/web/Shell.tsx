@@ -16,7 +16,7 @@
 import { ArrowRightFromSquare, ArrowRightToSquare, BookOpen, ChartColumn, CircleInfo, Gear, Moon, Person, Sun } from "@gravity-ui/icons";
 import { ActionBar, AsideHeader, FooterItem, type AsideHeaderItem } from "@gravity-ui/navigation";
 import { ActionTooltip, Avatar, Breadcrumbs, Button, Drawer, Flex, Icon, Text, useThemeValue, useToaster, type IconData } from "@gravity-ui/uikit";
-import { useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { createContext, useContext, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { logout, type MeResponse } from "./api";
 import { HealthCraftMark, PRODUCT_NAME } from "./logo";
@@ -37,7 +37,19 @@ const SECTIONS: SectionDef[] = [
   { id: "me", title: "Личный кабинет", href: "/me", icon: Person },
 ];
 
-export function Shell({ section, me, children }: { section: Section; me: MeResponse | null; children: ReactNode }) {
+const GlobalActionsContext = createContext<ReactNode>(null);
+
+export function Shell({
+  section,
+  me,
+  globalActions,
+  children,
+}: {
+  section: Section;
+  me: MeResponse | null;
+  globalActions?: ReactNode;
+  children: ReactNode;
+}) {
   const isPhone = useMediaQuery("(max-width: 767px)");
   const [compactPref, setCompact] = useRailCompact();
   const compact = isPhone || compactPref;
@@ -81,7 +93,11 @@ export function Shell({ section, me, children }: { section: Section; me: MeRespo
       }}
       menuItems={menuItems}
       renderFooter={({ compact: isCompact }) => <RailFooter me={me} compact={isCompact} />}
-      renderContent={() => <div className="rh-workspace">{children}</div>}
+      renderContent={() => (
+        <GlobalActionsContext.Provider value={globalActions ?? null}>
+          <div className="rh-workspace">{children}</div>
+        </GlobalActionsContext.Provider>
+      )}
       className={compact ? "rh-rail rh-rail_compact" : "rh-rail"}
     />
   );
@@ -376,14 +392,16 @@ interface PageProps {
 }
 
 export function Page({ crumbs, actions, aside, mode = "document", header, footer, children }: PageProps) {
+  const globalActions = useContext(GlobalActionsContext);
   const wide = useMediaQuery("(min-width: 1280px)");
   const [asideOpen, setAsideOpen] = useState(false);
   // fill уже 1280: правая панель — по кнопке, а не второй прокруткой под данными
   const asideInDrawer = mode === "fill" && !wide && aside !== undefined;
 
   const barActions =
-    actions || asideInDrawer ? (
+    actions || globalActions || asideInDrawer ? (
       <Flex gap={2} alignItems="center">
+        {globalActions}
         {actions}
         {asideInDrawer && (
           <ActionTooltip title="Как считается">

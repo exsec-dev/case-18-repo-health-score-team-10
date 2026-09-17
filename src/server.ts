@@ -10,9 +10,9 @@ import { openDb } from "./db";
 import { getMeta, getRepoCardForViewer, listRepos, parseReposQuery } from "./api/repos";
 import { makeAccessCache, resolveAccess, type AccessRepo, type AccessResult } from "./auth/access";
 import { makeAppsecClient } from "./collectors/appsec";
-import { listMyRepos, requestUserScan } from "./api/me";
+import { addFavorite, checkFavoriteAccess, isFavorite, listFavorites, listMyRepos, requestUserScan , myJobs, removeFavorite } from "./api/me";
 import { renderRepoReport } from "./report/markdown";
-import { startScheduler, startWorkerLoop } from "./jobs/scheduler";
+import { enqueueScan, schedulerHealthSnapshot, startScheduler, startWorkerLoop, sweepOrphanClones } from "./jobs/scheduler";
 import {
   clearSessionCookieHeader,
   createSession,
@@ -36,6 +36,8 @@ import { needsRescore, rescoreAll } from "./score/rescore";
 import index from "./web/index.html";
 
 const config = loadConfig();
+const patProbes = new Map<number, number[]>();
+
 const db = openDb(config);
 
 // Ф1.9: оценки устарели (derived_version старее кода) или их нет при
@@ -106,8 +108,27 @@ const server = Bun.serve({
   port: config.port,
   routes: {
     "/api/health": () => {
+      // ПОРТ hq-parallel (S3): health не врёт зелёным на мёртвой периодике —
+      // очередь, провалы за 24ч, последний обход, свежесть данных
       const n = (db.query("SELECT COUNT(*) AS c FROM repos").get() as { c: number }).c;
-      return Response.json({ ok: true, repos: n, llmProvider: config.llm.provider });
+      const queue = {
+        user: (db.query("SELECT COUNT(*) AS c FROM jobs WHERE status IN ('queued','running') AND trigger_kind = 'user'").get() as { c: number }).c,
+        rating: (db.query("SELECT COUNT(*) AS c FROM jobs WHERE status IN ('queued','running') AND trigger_kind != 'user'").get() as { c: number }).c,
+      };
+      const failed24h = (db.query("SELECT COUNT(*) AS c FROM jobs WHERE status = 'failed' AND created_at > ?").get(new Date(Date.now() - 24 * 60 * 60_000).toISOString()) as { c: number }).c;
+      const nightly = schedulerHealthSnapshot().lastNightly;
+      const fresh = db
+        .query("SELECT MAX(s.finished_at) AS f FROM scans s JOIN scores sc ON sc.scan_id = s.id WHERE s.finished_at IS NOT NULL AND sc.total_rating IS NOT NULL")
+        .get() as { f: string | null };
+      return Response.json({
+        ok: true,
+        repos: n,
+        llmProvider: config.llm.provider,
+        queue,
+        failedJobs24h: failed24h,
+        lastNightly: nightly ? { ok: nightly.ok, error: nightly.ok ? undefined : nightly.error, pages: nightly.ok ? nightly.pages : 0, catalogComplete: nightly.ok ? nightly.catalogComplete : false } : null,
+        freshAsOf: fresh.f,
+      });
     },
     "/api/meta": () => Response.json(getMeta(db)),
     "/api/repos": (req) => {
@@ -208,6 +229,19 @@ const server = Bun.serve({
         return Response.json({ error: { code: "unconfigured", message: "APP_SECRET не задан: PAT хранить нельзя" } }, { status: 503 });
       }
       if (req.method === "PUT") {
+        // ПОРТ hq-parallel (S1/security): живая проба токена = оракул
+        // валидности PAT — окно на юзера (10/час), сервис не переборщик
+        const nowPut = Date.now();
+        const window = patProbes.get(user.userId) ?? [];
+        const fresh = window.filter((ts) => nowPut - ts < 60 * 60_000);
+        if (fresh.length >= 10) {
+          return Response.json(
+            { error: { code: "rate_limited", message: "Слишком много проверок токена — попробуйте через час" } },
+            { status: 429 },
+          );
+        }
+        fresh.push(nowPut);
+        patProbes.set(user.userId, fresh);
         const body = (await req.json().catch(() => null)) as { token?: unknown } | null;
         if (typeof body?.token !== "string" || body.token.length < 8) return badQuery("token: ожидается строка PAT");
         // живая проверка GET /user: 401 = токен отклонён платформой
@@ -241,17 +275,72 @@ const server = Bun.serve({
       const user = sessionOf(req);
       if (!user) return unauthorized();
       const client = userClient(user.userId);
-      if (!client) {
-        return Response.json(
-          { error: { code: "no_pat", message: "сначала сохраните PAT SourceCraft (окно на этой странице)" } },
-          { status: 409 },
-        );
-      }
-      const result = await listMyRepos(db, client);
+      // ПОРТ 5: union-список живёт и без PAT (заявки + избранное)
+      const result = await listMyRepos(db, client, user.userId);
       if (!result.ok) {
         return Response.json({ error: { code: "bad_token", message: result.error } }, { status: 400 });
       }
       return Response.json({ username: result.username, entries: result.entries });
+    },
+    // ПОРТ 5: панель заданий — колокольчик/«Мои задания» (диагноз UX «очереди не видно»)
+    "/api/me/jobs": (req) => {
+      const user = sessionOf(req);
+      if (!user) return unauthorized();
+      return Response.json(myJobs(db, user.userId));
+    },
+    "/api/me/favorites": (req) => {
+      const user = sessionOf(req);
+      if (!user) return unauthorized();
+      return Response.json({ entries: listFavorites(db, user.userId) });
+    },
+    "/api/me/favorites/:org/:repo": (req) => {
+      const user = sessionOf(req);
+      if (!user) return unauthorized();
+      const { org, repo } = req.params;
+      if (!/^[a-z0-9_.-]+$/i.test(org ?? "") || !/^[a-z0-9_.-]+$/i.test(repo ?? "")) {
+        return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
+      }
+      if (req.method === "PUT") {
+        addFavorite(db, user.userId, org, repo);
+        return Response.json({ ok: true, favorite: true });
+      }
+      if (req.method === "DELETE") {
+        removeFavorite(db, user.userId, org, repo);
+        return Response.json({ ok: true, favorite: false });
+      }
+      if (req.method === "GET") {
+        return Response.json({ favorite: isFavorite(db, user.userId, org, repo) });
+      }
+      return Response.json({ error: { code: "bad_query", message: "ожидался GET/PUT/DELETE" } }, { status: 405 });
+    },
+    "/api/me/favorites/:org/:repo/check": async (req) => {
+      const user = sessionOf(req);
+      if (!user) return unauthorized();
+      if (req.method !== "POST") {
+        return Response.json({ error: { code: "bad_query", message: "ожидался POST" } }, { status: 405 });
+      }
+      const { org, repo } = req.params;
+      if (!/^[a-z0-9_.-]+$/i.test(org ?? "") || !/^[a-z0-9_.-]+$/i.test(repo ?? "")) {
+        return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
+      }
+      if (!isFavorite(db, user.userId, org, repo)) {
+        return Response.json({ error: { code: "not_favorite", message: "сначала добавьте репозиторий в избранное" } }, { status: 404 });
+      }
+      const pat = config.auth.appSecret ? getPat(db, config.auth.appSecret, user.userId) : null;
+      if (!pat) {
+        return Response.json({ error: { code: "no_pat", message: "для проверки прав нужен PAT SourceCraft" } }, { status: 409 });
+      }
+      const rest = makeScClient({ token: pat, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 8, timeoutMs: config.scan.rest.timeoutMs });
+      const appsec = makeAppsecClient({ token: pat, minIntervalMs: config.scan.rest.appsecMinIntervalMs });
+      const result = await checkFavoriteAccess(db, user.userId, org, repo, {
+        restGet: (path: string) => rest.get(path).then((r) => ({ status: r.status, json: r.json })),
+        appsecLatest: (gitRepo: string) => appsec.get("/v1/scans/latest", { gitRepo }).then((r) => ({ status: r.status })),
+      }, (db2, userId2, org2, repo2) => {
+        const repoRow = db2.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org2, repo2) as { id: number } | null;
+        if (!repoRow) return null;
+        return enqueueScan(db2, repoRow.id, { userId: userId2, triggerKind: "user" });
+      });
+      return Response.json(result);
     },
     "/api/me/repos/:org/:repo/scan": async (req) => {
       const user = sessionOf(req);
@@ -296,8 +385,28 @@ const serverClient = () =>
         timeoutMs: config.scan.rest.timeoutMs,
       })
     : null;
-startWorkerLoop({ db, config, serverClient });
-startScheduler(db, serverClient, config);
+// ПОРТ hq-parallel (S2): роли процесса — web = сервер + user-воркер,
+// rating = планировщик + rating-воркер, all = dev-всё-в-одном (user вперёд)
+const role = config.processRole;
+if (role === "web" || role === "all") {
+  startWorkerLoop({ db, config, serverClient }, { user: true, rating: role === "all" });
+}
+if (role === "rating" || role === "all") {
+  startScheduler(db, serverClient, config);
+  if (role === "rating") {
+    startWorkerLoop({ db, config, serverClient }, { rating: true });
+  }
+}
+console.log(`  role: ${role} (PROCESS_ROLE)`);
+
+// ПОРТ hq-parallel (S3): стартовый свип осиротевших клонов (после crash/OOM
+// их в tmp не подбирал никто) + явные сигналы — лог и упорядоченный выход
+void sweepOrphanClones();
+process.on("SIGTERM", () => {
+  console.log("[signal] SIGTERM — выходим (сирот подберёт стартовый свип при подъёме)");
+  process.exit(0);
+});
+process.on("SIGINT", () => process.exit(0));
 
 console.log(`repo-health слушает http://127.0.0.1:${server.port}`);
 console.log(`  llm: ${config.llm.provider} (main=${config.llm.mainModel}, side=${config.llm.sideModel})`);

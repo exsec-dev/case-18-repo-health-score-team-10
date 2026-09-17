@@ -14,6 +14,7 @@ import { loadConfig, DEFAULT_SCAN } from "../src/config";
 import { openDb } from "../src/db";
 import type { ScClient, ScResponse } from "../src/collectors/http";
 import {
+  claimAny,
   claimNext,
   countRecentUserJobs,
   enqueueScan,
@@ -80,16 +81,16 @@ describe("claim-loop: лизы и приоритеты", () => {
     const j1 = enqueueScan(db, a, { triggerKind: "periodic" });
     enqueueScan(db, b, { triggerKind: "periodic" });
     const now = new Date("2026-09-18T00:00:00Z");
-    const first = claimNext(db, now, 60_000);
+    const first = claimNext(db, now, 60_000, { queue: "rating" });
     expect(first?.slug).toBe("cl/a");
     expect(first?.userId).toBeNull();
     expect(first?.attempts).toBe(1);
     // лиз поставлен и живёт: строка больше не заявляется
-    const second = claimNext(db, new Date(now.getTime() + 30_000), 60_000);
+    const second = claimNext(db, new Date(now.getTime() + 30_000), 60_000, { queue: "rating" });
     expect(second?.slug).toBe("cl/b");
-    expect(claimNext(db, new Date(now.getTime() + 30_000), 60_000)).toBeNull();
+    expect(claimNext(db, new Date(now.getTime() + 30_000), 60_000, { queue: "rating" })).toBeNull();
     // истёкший лиз (упавший воркер) → job снова доступна, попытка №2
-    const revived = claimNext(db, new Date(now.getTime() + 120_000), 60_000);
+    const revived = claimNext(db, new Date(now.getTime() + 120_000), 60_000, { queue: "rating" });
     expect(revived?.id).toBe(j1);
     expect(revived?.attempts).toBe(2);
     // finishJob прежней заявки (claimed_at первой попытки) — no-op (К4)
@@ -105,13 +106,15 @@ describe("claim-loop: лизы и приоритеты", () => {
     enqueueScan(db, c, { triggerKind: "periodic" });
     const userId = (db.query("INSERT INTO users (ya_id, login, created_at, last_login_at) VALUES ('ya-1', 'u', '2026', '2026')").run(), Number((db.query("SELECT id FROM users WHERE ya_id = 'ya-1'").get() as { id: number }).id));
     const userJob = enqueueScan(db, d, { userId, triggerKind: "user" });
-    const claimed = claimNext(db, new Date("2026-09-19T00:00:00Z"));
+    const claimed = claimNext(db, new Date("2026-09-19T00:00:00Z"), 60_000, { queue: "user" });
     expect(claimed?.id).toBe(userJob);
     expect(claimed?.userId).toBe(userId);
+    // ПОРТ S2: изоляция — пока юзерская жива, rating-claim берёт периодику
+    // ПАРКЛЛЕЛЬНО (не ждёт), user-очередь не видит периодику вовсе
+    const parallel = claimNext(db, new Date("2026-09-19T00:00:30Z"), 60_000, { queue: "rating" });
+    expect(parallel?.slug).toBe("cl/c");
     finishJob(db, claimed!.id, claimed!.claimedAt, "done");
-    const periodic = claimNext(db, new Date("2026-09-19T00:01:00Z"));
-    expect(periodic?.slug).toBe("cl/c");
-    finishJob(db, periodic!.id, periodic!.claimedAt, "done");
+    finishJob(db, parallel!.id, parallel!.claimedAt, "done");
     // чистим за собой: дальше каталог-тесты видят чистую таблицу repos
     db.query("DELETE FROM jobs WHERE repo_id IN (SELECT id FROM repos WHERE org_slug = 'cl')").run();
     db.query("DELETE FROM repos WHERE org_slug = 'cl'").run();
@@ -122,7 +125,7 @@ describe("claim-loop: лизы и приоритеты", () => {
     const j1 = enqueueScan(db, e, {});
     const j2 = enqueueScan(db, e, { triggerKind: "user" });
     expect(j1).not.toBe(j2);
-    const c1 = claimNext(db, new Date("2026-09-20T00:00:00Z"))!;
+    const c1 = claimNext(db, new Date("2026-09-20T00:00:00Z"), 60_000, { queue: "rating" })!;
     const other = c1.id === j1 ? j2 : j1;
     finishJob(db, c1.id, c1.claimedAt, "done");
     expect((db.query("SELECT status FROM jobs WHERE id = ?").get(other) as { status: string }).status).toBe("queued");
@@ -157,7 +160,7 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
     expect(enqueueScan(q, r, { userId: u, triggerKind: "user" })).toBe(j1);
     // другой юзер на тот же репо — своя заявка
     expect(enqueueScan(q, r, { userId: user("other"), triggerKind: "user" })).not.toBe(j1);
-    const claimed = claimNext(q, new Date("2026-09-18T00:00:00Z"))!;
+    const claimed = claimNext(q, new Date("2026-09-18T00:00:00Z"), 60_000, { queue: "user" })!;
     expect(claimed.id).toBe(j1);
     expect(enqueueScan(q, r, { userId: u, triggerKind: "user" })).toBe(j1); // running — тоже активна
     finishJob(q, j1, claimed.claimedAt, "done");
@@ -190,15 +193,28 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
     expect(later.status).toBe(202);
   });
 
-  test("чередование: после юзерской заявки берётся периодическая, если она есть", () => {
+  test("ПОРТ S2 изоляция: user-очередь сначала, rating НЕ ждёт юзерских", () => {
     clear();
     const u = user("alt");
     const periodic = [repo("p1"), repo("p2")].map((r) => enqueueScan(q, r, { triggerKind: "periodic" }));
     const users = [repo("u1"), repo("u2"), repo("u3")].map((r) => enqueueScan(q, r, { userId: u, triggerKind: "user" }));
     const order: number[] = [];
     let t = Date.parse("2026-09-18T00:00:00Z");
-    for (let job = claimNext(q, new Date(t)); job; job = claimNext(q, new Date((t += 1000)))) order.push(job.id);
-    expect(order).toEqual([users[0], periodic[0], users[1], periodic[1], users[2]]);
+    for (let job = claimAny(q, ["user", "rating"], new Date(t)); job; job = claimAny(q, ["user", "rating"], new Date((t += 1000)))) order.push(job.id);
+    // ПОРТ S2: общий воркер (all) держит user-приоритет — все юзерские
+    // впереди ночной волны; изоляция = rating не ждёт за юзерскими
+    // (отдельный rating-воркер берёт периодику параллельно)
+    expect(order).toEqual([users[0], users[1], users[2], periodic[0], periodic[1]]);
+    // а ИЗОЛИРОВАННЫЙ user-воркер видит только юзерских:
+    clear();
+    const u2 = user("iso");
+    const p2 = [repo("pp1")].map((r) => enqueueScan(q, r, { triggerKind: "periodic" }));
+    const us2 = [repo("uu1"), repo("uu2")].map((r) => enqueueScan(q, r, { userId: u2, triggerKind: "user" }));
+    const isoOrder: number[] = [];
+    let t2 = Date.parse("2026-09-19T00:00:00Z");
+    for (let job = claimAny(q, ["user"], new Date(t2)); job; job = claimAny(q, ["user"], new Date((t2 += 1000))) ) isoOrder.push(job.id);
+    expect(isoOrder).toEqual(us2);
+    expect(p2[0] !== undefined).toBe(true); // периодика не тронута изолированным воркером
   });
 
   test("attempts: +1 при claim; исчерпавшая попытки job переводится в failed и не заявляется", () => {
@@ -207,12 +223,12 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
     const id = enqueueScan(q, r, { triggerKind: "periodic" });
     let t = Date.parse("2026-09-18T00:00:00Z");
     for (let i = 1; i <= 3; i++) {
-      const job = claimNext(q, new Date(t), 1000, { maxAttempts: 3 });
+      const job = claimAny(q, ["user", "rating"], new Date(t), 1000, { maxAttempts: 3 });
       expect(job?.id).toBe(id);
       expect(job?.attempts).toBe(i);
       t += 5000; // лиз истёк — воркер «упал»
     }
-    expect(claimNext(q, new Date(t), 1000, { maxAttempts: 3 })).toBeNull();
+    expect(claimAny(q, ["user", "rating"], new Date(t), 1000, { maxAttempts: 3 })).toBeNull();
     expect((q.query("SELECT status, attempts FROM jobs WHERE id = ?").get(id) as { status: string; attempts: number })).toEqual({ status: "failed", attempts: 3 });
   });
 
@@ -220,7 +236,7 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
     clear();
     const r = repo("lease");
     const id = enqueueScan(q, r, { triggerKind: "periodic" });
-    const job = claimNext(q, new Date("2026-09-18T00:00:00Z"), 60_000)!;
+    const job = claimAny(q, ["user", "rating"], new Date("2026-09-18T00:00:00Z"), 60_000)!;
     expect(renewLease(q, id, "1999-01-01T00:00:00.000Z", 60_000)).toBe(false);
     expect(renewLease(q, id, job.claimedAt, 10 * 60_000, new Date("2026-09-18T00:00:30Z"))).toBe(true);
     expect((q.query("SELECT lease_until FROM jobs WHERE id = ?").get(id) as { lease_until: string }).lease_until).toBe("2026-09-18T00:10:30.000Z");
@@ -243,6 +259,7 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
     }) as unknown as typeof import("../src/jobs/runner").runScan;
     const stop = startWorkerLoop(
       { db: q, config: { ...base, scheduler: { ...base.scheduler, leaseMs: 150 } }, serverClient: () => null, runScan: slow },
+      { user: true, rating: true },
       5,
     );
     await done;
@@ -267,7 +284,7 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
       const third = await requestUserScan(q, okClient, u, "am", "c", queue);
       expect(third.status).toBe(429);
       expect((third.body["error"] as { code: string }).code).toBe("too_many_active");
-      const job = claimNext(q)!;
+      const job = claimAny(q, ["user", "rating"])!;
       finishJob(q, job.id, job.claimedAt, "done");
       expect((await requestUserScan(q, okClient, u, "am", "c", queue)).status).toBe(202);
     });
@@ -291,7 +308,7 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
       const l1 = enqueueScan(q, repo("l1"), { userId: light, triggerKind: "user" });
       const order: number[] = [];
       let t = Date.parse("2026-09-18T00:00:00Z");
-      for (let job = claimNext(q, new Date(t)); job; job = claimNext(q, new Date((t += 1000)))) order.push(job.id);
+      for (let job = claimAny(q, ["user", "rating"], new Date(t)); job; job = claimAny(q, ["user", "rating"], new Date((t += 1000)))) order.push(job.id);
       expect(order).toEqual([h1, l1, h2]);
     });
 
@@ -299,7 +316,7 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
       clear();
       const orphan = q.query("INSERT INTO jobs (repo_id, status, trigger_kind, created_at) VALUES (999999, 'queued', 'periodic', ?)").run(new Date().toISOString());
       const next = enqueueScan(q, repo("after-orphan"), { triggerKind: "periodic" });
-      const job = claimNext(q)!;
+      const job = claimAny(q, ["user", "rating"])!;
       expect(job.id).toBe(next);
       expect(q.query("SELECT status, attempts FROM jobs WHERE id = ?").get(Number(orphan.lastInsertRowid))).toEqual({ status: "failed", attempts: 1 });
     });
@@ -320,13 +337,13 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
         return null;
       };
       const userJob = enqueueScan(q, repo("np-user"), { userId: u, triggerKind: "user" });
-      const claimedUser = claimNext(q)!;
+      const claimedUser = claimNext(q, new Date(), 60_000, { queue: "user" })!;
       expect(claimedUser.id).toBe(userJob);
       expect(await processJob({ db: q, config, serverClient, runScan: fakeScan, getPat: () => null }, claimedUser)).toBe("no-pat");
       expect(q.query("SELECT status FROM jobs WHERE id = ?").get(userJob)).toEqual({ status: "failed" });
       expect({ scans, serverClients }).toEqual({ scans: 0, serverClients: 0 });
       enqueueScan(q, repo("np-periodic"), { triggerKind: "periodic" });
-      await processJob({ db: q, config, serverClient, runScan: fakeScan, getPat: () => null }, claimNext(q)!);
+      await processJob({ db: q, config, serverClient, runScan: fakeScan, getPat: () => null }, claimNext(q, new Date(), 60_000, { queue: "rating" })!);
       expect({ scans, serverClients }).toEqual({ scans: 1, serverClients: 1 });
     });
   });
