@@ -540,7 +540,7 @@ describe("единая карточка: матрица доступа зрит�
     for (const leak of ["severity_counts", "runs_count", "fix-red-runs", "appsec-critical", "Полный Score (с CI и Security): 49"]) {
       expect(anonMd).not.toContain(leak);
     }
-    expect(anonMd).toContain("войдите и добавьте PAT");
+    expect(anonMd).toContain("войдите и добавьте токен доступа");
     const fullMd = renderRepoReport(view({ cicd: "granted", appsec: "granted", repo: "granted" })!);
     expect(fullMd).toContain("Полный Score (с CI и Security): 49 из 100");
     expect(fullMd).toContain("runs_count");

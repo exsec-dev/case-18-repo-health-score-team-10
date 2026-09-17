@@ -74,6 +74,11 @@ export function scoreTheme(value: number | null | undefined): "success" | "warni
   return "danger";
 }
 
+/** Первая буква заглавная — для меток (Label): у платформы они в регистре предложения. */
+export function sentence(text: string): string {
+  return text.length === 0 ? text : text[0]!.toUpperCase() + text.slice(1);
+}
+
 /** Кто запустил скан — словом, а не кодом очереди. */
 export function scanTriggerText(trigger: string): string {
   switch (trigger) {
@@ -105,9 +110,9 @@ export const SECURITY_PUBLIC_NOTE =
  * ChannelAccess без "granted". Строка — одна для страницы и MD-отчёта.
  */
 export const ACCESS_LOCK_TEXT: Record<"no-pat" | "denied" | "pat-expired" | "check-failed", string> = {
-  "no-pat": "Данные видны участникам репозитория: войдите и добавьте PAT SourceCraft в «Личном кабинете».",
-  denied: "Ваш PAT не дает доступа к этим данным репозитория.",
-  "pat-expired": "SourceCraft отклонил ваш PAT — обновите PAT в «Личном кабинете».",
+  "no-pat": "Данные видны участникам репозитория: войдите и добавьте токен доступа SourceCraft в «Личном кабинете».",
+  denied: "Ваш токен доступа не дает доступа к этим данным репозитория.",
+  "pat-expired": "SourceCraft отклонил ваш токен доступа — обновите его в «Личном кабинете».",
   "check-failed": "Не удалось проверить доступ к этим данным — попробуйте открыть карточку позже.",
 };
 

@@ -9,6 +9,7 @@
 // содержимое во вкладках, итоговая оценка — в правой панели.
 import { ArrowDownToLine, ArrowUpRightFromSquare, ChevronDown, Clock, CodeFork, FileText, Heart, Lock, LogoMarkdown, SquareListUl } from "@gravity-ui/icons";
 import {
+  ActionTooltip,
   Alert,
   ArrowToggle,
   Button,
@@ -50,6 +51,7 @@ import {
   scanStatusText,
   scanTriggerText,
   scoreTheme,
+  sentence,
 } from "./format";
 import { Page, type Crumb } from "./Shell";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, SkeletonRows } from "./ui";
@@ -215,29 +217,30 @@ function Header({ card }: { card: Card }) {
             <Text variant="header-1" as="h1" ellipsis>
               {r.org} / {r.repo}
             </Text>
-            <Button
-              view="flat-secondary"
-              size="s"
-              href={r.webUrl}
-              target="_blank"
-              rel="noreferrer"
-              aria-label="Открыть репозиторий на sourcecraft.dev"
-              title="Открыть на sourcecraft.dev"
-            >
-              <Icon data={ArrowUpRightFromSquare} size={14} />
-            </Button>
+            <ActionTooltip title="Открыть на sourcecraft.dev">
+              <Button
+                view="flat-secondary"
+                size="s"
+                href={r.webUrl}
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Открыть репозиторий на sourcecraft.dev"
+              >
+                <Icon data={ArrowUpRightFromSquare} size={14} />
+              </Button>
+            </ActionTooltip>
           </Flex>
           <Meta>
-            <MetaItem title="язык">
+            <MetaItem title="Язык">
               <LanguageName name={r.language} color={r.languageColor} />
             </MetaItem>
-            <MetaItem icon={Heart} title="лайки">
+            <MetaItem icon={Heart} title="Лайки">
               {fmtNumber(r.likes)}
             </MetaItem>
-            <MetaItem icon={CodeFork} title="форки">
+            <MetaItem icon={CodeFork} title="Форки">
               {fmtNumber(r.forks)}
             </MetaItem>
-            <MetaItem icon={Clock} title="последняя активность">
+            <MetaItem icon={Clock} title="Последняя активность">
               активность {fmtDate(r.lastActivityAt)}
             </MetaItem>
           </Meta>
@@ -342,7 +345,7 @@ function ScoreAside({ card, meta }: { card: Card; meta: MetaResponse | null }) {
             <DefinitionList.Item name="Завершен">{fmtDateTime(scan.finishedAt ?? scan.startedAt)}</DefinitionList.Item>
             <DefinitionList.Item name="Статус">
               <Label theme={scan.status === "ok" ? "success" : scan.status === "bad" ? "danger" : "warning"} size="xs">
-                {scanStatusText(scan.status)}
+                {sentence(scanStatusText(scan.status))}
               </Label>
             </DefinitionList.Item>
             <DefinitionList.Item name="Запуск">{scanTriggerText(scan.trigger)}</DefinitionList.Item>
@@ -463,7 +466,7 @@ function CategoryRow({ categoryKey: key, title, cat, contribution, card }: { cat
       <span className="rh-category__tags">
         {cat.stale && (
           <Label theme="warning" size="xs">
-            факты из истории
+            Факты из истории
           </Label>
         )}
       </span>
@@ -582,12 +585,12 @@ function RecommendationRow({ rec, evidence }: { rec: Recommendation; evidence: M
           <Text color="secondary">#{rec.priority}</Text>
           <Text variant="subheader-2">{rec.problem}</Text>
           {rec.deltaScore !== null ? (
-            <Label theme="success" size="xs" title="прирост итогового Score, если выполнить только эту рекомендацию">
+            <Label theme="success" size="xs" title="Прирост итогового Score, если выполнить только эту рекомендацию">
               {fmtDelta(rec.deltaScore)} к Score
             </Label>
           ) : rec.opensCategory ? (
-            <Label theme="info" size="xs" title="категория без данных станет считаемой">
-              откроет категорию
+            <Label theme="info" size="xs" title="Категория без данных станет считаемой">
+              Откроет категорию
             </Label>
           ) : null}
         </Flex>
@@ -630,7 +633,7 @@ function FactProof({ factKey, fact }: { factKey: string; fact: Evidence | undefi
       <Flex gap={2} wrap alignItems="center">
         <Text variant="subheader-1">{fact.key}</Text>
         <Label theme={fact.status === "ok" ? "success" : fact.status === "bad" ? "warning" : "unknown"} size="xs">
-          {factStatusText(fact.status)}
+          {sentence(factStatusText(fact.status))}
         </Label>
       </Flex>
       <Text variant="body-short" color="secondary">

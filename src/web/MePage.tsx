@@ -50,7 +50,7 @@ export function MePage() {
         description={
           <>
             Вы вошли как <Text variant="code-inline-1">{data.login}</Text> (Я ID). Вход — это UX-слой; права на данные
-            дает отдельный PAT SourceCraft, как на любом git-хостинге.
+            дает отдельный токен доступа SourceCraft, как на любом git-хостинге.
           </>
         }
       />
@@ -188,7 +188,7 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
         <Flex direction="column" gap={3}>
           <Flex gap={2} alignItems="center" wrap>
             <Label theme="success" size="xs">
-              сохранен
+              Сохранен
             </Label>
             <Text variant="body-short" color="secondary">
               проверен {fmtDateTime(checkedAt)}
@@ -200,7 +200,7 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
             Замена и удаление — сразу действуют на новые сканы.
           </Text>
           {replacing ? (
-            tokenForm("Новый PAT", "Проверить и заменить")
+            tokenForm("Новый токен доступа", "Проверить и заменить")
           ) : (
             <Flex gap={2}>
               <Button view="normal" size="m" onClick={() => setReplacing(true)}>
@@ -216,7 +216,7 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
         <Flex direction="column" gap={3}>
           <Flex gap={2} alignItems="center" wrap>
             <Label theme="warning" size="xs">
-              не задан
+              Не задан
             </Label>
             <Text variant="body-short" color="secondary">
               свои репозитории недоступны
@@ -227,7 +227,7 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
             раз — скопируйте его сразу. Перед сохранением мы проверяем его живым запросом GET /user: неверный токен
             платформа отклонит, и он не сохранится.
           </Text>
-          {tokenForm("SourceCraft PAT", "Проверить и сохранить")}
+          {tokenForm("Токен доступа SourceCraft", "Проверить и сохранить")}
         </Flex>
       )}
       {error && <Alert theme="danger" view="outlined" size="s" title="Токен не сохранен" message={error} />}
@@ -424,12 +424,12 @@ function RepoRow({ entry, job, onScan }: { entry: MyReposResponse["entries"][num
           </Flex>
         ) : (
           <Label theme="unknown" size="xs">
-            еще не анализировали
+            Еще не анализировали
           </Label>
         )}
 
         <Button size="m" view={scored ? "normal" : "action"} onClick={onScan} disabled={job !== null}>
-          {scored ? "Обновить анализ" : "Анализировать"}
+          {scored ? "Обновить анализ" : "Запустить анализ"}
         </Button>
       </Flex>
     </li>

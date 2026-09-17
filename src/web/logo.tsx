@@ -1,8 +1,3 @@
-// logo.tsx — знак HealthCraft. Отсылка к SourceCraft без копии их знака:
-// тот же красный и тот же наклон штрихов (~12°, как у их скобок и зигзага),
-// но своя форма — наклонная плитка, пересечённая белой линией пульса
-// (здоровье репозитория). Цвет знака — фирменный ассет логотипа, не токен
-// интерфейса: в палитру UI он не попадает.
 import type { SVGProps } from "react";
 
 export const PRODUCT_NAME = "HealthCraft";
@@ -11,7 +6,12 @@ const MARK_RED = "#ff3333";
 
 export function HealthCraftMark(props: SVGProps<SVGSVGElement>) {
   return (
-    <svg viewBox="0 0 28 28" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
+    <svg
+      viewBox="0 0 28 28"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      {...props}
+    >
       {/* плитка с наклоном 6/28 — угол штрихов знака SourceCraft */}
       <path d="M6 1h21.5l-5.8 26H.5z" fill={MARK_RED} />
       {/* пульс: плато — пик вверх — провал — плато, штрихи того же наклона */}

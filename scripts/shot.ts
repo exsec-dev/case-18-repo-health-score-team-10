@@ -172,8 +172,8 @@ await shoot("repo", `${base}/repo/${encodeURIComponent(org)}/${encodeURIComponen
   "категории": "document.body.innerText.includes('Категории') ? 1 : 0",
   "рекомендации": "document.body.innerText.includes('Рекомендации') ? 1 : 0",
   "объяснение Security": "document.body.innerText.includes('исключена с перенормировкой') ? 1 : 0",
-  // «Отчёт» — меню форматов (MD, PDF): ссылка на report.md рендерится при открытии
-  "кнопка отчёта": "[...document.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'Отчёт').length",
+  // «Отчет» — меню форматов (MD, PDF): ссылка на report.md рендерится при открытии
+  "кнопка отчёта": "[...document.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'Отчет').length",
 });
 
 // ---------- итог ----------

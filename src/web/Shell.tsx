@@ -254,20 +254,26 @@ function RailFooter({ me, compact }: { me: MeResponse | null; compact: boolean }
 
 /** Вход — главный акцент rail, как у платформы, но action (белая в тёмной теме). */
 function LoginButton({ compact }: { compact: boolean }) {
-  return (
+  const button = (
     <Button
       view="action"
       size="l"
       width={compact ? "auto" : "max"}
       href="/auth/ya"
       aria-label="Войти через Я ID"
-      title={compact ? "Войти через Я ID" : undefined}
       // узкий rail: квадрат 36×36 — ширина не зависит от колонки футера
       style={compact ? { width: 36, flexShrink: 0 } : undefined}
     >
       <Icon data={ArrowRightToSquare} size={16} />
       {!compact && "Войти"}
     </Button>
+  );
+  return compact ? (
+    <ActionTooltip title="Войти через Я ID" placement="right">
+      {button}
+    </ActionTooltip>
+  ) : (
+    button
   );
 }
 
@@ -305,8 +311,8 @@ function switchTheme(setTheme: (next: AppTheme) => void, next: AppTheme): void {
 function RailUser({ me, compact }: { me: MeResponse; compact: boolean }) {
   const login = me.login!;
   const name = displayName(me);
-  return (
-    <div className="rh-rail-user" title={compact ? (name === login ? login : `${name} (${login})`) : undefined}>
+  const block = (
+    <div className="rh-rail-user">
       <UserAvatar me={me} size="m" />
       <Flex direction="column" className="rh-rail-user__text">
         <Text variant="subheader-2" ellipsis>
@@ -319,6 +325,13 @@ function RailUser({ me, compact }: { me: MeResponse; compact: boolean }) {
         )}
       </Flex>
     </div>
+  );
+  return compact ? (
+    <ActionTooltip title={name} description={name !== login ? login : undefined} placement="right">
+      {block}
+    </ActionTooltip>
+  ) : (
+    block
   );
 }
 
@@ -379,9 +392,11 @@ export function Page({ crumbs, actions, aside, mode = "document", header, footer
       <Flex gap={2} alignItems="center">
         {actions}
         {asideInDrawer && (
-          <Button view="flat" size="m" onClick={() => setAsideOpen(true)} aria-label="Как считается" title="Как считается">
-            <Icon data={CircleInfo} size={16} />
-          </Button>
+          <ActionTooltip title="Как считается">
+            <Button view="flat" size="m" onClick={() => setAsideOpen(true)} aria-label="Как считается">
+              <Icon data={CircleInfo} size={16} />
+            </Button>
+          </ActionTooltip>
         )}
       </Flex>
     ) : null;

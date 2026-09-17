@@ -6,6 +6,7 @@
 // тулбар одной строкой (size m), таблица, методика в правой панели.
 import { BarsAscendingAlignLeft, BarsDescendingAlignLeft, Magnifier, SquareListUl } from "@gravity-ui/icons";
 import {
+  ActionTooltip,
   Alert,
   Button,
   DefinitionList,
@@ -116,7 +117,8 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
   const toolbar = (
     <Flex direction="column" gap={3} style={{ marginBottom: "var(--g-spacing-3)" }}>
       <Flex gap={2} wrap alignItems="center">
-        <div style={{ flex: "1 1 200px", minWidth: 200 }}>
+        {/* flex-обертка: блочная давала полю 27.3px против 28px у соседних Select */}
+        <div style={{ flex: "1 1 200px", minWidth: 200, display: "flex" }}>
           <TextInput
             size="m"
             placeholder="org, repo или название"
@@ -148,16 +150,17 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
             options={SORT_OPTIONS}
             onUpdate={(v) => setParams({ sort: v[0] ?? "score" })}
           />
-          <Button
-            view="outlined"
-            size="m"
-            pin="brick-round"
-            onClick={() => setParams({ order: order === "desc" ? "asc" : "desc" })}
-            aria-label={order === "desc" ? "По убыванию — переключить на возрастание" : "По возрастанию — переключить на убывание"}
-            title={order === "desc" ? "По убыванию" : "По возрастанию"}
-          >
-            <Icon data={order === "desc" ? BarsDescendingAlignLeft : BarsAscendingAlignLeft} size={16} />
-          </Button>
+          <ActionTooltip title={order === "desc" ? "По убыванию" : "По возрастанию"}>
+            <Button
+              view="outlined"
+              size="m"
+              pin="brick-round"
+              onClick={() => setParams({ order: order === "desc" ? "asc" : "desc" })}
+              aria-label={order === "desc" ? "По убыванию — переключить на возрастание" : "По возрастанию — переключить на убывание"}
+            >
+              <Icon data={order === "desc" ? BarsDescendingAlignLeft : BarsAscendingAlignLeft} size={16} />
+            </Button>
+          </ActionTooltip>
         </Flex>
       </Flex>
 
@@ -227,7 +230,19 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
         ) : isPhone ? (
           <PhoneList items={data.items} rankOffset={rankOffset} />
         ) : (
-          <Table className="rh-table-fill" data={data.items} columns={columns} width="max" verticalAlign="middle" />
+          <Table
+            className="rh-table-fill"
+            data={data.items}
+            columns={columns}
+            width="max"
+            verticalAlign="middle"
+            // строка целиком ведет в карточку, как строки списков SourceCraft;
+            // клик по самой ссылке (и Ctrl/⌘-клик) обрабатывает ссылка
+            onRowClick={(item, _index, e) => {
+              if ((e.target as HTMLElement).closest("a")) return;
+              navigate(repoHref(item.org, item.repo));
+            }}
+          />
         ))}
 
       {data && view === "unscored" && <UnscoredTable items={data.nullItems} meta={meta} hasFilters={hasFilters} />}
@@ -438,8 +453,8 @@ function ScoreCell({ item }: { item: Item }) {
     <Flex direction="column" gap={1} alignItems="flex-end">
       <Flex gap={2} alignItems="center">
         {item.staleFacts && (
-          <Label theme="warning" size="xs" title="часть фактов взята из истории при сбое канала">
-            из истории
+          <Label theme="warning" size="xs" title="Часть фактов взята из истории при сбое канала">
+            Из истории
           </Label>
         )}
         <Text variant="subheader-2">{fmtScore(item.score)}</Text>
