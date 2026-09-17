@@ -12,7 +12,7 @@ import { makeAccessCache, resolveAccess, type AccessRepo, type AccessResult } fr
 import { makeAppsecClient } from "./collectors/appsec";
 import { listMyRepos, requestUserScan } from "./api/me";
 import { renderRepoReport } from "./report/markdown";
-import { startScheduler, startWorkerLoop } from "./jobs/scheduler";
+import { schedulerHealthSnapshot, startScheduler, startWorkerLoop, sweepOrphanClones } from "./jobs/scheduler";
 import {
   clearSessionCookieHeader,
   createSession,
@@ -106,8 +106,27 @@ const server = Bun.serve({
   port: config.port,
   routes: {
     "/api/health": () => {
+      // ПОРТ hq-parallel (S3): health не врёт зелёным на мёртвой периодике —
+      // очередь, провалы за 24ч, последний обход, свежесть данных
       const n = (db.query("SELECT COUNT(*) AS c FROM repos").get() as { c: number }).c;
-      return Response.json({ ok: true, repos: n, llmProvider: config.llm.provider });
+      const queue = {
+        user: (db.query("SELECT COUNT(*) AS c FROM jobs WHERE status IN ('queued','running') AND trigger_kind = 'user'").get() as { c: number }).c,
+        rating: (db.query("SELECT COUNT(*) AS c FROM jobs WHERE status IN ('queued','running') AND trigger_kind != 'user'").get() as { c: number }).c,
+      };
+      const failed24h = (db.query("SELECT COUNT(*) AS c FROM jobs WHERE status = 'failed' AND created_at > ?").get(new Date(Date.now() - 24 * 60 * 60_000).toISOString()) as { c: number }).c;
+      const nightly = schedulerHealthSnapshot().lastNightly;
+      const fresh = db
+        .query("SELECT MAX(s.finished_at) AS f FROM scans s JOIN scores sc ON sc.scan_id = s.id WHERE s.finished_at IS NOT NULL AND sc.total_rating IS NOT NULL")
+        .get() as { f: string | null };
+      return Response.json({
+        ok: true,
+        repos: n,
+        llmProvider: config.llm.provider,
+        queue,
+        failedJobs24h: failed24h,
+        lastNightly: nightly ? { ok: nightly.ok, error: nightly.ok ? undefined : nightly.error, pages: nightly.ok ? nightly.pages : 0, catalogComplete: nightly.ok ? nightly.catalogComplete : false } : null,
+        freshAsOf: fresh.f,
+      });
     },
     "/api/meta": () => Response.json(getMeta(db)),
     "/api/repos": (req) => {
@@ -297,6 +316,15 @@ const serverClient = () =>
     : null;
 startWorkerLoop({ db, config, serverClient });
 startScheduler(db, serverClient, config);
+
+// ПОРТ hq-parallel (S3): стартовый свип осиротевших клонов (после crash/OOM
+// их в tmp не подбирал никто) + явные сигналы — лог и упорядоченный выход
+void sweepOrphanClones();
+process.on("SIGTERM", () => {
+  console.log("[signal] SIGTERM — выходим (сирот подберёт стартовый свип при подъёме)");
+  process.exit(0);
+});
+process.on("SIGINT", () => process.exit(0));
 
 console.log(`repo-health слушает http://127.0.0.1:${server.port}`);
 console.log(`  llm: ${config.llm.provider} (main=${config.llm.mainModel}, side=${config.llm.sideModel})`);

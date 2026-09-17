@@ -14,6 +14,9 @@
 // серверный REST-клиент — фабрика: новый бюджет на каждую задачу и на
 // каждый ночной обход (H2).
 import type { Database } from "bun:sqlite";
+import { rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { enumerateCatalog, type CatalogResult } from "../collectors/catalog";
 import type { ScClient } from "../collectors/http";
 import { upsertRepo, runScan, scanCloneLimitsOf, type ScanResult } from "./runner";
@@ -440,16 +443,57 @@ export function startWorkerLoop(deps: WorkerDeps, pollMs = 5000): () => void {
  * дизайн продукта, но оператор должен успеть это увидеть/отключить).
  * Расписание объясняется конфигурацией — раздел в отчёте воркера.
  */
+// ПОРТ hq-parallel (S3): реестр последнего обхода для /api/health —
+// «health зелёный при мёртвой периодике» больше не проходит незаметно
+const schedulerStateRef: { lastNightly: NightlyResult | { ok: false; error: string } | null } = { lastNightly: null };
+
+export function schedulerHealthSnapshot(): { lastNightly: NightlyResult | { ok: false; error: string } | null } {
+  return { lastNightly: schedulerStateRef.lastNightly };
+}
+
+/** ПОРТ hq-parallel (S3): свип осиротевших rh-clone-* (crash/OOM-убитые
+ *  клоны никто не подбирал — tmp тек до ENOSPC); старше часа — мёртвые. */
+export async function sweepOrphanClones(dir: string = tmpdir(), olderThanMs = 60 * 60_000): Promise<number> {
+  let removed = 0;
+  try {
+    const entries = Array.from(new Bun.Glob("rh-clone-*").scanSync({ cwd: dir, onlyFiles: false }));
+    const cutoff = Date.now() - olderThanMs;
+    for (const name of entries) {
+      const full = join(dir, name);
+      try {
+        const st = statSync(full);
+        if (st.mtimeMs < cutoff) {
+          rmSync(full, { recursive: true, force: true });
+          removed++;
+        }
+      } catch {
+        /* гонка с параллельным удалением — не страшно */
+      }
+    }
+  } catch {
+    /* tmp не читается — молча */
+  }
+  if (removed > 0) console.log(`[sweep] удалено осиротевших клонов: ${removed}`);
+  return removed;
+}
+
 export function startScheduler(db: Database, serverClient: () => ScClient | null, config: Config): () => void {
+  let walking = false; // ПОРТ S2: re-entrancy-гард (параллельные обходы дублировали волну)
   const run = async () => {
     // новый клиент (и бюджет) на каждый обход — H2
     const client = serverClient();
     if (!client) return; // без серверного токена каталог не читается
     try {
+      if (walking) {
+        console.warn("[scheduler] предыдущий обход ещё жив — запуск пропущен (ПОРТ S2)");
+        return;
+      }
+      walking = true;
       const result = await nightlyCatalog(db, client, {
         maxPages: config.scan.catalog.maxPages,
         fullRescan: config.scheduler.fullRescan,
       });
+      schedulerStateRef.lastNightly = result;
       if (!result.ok) {
         console.error(`[scheduler] catalog walk failed: ${result.error ?? "unknown"}`);
         return;
@@ -459,12 +503,16 @@ export function startScheduler(db: Database, serverClient: () => ScClient | null
       );
     } catch (e) {
       console.error(`[scheduler] crashed: ${String((e as Error).message).slice(0, 200)}`);
+    } finally {
+      walking = false;
     }
   };
   const first = setTimeout(() => void run(), config.scheduler.startDelayMs);
   const timer = setInterval(() => void run(), config.scheduler.intervalMs);
+  const sweepTimer = setInterval(() => void sweepOrphanClones(), 60 * 60_000); // ПОРТ S3
   return () => {
     clearTimeout(first);
     clearInterval(timer);
+    clearInterval(sweepTimer);
   };
 }
