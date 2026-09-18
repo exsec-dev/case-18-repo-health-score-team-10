@@ -263,14 +263,14 @@ describe("extractFacts (локальный bare-клон, без сети)", () 
       maxBytes: 1024 * 1024,
       pollMs: 10,
     });
-    rmSync(bigDisk, { recursive: true, force: true });
+    rmSync(bigDisk, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     expect(out.ok).toBe(false);
     if (out.ok) return;
     expect(out.reason).toBe("disk");
-  });
+  }, 15_000);
 
   afterAll(() => {
-    rmSync(work, { recursive: true, force: true });
+    rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
 });
 
