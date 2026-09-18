@@ -23,8 +23,14 @@ import { MODEL_VERSION } from "./model";
 import { recommend, writeRecommendations } from "./recommend";
 import { getMetaValue, setMetaValue } from "../db";
 
-/** Версия производных данных (scores/recommendations/rating_eligible) при неизменной MODEL_VERSION. */
-export const DERIVED_VERSION = 2;
+/**
+ * Версия производных данных (scores/recommendations/rating_eligible) при
+ * неизменной MODEL_VERSION.
+ * 3 (В4.2a, Ф2.3): `code_empty` больше не выводится из `loc === 0` — все
+ * сохранённые оценки, занулённые ложным «проекта нет», обязаны пересчитаться
+ * при первом старте нового кода.
+ */
+export const DERIVED_VERSION = 3;
 
 /** Порция фонового пересчёта истории за тик воркера (≈25 мс на скан). */
 export const HISTORY_RESCORE_BATCH = 20;

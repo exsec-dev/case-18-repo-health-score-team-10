@@ -337,10 +337,15 @@ export function computeFromFacts(ok: Map<string, unknown>, input: ComputeInput, 
     if (staleCats.has(k)) cat.stale = true;
   }
 
-  // без-кодовое репо (Q&A №13): ok-факты говорят file_count=0/loc=0 —
-  // «проекта нет» = Score 0 как данные, не NULL и не no-data
-  const tree = ok.get("tree.stats") as { file_count?: unknown; loc?: unknown } | undefined | null;
-  const codeEmpty = tree !== undefined && tree !== null && ((typeof tree.file_count === "number" && tree.file_count === 0) || (typeof tree.loc === "number" && tree.loc === 0));
+  // без-кодовое репо (Q&A №13): ok-факт говорит file_count=0 — «проекта нет»
+  // = Score 0 как данные, не NULL и не no-data.
+  // Ф2.3 (M5, В4.2a — явное исключение из «модель не трогать»): признаком
+  // был ещё и `loc === 0`, а нулевой LOC при живом дереве штатно бывает у
+  // обрыва `git cat-file` (теперь loc = null), у репо из одних бинарных
+  // файлов и у файлов больше textCap. Жёсткий Score 0 по такому признаку —
+  // нарушение закона 2 (отсутствие данных не ухудшает Score).
+  const tree = ok.get("tree.stats") as { file_count?: unknown } | undefined | null;
+  const codeEmpty = tree !== undefined && tree !== null && typeof tree.file_count === "number" && tree.file_count === 0;
 
   const allKeys = Object.keys(categories) as CategoryKey[];
   const noData: string[] = [];

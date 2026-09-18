@@ -60,6 +60,8 @@ export type CatFileSpawn = (cloneDir: string) => CatFileProc;
 export interface CloneSeams {
   /** подмена запуска git (по умолчанию `Bun.spawn`) */
   spawnGit?: SpawnGit;
+  /** подмена версии git (Ф2.4): null = не определилась */
+  gitVersion?: [number, number, number] | null;
   /** вызывается с каталогом успешного клона ДО того, как его увидит вызывающий */
   onCloneDir?: (dir: string) => void | Promise<void>;
 }
@@ -149,6 +151,77 @@ export function scrubCredentials(text: string): string {
   return text.replace(/(https?:\/\/)[^@\/\s]+@/g, "$1***@");
 }
 
+export type CredentialSplit =
+  | { kind: "none"; url: string }
+  | { kind: "header"; url: string; authorization: string }
+  | { kind: "refused"; detail: string };
+
+/**
+ * Ф2.4 + LOW-9: разбор клон-URL с кредами. Креды уезжают из URL в заголовок
+ * `Authorization` (в argv их видно всему хосту через /proc/<pid>/cmdline).
+ * Разрешены только `https://` и — ради герметичного теста — `http://` на
+ * loopback (`localhost`/`127.0.0.1`); любой другой внешний `http://` с
+ * кредами ОТКАЗЫВАЕТСЯ: отправить PAT открытым текстом на чужой хост хуже,
+ * чем не собрать канал. Разрешение на произвольный внешний http не
+ * расширяется (план: «Не ваши, но рядом»).
+ */
+export function splitCredentialUrl(raw: string): CredentialSplit {
+  let u: URL;
+  try {
+    u = new URL(raw);
+  } catch {
+    return { kind: "none", url: raw };
+  }
+  if (u.username === "" && u.password === "") return { kind: "none", url: raw };
+  const loopback = u.hostname === "localhost" || u.hostname === "127.0.0.1";
+  if (u.protocol !== "https:" && !(u.protocol === "http:" && loopback)) {
+    return { kind: "refused", detail: `refusing to send credentials over ${u.protocol}//${u.hostname} (https, or http on loopback, only)` };
+  }
+  const user = decodeURIComponent(u.username);
+  const pass = decodeURIComponent(u.password);
+  u.username = "";
+  u.password = "";
+  return {
+    kind: "header",
+    url: u.toString(),
+    authorization: `Authorization: Basic ${Buffer.from(`${user}:${pass}`).toString("base64")}`,
+  };
+}
+
+/** `git version 2.43.0.windows.1` → [2, 43, 0]; неразбираемое — null. */
+export function parseGitVersion(text: string): [number, number, number] | null {
+  const m = text.match(/git version (\d+)\.(\d+)(?:\.(\d+))?/);
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3] ?? 0)];
+}
+
+/**
+ * `http.extraHeader` через `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_*` появился в
+ * git 2.31 (до неё переменные игнорируются, и клон приватного репо ушёл бы
+ * без авторизации — либо, если бы мы вернули креды в URL, с PAT в argv).
+ * Версия читается один раз на процесс.
+ */
+export const MIN_GIT_VERSION: [number, number] = [2, 31];
+let gitVersionCache: Promise<[number, number, number] | null> | null = null;
+
+export function __resetGitVersionCache(): void {
+  gitVersionCache = null;
+}
+
+export async function gitVersion(): Promise<[number, number, number] | null> {
+  if (gitVersionCache === null) {
+    gitVersionCache = execGit(["--version"], { timeoutMs: 10_000 })
+      .then((r) => parseGitVersion(r.stdout))
+      .catch(() => null);
+  }
+  return gitVersionCache;
+}
+
+export function versionAtLeast(v: [number, number, number] | null, min: [number, number]): boolean {
+  if (v === null) return false;
+  return v[0] > min[0] || (v[0] === min[0] && v[1] >= min[1]);
+}
+
 export async function cloneBare(
   urlWithCreds: string,
   tmpDir: string = tmpdir(),
@@ -161,14 +234,34 @@ export async function cloneBare(
   // /proc/<pid>/cmdline на всё время клона) — из URL в http-заголовок через
   // env-конфиг git (GIT_CONFIG_*): environ читается только владельцем.
   // Живой смоук паттерна: приватный клон 2.1МБ/1.9с (hq-parallel 738841e)
-  let cloneUrl = urlWithCreds;
+  const split = splitCredentialUrl(urlWithCreds);
+  if (split.kind === "refused") {
+    await cleanupFailedClone(dir);
+    return { ok: false, reason: "git", detail: split.detail, elapsedMs: Date.now() - started };
+  }
+  let cloneUrl = split.url;
   const childEnv: Record<string, string> = { GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "/bin/true" };
-  const credMatch = urlWithCreds.match(/^(https:\/\/)([^@/\s]+)@(.+)$/);
-  if (credMatch) {
-    cloneUrl = `${credMatch[1]}${credMatch[3]}`;
-    childEnv.GIT_CONFIG_COUNT = "1";
+  if (split.kind === "header") {
+    // Ф2.4: без проверки версии `GIT_CONFIG_*` молча ничего не значит на
+    // git < 2.31 — клон приватного репо ушёл бы неавторизованным
+    const v = opts.gitVersion !== undefined ? opts.gitVersion : await gitVersion();
+    if (!versionAtLeast(v, MIN_GIT_VERSION)) {
+      await cleanupFailedClone(dir);
+      return {
+        ok: false,
+        reason: "git",
+        detail: `git ${v ? v.join(".") : "version unknown"} < ${MIN_GIT_VERSION.join(".")}: http.extraHeader via GIT_CONFIG_* is not supported, refusing to clone with a token`,
+        elapsedMs: Date.now() - started,
+      };
+    }
+    // COUNT=2: пустой `credential.helper` глушит системные хелперы (менеджер
+    // кредов Windows/osxkeychain), иначе они подхватывают и КЭШИРУЮТ PAT на
+    // диске хоста — «код не храним» относится и к чужим ключам
+    childEnv.GIT_CONFIG_COUNT = "2";
     childEnv.GIT_CONFIG_KEY_0 = "http.extraHeader";
-    childEnv.GIT_CONFIG_VALUE_0 = `Authorization: Basic ${Buffer.from(decodeURIComponent(credMatch[2]!)).toString("base64")}`;
+    childEnv.GIT_CONFIG_VALUE_0 = split.authorization;
+    childEnv.GIT_CONFIG_KEY_1 = "credential.helper";
+    childEnv.GIT_CONFIG_VALUE_1 = "";
   }
   const gitArgs = ["clone", "--bare"];
   if (opts.shallowSince) gitArgs.push(`--shallow-since=${opts.shallowSince}`);
@@ -200,12 +293,14 @@ export async function cloneBare(
   if (code !== 0) {
     let stderr = "";
     try {
-      stderr = (await new Response(proc.stderr).text()).trim().slice(0, 300);
+      // Ф2.4: скраб ДО обрезки. Обрезка первой могла срезать `@`, и регулярка
+      // скраба переставала матчить — креды оставались в детали факта
+      stderr = scrubCredentials((await new Response(proc.stderr).text()).trim()).slice(0, 300);
     } catch {
       /* stdout/stderr ignore */
     }
     await cleanupFailedClone(dir);
-    return { ok: false, reason: "git", detail: scrubCredentials(stderr) || `git clone exited ${code}`, elapsedMs: Date.now() - started };
+    return { ok: false, reason: "git", detail: stderr || `git clone exited ${code}`, elapsedMs: Date.now() - started };
   }
   bytes = await duBytes(dir);
   const elapsedMs = Date.now() - started;
@@ -736,7 +831,11 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
   // --- 5. LOC + TODO/FIXME потоково (git cat-file --batch) ---
   const candidates = blobs.filter((b) => b.size > 0 && b.size <= textCap);
   let loc = 0;
-  let locDeadlineHit = false;
+  // Ф2.3 (M5): ЛЮБОЙ обрыв потока `cat-file` — дедлайн, оборванный заголовок,
+  // недочитанный блоб — делает LOC и TODO неполными. Раньше неполнота
+  // помечалась только у дедлайна (`loc_note: "deadline"`), а обрыв заголовка
+  // оставлял факт «ok, loc = 0» — и модель читала это как «кода нет».
+  let locIncomplete = false;
   const todoOccs: TodoOccurrence[] = [];
   if (candidates.length > 0) {
     const catFile: CatFileSpawn =
@@ -757,19 +856,25 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
     try {
       for (let i = 0; i < candidates.length; i++) {
         if (Date.now() > deadline) {
-          locDeadlineHit = true;
+          locIncomplete = true;
           break;
         }
         const entry = candidates[i]!;
         const header = await reader.readLine();
-        if (header === null) break;
+        if (header === null) {
+          locIncomplete = true;
+          break;
+        }
         // формат: "<sha> blob <size>" (или "<sha> missing")
         const m = header.match(/^([0-9a-f]+) (?:blob|tag|tree) (\d+)$/);
         if (!m) continue;
         const size = parseInt(m[2]!, 10);
         const buf = await reader.readExact(size);
         await reader.readByte(); // завершающий \n
-        if (buf === null) break;
+        if (buf === null) {
+          locIncomplete = true;
+          break;
+        }
         const probe = buf.subarray(0, Math.min(8192, buf.length));
         if (probe.includes(0)) continue; // бинарный — не текст
         const text = new TextDecoder("utf-8", { fatal: false }).decode(buf);
@@ -797,8 +902,8 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
       top_level: topLevel,
       file_count: blobs.length,
       bytes: blobs.reduce((s, b) => s + b.size, 0),
-      loc: locDeadlineHit ? null : loc,
-      ...(locDeadlineHit ? { loc_note: "deadline" } : {}),
+      loc: locIncomplete ? null : loc,
+      ...(locIncomplete ? { loc_note: "incomplete" } : {}),
     },
     "git",
     nowIso,
@@ -844,6 +949,9 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
       older_180d: older180,
       todo_files: todoFiles.length,
       blamed_files: blamedFiles,
+      // Ф2.3: счётчики TODO собраны тем же потоком `cat-file` — оборвался он,
+      // неполны и они; читатель обязан видеть это по факту, а не гадать
+      ...(locIncomplete ? { todo_note: "incomplete" } : {}),
     },
     "git",
     nowIso,

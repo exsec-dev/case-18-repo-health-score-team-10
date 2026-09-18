@@ -110,17 +110,22 @@ describe("compute: здоровое репо (ручная арифметика)
     expect(s2.totalRating!).toBeCloseTo(83.16, 1);
   });
 
-  test("code_empty (Q&A №13): file_count=0/loc=0 при ok-фактах → оба итога 0 как данные", () => {
+  test("code_empty (Q&A №13): file_count=0 при ok-фактах → оба итога 0 как данные", () => {
     const empty = seedScan(t, withFacts(healthyFacts(), { key: "tree.stats", value: { top_level: [], file_count: 0, bytes: 0, loc: 0 } }));
     const s = compute(t.db, empty, { now: NOW });
     expect(s.codeEmpty).toBe(true);
     expect(s.totalRating).toBe(0); // «проекта нет» — данные, не NULL
     expect(s.totalFull).toBe(0);
     expect(s.noData.some((x) => x.startsWith("security"))).toBe(true);
+    // Ф2.3 (M5, В4.2a): loc = 0 при живом дереве больше НЕ code_empty —
+    // нулевой LOC даёт и обрыв cat-file, и репо из одних бинарных файлов
     const emptyLoc = seedScan(t, withFacts(healthyFacts(), { key: "tree.stats", value: { top_level: [{ name: "x", type: "tree" }], file_count: 3, bytes: 10, loc: 0 } }));
     const s2 = compute(t.db, emptyLoc, { now: NOW });
-    expect(s2.totalRating).toBe(0);
-    expect(s2.totalFull).toBe(0);
+    expect(s2.codeEmpty).toBe(false);
+    expect(s2.totalRating).toBeGreaterThan(0);
+    // loc = null (обрыв извлечения) — тоже не «проекта нет»
+    const locNull = seedScan(t, withFacts(healthyFacts(), { key: "tree.stats", value: { top_level: [{ name: "x", type: "tree" }], file_count: 3, bytes: 10, loc: null, loc_note: "incomplete" } }));
+    expect(compute(t.db, locNull, { now: NOW }).codeEmpty).toBe(false);
     // no-data tree.stats (клон не удался) — это НЕ code_empty
     const nodata = seedScan(t, withFacts(healthyFacts(), { key: "tree.stats", value: { reason: "limits" }, status: "no-data" }));
     const s3 = compute(t.db, nodata, { now: NOW });

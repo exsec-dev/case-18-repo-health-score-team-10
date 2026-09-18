@@ -48,7 +48,8 @@ function tempDb(): TestDb {
 // ---------------------------------------------------------------------------
 
 describe("Ф2.3 (M5): code_empty — только по file_count, не по loc", () => {
-  repro("tree.stats {file_count: 5, loc: 0} → codeEmpty=false и Score не занулён", () => {
+  // закрыто блоком Б2 — обёртка `repro` снята, утверждение не менялось
+  test("tree.stats {file_count: 5, loc: 0} → codeEmpty=false и Score не занулён", () => {
     const t = tempDb();
     const facts = withFacts(healthyFacts(), {
       key: "tree.stats",

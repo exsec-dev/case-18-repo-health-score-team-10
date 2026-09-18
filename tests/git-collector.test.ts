@@ -8,7 +8,21 @@ import { randomFillSync } from "node:crypto";
 import { existsSync, mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cloneBare, cloneWithDegrade, cleanupClone, extractFacts, isRobotPattern, robotIntervalFlags, readmeSectionFlags, ciHasSteps, scrubCredentials } from "../src/collectors/git";
+import {
+  cloneBare,
+  cloneWithDegrade,
+  cleanupClone,
+  extractFacts,
+  isRobotPattern,
+  robotIntervalFlags,
+  readmeSectionFlags,
+  ciHasSteps,
+  scrubCredentials,
+  splitCredentialUrl,
+  parseGitVersion,
+  versionAtLeast,
+  MIN_GIT_VERSION,
+} from "../src/collectors/git";
 import { parseYamlSubset } from "../src/collectors/yamlmini";
 import { Fact } from "../src/collectors/facts";
 
@@ -436,4 +450,244 @@ describe("scrubCredentials (В4/Б6: PAT не едет в детали ошиб�
     expect(scrubCredentials("no credentials here")).toBe("no credentials here");
     expect(scrubCredentials("https://git@git.sourcecraft.dev/x")).toBe("https://***@git.sourcecraft.dev/x");
   });
+});
+
+// ---------------------------------------------------------------------------
+// Ф2.4 (M6 + LOW-9, остаток после портов). PAT не в argv и не в config клона:
+// креды из URL уезжают в http.extraHeader через GIT_CONFIG_*; системные
+// credential-хелперы глушатся пустым credential.helper; на git < 2.31
+// GIT_CONFIG_* молча не работают — клон с токеном отказывается.
+// Сети нет: локальный Bun.serve отдаёт smart-HTTP настоящего git.
+// ---------------------------------------------------------------------------
+
+describe("Ф2.4: разбор клон-URL с кредами (LOW-9)", () => {
+  test("https → заголовок Basic, URL без кредов", () => {
+    const out = splitCredentialUrl("https://repo-health:pat-value@git.sourcecraft.dev/o/r.git");
+    expect(out.kind).toBe("header");
+    if (out.kind !== "header") return;
+    expect(out.url).toBe("https://git.sourcecraft.dev/o/r.git");
+    expect(out.authorization).toBe(`Authorization: Basic ${Buffer.from("repo-health:pat-value").toString("base64")}`);
+  });
+
+  test("percent-кодированный PAT восстанавливается до кодирования (Basic от сырого значения)", () => {
+    const pat = "pat/with+special=chars@and:colon";
+    const out = splitCredentialUrl(`https://repo-health:${encodeURIComponent(pat)}@git.sourcecraft.dev/o/r.git`);
+    expect(out.kind === "header" && out.authorization).toBe(`Authorization: Basic ${Buffer.from(`repo-health:${pat}`).toString("base64")}`);
+  });
+
+  test("http на loopback разрешён (герметичный тест), внешний http с кредами — отказ", () => {
+    expect(splitCredentialUrl("http://u:p@127.0.0.1:1234/o/r.git").kind).toBe("header");
+    expect(splitCredentialUrl("http://u:p@localhost:1234/o/r.git").kind).toBe("header");
+    const refused = splitCredentialUrl("http://u:p@evil.example.com/o/r.git");
+    expect(refused.kind).toBe("refused");
+    expect(refused.kind === "refused" && refused.detail).toContain("evil.example.com");
+  });
+
+  test("URL без кредов не трогается", () => {
+    expect(splitCredentialUrl("https://git.sourcecraft.dev/o/r.git")).toEqual({ kind: "none", url: "https://git.sourcecraft.dev/o/r.git" });
+  });
+
+  test("версия git: разбор и порог 2.31", () => {
+    expect(parseGitVersion("git version 2.43.0.windows.1")).toEqual([2, 43, 0]);
+    expect(parseGitVersion("git version 2.31")).toEqual([2, 31, 0]);
+    expect(parseGitVersion("not git")).toBeNull();
+    expect(versionAtLeast([2, 30, 9], MIN_GIT_VERSION)).toBe(false);
+    expect(versionAtLeast([2, 31, 0], MIN_GIT_VERSION)).toBe(true);
+    expect(versionAtLeast([3, 0, 0], MIN_GIT_VERSION)).toBe(true);
+    expect(versionAtLeast(null, MIN_GIT_VERSION)).toBe(false);
+  });
+});
+
+describe("Ф2.4: клон с PAT — заголовок, argv, config клона", () => {
+  /** pkt-line для smart-HTTP объявления сервиса. */
+  const pkt = (s: string): string => (s.length + 4).toString(16).padStart(4, "0") + s;
+
+  /**
+   * Настоящий smart-HTTP git поверх Bun.serve: `git upload-pack
+   * --stateless-rpc`. Нужен именно живой git-клиент — проверяем, что
+   * заголовок из GIT_CONFIG_* ДОХОДИТ до сервера, а не что мы его сформировали.
+   */
+  function startGitHttp(repoPath: string) {
+    const seen: { authorization: string | null; paths: string[] } = { authorization: null, paths: [] };
+    const server = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      async fetch(req) {
+        const url = new URL(req.url);
+        seen.paths.push(url.pathname);
+        if (seen.authorization === null) seen.authorization = req.headers.get("authorization");
+        if (url.pathname.endsWith("/info/refs") && url.searchParams.get("service") === "git-upload-pack") {
+          const proc = Bun.spawn(["git", "upload-pack", "--stateless-rpc", "--advertise-refs", repoPath], { stdout: "pipe", stderr: "ignore" });
+          const refs = await new Response(proc.stdout).arrayBuffer();
+          const head = new TextEncoder().encode(`${pkt("# service=git-upload-pack\n")}0000`);
+          const body = new Uint8Array(head.length + refs.byteLength);
+          body.set(head, 0);
+          body.set(new Uint8Array(refs), head.length);
+          return new Response(body, { headers: { "content-type": "application/x-git-upload-pack-advertisement" } });
+        }
+        if (req.method === "POST" && url.pathname.endsWith("/git-upload-pack")) {
+          const proc = Bun.spawn(["git", "upload-pack", "--stateless-rpc", repoPath], { stdin: "pipe", stdout: "pipe", stderr: "ignore" });
+          proc.stdin.write(new Uint8Array(await req.arrayBuffer()));
+          await proc.stdin.end();
+          const out = await new Response(proc.stdout).arrayBuffer();
+          return new Response(out, { headers: { "content-type": "application/x-git-upload-pack-result" } });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    return { seen, url: `http://127.0.0.1:${server.port}`, stop: () => server.stop(true) };
+  }
+
+  test("PAT едет заголовком: сервер видит Basic, argv без '@', config клона без токена", async () => {
+    const src = buildFixtureRepo();
+    const bare = mkdtempSync(join(tmpdir(), "rh-bare-src-"));
+    execFileSync("git", ["clone", "--bare", "-q", src, join(bare, "r.git")], { stdio: ["ignore", "pipe", "pipe"] });
+    const http = startGitHttp(join(bare, "r.git"));
+    const PAT = "pat-super-secret-value";
+    const seen: { cmd: string[]; env: Record<string, string> }[] = [];
+    let configText = "";
+    try {
+      const out = await cloneBare(`${http.url.replace("http://", `http://repo-health:${PAT}@`)}/o/r.git`, tmpdir(), LIMITS, {
+        spawnGit: (o) => {
+          seen.push(o);
+          return Bun.spawn({ cmd: o.cmd, stdout: "ignore", stderr: "pipe", stdin: "ignore", env: o.env });
+        },
+        onCloneDir: (dir) => {
+          configText = readFileSync(join(dir, "config"), "utf8");
+        },
+      });
+      expect(out.ok).toBe(true);
+      if (out.ok) cleanupClone(out.dir);
+      // сервер получил авторизацию именно заголовком
+      expect(http.seen.authorization).toBe(`Basic ${Buffer.from(`repo-health:${PAT}`).toString("base64")}`);
+      // argv: ни '@', ни самого токена (в /proc/<pid>/cmdline его нет)
+      const argv = seen[0]!.cmd.join(" ");
+      expect(argv).not.toContain("@");
+      expect(argv).not.toContain(PAT);
+      // env дочернего git: заголовок + заглушённый credential.helper
+      expect({
+        count: seen[0]!.env.GIT_CONFIG_COUNT,
+        key0: seen[0]!.env.GIT_CONFIG_KEY_0,
+        key1: seen[0]!.env.GIT_CONFIG_KEY_1,
+        value1: seen[0]!.env.GIT_CONFIG_VALUE_1,
+        prompt: seen[0]!.env.GIT_TERMINAL_PROMPT,
+      }).toEqual({ count: "2", key0: "http.extraHeader", key1: "credential.helper", value1: "", prompt: "0" });
+      // config клона на диске: ни токена, ни заголовка (сбой уборки не оставит PAT)
+      expect(configText).not.toContain(PAT);
+      expect(configText.toLowerCase()).not.toContain("authorization");
+      expect(configText).toContain("/o/r.git");
+    } finally {
+      http.stop();
+      rmSync(bare, { recursive: true, force: true });
+      rmSync(src, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  test("git < 2.31: клон с токеном отказывается (GIT_CONFIG_* там молча не работают), git не запускается", async () => {
+    let spawned = 0;
+    const out = await cloneBare("https://repo-health:pat@git.sourcecraft.dev/o/r.git", tmpdir(), LIMITS, {
+      gitVersion: [2, 30, 2],
+      spawnGit: () => {
+        spawned++;
+        throw new Error("git must not be spawned");
+      },
+    });
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.reason).toBe("git");
+    expect(out.detail).toContain("2.31");
+    expect(spawned).toBe(0);
+  });
+
+  test("внешний http с кредами: клон отказывается, git не запускается (LOW-9)", async () => {
+    let spawned = 0;
+    const out = await cloneBare("http://repo-health:pat@git.example.com/o/r.git", tmpdir(), LIMITS, {
+      spawnGit: () => {
+        spawned++;
+        throw new Error("git must not be spawned");
+      },
+    });
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.reason).toBe("git");
+    expect(out.detail).toContain("git.example.com");
+    expect(spawned).toBe(0);
+  });
+
+  test("скраб stderr выполняется ДО обрезки: длинный вывод не выносит креды в деталь", async () => {
+    const PAT = "pat-leaked-value";
+    const noise = "x".repeat(400);
+    const stderr = `${noise}\nfatal: could not read from 'https://repo-health:${PAT}@git.sourcecraft.dev/o/r.git'\n`;
+    const out = await cloneBare("https://git.sourcecraft.dev/o/r.git", tmpdir(), LIMITS, {
+      spawnGit: () => ({
+        pid: 1,
+        exited: Promise.resolve(128),
+        stderr: new Response(stderr).body!,
+        kill: () => {},
+      }),
+    });
+    expect(out.ok).toBe(false);
+    if (out.ok) return;
+    expect(out.detail).not.toContain(PAT);
+    expect(out.detail.length).toBeLessThanOrEqual(300);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ф2.3 (M5). Обрыв `cat-file --batch` — на уровне коллектора: loc = null,
+// loc_note/todo_note = "incomplete". На уровне модели то же закрыто
+// в tests/audit-m42a-repro.test.ts и tests/score.test.ts.
+// ---------------------------------------------------------------------------
+
+describe("Ф2.3: обрыв cat-file → loc no-data, а не нулевой LOC", () => {
+  test("поток оборвался на первом заголовке: loc=null, loc_note и todo_note = incomplete, file_count цел", async () => {
+    const src = buildFixtureRepo();
+    const clone = await cloneBare(src, tmpdir(), LIMITS);
+    expect(clone.ok).toBe(true);
+    if (!clone.ok) return;
+    try {
+      const facts = await extractFacts(clone.dir, {
+        ...EXTRACT,
+        now: NOW,
+        // шов Б0: процесс, у которого stdout сразу закончился (убитый cat-file)
+        catFile: () => ({
+          stdin: { write: () => 0, end: () => 0 },
+          stdout: new Response(new Uint8Array(0)).body!,
+          exited: Promise.resolve(137),
+          kill: () => {},
+        }),
+      });
+      const tree = facts.find((f) => f.key === "tree.stats")!.value as { loc: number | null; loc_note?: string; file_count: number };
+      const todo = facts.find((f) => f.key === "code.todo")!.value as { todo_note?: string; count: number };
+      expect({ loc: tree.loc, locNote: tree.loc_note, todoNote: todo.todo_note }).toEqual({
+        loc: null,
+        locNote: "incomplete",
+        todoNote: "incomplete",
+      });
+      expect(tree.file_count).toBeGreaterThan(0); // дерево прочитано — репо НЕ пустое
+    } finally {
+      cleanupClone(clone.dir);
+      rmSync(src, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  test("целый поток: loc > 0, пометок неполноты нет", async () => {
+    const src = buildFixtureRepo();
+    const clone = await cloneBare(src, tmpdir(), LIMITS);
+    expect(clone.ok).toBe(true);
+    if (!clone.ok) return;
+    try {
+      const facts = await extractFacts(clone.dir, { ...EXTRACT, now: NOW });
+      const tree = facts.find((f) => f.key === "tree.stats")!.value as { loc: number | null; loc_note?: string };
+      const todo = facts.find((f) => f.key === "code.todo")!.value as { todo_note?: string };
+      expect({ locPositive: (tree.loc ?? 0) > 0, locNote: tree.loc_note, todoNote: todo.todo_note }).toEqual({
+        locPositive: true,
+        locNote: undefined,
+        todoNote: undefined,
+      });
+    } finally {
+      cleanupClone(clone.dir);
+      rmSync(src, { recursive: true, force: true });
+    }
+  }, 60_000);
 });
