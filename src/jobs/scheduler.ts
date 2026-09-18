@@ -139,8 +139,16 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
            AND status IN ('queued', 'running')
            AND attempts < ?
            AND (CASE WHEN ? = 'user' THEN trigger_kind = 'user' ELSE trigger_kind != 'user' END)
-         ORDER BY (SELECT MAX(j2.claimed_at) FROM jobs j2 WHERE j2.user_id = jobs.user_id) IS NOT NULL,
-                  (SELECT MAX(j2.claimed_at) FROM jobs j2 WHERE j2.user_id = jobs.user_id) ASC,
+         -- В4.2-port-fix (П7): круговой порядок между юзерами (Ф1.7) — свойство
+         -- ПОЛОСЫ user. У периодических job user_id всегда NULL, но порты
+         -- распространили коррелированный подзапрос и на полосу rating, где он
+         -- бессмыслен по построению: 28 000 кандидатов × полный скан jobs =
+         -- 335,7 с на один claim без idx_jobs_user_claimed (замер вехи), то есть
+         -- не «медленнее», а мёртвый синхронный claim. CASE коротко замыкается в
+         -- рантайме (EXPLAIN QUERY PLAN у обоих вариантов одинаков — по плану
+         -- «исправлять» подзапрос не надо).
+         ORDER BY CASE WHEN ? = 'user' THEN ((SELECT MAX(j2.claimed_at) FROM jobs j2 WHERE j2.user_id = jobs.user_id) IS NOT NULL) ELSE 0 END,
+                  CASE WHEN ? = 'user' THEN (SELECT MAX(j2.claimed_at) FROM jobs j2 WHERE j2.user_id = jobs.user_id) ELSE NULL END ASC,
                   id
          LIMIT 1
        )
@@ -148,7 +156,7 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
   );
   // предохранитель цикла: каждая итерация переводит одну job в running или failed
   for (let guard = 0; guard < 1000; guard++) {
-    const claimed = claimStmt.get(nowIso, leaseIso, nowIso, maxAttempts, queue) as {
+    const claimed = claimStmt.get(nowIso, leaseIso, nowIso, maxAttempts, queue, queue, queue) as {
       id: number;
       repo_id: number;
       user_id: number | null;
@@ -424,6 +432,9 @@ export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<Sca
         : undefined,
       appsecClient: (p: string) => makeAppsecClient({ token: p, baseUrl: deps.config.api.appsecBase, minIntervalMs: deps.config.scan.rest.appsecMinIntervalMs }),
       gitBase: deps.config.api.gitBase,
+      // П3: адреса REST/AppSec — во все клиенты, включая те, что runScan строит сам
+      restBase: deps.config.api.restBase,
+      appsecBase: deps.config.api.appsecBase,
       appsecMinIntervalMs: deps.config.scan.rest.appsecMinIntervalMs,
     },
     job.slug,

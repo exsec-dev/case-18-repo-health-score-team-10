@@ -16,12 +16,22 @@ const config = loadConfig();
 const db = openDb(config);
 const client = makeScClient({
   token: config.sourcecraftToken,
+  // П3 (В4.2-port-fix): адреса API — только из конфига, ни один клиент не полагается на дефолт модуля
+  baseUrl: config.api.restBase,
   minIntervalMs: config.scan.rest.minIntervalMs,
   maxRequests: config.scan.rest.budget,
 });
 
 const result = await runScan(
-  { db, scClient: client, cloneLimits: scanCloneLimitsOf(config.scan), appsecMinIntervalMs: config.scan.rest.appsecMinIntervalMs },
+  {
+    db,
+    scClient: client,
+    cloneLimits: scanCloneLimitsOf(config.scan),
+    gitBase: config.api.gitBase,
+    restBase: config.api.restBase,
+    appsecBase: config.api.appsecBase,
+    appsecMinIntervalMs: config.scan.rest.appsecMinIntervalMs,
+  },
   slug,
   { trigger: process.env.SCAN_TRIGGER ?? "user" },
 );

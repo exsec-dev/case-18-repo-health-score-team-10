@@ -370,7 +370,10 @@ const server = Bun.serve({
         );
       }
       const rest = makeScClient({ token: pat, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 8, timeoutMs: config.scan.rest.timeoutMs });
-      const appsec = makeAppsecClient({ token: pat, minIntervalMs: config.scan.rest.appsecMinIntervalMs });
+      // П3 (Н2 HIGH): адрес из конфига обязателен — без baseUrl модуль
+      // подставлял боевой appsec.sourcecraft.tech, и PAT зрителя уходил туда
+      // даже с APPSEC_API_BASE на мок
+      const appsec = makeAppsecClient({ token: pat, baseUrl: config.api.appsecBase, minIntervalMs: config.scan.rest.appsecMinIntervalMs });
       const result: FavoriteCheckResponse = await checkFavoriteAccess(
         db,
         user.userId,

@@ -28,7 +28,9 @@ for (const line of readFileSync(".env", "utf8").split("\n")) {
 
 const config = loadConfig();
 const db = openDb(config);
-const live = () => makeScClient({ token: env.SOURCECRAFT_TOKEN ?? null, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 4 });
+// П3 (В4.2-port-fix): baseUrl обязателен и в скриптах — тот же класс дефекта, что Н2
+const live = () =>
+  makeScClient({ token: env.SOURCECRAFT_TOKEN ?? null, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 4 });
 
 console.log("=== прогон 1 (живой, 2 страницы): новые репо → очередь");
 const r1 = await nightlyCatalog(db, live(), { maxPages: 2 });

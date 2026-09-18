@@ -571,3 +571,53 @@ describe("processJob: repo-сигнал эвикции и заявки юзер�
     }
   });
 });
+
+// В4.2-port-fix (П7): круговой порядок Ф1.7 — свойство полосы user. Порты
+// распространили его коррелированный подзапрос и на полосу rating, где
+// user_id всегда NULL: на 28 000 job без idx_jobs_user_claimed один
+// claim(rating) занимал 335 655 мс (замер вехи; у ревьюера 576,8 с) — это не
+// «медленнее», а мёртвый синхронный claim, останавливающий и HTTP. Индекс
+// живёт в LATE_INDEXES и в норме есть — здесь он РОНЯЕТСЯ вручную, чтобы
+// проверить, что подзапрос в полосе rating больше не исполняется.
+describe("П7: claim(rating) не платит за подзапрос кругового порядка", () => {
+  test(
+    "28 000 job в полосе rating без idx_jobs_user_claimed: claim ≤ 100 мс",
+    () => {
+      const pdir = mkdtempSync(join(tmpdir(), "rh-p7-"));
+      const p: Database = openDb({ ...loadConfig(), dataDir: pdir });
+      try {
+        p.exec("PRAGMA synchronous = OFF");
+        const repoIds: number[] = [];
+        const userIds: number[] = [];
+        p.transaction(() => {
+          for (let i = 0; i < 20; i++) {
+            repoIds.push(Number(p.query("INSERT INTO repos (org_slug, repo_slug, visibility) VALUES ('p7', ?, 'public')").run(`r${i}`).lastInsertRowid));
+            p.query("INSERT INTO users (ya_id, login, created_at, last_login_at) VALUES (?, ?, '2026', '2026')").run(`ya-p7-${i}`, `p7-${i}`);
+            userIds.push((p.query("SELECT id FROM users WHERE ya_id = ?").get(`ya-p7-${i}`) as { id: number }).id);
+          }
+        })();
+        p.transaction(() => {
+          const ins = p.query(
+            "INSERT INTO jobs (repo_id, status, user_id, trigger_kind, created_at, claimed_at) VALUES (?, ?, ?, ?, '2026-09-18T00:00:00Z', ?)",
+          );
+          for (let i = 0; i < 28_000; i++) ins.run(repoIds[i % repoIds.length]!, "queued", null, "periodic", null);
+          for (let i = 0; i < 300; i++) ins.run(repoIds[i % repoIds.length]!, "queued", userIds[i % userIds.length]!, "user", null);
+          // история с заполненным claimed_at — именно её сканировал подзапрос
+          for (let i = 0; i < 20_000; i++) ins.run(repoIds[i % repoIds.length]!, "done", userIds[i % userIds.length]!, "user", `2026-09-1${i % 8}T00:00:00Z`);
+        })();
+        p.exec("DROP INDEX IF EXISTS idx_jobs_user_claimed");
+        const t0 = Date.now();
+        const job = claimNext(p, new Date("2026-09-18T12:00:00Z"), 60 * 60_000, { queue: "rating", maxAttempts: 3 });
+        const elapsed = Date.now() - t0;
+        expect({ triggerKind: job?.triggerKind ?? null, under100ms: elapsed <= 100 ? "≤100" : `${elapsed} мс` }).toEqual({
+          triggerKind: "periodic",
+          under100ms: "≤100",
+        });
+      } finally {
+        p.close();
+        rmSync(pdir, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
+});

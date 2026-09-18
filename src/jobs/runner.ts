@@ -52,6 +52,10 @@ export interface ScanDeps {
   gitUrl?: (org: string, repo: string) => string;
   /** git-хост (Config.api.gitBase; шов тестовых серверов, Ф1.13) */
   gitBase?: string;
+  /** REST-хост (Config.api.restBase) — для клиента, который runScan строит сам из userToken (П3) */
+  restBase?: string;
+  /** AppSec-хост (Config.api.appsecBase) — для клиента по умолчанию (П3, Н2) */
+  appsecBase?: string;
   /** швы для тестов: подмена каналов целиком */
   collectGit?: (org: string, repo: string, limits: ScanCloneLimits) => Promise<GitChannelOutcome>;
   collectRest?: (slug: string) => Promise<RestCollectResult>;
@@ -238,7 +242,8 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
   // REST-клиент (К3): userToken → PAT автора (шов или новый клиент),
   // иначе серверный; ни того ни другого → REST честно no-data(access)
   const restClient: ScClient | null = userToken
-    ? (deps.userScClient ?? makeScClient({ token: userToken, minIntervalMs: DEFAULT_SCAN.rest.minIntervalMs }))
+    ? // П3: без baseUrl клиент уходил на боевой REST-хост в обход шва Ф1.13
+      (deps.userScClient ?? makeScClient({ token: userToken, baseUrl: deps.restBase, minIntervalMs: DEFAULT_SCAN.rest.minIntervalMs }))
     : deps.scClient;
 
   try {
@@ -325,7 +330,8 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
       const collect = deps.collectAppsec ?? collectAppsec;
       const appsec = deps.appsecClient
         ? deps.appsecClient(userToken)
-        : makeAppsecClient({ token: userToken, minIntervalMs: deps.appsecMinIntervalMs ?? DEFAULT_SCAN.rest.appsecMinIntervalMs });
+        : // П3 (Н2): тот же класс дефекта — адрес AppSec только из конфига
+          makeAppsecClient({ token: userToken, baseUrl: deps.appsecBase, minIntervalMs: deps.appsecMinIntervalMs ?? DEFAULT_SCAN.rest.appsecMinIntervalMs });
       const out = await collect(restClient, appsec, slug);
       if (out.fact) {
         facts.push(out.fact);

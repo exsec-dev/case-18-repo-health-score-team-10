@@ -27,13 +27,20 @@ const dir = mkdtempSync(join(tmpdir(), "rh-fav-"));
 // org `pubnoci` — публичный репо без прав на CI (own = false);
 // остальное — приватный репо зрителя (own = true). `id` не отдаём: без него
 // AppSec-клиент не строится и PAT никуда не уходит.
+// org `withid` — repo-GET отдаёт `id`, поэтому вызывается AppSec-канал:
+// это и есть проверка П3 (адрес AppSec обязан быть из конфига, не боевой).
 const mock = startMockApi((req, url) => {
   const p = url.pathname;
   if (p === "/user") return Response.json({ username: "favtester" });
+  if (p === "/v1/scans/latest") return Response.json({ scanUuid: "s-1", timeFinished: 1, isLatest: true });
   const runs = p.match(/^\/repos\/([^/]+)\/([^/]+)\/cicd\/runs$/);
   if (runs) return runs[1] === "pubnoci" ? Response.json({ error: "denied" }, { status: 403 }) : Response.json({ runs: [] });
   const repo = p.match(/^\/repos\/([^/]+)\/([^/]+)$/);
-  if (repo) return Response.json({ name: repo[2], visibility: repo[1] === "pubnoci" ? "public" : "private" });
+  if (repo) {
+    const body: Record<string, unknown> = { name: repo[2], visibility: repo[1] === "pubnoci" ? "public" : "private" };
+    if (repo[1] === "withid") body.id = `gid-${repo[2]}`;
+    return Response.json(body);
+  }
   return null;
 });
 
@@ -45,13 +52,14 @@ beforeAll(async () => {
   const db = openDb({ ...loadConfig(), dataDir: dir });
   const t: ApiTestDb = { db, close: () => db.close() };
   const fav = db.query("INSERT INTO favorites (user_id, org_slug, repo_slug, added_at) VALUES (?, ?, ?, '2026-09-17T00:00:00Z')");
-  for (const name of ["lim", "gate", "cool", "noci", "other"]) {
+  for (const name of ["lim", "gate", "cool", "noci", "other", "appsec"]) {
     ids[name] = upsertUser(db, `ya-${name}`, name);
     cookies[name] = createSession(db, SECRET, ids[name]!);
   }
   for (let i = 1; i <= 4; i++) fav.run(ids.lim!, "lim", `l${i}`);
   for (let i = 1; i <= 3; i++) fav.run(ids.gate!, "gate", `g${i}`);
   fav.run(ids.noci!, "pubnoci", "repo");
+  fav.run(ids.appsec!, "withid", "repo");
   // кулдаун: own-скан ДРУГОГО юзера не блокирует автозаявку зрителя,
   // свой свежий own-скан — блокирует (К-П П2)
   const other = seedRepo(t, { org: "cool", repo: "other-scan" });
@@ -144,6 +152,19 @@ describe("исход автопостановки — единственное �
       mine: { status: "skipped", code: "cooldown" },
       legacyField: false,
     });
+  }, 60_000);
+
+  test("П3 (Н2): AppSec-клиент проверки идёт на APPSEC_API_BASE — в запросах мока есть путь /v1/scans/latest", async () => {
+    expect((await putPat("appsec", "pat-appsec-0000000")).status).toBe(200);
+    const mark = mock.requests.length;
+    const out = await check("appsec", "withid/repo");
+    const paths = mock.requests.slice(mark).map((r) => r.path);
+    // ассерт по ПУТИ, а не по счётчику: харнесс шлёт REST и AppSec в один мок,
+    // и двух REST-запросов проверки хватило бы, чтобы счётчик был > 0 без правки
+    expect({
+      appsecHit: paths.filter((p) => p.startsWith("/v1/scans/latest")).length,
+      access: out.body?.access,
+    }).toEqual({ appsecHit: 1, access: { clone: true, visibility: "private", ci: true, appsec: true, own: true } });
   }, 60_000);
 
   test("нет своих прав (публичный репо, CI 403, AppSec не спрашивали) → skipped/not_own, права всё равно показаны", async () => {
