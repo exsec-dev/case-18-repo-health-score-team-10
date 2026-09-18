@@ -23,6 +23,7 @@ import {
   versionAtLeast,
   MIN_GIT_VERSION,
 } from "../src/collectors/git";
+import { scanFromEnv } from "../src/config";
 import { parseYamlSubset } from "../src/collectors/yamlmini";
 import { Fact } from "../src/collectors/facts";
 
@@ -690,4 +691,36 @@ describe("Ф2.3: обрыв cat-file → loc no-data, а не нулевой LOC
       rmSync(src, { recursive: true, force: true });
     }
   }, 60_000);
+});
+
+// ---------------------------------------------------------------------------
+// Ф2.10 (M10): «env меняет поведение» — приёмочный пункт, не закреплённый
+// тестом. Бюджет клона едет из env через scanFromEnv в Config.scan и
+// РЕАЛЬНО меняет исход клона локального репо.
+// ---------------------------------------------------------------------------
+
+describe("Ф2.10: env → Config.scan → поведение клона", () => {
+  test("SCAN_CLONE_MAX_BYTES из env роняет клон по диску, без env тот же клон проходит", async () => {
+    const src = buildFixtureRepo();
+    try {
+      const tight = scanFromEnv({ SCAN_CLONE_MAX_BYTES: "1", SCAN_DEGRADE_ENABLED: "false" });
+      expect(tight.clone.maxBytes).toBe(1); // env дошёл до конфига
+      const failed = await cloneWithDegrade(src, tmpdir(), { ...tight.clone, pollMs: 1, degrade: tight.degrade });
+      expect(failed.ok).toBe(false);
+      if (!failed.ok) expect(failed.reason).toBe("disk");
+
+      const wide = scanFromEnv({});
+      const okClone = await cloneWithDegrade(src, tmpdir(), { ...wide.clone, pollMs: 1, degrade: wide.degrade });
+      expect(okClone.ok).toBe(true);
+      if (okClone.ok) cleanupClone(okClone.dir);
+    } finally {
+      rmSync(src, { recursive: true, force: true });
+    }
+  }, 60_000);
+
+  test("SCAN_DEGRADE_ENABLED=false отключает деградационный ярус (тоже из env)", () => {
+    expect(scanFromEnv({ SCAN_DEGRADE_ENABLED: "false" }).degrade.enabled).toBe(false);
+    expect(scanFromEnv({ SCAN_DEGRADE_ENABLED: "true" }).degrade.enabled).toBe(true);
+    expect(scanFromEnv({}).degrade.enabled).toBe(true);
+  });
 });

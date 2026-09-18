@@ -170,7 +170,7 @@ describe("Ф1.5 (MED-3): лимит частоты без гонки", () => {
       },
       requestCount: () => 0,
     };
-    const queue = { userScansPerHour: 2, maxAttempts: 3, userActiveMax: 100, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000 } as QueueConfig;
+    const queue = { userScansPerHour: 2, maxAttempts: 3, userActiveMax: 100, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000, retentionDays: 30 } as QueueConfig;
     const outs = await Promise.all([1, 2, 3, 4, 5].map((i) => requestUserScan(db, slow, user, "race", `repo-${i}`, queue)));
     const jobs = (db.query("SELECT COUNT(*) AS c FROM jobs WHERE user_id = ? AND status = 'queued'").get(user) as { c: number }).c;
     expect({ accepted: outs.filter((o) => o.status === 202).length, limited: outs.filter((o) => o.status === 429).length, jobs }).toEqual({

@@ -396,7 +396,12 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
       title: entry.name,
       language: entry.language,
       likes: entry.likes,
-      lastActivityAt: entry.last_updated,
+      // Ф2.12 (LOW-2, третья часть) + К-Ф1.1: `last_activity_at` — ВОДОРАЗДЕЛ
+      // «до какой даты репо просканирован», и двигать его вправе только
+      // пригодный успешный скан (`runScan`, после скор-хука). Обход писал сюда
+      // дату каталога прямо при постановке — «изменился» расходовался фактом
+      // постановки, и упавший скан больше никогда не переставлялся
+      lastActivityAt: undefined,
       // Ф2.5: видимость — ТОЛЬКО из явного поля платформы. Записи без поля
       // фильтр `publicOnly` сюда не пускает, а дефолт `?? "public"` был
       // молчаливым допущением: строка становилась публичной без подтверждения
@@ -756,6 +761,24 @@ export function sweepOrphanScans(db: Database, opts: { leaseMs: number; now?: Da
 }
 
 /**
+ * Ф2.13: очистка завершённых строк `jobs` старше `Config.queue.retentionDays`.
+ * Строки очереди транзитны (данные скана живут в `scans`/`facts`/`scores`), а
+ * растут они линейно от волн: 27 446 репо в сутки — это десятки миллионов
+ * строк в год в той же БД, что и чтение рейтинга. `queued`/`running` не
+ * трогаем никогда; строки без `created_at` (legacy) — тоже, их возраст
+ * неизвестен, а гадать по id нельзя.
+ */
+export function purgeOldJobs(db: Database, opts: { retentionDays: number; now?: Date }): number {
+  const now = opts.now ?? new Date();
+  const cutoff = new Date(now.getTime() - opts.retentionDays * 24 * 60 * 60_000).toISOString();
+  const r = db
+    .query("DELETE FROM jobs WHERE status IN ('done', 'failed', 'refused') AND created_at IS NOT NULL AND created_at < ?")
+    .run(cutoff);
+  if (r.changes > 0) console.log(`[sweep] удалено завершённых job старше ${opts.retentionDays} дней: ${r.changes}`);
+  return r.changes;
+}
+
+/**
  * Тик обслуживания (Ф2.1: тело тика — функция, вызываемая через шов;
  * Ф2.2 + Ф2.13): сироты-сканы, ретеншен `jobs`, свип каталогов клонов.
  * Целиком в try/catch — исключение наружу не выходит, таймер жив.
@@ -771,6 +794,11 @@ export async function maintenanceTick(
     out.scans = sweepOrphanScans(db, { leaseMs: config.scheduler.leaseMs, now }).length;
   } catch (e) {
     console.error(`[sweep] orphan scans failed: ${String((e as Error).message).slice(0, 200)}`);
+  }
+  try {
+    out.jobs = purgeOldJobs(db, { retentionDays: config.queue.retentionDays, now });
+  } catch (e) {
+    console.error(`[sweep] jobs retention failed: ${String((e as Error).message).slice(0, 200)}`);
   }
   try {
     out.clones = await sweepOrphanClones(opts.cloneDir);

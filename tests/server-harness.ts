@@ -99,6 +99,10 @@ export async function spawnServer(opts: {
       YA_CLIENT_ID: "",
       YA_CLIENT_SECRET: "",
       YA_REDIRECT_URI: `${base}/auth/ya/callback`,
+      // Ф2.10: адреса Я ID — на тот же мок; без них маршруты /auth/* ушли бы
+      // на боевой oauth.yandex.ru
+      YA_OAUTH_BASE: opts.mock.url,
+      YA_LOGIN_BASE: opts.mock.url,
       SCHEDULER_START_DELAY_MS: String(24 * 3600_000),
       ...(opts.env ?? {}),
     },

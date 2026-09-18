@@ -290,12 +290,23 @@ export function openDb(config: Config): Database {
   // v1.4: jobs UNIQUE(repo_id) (В1) мешает очереди — свой и публичный
   // скан одного репо стоят одновременно; очередь пересоздаём без UNIQUE
   // (строки jobs транзитны, данные не теряются: scans/scores независимы)
+  // Ф2.11 (LOW-1): пересборка ЦЕЛИКОМ в транзакции, а индексы старой таблицы
+  // сносятся ДО `RENAME`. SQLite переносит индексы вместе с переименованной
+  // таблицей: `CREATE INDEX IF NOT EXISTS` из SCHEMA видел занятые имена и
+  // молча пропускал создание, а `DROP TABLE jobs_v1_rebuild` уносил индексы
+  // с собой — новая `jobs` оставалась без idx_jobs_unclaimed и idx_jobs_claim.
+  // Без транзакции обрыв посреди пересборки оставлял базу без очереди вовсе.
   const jobsDdl = (db.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jobs'").get() as { sql: string } | null)?.sql ?? "";
   if (jobsDdl.includes("UNIQUE")) {
-    db.exec("ALTER TABLE jobs RENAME TO jobs_v1_rebuild");
-    db.exec(SCHEMA); // создаёт новую jobs без UNIQUE + индексы
-    db.exec("INSERT INTO jobs (repo_id, status, claimed_at, lease_until) SELECT repo_id, status, claimed_at, lease_until FROM jobs_v1_rebuild");
-    db.exec("DROP TABLE jobs_v1_rebuild");
+    db.transaction(() => {
+      for (const idx of db.query("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'jobs' AND sql IS NOT NULL").all() as { name: string }[]) {
+        db.exec(`DROP INDEX IF EXISTS "${idx.name}"`);
+      }
+      db.exec("ALTER TABLE jobs RENAME TO jobs_v1_rebuild");
+      db.exec(SCHEMA); // создаёт новую jobs без UNIQUE + индексы
+      db.exec("INSERT INTO jobs (repo_id, status, claimed_at, lease_until) SELECT repo_id, status, claimed_at, lease_until FROM jobs_v1_rebuild");
+      db.exec("DROP TABLE jobs_v1_rebuild");
+    })();
   }
   db.exec(LATE_INDEXES);
   // ПОРТ 5 (hq-parallel): панель заданий (jobs.error — причина падения)

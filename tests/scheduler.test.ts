@@ -31,6 +31,7 @@ import {
   maintenanceTick,
   nightlyCatalog,
   processJob,
+  purgeOldJobs,
   renewLease,
   returnRepo,
   startWorkerLoop,
@@ -39,7 +40,7 @@ import {
   type ClaimedJob,
 } from "../src/jobs/scheduler";
 import { myJobs, requestUserScan } from "../src/api/me";
-import { upsertRepo, type runScan as runScanType, type ScanDeps, type ScanResult } from "../src/jobs/runner";
+import { runScan as realRunScan, upsertRepo, type runScan as runScanType, type ScanDeps, type ScanResult } from "../src/jobs/runner";
 import { makeScClient } from "../src/collectors/http";
 
 const dir = mkdtempSync(join(tmpdir(), "rh-sched-"));
@@ -54,6 +55,14 @@ function seedRepo(org: string, repo: string, lastActivityAt: string | null = nul
     "INSERT INTO repos (org_slug, repo_slug, last_activity_at, visibility) VALUES (?, ?, ?, ?) ON CONFLICT(org_slug, repo_slug) DO UPDATE SET last_activity_at = excluded.last_activity_at",
   ).run(org, repo, lastActivityAt, visibility);
   return (db.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number }).id;
+}
+
+/**
+ * Успешный ПРИГОДНЫЙ скан репо (Ф2.12): только он двигает `last_activity_at`.
+ * Ровно это делает скор-хук `runScan` — обход каталога с В4.2a дату не пишет.
+ */
+function markScanned(org: string, repo: string, lastUpdated: string): void {
+  db.query("UPDATE repos SET last_activity_at = ? WHERE org_slug = ? AND repo_slug = ?").run(lastUpdated, org, repo);
 }
 
 /** Фейк-клиент каталога: страницы repositories + next_page_token. */
@@ -183,7 +192,7 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
   test("лимит частоты: 11-я новая заявка за час → 429; дубли не считаются; окно скользящее", async () => {
     clear();
     const u = user("rate");
-    const queue = { userScansPerHour: 10, maxAttempts: 3, userActiveMax: 100, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000 };
+    const queue = { userScansPerHour: 10, maxAttempts: 3, userActiveMax: 100, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000, retentionDays: 30 };
     const ok = { get: async () => ({ status: 200, json: { visibility: "public" }, bodyText: "" }), requestCount: () => 0 };
     const now = new Date("2026-09-18T10:00:00Z");
     for (let i = 0; i < 10; i++) {
@@ -295,7 +304,7 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
     test("≤ userActiveMax активных заявок на юзера → 429 too_many_active; после завершения — снова можно", async () => {
       clear();
       const u = user("active-max");
-      const queue = { userScansPerHour: 100, maxAttempts: 3, userActiveMax: 2, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000 };
+      const queue = { userScansPerHour: 100, maxAttempts: 3, userActiveMax: 2, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000, retentionDays: 30 };
       expect((await requestUserScan(q, okClient, u, "am", "a", queue)).status).toBe(202);
       expect((await requestUserScan(q, okClient, u, "am", "b", queue)).status).toBe(202);
       // дубль активной заявки — по-прежнему 202 deduplicated (дедуп раньше предела)
@@ -313,7 +322,7 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
       clear();
       const u = user("par-dup");
       const slow = { get: async () => (await Bun.sleep(10), { status: 200, json: { visibility: "public" }, bodyText: "" }), requestCount: () => 0 };
-      const queue = { userScansPerHour: 100, maxAttempts: 3, userActiveMax: 100, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000 };
+      const queue = { userScansPerHour: 100, maxAttempts: 3, userActiveMax: 100, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000, retentionDays: 30 };
       const outs = await Promise.all([1, 2, 3].map(() => requestUserScan(q, slow, u, "pd", "same", queue)));
       expect(outs.map((o) => o.body["deduplicated"]).sort()).toEqual([false, true, true]);
       expect(new Set(outs.map((o) => o.body["jobId"])).size).toBe(1);
@@ -380,6 +389,11 @@ describe("ночной каталог: дифф, форс, эвикция", () =
     expect(r1.ok).toBe(true);
     expect(r1.enqueued.map((e) => e.reason)).toEqual(["new", "new"]);
     expect(r1.evicted).toEqual([]);
+    // Ф2.12: «изменился» расходуется ПРИГОДНЫМ СКАНОМ, а не постановкой —
+    // без успешного скана репо остаётся кандидатом (обход дату не пишет)
+    db.query("UPDATE jobs SET status = 'done' WHERE repo_id IN (SELECT id FROM repos WHERE org_slug = 'nc')").run();
+    markScanned("nc", "one", "2026-09-10T00:00:00Z");
+    markScanned("nc", "two", "2026-09-11T00:00:00Z");
     // второй прогон: даты не изменились → ничего в очередь
     const r2 = await nightlyCatalog(db, catalogClient(pages), { now: new Date() });
     expect(r2.enqueued).toEqual([]);
@@ -387,8 +401,6 @@ describe("ночной каталог: дифф, форс, эвикция", () =
     // В4.2-port-fix (П5): инвариант держится и на НЕПРИГОДНОМ репо — ветка
     // retry-ineligible ставила job каждый обход, пока живая job не проверялась
     const one = (db.query("SELECT id FROM repos WHERE org_slug = 'nc' AND repo_slug = 'one'").get() as { id: number }).id;
-    // очередь первого прогона разобрана (иначе гард П5 сработает уже на ней)
-    db.query("UPDATE jobs SET status = 'done' WHERE repo_id IN (SELECT id FROM repos WHERE org_slug = 'nc')").run();
     db.query("INSERT INTO scans (repo_id, started_at, finished_at, status, trigger, rating_eligible) VALUES (?, ?, ?, 'ok', 'periodic', 0)").run(
       one,
       "2026-09-12T00:00:00Z",
@@ -410,6 +422,8 @@ describe("ночной каталог: дифф, форс, эвикция", () =
     const v1 = [{ repos: [repoOf("df", "x", "2026-09-01T00:00:00Z"), repoOf("df", "y", "2026-09-01T00:00:00Z")], next: null }];
     await nightlyCatalog(db, catalogClient(v1), { now: new Date() });
     db.query("DELETE FROM jobs WHERE repo_id IN (SELECT id FROM repos WHERE org_slug = 'df')").run();
+    markScanned("df", "x", "2026-09-01T00:00:00Z");
+    markScanned("df", "y", "2026-09-01T00:00:00Z");
     // x обновился, y нет
     const v2 = [{ repos: [repoOf("df", "x", "2026-09-18T00:00:00Z"), repoOf("df", "y", "2026-09-01T00:00:00Z")], next: null }];
     const r = await nightlyCatalog(db, catalogClient(v2), { now: new Date() });
@@ -432,6 +446,7 @@ describe("ночной каталог: дифф, форс, эвикция", () =
   test("проваленный скан ретраится следующей ночью (retry-failed)", async () => {
     const pages = [{ repos: [repoOf("rt", "flaky", "2026-09-01T00:00:00Z")], next: null }];
     await nightlyCatalog(db, catalogClient(pages), { now: new Date() });
+    markScanned("rt", "flaky", "2026-09-01T00:00:00Z");
     db.query("UPDATE jobs SET status = 'failed' WHERE repo_id IN (SELECT id FROM repos WHERE org_slug = 'rt')").run();
     const r2 = await nightlyCatalog(db, catalogClient(pages), { now: new Date() });
     expect(r2.enqueued).toEqual([{ slug: "rt/flaky", reason: "retry-failed" }]);
@@ -879,10 +894,14 @@ describe("Ф2.1: тик воркер-лупа и планировщика выз
   test("processJob бросает → job закрыта failed с внутренней причиной, исключение не выходит наружу", async () => {
     const repoId = seedRepo("tick", "crash");
     const jobId = enqueueScan(db, repoId, { triggerKind: "periodic" });
+    // claim через шов: очередь общая на файл, тик обязан закрыть ИМЕННО эту job
+    const claimedAt = new Date().toISOString();
+    db.query("UPDATE jobs SET status = 'running', claimed_at = ?, attempts = 1 WHERE id = ?").run(claimedAt, jobId);
     const deps = {
       db,
       config,
       serverClient: () => null,
+      claimAny: (() => ({ id: jobId, repoId, slug: "tick/crash", userId: null, triggerKind: "periodic", claimedAt, attempts: 1 })) as unknown as typeof claimAny,
       runScan: (async () => {
         throw new Error("boom");
       }) as unknown as typeof runScanType,
@@ -1163,4 +1182,139 @@ describe("Ф2.5: catalogTick — две фазы, один обход, един�
   test("бюджет клиента обхода — потолок страниц + 10", () => {
     expect(catalogClientBudget(cfg)).toBe(cfg.scan.catalog.maxPages + 10);
   });
+});
+
+// ---------------------------------------------------------------------------
+// Ф2.13 (LOW-11). Ретеншен очереди: завершённые строки старше срока удаляются
+// в тике планировщика; живые и безвозрастные — никогда.
+// ---------------------------------------------------------------------------
+
+describe("Ф2.13: очистка jobs старше Config.queue.retentionDays", () => {
+  const NOW = new Date("2026-09-18T12:00:00.000Z");
+  const daysAgo = (d: number) => new Date(NOW.getTime() - d * 24 * 60 * 60_000).toISOString();
+
+  test("done/failed/refused старше срока удаляются; queued/running и строки без created_at остаются", () => {
+    const repoId = seedRepo("ret", "repo");
+    const ins = (status: string, createdAt: string | null): number =>
+      Number(db.query("INSERT INTO jobs (repo_id, status, trigger_kind, created_at) VALUES (?, ?, 'periodic', ?)").run(repoId, status, createdAt).lastInsertRowid);
+    const oldDone = ins("done", daysAgo(40));
+    const oldFailed = ins("failed", daysAgo(31));
+    const oldRefused = ins("refused", daysAgo(90));
+    const freshDone = ins("done", daysAgo(29));
+    const oldQueued = ins("queued", daysAgo(100));
+    const oldRunning = ins("running", daysAgo(100));
+    const noDate = ins("done", null);
+    const removed = purgeOldJobs(db, { retentionDays: 30, now: NOW });
+    const alive = (id: number) => db.query("SELECT 1 FROM jobs WHERE id = ?").get(id) !== null;
+    expect({
+      removed,
+      oldDone: alive(oldDone),
+      oldFailed: alive(oldFailed),
+      oldRefused: alive(oldRefused),
+      freshDone: alive(freshDone),
+      oldQueued: alive(oldQueued),
+      oldRunning: alive(oldRunning),
+      noDate: alive(noDate),
+    }).toEqual({
+      removed: 3,
+      oldDone: false,
+      oldFailed: false,
+      oldRefused: false,
+      freshDone: true,
+      oldQueued: true,
+      oldRunning: true,
+      noDate: true,
+    });
+    db.query("DELETE FROM jobs WHERE repo_id = ?").run(repoId);
+    db.query("DELETE FROM repos WHERE org_slug = 'ret'").run();
+  });
+
+  test("срок берётся из конфига, а тик планировщика его применяет", async () => {
+    const repoId = seedRepo("ret2", "repo");
+    db.query("INSERT INTO jobs (repo_id, status, trigger_kind, created_at) VALUES (?, 'done', 'periodic', ?)").run(repoId, daysAgo(8));
+    const base = loadConfig();
+    const out = await maintenanceTick(db, { ...base, queue: { ...base.queue, retentionDays: 7 } }, { now: NOW, cloneDir: dir });
+    expect(out.jobs).toBe(1);
+    expect((db.query("SELECT COUNT(*) AS c FROM jobs WHERE repo_id = ?").get(repoId) as { c: number }).c).toBe(0);
+    db.query("DELETE FROM repos WHERE org_slug = 'ret2'").run();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ф2.12 (LOW-2, третья часть). `last_activity_at` двигает только пригодный
+// скан: «изменился» не расходуется постановкой.
+// ---------------------------------------------------------------------------
+
+describe("Ф2.12: «изменился» расходуется пригодным сканом, а не постановкой", () => {
+  test("обход не пишет last_activity_at; после успешного скана репо перестаёт быть кандидатом", async () => {
+    const pages = [{ repos: [repoOf("f212", "repo", "2026-09-10T00:00:00Z")], next: null }];
+    const r1 = await nightlyCatalog(db, catalogClient(pages), { now: new Date() });
+    expect(r1.enqueued).toEqual([{ slug: "f212/repo", reason: "new" }]);
+    const id = (db.query("SELECT id FROM repos WHERE org_slug = 'f212'").get() as { id: number }).id;
+    // дата каталога в строку НЕ уехала: скана не было
+    expect((db.query("SELECT last_activity_at FROM repos WHERE id = ?").get(id) as { last_activity_at: string | null }).last_activity_at).toBeNull();
+    // скан провалился → очередь разобрана, но репо всё ещё кандидат
+    db.query("UPDATE jobs SET status = 'done' WHERE repo_id = ?").run(id);
+    const r2 = await nightlyCatalog(db, catalogClient(pages), { now: new Date() });
+    expect(r2.enqueued).toEqual([{ slug: "f212/repo", reason: "changed" }]);
+    // пригодный скан двигает водораздел (так делает скор-хук runScan)
+    db.query("UPDATE jobs SET status = 'done' WHERE repo_id = ?").run(id);
+    upsertRepo(db, "f212", "repo", { lastActivityAt: "2026-09-10T00:00:00Z" });
+    const r3 = await nightlyCatalog(db, catalogClient(pages), { now: new Date() });
+    expect(r3.enqueued).toEqual([]);
+    db.query("DELETE FROM jobs WHERE repo_id = ?").run(id);
+    db.query("DELETE FROM repos WHERE org_slug = 'f212'").run();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ф2.10 (M10). Тест «канальные 403 — не эвикция» на НАСТОЯЩЕМ `runScan`:
+// прежний был тавтологией — фейковый runScan сам возвращал repoAccess "ok".
+// Здесь repoAccess вычисляет живой конвейер по ответам локального мока.
+// ---------------------------------------------------------------------------
+
+describe("Ф2.10 (M10): канальные 403 не эвиктят — проверено настоящим runScan", () => {
+  test("repo-GET 200 + cicd/runs 403 → скан прошёл, репо в рейтинге, cicd.runs = no-data access", async () => {
+    const mock = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch(req) {
+        const p = new URL(req.url).pathname;
+        if (/\/cicd\/runs$/.test(p)) return Response.json({ error: "AccessDenied" }, { status: 403 });
+        if (/^\/repos\/[^/]+\/[^/]+$/.test(p)) return Response.json({ id: "gid-1", name: "R", visibility: "public", last_updated: "2026-09-10T00:00:00Z" });
+        return Response.json({ items: [], issues: [], releases: [], pulls: [] });
+      },
+    });
+    const repoId = seedRepo("m10", "chan403");
+    try {
+      const client = makeScClient({ token: "server-token", baseUrl: `http://127.0.0.1:${mock.port}`, minIntervalMs: 0, maxRequests: 50 });
+      const base = loadConfig();
+      const deps = {
+        db,
+        config: { ...base, scan: DEFAULT_SCAN },
+        serverClient: () => client,
+        // git подменён целиком: предмет теста — REST-ветка repoAccess
+        runScan: ((d: ScanDeps, slug: string, opts: Record<string, unknown>) =>
+          realRunScan({ ...d, collectGit: async () => ({ facts: [] }) }, slug, opts)) as unknown as typeof runScanType,
+      };
+      const job: ClaimedJob = {
+        id: enqueueScan(db, repoId, { triggerKind: "periodic" }),
+        repoId,
+        slug: "m10/chan403",
+        userId: null,
+        triggerKind: "periodic",
+        claimedAt: new Date().toISOString(),
+        attempts: 1,
+      };
+      const out = await processJob(deps, job);
+      expect(out).not.toBe("gone"); // 403 КАНАЛА — не сигнал об исчезновении репо
+      const scanId = (out as ScanResult).scanId;
+      const runs = db.query("SELECT status FROM facts WHERE scan_id = ? AND key = 'cicd.runs'").get(scanId) as { status: string } | null;
+      expect(runs?.status).toBe("no-data");
+      expect((db.query("SELECT rating_active FROM repos WHERE id = ?").get(repoId) as { rating_active: number }).rating_active).toBe(1);
+    } finally {
+      mock.stop(true);
+      db.query("DELETE FROM jobs WHERE repo_id = ?").run(repoId);
+    }
+  }, 30_000);
 });

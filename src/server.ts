@@ -41,7 +41,7 @@ import {
   userProfile,
 } from "./auth/session";
 import { deletePat, getPat, patMeta, storePat } from "./auth/pat";
-import { buildAuthUrl, exchangeCode, yaAvatarUrl } from "./auth/ya";
+import { buildAuthUrl, exchangeCode, yaAvatarUrl, type YaEndpoints } from "./auth/ya";
 import { makeScClient } from "./collectors/http";
 import { needsRescore, rescoreAll } from "./score/rescore";
 import index from "./web/index.html";
@@ -148,6 +148,9 @@ const yaCreds = () => ({
   redirect: config.auth.redirect,
 });
 
+/** Ф2.10: адреса Я ID — из конфига (тесты направляют их на локальный мок). */
+const yaEndpoints = (): YaEndpoints => ({ oauthBase: config.auth.yaOauthBase, loginBase: config.auth.yaLoginBase });
+
 const server = Bun.serve({
   port: config.port,
   routes: {
@@ -211,7 +214,7 @@ const server = Bun.serve({
       }
       try {
         const state = makeOAuthState();
-        const url = buildAuthUrl(yaCreds(), state);
+        const url = buildAuthUrl(yaCreds(), state, yaEndpoints());
         return new Response(null, { status: 302, headers: { location: url, "set-cookie": oauthStateCookieHeader(state) } });
       } catch (e) {
         return Response.json({ error: { code: "unconfigured", message: String((e as Error).message) } }, { status: 503 });
@@ -242,7 +245,7 @@ const server = Bun.serve({
       if (!code || !config.auth.appSecret) {
         return Response.redirect(new URL("/me?auth_error=no_code", url.origin), 302);
       }
-      const exchanged = await exchangeCode(yaCreds(), code);
+      const exchanged = await exchangeCode(yaCreds(), code, undefined, yaEndpoints());
       if (!exchanged.ok) {
         return Response.redirect(new URL(`/me?auth_error=${encodeURIComponent(exchanged.error.slice(0, 120))}`, url.origin), 302);
       }

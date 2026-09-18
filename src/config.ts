@@ -5,6 +5,8 @@
 // живут здесь (Config.scan), а не константами в модулях. Слои:
 // дефолты в коде ← env (.env — правка без GUI/CI). Пользовательский
 // DB-override бюджетов удалён (К5 В4.1): лимиты скана — только оператор.
+import { DEFAULT_YA_ENDPOINTS } from "./auth/ya";
+
 export interface CloneLimits {
   /** таймаут субпроцесса клонирования */
   timeoutMs: number;
@@ -62,6 +64,10 @@ export interface AuthConfig {
   redirect: string;
   /** ключ подписи сессий и шифрования PAT (AES-256-GCM) */
   appSecret: string | null;
+  /** адреса Я ID (Ф2.10): env YA_OAUTH_BASE / YA_LOGIN_BASE; дефолты боевые,
+   *  тесты направляют их на локальный мок — как Config.api в Ф1.13 */
+  yaOauthBase: string;
+  yaLoginBase: string;
 }
 
 export interface SchedulerConfig {
@@ -92,6 +98,8 @@ export interface QueueConfig {
   favoriteChecksPerMinute: number;
   /** кулдаун автозаявки по избранному от последнего OWN-скана зрителя (П2; решение 17.09 — 6 ч): env QUEUE_FAVORITE_OWN_COOLDOWN_MS */
   favoriteOwnCooldownMs: number;
+  /** ретеншен завершённых строк `jobs` (Ф2.13): 30 дней, env QUEUE_RETENTION_DAYS */
+  retentionDays: number;
 }
 
 export interface AccessConfig {
@@ -249,6 +257,8 @@ export function loadConfig(): Config {
       yaClientSecret: env.YA_CLIENT_SECRET ?? null,
       redirect: env.YA_REDIRECT_URI ?? "http://localhost:8418/auth/ya/callback",
       appSecret: env.APP_SECRET ?? null,
+      yaOauthBase: apiBaseFromEnv(env, "YA_OAUTH_BASE", DEFAULT_YA_ENDPOINTS.oauthBase),
+      yaLoginBase: apiBaseFromEnv(env, "YA_LOGIN_BASE", DEFAULT_YA_ENDPOINTS.loginBase),
     },
     scheduler: {
       intervalMs: envInt(env, "SCHEDULER_INTERVAL_MS") ?? 24 * 60 * 60_000,
@@ -268,6 +278,7 @@ export function loadConfig(): Config {
       userActiveMax: envInt(env, "QUEUE_USER_ACTIVE_MAX") ?? 2,
       favoriteChecksPerMinute: envInt(env, "QUEUE_FAVORITE_CHECKS_PER_MINUTE") ?? 6,
       favoriteOwnCooldownMs: envInt(env, "QUEUE_FAVORITE_OWN_COOLDOWN_MS") ?? 6 * 60 * 60_000,
+      retentionDays: envInt(env, "QUEUE_RETENTION_DAYS") ?? 30,
     },
     llm: {
       provider,

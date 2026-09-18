@@ -36,8 +36,22 @@ export interface YaHttp {
 }
 
 export const YA_AUTHORIZE_URL = "https://oauth.yandex.ru/authorize";
-const YA_TOKEN_URL = "https://oauth.yandex.ru/token";
-const YA_INFO_URL = "https://login.yandex.ru/info";
+
+/**
+ * Адреса Я ID (Ф2.10, тот же приём, что `Config.api` в Ф1.13): тестовый
+ * сервер направляет их на локальный мок, дефолты — боевые. Без этого шва
+ * маршруты `/auth/*` проверяются только по кускам, а не по HTTP настоящего
+ * сервера (M10: «маршруты /auth/* не тестируются»).
+ */
+export interface YaEndpoints {
+  oauthBase: string;
+  loginBase: string;
+}
+
+export const DEFAULT_YA_ENDPOINTS: YaEndpoints = {
+  oauthBase: "https://oauth.yandex.ru",
+  loginBase: "https://login.yandex.ru",
+};
 
 /** Живой шов на fetch (ретраи не нужны: две короткие операции входа). */
 export const liveYaHttp: YaHttp = {
@@ -56,7 +70,7 @@ export const liveYaHttp: YaHttp = {
 };
 
 /** URL начала OAuth-потока (state — CSRF-токен, генерирует вызываемый). */
-export function buildAuthUrl(creds: YaIdCredentials, state: string): string {
+export function buildAuthUrl(creds: YaIdCredentials, state: string, endpoints: YaEndpoints = DEFAULT_YA_ENDPOINTS): string {
   if (!creds.clientId) {
     throw new Error("YA_CLIENT_ID не задан: приложение Я ID не сконфигурировано (env)");
   }
@@ -66,20 +80,25 @@ export function buildAuthUrl(creds: YaIdCredentials, state: string): string {
     redirect_uri: creds.redirect,
     state,
   });
-  return `${YA_AUTHORIZE_URL}?${params.toString()}`;
+  return `${endpoints.oauthBase}/authorize?${params.toString()}`;
 }
 
 /**
  * Обмен code → профиль Я ID: token → /info. Ошибки Яндекса проходят
  * текстом (без секретов): 400 invalid_grant, сеть, форма ответа /info.
  */
-export async function exchangeCode(creds: YaIdCredentials, code: string, http: YaHttp = liveYaHttp): Promise<ExchangeResult> {
+export async function exchangeCode(
+  creds: YaIdCredentials,
+  code: string,
+  http: YaHttp = liveYaHttp,
+  endpoints: YaEndpoints = DEFAULT_YA_ENDPOINTS,
+): Promise<ExchangeResult> {
   if (!creds.clientId || !creds.clientSecret) {
     return { ok: false, error: "приложение Я ID не сконфигурировано (YA_CLIENT_ID/SECRET)" };
   }
   let tokenRes: { status: number; json: unknown };
   try {
-    tokenRes = await http.postForm(YA_TOKEN_URL, {
+    tokenRes = await http.postForm(`${endpoints.oauthBase}/token`, {
       grant_type: "authorization_code",
       code,
       client_id: creds.clientId,
@@ -96,7 +115,7 @@ export async function exchangeCode(creds: YaIdCredentials, code: string, http: Y
   }
   let infoRes: { status: number; json: unknown };
   try {
-    infoRes = await http.getJson(YA_INFO_URL, { Authorization: `OAuth ${tokenBody.access_token}` });
+    infoRes = await http.getJson(`${endpoints.loginBase}/info`, { Authorization: `OAuth ${tokenBody.access_token}` });
   } catch (e) {
     return { ok: false, error: `сеть Я ID (info): ${String((e as Error).message).slice(0, 120)}` };
   }
