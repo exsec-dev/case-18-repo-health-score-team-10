@@ -89,9 +89,10 @@ const rawEntry = (org: string, slug: string, lastUpdated: string | null) => ({
 // ---------------------------------------------------------------------------
 
 describe("Р1 (HIGH): кэш версии git — только успех", () => {
+  // закрыто блоком Б9 — обёртка снята, утверждения не менялись.
   // Проба подменяется шимом в PATH (execFile резолвит git по PATH на каждый
   // запуск): падение и восстановление видны БЕЗ перезапуска процесса.
-  repro("проба падает → cloneBare отказывает; проба восстановлена → тот же процесс клонирует", async () => {
+  test("проба падает → cloneBare отказывает; проба восстановлена → тот же процесс клонирует", async () => {
     __resetGitVersionCache();
     const shimDir = mkdtempSync(join(tmpdir(), "rh-gitshim-"));
     writeFileSync(join(shimDir, "git"), "#!/bin/sh\nexit 3\n");
@@ -168,7 +169,8 @@ async function runBunScript(script: string): Promise<{ code: number; stdout: str
 const callsOf = (stdout: string): number => Number(/CALLS=(\d+)/.exec(stdout)?.[1] ?? 0);
 
 describe("Р2: броня таймеров планировщика (Ф2.1)", () => {
-  repro("шов тика бросает синхронно — таймер жив, процесс не падает", async () => {
+  // закрыто блоком Б9 — обёртка снята, утверждения не менялись
+  test("шов тика бросает синхронно — таймер жив, процесс не падает", async () => {
     const script = `
 const { startScheduler } = await import(${JSON.stringify(join(import.meta.dir, "..", "src", "jobs", "scheduler"))});
 let calls = 0;
@@ -184,7 +186,8 @@ console.log("CALLS=" + calls);`;
     expect(callsOf(out.stdout)).toBeGreaterThanOrEqual(2);
   });
 
-  repro("шов тика возвращает отказавший промис — таймер жив, процесс не падает", async () => {
+  // закрыто блоком Б9 — обёртка снята, утверждения не менялись
+  test("шов тика возвращает отказавший промис — таймер жив, процесс не падает", async () => {
     const script = `
 const { startScheduler } = await import(${JSON.stringify(join(import.meta.dir, "..", "src", "jobs", "scheduler"))});
 let calls = 0;

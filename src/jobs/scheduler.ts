@@ -905,6 +905,26 @@ export async function catalogTick(
   }
 }
 
+/**
+ * К-Р2 (круг 2): броня КОЛБЭКА ТАЙМЕРА — та же, что у воркер-лупа
+ * (`startWorkerLoop`): синхронный бросок шва и отказ промиса логируются,
+ * цикл жив (Ф2.1 «цикл жив» распространён на ОБА таймера планировщика —
+ * тик каталога и часовое обслуживание). Экспортирована для теста брони
+ * без ожидания часового интервала обслуживания.
+ */
+export function armoredTimerCallback(label: string, fn: () => Promise<unknown> | void): () => void {
+  return () => {
+    try {
+      const out = fn();
+      if (out !== undefined && typeof (out as Promise<unknown>).catch === "function") {
+        void (out as Promise<unknown>).catch((e) => console.error(`[${label}] tick failed: ${String((e as Error).message).slice(0, 200)}`));
+      }
+    } catch (e) {
+      console.error(`[${label}] tick failed: ${String((e as Error).message).slice(0, 200)}`);
+    }
+  };
+}
+
 export function startScheduler(
   db: Database,
   serverClient: () => ScClient | null,
@@ -916,12 +936,14 @@ export function startScheduler(
   const state = newCatalogTickState();
   const tick = seams.tick ?? catalogTick;
   const maintenance = seams.maintenance ?? maintenanceTick;
-  const run = () => void tick(db, serverClient, config, state);
+  // К-Р2: оба таймера — в броне (раньше `void tick(...)` без try/catch и без
+  // .catch: отказ шва останавливал таймер молча)
+  const run = armoredTimerCallback("scheduler", () => tick(db, serverClient, config, state));
   const first = setTimeout(run, config.scheduler.startDelayMs);
   // тик зовётся с периодом частой фазы; какая из фаз исполнится — решают
   // due-метки внутри тика, а не расписание таймера
   const timer = setInterval(run, Math.max(1, Math.min(config.scheduler.catalogIntervalMs, config.scheduler.intervalMs)));
-  const sweepTimer = setInterval(() => void maintenance(db, config), 60 * 60_000); // ПОРТ S3 + Ф2.2/Ф2.13
+  const sweepTimer = setInterval(armoredTimerCallback("sweep", () => maintenance(db, config)), 60 * 60_000); // ПОРТ S3 + Ф2.2/Ф2.13
   return () => {
     clearTimeout(first);
     clearInterval(timer);

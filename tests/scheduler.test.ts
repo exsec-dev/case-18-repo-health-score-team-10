@@ -15,6 +15,7 @@ import { openDb } from "../src/db";
 import type { ScClient, ScResponse } from "../src/collectors/http";
 import {
   __resetRoundRobin,
+  armoredTimerCallback,
   catalogClientBudget,
   catalogTick,
   newCatalogTickState,
@@ -915,6 +916,28 @@ describe("Ф2.1: тик воркер-лупа и планировщика выз
   test("тик занят (busy) → повторный вызов не заявляет вторую job", async () => {
     const deps = { db, config, serverClient: () => null };
     expect(await workerTick(deps, ["user"], { busy: true })).toBe("busy");
+  });
+
+  // К-Р2 (круг 2 В4.2a): обёртка колбэка таймера глотает оба вида отказа —
+  // синхронный бросок и отклонённый промис; покрывает ОБА таймера
+  // планировщика (тик каталога — поведенчески в audit-m42a-r2-repro.test.ts,
+  // часовое обслуживание — здесь, без ожидания часового интервала)
+  test("armoredTimerCallback: синхронный бросок и отказавший промис не выходят наружу, вызовы считаются", async () => {
+    let syncCalls = 0;
+    const syncWrapped = armoredTimerCallback("test-sync", () => {
+      syncCalls++;
+      throw new Error("sync boom");
+    });
+    expect(() => syncWrapped()).not.toThrow();
+    let asyncCalls = 0;
+    const asyncWrapped = armoredTimerCallback("test-async", () => {
+      asyncCalls++;
+      return Promise.reject(new Error("async boom"));
+    });
+    expect(() => asyncWrapped()).not.toThrow();
+    await Bun.sleep(10); // отказ промиса успевает стать unhandled без брони
+    expect(() => armoredTimerCallback("test-void", () => {})()).not.toThrow(); // void-возврат — штатный путь
+    expect({ syncCalls, asyncCalls }).toEqual({ syncCalls: 1, asyncCalls: 1 });
   });
 
   test("catalogTick: бросок внутри обхода не выходит наружу; re-entrancy-гард пропускает повторный вход", async () => {

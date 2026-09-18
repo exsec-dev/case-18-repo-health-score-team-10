@@ -199,7 +199,8 @@ export function parseGitVersion(text: string): [number, number, number] | null {
  * `http.extraHeader` через `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_*` появился в
  * git 2.31 (до неё переменные игнорируются, и клон приватного репо ушёл бы
  * без авторизации — либо, если бы мы вернули креды в URL, с PAT в argv).
- * Версия читается один раз на процесс.
+ * К-Р1 (круг 2, HIGH): в кэше живёт ТОЛЬКО успех — отказ пробы не
+ * сохраняется, следующий вызов пробует заново.
  */
 export const MIN_GIT_VERSION: [number, number] = [2, 31];
 let gitVersionCache: Promise<[number, number, number] | null> | null = null;
@@ -210,9 +211,25 @@ export function __resetGitVersionCache(): void {
 
 export async function gitVersion(): Promise<[number, number, number] | null> {
   if (gitVersionCache === null) {
-    gitVersionCache = execGit(["--version"], { timeoutMs: 10_000 })
-      .then((r) => parseGitVersion(r.stdout))
-      .catch(() => null);
+    const probe = execGit(["--version"], { timeoutMs: 10_000 }).then((r) => parseGitVersion(r.stdout));
+    // К-Р1: прежде отказ гасился в null и кэшировался ВМЕСТЕ с промисом —
+    // один транзиторный сбой `git --version` (EAGAIN, таймаут под нагрузкой)
+    // отравлял кэш до перезапуска процесса: versionAtLeast(null) ложно, и
+    // КАЖДЫЙ клон с кредами отказывался, не запуская git. Теперь отказ и
+    // неразбираемый вывод обнуляют кэш — следующий вызов пробует заново;
+    // параллельные вызовы делят один живой промис (двух проб одновременно
+    // не бывает). Отказ логируется без секретов (в `git --version` их нет).
+    gitVersionCache = probe.then(
+      (v) => {
+        if (v === null) gitVersionCache = null;
+        return v;
+      },
+      (e) => {
+        console.error(`[git] version probe failed: ${String((e as Error).message).slice(0, 160)}`);
+        gitVersionCache = null;
+        return null;
+      },
+    );
   }
   return gitVersionCache;
 }
