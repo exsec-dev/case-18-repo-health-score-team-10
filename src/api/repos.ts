@@ -212,6 +212,21 @@ WHERE sc.model_version = ?
 /** Категории каналов с правами зрителя (К2): в рейтинге и без доступа — закрыты. */
 export const CHANNEL_CATEGORIES: CategoryKey[] = ["cicd", "security"];
 
+/**
+ * Ключ дерева КАНАЛЬНОГО скана в доказательствах карточки (П13, круг 2
+ * В4.2-port-fix; решение владельца (1) 18.09). Это НЕ kind: факта с таким
+ * ключом в таблице `facts` не существует и появиться не может (ключи фактов
+ * приходят из реестра `KINDS`, где «@» не встречается), в
+ * PUBLIC_KINDS/CHANNEL_KINDS/READ_KINDS он не добавляется, Score по нему не
+ * считается, валидатор фактов и фильтры пригодности скана его не видят.
+ * Живёт только в `evidence` карточки и в MD-отчёте: под ним едет `tree.stats`
+ * того скана, по которому посчитана плотность Security, — публичный
+ * `tree.stats` скана P при этом остаётся на месте (он кормит `derived`).
+ * Суффикс `@channel` выбран так, чтобы ключ нельзя было спутать с kind и
+ * чтобы `categoryOf` (префикс до первой точки) по-прежнему давал «code».
+ */
+export const CHANNEL_TREE_KEY = "tree.stats@channel";
+
 function toRatingItem(row: RatingRow): RatingItem {
   const cats = JSON.parse(row.categories) as Record<string, CategoryScore>;
   const categories = {} as Record<CategoryKey, number | null>;
@@ -759,12 +774,24 @@ export function getRepoCard(
   // канального скана, а фильтр `f.key !== "tree.stats"` вырезал именно его —
   // зритель видел «плотность N на 10k LOC» и рядом «tree.stats — нет данных»
   // из другого (публичного) скана, то есть число без единого факта в
-  // отданном JSON. Теперь в доказательства едет `tree.stats` ТОГО скана, по
-  // которому посчитана категория, и он вытесняет одноимённый факт скана P
-  // (иначе в evidence было бы две записи с одним ключом).
-  const secTree = secOpen ? channel.securityFacts.find((f) => f.key === "tree.stats") : undefined;
-  const shownChannelFacts = [...(ciOpen ? channel.cicdFacts : []), ...(secOpen ? channel.securityFacts : [])];
-  const factRows = [...publicFacts.filter((f) => !(secTree !== undefined && f.key === "tree.stats")), ...shownChannelFacts];
+  // отданном JSON.
+  //
+  // Круг 2 (П13, Н-4; решение владельца (1) 18.09): вытеснять публичный факт
+  // канальным нельзя. `tree.stats` лежит в PUBLIC_KINDS и кормит ДВЕ
+  // поверхности сразу — плотность Security и публичные `derived`
+  // (todoDensityPerKloc, rootEntries, маркер codeEmpty), которые считаются по
+  // скану P. Подмена делала с публичными числами ровно то, за что чинили
+  // Security (число из одного скана, доказательство из другого) и ставила
+  // публичное доказательство в зависимость от прав зрителя вопреки К-Ф1.1.
+  // Поэтому публичный `tree.stats` остаётся нетронутым, а дерево канального
+  // скана едет СВОИМ ключом `tree.stats@channel`: он живёт только в evidence
+  // карточки и в MD, в PUBLIC_KINDS / CHANNEL_KINDS / READ_KINDS не входит, в
+  // расчёт Score не идёт (его считает channelFacts выше) и зрителю без прав
+  // на Security не отдаётся вовсе, как любое канальное доказательство.
+  const shownChannelFacts = [...(ciOpen ? channel.cicdFacts : []), ...(secOpen ? channel.securityFacts : [])].map((f) =>
+    f.key === "tree.stats" ? { ...f, key: CHANNEL_TREE_KEY } : f,
+  );
+  const factRows = [...publicFacts, ...shownChannelFacts];
   const factByKey = new Map(factRows.map((f) => [f.key, f]));
   // missing = факта нет по построению (публичный appsec.findings) — UI объясняет причину
   for (const rec of recommendations) for (const ref of rec.factRefs) ref.missing = !factByKey.has(ref.key);
@@ -772,7 +799,7 @@ export function getRepoCard(
   // адресуемые факты: те, на которые ссылаются рекомендации, плюс те,
   // что читает compute — сырьё остальных в ответ не едет
   const refKeys = recommendations.flatMap((rec) => rec.factRefs.map((ref) => ref.key));
-  const addressable = new Set<string>([...refKeys, ...PUBLIC_KINDS, ...CHANNEL_KINDS]);
+  const addressable = new Set<string>([...refKeys, ...PUBLIC_KINDS, ...CHANNEL_KINDS, CHANNEL_TREE_KEY]);
   const evidence: CardEvidence[] = factRows
     .filter((f) => addressable.has(f.key))
     .map((f) => {

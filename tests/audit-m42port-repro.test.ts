@@ -40,6 +40,12 @@ import { spawnServer, startMockApi, type SpawnedServer } from "./server-harness"
 // в конце файла.
 const repro = process.env.AUDIT_STRICT ? test : test.failing;
 
+/**
+ * Ключ канального дерева в `evidence` (П13). Литерал повторён здесь намеренно:
+ * репро-тест пиннит контракт, а не следует за константой реализации.
+ */
+const CHANNEL_TREE_KEY = "tree.stats@channel";
+
 const cleanups: (() => void)[] = [];
 afterAll(() => {
   for (const c of cleanups.reverse()) c();
@@ -155,7 +161,12 @@ describe("П5 (С2 r2): три обхода при неизменном ката
 const GRANTED = { cicd: "granted", appsec: "granted", repo: "granted" } as const;
 
 describe("П9 (С1 r2): число плотности Security и tree.stats в доказательствах — из одного скана", () => {
-  test("канальный скан с ok tree.stats(loc=20000) — его же tree.stats в evidence, не вырезанный фильтром", () => {
+  // Форму доказательства поправил круг 2 (П13, решение владельца (1) 18.09):
+  // канальное дерево едет СВОИМ ключом, публичный `tree.stats` скана P не
+  // вытесняется. Утверждение позиции П9 то же — число плотности и факт, из
+  // которого оно посчитано, из одного скана; изменился ключ, под которым
+  // канальный факт лежит в evidence.
+  test("канальный скан с ok tree.stats(loc=20000) — его дерево в evidence под канальным ключом", () => {
     const t = tempDb("rh-m42-p9-");
     const repoId = seedRepo(t, { org: "dens", repo: "repo", language: "Go" });
     // скан A: Security-канал (appsec.findings ok + tree.stats ok) — по нему считается плотность
@@ -177,7 +188,7 @@ describe("П9 (С1 r2): число плотности Security и tree.stats в 
 
     const card = getRepoCard(t.db, "dens", "repo", { access: { ...GRANTED } })!;
     const density = card.score!.categories.security.submetrics.density as { score: number | null; value: number | null } | undefined;
-    const tree = card.evidence.filter((e) => e.key === "tree.stats");
+    const tree = card.evidence.filter((e) => e.key === CHANNEL_TREE_KEY);
     const appsec = card.evidence.find((e) => e.key === "appsec.findings");
     expect({
       densityValue: typeof density?.value === "number" ? Math.round(density!.value! * 1000) / 1000 : density?.value ?? null,
@@ -186,6 +197,8 @@ describe("П9 (С1 r2): число плотности Security и tree.stats в 
       treeLoc: (tree[0]?.value as { loc?: unknown } | undefined)?.loc ?? null,
       appsecPresent: appsec !== undefined,
       sameScan: appsec !== undefined && tree[0] !== undefined && appsec.collectedAt === tree[0].collectedAt,
+      // публичный факт скана P остаётся на месте и своим статусом (П13)
+      publicTreeStatus: card.evidence.find((e) => e.key === "tree.stats")?.status ?? null,
     }).toEqual({
       // SEVERITY_WEIGHTS: 0*8 + 2*4 + 4*2 + 6*1 = 22 на 20 000 LOC → 11 на 10k LOC
       densityValue: 11,
@@ -194,6 +207,7 @@ describe("П9 (С1 r2): число плотности Security и tree.stats в 
       treeLoc: 20_000,
       appsecPresent: true,
       sameScan: true,
+      publicTreeStatus: "no-data",
     });
     // ни одна ссылка показанного правила на факт канала не «повисает»
     const dangling = card.recommendations.flatMap((r) => r.factRefs).filter((ref) => ref.missing && (ref.key === "tree.stats" || ref.key === "appsec.findings"));
@@ -268,8 +282,6 @@ describe("П11 (Н-2): миграция бэкфиллит trigger_kind — пр
 // едет своим ключом; публичный `tree.stats` не трогается.
 // ---------------------------------------------------------------------------
 
-/** Ключ канального дерева в evidence (только карточка и MD; не kind, в реестры не входит). */
-const CHANNEL_TREE_KEY = "tree.stats@channel";
 const DENIED = { cicd: "denied", appsec: "denied", repo: "denied" } as const;
 
 /** Репо, у которого tree.stats скана P и канального скана оба ok и РАЗНЫЕ. */
@@ -292,7 +304,7 @@ function twoTreesRepo(prefix: string): { t: ApiTestDb; secScan: number } {
 }
 
 describe("П13 (Н-4): публичный tree.stats не вытесняется канальным — публичная половина карточки одна для всех", () => {
-  repro("оба скана ok и значения разные: публичный tree.stats идентичен для зрителя с правами и без", () => {
+  test("оба скана ok и значения разные: публичный tree.stats идентичен для зрителя с правами и без", () => {
     const { t } = twoTreesRepo("rh-m42-p13a-");
     const open = getRepoCard(t.db, "twotrees", "repo", { access: { ...GRANTED } })!;
     const closed = getRepoCard(t.db, "twotrees", "repo", { access: { ...DENIED } })!;
@@ -321,7 +333,7 @@ describe("П13 (Н-4): публичный tree.stats не вытесняется
     });
   });
 
-  repro("плотность Security доказывается канальным ключом: его collectedAt — скана, давшего число", () => {
+  test("плотность Security доказывается канальным ключом: его collectedAt — скана, давшего число", () => {
     const { t } = twoTreesRepo("rh-m42-p13b-");
     const card = getRepoCard(t.db, "twotrees", "repo", { access: { ...GRANTED } })!;
     const density = card.score!.categories.security.submetrics.density as { value: number | null } | undefined;
