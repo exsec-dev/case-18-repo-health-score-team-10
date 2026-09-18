@@ -462,6 +462,8 @@ export interface WorkerDeps {
   /** швы для тестов */
   runScan?: typeof runScan;
   getPat?: typeof getPat;
+  /** шов Б0: подмена claim (тест роняет БД внутри тика) */
+  claimAny?: typeof claimAny;
 }
 
 /**
@@ -525,58 +527,97 @@ export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<Sca
  * rating-воркер (ночная волна), all = dev-обе-в-одном (user вперёд).
  * Фоновый пересчёт истории крутит только rating-роль (web держит готовность).
  */
-export function startWorkerLoop(deps: WorkerDeps, queues: { user?: boolean; rating?: boolean }, pollMs = 5000): () => void {
+export type WorkerTickOutcome = "busy" | "idle" | "claim-failed" | "done" | "failed";
+
+/** Состояние воркер-лупа между тиками (гард «занят»): шов Б0 держит его снаружи. */
+export interface WorkerLoopState {
+  busy: boolean;
+}
+
+/**
+ * Тело одного тика воркер-лупа — ОТДЕЛЬНАЯ функция (Ф2.1, остаток после
+ * портов): тест вызывает её напрямую, без таймера. Броня портов сохранена
+ * целиком — claim, фоновый пересчёт, `processJob`, `renewLease` в try/catch;
+ * исключение наружу не выходит, цикл жив.
+ */
+export async function workerTick(
+  deps: WorkerDeps,
+  order: Array<"user" | "rating">,
+  state: WorkerLoopState,
+  opts: { historyRescore?: boolean } = {},
+): Promise<WorkerTickOutcome> {
+  if (state.busy) return "busy";
+  const leaseMs = deps.config.scheduler.leaseMs;
+  // ПОРТ S2/ищейка-8: весь тик в броне — бросок БД не валит процесс
+  let job: ClaimedJob | null = null;
+  try {
+    job = (deps.claimAny ?? claimAny)(deps.db, order, new Date(), leaseMs, { maxAttempts: deps.config.queue.maxAttempts });
+  } catch (e) {
+    console.error(`[worker] claim failed: ${String((e as Error).message).slice(0, 200)}`);
+    return "claim-failed";
+  }
+  if (!job) {
+    // обе наши очереди пусты — порция фонового пересчёта истории (LOW-7)
+    if (opts.historyRescore) {
+      try {
+        rescoreHistoryBatch(deps.db, { log: (m) => console.log(`[worker] ${m}`) });
+      } catch (e) {
+        console.error(`[worker] history rescore failed: ${String((e as Error).message).slice(0, 200)}`);
+      }
+    }
+    return "idle";
+  }
+  const claimed = job;
+  state.busy = true;
+  const heartbeat = setInterval(() => {
+    try {
+      renewLease(deps.db, claimed.id, claimed.claimedAt, leaseMs);
+    } catch (e) {
+      console.error(`[worker] job ${claimed.id} lease renew failed: ${String((e as Error).message).slice(0, 200)}`);
+    }
+  }, Math.max(1, Math.floor(leaseMs / 3)));
+  try {
+    const result = await processJob(deps, claimed);
+    // П8: причина падения — в jobs.error, панель заданий показывает её дословно
+    const failure =
+      result === "gone"
+        ? JOB_ERRORS.gone
+        : result === "no-pat"
+          ? JOB_ERRORS.noPat
+          : result.status === "bad"
+            ? JOB_ERRORS.channels(failedChannelsOf(result.channels))
+            : null;
+    finishJob(deps.db, claimed.id, claimed.claimedAt, failure === null ? "done" : "failed", failure ?? undefined);
+    return failure === null ? "done" : "failed";
+  } catch (e) {
+    console.error(`[worker] job ${claimed.id} (${claimed.slug}) crashed: ${String((e as Error).message).slice(0, 200)}`);
+    finishJob(deps.db, claimed.id, claimed.claimedAt, "failed", JOB_ERRORS.internal);
+    return "failed";
+  } finally {
+    clearInterval(heartbeat);
+    state.busy = false;
+  }
+}
+
+export function startWorkerLoop(
+  deps: WorkerDeps,
+  queues: { user?: boolean; rating?: boolean },
+  pollMs = 5000,
+  seams: { tick?: typeof workerTick } = {},
+): () => void {
   const order: Array<"user" | "rating"> = queues.user && queues.rating ? ["user", "rating"] : queues.user ? ["user"] : queues.rating ? ["rating"] : [];
   if (order.length === 0) return () => {};
-  let busy = false;
-  const leaseMs = deps.config.scheduler.leaseMs;
-  const timer = setInterval(async () => {
-    if (busy) return;
-    // ПОРТ S2/ищейка-8: весь тик в броне — бросок БД не валит процесс
-    let job: ClaimedJob | null = null;
+  const state: WorkerLoopState = { busy: false };
+  const tick = seams.tick ?? workerTick;
+  const timer = setInterval(() => {
+    // тик целиком в броне и на уровне таймера: синхронный бросок шва (или
+    // отказ самого `setInterval`-колбэка) не должен ронять процесс
     try {
-      job = claimAny(deps.db, order, new Date(), leaseMs, { maxAttempts: deps.config.queue.maxAttempts });
+      void tick(deps, order, state, { historyRescore: queues.rating === true }).catch((e) =>
+        console.error(`[worker] tick failed: ${String((e as Error).message).slice(0, 200)}`),
+      );
     } catch (e) {
-      console.error(`[worker] claim failed: ${String((e as Error).message).slice(0, 200)}`);
-      return;
-    }
-    if (!job) {
-      // обе наши очереди пусты — порция фонового пересчёта истории (LOW-7)
-      if (queues.rating) {
-        try {
-          rescoreHistoryBatch(deps.db, { log: (m) => console.log(`[worker] ${m}`) });
-        } catch (e) {
-          console.error(`[worker] history rescore failed: ${String((e as Error).message).slice(0, 200)}`);
-        }
-      }
-      return;
-    }
-    busy = true;
-    const heartbeat = setInterval(() => {
-      try {
-        renewLease(deps.db, job.id, job.claimedAt, leaseMs);
-      } catch (e) {
-        console.error(`[worker] job ${job.id} lease renew failed: ${String((e as Error).message).slice(0, 200)}`);
-      }
-    }, Math.max(1, Math.floor(leaseMs / 3)));
-    try {
-      const result = await processJob(deps, job);
-      // П8: причина падения — в jobs.error, панель заданий показывает её дословно
-      const failure =
-        result === "gone"
-          ? JOB_ERRORS.gone
-          : result === "no-pat"
-            ? JOB_ERRORS.noPat
-            : result.status === "bad"
-              ? JOB_ERRORS.channels(failedChannelsOf(result.channels))
-              : null;
-      finishJob(deps.db, job.id, job.claimedAt, failure === null ? "done" : "failed", failure ?? undefined);
-    } catch (e) {
-      console.error(`[worker] job ${job.id} (${job.slug}) crashed: ${String((e as Error).message).slice(0, 200)}`);
-      finishJob(deps.db, job.id, job.claimedAt, "failed", JOB_ERRORS.internal);
-    } finally {
-      clearInterval(heartbeat);
-      busy = false;
+      console.error(`[worker] tick failed: ${String((e as Error).message).slice(0, 200)}`);
     }
   }, pollMs);
   return () => clearInterval(timer);

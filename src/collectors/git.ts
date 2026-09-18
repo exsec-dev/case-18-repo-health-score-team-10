@@ -33,6 +33,37 @@ export interface CloneFailure {
 
 export type CloneOutcome = CloneSuccess | CloneFailure;
 
+/**
+ * Швы В4.2a (Б0). Минимальные структурные типы вместо `Bun.Subprocess`:
+ * тест подставляет свой процесс, не собирая генерики Bun.
+ */
+export interface SpawnedGit {
+  pid: number;
+  exited: Promise<number>;
+  stderr: ReadableStream<Uint8Array>;
+  kill(signal?: number | NodeJS.Signals): void;
+}
+
+/** Шов запуска `git clone` (Ф2.4): тест видит argv и env дочернего процесса. */
+export type SpawnGit = (opts: { cmd: string[]; env: Record<string, string> }) => SpawnedGit;
+
+export interface CatFileProc {
+  stdin: { write(data: Uint8Array): unknown; end(): unknown };
+  stdout: ReadableStream<Uint8Array>;
+  exited: Promise<number>;
+  kill(signal?: number | NodeJS.Signals): void;
+}
+
+/** Шов `git cat-file --batch` (Ф2.3): тест обрывает поток на середине. */
+export type CatFileSpawn = (cloneDir: string) => CatFileProc;
+
+export interface CloneSeams {
+  /** подмена запуска git (по умолчанию `Bun.spawn`) */
+  spawnGit?: SpawnGit;
+  /** вызывается с каталогом успешного клона ДО того, как его увидит вызывающий */
+  onCloneDir?: (dir: string) => void | Promise<void>;
+}
+
 interface ExecResult {
   stdout: string;
   stderr: string;
@@ -122,7 +153,7 @@ export async function cloneBare(
   urlWithCreds: string,
   tmpDir: string = tmpdir(),
   limits: CloneLimits,
-  opts: { shallowSince?: string } = {},
+  opts: { shallowSince?: string } & CloneSeams = {},
 ): Promise<CloneOutcome> {
   const dir = mkdtempSync(join(tmpDir, "rh-clone-"));
   const started = Date.now();
@@ -143,8 +174,9 @@ export async function cloneBare(
   if (opts.shallowSince) gitArgs.push(`--shallow-since=${opts.shallowSince}`);
   gitArgs.push(cloneUrl, dir);
   const cmd = HAVE_SETSID ? ["setsid", "git", ...gitArgs] : ["git", ...gitArgs];
-  const proc = Bun.spawn({ cmd, stdout: "ignore", stderr: "pipe", stdin: "ignore",
-    env: { ...process.env, ...childEnv } });
+  const spawn: SpawnGit =
+    opts.spawnGit ?? ((o) => Bun.spawn({ cmd: o.cmd, stdout: "ignore", stderr: "pipe", stdin: "ignore", env: o.env }));
+  const proc = spawn({ cmd, env: { ...(process.env as Record<string, string>), ...childEnv } });
   let bytes = 0;
   let breach: "timeout" | "disk" | null = null;
   while (breach === null) {
@@ -195,6 +227,8 @@ export async function cloneBare(
           elapsedMs,
         };
   }
+  // шов Б0: тест читает `<dir>/config` до того, как каталог уберут
+  await opts.onCloneDir?.(dir);
   return { ok: true, dir, bytes, elapsedMs };
 }
 
@@ -218,8 +252,13 @@ export type DegradeCloneOutcome = DegradeCloneSuccess | CloneFailure;
  * <N>.months на бюджете деградации (2000МБ/20мин) + флаг усечённой
  * истории. git-ошибка деградацией не лечится — отдаётся как есть.
  */
-export async function cloneWithDegrade(url: string, tmpDir: string = tmpdir(), limits: ScanCloneLimits): Promise<DegradeCloneOutcome> {
-  const first = await cloneBare(url, tmpDir, limits);
+export async function cloneWithDegrade(
+  url: string,
+  tmpDir: string = tmpdir(),
+  limits: ScanCloneLimits,
+  seams: CloneSeams = {},
+): Promise<DegradeCloneOutcome> {
+  const first = await cloneBare(url, tmpDir, limits, seams);
   if (first.ok || first.reason === "git") {
     return first.ok ? { ...first, historyTruncatedSince: null } : first;
   }
@@ -232,7 +271,7 @@ export async function cloneWithDegrade(url: string, tmpDir: string = tmpdir(), l
     url,
     tmpDir,
     { timeoutMs: limits.degrade.timeoutMs, maxBytes: limits.degrade.maxBytes, pollMs: limits.pollMs },
-    { shallowSince: `${limits.degrade.sinceMonths}.months` },
+    { ...seams, shallowSince: `${limits.degrade.sinceMonths}.months` },
   );
   if (second.ok) {
     return { ...second, historyTruncatedSince: truncateSinceIso(limits.degrade.sinceMonths) };
@@ -537,6 +576,8 @@ export interface ExtractOptions {
   /** дата отсечения деградационного клона → history_truncated_since */
   historyTruncatedSince?: string;
   now?: Date;
+  /** шов Б0: подмена `git cat-file --batch` (обрыв потока на середине) */
+  catFile?: CatFileSpawn;
 }
 
 /**
@@ -698,11 +739,15 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
   let locDeadlineHit = false;
   const todoOccs: TodoOccurrence[] = [];
   if (candidates.length > 0) {
-    const proc = Bun.spawn(["git", "--git-dir", cloneDir, "cat-file", "--batch"], {
-      stdin: "pipe",
-      stdout: "pipe",
-      stderr: "ignore",
-    });
+    const catFile: CatFileSpawn =
+      opts.catFile ??
+      ((dir) =>
+        Bun.spawn(["git", "--git-dir", dir, "cat-file", "--batch"], {
+          stdin: "pipe",
+          stdout: "pipe",
+          stderr: "ignore",
+        }));
+    const proc = catFile(cloneDir);
     const enc = new TextEncoder();
     const writer = (async () => {
       for (const b of candidates) proc.stdin.write(enc.encode(`${b.sha}\n`));
