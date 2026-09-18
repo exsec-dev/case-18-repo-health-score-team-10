@@ -177,12 +177,35 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
   return null;
 }
 
-/** ПОРТ hq-parallel (S2/ищейка-3, фантомный claim): последовательный claim
- *  по порядку очередей — следующая только если предыдущая пуста (map() клеймил
- *  обе разом и вторая джоба повисала running без исполнителя на весь лиз). */
+// В4.2-port-fix (П1, К1 CRITICAL): курсор круговой очереди между ПОЛОСАМИ.
+// Порты убрали чередование 1:1 и оставили строгий порядок полос, поэтому в
+// дефолтной роли `all` полоса `rating` голодала навсегда, пока в полосе
+// `user` была хоть одна заявка (периодика, эвикция и рейтинг вставали, а
+// /api/health оставался зелёным). Решение владельца (1) 17.09: round-robin
+// в claimAny — обход начинается с разной полосы на каждом вызове.
+let rrCursor = 0;
+
+/** Шов тестов (К-П П1): курсор модульный, поэтому герметичность — сбросом. */
+export function __resetRoundRobin(): void {
+  rrCursor = 0;
+}
+
+/**
+ * ПОРТ hq-parallel (S2/ищейка-3, фантомный claim): последовательный claim
+ * по порядку очередей — следующая только если предыдущая пуста (map() клеймил
+ * обе разом и вторая джоба повисала running без исполнителя на весь лиз).
+ * В4.2-port-fix (П1): при нескольких полосах порядок обхода — `order`,
+ * повёрнутый на курсор, а курсор растёт на КАЖДОМ вызове (иначе пустая
+ * первая полоса залипает и прогресс курсора теряется). Изоляция не
+ * меняется: у ролей `web` (`["user"]`) и `rating` (`["rating"]`) поворот —
+ * тождество.
+ */
 export function claimAny(db: Database, order: Array<"user" | "rating">, now = new Date(), leaseMs = 60 * 60_000, opts: ClaimOptions = {}): ClaimedJob | null {
-  for (const queue of order) {
-    const job = claimNext(db, now, leaseMs, { ...opts, queue });
+  if (order.length === 0) return null;
+  const start = rrCursor % order.length;
+  rrCursor = (rrCursor + 1) % Number.MAX_SAFE_INTEGER;
+  for (let i = 0; i < order.length; i++) {
+    const job = claimNext(db, now, leaseMs, { ...opts, queue: order[(start + i) % order.length]! });
     if (job !== null) return job;
   }
   return null;

@@ -14,6 +14,7 @@ import { loadConfig, DEFAULT_SCAN } from "../src/config";
 import { openDb } from "../src/db";
 import type { ScClient, ScResponse } from "../src/collectors/http";
 import {
+  __resetRoundRobin,
   claimAny,
   claimNext,
   countRecentUserJobs,
@@ -193,18 +194,26 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
     expect(later.status).toBe(202);
   });
 
-  test("ПОРТ S2 изоляция: user-очередь сначала, rating НЕ ждёт юзерских", () => {
+  test("ПОРТ S2 изоляция + П1 round-robin: периодика не ждёт конца юзерской полосы", () => {
     clear();
+    // В4.2-port-fix (П1, решение владельца (1) 17.09): «user-приоритет в роли
+    // all» отменён — он и был механизмом К1 (полоса rating голодала навсегда).
+    // Охраняется изоляция, а не приоритет: вторая половина теста неизменна.
+    __resetRoundRobin();
     const u = user("alt");
     const periodic = [repo("p1"), repo("p2")].map((r) => enqueueScan(q, r, { triggerKind: "periodic" }));
     const users = [repo("u1"), repo("u2"), repo("u3")].map((r) => enqueueScan(q, r, { userId: u, triggerKind: "user" }));
-    const order: number[] = [];
+    const kinds: string[] = [];
     let t = Date.parse("2026-09-18T00:00:00Z");
-    for (let job = claimAny(q, ["user", "rating"], new Date(t)); job; job = claimAny(q, ["user", "rating"], new Date((t += 1000)))) order.push(job.id);
-    // ПОРТ S2: общий воркер (all) держит user-приоритет — все юзерские
-    // впереди ночной волны; изоляция = rating не ждёт за юзерскими
-    // (отдельный rating-воркер берёт периодику параллельно)
-    expect(order).toEqual([users[0], users[1], users[2], periodic[0], periodic[1]]);
+    for (let job = claimAny(q, ["user", "rating"], new Date(t)); job; job = claimAny(q, ["user", "rating"], new Date((t += 1000))))
+      kinds.push(job.triggerKind === "user" ? "u" : "p");
+    expect({
+      claimed: kinds.length,
+      periodic: kinds.filter((k) => k === "p").length,
+      // ключевое: периодика поехала ДО того, как кончилась юзерская полоса
+      periodicBeforeUserDrained: kinds.slice(0, 4).includes("p"),
+    }).toEqual({ claimed: 5, periodic: 2, periodicBeforeUserDrained: true });
+    expect(periodic.length + users.length).toBe(5);
     // а ИЗОЛИРОВАННЫЙ user-воркер видит только юзерских:
     clear();
     const u2 = user("iso");
