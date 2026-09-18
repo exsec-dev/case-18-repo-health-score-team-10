@@ -286,8 +286,9 @@ export function openDb(config: Config): Database {
   // работа каждого `openDb`. Полный UPDATE по всей очереди выполнялся при
   // каждом открытии БД (на живой базе это десятки тысяч строк на старте
   // каждого процесса и каждого теста). Условие — переход версии схемы:
-  // legacy-БД без версии или версия СТАРШЕ текущей. Транзакция своя, до
-  // записи версии (её пишет `setMetaValue` последней строкой функции).
+  // legacy-БД без версии или версия МЛАДШЕ текущей (переход < 1.8).
+  // Транзакция своя, до записи версии (её пишет `setMetaValue`
+  // последней строкой функции).
   if (stored === null || compareVersions(stored, SCHEMA_VERSION) < 0) {
     db.transaction(() => {
       db.exec("UPDATE jobs SET trigger_kind = 'user' WHERE user_id IS NOT NULL AND trigger_kind <> 'user'");

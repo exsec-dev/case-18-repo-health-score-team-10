@@ -35,8 +35,6 @@ export interface YaHttp {
   getJson(url: string, headers: Record<string, string>): Promise<{ status: number; json: unknown }>;
 }
 
-export const YA_AUTHORIZE_URL = "https://oauth.yandex.ru/authorize";
-
 /**
  * Адреса Я ID (Ф2.10, тот же приём, что `Config.api` в Ф1.13): тестовый
  * сервер направляет их на локальный мок, дефолты — боевые. Без этого шва
