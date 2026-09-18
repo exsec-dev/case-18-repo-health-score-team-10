@@ -42,8 +42,9 @@ export interface ScanDeps {
   appsecClient?: (pat: string) => AppsecClient;
   /** лимиты клона + деградационный ярус (Config.scan: clone + degrade) */
   cloneLimits?: ScanCloneLimits;
-  /** лимиты извлечения (Config.scan.extract.maxBlameFiles/textCapBytes) */
-  extract?: Pick<ScanConfig["extract"], "maxBlameFiles" | "textCapBytes">;
+  /** лимиты извлечения (Config.scan.extract): файлы blame, потолок текста и
+   *  СОБСТВЕННЫЙ таймаут извлечения (Ф2.19) */
+  extract?: Pick<ScanConfig["extract"], "maxBlameFiles" | "textCapBytes" | "timeoutMs">;
   /** Config.scan.extract.commentsTopN */
   commentsTopN?: number;
   /** интервал AppSec-запросов (Config.scan.rest.appsecMinIntervalMs) */
@@ -263,7 +264,10 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
               ...(await extractFacts(clone.dir, {
                 maxBlameFiles: extract.maxBlameFiles,
                 textCapBytes: extract.textCapBytes,
-                deadlineMs: limits.degrade.timeoutMs,
+                // Ф2.19: свой бюджет извлечения. Раньше сюда ехал
+                // `degrade.timeoutMs`, и выключение деградационного яруса
+                // молча меняло дедлайн разбора клона
+                deadlineMs: extract.timeoutMs,
                 historyTruncatedSince: clone.historyTruncatedSince ?? undefined,
               })),
             );

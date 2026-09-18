@@ -539,6 +539,9 @@ export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<Sca
       db: deps.db,
       scClient: deps.serverClient(),
       cloneLimits: limits,
+      // Ф2.19: лимиты извлечения — из конфига процесса, а не из дефолтов
+      // модуля: иначе SCAN_EXTRACT_TIMEOUT_MS не влиял бы ни на что
+      extract: deps.config.scan.extract,
       userScClient: pat
         ? makeScClient({
             token: pat,
@@ -701,8 +704,18 @@ export function __resetSchedulerState(): void {
   schedulerStateRef.lastNightlyAt = null;
 }
 
+/**
+ * Возраст, начиная с которого каталог клона считается осиротевшим (Ф2.19):
+ * не меньше ДВУХ лизов. Живой скан держит клон всё время своего лиза, а
+ * портовый час был короче даже одного лиза — свип сносил каталог из-под
+ * работающего git, и скан падал «сам по себе».
+ */
+export function orphanCloneAgeMs(config: Config): number {
+  return Math.max(2 * config.scheduler.leaseMs, 60 * 60_000);
+}
+
 /** ПОРТ hq-parallel (S3): свип осиротевших rh-clone-* (crash/OOM-убитые
- *  клоны никто не подбирал — tmp тек до ENOSPC); старше часа — мёртвые. */
+ *  клоны никто не подбирал — tmp тек до ENOSPC); возраст — Ф2.19. */
 export async function sweepOrphanClones(dir: string = tmpdir(), olderThanMs = 60 * 60_000): Promise<number> {
   let removed = 0;
   try {
@@ -801,7 +814,7 @@ export async function maintenanceTick(
     console.error(`[sweep] jobs retention failed: ${String((e as Error).message).slice(0, 200)}`);
   }
   try {
-    out.clones = await sweepOrphanClones(opts.cloneDir);
+    out.clones = await sweepOrphanClones(opts.cloneDir, orphanCloneAgeMs(config));
   } catch (e) {
     console.error(`[sweep] orphan clones failed: ${String((e as Error).message).slice(0, 200)}`);
   }

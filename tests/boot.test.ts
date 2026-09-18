@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Database } from "bun:sqlite";
 import { loadConfig } from "../src/config";
-import { openDb } from "../src/db";
+import { getMetaValue, openDb, SCHEMA_VERSION } from "../src/db";
 
 const dir = mkdtempSync(join(tmpdir(), "rh-boot-"));
 const config = { ...loadConfig(), port: 0, dataDir: dir };
@@ -122,6 +122,70 @@ describe("Ф2.11: пересборка jobs со старой схемы не т
     } finally {
       try {
         rmSync(legacy.dir, { recursive: true, force: true });
+      } catch {
+        /* Windows EBUSY */
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ф2.18. Бэкфилл признака полосы (П11) — ОДНОРАЗОВАЯ миграция при переходе
+// версии схемы, а не полный UPDATE очереди на каждом openDb.
+// ---------------------------------------------------------------------------
+
+describe("Ф2.18: бэкфилл trigger_kind выполняется один раз, при переходе версии", () => {
+  /** БД версии 1.7 с юзерской job, помеченной как периодика (legacy-DEFAULT). */
+  function db17(): string {
+    const d = mkdtempSync(join(tmpdir(), "rh-v17-"));
+    const raw = new Database(join(d, "repo-health.db"), { create: true });
+    raw.exec("CREATE TABLE repos (id INTEGER PRIMARY KEY, org_slug TEXT NOT NULL, repo_slug TEXT NOT NULL, title TEXT, language TEXT, likes INTEGER, last_activity_at TEXT, UNIQUE(org_slug, repo_slug))");
+    raw.exec("CREATE TABLE jobs (id INTEGER PRIMARY KEY, repo_id INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'queued', claimed_at TEXT, lease_until TEXT, user_id INTEGER, trigger_kind TEXT NOT NULL DEFAULT 'periodic', attempts INTEGER NOT NULL DEFAULT 0, created_at TEXT, error TEXT)");
+    raw.exec("CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    raw.exec("INSERT INTO meta (key, value) VALUES ('schema_version', '1.7')");
+    raw.exec("INSERT INTO repos (org_slug, repo_slug) VALUES ('o', 'r')");
+    raw.exec("INSERT INTO jobs (repo_id, status, user_id, trigger_kind) VALUES (1, 'queued', 7, 'periodic')");
+    raw.close();
+    return d;
+  }
+
+  test("переход 1.7 → текущая чинит признак полосы; ПОВТОРНОЕ открытие очередь не трогает", () => {
+    const d = db17();
+    try {
+      const first = openDb({ ...loadConfig(), dataDir: d });
+      expect((first.query("SELECT trigger_kind FROM jobs WHERE id = 1").get() as { trigger_kind: string }).trigger_kind).toBe("user");
+      expect(getMetaValue(first, "schema_version")).toBe(SCHEMA_VERSION);
+      // «отравленная» строка: если бэкфилл крутится на каждом старте, второй
+      // openDb её починит — а он не должен: схема уже текущая
+      first.query("UPDATE jobs SET trigger_kind = 'periodic' WHERE id = 1").run();
+      first.close();
+      const second = openDb({ ...loadConfig(), dataDir: d });
+      expect((second.query("SELECT trigger_kind FROM jobs WHERE id = 1").get() as { trigger_kind: string }).trigger_kind).toBe("periodic");
+      second.close();
+    } finally {
+      try {
+        rmSync(d, { recursive: true, force: true });
+      } catch {
+        /* Windows EBUSY */
+      }
+    }
+  });
+
+  test("legacy-БД без meta считается доверсионной: бэкфилл выполняется", () => {
+    const d = mkdtempSync(join(tmpdir(), "rh-nometa-"));
+    try {
+      const raw = new Database(join(d, "repo-health.db"), { create: true });
+      raw.exec("CREATE TABLE repos (id INTEGER PRIMARY KEY, org_slug TEXT NOT NULL, repo_slug TEXT NOT NULL, title TEXT, language TEXT, likes INTEGER, last_activity_at TEXT, UNIQUE(org_slug, repo_slug))");
+      raw.exec("CREATE TABLE jobs (id INTEGER PRIMARY KEY, repo_id INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'queued', claimed_at TEXT, lease_until TEXT, user_id INTEGER, trigger_kind TEXT NOT NULL DEFAULT 'periodic')");
+      raw.exec("INSERT INTO repos (org_slug, repo_slug) VALUES ('o', 'r')");
+      raw.exec("INSERT INTO jobs (repo_id, status, user_id, trigger_kind) VALUES (1, 'queued', 9, 'periodic')");
+      raw.close();
+      const migrated = openDb({ ...loadConfig(), dataDir: d });
+      expect((migrated.query("SELECT trigger_kind FROM jobs WHERE id = 1").get() as { trigger_kind: string }).trigger_kind).toBe("user");
+      migrated.close();
+    } finally {
+      try {
+        rmSync(d, { recursive: true, force: true });
       } catch {
         /* Windows EBUSY */
       }

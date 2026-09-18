@@ -7,7 +7,7 @@
 // каталог и runScan — фейки.
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, DEFAULT_SCAN } from "../src/config";
@@ -30,6 +30,7 @@ import {
   JOB_ERRORS,
   maintenanceTick,
   nightlyCatalog,
+  orphanCloneAgeMs,
   processJob,
   purgeOldJobs,
   renewLease,
@@ -1315,6 +1316,46 @@ describe("Ф2.10 (M10): канальные 403 не эвиктят — пров�
     } finally {
       mock.stop(true);
       db.query("DELETE FROM jobs WHERE repo_id = ?").run(repoId);
+    }
+  }, 30_000);
+});
+
+// ---------------------------------------------------------------------------
+// Ф2.19 (С6 аудита круга 2). Свип каталогов клонов не трогает клон моложе
+// двух лизов: живой скан держит свой клон весь лиз, а портовый «час» был
+// короче даже одного лиза.
+// ---------------------------------------------------------------------------
+
+describe("Ф2.19: возраст свипа клонов ≥ 2 × lease", () => {
+  const base = loadConfig();
+
+  test("возраст свипа — не меньше двух лизов и не меньше часа", () => {
+    const cfg = { ...base, scheduler: { ...base.scheduler, leaseMs: 85 * 60_000 } };
+    expect(orphanCloneAgeMs(cfg)).toBe(2 * 85 * 60_000);
+    // сверхкороткий лиз не опускает свип ниже часа
+    const short = { ...base, scheduler: { ...base.scheduler, leaseMs: 1000 } };
+    expect(orphanCloneAgeMs(short)).toBe(60 * 60_000);
+  });
+
+  test("клон моложе худшего бюджета скана выживает, заведомая сирота удаляется", async () => {
+    const sweepDir = mkdtempSync(join(tmpdir(), "rh-sweep-"));
+    try {
+      const live = mkdtempSync(join(sweepDir, "rh-clone-live-"));
+      const orphan = mkdtempSync(join(sweepDir, "rh-clone-orphan-"));
+      const leaseMs = 85 * 60_000;
+      // сирота старше двух лизов, живой клон — «идёт прямо сейчас»
+      const old = new Date(Date.now() - 3 * leaseMs);
+      utimesSync(orphan, old, old);
+      const cfg = { ...base, scheduler: { ...base.scheduler, leaseMs } };
+      const out = await maintenanceTick(db, cfg, { cloneDir: sweepDir });
+      expect(out.clones).toBe(1);
+      expect({ live: existsSync(live), orphan: existsSync(orphan) }).toEqual({ live: true, orphan: false });
+    } finally {
+      try {
+        rmSync(sweepDir, { recursive: true, force: true });
+      } catch {
+        /* Windows EBUSY */
+      }
     }
   }, 30_000);
 });

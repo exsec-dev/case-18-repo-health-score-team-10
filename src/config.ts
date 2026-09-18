@@ -36,7 +36,10 @@ export interface ScanConfig {
   /** timeoutMs — таймаут REST-запроса (В4.1-fix, Ф1.6): истёк → status 0 */
   rest: { budget: number; minIntervalMs: number; appsecMinIntervalMs: number; timeoutMs: number };
   catalog: { maxPages: number };
-  extract: { maxBlameFiles: number; textCapBytes: number; commentsTopN: number };
+  /** timeoutMs (Ф2.19) — СОБСТВЕННЫЙ бюджет извлечения фактов из клона: до
+   *  В4.2a runner передавал сюда `degrade.timeoutMs`, и выключение
+   *  деградационного яруса молча меняло дедлайн извлечения */
+  extract: { maxBlameFiles: number; textCapBytes: number; commentsTopN: number; timeoutMs: number };
 }
 
 /**
@@ -54,7 +57,7 @@ export const DEFAULT_SCAN: ScanConfig = {
   // с запасом почти вчетверо. Прежние 100 были бюджетом приёмки В1 и в проде
   // означали «эвикция не сработает никогда» (M7)
   catalog: { maxPages: 1000 },
-  extract: { maxBlameFiles: 200, textCapBytes: 1_000_000, commentsTopN: 50 },
+  extract: { maxBlameFiles: 200, textCapBytes: 1_000_000, commentsTopN: 50, timeoutMs: 25 * 60_000 },
 };
 
 export interface AuthConfig {
@@ -226,13 +229,38 @@ export function scanFromEnv(env: Record<string, string>): ScanConfig {
       timeoutMs: envInt(env, "SCAN_REST_TIMEOUT_MS") ?? d.rest.timeoutMs,
     },
     catalog: { maxPages: envInt(env, "SCAN_CATALOG_MAX_PAGES") ?? d.catalog.maxPages },
-    extract: { ...d.extract },
+    extract: { ...d.extract, timeoutMs: envInt(env, "SCAN_EXTRACT_TIMEOUT_MS") ?? d.extract.timeoutMs },
   };
 }
 
-/** Дефолт лиза (К4): худший скан (клон + деградационный ярус) + 15 мин запаса. */
+/**
+ * Пол лиза (Ф2.19, К4): ЧЕСТНЫЙ худший случай одного скана —
+ * клон + (деградационный ярус, если включён) + извлечение + 15 мин запаса.
+ * На дефолтах 20 + 25 + 25 + 15 = 85 мин. Прежняя формула забывала
+ * извлечение (60 мин), и воркер терял лиз посреди живого скана: job
+ * переклеймалась другим процессом, а первый продолжал писать факты.
+ */
+export function leaseFloorMs(scan: ScanConfig): number {
+  return scan.clone.timeoutMs + (scan.degrade.enabled ? scan.degrade.timeoutMs : 0) + scan.extract.timeoutMs + 15 * 60_000;
+}
+
+/** Дефолт лиза = пол (совместимость имени с В4.1). */
 export function defaultLeaseMs(scan: ScanConfig): number {
-  return scan.clone.timeoutMs + scan.degrade.timeoutMs + 15 * 60_000;
+  return leaseFloorMs(scan);
+}
+
+/**
+ * Лиз из env, но НЕ ниже пола: оператор, выставивший 30 мин, иначе получал
+ * бы двойное исполнение долгих сканов. Предупреждение без секретов.
+ */
+export function leaseMsFromEnv(env: Record<string, string>, scan: ScanConfig): number {
+  const floor = leaseFloorMs(scan);
+  const wanted = envInt(env, "SCHEDULER_LEASE_MS");
+  if (wanted !== null && wanted < floor) {
+    console.error(`[config] SCHEDULER_LEASE_MS=${wanted} ms is below the worst-case scan budget (${floor} ms): using ${floor} ms`);
+    return floor;
+  }
+  return wanted ?? floor;
 }
 
 export function loadConfig(): Config {
@@ -264,7 +292,7 @@ export function loadConfig(): Config {
       intervalMs: envInt(env, "SCHEDULER_INTERVAL_MS") ?? 24 * 60 * 60_000,
       catalogIntervalMs: envInt(env, "SCHEDULER_CATALOG_INTERVAL_MS") ?? 60 * 60_000,
       fullRescan: envBool(env, "SCHEDULER_FULL_RESCAN") ?? false,
-      leaseMs: envInt(env, "SCHEDULER_LEASE_MS") ?? defaultLeaseMs(scan),
+      leaseMs: leaseMsFromEnv(env, scan),
       startDelayMs: envInt(env, "SCHEDULER_START_DELAY_MS") ?? 5 * 60_000,
     },
     access: {

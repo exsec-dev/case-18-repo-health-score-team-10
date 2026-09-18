@@ -282,7 +282,17 @@ export function openDb(config: Config): Database {
   // legacy-юзерская job навсегда блокировала бы периодику по своему репо и
   // читалась бы как последняя периодическая. Согласованность обеспечивает
   // миграция, а не только вставка `enqueueScan`.
-  db.exec("UPDATE jobs SET trigger_kind = 'user' WHERE user_id IS NOT NULL AND trigger_kind <> 'user'");
+  // Ф2.18 (хвост приёмки В4.2-port-fix): бэкфилл — ОДНОРАЗОВАЯ миграция, а не
+  // работа каждого `openDb`. Полный UPDATE по всей очереди выполнялся при
+  // каждом открытии БД (на живой базе это десятки тысяч строк на старте
+  // каждого процесса и каждого теста). Условие — переход версии схемы:
+  // legacy-БД без версии или версия СТАРШЕ текущей. Транзакция своя, до
+  // записи версии (её пишет `setMetaValue` последней строкой функции).
+  if (stored === null || compareVersions(stored, SCHEMA_VERSION) < 0) {
+    db.transaction(() => {
+      db.exec("UPDATE jobs SET trigger_kind = 'user' WHERE user_id IS NOT NULL AND trigger_kind <> 'user'");
+    })();
+  }
   // v1.5 (В4.1, К4): попытки и время постановки
   ensureColumn(db, "jobs", "attempts", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "jobs", "created_at", "TEXT");

@@ -21,7 +21,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config";
-import { openDb } from "../src/db";
+import { openDb, setMetaValue } from "../src/db";
 import { createSession, SESSION_COOKIE, upsertUser } from "../src/auth/session";
 import { getRepoCard } from "../src/api/repos";
 import type { ScClient, ScResponse } from "../src/collectors/http";
@@ -243,6 +243,11 @@ function legacyJobDb(prefix: string, status: string): { db: Database; repoId: nu
       .query("INSERT INTO jobs (repo_id, status, user_id, trigger_kind, created_at) VALUES (?, ?, ?, 'periodic', '2026-09-01T00:00:00Z')")
       .run(repoId, status, uid).lastInsertRowid,
   );
+  // Ф2.18 (В4.2a): бэкфилл — одноразовая миграция при переходе версии, а не
+  // работа каждого openDb. Фикстура обязана быть ДОВЕРСИОННОЙ: 1.7 —
+  // историческая версия, при которой такие строки и появлялись (это не копия
+  // текущей константы, а точка отсчёта миграции)
+  setMetaValue(first, "schema_version", "1.7");
   first.close();
   // второй openDb = миграция на новом коде: бэкфилл обязан привести признак в порядок
   const db = openDb({ ...loadConfig(), dataDir: dir });
