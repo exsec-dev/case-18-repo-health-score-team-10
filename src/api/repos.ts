@@ -755,8 +755,16 @@ export function getRepoCard(
   // LOW-3: объединённая выдача — порядком движка, номера 1..N после фильтра (Ф1.3)
   const recommendations = orderRecommendations(publicRecs, channelRecs);
 
-  const shownChannelFacts = [...(ciOpen ? channel.cicdFacts : []), ...(secOpen ? channel.securityFacts.filter((f) => f.key !== "tree.stats") : [])];
-  const factRows = [...publicFacts, ...shownChannelFacts];
+  // В4.2-port-fix (П9, С1 r2): плотность Security считается по `tree.stats`
+  // канального скана, а фильтр `f.key !== "tree.stats"` вырезал именно его —
+  // зритель видел «плотность N на 10k LOC» и рядом «tree.stats — нет данных»
+  // из другого (публичного) скана, то есть число без единого факта в
+  // отданном JSON. Теперь в доказательства едет `tree.stats` ТОГО скана, по
+  // которому посчитана категория, и он вытесняет одноимённый факт скана P
+  // (иначе в evidence было бы две записи с одним ключом).
+  const secTree = secOpen ? channel.securityFacts.find((f) => f.key === "tree.stats") : undefined;
+  const shownChannelFacts = [...(ciOpen ? channel.cicdFacts : []), ...(secOpen ? channel.securityFacts : [])];
+  const factRows = [...publicFacts.filter((f) => !(secTree !== undefined && f.key === "tree.stats")), ...shownChannelFacts];
   const factByKey = new Map(factRows.map((f) => [f.key, f]));
   // missing = факта нет по построению (публичный appsec.findings) — UI объясняет причину
   for (const rec of recommendations) for (const ref of rec.factRefs) ref.missing = !factByKey.has(ref.key);

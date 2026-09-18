@@ -145,7 +145,7 @@ describe("П5 (С2 r2): три обхода при неизменном ката
 const GRANTED = { cicd: "granted", appsec: "granted", repo: "granted" } as const;
 
 describe("П9 (С1 r2): число плотности Security и tree.stats в доказательствах — из одного скана", () => {
-  repro("канальный скан с ok tree.stats(loc=20000) — его же tree.stats в evidence, не вырезанный фильтром", () => {
+  test("канальный скан с ok tree.stats(loc=20000) — его же tree.stats в evidence, не вырезанный фильтром", () => {
     const t = tempDb("rh-m42-p9-");
     const repoId = seedRepo(t, { org: "dens", repo: "repo", language: "Go" });
     // скан A: Security-канал (appsec.findings ok + tree.stats ok) — по нему считается плотность
@@ -311,7 +311,7 @@ describe("П2 (Н1): проверка избранного ставит скан
 });
 
 describe("П4 (MAJOR №1): merge-ветка listMyRepos считает score правилом круга 2", () => {
-  repro("без PAT: свой публичный репо (own-scan) и своё избранное приватное отдают число, а не null", async () => {
+  test("без PAT: свой публичный репо (own-scan) и своё избранное приватное отдают число, а не null", async () => {
     const res = await fetch(at("/api/me/repos"), as("own"));
     expect(res.status).toBe(200);
     const body = (await res.json()) as MyReposBody;
@@ -327,7 +327,7 @@ describe("П4 (MAJOR №1): merge-ветка listMyRepos считает score п
 });
 
 describe("П6 (С4): мета репо не отдаётся зрителю без прав", () => {
-  repro("посторонний добавил приватный слаг в избранное → ни названия, ни языка, ни времени скана, score === null", async () => {
+  test("посторонний добавил приватный слаг в избранное → ни названия, ни языка, ни времени скана, score === null", async () => {
     const res = await fetch(at("/api/me/repos"), as("peek"));
     expect(res.status).toBe(200);
     const body = (await res.json()) as MyReposBody;

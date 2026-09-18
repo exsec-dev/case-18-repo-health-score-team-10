@@ -59,6 +59,68 @@ export async function fetchTokenUsername(client: ScClient): Promise<{ ok: true; 
 }
 
 /**
+ * Score в рейтинге и время последнего анализа одного репо — правило круга 2
+ * (решение С2 (кр.1)): последний ПРИГОДНЫЙ скан P; приватный репо без P —
+ * последний не-bad; время — последний скан L.
+ *
+ * В4.2-port-fix (П4, MAJOR №1): один хелпер на обе ветки `listMyRepos`.
+ * Порты откатили решение С2, поставив в merge-ветке `score: null` литералом
+ * (комментарий кода при этом утверждал обратное); копию правила заводить
+ * нельзя — расходились бы снова.
+ */
+function ratingScoreOf(db: Database, org: string, repo: string): { score: number | null; lastScanAt: string | null } {
+  const row = db.query("SELECT id, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as
+    | { id: number; visibility: string }
+    | null;
+  if (!row) return { score: null, lastScanAt: null };
+  const scoreOf = (pick: string) =>
+    db
+      .query(
+        `SELECT sc.total_rating AS total FROM scores sc
+         JOIN repos r ON r.id = sc.repo_id
+         WHERE r.org_slug = ? AND r.repo_slug = ? AND sc.model_version = ? AND sc.scan_id = ${pick}`,
+      )
+      .get(org, repo, MODEL_VERSION, MODEL_VERSION) as { total: number | null } | null;
+  const scored = scoreOf(LAST_ELIGIBLE_SCAN_SQL) ?? (row.visibility !== "public" ? scoreOf(LAST_NOT_BAD_SCAN_SQL) : null);
+  const lastScan = db.query("SELECT finished_at, started_at FROM scans WHERE repo_id = ? ORDER BY id DESC LIMIT 1").get(row.id) as
+    | { finished_at: string | null; started_at: string }
+    | null;
+  return { score: scored?.total ?? null, lastScanAt: lastScan ? (lastScan.finished_at ?? lastScan.started_at) : null };
+}
+
+/**
+ * Права зрителя на репо-запись НЕ из namespace-выдачи (В4.2-port-fix, П6,
+ * находка С4; признак — решение владельца (3) 18.09): `clone === true` из
+ * сохранённого JSON `favorites.last_access` ИЛИ `repos.visibility = 'public'`
+ * ИЛИ у зрителя есть own-скан этого репо (`scans.user_id = зритель`).
+ *
+ * Берётся именно `clone` из пяти полей `FavoriteAccess` (владелец публичного
+ * репо без CI даёт `own: false` при `clone: true`) и `repos.visibility`, а не
+ * `access.visibility` из того же JSON (они расходятся: "unknown" против
+ * дефолта 'public'). Неизвестно → «нет прав» (fail-closed, как Ф1.10).
+ * Третье слагаемое снимает коллизию с П4: own-скан = доказанные права.
+ */
+function viewerMayReadRepo(db: Database, userId: number | null, org: string, repo: string): boolean {
+  const row = db.query("SELECT id, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as
+    | { id: number; visibility: string }
+    | null;
+  if (row && row.visibility === "public") return true;
+  if (userId === null) return false;
+  const fav = db.query("SELECT last_access FROM favorites WHERE user_id = ? AND org_slug = ? AND repo_slug = ?").get(userId, org, repo) as
+    | { last_access: string | null }
+    | null;
+  if (fav?.last_access) {
+    try {
+      if ((JSON.parse(fav.last_access) as FavoriteAccess).clone === true) return true;
+    } catch {
+      /* мусор в JSON — как «неизвестно» (fail-closed) */
+    }
+  }
+  if (row && db.query("SELECT 1 FROM scans WHERE repo_id = ? AND user_id = ? LIMIT 1").get(row.id, userId) !== null) return true;
+  return false;
+}
+
+/**
  * Репо namespace'а владельца токена (≤5 страниц — personal-namespace
  * репо измеряются единицами; исчерпание видно по next_page_token и
 // честно отражается записью truncated).
@@ -89,25 +151,9 @@ export async function listMyRepos(db: Database, client: ScClient | null, userId:
       const language =
         typeof raw.language === "string" ? raw.language : typeof raw.language?.name === "string" ? raw.language.name : null;
       // Score — последний пригодный скан; приватный без него — последний не-bad
-      // (круг 2, С2, как карточка); время — последнего анализа L (LOW-2)
-      const scoreOf = (pick: string) =>
-        db
-          .query(
-            `SELECT sc.total_rating AS total FROM scores sc
-             JOIN repos r ON r.id = sc.repo_id
-             WHERE r.org_slug = ? AND r.repo_slug = ? AND sc.model_version = ? AND sc.scan_id = ${pick}`,
-          )
-          .get(org, repo, MODEL_VERSION, MODEL_VERSION) as { total: number | null } | null;
-      const row = db.query("SELECT id, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as
-        | { id: number; visibility: string }
-        | null;
-      const scored = row ? (scoreOf(LAST_ELIGIBLE_SCAN_SQL) ?? (row.visibility !== "public" ? scoreOf(LAST_NOT_BAD_SCAN_SQL) : null)) : null;
-      const lastScan = row
-        ? (db.query("SELECT finished_at, started_at FROM scans WHERE repo_id = ? ORDER BY id DESC LIMIT 1").get(row.id) as
-            | { finished_at: string | null; started_at: string }
-            | null)
-        : null;
-      const known = scored || lastScan ? { total: scored?.total ?? null, finished_at: lastScan ? (lastScan.finished_at ?? lastScan.started_at) : null } : null;
+      // (круг 2, С2, как карточка); время — последнего анализа L (LOW-2).
+      // П4: одна функция на обе ветки (namespace-выдача = доказанные права)
+      const known = ratingScoreOf(db, org, repo);
       entries.push({
         org,
         repo,
@@ -116,8 +162,8 @@ export async function listMyRepos(db: Database, client: ScClient | null, userId:
         lastActivityAt: typeof raw.last_updated === "string" ? raw.last_updated : null,
         logoUrl: typeof raw.logo?.url === "string" && raw.logo.url !== "" ? raw.logo.url : null,
         languageColor: typeof raw.language === "object" && raw.language !== null ? hexColor(raw.language.color) : null,
-        score: known ? known.total : null,
-        lastScanAt: known ? known.finished_at : null,
+        score: known.score,
+        lastScanAt: known.lastScanAt,
         sources: ["namespace"], // ПОРТ 5: union-источники (диагноз UX-2)
       });
     }
@@ -126,23 +172,24 @@ export async function listMyRepos(db: Database, client: ScClient | null, userId:
     token = next;
   }
   } // конец if (client)
-  // ПОРТ 5: union — заявки юзера (руками добавленный слаг не пропадает)
-  // и избранное; score для них — по тем же правилам пригодности
-
+  // ПОРТ 5: union — заявки юзера (руками добавленный слаг не пропадает) и
+  // избранное. В4.2-port-fix: score считается ТЕМ ЖЕ правилом круга 2, что в
+  // namespace-ветке (П4), но только записям, прошедшим признак прав (П6):
+  // `addFavorite` сохраняет любой слаг без проверки, поэтому без прав из
+  // `repos`/`scans` не отдаётся ничего, кроме слага и источника.
   const merge = (org: string, repo: string, source: "own-scan" | "favorite") => {
     const existing = entries.find((e) => e.org === org && e.repo === repo);
     if (existing) {
       if (!existing.sources.includes(source)) existing.sources.push(source);
       return;
     }
-    const row = db.query("SELECT id, title, language, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as
-      | { id: number; title: string | null; language: string | null; visibility: string }
-      | null;
-    const lastScan = row
-      ? (db.query("SELECT finished_at, started_at FROM scans WHERE repo_id = ? ORDER BY id DESC LIMIT 1").get(row.id) as
-          | { finished_at: string | null; started_at: string }
+    const mayRead = viewerMayReadRepo(db, userId, org, repo);
+    const row = mayRead
+      ? (db.query("SELECT title, language FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as
+          | { title: string | null; language: string | null }
           | null)
       : null;
+    const known = mayRead ? ratingScoreOf(db, org, repo) : { score: null, lastScanAt: null };
     entries.push({
       org,
       repo,
@@ -151,8 +198,8 @@ export async function listMyRepos(db: Database, client: ScClient | null, userId:
       lastActivityAt: null,
       logoUrl: null,
       languageColor: null,
-      score: null,
-      lastScanAt: lastScan ? (lastScan.finished_at ?? lastScan.started_at) : null,
+      score: known.score,
+      lastScanAt: known.lastScanAt,
       sources: [source],
     });
   };
