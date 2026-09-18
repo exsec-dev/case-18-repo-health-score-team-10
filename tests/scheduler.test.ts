@@ -20,8 +20,10 @@ import {
   countRecentUserJobs,
   enqueueScan,
   evictRepo,
+  failedChannelsOf,
   findActiveUserJob,
   finishJob,
+  JOB_ERRORS,
   nightlyCatalog,
   processJob,
   renewLease,
@@ -29,7 +31,7 @@ import {
   startWorkerLoop,
   type ClaimedJob,
 } from "../src/jobs/scheduler";
-import { requestUserScan } from "../src/api/me";
+import { myJobs, requestUserScan } from "../src/api/me";
 import { upsertRepo, type runScan, type ScanDeps, type ScanResult } from "../src/jobs/runner";
 import { makeScClient } from "../src/collectors/http";
 
@@ -638,4 +640,80 @@ describe("П7: claim(rating) не платит за подзапрос круг�
     },
     120_000,
   );
+});
+
+// В4.2-port-fix (П8, LOW-1): колонку jobs.error принесли порты, myJobs её
+// читает, UI рисует дословно — но НИ ОДНОГО UPDATE в неё не было, то есть
+// панель заданий всегда показывала «упало» без причины. Причины — закрытый
+// список RU-текстов; обе ветки, ходившие мимо finishJob (предел попыток и
+// job без строки repos), переведены на него.
+describe("П8: причина падения job пишется в jobs.error", () => {
+  const edir = mkdtempSync(join(tmpdir(), "rh-joberr-"));
+  const e: Database = openDb({ ...loadConfig(), dataDir: edir });
+  afterAll(() => {
+    e.close();
+    rmSync(edir, { recursive: true, force: true });
+  });
+  const errorOf = (id: number) => (e.query("SELECT status, error FROM jobs WHERE id = ?").get(id) as { status: string; error: string | null });
+  const eRepo = (slug: string) => {
+    e.query("INSERT OR IGNORE INTO repos (org_slug, repo_slug) VALUES ('je', ?)").run(slug);
+    return (e.query("SELECT id FROM repos WHERE org_slug = 'je' AND repo_slug = ?").get(slug) as { id: number }).id;
+  };
+
+  test("предел попыток → «превышено число попыток» (ветка массового UPDATE переведена на finishJob)", () => {
+    const id = enqueueScan(e, eRepo("poison"), { triggerKind: "periodic" });
+    e.query("UPDATE jobs SET attempts = 3 WHERE id = ?").run(id);
+    expect(claimNext(e, new Date("2026-09-18T00:00:00Z"), 60_000, { queue: "rating", maxAttempts: 3 })).toBeNull();
+    expect(errorOf(id)).toEqual({ status: "failed", error: "превышено число попыток" });
+  });
+
+  test("job без строки repos → «репозиторий недоступен»; успешное завершение гасит причину", () => {
+    const orphan = Number(
+      e.query("INSERT INTO jobs (repo_id, status, trigger_kind, created_at) VALUES (999999, 'queued', 'periodic', '2026-09-18T00:00:00Z')").run()
+        .lastInsertRowid,
+    );
+    const next = enqueueScan(e, eRepo("after-orphan"), { triggerKind: "periodic" });
+    const job = claimNext(e, new Date("2026-09-18T01:00:00Z"), 60_000, { queue: "rating" })!;
+    expect(job.id).toBe(next);
+    expect(errorOf(orphan)).toEqual({ status: "failed", error: "репозиторий недоступен" });
+    // причина не «липнет»: успешный прогон её гасит
+    e.query("UPDATE jobs SET error = 'старая причина' WHERE id = ?").run(next);
+    expect(finishJob(e, next, job.claimedAt, "done")).toBe(true);
+    expect(errorOf(next)).toEqual({ status: "done", error: null });
+  });
+
+  test("юзерская job без читаемого PAT → «нет действующего токена» (Ф1.8 + П8)", async () => {
+    e.query("INSERT OR IGNORE INTO users (ya_id, login, created_at, last_login_at) VALUES ('ya-je', 'je', '2026', '2026')").run();
+    const uid = (e.query("SELECT id FROM users WHERE ya_id = 'ya-je'").get() as { id: number }).id;
+    const id = enqueueScan(e, eRepo("no-pat"), { userId: uid, triggerKind: "user" });
+    const base = loadConfig();
+    const config = { ...base, auth: { ...base.auth, appSecret: "scheduler-test-secret-0000000000000000" } };
+    const job = claimNext(e, new Date("2026-09-18T02:00:00Z"), 60_000, { queue: "user" })!;
+    expect(job.id).toBe(id);
+    const out = await processJob({ db: e, config, serverClient: () => null, getPat: () => null }, job);
+    expect({ out, row: errorOf(id) }).toEqual({ out: "no-pat", row: { status: "failed", error: "нет действующего токена" } });
+  });
+
+  test("bad-скан → «сбор данных не удался: <каналы>»; myJobs отдаёт причину панели заданий", () => {
+    expect(failedChannelsOf({ git: "no-data(limits)", rest: "ok", appsec: "skipped" })).toEqual(["git"]);
+    expect(JOB_ERRORS.channels(["git", "rest"])).toBe("сбор данных не удался: git, rest");
+    e.query("INSERT OR IGNORE INTO users (ya_id, login, created_at, last_login_at) VALUES ('ya-je2', 'je2', '2026', '2026')").run();
+    const uid = (e.query("SELECT id FROM users WHERE ya_id = 'ya-je2'").get() as { id: number }).id;
+    const id = enqueueScan(e, eRepo("bad-scan"), { userId: uid, triggerKind: "user" });
+    const job = claimNext(e, new Date("2026-09-18T03:00:00Z"), 60_000, { queue: "user" })!;
+    finishJob(e, id, job.claimedAt, "failed", JOB_ERRORS.channels(failedChannelsOf({ git: "bad", rest: "no-data(access)", appsec: "skipped" })));
+    const recent = myJobs(e, uid).recent.find((j) => j.jobId === id);
+    expect({ slug: recent?.slug, phase: recent?.phase, error: recent?.error }).toEqual({
+      slug: "je/bad-scan",
+      phase: "failed",
+      error: "сбор данных не удался: git, rest",
+    });
+  });
+
+  test("текст причины обрезан по 500 символов и не несёт секретов", () => {
+    const id = enqueueScan(e, eRepo("long"), { triggerKind: "periodic" });
+    const job = claimNext(e, new Date("2026-09-18T04:00:00Z"), 60_000, { queue: "rating" })!;
+    finishJob(e, id, job.claimedAt, "failed", "x".repeat(900));
+    expect(errorOf(id).error?.length).toBe(500);
+  });
 });

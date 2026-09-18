@@ -31,14 +31,22 @@
 // процесса на мигрированной БД) и derived_version (src/score/rescore.ts);
 // jobs.mode убран из DDL и миграций (Ф1.15; в старых БД колонка остаётся,
 // не читается); jobs.status += refused.
+// Схема v1.7 (В4.2-port-fix, П8): портовые объекты — favorites и jobs.error —
+// получили свою версию схемы (порты меняли схему под версией 1.6), а
+// setMetaValue(schema_version) переехал ПОСЛЕ всех DDL и ensureColumn.
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Config } from "./config";
 import { publicStatusSql, ratingEligibleSql } from "./score/compute";
 
-/** Версия схемы этого кода (Ф1.9): meta.schema_version. */
-export const SCHEMA_VERSION = "1.6";
+/**
+ * Версия схемы этого кода (Ф1.9): meta.schema_version.
+ * 1.7 (В4.2-port-fix, П8/LOW-2): порты изменили схему, не подняв версию —
+ * `favorites` и `jobs.error` появились при версии 1.6, и страж «БД новее
+ * кода» к портовой миграции был слеп.
+ */
+export const SCHEMA_VERSION = "1.7";
 
 const SCORES_DDL = `CREATE TABLE IF NOT EXISTS scores (
   scan_id INTEGER NOT NULL REFERENCES scans(id),
@@ -270,7 +278,6 @@ export function openDb(config: Config): Database {
     db.exec("DROP TABLE jobs_v1_rebuild");
   }
   db.exec(LATE_INDEXES);
-  setMetaValue(db, "schema_version", SCHEMA_VERSION);
   // ПОРТ 5 (hq-parallel): панель заданий (jobs.error — причина падения)
   // и избранное (сейвить что угодно строкой слага; права-ряд по факту)
   ensureColumn(db, "jobs", "error", "TEXT");
@@ -283,5 +290,10 @@ export function openDb(config: Config): Database {
     last_checked_at TEXT,
     UNIQUE(user_id, org_slug, repo_slug)
   )`);
+  // П8 (LOW-2): версия схемы пишется ПОСЛЕДНЕЙ — после всех DDL, миграций и
+  // ensureColumn. Порты оставили её перед портовыми объектами, и обрыв между
+  // ними помечал БД версией без этих объектов; теперь «версия = 1.7» означает,
+  // что favorites и jobs.error в базе действительно есть.
+  setMetaValue(db, "schema_version", SCHEMA_VERSION);
   return db;
 }

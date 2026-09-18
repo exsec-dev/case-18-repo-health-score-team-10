@@ -109,26 +109,37 @@ export interface ClaimOptions {
  * Заявить одну job: атомарный UPDATE … WHERE (lease_until IS NULL OR
  * lease_until < now) — NULL-lease обязан матчиться (контракт плана);
  * истёкший лиз running-строки тоже матчится (упавший воркер).
- * К4: attempts +1 при claim; исчерпавшие попытки → failed. Чередование:
- * если последняя заявленная (по claimed_at) была юзерской, а в очереди
- * есть периодическая — берётся периодическая; иначе юзерские вперёд.
- * В4.1-fix (Ф1.7): внутри юзерской половины — круговой порядок между
- * юзерами: сперва юзеры без единой заявленной job, затем по давности их
- * последней заявки (MAX claimed_at ASC), затем id. Ф1.12: job без строки
- * repos → failed (попытки не сжигаются по истечении лиза), берётся следующая.
+ * К4: attempts +1 при claim; исчерпавшие попытки → failed с причиной в
+ * `jobs.error` (П8).
+ * claim обслуживает ОДНУ полосу (`opts.queue`), полоса выводится из
+ * `jobs.trigger_kind` — единственного признака (П8). Чередования 1:1 больше
+ * НЕТ: его убрал порт S2, изоляция интерактива от ночной волны заменила
+ * честность перемеживания, а справедливость МЕЖДУ полосами живёт в
+ * `claimAny` (round-robin, П1).
+ * В4.1-fix (Ф1.7): внутри полосы `user` — круговой порядок между юзерами:
+ * сперва юзеры без единой заявленной job, затем по давности их последней
+ * заявки (MAX claimed_at ASC), затем id; в полосе `rating` этот подзапрос не
+ * исполняется вовсе (П7). Ф1.12: job без строки repos → failed (попытки не
+ * сжигаются по истечении лиза), берётся следующая.
  */
 export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000, opts: ClaimOptions = {}): ClaimedJob | null {
   const maxAttempts = opts.maxAttempts ?? 3;
   const nowIso = now.toISOString();
   const leaseIso = new Date(now.getTime() + leaseMs).toISOString();
-  db.query(
-    `UPDATE jobs SET status = 'failed', lease_until = NULL
-     WHERE status IN ('queued', 'running') AND attempts >= ? AND (lease_until IS NULL OR lease_until < ?)`,
-  ).run(maxAttempts, nowIso);
+  // П8: предел попыток идёт через finishJob (массовый UPDATE шёл мимо и не
+  // писал причину) — строк здесь единицы, цена выборки несущественна
+  const exhausted = db
+    .query(
+      `SELECT id, claimed_at FROM jobs
+       WHERE status IN ('queued', 'running') AND attempts >= ? AND (lease_until IS NULL OR lease_until < ?)`,
+    )
+    .all(maxAttempts, nowIso) as { id: number; claimed_at: string | null }[];
+  for (const row of exhausted) finishJob(db, row.id, row.claimed_at, "failed", JOB_ERRORS.attempts);
   // ПОРТ hq-parallel (S2): очереди РАЗДЕЛЕНЫ (решение Алексея 17.09 —
   // «всё лучшее от нас, сверху их капы»): claim обслуживает одну очередь
   // 'user' | 'rating'; чередование удалено — изоляция интерактива от ночной
-  // волны заменяет честность перемеживания. Внутри user-очереди сохранён их
+  // волны заменяет честность перемеживания, справедливость между полосами
+  // даёт round-robin в claimAny (П1). Внутри user-очереди сохранён их
   // круговой порядок между юзерами (Ф1.7); attempts (K4) неприкосновенны.
   const queue = opts.queue ?? "user";
   const claimStmt = db.query(
@@ -169,7 +180,8 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
       | { org_slug: string; repo_slug: string }
       | null;
     if (!repo) {
-      db.query("UPDATE jobs SET status = 'failed', lease_until = NULL WHERE id = ?").run(claimed.id);
+      // П8: тоже через finishJob — иначе панель заданий показывает failed без причины
+      finishJob(db, claimed.id, claimed.claimed_at, "failed", JOB_ERRORS.gone);
       continue;
     }
     return {
@@ -228,11 +240,39 @@ export function renewLease(db: Database, jobId: number, claimedAt: string, lease
 }
 
 /**
+ * Причины падения job для `jobs.error` (В4.2-port-fix, П8, LOW-1). Колонку
+ * принесли порты, `myJobs` её читает, UI рисует ДОСЛОВНО пользователю
+ * (`MePage.tsx`) — отсюда закрытый список RU-текстов без секретов; коммиты
+ * при этом EN. Ни одного `UPDATE`/`INSERT` в колонку до этой вехи не было,
+ * то есть заявленная портом фича была мертва.
+ */
+export const JOB_ERROR_MAX = 500;
+export const JOB_ERRORS = {
+  gone: "репозиторий недоступен",
+  noPat: "нет действующего токена",
+  attempts: "превышено число попыток",
+  internal: "внутренняя ошибка",
+  /** `bad`-скан: какие каналы не собрались (ScanResult.channels) */
+  channels: (channels: string[]): string => `сбор данных не удался: ${channels.join(", ")}`.slice(0, JOB_ERROR_MAX),
+} as const;
+
+/** Каналы `bad`-скана, которые не собрались, — для текста причины (П8). */
+export function failedChannelsOf(channels: { git: string; rest: string; appsec: string }): string[] {
+  return (["git", "rest", "appsec"] as const).filter((k) => channels[k] !== "ok" && channels[k] !== "skipped");
+}
+
+/**
  * Завершение job (К4): только своей заявки — WHERE id AND claimed_at;
  * воркер с истёкшим лизом, чью job перезаявили, чужой прогон не закрывает.
+ * `claimed_at IS ?` (а не `=`): через finishJob идёт и ветка предела попыток,
+ * где у незаявленной строки `claimed_at` NULL (П8).
+ * `error` — причина падения из `JOB_ERRORS`; не передана → колонка гасится,
+ * чтобы успешный перезапуск не показывал старую причину.
  */
-export function finishJob(db: Database, jobId: number, claimedAt: string, status: "done" | "failed"): boolean {
-  const r = db.query("UPDATE jobs SET status = ?, lease_until = NULL WHERE id = ? AND claimed_at = ?").run(status, jobId, claimedAt);
+export function finishJob(db: Database, jobId: number, claimedAt: string | null, status: "done" | "failed", error?: string): boolean {
+  const r = db
+    .query("UPDATE jobs SET status = ?, lease_until = NULL, error = ? WHERE id = ? AND claimed_at IS ?")
+    .run(status, error === undefined ? null : error.slice(0, JOB_ERROR_MAX), jobId, claimedAt);
   return r.changes > 0;
 }
 
@@ -342,10 +382,17 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
       continue;
     }
     const changed = entry.last_updated !== existing.last_activity_at;
+    // П8 (LOW-5): признак полосы один — trigger_kind. Раньше здесь стоял
+    // второй признак (`user_id IS NULL`), эквивалентный лишь потому, что
+    // enqueueScan пишет оба поля согласованно; строки refused (trigger_kind
+    // = 'user', repo_id = 0) в полосу периодики не попадают ни одним путём
     const lastJob = db
-      .query("SELECT status FROM jobs WHERE repo_id = ? AND user_id IS NULL ORDER BY id DESC LIMIT 1")
+      .query("SELECT status FROM jobs WHERE repo_id = ? AND trigger_kind != 'user' ORDER BY id DESC LIMIT 1")
       .get(repoId) as { status: string } | null;
     const retryFailed = lastJob?.status === "failed";
+    // ВНИМАНИЕ (К-П П5): в таблице scans колонка называется `trigger` и имеет
+    // ТРИ значения (periodic|user|probe), поэтому `trigger != 'user'` здесь НЕ
+    // эквивалентно `user_id IS NULL` — предикат по scans остаётся на user_id
     const lastPeriodicScan = db
       .query("SELECT rating_eligible FROM scans WHERE repo_id = ? AND user_id IS NULL AND status NOT IN ('queued', 'running') ORDER BY id DESC LIMIT 1")
       .get(repoId) as { rating_eligible: number } | null;
@@ -423,7 +470,7 @@ export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<Sca
       ? (deps.getPat ?? getPat)(deps.db, deps.config.auth.appSecret, job.userId)
       : null;
   if (job.userId !== null && !pat) {
-    finishJob(deps.db, job.id, job.claimedAt, "failed");
+    finishJob(deps.db, job.id, job.claimedAt, "failed", JOB_ERRORS.noPat);
     return "no-pat";
   }
   const limits = scanCloneLimitsOf(deps.config.scan);
@@ -503,10 +550,19 @@ export function startWorkerLoop(deps: WorkerDeps, queues: { user?: boolean; rati
     }, Math.max(1, Math.floor(leaseMs / 3)));
     try {
       const result = await processJob(deps, job);
-      finishJob(deps.db, job.id, job.claimedAt, result === "gone" || result === "no-pat" || result.status === "bad" ? "failed" : "done");
+      // П8: причина падения — в jobs.error, панель заданий показывает её дословно
+      const failure =
+        result === "gone"
+          ? JOB_ERRORS.gone
+          : result === "no-pat"
+            ? JOB_ERRORS.noPat
+            : result.status === "bad"
+              ? JOB_ERRORS.channels(failedChannelsOf(result.channels))
+              : null;
+      finishJob(deps.db, job.id, job.claimedAt, failure === null ? "done" : "failed", failure ?? undefined);
     } catch (e) {
       console.error(`[worker] job ${job.id} (${job.slug}) crashed: ${String((e as Error).message).slice(0, 200)}`);
-      finishJob(deps.db, job.id, job.claimedAt, "failed");
+      finishJob(deps.db, job.id, job.claimedAt, "failed", JOB_ERRORS.internal);
     } finally {
       clearInterval(heartbeat);
       busy = false;

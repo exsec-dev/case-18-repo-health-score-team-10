@@ -110,6 +110,19 @@ describe("schema_version: запись и защита от старого пр�
     expect(() => openDb(cfg)).toThrow(/schema v9\.0 is newer than this code/);
   });
 
+  test("В4.2-port-fix (П8): версия 1.7 и пишется ПОСЛЕ портовых объектов — favorites и jobs.error уже есть", () => {
+    const dir = tempDir();
+    const db = openDb({ ...loadConfig(), dataDir: dir });
+    const jobsCols = (db.query("PRAGMA table_info(jobs)").all() as { name: string }[]).map((r) => r.name);
+    expect({
+      version: SCHEMA_VERSION,
+      stored: getMetaValue(db, "schema_version"),
+      favorites: db.query("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'favorites'").get() !== null,
+      jobsError: jobsCols.includes("error"),
+    }).toEqual({ version: "1.7", stored: "1.7", favorites: true, jobsError: true });
+    db.close();
+  });
+
   test("сервер на БД новее кода не стартует (процесс завершается с ошибкой)", async () => {
     const dir = tempDir();
     const db = openDb({ ...loadConfig(), dataDir: dir });
