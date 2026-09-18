@@ -383,9 +383,12 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
     }
     const changed = entry.last_updated !== existing.last_activity_at;
     // П8 (LOW-5): признак полосы один — trigger_kind. Раньше здесь стоял
-    // второй признак (`user_id IS NULL`), эквивалентный лишь потому, что
-    // enqueueScan пишет оба поля согласованно; строки refused (trigger_kind
-    // = 'user', repo_id = 0) в полосу периодики не попадают ни одним путём
+    // второй признак (`user_id IS NULL`). Их согласованность держится НЕ на
+    // одной вставке `enqueueScan`, а на миграции: `openDb` бэкфиллит
+    // `trigger_kind = 'user'` всем строкам с `user_id` (П11, Н-2) — иначе
+    // legacy-строки, получившие колонку из DEFAULT 'periodic', читались бы
+    // как периодические. Строки refused (trigger_kind = 'user', repo_id = 0)
+    // в полосу периодики не попадают ни одним путём
     const lastJob = db
       .query("SELECT status FROM jobs WHERE repo_id = ? AND trigger_kind != 'user' ORDER BY id DESC LIMIT 1")
       .get(repoId) as { status: string } | null;

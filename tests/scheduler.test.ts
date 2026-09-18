@@ -642,6 +642,50 @@ describe("П7: claim(rating) не платит за подзапрос круг�
   );
 });
 
+// В4.2-port-fix круг 2 (П12, Н-3): гард П5 спрашивает про живую периодическую
+// job КАЖДОГО репо каталога. Своего индекса у jobs(repo_id, …) не было —
+// SQLite брал idx_jobs_status_claimed и просматривал все queued/running строки
+// на каждый вызов; обход не содержит await, поэтому цена гарда — один
+// синхронный блок, во время которого не тикает даже таймер. Индекс
+// idx_jobs_repo_status дополняет idx_jobs_status_claimed, а не заменяет его.
+describe("П12: гард живой периодической job стоит поиска по индексу, а не обхода очереди", () => {
+  const GUARD_SQL = "SELECT 1 FROM jobs WHERE repo_id = ? AND trigger_kind != 'user' AND status IN ('queued', 'running') LIMIT 1";
+  test(
+    "20 000 живых job: EXPLAIN QUERY PLAN гарда — SEARCH по idx_jobs_repo_status, вызов ≤ 0,05 мс",
+    () => {
+      const gdir = mkdtempSync(join(tmpdir(), "rh-p12-"));
+      const g: Database = openDb({ ...loadConfig(), dataDir: gdir });
+      try {
+        g.exec("PRAGMA synchronous = OFF");
+        const repoIds: number[] = [];
+        g.transaction(() => {
+          for (let i = 0; i < 400; i++) {
+            repoIds.push(Number(g.query("INSERT INTO repos (org_slug, repo_slug, visibility) VALUES ('p12', ?, 'public')").run(`r${i}`).lastInsertRowid));
+          }
+          const ins = g.query("INSERT INTO jobs (repo_id, status, trigger_kind, created_at) VALUES (?, 'queued', 'periodic', '2026-09-18T00:00:00Z')");
+          // живая очередь на первой сотне репо; гард спрашивают про остальные
+          for (let i = 0; i < 20_000; i++) ins.run(repoIds[i % 100]!);
+        })();
+        g.exec("ANALYZE");
+        const plan = (g.query(`EXPLAIN QUERY PLAN ${GUARD_SQL}`).all(repoIds[200]!) as { detail: string }[]).map((r) => r.detail).join(" | ");
+        const guard = g.query(GUARD_SQL);
+        const calls = 200;
+        const t0 = Bun.nanoseconds();
+        for (let i = 0; i < calls; i++) guard.get(repoIds[100 + (i % 300)]!);
+        const perCall = (Bun.nanoseconds() - t0) / calls / 1e6;
+        expect({
+          usesIndex: plan.includes("idx_jobs_repo_status") ? "idx_jobs_repo_status" : plan,
+          perCall: perCall <= 0.05 ? "≤0,05 мс" : `${perCall.toFixed(3)} мс`,
+        }).toEqual({ usesIndex: "idx_jobs_repo_status", perCall: "≤0,05 мс" });
+      } finally {
+        g.close();
+        rmSync(gdir, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
+});
+
 // В4.2-port-fix (П8, LOW-1): колонку jobs.error принесли порты, myJobs её
 // читает, UI рисует дословно — но НИ ОДНОГО UPDATE в неё не было, то есть
 // панель заданий всегда показывала «упало» без причины. Причины — закрытый

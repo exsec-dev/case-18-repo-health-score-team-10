@@ -91,8 +91,16 @@ function ratingScoreOf(db: Database, org: string, repo: string): { score: number
 /**
  * Права зрителя на репо-запись НЕ из namespace-выдачи (В4.2-port-fix, П6,
  * находка С4; признак — решение владельца (3) 18.09): `clone === true` из
- * сохранённого JSON `favorites.last_access` ИЛИ `repos.visibility = 'public'`
+ * сохранённого JSON `favorites.last_access` ИЛИ репо публичен и активен
  * ИЛИ у зрителя есть own-скан этого репо (`scans.user_id = зритель`).
+ *
+ * Круг 2 (П10, Н-1): публичный дизъюнкт читает ТУ ЖЕ ПАРУ признаков, что
+ * `cardVisible` (`repos.ts`) и рейтинг: `visibility = 'public' AND
+ * rating_active = 1`. `evictRepo` гасит `rating_active` и `visibility` не
+ * трогает (ставший приватным репо правился бы только следующим сканом,
+ * которого у эвиктированного не будет) — по одной `visibility` посторонний
+ * с чужим слагом в избранном видел название, язык, время анализа и Score
+ * репо, который карточке и MD-отчёту отдаёт 404 всем.
  *
  * Берётся именно `clone` из пяти полей `FavoriteAccess` (владелец публичного
  * репо без CI даёт `own: false` при `clone: true`) и `repos.visibility`, а не
@@ -101,10 +109,10 @@ function ratingScoreOf(db: Database, org: string, repo: string): { score: number
  * Третье слагаемое снимает коллизию с П4: own-скан = доказанные права.
  */
 function viewerMayReadRepo(db: Database, userId: number | null, org: string, repo: string): boolean {
-  const row = db.query("SELECT id, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as
-    | { id: number; visibility: string }
+  const row = db.query("SELECT id, visibility, rating_active FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as
+    | { id: number; visibility: string; rating_active: number }
     | null;
-  if (row && row.visibility === "public") return true;
+  if (row && row.visibility === "public" && row.rating_active === 1) return true;
   if (userId === null) return false;
   const fav = db.query("SELECT last_access FROM favorites WHERE user_id = ? AND org_slug = ? AND repo_slug = ?").get(userId, org, repo) as
     | { last_access: string | null }

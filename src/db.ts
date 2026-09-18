@@ -165,6 +165,13 @@ const LATE_INDEXES = `
 CREATE INDEX IF NOT EXISTS idx_scans_repo ON scans(repo_id, id);
 CREATE INDEX IF NOT EXISTS idx_jobs_status_claimed ON jobs(status, claimed_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_user_claimed ON jobs(user_id, claimed_at);
+-- П12 (Н-3, круг 2 В4.2-port-fix): гард ночного обхода спрашивает про ЖИВУЮ
+-- job каждого репо каталога. Без своего индекса SQLite брал
+-- idx_jobs_status_claimed и просматривал все queued/running строки на каждый
+-- репо: ~2,0 мс на вызов, на масштабе каталога ≈ 55 с синхронного блока за
+-- обход (event loop не отпускается — тиков таймера ноль). Индекс дополняет
+-- idx_jobs_status_claimed, а не заменяет его.
+CREATE INDEX IF NOT EXISTS idx_jobs_repo_status ON jobs(repo_id, status);
 `;
 
 function columnsOf(db: Database, table: string): Set<string> {
@@ -263,6 +270,14 @@ export function openDb(config: Config): Database {
   ensureColumn(db, "users", "avatar_id", "TEXT");
   ensureColumn(db, "jobs", "user_id", "INTEGER");
   ensureColumn(db, "jobs", "trigger_kind", "TEXT NOT NULL DEFAULT 'periodic'");
+  // П11 (Н-2, круг 2 В4.2-port-fix): бэкфилл признака полосы. Колонку добавили
+  // с DEFAULT 'periodic', и у строк, созданных ДО неё, `user_id IS NOT NULL`
+  // соседствует с `trigger_kind = 'periodic'`. На «единый признак полосы»
+  // (П8) опираются гард ночного обхода и retry-failed: без бэкфилла живая
+  // legacy-юзерская job навсегда блокировала бы периодику по своему репо и
+  // читалась бы как последняя периодическая. Согласованность обеспечивает
+  // миграция, а не только вставка `enqueueScan`.
+  db.exec("UPDATE jobs SET trigger_kind = 'user' WHERE user_id IS NOT NULL AND trigger_kind <> 'user'");
   // v1.5 (В4.1, К4): попытки и время постановки
   ensureColumn(db, "jobs", "attempts", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(db, "jobs", "created_at", "TEXT");

@@ -240,7 +240,7 @@ function legacyJobDb(prefix: string, status: string): { db: Database; repoId: nu
 }
 
 describe("П11 (Н-2): миграция бэкфиллит trigger_kind — предикаты полосы согласованы на старых БД", () => {
-  repro("живая legacy-юзерская job не читается как периодическая и не блокирует периодику по своему репо", async () => {
+  test("живая legacy-юзерская job не читается как периодическая и не блокирует периодику по своему репо", async () => {
     const { db, repoId, jobId } = legacyJobDb("rh-m42-p11a-", "queued");
     const kind = (db.query("SELECT trigger_kind FROM jobs WHERE id = ?").get(jobId) as { trigger_kind: string }).trigger_kind;
     // каталог отдаёт другую дату активности → «изменившийся» репо, периодика должна встать
@@ -251,7 +251,7 @@ describe("П11 (Н-2): миграция бэкфиллит trigger_kind — пр
     expect({ kind, reasons: out.enqueued.map((e) => e.reason), periodic }).toEqual({ kind: "user", reasons: ["changed"], periodic: 1 });
   });
 
-  repro("завершённая legacy-юзерская job не читается как последняя периодическая (retry-failed)", async () => {
+  test("завершённая legacy-юзерская job не читается как последняя периодическая (retry-failed)", async () => {
     const { db } = legacyJobDb("rh-m42-p11b-", "failed");
     // каталог не менялся: единственная причина перескана была бы retry-failed
     // по legacy-строке, прочитанной как «последняя периодическая»
@@ -499,7 +499,7 @@ describe("П6 (С4): мета репо не отдаётся зрителю бе
 });
 
 describe("П10 (Н-1, круг 2): признак прав читает пару visibility + rating_active", () => {
-  repro("эвиктированный публичный репо в избранном постороннего: ни меты, ни Score", async () => {
+  test("эвиктированный публичный репо в избранном постороннего: ни меты, ни Score", async () => {
     const res = await fetch(at("/api/me/repos"), as("peek"));
     expect(res.status).toBe(200);
     const body = (await res.json()) as MyReposBody;
