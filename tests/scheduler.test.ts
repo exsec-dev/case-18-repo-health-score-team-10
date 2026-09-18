@@ -369,8 +369,26 @@ describe("ночной каталог: дифф, форс, эвикция", () =
     const r2 = await nightlyCatalog(db, catalogClient(pages), { now: new Date() });
     expect(r2.enqueued).toEqual([]);
     expect(r2.returned).toEqual([]);
+    // В4.2-port-fix (П5): инвариант держится и на НЕПРИГОДНОМ репо — ветка
+    // retry-ineligible ставила job каждый обход, пока живая job не проверялась
+    const one = (db.query("SELECT id FROM repos WHERE org_slug = 'nc' AND repo_slug = 'one'").get() as { id: number }).id;
+    // очередь первого прогона разобрана (иначе гард П5 сработает уже на ней)
+    db.query("UPDATE jobs SET status = 'done' WHERE repo_id IN (SELECT id FROM repos WHERE org_slug = 'nc')").run();
+    db.query("INSERT INTO scans (repo_id, started_at, finished_at, status, trigger, rating_eligible) VALUES (?, ?, ?, 'ok', 'periodic', 0)").run(
+      one,
+      "2026-09-12T00:00:00Z",
+      "2026-09-12T00:10:00Z",
+    );
+    const r3 = await nightlyCatalog(db, catalogClient(pages), { now: new Date() });
+    const r4 = await nightlyCatalog(db, catalogClient(pages), { now: new Date() });
+    const r5 = await nightlyCatalog(db, catalogClient(pages), { now: new Date() });
+    expect({
+      reasons: [r3, r4, r5].map((r) => r.enqueued.map((e) => e.reason).join(",") || "-"),
+      liveJobs: (db.query("SELECT COUNT(*) AS c FROM jobs WHERE repo_id = ? AND status = 'queued'").get(one) as { c: number }).c,
+    }).toEqual({ reasons: ["retry-ineligible", "-", "-"], liveJobs: 1 });
     // чистим очередь этих репо
     db.query("DELETE FROM jobs WHERE repo_id IN (SELECT id FROM repos WHERE org_slug = 'nc')").run();
+    db.query("DELETE FROM scans WHERE repo_id = ?").run(one);
   });
 
   test("дифф last_updated: изменившееся — в очередь, форс-тогл — все", async () => {

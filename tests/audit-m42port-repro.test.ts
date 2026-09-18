@@ -111,7 +111,7 @@ function catalogClient(repos: Record<string, unknown>[]): ScClient {
 }
 
 describe("П5 (С2 r2): три обхода при неизменном каталоге ставят ровно одну job", () => {
-  repro("непригодный последний периодический скан — retry-ineligible не дублируется, пока job жива", async () => {
+  test("непригодный последний периодический скан — retry-ineligible не дублируется, пока job жива", async () => {
     const t = tempDb("rh-m42-p5-");
     const db = t.db;
     const repoId = seedRepo(t, { org: "nc5", repo: "ineligible", lastActivityAt: "2026-09-01T00:00:00Z" });

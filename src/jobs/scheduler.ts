@@ -279,11 +279,16 @@ export interface NightlyOptions {
  * постановка новых, эвикция исчезнувших (только public-строки нашей
  * таблицы; приватные own-репо в публичном каталоге и не ждутся).
  * Второй прогон при неизменном каталоге не ставит в очередь ничего —
- * приёмочный инвариант Б6.
+ * приёмочный инвариант каталога.
  * В4.1-fix круг 2 (С3, LOW-8): retry-failed — только по последней
  * ПЕРИОДИЧЕСКОЙ job (юзерская не навязывает и не маскирует перескан);
  * последний завершённый периодический скан непригоден → перескан
  * (retry-ineligible), не чаще раза за обход.
+ * В4.2-port-fix (П5, С2 r2 = Ф2.12, первая половина): у репо с ЖИВОЙ
+ * периодической job (queued/running) новая не ставится вообще. Без гарда
+ * ветка retry-ineligible ставила job КАЖДЫЙ обход — на масштабе каталога
+ * +1044 дубля за обход при пропускной способности ~700 сканов/сутки, и
+ * докстринг выше был неправдой.
  */
 export async function nightlyCatalog(db: Database, client: ScClient, opts: NightlyOptions = {}): Promise<NightlyResult> {
   const fullRescan = opts.fullRescan ?? false;
@@ -295,6 +300,10 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
 
   const enqueued: NightlyEnqueued[] = [];
   const enqueuedRepoIds = new Set<number>();
+  // П5: признак полосы сразу через trigger_kind (единый признак — П8);
+  // строки refused несут trigger_kind='user' и в полосу периодики не попадают
+  const hasLivePeriodicJob = (repoId: number): boolean =>
+    db.query("SELECT 1 FROM jobs WHERE repo_id = ? AND trigger_kind != 'user' AND status IN ('queued', 'running') LIMIT 1").get(repoId) !== null;
   const seenRepoIds = new Set<number>();
   const seenSlugs = new Set<string>();
 
@@ -317,6 +326,8 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
     seenRepoIds.add(repoId);
     // не чаще раза за обход (дубли записей каталога)
     if (enqueuedRepoIds.has(repoId)) continue;
+    // П5: живая периодическая job уже отсканирует репо — второй не нужно
+    if (hasLivePeriodicJob(repoId)) continue;
     if (!existing) {
       enqueuedRepoIds.add(repoId);
       enqueueScan(db, repoId, { triggerKind: "periodic" });
