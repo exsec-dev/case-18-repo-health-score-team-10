@@ -282,7 +282,7 @@ describe("«мои репо» и заявка (К-Ф1.1)", () => {
     const user = upsertUser(t.db, "ya-meta", "meta");
     const existing = seedRepo(t, { org: "own", repo: "old", title: "Old" });
     const body = (json: unknown): ScClient => ({ get: async () => ({ status: 200, json, bodyText: "" }), requestCount: () => 0 });
-    const queue = { userScansPerHour: 100, maxAttempts: 3, userActiveMax: 100 };
+    const queue = { userScansPerHour: 100, maxAttempts: 3, userActiveMax: 100, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000 };
     expect((await requestUserScan(t.db, body({ name: "New", visibility: "private" }), user, "own", "old", queue)).status).toBe(202);
     expect(t.db.query("SELECT title, visibility FROM repos WHERE id = ?").get(existing)).toEqual({ title: "Old", visibility: "public" });
     expect((await requestUserScan(t.db, body({ name: "Fresh" }), user, "own", "fresh", queue)).status).toBe(202);

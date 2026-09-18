@@ -193,6 +193,10 @@ export async function requestUserScan(
   repo: string,
   queue: QueueConfig,
   now = new Date(),
+  // В4.2-port-fix (П2): готовое тело repo-GET от вызывающего (проверка прав
+  // избранного только что его получила) — второй живой запрос не делается;
+  // вторая половина Н1 ровно про усилитель запросов
+  prefetched?: { status: number; json: unknown },
 ): Promise<UserScanResponse> {
   const existing = db.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number } | null;
   const active = existing ? findActiveUserJob(db, userId, existing.id) : null;
@@ -205,7 +209,7 @@ export async function requestUserScan(
   if (countRecentUserJobs(db, userId, now) >= queue.userScansPerHour) {
     return rateLimited(queue);
   }
-  const res = await client.get(`/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`);
+  const res = prefetched ?? (await client.get(`/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`));
   // Ф1.6 + круг 2 (LOW-6): любой неуспех предпроверки (403/404, 401,
   // 0/429/5xx) учитывается лимитом частоты — POST не усилитель запросов
   if (res.status !== 200) recordRefusedUserJob(db, userId, now);
@@ -358,26 +362,73 @@ export function listFavorites(db: import("bun:sqlite").Database, userId: number)
   });
 }
 
-/** Кулдаун автозапуска заявки избранного (решение 17.09: 6ч от последнего скана репо). */
-export const FAVORITE_OWN_COOLDOWN_MS = 6 * 60 * 60_000;
-
 export interface AccessProbeDeps {
   restGet: (path: string) => Promise<{ status: number; json: unknown }>;
   appsecLatest: (gitRepo: string) => Promise<{ status: number }>;
+  /** Config.queue.favoriteOwnCooldownMs (П2): модульной константы больше нет */
+  cooldownMs: number;
   now?: Date;
 }
 
-/** Живая проверка прав по факту (cache-then-revalidate): repo-GET →
- *  cicd/runs (listCIFlux) → scans/latest (useAppSecScan). При собственных
- *  правах и простывшем кулдауне — заявка на анализ (механика; LLM никогда). */
+/**
+ * Исход автопостановки анализа по избранному (В4.2-port-fix, П2, решение
+ * владельца (1) 18.09). `enqueued: boolean` убран: единственное поле исхода —
+ * `enqueue: {status, code}`. `code` у `refused` — код ошибки `requestUserScan`,
+ * у `skipped` — почему не ставили, у `queued`/`deduplicated` — `null`.
+ */
+export type FavoriteEnqueueStatus = "queued" | "deduplicated" | "refused" | "skipped";
+export type FavoriteEnqueueCode =
+  | "too_many_active"
+  | "rate_limited"
+  | "no_access"
+  | "pat_expired"
+  | "check_failed"
+  | "not_own"
+  | "cooldown"
+  | null;
+
+export interface FavoriteEnqueue {
+  status: FavoriteEnqueueStatus;
+  code: FavoriteEnqueueCode;
+}
+
+/** Ответ POST /api/me/favorites/:org/:repo/check — читается MePage.tsx (П2-UI). */
+export interface FavoriteCheckResponse {
+  access: FavoriteAccess;
+  enqueue: FavoriteEnqueue;
+  lastScanAt: string | null;
+}
+
+/** `requestUserScan` → форма исхода для ответа проверки избранного (П2). */
+export function favoriteEnqueueOf(out: UserScanResponse): FavoriteEnqueue {
+  if (out.status === 202) {
+    return { status: out.body["deduplicated"] === true ? "deduplicated" : "queued", code: null };
+  }
+  const code = (out.body["error"] as { code?: unknown } | undefined)?.code;
+  return { status: "refused", code: (typeof code === "string" ? code : "check_failed") as FavoriteEnqueueCode };
+}
+
+/**
+ * Живая проверка прав по факту (cache-then-revalidate): repo-GET →
+ * cicd/runs (listCIFlux) → scans/latest (useAppSecScan). При собственных
+ * правах и простывшем кулдауне — заявка на анализ (механика; LLM никогда).
+ *
+ * В4.2-port-fix (П2, Н1 HIGH): колбэк постановки АСИНХРОННЫЙ и отдаёт исход
+ * `FavoriteEnqueue`, а не `number | null`, — за ним стоит `requestUserScan`
+ * целиком (дешёвая предпроверка, дедуп, `too_many_active`, `rate_limited`,
+ * транзакция Ф1.5, строки `refused`); ScClient связывает вызывающий, он же
+ * прокидывает УЖЕ полученное тело repo-GET (4-го живого запроса нет).
+ * Отказ по капу не роняет проверку прав — её результат зритель видит всё
+ * равно. Кулдаун считается по последнему own-скану ИМЕННО этого зрителя.
+ */
 export async function checkFavoriteAccess(
   db: import("bun:sqlite").Database,
   userId: number,
   org: string,
   repo: string,
   deps: AccessProbeDeps,
-  enqueueUserScan: (db2: import("bun:sqlite").Database, userId2: number, org2: string, repo2: string) => number | null,
-): Promise<{ access: FavoriteAccess; enqueued: boolean; lastScanAt: string | null }> {
+  enqueueUserScan: (repoRes: { status: number; json: unknown }) => Promise<FavoriteEnqueue>,
+): Promise<FavoriteCheckResponse> {
   const repoRes = await deps.restGet(`/repos/${org}/${repo}`);
   const access: FavoriteAccess = { clone: false, visibility: "unknown", ci: null, appsec: null, own: false };
   if (repoRes.status === 200) {
@@ -395,17 +446,21 @@ export async function checkFavoriteAccess(
   access.own = access.ci === true || access.appsec === true || access.visibility === "private";
 
   const now = deps.now ?? new Date();
+  // К-П П2: own-скан ЭТОГО зрителя (scans.user_id = userId, не IS NOT NULL —
+  // иначе скан другого юзера блокирует автопостановку на 6 часов)
   const last = db
     .query(
-      "SELECT MAX(s.finished_at) AS f FROM scans s JOIN repos r ON r.id = s.repo_id WHERE r.org_slug = ? AND r.repo_slug = ? AND s.finished_at IS NOT NULL",
+      `SELECT MAX(s.finished_at) AS f FROM scans s JOIN repos r ON r.id = s.repo_id
+       WHERE r.org_slug = ? AND r.repo_slug = ? AND s.user_id = ? AND s.finished_at IS NOT NULL`,
     )
-    .get(org, repo) as { f: string | null };
+    .get(org, repo, userId) as { f: string | null };
   const lastScanAt = last?.f ?? null;
-  const cooldownPassed = lastScanAt === null || now.getTime() - Date.parse(lastScanAt) >= FAVORITE_OWN_COOLDOWN_MS;
-  let enqueued = false;
-  if (access.own && cooldownPassed) {
-    enqueued = enqueueUserScan(db, userId, org, repo) !== null;
-  }
+  const cooldownPassed = lastScanAt === null || now.getTime() - Date.parse(lastScanAt) >= deps.cooldownMs;
+  const enqueue: FavoriteEnqueue = !access.own
+    ? { status: "skipped", code: "not_own" }
+    : !cooldownPassed
+      ? { status: "skipped", code: "cooldown" }
+      : await enqueueUserScan(repoRes);
   db.query("UPDATE favorites SET last_access = ?, last_checked_at = ? WHERE user_id = ? AND org_slug = ? AND repo_slug = ?").run(
     JSON.stringify(access),
     now.toISOString(),
@@ -413,5 +468,5 @@ export async function checkFavoriteAccess(
     org,
     repo,
   );
-  return { access, enqueued, lastScanAt };
+  return { access, enqueue, lastScanAt };
 }

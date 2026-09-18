@@ -10,7 +10,18 @@ import { openDb } from "./db";
 import { getMeta, getRepoCardForViewer, listRepos, parseReposQuery } from "./api/repos";
 import { makeAccessCache, resolveAccess, type AccessRepo, type AccessResult } from "./auth/access";
 import { makeAppsecClient } from "./collectors/appsec";
-import { addFavorite, checkFavoriteAccess, isFavorite, listFavorites, listMyRepos, requestUserScan , myJobs, removeFavorite } from "./api/me";
+import {
+  addFavorite,
+  checkFavoriteAccess,
+  favoriteEnqueueOf,
+  isFavorite,
+  listFavorites,
+  listMyRepos,
+  myJobs,
+  removeFavorite,
+  requestUserScan,
+  type FavoriteCheckResponse,
+} from "./api/me";
 import { renderRepoReport } from "./report/markdown";
 import { enqueueScan, schedulerHealthSnapshot, startScheduler, startWorkerLoop, sweepOrphanClones } from "./jobs/scheduler";
 import {
@@ -37,6 +48,23 @@ import index from "./web/index.html";
 
 const config = loadConfig();
 const patProbes = new Map<number, number[]>();
+// В4.2-port-fix (П2): окно лимита проверок прав избранного на юзера.
+const favoriteChecks = new Map<number, number[]>();
+
+/** Минутное окно проверок прав избранного: true = пропустить. Окно чистится — Map не течёт. */
+function allowFavoriteCheck(userId: number, now = Date.now()): boolean {
+  const since = now - 60_000;
+  for (const [id, stamps] of favoriteChecks) {
+    const alive = stamps.filter((ts) => ts > since);
+    if (alive.length === 0) favoriteChecks.delete(id);
+    else favoriteChecks.set(id, alive);
+  }
+  const window = favoriteChecks.get(userId) ?? [];
+  if (window.length >= config.queue.favoriteChecksPerMinute) return false;
+  window.push(now);
+  favoriteChecks.set(userId, window);
+  return true;
+}
 
 const db = openDb(config);
 
@@ -330,16 +358,34 @@ const server = Bun.serve({
       if (!pat) {
         return Response.json({ error: { code: "no_pat", message: "для проверки прав нужен PAT SourceCraft" } }, { status: 409 });
       }
+      // В4.2-port-fix (П2, вторая половина Н1): каждый вызов — до 3 живых
+      // запросов PAT-ом зрителя, лимита не было вовсе. Окно минутное, счётчик
+      // по схеме patProbes, но С ЧИСТКОЙ (Map без очистки течёт). 429 стоит
+      // ПОСЛЕ not_favorite (404) и no_pat (409): перебор несуществующих
+      // слагов не должен жечь лимит.
+      if (!allowFavoriteCheck(user.userId)) {
+        return Response.json(
+          { error: { code: "rate_limited", message: `не больше ${config.queue.favoriteChecksPerMinute} проверок прав в минуту — попробуйте позже` } },
+          { status: 429 },
+        );
+      }
       const rest = makeScClient({ token: pat, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 8, timeoutMs: config.scan.rest.timeoutMs });
       const appsec = makeAppsecClient({ token: pat, minIntervalMs: config.scan.rest.appsecMinIntervalMs });
-      const result = await checkFavoriteAccess(db, user.userId, org, repo, {
-        restGet: (path: string) => rest.get(path).then((r) => ({ status: r.status, json: r.json })),
-        appsecLatest: (gitRepo: string) => appsec.get("/v1/scans/latest", { gitRepo }).then((r) => ({ status: r.status })),
-      }, (db2, userId2, org2, repo2) => {
-        const repoRow = db2.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org2, repo2) as { id: number } | null;
-        if (!repoRow) return null;
-        return enqueueScan(db2, repoRow.id, { userId: userId2, triggerKind: "user" });
-      });
+      const result: FavoriteCheckResponse = await checkFavoriteAccess(
+        db,
+        user.userId,
+        org,
+        repo,
+        {
+          restGet: (path: string) => rest.get(path).then((r) => ({ status: r.status, json: r.json })),
+          appsecLatest: (gitRepo: string) => appsec.get("/v1/scans/latest", { gitRepo }).then((r) => ({ status: r.status })),
+          cooldownMs: config.queue.favoriteOwnCooldownMs,
+        },
+        // Н1: постановка идёт ЦЕЛИКОМ через requestUserScan — его дедуп,
+        // too_many_active, rate_limited и транзакцию Ф1.5 не обойти; тело
+        // repo-GET прокидывается, чтобы не делать его второй раз
+        async (repoRes) => favoriteEnqueueOf(await requestUserScan(db, rest, user.userId, org, repo, config.queue, new Date(), repoRes)),
+      );
       return Response.json(result);
     },
     "/api/me/repos/:org/:repo/scan": async (req) => {

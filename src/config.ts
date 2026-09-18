@@ -81,6 +81,10 @@ export interface QueueConfig {
   maxAttempts: number;
   /** активных (queued/running) юзерских заявок на юзера, сверх — 429 too_many_active (В4.1-fix, Ф1.7): 2, env QUEUE_USER_ACTIVE_MAX */
   userActiveMax: number;
+  /** проверок прав избранного на юзера в минуту, сверх — 429 rate_limited (В4.2-port-fix, П2): 6, env QUEUE_FAVORITE_CHECKS_PER_MINUTE */
+  favoriteChecksPerMinute: number;
+  /** кулдаун автозаявки по избранному от последнего OWN-скана зрителя (П2; решение 17.09 — 6 ч): env QUEUE_FAVORITE_OWN_COOLDOWN_MS */
+  favoriteOwnCooldownMs: number;
 }
 
 export interface AccessConfig {
@@ -254,6 +258,8 @@ export function loadConfig(): Config {
       userScansPerHour: envInt(env, "QUEUE_USER_SCANS_PER_HOUR") ?? 10,
       maxAttempts: envInt(env, "QUEUE_MAX_ATTEMPTS") ?? 3,
       userActiveMax: envInt(env, "QUEUE_USER_ACTIVE_MAX") ?? 2,
+      favoriteChecksPerMinute: envInt(env, "QUEUE_FAVORITE_CHECKS_PER_MINUTE") ?? 6,
+      favoriteOwnCooldownMs: envInt(env, "QUEUE_FAVORITE_OWN_COOLDOWN_MS") ?? 6 * 60 * 60_000,
     },
     llm: {
       provider,

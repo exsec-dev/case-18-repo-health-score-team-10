@@ -285,7 +285,7 @@ interface MyReposBody {
 }
 
 describe("П2 (Н1): проверка избранного ставит сканы через requestUserScan — со всеми капами", () => {
-  repro("8 своих избранных → активных юзерских job ровно userActiveMax, остальные — enqueue.refused/too_many_active", async () => {
+  test("8 своих избранных → активных юзерских job ровно userActiveMax, остальные — enqueue.refused/too_many_active", async () => {
     const put = await fetch(at("/api/me/pat"), as("fav", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: "pat-fav-000000000" }) }));
     expect(put.status).toBe(200);
     const outcomes: CheckBody[] = [];

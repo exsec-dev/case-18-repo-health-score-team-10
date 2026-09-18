@@ -583,6 +583,31 @@ function accessRow(access: import("../api/me").FavoriteEntry["access"]): string 
   return `клон ${mark(access.clone)} · CI ${mark(access.ci)} · Security ${mark(access.appsec)}${access.own ? " · ваш" : ""}`;
 }
 
+/**
+ * П2-UI (решения (1) и (2) 18.09): исход автопостановки анализа читается из
+ * единственного поля `enqueue: {status, code}` — поля `enqueued` больше нет.
+ * Причина отказа показывается человеку, а не глотается молча.
+ */
+function enqueueNote(enqueue: import("../api/me").FavoriteEnqueue): string {
+  if (enqueue.status === "queued") return "запущен анализ (не чаще раза в 6 часов)";
+  if (enqueue.status === "deduplicated") return "анализ уже в очереди";
+  if (enqueue.status === "skipped") {
+    return enqueue.code === "not_own" ? "анализ доступен только для своих репозиториев" : "анализ запускали недавно";
+  }
+  switch (enqueue.code) {
+    case "too_many_active":
+      return "анализ не запущен: слишком много ваших анализов в очереди — дождитесь завершения";
+    case "rate_limited":
+      return "анализ не запущен: исчерпан часовой лимит запусков — попробуйте позже";
+    case "no_access":
+      return "анализ не запущен: ваш PAT не даёт доступа к этому репозиторию";
+    case "pat_expired":
+      return "анализ не запущен: SourceCraft отклонил PAT — обновите токен";
+    default:
+      return "анализ не запущен: не удалось проверить доступ к репозиторию";
+  }
+}
+
 /** Избранное: сейвить что угодно; права-ряд по факту; кулдаун 6ч. */
 function FavoritesSection({ hasPat }: { hasPat: boolean }) {
   const favs = useJson<FavoritesResponse>("/api/me/favorites");
@@ -602,11 +627,13 @@ function FavoritesSection({ hasPat }: { hasPat: boolean }) {
     setBusy(`${org}/${repo}`);
     setNote(null);
     try {
-      const res = await mutateJson<{ access: import("../api/me").FavoriteEntry["access"]; enqueued: boolean }>(
+      // П2-UI: тип ответа экспортирован из src/api/me.ts — переименование
+      // поля ловит tsc, а не пользователь (условие решения (1) 18.09)
+      const res = await mutateJson<import("../api/me").FavoriteCheckResponse>(
         `/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/check`,
         "POST",
       );
-      setNote({ text: `${org}/${repo}: ${accessRow(res.access)}${res.enqueued ? " — запущен анализ (не чаще раза в 6 часов)" : ""}`, danger: false });
+      setNote({ text: `${org}/${repo}: ${accessRow(res.access)} — ${enqueueNote(res.enqueue)}`, danger: false });
       favs.reload();
     } catch (e) {
       setNote({ text: e instanceof Error ? e.message : String(e), danger: true });
