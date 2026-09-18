@@ -127,6 +127,9 @@ describe("runScan: хук пишет пригодность, мета — тол
     const deps = (restFacts: Fact[], m: ReturnType<typeof meta>): ScanDeps => ({
       db,
       scClient: null,
+      // М7 (круг 2): адреса обязательны типом; каналы подменены швами
+      restBase: "http://127.0.0.1:1",
+      appsecBase: "http://127.0.0.1:1",
       collectGit: async () => ({ facts: git }),
       collectRest: async () => ({ facts: restFacts, repoMeta: m, channelErrors: [] }),
     });

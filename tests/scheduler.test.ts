@@ -138,7 +138,9 @@ describe("claim-loop: лизы и приоритеты", () => {
 });
 
 describe("очередь: анти-абьюз (К4 В4.1)", () => {
-  // своя БД: чередование читает «последнюю заявленную» по всей таблице
+  // своя БД: круговой порядок Ф1.7 внутри полосы user читает MAX(claimed_at)
+  // по ВСЕЙ таблице jobs (М4 круга 2: прежняя формулировка звала это
+  // «чередованием» — механизма с таким именем нет с 17.09, решение (1))
   const qdir = mkdtempSync(join(tmpdir(), "rh-queue-"));
   const q: Database = openDb({ ...loadConfig(), dataDir: qdir });
   afterAll(() => {
@@ -312,6 +314,10 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
 
     test("справедливость: юзер с 2 заявками не занимает юзерскую половину — второй юзер идёт между ними", () => {
       clear();
+      // Т2 (круг 2): курсор round-robin модульный. Тест детерминирован не
+      // сам по себе, а лишь потому, что полоса rating здесь пуста — сброс
+      // курсора делает это явным и герметизирует порядок от соседей
+      __resetRoundRobin();
       const heavy = user("heavy");
       const light = user("light");
       const h1 = enqueueScan(q, repo("h1"), { userId: heavy, triggerKind: "user" });
@@ -406,6 +412,13 @@ describe("ночной каталог: дифф, форс, эвикция", () =
     const rForce = await nightlyCatalog(db, catalogClient(v2), { fullRescan: true, now: new Date() });
     expect(rForce.enqueued.map((e) => e.slug).sort()).toEqual(["df/x", "df/y"]);
     expect(rForce.enqueued.every((e) => e.reason === "forced")).toBe(true);
+    // Т3 (круг 2): следствие отклонения 7 круга 1 — гард П5 стоит на ВСЕХ
+    // причинах постановки, поэтому SCHEDULER_FULL_RESCAN при непустой очереди
+    // периодики job НЕ дублирует. Свойство закрепляется тестом, а не отчётом:
+    // очередь после форса не разбиралась, второй форс не добавляет ни строки
+    const rForce2 = await nightlyCatalog(db, catalogClient(v2), { fullRescan: true, now: new Date() });
+    const live = (db.query("SELECT COUNT(*) AS c FROM jobs j JOIN repos r ON r.id = j.repo_id WHERE r.org_slug = 'df' AND j.status = 'queued'").get() as { c: number }).c;
+    expect({ second: rForce2.enqueued, live }).toEqual({ second: [], live: 2 });
     db.query("DELETE FROM jobs WHERE repo_id IN (SELECT id FROM repos WHERE org_slug = 'df')").run();
   });
 
@@ -642,6 +655,57 @@ describe("П7: claim(rating) не платит за подзапрос круг�
   );
 });
 
+// В4.2-port-fix круг 2 (Т2): П1 был покрыт двумя формами нагрузки из шести —
+// «полоса user пустеет и наполняется» ревьюер проверял руками, охраны от
+// регрессии не было. Курсор round-robin модульный: тест герметизируется
+// явным __resetRoundRobin().
+describe("П1 (Т2): полоса user пустеет и наполняется — курсор не залипает ни на пустой, ни на новой", () => {
+  test("после опустошения юзерской полосы периодика идёт сплошь, а новые юзерские job снова разбираются", () => {
+    const rdir = mkdtempSync(join(tmpdir(), "rh-rr-"));
+    const r: Database = openDb({ ...loadConfig(), dataDir: rdir });
+    try {
+      __resetRoundRobin();
+      const mk = (slug: string) => Number(r.query("INSERT INTO repos (org_slug, repo_slug, visibility) VALUES ('rr', ?, 'public')").run(slug).lastInsertRowid);
+      r.query("INSERT INTO users (ya_id, login, created_at, last_login_at) VALUES ('ya-rr', 'rr', '2026', '2026')").run();
+      const uid = (r.query("SELECT id FROM users WHERE ya_id = 'ya-rr'").get() as { id: number }).id;
+      for (let i = 0; i < 2; i++) enqueueScan(r, mk(`u${i}`), { userId: uid, triggerKind: "user" });
+      for (let i = 0; i < 12; i++) enqueueScan(r, mk(`p${i}`), { triggerKind: "periodic" });
+      let t = Date.parse("2026-09-18T00:00:00Z");
+      const take = (n: number) => {
+        const out: string[] = [];
+        for (let i = 0; i < n; i++) {
+          const job = claimAny(r, ["user", "rating"], new Date((t += 1000)), 60 * 60_000);
+          out.push(job === null ? "none" : job.triggerKind);
+        }
+        return out;
+      };
+      // фаза 1: обе полосы непусты — обе разбираются
+      const mixed = take(4);
+      // фаза 2: юзерская полоса пуста — периодика идёт сплошь, null не возвращается
+      const drained = take(4);
+      // фаза 3: полоса наполнилась снова — новые юзерские job не голодают
+      for (let i = 0; i < 2; i++) enqueueScan(r, mk(`u2${i}`), { userId: uid, triggerKind: "user" });
+      const refilled = take(4);
+      expect({
+        userInMixed: mixed.filter((x) => x === "user").length,
+        periodicInMixed: mixed.filter((x) => x === "periodic").length,
+        drained: drained.join(" "),
+        userAfterRefill: refilled.filter((x) => x === "user").length,
+        periodicAfterRefill: refilled.filter((x) => x === "periodic").length,
+      }).toEqual({
+        userInMixed: 2,
+        periodicInMixed: 2,
+        drained: "periodic periodic periodic periodic",
+        userAfterRefill: 2,
+        periodicAfterRefill: 2,
+      });
+    } finally {
+      r.close();
+      rmSync(rdir, { recursive: true, force: true });
+    }
+  });
+});
+
 // В4.2-port-fix круг 2 (П12, Н-3): гард П5 спрашивает про живую периодическую
 // job КАЖДОГО репо каталога. Своего индекса у jobs(repo_id, …) не было —
 // SQLite брал idx_jobs_status_claimed и просматривал все queued/running строки
@@ -759,5 +823,19 @@ describe("П8: причина падения job пишется в jobs.error", 
     const job = claimNext(e, new Date("2026-09-18T04:00:00Z"), 60_000, { queue: "rating" })!;
     finishJob(e, id, job.claimedAt, "failed", "x".repeat(900));
     expect(errorOf(id).error?.length).toBe(500);
+  });
+
+  // Т4 (круг 2): длина — не гарантия безопасности. Безопасность даёт закрытый
+  // список констант: НИ ОДИН вызывающий finishJob не имеет права собрать
+  // причину из ответа платформы, пути клона или текста исключения.
+  test("все причины, которые пишет код, принадлежат закрытому списку JOB_ERRORS", () => {
+    const fixed: string[] = [JOB_ERRORS.gone, JOB_ERRORS.noPat, JOB_ERRORS.attempts, JOB_ERRORS.internal];
+    const belongs = (text: string) => fixed.includes(text) || /^сбор данных не удался: (git|rest|appsec)(, (git|rest|appsec))*$/.test(text);
+    const written = (e.query("SELECT DISTINCT error FROM jobs WHERE error IS NOT NULL").all() as { error: string }[]).map((r) => r.error);
+    // строка теста про обрезку — единственная искусственная, её исключаем явно
+    const real = written.filter((t) => !/^x+$/.test(t));
+    expect({ count: real.length > 0, stranger: real.filter((t) => !belongs(t)) }).toEqual({ count: true, stranger: [] });
+    // и сам список: ни одной подстановки снаружи — только канальные имена
+    expect([JOB_ERRORS.channels(["git"]), JOB_ERRORS.channels(["rest", "appsec"])].every(belongs)).toBe(true);
   });
 });

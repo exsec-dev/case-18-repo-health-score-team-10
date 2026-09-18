@@ -256,9 +256,17 @@ export const JOB_ERRORS = {
   channels: (channels: string[]): string => `сбор данных не удался: ${channels.join(", ")}`.slice(0, JOB_ERROR_MAX),
 } as const;
 
-/** Каналы `bad`-скана, которые не собрались, — для текста причины (П8). */
+/**
+ * Каналы `bad`-скана, которые не собрались, — для текста причины (П8).
+ *
+ * М3 (круг 2): собравшимся считается любой `ok*`, а не только точное «ok».
+ * `runScan` помечает деградационный клон (shallow-ярус §5.7) как
+ * `ok(degraded)` — данные есть, история укорочена; строгое сравнение читало
+ * его как отказ, и пользователь получал «сбор данных не удался: git» про
+ * канал, который собрался.
+ */
 export function failedChannelsOf(channels: { git: string; rest: string; appsec: string }): string[] {
-  return (["git", "rest", "appsec"] as const).filter((k) => channels[k] !== "ok" && channels[k] !== "skipped");
+  return (["git", "rest", "appsec"] as const).filter((k) => !channels[k].startsWith("ok") && channels[k] !== "skipped");
 }
 
 /**

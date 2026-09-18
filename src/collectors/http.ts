@@ -18,7 +18,14 @@ export interface ScClient {
 
 export interface ScClientOptions {
   token: string | null;
-  baseUrl?: string;
+  /**
+   * Адрес REST-хоста (`Config.api.restBase`) — ОБЯЗАТЕЛЕН (М7 круга 2
+   * В4.2-port-fix). Дефолт модуля молча уводил клиент на боевой хост в обход
+   * шва Ф1.13: ровно так PAT зрителя уходил в живой AppSec при
+   * `APPSEC_API_BASE` на мок (Н2). Соглашение «все живые места и так
+   * передают адрес» держалось на дисциплине; теперь его держит тип.
+   */
+  baseUrl: string;
   minIntervalMs?: number;
   maxRequests?: number;
   /** таймаут запроса (Config.scan.rest.timeoutMs, дефолт 10 с): истёк → status 0 (Ф1.6) */
@@ -27,7 +34,7 @@ export interface ScClientOptions {
 }
 
 export function makeScClient(opts: ScClientOptions): ScClient {
-  const baseUrl = opts.baseUrl ?? "https://api.sourcecraft.tech";
+  const baseUrl = opts.baseUrl;
   const minInterval = opts.minIntervalMs ?? 50;
   const maxRequests = opts.maxRequests ?? 1000;
   const timeoutMs = opts.timeoutMs ?? 10_000;

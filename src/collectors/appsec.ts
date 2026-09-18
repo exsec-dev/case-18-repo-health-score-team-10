@@ -30,7 +30,8 @@ export interface AppsecClient {
 
 export interface AppsecClientOptions {
   token: string;
-  baseUrl?: string;
+  /** адрес AppSec-хоста (`Config.api.appsecBase`) — ОБЯЗАТЕЛЕН, как у `makeScClient` (М7 круга 2) */
+  baseUrl: string;
   /** ≥100мс между запросами (лимиты частоты в доке не определены — бережность наша) */
   minIntervalMs?: number;
   maxRequests?: number;
@@ -39,7 +40,7 @@ export interface AppsecClientOptions {
 
 /** Живой клиент: интервал, таймаут, один ретрай на временные сбои (429/5xx/сеть). */
 export function makeAppsecClient(opts: AppsecClientOptions): AppsecClient {
-  const baseUrl = opts.baseUrl ?? APPSEC_BASE_URL;
+  const baseUrl = opts.baseUrl;
   const minInterval = opts.minIntervalMs ?? 100;
   const maxRequests = opts.maxRequests ?? 40;
   const timeoutMs = opts.timeoutMs ?? 15_000;

@@ -228,7 +228,7 @@ describe("makeAppsecClient: бережность живого клиента", (
       return new Response(JSON.stringify({ uuid: "u", timeFinished: 1 }), { status: 200 });
     };
     try {
-      const client = makeAppsecClient({ token: "secret-token", minIntervalMs: 1 });
+      const client = makeAppsecClient({ token: "secret-token", baseUrl: "http://127.0.0.1:1", minIntervalMs: 1 });
       const ok = await client.get("/v1/scans/latest", { gitRepo: "g" });
       expect(ok.status).toBe(200);
       expect(calls.length).toBe(2);
@@ -250,7 +250,7 @@ describe("makeAppsecClient: бережность живого клиента", (
     const realFetch = globalThis.fetch;
     (globalThis as any).fetch = async () => new Response("{}", { status: 200 });
     try {
-      const client = makeAppsecClient({ token: "t", minIntervalMs: 1, maxRequests: 2 });
+      const client = makeAppsecClient({ token: "t", baseUrl: "http://127.0.0.1:1", minIntervalMs: 1, maxRequests: 2 });
       await client.get("/v1/scans/latest", { gitRepo: "g" });
       await client.get("/v1/scans/latest", { gitRepo: "g" });
       const third = await client.get("/v1/scans/latest", { gitRepo: "g" });

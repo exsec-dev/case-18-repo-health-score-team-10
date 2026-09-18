@@ -589,7 +589,10 @@ function accessRow(access: import("../api/me").FavoriteEntry["access"]): string 
  * Причина отказа показывается человеку, а не глотается молча.
  */
 function enqueueNote(enqueue: import("../api/me").FavoriteEnqueue): string {
-  if (enqueue.status === "queued") return "запущен анализ (не чаще раза в 6 часов)";
+  // М9 (круг 2): число часов из текста убрано — кулдаун настраивается
+  // (`QUEUE_FAVORITE_OWN_COOLDOWN_MS`), а в тексте оно было зашито и врало бы
+  // на любом стенде с другим значением
+  if (enqueue.status === "queued") return "запущен анализ";
   if (enqueue.status === "deduplicated") return "анализ уже в очереди";
   if (enqueue.status === "skipped") {
     return enqueue.code === "not_own" ? "анализ доступен только для своих репозиториев" : "анализ запускали недавно";
@@ -659,7 +662,7 @@ function FavoritesSection({ hasPat }: { hasPat: boolean }) {
           <Text variant="subheader-2">Избранное ★</Text>
           <Text color="secondary">
             Любой репозиторий — звёздочкой на его странице. «Проверить права» — живой запрос по вашему PAT;
-            свой репозиторий пересканируется автоматически, не чаще раза в 6 часов.
+            свой репозиторий пересканируется автоматически, но не сразу после предыдущего анализа.
           </Text>
           <Text color="secondary">✓ право есть · ✗ права нет · ? проверка не удалась или неизвестно</Text>
         </Flex>

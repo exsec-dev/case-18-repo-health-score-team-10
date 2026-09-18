@@ -63,7 +63,9 @@ describe("Ф1.1 (HIGH-1): из какого скана рейтинг", () => {
     const gitFacts = facts.filter((f) => f.source === "git");
     const restFacts = facts.filter((f) => f.source !== "git");
     const meta = { org: "victim", repo: "public-repo", title: "Victim", language: "Go", likes: 5, lastActivityAt: "2026-09-10T00:00:00Z", forks: 0, reactionCounts: null, visibility: "public" };
-    const base: ScanDeps = { db, scClient: null, collectGit: async () => ({ facts: gitFacts }) };
+    // М7 (круг 2): restBase/appsecBase обязательны типом; каналы подменены
+    // швами, живого клиента не строится — адрес заведомо нерабочий локальный
+    const base: ScanDeps = { db, scClient: null, restBase: "http://127.0.0.1:1", appsecBase: "http://127.0.0.1:1", collectGit: async () => ({ facts: gitFacts }) };
 
     // периодический скан серверным токеном: все публичные факты ok
     await runScan({ ...base, collectRest: async () => ({ facts: restFacts, repoMeta: meta, channelErrors: [] }) }, "victim/public-repo", { trigger: "periodic" });

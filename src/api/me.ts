@@ -24,6 +24,7 @@ export interface MyRepoEntry {
   languageColor: string | null;
   /** Score в рейтинге (total_rating) последнего пригодного скана (приватный без него — последнего не-bad, круг 2); null = не оценивался */
   score: number | null;
+  /** время последнего анализа репо ЛЮБЫМ автором (не own-скан зрителя — см. `FavoriteCheckResponse.lastOwnScanAt`, М1) */
   lastScanAt: string | null;
   /** ПОРТ 5 (hq-parallel): откуда репо в списке — ручной слаг после скана
    *  и избранное больше не пропадают (диагноз UX-аудита №2) */
@@ -447,11 +448,19 @@ export interface FavoriteEnqueue {
   code: FavoriteEnqueueCode;
 }
 
-/** Ответ POST /api/me/favorites/:org/:repo/check — читается MePage.tsx (П2-UI). */
+/**
+ * Ответ POST /api/me/favorites/:org/:repo/check — читается MePage.tsx (П2-UI).
+ *
+ * М1 (круг 2): поле зовётся `lastOwnScanAt`, а не `lastScanAt`. Одно имя
+ * несло два смысла: у `MyRepoEntry.lastScanAt` — последний скан репо ЛЮБОГО
+ * автора, здесь — последний завершённый own-скан ИМЕННО этого зрителя
+ * (основание кулдауна, К-П П2). Имена разведены.
+ */
 export interface FavoriteCheckResponse {
   access: FavoriteAccess;
   enqueue: FavoriteEnqueue;
-  lastScanAt: string | null;
+  /** последний завершённый own-скан зрителя (`scans.user_id = зритель`); основание кулдауна */
+  lastOwnScanAt: string | null;
 }
 
 /** `requestUserScan` → форма исхода для ответа проверки избранного (П2). */
@@ -509,8 +518,8 @@ export async function checkFavoriteAccess(
        WHERE r.org_slug = ? AND r.repo_slug = ? AND s.user_id = ? AND s.finished_at IS NOT NULL`,
     )
     .get(org, repo, userId) as { f: string | null };
-  const lastScanAt = last?.f ?? null;
-  const cooldownPassed = lastScanAt === null || now.getTime() - Date.parse(lastScanAt) >= deps.cooldownMs;
+  const lastOwnScanAt = last?.f ?? null;
+  const cooldownPassed = lastOwnScanAt === null || now.getTime() - Date.parse(lastOwnScanAt) >= deps.cooldownMs;
   const enqueue: FavoriteEnqueue = !access.own
     ? { status: "skipped", code: "not_own" }
     : !cooldownPassed
@@ -523,5 +532,5 @@ export async function checkFavoriteAccess(
     org,
     repo,
   );
-  return { access, enqueue, lastScanAt };
+  return { access, enqueue, lastOwnScanAt };
 }

@@ -52,10 +52,10 @@ export interface ScanDeps {
   gitUrl?: (org: string, repo: string) => string;
   /** git-хост (Config.api.gitBase; шов тестовых серверов, Ф1.13) */
   gitBase?: string;
-  /** REST-хост (Config.api.restBase) — для клиента, который runScan строит сам из userToken (П3) */
-  restBase?: string;
-  /** AppSec-хост (Config.api.appsecBase) — для клиента по умолчанию (П3, Н2) */
-  appsecBase?: string;
+  /** REST-хост (Config.api.restBase) — для клиента, который runScan строит сам из userToken (П3); обязателен с М7 круга 2 */
+  restBase: string;
+  /** AppSec-хост (Config.api.appsecBase) — для клиента по умолчанию (П3, Н2); обязателен с М7 круга 2 */
+  appsecBase: string;
   /** швы для тестов: подмена каналов целиком */
   collectGit?: (org: string, repo: string, limits: ScanCloneLimits) => Promise<GitChannelOutcome>;
   collectRest?: (slug: string) => Promise<RestCollectResult>;

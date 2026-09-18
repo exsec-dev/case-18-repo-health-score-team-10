@@ -64,9 +64,15 @@ const restDead = (): RestCollectResult => ({
   ],
 });
 
+// М7 (круг 2): restBase/appsecBase обязательны типом — каналы здесь подменены
+// швами, живого клиента не строится, адрес заведомо нерабочий локальный
+const LOCAL_DEAD = "http://127.0.0.1:1";
+
 const deps = (git: () => GitChannelOutcome, rest: (slug: string) => RestCollectResult): ScanDeps => ({
   db,
   scClient: null,
+  restBase: LOCAL_DEAD,
+  appsecBase: LOCAL_DEAD,
   collectGit: async () => git(),
   collectRest: async (slug) => rest(slug),
 });
@@ -122,7 +128,7 @@ describe("runScan: статусы и три-state", () => {
   });
 
   test("REST нет токена → rest no-data, git ok → partial", async () => {
-    const r = await runScan({ db, scClient: null, collectGit: async () => gitOk() }, "o/notoken");
+    const r = await runScan({ db, scClient: null, restBase: LOCAL_DEAD, appsecBase: LOCAL_DEAD, collectGit: async () => gitOk() }, "o/notoken");
     expect(r.status).toBe("partial");
     expect(r.channels.rest).toBe("no-data(no-token)");
     const restFacts = db.query("SELECT * FROM facts WHERE scan_id = ? AND source LIKE 'rest%'").all(r.scanId) as Array<Record<string, unknown>>;
@@ -150,6 +156,8 @@ describe("runScan: статусы и три-state", () => {
     const boom: ScanDeps = {
       db,
       scClient: null,
+      restBase: LOCAL_DEAD,
+      appsecBase: LOCAL_DEAD,
       collectGit: () => {
         throw new Error("boom-git");
       },
@@ -180,6 +188,8 @@ describe("В4.1/К3: один конвейер — токен определяе
         db,
         scClient: serverClient,
         userScClient: patClient,
+        restBase: LOCAL_DEAD,
+        appsecBase: LOCAL_DEAD,
         collectGit: async () => gitOk(),
         appsecClient: (pat) => ((appsecToken = pat), { get: async () => ({ status: 200, json: null }), requestCount: () => 0 }),
         collectAppsec: async (rest) => {
@@ -206,6 +216,8 @@ describe("В4.1/К3: один конвейер — токен определяе
       {
         db,
         scClient: null,
+        restBase: LOCAL_DEAD,
+        appsecBase: LOCAL_DEAD,
         collectGit: async () => gitOk(),
         collectAppsec: async () => ((appsecCalled = true), { fact: appsecFact, noData: null }),
       },
@@ -237,6 +249,8 @@ describe("В2/Б5: score-hook — конец скана пишет scores/recomm
     const deps: ScanDeps = {
       db,
       scClient: null,
+      restBase: LOCAL_DEAD,
+      appsecBase: LOCAL_DEAD,
       collectGit: async () => ({ facts: facts.filter((f) => f.source === "git") }),
       collectRest: async () => ({ facts: facts.filter((f) => f.source.startsWith("rest")), repoMeta: null, channelErrors: [{ resource: "cicd-runs", kind: "access", status: 403 }] }),
     };

@@ -17,7 +17,7 @@
 // запрос ушёл бы с PAT на боевой appsec.sourcecraft.tech (П3/Н2).
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config";
@@ -541,3 +541,20 @@ describe("П10 (Н-1, круг 2): признак прав читает пару
     });
   }, 30_000);
 });
+
+// ---------------------------------------------------------------------------
+// Т1 (круг 2). Самопроверка строгого режима. Без неё «AUDIT_STRICT=1 зелёный»
+// — тавтология: набор зелён и в обычном режиме, потому что незакрытые находки
+// стоят под `test.failing`. Здесь строгий прогон утверждает то, ради чего его
+// запускают: в файле не осталось НИ ОДНОЙ находки, припаркованной под
+// обёрткой, — значит зелёный означает «закрыто», а не «помечено красным».
+// На Б0-коммите этот тест красный вместе с самими репро-тестами.
+// ---------------------------------------------------------------------------
+
+if (process.env.AUDIT_STRICT) {
+  test("строгий режим: ни одной находки под repro/test.failing — зелёный значит «закрыто»", () => {
+    const src = readFileSync(import.meta.path, "utf8");
+    const parked = src.match(/^[ \t]*(repro|test\.failing)\(/gm) ?? [];
+    expect({ parked, wrapperIsPlainTest: repro === test }).toEqual({ parked: [], wrapperIsPlainTest: true });
+  });
+}

@@ -60,6 +60,10 @@ async function scanWith(db: Database, slug: string, facts: Fact[], opts: { userI
   const deps: ScanDeps = {
     db,
     scClient: null,
+    // М7 (круг 2): адреса хостов обязательны типом; здесь каналы подменены
+    // швами, живого клиента не строится — адрес заведомо нерабочий локальный
+    restBase: "http://127.0.0.1:1",
+    appsecBase: "http://127.0.0.1:1",
     collectGit: async () => ({ facts: git }),
     collectRest: async () => ({
       facts: rest,

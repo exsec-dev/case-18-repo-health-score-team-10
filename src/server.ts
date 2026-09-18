@@ -47,24 +47,40 @@ import { needsRescore, rescoreAll } from "./score/rescore";
 import index from "./web/index.html";
 
 const config = loadConfig();
+// ПОРТ hq-parallel (S1/security): окно живых проб PAT на юзера.
 const patProbes = new Map<number, number[]>();
 // В4.2-port-fix (П2): окно лимита проверок прав избранного на юзера.
 const favoriteChecks = new Map<number, number[]>();
 
-/** Минутное окно проверок прав избранного: true = пропустить. Окно чистится — Map не течёт. */
-function allowFavoriteCheck(userId: number, now = Date.now()): boolean {
-  const since = now - 60_000;
-  for (const [id, stamps] of favoriteChecks) {
+/**
+ * Скользящее окно счётчика на юзера: true = пропустить, лимит не исчерпан.
+ * Чистится ЦЕЛИКОМ (М8 круга 2: `Map` без очистки течёт — ровно та утечка,
+ * от которой П2 предостерегал для нового счётчика, а старое окно проб PAT
+ * держало запись на каждого юзера, заходившего хоть раз за жизнь процесса).
+ */
+function allowInWindow(windows: Map<number, number[]>, userId: number, limit: number, windowMs: number, now = Date.now()): boolean {
+  const since = now - windowMs;
+  for (const [id, stamps] of windows) {
     const alive = stamps.filter((ts) => ts > since);
-    if (alive.length === 0) favoriteChecks.delete(id);
-    else favoriteChecks.set(id, alive);
+    if (alive.length === 0) windows.delete(id);
+    else windows.set(id, alive);
   }
-  const window = favoriteChecks.get(userId) ?? [];
-  if (window.length >= config.queue.favoriteChecksPerMinute) return false;
+  const window = windows.get(userId) ?? [];
+  if (window.length >= limit) return false;
   window.push(now);
-  favoriteChecks.set(userId, window);
+  windows.set(userId, window);
   return true;
 }
+
+/** Минутное окно проверок прав избранного: true = пропустить. */
+const allowFavoriteCheck = (userId: number, now = Date.now()): boolean =>
+  allowInWindow(favoriteChecks, userId, config.queue.favoriteChecksPerMinute, 60_000, now);
+
+/** Живая проба токена = оракул валидности PAT; сервис не переборщик (ПОРТ S1). */
+const PAT_PROBES_PER_HOUR = 10;
+
+/** Часовое окно живых проб PAT: true = пропустить. */
+const allowPatProbe = (userId: number, now = Date.now()): boolean => allowInWindow(patProbes, userId, PAT_PROBES_PER_HOUR, 60 * 60_000, now);
 
 const db = openDb(config);
 
@@ -259,17 +275,12 @@ const server = Bun.serve({
       if (req.method === "PUT") {
         // ПОРТ hq-parallel (S1/security): живая проба токена = оракул
         // валидности PAT — окно на юзера (10/час), сервис не переборщик
-        const nowPut = Date.now();
-        const window = patProbes.get(user.userId) ?? [];
-        const fresh = window.filter((ts) => nowPut - ts < 60 * 60_000);
-        if (fresh.length >= 10) {
+        if (!allowPatProbe(user.userId)) {
           return Response.json(
             { error: { code: "rate_limited", message: "Слишком много проверок токена — попробуйте через час" } },
             { status: 429 },
           );
         }
-        fresh.push(nowPut);
-        patProbes.set(user.userId, fresh);
         const body = (await req.json().catch(() => null)) as { token?: unknown } | null;
         if (typeof body?.token !== "string" || body.token.length < 8) return badQuery("token: ожидается строка PAT");
         // живая проверка GET /user: 401 = токен отклонён платформой
