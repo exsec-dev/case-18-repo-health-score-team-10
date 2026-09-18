@@ -15,6 +15,7 @@ import { openDb } from "../src/db";
 import type { ScClient, ScResponse } from "../src/collectors/http";
 import {
   __resetRoundRobin,
+  catalogTick,
   claimAny,
   claimNext,
   countRecentUserJobs,
@@ -24,15 +25,18 @@ import {
   findActiveUserJob,
   finishJob,
   JOB_ERRORS,
+  maintenanceTick,
   nightlyCatalog,
   processJob,
   renewLease,
   returnRepo,
   startWorkerLoop,
+  sweepOrphanScans,
+  workerTick,
   type ClaimedJob,
 } from "../src/jobs/scheduler";
 import { myJobs, requestUserScan } from "../src/api/me";
-import { upsertRepo, type runScan, type ScanDeps, type ScanResult } from "../src/jobs/runner";
+import { upsertRepo, type runScan as runScanType, type ScanDeps, type ScanResult } from "../src/jobs/runner";
 import { makeScClient } from "../src/collectors/http";
 
 const dir = mkdtempSync(join(tmpdir(), "rh-sched-"));
@@ -348,7 +352,7 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
       const fakeScan = (async () => {
         scans++;
         return { scanId: 0, repoId: 0, status: "ok", repoAccess: "ok" };
-      }) as unknown as typeof runScan;
+      }) as unknown as typeof runScanType;
       const serverClient = () => {
         serverClients++;
         return null;
@@ -837,5 +841,154 @@ describe("П8: причина падения job пишется в jobs.error", 
     expect({ count: real.length > 0, stranger: real.filter((t) => !belongs(t)) }).toEqual({ count: true, stranger: [] });
     // и сам список: ни одной подстановки снаружи — только канальные имена
     expect([JOB_ERRORS.channels(["git"]), JOB_ERRORS.channels(["rest", "appsec"])].every(belongs)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ф2.1 (M1, остаток после портов). Тело тика — функция, вызываемая через шов:
+// тест дёргает её НАПРЯМУЮ, без таймера. Броня портов при этом не дублируется
+// и не ослабляется — проверяем именно её через шов.
+// ---------------------------------------------------------------------------
+
+describe("Ф2.1: тик воркер-лупа и планировщика вызываются напрямую и не выпускают исключение", () => {
+  const base = loadConfig();
+  const config = { ...base, scan: DEFAULT_SCAN, auth: { ...base.auth, appSecret: "test-app-secret" } };
+
+  test("claim бросает (SQLITE_BUSY) → тик возвращает claim-failed, цикл жив, следующий тик работает", async () => {
+    let firstCall = true;
+    const deps = {
+      db,
+      config,
+      serverClient: () => null,
+      claimAny: (() => {
+        if (firstCall) {
+          firstCall = false;
+          throw new Error("SQLITE_BUSY: database is locked");
+        }
+        return null;
+      }) as unknown as typeof claimAny,
+    };
+    expect(await workerTick(deps, ["user"], { busy: false })).toBe("claim-failed");
+    // цикл жив: следующий тик доходит до пустой очереди
+    expect(await workerTick(deps, ["user"], { busy: false })).toBe("idle");
+  });
+
+  test("processJob бросает → job закрыта failed с внутренней причиной, исключение не выходит наружу", async () => {
+    const repoId = seedRepo("tick", "crash");
+    const jobId = enqueueScan(db, repoId, { triggerKind: "periodic" });
+    const deps = {
+      db,
+      config,
+      serverClient: () => null,
+      runScan: (async () => {
+        throw new Error("boom");
+      }) as unknown as typeof runScanType,
+    };
+    expect(await workerTick(deps, ["rating"], { busy: false })).toBe("failed");
+    const row = db.query("SELECT status, error FROM jobs WHERE id = ?").get(jobId) as { status: string; error: string | null };
+    expect({ status: row.status, error: row.error }).toEqual({ status: "failed", error: JOB_ERRORS.internal });
+  });
+
+  test("тик занят (busy) → повторный вызов не заявляет вторую job", async () => {
+    const deps = { db, config, serverClient: () => null };
+    expect(await workerTick(deps, ["user"], { busy: true })).toBe("busy");
+  });
+
+  test("catalogTick: бросок внутри обхода не выходит наружу; re-entrancy-гард пропускает повторный вход", async () => {
+    const throwing: ScClient = {
+      async get(): Promise<ScResponse> {
+        throw new Error("network exploded");
+      },
+      requestCount: () => 0,
+    };
+    const state = { walking: false };
+    expect(await catalogTick(db, () => throwing, config, state)).toBeNull();
+    expect(state.walking).toBe(false); // гард сняли в finally — следующий обход возможен
+    // гард поднят (обход уже идёт) → второй вход пропускается без работы
+    const busyState = { walking: true };
+    expect(await catalogTick(db, () => throwing, config, busyState)).toBeNull();
+    expect(busyState.walking).toBe(true);
+  });
+
+  test("maintenanceTick на закрытой БД не бросает, отчитывается нулями по сканам", async () => {
+    const tmp = mkdtempSync(join(tmpdir(), "rh-maint-"));
+    const closed = openDb({ ...loadConfig(), dataDir: tmp });
+    closed.close();
+    const out = await maintenanceTick(closed, config, { cloneDir: tmp });
+    expect(out.scans).toBe(0);
+    rmSync(tmp, { recursive: true, force: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ф2.2 (M2, остаток). Осиротевшие `running`-сканы. Не путать с
+// `sweepOrphanClones` — там каталоги клонов в tmp, здесь строки `scans`.
+// ---------------------------------------------------------------------------
+
+describe("Ф2.2: осиротевшие running-сканы закрываются как bad/orphaned", () => {
+  const LEASE = 60 * 60_000;
+  const NOW = new Date("2026-09-18T12:00:00.000Z");
+  const ago = (ms: number) => new Date(NOW.getTime() - ms).toISOString();
+
+  const seedRunningScan = (repoId: number, startedAt: string, userId: number | null = null): number => {
+    const r = db
+      .query("INSERT INTO scans (repo_id, started_at, status, public_status, trigger, user_id) VALUES (?, ?, 'running', 'running', 'periodic', ?)")
+      .run(repoId, startedAt, userId);
+    return Number(r.lastInsertRowid);
+  };
+
+  test("running старше лиза без живой job → bad, finished_at, status_detail='orphaned'", () => {
+    const repoId = seedRepo("orphan", "stale");
+    const scanId = seedRunningScan(repoId, ago(3 * LEASE));
+    expect(sweepOrphanScans(db, { leaseMs: LEASE, now: NOW })).toContain(scanId);
+    const row = db.query("SELECT status, public_status, finished_at, status_detail FROM scans WHERE id = ?").get(scanId) as {
+      status: string;
+      public_status: string;
+      finished_at: string;
+      status_detail: string;
+    };
+    expect(row).toEqual({
+      status: "bad",
+      public_status: "bad",
+      finished_at: NOW.toISOString(),
+      status_detail: "orphaned",
+    });
+  });
+
+  test("running моложе лиза не трогается: скан идёт прямо сейчас", () => {
+    const repoId = seedRepo("orphan", "fresh");
+    const scanId = seedRunningScan(repoId, ago(LEASE / 2));
+    expect(sweepOrphanScans(db, { leaseMs: LEASE, now: NOW })).not.toContain(scanId);
+    expect((db.query("SELECT status FROM scans WHERE id = ?").get(scanId) as { status: string }).status).toBe("running");
+  });
+
+  test("живая job с непросроченным лизом прикрывает свой running-скан", () => {
+    const repoId = seedRepo("orphan", "alive");
+    const scanId = seedRunningScan(repoId, ago(3 * LEASE));
+    const jobId = enqueueScan(db, repoId, { triggerKind: "periodic" });
+    db.query("UPDATE jobs SET status = 'running', claimed_at = ?, lease_until = ? WHERE id = ?").run(ago(LEASE / 2), new Date(NOW.getTime() + LEASE / 2).toISOString(), jobId);
+    expect(sweepOrphanScans(db, { leaseMs: LEASE, now: NOW })).not.toContain(scanId);
+    // лиз протух — прикрытия больше нет
+    db.query("UPDATE jobs SET lease_until = ? WHERE id = ?").run(ago(LEASE), jobId);
+    expect(sweepOrphanScans(db, { leaseMs: LEASE, now: NOW })).toContain(scanId);
+  });
+
+  test("периодический скан не прикрывается юзерской job по тому же репо (user_id IS)", () => {
+    const repoId = seedRepo("orphan", "mixed");
+    db.query("INSERT OR REPLACE INTO users (ya_id, login, created_at, last_login_at) VALUES ('ya-orphan', 'uo', '2026', '2026')").run();
+    const uid = (db.query("SELECT id FROM users WHERE ya_id = 'ya-orphan'").get() as { id: number }).id;
+    const scanId = seedRunningScan(repoId, ago(3 * LEASE), null);
+    const jobId = enqueueScan(db, repoId, { userId: uid, triggerKind: "user" });
+    db.query("UPDATE jobs SET status = 'running', claimed_at = ?, lease_until = ? WHERE id = ?").run(ago(60_000), new Date(NOW.getTime() + LEASE).toISOString(), jobId);
+    expect(sweepOrphanScans(db, { leaseMs: LEASE, now: NOW })).toContain(scanId);
+  });
+
+  test("maintenanceTick закрывает сироту тем же правилом (шов тика)", async () => {
+    const repoId = seedRepo("orphan", "via-tick");
+    const scanId = seedRunningScan(repoId, "2020-01-01T00:00:00.000Z");
+    const base = loadConfig();
+    const out = await maintenanceTick(db, { ...base, scheduler: { ...base.scheduler, leaseMs: LEASE } }, { cloneDir: dir });
+    expect(out.scans).toBeGreaterThanOrEqual(1);
+    expect((db.query("SELECT status_detail FROM scans WHERE id = ?").get(scanId) as { status_detail: string }).status_detail).toBe("orphaned");
   });
 });

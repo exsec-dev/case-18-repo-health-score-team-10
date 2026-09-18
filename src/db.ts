@@ -45,8 +45,10 @@ import { publicStatusSql, ratingEligibleSql } from "./score/compute";
  * 1.7 (В4.2-port-fix, П8/LOW-2): порты изменили схему, не подняв версию —
  * `favorites` и `jobs.error` появились при версии 1.6, и страж «БД новее
  * кода» к портовой миграции был слеп.
+ * 1.8 (В4.2a): `scans.status_detail` (Ф2.2 — причина закрытия осиротевшего
+ * скана) и пересборка индексов `jobs` в транзакции (Ф2.11).
  */
-export const SCHEMA_VERSION = "1.7";
+export const SCHEMA_VERSION = "1.8";
 
 const SCORES_DDL = `CREATE TABLE IF NOT EXISTS scores (
   scan_id INTEGER NOT NULL REFERENCES scans(id),
@@ -101,7 +103,8 @@ CREATE TABLE IF NOT EXISTS scans (
   trigger TEXT NOT NULL DEFAULT 'periodic', -- periodic|user|probe
   user_id INTEGER,              -- автор скана (users.id); NULL = периодика/серверный токен (v1.5, К3)
   rating_eligible INTEGER NOT NULL DEFAULT 0, -- 1 = скан пригоден для рейтинга (ratingEligible; пишет скор-хук)
-  public_status TEXT            -- статус по фактам PUBLIC_KINDS (Ф1.11): показывается всем
+  public_status TEXT,           -- статус по фактам PUBLIC_KINDS (Ф1.11): показывается всем
+  status_detail TEXT            -- 'orphaned' — скан закрыт свипом сирот (v1.8, Ф2.2)
 );
 CREATE TABLE IF NOT EXISTS facts (
   scan_id INTEGER NOT NULL REFERENCES scans(id),
@@ -258,6 +261,8 @@ export function openDb(config: Config): Database {
   if (ensureColumn(db, "scans", "public_status", "TEXT")) {
     db.exec(`UPDATE scans SET public_status = ${publicStatusSql("scans")}`);
   }
+  // v1.8 (В4.2a, Ф2.2): чем закрыт скан, если закрыт не собой — 'orphaned'
+  ensureColumn(db, "scans", "status_detail", "TEXT");
   // v1.3 → v1.4 (В4): изоляция own/public и эвикция
   ensureColumn(db, "repos", "rating_active", "INTEGER NOT NULL DEFAULT 1");
   ensureColumn(db, "repos", "visibility", "TEXT NOT NULL DEFAULT 'public'");

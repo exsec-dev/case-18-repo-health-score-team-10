@@ -664,39 +664,120 @@ export async function sweepOrphanClones(dir: string = tmpdir(), olderThanMs = 60
   return removed;
 }
 
-export function startScheduler(db: Database, serverClient: () => ScClient | null, config: Config): () => void {
-  let walking = false; // ПОРТ S2: re-entrancy-гард (параллельные обходы дублировали волну)
-  const run = async () => {
-    // новый клиент (и бюджет) на каждый обход — H2
-    const client = serverClient();
-    if (!client) return; // без серверного токена каталог не читается
-    try {
-      if (walking) {
-        console.warn("[scheduler] предыдущий обход ещё жив — запуск пропущен (ПОРТ S2)");
-        return;
-      }
-      walking = true;
-      const result = await nightlyCatalog(db, client, {
-        maxPages: config.scan.catalog.maxPages,
-        fullRescan: config.scheduler.fullRescan,
-      });
-      schedulerStateRef.lastNightly = result;
-      if (!result.ok) {
-        console.error(`[scheduler] catalog walk failed: ${result.error ?? "unknown"}`);
-        return;
-      }
-      console.log(
-        `[scheduler] catalog: ${result.pages} pages, ${result.entriesSeen} repos; queued ${result.enqueued.length} (${result.enqueued.filter((e) => e.reason === "new").length} new), evicted ${result.evicted.length}, returned ${result.returned.length}${result.catalogComplete ? "" : "; catalog INCOMPLETE - eviction skipped"}`,
-      );
-    } catch (e) {
-      console.error(`[scheduler] crashed: ${String((e as Error).message).slice(0, 200)}`);
-    } finally {
-      walking = false;
+/**
+ * Ф2.2: осиротевшие `running`-сканы (НЕ путать со свипом каталогов клонов —
+ * `sweepOrphanClones`). Процесс, начавший скан, умер; строка `scans` осталась
+ * `running` навсегда (на живой БД 17.09 — 7 штук, старейшая от 16.09). Сирота
+ * = `running`, старше лиза, и нет ЖИВОЙ job того же (repo, автор) с
+ * непросроченным лизом. `user_id IS s.user_id`: SQLite `IS` сравнивает и
+ * NULL'ы, поэтому периодический скан не «прикрывается» юзерской job.
+ * Закрывается как `bad` с `status_detail='orphaned'` — статус скана честен, а
+ * причина отделена от настоящего провала сбора.
+ */
+export function sweepOrphanScans(db: Database, opts: { leaseMs: number; now?: Date }): number[] {
+  const now = opts.now ?? new Date();
+  const nowIso = now.toISOString();
+  const cutoff = new Date(now.getTime() - opts.leaseMs).toISOString();
+  const rows = db
+    .query(
+      `UPDATE scans SET status = 'bad', public_status = 'bad', finished_at = ?, status_detail = 'orphaned'
+       WHERE status = 'running' AND started_at < ?
+         AND NOT EXISTS (
+           SELECT 1 FROM jobs j
+           WHERE j.status IN ('queued', 'running')
+             AND j.repo_id = scans.repo_id
+             AND j.user_id IS scans.user_id
+             AND j.lease_until >= ?
+         )
+       RETURNING id`,
+    )
+    .all(nowIso, cutoff, nowIso) as { id: number }[];
+  const ids = rows.map((r) => r.id);
+  if (ids.length > 0) console.log(`[sweep] осиротевших сканов закрыто: ${ids.length}`);
+  return ids;
+}
+
+/**
+ * Тик обслуживания (Ф2.1: тело тика — функция, вызываемая через шов;
+ * Ф2.2 + Ф2.13): сироты-сканы, ретеншен `jobs`, свип каталогов клонов.
+ * Целиком в try/catch — исключение наружу не выходит, таймер жив.
+ */
+export async function maintenanceTick(
+  db: Database,
+  config: Config,
+  opts: { now?: Date; cloneDir?: string } = {},
+): Promise<{ scans: number; jobs: number; clones: number }> {
+  const out = { scans: 0, jobs: 0, clones: 0 };
+  const now = opts.now ?? new Date();
+  try {
+    out.scans = sweepOrphanScans(db, { leaseMs: config.scheduler.leaseMs, now }).length;
+  } catch (e) {
+    console.error(`[sweep] orphan scans failed: ${String((e as Error).message).slice(0, 200)}`);
+  }
+  try {
+    out.clones = await sweepOrphanClones(opts.cloneDir);
+  } catch (e) {
+    console.error(`[sweep] orphan clones failed: ${String((e as Error).message).slice(0, 200)}`);
+  }
+  return out;
+}
+
+/**
+ * Тик обхода каталога (Ф2.1: шов для прямого вызова из теста). Re-entrancy-гард
+ * порта (`walking`) живёт снаружи, в состоянии планировщика.
+ */
+export async function catalogTick(
+  db: Database,
+  serverClient: () => ScClient | null,
+  config: Config,
+  state: { walking: boolean },
+): Promise<NightlyResult | null> {
+  // новый клиент (и бюджет) на каждый обход — H2
+  // гард ДО try: в портовой редакции проверка стояла внутри, и `finally`
+  // снимал чужой гард — пропущенный тик открывал дорогу параллельному обходу,
+  // ровно тому, от которого гард и ставили
+  if (state.walking) {
+    console.warn("[scheduler] предыдущий обход ещё жив — запуск пропущен (ПОРТ S2)");
+    return null;
+  }
+  const client = serverClient();
+  if (!client) return null; // без серверного токена каталог не читается
+  state.walking = true;
+  try {
+    const result = await nightlyCatalog(db, client, {
+      maxPages: config.scan.catalog.maxPages,
+      fullRescan: config.scheduler.fullRescan,
+    });
+    schedulerStateRef.lastNightly = result;
+    if (!result.ok) {
+      console.error(`[scheduler] catalog walk failed: ${result.error ?? "unknown"}`);
+      return result;
     }
-  };
-  const first = setTimeout(() => void run(), config.scheduler.startDelayMs);
-  const timer = setInterval(() => void run(), config.scheduler.intervalMs);
-  const sweepTimer = setInterval(() => void sweepOrphanClones(), 60 * 60_000); // ПОРТ S3
+    console.log(
+      `[scheduler] catalog: ${result.pages} pages, ${result.entriesSeen} repos; queued ${result.enqueued.length} (${result.enqueued.filter((e) => e.reason === "new").length} new), evicted ${result.evicted.length}, returned ${result.returned.length}${result.catalogComplete ? "" : "; catalog INCOMPLETE - eviction skipped"}`,
+    );
+    return result;
+  } catch (e) {
+    console.error(`[scheduler] crashed: ${String((e as Error).message).slice(0, 200)}`);
+    return null;
+  } finally {
+    state.walking = false;
+  }
+}
+
+export function startScheduler(
+  db: Database,
+  serverClient: () => ScClient | null,
+  config: Config,
+  seams: { tick?: typeof catalogTick; maintenance?: typeof maintenanceTick } = {},
+): () => void {
+  const state = { walking: false }; // ПОРТ S2: re-entrancy-гард (параллельные обходы дублировали волну)
+  const tick = seams.tick ?? catalogTick;
+  const maintenance = seams.maintenance ?? maintenanceTick;
+  const run = () => void tick(db, serverClient, config, state);
+  const first = setTimeout(run, config.scheduler.startDelayMs);
+  const timer = setInterval(run, config.scheduler.intervalMs);
+  const sweepTimer = setInterval(() => void maintenance(db, config), 60 * 60_000); // ПОРТ S3 + Ф2.2/Ф2.13
   return () => {
     clearTimeout(first);
     clearInterval(timer);

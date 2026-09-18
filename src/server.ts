@@ -23,7 +23,7 @@ import {
   type FavoriteCheckResponse,
 } from "./api/me";
 import { renderRepoReport } from "./report/markdown";
-import { enqueueScan, schedulerHealthSnapshot, startScheduler, startWorkerLoop, sweepOrphanClones } from "./jobs/scheduler";
+import { enqueueScan, maintenanceTick, schedulerHealthSnapshot, startScheduler, startWorkerLoop } from "./jobs/scheduler";
 import {
   clearSessionCookieHeader,
   createSession,
@@ -459,9 +459,11 @@ if (role === "rating" || role === "all") {
 }
 console.log(`  role: ${role} (PROCESS_ROLE)`);
 
-// ПОРТ hq-parallel (S3): стартовый свип осиротевших клонов (после crash/OOM
-// их в tmp не подбирал никто) + явные сигналы — лог и упорядоченный выход
-void sweepOrphanClones();
+// ПОРТ hq-parallel (S3) + Ф2.2 (В4.2a): стартовое обслуживание — осиротевшие
+// каталоги клонов в tmp (после crash/OOM их не подбирал никто) И осиротевшие
+// `running`-строки `scans` (процесс умер, скан «идёт» вечно). Свип при старте
+// работает в любой роли процесса: роль `web` планировщика не поднимает
+void maintenanceTick(db, config);
 process.on("SIGTERM", () => {
   console.log("[signal] SIGTERM — выходим (сирот подберёт стартовый свип при подъёме)");
   process.exit(0);
