@@ -174,7 +174,8 @@ function fakeAppsec(opts: { scansLatest: unknown; criticalTotal: number; secrets
 const NOW = new Date("2026-09-18T12:00:00Z");
 
 describe("Ф2.6 (M8): корректность AppSec", () => {
-  repro("isLatest=false → no-data no-scan (unknown-enum.json): устаревший скан не выдаётся за результат", async () => {
+  // закрыто блоком Б4 — обёртка снята
+  test("isLatest=false → no-data no-scan (unknown-enum.json): устаревший скан не выдаётся за результат", async () => {
     const f = loadFixture("unknown-enum.json");
     const log: string[] = [];
     const out = await collectAppsec(
@@ -186,7 +187,7 @@ describe("Ф2.6 (M8): корректность AppSec", () => {
     expect({ fact: out.fact, reason: out.noData?.reason }).toEqual({ fact: null, reason: "no-scan" });
   });
 
-  repro("secrets_critical — фильтр type=SECRETS&severity=CRITICAL, а не /secret/i по имени движка", async () => {
+  test("secrets_critical — фильтр type=SECRETS&severity=CRITICAL, а не /secret/i по имени движка", async () => {
     const log: string[] = [];
     const scansLatest = {
       uuid: "scan-uuid-secrets",

@@ -39,6 +39,8 @@ interface FixtureAppsec {
   defectGroupsPages?: { data: unknown[]; nextPageToken: string; totalSize: number }[];
   severityFilterTotalSize?: Record<string, number>;
   severityFilterData?: Record<string, unknown[]>;
+  /** Ф2.6: корзина фильтра `type=SECRETS&severity=CRITICAL` платформы */
+  secretsTypeTotalSize?: number;
   groupsPageStatus?: number;
 }
 
@@ -54,6 +56,10 @@ function fakeAppsec(f: FixtureAppsec, log?: string[]): AppsecClient {
         return { status: 200, json: f.scansLatest ?? null };
       }
       if (path === "/v1/defect-groups") {
+        // Ф2.6: отдельная корзина движка секретов (фильтр платформы)
+        if (params["type"] !== undefined && params["type"] !== "") {
+          return { status: 200, json: { data: [], nextPageToken: "", totalSize: f.secretsTypeTotalSize ?? 0 } };
+        }
         if (params["severity"] !== undefined) {
           const bucket = params["severity"];
           return {
@@ -163,8 +169,20 @@ describe("collectAppsec: 7 веток плана", () => {
     expect(out.noData?.detail).toContain("timeFinished");
   });
 
-  test("unknown-enum — числовые/странные значения нормализуются, не падают и не декодируются", async () => {
+  // Ф2.6 (M8): у фикстуры isLatest = false. Прежнее ожидание «ok-факт с
+  // нулями» было ОШИБКОЙ контракта, а не проверкой устойчивости: скан,
+  // вытесненный более новым или упавший, выдавался за «уязвимостей нет».
+  test("unknown-enum — isLatest false → no-data no-scan (устаревший скан не выдаётся за результат)", async () => {
     const f = load("unknown-enum.json");
+    const out = await collectAppsec(fakeRest(f.repoId), fakeAppsec(f), "o/weird", { now: NOW });
+    expect(out.fact).toBeNull();
+    expect(out.noData?.reason).toBe("no-scan");
+    expect(out.noData?.detail).toContain("isLatest");
+  });
+
+  test("та же фикстура с isLatest true — числовые/странные значения нормализуются и не декодируются", async () => {
+    const f = load("unknown-enum.json");
+    f.scansLatest = { ...f.scansLatest, isLatest: true };
     const out = await collectAppsec(fakeRest(f.repoId), fakeAppsec(f), "o/weird", { now: NOW });
     expect(out.noData).toBeNull();
     const v = out.fact!.value as any;
@@ -173,17 +191,80 @@ describe("collectAppsec: 7 веток плана", () => {
     expect(v.backlog.severity_raw_counts).toEqual({ HIGH: 1 });
     expect(v.backlog.engines).toEqual({ FutureEngine: 1 });
     expect(v.provenance.commit_hash).toBeNull(); // commitHash null — живём
-    expect(v.provenance.is_latest).toBe(false);
+    expect(v.provenance.is_latest).toBe(true);
   });
 
-  test("secrets_critical — критичная группа движка секретов зажигает флаг", async () => {
+  // Ф2.6: флаг зажигает ФИЛЬТР платформы type=SECRETS&severity=CRITICAL, а не
+  // регулярка /secret/i по имени движка (живые движки — KICS/Opengrep)
+  test("secrets_critical — непустая корзина type=SECRETS зажигает флаг", async () => {
     const f = load("ok.json");
     f.severityFilterTotalSize.CRITICAL = 2;
-    f.severityFilterData = { CRITICAL: [{ engine: "Secrets Scanner", publicId: 1, uuid: "s-1", severity: 4 }] };
-    const out = await collectAppsec(fakeRest(f.repoId), fakeAppsec(f), "o/sec", { now: NOW });
+    f.severityFilterData = { CRITICAL: [{ engine: "KICS", publicId: 1, uuid: "s-1", severity: 4 }] };
+    f.secretsTypeTotalSize = 1;
+    const log: string[] = [];
+    const out = await collectAppsec(fakeRest(f.repoId), fakeAppsec(f, log), "o/sec", { now: NOW });
     const v = out.fact!.value as any;
     expect(v.severity_counts.critical).toBe(2);
     expect(v.secrets_critical).toBe(true);
+    const q = log.find((l) => l.includes("type=SECRETS"))!;
+    const params = new URLSearchParams(q.split("?")[1]);
+    expect({ severity: params.get("severity"), pageSize: params.get("pageSize"), scanUuid: params.get("scanUuid") !== null }).toEqual({
+      severity: "CRITICAL",
+      pageSize: "1",
+      scanUuid: true,
+    });
+  });
+
+  test("критичные находки ДРУГИХ движков флаг не зажигают (пустая корзина type=SECRETS)", async () => {
+    const f = load("ok.json");
+    f.severityFilterTotalSize.CRITICAL = 3;
+    f.severityFilterData = { CRITICAL: [{ engine: "Opengrep", publicId: 1, uuid: "s-1", severity: 4 }] };
+    f.secretsTypeTotalSize = 0;
+    const out = await collectAppsec(fakeRest(f.repoId), fakeAppsec(f), "o/sec2", { now: NOW });
+    const v = out.fact!.value as any;
+    expect({ critical: v.severity_counts.critical, secrets: v.secrets_critical }).toEqual({ critical: 3, secrets: false });
+  });
+
+  test("корзина type=SECRETS не ответила → no-data incomplete, а не «секретов нет»", async () => {
+    const f = load("ok.json");
+    const broken: AppsecClient = {
+      async get(path: string, params: Record<string, string>): Promise<AppsecGet> {
+        if (path === "/v1/defect-groups" && params["type"]) return { status: 503, json: null, error: "unavailable" };
+        return fakeAppsec(f).get(path, params);
+      },
+      requestCount: () => 0,
+    };
+    const out = await collectAppsec(fakeRest(f.repoId), broken, "o/sec3", { now: NOW });
+    expect(out.fact).toBeNull();
+    expect(out.noData?.reason).toBe("incomplete");
+    expect(out.noData?.detail).toContain("SECRETS");
+  });
+
+  test("повтор nextPageToken → стоп и incomplete (двойного счёта нет)", async () => {
+    const f = load("ok.json");
+    f.defectGroupsPages = undefined;
+    const loop: AppsecClient = {
+      async get(path: string, params: Record<string, string>): Promise<AppsecGet> {
+        if (path === "/v1/defect-groups" && !params["severity"] && !params["type"]) {
+          return { status: 200, json: { data: [{ engine: "KICS", findingsCount: 1 }], nextPageToken: "same", totalSize: 100 } };
+        }
+        return fakeAppsec(f).get(path, params);
+      },
+      requestCount: () => 0,
+    };
+    const out = await collectAppsec(fakeRest(f.repoId), loop, "o/loop", { now: NOW });
+    expect(out.fact).toBeNull();
+    expect(out.noData?.reason).toBe("incomplete");
+    expect(out.noData?.detail).toContain("repeated nextPageToken");
+  });
+
+  test("получено больше, чем totalSize → incomplete (страницы пересеклись)", async () => {
+    const f = load("ok.json");
+    f.defectGroupsPage = { data: [{ engine: "KICS", findingsCount: 1 }, { engine: "KICS", findingsCount: 1 }], nextPageToken: "", totalSize: 1 };
+    const out = await collectAppsec(fakeRest(f.repoId), fakeAppsec(f), "o/over", { now: NOW });
+    expect(out.fact).toBeNull();
+    expect(out.noData?.reason).toBe("incomplete");
+    expect(out.noData?.detail).toContain("overlapping");
   });
 
   test("REST repo-GET: 403 → access, 404 → no-scan", async () => {

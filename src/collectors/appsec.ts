@@ -113,6 +113,8 @@ export interface AppsecCollectOptions {
 
 const SEVERITY_BUCKETS = ["CRITICAL", "HIGH", "MEDIUM", "LOW"] as const;
 const GROUPS_PAGE_SIZE = 250;
+/** Тип движка секретов в спеке AppSec (`type` у /v1/defect-groups). */
+export const SECRETS_TYPE = "SECRETS";
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
@@ -192,6 +194,14 @@ export async function collectAppsec(
     // скан есть, но не завершён — это «данных нет», не «находок нет»
     return noData("no-scan", "latest scan is not finished yet (timeFinished is null)");
   }
+  // Ф2.6 (M8): завершённость = timeFinished И isLatest. Числовой `status` не
+  // декодируем (таблицы соответствия нет), но `isLatest` — булево поле спеки
+  // (ScanSummaryDto.isLatest, required). Скан, завершившийся с ошибкой или
+  // вытесненный более новым, отдавал ok-факт с нулями — то есть «уязвимостей
+  // нет» вместо «данных нет» (нарушение закона 2 и прямой риск Score)
+  if (scan?.["isLatest"] !== true) {
+    return noData("no-scan", "latest scan is not current (isLatest is not true)");
+  }
 
   // --- defect-groups по страницам с ЯВНЫМ scanUuid (детерминизм) ---
   const engines: Record<string, number> = {};
@@ -203,6 +213,9 @@ export async function collectAppsec(
   let totalSize: number | null = null;
   let token = "";
   let pages = 0;
+  // Ф2.6: платформа, вернувшая ТОТ ЖЕ курсор, крутила бы нас по одной
+  // странице — счётчики росли бы кратно числу оборотов (двойной счёт)
+  const seenTokens = new Set<string>([""]);
   while (pages < pagesCap) {
     const res = await appsec.get("/v1/defect-groups", {
       gitRepo,
@@ -237,15 +250,23 @@ export async function collectAppsec(
     if (totalSize === null && num(body?.totalSize) !== null) totalSize = num(body?.totalSize);
     const next = body?.nextPageToken;
     if (typeof next !== "string" || next === "") break;
+    if (seenTokens.has(next)) {
+      return noData("incomplete", `defect-groups: repeated nextPageToken after page ${pages} (pagination loop)`);
+    }
+    seenTokens.add(next);
     token = next;
     if (pages === pagesCap) truncated = true;
   }
   if (totalSize === null) totalSize = fetched;
+  // получено БОЛЬШЕ, чем платформа обещала: страницы пересеклись, агрегаты
+  // не сходятся — честнее не считать вовсе, чем показать завышенный бэклог
+  if (fetched > totalSize) {
+    return noData("incomplete", `defect-groups: fetched ${fetched} groups against totalSize ${totalSize} (overlapping pages)`);
+  }
   if (fetched < totalSize) truncated = true;
 
   // --- severity-классификация платформой (именованные фильтры) ---
   const counts: AppsecFindingsFactValue["severity_counts"] = { critical: 0, high: 0, medium: 0, low: 0 };
-  let secretsCritical = false;
   for (const bucket of SEVERITY_BUCKETS) {
     // CRITICAL берём страницей побольше: заодно движки критичных групп
     const pageSize = bucket === "CRITICAL" ? String(GROUPS_PAGE_SIZE) : "1";
@@ -259,12 +280,30 @@ export async function collectAppsec(
       return noData("incomplete", `defect-groups severity=${bucket}: no totalSize`);
     }
     counts[bucket.toLowerCase() as keyof typeof counts] = size;
-    if (bucket === "CRITICAL" && Array.isArray(body?.data)) {
-      for (const g of body!.data! as Record<string, unknown>[]) {
-        if (typeof g["engine"] === "string" && /secret/i.test(g.engine)) secretsCritical = true;
-      }
-    }
   }
+
+  // --- критичные секреты: ФИЛЬТР платформы, а не догадка по имени движка ---
+  // Ф2.6 (M8): было — регулярка /secret/i по полю `engine` первой страницы
+  // CRITICAL. Живые движки зовутся KICS/Opengrep, «Secrets Scanner» из
+  // тестовой фикстуры выдуман, и кап 49 в проде, вероятно, не срабатывал
+  // никогда. Спека AppSec документирует параметр `type` (SECRETS, SCA, SAST,
+  // SBOM_*, DAST, AI_AUDIT) — классификация остаётся на стороне платформы.
+  const secretsRes = await appsec.get("/v1/defect-groups", {
+    gitRepo,
+    scanUuid,
+    type: SECRETS_TYPE,
+    severity: "CRITICAL",
+    pageSize: "1",
+    pageToken: "",
+  });
+  if (secretsRes.status !== 200) {
+    return noData("incomplete", `defect-groups type=${SECRETS_TYPE} → ${secretsRes.status}${secretsRes.error ? `: ${secretsRes.error}` : ""}`);
+  }
+  const secretsTotal = num((secretsRes.json as { totalSize?: unknown } | null)?.totalSize);
+  if (secretsTotal === null) {
+    return noData("incomplete", `defect-groups type=${SECRETS_TYPE}: no totalSize`);
+  }
+  const secretsCritical = secretsTotal > 0;
 
   // --- resolved_share из именованных полей scans/latest ---
   const open = num(scan?.["openDefectGroups"]);
