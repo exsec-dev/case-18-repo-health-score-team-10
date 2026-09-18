@@ -15,7 +15,10 @@ import { openDb } from "../src/db";
 import type { ScClient, ScResponse } from "../src/collectors/http";
 import {
   __resetRoundRobin,
+  catalogClientBudget,
   catalogTick,
+  newCatalogTickState,
+  EVICT_NOT_IN_CATALOG,
   claimAny,
   claimNext,
   countRecentUserJobs,
@@ -901,11 +904,11 @@ describe("Ф2.1: тик воркер-лупа и планировщика выз
       },
       requestCount: () => 0,
     };
-    const state = { walking: false };
+    const state = newCatalogTickState();
     expect(await catalogTick(db, () => throwing, config, state)).toBeNull();
     expect(state.walking).toBe(false); // гард сняли в finally — следующий обход возможен
     // гард поднят (обход уже идёт) → второй вход пропускается без работы
-    const busyState = { walking: true };
+    const busyState = { ...newCatalogTickState(), walking: true };
     expect(await catalogTick(db, () => throwing, config, busyState)).toBeNull();
     expect(busyState.walking).toBe(true);
   });
@@ -990,5 +993,174 @@ describe("Ф2.2: осиротевшие running-сканы закрываютс�
     const out = await maintenanceTick(db, { ...base, scheduler: { ...base.scheduler, leaseMs: LEASE } }, { cloneDir: dir });
     expect(out.scans).toBeGreaterThanOrEqual(1);
     expect((db.query("SELECT status_detail FROM scans WHERE id = ?").get(scanId) as { status_detail: string }).status_detail).toBe("orphaned");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Ф2.5 (M7 + решение Екатерины 17.09). Сверка каталога и ночная волна — две
+// фазы ОДНОГО тика на ОДНОМ перечислении. Видимость — только из явного поля.
+// ---------------------------------------------------------------------------
+
+describe("Ф2.5: catalogTick — две фазы, один обход, единый гард", () => {
+  const HOUR = 60 * 60_000;
+  const base = loadConfig();
+  const cfg = {
+    ...base,
+    scan: { ...DEFAULT_SCAN, catalog: { maxPages: 100 } },
+    scheduler: { ...base.scheduler, catalogIntervalMs: HOUR, intervalMs: 24 * HOUR, fullRescan: false },
+  };
+  const T0 = new Date("2026-09-18T00:00:00.000Z");
+  const at = (ms: number) => new Date(T0.getTime() + ms);
+
+  /** Клиент каталога со счётчиком запросов (один бюджет на snapshot). */
+  function countingClient(pages: { repos: Record<string, unknown>[]; next: string | null }[]) {
+    const client = catalogClient(pages);
+    return client;
+  }
+
+  test("первый тик: обе фазы due, каталог перечислен ОДИН раз", async () => {
+    const state = newCatalogTickState();
+    const pages = [{ repos: [repoOf("ct", "one", "2026-09-10T00:00:00Z")], next: null }];
+    let clients = 0;
+    const out = await catalogTick(
+      db,
+      () => {
+        clients++;
+        return countingClient(pages);
+      },
+      cfg,
+      state,
+      { now: T0 },
+    );
+    expect(out?.phases).toEqual({ reconcile: true, nightly: true });
+    expect(out?.enqueued).toEqual([{ slug: "ct/one", reason: "new" }]);
+    expect(clients).toBe(1); // один клиент = один бюджет на snapshot
+    expect({ reconcile: state.lastReconcileAt, nightly: state.lastNightlyAt }).toEqual({ reconcile: T0, nightly: T0 });
+    db.query("DELETE FROM jobs WHERE repo_id IN (SELECT id FROM repos WHERE org_slug = 'ct')").run();
+  });
+
+  test("до срока обеих фаз тик не ходит в сеть вовсе", async () => {
+    const state = { ...newCatalogTickState(), lastReconcileAt: T0, lastNightlyAt: T0 };
+    let clients = 0;
+    const out = await catalogTick(
+      db,
+      () => {
+        clients++;
+        return countingClient([{ repos: [], next: null }]);
+      },
+      cfg,
+      state,
+      { now: at(HOUR / 2) },
+    );
+    expect({ out, clients }).toEqual({ out: null, clients: 0 });
+  });
+
+  test("час спустя: сверка есть, ночной волны нет — «изменился» не ставится, новый и эвикция работают", async () => {
+    const state = { ...newCatalogTickState(), lastReconcileAt: T0, lastNightlyAt: T0 };
+    const changed = seedRepo("ph", "changed", "2026-09-10T00:00:00Z");
+    const goes = seedRepo("ph", "gone", "2026-09-10T00:00:00Z");
+    const pages = [
+      {
+        repos: [repoOf("ph", "changed", "2026-09-18T00:00:00Z"), repoOf("ph", "fresh", "2026-09-18T00:00:00Z")],
+        next: null,
+      },
+    ];
+    const out = await catalogTick(db, () => countingClient(pages), cfg, state, { now: at(HOUR) });
+    expect(out?.phases).toEqual({ reconcile: true, nightly: false });
+    // сверка: новый в очередь, исчезнувший эвиктится дословной причиной
+    expect(out?.enqueued).toEqual([{ slug: "ph/fresh", reason: "new" }]);
+    expect(out?.evicted).toContain("ph/gone");
+    expect((db.query("SELECT evict_reason FROM repos WHERE id = ?").get(goes) as { evict_reason: string }).evict_reason).toBe(EVICT_NOT_IN_CATALOG);
+    // ночной фазы не было — «изменился» в очередь не поставлен
+    expect((db.query("SELECT COUNT(*) c FROM jobs WHERE repo_id = ?").get(changed) as { c: number }).c).toBe(0);
+    // сверка отметилась, ночная метка на месте
+    expect({ reconcile: state.lastReconcileAt, nightly: state.lastNightlyAt }).toEqual({ reconcile: at(HOUR), nightly: T0 });
+  });
+
+  test("сутки спустя: ночная фаза на том же snapshot ставит «изменился»", async () => {
+    const state = { ...newCatalogTickState(), lastReconcileAt: T0, lastNightlyAt: T0 };
+    const changed = (db.query("SELECT id FROM repos WHERE org_slug = 'ph' AND repo_slug = 'changed'").get() as { id: number }).id;
+    db.query("UPDATE repos SET last_activity_at = '2026-09-10T00:00:00Z' WHERE id = ?").run(changed);
+    const pages = [{ repos: [repoOf("ph", "changed", "2026-09-19T00:00:00Z")], next: null }];
+    const out = await catalogTick(db, () => countingClient(pages), cfg, state, { now: at(24 * HOUR) });
+    expect(out?.phases).toEqual({ reconcile: true, nightly: true });
+    expect(out?.enqueued).toEqual([{ slug: "ph/changed", reason: "changed" }]);
+    expect({ reconcile: state.lastReconcileAt, nightly: state.lastNightlyAt }).toEqual({ reconcile: at(24 * HOUR), nightly: at(24 * HOUR) });
+    db.query("DELETE FROM jobs WHERE repo_id IN (SELECT id FROM repos WHERE org_slug = 'ph')").run();
+    db.query("DELETE FROM repos WHERE org_slug = 'ph'").run();
+  });
+
+  test("недочитанный каталог: не эвиктит и НЕ двигает due-метки — следующий тик пробует снова", async () => {
+    const stay = seedRepo("tr", "stay", "2026-09-10T00:00:00Z");
+    const absent = seedRepo("tr", "absent", "2026-09-10T00:00:00Z");
+    const state = newCatalogTickState();
+    const pages = [{ repos: [repoOf("tr", "stay", "2026-09-10T00:00:00Z")], next: "more" }];
+    const out = await catalogTick(db, () => catalogClient(pages), { ...cfg, scan: { ...cfg.scan, catalog: { maxPages: 1 } } }, state, { now: T0 });
+    expect({ complete: out?.catalogComplete, evicted: out?.evicted }).toEqual({ complete: false, evicted: [] });
+    expect((db.query("SELECT rating_active FROM repos WHERE id = ?").get(absent) as { rating_active: number }).rating_active).toBe(1);
+    expect({ reconcile: state.lastReconcileAt, nightly: state.lastNightlyAt }).toEqual({ reconcile: null, nightly: null });
+    void stay;
+    db.query("DELETE FROM jobs WHERE repo_id IN (SELECT id FROM repos WHERE org_slug = 'tr')").run();
+    db.query("DELETE FROM repos WHERE org_slug = 'tr'").run();
+  });
+
+  test("200 без массива repositories: обход — сбой, эвикции нет, метки не двигаются", async () => {
+    const alone = seedRepo("bad", "row", "2026-09-10T00:00:00Z");
+    const state = newCatalogTickState();
+    const broken: ScClient = {
+      async get(): Promise<ScResponse> {
+        return { status: 200, json: { items: [] }, bodyText: "{}" };
+      },
+      requestCount: () => 1,
+    };
+    const out = await catalogTick(db, () => broken, cfg, state, { now: T0 });
+    expect(out?.ok).toBe(false);
+    expect((db.query("SELECT rating_active FROM repos WHERE id = ?").get(alone) as { rating_active: number }).rating_active).toBe(1);
+    expect({ reconcile: state.lastReconcileAt, nightly: state.lastNightlyAt }).toEqual({ reconcile: null, nightly: null });
+    db.query("DELETE FROM repos WHERE org_slug = 'bad'").run();
+  });
+
+  test("вернувшийся в каталог репо возвращается в рейтинг фазой сверки", async () => {
+    const back = seedRepo("rt", "back", "2026-09-10T00:00:00Z");
+    evictRepo(db, back, EVICT_NOT_IN_CATALOG);
+    const state = { ...newCatalogTickState(), lastReconcileAt: T0, lastNightlyAt: T0 };
+    const pages = [{ repos: [repoOf("rt", "back", "2026-09-10T00:00:00Z")], next: null }];
+    const out = await catalogTick(db, () => catalogClient(pages), cfg, state, { now: at(HOUR) });
+    expect(out?.returned).toEqual(["rt/back"]);
+    const row = db.query("SELECT rating_active, evict_reason FROM repos WHERE id = ?").get(back) as { rating_active: number; evict_reason: string | null };
+    expect(row).toEqual({ rating_active: 1, evict_reason: null });
+    db.query("DELETE FROM jobs WHERE repo_id IN (SELECT id FROM repos WHERE org_slug = 'rt')").run();
+    db.query("DELETE FROM repos WHERE org_slug = 'rt'").run();
+  });
+
+  test("видимость — только из явного поля: запись без поля в каталог не попадает, приватная строка не публикуется", async () => {
+    const priv = seedRepo("vis", "secret", "2026-09-10T00:00:00Z", "private");
+    const state = newCatalogTickState();
+    // запись с тем же слагом, но БЕЗ поля visibility — клиентский фильтр её отбрасывает
+    const noField = { organization: { slug: "vis" }, slug: "secret", last_updated: "2026-09-18T00:00:00Z" };
+    const out = await catalogTick(db, () => catalogClient([{ repos: [noField], next: null }]), cfg, state, { now: T0 });
+    expect(out?.entriesSeen).toBe(0);
+    expect((db.query("SELECT visibility FROM repos WHERE id = ?").get(priv) as { visibility: string }).visibility).toBe("private");
+    db.query("DELETE FROM repos WHERE org_slug = 'vis'").run();
+  });
+
+  test("гард един на обе фазы: пока обход жив, второй тик не начинает своего", async () => {
+    const state = { ...newCatalogTickState(), walking: true };
+    let clients = 0;
+    const out = await catalogTick(
+      db,
+      () => {
+        clients++;
+        return catalogClient([{ repos: [], next: null }]);
+      },
+      cfg,
+      state,
+      { now: T0 },
+    );
+    expect({ out, clients, walking: state.walking }).toEqual({ out: null, clients: 0, walking: true });
+  });
+
+  test("бюджет клиента обхода — потолок страниц + 10", () => {
+    expect(catalogClientBudget(cfg)).toBe(cfg.scan.catalog.maxPages + 10);
   });
 });

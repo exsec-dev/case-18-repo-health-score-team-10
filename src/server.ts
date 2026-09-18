@@ -23,7 +23,7 @@ import {
   type FavoriteCheckResponse,
 } from "./api/me";
 import { renderRepoReport } from "./report/markdown";
-import { enqueueScan, maintenanceTick, schedulerHealthSnapshot, startScheduler, startWorkerLoop } from "./jobs/scheduler";
+import { catalogClientBudget, enqueueScan, maintenanceTick, schedulerHealthSnapshot, startScheduler, startWorkerLoop } from "./jobs/scheduler";
 import {
   clearSessionCookieHeader,
   createSession,
@@ -160,7 +160,8 @@ const server = Bun.serve({
         rating: (db.query("SELECT COUNT(*) AS c FROM jobs WHERE status IN ('queued','running') AND trigger_kind != 'user'").get() as { c: number }).c,
       };
       const failed24h = (db.query("SELECT COUNT(*) AS c FROM jobs WHERE status = 'failed' AND created_at > ?").get(new Date(Date.now() - 24 * 60 * 60_000).toISOString()) as { c: number }).c;
-      const nightly = schedulerHealthSnapshot().lastNightly;
+      const sched = schedulerHealthSnapshot();
+      const nightly = sched.lastNightly;
       const fresh = db
         .query("SELECT MAX(s.finished_at) AS f FROM scans s JOIN scores sc ON sc.scan_id = s.id WHERE s.finished_at IS NOT NULL AND sc.total_rating IS NOT NULL")
         .get() as { f: string | null };
@@ -171,6 +172,10 @@ const server = Bun.serve({
         queue,
         failedJobs24h: failed24h,
         lastNightly: nightly ? { ok: nightly.ok, error: nightly.ok ? undefined : nightly.error, pages: nightly.ok ? nightly.pages : 0, catalogComplete: nightly.ok ? nightly.catalogComplete : false } : null,
+        // Ф2.5: обе фазы обхода отчитываются отдельно — «сверка жива» и
+        // «ночная волна жива» отвечают на разные вопросы оператора
+        lastReconcileAt: sched.lastReconcileAt,
+        lastNightlyAt: sched.lastNightlyAt,
         freshAsOf: fresh.f,
       });
     },
@@ -445,6 +450,19 @@ const serverClient = () =>
         timeoutMs: config.scan.rest.timeoutMs,
       })
     : null;
+// Ф2.5: обходу каталога — СВОЙ бюджет (потолок страниц + 10), а не бюджет
+// скана: полный каталог 27 446 репо = 275 страниц, и общий бюджет 1000
+// запросов кончился бы посреди обхода, превратив его в «недочитанный»
+const catalogClient = () =>
+  config.sourcecraftToken
+    ? makeScClient({
+        token: config.sourcecraftToken,
+        baseUrl: config.api.restBase,
+        minIntervalMs: config.scan.rest.minIntervalMs,
+        maxRequests: catalogClientBudget(config),
+        timeoutMs: config.scan.rest.timeoutMs,
+      })
+    : null;
 // ПОРТ hq-parallel (S2): роли процесса — web = сервер + user-воркер,
 // rating = планировщик + rating-воркер, all = dev-всё-в-одном (user вперёд)
 const role = config.processRole;
@@ -452,7 +470,7 @@ if (role === "web" || role === "all") {
   startWorkerLoop({ db, config, serverClient }, { user: true, rating: role === "all" });
 }
 if (role === "rating" || role === "all") {
-  startScheduler(db, serverClient, config);
+  startScheduler(db, catalogClient, config);
   if (role === "rating") {
     startWorkerLoop({ db, config, serverClient }, { rating: true });
   }

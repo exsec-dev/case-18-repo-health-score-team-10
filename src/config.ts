@@ -47,7 +47,11 @@ export const DEFAULT_SCAN: ScanConfig = {
   clone: { timeoutMs: 20 * 60_000, maxBytes: 1.5 * 1024 * 1024 * 1024, pollMs: 5_000 },
   degrade: { sinceMonths: 13, timeoutMs: 25 * 60_000, maxBytes: 2.5 * 1024 * 1024 * 1024, enabled: true },
   rest: { budget: 1000, minIntervalMs: 50, appsecMinIntervalMs: 100, timeoutMs: 10_000 },
-  catalog: { maxPages: 100 },
+  // Ф2.5: потолок страниц — ПРЕДОХРАНИТЕЛЬ, не продуктовый дефолт. Полный
+  // публичный каталог 17.09 — 27 446 репо за 275 страниц по 100; 1000 взято
+  // с запасом почти вчетверо. Прежние 100 были бюджетом приёмки В1 и в проде
+  // означали «эвикция не сработает никогда» (M7)
+  catalog: { maxPages: 1000 },
   extract: { maxBlameFiles: 200, textCapBytes: 1_000_000, commentsTopN: 50 },
 };
 
@@ -61,8 +65,11 @@ export interface AuthConfig {
 }
 
 export interface SchedulerConfig {
-  /** интервал ночного обхода каталога (сутки по умолчанию, ТЗ §6) */
+  /** интервал ночной фазы обхода каталога (сутки по умолчанию, ТЗ §6) */
   intervalMs: number;
+  /** интервал СВЕРКИ каталога (Ф2.5): дешёвый проход чаще сканов — час по
+   *  умолчанию (решение Екатерины 17.09; задержка отражения ≤ интервала) */
+  catalogIntervalMs: number;
   /** форс-полный рескан: игнорировать дифф last_updated, поставить все репо */
   fullRescan: boolean;
   /** лиз job'а: время, на которое job закрепляется за воркером; дефолт (К4) =
@@ -245,6 +252,7 @@ export function loadConfig(): Config {
     },
     scheduler: {
       intervalMs: envInt(env, "SCHEDULER_INTERVAL_MS") ?? 24 * 60 * 60_000,
+      catalogIntervalMs: envInt(env, "SCHEDULER_CATALOG_INTERVAL_MS") ?? 60 * 60_000,
       fullRescan: envBool(env, "SCHEDULER_FULL_RESCAN") ?? false,
       leaseMs: envInt(env, "SCHEDULER_LEASE_MS") ?? defaultLeaseMs(scan),
       startDelayMs: envInt(env, "SCHEDULER_START_DELAY_MS") ?? 5 * 60_000,

@@ -313,6 +313,8 @@ export interface NightlyResult {
   returned: string[];
   /** каталог дочитан до конца? если нет — эвикция НЕ выполнялась (неполный каталог не доказывает исчезновение) */
   catalogComplete: boolean;
+  /** какие фазы реально исполнились на этом snapshot (Ф2.5) */
+  phases: CatalogPhases;
   error?: string;
 }
 
@@ -320,7 +322,24 @@ export interface NightlyOptions {
   maxPages?: number;
   fullRescan?: boolean;
   now?: Date;
+  /** какие фазы исполняются на этом snapshot (Ф2.5) */
+  phases?: CatalogPhases;
 }
+
+/**
+ * Ф2.5: две фазы поверх ОДНОГО перечисления каталога.
+ * `reconcile` — сверка состава (час): новые репо, возврат вернувшихся,
+ * эвикция исчезнувших. `nightly` — волна пересканов (сутки): changed,
+ * retry-failed, retry-ineligible, форс. Один обход обслуживает обе — второго
+ * клиента и второго бюджета не существует.
+ */
+export interface CatalogPhases {
+  reconcile: boolean;
+  nightly: boolean;
+}
+
+/** Причина эвикции сверкой (К-Ф2.5, дословно). */
+export const EVICT_NOT_IN_CATALOG = "not in public catalog";
 
 /**
  * Полный обход каталога: дифф last_updated → очередь изменившихся,
@@ -341,9 +360,20 @@ export interface NightlyOptions {
 export async function nightlyCatalog(db: Database, client: ScClient, opts: NightlyOptions = {}): Promise<NightlyResult> {
   const fullRescan = opts.fullRescan ?? false;
   const now = opts.now ?? new Date();
+  const phases: CatalogPhases = opts.phases ?? { reconcile: true, nightly: true };
   const catalog: CatalogResult = await enumerateCatalog(client, { maxPages: opts.maxPages });
   if (!catalog.ok && catalog.pages === 0) {
-    return { ok: false, pages: 0, entriesSeen: 0, enqueued: [], evicted: [], returned: [], catalogComplete: false, error: catalog.error?.detail ?? "catalog failed" };
+    return {
+      ok: false,
+      pages: 0,
+      entriesSeen: 0,
+      enqueued: [],
+      evicted: [],
+      returned: [],
+      catalogComplete: false,
+      phases: { reconcile: false, nightly: false },
+      error: catalog.error?.detail ?? "catalog failed",
+    };
   }
 
   const enqueued: NightlyEnqueued[] = [];
@@ -367,7 +397,10 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
       language: entry.language,
       likes: entry.likes,
       lastActivityAt: entry.last_updated,
-      visibility: entry.visibility ?? "public",
+      // Ф2.5: видимость — ТОЛЬКО из явного поля платформы. Записи без поля
+      // фильтр `publicOnly` сюда не пускает, а дефолт `?? "public"` был
+      // молчаливым допущением: строка становилась публичной без подтверждения
+      visibility: entry.visibility ?? undefined,
       logoUrl: entry.logo_url,
       languageColor: entry.language_color,
     });
@@ -377,11 +410,15 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
     // П5: живая периодическая job уже отсканирует репо — второй не нужно
     if (hasLivePeriodicJob(repoId)) continue;
     if (!existing) {
+      // новые репо — фаза сверки (Ф2.5): состав каталога, не волна пересканов
+      if (!phases.reconcile) continue;
       enqueuedRepoIds.add(repoId);
       enqueueScan(db, repoId, { triggerKind: "periodic" });
       enqueued.push({ slug, reason: "new" });
       continue;
     }
+    // всё, что ниже, — ночная волна пересканов
+    if (!phases.nightly) continue;
     if (existing.last_activity_at === null && entry.last_updated !== null) {
       // строка была без даты (ручной ввод слага) — теперь дата есть: это «изменившийся»
       enqueuedRepoIds.add(repoId);
@@ -415,9 +452,9 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
     }
   }
 
-  // возврат ранее эвиктированных, вернувшихся в каталог
+  // возврат ранее эвиктированных, вернувшихся в каталог — фаза сверки
   const returned: string[] = [];
-  for (const id of seenRepoIds) {
+  for (const id of phases.reconcile ? seenRepoIds : []) {
     const row = db.query("SELECT rating_active, org_slug, repo_slug FROM repos WHERE id = ?").get(id) as
       | { rating_active: number; org_slug: string; repo_slug: string }
       | null;
@@ -427,28 +464,33 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
     }
   }
 
-  // эвикция: только полным каталогом и только public-строки
+  // эвикция: фаза сверки, только полным каталогом и только public-строки
   const evicted: string[] = [];
-  if (!catalog.truncated) {
+  if (phases.reconcile && !catalog.truncated) {
     const candidates = db
       .query("SELECT id, org_slug, repo_slug FROM repos WHERE rating_active = 1 AND visibility = 'public'")
       .all() as { id: number; org_slug: string; repo_slug: string }[];
     for (const row of candidates) {
       if (!seenSlugs.has(`${row.org_slug}/${row.repo_slug}`)) {
-        evictRepo(db, row.id, "disappeared from public catalog");
+        evictRepo(db, row.id, EVICT_NOT_IN_CATALOG);
         evicted.push(`${row.org_slug}/${row.repo_slug}`);
       }
     }
   }
 
   return {
-    ok: true,
+    // Ф2.5: ошибка страницы посреди обхода — это СБОЙ обхода, даже если
+    // что-то уже прочитано. Прежний код отдавал ok=true при `pages > 0`, и
+    // тик считал такой проход успешным (due-метки двигались бы зря)
+    ok: catalog.ok,
     pages: catalog.pages,
     entriesSeen: catalog.entries.length,
     enqueued,
     evicted,
     returned,
     catalogComplete: !catalog.truncated,
+    phases,
+    ...(catalog.ok ? {} : { error: catalog.error?.detail ?? "catalog failed" }),
   };
 }
 
@@ -632,10 +674,26 @@ export function startWorkerLoop(
  */
 // ПОРТ hq-parallel (S3): реестр последнего обхода для /api/health —
 // «health зелёный при мёртвой периодике» больше не проходит незаметно
-const schedulerStateRef: { lastNightly: NightlyResult | { ok: false; error: string } | null } = { lastNightly: null };
+const schedulerStateRef: {
+  lastNightly: NightlyResult | { ok: false; error: string } | null;
+  /** Ф2.5: метки успеха фаз едут в /api/health — «зелёное» не врёт и про сверку */
+  lastReconcileAt: string | null;
+  lastNightlyAt: string | null;
+} = { lastNightly: null, lastReconcileAt: null, lastNightlyAt: null };
 
-export function schedulerHealthSnapshot(): { lastNightly: NightlyResult | { ok: false; error: string } | null } {
-  return { lastNightly: schedulerStateRef.lastNightly };
+export function schedulerHealthSnapshot(): {
+  lastNightly: NightlyResult | { ok: false; error: string } | null;
+  lastReconcileAt: string | null;
+  lastNightlyAt: string | null;
+} {
+  return { ...schedulerStateRef };
+}
+
+/** Шов тестов: метки фаз — модульное состояние, герметичность сбросом. */
+export function __resetSchedulerState(): void {
+  schedulerStateRef.lastNightly = null;
+  schedulerStateRef.lastReconcileAt = null;
+  schedulerStateRef.lastNightlyAt = null;
 }
 
 /** ПОРТ hq-parallel (S3): свип осиротевших rh-clone-* (crash/OOM-убитые
@@ -722,17 +780,40 @@ export async function maintenanceTick(
   return out;
 }
 
+/** Состояние тика каталога: единый re-entry-гард и две due-метки (Ф2.5). */
+export interface CatalogTickState {
+  walking: boolean;
+  /** время последней УСПЕШНОЙ сверки (каталог дочитан) */
+  lastReconcileAt: Date | null;
+  /** время последней УСПЕШНОЙ ночной фазы */
+  lastNightlyAt: Date | null;
+}
+
+export function newCatalogTickState(): CatalogTickState {
+  return { walking: false, lastReconcileAt: null, lastNightlyAt: null };
+}
+
+/** Бюджет запросов клиента одного обхода (К-Ф2.5): потолок страниц + 10. */
+export function catalogClientBudget(config: Config): number {
+  return config.scan.catalog.maxPages + 10;
+}
+
 /**
- * Тик обхода каталога (Ф2.1: шов для прямого вызова из теста). Re-entrancy-гард
- * порта (`walking`) живёт снаружи, в состоянии планировщика.
+ * Тик каталога (Ф2.1 — шов для прямого вызова из теста; Ф2.5 — одно
+ * перечисление на обе фазы). Каталог обходится ОДИН раз, если должна хотя бы
+ * одна фаза; дочитанный snapshot всегда исполняет сверку, а ночная фаза
+ * добавляется к тому же snapshot, когда её срок пришёл. Недочитанный или
+ * ошибочный snapshot не эвиктит и НЕ двигает due-метки — срок остаётся
+ * просроченным, следующий тик попробует снова. Конкурирующих обходов нет:
+ * гард один на обе фазы, клиент (и его бюджет) — один на snapshot.
  */
 export async function catalogTick(
   db: Database,
   serverClient: () => ScClient | null,
   config: Config,
-  state: { walking: boolean },
+  state: CatalogTickState,
+  opts: { now?: Date } = {},
 ): Promise<NightlyResult | null> {
-  // новый клиент (и бюджет) на каждый обход — H2
   // гард ДО try: в портовой редакции проверка стояла внутри, и `finally`
   // снимал чужой гард — пропущенный тик открывал дорогу параллельному обходу,
   // ровно тому, от которого гард и ставили
@@ -740,21 +821,39 @@ export async function catalogTick(
     console.warn("[scheduler] предыдущий обход ещё жив — запуск пропущен (ПОРТ S2)");
     return null;
   }
+  const now = opts.now ?? new Date();
+  const due = (last: Date | null, everyMs: number) => last === null || now.getTime() - last.getTime() >= everyMs;
+  const reconcileDue = due(state.lastReconcileAt, config.scheduler.catalogIntervalMs);
+  const nightlyDue = due(state.lastNightlyAt, config.scheduler.intervalMs);
+  if (!reconcileDue && !nightlyDue) return null;
+  // новый клиент (и бюджет) на каждый обход — H2
   const client = serverClient();
   if (!client) return null; // без серверного токена каталог не читается
   state.walking = true;
   try {
+    // сверка исполняется на КАЖДОМ обходе: каталог всё равно перечислен —
+    // не воспользоваться им значит заплатить за обход и выбросить результат
     const result = await nightlyCatalog(db, client, {
       maxPages: config.scan.catalog.maxPages,
       fullRescan: config.scheduler.fullRescan,
+      now,
+      phases: { reconcile: true, nightly: nightlyDue },
     });
     schedulerStateRef.lastNightly = result;
     if (!result.ok) {
       console.error(`[scheduler] catalog walk failed: ${result.error ?? "unknown"}`);
       return result;
     }
+    if (result.catalogComplete) {
+      state.lastReconcileAt = now;
+      schedulerStateRef.lastReconcileAt = now.toISOString();
+      if (nightlyDue) {
+        state.lastNightlyAt = now;
+        schedulerStateRef.lastNightlyAt = now.toISOString();
+      }
+    }
     console.log(
-      `[scheduler] catalog: ${result.pages} pages, ${result.entriesSeen} repos; queued ${result.enqueued.length} (${result.enqueued.filter((e) => e.reason === "new").length} new), evicted ${result.evicted.length}, returned ${result.returned.length}${result.catalogComplete ? "" : "; catalog INCOMPLETE - eviction skipped"}`,
+      `[scheduler] catalog: ${result.pages} pages, ${result.entriesSeen} repos; phases reconcile+${nightlyDue ? "nightly" : "-"}; queued ${result.enqueued.length} (${result.enqueued.filter((e) => e.reason === "new").length} new), evicted ${result.evicted.length}, returned ${result.returned.length}${result.catalogComplete ? "" : "; catalog INCOMPLETE - eviction skipped, due marks kept"}`,
     );
     return result;
   } catch (e) {
@@ -771,12 +870,16 @@ export function startScheduler(
   config: Config,
   seams: { tick?: typeof catalogTick; maintenance?: typeof maintenanceTick } = {},
 ): () => void {
-  const state = { walking: false }; // ПОРТ S2: re-entrancy-гард (параллельные обходы дублировали волну)
+  // ПОРТ S2: re-entrancy-гард + due-метки фаз (Ф2.5). Метки пусты — первый тик
+  // после startDelayMs считает due обе фазы
+  const state = newCatalogTickState();
   const tick = seams.tick ?? catalogTick;
   const maintenance = seams.maintenance ?? maintenanceTick;
   const run = () => void tick(db, serverClient, config, state);
   const first = setTimeout(run, config.scheduler.startDelayMs);
-  const timer = setInterval(run, config.scheduler.intervalMs);
+  // тик зовётся с периодом частой фазы; какая из фаз исполнится — решают
+  // due-метки внутри тика, а не расписание таймера
+  const timer = setInterval(run, Math.max(1, Math.min(config.scheduler.catalogIntervalMs, config.scheduler.intervalMs)));
   const sweepTimer = setInterval(() => void maintenance(db, config), 60 * 60_000); // ПОРТ S3 + Ф2.2/Ф2.13
   return () => {
     clearTimeout(first);

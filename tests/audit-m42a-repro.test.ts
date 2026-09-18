@@ -97,7 +97,8 @@ function fakeCatalogClient(responses: ScResponse[], paths: string[]): ScClient {
 const okPage = (json: unknown): ScResponse => ({ status: 200, json, bodyText: JSON.stringify(json) });
 
 describe("Ф2.5 (M7): полный каталог 27 446 репо", () => {
-  repro("обход просит page_size=100 и sort_by=created_at (275 запросов вместо 1373)", async () => {
+  // закрыто блоком Б3 — обёртка снята
+  test("обход просит page_size=100 и sort_by=created_at (275 запросов вместо 1373)", async () => {
     const paths: string[] = [];
     const client = fakeCatalogClient([okPage({ repositories: [{ organization: { slug: "o" }, slug: "r", visibility: "public" }] })], paths);
     await enumerateCatalog(client);
@@ -108,11 +109,11 @@ describe("Ф2.5 (M7): полный каталог 27 446 репо", () => {
     });
   });
 
-  repro("потолок страниц — предохранитель: дефолт 1000 (27 446 репо = 275 страниц)", () => {
+  test("потолок страниц — предохранитель: дефолт 1000 (27 446 репо = 275 страниц)", () => {
     expect(DEFAULT_SCAN.catalog.maxPages).toBe(1000);
   });
 
-  repro("200 без массива repositories = сбой канала, а не дочитанный пустой каталог", async () => {
+  test("200 без массива repositories = сбой канала, а не дочитанный пустой каталог", async () => {
     const paths: string[] = [];
     const client = fakeCatalogClient([okPage({ items: [], next_page_token: "" })], paths);
     const res = await enumerateCatalog(client);

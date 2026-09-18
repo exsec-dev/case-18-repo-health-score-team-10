@@ -1,7 +1,13 @@
-// catalog.ts — каталог-энумерация (Б2): недокументированный
-// GET /repos?page_token=<next_page_token> (20/стр, курсор; зонд
-// 15.09 + scripts/probe-catalog.ts). Обход ≤100 страниц, фильтр
-// public (запрос + клиентская гарантия), результат — записи каталога.
+// catalog.ts — каталог-энумерация (Б2 В1; Ф2.5 В4.2a): документированный
+// GET /repos (DiscoverRepositories, docs/api-spec/sourcecraft.swagger.json).
+// В4.2a: `page_size=100` (максимум спеки) и `sort_by=created_at` —
+// порядок по умолчанию `-rating` НЕ стабилен при пагинации (спека: «rating
+// changes can cause repositories to be skipped or returned more than once»),
+// а 20 записей на страницу превращали 27 446 репо в 1373 запроса вместо 275
+// (живой замер 17.09). Потолок страниц — предохранитель, не бюджет приёмки.
+// Эндпоинт по построению отдаёт только публичные репо; параметра
+// `visibility` в спеке нет, клиентский фильтр по явному полю остаётся
+// (видимость — свойство репо, решение Екатерины 17.09).
 import { ScClient } from "./http";
 
 export interface CatalogEntry {
@@ -95,14 +101,17 @@ function parseEntry(e: RawEntry): CatalogEntry | null {
  * (scripts/probe-catalog.ts): список в `repositories`, курсор в
  * `next_page_token`, пустой/отсутствующий курсор = конец.
  */
+export const CATALOG_PAGE_SIZE = 100;
+export const CATALOG_SORT_BY = "created_at";
+
 export async function enumerateCatalog(client: ScClient, opts: CatalogOptions = {}): Promise<CatalogResult> {
-  const maxPages = opts.maxPages ?? 100;
+  const maxPages = opts.maxPages ?? 1000;
   const publicOnly = opts.publicOnly ?? true;
   const entries: CatalogEntry[] = [];
   let token: string | null = null;
   let pages = 0;
   while (pages < maxPages) {
-    const path = `/repos?visibility=public${token ? `&page_token=${encodeURIComponent(token)}` : ""}`;
+    const path = `/repos?page_size=${CATALOG_PAGE_SIZE}&sort_by=${CATALOG_SORT_BY}${token ? `&page_token=${encodeURIComponent(token)}` : ""}`;
     const res = await client.get(path);
     if (res.status !== 200) {
       return {
@@ -115,7 +124,19 @@ export async function enumerateCatalog(client: ScClient, opts: CatalogOptions = 
     }
     pages++;
     const body = res.json as { repositories?: RawEntry[]; next_page_token?: unknown } | null;
-    const list = Array.isArray(body?.repositories) ? body!.repositories! : [];
+    // M7, обратный край: 200 без массива `repositories` — это СБОЙ формы, а не
+    // дочитанный пустой каталог. Прежний код читал его как «в каталоге никого»
+    // и уносил в эвикцию весь рейтинг
+    if (!Array.isArray(body?.repositories)) {
+      return {
+        ok: false,
+        entries,
+        pages,
+        truncated: true,
+        error: { status: res.status, detail: `page ${pages}: 200 without a "repositories" array` },
+      };
+    }
+    const list = body!.repositories!;
     for (const raw of list) {
       const e = parseEntry(raw);
       if (e && (!publicOnly || e.visibility === "public")) entries.push(e);
