@@ -21,6 +21,13 @@ export interface AppsecGet {
   status: number;
   json: unknown;
   error?: string;
+  /**
+   * К-Р15 (круг 2): сколько HTTP-попыток израсходовано на этот get
+   * (2 = был ретрай временного сбоя; 0 = бюджет исчерпан до запроса).
+   * Опционально — тестовые фейки без семантики попыток не обязаны его знать;
+   * читатели трактуют отсутствие как одну попытку.
+   */
+  attempts?: number;
 }
 
 export interface AppsecClient {
@@ -47,7 +54,7 @@ export function makeAppsecClient(opts: AppsecClientOptions): AppsecClient {
   let count = 0;
   let lastAt = 0;
 
-  const once = async (path: string, params: Record<string, string>): Promise<AppsecGet> => {
+  const once = async (path: string, params: Record<string, string>): Promise<Omit<AppsecGet, "attempts">> => {
     const qs = new URLSearchParams(params).toString();
     try {
       const res = await fetch(`${baseUrl}${path}${qs ? `?${qs}` : ""}`, {
@@ -70,7 +77,7 @@ export function makeAppsecClient(opts: AppsecClientOptions): AppsecClient {
   return {
     async get(path, params) {
       if (count >= maxRequests) {
-        return { status: 0, json: null, error: `budget exhausted: ${maxRequests} requests` };
+        return { status: 0, json: null, error: `budget exhausted: ${maxRequests} requests`, attempts: 0 };
       }
       const wait = minInterval - (Date.now() - lastAt);
       if (wait > 0) await new Promise((r) => setTimeout(r, wait));
@@ -82,9 +89,9 @@ export function makeAppsecClient(opts: AppsecClientOptions): AppsecClient {
         await new Promise((r) => setTimeout(r, 600));
         const second = await once(path, params);
         count++;
-        return second;
+        return { ...second, attempts: 2 };
       }
-      return first;
+      return { ...first, attempts: 1 };
     },
     requestCount: () => count,
   };
@@ -95,6 +102,10 @@ export function makeAppsecClient(opts: AppsecClientOptions): AppsecClient {
 export interface AppsecNoData {
   reason: "access" | "no-scan" | "incomplete";
   detail: string;
+  /** К-Р15 (круг 2): корзина/страница, чей отказ исчерпал ретраи — доезжает в status_detail скана и noData карточки */
+  bucket?: string;
+  /** К-Р15: HTTP-попыток на отказавшийся запрос (клиент ретраит 0/429/5xx один раз) */
+  attempts?: number;
 }
 
 export interface AppsecCollectOutcome {
@@ -224,7 +235,7 @@ export async function collectAppsec(
       pageToken: token,
     });
     if (res.status !== 200) {
-      return noData("incomplete", `defect-groups page ${pages + 1} → ${res.status}${res.error ? `: ${res.error}` : ""}`);
+      return noData("incomplete", `defect-groups page ${pages + 1} → ${res.status}${res.error ? `: ${res.error}` : ""} (after ${res.attempts ?? 1} attempts)`, { bucket: `page ${pages + 1}`, attempts: res.attempts ?? 1 });
     }
     pages++;
     const body = res.json as { data?: unknown[]; nextPageToken?: unknown; totalSize?: unknown } | null;
@@ -272,7 +283,7 @@ export async function collectAppsec(
     const pageSize = bucket === "CRITICAL" ? String(GROUPS_PAGE_SIZE) : "1";
     const res = await appsec.get("/v1/defect-groups", { gitRepo, scanUuid, severity: bucket, pageSize, pageToken: "" });
     if (res.status !== 200) {
-      return noData("incomplete", `defect-groups severity=${bucket} → ${res.status}${res.error ? `: ${res.error}` : ""}`);
+      return noData("incomplete", `defect-groups severity=${bucket} → ${res.status}${res.error ? `: ${res.error}` : ""} (after ${res.attempts ?? 1} attempts)`, { bucket: `severity=${bucket}`, attempts: res.attempts ?? 1 });
     }
     const body = res.json as { totalSize?: unknown; data?: unknown[] } | null;
     const size = num(body?.totalSize);
@@ -297,7 +308,7 @@ export async function collectAppsec(
     pageToken: "",
   });
   if (secretsRes.status !== 200) {
-    return noData("incomplete", `defect-groups type=${SECRETS_TYPE} → ${secretsRes.status}${secretsRes.error ? `: ${secretsRes.error}` : ""}`);
+    return noData("incomplete", `defect-groups type=${SECRETS_TYPE} → ${secretsRes.status}${secretsRes.error ? `: ${secretsRes.error}` : ""} (after ${secretsRes.attempts ?? 1} attempts)`, { bucket: `type=${SECRETS_TYPE}`, attempts: secretsRes.attempts ?? 1 });
   }
   const secretsTotal = num((secretsRes.json as { totalSize?: unknown } | null)?.totalSize);
   if (secretsTotal === null) {
@@ -334,8 +345,8 @@ export async function collectAppsec(
   return { fact: okFact("appsec.findings", value, "appsec:api", now.toISOString()), noData: null };
 }
 
-function noData(reason: AppsecNoData["reason"], detail: string): AppsecCollectOutcome {
-  return { fact: null, noData: { reason, detail } };
+function noData(reason: AppsecNoData["reason"], detail: string, extra: { bucket?: string; attempts?: number } = {}): AppsecCollectOutcome {
+  return { fact: null, noData: { reason, detail, ...extra } };
 }
 
 /** Факт no-data для сканов без AppSec-канала (например, PAT не сохранён). */

@@ -38,6 +38,12 @@ export interface DerivedMetrics {
   /** маркеров на KLOC (loc=null при дедлайне → null) */
   todoDensityPerKloc: number | null;
   oldShare: number | null;
+  /**
+   * К-Р14 (круг 2): причина no-data для old_share, когда выборка TODO
+   * неполна (todo_note = "incomplete" — обрыв `git cat-file`): доля старых
+   * маркеров опирается на полноту выборки и по частичной число не даёт.
+   */
+  oldShareNoData: string | null;
   rootEntries: number | null;
   // --- rest ---
   pulls90d: number | null;
@@ -141,7 +147,7 @@ export function deriveMetrics(ok: Map<string, unknown>, now: Date): DerivedMetri
   };
 }
 
-function issuesCodeRest(ok: Map<string, unknown>, now: Date): Pick<DerivedMetrics, "staleShare" | "resolutionRatio" | "todoTotal" | "todoDensityPerKloc" | "oldShare" | "rootEntries" | "pulls90d" | "releases12m"> {
+function issuesCodeRest(ok: Map<string, unknown>, now: Date): Pick<DerivedMetrics, "staleShare" | "resolutionRatio" | "todoTotal" | "todoDensityPerKloc" | "oldShare" | "oldShareNoData" | "rootEntries" | "pulls90d" | "releases12m"> {
   // issues.stats
   const stats = ok.get("issues.stats") as { open?: unknown; closed?: unknown; stale_90d?: unknown } | undefined;
   const open = typeof stats?.open === "number" ? stats.open : null;
@@ -151,7 +157,7 @@ function issuesCodeRest(ok: Map<string, unknown>, now: Date): Pick<DerivedMetric
   const resolutionRatio = open !== null && closed !== null && open + closed > 0 ? closed / (open + closed) : null;
 
   // code.todo + tree.stats
-  const todo = ok.get("code.todo") as { count?: unknown; fixme?: unknown; older_180d?: unknown; todo_files?: unknown; blamed_files?: unknown } | undefined;
+  const todo = ok.get("code.todo") as { count?: unknown; fixme?: unknown; older_180d?: unknown; todo_files?: unknown; blamed_files?: unknown; todo_note?: unknown } | undefined;
   const count = typeof todo?.count === "number" ? todo.count : null;
   const fixme = typeof todo?.fixme === "number" ? todo.fixme : null;
   const older = typeof todo?.older_180d === "number" ? todo.older_180d : null;
@@ -160,7 +166,11 @@ function issuesCodeRest(ok: Map<string, unknown>, now: Date): Pick<DerivedMetric
   const loc = typeof tree?.loc === "number" ? tree.loc : null;
   const todoDensityPerKloc = todoTotal !== null && loc !== null && loc > 0 ? (todoTotal / loc) * 1000 : null;
   const blamed = typeof todo?.blamed_files === "number" ? todo.blamed_files : null;
-  const oldShare = todoTotal !== null && todoTotal > 0 && older !== null && blamed !== null && blamed > 0 ? older / todoTotal : null;
+  // К-Р14: неполная выборка TODO (обрыв cat-file) → old_share no-data с
+  // причиной, а не число по частичной выборке
+  const todoIncomplete = todo?.todo_note === "incomplete";
+  const oldShare = !todoIncomplete && todoTotal !== null && todoTotal > 0 && older !== null && blamed !== null && blamed > 0 ? older / todoTotal : null;
+  const oldShareNoData = todoIncomplete ? "todo sample incomplete (cat-file truncated) — old_share needs the full sample" : null;
   const rootEntries = Array.isArray(tree?.top_level) ? tree!.top_level!.length : null;
 
   // activity.rest (событийные даты §7.4)
@@ -168,7 +178,7 @@ function issuesCodeRest(ok: Map<string, unknown>, now: Date): Pick<DerivedMetric
   const pulls90d = Array.isArray(rest?.pulls_created_at) ? countRecent(rest!.pulls_created_at!, now, 90) : null;
   const releases12m = Array.isArray(rest?.releases_released_at) ? countRecent(rest!.releases_released_at!, now, 365) : null;
 
-  return { staleShare, resolutionRatio, todoTotal, todoDensityPerKloc, oldShare, rootEntries, pulls90d, releases12m };
+  return { staleShare, resolutionRatio, todoTotal, todoDensityPerKloc, oldShare, oldShareNoData, rootEntries, pulls90d, releases12m };
 }
 
 function round3(x: number): number {

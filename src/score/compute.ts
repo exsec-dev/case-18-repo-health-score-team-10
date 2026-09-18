@@ -619,7 +619,8 @@ function scoreCode(derived: DerivedMetrics): CategoryScore {
     no_data: score === null ? "git channel no-data" : undefined,
     submetrics: {
       density: { score: densitySub, value: derived.todoDensityPerKloc },
-      old_share: { score: oldSub, value: derived.oldShare },
+      // К-Р14: неполная выборка TODO — причина no-data рядом со значением
+      old_share: { score: oldSub, value: derived.oldShare, ...(derived.oldShareNoData ? { note: derived.oldShareNoData } : {}) },
       root: { score: rootSub, value: derived.rootEntries },
       todo_total: { score: null, value: derived.todoTotal },
     },

@@ -190,14 +190,23 @@ const server = Bun.serve({
       if (!parsed.ok) return badQuery(parsed.message);
       return Response.json(listRepos(db, parsed.query));
     },
-    // единая карточка (К2): состав ответа — по доступу зрителя из cookie
+    // единая карточка (К2): состав ответа — по доступу зрителя из cookie.
+    // К-Р13: слаг с невалидным percent-encoding (напр. %zz) — управляемый
+    // отказ bad_query 400, не «не найдено» и не 500
     "/api/repos/:org/:repo": async (req) => {
-      const card = await getRepoCardForViewer(db, req.params.org, req.params.repo, viewerAccess(req), { limits: config.scan });
-      if (!card) return notFound(`репозиторий ${req.params.org}/${req.params.repo} не найден в каталоге`);
+      const { org, repo } = req.params;
+      if (!/^[a-z0-9_.-]+$/i.test(org ?? "") || !/^[a-z0-9_.-]+$/i.test(repo ?? "")) {
+        return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
+      }
+      const card = await getRepoCardForViewer(db, org, repo, viewerAccess(req), { limits: config.scan });
+      if (!card) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
       return Response.json(card);
     },
     "/api/repos/:org/:repo/report.md": async (req) => {
       const { org, repo } = req.params;
+      if (!/^[a-z0-9_.-]+$/i.test(org ?? "") || !/^[a-z0-9_.-]+$/i.test(repo ?? "")) {
+        return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
+      }
       // тот же сборщик карточки с тем же зрителем (К2)
       const card = await getRepoCardForViewer(db, org, repo, viewerAccess(req), { limits: config.scan });
       if (!card) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);

@@ -21,8 +21,14 @@ import { loadConfig, type Config } from "../src/config";
 import type { ScClient, ScResponse } from "../src/collectors/http";
 import { catalogTick, newCatalogTickState, nightlyCatalog, schedulerHealthSnapshot, startScheduler, __resetSchedulerState } from "../src/jobs/scheduler";
 import { cloneBare, cleanupClone, gitVersion, splitCredentialUrl, __resetGitVersionCache, type SpawnedGit } from "../src/collectors/git";
+import { collectAppsec, makeAppsecClient, type AppsecClient, type AppsecGet } from "../src/collectors/appsec";
+import { runScan } from "../src/jobs/runner";
+import { okFact } from "../src/collectors/facts";
 import { compute } from "../src/score/compute";
 import { healthyFacts, makeDb, seedScan, withFacts, type TestDb } from "./score-fixtures";
+import { cardFacts, seedRepo, seedScan as seedApiScan, seedScore, type ApiTestDb } from "./api-fixtures";
+import type { AccessResult } from "../src/auth/access";
+import { getRepoCard } from "../src/api/repos";
 import { spawnServer, startMockApi, type MockApi, type SpawnedServer } from "./server-harness";
 
 // Обёртка строгого режима (как в audit-m42a-repro.test.ts:242-247, приём Т1
@@ -348,7 +354,8 @@ describe("Р6: вход теста скраба различает порядо�
 // ---------------------------------------------------------------------------
 
 describe("Р13: битая percent-последовательность — управляемый отказ, не исключение", () => {
-  repro("splitCredentialUrl на %zz в кредах отказывает (refused), не бросает URIError", () => {
+  // закрыто блоком Б13 — обёртка снята, утверждения не менялись
+  test("splitCredentialUrl на %zz в кредах отказывает (refused), не бросает URIError", () => {
     const split = splitCredentialUrl("https://user%zz:pat@git.example.com/o/r.git");
     expect(split.kind).toBe("refused");
   });
@@ -365,7 +372,8 @@ describe("Р13: битая percent-последовательность — уп
     if (mock) mock.stop();
   });
 
-  repro("слаг %zz → управляемый отказ маршрута (bad_query 400), процесс жив", async () => {
+  // закрыто блоком Б13 — обёртка снята, утверждения не менялись
+  test("слаг %zz → управляемый отказ маршрута (bad_query 400), процесс жив", async () => {
     const base = server!.base;
     const bad = await fetch(`${base}/api/repos/%zz/r`);
     expect(bad.status).toBe(400);
@@ -385,7 +393,8 @@ describe("Р13: битая percent-последовательность — уп
 // ---------------------------------------------------------------------------
 
 describe("Р14: old_share no-data при неполной выборке TODO", () => {
-  repro("todo_note=incomplete → old_share no-data с причиной, не число по частичной выборке", () => {
+  // закрыто блоком Б13 — обёртка снята, утверждения не менялись
+  test("todo_note=incomplete → old_share no-data с причиной, не число по частичной выборке", () => {
     const t = tempDb();
     const facts = withFacts(healthyFacts(), {
       key: "code.todo",
@@ -416,7 +425,8 @@ describe("Р14: old_share no-data при неполной выборке TODO", 
 // ---------------------------------------------------------------------------
 
 describe("Р16: анонимный клон не требует git ≥ 2.31", () => {
-  repro("анонимный URL при версии 2.30 клонируется; с кредами при той же версии — отказ с внятной причиной", async () => {
+  // закрыто блоком Б13 — обёртка снята, утверждения не менялись
+  test("анонимный URL при версии 2.30 клонируется; с кредами при той же версии — отказ с внятной причиной", async () => {
     let anonSpawned = 0;
     const anon = await cloneBare("https://git@git.sourcecraft.dev/o/r.git", tmpdir(), LIMITS, {
       gitVersion: [2, 30, 2], // инъекция швом: версии ниже минимума
@@ -442,6 +452,137 @@ describe("Р16: анонимный клон не требует git ≥ 2.31", (
     expect(priv.reason).toBe("git");
     expect(priv.detail).toContain("2.31"); // внятная причина
     expect(privSpawned).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Р15. Один 500 на корзине type=SECRETS обнуляет весь Security-факт —
+// поведение честное и предписанное (К-Ф2.6), но причина no-data нигде не
+// фиксировалась. Контракт К-Р15: исход факта НЕ меняется (частичная выборка
+// может только льстить скору), чинится наблюдаемость — после исчерпания
+// ретраев причина фиксируется в status_detail скана и доезжает до noData
+// карточки по существующему каналу причин (факт). Репро не имеет.
+// ---------------------------------------------------------------------------
+
+describe("Р15: причина no-data Security наблюдаема, счёт скоринга не тронут", () => {
+  const SECRETS_DETAIL = "defect-groups type=SECRETS → 500: upstream (after 2 attempts)";
+
+  /** Фейк AppSec: страницы/severity-корзины ок, корзина SECRETS — 500 после ретрая. */
+  function secrets500Client(): AppsecClient {
+    return {
+      async get(path: string, params: Record<string, string>): Promise<AppsecGet> {
+        if (path === "/v1/scans/latest") {
+          return {
+            status: 200,
+            json: { uuid: "u-secrets", timeFinished: 1789570610046, isLatest: true, commitHash: "abc", openDefectGroups: 1, totalDefectGroups: 1 },
+          };
+        }
+        if (path === "/v1/defect-groups" && params["type"] === "SECRETS") {
+          return { status: 500, json: null, error: "upstream", attempts: 2 };
+        }
+        if (path === "/v1/defect-groups" && params["severity"] !== undefined) {
+          return { status: 200, json: { data: [], nextPageToken: "", totalSize: 0 }, attempts: 1 };
+        }
+        if (path === "/v1/defect-groups") {
+          return { status: 200, json: { data: [{ engine: "KICS", publicId: 1, findingsCount: 1, uuid: "g1" }], nextPageToken: "", totalSize: 1 }, attempts: 1 };
+        }
+        return { status: 404, json: null, attempts: 1 };
+      },
+      requestCount: () => 0,
+    };
+  }
+
+  const restWithId = (): ScClient => ({
+    async get(path: string): Promise<ScResponse> {
+      if (path.startsWith("/repos/")) return { status: 200, json: { id: "42" }, bodyText: "" };
+      return { status: 404, json: null, bodyText: "" };
+    },
+    requestCount: () => 1,
+  });
+
+  test("коллектор: 500 корзины SECRETS после ретраев → no-data incomplete с корзиной и числом попыток", async () => {
+    const out = await collectAppsec(restWithId(), secrets500Client(), "org/repo", { now: T0 });
+    expect(out.fact).toBeNull();
+    expect({ reason: out.noData?.reason, bucket: out.noData?.bucket, attempts: out.noData?.attempts, detailHasAttempts: (out.noData?.detail ?? "").includes("after 2 attempts") }).toEqual({
+      reason: "incomplete",
+      bucket: "type=SECRETS",
+      attempts: 2,
+      detailHasAttempts: true,
+    });
+  });
+
+  test("клиент: 5xx действительно ретраится — attempts=2 на отказавшемся запросе", async () => {
+    const upstream = Bun.serve({
+      port: 0,
+      hostname: "127.0.0.1",
+      fetch: () => new Response("upstream boom", { status: 500 }),
+    });
+    try {
+      const client = makeAppsecClient({ token: "pat", baseUrl: `http://127.0.0.1:${upstream.port}`, minIntervalMs: 1, timeoutMs: 2000 });
+      const out = await client.get("/v1/defect-groups", { gitRepo: "42" });
+      expect({ status: out.status, attempts: out.attempts, requests: client.requestCount() }).toEqual({ status: 500, attempts: 2, requests: 2 });
+    } finally {
+      upstream.stop(true);
+    }
+  });
+
+  test("runScan: отказ корзины → факт no-data, причина в scans.status_detail; скоринг не тронут", async () => {
+    const t = tempDb();
+    const gitOk = () => ({
+      facts: [
+        okFact("activity.git.summary", { commits: 5 }, "git"),
+        okFact("docs.presence", { readme: true }, "git"),
+      ],
+    });
+    const restOk = () => ({
+      facts: [
+        okFact("issues.stats", { open: 1, closed: 2 }, "rest:issues"),
+        okFact("cicd.runs", { last_status: null }, "rest:cicd"),
+      ],
+      repoMeta: null,
+      channelErrors: [],
+    });
+    const result = await runScan(
+      {
+        db: t.db,
+        scClient: null,
+        restBase: "http://127.0.0.1:1",
+        appsecBase: "http://127.0.0.1:1",
+        collectGit: async () => gitOk(),
+        collectRest: async () => restOk(),
+        collectAppsec: async () => ({ fact: null, noData: { reason: "incomplete", detail: SECRETS_DETAIL, bucket: "type=SECRETS", attempts: 2 } }),
+      },
+      "kr15/repo",
+      { userId: 1, userToken: "pat", trigger: "user" },
+    );
+    expect(result.channels.appsec).toBe("no-data(incomplete)");
+    const row = t.db.query("SELECT status_detail FROM scans WHERE id = ?").get(result.scanId) as { status_detail: string | null };
+    expect(row.status_detail).toBe("appsec bucket type=SECRETS unavailable after 2 attempts");
+    const fact = t.db.query("SELECT status FROM facts WHERE scan_id = ? AND key = 'appsec.findings'").get(result.scanId) as { status: string };
+    expect(fact.status).toBe("no-data"); // исход факта не изменился (К-Ф2.6)
+    // счёт скоринга не тронут: публичный Score считается, Security — no-data
+    expect(result.score?.totalRating).not.toBeNull();
+    const scores = JSON.parse((t.db.query("SELECT categories FROM scores WHERE scan_id = ?").get(result.scanId) as { categories: string }).categories) as { security: { score: number | null } };
+    expect(scores.security.score).toBeNull();
+  });
+
+  test("карточка: noData Security несёт причину последнего no-data факта (открытому зрителю)", () => {
+    const t = tempDb();
+    const at: ApiTestDb = { db: t.db, close: () => {} };
+    const repoId = seedRepo(at, { org: "kr15c", repo: "repo" });
+    const scanId = seedApiScan(at, repoId, {
+      facts: [
+        ...cardFacts(),
+        { key: "appsec.findings", source: "appsec:api", status: "no-data", value: { reason: "incomplete", detail: SECRETS_DETAIL } },
+      ],
+    });
+    seedScore(at, repoId, scanId, { total: 60 });
+    const granted: AccessResult = { cicd: "granted", appsec: "granted", repo: "granted" };
+    const card = getRepoCard(t.db, "kr15c", "repo", { access: granted });
+    const securityNoData = card?.score?.noData.find((raw) => raw.startsWith("security:")) ?? "";
+    expect(securityNoData).toContain("type=SECRETS");
+    expect(securityNoData).toContain("after 2 attempts");
+    expect(card?.score?.totalRating).toBe(60); // счёт не тронут
   });
 });
 

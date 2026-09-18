@@ -691,6 +691,28 @@ export function getRepoCard(
   }
   const stale = (JSON.parse(publicRow.stale) as string[]).filter((k) => PUBLIC_KINDS.includes(k));
   const isChannelCategory = (key: string) => CHANNEL_CATEGORIES.includes(key as CategoryKey);
+  // К-Р15 (круг 2): «почему данных нет» для Security — деталь последнего
+  // no-data факта appsec (корзина type=X недоступна после N попыток...);
+  // существующий канал причин — факт. Только ОТКРЫТОМУ зрителю: причина
+  // закрытого канала — тоже данные канала. Счёт скоринга не тронут.
+  let securityNoDataDetail: string | null = null;
+  if (secOpen && shownCats.security.score === null) {
+    const lastNoData = db
+      .query(
+        `SELECT f.value FROM facts f JOIN scans s ON s.id = f.scan_id
+         WHERE f.key = 'appsec.findings' AND f.status = 'no-data' AND s.repo_id = ?
+         ORDER BY f.scan_id DESC LIMIT 1`,
+      )
+      .get(r.id) as { value: string } | null;
+    if (lastNoData) {
+      try {
+        const v = JSON.parse(lastNoData.value) as { detail?: unknown };
+        if (typeof v.detail === "string" && v.detail !== "") securityNoDataDetail = v.detail;
+      } catch {
+        /* повреждённый JSON причины — показываем без неё */
+      }
+    }
+  }
   const score: CardScore = {
     totalRating: publicRow.total_rating,
     coverageRating: publicRow.coverage_rating,
@@ -703,8 +725,10 @@ export function getRepoCard(
     // причины no-data закрытых категорий — тоже данные канала (напр. «config-only cap»)
     noData: [
       ...(JSON.parse(publicRow.no_data) as string[]).filter((raw) => !isChannelCategory(raw.split(":")[0]!)),
-      ...CHANNEL_CATEGORIES.filter((key) => lockOf[key] === undefined && shownCats[key].score === null).map(
-        (key) => `${key}: ${shownCats[key].no_data ?? "no data"}`,
+      ...CHANNEL_CATEGORIES.filter((key) => lockOf[key] === undefined && shownCats[key].score === null).map((key) =>
+        key === "security" && securityNoDataDetail !== null
+          ? `security: ${shownCats.security.no_data ?? "no data"} — ${securityNoDataDetail}`
+          : `${key}: ${shownCats[key].no_data ?? "no data"}`,
       ),
     ],
     stale,

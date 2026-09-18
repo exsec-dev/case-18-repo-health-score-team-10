@@ -60,8 +60,8 @@ export interface ScanDeps {
   /** швы для тестов: подмена каналов целиком */
   collectGit?: (org: string, repo: string, limits: ScanCloneLimits) => Promise<GitChannelOutcome>;
   collectRest?: (slug: string) => Promise<RestCollectResult>;
-  /** шов AppSec-сбора (тесты без сети) */
-  collectAppsec?: (rest: ScClient, appsec: AppsecClient, slug: string) => Promise<{ fact: Fact | null; noData: { reason: string; detail: string } | null }>;
+  /** шов AppSec-сбора (тесты без сети; К-Р15 — bucket/attempts для status_detail) */
+  collectAppsec?: (rest: ScClient, appsec: AppsecClient, slug: string) => Promise<{ fact: Fact | null; noData: { reason: string; detail: string; bucket?: string; attempts?: number } | null }>;
 }
 
 export interface ScanOptions {
@@ -343,6 +343,15 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
       } else {
         appsecChannel = `no-data(${out.noData?.reason ?? "other"})`;
         facts.push(noDataFact("appsec.findings", (out.noData?.reason as "access" | "no-scan" | "incomplete") ?? "other", "appsec:api", out.noData?.detail ?? "", startedAt));
+        // К-Р15 (круг 2): после исчерпания ретраев корзины причина «почему
+        // данных нет» фиксируется в status_detail скана и доезжает до noData
+        // карточки по каналу причин (факт); счёт скоринга не тронут — частичная
+        // Security-выборка может только льстить скору (К-Ф2.6), no-data честно
+        if (out.noData?.reason === "incomplete" && out.noData.bucket !== undefined) {
+          deps.db
+            .query("UPDATE scans SET status_detail = ? WHERE id = ?")
+            .run(`appsec bucket ${out.noData.bucket} unavailable after ${out.noData.attempts ?? 1} attempts`, scanId);
+        }
       }
     }
   } catch (e) {

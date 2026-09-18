@@ -29,8 +29,11 @@ import { getMetaValue, setMetaValue } from "../db";
  * 3 (В4.2a, Ф2.3): `code_empty` больше не выводится из `loc === 0` — все
  * сохранённые оценки, занулённые ложным «проекта нет», обязаны пересчитаться
  * при первом старте нового кода.
+ * 4 (круг 2 В4.2a, К-Р14): `todo_note = "incomplete"` (обрыв cat-file) даёт
+ * `old_share` = no-data с причиной — оценки, посчитавшие долю старых
+ * маркеров по частичной выборке, пересчитываются (прецедент Ф2.3).
  */
-export const DERIVED_VERSION = 3;
+export const DERIVED_VERSION = 4;
 
 /** Порция фонового пересчёта истории за тик воркера (≈25 мс на скан). */
 export const HISTORY_RESCORE_BATCH = 20;

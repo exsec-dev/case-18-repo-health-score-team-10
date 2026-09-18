@@ -157,6 +157,20 @@ export type CredentialSplit =
   | { kind: "refused"; detail: string };
 
 /**
+ * К-Р13 (круг 2): декодирование percent-последовательностей из
+ * пользовательского ввода — ТОЛЬКО через этот хелпер. Битая
+ * последовательность (`%zz`) бросает URIError: вход считается невалидным и
+ * даёт управляемый отказ (null), а не исключение наружу (500).
+ */
+export function safeDecodeURIComponent(raw: string): string | null {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Ф2.4 + LOW-9: разбор клон-URL с кредами. Креды уезжают из URL в заголовок
  * `Authorization` (в argv их видно всему хосту через /proc/<pid>/cmdline).
  * Разрешены только `https://` и — ради герметичного теста — `http://` на
@@ -172,13 +186,23 @@ export function splitCredentialUrl(raw: string): CredentialSplit {
   } catch {
     return { kind: "none", url: raw };
   }
-  if (u.username === "" && u.password === "") return { kind: "none", url: raw };
+  // К-Р16 (круг 2): креды — это ПАРОЛЬ. Username без пароля (анонимный
+  // `https://git@host/...` — канон платформы для публичных репо) секрета не
+  // несёт и header-механику не включает: проверка git ≥ 2.31 относится
+  // ТОЛЬКО к клонам с кредами, анонимный клон не должен отказываться
+  // вместе с приватными.
+  if (u.password === "") return { kind: "none", url: raw };
   const loopback = u.hostname === "localhost" || u.hostname === "127.0.0.1";
   if (u.protocol !== "https:" && !(u.protocol === "http:" && loopback)) {
     return { kind: "refused", detail: `refusing to send credentials over ${u.protocol}//${u.hostname} (https, or http on loopback, only)` };
   }
-  const user = decodeURIComponent(u.username);
-  const pass = decodeURIComponent(u.password);
+  // К-Р13: битая percent-последовательность в кредах — невалидный вход,
+  // управляемый отказ (не URIError наружу)
+  const user = safeDecodeURIComponent(u.username);
+  const pass = safeDecodeURIComponent(u.password);
+  if (user === null || pass === null) {
+    return { kind: "refused", detail: "refusing malformed credentials in URL (bad percent-encoding)" };
+  }
   u.username = "";
   u.password = "";
   return {
