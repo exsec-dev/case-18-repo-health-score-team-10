@@ -2,13 +2,14 @@
 // hq-parallel (слияние `fdeb923`), найденных аудит-парой круга 2 В4.1-fix
 // (reports/2026-09-17-m41fix-r2-audit-pair.md). Закон вехи В4.2-port-fix —
 // reports/2026-09-17-fix-plan.md ревизия 4, Часть 2 «В4.2-port-fix = П» и
-// Часть 3 «К-П». Покрыты позиции П1, П2, П4, П5, П6, П9: каждый тест
+// Часть 3 «К-П». Круг 1 — позиции П1, П2, П4, П5, П6, П9; круг 2 (Б8, после
+// reports/2026-09-18-m42port-audit-pair.md) — П10, П11, П13. Каждый тест
 // описывает ПРАВИЛЬНОЕ поведение и ассертит конкретное значение.
 //
-// На Б0-коммите все тесты стояли под `test.failing` (в строгом режиме —
-// красные); пометка снималась в блоке, закрывшем находку (Б1–Б5), сами
-// утверждения при этом не менялись. Сейчас все тесты обычные. Строгий режим —
-// для команды приёмки: AUDIT_STRICT=1 bun test tests/audit-m42port-repro.test.ts
+// На Б0-коммите тесты стоят под обёрткой `repro` (в строгом режиме — красные);
+// она снимается в блоке, закрывшем находку, сами утверждения при этом не
+// меняются. Строгий режим — для команды приёмки:
+// AUDIT_STRICT=1 bun test tests/audit-m42port-repro.test.ts
 //
 // Живых запросов нет: временный DATA_DIR, SOURCECRAFT_TOKEN="" (задаёт
 // харнесс), все адреса API — локальный мок. Мок repo-GET НЕ отдаёт `id`:
@@ -28,13 +29,16 @@ import * as scheduler from "../src/jobs/scheduler";
 import { cardFacts, seedRepo, seedScan, seedScore, type ApiTestDb, type FactSpec } from "./api-fixtures";
 import { spawnServer, startMockApi, type SpawnedServer } from "./server-harness";
 
-// Обёртка строгого режима: на Б0-коммите (`ce36154`) под ней стояли все семь
-// тестов, сейчас не используется ни одним — все находки закрыты (Б1–Б5), и
-// AUDIT_STRICT=1 по этому файлу зелёный. Константа сохранена, чтобы HQ мог
-// вернуть любой тест в форму `repro(...)` при сверке Б0-коммита, не правя
-// импорты (та же практика, что в audit-m4-repro.test.ts).
+// Обёртка строгого режима (Т1, круг 2). Тест, стоящий под `repro`, —
+// ПРИПАРКОВАННАЯ находка: в обычном режиме `test.failing` (набор зелёный,
+// красноты в CI нет), под `AUDIT_STRICT=1` — обычный `test`, то есть
+// красный, пока находка не закрыта. Когда блок её закрывает, тест
+// переводится в обычный `test` (иначе `test.failing` упал бы на «прошёл»).
+// Круг 1 держал константу с `void repro` — обёртка была декоративной, и
+// «AUDIT_STRICT=1 зелёный» не значил ничего сверх обычного прогона; круг 2
+// исполняет её по-настоящему (Б8) и добавляет самопроверку строгого режима
+// в конце файла.
 const repro = process.env.AUDIT_STRICT ? test : test.failing;
-void repro;
 
 const cleanups: (() => void)[] = [];
 afterAll(() => {
@@ -199,6 +203,142 @@ describe("П9 (С1 r2): число плотности Security и tree.stats в 
 });
 
 // ---------------------------------------------------------------------------
+// КРУГ 2. П11 (Н-2 MAJOR). Бэкфилл `trigger_kind` при миграции: у строк,
+// созданных ДО появления колонки, `user_id IS NOT NULL` соседствует с
+// `trigger_kind = 'periodic'` (ensureColumn поставил DEFAULT). Круг 1 поставил
+// на эквивалентность «trigger_kind != 'user' ⇔ user_id IS NULL» два предиката
+// полосы — гард П5 и retry-failed; для legacy-строк она неверна.
+// ---------------------------------------------------------------------------
+
+/** Каталог из одной записи с заданной датой — вход ночного обхода. */
+const catalogPage = (org: string, repo: string, lastUpdated: string) => [
+  { organization: { slug: org }, slug: repo, name: repo, visibility: "public", last_updated: lastUpdated, language: null as unknown, rating: null },
+];
+
+/** Временная БД с legacy-строкой jobs (user_id задан, trigger_kind='periodic') и повторным openDb. */
+function legacyJobDb(prefix: string, status: string): { db: Database; repoId: number; jobId: number; dir: string } {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  const first = openDb({ ...loadConfig(), dataDir: dir });
+  const uid = upsertUser(first, `ya-${prefix}`, prefix);
+  const repoId = Number(
+    first.query("INSERT INTO repos (org_slug, repo_slug, visibility, last_activity_at) VALUES ('legacy', 'row', 'public', '2026-09-01T00:00:00Z')").run().lastInsertRowid,
+  );
+  // строка старого вида: колонка trigger_kind досталась ей от DEFAULT миграции
+  const jobId = Number(
+    first
+      .query("INSERT INTO jobs (repo_id, status, user_id, trigger_kind, created_at) VALUES (?, ?, ?, 'periodic', '2026-09-01T00:00:00Z')")
+      .run(repoId, status, uid).lastInsertRowid,
+  );
+  first.close();
+  // второй openDb = миграция на новом коде: бэкфилл обязан привести признак в порядок
+  const db = openDb({ ...loadConfig(), dataDir: dir });
+  cleanups.push(() => {
+    db.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  return { db, repoId, jobId, dir };
+}
+
+describe("П11 (Н-2): миграция бэкфиллит trigger_kind — предикаты полосы согласованы на старых БД", () => {
+  repro("живая legacy-юзерская job не читается как периодическая и не блокирует периодику по своему репо", async () => {
+    const { db, repoId, jobId } = legacyJobDb("rh-m42-p11a-", "queued");
+    const kind = (db.query("SELECT trigger_kind FROM jobs WHERE id = ?").get(jobId) as { trigger_kind: string }).trigger_kind;
+    // каталог отдаёт другую дату активности → «изменившийся» репо, периодика должна встать
+    const out = await scheduler.nightlyCatalog(db, catalogClient(catalogPage("legacy", "row", "2026-09-17T00:00:00Z")), { now: new Date() });
+    const periodic = (
+      db.query("SELECT COUNT(*) AS c FROM jobs WHERE repo_id = ? AND trigger_kind = 'periodic' AND user_id IS NULL AND status = 'queued'").get(repoId) as { c: number }
+    ).c;
+    expect({ kind, reasons: out.enqueued.map((e) => e.reason), periodic }).toEqual({ kind: "user", reasons: ["changed"], periodic: 1 });
+  });
+
+  repro("завершённая legacy-юзерская job не читается как последняя периодическая (retry-failed)", async () => {
+    const { db } = legacyJobDb("rh-m42-p11b-", "failed");
+    // каталог не менялся: единственная причина перескана была бы retry-failed
+    // по legacy-строке, прочитанной как «последняя периодическая»
+    const out = await scheduler.nightlyCatalog(db, catalogClient(catalogPage("legacy", "row", "2026-09-01T00:00:00Z")), { now: new Date() });
+    expect(out.enqueued.map((e) => e.reason)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// КРУГ 2. П13 (Н-4 MAJOR). `tree.stats` — публичный факт (PUBLIC_KINDS): он
+// кормит и плотность Security, и публичные derived. Круг 1 (П9) вытеснил
+// публичный факт канальным — публичная половина карточки стала зависеть от
+// прав зрителя, хотя К-Ф1.1 требует одного скана для всех. Канальное дерево
+// едет своим ключом; публичный `tree.stats` не трогается.
+// ---------------------------------------------------------------------------
+
+/** Ключ канального дерева в evidence (только карточка и MD; не kind, в реестры не входит). */
+const CHANNEL_TREE_KEY = "tree.stats@channel";
+const DENIED = { cicd: "denied", appsec: "denied", repo: "denied" } as const;
+
+/** Репо, у которого tree.stats скана P и канального скана оба ok и РАЗНЫЕ. */
+function twoTreesRepo(prefix: string): { t: ApiTestDb; secScan: number } {
+  const t = tempDb(prefix);
+  const repoId = seedRepo(t, { org: "twotrees", repo: "repo", language: "Go" });
+  const secScan = seedScan(t, repoId, {
+    startedAt: "2026-09-10T00:00:00Z",
+    status: "ok",
+    ratingEligible: false,
+    facts: [
+      { key: "appsec.findings", source: "appsec:api", value: { severity_counts: { critical: 0, high: 2, medium: 4, low: 6 }, resolved_share: 0.5, secrets_critical: false } },
+      { key: "tree.stats", source: "git", value: { top_level: [{ name: "src", type: "tree" }], file_count: 42, bytes: 900_000, loc: 20_000 } },
+    ],
+  });
+  // скан P: tree.stats собран ok, но ДРУГОЙ (loc 5000 из cardFacts)
+  const pScan = seedScan(t, repoId, { startedAt: "2026-09-16T00:00:00Z", status: "ok", ratingEligible: true, facts: cardFacts() });
+  seedScore(t, repoId, pScan, { total: 60 });
+  return { t, secScan };
+}
+
+describe("П13 (Н-4): публичный tree.stats не вытесняется канальным — публичная половина карточки одна для всех", () => {
+  repro("оба скана ok и значения разные: публичный tree.stats идентичен для зрителя с правами и без", () => {
+    const { t } = twoTreesRepo("rh-m42-p13a-");
+    const open = getRepoCard(t.db, "twotrees", "repo", { access: { ...GRANTED } })!;
+    const closed = getRepoCard(t.db, "twotrees", "repo", { access: { ...DENIED } })!;
+    const publicTree = (card: typeof open) => {
+      const rows = card.evidence.filter((e) => e.key === "tree.stats");
+      return {
+        count: rows.length,
+        loc: (rows[0]?.value as { loc?: unknown } | undefined)?.loc ?? null,
+        status: rows[0]?.status ?? null,
+        collectedAt: rows[0]?.collectedAt ?? null,
+      };
+    };
+    expect({
+      open: publicTree(open),
+      closed: publicTree(closed),
+      // канальный ключ — только зрителю с правами на Security
+      channelKeyOpen: open.evidence.filter((e) => e.key === CHANNEL_TREE_KEY).length,
+      channelKeyClosed: closed.evidence.filter((e) => e.key === CHANNEL_TREE_KEY).length,
+      channelLoc: (open.evidence.find((e) => e.key === CHANNEL_TREE_KEY)?.value as { loc?: unknown } | undefined)?.loc ?? null,
+    }).toEqual({
+      open: { count: 1, loc: 5_000, status: "ok", collectedAt: "2026-09-16T00:00:00Z" },
+      closed: { count: 1, loc: 5_000, status: "ok", collectedAt: "2026-09-16T00:00:00Z" },
+      channelKeyOpen: 1,
+      channelKeyClosed: 0,
+      channelLoc: 20_000,
+    });
+  });
+
+  repro("плотность Security доказывается канальным ключом: его collectedAt — скана, давшего число", () => {
+    const { t } = twoTreesRepo("rh-m42-p13b-");
+    const card = getRepoCard(t.db, "twotrees", "repo", { access: { ...GRANTED } })!;
+    const density = card.score!.categories.security.submetrics.density as { value: number | null } | undefined;
+    const channelTree = card.evidence.find((e) => e.key === CHANNEL_TREE_KEY);
+    const appsec = card.evidence.find((e) => e.key === "appsec.findings");
+    expect({
+      // SEVERITY_WEIGHTS: 0*8 + 2*4 + 4*2 + 6*1 = 22 на 20 000 LOC → 11 на 10k LOC
+      density: typeof density?.value === "number" ? Math.round(density.value * 1000) / 1000 : null,
+      channelStatus: channelTree?.status ?? null,
+      channelCategory: channelTree?.category ?? null,
+      sameScanAsNumber: channelTree !== undefined && appsec !== undefined && channelTree.collectedAt === appsec.collectedAt,
+      collectedAt: channelTree?.collectedAt ?? null,
+    }).toEqual({ density: 11, channelStatus: "ok", channelCategory: "code", sameScanAsNumber: true, collectedAt: "2026-09-10T00:00:00Z" });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // П2 (Н1 HIGH), П4 (MAJOR №1), П6 (С4) — через HTTP настоящего сервера.
 // Портовая поверхность (favorites / checkFavoriteAccess / merge-ветка
 // listMyRepos) не покрыта тестами вовсе — фикстура пишется с нуля.
@@ -245,6 +385,15 @@ beforeAll(async () => {
   db.query("UPDATE repos SET visibility = 'private' WHERE id = ?").run(secret);
   seedScore(t, secret, seedScan(t, secret, { facts: cardFacts(), userId: null, ratingEligible: true }), { total: 88 });
   db.query("INSERT INTO favorites (user_id, org_slug, repo_slug, added_at) VALUES (?, 'secret', 'repo', '2026-09-17T00:00:00Z')").run(ids.peek!);
+  // --- П10 (круг 2): публичный репо, ВЫТЕСНЕННЫЙ из рейтинга. `evictRepo`
+  // ставит rating_active = 0 и не трогает visibility; карточка и MD отдают
+  // такому репо 404 всем, а признак прав круга 1 смотрел только на visibility
+  const evicted = seedRepo(t, { org: "evicted", repo: "pub", title: "Вытесненный", language: "Go", lastActivityAt: "2026-08-01T00:00:00Z" });
+  db.query("UPDATE repos SET rating_active = 0, evict_reason = 'gone' WHERE id = ?").run(evicted);
+  // скан авторства «own» — у владельца права доказаны own-сканом и остаются
+  seedScore(t, evicted, seedScan(t, evicted, { facts: cardFacts(), userId: ids.own!, ratingEligible: true, startedAt: "2026-08-02T00:00:00Z" }), { total: 55 });
+  db.query("INSERT INTO favorites (user_id, org_slug, repo_slug, added_at) VALUES (?, 'evicted', 'pub', '2026-09-17T00:00:00Z')").run(ids.peek!);
+  db.query("INSERT INTO favorites (user_id, org_slug, repo_slug, added_at) VALUES (?, 'evicted', 'pub', '2026-09-17T00:00:00Z')").run(ids.own!);
   // --- П2: восемь своих избранных у пользователя с PAT (строки repos есть:
   // иначе портовый колбэк отсеет их до капов и обход капа не воспроизведётся) ---
   for (let i = 1; i <= 8; i++) {
@@ -346,5 +495,37 @@ describe("П6 (С4): мета репо не отдаётся зрителю бе
       score: entry!.score,
       sources: entry!.sources,
     }).toEqual({ title: null, language: null, lastScanAt: null, score: null, sources: ["favorite"] });
+  }, 30_000);
+});
+
+describe("П10 (Н-1, круг 2): признак прав читает пару visibility + rating_active", () => {
+  repro("эвиктированный публичный репо в избранном постороннего: ни меты, ни Score", async () => {
+    const res = await fetch(at("/api/me/repos"), as("peek"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as MyReposBody;
+    const entry = body.entries.find((e) => e.org === "evicted" && e.repo === "pub");
+    expect(entry).toBeDefined();
+    expect({
+      title: entry!.title,
+      language: entry!.language,
+      lastScanAt: entry!.lastScanAt,
+      score: entry!.score,
+      sources: entry!.sources,
+    }).toEqual({ title: null, language: null, lastScanAt: null, score: null, sources: ["favorite"] });
+  }, 30_000);
+
+  // вторая половина контракта П10 («остальные два дизъюнкта не трогаются»)
+  // зелена и до исправления — это охрана от пере-затягивания признака, не репро
+  test("тот же репо владельцу (own-скан) виден по-прежнему: мета и Score на месте", async () => {
+    const res = await fetch(at("/api/me/repos"), as("own"));
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as MyReposBody;
+    const entry = body.entries.find((e) => e.org === "evicted" && e.repo === "pub");
+    expect(entry).toBeDefined();
+    expect({ title: entry!.title, language: entry!.language, score: entry!.score }).toEqual({
+      title: "Вытесненный",
+      language: "Go",
+      score: 55,
+    });
   }, 30_000);
 });
