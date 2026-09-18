@@ -17,7 +17,7 @@ import type { Database } from "bun:sqlite";
 import { rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { enumerateCatalog, type CatalogResult } from "../collectors/catalog";
+import { enumerateCatalog, type CatalogEntry, type CatalogResult } from "../collectors/catalog";
 import type { ScClient } from "../collectors/http";
 import { upsertRepo, runScan, scanCloneLimitsOf, type ScanResult } from "./runner";
 import { getPat } from "../auth/pat";
@@ -341,6 +341,56 @@ export interface CatalogPhases {
 /** Причина эвикции сверкой (К-Ф2.5, дословно). */
 export const EVICT_NOT_IN_CATALOG = "not in public catalog";
 
+/** Строка repos для сверки каталога (К-Р4: чтение одним запросом в память). */
+interface CatalogRepoRow {
+  id: number;
+  org_slug: string;
+  repo_slug: string;
+  title: string | null;
+  language: string | null;
+  likes: number | null;
+  visibility: string;
+  logo_url: string | null;
+  language_color: string | null;
+  last_activity_at: string | null;
+}
+
+/**
+ * К-Р4 (круг 2): применить мету каталога к repos ТОЛЬКО при расхождении
+ * (или новой строке); неизменившаяся строка НЕ перезаписывается. Семантика
+ * сравнения — зеркально COALESCE-ветке upsertRepo: null из каталога ничего
+ * не затирает, расхождение — только непустое новое значение; видимость —
+ * только явным полем (Ф2.5); `last_activity_at` обход не пишет (К-Ф1.1).
+ * Трогает ТОЛЬКО путь сверки каталога — остальные зовущие upsertRepo
+ * (сканы, постановка юзером) сохраняют прежнее поведение.
+ */
+function reconcileCatalogRepo(db: Database, entry: CatalogEntry, existing: CatalogRepoRow | null): number {
+  if (existing !== null) {
+    const hasVisibility = typeof entry.visibility === "string" && entry.visibility !== "";
+    const changed =
+      (entry.name !== null && entry.name !== existing.title) ||
+      (entry.language !== null && entry.language !== existing.language) ||
+      (entry.likes !== null && entry.likes !== existing.likes) ||
+      (hasVisibility && entry.visibility !== existing.visibility) ||
+      (entry.logo_url !== null && entry.logo_url !== existing.logo_url) ||
+      (entry.language_color !== null && entry.language_color !== existing.language_color);
+    if (!changed) return existing.id; // неизменившаяся строка — ноль записей
+  }
+  return upsertRepo(db, entry.org, entry.repo, {
+    title: entry.name,
+    language: entry.language,
+    likes: entry.likes,
+    // Ф2.12 (LOW-2, третья часть) + К-Ф1.1: `last_activity_at` — ВОДОРАЗДЕЛ
+    // «до какой даты репо просканирован», и двигать его вправе только
+    // пригодный успешный скан (`runScan`, после скор-хука)
+    lastActivityAt: undefined,
+    // Ф2.5: видимость — ТОЛЬКО из явного поля платформы
+    visibility: entry.visibility ?? undefined,
+    logoUrl: entry.logo_url,
+    languageColor: entry.language_color,
+  });
+}
+
 /**
  * Полный обход каталога: дифф last_updated → очередь изменившихся,
  * постановка новых, эвикция исчезнувших (только public-строки нашей
@@ -384,31 +434,23 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
     db.query("SELECT 1 FROM jobs WHERE repo_id = ? AND trigger_kind != 'user' AND status IN ('queued', 'running') LIMIT 1").get(repoId) !== null;
   const seenRepoIds = new Set<number>();
   const seenSlugs = new Set<string>();
+  // К-Р4 (круг 2): состояние repos читается ОДНИМ запросом в память — не
+  // запросом на каждую запись каталога; запись — только при расхождении
+  // полей или новой строке. Прежний путь делал upsertRepo на КАЖДУЮ запись:
+  // 27 446 безусловных UPDATE за проход часовой сверки (замер до правки:
+  // 27 446 UPDATE / 869 мс на этой машине; 28–40 с синхронной БД у
+  // аудит-пары) × 24 раза в сутки в одном процессе с Bun.serve.
+  const repoRows = db
+    .query("SELECT id, org_slug, repo_slug, title, language, likes, visibility, logo_url, language_color, last_activity_at FROM repos")
+    .all() as CatalogRepoRow[];
+  const reposBySlug = new Map(repoRows.map((r) => [`${r.org_slug}/${r.repo_slug}`, r]));
 
   for (const entry of catalog.entries) {
     const slug = `${entry.org}/${entry.repo}`;
     seenSlugs.add(slug);
-    const existing = db.query("SELECT id, last_activity_at FROM repos WHERE org_slug = ? AND repo_slug = ?").get(entry.org, entry.repo) as
-      | { id: number; last_activity_at: string | null }
-      | null;
-    // upsert мета каталога (language/likes/дата — свежие всегда)
-    const repoId = upsertRepo(db, entry.org, entry.repo, {
-      title: entry.name,
-      language: entry.language,
-      likes: entry.likes,
-      // Ф2.12 (LOW-2, третья часть) + К-Ф1.1: `last_activity_at` — ВОДОРАЗДЕЛ
-      // «до какой даты репо просканирован», и двигать его вправе только
-      // пригодный успешный скан (`runScan`, после скор-хука). Обход писал сюда
-      // дату каталога прямо при постановке — «изменился» расходовался фактом
-      // постановки, и упавший скан больше никогда не переставлялся
-      lastActivityAt: undefined,
-      // Ф2.5: видимость — ТОЛЬКО из явного поля платформы. Записи без поля
-      // фильтр `publicOnly` сюда не пускает, а дефолт `?? "public"` был
-      // молчаливым допущением: строка становилась публичной без подтверждения
-      visibility: entry.visibility ?? undefined,
-      logoUrl: entry.logo_url,
-      languageColor: entry.language_color,
-    });
+    const existing = reposBySlug.get(slug) ?? null;
+    // К-Р4: мета каталога — сверкой с записью только при расхождении
+    const repoId = reconcileCatalogRepo(db, entry, existing);
     seenRepoIds.add(repoId);
     // не чаще раза за обход (дубли записей каталога)
     if (enqueuedRepoIds.has(repoId)) continue;
@@ -844,9 +886,13 @@ export function catalogClientBudget(config: Config): number {
  * перечисление на обе фазы). Каталог обходится ОДИН раз, если должна хотя бы
  * одна фаза; дочитанный snapshot всегда исполняет сверку, а ночная фаза
  * добавляется к тому же snapshot, когда её срок пришёл. Недочитанный или
- * ошибочный snapshot не эвиктит и НЕ двигает due-метки — срок остаётся
- * просроченным, следующий тик попробует снова. Конкурирующих обходов нет:
- * гард один на обе фазы, клиент (и его бюджет) — один на snapshot.
+ * ошибочный snapshot не эвиктит и не двигает метку СВЕРКИ; К-Р3 (решение
+ * Екатерины 19.09): ночная метка двигается, если ночная фаза ИСПОЛНИЛАСЬ
+ * (обход прошёл), независимо от полноты каталога — иначе суточная волна
+ * вырождается в часовую, пока каталог недочитывается; ритм ночной волны от
+ * полноты каталога не зависит, эвикция — единственное опасное действие на
+ * неполном снимке — по-прежнему только по дочитанному. Конкурирующих обходов
+ * нет: гард один на обе фазы, клиент (и его бюджет) — один на snapshot.
  */
 export async function catalogTick(
   db: Database,
@@ -888,13 +934,15 @@ export async function catalogTick(
     if (result.catalogComplete) {
       state.lastReconcileAt = now;
       schedulerStateRef.lastReconcileAt = now.toISOString();
-      if (nightlyDue) {
-        state.lastNightlyAt = now;
-        schedulerStateRef.lastNightlyAt = now.toISOString();
-      }
+    }
+    // К-Р3: ночная метка — по исполнению фазы (обход ok), НЕ по полноте
+    // каталога; метка сверки выше — по-прежнему только по дочитанному
+    if (nightlyDue && result.ok) {
+      state.lastNightlyAt = now;
+      schedulerStateRef.lastNightlyAt = now.toISOString();
     }
     console.log(
-      `[scheduler] catalog: ${result.pages} pages, ${result.entriesSeen} repos; phases reconcile+${nightlyDue ? "nightly" : "-"}; queued ${result.enqueued.length} (${result.enqueued.filter((e) => e.reason === "new").length} new), evicted ${result.evicted.length}, returned ${result.returned.length}${result.catalogComplete ? "" : "; catalog INCOMPLETE - eviction skipped, due marks kept"}`,
+      `[scheduler] catalog: ${result.pages} pages, ${result.entriesSeen} repos; phases reconcile+${nightlyDue ? "nightly" : "-"}; queued ${result.enqueued.length} (${result.enqueued.filter((e) => e.reason === "new").length} new), evicted ${result.evicted.length}, returned ${result.returned.length}${result.catalogComplete ? "" : "; catalog INCOMPLETE - eviction skipped, reconcile mark kept"}`,
     );
     return result;
   } catch (e) {

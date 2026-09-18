@@ -212,7 +212,8 @@ console.log("CALLS=" + calls);`;
 // ---------------------------------------------------------------------------
 
 describe("Р3: ночная метка — по исполнению фазы, не по полноте каталога", () => {
-  repro("недочитанный каталог, три часовых тика подряд → ночная фаза исполнилась ОДИН раз, эвикций ноль", async () => {
+  // закрыто блоком Б10 — обёртка снята, утверждения не менялись
+  test("недочитанный каталог, три часовых тика подряд → ночная фаза исполнилась ОДИН раз, эвикций ноль", async () => {
     const t = tempDb();
     const cfg = catalogConfig({ catalogIntervalMs: HOUR, intervalMs: 24 * HOUR, maxPages: 1 });
     t.db
@@ -241,7 +242,8 @@ describe("Р3: ночная метка — по исполнению фазы, �
 // ---------------------------------------------------------------------------
 
 describe("Р4: сверка каталога — ноль записей на неизменном каталоге", () => {
-  repro("SQL-триггер на repos: проход сверки без расхождений не делает ни INSERT, ни UPDATE", async () => {
+  // закрыто блоком Б10 — обёртка снята, утверждения не менялись
+  test("SQL-триггер на repos: проход сверки без расхождений не делает ни INSERT, ни UPDATE", async () => {
     const t = tempDb();
     const N = 40;
     const seed = t.db.query(
@@ -250,7 +252,11 @@ describe("Р4: сверка каталога — ноль записей на н
     for (let i = 0; i < N; i++) {
       seed.run(`r4o${i}`, `r4r${i}`, `title-${i}`, i % 3 === 0 ? "TypeScript" : null, i, "public", `https://logo.example/${i}.png`, i % 3 === 0 ? "#3178c6" : null, "2026-09-10T00:00:00Z");
     }
-    // триггеры-счётчики ставятся ПОСЛЕ сида, чтобы посев не попадал в замер
+    // служебная строка makeDb ('t/repo') в каталоге нет — эвикция тронула бы её
+    // своим UPDATE; гасим ДО установки триггеров, чтобы гашение не попадало
+    // в замер (это UPDATE репо, но не запись сверки)
+    t.db.exec("UPDATE repos SET rating_active = 0 WHERE org_slug NOT LIKE 'r4o%'");
+    // триггеры-счётчики ставятся ПОСЛЕ сида и гашения, чтобы они не попадали в замер
     t.db.exec("CREATE TABLE r4_audit (kind TEXT NOT NULL)");
     t.db.exec("CREATE TRIGGER r4_after_ins AFTER INSERT ON repos BEGIN INSERT INTO r4_audit VALUES ('insert'); END");
     t.db.exec("CREATE TRIGGER r4_after_upd AFTER UPDATE ON repos BEGIN INSERT INTO r4_audit VALUES ('update'); END");

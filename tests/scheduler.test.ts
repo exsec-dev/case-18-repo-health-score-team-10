@@ -1133,7 +1133,7 @@ describe("Ф2.5: catalogTick — две фазы, один обход, един�
     db.query("DELETE FROM repos WHERE org_slug = 'ph'").run();
   });
 
-  test("недочитанный каталог: не эвиктит и НЕ двигает due-метки — следующий тик пробует снова", async () => {
+  test("недочитанный каталог: не эвиктит, метку сверки не двигает (К-Р3: ночную — двигает, фаза исполнилась)", async () => {
     const stay = seedRepo("tr", "stay", "2026-09-10T00:00:00Z");
     const absent = seedRepo("tr", "absent", "2026-09-10T00:00:00Z");
     const state = newCatalogTickState();
@@ -1141,7 +1141,9 @@ describe("Ф2.5: catalogTick — две фазы, один обход, един�
     const out = await catalogTick(db, () => catalogClient(pages), { ...cfg, scan: { ...cfg.scan, catalog: { maxPages: 1 } } }, state, { now: T0 });
     expect({ complete: out?.catalogComplete, evicted: out?.evicted }).toEqual({ complete: false, evicted: [] });
     expect((db.query("SELECT rating_active FROM repos WHERE id = ?").get(absent) as { rating_active: number }).rating_active).toBe(1);
-    expect({ reconcile: state.lastReconcileAt, nightly: state.lastNightlyAt }).toEqual({ reconcile: null, nightly: null });
+    // К-Р3 (круг 2): ночная фаза на этом snapshot исполнилась (обход ok) —
+    // её метка двигается и без полноты каталога; метка сверки — нет
+    expect({ reconcile: state.lastReconcileAt, nightly: state.lastNightlyAt }).toEqual({ reconcile: null, nightly: T0 });
     void stay;
     db.query("DELETE FROM jobs WHERE repo_id IN (SELECT id FROM repos WHERE org_slug = 'tr')").run();
     db.query("DELETE FROM repos WHERE org_slug = 'tr'").run();
@@ -1205,6 +1207,54 @@ describe("Ф2.5: catalogTick — две фазы, один обход, един�
 
   test("бюджет клиента обхода — потолок страниц + 10", () => {
     expect(catalogClientBudget(cfg)).toBe(cfg.scan.catalog.maxPages + 10);
+  });
+
+  // К-Р4 (круг 2): запись — ТОЛЬКО при реальном расхождении поля или новой
+  // строке; ноль записей на неизменном каталоге — в repro круга 2
+  test("сверка пишет только расхождения: смена title — один UPDATE, новый репо — один INSERT", async () => {
+    // обычная (не TEMP) таблица: имена внутри триггера резолвятся в схеме
+    // триггера (main), temp из него не видна; teardown обязателен — иначе
+    // триггеры отравят INSERT/UPDATE на repos всем последующим тестам
+    db.exec("DROP TRIGGER IF EXISTS kr4_ins");
+    db.exec("DROP TRIGGER IF EXISTS kr4_upd");
+    db.exec("CREATE TABLE IF NOT EXISTS kr4_audit (kind TEXT)");
+    db.exec("DELETE FROM kr4_audit");
+    const before = seedRepo("kr4", "repo", "2026-09-10T00:00:00Z");
+    db.query("UPDATE repos SET title = 'old title', likes = 7 WHERE id = ?").run(before);
+    db.exec("CREATE TRIGGER kr4_ins AFTER INSERT ON repos BEGIN INSERT INTO kr4_audit VALUES ('insert'); END");
+    db.exec("CREATE TRIGGER kr4_upd AFTER UPDATE ON repos BEGIN INSERT INTO kr4_audit VALUES ('update'); END");
+    try {
+      const state = newCatalogTickState();
+      // title изменился, likes нет; changed-ветка не ночная — «изменился» не ставится
+      const out = await catalogTick(
+        db,
+        () =>
+          catalogClient([
+            {
+              repos: [
+                { organization: { slug: "kr4" }, slug: "repo", name: "new title", visibility: "public", last_updated: "2026-09-10T00:00:00Z", language: null, rating: { value: 7 } },
+                { organization: { slug: "kr4" }, slug: "fresh", name: "fresh", visibility: "public", last_updated: "2026-09-11T00:00:00Z", language: null, rating: null },
+              ],
+              next: null,
+            },
+          ]),
+        cfg,
+        state,
+        { now: T0 },
+      );
+      const audit = db.query("SELECT kind, COUNT(*) AS c FROM kr4_audit GROUP BY kind").all() as { kind: string; c: number }[];
+      expect(audit.sort((a, b) => a.kind.localeCompare(b.kind))).toEqual([
+        { kind: "insert", c: 1 }, // новый репо каталога
+        { kind: "update", c: 1 }, // только расхождение title
+      ]);
+      expect(out?.enqueued).toEqual([{ slug: "kr4/fresh", reason: "new" }]);
+      expect((db.query("SELECT title, likes FROM repos WHERE org_slug = 'kr4' AND repo_slug = 'repo'").get() as { title: string; likes: number })).toEqual({ title: "new title", likes: 7 });
+    } finally {
+      db.exec("DROP TRIGGER IF EXISTS kr4_ins");
+      db.exec("DROP TRIGGER IF EXISTS kr4_upd");
+      db.query("DELETE FROM jobs WHERE repo_id IN (SELECT id FROM repos WHERE org_slug = 'kr4')").run();
+      db.query("DELETE FROM repos WHERE org_slug = 'kr4'").run();
+    }
   });
 });
 
