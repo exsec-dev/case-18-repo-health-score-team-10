@@ -725,6 +725,11 @@ export function startWorkerLoop(
 // ПОРТ hq-parallel (S3): реестр последнего обхода для /api/health —
 // «health зелёный при мёртвой периодике» больше не проходит незаметно
 const schedulerStateRef: {
+  /**
+   * К-Р5 (круг 2): результат последнего обхода, в котором ИСПОЛНЯЛАСЬ
+   * ночная фаза — часовая сверка этот факт НЕ трогает (прежде обновлял
+   * любой обход, и мёртвая ночная волна светила зелёным).
+   */
   lastNightly: NightlyResult | { ok: false; error: string } | null;
   /** Ф2.5: метки успеха фаз едут в /api/health — «зелёное» не врёт и про сверку */
   lastReconcileAt: string | null;
@@ -926,7 +931,9 @@ export async function catalogTick(
       now,
       phases: { reconcile: true, nightly: nightlyDue },
     });
-    schedulerStateRef.lastNightly = result;
+    // К-Р5: ночной факт health — только обходы, в которых ночная фаза
+    // участвовала; часовая сверка его не обновляет
+    if (nightlyDue) schedulerStateRef.lastNightly = result;
     if (!result.ok) {
       console.error(`[scheduler] catalog walk failed: ${result.error ?? "unknown"}`);
       return result;

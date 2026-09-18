@@ -291,16 +291,24 @@ describe("Р4: сверка каталога — ноль записей на н
 // ---------------------------------------------------------------------------
 
 describe("Р5: /api/health — часовая сверка не трогает ночной факт", () => {
-  repro("обход с фазой сверки не обновляет lastNightly/lastNightlyAt", async () => {
+  // закрыто блоком Б11 — обёртка снята, утверждения не менялись (уточнён
+  // сетап: модульный schedulerStateRef отделён от state тика, ночной факт
+  // сперва ставится настоящей ночной фазой, иначе сверке нечего «не трогать»)
+  test("обход с фазой сверки не обновляет lastNightly/lastNightlyAt", async () => {
     __resetSchedulerState();
     const t = tempDb();
     const cfg = catalogConfig({ catalogIntervalMs: HOUR, intervalMs: 24 * HOUR, maxPages: 100 });
-    const state = { ...newCatalogTickState(), lastReconcileAt: T0, lastNightlyAt: T0 };
+    // ночной тик в T0: обе фазы due — ставит ночной факт health
+    const state = newCatalogTickState();
+    const nightlyOut = await catalogTick(t.db, () => catalogPagesClient([{ repos: [], next: null }]), cfg, state, { now: T0 });
+    expect(nightlyOut?.phases.nightly).toBe(true);
+    expect(schedulerHealthSnapshot().lastNightlyAt).toBe(T0.toISOString());
+    // часовой тик: только сверка — ночной факт не трогается
     const out = await catalogTick(t.db, () => catalogPagesClient([{ repos: [], next: null }]), cfg, state, { now: at(HOUR) });
     expect(out?.phases).toEqual({ reconcile: true, nightly: false });
     const snap = schedulerHealthSnapshot();
-    expect({ lastNightly: snap.lastNightly, lastNightlyAt: snap.lastNightlyAt, lastReconcileAt: snap.lastReconcileAt }).toEqual({
-      lastNightly: null, // ночной факт не тронут часовым обходом
+    expect({ lastNightlyOk: (snap.lastNightly as { ok: boolean } | null)?.ok ?? null, lastNightlyAt: snap.lastNightlyAt, lastReconcileAt: snap.lastReconcileAt }).toEqual({
+      lastNightlyOk: true, // ночной факт — от ночного тика, не от сверки
       lastNightlyAt: T0.toISOString(),
       lastReconcileAt: at(HOUR).toISOString(),
     });
@@ -316,7 +324,8 @@ describe("Р5: /api/health — часовая сверка не трогает �
 // ---------------------------------------------------------------------------
 
 describe("Р6: вход теста скраба различает порядок scrub/slice", () => {
-  repro("вход теста git-collector ловит утечку PAT при порядке slice→scrub", () => {
+  // закрыто блоком Б11 — обёртка снята, утверждения не менялись
+  test("вход теста git-collector ловит утечку PAT при порядке slice→scrub", () => {
     const src = readFileSync(join(import.meta.dir, "git-collector.test.ts"), "utf8");
     const m = src.match(/const noise = "x"\.repeat\((\d+)\)/);
     expect(m).not.toBeNull();

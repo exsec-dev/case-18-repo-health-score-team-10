@@ -617,7 +617,16 @@ describe("Ф2.4: клон с PAT — заголовок, argv, config клона
 
   test("скраб stderr выполняется ДО обрезки: длинный вывод не выносит креды в деталь", async () => {
     const PAT = "pat-leaked-value";
-    const noise = "x".repeat(400);
+    // К-Р6 (круг 2): различающий вход. noise=400 проходил и при порядке
+    // slice→scrub — секрет целиком уходил ЗА границу обрезки, и тест
+    // выполняла обрезка, а не скраб. Число 235 подобрано арифметически
+    // (репро-файл круга 2 проверяет его различающую силу): строка шума
+    // начинается с индекса noise+1, PAT — на 48-м символе fatal-строки,
+    // '@' — на 64-м; чтобы ПОЛНЫЙ PAT попал в первые 300 символов, а '@'
+    // был отрезан: noise+1+48+16 = 300 и noise+1+64 > 300 → noise = 235
+    // (единственное значение). При slice→scrub в detail остаётся PAT без
+    // '@' — регулярка скраба его не матчит, тест красный.
+    const noise = "x".repeat(235);
     const stderr = `${noise}\nfatal: could not read from 'https://repo-health:${PAT}@git.sourcecraft.dev/o/r.git'\n`;
     const out = await cloneBare("https://git.sourcecraft.dev/o/r.git", tmpdir(), LIMITS, {
       spawnGit: () => ({

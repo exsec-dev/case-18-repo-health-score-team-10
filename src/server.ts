@@ -174,9 +174,11 @@ const server = Bun.serve({
         llmProvider: config.llm.provider,
         queue,
         failedJobs24h: failed24h,
+        // К-Р5: два РАЗНЫХ факта — «последний обход» и «последний обход с
+        // исполнившейся ночной фазой»; lastNightly обновляет только второй
+        // (часовая сверка его не трогает), lastReconcileAt/lastNightlyAt —
+        // метки успеха своих фаз
         lastNightly: nightly ? { ok: nightly.ok, error: nightly.ok ? undefined : nightly.error, pages: nightly.ok ? nightly.pages : 0, catalogComplete: nightly.ok ? nightly.catalogComplete : false } : null,
-        // Ф2.5: обе фазы обхода отчитываются отдельно — «сверка жива» и
-        // «ночная волна жива» отвечают на разные вопросы оператора
         lastReconcileAt: sched.lastReconcileAt,
         lastNightlyAt: sched.lastNightlyAt,
         freshAsOf: fresh.f,
