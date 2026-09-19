@@ -13,6 +13,7 @@ import { buildAuthUrl, exchangeCode, type YaHttp } from "../src/auth/ya";
 import {
   OAUTH_STATE_COOKIE,
   SESSION_COOKIE,
+  cookieNames,
   createSession,
   getSessionUser,
   makeOAuthState,
@@ -127,11 +128,25 @@ describe("сессии: подпись, TTL, отзыв", () => {
 
   test("cookie-хелперы: parseCookies, имена, state", () => {
     const state = makeOAuthState();
-    expect(oauthStateCookieHeader(state)).toContain(`${OAUTH_STATE_COOKIE}=${state}`);
-    expect(oauthStateCookieHeader(state)).toContain("HttpOnly");
+    const names = cookieNames({ redirect: "http://localhost:8418/auth/ya/callback" });
+    expect(oauthStateCookieHeader(names, state)).toContain(`${OAUTH_STATE_COOKIE}=${state}`);
+    expect(oauthStateCookieHeader(names, state)).toContain("HttpOnly");
     const cookies = parseCookies(`a=1; ${SESSION_COOKIE}=abc.def; bad`);
     expect(cookies[SESSION_COOKIE]).toBe("abc.def");
     expect(parseCookies(null)).toEqual({});
+  });
+
+  test("Ф2.7: cookieNames — http-redirect прежние имена без Secure, https — __Host- и Secure", () => {
+    const http = cookieNames({ redirect: "http://localhost:8418/auth/ya/callback" });
+    expect(http).toEqual({ session: SESSION_COOKIE, oauthState: OAUTH_STATE_COOKIE, secure: false });
+    const https = cookieNames({ redirect: "https://rh-stand.example/auth/ya/callback" });
+    expect(https).toEqual({ session: "__Host-rh_session", oauthState: "__Host-rh_oauth_state", secure: true });
+    // __Host- требует Secure, Path=/ и отсутствие Domain — заголовок обязан это держать
+    const header = oauthStateCookieHeader(https, "s");
+    expect(header.startsWith("__Host-rh_oauth_state=s;")).toBe(true);
+    expect(header).toContain("Secure");
+    expect(header).toContain("Path=/");
+    expect(header).not.toContain("Domain=");
   });
 });
 

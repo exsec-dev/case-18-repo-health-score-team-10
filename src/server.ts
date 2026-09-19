@@ -25,15 +25,15 @@ import {
 import { renderRepoReport } from "./report/markdown";
 import { catalogClientBudget, enqueueScan, maintenanceTick, schedulerHealthSnapshot, startScheduler, startWorkerLoop } from "./jobs/scheduler";
 import {
+  clearOAuthStateCookieHeader,
   clearSessionCookieHeader,
+  cookieNames,
   createSession,
   getSessionUser,
   makeOAuthState,
   oauthStateCookieHeader,
   oauthStateFromCookie,
   parseCookies,
-  OAUTH_STATE_COOKIE,
-  SESSION_COOKIE,
   sessionCookieHeader,
   SESSION_TTL_MS,
   revokeSession,
@@ -84,6 +84,10 @@ const allowPatProbe = (userId: number, now = Date.now()): boolean => allowInWind
 
 const db = openDb(config);
 
+// Ф2.7 (В4.2b): имена/атрибуты cookie по схеме YA_REDIRECT_URI — на https
+// это `__Host-rh_*` с Secure. Читается ТОЛЬКО актуальное имя.
+const ck = cookieNames(config.auth);
+
 // Ф1.9: оценки устарели (derived_version старее кода) или их нет при
 // непустых сканах (после миграции схемы) — синхронный пересчёт ДО Bun.serve:
 // рейтинг не отвечает пустым или смешанным. Прогресс — в лог.
@@ -107,7 +111,7 @@ const unauthorized = (message = "требуется вход (Я ID)"): Response
 function sessionOf(req: Request) {
   if (!config.auth.appSecret) return null;
   const cookies = parseCookies(req.headers.get("cookie"));
-  return getSessionUser(db, config.auth.appSecret, cookies[SESSION_COOKIE]);
+  return getSessionUser(db, config.auth.appSecret, cookies[ck.session]);
 }
 
 /** REST-клиент с юзерским PAT (PAT-окно/«мои репо»); PAT нет → null. */
@@ -226,7 +230,7 @@ const server = Bun.serve({
       try {
         const state = makeOAuthState();
         const url = buildAuthUrl(yaCreds(), state, yaEndpoints());
-        return new Response(null, { status: 302, headers: { location: url, "set-cookie": oauthStateCookieHeader(state) } });
+        return new Response(null, { status: 302, headers: { location: url, "set-cookie": oauthStateCookieHeader(ck, state) } });
       } catch (e) {
         return Response.json({ error: { code: "unconfigured", message: String((e as Error).message) } }, { status: 503 });
       }
@@ -237,36 +241,44 @@ const server = Bun.serve({
     "/auth/logout": {
       POST: (req) => {
         if (!config.auth.appSecret) return new Response(null, { status: 204 });
-        revokeSession(db, config.auth.appSecret, parseCookies(req.headers.get("cookie"))[SESSION_COOKIE]);
-        return new Response(null, { status: 204, headers: { "set-cookie": sessionCookieHeader(config.auth.appSecret, "", 0) } });
+        revokeSession(db, config.auth.appSecret, parseCookies(req.headers.get("cookie"))[ck.session]);
+        return new Response(null, { status: 204, headers: { "set-cookie": sessionCookieHeader(ck, "", 0) } });
       },
     },
     "/auth/ya/callback": async (req) => {
       const url = new URL(req.url);
+      // Ф2.7: редирект ОТНОСИТЕЛЬНЫЙ (абсолютный из Host — риск за кривым
+      // прокси), и ВСЕ исходы callback гасят state-cookie. Несколько
+      // Set-Cookie — через Headers.append.
+      const callbackRedirect = (location: string, extraCookies: string[] = []): Response => {
+        const headers = new Headers({ location });
+        for (const c of extraCookies) headers.append("set-cookie", c);
+        return new Response(null, { status: 302, headers });
+      };
       const errorParam = url.searchParams.get("error");
       if (errorParam) {
-        return Response.redirect(new URL(`/me?auth_error=${encodeURIComponent(errorParam)}`, url.origin), 302);
+        return callbackRedirect(`/me?auth_error=${encodeURIComponent(errorParam)}`, [clearOAuthStateCookieHeader(ck)]);
       }
-      const stateCookie = oauthStateFromCookie(parseCookies(req.headers.get("cookie"))[OAUTH_STATE_COOKIE]);
+      const stateCookie = oauthStateFromCookie(parseCookies(req.headers.get("cookie"))[ck.oauthState]);
       const state = url.searchParams.get("state");
       if (!stateCookie || !state || state !== stateCookie) {
-        return Response.redirect(new URL("/me?auth_error=state", url.origin), 302);
+        return callbackRedirect("/me?auth_error=state", [clearOAuthStateCookieHeader(ck)]);
       }
       const code = url.searchParams.get("code");
       if (!code || !config.auth.appSecret) {
-        return Response.redirect(new URL("/me?auth_error=no_code", url.origin), 302);
+        return callbackRedirect("/me?auth_error=no_code", [clearOAuthStateCookieHeader(ck)]);
       }
       const exchanged = await exchangeCode(yaCreds(), code, undefined, yaEndpoints());
       if (!exchanged.ok) {
-        return Response.redirect(new URL(`/me?auth_error=${encodeURIComponent(exchanged.error.slice(0, 120))}`, url.origin), 302);
+        return callbackRedirect(`/me?auth_error=${encodeURIComponent(exchanged.error.slice(0, 120))}`, [clearOAuthStateCookieHeader(ck)]);
       }
       const { yaId, login, displayName, avatarId } = exchanged.profile;
       const userId = upsertUser(db, yaId, login, new Date(), { displayName, avatarId });
       const cookie = createSession(db, config.auth.appSecret, userId);
-      return new Response(null, {
-        status: 302,
-        headers: { location: "/me", "set-cookie": sessionCookieHeader(config.auth.appSecret, cookie, SESSION_TTL_MS) },
-      });
+      return callbackRedirect("/me", [
+        sessionCookieHeader(ck, cookie, SESSION_TTL_MS),
+        clearOAuthStateCookieHeader(ck),
+      ]);
     },
     // ---------- /api/me: аккаунт, PAT-окно, мои репо (настройки бюджетов удалены — К5) ----------
     "/api/me": (req) => {

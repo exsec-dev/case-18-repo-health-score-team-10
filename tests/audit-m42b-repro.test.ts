@@ -129,13 +129,14 @@ describe("Ф2.8: APP_SECRET < 32 символов выключает сесси�
 // ---------------------------------------------------------------------------
 
 describe("Ф2.7: ошибочный исход callback отдаёт относительный Location", () => {
-  repro("провайдер вернул ?error= → Location ровно /me?auth_error=…", async () => {
+  // закрыто блоком Б1 — обёртка repro снята, утверждение не менялось
+  test("провайдер вернул ?error= → Location ровно /me?auth_error=…", async () => {
     const res = await fetch(at("/auth/ya/callback?error=access_denied"), { redirect: "manual" });
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/me?auth_error=access_denied");
   });
 
-  repro("state не сошёлся → Location ровно /me?auth_error=state", async () => {
+  test("state не сошёлся → Location ровно /me?auth_error=state", async () => {
     const res = await fetch(at("/auth/ya/callback?code=x&state=forged"), { redirect: "manual" });
     expect(res.status).toBe(302);
     expect(res.headers.get("location")).toBe("/me?auth_error=state");
@@ -148,14 +149,15 @@ describe("Ф2.7: ошибочный исход callback отдаёт относ�
 // ---------------------------------------------------------------------------
 
 describe("Ф2.7: https-redirect включает __Host-/Secure cookie", () => {
-  repro("state-cookie зовётся __Host-rh_oauth_state и помечена Secure", async () => {
+  // закрыто блоком Б1 — обёртка repro снята, утверждение не менялось
+  test("state-cookie зовётся __Host-rh_oauth_state и помечена Secure", async () => {
     const start = await fetch(`${httpsServer!.base}/auth/ya`, { redirect: "manual" });
     const stateCookie = start.headers.getSetCookie().find((c) => c.startsWith("__Host-rh_oauth_state="));
     expect(stateCookie ?? "(no __Host-rh_oauth_state cookie)").toContain("Secure");
     expect(stateCookie!.split(";").map((s) => s.trim())).not.toContain("Domain=rh-stand.example");
   });
 
-  repro("сессия после входа зовётся __Host-rh_session и помечена Secure", async () => {
+  test("сессия после входа зовётся __Host-rh_session и помечена Secure", async () => {
     const base = httpsServer!.base;
     const start = await fetch(`${base}/auth/ya`, { redirect: "manual" });
     const state = new URL(start.headers.get("location")!).searchParams.get("state")!;
@@ -166,6 +168,53 @@ describe("Ф2.7: https-redirect включает __Host-/Secure cookie", () => {
     });
     const sessionCookie = cb.headers.getSetCookie().find((c) => c.startsWith("__Host-rh_session="));
     expect(sessionCookie ?? "(no __Host-rh_session cookie)").toContain("Secure");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Блок Б1 (обычные тесты блока): state-cookie гасится во всех исходах
+// callback; вход/выход под https работают по актуальному имени __Host-.
+// ---------------------------------------------------------------------------
+
+describe("Б1: state-cookie очищается во всех исходах callback", () => {
+  test("ошибочный исход: state-cookie в ответе с Max-Age=0", async () => {
+    const res = await fetch(at("/auth/ya/callback?error=access_denied"), { redirect: "manual" });
+    const cleared = res.headers.getSetCookie().find((c) => c.startsWith("rh_oauth_state="));
+    expect(cleared ?? "(no state-clearing cookie)").toContain("Max-Age=0");
+  });
+
+  test("успешный исход: сессия ставится, state-cookie гасится", async () => {
+    const start = await fetch(at("/auth/ya"), { redirect: "manual" });
+    const state = new URL(start.headers.get("location")!).searchParams.get("state")!;
+    const stateCookie = start.headers.getSetCookie().find((c) => c.startsWith("rh_oauth_state="))!.split(";")[0]!;
+    const cb = await fetch(at(`/auth/ya/callback?code=good&state=${encodeURIComponent(state)}`), {
+      redirect: "manual",
+      headers: { cookie: stateCookie },
+    });
+    const setCookies = cb.headers.getSetCookie();
+    expect(setCookies.some((c) => c.startsWith("rh_session=") && !c.includes("Max-Age=0"))).toBe(true);
+    expect(setCookies.some((c) => c.startsWith("rh_oauth_state=;") && c.includes("Max-Age=0"))).toBe(true);
+  });
+});
+
+describe("Б1: под https выход работает по актуальному имени __Host-", () => {
+  test("login по __Host-имени → logout гасит __Host-rh_session, сессия отозвана", async () => {
+    const base = httpsServer!.base;
+    const start = await fetch(`${base}/auth/ya`, { redirect: "manual" });
+    const state = new URL(start.headers.get("location")!).searchParams.get("state")!;
+    const stateCookie = start.headers.getSetCookie().find((c) => c.startsWith("__Host-rh_oauth_state="))!.split(";")[0]!;
+    const cb = await fetch(`${base}/auth/ya/callback?code=good&state=${encodeURIComponent(state)}`, {
+      redirect: "manual",
+      headers: { cookie: stateCookie },
+    });
+    const sessionCookie = cb.headers.getSetCookie().find((c) => c.startsWith("__Host-rh_session="))!.split(";")[0]!;
+    const me = await fetch(`${base}/api/me`, { headers: { cookie: sessionCookie } });
+    expect(((await me.json()) as { login: string | null }).login).toBe("tester");
+    const out = await fetch(`${base}/auth/logout`, { method: "POST", headers: { cookie: sessionCookie } });
+    expect(out.status).toBe(204);
+    expect(out.headers.getSetCookie().join(";")).toContain("__Host-rh_session=;");
+    const after = await fetch(`${base}/api/me`, { headers: { cookie: sessionCookie } });
+    expect(((await after.json()) as { login: string | null }).login).toBeNull();
   });
 });
 

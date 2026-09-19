@@ -4,6 +4,9 @@
 // (не stateless — удаление строки убивает cookie). Имя/TTL/SameSite
 // зафиксированы здесь: rh_session / 7 суток / Lax (OAuth-redirect с
 // чужого домена обязан доезжать, Lax пропускает top-level navigation).
+// Ф2.7 (В4.2b): при YA_REDIRECT_URI на https имена переезжают на
+// __Host-rh_* с атрибутом Secure (Path=/ уже есть, Domain не ставим) —
+// требование `__Host-`; на http прежние имена, читается только актуальное.
 import type { Database } from "bun:sqlite";
 import { createHmac, randomBytes, timingSafeEqual, createHash } from "node:crypto";
 
@@ -12,6 +15,32 @@ export const SESSION_TTL_MS = 7 * 24 * 3600_000;
 /** отдельная короткая cookie для CSRF-state OAuth-потока */
 export const OAUTH_STATE_COOKIE = "rh_oauth_state";
 export const OAUTH_STATE_TTL_MS = 10 * 60_000;
+
+/** Актуальные имена и атрибуты cookie (Ф2.7): зависят от схемы YA_REDIRECT_URI. */
+export interface CookieNames {
+  session: string;
+  oauthState: string;
+  /** true = добавить `Secure` (и имена `__Host-`); http-стендам не нужно */
+  secure: boolean;
+}
+
+/**
+ * Ф2.7: redirect на `https://` → `__Host-rh_session` / `__Host-rh_oauth_state`
+ * (`Secure; Path=/`, без `Domain` — так требует префикс `__Host-`); иначе
+ * прежние имена без Secure. Кривой redirect — прежние имена (fail-closed
+ * к http-стенду разработки). Читается только актуальное имя.
+ */
+export function cookieNames(auth: { redirect: string }): CookieNames {
+  let https = false;
+  try {
+    https = new URL(auth.redirect).protocol === "https:";
+  } catch {
+    /* не URL — прежние имена */
+  }
+  return https
+    ? { session: "__Host-rh_session", oauthState: "__Host-rh_oauth_state", secure: true }
+    : { session: SESSION_COOKIE, oauthState: OAUTH_STATE_COOKIE, secure: false };
+}
 
 export interface SessionUser {
   userId: number;
@@ -108,13 +137,15 @@ export function upsertUser(
   return (db.query("SELECT id FROM users WHERE ya_id = ?").get(yaId) as { id: number }).id;
 }
 
-/** Cookie-заголовки в одном месте (Set-Cookie строки). */
-export function sessionCookieHeader(secret: string, cookieValue: string, maxAgeMs: number): string {
-  return `${SESSION_COOKIE}=${cookieValue}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(maxAgeMs / 1000)}`;
+/** Cookie-заголовки в одном месте (Set-Cookie строки); имена/Secure — по Ф2.7. */
+export function sessionCookieHeader(names: CookieNames, cookieValue: string, maxAgeMs: number): string {
+  const secure = names.secure ? "; Secure" : "";
+  return `${names.session}=${cookieValue}; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=${Math.floor(maxAgeMs / 1000)}`;
 }
 
-export function clearSessionCookieHeader(): string {
-  return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
+export function clearSessionCookieHeader(names: CookieNames): string {
+  const secure = names.secure ? "; Secure" : "";
+  return `${names.session}=; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=0`;
 }
 
 /** CSRF-state OAuth: случайная строка + короткая cookie того же значения. */
@@ -122,8 +153,15 @@ export function makeOAuthState(): string {
   return randomBytes(16).toString("base64url");
 }
 
-export function oauthStateCookieHeader(state: string): string {
-  return `${OAUTH_STATE_COOKIE}=${state}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${Math.floor(OAUTH_STATE_TTL_MS / 1000)}`;
+export function oauthStateCookieHeader(names: CookieNames, state: string): string {
+  const secure = names.secure ? "; Secure" : "";
+  return `${names.oauthState}=${state}; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=${Math.floor(OAUTH_STATE_TTL_MS / 1000)}`;
+}
+
+/** Гашение state-cookie — одинаковый исход у всех исходов callback (Ф2.7). */
+export function clearOAuthStateCookieHeader(names: CookieNames): string {
+  const secure = names.secure ? "; Secure" : "";
+  return `${names.oauthState}=; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=0`;
 }
 
 export function oauthStateFromCookie(cookieValue: string | undefined): string | null {
