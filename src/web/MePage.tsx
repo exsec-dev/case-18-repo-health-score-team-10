@@ -152,7 +152,10 @@ function seedNote(seed: import("../api/me").PatSeed | undefined): string {
       ? "достигнут предел избранного"
       : seed.error?.code === "page_limit"
         ? "прочитаны не все страницы namespace"
-        : "namespace ответил сбоем";
+        : seed.error?.code === "no_username"
+          ? // UX-9 (круг 2 В4.4): namespace не опрашивался — не обвинять его
+            "не удалось начать посев — SourceCraft не вернул имя пользователя"
+          : "namespace ответил сбоем";
   return `Посев избранного остановлен: ${why} (добавлено ${seed.added}).`;
 }
 
@@ -624,10 +627,15 @@ function RepoRow({
     <Label theme="unknown" size="xs">
       Проанализировали — данных для оценки не хватило
     </Label>
-  ) : entry.title === null ? (
-    // В4.4 (кластер M-2): честный ярлык закрытых прав вместо свалки
+  ) : !entry.inCatalog ? (
+    // UX-8 (круг 2 В4.4): явные признаки вместо прокси `title === null` —
+    // публичное репо без title тоже без title, прежний ярлык врал в причинах
     <Label theme="unknown" size="xs">
-      Данных нет (нет прав или репо не в каталоге)
+      Нет в каталоге
+    </Label>
+  ) : !entry.mayRead ? (
+    <Label theme="unknown" size="xs">
+      Нет прав
     </Label>
   ) : (
     <Label theme="unknown" size="xs">

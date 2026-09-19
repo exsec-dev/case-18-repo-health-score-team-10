@@ -442,7 +442,9 @@ const routes = {
         // Ф2.20: PAT уже сохранён — посев избранного fail-soft, любой его
         // исход сохранение не откатывает. Отдельный клиент с бюджетом 6
         // запросов (до 5 страниц по 100; /user уже сделан пробой выше)
-        let seed: PatSeed = { status: "partial", added: 0, error: { code: "source_http" } };
+        // UX-9 (круг 2 В4.4): без username посев НЕ начинался — отдельный код
+        // вместо source_http, который ложно обвинял namespace
+        let seed: PatSeed = { status: "partial", added: 0, error: { code: "no_username" } };
         if (typeof username === "string" && username !== "") {
           const seeder = makeScClient({
             token: body.token,

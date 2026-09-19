@@ -30,6 +30,12 @@ export interface MyRepoEntry {
    *  различает «анализ завершился ошибкой» и «данных не хватило»; running — легальный
    *  транзитный статус. null = сканов нет или меты у зрителя нет (нет прав) */
   lastScanStatus: "ok" | "partial" | "bad" | "running" | null;
+  /** UX-8 (круг 2 В4.4): ДВА явных признака вместо прокси `title === null`
+   *  (публичное репо без title тоже без title): репо есть в каталоге (таблица
+   *  repos по слагу) и подтверждены ли права зрителя. Ярлык кабинета честно
+   *  различает «нет в каталоге» / «нет прав» / «еще не анализировали» */
+  inCatalog: boolean;
+  mayRead: boolean;
   /**
    * Ф2.17 (решение владельца 18.09): у записи есть живая job ЗРИТЕЛЯ
    * (queued/running) и нет завершённого own-скана — «работа запланирована».
@@ -147,7 +153,9 @@ function plannedWork(db: Database, userId: number | null, org: string, repo: str
 export interface PatSeed {
   status: "ok" | "partial";
   added: number;
-  error?: { code: "source_http" | "favorite_limit" | "page_limit" };
+  /** UX-9 (круг 2 В4.4): `no_username` — /user не вернул имя, namespace НЕ
+   *  опрашивался (прежний дефолт source_http ложно обвинял его) */
+  error?: { code: "source_http" | "favorite_limit" | "page_limit" | "no_username" };
 }
 
 /**
@@ -255,6 +263,9 @@ export async function listMyRepos(db: Database, userId: number | null): Promise<
     .all(userId ?? -1) as { org_slug: string; repo_slug: string }[];
   const entries: MyRepoEntry[] = favs.map((f) => {
     const mayRead = viewerMayReadRepo(db, userId, f.org_slug, f.repo_slug);
+    // UX-8: признак «в каталоге» — один дешёвый lookup (JOIN'а в listMyRepos
+    // нет; строку repos поднимает viewerMayReadRepo и выбрасывает)
+    const inCatalog = db.query("SELECT 1 FROM repos WHERE org_slug = ? AND repo_slug = ?").get(f.org_slug, f.repo_slug) !== null;
     const row = mayRead
       ? (db.query("SELECT title, language FROM repos WHERE org_slug = ? AND repo_slug = ?").get(f.org_slug, f.repo_slug) as
           | { title: string | null; language: string | null }
@@ -272,6 +283,8 @@ export async function listMyRepos(db: Database, userId: number | null): Promise<
       healthcraftIndex: known.healthcraftIndex,
       lastScanAt: known.lastScanAt,
       lastScanStatus: known.lastScanStatus,
+      inCatalog,
+      mayRead,
       planned: plannedWork(db, userId, f.org_slug, f.repo_slug),
     };
   });

@@ -186,3 +186,68 @@ describe("UI-ветки круга 2 (source-assert, Б2)", () => {
     expect(src.includes("Не удалось убрать из избранного")).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Круг 2 В4.4 (Б4): UX-хвосты ре-аудита — дискриминатор прав/каталога (UX-8),
+// скрытие кнопки анализа на error-странице (UX-5), seedNote без username
+// (UX-9), заметка «затянулось» на карточке (UX-10 — source-assert).
+// ---------------------------------------------------------------------------
+
+describe("UX-8 (круг 2 В4.4): inCatalog/mayRead в /api/me/repos", () => {
+  test("публичное репо каталога без title: inCatalog+mayRead честны (прокси title===null врал бы)", async () => {
+    const u = upsertUser(db, "ya-ux8", "ux8");
+    // публичное витринное репо каталога без title — репро-кейс находки:
+    // права есть, репо в каталоге, сканов ещё не было
+    db.query("INSERT INTO repos (org_slug, repo_slug, title, visibility) VALUES ('showcase', 'no-title-repo', NULL, 'public')").run();
+    // чужой слаг вне каталога — строка repos не создаётся никогда
+    addFavorite(db, u, "showcase", "no-title-repo");
+    addFavorite(db, u, "ghost", "not-in-catalog");
+    // приватный в каталоге без прав
+    db.query("INSERT INTO repos (org_slug, repo_slug, visibility) VALUES ('vault', 'hidden', 'private')").run();
+    addFavorite(db, u, "vault", "hidden");
+    const out = await listMyRepos(db, u);
+    const byRepo = new Map(out.entries.map((e) => [e.repo, e]));
+    expect(byRepo.get("no-title-repo")?.inCatalog).toBe(true);
+    expect(byRepo.get("no-title-repo")?.mayRead).toBe(true);
+    expect(byRepo.get("not-in-catalog")?.inCatalog).toBe(false);
+    expect(byRepo.get("not-in-catalog")?.mayRead).toBe(false);
+    // в каталоге, без прав — отдельная ветка «нет прав»
+    expect(byRepo.get("hidden")?.inCatalog).toBe(true);
+    expect(byRepo.get("hidden")?.mayRead).toBe(false);
+  });
+});
+
+describe("UI-ветки круга 2 (source-assert, Б4)", () => {
+  const srcOf = (file: string): string => readFileSync(join(import.meta.dir, "..", "src", "web", file), "utf8");
+
+  test("UX-5: кнопка анализа не показывается на error-странице карточки", () => {
+    const src = srcOf("RepoPage.tsx");
+    expect(src.includes("actions={refreshButton}")).toBe(false);
+  });
+
+  test("UX-8: ярлыки кабинета различают «нет в каталоге» / «нет прав» / «еще не анализировали»", () => {
+    const src = srcOf("MePage.tsx");
+    expect({ noCatalog: src.includes("Нет в каталоге"), noRights: src.includes("Нет прав"), notYet: src.includes("Еще не анализировали") }).toEqual({
+      noCatalog: true,
+      noRights: true,
+      notYet: true,
+    });
+    // старый прокси-дискриминатор ушёл
+    expect(src.includes("entry.title === null")).toBe(false);
+  });
+
+  test("UX-9: seedNote при отсутствующем username не обвиняет namespace", () => {
+    const meSrc = srcOf("MePage.tsx");
+    expect(meSrc.includes("не удалось начать посев — SourceCraft не вернул имя пользователя")).toBe(true);
+    const serverSrc = readFileSync(join(import.meta.dir, "..", "src", "server.ts"), "utf8");
+    expect(serverSrc.includes('code: "no_username"')).toBe(true);
+  });
+
+  test("UX-10: карточка после leaseMs показывает «затянулось», а не вечный спиннер", () => {
+    const src = srcOf("RepoPage.tsx");
+    expect({ stalled: src.includes("jobStalled"), note: src.includes("затянулось — смотрите панель заданий") }).toEqual({
+      stalled: true,
+      note: true,
+    });
+  });
+});

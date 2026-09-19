@@ -80,13 +80,22 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   const etaNote = `обычно до ${Math.max(1, Math.round(leaseMs / 60_000))} минут`;
 
   // Ф2.15: живая job зрителя — опрос карточки каждые 3 с, пока заявка не
-  // доедет до скана; не дольше leaseMs (худший случай одного скана)
+  // доедет до скана; не дольше leaseMs (худший случай одного скана).
+  // UX-10 (круг 2 В4.4): после leaseMs опрос прекращается ЗАМЕТКОЙ «затянулось»
+  // (симметрично кабинету), а не молчаливым зависанием спиннера
+  const [jobStalled, setJobStalled] = useState(false);
   const jobLive = state.kind === "ok" && state.data.job !== null;
   useEffect(() => {
-    if (!jobLive) return;
+    if (!jobLive) {
+      setJobStalled(false);
+      return;
+    }
     const started = Date.now();
     const timer = setInterval(() => {
-      if (Date.now() - started > leaseMs) return;
+      if (Date.now() - started > leaseMs) {
+        setJobStalled(true);
+        return;
+      }
       reload();
     }, 3000);
     return () => clearInterval(timer);
@@ -111,8 +120,11 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
     );
   }
   if (state.kind === "error") {
+    // UX-5 (круг 2 В4.4): «Обновить анализ» на error-странице скрыт — здесь
+    // sinceScanId = 0, опрос взял бы первый СТАРЫЙ скан и отпраздновал
+    // false-success без нового скана; повтор — только «Повторить» (reload)
     return (
-      <Page crumbs={crumbs} actions={refreshButton}>
+      <Page crumbs={crumbs}>
         <Alert
           theme="danger"
           view="outlined"
@@ -134,7 +146,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   );
 
   return (
-    <Page crumbs={crumbs} actions={actions} aside={<ScoreAside card={card} meta={meta} leaseMs={leaseMs} />}>
+    <Page crumbs={crumbs} actions={actions} aside={<ScoreAside card={card} meta={meta} leaseMs={leaseMs} jobStalled={jobStalled} />}>
       <Header
         card={card}
         starDoneKey={refresh.doneKey}
@@ -147,9 +159,11 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
             icon={SquareListUl}
             title={card.job.status === "queued" ? "Анализ запланирован" : "Сканируем…"}
             description={
-              card.job.status === "queued"
+              (card.job.status === "queued"
                 ? `Заявка стоит в очереди — её возьмут в работу, и здесь появится статус скана. ${etaNote}.`
-                : `Скан собирает факты из репозитория; Score появится после завершения. ${etaNote}.`
+                : `Скан собирает факты из репозитория; Score появится после завершения. ${etaNote}.`) +
+              // UX-10 (круг 2 В4.4): симметричная кабинету заметка после leaseMs
+              (jobStalled ? " Затянулось — смотрите панель заданий в кабинете." : "")
             }
           />
         ) : (
@@ -367,7 +381,7 @@ function fullLockReason(card: Card): string | null {
   return accessLockText(card.access.cicd) ?? accessLockText(card.access.appsec);
 }
 
-function ScoreAside({ card, meta, leaseMs }: { card: Card; meta: MetaResponse | null; leaseMs: number }) {
+function ScoreAside({ card, meta, leaseMs, jobStalled }: { card: Card; meta: MetaResponse | null; leaseMs: number; jobStalled: boolean }) {
   const { score, scan, job } = card;
   const threshold = meta ? fmtCoverage(meta.coverageNullBelow) : "порога";
   return (
@@ -452,11 +466,18 @@ function ScoreAside({ card, meta, leaseMs }: { card: Card; meta: MetaResponse | 
             {score && <DefinitionList.Item name="Модель">{score.modelVersion}</DefinitionList.Item>}
           </DefinitionList>
         ) : job ? (
-          // Ф2.15: живая job зрителя — «в очереди/сканируем», а не «скана не было»; M-4 — ожидание по лизу
-          <Flex gap={2} alignItems="center" title={`обычно до ${Math.max(1, Math.round(leaseMs / 60_000))} минут`}>
-            <Spin size="xs" />
-            <Text color="secondary">{job.status === "queued" ? "в очереди" : "сканируем…"}</Text>
-          </Flex>
+          // Ф2.15: живая job зрителя — «в очереди/сканируем», а не «скана не было»; M-4 — ожидание по лизу.
+          // UX-10 (круг 2 В4.4): после leaseMs — заметка «затянулось», не вечный спиннер
+          jobStalled ? (
+            <Label theme="warning" size="xs">
+              затянулось — смотрите панель заданий
+            </Label>
+          ) : (
+            <Flex gap={2} alignItems="center" title={`обычно до ${Math.max(1, Math.round(leaseMs / 60_000))} минут`}>
+              <Spin size="xs" />
+              <Text color="secondary">{job.status === "queued" ? "в очереди" : "сканируем…"}</Text>
+            </Flex>
+          )
         ) : (
           <Text color="secondary">Скана еще не было</Text>
         )}
