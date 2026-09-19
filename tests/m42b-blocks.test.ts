@@ -18,10 +18,14 @@ import { fetchResource } from "../src/collectors/rest";
 import { collectAppsec } from "../src/collectors/appsec";
 import type { ScClient, ScResponse } from "../src/collectors/http";
 import { renderRepoReport } from "../src/report/markdown";
-import { getRepoCard } from "../src/api/repos";
+import { getMeta, getRepoCard } from "../src/api/repos";
+import { listMyRepos } from "../src/api/me";
+import { enqueueScan } from "../src/jobs/scheduler";
+import { DEFAULT_SCAN, defaultLeaseMs } from "../src/config";
 import { authErrorText } from "../src/web/format";
 import { cardFacts, makeApiDb, seedRepo, seedScan, seedScore, type ApiTestDb } from "./api-fixtures";
 import { spawnServer, startMockApi, type SpawnedServer } from "./server-harness";
+import { readFileSync } from "node:fs";
 
 const SECRET = "m42b-blocks-test-secret-0123456789abcdef";
 const ROOT = mkdtempSync(join(tmpdir(), "rh-m42b-blocks-"));
@@ -292,5 +296,113 @@ describe("Б3 (Ф2.9): текст auth_error для /me", () => {
     expect(authErrorText("state")).toContain("state");
     expect(authErrorText("no_code")).toContain("ещё раз");
     expect(authErrorText("access_denied")).toBe("Вход не удался: access_denied");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Блок Б4: Ф2.15 (статус живой job зрителя в карточке, без позиции) +
+// Ф2.17 (признак «работа запланирована» в кабинете) + queue.leaseMs в мете.
+// ---------------------------------------------------------------------------
+
+describe("Б4 (Ф2.15): карточка несёт только статус живой job зрителя", () => {
+  test("queued-заявка → job {status:'queued'}; без зрителя → null; лишних полей нет", () => {
+    const t: ApiTestDb = makeApiDb();
+    try {
+      const repoId = seedRepo(t, { org: "m42b", repo: "jobby" });
+      seedScan(t, repoId, { facts: cardFacts() });
+      seedScore(t, repoId, seedScan(t, repoId, { facts: cardFacts() }), { total: 60 });
+      t.db.query("INSERT INTO users (ya_id, login, created_at, last_login_at) VALUES (?, ?, ?, ?)").run("ya-jobby", "jobby", "2026-09-19T00:00:00Z", "2026-09-19T00:00:00Z");
+      const uid = (t.db.query("SELECT id FROM users WHERE ya_id = 'ya-jobby'").get() as { id: number }).id;
+      enqueueScan(t.db, repoId, { userId: uid, triggerKind: "user" });
+      const withViewer = getRepoCard(t.db, "m42b", "jobby", { viewerUserId: uid });
+      expect(withViewer?.job).toEqual({ status: "queued" });
+      expect(Object.keys(withViewer?.job ?? {})).toEqual(["status"]);
+      const anon = getRepoCard(t.db, "m42b", "jobby", {});
+      expect(anon?.job).toBeNull();
+    } finally {
+      t.close();
+    }
+  });
+
+  test("running-заявка тоже видна; репо без скана и с job — job в ранней ветке ответа", () => {
+    const t: ApiTestDb = makeApiDb();
+    try {
+      const repoId = seedRepo(t, { org: "m42b", repo: "first-run" });
+      t.db.query("INSERT INTO users (ya_id, login, created_at, last_login_at) VALUES (?, ?, ?, ?)").run("ya-fr", "fr", "2026-09-19T00:00:00Z", "2026-09-19T00:00:00Z");
+      const uid = (t.db.query("SELECT id FROM users WHERE ya_id = 'ya-fr'").get() as { id: number }).id;
+      const jobId = enqueueScan(t.db, repoId, { userId: uid, triggerKind: "user" });
+      t.db.query("UPDATE jobs SET status = 'running', claimed_at = ? WHERE id = ?").run("2026-09-19T00:00:00Z", jobId);
+      const card = getRepoCard(t.db, "m42b", "first-run", { viewerUserId: uid });
+      expect({ job: card?.job, score: card?.score, scan: card?.scan }).toEqual({ job: { status: "running" }, score: null, scan: null });
+    } finally {
+      t.close();
+    }
+  });
+
+  test("UI-запрет: ни один текст панели/карточки не называет позицию («N-й», «перед вами»)", () => {
+    for (const file of ["MePage.tsx", "RepoPage.tsx", "Rating.tsx"]) {
+      const src = readFileSync(join(import.meta.dir, "..", "src", "web", file), "utf8");
+      expect({ file, hasPosition: src.includes("перед вами") || src.includes("-й)") }).toEqual({ file, hasPosition: false });
+    }
+  });
+});
+
+describe("Б4 (Ф2.17): кабинет показывает «работа запланирована» без раскрытия меты", () => {
+  test("посторонний с заявкой на чужой приватный репо: planned=true, ни названия, ни языка, ни времени, ни Score", async () => {
+    const t: ApiTestDb = makeApiDb();
+    try {
+      const repoId = seedRepo(t, { org: "owner", repo: "secret", title: "Секретный проект", language: "Go" });
+      t.db.query("UPDATE repos SET visibility = 'private' WHERE id = ?").run(repoId);
+      t.db.query("INSERT INTO users (ya_id, login, created_at, last_login_at) VALUES (?, ?, ?, ?)").run("ya-stranger2", "stranger2", "2026-09-19T00:00:00Z", "2026-09-19T00:00:00Z");
+      const uid = (t.db.query("SELECT id FROM users WHERE ya_id = 'ya-stranger2'").get() as { id: number }).id;
+      t.db.query("INSERT INTO favorites (user_id, org_slug, repo_slug, added_at) VALUES (?, ?, ?, ?)").run(uid, "owner", "secret", "2026-09-19T00:00:00Z");
+      enqueueScan(t.db, repoId, { userId: uid, triggerKind: "user" });
+      const out = await listMyRepos(t.db, null, uid);
+      expect(out.ok).toBe(true);
+      const entry = out.entries.find((e) => e.org === "owner" && e.repo === "secret");
+      expect(entry?.planned).toBe(true);
+      expect({ title: entry?.title, language: entry?.language, lastScanAt: entry?.lastScanAt, score: entry?.score }).toEqual({
+        title: null,
+        language: null,
+        lastScanAt: null,
+        score: null,
+      });
+    } finally {
+      t.close();
+    }
+  });
+
+  test("после завершённого own-скана признак снимается; чужая job признак не ставит", async () => {
+    const t: ApiTestDb = makeApiDb();
+    try {
+      const repoId = seedRepo(t, { org: "owner", repo: "done" });
+      t.db.query("UPDATE repos SET visibility = 'private' WHERE id = ?").run(repoId);
+      t.db.query("INSERT INTO users (ya_id, login, created_at, last_login_at) VALUES (?, ?, ?, ?)").run("ya-dl", "dl", "2026-09-19T00:00:00Z", "2026-09-19T00:00:00Z");
+      t.db.query("INSERT INTO users (ya_id, login, created_at, last_login_at) VALUES (?, ?, ?, ?)").run("ya-other", "other", "2026-09-19T00:00:00Z", "2026-09-19T00:00:00Z");
+      const uid = (t.db.query("SELECT id FROM users WHERE ya_id = 'ya-dl'").get() as { id: number }).id;
+      const otherId = (t.db.query("SELECT id FROM users WHERE ya_id = 'ya-other'").get() as { id: number }).id;
+      t.db.query("INSERT INTO favorites (user_id, org_slug, repo_slug, added_at) VALUES (?, ?, ?, ?)").run(uid, "owner", "done", "2026-09-19T00:00:00Z");
+      // чужая живая job → признака нет
+      enqueueScan(t.db, repoId, { userId: otherId, triggerKind: "user" });
+      expect((await listMyRepos(t.db, null, uid)).entries.find((e) => e.repo === "done")?.planned).toBe(false);
+      // свой завершённый own-скан → признака нет даже при живой job
+      seedScan(t, repoId, { facts: cardFacts(), userId: uid, finishedAt: "2026-09-19T01:00:00Z", status: "ok" });
+      enqueueScan(t.db, repoId, { userId: uid, triggerKind: "user" });
+      expect((await listMyRepos(t.db, null, uid)).entries.find((e) => e.repo === "done")?.planned).toBe(false);
+    } finally {
+      t.close();
+    }
+  });
+});
+
+describe("Б4 (Ф2.9): /api/meta дополняется queue.leaseMs", () => {
+  test("leaseMs из конфига планировщика; без аргумента — дефолт пола", () => {
+    const t: ApiTestDb = makeApiDb();
+    try {
+      expect(getMeta(t.db, { leaseMs: 12_345 }).queue.leaseMs).toBe(12_345);
+      expect(getMeta(t.db).queue.leaseMs).toBe(defaultLeaseMs(DEFAULT_SCAN));
+    } finally {
+      t.close();
+    }
   });
 });

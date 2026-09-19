@@ -10,7 +10,7 @@
 import { ArrowRightFromSquare, Clock, Key, Person } from "@gravity-ui/icons";
 import { Alert, Button, Card, Dialog, Flex, Icon, Label, Link, Spin, Text, TextInput, useToaster } from "@gravity-ui/uikit";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { type MeResponse, type MyReposResponse, type RepoCard, fetchJson, logout, mutateJson, useJson } from "./api";
+import { type MeResponse, type MetaResponse, type MyReposResponse, type RepoCard, fetchJson, logout, mutateJson, useJson } from "./api";
 import { authErrorText, fmtDateTime, fmtScore } from "./format";
 import { linkProps, repoHref } from "./router";
 import { Page, UserAvatar, displayName, logoutFailedToast } from "./Shell";
@@ -21,8 +21,10 @@ const CRUMBS = [{ text: "Личный кабинет" }];
 
 type ScanJobState = { sinceScanId: number; startedAt: number; seenScanId: number | null; phase: "queued" | "running" };
 
-export function MePage() {
+export function MePage({ meta }: { meta: MetaResponse | null }) {
   const me = useJson<MeResponse>("/api/me");
+  // Ф2.9: горизонт опросов анализа — лиз job из /api/meta, не хардкод 20 минут
+  const leaseMs = meta?.queue.leaseMs ?? 85 * 60_000;
 
   if (me.state.kind === "loading") {
     return (
@@ -56,7 +58,7 @@ export function MePage() {
       />
       <CabinetJobs />
       {data.hasPat ? (
-        <MyReposSection />
+        <MyReposSection leaseMs={leaseMs} />
       ) : (
         <EmptyState
           icon={Key}
@@ -261,7 +263,7 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
 
 // ---------- мои репозитории: список + ручной слаг + запуск анализа ----------
 
-function MyReposSection() {
+function MyReposSection({ leaseMs }: { leaseMs: number }) {
   const repos = useJson<MyReposResponse>("/api/me/repos");
   const [jobs, setJobs] = useState<Record<string, ScanJobState>>({});
   const [manualSlug, setManualSlug] = useState("");
@@ -290,14 +292,14 @@ function MyReposSection() {
     [toaster],
   );
 
-  // опрос статуса запущенных анализов: 3с, до 20 минут
+  // опрос статуса запущенных анализов: 3с, не дольше лиза job (Ф2.9)
   useEffect(() => {
     const slugs = Object.keys(jobs);
     if (slugs.length === 0) return;
     const timer = setInterval(async () => {
       for (const slug of slugs) {
         const job = jobs[slug]!;
-        if (Date.now() - job.startedAt > 20 * 60_000) {
+        if (Date.now() - job.startedAt > leaseMs) {
           setJobs((prev) => {
             const next = { ...prev };
             delete next[slug];
@@ -327,7 +329,7 @@ function MyReposSection() {
       }
     }, 3000);
     return () => clearInterval(timer);
-  }, [jobs, toaster]);
+  }, [jobs, toaster, leaseMs]);
 
   const slugError = manualSlug !== "" && !SLUG_RE.test(manualSlug) ? "формат: org/repo" : undefined;
 
@@ -419,6 +421,13 @@ function RepoRow({ entry, job, onScan }: { entry: MyReposResponse["entries"][num
             <Spin size="xs" />
             <Text color="complementary">{job.phase === "queued" ? "В очереди" : "Сканируется"}</Text>
           </Flex>
+        ) : entry.planned ? (
+          // Ф2.17 (решение 18.09): «данных нет» ≠ «данных не будет» — пока
+          // заявка жива, кабинет показывает план вместо пустой строки; мета
+          // и Score по-прежнему скрыты (fail-closed)
+          <Label theme="info" size="xs">
+            анализ запланирован, данные скоро будут
+          </Label>
         ) : scored ? (
           <Flex direction="column" alignItems="flex-end" gap={0}>
             <Flex gap={1} alignItems="baseline">
@@ -496,7 +505,9 @@ function useMyJobs(idleMs = 5000): { jobs: JobsResponse | null; reload: () => vo
 }
 
 function jobPhaseLabel(j: import("../api/me").MyJob): string {
-  if (j.phase === "queued") return j.queueAhead !== null && j.queueAhead > 0 ? `в очереди (${j.queueAhead + 1}-й) · перед вами ${j.queueAhead} скан(ов)` : "следующая в очереди";
+  // Ф2.15 / LOW-8 (решение владельца 18.09): очередью правит round-robin,
+  // численный queueAhead — не FIFO-позиция; статус без числа
+  if (j.phase === "queued") return "в очереди";
   if (j.phase === "running") return "сканируется…";
   if (j.phase === "failed") return "ошибка";
   if (j.phase === "refused") return "отклонена (лимит заявок)";

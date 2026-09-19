@@ -10,7 +10,7 @@ import { CHANNEL_KINDS, PUBLIC_KINDS, computeFromFacts, totalsFromCategories, ty
 import { orderRecommendations, recommendFromFacts, round4, type DeltaEvaluator } from "../score/recommend";
 import { categoryOf } from "../collectors/facts";
 import { NO_PAT_ACCESS, type AccessRepo, type AccessResult, type ChannelAccess } from "../auth/access";
-import { DEFAULT_SCAN, type ScanConfig } from "../config";
+import { DEFAULT_SCAN, defaultLeaseMs, type ScanConfig } from "../config";
 import type { GitLimitsMarker } from "../web/format";
 import type { DerivedMetrics } from "../score/derived";
 import { CATEGORY_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, MODEL_VERSION, SECRETS_CRITICAL_TOTAL_CAP } from "../score/model";
@@ -371,6 +371,16 @@ export interface CardScan {
   trigger: string;
 }
 
+/**
+ * Ф2.15: статус ЖИВОЙ job зрителя по этому репо (queued/running) — единственное
+ * поле: ни queueAhead (round-robin не задаёт FIFO-позицию), ни id. null = у
+ * зрителя нет живой заявки (или он анонимен). Читатель — статус-блок карточки
+ * «в очереди/сканируем» с опросом 3 с.
+ */
+export interface CardJob {
+  status: "queued" | "running";
+}
+
 export interface CardCategory extends CategoryScore {
   /** номинальный вес модели: страница объясняет перенормировку, а не только результат */
   weight: number;
@@ -446,6 +456,8 @@ export interface RepoCard {
   access: CardAccess;
   markers: CardMarkers;
   scan: CardScan | null;
+  /** живая job зрителя (Ф2.15) — очередь без позиции; аноним/без заявки → null */
+  job: CardJob | null;
   score: CardScore | null;
   derived: DerivedMetrics | null;
   recommendations: CardRecommendation[];
@@ -562,14 +574,14 @@ export async function getRepoCardForViewer(
   org: string,
   repo: string,
   resolve: (repo: AccessRepo) => Promise<AccessResult>,
-  opts: { limits?: ScanConfig } = {},
+  opts: { limits?: ScanConfig; viewerUserId?: number } = {},
 ): Promise<RepoCard | null> {
   const r = findRepoRow(db, org, repo);
   if (!r) return null;
   // эвиктированный публичный — 404 всем, проверять доступ незачем
   if (r.visibility === "public" && r.rating_active !== 1) return null;
   const access = await resolve({ id: r.id, org: r.org_slug, repo: r.repo_slug, visibility: r.visibility });
-  return getRepoCard(db, org, repo, { access, limits: opts.limits });
+  return getRepoCard(db, org, repo, { access, limits: opts.limits, viewerUserId: opts.viewerUserId });
 }
 
 /**
@@ -581,7 +593,7 @@ export function getRepoCard(
   db: Database,
   org: string,
   repo: string,
-  opts: { access?: AccessResult; limits?: ScanConfig } = {},
+  opts: { access?: AccessResult; limits?: ScanConfig; viewerUserId?: number } = {},
 ): RepoCard | null {
   const access = opts.access ?? NO_PAT_ACCESS;
   const r = findRepoRow(db, org, repo);
@@ -649,6 +661,7 @@ export function getRepoCard(
       access: cardAccess,
       markers: { historyTruncatedSince: null, ciConfigOnlyCap: false, staleFacts: false, codeEmpty: false, gitLimits: null },
       scan,
+      job: liveViewerJob(db, org, repo, opts.viewerUserId),
       score: null,
       derived: null,
       recommendations: [],
@@ -850,11 +863,25 @@ export function getRepoCard(
     access: cardAccess,
     markers,
     scan,
+    job: liveViewerJob(db, org, repo, opts.viewerUserId),
     score,
     derived: publicRow.derived === null ? null : (JSON.parse(publicRow.derived) as DerivedMetrics),
     recommendations,
     evidence,
   };
+}
+
+/** Ф2.15: статус живой job ИМЕННО зрителя (queued/running); queueAhead наружу не едет. */
+function liveViewerJob(db: Database, org: string, repo: string, viewerUserId: number | undefined): CardJob | null {
+  if (viewerUserId === undefined) return null;
+  const row = db
+    .query(
+      `SELECT j.status FROM jobs j JOIN repos r ON r.id = j.repo_id
+       WHERE r.org_slug = ? AND r.repo_slug = ? AND j.user_id = ? AND j.status IN ('queued','running')
+       ORDER BY j.id DESC LIMIT 1`,
+    )
+    .get(org, repo, viewerUserId) as { status: string } | null;
+  return row ? { status: row.status === "running" ? "running" : "queued" } : null;
 }
 
 /** Текст канального presence-правила без числа (С4): Δ полного Score виден только при доступе к CI и Security. */
@@ -924,11 +951,13 @@ export interface MetaResponse {
   categories: { key: CategoryKey; title: string; weight: number }[];
   coverageNullBelow: number;
   repos: { scored: number; nullScore: number };
+  /** Ф2.9/Ф2.15: лиз job из конфига планировщика — UI опрашивает анализ до этого горизонта */
+  queue: { leaseMs: number };
   methodology: string;
   generatedAt: string;
 }
 
-export function getMeta(db: Database, opts: { now?: Date } = {}): MetaResponse {
+export function getMeta(db: Database, opts: { now?: Date; leaseMs?: number } = {}): MetaResponse {
   const rows = db.query(RATING_SQL).all(MODEL_VERSION, MODEL_VERSION) as RatingRow[];
   return {
     modelVersion: MODEL_VERSION,
@@ -938,6 +967,7 @@ export function getMeta(db: Database, opts: { now?: Date } = {}): MetaResponse {
       scored: rows.filter((r) => r.total !== null).length,
       nullScore: rows.filter((r) => r.total === null).length,
     },
+    queue: { leaseMs: opts.leaseMs ?? defaultLeaseMs(DEFAULT_SCAN) },
     methodology: METHODOLOGY_PATH,
     generatedAt: (opts.now ?? new Date()).toISOString(),
   };

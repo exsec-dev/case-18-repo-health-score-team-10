@@ -27,7 +27,7 @@ export function App() {
     <Shell section={section} me={meData} globalActions={meData?.login ? <JobsBell /> : null}>
       {route.kind === "rating" && <Rating search={route.search} meta={metaData} />}
       {route.kind === "repo" && <RepoPage org={route.org} repo={route.repo} meta={metaData} />}
-      {route.kind === "me" && <MePage />}
+      {route.kind === "me" && <MePage meta={metaData} />}
       {route.kind === "not-found" && (
         <Page crumbs={[{ text: "Страница не найдена" }]}>
           <EmptyState

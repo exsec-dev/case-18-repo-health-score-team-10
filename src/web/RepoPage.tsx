@@ -67,7 +67,22 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   const me = useJson<MeResponse>("/api/me");
   const canRefresh = me.state.kind === "ok" && me.state.data.login !== null && me.state.data.hasPat;
   const sinceScanId = state.kind === "ok" ? (state.data.scan?.id ?? 0) : 0;
-  const refresh = useRefreshAnalysis(org, repo, cardUrl, sinceScanId, reload);
+  // Ф2.9/Ф2.15: горизонт опросов анализа — лиз job из /api/meta, не хардкод
+  const leaseMs = meta?.queue.leaseMs ?? 85 * 60_000;
+  const refresh = useRefreshAnalysis(org, repo, cardUrl, sinceScanId, reload, leaseMs);
+
+  // Ф2.15: живая job зрителя — опрос карточки каждые 3 с, пока заявка не
+  // доедет до скана; не дольше leaseMs (худший случай одного скана)
+  const jobLive = state.kind === "ok" && state.data.job !== null;
+  useEffect(() => {
+    if (!jobLive) return;
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (Date.now() - started > leaseMs) return;
+      reload();
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [jobLive, leaseMs, reload]);
 
   const crumbs: Crumb[] = [{ text: "Рейтинг", href: "/" }, { text: `${org} / ${repo}` }];
   const refreshButton = canRefresh && (
@@ -114,11 +129,24 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
     <Page crumbs={crumbs} actions={actions} aside={<ScoreAside card={card} meta={meta} />}>
       <Header card={card} />
       {card.score === null ? (
-        <EmptyState
-          icon={SquareListUl}
-          title="Репозиторий есть в каталоге, но еще не сканировался"
-          description="Score появится после первого скана: его считает код по фактам, а фактов пока нет."
-        />
+        card.job ? (
+          // Ф2.15: первый анализ — статус живой job вместо лжи «скана ещё не было»
+          <EmptyState
+            icon={SquareListUl}
+            title={card.job.status === "queued" ? "Анализ запланирован" : "Сканируем…"}
+            description={
+              card.job.status === "queued"
+                ? "Заявка стоит в очереди — её возьмут в работу, и здесь появится статус скана. Данные скоро будут."
+                : "Скан собирает факты из репозитория; Score появится после завершения."
+            }
+          />
+        ) : (
+          <EmptyState
+            icon={SquareListUl}
+            title="Репозиторий есть в каталоге, но еще не сканировался"
+            description="Score появится после первого скана: его считает код по фактам, а фактов пока нет."
+          />
+        )
       ) : (
         <Flex direction="column" gap={4}>
           <Markers card={card} />
@@ -157,9 +185,10 @@ function ReportMenu({ mdHref }: { mdHref: string }) {
 /**
  * «Обновить анализ» — зрителю с сессией и PAT (К2). Сервер проверяет доступ
  * PAT до постановки (К3); ответ показывается как есть, опрос карточки — до
- * появления нового завершённого скана. Итог — тостом, как у платформы.
+ * появления нового завершённого скана, но не дольше leaseMs из /api/meta
+ * (Ф2.9: раньше горизонт был зашит на 60 минут). Итог — тостом, как у платформы.
  */
-function useRefreshAnalysis(org: string, repo: string, cardUrl: string, sinceScanId: number, onDone: () => void) {
+function useRefreshAnalysis(org: string, repo: string, cardUrl: string, sinceScanId: number, onDone: () => void, leaseMs: number) {
   const [phase, setPhase] = useState<"idle" | "sending" | "queued">("idle");
   const toaster = useToaster();
 
@@ -167,7 +196,7 @@ function useRefreshAnalysis(org: string, repo: string, cardUrl: string, sinceSca
     if (phase !== "queued") return;
     const started = Date.now();
     const timer = setInterval(async () => {
-      if (Date.now() - started > 60 * 60_000) {
+      if (Date.now() - started > leaseMs) {
         setPhase("idle");
         return;
       }
@@ -183,7 +212,7 @@ function useRefreshAnalysis(org: string, repo: string, cardUrl: string, sinceSca
       }
     }, 5000);
     return () => clearInterval(timer);
-  }, [phase, cardUrl, sinceScanId, onDone, toaster, org, repo]);
+  }, [phase, cardUrl, sinceScanId, onDone, toaster, org, repo, leaseMs]);
 
   async function start() {
     setPhase("sending");
@@ -286,7 +315,7 @@ function fullLockReason(card: Card): string | null {
 }
 
 function ScoreAside({ card, meta }: { card: Card; meta: MetaResponse | null }) {
-  const { score, scan } = card;
+  const { score, scan, job } = card;
   const threshold = meta ? fmtCoverage(meta.coverageNullBelow) : "порога";
   return (
     <>
@@ -353,6 +382,12 @@ function ScoreAside({ card, meta }: { card: Card; meta: MetaResponse | null }) {
             <DefinitionList.Item name="Номер">#{scan.id}</DefinitionList.Item>
             {score && <DefinitionList.Item name="Модель">{score.modelVersion}</DefinitionList.Item>}
           </DefinitionList>
+        ) : job ? (
+          // Ф2.15: живая job зрителя — «в очереди/сканируем», а не «скана не было»
+          <Flex gap={2} alignItems="center">
+            <Spin size="xs" />
+            <Text color="secondary">{job.status === "queued" ? "в очереди" : "сканируем…"}</Text>
+          </Flex>
         ) : (
           <Text color="secondary">Скана еще не было</Text>
         )}

@@ -229,7 +229,7 @@ const server = Bun.serve({
         freshAsOf: fresh.f,
       });
     },
-    "/api/meta": () => Response.json(getMeta(db)),
+    "/api/meta": () => Response.json(getMeta(db, { leaseMs: config.scheduler.leaseMs })),
     "/api/repos": (req) => {
       const parsed = parseReposQuery(new URL(req.url).searchParams);
       if (!parsed.ok) return badQuery(parsed.message);
@@ -243,7 +243,8 @@ const server = Bun.serve({
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
         return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
       }
-      const card = await getRepoCardForViewer(db, org!, repo!, viewerAccess(req), { limits: config.scan });
+      const viewer = sessionOf(req);
+      const card = await getRepoCardForViewer(db, org!, repo!, viewerAccess(req), { limits: config.scan, viewerUserId: viewer?.userId });
       if (!card) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
       return Response.json(card);
     },
@@ -252,8 +253,9 @@ const server = Bun.serve({
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
         return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
       }
+      const viewer = sessionOf(req);
       // тот же сборщик карточки с тем же зрителем (К2)
-      const card = await getRepoCardForViewer(db, org!, repo!, viewerAccess(req), { limits: config.scan });
+      const card = await getRepoCardForViewer(db, org!, repo!, viewerAccess(req), { limits: config.scan, viewerUserId: viewer?.userId });
       if (!card) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
       return new Response(renderRepoReport(card), {
         headers: {

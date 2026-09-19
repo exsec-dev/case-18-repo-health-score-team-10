@@ -29,6 +29,13 @@ export interface MyRepoEntry {
   /** ПОРТ 5 (hq-parallel): откуда репо в списке — ручной слаг после скана
    *  и избранное больше не пропадают (диагноз UX-аудита №2) */
   sources: MyRepoSource[];
+  /**
+   * Ф2.17 (решение владельца 18.09): у записи есть живая job ЗРИТЕЛЯ
+   * (queued/running) и нет завершённого own-скана — «работа запланирована».
+   * Мета и Score этим признаком НЕ раскрываются (fail-closed не ослабляется);
+   * источник — `jobs`, не `scans`.
+   */
+  planned: boolean;
 }
 
 export type MyRepoSource = "namespace" | "own-scan" | "favorite";
@@ -130,6 +137,25 @@ function viewerMayReadRepo(db: Database, userId: number | null, org: string, rep
 }
 
 /**
+ * Ф2.17: «работа запланирована» — у зрителя есть job в статусе
+ * queued/running по этому репо (user_id = зритель, источник `jobs`) И нет
+ * завершённого own-скана. Мета/Score не трогаются.
+ */
+function plannedWork(db: Database, userId: number | null, org: string, repo: string): boolean {
+  if (userId === null) return false;
+  const row = db.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number } | null;
+  if (!row) return false;
+  const live = db
+    .query("SELECT 1 FROM jobs WHERE repo_id = ? AND user_id = ? AND status IN ('queued','running') LIMIT 1")
+    .get(row.id, userId);
+  if (!live) return false;
+  const finishedOwn = db
+    .query("SELECT 1 FROM scans WHERE repo_id = ? AND user_id = ? AND finished_at IS NOT NULL LIMIT 1")
+    .get(row.id, userId);
+  return finishedOwn === null;
+}
+
+/**
  * Репо namespace'а владельца токена (≤5 страниц — personal-namespace
  * репо измеряются единицами; исчерпание видно по next_page_token и
 // честно отражается записью truncated).
@@ -174,6 +200,7 @@ export async function listMyRepos(db: Database, client: ScClient | null, userId:
         score: known.score,
         lastScanAt: known.lastScanAt,
         sources: ["namespace"], // ПОРТ 5: union-источники (диагноз UX-2)
+        planned: plannedWork(db, userId, org, repo), // Ф2.17
       });
     }
     const next = body?.next_page_token;
@@ -210,6 +237,7 @@ export async function listMyRepos(db: Database, client: ScClient | null, userId:
       score: known.score,
       lastScanAt: known.lastScanAt,
       sources: [source],
+      planned: plannedWork(db, userId, org, repo), // Ф2.17
     });
   };
   const jobs = db
