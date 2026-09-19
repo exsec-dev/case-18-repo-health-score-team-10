@@ -69,8 +69,12 @@ export function getHealth(db: Database, config: Config): HealthStatus {
   const nightlyError = getMetaValue(db, SCHED_META.nightlyError);
 
   const reasons: string[] = [];
+  // S-5 (круг 2 В4.4): сырые внутренние тексты (SQLite-сообщения, фрагменты
+  // ответа платформы) в публичном /api/health капятся — диагностика читается,
+  // поверхность ограничена (секретов там нет — сверено аудитом)
+  const safeHealthText = (raw: string): string => raw.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 200);
   if (rescore.error !== null) {
-    reasons.push(`стартовый пересчёт оценок упал: ${rescore.error}`);
+    reasons.push(`стартовый пересчёт оценок упал: ${safeHealthText(rescore.error)}`);
   } else if (needsRescore(db)) {
     reasons.push(rescore.running ? "идёт стартовый пересчёт оценок (rescore pending)" : "стартовый пересчёт оценок не завершён (rescore pending)");
   }
@@ -78,7 +82,7 @@ export function getHealth(db: Database, config: Config): HealthStatus {
     reasons.push(`обход каталога вернул пустой список при живом рейтинге (${suspiciousAt}) — эвикция приостановлена до живого снимка`);
   }
   if (nightlyOkRaw === "0") {
-    reasons.push(`последняя ночная фаза обхода не удалась${nightlyError ? `: ${nightlyError}` : ""}`);
+    reasons.push(`последняя ночная фаза обхода не удалась${nightlyError ? `: ${safeHealthText(nightlyError)}` : ""}`);
   }
   // З6 (круг 2 В4.4): метка тика есть, но стареет — rating-роль, вероятно,
   // мертва (в разводке web/rating её смерть раньше оставалась зелёной:

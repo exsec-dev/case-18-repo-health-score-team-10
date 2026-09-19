@@ -137,3 +137,53 @@ describe("В4.4: security-заголовки и churn-лимит", () => {
     expect(read.status).toBe(200);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Круг 2 В4.4 (Б5): Bun-внутренние ответы и серверный кап auth_error.
+// ---------------------------------------------------------------------------
+
+describe("Б5 (круг 2 В4.4): Bun-внутренние ответы и auth_error", () => {
+  test("S-6: 500 упавшего хендлера несёт security-заголовки (опция error у Bun.serve)", async () => {
+    // ломаем derived у карточки pub/repo: JSON.parse в хендлере бросает —
+    // Bun вызывает error(), 500 обязан уйти с теми же заголовками
+    const writer = openDb({ ...loadConfig(), dataDir: dir });
+    writer
+      .query("UPDATE scores SET derived = '{broken' WHERE repo_id = (SELECT id FROM repos WHERE org_slug = 'pub' AND repo_slug = 'repo')")
+      .run();
+    writer.close();
+    const res = await fetch(`${base}/api/repos/pub/repo`);
+    expect(res.status).toBe(500);
+    expect(res.headers.get("x-frame-options")).toBe("DENY");
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(res.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("internal");
+    // чиним обратно — общий сервер других тестов
+    const fixer = openDb({ ...loadConfig(), dataDir: dir });
+    fixer
+      .query("UPDATE scores SET derived = ? WHERE repo_id = (SELECT id FROM repos WHERE org_slug = 'pub' AND repo_slug = 'repo')")
+      .run(JSON.stringify({ commitsPerMonth: 12, mirrorLikeness: null }));
+    fixer.close();
+  });
+
+  test("S-6 (отклонение, живая проверка): 405 метод-карты генерит сам Bun — без заголовков", async () => {
+    // живой замер: GET-промах метод-карты уходит в HTML-шелл (отклонение 1
+    // круга 1), а НЕ-GET (DELETE) даёт родной 405 Bun без хука. Перехват
+    // потребовал бы перестройки таблицы маршрутов (несоразмерно) —
+    // зафиксировано отклонением в отчёте воркера
+    const notAllowed = await fetch(`${base}/auth/logout`, { method: "DELETE" });
+    expect(notAllowed.status).toBe(405);
+    expect(notAllowed.headers.get("x-frame-options")).toBeNull();
+  });
+
+  test("S-4: auth_error капается сервером до редиректа (200 символов, без управляющих)", async () => {
+    const junk = `${"x".repeat(300)}\u0007\n<script>alert</script>`;
+    const res = await fetch(`${base}/auth/ya/callback?error=${encodeURIComponent(junk)}`, { redirect: "manual" });
+    expect(res.status).toBe(302);
+    const location = res.headers.get("location")!;
+    expect(location.startsWith("/me?auth_error=")).toBe(true);
+    const echoed = decodeURIComponent(location.split("auth_error=")[1] ?? "");
+    expect(echoed.length).toBeLessThanOrEqual(200);
+    expect(echoed.includes("\u0007")).toBe(false);
+    expect(echoed.includes("\n")).toBe(false);
+  });
+});

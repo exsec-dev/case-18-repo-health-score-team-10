@@ -725,3 +725,25 @@ describe("В4.4: сжатый timeline читается как несжатый"
     h.close();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Круг 2 В4.4 (Б5, S-5): сырые внутренние тексты в публичном /api/health
+// капятся (200 символов + срез управляющих) — диагностика сохраняется.
+// ---------------------------------------------------------------------------
+
+describe("Б5 (круг 2 В4.4): капы текстов health", () => {
+  test("S-5: derived_rescore_error в reason обрезан и без управляющих символов", () => {
+    const h = makeApiDb();
+    h.db.query("INSERT INTO meta (key, value) VALUES ('derived_version', '5')").run();
+    const maxId = (h.db.query("SELECT COALESCE(MAX(id), 0) AS m FROM scans").get() as { m: number }).m;
+    h.db.query("INSERT INTO meta (key, value) VALUES ('derived_rescore_cursor', ?)").run(String(maxId));
+    h.db.query("INSERT INTO meta (key, value) VALUES ('derived_rescore_error', ?)").run(`\u0007boom${"e".repeat(300)}`);
+    const status = getHealth(h.db, { ...loadConfig() });
+    const reason = status.reasons.find((r) => r.includes("упал"))!;
+    const echoed = reason.split("упал: ")[1] ?? "";
+    expect(echoed.length).toBe(200);
+    expect(echoed.startsWith("boomee")).toBe(true);
+    expect(echoed.includes("\u0007")).toBe(false);
+    h.close();
+  });
+});

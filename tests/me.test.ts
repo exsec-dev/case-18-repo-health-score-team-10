@@ -251,3 +251,8 @@ describe("UI-ветки круга 2 (source-assert, Б4)", () => {
     });
   });
 });
+
+test("S-7 (круг 2 В4.4): двойной sessionOf в PUT-ветках избранного убран", () => {
+  const serverSrc = readFileSync(join(import.meta.dir, "..", "src", "server.ts"), "utf8");
+  expect(serverSrc.includes("user0 = sessionOf(req)")).toBe(false);
+});

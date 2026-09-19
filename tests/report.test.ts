@@ -183,3 +183,28 @@ describe("В4.4: экранирование заголовков MD", () => {
     void repoId;
   });
 });
+
+// ---------------------------------------------------------------------------
+// Круг 2 В4.4 (Б5): mdEscape-дыры — repo.language (S-1) и top.problem в
+// «Итоге» (S-2) экранируются, как title и rec.problem до круга 2.
+// ---------------------------------------------------------------------------
+
+describe("Б5 (круг 2 В4.4): mdEscape-дыры", () => {
+  test("S-1: repo.language с разметкой не становится картинкой/HTML в отчёте", () => {
+    seedRepo(t, { org: "esc2", repo: "lang", language: "x ![t](https://evil.example/l) <s>" });
+    const md = renderRepoReport(getRepoCard(t.db, "esc2", "lang", { access: GRANTED })!);
+    expect(md).toContain("- Язык: x \\!\\[t\\]\\(https://evil.example/l\\) &lt;s&gt;");
+    expect(md).not.toMatch(/!\[[^\]]*\]\(https:\/\/evil\.example\/l\)/);
+    expect(md).not.toContain("<s>");
+  });
+
+  test("S-2: top.problem в «Итоге» экранирован, как rec.problem в рекомендациях", () => {
+    const repoId = seedRepo(t, { org: "esc2", repo: "top" });
+    const scanId = seedScan(t, repoId, {});
+    seedScore(t, repoId, scanId, { total: 60 });
+    seedRecommendation(t, scanId, { ruleId: "top-esc", priority: 1, problem: "p ![x](https://evil.example/t)", factRef: "docs.presence", deltaScore: 1.5 });
+    const md = renderRepoReport(getRepoCard(t.db, "esc2", "top", { access: GRANTED })!);
+    expect(md).toContain("наибольший измеримый прирост даёт «p \\!\\[x\\]\\(https://evil.example/t\\)»");
+    expect(md).not.toMatch(/!\[[^\]]*\]\(https:\/\/evil\.example\/t\)/);
+  });
+});

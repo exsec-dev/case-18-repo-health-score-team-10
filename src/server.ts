@@ -27,7 +27,7 @@ import {
   type PatSeed,
 } from "./api/me";
 import { renderRepoReport } from "./report/markdown";
-import { catalogClientBudget, maintenanceTick, returnOwnRunningJobs, startScheduler, startWorkerLoop } from "./jobs/scheduler";
+import { catalogClientBudget, closeOwnRunningScans, maintenanceTick, returnOwnRunningJobs, startScheduler, startWorkerLoop } from "./jobs/scheduler";
 import { killActiveClones } from "./collectors/git";
 import {
   clearOAuthStateCookieHeader,
@@ -359,7 +359,11 @@ const routes = {
       };
       const errorParam = url.searchParams.get("error");
       if (errorParam) {
-        return callbackRedirect(`/me?auth_error=${encodeURIComponent(errorParam)}`, [clearOAuthStateCookieHeader(ck)]);
+        // S-4 (круг 2 В4.4): серверный кап симметричен клиентскому санитайзеру
+        // (format.ts authErrorText): управляющие символы + 200 символов —
+        // до редиректа, а не только на рендере
+        const safeError = errorParam.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 200);
+        return callbackRedirect(`/me?auth_error=${encodeURIComponent(safeError)}`, [clearOAuthStateCookieHeader(ck)]);
       }
       const stateCookie = oauthStateFromCookie(parseCookies(req.headers.get("cookie"))[ck.oauthState]);
       const state = url.searchParams.get("state");
@@ -497,8 +501,8 @@ const routes = {
       if (req.method === "PUT") {
         const csrf = guardOrigin(req);
         if (csrf) return csrf;
-        const user0 = sessionOf(req);
-        if (user0 && !allowFavMutation(user0.userId)) return favoriteRateLimited();
+        // S-7 (круг 2): сессия читается ОДИН раз — выше
+        if (!allowFavMutation(user.userId)) return favoriteRateLimited();
         const body = (await req.json().catch(() => null)) as { repository?: unknown } | null;
         if (typeof body?.repository !== "string") return badQuery("repository: ожидается строка org/repo или URL");
         const parsed = parseFavoriteInput(body.repository);
@@ -521,8 +525,8 @@ const routes = {
       const user = sessionOf(req);
       if (!user) return unauthorized();
       if (req.method === "PUT") {
-        const user0 = sessionOf(req);
-        if (user0 && !allowFavMutation(user0.userId)) return favoriteRateLimited();
+        // S-7 (круг 2): сессия читается ОДИН раз — выше
+        if (!allowFavMutation(user.userId)) return favoriteRateLimited();
         // общий парсер (Ф2.20) применён и к path-роуту звезды
         const parsed = parseFavoriteInput(`${org}/${repo}`);
         if (!parsed) return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
@@ -642,6 +646,15 @@ const server = Bun.serve({
     for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.headers.set(k, v);
     return res;
   },
+  // S-6 (круг 2 В4.4): упавший хендлер перехватывается опцией error — 500
+  // уходит С теми же security-заголовками (раньше Bun-внутренний фолбэк шёл
+  // мимо hardenRoutes)
+  error(err) {
+    console.error(`[http] handler failed: ${String((err as Error).message ?? err).slice(0, 200)}`);
+    const res = Response.json({ error: { code: "internal", message: "внутренняя ошибка сервера" } }, { status: 500 });
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.headers.set(k, v);
+    return res;
+  },
 });
 
 // --- периодика (В4/Б3): воркер очереди + ночной обход каталога ---
@@ -737,6 +750,14 @@ function shutdown(signal: string): void {
     } catch {
       /* таймер уже снят */
     }
+  }
+  // П-5 (круг 2 В4.4): порядок — сначала закрыть СВОИ running-сканы честным
+  // квартетом (bad + shutdown), ПОТОМ вернуть заявки в queued
+  try {
+    const closed = closeOwnRunningScans(db);
+    if (closed > 0) console.log(`[signal] прерванных сканов закрыто как bad (shutdown): ${closed}`);
+  } catch (e) {
+    console.error(`[signal] close scans failed: ${String((e as Error).message).slice(0, 200)}`);
   }
   try {
     const returned = returnOwnRunningJobs(db);

@@ -248,7 +248,7 @@ describe("В4.4 (кластер A): батчевый проход по водя�
     db.close();
   });
 
-  test("needsRescore/bumpRescoreCursor: водяной знак — running расширяет цель, прыжок через непройденное запрещён", () => {
+  test("needsRescore/bumpRescoreCursor: running — не «недогон» (И-4, круг 2), прыжок через непройденное запрещён", () => {
     const dir = tempDir();
     const db = openDb({ ...loadConfig(), dataDir: dir });
     const t = { db, close: () => db.close() };
@@ -257,10 +257,14 @@ describe("В4.4 (кластер A): батчевый проход по водя�
     const b = seedScan(t, repoId, { facts: healthySpecs() });
     rescoreAll(db);
     expect(needsRescore(db)).toBe(false);
-    // running-скан расширяет max(scan_id) — «не догнал» до батча мимо него
+    // И-4 (круг 2, СОЗНАТЕЛЬНАЯ семантическая правка теста круга 1 — контракт
+    // Б5 workers/V4.4-round2-oneshot.md): водяной знак считает только
+    // ЗАВЕРШЁННЫЕ сканы — running-скан не «недогон», рестарт при непустой
+    // очереди больше не мигает «rescore pending»; свой скор running получит
+    // от собственного скор-хука при завершении
     const running = seedScan(t, repoId, { facts: [], status: "running", finishedAt: null });
     expect(running).toBeGreaterThan(b);
-    expect(needsRescore(db)).toBe(true);
+    expect(needsRescore(db)).toBe(false);
     const walked = rescoreBatchByCursor(db, { limit: 10 });
     expect({ walked: walked.processed, done: walked.done }).toEqual({ walked: 1, done: true });
     expect(needsRescore(db)).toBe(false); // курсор миновал running (скор даст его хук)
