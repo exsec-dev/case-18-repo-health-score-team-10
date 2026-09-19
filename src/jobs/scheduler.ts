@@ -27,7 +27,7 @@ import { getPat } from "../auth/pat";
 import { makeScClient } from "../collectors/http";
 import { makeAppsecClient } from "../collectors/appsec";
 import type { Config } from "../config";
-import { rescoreHistoryBatch } from "../score/rescore";
+import { needsRescore, rescoreBatchByCursor, rescoreHistoryBatch } from "../score/rescore";
 
 export interface ClaimedJob {
   id: number;
@@ -652,12 +652,16 @@ export async function workerTick(
     return "claim-failed";
   }
   if (!job) {
-    // обе наши очереди пусты — порция фонового пересчёта истории (LOW-7)
+    // обе наши очереди пусты — порция фонового пересчёта (LOW-7).
+    // В4.4 (кластер A + L/З2): сперва добирается актуальный проход
+    // (needsRescore → батч водяного знака — самозаживление после
+    // BUSY-останова или сбоя), затем — исторический курсор, если он есть
     if (opts.historyRescore) {
       try {
-        rescoreHistoryBatch(deps.db, { log: (m) => console.log(`[worker] ${m}`) });
+        const healed = needsRescore(deps.db) ? rescoreBatchByCursor(deps.db, { log: (m) => console.log(`[worker] ${m}`) }).processed : 0;
+        if (healed === 0) rescoreHistoryBatch(deps.db, { log: (m) => console.log(`[worker] ${m}`) });
       } catch (e) {
-        console.error(`[worker] history rescore failed: ${String((e as Error).message).slice(0, 200)}`);
+        console.error(`[worker] background rescore failed: ${String((e as Error).message).slice(0, 200)}`);
       }
     }
     return "idle";

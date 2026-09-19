@@ -23,6 +23,7 @@ import { RestCollectResult, collectRestFacts } from "../collectors/rest";
 import { AppsecClient, collectAppsec, makeAppsecClient } from "../collectors/appsec";
 import { DEFAULT_SCAN, ScanCloneLimits, ScanConfig } from "../config";
 import { compute, PUBLIC_KINDS, ratingEligible, scanStatusOf, writeScores } from "../score/compute";
+import { bumpRescoreCursor } from "../score/rescore";
 import { recommend, writeRecommendations } from "../score/recommend";
 
 export interface GitChannelOutcome {
@@ -393,6 +394,9 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
       writeRecommendations(deps.db, scanId, scores.modelVersion, recs);
       deps.db.query("UPDATE scans SET rating_eligible = ? WHERE id = ?").run(eligible ? 1 : 0, scanId);
       if (eligible && repoMeta) upsertRepo(deps.db, org, repo, repoMetaToUpsert(repoMeta));
+      // В4.4 (кластер A): скан только что получил оценки — водяной знак
+      // батчевого прохода не должен из-за него висеть «недогнанным»
+      bumpRescoreCursor(deps.db, scanId);
     })();
     scoreSummary = { healthcraftIndex: scores.healthcraftIndex, indexCoverage: scores.indexCoverage, repoHealthScore: scores.repoHealthScore, repoHealthCoverage: scores.repoHealthCoverage };
   } catch (e) {

@@ -12,7 +12,19 @@ import { getMetaValue, openDb, SCHEMA_VERSION, setMetaValue } from "../src/db";
 import { okFact } from "../src/collectors/facts";
 import { repoMetaToUpsert, upsertRepo } from "../src/jobs/runner";
 import { MODEL_VERSION } from "../src/score/model";
-import { DERIVED_VERSION, needsRescore, rescoreAll } from "../src/score/rescore";
+import {
+  bumpRescoreCursor,
+  DERIVED_VERSION,
+  isBusyError,
+  needsRescore,
+  RESCORE_CURSOR,
+  RESCORE_ERROR,
+  RESCORE_RUNNING,
+  rescoreAll,
+  rescoreBatchByCursor,
+  rescoreState,
+  runStartupRescore,
+} from "../src/score/rescore";
 import { healthyFacts } from "./score-fixtures";
 import { seedRepo, seedScan } from "./api-fixtures";
 import { spawnServer, startMockApi } from "./server-harness";
@@ -155,11 +167,26 @@ describe("schema_version: запись и защита от старого пр�
     expect(stderr).toContain("is newer than this code");
   }, 30_000);
 
-  test("старт сервера без актуальных оценок: синхронный пересчёт до ответа рейтинга", async () => {
+  test("старт сервера без актуальных оценок (В4.4): порт ДО рескора, оценки доезжают фоном", async () => {
     const { dir } = seededDir();
     const mock = startMockApi();
     const server = await spawnServer({ dataDir: dir, mock, seedMeta: false });
     try {
+      // порт уже отвечает: рескор асинхронен (прежде порт ждал пересчёта)
+      const health = (await (await fetch(`${server.base}/api/health`)).json()) as { rescore: { running: boolean; done: number; total: number } };
+      expect(typeof health.rescore.total).toBe("number");
+      expect(typeof health.rescore.done).toBe("number");
+      // фоновый проход доезжает: derived_version записан по завершении
+      const deadline = Date.now() + 30_000;
+      let derived: string | null = null;
+      while (Date.now() < deadline) {
+        const poll = openDb({ ...loadConfig(), dataDir: dir });
+        derived = getMetaValue(poll, "derived_version");
+        poll.close();
+        if (derived === String(DERIVED_VERSION)) break;
+        await Bun.sleep(200);
+      }
+      expect(derived).toBe(String(DERIVED_VERSION));
       const body = (await (await fetch(`${server.base}/api/repos`)).json()) as { items: { repo: string; score: number | null }[] };
       expect(body.items.map((i) => i.repo)).toEqual(["repo"]);
       expect(body.items[0]!.score).not.toBeNull();
@@ -172,7 +199,171 @@ describe("schema_version: запись и защита от старого пр�
     const derived = getMetaValue(db, "derived_version");
     db.close();
     expect(derived).toBe(String(DERIVED_VERSION));
-  }, 30_000);
+  }, 40_000);
+});
+
+describe("В4.4 (кластер A): батчевый проход по водяному знаку", () => {
+  test("rescoreBatchByCursor: курсор после каждого батча, derived_version и cursor=max по завершении, идемпотентность", () => {
+    const dir = tempDir();
+    const db = openDb({ ...loadConfig(), dataDir: dir });
+    const t = { db, close: () => db.close() };
+    const repoId = seedRepo(t, { org: "cur", repo: "r" });
+    const ids = [1, 2, 3, 4, 5].map((i) => seedScan(t, repoId, { facts: healthySpecs(), startedAt: `2026-03-0${i}T00:00:00Z` }));
+    const first = rescoreBatchByCursor(db, { limit: 2 });
+    expect(first).toEqual({ processed: 2, done: false });
+    expect(getMetaValue(db, RESCORE_CURSOR)).toBe(String(ids[1]));
+    expect(getMetaValue(db, "derived_version")).toBeNull();
+    rescoreBatchByCursor(db, { limit: 2 });
+    expect(getMetaValue(db, RESCORE_CURSOR)).toBe(String(ids[3]));
+    const third = rescoreBatchByCursor(db, { limit: 10 });
+    expect(third).toEqual({ processed: 1, done: true });
+    expect(getMetaValue(db, "derived_version")).toBe(String(DERIVED_VERSION));
+    expect(getMetaValue(db, RESCORE_CURSOR)).toBe(String(ids[4]));
+    expect(needsRescore(db)).toBe(false);
+    // повторный вызов при догнанном курсоре — работы нет, готовое не трогается
+    const stamps = (db.query("SELECT scan_id, computed_at FROM scores ORDER BY scan_id").all() as { scan_id: number; computed_at: string }[]).map((r) => `${r.scan_id}:${r.computed_at}`);
+    const again = rescoreBatchByCursor(db, { limit: 10 });
+    expect(again.processed).toBe(0);
+    const stampsAfter = (db.query("SELECT scan_id, computed_at FROM scores ORDER BY scan_id").all() as { scan_id: number; computed_at: string }[]).map((r) => `${r.scan_id}:${r.computed_at}`);
+    expect(stampsAfter).toEqual(stamps);
+    db.close();
+  });
+
+  test("needsRescore/bumpRescoreCursor: водяной знак — running расширяет цель, прыжок через непройденное запрещён", () => {
+    const dir = tempDir();
+    const db = openDb({ ...loadConfig(), dataDir: dir });
+    const t = { db, close: () => db.close() };
+    const repoId = seedRepo(t, { org: "bump", repo: "r" });
+    const a = seedScan(t, repoId, { facts: healthySpecs() });
+    const b = seedScan(t, repoId, { facts: healthySpecs() });
+    rescoreAll(db);
+    expect(needsRescore(db)).toBe(false);
+    // running-скан расширяет max(scan_id) — «не догнал» до батча мимо него
+    const running = seedScan(t, repoId, { facts: [], status: "running", finishedAt: null });
+    expect(running).toBeGreaterThan(b);
+    expect(needsRescore(db)).toBe(true);
+    const walked = rescoreBatchByCursor(db, { limit: 10 });
+    expect({ walked: walked.processed, done: walked.done }).toEqual({ walked: 1, done: true });
+    expect(needsRescore(db)).toBe(false); // курсор миновал running (скор даст его хук)
+    // прерванный проход: под курсором непройденное завершённое — знак не прыгает
+    const c = seedScan(t, repoId, { facts: healthySpecs() });
+    const d = seedScan(t, repoId, { facts: healthySpecs() });
+    setMetaValue(db, RESCORE_CURSOR, String(running));
+    bumpRescoreCursor(db, d); // хук d: между знаком и d есть непройденный c
+    expect(getMetaValue(db, RESCORE_CURSOR)).toBe(String(running));
+    bumpRescoreCursor(db, c); // хук c: ниже чисто — знак на c
+    expect(getMetaValue(db, RESCORE_CURSOR)).toBe(String(c));
+    bumpRescoreCursor(db, d); // теперь чисто — знак на d
+    expect(getMetaValue(db, RESCORE_CURSOR)).toBe(String(d));
+    db.close();
+  });
+
+  test("rescoreState: running по свежему сердцебиению, staleness и ошибка честны", () => {
+    const dir = tempDir();
+    const db = openDb({ ...loadConfig(), dataDir: dir });
+    const t = { db, close: () => db.close() };
+    const repoId = seedRepo(t, { org: "st", repo: "r" });
+    seedScan(t, repoId, { facts: healthySpecs() });
+    expect(rescoreState(db).running).toBe(false);
+    setMetaValue(db, RESCORE_RUNNING, new Date().toISOString());
+    expect(rescoreState(db).running).toBe(true);
+    setMetaValue(db, RESCORE_RUNNING, new Date(Date.now() - 11 * 60_000).toISOString());
+    expect(rescoreState(db).running).toBe(false);
+    setMetaValue(db, RESCORE_ERROR, "boom");
+    expect(rescoreState(db)).toMatchObject({ running: false, error: "boom" });
+    db.close();
+  });
+
+  test("runStartupRescore: полный проход до done", async () => {
+    const dir = tempDir();
+    const db = openDb({ ...loadConfig(), dataDir: dir });
+    const t = { db, close: () => db.close() };
+    const repoId = seedRepo(t, { org: "run", repo: "r" });
+    for (let i = 0; i < 3; i++) seedScan(t, repoId, { facts: healthySpecs(), startedAt: `2026-03-0${i + 1}T00:00:00Z` });
+    const done = await runStartupRescore(db, { limit: 2, pauseMs: 0 });
+    expect(done).toEqual({ stopped: "done" });
+    expect(getMetaValue(db, "derived_version")).toBe(String(DERIVED_VERSION));
+    expect(getMetaValue(db, RESCORE_RUNNING)).toBeNull();
+    db.close();
+  });
+
+  test("runStartupRescore: BUSY — ретраи с бэкоффом излечивают проход; повторные (>3) — стоп с курсором", async () => {
+    // настоящий SQLITE_BUSY: второй коннект держит write-транзакцию, BEGIN
+    // IMMEDIATE на первом падает честным кодом (SQLiteError нельзя сконструировать)
+    const { Database } = await import("bun:sqlite");
+    const dir = tempDir();
+    const path = join(dir, "repo-health.db");
+    const db = openDb({ ...loadConfig(), dataDir: dir });
+    const t = { db, close: () => db.close() };
+    const repoId = seedRepo(t, { org: "busy", repo: "r" });
+    for (let i = 0; i < 2; i++) seedScan(t, repoId, { facts: healthySpecs(), startedAt: `2026-03-0${i + 1}T00:00:00Z` });
+    db.exec("PRAGMA busy_timeout = 10;");
+    let busyErr: Error;
+    {
+      const blocker = new Database(path);
+      blocker.exec("BEGIN IMMEDIATE");
+      try {
+        db.exec("BEGIN IMMEDIATE");
+        db.exec("ROLLBACK");
+        throw new Error("expected SQLITE_BUSY here");
+      } catch (e) {
+        if (!isBusyError(e)) throw e;
+        busyErr = e as Error;
+      } finally {
+        blocker.exec("ROLLBACK");
+        blocker.close();
+      }
+    }
+    expect(isBusyError(busyErr!)).toBe(true);
+    expect(isBusyError(new Error("not sqlite"))).toBe(false);
+    // два броска BUSY переживаются (бэкофф), третий батч проходит по чистой базе
+    let throws = 0;
+    const flaky = (() => {
+      if (throws < 2) {
+        throws++;
+        throw busyErr!;
+      }
+      return rescoreBatchByCursor(db, { limit: 10 });
+    }) as unknown as typeof rescoreBatchByCursor;
+    const healed = await runStartupRescore(db, { limit: 10, pauseMs: 0, busyTimeoutMs: 10, batch: flaky });
+    expect(healed).toEqual({ stopped: "done" });
+    expect(throws).toBe(2);
+    expect(getMetaValue(db, "derived_version")).toBe(String(DERIVED_VERSION));
+    db.close();
+
+    // блокер не отпускают: 4 попытки (1 + 3 повтора) — стоп «busy», курсор цел
+    const dir2 = tempDir();
+    const path2 = join(dir2, "repo-health.db");
+    const db2 = openDb({ ...loadConfig(), dataDir: dir2 });
+    const t2 = { db: db2, close: () => db2.close() };
+    const repo2 = seedRepo(t2, { org: "busy2", repo: "r" });
+    seedScan(t2, repo2, { facts: healthySpecs() });
+    db2.exec("PRAGMA busy_timeout = 10;");
+    const blocker2 = new Database(path2);
+    blocker2.exec("BEGIN IMMEDIATE");
+    const out = await runStartupRescore(db2, { limit: 2, pauseMs: 0, busyTimeoutMs: 10 });
+    blocker2.exec("ROLLBACK");
+    blocker2.close();
+    expect(out).toEqual({ stopped: "busy" });
+    expect(getMetaValue(db2, "derived_version")).toBeNull();
+    expect(getMetaValue(db2, RESCORE_RUNNING)).toBeNull();
+    db2.close();
+  }, 20_000);
+
+  test("runStartupRescore: схемная ошибка — стоп с derived_rescore_error, derived_version не пишется", async () => {
+    const dir = tempDir();
+    const db = openDb({ ...loadConfig(), dataDir: dir });
+    const t = { db, close: () => db.close() };
+    const repoId = seedRepo(t, { org: "schema", repo: "r" });
+    seedScan(t, repoId, { facts: healthySpecs() });
+    db.exec("DROP TABLE recommendations"); // схемная дыра: rescoreScan бросит
+    const out = await runStartupRescore(db, { limit: 2, pauseMs: 0 });
+    expect(out).toEqual({ stopped: "error" });
+    expect(getMetaValue(db, "derived_version")).toBeNull();
+    expect(getMetaValue(db, RESCORE_ERROR)).toContain("recommendations");
+    expect(getMetaValue(db, RESCORE_RUNNING)).toBeNull();
+    db.close();
+  });
 });
 
 describe("видимость fail-closed (Ф1.10) и jobs.mode (Ф1.15)", () => {

@@ -92,7 +92,8 @@ function catalogMock(pages: unknown[] = []): ScClient {
 // ---------------------------------------------------------------------------
 
 describe("A-1 (Б1): порт раньше рескора; /api/health несёт rescore-прогресс", () => {
-  repro("health отвечает при pending-рескоре и несёт {running, done, total}", async () => {
+  // закрыто блоком Б1 — обёртка `repro` снята, утверждение не менялось
+  test("health отвечает при pending-рескоре и несёт {running, done, total}", async () => {
     const dir = tempDir("rh-v44-a1-");
     // 150 пригодных сканов без оценок и без derived_version: рескор при
     // старте обязателен (needsRescore), но порт поднимается первым
@@ -159,7 +160,8 @@ describe("A-2 (Б1): курсор рескора в meta переживает р
     rescoreBatchByCursor?: (db: Database, opts?: { limit?: number }) => { processed: number; done: boolean };
   };
 
-  repro("батч двигает курсор; derived_version — только по завершении; рестарт не пересчитывает готовое", () => {
+  // закрыто блоком Б1 — обёртка `repro` снята, утверждение не менялось
+  test("батч двигает курсор; derived_version — только по завершении; рестарт не пересчитывает готовое", () => {
     const dir = tempDir("rh-v44-a2-");
     const db = openDb({ ...loadConfig(), dataDir: dir });
     const t: ApiTestDb = { db, close: () => db.close() };

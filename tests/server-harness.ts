@@ -7,7 +7,7 @@
 import { join } from "node:path";
 import { loadConfig } from "../src/config";
 import { openDb, setMetaValue } from "../src/db";
-import { DERIVED_VERSION } from "../src/score/rescore";
+import { DERIVED_VERSION, RESCORE_CURSOR } from "../src/score/rescore";
 
 const ROOT = join(import.meta.dir, "..");
 
@@ -59,12 +59,16 @@ export interface SpawnedServer {
 }
 
 /**
- * Актуальные meta сид-БД (Ф1.9): без derived_version сервер при старте
- * пересчитал бы сид-оценки моделью и затёр фикстуру.
+ * Актуальные meta сид-БД (Ф1.9 + В4.4): без derived_version сервер при старте
+ * пересчитал бы сид-оценки моделью и затёр фикстуру; без водяного знака
+ * рескора (needsRescore «курсор не догнал») фоновый проход сделал бы то же
+ * самое уже асинхронно.
  */
 export function seedCurrentMeta(dataDir: string): void {
   const db = openDb({ ...loadConfig(), dataDir });
   setMetaValue(db, "derived_version", String(DERIVED_VERSION));
+  const maxId = (db.query("SELECT COALESCE(MAX(id), 0) AS m FROM scans").get() as { m: number }).m;
+  setMetaValue(db, RESCORE_CURSOR, String(maxId));
   db.close();
 }
 

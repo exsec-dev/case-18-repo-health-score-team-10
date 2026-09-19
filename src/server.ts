@@ -46,7 +46,7 @@ import {
 import { deletePat, getPat, patMeta, patReadable, storePat } from "./auth/pat";
 import { buildAuthUrl, exchangeCode, yaAvatarUrl, type YaEndpoints } from "./auth/ya";
 import { makeScClient } from "./collectors/http";
-import { needsRescore, rescoreAll } from "./score/rescore";
+import { needsRescore, rescoreState, runStartupRescore } from "./score/rescore";
 import index from "./web/index.html";
 
 const config = loadConfig();
@@ -97,17 +97,9 @@ const db = openDb(config);
 // это `__Host-rh_*` с Secure. Читается ТОЛЬКО актуальное имя.
 const ck = cookieNames(config.auth);
 
-// Ф1.9: оценки устарели (derived_version старее кода) или их нет при
-// непустых сканах (после миграции схемы) — синхронный пересчёт ДО Bun.serve:
-// рейтинг не отвечает пустым или смешанным. Прогресс — в лог.
-if (needsRescore(db)) {
-  const t0 = Date.now();
-  console.log("[startup] stored scores are outdated or missing: rescoring before serving");
-  // круг 2 (LOW-7): до порта — только читаемые сканы (P, L, приватный не-bad), история — фоновым тиком воркера
-  const out = rescoreAll(db, { scope: "startup", log: (m) => console.log(`[startup] ${m}`), progressEvery: 200 });
-  if (out.fatal > 0) throw new Error("startup rescore stopped on a schema error (see log above)");
-  console.log(`[startup] rescore finished in ${Math.round((Date.now() - t0) / 1000)} s`);
-}
+// В4.4 (кластер A код-аудита): стартовый рескор — АСИНХРОННО ПОСЛЕ поднятия
+// порта (ниже, у старта ролей): деплой с бампом производных больше не держит
+// порт десятки минут и не порождает рестарт-луп «рескор-kill-рескор».
 
 const badQuery = (message: string): Response =>
   Response.json({ error: { code: "bad_query", message } }, { status: 400 });
@@ -226,6 +218,9 @@ const server = Bun.serve({
         llmProvider: config.llm.provider,
         queue,
         failedJobs24h: failed24h,
+        // В4.4 (кластер A): прогресс асинхронного стартового рескора — из meta,
+        // кросс-процессно: web-роль видит проход, который ведёт rating-роль
+        rescore: rescoreState(db),
         // К-Р5: два РАЗНЫХ факта — «последний обход» и «последний обход с
         // исполнившейся ночной фазой»; lastNightly обновляет только второй
         // (часовая сверка его не трогает), lastReconcileAt/lastNightlyAt —
@@ -600,6 +595,18 @@ const catalogClient = () =>
 // ПОРТ hq-parallel (S2): роли процесса — web = сервер + user-воркер,
 // rating = планировщик + rating-воркер, all = dev-всё-в-одном (user вперёд)
 const role = config.processRole;
+// В4.4 (кластер A): стартовый рескор асинхронен и исполняется ТОЛЬКО ролями
+// rating/all — порт уже поднят; web-роль не пишет оценки, её health читает
+// прогресс из meta. Прогресс персистентен (курсор в meta): рестарт
+// продолжает с места остановки, BUSY не фатален (бэкофф-ретраи).
+if (needsRescore(db)) {
+  if (role === "rating" || role === "all") {
+    console.log("[startup] stored scores are outdated or missing: background rescore (port is already up)");
+    void runStartupRescore(db, { log: (m) => console.log(`[rescore] ${m}`) });
+  } else {
+    console.log("[startup] stored scores are outdated or missing: rescore runs in the rating process (PROCESS_ROLE=web)");
+  }
+}
 if (role === "web" || role === "all") {
   startWorkerLoop({ db, config, serverClient }, { user: true, rating: role === "all" });
 }
