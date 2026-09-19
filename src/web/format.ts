@@ -103,6 +103,16 @@ export function fmtDelta(delta: number): string {
 }
 
 /**
+ * Знаковая дельта (В4.3, К-Ф3.4): минус законен — плохие CI/Security
+ * опускают Repo Health Score ниже HealthCraft Index (инверсия), знак
+ * берётся из фактической разности. Одна копия для страницы и MD.
+ */
+export function fmtSigned(delta: number): string {
+  const v = Math.round(delta * 10) / 10;
+  return `${v < 0 ? "-" : "+"}${Math.abs(v).toFixed(1)}`;
+}
+
+/**
  * Единая копия про Security без данных (STOP §4 плана): категория
  * исключена с перенормировкой, а не занижена — доступ к AppSec даётся
  * правом, а не публичностью репозитория. Одна строка на странице и в MD.

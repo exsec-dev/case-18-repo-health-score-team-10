@@ -35,7 +35,7 @@ seedRecommendation(t, scoredScan, {
   problem: "Нет CONTRIBUTING — как вносить правки не описано",
   factRef: "docs.presence",
   deltaScore: 2.25,
-  expectedImpact: "+2.3 Score (по одному)",
+  expectedImpact: "+2.3 к HealthCraft Index (по одному)",
 });
 seedRecommendation(t, scoredScan, {
   ruleId: "connect-appsec",
@@ -75,9 +75,9 @@ describe("MD-отчёт: структура", () => {
 
 describe("MD-отчёт: числа и tri-state", () => {
   test("Score и покрытие в итоге", () => {
-    expect(md).toContain("**Score в рейтинге (4 категории): 67 из 100**");
+    expect(md).toContain("**HealthCraft Index (4 категории): 67 из 100**");
     // круг 2: полный Score складывается из показанных категорий (60·15+50·15+70·15+40·15+80·20)/80 = 61
-    expect(md).toContain("Полный Score (с CI и Security): 61 из 100 при покрытии данными 80%");
+    expect(md).toContain("Repo Health Score (6 категорий, с CI и Security): 61 из 100 при покрытии данными 80%");
     expect(md).toContain("покрытии данными 100%");
   });
 
@@ -92,7 +92,7 @@ describe("MD-отчёт: числа и tri-state", () => {
 
   test("Security объясняется доступом, а не «данных нет по неизвестной причине»", () => {
     expect(md).toContain("без них категория исключена с перенормировкой, а не занижена");
-    expect(md).toContain("Категория не снизила Score");
+    expect(md).toContain("Категория не снизила");
   });
 
   test("причина no-data у категории с данными тоже проговаривается (CI-потолок)", () => {
@@ -109,7 +109,7 @@ describe("MD-отчёт: числа и tri-state", () => {
 describe("MD-отчёт: рекомендации и доказательства", () => {
   test("каждая рекомендация со своим fact_ref и эффектом", () => {
     expect(md).toContain("### 1. Нет CONTRIBUTING");
-    expect(md).toContain("+2.3 Score");
+    expect(md).toContain("+2.3 к HealthCraft Index");
     expect(md).toContain("`docs.presence`");
     expect(md).toContain("### 2. Security без данных");
     expect(md).toContain("`appsec.findings` (факта нет по построению)");
