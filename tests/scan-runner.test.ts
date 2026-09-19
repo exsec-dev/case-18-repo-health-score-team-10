@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { loadConfig } from "../src/config";
 import { openDb } from "../src/db";
 import { fillMissingFacts, gitFailureReason, runScan, GitChannelOutcome, ScanDeps } from "../src/jobs/runner";
-import { okFact, noDataFact, badChannelFact, Fact } from "../src/collectors/facts";
+import { okFact, noDataFact, badChannelFact, Fact, parseFactValue } from "../src/collectors/facts";
 import { cleanupClone, gitFactsNoData } from "../src/collectors/git";
 import type { Database } from "bun:sqlite";
 import type { RestCollectResult } from "../src/collectors/rest";
@@ -311,5 +311,35 @@ describe("круг 2 (С5): причина сбоя клона", () => {
     expect([gitFailureReason("disk", false), gitFailureReason("disk", true)]).toEqual(["limits", "limits"]);
     expect([gitFailureReason("timeout", false), gitFailureReason("timeout", true)]).toEqual(["limits", "other"]);
     expect([gitFailureReason("git", false), gitFailureReason("git", true)]).toEqual(["other", "other"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// В4.4 (кластер C): timeline пишется в facts сжатым (z:-префикс zlib+base64)
+// ---------------------------------------------------------------------------
+
+describe("В4.4: компрессия timeline в insertFacts", () => {
+  test("runScan с timeline-фактом пишет z:-строку; чтение parseFactValue разворачивает", async () => {
+    const events = [
+      { sha: "a1", author: { name: "a", email: "a@e", date: "2026-01-01T00:00:00Z" }, committer: { name: "a", email: "a@e", date: "2026-01-01T00:00:00Z" }, robot: false, robot_reasons: [] },
+      { sha: "a2", author: { name: "b", email: "b@e", date: "2026-02-01T00:00:00Z" }, committer: { name: "b", email: "b@e", date: "2026-02-01T00:00:00Z" }, robot: true, robot_reasons: ["committer-pattern"] },
+    ];
+    const withTimeline = (): GitChannelOutcome => ({
+      facts: [
+        okFact("activity.git.timeline", { events }, "git"),
+        okFact("activity.git.summary", { commits: 2 }, "git"),
+        okFact("docs.presence", { readme: true }, "git"),
+      ],
+    });
+    const r = await runScan(deps(withTimeline, restOk), "o/compressed");
+    const row = db.query("SELECT value FROM facts WHERE scan_id = ? AND key = 'activity.git.timeline'").get(r.scanId) as { value: string };
+    expect(row.value.startsWith("z:")).toBe(true);
+    expect((parseFactValue(row.value) as { events: unknown[] }).events).toEqual(events);
+    // несжатые kinds — как были
+    const summary = db.query("SELECT value FROM facts WHERE scan_id = ? AND key = 'activity.git.summary'").get(r.scanId) as { value: string };
+    expect(summary.value.startsWith("z:")).toBe(false);
+    expect(JSON.parse(summary.value)).toEqual({ commits: 2 });
+    // сжатие реально уменьшает повторяющийся JSON
+    expect(row.value.length).toBeLessThan(JSON.stringify({ events }).length);
   });
 });

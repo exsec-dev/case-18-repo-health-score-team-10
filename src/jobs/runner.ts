@@ -16,7 +16,7 @@
 // активности; видимость применяет любой скан, если поле есть в ответе.
 // scans.public_status (Ф1.11) — статус по фактам публичных категорий.
 import type { Database } from "bun:sqlite";
-import { Fact, noDataFact } from "../collectors/facts";
+import { encodeFactValue, Fact, noDataFact } from "../collectors/facts";
 import { cloneWithDegrade, cleanupClone, extractFacts, gitFactsNoData } from "../collectors/git";
 import { ScClient, makeScClient } from "../collectors/http";
 import { RestCollectResult, collectRestFacts } from "../collectors/rest";
@@ -200,7 +200,9 @@ function insertFacts(db: Database, scanId: number, facts: Fact[]): void {
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const f of facts) {
-    stmt.run(scanId, f.category, f.key, JSON.stringify(f.value), f.status, f.source, f.collectedAt);
+    // В4.4 (кластер C): timeline пишется сжатым (z:-префикс); чтение
+    // прозрачно по префиксу, остальные kinds — как были
+    stmt.run(scanId, f.category, f.key, encodeFactValue(f.key, f.value), f.status, f.source, f.collectedAt);
   }
 }
 

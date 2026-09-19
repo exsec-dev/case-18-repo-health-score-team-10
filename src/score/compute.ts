@@ -10,7 +10,7 @@
 // Критичные secrets → кап полного итога ≤ 49 (§5/В2-8). Все числа —
 // константы model.ts.
 import type { Database } from "bun:sqlite";
-import { categoryOf } from "../collectors/facts";
+import { categoryOf, parseFactValue } from "../collectors/facts";
 import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
 import { DerivedMetrics, deriveMetrics } from "./derived";
 import {
@@ -281,7 +281,7 @@ export function effectiveFacts(db: Database, scanId: number, repoId: number): Ef
   for (const kind of READ_KINDS) {
     const row = rows.find((r) => r.key === kind);
     if (row && row.status === "ok") {
-      ok.set(kind, JSON.parse(row.value));
+      ok.set(kind, parseFactValue(row.value));
       continue;
     }
     const channel = CHANNEL_FALLBACK_KINDS.includes(kind);
@@ -294,7 +294,7 @@ export function effectiveFacts(db: Database, scanId: number, repoId: number): Ef
       )
       .get(kind, repoId, scanId) as { value: string } | null;
     if (prev) {
-      ok.set(kind, JSON.parse(prev.value));
+      ok.set(kind, parseFactValue(prev.value));
       stale.push(kind);
       staleCats.add(categoryOf(kind));
     }

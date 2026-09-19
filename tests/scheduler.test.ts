@@ -1432,3 +1432,49 @@ describe("Ф2.19: возраст свипа клонов ≥ 2 × lease", () => 
     }
   }, 30_000);
 });
+
+// ---------------------------------------------------------------------------
+// В4.4 (кластер F): волна каталога ставится ПО ЛАЙКАМ (убывание) — витринные
+// репо оцениваются первыми; дифф last_updated не меняется.
+// ---------------------------------------------------------------------------
+
+describe("В4.4: первая волна — по лайкам", () => {
+  test("кандидаты ставятся по likes desc (без лайков — в хвост), независимо от порядка каталога", async () => {
+    const likeOf = (org: string, slug: string, likes: number, updated: string) => ({
+      organization: { slug: org },
+      slug,
+      name: slug,
+      visibility: "public",
+      last_updated: updated,
+      rating: { value: likes },
+    });
+    // порядок каталога: средний → без лайков → максимум → минимум
+    const pages = [
+      {
+        repos: [
+          likeOf("wave", "mid", 40, "2026-09-10T00:00:00Z"),
+          likeOf("wave", "nolikes", 0, "2026-09-10T00:00:00Z"),
+          likeOf("wave", "top", 4062, "2026-09-10T00:00:00Z"),
+          likeOf("wave", "low", 3, "2026-09-10T00:00:00Z"),
+        ],
+        next: null,
+      },
+    ];
+    const r = await nightlyCatalog(db, catalogClient(pages), { now: new Date() });
+    expect(r.ok).toBe(true);
+    expect(r.enqueued.map((e) => e.slug)).toEqual(["wave/top", "wave/mid", "wave/low", "wave/nolikes"]);
+    // jobs созданы в том же порядке: id растут по likes desc
+    const order = (
+      db.query(
+        `SELECT j.id, r.repo_slug AS slug FROM jobs j JOIN repos r ON r.id = j.repo_id
+         WHERE r.org_slug = 'wave' ORDER BY j.id`,
+      ).all() as { id: number; slug: string }[]
+    ).map((row) => row.slug);
+    expect(order).toEqual(["top", "mid", "low", "nolikes"]);
+    // дифф не сломан: повторный обход с теми же датами ничего не ставит
+    const again = await nightlyCatalog(db, catalogClient(pages), { now: new Date() });
+    expect(again.enqueued).toEqual([]);
+    db.query("DELETE FROM repos WHERE org_slug = 'wave'").run();
+    db.query("DELETE FROM jobs WHERE repo_id NOT IN (SELECT id FROM repos)").run();
+  });
+});

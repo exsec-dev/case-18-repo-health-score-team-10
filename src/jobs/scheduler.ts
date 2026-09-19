@@ -436,6 +436,13 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
 
   const enqueued: NightlyEnqueued[] = [];
   const enqueuedRepoIds = new Set<number>();
+  // В4.4 (кластер F): постановка волны — ПО ЛАЙКАМ (убывание): витринные
+  // репо получают оценку первыми (700 сканов/сутки против 27 446 каталога —
+  // порядок решает, что увидит демо). Спека GET /repos sort_by=likes НЕ
+  // поддерживает (enum created_at|rating) — сортировка клиентская по
+  // полям уже собранного перечисления; дифф last_updated не меняется.
+  // Кандидаты собираются с прежними гард'ами, ставятся после обхода батчами.
+  const waveCandidates: { repoId: number; slug: string; reason: NightlyEnqueued["reason"]; likes: number | null }[] = [];
   // П5: признак полосы сразу через trigger_kind (единый признак — П8);
   // строки refused несут trigger_kind='user' и в полосу периодики не попадают
   const hasLivePeriodicJob = (repoId: number): boolean =>
@@ -468,8 +475,7 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
       // новые репо — фаза сверки (Ф2.5): состав каталога, не волна пересканов
       if (!phases.reconcile) continue;
       enqueuedRepoIds.add(repoId);
-      enqueueScan(db, repoId, { triggerKind: "periodic" });
-      enqueued.push({ slug, reason: "new" });
+      waveCandidates.push({ repoId, slug, reason: "new", likes: entry.likes });
       continue;
     }
     // всё, что ниже, — ночная волна пересканов
@@ -477,8 +483,7 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
     if (existing.last_activity_at === null && entry.last_updated !== null) {
       // строка была без даты (ручной ввод слага) — теперь дата есть: это «изменившийся»
       enqueuedRepoIds.add(repoId);
-      enqueueScan(db, repoId, { triggerKind: "periodic" });
-      enqueued.push({ slug, reason: "changed" });
+      waveCandidates.push({ repoId, slug, reason: "changed", likes: entry.likes ?? existing.likes });
       continue;
     }
     const changed = entry.last_updated !== existing.last_activity_at;
@@ -502,9 +507,27 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
     const retryIneligible = lastPeriodicScan !== null && lastPeriodicScan.rating_eligible !== 1;
     if (fullRescan || changed || retryFailed || retryIneligible) {
       enqueuedRepoIds.add(repoId);
-      enqueueScan(db, repoId, { triggerKind: "periodic" });
-      enqueued.push({ slug, reason: fullRescan ? "forced" : changed ? "changed" : retryFailed ? "retry-failed" : "retry-ineligible" });
+      waveCandidates.push({
+        repoId,
+        slug,
+        reason: fullRescan ? "forced" : changed ? "changed" : retryFailed ? "retry-failed" : "retry-ineligible",
+        likes: entry.likes ?? existing.likes,
+      });
     }
+  }
+
+  // В4.4 (кластер F): лайки по убыванию (нет лайков — в хвост), постановка —
+  // батчами по 100 в одной транзакции (синхронная фаза постановки как целое
+  // — З5 аудита — вне скоупа, В6; батч режет число автокоммитов)
+  waveCandidates.sort((a, b) => (b.likes ?? Number.NEGATIVE_INFINITY) - (a.likes ?? Number.NEGATIVE_INFINITY));
+  const WAVE_ENQUEUE_CHUNK = 100;
+  for (let i = 0; i < waveCandidates.length; i += WAVE_ENQUEUE_CHUNK) {
+    db.transaction(() => {
+      for (const cand of waveCandidates.slice(i, i + WAVE_ENQUEUE_CHUNK)) {
+        enqueueScan(db, cand.repoId, { triggerKind: "periodic" });
+        enqueued.push({ slug: cand.slug, reason: cand.reason });
+      }
+    })();
   }
 
   // возврат ранее эвиктированных, вернувшихся в каталог — фаза сверки

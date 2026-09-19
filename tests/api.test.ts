@@ -14,6 +14,8 @@ import { MODEL_VERSION } from "../src/score/model";
 import { computeFromFacts, totalsFromCategories } from "../src/score/compute";
 import { renderRepoReport } from "../src/report/markdown";
 import { getHealth } from "../src/api/health";
+import { encodeFactValue, parseFactValue } from "../src/collectors/facts";
+import { compute } from "../src/score/compute";
 import { loadConfig } from "../src/config";
 import type { AccessResult } from "../src/auth/access";
 import { DEFAULT_SCAN } from "../src/config";
@@ -648,6 +650,47 @@ describe("health (В4.4): ok вычисляемое, reasons по контрак
     expect(status.reasons.some((r) => r.includes("пустой список"))).toBe(true);
     expect(status.reasons.some((r) => r.includes("ночная фаза") && r.includes("page 3"))).toBe(true);
     expect(status.lastNightly).toEqual({ ok: false, error: "page 3: timeout" });
+    h.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// В4.4 (кластер C): чтение сжатого timeline прозрачно — карточка и compute
+// ---------------------------------------------------------------------------
+
+describe("В4.4: сжатый timeline читается как несжатый", () => {
+  test("encodeFactValue/parseFactValue: раундтрип и прозрачность старых строк", () => {
+    const value = { events: [{ sha: "x1", committer: { date: "2026-01-01T00:00:00Z" } }] };
+    const encoded = encodeFactValue("activity.git.timeline", value);
+    expect(encoded.startsWith("z:")).toBe(true);
+    expect(parseFactValue(encoded)).toEqual(value);
+    // старый (несжатый) формат читается как раньше
+    expect(parseFactValue(JSON.stringify(value))).toEqual(value);
+    // прочие kinds не сжимаются
+    expect(encodeFactValue("tree.stats", value)).toBe(JSON.stringify(value));
+  });
+
+  test("карточка и compute читают сжатую строку: агрегат timeline и категория активности", () => {
+    const h = makeApiDb();
+    const repoId = seedRepo(h, { org: "z", repo: "tl" });
+    const events = [
+      { sha: "a1", author: { name: "a", email: "a@e", date: "2025-08-16T10:00:00Z" }, committer: { name: "a", email: "a@e", date: "2025-08-16T10:00:00Z" } },
+      { sha: "a2", author: { name: "b", email: "b@e", date: "2026-09-10T10:00:00Z" }, committer: { name: "b", email: "b@e", date: "2026-09-10T10:00:00Z" } },
+    ];
+    const facts = cardFacts().map((f) =>
+      f.key === "activity.git.timeline" ? { ...f, value: { events } } : f,
+    );
+    const scanId = seedScan(h, repoId, { facts });
+    // пересаживаем timeline-строку в сжатую форму (как её пишет insertFacts)
+    h.db.query("UPDATE facts SET value = ? WHERE scan_id = ? AND key = 'activity.git.timeline'").run(encodeFactValue("activity.git.timeline", { events }), scanId);
+    seedScore(h, repoId, scanId, { total: 55 });
+    const card = getRepoCard(h.db, "z", "tl")!;
+    const timeline = card.evidence.find((e) => e.key === "activity.git.timeline");
+    expect(timeline).toBeDefined();
+    expect(timeline!.value).toMatchObject({ events: 2, first: "2025-08-16T10:00:00Z", last: "2026-09-10T10:00:00Z", truncated: true });
+    // compute по сжатой строке: категория активности считает данные
+    const scores = compute(h.db, scanId);
+    expect(scores.categories.activity.score).not.toBeNull();
     h.close();
   });
 });
