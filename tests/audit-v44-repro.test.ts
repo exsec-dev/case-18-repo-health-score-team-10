@@ -313,7 +313,8 @@ describe("E (Б5): исход анализа по статусу скана", ()
     analysisOutcome?: (scan: { status: string; finishedAt: string | null } | null | undefined) => "pending" | "ok" | "failed";
   };
 
-  repro("bad → failed; ok/partial → ok; running/нет скана → pending", () => {
+  // закрыто блоком Б5 — обёртка `repro` снята, утверждение не менялось
+  test("bad → failed; ok/partial → ok; running/нет скана → pending", () => {
     expect(typeof fmt.analysisOutcome).toBe("function");
     const outcome = fmt.analysisOutcome!;
     expect(outcome({ status: "bad", finishedAt: "2026-09-20T10:00:00Z" })).toBe("failed");

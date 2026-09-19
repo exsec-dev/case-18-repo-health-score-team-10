@@ -97,6 +97,17 @@ export function scanTriggerText(trigger: string): string {
   }
 }
 
+/**
+ * В4.4 (кластер E код-аудита): исход анализа для опросщиков (MePage/RepoPage).
+ * Finished-скан со статусом bad — ОШИБКА (раньше любой доехавший скан
+ * праздновался success-тостом «Анализ завершен»), ok/partial — успех,
+ * running/нет скана — ещё не закончился. Тост рисует UI — здесь только исход.
+ */
+export function analysisOutcome(scan: { status: string; finishedAt: string | null } | null | undefined): "pending" | "ok" | "failed" {
+  if (!scan || scan.finishedAt === null || scan.status === "running" || scan.status === "queued") return "pending";
+  return scan.status === "bad" ? "failed" : "ok";
+}
+
 /** Прирост Score — одним знаком после точки, как в тексте эффекта рекомендации. */
 export function fmtDelta(delta: number): string {
   return `+${(Math.round(delta * 10) / 10).toFixed(1)}`;

@@ -39,6 +39,7 @@ import {
   NO_SCORE,
   SECURITY_PUBLIC_NOTE,
   accessLockText,
+  analysisOutcome,
   fmtCoverage,
   fmtDate,
   fmtDateTime,
@@ -65,7 +66,8 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   const cardUrl = `/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`;
   const { state, reload } = useJson<Card>(cardUrl);
   const me = useJson<MeResponse>("/api/me");
-  const canRefresh = me.state.kind === "ok" && me.state.data.login !== null && me.state.data.hasPat;
+  const loggedIn = me.state.kind === "ok" && me.state.data.login !== null;
+  const canRefresh = loggedIn && me.state.kind === "ok" && me.state.data.hasPat;
   const sinceScanId = state.kind === "ok" ? (state.data.scan?.id ?? 0) : 0;
   // Ф2.9/Ф2.15: горизонт опросов анализа — лиз job из /api/meta, не хардкод
   const leaseMs = meta?.queue.leaseMs ?? 85 * 60_000;
@@ -145,10 +147,23 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
             }
           />
         ) : (
+          // В4.4 (кластер E): «скана не было» ≠ «скан был — сбой/мало данных»;
+          // CTA — по возможностям зрителя (запуск/токен/объяснение)
           <EmptyState
             icon={SquareListUl}
-            title="Репозиторий есть в каталоге, но еще не сканировался"
-            description="Score появится после первого скана: его считает код по фактам, а фактов пока нет."
+            title={card.scan ? "Скан был — данных для оценки не хватило" : "Репозиторий есть в каталоге, но еще не сканировался"}
+            description={
+              card.scan
+                ? `Последний скан (${sentence(scanStatusText(card.scan.status))}) не собрал достаточно фактов для честного числа — это отсутствие данных, а не плохая оценка. Повторный анализ соберёт факты заново.`
+                : "Score появится после первого скана: его считает код по фактам, а фактов пока нет."
+            }
+            actions={
+              canRefresh
+                ? [{ text: card.scan ? "Повторить анализ" : "Запустить анализ", view: "action", size: "l", onClick: refresh.start }]
+                : loggedIn
+                  ? [{ text: "Добавьте токен в кабинете — и запустите первый анализ", view: "action", size: "l", href: "/me" }]
+                  : undefined
+            }
           />
         )
       ) : (
@@ -209,10 +224,23 @@ function useRefreshAnalysis(org: string, repo: string, cardUrl: string, sinceSca
       }
       try {
         const card = await fetchJson<Card>(cardUrl);
-        if (card.scan && card.scan.id > sinceScanId && card.scan.finishedAt && card.scan.status !== "running") {
+        if (card.scan && card.scan.id > sinceScanId) {
+          // В4.4 (кластер E): исход — по статусу скана; bad больше не
+          // празднуется success-тостом «Анализ завершен»
+          const outcome = analysisOutcome(card.scan);
+          if (outcome === "pending") return;
           setPhase("idle");
-          if (jobIdRef.current !== null) setDoneKey(`${org}/${repo}:${jobIdRef.current}`);
-          toaster.add({ name: `scan-done:${org}/${repo}`, theme: "success", title: "Анализ завершен", content: "Карточка обновлена по новому скану." });
+          if (outcome === "ok") {
+            if (jobIdRef.current !== null) setDoneKey(`${org}/${repo}:${jobIdRef.current}`);
+            toaster.add({ name: `scan-done:${org}/${repo}`, theme: "success", title: "Анализ завершен", content: "Карточка обновлена по новому скану." });
+          } else {
+            toaster.add({
+              name: `scan-failed:${org}/${repo}`,
+              theme: "danger",
+              title: "Анализ завершился ошибкой",
+              content: "Сбор данных не удался — подробности в «Моих заданиях» кабинета.",
+            });
+          }
           onDone();
         }
       } catch {
