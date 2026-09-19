@@ -191,7 +191,9 @@ describe("чтение: последний пригодный (P) и после�
     const item = listRepos(t.db, DEFAULT_QUERY).items.find((i) => i.repo === "repo")!;
     // круг 2 (LOW-2): статус и время — последнего скана, как в карточке
     expect({ score: item.healthcraftIndex, status: item.scanStatus }).toEqual({ score: 60, status: "running" });
-    expect(getMeta(t.db).repos).toEqual({ scored: 1, nullScore: 0 });
+    // В4.6 (Б9, У15): в meta появился знаменатель охвата — размер каталога.
+    // Здесь он равен 1: в фикстуре один публичный rating_active репозиторий
+    expect(getMeta(t.db).repos).toEqual({ scored: 1, nullScore: 0, catalog: 1 });
 
     const granted = { cicd: "granted", appsec: "granted", repo: "granted" } as const;
     const card = getRepoCard(t.db, "pl", "repo", { access: granted })!;

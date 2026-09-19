@@ -967,7 +967,17 @@ export interface MetaResponse {
   /** имя полного показателя (карточка с правами, кап 49) */
   fullMetricTitle: "Repo Health Score";
   coverageNullBelow: number;
-  repos: { scored: number; nullScore: number };
+  /**
+   * В4.6 (У15): охват каталога честными числами. `scored` и `nullScore` —
+   * репозитории, по которым УЖЕ есть строка `scores` текущей модели;
+   * `catalog` — сколько всего публичных репозиториев в рейтинговом каталоге.
+   * Без `catalog` страница могла сказать только «оценено 4964 из 4969», то
+   * есть отрапортовать почти полный охват при фактическом обходе первой
+   * волны — ровно та неправда, которую контракт У15 закрывает. Поле
+   * ЧИТАЕМОЕ и производное: схема БД, веса и MODEL_VERSION не тронуты,
+   * новых маршрутов и коллекторов нет.
+   */
+  repos: { scored: number; nullScore: number; catalog: number };
   /** Ф2.9/Ф2.15: лиз job из конфига планировщика — UI опрашивает анализ до этого горизонта */
   queue: { leaseMs: number };
   methodology: string;
@@ -990,6 +1000,9 @@ export function getMeta(db: Database, opts: { now?: Date; leaseMs?: number } = {
     repos: {
       scored: rows.filter((r) => r.total !== null).length,
       nullScore: rows.filter((r) => r.total === null).length,
+      // тот же фильтр, что у RATING_SQL (rating_active + public), но без
+      // JOIN на scores: знаменатель охвата — каталог, а не оценённая часть
+      catalog: (db.query("SELECT COUNT(*) AS c FROM repos WHERE rating_active = 1 AND visibility = 'public'").get() as { c: number }).c,
     },
     queue: { leaseMs: opts.leaseMs ?? defaultLeaseMs(DEFAULT_SCAN) },
     methodology: METHODOLOGY_PATH,

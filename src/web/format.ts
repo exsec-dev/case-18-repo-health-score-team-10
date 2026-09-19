@@ -47,6 +47,11 @@ export function fmtDateTime(iso: string | null | undefined): string {
   return d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+/** Крупные счётчики — с разделителем разрядов: «27 621» читается, «27621» нет. */
+export function fmtCount(value: number): string {
+  return value.toLocaleString("ru-RU");
+}
+
 export function fmtCoverage(coverage: number): string {
   return `${Math.round(coverage * 100)}%`;
 }

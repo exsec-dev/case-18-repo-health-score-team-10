@@ -34,6 +34,7 @@ import {
   DEFINITION_NAME_WIDTH,
   NO_DATA_SHORT,
   NO_SCORE,
+  fmtCount,
   fmtCoverage,
   fmtDate,
   fmtNumber,
@@ -230,6 +231,12 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
             title="Рейтинг здоровья репозиториев"
             description="Порядок задает HealthCraft Index – воспроизводимая оценка из публичных данных, а не число лайков."
           />
+          {/* В4.6 (У15): охват НАЗВАН числами и стратегией, а не умолчан.
+              Раньше страница показывала только «Оценены N» — и это читалось
+              как «весь каталог оценен», хотя обход идет первой волной.
+              Числа из /api/meta (БД), не из константы; переключатель ниже
+              оставляет возможность смотреть только оцененные. */}
+          <CoverageNote meta={meta} />
           {toolbar}
         </>
       }
@@ -283,6 +290,25 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
 
       {data && view === "unscored" && <UnscoredTable items={data.nullItems} meta={meta} hasFilters={hasFilters} />}
     </Page>
+  );
+}
+
+/**
+ * Честный охват каталога (В4.6, У15). Стратегия первой волны — решение вехи
+ * В4.4: очередь идет по убыванию лайков, то есть сначала оцениваются самые
+ * заметные проекты. Это НЕ противоречит подзаголовку «порядок задает индекс, а
+ * не лайки»: лайки решают, что сканируется раньше, а не кто выше в рейтинге, —
+ * и сказано это здесь прямо, чтобы зритель не заподозрил обратного.
+ */
+function CoverageNote({ meta }: { meta: MetaResponse | null }) {
+  if (!meta) return null;
+  const { scored, catalog } = meta.repos;
+  return (
+    <Text as="p" variant="body-2" color="complementary" style={{ marginBottom: "var(--g-spacing-3)" }}>
+      Оценено {fmtCount(scored)} из {fmtCount(catalog)} публичных репозиториев каталога. Первая волна идет по убыванию лайков –
+      сначала оцениваются самые заметные проекты, остальные подключаются по мере обхода. На место в рейтинге лайки не влияют:
+      порядок считает индекс.
+    </Text>
   );
 }
 

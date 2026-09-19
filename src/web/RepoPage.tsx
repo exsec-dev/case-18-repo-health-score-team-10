@@ -800,6 +800,9 @@ function CategoryRow({
           </Text>
         </div>
       )}
+      {/* В4.6 (У17): разбивка по движкам живёт под строкой Security — рядом с
+          числом, которое она объясняет, и только когда факт есть и он ok */}
+      {key === "security" && <AppsecEngines card={card} />}
       {open && (
         <div className="rh-subrows">
           {subs.map(([subKey, sub]) => (
@@ -1073,6 +1076,75 @@ function submetricTitle(category: string, sub: string): string {
   return SUBMETRIC_TITLES[`${category}.${sub}`] ?? sub;
 }
 
+/**
+ * Разбивка находок AppSec ПО ДВИЖКАМ (В4.6, У17). Счётчики коллектор уже
+ * собирает (`appsec.ts`, поле `backlog.engines`) — до этой вехи они лежали в
+ * факте и никуда не показывались, то есть зритель видел одно число «столько-то
+ * находок» без понимания, чем именно они найдены.
+ *
+ * SCA — отдельной строкой, потому что это другой класс находок (зависимости, а
+ * не свой код), и по нему у платформы отдельный вопрос (Q&A №14). **В ОЦЕНКУ
+ * SCA не вводится:** решение владельца 20.09 — Security-формула не меняется ни
+ * на йоту (закон 5, воспроизводимость 13.2.2). Имя движка не угадывается: в
+ * SCA-строку идёт тот счётчик, чьё имя платформа назвала сама, остальные
+ * печатаются как есть.
+ */
+interface AppsecBreakdown {
+  engines: [string, number][];
+  sca: [string, number] | null;
+  openFindings: number | null;
+  truncated: boolean;
+}
+
+function appsecBreakdown(card: Card): AppsecBreakdown | null {
+  const fact = card.evidence.find((e) => e.key === "appsec.findings");
+  if (!fact || fact.status !== "ok") return null;
+  const backlog = (fact.value as { backlog?: { engines?: Record<string, number>; open_findings?: number | null; truncated?: boolean } } | null)?.backlog;
+  if (!backlog || typeof backlog.engines !== "object" || backlog.engines === null) return null;
+  const all = Object.entries(backlog.engines).sort((a, b) => b[1] - a[1]);
+  const sca = all.find(([name]) => /sca|composition|depend/i.test(name)) ?? null;
+  return {
+    engines: all.filter((pair) => pair !== sca),
+    sca,
+    openFindings: typeof backlog.open_findings === "number" ? backlog.open_findings : null,
+    truncated: backlog.truncated === true,
+  };
+}
+
+function AppsecEngines({ card }: { card: Card }) {
+  const breakdown = appsecBreakdown(card);
+  if (!breakdown || (breakdown.engines.length === 0 && breakdown.sca === null)) return null;
+  return (
+    <Flex direction="column" gap={1} style={{ padding: "0 var(--g-spacing-3) var(--g-spacing-2) calc(16px + var(--g-spacing-6))" }}>
+      <Text variant="body-2" color="complementary">
+        Находки AppSec по движкам{breakdown.openFindings !== null ? ` (всего открытых: ${fmtNumber(breakdown.openFindings)})` : ""}:
+      </Text>
+      <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
+        {breakdown.engines.map(([name, count]) => (
+          <DefinitionList.Item key={name} name={name}>
+            {fmtNumber(count)}
+          </DefinitionList.Item>
+        ))}
+        {breakdown.sca && (
+          <DefinitionList.Item name={`${breakdown.sca[0]} (зависимости, SCA)`} note="Находки в зависимостях показываются отдельно и в оценку Security не входят: формула категории не менялась.">
+            {fmtNumber(breakdown.sca[1])}
+          </DefinitionList.Item>
+        )}
+      </DefinitionList>
+      {breakdown.sca === null && (
+        <Text variant="body-2" color="complementary">
+          Отдельного счетчика SCA платформа по этому скану не вернула – значит показывать его нечем.
+        </Text>
+      )}
+      {breakdown.truncated && (
+        <Text variant="body-2" color="complementary">
+          Список групп находок усечен предохранителем пагинации: счетчики показывают собранную часть.
+        </Text>
+      )}
+    </Flex>
+  );
+}
+
 /** Причина no-data Security при открытом канале — из факта appsec.findings (честный tri-state). */
 function securityNote(card: Card): string {
   const fact = card.evidence.find((e) => e.key === "appsec.findings");
@@ -1178,7 +1250,17 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
         view="flat"
         className={glow ? "rh-star-glow" : undefined}
         disabled={state === "anon"}
-        title={state === "anon" ? "Войдите через Я ID, чтобы добавлять в избранное" : "в избранное: права проверятся в кабинете"}
+        /* В4.6 (У16): объяснение границы доступа прямо там, где зритель
+           нажимает звезду. Сервис НЕ перечисляет репозитории зрителя сам —
+           списка «все мои репозитории» у него нет и быть не может без
+           токена с правами; поэтому «Мои репозитории» в кабинете — это
+           избранное, а не автоматический список (решение favorites-only
+           18.09). Кабинет при этом не тронут: он уходит в веху В4.7. */
+        title={
+          state === "anon"
+            ? "Войдите через Я ID, чтобы добавлять в избранное"
+            : "В избранное. «Мои репозитории» в кабинете – это избранное, а не автоматический список: сервис не перечисляет ваши репозитории сам, вы сами выбираете, за чем следить. Права на закрытые данные проверяются в кабинете."
+        }
         onClick={() => void toggle()}
       >
         <Text color={state === "on" ? "warning" : "secondary"}>

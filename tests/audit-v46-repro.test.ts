@@ -428,26 +428,30 @@ describe("В4.6-10 (У18): слоты под В5 заложены честным
 // ---------------------------------------------------------------------------
 
 describe("В4.6-11 (У15/У16/У17): охват, границы доступа, движки AppSec", () => {
-  repro("У15: рейтинг называет охват числами из БД и стратегию первой волны", () => {
+  // ЗАКРЫТО блоком Б9 (охват, границы доступа, движки AppSec).
+  test("У15: рейтинг называет охват числами из БД и стратегию первой волны", () => {
     const src = srcOf("Rating.tsx");
     expect({
-      coverage: src.includes("оценено"),
+      coverage: /оценено/i.test(src),
       wave: src.includes("по убыванию лайков") || src.includes("самые заметные"),
       onlyScored: src.includes("view=") || src.includes("unscored"),
     }).toEqual({ coverage: true, wave: true, onlyScored: true });
   });
 
-  repro("У15: охват берётся из БД, а не из константы (в /api/meta есть размер каталога)", async () => {
+  // ЗАКРЫТО блоком Б9 (охват, границы доступа, движки AppSec).
+  test("У15: охват берётся из БД, а не из константы (в /api/meta есть размер каталога)", async () => {
     const { getMeta } = await import("../src/api/repos");
     const meta = getMeta(t.db) as unknown as { repos: Record<string, number> };
     expect(typeof meta.repos.catalog).toBe("number");
   });
 
-  repro("У16: карточка объясняет, что «мои репозитории» — избранное, а не автоперечисление", () => {
+  // ЗАКРЫТО блоком Б9 (охват, границы доступа, движки AppSec).
+  test("У16: карточка объясняет, что «мои репозитории» — избранное, а не автоперечисление", () => {
     expect(srcOf("RepoPage.tsx")).toContain("это избранное, а не автоматический список");
   });
 
-  repro("У17: находки AppSec показаны с разбивкой по движкам, SCA отдельной строкой", () => {
+  // ЗАКРЫТО блоком Б9 (охват, границы доступа, движки AppSec).
+  test("У17: находки AppSec показаны с разбивкой по движкам, SCA отдельной строкой", () => {
     const src = srcOf("RepoPage.tsx");
     expect({ engines: src.includes("backlog.engines") || src.includes("enginesOf"), sca: src.includes("SCA") }).toEqual({ engines: true, sca: true });
   });
