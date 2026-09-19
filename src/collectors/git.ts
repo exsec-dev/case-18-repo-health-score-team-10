@@ -383,10 +383,12 @@ export interface DegradeCloneSuccess extends CloneSuccess {
 export type DegradeCloneOutcome = DegradeCloneSuccess | CloneFailure;
 
 /**
- * Клон с деградационным ярусом (§5.7): полный клон (500МБ/10мин из
- * конфига) → при пробое timeout/disk вторая попытка --shallow-since=
- * <N>.months на бюджете деградации (2000МБ/20мин) + флаг усечённой
- * истории. git-ошибка деградацией не лечится — отдаётся как есть.
+ * Клон с деградационным ярусом (§5.7): полный клон (бюджеты ярусов —
+ * только операторские, из env/`DEFAULT_SCAN` в config.ts: первый
+ * 1.5ГБ/20мин, деградация 2.5ГБ/25мин, RESOLVED 17.09) → при пробое
+ * timeout/disk вторая попытка --shallow-since=<N>.months на бюджете
+ * деградации + флаг усечённой истории. git-ошибка деградацией не
+ * лечится — отдаётся как есть.
  */
 export async function cloneWithDegrade(
   url: string,
