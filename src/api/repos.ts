@@ -13,7 +13,7 @@ import { NO_PAT_ACCESS, type AccessRepo, type AccessResult, type ChannelAccess }
 import { DEFAULT_SCAN, defaultLeaseMs, type ScanConfig } from "../config";
 import type { GitLimitsMarker } from "../web/format";
 import type { DerivedMetrics } from "../score/derived";
-import { SCORE_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, MODEL_VERSION, SECRETS_CRITICAL_TOTAL_CAP } from "../score/model";
+import { INDEX_WEIGHTS, SCORE_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, type IndexCategoryKey, MODEL_VERSION, SECRETS_CRITICAL_TOTAL_CAP } from "../score/model";
 
 // ---------- общие формы ----------
 
@@ -41,9 +41,9 @@ export interface RatingItem {
   repo: string;
   title: string | null;
   language: string | null;
-  /** Score в рейтинге (4 категории, total_rating) */
-  score: number | null;
-  /** coverage_rating */
+  /** HealthCraft Index (4 категории, сохранённый healthcraft_index) */
+  healthcraftIndex: number | null;
+  /** index_coverage */
   coverage: number;
   /** CI/Security в рейтинг не входят — всегда null (данные каналов с правами не публикуются) */
   categories: Record<CategoryKey, number | null>;
@@ -68,7 +68,7 @@ export interface LanguageFacet {
 
 export interface RatingResponse {
   items: RatingItem[];
-  /** Score = NULL: вне ранжирования и вне пагинации (закон 2) */
+  /** HealthCraft Index = NULL: вне ранжирования и вне пагинации (закон 2) */
   nullItems: RatingItem[];
   page: number;
   perPage: number;
@@ -79,7 +79,7 @@ export interface RatingResponse {
   generatedAt: string;
 }
 
-export type SortKey = "score" | "likes" | "activity" | "coverage" | "name";
+export type SortKey = "index" | "likes" | "activity" | "coverage" | "name";
 export type SortOrder = "desc" | "asc";
 
 export interface ReposQuery {
@@ -92,9 +92,9 @@ export interface ReposQuery {
   perPage: number;
 }
 
-const SORT_KEYS: SortKey[] = ["score", "likes", "activity", "coverage", "name"];
+const SORT_KEYS: SortKey[] = ["index", "likes", "activity", "coverage", "name"];
 
-export const DEFAULT_QUERY: ReposQuery = { sort: "score", order: "desc", page: 1, perPage: 25 };
+export const DEFAULT_QUERY: ReposQuery = { sort: "index", order: "desc", page: 1, perPage: 25 };
 
 export type ParseResult = { ok: true; query: ReposQuery } | { ok: false; message: string };
 
@@ -241,7 +241,7 @@ function toRatingItem(row: RatingRow): RatingItem {
     repo: row.repo_slug,
     title: row.title,
     language: row.language,
-    score: row.total,
+    healthcraftIndex: row.total,
     coverage: row.coverage,
     categories,
     likes: row.likes,
@@ -261,8 +261,8 @@ const fullName = (i: RatingItem): string => `${i.org}/${i.repo}`;
 /** Ключ сортировки; null = значения нет (всегда в хвосте, при любом order). */
 function sortValue(item: RatingItem, sort: SortKey): number | string | null {
   switch (sort) {
-    case "score":
-      return item.score;
+    case "index":
+      return item.healthcraftIndex;
     case "likes":
       return item.likes;
     case "activity":
@@ -313,9 +313,9 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
     .sort((a, b) => b.count - a.count || (a.language ?? "￿").localeCompare(b.language ?? "￿"));
 
   const filtered = query.lang === undefined ? byQ : byQ.filter((i) => i.language === query.lang);
-  const scored = filtered.filter((i) => i.score !== null);
+  const scored = filtered.filter((i) => i.healthcraftIndex !== null);
   const nullItems = filtered
-    .filter((i) => i.score === null)
+    .filter((i) => i.healthcraftIndex === null)
     .sort((a, b) => fullName(a).localeCompare(fullName(b)));
   scored.sort((a, b) => compareItems(a, b, query.sort, query.order));
 
@@ -383,20 +383,20 @@ export interface CardJob {
 }
 
 export interface CardCategory extends CategoryScore {
-  /** номинальный вес модели: страница объясняет перенормировку, а не только результат */
+  /** номинальный вес категории в Repo Health Score (SCORE_WEIGHTS): карточка объясняет перенормировку полного показателя; веса индекса — в /api/meta.categories[].indexWeight */
   weight: number;
   /** канал закрыт зрителю (К2): чисел и подметрик нет, причина — для заглушки */
   locked?: ChannelAccess;
 }
 
 export interface CardScore {
-  /** Score в рейтинге (4 категории) — всем */
-  totalRating: number | null;
-  coverageRating: number;
-  /** Полный Score (6 категорий, кап 49) — только при доступе к CI и Security, иначе null */
-  totalFull: number | null;
-  coverageFull: number | null;
-  /** true = зрителю закрыт хотя бы один из каналов CI/Security — полный итог не показывается */
+  /** HealthCraft Index (4 категории) — всем */
+  healthcraftIndex: number | null;
+  indexCoverage: number;
+  /** Repo Health Score (6 категорий, кап 49) — только при доступе к CI и Security, иначе null; считается на чтении из показанных категорий */
+  repoHealthScore: number | null;
+  repoHealthCoverage: number | null;
+  /** true = зрителю закрыт хотя бы один из каналов CI/Security — полный показатель не показывается */
   fullLocked: boolean;
   modelVersion: string;
   computedAt: string;
@@ -422,6 +422,8 @@ export interface CardRecommendation {
   deltaScore: number | null;
   opensCategory: string | null;
   source: string;
+  /** канал правила (cicd | appsec | null): у какого показателя Δ — HealthCraft Index или Repo Health Score (В4.3) */
+  channel: string | null;
 }
 
 export interface TruncatedValue {
@@ -726,11 +728,11 @@ export function getRepoCard(
     }
   }
   const score: CardScore = {
-    totalRating: publicRow.healthcraft_index,
-    coverageRating: publicRow.index_coverage,
-    // полный Score складывается из показанных категорий (тот же totalsFromCategories, что compute)
-    totalFull: fullOpen ? roundTotal(fullTotals.repoHealthScore) : null,
-    coverageFull: fullOpen ? Math.round(fullTotals.repoHealthCoverage * 1000) / 1000 : null,
+    healthcraftIndex: publicRow.healthcraft_index,
+    indexCoverage: publicRow.index_coverage,
+    // Repo Health Score складывается из показанных категорий (тот же totalsFromCategories, что compute)
+    repoHealthScore: fullOpen ? roundTotal(fullTotals.repoHealthScore) : null,
+    repoHealthCoverage: fullOpen ? Math.round(fullTotals.repoHealthCoverage * 1000) / 1000 : null,
     fullLocked: !fullOpen,
     modelVersion: publicRow.model_version,
     computedAt: publicRow.computed_at,
@@ -764,6 +766,7 @@ export function getRepoCard(
     deltaScore: rec.delta_score,
     opensCategory: rec.opens_category,
     source: rec.source,
+    channel: rec.channel,
   }));
   const baseFull = fullTotals.repoHealthScore;
   const channelDelta: DeltaEvaluator = (ruleChannel, patch) => {
@@ -801,6 +804,7 @@ export function getRepoCard(
         deltaScore: hidden ? null : rec.deltaScore,
         opensCategory: rec.opensCategory,
         source: "rule",
+        channel: rec.channel,
       };
     });
   // LOW-3: объединённая выдача — порядком движка, номера 1..N после фильтра (Ф1.3)
@@ -883,8 +887,8 @@ function liveViewerJob(db: Database, org: string, repo: string, viewerUserId: nu
   return row ? { status: row.status === "running" ? "running" : "queued" } : null;
 }
 
-/** Текст канального presence-правила без числа (С4): Δ полного Score виден только при доступе к CI и Security. */
-export const CHANNEL_DELTA_HIDDEN_TEXT = "улучшит CI/CD — прирост полного Score виден при доступе к CI и Security";
+/** Текст канального presence-правила без числа (С4): Δ Repo Health Score виден только при доступе к CI и Security. */
+export const CHANNEL_DELTA_HIDDEN_TEXT = "улучшит CI/CD — прирост Repo Health Score виден при доступе к CI и Security";
 
 const roundTotal = (x: number | null): number | null => (x === null ? null : Math.round(x));
 const splitRefs = (raw: string): string[] =>
@@ -947,7 +951,12 @@ function ruleKind(rec: RecRow): CardRecommendation["kind"] {
 
 export interface MetaResponse {
   modelVersion: string;
-  categories: { key: CategoryKey; title: string; weight: number }[];
+  /** В4.3 (К-Ф3.5): веса категории в двух показателях — indexWeight (HealthCraft Index; у CI/Security null — их там нет) и scoreWeight (Repo Health Score) */
+  categories: { key: CategoryKey; title: string; indexWeight: number | null; scoreWeight: number }[];
+  /** имя публичного показателя (рейтинг сортирует по нему) */
+  publicMetricTitle: "HealthCraft Index";
+  /** имя полного показателя (карточка с правами, кап 49) */
+  fullMetricTitle: "Repo Health Score";
   coverageNullBelow: number;
   repos: { scored: number; nullScore: number };
   /** Ф2.9/Ф2.15: лиз job из конфига планировщика — UI опрашивает анализ до этого горизонта */
@@ -960,7 +969,14 @@ export function getMeta(db: Database, opts: { now?: Date; leaseMs?: number } = {
   const rows = db.query(RATING_SQL).all(MODEL_VERSION, MODEL_VERSION) as RatingRow[];
   return {
     modelVersion: MODEL_VERSION,
-    categories: CATEGORY_ORDER.map((key) => ({ key, title: CATEGORY_TITLES[key], weight: SCORE_WEIGHTS[key] })),
+    categories: CATEGORY_ORDER.map((key) => ({
+      key,
+      title: CATEGORY_TITLES[key],
+      indexWeight: INDEX_WEIGHTS[key as IndexCategoryKey] ?? null,
+      scoreWeight: SCORE_WEIGHTS[key],
+    })),
+    publicMetricTitle: "HealthCraft Index",
+    fullMetricTitle: "Repo Health Score",
     coverageNullBelow: COVERAGE_NULL_BELOW,
     repos: {
       scored: rows.filter((r) => r.total !== null).length,

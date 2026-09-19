@@ -402,7 +402,7 @@ function MyReposSection({ hasPat, leaseMs }: { hasPat: boolean; leaseMs: number 
 
 function RepoRow({ entry, job, onScan }: { entry: MyReposResponse["entries"][number]; job: ScanJobState | null; onScan: () => void }) {
   const { org, repo } = entry;
-  const scored = entry.score !== null;
+  const scored = entry.healthcraftIndex !== null;
   return (
     <li className="rh-list__item">
       <Flex gap={4} alignItems="center" wrap>
@@ -437,7 +437,7 @@ function RepoRow({ entry, job, onScan }: { entry: MyReposResponse["entries"][num
         ) : scored ? (
           <Flex direction="column" alignItems="flex-end" gap={0}>
             <Flex gap={1} alignItems="baseline">
-              <Text variant="subheader-3">{fmtScore(entry.score)}</Text>
+              <Text variant="subheader-3">{fmtScore(entry.healthcraftIndex)}</Text>
               <Text color="secondary">/ 100 в рейтинге</Text>
             </Flex>
             {entry.lastScanAt && (

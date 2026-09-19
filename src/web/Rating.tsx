@@ -41,7 +41,7 @@ const LANG_ALL = " all";
 const LANG_NONE = " none";
 
 const SORT_OPTIONS = [
-  { value: "score", content: "Score" },
+  { value: "index", content: "Score" },
   { value: "likes", content: "Лайки" },
   { value: "activity", content: "Последняя активность" },
   { value: "coverage", content: "Покрытие данными" },
@@ -68,7 +68,7 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
   }, [search]);
   const { state, reload } = useJson<RatingResponse>(`/api/repos${apiSearch ? `?${apiSearch}` : ""}`);
 
-  const sort = params.get("sort") ?? "score";
+  const sort = params.get("sort") ?? "index";
   const order = params.get("order") ?? "desc";
   const view = params.get("view") === "unscored" ? "unscored" : "scored";
   const langParam = params.has("lang") ? (params.get("lang") === "" ? LANG_NONE : params.get("lang")!) : LANG_ALL;
@@ -148,7 +148,7 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
             pin="round-brick"
             value={[sort]}
             options={SORT_OPTIONS}
-            onUpdate={(v) => setParams({ sort: v[0] ?? "score" })}
+            onUpdate={(v) => setParams({ sort: v[0] ?? "index" })}
           />
           <ActionTooltip title={order === "desc" ? "По убыванию" : "По возрастанию"}>
             <Button
@@ -316,7 +316,7 @@ function UnscoredTable({ items, meta, hasFilters }: { items: Item[]; meta: MetaR
 
 function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generatedAt: string | null }) {
   if (!meta) return <SkeletonRows rows={4} height={64} />;
-  const ratingWeight = meta.categories.filter((c) => !NOT_IN_RATING.has(c.key)).reduce((sum, c) => sum + c.weight, 0);
+  const ratingWeight = meta.categories.reduce((sum, c) => sum + (c.indexWeight ?? 0), 0);
   return (
     <>
       <AsideSection title="О рейтинге">
@@ -333,7 +333,7 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
             .filter((c) => !NOT_IN_RATING.has(c.key))
             .map((c) => (
               <DefinitionList.Item key={c.key} name={c.title}>
-                <span title={`номинальный вес в модели — ${c.weight}%`}>{Math.round((c.weight / Math.max(1, ratingWeight)) * 100)}%</span>
+                <span title={`вес в HealthCraft Index — ${c.indexWeight}`}>{Math.round(((c.indexWeight ?? 0) / Math.max(1, ratingWeight)) * 100)}%</span>
               </DefinitionList.Item>
             ))}
         </DefinitionList>
@@ -458,7 +458,7 @@ function buildColumns(categories: MetaResponse["categories"], rankOffset: number
 }
 
 function ScoreCell({ item }: { item: Item }) {
-  if (item.score === null) {
+  if (item.healthcraftIndex === null) {
     return (
       <Label theme="unknown" size="xs">
         {NO_SCORE}
@@ -473,10 +473,10 @@ function ScoreCell({ item }: { item: Item }) {
             Из истории
           </Label>
         )}
-        <Text variant="subheader-2">{fmtScore(item.score)}</Text>
+        <Text variant="subheader-2">{fmtScore(item.healthcraftIndex)}</Text>
       </Flex>
       <div style={{ width: 64 }}>
-        <Progress value={item.score} size="xs" theme={scoreTheme(item.score)} />
+        <Progress value={item.healthcraftIndex} size="xs" theme={scoreTheme(item.healthcraftIndex)} />
       </div>
     </Flex>
   );

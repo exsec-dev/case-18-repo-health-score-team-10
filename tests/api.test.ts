@@ -60,8 +60,8 @@ describe("рейтинг: выборка строк", () => {
     seedScore(t, repoId, newer, { total: 88 });
 
     const item = listRepos(t.db, q()).items.find((i) => i.repo === "by-id");
-    expect(item?.score).toBe(88);
-    expect(getRepoCard(t.db, "z-order", "by-id")?.score?.totalRating).toBe(88);
+    expect(item?.healthcraftIndex).toBe(88);
+    expect(getRepoCard(t.db, "z-order", "by-id")?.score?.healthcraftIndex).toBe(88);
 
     t.db.query("DELETE FROM scores WHERE repo_id = ?").run(repoId);
     t.db.query("DELETE FROM scans WHERE repo_id = ?").run(repoId);
@@ -84,7 +84,7 @@ describe("рейтинг: tri-state (закон 2)", () => {
     for (const order of ["desc", "asc"] as const) {
       const res = listRepos(t.db, q({ order }));
       expect(names(res.items)).not.toContain("nodata/dark-repo");
-      expect(res.items.every((i) => i.score !== null)).toBe(true);
+      expect(res.items.every((i) => i.healthcraftIndex !== null)).toBe(true);
       expect(res.total).toBe(7);
       expect(res.nulls).toBe(1);
       expect(names(res.nullItems)).toEqual(["nodata/dark-repo"]);
@@ -114,11 +114,11 @@ describe("рейтинг: tri-state (закон 2)", () => {
 describe("рейтинг: сортировки", () => {
   test("дефолт — Score ↓", () => {
     const res = listRepos(t.db, q());
-    expect(res.items.map((i) => i.score)).toEqual([74, 62, 60, 56, 50, 47, 35]);
+    expect(res.items.map((i) => i.healthcraftIndex)).toEqual([74, 62, 60, 56, 50, 47, 35]);
   });
 
   test("score asc", () => {
-    expect(listRepos(t.db, q({ order: "asc" })).items.map((i) => i.score)).toEqual([35, 47, 50, 56, 60, 62, 74]);
+    expect(listRepos(t.db, q({ order: "asc" })).items.map((i) => i.healthcraftIndex)).toEqual([35, 47, 50, 56, 60, 62, 74]);
   });
 
   test("likes desc", () => {
@@ -187,7 +187,7 @@ describe("рейтинг: фильтры и фасеты", () => {
 
   test("пагинация: срез и totalPages", () => {
     const p2 = listRepos(t.db, q({ perPage: 2, page: 2 }));
-    expect(p2.items.map((i) => i.score)).toEqual([60, 56]);
+    expect(p2.items.map((i) => i.healthcraftIndex)).toEqual([60, 56]);
     expect(p2.totalPages).toBe(4);
     expect(listRepos(t.db, q({ perPage: 2, page: 99 })).items).toEqual([]);
   });
@@ -251,7 +251,7 @@ describe("карточка репозитория", () => {
 
   test("скан и скор со всеми полями показа", () => {
     expect(card.scan).toMatchObject({ id: scanId, status: "partial", trigger: "user" });
-    expect(card.score?.totalRating).toBe(67);
+    expect(card.score?.healthcraftIndex).toBe(67);
     expect(card.score?.modelVersion).toBe(MODEL_VERSION);
     expect(card.score?.noData[0]).toContain("security");
     expect(card.derived).toMatchObject({ commitsPerMonth: 12 });
@@ -343,14 +343,14 @@ describe("изоляция own/public и эвикция (В4/Б4)", () => {
     // рейтинг: total_rating последнего скана; категории каналов с правами не публикуются
     const rating = listRepos(iso.db, q());
     expect(rating.items.map((i) => `${i.org}/${i.repo}`)).toEqual(["iso/dual"]);
-    expect(rating.items[0]!.score).toBe(70);
+    expect(rating.items[0]!.healthcraftIndex).toBe(70);
     expect(rating.items[0]!.categories.cicd).toBeNull();
     expect(rating.items[0]!.categories.security).toBeNull();
     // карточка: Score в рейтинге последнего пригодного скана; полный Score — из
     // показанных категорий (круг 2), а не сохранённый total_full
     const card = getRepoCard(iso.db, "iso", "dual", { access: GRANTED })!;
-    expect(card.score!.totalRating).toBe(70);
-    expect(card.score!.totalFull).toBe(Math.round(totalsFromCategories(card.score!.categories, { codeEmpty: false, secretsCritical: false }).repoHealthScore!));
+    expect(card.score!.healthcraftIndex).toBe(70);
+    expect(card.score!.repoHealthScore).toBe(Math.round(totalsFromCategories(card.score!.categories, { codeEmpty: false, secretsCritical: false }).repoHealthScore!));
   });
 
   test("stale-маркер рейтинга не выдаёт фолбэк каналов с правами", () => {
@@ -385,7 +385,7 @@ describe("изоляция own/public и эвикция (В4/Б4)", () => {
     expect(getRepoCard(iso.db, "iso", "evicted", { access: { ...GRANTED, repo: "denied" } })).toBeNull();
     expect(getRepoCard(iso.db, "iso", "evicted", { access: GRANTED })!.repo.repo).toBe("evicted");
     // эвикция чужих скоров нейтральна: у dual ничего не поменялось
-    expect(getRepoCard(iso.db, "iso", "dual")!.score!.totalRating).toBe(70);
+    expect(getRepoCard(iso.db, "iso", "dual")!.score!.healthcraftIndex).toBe(70);
   });
 
   test("code_empty маркер доезжает до карточки (Score 0 как данные)", () => {
@@ -394,14 +394,14 @@ describe("изоляция own/public и эвикция (В4/Б4)", () => {
     seedScore(iso, repoId, scanId, { total: 0, coverage: 1 });
     iso.db.query("UPDATE scores SET code_empty = 1 WHERE scan_id = ?").run(scanId);
     const card = getRepoCard(iso.db, "iso", "empty-code")!;
-    expect(card.score!.totalRating).toBe(0);
+    expect(card.score!.healthcraftIndex).toBe(0);
     expect(card.markers.codeEmpty).toBe(true);
     // NULL-скор (недостаточно данных) маркером не обладает
     const nullRepo = seedRepo(iso, { org: "iso", repo: "null-score" });
     const nullScan = seedScan(iso, nullRepo, { status: "partial" });
     seedScore(iso, nullRepo, nullScan, { total: null, coverage: 0.2 });
     const nullCard = getRepoCard(iso.db, "iso", "null-score")!;
-    expect(nullCard.score!.totalRating).toBeNull();
+    expect(nullCard.score!.healthcraftIndex).toBeNull();
     expect(nullCard.markers.codeEmpty).toBe(false);
   });
 });
@@ -454,9 +454,9 @@ describe("единая карточка: матрица доступа зрит�
   test("аноним: Score в рейтинге есть; полного итога, чисел и фактов CI/Security нет — во всём JSON", () => {
     const card = view(ANON)!;
     expect(card.access).toEqual({ cicd: "no-pat", appsec: "no-pat" });
-    expect(card.score!.totalRating).toBe(61);
-    expect(card.score!.totalFull).toBeNull();
-    expect(card.score!.coverageFull).toBeNull();
+    expect(card.score!.healthcraftIndex).toBe(61);
+    expect(card.score!.repoHealthScore).toBeNull();
+    expect(card.score!.repoHealthCoverage).toBeNull();
     expect(card.score!.fullLocked).toBe(true);
     expect(card.score!.categories.cicd).toEqual({ score: null, submetrics: {}, locked: "no-pat", weight: 15 });
     expect(card.score!.categories.security).toEqual({ score: null, submetrics: {}, locked: "no-pat", weight: 20 });
@@ -478,7 +478,7 @@ describe("единая карточка: матрица доступа зрит�
       const card = view({ cicd: reason, appsec: reason, repo: "granted" })!;
       expect(card.score!.categories.cicd.locked).toBe(reason);
       expect(card.score!.categories.security.locked).toBe(reason);
-      expect(card.score!.totalFull).toBeNull();
+      expect(card.score!.repoHealthScore).toBeNull();
       expect(JSON.stringify(card)).not.toContain("runs_count");
     }
   });
@@ -489,7 +489,7 @@ describe("единая карточка: матрица доступа зрит�
     expect(card.score!.categories.cicd.locked).toBeUndefined();
     expect(card.score!.categories.security.locked).toBe("denied");
     expect(card.score!.fullLocked).toBe(true);
-    expect(card.score!.totalFull).toBeNull();
+    expect(card.score!.repoHealthScore).toBeNull();
     expect(rules(card)).toEqual(["license-missing", "fix-red-runs", "speed-up-pipeline"]);
     expect(keys(card)).toContain("cicd.runs");
     expect(keys(card)).not.toContain("appsec.findings");
@@ -502,7 +502,7 @@ describe("единая карточка: матрица доступа зрит�
     const card = view({ cicd: "denied", appsec: "granted", repo: "granted" })!;
     expect(card.score!.categories.security.score).toBe(channelCats.security.score);
     expect(card.score!.categories.cicd.locked).toBe("denied");
-    expect(card.score!.totalFull).toBeNull();
+    expect(card.score!.repoHealthScore).toBeNull();
     expect(rules(card)).toEqual(["license-missing", "appsec-critical"]);
     const json = JSON.stringify(card);
     expect(json).toContain("severity_counts");
@@ -512,8 +512,8 @@ describe("единая карточка: матрица доступа зрит�
   test("оба канала: полный итог и всё содержимое", () => {
     const card = view({ cicd: "granted", appsec: "granted", repo: "granted" })!;
     expect(card.score!.fullLocked).toBe(false);
-    expect(card.score!.totalFull).toBe(49);
-    expect(card.score!.coverageFull).toBe(1);
+    expect(card.score!.repoHealthScore).toBe(49);
+    expect(card.score!.repoHealthCoverage).toBe(1);
     expect(rules(card)).toEqual(["license-missing", "fix-red-runs", "speed-up-pipeline", "appsec-critical"]);
     // канальные данные берутся из скана, где они собраны ok, — фолбэка «из истории» у них нет (круг 2)
     expect(card.score!.stale).toEqual(["issues.stats"]);
@@ -524,7 +524,7 @@ describe("единая карточка: матрица доступа зрит�
     expect(view({ cicd: "denied", appsec: "denied", repo: "denied" }, "priv")).toBeNull();
     expect(view({ cicd: "check-failed", appsec: "check-failed", repo: "check-failed" }, "priv")).toBeNull();
     const card = view({ cicd: "granted", appsec: "denied", repo: "granted" }, "priv")!;
-    expect(card.score!.totalRating).toBe(61);
+    expect(card.score!.healthcraftIndex).toBe(61);
     expect(card.score!.categories.security.locked).toBe("denied");
   });
 
@@ -584,7 +584,7 @@ describe("мета", () => {
     expect(meta.modelVersion).toBe(MODEL_VERSION);
     expect(meta.categories.map((c) => c.key)).toEqual(["documentation", "cicd", "security", "activity", "issues", "code"]);
     expect(meta.categories.map((c) => c.title)).toEqual(["Документация", "CI/CD", "Security", "Активность", "Issues", "Code health"]);
-    expect(meta.categories.reduce((s, c) => s + c.weight, 0)).toBe(100);
+    expect(meta.categories.reduce((s, c) => s + c.scoreWeight, 0)).toBe(100);
     expect(meta.coverageNullBelow).toBe(0.4);
     expect(meta.repos.nullScore).toBe(1);
     expect(meta.repos.scored).toBeGreaterThanOrEqual(7);

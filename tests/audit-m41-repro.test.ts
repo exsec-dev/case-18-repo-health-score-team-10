@@ -69,7 +69,7 @@ describe("Ф1.1 (HIGH-1): из какого скана рейтинг", () => {
 
     // периодический скан серверным токеном: все публичные факты ok
     await runScan({ ...base, collectRest: async () => ({ facts: restFacts, repoMeta: meta, channelErrors: [] }) }, "victim/public-repo", { trigger: "periodic" });
-    const before = listRepos(db, DEFAULT_QUERY).items.find((i) => i.repo === "public-repo")?.score ?? null;
+    const before = listRepos(db, DEFAULT_QUERY).items.find((i) => i.repo === "public-repo")?.healthcraftIndex ?? null;
 
     // пользовательский скан узким PAT: issues недоступны (no-data access)
     const narrowRest = [
@@ -86,7 +86,7 @@ describe("Ф1.1 (HIGH-1): из какого скана рейтинг", () => {
       "victim/public-repo",
       { trigger: "user", userId: user, userToken: "narrow-pat" },
     );
-    const after = listRepos(db, DEFAULT_QUERY).items.find((i) => i.repo === "public-repo")?.score ?? null;
+    const after = listRepos(db, DEFAULT_QUERY).items.find((i) => i.repo === "public-repo")?.healthcraftIndex ?? null;
     const lastActivity = (db.query("SELECT last_activity_at FROM repos WHERE repo_slug = 'public-repo'").get() as { last_activity_at: string }).last_activity_at;
     expect(before).not.toBeNull();
     expect({ after, lastActivity }).toEqual({ after: before, lastActivity: "2026-09-10T00:00:00Z" });

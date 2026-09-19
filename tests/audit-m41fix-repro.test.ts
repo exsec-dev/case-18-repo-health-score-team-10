@@ -142,9 +142,9 @@ describe("С1: канальная часть карточки и полный Sc
     const snap = (c: typeof before) => ({
       cicd: c.score!.categories.cicd.score,
       security: c.score!.categories.security.score,
-      totalFull: c.score!.totalFull,
+      repoHealthScore: c.score!.repoHealthScore,
     });
-    expect(snap(before).totalFull).not.toBeNull();
+    expect(snap(before).repoHealthScore).not.toBeNull();
 
     // скан с отозванным PAT: клон по PAT не удался, REST и AppSec — 401
     const revoked = [
@@ -158,7 +158,7 @@ describe("С1: канальная часть карточки и полный Sc
     const after = getRepoCard(db, "team", "app", { access: GRANTED })!;
     expect(snap(after)).toEqual(snap(before));
     const shown = composedFull(after.score!.categories);
-    expect(Math.abs(after.score!.totalFull! - shown)).toBeLessThanOrEqual(0.5);
+    expect(Math.abs(after.score!.repoHealthScore! - shown)).toBeLessThanOrEqual(0.5);
   });
 });
 
@@ -178,11 +178,11 @@ describe("С2: приватный репо без пригодного скан�
     const card = getRepoCard(db, "own", "private", { access: GRANTED })!;
     expect(card).not.toBeNull();
     expect({
-      totalRating: typeof card.score?.totalRating,
+      healthcraftIndex: typeof card.score?.healthcraftIndex,
       cicd: typeof card.score?.categories.cicd.score,
       security: typeof card.score?.categories.security.score,
-      totalFull: typeof card.score?.totalFull,
-    }).toEqual({ totalRating: "number", cicd: "number", security: "number", totalFull: "number" });
+      repoHealthScore: typeof card.score?.repoHealthScore,
+    }).toEqual({ healthcraftIndex: "number", cicd: "number", security: "number", repoHealthScore: "number" });
   });
 });
 

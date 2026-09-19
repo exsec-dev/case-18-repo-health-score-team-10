@@ -337,8 +337,8 @@ function ScoreAside({ card, meta }: { card: Card; meta: MetaResponse | null }) {
             <ScoreFigure
               title="Score в рейтинге"
               help="Считают 4 категории: Документация, Активность, Issues, Code health. Так репозитории сравниваются в общем рейтинге."
-              total={score.totalRating}
-              coverage={score.coverageRating}
+              total={score.healthcraftIndex}
+              coverage={score.indexCoverage}
             />
             {score.fullLocked ? (
               <Flex direction="column" gap={1}>
@@ -355,8 +355,8 @@ function ScoreAside({ card, meta }: { card: Card; meta: MetaResponse | null }) {
               <ScoreFigure
                 title="Полный Score (с CI и Security)"
                 help="Все 6 категорий. Виден участникам репозитория с доступом к данным CI и Security."
-                total={score.totalFull}
-                coverage={score.coverageFull ?? 0}
+                total={score.repoHealthScore}
+                coverage={score.repoHealthCoverage ?? 0}
               />
             )}
           </Flex>

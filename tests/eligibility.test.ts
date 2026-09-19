@@ -190,20 +190,20 @@ describe("чтение: последний пригодный (P) и после�
 
     const item = listRepos(t.db, DEFAULT_QUERY).items.find((i) => i.repo === "repo")!;
     // круг 2 (LOW-2): статус и время — последнего скана, как в карточке
-    expect({ score: item.score, status: item.scanStatus }).toEqual({ score: 60, status: "running" });
+    expect({ score: item.healthcraftIndex, status: item.scanStatus }).toEqual({ score: 60, status: "running" });
     expect(getMeta(t.db).repos).toEqual({ scored: 1, nullScore: 0 });
 
     const granted = { cicd: "granted", appsec: "granted", repo: "granted" } as const;
     const card = getRepoCard(t.db, "pl", "repo", { access: granted })!;
     expect(card.scan).toMatchObject({ id: Number(running.lastInsertRowid), status: "running" });
     expect({
-      totalRating: card.score!.totalRating,
-      totalFull: card.score!.totalFull,
+      healthcraftIndex: card.score!.healthcraftIndex,
+      repoHealthScore: card.score!.repoHealthScore,
       docs: card.score!.categories.documentation.score,
       cicd: card.score!.categories.cicd.score,
     }).toEqual({
-      totalRating: 60,
-      totalFull: Math.round(totalsFromCategories(card.score!.categories, { codeEmpty: false, secretsCritical: false }).repoHealthScore!),
+      healthcraftIndex: 60,
+      repoHealthScore: Math.round(totalsFromCategories(card.score!.categories, { codeEmpty: false, secretsCritical: false }).repoHealthScore!),
       docs: 61,
       cicd: 100, // посчитана из ok-фактов CI скана L (зелёные быстрые раны), не из сохранённой строки
     });
@@ -216,7 +216,7 @@ describe("чтение: последний пригодный (P) и после�
 
     // аноним: публичная часть та же, канальной нет
     const anon = getRepoCard(t.db, "pl", "repo")!;
-    expect(anon.score!.totalRating).toBe(60);
+    expect(anon.score!.healthcraftIndex).toBe(60);
     expect(anon.recommendations.map((r) => r.ruleId)).toEqual(["license-missing"]);
     expect(anon.evidence.some((e) => CHANNEL_KINDS.includes(e.key))).toBe(false);
   });
@@ -244,7 +244,7 @@ describe("«мои репо» и заявка (К-Ф1.1)", () => {
     seedScore(t, repoId, seedScan(t, repoId), { total: 71 });
     seedScore(t, repoId, seedScan(t, repoId, { ratingEligible: false }), { total: 12 });
     const out = await listMyRepos(t.db, userId);
-    expect(out.entries.map((e) => [e.repo, e.score])).toEqual([["mine", 71]]);
+    expect(out.entries.map((e) => [e.repo, e.healthcraftIndex])).toEqual([["mine", 71]]);
   });
 
   test("listMyRepos (круг 2): приватный без пригодного скана — Score последнего не-bad; время — последнего анализа", async () => {
@@ -264,7 +264,7 @@ describe("«мои репо» и заявка (К-Ф1.1)", () => {
     }
     const out = await listMyRepos(t.db, userId);
     // порядок избранного — по added_at (здесь равны): сортируем по репо
-    expect(out.entries.sort((a, b) => a.repo.localeCompare(b.repo)).map((e) => [e.repo, e.score, e.lastScanAt])).toEqual([
+    expect(out.entries.sort((a, b) => a.repo.localeCompare(b.repo)).map((e) => [e.repo, e.healthcraftIndex, e.lastScanAt])).toEqual([
       ["open", null, "2026-09-12T00:00:00Z"],
       ["secret", 44, "2026-09-11T00:00:00Z"],
     ]);

@@ -86,7 +86,8 @@ describe("Ф3.1/Ф3.2: веса публичной четвёрки 23/23/23/31"
 // ---------------------------------------------------------------------------
 
 describe("Ф3.1/Ф3.5: публичное число зовётся HealthCraft Index", () => {
-  repro("items[] несёт healthcraftIndex (не score); сортировка sort=index валидна", () => {
+  // закрыто блоком Б3 — обёртка `repro` снята, утверждение не менялось
+  test("items[] несёт healthcraftIndex (не score); сортировка sort=index валидна", () => {
     const t = tempDb();
     seedRating(t);
     const top = listRepos(t.db, { ...DEFAULT_QUERY, sort: "index" as SortKey }).items[0]! as unknown as Record<string, unknown>;
@@ -96,7 +97,8 @@ describe("Ф3.1/Ф3.5: публичное число зовётся HealthCraft 
     expect(parsed.ok).toBe(true);
   });
 
-  repro("/api/meta называет показатели: publicMetricTitle/fullMetricTitle и веса indexWeight/scoreWeight", () => {
+  // закрыто блоком Б3 — обёртка `repro` снята, утверждение не менялось
+  test("/api/meta называет показатели: publicMetricTitle/fullMetricTitle и веса indexWeight/scoreWeight", () => {
     const t = tempDb();
     seedRating(t);
     const meta = getMeta(t.db) as unknown as Record<string, unknown> & {

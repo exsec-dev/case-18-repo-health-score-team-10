@@ -71,9 +71,9 @@ function summarySection(card: RepoCard): string[] {
     );
     return out;
   }
-  if (score.totalRating === null) {
+  if (score.healthcraftIndex === null) {
     out.push(
-      `**Недостаточно данных для оценки.** Покрытие данными — ${pct(score.coverageRating)} при пороге ${pct(COVERAGE_NULL_BELOW)}.`,
+      `**Недостаточно данных для оценки.** Покрытие данными — ${pct(score.indexCoverage)} при пороге ${pct(COVERAGE_NULL_BELOW)}.`,
       "",
       "Это не ноль и не плохая оценка: при таком покрытии честного числа не существует.",
       "",
@@ -92,7 +92,7 @@ function summarySection(card: RepoCard): string[] {
   const top = withDelta.length > 0 ? withDelta.reduce((a, b) => ((a.deltaScore ?? 0) >= (b.deltaScore ?? 0) ? a : b)) : null;
 
   out.push(
-    `**Score в рейтинге (4 категории): ${Math.round(score.totalRating)} из 100** при покрытии данными ${pct(score.coverageRating)}` +
+    `**Score в рейтинге (4 категории): ${Math.round(score.healthcraftIndex)} из 100** при покрытии данными ${pct(score.indexCoverage)}` +
       `${card.markers.staleFacts ? " (часть фактов взята из истории при сбое канала)" : ""}.`,
     "",
   );
@@ -122,10 +122,10 @@ function fullScoreLine(card: RepoCard): string[] {
   if (score.fullLocked) {
     return ["Полный Score (с CI и Security) виден зрителю с доступом к CI и Security этого репозитория."];
   }
-  if (score.totalFull === null || score.coverageFull === null) {
+  if (score.repoHealthScore === null || score.repoHealthCoverage === null) {
     return ["Полный Score (с CI и Security): недостаточно данных для оценки."];
   }
-  return [`Полный Score (с CI и Security): ${Math.round(score.totalFull)} из 100 при покрытии данными ${pct(score.coverageFull)}.`];
+  return [`Полный Score (с CI и Security): ${Math.round(score.repoHealthScore)} из 100 при покрытии данными ${pct(score.repoHealthCoverage)}.`];
 }
 
 // ---------- 3. таблица категорий ----------

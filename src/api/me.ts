@@ -22,8 +22,8 @@ export interface MyRepoEntry {
   /** logo.url платформы из ответа namespace (дисплей) */
   logoUrl: string | null;
   languageColor: string | null;
-  /** Score в рейтинге (total_rating) последнего пригодного скана (приватный без него — последнего не-bad, круг 2); null = не оценивался */
-  score: number | null;
+  /** HealthCraft Index последнего пригодного скана (приватный без него — последнего не-bad, круг 2); null = не оценивался (В4.3: читает healthcraft_index) */
+  healthcraftIndex: number | null;
   /** время последнего анализа репо ЛЮБЫМ автором (не own-скан зрителя — см. `FavoriteCheckResponse.lastOwnScanAt`, М1) */
   lastScanAt: string | null;
   /**
@@ -43,18 +43,20 @@ export interface MyReposResult {
 }
 
 /**
- * Score в рейтинге и время последнего анализа одного репо — правило круга 2
+ * HealthCraft Index и время последнего анализа одного репо — правило круга 2
  * (решение С2 (кр.1)): последний ПРИГОДНЫЙ скан P; приватный репо без P —
  * последний не-bad; время — последний скан L.
  *
  * В4.2-port-fix (П4, MAJOR №1): один хелпер на все записи `listMyRepos`.
  * Копию правила заводить нельзя — расходились бы снова.
+ * В4.3 (Б3-кабинет): сырой SQL переведён на дропаемую total_rating →
+ * healthcraft_index.
  */
-function ratingScoreOf(db: Database, org: string, repo: string): { score: number | null; lastScanAt: string | null } {
+function ratingScoreOf(db: Database, org: string, repo: string): { healthcraftIndex: number | null; lastScanAt: string | null } {
   const row = db.query("SELECT id, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as
     | { id: number; visibility: string }
     | null;
-  if (!row) return { score: null, lastScanAt: null };
+  if (!row) return { healthcraftIndex: null, lastScanAt: null };
   const scoreOf = (pick: string) =>
     db
       .query(
@@ -67,7 +69,7 @@ function ratingScoreOf(db: Database, org: string, repo: string): { score: number
   const lastScan = db.query("SELECT finished_at, started_at FROM scans WHERE repo_id = ? ORDER BY id DESC LIMIT 1").get(row.id) as
     | { finished_at: string | null; started_at: string }
     | null;
-  return { score: scored?.total ?? null, lastScanAt: lastScan ? (lastScan.finished_at ?? lastScan.started_at) : null };
+  return { healthcraftIndex: scored?.total ?? null, lastScanAt: lastScan ? (lastScan.finished_at ?? lastScan.started_at) : null };
 }
 
 /**
@@ -249,7 +251,7 @@ export async function listMyRepos(db: Database, userId: number | null): Promise<
           | { title: string | null; language: string | null }
           | null)
       : null;
-    const known = mayRead ? ratingScoreOf(db, f.org_slug, f.repo_slug) : { score: null, lastScanAt: null };
+    const known = mayRead ? ratingScoreOf(db, f.org_slug, f.repo_slug) : { healthcraftIndex: null, lastScanAt: null };
     return {
       org: f.org_slug,
       repo: f.repo_slug,
@@ -258,7 +260,7 @@ export async function listMyRepos(db: Database, userId: number | null): Promise<
       lastActivityAt: null,
       logoUrl: null,
       languageColor: null,
-      score: known.score,
+      healthcraftIndex: known.healthcraftIndex,
       lastScanAt: known.lastScanAt,
       planned: plannedWork(db, userId, f.org_slug, f.repo_slug),
     };

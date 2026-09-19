@@ -454,7 +454,7 @@ interface CheckBody {
 
 interface MyReposBody {
   // Ф2.20 (решение 18.09): кабинет favorites-only — поле `sources` удалено
-  entries: { org: string; repo: string; title: string | null; language: string | null; lastScanAt: string | null; score: number | null }[];
+  entries: { org: string; repo: string; title: string | null; language: string | null; lastScanAt: string | null; healthcraftIndex: number | null }[];
 }
 
 describe("П2 (Н1): проверка избранного ставит сканы через requestUserScan — со всеми капами", () => {
@@ -493,7 +493,7 @@ describe("П4 (MAJOR №1): listMyRepos считает score правилом к
     const body = (await res.json()) as MyReposBody;
     const priv = body.entries.find((e) => e.org === "own" && e.repo === "priv");
     expect({
-      privScore: priv?.score ?? null,
+      privScore: priv?.healthcraftIndex ?? null,
       unionGone: body.entries.some((e) => e.org === "own" && e.repo === "pub"),
     }).toEqual({ privScore: 64, unionGone: false });
   }, 30_000);
@@ -510,8 +510,8 @@ describe("П6 (С4): мета репо не отдаётся зрителю бе
       title: entry!.title,
       language: entry!.language,
       lastScanAt: entry!.lastScanAt,
-      score: entry!.score,
-    }).toEqual({ title: null, language: null, lastScanAt: null, score: null });
+      healthcraftIndex: entry!.healthcraftIndex,
+    }).toEqual({ title: null, language: null, lastScanAt: null, healthcraftIndex: null });
   }, 30_000);
 });
 
@@ -526,8 +526,8 @@ describe("П10 (Н-1, круг 2): признак прав читает пару
       title: entry!.title,
       language: entry!.language,
       lastScanAt: entry!.lastScanAt,
-      score: entry!.score,
-    }).toEqual({ title: null, language: null, lastScanAt: null, score: null });
+      healthcraftIndex: entry!.healthcraftIndex,
+    }).toEqual({ title: null, language: null, lastScanAt: null, healthcraftIndex: null });
   }, 30_000);
 
   // вторая половина контракта П10 («остальные два дизъюнкта не трогаются»)
@@ -538,10 +538,10 @@ describe("П10 (Н-1, круг 2): признак прав читает пару
     const body = (await res.json()) as MyReposBody;
     const entry = body.entries.find((e) => e.org === "evicted" && e.repo === "pub");
     expect(entry).toBeDefined();
-    expect({ title: entry!.title, language: entry!.language, score: entry!.score }).toEqual({
+    expect({ title: entry!.title, language: entry!.language, healthcraftIndex: entry!.healthcraftIndex }).toEqual({
       title: "Вытесненный",
       language: "Go",
-      score: 55,
+      healthcraftIndex: 55,
     });
   }, 30_000);
 });

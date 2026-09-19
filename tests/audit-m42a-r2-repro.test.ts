@@ -582,7 +582,7 @@ describe("Р15: причина no-data Security наблюдаема, счёт �
     const securityNoData = card?.score?.noData.find((raw) => raw.startsWith("security:")) ?? "";
     expect(securityNoData).toContain("type=SECRETS");
     expect(securityNoData).toContain("after 2 attempts");
-    expect(card?.score?.totalRating).toBe(60); // счёт не тронут
+    expect(card?.score?.healthcraftIndex).toBe(60); // счёт не тронут
   });
 });
 

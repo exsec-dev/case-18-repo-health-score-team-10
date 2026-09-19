@@ -366,11 +366,11 @@ describe("Б4 (Ф2.17): кабинет показывает «работа за�
       const out = await listMyRepos(t.db, uid);
       const entry = out.entries.find((e) => e.org === "owner" && e.repo === "secret");
       expect(entry?.planned).toBe(true);
-      expect({ title: entry?.title, language: entry?.language, lastScanAt: entry?.lastScanAt, score: entry?.score }).toEqual({
+      expect({ title: entry?.title, language: entry?.language, lastScanAt: entry?.lastScanAt, healthcraftIndex: entry?.healthcraftIndex }).toEqual({
         title: null,
         language: null,
         lastScanAt: null,
-        score: null,
+        healthcraftIndex: null,
       });
     } finally {
       t.close();

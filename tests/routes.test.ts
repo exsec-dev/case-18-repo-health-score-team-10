@@ -73,7 +73,7 @@ describe("роуты единой карточки (К2)", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/html");
     const html = await res.text();
-    for (const leak of ["severity_counts", "runs_count", "totalRating"]) expect(html).not.toContain(leak);
+    for (const leak of ["severity_counts", "runs_count", "totalRating", "repoHealthScore"]) expect(html).not.toContain(leak);
   });
 
   test("приватный репо: аноним и вошедший без PAT получают 404 без данных (карточка и .md)", async () => {
@@ -92,10 +92,10 @@ describe("роуты единой карточки (К2)", () => {
     const res = await fetch(`${base}/api/repos/pub/repo`, asStranger);
     expect(res.status).toBe(200);
     const text = await res.text();
-    const card = JSON.parse(text) as { access: unknown; score: { totalRating: number; totalFull: number | null; fullLocked: boolean } };
+    const card = JSON.parse(text) as { access: unknown; score: { healthcraftIndex: number; repoHealthScore: number | null; fullLocked: boolean } };
     expect(card.access).toEqual({ cicd: "no-pat", appsec: "no-pat" });
-    expect(card.score.totalRating).toBe(60);
-    expect(card.score.totalFull).toBeNull();
+    expect(card.score.healthcraftIndex).toBe(60);
+    expect(card.score.repoHealthScore).toBeNull();
     expect(card.score.fullLocked).toBe(true);
     for (const leak of ["severity_counts", "runs_count", "fix-red-runs"]) expect(text).not.toContain(leak);
     const md = await (await fetch(`${base}/api/repos/pub/repo/report.md`)).text();
