@@ -71,7 +71,7 @@ export function MePage({ meta }: { meta: MetaResponse | null }) {
           </>
         }
       />
-      <JobsPanel jobs={jobs.jobs} reload={jobs.reload} />
+      <JobsPanel jobs={jobs.jobs} reload={jobs.reload} leaseMs={leaseMs} />
       {/* В4.4 (кластер I): кабинет favorites-only — список живёт и без PAT;
           токен нужен для проверки прав, автозапуска и посева из namespace */}
       <MyReposSection hasPat={data.hasPat} leaseMs={leaseMs} serverJobs={jobs.jobs} />
@@ -496,6 +496,7 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
                 job={jobs[slug] ?? null}
                 serverJob={serverJobs?.active.find((j) => j.slug === slug) ?? null}
                 busy={busy !== null}
+                etaNote={`обычно до ${Math.max(1, Math.round(leaseMs / 60_000))} минут`}
                 onScan={() => void startScan(slug)}
                 onCheck={() => void check(entry.org, entry.repo)}
                 onRemove={() => void removeFav(entry.org, entry.repo)}
@@ -521,6 +522,7 @@ function RepoRow({
   job,
   serverJob,
   busy,
+  etaNote,
   onScan,
   onCheck,
   onRemove,
@@ -532,6 +534,8 @@ function RepoRow({
   job: ScanJobState | null;
   serverJob: import("../api/me").MyJob | null;
   busy: boolean;
+  /** M-4: «обычно до N минут» — из лиза job (/api/meta) */
+  etaNote: string;
   onScan: () => void;
   onCheck: () => void;
   onRemove: () => void;
@@ -540,7 +544,7 @@ function RepoRow({
   const scored = entry.healthcraftIndex !== null;
   // В4.4 (кластер M-14): серверный статус job — приоритетнее локального опроса
   const statusCell = serverJob ? (
-    <Flex gap={2} alignItems="center">
+    <Flex gap={2} alignItems="center" title={etaNote}>
       <Spin size="xs" />
       <Text color="complementary">{serverJob.phase === "queued" ? "В очереди" : "Сканируется"}</Text>
     </Flex>
@@ -550,7 +554,7 @@ function RepoRow({
         затянулось — смотрите панель заданий
       </Label>
     ) : (
-      <Flex gap={2} alignItems="center">
+      <Flex gap={2} alignItems="center" title={etaNote}>
         <Spin size="xs" />
         <Text color="complementary">{job.phase === "queued" ? "В очереди" : "Сканируется"}</Text>
       </Flex>
@@ -695,9 +699,11 @@ function jobPhaseLabel(j: import("../api/me").MyJob): string {
 /** Колокольчик шапки: тихий в покое; «Задания ◷ N» с позициями; ⚠ с причиной. */
 export function JobsBell() {
   const { jobs } = useMyJobs(20000);
-  const active = jobs?.active ?? [];
-  const failed = jobs?.recent.filter((j) => j.phase === "failed").length ?? 0;
-  if (active.length === 0 && failed === 0 && jobs !== null) return null;
+  // M-1: до первого ответа /api/me/jobs — тишина, не danger «⚠ 0»
+  if (jobs === null) return null;
+  const active = jobs.active;
+  const failed = jobs.recent.filter((j) => j.phase === "failed").length;
+  if (active.length === 0 && failed === 0) return null;
   return (
     <details style={{ position: "relative" }}>
       <summary style={{ cursor: "pointer", listStyle: "none", whiteSpace: "nowrap" }} title="ваши анализы в очереди">
@@ -727,18 +733,21 @@ export function JobsBell() {
   );
 }
 
-/** Панель «Мои задания» кабинета: активные с позицией + последние с исходом. */
-function JobsPanel(props: { jobs: JobsResponse | null; reload: () => void }) {
-  const { jobs, reload } = props;
+/** Панель «Мои задания» кабинета: активные с ожиданием + последние с исходом. */
+function JobsPanel(props: { jobs: JobsResponse | null; reload: () => void; leaseMs: number }) {
+  const { jobs, reload, leaseMs } = props;
   if (jobs === null) return null;
   const { active, recent } = jobs;
   if (active.length === 0 && recent.length === 0) return null;
+  // M-4: горизонт ожидания — лиз job из /api/meta, не хардкод
+  const eta = `обычно до ${Math.max(1, Math.round(leaseMs / 60_000))} минут`;
   return (
     <Card view="outlined" style={{ padding: "var(--g-spacing-5)", marginBottom: "var(--g-spacing-5)" }}>
       <Flex direction="column" gap={3}>
         <Flex direction="column" gap={1}>
           <Text variant="subheader-2">Мои задания</Text>
-          <Text color="secondary">Интерактивная очередь отдельная от ночной волны рейтинга — ваши сканы не ждут чужих клонов.</Text>
+          {/* M-12: без жаргона про «ночная волна/клоны» */}
+          <Text color="secondary">Ваши сканы идут в отдельной быстрой очереди — ночной обход рейтинга им не мешает.</Text>
         </Flex>
         {active.map((j) => (
           <Flex key={j.jobId} gap={3} alignItems="center" wrap>
@@ -746,6 +755,7 @@ function JobsPanel(props: { jobs: JobsResponse | null; reload: () => void }) {
             <Text>
               <Text variant="code-1">{j.slug}</Text>
             </Text>
+            <Text color="secondary">{eta}</Text>
           </Flex>
         ))}
         {recent.length > 0 && (

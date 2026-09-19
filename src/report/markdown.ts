@@ -152,7 +152,12 @@ function fullScoreLine(card: RepoCard): string[] {
   ];
   if (score.healthcraftIndex !== null) {
     const d = score.repoHealthScore - score.healthcraftIndex;
-    lines.push(`Разницу с HealthCraft Index дают CI и Security: ${fmtSigned(d)} — вклад двух каналов при их фактических данных.`);
+    // M-13: |Δ| < 0.05 — «разницы нет», не «+0.0» (паритет со страницей)
+    lines.push(
+      Math.abs(d) < 0.05
+        ? "Разницы нет: CI и Security на этом скане нейтральны."
+        : `Разницу с HealthCraft Index дают CI и Security: ${fmtSigned(d)} — вклад двух каналов при их фактических данных.`,
+    );
   }
   return lines;
 }

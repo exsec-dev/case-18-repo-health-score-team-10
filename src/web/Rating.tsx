@@ -28,7 +28,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import type { MetaResponse, RatingResponse } from "./api";
 import { useJson } from "./api";
-import { NO_SCORE, fmtCoverage, fmtDate, fmtNumber, fmtScore, scanStatusText, scoreTheme } from "./format";
+import { CATEGORY_TITLES_RU, NO_SCORE, fmtCoverage, fmtDate, fmtNumber, fmtScore, scanStatusText, scoreTheme } from "./format";
 import { useMediaQuery } from "./prefs";
 import { linkProps, navigate, repoHref } from "./router";
 import { Page } from "./Shell";
@@ -103,6 +103,12 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
   }
 
   const data = state.kind === "ok" ? state.data : null;
+  // M-9: без /api/meta категории не сыплются ключами — имена из констант
+  const categoryNames: Record<string, string> = useMemo(
+    () => Object.fromEntries((meta?.categories ?? []).map((c) => [c.key, c.title])),
+    [meta],
+  );
+  const titleOf = (key: string): string => categoryNames[key] ?? CATEGORY_TITLES_RU[key] ?? key;
   const categories = useMemo(() => (meta?.categories ?? []).filter((c) => !NOT_IN_RATING.has(c.key)), [meta]);
   const rankOffset = data ? (data.page - 1) * data.perPage : 0;
   const allColumns = useMemo(() => buildColumns(categories, rankOffset), [categories, rankOffset]);
@@ -272,7 +278,7 @@ function NothingFound({ hasFilters }: { hasFilters: boolean }) {
 
 /** Группа «нет данных» — витрина закона 2: счётчик виден всегда, список — по переключателю. */
 function UnscoredTable({ items, meta, hasFilters }: { items: Item[]; meta: MetaResponse | null; hasFilters: boolean }) {
-  const titleOf = (key: string): string => meta?.categories.find((c) => c.key === key)?.title ?? key;
+  const titleOf = (key: string): string => meta?.categories.find((c) => c.key === key)?.title ?? CATEGORY_TITLES_RU[key] ?? key;
   const columns: TableColumnConfig<Item>[] = [
     { id: "repo", name: "Репозиторий", primary: true, template: (item) => <RepoCell item={item} /> },
     { id: "coverage", name: "Покрытие данными", align: "end", width: 160, template: (item) => fmtCoverage(item.coverage) },
@@ -352,7 +358,10 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
               {meta.modelVersion}
             </Label>
           </DefinitionList.Item>
-          <DefinitionList.Item name="Данные на">{fmtDate(generatedAt ?? meta.generatedAt)}</DefinitionList.Item>
+          {/* M-7: «Данные на сегодня» врало (generatedAt = момент запроса) — честная свежесть ниже */}
+          <DefinitionList.Item name="Свежесть" note="У каждого репозитория — дата своего последнего скана (колонка «Скан»); ночной обход обновляет их по очереди.">
+            обновляется ежесуточно
+          </DefinitionList.Item>
         </DefinitionList>
       </AsideSection>
     </>

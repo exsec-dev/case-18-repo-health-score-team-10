@@ -5,6 +5,19 @@
 export const NO_DATA = "нет данных";
 export const NO_SCORE = "Недостаточно данных";
 
+/**
+ * В4.4 (кластер M-9): RU-имена категорий из константы — фолбэк, когда
+ * /api/meta не загрузился (раньше страница показывала сырые ключи).
+ */
+export const CATEGORY_TITLES_RU: Record<string, string> = {
+  documentation: "Документация",
+  cicd: "CI/CD",
+  security: "Security",
+  activity: "Активность",
+  issues: "Issues",
+  code: "Code health",
+};
+
 /** Балл категории 0..100 — целым: дробь тут ничего не объясняет. */
 export function fmtScore(value: number | null | undefined): string {
   return value === null || value === undefined ? "—" : String(Math.round(value));
