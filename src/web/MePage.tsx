@@ -24,8 +24,9 @@ export function MePage({ meta }: { meta: MetaResponse | null }) {
   // Ф2.9: горизонт опросов анализа — лиз job из /api/meta, не хардкод 20 минут
   const leaseMs = meta?.queue.leaseMs ?? 85 * 60_000;
   // В4.4 (кластер M-14): ОДИН источник статусов — серверные jobs; строка
-  // списка предпочитает их локальному опросу (диагноз UX: два источника)
-  const jobs = useMyJobs(5000);
+  // списка предпочитает их локальному опросу (диагноз UX: два источника).
+  // Аноним не опрашивает вовсе (см. useMyJobs)
+  const jobs = useMyJobs(5000, me.state.kind === "ok" && me.state.data.login !== null);
 
   if (me.state.kind === "loading") {
     return (
@@ -646,13 +647,16 @@ interface JobsResponse {
 
 /** Опрос /api/me/jobs: чаще при активных (честная позиция вместо спиннера);
  *  бэкофф ×2 до 5 мин на сбоях/401 после успешных данных — истёкшая сессия
- *  не крутит вечный 20-секундный опрос (ищейка-7). */
-function useMyJobs(idleMs = 5000): { jobs: JobsResponse | null; reload: () => void } {
+ *  не крутит вечный 20-секундный опрос (ищейка-7). `enabled=false` (аноним)
+ *  не шлёт ни одного запроса — 401-зонд мусорил бы консоль (планка «ноль
+ *  ошибок консоли» харнесса). */
+function useMyJobs(idleMs = 5000, enabled = true): { jobs: JobsResponse | null; reload: () => void } {
   const [jobs, setJobs] = useState<JobsResponse | null>(null);
   const [tick, setTick] = useState(0);
   const hadData = useRef(false);
   const reload = useCallback(() => setTick((x) => x + 1), []);
   useEffect(() => {
+    if (!enabled) return;
     let stop = false;
     let timer: ReturnType<typeof setTimeout>;
     let backoff = 1;
@@ -682,7 +686,7 @@ function useMyJobs(idleMs = 5000): { jobs: JobsResponse | null; reload: () => vo
       stop = true;
       clearTimeout(timer);
     };
-  }, [tick, idleMs]);
+  }, [tick, idleMs, enabled]);
   return { jobs, reload };
 }
 
