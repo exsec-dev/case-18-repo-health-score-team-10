@@ -561,7 +561,7 @@ describe("Р15: причина no-data Security наблюдаема, счёт �
     const fact = t.db.query("SELECT status FROM facts WHERE scan_id = ? AND key = 'appsec.findings'").get(result.scanId) as { status: string };
     expect(fact.status).toBe("no-data"); // исход факта не изменился (К-Ф2.6)
     // счёт скоринга не тронут: публичный Score считается, Security — no-data
-    expect(result.score?.totalRating).not.toBeNull();
+    expect(result.score?.healthcraftIndex).not.toBeNull();
     const scores = JSON.parse((t.db.query("SELECT categories FROM scores WHERE scan_id = ?").get(result.scanId) as { categories: string }).categories) as { security: { score: number | null } };
     expect(scores.security.score).toBeNull();
   });

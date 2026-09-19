@@ -57,7 +57,7 @@ describe("Ф2.3 (M5): code_empty — только по file_count, не по loc
     });
     const scanId = seedScan(t, facts);
     const scores = compute(t.db, scanId);
-    expect({ codeEmpty: scores.codeEmpty, ratingIsZero: scores.totalRating === 0 }).toEqual({
+    expect({ codeEmpty: scores.codeEmpty, ratingIsZero: scores.healthcraftIndex === 0 }).toEqual({
       codeEmpty: false,
       ratingIsZero: false,
     });
@@ -71,7 +71,7 @@ describe("Ф2.3 (M5): code_empty — только по file_count, не по loc
     });
     const scanId = seedScan(t, facts);
     const scores = compute(t.db, scanId);
-    expect({ codeEmpty: scores.codeEmpty, totalRating: scores.totalRating }).toEqual({ codeEmpty: true, totalRating: 0 });
+    expect({ codeEmpty: scores.codeEmpty, healthcraftIndex: scores.healthcraftIndex }).toEqual({ codeEmpty: true, healthcraftIndex: 0 });
   });
 });
 

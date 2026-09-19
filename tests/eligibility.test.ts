@@ -203,7 +203,7 @@ describe("чтение: последний пригодный (P) и после�
       cicd: card.score!.categories.cicd.score,
     }).toEqual({
       totalRating: 60,
-      totalFull: Math.round(totalsFromCategories(card.score!.categories, { codeEmpty: false, secretsCritical: false }).totalFull!),
+      totalFull: Math.round(totalsFromCategories(card.score!.categories, { codeEmpty: false, secretsCritical: false }).repoHealthScore!),
       docs: 61,
       cicd: 100, // посчитана из ok-фактов CI скана L (зелёные быстрые раны), не из сохранённой строки
     });

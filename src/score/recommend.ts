@@ -10,15 +10,15 @@
 // скор-правила. LLM (В5) ничего не решает — только формулировки.
 // В4.1 (К1): одна выдача на скан; правило несёт channel (cicd | appsec |
 // null = публичное) — карточка отфильтровывает правила закрытых зрителю
-// каналов. Δ правил с channel относится к полному Score, остальных — к
-// Score в рейтинге.
+// каналов. Δ правил с channel относится к Repo Health Score, остальных —
+// к HealthCraft Index (В4.3).
 // В4.1-fix круг 2: движок — чистая recommendFromFacts(ok, ctx) с инъекцией
 // оценщика Δ; карточка собирает канальные правила на ПОКАЗАННЫХ фактах
 // (CI/Security из своих сканов) своим оценщиком; порядок — одна функция
 // orderRecommendations для движка и для объединённой выдачи карточки.
 import type { Database } from "bun:sqlite";
 import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
-import { CATEGORY_WEIGHTS, CategoryKey, SECRETS_CRITICAL_TOTAL_CAP } from "./model";
+import { SCORE_WEIGHTS, CategoryKey, SECRETS_CRITICAL_TOTAL_CAP } from "./model";
 import { compute, computeFromFacts, effectiveFacts, Scores } from "./compute";
 
 /** Канал правила: данные, видимые только зрителю с доступом (К2). */
@@ -95,7 +95,7 @@ export function orderRecommendations<T extends Orderable>(...lists: T[][]): T[] 
   });
   activation.sort(
     (a, b) =>
-      CATEGORY_WEIGHTS[(b.opensCategory ?? "issues") as CategoryKey] - CATEGORY_WEIGHTS[(a.opensCategory ?? "issues") as CategoryKey] ||
+      SCORE_WEIGHTS[(b.opensCategory ?? "issues") as CategoryKey] - SCORE_WEIGHTS[(a.opensCategory ?? "issues") as CategoryKey] ||
       a.ruleId.localeCompare(b.ruleId),
   );
   let scoreRules: T[] = [];
@@ -141,7 +141,7 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
     const facts = new Map(ok);
     patch(facts);
     const after = computeFromFacts(facts, input, now);
-    const pick = (s: Scores) => (channel === null ? s.totalRating : s.totalFull);
+    const pick = (s: Scores) => (channel === null ? s.healthcraftIndex : s.repoHealthScore);
     if (base.codeEmpty) return { delta: 0, reason: "в репозитории нет кода" };
     const b = pick(base);
     const a = pick(after);
@@ -236,9 +236,9 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
         "connect-appsec",
         "security",
         "Security без данных: результатов AppSec SourceCraft по репозиторию нет",
-        "Подключите AppSec к репозиторию и дождитесь завершенного скана — SAST/SCA/secrets закроют 20% полного Score",
+        "Подключите AppSec к репозиторию и дождитесь завершенного скана — SAST/SCA/secrets закроют 20% Repo Health Score",
         ["appsec.findings"],
-        "AppSec-данные недоступны: проверьте право PAT src.repositories.useAppSecScan и завершенность скана — Security заработает в полном Score",
+        "AppSec-данные недоступны: проверьте право PAT src.repositories.useAppSecScan и завершенность скана — Security заработает в Repo Health Score",
         "appsec",
       ),
     );
@@ -269,7 +269,7 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
     const crit = (appsec.severity_counts?.critical as number | undefined) ?? 0;
     if (appsec.secrets_critical === true || crit > 0) {
       scoreRules.push(
-        mkScore("appsec-critical", "Критичные находки AppSec (secrets/SAST critical)", "Закройте критичные находки: утечки секретов капят total на 49", ["appsec.findings"], "снимет кап полного Score ≤ 49 и поднимет Security", "appsec"),
+        mkScore("appsec-critical", "Критичные находки AppSec (secrets/SAST critical)", "Закройте критичные находки: утечки секретов капят Repo Health Score на 49", ["appsec.findings"], "снимет кап Repo Health Score ≤ 49 и поднимет Security", "appsec"),
       );
     }
   }
@@ -311,8 +311,12 @@ function mk(
   real: { delta: number; reason: string | null },
   channel: RecommendationChannel | null = null,
 ): Recommendation {
-  // Δ канального правила — к полному Score, публичного — к Score в рейтинге (К-Ф1.2)
-  const scope = channel === null ? "к Score в рейтинге" : "к полному Score";
+  // Δ канального правила — к Repo Health Score, публичного — к HealthCraft
+  // Index (К-Ф1.2, В4.3). Дельта ЗНАКОВАЯ: инверсия законна (плохие
+  // CI/Security опускают полный Score ниже индекса) — «+» безусловно
+  // рисовало «+-2.5»; знак берётся из фактического прироста.
+  const scope = channel === null ? "к HealthCraft Index" : "к Repo Health Score";
+  const sign = real.delta < 0 ? "-" : "+";
   return {
     ruleId,
     kind: "presence",
@@ -320,7 +324,7 @@ function mk(
     problem,
     action,
     factRefs,
-    expectedImpact: `+${real.delta.toFixed(1)} ${scope}${real.reason ? ` — ${real.reason}` : ""}`,
+    expectedImpact: `${sign}${Math.abs(real.delta).toFixed(1)} ${scope}${real.reason ? ` — ${real.reason}` : ""}`,
     deltaScore: real.delta,
     opensCategory: null,
     channel,

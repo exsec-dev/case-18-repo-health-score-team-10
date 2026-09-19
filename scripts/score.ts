@@ -35,13 +35,13 @@ writeRecommendations(db, scan.id, scores.modelVersion, recs);
 
 const fmt = (x: number | null) => (x === null ? "NULL" : String(Math.round(x)));
 console.log(`scan_id=${scan.id} model=${scores.modelVersion}`);
-console.log(`Score (rating, 4 cat)=${fmt(scores.totalRating)} coverage=${scores.coverageRating.toFixed(2)}; Score (full, 6 cat)=${fmt(scores.totalFull)} coverage=${scores.coverageFull.toFixed(2)} stale=[${scores.stale.join(",")}]`);
+console.log(`HealthCraft Index (4 cat)=${fmt(scores.healthcraftIndex)} coverage=${scores.indexCoverage.toFixed(2)}; Repo Health Score (6 cat)=${fmt(scores.repoHealthScore)} coverage=${scores.repoHealthCoverage.toFixed(2)} stale=[${scores.stale.join(",")}]`);
 for (const [key, cat] of Object.entries(scores.categories)) {
   const val = cat.score === null ? "no-data" : cat.score.toFixed(1);
   const mark = cat.stale ? " (stale)" : "";
   console.log(`  ${key.padEnd(13)} ${val.padStart(5)}${mark}`);
 }
-if (scores.totalRating === null || scores.totalFull === null) {
+if (scores.healthcraftIndex === null || scores.repoHealthScore === null) {
   console.log(`  NULL: ${scores.noData.join("; ")}`);
 }
 console.log(`recommendations: ${recs.length}`);

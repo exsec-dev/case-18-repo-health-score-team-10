@@ -23,7 +23,7 @@ import { getRepoCard } from "../src/api/repos";
 import { renderRepoReport } from "../src/report/markdown";
 import { runScan, type ScanDeps } from "../src/jobs/runner";
 import { claimNext, nightlyCatalog } from "../src/jobs/scheduler";
-import { CATEGORY_WEIGHTS, type CategoryKey } from "../src/score/model";
+import { SCORE_WEIGHTS, type CategoryKey } from "../src/score/model";
 import { healthyFacts } from "./score-fixtures";
 
 const cleanups: (() => void)[] = [];
@@ -83,8 +83,8 @@ function composedFull(categories: Record<CategoryKey, { score: number | null }>)
   let acc = 0;
   for (const [key, cat] of Object.entries(categories) as [CategoryKey, { score: number | null }][]) {
     if (cat.score === null) continue;
-    w += CATEGORY_WEIGHTS[key];
-    acc += cat.score * CATEGORY_WEIGHTS[key];
+    w += SCORE_WEIGHTS[key];
+    acc += cat.score * SCORE_WEIGHTS[key];
   }
   return acc / w;
 }

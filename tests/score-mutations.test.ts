@@ -14,7 +14,7 @@ afterAll(() => t.close());
 // итог — их мутации меряем по нему ("full"); остальные (анти-накрутка,
 // Issues, каналы) — по Score в рейтинге ("rating").
 type Total = "rating" | "full";
-const pick = (s: ReturnType<typeof compute>, which: Total): number | null => (which === "full" ? s.totalFull : s.totalRating);
+const pick = (s: ReturnType<typeof compute>, which: Total): number | null => (which === "full" ? s.repoHealthScore : s.healthcraftIndex);
 const totalOf = (facts: FactSpec[], which: Total = "rating"): number | null => pick(compute(t.db, seedScan(t, facts), { now: NOW }), which);
 const catOf = (facts: FactSpec[], key: string): number | null => compute(t.db, seedScan(t, facts), { now: NOW }).categories[key as keyof ReturnType<typeof compute>["categories"]].score;
 
@@ -24,8 +24,8 @@ describe("§9 Security (полный итог, В4.1)", () => {
     const attackedFacts = withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0, secrets_critical: true } });
     const attacked = compute(t.db, seedScan(t, attackedFacts), { now: NOW });
     expect(attacked.categories.security.score!).toBeLessThan(30); // ↓ заметно
-    expect(attacked.totalFull!).toBeLessThanOrEqual(49); // жёсткий кап (В2-8)
-    expect(attacked.totalFull!).toBeLessThan(base);
+    expect(attacked.repoHealthScore!).toBeLessThanOrEqual(49); // жёсткий кап (В2-8)
+    expect(attacked.repoHealthScore!).toBeLessThan(base);
     // изоляция (В4/Б4): тот же факт публично не влияет — 4 категории
     const pubBefore = totalOf(healthyFacts())!;
     const pubAfter = totalOf(attackedFacts)!;
@@ -98,7 +98,7 @@ describe("§9 CI/CD (полный итог, В4.1)", () => {
     );
     const s = compute(t.db, seedScan(t, afterFacts), { now: NOW });
     expect(s.categories.cicd.score!).toBe(50);
-    expect(s.totalFull! - before).toBeCloseTo(9.375, 10); // 15·(50−0)/80
+    expect(s.repoHealthScore! - before).toBeCloseTo(9.375, 10); // 15·(50−0)/80
   });
 
   test("инвариант изоляции (В4/Б4): CI/Security-мутации НЕ двигают публичный total", () => {
@@ -134,9 +134,9 @@ describe("§9 анти-накрутка", () => {
 
   test("likes ×100: Score не меняется", () => {
     const scanId = seedScan(t, healthyFacts());
-    const before = compute(t.db, scanId, { now: NOW }).totalRating;
+    const before = compute(t.db, scanId, { now: NOW }).healthcraftIndex;
     t.db.exec("UPDATE repos SET likes = COALESCE(likes, 1) * 100");
-    const after = compute(t.db, scanId, { now: NOW }).totalRating;
+    const after = compute(t.db, scanId, { now: NOW }).healthcraftIndex;
     expect(after).toBe(before);
   });
 
@@ -176,14 +176,14 @@ describe("§9 устойчивость канала", () => {
       repoId,
     );
     const s2 = compute(t.db, scan2, { now: NOW });
-    expect(s2.totalRating!).toBeCloseTo(base.totalRating!, 9);
+    expect(s2.healthcraftIndex!).toBeCloseTo(base.healthcraftIndex!, 9);
     expect(s2.categories.issues.stale).toBe(true);
     expect(new Set(s2.stale)).toEqual(new Set(["issues.stats", "issues.comments_sample"]));
   });
 
   test("coverage < 0.4 → Score NULL + объяснение каких данных не хватило", () => {
     const s = compute(t.db, seedScan(t, [{ key: "activity.rest", value: { contributors: 1, releases: 0, pulls_open: 0, pulls_created_at: [], releases_released_at: [] } }]), { now: NOW });
-    expect(s.totalRating).toBeNull();
+    expect(s.healthcraftIndex).toBeNull();
     expect(s.noData.length).toBeGreaterThanOrEqual(4); // каких данных не хватило
   });
 });

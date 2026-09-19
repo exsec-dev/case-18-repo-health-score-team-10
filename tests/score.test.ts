@@ -59,7 +59,7 @@ describe("compute: здоровое репо (ручная арифметика)
   const t: TestDb = makeDb();
   afterAll(() => t.close());
 
-  test("один скан — два итога: в рейтинге 4 категории, полный 6 (3.0.0-m4, К1 В4.1)", () => {
+  test("один скан — два показателя: HealthCraft Index из 4 категорий, Repo Health Score из 6 (4.0.0-hci, К1 В4.1 → Ф3.1)", () => {
     const scanId = seedScan(t, healthyFacts());
     const s = compute(t.db, scanId, { now: NOW });
     // документация: readme 0.3+0.7·(0.5·0.72917+0.5·1)=0.90521; (0.45·0.90521+0.25+0.15)/0.85→0.80734
@@ -74,15 +74,15 @@ describe("compute: здоровое репо (ручная арифметика)
     expect(s.categories.cicd.score!).toBeCloseTo(100, 10);
     expect(s.categories.security.score).toBeNull();
     expect(s.categories.security.no_data).toContain("AppSec data unavailable");
-    // в рейтинге: (15+15+15+20)/100 / 0.65 = 1.0
-    expect(s.coverageRating).toBe(1.0);
-    // (15·80.734 + 15·69.793 + 15·89.425 + 20·90.29)/65 = 83.155
-    expect(s.totalRating!).toBeCloseTo(83.16, 1);
-    // полный: (15·5+20)/100 / 1.0 = 0.8 — Security no-data
-    expect(s.coverageFull).toBeCloseTo(0.8, 10);
+    // индекс: coverage = (15+15+15+20)/65 = 1.0 (масса SCORE_WEIGHTS с данными)
+    expect(s.indexCoverage).toBe(1.0);
+    // (23·80.734 + 23·69.793 + 23·89.425 + 31·90.29)/100 = 83.179 (INDEX_WEIGHTS)
+    expect(s.healthcraftIndex!).toBeCloseTo(83.18, 1);
+    // полный: coverage = 80/100 — Security no-data
+    expect(s.repoHealthCoverage).toBeCloseTo(0.8, 10);
     // (15·80.734 + 15·100 + 15·69.793 + 15·89.425 + 20·90.29)/80 = 86.31
-    expect(s.totalFull!).toBeCloseTo(86.31, 1);
-    expect(s.modelVersion).toBe("3.0.0-m4");
+    expect(s.repoHealthScore!).toBeCloseTo(86.31, 1);
+    expect(s.modelVersion).toBe("4.0.0-hci");
     expect(s.codeEmpty).toBe(false);
     expect(s.stale).toEqual([]);
   });
@@ -91,7 +91,7 @@ describe("compute: здоровое репо (ручная арифметика)
     const scanId = seedScan(t, withFacts(healthyFacts(), { key: "issues.stats", value: { open: 0, closed: 0, median_close_days: null, stale_90d: 0, fetched_count: 0 } }));
     const s = compute(t.db, scanId, { now: NOW });
     expect(s.categories.issues.score!).toBeCloseTo(ISSUES_TRACKER_UNUSED, 10);
-    expect(s.coverageRating).toBe(1.0);
+    expect(s.indexCoverage).toBe(1.0);
     expect(s.noData.some((x) => x.startsWith("issues:"))).toBe(false);
   });
 
@@ -100,29 +100,29 @@ describe("compute: здоровое репо (ручная арифметика)
     const s1 = compute(t.db, capped, { now: NOW });
     expect(s1.categories.cicd.score!).toBe(50);
     // (6905.08 − 1500 + 750)/80 = 76.94
-    expect(s1.totalFull!).toBeCloseTo(76.94, 1);
+    expect(s1.repoHealthScore!).toBeCloseTo(76.94, 1);
 
     const noYaml = seedScan(t, withFacts(healthyFacts(), { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } }));
     const s2 = compute(t.db, noYaml, { now: NOW });
     expect(s2.categories.cicd.score!).toBe(0);
     // рейтинг: CI не входит — потолки на него не влияют
-    expect(s1.totalRating!).toBeCloseTo(83.16, 1);
-    expect(s2.totalRating!).toBeCloseTo(83.16, 1);
+    expect(s1.healthcraftIndex!).toBeCloseTo(83.18, 1);
+    expect(s2.healthcraftIndex!).toBeCloseTo(83.18, 1);
   });
 
   test("code_empty (Q&A №13): file_count=0 при ok-фактах → оба итога 0 как данные", () => {
     const empty = seedScan(t, withFacts(healthyFacts(), { key: "tree.stats", value: { top_level: [], file_count: 0, bytes: 0, loc: 0 } }));
     const s = compute(t.db, empty, { now: NOW });
     expect(s.codeEmpty).toBe(true);
-    expect(s.totalRating).toBe(0); // «проекта нет» — данные, не NULL
-    expect(s.totalFull).toBe(0);
+    expect(s.healthcraftIndex).toBe(0); // «проекта нет» — данные, не NULL
+    expect(s.repoHealthScore).toBe(0);
     expect(s.noData.some((x) => x.startsWith("security"))).toBe(true);
     // Ф2.3 (M5, В4.2a): loc = 0 при живом дереве больше НЕ code_empty —
     // нулевой LOC даёт и обрыв cat-file, и репо из одних бинарных файлов
     const emptyLoc = seedScan(t, withFacts(healthyFacts(), { key: "tree.stats", value: { top_level: [{ name: "x", type: "tree" }], file_count: 3, bytes: 10, loc: 0 } }));
     const s2 = compute(t.db, emptyLoc, { now: NOW });
     expect(s2.codeEmpty).toBe(false);
-    expect(s2.totalRating).toBeGreaterThan(0);
+    expect(s2.healthcraftIndex).toBeGreaterThan(0);
     // loc = null (обрыв извлечения) — тоже не «проекта нет»
     const locNull = seedScan(t, withFacts(healthyFacts(), { key: "tree.stats", value: { top_level: [{ name: "x", type: "tree" }], file_count: 3, bytes: 10, loc: null, loc_note: "incomplete" } }));
     expect(compute(t.db, locNull, { now: NOW }).codeEmpty).toBe(false);
@@ -142,8 +142,8 @@ describe("compute: здоровое репо (ручная арифметика)
     );
     const s1 = compute(t.db, crit, { now: NOW });
     expect(s1.categories.security.score!).toBeCloseTo(39, 1); // 0.5·0.72 + 0.3·0.1 + 0.2·0
-    expect(s1.totalFull!).toBeLessThanOrEqual(49);
-    expect(s1.coverageFull).toBe(1.0); // 100/100 → clamp
+    expect(s1.repoHealthScore!).toBeLessThanOrEqual(49);
+    expect(s1.repoHealthCoverage).toBe(1.0); // 100/100 → clamp
 
     const fixed = seedScan(
       t,
@@ -154,9 +154,9 @@ describe("compute: здоровое репо (ручная арифметика)
     );
     const s2 = compute(t.db, fixed, { now: NOW });
     expect(s2.categories.security.score!).toBeCloseTo(98.5, 1); // 0.5 + 0.3·0.95 + 0.2
-    expect(s2.totalFull!).toBeGreaterThan(s1.totalFull!);
+    expect(s2.repoHealthScore!).toBeGreaterThan(s1.repoHealthScore!);
     // рейтинг: Security не входит, кап 49 не применяется
-    expect(s1.totalRating!).toBeCloseTo(83.16, 1);
+    expect(s1.healthcraftIndex!).toBeCloseTo(83.18, 1);
   });
 
   test("bad-channel: stale-факты последнего успешного kind, итоги не двигаются (§5.6)", () => {
@@ -179,9 +179,9 @@ describe("compute: здоровое репо (ручная арифметика)
     const s2 = compute(t.db, scan2, { now: NOW });
     expect(new Set(s2.stale)).toEqual(new Set(["issues.stats", "cicd.runs", "activity.rest"]));
     expect(s2.categories.issues.stale).toBe(true);
-    expect(s2.totalRating!).toBeCloseTo(base.totalRating!, 9); // ε=1e-9 в тотал-масштабе
-    expect(s2.totalFull!).toBeCloseTo(base.totalFull!, 9);
-    expect(s2.coverageRating).toBe(base.coverageRating);
+    expect(s2.healthcraftIndex!).toBeCloseTo(base.healthcraftIndex!, 9); // ε=1e-9 в тотал-масштабе
+    expect(s2.repoHealthScore!).toBeCloseTo(base.repoHealthScore!, 9);
+    expect(s2.indexCoverage).toBe(base.indexCoverage);
 
     // без истории bad = no-data: cicd уходит в конфиг-потолок
     const scan3 = seedScan(t, withFacts(healthyFacts(), { key: "cicd.runs", value: { reason: "bad-channel" }, status: "bad" }));
@@ -211,8 +211,8 @@ describe("compute: здоровое репо (ручная арифметика)
     expect(new Set(s.stale)).toEqual(new Set(["cicd.runs", "appsec.findings"]));
     expect(s.categories.cicd.stale).toBe(true);
     expect(s.categories.security.stale).toBe(true);
-    expect(s.totalFull!).toBeCloseTo(base.totalFull!, 9);
-    expect(s.totalRating!).toBeCloseTo(base.totalRating!, 9);
+    expect(s.repoHealthScore!).toBeCloseTo(base.repoHealthScore!, 9);
+    expect(s.healthcraftIndex!).toBeCloseTo(base.healthcraftIndex!, 9);
     // строки AppSec нет вовсе — тоже фолбэк
     const noRow = seedScan(t, healthyFacts().filter((f) => f.key !== "cicd.runs"), 0, repoId);
     const s2 = compute(t.db, noRow, { now: NOW });
@@ -227,9 +227,9 @@ describe("compute: здоровое репо (ручная арифметика)
   test("coverage < 0.4 → оба итога NULL + объяснение", () => {
     const scanId = seedScan(t, [{ key: "cicd.runs", value: { reason: "access" }, status: "no-data" }]);
     const s = compute(t.db, scanId, { now: NOW });
-    expect(s.coverageRating).toBeLessThan(0.4);
-    expect(s.totalRating).toBeNull();
-    expect(s.totalFull).toBeNull();
+    expect(s.indexCoverage).toBeLessThan(0.4);
+    expect(s.healthcraftIndex).toBeNull();
+    expect(s.repoHealthScore).toBeNull();
     expect(s.noData.length).toBeGreaterThan(0);
   });
 
@@ -238,8 +238,8 @@ describe("compute: здоровое репо (ручная арифметика)
     const before = compute(t.db, scanId, { now: NOW });
     t.db.exec("UPDATE repos SET likes = 100");
     const after = compute(t.db, scanId, { now: NOW });
-    expect(after.totalRating).toBe(before.totalRating);
-    expect(after.totalFull).toBe(before.totalFull);
+    expect(after.healthcraftIndex).toBe(before.healthcraftIndex);
+    expect(after.repoHealthScore).toBe(before.repoHealthScore);
   });
 
   test("writeScores: одна строка на (скан, модель) — идемпотентно; новая версия = новая строка", () => {
@@ -248,10 +248,10 @@ describe("compute: здоровое репо (ручная арифметика)
     writeScores(t.db, s);
     writeScores(t.db, s);
     const rows1 = t.db.query("SELECT total_rating, total_full FROM scores WHERE scan_id = ?").all(scanId) as { total_rating: number; total_full: number }[];
-    expect(rows1).toEqual([{ total_rating: Math.round(s.totalRating!), total_full: Math.round(s.totalFull!) }]);
+    expect(rows1).toEqual([{ total_rating: Math.round(s.healthcraftIndex!), total_full: Math.round(s.repoHealthScore!) }]);
     writeScores(t.db, { ...s, modelVersion: "9.9.9-test" });
     const rows = t.db.query("SELECT model_version FROM scores WHERE scan_id = ? ORDER BY model_version").all(scanId) as { model_version: string }[];
-    expect(rows.map((r) => r.model_version)).toEqual(["3.0.0-m4", "9.9.9-test"]);
+    expect(rows.map((r) => r.model_version)).toEqual(["4.0.0-hci", "9.9.9-test"]);
     // immutable: старые строки не перезаписаны
     t.db.exec("DELETE FROM scores WHERE model_version = '9.9.9-test'");
   });

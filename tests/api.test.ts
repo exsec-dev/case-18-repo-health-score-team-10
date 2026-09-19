@@ -350,7 +350,7 @@ describe("изоляция own/public и эвикция (В4/Б4)", () => {
     // показанных категорий (круг 2), а не сохранённый total_full
     const card = getRepoCard(iso.db, "iso", "dual", { access: GRANTED })!;
     expect(card.score!.totalRating).toBe(70);
-    expect(card.score!.totalFull).toBe(Math.round(totalsFromCategories(card.score!.categories, { codeEmpty: false, secretsCritical: false }).totalFull!));
+    expect(card.score!.totalFull).toBe(Math.round(totalsFromCategories(card.score!.categories, { codeEmpty: false, secretsCritical: false }).repoHealthScore!));
   });
 
   test("stale-маркер рейтинга не выдаёт фолбэк каналов с правами", () => {

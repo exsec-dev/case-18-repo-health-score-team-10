@@ -16,10 +16,13 @@ import { DerivedMetrics, deriveMetrics } from "./derived";
 import {
   CI_CONFIG_ONLY_FACTOR,
   CLOSE_DAYS,
-  COVERAGE_MODE_MAX,
   COVERAGE_NULL_BELOW,
-  CATEGORY_WEIGHTS,
+  FULL_COVERAGE_BASE,
+  INDEX_COVERAGE_BASE,
+  INDEX_WEIGHTS,
+  SCORE_WEIGHTS,
   CategoryKey,
+  IndexCategoryKey,
   DURATION_MIN,
   FIRST_COMMENT_H,
   FRESH_MONTHS,
@@ -62,21 +65,24 @@ export interface CategoryScore {
 }
 
 /**
- * Один анализ — одна оценка с двумя итогами (В4.1, К1): «в рейтинге»
- * (4 публичные категории, максимум 0.65, без капа) и «полный» (6
- * категорий, максимум 1.0, кап 49 за критичные secrets). Режим — свойство
- * показа, а не хранения.
+ * Один анализ — одна оценка с ДВУМЯ показателями (В4.1, К1 → В4.3, Ф3.1):
+ * HealthCraft Index (4 публичные категории, свой словарь весов, без капа)
+ * и Repo Health Score (6 категорий, кап 49 за критичные secrets). Index —
+ * прерассчитанное сохраняемое число (рейтинг сортирует по нему); полный
+ * Score — дериватив показанных категорий, отдельным total НЕ хранится
+ * (К-Ф3.3): здесь он считается для рекомендаций и скриптов, в хранении —
+ * только индекс.
  */
 export interface Scores {
   scanId: number;
   repoId: number;
   modelVersion: string;
-  /** Score в рейтинге (4 категории); NULL = coverageRating < 0.4 — не «плохо» */
-  totalRating: number | null;
-  coverageRating: number;
-  /** Полный Score (6 категорий, кап 49); NULL = coverageFull < 0.4 */
-  totalFull: number | null;
-  coverageFull: number;
+  /** HealthCraft Index (4 категории); NULL = indexCoverage < 0.4 — не «плохо» */
+  healthcraftIndex: number | null;
+  indexCoverage: number;
+  /** Repo Health Score (6 категорий, кап 49); NULL = repoHealthCoverage < 0.4; в БД не хранится */
+  repoHealthScore: number | null;
+  repoHealthCoverage: number;
   /** все 6 категорий; CI/Security — со своими данными (или no-data) */
   categories: Record<CategoryKey, CategoryScore>;
   /** derived-показатели (§7.3) — для отображения; в БД с v1.3 (scores.derived) */
@@ -356,17 +362,15 @@ export function computeFromFacts(ok: Map<string, unknown>, input: ComputeInput, 
 
   const appsecFact = ok.get("appsec.findings") as { secrets_critical?: unknown } | undefined | null;
   const totals = totalsFromCategories(categories, { codeEmpty, secretsCritical: appsecFact?.secrets_critical === true });
-  const rating = { total: totals.totalRating, coverage: totals.coverageRating };
-  const full = { total: totals.totalFull, coverage: totals.coverageFull };
 
   return {
     scanId,
     repoId,
     modelVersion: MODEL_VERSION,
-    totalRating: rating.total,
-    coverageRating: rating.coverage,
-    totalFull: full.total,
-    coverageFull: full.coverage,
+    healthcraftIndex: totals.healthcraftIndex,
+    indexCoverage: totals.indexCoverage,
+    repoHealthScore: totals.repoHealthScore,
+    repoHealthCoverage: totals.repoHealthCoverage,
     categories,
     derived,
     noData,
@@ -376,26 +380,46 @@ export function computeFromFacts(ok: Map<string, unknown>, input: ComputeInput, 
   };
 }
 
+/** Оба показателя из готовых категорий (В4.3, К-Ф1.2/К-Ф3.1). */
+export interface Totals {
+  /** HealthCraft Index — взвешенное среднее четвёрки со словарём INDEX_WEIGHTS */
+  healthcraftIndex: number | null;
+  indexCoverage: number;
+  /** Repo Health Score — взвешенное среднее шести со словарём SCORE_WEIGHTS, кап 49 */
+  repoHealthScore: number | null;
+  repoHealthCoverage: number;
+}
+
 /**
- * Оба итога из готовых категорий (круг 2, правило карточки): взвешенное
- * среднее с перенормировкой. В рейтинге — 4 публичные категории (Q&A №1),
- * кап 49 не применяется; полный — 6 категорий, кап 49 за критичные secrets.
- * compute и карточка (полный Score из показанных категорий) — одна формула.
+ * Оба показателя из готовых категорий (круга 2 → В4.3): взвешенное среднее
+ * с перенормировкой no-data. Индекс четвёрки — свой словарь INDEX_WEIGHTS
+ * (23/23/23/31), полный Score — SCORE_WEIGHTS (20/15/15/15/15/20); ни один
+ * не является перенормировкой другого. Coverage обоих — доля номинальной
+ * массы SCORE_WEIGHTS с данными: индекс от 65 (масса четвёрки), полный от
+ * 100. compute и карточка (полный Score из показанных категорий) — одна
+ * формула. Кап 49 применяется только полному Score.
  */
 export function totalsFromCategories(
   categories: Record<CategoryKey, { score: number | null }>,
   flags: { codeEmpty: boolean; secretsCritical: boolean },
-): { totalRating: number | null; coverageRating: number; totalFull: number | null; coverageFull: number } {
-  const totalOf = (keys: CategoryKey[], coverageMax: number, capSecrets: boolean) => {
+): Totals {
+  const coverageOf = (keys: CategoryKey[], base: number): number => {
+    let dataWeight = 0;
+    for (const key of keys) {
+      const cat = categories[key];
+      if (cat && cat.score !== null) dataWeight += SCORE_WEIGHTS[key];
+    }
+    return Math.min(1, dataWeight / base);
+  };
+  const totalOf = (weightOf: (key: CategoryKey) => number, keys: CategoryKey[], coverage: number, capSecrets: boolean): number | null => {
     let dataWeight = 0;
     let acc = 0;
     for (const key of keys) {
       const cat = categories[key];
       if (!cat || cat.score === null) continue;
-      dataWeight += CATEGORY_WEIGHTS[key];
-      acc += (cat.score / 100) * CATEGORY_WEIGHTS[key];
+      dataWeight += weightOf(key);
+      acc += (cat.score / 100) * weightOf(key);
     }
-    const coverage = Math.min(1, dataWeight / 100 / coverageMax);
     let total: number | null = null;
     if (flags.codeEmpty) {
       total = 0;
@@ -403,12 +427,21 @@ export function totalsFromCategories(
       total = (acc / dataWeight) * 100;
       if (capSecrets && flags.secretsCritical) total = Math.min(total, SECRETS_CRITICAL_TOTAL_CAP);
     }
-    return { total, coverage };
+    return total;
   };
-  const rating = totalOf(PUBLIC_CATEGORIES, COVERAGE_MODE_MAX.public, false);
-  // порядок суммирования — как у compute до круга 2 (числа с плавающей точкой бит-в-бит)
-  const full = totalOf(["documentation", "cicd", "security", "activity", "issues", "code"], COVERAGE_MODE_MAX.own, true);
-  return { totalRating: rating.total, coverageRating: rating.coverage, totalFull: full.total, coverageFull: full.coverage };
+  const indexWeightOf = (key: CategoryKey): number => INDEX_WEIGHTS[key as IndexCategoryKey];
+  // порядок суммирования шести — как у compute до круга 2 (числа с плавающей точкой бит-в-бит)
+  return {
+    healthcraftIndex: totalOf(indexWeightOf, PUBLIC_CATEGORIES, coverageOf(PUBLIC_CATEGORIES, INDEX_COVERAGE_BASE), false),
+    indexCoverage: coverageOf(PUBLIC_CATEGORIES, INDEX_COVERAGE_BASE),
+    repoHealthScore: totalOf(
+      (key) => SCORE_WEIGHTS[key],
+      ["documentation", "cicd", "security", "activity", "issues", "code"],
+      coverageOf(["documentation", "cicd", "security", "activity", "issues", "code"], FULL_COVERAGE_BASE),
+      true,
+    ),
+    repoHealthCoverage: coverageOf(["documentation", "cicd", "security", "activity", "issues", "code"], FULL_COVERAGE_BASE),
+  };
 }
 
 // ---------- категории ----------
@@ -632,6 +665,12 @@ function scoreCode(derived: DerivedMetrics): CategoryScore {
 const roundTotal = (x: number | null): number | null => (x === null ? null : Math.round(x));
 const roundCoverage = (x: number): number => Math.round(x * 1000) / 1000;
 
+/**
+ * В4.3 (Б1, переходный шаг): полное имя колонок прежнее — схема 1.8 ещё
+ * живёт; Б2 поднимает схему до 1.9 (healthcraft_index/index_coverage без
+ * полного итога) и эта вставка переезжает на новые колонки. Отдельного
+ * хранимого полного total в актуальной схеме не будет (К-Ф3.3).
+ */
 export function writeScores(db: Database, s: Scores): void {
   db.query(
     `INSERT OR REPLACE INTO scores
@@ -642,10 +681,10 @@ export function writeScores(db: Database, s: Scores): void {
     s.scanId,
     s.modelVersion,
     s.repoId,
-    roundTotal(s.totalRating),
-    roundCoverage(s.coverageRating),
-    roundTotal(s.totalFull),
-    roundCoverage(s.coverageFull),
+    roundTotal(s.healthcraftIndex),
+    roundCoverage(s.indexCoverage),
+    roundTotal(s.repoHealthScore),
+    roundCoverage(s.repoHealthCoverage),
     JSON.stringify(s.categories),
     JSON.stringify(s.noData),
     JSON.stringify(s.stale),

@@ -68,7 +68,7 @@ describe("MD-отчёт: структура", () => {
   test("шапка: ссылка на репозиторий, скан, версия модели (режима больше нет — К1)", () => {
     expect(md).toContain("https://sourcecraft.dev/report/sample");
     expect(md).toContain(`#${scoredScan} от 2026-09-16`);
-    expect(md).toContain("3.0.0-m4");
+    expect(md).toContain("4.0.0-hci");
     expect(md).not.toContain("режим:");
   });
 });

@@ -94,7 +94,7 @@ async function main() {
   const cats = card.score.categories as Record<string, { score: number | null; no_data?: string }>;
   console.log(`\nкарточка ${SLUG} (зритель с PAT):`);
   console.log(`  scan #${card.scan.id} ${card.scan.status} (${card.scan.trigger}), модель ${card.score.modelVersion}, доступ ${JSON.stringify(card.access)}`);
-  console.log(`  Score в рейтинге=${card.score.totalRating} (cov ${card.score.coverageRating}); полный=${card.score.totalFull} (cov ${card.score.coverageFull})`);
+  console.log(`  HealthCraft Index=${card.score.totalRating} (cov ${card.score.coverageRating}); полный=${card.score.totalFull} (cov ${card.score.coverageFull})`);
   for (const key of ["documentation", "cicd", "security", "activity", "issues", "code"]) {
     const c = cats[key];
     console.log(`  ${key.padEnd(13)} ${c?.score === null || c?.score === undefined ? "no-data" : String(Math.round(c.score)).padStart(3)}${c?.no_data ? `  (${c.no_data.slice(0, 60)})` : ""}`);

@@ -2,7 +2,10 @@
 // случаи; чистая функция, все числа фиксированы и меняются только со
 // сменой MODEL_VERSION — воспроизводимость, жюри 13.2.2). Анкеры
 // откалиброваны по живой выборке (драфт В2, Приложение А) и заморожены.
-export const MODEL_VERSION = "3.0.0-m4";
+// В4.3 (18.09, Алексей): модель описывает ДВА показателя — полный
+// Repo Health Score (6 категорий, SCORE_WEIGHTS) и публичную проекцию
+// HealthCraft Index (4 категории, INDEX_WEIGHTS).
+export const MODEL_VERSION = "4.0.0-hci";
 
 /**
  * Публичный рейтинг = 4 категории (17.09, Алексей, Q&A №1: «в общий
@@ -172,7 +175,15 @@ export const RELEASES_12M: Anchor[] = [
 
 export type CategoryKey = "security" | "activity" | "documentation" | "cicd" | "issues" | "code";
 
-export const CATEGORY_WEIGHTS: Record<CategoryKey, number> = {
+/** Публичная четвёрка HealthCraft Index (ключи PUBLIC_CATEGORIES). */
+export type IndexCategoryKey = "documentation" | "activity" | "issues" | "code";
+
+/**
+ * Repo Health Score — номинальные веса ТЗ (Q11): Security 20, Активность
+ * 15, Документация 15, CI/CD 15, Issues 15, Code 20. Кап критичных
+ * secrets 49 применяется только к этому показателю.
+ */
+export const SCORE_WEIGHTS: Record<CategoryKey, number> = {
   security: 20,
   activity: 15,
   documentation: 15,
@@ -180,6 +191,31 @@ export const CATEGORY_WEIGHTS: Record<CategoryKey, number> = {
   issues: 15,
   code: 20,
 };
+
+/**
+ * HealthCraft Index — собственный словарь публичной четвёрки (18.09,
+ * Алексей, TASK.md §2 «Веса публичной четвёрки»): перенормированная
+ * редукция SCORE_WEIGHTS на массу четвёрки — 15+15+15+20 = 65 → 100,
+ * округление до целых (15/65·100 ≈ 23.08 → 23; 20/65·100 ≈ 30.77 → 31).
+ * Рейтинги служат разным вещам: витрине — своя доктрина весов; источник
+ * чисел и допуск калибровки организаторами зафиксирован в методике.
+ * Смена весов = MODEL_VERSION + пересчёт.
+ */
+export const INDEX_WEIGHTS: Record<IndexCategoryKey, number> = {
+  documentation: 23,
+  activity: 23,
+  issues: 23,
+  code: 31,
+};
+
+/**
+ * Знаменатели coverage — номинальная масса весов SCORE_WEIGHTS с данными:
+ * индекс считается от массы публичной четвёрки (65 из 100), полный Score —
+ * от всей сотни. Семантика tri-state одна: coverage ниже порога → итог
+ * NULL, «нет данных» не наказывает ни один показатель.
+ */
+export const INDEX_COVERAGE_BASE = 65;
+export const FULL_COVERAGE_BASE = 100;
 
 export const SUBWEIGHTS = {
   documentation: { readme: 0.45, license: 0.25, contributing: 0.15, codeowners: 0.15 },
@@ -205,10 +241,7 @@ export const SECRETS_CRITICAL_TOTAL_CAP = 49;
 /** severity-веса плотности на 10К LOC. */
 export const SEVERITY_WEIGHTS = { critical: 8, high: 4, medium: 2, low: 1 } as const;
 
-/** режимный максимум coverage: публично 4 категории = 65 весов; свой репо — все 6 = 1.0 (В4/Б4). */
-export const COVERAGE_MODE_MAX: Record<"public" | "own", number> = { public: 0.65, own: 1.0 };
-
-/** coverage ниже порога → Score = NULL («недостаточно данных», В2-6). */
+/** coverage ниже порога → итог NULL («недостаточно данных», В2-6). */
 export const COVERAGE_NULL_BELOW = 0.4;
 
 const anchorMin = (a: Anchor[]): number => Math.min(...a.map((x) => x.y));

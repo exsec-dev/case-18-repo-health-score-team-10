@@ -103,7 +103,7 @@ describe("Ф1.2 (LOW-1): реальный прирост рекомендаци�
     const withLicense = withFacts(healthyFacts(), { key: "docs.presence", value: { readme: true, license: true, contributing: true, codeowners: false } });
     const baseScan = seedScoreScan(t, noLicense);
     const fixedScan = seedScoreScan(t, withLicense);
-    const real = compute(t.db, fixedScan, { now: SCORE_NOW }).totalRating! - compute(t.db, baseScan, { now: SCORE_NOW }).totalRating!;
+    const real = compute(t.db, fixedScan, { now: SCORE_NOW }).healthcraftIndex! - compute(t.db, baseScan, { now: SCORE_NOW }).healthcraftIndex!;
     const rule = recommend(t.db, baseScan, { now: SCORE_NOW }).find((r) => r.ruleId === "license-missing")!;
     expect(real).toBeGreaterThan(0);
     expect(rule.deltaScore).toBe(Math.round(real * 10000) / 10000);

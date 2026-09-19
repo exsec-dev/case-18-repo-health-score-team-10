@@ -119,7 +119,7 @@ function rescoreScan(db: Database, scan: ScanRow, result: RescoreResult, opts: R
     }
     result.scans++;
     if (eligible) result.eligible++;
-    if (scores.totalRating === null) result.ratingNull++;
+    if (scores.healthcraftIndex === null) result.ratingNull++;
     else result.ratingScored++;
     opts.onScan?.({ id: scan.id, repoId: scan.repo_id, slug: `${scan.org_slug}/${scan.repo_slug}` }, scores, eligible);
   } catch (e) {

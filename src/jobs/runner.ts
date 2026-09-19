@@ -82,8 +82,8 @@ export interface ScanResult {
   channels: { git: string; rest: string; appsec: string };
   /** repo-GET 404/403 токена скана; эвикция — только у сканов без автора (К3); канальные 403 тут ни при чём */
   repoAccess: "ok" | "gone" | "unknown";
-  /** score-hook итог (null = хук не смог — факты записаны, скан не роняется) */
-  score: { totalRating: number | null; coverageRating: number; totalFull: number | null; coverageFull: number } | null;
+  /** score-hook итог (null = хук не смог — факты записаны, скан не роняется); полный Score — дериватив, в БД не хранится (В4.3) */
+  score: { healthcraftIndex: number | null; indexCoverage: number; repoHealthScore: number | null; repoHealthCoverage: number } | null;
   /** скан пригоден для рейтинга (К-Ф1.1): записан хуком в scans.rating_eligible */
   ratingEligible: boolean;
   elapsedMs: number;
@@ -394,7 +394,7 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
       deps.db.query("UPDATE scans SET rating_eligible = ? WHERE id = ?").run(eligible ? 1 : 0, scanId);
       if (eligible && repoMeta) upsertRepo(deps.db, org, repo, repoMetaToUpsert(repoMeta));
     })();
-    scoreSummary = { totalRating: scores.totalRating, coverageRating: scores.coverageRating, totalFull: scores.totalFull, coverageFull: scores.coverageFull };
+    scoreSummary = { healthcraftIndex: scores.healthcraftIndex, indexCoverage: scores.indexCoverage, repoHealthScore: scores.repoHealthScore, repoHealthCoverage: scores.repoHealthCoverage };
   } catch (e) {
     console.error(`[scan ${scanId}] score hook failed: ${String((e as Error).message).slice(0, 200)}`);
   }

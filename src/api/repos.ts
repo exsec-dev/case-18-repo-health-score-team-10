@@ -13,7 +13,7 @@ import { NO_PAT_ACCESS, type AccessRepo, type AccessResult, type ChannelAccess }
 import { DEFAULT_SCAN, defaultLeaseMs, type ScanConfig } from "../config";
 import type { GitLimitsMarker } from "../web/format";
 import type { DerivedMetrics } from "../score/derived";
-import { CATEGORY_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, MODEL_VERSION, SECRETS_CRITICAL_TOTAL_CAP } from "../score/model";
+import { SCORE_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, MODEL_VERSION, SECRETS_CRITICAL_TOTAL_CAP } from "../score/model";
 
 // ---------- общие формы ----------
 
@@ -699,8 +699,8 @@ export function getRepoCard(
     const locked = lockOf[key];
     categories[key] =
       locked !== undefined
-        ? { score: null, submetrics: {}, locked, weight: CATEGORY_WEIGHTS[key] }
-        : { ...shownCats[key], weight: CATEGORY_WEIGHTS[key] };
+        ? { score: null, submetrics: {}, locked, weight: SCORE_WEIGHTS[key] }
+        : { ...shownCats[key], weight: SCORE_WEIGHTS[key] };
   }
   const stale = (JSON.parse(publicRow.stale) as string[]).filter((k) => PUBLIC_KINDS.includes(k));
   const isChannelCategory = (key: string) => CHANNEL_CATEGORIES.includes(key as CategoryKey);
@@ -730,8 +730,8 @@ export function getRepoCard(
     totalRating: publicRow.total_rating,
     coverageRating: publicRow.coverage_rating,
     // полный Score складывается из показанных категорий (тот же totalsFromCategories, что compute)
-    totalFull: fullOpen ? roundTotal(fullTotals.totalFull) : null,
-    coverageFull: fullOpen ? Math.round(fullTotals.coverageFull * 1000) / 1000 : null,
+    totalFull: fullOpen ? roundTotal(fullTotals.repoHealthScore) : null,
+    coverageFull: fullOpen ? Math.round(fullTotals.repoHealthCoverage * 1000) / 1000 : null,
     fullLocked: !fullOpen,
     modelVersion: publicRow.model_version,
     computedAt: publicRow.computed_at,
@@ -766,7 +766,7 @@ export function getRepoCard(
     opensCategory: rec.opens_category,
     source: rec.source,
   }));
-  const baseFull = fullTotals.totalFull;
+  const baseFull = fullTotals.repoHealthScore;
   const channelDelta: DeltaEvaluator = (ruleChannel, patch) => {
     if (ruleChannel === null) throw new Error("card: public rules come from the eligible scan");
     const facts = new Map(channelFacts);
@@ -774,7 +774,7 @@ export function getRepoCard(
     const after = totalsFromCategories(
       { ...shownCats, cicd: categoryOfFacts(facts, "cicd"), security: categoryOfFacts(facts, "security") },
       { codeEmpty, secretsCritical: secretsOf(facts) },
-    ).totalFull;
+    ).repoHealthScore;
     if (codeEmpty) return { delta: 0, reason: "в репозитории нет кода" };
     if (baseFull === null || after === null) return { delta: 0, reason: "итог появится при большем покрытии" };
     const delta = round4(after - baseFull);
@@ -961,7 +961,7 @@ export function getMeta(db: Database, opts: { now?: Date; leaseMs?: number } = {
   const rows = db.query(RATING_SQL).all(MODEL_VERSION, MODEL_VERSION) as RatingRow[];
   return {
     modelVersion: MODEL_VERSION,
-    categories: CATEGORY_ORDER.map((key) => ({ key, title: CATEGORY_TITLES[key], weight: CATEGORY_WEIGHTS[key] })),
+    categories: CATEGORY_ORDER.map((key) => ({ key, title: CATEGORY_TITLES[key], weight: SCORE_WEIGHTS[key] })),
     coverageNullBelow: COVERAGE_NULL_BELOW,
     repos: {
       scored: rows.filter((r) => r.total !== null).length,

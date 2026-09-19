@@ -15,7 +15,7 @@ afterAll(() => t.close());
 function realGain(before: FactSpec[], after: FactSpec[], scope: "rating" | "full"): number {
   const pick = (id: number) => {
     const s = compute(t.db, id, { now: NOW });
-    return scope === "rating" ? s.totalRating! : s.totalFull!;
+    return scope === "rating" ? s.healthcraftIndex! : s.repoHealthScore!;
   };
   return Math.round((pick(seedScan(t, after)) - pick(seedScan(t, before))) * 10000) / 10000;
 }
@@ -36,14 +36,14 @@ describe("presence-правила: реальный прирост итога (�
     expect(recs[1]!.channel).toBe("appsec");
   });
 
-  test("нет лицензии → Δ к Score в рейтинге = реальный прирост (перенормировка 0.65, не номинальные 3.75)", () => {
+  test("нет лицензии → Δ к HealthCraft Index = реальный прирост (словарь 23/23/23/31, не номинальные 3.45)", () => {
     const base = withFacts(healthyFacts(), { key: "docs.presence", value: { readme: true, license: false, contributing: true, codeowners: true } });
     const fixed = withFacts(healthyFacts(), { key: "docs.presence", value: { readme: true, license: true, contributing: true, codeowners: true } });
     const rec = recommend(t.db, seedScan(t, base), { now: NOW }).find((r) => r.ruleId === "license-missing")!;
     const gain = realGain(base, fixed, "rating");
     expect(rec.deltaScore).toBe(gain);
-    expect(gain).toBeCloseTo(3.75 / 0.65, 3); // 4 публичные категории с полным покрытием
-    expect(rec.expectedImpact).toBe(`+${gain.toFixed(1)} к Score в рейтинге`);
+    expect(gain).toBeCloseTo(0.25 * 23, 3); // вес лицензии в Доках × INDEX_WEIGHTS.documentation (четвёрка с полным покрытием; словарь индекса суммируется в 100 — перенормировки нет)
+    expect(rec.expectedImpact).toBe(`+${gain.toFixed(1)} к HealthCraft Index`);
     expect(rec.factRefs).toContain("docs.presence");
   });
 
@@ -77,7 +77,7 @@ describe("presence-правила: реальный прирост итога (�
     const rec1 = recommend(t.db, noCi, { now: NOW }).find((r) => r.ruleId === "ci-missing")!;
     expect(rec1.deltaScore).toBe(realGain(noCiFacts, withFacts(noCiFacts, { key: "cicd.configs", value: { has_ci_yaml: true, has_steps: true } }), "full"));
     expect(rec1.deltaScore!).toBeGreaterThan(0);
-    expect(rec1.expectedImpact).toBe(`+${rec1.deltaScore!.toFixed(1)} к полному Score`);
+    expect(rec1.expectedImpact).toBe(`+${rec1.deltaScore!.toFixed(1)} к Repo Health Score`);
     // CI-правила существуют в одной выдаче, но только с каналом cicd —
     // карточка скрывает их от зрителя без доступа к CI (К2)
     const ciRules = recommend(t.db, noCi, { now: NOW }).filter((r) => ["ci-missing", "ci-no-steps", "grant-ci-runs"].includes(r.ruleId));
@@ -101,7 +101,7 @@ describe("presence-правила: реальный прирост итога (�
       { key: "appsec.findings", value: { severity_counts: { critical: 0, high: 0, medium: 0, low: 0 }, resolved_share: 1, secrets_critical: true } },
     );
     const ci = recommend(t.db, seedScan(t, capped), { now: NOW }).find((r) => r.ruleId === "ci-missing")!;
-    expect({ delta: ci.deltaScore, impact: ci.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к полному Score — упирается в кап 49" });
+    expect({ delta: ci.deltaScore, impact: ci.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к Repo Health Score — упирается в кап 49" });
 
     const empty = withFacts(
       healthyFacts(),
@@ -109,12 +109,12 @@ describe("presence-правила: реальный прирост итога (�
       { key: "docs.presence", value: { readme: true, license: false, contributing: true, codeowners: true } },
     );
     const lic = recommend(t.db, seedScan(t, empty), { now: NOW }).find((r) => r.ruleId === "license-missing")!;
-    expect({ delta: lic.deltaScore, impact: lic.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к Score в рейтинге — в репозитории нет кода" });
+    expect({ delta: lic.deltaScore, impact: lic.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к HealthCraft Index — в репозитории нет кода" });
 
     // только git-документация: покрытие рейтинга < 0.4 → итог NULL
     const sparse: FactSpec[] = [{ key: "docs.presence", value: { readme: true, license: false, contributing: true, codeowners: true } }];
     const nul = recommend(t.db, seedScan(t, sparse), { now: NOW }).find((r) => r.ruleId === "license-missing")!;
-    expect({ delta: nul.deltaScore, impact: nul.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к Score в рейтинге — итог появится при большем покрытии" });
+    expect({ delta: nul.deltaScore, impact: nul.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к HealthCraft Index — итог появится при большем покрытии" });
   });
 });
 
