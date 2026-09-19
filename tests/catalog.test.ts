@@ -93,3 +93,29 @@ describe("catalog: обход и ошибки", () => {
     expect(res.error?.detail).toContain("ECONNREFUSED");
   });
 });
+
+// ---------------------------------------------------------------------------
+// В4.4 (кластер K/З5): charset-гард слагов каталога — невалидная запись
+// пропускается и считается (счётчик едет в health/лог через nightlyCatalog).
+// ---------------------------------------------------------------------------
+
+describe("В4.4: гард слагов каталога", () => {
+  test("слаг с путёвыми/управляющими символами пропускается; счётчик растёт; валидные записи проходят", async () => {
+    const page = ok({
+      repositories: [
+        { organization: { slug: "good" }, slug: "repo", visibility: "public" },
+        { organization: { slug: "evil/../other-host" }, slug: "repo", visibility: "public" },
+        { organization: { slug: "dots" }, slug: ".", visibility: "public" },
+        { organization: { slug: "ok" }, slug: "repo two", visibility: "public" },
+        { organization: { slug: "space​" }, slug: "repo", visibility: "public" },
+      ],
+    });
+    const res = await enumerateCatalog(fakeClient([page]));
+    expect(res.ok).toBe(true);
+    expect(res.entries.map((e) => `${e.org}/${e.repo}`)).toEqual(["good/repo"]);
+    expect(res.skippedBadEntries).toBe(4);
+    // пустой каталог без мусора — счётчик ноль
+    const clean = await enumerateCatalog(fakeClient([ok({ repositories: [] })]));
+    expect(clean.skippedBadEntries).toBe(0);
+  });
+});

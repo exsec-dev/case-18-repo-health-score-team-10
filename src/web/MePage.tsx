@@ -688,7 +688,7 @@ function jobPhaseLabel(j: import("../api/me").MyJob): string {
   if (j.phase === "queued") return "в очереди";
   if (j.phase === "running") return "сканируется…";
   if (j.phase === "failed") return "ошибка";
-  if (j.phase === "refused") return "отклонена (лимит заявок)";
+  if (j.phase === "refused") return "отклонена предпроверкой";
   return "готово";
 }
 

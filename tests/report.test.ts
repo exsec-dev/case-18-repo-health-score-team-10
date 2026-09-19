@@ -165,3 +165,21 @@ describe("MD-отчёт: репозитории без Score", () => {
     expect(never).toContain("## Как считается и что это не значит");
   });
 });
+
+// ---------------------------------------------------------------------------
+// В4.4 (кластер K/З7): экранирование заголовков MD — tracking-pixel из
+// title репозитория не выживает в выгрузке
+// ---------------------------------------------------------------------------
+
+describe("В4.4: экранирование заголовков MD", () => {
+  test("title с ![img](url) и <img> не становится разметкой/HTML в отчёте", () => {
+    const repoId = seedRepo(t, { org: "esc", repo: "pixel", title: "x ![t](https://evil.example/pixel) <img src=x> *em*" });
+    const card = getRepoCard(t.db, "esc", "pixel", { access: GRANTED })!;
+    const md = renderRepoReport(card);
+    expect(md).not.toMatch(/!\[[^\]]*\]\(https:\/\/evil\.example\/pixel\)/);
+    expect(md).not.toContain("<img");
+    expect(md).toContain("\\!\\[t\\]");
+    expect(md).toContain("&lt;img");
+    void repoId;
+  });
+});

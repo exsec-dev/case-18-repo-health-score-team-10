@@ -59,10 +59,13 @@ export function findActiveUserJob(db: Database, userId: number, repoId: number):
  * repos по отказу не создаётся (К3), а NOT NULL колонки требует значения
  * (FK в SQLite не включены); ночной обход по repo_id её не видит.
  */
-export function recordRefusedUserJob(db: Database, userId: number, now = new Date()): number {
+export function recordRefusedUserJob(db: Database, userId: number, now = new Date(), slug?: string): number {
+  // В4.4 (кластер J): слаг отказанной заявки — в error-payload (repo-строки
+  // нет, LEFT JOIN панели иначе показал бы «—» вместо репозитория)
+  const error = slug === undefined ? null : JSON.stringify({ slug });
   const r = db
-    .query("INSERT INTO jobs (repo_id, status, user_id, trigger_kind, created_at) VALUES (0, 'refused', ?, 'user', ?)")
-    .run(userId, now.toISOString());
+    .query("INSERT INTO jobs (repo_id, status, user_id, trigger_kind, created_at, error) VALUES (0, 'refused', ?, 'user', ?, ?)")
+    .run(userId, now.toISOString(), error);
   return Number(r.lastInsertRowid);
 }
 
@@ -548,6 +551,11 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
   // исчезли»: один такой тик раньше гасил rating_active всему рейтингу.
   // Эвикция не исполняется, ставится meta-флаг catalog_suspicious_at
   // (health окрасится); снимает флаг первый обход с записями.
+  // В4.4 (кластер K/З5): гард слагов — счётчик отброшенного в health/лог
+  if (catalog.skippedBadEntries > 0) {
+    setMetaValue(db, "catalog_skipped_bad_entries", String(catalog.skippedBadEntries));
+    console.warn(`[scheduler] catalog walk skipped ${catalog.skippedBadEntries} entries with bad slugs/form`);
+  }
   let suspicious = false;
   if (catalog.entries.length > 0) {
     if (getMetaValue(db, CATALOG_SUSPICIOUS_AT) !== null) db.query("DELETE FROM meta WHERE key = ?").run(CATALOG_SUSPICIOUS_AT);

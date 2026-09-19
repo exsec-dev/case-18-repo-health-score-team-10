@@ -33,6 +33,8 @@ export interface HealthStatus {
   rescore: RescoreState;
   /** обход вернул пустой каталог при живом рейтинге — эвикция стоит */
   catalogSuspiciousAt: string | null;
+  /** записей каталога отброшено гардом слагов (последний обход) */
+  catalogSkippedBadEntries: number;
   /** последняя ИСПОЛНИВШАЯСЯ ночная фаза (К-Р5: сверка этот факт не трогает) */
   lastNightly: { ok: boolean; error?: string } | null;
   lastReconcileAt: string | null;
@@ -81,6 +83,7 @@ export function getHealth(db: Database, config: Config): HealthStatus {
     failedJobs24h: failed24h,
     rescore,
     catalogSuspiciousAt: suspiciousAt,
+    catalogSkippedBadEntries: Number(getMetaValue(db, "catalog_skipped_bad_entries") ?? "0") || 0,
     lastNightly:
       nightlyAt === null
         ? null

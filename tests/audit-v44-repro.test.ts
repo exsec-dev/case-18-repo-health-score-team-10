@@ -400,7 +400,8 @@ describe("G (Б4): карточка залогиненного зрителя л
 // ---------------------------------------------------------------------------
 
 describe("J (Б6): refused-заявка видна в /api/me/jobs", () => {
-  repro("recordRefusedUserJob со слагом → myJobs.recent несёт refused со слагом", () => {
+  // закрыто блоком Б6 — обёртка `repro` снята, утверждение не менялось
+  test("recordRefusedUserJob со слагом → myJobs.recent несёт refused со слагом", () => {
     const dir = tempDir("rh-v44-j-");
     const db = openDb({ ...loadConfig(), dataDir: dir });
     const userId = upsertUser(db, "ya-refused", "refused", new Date());

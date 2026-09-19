@@ -63,6 +63,9 @@ const myReposViews = new Map<number, number[]>();
 // доступа): минутное окно на ЗАЛОГИНЕННОГО зрителя; аноним — без лимита
 // (публичная карточка в сеть не ходит, проб нет).
 const cardViews = new Map<number, number[]>();
+// В4.4 (кластер K/З6): churn-цикл PUT/DELETE избранного деградирует БД —
+// минутное окно мутаций на юзера (добавление/снятие звезды).
+const favMutations = new Map<number, number[]>();
 
 /**
  * Скользящее окно счётчика на юзера: true = пропустить, лимит не исчерпан.
@@ -96,6 +99,52 @@ const allowMyReposView = (userId: number, now = Date.now()): boolean =>
 const allowCardView = (userId: number, now = Date.now()): boolean =>
   allowInWindow(cardViews, userId, config.queue.cardPerMinute ?? 30, 60_000, now);
 
+/** Минутное окно мутаций избранного (В4.4, кластер K/З6): true = пропустить. */
+const allowFavMutation = (userId: number, now = Date.now()): boolean =>
+  allowInWindow(favMutations, userId, config.queue.favoritesMutationsPerMinute ?? 30, 60_000, now);
+
+/**
+ * В4.4 (кластер K/З3): у Bun.serve нет глобальных headers — защита от
+ * фрейминга и MIME-сниффинга ставится обёрткой над каждым ответом.
+ */
+const SECURITY_HEADERS: Record<string, string> = {
+  "x-frame-options": "DENY",
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "strict-origin-when-cross-origin",
+};
+
+function harden(handler: (req: Request) => Response | Promise<Response>): (req: Request) => Response | Promise<Response> {
+  const apply = (res: Response): Response => {
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.headers.set(k, v);
+    return res;
+  };
+  return (req: Request) => {
+    const out = handler(req);
+    return out instanceof Promise ? out.then(apply) : apply(out);
+  };
+}
+
+/** Обёртка над таблицей маршрутов: каждый обработчик (и метод во вложенной
+ *  карте) отвечает с заголовками; Response/HTMLBundle-значения проходят
+ *  как есть (их Bun разложил бы в метод-карту и сломал). */
+function hardenRoutes<T extends Record<string, unknown>>(routes: T): T {
+  const out: Record<string, unknown> = {};
+  for (const [path, value] of Object.entries(routes)) {
+    if (typeof value === "function") {
+      out[path] = harden(value as (req: Request) => Response | Promise<Response>);
+    } else if (value !== null && typeof value === "object" && Object.values(value).length > 0 && Object.values(value).every((v) => typeof v === "function")) {
+      const methods: Record<string, unknown> = {};
+      for (const [method, handler] of Object.entries(value as Record<string, unknown>)) {
+        methods[method] = harden(handler as (req: Request) => Response | Promise<Response>);
+      }
+      out[path] = methods;
+    } else {
+      out[path] = value;
+    }
+  }
+  return out as T;
+}
+
 /** Живая проба токена = оракул валидности PAT; сервис не переборщик (ПОРТ S1). */
 const PAT_PROBES_PER_HOUR = 10;
 
@@ -120,6 +169,13 @@ const unauthorized = (message = "требуется вход (Я ID)"): Response
   Response.json({ error: { code: "unauthorized", message } }, { status: 401 });
 const forbidden = (message: string): Response =>
   Response.json({ error: { code: "forbidden", message } }, { status: 403 });
+
+/** В4.4 (кластер K/З6): окно мутаций избранного исчерпано — 429. */
+const favoriteRateLimited = (): Response =>
+  Response.json(
+    { error: { code: "rate_limited", message: `не больше ${config.queue.favoritesMutationsPerMinute ?? 30} изменений избранного в минуту — попробуйте чуть позже` } },
+    { status: 429 },
+  );
 
 /** Ф2.21: предел избранного — 409 без меты репо и без факта существования приватного. */
 const favoriteLimit = (max: number): Response =>
@@ -206,13 +262,10 @@ const yaCreds = () => ({
 /** Ф2.10: адреса Я ID — из конфига (тесты направляют их на локальный мок). */
 const yaEndpoints = (): YaEndpoints => ({ oauthBase: config.auth.yaOauthBase, loginBase: config.auth.yaLoginBase });
 
-const server = Bun.serve({
-  port: config.port,
-  // В4.4 (кластер H, Прод-С4): Bun рвёт соединение при ~10–12 с тишины
-  // (замер аудита) — «думающие» хендлеры (PUT PAT: проба+посев, карточка
-  // с PAT, callback) легально живут дольше; 120 с — с запасом
-  idleTimeout: 120,
-  routes: {
+// В4.4 (кластер K): таблица маршрутов — тип Bun.serve, чтобы обёртка
+// hardenRoutes не стирала сигнатуры обработчиков (и метод-карты вроде POST)
+type RoutesTable = NonNullable<Parameters<typeof Bun.serve>[0]>["routes"];
+const routes = {
     "/api/health": () => {
       // В4.4 (кластер B): ok — вычисляемое (pending-рескор, подозрительно
       // пустой каталог, провал ночной фазы); тело — честный статус, HTTP-200
@@ -442,6 +495,8 @@ const server = Bun.serve({
       if (req.method === "PUT") {
         const csrf = guardOrigin(req);
         if (csrf) return csrf;
+        const user0 = sessionOf(req);
+        if (user0 && !allowFavMutation(user0.userId)) return favoriteRateLimited();
         const body = (await req.json().catch(() => null)) as { repository?: unknown } | null;
         if (typeof body?.repository !== "string") return badQuery("repository: ожидается строка org/repo или URL");
         const parsed = parseFavoriteInput(body.repository);
@@ -464,6 +519,8 @@ const server = Bun.serve({
       const user = sessionOf(req);
       if (!user) return unauthorized();
       if (req.method === "PUT") {
+        const user0 = sessionOf(req);
+        if (user0 && !allowFavMutation(user0.userId)) return favoriteRateLimited();
         // общий парсер (Ф2.20) применён и к path-роуту звезды
         const parsed = parseFavoriteInput(`${org}/${repo}`);
         if (!parsed) return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
@@ -474,6 +531,7 @@ const server = Bun.serve({
         return Response.json({ ok: true, favorite: true });
       }
       if (req.method === "DELETE") {
+        if (!allowFavMutation(user.userId)) return favoriteRateLimited();
         removeFavorite(db, user.userId, org!, repo!);
         return Response.json({ ok: true, favorite: false });
       }
@@ -561,10 +619,26 @@ const server = Bun.serve({
     "/api/*": () => notFound("неизвестный endpoint"),
     // catch-all фронтенда: маршруты /repo/{org}/{repo} живут в History API,
     // прямая ссылка и F5 на карточке должны отдавать тот же бандл
+    // HTML-импорт — готовый Response: заголовки выставляются один раз (идемпотентно)
     "/*": index,
-  },
+  } satisfies NonNullable<RoutesTable>;
+// В4.4 (кластер K, отклонение): заголовки защиты НЕ ставятся на HTML-бандл —
+// Bun HTML-import маршрут (routes["/*"] = index) не даёт управлять ответом
+// (проверено живьём на bun 1.4.2: HTMLBundle непрозрачен, из обработчика не
+// возвращается). JSON API закрыт целиком; фрейминг страницы закроет
+// reverse-proxy стенда (В6, add_header) — честное ограничение в отчёте.
+
+const server = Bun.serve({
+  port: config.port,
+  // В4.4 (кластер H, Прод-С4): Bun рвёт соединение при ~10–12 с тишины
+  // (замер аудита) — «думающие» хендлеры (PUT PAT: проба+посев, карточка
+  // с PAT, callback) легально живут дольше; 120 с — с запасом
+  idleTimeout: 120,
+  routes: hardenRoutes(routes),
   fetch() {
-    return new Response("not found", { status: 404 });
+    const res = new Response("not found", { status: 404 });
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.headers.set(k, v);
+    return res;
   },
 });
 

@@ -193,5 +193,8 @@ export function accessLockText(access: string | undefined): string | null {
 export function authErrorText(raw: string): string {
   if (raw === "state") return "Не сошёлся проверочный код входа (state) — начните вход заново. Так работает защита от подмены.";
   if (raw === "no_code") return "Провайдер входа не передал код подтверждения — попробуйте войти ещё раз.";
-  return `Вход не удался: ${raw}`;
+  // В4.4 (кластер K/З4): отражаемый текст ограничен — обрезка 200 символов и
+  // отсечение управляющих символов (фишинг авторитетностью официального Alert)
+  const safe = raw.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 200);
+  return `Вход не удался: ${safe}`;
 }
