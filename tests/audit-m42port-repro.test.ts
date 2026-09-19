@@ -453,7 +453,8 @@ interface CheckBody {
 }
 
 interface MyReposBody {
-  entries: { org: string; repo: string; title: string | null; language: string | null; lastScanAt: string | null; score: number | null; sources: string[] }[];
+  // Ф2.20 (решение 18.09): кабинет favorites-only — поле `sources` удалено
+  entries: { org: string; repo: string; title: string | null; language: string | null; lastScanAt: string | null; score: number | null }[];
 }
 
 describe("П2 (Н1): проверка избранного ставит сканы через requestUserScan — со всеми капами", () => {
@@ -482,19 +483,19 @@ describe("П2 (Н1): проверка избранного ставит скан
   }, 60_000);
 });
 
-describe("П4 (MAJOR №1): merge-ветка listMyRepos считает score правилом круга 2", () => {
-  test("без PAT: свой публичный репо (own-scan) и своё избранное приватное отдают число, а не null", async () => {
+describe("П4 (MAJOR №1): listMyRepos считает score правилом круга 2", () => {
+  // Ф2.20 (решение 18.09): кабинет favorites-only — union-запись own/pub
+  // (источник own-scan) из списка ушла; контракт П4 «число, а не null» для
+  // записи с правами проверяется на избранном приватном (права — own-скан)
+  test("без PAT: своё избранное приватное отдаёт число, а не null; union-запись больше не показывается", async () => {
     const res = await fetch(at("/api/me/repos"), as("own"));
     expect(res.status).toBe(200);
     const body = (await res.json()) as MyReposBody;
-    const pub = body.entries.find((e) => e.org === "own" && e.repo === "pub");
     const priv = body.entries.find((e) => e.org === "own" && e.repo === "priv");
     expect({
-      pubScore: pub?.score ?? null,
-      pubSources: pub?.sources ?? [],
       privScore: priv?.score ?? null,
-      privSources: priv?.sources ?? [],
-    }).toEqual({ pubScore: 71, pubSources: ["own-scan"], privScore: 64, privSources: ["favorite"] });
+      unionGone: body.entries.some((e) => e.org === "own" && e.repo === "pub"),
+    }).toEqual({ privScore: 64, unionGone: false });
   }, 30_000);
 });
 
@@ -510,8 +511,7 @@ describe("П6 (С4): мета репо не отдаётся зрителю бе
       language: entry!.language,
       lastScanAt: entry!.lastScanAt,
       score: entry!.score,
-      sources: entry!.sources,
-    }).toEqual({ title: null, language: null, lastScanAt: null, score: null, sources: ["favorite"] });
+    }).toEqual({ title: null, language: null, lastScanAt: null, score: null });
   }, 30_000);
 });
 
@@ -527,8 +527,7 @@ describe("П10 (Н-1, круг 2): признак прав читает пару
       language: entry!.language,
       lastScanAt: entry!.lastScanAt,
       score: entry!.score,
-      sources: entry!.sources,
-    }).toEqual({ title: null, language: null, lastScanAt: null, score: null, sources: ["favorite"] });
+    }).toEqual({ title: null, language: null, lastScanAt: null, score: null });
   }, 30_000);
 
   // вторая половина контракта П10 («остальные два дизъюнкта не трогаются»)

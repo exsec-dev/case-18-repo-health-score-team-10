@@ -11,16 +11,19 @@ import { getMeta, getRepoCardForViewer, listRepos, parseReposQuery } from "./api
 import { makeAccessCache, resolveAccess, type AccessRepo, type AccessResult } from "./auth/access";
 import { makeAppsecClient } from "./collectors/appsec";
 import {
-  addFavorite,
+  addFavoriteCapped,
   checkFavoriteAccess,
   favoriteEnqueueOf,
   isFavorite,
   listFavorites,
   listMyRepos,
   myJobs,
+  parseFavoriteInput,
   removeFavorite,
   requestUserScan,
+  seedFavoritesFromNamespace,
   type FavoriteCheckResponse,
+  type PatSeed,
 } from "./api/me";
 import { renderRepoReport } from "./report/markdown";
 import { catalogClientBudget, enqueueScan, maintenanceTick, schedulerHealthSnapshot, startScheduler, startWorkerLoop } from "./jobs/scheduler";
@@ -114,6 +117,10 @@ const unauthorized = (message = "требуется вход (Я ID)"): Response
   Response.json({ error: { code: "unauthorized", message } }, { status: 401 });
 const forbidden = (message: string): Response =>
   Response.json({ error: { code: "forbidden", message } }, { status: 403 });
+
+/** Ф2.21: предел избранного — 409 без меты репо и без факта существования приватного. */
+const favoriteLimit = (max: number): Response =>
+  Response.json({ error: { code: "favorite_limit", message: `в избранном не больше ${max} репозиториев — уберите лишние, чтобы добавить новый` } }, { status: 409 });
 
 // Ф2.8 (LOW-6): CSRF-гард по Origin на мутирующих /api/me/* и /auth/logout.
 // Заголовка нет → пропустить (межсайтовой POST закрыт SameSite=Lax); есть и
@@ -382,7 +389,21 @@ const server = Bun.serve({
         storePat(db, config.auth.appSecret!, user.userId, body.token);
         accessCache.clearUser(user.userId); // новый PAT — новые права
         const username = (who.json as { username?: unknown } | null)?.username ?? null;
-        return Response.json({ ok: true, tokenOwner: typeof username === "string" ? username : null });
+        // Ф2.20: PAT уже сохранён — посев избранного fail-soft, любой его
+        // исход сохранение не откатывает. Отдельный клиент с бюджетом 6
+        // запросов (до 5 страниц по 100; /user уже сделан пробой выше)
+        let seed: PatSeed = { status: "partial", added: 0, error: { code: "source_http" } };
+        if (typeof username === "string" && username !== "") {
+          const seeder = makeScClient({
+            token: body.token,
+            baseUrl: config.api.restBase,
+            minIntervalMs: config.scan.rest.minIntervalMs,
+            maxRequests: 6,
+            timeoutMs: config.scan.rest.timeoutMs,
+          });
+          seed = await seedFavoritesFromNamespace(db, seeder, username, user.userId, config.queue.favoritesMax);
+        }
+        return Response.json({ ok: true, tokenOwner: typeof username === "string" ? username : null, seed });
       }
       if (req.method === "DELETE") {
         deletePat(db, user.userId);
@@ -394,20 +415,17 @@ const server = Bun.serve({
     "/api/me/repos": async (req) => {
       const user = sessionOf(req);
       if (!user) return unauthorized();
-      // Ф2.8 (LOW-11): каждое чтение с PAT — до 6 живых запросов; минутное
-      // окно на юзера, 429 — до какой-либо работы маршрута
+      // Ф2.8 (LOW-11): минутное окно чтений на юзера — в кабинете список
+      // перечитывается; 429 — до какой-либо работы маршрута
       if (!allowMyReposView(user.userId)) {
         return Response.json(
           { error: { code: "rate_limited", message: `не больше ${config.queue.myReposPerMinute} обновлений списка в минуту — попробуйте позже` } },
           { status: 429 },
         );
       }
-      const client = userClient(user.userId);
-      // ПОРТ 5: union-список живёт и без PAT (заявки + избранное)
-      const result = await listMyRepos(db, client, user.userId);
-      if (!result.ok) {
-        return Response.json({ error: { code: "bad_token", message: result.error } }, { status: 400 });
-      }
+      // Ф2.20: кабинет читает ТОЛЬКО избранное — PAT здесь не нужен и в сеть
+      // маршрут не ходит вовсе
+      const result = await listMyRepos(db, user.userId);
       return Response.json({ username: result.username, entries: result.entries });
     },
     // ПОРТ 5: панель заданий — колокольчик/«Мои задания» (диагноз UX «очереди не видно»)
@@ -416,10 +434,26 @@ const server = Bun.serve({
       if (!user) return unauthorized();
       return Response.json(myJobs(db, user.userId));
     },
-    "/api/me/favorites": (req) => {
+    "/api/me/favorites": async (req) => {
       const user = sessionOf(req);
       if (!user) return unauthorized();
-      return Response.json({ entries: listFavorites(db, user.userId) });
+      if (req.method === "GET") {
+        return Response.json({ entries: listFavorites(db, user.userId) });
+      }
+      // Ф2.20: ручной ввод — JSON {repository: "org/repo" | SourceCraft-URL};
+      // тот же парсер, что у path-роут звезды
+      if (req.method === "PUT") {
+        const csrf = guardOrigin(req);
+        if (csrf) return csrf;
+        const body = (await req.json().catch(() => null)) as { repository?: unknown } | null;
+        if (typeof body?.repository !== "string") return badQuery("repository: ожидается строка org/repo или URL");
+        const parsed = parseFavoriteInput(body.repository);
+        if (!parsed) return badQuery("repository: ожидается org/repo или http(s)-URL; пустые и точечные сегменты не принимаются");
+        const outcome = addFavoriteCapped(db, user.userId, parsed.org, parsed.repo, config.queue.favoritesMax);
+        if (outcome === "limit") return favoriteLimit(config.queue.favoritesMax);
+        return Response.json({ ok: true, favorite: true });
+      }
+      return Response.json({ error: { code: "bad_query", message: "ожидался GET или PUT" } }, { status: 405 });
     },
     "/api/me/favorites/:org/:repo": (req) => {
       const { org, repo } = req.params;
@@ -433,7 +467,13 @@ const server = Bun.serve({
       const user = sessionOf(req);
       if (!user) return unauthorized();
       if (req.method === "PUT") {
-        addFavorite(db, user.userId, org!, repo!);
+        // общий парсер (Ф2.20) применён и к path-роуту звезды
+        const parsed = parseFavoriteInput(`${org}/${repo}`);
+        if (!parsed) return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
+        // Ф2.21: повтор существующего идемпотентен и лимит не расходует;
+        // сверх QUEUE_FAVORITES_MAX — 409 favorite_limit
+        const outcome = addFavoriteCapped(db, user.userId, parsed.org, parsed.repo, config.queue.favoritesMax);
+        if (outcome === "limit") return favoriteLimit(config.queue.favoritesMax);
         return Response.json({ ok: true, favorite: true });
       }
       if (req.method === "DELETE") {

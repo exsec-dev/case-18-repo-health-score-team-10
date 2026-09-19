@@ -16,7 +16,6 @@ import { linkProps, repoHref } from "./router";
 import { Page, UserAvatar, displayName, logoutFailedToast } from "./Shell";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, SkeletonRows } from "./ui";
 
-const SLUG_RE = /^[a-z0-9_.-]+\/[a-z0-9_.-]+$/i;
 const CRUMBS = [{ text: "Личный кабинет" }];
 
 type ScanJobState = { sinceScanId: number; startedAt: number; seenScanId: number | null; phase: "queued" | "running" };
@@ -57,15 +56,9 @@ export function MePage({ meta }: { meta: MetaResponse | null }) {
         }
       />
       <CabinetJobs />
-      {data.hasPat ? (
-        <MyReposSection leaseMs={leaseMs} />
-      ) : (
-        <EmptyState
-          icon={Key}
-          title="Добавьте токен, чтобы увидеть свои репозитории"
-          description="Персональный токен SourceCraft открывает ваш namespace, CI-раны и AppSec ваших репозиториев. Добавьте его в блоке «Токен доступа»."
-        />
-      )}
+      {/* Ф2.20: кабинет favorites-only — список живёт и без PAT; токен нужен
+          для проверки прав, автозапуска и посева избранного из namespace */}
+      <MyReposSection hasPat={data.hasPat} leaseMs={leaseMs} />
     </Page>
   );
 }
@@ -261,9 +254,12 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
   );
 }
 
-// ---------- мои репозитории: список + ручной слаг + запуск анализа ----------
+// ---------- мои репозитории: избранное + ручной ввод (слаг/URL) ----------
 
-function MyReposSection({ leaseMs }: { leaseMs: number }) {
+/** Светлая клиентская проверка ручного ввода: слаг org/repo или http(s)-ссылка; точную грамматику держит сервер. */
+const INPUT_LIKELY = /^([a-z0-9_.-]+\/[a-z0-9_.-]+|https?:\/\/\S+)$/i;
+
+function MyReposSection({ hasPat, leaseMs }: { hasPat: boolean; leaseMs: number }) {
   const repos = useJson<MyReposResponse>("/api/me/repos");
   const [jobs, setJobs] = useState<Record<string, ScanJobState>>({});
   const [manualSlug, setManualSlug] = useState("");
@@ -331,7 +327,20 @@ function MyReposSection({ leaseMs }: { leaseMs: number }) {
     return () => clearInterval(timer);
   }, [jobs, toaster, leaseMs]);
 
-  const slugError = manualSlug !== "" && !SLUG_RE.test(manualSlug) ? "формат: org/repo" : undefined;
+  // Ф2.20: ручной ввод добавляет в избранное (слаг или URL); парсер —
+  // серверный, клиент лишь не пускает заведомо не похожее
+  const addManual = async () => {
+    try {
+      await mutateJson("/api/me/favorites", "PUT", { repository: manualSlug });
+      setManualSlug("");
+      toaster.add({ name: "fav-added", theme: "success", title: "Добавлено в избранное", content: manualSlug });
+      repos.reload();
+    } catch (e) {
+      toaster.add({ name: "fav-failed", theme: "danger", title: "Не добавлено", content: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
+  const slugError = manualSlug !== "" && !INPUT_LIKELY.test(manualSlug) ? "формат: org/repo или ссылка" : undefined;
 
   return (
     <Flex direction="column" gap={3}>
@@ -340,8 +349,9 @@ function MyReposSection({ leaseMs }: { leaseMs: number }) {
           Мои репозитории
         </Text>
         <Text color="complementary">
-          Список читается из вашего namespace на SourceCraft по токену. Свои репозитории можно добавить и вручную: чужие
-          и недоступные платформа сама не покажет.
+          В списке — ваше избранное: репозитории, отмеченные звёздочкой на их страницах
+          {hasPat ? ". Токен открывает проверку прав, автозапуск анализа и посев из вашего namespace при сохранении" : ""}. Добавить можно и вручную:
+          слагом org/repo или ссылкой на репозиторий.
         </Text>
       </Flex>
 
@@ -349,11 +359,11 @@ function MyReposSection({ leaseMs }: { leaseMs: number }) {
         <div style={{ flex: "1 1 240px", maxWidth: 360 }}>
           <TextInput
             size="m"
-            placeholder="org/repo"
+            placeholder="org/repo или ссылка"
             value={manualSlug}
             onUpdate={(v) => setManualSlug(v.trim())}
             hasClear
-            controlProps={{ "aria-label": "Добавить репозиторий по слагу org/repo" }}
+            controlProps={{ "aria-label": "Добавить репозиторий в избранное по слагу или ссылке" }}
             errorPlacement="outside"
             validationState={slugError ? "invalid" : undefined}
             errorMessage={slugError}
@@ -362,13 +372,10 @@ function MyReposSection({ leaseMs }: { leaseMs: number }) {
         <Button
           view="action"
           size="m"
-          disabled={!SLUG_RE.test(manualSlug)}
-          onClick={() => {
-            void startScan(manualSlug);
-            setManualSlug("");
-          }}
+          disabled={!INPUT_LIKELY.test(manualSlug)}
+          onClick={() => void addManual()}
         >
-          Запустить анализ
+          Добавить в избранное
         </Button>
       </Flex>
 
@@ -378,8 +385,7 @@ function MyReposSection({ leaseMs }: { leaseMs: number }) {
       )}
       {repos.state.kind === "ok" && repos.state.data.entries.length === 0 && (
         <Text color="secondary">
-          В namespace <Text variant="code-inline-1">{repos.state.data.username}</Text> публичных репозиториев нет — добавьте
-          свой слагом выше.
+          В избранном пока пусто — отметьте репозиторий звёздочкой на его странице или добавьте слагом/ссылкой выше.
         </Text>
       )}
       {repos.state.kind === "ok" && repos.state.data.entries.length > 0 && (
@@ -573,15 +579,21 @@ function JobsPanel(props: { jobs: JobsResponse | null; reload: () => void }) {
         {recent.length > 0 && (
           <Flex direction="column" gap={2}>
             <Text variant="subheader-3">Последние</Text>
-            {recent.map((j) => (
-              <Flex key={j.jobId} gap={3} alignItems="baseline" wrap>
-                <Label theme={j.phase === "failed" ? "danger" : j.phase === "refused" ? "unknown" : "success"}>{jobPhaseLabel(j)}</Label>
-                <Text>
-                  <Text variant="code-1">{j.slug}</Text>
-                  {j.error ? ` — ${j.error}` : ""}
-                </Text>
-              </Flex>
-            ))}
+            {recent.map((j) => {
+              const [org, repo] = j.slug.split("/");
+              return (
+                <Flex key={j.jobId} gap={3} alignItems="baseline" wrap>
+                  <Label theme={j.phase === "failed" ? "danger" : j.phase === "refused" ? "unknown" : "success"}>{jobPhaseLabel(j)}</Label>
+                  {/* Ф2.20: «Последние» кликабельны — карточка в одном клике */}
+                  <Text>
+                    <Link {...linkProps(repoHref(org ?? "", repo ?? ""))} view="primary">
+                      <Text variant="code-1">{j.slug}</Text>
+                    </Link>
+                    {j.error ? ` — ${j.error}` : ""}
+                  </Text>
+                </Flex>
+              );
+            })}
           </Flex>
         )}
         <Button size="m" view="outlined" onClick={reload}>

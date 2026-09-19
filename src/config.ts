@@ -105,6 +105,8 @@ export interface QueueConfig {
   retentionDays: number;
   /** чтений /api/me/repos на юзера в минуту (Ф2.8): 6, env QUEUE_MY_REPOS_PER_MINUTE */
   myReposPerMinute: number;
+  /** предел избранного на юзера (Ф2.21): 500, env QUEUE_FAVORITES_MAX */
+  favoritesMax: number;
 }
 
 export interface AccessConfig {
@@ -317,6 +319,7 @@ export function loadConfig(): Config {
       favoriteOwnCooldownMs: envInt(env, "QUEUE_FAVORITE_OWN_COOLDOWN_MS") ?? 6 * 60 * 60_000,
       retentionDays: envInt(env, "QUEUE_RETENTION_DAYS") ?? 30,
       myReposPerMinute: envInt(env, "QUEUE_MY_REPOS_PER_MINUTE") ?? 6,
+      favoritesMax: envInt(env, "QUEUE_FAVORITES_MAX") ?? 500,
     },
     llm: {
       provider,

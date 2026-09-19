@@ -1,11 +1,11 @@
-// me.ts — read-поверхность «мой аккаунт» (В4/Б1): список доступных репо
-// по юзерскому PAT. Спискового юзерского эндпоинта в доках нет — план
-// Б1: зонд (/user → /orgs/{username}/repos, подтверждён живьём 17.09:
-// /user отдаёт username; orgs-список 200) + фолбэк — ручной ввод слага
-// в UI. Функции чистые от HTTP-слоя сервера: клиент инъектится, тесты
-// без сети. Чужие/недоступные репо не запрашиваются вовсе (ТЗ 5).
+// me.ts — read-поверхность «мой аккаунт» (В4/Б1). Ф2.20 (решение владельца
+// 18.09): кабинет — ТОЛЬКО избранное (union namespace/own-сканов закрыт как
+// «три избранных с разными механизмами»); namespace остаётся источником
+// ОДНОХОДОВОГО посева избранного при сохранении PAT. Ручной ввод — слаг или
+// URL через общий parseFavoriteInput (им пользуется и path-роут звезды).
+// Функции чистые от HTTP-слоя сервера: клиент инъектится, тесты без сети.
+// Чужие/недоступные репо не запрашиваются вовсе (ТЗ 5).
 import type { Database } from "bun:sqlite";
-import { hexColor } from "../collectors/catalog";
 import { ScClient } from "../collectors/http";
 import { upsertRepo } from "../jobs/runner";
 import { LAST_ELIGIBLE_SCAN_SQL, LAST_NOT_BAD_SCAN_SQL } from "./repos";
@@ -26,9 +26,6 @@ export interface MyRepoEntry {
   score: number | null;
   /** время последнего анализа репо ЛЮБЫМ автором (не own-скан зрителя — см. `FavoriteCheckResponse.lastOwnScanAt`, М1) */
   lastScanAt: string | null;
-  /** ПОРТ 5 (hq-parallel): откуда репо в списке — ручной слаг после скана
-   *  и избранное больше не пропадают (диагноз UX-аудита №2) */
-  sources: MyRepoSource[];
   /**
    * Ф2.17 (решение владельца 18.09): у записи есть живая job ЗРИТЕЛЯ
    * (queued/running) и нет завершённого own-скана — «работа запланирована».
@@ -36,34 +33,13 @@ export interface MyRepoEntry {
    * источник — `jobs`, не `scans`.
    */
   planned: boolean;
+  /** ПОРТ 5: поле `sources` удалено (Ф2.20, решение 18.09 — кабинет favorites-only) */
 }
-
-export type MyRepoSource = "namespace" | "own-scan" | "favorite";
 
 export interface MyReposResult {
-  ok: boolean;
-  /** namespace владельца токена (для заголовка «репозитории X») */
+  /** namespace-заголовок ушёл вместе с union (Ф2.20) — всегда null, поле оставлено для формы ответа */
   username: string | null;
   entries: MyRepoEntry[];
-  error?: string;
-}
-
-interface RawRepoEntry {
-  organization?: { slug?: unknown };
-  slug?: unknown;
-  name?: unknown;
-  language?: { name?: unknown; color?: unknown } | string | null;
-  last_updated?: unknown;
-  logo?: { url?: unknown } | null;
-}
-
-/** GET /user по PAT: чей токен (username) — единственная живая проверка «мой». */
-export async function fetchTokenUsername(client: ScClient): Promise<{ ok: true; username: string } | { ok: false; status: number }> {
-  const res = await client.get("/user");
-  if (res.status !== 200) return { ok: false, status: res.status };
-  const body = res.json as { username?: unknown } | null;
-  if (typeof body?.username !== "string" || body.username === "") return { ok: false, status: 0 };
-  return { ok: true, username: body.username };
 }
 
 /**
@@ -71,10 +47,8 @@ export async function fetchTokenUsername(client: ScClient): Promise<{ ok: true; 
  * (решение С2 (кр.1)): последний ПРИГОДНЫЙ скан P; приватный репо без P —
  * последний не-bad; время — последний скан L.
  *
- * В4.2-port-fix (П4, MAJOR №1): один хелпер на обе ветки `listMyRepos`.
- * Порты откатили решение С2, поставив в merge-ветке `score: null` литералом
- * (комментарий кода при этом утверждал обратное); копию правила заводить
- * нельзя — расходились бы снова.
+ * В4.2-port-fix (П4, MAJOR №1): один хелпер на все записи `listMyRepos`.
+ * Копию правила заводить нельзя — расходились бы снова.
  */
 function ratingScoreOf(db: Database, org: string, repo: string): { score: number | null; lastScanAt: string | null } {
   const row = db.query("SELECT id, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as
@@ -97,18 +71,17 @@ function ratingScoreOf(db: Database, org: string, repo: string): { score: number
 }
 
 /**
- * Права зрителя на репо-запись НЕ из namespace-выдачи (В4.2-port-fix, П6,
- * находка С4; признак — решение владельца (3) 18.09): `clone === true` из
- * сохранённого JSON `favorites.last_access` ИЛИ репо публичен и активен
- * ИЛИ у зрителя есть own-скан этого репо (`scans.user_id = зритель`).
+ * Права зрителя на репо-запись (В4.2-port-fix, П6, находка С4; признак —
+ * решение владельца (3) 18.09): `clone === true` из сохранённого JSON
+ * `favorites.last_access` ИЛИ репо публичен и активен ИЛИ у зрителя есть
+ * own-скан этого репо (`scans.user_id = зритель`).
  *
  * Круг 2 (П10, Н-1): публичный дизъюнкт читает ТУ ЖЕ ПАРУ признаков, что
  * `cardVisible` (`repos.ts`) и рейтинг: `visibility = 'public' AND
  * rating_active = 1`. `evictRepo` гасит `rating_active` и `visibility` не
- * трогает (ставший приватным репо правился бы только следующим сканом,
- * которого у эвиктированного не будет) — по одной `visibility` посторонний
- * с чужим слагом в избранном видел название, язык, время анализа и Score
- * репо, который карточке и MD-отчёту отдаёт 404 всем.
+ * трогает — по одной `visibility` посторонний с чужим слагом в избранном
+ * видел название, язык, время анализа и Score репо, который карточке и
+ * MD-отчёту отдаёт 404 всем.
  *
  * Берётся именно `clone` из пяти полей `FavoriteAccess` (владелец публичного
  * репо без CI даёт `own: false` при `clone: true`) и `repos.visibility`, а не
@@ -156,79 +129,130 @@ function plannedWork(db: Database, userId: number | null, org: string, repo: str
 }
 
 /**
- * Репо namespace'а владельца токена (≤5 страниц — personal-namespace
- * репо измеряются единицами; исчерпание видно по next_page_token и
-// честно отражается записью truncated).
+ * Форма ответа сохранения PAT (Ф2.20): после проверки живьём PAT сохраняется
+ * ОБЯЗАТЕЛЬНО, затем fail-soft посев избранного из namespace — сбой страницы,
+ * лимит или недочитанный каталог не откатывают сохранение.
  */
-export async function listMyRepos(db: Database, client: ScClient | null, userId: number | null, opts: { maxPages?: number } = {}): Promise<MyReposResult> {
-  const entries: MyRepoEntry[] = [];
-  let username: string | null = null;
-  if (client) {
-    const who = await fetchTokenUsername(client);
-    if (!who.ok) {
-      return { ok: false, username: null, entries: [], error: `токен отклонён (HTTP ${who.status})` };
+export interface PatSeed {
+  status: "ok" | "partial";
+  added: number;
+  error?: { code: "source_http" | "favorite_limit" | "page_limit" };
+}
+
+/**
+ * Ф2.20: строка ручного ввода → пара слагов. `org/repo` принимается как есть;
+ * http(s)-URL — ПЕРВЫЕ ДВА сегмента пути (хвосты вида /tree/main, query и
+ * fragment отбрасываются); домен НЕ валидируется — избранное может указывать
+ * куда угодно, права резолвятся при проверке. Пустые/точечные сегменты и
+ * мусорный charset → null (маршрут отдаёт 400 bad_query). Парсер общий:
+ * им пользуются и PUT /api/me/favorites, и path-роут звезды.
+ */
+export function parseFavoriteInput(raw: string): { org: string; repo: string } | null {
+  const value = raw.trim();
+  if (value === "") return null;
+  const segmentOk = (seg: string | undefined): seg is string =>
+    typeof seg === "string" && seg !== "" && /^[a-z0-9_.-]+$/i.test(seg) && !/^[.]+$/.test(seg);
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      const url = new URL(value);
+      const [org, repo] = url.pathname.split("/").filter((p) => p !== "");
+      if (!segmentOk(org) || !segmentOk(repo)) return null;
+      return { org, repo };
+    } catch {
+      return null;
     }
-    username = who.username;
-    const maxPages = opts.maxPages ?? 5;
-    let token: string | null = null;
+  }
+  const parts = value.split("/");
+  if (parts.length !== 2) return null;
+  if (!segmentOk(parts[0]) || !segmentOk(parts[1])) return null;
+  return { org: parts[0]!, repo: parts[1]! };
+}
+
+/**
+ * Ф2.21: добавление избранного с пределом на юзера. Повтор существующего
+ * идемпотентен ("exists") и лимит не расходует; считает только НОВЫЕ строки.
+ */
+export type FavoriteAddResult = "added" | "exists" | "limit";
+
+export function addFavoriteCapped(
+  db: Database,
+  userId: number,
+  org: string,
+  repo: string,
+  favoritesMax: number,
+  now = new Date(),
+): FavoriteAddResult {
+  if (isFavorite(db, userId, org, repo)) return "exists";
+  const count = (db.query("SELECT COUNT(*) AS c FROM favorites WHERE user_id = ?").get(userId) as { c: number }).c;
+  if (count >= favoritesMax) return "limit";
+  // вставка одной строки атомарна (INSERT .. ON CONFLICT DO NOTHING)
+  addFavorite(db, userId, org, repo, now);
+  return "added";
+}
+
+/**
+ * Ф2.20: однопроходный посев избранного из namespace владельца PAT —
+ * `GET /orgs/{username}/repos?page_size=100`, до 5 страниц; бюджет клиента
+ * (6 запросов) держит вызывающий. Существующие строки не считаются ни в
+ * added, ни в лимите; достигнутый кап останавливает посев с
+ * favorite_limit; оставшийся next_page_token после пятой страницы —
+ * partial/page_limit.
+ */
+export async function seedFavoritesFromNamespace(
+  db: Database,
+  client: ScClient,
+  username: string,
+  userId: number,
+  favoritesMax: number,
+  opts: { maxPages?: number } = {},
+): Promise<PatSeed> {
+  const maxPages = opts.maxPages ?? 5;
+  let added = 0;
+  let token: string | null = null;
   let pages = 0;
   while (pages < maxPages) {
-    const path = `/orgs/${encodeURIComponent(who.username)}/repos?page_size=100${token ? `&page_token=${encodeURIComponent(token)}` : ""}`;
+    const path = `/orgs/${encodeURIComponent(username)}/repos?page_size=100${token ? `&page_token=${encodeURIComponent(token)}` : ""}`;
     const res = await client.get(path);
-    if (res.status !== 200) break;
+    if (res.status !== 200) return { status: "partial", added, error: { code: "source_http" } };
     pages++;
-    const body = res.json as { repositories?: RawRepoEntry[]; next_page_token?: unknown } | null;
+    const body = res.json as { repositories?: { organization?: { slug?: unknown }; slug?: unknown }[]; next_page_token?: unknown } | null;
     const list = Array.isArray(body?.repositories) ? body!.repositories! : [];
     for (const raw of list) {
-      const org = typeof raw.organization?.slug === "string" ? raw.organization.slug : who.username;
+      const org = typeof raw.organization?.slug === "string" ? raw.organization.slug : username;
       const repo = typeof raw.slug === "string" ? raw.slug : null;
       if (!repo) continue;
-      const language =
-        typeof raw.language === "string" ? raw.language : typeof raw.language?.name === "string" ? raw.language.name : null;
-      // Score — последний пригодный скан; приватный без него — последний не-bad
-      // (круг 2, С2, как карточка); время — последнего анализа L (LOW-2).
-      // П4: одна функция на обе ветки (namespace-выдача = доказанные права)
-      const known = ratingScoreOf(db, org, repo);
-      entries.push({
-        org,
-        repo,
-        title: typeof raw.name === "string" ? raw.name : null,
-        language,
-        lastActivityAt: typeof raw.last_updated === "string" ? raw.last_updated : null,
-        logoUrl: typeof raw.logo?.url === "string" && raw.logo.url !== "" ? raw.logo.url : null,
-        languageColor: typeof raw.language === "object" && raw.language !== null ? hexColor(raw.language.color) : null,
-        score: known.score,
-        lastScanAt: known.lastScanAt,
-        sources: ["namespace"], // ПОРТ 5: union-источники (диагноз UX-2)
-        planned: plannedWork(db, userId, org, repo), // Ф2.17
-      });
+      const outcome = addFavoriteCapped(db, userId, org, repo, favoritesMax);
+      if (outcome === "added") added++;
+      if (outcome === "limit") return { status: "partial", added, error: { code: "favorite_limit" } };
     }
     const next = body?.next_page_token;
-    if (typeof next !== "string" || next.length === 0) break;
+    if (typeof next !== "string" || next.length === 0) return { status: "ok", added };
     token = next;
   }
-  } // конец if (client)
-  // ПОРТ 5: union — заявки юзера (руками добавленный слаг не пропадает) и
-  // избранное. В4.2-port-fix: score считается ТЕМ ЖЕ правилом круга 2, что в
-  // namespace-ветке (П4), но только записям, прошедшим признак прав (П6):
-  // `addFavorite` сохраняет любой слаг без проверки, поэтому без прав из
-  // `repos`/`scans` не отдаётся ничего, кроме слага и источника.
-  const merge = (org: string, repo: string, source: "own-scan" | "favorite") => {
-    const existing = entries.find((e) => e.org === org && e.repo === repo);
-    if (existing) {
-      if (!existing.sources.includes(source)) existing.sources.push(source);
-      return;
-    }
-    const mayRead = viewerMayReadRepo(db, userId, org, repo);
+  return { status: "partial", added, error: { code: "page_limit" } };
+}
+
+/**
+ * «Мои репозитории» — ТОЛЬКО избранное (Ф2.20, решение 18.09): строка
+ * `favorites` есть — запись есть; запись убрали — пропала из кабинета.
+ * Namespace- и own-scan-объединение удалены. Мета и Score по-прежнему
+ * только записям с правами (признак П6/П10 — viewerMayReadRepo не тронут).
+ */
+export async function listMyRepos(db: Database, userId: number | null): Promise<MyReposResult> {
+  const favs = db
+    .query("SELECT org_slug, repo_slug FROM favorites WHERE user_id = ? ORDER BY added_at DESC")
+    .all(userId ?? -1) as { org_slug: string; repo_slug: string }[];
+  const entries: MyRepoEntry[] = favs.map((f) => {
+    const mayRead = viewerMayReadRepo(db, userId, f.org_slug, f.repo_slug);
     const row = mayRead
-      ? (db.query("SELECT title, language FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as
+      ? (db.query("SELECT title, language FROM repos WHERE org_slug = ? AND repo_slug = ?").get(f.org_slug, f.repo_slug) as
           | { title: string | null; language: string | null }
           | null)
       : null;
-    const known = mayRead ? ratingScoreOf(db, org, repo) : { score: null, lastScanAt: null };
-    entries.push({
-      org,
-      repo,
+    const known = mayRead ? ratingScoreOf(db, f.org_slug, f.repo_slug) : { score: null, lastScanAt: null };
+    return {
+      org: f.org_slug,
+      repo: f.repo_slug,
       title: row?.title ?? null,
       language: row?.language ?? null,
       lastActivityAt: null,
@@ -236,19 +260,10 @@ export async function listMyRepos(db: Database, client: ScClient | null, userId:
       languageColor: null,
       score: known.score,
       lastScanAt: known.lastScanAt,
-      sources: [source],
-      planned: plannedWork(db, userId, org, repo), // Ф2.17
-    });
-  };
-  const jobs = db
-    .query("SELECT DISTINCT r.org_slug, r.repo_slug FROM jobs j JOIN repos r ON r.id = j.repo_id WHERE j.user_id = ?")
-    .all(userId ?? -1) as { org_slug: string; repo_slug: string }[];
-  for (const j of jobs) merge(j.org_slug, j.repo_slug, "own-scan");
-  const favs = db
-    .query("SELECT org_slug, repo_slug FROM favorites WHERE user_id = ? ORDER BY added_at DESC")
-    .all(userId ?? -1) as { org_slug: string; repo_slug: string }[];
-  for (const f of favs) merge(f.org_slug, f.repo_slug, "favorite");
-  return { ok: true, username, entries };
+      planned: plannedWork(db, userId, f.org_slug, f.repo_slug),
+    };
+  });
+  return { username: null, entries };
 }
 
 // ---------- запуск анализа юзером (В4.1, К3) ----------

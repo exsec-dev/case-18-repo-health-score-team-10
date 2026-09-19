@@ -235,47 +235,38 @@ describe("чтение: последний пригодный (P) и после�
 });
 
 describe("«мои репо» и заявка (К-Ф1.1)", () => {
-  test("listMyRepos: Score — из последнего пригодного скана", async () => {
+  test("listMyRepos: Score — из последнего пригодного скана (кабинет favorites-only, Ф2.20)", async () => {
     const t = makeApiDb();
     cleanups.push(t.close);
+    const userId = upsertUser(t.db, "ya-elig", "elig");
     const repoId = seedRepo(t, { org: "me", repo: "mine" });
+    t.db.query("INSERT INTO favorites (user_id, org_slug, repo_slug, added_at) VALUES (?, 'me', 'mine', '2026-09-19T00:00:00Z')").run(userId);
     seedScore(t, repoId, seedScan(t, repoId), { total: 71 });
     seedScore(t, repoId, seedScan(t, repoId, { ratingEligible: false }), { total: 12 });
-    const client: ScClient = {
-      async get(path: string) {
-        if (path === "/user") return { status: 200, json: { username: "me" }, bodyText: "" };
-        return { status: 200, json: { repositories: [{ organization: { slug: "me" }, slug: "mine", name: "Mine" }] }, bodyText: "" };
-      },
-      requestCount: () => 0,
-    };
-    const out = await listMyRepos(t.db, client, null);
+    const out = await listMyRepos(t.db, userId);
     expect(out.entries.map((e) => [e.repo, e.score])).toEqual([["mine", 71]]);
   });
 
   test("listMyRepos (круг 2): приватный без пригодного скана — Score последнего не-bad; время — последнего анализа", async () => {
     const t = makeApiDb();
     cleanups.push(t.close);
+    const userId = upsertUser(t.db, "ya-elig2", "elig2");
     const priv = seedRepo(t, { org: "me", repo: "secret" });
     t.db.query("UPDATE repos SET visibility = 'private' WHERE id = ?").run(priv);
-    seedScore(t, priv, seedScan(t, priv, { ratingEligible: false, status: "partial", startedAt: "2026-09-10T00:00:00Z" }), { total: 44 });
-    seedScore(t, priv, seedScan(t, priv, { ratingEligible: false, status: "bad", startedAt: "2026-09-11T00:00:00Z" }), { total: null });
+    // Ф2.20: кабинет favorites-only — права приватного репо здесь через own-скан зрителя
+    seedScore(t, priv, seedScan(t, priv, { ratingEligible: false, status: "partial", startedAt: "2026-09-10T00:00:00Z", userId }), { total: 44 });
+    seedScore(t, priv, seedScan(t, priv, { ratingEligible: false, status: "bad", startedAt: "2026-09-11T00:00:00Z", userId }), { total: null });
     const pub = seedRepo(t, { org: "me", repo: "open" });
     seedScore(t, pub, seedScan(t, pub, { ratingEligible: false, status: "partial", startedAt: "2026-09-12T00:00:00Z" }), { total: 33 });
-    const client: ScClient = {
-      async get(path: string) {
-        if (path === "/user") return { status: 200, json: { username: "me" }, bodyText: "" };
-        return {
-          status: 200,
-          json: { repositories: [{ organization: { slug: "me" }, slug: "secret" }, { organization: { slug: "me" }, slug: "open" }] },
-          bodyText: "",
-        };
-      },
-      requestCount: () => 0,
-    };
-    const out = await listMyRepos(t.db, client, null);
-    expect(out.entries.map((e) => [e.repo, e.score, e.lastScanAt])).toEqual([
-      ["secret", 44, "2026-09-11T00:00:00Z"],
+    // Ф2.20: записи кабинета — только избранное; оба репо в нём
+    for (const slug of ["secret", "open"]) {
+      t.db.query("INSERT INTO favorites (user_id, org_slug, repo_slug, added_at) VALUES (?, 'me', ?, '2026-09-19T00:00:00Z')").run(userId, slug);
+    }
+    const out = await listMyRepos(t.db, userId);
+    // порядок избранного — по added_at (здесь равны): сортируем по репо
+    expect(out.entries.sort((a, b) => a.repo.localeCompare(b.repo)).map((e) => [e.repo, e.score, e.lastScanAt])).toEqual([
       ["open", null, "2026-09-12T00:00:00Z"],
+      ["secret", 44, "2026-09-11T00:00:00Z"],
     ]);
   });
 
@@ -285,7 +276,7 @@ describe("«мои репо» и заявка (К-Ф1.1)", () => {
     const user = upsertUser(t.db, "ya-meta", "meta");
     const existing = seedRepo(t, { org: "own", repo: "old", title: "Old" });
     const body = (json: unknown): ScClient => ({ get: async () => ({ status: 200, json, bodyText: "" }), requestCount: () => 0 });
-    const queue = { userScansPerHour: 100, maxAttempts: 3, userActiveMax: 100, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000, retentionDays: 30, myReposPerMinute: 1000 };
+    const queue = { userScansPerHour: 100, maxAttempts: 3, userActiveMax: 100, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000, retentionDays: 30, myReposPerMinute: 1000, favoritesMax: 1000 };
     expect((await requestUserScan(t.db, body({ name: "New", visibility: "private" }), user, "own", "old", queue)).status).toBe(202);
     expect(t.db.query("SELECT title, visibility FROM repos WHERE id = ?").get(existing)).toEqual({ title: "Old", visibility: "public" });
     expect((await requestUserScan(t.db, body({ name: "Fresh" }), user, "own", "fresh", queue)).status).toBe(202);

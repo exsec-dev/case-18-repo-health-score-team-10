@@ -505,3 +505,22 @@ button.rh-category:focus-visible {
     gap: 0;
   }
 }
+
+/* В4.2b (Ф2.20, решение 18.09): одноразовый зелёный glow НЕзаполненной
+   звезды после успешного own-скана. Узкий state-класс: сетка, палитра и
+   токены не тронуты — цвет берётся из существующего семантического токена. */
+.rh-star-glow {
+  animation: rh-star-glow-pulse 0.9s ease-out 2;
+}
+
+@keyframes rh-star-glow-pulse {
+  0% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+  40% {
+    box-shadow: 0 0 0 4px var(--g-color-text-positive);
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}

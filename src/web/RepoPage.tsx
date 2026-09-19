@@ -30,7 +30,7 @@ import {
   Text,
   useToaster,
 } from "@gravity-ui/uikit";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CardCategory } from "../api/repos";
 import type { MeResponse, MetaResponse, RepoCard } from "./api";
 import { fetchJson, mutateJson, useJson } from "./api";
@@ -127,7 +127,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
 
   return (
     <Page crumbs={crumbs} actions={actions} aside={<ScoreAside card={card} meta={meta} />}>
-      <Header card={card} />
+      <Header card={card} starDoneKey={refresh.doneKey} />
       {card.score === null ? (
         card.job ? (
           // Ф2.15: первый анализ — статус живой job вместо лжи «скана ещё не было»
@@ -190,6 +190,9 @@ function ReportMenu({ mdHref }: { mdHref: string }) {
  */
 function useRefreshAnalysis(org: string, repo: string, cardUrl: string, sinceScanId: number, onDone: () => void, leaseMs: number) {
   const [phase, setPhase] = useState<"idle" | "sending" | "queued">("idle");
+  /** ключ sessionStorage `<org>/<repo>:<jobId>` скана, чей переход active→done увиден в этой сессии (Ф2.20) */
+  const [doneKey, setDoneKey] = useState<string | null>(null);
+  const jobIdRef = useRef<number | null>(null);
   const toaster = useToaster();
 
   useEffect(() => {
@@ -204,6 +207,7 @@ function useRefreshAnalysis(org: string, repo: string, cardUrl: string, sinceSca
         const card = await fetchJson<Card>(cardUrl);
         if (card.scan && card.scan.id > sinceScanId && card.scan.finishedAt && card.scan.status !== "running") {
           setPhase("idle");
+          if (jobIdRef.current !== null) setDoneKey(`${org}/${repo}:${jobIdRef.current}`);
           toaster.add({ name: `scan-done:${org}/${repo}`, theme: "success", title: "Анализ завершен", content: "Карточка обновлена по новому скану." });
           onDone();
         }
@@ -217,7 +221,11 @@ function useRefreshAnalysis(org: string, repo: string, cardUrl: string, sinceSca
   async function start() {
     setPhase("sending");
     try {
-      await mutateJson(`/api/me/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/scan`, "POST");
+      const res = await mutateJson<{ queued?: boolean; jobId?: number }>(
+        `/api/me/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/scan`,
+        "POST",
+      );
+      jobIdRef.current = typeof res.jobId === "number" ? res.jobId : null;
       setPhase("queued");
       toaster.add({ name: `scan-queued:${org}/${repo}`, theme: "info", title: "Анализ в очереди", content: "Карточка обновится после скана." });
     } catch (e) {
@@ -231,10 +239,10 @@ function useRefreshAnalysis(org: string, repo: string, cardUrl: string, sinceSca
     }
   }
 
-  return { phase, start };
+  return { phase, start, doneKey };
 }
 
-function Header({ card }: { card: Card }) {
+function Header({ card, starDoneKey }: { card: Card; starDoneKey: string | null }) {
   const { repo: r } = card;
   return (
     <div style={{ marginBottom: "var(--g-spacing-4)" }}>
@@ -246,7 +254,7 @@ function Header({ card }: { card: Card }) {
             <Text variant="header-1" as="h1" ellipsis>
               {r.org} / {r.repo}
             </Text>
-            <FavoriteStar org={r.org} repo={r.repo} />
+            <FavoriteStar org={r.org} repo={r.repo} doneKey={starDoneKey} />
             <ActionTooltip title="Открыть на sourcecraft.dev">
               <Button
                 view="flat-secondary"
@@ -801,9 +809,28 @@ function securityNote(card: Card): string {
 
 // ========== ПОРТ 6 (hq-parallel): избранное на карточке ==========
 
-function FavoriteStar({ org, repo }: { org: string; repo: string }) {
+/**
+ * Ф2.20 (решение 18.09): после успешного own-скана НЕзаполненная звезда один
+ * раз получает неблокирующий зелёный glow (модалка запрещена). «Один раз» =
+ * переход active→done в текущей browser-session: ключ `<org>/<repo>:<jobId>`
+ * в sessionStorage, DDL нет. Заполненная звезда не светится.
+ */
+function FavoriteStar({ org, repo, doneKey }: { org: string; repo: string; doneKey: string | null }) {
   const [state, setState] = useState<"loading" | "on" | "off" | "anon">("loading");
   const [error, setError] = useState<string | null>(null);
+  const [glow, setGlow] = useState(false);
+  useEffect(() => {
+    if (!doneKey || state !== "off") return;
+    try {
+      if (sessionStorage.getItem(doneKey) !== null) return;
+      sessionStorage.setItem(doneKey, "1");
+    } catch {
+      /* sessionStorage недоступен — светим без «одного раза», модалки нет */
+    }
+    setGlow(true);
+    const timer = setTimeout(() => setGlow(false), 2800);
+    return () => clearTimeout(timer);
+  }, [doneKey, state, org, repo]);
   useEffect(() => {
     let stop = false;
     fetch(`/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`)
@@ -840,6 +867,7 @@ function FavoriteStar({ org, repo }: { org: string; repo: string }) {
       <Button
         size="m"
         view="flat"
+        className={glow ? "rh-star-glow" : undefined}
         disabled={state === "anon"}
         title={state === "anon" ? "Войдите через Я ID, чтобы добавлять в избранное" : "в избранное: права проверятся в кабинете"}
         onClick={() => void toggle()}

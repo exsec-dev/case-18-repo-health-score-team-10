@@ -19,7 +19,7 @@ import { collectAppsec } from "../src/collectors/appsec";
 import type { ScClient, ScResponse } from "../src/collectors/http";
 import { renderRepoReport } from "../src/report/markdown";
 import { getMeta, getRepoCard } from "../src/api/repos";
-import { listMyRepos } from "../src/api/me";
+import { addFavoriteCapped, listMyRepos, parseFavoriteInput, seedFavoritesFromNamespace } from "../src/api/me";
 import { enqueueScan } from "../src/jobs/scheduler";
 import { DEFAULT_SCAN, defaultLeaseMs } from "../src/config";
 import { authErrorText } from "../src/web/format";
@@ -151,17 +151,19 @@ const mock = startMockApi(() => null);
 
 let server: SpawnedServer | null = null;
 let sessionCookie = "";
+let sessionCookie2 = "";
 
 beforeAll(async () => {
   const base = loadConfig();
   const db = openDb({ ...base, dataDir: join(ROOT, "http") });
   sessionCookie = createSession(db, SECRET, upsertUser(db, "ya-http", "http"));
+  sessionCookie2 = createSession(db, SECRET, upsertUser(db, "ya-http2", "http2"));
   db.close();
   server = await spawnServer({
     dataDir: join(ROOT, "http"),
     mock,
     appSecret: SECRET,
-    env: { QUEUE_MY_REPOS_PER_MINUTE: "2", QUEUE_USER_SCANS_PER_HOUR: "100" },
+    env: { QUEUE_MY_REPOS_PER_MINUTE: "2", QUEUE_USER_SCANS_PER_HOUR: "100", QUEUE_FAVORITES_MAX: "3" },
   });
 }, 30_000);
 
@@ -179,6 +181,10 @@ const at = (path: string) => `${server!.base}${path}`;
 const asSession = (init: RequestInit = {}): RequestInit => ({
   ...init,
   headers: { ...(init.headers ?? {}), cookie: `rh_session=${sessionCookie}` },
+});
+const asSession2 = (init: RequestInit = {}): RequestInit => ({
+  ...init,
+  headers: { ...(init.headers ?? {}), cookie: `rh_session=${sessionCookie2}` },
 });
 
 describe("Ф2.8: сегменты слага из одних точек → 400", () => {
@@ -357,8 +363,7 @@ describe("Б4 (Ф2.17): кабинет показывает «работа за�
       const uid = (t.db.query("SELECT id FROM users WHERE ya_id = 'ya-stranger2'").get() as { id: number }).id;
       t.db.query("INSERT INTO favorites (user_id, org_slug, repo_slug, added_at) VALUES (?, ?, ?, ?)").run(uid, "owner", "secret", "2026-09-19T00:00:00Z");
       enqueueScan(t.db, repoId, { userId: uid, triggerKind: "user" });
-      const out = await listMyRepos(t.db, null, uid);
-      expect(out.ok).toBe(true);
+      const out = await listMyRepos(t.db, uid);
       const entry = out.entries.find((e) => e.org === "owner" && e.repo === "secret");
       expect(entry?.planned).toBe(true);
       expect({ title: entry?.title, language: entry?.language, lastScanAt: entry?.lastScanAt, score: entry?.score }).toEqual({
@@ -384,11 +389,11 @@ describe("Б4 (Ф2.17): кабинет показывает «работа за�
       t.db.query("INSERT INTO favorites (user_id, org_slug, repo_slug, added_at) VALUES (?, ?, ?, ?)").run(uid, "owner", "done", "2026-09-19T00:00:00Z");
       // чужая живая job → признака нет
       enqueueScan(t.db, repoId, { userId: otherId, triggerKind: "user" });
-      expect((await listMyRepos(t.db, null, uid)).entries.find((e) => e.repo === "done")?.planned).toBe(false);
+      expect((await listMyRepos(t.db, uid)).entries.find((e) => e.repo === "done")?.planned).toBe(false);
       // свой завершённый own-скан → признака нет даже при живой job
       seedScan(t, repoId, { facts: cardFacts(), userId: uid, finishedAt: "2026-09-19T01:00:00Z", status: "ok" });
       enqueueScan(t.db, repoId, { userId: uid, triggerKind: "user" });
-      expect((await listMyRepos(t.db, null, uid)).entries.find((e) => e.repo === "done")?.planned).toBe(false);
+      expect((await listMyRepos(t.db, uid)).entries.find((e) => e.repo === "done")?.planned).toBe(false);
     } finally {
       t.close();
     }
@@ -404,5 +409,148 @@ describe("Б4 (Ф2.9): /api/meta дополняется queue.leaseMs", () => {
     } finally {
       t.close();
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Блок Б5: Ф2.20 (ручной ввод org/repo|URL, favorites-only список, посев
+// избранного при сохранении PAT) и Ф2.21 (предел избранного, идемпотентный
+// повтор).
+// ---------------------------------------------------------------------------
+
+describe("Б5 (Ф2.20): parseFavoriteInput", () => {
+  test("org/repo принимается как есть; лишние сегменты — отказ", () => {
+    expect(parseFavoriteInput("sourcecraft/repo-health")).toEqual({ org: "sourcecraft", repo: "repo-health" });
+    expect(parseFavoriteInput("  sourcecraft/repo-health  ")).toEqual({ org: "sourcecraft", repo: "repo-health" });
+    expect(parseFavoriteInput("a/b/c")).toBeNull();
+    expect(parseFavoriteInput("onlyname")).toBeNull();
+  });
+
+  test("URL: первые два сегмента пути, хвосты/query/fragment отбрасываются, домен не валидируется", () => {
+    expect(parseFavoriteInput("https://sourcecraft.dev/alpha/beta?rev=main")).toEqual({ org: "alpha", repo: "beta" });
+    expect(parseFavoriteInput("http://git.example/alpha/beta/tree/main#readme")).toEqual({ org: "alpha", repo: "beta" });
+    expect(parseFavoriteInput("https://whatever.host/alpha/beta")).toEqual({ org: "alpha", repo: "beta" });
+    expect(parseFavoriteInput("https://sourcecraft.dev/alpha")).toBeNull();
+  });
+
+  test("пустые и точечные сегменты → отказ (400 на маршруте)", () => {
+    expect(parseFavoriteInput("../..")).toBeNull();
+    expect(parseFavoriteInput("https://x/../../secret")).toBeNull();
+    expect(parseFavoriteInput("org/..")).toBeNull();
+    expect(parseFavoriteInput("./repo")).toBeNull();
+    expect(parseFavoriteInput("")).toBeNull();
+    expect(parseFavoriteInput("bad slug/name")).toBeNull();
+  });
+});
+
+describe("Б5 (Ф2.21): addFavoriteCapped — предел, идемпотентный повтор", () => {
+  test("сверх предела → limit; существующий → exists и лимит не расходует", () => {
+    const t: ApiTestDb = makeApiDb();
+    try {
+      const userId = upsertUser(t.db, "ya-cap", "cap");
+      for (let i = 1; i <= 3; i++) {
+        expect(addFavoriteCapped(t.db, userId, "o", `r${i}`, 3)).toBe("added");
+      }
+      expect(addFavoriteCapped(t.db, userId, "o", "r4", 3)).toBe("limit");
+      // повтор существующего: лимит не расходует
+      expect(addFavoriteCapped(t.db, userId, "o", "r1", 3)).toBe("exists");
+      const count = (t.db.query("SELECT COUNT(*) AS c FROM favorites WHERE user_id = ?").get(userId) as { c: number }).c;
+      expect(count).toBe(3);
+    } finally {
+      t.close();
+    }
+  });
+});
+
+/** Фейковый клиент посева: отдаёт заготовленные страницы, считает запросы. */
+function seedClient(pages: { status: number; json: unknown }[], paths: string[]): ScClient {
+  let i = 0;
+  return {
+    async get(path: string): Promise<ScResponse> {
+      paths.push(path);
+      const p = pages[Math.min(i, pages.length - 1)]!;
+      i++;
+      return { status: p.status, json: p.json, bodyText: JSON.stringify(p.json) };
+    },
+    requestCount: () => i,
+  };
+}
+
+const seedPage = (slugs: string[], next?: string): { status: number; json: unknown } => ({
+  status: 200,
+  json: {
+    repositories: slugs.map((s) => ({ organization: { slug: "seeder" }, slug: s })),
+    ...(next ? { next_page_token: next } : {}),
+  },
+});
+
+describe("Б5 (Ф2.20): seedFavoritesFromNamespace", () => {
+  test("две страницы → ok/3; существующие не считаются ни в added, ни в лимите", async () => {
+    const t: ApiTestDb = makeApiDb();
+    try {
+      const userId = upsertUser(t.db, "ya-seed", "seed");
+      addFavoriteCapped(t.db, userId, "seeder", "already", 500);
+      const paths: string[] = [];
+      const out = await seedFavoritesFromNamespace(
+        t.db,
+        seedClient([seedPage(["already", "b"], "p2"), seedPage(["c"])], paths),
+        "seeder",
+        userId,
+        500,
+      );
+      expect(out).toEqual({ status: "ok", added: 2 });
+      expect(new URL(`http://x${paths[0]}`).searchParams.get("page_size")).toBe("100");
+      expect(new URL(`http://x${paths[1]}`).searchParams.get("page_token")).toBe("p2");
+    } finally {
+      t.close();
+    }
+  });
+
+  test("не-200 страницы → partial/source_http; хвост после 5-й страницы → partial/page_limit; кап → partial/favorite_limit", async () => {
+    const t: ApiTestDb = makeApiDb();
+    try {
+      const userId = upsertUser(t.db, "ya-seed2", "seed2");
+      const paths: string[] = [];
+      const http = await seedFavoritesFromNamespace(t.db, seedClient([{ status: 503, json: {} }], paths), "seeder", userId, 500);
+      expect(http).toEqual({ status: "partial", added: 0, error: { code: "source_http" } });
+      const pages = Array.from({ length: 5 }, (_, i) => seedPage([`r${i}`], "more"));
+      const tail = await seedFavoritesFromNamespace(t.db, seedClient(pages, paths), "seeder", userId, 500);
+      expect(tail.status).toBe("partial");
+      expect(tail.error?.code).toBe("page_limit");
+      expect(tail.added).toBe(5);
+      const capped = await seedFavoritesFromNamespace(t.db, seedClient([seedPage(["x1", "x2", "x3"])], paths), "seeder", userId, 6);
+      expect(capped).toEqual({ status: "partial", added: 1, error: { code: "favorite_limit" } });
+    } finally {
+      t.close();
+    }
+  });
+});
+
+describe("Б5 (Ф2.21): HTTP-предел избранного и повтор (QUEUE_FAVORITES_MAX=3)", () => {
+  test("4-е → 409 favorite_limit; повтор существующего → 200; в ошибке нет меты репо", async () => {
+    for (const repo of ["lim-a", "lim-b", "lim-c"]) {
+      const res = await fetch(at("/api/me/favorites"), asSession({ method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ repository: `o/${repo}` }) }));
+      expect(res.status).toBe(200);
+    }
+    const fourth = await fetch(at("/api/me/favorites"), asSession({ method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ repository: "o/lim-d" }) }));
+    expect(fourth.status).toBe(409);
+    const body = (await fourth.json()) as { error: { code: string; message: string } };
+    expect(body.error.code).toBe("favorite_limit");
+    expect(body.error.message).not.toContain("lim-d");
+    const repeat = await fetch(at("/api/me/favorites"), asSession({ method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ repository: "o/lim-a" }) }));
+    expect(repeat.status).toBe(200);
+    const list = await fetch(at("/api/me/favorites"), asSession());
+    expect(((await list.json()) as { entries: unknown[] }).entries.length).toBe(3);
+  });
+
+  test("ручной ввод URL: первые два сегмента пути, домен любой; мусор → 400", async () => {
+    const url = await fetch(at("/api/me/favorites"), asSession2({ method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ repository: "https://git.host/alpha/beta/tree/main" }) }));
+    expect(url.status).toBe(200);
+    const list = await fetch(at("/api/me/favorites"), asSession2());
+    const entries = (await list.json()) as { entries: { org: string; repo: string }[] };
+    expect(entries.entries.map((e) => `${e.org}/${e.repo}`)).toEqual(["alpha/beta"]);
+    const invalid = await fetch(at("/api/me/favorites"), asSession2({ method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ repository: "../etc" }) }));
+    expect(invalid.status).toBe(400);
+    expect(((await invalid.json()) as { error: { code: string } }).error.code).toBe("bad_query");
   });
 });
