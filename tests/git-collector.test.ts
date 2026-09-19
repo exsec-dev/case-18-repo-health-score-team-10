@@ -8,7 +8,7 @@ import { randomFillSync } from "node:crypto";
 import { existsSync, mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
+import { killActiveClones, trackCloneGroup, 
   cloneBare,
   cloneWithDegrade,
   cleanupClone,
@@ -732,4 +732,25 @@ describe("Ф2.10: env → Config.scan → поведение клона", () => 
     expect(scanFromEnv({ SCAN_DEGRADE_ENABLED: "true" }).degrade.enabled).toBe(true);
     expect(scanFromEnv({}).degrade.enabled).toBe(true);
   });
+});
+
+// ---------------------------------------------------------------------------
+// В4.4 (кластер L/З1): реестр групп клонов — SIGTERM гасит их сразу
+// ---------------------------------------------------------------------------
+
+describe("В4.4: killActiveClones", () => {
+  test("зарегистрированная setsid-группа убивается; реестр пустеет; незарегистрированное не трогается", async () => {
+    const victim = Bun.spawn({ cmd: ["setsid", "sleep", "60"], stdout: "ignore", stderr: "ignore", stdin: "ignore" });
+    const bystander = Bun.spawn({ cmd: ["sleep", "60"], stdout: "ignore", stderr: "ignore", stdin: "ignore" });
+    trackCloneGroup(victim.pid);
+    await Bun.sleep(150); // setsid обязан успеть стать лидером группы
+    const killed = killActiveClones();
+    expect(killed).toBe(1);
+    expect(killActiveClones()).toBe(0); // реестр пуст
+    await victim.exited; // группа убита — setsid/sleep завершены
+    // незарегистрированный процесс жив — гасим руками
+    expect(bystander.exitCode === null || bystander.exitCode === 0).toBe(true);
+    bystander.kill("SIGKILL");
+    await bystander.exited;
+  }, 15_000);
 });

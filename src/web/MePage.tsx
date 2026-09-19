@@ -1,29 +1,32 @@
 // MePage.tsx — «Личный кабинет» (В4/Б5): слои идентичности (Q4) — вход
-// Я ID (UX), PAT SourceCraft (права на данные). Основная колонка — «мои
-// репозитории» (PAT + ручной ввод слага — спискового юзерского эндпоинта
-// в доках нет), запуск анализа с очередью и опросом статуса. Токен —
-// настройка, поэтому живёт в правой панели: вставка → живая проверка →
-// зашифрованное хранение, замена/удаление (удаление — с подтверждением).
-// Секция «Бюджеты скана» удалена (К5 В4.1, PENDING Алексей): лимиты скана —
-// только оператор. Ссылки ведут на единую карточку /repo/...
+// Я ID (UX), PAT SourceCraft (права на данные). Основная колонна — ОДИН
+// список «Мои репозитории» = избранное (В4.4, кластер I: дубль-секция
+// «Избранное» удалена — права-ряд, проверка, звезда и анализ в одной
+// строке). Токен — настройка в правой панели: вставка → живая проверка →
+// зашифрованное хранение, замена/удаление; исход посева из namespace
+// показывается тостом (кластер I). Ссылки ведут на единую карточку /repo/...
 // Токен НИКОГДА не возвращается API и не логируется.
 import { ArrowRightFromSquare, Clock, Key, Person } from "@gravity-ui/icons";
 import { Alert, Button, Card, Dialog, Flex, Icon, Label, Link, Spin, Text, TextInput, useToaster } from "@gravity-ui/uikit";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type MeResponse, type MetaResponse, type MyReposResponse, type RepoCard, fetchJson, logout, mutateJson, useJson } from "./api";
-import { authErrorText, fmtDateTime, fmtScore } from "./format";
+import { analysisOutcome, authErrorText, fmtDateTime, fmtScore } from "./format";
 import { linkProps, repoHref } from "./router";
 import { Page, UserAvatar, displayName, logoutFailedToast } from "./Shell";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, SkeletonRows } from "./ui";
 
 const CRUMBS = [{ text: "Личный кабинет" }];
 
-type ScanJobState = { sinceScanId: number; startedAt: number; seenScanId: number | null; phase: "queued" | "running" };
+type ScanJobState = { sinceScanId: number; startedAt: number; seenScanId: number | null; phase: "queued" | "running" | "stalled" };
 
 export function MePage({ meta }: { meta: MetaResponse | null }) {
   const me = useJson<MeResponse>("/api/me");
   // Ф2.9: горизонт опросов анализа — лиз job из /api/meta, не хардкод 20 минут
   const leaseMs = meta?.queue.leaseMs ?? 85 * 60_000;
+  // В4.4 (кластер M-14): ОДИН источник статусов — серверные jobs; строка
+  // списка предпочитает их локальному опросу (диагноз UX: два источника).
+  // Аноним не опрашивает вовсе (см. useMyJobs)
+  const jobs = useMyJobs(5000, me.state.kind === "ok" && me.state.data.login !== null);
 
   if (me.state.kind === "loading") {
     return (
@@ -32,7 +35,21 @@ export function MePage({ meta }: { meta: MetaResponse | null }) {
       </Page>
     );
   }
-  if (me.state.kind === "error" || me.state.data.login === null) {
+  if (me.state.kind === "error") {
+    // В4.4 (кластер M-3): сбой /api/me — честная ошибка с повтором, не LoginOffer
+    return (
+      <Page crumbs={CRUMBS}>
+        <Alert
+          theme="danger"
+          view="outlined"
+          title="Не удалось загрузить кабинет"
+          message={me.state.message}
+          actions={[{ text: "Повторить", handler: me.reload }]}
+        />
+      </Page>
+    );
+  }
+  if (me.state.data.login === null) {
     return <LoginOffer />;
   }
   const data = me.state.data;
@@ -55,10 +72,10 @@ export function MePage({ meta }: { meta: MetaResponse | null }) {
           </>
         }
       />
-      <CabinetJobs />
-      {/* Ф2.20: кабинет favorites-only — список живёт и без PAT; токен нужен
-          для проверки прав, автозапуска и посева избранного из namespace */}
-      <MyReposSection hasPat={data.hasPat} leaseMs={leaseMs} />
+      <JobsPanel jobs={jobs.jobs} reload={jobs.reload} leaseMs={leaseMs} />
+      {/* В4.4 (кластер I): кабинет favorites-only — список живёт и без PAT;
+          токен нужен для проверки прав, автозапуска и посева из namespace */}
+      <MyReposSection hasPat={data.hasPat} leaseMs={leaseMs} serverJobs={jobs.jobs} />
     </Page>
   );
 }
@@ -126,6 +143,19 @@ function LoginOffer() {
 
 // ---------- токен (github-style: PUT проверяет живьём, DELETE убирает) ----------
 
+/** В4.4 (кластер I): исход посева избранного из namespace — человеческой строкой. */
+function seedNote(seed: import("../api/me").PatSeed | undefined): string {
+  if (seed === undefined) return "Посев избранного из вашего namespace не выполнялся.";
+  if (seed.status === "ok") return `Посев избранного из namespace: добавлено ${seed.added}.`;
+  const why =
+    seed.error?.code === "favorite_limit"
+      ? "достигнут предел избранного"
+      : seed.error?.code === "page_limit"
+        ? "прочитаны не все страницы namespace"
+        : "namespace ответил сбоем";
+  return `Посев избранного остановлен: ${why} (добавлено ${seed.added}).`;
+}
+
 function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checkedAt: string | null; onChanged: () => void }) {
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
@@ -133,16 +163,30 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
   const [owner, setOwner] = useState<string | null>(null);
   const [replacing, setReplacing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  // В4.4 (кластер M-6): заголовок ошибки — по операции (сохранение/удаление)
+  const [failedOp, setFailedOp] = useState<"save" | "remove">("save");
   const toaster = useToaster();
 
   async function save() {
     setBusy(true);
     setError(null);
+    setFailedOp("save");
     try {
-      const res = await mutateJson<{ ok: boolean; tokenOwner: string | null }>("/api/me/pat", "PUT", { token });
+      // В4.4 (кластер I): исход посева показывается сразу — PAT уже сохранён,
+      // но что стало с избранного из namespace, юзер раньше не узнавал вовсе
+      const res = await mutateJson<{ ok: boolean; tokenOwner: string | null; seed?: import("../api/me").PatSeed }>(
+        "/api/me/pat",
+        "PUT",
+        { token },
+      );
       setOwner(res.tokenOwner);
       setToken("");
-      toaster.add({ name: "pat-saved", theme: "success", title: hasPat ? "Токен заменен" : "Токен сохранен" });
+      toaster.add({
+        name: "pat-saved",
+        theme: "success",
+        title: hasPat ? "Токен заменен" : "Токен сохранен",
+        content: `${res.tokenOwner ? `Владелец токена: ${res.tokenOwner}. ` : ""}${seedNote(res.seed)}`,
+      });
       onChanged();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -154,6 +198,7 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
   async function remove() {
     setBusy(true);
     setError(null);
+    setFailedOp("remove");
     try {
       await mutateJson("/api/me/pat", "DELETE");
       setOwner(null);
@@ -204,7 +249,13 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
             Замена и удаление — сразу действуют на новые сканы.
           </Text>
           {replacing ? (
-            tokenForm("Новый токен доступа", "Проверить и заменить")
+            <Flex direction="column" gap={2}>
+              {tokenForm("Новый токен доступа", "Проверить и заменить")}
+              {/* В4.4 (кластер M-8): выход из режима замены — явная «Отмена» */}
+              <Button view="normal" size="m" width="max" onClick={() => setReplacing(false)} disabled={busy}>
+                Отмена
+              </Button>
+            </Flex>
           ) : (
             <Flex gap={2}>
               <Button view="normal" size="m" onClick={() => setReplacing(true)}>
@@ -234,7 +285,9 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
           {tokenForm("Токен доступа SourceCraft", "Проверить и сохранить")}
         </Flex>
       )}
-      {error && <Alert theme="danger" view="outlined" size="s" title="Токен не сохранен" message={error} />}
+      {error && (
+        <Alert theme="danger" view="outlined" size="s" title={failedOp === "save" ? "Токен не сохранен" : "Токен не удален"} message={error} />
+      )}
 
       <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)} size="s" aria-label="Удаление токена">
         <Dialog.Header caption="Удалить токен?" />
@@ -254,15 +307,18 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
   );
 }
 
-// ---------- мои репозитории: избранное + ручной ввод (слаг/URL) ----------
+// ---------- мои репозитории: ОДИН список = избранное (В4.4, кластер I) ----------
 
 /** Светлая клиентская проверка ручного ввода: слаг org/repo или http(s)-ссылка; точную грамматику держит сервер. */
 const INPUT_LIKELY = /^([a-z0-9_.-]+\/[a-z0-9_.-]+|https?:\/\/\S+)$/i;
 
-function MyReposSection({ hasPat, leaseMs }: { hasPat: boolean; leaseMs: number }) {
+function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leaseMs: number; serverJobs: JobsResponse | null }) {
   const repos = useJson<MyReposResponse>("/api/me/repos");
+  const favs = useJson<FavoritesResponse>("/api/me/favorites");
   const [jobs, setJobs] = useState<Record<string, ScanJobState>>({});
   const [manualSlug, setManualSlug] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [note, setNote] = useState<{ text: string; danger: boolean } | null>(null);
   const toaster = useToaster();
   const reposReloadRef = useRef(repos.reload);
   reposReloadRef.current = repos.reload;
@@ -288,32 +344,41 @@ function MyReposSection({ hasPat, leaseMs }: { hasPat: boolean; leaseMs: number 
     [toaster],
   );
 
-  // опрос статуса запущенных анализов: 3с, не дольше лиза job (Ф2.9)
+  // опрос статуса запущенных анализов: 3с, не дольше лиза job (Ф2.9).
+  // В4.4 (кластер E): исход — по СТАТУСУ скана (bad → ошибка, не success);
+  // В4.4 (кластер M-5): после leaseMs — «затянулось», не молчаливое снятие
   useEffect(() => {
     const slugs = Object.keys(jobs);
     if (slugs.length === 0) return;
     const timer = setInterval(async () => {
       for (const slug of slugs) {
         const job = jobs[slug]!;
+        if (job.phase === "stalled") continue;
         if (Date.now() - job.startedAt > leaseMs) {
-          setJobs((prev) => {
-            const next = { ...prev };
-            delete next[slug];
-            return next;
-          });
+          setJobs((prev) => ({ ...prev, [slug]: { ...job, phase: "stalled" } }));
           continue;
         }
         try {
           const [org, repo] = slug.split("/");
           const card = await fetchJson<RepoCard>(`/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`);
           if (card.scan && card.scan.id > job.sinceScanId) {
-            if (card.scan.finishedAt && card.scan.status !== "running") {
+            const outcome = analysisOutcome(card.scan);
+            if (outcome !== "pending") {
               setJobs((prev) => {
                 const next = { ...prev };
                 delete next[slug];
                 return next;
               });
-              toaster.add({ name: `scan-done:${slug}`, theme: "success", title: "Анализ завершен", content: slug });
+              if (outcome === "ok") {
+                toaster.add({ name: `scan-done:${slug}`, theme: "success", title: "Анализ завершен", content: slug });
+              } else {
+                toaster.add({
+                  name: `scan-failed:${slug}`,
+                  theme: "danger",
+                  title: "Анализ завершился ошибкой",
+                  content: `${slug}: сбор данных не удался — подробности в «Моих заданиях»`,
+                });
+              }
               reposReloadRef.current();
             } else {
               setJobs((prev) => ({ ...prev, [slug]: { ...job, seenScanId: card.scan!.id, phase: "running" } }));
@@ -335,12 +400,46 @@ function MyReposSection({ hasPat, leaseMs }: { hasPat: boolean; leaseMs: number 
       setManualSlug("");
       toaster.add({ name: "fav-added", theme: "success", title: "Добавлено в избранное", content: manualSlug });
       repos.reload();
+      favs.reload();
     } catch (e) {
       toaster.add({ name: "fav-failed", theme: "danger", title: "Не добавлено", content: e instanceof Error ? e.message : String(e) });
     }
   };
 
+  const check = async (org: string, repo: string) => {
+    setBusy(`${org}/${repo}`);
+    setNote(null);
+    try {
+      // П2-UI: тип ответа экспортирован из src/api/me.ts — переименование
+      // поля ловит tsc, а не пользователь (условие решения (1) 18.09)
+      const res = await mutateJson<import("../api/me").FavoriteCheckResponse>(
+        `/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/check`,
+        "POST",
+      );
+      setNote({ text: `${org}/${repo}: ${accessRow(res.access)} — ${enqueueNote(res.enqueue)}`, danger: false });
+      favs.reload();
+      reposReloadRef.current();
+    } catch (e) {
+      setNote({ text: e instanceof Error ? e.message : String(e), danger: true });
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const removeFav = async (org: string, repo: string) => {
+    setBusy(`${org}/${repo}`);
+    try {
+      await mutateJson(`/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`, "DELETE");
+      favs.reload();
+      reposReloadRef.current();
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const slugError = manualSlug !== "" && !INPUT_LIKELY.test(manualSlug) ? "формат: org/repo или ссылка" : undefined;
+  const entries = repos.state.kind === "ok" ? repos.state.data.entries : [];
+  const accessBySlug = new Map((favs.state.kind === "ok" ? favs.state.data.entries : []).map((f) => [`${f.org}/${f.repo}`, f]));
 
   return (
     <Flex direction="column" gap={3}>
@@ -369,12 +468,7 @@ function MyReposSection({ hasPat, leaseMs }: { hasPat: boolean; leaseMs: number 
             errorMessage={slugError}
           />
         </div>
-        <Button
-          view="action"
-          size="m"
-          disabled={!INPUT_LIKELY.test(manualSlug)}
-          onClick={() => void addManual()}
-        >
+        <Button view="action" size="m" disabled={!INPUT_LIKELY.test(manualSlug)} onClick={() => void addManual()}>
           Добавить в избранное
         </Button>
       </Flex>
@@ -383,26 +477,123 @@ function MyReposSection({ hasPat, leaseMs }: { hasPat: boolean; leaseMs: number 
       {repos.state.kind === "error" && (
         <Alert theme="warning" view="outlined" title="Список не получился" message={repos.state.message} actions={[{ text: "Повторить", handler: repos.reload }]} />
       )}
-      {repos.state.kind === "ok" && repos.state.data.entries.length === 0 && (
+      {/* В4.4 (кластер I): пустое состояние ОДНО — список один */}
+      {repos.state.kind === "ok" && entries.length === 0 && (
         <Text color="secondary">
           В избранном пока пусто — отметьте репозиторий звёздочкой на его странице или добавьте слагом/ссылкой выше.
         </Text>
       )}
-      {repos.state.kind === "ok" && repos.state.data.entries.length > 0 && (
+      {repos.state.kind === "ok" && entries.length > 0 && (
         <ul className="rh-list">
-          {repos.state.data.entries.map((entry) => {
+          {entries.map((entry) => {
             const slug = `${entry.org}/${entry.repo}`;
-            return <RepoRow key={slug} entry={entry} job={jobs[slug] ?? null} onScan={() => void startScan(slug)} />;
+            return (
+              <RepoRow
+                key={slug}
+                entry={entry}
+                access={accessBySlug.get(slug)?.access ?? null}
+                lastCheckedAt={accessBySlug.get(slug)?.lastCheckedAt ?? null}
+                hasPat={hasPat}
+                job={jobs[slug] ?? null}
+                serverJob={serverJobs?.active.find((j) => j.slug === slug) ?? null}
+                busy={busy !== null}
+                etaNote={`обычно до ${Math.max(1, Math.round(leaseMs / 60_000))} минут`}
+                onScan={() => void startScan(slug)}
+                onCheck={() => void check(entry.org, entry.repo)}
+                onRemove={() => void removeFav(entry.org, entry.repo)}
+              />
+            );
           })}
         </ul>
       )}
+      {note && note.danger && <Alert theme="danger" title="Проверка прав не получилась" message={note.text} />}
+      {note && !note.danger && <Text color="secondary">{note.text}</Text>}
+      <Text variant="body-short" color="secondary">
+        ✓ право есть · ✗ права нет · ? проверка не удалась или неизвестно
+      </Text>
     </Flex>
   );
 }
 
-function RepoRow({ entry, job, onScan }: { entry: MyReposResponse["entries"][number]; job: ScanJobState | null; onScan: () => void }) {
+function RepoRow({
+  entry,
+  access,
+  lastCheckedAt,
+  hasPat,
+  job,
+  serverJob,
+  busy,
+  etaNote,
+  onScan,
+  onCheck,
+  onRemove,
+}: {
+  entry: MyReposResponse["entries"][number];
+  access: import("../api/me").FavoriteAccess | null;
+  lastCheckedAt: string | null;
+  hasPat: boolean;
+  job: ScanJobState | null;
+  serverJob: import("../api/me").MyJob | null;
+  busy: boolean;
+  /** M-4: «обычно до N минут» — из лиза job (/api/meta) */
+  etaNote: string;
+  onScan: () => void;
+  onCheck: () => void;
+  onRemove: () => void;
+}) {
   const { org, repo } = entry;
   const scored = entry.healthcraftIndex !== null;
+  // В4.4 (кластер M-14): серверный статус job — приоритетнее локального опроса
+  const statusCell = serverJob ? (
+    <Flex gap={2} alignItems="center" title={etaNote}>
+      <Spin size="xs" />
+      <Text color="complementary">{serverJob.phase === "queued" ? "В очереди" : "Сканируется"}</Text>
+    </Flex>
+  ) : job ? (
+    job.phase === "stalled" ? (
+      <Label theme="warning" size="xs">
+        затянулось — смотрите панель заданий
+      </Label>
+    ) : (
+      <Flex gap={2} alignItems="center" title={etaNote}>
+        <Spin size="xs" />
+        <Text color="complementary">{job.phase === "queued" ? "В очереди" : "Сканируется"}</Text>
+      </Flex>
+    )
+  ) : entry.planned ? (
+    // Ф2.17 (решение 18.09): «данных нет» ≠ «данных не будет» — пока
+    // заявка жива, кабинет показывает план вместо пустой строки; мета
+    // и Score по-прежнему скрыты (fail-closed)
+    <Label theme="info" size="xs">
+      анализ запланирован, данные скоро будут
+    </Label>
+  ) : scored ? (
+    <Flex direction="column" alignItems="flex-end" gap={0} title="HealthCraft Index — публичная оценка репозитория">
+      <Flex gap={1} alignItems="baseline">
+        <Text variant="subheader-3">{fmtScore(entry.healthcraftIndex)}</Text>
+        <Text color="secondary">/ 100 в рейтинге</Text>
+      </Flex>
+      {entry.lastScanAt && (
+        <Text variant="body-short" color="secondary">
+          {fmtDateTime(entry.lastScanAt)}
+        </Text>
+      )}
+    </Flex>
+  ) : entry.lastScanAt !== null ? (
+    <Label theme="unknown" size="xs">
+      Проанализировали — данных для оценки не хватило
+    </Label>
+  ) : entry.title === null ? (
+    // В4.4 (кластер M-2): честный ярлык закрытых прав вместо свалки
+    <Label theme="unknown" size="xs">
+      Данных нет (нет прав или репо не в каталоге)
+    </Label>
+  ) : (
+    <Label theme="unknown" size="xs">
+      Еще не анализировали
+    </Label>
+  );
+
   return (
     <li className="rh-list__item">
       <Flex gap={4} alignItems="center" wrap>
@@ -419,49 +610,35 @@ function RepoRow({ entry, job, onScan }: { entry: MyReposResponse["entries"][num
               <LanguageName name={entry.language} color={entry.languageColor} />
             </MetaItem>
             {entry.lastActivityAt && <MetaItem icon={Clock}>активность {fmtDateTime(entry.lastActivityAt)}</MetaItem>}
+            <MetaItem>
+              {accessRow(access)}
+              {lastCheckedAt ? ` · проверено ${fmtDateTime(lastCheckedAt)}` : ""}
+            </MetaItem>
           </Meta>
         </Flex>
 
-        {job ? (
-          <Flex gap={2} alignItems="center">
-            <Spin size="xs" />
-            <Text color="complementary">{job.phase === "queued" ? "В очереди" : "Сканируется"}</Text>
-          </Flex>
-        ) : entry.planned ? (
-          // Ф2.17 (решение 18.09): «данных нет» ≠ «данных не будет» — пока
-          // заявка жива, кабинет показывает план вместо пустой строки; мета
-          // и Score по-прежнему скрыты (fail-closed)
-          <Label theme="info" size="xs">
-            анализ запланирован, данные скоро будут
-          </Label>
-        ) : scored ? (
-          <Flex direction="column" alignItems="flex-end" gap={0} title="HealthCraft Index — публичная оценка репозитория">
-            <Flex gap={1} alignItems="baseline">
-              <Text variant="subheader-3">{fmtScore(entry.healthcraftIndex)}</Text>
-              <Text color="secondary">/ 100 в рейтинге</Text>
-            </Flex>
-            {entry.lastScanAt && (
-              <Text variant="body-short" color="secondary">
-                {fmtDateTime(entry.lastScanAt)}
-              </Text>
-            )}
-          </Flex>
-        ) : (
-          <Label theme="unknown" size="xs">
-            Еще не анализировали
-          </Label>
-        )}
+        {statusCell}
 
-        <Button size="m" view={scored ? "normal" : "action"} onClick={onScan} disabled={job !== null}>
-          {scored ? "Обновить анализ" : "Запустить анализ"}
-        </Button>
+        <Flex gap={2} alignItems="center">
+          {hasPat && (
+            <Button size="m" view="outlined" disabled={busy} onClick={onCheck}>
+              Проверить права
+            </Button>
+          )}
+          <Button size="m" view={scored ? "normal" : "action"} onClick={onScan} disabled={job !== null || serverJob !== null}>
+            {scored ? "Обновить анализ" : "Запустить анализ"}
+          </Button>
+          <Button size="m" view="flat" disabled={busy} onClick={onRemove}>
+            Убрать ★
+          </Button>
+        </Flex>
       </Flex>
     </li>
   );
 }
 
 
-// ========== ПОРТ 5 (hq-parallel): панель заданий + избранное ==========
+// ========== ПОРТ 5 (hq-parallel): панель заданий ==========
 
 interface JobsResponse {
   active: import("../api/me").MyJob[];
@@ -470,13 +647,16 @@ interface JobsResponse {
 
 /** Опрос /api/me/jobs: чаще при активных (честная позиция вместо спиннера);
  *  бэкофф ×2 до 5 мин на сбоях/401 после успешных данных — истёкшая сессия
- *  не крутит вечный 20-секундный опрос (ищейка-7). */
-function useMyJobs(idleMs = 5000): { jobs: JobsResponse | null; reload: () => void } {
+ *  не крутит вечный 20-секундный опрос (ищейка-7). `enabled=false` (аноним)
+ *  не шлёт ни одного запроса — 401-зонд мусорил бы консоль (планка «ноль
+ *  ошибок консоли» харнесса). */
+function useMyJobs(idleMs = 5000, enabled = true): { jobs: JobsResponse | null; reload: () => void } {
   const [jobs, setJobs] = useState<JobsResponse | null>(null);
   const [tick, setTick] = useState(0);
   const hadData = useRef(false);
   const reload = useCallback(() => setTick((x) => x + 1), []);
   useEffect(() => {
+    if (!enabled) return;
     let stop = false;
     let timer: ReturnType<typeof setTimeout>;
     let backoff = 1;
@@ -506,7 +686,7 @@ function useMyJobs(idleMs = 5000): { jobs: JobsResponse | null; reload: () => vo
       stop = true;
       clearTimeout(timer);
     };
-  }, [tick, idleMs]);
+  }, [tick, idleMs, enabled]);
   return { jobs, reload };
 }
 
@@ -516,16 +696,18 @@ function jobPhaseLabel(j: import("../api/me").MyJob): string {
   if (j.phase === "queued") return "в очереди";
   if (j.phase === "running") return "сканируется…";
   if (j.phase === "failed") return "ошибка";
-  if (j.phase === "refused") return "отклонена (лимит заявок)";
+  if (j.phase === "refused") return "отклонена предпроверкой";
   return "готово";
 }
 
 /** Колокольчик шапки: тихий в покое; «Задания ◷ N» с позициями; ⚠ с причиной. */
 export function JobsBell() {
   const { jobs } = useMyJobs(20000);
-  const active = jobs?.active ?? [];
-  const failed = jobs?.recent.filter((j) => j.phase === "failed").length ?? 0;
-  if (active.length === 0 && failed === 0 && jobs !== null) return null;
+  // M-1: до первого ответа /api/me/jobs — тишина, не danger «⚠ 0»
+  if (jobs === null) return null;
+  const active = jobs.active;
+  const failed = jobs.recent.filter((j) => j.phase === "failed").length;
+  if (active.length === 0 && failed === 0) return null;
   return (
     <details style={{ position: "relative" }}>
       <summary style={{ cursor: "pointer", listStyle: "none", whiteSpace: "nowrap" }} title="ваши анализы в очереди">
@@ -555,18 +737,21 @@ export function JobsBell() {
   );
 }
 
-/** Панель «Мои задания» кабинета: активные с позицией + последние с исходом. */
-function JobsPanel(props: { jobs: JobsResponse | null; reload: () => void }) {
-  const { jobs, reload } = props;
+/** Панель «Мои задания» кабинета: активные с ожиданием + последние с исходом. */
+function JobsPanel(props: { jobs: JobsResponse | null; reload: () => void; leaseMs: number }) {
+  const { jobs, reload, leaseMs } = props;
   if (jobs === null) return null;
   const { active, recent } = jobs;
   if (active.length === 0 && recent.length === 0) return null;
+  // M-4: горизонт ожидания — лиз job из /api/meta, не хардкод
+  const eta = `обычно до ${Math.max(1, Math.round(leaseMs / 60_000))} минут`;
   return (
-    <Card view="outlined" style={{ padding: "var(--g-spacing-5)" }}>
+    <Card view="outlined" style={{ padding: "var(--g-spacing-5)", marginBottom: "var(--g-spacing-5)" }}>
       <Flex direction="column" gap={3}>
         <Flex direction="column" gap={1}>
           <Text variant="subheader-2">Мои задания</Text>
-          <Text color="secondary">Интерактивная очередь отдельная от ночной волны рейтинга — ваши сканы не ждут чужих клонов.</Text>
+          {/* M-12: без жаргона про «ночная волна/клоны» */}
+          <Text color="secondary">Ваши сканы идут в отдельной быстрой очереди — ночной обход рейтинга им не мешает.</Text>
         </Flex>
         {active.map((j) => (
           <Flex key={j.jobId} gap={3} alignItems="center" wrap>
@@ -574,6 +759,7 @@ function JobsPanel(props: { jobs: JobsResponse | null; reload: () => void }) {
             <Text>
               <Text variant="code-1">{j.slug}</Text>
             </Text>
+            <Text color="secondary">{eta}</Text>
           </Flex>
         ))}
         {recent.length > 0 && (
@@ -640,107 +826,4 @@ function enqueueNote(enqueue: import("../api/me").FavoriteEnqueue): string {
     default:
       return "анализ не запущен: не удалось проверить доступ к репозиторию";
   }
-}
-
-/** Избранное: сейвить что угодно; права-ряд по факту; кулдаун 6ч. */
-function FavoritesSection({ hasPat }: { hasPat: boolean }) {
-  const favs = useJson<FavoritesResponse>("/api/me/favorites");
-  const [busy, setBusy] = useState<string | null>(null);
-  const [note, setNote] = useState<{ text: string; danger: boolean } | null>(null);
-  if (favs.state.kind === "loading") return null;
-  if (favs.state.kind === "error") {
-    return (
-      <Card view="outlined" style={{ padding: "var(--g-spacing-5)" }}>
-        <Alert theme="warning" title="Раздел избранного не загрузился" message={favs.state.message} />
-      </Card>
-    );
-  }
-  const entries = favs.state.data.entries;
-
-  const check = async (org: string, repo: string) => {
-    setBusy(`${org}/${repo}`);
-    setNote(null);
-    try {
-      // П2-UI: тип ответа экспортирован из src/api/me.ts — переименование
-      // поля ловит tsc, а не пользователь (условие решения (1) 18.09)
-      const res = await mutateJson<import("../api/me").FavoriteCheckResponse>(
-        `/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/check`,
-        "POST",
-      );
-      setNote({ text: `${org}/${repo}: ${accessRow(res.access)} — ${enqueueNote(res.enqueue)}`, danger: false });
-      favs.reload();
-    } catch (e) {
-      setNote({ text: e instanceof Error ? e.message : String(e), danger: true });
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const remove = async (org: string, repo: string) => {
-    setBusy(`${org}/${repo}`);
-    try {
-      await mutateJson(`/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`, "DELETE");
-      favs.reload();
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  return (
-    <Card view="outlined" style={{ padding: "var(--g-spacing-5)" }}>
-      <Flex direction="column" gap={3}>
-        <Flex direction="column" gap={1}>
-          <Text variant="subheader-2">Избранное ★</Text>
-          <Text color="secondary">
-            Любой репозиторий — звёздочкой на его странице. «Проверить права» — живой запрос по вашему PAT;
-            свой репозиторий пересканируется автоматически, но не сразу после предыдущего анализа.
-          </Text>
-          <Text color="secondary">✓ право есть · ✗ права нет · ? проверка не удалась или неизвестно</Text>
-        </Flex>
-        {entries.length === 0 && <Text color="secondary">пока пусто — добавьте звёздочкой со страницы репозитория</Text>}
-        {entries.map((f) => (
-          <Flex key={f.org + "/" + f.repo} gap={3} alignItems="center" wrap style={{ borderTop: "1px solid var(--g-color-line-generic)", paddingTop: "var(--g-spacing-3)" }}>
-            <Flex direction="column" gap={1} style={{ minWidth: 220, flex: 1 }}>
-              <Text>
-                <Text variant="code-1">{f.org}/{f.repo}</Text>
-              </Text>
-              <Text color="secondary">
-                {accessRow(f.access)}
-                {f.lastCheckedAt ? ` · проверено ${fmtDateTime(f.lastCheckedAt)}` : ""}
-              </Text>
-            </Flex>
-            {hasPat && (
-              <Button size="m" view="outlined" disabled={busy !== null} onClick={() => void check(f.org, f.repo)}>
-                Проверить права
-              </Button>
-            )}
-            <Button size="m" view="flat" disabled={busy !== null} onClick={() => void remove(f.org, f.repo)}>
-              Убрать ★
-            </Button>
-          </Flex>
-        ))}
-        {note && note.danger && <Alert theme="danger" title="Проверка прав не получилась" message={note.text} />}
-        {note && !note.danger && <Text color="secondary">{note.text}</Text>}
-      </Flex>
-    </Card>
-  );
-}
-
-/** Кабинетный контур заданий: ОДИН источник для панели (и для строк списка
- *  «моих репо» — статусы из серверных jobs, не useState; диагноз UX-2a). */
-function CabinetJobs() {
-  const { jobs, reload } = useMyJobs(5000);
-  return (
-    <Flex direction="column" gap={5}>
-      <JobsPanel jobs={jobs} reload={reload} />
-      <FavoritesGate jobsReload={reload} />
-    </Flex>
-  );
-}
-
-function FavoritesGate({ jobsReload }: { jobsReload: () => void }) {
-  void jobsReload;
-  const me = useJson<MeResponse>("/api/me");
-  const hasPat = me.state.kind === "ok" && me.state.data.hasPat;
-  return <FavoritesSection hasPat={hasPat} />;
 }

@@ -107,6 +107,13 @@ export interface QueueConfig {
   myReposPerMinute: number;
   /** предел избранного на юзера (Ф2.21): 500, env QUEUE_FAVORITES_MAX */
   favoritesMax: number;
+  /** открытий карточки залогиненным зрителем в минуту (В4.4, кластер G): 30, env QUEUE_CARD_PER_MINUTE; аноним — без лимита (проб нет).
+   *  Optional ТОЛЬКО для старых литералов QueueConfig в замороженных аудит-тестах
+   *  (правка чужих аудит-файлов запрещена промптом вехи); loadConfig задаёт всегда. */
+  cardPerMinute?: number;
+  /** мутаций избранного (PUT/DELETE звезды) на юзера в минуту (В4.4, кластер K/З6): 30, env QUEUE_FAVORITES_MUTATIONS_PER_MINUTE.
+   *  Optional — как cardPerMinute: замороженные аудит-литералы QueueConfig не правятся. */
+  favoritesMutationsPerMinute?: number;
 }
 
 export interface AccessConfig {
@@ -320,6 +327,8 @@ export function loadConfig(): Config {
       retentionDays: envInt(env, "QUEUE_RETENTION_DAYS") ?? 30,
       myReposPerMinute: envInt(env, "QUEUE_MY_REPOS_PER_MINUTE") ?? 6,
       favoritesMax: envInt(env, "QUEUE_FAVORITES_MAX") ?? 500,
+      cardPerMinute: envInt(env, "QUEUE_CARD_PER_MINUTE") ?? 30,
+      favoritesMutationsPerMinute: envInt(env, "QUEUE_FAVORITES_MUTATIONS_PER_MINUTE") ?? 30,
     },
     llm: {
       provider,

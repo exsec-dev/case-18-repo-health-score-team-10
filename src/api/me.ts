@@ -313,7 +313,7 @@ export async function requestUserScan(
   const res = prefetched ?? (await client.get(`/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`));
   // Ф1.6 + круг 2 (LOW-6): любой неуспех предпроверки (403/404, 401,
   // 0/429/5xx) учитывается лимитом частоты — POST не усилитель запросов
-  if (res.status !== 200) recordRefusedUserJob(db, userId, now);
+  if (res.status !== 200) recordRefusedUserJob(db, userId, now, `${org}/${repo}`);
   if (res.status === 403 || res.status === 404) {
     return { status: 403, body: { error: { code: "no_access", message: `ваш PAT не дает доступа к ${org}/${repo}` } } };
   }
@@ -382,8 +382,23 @@ export interface MyJob {
 }
 
 /** Активные (queued/running) + последние завершённые заявки юзера.
- *  Диагноз UX-аудита: «очереди не видно» — статус жил в useState компонента. */
+ *  Диагноз UX-аудита: «очереди не видно» — статус жил в useState компонента.
+ *  В4.4 (кластер J): LEFT JOIN — refused-заявки (repo_id=0, строки repos по
+ *  отказу нет) видны; слаг отказанной — из error-payload, нет и его — «—». */
 export function myJobs(db: import("bun:sqlite").Database, userId: number, doneLimit = 8): { active: MyJob[]; recent: MyJob[] } {
+  const slugOf = (row: Record<string, unknown>): string => {
+    if (typeof row.org_slug === "string") return `${row.org_slug}/${row.repo_slug}`;
+    // refused без репо-строки: слаг писался в error-payload при отказе
+    if (typeof row.error === "string" && row.error.startsWith("{")) {
+      try {
+        const slug = (JSON.parse(row.error) as { slug?: unknown }).slug;
+        if (typeof slug === "string" && slug !== "") return slug;
+      } catch {
+        /* не JSON — прочерк */
+      }
+    }
+    return "—";
+  };
   const toJob = (row: Record<string, unknown>): MyJob => {
     const status = String(row.status);
     const phase = (["queued", "running", "done", "failed", "refused"] as const).includes(status as "queued")
@@ -391,7 +406,7 @@ export function myJobs(db: import("bun:sqlite").Database, userId: number, doneLi
       : "queued";
     return {
       jobId: Number(row.id),
-      slug: `${row.org_slug}/${row.repo_slug}`,
+      slug: slugOf(row),
       status,
       phase,
       queueAhead:
@@ -401,10 +416,13 @@ export function myJobs(db: import("bun:sqlite").Database, userId: number, doneLi
               .get(Number(row.id)) as { n: number }).n
           : null,
       claimedAt: typeof row.claimed_at === "string" ? row.claimed_at : null,
-      error: typeof row.error === "string" ? row.error : null,
+      // refused: error — машинный JSON со слагом, человеку показывается слаг в `slug`
+      error: phase === "refused" ? null : typeof row.error === "string" ? row.error : null,
     };
   };
-  const base = "SELECT j.id, j.status, j.claimed_at, j.error, r.org_slug, r.repo_slug FROM jobs j JOIN repos r ON r.id = j.repo_id WHERE j.user_id = ?";
+    // LEFT JOIN: refused живёт без строки repos (repo_id = 0)
+  const base =
+    "SELECT j.id, j.status, j.claimed_at, j.error, r.org_slug, r.repo_slug FROM jobs j LEFT JOIN repos r ON r.id = j.repo_id WHERE j.user_id = ?";
   const active = (db.query(base + " AND j.status IN ('queued','running') ORDER BY j.id").all(userId) as Record<string, unknown>[]).map(toJob);
   const recent = (db.query(base + " AND j.status IN ('done','failed','refused') ORDER BY j.id DESC LIMIT ?").all(userId, doneLimit) as Record<string, unknown>[]).map(toJob);
   return { active, recent };

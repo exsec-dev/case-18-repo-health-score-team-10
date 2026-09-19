@@ -5,6 +5,19 @@
 export const NO_DATA = "нет данных";
 export const NO_SCORE = "Недостаточно данных";
 
+/**
+ * В4.4 (кластер M-9): RU-имена категорий из константы — фолбэк, когда
+ * /api/meta не загрузился (раньше страница показывала сырые ключи).
+ */
+export const CATEGORY_TITLES_RU: Record<string, string> = {
+  documentation: "Документация",
+  cicd: "CI/CD",
+  security: "Security",
+  activity: "Активность",
+  issues: "Issues",
+  code: "Code health",
+};
+
 /** Балл категории 0..100 — целым: дробь тут ничего не объясняет. */
 export function fmtScore(value: number | null | undefined): string {
   return value === null || value === undefined ? "—" : String(Math.round(value));
@@ -97,6 +110,17 @@ export function scanTriggerText(trigger: string): string {
   }
 }
 
+/**
+ * В4.4 (кластер E код-аудита): исход анализа для опросщиков (MePage/RepoPage).
+ * Finished-скан со статусом bad — ОШИБКА (раньше любой доехавший скан
+ * праздновался success-тостом «Анализ завершен»), ok/partial — успех,
+ * running/нет скана — ещё не закончился. Тост рисует UI — здесь только исход.
+ */
+export function analysisOutcome(scan: { status: string; finishedAt: string | null } | null | undefined): "pending" | "ok" | "failed" {
+  if (!scan || scan.finishedAt === null || scan.status === "running" || scan.status === "queued") return "pending";
+  return scan.status === "bad" ? "failed" : "ok";
+}
+
 /** Прирост Score — одним знаком после точки, как в тексте эффекта рекомендации. */
 export function fmtDelta(delta: number): string {
   return `+${(Math.round(delta * 10) / 10).toFixed(1)}`;
@@ -182,5 +206,8 @@ export function accessLockText(access: string | undefined): string | null {
 export function authErrorText(raw: string): string {
   if (raw === "state") return "Не сошёлся проверочный код входа (state) — начните вход заново. Так работает защита от подмены.";
   if (raw === "no_code") return "Провайдер входа не передал код подтверждения — попробуйте войти ещё раз.";
-  return `Вход не удался: ${raw}`;
+  // В4.4 (кластер K/З4): отражаемый текст ограничен — обрезка 200 символов и
+  // отсечение управляющих символов (фишинг авторитетностью официального Alert)
+  const safe = raw.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 200);
+  return `Вход не удался: ${safe}`;
 }

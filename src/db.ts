@@ -234,132 +234,140 @@ export function openDb(config: Config): Database {
     );
   }
   db.exec("PRAGMA journal_mode = WAL;");
-  db.exec(SCHEMA);
-  // v1.1 → v1.2: repos-колонки В2 (forks/reaction_counts)
-  ensureColumn(db, "repos", "forks", "INTEGER");
-  ensureColumn(db, "repos", "reaction_counts", "TEXT");
-  // старые формы производных таблиц пересоздаются: v1.1 scores был
-  // PK(scan_id) + formula_version; v1.1 recommendations — без model_version.
-  // v1.9 (В4.3, Ф3.2): scores без healthcraft_index (включая формы с
-  // сохранённым total_rating/total_full вплоть до 1.8) пересоздаётся —
-  // производная таблица, строки восстанавливает rescoreAll из facts;
-  // старые totals источником не служат (полный итог — дериватив показа).
-  if (!columnsOf(db, "scores").has("healthcraft_index")) {
-    db.exec("DROP TABLE IF EXISTS scores");
-    db.exec(SCORES_DDL);
-  }
-  if (!columnsOf(db, "recommendations").has("model_version")) {
-    db.exec("DROP TABLE IF EXISTS recommendations");
-    db.exec(RECOMMENDATIONS_DDL);
-  }
-  // v1.2 → v1.3: derived-метрики строки скоров (NULL у строк старых
-  // прогонов — пересчёт scripts/score.ts заполняет последний скан)
-  ensureColumn(db, "scores", "derived", "TEXT");
-  // v1.4 → v1.5 (В4.1): recommendations с каналом — производная таблица,
-  // пересоздаётся (данные восстанавливает rescore-m4.ts)
-  if (!columnsOf(db, "recommendations").has("channel")) {
-    db.exec("DROP TABLE IF EXISTS recommendations");
-    db.exec(RECOMMENDATIONS_DDL);
-  }
-  ensureColumn(db, "scans", "user_id", "INTEGER");
-  // В4.1-fix (К-Ф1.1): пригодность — тем же правилом, что скор-хук, одним UPDATE
-  if (ensureColumn(db, "scans", "rating_eligible", "INTEGER NOT NULL DEFAULT 0")) {
-    db.exec(`UPDATE scans SET rating_eligible = CASE WHEN ${ratingEligibleSql("scans")} THEN 1 ELSE 0 END`);
-  }
-  // В4.1-fix (Ф1.11): публичный статус по фактам
-  if (ensureColumn(db, "scans", "public_status", "TEXT")) {
-    db.exec(`UPDATE scans SET public_status = ${publicStatusSql("scans")}`);
-  }
-  // v1.8 (В4.2a, Ф2.2): чем закрыт скан, если закрыт не собой — 'orphaned'
-  ensureColumn(db, "scans", "status_detail", "TEXT");
-  // v1.3 → v1.4 (В4): изоляция own/public и эвикция
-  ensureColumn(db, "repos", "rating_active", "INTEGER NOT NULL DEFAULT 1");
-  ensureColumn(db, "repos", "visibility", "TEXT NOT NULL DEFAULT 'public'");
-  ensureColumn(db, "repos", "evict_reason", "TEXT");
-  // В4.5 (17.09): аватары — logo.url репозитория и портрет Я ID пользователя;
-  // колонки аддитивные (старый код их не читает), версия схемы не меняется
-  ensureColumn(db, "repos", "logo_url", "TEXT");
-  ensureColumn(db, "repos", "language_color", "TEXT");
-  ensureColumn(db, "users", "display_name", "TEXT");
-  ensureColumn(db, "users", "avatar_id", "TEXT");
-  ensureColumn(db, "jobs", "user_id", "INTEGER");
-  ensureColumn(db, "jobs", "trigger_kind", "TEXT NOT NULL DEFAULT 'periodic'");
-  // П11 (Н-2, круг 2 В4.2-port-fix): бэкфилл признака полосы. Колонку добавили
-  // с DEFAULT 'periodic', и у строк, созданных ДО неё, `user_id IS NOT NULL`
-  // соседствует с `trigger_kind = 'periodic'`. На «единый признак полосы»
-  // (П8) опираются гард ночного обхода и retry-failed: без бэкфилла живая
-  // legacy-юзерская job навсегда блокировала бы периодику по своему репо и
-  // читалась бы как последняя периодическая. Согласованность обеспечивает
-  // миграция, а не только вставка `enqueueScan`.
-  // Ф2.18 (хвост приёмки В4.2-port-fix): бэкфилл — ОДНОРАЗОВАЯ миграция, а не
-  // работа каждого `openDb`. Полный UPDATE по всей очереди выполнялся при
-  // каждом открытии БД (на живой базе это десятки тысяч строк на старте
-  // каждого процесса и каждого теста). Условие — переход версии схемы:
-  // legacy-БД без версии или версия МЛАДШЕ текущей (переход < 1.8).
-  // Транзакция своя, до записи версии (её пишет `setMetaValue`
-  // последней строкой функции).
-  if (stored === null || compareVersions(stored, SCHEMA_VERSION) < 0) {
-    db.transaction(() => {
-      db.exec("UPDATE jobs SET trigger_kind = 'user' WHERE user_id IS NOT NULL AND trigger_kind <> 'user'");
-    })();
-  }
-  // v1.5 (В4.1, К4): попытки и время постановки
-  ensureColumn(db, "jobs", "attempts", "INTEGER NOT NULL DEFAULT 0");
-  ensureColumn(db, "jobs", "created_at", "TEXT");
-  ensureColumn(db, "scores", "code_empty", "INTEGER");
-  // v1.4: jobs UNIQUE(repo_id) (В1) мешает очереди — свой и публичный
-  // скан одного репо стоят одновременно; очередь пересоздаём без UNIQUE
-  // (строки jobs транзитны, данные не теряются: scans/scores независимы)
-  // Ф2.11 (LOW-1): пересборка ЦЕЛИКОМ в транзакции, а индексы старой таблицы
-  // сносятся ДО `RENAME`. SQLite переносит индексы вместе с переименованной
-  // таблицей: `CREATE INDEX IF NOT EXISTS` из SCHEMA видел занятые имена и
-  // молча пропускал создание, а `DROP TABLE jobs_v1_rebuild` уносил индексы
-  // с собой — новая `jobs` оставалась без idx_jobs_unclaimed и idx_jobs_claim.
-  // Без транзакции обрыв посреди пересборки оставлял базу без очереди вовсе.
-  const jobsDdl = (db.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jobs'").get() as { sql: string } | null)?.sql ?? "";
-  if (jobsDdl.includes("UNIQUE")) {
-    db.transaction(() => {
-      for (const idx of db.query("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'jobs' AND sql IS NOT NULL").all() as { name: string }[]) {
-        db.exec(`DROP INDEX IF EXISTS "${idx.name}"`);
-      }
-      db.exec("ALTER TABLE jobs RENAME TO jobs_v1_rebuild");
-      db.exec(SCHEMA); // создаёт новую jobs без UNIQUE + индексы
-      db.exec("INSERT INTO jobs (repo_id, status, claimed_at, lease_until) SELECT repo_id, status, claimed_at, lease_until FROM jobs_v1_rebuild");
-      db.exec("DROP TABLE jobs_v1_rebuild");
-    })();
-  }
-  db.exec(LATE_INDEXES);
-  // ПОРТ 5 (hq-parallel): панель заданий (jobs.error — причина падения)
-  // и избранное (сейвить что угодно строкой слага; права-ряд по факту)
-  ensureColumn(db, "jobs", "error", "TEXT");
-  db.exec(`CREATE TABLE IF NOT EXISTS favorites (
-    user_id INTEGER NOT NULL REFERENCES users(id),
-    org_slug TEXT NOT NULL,
-    repo_slug TEXT NOT NULL,
-    added_at TEXT NOT NULL,
-    last_access TEXT,
-    last_checked_at TEXT,
-    UNIQUE(user_id, org_slug, repo_slug)
-  )`);
-  // Ф2.8 (В4.2b): перешифровка PAT на ключ HKDF — ИДЕМПОТЕНТНО. Строки
-  // без префикса `v2:` расшифровываются прежним ключом sha256 и
-  // перезаписываются на `v2:` (HKDF); нерасшифровываемые (секрет сменился,
-  // данные повреждены) НЕ трогаются — их честно объявит patReadable. Без
-  // appSecret (сессии выключены) проход не выполняется вовсе.
-  if (config.auth.appSecret) {
-    const legacyRows = db
-      .query("SELECT user_id, pat_enc FROM user_tokens WHERE pat_enc IS NOT NULL")
-      .all() as { user_id: number; pat_enc: string }[];
-    for (const row of legacyRows) {
-      if (row.pat_enc.startsWith(PAT_V2_PREFIX)) continue;
-      const next = reencryptPat(config.auth.appSecret, row.pat_enc);
-      if (next !== null) db.query("UPDATE user_tokens SET pat_enc = ? WHERE user_id = ?").run(next, row.user_id);
+  // В4.4 (кластер A, Прод-С3 код-аудита): вся миграция — ОДНА транзакция
+  // (DDL в SQLite транзакционен). Параллельный старт двух ролей на переходе
+  // версии больше не может оставить базу полумигрированной: либо все DDL и
+  // schema_version, либо ничего. PRAGMA journal_mode — снаружи (в транзакции
+  // no-op); вложенные db.transaction (П11, Ф2.11) становятся сейвпоинтами.
+  db.transaction(() => {
+    db.exec(SCHEMA);
+    // v1.1 → v1.2: repos-колонки В2 (forks/reaction_counts)
+    ensureColumn(db, "repos", "forks", "INTEGER");
+    ensureColumn(db, "repos", "reaction_counts", "TEXT");
+    // старые формы производных таблиц пересоздаются: v1.1 scores был
+    // PK(scan_id) + formula_version; v1.1 recommendations — без model_version.
+    // v1.9 (В4.3, Ф3.2): scores без healthcraft_index (включая формы с
+    // сохранённым total_rating/total_full вплоть до 1.8) пересоздаётся —
+    // производная таблица, строки восстанавливает rescoreAll из facts;
+    // старые totals источником не служат (полный итог — дериватив показа).
+    if (!columnsOf(db, "scores").has("healthcraft_index")) {
+      db.exec("DROP TABLE IF EXISTS scores");
+      db.exec(SCORES_DDL);
     }
-  }
-  // П8 (LOW-2): версия схемы пишется ПОСЛЕДНЕЙ — после всех DDL, миграций и
-  // ensureColumn. Порты оставили её перед портовыми объектами, и обрыв между
-  // ними помечал БД версией без этих объектов; теперь «версия = 1.7» означает,
-  // что favorites и jobs.error в базе действительно есть.
-  setMetaValue(db, "schema_version", SCHEMA_VERSION);
+    if (!columnsOf(db, "recommendations").has("model_version")) {
+      db.exec("DROP TABLE IF EXISTS recommendations");
+      db.exec(RECOMMENDATIONS_DDL);
+    }
+    // v1.2 → v1.3: derived-метрики строки скоров (NULL у строк старых
+    // прогонов — пересчёт scripts/score.ts заполняет последний скан)
+    ensureColumn(db, "scores", "derived", "TEXT");
+    // v1.4 → v1.5 (В4.1): recommendations с каналом — производная таблица,
+    // пересоздаётся (данные восстанавливает rescore-m4.ts)
+    if (!columnsOf(db, "recommendations").has("channel")) {
+      db.exec("DROP TABLE IF EXISTS recommendations");
+      db.exec(RECOMMENDATIONS_DDL);
+    }
+    ensureColumn(db, "scans", "user_id", "INTEGER");
+    // В4.1-fix (К-Ф1.1): пригодность — тем же правилом, что скор-хук, одним UPDATE
+    if (ensureColumn(db, "scans", "rating_eligible", "INTEGER NOT NULL DEFAULT 0")) {
+      db.exec(`UPDATE scans SET rating_eligible = CASE WHEN ${ratingEligibleSql("scans")} THEN 1 ELSE 0 END`);
+    }
+    // В4.1-fix (Ф1.11): публичный статус по фактам
+    if (ensureColumn(db, "scans", "public_status", "TEXT")) {
+      db.exec(`UPDATE scans SET public_status = ${publicStatusSql("scans")}`);
+    }
+    // v1.8 (В4.2a, Ф2.2): чем закрыт скан, если закрыт не собой — 'orphaned'
+    ensureColumn(db, "scans", "status_detail", "TEXT");
+    // v1.3 → v1.4 (В4): изоляция own/public и эвикция
+    ensureColumn(db, "repos", "rating_active", "INTEGER NOT NULL DEFAULT 1");
+    ensureColumn(db, "repos", "visibility", "TEXT NOT NULL DEFAULT 'public'");
+    ensureColumn(db, "repos", "evict_reason", "TEXT");
+    // В4.5 (17.09): аватары — logo.url репозитория и портрет Я ID пользователя;
+    // колонки аддитивные (старый код их не читает), версия схемы не меняется
+    ensureColumn(db, "repos", "logo_url", "TEXT");
+    ensureColumn(db, "repos", "language_color", "TEXT");
+    ensureColumn(db, "users", "display_name", "TEXT");
+    ensureColumn(db, "users", "avatar_id", "TEXT");
+    ensureColumn(db, "jobs", "user_id", "INTEGER");
+    ensureColumn(db, "jobs", "trigger_kind", "TEXT NOT NULL DEFAULT 'periodic'");
+    // П11 (Н-2, круг 2 В4.2-port-fix): бэкфилл признака полосы. Колонку добавили
+    // с DEFAULT 'periodic', и у строк, созданных ДО неё, `user_id IS NOT NULL`
+    // соседствует с `trigger_kind = 'periodic'`. На «единый признак полосы»
+    // (П8) опираются гард ночного обхода и retry-failed: без бэкфилла живая
+    // legacy-юзерская job навсегда блокировала бы периодику по своему репо и
+    // читалась бы как последняя периодическая. Согласованность обеспечивает
+    // миграция, а не только вставка `enqueueScan`.
+    // Ф2.18 (хвост приёмки В4.2-port-fix): бэкфилл — ОДНОРАЗОВАЯ миграция, а не
+    // работа каждого `openDb`. Полный UPDATE по всей очереди выполнялся при
+    // каждом открытии БД (на живой базе это десятки тысяч строк на старте
+    // каждого процесса и каждого теста). Условие — переход версии схемы:
+    // legacy-БД без версии или версия МЛАДШЕ текущей (переход < 1.8).
+    // Транзакция своя, до записи версии (её пишет `setMetaValue`
+    // последней строкой функции).
+    if (stored === null || compareVersions(stored, SCHEMA_VERSION) < 0) {
+      db.transaction(() => {
+        db.exec("UPDATE jobs SET trigger_kind = 'user' WHERE user_id IS NOT NULL AND trigger_kind <> 'user'");
+      })();
+    }
+    // v1.5 (В4.1, К4): попытки и время постановки
+    ensureColumn(db, "jobs", "attempts", "INTEGER NOT NULL DEFAULT 0");
+    ensureColumn(db, "jobs", "created_at", "TEXT");
+    ensureColumn(db, "scores", "code_empty", "INTEGER");
+    // v1.4: jobs UNIQUE(repo_id) (В1) мешает очереди — свой и публичный
+    // скан одного репо стоят одновременно; очередь пересоздаём без UNIQUE
+    // (строки jobs транзитны, данные не теряются: scans/scores независимы)
+    // Ф2.11 (LOW-1): пересборка ЦЕЛИКОМ в транзакции, а индексы старой таблицы
+    // сносятся ДО `RENAME`. SQLite переносит индексы вместе с переименованной
+    // таблицей: `CREATE INDEX IF NOT EXISTS` из SCHEMA видел занятые имена и
+    // молча пропускал создание, а `DROP TABLE jobs_v1_rebuild` уносил индексы
+    // с собой — новая `jobs` оставалась без idx_jobs_unclaimed и idx_jobs_claim.
+    // Без транзакции обрыв посреди пересборки оставлял базу без очереди вовсе.
+    const jobsDdl = (db.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jobs'").get() as { sql: string } | null)?.sql ?? "";
+    if (jobsDdl.includes("UNIQUE")) {
+      db.transaction(() => {
+        for (const idx of db.query("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'jobs' AND sql IS NOT NULL").all() as { name: string }[]) {
+          db.exec(`DROP INDEX IF EXISTS "${idx.name}"`);
+        }
+        db.exec("ALTER TABLE jobs RENAME TO jobs_v1_rebuild");
+        db.exec(SCHEMA); // создаёт новую jobs без UNIQUE + индексы
+        db.exec("INSERT INTO jobs (repo_id, status, claimed_at, lease_until) SELECT repo_id, status, claimed_at, lease_until FROM jobs_v1_rebuild");
+        db.exec("DROP TABLE jobs_v1_rebuild");
+      })();
+    }
+    db.exec(LATE_INDEXES);
+    // ПОРТ 5 (hq-parallel): панель заданий (jobs.error — причина падения)
+    // и избранное (сейвить что угодно строкой слага; права-ряд по факту)
+    ensureColumn(db, "jobs", "error", "TEXT");
+    db.exec(`CREATE TABLE IF NOT EXISTS favorites (
+      user_id INTEGER NOT NULL REFERENCES users(id),
+      org_slug TEXT NOT NULL,
+      repo_slug TEXT NOT NULL,
+      added_at TEXT NOT NULL,
+      last_access TEXT,
+      last_checked_at TEXT,
+      UNIQUE(user_id, org_slug, repo_slug)
+    )`);
+    // Ф2.8 (В4.2b): перешифровка PAT на ключ HKDF — ИДЕМПОТЕНТНО. Строки
+    // без префикса `v2:` расшифровываются прежним ключом sha256 и
+    // перезаписываются на `v2:` (HKDF); нерасшифровываемые (секрет сменился,
+    // данные повреждены) НЕ трогаются — их честно объявит patReadable. Без
+    // appSecret (сессии выключены) проход не выполняется вовсе.
+    if (config.auth.appSecret) {
+      const legacyRows = db
+        .query("SELECT user_id, pat_enc FROM user_tokens WHERE pat_enc IS NOT NULL")
+        .all() as { user_id: number; pat_enc: string }[];
+      for (const row of legacyRows) {
+        if (row.pat_enc.startsWith(PAT_V2_PREFIX)) continue;
+        const next = reencryptPat(config.auth.appSecret, row.pat_enc);
+        if (next !== null) db.query("UPDATE user_tokens SET pat_enc = ? WHERE user_id = ?").run(next, row.user_id);
+      }
+    }
+    // П8 (LOW-2): версия схемы пишется ПОСЛЕДНЕЙ — после всех DDL, миграций и
+    // ensureColumn. Порты оставили её перед портовыми объектами, и обрыв между
+    // ними помечал БД версией без этих объектов; теперь «версия = 1.7» означает,
+    // что favorites и jobs.error в базе действительно есть. В4.4: внутри общей
+    // транзакции — атомарно с самими DDL.
+    setMetaValue(db, "schema_version", SCHEMA_VERSION);
+  })();
   return db;
 }

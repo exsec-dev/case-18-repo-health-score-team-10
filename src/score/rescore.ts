@@ -7,11 +7,20 @@
 //
 // Круг 2: ошибка одного скана (битые данные) логируется и считается, пересчёт
 // идёт дальше; ошибка схемы (SQLiteError: нет таблицы/колонки) — фатальна:
-// пересчёт останавливается, derived_version не пишется. Старт сервера
-// пересчитывает только то, что читается сейчас: для каждого репо последний
-// пригодный скан P, последний завершённый L и для приватного — последний
-// не-bad; остальная история — фоновым тиком воркера по курсору
-// meta.history_rescore_cursor (порциями, когда очередь пуста).
+// пересчёт останавливается, derived_version не пишется.
+//
+// В4.4 (кластер A код-аудита): стартовый рескор — АСИНХРОННО после поднятия
+// порта, батчами по watermark scan_id: прогресс персистентен
+// (meta.derived_rescore_cursor пишется после каждого батча, рестарт
+// продолжает с курсора), running-флаг и ошибка — в meta (кросс-процессно,
+// web-роль читает их для /api/health). Рескор исполняют только роли
+// rating/all. BUSY-класс (SQLITE_BUSY*) больше не фатален: busy_timeout
+// 15 c + до 3 повторов батча с бэкоффом; схемные ошибки по-прежнему
+// останавливают проход без derived_version — но процесс с поднятым портом
+// не роняют (деплой-гонка «рескор-kill-рескор» умирает вместе с ней).
+// Во время прохода рейтинг читает частичное покрытие (фильтр
+// model_version в SQL рейтинга): непересчитанные сканы не участвуют, а не
+// показываются мусором. Синхронный rescoreAll остаётся для скриптов.
 //
 // meta.derived_version повышается, когда меняется форма/смысл хранимых
 // оценок без смены MODEL_VERSION (1 — Ф1.2/Ф1.12; 2 — круг 2: одно правило
@@ -42,6 +51,31 @@ export const HISTORY_RESCORE_BATCH = 20;
 
 const HISTORY_CURSOR = "history_rescore_cursor";
 
+/** Порция асинхронного стартового прохода (В4.4, кластер A). */
+export const RESCORE_BATCH = 50;
+
+/** Watermark scan_id пройденного батчами (пишется после каждого батча). */
+export const RESCORE_CURSOR = "derived_rescore_cursor";
+
+/**
+ * Флаг «проход идёт» (кросс-процессно): значение — ISO-метка последнего
+ * сердцебиения (обновляется после каждого батча). Умерший процесс оставляет
+ * метку стареть: RESCORE_HEARTBEAT_STALE_MS — порог, после которого running
+ * считается ложным (health не врёт «идёт» про мёртвый проход).
+ */
+export const RESCORE_RUNNING = "derived_rescore_running";
+export const RESCORE_HEARTBEAT_STALE_MS = 10 * 60_000;
+
+/** Последняя схемная ошибка прохода (пусто = проход не падал). */
+export const RESCORE_ERROR = "derived_rescore_error";
+
+/** BUSY-класс по коду ошибки (аудит-пара 20.09: не по строке сообщения). */
+export function isBusyError(e: unknown): boolean {
+  if (!(e instanceof SQLiteError)) return false;
+  const code = (e as { code?: string }).code ?? "";
+  return code.startsWith("SQLITE_BUSY") || (!code && /database is locked/i.test(e.message));
+}
+
 export interface RescoreOptions {
   /** лог прогресса (сервер — console.log) */
   log?: (message: string) => void;
@@ -67,7 +101,10 @@ export interface RescoreResult {
   fatal: number;
 }
 
-/** Нужен ли пересчёт при старте: derived_version БД старее кода, нет строк текущей модели или следы старого процесса. */
+/**
+ * Нужен ли пересчёт при старте: derived_version БД старее кода, нет строк текущей модели, следы старого процесса
+ * или (В4.4) водяной знак батчевого прохода не догнал последний скан.
+ */
 export function needsRescore(db: Database): boolean {
   const stored = Number(getMetaValue(db, "derived_version") ?? "0");
   if (!Number.isFinite(stored) || stored < DERIVED_VERSION) return true;
@@ -77,7 +114,48 @@ export function needsRescore(db: Database): boolean {
   if (rows === 0) return true;
   // круг 2 (LOW-10): следы старого процесса — завершённые сканы без public_status
   const legacy = db.query("SELECT 1 FROM scans WHERE public_status IS NULL AND status NOT IN ('running', 'queued') LIMIT 1").get();
-  return legacy !== null;
+  if (legacy !== null) return true;
+  // В4.4: курсор не догнал max(scan_id) — проход не закончен (рестарт посреди него)
+  const cursor = Number(getMetaValue(db, RESCORE_CURSOR) ?? "0") || 0;
+  const maxId = (db.query("SELECT COALESCE(MAX(id), 0) AS m FROM scans").get() as { m: number }).m;
+  return cursor < maxId;
+}
+
+/** Прогресс асинхронного прохода для /api/health (кросс-процессно из meta). */
+export interface RescoreState {
+  running: boolean;
+  /** watermark scan_id пройденного */
+  done: number;
+  /** max(scan_id) — цель прохода */
+  total: number;
+  /** последняя схемная ошибка прохода; null = не падал */
+  error: string | null;
+}
+
+export function rescoreState(db: Database): RescoreState {
+  const total = (db.query("SELECT COALESCE(MAX(id), 0) AS m FROM scans").get() as { m: number }).m;
+  const done = Number(getMetaValue(db, RESCORE_CURSOR) ?? "0") || 0;
+  const heartbeat = getMetaValue(db, RESCORE_RUNNING);
+  const stamp = heartbeat === null ? Number.NaN : Date.parse(heartbeat);
+  const running = Number.isFinite(stamp) && Date.now() - stamp < RESCORE_HEARTBEAT_STALE_MS;
+  return { running, done, total, error: getMetaValue(db, RESCORE_ERROR) };
+}
+
+/**
+ * Скор-хук продвигает водяной знак: скан только что получил оценки, и если
+ * под курсором не осталось непройденного, курсор можно поднять до него —
+ * иначе needsRescore висел бы «недогнанным» до следующего старта. Между
+ * курсором и сканом есть непройденные завершённые сканы — знак не двигается:
+ * их посчитает проход (батч/старт), прыжок через них потерял бы их навсегда.
+ */
+export function bumpRescoreCursor(db: Database, scanId: number): void {
+  const cursor = Number(getMetaValue(db, RESCORE_CURSOR) ?? "0") || 0;
+  if (scanId <= cursor) return;
+  const unprocessed = db
+    .query("SELECT 1 FROM scans WHERE id > ? AND id < ? AND status NOT IN ('running', 'queued') LIMIT 1")
+    .get(cursor, scanId);
+  if (unprocessed !== null) return;
+  setMetaValue(db, RESCORE_CURSOR, String(scanId));
 }
 
 interface ScanRow {
@@ -170,6 +248,10 @@ export function rescoreAll(db: Database, opts: RescoreOptions = {}): RescoreResu
   }
   if (!opts.dry) {
     setMetaValue(db, "derived_version", String(DERIVED_VERSION));
+    // В4.4: синхронный проход (скрипты) закрывает водяной знак целиком;
+    // startup-подмножество закрывает читаемые сканы, история — своим курсором
+    const maxId = (db.query("SELECT COALESCE(MAX(id), 0) AS m FROM scans").get() as { m: number }).m;
+    setMetaValue(db, RESCORE_CURSOR, String(maxId));
     // стартовый пересчёт покрыл только читаемые сканы — остальная история фоном
     if (scope === "startup") setMetaValue(db, HISTORY_CURSOR, "0");
     else db.query("DELETE FROM meta WHERE key = ?").run(HISTORY_CURSOR);
@@ -203,4 +285,161 @@ export function rescoreHistoryBatch(db: Database, opts: { limit?: number; log?: 
     setMetaValue(db, HISTORY_CURSOR, String(scans[scans.length - 1]!.id));
   }
   return scans.length;
+}
+
+// ---------- В4.4 (кластер A): асинхронный проход по водяному знаку ----------
+
+export interface CursorBatchResult {
+  /** строк пройдено (включая пропущенные running/queued — курсор минует их) */
+  processed: number;
+  /** true = за курсором сканов больше нет, проход завершён */
+  done: boolean;
+}
+
+/**
+ * Один батч асинхронного прохода: сканы с id > курсора, порцией `limit`,
+ * курсор — на последнем пройденном (пишется ВСЕГДА, включая skipped —
+ * running-скан посчитает свой скор-хук). Последний неполный батч
+ * завершает проход: derived_version пишется здесь, running-флаг и ошибка
+ * гасятся, курсор встаёт на max(scan_id). Идемпотентен: вызов при
+ * догнанном курсоре — processed 0 без записей, кроме повторной фиксации
+ * derived_version.
+ */
+export function rescoreBatchByCursor(db: Database, opts: { limit?: number; log?: (m: string) => void } = {}): CursorBatchResult {
+  const log = opts.log ?? (() => {});
+  const limit = Math.max(1, opts.limit ?? RESCORE_BATCH);
+  const cursor = Number(getMetaValue(db, RESCORE_CURSOR) ?? "0") || 0;
+  const scans = db
+    .query(`SELECT ${SCAN_COLS} FROM scans s JOIN repos r ON r.id = s.repo_id WHERE s.id > ? ORDER BY s.id LIMIT ?`)
+    .all(cursor, limit) as ScanRow[];
+  const result: RescoreResult = { scans: 0, skipped: 0, ratingScored: 0, ratingNull: 0, eligible: 0, errors: 0, fatal: 0 };
+  // схемная ошибка летит из rescoreScan как есть — runStartupRescore ловит её
+  for (const scan of scans) rescoreScan(db, scan, result, {}, log);
+  const done = scans.length < limit;
+  if (done) {
+    const maxId = (db.query("SELECT COALESCE(MAX(id), 0) AS m FROM scans").get() as { m: number }).m;
+    setMetaValue(db, RESCORE_CURSOR, String(maxId));
+    setMetaValue(db, "derived_version", String(DERIVED_VERSION));
+    db.query("DELETE FROM meta WHERE key = ?").run(HISTORY_CURSOR);
+    log(
+      `rescore pass complete: scans=${result.scans} skipped(running)=${result.skipped} errors=${result.errors} eligible=${result.eligible} rating_scored=${result.ratingScored} rating_null=${result.ratingNull}`,
+    );
+  } else {
+    setMetaValue(db, RESCORE_CURSOR, String(scans[scans.length - 1]!.id));
+  }
+  return { processed: scans.length, done };
+}
+
+/** Исход асинхронного прохода: чем он остановился. */
+export type StartupRescoreStop = "done" | "busy" | "error";
+
+export interface StartupRescoreOptions {
+  log?: (message: string) => void;
+  /** размер батча (тест — мелкие) */
+  limit?: number;
+  /** пауза между батчами: уступить event loop HTTP и воркеру */
+  pauseMs?: number;
+  /** окно ожидания блокировки (дефолт — контракт кластера A: 15 с; тест — короче) */
+  busyTimeoutMs?: number;
+  /** шов теста BUSY-политики: подмена одного шага прохода */
+  batch?: typeof rescoreBatchByCursor;
+}
+
+/**
+ * Шаг прохода под BUSY-политикой (busy_timeout уже поднят): не-BUSY бросок
+ * летит наружу, BUSY — до 3 повторов с бэкоффом, дальше `onBusyStop()`.
+ */
+async function busyGuarded<T>(fn: () => T, onBusyStop: () => T, log: (m: string) => void, label: string): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return fn();
+    } catch (e) {
+      if (!isBusyError(e)) throw e;
+      if (attempt > 3) {
+        log(`${label}: repeated SQLITE_BUSY — stopping (cursor/progress kept)`);
+        return onBusyStop();
+      }
+      log(`${label}: SQLITE_BUSY (attempt ${attempt}/3) — backing off`);
+      await Bun.sleep(250 * 2 ** (attempt - 1));
+    }
+  }
+}
+
+/**
+ * Асинхронный стартовый проход (исполняют роли rating/all после поднятия
+ * порта): батчи rescoreBatchByCursor с сердцебиением в meta. BUSY —
+ * busy_timeout 15 с + до 3 повторов с бэкоффом (включая предцикловые
+ * записи), затем стоп с сохранённым курсором (рестарт/тик доберут);
+ * схемная ошибка — стоп с meta derived_rescore_error и БЕЗ derived_version
+ * (проход фатален, процесс — нет: порт уже обслуживает запросы,
+ * crash-loop деплой-окна исключён).
+ */
+export async function runStartupRescore(db: Database, opts: StartupRescoreOptions = {}): Promise<{ stopped: StartupRescoreStop }> {
+  const log = opts.log ?? (() => {});
+  const batch = opts.batch ?? rescoreBatchByCursor;
+  const limit = Math.max(1, opts.limit ?? RESCORE_BATCH);
+  const pauseMs = Math.max(0, opts.pauseMs ?? 10);
+  try {
+    db.exec(`PRAGMA busy_timeout = ${Math.max(0, Math.floor(opts.busyTimeoutMs ?? 15_000))};`);
+  } catch {
+    /* выше пола не бывает — политика ретраев ниже всё равно стоит */
+  }
+  const t0 = Date.now();
+  const prelude = await busyGuarded(
+    () => {
+      db.query("DELETE FROM meta WHERE key = ?").run(RESCORE_ERROR);
+      setMetaValue(db, RESCORE_RUNNING, new Date().toISOString());
+      return true;
+    },
+    () => false,
+    log,
+    "rescore prelude",
+  );
+  if (!prelude) return { stopped: "busy" };
+  log(`rescore ${MODEL_VERSION} (derived v${DERIVED_VERSION}): background pass by scan_id watermark, batches of ${limit}`);
+  if (!needsRescore(db)) {
+    db.query("DELETE FROM meta WHERE key = ?").run(RESCORE_RUNNING);
+    log("rescore: nothing to do (cursor caught up)");
+    return { stopped: "done" };
+  }
+  const migrated = await busyGuarded(
+    () => {
+      migrateEligibility(db);
+      return true;
+    },
+    () => false,
+    log,
+    "rescore eligibility migration",
+  );
+  if (!migrated) {
+    db.query("DELETE FROM meta WHERE key = ?").run(RESCORE_RUNNING);
+    return { stopped: "busy" };
+  }
+  let stopped: StartupRescoreStop = "done";
+  try {
+    for (;;) {
+      const out = await busyGuarded(
+        () => batch(db, { limit, log }),
+        () => null,
+        log,
+        "rescore batch",
+      );
+      if (out === null) {
+        stopped = "busy";
+        break;
+      }
+      setMetaValue(db, RESCORE_RUNNING, new Date().toISOString());
+      if (out.done) break;
+      await Bun.sleep(pauseMs);
+    }
+  } catch (e) {
+    const msg = String((e as Error).message).slice(0, 200);
+    setMetaValue(db, RESCORE_ERROR, msg);
+    log(`rescore stopped: schema error: ${msg}`);
+    return { stopped: "error" };
+  } finally {
+    db.query("DELETE FROM meta WHERE key = ?").run(RESCORE_RUNNING);
+  }
+  if (stopped === "done") log(`rescore pass finished in ${Math.round((Date.now() - t0) / 1000)} s`);
+  return { stopped };
 }

@@ -102,3 +102,38 @@ describe("роуты единой карточки (К2)", () => {
     for (const leak of ["severity_counts", "runs_count", "fix-red-runs"]) expect(md).not.toContain(leak);
   });
 });
+
+// ---------------------------------------------------------------------------
+// В4.4 (кластер K): заголовки защиты на JSON-ответах + churn-лимит мутаций
+// избранного. Отклонение (проверено воркером живьём): HTML-бандл Bun-маршрута
+// заголовков не получает — механизм HTML-import не даёт управлять ответом.
+// ---------------------------------------------------------------------------
+
+describe("В4.4: security-заголовки и churn-лимит", () => {
+  test("JSON-ответы несут X-Frame-Options/nosniff/Referrer-Policy", async () => {
+    for (const path of ["/api/health", "/api/repos", "/api/no-such-endpoint"]) {
+      const res = await fetch(`${base}${path}`);
+      expect(res.headers.get("x-frame-options")).toBe("DENY");
+      expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(res.headers.get("referrer-policy")).toBe("strict-origin-when-cross-origin");
+    }
+  });
+
+  test("мутации избранного: 31-я за минуту → 429 rate_limited; GET не считается", async () => {
+    // asStranger заморожен на module-load с пустым cookie — здесь нужен живой
+    const as = { headers: { cookie: `${SESSION_COOKIE}=${strangerCookie}` } };
+    expect(((await (await fetch(`${base}/api/me`, as)).json()) as { login: string | null }).login).toBe("stranger");
+    const statuses: number[] = [];
+    for (let i = 0; i < 31; i++) {
+      const res = await fetch(`${base}/api/me/favorites/two/repo-${i}`, { ...as, method: "PUT" });
+      statuses.push(res.status);
+    }
+    expect(statuses.slice(0, 30).every((s) => s === 200)).toBe(true);
+    expect(statuses[30]).toBe(429);
+    const body = (await (await fetch(`${base}/api/me/favorites/two/repo-0`, { ...as, method: "PUT" })).json()) as { error?: { code: string } };
+    expect(body.error?.code).toBe("rate_limited");
+    // чтения лимит не расходуют
+    const read = await fetch(`${base}/api/me/favorites`, as);
+    expect(read.status).toBe(200);
+  });
+});

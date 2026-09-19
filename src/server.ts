@@ -8,6 +8,7 @@
 import { loadConfig } from "./config";
 import { openDb } from "./db";
 import { getMeta, getRepoCardForViewer, listRepos, parseReposQuery } from "./api/repos";
+import { getHealth } from "./api/health";
 import { makeAccessCache, resolveAccess, type AccessRepo, type AccessResult } from "./auth/access";
 import { makeAppsecClient } from "./collectors/appsec";
 import {
@@ -26,7 +27,8 @@ import {
   type PatSeed,
 } from "./api/me";
 import { renderRepoReport } from "./report/markdown";
-import { catalogClientBudget, enqueueScan, maintenanceTick, schedulerHealthSnapshot, startScheduler, startWorkerLoop } from "./jobs/scheduler";
+import { catalogClientBudget, maintenanceTick, returnOwnRunningJobs, startScheduler, startWorkerLoop } from "./jobs/scheduler";
+import { killActiveClones } from "./collectors/git";
 import {
   clearOAuthStateCookieHeader,
   clearSessionCookieHeader,
@@ -46,7 +48,7 @@ import {
 import { deletePat, getPat, patMeta, patReadable, storePat } from "./auth/pat";
 import { buildAuthUrl, exchangeCode, yaAvatarUrl, type YaEndpoints } from "./auth/ya";
 import { makeScClient } from "./collectors/http";
-import { needsRescore, rescoreAll } from "./score/rescore";
+import { needsRescore, runStartupRescore } from "./score/rescore";
 import index from "./web/index.html";
 
 const config = loadConfig();
@@ -56,6 +58,14 @@ const patProbes = new Map<number, number[]>();
 const favoriteChecks = new Map<number, number[]>();
 // Ф2.8 (В4.2b): минутное окно чтений /api/me/repos на юзера.
 const myReposViews = new Map<number, number[]>();
+// В4.4 (кластер G код-аудита): карточка — единственная пробная поверхность
+// без лимита (до 3 живых запросов PAT зрителя на показ + вымывание кэша
+// доступа): минутное окно на ЗАЛОГИНЕННОГО зрителя; аноним — без лимита
+// (публичная карточка в сеть не ходит, проб нет).
+const cardViews = new Map<number, number[]>();
+// В4.4 (кластер K/З6): churn-цикл PUT/DELETE избранного деградирует БД —
+// минутное окно мутаций на юзера (добавление/снятие звезды).
+const favMutations = new Map<number, number[]>();
 
 /**
  * Скользящее окно счётчика на юзера: true = пропустить, лимит не исчерпан.
@@ -85,6 +95,56 @@ const allowFavoriteCheck = (userId: number, now = Date.now()): boolean =>
 const allowMyReposView = (userId: number, now = Date.now()): boolean =>
   allowInWindow(myReposViews, userId, config.queue.myReposPerMinute, 60_000, now);
 
+/** Минутное окно показов карточки залогиненным зрителем (В4.4, кластер G): true = пропустить. */
+const allowCardView = (userId: number, now = Date.now()): boolean =>
+  allowInWindow(cardViews, userId, config.queue.cardPerMinute ?? 30, 60_000, now);
+
+/** Минутное окно мутаций избранного (В4.4, кластер K/З6): true = пропустить. */
+const allowFavMutation = (userId: number, now = Date.now()): boolean =>
+  allowInWindow(favMutations, userId, config.queue.favoritesMutationsPerMinute ?? 30, 60_000, now);
+
+/**
+ * В4.4 (кластер K/З3): у Bun.serve нет глобальных headers — защита от
+ * фрейминга и MIME-сниффинга ставится обёрткой над каждым ответом.
+ */
+const SECURITY_HEADERS: Record<string, string> = {
+  "x-frame-options": "DENY",
+  "x-content-type-options": "nosniff",
+  "referrer-policy": "strict-origin-when-cross-origin",
+};
+
+function harden(handler: (req: Request) => Response | Promise<Response>): (req: Request) => Response | Promise<Response> {
+  const apply = (res: Response): Response => {
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.headers.set(k, v);
+    return res;
+  };
+  return (req: Request) => {
+    const out = handler(req);
+    return out instanceof Promise ? out.then(apply) : apply(out);
+  };
+}
+
+/** Обёртка над таблицей маршрутов: каждый обработчик (и метод во вложенной
+ *  карте) отвечает с заголовками; Response/HTMLBundle-значения проходят
+ *  как есть (их Bun разложил бы в метод-карту и сломал). */
+function hardenRoutes<T extends Record<string, unknown>>(routes: T): T {
+  const out: Record<string, unknown> = {};
+  for (const [path, value] of Object.entries(routes)) {
+    if (typeof value === "function") {
+      out[path] = harden(value as (req: Request) => Response | Promise<Response>);
+    } else if (value !== null && typeof value === "object" && Object.values(value).length > 0 && Object.values(value).every((v) => typeof v === "function")) {
+      const methods: Record<string, unknown> = {};
+      for (const [method, handler] of Object.entries(value as Record<string, unknown>)) {
+        methods[method] = harden(handler as (req: Request) => Response | Promise<Response>);
+      }
+      out[path] = methods;
+    } else {
+      out[path] = value;
+    }
+  }
+  return out as T;
+}
+
 /** Живая проба токена = оракул валидности PAT; сервис не переборщик (ПОРТ S1). */
 const PAT_PROBES_PER_HOUR = 10;
 
@@ -97,17 +157,9 @@ const db = openDb(config);
 // это `__Host-rh_*` с Secure. Читается ТОЛЬКО актуальное имя.
 const ck = cookieNames(config.auth);
 
-// Ф1.9: оценки устарели (derived_version старее кода) или их нет при
-// непустых сканах (после миграции схемы) — синхронный пересчёт ДО Bun.serve:
-// рейтинг не отвечает пустым или смешанным. Прогресс — в лог.
-if (needsRescore(db)) {
-  const t0 = Date.now();
-  console.log("[startup] stored scores are outdated or missing: rescoring before serving");
-  // круг 2 (LOW-7): до порта — только читаемые сканы (P, L, приватный не-bad), история — фоновым тиком воркера
-  const out = rescoreAll(db, { scope: "startup", log: (m) => console.log(`[startup] ${m}`), progressEvery: 200 });
-  if (out.fatal > 0) throw new Error("startup rescore stopped on a schema error (see log above)");
-  console.log(`[startup] rescore finished in ${Math.round((Date.now() - t0) / 1000)} s`);
-}
+// В4.4 (кластер A код-аудита): стартовый рескор — АСИНХРОННО ПОСЛЕ поднятия
+// порта (ниже, у старта ролей): деплой с бампом производных больше не держит
+// порт десятки минут и не порождает рестарт-луп «рескор-kill-рескор».
 
 const badQuery = (message: string): Response =>
   Response.json({ error: { code: "bad_query", message } }, { status: 400 });
@@ -117,6 +169,13 @@ const unauthorized = (message = "требуется вход (Я ID)"): Response
   Response.json({ error: { code: "unauthorized", message } }, { status: 401 });
 const forbidden = (message: string): Response =>
   Response.json({ error: { code: "forbidden", message } }, { status: 403 });
+
+/** В4.4 (кластер K/З6): окно мутаций избранного исчерпано — 429. */
+const favoriteRateLimited = (): Response =>
+  Response.json(
+    { error: { code: "rate_limited", message: `не больше ${config.queue.favoritesMutationsPerMinute ?? 30} изменений избранного в минуту — попробуйте чуть позже` } },
+    { status: 429 },
+  );
 
 /** Ф2.21: предел избранного — 409 без меты репо и без факта существования приватного. */
 const favoriteLimit = (max: number): Response =>
@@ -203,38 +262,15 @@ const yaCreds = () => ({
 /** Ф2.10: адреса Я ID — из конфига (тесты направляют их на локальный мок). */
 const yaEndpoints = (): YaEndpoints => ({ oauthBase: config.auth.yaOauthBase, loginBase: config.auth.yaLoginBase });
 
-const server = Bun.serve({
-  port: config.port,
-  routes: {
+// В4.4 (кластер K): таблица маршрутов — тип Bun.serve, чтобы обёртка
+// hardenRoutes не стирала сигнатуры обработчиков (и метод-карты вроде POST)
+type RoutesTable = NonNullable<Parameters<typeof Bun.serve>[0]>["routes"];
+const routes = {
     "/api/health": () => {
-      // ПОРТ hq-parallel (S3): health не врёт зелёным на мёртвой периодике —
-      // очередь, провалы за 24ч, последний обход, свежесть данных
-      const n = (db.query("SELECT COUNT(*) AS c FROM repos").get() as { c: number }).c;
-      const queue = {
-        user: (db.query("SELECT COUNT(*) AS c FROM jobs WHERE status IN ('queued','running') AND trigger_kind = 'user'").get() as { c: number }).c,
-        rating: (db.query("SELECT COUNT(*) AS c FROM jobs WHERE status IN ('queued','running') AND trigger_kind != 'user'").get() as { c: number }).c,
-      };
-      const failed24h = (db.query("SELECT COUNT(*) AS c FROM jobs WHERE status = 'failed' AND created_at > ?").get(new Date(Date.now() - 24 * 60 * 60_000).toISOString()) as { c: number }).c;
-      const sched = schedulerHealthSnapshot();
-      const nightly = sched.lastNightly;
-      const fresh = db
-        .query("SELECT MAX(s.finished_at) AS f FROM scans s JOIN scores sc ON sc.scan_id = s.id WHERE s.finished_at IS NOT NULL AND sc.healthcraft_index IS NOT NULL")
-        .get() as { f: string | null };
-      return Response.json({
-        ok: true,
-        repos: n,
-        llmProvider: config.llm.provider,
-        queue,
-        failedJobs24h: failed24h,
-        // К-Р5: два РАЗНЫХ факта — «последний обход» и «последний обход с
-        // исполнившейся ночной фазой»; lastNightly обновляет только второй
-        // (часовая сверка его не трогает), lastReconcileAt/lastNightlyAt —
-        // метки успеха своих фаз
-        lastNightly: nightly ? { ok: nightly.ok, error: nightly.ok ? undefined : nightly.error, pages: nightly.ok ? nightly.pages : 0, catalogComplete: nightly.ok ? nightly.catalogComplete : false } : null,
-        lastReconcileAt: sched.lastReconcileAt,
-        lastNightlyAt: sched.lastNightlyAt,
-        freshAsOf: fresh.f,
-      });
+      // В4.4 (кластер B): ok — вычисляемое (pending-рескор, подозрительно
+      // пустой каталог, провал ночной фазы); тело — честный статус, HTTP-200
+      // остаётся (здоровье читают по телу, порт-гарды ждут статус)
+      return Response.json(getHealth(db, config));
     },
     "/api/meta": () => Response.json(getMeta(db, { leaseMs: config.scheduler.leaseMs })),
     "/api/repos": (req) => {
@@ -251,6 +287,13 @@ const server = Bun.serve({
         return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
       }
       const viewer = sessionOf(req);
+      // В4.4 (кластер G): 429 — до резолва доступа (не тратим PAT-запросы)
+      if (viewer && !allowCardView(viewer.userId)) {
+        return Response.json(
+          { error: { code: "rate_limited", message: `не больше ${config.queue.cardPerMinute ?? 30} открытий карточки в минуту — попробуйте чуть позже` } },
+          { status: 429 },
+        );
+      }
       const card = await getRepoCardForViewer(db, org!, repo!, viewerAccess(req), { limits: config.scan, viewerUserId: viewer?.userId });
       if (!card) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
       return Response.json(card);
@@ -261,6 +304,13 @@ const server = Bun.serve({
         return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
       }
       const viewer = sessionOf(req);
+      // В4.4 (кластер G): MD-выгрузка — та же карточка, тот же лимит
+      if (viewer && !allowCardView(viewer.userId)) {
+        return Response.json(
+          { error: { code: "rate_limited", message: `не больше ${config.queue.cardPerMinute ?? 30} открытий карточки в минуту — попробуйте чуть позже` } },
+          { status: 429 },
+        );
+      }
       // тот же сборщик карточки с тем же зрителем (К2)
       const card = await getRepoCardForViewer(db, org!, repo!, viewerAccess(req), { limits: config.scan, viewerUserId: viewer?.userId });
       if (!card) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
@@ -445,6 +495,8 @@ const server = Bun.serve({
       if (req.method === "PUT") {
         const csrf = guardOrigin(req);
         if (csrf) return csrf;
+        const user0 = sessionOf(req);
+        if (user0 && !allowFavMutation(user0.userId)) return favoriteRateLimited();
         const body = (await req.json().catch(() => null)) as { repository?: unknown } | null;
         if (typeof body?.repository !== "string") return badQuery("repository: ожидается строка org/repo или URL");
         const parsed = parseFavoriteInput(body.repository);
@@ -467,6 +519,8 @@ const server = Bun.serve({
       const user = sessionOf(req);
       if (!user) return unauthorized();
       if (req.method === "PUT") {
+        const user0 = sessionOf(req);
+        if (user0 && !allowFavMutation(user0.userId)) return favoriteRateLimited();
         // общий парсер (Ф2.20) применён и к path-роуту звезды
         const parsed = parseFavoriteInput(`${org}/${repo}`);
         if (!parsed) return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
@@ -477,6 +531,7 @@ const server = Bun.serve({
         return Response.json({ ok: true, favorite: true });
       }
       if (req.method === "DELETE") {
+        if (!allowFavMutation(user.userId)) return favoriteRateLimited();
         removeFavorite(db, user.userId, org!, repo!);
         return Response.json({ ok: true, favorite: false });
       }
@@ -564,10 +619,26 @@ const server = Bun.serve({
     "/api/*": () => notFound("неизвестный endpoint"),
     // catch-all фронтенда: маршруты /repo/{org}/{repo} живут в History API,
     // прямая ссылка и F5 на карточке должны отдавать тот же бандл
+    // HTML-импорт — готовый Response: заголовки выставляются один раз (идемпотентно)
     "/*": index,
-  },
+  } satisfies NonNullable<RoutesTable>;
+// В4.4 (кластер K, отклонение): заголовки защиты НЕ ставятся на HTML-бандл —
+// Bun HTML-import маршрут (routes["/*"] = index) не даёт управлять ответом
+// (проверено живьём на bun 1.4.2: HTMLBundle непрозрачен, из обработчика не
+// возвращается). JSON API закрыт целиком; фрейминг страницы закроет
+// reverse-proxy стенда (В6, add_header) — честное ограничение в отчёте.
+
+const server = Bun.serve({
+  port: config.port,
+  // В4.4 (кластер H, Прод-С4): Bun рвёт соединение при ~10–12 с тишины
+  // (замер аудита) — «думающие» хендлеры (PUT PAT: проба+посев, карточка
+  // с PAT, callback) легально живут дольше; 120 с — с запасом
+  idleTimeout: 120,
+  routes: hardenRoutes(routes),
   fetch() {
-    return new Response("not found", { status: 404 });
+    const res = new Response("not found", { status: 404 });
+    for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.headers.set(k, v);
+    return res;
   },
 });
 
@@ -600,13 +671,27 @@ const catalogClient = () =>
 // ПОРТ hq-parallel (S2): роли процесса — web = сервер + user-воркер,
 // rating = планировщик + rating-воркер, all = dev-всё-в-одном (user вперёд)
 const role = config.processRole;
+// В4.4 (кластер L): стоп-хендлалы таймеров — SIGTERM снимает их штатно
+const stopWorkerLoops: Array<() => void> = [];
+// В4.4 (кластер A): стартовый рескор асинхронен и исполняется ТОЛЬКО ролями
+// rating/all — порт уже поднят; web-роль не пишет оценки, её health читает
+// прогресс из meta. Прогресс персистентен (курсор в meta): рестарт
+// продолжает с места остановки, BUSY не фатален (бэкофф-ретраи).
+if (needsRescore(db)) {
+  if (role === "rating" || role === "all") {
+    console.log("[startup] stored scores are outdated or missing: background rescore (port is already up)");
+    void runStartupRescore(db, { log: (m) => console.log(`[rescore] ${m}`) });
+  } else {
+    console.log("[startup] stored scores are outdated or missing: rescore runs in the rating process (PROCESS_ROLE=web)");
+  }
+}
 if (role === "web" || role === "all") {
-  startWorkerLoop({ db, config, serverClient }, { user: true, rating: role === "all" });
+  stopWorkerLoops.push(startWorkerLoop({ db, config, serverClient }, { user: true, rating: role === "all" }));
 }
 if (role === "rating" || role === "all") {
-  startScheduler(db, catalogClient, config);
+  stopWorkerLoops.push(startScheduler(db, catalogClient, config));
   if (role === "rating") {
-    startWorkerLoop({ db, config, serverClient }, { rating: true });
+    stopWorkerLoops.push(startWorkerLoop({ db, config, serverClient }, { rating: true }));
   }
 }
 console.log(`  role: ${role} (PROCESS_ROLE)`);
@@ -616,11 +701,41 @@ console.log(`  role: ${role} (PROCESS_ROLE)`);
 // `running`-строки `scans` (процесс умер, скан «идёт» вечно). Свип при старте
 // работает в любой роли процесса: роль `web` планировщика не поднимает
 void maintenanceTick(db, config);
-process.on("SIGTERM", () => {
-  console.log("[signal] SIGTERM — выходим (сирот подберёт стартовый свип при подъёме)");
+
+// В4.4 (кластер L/З1 код-аудита): SIGTERM/SIGINT — ШТАТНОЕ завершение ≤ 5 с,
+// а не мгновенный выход с сиротами до лиза (85 мин) и свипа (170 мин):
+// перестаём принимать, свои running-заявки возвращаем в queued (claimed_at
+// NULL, attempts не трогаем — сбой не считается попыткой), живые группы
+// клонов гасим, таймеры снимаем.
+let shuttingDown = false;
+function shutdown(signal: string): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[signal] ${signal} — штатное завершение (заявки возвращены в очередь, клоны погашены)`);
+  try {
+    server.stop(false);
+  } catch {
+    /* уже стоит */
+  }
+  for (const stop of stopWorkerLoops) {
+    try {
+      stop();
+    } catch {
+      /* таймер уже снят */
+    }
+  }
+  try {
+    const returned = returnOwnRunningJobs(db);
+    if (returned > 0) console.log(`[signal] заявок возвращено в очередь: ${returned}`);
+  } catch (e) {
+    console.error(`[signal] return jobs failed: ${String((e as Error).message).slice(0, 200)}`);
+  }
+  const killed = killActiveClones();
+  if (killed > 0) console.log(`[signal] групп клонов погашено: ${killed}`);
   process.exit(0);
-});
-process.on("SIGINT", () => process.exit(0));
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
 
 console.log(`repo-health слушает http://127.0.0.1:${server.port}`);
 console.log(`  llm: ${config.llm.provider} (main=${config.llm.mainModel}, side=${config.llm.sideModel})`);

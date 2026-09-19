@@ -35,10 +35,12 @@ import type { CardCategory } from "../api/repos";
 import type { MeResponse, MetaResponse, RepoCard } from "./api";
 import { fetchJson, mutateJson, useJson } from "./api";
 import {
+  CATEGORY_TITLES_RU,
   NO_DATA,
   NO_SCORE,
   SECURITY_PUBLIC_NOTE,
   accessLockText,
+  analysisOutcome,
   fmtCoverage,
   fmtDate,
   fmtDateTime,
@@ -65,11 +67,14 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   const cardUrl = `/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`;
   const { state, reload } = useJson<Card>(cardUrl);
   const me = useJson<MeResponse>("/api/me");
-  const canRefresh = me.state.kind === "ok" && me.state.data.login !== null && me.state.data.hasPat;
+  const loggedIn = me.state.kind === "ok" && me.state.data.login !== null;
+  const canRefresh = loggedIn && me.state.kind === "ok" && me.state.data.hasPat;
   const sinceScanId = state.kind === "ok" ? (state.data.scan?.id ?? 0) : 0;
   // Ф2.9/Ф2.15: горизонт опросов анализа — лиз job из /api/meta, не хардкод
   const leaseMs = meta?.queue.leaseMs ?? 85 * 60_000;
   const refresh = useRefreshAnalysis(org, repo, cardUrl, sinceScanId, reload, leaseMs);
+  // M-4: честное ожидание — из лиза job (горизонт одного скана), не хардкод
+  const etaNote = `обычно до ${Math.max(1, Math.round(leaseMs / 60_000))} минут`;
 
   // Ф2.15: живая job зрителя — опрос карточки каждые 3 с, пока заявка не
   // доедет до скана; не дольше leaseMs (худший случай одного скана)
@@ -126,7 +131,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   );
 
   return (
-    <Page crumbs={crumbs} actions={actions} aside={<ScoreAside card={card} meta={meta} />}>
+    <Page crumbs={crumbs} actions={actions} aside={<ScoreAside card={card} meta={meta} leaseMs={leaseMs} />}>
       <Header
         card={card}
         starDoneKey={refresh.doneKey}
@@ -140,15 +145,28 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
             title={card.job.status === "queued" ? "Анализ запланирован" : "Сканируем…"}
             description={
               card.job.status === "queued"
-                ? "Заявка стоит в очереди — её возьмут в работу, и здесь появится статус скана. Данные скоро будут."
-                : "Скан собирает факты из репозитория; Score появится после завершения."
+                ? `Заявка стоит в очереди — её возьмут в работу, и здесь появится статус скана. ${etaNote}.`
+                : `Скан собирает факты из репозитория; Score появится после завершения. ${etaNote}.`
             }
           />
         ) : (
+          // В4.4 (кластер E): «скана не было» ≠ «скан был — сбой/мало данных»;
+          // CTA — по возможностям зрителя (запуск/токен/объяснение)
           <EmptyState
             icon={SquareListUl}
-            title="Репозиторий есть в каталоге, но еще не сканировался"
-            description="Score появится после первого скана: его считает код по фактам, а фактов пока нет."
+            title={card.scan ? "Скан был — данных для оценки не хватило" : "Репозиторий есть в каталоге, но еще не сканировался"}
+            description={
+              card.scan
+                ? `Последний скан (${sentence(scanStatusText(card.scan.status))}) не собрал достаточно фактов для честного числа — это отсутствие данных, а не плохая оценка. Повторный анализ соберёт факты заново.`
+                : "Score появится после первого скана: его считает код по фактам, а фактов пока нет."
+            }
+            actions={
+              canRefresh
+                ? [{ text: card.scan ? "Повторить анализ" : "Запустить анализ", view: "action", size: "l", onClick: refresh.start }]
+                : loggedIn
+                  ? [{ text: "Добавьте токен в кабинете — и запустите первый анализ", view: "action", size: "l", href: "/me" }]
+                  : undefined
+            }
           />
         )
       ) : (
@@ -209,10 +227,23 @@ function useRefreshAnalysis(org: string, repo: string, cardUrl: string, sinceSca
       }
       try {
         const card = await fetchJson<Card>(cardUrl);
-        if (card.scan && card.scan.id > sinceScanId && card.scan.finishedAt && card.scan.status !== "running") {
+        if (card.scan && card.scan.id > sinceScanId) {
+          // В4.4 (кластер E): исход — по статусу скана; bad больше не
+          // празднуется success-тостом «Анализ завершен»
+          const outcome = analysisOutcome(card.scan);
+          if (outcome === "pending") return;
           setPhase("idle");
-          if (jobIdRef.current !== null) setDoneKey(`${org}/${repo}:${jobIdRef.current}`);
-          toaster.add({ name: `scan-done:${org}/${repo}`, theme: "success", title: "Анализ завершен", content: "Карточка обновлена по новому скану." });
+          if (outcome === "ok") {
+            if (jobIdRef.current !== null) setDoneKey(`${org}/${repo}:${jobIdRef.current}`);
+            toaster.add({ name: `scan-done:${org}/${repo}`, theme: "success", title: "Анализ завершен", content: "Карточка обновлена по новому скану." });
+          } else {
+            toaster.add({
+              name: `scan-failed:${org}/${repo}`,
+              theme: "danger",
+              title: "Анализ завершился ошибкой",
+              content: "Сбор данных не удался — подробности в «Моих заданиях» кабинета.",
+            });
+          }
           onDone();
         }
       } catch {
@@ -326,7 +357,7 @@ function fullLockReason(card: Card): string | null {
   return accessLockText(card.access.cicd) ?? accessLockText(card.access.appsec);
 }
 
-function ScoreAside({ card, meta }: { card: Card; meta: MetaResponse | null }) {
+function ScoreAside({ card, meta, leaseMs }: { card: Card; meta: MetaResponse | null; leaseMs: number }) {
   const { score, scan, job } = card;
   const threshold = meta ? fmtCoverage(meta.coverageNullBelow) : "порога";
   return (
@@ -359,13 +390,19 @@ function ScoreAside({ card, meta }: { card: Card; meta: MetaResponse | null }) {
                   total={score.repoHealthScore}
                   coverage={score.repoHealthCoverage ?? 0}
                 />
-                {score.repoHealthScore !== null && score.healthcraftIndex !== null && (
+                {score.repoHealthScore !== null && score.healthcraftIndex !== null &&
                   // К-Ф3.4: фактическая signed-дельта — знак не обещается (плохие
-                  // CI/Security опускают полный показатель ниже индекса)
-                  <Text variant="body-short" color="complementary">
-                    Разницу с HealthCraft Index дают CI и Security: {fmtSigned(score.repoHealthScore - score.healthcraftIndex)}.
-                  </Text>
-                )}
+                  // CI/Security опускают полный показатель ниже индекса);
+                  // M-13: |Δ| < 0.05 — «разницы нет», не «+0.0»
+                  (Math.abs(score.repoHealthScore - score.healthcraftIndex) < 0.05 ? (
+                    <Text variant="body-short" color="complementary">
+                      Разницы нет: CI и Security на этом скане нейтральны.
+                    </Text>
+                  ) : (
+                    <Text variant="body-short" color="complementary">
+                      Разницу с HealthCraft Index дают CI и Security: {fmtSigned(score.repoHealthScore - score.healthcraftIndex)}.
+                    </Text>
+                  ))}
               </>
             )}
           </Flex>
@@ -405,8 +442,8 @@ function ScoreAside({ card, meta }: { card: Card; meta: MetaResponse | null }) {
             {score && <DefinitionList.Item name="Модель">{score.modelVersion}</DefinitionList.Item>}
           </DefinitionList>
         ) : job ? (
-          // Ф2.15: живая job зрителя — «в очереди/сканируем», а не «скана не было»
-          <Flex gap={2} alignItems="center">
+          // Ф2.15: живая job зрителя — «в очереди/сканируем», а не «скана не было»; M-4 — ожидание по лизу
+          <Flex gap={2} alignItems="center" title={`обычно до ${Math.max(1, Math.round(leaseMs / 60_000))} минут`}>
             <Spin size="xs" />
             <Text color="secondary">{job.status === "queued" ? "в очереди" : "сканируем…"}</Text>
           </Flex>
@@ -458,7 +495,7 @@ function Categories({ card, meta }: { card: Card; meta: MetaResponse | null }) {
   // фактический вклад после перенормировки: вес категории делится на сумму
   // весов тех категорий, у которых данные есть (§4 методики)
   const dataWeight = entries.reduce((sum, [, cat]) => (cat.score === null ? sum : sum + cat.weight), 0);
-  const titleOf = (key: string): string => meta?.categories.find((c) => c.key === key)?.title ?? key;
+  const titleOf = (key: string): string => meta?.categories.find((c) => c.key === key)?.title ?? CATEGORY_TITLES_RU[key] ?? key;
 
   return (
     <ul className="rh-list" style={{ borderTop: 0 }}>
@@ -862,11 +899,22 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
           if (!stop) setState("anon");
           return;
         }
+        // M-11: сбой сервера — не «войдите»: честная ошибка проверки
+        if (!res.ok) {
+          if (!stop) {
+            setState("off");
+            setError("Не удалось проверить избранное — попробуйте позже");
+          }
+          return;
+        }
         const body = (await res.json()) as { favorite: boolean };
         if (!stop) setState(body.favorite ? "on" : "off");
       })
       .catch(() => {
-        if (!stop) setState("anon");
+        if (!stop) {
+          setState("off");
+          setError("Не удалось проверить избранное — попробуйте позже");
+        }
       });
     return () => {
       stop = true;

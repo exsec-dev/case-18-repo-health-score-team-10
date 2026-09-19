@@ -27,7 +27,9 @@ import { getPat } from "../auth/pat";
 import { makeScClient } from "../collectors/http";
 import { makeAppsecClient } from "../collectors/appsec";
 import type { Config } from "../config";
-import { rescoreHistoryBatch } from "../score/rescore";
+import { getMetaValue, setMetaValue } from "../db";
+import { CATALOG_SUSPICIOUS_AT, SCHED_META } from "../api/health";
+import { needsRescore, rescoreBatchByCursor, rescoreHistoryBatch } from "../score/rescore";
 
 export interface ClaimedJob {
   id: number;
@@ -57,10 +59,13 @@ export function findActiveUserJob(db: Database, userId: number, repoId: number):
  * repos по отказу не создаётся (К3), а NOT NULL колонки требует значения
  * (FK в SQLite не включены); ночной обход по repo_id её не видит.
  */
-export function recordRefusedUserJob(db: Database, userId: number, now = new Date()): number {
+export function recordRefusedUserJob(db: Database, userId: number, now = new Date(), slug?: string): number {
+  // В4.4 (кластер J): слаг отказанной заявки — в error-payload (repo-строки
+  // нет, LEFT JOIN панели иначе показал бы «—» вместо репозитория)
+  const error = slug === undefined ? null : JSON.stringify({ slug });
   const r = db
-    .query("INSERT INTO jobs (repo_id, status, user_id, trigger_kind, created_at) VALUES (0, 'refused', ?, 'user', ?)")
-    .run(userId, now.toISOString());
+    .query("INSERT INTO jobs (repo_id, status, user_id, trigger_kind, created_at, error) VALUES (0, 'refused', ?, 'user', ?, ?)")
+    .run(userId, now.toISOString(), error);
   return Number(r.lastInsertRowid);
 }
 
@@ -318,6 +323,8 @@ export interface NightlyResult {
   catalogComplete: boolean;
   /** какие фазы реально исполнились на этом snapshot (Ф2.5) */
   phases: CatalogPhases;
+  /** В4.4 (кластер D): обход поднял catalog_suspicious_at (эвикция приостановлена) */
+  suspicious: boolean;
   error?: string;
 }
 
@@ -425,12 +432,20 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
       returned: [],
       catalogComplete: false,
       phases: { reconcile: false, nightly: false },
+      suspicious: false,
       error: catalog.error?.detail ?? "catalog failed",
     };
   }
 
   const enqueued: NightlyEnqueued[] = [];
   const enqueuedRepoIds = new Set<number>();
+  // В4.4 (кластер F): постановка волны — ПО ЛАЙКАМ (убывание): витринные
+  // репо получают оценку первыми (700 сканов/сутки против 27 446 каталога —
+  // порядок решает, что увидит демо). Спека GET /repos sort_by=likes НЕ
+  // поддерживает (enum created_at|rating) — сортировка клиентская по
+  // полям уже собранного перечисления; дифф last_updated не меняется.
+  // Кандидаты собираются с прежними гард'ами, ставятся после обхода батчами.
+  const waveCandidates: { repoId: number; slug: string; reason: NightlyEnqueued["reason"]; likes: number | null }[] = [];
   // П5: признак полосы сразу через trigger_kind (единый признак — П8);
   // строки refused несут trigger_kind='user' и в полосу периодики не попадают
   const hasLivePeriodicJob = (repoId: number): boolean =>
@@ -463,8 +478,7 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
       // новые репо — фаза сверки (Ф2.5): состав каталога, не волна пересканов
       if (!phases.reconcile) continue;
       enqueuedRepoIds.add(repoId);
-      enqueueScan(db, repoId, { triggerKind: "periodic" });
-      enqueued.push({ slug, reason: "new" });
+      waveCandidates.push({ repoId, slug, reason: "new", likes: entry.likes });
       continue;
     }
     // всё, что ниже, — ночная волна пересканов
@@ -472,8 +486,7 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
     if (existing.last_activity_at === null && entry.last_updated !== null) {
       // строка была без даты (ручной ввод слага) — теперь дата есть: это «изменившийся»
       enqueuedRepoIds.add(repoId);
-      enqueueScan(db, repoId, { triggerKind: "periodic" });
-      enqueued.push({ slug, reason: "changed" });
+      waveCandidates.push({ repoId, slug, reason: "changed", likes: entry.likes ?? existing.likes });
       continue;
     }
     const changed = entry.last_updated !== existing.last_activity_at;
@@ -497,9 +510,27 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
     const retryIneligible = lastPeriodicScan !== null && lastPeriodicScan.rating_eligible !== 1;
     if (fullRescan || changed || retryFailed || retryIneligible) {
       enqueuedRepoIds.add(repoId);
-      enqueueScan(db, repoId, { triggerKind: "periodic" });
-      enqueued.push({ slug, reason: fullRescan ? "forced" : changed ? "changed" : retryFailed ? "retry-failed" : "retry-ineligible" });
+      waveCandidates.push({
+        repoId,
+        slug,
+        reason: fullRescan ? "forced" : changed ? "changed" : retryFailed ? "retry-failed" : "retry-ineligible",
+        likes: entry.likes ?? existing.likes,
+      });
     }
+  }
+
+  // В4.4 (кластер F): лайки по убыванию (нет лайков — в хвост), постановка —
+  // батчами по 100 в одной транзакции (синхронная фаза постановки как целое
+  // — З5 аудита — вне скоупа, В6; батч режет число автокоммитов)
+  waveCandidates.sort((a, b) => (b.likes ?? Number.NEGATIVE_INFINITY) - (a.likes ?? Number.NEGATIVE_INFINITY));
+  const WAVE_ENQUEUE_CHUNK = 100;
+  for (let i = 0; i < waveCandidates.length; i += WAVE_ENQUEUE_CHUNK) {
+    db.transaction(() => {
+      for (const cand of waveCandidates.slice(i, i + WAVE_ENQUEUE_CHUNK)) {
+        enqueueScan(db, cand.repoId, { triggerKind: "periodic" });
+        enqueued.push({ slug: cand.slug, reason: cand.reason });
+      }
+    })();
   }
 
   // возврат ранее эвиктированных, вернувшихся в каталог — фаза сверки
@@ -514,9 +545,35 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
     }
   }
 
-  // эвикция: фаза сверки, только полным каталогом и только public-строки
+  // В4.4 (кластер D код-аудита): «успешно пустой» ПОЛНЫЙ обход (ok, не
+  // truncated, 0 записей) при существующих активных публичных репо — это
+  // сломавшаяся форма каталога (дрейф поля visibility и т.п.), а не «все
+  // исчезли»: один такой тик раньше гасил rating_active всему рейтингу.
+  // Эвикция не исполняется, ставится meta-флаг catalog_suspicious_at
+  // (health окрасится); снимает флаг первый обход с записями.
+  // В4.4 (кластер K/З5): гард слагов — счётчик отброшенного в health/лог
+  if (catalog.skippedBadEntries > 0) {
+    setMetaValue(db, "catalog_skipped_bad_entries", String(catalog.skippedBadEntries));
+    console.warn(`[scheduler] catalog walk skipped ${catalog.skippedBadEntries} entries with bad slugs/form`);
+  }
+  let suspicious = false;
+  if (catalog.entries.length > 0) {
+    if (getMetaValue(db, CATALOG_SUSPICIOUS_AT) !== null) db.query("DELETE FROM meta WHERE key = ?").run(CATALOG_SUSPICIOUS_AT);
+  } else if (catalog.ok && !catalog.truncated) {
+    const activePublic = db.query("SELECT 1 FROM repos WHERE rating_active = 1 AND visibility = 'public' LIMIT 1").get();
+    if (activePublic !== null) {
+      suspicious = true;
+      setMetaValue(db, CATALOG_SUSPICIOUS_AT, now.toISOString());
+      console.error(
+        "[scheduler] catalog walk returned ZERO public entries while active public repos exist — eviction suspended, catalog_suspicious_at set",
+      );
+    }
+  }
+
+  // эвикция: фаза сверки, только полным каталогом и только public-строки;
+  // подозрительно пустой снимок эвицировать не имеет права (гард выше)
   const evicted: string[] = [];
-  if (phases.reconcile && !catalog.truncated) {
+  if (phases.reconcile && !catalog.truncated && !suspicious) {
     const candidates = db
       .query("SELECT id, org_slug, repo_slug FROM repos WHERE rating_active = 1 AND visibility = 'public'")
       .all() as { id: number; org_slug: string; repo_slug: string }[];
@@ -540,6 +597,8 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
     returned,
     catalogComplete: !catalog.truncated,
     phases,
+    /** В4.4 (кластер D): этот обход поднял catalog_suspicious_at */
+    suspicious,
     ...(catalog.ok ? {} : { error: catalog.error?.detail ?? "catalog failed" }),
   };
 }
@@ -616,6 +675,31 @@ export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<Sca
 // ---------- циклы процесса сервера ----------
 
 /**
+ * В4.4 (кластер L/З1): заявки, заявленные ЭТИМ процессом (id → claimed_at).
+ * SIGTERM возвращает их в queued (claimed_at NULL, attempts без изменений —
+ * административная остановка не считается попыткой); registry живёт
+ * в памяти процесса — чужие заявки не трогаются никогда.
+ */
+const liveClaims = new Map<number, string>();
+
+/** Вернуть свои running-заявки в очередь; возвращает число возвращённых. */
+export function returnOwnRunningJobs(db: Database): number {
+  let returned = 0;
+  for (const [id, claimedAt] of liveClaims) {
+    try {
+      const r = db
+        .query("UPDATE jobs SET status = 'queued', claimed_at = NULL, lease_until = NULL WHERE id = ? AND claimed_at = ? AND status = 'running'")
+        .run(id, claimedAt);
+      if (r.changes > 0) returned++;
+    } catch (e) {
+      console.error(`[shutdown] return job ${id} failed: ${String((e as Error).message).slice(0, 200)}`);
+    }
+    liveClaims.delete(id);
+  }
+  return returned;
+}
+
+/**
  * Воркер-луп: одна job за раз; ошибки не останавливают цикл; лиз продлевается
  * каждые leaseMs/3 (К4). ПОРТ hq-parallel (S2): очереди user|rating с ролями
  * процесса — web = сервер + user-воркер (интерактив), rating = планировщик +
@@ -627,6 +711,21 @@ export type WorkerTickOutcome = "busy" | "idle" | "claim-failed" | "done" | "fai
 /** Состояние воркер-лупа между тиками (гард «занят»): шов Б0 держит его снаружи. */
 export interface WorkerLoopState {
   busy: boolean;
+  /** В4.4 (З2): время последнего редкого фонового батча (каденс при непустых очередях) */
+  lastBackgroundTickAt?: number;
+}
+
+/** В4.4 (З2): каденс фонового пересчёта при НЕпустых очередях — раз в 10 мин один батч. */
+export const BACKGROUND_RESCORE_CADENCE_MS = 10 * 60_000;
+
+/** Один шаг фонового пересчёта: сперва недогнанный курсор прохода, затем история. */
+function backgroundRescoreStep(deps: WorkerDeps): void {
+  try {
+    const healed = needsRescore(deps.db) ? rescoreBatchByCursor(deps.db, { log: (m) => console.log(`[worker] ${m}`) }).processed : 0;
+    if (healed === 0) rescoreHistoryBatch(deps.db, { log: (m) => console.log(`[worker] ${m}`) });
+  } catch (e) {
+    console.error(`[worker] background rescore failed: ${String((e as Error).message).slice(0, 200)}`);
+  }
 }
 
 /**
@@ -634,6 +733,9 @@ export interface WorkerLoopState {
  * портов): тест вызывает её напрямую, без таймера. Броня портов сохранена
  * целиком — claim, фоновый пересчёт, `processJob`, `renewLease` в try/catch;
  * исключение наружу не выходит, цикл жив.
+ * В4.4 (З2): фоновый пересчёт гоняется и при непустой очереди — редким
+ * каденсом (раз в 10 мин, один батч) до busy-гарда, чтобы длинная волна
+ * не морила курсоры голодом (факт аудита: cursor=0 при derived=5).
  */
 export async function workerTick(
   deps: WorkerDeps,
@@ -641,6 +743,12 @@ export async function workerTick(
   state: WorkerLoopState,
   opts: { historyRescore?: boolean } = {},
 ): Promise<WorkerTickOutcome> {
+  const dueBackground =
+    opts.historyRescore === true && (state.lastBackgroundTickAt === undefined || Date.now() - state.lastBackgroundTickAt >= BACKGROUND_RESCORE_CADENCE_MS);
+  if (dueBackground) {
+    state.lastBackgroundTickAt = Date.now();
+    backgroundRescoreStep(deps);
+  }
   if (state.busy) return "busy";
   const leaseMs = deps.config.scheduler.leaseMs;
   // ПОРТ S2/ищейка-8: весь тик в броне — бросок БД не валит процесс
@@ -652,18 +760,17 @@ export async function workerTick(
     return "claim-failed";
   }
   if (!job) {
-    // обе наши очереди пусты — порция фонового пересчёта истории (LOW-7)
+    // обе наши очереди пусты — порция фонового пересчёта (LOW-7) КАЖДЫЙ тик:
+    // В4.4 — сперва недогнанный курсор актуального прохода, затем история
     if (opts.historyRescore) {
-      try {
-        rescoreHistoryBatch(deps.db, { log: (m) => console.log(`[worker] ${m}`) });
-      } catch (e) {
-        console.error(`[worker] history rescore failed: ${String((e as Error).message).slice(0, 200)}`);
-      }
+      backgroundRescoreStep(deps);
+      state.lastBackgroundTickAt = Date.now();
     }
     return "idle";
   }
   const claimed = job;
   state.busy = true;
+  liveClaims.set(claimed.id, claimed.claimedAt);
   const heartbeat = setInterval(() => {
     try {
       renewLease(deps.db, claimed.id, claimed.claimedAt, leaseMs);
@@ -689,6 +796,7 @@ export async function workerTick(
     finishJob(deps.db, claimed.id, claimed.claimedAt, "failed", JOB_ERRORS.internal);
     return "failed";
   } finally {
+    liveClaims.delete(claimed.id);
     clearInterval(heartbeat);
     state.busy = false;
   }
@@ -935,8 +1043,19 @@ export async function catalogTick(
       phases: { reconcile: true, nightly: nightlyDue },
     });
     // К-Р5: ночной факт health — только обходы, в которых ночная фаза
-    // участвовала; часовая сверка его не обновляет
-    if (nightlyDue) schedulerStateRef.lastNightly = result;
+    // участвовала; часовая сверка его не обновляет. В4.4 (кластер B): тот же
+    // факт дублируется в meta — кросс-процессно (web-роль читает состоянием
+    // планировщика, которого в её процессе нет)
+    if (nightlyDue) {
+      schedulerStateRef.lastNightly = result;
+      setMetaValue(db, SCHED_META.nightlyAt, now.toISOString());
+      setMetaValue(db, SCHED_META.nightlyOk, result.ok ? "1" : "0");
+      if (result.ok) {
+        db.query("DELETE FROM meta WHERE key = ?").run(SCHED_META.nightlyError);
+      } else {
+        setMetaValue(db, SCHED_META.nightlyError, (result.error ?? "catalog walk failed").slice(0, 200));
+      }
+    }
     if (!result.ok) {
       console.error(`[scheduler] catalog walk failed: ${result.error ?? "unknown"}`);
       return result;
@@ -944,6 +1063,7 @@ export async function catalogTick(
     if (result.catalogComplete) {
       state.lastReconcileAt = now;
       schedulerStateRef.lastReconcileAt = now.toISOString();
+      setMetaValue(db, SCHED_META.reconcileAt, now.toISOString());
     }
     // К-Р3: ночная метка — по исполнению фазы (обход ok), НЕ по полноте
     // каталога; метка сверки выше — по-прежнему только по дочитанному

@@ -13,6 +13,10 @@ import {
 import { MODEL_VERSION } from "../src/score/model";
 import { computeFromFacts, totalsFromCategories } from "../src/score/compute";
 import { renderRepoReport } from "../src/report/markdown";
+import { getHealth } from "../src/api/health";
+import { encodeFactValue, parseFactValue } from "../src/collectors/facts";
+import { compute } from "../src/score/compute";
+import { loadConfig } from "../src/config";
 import type { AccessResult } from "../src/auth/access";
 import { DEFAULT_SCAN } from "../src/config";
 import {
@@ -589,5 +593,104 @@ describe("мета", () => {
     expect(meta.repos.nullScore).toBe(1);
     expect(meta.repos.scored).toBeGreaterThanOrEqual(7);
     expect(meta.methodology).toMatch(/^reports\/.+\.md$/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// В4.4 (кластер B): честный health — ok вычисляемое, красные причины
+// (pending-рескор, подозрительно пустой каталог, провал ночной фазы).
+// ---------------------------------------------------------------------------
+
+describe("health (В4.4): ok вычисляемое, reasons по контракту", () => {
+  const healthyDb = (): ApiTestDb => {
+    const h = makeApiDb();
+    seedRating(h);
+    // актуальные производные: версии и водяной знак догнаны
+    h.db.query("INSERT INTO meta (key, value) VALUES ('derived_version', '5')").run();
+    const maxId = (h.db.query("SELECT COALESCE(MAX(id), 0) AS m FROM scans").get() as { m: number }).m;
+    h.db.query("INSERT INTO meta (key, value) VALUES ('derived_rescore_cursor', ?)").run(String(maxId));
+    return h;
+  };
+
+  test("здоровая база: ok true, reasons пусты", () => {
+    const h = healthyDb();
+    const status = getHealth(h.db, { ...loadConfig() });
+    expect({ ok: status.ok, reasons: status.reasons, suspicious: status.catalogSuspiciousAt }).toEqual({
+      ok: true,
+      reasons: [],
+      suspicious: null,
+    });
+    expect(status.rescore).toMatchObject({ running: false, error: null });
+    h.close();
+  });
+
+  test("pending-рескор и ошибка прохода — две разные красные причины", () => {
+    const h = healthyDb();
+    h.db.query("DELETE FROM meta WHERE key = 'derived_rescore_cursor'").run();
+    const pending = getHealth(h.db, { ...loadConfig() });
+    expect(pending.ok).toBe(false);
+    expect(pending.reasons[0]).toContain("пересчёт");
+    h.db.query("INSERT INTO meta (key, value) VALUES ('derived_rescore_cursor', '999999')").run();
+    h.db.query("INSERT INTO meta (key, value) VALUES ('derived_rescore_error', 'no such table: scores')").run();
+    const failed = getHealth(h.db, { ...loadConfig() });
+    expect(failed.ok).toBe(false);
+    expect(failed.reasons[0]).toContain("упал");
+    h.close();
+  });
+
+  test("catalog_suspicious_at и провал ночной фазы краснят health", () => {
+    const h = healthyDb();
+    h.db.query("INSERT INTO meta (key, value) VALUES ('catalog_suspicious_at', '2026-09-20T01:00:00Z')").run();
+    h.db.query("INSERT INTO meta (key, value) VALUES ('sched_last_nightly_at', '2026-09-20T01:00:00Z')").run();
+    h.db.query("INSERT INTO meta (key, value) VALUES ('sched_last_nightly_ok', '0')").run();
+    h.db.query("INSERT INTO meta (key, value) VALUES ('sched_last_nightly_error', 'page 3: timeout')").run();
+    const status = getHealth(h.db, { ...loadConfig() });
+    expect(status.ok).toBe(false);
+    expect(status.reasons.length).toBe(2);
+    expect(status.reasons.some((r) => r.includes("пустой список"))).toBe(true);
+    expect(status.reasons.some((r) => r.includes("ночная фаза") && r.includes("page 3"))).toBe(true);
+    expect(status.lastNightly).toEqual({ ok: false, error: "page 3: timeout" });
+    h.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// В4.4 (кластер C): чтение сжатого timeline прозрачно — карточка и compute
+// ---------------------------------------------------------------------------
+
+describe("В4.4: сжатый timeline читается как несжатый", () => {
+  test("encodeFactValue/parseFactValue: раундтрип и прозрачность старых строк", () => {
+    const value = { events: [{ sha: "x1", committer: { date: "2026-01-01T00:00:00Z" } }] };
+    const encoded = encodeFactValue("activity.git.timeline", value);
+    expect(encoded.startsWith("z:")).toBe(true);
+    expect(parseFactValue(encoded)).toEqual(value);
+    // старый (несжатый) формат читается как раньше
+    expect(parseFactValue(JSON.stringify(value))).toEqual(value);
+    // прочие kinds не сжимаются
+    expect(encodeFactValue("tree.stats", value)).toBe(JSON.stringify(value));
+  });
+
+  test("карточка и compute читают сжатую строку: агрегат timeline и категория активности", () => {
+    const h = makeApiDb();
+    const repoId = seedRepo(h, { org: "z", repo: "tl" });
+    const events = [
+      { sha: "a1", author: { name: "a", email: "a@e", date: "2025-08-16T10:00:00Z" }, committer: { name: "a", email: "a@e", date: "2025-08-16T10:00:00Z" } },
+      { sha: "a2", author: { name: "b", email: "b@e", date: "2026-09-10T10:00:00Z" }, committer: { name: "b", email: "b@e", date: "2026-09-10T10:00:00Z" } },
+    ];
+    const facts = cardFacts().map((f) =>
+      f.key === "activity.git.timeline" ? { ...f, value: { events } } : f,
+    );
+    const scanId = seedScan(h, repoId, { facts });
+    // пересаживаем timeline-строку в сжатую форму (как её пишет insertFacts)
+    h.db.query("UPDATE facts SET value = ? WHERE scan_id = ? AND key = 'activity.git.timeline'").run(encodeFactValue("activity.git.timeline", { events }), scanId);
+    seedScore(h, repoId, scanId, { total: 55 });
+    const card = getRepoCard(h.db, "z", "tl")!;
+    const timeline = card.evidence.find((e) => e.key === "activity.git.timeline");
+    expect(timeline).toBeDefined();
+    expect(timeline!.value).toMatchObject({ events: 2, first: "2025-08-16T10:00:00Z", last: "2026-09-10T10:00:00Z", truncated: true });
+    // compute по сжатой строке: категория активности считает данные
+    const scores = compute(h.db, scanId);
+    expect(scores.categories.activity.score).not.toBeNull();
+    h.close();
   });
 });

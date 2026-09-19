@@ -1,4 +1,5 @@
 // facts.ts — тип факта + kinds-реестр В1 (мини) + категорийный мап.
+import { deflateSync, inflateSync } from "node:zlib";
 // Контракт плана В1: key = kind целиком, category = мап префикса,
 // value = JSON, status ok/no-data/bad, source = канал, collected_at UTC.
 // Реестр — const-словарь здесь (не отдельный файл): форма значений
@@ -116,3 +117,33 @@ export const GIT_KINDS: string[] = [
   "cicd.configs",
   "code.todo",
 ];
+
+// ---------------------------------------------------------------------------
+// В4.4 (кластер C код-аудита): компрессия timeline. Строки
+// activity.git.timeline замерены до 21.9 МБ (полная история коммитов без
+// капа); zlib-сжатие с префиксом `z:` + base64 режет их на порядок, чтение
+// прозрачно разворачивает по префиксу — старые (несжатые) строки читаются
+// как раньше. Удаления сканов/фактов НЕТ (история — В5); цена парса на
+// чтении остаётся — В6-кандидат (З3 аудита). Точка записи одна —
+// insertFacts (runner), точки чтения — effectiveFacts (compute) и карточка
+// (repos): ни один потребитель формы значения не меняется.
+// ---------------------------------------------------------------------------
+
+/** Крупный факт, хранимый сжатым (единственный в реестре). */
+export const TIMELINE_KIND = "activity.git.timeline";
+
+/** Префикс сжатого значения в facts.value. */
+export const FACT_Z_PREFIX = "z:";
+
+/** Сериализация значения факта для БД; timeline — zlib+base64 с префиксом. */
+export function encodeFactValue(kind: string, value: unknown): string {
+  const json = JSON.stringify(value);
+  if (kind !== TIMELINE_KIND) return json;
+  return FACT_Z_PREFIX + Buffer.from(deflateSync(json, { level: 6 })).toString("base64");
+}
+
+/** Прозрачное чтение facts.value: сжатое (префикс) разворачивается, старое парсится как было. */
+export function parseFactValue(raw: string): unknown {
+  if (!raw.startsWith(FACT_Z_PREFIX)) return JSON.parse(raw);
+  return JSON.parse(inflateSync(Buffer.from(raw.slice(FACT_Z_PREFIX.length), "base64")).toString("utf8"));
+}

@@ -8,7 +8,7 @@
 import type { Database } from "bun:sqlite";
 import { CHANNEL_KINDS, PUBLIC_KINDS, computeFromFacts, totalsFromCategories, type CategoryScore } from "../score/compute";
 import { orderRecommendations, recommendFromFacts, round4, type DeltaEvaluator } from "../score/recommend";
-import { categoryOf } from "../collectors/facts";
+import { categoryOf, parseFactValue } from "../collectors/facts";
 import { NO_PAT_ACCESS, type AccessRepo, type AccessResult, type ChannelAccess } from "../auth/access";
 import { DEFAULT_SCAN, defaultLeaseMs, type ScanConfig } from "../config";
 import type { GitLimitsMarker } from "../web/format";
@@ -843,14 +843,14 @@ export function getRepoCard(
   const evidence: CardEvidence[] = factRows
     .filter((f) => addressable.has(f.key))
     .map((f) => {
-      const parsed = JSON.parse(f.value) as unknown;
+      const parsed = parseFactValue(f.value) as unknown;
       const value = f.key === "activity.git.timeline" ? timelineAggregate(parsed) : capValue(parsed);
       return { key: f.key, category: f.category, status: f.status, source: f.source, collectedAt: f.collected_at, value };
     })
     .sort((a, b) => a.key.localeCompare(b.key));
 
   const summary = factByKey.get("activity.git.summary");
-  const summaryValue = summary && summary.status === "ok" ? (JSON.parse(summary.value) as { history_truncated_since?: unknown }) : null;
+  const summaryValue = summary && summary.status === "ok" ? (parseFactValue(summary.value) as { history_truncated_since?: unknown }) : null;
   const cicdNoData = categories.cicd.no_data ?? "";
   const markers: CardMarkers = {
     historyTruncatedSince: typeof summaryValue?.history_truncated_since === "string" ? summaryValue.history_truncated_since : null,

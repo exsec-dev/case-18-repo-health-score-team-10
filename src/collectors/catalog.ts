@@ -39,6 +39,8 @@ export interface CatalogResult {
   pages: number;
   /** true = упёрлись в потолок страниц, каталог не дочитан */
   truncated: boolean;
+  /** В4.4 (кластер K/З5): записей отброшено гардом слагов/формы за обход */
+  skippedBadEntries: number;
   /** первая ошибка канала, если ok=false */
   error?: { status: number; detail: string };
 }
@@ -70,10 +72,16 @@ export function hexColor(v: unknown): string | null {
   return typeof v === "string" && /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(v) ? v : null;
 }
 
+/** В4.4 (кластер K/З5): слаг каталога обязан пройти charset-гард — иначе
+ *  сконструированная запись уводит клон-URL на чужой путь git-хоста. */
+const SLUG_OK = /^[a-z0-9_.-]+$/i;
+const slugOk = (v: string): boolean => SLUG_OK.test(v) && !/^[.]+$/.test(v);
+
 function parseEntry(e: RawEntry): CatalogEntry | null {
   const org = typeof e.organization?.slug === "string" ? e.organization.slug : null;
   const repo = typeof e.slug === "string" ? e.slug : null;
   if (!org || !repo) return null;
+  if (!slugOk(org) || !slugOk(repo)) return null;
   const ratingValue = typeof e.rating?.value === "number" ? e.rating.value : null;
   // live 15.09: language — объект {name, color}, не строка
   const language = typeof e.language === "string" ? e.language : typeof e.language?.name === "string" ? e.language.name : null;
@@ -110,6 +118,7 @@ export async function enumerateCatalog(client: ScClient, opts: CatalogOptions = 
   const entries: CatalogEntry[] = [];
   let token: string | null = null;
   let pages = 0;
+  let skippedBadEntries = 0;
   while (pages < maxPages) {
     const path = `/repos?page_size=${CATALOG_PAGE_SIZE}&sort_by=${CATALOG_SORT_BY}${token ? `&page_token=${encodeURIComponent(token)}` : ""}`;
     const res = await client.get(path);
@@ -119,6 +128,7 @@ export async function enumerateCatalog(client: ScClient, opts: CatalogOptions = 
         entries,
         pages,
         truncated: true,
+        skippedBadEntries,
         error: { status: res.status, detail: res.error ?? res.bodyText.slice(0, 200) },
       };
     }
@@ -133,19 +143,24 @@ export async function enumerateCatalog(client: ScClient, opts: CatalogOptions = 
         entries,
         pages,
         truncated: true,
+        skippedBadEntries,
         error: { status: res.status, detail: `page ${pages}: 200 without a "repositories" array` },
       };
     }
     const list = body!.repositories!;
     for (const raw of list) {
       const e = parseEntry(raw);
-      if (e && (!publicOnly || e.visibility === "public")) entries.push(e);
+      if (e === null) {
+        skippedBadEntries++;
+        continue;
+      }
+      if (!publicOnly || e.visibility === "public") entries.push(e);
     }
     const next = body?.next_page_token;
     if (typeof next !== "string" || next.length === 0) {
-      return { ok: true, entries, pages, truncated: false };
+      return { ok: true, entries, pages, truncated: false, skippedBadEntries };
     }
     token = next;
   }
-  return { ok: true, entries, pages, truncated: true };
+  return { ok: true, entries, pages, truncated: true, skippedBadEntries };
 }

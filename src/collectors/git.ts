@@ -104,6 +104,36 @@ function killTree(pid: number, killSelf: () => void): void {
   }
 }
 
+// В4.4 (кластер L/З1): реестр живых групп клонов ЭТОГО процесса — setsid-
+// группы переживают убитого родителя до свипа (2×lease, 170 мин); SIGTERM
+// гасит их сразу (штатное завершение ≤ 5 с). Регистрация/снятие — вокруг
+// живого proc.exited в cloneBare.
+const liveCloneGroups = new Set<number>();
+
+/** Зарегистрировать живую группу клона (pid == pgid у setsid-спавна). */
+export function trackCloneGroup(pid: number): void {
+  if (Number.isFinite(pid) && pid > 0) liveCloneGroups.add(pid);
+}
+
+function untrackCloneGroup(pid: number): void {
+  liveCloneGroups.delete(pid);
+}
+
+/** Убить все живые группы клонов процесса (SIGTERM-путь); возвращает число убитых. */
+export function killActiveClones(): number {
+  let killed = 0;
+  for (const pid of Array.from(liveCloneGroups)) {
+    untrackCloneGroup(pid);
+    try {
+      process.kill(-pid, "SIGKILL");
+      killed++;
+    } catch {
+      /* группа уже мертва */
+    }
+  }
+  return killed;
+}
+
 const HAVE_DU = Boolean(Bun.which("du"));
 
 /** Размер каталога для watchdog: быстрый du, portable fallback для Windows. */
@@ -311,6 +341,7 @@ export async function cloneBare(
   const spawn: SpawnGit =
     opts.spawnGit ?? ((o) => Bun.spawn({ cmd: o.cmd, stdout: "ignore", stderr: "pipe", stdin: "ignore", env: o.env }));
   const proc = spawn({ cmd, env: { ...(process.env as Record<string, string>), ...childEnv } });
+  trackCloneGroup(proc.pid); // В4.4 (З1): SIGTERM гасит группу, не дожидаясь свипа
   let bytes = 0;
   let breach: "timeout" | "disk" | null = null;
   while (breach === null) {
@@ -322,6 +353,7 @@ export async function cloneBare(
   }
   if (breach !== null) {
     killTree(proc.pid, () => proc.kill("SIGKILL"));
+    untrackCloneGroup(proc.pid);
     await proc.exited.catch(() => undefined);
     await cleanupFailedClone(dir);
     const detail =
@@ -331,6 +363,7 @@ export async function cloneBare(
     return { ok: false, reason: breach, detail, elapsedMs: Date.now() - started };
   }
   const code = await proc.exited;
+  untrackCloneGroup(proc.pid); // В4.4 (З1): группа завершилась сама — из реестра
   if (code !== 0) {
     let stderr = "";
     try {

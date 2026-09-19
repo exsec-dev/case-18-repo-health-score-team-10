@@ -34,10 +34,23 @@ export function renderRepoReport(card: RepoCard): string {
 
 // ---------- 1. заголовок ----------
 
+/**
+ * В4.4 (кластер K/З7): заголовки отчёта экранируются — title репозитория
+ * контролируется платформой/владельцем, «![](url)» или <img> в нём не должны
+ * становиться tracking-pixel'ем в выгрузке. Бэкслеш-эскейп MD-спецсимволов
+ * разметки ссылок/картинок/выделения + HTML-уголки сущностями.
+ */
+function mdEscape(text: string): string {
+  return text
+    .replace(/([\\`*_\[\]()!#|])/g, "\\$1")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
 function headerSection(card: RepoCard): string[] {
   const { repo, scan, score } = card;
-  const out = [`# Repo Health: ${repo.org}/${repo.repo}`, ""];
-  if (repo.title && repo.title !== repo.repo) out.push(`_${repo.title}_`, "");
+  const out = [`# Repo Health: ${mdEscape(`${repo.org}/${repo.repo}`)}`, ""];
+  if (repo.title && repo.title !== repo.repo) out.push(`_${mdEscape(repo.title)}_`, "");
   out.push(
     `- Репозиторий: ${repo.webUrl}`,
     // Ф2.9: один язык (RU) — статусы и триггеры словами, как на карточке
@@ -139,7 +152,12 @@ function fullScoreLine(card: RepoCard): string[] {
   ];
   if (score.healthcraftIndex !== null) {
     const d = score.repoHealthScore - score.healthcraftIndex;
-    lines.push(`Разницу с HealthCraft Index дают CI и Security: ${fmtSigned(d)} — вклад двух каналов при их фактических данных.`);
+    // M-13: |Δ| < 0.05 — «разницы нет», не «+0.0» (паритет со страницей)
+    lines.push(
+      Math.abs(d) < 0.05
+        ? "Разницы нет: CI и Security на этом скане нейтральны."
+        : `Разницу с HealthCraft Index дают CI и Security: ${fmtSigned(d)} — вклад двух каналов при их фактических данных.`,
+    );
   }
   return lines;
 }
@@ -213,7 +231,7 @@ function recommendationsSection(card: RepoCard): string[] {
     "",
   );
   for (const rec of card.recommendations) {
-    out.push(`### ${rec.priority}. ${rec.problem}`, "");
+    out.push(`### ${rec.priority}. ${mdEscape(rec.problem)}`, "");
     out.push(`- Что сделать: ${rec.action}`);
     out.push(`- Эффект: ${impact(rec)}`);
     out.push(`- Факты: ${rec.factRefs.map((r) => `\`${r.key}\`${r.missing ? " (факта нет по построению)" : ""}`).join(", ")}`);
