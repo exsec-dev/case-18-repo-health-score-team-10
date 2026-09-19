@@ -525,6 +525,15 @@ function Markers({ card }: { card: Card }) {
   if (m.gitLimits) {
     rows.push({ key: "git-limits", label: "Репозиторий больше лимита сервиса", text: gitLimitsText(m.gitLimits) });
   }
+  // Ф2.9 (LOW-9): маркер codeEmpty API отдаёт, но карточка молчала — зритель
+  // видел Score 0 без объяснения, хотя это данные о проекте (Q&A №13)
+  if (m.codeEmpty) {
+    rows.push({
+      key: "code-empty",
+      label: "В репозитории нет кода",
+      text: "В репозитории нет ни одного файла, поэтому по методике Score равен 0 — это данные о проекте («проекта нет»), а не отсутствие оценки или сбой сбора.",
+    });
+  }
   if (m.historyTruncatedSince) {
     rows.push({
       key: "truncated",

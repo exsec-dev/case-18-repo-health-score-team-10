@@ -14,7 +14,7 @@ import {
 } from "../api/repos";
 import { COVERAGE_NULL_BELOW, type CategoryKey } from "../score/model";
 // копии про Security и заглушки доступа — одни и те же на странице и в отчёте
-import { SECURITY_PUBLIC_NOTE, accessLockText, gitLimitsText } from "../web/format";
+import { SECURITY_PUBLIC_NOTE, accessLockText, gitLimitsText, scanStatusText, scanTriggerText } from "../web/format";
 
 export { SECURITY_PUBLIC_NOTE };
 
@@ -40,7 +40,8 @@ function headerSection(card: RepoCard): string[] {
   if (repo.title && repo.title !== repo.repo) out.push(`_${repo.title}_`, "");
   out.push(
     `- Репозиторий: ${repo.webUrl}`,
-    `- Скан: ${scan ? `#${scan.id} от ${fmtDateTime(scan.finishedAt ?? scan.startedAt)} (статус ${scan.status}, запуск ${scan.trigger})` : "не выполнялся"}`,
+    // Ф2.9: один язык (RU) — статусы и триггеры словами, как на карточке
+    `- Скан: ${scan ? `#${scan.id} от ${fmtDateTime(scan.finishedAt ?? scan.startedAt)} (статус ${scanStatusText(scan.status)}, запуск ${scanTriggerText(scan.trigger)})` : "не выполнялся"}`,
     `- Модель: ${score ? score.modelVersion : "—"}`,
     `- Язык: ${repo.language ?? "не определён"}; лайки: ${num(repo.likes)}; форки: ${num(repo.forks)}`,
     `- Последняя активность: ${fmtDate(repo.lastActivityAt)}`,
@@ -55,6 +56,13 @@ function summarySection(card: RepoCard): string[] {
   const out = ["## Итог", ""];
   const score = card.score;
   if (card.markers.gitLimits) out.push(gitLimitsText(card.markers.gitLimits), "");
+  // Ф2.9 (LOW-9): маркер codeEmpty — теми же словами, что на карточке
+  if (card.markers.codeEmpty) {
+    out.push(
+      "В репозитории нет кода (ни одного файла): Score 0 — по методике это данные о проекте («проекта нет»), а не отсутствие оценки или сбой.",
+      "",
+    );
+  }
   if (!score) {
     out.push(
       "Репозиторий есть в каталоге, но ещё не сканировался — фактов нет, поэтому нет и Score.",
@@ -134,7 +142,7 @@ function categoriesTable(card: RepoCard): string[] {
   ];
   for (const [key, cat] of entries) {
     const contribution = cat.score === null ? "0%" : `${Math.round((cat.weight / Math.max(1, dataWeight)) * 100)}%`;
-    const status = cat.locked !== undefined ? "закрыто доступом" : cat.score === null ? NO_DATA : cat.stale ? "данные из истории (stale)" : "данные есть";
+    const status = cat.locked !== undefined ? "закрыто доступом" : cat.score === null ? NO_DATA : cat.stale ? "данные из истории" : "данные есть";
     out.push(`| ${CATEGORY_TITLES[key]} | ${cat.weight}% | ${cat.score === null ? "—" : round(cat.score)} | ${contribution} | ${status} |`);
   }
   out.push("");

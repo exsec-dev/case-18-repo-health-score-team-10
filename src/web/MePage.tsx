@@ -11,7 +11,7 @@ import { ArrowRightFromSquare, Clock, Key, Person } from "@gravity-ui/icons";
 import { Alert, Button, Card, Dialog, Flex, Icon, Label, Link, Spin, Text, TextInput, useToaster } from "@gravity-ui/uikit";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type MeResponse, type MyReposResponse, type RepoCard, fetchJson, logout, mutateJson, useJson } from "./api";
-import { fmtDateTime, fmtScore } from "./format";
+import { authErrorText, fmtDateTime, fmtScore } from "./format";
 import { linkProps, repoHref } from "./router";
 import { Page, UserAvatar, displayName, logoutFailedToast } from "./Shell";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, SkeletonRows } from "./ui";
@@ -98,6 +98,9 @@ function AccountSection({ me }: { me: MeResponse }) {
 
 /** Не вошедшему — объяснение слоёв и кнопка входа (живой клик — приёмка HQ). */
 function LoginOffer() {
+  // Ф2.9: /me?auth_error=… после неудачного callback — причина показывается,
+  // а не проглатывается
+  const authError = new URLSearchParams(window.location.search).get("auth_error");
   return (
     <Page
       crumbs={CRUMBS}
@@ -111,6 +114,11 @@ function LoginOffer() {
       }
     >
       <PageHeader title="Личный кабинет" />
+      {authError && (
+        <Flex direction="column" gap={3} style={{ marginBottom: "var(--g-spacing-4)" }}>
+          <Alert theme="danger" view="outlined" title="Вход через Я ID не завершен" message={authErrorText(authError)} />
+        </Flex>
+      )}
       <EmptyState
         icon={Person}
         title="Анализ своего репозитория"

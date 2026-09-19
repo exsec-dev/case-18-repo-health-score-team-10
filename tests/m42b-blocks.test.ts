@@ -17,6 +17,10 @@ import { decryptPat, encryptPat, getPat, patMeta, patReadable, reencryptPat, sto
 import { fetchResource } from "../src/collectors/rest";
 import { collectAppsec } from "../src/collectors/appsec";
 import type { ScClient, ScResponse } from "../src/collectors/http";
+import { renderRepoReport } from "../src/report/markdown";
+import { getRepoCard } from "../src/api/repos";
+import { authErrorText } from "../src/web/format";
+import { cardFacts, makeApiDb, seedRepo, seedScan, seedScore, type ApiTestDb } from "./api-fixtures";
 import { spawnServer, startMockApi, type SpawnedServer } from "./server-harness";
 
 const SECRET = "m42b-blocks-test-secret-0123456789abcdef";
@@ -241,5 +245,52 @@ describe("Ф2.8: encodeURIComponent в исходящих путях", () => {
     };
     await collectAppsec(rest, appsec, "a b/c d", { now: new Date("2026-09-19T12:00:00Z") });
     expect(paths[0]).toBe("/repos/a%20b/c%20d");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Блок Б3 (Ф2.9-остаток): маркер codeEmpty на карточке и в MD; текст
+// auth_error для /me.
+// ---------------------------------------------------------------------------
+
+describe("Б3 (Ф2.9): маркер codeEmpty виден на карточке и в MD", () => {
+  test("getRepoCard несёт markers.codeEmpty, MD объясняет «проекта нет»", () => {
+    const t: ApiTestDb = makeApiDb();
+    try {
+      const repoId = seedRepo(t, { org: "m42b", repo: "empty" });
+      const scanId = seedScan(t, repoId, { facts: cardFacts() });
+      seedScore(t, repoId, scanId, { total: 0, totalFull: 0 });
+      t.db.query("UPDATE scores SET code_empty = 1 WHERE scan_id = ?").run(scanId);
+      const card = getRepoCard(t.db, "m42b", "empty", {});
+      expect(card?.markers.codeEmpty).toBe(true);
+      const md = renderRepoReport(card!);
+      expect(md).toContain("В репозитории нет кода");
+      expect(md).toContain("не отсутствие оценки");
+    } finally {
+      t.close();
+    }
+  });
+
+  test("MD: статус и триггер скана — словами (один язык), без EN-жаргона", () => {
+    const t: ApiTestDb = makeApiDb();
+    try {
+      const repoId = seedRepo(t, { org: "m42b", repo: "words" });
+      const scanId = seedScan(t, repoId, { facts: cardFacts(), trigger: "periodic" });
+      seedScore(t, repoId, scanId, { total: 60 });
+      const md = renderRepoReport(getRepoCard(t.db, "m42b", "words", {})!);
+      expect(md).toContain("статус полный");
+      expect(md).toMatch(/запуск (по расписанию|вручную|проба)/);
+      expect(md).not.toContain("(stale)");
+    } finally {
+      t.close();
+    }
+  });
+});
+
+describe("Б3 (Ф2.9): текст auth_error для /me", () => {
+  test("известные коды — человеческие фразы, остальное — текст провайдера", () => {
+    expect(authErrorText("state")).toContain("state");
+    expect(authErrorText("no_code")).toContain("ещё раз");
+    expect(authErrorText("access_denied")).toBe("Вход не удался: access_denied");
   });
 });

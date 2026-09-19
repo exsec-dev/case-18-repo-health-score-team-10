@@ -46,7 +46,7 @@ export function fmtFactValue(value: unknown): string {
   return JSON.stringify(value, null, 1);
 }
 
-/** Статус скана — человеческим словом, без жаргона таблицы. */
+/** Статус скана — человеческим словом, без жаргона таблицы (queued/running — Ф2.9/Ф2.16). */
 export function scanStatusText(status: string): string {
   switch (status) {
     case "ok":
@@ -55,6 +55,10 @@ export function scanStatusText(status: string): string {
       return "частичный";
     case "bad":
       return "сбойный";
+    case "queued":
+      return "в очереди";
+    case "running":
+      return "идёт";
     default:
       return status;
   }
@@ -79,13 +83,15 @@ export function sentence(text: string): string {
   return text.length === 0 ? text : text[0]!.toUpperCase() + text.slice(1);
 }
 
-/** Кто запустил скан — словом, а не кодом очереди. */
+/** Кто запустил скан — словом, а не кодом очереди (значения scans.trigger: periodic|user|probe). */
 export function scanTriggerText(trigger: string): string {
   switch (trigger) {
     case "periodic":
       return "по расписанию";
     case "user":
       return "вручную";
+    case "probe":
+      return "проба";
     default:
       return trigger;
   }
@@ -155,4 +161,16 @@ export function gitLimitsText(l: GitLimitsMarker): string {
 export function accessLockText(access: string | undefined): string | null {
   if (access === undefined || access === "granted") return null;
   return ACCESS_LOCK_TEXT[access as keyof typeof ACCESS_LOCK_TEXT] ?? ACCESS_LOCK_TEXT["check-failed"];
+}
+
+/**
+ * Причина неудачного входа человеческим словом (Ф2.9, LOW-9): callback
+ * кладёт `auth_error` в query /me — коды `state`/`no_code` известны,
+ * остальное — текст провайдера. Живёт здесь, среди текстов: MePage —
+ * компонент, его нельзя импортировать в bun test (CJS-CSS зависимости).
+ */
+export function authErrorText(raw: string): string {
+  if (raw === "state") return "Не сошёлся проверочный код входа (state) — начните вход заново. Так работает защита от подмены.";
+  if (raw === "no_code") return "Провайдер входа не передал код подтверждения — попробуйте войти ещё раз.";
+  return `Вход не удался: ${raw}`;
 }
