@@ -670,6 +670,22 @@ describe("В4.4: сжатый timeline читается как несжатый"
     expect(encodeFactValue("tree.stats", value)).toBe(JSON.stringify(value));
   });
 
+  test("encodeFactValue: no-data/bad timeline не сжимается, ok и старый вызов — сжимаются (круг 2)", () => {
+    const value = { reason: "empty" };
+    expect(encodeFactValue("activity.git.timeline", value, "no-data")).toBe(JSON.stringify(value));
+    expect(encodeFactValue("activity.git.timeline", value, "bad")).toBe(JSON.stringify(value));
+    expect(encodeFactValue("activity.git.timeline", value, "ok").startsWith("z:")).toBe(true);
+    // старый двухаргументный вызов (замороженные тесты круга 1) — как был
+    expect(encodeFactValue("activity.git.timeline", value).startsWith("z:")).toBe(true);
+  });
+
+  test("parseFactValue: битое z:-значение fail-soft → no-data/other, поверхность не роняет (круг 2, Прод-7)", () => {
+    expect(parseFactValue("z:not-valid-base64!!!")).toEqual({ reason: "other" });
+    expect(parseFactValue(`z:${Buffer.from("не-JSON").toString("base64")}`)).toEqual({ reason: "other" });
+    // обычный битый JSON ведёт себя как раньше (бросок) — fail-soft только на z:
+    expect(() => parseFactValue("{broken")).toThrow();
+  });
+
   test("карточка и compute читают сжатую строку: агрегат timeline и категория активности", () => {
     const h = makeApiDb();
     const repoId = seedRepo(h, { org: "z", repo: "tl" });

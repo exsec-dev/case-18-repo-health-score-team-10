@@ -135,15 +135,26 @@ export const TIMELINE_KIND = "activity.git.timeline";
 /** Префикс сжатого значения в facts.value. */
 export const FACT_Z_PREFIX = "z:";
 
-/** Сериализация значения факта для БД; timeline — zlib+base64 с префиксом. */
-export function encodeFactValue(kind: string, value: unknown): string {
+/** Сериализация значения факта для БД; timeline сжимается ТОЛЬКО при статусе
+ *  ok (круг 2 В4.4: no-data значение — маленький plain JSON, сжатие не нужно,
+ *  а его сырые читатели — gitLimitsHit и json_extract в ratingEligibleSql —
+ *  на `z:` отдают 500 и крэш стартового рескора). Вызов без статуса (старые
+ *  callers и тесты) ведёт себя как в круге 1 — жмёт. */
+export function encodeFactValue(kind: string, value: unknown, status?: FactStatus): string {
   const json = JSON.stringify(value);
   if (kind !== TIMELINE_KIND) return json;
+  if (status === "no-data" || status === "bad") return json;
   return FACT_Z_PREFIX + Buffer.from(deflateSync(json, { level: 6 })).toString("base64");
 }
 
-/** Прозрачное чтение facts.value: сжатое (префикс) разворачивается, старое парсится как было. */
+/** Прозрачное чтение facts.value: сжатое (префикс) разворачивается, старое парсится как было.
+ *  Прод-7 (круг 2): битое сжатое значение — мусорный ввод, поверхность не роняет;
+ *  читатели трактуют его как no-data с общей причиной `other`. */
 export function parseFactValue(raw: string): unknown {
   if (!raw.startsWith(FACT_Z_PREFIX)) return JSON.parse(raw);
-  return JSON.parse(inflateSync(Buffer.from(raw.slice(FACT_Z_PREFIX.length), "base64")).toString("utf8"));
+  try {
+    return JSON.parse(inflateSync(Buffer.from(raw.slice(FACT_Z_PREFIX.length), "base64")).toString("utf8"));
+  } catch {
+    return { reason: "other" };
+  }
 }

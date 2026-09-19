@@ -201,8 +201,10 @@ function insertFacts(db: Database, scanId: number, facts: Fact[]): void {
   );
   for (const f of facts) {
     // В4.4 (кластер C): timeline пишется сжатым (z:-префикс); чтение
-    // прозрачно по префиксу, остальные kinds — как были
-    stmt.run(scanId, f.category, f.key, encodeFactValue(f.key, f.value), f.status, f.source, f.collectedAt);
+    // прозрачно по префиксу, остальные kinds — как были. Круг 2: сжатие
+    // только у ok-значений — no-data едет plain JSON (его читают сырым
+    // парсером и json_extract: карточка и правило пригодности)
+    stmt.run(scanId, f.category, f.key, encodeFactValue(f.key, f.value, f.status), f.status, f.source, f.collectedAt);
   }
 }
 

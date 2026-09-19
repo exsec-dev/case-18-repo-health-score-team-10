@@ -87,7 +87,7 @@ function seedScanWithCompressedNoDataTimeline(t: ApiTestDb, repoId: number, spec
 // ---------------------------------------------------------------------------
 
 describe("R1а (Б1): карточка и MD при сжатом no-data timeline отвечают 200", () => {
-  repro("карточка пустого репо с z:-timeline — 200 и честный no-data activity", async () => {
+  test("карточка пустого репо с z:-timeline — 200 и честный no-data activity", async () => {
     const dir = tempDir("rh-v44r2-card-");
     const db = openDb({ ...loadConfig(), dataDir: dir });
     const t: ApiTestDb = { db, close: () => db.close() };
@@ -140,9 +140,10 @@ describe("R1а (Б1): карточка и MD при сжатом no-data timelin
     };
     expect(card.score).not.toBeNull();
     // activity-канал остаётся no-data — честное состояние, не подделка
+    // (значение timeline в evidence — агрегат, событий не выдумано)
     const timeline = card.evidence.find((e) => e.key === "activity.git.timeline");
     expect(timeline?.status).toBe("no-data");
-    expect((timeline?.value as { reason?: string } | undefined)?.reason).toBe("empty");
+    expect((timeline?.value as { events?: number } | undefined)?.events).toBe(0);
     // MD-отчёт — та же карточка тем же сборщиком
     const md = await fetch(`${base}/api/repos/r2/empty-repo/report.md`);
     expect(md.status).toBe(200);
@@ -157,7 +158,7 @@ describe("R1а (Б1): карточка и MD при сжатом no-data timelin
 // ---------------------------------------------------------------------------
 
 describe("R1б (Б1): runStartupRescore жив на сжатом no-data timeline", () => {
-  repro("needsRescore=true + z:-timeline: проход доходит до done, курсор на max", async () => {
+  test("needsRescore=true + z:-timeline: проход доходит до done, курсор на max", async () => {
     const dir = tempDir("rh-v44r2-rescore-");
     const db = openDb({ ...loadConfig(), dataDir: dir });
     const t: ApiTestDb = { db, close: () => db.close() };
@@ -199,7 +200,7 @@ describe("R3 (Б1): JS и SQL правила пригодности совпад
   function factsOf(db: Database, scanId: number): EligibilityFact[] {
     return db.query("SELECT key, status, source, value FROM facts WHERE scan_id = ?").all(scanId) as EligibilityFact[];
   }
-  repro("z:-timeline с reason empty: ratingEligible === SQL-оценка (и контроль без сжатия)", () => {
+  test("z:-timeline с reason empty: ratingEligible === SQL-оценка (и контроль без сжатия)", () => {
     const dir = tempDir("rh-v44r2-elig-");
     const db = openDb({ ...loadConfig(), dataDir: dir });
     const t: ApiTestDb = { db, close: () => db.close() };

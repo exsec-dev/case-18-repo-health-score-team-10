@@ -924,9 +924,12 @@ export function channelSources(db: Database, repoId: number): { cicdScanId: numb
   };
 }
 
-/** Git-канал упёрся в лимиты: git-факт со статусом no-data и reason=limits. */
+/** Git-канал упёрся в лимиты: git-факт со статусом no-data и reason=limits.
+ *  Круг 2 В4.4: через parseFactValue, а не сырой JSON.parse — легаси-строка
+ *  круга 1 (сжатый no-data timeline) переваривается, карточка и MD не отдают
+ *  500 (репро Ищейки 1а). */
 function gitLimitsHit(facts: FactRow[]): boolean {
-  return facts.some((f) => f.source === "git" && f.status === "no-data" && (JSON.parse(f.value) as { reason?: unknown }).reason === "limits");
+  return facts.some((f) => f.source === "git" && f.status === "no-data" && (parseFactValue(f.value) as { reason?: unknown }).reason === "limits");
 }
 
 function gitLimitsOf(scan: ScanConfig): GitLimitsMarker {

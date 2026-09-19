@@ -6,7 +6,7 @@
 // OAuth-обмен (вход) и PAT/me-repos по явному действию юзера; данные
 // рейтинга появляются исключительно сканом.
 import { loadConfig } from "./config";
-import { openDb } from "./db";
+import { openDb, setMetaValue } from "./db";
 import { getMeta, getRepoCardForViewer, listRepos, parseReposQuery } from "./api/repos";
 import { getHealth } from "./api/health";
 import { makeAccessCache, resolveAccess, type AccessRepo, type AccessResult } from "./auth/access";
@@ -48,7 +48,7 @@ import {
 import { deletePat, getPat, patMeta, patReadable, storePat } from "./auth/pat";
 import { buildAuthUrl, exchangeCode, yaAvatarUrl, type YaEndpoints } from "./auth/ya";
 import { makeScClient } from "./collectors/http";
-import { needsRescore, runStartupRescore } from "./score/rescore";
+import { needsRescore, runStartupRescore, RESCORE_ERROR } from "./score/rescore";
 import index from "./web/index.html";
 
 const config = loadConfig();
@@ -680,7 +680,19 @@ const stopWorkerLoops: Array<() => void> = [];
 if (needsRescore(db)) {
   if (role === "rating" || role === "all") {
     console.log("[startup] stored scores are outdated or missing: background rescore (port is already up)");
-    void runStartupRescore(db, { log: (m) => console.log(`[rescore] ${m}`) });
+    // Круг 2 В4.4 (глубокая эщ к крэш-лупу деплой-окна): непойманный rejection
+    // в Bun — exit 1, супервизор перезапускает, процесс не поднимается. Б1
+    // чинит корень (кодек-осознанные читатели причины), .catch — страховка:
+    // ошибка уходит в meta derived_rescore_error (health окрасится), процесс жив
+    void runStartupRescore(db, { log: (m) => console.log(`[rescore] ${m}`) }).catch((e: unknown) => {
+      const msg = String((e as Error).message ?? e).slice(0, 200);
+      console.error(`[rescore] startup pass crashed: ${msg}`);
+      try {
+        setMetaValue(db, RESCORE_ERROR, msg);
+      } catch (metaError) {
+        console.error(`[rescore] failed to record rescore error: ${String((metaError as Error).message).slice(0, 200)}`);
+      }
+    });
   } else {
     console.log("[startup] stored scores are outdated or missing: rescore runs in the rating process (PROCESS_ROLE=web)");
   }
