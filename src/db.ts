@@ -220,10 +220,15 @@ export function setMetaValue(db: Database, key: string, value: string): void {
   db.query("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, value);
 }
 
+/** Дефолт ожидания блокировки на соединении (был литералом здесь). З5 круга 2
+ *  В4.4: поднявший 15 с проход рескора обязан восстанавливать этот дефолт —
+ *  контракт SIGTERM «≤ 5 с» иначе нарушаем. */
+export const DB_BUSY_TIMEOUT_MS = 5_000;
+
 export function openDb(config: Config): Database {
   mkdirSync(config.dataDir, { recursive: true });
   const db = new Database(join(config.dataDir, "repo-health.db"), { create: true });
-  db.exec("PRAGMA busy_timeout = 5000;");
+  db.exec(`PRAGMA busy_timeout = ${DB_BUSY_TIMEOUT_MS};`);
   // Ф1.9: БД мигрирована более новым кодом — этот процесс её не трогает
   // (сценарий «старый процесс на той же БД», инцидент 16.09)
   const stored = getMetaValue(db, "schema_version");

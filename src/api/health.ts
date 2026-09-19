@@ -16,7 +16,14 @@ export const SCHED_META = {
   nightlyAt: "sched_last_nightly_at",
   nightlyOk: "sched_last_nightly_ok",
   nightlyError: "sched_last_nightly_error",
+  /** З6 (круг 2 В4.4): метка завершённого тика rating-воркер-лупа (пишет только rating-сторона). */
+  tickAt: "sched_tick_at",
 } as const;
+
+/** З6 (круг 2 В4.4): метка тика планировщика старше этого порога — rating-роль
+ *  вероятно мертва (таймеры стоят), health обязан краснеть, а не лгать зелёным.
+ *  Порог оспариванию в приёмке не подлежит. */
+export const SCHED_STALE_AFTER_MS = 30 * 60_000;
 
 /** meta-ключ гарда пустого каталога (кластер D). */
 export const CATALOG_SUSPICIOUS_AT = "catalog_suspicious_at";
@@ -72,6 +79,17 @@ export function getHealth(db: Database, config: Config): HealthStatus {
   }
   if (nightlyOkRaw === "0") {
     reasons.push(`последняя ночная фаза обхода не удалась${nightlyError ? `: ${nightlyError}` : ""}`);
+  }
+  // З6 (круг 2 В4.4): метка тика есть, но стареет — rating-роль, вероятно,
+  // мертва (в разводке web/rating её смерть раньше оставалась зелёной:
+  // sched_last_nightly_ok хранил последний УСПЕХ). Нет метки — нет и
+  // утверждения «не тикал» (свежий деплой / роль web без планировщика)
+  const schedTickAt = getMetaValue(db, SCHED_META.tickAt);
+  if (schedTickAt !== null) {
+    const ageMs = Date.now() - Date.parse(schedTickAt);
+    if (Number.isFinite(ageMs) && ageMs > SCHED_STALE_AFTER_MS) {
+      reasons.push(`планировщик не тикал ${Math.round(ageMs / 60_000)} минут — похоже, rating-роль не работает`);
+    }
   }
 
   return {

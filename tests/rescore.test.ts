@@ -464,3 +464,24 @@ describe("круг 2 (LOW-7): стартовый пересчёт только �
     db.close();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Круг 2 В4.4 (З5): проход рескора поднимал busy_timeout до 15 с навсегда —
+// контракт SIGTERM «≤ 5 с» нарушался. После прохода дефолт соединения
+// (DB_BUSY_TIMEOUT_MS, db.ts) обязан вернуться.
+// ---------------------------------------------------------------------------
+
+describe("З5 (круг 2 В4.4): busy_timeout восстанавливается после прохода", () => {
+  test("runStartupRescore: после done PRAGMA busy_timeout снова 5000", async () => {
+    const dir = tempDir();
+    const db = openDb({ ...loadConfig(), dataDir: dir });
+    const t = { db, close: () => db.close() };
+    const repoId = seedRepo(t, { org: "busyto", repo: "r" });
+    seedScan(t, repoId, { facts: healthySpecs() });
+    const done = await runStartupRescore(db, { limit: 5, pauseMs: 0 });
+    expect(done).toEqual({ stopped: "done" });
+    const bt = (db.query("PRAGMA busy_timeout").get() as { timeout: number }).timeout;
+    expect(bt).toBe(5000);
+    db.close();
+  });
+});

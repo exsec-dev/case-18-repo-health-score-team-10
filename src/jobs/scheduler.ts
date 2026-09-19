@@ -816,9 +816,14 @@ export function startWorkerLoop(
     // тик целиком в броне и на уровне таймера: синхронный бросок шва (или
     // отказ самого `setInterval`-колбэка) не должен ронять процесс
     try {
-      void tick(deps, order, state, { historyRescore: queues.rating === true }).catch((e) =>
-        console.error(`[worker] tick failed: ${String((e as Error).message).slice(0, 200)}`),
-      );
+      void tick(deps, order, state, { historyRescore: queues.rating === true })
+        .then(() => {
+          // З6 (круг 2 В4.4): метка завершённого тика — только у rating-стороны
+          // лупа (иначе живой web-процесс маскировал бы мёртвую rating-роль).
+          // health читает её из meta кросс-процессно и краснеет по staleness
+          if (queues.rating) setMetaValue(deps.db, SCHED_META.tickAt, new Date().toISOString());
+        })
+        .catch((e) => console.error(`[worker] tick failed: ${String((e as Error).message).slice(0, 200)}`));
     } catch (e) {
       console.error(`[worker] tick failed: ${String((e as Error).message).slice(0, 200)}`);
     }

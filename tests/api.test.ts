@@ -652,6 +652,21 @@ describe("health (В4.4): ok вычисляемое, reasons по контрак
     expect(status.lastNightly).toEqual({ ok: false, error: "page 3: timeout" });
     h.close();
   });
+
+  test("З6 (круг 2): устаревшая метка тика планировщика краснит health; нет метки — нет причины", () => {
+    const h = healthyDb();
+    // метки нет — свежий деплой или роль web без планировщика «не тикал» не утверждается
+    const noStamp = getHealth(h.db, { ...loadConfig() });
+    expect(noStamp.reasons.some((r) => r.includes("планировщик"))).toBe(false);
+    h.db.query("INSERT INTO meta (key, value) VALUES ('sched_tick_at', ?)").run(new Date(Date.now() - 31 * 60_000).toISOString());
+    const stale = getHealth(h.db, { ...loadConfig() });
+    expect(stale.ok).toBe(false);
+    expect(stale.reasons.some((r) => r.includes("планировщик не тикал"))).toBe(true);
+    h.db.query("UPDATE meta SET value = ? WHERE key = 'sched_tick_at'").run(new Date().toISOString());
+    const fresh = getHealth(h.db, { ...loadConfig() });
+    expect(fresh.ok).toBe(true);
+    h.close();
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -30,7 +30,7 @@ import { SQLiteError } from "bun:sqlite";
 import { compute, migrateEligibility, ratingEligible, writeScores, type Scores } from "./compute";
 import { MODEL_VERSION } from "./model";
 import { recommend, writeRecommendations } from "./recommend";
-import { getMetaValue, setMetaValue } from "../db";
+import { DB_BUSY_TIMEOUT_MS, getMetaValue, setMetaValue } from "../db";
 
 /**
  * Версия производных данных (scores/recommendations/rating_eligible) при
@@ -384,6 +384,26 @@ export async function runStartupRescore(db: Database, opts: StartupRescoreOption
   } catch {
     /* выше пола не бывает — политика ретраев ниже всё равно стоит */
   }
+  try {
+    return await startupRescorePass(db, { log, batch, limit, pauseMs });
+  } finally {
+    // З5 (круг 2 В4.4): PRAGMA пер-коннектная — проход, поднявший 15 с, не оставляет
+    // её навсегда: дефолт соединения восстанавливается, контракт SIGTERM «≤ 5 с»
+    // держится (иначе returnOwnRunningJobs при BUSY мог ждать втрое дольше)
+    try {
+      db.exec(`PRAGMA busy_timeout = ${DB_BUSY_TIMEOUT_MS};`);
+    } catch {
+      /* соединение уже не живо — восстанавливать нечем */
+    }
+  }
+}
+
+/** Тело стартового прохода (запускается runStartupRescore под его busy_timeout-политикой). */
+async function startupRescorePass(
+  db: Database,
+  pass: { log: (m: string) => void; batch: typeof rescoreBatchByCursor; limit: number; pauseMs: number },
+): Promise<{ stopped: StartupRescoreStop }> {
+  const { log, batch, limit, pauseMs } = pass;
   const t0 = Date.now();
   const prelude = await busyGuarded(
     () => {

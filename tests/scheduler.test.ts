@@ -1570,3 +1570,30 @@ describe("В4.4 (кластер L): штатное завершение", () => 
     expect(elapsedMs).toBeLessThan(5000);
   }, 30_000);
 });
+
+// ---------------------------------------------------------------------------
+// Круг 2 В4.4 (З6): метка завершённого тика в meta — только у rating-стороны
+// воркер-лупа (живой web-процесс не должен маскировать мёртвую rating-роль).
+// getHealth краснеет по staleness (тест — в api.test.ts).
+// ---------------------------------------------------------------------------
+
+describe("З6 (круг 2 В4.4): метка тика планировщика в meta", () => {
+  test("rating-луп пишет sched_tick_at; user-луп не трогает", async () => {
+    const tickDir = mkdtempSync(join(tmpdir(), "rh-sched-tick-"));
+    const tickDb = openDb({ ...loadConfig(), dataDir: tickDir });
+    const base = loadConfig();
+    const stopRating = startWorkerLoop({ db: tickDb, config: base, serverClient: () => null }, { rating: true }, 20);
+    await Bun.sleep(200);
+    stopRating();
+    const stamp = (tickDb.query("SELECT value FROM meta WHERE key = 'sched_tick_at'").get() as { value: string } | null)?.value;
+    expect(typeof stamp).toBe("string");
+    // user-луп метку не пишет: иначе живой web изображал бы живую периодику
+    tickDb.query("UPDATE meta SET value = '2026-01-01T00:00:00.000Z' WHERE key = 'sched_tick_at'").run();
+    const stopUser = startWorkerLoop({ db: tickDb, config: base, serverClient: () => null }, { user: true }, 20);
+    await Bun.sleep(150);
+    stopUser();
+    expect((tickDb.query("SELECT value FROM meta WHERE key = 'sched_tick_at'").get() as { value: string }).value).toBe("2026-01-01T00:00:00.000Z");
+    tickDb.close();
+    rmSync(tickDir, { recursive: true, force: true });
+  }, 15_000);
+});
