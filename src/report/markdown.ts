@@ -56,7 +56,7 @@ function headerSection(card: RepoCard): string[] {
     // Ф2.9: один язык (RU) — статусы и триггеры словами, как на карточке
     `- Скан: ${scan ? `#${scan.id} от ${fmtDateTime(scan.finishedAt ?? scan.startedAt)} (статус ${scanStatusText(scan.status)}, запуск ${scanTriggerText(scan.trigger)})` : "не выполнялся"}`,
     `- Модель: ${score ? score.modelVersion : "—"}`,
-    `- Язык: ${repo.language ?? "не определён"}; лайки: ${num(repo.likes)}; форки: ${num(repo.forks)}`,
+    `- Язык: ${repo.language ? mdEscape(repo.language) : "не определён"}; лайки: ${num(repo.likes)}; форки: ${num(repo.forks)}`,
     `- Последняя активность: ${fmtDate(repo.lastActivityAt)}`,
     "",
   );
@@ -123,7 +123,9 @@ function summarySection(card: RepoCard): string[] {
   }
   out.push(
     `Рекомендаций: ${card.recommendations.length}` +
-      `${top ? `; наибольший измеримый прирост даёт «${top.problem}» (${top.expectedImpact ?? fmtSigned(top.deltaScore)})` : ""}.`,
+      // S-2 (круг 2 В4.4): тот же mdEscape, что у rec.problem в разделе рекомендаций —
+      // непоследовательности защиты больше нет
+      `${top ? `; наибольший измеримый прирост даёт «${mdEscape(top.problem)}» (${top.expectedImpact ?? fmtSigned(top.deltaScore)})` : ""}.`,
     "",
   );
   if (score.noData.length > 0) {

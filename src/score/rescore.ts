@@ -30,7 +30,7 @@ import { SQLiteError } from "bun:sqlite";
 import { compute, migrateEligibility, ratingEligible, writeScores, type Scores } from "./compute";
 import { MODEL_VERSION } from "./model";
 import { recommend, writeRecommendations } from "./recommend";
-import { getMetaValue, setMetaValue } from "../db";
+import { DB_BUSY_TIMEOUT_MS, getMetaValue, setMetaValue } from "../db";
 
 /**
  * Версия производных данных (scores/recommendations/rating_eligible) при
@@ -115,9 +115,14 @@ export function needsRescore(db: Database): boolean {
   // круг 2 (LOW-10): следы старого процесса — завершённые сканы без public_status
   const legacy = db.query("SELECT 1 FROM scans WHERE public_status IS NULL AND status NOT IN ('running', 'queued') LIMIT 1").get();
   if (legacy !== null) return true;
-  // В4.4: курсор не догнал max(scan_id) — проход не закончен (рестарт посреди него)
+  // В4.4: курсор не догнал max(scan_id) — проход не закончен (рестарт посреди него).
+  // И-4 (круг 2, сознательная семантика): водяной знак считает только
+  // ЗАВЕРШЁННЫЕ сканы — в scans статуса queued не бывает (вставка сразу
+  // running), источником шума были running-сканы в MAX(id): рестарт при
+  // непустой очереди коротко мигал «rescore pending». Running посчитает
+  // собственный скор-хук при завершении.
   const cursor = Number(getMetaValue(db, RESCORE_CURSOR) ?? "0") || 0;
-  const maxId = (db.query("SELECT COALESCE(MAX(id), 0) AS m FROM scans").get() as { m: number }).m;
+  const maxId = (db.query("SELECT COALESCE(MAX(id), 0) AS m FROM scans WHERE status NOT IN ('running', 'queued')").get() as { m: number }).m;
   return cursor < maxId;
 }
 
@@ -348,8 +353,11 @@ export interface StartupRescoreOptions {
 /**
  * Шаг прохода под BUSY-политикой (busy_timeout уже поднят): не-BUSY бросок
  * летит наружу, BUSY — до 3 повторов с бэкоффом, дальше `onBusyStop()`.
+ * И-5 (круг 2): `touch` обновляет сердцебиение ПЕРЕД каждой попыткой —
+ * патологически медленный батч из BUSY-ретраев не старит метку мимо порога
+ * health (RESCORE_HEARTBEAT_STALE_MS), пока проход жив.
  */
-async function busyGuarded<T>(fn: () => T, onBusyStop: () => T, log: (m: string) => void, label: string): Promise<T> {
+async function busyGuarded<T>(fn: () => T, onBusyStop: () => T, log: (m: string) => void, label: string, touch?: () => void): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     try {
       return fn();
@@ -358,6 +366,11 @@ async function busyGuarded<T>(fn: () => T, onBusyStop: () => T, log: (m: string)
       if (attempt > 3) {
         log(`${label}: repeated SQLITE_BUSY — stopping (cursor/progress kept)`);
         return onBusyStop();
+      }
+      try {
+        touch?.();
+      } catch {
+        /* свежая метка не важнее самой попытки */
       }
       log(`${label}: SQLITE_BUSY (attempt ${attempt}/3) — backing off`);
       await Bun.sleep(250 * 2 ** (attempt - 1));
@@ -384,7 +397,29 @@ export async function runStartupRescore(db: Database, opts: StartupRescoreOption
   } catch {
     /* выше пола не бывает — политика ретраев ниже всё равно стоит */
   }
+  try {
+    return await startupRescorePass(db, { log, batch, limit, pauseMs });
+  } finally {
+    // З5 (круг 2 В4.4): PRAGMA пер-коннектная — проход, поднявший 15 с, не оставляет
+    // её навсегда: дефолт соединения восстанавливается, контракт SIGTERM «≤ 5 с»
+    // держится (иначе returnOwnRunningJobs при BUSY мог ждать втрое дольше)
+    try {
+      db.exec(`PRAGMA busy_timeout = ${DB_BUSY_TIMEOUT_MS};`);
+    } catch {
+      /* соединение уже не живо — восстанавливать нечем */
+    }
+  }
+}
+
+/** Тело стартового прохода (запускается runStartupRescore под его busy_timeout-политикой). */
+async function startupRescorePass(
+  db: Database,
+  pass: { log: (m: string) => void; batch: typeof rescoreBatchByCursor; limit: number; pauseMs: number },
+): Promise<{ stopped: StartupRescoreStop }> {
+  const { log, batch, limit, pauseMs } = pass;
   const t0 = Date.now();
+  // И-5 (круг 2): свежее сердцебиение — и на каждой BUSY-попытке (см. busyGuarded)
+  const touchHeartbeat = (): void => setMetaValue(db, RESCORE_RUNNING, new Date().toISOString());
   const prelude = await busyGuarded(
     () => {
       db.query("DELETE FROM meta WHERE key = ?").run(RESCORE_ERROR);
@@ -394,6 +429,7 @@ export async function runStartupRescore(db: Database, opts: StartupRescoreOption
     () => false,
     log,
     "rescore prelude",
+    touchHeartbeat,
   );
   if (!prelude) return { stopped: "busy" };
   log(`rescore ${MODEL_VERSION} (derived v${DERIVED_VERSION}): background pass by scan_id watermark, batches of ${limit}`);
@@ -410,6 +446,7 @@ export async function runStartupRescore(db: Database, opts: StartupRescoreOption
     () => false,
     log,
     "rescore eligibility migration",
+    touchHeartbeat,
   );
   if (!migrated) {
     db.query("DELETE FROM meta WHERE key = ?").run(RESCORE_RUNNING);
@@ -423,6 +460,7 @@ export async function runStartupRescore(db: Database, opts: StartupRescoreOption
         () => null,
         log,
         "rescore batch",
+        touchHeartbeat,
       );
       if (out === null) {
         stopped = "busy";

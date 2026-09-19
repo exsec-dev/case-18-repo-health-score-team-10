@@ -26,6 +26,16 @@ export interface MyRepoEntry {
   healthcraftIndex: number | null;
   /** время последнего анализа репо ЛЮБЫМ автором (не own-скан зрителя — см. `FavoriteCheckResponse.lastOwnScanAt`, М1) */
   lastScanAt: string | null;
+  /** З4 (круг 2 В4.4): статус ПОСЛЕДНЕГО скана репо (любого автора) — строка кабинета
+   *  различает «анализ завершился ошибкой» и «данных не хватило»; running — легальный
+   *  транзитный статус. null = сканов нет или меты у зрителя нет (нет прав) */
+  lastScanStatus: "ok" | "partial" | "bad" | "running" | null;
+  /** UX-8 (круг 2 В4.4): ДВА явных признака вместо прокси `title === null`
+   *  (публичное репо без title тоже без title): репо есть в каталоге (таблица
+   *  repos по слагу) и подтверждены ли права зрителя. Ярлык кабинета честно
+   *  различает «нет в каталоге» / «нет прав» / «еще не анализировали» */
+  inCatalog: boolean;
+  mayRead: boolean;
   /**
    * Ф2.17 (решение владельца 18.09): у записи есть живая job ЗРИТЕЛЯ
    * (queued/running) и нет завершённого own-скана — «работа запланирована».
@@ -52,11 +62,11 @@ export interface MyReposResult {
  * В4.3 (Б3-кабинет): сырой SQL переведён на дропаемую total_rating →
  * healthcraft_index.
  */
-function ratingScoreOf(db: Database, org: string, repo: string): { healthcraftIndex: number | null; lastScanAt: string | null } {
+function ratingScoreOf(db: Database, org: string, repo: string): { healthcraftIndex: number | null; lastScanAt: string | null; lastScanStatus: MyRepoEntry["lastScanStatus"] } {
   const row = db.query("SELECT id, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as
     | { id: number; visibility: string }
     | null;
-  if (!row) return { healthcraftIndex: null, lastScanAt: null };
+  if (!row) return { healthcraftIndex: null, lastScanAt: null, lastScanStatus: null };
   const scoreOf = (pick: string) =>
     db
       .query(
@@ -66,10 +76,15 @@ function ratingScoreOf(db: Database, org: string, repo: string): { healthcraftIn
       )
       .get(org, repo, MODEL_VERSION, MODEL_VERSION) as { total: number | null } | null;
   const scored = scoreOf(LAST_ELIGIBLE_SCAN_SQL) ?? (row.visibility !== "public" ? scoreOf(LAST_NOT_BAD_SCAN_SQL) : null);
-  const lastScan = db.query("SELECT finished_at, started_at FROM scans WHERE repo_id = ? ORDER BY id DESC LIMIT 1").get(row.id) as
-    | { finished_at: string | null; started_at: string }
+  // З4 (круг 2): статус ДОБАВЛЯЕТСЯ в проекцию существующего SELECT'а последнего скана (DDL нет)
+  const lastScan = db.query("SELECT status, finished_at, started_at FROM scans WHERE repo_id = ? ORDER BY id DESC LIMIT 1").get(row.id) as
+    | { status: string; finished_at: string | null; started_at: string }
     | null;
-  return { healthcraftIndex: scored?.total ?? null, lastScanAt: lastScan ? (lastScan.finished_at ?? lastScan.started_at) : null };
+  return {
+    healthcraftIndex: scored?.total ?? null,
+    lastScanAt: lastScan ? (lastScan.finished_at ?? lastScan.started_at) : null,
+    lastScanStatus: lastScan ? (lastScan.status as MyRepoEntry["lastScanStatus"]) : null,
+  };
 }
 
 /**
@@ -138,7 +153,9 @@ function plannedWork(db: Database, userId: number | null, org: string, repo: str
 export interface PatSeed {
   status: "ok" | "partial";
   added: number;
-  error?: { code: "source_http" | "favorite_limit" | "page_limit" };
+  /** UX-9 (круг 2 В4.4): `no_username` — /user не вернул имя, namespace НЕ
+   *  опрашивался (прежний дефолт source_http ложно обвинял его) */
+  error?: { code: "source_http" | "favorite_limit" | "page_limit" | "no_username" };
 }
 
 /**
@@ -246,12 +263,15 @@ export async function listMyRepos(db: Database, userId: number | null): Promise<
     .all(userId ?? -1) as { org_slug: string; repo_slug: string }[];
   const entries: MyRepoEntry[] = favs.map((f) => {
     const mayRead = viewerMayReadRepo(db, userId, f.org_slug, f.repo_slug);
+    // UX-8: признак «в каталоге» — один дешёвый lookup (JOIN'а в listMyRepos
+    // нет; строку repos поднимает viewerMayReadRepo и выбрасывает)
+    const inCatalog = db.query("SELECT 1 FROM repos WHERE org_slug = ? AND repo_slug = ?").get(f.org_slug, f.repo_slug) !== null;
     const row = mayRead
       ? (db.query("SELECT title, language FROM repos WHERE org_slug = ? AND repo_slug = ?").get(f.org_slug, f.repo_slug) as
           | { title: string | null; language: string | null }
           | null)
       : null;
-    const known = mayRead ? ratingScoreOf(db, f.org_slug, f.repo_slug) : { healthcraftIndex: null, lastScanAt: null };
+    const known = mayRead ? ratingScoreOf(db, f.org_slug, f.repo_slug) : { healthcraftIndex: null, lastScanAt: null, lastScanStatus: null };
     return {
       org: f.org_slug,
       repo: f.repo_slug,
@@ -262,6 +282,9 @@ export async function listMyRepos(db: Database, userId: number | null): Promise<
       languageColor: null,
       healthcraftIndex: known.healthcraftIndex,
       lastScanAt: known.lastScanAt,
+      lastScanStatus: known.lastScanStatus,
+      inCatalog,
+      mayRead,
       planned: plannedWork(db, userId, f.org_slug, f.repo_slug),
     };
   });

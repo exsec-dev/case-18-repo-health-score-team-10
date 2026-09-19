@@ -147,7 +147,10 @@ function noDataReason(value: unknown): unknown {
   let v = value;
   if (typeof v === "string") {
     try {
-      v = JSON.parse(v);
+      // кодек-осознанно (круг 2 В4.4): строка может быть сжатой (z:-префикс,
+      // легаси круга 1) — parseFactValue разворачивает её перед парсом;
+      // JS- и SQL-правила пригодности обязаны видеть одну причину
+      v = parseFactValue(v);
     } catch {
       return null;
     }
@@ -182,7 +185,13 @@ export function ratingEligible(facts: EligibilityFact[], scan: EligibilityScan):
 
 const sqlList = (items: string[]) => items.map((k) => `'${k}'`).join(", ");
 
-/** SQL-эквивалент ratingEligible: логическое выражение для строки scans с алиасом `scanAlias` (id, status, user_id). */
+/** SQL-эквивалент ratingEligible: логическое выражение для строки scans с алиасом `scanAlias` (id, status, user_id).
+ *  Круг 2 В4.4: причина no-data читается кодек-осознанно — json_extract по сжатой
+ *  (z:) строке бросал `malformed JSON` и ронял migrateEligibility (крэш-луп
+ *  стартового рескора). SQLite разворачивать zlib не умеет, поэтому сжатая
+ *  no-data-строка читается как «причина неизвестна» (NULL — не дисквалификатор);
+ *  после фикса write-side no-data значения не сжимаются вовсе, окно — только
+ *  легаси-строки круга 1. Одна функция — фикс покрывает db.ts и migrateEligibility. */
 export function ratingEligibleSql(scanAlias: string): string {
   return `(${scanAlias}.status NOT IN ('bad', 'running', 'queued')
           AND (${scanAlias}.user_id IS NULL OR NOT EXISTS (
@@ -191,7 +200,7 @@ export function ratingEligibleSql(scanAlias: string): string {
             WHERE f.scan_id = ${scanAlias}.id
               AND f.key IN (${sqlList(PUBLIC_KINDS)})
               AND f.status <> 'bad'
-              AND NOT (f.status = 'no-data' AND COALESCE(json_extract(f.value, '$.reason'), '') IN (${sqlList(INELIGIBLE_NO_DATA_REASONS)}))
+              AND NOT (f.status = 'no-data' AND COALESCE(CASE WHEN f.value LIKE 'z:%' THEN NULL ELSE json_extract(f.value, '$.reason') END, '') IN (${sqlList(INELIGIBLE_NO_DATA_REASONS)}))
           ) = ${PUBLIC_KINDS.length})`;
 }
 

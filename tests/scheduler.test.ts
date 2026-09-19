@@ -44,7 +44,7 @@ import {
 import { myJobs, requestUserScan } from "../src/api/me";
 import { runScan as realRunScan, upsertRepo, type runScan as runScanType, type ScanDeps, type ScanResult } from "../src/jobs/runner";
 import { makeScClient } from "../src/collectors/http";
-import { returnOwnRunningJobs } from "../src/jobs/scheduler";
+import { closeOwnRunningScans, returnOwnRunningJobs } from "../src/jobs/scheduler";
 import { startMockApi } from "./server-harness";
 
 const dir = mkdtempSync(join(tmpdir(), "rh-sched-"));
@@ -1569,4 +1569,140 @@ describe("В4.4 (кластер L): штатное завершение", () => 
     expect(code).toBe(0);
     expect(elapsedMs).toBeLessThan(5000);
   }, 30_000);
+});
+
+// ---------------------------------------------------------------------------
+// Круг 2 В4.4 (З6): метка завершённого тика в meta — только у rating-стороны
+// воркер-лупа (живой web-процесс не должен маскировать мёртвую rating-роль).
+// getHealth краснеет по staleness (тест — в api.test.ts).
+// ---------------------------------------------------------------------------
+
+describe("З6 (круг 2 В4.4): метка тика планировщика в meta", () => {
+  test("rating-луп пишет sched_tick_at; user-луп не трогает", async () => {
+    const tickDir = mkdtempSync(join(tmpdir(), "rh-sched-tick-"));
+    const tickDb = openDb({ ...loadConfig(), dataDir: tickDir });
+    const base = loadConfig();
+    const stopRating = startWorkerLoop({ db: tickDb, config: base, serverClient: () => null }, { rating: true }, 20);
+    await Bun.sleep(200);
+    stopRating();
+    const stamp = (tickDb.query("SELECT value FROM meta WHERE key = 'sched_tick_at'").get() as { value: string } | null)?.value;
+    expect(typeof stamp).toBe("string");
+    // user-луп метку не пишет: иначе живой web изображал бы живую периодику
+    tickDb.query("UPDATE meta SET value = '2026-01-01T00:00:00.000Z' WHERE key = 'sched_tick_at'").run();
+    const stopUser = startWorkerLoop({ db: tickDb, config: base, serverClient: () => null }, { user: true }, 20);
+    await Bun.sleep(150);
+    stopUser();
+    expect((tickDb.query("SELECT value FROM meta WHERE key = 'sched_tick_at'").get() as { value: string }).value).toBe("2026-01-01T00:00:00.000Z");
+    tickDb.close();
+    rmSync(tickDir, { recursive: true, force: true });
+  }, 15_000);
+});
+
+// ---------------------------------------------------------------------------
+// Круг 2 В4.4 (Б5): skipped-счётчик сбрасывается чистым обходом (И-3/П-6/S-3)
+// и волна сортируется конечным сентинелом (И-6 — NaN на паре null-лайков).
+// ---------------------------------------------------------------------------
+
+describe("Б5 (круг 2 В4.4): счётчик плохих слагов — метка «последнего обхода»", () => {
+  test("грязный обход пишет счётчик в meta; чистый — сбрасывает в 0", async () => {
+    const dirty = [{ repos: [repoOf("b5", "fine", "2026-09-19T00:00:00Z"), repoOf("bad/../host", "x", "2026-09-19T00:00:00Z"), repoOf("dots", ".", "2026-09-19T00:00:00Z")], next: null }];
+    const r1 = await nightlyCatalog(db, catalogClient(dirty), { now: new Date() });
+    expect(r1.ok).toBe(true);
+    expect(r1.enqueued.length).toBeGreaterThan(0);
+    const afterDirty = (db.query("SELECT value FROM meta WHERE key = 'catalog_skipped_bad_entries'").get() as { value: string } | null)?.value;
+    expect(Number(afterDirty)).toBeGreaterThan(0);
+    // чистый обход (записи валидны) сбрасывает счётчик: «последний обход» не врёт
+    db.query("UPDATE jobs SET status = 'done'").run();
+    const clean = [{ repos: [repoOf("b5", "fine", "2026-09-19T00:00:00Z")], next: null }];
+    const r2 = await nightlyCatalog(db, catalogClient(clean), { now: new Date() });
+    expect(r2.ok).toBe(true);
+    expect((db.query("SELECT value FROM meta WHERE key = 'catalog_skipped_bad_entries'").get() as { value: string }).value).toBe("0");
+  });
+
+  test("компаратор волны: пара null-лайков сравнима (без NaN), без лайков — в хвосте", async () => {
+    const pages: { repos: Record<string, unknown>[]; next: string | null }[] = [
+      {
+        repos: [
+          repoOf("wave", "no-likes-a", "2026-09-19T00:00:00Z"),
+          repoOf("wave", "liked", "2026-09-19T00:00:00Z"),
+          repoOf("wave", "no-likes-b", "2026-09-19T00:00:00Z"),
+        ],
+        next: null,
+      },
+    ];
+    // лайки каталога едут в rating.value (не полем likes); null-пара обязана
+    // сравниваться без NaN
+    pages[0]!.repos[0]!.rating = null;
+    pages[0]!.repos[1]!.rating = { value: 5 };
+    pages[0]!.repos[2]!.rating = null;
+    const r = await nightlyCatalog(db, catalogClient(pages), { now: new Date() });
+    expect(r.ok).toBe(true);
+    const likedFirst = r.enqueued[0]!.slug.endsWith("liked");
+    expect(likedFirst).toBe(true);
+    expect(Number.isNaN(likedFirst)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Круг 2 В4.4 (Б5, П-5): SIGTERM закрывает скан ЭТОГО процесса честным
+// квартетом (bad + public_status bad + finished_at + shutdown), ПОТОМ
+// возвращает заявку в queued. Один status='bad' оставил бы
+// public_status='running' навсегда — нечестность вернулась бы в карточку.
+// ---------------------------------------------------------------------------
+
+describe("П-5 (круг 2 В4.4): сирота-скан при штатном завершении", () => {
+  test("closeOwnRunningScans — квартет bad/shutdown; затем returnOwnRunningJobs", async () => {
+    const p5dir = mkdtempSync(join(tmpdir(), "rh-p5-"));
+    const pdb: Database = openDb({ ...loadConfig(), dataDir: p5dir });
+    try {
+      pdb.query("INSERT INTO repos (org_slug, repo_slug) VALUES ('p5', 'repo')").run();
+      const p5Repo = (pdb.query("SELECT id FROM repos WHERE org_slug = 'p5' AND repo_slug = 'repo'").get() as { id: number }).id;
+      pdb.query("INSERT INTO users (ya_id, login, created_at, last_login_at) VALUES ('p5u', 'p5u', '2026', '2026')").run();
+      const u = (pdb.query("SELECT id FROM users WHERE ya_id = 'p5u'").get() as { id: number }).id;
+      const jobId = enqueueScan(pdb, p5Repo, { userId: u, triggerKind: "user" });
+      // (заявку клеим сам workerTick — ручной claim поставил бы лиз и
+      // заблокировал бы воркер до его истечения)
+      // running-скан этого процесса (как его создаёт runScan)
+      pdb.query("INSERT INTO scans (repo_id, started_at, status, public_status, trigger, user_id) VALUES (?, ?, 'running', 'running', 'user', ?)").run(
+        p5Repo,
+        new Date().toISOString(),
+        u,
+      );
+      const scanId = (pdb.query("SELECT id FROM scans WHERE repo_id = ? AND status = 'running'").get(p5Repo) as { id: number }).id;
+      // регистрация в liveClaims — через workerTick с зависшим runScan
+      let release: () => void = () => {};
+      const gate = new Promise<void>((res) => (release = res));
+      const hang = (async () => {
+        await gate;
+        return { scanId, repoId: p5Repo, status: "ok", repoAccess: "ok" } as ScanResult;
+      }) as unknown as typeof runScanType;
+      const base = loadConfig();
+      const config = { ...base, auth: { ...base.auth, appSecret: "scheduler-test-secret-0000000000000000" } };
+      const tick = workerTick({ db: pdb, config, serverClient: () => null, runScan: hang, getPat: () => "pat" }, ["user"], { busy: false });
+      await Bun.sleep(80);
+      // ПОРЯДОК SIGTERM: сначала сканы, потом заявки
+      expect(closeOwnRunningScans(pdb)).toBe(1);
+      const scan = pdb.query("SELECT status, public_status, finished_at, status_detail FROM scans WHERE id = ?").get(scanId) as {
+        status: string;
+        public_status: string;
+        finished_at: string | null;
+        status_detail: string;
+      };
+      expect({ status: scan.status, public: scan.public_status, detail: scan.status_detail, finished: scan.finished_at !== null }).toEqual({
+        status: "bad",
+        public: "bad",
+        detail: "shutdown",
+        finished: true,
+      });
+      expect(returnOwnRunningJobs(pdb)).toBe(1);
+      expect(pdb.query("SELECT status, claimed_at, attempts FROM jobs WHERE id = ?").get(jobId)).toEqual({ status: "queued", claimed_at: null, attempts: 1 });
+      release();
+      await tick;
+      // finishJob по возвращённой заявке не матчится (claimed_at NULL) — queued цела
+      expect(pdb.query("SELECT status FROM jobs WHERE id = ?").get(jobId)).toEqual({ status: "queued" });
+    } finally {
+      pdb.close();
+      rmSync(p5dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -521,8 +521,11 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
 
   // В4.4 (кластер F): лайки по убыванию (нет лайков — в хвост), постановка —
   // батчами по 100 в одной транзакции (синхронная фаза постановки как целое
-  // — З5 аудита — вне скоупа, В6; батч режет число автокоммитов)
-  waveCandidates.sort((a, b) => (b.likes ?? Number.NEGATIVE_INFINITY) - (a.likes ?? Number.NEGATIVE_INFINITY));
+  // — З5 аудита — вне скоупа, В6; батч режет число автокоммитов).
+  // И-6 (круг 2): конечный сентинел вместо -Infinity — на паре null-лайков
+  // разность давала NaN; лайки неотрицательны, -1 безопасен и null-пара
+  // сравнима корректно (обе в хвост, порядок перечисления между ними)
+  waveCandidates.sort((a, b) => (b.likes ?? -1) - (a.likes ?? -1));
   const WAVE_ENQUEUE_CHUNK = 100;
   for (let i = 0; i < waveCandidates.length; i += WAVE_ENQUEUE_CHUNK) {
     db.transaction(() => {
@@ -551,9 +554,11 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
   // исчезли»: один такой тик раньше гасил rating_active всему рейтингу.
   // Эвикция не исполняется, ставится meta-флаг catalog_suspicious_at
   // (health окрасится); снимает флаг первый обход с записями.
-  // В4.4 (кластер K/З5): гард слагов — счётчик отброшенного в health/лог
+  // В4.4 (кластер K/З5): гард слагов — счётчик отброшенного в health/лог.
+  // И-3/П-6/S-3 (круг 2): пишется ВСЕГДА — чистый обход сбрасывает в 0, и
+  // подпись «последний обход» в health не показывает устаревшее число
+  setMetaValue(db, "catalog_skipped_bad_entries", String(catalog.skippedBadEntries));
   if (catalog.skippedBadEntries > 0) {
-    setMetaValue(db, "catalog_skipped_bad_entries", String(catalog.skippedBadEntries));
     console.warn(`[scheduler] catalog walk skipped ${catalog.skippedBadEntries} entries with bad slugs/form`);
   }
   let suspicious = false;
@@ -679,17 +684,47 @@ export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<Sca
  * SIGTERM возвращает их в queued (claimed_at NULL, attempts без изменений —
  * административная остановка не считается попыткой); registry живёт
  * в памяти процесса — чужие заявки не трогаются никогда.
+ * П-5 (круг 2): реестр несёт repoId/userId — прерванный завершением скан
+ * этого процесса закрывается честным квартетом (см. closeOwnRunningScans),
+ * а не висит running до свипа сирот.
  */
-const liveClaims = new Map<number, string>();
+const liveClaims = new Map<number, { claimedAt: string; repoId: number; userId: number | null }>();
+
+/**
+ * П-5 (круг 2 В4.4): сканы ЭТОГО процесса, прерванные штатным завершением, —
+ * не сироты до свипа, а честный `bad` с причиной shutdown. Квартет как у
+ * свипа сирот (`sweepOrphanScans`): status + public_status + finished_at +
+ * status_detail — один status='bad' оставил бы public_status='running'
+ * навсегда. ПОРЯДОК при SIGTERM: сначала закрыть сканы, ПОТОМ вернуть
+ * заявки (иначе queued-заявка прикрывала бы закрываемый скан).
+ */
+export function closeOwnRunningScans(db: Database): number {
+  const nowIso = new Date().toISOString();
+  let closed = 0;
+  for (const claim of liveClaims.values()) {
+    try {
+      const r = db
+        .query(
+          `UPDATE scans SET status = 'bad', public_status = 'bad', finished_at = ?, status_detail = 'shutdown'
+           WHERE repo_id = ? AND user_id IS ? AND status = 'running'`,
+        )
+        .run(nowIso, claim.repoId, claim.userId);
+      closed += r.changes;
+    } catch (e) {
+      console.error(`[shutdown] close scan failed: ${String((e as Error).message).slice(0, 200)}`);
+    }
+  }
+  return closed;
+}
 
 /** Вернуть свои running-заявки в очередь; возвращает число возвращённых. */
 export function returnOwnRunningJobs(db: Database): number {
   let returned = 0;
-  for (const [id, claimedAt] of liveClaims) {
+  for (const [id, claim] of liveClaims) {
     try {
       const r = db
         .query("UPDATE jobs SET status = 'queued', claimed_at = NULL, lease_until = NULL WHERE id = ? AND claimed_at = ? AND status = 'running'")
-        .run(id, claimedAt);
+        .run(id, claim.claimedAt);
       if (r.changes > 0) returned++;
     } catch (e) {
       console.error(`[shutdown] return job ${id} failed: ${String((e as Error).message).slice(0, 200)}`);
@@ -770,7 +805,7 @@ export async function workerTick(
   }
   const claimed = job;
   state.busy = true;
-  liveClaims.set(claimed.id, claimed.claimedAt);
+  liveClaims.set(claimed.id, { claimedAt: claimed.claimedAt, repoId: claimed.repoId, userId: claimed.userId });
   const heartbeat = setInterval(() => {
     try {
       renewLease(deps.db, claimed.id, claimed.claimedAt, leaseMs);
@@ -816,9 +851,14 @@ export function startWorkerLoop(
     // тик целиком в броне и на уровне таймера: синхронный бросок шва (или
     // отказ самого `setInterval`-колбэка) не должен ронять процесс
     try {
-      void tick(deps, order, state, { historyRescore: queues.rating === true }).catch((e) =>
-        console.error(`[worker] tick failed: ${String((e as Error).message).slice(0, 200)}`),
-      );
+      void tick(deps, order, state, { historyRescore: queues.rating === true })
+        .then(() => {
+          // З6 (круг 2 В4.4): метка завершённого тика — только у rating-стороны
+          // лупа (иначе живой web-процесс маскировал бы мёртвую rating-роль).
+          // health читает её из meta кросс-процессно и краснеет по staleness
+          if (queues.rating) setMetaValue(deps.db, SCHED_META.tickAt, new Date().toISOString());
+        })
+        .catch((e) => console.error(`[worker] tick failed: ${String((e as Error).message).slice(0, 200)}`));
     } catch (e) {
       console.error(`[worker] tick failed: ${String((e as Error).message).slice(0, 200)}`);
     }

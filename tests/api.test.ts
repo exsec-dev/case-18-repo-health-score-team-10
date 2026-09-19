@@ -652,6 +652,21 @@ describe("health (В4.4): ok вычисляемое, reasons по контрак
     expect(status.lastNightly).toEqual({ ok: false, error: "page 3: timeout" });
     h.close();
   });
+
+  test("З6 (круг 2): устаревшая метка тика планировщика краснит health; нет метки — нет причины", () => {
+    const h = healthyDb();
+    // метки нет — свежий деплой или роль web без планировщика «не тикал» не утверждается
+    const noStamp = getHealth(h.db, { ...loadConfig() });
+    expect(noStamp.reasons.some((r) => r.includes("планировщик"))).toBe(false);
+    h.db.query("INSERT INTO meta (key, value) VALUES ('sched_tick_at', ?)").run(new Date(Date.now() - 31 * 60_000).toISOString());
+    const stale = getHealth(h.db, { ...loadConfig() });
+    expect(stale.ok).toBe(false);
+    expect(stale.reasons.some((r) => r.includes("планировщик не тикал"))).toBe(true);
+    h.db.query("UPDATE meta SET value = ? WHERE key = 'sched_tick_at'").run(new Date().toISOString());
+    const fresh = getHealth(h.db, { ...loadConfig() });
+    expect(fresh.ok).toBe(true);
+    h.close();
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -668,6 +683,22 @@ describe("В4.4: сжатый timeline читается как несжатый"
     expect(parseFactValue(JSON.stringify(value))).toEqual(value);
     // прочие kinds не сжимаются
     expect(encodeFactValue("tree.stats", value)).toBe(JSON.stringify(value));
+  });
+
+  test("encodeFactValue: no-data/bad timeline не сжимается, ok и старый вызов — сжимаются (круг 2)", () => {
+    const value = { reason: "empty" };
+    expect(encodeFactValue("activity.git.timeline", value, "no-data")).toBe(JSON.stringify(value));
+    expect(encodeFactValue("activity.git.timeline", value, "bad")).toBe(JSON.stringify(value));
+    expect(encodeFactValue("activity.git.timeline", value, "ok").startsWith("z:")).toBe(true);
+    // старый двухаргументный вызов (замороженные тесты круга 1) — как был
+    expect(encodeFactValue("activity.git.timeline", value).startsWith("z:")).toBe(true);
+  });
+
+  test("parseFactValue: битое z:-значение fail-soft → no-data/other, поверхность не роняет (круг 2, Прод-7)", () => {
+    expect(parseFactValue("z:not-valid-base64!!!")).toEqual({ reason: "other" });
+    expect(parseFactValue(`z:${Buffer.from("не-JSON").toString("base64")}`)).toEqual({ reason: "other" });
+    // обычный битый JSON ведёт себя как раньше (бросок) — fail-soft только на z:
+    expect(() => parseFactValue("{broken")).toThrow();
   });
 
   test("карточка и compute читают сжатую строку: агрегат timeline и категория активности", () => {
@@ -691,6 +722,28 @@ describe("В4.4: сжатый timeline читается как несжатый"
     // compute по сжатой строке: категория активности считает данные
     const scores = compute(h.db, scanId);
     expect(scores.categories.activity.score).not.toBeNull();
+    h.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Круг 2 В4.4 (Б5, S-5): сырые внутренние тексты в публичном /api/health
+// капятся (200 символов + срез управляющих) — диагностика сохраняется.
+// ---------------------------------------------------------------------------
+
+describe("Б5 (круг 2 В4.4): капы текстов health", () => {
+  test("S-5: derived_rescore_error в reason обрезан и без управляющих символов", () => {
+    const h = makeApiDb();
+    h.db.query("INSERT INTO meta (key, value) VALUES ('derived_version', '5')").run();
+    const maxId = (h.db.query("SELECT COALESCE(MAX(id), 0) AS m FROM scans").get() as { m: number }).m;
+    h.db.query("INSERT INTO meta (key, value) VALUES ('derived_rescore_cursor', ?)").run(String(maxId));
+    h.db.query("INSERT INTO meta (key, value) VALUES ('derived_rescore_error', ?)").run(`\u0007boom${"e".repeat(300)}`);
+    const status = getHealth(h.db, { ...loadConfig() });
+    const reason = status.reasons.find((r) => r.includes("упал"))!;
+    const echoed = reason.split("упал: ")[1] ?? "";
+    expect(echoed.length).toBe(200);
+    expect(echoed.startsWith("boomee")).toBe(true);
+    expect(echoed.includes("\u0007")).toBe(false);
     h.close();
   });
 });

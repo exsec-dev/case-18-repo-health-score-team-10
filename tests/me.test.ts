@@ -4,14 +4,14 @@
 // Сети нет: REST-клиент — фейк с заданным статусом.
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config";
 import { openDb } from "../src/db";
 import type { ScClient } from "../src/collectors/http";
 import { upsertUser } from "../src/auth/session";
-import { requestUserScan } from "../src/api/me";
+import { addFavorite, listMyRepos, requestUserScan } from "../src/api/me";
 
 const dir = mkdtempSync(join(tmpdir(), "rh-me-"));
 const db: Database = openDb({ ...loadConfig(), dataDir: dir });
@@ -115,4 +115,144 @@ describe("requestUserScan: предпроверка доступа PAT (К3)", (
       requests: 0,
     });
   });
+});
+
+// ---------------------------------------------------------------------------
+// Круг 2 В4.4 (Б2): статус последнего скана в /api/me/repos (З4) и честные
+// ветки UI кабинета/карточки (З1–З3, UX-6/7 — source-assert по образцу
+// tests/m42b-blocks.test.ts: компонентовых тестов в репо нет).
+// ---------------------------------------------------------------------------
+
+describe("З4 (круг 2 В4.4): lastScanStatus в /api/me/repos", () => {
+  const user = upsertUser(db, "ya-lss", "lss");
+
+  test("последний скан bad → 'bad', running → 'running'; без прав меты → null", async () => {
+    db.query("INSERT INTO repos (org_slug, repo_slug) VALUES ('lss', 'failed-repo')").run();
+    const failedRepo = repoRow("lss", "failed-repo")!.id;
+    db.query("INSERT INTO scans (repo_id, started_at, finished_at, status, public_status, trigger) VALUES (?, '2026-09-19T00:00:00Z', '2026-09-19T00:05:00Z', 'bad', 'bad', 'periodic')").run(failedRepo);
+    db.query("INSERT INTO repos (org_slug, repo_slug) VALUES ('lss', 'running-repo')").run();
+    const runningRepo = repoRow("lss", "running-repo")!.id;
+    db.query("INSERT INTO scans (repo_id, started_at, finished_at, status, public_status, trigger) VALUES (?, '2026-09-19T00:00:00Z', NULL, 'running', 'running', 'periodic')").run(runningRepo);
+    db.query("INSERT INTO repos (org_slug, repo_slug, visibility) VALUES ('lss', 'private-repo', 'private')").run();
+    addFavorite(db, user, "lss", "failed-repo");
+    addFavorite(db, user, "lss", "running-repo");
+    addFavorite(db, user, "lss", "private-repo");
+    const out = await listMyRepos(db, user);
+    const byRepo = new Map(out.entries.map((e) => [e.repo, e]));
+    expect(byRepo.get("failed-repo")?.lastScanStatus).toBe("bad");
+    expect(byRepo.get("running-repo")?.lastScanStatus).toBe("running");
+    // fail-closed: без прав меты статус не раскрывается вместе с ней
+    expect(byRepo.get("private-repo")?.lastScanStatus).toBeNull();
+    expect(byRepo.get("private-repo")?.lastScanAt).toBeNull();
+  });
+});
+
+describe("UI-ветки круга 2 (source-assert, Б2)", () => {
+  const srcOf = (file: string): string => readFileSync(join(import.meta.dir, "..", "src", "web", file), "utf8");
+
+  test("З1: сбой /api/me/favorites показывает Alert над списком кабинета", () => {
+    expect(srcOf("MePage.tsx").includes('title="Раздел избранного не получился"')).toBe(true);
+  });
+
+  test("З2: stalled-метка снимается, когда серверная job ушла из active", () => {
+    const src = srcOf("MePage.tsx");
+    expect({ hasClearing: src.includes("stillActive"), keepsSkip: src.includes('job.phase === "stalled"') }).toEqual({
+      hasClearing: true,
+      keepsSkip: true,
+    });
+  });
+
+  test("З3: RepoPage перечитывает карточку сразу после успешного старта анализа", () => {
+    const src = srcOf("RepoPage.tsx");
+    expect(src.includes("useRefreshAnalysis(org, repo, cardUrl, sinceScanId, reload, leaseMs, reload)")).toBe(true);
+    expect(src.includes("onStarted()")).toBe(true);
+  });
+
+  test("З4: bad-статус имеет честный текст; ветка индекса срабатывает раньше статус-текста", () => {
+    const src = srcOf("MePage.tsx");
+    expect(src.includes("Анализ завершился ошибкой — повторите")).toBe(true);
+    const indexBranch = src.indexOf("entry.healthcraftIndex !== null");
+    const badBranch = src.indexOf('entry.lastScanStatus === "bad"');
+    expect({ indexBranch, badBranch, indexFirst: indexBranch < badBranch }).toMatchObject({ indexFirst: true });
+  });
+
+  test("UX-6: слово «первый» в подсказке про токен — только на ветке без скана", () => {
+    const src = srcOf("RepoPage.tsx");
+    expect(src.includes('card.scan ? "Добавьте токен в кабинете — и запустите анализ" : "Добавьте токен в кабинете — и запустите первый анализ"')).toBe(true);
+  });
+
+  test("UX-7: сбой снятия звезды показывается тостом, не молчит", () => {
+    const src = srcOf("MePage.tsx");
+    expect(src.includes("Не удалось убрать из избранного")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Круг 2 В4.4 (Б4): UX-хвосты ре-аудита — дискриминатор прав/каталога (UX-8),
+// скрытие кнопки анализа на error-странице (UX-5), seedNote без username
+// (UX-9), заметка «затянулось» на карточке (UX-10 — source-assert).
+// ---------------------------------------------------------------------------
+
+describe("UX-8 (круг 2 В4.4): inCatalog/mayRead в /api/me/repos", () => {
+  test("публичное репо каталога без title: inCatalog+mayRead честны (прокси title===null врал бы)", async () => {
+    const u = upsertUser(db, "ya-ux8", "ux8");
+    // публичное витринное репо каталога без title — репро-кейс находки:
+    // права есть, репо в каталоге, сканов ещё не было
+    db.query("INSERT INTO repos (org_slug, repo_slug, title, visibility) VALUES ('showcase', 'no-title-repo', NULL, 'public')").run();
+    // чужой слаг вне каталога — строка repos не создаётся никогда
+    addFavorite(db, u, "showcase", "no-title-repo");
+    addFavorite(db, u, "ghost", "not-in-catalog");
+    // приватный в каталоге без прав
+    db.query("INSERT INTO repos (org_slug, repo_slug, visibility) VALUES ('vault', 'hidden', 'private')").run();
+    addFavorite(db, u, "vault", "hidden");
+    const out = await listMyRepos(db, u);
+    const byRepo = new Map(out.entries.map((e) => [e.repo, e]));
+    expect(byRepo.get("no-title-repo")?.inCatalog).toBe(true);
+    expect(byRepo.get("no-title-repo")?.mayRead).toBe(true);
+    expect(byRepo.get("not-in-catalog")?.inCatalog).toBe(false);
+    expect(byRepo.get("not-in-catalog")?.mayRead).toBe(false);
+    // в каталоге, без прав — отдельная ветка «нет прав»
+    expect(byRepo.get("hidden")?.inCatalog).toBe(true);
+    expect(byRepo.get("hidden")?.mayRead).toBe(false);
+  });
+});
+
+describe("UI-ветки круга 2 (source-assert, Б4)", () => {
+  const srcOf = (file: string): string => readFileSync(join(import.meta.dir, "..", "src", "web", file), "utf8");
+
+  test("UX-5: кнопка анализа не показывается на error-странице карточки", () => {
+    const src = srcOf("RepoPage.tsx");
+    expect(src.includes("actions={refreshButton}")).toBe(false);
+  });
+
+  test("UX-8: ярлыки кабинета различают «нет в каталоге» / «нет прав» / «еще не анализировали»", () => {
+    const src = srcOf("MePage.tsx");
+    expect({ noCatalog: src.includes("Нет в каталоге"), noRights: src.includes("Нет прав"), notYet: src.includes("Еще не анализировали") }).toEqual({
+      noCatalog: true,
+      noRights: true,
+      notYet: true,
+    });
+    // старый прокси-дискриминатор ушёл
+    expect(src.includes("entry.title === null")).toBe(false);
+  });
+
+  test("UX-9: seedNote при отсутствующем username не обвиняет namespace", () => {
+    const meSrc = srcOf("MePage.tsx");
+    expect(meSrc.includes("не удалось начать посев — SourceCraft не вернул имя пользователя")).toBe(true);
+    const serverSrc = readFileSync(join(import.meta.dir, "..", "src", "server.ts"), "utf8");
+    expect(serverSrc.includes('code: "no_username"')).toBe(true);
+  });
+
+  test("UX-10: карточка после leaseMs показывает «затянулось», а не вечный спиннер", () => {
+    const src = srcOf("RepoPage.tsx");
+    expect({ stalled: src.includes("jobStalled"), note: src.includes("затянулось — смотрите панель заданий") }).toEqual({
+      stalled: true,
+      note: true,
+    });
+  });
+});
+
+test("S-7 (круг 2 В4.4): двойной sessionOf в PUT-ветках избранного убран", () => {
+  const serverSrc = readFileSync(join(import.meta.dir, "..", "src", "server.ts"), "utf8");
+  expect(serverSrc.includes("user0 = sessionOf(req)")).toBe(false);
 });

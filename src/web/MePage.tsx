@@ -152,7 +152,10 @@ function seedNote(seed: import("../api/me").PatSeed | undefined): string {
       ? "достигнут предел избранного"
       : seed.error?.code === "page_limit"
         ? "прочитаны не все страницы namespace"
-        : "namespace ответил сбоем";
+        : seed.error?.code === "no_username"
+          ? // UX-9 (круг 2 В4.4): namespace не опрашивался — не обвинять его
+            "не удалось начать посев — SourceCraft не вернул имя пользователя"
+          : "namespace ответил сбоем";
   return `Посев избранного остановлен: ${why} (добавлено ${seed.added}).`;
 }
 
@@ -353,7 +356,21 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
     const timer = setInterval(async () => {
       for (const slug of slugs) {
         const job = jobs[slug]!;
-        if (job.phase === "stalled") continue;
+        if (job.phase === "stalled") {
+          // З2 (круг 2 В4.4): stalled не замораживает строку навсегда — когда
+          // серверная job ушла из active (исход есть в панели заданий), метка
+          // снимается и строка перечитывает серверную правду
+          const stillActive = serverJobs?.active.some((j) => j.slug === slug) ?? true;
+          if (!stillActive) {
+            setJobs((prev) => {
+              const next = { ...prev };
+              delete next[slug];
+              return next;
+            });
+            reposReloadRef.current();
+          }
+          continue;
+        }
         if (Date.now() - job.startedAt > leaseMs) {
           setJobs((prev) => ({ ...prev, [slug]: { ...job, phase: "stalled" } }));
           continue;
@@ -390,7 +407,7 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
       }
     }, 3000);
     return () => clearInterval(timer);
-  }, [jobs, toaster, leaseMs]);
+  }, [jobs, toaster, leaseMs, serverJobs]);
 
   // Ф2.20: ручной ввод добавляет в избранное (слаг или URL); парсер —
   // серверный, клиент лишь не пускает заведомо не похожее
@@ -432,6 +449,15 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
       await mutateJson(`/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`, "DELETE");
       favs.reload();
       reposReloadRef.current();
+    } catch (e) {
+      // UX-7 (круг 2 В4.4): сбой снятия не глотается — соседние действия
+      // (addManual/check) тостят, асимметрия внутри одного списка заметна
+      toaster.add({
+        name: `fav-remove-failed:${org}/${repo}`,
+        theme: "danger",
+        title: "Не удалось убрать из избранного",
+        content: e instanceof Error ? e.message : String(e),
+      });
     } finally {
       setBusy(null);
     }
@@ -476,6 +502,11 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
       {repos.state.kind === "loading" && <SkeletonRows rows={3} height={60} />}
       {repos.state.kind === "error" && (
         <Alert theme="warning" view="outlined" title="Список не получился" message={repos.state.message} actions={[{ text: "Повторить", handler: repos.reload }]} />
+      )}
+      {/* З1 (круг 2 В4.4): сбой /api/me/favorites больше не глотается в пустой Map —
+          строки списка без прав-ряда врут «ещё не проверяли», хотя проверка упала */}
+      {favs.state.kind === "error" && (
+        <Alert theme="warning" view="outlined" title="Раздел избранного не получился" message={favs.state.message} actions={[{ text: "Повторить", handler: favs.reload }]} />
       )}
       {/* В4.4 (кластер I): пустое состояние ОДНО — список один */}
       {repos.state.kind === "ok" && entries.length === 0 && (
@@ -579,14 +610,32 @@ function RepoRow({
         </Text>
       )}
     </Flex>
+  ) : entry.lastScanStatus === "running" ? (
+    // З4 (круг 2 В4.4): running — легальный транзитный статус последнего скана
+    <Flex gap={2} alignItems="center" title={etaNote}>
+      <Spin size="xs" />
+      <Text color="complementary">Сканируется</Text>
+    </Flex>
+  ) : entry.lastScanStatus === "bad" ? (
+    // З4: последний скан упал — честный статус вместо «Проанализировали»;
+    // текст согласован с тостом опросщика и панелью заданий. Пригодный старый
+    // индекс сработал бы веткой выше — статус-текст только там, где оценки нет
+    <Label theme="danger" size="xs">
+      Анализ завершился ошибкой — повторите
+    </Label>
   ) : entry.lastScanAt !== null ? (
     <Label theme="unknown" size="xs">
       Проанализировали — данных для оценки не хватило
     </Label>
-  ) : entry.title === null ? (
-    // В4.4 (кластер M-2): честный ярлык закрытых прав вместо свалки
+  ) : !entry.inCatalog ? (
+    // UX-8 (круг 2 В4.4): явные признаки вместо прокси `title === null` —
+    // публичное репо без title тоже без title, прежний ярлык врал в причинах
     <Label theme="unknown" size="xs">
-      Данных нет (нет прав или репо не в каталоге)
+      Нет в каталоге
+    </Label>
+  ) : !entry.mayRead ? (
+    <Label theme="unknown" size="xs">
+      Нет прав
     </Label>
   ) : (
     <Label theme="unknown" size="xs">
