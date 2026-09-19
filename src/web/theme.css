@@ -20,6 +20,29 @@
  * Специфичность обязана быть выше стоковой (.g-root.g-root_theme_*,
  * 0-2-0): в dev Bun отдаёт стили россыпью, и этот файл может загрузиться
  * раньше темы uikit (ERROR_LOG 16.09).
+ *
+ * ПАЛИТРОВЫЙ ПАС В4.6 (решение 20.09, Екатерина — «в обеих темах цвета
+ * ярче»; расчёты — reports/2026-09-20-ui-card-layout-and-palette-round.md
+ * часть 3). Изменённые строки помечены комментарием «В4.6». Два корня:
+ *   1. `Progress` заливает полосу токеном `--g-color-base-<тон>-medium`, а в
+ *      снятой с платформы палитре это ПОЛУПРОЗРАЧНЫЕ значения: зелёный
+ *      смешивался с дорожкой в #527F50 (1,95:1 — «сливается с серым»),
+ *      красный в #984947 (1,46:1). Заливки переведены в непрозрачные, порог
+ *      WCAG 1.4.11 для нетекстовой графики — 3:1. В пине 7.49.0 эти токены
+ *      использует ТОЛЬКО Progress.css (и FilePreview.css, у нас не
+ *      применяется) — правка хирургическая, проверено грепом по CSS пакета.
+ *   2. Цветной текст не проходил AA 4,5:1 — 10 токенов хотя бы в одной теме
+ *      (text-danger 3,24:1 в тёмной, text-positive 2,57:1 и text-warning
+ *      2,39:1 в светлой, text-link 3,99–4,09:1 в обеих). Без этого паса
+ *      кодирование категорий цветом (У20) дало бы нечитаемое число.
+ * Границы паса: альфа чипов `Label` (`base-*-light`) НЕ поднимается — это
+ * отнимает 0,6 у контраста их собственного текста, яркость чипа берётся из
+ * `-heavy`-токенов; `line-generic` не трогается (декоративная графика, порог
+ * 3:1 не применяется, а поднятие делает таблицу полосатой); ховер строк и
+ * активный пункт rail — платформенный вид, данность каркаса В4.5.
+ * Ожидаемая таблица контрастов зафиксирована тестом tests/theme.test.ts:
+ * светлая тема проверяется арифметикой, а не рендером — снимков светлой
+ * темы владелец сознательно не заказывал (решение 20.09).
  */
 
 .g-root.g-root_theme_dark {
@@ -30,7 +53,7 @@
   --g-color-base-danger-heavy-hover: #ef7f7d;
   --g-color-base-danger-light: rgba(232, 73, 69, .2);
   --g-color-base-danger-light-hover: rgba(232, 73, 69, .3);
-  --g-color-base-danger-medium: rgba(232, 73, 69, .5);
+  --g-color-base-danger-medium: #ef7f7d; /* В4.6: заливка Progress — было rgba(232,73,69,.5) → #984947, 1,46:1 к дорожке; стало 3,47:1 (значение = base-danger-heavy-hover) */
   --g-color-base-danger-medium-hover: rgba(232, 73, 69, .7);
   --g-color-base-float: #494949;
   --g-color-base-float-accent: #4d4c52;
@@ -61,7 +84,7 @@
   --g-color-base-misc-heavy-hover: #90a6ba;
   --g-color-base-misc-light: rgba(96, 128, 156, .2);
   --g-color-base-misc-light-hover: rgba(96, 128, 156, .3);
-  --g-color-base-misc-medium: rgba(96, 128, 156, .5);
+  --g-color-base-misc-medium: #8099b0; /* В4.6: полоса покрытия — было #546472, 1,50:1; стало 3,08:1. Остаётся стальной, не зелёной (охранный пункт 6) */
   --g-color-base-misc-medium-hover: rgba(96, 128, 156, .7);
   --g-color-base-modal: #343434;
   --g-color-base-neutral-heavy: rgba(255, 255, 255, .55);
@@ -74,7 +97,7 @@
   --g-color-base-positive-heavy-hover: #8ccb89;
   --g-color-base-positive-light: rgba(91, 181, 87, .2);
   --g-color-base-positive-light-hover: rgba(91, 181, 87, .3);
-  --g-color-base-positive-medium: rgba(91, 181, 87, .5);
+  --g-color-base-positive-medium: #74c770; /* В4.6: было #527F50, 1,95:1; стало 4,40:1. Развилка решена владельцем в пользу более яркого #74c770 (платформенный #6bbc68 дал бы 3,91:1) */
   --g-color-base-positive-medium-hover: rgba(91, 181, 87, .7);
   --g-color-base-selection: rgba(255, 255, 255, .15);
   --g-color-base-selection-hover: rgba(255, 255, 255, .2);
@@ -90,13 +113,13 @@
   --g-color-base-warning-heavy-hover: #ffdb4c;
   --g-color-base-warning-light: rgba(255, 203, 0, .2);
   --g-color-base-warning-light-hover: rgba(255, 203, 0, .3);
-  --g-color-base-warning-medium: rgba(255, 203, 0, .5);
+  --g-color-base-warning-medium: #ffd01a; /* В4.6: было оливковое #A48A24, 2,69:1; стало 6,19:1 (значение = base-warning-heavy) */
   --g-color-base-warning-medium-hover: rgba(255, 203, 0, .7);
   --g-color-infographics-axis: #4d4c52;
   --g-color-infographics-tooltip-bg: rgba(76, 75, 81, .95);
   --g-color-line-brand: #fff;
   --g-color-line-danger: rgba(232, 73, 69, .8);
-  --g-color-line-focus: rgba(96, 128, 156, .8);
+  --g-color-line-focus: #8099b0; /* В4.6: фокус-ринг был #577187, 2,44:1 — ниже порога 3:1 для нетекстовой графики; стало 4,21:1 */
   --g-color-line-generic: rgba(255, 255, 255, .15);
   --g-color-line-generic-accent: rgba(255, 255, 255, .15);
   --g-color-line-generic-accent-hover: rgba(255, 255, 255, .3);
@@ -122,8 +145,8 @@
   --g-color-text-brand-contrast: rgba(0, 0, 0, .9);
   --g-color-text-brand-heavy: #fff;
   --g-color-text-complementary: rgba(255, 255, 255, .7);
-  --g-color-text-danger: #e84945;
-  --g-color-text-danger-heavy: #ea5b58;
+  --g-color-text-danger: #f08a88; /* В4.6: было 3,24:1 — AA не проходил; стало 5,16:1 */
+  --g-color-text-danger-heavy: #f59b99; /* В4.6: было 3,64:1 (на чипе 3,01:1); стало 5,95:1 (на чипе 4,92:1) */
   --g-color-text-dark-complementary: rgba(0, 0, 0, .7);
   --g-color-text-dark-hint: rgba(0, 0, 0, .3);
   --g-color-text-dark-primary: rgba(0, 0, 0, .9);
@@ -139,16 +162,16 @@
   --g-color-text-light-hint: rgba(255, 255, 255, .3);
   --g-color-text-light-primary: rgba(255, 255, 255, .85);
   --g-color-text-light-secondary: rgba(255, 255, 255, .5);
-  --g-color-text-link: #638fff;
+  --g-color-text-link: #86a8ff; /* В4.6: было 4,09:1; стало 5,37:1 (значение = base-info-heavy-hover) */
   --g-color-text-link-hover: #97b4ff;
   --g-color-text-link-visited: #bc97e0;
   --g-color-text-link-visited-hover: #ddcbf0;
-  --g-color-text-misc: #708da6;
-  --g-color-text-misc-heavy: #8099b0;
-  --g-color-text-positive: #5bb557;
-  --g-color-text-positive-heavy: #6bbc68;
+  --g-color-text-misc: #8099b0; /* В4.6: было 3,59:1; стало 4,21:1 — порог 3:1 для иконок и меток берёт, AA нет. ПРАВИЛО: прозу токеном misc не набирать (сознательная развилка раунда) */
+  --g-color-text-misc-heavy: #9ab0c2; /* В4.6: было 4,21:1 (на чипе 3,38:1); стало 5,55:1 (на чипе 4,46:1) — это текст чипа Label theme="normal" */
+  --g-color-text-positive: #74c770; /* В4.6: было 4,86:1; стало 6,01:1 — один тон с заливкой полосы */
+  --g-color-text-positive-heavy: #8ccb89; /* В4.6: было 5,35:1, но на чипе 3,86:1; стало 6,53:1 и 4,71:1 на чипе */
   --g-color-text-primary: rgba(255, 255, 255, .85);
-  --g-color-text-secondary: rgba(255, 255, 255, .5);
+  --g-color-text-secondary: rgba(255, 255, 255, .58); /* В4.6: было #9a9a9a, 4,40:1 — ниже AA (корень ДП5); стало #aaaaaa, 5,34:1 */
   --g-color-text-utility: #9a63d1;
   --g-color-text-utility-heavy: #a575d6;
   --g-color-text-warning: #ffcb00;
@@ -168,7 +191,7 @@
   --g-color-base-danger-heavy-hover: #c0100f;
   --g-color-base-danger-light: rgba(255, 4, 0, .15);
   --g-color-base-danger-light-hover: rgba(255, 4, 0, .3);
-  --g-color-base-danger-medium: rgba(255, 4, 0, .3);
+  --g-color-base-danger-medium: #ea0805; /* В4.6: заливка Progress — было #F6ABAA, 1,66:1 к дорожке #f2f2f2; стало 4,15:1 */
   --g-color-base-danger-medium-hover: rgba(255, 4, 0, .5);
   --g-color-base-float: #fff;
   --g-color-base-float-accent: #fff;
@@ -199,7 +222,7 @@
   --g-color-base-misc-heavy-hover: #586a7a;
   --g-color-base-misc-light: rgba(107, 132, 153, .15);
   --g-color-base-misc-light-hover: rgba(107, 132, 153, .3);
-  --g-color-base-misc-medium: rgba(107, 132, 153, .3);
+  --g-color-base-misc-medium: #657b8f; /* В4.6: было #CAD1D7, 1,38:1; стало 3,93:1 */
   --g-color-base-misc-medium-hover: rgba(107, 132, 153, .5);
   --g-color-base-modal: #fff;
   --g-color-base-neutral-heavy: rgba(0, 0, 0, .45);
@@ -212,7 +235,7 @@
   --g-color-base-positive-heavy-hover: #379a34;
   --g-color-base-positive-light: rgba(59, 201, 53, .15);
   --g-color-base-positive-light-hover: rgba(59, 201, 53, .3);
-  --g-color-base-positive-medium: rgba(59, 201, 53, .3);
+  --g-color-base-positive-medium: #2f9f2b; /* В4.6: было #BBE6B9, 1,24:1; стало 3,07:1. В светлой теме «ярче» = насыщеннее и темнее: контраст считается против белого */
   --g-color-base-positive-medium-hover: rgba(59, 201, 53, .5);
   --g-color-base-selection: rgba(0, 0, 0, .1);
   --g-color-base-selection-hover: rgba(0, 0, 0, .15);
@@ -228,13 +251,13 @@
   --g-color-base-warning-heavy-hover: #d5b848;
   --g-color-base-warning-light: rgba(255, 219, 77, .3);
   --g-color-base-warning-light-hover: rgba(255, 219, 77, .5);
-  --g-color-base-warning-medium: rgba(255, 219, 77, .7);
+  --g-color-base-warning-medium: #a07c00; /* В4.6: было #FBE27F, 1,15:1. СОЗНАТЕЛЬНАЯ РАЗВИЛКА (решение владельца 20.09): жёлтый против белого 3:1 не берёт ни на одном оттенке (#eac94a 1,45:1, #e0a900 1,91:1, #c0a645 2,14:1), поэтому полоса уходит в янтарь — 3,50:1. В тёмной теме жёлтый остаётся жёлтым, 6,19:1 */
   --g-color-base-warning-medium-hover: rgba(255, 219, 77, .9);
   --g-color-infographics-axis: #d9d9d9;
   --g-color-infographics-tooltip-bg: rgba(255, 255, 255, .95);
   --g-color-line-brand: #030303;
   --g-color-line-danger: rgba(255, 4, 0, .8);
-  --g-color-line-focus: rgba(107, 132, 153, .8);
+  --g-color-line-focus: #4e79eb; /* В4.6: фокус-ринг был #899dad, 2,82:1; стало 3,99:1 */
   --g-color-line-generic: rgba(0, 0, 0, .1);
   --g-color-line-generic-accent: rgba(0, 0, 0, .15);
   --g-color-line-generic-accent-hover: rgba(0, 0, 0, .3);
@@ -277,20 +300,20 @@
   --g-color-text-light-hint: rgba(255, 255, 255, .5);
   --g-color-text-light-primary: #fff;
   --g-color-text-light-secondary: rgba(255, 255, 255, .7);
-  --g-color-text-link: #4e79eb;
+  --g-color-text-link: #4768c2; /* В4.6: было 3,99:1; стало 5,21:1 (значение = base-info-heavy-hover светлой темы) */
   --g-color-text-link-hover: #3f5799;
   --g-color-text-link-visited: #8f52cc;
   --g-color-text-link-visited-hover: #5e3f80;
-  --g-color-text-misc: #657b8f;
-  --g-color-text-misc-heavy: #586a7a;
-  --g-color-text-positive: #3ab935;
-  --g-color-text-positive-heavy: #379a34;
+  --g-color-text-misc: #586a7a; /* В4.6: было 4,39:1; стало 5,59:1 */
+  --g-color-text-misc-heavy: #4b5a68; /* В4.6: было 5,59:1 (на чипе 4,73:1); стало 7,09:1 (на чипе 6,00:1) */
+  --g-color-text-positive: #2e7d2b; /* В4.6: было 2,57:1 — худший текстовый токен палитры; стало 5,14:1 */
+  --g-color-text-positive-heavy: #2a7227; /* В4.6: было 3,60:1 (на чипе 3,19:1); стало 5,94:1 (на чипе 5,26:1) */
   --g-color-text-primary: rgba(0, 0, 0, .85);
-  --g-color-text-secondary: rgba(0, 0, 0, .5);
+  --g-color-text-secondary: rgba(0, 0, 0, .58); /* В4.6: было #808080, 3,98:1 — ниже AA (корень ДП5); стало #6b6b6b, 5,32:1 */
   --g-color-text-utility: #854ebd;
   --g-color-text-utility-heavy: #72479e;
-  --g-color-text-warning: #c0a645;
-  --g-color-text-warning-heavy: #c0600f;
+  --g-color-text-warning: #8a6c00; /* В4.6: было 2,39:1; стало 4,97:1 */
+  --g-color-text-warning-heavy: #7d6200; /* В4.6: было 4,27:1 (на чипе 3,87:1); стало 5,80:1 (на чипе 5,27:1) */
 
   --gn-aside-header-collapsed-background-color: #f2f2f2;
   --gn-aside-header-expanded-background-color: #f2f2f2;

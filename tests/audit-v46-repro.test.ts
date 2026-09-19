@@ -157,11 +157,13 @@ describe("В4.6-4 (У24/У37): проза color=\"secondary\" берёт AA в �
     return contrast(flatten([bg, tokens.get("--g-color-text-secondary")!]), bg);
   };
 
-  repro("тёмная тема: --g-color-text-secondary ≥ 4.5:1 (было 4.4:1)", () => {
+  // ЗАКРЫТО блоком Б1 (палитра): обёртка снята, утверждение не менялось.
+  test("тёмная тема: --g-color-text-secondary ≥ 4.5:1 (было 4.4:1)", () => {
     expect(secondaryContrast("dark")).toBeGreaterThanOrEqual(4.5);
   });
 
-  repro("светлая тема: --g-color-text-secondary ≥ 4.5:1 (было 3.98:1)", () => {
+  // ЗАКРЫТО блоком Б1.
+  test("светлая тема: --g-color-text-secondary ≥ 4.5:1 (было 3.98:1)", () => {
     expect(secondaryContrast("light")).toBeGreaterThanOrEqual(4.5);
   });
 });
@@ -178,13 +180,15 @@ describe("В4.6-5 (У37): заливка полос непрозрачна и б
   const TONES = ["positive", "warning", "danger", "misc"] as const;
 
   for (const theme of ["dark", "light"] as const) {
-    repro(`${theme === "dark" ? "тёмная" : "светлая"} тема: base-*-medium без альфы`, () => {
+    // ЗАКРЫТО блоком Б1.
+    test(`${theme === "dark" ? "тёмная" : "светлая"} тема: base-*-medium без альфы`, () => {
       const tokens = themeTokens(theme);
       const withAlpha = TONES.filter((tone) => parseColor(tokens.get(`--g-color-base-${tone}-medium`)!).a < 1);
       expect(withAlpha).toEqual([]);
     });
 
-    repro(`${theme === "dark" ? "тёмная" : "светлая"} тема: каждая заливка ≥ 3:1 к дорожке Progress`, () => {
+    // ЗАКРЫТО блоком Б1.
+    test(`${theme === "dark" ? "тёмная" : "светлая"} тема: каждая заливка ≥ 3:1 к дорожке Progress`, () => {
       const tokens = themeTokens(theme);
       const track = progressTrack(tokens);
       const below = TONES.filter((tone) => contrast(progressFill(tokens, tone), track) < 3);
