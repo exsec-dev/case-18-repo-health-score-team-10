@@ -33,7 +33,7 @@ beforeAll(async () => {
     db.query("UPDATE repos SET visibility = ? WHERE id = ?").run(visibility, repoId);
     const facts = cardFacts().map((f) => (f.key === "cicd.runs" ? { key: "cicd.runs", source: "rest:cicd", value: RUNS } : f));
     const scanId = seedScan(t, repoId, { facts: [...facts, { key: "appsec.findings", source: "appsec:api", value: APPSEC }] });
-    seedScore(t, repoId, scanId, { total: 60, totalFull: 49 });
+    seedScore(t, repoId, scanId, { total: 60 });
     seedRecommendation(t, scanId, { ruleId: "fix-red-runs", priority: 1, factRef: "cicd.runs", channel: "cicd" });
   }
   const stranger = upsertUser(db, "ya-stranger", "stranger");

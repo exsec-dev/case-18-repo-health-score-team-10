@@ -32,8 +32,10 @@ import { getMetaValue, setMetaValue } from "../db";
  * 4 (круг 2 В4.2a, К-Р14): `todo_note = "incomplete"` (обрыв cat-file) даёт
  * `old_share` = no-data с причиной — оценки, посчитавшие долю старых
  * маркеров по частичной выборке, пересчитываются (прецедент Ф2.3).
+ * 5 (В4.3, Ф3.2): схема 1.9 — scores пересоздан под healthcraft_index без
+ * сохранённого полного итога; строки восстанавливаются этим пересчётом.
  */
-export const DERIVED_VERSION = 4;
+export const DERIVED_VERSION = 5;
 
 /** Порция фонового пересчёта истории за тик воркера (≈25 мс на скан). */
 export const HISTORY_RESCORE_BATCH = 20;

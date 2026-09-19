@@ -335,10 +335,10 @@ describe("изоляция own/public и эвикция (В4/Б4)", () => {
   test("одна строка оценки на скан (К1): рейтинг и карточка — последний скан; рейтинг без CI/Security", () => {
     const repoId = seedRepo(iso, { org: "iso", repo: "dual", language: "Go", likes: 10 });
     const scan1 = seedScan(iso, repoId, { status: "ok" });
-    seedScore(iso, repoId, scan1, { total: 60, totalFull: 58 });
+    seedScore(iso, repoId, scan1, { total: 60 });
     // позже — скан участника с PAT: тот же репо, новая строка с двумя итогами
     const scan2 = seedScan(iso, repoId, { status: "ok", trigger: "user" });
-    seedScore(iso, repoId, scan2, { total: 70, totalFull: 95 });
+    seedScore(iso, repoId, scan2, { total: 70 });
     expect((iso.db.query("SELECT COUNT(*) AS c FROM scores WHERE scan_id = ?").get(scan2) as { c: number }).c).toBe(1);
     // рейтинг: total_rating последнего скана; категории каналов с правами не публикуются
     const rating = listRepos(iso.db, q());
@@ -418,8 +418,6 @@ describe("единая карточка: матрица доступа зрит�
     const scanId = seedScan(m, repoId, { trigger: "user", facts: [...facts, { key: "appsec.findings", source: "appsec:api", value: APPSEC }] });
     seedScore(m, repoId, scanId, {
       total: 61,
-      totalFull: 49,
-      coverageFull: 1,
       categories: {
         cicd: { score: 47, submetrics: { pass_rate: { score: 0.4, value: 0.5 } } },
         security: { score: 39, submetrics: { secrets: { score: 0, value: true } } },

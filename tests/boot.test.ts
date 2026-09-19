@@ -20,15 +20,53 @@ describe("boot", () => {
     expect(c.c).toBe(0);
   });
 
-  test("db: scores.total_rating/total_full допускают NULL (tri-state: нет данных ≠ плохо)", () => {
+  test("db: scores.healthcraft_index допускает NULL (tri-state: нет данных ≠ плохо); полного total в схеме нет", () => {
     db.exec("INSERT INTO repos (org_slug, repo_slug) VALUES ('org', 'repo')");
     db.exec("INSERT INTO scans (repo_id, started_at) VALUES (1, '2026-09-15')");
     db.exec(
-      "INSERT INTO scores (scan_id, model_version, repo_id, total_rating, coverage_rating, total_full, coverage_full, categories, no_data, stale, computed_at) VALUES (1, 'test', 1, NULL, 0, NULL, 0, '{}', '[]', '[]', '2026-09-15T00:00:00Z')",
+      "INSERT INTO scores (scan_id, model_version, repo_id, healthcraft_index, index_coverage, categories, no_data, stale, computed_at) VALUES (1, 'test', 1, NULL, 0, '{}', '[]', '[]', '2026-09-15T00:00:00Z')",
     );
-    const row = db.query("SELECT total_rating, total_full FROM scores WHERE scan_id = 1 AND model_version = 'test'").get() as { total_rating: number | null; total_full: number | null };
-    expect(row.total_rating).toBeNull();
-    expect(row.total_full).toBeNull();
+    const row = db.query("SELECT healthcraft_index FROM scores WHERE scan_id = 1 AND model_version = 'test'").get() as { healthcraft_index: number | null };
+    expect(row.healthcraft_index).toBeNull();
+    // В4.3 (К-Ф3.2): сохранённого полного итога в актуальной схеме нет
+    const cols = (db.query("PRAGMA table_info(scores)").all() as { name: string }[]).map((c) => c.name);
+    expect(cols).not.toContain("total_full");
+    expect(cols).not.toContain("coverage_full");
+  });
+
+  test("db: миграция 1.8 → 1.9 пересоздаёт scores без полного итога, не трогая факты (К-Ф3.2)", () => {
+    // БД формы 1.8: scores со старыми колонками и строкой, факты/скан/репо на месте
+    db.exec("INSERT INTO facts (scan_id, category, key, value, status, source, collected_at) VALUES (1, 'code', 'tree.stats', '{}', 'ok', 'git', '2026-09-15T00:00:00Z')");
+    db.exec("DROP TABLE scores");
+    db.exec(`CREATE TABLE scores (
+      scan_id INTEGER NOT NULL REFERENCES scans(id),
+      model_version TEXT NOT NULL,
+      repo_id INTEGER NOT NULL,
+      total_rating INTEGER,
+      coverage_rating REAL NOT NULL,
+      total_full INTEGER,
+      coverage_full REAL NOT NULL,
+      categories TEXT NOT NULL,
+      no_data TEXT NOT NULL,
+      stale TEXT NOT NULL,
+      computed_at TEXT NOT NULL,
+      derived TEXT,
+      code_empty INTEGER,
+      PRIMARY KEY (scan_id, model_version)
+    )`);
+    db.exec("INSERT INTO scores (scan_id, model_version, repo_id, total_rating, coverage_rating, total_full, coverage_full, categories, no_data, stale, computed_at) VALUES (1, '3.0.0-m4', 1, 60, 1, 55, 0.8, '{}', '[]', '[]', '2026-09-15T00:00:00Z')");
+    db.query("UPDATE meta SET value = '1.8' WHERE key = 'schema_version'").run();
+    const db2 = openDb(config);
+    const cols = (db2.query("PRAGMA table_info(scores)").all() as { name: string }[]).map((c) => c.name);
+    expect(cols).toContain("healthcraft_index");
+    expect(cols).not.toContain("total_rating");
+    expect(cols).not.toContain("total_full");
+    // производная таблица пересоздана пустой — старые totals не источник
+    expect((db2.query("SELECT COUNT(*) AS c FROM scores").get() as { c: number }).c).toBe(0);
+    // факты/сканы/репо не тронуты
+    expect((db2.query("SELECT COUNT(*) AS c FROM facts").get() as { c: number }).c).toBe(1);
+    expect((db2.query("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value: string }).value).toBe("1.9");
+    db2.close();
   });
 
   test("jobs: индекс незаклейменных работает", () => {

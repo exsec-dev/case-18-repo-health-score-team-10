@@ -247,8 +247,8 @@ describe("compute: здоровое репо (ручная арифметика)
     const s = compute(t.db, scanId, { now: NOW });
     writeScores(t.db, s);
     writeScores(t.db, s);
-    const rows1 = t.db.query("SELECT total_rating, total_full FROM scores WHERE scan_id = ?").all(scanId) as { total_rating: number; total_full: number }[];
-    expect(rows1).toEqual([{ total_rating: Math.round(s.healthcraftIndex!), total_full: Math.round(s.repoHealthScore!) }]);
+    const rows1 = t.db.query("SELECT healthcraft_index FROM scores WHERE scan_id = ?").all(scanId) as { healthcraft_index: number }[];
+    expect(rows1).toEqual([{ healthcraft_index: Math.round(s.healthcraftIndex!) }]); // полного итога в схеме нет (К-Ф3.3)
     writeScores(t.db, { ...s, modelVersion: "9.9.9-test" });
     const rows = t.db.query("SELECT model_version FROM scores WHERE scan_id = ? ORDER BY model_version").all(scanId) as { model_version: string }[];
     expect(rows.map((r) => r.model_version)).toEqual(["4.0.0-hci", "9.9.9-test"]);

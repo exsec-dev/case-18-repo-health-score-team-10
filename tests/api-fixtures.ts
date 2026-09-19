@@ -99,12 +99,9 @@ export function seedScan(t: ApiTestDb, repoId: number, spec: ScanSpec = {}): num
 }
 
 export interface ScoreSpec {
-  /** Score в рейтинге (total_rating) */
+  /** HealthCraft Index (healthcraft_index) */
   total: number | null;
   coverage?: number;
-  /** полный Score (total_full); дефолт = total */
-  totalFull?: number | null;
-  coverageFull?: number;
   categories?: Partial<Record<CategoryKey, unknown>>;
   noData?: string[];
   stale?: string[];
@@ -129,8 +126,8 @@ export function seedScore(t: ApiTestDb, repoId: number, scanId: number, spec: Sc
   t.db
     .query(
       `INSERT OR REPLACE INTO scores
-         (scan_id, model_version, repo_id, total_rating, coverage_rating, total_full, coverage_full, categories, no_data, stale, computed_at, derived)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (scan_id, model_version, repo_id, healthcraft_index, index_coverage, categories, no_data, stale, computed_at, derived)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       scanId,
@@ -138,8 +135,6 @@ export function seedScore(t: ApiTestDb, repoId: number, scanId: number, spec: Sc
       repoId,
       spec.total,
       spec.coverage ?? 1,
-      spec.totalFull === undefined ? spec.total : spec.totalFull,
-      spec.coverageFull ?? 0.8,
       JSON.stringify({ ...defaultCategories(), ...(spec.categories ?? {}) }),
       JSON.stringify(spec.noData ?? ["security: AppSec data unavailable (no AppSec access or no finished scan)"]),
       JSON.stringify(spec.stale ?? []),

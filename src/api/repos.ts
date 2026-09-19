@@ -192,14 +192,15 @@ export const LAST_NOT_BAD_SCAN_SQL = `(SELECT MAX(sc2.scan_id) FROM scores sc2 J
 /** Последний скан репо (L): статус и время последнего анализа (ТЗ §3.4). Алиас репо — r. */
 const LAST_SCAN_SQL = `(SELECT MAX(l2.id) FROM scans l2 WHERE l2.repo_id = r.id)`;
 
-// В4.1 (К1/К2) + В4.1-fix (К-Ф1.1, Ф1.11): одна строка на репозиторий —
-// последний пригодный скан; рейтинг читает total_rating / coverage_rating
-// (4 категории — CI и Security в рейтинг не входят); статус и время —
-// последнего скана L (круг 2, LOW-2: как карточка), статус — public_status;
-// только rating_active=1 AND visibility='public'. Проверок доступа нет.
+// В4.1 (К1/К2) + В4.1-fix (К-Ф1.1, Ф1.11) + В4.3 (Ф3.1/Ф3.2): одна строка на
+// репозиторий — последний пригодный скан; рейтинг сортируется по сохранённому
+// HealthCraft Index (healthcraft_index, 4 категории — CI и Security в рейтинг
+// не входят); статус и время — последнего скана L (круг 2, LOW-2: как
+// карточка), статус — public_status; только rating_active=1 AND
+// visibility='public'. Проверок доступа нет.
 const RATING_SQL = `
 SELECT r.org_slug, r.repo_slug, r.title, r.language, r.likes, r.forks, r.last_activity_at, r.logo_url, r.language_color,
-       sc.total_rating AS total, sc.coverage_rating AS coverage, sc.categories, sc.stale, sc.model_version,
+       sc.healthcraft_index AS total, sc.index_coverage AS coverage, sc.categories, sc.stale, sc.model_version,
        COALESCE(l.public_status, l.status) AS scan_status, l.started_at, l.finished_at
 FROM scores sc
 JOIN repos r ON r.id = sc.repo_id
@@ -512,10 +513,8 @@ interface RepoRow {
 interface ScoreRow {
   scan_id: number;
   model_version: string;
-  total_rating: number | null;
-  coverage_rating: number;
-  total_full: number | null;
-  coverage_full: number;
+  healthcraft_index: number | null;
+  index_coverage: number;
   categories: string;
   no_data: string;
   stale: string;
@@ -628,7 +627,7 @@ export function getRepoCard(
   //    чужой сбойный скан их не трогает;
   //  - полный Score и Δ канальных правил — на показе из показанных данных;
   //  - блок scan — последний скан (статус без каналов и время анализа).
-  const SCORE_COLS = `sc.scan_id, sc.model_version, sc.total_rating, sc.coverage_rating, sc.total_full, sc.coverage_full,
+  const SCORE_COLS = `sc.scan_id, sc.model_version, sc.healthcraft_index, sc.index_coverage,
               sc.categories, sc.no_data, sc.stale, sc.computed_at, sc.derived, sc.code_empty`;
   let publicRow = db
     .query(`SELECT ${SCORE_COLS} FROM scores sc WHERE sc.repo_id = ? AND sc.model_version = ? AND sc.scan_id = ${LAST_ELIGIBLE_SCAN_SQL}`)
@@ -727,8 +726,8 @@ export function getRepoCard(
     }
   }
   const score: CardScore = {
-    totalRating: publicRow.total_rating,
-    coverageRating: publicRow.coverage_rating,
+    totalRating: publicRow.healthcraft_index,
+    coverageRating: publicRow.index_coverage,
     // полный Score складывается из показанных категорий (тот же totalsFromCategories, что compute)
     totalFull: fullOpen ? roundTotal(fullTotals.repoHealthScore) : null,
     coverageFull: fullOpen ? Math.round(fullTotals.repoHealthCoverage * 1000) / 1000 : null,

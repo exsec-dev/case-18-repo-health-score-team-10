@@ -169,7 +169,7 @@ describe("чтение: последний пригодный (P) и после�
     cleanups.push(t.close);
     const repoId = seedRepo(t, { org: "pl", repo: "repo" });
     const p = seedScan(t, repoId, { status: "partial", publicStatus: "ok", facts: [{ key: "docs.presence", source: "git", value: { readme: true } }] });
-    seedScore(t, repoId, p, { total: 60, totalFull: 50, categories: CATS(50, 61) });
+    seedScore(t, repoId, p, { total: 60, categories: CATS(50, 61) });
     seedRecommendation(t, p, { ruleId: "license-missing", priority: 1, factRef: "docs.presence", deltaScore: 5.7692 });
     seedRecommendation(t, p, { ruleId: "fix-red-runs", priority: 2, factRef: "cicd.runs", channel: "cicd" });
     const l = seedScan(t, repoId, {
@@ -182,7 +182,7 @@ describe("чтение: последний пригодный (P) и после�
         { key: "cicd.runs", source: "rest:cicd", value: { runs_count: 3, success_rate: 1, last_status: "success", duration_p50: 10 } },
       ],
     });
-    seedScore(t, repoId, l, { total: 10, totalFull: 70, categories: CATS(90, 5) });
+    seedScore(t, repoId, l, { total: 10, categories: CATS(90, 5) });
     seedRecommendation(t, l, { ruleId: "readme-missing", priority: 1, factRef: "docs.presence" });
     seedRecommendation(t, l, { ruleId: "speed-up-pipeline", priority: 2, factRef: "cicd.runs", channel: "cicd" });
     // незавершённый скан после них: блок scan показывает его

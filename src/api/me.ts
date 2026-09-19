@@ -58,7 +58,7 @@ function ratingScoreOf(db: Database, org: string, repo: string): { score: number
   const scoreOf = (pick: string) =>
     db
       .query(
-        `SELECT sc.total_rating AS total FROM scores sc
+        `SELECT sc.healthcraft_index AS total FROM scores sc
          JOIN repos r ON r.id = sc.repo_id
          WHERE r.org_slug = ? AND r.repo_slug = ? AND sc.model_version = ? AND sc.scan_id = ${pick}`,
       )

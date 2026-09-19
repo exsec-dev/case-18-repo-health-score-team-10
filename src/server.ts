@@ -218,7 +218,7 @@ const server = Bun.serve({
       const sched = schedulerHealthSnapshot();
       const nightly = sched.lastNightly;
       const fresh = db
-        .query("SELECT MAX(s.finished_at) AS f FROM scans s JOIN scores sc ON sc.scan_id = s.id WHERE s.finished_at IS NOT NULL AND sc.total_rating IS NOT NULL")
+        .query("SELECT MAX(s.finished_at) AS f FROM scans s JOIN scores sc ON sc.scan_id = s.id WHERE s.finished_at IS NOT NULL AND sc.healthcraft_index IS NOT NULL")
         .get() as { f: string | null };
       return Response.json({
         ok: true,

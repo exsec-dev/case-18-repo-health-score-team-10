@@ -258,10 +258,10 @@ describe("В2/Б5: score-hook — конец скана пишет scores/recomm
     expect(res.score).not.toBeNull();
     expect(res.score!.healthcraftIndex).not.toBeNull();
     // В4.1 (К1): одна строка оценки на скан с двумя итогами
-    const rows = db.query("SELECT total_rating, total_full, model_version FROM scores WHERE scan_id = ?").all(res.scanId) as { total_rating: number; total_full: number; model_version: string }[];
+    const rows = db.query("SELECT healthcraft_index, model_version FROM scores WHERE scan_id = ?").all(res.scanId) as { healthcraft_index: number; model_version: string }[];
     expect(rows).toHaveLength(1);
     expect(rows[0]!.model_version).toBe("4.0.0-hci");
-    expect(rows[0]!.total_rating).toBe(Math.round(res.score!.healthcraftIndex!)); // B1: колонки схемы 1.8 ещё старые (Б2 поднимет до 1.9)
+    expect(rows[0]!.healthcraft_index).toBe(Math.round(res.score!.healthcraftIndex!));
     expect(res.score!.repoHealthScore).not.toBeNull(); // полный итог — дериватив: живёт в результате хука, в актуальной схеме не хранится (К-Ф3.3)
     const recs = db.query("SELECT rule_id FROM recommendations WHERE scan_id = ? ORDER BY priority").all(res.scanId) as { rule_id: string }[];
     expect(recs.map((r) => r.rule_id)).toContain("start-tracker");

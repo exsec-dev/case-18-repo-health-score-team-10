@@ -34,6 +34,8 @@
 // Схема v1.7 (В4.2-port-fix, П8): портовые объекты — favorites и jobs.error —
 // получили свою версию схемы (порты меняли схему под версией 1.6), а
 // setMetaValue(schema_version) переехал ПОСЛЕ всех DDL и ensureColumn.
+// Схема v1.9 (В4.3): scores — производная таблица публичного индекса
+// (healthcraft_index/index_coverage); полный итог не хранится.
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -48,17 +50,22 @@ import { publicStatusSql, ratingEligibleSql } from "./score/compute";
  * кода» к портовой миграции был слеп.
  * 1.8 (В4.2a): `scans.status_detail` (Ф2.2 — причина закрытия осиротевшего
  * скана) и пересборка индексов `jobs` в транзакции (Ф2.11).
+ * 1.9 (В4.3, Ф3.2/Ф3.3): `scores` хранит ТОЛЬКО публичный показатель —
+ * `healthcraft_index`/`index_coverage` (HealthCraft Index, 4 категории);
+ * сохранённого полного итога (total_full/coverage_full) и JSON markers нет —
+ * полный Repo Health Score — дериватив показанных категорий, считается на
+ * чтении. Таблица производная: миграция пересоздаёт её пустой, строки
+ * восстанавливает rescoreAll из facts; старые totals не копируются как
+ * источник.
  */
-export const SCHEMA_VERSION = "1.8";
+export const SCHEMA_VERSION = "1.9";
 
 const SCORES_DDL = `CREATE TABLE IF NOT EXISTS scores (
   scan_id INTEGER NOT NULL REFERENCES scans(id),
   model_version TEXT NOT NULL,
   repo_id INTEGER NOT NULL,
-  total_rating INTEGER,           -- Score в рейтинге (4 категории); NULL = нет данных (tri-state)
-  coverage_rating REAL NOT NULL,
-  total_full INTEGER,             -- полный Score (6 категорий, кап 49); NULL = нет данных
-  coverage_full REAL NOT NULL,
+  healthcraft_index INTEGER,      -- HealthCraft Index (4 категории); NULL = нет данных (tri-state)
+  index_coverage REAL NOT NULL,
   categories TEXT NOT NULL,       -- JSON: все 6 категорий → {score|NULL, submetrics, stale}
   no_data TEXT NOT NULL,          -- JSON: список no-data причин
   stale TEXT NOT NULL,            -- JSON: список stale-фактов (bad-channel, §5.6)
@@ -232,8 +239,12 @@ export function openDb(config: Config): Database {
   ensureColumn(db, "repos", "forks", "INTEGER");
   ensureColumn(db, "repos", "reaction_counts", "TEXT");
   // старые формы производных таблиц пересоздаются: v1.1 scores был
-  // PK(scan_id) + formula_version; v1.1 recommendations — без model_version
-  if (!columnsOf(db, "scores").has("model_version")) {
+  // PK(scan_id) + formula_version; v1.1 recommendations — без model_version.
+  // v1.9 (В4.3, Ф3.2): scores без healthcraft_index (включая формы с
+  // сохранённым total_rating/total_full вплоть до 1.8) пересоздаётся —
+  // производная таблица, строки восстанавливает rescoreAll из facts;
+  // старые totals источником не служат (полный итог — дериватив показа).
+  if (!columnsOf(db, "scores").has("healthcraft_index")) {
     db.exec("DROP TABLE IF EXISTS scores");
     db.exec(SCORES_DDL);
   }
@@ -244,14 +255,11 @@ export function openDb(config: Config): Database {
   // v1.2 → v1.3: derived-метрики строки скоров (NULL у строк старых
   // прогонов — пересчёт scripts/score.ts заполняет последний скан)
   ensureColumn(db, "scores", "derived", "TEXT");
-  // v1.4 → v1.5 (В4.1): scores с двумя итогами, recommendations с каналом —
-  // производные таблицы пересоздаются (данные восстанавливает rescore-m4.ts)
-  if (!columnsOf(db, "scores").has("total_rating") || !columnsOf(db, "recommendations").has("channel")) {
-    db.exec("DROP TABLE IF EXISTS scores");
+  // v1.4 → v1.5 (В4.1): recommendations с каналом — производная таблица,
+  // пересоздаётся (данные восстанавливает rescore-m4.ts)
+  if (!columnsOf(db, "recommendations").has("channel")) {
     db.exec("DROP TABLE IF EXISTS recommendations");
-    db.exec(SCORES_DDL);
     db.exec(RECOMMENDATIONS_DDL);
-    db.exec("CREATE INDEX IF NOT EXISTS idx_scores_repo ON scores(repo_id, model_version)");
   }
   ensureColumn(db, "scans", "user_id", "INTEGER");
   // В4.1-fix (К-Ф1.1): пригодность — тем же правилом, что скор-хук, одним UPDATE

@@ -666,25 +666,23 @@ const roundTotal = (x: number | null): number | null => (x === null ? null : Mat
 const roundCoverage = (x: number): number => Math.round(x * 1000) / 1000;
 
 /**
- * В4.3 (Б1, переходный шаг): полное имя колонок прежнее — схема 1.8 ещё
- * живёт; Б2 поднимает схему до 1.9 (healthcraft_index/index_coverage без
- * полного итога) и эта вставка переезжает на новые колонки. Отдельного
- * хранимого полного total в актуальной схеме не будет (К-Ф3.3).
+ * В4.3 (Ф3.2/Ф3.3): строка scores хранит ТОЛЬКО публичный показатель —
+ * healthcraft_index/index_coverage. Полный Repo Health Score — дериватив
+ * показанных категорий (карточка считает totalsFromCategories на чтении),
+ * отдельным total не хранится нигде.
  */
 export function writeScores(db: Database, s: Scores): void {
   db.query(
     `INSERT OR REPLACE INTO scores
-       (scan_id, model_version, repo_id, total_rating, coverage_rating, total_full, coverage_full,
+       (scan_id, model_version, repo_id, healthcraft_index, index_coverage,
         categories, no_data, stale, computed_at, derived, code_empty)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     s.scanId,
     s.modelVersion,
     s.repoId,
     roundTotal(s.healthcraftIndex),
     roundCoverage(s.indexCoverage),
-    roundTotal(s.repoHealthScore),
-    roundCoverage(s.repoHealthCoverage),
     JSON.stringify(s.categories),
     JSON.stringify(s.noData),
     JSON.stringify(s.stale),

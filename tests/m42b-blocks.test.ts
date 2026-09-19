@@ -269,7 +269,7 @@ describe("Б3 (Ф2.9): маркер codeEmpty виден на карточке �
     try {
       const repoId = seedRepo(t, { org: "m42b", repo: "empty" });
       const scanId = seedScan(t, repoId, { facts: cardFacts() });
-      seedScore(t, repoId, scanId, { total: 0, totalFull: 0 });
+      seedScore(t, repoId, scanId, { total: 0 });
       t.db.query("UPDATE scores SET code_empty = 1 WHERE scan_id = ?").run(scanId);
       const card = getRepoCard(t.db, "m42b", "empty", {});
       expect(card?.markers.codeEmpty).toBe(true);

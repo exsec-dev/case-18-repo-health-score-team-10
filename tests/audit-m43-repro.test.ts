@@ -115,7 +115,8 @@ describe("Ф3.1/Ф3.5: публичное число зовётся HealthCraft 
 // ---------------------------------------------------------------------------
 
 describe("Ф3.2/Ф3.3: в scores нет сохранённого полного итога", () => {
-  repro("PRAGMA table_info(scores): есть healthcraft_index, нет total_rating/total_full/coverage_full/markers", () => {
+  // закрыто блоком Б2 — обёртка `repro` снята, утверждение не менялось
+  test("PRAGMA table_info(scores): есть healthcraft_index, нет total_rating/total_full/coverage_full/markers", () => {
     const t = tempDb();
     const cols = ((t.db.query("PRAGMA table_info(scores)").all() as { name: string }[]).map((c) => c.name));
     expect(cols).toContain("healthcraft_index");
