@@ -206,7 +206,8 @@ describe("A-2 (Б1): курсор рескора в meta переживает р
 // ---------------------------------------------------------------------------
 
 describe("D (Б2): успешно пустой каталог не эвицит и ставит suspicious", () => {
-  repro("полный обход с entries=0: без эвикции, флаг стоит; обход с записями снимает", async () => {
+  // закрыто блоком Б2 — обёртка `repro` снята, утверждение не менялось
+  test("полный обход с entries=0: без эвикции, флаг стоит; обход с записями снимает", async () => {
     const dir = tempDir("rh-v44-d-");
     const db = openDb({ ...loadConfig(), dataDir: dir });
     const t: ApiTestDb = { db, close: () => db.close() };
@@ -243,7 +244,8 @@ describe("D (Б2): успешно пустой каталог не эвицит 
 // ---------------------------------------------------------------------------
 
 describe("B (Б2): health ok:false с reasons при провале ночной фазы", () => {
-  repro("sched_last_nightly_ok=0 → ok:false, reasons непусты", async () => {
+  // закрыто блоком Б2 — обёртка `repro` снята, утверждение не менялось
+  test("sched_last_nightly_ok=0 → ok:false, reasons непусты", async () => {
     const dir = tempDir("rh-v44-b-");
     const mock = startMockApi();
     const db = openDb({ ...loadConfig(), dataDir: dir });

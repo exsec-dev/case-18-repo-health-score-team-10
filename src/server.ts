@@ -8,6 +8,7 @@
 import { loadConfig } from "./config";
 import { openDb } from "./db";
 import { getMeta, getRepoCardForViewer, listRepos, parseReposQuery } from "./api/repos";
+import { getHealth } from "./api/health";
 import { makeAccessCache, resolveAccess, type AccessRepo, type AccessResult } from "./auth/access";
 import { makeAppsecClient } from "./collectors/appsec";
 import {
@@ -26,7 +27,7 @@ import {
   type PatSeed,
 } from "./api/me";
 import { renderRepoReport } from "./report/markdown";
-import { catalogClientBudget, enqueueScan, maintenanceTick, schedulerHealthSnapshot, startScheduler, startWorkerLoop } from "./jobs/scheduler";
+import { catalogClientBudget, maintenanceTick, startScheduler, startWorkerLoop } from "./jobs/scheduler";
 import {
   clearOAuthStateCookieHeader,
   clearSessionCookieHeader,
@@ -46,7 +47,7 @@ import {
 import { deletePat, getPat, patMeta, patReadable, storePat } from "./auth/pat";
 import { buildAuthUrl, exchangeCode, yaAvatarUrl, type YaEndpoints } from "./auth/ya";
 import { makeScClient } from "./collectors/http";
-import { needsRescore, rescoreState, runStartupRescore } from "./score/rescore";
+import { needsRescore, runStartupRescore } from "./score/rescore";
 import index from "./web/index.html";
 
 const config = loadConfig();
@@ -199,37 +200,10 @@ const server = Bun.serve({
   port: config.port,
   routes: {
     "/api/health": () => {
-      // ПОРТ hq-parallel (S3): health не врёт зелёным на мёртвой периодике —
-      // очередь, провалы за 24ч, последний обход, свежесть данных
-      const n = (db.query("SELECT COUNT(*) AS c FROM repos").get() as { c: number }).c;
-      const queue = {
-        user: (db.query("SELECT COUNT(*) AS c FROM jobs WHERE status IN ('queued','running') AND trigger_kind = 'user'").get() as { c: number }).c,
-        rating: (db.query("SELECT COUNT(*) AS c FROM jobs WHERE status IN ('queued','running') AND trigger_kind != 'user'").get() as { c: number }).c,
-      };
-      const failed24h = (db.query("SELECT COUNT(*) AS c FROM jobs WHERE status = 'failed' AND created_at > ?").get(new Date(Date.now() - 24 * 60 * 60_000).toISOString()) as { c: number }).c;
-      const sched = schedulerHealthSnapshot();
-      const nightly = sched.lastNightly;
-      const fresh = db
-        .query("SELECT MAX(s.finished_at) AS f FROM scans s JOIN scores sc ON sc.scan_id = s.id WHERE s.finished_at IS NOT NULL AND sc.healthcraft_index IS NOT NULL")
-        .get() as { f: string | null };
-      return Response.json({
-        ok: true,
-        repos: n,
-        llmProvider: config.llm.provider,
-        queue,
-        failedJobs24h: failed24h,
-        // В4.4 (кластер A): прогресс асинхронного стартового рескора — из meta,
-        // кросс-процессно: web-роль видит проход, который ведёт rating-роль
-        rescore: rescoreState(db),
-        // К-Р5: два РАЗНЫХ факта — «последний обход» и «последний обход с
-        // исполнившейся ночной фазой»; lastNightly обновляет только второй
-        // (часовая сверка его не трогает), lastReconcileAt/lastNightlyAt —
-        // метки успеха своих фаз
-        lastNightly: nightly ? { ok: nightly.ok, error: nightly.ok ? undefined : nightly.error, pages: nightly.ok ? nightly.pages : 0, catalogComplete: nightly.ok ? nightly.catalogComplete : false } : null,
-        lastReconcileAt: sched.lastReconcileAt,
-        lastNightlyAt: sched.lastNightlyAt,
-        freshAsOf: fresh.f,
-      });
+      // В4.4 (кластер B): ok — вычисляемое (pending-рескор, подозрительно
+      // пустой каталог, провал ночной фазы); тело — честный статус, HTTP-200
+      // остаётся (здоровье читают по телу, порт-гарды ждут статус)
+      return Response.json(getHealth(db, config));
     },
     "/api/meta": () => Response.json(getMeta(db, { leaseMs: config.scheduler.leaseMs })),
     "/api/repos": (req) => {

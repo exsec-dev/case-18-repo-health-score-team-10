@@ -27,6 +27,8 @@ import { getPat } from "../auth/pat";
 import { makeScClient } from "../collectors/http";
 import { makeAppsecClient } from "../collectors/appsec";
 import type { Config } from "../config";
+import { getMetaValue, setMetaValue } from "../db";
+import { CATALOG_SUSPICIOUS_AT, SCHED_META } from "../api/health";
 import { needsRescore, rescoreBatchByCursor, rescoreHistoryBatch } from "../score/rescore";
 
 export interface ClaimedJob {
@@ -318,6 +320,8 @@ export interface NightlyResult {
   catalogComplete: boolean;
   /** какие фазы реально исполнились на этом snapshot (Ф2.5) */
   phases: CatalogPhases;
+  /** В4.4 (кластер D): обход поднял catalog_suspicious_at (эвикция приостановлена) */
+  suspicious: boolean;
   error?: string;
 }
 
@@ -425,6 +429,7 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
       returned: [],
       catalogComplete: false,
       phases: { reconcile: false, nightly: false },
+      suspicious: false,
       error: catalog.error?.detail ?? "catalog failed",
     };
   }
@@ -514,9 +519,30 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
     }
   }
 
-  // эвикция: фаза сверки, только полным каталогом и только public-строки
+  // В4.4 (кластер D код-аудита): «успешно пустой» ПОЛНЫЙ обход (ok, не
+  // truncated, 0 записей) при существующих активных публичных репо — это
+  // сломавшаяся форма каталога (дрейф поля visibility и т.п.), а не «все
+  // исчезли»: один такой тик раньше гасил rating_active всему рейтингу.
+  // Эвикция не исполняется, ставится meta-флаг catalog_suspicious_at
+  // (health окрасится); снимает флаг первый обход с записями.
+  let suspicious = false;
+  if (catalog.entries.length > 0) {
+    if (getMetaValue(db, CATALOG_SUSPICIOUS_AT) !== null) db.query("DELETE FROM meta WHERE key = ?").run(CATALOG_SUSPICIOUS_AT);
+  } else if (catalog.ok && !catalog.truncated) {
+    const activePublic = db.query("SELECT 1 FROM repos WHERE rating_active = 1 AND visibility = 'public' LIMIT 1").get();
+    if (activePublic !== null) {
+      suspicious = true;
+      setMetaValue(db, CATALOG_SUSPICIOUS_AT, now.toISOString());
+      console.error(
+        "[scheduler] catalog walk returned ZERO public entries while active public repos exist — eviction suspended, catalog_suspicious_at set",
+      );
+    }
+  }
+
+  // эвикция: фаза сверки, только полным каталогом и только public-строки;
+  // подозрительно пустой снимок эвицировать не имеет права (гард выше)
   const evicted: string[] = [];
-  if (phases.reconcile && !catalog.truncated) {
+  if (phases.reconcile && !catalog.truncated && !suspicious) {
     const candidates = db
       .query("SELECT id, org_slug, repo_slug FROM repos WHERE rating_active = 1 AND visibility = 'public'")
       .all() as { id: number; org_slug: string; repo_slug: string }[];
@@ -540,6 +566,8 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
     returned,
     catalogComplete: !catalog.truncated,
     phases,
+    /** В4.4 (кластер D): этот обход поднял catalog_suspicious_at */
+    suspicious,
     ...(catalog.ok ? {} : { error: catalog.error?.detail ?? "catalog failed" }),
   };
 }
@@ -939,8 +967,19 @@ export async function catalogTick(
       phases: { reconcile: true, nightly: nightlyDue },
     });
     // К-Р5: ночной факт health — только обходы, в которых ночная фаза
-    // участвовала; часовая сверка его не обновляет
-    if (nightlyDue) schedulerStateRef.lastNightly = result;
+    // участвовала; часовая сверка его не обновляет. В4.4 (кластер B): тот же
+    // факт дублируется в meta — кросс-процессно (web-роль читает состоянием
+    // планировщика, которого в её процессе нет)
+    if (nightlyDue) {
+      schedulerStateRef.lastNightly = result;
+      setMetaValue(db, SCHED_META.nightlyAt, now.toISOString());
+      setMetaValue(db, SCHED_META.nightlyOk, result.ok ? "1" : "0");
+      if (result.ok) {
+        db.query("DELETE FROM meta WHERE key = ?").run(SCHED_META.nightlyError);
+      } else {
+        setMetaValue(db, SCHED_META.nightlyError, (result.error ?? "catalog walk failed").slice(0, 200));
+      }
+    }
     if (!result.ok) {
       console.error(`[scheduler] catalog walk failed: ${result.error ?? "unknown"}`);
       return result;
@@ -948,6 +987,7 @@ export async function catalogTick(
     if (result.catalogComplete) {
       state.lastReconcileAt = now;
       schedulerStateRef.lastReconcileAt = now.toISOString();
+      setMetaValue(db, SCHED_META.reconcileAt, now.toISOString());
     }
     // К-Р3: ночная метка — по исполнению фазы (обход ok), НЕ по полноте
     // каталога; метка сверки выше — по-прежнему только по дочитанному
