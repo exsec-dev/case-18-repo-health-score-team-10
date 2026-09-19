@@ -391,7 +391,8 @@ describe("В4.6-9 (У27–У32): консистентность вне каби�
 // ---------------------------------------------------------------------------
 
 describe("В4.6-10 (У18): слоты под В5 заложены честными состояниями", () => {
-  repro("слоты AI-summary, истории Score и badge видны с состоянием «пока нет данных»", () => {
+  // ЗАКРЫТО блоком Б8 (слоты под В5).
+  test("слоты AI-summary, истории Score и badge видны с состоянием «пока нет данных»", () => {
     const src = srcOf("RepoPage.tsx");
     expect({ ai: src.includes("aiSummary"), history: src.includes("scoreHistory"), badge: src.includes("badge") }).toEqual({
       ai: true,
@@ -400,13 +401,15 @@ describe("В4.6-10 (У18): слоты под В5 заложены честным
     });
   });
 
-  repro("контракты полей слотов совпадают со спекой В5 по именам", async () => {
+  // ЗАКРЫТО блоком Б8 (слоты под В5).
+  test("контракты полей слотов совпадают со спекой В5 по именам", async () => {
     const mod = await importLater("../src/web/slots");
     const contracts = mod.SLOT_CONTRACTS as Record<string, readonly string[]> | undefined;
     expect(Object.keys(contracts ?? {}).sort()).toEqual(["aiSummary", "badge", "compare", "scoreHistory"]);
   });
 
-  repro("сравнение: контракт и пустое состояние есть, маршрута и пункта rail нет", async () => {
+  // ЗАКРЫТО блоком Б8 (слоты под В5).
+  test("сравнение: контракт и пустое состояние есть, маршрута и пункта rail нет", async () => {
     const mod = await importLater("../src/web/slots");
     const contracts = mod.SLOT_CONTRACTS as Record<string, readonly string[]> | undefined;
     const shell = srcOf("Shell.tsx");

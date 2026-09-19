@@ -65,6 +65,7 @@ import {
 } from "./format";
 import { linkProps, navigate, useQueryParam } from "./router";
 import { Page, type Crumb } from "./Shell";
+import { SLOT_EMPTY } from "./slots";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows } from "./ui";
 
 type Card = RepoCard;
@@ -206,6 +207,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
         <Flex direction="column" gap={4}>
           <Markers card={card} />
           <CardTabs card={card} meta={meta} />
+          <CardSlots />
         </Flex>
       )}
     </Page>
@@ -396,6 +398,41 @@ function CardTabs({ card, meta }: { card: Card; meta: MetaResponse | null }) {
         </TabPanel>
       </div>
     </TabProvider>
+  );
+}
+
+/**
+ * Слоты под В5 (В4.6, У18). Стоят ПОСЛЕ табов сознательно: выше они отобрали бы
+ * высоту у величины и шести категорий, а приёмка вехи требует видеть их в одном
+ * экране на 1366x768. Ни одной кнопки внутри: место и честное состояние — да,
+ * мёртвых действий — нет (критерий ТЗ 13.4). Контракты полей и формулировки —
+ * `src/web/slots.ts`, имена берутся из спеки В5.
+ *
+ * Сравнение (К5.15) здесь НЕ монтируется: у него нет ни маршрута, ни пункта
+ * rail до того, как В5 принесёт работающий сценарий — решение владельца 20.09.
+ * Его контракт и пустое состояние живут в `slots.ts` и ждут там.
+ */
+function CardSlots() {
+  return (
+    <Flex gap={3} wrap role="region" aria-label="Готовится">
+      {(["aiSummary", "scoreHistory", "badge"] as const).map((slot) => (
+        <Card key={slot} view="outlined" className="rh-slot">
+          <Flex direction="column" gap={1}>
+            <Flex gap={2} alignItems="center">
+              <Text variant="subheader-2" as="h2">
+                {SLOT_EMPTY[slot].title}
+              </Text>
+              <Label theme="unknown" size="xs">
+                готовится
+              </Label>
+            </Flex>
+            <Text variant="body-2" color="complementary">
+              {SLOT_EMPTY[slot].text}
+            </Text>
+          </Flex>
+        </Card>
+      ))}
+    </Flex>
   );
 }
 
