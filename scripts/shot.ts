@@ -7,11 +7,31 @@
 //   SHOT_MODE=production bun scripts/shot.ts [org/repo]
 //   SHOT_MODE=development bun scripts/shot.ts [org/repo]
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 type ShotMode = "development" | "production";
+
+/**
+ * DATA_DIR харнесса: без явной переменной — КОПИЯ живой базы во
+ * временном каталоге, оригинал не открывается (урок 19.09: прежний
+ * дефолт "data" дал стартовому серверу мигрировать живую БД мимо
+ * гейта HQ — ERROR_LOG). Явный DATA_DIR — доверяем как есть.
+ */
+function harnessDataDir(): string {
+  const explicit = process.env.DATA_DIR;
+  if (explicit) return explicit;
+  const dir = mkdtempSync(join(tmpdir(), "rh-shot-data-"));
+  const live = join("data", "repo-health.db");
+  if (existsSync(live)) {
+    copyFileSync(live, join(dir, "repo-health.db"));
+    console.log(`[shot] DATA_DIR не задан: работаю с КОПИЕЙ живой базы (${dir}) — оригинал не трогается`);
+  } else {
+    console.log(`[shot] DATA_DIR не задан: чистый временный каталог ${dir}`);
+  }
+  return dir;
+}
 
 const SLUG = process.argv[2] ?? "bayselonarrend/openintegrations";
 const SERVER_PORT = Number(process.env.SHOT_PORT ?? 8519);
@@ -59,7 +79,7 @@ async function run(): Promise<void> {
     env: {
       ...process.env,
       PORT: String(SERVER_PORT),
-      DATA_DIR: process.env.DATA_DIR ?? "data",
+      DATA_DIR: harnessDataDir(),
       NODE_ENV: MODE,
       // Приёмка UI не имеет права случайно запустить живой обход каталога.
       SCHEDULER_START_DELAY_MS: "86400000",
