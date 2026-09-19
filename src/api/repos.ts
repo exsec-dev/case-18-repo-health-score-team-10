@@ -94,7 +94,13 @@ export interface ReposQuery {
 
 const SORT_KEYS: SortKey[] = ["index", "likes", "activity", "coverage", "name"];
 
-export const DEFAULT_QUERY: ReposQuery = { sort: "index", order: "desc", page: 1, perPage: 25 };
+/**
+ * В4.6 (У21, решение владельца 20.09): страница 20, а не 25. После
+ * уплотнения строки до 46px при 1440 видно 17 строк — страница из 20
+ * обозрима почти целиком, и пагинация перестаёт обещать то, чего не видно
+ * (при 25 видно было 14 из 25). Список опций в UI обязан содержать 20.
+ */
+export const DEFAULT_QUERY: ReposQuery = { sort: "index", order: "desc", page: 1, perPage: 20 };
 
 export type ParseResult = { ok: true; query: ReposQuery } | { ok: false; message: string };
 

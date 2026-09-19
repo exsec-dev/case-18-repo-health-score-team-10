@@ -435,6 +435,17 @@ button.rh-category:focus-visible {
   text-align: right;
 }
 
+/* В4.6 (У21): фиксированный слот числа индекса в рейтинге. 32px и
+ * tabular-nums — чтобы левая кромка полосы стояла на одной вертикали при
+ * двузначных и трёхзначных значениях: иначе полосы в колонке перестают
+ * сравниваться между строками. Ни цвета, ни радиуса, ни тени здесь нет —
+ * класс остаётся в рамках правила 3а docs/ui/gravity-uikit.md. */
+.rh-score-cell__num {
+  min-width: 32px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
 .rh-subrows {
   display: flex;
   flex-direction: column;

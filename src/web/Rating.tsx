@@ -32,7 +32,7 @@ import { CATEGORY_TITLES_RU, NO_DATA_SHORT, NO_SCORE, fmtCoverage, fmtDate, fmtN
 import { useMediaQuery } from "./prefs";
 import { linkProps, navigate, repoHref } from "./router";
 import { Page } from "./Shell";
-import { AsideSection, EmptyState, LanguageName, PageHeader, RepoAvatar, ScoreLegend, SkeletonRows } from "./ui";
+import { AsideSection, EmptyState, LanguageDot, LanguageName, PageHeader, RepoAvatar, ScoreLegend, SkeletonRows } from "./ui";
 
 type Item = RatingResponse["items"][number];
 
@@ -56,7 +56,7 @@ const SORT_OPTIONS = [
 const NOT_IN_RATING = new Set(["cicd", "security"]);
 
 /** Лайки — сортировкой и в настройке колонок, но не в виде по умолчанию: рейтинг не про популярность. */
-const HIDDEN_BY_DEFAULT = ["likes", "forks", "activity", "scanned"];
+const HIDDEN_BY_DEFAULT = ["lang", "likes", "forks", "activity", "scanned"];
 
 export function Rating({ search, meta }: { search: string; meta: MetaResponse | null }) {
   const params = useMemo(() => new URLSearchParams(search), [search]);
@@ -211,7 +211,8 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
             page={data.page}
             pageSize={data.perPage}
             total={data.total}
-            pageSizeOptions={isPhone ? undefined : [10, 25, 50, 100]}
+            // В4.6 (У21): дефолт стал 20 — без опции 20 к нему было бы не вернуться
+            pageSizeOptions={isPhone ? undefined : [10, 20, 50, 100]}
             onUpdate={(page, pageSize) => setParams({ page: String(page), per_page: String(pageSize) }, { keepPage: true })}
           />
         ) : undefined
@@ -402,20 +403,34 @@ function PhoneList({ items, rankOffset }: { items: Item[]; rankOffset: number })
   );
 }
 
+/**
+ * Строка репозитория В ОДНУ ЛИНИЮ (В4.6, З9 систематика — входит в Б3
+ * решением владельца 20.09).
+ *
+ * Причина именно здесь: высоту строки рейтинга задавала НЕ ячейка индекса
+ * (28px содержимого), а эта двухстрочная ячейка — 18px слага плюс 16px
+ * названия языка = 34px, и 56px строки целиком её работа (замер раунда
+ * 20.09). Разворот индекса в строку сам по себе не вернул бы ни одного
+ * пикселя. Здесь слаг и точка языка встают на одну линию, аватар берёт
+ * `xs`, и содержимое становится 24px → строка 46px, то есть при 1440
+ * видно 17 строк вместо 14. Название языка не теряется: оно живёт в `title`
+ * точки и в колонке «Язык», выключенной по умолчанию (её включает
+ * `TableColumnSetup`) — там же, где лайки и форки.
+ *
+ * `size="xs"` (24px), а не `s`: в Gravity 7.49.0 `s` — это 28px, и с ним
+ * строка встала бы на 50px, то есть проверяемое следствие блока (46px и 17
+ * строк) не выполнилось бы.
+ */
 function RepoCell({ item }: { item: Item }) {
   return (
-    <Flex gap={3} alignItems="center" style={{ minWidth: 180, maxWidth: 264 }}>
-      <RepoAvatar repo={item.repo} logoUrl={item.logoUrl} size="m" />
-      <Flex direction="column" gap={0} style={{ minWidth: 0 }}>
-        <Link {...linkProps(repoHref(item.org, item.repo))} view="primary" title={`${item.org}/${item.repo}`}>
-          <Text variant="subheader-1" ellipsis style={{ display: "block" }}>
-            {item.org} / {item.repo}
-          </Text>
-        </Link>
-        <Text variant="body-short" color="secondary" ellipsis>
-          <LanguageName name={item.language} color={item.languageColor} />
+    <Flex gap={2} alignItems="center" style={{ minWidth: 180, maxWidth: 300 }}>
+      <RepoAvatar repo={item.repo} logoUrl={item.logoUrl} size="xs" />
+      <LanguageDot name={item.language} color={item.languageColor} />
+      <Link {...linkProps(repoHref(item.org, item.repo))} view="primary" title={`${item.org}/${item.repo}`}>
+        <Text variant="subheader-1" ellipsis style={{ display: "block" }}>
+          {item.org} / {item.repo}
         </Text>
-      </Flex>
+      </Link>
     </Flex>
   );
 }
@@ -440,6 +455,8 @@ function buildColumns(categories: MetaResponse["categories"], rankOffset: number
     { id: "repo", name: "Репозиторий", primary: true, sticky: "start", template: (item: Item) => <RepoCell item={item} /> },
     { id: "index", name: "HealthCraft Index", align: "end", width: 96, template: (item: Item) => <ScoreCell item={item} /> },
     ...categoryColumns,
+    // В4.6 (З9): название языка ушло из строки — остаётся доступным колонкой
+    { id: "lang", name: "Язык", template: (item: Item) => <LanguageName name={item.language} color={item.languageColor} /> },
     { id: "likes", name: "Лайки", align: "end", template: (item: Item) => fmtNumber(item.likes) },
     { id: "forks", name: "Форки", align: "end", template: (item: Item) => fmtNumber(item.forks) },
     // не «Активность»: так называется категория Score, а это дата из каталога
@@ -469,6 +486,25 @@ function buildColumns(categories: MetaResponse["categories"], rankOffset: number
   ];
 }
 
+/**
+ * Колонка HealthCraft Index (В4.6, У21 — замечание владельца 2): полоса и
+ * число стоят В СТРОКУ, число справа.
+ *
+ * Измерено дизайн-раундом 20.09, а не выбрано на глаз: прежняя вертикаль
+ * давала полосу 64x4px — 0,64px на балл, то есть разница 83 и 80 занимала
+ * 1,9px и была невидима. Теперь 80x10px (`size="s"` — тот же вид, что у
+ * полос категорий на карточке: одна сущность, один вид на двух экранах), а
+ * читаемость полоса получает не длиной, а цветом: после палитрового паса
+ * контраст заливки к дорожке вырос с 1,95:1 до 4,40:1.
+ *
+ * 80 + 8 + 32 = 120px укладывается в уже занятые колонкой ~126px, поэтому
+ * ширина колонки не меняется и горизонтальная прокрутка не появляется.
+ * Число — `subheader-3` 17/24 вместо `subheader-2` 15/20: шаг к соседям
+ * (13px) становится 1,31 вместо 1,15, то есть попадает в вилку 1,2–1,33.
+ * Слот числа ФИКСИРОВАН на 32px и набран `tabular-nums` — иначе при
+ * двузначных и трёхзначных значениях левая кромка полосы гуляет по колонке
+ * и полосы перестают сравниваться между строками.
+ */
 function ScoreCell({ item }: { item: Item }) {
   if (item.healthcraftIndex === null) {
     return (
@@ -478,18 +514,19 @@ function ScoreCell({ item }: { item: Item }) {
     );
   }
   return (
-    <Flex direction="column" gap={1} alignItems="flex-end">
-      <Flex gap={2} alignItems="center">
-        {item.staleFacts && (
-          <Label theme="warning" size="xs" title="Часть фактов взята из истории при сбое канала">
-            Из истории
-          </Label>
-        )}
-        <Text variant="subheader-2">{fmtScore(item.healthcraftIndex)}</Text>
-      </Flex>
-      <div style={{ width: 64 }}>
-        <Progress value={item.healthcraftIndex} size="xs" theme={scoreTheme(item.healthcraftIndex)} />
+    <Flex gap={2} alignItems="center" justifyContent="flex-end">
+      {/* «Из истории» — левее полосы: ярлык редкий и не должен раздвигать числовой ряд */}
+      {item.staleFacts && (
+        <Label theme="warning" size="xs" title="Часть фактов взята из истории при сбое канала">
+          Из истории
+        </Label>
+      )}
+      <div style={{ width: 80 }}>
+        <Progress value={item.healthcraftIndex} size="s" theme={scoreTheme(item.healthcraftIndex)} />
       </div>
+      <Text variant="subheader-3" className="rh-score-cell__num" title={sentence(scoreWord(item.healthcraftIndex))}>
+        {fmtScore(item.healthcraftIndex)}
+      </Text>
     </Flex>
   );
 }

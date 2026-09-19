@@ -123,6 +123,17 @@ export function LanguageName({ name, color }: { name: string | null; color: stri
   );
 }
 
+/**
+ * В4.6 (З9): только точка языка, название — в `title`. Нужна для уплотнённой
+ * строки рейтинга: цветной маркер языка там сохраняется (он же носитель
+ * акцента платформы), а строка перестаёт быть двухэтажной. Без языка точка
+ * не рисуется вовсе — пустого места на «неизвестно» не занимаем.
+ */
+export function LanguageDot({ name, color }: { name: string | null; color: string | null }) {
+  if (!name) return null;
+  return <span className="rh-lang__dot" style={color ? { background: color } : undefined} title={`Язык: ${name}`} />;
+}
+
 export function Meta({ children }: { children: ReactNode }) {
   return <div className="rh-meta">{children}</div>;
 }

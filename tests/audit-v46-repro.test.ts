@@ -226,7 +226,8 @@ describe("В4.6-5 (У37): заливка полос непрозрачна и б
 // ---------------------------------------------------------------------------
 
 describe("В4.6-6 (У21): колонка индекса — горизонтально, число справа", () => {
-  repro("ScoreCell: полоса 80px слева, число subheader-3 в слоте справа", () => {
+  // ЗАКРЫТО блоком Б3 (колонка индекса и уплотнение строки).
+  test("ScoreCell: полоса 80px слева, число subheader-3 в слоте справа", () => {
     const src = srcOf("Rating.tsx");
     const cell = src.slice(src.indexOf("function ScoreCell"), src.indexOf("function CategoryCell"));
     expect({
@@ -238,7 +239,8 @@ describe("В4.6-6 (У21): колонка индекса — горизонтал
     }).toEqual({ horizontal: true, bar80: true, subheader3: true, slot: true, noOldBar: true });
   });
 
-  repro("дефолт страницы 20 и опция 20 в pageSizeOptions (иначе к дефолту не вернуться)", async () => {
+  // ЗАКРЫТО блоком Б3 (колонка индекса и уплотнение строки).
+  test("дефолт страницы 20 и опция 20 в pageSizeOptions (иначе к дефолту не вернуться)", async () => {
     const { DEFAULT_QUERY } = await import("../src/api/repos");
     expect(DEFAULT_QUERY.perPage).toBe(20);
     expect(srcOf("Rating.tsx")).toContain("[10, 20, 50, 100]");
