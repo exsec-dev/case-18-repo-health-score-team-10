@@ -667,6 +667,31 @@ export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<Sca
 // ---------- циклы процесса сервера ----------
 
 /**
+ * В4.4 (кластер L/З1): заявки, заявленные ЭТИМ процессом (id → claimed_at).
+ * SIGTERM возвращает их в queued (claimed_at NULL, attempts без изменений —
+ * административная остановка не считается попыткой); registry живёт
+ * в памяти процесса — чужие заявки не трогаются никогда.
+ */
+const liveClaims = new Map<number, string>();
+
+/** Вернуть свои running-заявки в очередь; возвращает число возвращённых. */
+export function returnOwnRunningJobs(db: Database): number {
+  let returned = 0;
+  for (const [id, claimedAt] of liveClaims) {
+    try {
+      const r = db
+        .query("UPDATE jobs SET status = 'queued', claimed_at = NULL, lease_until = NULL WHERE id = ? AND claimed_at = ? AND status = 'running'")
+        .run(id, claimedAt);
+      if (r.changes > 0) returned++;
+    } catch (e) {
+      console.error(`[shutdown] return job ${id} failed: ${String((e as Error).message).slice(0, 200)}`);
+    }
+    liveClaims.delete(id);
+  }
+  return returned;
+}
+
+/**
  * Воркер-луп: одна job за раз; ошибки не останавливают цикл; лиз продлевается
  * каждые leaseMs/3 (К4). ПОРТ hq-parallel (S2): очереди user|rating с ролями
  * процесса — web = сервер + user-воркер (интерактив), rating = планировщик +
@@ -678,6 +703,21 @@ export type WorkerTickOutcome = "busy" | "idle" | "claim-failed" | "done" | "fai
 /** Состояние воркер-лупа между тиками (гард «занят»): шов Б0 держит его снаружи. */
 export interface WorkerLoopState {
   busy: boolean;
+  /** В4.4 (З2): время последнего редкого фонового батча (каденс при непустых очередях) */
+  lastBackgroundTickAt?: number;
+}
+
+/** В4.4 (З2): каденс фонового пересчёта при НЕпустых очередях — раз в 10 мин один батч. */
+export const BACKGROUND_RESCORE_CADENCE_MS = 10 * 60_000;
+
+/** Один шаг фонового пересчёта: сперва недогнанный курсор прохода, затем история. */
+function backgroundRescoreStep(deps: WorkerDeps): void {
+  try {
+    const healed = needsRescore(deps.db) ? rescoreBatchByCursor(deps.db, { log: (m) => console.log(`[worker] ${m}`) }).processed : 0;
+    if (healed === 0) rescoreHistoryBatch(deps.db, { log: (m) => console.log(`[worker] ${m}`) });
+  } catch (e) {
+    console.error(`[worker] background rescore failed: ${String((e as Error).message).slice(0, 200)}`);
+  }
 }
 
 /**
@@ -685,6 +725,9 @@ export interface WorkerLoopState {
  * портов): тест вызывает её напрямую, без таймера. Броня портов сохранена
  * целиком — claim, фоновый пересчёт, `processJob`, `renewLease` в try/catch;
  * исключение наружу не выходит, цикл жив.
+ * В4.4 (З2): фоновый пересчёт гоняется и при непустой очереди — редким
+ * каденсом (раз в 10 мин, один батч) до busy-гарда, чтобы длинная волна
+ * не морила курсоры голодом (факт аудита: cursor=0 при derived=5).
  */
 export async function workerTick(
   deps: WorkerDeps,
@@ -692,6 +735,12 @@ export async function workerTick(
   state: WorkerLoopState,
   opts: { historyRescore?: boolean } = {},
 ): Promise<WorkerTickOutcome> {
+  const dueBackground =
+    opts.historyRescore === true && (state.lastBackgroundTickAt === undefined || Date.now() - state.lastBackgroundTickAt >= BACKGROUND_RESCORE_CADENCE_MS);
+  if (dueBackground) {
+    state.lastBackgroundTickAt = Date.now();
+    backgroundRescoreStep(deps);
+  }
   if (state.busy) return "busy";
   const leaseMs = deps.config.scheduler.leaseMs;
   // ПОРТ S2/ищейка-8: весь тик в броне — бросок БД не валит процесс
@@ -703,22 +752,17 @@ export async function workerTick(
     return "claim-failed";
   }
   if (!job) {
-    // обе наши очереди пусты — порция фонового пересчёта (LOW-7).
-    // В4.4 (кластер A + L/З2): сперва добирается актуальный проход
-    // (needsRescore → батч водяного знака — самозаживление после
-    // BUSY-останова или сбоя), затем — исторический курсор, если он есть
+    // обе наши очереди пусты — порция фонового пересчёта (LOW-7) КАЖДЫЙ тик:
+    // В4.4 — сперва недогнанный курсор актуального прохода, затем история
     if (opts.historyRescore) {
-      try {
-        const healed = needsRescore(deps.db) ? rescoreBatchByCursor(deps.db, { log: (m) => console.log(`[worker] ${m}`) }).processed : 0;
-        if (healed === 0) rescoreHistoryBatch(deps.db, { log: (m) => console.log(`[worker] ${m}`) });
-      } catch (e) {
-        console.error(`[worker] background rescore failed: ${String((e as Error).message).slice(0, 200)}`);
-      }
+      backgroundRescoreStep(deps);
+      state.lastBackgroundTickAt = Date.now();
     }
     return "idle";
   }
   const claimed = job;
   state.busy = true;
+  liveClaims.set(claimed.id, claimed.claimedAt);
   const heartbeat = setInterval(() => {
     try {
       renewLease(deps.db, claimed.id, claimed.claimedAt, leaseMs);
@@ -744,6 +788,7 @@ export async function workerTick(
     finishJob(deps.db, claimed.id, claimed.claimedAt, "failed", JOB_ERRORS.internal);
     return "failed";
   } finally {
+    liveClaims.delete(claimed.id);
     clearInterval(heartbeat);
     state.busy = false;
   }

@@ -44,6 +44,8 @@ import {
 import { myJobs, requestUserScan } from "../src/api/me";
 import { runScan as realRunScan, upsertRepo, type runScan as runScanType, type ScanDeps, type ScanResult } from "../src/jobs/runner";
 import { makeScClient } from "../src/collectors/http";
+import { returnOwnRunningJobs } from "../src/jobs/scheduler";
+import { startMockApi } from "./server-harness";
 
 const dir = mkdtempSync(join(tmpdir(), "rh-sched-"));
 const db: Database = openDb({ ...loadConfig(), dataDir: dir });
@@ -194,7 +196,7 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
   test("лимит частоты: 11-я новая заявка за час → 429; дубли не считаются; окно скользящее", async () => {
     clear();
     const u = user("rate");
-    const queue = { userScansPerHour: 10, maxAttempts: 3, userActiveMax: 100, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000, retentionDays: 30, myReposPerMinute: 1000, favoritesMax: 1000 };
+    const queue = { userScansPerHour: 10, maxAttempts: 3, userActiveMax: 100, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000, retentionDays: 30, myReposPerMinute: 1000, favoritesMax: 1000, cardPerMinute: 30 };
     const ok = { get: async () => ({ status: 200, json: { visibility: "public" }, bodyText: "" }), requestCount: () => 0 };
     const now = new Date("2026-09-18T10:00:00Z");
     for (let i = 0; i < 10; i++) {
@@ -306,7 +308,7 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
     test("≤ userActiveMax активных заявок на юзера → 429 too_many_active; после завершения — снова можно", async () => {
       clear();
       const u = user("active-max");
-      const queue = { userScansPerHour: 100, maxAttempts: 3, userActiveMax: 2, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000, retentionDays: 30, myReposPerMinute: 1000, favoritesMax: 1000 };
+      const queue = { userScansPerHour: 100, maxAttempts: 3, userActiveMax: 2, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000, retentionDays: 30, myReposPerMinute: 1000, favoritesMax: 1000, cardPerMinute: 30 };
       expect((await requestUserScan(q, okClient, u, "am", "a", queue)).status).toBe(202);
       expect((await requestUserScan(q, okClient, u, "am", "b", queue)).status).toBe(202);
       // дубль активной заявки — по-прежнему 202 deduplicated (дедуп раньше предела)
@@ -324,7 +326,7 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
       clear();
       const u = user("par-dup");
       const slow = { get: async () => (await Bun.sleep(10), { status: 200, json: { visibility: "public" }, bodyText: "" }), requestCount: () => 0 };
-      const queue = { userScansPerHour: 100, maxAttempts: 3, userActiveMax: 100, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000, retentionDays: 30, myReposPerMinute: 1000, favoritesMax: 1000 };
+      const queue = { userScansPerHour: 100, maxAttempts: 3, userActiveMax: 100, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000, retentionDays: 30, myReposPerMinute: 1000, favoritesMax: 1000, cardPerMinute: 30 };
       const outs = await Promise.all([1, 2, 3].map(() => requestUserScan(q, slow, u, "pd", "same", queue)));
       expect(outs.map((o) => o.body["deduplicated"]).sort()).toEqual([false, true, true]);
       expect(new Set(outs.map((o) => o.body["jobId"])).size).toBe(1);
@@ -1477,4 +1479,94 @@ describe("В4.4: первая волна — по лайкам", () => {
     db.query("DELETE FROM repos WHERE org_slug = 'wave'").run();
     db.query("DELETE FROM jobs WHERE repo_id NOT IN (SELECT id FROM repos)").run();
   });
+});
+
+// ---------------------------------------------------------------------------
+// В4.4 (кластер L/З1): SIGTERM — свои running-заявки возвращаются в queued
+// (claimed_at NULL, attempts не трогаются), процесс завершается штатно.
+// ---------------------------------------------------------------------------
+
+describe("В4.4 (кластер L): штатное завершение", () => {
+  test("returnOwnRunningJobs: своя running-заявка → queued с NULL-лизом; чужая не трогается; attempts целы", async () => {
+    // гермитичность: очередь файла делится между тестами — гасим хвосты
+    db.query("UPDATE jobs SET status = 'done' WHERE status IN ('queued', 'running')").run();
+    const repoId = seedRepo("sig", "mine");
+    const foreignId = seedRepo("sig", "foreign");
+    // «чужая» заявка: заявлена напрямую claimNext'ом (не через workerTick) —
+    // в реестре этого процесса её нет
+    const foreignJob = enqueueScan(db, foreignId, { triggerKind: "periodic" });
+    const foreign = claimNext(db, new Date(), 60_000, { queue: "rating" })!;
+    expect(foreign.id).toBe(foreignJob);
+
+    // своя: workerTick с зависшим runScan — заявка живёт в liveClaims
+    let release: (() => void) | null = null;
+    const hangScan = (() =>
+      new Promise<ScanResult>((resolve) => {
+        release = () => resolve({ scanId: 1, repoId, status: "ok", repoAccess: "ok" } as unknown as ScanResult);
+      })) as unknown as typeof runScanType;
+    const myJob = enqueueScan(db, repoId, { triggerKind: "periodic" });
+    const deps: import("../src/jobs/scheduler").WorkerDeps = { db, config: loadConfig(), serverClient: () => null, runScan: hangScan };
+    const state = { busy: false };
+    const tick = workerTick(deps, ["rating"], state);
+    await Bun.sleep(100); // claim синхронен до зависания
+    expect((db.query("SELECT status FROM jobs WHERE id = ?").get(myJob) as { status: string }).status).toBe("running");
+
+    const returned = returnOwnRunningJobs(db);
+    expect(returned).toBe(1);
+    expect(db.query("SELECT status, claimed_at, attempts FROM jobs WHERE id = ?").get(myJob)).toEqual({ status: "queued", claimed_at: null, attempts: 1 });
+    // чужая running-заявка не тронута
+    expect((db.query("SELECT status FROM jobs WHERE id = ?").get(foreignJob) as { status: string }).status).toBe("running");
+
+    release!();
+    const outcome = await tick;
+    expect(outcome).toBe("done");
+    // finishJob после возврата не матчится по claimed_at — заявка остаётся queued
+    expect((db.query("SELECT status FROM jobs WHERE id = ?").get(myJob) as { status: string }).status).toBe("queued");
+    db.query("UPDATE jobs SET status = 'done' WHERE id IN (?, ?)").run(myJob, foreignJob);
+  });
+
+  test("SIGTERM процессу сервера: штатный выход кодом 0 за ≤5 с", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rh-sigterm-"));
+    const mock = startMockApi();
+    const port = 46100 + Math.floor(Math.random() * 2000);
+    const proc = Bun.spawn([process.execPath, "run", join(import.meta.dir, "..", "src/server.ts")], {
+      cwd: join(import.meta.dir, ".."),
+      env: {
+        ...process.env,
+        PORT: String(port),
+        DATA_DIR: dir,
+        APP_SECRET: "",
+        SOURCECRAFT_TOKEN: "",
+        SOURCECRAFT_API_BASE: mock.url,
+        APPSEC_API_BASE: mock.url,
+        SOURCECRAFT_GIT_BASE: mock.url,
+        YA_REDIRECT_URI: `http://127.0.0.1:${port}/auth/ya/callback`,
+        SCHEDULER_START_DELAY_MS: String(24 * 3600_000),
+      },
+      stdout: "ignore",
+      stderr: "pipe",
+    });
+    let up = false;
+    for (let i = 0; i < 200 && proc.exitCode === null; i++) {
+      try {
+        if ((await fetch(`http://127.0.0.1:${port}/api/health`)).ok) {
+          up = true;
+          break;
+        }
+      } catch {
+        /* порт поднимается */
+      }
+      await Bun.sleep(100);
+    }
+    expect(up).toBe(true);
+    const t0 = Date.now();
+    proc.kill("SIGTERM");
+    const code = await proc.exited;
+    const elapsedMs = Date.now() - t0;
+    await new Response(proc.stderr).text().catch(() => "");
+    mock.stop();
+    rmSync(dir, { recursive: true, force: true });
+    expect(code).toBe(0);
+    expect(elapsedMs).toBeLessThan(5000);
+  }, 30_000);
 });

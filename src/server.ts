@@ -27,7 +27,8 @@ import {
   type PatSeed,
 } from "./api/me";
 import { renderRepoReport } from "./report/markdown";
-import { catalogClientBudget, maintenanceTick, startScheduler, startWorkerLoop } from "./jobs/scheduler";
+import { catalogClientBudget, maintenanceTick, returnOwnRunningJobs, startScheduler, startWorkerLoop } from "./jobs/scheduler";
+import { killActiveClones } from "./collectors/git";
 import {
   clearOAuthStateCookieHeader,
   clearSessionCookieHeader,
@@ -57,6 +58,11 @@ const patProbes = new Map<number, number[]>();
 const favoriteChecks = new Map<number, number[]>();
 // Ф2.8 (В4.2b): минутное окно чтений /api/me/repos на юзера.
 const myReposViews = new Map<number, number[]>();
+// В4.4 (кластер G код-аудита): карточка — единственная пробная поверхность
+// без лимита (до 3 живых запросов PAT зрителя на показ + вымывание кэша
+// доступа): минутное окно на ЗАЛОГИНЕННОГО зрителя; аноним — без лимита
+// (публичная карточка в сеть не ходит, проб нет).
+const cardViews = new Map<number, number[]>();
 
 /**
  * Скользящее окно счётчика на юзера: true = пропустить, лимит не исчерпан.
@@ -85,6 +91,10 @@ const allowFavoriteCheck = (userId: number, now = Date.now()): boolean =>
 /** Минутное окно чтений /api/me/repos (Ф2.8): true = пропустить. */
 const allowMyReposView = (userId: number, now = Date.now()): boolean =>
   allowInWindow(myReposViews, userId, config.queue.myReposPerMinute, 60_000, now);
+
+/** Минутное окно показов карточки залогиненным зрителем (В4.4, кластер G): true = пропустить. */
+const allowCardView = (userId: number, now = Date.now()): boolean =>
+  allowInWindow(cardViews, userId, config.queue.cardPerMinute ?? 30, 60_000, now);
 
 /** Живая проба токена = оракул валидности PAT; сервис не переборщик (ПОРТ S1). */
 const PAT_PROBES_PER_HOUR = 10;
@@ -198,6 +208,10 @@ const yaEndpoints = (): YaEndpoints => ({ oauthBase: config.auth.yaOauthBase, lo
 
 const server = Bun.serve({
   port: config.port,
+  // В4.4 (кластер H, Прод-С4): Bun рвёт соединение при ~10–12 с тишины
+  // (замер аудита) — «думающие» хендлеры (PUT PAT: проба+посев, карточка
+  // с PAT, callback) легально живут дольше; 120 с — с запасом
+  idleTimeout: 120,
   routes: {
     "/api/health": () => {
       // В4.4 (кластер B): ok — вычисляемое (pending-рескор, подозрительно
@@ -220,6 +234,13 @@ const server = Bun.serve({
         return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
       }
       const viewer = sessionOf(req);
+      // В4.4 (кластер G): 429 — до резолва доступа (не тратим PAT-запросы)
+      if (viewer && !allowCardView(viewer.userId)) {
+        return Response.json(
+          { error: { code: "rate_limited", message: `не больше ${config.queue.cardPerMinute ?? 30} открытий карточки в минуту — попробуйте чуть позже` } },
+          { status: 429 },
+        );
+      }
       const card = await getRepoCardForViewer(db, org!, repo!, viewerAccess(req), { limits: config.scan, viewerUserId: viewer?.userId });
       if (!card) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
       return Response.json(card);
@@ -230,6 +251,13 @@ const server = Bun.serve({
         return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
       }
       const viewer = sessionOf(req);
+      // В4.4 (кластер G): MD-выгрузка — та же карточка, тот же лимит
+      if (viewer && !allowCardView(viewer.userId)) {
+        return Response.json(
+          { error: { code: "rate_limited", message: `не больше ${config.queue.cardPerMinute ?? 30} открытий карточки в минуту — попробуйте чуть позже` } },
+          { status: 429 },
+        );
+      }
       // тот же сборщик карточки с тем же зрителем (К2)
       const card = await getRepoCardForViewer(db, org!, repo!, viewerAccess(req), { limits: config.scan, viewerUserId: viewer?.userId });
       if (!card) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
@@ -569,6 +597,8 @@ const catalogClient = () =>
 // ПОРТ hq-parallel (S2): роли процесса — web = сервер + user-воркер,
 // rating = планировщик + rating-воркер, all = dev-всё-в-одном (user вперёд)
 const role = config.processRole;
+// В4.4 (кластер L): стоп-хендлалы таймеров — SIGTERM снимает их штатно
+const stopWorkerLoops: Array<() => void> = [];
 // В4.4 (кластер A): стартовый рескор асинхронен и исполняется ТОЛЬКО ролями
 // rating/all — порт уже поднят; web-роль не пишет оценки, её health читает
 // прогресс из meta. Прогресс персистентен (курсор в meta): рестарт
@@ -582,12 +612,12 @@ if (needsRescore(db)) {
   }
 }
 if (role === "web" || role === "all") {
-  startWorkerLoop({ db, config, serverClient }, { user: true, rating: role === "all" });
+  stopWorkerLoops.push(startWorkerLoop({ db, config, serverClient }, { user: true, rating: role === "all" }));
 }
 if (role === "rating" || role === "all") {
-  startScheduler(db, catalogClient, config);
+  stopWorkerLoops.push(startScheduler(db, catalogClient, config));
   if (role === "rating") {
-    startWorkerLoop({ db, config, serverClient }, { rating: true });
+    stopWorkerLoops.push(startWorkerLoop({ db, config, serverClient }, { rating: true }));
   }
 }
 console.log(`  role: ${role} (PROCESS_ROLE)`);
@@ -597,11 +627,41 @@ console.log(`  role: ${role} (PROCESS_ROLE)`);
 // `running`-строки `scans` (процесс умер, скан «идёт» вечно). Свип при старте
 // работает в любой роли процесса: роль `web` планировщика не поднимает
 void maintenanceTick(db, config);
-process.on("SIGTERM", () => {
-  console.log("[signal] SIGTERM — выходим (сирот подберёт стартовый свип при подъёме)");
+
+// В4.4 (кластер L/З1 код-аудита): SIGTERM/SIGINT — ШТАТНОЕ завершение ≤ 5 с,
+// а не мгновенный выход с сиротами до лиза (85 мин) и свипа (170 мин):
+// перестаём принимать, свои running-заявки возвращаем в queued (claimed_at
+// NULL, attempts не трогаем — сбой не считается попыткой), живые группы
+// клонов гасим, таймеры снимаем.
+let shuttingDown = false;
+function shutdown(signal: string): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[signal] ${signal} — штатное завершение (заявки возвращены в очередь, клоны погашены)`);
+  try {
+    server.stop(false);
+  } catch {
+    /* уже стоит */
+  }
+  for (const stop of stopWorkerLoops) {
+    try {
+      stop();
+    } catch {
+      /* таймер уже снят */
+    }
+  }
+  try {
+    const returned = returnOwnRunningJobs(db);
+    if (returned > 0) console.log(`[signal] заявок возвращено в очередь: ${returned}`);
+  } catch (e) {
+    console.error(`[signal] return jobs failed: ${String((e as Error).message).slice(0, 200)}`);
+  }
+  const killed = killActiveClones();
+  if (killed > 0) console.log(`[signal] групп клонов погашено: ${killed}`);
   process.exit(0);
-});
-process.on("SIGINT", () => process.exit(0));
+}
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
 
 console.log(`repo-health слушает http://127.0.0.1:${server.port}`);
 console.log(`  llm: ${config.llm.provider} (main=${config.llm.mainModel}, side=${config.llm.sideModel})`);
