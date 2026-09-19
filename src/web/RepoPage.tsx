@@ -72,7 +72,10 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   const sinceScanId = state.kind === "ok" ? (state.data.scan?.id ?? 0) : 0;
   // Ф2.9/Ф2.15: горизонт опросов анализа — лиз job из /api/meta, не хардкод
   const leaseMs = meta?.queue.leaseMs ?? 85 * 60_000;
-  const refresh = useRefreshAnalysis(org, repo, cardUrl, sinceScanId, reload, leaseMs);
+  // З3 (круг 2 В4.4): после успешного старта карточка ПЕРЕЧИТЫВАЕТСЯ —
+  // тело переключается в job-ветку («Анализ запланирован/Сканируем») вслед
+  // за заголовком, а не спорит с ним до конца скана
+  const refresh = useRefreshAnalysis(org, repo, cardUrl, sinceScanId, reload, leaseMs, reload);
   // M-4: честное ожидание — из лиза job (горизонт одного скана), не хардкод
   const etaNote = `обычно до ${Math.max(1, Math.round(leaseMs / 60_000))} минут`;
 
@@ -164,7 +167,11 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
               canRefresh
                 ? [{ text: card.scan ? "Повторить анализ" : "Запустить анализ", view: "action", size: "l", onClick: refresh.start }]
                 : loggedIn
-                  ? [{ text: "Добавьте токен в кабинете — и запустите первый анализ", view: "action", size: "l", href: "/me" }]
+                  ? [
+                      // UX-6 (круг 2 В4.4): на ветке «Скан был» анализа уже были —
+                      // слово «первый» обещало то, чего не случится
+                      { text: card.scan ? "Добавьте токен в кабинете — и запустите анализ" : "Добавьте токен в кабинете — и запустите первый анализ", view: "action", size: "l", href: "/me" },
+                    ]
                   : undefined
             }
           />
@@ -210,7 +217,7 @@ function ReportMenu({ mdHref }: { mdHref: string }) {
  * появления нового завершённого скана, но не дольше leaseMs из /api/meta
  * (Ф2.9: раньше горизонт был зашит на 60 минут). Итог — тостом, как у платформы.
  */
-function useRefreshAnalysis(org: string, repo: string, cardUrl: string, sinceScanId: number, onDone: () => void, leaseMs: number) {
+function useRefreshAnalysis(org: string, repo: string, cardUrl: string, sinceScanId: number, onDone: () => void, leaseMs: number, onStarted: () => void) {
   const [phase, setPhase] = useState<"idle" | "sending" | "queued">("idle");
   /** ключ sessionStorage `<org>/<repo>:<jobId>` скана, чей переход active→done увиден в этой сессии (Ф2.20) */
   const [doneKey, setDoneKey] = useState<string | null>(null);
@@ -262,6 +269,9 @@ function useRefreshAnalysis(org: string, repo: string, cardUrl: string, sinceSca
       );
       jobIdRef.current = typeof res.jobId === "number" ? res.jobId : null;
       setPhase("queued");
+      // З3: перечитывание сразу после постановки — card.job появляется и
+      // подхватывает свой 3-секундный опрос
+      onStarted();
       toaster.add({ name: `scan-queued:${org}/${repo}`, theme: "info", title: "Анализ в очереди", content: "Карточка обновится после скана." });
     } catch (e) {
       setPhase("idle");
