@@ -41,7 +41,7 @@ const LANG_ALL = " all";
 const LANG_NONE = " none";
 
 const SORT_OPTIONS = [
-  { value: "index", content: "Score" },
+  { value: "index", content: "HealthCraft Index" },
   { value: "likes", content: "Лайки" },
   { value: "activity", content: "Последняя активность" },
   { value: "coverage", content: "Покрытие данными" },
@@ -110,7 +110,7 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
     id: c.id,
     title: typeof c.name === "string" ? c.name : c.id,
     selected: !hidden.includes(c.id),
-    required: c.id === "rank" || c.id === "repo" || c.id === "score",
+    required: c.id === "rank" || c.id === "repo" || c.id === "index",
   }));
   const columns = allColumns.filter((c) => !hidden.includes(c.id));
 
@@ -194,7 +194,7 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
         <>
           <PageHeader
             title="Рейтинг здоровья репозиториев"
-            description="Порядок задает Repo Health Score — воспроизводимая оценка, а не число лайков."
+            description="Порядок задает HealthCraft Index — воспроизводимая оценка из публичных данных, а не число лайков."
           />
           {toolbar}
         </>
@@ -303,7 +303,7 @@ function UnscoredTable({ items, meta, hasFilters }: { items: Item[]; meta: MetaR
   return (
     <Flex direction="column" gap={3}>
       <Text color="complementary">
-        Эти репозитории не получили Score: покрытие данными оказалось ниже порога
+        Эти репозитории не получили HealthCraft Index: покрытие данными оказалось ниже порога
         {meta ? ` ${fmtCoverage(meta.coverageNullBelow)}` : ""}. Отсутствие данных — не плохая оценка и не ноль: пока
         источники недоступны, честного числа нет.
         {failedScan && " У части репозиториев последний скан завершился сбоем — для оценки он непригоден; повторный обход попробует снова."}
@@ -338,7 +338,7 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
             ))}
         </DefinitionList>
         <Text variant="body-short" color="secondary">
-          Доля в Score рейтинга. CI/CD и Security считаются только в полном Score на карточке.
+          Доля в HealthCraft Index. CI/CD и Security считаются только в Repo Health Score на карточке.
         </Text>
       </AsideSection>
 
@@ -426,7 +426,7 @@ function buildColumns(categories: MetaResponse["categories"], rankOffset: number
       template: (_item: Item, index: number) => <Text color="secondary">{rankOffset + index + 1}</Text>,
     },
     { id: "repo", name: "Репозиторий", primary: true, sticky: "start", template: (item: Item) => <RepoCell item={item} /> },
-    { id: "score", name: "Score", align: "end", width: 96, template: (item: Item) => <ScoreCell item={item} /> },
+    { id: "index", name: "HealthCraft Index", align: "end", width: 96, template: (item: Item) => <ScoreCell item={item} /> },
     ...categoryColumns,
     { id: "likes", name: "Лайки", align: "end", template: (item: Item) => fmtNumber(item.likes) },
     { id: "forks", name: "Форки", align: "end", template: (item: Item) => fmtNumber(item.forks) },

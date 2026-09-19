@@ -435,7 +435,7 @@ function RepoRow({ entry, job, onScan }: { entry: MyReposResponse["entries"][num
             анализ запланирован, данные скоро будут
           </Label>
         ) : scored ? (
-          <Flex direction="column" alignItems="flex-end" gap={0}>
+          <Flex direction="column" alignItems="flex-end" gap={0} title="HealthCraft Index — публичная оценка репозитория">
             <Flex gap={1} alignItems="baseline">
               <Text variant="subheader-3">{fmtScore(entry.healthcraftIndex)}</Text>
               <Text color="secondary">/ 100 в рейтинге</Text>

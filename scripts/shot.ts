@@ -112,10 +112,10 @@ async function run(): Promise<void> {
   mkdirSync(SHOTS_DIR, { recursive: true });
   const [org, repo] = SLUG.split("/") as [string, string];
 
-  await shoot("rating", `${base}/?sort=score&order=desc`, {
+  await shoot("rating", `${base}/?sort=index&order=desc`, {
     "строк таблицы": "document.querySelectorAll('table tbody tr').length",
     "заголовок рейтинга": "document.body.innerText.includes('Рейтинг здоровья репозиториев') ? 1 : 0",
-    "колонка Score": "document.body.innerText.includes('Score') ? 1 : 0",
+    "колонка HealthCraft Index": "document.body.innerText.includes('HealthCraft Index') ? 1 : 0",
   });
 
   // «Личный кабинет» без сессии — витрина слоёв (Я ID → токен доступа) и входа.
@@ -128,8 +128,8 @@ async function run(): Promise<void> {
     "блок Score": "document.body.innerText.includes('из 100') ? 1 : 0",
     категории: "document.body.innerText.includes('Категории') ? 1 : 0",
     рекомендации: "document.body.innerText.includes('Рекомендации') ? 1 : 0",
-    "tri-state NULL": "document.body.textContent?.includes('При покрытии данными ниже 40% Score не выставляется') ? 1 : 0",
-    "объяснение закрытых каналов": "document.body.innerText.includes('CI и Security видны участникам репозитория') ? 1 : 0",
+    "tri-state NULL": "document.body.textContent?.includes('показатель не выставляется') ? 1 : 0",
+    "объяснение закрытых каналов": "document.body.innerText.includes('входят только в Repo Health Score') ? 1 : 0",
     "кнопка отчета": "[...document.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'Отчет').length",
   });
 

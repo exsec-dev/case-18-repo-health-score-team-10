@@ -1,6 +1,6 @@
 // RepoPage.tsx — единая карточка репозитория (план §5 В3 + К2 В4.1):
-// Score в рейтинге и полный Score, шесть категорий с раскрытием
-// submetrics, маркеры и рекомендации с доказательствами. Состав ответа
+// HealthCraft Index и полный Repo Health Score (В4.3), шесть категорий с
+// раскрытием submetrics, маркеры и рекомендации с доказательствами. Состав ответа
 // собирает сервер по доступу зрителя: закрытые ему блоки CI/Security
 // приходят без чисел и показываются заглушкой по причине доступа.
 // Главное правило экрана — трекер-закон в UI: ни одной фразы без факта
@@ -42,7 +42,7 @@ import {
   fmtCoverage,
   fmtDate,
   fmtDateTime,
-  fmtDelta,
+  fmtSigned,
   fmtFactValue,
   fmtNumber,
   fmtScore,
@@ -335,14 +335,14 @@ function ScoreAside({ card, meta }: { card: Card; meta: MetaResponse | null }) {
         <Card view="outlined" style={{ padding: "var(--g-spacing-4)", marginBottom: "var(--g-spacing-4)" }}>
           <Flex direction="column" gap={4}>
             <ScoreFigure
-              title="Score в рейтинге"
-              help="Считают 4 категории: Документация, Активность, Issues, Code health. Так репозитории сравниваются в общем рейтинге."
+              title="HealthCraft Index"
+              help="Публичная оценка из 4 категорий: Документация, Активность, Issues, Code health. По ней репозитории сравниваются в общем рейтинге."
               total={score.healthcraftIndex}
               coverage={score.indexCoverage}
             />
             {score.fullLocked ? (
               <Flex direction="column" gap={1}>
-                <Text color="secondary">Полный Score (с CI и Security)</Text>
+                <Text color="secondary">Repo Health Score</Text>
                 <Flex gap={2} alignItems="center">
                   <Icon data={Lock} size={16} />
                   <Text variant="subheader-2">закрыто</Text>
@@ -352,20 +352,30 @@ function ScoreAside({ card, meta }: { card: Card; meta: MetaResponse | null }) {
                 </Text>
               </Flex>
             ) : (
-              <ScoreFigure
-                title="Полный Score (с CI и Security)"
-                help="Все 6 категорий. Виден участникам репозитория с доступом к данным CI и Security."
-                total={score.repoHealthScore}
-                coverage={score.repoHealthCoverage ?? 0}
-              />
+              <>
+                <ScoreFigure
+                  title="Repo Health Score"
+                  help="Полная оценка по всем 6 категориям (с CI и Security). Видна участникам репозитория с доступом к этим данным."
+                  total={score.repoHealthScore}
+                  coverage={score.repoHealthCoverage ?? 0}
+                />
+                {score.repoHealthScore !== null && score.healthcraftIndex !== null && (
+                  // К-Ф3.4: фактическая signed-дельта — знак не обещается (плохие
+                  // CI/Security опускают полный показатель ниже индекса)
+                  <Text variant="body-short" color="complementary">
+                    Разницу с HealthCraft Index дают CI и Security: {fmtSigned(score.repoHealthScore - score.healthcraftIndex)}.
+                  </Text>
+                )}
+              </>
             )}
           </Flex>
         </Card>
       )}
       {score && (
         <Text as="p" variant="body-short" color="secondary" style={{ margin: "0 0 var(--g-spacing-6)" }}>
-          {meta ? `При покрытии данными ниже ${threshold} Score не выставляется: без данных честного числа нет. ` : ""}В рейтинге
-          сравниваются только 4 категории; CI и Security видны участникам репозитория с доступом к этим данным.
+          {meta ? `При покрытии данными ниже ${threshold} показатель не выставляется: без данных честного числа нет. ` : ""}
+          HealthCraft Index строят 4 публичные категории; CI и Security входят только в Repo Health Score — он виден участникам
+          репозитория с доступом к этим данным.
         </Text>
       )}
 
@@ -508,7 +518,7 @@ function CategoryRow({ categoryKey: key, title, cat, contribution, card }: { cat
       <Text variant="subheader-2" className="rh-category__value">
         {cat.score === null ? "—" : fmtScore(cat.score)}
       </Text>
-      <Text variant="body-short" color="secondary" className="rh-category__weight" title="номинальный вес категории → вклад в итоговый Score после перенормировки">
+      <Text variant="body-short" color="secondary" className="rh-category__weight" title="номинальный вес категории в Repo Health Score → вклад после перенормировки">
         вес {cat.weight}% → вклад {contribution}%
       </Text>
       <span className="rh-category__tags">
@@ -642,8 +652,8 @@ function RecommendationRow({ rec, evidence }: { rec: Recommendation; evidence: M
           <Text color="secondary">#{rec.priority}</Text>
           <Text variant="subheader-2">{rec.problem}</Text>
           {rec.deltaScore !== null ? (
-            <Label theme="success" size="xs" title="Прирост итогового Score, если выполнить только эту рекомендацию">
-              {fmtDelta(rec.deltaScore)} к Score
+            <Label theme="success" size="xs" title="Прирост показателя, если выполнить только эту рекомендацию">
+              {fmtSigned(rec.deltaScore)} к {rec.channel ? "Repo Health Score" : "HealthCraft Index"}
             </Label>
           ) : rec.opensCategory ? (
             <Label theme="info" size="xs" title="Категория без данных станет считаемой">
