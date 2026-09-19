@@ -340,14 +340,14 @@ describe("изоляция own/public и эвикция (В4/Б4)", () => {
     const scan2 = seedScan(iso, repoId, { status: "ok", trigger: "user" });
     seedScore(iso, repoId, scan2, { total: 70 });
     expect((iso.db.query("SELECT COUNT(*) AS c FROM scores WHERE scan_id = ?").get(scan2) as { c: number }).c).toBe(1);
-    // рейтинг: total_rating последнего скана; категории каналов с правами не публикуются
+    // рейтинг: healthcraft_index последнего пригодного скана; категории каналов с правами не публикуются
     const rating = listRepos(iso.db, q());
     expect(rating.items.map((i) => `${i.org}/${i.repo}`)).toEqual(["iso/dual"]);
     expect(rating.items[0]!.healthcraftIndex).toBe(70);
     expect(rating.items[0]!.categories.cicd).toBeNull();
     expect(rating.items[0]!.categories.security).toBeNull();
     // карточка: Score в рейтинге последнего пригодного скана; полный Score — из
-    // показанных категорий (круг 2), а не сохранённый total_full
+    // показанных категорий (круг 2), а не сохранённая строка (полного итога в схеме нет)
     const card = getRepoCard(iso.db, "iso", "dual", { access: GRANTED })!;
     expect(card.score!.healthcraftIndex).toBe(70);
     expect(card.score!.repoHealthScore).toBe(Math.round(totalsFromCategories(card.score!.categories, { codeEmpty: false, secretsCritical: false }).repoHealthScore!));
