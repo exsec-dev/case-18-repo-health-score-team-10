@@ -295,14 +295,21 @@ function UnscoredTable({ items, meta, hasFilters }: { items: Item[]; meta: MetaR
       <EmptyState icon={SquareListUl} title="Все репозитории оценены" description="Покрытия данными хватило каждому репозиторию выборки." />
     );
   }
+  // Ф2.16: NULL-группа может быть огромной (весь не обходивший каталог) —
+  // таблица показывает первые 5, остальное честным счётчиком «и ещё N»
+  const shown = items.slice(0, 5);
+  const rest = items.length - shown.length;
+  const failedScan = items.some((i) => i.scanStatus === "bad");
   return (
     <Flex direction="column" gap={3}>
       <Text color="complementary">
         Эти репозитории не получили Score: покрытие данными оказалось ниже порога
         {meta ? ` ${fmtCoverage(meta.coverageNullBelow)}` : ""}. Отсутствие данных — не плохая оценка и не ноль: пока
         источники недоступны, честного числа нет.
+        {failedScan && " У части репозиториев последний скан завершился сбоем — для оценки он непригоден; повторный обход попробует снова."}
       </Text>
-      <Table data={items} columns={columns} width="max" verticalAlign="middle" />
+      <Table data={shown} columns={columns} width="max" verticalAlign="middle" />
+      {rest > 0 && <Text color="complementary">…и ещё {fmtNumber(rest)} — уточните поиск или фильтры, чтобы сузить список.</Text>}
     </Flex>
   );
 }
@@ -315,8 +322,8 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
       <AsideSection title="О рейтинге">
         <Text color="complementary">
           Публичный рейтинг считают четыре категории: {meta.categories.filter((c) => !NOT_IN_RATING.has(c.key)).map((c) => c.title).join(", ")}.
-          CI/CD и Security видны на карточке репозитория участникам с доступом к этим данным — в общий рейтинг их не
-          вкладывают. Лайки доступны сортировкой, но никогда не выбраны по умолчанию.
+          CI/CD и Security в общий рейтинг не вкладываются — они доступны в полном Repo Health Score на карточке
+          репозитория участникам с доступом к этим данным. Лайки доступны сортировкой, но никогда не выбраны по умолчанию.
         </Text>
       </AsideSection>
 
@@ -432,7 +439,16 @@ function buildColumns(categories: MetaResponse["categories"], rankOffset: number
       template: (item: Item) => (
         <Flex direction="column" gap={0} alignItems="flex-end">
           <Text>{fmtDate(item.scannedAt)}</Text>
-          <Text variant="body-short" color="secondary">
+          {/* Ф2.16: пояснение при сбойном скане — Score держится на последнем удачном */}
+          <Text
+            variant="body-short"
+            color="secondary"
+            title={
+              item.scanStatus === "bad"
+                ? "Последний скан завершился сбоем: часть источников не ответила. Score посчитан по последнему успешному скану — сбой не понижает оценку."
+                : undefined
+            }
+          >
             {scanStatusText(item.scanStatus)}
           </Text>
         </Flex>
