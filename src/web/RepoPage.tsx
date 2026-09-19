@@ -53,12 +53,15 @@ import {
   gitLimitsText,
   scanStatusText,
   scanTriggerText,
+  contributionText,
   scoreColor,
   scoreLabelTheme,
   scoreTheme,
   scoreWord,
   sentence,
+  summaryLine,
 } from "./format";
+import { linkProps, navigate, useQueryParam } from "./router";
 import { Page, type Crumb } from "./Shell";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, ScoreLegend, SkeletonRows } from "./ui";
 
@@ -156,6 +159,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
         starDoneKey={refresh.doneKey}
         starLoggedIn={me.state.kind === "ok" && me.state.data.login !== null}
       />
+      {card.score !== null && <ScoreBand card={card} meta={meta} />}
       {card.score === null ? (
         card.job ? (
           // Ф2.15: первый анализ — статус живой job вместо лжи «скана ещё не было»
@@ -356,8 +360,22 @@ function Header({ card, starDoneKey, starLoggedIn }: { card: Card; starDoneKey: 
   );
 }
 
+/**
+ * В4.6 (У26, ДП7): значение таба живёт в query (`?tab=recommendations`), а не
+ * в локальном состоянии. Раньше ссылку на рекомендации дать было нельзя,
+ * «назад» из них не работал и привести зрителя прямо к следующему шагу (из
+ * кабинета, из письма, из питча) было невозможно — именно это делало
+ * следующий шаг спрятанным. `replace: true` у сброса на «Категории»: дефолт
+ * не должен засорять историю браузера.
+ */
+export const TAB_RECOMMENDATIONS = "recommendations";
+
 function CardTabs({ card, meta }: { card: Card; meta: MetaResponse | null }) {
-  const [tab, setTab] = useState("categories");
+  const tab = useQueryParam("tab") === TAB_RECOMMENDATIONS ? TAB_RECOMMENDATIONS : "categories";
+  const setTab = (next: string): void => {
+    const url = next === TAB_RECOMMENDATIONS ? `${window.location.pathname}?tab=${TAB_RECOMMENDATIONS}` : window.location.pathname;
+    navigate(url, { replace: next !== TAB_RECOMMENDATIONS });
+  };
   return (
     <TabProvider value={tab} onUpdate={setTab}>
       <TabList size="m">
@@ -385,72 +403,36 @@ function fullLockReason(card: Card): string | null {
   return accessLockText(card.access.cicd) ?? accessLockText(card.access.appsec);
 }
 
+/**
+ * В4.6 (вариант А компоновки, решение владельца 20.09): правая панель стала
+ * ЧИСТО МЕТОДИЧЕСКОЙ. Величина уехала в главную колонку (`ScoreBand`), потому
+ * что здесь она стояла на x = 80% ширины окна, последней в DOM и последней для
+ * глаза при чтении слева направо. Осталось только «как читать оценку», «что
+ * считаем», «каких данных не хватило» и реквизиты расчёта — панель впервые
+ * получила однородное содержание (охранный пункт 10 не просто соблюдён, а
+ * усилен: панель никуда не исчезает и в модальные окна не переезжает).
+ */
 function ScoreAside({ card, meta, leaseMs, jobStalled }: { card: Card; meta: MetaResponse | null; leaseMs: number; jobStalled: boolean }) {
   const { score, scan, job } = card;
   const threshold = meta ? fmtCoverage(meta.coverageNullBelow) : "порога";
   return (
     <>
-      {score && (
-        <Card view="outlined" style={{ padding: "var(--g-spacing-4)", marginBottom: "var(--g-spacing-4)" }}>
-          <Flex direction="column" gap={4}>
-            <ScoreFigure
-              title="HealthCraft Index"
-              help="Публичная оценка из 4 категорий: Документация, Активность, Issues, Code health. По ней репозитории сравниваются в общем рейтинге."
-              total={score.healthcraftIndex}
-              coverage={score.indexCoverage}
-            />
-            {score.fullLocked ? (
-              <Flex direction="column" gap={1}>
-                <Text color="secondary">Repo Health Score</Text>
-                <Flex gap={2} alignItems="center">
-                  <Icon data={Lock} size={16} />
-                  <Text variant="subheader-2">закрыто</Text>
-                </Flex>
-                {/* В4.6 (У24): предложение, а не подпись — body-2 */}
-                <Text variant="body-2" color="complementary">
-                  {fullLockReason(card)}
-                </Text>
-              </Flex>
-            ) : (
-              <>
-                <ScoreFigure
-                  title="Repo Health Score"
-                  help="Полная оценка по всем 6 категориям (с CI и Security). Видна участникам репозитория с доступом к этим данным."
-                  total={score.repoHealthScore}
-                  coverage={score.repoHealthCoverage ?? 0}
-                />
-                {score.repoHealthScore !== null && score.healthcraftIndex !== null &&
-                  // К-Ф3.4: фактическая signed-дельта — знак не обещается (плохие
-                  // CI/Security опускают полный показатель ниже индекса);
-                  // M-13: |Δ| < 0.05 — «разницы нет», не «+0.0»
-                  (Math.abs(score.repoHealthScore - score.healthcraftIndex) < 0.05 ? (
-                    <Text variant="body-2" color="complementary">
-                      Разницы нет: CI и Security на этом скане нейтральны.
-                    </Text>
-                  ) : (
-                    <Text variant="body-2" color="complementary">
-                      Разницу с HealthCraft Index дают CI и Security: {fmtSigned(score.repoHealthScore - score.healthcraftIndex)}.
-                    </Text>
-                  ))}
-              </>
-            )}
-          </Flex>
-        </Card>
-      )}
-      {/* В4.6 (У24): ЭТО и есть находка ДП5 — семистрочный абзац был набран
-          вариантом для однострочных подписей (body-short 13/16) и вторичным
-          цветом. Стало body-2 13/18 + complementary: интерлиньяж абзаца и
-          7,0:1 против 5,34:1 в тёмной теме. */}
-      {score && (
-        <Text as="p" variant="body-2" color="complementary" style={{ margin: "0 0 var(--g-spacing-6)" }}>
-          {meta ? `При покрытии данными ниже ${threshold} показатель не выставляется: без данных честного числа нет. ` : ""}
-          HealthCraft Index строят 4 публичные категории; CI и Security входят только в Repo Health Score – он виден участникам
-          репозитория с доступом к этим данным.
-        </Text>
-      )}
-
       {/* В4.6 (У22): тот же блок, что на рейтинге — вариант А кладёт шкалу в методику карточки */}
       {score && <ScoreLegend />}
+
+      {score && (
+        <AsideSection title="Что считаем">
+          {/* В4.6 (У24): ЭТО и есть находка ДП5 — семистрочный абзац был набран
+              вариантом для однострочных подписей (body-short 13/16) и вторичным
+              цветом. Стало body-2 13/18 + complementary: интерлиньяж абзаца и
+              7,0:1 против 5,34:1 в тёмной теме. */}
+          <Text as="p" variant="body-2" color="complementary">
+            {meta ? `При покрытии данными ниже ${threshold} показатель не выставляется: без данных честного числа нет. ` : ""}
+            HealthCraft Index строят 4 публичные категории; CI и Security входят только в Repo Health Score – он виден участникам
+            репозитория с доступом к этим данным.
+          </Text>
+        </AsideSection>
+      )}
 
       {score && score.noData.length > 0 && (
         <AsideSection title="Каких данных не хватило">
@@ -464,7 +446,10 @@ function ScoreAside({ card, meta, leaseMs, jobStalled }: { card: Card; meta: Met
         </AsideSection>
       )}
 
-      <AsideSection title="Скан">
+      {/* В4.6 (вариант А): жаргон и идентификаторы (номер скана, версия модели)
+          собраны ОДНИМ блоком под честным заголовком и стоят последними —
+          первый взгляд просил убрать их с видного места, но не терять */}
+      <AsideSection title="Реквизиты расчета">
         {scan ? (
           <DefinitionList nameMaxWidth={120}>
             <DefinitionList.Item name="Завершен">{fmtDateTime(scan.finishedAt ?? scan.startedAt)}</DefinitionList.Item>
@@ -498,9 +483,115 @@ function ScoreAside({ card, meta, leaseMs, jobStalled }: { card: Card; meta: Met
   );
 }
 
-function ScoreFigure({ title, help, total, coverage }: { title: string; help: string; total: number | null; coverage: number }) {
+/**
+ * ВЕЛИЧИНА — блок-полоса первым экраном главной колонки (В4.6, вариант А
+ * компоновки; замечание владельца 13 и корни ДП2/ДП4/ДП7 дизайн-пары).
+ *
+ * Что именно это лечит, числами замера 20.09: раньше «83» стояло на x = 1136
+ * из 1418 (80% ширины окна вправо), `Page` рендерил `main` и только потом
+ * `aside` — то есть главная величина была последней и для глаза, и для
+ * скринридера, а первое, что попадало в главную колонку, — номинальные веса.
+ * Контент колонки заканчивался на 59% её высоты, остальное был фон.
+ *
+ * Три яруса блока: величины, покрытие строкой, итог с действием.
+ * Полоса покрытия СНЯТА (находка Z5 пары): рядом с 83 стояла полная полоса,
+ * измеряющая не его, а покрытие данными — она конкурировала с самим
+ * показателем. Покрытие осталось строкой текста, полоса отдана величине.
+ */
+function ScoreBand({ card, meta }: { card: Card; meta: MetaResponse | null }) {
+  const score = card.score!;
+  const titleOf = (key: string): string => meta?.categories.find((c) => c.key === key)?.title ?? CATEGORY_TITLES_RU[key] ?? key;
+  const withDelta = card.recommendations.filter((r) => r.deltaScore !== null);
+  const top = withDelta.length > 0 ? withDelta.reduce((a, b) => ((a.deltaScore ?? 0) >= (b.deltaScore ?? 0) ? a : b)) : null;
+  const summary = summaryLine({
+    categories: (Object.entries(score.categories) as [string, Category][]).map(([key, cat]) => ({ title: titleOf(key), score: cat.score })),
+    recommendations: card.recommendations.length,
+    top: top ? { problem: top.problem, impact: top.expectedImpact ?? fmtSigned(top.deltaScore!) } : null,
+  });
   return (
-    <Flex direction="column" gap={1}>
+    <Card view="outlined" className="rh-score-band">
+      <Flex direction="column" gap={3}>
+        <Flex gap={6} wrap>
+          <ScoreFigure
+            title="HealthCraft Index"
+            help="Публичная оценка из 4 категорий: Документация, Активность, Issues, Code health. По ней репозитории сравниваются в общем рейтинге."
+            total={score.healthcraftIndex}
+            coverage={score.indexCoverage}
+            withBar
+          />
+          {score.fullLocked ? (
+            <Flex direction="column" gap={1} style={{ flex: "1 1 240px", minWidth: 0 }}>
+              <Text color="secondary">Repo Health Score</Text>
+              <Flex gap={2} alignItems="center">
+                <Icon data={Lock} size={16} />
+                <Text variant="subheader-2">закрыто</Text>
+              </Flex>
+              <Text variant="body-2" color="complementary">
+                {fullLockReason(card)}
+              </Text>
+              {/* П-Z7 дизайн-пары: под текстом замка — переход туда, где замок снимается */}
+              <Flex>
+                <Button view="normal" size="s" {...linkProps("/me")}>
+                  Открыть личный кабинет
+                </Button>
+              </Flex>
+            </Flex>
+          ) : (
+            <Flex direction="column" gap={1} style={{ flex: "1 1 240px", minWidth: 0 }}>
+              <ScoreFigure
+                title="Repo Health Score"
+                help="Полная оценка по всем 6 категориям (с CI и Security). Видна участникам репозитория с доступом к этим данным."
+                total={score.repoHealthScore}
+                coverage={score.repoHealthCoverage ?? 0}
+              />
+              {score.repoHealthScore !== null && score.healthcraftIndex !== null &&
+                // К-Ф3.4: фактическая signed-дельта — знак не обещается (плохие
+                // CI/Security опускают полный показатель ниже индекса);
+                // M-13: |Δ| < 0.05 — «разницы нет», не «+0.0»
+                (Math.abs(score.repoHealthScore - score.healthcraftIndex) < 0.05 ? (
+                  <Text variant="body-2" color="complementary">
+                    Разницы нет: CI и Security на этом скане нейтральны.
+                  </Text>
+                ) : (
+                  <Text variant="body-2" color="complementary">
+                    Разницу с HealthCraft Index дают CI и Security: {fmtSigned(score.repoHealthScore - score.healthcraftIndex)}.
+                  </Text>
+                ))}
+            </Flex>
+          )}
+        </Flex>
+
+        {/* нижний ярус: итог и следующий шаг, отделённые линией (У26 + У13) */}
+        <Flex gap={3} alignItems="center" justifyContent="space-between" wrap className="rh-score-band__summary">
+          <Text variant="body-1" color="complementary" style={{ flex: "1 1 320px" }}>
+            {summary}
+          </Text>
+          {card.recommendations.length > 0 && (
+            <Button view="normal" size="m" {...linkProps(`${window.location.pathname}?tab=${TAB_RECOMMENDATIONS}`)}>
+              Что делать ({card.recommendations.length})
+            </Button>
+          )}
+        </Flex>
+      </Flex>
+    </Card>
+  );
+}
+
+function ScoreFigure({
+  title,
+  help,
+  total,
+  coverage,
+  withBar = false,
+}: {
+  title: string;
+  help: string;
+  total: number | null;
+  coverage: number;
+  withBar?: boolean;
+}) {
+  return (
+    <Flex direction="column" gap={1} style={{ flex: "1 1 240px", minWidth: 0 }}>
       <Flex gap={1} alignItems="center">
         <Text color="secondary">{title}</Text>
         <HelpMark iconSize="s" aria-label={`Что такое «${title}»`}>
@@ -521,15 +612,17 @@ function ScoreFigure({ title, help, total, coverage }: { title: string; help: st
           </Label>
         </Flex>
       )}
-      <Flex justifyContent="space-between">
-        <Text variant="body-short" color="secondary">
-          Покрытие данными
-        </Text>
-        <Text variant="body-short">{fmtCoverage(coverage)}</Text>
-      </Flex>
-      <div style={{ width: "100%" }}>
-        <Progress value={Math.round(coverage * 100)} size="xs" theme="misc" />
-      </div>
+      {/* В4.6 (У21): полоса измеряет САМ показатель, а не покрытие; мера 360px
+          из варианта А — иначе на 1920 она превращается в декоративную линию */}
+      {withBar && total !== null && (
+        <div style={{ maxWidth: 360 }}>
+          <Progress value={Math.round(total)} size="s" theme={scoreTheme(total)} />
+        </div>
+      )}
+      {/* покрытие — строкой, без своей полосы (находка Z5 дизайн-пары) */}
+      <Text variant="body-short" color="secondary">
+        данных хватило: {fmtCoverage(coverage)}
+      </Text>
     </Flex>
   );
 }
@@ -543,6 +636,16 @@ function Categories({ card, meta }: { card: Card; meta: MetaResponse | null }) {
   // весов тех категорий, у которых данные есть (§4 методики)
   const dataWeight = entries.reduce((sum, [, cat]) => (cat.score === null ? sum : sum + cat.weight), 0);
   const titleOf = (key: string): string => meta?.categories.find((c) => c.key === key)?.title ?? CATEGORY_TITLES_RU[key] ?? key;
+  /**
+   * В4.6 (вариант А): ХУДШАЯ категория раскрыта по умолчанию — низ экрана
+   * занимают доказательства, а не фон (корень ДП4: контент главной колонки
+   * заканчивался на 59% её высоты). Она же — то место, куда ведёт строка
+   * итога «слабее всего», поэтому раскрытие совпадает с прочитанным.
+   * Категории без данных в расчёт худшей не идут: «нет данных» не плохо.
+   */
+  const worstKey = entries
+    .filter(([, cat]) => cat.score !== null)
+    .sort((a, b) => (a[1].score ?? 0) - (b[1].score ?? 0))[0]?.[0];
 
   return (
     <ul className="rh-list" style={{ borderTop: 0 }}>
@@ -554,14 +657,29 @@ function Categories({ card, meta }: { card: Card; meta: MetaResponse | null }) {
           cat={cat}
           contribution={cat.score === null ? 0 : Math.round((cat.weight / Math.max(1, dataWeight)) * 100)}
           card={card}
+          defaultOpen={key === worstKey}
         />
       ))}
     </ul>
   );
 }
 
-function CategoryRow({ categoryKey: key, title, cat, contribution, card }: { categoryKey: string; title: string; cat: Category; contribution: number; card: Card }) {
-  const [open, setOpen] = useState(false);
+function CategoryRow({
+  categoryKey: key,
+  title,
+  cat,
+  contribution,
+  card,
+  defaultOpen = false,
+}: {
+  categoryKey: string;
+  title: string;
+  cat: Category;
+  contribution: number;
+  card: Card;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
   const subs = Object.entries(cat.submetrics);
   const expandable = subs.length > 0;
 
@@ -610,8 +728,11 @@ function CategoryRow({ categoryKey: key, title, cat, contribution, card }: { cat
           {fmtScore(cat.score)}
         </Text>
       )}
+      {/* В4.6 (У25, ДП6): у категории без данных «вклад 0%» превращался в
+          «категория дала ноль» — единственное место, где продукт своими руками
+          опровергал собственный tri-state. Теперь там «не учитывается». */}
       <Text variant="body-short" color="secondary" className="rh-category__weight" title="номинальный вес категории в Repo Health Score → вклад после перенормировки">
-        вес {cat.weight}% → вклад {contribution}%
+        вес {cat.weight}% → вклад {contributionText(cat.score, contribution)}
       </Text>
       <span className="rh-category__tags">
         {cat.stale && (

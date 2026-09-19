@@ -409,6 +409,22 @@ body {
   gap: var(--g-spacing-1);
 }
 
+/* ---------- блок-полоса величины на карточке (В4.6, вариант А) ---------- */
+
+/* Величина первым экраном главной колонки. Паддинг — общий для Card
+ * карточки (У27: единый паддинг), линия отделяет нижний ярус «итог +
+ * следующий шаг» от ярусa величин. Только токены. */
+.rh-score-band {
+  box-sizing: border-box;
+  margin-bottom: var(--g-spacing-3);
+  padding: var(--g-spacing-3) var(--g-spacing-4);
+}
+
+.rh-score-band__summary {
+  padding-top: var(--g-spacing-2);
+  border-top: 1px solid var(--g-color-line-generic);
+}
+
 /* ---------- строка категории на карточке ---------- */
 
 .rh-category {
@@ -462,8 +478,8 @@ button.rh-category:focus-visible {
 .rh-subrows {
   display: flex;
   flex-direction: column;
-  gap: var(--g-spacing-2);
-  padding: var(--g-spacing-1) var(--g-spacing-3) var(--g-spacing-3) calc(16px + var(--g-spacing-6));
+  gap: var(--g-spacing-1);
+  padding: 0 var(--g-spacing-3) var(--g-spacing-2) calc(16px + var(--g-spacing-6));
 }
 
 .rh-subrow {

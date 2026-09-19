@@ -69,6 +69,20 @@ function subscribe(onChange: () => void): () => void {
 
 const snapshot = (): string => `${window.location.pathname}${window.location.search}`;
 
+/**
+ * В4.6 (У26): один параметр query как состояние — для таба карточки
+ * (`?tab=recommendations`). Форма `Route` при этом НЕ меняется: добавить
+ * `search` в ветку `repo` значило бы переписать её контракт и три ассерта
+ * `parseRoute` заодно, тогда как здесь нужен ровно один параметр и та же
+ * подписка, что у маршрута (popstate + своё событие навигации), чтобы
+ * «назад» переключал таб.
+ */
+export function useQueryParam(name: string): string | null {
+  // снимок — строка, не объект: useSyncExternalStore сравнивает по ссылке
+  const search = useSyncExternalStore(subscribe, () => window.location.search, () => "");
+  return new URLSearchParams(search).get(name);
+}
+
 export function useRoute(): Route {
   // строка-снимок, а не объект: useSyncExternalStore сравнивает ссылку,
   // новый объект на каждый вызов дал бы бесконечный ре-рендер

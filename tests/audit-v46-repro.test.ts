@@ -97,7 +97,8 @@ describe("В4.6-1 (У20): качество категорий закодиров
 // ---------------------------------------------------------------------------
 
 describe("В4.6-2 (У25): «вклад 0%» заменён на «не учитывается»", () => {
-  repro("карточка: у категории без данных вклад не печатается нулём", () => {
+  // ЗАКРЫТО блоком Б6 (вариант А компоновки карточки).
+  test("карточка: у категории без данных вклад не печатается нулём", () => {
     const src = srcOf("RepoPage.tsx");
     expect({ hasHonestWording: src.includes("не учитывается"), printsZeroContribution: /вклад \{contribution\}%/.test(src) }).toEqual({
       hasHonestWording: true,
@@ -105,7 +106,8 @@ describe("В4.6-2 (У25): «вклад 0%» заменён на «не учит�
     });
   });
 
-  repro("MD: в таблице категорий у Security стоит «не учитывается», а не «0%»", () => {
+  // ЗАКРЫТО блоком Б6 (вариант А компоновки карточки).
+  test("MD: в таблице категорий у Security стоит «не учитывается», а не «0%»", () => {
     const out = md();
     expect({ honest: out.includes("| Security | 20% | — | не учитывается |"), zero: out.includes("| 0% |") }).toEqual({
       honest: true,
@@ -295,24 +297,36 @@ describe("В4.6-7 (У23): границы сетки и разрешения", ()
 // ---------------------------------------------------------------------------
 
 describe("В4.6-8 (У26/У13/У38): вариант А — карточка начинается с вывода", () => {
-  repro("генератор строки итога — чистая функция src/web/format.ts, MD её вызывает", async () => {
+  // ЗАКРЫТО блоком Б6 (вариант А компоновки карточки).
+  test("генератор строки итога — чистая функция src/web/format.ts, MD её вызывает", async () => {
     const mod = (await import("../src/web/format")) as { summaryLine?: unknown };
     expect(typeof mod.summaryLine).toBe("function");
     expect(reportSrc()).toContain("summaryLine");
   });
 
-  repro("величина — блоком в главной колонке, правая панель чисто методическая", () => {
+  // Б6: проверяется ПОРЯДОК РЕНДЕРА, а не порядок объявления функций в файле.
+  // Первый вариант ассерта сравнивал позиции `rh-score-band` и
+  // `function ScoreAside` в исходнике — это мерило ничего не говорит о том,
+  // где блок оказывается на экране: `Page` берёт панель пропом `aside` и
+  // рендерит `main`, потом `aside`, поэтому «полоса раньше панели» = «полоса
+  // лежит среди детей Page». Заодно проверяется, что панель стала
+  // МЕТОДИЧЕСКОЙ по составу, а не просто лишилась числа.
+  // ЗАКРЫТО блоком Б6 (вариант А компоновки карточки).
+  test("величина — блоком в главной колонке, правая панель чисто методическая", () => {
     const src = srcOf("RepoPage.tsx");
-    const main = src.indexOf("rh-score-band");
-    const aside = src.indexOf("function ScoreAside");
-    expect({ hasBand: main >= 0, bandBeforeAside: main >= 0 && main < aside, asideKeepsFigure: /function ScoreAside[\s\S]{0,4000}display-2/.test(src) }).toEqual({
-      hasBand: true,
-      bandBeforeAside: true,
-      asideKeepsFigure: false,
-    });
+    const pageOpen = src.indexOf("<Page crumbs={crumbs} actions={actions}");
+    const bandMount = src.indexOf("<ScoreBand card={card}");
+    const asideBody = src.slice(src.indexOf("function ScoreAside"), src.indexOf("function ScoreBand"));
+    expect({
+      bandIsMainChild: pageOpen >= 0 && bandMount > pageOpen,
+      bandHasOwnClass: src.includes('className="rh-score-band"'),
+      asideKeepsFigure: /display-2/.test(asideBody),
+      asideIsMethodOnly: asideBody.includes("<ScoreLegend />") && asideBody.includes("Реквизиты расчета"),
+    }).toEqual({ bandIsMainChild: true, bandHasOwnClass: true, asideKeepsFigure: false, asideIsMethodOnly: true });
   });
 
-  repro("строка итога и кнопка «Что делать (N)» — над табами; таб в query", () => {
+  // ЗАКРЫТО блоком Б6 (вариант А компоновки карточки).
+  test("строка итога и кнопка «Что делать (N)» — над табами; таб в query", () => {
     const src = srcOf("RepoPage.tsx");
     expect({ cta: src.includes("Что делать"), tabInQuery: src.includes("?tab=") || src.includes('"tab"'), worstOpen: src.includes("worstKey") }).toEqual({
       cta: true,

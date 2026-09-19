@@ -156,6 +156,69 @@ export const SCORE_SCALE: { theme: "success" | "warning" | "danger"; word: strin
 /** Короткая форма «нет данных» для узких колонок таблицы («Нет данных» не влезает в 59px). */
 export const NO_DATA_SHORT = "н/д";
 
+/** Категория для строки итога: имя и балл (null — категория без данных, в итог не идёт). */
+export interface SummaryCategory {
+  title: string;
+  score: number | null;
+}
+
+/** Рекомендация с наибольшим измеримым приростом; `problem` приходит УЖЕ экранированной вызывающим. */
+export interface SummaryTop {
+  problem: string;
+  impact: string;
+}
+
+export interface SummaryInput {
+  categories: SummaryCategory[];
+  recommendations: number;
+  top: SummaryTop | null;
+}
+
+/**
+ * В4.6 (У26/У13, ДП7): строка итога — «сильнее всего…, слабее всего…,
+ * рекомендаций N, наибольший прирост даёт…».
+ *
+ * Почему функция живёт ЗДЕСЬ, а не в `src/report/markdown.ts`, где родился
+ * этот текст: аудит-пара промпта показала, что шов ровно один.
+ * `summarySection()` приватна и возвращает массив markdown-строк, а импорт
+ * `src/report` в клиент тянет серверный слой и валит `Bun.build` (живой тест
+ * tests/web.test.ts). Зависимость в дереве идёт web ← report
+ * (`markdown.ts` уже импортирует `../web/format`), поэтому генератор
+ * переезжает сюда чистой функцией, а `markdown.ts` её вызывает: одна
+ * формулировка на страницу и на отчёт, новых полей и маршрутов API нет.
+ *
+ * Вход — плоские структуры, а НЕ `RepoCard`: `src/api/repos` тянет
+ * `bun:sqlite`, и типовой импорт из него в этот модуль сломал бы бандл.
+ * Экранирование markdown остаётся заботой вызывающего (`markdown.ts`
+ * передаёт `mdEscape(problem)`) — здесь нет знания о формате вывода.
+ */
+export function summaryLine(input: SummaryInput): string {
+  const scored = input.categories.filter((c): c is { title: string; score: number } => c.score !== null);
+  const parts: string[] = [];
+  if (scored.length > 0) {
+    const best = [...scored].sort((a, b) => b.score - a.score)[0]!;
+    const worst = [...scored].sort((a, b) => a.score - b.score)[0]!;
+    parts.push(`Сильнее всего – ${best.title} (${fmtScore(best.score)}), слабее всего – ${worst.title} (${fmtScore(worst.score)}).`);
+  }
+  parts.push(
+    `Рекомендаций: ${input.recommendations}` +
+      `${input.top ? `; наибольший измеримый прирост дает «${input.top.problem}» (${input.top.impact})` : ""}.`,
+  );
+  return parts.join(" ");
+}
+
+/**
+ * В4.6 (У25, ДП6): вклад категории БЕЗ данных не печатается нулём.
+ * «вклад 0%» — единственное место, где продукт своими руками опровергал
+ * собственный tri-state: категория читалась как «дала ноль», тогда как её
+ * вес выброшен и перенормирован. Одна копия на карточку и на MD-таблицу.
+ */
+export const NOT_COUNTED = "не учитывается";
+
+export function contributionText(score: number | null | undefined, contribution: number): string {
+  return score === null || score === undefined ? NOT_COUNTED : `${contribution}%`;
+}
+
 /** Первая буква заглавная — для меток (Label): у платформы они в регистре предложения. */
 export function sentence(text: string): string {
   return text.length === 0 ? text : text[0]!.toUpperCase() + text.slice(1);

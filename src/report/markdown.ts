@@ -14,7 +14,7 @@ import {
 } from "../api/repos";
 import { COVERAGE_NULL_BELOW, INDEX_WEIGHTS, SCORE_WEIGHTS, type CategoryKey } from "../score/model";
 // копии про Security и заглушки доступа — одни и те же на странице и в отчёте
-import { SECURITY_PUBLIC_NOTE, accessLockText, fmtSigned, gitLimitsText, scanStatusText, scanTriggerText, scoreWord } from "../web/format";
+import { SECURITY_PUBLIC_NOTE, accessLockText, contributionText, fmtSigned, gitLimitsText, scanStatusText, scanTriggerText, scoreWord, summaryLine } from "../web/format";
 
 export { SECURITY_PUBLIC_NOTE };
 
@@ -53,7 +53,7 @@ function headerSection(card: RepoCard): string[] {
   if (repo.title && repo.title !== repo.repo) out.push(`_${mdEscape(repo.title)}_`, "");
   out.push(
     `- Репозиторий: ${repo.webUrl}`,
-    // Ф2.9: один язык (RU) – статусы и триггеры словами, как на карточке
+    // Ф2.9: один язык (RU) — статусы и триггеры словами, как на карточке
     `- Скан: ${scan ? `#${scan.id} от ${fmtDateTime(scan.finishedAt ?? scan.startedAt)} (статус ${scanStatusText(scan.status)}, запуск ${scanTriggerText(scan.trigger)})` : "не выполнялся"}`,
     `- Модель: ${score ? score.modelVersion : "—"}`,
     `- Язык: ${repo.language ? mdEscape(repo.language) : "не определен"}; лайки: ${num(repo.likes)}; форки: ${num(repo.forks)}`,
@@ -69,7 +69,7 @@ function summarySection(card: RepoCard): string[] {
   const out = ["## Итог", ""];
   const score = card.score;
   if (card.markers.gitLimits) out.push(gitLimitsText(card.markers.gitLimits), "");
-  // Ф2.9 (LOW-9): маркер codeEmpty – теми же словами, что на карточке
+  // Ф2.9 (LOW-9): маркер codeEmpty — теми же словами, что на карточке
   if (card.markers.codeEmpty) {
     out.push(
       "В репозитории нет кода (ни одного файла): HealthCraft Index и Repo Health Score равны 0 – по методике это данные о проекте («проекта нет»), а не отсутствие оценки или сбой.",
@@ -98,13 +98,10 @@ function summarySection(card: RepoCard): string[] {
     return out;
   }
 
-  const scored = categoryEntries(card).filter(([, c]) => c.score !== null) as [CategoryKey, CardCategory][];
-  const best = [...scored].sort((a, b) => (b[1].score ?? 0) - (a[1].score ?? 0))[0];
-  const worst = [...scored].sort((a, b) => (a[1].score ?? 0) - (b[1].score ?? 0))[0];
   const withDelta = card.recommendations.filter((r): r is CardRecommendation & { deltaScore: number } => r.deltaScore !== null);
   const top = withDelta.length > 0 ? withDelta.reduce((a, b) => ((a.deltaScore ?? 0) >= (b.deltaScore ?? 0) ? a : b)) : null;
 
-  // В4.6 (У22): то же слово шкалы, что стоит у числа на карточке – отчет и
+  // В4.6 (У22): то же слово шкалы, что стоит у числа на карточке — отчёт и
   // страница обязаны говорить одно и то же (источник слова один, format.ts)
   out.push(
     `**HealthCraft Index (4 категории): ${Math.round(score.healthcraftIndex)} из 100 – ${scoreWord(score.healthcraftIndex)}** ` +
@@ -117,18 +114,17 @@ function summarySection(card: RepoCard): string[] {
     "Индекс построен из публичных данных: CI/CD и Security в нем не участвуют по правилам платформы – разницу с полным показателем дают только они.",
     "",
   );
-  if (best && worst) {
-    out.push(
-      `Сильнее всего – ${CATEGORY_TITLES[best[0]]} (${round(best[1].score)}), слабее всего – ` +
-        `${CATEGORY_TITLES[worst[0]]} (${round(worst[1].score)}).`,
-      "",
-    );
-  }
+  // В4.6 (У26/У13): СТРОКА ИТОГА берётся из общего генератора
+  // (`src/web/format.ts`), чтобы на карточке и в отчёте стояла ОДНА
+  // формулировка. Экранирование остаётся здесь: `top.problem` уходит в
+  // генератор УЖЕ пропущенным через mdEscape — тот же, что у rec.problem
+  // в разделе рекомендаций (S-2 круга 2 В4.4 не регрессирует).
   out.push(
-    `Рекомендаций: ${card.recommendations.length}` +
-      // S-2 (круг 2 В4.4): тот же mdEscape, что у rec.problem в разделе рекомендаций –
-      // непоследовательности защиты больше нет
-      `${top ? `; наибольший измеримый прирост дает «${mdEscape(top.problem)}» (${top.expectedImpact ?? fmtSigned(top.deltaScore)})` : ""}.`,
+    summaryLine({
+      categories: categoryEntries(card).map(([key, cat]) => ({ title: CATEGORY_TITLES[key], score: cat.score })),
+      recommendations: card.recommendations.length,
+      top: top ? { problem: mdEscape(top.problem), impact: top.expectedImpact ?? fmtSigned(top.deltaScore) } : null,
+    }),
     "",
   );
   if (score.noData.length > 0) {
@@ -139,10 +135,10 @@ function summarySection(card: RepoCard): string[] {
 }
 
 /**
- * Repo Health Score (6 категорий, с CI и Security) – отдельной строкой;
- * NULL – честно «недостаточно данных». Рядом – ФАКТИЧЕСКАЯ signed-дельта
+ * Repo Health Score (6 категорий, с CI и Security) — отдельной строкой;
+ * NULL — честно «недостаточно данных». Рядом — ФАКТИЧЕСКАЯ signed-дельта
  * с индексом: знак не обещается (плохие CI/Security опускают полный
- * показатель ниже индекса – инверсия законна, К-Ф3.4).
+ * показатель ниже индекса — инверсия законна, К-Ф3.4).
  */
 function fullScoreLine(card: RepoCard): string[] {
   const score = card.score!;
@@ -157,7 +153,7 @@ function fullScoreLine(card: RepoCard): string[] {
   ];
   if (score.healthcraftIndex !== null) {
     const d = score.repoHealthScore - score.healthcraftIndex;
-    // M-13: |Δ| < 0.05 – «разницы нет», не «+0.0» (паритет со страницей)
+    // M-13: |Δ| < 0.05 — «разницы нет», не «+0.0» (паритет со страницей)
     lines.push(
       Math.abs(d) < 0.05
         ? "Разницы нет: CI и Security на этом скане нейтральны."
@@ -180,7 +176,9 @@ function categoriesTable(card: RepoCard): string[] {
     "|---|---:|---:|---:|---|",
   ];
   for (const [key, cat] of entries) {
-    const contribution = cat.score === null ? "0%" : `${Math.round((cat.weight / Math.max(1, dataWeight)) * 100)}%`;
+    // В4.6 (У25, ДП6): у категории без данных вклад не нулевой, а НЕ СУЩЕСТВУЕТ:
+    // вес выброшен и перенормирован. «0%» читалось как «категория дала ноль».
+    const contribution = contributionText(cat.score, Math.round((cat.weight / Math.max(1, dataWeight)) * 100));
     const status = cat.locked !== undefined ? "закрыто доступом" : cat.score === null ? NO_DATA : cat.stale ? "данные из истории" : "данные есть";
     out.push(`| ${CATEGORY_TITLES[key]} | ${cat.weight}% | ${cat.score === null ? "—" : round(cat.score)} | ${contribution} | ${status} |`);
   }
@@ -213,7 +211,7 @@ function categoriesDetail(card: RepoCard): string[] {
     }
     out.push("| Подметрика | Балл (0–100) | Значение | Примечание |", "|---|---:|---|---|");
     for (const [subKey, sub] of subs) {
-      // submetric приходит долей 0..1 – в отчете показывается ×100, как и на странице
+      // submetric приходит долей 0..1 — в отчёте показывается ×100, как и на странице
       const value = sub.score === null ? "—" : String(Math.round(sub.score * 100));
       out.push(`| ${subKey} | ${value} | ${cell(sub.value)} | ${cell(sub.note ?? "")} |`);
     }

@@ -213,6 +213,15 @@ async function run(): Promise<void> {
         "tri-state NULL": "document.body.textContent?.includes('показатель не выставляется') ? 1 : 0",
         "объяснение закрытых каналов": "document.body.innerText.includes('входят только в Repo Health Score') ? 1 : 0",
         "кнопка отчета": "[...document.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'Отчет').length",
+        // В4.6, приёмка вариантa А (пункт 5): величина И шесть категорий в
+        // ОДНОМ экране. Проверяется не на глаз, а геометрией: нижняя кромка
+        // шестой строки категории обязана лежать внутри окна. Целевое
+        // разрешение 1366x768 — самое тесное из трёх.
+        "величина и 6 категорий в одном экране":
+          "(() => { const rows = [...document.querySelectorAll('.rh-category')]; if (rows.length < 6) return 0; return rows[5].getBoundingClientRect().bottom <= window.innerHeight ? 1 : 0; })()",
+        // нижний ярус блока-полосы: строка итога и следующий шаг (У26)
+        "строка итога и «Что делать»":
+          "(document.body.innerText.includes('Сильнее всего') && document.body.innerText.includes('Что делать')) ? 1 : 0",
       },
     },
   ];
