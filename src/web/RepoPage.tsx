@@ -127,7 +127,11 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
 
   return (
     <Page crumbs={crumbs} actions={actions} aside={<ScoreAside card={card} meta={meta} />}>
-      <Header card={card} starDoneKey={refresh.doneKey} />
+      <Header
+        card={card}
+        starDoneKey={refresh.doneKey}
+        starLoggedIn={me.state.kind === "ok" && me.state.data.login !== null}
+      />
       {card.score === null ? (
         card.job ? (
           // Ф2.15: первый анализ — статус живой job вместо лжи «скана ещё не было»
@@ -242,7 +246,7 @@ function useRefreshAnalysis(org: string, repo: string, cardUrl: string, sinceSca
   return { phase, start, doneKey };
 }
 
-function Header({ card, starDoneKey }: { card: Card; starDoneKey: string | null }) {
+function Header({ card, starDoneKey, starLoggedIn }: { card: Card; starDoneKey: string | null; starLoggedIn: boolean }) {
   const { repo: r } = card;
   return (
     <div style={{ marginBottom: "var(--g-spacing-4)" }}>
@@ -254,7 +258,7 @@ function Header({ card, starDoneKey }: { card: Card; starDoneKey: string | null 
             <Text variant="header-1" as="h1" ellipsis>
               {r.org} / {r.repo}
             </Text>
-            <FavoriteStar org={r.org} repo={r.repo} doneKey={starDoneKey} />
+            <FavoriteStar org={r.org} repo={r.repo} doneKey={starDoneKey} loggedIn={starLoggedIn} />
             <ActionTooltip title="Открыть на sourcecraft.dev">
               <Button
                 view="flat-secondary"
@@ -815,10 +819,11 @@ function securityNote(card: Card): string {
  * переход active→done в текущей browser-session: ключ `<org>/<repo>:<jobId>`
  * в sessionStorage, DDL нет. Заполненная звезда не светится.
  */
-function FavoriteStar({ org, repo, doneKey }: { org: string; repo: string; doneKey: string | null }) {
+function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: string; doneKey: string | null; loggedIn: boolean }) {
   const [state, setState] = useState<"loading" | "on" | "off" | "anon">("loading");
   const [error, setError] = useState<string | null>(null);
   const [glow, setGlow] = useState(false);
+  const probed = useRef(false);
   useEffect(() => {
     if (!doneKey || state !== "off") return;
     try {
@@ -832,6 +837,14 @@ function FavoriteStar({ org, repo, doneKey }: { org: string; repo: string; doneK
     return () => clearTimeout(timer);
   }, [doneKey, state, org, repo]);
   useEffect(() => {
+    // аноним: звезда выключена без живого запроса — 401-зонд мусорил консоль
+    // браузера (планка В4.5 «ноль ошибок консоли»), а вход уже виден в /api/me
+    if (!loggedIn) {
+      setState("anon");
+      return;
+    }
+    if (probed.current) return;
+    probed.current = true;
     let stop = false;
     fetch(`/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`)
       .then(async (res) => {
@@ -848,7 +861,7 @@ function FavoriteStar({ org, repo, doneKey }: { org: string; repo: string; doneK
     return () => {
       stop = true;
     };
-  }, [org, repo]);
+  }, [org, repo, loggedIn]);
   if (state === "loading") return null;
   const toggle = async () => {
     setError(null);
