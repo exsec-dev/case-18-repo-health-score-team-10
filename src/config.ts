@@ -103,6 +103,8 @@ export interface QueueConfig {
   favoriteOwnCooldownMs: number;
   /** ретеншен завершённых строк `jobs` (Ф2.13): 30 дней, env QUEUE_RETENTION_DAYS */
   retentionDays: number;
+  /** чтений /api/me/repos на юзера в минуту (Ф2.8): 6, env QUEUE_MY_REPOS_PER_MINUTE */
+  myReposPerMinute: number;
 }
 
 export interface AccessConfig {
@@ -268,6 +270,13 @@ export function loadConfig(): Config {
   const scan = scanFromEnv(env);
   const provider = env.LLM_PROVIDER === "zai" ? "zai" : "yandex";
   const mainModel = env.MAIN_MODEL ?? (provider === "yandex" ? "yandexgpt" : "glm-5.3");
+  // Ф2.8: слишком короткий секрет = отсутствующий (сессии и PAT выключены),
+  // а не «слабый, но рабочий»; значение в лог не печатается
+  const appSecretRaw = env.APP_SECRET ?? null;
+  const appSecret =
+    appSecretRaw !== null && appSecretRaw.length < 32
+      ? (console.error("[config] APP_SECRET: shorter than 32 chars — sessions and PAT storage are disabled"), null)
+      : appSecretRaw;
   return {
     port: Number(env.PORT) > 0 ? Number(env.PORT) : 8418,
     processRole: (["all", "web", "rating"] as const).includes(process.env.PROCESS_ROLE as "all" | "web" | "rating")
@@ -284,7 +293,7 @@ export function loadConfig(): Config {
       yaClientId: env.YA_CLIENT_ID ?? null,
       yaClientSecret: env.YA_CLIENT_SECRET ?? null,
       redirect: env.YA_REDIRECT_URI ?? "http://localhost:8418/auth/ya/callback",
-      appSecret: env.APP_SECRET ?? null,
+      appSecret,
       yaOauthBase: apiBaseFromEnv(env, "YA_OAUTH_BASE", DEFAULT_YA_ENDPOINTS.oauthBase),
       yaLoginBase: apiBaseFromEnv(env, "YA_LOGIN_BASE", DEFAULT_YA_ENDPOINTS.loginBase),
     },
@@ -307,6 +316,7 @@ export function loadConfig(): Config {
       favoriteChecksPerMinute: envInt(env, "QUEUE_FAVORITE_CHECKS_PER_MINUTE") ?? 6,
       favoriteOwnCooldownMs: envInt(env, "QUEUE_FAVORITE_OWN_COOLDOWN_MS") ?? 6 * 60 * 60_000,
       retentionDays: envInt(env, "QUEUE_RETENTION_DAYS") ?? 30,
+      myReposPerMinute: envInt(env, "QUEUE_MY_REPOS_PER_MINUTE") ?? 6,
     },
     llm: {
       provider,

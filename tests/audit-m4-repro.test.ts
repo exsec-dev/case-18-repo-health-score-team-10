@@ -59,7 +59,7 @@ describe("C1: own-результаты не привязаны к пользов
     "чужой пользователь (свой Я ID, без PAT, без прав) НЕ получает own-карточку приватного репо",
     async () => {
       const { dir, t } = tempDb();
-      const secret = "audit-test-secret";
+      const secret = "audit-test-secret-0123456789abcdef";
       const owner = upsertUser(t.db, "ya-owner", "owner");
       const stranger = upsertUser(t.db, "ya-stranger", "stranger");
       const repoId = insertRepo(t.db, "acme", "secret-repo", "private");
@@ -114,7 +114,7 @@ describe("H1: own-скан с узким PAT эвиктирует публичн
     const user = upsertUser(t.db, "ya-griefer", "griefer");
     const repoId = insertRepo(t.db, "popular", "project", "public");
     const base = loadConfig();
-    const config: Config = { ...base, auth: { ...base.auth, appSecret: "audit-test-secret" } };
+    const config: Config = { ...base, auth: { ...base.auth, appSecret: "audit-test-secret-0123456789abcdef" } };
 
     // настоящий runScan; фейки — только сетевые каналы (git ок, REST: repo-GET 403 по PAT юзера)
     const realRunScan = (d: ScanDeps, slug: string, o: ScanOptions) =>
@@ -267,7 +267,7 @@ describe("H4: DoS одним пользователем", () => {
       .query("INSERT INTO user_settings (user_id, scan, updated_at) VALUES (?, ?, ?)")
       .run(user, JSON.stringify({ useDefaults: false, maxBytes: null, timeoutMs: 1e300 }), new Date().toISOString());
     const base = loadConfig();
-    const config: Config = { ...base, auth: { ...base.auth, appSecret: "audit-test-secret" } };
+    const config: Config = { ...base, auth: { ...base.auth, appSecret: "audit-test-secret-0123456789abcdef" } };
     let limits: ScanDeps["cloneLimits"];
     const capture = (async (d: ScanDeps) => {
       limits = d.cloneLimits;

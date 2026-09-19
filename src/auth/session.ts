@@ -8,7 +8,7 @@
 // __Host-rh_* с атрибутом Secure (Path=/ уже есть, Domain не ставим) —
 // требование `__Host-`; на http прежние имена, читается только актуальное.
 import type { Database } from "bun:sqlite";
-import { createHmac, randomBytes, timingSafeEqual, createHash } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual, createHash, hkdfSync } from "node:crypto";
 
 export const SESSION_COOKIE = "rh_session";
 export const SESSION_TTL_MS = 7 * 24 * 3600_000;
@@ -47,8 +47,18 @@ export interface SessionUser {
   login: string;
 }
 
+/**
+ * Ф2.8: ключ HMAC сессий — HKDF от APP_SECRET с контекстом "session"
+ * (PAT живёт на своём контексте "pat" в pat.ts). Смена APP_SECRET
+ * инвалидирует все подписи — старые cookie становятся анонимными
+ * (разлогинивает всех), это осознанное свойство, не дефект.
+ */
+function sessionHmacKey(appSecret: string): Buffer {
+  return Buffer.from(hkdfSync("sha256", appSecret, "repo-health", "session", 32));
+}
+
 function hmac(secret: string, value: string): string {
-  return createHmac("sha256", secret).update(value).digest("base64url");
+  return createHmac("sha256", sessionHmacKey(secret)).update(value).digest("base64url");
 }
 
 function sha256(value: string): string {

@@ -38,6 +38,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Config } from "./config";
+import { PAT_V2_PREFIX, reencryptPat } from "./auth/pat";
 import { publicStatusSql, ratingEligibleSql } from "./score/compute";
 
 /**
@@ -332,6 +333,21 @@ export function openDb(config: Config): Database {
     last_checked_at TEXT,
     UNIQUE(user_id, org_slug, repo_slug)
   )`);
+  // Ф2.8 (В4.2b): перешифровка PAT на ключ HKDF — ИДЕМПОТЕНТНО. Строки
+  // без префикса `v2:` расшифровываются прежним ключом sha256 и
+  // перезаписываются на `v2:` (HKDF); нерасшифровываемые (секрет сменился,
+  // данные повреждены) НЕ трогаются — их честно объявит patReadable. Без
+  // appSecret (сессии выключены) проход не выполняется вовсе.
+  if (config.auth.appSecret) {
+    const legacyRows = db
+      .query("SELECT user_id, pat_enc FROM user_tokens WHERE pat_enc IS NOT NULL")
+      .all() as { user_id: number; pat_enc: string }[];
+    for (const row of legacyRows) {
+      if (row.pat_enc.startsWith(PAT_V2_PREFIX)) continue;
+      const next = reencryptPat(config.auth.appSecret, row.pat_enc);
+      if (next !== null) db.query("UPDATE user_tokens SET pat_enc = ? WHERE user_id = ?").run(next, row.user_id);
+    }
+  }
   // П8 (LOW-2): версия схемы пишется ПОСЛЕДНЕЙ — после всех DDL, миграций и
   // ensureColumn. Порты оставили её перед портовыми объектами, и обрыв между
   // ними помечал БД версией без этих объектов; теперь «версия = 1.7» означает,

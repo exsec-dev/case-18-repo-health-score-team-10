@@ -169,7 +169,8 @@ export async function collectAppsec(
   const groupIdsCap = opts.groupIdsCap ?? 50;
 
   // --- gitRepo: внутренний id репозитория (строкой, как требует API) ---
-  const repoRes = await rest.get(`/repos/${slug}`);
+  // Ф2.8: сегменты слага в URL — encodeURIComponent
+  const repoRes = await rest.get(`/repos/${slug.split("/").map((s) => encodeURIComponent(s)).join("/")}`);
   if (repoRes.status === 401 || repoRes.status === 403) {
     return noData("access", `repo GET ${repoRes.status}`);
   }

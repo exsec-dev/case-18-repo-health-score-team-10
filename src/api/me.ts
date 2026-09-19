@@ -493,13 +493,13 @@ export async function checkFavoriteAccess(
   deps: AccessProbeDeps,
   enqueueUserScan: (repoRes: { status: number; json: unknown }) => Promise<FavoriteEnqueue>,
 ): Promise<FavoriteCheckResponse> {
-  const repoRes = await deps.restGet(`/repos/${org}/${repo}`);
+  const repoRes = await deps.restGet(`/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`);
   const access: FavoriteAccess = { clone: false, visibility: "unknown", ci: null, appsec: null, own: false };
   if (repoRes.status === 200) {
     access.clone = true;
     const body = repoRes.json as { visibility?: unknown; id?: unknown } | null;
     access.visibility = body?.visibility === "private" ? "private" : body?.visibility === "public" ? "public" : "unknown";
-    const ci = await deps.restGet(`/repos/${org}/${repo}/cicd/runs?page_size=1`);
+    const ci = await deps.restGet(`/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/cicd/runs?page_size=1`);
     access.ci = ci.status === 200 ? true : ci.status === 403 ? false : null;
     const uuid = typeof body?.id === "string" ? body.id : null;
     if (uuid) {

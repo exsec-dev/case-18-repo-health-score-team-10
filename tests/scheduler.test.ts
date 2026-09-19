@@ -194,7 +194,7 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
   test("лимит частоты: 11-я новая заявка за час → 429; дубли не считаются; окно скользящее", async () => {
     clear();
     const u = user("rate");
-    const queue = { userScansPerHour: 10, maxAttempts: 3, userActiveMax: 100, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000, retentionDays: 30 };
+    const queue = { userScansPerHour: 10, maxAttempts: 3, userActiveMax: 100, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000, retentionDays: 30, myReposPerMinute: 1000 };
     const ok = { get: async () => ({ status: 200, json: { visibility: "public" }, bodyText: "" }), requestCount: () => 0 };
     const now = new Date("2026-09-18T10:00:00Z");
     for (let i = 0; i < 10; i++) {
@@ -306,7 +306,7 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
     test("≤ userActiveMax активных заявок на юзера → 429 too_many_active; после завершения — снова можно", async () => {
       clear();
       const u = user("active-max");
-      const queue = { userScansPerHour: 100, maxAttempts: 3, userActiveMax: 2, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000, retentionDays: 30 };
+      const queue = { userScansPerHour: 100, maxAttempts: 3, userActiveMax: 2, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000, retentionDays: 30, myReposPerMinute: 1000 };
       expect((await requestUserScan(q, okClient, u, "am", "a", queue)).status).toBe(202);
       expect((await requestUserScan(q, okClient, u, "am", "b", queue)).status).toBe(202);
       // дубль активной заявки — по-прежнему 202 deduplicated (дедуп раньше предела)
@@ -324,7 +324,7 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
       clear();
       const u = user("par-dup");
       const slow = { get: async () => (await Bun.sleep(10), { status: 200, json: { visibility: "public" }, bodyText: "" }), requestCount: () => 0 };
-      const queue = { userScansPerHour: 100, maxAttempts: 3, userActiveMax: 100, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000, retentionDays: 30 };
+      const queue = { userScansPerHour: 100, maxAttempts: 3, userActiveMax: 100, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 6 * 60 * 60_000, retentionDays: 30, myReposPerMinute: 1000 };
       const outs = await Promise.all([1, 2, 3].map(() => requestUserScan(q, slow, u, "pd", "same", queue)));
       expect(outs.map((o) => o.body["deduplicated"]).sort()).toEqual([false, true, true]);
       expect(new Set(outs.map((o) => o.body["jobId"])).size).toBe(1);
@@ -539,7 +539,7 @@ describe("ночной каталог: дифф, форс, эвикция", () =
 describe("processJob: repo-сигнал эвикции и заявки юзеров (К3)", () => {
   // герметично (M10): APP_SECRET инъектируется в конфиг теста, не из .env
   const base = loadConfig();
-  const config = { ...base, scan: DEFAULT_SCAN, auth: { ...base.auth, appSecret: "test-app-secret" } };
+  const config = { ...base, scan: DEFAULT_SCAN, auth: { ...base.auth, appSecret: "test-app-secret-0123456789abcdef" } };
 
   function fakeWorker(runScanImpl: (slug: string, opts: Record<string, unknown>) => Partial<ScanResult>) {
     const calls: { slug: string; opts: Record<string, unknown>; deps: ScanDeps }[] = [];
@@ -872,7 +872,7 @@ describe("П8: причина падения job пишется в jobs.error", 
 
 describe("Ф2.1: тик воркер-лупа и планировщика вызываются напрямую и не выпускают исключение", () => {
   const base = loadConfig();
-  const config = { ...base, scan: DEFAULT_SCAN, auth: { ...base.auth, appSecret: "test-app-secret" } };
+  const config = { ...base, scan: DEFAULT_SCAN, auth: { ...base.auth, appSecret: "test-app-secret-0123456789abcdef" } };
 
   test("claim бросает (SQLITE_BUSY) → тик возвращает claim-failed, цикл жив, следующий тик работает", async () => {
     let firstCall = true;

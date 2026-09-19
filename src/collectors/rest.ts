@@ -61,30 +61,35 @@ interface PathArgs {
   issueSlug?: string;
 }
 
+/** Ф2.8: сегменты слага/issue в URL — encodeURIComponent (вход может быть извне). */
+const encSegment = (raw: string): string => encodeURIComponent(raw);
+const encSlugPath = (slug: string): string => slug.split("/").map(encSegment).join("/");
+
 function resourcePath(resource: RestResourceName, slug: string, args: PathArgs): { path: string; list: boolean } {
   const ps = args.pageSize;
+  const s = encSlugPath(slug);
   switch (resource) {
     case "repo":
-      return { path: `/repos/${slug}`, list: false };
+      return { path: `/repos/${s}`, list: false };
     case "issues-open":
-      return { path: `/repos/${slug}/issues?filter=status%3Dopen&sort_by=-created_at&page_size=${ps}`, list: true };
+      return { path: `/repos/${s}/issues?filter=status%3Dopen&sort_by=-created_at&page_size=${ps}`, list: true };
     case "issues-closed":
-      return { path: `/repos/${slug}/issues?filter=status%3Dclosed&sort_by=-updated_at&page_size=${ps}`, list: true };
+      return { path: `/repos/${s}/issues?filter=status%3Dclosed&sort_by=-updated_at&page_size=${ps}`, list: true };
     case "pulls-open":
     case "pulls-open":
       // sort_by=-created_at: недавние первыми (для pulls_90d); даты ещё
       // раз сортируются клиентски — устойчиво к игнору сервером
-      return { path: `/repos/${slug}/pulls?filter=status%3Dopen&sort_by=-created_at&page_size=${ps}`, list: true };
+      return { path: `/repos/${s}/pulls?filter=status%3Dopen&sort_by=-created_at&page_size=${ps}`, list: true };
     case "contributors":
-      return { path: `/repos/${slug}/contributors?page_size=${ps}`, list: true };
+      return { path: `/repos/${s}/contributors?page_size=${ps}`, list: true };
     case "releases":
-      return { path: `/repos/${slug}/releases?sort_by=-released_at&page_size=${ps}`, list: true };
+      return { path: `/repos/${s}/releases?sort_by=-released_at&page_size=${ps}`, list: true };
     case "cicd-runs":
-      return { path: `/repos/${slug}/cicd/runs?page_size=${ps}`, list: true };
+      return { path: `/repos/${s}/cicd/runs?page_size=${ps}`, list: true };
     case "rating":
-      return { path: `/repos/${slug}/rating`, list: false };
+      return { path: `/repos/${s}/rating`, list: false };
     case "issue-comments":
-      return { path: `/repos/${slug}/issues/${args.issueSlug}/comments?sort_by=created_at&page_size=${ps}`, list: true };
+      return { path: `/repos/${s}/issues/${encSegment(args.issueSlug ?? "")}/comments?sort_by=created_at&page_size=${ps}`, list: true };
   }
 }
 

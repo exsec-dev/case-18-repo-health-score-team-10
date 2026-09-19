@@ -13,7 +13,7 @@ import { createSession, SESSION_COOKIE, upsertUser } from "../src/auth/session";
 import { cardFacts, seedRecommendation, seedRepo, seedScan, seedScore, type ApiTestDb } from "./api-fixtures";
 import { spawnServer, startMockApi, type SpawnedServer } from "./server-harness";
 
-const SECRET = "routes-test-secret";
+const SECRET = "routes-test-secret-0123456789abcdef";
 const dir = mkdtempSync(join(tmpdir(), "rh-routes-"));
 const mock = startMockApi();
 let base = "";

@@ -110,7 +110,8 @@ async function login(base: string, sessionCookieName: string): Promise<string> {
 // ---------------------------------------------------------------------------
 
 describe("Ф2.8: APP_SECRET < 32 символов выключает сессии", () => {
-  repro("loadConfig: короткий APP_SECRET → appSecret = null", () => {
+  // закрыто блоком Б2 — обёртка repro снята, утверждение не менялось
+  test("loadConfig: короткий APP_SECRET → appSecret = null", () => {
     const saved = process.env.APP_SECRET;
     process.env.APP_SECRET = "short-secret";
     try {
@@ -230,7 +231,8 @@ describe("Ф2.8: чужой Origin на мутациях → 403", () => {
     session = await login(server!.base, "rh_session");
   }, 30_000);
 
-  repro("POST /auth/logout с чужим Origin → 403, сессия не отозвана", async () => {
+  // закрыто блоком Б2 — обёртки repro сняты, утверждения не менялись
+  test("POST /auth/logout с чужим Origin → 403, сессия не отозвана", async () => {
     const out = await fetch(at("/auth/logout"), {
       method: "POST",
       headers: { cookie: `rh_session=${session}`, origin: "https://evil.example" },
@@ -240,12 +242,25 @@ describe("Ф2.8: чужой Origin на мутациях → 403", () => {
     expect(((await me.json()) as { login: string | null }).login).toBe("tester");
   });
 
-  repro("PUT /api/me/favorites/:org/:repo с чужим Origin → 403", async () => {
+  test("PUT /api/me/favorites/:org/:repo с чужим Origin → 403", async () => {
     const res = await fetch(at("/api/me/favorites/evil/repo"), {
       method: "PUT",
       headers: { cookie: `rh_session=${session}`, origin: "https://evil.example" },
     });
     expect(res.status).toBe(403);
+  });
+
+  test("без Origin (SameSite=Lax) и с origin стенда мутации проходят", async () => {
+    const noOrigin = await fetch(at("/api/me/favorites/ok/repo"), {
+      method: "PUT",
+      headers: { cookie: `rh_session=${session}` },
+    });
+    expect(noOrigin.status).toBe(200);
+    const ownOrigin = await fetch(at("/api/me/favorites/ok/repo2"), {
+      method: "PUT",
+      headers: { cookie: `rh_session=${session}`, origin: server!.base },
+    });
+    expect(ownOrigin.status).toBe(200);
   });
 });
 

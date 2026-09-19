@@ -33,7 +33,7 @@ afterAll(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const SECRET = "test-app-secret-0123456789";
+const SECRET = "test-app-secret-0123456789abcdef";
 
 describe("Я ID OAuth: URL и обмен кода", () => {
   const creds = { clientId: "ya-client", clientSecret: "ya-secret", redirect: "http://localhost:8418/auth/ya/callback" };

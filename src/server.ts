@@ -40,7 +40,7 @@ import {
   upsertUser,
   userProfile,
 } from "./auth/session";
-import { deletePat, getPat, patMeta, storePat } from "./auth/pat";
+import { deletePat, getPat, patMeta, patReadable, storePat } from "./auth/pat";
 import { buildAuthUrl, exchangeCode, yaAvatarUrl, type YaEndpoints } from "./auth/ya";
 import { makeScClient } from "./collectors/http";
 import { needsRescore, rescoreAll } from "./score/rescore";
@@ -51,6 +51,8 @@ const config = loadConfig();
 const patProbes = new Map<number, number[]>();
 // В4.2-port-fix (П2): окно лимита проверок прав избранного на юзера.
 const favoriteChecks = new Map<number, number[]>();
+// Ф2.8 (В4.2b): минутное окно чтений /api/me/repos на юзера.
+const myReposViews = new Map<number, number[]>();
 
 /**
  * Скользящее окно счётчика на юзера: true = пропустить, лимит не исчерпан.
@@ -75,6 +77,10 @@ function allowInWindow(windows: Map<number, number[]>, userId: number, limit: nu
 /** Минутное окно проверок прав избранного: true = пропустить. */
 const allowFavoriteCheck = (userId: number, now = Date.now()): boolean =>
   allowInWindow(favoriteChecks, userId, config.queue.favoriteChecksPerMinute, 60_000, now);
+
+/** Минутное окно чтений /api/me/repos (Ф2.8): true = пропустить. */
+const allowMyReposView = (userId: number, now = Date.now()): boolean =>
+  allowInWindow(myReposViews, userId, config.queue.myReposPerMinute, 60_000, now);
 
 /** Живая проба токена = оракул валидности PAT; сервис не переборщик (ПОРТ S1). */
 const PAT_PROBES_PER_HOUR = 10;
@@ -106,6 +112,41 @@ const notFound = (message: string): Response =>
   Response.json({ error: { code: "not_found", message } }, { status: 404 });
 const unauthorized = (message = "требуется вход (Я ID)"): Response =>
   Response.json({ error: { code: "unauthorized", message } }, { status: 401 });
+const forbidden = (message: string): Response =>
+  Response.json({ error: { code: "forbidden", message } }, { status: 403 });
+
+// Ф2.8 (LOW-6): CSRF-гард по Origin на мутирующих /api/me/* и /auth/logout.
+// Заголовка нет → пропустить (межсайтовой POST закрыт SameSite=Lax); есть и
+// не совпал с origin YA_REDIRECT_URI (без него — localhost/127.0.0.1:PORT) → 403.
+const allowedOrigins = (): Set<string> => {
+  const out = new Set<string>();
+  try {
+    out.add(new URL(config.auth.redirect).origin);
+  } catch {
+    /* кривой redirect — остаются локальные дефолты ниже */
+  }
+  if (out.size === 0) {
+    out.add(`http://localhost:${config.port}`);
+    out.add(`http://127.0.0.1:${config.port}`);
+  }
+  return out;
+};
+
+/** null = запрос прошёл гард; Response = 403 «чужой Origin». */
+function guardOrigin(req: Request): Response | null {
+  const origin = req.headers.get("origin");
+  if (origin === null || origin === "") return null;
+  return allowedOrigins().has(origin) ? null : forbidden("чужой Origin: запрос отклонён");
+}
+
+/**
+ * Ф2.8 (LOW-4): сегмент слага из ОДНИХ ТОЧЕК («.», «..») в charset проходит,
+ * а семантически это обход пути — наружу 400. Остальной charset проверяет
+ * прежняя регулярка.
+ */
+function validSlugSegment(segment: string | undefined): boolean {
+  return typeof segment === "string" && /^[a-z0-9_.-]+$/i.test(segment) && !/^[.]+$/.test(segment);
+}
 
 /** Сессия из cookie; APP_SECRET отсутствует = сессии принципиально выключены. */
 function sessionOf(req: Request) {
@@ -199,20 +240,20 @@ const server = Bun.serve({
     // отказ bad_query 400, не «не найдено» и не 500
     "/api/repos/:org/:repo": async (req) => {
       const { org, repo } = req.params;
-      if (!/^[a-z0-9_.-]+$/i.test(org ?? "") || !/^[a-z0-9_.-]+$/i.test(repo ?? "")) {
+      if (!validSlugSegment(org) || !validSlugSegment(repo)) {
         return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
       }
-      const card = await getRepoCardForViewer(db, org, repo, viewerAccess(req), { limits: config.scan });
+      const card = await getRepoCardForViewer(db, org!, repo!, viewerAccess(req), { limits: config.scan });
       if (!card) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
       return Response.json(card);
     },
     "/api/repos/:org/:repo/report.md": async (req) => {
       const { org, repo } = req.params;
-      if (!/^[a-z0-9_.-]+$/i.test(org ?? "") || !/^[a-z0-9_.-]+$/i.test(repo ?? "")) {
+      if (!validSlugSegment(org) || !validSlugSegment(repo)) {
         return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
       }
       // тот же сборщик карточки с тем же зрителем (К2)
-      const card = await getRepoCardForViewer(db, org, repo, viewerAccess(req), { limits: config.scan });
+      const card = await getRepoCardForViewer(db, org!, repo!, viewerAccess(req), { limits: config.scan });
       if (!card) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
       return new Response(renderRepoReport(card), {
         headers: {
@@ -240,6 +281,8 @@ const server = Bun.serve({
     // отдаёт cookie межсайтовому POST, выход чужой страницей невозможен
     "/auth/logout": {
       POST: (req) => {
+        const csrf = guardOrigin(req);
+        if (csrf) return csrf;
         if (!config.auth.appSecret) return new Response(null, { status: 204 });
         revokeSession(db, config.auth.appSecret, parseCookies(req.headers.get("cookie"))[ck.session]);
         return new Response(null, { status: 204, headers: { "set-cookie": sessionCookieHeader(ck, "", 0) } });
@@ -289,15 +332,20 @@ const server = Bun.serve({
       if (!user) return Response.json({ login: null, displayName: null, avatarUrl: null, hasPat: false, patCheckedAt: null });
       const meta = config.auth.appSecret ? patMeta(db, user.userId) : null;
       const profile = userProfile(db, user.userId);
+      // Ф2.8 (LOW-5): hasPat = строка есть И она читается текущим ключом —
+      // после ротации APP_SECRET мёртвая строка не выдаётся за рабочий PAT
+      const readable = config.auth.appSecret ? patReadable(db, config.auth.appSecret, user.userId) : false;
       return Response.json({
         login: user.login,
         displayName: profile.displayName,
         avatarUrl: profile.avatarId ? yaAvatarUrl(profile.avatarId) : null,
-        hasPat: meta?.hasPat === true,
-        patCheckedAt: meta && meta.hasPat ? meta.checkedAt : null,
+        hasPat: meta?.hasPat === true && readable,
+        patCheckedAt: meta && meta.hasPat && readable ? meta.checkedAt : null,
       });
     },
     "/api/me/pat": async (req) => {
+      const csrf = guardOrigin(req);
+      if (csrf) return csrf;
       const user = sessionOf(req);
       if (!user) return unauthorized();
       if (!config.auth.appSecret) {
@@ -344,6 +392,14 @@ const server = Bun.serve({
     "/api/me/repos": async (req) => {
       const user = sessionOf(req);
       if (!user) return unauthorized();
+      // Ф2.8 (LOW-11): каждое чтение с PAT — до 6 живых запросов; минутное
+      // окно на юзера, 429 — до какой-либо работы маршрута
+      if (!allowMyReposView(user.userId)) {
+        return Response.json(
+          { error: { code: "rate_limited", message: `не больше ${config.queue.myReposPerMinute} обновлений списка в минуту — попробуйте позже` } },
+          { status: 429 },
+        );
+      }
       const client = userClient(user.userId);
       // ПОРТ 5: union-список живёт и без PAT (заявки + избранное)
       const result = await listMyRepos(db, client, user.userId);
@@ -364,36 +420,44 @@ const server = Bun.serve({
       return Response.json({ entries: listFavorites(db, user.userId) });
     },
     "/api/me/favorites/:org/:repo": (req) => {
-      const user = sessionOf(req);
-      if (!user) return unauthorized();
       const { org, repo } = req.params;
-      if (!/^[a-z0-9_.-]+$/i.test(org ?? "") || !/^[a-z0-9_.-]+$/i.test(repo ?? "")) {
+      if (!validSlugSegment(org) || !validSlugSegment(repo)) {
         return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
       }
+      if (req.method !== "GET") {
+        const csrf = guardOrigin(req);
+        if (csrf) return csrf;
+      }
+      const user = sessionOf(req);
+      if (!user) return unauthorized();
       if (req.method === "PUT") {
-        addFavorite(db, user.userId, org, repo);
+        addFavorite(db, user.userId, org!, repo!);
         return Response.json({ ok: true, favorite: true });
       }
       if (req.method === "DELETE") {
-        removeFavorite(db, user.userId, org, repo);
+        removeFavorite(db, user.userId, org!, repo!);
         return Response.json({ ok: true, favorite: false });
       }
       if (req.method === "GET") {
-        return Response.json({ favorite: isFavorite(db, user.userId, org, repo) });
+        return Response.json({ favorite: isFavorite(db, user.userId, org!, repo!) });
       }
       return Response.json({ error: { code: "bad_query", message: "ожидался GET/PUT/DELETE" } }, { status: 405 });
     },
     "/api/me/favorites/:org/:repo/check": async (req) => {
-      const user = sessionOf(req);
-      if (!user) return unauthorized();
+      const { org, repo } = req.params;
+      if (!validSlugSegment(org) || !validSlugSegment(repo)) {
+        return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
+      }
       if (req.method !== "POST") {
         return Response.json({ error: { code: "bad_query", message: "ожидался POST" } }, { status: 405 });
       }
-      const { org, repo } = req.params;
-      if (!/^[a-z0-9_.-]+$/i.test(org ?? "") || !/^[a-z0-9_.-]+$/i.test(repo ?? "")) {
-        return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
-      }
-      if (!isFavorite(db, user.userId, org, repo)) {
+      const csrf = guardOrigin(req);
+      if (csrf) return csrf;
+      const user = sessionOf(req);
+      if (!user) return unauthorized();
+      const orgSlug = org!;
+      const repoSlug = repo!;
+      if (!isFavorite(db, user.userId, orgSlug, repoSlug)) {
         return Response.json({ error: { code: "not_favorite", message: "сначала добавьте репозиторий в избранное" } }, { status: 404 });
       }
       const pat = config.auth.appSecret ? getPat(db, config.auth.appSecret, user.userId) : null;
@@ -419,8 +483,8 @@ const server = Bun.serve({
       const result: FavoriteCheckResponse = await checkFavoriteAccess(
         db,
         user.userId,
-        org,
-        repo,
+        orgSlug,
+        repoSlug,
         {
           restGet: (path: string) => rest.get(path).then((r) => ({ status: r.status, json: r.json })),
           appsecLatest: (gitRepo: string) => appsec.get("/v1/scans/latest", { gitRepo }).then((r) => ({ status: r.status })),
@@ -429,27 +493,29 @@ const server = Bun.serve({
         // Н1: постановка идёт ЦЕЛИКОМ через requestUserScan — его дедуп,
         // too_many_active, rate_limited и транзакцию Ф1.5 не обойти; тело
         // repo-GET прокидывается, чтобы не делать его второй раз
-        async (repoRes) => favoriteEnqueueOf(await requestUserScan(db, rest, user.userId, org, repo, config.queue, new Date(), repoRes)),
+        async (repoRes) => favoriteEnqueueOf(await requestUserScan(db, rest, user.userId, orgSlug, repoSlug, config.queue, new Date(), repoRes)),
       );
       return Response.json(result);
     },
     "/api/me/repos/:org/:repo/scan": async (req) => {
-      const user = sessionOf(req);
-      if (!user) return unauthorized();
+      const { org, repo } = req.params;
+      if (!validSlugSegment(org) || !validSlugSegment(repo)) {
+        return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
+      }
       if (req.method !== "POST") {
         return Response.json({ error: { code: "bad_query", message: "ожидался POST" } }, { status: 405 });
       }
+      const csrf = guardOrigin(req);
+      if (csrf) return csrf;
+      const user = sessionOf(req);
+      if (!user) return unauthorized();
       const client = userClient(user.userId);
       if (!client) {
         return Response.json({ error: { code: "no_pat", message: "сначала сохраните PAT SourceCraft" } }, { status: 409 });
       }
-      const { org, repo } = req.params;
-      if (!/^[a-z0-9_.-]+$/i.test(org ?? "") || !/^[a-z0-9_.-]+$/i.test(repo ?? "")) {
-        return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
-      }
       // H1/LOW-3 (К3): до постановки — repo-GET с PAT юзера; строка repos
       // и заявка появляются только при подтверждённом доступе
-      const out = await requestUserScan(db, client, user.userId, org, repo, config.queue);
+      const out = await requestUserScan(db, client, user.userId, org!, repo!, config.queue);
       return Response.json(out.body, { status: out.status });
     },
     // неизвестный /api/* обязан остаться JSON-404, а не отдать HTML
