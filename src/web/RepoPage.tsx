@@ -7,7 +7,7 @@
 // либо без честного объяснения, почему факта нет.
 // Раскладка как у страницы репозитория SourceCraft: действия в ActionBar,
 // содержимое во вкладках, итоговая оценка — в правой панели.
-import { ArrowDownToLine, ArrowUpRightFromSquare, ChevronDown, Clock, CodeFork, FileText, Heart, Lock, LogoMarkdown, SquareListUl } from "@gravity-ui/icons";
+import { ArrowDownToLine, ArrowUpRightFromSquare, ChevronDown, Clock, CodeFork, FileText, Heart, Lock, LogoMarkdown, SquareListUl, Star, StarFill } from "@gravity-ui/icons";
 import {
   ActionTooltip,
   Alert,
@@ -53,17 +53,19 @@ import {
   gitLimitsText,
   scanStatusText,
   scanTriggerText,
+  DEFINITION_NAME_WIDTH,
   contributionText,
   scoreColor,
   scoreLabelTheme,
   scoreTheme,
   scoreWord,
   sentence,
+  slugOf,
   summaryLine,
 } from "./format";
 import { linkProps, navigate, useQueryParam } from "./router";
 import { Page, type Crumb } from "./Shell";
-import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, ScoreLegend, SkeletonRows } from "./ui";
+import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows } from "./ui";
 
 type Card = RepoCard;
 type Category = CardCategory;
@@ -118,10 +120,12 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
 
   if (state.kind === "loading") {
     return (
+      // В4.6 (У27): ритм скелетона = ритм содержимого — блок-полоса величины
+      // (~150px) и шесть строк категорий по 45px, панель начинается с легенды
       <Page crumbs={crumbs} aside={<SkeletonRows rows={3} height={96} />}>
-        <Flex direction="column" gap={4}>
-          <SkeletonRows rows={1} height={48} />
-          <SkeletonRows rows={6} />
+        <Flex direction="column" gap={3}>
+          <SkeletonRows rows={1} height={150} />
+          <SkeletonRows rows={6} height={45} />
         </Flex>
       </Page>
     );
@@ -135,7 +139,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
         <Alert
           theme="danger"
           view="outlined"
-          title={`Не удалось открыть ${org}/${repo}`}
+          title={`Не удалось открыть ${slugOf(org, repo)}`}
           message={state.message}
           actions={[{ text: "Повторить", handler: reload }]}
         />
@@ -318,9 +322,8 @@ function Header({ card, starDoneKey, starLoggedIn }: { card: Card; starDoneKey: 
         <RepoAvatar repo={r.repo} logoUrl={r.logoUrl} size="l" />
         <Flex direction="column" justifyContent="space-between" style={{ minWidth: 0 }}>
           <Flex gap={1} alignItems="center" style={{ minWidth: 0 }}>
-            <Text variant="header-1" as="h1" ellipsis>
-              {r.org} / {r.repo}
-            </Text>
+            {/* В4.6 (У27): тот же компонент слага, что в строке рейтинга */}
+            <RepoSlug org={r.org} repo={r.repo} variant="header-1" />
             <FavoriteStar org={r.org} repo={r.repo} doneKey={starDoneKey} loggedIn={starLoggedIn} />
             <ActionTooltip title="Открыть на sourcecraft.dev">
               <Button
@@ -451,7 +454,7 @@ function ScoreAside({ card, meta, leaseMs, jobStalled }: { card: Card; meta: Met
           первый взгляд просил убрать их с видного места, но не терять */}
       <AsideSection title="Реквизиты расчета">
         {scan ? (
-          <DefinitionList nameMaxWidth={120}>
+          <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
             <DefinitionList.Item name="Завершен">{fmtDateTime(scan.finishedAt ?? scan.startedAt)}</DefinitionList.Item>
             <DefinitionList.Item name="Статус">
               <Label theme={scan.status === "ok" ? "success" : scan.status === "bad" ? "danger" : "warning"} size="xs">
@@ -782,18 +785,27 @@ function CategoryRow({
 
 // ---------- маркеры расчёта ----------
 
+/**
+ * Маркеры расчёта (В4.6, З4 систематика): у них ДВА разных смысла, а рисовались
+ * они одним жёлтым. Теперь `info` — граница данных (что источники смогли
+ * отдать: лимит клона, усечённая история, пустой репозиторий), `warning` —
+ * оговорка о самом расчёте (факты из истории, потолок CI без прогонов).
+ * Порядок стопки: сначала оговорки, потом границы данных — оговорка меняет
+ * чтение чисел, а граница объясняет их происхождение.
+ */
 function Markers({ card }: { card: Card }) {
   const m = card.markers;
-  const rows: { key: string; label: string; text: string }[] = [];
+  const rows: { key: string; label: string; text: string; theme: "info" | "warning" }[] = [];
   if (m.staleFacts) {
     rows.push({
       key: "stale",
       label: "Факты из истории",
       text: "Часть источников ответила сбоем канала, поэтому в расчет пошли последние успешные факты предыдущих сканов. Сбой трубы – не отсутствие данных, и он не превращается в премию или штраф.",
+      theme: "warning",
     });
   }
   if (m.gitLimits) {
-    rows.push({ key: "git-limits", label: "Репозиторий больше лимита сервиса", text: gitLimitsText(m.gitLimits) });
+    rows.push({ key: "git-limits", label: "Репозиторий больше лимита сервиса", text: gitLimitsText(m.gitLimits), theme: "info" });
   }
   // Ф2.9 (LOW-9): маркер codeEmpty API отдаёт, но карточка молчала — зритель
   // видел Score 0 без объяснения, хотя это данные о проекте (Q&A №13)
@@ -802,6 +814,7 @@ function Markers({ card }: { card: Card }) {
       key: "code-empty",
       label: "В репозитории нет кода",
       text: "В репозитории нет ни одного файла, поэтому по методике Score равен 0 – это данные о проекте («проекта нет»), а не отсутствие оценки или сбой сбора.",
+      theme: "info",
     });
   }
   if (m.historyTruncatedSince) {
@@ -809,6 +822,7 @@ function Markers({ card }: { card: Card }) {
       key: "truncated",
       label: "История усечена",
       text: `Репозиторий слишком велик для полного клона, сработал деградационный ярус: git-история видна с ${fmtDate(m.historyTruncatedSince)}. Метрики активности и возраста TODO посчитаны по видимой части.`,
+      theme: "info",
     });
   }
   if (m.ciConfigOnlyCap) {
@@ -816,14 +830,18 @@ function Markers({ card }: { card: Card }) {
       key: "ci-cap",
       label: "CI заявлен, прогоны недоступны",
       text: "Конфигурация CI в репозитории есть, но статусы прогонов закрыты правами (403 для чужих репозиториев). Заявленный CI дает максимум 50 из 100 – доказательства дают прогоны.",
+      theme: "warning",
     });
   }
   if (rows.length === 0) return null;
 
   return (
     <Flex direction="column" gap={2} role="region" aria-label="Особенности расчета">
-      {rows.map((row) => (
-        <Alert key={row.key} theme="warning" view="outlined" size="s" title={row.label} message={row.text} />
+      {/* У27: один способ применения Alert вне кабинета — сбой страницы идёт
+          размером по умолчанию, встроенная заметка `size="s"`; `view` всегда
+          outlined, `theme` НЕСЁТ СМЫСЛ и больше не один на все случаи */}
+      {[...rows].sort((a, b) => (a.theme === b.theme ? 0 : a.theme === "warning" ? -1 : 1)).map((row) => (
+        <Alert key={row.key} theme={row.theme} view="outlined" size="s" title={row.label} message={row.text} />
       ))}
     </Flex>
   );
@@ -1112,15 +1130,23 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
   };
   return (
     <Flex direction="column" gap={1}>
+      {/* В4.6 (У32, замечание владельца 9 + правило 3а docs/ui/gravity-uikit.md):
+          звезда — ИКОНКА из @gravity-ui/icons, а не юникодный символ звезды.
+          Символ рисовался шрифтом, то есть не совпадал по размеру и оптике с
+          соседней иконочной кнопкой и не слушался размера иконок вообще.
+          Заполненная — янтарная (`warning`, 8,18:1 в тёмной теме): это тот
+          самый «акцент на мелкой детали», который просил владелец. */}
       <Button
-        size="m"
+        size="s"
         view="flat"
         className={glow ? "rh-star-glow" : undefined}
         disabled={state === "anon"}
         title={state === "anon" ? "Войдите через Я ID, чтобы добавлять в избранное" : "в избранное: права проверятся в кабинете"}
         onClick={() => void toggle()}
       >
-        {state === "on" ? "★" : "☆"}
+        <Text color={state === "on" ? "warning" : "secondary"}>
+          <Icon data={state === "on" ? StarFill : Star} size={16} />
+        </Text>
       </Button>
       {error && <Text color="danger">{error}</Text>}
     </Flex>

@@ -14,7 +14,7 @@ import {
   type PlaceholderContainerActionProps,
 } from "@gravity-ui/uikit";
 import { useEffect, useState, type ReactNode } from "react";
-import { SCORE_LEGEND_TITLE, SCORE_SCALE, sentence } from "./format";
+import { SCORE_LEGEND_TITLE, SCORE_SCALE, sentence, slugOf } from "./format";
 
 /** Заголовок страницы: header-1 20/24 и одна строка пояснения, как у SourceCraft. */
 export function PageHeader({ title, description, end }: { title: ReactNode; description?: ReactNode; end?: ReactNode }) {
@@ -134,6 +134,20 @@ export function LanguageDot({ name, color }: { name: string | null; color: strin
   return <span className="rh-lang__dot" style={color ? { background: color } : undefined} title={`Язык: ${name}`} />;
 }
 
+/**
+ * В4.6 (У27): слаг репозитория — один компонент на рейтинг и карточку.
+ * Пробелы вокруг слеша и обрезка по ширине решаются здесь, а не на каждом
+ * экране; `title` всегда несёт полную текстовую форму из `slugOf`, чтобы
+ * обрезанное имя можно было прочесть наведением.
+ */
+export function RepoSlug({ org, repo, variant }: { org: string; repo: string; variant: "subheader-1" | "header-1" }) {
+  return (
+    <Text variant={variant} as={variant === "header-1" ? "h1" : "span"} ellipsis title={slugOf(org, repo)} style={{ display: "block" }}>
+      {org} / {repo}
+    </Text>
+  );
+}
+
 export function Meta({ children }: { children: ReactNode }) {
   return <div className="rh-meta">{children}</div>;
 }
@@ -154,7 +168,13 @@ export function MetaItem({ icon, children, title }: { icon?: IconData; children:
   );
 }
 
-/** Загрузка в форме будущего содержимого: строки нужной высоты. */
+/**
+ * Загрузка в форме будущего содержимого: строки нужной высоты.
+ * В4.6 (У27): высоты вызывающих сторон приведены к РИТМУ того, что они
+ * заменяют — строка рейтинга 46px, строка категории 45px, блок-полоса
+ * величины 150px. Скелетон, не совпадающий с содержимым, даёт прыжок
+ * раскладки в момент загрузки — это и было находкой пары.
+ */
 export function SkeletonRows({ rows, height = 44 }: { rows: number; height?: number }) {
   return (
     <Flex direction="column" gap={2} aria-busy="true" aria-label="Загрузка">

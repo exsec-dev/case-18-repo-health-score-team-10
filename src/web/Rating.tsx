@@ -11,6 +11,7 @@ import {
   Button,
   DefinitionList,
   Flex,
+  HelpMark,
   Icon,
   Label,
   Link,
@@ -28,11 +29,25 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import type { MetaResponse, RatingResponse } from "./api";
 import { useJson } from "./api";
-import { CATEGORY_TITLES_RU, NO_DATA_SHORT, NO_SCORE, fmtCoverage, fmtDate, fmtNumber, fmtScore, scanStatusText, scoreColor, scoreTheme, scoreWord, sentence } from "./format";
+import {
+  CATEGORY_TITLES_RU,
+  DEFINITION_NAME_WIDTH,
+  NO_DATA_SHORT,
+  NO_SCORE,
+  fmtCoverage,
+  fmtDate,
+  fmtNumber,
+  fmtScore,
+  scanStatusText,
+  scoreColor,
+  scoreTheme,
+  scoreWord,
+  sentence,
+} from "./format";
 import { useMediaQuery } from "./prefs";
 import { linkProps, navigate, repoHref } from "./router";
 import { Page } from "./Shell";
-import { AsideSection, EmptyState, LanguageDot, LanguageName, PageHeader, RepoAvatar, ScoreLegend, SkeletonRows } from "./ui";
+import { AsideSection, EmptyState, LanguageDot, LanguageName, PageHeader, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows } from "./ui";
 
 type Item = RatingResponse["items"][number];
 
@@ -45,7 +60,10 @@ const SORT_OPTIONS = [
   { value: "likes", content: "Лайки" },
   { value: "activity", content: "Последняя активность" },
   { value: "coverage", content: "Покрытие данными" },
-  { value: "name", content: "Имя (org/repo)" },
+  // В4.6 (У30, замечание владельца 5): прежняя подпись называла ФОРМУ ЗАПИСИ
+  // слага вместо того, по чему идёт сортировка; зрителю нужно слово, а не
+  // синтаксис. Сортировка сама не менялась — только её имя в списке.
+  { value: "name", content: "Название" },
 ];
 
 /**
@@ -125,13 +143,23 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
       <Flex gap={2} wrap alignItems="center">
         {/* flex-обертка: блочная давала полю 27.3px против 28px у соседних Select */}
         <div style={{ flex: "1 1 200px", minWidth: 200, display: "flex" }}>
+          {/* В4.6 (У29, замечание владельца 3): плейсхолдер называет ДЕЙСТВИЕ,
+              а перечень полей уезжает в подсказку у правого края инпута. Текст
+              подсказки сверен по коду (`repos.ts`, matchesQ), а не написан на
+              слух: поиск идёт подстрокой по org, repo и названию, без учёта
+              регистра — обещать больше было бы неправдой. */}
           <TextInput
             size="m"
-            placeholder="org, repo или название"
+            placeholder="Поиск"
             value={queryDraft}
             onUpdate={setQueryDraft}
             hasClear
             startContent={<Icon data={Magnifier} size={14} style={{ marginInlineStart: "var(--g-spacing-2)", color: "var(--g-color-text-secondary)" }} />}
+            endContent={
+              <HelpMark iconSize="s" aria-label="По каким полям идет поиск" style={{ marginInlineEnd: "var(--g-spacing-2)" }}>
+                Ищем по владельцу, имени репозитория и названию; подстрокой, регистр не важен.
+              </HelpMark>
+            }
             controlProps={{ "aria-label": "Поиск по репозиториям" }}
           />
         </div>
@@ -218,7 +246,8 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
         ) : undefined
       }
     >
-      {state.kind === "loading" && <SkeletonRows rows={10} height={48} />}
+      {/* В4.6 (У27): 46px — фактическая высота строки рейтинга после уплотнения (Б3) */}
+      {state.kind === "loading" && <SkeletonRows rows={10} height={46} />}
 
       {state.kind === "error" && (
         <Alert
@@ -322,7 +351,8 @@ function UnscoredTable({ items, meta, hasFilters }: { items: Item[]; meta: MetaR
 }
 
 function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generatedAt: string | null }) {
-  if (!meta) return <SkeletonRows rows={4} height={64} />;
+  // В4.6 (У27): панель начинается с легенды шкалы (3 чипа + абзац) и двух блоков
+  if (!meta) return <SkeletonRows rows={4} height={96} />;
   const ratingWeight = meta.categories.reduce((sum, c) => sum + (c.indexWeight ?? 0), 0);
   return (
     <>
@@ -338,7 +368,7 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
       </AsideSection>
 
       <AsideSection title="Вклад категорий">
-        <DefinitionList nameMaxWidth={160}>
+        <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
           {meta.categories
             .filter((c) => !NOT_IN_RATING.has(c.key))
             .map((c) => (
@@ -355,7 +385,7 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
       </AsideSection>
 
       <AsideSection title="Расчет">
-        <DefinitionList nameMaxWidth={160}>
+        <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
           <DefinitionList.Item name="Порог оценки" note="Без данных честного числа нет: Score не выставляется, а не занижается.">
             покрытие от {fmtCoverage(meta.coverageNullBelow)}
           </DefinitionList.Item>
@@ -428,10 +458,9 @@ function RepoCell({ item }: { item: Item }) {
     <Flex gap={2} alignItems="center" style={{ minWidth: 180, maxWidth: 264 }}>
       <RepoAvatar repo={item.repo} logoUrl={item.logoUrl} size="xs" />
       <LanguageDot name={item.language} color={item.languageColor} />
-      <Link {...linkProps(repoHref(item.org, item.repo))} view="primary" title={`${item.org}/${item.repo}`}>
-        <Text variant="subheader-1" ellipsis style={{ display: "block" }}>
-          {item.org} / {item.repo}
-        </Text>
+      <Link {...linkProps(repoHref(item.org, item.repo))} view="primary">
+        {/* В4.6 (У27): слаг — один компонент на рейтинг и карточку */}
+        <RepoSlug org={item.org} repo={item.repo} variant="subheader-1" />
       </Link>
     </Flex>
   );

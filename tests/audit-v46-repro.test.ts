@@ -345,12 +345,14 @@ describe("В4.6-8 (У26/У13/У38): вариант А — карточка на�
 // ---------------------------------------------------------------------------
 
 describe("В4.6-9 (У27–У32): консистентность вне кабинета", () => {
-  repro("У32: звезда избранного — иконка @gravity-ui/icons, не глиф ★/☆", () => {
+  // ЗАКРЫТО блоком Б7 (консистентность и мелкие замечания владельца).
+  test("У32: звезда избранного — иконка @gravity-ui/icons, не глиф ★/☆", () => {
     const src = srcOf("RepoPage.tsx");
     expect({ glyph: src.includes("★") || src.includes("☆"), icon: /Star/.test(src) }).toEqual({ glyph: false, icon: true });
   });
 
-  repro("У29: плейсхолдер «Поиск» плюс подсказка о полях поиска", () => {
+  // ЗАКРЫТО блоком Б7 (консистентность и мелкие замечания владельца).
+  test("У29: плейсхолдер «Поиск» плюс подсказка о полях поиска", () => {
     const src = srcOf("Rating.tsx");
     expect({
       placeholder: src.includes('placeholder="Поиск"'),
@@ -359,13 +361,24 @@ describe("В4.6-9 (У27–У32): консистентность вне каби�
     }).toEqual({ placeholder: true, oldPlaceholder: false, hint: true });
   });
 
-  repro("У30: опция сортировки «Название» вместо «Имя (org/repo)»", () => {
+  // ЗАКРЫТО блоком Б7 (консистентность и мелкие замечания владельца).
+  test("У30: опция сортировки «Название» вместо «Имя (org/repo)»", () => {
     const src = srcOf("Rating.tsx");
     expect({ plain: src.includes('content: "Название"'), jargon: src.includes("Имя (org/repo)") }).toEqual({ plain: true, jargon: false });
   });
 
-  repro("У28: разделительной линии между лого и меню в rail нет", () => {
-    expect(srcOf("layout.css")).toContain("rh-rail [class*=\"gn-aside-header__divider\"]");
+  // Б7: имя класса в ассерте было взято на слух. AsideHeader 6.6.0 рисует
+  // линию под шапкой rail псевдоэлементами блока `gn-aside-header__header`
+  // (`::after` в широком режиме, `::before` в узком), а класса
+  // `gn-aside-header__divider` в пакете нет вовсе — проверяется тот же факт
+  // по настоящему имени, а не ослабляется.
+  // ЗАКРЫТО блоком Б7 (консистентность и мелкие замечания владельца).
+  test("У28: разделительной линии между лого и меню в rail нет", () => {
+    const css = srcOf("layout.css");
+    expect({
+      afterHidden: css.includes('.rh-rail [class*="gn-aside-header__header"]::after'),
+      beforeHidden: css.includes('.rh-rail [class*="gn-aside-header__header"]::before'),
+    }).toEqual({ afterHidden: true, beforeHidden: true });
   });
 });
 

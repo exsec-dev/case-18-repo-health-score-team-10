@@ -156,6 +156,21 @@ export const SCORE_SCALE: { theme: "success" | "warning" | "danger"; word: strin
 /** Короткая форма «нет данных» для узких колонок таблицы («Нет данных» не влезает в 59px). */
 export const NO_DATA_SHORT = "н/д";
 
+/**
+ * В4.6 (У27, ДП8): ОДИН способ набрать слаг репозитория. Дизайн-пара нашла
+ * четыре разных на трёх экранах — «org / repo», «org/repo», только `repo`,
+ * ссылка с разным набором. Текстовая форма (тултипы, заголовки ошибок,
+ * крошки, отчёт) — здесь; визуальная (с пробелами вокруг слеша, как у
+ * платформы) — компонент `RepoSlug` в ui.tsx. Решает один модуль, а не
+ * каждый экран по-своему.
+ */
+export function slugOf(org: string, repo: string): string {
+  return `${org}/${repo}`;
+}
+
+/** Мера имени в `DefinitionList` — одна на все панели (У27: единый nameMaxWidth). */
+export const DEFINITION_NAME_WIDTH = 140;
+
 /** Категория для строки итога: имя и балл (null — категория без данных, в итог не идёт). */
 export interface SummaryCategory {
   title: string;
