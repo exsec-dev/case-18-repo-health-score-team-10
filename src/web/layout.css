@@ -256,6 +256,16 @@ body {
   padding: var(--g-spacing-5);
 }
 
+/* В4.6 (У23): мера основной колонки. На 1920 без неё полоса категории
+ * растягивалась до 840px и перестала быть измерительным инструментом, а
+ * строка итога расползалась на длину, которую глаз не держит. 1120px —
+ * предложение дизайн-аудита; применяется ТОЛЬКО к `document` (карточка,
+ * кабинет): в `fill` основная колонка несёт таблицу рейтинга, и мера там
+ * создала бы мёртвое поле рядом с колонками, которые зритель включил сам. */
+.rh-page_document .rh-page__main {
+  max-width: 1120px;
+}
+
 .rh-page__aside {
   flex-shrink: 0;
   box-sizing: border-box;
@@ -403,7 +413,10 @@ body {
 
 .rh-category {
   display: grid;
-  grid-template-columns: 16px minmax(120px, 180px) minmax(80px, 1fr) 40px minmax(96px, auto) auto;
+  /* В4.6 (У23): полоса ограничена мерой minmax(80px, 360px) вместо 1fr —
+   * иначе на 1920 она растягивалась до 840px и перестала что-либо измерять.
+   * Излишек ширины забирает последний трек (ярлыки), а не графика. */
+  grid-template-columns: 16px minmax(120px, 180px) minmax(80px, 360px) 40px minmax(96px, auto) minmax(0, 1fr);
   align-items: center;
   gap: var(--g-spacing-3);
   box-sizing: border-box;
@@ -460,6 +473,39 @@ button.rh-category:focus-visible {
   align-items: baseline;
 }
 
+/* В4.6 (У23): затухание на нижней кромке прокручиваемого контейнера —
+ * честный признак «ниже есть ещё». Sticky-псевдоэлемент последним в потоке
+ * липнет к нижнему краю контейнера прокрутки (absolute здесь встал бы к низу
+ * СОДЕРЖИМОГО, а не видимой области), отрицательный margin не занимает
+ * высоту. Цвет — токен фона страницы; `transparent` и `black` в градиенте
+ * задают только альфу перехода, палитрой не являются. */
+.rh-fade {
+  position: relative;
+}
+
+.rh-fade::after {
+  position: sticky;
+  bottom: 0;
+  display: block;
+  height: 24px;
+  margin-top: -24px;
+  background: linear-gradient(to top, var(--g-color-base-background), transparent);
+  content: "";
+  pointer-events: none;
+}
+
+/* таблица рейтинга прокручивает себя сама — кромка нужна ей, а не обёртке */
+.rh-table-fill .g-table__scroll-container::after {
+  position: sticky;
+  bottom: 0;
+  display: block;
+  height: 24px;
+  margin-top: -24px;
+  background: linear-gradient(to top, var(--g-color-base-background), transparent);
+  content: "";
+  pointer-events: none;
+}
+
 .rh-code {
   margin: 0;
   font-family: var(--g-text-code-font-family);
@@ -471,7 +517,14 @@ button.rh-category:focus-visible {
 
 /* ---------- адаптив ---------- */
 
-@media (max-width: 1279px) {
+/* В4.6 (У23, решение владельца 20.09 — вариант (iii)): порог поднят с 1279px
+ * до 1439px. Карточка рендерится в `document` (RepoPage.tsx), а Drawer правой
+ * панели гейтится `mode === "fill"` (Shell.tsx) — то есть на карточке Drawer
+ * не работает ни на какой ширине, и правка JS-порога её вообще не касается.
+ * Отвечает CSS: на 1366 панель встаёт ПОД основную колонку и перестаёт
+ * отнимать 320px у данных и у шести строк категорий. Проверяемое следствие
+ * одно и то же для обоих экранов: на 1366x768 данные не обрезаны. */
+@media (max-width: 1439px) {
   /* document: колонки друг под другом, прокрутка одна — всего тела страницы */
   .rh-page_document .rh-page__body {
     flex-direction: column;
@@ -481,6 +534,7 @@ button.rh-category:focus-visible {
   .rh-page_document .rh-page__main,
   .rh-page_document .rh-page__aside {
     flex: none;
+    max-width: none;
     overflow: visible;
   }
 

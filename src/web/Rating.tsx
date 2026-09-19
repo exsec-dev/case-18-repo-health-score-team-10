@@ -423,7 +423,7 @@ function PhoneList({ items, rankOffset }: { items: Item[]; rankOffset: number })
  */
 function RepoCell({ item }: { item: Item }) {
   return (
-    <Flex gap={2} alignItems="center" style={{ minWidth: 180, maxWidth: 300 }}>
+    <Flex gap={2} alignItems="center" style={{ minWidth: 180, maxWidth: 264 }}>
       <RepoAvatar repo={item.repo} logoUrl={item.logoUrl} size="xs" />
       <LanguageDot name={item.language} color={item.languageColor} />
       <Link {...linkProps(repoHref(item.org, item.repo))} view="primary" title={`${item.org}/${item.repo}`}>

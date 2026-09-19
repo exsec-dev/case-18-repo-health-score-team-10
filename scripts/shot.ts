@@ -1,11 +1,23 @@
 // shot.ts — харнесс скриншотов на сыром CDP, ноль новых зависимостей.
 // Поднимает локальный сервер в development или production, водит headless
-// Chrome по трём экранам, ловит ошибки консоли и внешние запросы, кладёт PNG
-// в reports/shots/<mode>/. В `bun test` не входит — требует Chrome.
+// Chrome по трём страницам в ТРЁХ РАЗРЕШЕНИЯХ, ловит ошибки консоли и внешние
+// запросы, кладёт PNG в reports/shots/<mode>/. В `bun test` не входит —
+// требует Chrome.
+//
+// В4.6 (У23/У19): разрешений три, а не одно. Приёмка вехи спрашивает «влезает
+// ли в один экран» и «не обрезаны ли данные», а на это отвечает только
+// снимок РОВНО ВИДИМОЙ ОБЛАСТИ — поэтому основной файл снимается БЕЗ
+// `captureBeyondViewport` (постраничный снимок склеивает всю прокрутку и
+// вопрос про один экран не решает вовсе). Постраничный остаётся вторым
+// файлом с суффиксом `-full` для чтения содержимого целиком.
+// Схема имён: reports/shots/<mode>/<page>@<width>.png (+ `<page>@<width>-full.png`).
+// 3 страницы x 3 ширины x 2 режима = 18 приёмочных файлов.
 //
 // Запуск:
 //   SHOT_MODE=production bun scripts/shot.ts [org/repo]
 //   SHOT_MODE=development bun scripts/shot.ts [org/repo]
+// DATA_DIR задавать ЯВНО (урок инцидента 19.09, ERROR_LOG): без него харнесс
+// сам снимает файловую копию живой базы, но полагаться на дефолт нельзя.
 import { spawn, type ChildProcess } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -25,7 +37,13 @@ function harnessDataDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "rh-shot-data-"));
   const live = join("data", "repo-health.db");
   if (existsSync(live)) {
+    // ТОЛЬКО файловое копирование: SQLite-хендл на живой базе запрещён
+    // (ERROR_LOG 19–20.09). WAL и SHM копируются рядом — без них копия
+    // теряет последние транзакции и показывает вчерашние данные.
     copyFileSync(live, join(dir, "repo-health.db"));
+    for (const suffix of ["-wal", "-shm"]) {
+      if (existsSync(live + suffix)) copyFileSync(live + suffix, join(dir, `repo-health.db${suffix}`));
+    }
     console.log(`[shot] DATA_DIR не задан: работаю с КОПИЕЙ живой базы (${dir}) — оригинал не трогается`);
   } else {
     console.log(`[shot] DATA_DIR не задан: чистый временный каталог ${dir}`);
@@ -44,6 +62,27 @@ const SHOTS_DIR = join("reports", "shots", MODE);
  * необязательные картинки, без сети UI показывает инициалы.
  */
 const ALLOWED_EXTERNAL = ["fonts.googleapis.com", "fonts.gstatic.com", "storage.yandexcloud.net", "avatars.yandex.net"];
+
+/**
+ * Три разрешения приёмки В4.6. 1366x768 — целевое: именно на нём проверяется,
+ * что величина и шесть категорий влезают в один экран и что таблица рейтинга
+ * не обрезана (порог правой панели поднят до 1440 ровно ради него).
+ * 1440x1200 — ширина, на которой снимала дизайн-пара (сопоставимость с её
+ * замерами). 1920x1080 — верхняя граница сетки: на ней проверяется мера
+ * основной колонки и то, что полоса категории не растянулась в декорацию.
+ */
+/**
+ * Порог правой панели рейтинга (Shell.tsx, У23). Включительный: на ровно
+ * 1440 панель на месте, ниже — в Drawer. Харнесс держит число рядом с проверками,
+ * чтобы не требовать содержимого панели там, где его нет по замыслу.
+ */
+const WIDE_MIN = 1440;
+
+const VIEWPORTS: { width: number; height: number }[] = [
+  { width: 1920, height: 1080 },
+  { width: 1440, height: 1200 },
+  { width: 1366, height: 768 },
+];
 
 interface Problem {
   page: string;
@@ -89,6 +128,12 @@ async function run(): Promise<void> {
 
   const base = `http://127.0.0.1:${SERVER_PORT}`;
   await waitFor(async () => (await fetch(`${base}/api/health`)).ok, "сервер не поднялся");
+  // Прогрев бандла ДО прихода Chrome: в development Bun собирает HTML-вход
+  // (React 19 + uikit) по первому запросу страницы, и на холодном старте это
+  // дольше окна ожидания `load`. /api/health бандл не трогает, поэтому греем
+  // сам «/» — иначе первый навигейт падал «страница не загрузилась» в
+  // development и проходил в production, где чанки уже минифицированы.
+  await waitFor(async () => (await fetch(`${base}/`)).ok, "страница «/» не собралась", 240, 500);
 
   profile = mkdtempSync(join(tmpdir(), `rh-shot-${MODE}-`));
   browser = spawn(
@@ -101,7 +146,8 @@ async function run(): Promise<void> {
       "--no-default-browser-check",
       "--disable-extensions",
       `--user-data-dir=${profile}`,
-      "--window-size=1440,1200",
+      // viewport задаётся через CDP (Emulation), окно — просто достаточно большое
+      `--window-size=${VIEWPORTS[0]!.width},${VIEWPORTS[0]!.height}`,
       "about:blank",
     ],
     { stdio: "ignore" },
@@ -132,26 +178,58 @@ async function run(): Promise<void> {
   mkdirSync(SHOTS_DIR, { recursive: true });
   const [org, repo] = SLUG.split("/") as [string, string];
 
-  await shoot("rating", `${base}/?sort=index&order=desc`, {
-    "строк таблицы": "document.querySelectorAll('table tbody tr').length",
-    "заголовок рейтинга": "document.body.innerText.includes('Рейтинг здоровья репозиториев') ? 1 : 0",
-    "колонка HealthCraft Index": "document.body.innerText.includes('HealthCraft Index') ? 1 : 0",
-  });
+  const pages: { name: string; url: string; checks: Record<string, string>; wideOnly?: Record<string, string> }[] = [
+    {
+      name: "rating",
+      url: `${base}/?sort=index&order=desc`,
+      checks: {
+        "строк таблицы": "document.querySelectorAll('table tbody tr').length",
+        "заголовок рейтинга": "document.body.innerText.includes('Рейтинг здоровья репозиториев') ? 1 : 0",
+        "колонка HealthCraft Index": "document.body.innerText.includes('HealthCraft Index') ? 1 : 0",
+      },
+      // В4.6 (У22/У23): ниже 1440 правая панель рейтинга уезжает в закрытый Drawer,
+      // и легенды в DOM нет ПО ЗАМЫСЛУ — требовать её там значило бы ловить
+      // собственное решение о пороге как дефект.
+      wideOnly: {
+        "легенда шкалы": "document.body.innerText.includes('Как читать оценку') ? 1 : 0",
+      },
+    },
+    {
+      // «Личный кабинет» без сессии — витрина слоёв (Я ID → токен доступа) и входа.
+      name: "me",
+      url: `${base}/me`,
+      checks: {
+        "заголовок кабинета": "document.querySelectorAll('h1').length",
+        "кнопка входа Я ID": `[...document.querySelectorAll('a,button')].filter((n) => n.textContent?.includes("Войти через Я ID")).length`,
+      },
+    },
+    {
+      name: "repo",
+      url: `${base}/repo/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`,
+      checks: {
+        "блок Score": "document.body.innerText.includes('из 100') ? 1 : 0",
+        категории: "document.body.innerText.includes('Категории') ? 1 : 0",
+        рекомендации: "document.body.innerText.includes('Рекомендации') ? 1 : 0",
+        "tri-state NULL": "document.body.textContent?.includes('показатель не выставляется') ? 1 : 0",
+        "объяснение закрытых каналов": "document.body.innerText.includes('входят только в Repo Health Score') ? 1 : 0",
+        "кнопка отчета": "[...document.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'Отчет').length",
+      },
+    },
+  ];
 
-  // «Личный кабинет» без сессии — витрина слоёв (Я ID → токен доступа) и входа.
-  await shoot("me", `${base}/me`, {
-    "заголовок кабинета": "document.querySelectorAll('h1').length",
-    "кнопка входа Я ID": `[...document.querySelectorAll('a,button')].filter((n) => n.textContent?.includes("Войти через Я ID")).length`,
-  });
-
-  await shoot("repo", `${base}/repo/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`, {
-    "блок Score": "document.body.innerText.includes('из 100') ? 1 : 0",
-    категории: "document.body.innerText.includes('Категории') ? 1 : 0",
-    рекомендации: "document.body.innerText.includes('Рекомендации') ? 1 : 0",
-    "tri-state NULL": "document.body.textContent?.includes('показатель не выставляется') ? 1 : 0",
-    "объяснение закрытых каналов": "document.body.innerText.includes('входят только в Repo Health Score') ? 1 : 0",
-    "кнопка отчета": "[...document.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'Отчет').length",
-  });
+  for (const viewport of VIEWPORTS) {
+    // Метрики задаются CDP, а не размером окна: --window-size у headless
+    // включает хром браузера, и фактический viewport оказывался уже
+    // заявленного — то есть «проверено на 1366» было бы неправдой.
+    await call("Emulation.setDeviceMetricsOverride", {
+      width: viewport.width,
+      height: viewport.height,
+      deviceScaleFactor: 1,
+      mobile: false,
+    });
+    for (const page of pages) await shoot(page.name, page.url, page.checks, viewport, page.wideOnly);
+  }
+  await call("Emulation.clearDeviceMetricsOverride");
 
   const badExternals = [...externals].filter((url) => {
     const host = safeHost(url);
@@ -225,27 +303,54 @@ function call<T = any>(method: string, params: Record<string, unknown> = {}): Pr
   return new Promise<T>((resolve, reject) => pending.set(id, { resolve, reject }));
 }
 
-async function shoot(name: string, url: string, checks: Record<string, string>): Promise<void> {
-  currentPage = name;
+async function shoot(
+  name: string,
+  url: string,
+  checks: Record<string, string>,
+  viewport: { width: number; height: number },
+  wideOnly: Record<string, string> = {},
+): Promise<void> {
+  currentPage = `${name}@${viewport.width}`;
   loaded.fired = false;
   await call("Page.navigate", { url });
-  await waitFor(async () => loaded.fired, `${name}: страница не загрузилась`);
+  await waitFor(async () => loaded.fired, `${currentPage}: страница не загрузилась`, 240, 250);
   const first = Object.values(checks)[0]!;
-  await waitFor(async () => (await evaluate<number>(first)) > 0, `${name}: ключевой узел не появился`);
+  await waitFor(async () => (await evaluate<number>(first)) > 0, `${currentPage}: ключевой узел не появился`);
 
+  // Проверки ЖДУТ, а не снимают одно мгновение: карточка рисуется по своему
+  // ответу, а тексты про порог ждут /api/meta, который на живой базе в 27 тысяч
+  // репозиториев отвечает заметно позже. Без ожидания харнесс ругался на гонку
+  // загрузки, а не на вёрстку.
   const results: string[] = [];
-  for (const [label, expression] of Object.entries(checks)) {
-    const value = await evaluate<number>(expression);
+  const applicable = viewport.width >= WIDE_MIN ? { ...checks, ...wideOnly } : checks;
+  for (const [label, expression] of Object.entries(applicable)) {
+    let value = await evaluate<number>(expression);
+    for (let i = 0; value === 0 && i < 40; i++) {
+      await delay(250);
+      value = await evaluate<number>(expression);
+    }
     results.push(`${label}=${value}`);
-    if (value === 0) problems.push({ page: name, kind: "node", text: `узел не найден: ${label}` });
+    if (value === 0) problems.push({ page: currentPage, kind: "node", text: `узел не найден: ${label}` });
   }
+  // Приёмочный факт, видимый только на конкретной ширине: окно никогда
+  // не прокручивается горизонтально (решение 17.09) — перелив означает обрезанные данные.
+  const overflow = await evaluate<number>("document.documentElement.scrollWidth - document.documentElement.clientWidth");
+  results.push(`перелив по горизонтали=${overflow}px`);
+  if (overflow > 0) problems.push({ page: currentPage, kind: "layout", text: `страница шире окна на ${overflow}px` });
 
-  const shot = await call<{ data: string }>("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
-  const file = join(SHOTS_DIR, `${name}.png`);
-  writeFileSync(file, Buffer.from(shot.data, "base64"));
-  console.log(`${name}: ${url}`);
+  // основной файл — РОВНО видимая область: на него смотрит приёмка «в одном экране»
+  const viewShot = await call<{ data: string }>("Page.captureScreenshot", { format: "png" });
+  const file = join(SHOTS_DIR, `${name}@${viewport.width}.png`);
+  writeFileSync(file, Buffer.from(viewShot.data, "base64"));
+
+  // постраничный — вторым файлом, чтобы содержимое можно было прочесть целиком
+  const fullShot = await call<{ data: string }>("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
+  const fullFile = join(SHOTS_DIR, `${name}@${viewport.width}-full.png`);
+  writeFileSync(fullFile, Buffer.from(fullShot.data, "base64"));
+
+  console.log(`${currentPage}: ${url}`);
   console.log(`  ${results.join(", ")}`);
-  console.log(`  скриншот: ${file}`);
+  console.log(`  скриншот: ${file} (+ ${fullFile})`);
 }
 
 async function evaluate<T>(expression: string): Promise<T> {

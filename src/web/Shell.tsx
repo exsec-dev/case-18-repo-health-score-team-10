@@ -7,12 +7,12 @@
 // Прокрутка (решение 17.09): окно не прокручивается никогда — только
 // контейнеры страницы. Два режима Page:
 //   document — текст/плашки: основная колонка и правая панель прокручиваются
-//     каждая своим контейнером; уже 1280px колонки встают друг под друга и
-//     прокручиваются одним контейнером под ActionBar;
+//     каждая своим контейнером; уже 1440px (В4.6, У23) колонки встают друг
+//     под друга и прокручиваются одним контейнером под ActionBar;
 //   fill — данные на высоту экрана (рейтинг): шапка и футер закреплены,
 //     прокручивается только область между ними (таблица — сама, с
-//     закреплённой строкой заголовков); уже 1280px правая панель уходит в
-//     Drawer по кнопке в ActionBar — второй прокрутки на странице нет.
+//     закреплённой строкой заголовков); уже 1440px (В4.6, У23) правая панель
+//     уходит в Drawer по кнопке в ActionBar — второй прокрутки на странице нет.
 import { ArrowRightFromSquare, ArrowRightToSquare, BookOpen, ChartColumn, CircleInfo, Gear, Moon, Person, Sun } from "@gravity-ui/icons";
 import { ActionBar, AsideHeader, FooterItem, type AsideHeaderItem } from "@gravity-ui/navigation";
 import { ActionTooltip, Avatar, Breadcrumbs, Button, Drawer, Flex, Icon, Text, useThemeValue, useToaster, type IconData } from "@gravity-ui/uikit";
@@ -393,9 +393,18 @@ interface PageProps {
 
 export function Page({ crumbs, actions, aside, mode = "document", header, footer, children }: PageProps) {
   const globalActions = useContext(GlobalActionsContext);
-  const wide = useMediaQuery("(min-width: 1280px)");
+  /**
+   * В4.6 (У23, решение владельца 20.09 — вариант (iii)): порог 1440, а не
+   * 1280. На 1366x768 прежний порог оставлял панель на месте, и она держала
+   * 320px, из-за чего колонка «Code health» резалась до «Code hea» без
+   * всякого признака прокрутки. Порог ВКЛЮЧИТЕЛЬНЫЙ: ровно на 1440 панель
+   * остаётся, ниже уезжает в Drawer по кнопке «Как считается» в ActionBar.
+   * Гейт `mode === "fill"` не снимаем: карточка рендерится в `document`
+   * (RepoPage.tsx), Drawer там не работает ни на какой ширине — ей отвечает
+   * CSS-медиазапрос layout.css, который кладёт панель ПОД основную колонку.
+   */
+  const wide = useMediaQuery("(min-width: 1440px)");
   const [asideOpen, setAsideOpen] = useState(false);
-  // fill уже 1280: правая панель — по кнопке, а не второй прокруткой под данными
   const asideInDrawer = mode === "fill" && !wide && aside !== undefined;
 
   const barActions =
@@ -445,11 +454,11 @@ export function Page({ crumbs, actions, aside, mode = "document", header, footer
         {mode === "fill" ? (
           <main className="rh-page__main">
             {header && <div className="rh-fill__header">{header}</div>}
-            <div className="rh-fill__content">{children}</div>
+            <div className="rh-fill__content rh-fade">{children}</div>
             {footer && <div className="rh-fill__footer">{footer}</div>}
           </main>
         ) : (
-          <main className="rh-page__main">{children}</main>
+          <main className="rh-page__main rh-fade">{children}</main>
         )}
         {aside !== undefined && !asideInDrawer && <aside className="rh-page__aside">{aside}</aside>}
       </div>
