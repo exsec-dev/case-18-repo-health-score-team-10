@@ -164,10 +164,10 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
             title={card.job.status === "queued" ? "Анализ запланирован" : "Сканируем…"}
             description={
               (card.job.status === "queued"
-                ? `Заявка стоит в очереди — её возьмут в работу, и здесь появится статус скана. ${etaNote}.`
+                ? `Заявка стоит в очереди – ее возьмут в работу, и здесь появится статус скана. ${etaNote}.`
                 : `Скан собирает факты из репозитория; Score появится после завершения. ${etaNote}.`) +
               // UX-10 (круг 2 В4.4): симметричная кабинету заметка после leaseMs
-              (jobStalled ? " Затянулось — смотрите панель заданий в кабинете." : "")
+              (jobStalled ? " Затянулось – смотрите панель заданий в кабинете." : "")
             }
           />
         ) : (
@@ -175,10 +175,10 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
           // CTA — по возможностям зрителя (запуск/токен/объяснение)
           <EmptyState
             icon={SquareListUl}
-            title={card.scan ? "Скан был — данных для оценки не хватило" : "Репозиторий есть в каталоге, но еще не сканировался"}
+            title={card.scan ? "Скан был – данных для оценки не хватило" : "Репозиторий есть в каталоге, но еще не сканировался"}
             description={
               card.scan
-                ? `Последний скан (${sentence(scanStatusText(card.scan.status))}) не собрал достаточно фактов для честного числа — это отсутствие данных, а не плохая оценка. Повторный анализ соберёт факты заново.`
+                ? `Последний скан (${sentence(scanStatusText(card.scan.status))}) не собрал достаточно фактов для честного числа – это отсутствие данных, а не плохая оценка. Повторный анализ соберет факты заново.`
                 : "Score появится после первого скана: его считает код по фактам, а фактов пока нет."
             }
             actions={
@@ -188,7 +188,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
                   ? [
                       // UX-6 (круг 2 В4.4): на ветке «Скан был» анализа уже были —
                       // слово «первый» обещало то, чего не случится
-                      { text: card.scan ? "Добавьте токен в кабинете — и запустите анализ" : "Добавьте токен в кабинете — и запустите первый анализ", view: "action", size: "l", href: "/me" },
+                      { text: card.scan ? "Добавьте токен в кабинете – и запустите анализ" : "Добавьте токен в кабинете – и запустите первый анализ", view: "action", size: "l", href: "/me" },
                     ]
                   : undefined
             }
@@ -266,7 +266,7 @@ function useRefreshAnalysis(org: string, repo: string, cardUrl: string, sinceSca
               name: `scan-failed:${org}/${repo}`,
               theme: "danger",
               title: "Анализ завершился ошибкой",
-              content: "Сбор данных не удался — подробности в «Моих заданиях» кабинета.",
+              content: "Сбор данных не удался – подробности в «Моих заданиях» кабинета.",
             });
           }
           onDone();
@@ -406,7 +406,8 @@ function ScoreAside({ card, meta, leaseMs, jobStalled }: { card: Card; meta: Met
                   <Icon data={Lock} size={16} />
                   <Text variant="subheader-2">закрыто</Text>
                 </Flex>
-                <Text variant="body-short" color="complementary">
+                {/* В4.6 (У24): предложение, а не подпись — body-2 */}
+                <Text variant="body-2" color="complementary">
                   {fullLockReason(card)}
                 </Text>
               </Flex>
@@ -423,11 +424,11 @@ function ScoreAside({ card, meta, leaseMs, jobStalled }: { card: Card; meta: Met
                   // CI/Security опускают полный показатель ниже индекса);
                   // M-13: |Δ| < 0.05 — «разницы нет», не «+0.0»
                   (Math.abs(score.repoHealthScore - score.healthcraftIndex) < 0.05 ? (
-                    <Text variant="body-short" color="complementary">
+                    <Text variant="body-2" color="complementary">
                       Разницы нет: CI и Security на этом скане нейтральны.
                     </Text>
                   ) : (
-                    <Text variant="body-short" color="complementary">
+                    <Text variant="body-2" color="complementary">
                       Разницу с HealthCraft Index дают CI и Security: {fmtSigned(score.repoHealthScore - score.healthcraftIndex)}.
                     </Text>
                   ))}
@@ -436,10 +437,14 @@ function ScoreAside({ card, meta, leaseMs, jobStalled }: { card: Card; meta: Met
           </Flex>
         </Card>
       )}
+      {/* В4.6 (У24): ЭТО и есть находка ДП5 — семистрочный абзац был набран
+          вариантом для однострочных подписей (body-short 13/16) и вторичным
+          цветом. Стало body-2 13/18 + complementary: интерлиньяж абзаца и
+          7,0:1 против 5,34:1 в тёмной теме. */}
       {score && (
-        <Text as="p" variant="body-short" color="secondary" style={{ margin: "0 0 var(--g-spacing-6)" }}>
+        <Text as="p" variant="body-2" color="complementary" style={{ margin: "0 0 var(--g-spacing-6)" }}>
           {meta ? `При покрытии данными ниже ${threshold} показатель не выставляется: без данных честного числа нет. ` : ""}
-          HealthCraft Index строят 4 публичные категории; CI и Security входят только в Repo Health Score — он виден участникам
+          HealthCraft Index строят 4 публичные категории; CI и Security входят только в Repo Health Score – он виден участникам
           репозитория с доступом к этим данным.
         </Text>
       )}
@@ -477,7 +482,7 @@ function ScoreAside({ card, meta, leaseMs, jobStalled }: { card: Card; meta: Met
           // UX-10 (круг 2 В4.4): после leaseMs — заметка «затянулось», не вечный спиннер
           jobStalled ? (
             <Label theme="warning" size="xs">
-              затянулось — смотрите панель заданий
+              затянулось – смотрите панель заданий
             </Label>
           ) : (
             <Flex gap={2} alignItems="center" title={`обычно до ${Math.max(1, Math.round(leaseMs / 60_000))} минут`}>
@@ -629,7 +634,7 @@ function CategoryRow({ categoryKey: key, title, cat, contribution, card }: { cat
       )}
       {note && (
         <div style={{ padding: "0 var(--g-spacing-3) var(--g-spacing-3) calc(16px + var(--g-spacing-6))", marginTop: "calc(-1 * var(--g-spacing-1))" }}>
-          <Text variant="body-short" color="complementary">
+          <Text variant="body-2" color="complementary">
             {note}
           </Text>
         </div>
@@ -663,7 +668,7 @@ function Markers({ card }: { card: Card }) {
     rows.push({
       key: "stale",
       label: "Факты из истории",
-      text: "Часть источников ответила сбоем канала, поэтому в расчет пошли последние успешные факты предыдущих сканов. Сбой трубы — не отсутствие данных, и он не превращается в премию или штраф.",
+      text: "Часть источников ответила сбоем канала, поэтому в расчет пошли последние успешные факты предыдущих сканов. Сбой трубы – не отсутствие данных, и он не превращается в премию или штраф.",
     });
   }
   if (m.gitLimits) {
@@ -675,7 +680,7 @@ function Markers({ card }: { card: Card }) {
     rows.push({
       key: "code-empty",
       label: "В репозитории нет кода",
-      text: "В репозитории нет ни одного файла, поэтому по методике Score равен 0 — это данные о проекте («проекта нет»), а не отсутствие оценки или сбой сбора.",
+      text: "В репозитории нет ни одного файла, поэтому по методике Score равен 0 – это данные о проекте («проекта нет»), а не отсутствие оценки или сбой сбора.",
     });
   }
   if (m.historyTruncatedSince) {
@@ -689,7 +694,7 @@ function Markers({ card }: { card: Card }) {
     rows.push({
       key: "ci-cap",
       label: "CI заявлен, прогоны недоступны",
-      text: "Конфигурация CI в репозитории есть, но статусы прогонов закрыты правами (403 для чужих репозиториев). Заявленный CI дает максимум 50 из 100 — доказательства дают прогоны.",
+      text: "Конфигурация CI в репозитории есть, но статусы прогонов закрыты правами (403 для чужих репозиториев). Заявленный CI дает максимум 50 из 100 – доказательства дают прогоны.",
     });
   }
   if (rows.length === 0) return null;
@@ -718,7 +723,8 @@ function Recommendations({ card }: { card: Card }) {
   }
   return (
     <Flex direction="column" gap={3}>
-      <Text variant="body-short" color="secondary">
+      {/* В4.6 (У24): два предложения в полную ширину колонки — проза */}
+      <Text variant="body-1" color="complementary">
         Порядок задан движком правил: сперва измеримый прирост Score, затем то, что открывает закрытую категорию,
         затем улучшения по уже собранным данным. Каждый факт открывается по клику.
       </Text>
@@ -777,7 +783,7 @@ function FactProof({ factKey, fact }: { factKey: string; fact: Evidence | undefi
   if (!fact) {
     return (
       <Flex direction="column" gap={1} style={{ maxWidth: 420, padding: "var(--g-spacing-3)" }}>
-        <Text variant="subheader-1">{factKey} — факта нет по построению</Text>
+        <Text variant="subheader-1">{factKey} – факта нет по построению</Text>
         <Text color="complementary">{SECURITY_PUBLIC_NOTE}</Text>
       </Flex>
     );
@@ -823,7 +829,7 @@ export function humanNoData(raw: string): string {
   const prefix = category === "security" ? "" : `${categoryWord(category)}: `;
   if (category === "security" || reason.startsWith("AppSec data unavailable")) return SECURITY_PUBLIC_NOTE;
   if (reason.startsWith("ci runs no-data")) {
-    return `${prefix}прогоны CI недоступны (закрыты правами или их нет) — категория ограничена потолком 50.`;
+    return `${prefix}прогоны CI недоступны (закрыты правами или их нет) – категория ограничена потолком 50.`;
   }
   if (reason === "git channel no-data") return `${prefix}git-канал не отдал данные (клон не удался или уперся в лимиты).`;
   if (reason === "git+rest channels no-data") return `${prefix}ни git-, ни REST-канал не отдали данных.`;
@@ -896,13 +902,13 @@ function securityNote(card: Card): string {
   const fact = card.evidence.find((e) => e.key === "appsec.findings");
   const reason = fact && fact.status === "no-data" ? (fact.value as { reason?: string }).reason : undefined;
   if (reason === "access") {
-    return "AppSec этого репозитория недоступен токену скана: право src.repositories.useAppSecScan не выдано. Это отсутствие данных, не ноль — вес категории выброшен.";
+    return "AppSec этого репозитория недоступен токену скана: право src.repositories.useAppSecScan не выдано. Это отсутствие данных, не ноль – вес категории выброшен.";
   }
   if (reason === "no-scan") {
     return "Завершенного скана AppSec нет (не запускался или еще идет). Это отсутствие данных, не ноль.";
   }
   if (reason === "incomplete") {
-    return "AppSec API ответил неполно (канал/пагинация). Ошибка — не отсутствие уязвимостей: вес категории выброшен до успешного пересбора.";
+    return "AppSec API ответил неполно (канал/пагинация). Ошибка – не отсутствие уязвимостей: вес категории выброшен до успешного пересбора.";
   }
   return SECURITY_PUBLIC_NOTE;
 }
@@ -953,7 +959,7 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
         if (!res.ok) {
           if (!stop) {
             setState("off");
-            setError("Не удалось проверить избранное — попробуйте позже");
+            setError("Не удалось проверить избранное – попробуйте позже");
           }
           return;
         }
@@ -963,7 +969,7 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
       .catch(() => {
         if (!stop) {
           setState("off");
-          setError("Не удалось проверить избранное — попробуйте позже");
+          setError("Не удалось проверить избранное – попробуйте позже");
         }
       });
     return () => {

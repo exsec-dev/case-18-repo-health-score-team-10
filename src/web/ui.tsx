@@ -141,8 +141,13 @@ export function Meta({ children }: { children: ReactNode }) {
 export function MetaItem({ icon, children, title }: { icon?: IconData; children: ReactNode; title?: string }) {
   return (
     <span className="rh-meta__item" title={title}>
+      {/* В4.6 (У37, таблица акцентов раунда): мета-строка (лайки, форки, часы)
+          берёт стальной `misc` вместо серого — акцент ставится туда, где цвет
+          что-то ОЗНАЧАЕТ. Это однострочные метки с иконками, не проза: для них
+          работает порог 3:1 (misc даёт 4,21:1 в тёмной и 5,59:1 в светлой),
+          а правило «прозой misc не набирать» остаётся в силе. */}
       {icon && <Icon data={icon} size={14} />}
-      <Text variant="body-short" color="secondary">
+      <Text variant="body-short" color="misc">
         {children}
       </Text>
     </span>

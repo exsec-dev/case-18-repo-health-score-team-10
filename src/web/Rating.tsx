@@ -162,7 +162,7 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
               size="m"
               pin="brick-round"
               onClick={() => setParams({ order: order === "desc" ? "asc" : "desc" })}
-              aria-label={order === "desc" ? "По убыванию — переключить на возрастание" : "По возрастанию — переключить на убывание"}
+              aria-label={order === "desc" ? "По убыванию – переключить на возрастание" : "По возрастанию – переключить на убывание"}
             >
               <Icon data={order === "desc" ? BarsDescendingAlignLeft : BarsAscendingAlignLeft} size={16} />
             </Button>
@@ -200,7 +200,7 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
         <>
           <PageHeader
             title="Рейтинг здоровья репозиториев"
-            description="Порядок задает HealthCraft Index — воспроизводимая оценка из публичных данных, а не число лайков."
+            description="Порядок задает HealthCraft Index – воспроизводимая оценка из публичных данных, а не число лайков."
           />
           {toolbar}
         </>
@@ -271,7 +271,7 @@ function NothingFound({ hasFilters }: { hasFilters: boolean }) {
     <EmptyState
       icon={Magnifier}
       title="Под фильтр ничего не подошло"
-      description="Ни один репозиторий выборки не совпал с поиском и языком. Данные при этом на месте — сброс фильтров вернет полный рейтинг."
+      description="Ни один репозиторий выборки не совпал с поиском и языком. Данные при этом на месте – сброс фильтров вернет полный рейтинг."
       actions={[{ text: "Сбросить фильтры", view: "normal", onClick: () => navigate("/") }]}
     />
   );
@@ -311,12 +311,12 @@ function UnscoredTable({ items, meta, hasFilters }: { items: Item[]; meta: MetaR
     <Flex direction="column" gap={3}>
       <Text color="complementary">
         Эти репозитории не получили HealthCraft Index: покрытие данными оказалось ниже порога
-        {meta ? ` ${fmtCoverage(meta.coverageNullBelow)}` : ""}. Отсутствие данных — не плохая оценка и не ноль: пока
+        {meta ? ` ${fmtCoverage(meta.coverageNullBelow)}` : ""}. Отсутствие данных – не плохая оценка и не ноль: пока
         источники недоступны, честного числа нет.
-        {failedScan && " У части репозиториев последний скан завершился сбоем — для оценки он непригоден; повторный обход попробует снова."}
+        {failedScan && " У части репозиториев последний скан завершился сбоем – для оценки он непригоден; повторный обход попробует снова."}
       </Text>
       <Table data={shown} columns={columns} width="max" verticalAlign="middle" />
-      {rest > 0 && <Text color="complementary">…и ещё {fmtNumber(rest)} — уточните поиск или фильтры, чтобы сузить список.</Text>}
+      {rest > 0 && <Text color="complementary">…и еще {fmtNumber(rest)} – уточните поиск или фильтры, чтобы сузить список.</Text>}
     </Flex>
   );
 }
@@ -331,8 +331,8 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
 
       <AsideSection title="О рейтинге">
         <Text color="complementary">
-          Публичный рейтинг считают четыре категории: {meta.categories.filter((c) => !NOT_IN_RATING.has(c.key)).map((c) => c.title).join(", ")}.
-          CI/CD и Security в общий рейтинг не вкладываются — они доступны в полном Repo Health Score на карточке
+          Публичный рейтинг считают 4 категории: {meta.categories.filter((c) => !NOT_IN_RATING.has(c.key)).map((c) => c.title).join(", ")}.
+          CI/CD и Security в общий рейтинг не вкладываются – они доступны в полном Repo Health Score на карточке
           репозитория участникам с доступом к этим данным. Лайки доступны сортировкой, но никогда не выбраны по умолчанию.
         </Text>
       </AsideSection>
@@ -343,11 +343,13 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
             .filter((c) => !NOT_IN_RATING.has(c.key))
             .map((c) => (
               <DefinitionList.Item key={c.key} name={c.title}>
-                <span title={`вес в HealthCraft Index — ${c.indexWeight}`}>{Math.round(((c.indexWeight ?? 0) / Math.max(1, ratingWeight)) * 100)}%</span>
+                <span title={`вес в HealthCraft Index – ${c.indexWeight}`}>{Math.round(((c.indexWeight ?? 0) / Math.max(1, ratingWeight)) * 100)}%</span>
               </DefinitionList.Item>
             ))}
         </DefinitionList>
-        <Text variant="body-short" color="secondary">
+        {/* В4.6 (У24): абзац в панели 320px переносится, значит это проза —
+            body-2 + complementary, а не однострочная подпись body-short */}
+        <Text variant="body-2" color="complementary">
           Доля в HealthCraft Index. CI/CD и Security считаются только в Repo Health Score на карточке.
         </Text>
       </AsideSection>
@@ -363,7 +365,7 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
             </Label>
           </DefinitionList.Item>
           {/* M-7: «Данные на сегодня» врало (generatedAt = момент запроса) — честная свежесть ниже */}
-          <DefinitionList.Item name="Свежесть" note="У каждого репозитория — дата своего последнего скана (колонка «Скан»); ночной обход обновляет их по очереди.">
+          <DefinitionList.Item name="Свежесть" note="У каждого репозитория – дата своего последнего скана (колонка «Скан»); ночной обход обновляет их по очереди.">
             обновляется ежесуточно
           </DefinitionList.Item>
         </DefinitionList>
@@ -474,7 +476,7 @@ function buildColumns(categories: MetaResponse["categories"], rankOffset: number
             color="secondary"
             title={
               item.scanStatus === "bad"
-                ? "Последний скан завершился сбоем: часть источников не ответила. Score посчитан по последнему успешному скану — сбой не понижает оценку."
+                ? "Последний скан завершился сбоем: часть источников не ответила. Score посчитан по последнему успешному скану – сбой не понижает оценку."
                 : undefined
             }
           >

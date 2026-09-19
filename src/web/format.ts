@@ -71,7 +71,7 @@ export function scanStatusText(status: string): string {
     case "queued":
       return "в очереди";
     case "running":
-      return "идёт";
+      return "идет";
     default:
       return status;
   }
@@ -217,8 +217,8 @@ export const SECURITY_PUBLIC_NOTE =
 export const ACCESS_LOCK_TEXT: Record<"no-pat" | "denied" | "pat-expired" | "check-failed", string> = {
   "no-pat": "Данные видны участникам репозитория: войдите и добавьте токен доступа SourceCraft в «Личном кабинете».",
   denied: "Ваш токен доступа не дает доступа к этим данным репозитория.",
-  "pat-expired": "SourceCraft отклонил ваш токен доступа — обновите его в «Личном кабинете».",
-  "check-failed": "Не удалось проверить доступ к этим данным — попробуйте открыть карточку позже.",
+  "pat-expired": "SourceCraft отклонил ваш токен доступа – обновите его в «Личном кабинете».",
+  "check-failed": "Не удалось проверить доступ к этим данным – попробуйте открыть карточку позже.",
 };
 
 /** Размер человекочитаемо: ГБ с двумя знаками или МБ. */
@@ -248,11 +248,11 @@ export interface GitLimitsMarker {
 export function gitLimitsText(l: GitLimitsMarker): string {
   const full = `полный клон больше ${fmtBytes(l.cloneMaxBytes)} или дольше ${fmtMinutes(l.cloneTimeoutMs)}`;
   const degrade = l.degradeEnabled
-    ? `, ${l.degradeSinceMonths} месяцев истории — больше ${fmtBytes(l.degradeMaxBytes)} или дольше ${fmtMinutes(l.degradeTimeoutMs)}`
+    ? `, ${l.degradeSinceMonths} месяцев истории – больше ${fmtBytes(l.degradeMaxBytes)} или дольше ${fmtMinutes(l.degradeTimeoutMs)}`
     : "";
   return (
     `Репозиторий больше лимита сервиса: ${full}${degrade}. ` +
-    "Git-метрики (документация, активность, код) — нет данных; Score не занижен, их вес выброшен. Лимиты задает оператор сервиса."
+    "Git-метрики (документация, активность, код) – нет данных; Score не занижен, их вес выброшен. Лимиты задает оператор сервиса."
   );
 }
 
@@ -269,8 +269,8 @@ export function accessLockText(access: string | undefined): string | null {
  * компонент, его нельзя импортировать в bun test (CJS-CSS зависимости).
  */
 export function authErrorText(raw: string): string {
-  if (raw === "state") return "Не сошёлся проверочный код входа (state) — начните вход заново. Так работает защита от подмены.";
-  if (raw === "no_code") return "Провайдер входа не передал код подтверждения — попробуйте войти ещё раз.";
+  if (raw === "state") return "Не сошелся проверочный код входа (state) – начните вход заново. Так работает защита от подмены.";
+  if (raw === "no_code") return "Провайдер входа не передал код подтверждения – попробуйте войти еще раз.";
   // В4.4 (кластер K/З4): отражаемый текст ограничен — обрезка 200 символов и
   // отсечение управляющих символов (фишинг авторитетностью официального Alert)
   const safe = raw.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 200);

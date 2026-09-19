@@ -88,7 +88,7 @@ export function Shell({
         iconSize: 26,
         textSize: 20,
         href: "/",
-        "aria-label": `${PRODUCT_NAME} — к рейтингу`,
+        "aria-label": `${PRODUCT_NAME} – к рейтингу`,
         onClick: (e) => followLink(e, "/"),
       }}
       menuItems={menuItems}

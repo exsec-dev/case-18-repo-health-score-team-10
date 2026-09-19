@@ -300,7 +300,8 @@ describe("Б3 (Ф2.9): маркер codeEmpty виден на карточке �
 describe("Б3 (Ф2.9): текст auth_error для /me", () => {
   test("известные коды — человеческие фразы, остальное — текст провайдера", () => {
     expect(authErrorText("state")).toContain("state");
-    expect(authErrorText("no_code")).toContain("ещё раз");
+    // Б5 В4.6 (У31): «ещё» → «еще» в текстах интерфейса
+    expect(authErrorText("no_code")).toContain("еще раз");
     expect(authErrorText("access_denied")).toBe("Вход не удался: access_denied");
   });
 });

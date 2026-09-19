@@ -53,10 +53,10 @@ function headerSection(card: RepoCard): string[] {
   if (repo.title && repo.title !== repo.repo) out.push(`_${mdEscape(repo.title)}_`, "");
   out.push(
     `- Репозиторий: ${repo.webUrl}`,
-    // Ф2.9: один язык (RU) — статусы и триггеры словами, как на карточке
+    // Ф2.9: один язык (RU) – статусы и триггеры словами, как на карточке
     `- Скан: ${scan ? `#${scan.id} от ${fmtDateTime(scan.finishedAt ?? scan.startedAt)} (статус ${scanStatusText(scan.status)}, запуск ${scanTriggerText(scan.trigger)})` : "не выполнялся"}`,
     `- Модель: ${score ? score.modelVersion : "—"}`,
-    `- Язык: ${repo.language ? mdEscape(repo.language) : "не определён"}; лайки: ${num(repo.likes)}; форки: ${num(repo.forks)}`,
+    `- Язык: ${repo.language ? mdEscape(repo.language) : "не определен"}; лайки: ${num(repo.likes)}; форки: ${num(repo.forks)}`,
     `- Последняя активность: ${fmtDate(repo.lastActivityAt)}`,
     "",
   );
@@ -69,16 +69,16 @@ function summarySection(card: RepoCard): string[] {
   const out = ["## Итог", ""];
   const score = card.score;
   if (card.markers.gitLimits) out.push(gitLimitsText(card.markers.gitLimits), "");
-  // Ф2.9 (LOW-9): маркер codeEmpty — теми же словами, что на карточке
+  // Ф2.9 (LOW-9): маркер codeEmpty – теми же словами, что на карточке
   if (card.markers.codeEmpty) {
     out.push(
-      "В репозитории нет кода (ни одного файла): HealthCraft Index и Repo Health Score равны 0 — по методике это данные о проекте («проекта нет»), а не отсутствие оценки или сбой.",
+      "В репозитории нет кода (ни одного файла): HealthCraft Index и Repo Health Score равны 0 – по методике это данные о проекте («проекта нет»), а не отсутствие оценки или сбой.",
       "",
     );
   }
   if (!score) {
     out.push(
-      "Репозиторий есть в каталоге, но ещё не сканировался — фактов нет, поэтому нет и оценки.",
+      "Репозиторий есть в каталоге, но еще не сканировался – фактов нет, поэтому нет и оценки.",
       "Отсутствие оценки здесь означает отсутствие данных, а не плохое состояние репозитория.",
       "",
     );
@@ -86,7 +86,7 @@ function summarySection(card: RepoCard): string[] {
   }
   if (score.healthcraftIndex === null) {
     out.push(
-      `**Недостаточно данных для оценки.** Покрытие данными — ${pct(score.indexCoverage)} при пороге ${pct(COVERAGE_NULL_BELOW)}.`,
+      `**Недостаточно данных для оценки.** Покрытие данными – ${pct(score.indexCoverage)} при пороге ${pct(COVERAGE_NULL_BELOW)}.`,
       "",
       "Это не ноль и не плохая оценка: при таком покрытии честного числа не существует.",
       "",
@@ -104,7 +104,7 @@ function summarySection(card: RepoCard): string[] {
   const withDelta = card.recommendations.filter((r): r is CardRecommendation & { deltaScore: number } => r.deltaScore !== null);
   const top = withDelta.length > 0 ? withDelta.reduce((a, b) => ((a.deltaScore ?? 0) >= (b.deltaScore ?? 0) ? a : b)) : null;
 
-  // В4.6 (У22): то же слово шкалы, что стоит у числа на карточке — отчёт и
+  // В4.6 (У22): то же слово шкалы, что стоит у числа на карточке – отчет и
   // страница обязаны говорить одно и то же (источник слова один, format.ts)
   out.push(
     `**HealthCraft Index (4 категории): ${Math.round(score.healthcraftIndex)} из 100 – ${scoreWord(score.healthcraftIndex)}** ` +
@@ -114,21 +114,21 @@ function summarySection(card: RepoCard): string[] {
   );
   out.push(...fullScoreLine(card), "");
   out.push(
-    "Индекс построен из публичных данных: CI/CD и Security в нём не участвуют по правилам платформы — разницу с полным показателем дают только они.",
+    "Индекс построен из публичных данных: CI/CD и Security в нем не участвуют по правилам платформы – разницу с полным показателем дают только они.",
     "",
   );
   if (best && worst) {
     out.push(
-      `Сильнее всего — ${CATEGORY_TITLES[best[0]]} (${round(best[1].score)}), слабее всего — ` +
+      `Сильнее всего – ${CATEGORY_TITLES[best[0]]} (${round(best[1].score)}), слабее всего – ` +
         `${CATEGORY_TITLES[worst[0]]} (${round(worst[1].score)}).`,
       "",
     );
   }
   out.push(
     `Рекомендаций: ${card.recommendations.length}` +
-      // S-2 (круг 2 В4.4): тот же mdEscape, что у rec.problem в разделе рекомендаций —
+      // S-2 (круг 2 В4.4): тот же mdEscape, что у rec.problem в разделе рекомендаций –
       // непоследовательности защиты больше нет
-      `${top ? `; наибольший измеримый прирост даёт «${mdEscape(top.problem)}» (${top.expectedImpact ?? fmtSigned(top.deltaScore)})` : ""}.`,
+      `${top ? `; наибольший измеримый прирост дает «${mdEscape(top.problem)}» (${top.expectedImpact ?? fmtSigned(top.deltaScore)})` : ""}.`,
     "",
   );
   if (score.noData.length > 0) {
@@ -139,10 +139,10 @@ function summarySection(card: RepoCard): string[] {
 }
 
 /**
- * Repo Health Score (6 категорий, с CI и Security) — отдельной строкой;
- * NULL — честно «недостаточно данных». Рядом — ФАКТИЧЕСКАЯ signed-дельта
+ * Repo Health Score (6 категорий, с CI и Security) – отдельной строкой;
+ * NULL – честно «недостаточно данных». Рядом – ФАКТИЧЕСКАЯ signed-дельта
  * с индексом: знак не обещается (плохие CI/Security опускают полный
- * показатель ниже индекса — инверсия законна, К-Ф3.4).
+ * показатель ниже индекса – инверсия законна, К-Ф3.4).
  */
 function fullScoreLine(card: RepoCard): string[] {
   const score = card.score!;
@@ -157,11 +157,11 @@ function fullScoreLine(card: RepoCard): string[] {
   ];
   if (score.healthcraftIndex !== null) {
     const d = score.repoHealthScore - score.healthcraftIndex;
-    // M-13: |Δ| < 0.05 — «разницы нет», не «+0.0» (паритет со страницей)
+    // M-13: |Δ| < 0.05 – «разницы нет», не «+0.0» (паритет со страницей)
     lines.push(
       Math.abs(d) < 0.05
         ? "Разницы нет: CI и Security на этом скане нейтральны."
-        : `Разницу с HealthCraft Index дают CI и Security: ${fmtSigned(d)} — вклад двух каналов при их фактических данных.`,
+        : `Разницу с HealthCraft Index дают CI и Security: ${fmtSigned(d)} – вклад двух каналов при их фактических данных.`,
     );
   }
   return lines;
@@ -195,14 +195,14 @@ function categoriesDetail(card: RepoCard): string[] {
   const out = ["## Разбор по категориям", ""];
   for (const [key, cat] of categoryEntries(card)) {
     const lock = accessLockText(cat.locked);
-    out.push(`### ${CATEGORY_TITLES[key]} — ${lock !== null ? "закрыто" : cat.score === null ? NO_DATA : `${round(cat.score)} / 100`}`, "");
+    out.push(`### ${CATEGORY_TITLES[key]} – ${lock !== null ? "закрыто" : cat.score === null ? NO_DATA : `${round(cat.score)} / 100`}`, "");
     if (lock !== null) {
       out.push(lock, "", "HealthCraft Index эту категорию не учитывает.", "");
       continue;
     }
     if (cat.score === null) {
       out.push(key === "security" ? SECURITY_PUBLIC_NOTE : humanNoData(`${key}: ${cat.no_data ?? ""}`), "");
-      out.push("Категория не снизила Score: её вес выброшен, веса остальных категорий перенормированы.", "");
+      out.push("Категория не снизила Score: ее вес выброшен, веса остальных категорий перенормированы.", "");
       continue;
     }
     if (cat.no_data) out.push(humanNoData(`${key}: ${cat.no_data}`), "");
@@ -213,7 +213,7 @@ function categoriesDetail(card: RepoCard): string[] {
     }
     out.push("| Подметрика | Балл (0–100) | Значение | Примечание |", "|---|---:|---|---|");
     for (const [subKey, sub] of subs) {
-      // submetric приходит долей 0..1 — в отчёте показывается ×100, как и на странице
+      // submetric приходит долей 0..1 – в отчете показывается ×100, как и на странице
       const value = sub.score === null ? "—" : String(Math.round(sub.score * 100));
       out.push(`| ${subKey} | ${value} | ${cell(sub.value)} | ${cell(sub.note ?? "")} |`);
     }
@@ -231,7 +231,7 @@ function recommendationsSection(card: RepoCard): string[] {
     return out;
   }
   out.push(
-    "Порядок задан движком: сперва измеримый прирост показателя (HealthCraft Index или Repo Health Score — смотрите строку эффекта), " +
+    "Порядок задан движком: сперва измеримый прирост показателя (HealthCraft Index или Repo Health Score – смотрите строку эффекта), " +
       "затем то, что открывает закрытую категорию, затем улучшения по уже собранным данным. Каждая рекомендация привязана к фактам.",
     "",
   );
@@ -251,7 +251,7 @@ function impact(rec: CardRecommendation): string {
   // К-Ф1.2/К-Ф3.4: текст прироста уже содержит показатель, к которому он относится
   // («+N.N к HealthCraft Index» / «−N.N к Repo Health Score»)
   if (rec.deltaScore !== null) return rec.expectedImpact ?? fmtSigned(rec.deltaScore);
-  if (rec.opensCategory) return `откроет категорию${rec.expectedImpact ? ` — ${rec.expectedImpact}` : ""}`;
+  if (rec.opensCategory) return `откроет категорию${rec.expectedImpact ? ` – ${rec.expectedImpact}` : ""}`;
   return rec.expectedImpact ?? "улучшение по уже собранным данным";
 }
 
@@ -264,8 +264,8 @@ function evidenceSection(card: RepoCard): string[] {
     return out;
   }
   out.push(
-    "Каждое число выше получено из этих фактов. Тяжёлые значения (история коммитов) показаны агрегатом — " +
-      "сырьё коммитов не хранится и не выгружается.",
+    "Каждое число выше получено из этих фактов. Тяжелые значения (история коммитов) показаны агрегатом – " +
+      "сырье коммитов не хранится и не выгружается.",
     "",
     "| Факт (kind) | Категория | Статус | Источник | Собрано | Значение |",
     "|---|---|---|---|---|---|",
@@ -306,17 +306,17 @@ function methodSection(card: RepoCard): string[] {
   return [
     "## Как считается и что это не значит",
     "",
-    "- **Два показателя:** HealthCraft Index — публичная проекция из 4 категорий (порядок в рейтинге), Repo Health Score — полный показатель из 6 категорий (кап 49 за критичные secrets). Полный считается на чтении из фактически показанных категорий и нигде не хранится.",
-    `- **Веса HealthCraft Index (публичная четвёрка):** ${indexWeights} — перенормированная редукция весов полного показателя (источник и правило вывода — методика).`,
-    `- **Веса Repo Health Score (номинальные):** ${fullWeights}. Каждый показатель — взвешенное среднее баллов категорий, у которых есть данные.`,
-    "- **Перенормировка (tri-state):** категория без данных не получает ноль — её вес выбрасывается, а веса остальных пересчитываются. Отсутствие данных никогда не ухудшает показатель.",
+    "- **Два показателя:** HealthCraft Index – публичная проекция из 4 категорий (порядок в рейтинге), Repo Health Score – полный показатель из 6 категорий (кап 49 за критичные secrets). Полный считается на чтении из фактически показанных категорий и нигде не хранится.",
+    `- **Веса HealthCraft Index (публичные 4 категории):** ${indexWeights} – перенормированная редукция весов полного показателя (источник и правило вывода – методика).`,
+    `- **Веса Repo Health Score (номинальные):** ${fullWeights}. Каждый показатель – взвешенное среднее баллов категорий, у которых есть данные.`,
+    "- **Перенормировка (tri-state):** категория без данных не получает ноль – ее вес выбрасывается, а веса остальных пересчитываются. Отсутствие данных никогда не ухудшает показатель.",
     `- **Порог «недостаточно данных»:** при покрытии ниже ${pct(COVERAGE_NULL_BELOW)} показатель не выставляется вовсе (значение NULL), потому что честного числа на таких данных нет.`,
-    `- **CI/CD и Security:** в HealthCraft Index не входят (раны чужих репо и AppSec платформа публично не отдаёт); Repo Health Score с ними виден зрителю с доступом к этим данным. ${SECURITY_PUBLIC_NOTE}`,
+    `- **CI/CD и Security:** в HealthCraft Index не входят (раны чужих репо и AppSec платформа публично не отдает); Repo Health Score с ними виден зрителю с доступом к этим данным. ${SECURITY_PUBLIC_NOTE}`,
     "- **Что это НЕ значит:** показатели не измеряют популярность (лайки и форки в формулу не входят), не оценивают качество кода по существу и не заменяют ревью. Они измеряют наблюдаемые признаки здоровья репозитория теми данными, которые доступны.",
-    "- **Ограничения методики:** часть сигналов недоступна снаружи (статусы CI чужих репозиториев, AppSec без права доступа), крупные репозитории читаются деградационным ярусом с усечённой историей, а активность зеркал занижается детектором роботов не полностью.",
-    `- **Методика целиком:** ${METHODOLOGY_PATH} (раздел §12 — известные ограничения).`,
+    "- **Ограничения методики:** часть сигналов недоступна снаружи (статусы CI чужих репозиториев, AppSec без права доступа), крупные репозитории читаются деградационным ярусом с усеченной историей, а активность зеркал занижается детектором роботов не полностью.",
+    `- **Методика целиком:** ${METHODOLOGY_PATH} (раздел §12 – известные ограничения).`,
     "",
-    `Отчёт сформирован детерминированно из фактов скана, без участия LLM.`,
+    `Отчет сформирован детерминированно из фактов скана, без участия LLM.`,
     "",
   ];
 }
@@ -364,9 +364,9 @@ function humanNoData(raw: string): string {
   const prefix = category === "security" ? "" : `${CATEGORY_TITLES[category as CategoryKey] ?? category}: `;
   if (category === "security" || reason.startsWith("AppSec data unavailable")) return SECURITY_PUBLIC_NOTE;
   if (reason.startsWith("ci runs no-data")) {
-    return `${prefix}прогоны CI недоступны (закрыты правами или их нет) — категория ограничена потолком 50.`;
+    return `${prefix}прогоны CI недоступны (закрыты правами или их нет) – категория ограничена потолком 50.`;
   }
-  if (reason === "git channel no-data") return `${prefix}git-канал не отдал данные (клон не удался или упёрся в лимиты).`;
+  if (reason === "git channel no-data") return `${prefix}git-канал не отдал данные (клон не удался или уперся в лимиты).`;
   if (reason === "git+rest channels no-data") return `${prefix}ни git-, ни REST-канал не отдали данных.`;
   if (reason === "issues channel no-data") return `${prefix}данные трекера задач недоступны.`;
   return `${prefix}${reason || NO_DATA}`;

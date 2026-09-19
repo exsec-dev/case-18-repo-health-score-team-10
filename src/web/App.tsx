@@ -48,7 +48,7 @@ export function App() {
           <EmptyState
             icon={CircleQuestion}
             title="Страница не найдена"
-            description={`Адрес ${route.path} не соответствует ни одному экрану. Рейтинг живет на «/», карточка репозитория — на «/repo/{org}/{repo}», кабинет — на «/me».`}
+            description={`Адрес ${route.path} не соответствует ни одному экрану. Рейтинг живет на «/», карточка репозитория – на «/repo/{org}/{repo}», кабинет – на «/me».`}
             actions={[{ text: "К рейтингу", view: "action", onClick: () => navigate("/") }]}
           />
         </Page>

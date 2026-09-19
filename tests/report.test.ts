@@ -154,7 +154,7 @@ describe("MD-отчёт: репозитории без Score", () => {
     });
     const dark = renderRepoReport(getRepoCard(t.db, "report", "dark", { access: GRANTED })!);
     expect(dark).toContain("**Недостаточно данных для оценки.**");
-    expect(dark).toContain("Покрытие данными — 38% при пороге 40%");
+    expect(dark).toContain("Покрытие данными – 38% при пороге 40%");
     expect(dark).toContain("git-канал не отдал данные");
     expect(dark).not.toContain("Score: 0");
   });
@@ -162,7 +162,8 @@ describe("MD-отчёт: репозитории без Score", () => {
   test("репо в каталоге без скана — отчёт объясняет отсутствие фактов", () => {
     seedRepo(t, { org: "report", repo: "never-scanned" });
     const never = renderRepoReport(getRepoCard(t.db, "report", "never-scanned")!);
-    expect(never).toContain("ещё не сканировался");
+    // Б5 (У31): «ё» в текстах отчёта заменена на «е»
+    expect(never).toContain("еще не сканировался");
     expect(never).toContain("## Как считается и что это не значит");
   });
 });
@@ -205,7 +206,7 @@ describe("Б5 (круг 2 В4.4): mdEscape-дыры", () => {
     seedScore(t, repoId, scanId, { total: 60 });
     seedRecommendation(t, scanId, { ruleId: "top-esc", priority: 1, problem: "p ![x](https://evil.example/t)", factRef: "docs.presence", deltaScore: 1.5 });
     const md = renderRepoReport(getRepoCard(t.db, "esc2", "top", { access: GRANTED })!);
-    expect(md).toContain("наибольший измеримый прирост даёт «p \\!\\[x\\]\\(https://evil.example/t\\)»");
+    expect(md).toContain("наибольший измеримый прирост дает «p \\!\\[x\\]\\(https://evil.example/t\\)»");
     expect(md).not.toMatch(/!\[[^\]]*\]\(https:\/\/evil\.example\/t\)/);
   });
 });

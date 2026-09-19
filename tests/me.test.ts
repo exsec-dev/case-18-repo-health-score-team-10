@@ -178,7 +178,7 @@ describe("UI-ветки круга 2 (source-assert, Б2)", () => {
 
   test("UX-6: слово «первый» в подсказке про токен — только на ветке без скана", () => {
     const src = srcOf("RepoPage.tsx");
-    expect(src.includes('card.scan ? "Добавьте токен в кабинете — и запустите анализ" : "Добавьте токен в кабинете — и запустите первый анализ"')).toBe(true);
+    expect(src.includes('card.scan ? "Добавьте токен в кабинете – и запустите анализ" : "Добавьте токен в кабинете – и запустите первый анализ"')).toBe(true);
   });
 
   test("UX-7: сбой снятия звезды показывается тостом, не молчит", () => {
@@ -245,7 +245,9 @@ describe("UI-ветки круга 2 (source-assert, Б4)", () => {
 
   test("UX-10: карточка после leaseMs показывает «затянулось», а не вечный спиннер", () => {
     const src = srcOf("RepoPage.tsx");
-    expect({ stalled: src.includes("jobStalled"), note: src.includes("затянулось — смотрите панель заданий") }).toEqual({
+    expect({ stalled: src.includes("jobStalled"), // Б5 (У31): проверяется КАРТОЧКА — в ней тире стало средним; та же фраза
+      // в MePage.tsx не тронута: кабинет целиком отдан вехе В4.7 (П3.4)
+      note: src.includes("затянулось – смотрите панель заданий") }).toEqual({
       stalled: true,
       note: true,
     });
