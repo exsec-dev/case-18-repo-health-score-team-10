@@ -167,6 +167,25 @@ describe("schema_version: запись и защита от старого пр�
     expect(stderr).toContain("is newer than this code");
   }, 30_000);
 
+  test("роль web не ведёт рескор: порт поднят, derived_version остаётся незаписанным (В4.4)", async () => {
+    const { dir } = seededDir();
+    const mock = startMockApi();
+    const server = await spawnServer({ dataDir: dir, mock, seedMeta: false, env: { PROCESS_ROLE: "web" } });
+    try {
+      const health = (await (await fetch(`${server.base}/api/health`)).json()) as { rescore: { total: number } };
+      expect(health.rescore.total).toBeGreaterThan(0);
+      // web-роль не пишет оценки: проход ведёт rating-процесс, здесь его нет
+      await Bun.sleep(1500);
+      const poll = openDb({ ...loadConfig(), dataDir: dir });
+      const derived = getMetaValue(poll, "derived_version");
+      poll.close();
+      expect(derived).toBeNull();
+    } finally {
+      await server.stop();
+      mock.stop();
+    }
+  }, 30_000);
+
   test("старт сервера без актуальных оценок (В4.4): порт ДО рескора, оценки доезжают фоном", async () => {
     const { dir } = seededDir();
     const mock = startMockApi();
