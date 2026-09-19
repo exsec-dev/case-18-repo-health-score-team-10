@@ -91,6 +91,71 @@ export function scoreTheme(value: number | null | undefined): "success" | "warni
   return "danger";
 }
 
+/**
+ * В4.6 (У22, ДП3): те же полосы, что делит `scoreTheme()`, НАЗВАННЫЕ словом.
+ * До этой вехи слова жили только в комментарии к `scoreTheme()`: на экране
+ * стояло число без шкалы, и «83» нечем было отличить от «отлично» или
+ * «терпимо». Формулировки — решение HQ 20.09 (право владельца отменить).
+ * Одна копия на рейтинг, карточку и MD-отчёт: `markdown.ts` импортирует
+ * отсюда (зависимость в дереве идёт web ← report).
+ */
+export const SCORE_WORDS: Record<"success" | "warning" | "danger", string> = {
+  success: "здоров",
+  warning: "есть над чем работать",
+  danger: "запущен",
+};
+
+/** Слово шкалы для показанного числа; нет данных — не слово шкалы, а «нет данных» (закон 2). */
+export function scoreWord(value: number | null | undefined): string {
+  const theme = scoreTheme(value);
+  return theme === "misc" ? NO_DATA : SCORE_WORDS[theme];
+}
+
+/**
+ * Цвет ЧИСЛА по тем же порогам (У20). `-heavy`-варианты выбраны не из вкуса:
+ * после палитрового паса В4.6 они дают 5,9–8,5:1 в тёмной и 5,8–6,3:1 в
+ * светлой теме, то есть число остаётся прозой уровня AA в обеих темах.
+ * success-диапазон КРАСИМ — решение владельца 20.09 (перекрывает
+ * рекомендацию дизайн-пары «хорошее оставить нейтральным»).
+ * Для `null` цвета нет вовсе: «нет данных» — другой ТИП ячейки
+ * (`Label theme="unknown"`), а не бледное значение (охранный пункт 1).
+ */
+export function scoreColor(value: number | null | undefined): "positive-heavy" | "warning-heavy" | "danger-heavy" | "secondary" {
+  switch (scoreTheme(value)) {
+    case "success":
+      return "positive-heavy";
+    case "warning":
+      return "warning-heavy";
+    case "danger":
+      return "danger-heavy";
+    default:
+      return "secondary";
+  }
+}
+
+/**
+ * Тема чипа `Label` для показанного числа. `scoreTheme()` отдаёт `misc` —
+ * тему ПОЛОСЫ; у чипа нейтральное состояние называется `unknown`, и именно
+ * им во всём продукте нарисовано «нет данных» (охранный пункт 1).
+ */
+export function scoreLabelTheme(value: number | null | undefined): "success" | "warning" | "danger" | "unknown" {
+  const theme = scoreTheme(value);
+  return theme === "misc" ? "unknown" : theme;
+}
+
+/** Заголовок легенды шкалы — один на обе панели (рейтинг и методика карточки). */
+export const SCORE_LEGEND_TITLE = "Как читать оценку";
+
+/** Легенда шкалы: слово, диапазон, тема чипа. Порядок — сверху вниз от здорового. */
+export const SCORE_SCALE: { theme: "success" | "warning" | "danger"; word: string; range: string }[] = [
+  { theme: "success", word: SCORE_WORDS.success, range: "70–100" },
+  { theme: "warning", word: SCORE_WORDS.warning, range: "40–69" },
+  { theme: "danger", word: SCORE_WORDS.danger, range: "0–39" },
+];
+
+/** Короткая форма «нет данных» для узких колонок таблицы («Нет данных» не влезает в 59px). */
+export const NO_DATA_SHORT = "н/д";
+
 /** Первая буква заглавная — для меток (Label): у платформы они в регистре предложения. */
 export function sentence(text: string): string {
   return text.length === 0 ? text : text[0]!.toUpperCase() + text.slice(1);

@@ -5,6 +5,7 @@ import {
   Avatar,
   Flex,
   Icon,
+  Label,
   PlaceholderContainer,
   Skeleton,
   Text,
@@ -13,6 +14,7 @@ import {
   type PlaceholderContainerActionProps,
 } from "@gravity-ui/uikit";
 import { useEffect, useState, type ReactNode } from "react";
+import { SCORE_LEGEND_TITLE, SCORE_SCALE, sentence } from "./format";
 
 /** Заголовок страницы: header-1 20/24 и одна строка пояснения, как у SourceCraft. */
 export function PageHeader({ title, description, end }: { title: ReactNode; description?: ReactNode; end?: ReactNode }) {
@@ -38,6 +40,37 @@ export function AsideSection({ title, children }: { title: ReactNode; children: 
       </Text>
       {children}
     </Flex>
+  );
+}
+
+/**
+ * В4.6 (У22): легенда шкалы — ОДИН блок на две панели, первым в обеих.
+ * На рейтинге он даёт якорь «как выглядит плохое» (на первой странице
+ * диапазон 72–83, и без легенды 72 читается как провал), на карточке —
+ * первый блок методической панели (вариант А компоновки кладёт её туда).
+ * Слова и диапазоны — из `SCORE_SCALE`, чтобы шкала на двух экранах и в
+ * MD-отчёте не разъехалась. «Нет данных» в легенду НЕ входит: это не полоса
+ * шкалы, а отсутствие числа (закон 2) — про него говорит отдельная строка.
+ */
+export function ScoreLegend() {
+  return (
+    <AsideSection title={SCORE_LEGEND_TITLE}>
+      <Flex direction="column" gap={2}>
+        {SCORE_SCALE.map((step) => (
+          <Flex key={step.theme} gap={2} alignItems="center" justifyContent="space-between">
+            <Label theme={step.theme} size="s">
+              {sentence(step.word)}
+            </Label>
+            <Text variant="body-2" style={{ fontVariantNumeric: "tabular-nums" }}>
+              {step.range}
+            </Text>
+          </Flex>
+        ))}
+      </Flex>
+      <Text variant="body-2" color="complementary">
+        Нет данных – не ноль и не плохая оценка: пока источники недоступны, честного числа нет, и оценка не выставляется.
+      </Text>
+    </AsideSection>
   );
 }
 

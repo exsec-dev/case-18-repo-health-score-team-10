@@ -28,11 +28,11 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import type { MetaResponse, RatingResponse } from "./api";
 import { useJson } from "./api";
-import { CATEGORY_TITLES_RU, NO_SCORE, fmtCoverage, fmtDate, fmtNumber, fmtScore, scanStatusText, scoreTheme } from "./format";
+import { CATEGORY_TITLES_RU, NO_DATA_SHORT, NO_SCORE, fmtCoverage, fmtDate, fmtNumber, fmtScore, scanStatusText, scoreColor, scoreTheme, scoreWord, sentence } from "./format";
 import { useMediaQuery } from "./prefs";
 import { linkProps, navigate, repoHref } from "./router";
 import { Page } from "./Shell";
-import { AsideSection, EmptyState, LanguageName, PageHeader, RepoAvatar, SkeletonRows } from "./ui";
+import { AsideSection, EmptyState, LanguageName, PageHeader, RepoAvatar, ScoreLegend, SkeletonRows } from "./ui";
 
 type Item = RatingResponse["items"][number];
 
@@ -325,6 +325,9 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
   const ratingWeight = meta.categories.reduce((sum, c) => sum + (c.indexWeight ?? 0), 0);
   return (
     <>
+      {/* В4.6 (У22): шкала — первое, что читается в панели: без неё число не с чем сравнить */}
+      <ScoreLegend />
+
       <AsideSection title="О рейтинге">
         <Text color="complementary">
           Публичный рейтинг считают четыре категории: {meta.categories.filter((c) => !NOT_IN_RATING.has(c.key)).map((c) => c.title).join(", ")}.
@@ -491,14 +494,28 @@ function ScoreCell({ item }: { item: Item }) {
   );
 }
 
-/** Категория без данных — «—» с причиной, не ноль (закон 2). */
+/**
+ * Категория: качество ЗАКОДИРОВАНО (В4.6, У20 — корень ДП1). До этой вехи 26
+ * и 98 были набраны одним цветом и размером, а `null` — бледным тире, то есть
+ * «плохо» и «нет данных» глаз не различал. Теперь число красится по
+ * `scoreTheme()` (тот же порог, что у полос — источник правды один), а
+ * отсутствие данных становится ДРУГИМ ТИПОМ ячейки: нейтральный
+ * `Label theme="unknown"` со словом «н/д» и причиной в `title`. Никогда не
+ * красное и никогда не ноль (закон 2, охранный пункт 1 синтеза).
+ * «Нет данных» полностью в узкую колонку (59px у Issues) не влезает — отсюда
+ * короткая форма.
+ */
 function CategoryCell({ value }: { value: number | null }) {
   if (value === null) {
     return (
-      <Text color="secondary" title="категория без данных: исключена с перенормировкой, а не занижена">
-        —
-      </Text>
+      <Label theme="unknown" size="xs" title={`${NO_SCORE}: категория исключена с перенормировкой, а не занижена`}>
+        {NO_DATA_SHORT}
+      </Label>
     );
   }
-  return <Text>{fmtScore(value)}</Text>;
+  return (
+    <Text color={scoreColor(value)} style={{ fontVariantNumeric: "tabular-nums" }} title={sentence(scoreWord(value))}>
+      {fmtScore(value)}
+    </Text>
+  );
 }

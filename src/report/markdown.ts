@@ -14,7 +14,7 @@ import {
 } from "../api/repos";
 import { COVERAGE_NULL_BELOW, INDEX_WEIGHTS, SCORE_WEIGHTS, type CategoryKey } from "../score/model";
 // копии про Security и заглушки доступа — одни и те же на странице и в отчёте
-import { SECURITY_PUBLIC_NOTE, accessLockText, fmtSigned, gitLimitsText, scanStatusText, scanTriggerText } from "../web/format";
+import { SECURITY_PUBLIC_NOTE, accessLockText, fmtSigned, gitLimitsText, scanStatusText, scanTriggerText, scoreWord } from "../web/format";
 
 export { SECURITY_PUBLIC_NOTE };
 
@@ -104,8 +104,11 @@ function summarySection(card: RepoCard): string[] {
   const withDelta = card.recommendations.filter((r): r is CardRecommendation & { deltaScore: number } => r.deltaScore !== null);
   const top = withDelta.length > 0 ? withDelta.reduce((a, b) => ((a.deltaScore ?? 0) >= (b.deltaScore ?? 0) ? a : b)) : null;
 
+  // В4.6 (У22): то же слово шкалы, что стоит у числа на карточке — отчёт и
+  // страница обязаны говорить одно и то же (источник слова один, format.ts)
   out.push(
-    `**HealthCraft Index (4 категории): ${Math.round(score.healthcraftIndex)} из 100** при покрытии данными ${pct(score.indexCoverage)}` +
+    `**HealthCraft Index (4 категории): ${Math.round(score.healthcraftIndex)} из 100 – ${scoreWord(score.healthcraftIndex)}** ` +
+      `при покрытии данными ${pct(score.indexCoverage)}` +
       `${card.markers.staleFacts ? " (часть фактов взята из истории при сбое канала)" : ""}.`,
     "",
   );

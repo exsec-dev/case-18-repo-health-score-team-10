@@ -37,6 +37,7 @@ import { fetchJson, mutateJson, useJson } from "./api";
 import {
   CATEGORY_TITLES_RU,
   NO_DATA,
+  NO_DATA_SHORT,
   NO_SCORE,
   SECURITY_PUBLIC_NOTE,
   accessLockText,
@@ -52,11 +53,14 @@ import {
   gitLimitsText,
   scanStatusText,
   scanTriggerText,
+  scoreColor,
+  scoreLabelTheme,
   scoreTheme,
+  scoreWord,
   sentence,
 } from "./format";
 import { Page, type Crumb } from "./Shell";
-import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, SkeletonRows } from "./ui";
+import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, ScoreLegend, SkeletonRows } from "./ui";
 
 type Card = RepoCard;
 type Category = CardCategory;
@@ -440,6 +444,9 @@ function ScoreAside({ card, meta, leaseMs, jobStalled }: { card: Card; meta: Met
         </Text>
       )}
 
+      {/* В4.6 (У22): тот же блок, что на рейтинге — вариант А кладёт шкалу в методику карточки */}
+      {score && <ScoreLegend />}
+
       {score && score.noData.length > 0 && (
         <AsideSection title="Каких данных не хватило">
           <Flex as="ul" direction="column" gap={2} style={{ margin: 0, paddingInlineStart: "var(--g-spacing-4)" }}>
@@ -500,9 +507,13 @@ function ScoreFigure({ title, help, total, coverage }: { title: string; help: st
           {NO_SCORE}
         </Label>
       ) : (
-        <Flex gap={2} alignItems="baseline">
+        <Flex gap={2} alignItems="baseline" wrap>
           <Text variant="display-2">{fmtScore(total)}</Text>
           <Text color="secondary">из 100</Text>
+          {/* В4.6 (У22): шкала вплотную к числу — иначе «83» не с чем сравнить */}
+          <Label theme={scoreLabelTheme(total)} size="m">
+            {sentence(scoreWord(total))}
+          </Label>
         </Flex>
       )}
       <Flex justifyContent="space-between">
@@ -583,9 +594,17 @@ function CategoryRow({ categoryKey: key, title, cat, contribution, card }: { cat
           <Progress value={Math.round(cat.score)} size="s" theme={scoreTheme(cat.score)} />
         )}
       </span>
-      <Text variant="subheader-2" className="rh-category__value">
-        {cat.score === null ? "—" : fmtScore(cat.score)}
-      </Text>
+      {/* В4.6 (У20): число окрашено теми же порогами, что полоса; отсутствие данных —
+          ДРУГОЙ тип ячейки (нейтральный Label), а не бледное значение (закон 2) */}
+      {cat.score === null ? (
+        <Label theme="unknown" size="xs" className="rh-category__value" title={NO_SCORE}>
+          {NO_DATA_SHORT}
+        </Label>
+      ) : (
+        <Text variant="subheader-2" color={scoreColor(cat.score)} className="rh-category__value" title={sentence(scoreWord(cat.score))}>
+          {fmtScore(cat.score)}
+        </Text>
+      )}
       <Text variant="body-short" color="secondary" className="rh-category__weight" title="номинальный вес категории в Repo Health Score → вклад после перенормировки">
         вес {cat.weight}% → вклад {contribution}%
       </Text>

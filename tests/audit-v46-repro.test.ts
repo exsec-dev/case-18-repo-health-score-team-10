@@ -67,17 +67,20 @@ const md = (): string => renderRepoReport(getRepoCard(t.db, "v46", "repro", { ac
 // ---------------------------------------------------------------------------
 
 describe("В4.6-1 (У20): качество категорий закодировано в рейтинге и на карточке", () => {
-  repro("рейтинг: число категории окрашено по scoreTheme(), null — Label theme=\"unknown\"", () => {
+  // ЗАКРЫТО блоком Б2 (шкала и кодирование).
+  test("рейтинг: число категории окрашено по scoreTheme(), null — Label theme=\"unknown\"", () => {
     const src = srcOf("Rating.tsx");
     const cell = src.slice(src.indexOf("function CategoryCell"));
     expect({
-      colorsByTheme: /scoreTheme\(/.test(cell),
+      // Б2: окраска идёт через scoreColor() — производную того же scoreTheme()
+      colorsByTheme: /score(Theme|Color)\(/.test(cell),
       nullIsUnknownLabel: /theme="unknown"/.test(cell),
       nullIsNotBareDash: !/>\s*—\s*</.test(cell),
     }).toEqual({ colorsByTheme: true, nullIsUnknownLabel: true, nullIsNotBareDash: true });
   });
 
-  repro("карточка: число категории окрашено теми же порогами, «нет данных» остаётся нейтральным", () => {
+  // ЗАКРЫТО блоком Б2 (шкала и кодирование).
+  test("карточка: число категории окрашено теми же порогами, «нет данных» остаётся нейтральным", () => {
     const src = srcOf("RepoPage.tsx");
     const row = src.slice(src.indexOf("function CategoryRow"), src.indexOf("// ---------- маркеры расчёта"));
     expect({
@@ -118,25 +121,43 @@ describe("В4.6-2 (У25): «вклад 0%» заменён на «не учит�
 // ---------------------------------------------------------------------------
 
 describe("В4.6-3 (У22): словесная шкала здоровья видна на карточке и в MD", () => {
-  repro("format.ts отдаёт слово шкалы чистой функцией (одна копия на страницу и отчёт)", async () => {
+  // ЗАКРЫТО блоком Б2 (шкала и кодирование).
+  test("format.ts отдаёт слово шкалы чистой функцией (одна копия на страницу и отчёт)", async () => {
     const { scoreWord } = (await import("../src/web/format")) as { scoreWord?: (v: number | null) => string };
     expect(typeof scoreWord).toBe("function");
     expect([scoreWord!(83), scoreWord!(55), scoreWord!(12)]).toEqual(["здоров", "есть над чем работать", "запущен"]);
   });
 
-  repro("карточка: Label со словом шкалы стоит рядом с числом", () => {
-    const src = srcOf("RepoPage.tsx");
-    expect({ importsWord: src.includes("scoreWord"), legend: src.includes("Как читать оценку") }).toEqual({ importsWord: true, legend: true });
+  // Б2: фраза легенды живёт в ОДНОМ месте (format.ts SCORE_LEGEND_TITLE) и
+  // рисуется общим компонентом ui.tsx/ScoreLegend — литерал в каждой странице
+  // означал бы две копии одной формулировки. Проверяется тот же факт: шкала
+  // видна на обоих экранах, и заголовок у неё один.
+  // ЗАКРЫТО блоком Б2 (шкала и кодирование).
+  test("легенда шкалы — один компонент с одним заголовком «Как читать оценку»", () => {
+    const ui = srcOf("ui.tsx");
+    expect({
+      component: ui.includes("export function ScoreLegend"),
+      titleFromFormat: ui.includes("SCORE_LEGEND_TITLE"),
+      oneHome: srcOf("format.ts").includes('SCORE_LEGEND_TITLE = "Как читать оценку"'),
+    }).toEqual({ component: true, titleFromFormat: true, oneHome: true });
   });
 
-  repro("рейтинг: легенда «Как читать оценку» — первым блоком правой панели", () => {
+  // ЗАКРЫТО блоком Б2 (шкала и кодирование).
+  test("карточка: Label со словом шкалы у числа плюс блок легенды в методике", () => {
+    const src = srcOf("RepoPage.tsx");
+    expect({ importsWord: src.includes("scoreWord"), legend: src.includes("<ScoreLegend />") }).toEqual({ importsWord: true, legend: true });
+  });
+
+  // ЗАКРЫТО блоком Б2 (шкала и кодирование).
+  test("рейтинг: легенда — первым блоком правой панели", () => {
     const src = srcOf("Rating.tsx");
-    const legend = src.indexOf("Как читать оценку");
+    const legend = src.indexOf("<ScoreLegend />");
     const aboutRating = src.indexOf("О рейтинге");
     expect({ hasLegend: legend >= 0, isFirst: legend >= 0 && aboutRating >= 0 && legend < aboutRating }).toEqual({ hasLegend: true, isFirst: true });
   });
 
-  repro("MD: строка итога называет то же слово шкалы", () => {
+  // ЗАКРЫТО блоком Б2 (шкала и кодирование).
+  test("MD: строка итога называет то же слово шкалы", () => {
     const out = md();
     expect(/\*\*HealthCraft Index \(4 категории\): 67 из 100[^\n]*есть над чем работать/.test(out)).toBe(true);
   });
