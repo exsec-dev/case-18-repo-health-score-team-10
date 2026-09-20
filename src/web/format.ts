@@ -329,10 +329,32 @@ export const SECURITY_PUBLIC_NOTE =
  */
 export const ACCESS_LOCK_TEXT: Record<"no-pat" | "denied" | "pat-expired" | "check-failed", string> = {
   "no-pat": "Данные видны участникам репозитория: войдите и добавьте токен доступа SourceCraft в Настройках.",
-  denied: "Ваш токен доступа не дает доступа к этим данным репозитория.",
+  denied: "У вашего токена нет прав на эти данные репозитория.",
   "pat-expired": "SourceCraft отклонил ваш токен доступа – обновите его в Настройках.",
   "check-failed": "Не удалось проверить доступ к этим данным – попробуйте открыть карточку позже.",
 };
+
+/**
+ * КОРОТКАЯ форма тех же причин — для слота показателя на карточке, где рядом
+ * уже стоят заголовок «Виден участникам репозитория» и ссылка на Настройки.
+ * Полные формулировки выше самодостаточны: они несут и условие доступа, и
+ * призыв, потому что в MD-отчёте стоят в одиночку. Под заголовком
+ * со ссылкой тот же текст повторил бы оба соседних элемента, поэтому здесь
+ * остаётся ТОЛЬКО причина, без призыва: действие называет ссылка.
+ * Ключи и порядок те же — один источник, две длины.
+ */
+export const ACCESS_LOCK_SHORT: Record<"no-pat" | "denied" | "pat-expired" | "check-failed", string> = {
+  "no-pat": "Токен доступа SourceCraft не добавлен.",
+  denied: "У вашего токена нет прав на эти данные репозитория.",
+  "pat-expired": "SourceCraft отклонил ваш токен доступа.",
+  "check-failed": "Не удалось проверить доступ к этим данным.",
+};
+
+/** Короткая причина по коду доступа; granted → null (причины нет). */
+export function accessLockShort(access: string | undefined): string | null {
+  if (access === undefined || access === "granted") return null;
+  return ACCESS_LOCK_SHORT[access as keyof typeof ACCESS_LOCK_SHORT] ?? ACCESS_LOCK_SHORT["check-failed"];
+}
 
 /** Размер человекочитаемо: ГБ с двумя знаками или МБ. */
 export function fmtBytes(bytes: number): string {

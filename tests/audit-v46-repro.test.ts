@@ -68,17 +68,17 @@ const md = (): string => renderRepoReport(getRepoCard(t.db, "v46", "repro", { ac
 
 describe("В4.6-1 (У20): качество категорий закодировано в рейтинге и на карточке", () => {
   // ЗАКРЫТО блоком Б2 (шкала и кодирование).
-  test("рейтинг: число категории окрашено по scoreTheme(), null — Label theme=\"unknown\"", () => {
+  test("рейтинг: исключения выделены Label, >=70 нейтрально, null — Label theme=\"unknown\"", () => {
     const src = srcOf("Rating.tsx");
     const cell = src.slice(src.indexOf("function CategoryCell"));
     expect({
-      // Круг 2 (Р4): утверждение `colorsByTheme` СНЯТО — владелец отменила
-      // цветовую индикацию категорийных колонок рейтинга, и обратное
-      // утверждение живёт в tests/audit-v46r2-repro.test.ts (трипвай Т7).
-      // Tri-state-половина находки остаётся здесь в полной силе.
+      // Круг 3, П3/1 отменяет Р4 круга 2: цвет вернулся только для
+      // исключений, а не для всего числового ряда.
+      exceptionsAreLabels: /scoreLabelTheme\(value\)/.test(cell) && /className="rh-cat-chip"/.test(cell),
+      healthyIsPlain: /scoreTheme\(value\) === "success"/.test(cell) && /className="rh-cat-plain"/.test(cell),
       nullIsUnknownLabel: /theme="unknown"/.test(cell),
       nullIsNotBareDash: !/>\s*—\s*</.test(cell),
-    }).toEqual({ nullIsUnknownLabel: true, nullIsNotBareDash: true });
+    }).toEqual({ exceptionsAreLabels: true, healthyIsPlain: true, nullIsUnknownLabel: true, nullIsNotBareDash: true });
   });
 
   // ЗАКРЫТО блоком Б2 (шкала и кодирование).

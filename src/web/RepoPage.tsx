@@ -7,7 +7,7 @@
 // либо без честного объяснения, почему факта нет.
 // Раскладка как у страницы репозитория SourceCraft: действия в ActionBar,
 // содержимое во вкладках, итоговая оценка — в правой панели.
-import { ArrowDownToLine, ArrowUpRightFromSquare, ChevronDown, Clock, CodeFork, FileText, Heart, Lock, LogoMarkdown, SquareListUl, Star, StarFill } from "@gravity-ui/icons";
+import { ArrowDownToLine, ArrowUpRightFromSquare, ChevronDown, Clock, CodeFork, FileText, Heart, LogoMarkdown, SquareListUl, Star, StarFill } from "@gravity-ui/icons";
 import {
   ActionTooltip,
   Alert,
@@ -36,14 +36,14 @@ import type { CardCategory } from "../api/repos";
 import type { MeResponse, MetaResponse, RepoCard } from "./api";
 import { fetchJson, mutateJson, useJson } from "./api";
 import {
-  ACCESS_LOCK_TEXT,
+  ACCESS_LOCK_SHORT,
   CATEGORY_TITLES_RU,
   NO_DATA,
   NO_DATA_SHORT,
   NOT_COUNTED,
   NO_SCORE,
   SECURITY_PUBLIC_NOTE,
-  accessLockText,
+  accessLockShort,
   analysisOutcome,
   fmtCoverage,
   fmtDate,
@@ -450,11 +450,6 @@ function CardSlots() {
 
 // ---------- правая панель: итог ----------
 
-/** Причина закрытия полного итога: первый закрытый канал (CI, затем Security). */
-function fullLockReason(card: Card): string | null {
-  return accessLockText(card.access.cicd) ?? accessLockText(card.access.appsec);
-}
-
 /**
  * ДВА показателя объясняются ПАРОЙ ПОДСКАЗОК (В4.6 круг 2, Р13 — решение
  * владельца 20.09). Абзац «Разницу с HealthCraft Index дают CI и Security»
@@ -468,11 +463,16 @@ function fullLockReason(card: Card): string | null {
  */
 const INDEX_HELP =
   "Публичная оценка по 4 категориям: документация, активность, issues и состояние кода. " +
-  "Считается для всех открытых репозиториев – по ней и строится общий рейтинг.";
+  "Считается для всех открытых репозиториев и является основой общего рейтинга";
 
 const FULL_HELP =
-  "Repo Health Score рассчитывается по 6 категориям: 4 категориям HealthCraft Index, а также CI/CD и Security. " +
-  "Показатель доступен только для репозиториев, к которым у вас есть доступ.";
+  "Рассчитывается по 6 категориям: 4 категориям HealthCraft Index, а также CI/CD и Security. " +
+  "Показатель доступен только для репозиториев, к которым у вас есть доступ";
+
+/** Короткая причина закрытия полного итога: первый закрытый канал (CI, затем Security). */
+function fullLockShortReason(card: Card): string {
+  return accessLockShort(card.access.cicd) ?? accessLockShort(card.access.appsec) ?? ACCESS_LOCK_SHORT["check-failed"];
+}
 
 /**
  * В4.6 (вариант А компоновки, решение владельца 20.09): правая панель стала
@@ -596,23 +596,24 @@ function ScoreBand({ card }: { card: Card }) {
                   {FULL_HELP}
                 </HelpMark>
               </Flex>
-              <Flex gap={2} alignItems="center">
-                <Icon data={Lock} size={16} />
-                {/* В4.6 круг 2 (Р12): «закрыто» → «Недоступно» — одно слово на
-                    страницу и отчёт. Смысл не меняется: причина стоит строкой
-                    ниже, сведения об отсутствии доступа не исчезают (ТЗ §3.4). */}
-                <Text variant="subheader-2">Недоступно</Text>
-              </Flex>
-              {/* В4.6 круг 2 (Р12): текст под замком МЕЛЬЧЕ — `body-1` 13/18
-                  вместо `body-2` 15/20. Не `body-short`: причина занимает две
-                  строки, то есть это проза, а правило 4а
-                  docs/ui/gravity-uikit.md держит для прозы интерлиньяж абзаца
-                  (`body-1`/`body-2` + `complementary`), а подпись оставляет
-                  однострочным меткам.
-                  Отдельная кнопка перехода убрана, вместо нее ссылка внутри
-                  строки. П2.9 снимает точку только в UI; общий словарь причин
-                  для MD и выбора ветки остается `ACCESS_LOCK_TEXT`. */}
-              <FullLockMessage reason={fullLockReason(card)} />
+              {/* Закрытый показатель НЕ схлопывается в метку — это приём самой
+                  платформы: у репозитория без рейтинга карточка `scoring-card`
+                  держит свой габарит и наполняется приглашением («Rate this
+                  repository» 15/20 500 + объяснение 13/18 приглушённым + сами
+                  реакции нулями), а не исчезает. Здесь то же: заголовок говорит,
+                  кому показатель виден, строка под ним — ПОЧЕМУ он закрыт именно
+                  у этого зрителя, ссылка — что с этим сделать.
+                  Причина берётся короткой формой (`ACCESS_LOCK_SHORT`): полная
+                  несёт ещё и призыв, который здесь уже сказан ссылкой.
+                  Пара по высоте сходится с левым показателем без распорок:
+                  три строки против «число + полоса + покрытие». */}
+              <Text variant="subheader-2">Виден участникам репозитория</Text>
+              <Text variant="body-1" color="complementary">
+                {fullLockShortReason(card)}
+              </Text>
+              <Text variant="body-1">
+                <Link {...linkProps("/settings")}>Добавить токен доступа</Link>
+              </Text>
             </Flex>
           ) : (
             <ScoreFigure
@@ -620,28 +621,13 @@ function ScoreBand({ card }: { card: Card }) {
               help={FULL_HELP}
               total={score.repoHealthScore}
               coverage={score.repoHealthCoverage ?? 0}
+              withBar
             />
           )}
         </Flex>
 
       </Flex>
     </Card>
-  );
-}
-
-function FullLockMessage({ reason }: { reason: string | null }) {
-  if (reason === ACCESS_LOCK_TEXT["no-pat"]) {
-    return (
-      <Text variant="body-1" color="complementary" className="rh-lock-message">
-        Данные видны участникам репозитория: войдите и добавьте токен доступа SourceCraft в{" "}
-        <Link {...linkProps("/settings")}>Настройках</Link>
-      </Text>
-    );
-  }
-  return (
-    <Text variant="body-1" color="complementary">
-      {reason}
-    </Text>
   );
 }
 
@@ -732,7 +718,7 @@ function Categories({ card, meta }: { card: Card; meta: MetaResponse | null }) {
   const shown = entries.filter(([, cat]) => cat.locked === undefined);
   const locked = entries
     .filter(([, cat]) => cat.locked !== undefined)
-    .map(([key, cat]) => ({ title: titleOf(key), reason: accessLockText(cat.locked) ?? ACCESS_LOCK_TEXT["check-failed"] }));
+    .map(([key, cat]) => ({ title: titleOf(key), reason: accessLockShort(cat.locked) ?? ACCESS_LOCK_SHORT["check-failed"] }));
 
   return (
     <>
@@ -758,38 +744,21 @@ function Categories({ card, meta }: { card: Card; meta: MetaResponse | null }) {
  * Строка о недоступных категориях — ПОСЛЕДНЕЙ, под Code health (уточнение
  * владельца: не вверху).
  *
- * П2.11 задает точную фразу для штатной пары CI/CD+Security без PAT и ссылку
- * на настройки. Для одной закрытой категории или другой причины сохраняется
- * прежняя группировка по `accessLockText`: фиксированная пара там была бы
- * ложью (см. tests/api.test.ts, ветка «только CI»).
+ * Фиксированная ветка под пару CI/CD+Security без PAT (П2.11) снята вместе со
+ * своей ссылкой: переход к токену теперь стоит ОДИН раз — у самого показателя,
+ * где зритель и упирается в закрытое число (решение владельца 21.09). Здесь
+ * остаётся констатация и короткая причина, поэтому одна группировка на все
+ * случаи — и на пару, и на одну категорию (см. tests/api.test.ts, ветка
+ * «только CI», где фиксированная пара была бы ложью).
  */
 function LockedCategories({ items }: { items: { title: string; reason: string }[] }) {
-  const isNoPatPair =
-    items.length === 2 &&
-    items.every((item) => item.reason === ACCESS_LOCK_TEXT["no-pat"]) &&
-    items.some((item) => item.title === "CI/CD") &&
-    items.some((item) => item.title === "Security");
-  if (isNoPatPair) {
-    return (
-      <Alert
-        theme="info"
-        view="outlined"
-        size="s"
-        className="rh-locked-note"
-        message={
-          <>
-            Категории CI/CD и Security недоступны. Они видны только участникам репозитория: войдите и добавьте токен доступа
-            SourceCraft в <Link {...linkProps("/settings")}>Настройках</Link>.
-          </>
-        }
-      />
-    );
-  }
   const groups = new Map<string, string[]>();
   for (const item of items) groups.set(item.reason, [...(groups.get(item.reason) ?? []), item.title]);
   const sentences = [...groups].map(
-    ([reason, titles]) => `${titles.join(" и ")} – ${titles.length > 1 ? "недоступны" : "недоступна"}. ${reason}`,
+    ([reason, titles]) =>
+      `${titles.length > 1 ? "Категории" : "Категория"} ${titles.join(" и ")} ${titles.length > 1 ? "недоступны" : "недоступна"}. ${reason}`,
   );
+
   return <Alert theme="info" view="outlined" size="s" className="rh-locked-note" message={sentences.join(" ")} />;
 }
 

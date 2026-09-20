@@ -17,6 +17,11 @@ describe("В4.6 круг 3: рейтинг", () => {
     expect(css).toMatch(/\.rh-score-cell__bar\s*\{[^}]*flex:\s*0 0 80px[^}]*width:\s*80px/);
     expect(css).toMatch(/\.rh-score-cell__num\s*\{[^}]*font-size:\s*14px[^}]*font-weight:\s*600/);
     expect(css).toMatch(/\.rh-score-cell__bar \.g-progress,[\s\S]{0,100}height:\s*8px/);
+    const categoryCell = rating.slice(rating.indexOf("function CategoryCell"));
+    expect(categoryCell).toMatch(/scoreTheme\(value\) === "success"[\s\S]{0,300}rh-cat-plain/);
+    expect(categoryCell).toMatch(/scoreLabelTheme\(value\)[\s\S]{0,100}rh-cat-chip/);
+    expect(css).toMatch(/\.rh-cat-plain\s*\{[^}]*padding-inline-end:\s*8px/);
+    expect(css).toMatch(/\.rh-cat-chip\.g-label_theme_(?:warning|danger)[\s\S]{0,260}color-mix\(in srgb,[^;]*60%, transparent\)/);
   });
 
   test("поиск, лид, вклад и частота используют утвержденные формулировки", () => {
@@ -39,7 +44,9 @@ describe("В4.6 круг 3: карточка", () => {
     const format = web("format.ts");
     expect(format).toContain('danger: "в зоне риска"');
     expect(format).toContain('SCORE_LEGEND_TITLE = "Шкала оценки"');
-    expect(repo).toContain("Repo Health Score рассчитывается по 6 категориям");
+    expect(format).toContain('denied: "У вашего токена нет прав на эти данные репозитория."');
+    expect(format).toContain("ACCESS_LOCK_SHORT");
+    expect(repo).toContain("Рассчитывается по 6 категориям");
     expect(repo).toContain('title="Что учитывается"');
     expect(repo).toContain('title="Параметры расчета"');
     expect(ui).toContain('variant="body-1"');
@@ -50,11 +57,14 @@ describe("В4.6 круг 3: карточка", () => {
   test("верх и категории соответствуют новой геометрии", () => {
     const repo = web("RepoPage.tsx");
     const css = web("layout.css");
+    const band = repo.slice(repo.indexOf("function ScoreBand"), repo.indexOf("function ScoreFigure"));
     const figure = repo.slice(repo.indexOf("function ScoreFigure"), repo.indexOf("// ---------- категории"));
     const row = repo.slice(repo.indexOf("function CategoryRow"), repo.indexOf("function AppsecEngines"));
     expect(figure).toContain('alignItems="baseline"');
+    expect(band).toMatch(/title="Repo Health Score"[\s\S]{0,240}\bwithBar/);
     expect(row.indexOf('className="rh-category__bar"')).toBeLessThan(row.indexOf('className="rh-category__weight"'));
     expect(css).toContain("grid-template-columns: 16px minmax(120px, 180px) minmax(0, 1fr) minmax(80px, 360px) 40px auto");
+    expect(css).toMatch(/\.rh-aside-section > \.g-definition-list\s*\{[^}]*margin-block-start:\s*var\(--g-spacing-1\)/);
   });
 
   test("недоступные каналы — Alert, нижний CTA снят, основания раскрываемы", () => {
@@ -63,8 +73,9 @@ describe("В4.6 круг 3: карточка", () => {
     const band = repo.slice(repo.indexOf("function ScoreBand"), repo.indexOf("function ScoreFigure"));
     expect(locked).toContain('<Alert');
     expect(locked).toContain('theme="info"');
-    expect(locked).toContain("Категории CI/CD и Security недоступны");
-    expect(locked).toContain('linkProps("/settings")');
+    expect(locked).toContain("недоступны");
+    // ссылка из строки убрана: переход к токену живёт у показателя (решение 21.09)
+    expect(locked).not.toContain('linkProps("/settings")');
     expect(web("layout.css")).toMatch(/\.rh-locked-note\s*\{[^}]*margin-top:[^}]*\}/);
     expect(web("layout.css")).not.toMatch(/\.rh-locked-note\s*\{[^}]*padding:/);
     expect(band).not.toContain("summaryLine");
@@ -76,7 +87,8 @@ describe("В4.6 круг 3: карточка", () => {
   test("переход к токену встроен в текст, иконка избранного центрирована", () => {
     const repo = web("RepoPage.tsx");
     const css = web("layout.css");
-    expect(repo).toMatch(/добавьте токен доступа SourceCraft в\{" "\}[\s\S]{0,100}linkProps\("\/settings"\)/);
+    // переход встроен ссылкой в блок закрытого показателя, отдельной кнопки нет
+    expect(repo).toMatch(/linkProps\("\/settings"\)[\s\S]{0,60}>Добавить токен доступа</);
     const star = repo.slice(repo.indexOf("function FavoriteStar"));
     expect(star).toContain('className={["rh-favorite-star"');
     expect(star).toMatch(/<Button[\s\S]{0,1300}<Icon data=\{state === "on" \? StarFill : Star\} size=\{14\} \/>/);

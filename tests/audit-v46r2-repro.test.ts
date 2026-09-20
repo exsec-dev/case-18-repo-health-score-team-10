@@ -143,7 +143,9 @@ describe("Р12 (UI): «закрыто» → «Недоступно» на кар
     const src = codeOf("RepoPage.tsx");
     expect({
       userWordClosed: />\s*закрыто\s*</.test(src),
-      userWordUnavailable: />\s*Недоступно\s*</.test(src),
+      // закрытый показатель назван фразой, а не одним словом (решение владельца
+      // 21.09); «недоступны» осталось в строке о закрытых категориях
+      userWordUnavailable: src.includes("Виден участникам репозитория") && /недоступн[ыа]"/.test(src),
     }).toEqual({ userWordClosed: false, userWordUnavailable: true });
   });
 });
@@ -219,24 +221,24 @@ describe("Р13 + П1.10: нижний ярус показателей полно
 });
 
 // ---------------------------------------------------------------------------
-// Т7 (Р4): категорийные числа В ТАБЛИЦЕ РЕЙТИНГА окрашены по scoreColor().
-// Владелец снимает цветовую индикацию со всех категорийных колонок — это
-// сознательная отмена находки ДП1 круга 1 (закрытый трипвай `colorsByTheme`
-// снят поимённо). На КАРТОЧКЕ окраска остаётся (уточнение HQ по букве пункта
-// «для остальных колонок»): там рядом с числом стоит полоса, она несёт цвет.
-// Tri-state не двигается: `null` остаётся Label theme="unknown» со «н/д».
+// Т7 (Р4): круг 3, П3/1 явно ОТМЕНЯЕТ запрет цветовой индикации круга 2.
+// Новый контракт выделяет только исключения: >=70 остаётся нейтральным
+// текстом, 40-69 и <40 получают семантический Label. На карточке прежняя
+// окраска сохраняется. Tri-state не двигается: `null` остаётся Label
+// theme="unknown» со «н/д».
 // ---------------------------------------------------------------------------
 
-describe("Р4: цвет снят с категорийных чисел рейтинга, на карточке остаётся", () => {
-  // ЗАКРЫТО блоком Б2 (строка рейтинга) — обёртка снята, утверждение не менялось.
-  test("CategoryCell рейтинга без scoreColor(), CategoryRow карточки с ним", () => {
+describe("П3/1 отменяет Р4: в рейтинге подсвечены только исключения", () => {
+  test("CategoryCell разделяет >=70, исключения и null; CategoryRow сохраняет цвет", () => {
     const cell = codeOf("Rating.tsx").slice(codeOf("Rating.tsx").indexOf("function CategoryCell"));
     const row = between(codeOf("RepoPage.tsx"), "function CategoryRow", "function Markers");
     expect({
-      ratingColored: /scoreColor\(/.test(cell),
+      healthyPlain: /scoreTheme\(value\) === "success"[\s\S]{0,300}rh-cat-plain/.test(cell),
+      exceptionsLabeled: /scoreLabelTheme\(value\)[\s\S]{0,100}rh-cat-chip/.test(cell),
+      ratingInlineColor: /scoreColor\(/.test(cell),
       ratingNullStaysUnknown: /theme="unknown"/.test(cell),
       cardKeepsColor: /scoreColor\(/.test(row),
-    }).toEqual({ ratingColored: false, ratingNullStaysUnknown: true, cardKeepsColor: true });
+    }).toEqual({ healthyPlain: true, exceptionsLabeled: true, ratingInlineColor: false, ratingNullStaysUnknown: true, cardKeepsColor: true });
   });
 });
 
@@ -335,7 +337,7 @@ describe("Б4 (Р14, Р16): список категорий и контейне�
       rowsFiltered: /cat\.locked === undefined/.test(categories),
       noteAfterList: categories.indexOf("</ul>") < categories.indexOf("<LockedCategories"),
       namesActualCategories: note.includes("titles.join"),
-      reasonFromAccessLock: /accessLockText\(cat\.locked\)/.test(categories),
+      reasonFromAccessLock: /accessLockShort\(cat\.locked\)/.test(categories),
       // фиксированная фраза «CI/CD и Security» была бы ложью при закрытой одной
       hardcodedPair: src.includes("CI/CD и Security – недоступны"),
       lockBranchGoneFromRow: /cat\.locked !== undefined/.test(row),
@@ -403,24 +405,34 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
     const src = codeOf("RepoPage.tsx");
     const figure = between(src, "function ScoreFigure", "// ---------- категории");
     const lock = between(src, "score.fullLocked ?", "function ScoreFigure");
-    const { ACCESS_LOCK_TEXT } = (await import("../src/web/format")) as { ACCESS_LOCK_TEXT: Record<string, string> };
+    const { ACCESS_LOCK_TEXT, ACCESS_LOCK_SHORT } = (await import("../src/web/format")) as {
+      ACCESS_LOCK_TEXT: Record<string, string>;
+      ACCESS_LOCK_SHORT: Record<string, string>;
+    };
     expect({
       coverageWord: figure.includes("Покрытие: {fmtCoverage(coverage)}"),
       oldCoverageWord: figure.includes("данных хватило"),
       chipLikeAside: /scoreLabelTheme\(total\)\} size="s"/.test(figure),
-      // мельче прежнего body-2, но всё ещё проза: правило 4а gravity-uikit.md
-      lockTextSmaller: lock.includes("<FullLockMessage") && /function FullLockMessage[\s\S]{0,500}variant="body-1"/.test(src),
+      // блок не схлопывается в метку: заголовок, конкретная причина короткой
+      // формой и переход — приём карточки показателя у платформы
+      lockIsInvite:
+        lock.includes("Виден участникам репозитория") &&
+        /fullLockShortReason\(card\)/.test(lock) &&
+        !src.includes("FullLockMessage"),
       buttonGone: lock.includes("Открыть личный кабинет"),
-      linkInText: /linkProps\("\/settings"\)[\s\S]{0,80}>Настройках</.test(src),
+      // переход к токену ОДИН на экран и стоит у самого показателя
+      linkInText: /linkProps\("\/settings"\)[\s\S]{0,80}>Добавить токен доступа</.test(lock),
       lockTextStillShared: Object.keys(ACCESS_LOCK_TEXT).sort().join(",") === "check-failed,denied,no-pat,pat-expired",
+      shortKeysMatchFull: Object.keys(ACCESS_LOCK_SHORT).sort().join(",") === Object.keys(ACCESS_LOCK_TEXT).sort().join(","),
     }).toEqual({
       coverageWord: true,
       oldCoverageWord: false,
       chipLikeAside: true,
-      lockTextSmaller: true,
+      lockIsInvite: true,
       buttonGone: false,
       linkInText: true,
       lockTextStillShared: true,
+      shortKeysMatchFull: true,
     });
   });
 
@@ -429,10 +441,10 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
     const band = between(src, "function ScoreBand", "function ScoreFigure");
     expect({
       paragraphGone: band.includes("Разницу с HealthCraft Index дают CI и Security:"),
-      indexHelp: src.includes("Публичная оценка по 4 категориям") && src.includes("по ней и строится общий рейтинг"),
+      indexHelp: src.includes("Публичная оценка по 4 категориям") && src.includes("и является основой общего рейтинга"),
       fullHelp:
-        src.includes("Repo Health Score рассчитывается по 6 категориям") &&
-        src.includes("Показатель доступен только для репозиториев, к которым у вас есть доступ."),
+        src.includes("Рассчитывается по 6 категориям") &&
+        src.includes("Показатель доступен только для репозиториев, к которым у вас есть доступ"),
       helpOnLockedBranch: /score\.fullLocked \?[\s\S]{0,1200}<HelpMark/.test(band),
       // MD-отчёт свою формулировку сохраняет: документ читается без наведения
       mdKeepsParagraph: reportSrc().includes("Разницу с HealthCraft Index дают CI и Security"),

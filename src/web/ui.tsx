@@ -41,7 +41,7 @@ export function PageHeader({ title, description, end }: { title: ReactNode; desc
  */
 export function AsideSection({ title, help, children }: { title: ReactNode; help?: ReactNode; children: ReactNode }) {
   return (
-    <Flex as="section" direction="column" gap={2} style={{ marginBottom: "var(--g-spacing-6)" }}>
+    <Flex as="section" className="rh-aside-section" direction="column" gap={2} style={{ marginBottom: "var(--g-spacing-6)" }}>
       <Flex gap={1} alignItems="center">
         <Text variant="subheader-2" as="h2">
           {title}

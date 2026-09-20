@@ -41,6 +41,7 @@ import {
   fmtScore,
   scanStatusText,
   scoreColor,
+  scoreLabelTheme,
   scoreTheme,
   scoreWord,
   sentence,
@@ -653,9 +654,19 @@ function CategoryCell({ value }: { value: number | null }) {
       </Label>
     );
   }
+  // Круг 3, пакет П3/1 отменяет Р4 круга 2: цвет возвращен только для исключений.
+  // Значения >=70 остаются нейтральным текстом, 40-69 и <40 получают Label;
+  // null сохраняет отдельное нейтральное состояние tri-state.
+  if (scoreTheme(value) === "success") {
+    return (
+      <Text className="rh-cat-plain" style={{ fontVariantNumeric: "tabular-nums" }} title={sentence(scoreWord(value))}>
+        {fmtScore(value)}
+      </Text>
+    );
+  }
   return (
-    <Text style={{ fontVariantNumeric: "tabular-nums" }} title={sentence(scoreWord(value))}>
-      {fmtScore(value)}
-    </Text>
+    <Label theme={scoreLabelTheme(value)} size="xs" className="rh-cat-chip" title={sentence(scoreWord(value))}>
+      <span style={{ fontVariantNumeric: "tabular-nums" }}>{fmtScore(value)}</span>
+    </Label>
   );
 }
