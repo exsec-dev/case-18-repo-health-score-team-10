@@ -187,6 +187,11 @@ async function run(): Promise<void> {
         // В4.6 круг 2 (Р5): заголовок — «Рейтинг здоровья ОТКРЫТЫХ репозиториев»
         "заголовок рейтинга": "document.body.innerText.includes('Рейтинг здоровья открытых репозиториев') ? 1 : 0",
         "колонка HealthCraft Index": "document.body.innerText.includes('HealthCraft Index') ? 1 : 0",
+        // В4.6 круг 2 (Р21): контрол сортировки не режет собственное значение.
+        // Проверяется геометрией, а не на глаз: текст выбранной опции обязан
+        // укладываться в свою рамку (scrollWidth <= clientWidth).
+        "сортировка не обрезана":
+          "(() => { const n = [...document.querySelectorAll('[class*=\"select-control__option-text\"]')].pop(); if (!n) return 0; return n.scrollWidth <= n.clientWidth + 1 ? 1 : 0; })()",
       },
       // В4.6 (У22/У23): ниже 1440 правая панель рейтинга уезжает в закрытый Drawer,
       // и легенды в DOM нет ПО ЗАМЫСЛУ — требовать её там значило бы ловить

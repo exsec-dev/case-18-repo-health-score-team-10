@@ -208,7 +208,8 @@ describe("Р13: кнопка «Что делать» снята, счётчик 
 // ---------------------------------------------------------------------------
 
 describe("Р4: цвет снят с категорийных чисел рейтинга, на карточке остаётся", () => {
-  repro("CategoryCell рейтинга без scoreColor(), CategoryRow карточки с ним", () => {
+  // ЗАКРЫТО блоком Б2 (строка рейтинга) — обёртка снята, утверждение не менялось.
+  test("CategoryCell рейтинга без scoreColor(), CategoryRow карточки с ним", () => {
     const cell = srcOf("Rating.tsx").slice(srcOf("Rating.tsx").indexOf("function CategoryCell"));
     const row = between(srcOf("RepoPage.tsx"), "function CategoryRow", "// ---------- маркеры расчёта");
     expect({
@@ -255,6 +256,45 @@ describe("Р7: блока «О рейтинге» в правой панели �
       aboutRating: src.includes("О рейтинге"),
       legendFirst: legend >= 0 && contribution >= 0 && legend < contribution,
     }).toEqual({ aboutRating: false, legendFirst: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Блок Б2 — строка рейтинга: Р3 (лэйаут строки и типографика пары) и Р21
+// (Select сортировки не режет своё значение). Р4 закрыт трипваем Т7 выше.
+// ---------------------------------------------------------------------------
+
+describe("Б2 (Р3, Р21): строка рейтинга и контрол сортировки", () => {
+  test("Р3: в строке иконка, имя и НАЗВАНИЕ языка; скелетон держит ритм 56px", () => {
+    const src = srcOf("Rating.tsx");
+    const cell = between(src, "function RepoCell", "function buildColumns");
+    expect({
+      avatar: /RepoAvatar[\s\S]{0,120}size="m"/.test(cell),
+      slugComponent: cell.includes("<RepoSlug"),
+      languageName: cell.includes("<LanguageName"),
+      dotOnly: cell.includes("<LanguageDot") || srcOf("ui.tsx").includes("LanguageDot"),
+      skeletonRhythm: src.includes("<SkeletonRows rows={10} height={56} />"),
+    }).toEqual({ avatar: true, slugComponent: true, languageName: true, dotOnly: false, skeletonRhythm: true });
+  });
+
+  test("Р3: число индекса без лишней жирности, полоса ниже, зазор меньше; ширины те же", () => {
+    const cell = between(srcOf("Rating.tsx"), "function ScoreCell", "function CategoryCell");
+    expect({
+      lighterNumber: cell.includes('variant="body-3"'),
+      boldNumberGone: cell.includes('variant="subheader-3"'),
+      lowerBar: /<Progress[\s\S]{0,120}size="xs"/.test(cell),
+      tighterGap: /<Flex gap=\{1\} alignItems="center" justifyContent="flex-end">/.test(cell),
+      widthsUntouched: cell.includes("width: 80") && srcOf("layout.css").includes("min-width: 32px"),
+    }).toEqual({ lighterNumber: true, boldNumberGone: false, lowerBar: true, tighterGap: true, widthsUntouched: true });
+  });
+
+  test("Р21: у Select сортировки нет ширины-обрезки — контрол берёт ширину по содержимому", () => {
+    const src = srcOf("Rating.tsx");
+    const sort = between(src, 'label="Сортировка:"', "/>");
+    expect({ autoWidth: sort.includes('width="auto"'), oldFixedWidth: sort.includes("width={230}") }).toEqual({
+      autoWidth: true,
+      oldFixedWidth: false,
+    });
   });
 });
 

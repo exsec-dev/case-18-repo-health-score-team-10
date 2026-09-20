@@ -40,7 +40,6 @@ import {
   fmtNumber,
   fmtScore,
   scanStatusText,
-  scoreColor,
   scoreTheme,
   scoreWord,
   sentence,
@@ -48,7 +47,7 @@ import {
 import { useMediaQuery } from "./prefs";
 import { linkProps, navigate, repoHref } from "./router";
 import { Page } from "./Shell";
-import { AsideSection, EmptyState, LanguageDot, LanguageName, PageHeader, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows } from "./ui";
+import { AsideSection, EmptyState, LanguageName, PageHeader, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows } from "./ui";
 
 type Item = RatingResponse["items"][number];
 
@@ -189,10 +188,17 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
           }}
         />
         <Flex>
+          {/* В4.6 круг 2 (Р21, находка приёмки круга 1 / ДП8): прежние 230px
+              резали собственное значение контрола («Сортировка: HealthCraft
+              In…»). `width="auto"` вместо нового магического числа: контрол
+              берёт ширину по содержимому, то есть НЕ РЕЖЕТ ни одну опцию — в
+              том числе самую длинную («Последняя активность») и в любой теме,
+              где метрика шрифта другая. Фиксированное число пришлось бы
+              пересчитывать при каждой правке списка сортировок. */}
           <Select
             label="Сортировка:"
             size="m"
-            width={230}
+            width="auto"
             pin="round-brick"
             value={[sort]}
             options={SORT_OPTIONS}
@@ -263,8 +269,10 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
         ) : undefined
       }
     >
-      {/* В4.6 (У27): 46px — фактическая высота строки рейтинга после уплотнения (Б3) */}
-      {state.kind === "loading" && <SkeletonRows rows={10} height={46} />}
+      {/* В4.6 (У27): скелетон держит РИТМ содержимого. Круг 2 (Р3) вернул в
+          строку название языка, и её высота снова 56px — 46px оставили бы
+          прыжок раскладки в момент загрузки, то есть ровно ту находку пары. */}
+      {state.kind === "loading" && <SkeletonRows rows={10} height={56} />}
 
       {state.kind === "error" && (
         <Alert
@@ -488,32 +496,30 @@ function PhoneList({ items, rankOffset }: { items: Item[]; rankOffset: number })
 }
 
 /**
- * Строка репозитория В ОДНУ ЛИНИЮ (В4.6, З9 систематика — входит в Б3
- * решением владельца 20.09).
+ * Строка репозитория: иконка, имя, НАЗВАНИЕ ЯЗЫКА (В4.6 круг 2, Р3 —
+ * замечание владельца 3; частичная отмена З9 круга 1).
  *
- * Причина именно здесь: высоту строки рейтинга задавала НЕ ячейка индекса
- * (28px содержимого), а эта двухстрочная ячейка — 18px слага плюс 16px
- * названия языка = 34px, и 56px строки целиком её работа (замер раунда
- * 20.09). Разворот индекса в строку сам по себе не вернул бы ни одного
- * пикселя. Здесь слаг и точка языка встают на одну линию, аватар берёт
- * `xs`, и содержимое становится 24px → строка 46px, то есть при 1440
- * видно 17 строк вместо 14. Название языка не теряется: оно живёт в `title`
- * точки и в колонке «Язык», выключенной по умолчанию (её включает
- * `TableColumnSetup`) — там же, где лайки и форки.
- *
- * `size="xs"` (24px), а не `s`: в Gravity 7.49.0 `s` — это 28px, и с ним
- * строка встала бы на 50px, то есть проверяемое следствие блока (46px и 17
- * строк) не выполнилось бы.
+ * Круг 1 уплотнил строку до 46px: название языка ушло в `title` цветной точки
+ * и в колонку «Язык», выключенную по умолчанию. Владелец прошла по живому
+ * рейтингу и вернула лэйаут: цветной кружок без названия ничего не сообщал —
+ * язык узнавался только наведением, то есть для читающего глазами не
+ * существовал. Высота строки 56px ПРИНЯТА решением владельца (18px слага +
+ * 16px названия языка + аватар `m`), `perPage` 20 остаётся: видно ~15 строк
+ * вместо 17, и это осознанная плата за читаемую строку.
  */
 function RepoCell({ item }: { item: Item }) {
   return (
-    <Flex gap={2} alignItems="center" style={{ minWidth: 180, maxWidth: 264 }}>
-      <RepoAvatar repo={item.repo} logoUrl={item.logoUrl} size="xs" />
-      <LanguageDot name={item.language} color={item.languageColor} />
-      <Link {...linkProps(repoHref(item.org, item.repo))} view="primary">
-        {/* В4.6 (У27): слаг — один компонент на рейтинг и карточку */}
-        <RepoSlug org={item.org} repo={item.repo} variant="subheader-1" />
-      </Link>
+    <Flex gap={3} alignItems="center" style={{ minWidth: 180, maxWidth: 264 }}>
+      <RepoAvatar repo={item.repo} logoUrl={item.logoUrl} size="m" />
+      <Flex direction="column" gap={0} style={{ minWidth: 0 }}>
+        <Link {...linkProps(repoHref(item.org, item.repo))} view="primary">
+          {/* В4.6 (У27): слаг — один компонент на рейтинг и карточку */}
+          <RepoSlug org={item.org} repo={item.repo} variant="subheader-1" />
+        </Link>
+        <Text variant="body-short" color="secondary" ellipsis>
+          <LanguageName name={item.language} color={item.languageColor} />
+        </Text>
+      </Flex>
     </Flex>
   );
 }
@@ -538,7 +544,8 @@ function buildColumns(categories: MetaResponse["categories"], rankOffset: number
     { id: "repo", name: "Репозиторий", primary: true, sticky: "start", template: (item: Item) => <RepoCell item={item} /> },
     { id: "index", name: "HealthCraft Index", align: "end", width: 96, template: (item: Item) => <ScoreCell item={item} /> },
     ...categoryColumns,
-    // В4.6 (З9): название языка ушло из строки — остаётся доступным колонкой
+    // В4.6 круг 2 (Р3): название языка снова стоит в строке репозитория;
+    // колонка остаётся для сортируемого/копируемого вида, выключенной по умолчанию
     { id: "lang", name: "Язык", template: (item: Item) => <LanguageName name={item.language} color={item.languageColor} /> },
     { id: "likes", name: "Лайки", align: "end", template: (item: Item) => fmtNumber(item.likes) },
     { id: "forks", name: "Форки", align: "end", template: (item: Item) => fmtNumber(item.forks) },
@@ -575,18 +582,23 @@ function buildColumns(categories: MetaResponse["categories"], rankOffset: number
  *
  * Измерено дизайн-раундом 20.09, а не выбрано на глаз: прежняя вертикаль
  * давала полосу 64x4px — 0,64px на балл, то есть разница 83 и 80 занимала
- * 1,9px и была невидима. Теперь 80x10px (`size="s"` — тот же вид, что у
- * полос категорий на карточке: одна сущность, один вид на двух экранах), а
- * читаемость полоса получает не длиной, а цветом: после палитрового паса
- * контраст заливки к дорожке вырос с 1,95:1 до 4,40:1.
+ * 1,9px и была невидима. Круг 1 развернул пару в строку и дал полосе 80px
+ * длины; читаемость она получает не длиной, а цветом (после палитрового паса
+ * контраст заливки к дорожке вырос с 1,95:1 до 4,40:1). Круг 2 (Р3) снизил
+ * её высоту до `size="xs"` по замечанию владельца — в СТРОКЕ рейтинга полоса
+ * стоит рядом с числом и не должна с ним спорить; полосы карточки остаются
+ * `size="s"`, там они главная графика блока.
  *
- * 80 + 8 + 32 = 120px укладывается в уже занятые колонкой ~126px, поэтому
- * ширина колонки не меняется и горизонтальная прокрутка не появляется.
- * Число — `subheader-3` 17/24 вместо `subheader-2` 15/20: шаг к соседям
- * (13px) становится 1,31 вместо 1,15, то есть попадает в вилку 1,2–1,33.
  * Слот числа ФИКСИРОВАН на 32px и набран `tabular-nums` — иначе при
  * двузначных и трёхзначных значениях левая кромка полосы гуляет по колонке
  * и полосы перестают сравниваться между строками.
+ *
+ * В4.6 круг 2 (Р3): владелец прошла по живому рейтингу — «число меньше
+ * жирности, полоса чуть ниже, отступ между ними меньше». Ширины НЕ
+ * пересчитываются (равенство ширин пары и заголовка владелец отменила),
+ * меняются три соседних шага шкал: число `subheader-3` → `body-3` (тот же
+ * кегль 17/24, обычное начертание вместо полужирного), полоса `size="s"` →
+ * `"xs"` (соседний шаг ProgressSize), зазор `gap={2}` → `gap={1}`.
  */
 function ScoreCell({ item }: { item: Item }) {
   if (item.healthcraftIndex === null) {
@@ -597,7 +609,7 @@ function ScoreCell({ item }: { item: Item }) {
     );
   }
   return (
-    <Flex gap={2} alignItems="center" justifyContent="flex-end">
+    <Flex gap={1} alignItems="center" justifyContent="flex-end">
       {/* «Из истории» — левее полосы: ярлык редкий и не должен раздвигать числовой ряд */}
       {item.staleFacts && (
         <Label theme="warning" size="xs" title="Часть фактов взята из истории при сбое канала">
@@ -605,9 +617,9 @@ function ScoreCell({ item }: { item: Item }) {
         </Label>
       )}
       <div style={{ width: 80 }}>
-        <Progress value={item.healthcraftIndex} size="s" theme={scoreTheme(item.healthcraftIndex)} />
+        <Progress value={item.healthcraftIndex} size="xs" theme={scoreTheme(item.healthcraftIndex)} />
       </div>
-      <Text variant="subheader-3" className="rh-score-cell__num" title={sentence(scoreWord(item.healthcraftIndex))}>
+      <Text variant="body-3" className="rh-score-cell__num" title={sentence(scoreWord(item.healthcraftIndex))}>
         {fmtScore(item.healthcraftIndex)}
       </Text>
     </Flex>
@@ -615,13 +627,20 @@ function ScoreCell({ item }: { item: Item }) {
 }
 
 /**
- * Категория: качество ЗАКОДИРОВАНО (В4.6, У20 — корень ДП1). До этой вехи 26
- * и 98 были набраны одним цветом и размером, а `null` — бледным тире, то есть
- * «плохо» и «нет данных» глаз не различал. Теперь число красится по
- * `scoreTheme()` (тот же порог, что у полос — источник правды один), а
- * отсутствие данных становится ДРУГИМ ТИПОМ ячейки: нейтральный
- * `Label theme="unknown"` со словом «н/д» и причиной в `title`. Никогда не
- * красное и никогда не ноль (закон 2, охранный пункт 1 синтеза).
+ * Категория в таблице рейтинга (В4.6 круг 2, Р4 — замечание владельца 4).
+ *
+ * Круг 1 красил число по `scoreTheme()` (корень ДП1: «26 и 98 набраны одним
+ * цветом»). Владелец прошла по живому рейтингу и СНЯЛА цветовую индикацию со
+ * всех категорийных колонок: четыре-шесть цветных чисел в строке читались как
+ * светофор на всю таблицу и спорили с окраской самого индекса. Отмена
+ * сознательная — оба дизайн-аудитора считали ДП1 критичной, поэтому вопрос
+ * «как визуально передать категорию» заведён в парковку канвы, а не забыт.
+ * Окраска ИНДЕКСА и его полосы остаётся; на КАРТОЧКЕ окраска категорийных
+ * чисел тоже остаётся (там рядом с числом стоит полоса, она несёт цвет).
+ *
+ * Tri-state не двигается ни на йоту: отсутствие данных — ДРУГОЙ ТИП ячейки,
+ * нейтральный `Label theme="unknown"` со словом «н/д» и причиной в `title`,
+ * никогда не красный и никогда не ноль (закон 2, охранный пункт 1).
  * «Нет данных» полностью в узкую колонку (59px у Issues) не влезает — отсюда
  * короткая форма.
  */
@@ -634,7 +653,7 @@ function CategoryCell({ value }: { value: number | null }) {
     );
   }
   return (
-    <Text color={scoreColor(value)} style={{ fontVariantNumeric: "tabular-nums" }} title={sentence(scoreWord(value))}>
+    <Text style={{ fontVariantNumeric: "tabular-nums" }} title={sentence(scoreWord(value))}>
       {fmtScore(value)}
     </Text>
   );

@@ -72,11 +72,13 @@ describe("В4.6-1 (У20): качество категорий закодиров
     const src = srcOf("Rating.tsx");
     const cell = src.slice(src.indexOf("function CategoryCell"));
     expect({
-      // Б2: окраска идёт через scoreColor() — производную того же scoreTheme()
-      colorsByTheme: /score(Theme|Color)\(/.test(cell),
+      // Круг 2 (Р4): утверждение `colorsByTheme` СНЯТО — владелец отменила
+      // цветовую индикацию категорийных колонок рейтинга, и обратное
+      // утверждение живёт в tests/audit-v46r2-repro.test.ts (трипвай Т7).
+      // Tri-state-половина находки остаётся здесь в полной силе.
       nullIsUnknownLabel: /theme="unknown"/.test(cell),
       nullIsNotBareDash: !/>\s*—\s*</.test(cell),
-    }).toEqual({ colorsByTheme: true, nullIsUnknownLabel: true, nullIsNotBareDash: true });
+    }).toEqual({ nullIsUnknownLabel: true, nullIsNotBareDash: true });
   });
 
   // ЗАКРЫТО блоком Б2 (шкала и кодирование).
@@ -238,10 +240,13 @@ describe("В4.6-6 (У21): колонка индекса — горизонтал
     expect({
       horizontal: !/direction="column"/.test(cell),
       bar80: cell.includes("width: 80"),
-      subheader3: cell.includes('variant="subheader-3"'),
+      // Круг 2 (Р3): утверждение `subheader3` СНЯТО — владелец попросила у
+      // числа меньше жирности, и набор выбирает соседний шаг шкалы
+      // (`body-3`). Ширины пары НЕ пересчитываются, поэтому `bar80` и слот
+      // числа остаются проверяемыми здесь.
       slot: cell.includes("rh-score-cell__num"),
       noOldBar: !cell.includes("width: 64"),
-    }).toEqual({ horizontal: true, bar80: true, subheader3: true, slot: true, noOldBar: true });
+    }).toEqual({ horizontal: true, bar80: true, slot: true, noOldBar: true });
   });
 
   // ЗАКРЫТО блоком Б3 (колонка индекса и уплотнение строки).
