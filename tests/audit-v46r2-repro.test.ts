@@ -96,7 +96,8 @@ const mdLocked = (): string =>
 // ---------------------------------------------------------------------------
 
 describe("Р15: затухание живёт только на контейнерах с собственной прокруткой", () => {
-  repro("`.rh-fade::after` погашен порогом 1439, кромка таблицы рейтинга цела", () => {
+  // ЗАКРЫТО блоком Б6 (затухание и приёмочная база) — обёртка снята, утверждение не менялось.
+  test("`.rh-fade::after` погашен порогом 1439, кромка таблицы рейтинга цела", () => {
     const css = srcOf("layout.css");
     const narrow = css.slice(css.indexOf("@media (max-width: 1439px)"), css.indexOf("@media (max-width: 767px)"));
     expect({
@@ -273,6 +274,22 @@ describe("Р7: блока «О рейтинге» в правой панели �
       aboutRating: src.includes("О рейтинге"),
       legendFirst: legend >= 0 && contribution >= 0 && legend < contribution,
     }).toEqual({ aboutRating: false, legendFirst: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Блок Б6 — Р15 закрыт трипваем Т1 выше; здесь второй случай того же
+// диагноза: обёртка таблицы рейтинга тоже не прокручивает себя.
+// ---------------------------------------------------------------------------
+
+describe("Б6 (Р15): затухания нет там, где контейнер не прокручивает себя", () => {
+  test("обёртка таблицы рейтинга: затухание погашено, кромку даёт сама таблица", () => {
+    const css = srcOf("layout.css");
+    expect({
+      wrapperFadeOff: /\.rh-fill__content:has\(> \.rh-table-fill\)\.rh-fade::after \{\s*display: none/.test(css),
+      wrapperNotScrolling: /\.rh-fill__content:has\(> \.rh-table-fill\) \{[^}]*overflow: hidden/.test(css),
+      tableEdge: /\.rh-table-fill \.g-table__scroll-container::after \{[^}]*position: sticky/.test(css),
+    }).toEqual({ wrapperFadeOff: true, wrapperNotScrolling: true, tableEdge: true });
   });
 });
 

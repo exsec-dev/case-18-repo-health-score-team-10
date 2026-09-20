@@ -236,7 +236,7 @@ async function run(): Promise<void> {
         // В4.6 круг 2 (Р13): следующий шаг — ссылка-счётчик «Рекомендаций: N»,
         // кнопки «Что делать» больше нет.
         "строка итога и ссылка-счётчик рекомендаций":
-          "(document.body.innerText.includes('Сильнее всего') && [...document.querySelectorAll('a')].some((a) => /Рекомендаций: \d+/.test(a.textContent ?? ''))) ? 1 : 0",
+          "(document.body.innerText.includes('Сильнее всего') && [...document.querySelectorAll('a')].some((a) => /Рекомендаций: [0-9]+/.test(a.textContent ?? ''))) ? 1 : 0",
       },
     },
   ];
