@@ -153,7 +153,8 @@ describe("Р12 (UI): «закрыто» → «Недоступно» на кар
 // ---------------------------------------------------------------------------
 
 describe("Р12 (MD): «закрыто»/«закрыто доступом» → «Недоступно» в отчёте", () => {
-  repro("таблица категорий и заголовки разбора говорят «Недоступно»", () => {
+  // ЗАКРЫТО блоком Б5 (тексты и язык) — обёртка снята, утверждение не менялось.
+  test("таблица категорий и заголовки разбора говорят «Недоступно»", () => {
     const out = mdLocked();
     expect({
       statusCell: out.includes("| CI/CD | 15% | — | не учитывается | Недоступно |"),
@@ -272,6 +273,32 @@ describe("Р7: блока «О рейтинге» в правой панели �
       aboutRating: src.includes("О рейтинге"),
       legendFirst: legend >= 0 && contribution >= 0 && legend < contribution,
     }).toEqual({ aboutRating: false, legendFirst: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Блок Б5 — тексты и язык: Р18 (правило языка в заготовленных текстах
+// рекомендаций и двух пользовательских строках API) и Р19 («Основание»).
+// MD-часть Р12 закрыта трипваем Т4 выше.
+// ---------------------------------------------------------------------------
+
+describe("Б5 (Р18, Р19): правило языка в текстах движка и «Основание»", () => {
+  const textOf = (rel: string): string => stripComments(readFileSync(join(import.meta.dir, "..", rel), "utf8"));
+
+  test("Р18: в текстах рекомендаций нет длинного тире и нет «ё»", () => {
+    const src = textOf("src/score/recommend.ts");
+    expect({ emDash: src.includes("—"), yo: /[ёЁ]/.test(src) }).toEqual({ emDash: false, yo: false });
+  });
+
+  test("Р18: две названные пользовательские строки API — по правилу языка", async () => {
+    const { CHANNEL_DELTA_HIDDEN_TEXT } = (await import("../src/api/repos")) as { CHANNEL_DELTA_HIDDEN_TEXT: string };
+    expect(CHANNEL_DELTA_HIDDEN_TEXT).toBe("улучшит CI/CD – прирост Repo Health Score виден при доступе к CI и Security");
+    expect(textOf("src/api/me.ts")).toContain("SourceCraft отклонил PAT – обновите токен в кабинете");
+  });
+
+  test("Р19: подпись фактов рекомендации — «Основание»", () => {
+    const src = codeOf("RepoPage.tsx");
+    expect({ newWord: src.includes("Основание:"), oldWord: src.includes("Основано на фактах") }).toEqual({ newWord: true, oldWord: false });
   });
 });
 

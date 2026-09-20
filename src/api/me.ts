@@ -341,7 +341,7 @@ export async function requestUserScan(
     return { status: 403, body: { error: { code: "no_access", message: `ваш PAT не дает доступа к ${org}/${repo}` } } };
   }
   if (res.status === 401) {
-    return { status: 401, body: { error: { code: "pat_expired", message: "SourceCraft отклонил PAT — обновите токен в кабинете" } } };
+    return { status: 401, body: { error: { code: "pat_expired", message: "SourceCraft отклонил PAT – обновите токен в кабинете" } } };
   }
   if (res.status !== 200) {
     return { status: 503, body: { error: { code: "check_failed", message: `не удалось проверить доступ к ${org}/${repo} (HTTP ${res.status})` } } };

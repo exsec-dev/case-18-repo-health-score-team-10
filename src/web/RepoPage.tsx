@@ -1033,8 +1033,12 @@ function RecommendationRow({ rec, evidence }: { rec: Recommendation; evidence: M
         <Text>{rec.action}</Text>
         {rec.expectedImpact && <Text color="complementary">Эффект: {rec.expectedImpact}</Text>}
         <Flex gap={2} wrap alignItems="center">
+          {/* В4.6 круг 2 (Р19, замечание владельца 19): «Основано на фактах» →
+              «Основание». Прежняя формулировка была оправданием («мы не
+              выдумали»), новая называет саму вещь: ниже стоят факты, по клику
+              открывается их значение и источник. */}
           <Text variant="body-short" color="secondary">
-            Основано на фактах:
+            Основание:
           </Text>
           {rec.factRefs.map((ref) => (
             <Popover

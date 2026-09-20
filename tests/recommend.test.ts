@@ -101,7 +101,7 @@ describe("presence-правила: реальный прирост итога (�
       { key: "appsec.findings", value: { severity_counts: { critical: 0, high: 0, medium: 0, low: 0 }, resolved_share: 1, secrets_critical: true } },
     );
     const ci = recommend(t.db, seedScan(t, capped), { now: NOW }).find((r) => r.ruleId === "ci-missing")!;
-    expect({ delta: ci.deltaScore, impact: ci.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к Repo Health Score — упирается в кап 49" });
+    expect({ delta: ci.deltaScore, impact: ci.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к Repo Health Score – упирается в кап 49" });
 
     const empty = withFacts(
       healthyFacts(),
@@ -109,12 +109,12 @@ describe("presence-правила: реальный прирост итога (�
       { key: "docs.presence", value: { readme: true, license: false, contributing: true, codeowners: true } },
     );
     const lic = recommend(t.db, seedScan(t, empty), { now: NOW }).find((r) => r.ruleId === "license-missing")!;
-    expect({ delta: lic.deltaScore, impact: lic.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к HealthCraft Index — в репозитории нет кода" });
+    expect({ delta: lic.deltaScore, impact: lic.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к HealthCraft Index – в репозитории нет кода" });
 
     // только git-документация: покрытие рейтинга < 0.4 → итог NULL
     const sparse: FactSpec[] = [{ key: "docs.presence", value: { readme: true, license: false, contributing: true, codeowners: true } }];
     const nul = recommend(t.db, seedScan(t, sparse), { now: NOW }).find((r) => r.ruleId === "license-missing")!;
-    expect({ delta: nul.deltaScore, impact: nul.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к HealthCraft Index — итог появится при большем покрытии" });
+    expect({ delta: nul.deltaScore, impact: nul.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к HealthCraft Index – итог появится при большем покрытии" });
   });
 });
 

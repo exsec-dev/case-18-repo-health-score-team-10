@@ -894,7 +894,7 @@ function liveViewerJob(db: Database, org: string, repo: string, viewerUserId: nu
 }
 
 /** Текст канального presence-правила без числа (С4): Δ Repo Health Score виден только при доступе к CI и Security. */
-export const CHANNEL_DELTA_HIDDEN_TEXT = "улучшит CI/CD — прирост Repo Health Score виден при доступе к CI и Security";
+export const CHANNEL_DELTA_HIDDEN_TEXT = "улучшит CI/CD – прирост Repo Health Score виден при доступе к CI и Security";
 
 const roundTotal = (x: number | null): number | null => (x === null ? null : Math.round(x));
 const splitRefs = (raw: string): string[] =>

@@ -179,7 +179,10 @@ function categoriesTable(card: RepoCard): string[] {
     // В4.6 (У25, ДП6): у категории без данных вклад не нулевой, а НЕ СУЩЕСТВУЕТ:
     // вес выброшен и перенормирован. «0%» читалось как «категория дала ноль».
     const contribution = contributionText(cat.score, Math.round((cat.weight / Math.max(1, dataWeight)) * 100));
-    const status = cat.locked !== undefined ? "закрыто доступом" : cat.score === null ? NO_DATA : cat.stale ? "данные из истории" : "данные есть";
+    // В4.6 круг 2 (Р12): ячейка «Статус» говорит «Недоступно» — то же слово,
+    // что на карточке. «закрыто доступом» было ещё и тавтологией: причина
+    // доступа стоит абзацем ниже, в разборе категории.
+    const status = cat.locked !== undefined ? "Недоступно" : cat.score === null ? NO_DATA : cat.stale ? "данные из истории" : "данные есть";
     out.push(`| ${CATEGORY_TITLES[key]} | ${cat.weight}% | ${cat.score === null ? "—" : round(cat.score)} | ${contribution} | ${status} |`);
   }
   out.push("");
@@ -193,7 +196,8 @@ function categoriesDetail(card: RepoCard): string[] {
   const out = ["## Разбор по категориям", ""];
   for (const [key, cat] of categoryEntries(card)) {
     const lock = accessLockText(cat.locked);
-    out.push(`### ${CATEGORY_TITLES[key]} – ${lock !== null ? "закрыто" : cat.score === null ? NO_DATA : `${round(cat.score)} / 100`}`, "");
+    // В4.6 круг 2 (Р12): заголовок разбора — тем же словом, что ячейка «Статус»
+    out.push(`### ${CATEGORY_TITLES[key]} – ${lock !== null ? "Недоступно" : cat.score === null ? NO_DATA : `${round(cat.score)} / 100`}`, "");
     if (lock !== null) {
       out.push(lock, "", "HealthCraft Index эту категорию не учитывает.", "");
       continue;

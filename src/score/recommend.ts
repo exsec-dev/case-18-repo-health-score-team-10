@@ -175,13 +175,13 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
   const presence_ = ok.get("docs.presence") as DocsPresenceValue | undefined;
   if (pub && presence_) {
     if (presence_.license !== true) {
-      presenceRule("license-missing", "В репозитории нет файла лицензии", "Добавьте LICENSE (MIT/Apache-2.0) в корень — лицензия условие переиспользования", ["docs.presence"], withPresence("license"));
+      presenceRule("license-missing", "В репозитории нет файла лицензии", "Добавьте LICENSE (MIT/Apache-2.0) в корень – лицензия условие переиспользования", ["docs.presence"], withPresence("license"));
     }
     if (presence_.contributing !== true) {
-      presenceRule("contributing-missing", "Нет CONTRIBUTING — как вносить правки не описано", "Добавьте CONTRIBUTING.md с процессом контрибуции", ["docs.presence"], withPresence("contributing"));
+      presenceRule("contributing-missing", "Нет CONTRIBUTING – как вносить правки не описано", "Добавьте CONTRIBUTING.md с процессом контрибуции", ["docs.presence"], withPresence("contributing"));
     }
     if (presence_.codeowners !== true) {
-      presenceRule("codeowners-missing", "Нет CODEOWNERS — код без ответственных", "Добавьте CODEOWNERS с владельцами каталогов", ["docs.presence"], withPresence("codeowners"));
+      presenceRule("codeowners-missing", "Нет CODEOWNERS – код без ответственных", "Добавьте CODEOWNERS с владельцами каталогов", ["docs.presence"], withPresence("codeowners"));
     }
     const readme = ok.get("docs.readme") as DocsReadmeValue | undefined;
     if (presence_.readme !== true) {
@@ -209,10 +209,10 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
     const hasYaml = cicdCfg.has_ci_yaml === true;
     presenceRule(
       hasYaml ? "ci-no-steps" : "ci-missing",
-      hasYaml ? "ci.yaml есть, но без шагов — CI фактически не заявлен" : "CI не заявлен: нет .sourcecraft/ci.yaml",
+      hasYaml ? "ci.yaml есть, но без шагов – CI фактически не заявлен" : "CI не заявлен: нет .sourcecraft/ci.yaml",
       hasYaml
         ? "Добавьте в ci.yaml хотя бы один task с непустой командой (build/test)"
-        : "Добавьте .sourcecraft/ci.yaml с task и командой (образец — ci.yaml этого проекта)",
+        : "Добавьте .sourcecraft/ci.yaml с task и командой (образец – ci.yaml этого проекта)",
       ["cicd.configs"],
       (facts) => {
         facts.set("cicd.configs", hasYaml ? { ...(facts.get("cicd.configs") as object), has_steps: true } : { has_ci_yaml: true, has_steps: true });
@@ -225,7 +225,7 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
   const stats = ok.get("issues.stats") as { open?: unknown; closed?: unknown } | undefined;
   if (pub && stats && (stats.open ?? 0) === 0 && (stats.closed ?? 0) === 0) {
     activation.push(
-      act("start-tracker", "issues", "Трекер не ведется: 0 открытых и 0 закрытых issues", "Начните вести трекер issues (баги + планы) — источник метрик поддержки", ["issues.stats"], `Issues: скор с минимума категории (${ctx.issuesScore ?? 0}/100) до фактического по данным`),
+      act("start-tracker", "issues", "Трекер не ведется: 0 открытых и 0 закрытых issues", "Начните вести трекер issues (баги + планы) – источник метрик поддержки", ["issues.stats"], `Issues: скор с минимума категории (${ctx.issuesScore ?? 0}/100) до фактического по данным`),
     );
   }
   if (!ok.has("appsec.findings")) {
@@ -236,9 +236,9 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
         "connect-appsec",
         "security",
         "Security без данных: результатов AppSec SourceCraft по репозиторию нет",
-        "Подключите AppSec к репозиторию и дождитесь завершенного скана — SAST/SCA/secrets закроют 20% Repo Health Score",
+        "Подключите AppSec к репозиторию и дождитесь завершенного скана – SAST/SCA/secrets закроют 20% Repo Health Score",
         ["appsec.findings"],
-        "AppSec-данные недоступны: проверьте право PAT src.repositories.useAppSecScan и завершенность скана — Security заработает в Repo Health Score",
+        "AppSec-данные недоступны: проверьте право PAT src.repositories.useAppSecScan и завершенность скана – Security заработает в Repo Health Score",
         "appsec",
       ),
     );
@@ -246,7 +246,7 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
   const runsFact = ok.get("cicd.runs");
   if (!runsFact && cicdCfg?.has_ci_yaml === true && cicdCfg?.has_steps === true) {
     activation.push(
-      act("grant-ci-runs", "cicd", "CI заявлен, но статусы прогонов недоступны (403 для чужих репо)", "Дайте доступ к прогонам CI (свой репо / права токена) — доказательства вместо потолка", ["cicd.runs", "cicd.configs"], "CI/CD: 50 → до 100 по фактическим прогонам", "cicd"),
+      act("grant-ci-runs", "cicd", "CI заявлен, но статусы прогонов недоступны (403 для чужих репо)", "Дайте доступ к прогонам CI (свой репо / права токена) – доказательства вместо потолка", ["cicd.runs", "cicd.configs"], "CI/CD: 50 → до 100 по фактическим прогонам", "cicd"),
     );
   }
 
@@ -315,6 +315,8 @@ function mk(
   // Index (К-Ф1.2, В4.3). Дельта ЗНАКОВАЯ: инверсия законна (плохие
   // CI/Security опускают полный Score ниже индекса) — «+» безусловно
   // рисовало «+-2.5»; знак берётся из фактического прироста.
+  // В4.6 круг 2 (Р18): разделитель в тексте эффекта — среднее тире (правило
+  // языка UI): строка едет на карточку и в MD-отчёт как есть.
   const scope = channel === null ? "к HealthCraft Index" : "к Repo Health Score";
   const sign = real.delta < 0 ? "-" : "+";
   return {
@@ -324,7 +326,7 @@ function mk(
     problem,
     action,
     factRefs,
-    expectedImpact: `${sign}${Math.abs(real.delta).toFixed(1)} ${scope}${real.reason ? ` — ${real.reason}` : ""}`,
+    expectedImpact: `${sign}${Math.abs(real.delta).toFixed(1)} ${scope}${real.reason ? ` – ${real.reason}` : ""}`,
     deltaScore: real.delta,
     opensCategory: null,
     channel,
