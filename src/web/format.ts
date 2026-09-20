@@ -238,7 +238,7 @@ export interface SummaryInput {
  * Экранирование markdown остаётся заботой вызывающего (`markdown.ts`
  * передаёт `mdEscape(problem)`) — здесь нет знания о формате вывода.
  */
-export function summaryLine(input: SummaryInput): string {
+export function summaryLine(input: SummaryInput, opts: { withCount?: boolean } = {}): string {
   const scored = input.categories.filter((c): c is { title: string; score: number } => c.score !== null);
   const parts: string[] = [];
   if (scored.length > 0) {
@@ -246,10 +246,14 @@ export function summaryLine(input: SummaryInput): string {
     const worst = [...scored].sort((a, b) => a.score - b.score)[0]!;
     parts.push(`Сильнее всего – ${best.title} (${fmtScore(best.score)}), слабее всего – ${worst.title} (${fmtScore(worst.score)}).`);
   }
-  parts.push(
-    `Рекомендаций: ${input.recommendations}` +
-      `${input.top ? `; наибольший измеримый прирост дает «${input.top.problem}» (${input.top.impact})` : ""}.`,
-  );
+  const top = input.top ? `наибольший измеримый прирост дает «${input.top.problem}» (${input.top.impact})` : "";
+  if (opts.withCount !== false) {
+    parts.push(`Рекомендаций: ${input.recommendations}${top ? `; ${top}` : ""}.`);
+  } else if (top) {
+    // страница показывает счётчик ссылкой рядом со строкой (Р13), поэтому
+    // внутри строки его не повторяем — иначе «Рекомендаций: N» читается дважды
+    parts.push(`${top.charAt(0).toUpperCase()}${top.slice(1)}.`);
+  }
   return parts.join(" ");
 }
 

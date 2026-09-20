@@ -589,7 +589,7 @@ function ScoreBand({ card, meta }: { card: Card; meta: MetaResponse | null }) {
     categories: (Object.entries(score.categories) as [string, Category][]).map(([key, cat]) => ({ title: titleOf(key), score: cat.score })),
     recommendations: card.recommendations.length,
     top: top ? { problem: top.problem, impact: top.expectedImpact ?? fmtSigned(top.deltaScore!) } : null,
-  });
+  }, { withCount: false });
   return (
     <Card view="outlined" className="rh-score-band">
       <Flex direction="column" gap={3}>
@@ -645,7 +645,10 @@ function ScoreBand({ card, meta }: { card: Card; meta: MetaResponse | null }) {
             сняла решение круга 1. Следующий шаг остаётся кликабельным, но
             СЧЁТЧИКОМ: ссылка «Рекомендаций: N» рядом со строкой итога.
             `summaryLine` резать нельзя (одна формулировка на страницу и
-            MD-отчёт), поэтому счётчик стоит рядом, а не внутри строки. */}
+            MD-отчёт), поэтому счётчик стоит рядом, а не внутри строки.
+            Приёмка круга 2 (HQ): счётчик читался ДВАЖДЫ — строка тоже его
+            называла. Генератор получил опцию `withCount`: страница просит
+            строку без счётчика, MD-отчёт (где ссылки нет) оставляет его. */}
         <Flex gap={3} alignItems="center" justifyContent="space-between" wrap className="rh-score-band__summary">
           <Text variant="body-1" color="complementary" style={{ flex: "1 1 320px" }}>
             {summary}

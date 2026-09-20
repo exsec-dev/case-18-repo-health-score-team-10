@@ -555,3 +555,42 @@ describe("Б5 (Ф2.21): HTTP-предел избранного и повтор (
     expect(((await invalid.json()) as { error: { code: string } }).error.code).toBe("bad_query");
   });
 });
+
+// ---------- В4.6 круг 2, хвост приёмки: счётчик рекомендаций не дублируется ----------
+
+describe("В4.6 (приёмка круга 2): строка итога и счётчик", () => {
+  const src = (name: string): string => readFileSync(join(import.meta.dir, "..", "src", "web", name), "utf8");
+
+  test("страница просит строку БЕЗ счётчика, MD-отчёт — со счётчиком", async () => {
+    const { summaryLine } = (await import("../src/web/format")) as {
+      summaryLine: (i: { categories: { title: string; score: number | null }[]; recommendations: number; top: { problem: string; impact: string } | null }, o?: { withCount?: boolean }) => string;
+    };
+    const input = {
+      categories: [
+        { title: "Code health", score: 98 },
+        { title: "Issues", score: 70 },
+        { title: "Security", score: null },
+      ],
+      recommendations: 3,
+      top: { problem: "Нет CODEOWNERS", impact: "+3.5" },
+    };
+    const forReport = summaryLine(input);
+    const forPage = summaryLine(input, { withCount: false });
+
+    expect({
+      reportNamesCount: forReport.includes("Рекомендаций: 3"),
+      pageOmitsCount: !forPage.includes("Рекомендаций"),
+      bothKeepBestWorst: forReport.includes("Сильнее всего – Code health (98)") && forPage.includes("слабее всего – Issues (70)"),
+      pageKeepsTop: forPage.includes("Наибольший измеримый прирост дает «Нет CODEOWNERS» (+3.5)."),
+      pageStartsCapitalized: /\. Н/.test(forPage),
+    }).toEqual({ reportNamesCount: true, pageOmitsCount: true, bothKeepBestWorst: true, pageKeepsTop: true, pageStartsCapitalized: true });
+  });
+
+  test("карточка вызывает генератор с withCount: false, а ссылка-счётчик остаётся", () => {
+    const card = src("RepoPage.tsx");
+    expect({
+      asksWithoutCount: /summaryLine\(\{[\s\S]{0,600}?\}, \{ withCount: false \}\)/.test(card),
+      linkStillThere: card.includes("Рекомендаций: {card.recommendations.length}"),
+    }).toEqual({ asksWithoutCount: true, linkStillThere: true });
+  });
+});
