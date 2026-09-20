@@ -405,11 +405,15 @@ body {
 
 /* ---------- мета-строка: иконка + вторичный текст ---------- */
 
+/* В4.6 круг 2 (Р11): пара пикселей отступа сверху — мета-строка стояла
+ * вплотную к названию репозитория и читалась его продолжением. Токен
+ * `--g-spacing-half` (2px), не хардкод. */
 .rh-meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--g-spacing-1) var(--g-spacing-3);
+  margin-top: var(--g-spacing-half);
   color: var(--g-color-text-secondary);
 }
 

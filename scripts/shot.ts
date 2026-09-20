@@ -225,9 +225,11 @@ async function run(): Promise<void> {
         // разрешение 1366x768 — самое тесное из трёх.
         "величина и 6 категорий в одном экране":
           "(() => { const rows = [...document.querySelectorAll('.rh-category')]; if (rows.length < 6) return 0; return rows[5].getBoundingClientRect().bottom <= window.innerHeight ? 1 : 0; })()",
-        // нижний ярус блока-полосы: строка итога и следующий шаг (У26)
-        "строка итога и «Что делать»":
-          "(document.body.innerText.includes('Сильнее всего') && document.body.innerText.includes('Что делать')) ? 1 : 0",
+        // нижний ярус блока-полосы: строка итога и следующий шаг (У26).
+        // В4.6 круг 2 (Р13): следующий шаг — ссылка-счётчик «Рекомендаций: N»,
+        // кнопки «Что делать» больше нет.
+        "строка итога и ссылка-счётчик рекомендаций":
+          "(document.body.innerText.includes('Сильнее всего') && [...document.querySelectorAll('a')].some((a) => /Рекомендаций: \d+/.test(a.textContent ?? ''))) ? 1 : 0",
       },
     },
   ];

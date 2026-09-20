@@ -20,6 +20,7 @@ import {
   HelpMark,
   Icon,
   Label,
+  Link,
   Popover,
   Progress,
   Spin,
@@ -350,8 +351,12 @@ function Header({ card, starDoneKey, starLoggedIn }: { card: Card; starDoneKey: 
             <MetaItem icon={CodeFork} title="Форки">
               {fmtNumber(r.forks)}
             </MetaItem>
+            {/* В4.6 круг 2 (Р11): слово «активность» из строки убрано —
+                иконка часов и подсказка по hover говорят то же самое, а в
+                ряду реквизитов лишнее слово ломало ритм. Подсказка
+                («Последняя активность») остаётся как есть. */}
             <MetaItem icon={Clock} title="Последняя активность">
-              активность {fmtDate(r.lastActivityAt)}
+              {fmtDate(r.lastActivityAt)}
             </MetaItem>
           </Meta>
         </Flex>
@@ -444,6 +449,25 @@ function fullLockReason(card: Card): string | null {
 }
 
 /**
+ * ДВА показателя объясняются ПАРОЙ ПОДСКАЗОК (В4.6 круг 2, Р13 — решение
+ * владельца 20.09). Абзац «Разницу с HealthCraft Index дают CI и Security»
+ * стоял под числами и повторял то, что уже сказано выше; владелец его
+ * удалила, а отличие показателей переехало сюда. Тексты согласованы так,
+ * чтобы разница читалась при чтении ПАРЫ: одна называет 4 категории и
+ * «строится рейтинг», вторая — 6 категорий и «в рейтинг не входит».
+ * Подсказка полного показателя стоит на ОБЕИХ ветках — открытой и закрытой
+ * (в закрытой её не было вовсе, а спрашивают про отличие как раз там).
+ * MD-отчёт свою формулировку сохраняет: документ читается без наведения.
+ */
+const INDEX_HELP =
+  "Публичная оценка по 4 категориям: документация, активность, issues и состояние кода. " +
+  "Считается для всех открытых репозиториев – по ней и строится общий рейтинг.";
+
+const FULL_HELP =
+  "Полная оценка по 6 категориям: те же 4 плюс CI/CD и Security. " +
+  "Требует доступа к репозиторию, поэтому в общий рейтинг не входит.";
+
+/**
  * В4.6 (вариант А компоновки, решение владельца 20.09): правая панель стала
  * ЧИСТО МЕТОДИЧЕСКОЙ. Величина уехала в главную колонку (`ScoreBand`), потому
  * что здесь она стояла на x = 80% ширины окна, последней в DOM и последней для
@@ -500,7 +524,17 @@ function ScoreAside({ card, meta, leaseMs, jobStalled }: { card: Card; meta: Met
             </DefinitionList.Item>
             <DefinitionList.Item name="Запуск">{scanTriggerText(scan.trigger)}</DefinitionList.Item>
             <DefinitionList.Item name="Номер">#{scan.id}</DefinitionList.Item>
-            {score && <DefinitionList.Item name="Модель">{score.modelVersion}</DefinitionList.Item>}
+            {/* В4.6 круг 2 (Р17, замечание владельца 17): версия модели —
+                с фоном-выделением, как тот же реквизит в панели рейтинга
+                (`Rating.tsx`, Label theme="normal" size="xs"): это код, а не
+                проза, и читается он как код только в плашке. */}
+            {score && (
+              <DefinitionList.Item name="Модель">
+                <Label theme="normal" size="xs">
+                  {score.modelVersion}
+                </Label>
+              </DefinitionList.Item>
+            )}
           </DefinitionList>
         ) : job ? (
           // Ф2.15: живая job зрителя — «в очереди/сканируем», а не «скана не было»; M-4 — ожидание по лизу.
@@ -552,64 +586,62 @@ function ScoreBand({ card, meta }: { card: Card; meta: MetaResponse | null }) {
     <Card view="outlined" className="rh-score-band">
       <Flex direction="column" gap={3}>
         <Flex gap={6} wrap>
-          <ScoreFigure
-            title="HealthCraft Index"
-            help="Публичная оценка из 4 категорий: Документация, Активность, Issues, Code health. По ней репозитории сравниваются в общем рейтинге."
-            total={score.healthcraftIndex}
-            coverage={score.indexCoverage}
-            withBar
-          />
+          <ScoreFigure title="HealthCraft Index" help={INDEX_HELP} total={score.healthcraftIndex} coverage={score.indexCoverage} withBar />
           {score.fullLocked ? (
             <Flex direction="column" gap={1} style={{ flex: "1 1 240px", minWidth: 0 }}>
-              <Text color="secondary">Repo Health Score</Text>
+              <Flex gap={1} alignItems="center">
+                <Text color="secondary">Repo Health Score</Text>
+                {/* В4.6 круг 2 (Р13): в ЗАКРЫТОЙ ветке подсказки не было вовсе —
+                    а именно здесь зритель и спрашивает, чем полный показатель
+                    отличается от публичного. Теперь подсказка есть у обоих. */}
+                <HelpMark iconSize="s" aria-label="Что такое «Repo Health Score»">
+                  {FULL_HELP}
+                </HelpMark>
+              </Flex>
               <Flex gap={2} alignItems="center">
                 <Icon data={Lock} size={16} />
-                <Text variant="subheader-2">закрыто</Text>
+                {/* В4.6 круг 2 (Р12): «закрыто» → «Недоступно» — одно слово на
+                    страницу и отчёт. Смысл не меняется: причина стоит строкой
+                    ниже, сведения об отсутствии доступа не исчезают (ТЗ §3.4). */}
+                <Text variant="subheader-2">Недоступно</Text>
               </Flex>
-              <Text variant="body-2" color="complementary">
-                {fullLockReason(card)}
+              {/* В4.6 круг 2 (Р12): текст под замком МЕЛЬЧЕ (body-short вместо
+                  body-2) — это однострочная причина, а не проза блока.
+                  Кнопка «Открыть личный кабинет» убрана, вместо неё ссылка
+                  РЯДОМ со строкой: `ACCESS_LOCK_TEXT` — одна формулировка на
+                  страницу и MD-отчёт, резать её ради ссылки внутри фразы
+                  запрещено, а слова «Личном кабинете» есть лишь в двух
+                  вариантах из четырёх — на ветках `denied` и `check-failed`
+                  путь в кабинет иначе исчез бы вовсе. */}
+              <Text variant="body-short" color="complementary">
+                {fullLockReason(card)}{" "}
+                <Link {...linkProps("/me")}>Личный кабинет</Link>
               </Text>
-              {/* П-Z7 дизайн-пары: под текстом замка — переход туда, где замок снимается */}
-              <Flex>
-                <Button view="normal" size="s" {...linkProps("/me")}>
-                  Открыть личный кабинет
-                </Button>
-              </Flex>
             </Flex>
           ) : (
-            <Flex direction="column" gap={1} style={{ flex: "1 1 240px", minWidth: 0 }}>
-              <ScoreFigure
-                title="Repo Health Score"
-                help="Полная оценка по всем 6 категориям (с CI и Security). Видна участникам репозитория с доступом к этим данным."
-                total={score.repoHealthScore}
-                coverage={score.repoHealthCoverage ?? 0}
-              />
-              {score.repoHealthScore !== null && score.healthcraftIndex !== null &&
-                // К-Ф3.4: фактическая signed-дельта — знак не обещается (плохие
-                // CI/Security опускают полный показатель ниже индекса);
-                // M-13: |Δ| < 0.05 — «разницы нет», не «+0.0»
-                (Math.abs(score.repoHealthScore - score.healthcraftIndex) < 0.05 ? (
-                  <Text variant="body-2" color="complementary">
-                    Разницы нет: CI и Security на этом скане нейтральны.
-                  </Text>
-                ) : (
-                  <Text variant="body-2" color="complementary">
-                    Разницу с HealthCraft Index дают CI и Security: {fmtSigned(score.repoHealthScore - score.healthcraftIndex)}.
-                  </Text>
-                ))}
-            </Flex>
+            <ScoreFigure
+              title="Repo Health Score"
+              help={FULL_HELP}
+              total={score.repoHealthScore}
+              coverage={score.repoHealthCoverage ?? 0}
+            />
           )}
         </Flex>
 
-        {/* нижний ярус: итог и следующий шаг, отделённые линией (У26 + У13) */}
+        {/* нижний ярус: итог и следующий шаг, отделённые линией (У26 + У13).
+            В4.6 круг 2 (Р13): кнопка «Что делать (N)» удалена — владелец
+            сняла решение круга 1. Следующий шаг остаётся кликабельным, но
+            СЧЁТЧИКОМ: ссылка «Рекомендаций: N» рядом со строкой итога.
+            `summaryLine` резать нельзя (одна формулировка на страницу и
+            MD-отчёт), поэтому счётчик стоит рядом, а не внутри строки. */}
         <Flex gap={3} alignItems="center" justifyContent="space-between" wrap className="rh-score-band__summary">
           <Text variant="body-1" color="complementary" style={{ flex: "1 1 320px" }}>
             {summary}
           </Text>
           {card.recommendations.length > 0 && (
-            <Button view="normal" size="m" {...linkProps(`${window.location.pathname}?tab=${TAB_RECOMMENDATIONS}`)}>
-              Что делать ({card.recommendations.length})
-            </Button>
+            <Link {...linkProps(`${window.location.pathname}?tab=${TAB_RECOMMENDATIONS}`)}>
+              Рекомендаций: {card.recommendations.length}
+            </Link>
           )}
         </Flex>
       </Flex>
@@ -639,15 +671,19 @@ function ScoreFigure({
         </HelpMark>
       </Flex>
       {total === null ? (
-        <Label theme="unknown" size="m">
+        <Label theme="unknown" size="s">
           {NO_SCORE}
         </Label>
       ) : (
         <Flex gap={2} alignItems="baseline" wrap>
           <Text variant="display-2">{fmtScore(total)}</Text>
           <Text color="secondary">из 100</Text>
-          {/* В4.6 (У22): шкала вплотную к числу — иначе «83» не с чем сравнить */}
-          <Label theme={scoreLabelTheme(total)} size="m">
+          {/* В4.6 (У22): шкала вплотную к числу — иначе «83» не с чем сравнить.
+              Круг 2 (Р12): размер чипа приведён к чипам правой панели
+              (`size="s"`, легенда `ScoreLegend`) — у плашки «Здоров» были
+              паддинги на шаг крупнее, и рядом с легендой это читалось как две
+              разные сущности. Тема чипа не менялась. */}
+          <Label theme={scoreLabelTheme(total)} size="s">
             {sentence(scoreWord(total))}
           </Label>
         </Flex>
@@ -659,9 +695,11 @@ function ScoreFigure({
           <Progress value={Math.round(total)} size="s" theme={scoreTheme(total)} />
         </div>
       )}
-      {/* покрытие — строкой, без своей полосы (находка Z5 дизайн-пары) */}
+      {/* покрытие — строкой, без своей полосы (находка Z5 дизайн-пары).
+          Круг 2 (Р12): «данных хватило: N%» → «Покрытие: N%» — прежняя фраза
+          звучала как вердикт («хватило»), хотя это измеренная доля. */}
       <Text variant="body-short" color="secondary">
-        данных хватило: {fmtCoverage(coverage)}
+        Покрытие: {fmtCoverage(coverage)}
       </Text>
     </Flex>
   );
@@ -748,7 +786,7 @@ function CategoryRow({
           <Flex gap={1} alignItems="center">
             <Icon data={Lock} size={14} />
             <Text color="secondary" title={lockNote ?? undefined}>
-              закрыто
+              Недоступно
             </Text>
           </Flex>
         ) : cat.score === null ? (
@@ -1263,8 +1301,12 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
         }
         onClick={() => void toggle()}
       >
+        {/* В4.6 круг 2 (Р22, замечание владельца 20.09): 14px, как у соседней
+            иконки перехода на sourcecraft.dev — 16 против 14 давали разную
+            оптику у двух кнопок, стоящих вплотную. Кнопки-обёртки совпадают
+            по габариту: обе `size="s"`. */}
         <Text color={state === "on" ? "warning" : "secondary"}>
-          <Icon data={state === "on" ? StarFill : Star} size={16} />
+          <Icon data={state === "on" ? StarFill : Star} size={14} />
         </Text>
       </Button>
       {error && <Text color="danger">{error}</Text>}

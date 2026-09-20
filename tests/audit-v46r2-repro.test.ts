@@ -31,6 +31,18 @@ const srcOf = (file: string): string => readFileSync(join(import.meta.dir, "..",
 const reportSrc = (): string => readFileSync(join(import.meta.dir, "..", "src", "report", "markdown.ts"), "utf8");
 
 /**
+ * Исходник БЕЗ комментариев — для утверждений «такого пользовательского слова
+ * в интерфейсе больше нет». Иначе тест ловит собственную мотивировку правки
+ * («слово «закрыто» заменено на «Недоступно»») и заставляет писать
+ * комментарии загадками. Утверждение от этого становится СТРОЖЕ: оно говорит
+ * о разметке, а не о файле.
+ */
+const codeOf = (file: string): string => stripComments(srcOf(file));
+
+const stripComments = (src: string): string =>
+  src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
+
+/**
  * Кусок исходника между двумя якорями — чтобы утверждение говорило о нужной
  * функции, а не о файле. Закрывающий якорь ищется ПОСЛЕ открывающего: иначе
  * на повторяющихся тегах (`</DefinitionList.Item>`) срез уходил бы назад и
@@ -104,7 +116,7 @@ describe("Р15: затухание живёт только на контейне
 
 describe("Р14: вклад категории — одна плашка, а не строка «вес → вклад»", () => {
   repro("CategoryRow: Label theme=\"normal\" со словом «Вклад», старой строки нет", () => {
-    const row = between(srcOf("RepoPage.tsx"), "function CategoryRow", "// ---------- маркеры расчёта");
+    const row = between(codeOf("RepoPage.tsx"), "function CategoryRow", "function Markers");
     expect({
       plate: /<Label[\s\S]{0,200}rh-category__weight/.test(row) || /rh-category__weight[\s\S]{0,200}Вклад/.test(row),
       normalTheme: /theme="normal"/.test(row),
@@ -123,8 +135,9 @@ describe("Р14: вклад категории — одна плашка, а не
 // ---------------------------------------------------------------------------
 
 describe("Р12 (UI): «закрыто» → «Недоступно» на карточке", () => {
-  repro("RepoPage: пользовательского слова «закрыто» нет, есть «Недоступно»", () => {
-    const src = srcOf("RepoPage.tsx");
+  // ЗАКРЫТО блоком Б3 (карточка, верх) — обёртка снята, утверждение не менялось.
+  test("RepoPage: пользовательского слова «закрыто» нет, есть «Недоступно»", () => {
+    const src = codeOf("RepoPage.tsx");
     expect({
       userWordClosed: />\s*закрыто\s*</.test(src),
       userWordUnavailable: />\s*Недоступно\s*</.test(src),
@@ -188,8 +201,9 @@ describe("Р20: значения подметрик округлены, дока
 // ---------------------------------------------------------------------------
 
 describe("Р13: кнопка «Что делать» снята, счётчик рекомендаций стал ссылкой", () => {
-  repro("RepoPage: кнопки «Что делать» нет, есть ссылка «Рекомендаций: N» на таб", () => {
-    const src = srcOf("RepoPage.tsx");
+  // ЗАКРЫТО блоком Б3 (карточка, верх) — обёртка снята, утверждение не менялось.
+  test("RepoPage: кнопки «Что делать» нет, есть ссылка «Рекомендаций: N» на таб", () => {
+    const src = codeOf("RepoPage.tsx");
     expect({
       cta: src.includes("Что делать"),
       counterLink: /Рекомендаций: \{card\.recommendations\.length\}/.test(src),
@@ -210,8 +224,8 @@ describe("Р13: кнопка «Что делать» снята, счётчик 
 describe("Р4: цвет снят с категорийных чисел рейтинга, на карточке остаётся", () => {
   // ЗАКРЫТО блоком Б2 (строка рейтинга) — обёртка снята, утверждение не менялось.
   test("CategoryCell рейтинга без scoreColor(), CategoryRow карточки с ним", () => {
-    const cell = srcOf("Rating.tsx").slice(srcOf("Rating.tsx").indexOf("function CategoryCell"));
-    const row = between(srcOf("RepoPage.tsx"), "function CategoryRow", "// ---------- маркеры расчёта");
+    const cell = codeOf("Rating.tsx").slice(codeOf("Rating.tsx").indexOf("function CategoryCell"));
+    const row = between(codeOf("RepoPage.tsx"), "function CategoryRow", "function Markers");
     expect({
       ratingColored: /scoreColor\(/.test(cell),
       ratingNullStaysUnknown: /theme="unknown"/.test(cell),
@@ -249,13 +263,87 @@ describe("Р10: пункт «Свежесть» в панели рейтинга
 describe("Р7: блока «О рейтинге» в правой панели нет", () => {
   // ЗАКРЫТО блоком Б1 (рейтинг) — обёртка снята, утверждение не менялось.
   test("Rating: блок удалён, легенда по-прежнему первая в панели", () => {
-    const src = srcOf("Rating.tsx");
+    const src = codeOf("Rating.tsx");
     const legend = src.indexOf("<ScoreLegend />");
     const contribution = src.indexOf('title="Вклад категорий"');
     expect({
       aboutRating: src.includes("О рейтинге"),
       legendFirst: legend >= 0 && contribution >= 0 && legend < contribution,
     }).toEqual({ aboutRating: false, legendFirst: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Блок Б3 — карточка, верх: Р11 (мета-строка), Р12 (плашка, покрытие, замок,
+// ссылка в кабинет), Р13 (пара подсказок вместо абзаца), Р17 (плашка модели),
+// Р22 (размер звезды). Слово «Недоступно» и счётчик рекомендаций закрыты
+// трипваями Т3 и Т6 выше.
+// ---------------------------------------------------------------------------
+
+describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по замечаниям 11-13, 17 и Р22", () => {
+  test("Р11: мета-строка серая, выровнена отступом сверху, без слова «активность»", () => {
+    const meta = between(codeOf("ui.tsx"), "function MetaItem", "function SkeletonRows");
+    const head = between(codeOf("RepoPage.tsx"), "function Header", "export const TAB_RECOMMENDATIONS");
+    expect({
+      grey: meta.includes('color="secondary"'),
+      steelGone: meta.includes('color="misc"'),
+      topGap: /\.rh-meta \{[^}]*margin-top: var\(--g-spacing-half\)/.test(srcOf("layout.css")),
+      wordGone: head.includes("активность {fmtDate"),
+      tooltipKept: head.includes('title="Последняя активность"'),
+    }).toEqual({ grey: true, steelGone: false, topGap: true, wordGone: false, tooltipKept: true });
+  });
+
+  test("Р12: «Покрытие: N%», чип размера панели, мелкий текст замка и ссылка в кабинет на всех ветках", async () => {
+    const src = codeOf("RepoPage.tsx");
+    const figure = between(src, "function ScoreFigure", "// ---------- категории");
+    const lock = between(src, "score.fullLocked ?", "function ScoreFigure");
+    const { ACCESS_LOCK_TEXT } = (await import("../src/web/format")) as { ACCESS_LOCK_TEXT: Record<string, string> };
+    expect({
+      coverageWord: figure.includes("Покрытие: {fmtCoverage(coverage)}"),
+      oldCoverageWord: figure.includes("данных хватило"),
+      chipLikeAside: /scoreLabelTheme\(total\)\} size="s"/.test(figure),
+      lockTextSmaller: /variant="body-short"[\s\S]{0,120}fullLockReason\(card\)/.test(lock),
+      buttonGone: lock.includes("Открыть личный кабинет"),
+      // ссылка стоит РЯДОМ с общей строкой, поэтому она одна на все четыре ветки
+      linkOnce: (lock.match(/Личный кабинет</g) ?? []).length === 1,
+      lockTextStillShared: Object.keys(ACCESS_LOCK_TEXT).sort().join(",") === "check-failed,denied,no-pat,pat-expired",
+    }).toEqual({
+      coverageWord: true,
+      oldCoverageWord: false,
+      chipLikeAside: true,
+      lockTextSmaller: true,
+      buttonGone: false,
+      linkOnce: true,
+      lockTextStillShared: true,
+    });
+  });
+
+  test("Р13: абзац про разницу снят, подсказки у ОБОИХ показателей называют отличие", () => {
+    const src = codeOf("RepoPage.tsx");
+    const band = between(src, "function ScoreBand", "function ScoreFigure");
+    expect({
+      paragraphGone: band.includes("Разницу с HealthCraft Index дают CI и Security:"),
+      indexHelp: src.includes("Публичная оценка по 4 категориям") && src.includes("по ней и строится общий рейтинг"),
+      fullHelp: src.includes("Полная оценка по 6 категориям") && src.includes("в общий рейтинг не входит"),
+      helpOnLockedBranch: /score\.fullLocked \?[\s\S]{0,1200}<HelpMark/.test(band),
+      // MD-отчёт свою формулировку сохраняет: документ читается без наведения
+      mdKeepsParagraph: reportSrc().includes("Разницу с HealthCraft Index дают CI и Security"),
+    }).toEqual({ paragraphGone: false, indexHelp: true, fullHelp: true, helpOnLockedBranch: true, mdKeepsParagraph: true });
+  });
+
+  test("Р17/Р22: модель в плашке как в панели рейтинга, звезда одного размера с иконкой перехода", () => {
+    const src = codeOf("RepoPage.tsx");
+    const aside = between(src, "function ScoreAside", "function ScoreBand");
+    const star = src.slice(src.indexOf("function FavoriteStar"));
+    const link = between(src, "Открыть на sourcecraft.dev", "</ActionTooltip>");
+    expect({
+      modelPlate: /name="Модель"[\s\S]{0,200}<Label theme="normal" size="xs">/.test(aside),
+      sameAsRating: /name="Модель"[\s\S]{0,200}<Label theme="normal" size="xs">/.test(codeOf("Rating.tsx")),
+      starIcon14: /data=\{state === "on" \? StarFill : Star\} size=\{14\}/.test(star),
+      linkIcon14: /data=\{ArrowUpRightFromSquare\} size=\{14\}/.test(link),
+      // кнопки-обёртки совпадают по габариту: обе `size="s"`
+      sameButtonSize: /<Button[\s\S]{0,200}size="s"/.test(star) && /<Button[\s\S]{0,200}size="s"/.test(link),
+    }).toEqual({ modelPlate: true, sameAsRating: true, starIcon14: true, linkIcon14: true, sameButtonSize: true });
   });
 });
 
@@ -278,7 +366,7 @@ describe("Б2 (Р3, Р21): строка рейтинга и контрол со�
   });
 
   test("Р3: число индекса без лишней жирности, полоса ниже, зазор меньше; ширины те же", () => {
-    const cell = between(srcOf("Rating.tsx"), "function ScoreCell", "function CategoryCell");
+    const cell = between(codeOf("Rating.tsx"), "function ScoreCell", "function CategoryCell");
     expect({
       lighterNumber: cell.includes('variant="body-3"'),
       boldNumberGone: cell.includes('variant="subheader-3"'),
@@ -289,7 +377,7 @@ describe("Б2 (Р3, Р21): строка рейтинга и контрол со�
   });
 
   test("Р21: у Select сортировки нет ширины-обрезки — контрол берёт ширину по содержимому", () => {
-    const src = srcOf("Rating.tsx");
+    const src = codeOf("Rating.tsx");
     const sort = between(src, 'label="Сортировка:"', "/>");
     expect({ autoWidth: sort.includes('width="auto"'), oldFixedWidth: sort.includes("width={230}") }).toEqual({
       autoWidth: true,
@@ -306,7 +394,7 @@ describe("Б2 (Р3, Р21): строка рейтинга и контрол со�
 
 describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечаниям владельца 1-2, 5-6, 8-9", () => {
   test("Р1/Р2: у иконки поиска отступ справа, текст подсказки — формулировка владельца", () => {
-    const src = srcOf("Rating.tsx");
+    const src = codeOf("Rating.tsx");
     const input = between(src, "<TextInput", "controlProps=");
     expect({
       iconGap: /data=\{Magnifier\}[\s\S]{0,260}marginInlineEnd/.test(input),
@@ -317,7 +405,7 @@ describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечан
   });
 
   test("Р5: заголовок и ОДИН текст под ним; охват — числами из БД, не константой", () => {
-    const src = srcOf("Rating.tsx");
+    const src = codeOf("Rating.tsx");
     expect({
       title: src.includes('title="Рейтинг здоровья открытых репозиториев"'),
       oneLead: src.includes("description={ratingLead(meta)}"),
@@ -349,7 +437,7 @@ describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечан
   });
 
   test("Р9: пояснение порога — формулировка владельца, число порога из БД на экране", () => {
-    const src = srcOf("Rating.tsx");
+    const src = codeOf("Rating.tsx");
     const item = between(src, 'name="Порог оценки"', "</DefinitionList.Item>");
     expect({
       note: item.includes("Оценка рассчитывается только при достаточном покрытии. Недостающие категории исключаются из расчета"),
