@@ -133,7 +133,7 @@ export function scoreTheme(value: number | null | undefined): "success" | "warni
 export const SCORE_WORDS: Record<"success" | "warning" | "danger", string> = {
   success: "здоров",
   warning: "есть над чем работать",
-  danger: "критическое состояние",
+  danger: "в зоне риска",
 };
 
 /** Слово шкалы для показанного числа; нет данных — не слово шкалы, а «нет данных» (закон 2). */
@@ -175,7 +175,7 @@ export function scoreLabelTheme(value: number | null | undefined): "success" | "
 }
 
 /** Заголовок легенды шкалы — один на обе панели (рейтинг и методика карточки). */
-export const SCORE_LEGEND_TITLE = "Как читать оценку";
+export const SCORE_LEGEND_TITLE = "Шкала оценки";
 
 /** Легенда шкалы: слово, диапазон, тема чипа. Порядок — сверху вниз от здорового. */
 export const SCORE_SCALE: { theme: "success" | "warning" | "danger"; word: string; range: string }[] = [

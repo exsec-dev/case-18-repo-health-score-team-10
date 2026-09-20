@@ -270,7 +270,7 @@ describe("Р7: блока «О рейтинге» в правой панели �
   // ЗАКРЫТО блоком Б1 (рейтинг) — обёртка снята, утверждение не менялось.
   test("Rating: блок удалён, легенда по-прежнему первая в панели", () => {
     const src = codeOf("Rating.tsx");
-    const legend = src.indexOf("<ScoreLegend />");
+    const legend = src.indexOf("<ScoreLegend ");
     const contribution = src.indexOf('title="Вклад категорий"');
     expect({
       aboutRating: src.includes("О рейтинге"),
@@ -356,7 +356,7 @@ describe("Б4 (Р14, Р16): список категорий и контейне�
       groupsByReason: note.includes("groups.set(item.reason"),
       singular: note.includes('"недоступна"'),
       plural: note.includes('"недоступны"'),
-      lastInList: /\.rh-locked-note \{[^}]*padding:/.test(srcOf("layout.css")),
+      lastInList: /\.rh-locked-note \{[^}]*margin-top:\s*var\(--g-spacing-3\)/.test(srcOf("layout.css")),
     }).toEqual({ groupsByReason: true, singular: true, plural: true, lastInList: true });
   });
 
@@ -430,7 +430,9 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
     expect({
       paragraphGone: band.includes("Разницу с HealthCraft Index дают CI и Security:"),
       indexHelp: src.includes("Публичная оценка по 4 категориям") && src.includes("по ней и строится общий рейтинг"),
-      fullHelp: src.includes("Repo Health Score рассчитывается по 6 категориям") && src.includes("не влияет на публичный рейтинг"),
+      fullHelp:
+        src.includes("Repo Health Score рассчитывается по 6 категориям") &&
+        src.includes("Показатель доступен только для репозиториев, к которым у вас есть доступ."),
       helpOnLockedBranch: /score\.fullLocked \?[\s\S]{0,1200}<HelpMark/.test(band),
       // MD-отчёт свою формулировку сохраняет: документ читается без наведения
       mdKeepsParagraph: reportSrc().includes("Разницу с HealthCraft Index дают CI и Security"),
@@ -478,9 +480,13 @@ describe("Б2 (Р3, Р21): строка рейтинга и контрол со�
       normalNumber: !cell.includes('variant="body-3"') && !cell.includes('variant="subheader-3"'),
       boldNumberGone: cell.includes('variant="subheader-3"'),
       colouredNumber: cell.includes("scoreColor(item.healthcraftIndex)"),
-      readableBar: /<Progress[\s\S]{0,120}size="s"/.test(cell),
-      tighterGap: /<Flex gap=\{1\} alignItems="center" justifyContent="flex-end">/.test(cell),
-      widths: css.includes("flex: 0 0 80px") && css.includes("min-width: 32px"),
+      readableBar: /\.rh-score-cell__bar \.g-progress,[\s\S]{0,100}height:\s*8px/.test(css),
+      tighterGap: /<Flex gap=\{0\} alignItems="center" justifyContent="flex-end">/.test(cell),
+      widths:
+        css.includes("flex: 0 0 80px") &&
+        css.includes("min-width: 32px") &&
+        css.includes("font-size: 14px") &&
+        css.includes("font-weight: 600"),
     }).toEqual({ normalNumber: true, boldNumberGone: false, colouredNumber: true, readableBar: true, tighterGap: true, widths: true });
   });
 
@@ -506,7 +512,7 @@ describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечан
     const input = between(src, "<TextInput", "controlProps=");
     expect({
       iconGap: /data=\{Magnifier\}[\s\S]{0,260}marginInlineEnd/.test(input),
-      hint: input.includes("Поиск по владельцу, имени репозитория и названию"),
+      hint: input.includes("Поиск по владельцу, репозиторию и заголовку"),
       oldHint: src.includes("регистр не важен"),
       placeholderKept: src.includes('placeholder="Поиск"'),
     }).toEqual({ iconGap: true, hint: true, oldHint: false, placeholderKept: true });

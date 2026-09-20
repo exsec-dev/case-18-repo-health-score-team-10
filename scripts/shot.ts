@@ -197,7 +197,7 @@ async function run(): Promise<void> {
       // и легенды в DOM нет ПО ЗАМЫСЛУ — требовать её там значило бы ловить
       // собственное решение о пороге как дефект.
       wideOnly: {
-        "легенда шкалы": "document.body.innerText.includes('Как читать оценку') ? 1 : 0",
+        "легенда шкалы": "document.body.innerText.includes('Шкала оценки') ? 1 : 0",
       },
     },
     {
@@ -224,7 +224,7 @@ async function run(): Promise<void> {
         "блок Score": "document.body.innerText.includes('из 100') ? 1 : 0",
         категории: "document.body.innerText.includes('Категории') ? 1 : 0",
         рекомендации: "document.body.innerText.includes('Рекомендации') ? 1 : 0",
-        "tri-state NULL": "document.body.textContent?.includes('Недостаточно данных для расчета оценки') ? 1 : 0",
+        "tri-state NULL": "document.body.textContent?.includes('Отсутствующие данные не учитываются как нулевые значения') ? 1 : 0",
         "объяснение закрытых каналов": "document.body.innerText.includes('учитываются только в Repo Health Score') ? 1 : 0",
         "кнопка отчета": "[...document.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'Отчет').length",
         // В4.6, приёмка вариантa А (пункт 5): величина И весь список категорий

@@ -171,7 +171,7 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
             }
             endContent={
               <HelpMark iconSize="s" aria-label="По каким полям идет поиск" style={{ marginInlineEnd: "var(--g-spacing-2)" }}>
-                Поиск по владельцу, имени репозитория и названию
+                Поиск по владельцу, репозиторию и заголовку
               </HelpMark>
             }
             controlProps={{ "aria-label": "Поиск по репозиториям" }}
@@ -389,10 +389,10 @@ function UnscoredTable({ items, meta, hasFilters }: { items: Item[]; meta: MetaR
   const failedScan = items.some((i) => i.scanStatus === "bad");
   return (
     <Flex direction="column" gap={3}>
-      <Text color="complementary">
-        Эти репозитории не получили HealthCraft Index: покрытие данными оказалось ниже порога
-        {meta ? ` ${fmtCoverage(meta.coverageNullBelow)}` : ""}. Недостаточно данных для расчета оценки. Отсутствующие
-        данные не приравниваются к нулевому результату.
+      <Text variant="body-1" color="complementary">
+        Эти репозитории не получили HealthCraft Index. При покрытии данных ниже
+        {meta ? ` ${fmtCoverage(meta.coverageNullBelow)}` : " установленного порога"} оценка не рассчитывается. Отсутствующие
+        данные не учитываются как нулевые значения.
         {failedScan && " У части репозиториев последний скан завершился сбоем – для оценки он непригоден; повторный обход попробует снова."}
       </Text>
       <Table data={shown} columns={columns} width="max" verticalAlign="middle" />
@@ -408,7 +408,7 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
   return (
     <>
       {/* В4.6 (У22): шкала — первое, что читается в панели: без неё число не с чем сравнить */}
-      <ScoreLegend />
+      <ScoreLegend coverageNullBelow={meta.coverageNullBelow} />
 
       {/* В4.6 круг 2 (Р7, замечание владельца 7): первый блок панели —
           пересказ методики — удалён целиком. Он повторял то, что теперь стоит
@@ -425,7 +425,7 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
         help={
           <HelpMark iconSize="s" aria-label="Что показывает вклад категорий">
             Доля в HealthCraft Index. Категории CI/CD и Security учитываются только в показателе Repo Health Score для
-            репозиториев, к которым у вас есть доступ.
+            репозиториев, к которым у вас есть доступ
           </HelpMark>
         }
       >
@@ -598,12 +598,8 @@ function buildColumns(categories: MetaResponse["categories"], rankOffset: number
  * двузначных и трёхзначных значениях левая кромка полосы гуляет по колонке
  * и полосы перестают сравниваться между строками.
  *
- * В4.6 круг 2 (Р3): владелец прошла по живому рейтингу — «число меньше
- * жирности, полоса чуть ниже, отступ между ними меньше». Ширины НЕ
- * пересчитываются (равенство ширин пары и заголовка владелец отменила),
- * меняются три соседних шага шкал: число `subheader-3` → `body-3` (тот же
- * кегль 17/24, обычное начертание вместо полужирного), полоса `size="s"` →
- * `"xs"` (соседний шаг ProgressSize), зазор `gap={2}` → `gap={1}`.
+ * В4.6 круг 3 П2.6 явно заменил типографику П1: число 14px/600, высота
+ * полосы ровно 8px, зазор пары 0. Длина 80px и цвет по порогам сохранены.
  */
 function ScoreCell({ item }: { item: Item }) {
   if (item.healthcraftIndex === null) {
@@ -614,7 +610,7 @@ function ScoreCell({ item }: { item: Item }) {
     );
   }
   return (
-    <Flex gap={1} alignItems="center" justifyContent="flex-end">
+    <Flex gap={0} alignItems="center" justifyContent="flex-end">
       {/* «Из истории» — левее полосы: ярлык редкий и не должен раздвигать числовой ряд */}
       {item.staleFacts && (
         <Label theme="warning" size="xs" title="Часть фактов взята из истории при сбое канала">

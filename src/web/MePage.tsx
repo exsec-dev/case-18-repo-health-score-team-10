@@ -88,7 +88,6 @@ export function SettingsPage() {
   const data = me.state.data;
   return (
     <Page crumbs={SETTINGS_CRUMBS} aside={<AccountSection me={data} />}>
-      <PageHeader title="Настройки" description="Управление доступом к данным репозиториев SourceCraft." />
       <PatSection key={data.patCheckedAt ?? "no-pat"} hasPat={data.hasPat} checkedAt={data.patCheckedAt} onChanged={me.reload} />
     </Page>
   );
@@ -271,8 +270,8 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
             </Flex>
             {owner && <Text color="complementary">Токен принадлежит пользователю {owner}.</Text>}
             <Text variant="body-short" color="secondary">
-              Токен хранится зашифрованным (AES-256-GCM) и никогда не возвращается обратно в браузер и не попадает в логи.
-              Замена и удаление — сразу действуют на новые сканы.
+              Токен хранится в зашифрованном виде (AES-256-GCM), не возвращается в браузер и не записывается в журналы. Изменения
+              применяются к последующим анализам.
             </Text>
             {replacing ? (
               <Flex direction="column" gap={2}>

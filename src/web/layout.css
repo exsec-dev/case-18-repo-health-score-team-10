@@ -443,11 +443,10 @@ body {
   padding: var(--g-spacing-3) var(--g-spacing-4);
 }
 
-/* В4.6 круг 2 (Р14): строка о недоступных категориях — последней, под Code
- * health; левый отступ выравнивает её по названиям категорий, а не по краю
- * контейнера, чтобы читалась как часть списка. */
+/* Круг 3, П2: Alert сохраняет штатные внутренние отступы Gravity UI; класс
+ * отвечает только за воздух над панелью, чтобы она не сливалась с категорией. */
 .rh-locked-note {
-  padding: var(--g-spacing-2) var(--g-spacing-3) 0 calc(16px + var(--g-spacing-6));
+  margin-top: var(--g-spacing-3);
 }
 
 /* В4.6 (У18): слот под поверхность В5 — одинаковая карточка с честным
@@ -513,14 +512,13 @@ button.rh-category:focus-visible {
   justify-self: end;
 }
 
-/* В4.6 (У21): фиксированный слот числа индекса в рейтинге. 32px и
- * tabular-nums — чтобы левая кромка полосы стояла на одной вертикали при
- * двузначных и трёхзначных значениях: иначе полосы в колонке перестают
- * сравниваться между строками. Ни цвета, ни радиуса, ни тени здесь нет —
- * класс остаётся в рамках правила 3а docs/ui/gravity-uikit.md. */
+/* В4.6 (У21): фиксированный слот числа индекса в рейтинге и tabular-nums
+ * держат одну вертикаль. П2.6 задает утвержденные 14px/600. */
 .rh-score-cell__num {
   min-width: 32px;
   text-align: right;
+  font-size: 14px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
@@ -529,10 +527,29 @@ button.rh-category:focus-visible {
   width: 80px;
 }
 
-.rh-favorite-star__icon {
-  display: flex;
-  align-items: center;
-  line-height: 0;
+.rh-score-cell__bar .g-progress,
+.rh-score-cell__bar .g-progress__stack {
+  height: 8px;
+  line-height: 8px;
+}
+
+.rh-score-figure__value {
+  align-items: baseline;
+}
+
+.rh-lock-message,
+.rh-lock-message a {
+  font-weight: 400;
+}
+
+.rh-favorite-star {
+  --g-button-text-color: var(--g-color-text-secondary);
+  --g-button-text-color-hover: var(--g-color-text-primary);
+}
+
+.rh-favorite-star_on {
+  --g-button-text-color: var(--g-color-text-warning);
+  --g-button-text-color-hover: var(--g-color-text-warning-heavy);
 }
 
 /* В4.6 круг 2 (Р14): отступ между шапкой коллапс-блока и раскрытым
@@ -600,11 +617,6 @@ button.rh-category:focus-visible {
 
   .rh-category {
     grid-template-columns: 16px 1fr 40px;
-  }
-
-  /* строка о недоступных категориях: тот же левый отступ, что у подметрик */
-  .rh-locked-note {
-    padding-left: var(--g-spacing-3);
   }
 
   .rh-category__bar,

@@ -134,7 +134,7 @@ describe("В4.6-3 (У22): словесная шкала здоровья вид�
   test("format.ts отдаёт слово шкалы чистой функцией (одна копия на страницу и отчёт)", async () => {
     const { scoreWord } = (await import("../src/web/format")) as { scoreWord?: (v: number | null) => string };
     expect(typeof scoreWord).toBe("function");
-    expect([scoreWord!(83), scoreWord!(55), scoreWord!(12)]).toEqual(["здоров", "есть над чем работать", "критическое состояние"]);
+    expect([scoreWord!(83), scoreWord!(55), scoreWord!(12)]).toEqual(["здоров", "есть над чем работать", "в зоне риска"]);
   });
 
   // Б2: фраза легенды живёт в ОДНОМ месте (format.ts SCORE_LEGEND_TITLE) и
@@ -142,19 +142,19 @@ describe("В4.6-3 (У22): словесная шкала здоровья вид�
   // означал бы две копии одной формулировки. Проверяется тот же факт: шкала
   // видна на обоих экранах, и заголовок у неё один.
   // ЗАКРЫТО блоком Б2 (шкала и кодирование).
-  test("легенда шкалы — один компонент с одним заголовком «Как читать оценку»", () => {
+  test("легенда шкалы — один компонент с одним заголовком «Шкала оценки»", () => {
     const ui = srcOf("ui.tsx");
     expect({
       component: ui.includes("export function ScoreLegend"),
       titleFromFormat: ui.includes("SCORE_LEGEND_TITLE"),
-      oneHome: srcOf("format.ts").includes('SCORE_LEGEND_TITLE = "Как читать оценку"'),
+      oneHome: srcOf("format.ts").includes('SCORE_LEGEND_TITLE = "Шкала оценки"'),
     }).toEqual({ component: true, titleFromFormat: true, oneHome: true });
   });
 
   // ЗАКРЫТО блоком Б2 (шкала и кодирование).
   test("карточка: Label со словом шкалы у числа плюс блок легенды в методике", () => {
     const src = srcOf("RepoPage.tsx");
-    expect({ importsWord: src.includes("scoreWord"), legend: src.includes("<ScoreLegend />") }).toEqual({ importsWord: true, legend: true });
+    expect({ importsWord: src.includes("scoreWord"), legend: src.includes("<ScoreLegend ") }).toEqual({ importsWord: true, legend: true });
   });
 
   // ЗАКРЫТО блоком Б2 (шкала и кодирование).
@@ -163,7 +163,7 @@ describe("В4.6-3 (У22): словесная шкала здоровья вид�
   // категорий». Утверждение то же: легенда открывает панель.
   test("рейтинг: легенда — первым блоком правой панели", () => {
     const src = srcOf("Rating.tsx");
-    const legend = src.indexOf("<ScoreLegend />");
+    const legend = src.indexOf("<ScoreLegend ");
     const nextSection = src.indexOf('title="Вклад категорий"');
     expect({ hasLegend: legend >= 0, isFirst: legend >= 0 && nextSection >= 0 && legend < nextSection }).toEqual({ hasLegend: true, isFirst: true });
   });
@@ -333,7 +333,7 @@ describe("В4.6-8 (У26/У13/У38): вариант А — карточка на�
       bandIsMainChild: pageOpen >= 0 && bandMount > pageOpen,
       bandHasOwnClass: src.includes('className="rh-score-band"'),
       asideKeepsFigure: /display-2/.test(asideBody),
-      asideIsMethodOnly: asideBody.includes("<ScoreLegend />") && asideBody.includes("Параметры расчета"),
+      asideIsMethodOnly: asideBody.includes("<ScoreLegend ") && asideBody.includes("Параметры расчета"),
     }).toEqual({ bandIsMainChild: true, bandHasOwnClass: true, asideKeepsFigure: false, asideIsMethodOnly: true });
   });
 
@@ -372,8 +372,8 @@ describe("В4.6-9 (У27–У32): консистентность вне каби�
     expect({
       placeholder: src.includes('placeholder="Поиск"'),
       oldPlaceholder: src.includes('placeholder="org, repo или название"'),
-      // Круг 2 (Р2): формулировка подсказки задана владельцем дословно
-      hint: src.includes("Поиск по владельцу, имени репозитория и названию"),
+      // Круг 3 П2.1: «имя» и «название» разведены по фактическим полям поиска.
+      hint: src.includes("Поиск по владельцу, репозиторию и заголовку"),
     }).toEqual({ placeholder: true, oldPlaceholder: false, hint: true });
   });
 

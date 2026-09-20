@@ -14,7 +14,7 @@ import {
   type PlaceholderContainerActionProps,
 } from "@gravity-ui/uikit";
 import { useEffect, useState, type ReactNode } from "react";
-import { SCORE_LEGEND_TITLE, SCORE_SCALE, sentence, slugOf } from "./format";
+import { SCORE_LEGEND_TITLE, SCORE_SCALE, fmtCoverage, sentence, slugOf } from "./format";
 
 /** Заголовок страницы: header-1 20/24 и одна строка пояснения, как у SourceCraft. */
 export function PageHeader({ title, description, end }: { title: ReactNode; description?: ReactNode; end?: ReactNode }) {
@@ -62,7 +62,7 @@ export function AsideSection({ title, help, children }: { title: ReactNode; help
  * MD-отчёте не разъехалась. «Нет данных» в легенду НЕ входит: это не полоса
  * шкалы, а отсутствие числа (закон 2) — про него говорит отдельная строка.
  */
-export function ScoreLegend() {
+export function ScoreLegend({ coverageNullBelow }: { coverageNullBelow?: number }) {
   return (
     <AsideSection title={SCORE_LEGEND_TITLE}>
       <Flex direction="column" gap={2}>
@@ -77,8 +77,10 @@ export function ScoreLegend() {
           </Flex>
         ))}
       </Flex>
-      <Text variant="body-2" color="complementary">
-        Недостаточно данных для расчета оценки. Отсутствующие данные не приравниваются к нулевому результату.
+      <Text variant="body-1" color="complementary">
+        {coverageNullBelow === undefined
+          ? "При недостаточном покрытии данных оценка не рассчитывается. Отсутствующие данные не учитываются как нулевые значения."
+          : `При покрытии данных ниже ${fmtCoverage(coverageNullBelow)} оценка не рассчитывается. Отсутствующие данные не учитываются как нулевые значения.`}
       </Text>
     </AsideSection>
   );

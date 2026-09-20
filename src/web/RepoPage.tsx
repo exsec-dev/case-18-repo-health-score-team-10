@@ -472,7 +472,7 @@ const INDEX_HELP =
 
 const FULL_HELP =
   "Repo Health Score рассчитывается по 6 категориям: 4 категориям HealthCraft Index, а также CI/CD и Security. " +
-  "Показатель доступен только для репозиториев, к данным которых у пользователя есть доступ, и не влияет на публичный рейтинг.";
+  "Показатель доступен только для репозиториев, к которым у вас есть доступ.";
 
 /**
  * В4.6 (вариант А компоновки, решение владельца 20.09): правая панель стала
@@ -489,18 +489,17 @@ function ScoreAside({ card, meta, leaseMs, jobStalled }: { card: Card; meta: Met
   return (
     <>
       {/* В4.6 (У22): тот же блок, что на рейтинге — вариант А кладёт шкалу в методику карточки */}
-      {score && <ScoreLegend />}
+      {score && <ScoreLegend coverageNullBelow={meta?.coverageNullBelow} />}
 
       {score && (
         <AsideSection title="Что учитывается">
-          {/* В4.6 (У24): ЭТО и есть находка ДП5 — семистрочный абзац был набран
-              вариантом для однострочных подписей (body-short 13/16) и вторичным
-              цветом. Стало body-2 13/18 + complementary: интерлиньяж абзаца и
-              7,0:1 против 5,34:1 в тёмной теме. */}
-          <Text as="p" variant="body-2" color="complementary">
-            HealthCraft Index рассчитывается по 4 категориям на основе публичных данных. CI/CD и Security учитываются только в
-            Repo Health Score, доступном участникам репозитория.
-            {meta ? ` При покрытии данными ниже ${threshold} соответствующий показатель не рассчитывается.` : ""}
+          {/* В4.6 (У24): семистрочный абзац был набран вариантом для
+              однострочных подписей. П1 дал body-2, П2.12 уменьшил его до
+              body-1 13/18; complementary сохраняет контраст прозы. */}
+          <Text as="p" variant="body-1" color="complementary">
+            HealthCraft Index рассчитывается по 4 категориям на основе публичных данных. Категории CI/CD и Security учитываются
+            только в Repo Health Score, доступном участникам репозитория.
+            {meta ? ` При покрытии ниже ${threshold} соответствующий показатель не рассчитывается.` : ""}
           </Text>
         </AsideSection>
       )}
@@ -610,12 +609,9 @@ function ScoreBand({ card }: { card: Card }) {
                   docs/ui/gravity-uikit.md держит для прозы интерлиньяж абзаца
                   (`body-1`/`body-2` + `complementary`), а подпись оставляет
                   однострочным меткам.
-                  Отдельная кнопка перехода убрана, вместо нее ссылка
-                  РЯДОМ со строкой: `ACCESS_LOCK_TEXT` — одна формулировка на
-                  страницу и MD-отчёт, резать её ради ссылки внутри фразы
-                  запрещено, а переход нужен лишь в двух
-                  вариантах из четырёх — на ветках `denied` и `check-failed`
-                  вариантах доступа. */}
+                  Отдельная кнопка перехода убрана, вместо нее ссылка внутри
+                  строки. П2.9 снимает точку только в UI; общий словарь причин
+                  для MD и выбора ветки остается `ACCESS_LOCK_TEXT`. */}
               <FullLockMessage reason={fullLockReason(card)} />
             </Flex>
           ) : (
@@ -636,9 +632,9 @@ function ScoreBand({ card }: { card: Card }) {
 function FullLockMessage({ reason }: { reason: string | null }) {
   if (reason === ACCESS_LOCK_TEXT["no-pat"]) {
     return (
-      <Text variant="body-1" color="complementary">
+      <Text variant="body-1" color="complementary" className="rh-lock-message">
         Данные видны участникам репозитория: войдите и добавьте токен доступа SourceCraft в{" "}
-        <Link {...linkProps("/settings")}>Настройках</Link>.
+        <Link {...linkProps("/settings")}>Настройках</Link>
       </Text>
     );
   }
@@ -675,7 +671,7 @@ function ScoreFigure({
           {NO_SCORE}
         </Label>
       ) : (
-        <Flex gap={2} alignItems="flex-end" wrap>
+        <Flex gap={2} alignItems="baseline" wrap className="rh-score-figure__value">
           <Text variant="display-2">{fmtScore(total)}</Text>
           <Text color="secondary">из 100</Text>
           {/* В4.6 (У22): шкала вплотную к числу — иначе «83» не с чем сравнить.
@@ -762,16 +758,33 @@ function Categories({ card, meta }: { card: Card; meta: MetaResponse | null }) {
  * Строка о недоступных категориях — ПОСЛЕДНЕЙ, под Code health (уточнение
  * владельца: не вверху).
  *
- * Почему группировка по причине, а не фиксированная фраза «CI/CD и Security
- * недоступны»: `locked` — свойство КАЖДОЙ категории, а не пары (см.
- * tests/api.test.ts, ветка «только CI»), и при закрытой одной фиксированная
- * фраза была бы ложью. Причина берётся из `accessLockText` — те же четыре
- * текста, что стоят на странице и в MD-отчёте; общей фразой они не
- * подменяются, иначе зритель не узнает, ЧТО делать (войти, обновить токен,
- * прийти позже). Если причины у двух категорий разные, получается два
- * предложения, а не одно ложное.
+ * П2.11 задает точную фразу для штатной пары CI/CD+Security без PAT и ссылку
+ * на настройки. Для одной закрытой категории или другой причины сохраняется
+ * прежняя группировка по `accessLockText`: фиксированная пара там была бы
+ * ложью (см. tests/api.test.ts, ветка «только CI»).
  */
 function LockedCategories({ items }: { items: { title: string; reason: string }[] }) {
+  const isNoPatPair =
+    items.length === 2 &&
+    items.every((item) => item.reason === ACCESS_LOCK_TEXT["no-pat"]) &&
+    items.some((item) => item.title === "CI/CD") &&
+    items.some((item) => item.title === "Security");
+  if (isNoPatPair) {
+    return (
+      <Alert
+        theme="info"
+        view="outlined"
+        size="s"
+        className="rh-locked-note"
+        message={
+          <>
+            Категории CI/CD и Security недоступны. Они видны только участникам репозитория: войдите и добавьте токен доступа
+            SourceCraft в <Link {...linkProps("/settings")}>Настройках</Link>.
+          </>
+        }
+      />
+    );
+  }
   const groups = new Map<string, string[]>();
   for (const item of items) groups.set(item.reason, [...(groups.get(item.reason) ?? []), item.title]);
   const sentences = [...groups].map(
@@ -1332,7 +1345,9 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
       <Button
         size="s"
         view="flat"
-        className={glow ? "rh-star-glow" : undefined}
+        className={["rh-favorite-star", state === "on" ? "rh-favorite-star_on" : "", glow ? "rh-star-glow" : ""]
+          .filter(Boolean)
+          .join(" ")}
         disabled={state === "anon"}
         /* В4.6 (У16): объяснение границы доступа прямо там, где зритель
            нажимает звезду. Сервис НЕ перечисляет репозитории зрителя сам —
@@ -1351,9 +1366,7 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
             иконки перехода на sourcecraft.dev — 16 против 14 давали разную
             оптику у двух кнопок, стоящих вплотную. Кнопки-обёртки совпадают
             по габариту: обе `size="s"`. */}
-        <Text color={state === "on" ? "warning" : "secondary"} className="rh-favorite-star__icon">
-          <Icon data={state === "on" ? StarFill : Star} size={14} />
-        </Text>
+        <Icon data={state === "on" ? StarFill : Star} size={14} />
       </Button>
       {error && <Text color="danger">{error}</Text>}
     </Flex>
