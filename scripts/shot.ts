@@ -184,7 +184,8 @@ async function run(): Promise<void> {
       url: `${base}/?sort=index&order=desc`,
       checks: {
         "строк таблицы": "document.querySelectorAll('table tbody tr').length",
-        "заголовок рейтинга": "document.body.innerText.includes('Рейтинг здоровья репозиториев') ? 1 : 0",
+        // В4.6 круг 2 (Р5): заголовок — «Рейтинг здоровья ОТКРЫТЫХ репозиториев»
+        "заголовок рейтинга": "document.body.innerText.includes('Рейтинг здоровья открытых репозиториев') ? 1 : 0",
         "колонка HealthCraft Index": "document.body.innerText.includes('HealthCraft Index') ? 1 : 0",
       },
       // В4.6 (У22/У23): ниже 1440 правая панель рейтинга уезжает в закрытый Drawer,

@@ -31,13 +31,23 @@ export function PageHeader({ title, description, end }: { title: ReactNode; desc
   );
 }
 
-/** Блок правой панели: заголовок subheader-2 и содержимое. */
-export function AsideSection({ title, children }: { title: ReactNode; children: ReactNode }) {
+/**
+ * Блок правой панели: заголовок subheader-2 и содержимое.
+ *
+ * В4.6 круг 2 (Р8): у заголовка появился необязательный слот `help` —
+ * иконка-подсказка РЯДОМ с заголовком. Замечание владельца 8: пояснение под
+ * списком «Вклад категорий» читалось как ещё один абзац панели, хотя
+ * объясняло сам список; в подсказке оно на месте и не занимает высоту.
+ */
+export function AsideSection({ title, help, children }: { title: ReactNode; help?: ReactNode; children: ReactNode }) {
   return (
     <Flex as="section" direction="column" gap={2} style={{ marginBottom: "var(--g-spacing-6)" }}>
-      <Text variant="subheader-2" as="h2">
-        {title}
-      </Text>
+      <Flex gap={1} alignItems="center">
+        <Text variant="subheader-2" as="h2">
+          {title}
+        </Text>
+        {help}
+      </Flex>
       {children}
     </Flex>
   );

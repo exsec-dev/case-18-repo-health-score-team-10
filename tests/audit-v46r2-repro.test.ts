@@ -30,8 +30,18 @@ const repro = process.env.AUDIT_STRICT ? test : test.failing;
 const srcOf = (file: string): string => readFileSync(join(import.meta.dir, "..", "src", "web", file), "utf8");
 const reportSrc = (): string => readFileSync(join(import.meta.dir, "..", "src", "report", "markdown.ts"), "utf8");
 
-/** Кусок исходника между двумя якорями — чтобы утверждение говорило о нужной функции, а не о файле. */
-const between = (src: string, from: string, to: string): string => src.slice(src.indexOf(from), src.indexOf(to));
+/**
+ * Кусок исходника между двумя якорями — чтобы утверждение говорило о нужной
+ * функции, а не о файле. Закрывающий якорь ищется ПОСЛЕ открывающего: иначе
+ * на повторяющихся тегах (`</DefinitionList.Item>`) срез уходил бы назад и
+ * утверждение молча проверяло пустую строку.
+ */
+const between = (src: string, from: string, to: string): string => {
+  const start = src.indexOf(from);
+  if (start < 0) return "";
+  const end = src.indexOf(to, start + from.length);
+  return src.slice(start, end < 0 ? undefined : end);
+};
 
 // ---------------------------------------------------------------------------
 // Фикстура: одна карточка, два зрителя. Сырое значение подметрики (доля с 16
@@ -216,7 +226,8 @@ describe("Р4: цвет снят с категорийных чисел рейт
 // ---------------------------------------------------------------------------
 
 describe("Р10: пункт «Свежесть» в панели рейтинга стал «Частота»", () => {
-  repro("Rating: name=\"Частота\" со значением «ежесуточно» и пояснением про «Скан»", () => {
+  // ЗАКРЫТО блоком Б1 (рейтинг) — обёртка снята, утверждение не менялось.
+  test("Rating: name=\"Частота\" со значением «ежесуточно» и пояснением про «Скан»", () => {
     const src = srcOf("Rating.tsx");
     expect({
       oldName: src.includes('name="Свежесть"'),
@@ -235,7 +246,8 @@ describe("Р10: пункт «Свежесть» в панели рейтинга
 // ---------------------------------------------------------------------------
 
 describe("Р7: блока «О рейтинге» в правой панели нет", () => {
-  repro("Rating: блок удалён, легенда по-прежнему первая в панели", () => {
+  // ЗАКРЫТО блоком Б1 (рейтинг) — обёртка снята, утверждение не менялось.
+  test("Rating: блок удалён, легенда по-прежнему первая в панели", () => {
     const src = srcOf("Rating.tsx");
     const legend = src.indexOf("<ScoreLegend />");
     const contribution = src.indexOf('title="Вклад категорий"');
@@ -243,6 +255,67 @@ describe("Р7: блока «О рейтинге» в правой панели �
       aboutRating: src.includes("О рейтинге"),
       legendFirst: legend >= 0 && contribution >= 0 && legend < contribution,
     }).toEqual({ aboutRating: false, legendFirst: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Блок Б1 — рейтинг: контракты Р1, Р2, Р5, Р6, Р8, Р9 (Р7 и Р10 закрыты
+// трипваями Т9 и Т8 выше). Утверждения обычные, не трипваи: эти контракты
+// пришли без репро-находки, они просто исполняются и закрепляются.
+// ---------------------------------------------------------------------------
+
+describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечаниям владельца 1-2, 5-6, 8-9", () => {
+  test("Р1/Р2: у иконки поиска отступ справа, текст подсказки — формулировка владельца", () => {
+    const src = srcOf("Rating.tsx");
+    const input = between(src, "<TextInput", "controlProps=");
+    expect({
+      iconGap: /data=\{Magnifier\}[\s\S]{0,260}marginInlineEnd/.test(input),
+      hint: input.includes("Поиск по владельцу, имени репозитория и названию"),
+      oldHint: src.includes("регистр не важен"),
+      placeholderKept: src.includes('placeholder="Поиск"'),
+    }).toEqual({ iconGap: true, hint: true, oldHint: false, placeholderKept: true });
+  });
+
+  test("Р5: заголовок и ОДИН текст под ним; охват — числами из БД, не константой", () => {
+    const src = srcOf("Rating.tsx");
+    expect({
+      title: src.includes('title="Рейтинг здоровья открытых репозиториев"'),
+      oneLead: src.includes("description={ratingLead(meta)}"),
+      oldSubheader: src.includes("а не число лайков"),
+      secondParagraph: src.includes("<CoverageNote"),
+      fromDb: /ratingLead[\s\S]{0,900}meta\.repos/.test(src),
+      wave: src.includes("первыми идут самые заметные проекты"),
+    }).toEqual({ title: true, oneLead: true, oldSubheader: false, secondParagraph: false, fromDb: true, wave: true });
+  });
+
+  test("Р6: в числовых диапазонах дефис — шкала, MD-таблица подметрик, слот сравнения", async () => {
+    const { SCORE_SCALE } = (await import("../src/web/format")) as { SCORE_SCALE: { range: string }[] };
+    expect(SCORE_SCALE.map((s) => s.range)).toEqual(["70-100", "40-69", "0-39"]);
+    expect(reportSrc()).toContain("Балл (0-100)");
+    expect(srcOf("slots.ts")).toContain("2-3 репозиториев");
+    // глиф «нет данных» (длинное тире) правилом не затронут — охранный пункт 1
+    expect(reportSrc()).toContain('return "—"');
+  });
+
+  test("Р8: абзац под «Вклад категорий» снят, сведения — в подсказке у заголовка", () => {
+    const src = srcOf("Rating.tsx");
+    const section = between(src, 'title="Вклад категорий"', "</AsideSection>");
+    expect({
+      helpAtTitle: /help=\{[\s\S]{0,400}HelpMark/.test(section),
+      keepsMeaning: section.includes("считаются только в Repo Health Score на карточке"),
+      paragraphGone: !/<\/DefinitionList>[\s\S]{0,200}<Text/.test(section),
+      asideSupportsHelp: srcOf("ui.tsx").includes("help?: ReactNode"),
+    }).toEqual({ helpAtTitle: true, keepsMeaning: true, paragraphGone: true, asideSupportsHelp: true });
+  });
+
+  test("Р9: пояснение порога — формулировка владельца, число порога из БД на экране", () => {
+    const src = srcOf("Rating.tsx");
+    const item = between(src, 'name="Порог оценки"', "</DefinitionList.Item>");
+    expect({
+      note: item.includes("Оценка рассчитывается только при достаточном покрытии. Недостающие категории исключаются из расчета"),
+      oldNote: src.includes("Score не выставляется, а не занижается"),
+      numberFromDb: item.includes("fmtCoverage(meta.coverageNullBelow)"),
+    }).toEqual({ note: true, oldNote: false, numberFromDb: true });
   });
 });
 

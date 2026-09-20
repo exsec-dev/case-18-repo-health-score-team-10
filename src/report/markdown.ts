@@ -209,7 +209,7 @@ function categoriesDetail(card: RepoCard): string[] {
       out.push("Подметрики не рассчитывались.", "");
       continue;
     }
-    out.push("| Подметрика | Балл (0–100) | Значение | Примечание |", "|---|---:|---|---|");
+    out.push("| Подметрика | Балл (0-100) | Значение | Примечание |", "|---|---:|---|---|");
     for (const [subKey, sub] of subs) {
       // submetric приходит долей 0..1 — в отчёте показывается ×100, как и на странице
       const value = sub.score === null ? "—" : String(Math.round(sub.score * 100));

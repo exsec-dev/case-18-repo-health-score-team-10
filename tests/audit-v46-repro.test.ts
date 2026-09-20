@@ -151,11 +151,14 @@ describe("В4.6-3 (У22): словесная шкала здоровья вид�
   });
 
   // ЗАКРЫТО блоком Б2 (шкала и кодирование).
+  // Круг 2 (Р7): блок «О рейтинге» удалён владельцем, поэтому якорь «что
+  // стоит после легенды» переехал на следующий блок панели — «Вклад
+  // категорий». Утверждение то же: легенда открывает панель.
   test("рейтинг: легенда — первым блоком правой панели", () => {
     const src = srcOf("Rating.tsx");
     const legend = src.indexOf("<ScoreLegend />");
-    const aboutRating = src.indexOf("О рейтинге");
-    expect({ hasLegend: legend >= 0, isFirst: legend >= 0 && aboutRating >= 0 && legend < aboutRating }).toEqual({ hasLegend: true, isFirst: true });
+    const nextSection = src.indexOf('title="Вклад категорий"');
+    expect({ hasLegend: legend >= 0, isFirst: legend >= 0 && nextSection >= 0 && legend < nextSection }).toEqual({ hasLegend: true, isFirst: true });
   });
 
   // ЗАКРЫТО блоком Б2 (шкала и кодирование).
@@ -357,7 +360,8 @@ describe("В4.6-9 (У27–У32): консистентность вне каби�
     expect({
       placeholder: src.includes('placeholder="Поиск"'),
       oldPlaceholder: src.includes('placeholder="org, repo или название"'),
-      hint: src.includes("регистр не важен"),
+      // Круг 2 (Р2): формулировка подсказки задана владельцем дословно
+      hint: src.includes("Поиск по владельцу, имени репозитория и названию"),
     }).toEqual({ placeholder: true, oldPlaceholder: false, hint: true });
   });
 

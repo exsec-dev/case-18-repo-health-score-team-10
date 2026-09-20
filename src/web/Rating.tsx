@@ -148,17 +148,30 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
               а перечень полей уезжает в подсказку у правого края инпута. Текст
               подсказки сверен по коду (`repos.ts`, matchesQ), а не написан на
               слух: поиск идёт подстрокой по org, repo и названию, без учёта
-              регистра — обещать больше было бы неправдой. */}
+              регистра — обещать больше было бы неправдой.
+              Круг 2 (Р1): у иконки появился отступ СПРАВА — без него «Поиск»
+              слипался с лупой (замечание владельца 1); формулировка подсказки
+              взята дословно из пункта 2 (Р2). */}
           <TextInput
             size="m"
             placeholder="Поиск"
             value={queryDraft}
             onUpdate={setQueryDraft}
             hasClear
-            startContent={<Icon data={Magnifier} size={14} style={{ marginInlineStart: "var(--g-spacing-2)", color: "var(--g-color-text-secondary)" }} />}
+            startContent={
+              <Icon
+                data={Magnifier}
+                size={14}
+                style={{
+                  marginInlineStart: "var(--g-spacing-2)",
+                  marginInlineEnd: "var(--g-spacing-2)",
+                  color: "var(--g-color-text-secondary)",
+                }}
+              />
+            }
             endContent={
               <HelpMark iconSize="s" aria-label="По каким полям идет поиск" style={{ marginInlineEnd: "var(--g-spacing-2)" }}>
-                Ищем по владельцу, имени репозитория и названию; подстрокой, регистр не важен.
+                Поиск по владельцу, имени репозитория и названию
               </HelpMark>
             }
             controlProps={{ "aria-label": "Поиск по репозиториям" }}
@@ -227,16 +240,13 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
       aside={<RatingAside meta={meta} generatedAt={data?.generatedAt ?? null} />}
       header={
         <>
-          <PageHeader
-            title="Рейтинг здоровья репозиториев"
-            description="Порядок задает HealthCraft Index – воспроизводимая оценка из публичных данных, а не число лайков."
-          />
-          {/* В4.6 (У15): охват НАЗВАН числами и стратегией, а не умолчан.
-              Раньше страница показывала только «Оценены N» — и это читалось
-              как «весь каталог оценен», хотя обход идет первой волной.
-              Числа из /api/meta (БД), не из константы; переключатель ниже
-              оставляет возможность смотреть только оцененные. */}
-          <CoverageNote meta={meta} />
+          {/* В4.6 круг 2 (Р5, замечание владельца 5): заголовок, подзаголовок и
+              абзац охвата были ТРЕМЯ текстами подряд. Владелец схлопнула их в
+              один — формулировка её, размер прежнего подзаголовка (он и есть
+              слот `description`). Охват по-прежнему НАЗВАН числами из БД
+              (У15), а стратегия волн — словами; охранный пункт 3 дизайн-пары
+              (прежний подзаголовок про лайки) отменён этим контрактом. */}
+          <PageHeader title="Рейтинг здоровья открытых репозиториев" description={ratingLead(meta)} />
           {toolbar}
         </>
       }
@@ -294,22 +304,24 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
 }
 
 /**
- * Честный охват каталога (В4.6, У15). Стратегия первой волны — решение вехи
- * В4.4: очередь идет по убыванию лайков, то есть сначала оцениваются самые
- * заметные проекты. Это НЕ противоречит подзаголовку «порядок задает индекс, а
- * не лайки»: лайки решают, что сканируется раньше, а не кто выше в рейтинге, —
- * и сказано это здесь прямо, чтобы зритель не заподозрил обратного.
+ * ОДИН текст под заголовком рейтинга (В4.6 круг 2, Р5 — формулировка
+ * владельца). Что он обязан сказать и почему: чем считается порядок (индекс,
+ * 4 публичные категории), что оценка воспроизводима из публичных данных, и —
+ * честный охват каталога числами из БД (У15), потому что «Оценены N» без
+ * знаменателя читалось как «оценен весь каталог». Стратегия волн названа
+ * словами: обход идёт с самых заметных проектов, но на МЕСТО в рейтинге это
+ * не влияет — порядок считает индекс.
+ *
+ * Без `/api/meta` печатается только первая половина: соврать числом нельзя,
+ * а смысл «что такое индекс» от знаменателя не зависит.
  */
-function CoverageNote({ meta }: { meta: MetaResponse | null }) {
-  if (!meta) return null;
+function ratingLead(meta: MetaResponse | null): string {
+  const about =
+    "HealthCraft Index показывает состояние открытых репозиториев SourceCraft по 4 категориям: документация, активность, " +
+    "issues и состояние кода – воспроизводимая оценка из публичных данных, по ней и строится порядок.";
+  if (!meta) return about;
   const { scored, catalog } = meta.repos;
-  return (
-    <Text as="p" variant="body-2" color="complementary" style={{ marginBottom: "var(--g-spacing-3)" }}>
-      Оценено {fmtCount(scored)} из {fmtCount(catalog)} публичных репозиториев каталога. Первая волна идет по убыванию лайков –
-      сначала оцениваются самые заметные проекты, остальные подключаются по мере обхода. На место в рейтинге лайки не влияют:
-      порядок считает индекс.
-    </Text>
-  );
+  return `${about} Оценено ${fmtCount(scored)} из ${fmtCount(catalog)}, каталог обходится волнами: первыми идут самые заметные проекты.`;
 }
 
 function NothingFound({ hasFilters }: { hasFilters: boolean }) {
@@ -385,15 +397,25 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
       {/* В4.6 (У22): шкала — первое, что читается в панели: без неё число не с чем сравнить */}
       <ScoreLegend />
 
-      <AsideSection title="О рейтинге">
-        <Text color="complementary">
-          Публичный рейтинг считают 4 категории: {meta.categories.filter((c) => !NOT_IN_RATING.has(c.key)).map((c) => c.title).join(", ")}.
-          CI/CD и Security в общий рейтинг не вкладываются – они доступны в полном Repo Health Score на карточке
-          репозитория участникам с доступом к этим данным. Лайки доступны сортировкой, но никогда не выбраны по умолчанию.
-        </Text>
-      </AsideSection>
+      {/* В4.6 круг 2 (Р7, замечание владельца 7): первый блок панели —
+          пересказ методики — удалён целиком. Он повторял то, что теперь стоит
+          ОДНИМ текстом над таблицей (Р5), и панель начиналась с двух абзацев
+          подряд. Сведения не потеряны: 4 публичные категории названы в тексте
+          над таблицей, граница CI/CD и Security — в подсказке блока «Вклад
+          категорий» ниже, а лайки-как-сортировка видны списком сортировок. */}
 
-      <AsideSection title="Вклад категорий">
+      <AsideSection
+        title="Вклад категорий"
+        /* В4.6 круг 2 (Р8, замечание владельца 8): абзац под списком удалён,
+           его сведения переехали в иконку-подсказку рядом с заголовком —
+           объяснение списка стоит у списка, а не отдельным абзацем панели. */
+        help={
+          <HelpMark iconSize="s" aria-label="Что показывает вклад категорий">
+            Доля в HealthCraft Index. CI/CD и Security считаются только в Repo Health Score на карточке – он виден участникам
+            репозитория с доступом к этим данным.
+          </HelpMark>
+        }
+      >
         <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
           {meta.categories
             .filter((c) => !NOT_IN_RATING.has(c.key))
@@ -403,16 +425,17 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
               </DefinitionList.Item>
             ))}
         </DefinitionList>
-        {/* В4.6 (У24): абзац в панели 320px переносится, значит это проза —
-            body-2 + complementary, а не однострочная подпись body-short */}
-        <Text variant="body-2" color="complementary">
-          Доля в HealthCraft Index. CI/CD и Security считаются только в Repo Health Score на карточке.
-        </Text>
       </AsideSection>
 
       <AsideSection title="Расчет">
         <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
-          <DefinitionList.Item name="Порог оценки" note="Без данных честного числа нет: Score не выставляется, а не занижается.">
+          {/* В4.6 круг 2 (Р9, замечание владельца 9): пояснение порога —
+              формулировка владельца; само число порога из БД остаётся на
+              экране значением пункта. */}
+          <DefinitionList.Item
+            name="Порог оценки"
+            note="Оценка рассчитывается только при достаточном покрытии. Недостающие категории исключаются из расчета"
+          >
             покрытие от {fmtCoverage(meta.coverageNullBelow)}
           </DefinitionList.Item>
           <DefinitionList.Item name="Модель">
@@ -420,9 +443,12 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
               {meta.modelVersion}
             </Label>
           </DefinitionList.Item>
-          {/* M-7: «Данные на сегодня» врало (generatedAt = момент запроса) — честная свежесть ниже */}
-          <DefinitionList.Item name="Свежесть" note="У каждого репозитория – дата своего последнего скана (колонка «Скан»); ночной обход обновляет их по очереди.">
-            обновляется ежесуточно
+          {/* M-7: «Данные на сегодня» врало (generatedAt = момент запроса) — честная свежесть ниже.
+              В4.6 круг 2 (Р10, замечание владельца 10): пункт называется «Частота» —
+              «Свежесть» обещала давность данных, а речь о периодичности обхода;
+              значение и пояснение — формулировки владельца. */}
+          <DefinitionList.Item name="Частота" note="Обход каталога выполняется ежесуточно; дата последнего анализа указана в колонке «Скан»">
+            ежесуточно
           </DefinitionList.Item>
         </DefinitionList>
       </AsideSection>
