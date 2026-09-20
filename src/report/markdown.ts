@@ -14,7 +14,7 @@ import {
 } from "../api/repos";
 import { COVERAGE_NULL_BELOW, INDEX_WEIGHTS, SCORE_WEIGHTS, type CategoryKey } from "../score/model";
 // копии про Security и заглушки доступа — одни и те же на странице и в отчёте
-import { SECURITY_PUBLIC_NOTE, accessLockText, contributionText, fmtSigned, gitLimitsText, scanStatusText, scanTriggerText, scoreWord, summaryLine } from "../web/format";
+import { SECURITY_PUBLIC_NOTE, accessLockText, contributionText, fmtSigned, gitLimitsText, roundFacts, scanStatusText, scanTriggerText, scoreWord, summaryLine } from "../web/format";
 
 export { SECURITY_PUBLIC_NOTE };
 
@@ -213,7 +213,11 @@ function categoriesDetail(card: RepoCard): string[] {
     for (const [subKey, sub] of subs) {
       // submetric приходит долей 0..1 — в отчёте показывается ×100, как и на странице
       const value = sub.score === null ? "—" : String(Math.round(sub.score * 100));
-      out.push(`| ${subKey} | ${value} | ${cell(sub.value)} | ${cell(sub.note ?? "")} |`);
+      // В4.6 круг 2 (Р20): значение подметрики округляется тем же правилом,
+      // что на странице (`roundFacts`) — доли до 2 знаков, целые без хвоста.
+      // Раздел «Доказательная база» ниже печатает значения СЫРЫМИ: там их
+      // задача — воспроизводимость, а не читаемость.
+      out.push(`| ${subKey} | ${value} | ${cell(roundFacts(sub.value))} | ${cell(sub.note ?? "")} |`);
     }
     out.push("");
   }

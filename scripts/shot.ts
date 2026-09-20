@@ -219,12 +219,19 @@ async function run(): Promise<void> {
         "tri-state NULL": "document.body.textContent?.includes('показатель не выставляется') ? 1 : 0",
         "объяснение закрытых каналов": "document.body.innerText.includes('входят только в Repo Health Score') ? 1 : 0",
         "кнопка отчета": "[...document.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'Отчет').length",
-        // В4.6, приёмка вариантa А (пункт 5): величина И шесть категорий в
-        // ОДНОМ экране. Проверяется не на глаз, а геометрией: нижняя кромка
-        // шестой строки категории обязана лежать внутри окна. Целевое
+        // В4.6, приёмка вариантa А (пункт 5): величина И весь список категорий
+        // в ОДНОМ экране. Проверяется не на глаз, а геометрией: нижняя кромка
+        // последней строки категории обязана лежать внутри окна. Целевое
         // разрешение 1366x768 — самое тесное из трёх.
-        "величина и 6 категорий в одном экране":
-          "(() => { const rows = [...document.querySelectorAll('.rh-category')]; if (rows.length < 6) return 0; return rows[5].getBoundingClientRect().bottom <= window.innerHeight ? 1 : 0; })()",
+        // Круг 2 (Р14): строк столько, сколько категорий ОТКРЫТО зрителю —
+        // закрытые собраны в одну строку под списком, поэтому анонимному
+        // зрителю видно 4 строки, а не 6. Порог — «не меньше 4».
+        "величина и открытые категории в одном экране":
+          "(() => { const rows = [...document.querySelectorAll('.rh-category')]; if (rows.length < 4) return 0; return rows[rows.length - 1].getBoundingClientRect().bottom <= window.innerHeight ? 1 : 0; })()",
+        // Круг 2 (Р14): сведения о закрытых категориях не исчезли — строка
+        // стоит ПОСЛЕ последней строки категории (под Code health).
+        "строка недоступных категорий под списком":
+          "(() => { const note = document.querySelector('.rh-locked-note'); const rows = [...document.querySelectorAll('.rh-category')]; if (!note || rows.length === 0) return 0; return note.getBoundingClientRect().top >= rows[rows.length - 1].getBoundingClientRect().top ? 1 : 0; })()",
         // нижний ярус блока-полосы: строка итога и следующий шаг (У26).
         // В4.6 круг 2 (Р13): следующий шаг — ссылка-счётчик «Рекомендаций: N»,
         // кнопки «Что делать» больше нет.

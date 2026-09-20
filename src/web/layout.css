@@ -439,6 +439,22 @@ body {
   border-top: 1px solid var(--g-color-line-generic);
 }
 
+/* В4.6 круг 2 (Р16): табы «Категории»/«Рекомендации» вместе с коллапс-блоками
+ * живут в контейнере с границами — по образцу блока-полосы величины сверху
+ * (`rh-score-band`): тот же `Card view="outlined"` и тот же паддинг, чтобы на
+ * карточке было ДВА одинаковых контейнера, а не блок с рамкой и список без. */
+.rh-tabs-card {
+  box-sizing: border-box;
+  padding: var(--g-spacing-3) var(--g-spacing-4);
+}
+
+/* В4.6 круг 2 (Р14): строка о недоступных категориях — последней, под Code
+ * health; левый отступ выравнивает её по названиям категорий, а не по краю
+ * контейнера, чтобы читалась как часть списка. */
+.rh-locked-note {
+  padding: var(--g-spacing-2) var(--g-spacing-3) 0 calc(16px + var(--g-spacing-6));
+}
+
 /* В4.6 (У18): слот под поверхность В5 — одинаковая карточка с честным
  * состоянием. Паддинг тот же, что у блока-полосы (У27: единый паддинг Card);
  * минимальная ширина держит три слота в ряд на широком экране и складывает их
@@ -456,8 +472,10 @@ body {
   display: grid;
   /* В4.6 (У23): полоса ограничена мерой minmax(80px, 360px) вместо 1fr —
    * иначе на 1920 она растягивалась до 840px и перестала что-либо измерять.
-   * Излишек ширины забирает последний трек (ярлыки), а не графика. */
-  grid-template-columns: 16px minmax(120px, 180px) minmax(80px, 360px) 40px minmax(96px, auto) minmax(0, 1fr);
+   * Излишек ширины забирает трек ярлыков, а не графика.
+   * Круг 2 (Р14): плашка вклада стала ПОСЛЕДНИМ треком — «прижата к правому
+   * краю» по замечанию владельца; излишек по-прежнему у ярлыков (5-й трек). */
+  grid-template-columns: 16px minmax(120px, 180px) minmax(80px, 360px) 40px minmax(0, 1fr) auto;
   align-items: center;
   gap: var(--g-spacing-3);
   box-sizing: border-box;
@@ -489,6 +507,12 @@ button.rh-category:focus-visible {
   text-align: right;
 }
 
+/* В4.6 круг 2 (Р14): плашка вклада прижата к правому краю своего трека —
+ * сам трек стоит последним, поэтому это и есть правый край строки. */
+.rh-category__weight {
+  justify-self: end;
+}
+
 /* В4.6 (У21): фиксированный слот числа индекса в рейтинге. 32px и
  * tabular-nums — чтобы левая кромка полосы стояла на одной вертикали при
  * двузначных и трёхзначных значениях: иначе полосы в колонке перестают
@@ -500,11 +524,14 @@ button.rh-category:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
+/* В4.6 круг 2 (Р14): отступ между шапкой коллапс-блока и раскрытым
+ * содержимым — без него подметрики начинались вплотную к строке категории и
+ * читались её частью, а не раскрытием. */
 .rh-subrows {
   display: flex;
   flex-direction: column;
   gap: var(--g-spacing-1);
-  padding: 0 var(--g-spacing-3) var(--g-spacing-2) calc(16px + var(--g-spacing-6));
+  padding: var(--g-spacing-2) var(--g-spacing-3) var(--g-spacing-3) calc(16px + var(--g-spacing-6));
 }
 
 .rh-subrow {
@@ -594,6 +621,11 @@ button.rh-category:focus-visible {
 
   .rh-category {
     grid-template-columns: 16px 1fr 40px;
+  }
+
+  /* строка о недоступных категориях: тот же левый отступ, что у подметрик */
+  .rh-locked-note {
+    padding-left: var(--g-spacing-3);
   }
 
   .rh-category__bar,

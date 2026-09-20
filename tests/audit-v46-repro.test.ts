@@ -100,9 +100,14 @@ describe("В4.6-1 (У20): качество категорий закодиров
 
 describe("В4.6-2 (У25): «вклад 0%» заменён на «не учитывается»", () => {
   // ЗАКРЫТО блоком Б6 (вариант А компоновки карточки).
+  // Круг 2 (Р14): литерал «не учитывается» на карточке стоял ТОЛЬКО в
+  // комментарии к правке круга 1 — сам текст всегда приходил из константы
+  // `NOT_COUNTED` (src/web/format.ts). Р14 переписал этот комментарий, и
+  // утверждение покраснело по ложной причине; оно переведено на константу,
+  // то есть проверяет ровно то же и уже не зависит от прозы комментариев.
   test("карточка: у категории без данных вклад не печатается нулём", () => {
     const src = srcOf("RepoPage.tsx");
-    expect({ hasHonestWording: src.includes("не учитывается"), printsZeroContribution: /вклад \{contribution\}%/.test(src) }).toEqual({
+    expect({ hasHonestWording: src.includes("NOT_COUNTED"), printsZeroContribution: /вклад \{contribution\}%/.test(src) }).toEqual({
       hasHonestWording: true,
       printsZeroContribution: false,
     });

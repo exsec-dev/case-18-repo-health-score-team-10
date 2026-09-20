@@ -36,9 +36,11 @@ import type { CardCategory } from "../api/repos";
 import type { MeResponse, MetaResponse, RepoCard } from "./api";
 import { fetchJson, mutateJson, useJson } from "./api";
 import {
+  ACCESS_LOCK_TEXT,
   CATEGORY_TITLES_RU,
   NO_DATA,
   NO_DATA_SHORT,
+  NOT_COUNTED,
   NO_SCORE,
   SECURITY_PUBLIC_NOTE,
   accessLockText,
@@ -52,10 +54,10 @@ import {
   fmtScore,
   fmtSubmetric,
   gitLimitsText,
+  roundFacts,
   scanStatusText,
   scanTriggerText,
   DEFINITION_NAME_WIDTH,
-  contributionText,
   scoreColor,
   scoreLabelTheme,
   scoreTheme,
@@ -387,22 +389,28 @@ function CardTabs({ card, meta }: { card: Card; meta: MetaResponse | null }) {
     navigate(url, { replace: next !== TAB_RECOMMENDATIONS });
   };
   return (
-    <TabProvider value={tab} onUpdate={setTab}>
-      <TabList size="m">
-        <Tab value="categories">Категории</Tab>
-        <Tab value="recommendations" counter={card.recommendations.length}>
-          Рекомендации
-        </Tab>
-      </TabList>
-      <div style={{ paddingTop: "var(--g-spacing-3)" }}>
-        <TabPanel value="categories">
-          <Categories card={card} meta={meta} />
-        </TabPanel>
-        <TabPanel value="recommendations">
-          <Recommendations card={card} />
-        </TabPanel>
-      </div>
-    </TabProvider>
+    // В4.6 круг 2 (Р16, замечание владельца 16): табы и коллапс-блоки обёрнуты
+    // в контейнер с границами — тот же `Card view="outlined"`, что у блока
+    // величины сверху. До этого верх карточки имел рамку, а список категорий
+    // висел в воздухе: два одинаковых по весу блока читались по-разному.
+    <Card view="outlined" className="rh-tabs-card">
+      <TabProvider value={tab} onUpdate={setTab}>
+        <TabList size="m">
+          <Tab value="categories">Категории</Tab>
+          <Tab value="recommendations" counter={card.recommendations.length}>
+            Рекомендации
+          </Tab>
+        </TabList>
+        <div style={{ paddingTop: "var(--g-spacing-3)" }}>
+          <TabPanel value="categories">
+            <Categories card={card} meta={meta} />
+          </TabPanel>
+          <TabPanel value="recommendations">
+            <Recommendations card={card} />
+          </TabPanel>
+        </div>
+      </TabProvider>
+    </Card>
   );
 }
 
@@ -725,20 +733,65 @@ function Categories({ card, meta }: { card: Card; meta: MetaResponse | null }) {
     .filter(([, cat]) => cat.score !== null)
     .sort((a, b) => (a[1].score ?? 0) - (b[1].score ?? 0))[0]?.[0];
 
+  /**
+   * В4.6 круг 2 (Р14, замечание владельца 14): закрытые зрителю категории
+   * больше НЕ занимают по строке каждая. Владелец прошла по живому интерфейсу:
+   * два блока с замком и без чисел давали половину списка визуального шума.
+   * Сведения при этом обязаны остаться (закон 2 и ТЗ §3.4 «сведения об
+   * отсутствии данных») — они собраны в ОДНУ строку под Code health, и строка
+   * называет ИМЕННО закрытые категории с их конкретной причиной.
+   */
+  const shown = entries.filter(([, cat]) => cat.locked === undefined);
+  const locked = entries
+    .filter(([, cat]) => cat.locked !== undefined)
+    .map(([key, cat]) => ({ title: titleOf(key), reason: accessLockText(cat.locked) ?? ACCESS_LOCK_TEXT["check-failed"] }));
+
   return (
-    <ul className="rh-list" style={{ borderTop: 0 }}>
-      {entries.map(([key, cat]) => (
-        <CategoryRow
-          key={key}
-          categoryKey={key}
-          title={titleOf(key)}
-          cat={cat}
-          contribution={cat.score === null ? 0 : Math.round((cat.weight / Math.max(1, dataWeight)) * 100)}
-          card={card}
-          defaultOpen={key === worstKey}
-        />
-      ))}
-    </ul>
+    <>
+      <ul className="rh-list" style={{ borderTop: 0 }}>
+        {shown.map(([key, cat]) => (
+          <CategoryRow
+            key={key}
+            categoryKey={key}
+            title={titleOf(key)}
+            cat={cat}
+            contribution={cat.score === null ? 0 : Math.round((cat.weight / Math.max(1, dataWeight)) * 100)}
+            card={card}
+            defaultOpen={key === worstKey}
+          />
+        ))}
+      </ul>
+      {locked.length > 0 && <LockedCategories items={locked} />}
+    </>
+  );
+}
+
+/**
+ * Строка о недоступных категориях — ПОСЛЕДНЕЙ, под Code health (уточнение
+ * владельца: не вверху).
+ *
+ * Почему группировка по причине, а не фиксированная фраза «CI/CD и Security
+ * недоступны»: `locked` — свойство КАЖДОЙ категории, а не пары (см.
+ * tests/api.test.ts, ветка «только CI»), и при закрытой одной фиксированная
+ * фраза была бы ложью. Причина берётся из `accessLockText` — те же четыре
+ * текста, что стоят на странице и в MD-отчёте; общей фразой они не
+ * подменяются, иначе зритель не узнает, ЧТО делать (войти, обновить токен,
+ * прийти позже). Если причины у двух категорий разные, получается два
+ * предложения, а не одно ложное.
+ */
+function LockedCategories({ items }: { items: { title: string; reason: string }[] }) {
+  const groups = new Map<string, string[]>();
+  for (const item of items) groups.set(item.reason, [...(groups.get(item.reason) ?? []), item.title]);
+  const sentences = [...groups].map(
+    ([reason, titles]) => `${titles.join(" и ")} – ${titles.length > 1 ? "недоступны" : "недоступна"}. ${reason}`,
+  );
+  return (
+    <Flex gap={2} alignItems="baseline" className="rh-locked-note">
+      <Icon data={Lock} size={14} />
+      <Text variant="body-2" color="complementary">
+        {sentences.join(" ")}
+      </Text>
+    </Flex>
   );
 }
 
@@ -761,19 +814,18 @@ function CategoryRow({
   const subs = Object.entries(cat.submetrics);
   const expandable = subs.length > 0;
 
-  // причина закрытого канала уже написана в блоке Score правой панели — в строке
-  // повторяем её, только если она отличается (иначе один текст стоит трижды)
-  const lockNote = cat.locked !== undefined ? accessLockText(cat.locked) : null;
+  /**
+   * В4.6 круг 2 (Р14): ветки закрытого канала здесь больше нет — закрытые
+   * категории до строки не доходят (`Categories` их отфильтровывает и
+   * собирает в одну строку под списком). Осталось tri-state: «нет данных» с
+   * причиной и оговоркой про перенормировку.
+   */
   const note =
-    cat.locked !== undefined
-      ? lockNote === fullLockReason(card) && card.score?.fullLocked
-        ? null
-        : lockNote
-      : cat.score === null
-        ? `${key === "security" ? securityNote(card) : humanNoData(`${key}: ${cat.no_data ?? ""}`)} Категория не снизила Score: ее вес выброшен, остальные перенормированы.`
-        : cat.no_data
-          ? humanNoData(`${key}: ${cat.no_data}`)
-          : null;
+    cat.score === null
+      ? `${key === "security" ? securityNote(card) : humanNoData(`${key}: ${cat.no_data ?? ""}`)} Категория не снизила Score: ее вес выброшен, остальные перенормированы.`
+      : cat.no_data
+        ? humanNoData(`${key}: ${cat.no_data}`)
+        : null;
 
   const row = (
     <>
@@ -782,14 +834,7 @@ function CategoryRow({
         {title}
       </Text>
       <span className="rh-category__bar">
-        {cat.locked !== undefined ? (
-          <Flex gap={1} alignItems="center">
-            <Icon data={Lock} size={14} />
-            <Text color="secondary" title={lockNote ?? undefined}>
-              Недоступно
-            </Text>
-          </Flex>
-        ) : cat.score === null ? (
+        {cat.score === null ? (
           <Text color="secondary">{NO_DATA}</Text>
         ) : (
           <Progress value={Math.round(cat.score)} size="s" theme={scoreTheme(cat.score)} />
@@ -806,12 +851,6 @@ function CategoryRow({
           {fmtScore(cat.score)}
         </Text>
       )}
-      {/* В4.6 (У25, ДП6): у категории без данных «вклад 0%» превращался в
-          «категория дала ноль» — единственное место, где продукт своими руками
-          опровергал собственный tri-state. Теперь там «не учитывается». */}
-      <Text variant="body-short" color="secondary" className="rh-category__weight" title="номинальный вес категории в Repo Health Score → вклад после перенормировки">
-        вес {cat.weight}% → вклад {contributionText(cat.score, contribution)}
-      </Text>
       <span className="rh-category__tags">
         {cat.stale && (
           <Label theme="warning" size="xs">
@@ -819,6 +858,22 @@ function CategoryRow({
           </Label>
         )}
       </span>
+      {/* В4.6 (У25, ДП6): у категории без данных «вклад 0%» превращался в
+          «категория дала ноль» — единственное место, где продукт своими руками
+          опровергал собственный tri-state. Поэтому там стоит `NOT_COUNTED`.
+          Круг 2 (Р14): вместо строки «вес N% → вклад M%» — ОДНА плашка в стиле
+          чипа величины (`theme="normal"`), последней в сетке строки, то есть
+          прижатой к правому краю. Номинальный вес не потерян: он в подсказке
+          по наведению — на экране остаётся то, что зритель спрашивает
+          («сколько эта категория дала»), а не то, из чего это выведено. */}
+      <Label
+        theme="normal"
+        size="xs"
+        className="rh-category__weight"
+        title={`номинальный вес категории в Repo Health Score – ${cat.weight}% → вклад после перенормировки`}
+      >
+        {cat.score === null ? NOT_COUNTED : `Вклад ${contribution}%`}
+      </Label>
     </>
   );
 
@@ -849,8 +904,12 @@ function CategoryRow({
               <Text color="complementary">
                 {displayOnly(key, subKey) ? "показ, без веса" : sub.score === null ? NO_DATA : `${fmtSubmetric(sub.score)} / 100`}
               </Text>
+              {/* В4.6 круг 2 (Р20): доля округляется до 2 знаков (`roundFacts`),
+                  целое остаётся как есть — «0.8723404255319149» на первом
+                  экране карточки было шумом, а не фактом. Поповер «Основание»
+                  ниже печатает значение СЫРЫМ: это доказательная база. */}
               <Text color="secondary" wordBreak="break-word">
-                значение: {fmtFactValue(sub.value)}
+                значение: {fmtFactValue(roundFacts(sub.value))}
                 {sub.note ? ` (${sub.note})` : ""}
               </Text>
             </div>

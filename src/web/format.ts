@@ -56,6 +56,32 @@ export function fmtCoverage(coverage: number): string {
   return `${Math.round(coverage * 100)}%`;
 }
 
+/**
+ * В4.6 круг 2 (Р20, находка приёмки круга 1): доли ОКРУГЛЯЮТСЯ до 2 знаков,
+ * целые остаются как есть. Причина конкретная: вариант А компоновки раскрывает
+ * худшую категорию на первом экране карточки, и туда попало «значение:
+ * 0.8723404255319149» — шум вместо факта.
+ *
+ * Где применяется — решение владельца 20.09: ТОЛЬКО список подметрик на
+ * карточке и таблица подметрик в MD-отчёте. Поповер «Основание» остаётся
+ * сырым JSON: это доказательная база, и её задача — воспроизводимость, а не
+ * читаемость. Словарь единиц для 28 подметрик в этот круг НЕ входит
+ * (кандидат в В4.7) — здесь только формат чисел.
+ *
+ * Рекурсия по объектам и массивам нужна потому, что значение подметрики —
+ * не всегда число: часть фактов приходит объектом (`{"bytes":8000}`), и доля
+ * с шестнадцатью знаками может лежать внутри него. Одна копия правила на
+ * страницу и на отчёт: `markdown.ts` вызывает эту же функцию.
+ */
+export function roundFacts(value: unknown): unknown {
+  if (typeof value === "number") return Number.isInteger(value) ? value : Math.round(value * 100) / 100;
+  if (Array.isArray(value)) return value.map(roundFacts);
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([key, v]) => [key, roundFacts(v)]));
+  }
+  return value;
+}
+
 /** Значение факта — читаемой строкой; объекты как JSON (доказательство, не проза). */
 export function fmtFactValue(value: unknown): string {
   if (value === null || value === undefined) return "—";

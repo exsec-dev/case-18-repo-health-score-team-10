@@ -115,7 +115,8 @@ describe("Р15: затухание живёт только на контейне
 // ---------------------------------------------------------------------------
 
 describe("Р14: вклад категории — одна плашка, а не строка «вес → вклад»", () => {
-  repro("CategoryRow: Label theme=\"normal\" со словом «Вклад», старой строки нет", () => {
+  // ЗАКРЫТО блоком Б4 (карточка, категории) — обёртка снята, утверждение не менялось.
+  test("CategoryRow: Label theme=\"normal\" со словом «Вклад», старой строки нет", () => {
     const row = between(codeOf("RepoPage.tsx"), "function CategoryRow", "function Markers");
     expect({
       plate: /<Label[\s\S]{0,200}rh-category__weight/.test(row) || /rh-category__weight[\s\S]{0,200}Вклад/.test(row),
@@ -172,7 +173,8 @@ describe("Р12 (MD): «закрыто»/«закрыто доступом» → 
 // ---------------------------------------------------------------------------
 
 describe("Р20: значения подметрик округлены, доказательная база остаётся сырой", () => {
-  repro("одна функция округления фактов на страницу и отчёт", async () => {
+  // ЗАКРЫТО блоком Б4 (карточка, категории) — обёртки сняты, утверждения не менялись.
+  test("одна функция округления фактов на страницу и отчёт", async () => {
     const mod = (await import("../src/web/format")) as { roundFacts?: (v: unknown) => unknown };
     expect(typeof mod.roundFacts).toBe("function");
     expect(mod.roundFacts!(0.8723404255319149)).toBe(0.87);
@@ -180,7 +182,7 @@ describe("Р20: значения подметрик округлены, дока
     expect(mod.roundFacts!({ ratio: 0.8723404255319149, count: 47 })).toEqual({ ratio: 0.87, count: 47 });
   });
 
-  repro("MD: в таблице подметрик доля округлена, поповер доказательства — нет", () => {
+  test("MD: в таблице подметрик доля округлена, поповер доказательства — нет", () => {
     const out = mdOpen();
     const page = srcOf("RepoPage.tsx");
     expect({
@@ -270,6 +272,65 @@ describe("Р7: блока «О рейтинге» в правой панели �
       aboutRating: src.includes("О рейтинге"),
       legendFirst: legend >= 0 && contribution >= 0 && legend < contribution,
     }).toEqual({ aboutRating: false, legendFirst: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Блок Б4 — карточка, категории: Р14 (строка недоступных под списком; плашка
+// вклада закрыта трипваем Т2), Р16 (контейнер табов), Р20 (закрыт Т5).
+// ---------------------------------------------------------------------------
+
+describe("Б4 (Р14, Р16): список категорий и контейнер табов", () => {
+  test("Р14: закрытые категории не строки, а ОДНА строка под списком, с их конкретной причиной", () => {
+    const src = codeOf("RepoPage.tsx");
+    const categories = between(src, "function Categories", "function LockedCategories");
+    const note = between(src, "function LockedCategories", "function CategoryRow");
+    const row = between(src, "function CategoryRow", "function Markers");
+    expect({
+      rowsFiltered: /cat\.locked === undefined/.test(categories),
+      noteAfterList: categories.indexOf("</ul>") < categories.indexOf("<LockedCategories"),
+      namesActualCategories: note.includes("titles.join"),
+      reasonFromAccessLock: /accessLockText\(cat\.locked\)/.test(categories),
+      // фиксированная фраза «CI/CD и Security» была бы ложью при закрытой одной
+      hardcodedPair: src.includes("CI/CD и Security – недоступны"),
+      lockBranchGoneFromRow: /cat\.locked !== undefined/.test(row),
+    }).toEqual({
+      rowsFiltered: true,
+      noteAfterList: true,
+      namesActualCategories: true,
+      reasonFromAccessLock: true,
+      hardcodedPair: false,
+      lockBranchGoneFromRow: false,
+    });
+  });
+
+  test("Р14: строка склеивает категории по ПРИЧИНЕ и согласует число (одна — «недоступна»)", () => {
+    const src = codeOf("RepoPage.tsx");
+    const note = between(src, "function LockedCategories", "function CategoryRow");
+    expect({
+      groupsByReason: note.includes("groups.set(item.reason"),
+      singular: note.includes('"недоступна"'),
+      plural: note.includes('"недоступны"'),
+      lastInList: /\.rh-locked-note \{[^}]*padding:/.test(srcOf("layout.css")),
+    }).toEqual({ groupsByReason: true, singular: true, plural: true, lastInList: true });
+  });
+
+  test("Р14: отступ между шапкой коллапс-блока и раскрытым содержимым", () => {
+    const css = srcOf("layout.css");
+    const subrows = between(css, ".rh-subrows {", "}");
+    expect(/padding: var\(--g-spacing-2\)/.test(subrows)).toBe(true);
+  });
+
+  test("Р16: табы и коллапс-блоки — в контейнере с границами, как блок величины", () => {
+    const src = codeOf("RepoPage.tsx");
+    const tabs = between(src, "function CardTabs", "function CardSlots");
+    const css = srcOf("layout.css");
+    expect({
+      container: /<Card view="outlined" className="rh-tabs-card">/.test(tabs),
+      sameAsBand:
+        between(css, ".rh-tabs-card {", "}").includes("padding: var(--g-spacing-3) var(--g-spacing-4)") &&
+        between(css, ".rh-score-band {", "}").includes("padding: var(--g-spacing-3) var(--g-spacing-4)"),
+    }).toEqual({ container: true, sameAsBand: true });
   });
 });
 
