@@ -23,7 +23,7 @@ import { HealthCraftMark, PRODUCT_NAME } from "./logo";
 import { useAppTheme, useMediaQuery, useRailCompact, type AppTheme } from "./prefs";
 import { linkProps, navigate } from "./router";
 
-export type Section = "rating" | "me" | null;
+export type Section = "rating" | "me" | "settings" | null;
 
 interface SectionDef {
   id: Exclude<Section, null>;
@@ -34,7 +34,7 @@ interface SectionDef {
 
 const SECTIONS: SectionDef[] = [
   { id: "rating", title: "Рейтинг", href: "/", icon: ChartColumn },
-  { id: "me", title: "Личный кабинет", href: "/me", icon: Person },
+  { id: "me", title: "Мои репозитории", href: "/me", icon: Person },
 ];
 
 const GlobalActionsContext = createContext<ReactNode>(null);
@@ -92,7 +92,7 @@ export function Shell({
         onClick: (e) => followLink(e, "/"),
       }}
       menuItems={menuItems}
-      renderFooter={({ compact: isCompact }) => <RailFooter me={me} compact={isCompact} />}
+      renderFooter={({ compact: isCompact }) => <RailFooter me={me} compact={isCompact} section={section} />}
       renderContent={() => (
         <GlobalActionsContext.Provider value={globalActions ?? null}>
           <div className="rh-workspace">{children}</div>
@@ -221,7 +221,7 @@ function followLink(e: MouseEvent<HTMLElement>, href: string): void {
   navigate(href);
 }
 
-function RailFooter({ me, compact }: { me: MeResponse | null; compact: boolean }) {
+function RailFooter({ me, compact, section }: { me: MeResponse | null; compact: boolean; section: Section }) {
   const [, setTheme] = useAppTheme();
   const resolved = useThemeValue();
   const isDark = resolved === "dark" || resolved === "dark-hc";
@@ -239,10 +239,19 @@ function RailFooter({ me, compact }: { me: MeResponse | null; compact: boolean }
 
   return (
     <>
-      {/* Документация и Настройки — еще не сделаны: пункты есть, действия нет.
-          regularSize — строка 40px, как нижние пункты rail SourceCraft */}
+      {/* Документация пока недоступна; regularSize — строка 40px,
+          как нижние пункты rail SourceCraft. */}
       <FooterItem id="docs" title="Документация" icon={BookOpen} regularSize {...tip("Документация")} />
-      <FooterItem id="settings" title="Настройки" icon={Gear} regularSize {...tip("Настройки")} />
+      <FooterItem
+        id="settings"
+        title="Настройки"
+        icon={Gear}
+        href="/settings"
+        current={section === "settings"}
+        regularSize
+        {...tip("Настройки")}
+        onItemClick={(_item, _collapsed, e) => followLink(e, "/settings")}
+      />
       <FooterItem
         id="theme"
         title={themeTitle}
@@ -454,11 +463,11 @@ export function Page({ crumbs, actions, aside, mode = "document", header, footer
         {mode === "fill" ? (
           <main className="rh-page__main">
             {header && <div className="rh-fill__header">{header}</div>}
-            <div className="rh-fill__content rh-fade">{children}</div>
+            <div className="rh-fill__content">{children}</div>
             {footer && <div className="rh-fill__footer">{footer}</div>}
           </main>
         ) : (
-          <main className="rh-page__main rh-fade">{children}</main>
+          <main className="rh-page__main">{children}</main>
         )}
         {aside !== undefined && !asideInDrawer && <aside className="rh-page__aside">{aside}</aside>}
       </div>

@@ -7,7 +7,7 @@ import { CircleQuestion } from "@gravity-ui/icons";
 import { Alert, Flex } from "@gravity-ui/uikit";
 import type { MeResponse, MetaResponse } from "./api";
 import { useJson } from "./api";
-import { JobsBell, MePage } from "./MePage";
+import { JobsBell, MePage, SettingsPage } from "./MePage";
 import { Rating } from "./Rating";
 import { RepoPage } from "./RepoPage";
 import { navigate, useRoute } from "./router";
@@ -25,7 +25,8 @@ export function App() {
   const metaFailed = meta.state.kind === "error" ? meta.state.message : null;
 
   // карточка репозитория — часть раздела «Рейтинг»: туда ведут его строки
-  const section: Section = route.kind === "rating" || route.kind === "repo" ? "rating" : route.kind === "me" ? "me" : null;
+  const section: Section =
+    route.kind === "rating" || route.kind === "repo" ? "rating" : route.kind === "me" ? "me" : route.kind === "settings" ? "settings" : null;
 
   return (
     <Shell section={section} me={meData} globalActions={meData?.login ? <JobsBell /> : null}>
@@ -43,12 +44,13 @@ export function App() {
       {route.kind === "rating" && <Rating search={route.search} meta={metaData} />}
       {route.kind === "repo" && <RepoPage org={route.org} repo={route.repo} meta={metaData} />}
       {route.kind === "me" && <MePage meta={metaData} />}
+      {route.kind === "settings" && <SettingsPage />}
       {route.kind === "not-found" && (
         <Page crumbs={[{ text: "Страница не найдена" }]}>
           <EmptyState
             icon={CircleQuestion}
             title="Страница не найдена"
-            description={`Адрес ${route.path} не соответствует ни одному экрану. Рейтинг живет на «/», карточка репозитория – на «/repo/{org}/{repo}», кабинет – на «/me».`}
+            description={`Адрес ${route.path} не соответствует ни одному экрану. Рейтинг живет на «/», карточка репозитория – на «/repo/{org}/{repo}», «Мои репозитории» – на «/me», настройки – на «/settings».`}
             actions={[{ text: "К рейтингу", view: "action", onClick: () => navigate("/") }]}
           />
         </Page>

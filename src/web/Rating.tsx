@@ -26,7 +26,7 @@ import {
   Text,
   TextInput,
 } from "@gravity-ui/uikit";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import type { MetaResponse, RatingResponse } from "./api";
 import { useJson } from "./api";
 import {
@@ -40,6 +40,7 @@ import {
   fmtNumber,
   fmtScore,
   scanStatusText,
+  scoreColor,
   scoreTheme,
   scoreWord,
   sentence,
@@ -323,13 +324,17 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
  * Без `/api/meta` печатается только первая половина: соврать числом нельзя,
  * а смысл «что такое индекс» от знаменателя не зависит.
  */
-function ratingLead(meta: MetaResponse | null): string {
-  const about =
-    "HealthCraft Index показывает состояние открытых репозиториев SourceCraft по 4 категориям: документация, активность, " +
-    "issues и состояние кода – воспроизводимая оценка из публичных данных, по ней и строится порядок.";
+function ratingLead(meta: MetaResponse | null): ReactNode {
+  const about = "HealthCraft Index показывает состояние открытых репозиториев SourceCraft по 4 категориям: документация, активность, issues и состояние кода.";
   if (!meta) return about;
   const { scored, catalog } = meta.repos;
-  return `${about} Оценено ${fmtCount(scored)} из ${fmtCount(catalog)}, каталог обходится волнами: первыми идут самые заметные проекты.`;
+  return (
+    <>
+      {about}
+      <br />
+      Оценено {fmtCount(scored)} из {fmtCount(catalog)} репозиториев.
+    </>
+  );
 }
 
 function NothingFound({ hasFilters }: { hasFilters: boolean }) {
@@ -386,8 +391,8 @@ function UnscoredTable({ items, meta, hasFilters }: { items: Item[]; meta: MetaR
     <Flex direction="column" gap={3}>
       <Text color="complementary">
         Эти репозитории не получили HealthCraft Index: покрытие данными оказалось ниже порога
-        {meta ? ` ${fmtCoverage(meta.coverageNullBelow)}` : ""}. Отсутствие данных – не плохая оценка и не ноль: пока
-        источники недоступны, честного числа нет.
+        {meta ? ` ${fmtCoverage(meta.coverageNullBelow)}` : ""}. Недостаточно данных для расчета оценки. Отсутствующие
+        данные не приравниваются к нулевому результату.
         {failedScan && " У части репозиториев последний скан завершился сбоем – для оценки он непригоден; повторный обход попробует снова."}
       </Text>
       <Table data={shown} columns={columns} width="max" verticalAlign="middle" />
@@ -419,8 +424,8 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
            объяснение списка стоит у списка, а не отдельным абзацем панели. */
         help={
           <HelpMark iconSize="s" aria-label="Что показывает вклад категорий">
-            Доля в HealthCraft Index. CI/CD и Security считаются только в Repo Health Score на карточке – он виден участникам
-            репозитория с доступом к этим данным.
+            Доля в HealthCraft Index. Категории CI/CD и Security учитываются только в показателе Repo Health Score для
+            репозиториев, к которым у вас есть доступ.
           </HelpMark>
         }
       >
@@ -455,7 +460,7 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
               В4.6 круг 2 (Р10, замечание владельца 10): пункт называется «Частота» —
               «Свежесть» обещала давность данных, а речь о периодичности обхода;
               значение и пояснение — формулировки владельца. */}
-          <DefinitionList.Item name="Частота" note="Обход каталога выполняется ежесуточно; дата последнего анализа указана в колонке «Скан»">
+          <DefinitionList.Item name="Частота" note="Обход каталога выполняется ежесуточно. Дата последнего анализа указана в колонке «Скан»">
             ежесуточно
           </DefinitionList.Item>
         </DefinitionList>
@@ -542,7 +547,7 @@ function buildColumns(categories: MetaResponse["categories"], rankOffset: number
       template: (_item: Item, index: number) => <Text color="secondary">{rankOffset + index + 1}</Text>,
     },
     { id: "repo", name: "Репозиторий", primary: true, sticky: "start", template: (item: Item) => <RepoCell item={item} /> },
-    { id: "index", name: "HealthCraft Index", align: "end", width: 96, template: (item: Item) => <ScoreCell item={item} /> },
+    { id: "index", name: "HealthCraft Index", align: "end", width: 136, template: (item: Item) => <ScoreCell item={item} /> },
     ...categoryColumns,
     // В4.6 круг 2 (Р3): название языка снова стоит в строке репозитория;
     // колонка остаётся для сортируемого/копируемого вида, выключенной по умолчанию
@@ -616,10 +621,10 @@ function ScoreCell({ item }: { item: Item }) {
           Из истории
         </Label>
       )}
-      <div style={{ width: 80 }}>
-        <Progress value={item.healthcraftIndex} size="xs" theme={scoreTheme(item.healthcraftIndex)} />
+      <div className="rh-score-cell__bar">
+        <Progress value={item.healthcraftIndex} size="s" theme={scoreTheme(item.healthcraftIndex)} />
       </div>
-      <Text variant="body-3" className="rh-score-cell__num" title={sentence(scoreWord(item.healthcraftIndex))}>
+      <Text color={scoreColor(item.healthcraftIndex)} className="rh-score-cell__num" title={sentence(scoreWord(item.healthcraftIndex))}>
         {fmtScore(item.healthcraftIndex)}
       </Text>
     </Flex>

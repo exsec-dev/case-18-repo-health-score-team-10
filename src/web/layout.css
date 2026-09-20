@@ -434,11 +434,6 @@ body {
   padding: var(--g-spacing-3) var(--g-spacing-4);
 }
 
-.rh-score-band__summary {
-  padding-top: var(--g-spacing-2);
-  border-top: 1px solid var(--g-color-line-generic);
-}
-
 /* В4.6 круг 2 (Р16): табы «Категории»/«Рекомендации» вместе с коллапс-блоками
  * живут в контейнере с границами — по образцу блока-полосы величины сверху
  * (`rh-score-band`): тот же `Card view="outlined"` и тот же паддинг, чтобы на
@@ -466,6 +461,11 @@ body {
   padding: var(--g-spacing-3) var(--g-spacing-4);
 }
 
+.rh-settings-card {
+  box-sizing: border-box;
+  padding: var(--g-spacing-4);
+}
+
 /* ---------- строка категории на карточке ---------- */
 
 .rh-category {
@@ -475,7 +475,7 @@ body {
    * Излишек ширины забирает трек ярлыков, а не графика.
    * Круг 2 (Р14): плашка вклада стала ПОСЛЕДНИМ треком — «прижата к правому
    * краю» по замечанию владельца; излишек по-прежнему у ярлыков (5-й трек). */
-  grid-template-columns: 16px minmax(120px, 180px) minmax(80px, 360px) 40px minmax(0, 1fr) auto;
+  grid-template-columns: 16px minmax(120px, 180px) minmax(0, 1fr) minmax(80px, 360px) 40px auto;
   align-items: center;
   gap: var(--g-spacing-3);
   box-sizing: border-box;
@@ -524,6 +524,17 @@ button.rh-category:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
+.rh-score-cell__bar {
+  flex: 0 0 80px;
+  width: 80px;
+}
+
+.rh-favorite-star__icon {
+  display: flex;
+  align-items: center;
+  line-height: 0;
+}
+
 /* В4.6 круг 2 (Р14): отступ между шапкой коллапс-блока и раскрытым
  * содержимым — без него подметрики начинались вплотную к строке категории и
  * читались её частью, а не раскрытием. */
@@ -539,59 +550,6 @@ button.rh-category:focus-visible {
   grid-template-columns: minmax(160px, 260px) 120px 1fr;
   gap: var(--g-spacing-3);
   align-items: baseline;
-}
-
-/* В4.6 (У23): затухание на нижней кромке прокручиваемого контейнера —
- * честный признак «ниже есть ещё». Sticky-псевдоэлемент последним в потоке
- * липнет к нижнему краю контейнера прокрутки (absolute здесь встал бы к низу
- * СОДЕРЖИМОГО, а не видимой области), отрицательный margin не занимает
- * высоту. Цвет — токен фона страницы; `transparent` и `black` в градиенте
- * задают только альфу перехода, палитрой не являются. */
-.rh-fade {
-  position: relative;
-}
-
-.rh-fade::after {
-  position: sticky;
-  bottom: 0;
-  display: block;
-  height: 24px;
-  margin-top: -24px;
-  background: linear-gradient(to top, var(--g-color-base-background), transparent);
-  content: "";
-  pointer-events: none;
-}
-
-/* В4.6 круг 2 (Р15, замечание владельца 15 + диагноз аудит-пары): затухание
- * живёт ТОЛЬКО на контейнере, который прокручивает СЕБЯ. Иначе
- * sticky-псевдоэлемент липнет к нижней кромке ближайшего предка с прокруткой
- * (в пределе — окна) и красит собой контент: это и есть «футер ломает
- * отображение» со скриншота владельца.
- *
- * Два случая, где контейнер себя не прокручивает:
- * 1. Карточка ниже 1440: `.rh-page_document .rh-page__main` получает
- *    `overflow: visible`, прокрутку берёт всё тело страницы (медиазапрос
- *    ниже). На 1920 и 1440 колонка прокручивает себя, и затухание там верно —
- *    поэтому гасится ровно тем же порогом 1439, а не отменяется вовсе.
- * 2. Рейтинг с таблицей: `.rh-fill__content:has(> .rh-table-fill)` выше
- *    объявлен `overflow: hidden` — прокручивает себя сама таблица, и кромку
- *    даёт её собственный `::after` ниже.
- * Классы со Shell.tsx не вычищаются: отвечает CSS, разметка не знает о
- * разрешениях. */
-.rh-fill__content:has(> .rh-table-fill).rh-fade::after {
-  display: none;
-}
-
-/* таблица рейтинга прокручивает себя сама — кромка нужна ей, а не обёртке */
-.rh-table-fill .g-table__scroll-container::after {
-  position: sticky;
-  bottom: 0;
-  display: block;
-  height: 24px;
-  margin-top: -24px;
-  background: linear-gradient(to top, var(--g-color-base-background), transparent);
-  content: "";
-  pointer-events: none;
 }
 
 .rh-code {
@@ -632,12 +590,6 @@ button.rh-category:focus-visible {
     border-left: 0;
   }
 
-  /* Р15: колонки здесь себя не прокручивают (прокрутка у `.rh-page__body`),
-   * поэтому sticky-затухание гасится — иначе оно липнет к кромке окна и
-   * красит контент карточки на 1366. */
-  .rh-fade::after {
-    display: none;
-  }
 }
 
 @media (max-width: 767px) {

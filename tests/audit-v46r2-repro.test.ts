@@ -95,16 +95,14 @@ const mdLocked = (): string =>
 // рейтинга (layout.css:535-543) не трогается, класс со Shell.tsx не вычищается.
 // ---------------------------------------------------------------------------
 
-describe("Р15: затухание живёт только на контейнерах с собственной прокруткой", () => {
-  // ЗАКРЫТО блоком Б6 (затухание и приёмочная база) — обёртка снята, утверждение не менялось.
-  test("`.rh-fade::after` погашен порогом 1439, кромка таблицы рейтинга цела", () => {
+describe("Р15 + П1.13: затухание полностью снято по решению владельца", () => {
+  test("ни CSS, ни разметка больше не создают нижнее затухание", () => {
     const css = srcOf("layout.css");
-    const narrow = css.slice(css.indexOf("@media (max-width: 1439px)"), css.indexOf("@media (max-width: 767px)"));
     expect({
-      fadeGatedAt1439: /\.rh-fade::after\s*\{[^}]*display:\s*none/.test(narrow),
-      tableEdgeKept: css.includes(".rh-table-fill .g-table__scroll-container::after"),
-      classKept: srcOf("Shell.tsx").includes('className="rh-page__main rh-fade"'),
-    }).toEqual({ fadeGatedAt1439: true, tableEdgeKept: true, classKept: true });
+      fadeCss: css.includes("rh-fade"),
+      tableFade: css.includes(".rh-table-fill .g-table__scroll-container::after"),
+      fadeClass: srcOf("Shell.tsx").includes("rh-fade"),
+    }).toEqual({ fadeCss: false, tableFade: false, fadeClass: false });
   });
 });
 
@@ -204,15 +202,16 @@ describe("Р20: значения подметрик округлены, дока
 // запрещено, поэтому счётчик рендерится ссылкой РЯДОМ, а не внутри строки.
 // ---------------------------------------------------------------------------
 
-describe("Р13: кнопка «Что делать» снята, счётчик рекомендаций стал ссылкой", () => {
-  // ЗАКРЫТО блоком Б3 (карточка, верх) — обёртка снята, утверждение не менялось.
-  test("RepoPage: кнопки «Что делать» нет, есть ссылка «Рекомендаций: N» на таб", () => {
+describe("Р13 + П1.10: нижний ярус показателей полностью снят", () => {
+  test("RepoPage: под показателями нет CTA, итогового текста и ссылки рекомендаций", () => {
     const src = codeOf("RepoPage.tsx");
+    const band = between(src, "function ScoreBand", "function ScoreFigure");
     expect({
       cta: src.includes("Что делать"),
-      counterLink: /Рекомендаций: \{card\.recommendations\.length\}/.test(src),
-      summaryStillShared: src.includes("summaryLine") && reportSrc().includes("summaryLine"),
-    }).toEqual({ cta: false, counterLink: true, summaryStillShared: true });
+      counterLink: /Рекомендаций: \{card\.recommendations\.length\}/.test(band),
+      summaryOnPage: band.includes("summaryLine"),
+      reportStillUsesSummary: reportSrc().includes("summaryLine"),
+    }).toEqual({ cta: false, counterLink: false, summaryOnPage: false, reportStillUsesSummary: true });
   });
 });
 
@@ -282,14 +281,13 @@ describe("Р7: блока «О рейтинге» в правой панели �
 // диагноза: обёртка таблицы рейтинга тоже не прокручивает себя.
 // ---------------------------------------------------------------------------
 
-describe("Б6 (Р15): затухания нет там, где контейнер не прокручивает себя", () => {
-  test("обёртка таблицы рейтинга: затухание погашено, кромку даёт сама таблица", () => {
+describe("Б6 (Р15) + П1.13: затухания нет ни на одной поверхности", () => {
+  test("таблица сохраняет собственную прокрутку без псевдоэлемента затухания", () => {
     const css = srcOf("layout.css");
     expect({
-      wrapperFadeOff: /\.rh-fill__content:has\(> \.rh-table-fill\)\.rh-fade::after \{\s*display: none/.test(css),
       wrapperNotScrolling: /\.rh-fill__content:has\(> \.rh-table-fill\) \{[^}]*overflow: hidden/.test(css),
       tableEdge: /\.rh-table-fill \.g-table__scroll-container::after \{[^}]*position: sticky/.test(css),
-    }).toEqual({ wrapperFadeOff: true, wrapperNotScrolling: true, tableEdge: true });
+    }).toEqual({ wrapperNotScrolling: true, tableEdge: false });
   });
 });
 
@@ -408,10 +406,9 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
       oldCoverageWord: figure.includes("данных хватило"),
       chipLikeAside: /scoreLabelTheme\(total\)\} size="s"/.test(figure),
       // мельче прежнего body-2, но всё ещё проза: правило 4а gravity-uikit.md
-      lockTextSmaller: /variant="body-1"[\s\S]{0,120}fullLockReason\(card\)/.test(lock),
+      lockTextSmaller: lock.includes("<FullLockMessage") && /function FullLockMessage[\s\S]{0,500}variant="body-1"/.test(src),
       buttonGone: lock.includes("Открыть личный кабинет"),
-      // ссылка стоит РЯДОМ с общей строкой, поэтому она одна на все четыре ветки
-      linkOnce: (lock.match(/Личный кабинет</g) ?? []).length === 1,
+      linkInText: /linkProps\("\/settings"\)[\s\S]{0,80}>Настройках</.test(src),
       lockTextStillShared: Object.keys(ACCESS_LOCK_TEXT).sort().join(",") === "check-failed,denied,no-pat,pat-expired",
     }).toEqual({
       coverageWord: true,
@@ -419,7 +416,7 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
       chipLikeAside: true,
       lockTextSmaller: true,
       buttonGone: false,
-      linkOnce: true,
+      linkInText: true,
       lockTextStillShared: true,
     });
   });
@@ -430,7 +427,7 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
     expect({
       paragraphGone: band.includes("Разницу с HealthCraft Index дают CI и Security:"),
       indexHelp: src.includes("Публичная оценка по 4 категориям") && src.includes("по ней и строится общий рейтинг"),
-      fullHelp: src.includes("Полная оценка по 6 категориям") && src.includes("в общий рейтинг не входит"),
+      fullHelp: src.includes("Repo Health Score рассчитывается по 6 категориям") && src.includes("не влияет на публичный рейтинг"),
       helpOnLockedBranch: /score\.fullLocked \?[\s\S]{0,1200}<HelpMark/.test(band),
       // MD-отчёт свою формулировку сохраняет: документ читается без наведения
       mdKeepsParagraph: reportSrc().includes("Разницу с HealthCraft Index дают CI и Security"),
@@ -471,15 +468,17 @@ describe("Б2 (Р3, Р21): строка рейтинга и контрол со�
     }).toEqual({ avatar: true, slugComponent: true, languageName: true, dotOnly: false, skeletonRhythm: true });
   });
 
-  test("Р3: число индекса без лишней жирности, полоса ниже, зазор меньше; ширины те же", () => {
+  test("Р3 + П1.1: число как в остальных колонках, окрашено; полоса снова читаемая", () => {
     const cell = between(codeOf("Rating.tsx"), "function ScoreCell", "function CategoryCell");
+    const css = srcOf("layout.css");
     expect({
-      lighterNumber: cell.includes('variant="body-3"'),
+      normalNumber: !cell.includes('variant="body-3"') && !cell.includes('variant="subheader-3"'),
       boldNumberGone: cell.includes('variant="subheader-3"'),
-      lowerBar: /<Progress[\s\S]{0,120}size="xs"/.test(cell),
+      colouredNumber: cell.includes("scoreColor(item.healthcraftIndex)"),
+      readableBar: /<Progress[\s\S]{0,120}size="s"/.test(cell),
       tighterGap: /<Flex gap=\{1\} alignItems="center" justifyContent="flex-end">/.test(cell),
-      widthsUntouched: cell.includes("width: 80") && srcOf("layout.css").includes("min-width: 32px"),
-    }).toEqual({ lighterNumber: true, boldNumberGone: false, lowerBar: true, tighterGap: true, widthsUntouched: true });
+      widths: css.includes("flex: 0 0 80px") && css.includes("min-width: 32px"),
+    }).toEqual({ normalNumber: true, boldNumberGone: false, colouredNumber: true, readableBar: true, tighterGap: true, widths: true });
   });
 
   test("Р21: у Select сортировки нет ширины-обрезки — контрол берёт ширину по содержимому", () => {
@@ -519,7 +518,8 @@ describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечан
       secondParagraph: src.includes("<CoverageNote"),
       fromDb: /ratingLead[\s\S]{0,900}meta\.repos/.test(src),
       wave: src.includes("первыми идут самые заметные проекты"),
-    }).toEqual({ title: true, oneLead: true, oldSubheader: false, secondParagraph: false, fromDb: true, wave: true });
+      concise: src.includes("из {fmtCount(catalog)} репозиториев"),
+    }).toEqual({ title: true, oneLead: true, oldSubheader: false, secondParagraph: false, fromDb: true, wave: false, concise: true });
   });
 
   test("Р6: в числовых диапазонах дефис — шкала, MD-таблица подметрик, слот сравнения", async () => {
@@ -536,7 +536,7 @@ describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечан
     const section = between(src, 'title="Вклад категорий"', "</AsideSection>");
     expect({
       helpAtTitle: /help=\{[\s\S]{0,400}HelpMark/.test(section),
-      keepsMeaning: section.includes("считаются только в Repo Health Score на карточке"),
+      keepsMeaning: section.includes("учитываются только в показателе Repo Health Score"),
       paragraphGone: !/<\/DefinitionList>[\s\S]{0,200}<Text/.test(section),
       asideSupportsHelp: srcOf("ui.tsx").includes("help?: ReactNode"),
     }).toEqual({ helpAtTitle: true, keepsMeaning: true, paragraphGone: true, asideSupportsHelp: true });

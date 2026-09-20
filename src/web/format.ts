@@ -133,7 +133,7 @@ export function scoreTheme(value: number | null | undefined): "success" | "warni
 export const SCORE_WORDS: Record<"success" | "warning" | "danger", string> = {
   success: "здоров",
   warning: "есть над чем работать",
-  danger: "запущен",
+  danger: "критическое состояние",
 };
 
 /** Слово шкалы для показанного числа; нет данных — не слово шкалы, а «нет данных» (закон 2). */
@@ -328,9 +328,9 @@ export const SECURITY_PUBLIC_NOTE =
  * ChannelAccess без "granted". Строка — одна для страницы и MD-отчёта.
  */
 export const ACCESS_LOCK_TEXT: Record<"no-pat" | "denied" | "pat-expired" | "check-failed", string> = {
-  "no-pat": "Данные видны участникам репозитория: войдите и добавьте токен доступа SourceCraft в «Личном кабинете».",
+  "no-pat": "Данные видны участникам репозитория: войдите и добавьте токен доступа SourceCraft в Настройках.",
   denied: "Ваш токен доступа не дает доступа к этим данным репозитория.",
-  "pat-expired": "SourceCraft отклонил ваш токен доступа – обновите его в «Личном кабинете».",
+  "pat-expired": "SourceCraft отклонил ваш токен доступа – обновите его в Настройках.",
   "check-failed": "Не удалось проверить доступ к этим данным – попробуйте открыть карточку позже.",
 };
 

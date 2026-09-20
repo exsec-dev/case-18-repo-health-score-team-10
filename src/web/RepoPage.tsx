@@ -64,7 +64,6 @@ import {
   scoreWord,
   sentence,
   slugOf,
-  summaryLine,
 } from "./format";
 import { linkProps, navigate, useQueryParam } from "./router";
 import { Page, type Crumb } from "./Shell";
@@ -167,7 +166,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
         starDoneKey={refresh.doneKey}
         starLoggedIn={me.state.kind === "ok" && me.state.data.login !== null}
       />
-      {card.score !== null && <ScoreBand card={card} meta={meta} />}
+      {card.score !== null && <ScoreBand card={card} />}
       {card.score === null ? (
         card.job ? (
           // Ф2.15: первый анализ — статус живой job вместо лжи «скана ещё не было»
@@ -179,7 +178,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
                 ? `Заявка стоит в очереди – ее возьмут в работу, и здесь появится статус скана. ${etaNote}.`
                 : `Скан собирает факты из репозитория; Score появится после завершения. ${etaNote}.`) +
               // UX-10 (круг 2 В4.4): симметричная кабинету заметка после leaseMs
-              (jobStalled ? " Затянулось – смотрите панель заданий в кабинете." : "")
+              (jobStalled ? " Затянулось – смотрите панель заданий в разделе «Мои репозитории»." : "")
             }
           />
         ) : (
@@ -200,7 +199,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
                   ? [
                       // UX-6 (круг 2 В4.4): на ветке «Скан был» анализа уже были —
                       // слово «первый» обещало то, чего не случится
-                      { text: card.scan ? "Добавьте токен в кабинете – и запустите анализ" : "Добавьте токен в кабинете – и запустите первый анализ", view: "action", size: "l", href: "/me" },
+                      { text: card.scan ? "Добавьте токен в Настройках – и запустите анализ" : "Добавьте токен в Настройках – и запустите первый анализ", view: "action", size: "l", href: "/settings" },
                     ]
                   : undefined
             }
@@ -279,7 +278,7 @@ function useRefreshAnalysis(org: string, repo: string, cardUrl: string, sinceSca
               name: `scan-failed:${org}/${repo}`,
               theme: "danger",
               title: "Анализ завершился ошибкой",
-              content: "Сбор данных не удался – подробности в «Моих заданиях» кабинета.",
+              content: "Сбор данных не удался – подробности в «Моих заданиях» раздела «Мои репозитории».",
             });
           }
           onDone();
@@ -472,8 +471,8 @@ const INDEX_HELP =
   "Считается для всех открытых репозиториев – по ней и строится общий рейтинг.";
 
 const FULL_HELP =
-  "Полная оценка по 6 категориям: те же 4 плюс CI/CD и Security. " +
-  "Требует доступа к репозиторию, поэтому в общий рейтинг не входит.";
+  "Repo Health Score рассчитывается по 6 категориям: 4 категориям HealthCraft Index, а также CI/CD и Security. " +
+  "Показатель доступен только для репозиториев, к данным которых у пользователя есть доступ, и не влияет на публичный рейтинг.";
 
 /**
  * В4.6 (вариант А компоновки, решение владельца 20.09): правая панель стала
@@ -493,15 +492,15 @@ function ScoreAside({ card, meta, leaseMs, jobStalled }: { card: Card; meta: Met
       {score && <ScoreLegend />}
 
       {score && (
-        <AsideSection title="Что считаем">
+        <AsideSection title="Что учитывается">
           {/* В4.6 (У24): ЭТО и есть находка ДП5 — семистрочный абзац был набран
               вариантом для однострочных подписей (body-short 13/16) и вторичным
               цветом. Стало body-2 13/18 + complementary: интерлиньяж абзаца и
               7,0:1 против 5,34:1 в тёмной теме. */}
           <Text as="p" variant="body-2" color="complementary">
-            {meta ? `При покрытии данными ниже ${threshold} показатель не выставляется: без данных честного числа нет. ` : ""}
-            HealthCraft Index строят 4 публичные категории; CI и Security входят только в Repo Health Score – он виден участникам
-            репозитория с доступом к этим данным.
+            HealthCraft Index рассчитывается по 4 категориям на основе публичных данных. CI/CD и Security учитываются только в
+            Repo Health Score, доступном участникам репозитория.
+            {meta ? ` При покрытии данными ниже ${threshold} соответствующий показатель не рассчитывается.` : ""}
           </Text>
         </AsideSection>
       )}
@@ -521,7 +520,7 @@ function ScoreAside({ card, meta, leaseMs, jobStalled }: { card: Card; meta: Met
       {/* В4.6 (вариант А): жаргон и идентификаторы (номер скана, версия модели)
           собраны ОДНИМ блоком под честным заголовком и стоят последними —
           первый взгляд просил убрать их с видного места, но не терять */}
-      <AsideSection title="Реквизиты расчета">
+      <AsideSection title="Параметры расчета">
         {scan ? (
           <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
             <DefinitionList.Item name="Завершен">{fmtDateTime(scan.finishedAt ?? scan.startedAt)}</DefinitionList.Item>
@@ -580,16 +579,8 @@ function ScoreAside({ card, meta, leaseMs, jobStalled }: { card: Card; meta: Met
  * измеряющая не его, а покрытие данными — она конкурировала с самим
  * показателем. Покрытие осталось строкой текста, полоса отдана величине.
  */
-function ScoreBand({ card, meta }: { card: Card; meta: MetaResponse | null }) {
+function ScoreBand({ card }: { card: Card }) {
   const score = card.score!;
-  const titleOf = (key: string): string => meta?.categories.find((c) => c.key === key)?.title ?? CATEGORY_TITLES_RU[key] ?? key;
-  const withDelta = card.recommendations.filter((r) => r.deltaScore !== null);
-  const top = withDelta.length > 0 ? withDelta.reduce((a, b) => ((a.deltaScore ?? 0) >= (b.deltaScore ?? 0) ? a : b)) : null;
-  const summary = summaryLine({
-    categories: (Object.entries(score.categories) as [string, Category][]).map(([key, cat]) => ({ title: titleOf(key), score: cat.score })),
-    recommendations: card.recommendations.length,
-    top: top ? { problem: top.problem, impact: top.expectedImpact ?? fmtSigned(top.deltaScore!) } : null,
-  }, { withCount: false });
   return (
     <Card view="outlined" className="rh-score-band">
       <Flex direction="column" gap={3}>
@@ -619,16 +610,13 @@ function ScoreBand({ card, meta }: { card: Card; meta: MetaResponse | null }) {
                   docs/ui/gravity-uikit.md держит для прозы интерлиньяж абзаца
                   (`body-1`/`body-2` + `complementary`), а подпись оставляет
                   однострочным меткам.
-                  Кнопка «Открыть личный кабинет» убрана, вместо неё ссылка
+                  Отдельная кнопка перехода убрана, вместо нее ссылка
                   РЯДОМ со строкой: `ACCESS_LOCK_TEXT` — одна формулировка на
                   страницу и MD-отчёт, резать её ради ссылки внутри фразы
-                  запрещено, а слова «Личном кабинете» есть лишь в двух
+                  запрещено, а переход нужен лишь в двух
                   вариантах из четырёх — на ветках `denied` и `check-failed`
-                  путь в кабинет иначе исчез бы вовсе. */}
-              <Text variant="body-1" color="complementary">
-                {fullLockReason(card)}{" "}
-                <Link {...linkProps("/me")}>Личный кабинет</Link>
-              </Text>
+                  вариантах доступа. */}
+              <FullLockMessage reason={fullLockReason(card)} />
             </Flex>
           ) : (
             <ScoreFigure
@@ -640,27 +628,24 @@ function ScoreBand({ card, meta }: { card: Card; meta: MetaResponse | null }) {
           )}
         </Flex>
 
-        {/* нижний ярус: итог и следующий шаг, отделённые линией (У26 + У13).
-            В4.6 круг 2 (Р13): кнопка «Что делать (N)» удалена — владелец
-            сняла решение круга 1. Следующий шаг остаётся кликабельным, но
-            СЧЁТЧИКОМ: ссылка «Рекомендаций: N» рядом со строкой итога.
-            `summaryLine` резать нельзя (одна формулировка на страницу и
-            MD-отчёт), поэтому счётчик стоит рядом, а не внутри строки.
-            Приёмка круга 2 (HQ): счётчик читался ДВАЖДЫ — строка тоже его
-            называла. Генератор получил опцию `withCount`: страница просит
-            строку без счётчика, MD-отчёт (где ссылки нет) оставляет его. */}
-        <Flex gap={3} alignItems="center" justifyContent="space-between" wrap className="rh-score-band__summary">
-          <Text variant="body-1" color="complementary" style={{ flex: "1 1 320px" }}>
-            {summary}
-          </Text>
-          {card.recommendations.length > 0 && (
-            <Link {...linkProps(`${window.location.pathname}?tab=${TAB_RECOMMENDATIONS}`)}>
-              Рекомендаций: {card.recommendations.length}
-            </Link>
-          )}
-        </Flex>
       </Flex>
     </Card>
+  );
+}
+
+function FullLockMessage({ reason }: { reason: string | null }) {
+  if (reason === ACCESS_LOCK_TEXT["no-pat"]) {
+    return (
+      <Text variant="body-1" color="complementary">
+        Данные видны участникам репозитория: войдите и добавьте токен доступа SourceCraft в{" "}
+        <Link {...linkProps("/settings")}>Настройках</Link>.
+      </Text>
+    );
+  }
+  return (
+    <Text variant="body-1" color="complementary">
+      {reason}
+    </Text>
   );
 }
 
@@ -690,7 +675,7 @@ function ScoreFigure({
           {NO_SCORE}
         </Label>
       ) : (
-        <Flex gap={2} alignItems="baseline" wrap>
+        <Flex gap={2} alignItems="flex-end" wrap>
           <Text variant="display-2">{fmtScore(total)}</Text>
           <Text color="secondary">из 100</Text>
           {/* В4.6 (У22): шкала вплотную к числу — иначе «83» не с чем сравнить.
@@ -792,14 +777,7 @@ function LockedCategories({ items }: { items: { title: string; reason: string }[
   const sentences = [...groups].map(
     ([reason, titles]) => `${titles.join(" и ")} – ${titles.length > 1 ? "недоступны" : "недоступна"}. ${reason}`,
   );
-  return (
-    <Flex gap={2} alignItems="baseline" className="rh-locked-note">
-      <Icon data={Lock} size={14} />
-      <Text variant="body-2" color="complementary">
-        {sentences.join(" ")}
-      </Text>
-    </Flex>
-  );
+  return <Alert theme="info" view="outlined" size="s" className="rh-locked-note" message={sentences.join(" ")} />;
 }
 
 function CategoryRow({
@@ -840,6 +818,13 @@ function CategoryRow({
       <Text variant="subheader-1" ellipsis>
         {title}
       </Text>
+      <span className="rh-category__tags">
+        {cat.stale && (
+          <Label theme="warning" size="xs">
+            Факты из истории
+          </Label>
+        )}
+      </span>
       <span className="rh-category__bar">
         {cat.score === null ? (
           <Text color="secondary">{NO_DATA}</Text>
@@ -858,13 +843,6 @@ function CategoryRow({
           {fmtScore(cat.score)}
         </Text>
       )}
-      <span className="rh-category__tags">
-        {cat.stale && (
-          <Label theme="warning" size="xs">
-            Факты из истории
-          </Label>
-        )}
-      </span>
       {/* В4.6 (У25, ДП6): у категории без данных «вклад 0%» превращался в
           «категория дала ноль» — единственное место, где продукт своими руками
           опровергал собственный tri-state. Поэтому там стоит `NOT_COUNTED`.
@@ -1006,12 +984,7 @@ function Recommendations({ card }: { card: Card }) {
   }
   return (
     <Flex direction="column" gap={3}>
-      {/* В4.6 (У24): два предложения в полную ширину колонки — проза */}
-      <Text variant="body-1" color="complementary">
-        Порядок задан движком правил: сперва измеримый прирост Score, затем то, что открывает закрытую категорию,
-        затем улучшения по уже собранным данным. Каждый факт открывается по клику.
-      </Text>
-      <ul className="rh-list">
+      <ul className="rh-list" style={{ borderTop: 0 }}>
         {card.recommendations.map((rec) => (
           <RecommendationRow key={rec.ruleId} rec={rec} evidence={evidence} />
         ))}
@@ -1055,7 +1028,10 @@ function RecommendationRow({ rec, evidence }: { rec: Recommendation; evidence: M
               content={<FactProof factKey={ref.key} fact={evidence.get(ref.key)} />}
             >
               <Label theme={ref.missing ? "unknown" : "info"} size="xs" interactive>
-                {ref.key}
+                <Flex gap={1} alignItems="center">
+                  {ref.key}
+                  <Icon data={ChevronDown} size={12} />
+                </Flex>
               </Label>
             </Popover>
           ))}
@@ -1363,11 +1339,11 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
            списка «все мои репозитории» у него нет и быть не может без
            токена с правами; поэтому «Мои репозитории» в кабинете — это
            избранное, а не автоматический список (решение favorites-only
-           18.09). Кабинет при этом не тронут: он уходит в веху В4.7. */
+           18.09). Раздел настроек вынесен на `/settings` в В4.6, круг 3. */
         title={
           state === "anon"
             ? "Войдите через Я ID, чтобы добавлять в избранное"
-            : "В избранное. «Мои репозитории» в кабинете – это избранное, а не автоматический список: сервис не перечисляет ваши репозитории сам, вы сами выбираете, за чем следить. Права на закрытые данные проверяются в кабинете."
+            : "В избранное. Раздел «Мои репозитории» содержит выбранные вами репозитории. Права на закрытые данные проверяются в Настройках."
         }
         onClick={() => void toggle()}
       >
@@ -1375,7 +1351,7 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
             иконки перехода на sourcecraft.dev — 16 против 14 давали разную
             оптику у двух кнопок, стоящих вплотную. Кнопки-обёртки совпадают
             по габариту: обе `size="s"`. */}
-        <Text color={state === "on" ? "warning" : "secondary"}>
+        <Text color={state === "on" ? "warning" : "secondary"} className="rh-favorite-star__icon">
           <Icon data={state === "on" ? StarFill : Star} size={14} />
         </Text>
       </Button>

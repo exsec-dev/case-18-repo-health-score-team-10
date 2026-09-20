@@ -1,8 +1,8 @@
 // router.ts — мини-роутер на History API. Своим, а не react-router:
-// экранов два, а зависимость тянула бы контекст, матчер и Outlet ради
+// экранов мало, а зависимость тянула бы контекст, матчер и Outlet ради
 // одного switch (решение канвы §2 «Пуск В3», пункт «в»). Маршруты (В4.1,
-// К2): только «/», «/repo/:org/:repo», «/me» — «/me/repo/...» удалён без
-// перенаправления (единая карточка).
+// К2): «/», «/repo/:org/:repo», «/me», «/settings»; «/me/repo/...» удален
+// без перенаправления (единая карточка).
 // Состояние фильтров рейтинга живёт в query-строке, поэтому «маршрут» —
 // это pathname + search целиком: ссылкой можно поделиться.
 import { useSyncExternalStore, type MouseEvent } from "react";
@@ -11,6 +11,7 @@ export type Route =
   | { kind: "rating"; search: string }
   | { kind: "repo"; org: string; repo: string }
   | { kind: "me" }
+  | { kind: "settings" }
   | { kind: "not-found"; path: string };
 
 /** Событие своей навигации: popstate браузер шлёт только на назад/вперёд. */
@@ -20,6 +21,7 @@ export function parseRoute(pathname: string, search = ""): Route {
   const parts = pathname.split("/").filter((p) => p !== "");
   if (parts.length === 0) return { kind: "rating", search };
   if (parts[0] === "me" && parts.length === 1) return { kind: "me" };
+  if (parts[0] === "settings" && parts.length === 1) return { kind: "settings" };
   if (parts[0] === "repo" && parts.length === 3) {
     return { kind: "repo", org: safeDecode(parts[1]!), repo: safeDecode(parts[2]!) };
   }

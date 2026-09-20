@@ -1,6 +1,6 @@
 // shot.ts — харнесс скриншотов на сыром CDP, ноль новых зависимостей.
 // Поднимает локальный сервер в development или production, водит headless
-// Chrome по трём страницам в ТРЁХ РАЗРЕШЕНИЯХ, ловит ошибки консоли и внешние
+// Chrome по четырём страницам в ТРЁХ РАЗРЕШЕНИЯХ, ловит ошибки консоли и внешние
 // запросы, кладёт PNG в reports/shots/<mode>/. В `bun test` не входит —
 // требует Chrome.
 //
@@ -11,7 +11,7 @@
 // вопрос про один экран не решает вовсе). Постраничный остаётся вторым
 // файлом с суффиксом `-full` для чтения содержимого целиком.
 // Схема имён: reports/shots/<mode>/<page>@<width>.png (+ `<page>@<width>-full.png`).
-// 3 страницы x 3 ширины x 2 режима = 18 приёмочных файлов.
+// 4 страницы x 3 ширины x 2 режима = 24 приёмочных файла.
 //
 // Запуск:
 //   SHOT_MODE=production bun scripts/shot.ts [org/repo]
@@ -201,12 +201,20 @@ async function run(): Promise<void> {
       },
     },
     {
-      // «Личный кабинет» без сессии — витрина слоёв (Я ID → токен доступа) и входа.
+      // «Мои репозитории» без сессии — витрина входа через Я ID.
       name: "me",
       url: `${base}/me`,
       checks: {
-        "заголовок кабинета": "document.querySelectorAll('h1').length",
+        "заголовок моих репозиториев": "document.body.innerText.includes('Мои репозитории') ? 1 : 0",
         "кнопка входа Я ID": `[...document.querySelectorAll('a,button')].filter((n) => n.textContent?.includes("Войти через Я ID")).length`,
+      },
+    },
+    {
+      name: "settings",
+      url: `${base}/settings`,
+      checks: {
+        "заголовок настроек": "document.body.innerText.includes('Настройки') ? 1 : 0",
+        "объяснение входа для настроек": "document.body.innerText.includes('настроить токен доступа SourceCraft') ? 1 : 0",
       },
     },
     {
@@ -216,8 +224,8 @@ async function run(): Promise<void> {
         "блок Score": "document.body.innerText.includes('из 100') ? 1 : 0",
         категории: "document.body.innerText.includes('Категории') ? 1 : 0",
         рекомендации: "document.body.innerText.includes('Рекомендации') ? 1 : 0",
-        "tri-state NULL": "document.body.textContent?.includes('показатель не выставляется') ? 1 : 0",
-        "объяснение закрытых каналов": "document.body.innerText.includes('входят только в Repo Health Score') ? 1 : 0",
+        "tri-state NULL": "document.body.textContent?.includes('Недостаточно данных для расчета оценки') ? 1 : 0",
+        "объяснение закрытых каналов": "document.body.innerText.includes('учитываются только в Repo Health Score') ? 1 : 0",
         "кнопка отчета": "[...document.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'Отчет').length",
         // В4.6, приёмка вариантa А (пункт 5): величина И весь список категорий
         // в ОДНОМ экране. Проверяется не на глаз, а геометрией: нижняя кромка
@@ -232,11 +240,9 @@ async function run(): Promise<void> {
         // стоит ПОСЛЕ последней строки категории (под Code health).
         "строка недоступных категорий под списком":
           "(() => { const note = document.querySelector('.rh-locked-note'); const rows = [...document.querySelectorAll('.rh-category')]; if (!note || rows.length === 0) return 0; return note.getBoundingClientRect().top >= rows[rows.length - 1].getBoundingClientRect().top ? 1 : 0; })()",
-        // нижний ярус блока-полосы: строка итога и следующий шаг (У26).
-        // В4.6 круг 2 (Р13): следующий шаг — ссылка-счётчик «Рекомендаций: N»,
-        // кнопки «Что делать» больше нет.
-        "строка итога и ссылка-счётчик рекомендаций":
-          "(document.body.innerText.includes('Сильнее всего') && [...document.querySelectorAll('a')].some((a) => /Рекомендаций: [0-9]+/.test(a.textContent ?? ''))) ? 1 : 0",
+        // В4.6 круг 3 (П1.10): под 2 показателями нет текста и CTA.
+        "нижний текст и ссылка показателей сняты":
+          "(() => { const band = document.querySelector('.rh-score-band'); if (!band || band.querySelector('.rh-score-band__summary')) return 0; return [...band.querySelectorAll('a')].every((a) => !/^Рекомендаций:/.test(a.textContent?.trim() ?? '')) ? 1 : 0; })()",
       },
     },
   ];

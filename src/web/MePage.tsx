@@ -1,8 +1,8 @@
-// MePage.tsx — «Личный кабинет» (В4/Б5): слои идентичности (Q4) — вход
+// MePage.tsx — пользовательские поверхности «Мои репозитории» и «Настройки»:
 // Я ID (UX), PAT SourceCraft (права на данные). Основная колонна — ОДИН
 // список «Мои репозитории» = избранное (В4.4, кластер I: дубль-секция
 // «Избранное» удалена — права-ряд, проверка, звезда и анализ в одной
-// строке). Токен — настройка в правой панели: вставка → живая проверка →
+// строке). Токен — отдельная настройка на /settings: вставка → живая проверка →
 // зашифрованное хранение, замена/удаление; исход посева из namespace
 // показывается тостом (кластер I). Ссылки ведут на единую карточку /repo/...
 // Токен НИКОГДА не возвращается API и не логируется.
@@ -15,7 +15,8 @@ import { linkProps, repoHref } from "./router";
 import { Page, UserAvatar, displayName, logoutFailedToast } from "./Shell";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, SkeletonRows } from "./ui";
 
-const CRUMBS = [{ text: "Личный кабинет" }];
+const REPOS_CRUMBS = [{ text: "Мои репозитории" }];
+const SETTINGS_CRUMBS = [{ text: "Настройки" }];
 
 type ScanJobState = { sinceScanId: number; startedAt: number; seenScanId: number | null; phase: "queued" | "running" | "stalled" };
 
@@ -30,7 +31,7 @@ export function MePage({ meta }: { meta: MetaResponse | null }) {
 
   if (me.state.kind === "loading") {
     return (
-      <Page crumbs={CRUMBS}>
+      <Page crumbs={REPOS_CRUMBS}>
         <SkeletonRows rows={4} height={56} />
       </Page>
     );
@@ -38,11 +39,11 @@ export function MePage({ meta }: { meta: MetaResponse | null }) {
   if (me.state.kind === "error") {
     // В4.4 (кластер M-3): сбой /api/me — честная ошибка с повтором, не LoginOffer
     return (
-      <Page crumbs={CRUMBS}>
+      <Page crumbs={REPOS_CRUMBS}>
         <Alert
           theme="danger"
           view="outlined"
-          title="Не удалось загрузить кабинет"
+          title="Не удалось загрузить список репозиториев"
           message={me.state.message}
           actions={[{ text: "Повторить", handler: me.reload }]}
         />
@@ -50,39 +51,53 @@ export function MePage({ meta }: { meta: MetaResponse | null }) {
     );
   }
   if (me.state.data.login === null) {
-    return <LoginOffer />;
+    return <LoginOffer pageTitle="Мои репозитории" />;
   }
   const data = me.state.data;
   return (
     <Page
-      crumbs={CRUMBS}
-      aside={
-        <>
-          <AccountSection me={data} />
-          <PatSection key={data.patCheckedAt ?? "no-pat"} hasPat={data.hasPat} checkedAt={data.patCheckedAt} onChanged={me.reload} />
-        </>
-      }
+      crumbs={REPOS_CRUMBS}
+      aside={<AccountSection me={data} />}
     >
-      <PageHeader
-        title="Личный кабинет"
-        description={
-          <>
-            Вы вошли как <Text variant="code-inline-1">{data.login}</Text> (Я ID). Вход — это UX-слой; права на данные
-            дает отдельный токен доступа SourceCraft, как на любом git-хостинге.
-          </>
-        }
-      />
+      <PageHeader title="Мои репозитории" />
       <JobsPanel jobs={jobs.jobs} reload={jobs.reload} leaseMs={leaseMs} />
-      {/* В4.4 (кластер I): кабинет favorites-only — список живёт и без PAT;
+      {/* В4.4 (кластер I): список favorites-only живет и без PAT;
           токен нужен для проверки прав, автозапуска и посева из namespace */}
       <MyReposSection hasPat={data.hasPat} leaseMs={leaseMs} serverJobs={jobs.jobs} />
     </Page>
   );
 }
 
+export function SettingsPage() {
+  const me = useJson<MeResponse>("/api/me");
+  if (me.state.kind === "loading") {
+    return (
+      <Page crumbs={SETTINGS_CRUMBS}>
+        <SkeletonRows rows={4} height={56} />
+      </Page>
+    );
+  }
+  if (me.state.kind === "error") {
+    return (
+      <Page crumbs={SETTINGS_CRUMBS}>
+        <Alert theme="danger" view="outlined" title="Не удалось загрузить настройки" message={me.state.message} actions={[{ text: "Повторить", handler: me.reload }]} />
+      </Page>
+    );
+  }
+  if (me.state.data.login === null) return <LoginOffer pageTitle="Настройки" />;
+  const data = me.state.data;
+  return (
+    <Page crumbs={SETTINGS_CRUMBS} aside={<AccountSection me={data} />}>
+      <PageHeader title="Настройки" description="Управление доступом к данным репозиториев SourceCraft." />
+      <PatSection key={data.patCheckedAt ?? "no-pat"} hasPat={data.hasPat} checkedAt={data.patCheckedAt} onChanged={me.reload} />
+    </Page>
+  );
+}
+
 /**
  * «Аккаунт» — кто вошёл и выход. Здесь выход доступен всегда, в том числе при
- * узком rail (там у аватара кнопки нет): кабинет — место настроек аккаунта.
+ * узком rail (там у аватара кнопки нет): обе пользовательские поверхности
+ * сохраняют доступ к управлению аккаунтом.
  */
 function AccountSection({ me }: { me: MeResponse }) {
   const toaster = useToaster();
@@ -109,32 +124,36 @@ function AccountSection({ me }: { me: MeResponse }) {
 }
 
 /** Не вошедшему — объяснение слоёв и кнопка входа (живой клик — приёмка HQ). */
-function LoginOffer() {
+function LoginOffer({ pageTitle }: { pageTitle: "Мои репозитории" | "Настройки" }) {
   // Ф2.9: /me?auth_error=… после неудачного callback — причина показывается,
   // а не проглатывается
   const authError = new URLSearchParams(window.location.search).get("auth_error");
   return (
     <Page
-      crumbs={CRUMBS}
+      crumbs={[{ text: pageTitle }]}
       aside={
         <AsideSection title="Как это устроено">
           <Text color="complementary">
-            Публичный рейтинг работает и без входа — раздел «Рейтинг». Блоки CI/CD и Security на карточке репозитория
+            Публичный рейтинг работает и без входа – раздел «Рейтинг». Блоки CI/CD и Security на карточке репозитория
             видны только тем, у кого есть к ним доступ на SourceCraft; в общий рейтинг они не вкладываются.
           </Text>
         </AsideSection>
       }
     >
-      <PageHeader title="Личный кабинет" />
+      <PageHeader title={pageTitle} />
       {authError && (
         <Flex direction="column" gap={3} style={{ marginBottom: "var(--g-spacing-4)" }}>
           <Alert theme="danger" view="outlined" title="Вход через Я ID не завершен" message={authErrorText(authError)} />
         </Flex>
       )}
       <EmptyState
-        icon={Person}
-        title="Анализ своего репозитория"
-        description="Сценарий «свой репо» состоит из двух слоев: вход через Я ID (кто вы у нас) и персональный токен SourceCraft (что платформа может вам показать — CI-раны и AppSec вашего репозитория). Токен создается в SourceCraft: Домой → Доступ → Персональные токены доступа."
+        icon={pageTitle === "Настройки" ? Key : Person}
+        title={pageTitle === "Настройки" ? "Настройки доступны после входа" : "Мои репозитории доступны после входа"}
+        description={
+          pageTitle === "Настройки"
+            ? "Войдите через Я ID, чтобы настроить токен доступа SourceCraft."
+            : "Войдите через Я ID, чтобы управлять избранными репозиториями и запускать их анализ."
+        }
         actions={[{ text: "Войти через Я ID", view: "action", size: "l", href: "/auth/ya" }]}
       />
     </Page>
@@ -235,78 +254,89 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
   );
 
   return (
-    <AsideSection title="Токен доступа">
-      {hasPat ? (
-        <Flex direction="column" gap={3}>
-          <Flex gap={2} alignItems="center" wrap>
-            <Label theme="success" size="xs">
-              Сохранен
-            </Label>
-            <Text variant="body-short" color="secondary">
-              проверен {fmtDateTime(checkedAt)}
-            </Text>
-          </Flex>
-          {owner && <Text color="complementary">Токен принадлежит пользователю {owner}.</Text>}
-          <Text variant="body-short" color="secondary">
-            Токен хранится зашифрованным (AES-256-GCM) и никогда не возвращается обратно в браузер и не попадает в логи.
-            Замена и удаление — сразу действуют на новые сканы.
-          </Text>
-          {replacing ? (
-            <Flex direction="column" gap={2}>
-              {tokenForm("Новый токен доступа", "Проверить и заменить")}
-              {/* В4.4 (кластер M-8): выход из режима замены — явная «Отмена» */}
-              <Button view="normal" size="m" width="max" onClick={() => setReplacing(false)} disabled={busy}>
-                Отмена
-              </Button>
+    <Card view="outlined" className="rh-settings-card">
+      <Flex as="section" direction="column" gap={3}>
+        <Text variant="subheader-2" as="h2">
+          Токен доступа SourceCraft
+        </Text>
+        {hasPat ? (
+          <Flex direction="column" gap={3}>
+            <Flex gap={2} alignItems="center" wrap>
+              <Label theme="success" size="xs">
+                Сохранен
+              </Label>
+              <Text variant="body-short" color="secondary">
+                проверен {fmtDateTime(checkedAt)}
+              </Text>
             </Flex>
-          ) : (
-            <Flex gap={2}>
-              <Button view="normal" size="m" onClick={() => setReplacing(true)}>
-                Заменить
-              </Button>
-              <Button view="outlined-danger" size="m" onClick={() => setConfirmDelete(true)} disabled={busy}>
-                Удалить
-              </Button>
-            </Flex>
-          )}
-        </Flex>
-      ) : (
-        <Flex direction="column" gap={3}>
-          <Flex gap={2} alignItems="center" wrap>
-            <Label theme="warning" size="xs">
-              Не задан
-            </Label>
+            {owner && <Text color="complementary">Токен принадлежит пользователю {owner}.</Text>}
             <Text variant="body-short" color="secondary">
-              свои репозитории недоступны
+              Токен хранится зашифрованным (AES-256-GCM) и никогда не возвращается обратно в браузер и не попадает в логи.
+              Замена и удаление — сразу действуют на новые сканы.
             </Text>
+            {replacing ? (
+              <Flex direction="column" gap={2}>
+                {tokenForm("Новый токен доступа", "Проверить и заменить")}
+                {/* В4.4 (кластер M-8): выход из режима замены — явная «Отмена» */}
+                <Button view="normal" size="m" width="max" onClick={() => setReplacing(false)} disabled={busy}>
+                  Отмена
+                </Button>
+              </Flex>
+            ) : (
+              <Flex gap={2}>
+                <Button view="normal" size="m" onClick={() => setReplacing(true)}>
+                  Заменить
+                </Button>
+                <Button view="outlined-danger" size="m" onClick={() => setConfirmDelete(true)} disabled={busy}>
+                  Удалить
+                </Button>
+              </Flex>
+            )}
           </Flex>
-          <Text variant="body-short" color="complementary">
-            SourceCraft: Домой → Доступ → Персональные токены доступа → Сгенерировать новый токен. Токен показывается один
-            раз — скопируйте его сразу. Перед сохранением мы проверяем его живым запросом GET /user: неверный токен
-            платформа отклонит, и он не сохранится.
-          </Text>
-          {tokenForm("Токен доступа SourceCraft", "Проверить и сохранить")}
-        </Flex>
-      )}
-      {error && (
-        <Alert theme="danger" view="outlined" size="s" title={failedOp === "save" ? "Токен не сохранен" : "Токен не удален"} message={error} />
-      )}
+        ) : (
+          <Flex direction="column" gap={3}>
+            <Flex gap={2} alignItems="center" wrap>
+              <Label theme="warning" size="xs">
+                Не задан
+              </Label>
+              <Text variant="body-short" color="secondary">
+                свои репозитории недоступны
+              </Text>
+            </Flex>
+            <Text variant="body-short" color="complementary">
+              SourceCraft: Домой → Доступ → Персональные токены доступа → Сгенерировать новый токен. Токен показывается один
+              раз — скопируйте его сразу. Перед сохранением мы проверяем его живым запросом GET /user: неверный токен
+              платформа отклонит, и он не сохранится.
+            </Text>
+            {tokenForm("Токен доступа SourceCraft", "Проверить и сохранить")}
+          </Flex>
+        )}
+        {error && (
+          <Alert
+            theme="danger"
+            view="outlined"
+            size="s"
+            title={failedOp === "save" ? "Токен не сохранен" : "Токен не удален"}
+            message={error}
+          />
+        )}
 
-      <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)} size="s" aria-label="Удаление токена">
-        <Dialog.Header caption="Удалить токен?" />
-        <Dialog.Body>
-          <Text>Свои репозитории и запуск анализа станут недоступны, пока вы не добавите новый токен.</Text>
-        </Dialog.Body>
-        <Dialog.Footer
-          preset="danger"
-          textButtonApply="Удалить"
-          textButtonCancel="Отмена"
-          onClickButtonApply={() => void remove()}
-          onClickButtonCancel={() => setConfirmDelete(false)}
-          loading={busy}
-        />
-      </Dialog>
-    </AsideSection>
+        <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)} size="s" aria-label="Удаление токена">
+          <Dialog.Header caption="Удалить токен?" />
+          <Dialog.Body>
+            <Text>Свои репозитории и запуск анализа станут недоступны, пока вы не добавите новый токен.</Text>
+          </Dialog.Body>
+          <Dialog.Footer
+            preset="danger"
+            textButtonApply="Удалить"
+            textButtonCancel="Отмена"
+            onClickButtonApply={() => void remove()}
+            onClickButtonCancel={() => setConfirmDelete(false)}
+            loading={busy}
+          />
+        </Dialog>
+      </Flex>
+    </Card>
   );
 }
 
@@ -474,9 +504,8 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
           Мои репозитории
         </Text>
         <Text color="complementary">
-          В списке — ваше избранное: репозитории, отмеченные звёздочкой на их страницах
-          {hasPat ? ". Токен открывает проверку прав, автозапуск анализа и посев из вашего namespace при сохранении" : ""}. Добавить можно и вручную:
-          слагом org/repo или ссылкой на репозиторий.
+          В разделе отображаются репозитории, добавленные в избранное на их страницах. Репозиторий также можно добавить
+          вручную по идентификатору org/repo или ссылке.
         </Text>
       </Flex>
 
@@ -779,7 +808,7 @@ export function JobsBell() {
                 <Text variant="code-1">{j.slug}</Text> — {j.error ?? "ошибка"}
               </Text>
             ))}
-          <Link {...linkProps("/me")}>весь список — в кабинете</Link>
+          <Link {...linkProps("/me")}>весь список – в разделе «Мои репозитории»</Link>
         </Flex>
       </Card>
     </details>

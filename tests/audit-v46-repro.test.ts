@@ -134,7 +134,7 @@ describe("В4.6-3 (У22): словесная шкала здоровья вид�
   test("format.ts отдаёт слово шкалы чистой функцией (одна копия на страницу и отчёт)", async () => {
     const { scoreWord } = (await import("../src/web/format")) as { scoreWord?: (v: number | null) => string };
     expect(typeof scoreWord).toBe("function");
-    expect([scoreWord!(83), scoreWord!(55), scoreWord!(12)]).toEqual(["здоров", "есть над чем работать", "запущен"]);
+    expect([scoreWord!(83), scoreWord!(55), scoreWord!(12)]).toEqual(["здоров", "есть над чем работать", "критическое состояние"]);
   });
 
   // Б2: фраза легенды живёт в ОДНОМ месте (format.ts SCORE_LEGEND_TITLE) и
@@ -239,19 +239,18 @@ describe("В4.6-5 (У37): заливка полос непрозрачна и б
 
 describe("В4.6-6 (У21): колонка индекса — горизонтально, число справа", () => {
   // ЗАКРЫТО блоком Б3 (колонка индекса и уплотнение строки).
-  test("ScoreCell: полоса 80px слева, число subheader-3 в слоте справа", () => {
+  test("ScoreCell: полоса 80px слева, число размера остальных колонок и того же цвета", () => {
     const src = srcOf("Rating.tsx");
     const cell = src.slice(src.indexOf("function ScoreCell"), src.indexOf("function CategoryCell"));
+    const css = srcOf("layout.css");
     expect({
       horizontal: !/direction="column"/.test(cell),
-      bar80: cell.includes("width: 80"),
-      // Круг 2 (Р3): утверждение `subheader3` СНЯТО — владелец попросила у
-      // числа меньше жирности, и набор выбирает соседний шаг шкалы
-      // (`body-3`). Ширины пары НЕ пересчитываются, поэтому `bar80` и слот
-      // числа остаются проверяемыми здесь.
+      bar80: /\.rh-score-cell__bar\s*\{[^}]*flex:\s*0 0 80px[^}]*width:\s*80px/.test(css),
       slot: cell.includes("rh-score-cell__num"),
+      sameTextSize: !cell.includes('variant="body-3"') && !cell.includes('variant="subheader-3"'),
+      sameColor: cell.includes("scoreColor(item.healthcraftIndex)"),
       noOldBar: !cell.includes("width: 64"),
-    }).toEqual({ horizontal: true, bar80: true, slot: true, noOldBar: true });
+    }).toEqual({ horizontal: true, bar80: true, slot: true, sameTextSize: true, sameColor: true, noOldBar: true });
   });
 
   // ЗАКРЫТО блоком Б3 (колонка индекса и уплотнение строки).
@@ -294,9 +293,9 @@ describe("В4.6-7 (У23): границы сетки и разрешения", ()
   });
 
   // ЗАКРЫТО блоком Б4 (границы сетки и разрешения).
-  test("у основной колонки есть мера, у прокручиваемых кромок — затухание", () => {
+  test("у основной колонки есть мера, затухание нижней кромки полностью снято", () => {
     const css = layout();
-    expect({ measure: /\.rh-page__main[\s\S]{0,200}max-width/.test(css), fade: css.includes("rh-fade") }).toEqual({ measure: true, fade: true });
+    expect({ measure: /\.rh-page__main[\s\S]{0,200}max-width/.test(css), fade: css.includes("rh-fade") }).toEqual({ measure: true, fade: false });
   });
 });
 
@@ -334,15 +333,17 @@ describe("В4.6-8 (У26/У13/У38): вариант А — карточка на�
       bandIsMainChild: pageOpen >= 0 && bandMount > pageOpen,
       bandHasOwnClass: src.includes('className="rh-score-band"'),
       asideKeepsFigure: /display-2/.test(asideBody),
-      asideIsMethodOnly: asideBody.includes("<ScoreLegend />") && asideBody.includes("Реквизиты расчета"),
+      asideIsMethodOnly: asideBody.includes("<ScoreLegend />") && asideBody.includes("Параметры расчета"),
     }).toEqual({ bandIsMainChild: true, bandHasOwnClass: true, asideKeepsFigure: false, asideIsMethodOnly: true });
   });
 
   // ЗАКРЫТО блоком Б6 (вариант А компоновки карточки).
-  test("строка итога и кнопка «Что делать (N)» — над табами; таб в query", () => {
+  test("текст под индексами и ссылка рекомендаций сняты; таб и худшая категория сохранены", () => {
     const src = srcOf("RepoPage.tsx");
-    expect({ cta: src.includes("Что делать"), tabInQuery: src.includes("?tab=") || src.includes('"tab"'), worstOpen: src.includes("worstKey") }).toEqual({
-      cta: true,
+    const band = src.slice(src.indexOf("function ScoreBand"), src.indexOf("function ScoreFigure"));
+    expect({ summary: band.includes("summaryLine"), recommendationLink: band.includes("Рекомендаций:"), tabInQuery: src.includes("?tab=") || src.includes('"tab"'), worstOpen: src.includes("worstKey") }).toEqual({
+      summary: false,
+      recommendationLink: false,
       tabInQuery: true,
       worstOpen: true,
     });
@@ -354,7 +355,8 @@ describe("В4.6-8 (У26/У13/У38): вариант А — карточка на�
 // Звезда — юникодный глиф ★/☆ вместо иконки из @gravity-ui/icons (нарушение
 // правила 3а docs/ui/gravity-uikit.md); плейсхолдер поиска называет поля
 // вместо действия; опция сортировки «Имя (org/repo)» — жаргон.
-// Область — всё, КРОМЕ MePage.tsx (кабинет отдан вехе В4.7, П3.4).
+// Область первоначального контракта не включала MePage.tsx; перенос П3.1
+// в интерактивный круг В4.6 зафиксирован отдельным аудитом круга 3.
 // ---------------------------------------------------------------------------
 
 describe("В4.6-9 (У27–У32): консистентность вне кабинета", () => {
@@ -443,13 +445,13 @@ describe("В4.6-10 (У18): слоты под В5 заложены честным
 
 describe("В4.6-11 (У15/У16/У17): охват, границы доступа, движки AppSec", () => {
   // ЗАКРЫТО блоком Б9 (охват, границы доступа, движки AppSec).
-  test("У15: рейтинг называет охват числами из БД и стратегию первой волны", () => {
+  test("У15: рейтинг называет охват числами из БД без внутренней стратегии обхода", () => {
     const src = srcOf("Rating.tsx");
     expect({
       coverage: /оценено/i.test(src),
       wave: src.includes("по убыванию лайков") || src.includes("самые заметные"),
       onlyScored: src.includes("view=") || src.includes("unscored"),
-    }).toEqual({ coverage: true, wave: true, onlyScored: true });
+    }).toEqual({ coverage: true, wave: false, onlyScored: true });
   });
 
   // ЗАКРЫТО блоком Б9 (охват, границы доступа, движки AppSec).
@@ -460,8 +462,8 @@ describe("В4.6-11 (У15/У16/У17): охват, границы доступа, 
   });
 
   // ЗАКРЫТО блоком Б9 (охват, границы доступа, движки AppSec).
-  test("У16: карточка объясняет, что «мои репозитории» — избранное, а не автоперечисление", () => {
-    expect(srcOf("RepoPage.tsx")).toContain("это избранное, а не автоматический список");
+  test("У16: карточка формально объясняет, что раздел содержит выбранные репозитории", () => {
+    expect(srcOf("RepoPage.tsx")).toContain("Раздел «Мои репозитории» содержит выбранные вами репозитории");
   });
 
   // ЗАКРЫТО блоком Б9 (охват, границы доступа, движки AppSec).

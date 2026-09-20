@@ -586,11 +586,13 @@ describe("В4.6 (приёмка круга 2): строка итога и счё
     }).toEqual({ reportNamesCount: true, pageOmitsCount: true, bothKeepBestWorst: true, pageKeepsTop: true, pageStartsCapitalized: true });
   });
 
-  test("карточка вызывает генератор с withCount: false, а ссылка-счётчик остаётся", () => {
+  test("карточка больше не печатает итоговую строку и ссылку; MD сохраняет общий генератор", () => {
     const card = src("RepoPage.tsx");
+    const report = src("../report/markdown.ts");
     expect({
       asksWithoutCount: /summaryLine\(\{[\s\S]{0,600}?\}, \{ withCount: false \}\)/.test(card),
       linkStillThere: card.includes("Рекомендаций: {card.recommendations.length}"),
-    }).toEqual({ asksWithoutCount: true, linkStillThere: true });
+      reportStillUsesGenerator: report.includes("summaryLine"),
+    }).toEqual({ asksWithoutCount: false, linkStillThere: false, reportStillUsesGenerator: true });
   });
 });
