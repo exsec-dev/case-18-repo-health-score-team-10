@@ -407,7 +407,8 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
       coverageWord: figure.includes("Покрытие: {fmtCoverage(coverage)}"),
       oldCoverageWord: figure.includes("данных хватило"),
       chipLikeAside: /scoreLabelTheme\(total\)\} size="s"/.test(figure),
-      lockTextSmaller: /variant="body-short"[\s\S]{0,120}fullLockReason\(card\)/.test(lock),
+      // мельче прежнего body-2, но всё ещё проза: правило 4а gravity-uikit.md
+      lockTextSmaller: /variant="body-1"[\s\S]{0,120}fullLockReason\(card\)/.test(lock),
       buttonGone: lock.includes("Открыть личный кабинет"),
       // ссылка стоит РЯДОМ с общей строкой, поэтому она одна на все четыре ветки
       linkOnce: (lock.match(/Личный кабинет</g) ?? []).length === 1,
