@@ -7,7 +7,46 @@
 // либо без честного объяснения, почему факта нет.
 // Раскладка как у страницы репозитория SourceCraft: действия в ActionBar,
 // содержимое во вкладках, итоговая оценка — в правой панели.
-import { ArrowDownToLine, ArrowUpRightFromSquare, ChevronDown, Clock, CodeFork, FileText, Heart, LogoMarkdown, SquareListUl, Star, StarFill } from "@gravity-ui/icons";
+import {
+  ArrowDownToLine,
+  ArrowUpRightFromSquare,
+  Bug,
+  Calendar,
+  CalendarXmark,
+  ChevronDown,
+  Circle,
+  CircleCheck,
+  Clock,
+  ClockArrowRotateLeft,
+  CodeCommits,
+  CodeFork,
+  CodePullRequest,
+  Comment,
+  CommentSlash,
+  Copy,
+  FileText,
+  Flag,
+  FolderTree,
+  Hashtag,
+  Heart,
+  Hourglass,
+  Key,
+  LogoMarkdown,
+  PersonGear,
+  Persons,
+  Pipeline,
+  Pulse,
+  Rocket,
+  ScalesBalanced,
+  ShieldCheck,
+  SquareCheck,
+  SquareListUl,
+  Star,
+  StarFill,
+  Stopwatch,
+  Thunderbolt,
+} from "@gravity-ui/icons";
+import type { IconData } from "@gravity-ui/uikit";
 import {
   ActionTooltip,
   Alert,
@@ -45,6 +84,7 @@ import {
   SECURITY_PUBLIC_NOTE,
   accessLockShort,
   analysisOutcome,
+  fmtCount,
   fmtCoverage,
   fmtDate,
   fmtDateTime,
@@ -116,7 +156,16 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   const crumbs: Crumb[] = [{ text: "Рейтинг", href: "/" }, { text: `${org} / ${repo}` }];
   const refreshButton = canRefresh && (
     <Button view="action" size="m" onClick={refresh.start} disabled={refresh.phase !== "idle"} loading={refresh.phase === "sending"}>
-      {refresh.phase === "queued" && <Spin size="xs" />}
+      {/* Доводка 21.09: спиннер живёт в слоте `Button.Icon`, а не голым узлом
+          рядом с текстом. Слот сам держит габарит в высоту кнопки и гасит
+          паддинг отрицательным полем (`.g-button__icon`); голый `Spin` был
+          обычным inline-block и вставал к тексту вплотную — крутящееся кольцо
+          налезало на первую букву. */}
+      {refresh.phase === "queued" && (
+        <Button.Icon side="start">
+          <Spin size="xs" />
+        </Button.Icon>
+      )}
       {refresh.phase === "queued" ? "Анализ в очереди" : "Обновить анализ"}
     </Button>
   );
@@ -342,6 +391,11 @@ function Header({ card, starDoneKey, starLoggedIn }: { card: Card; starDoneKey: 
               </Button>
             </ActionTooltip>
           </Flex>
+          {/* Реквизиты остаются в шапке (решение владельца 21.09 — перенос в
+              панель отменён). Изменения к прежнему виду два: у языка иконки
+              НЕТ (цветная точка сама его и обозначает), а дата снова названа
+              словом «обновлен» — иконка часов без слова читалась как время
+              скана, а не как активность репозитория. */}
           <Meta>
             <MetaItem title="Язык">
               <LanguageName name={r.language} color={r.languageColor} />
@@ -352,18 +406,14 @@ function Header({ card, starDoneKey, starLoggedIn }: { card: Card; starDoneKey: 
             <MetaItem icon={CodeFork} title="Форки">
               {fmtNumber(r.forks)}
             </MetaItem>
-            {/* В4.6 круг 2 (Р11): слово «активность» из строки убрано —
-                иконка часов и подсказка по hover говорят то же самое, а в
-                ряду реквизитов лишнее слово ломало ритм. Подсказка
-                («Последняя активность») остаётся как есть. */}
             <MetaItem icon={Clock} title="Последняя активность">
-              {fmtDate(r.lastActivityAt)}
+              обновлен {fmtDate(r.lastActivityAt)}
             </MetaItem>
           </Meta>
         </Flex>
       </div>
       {r.title && r.title !== r.repo && (
-        <Text as="p" color="complementary" style={{ margin: "var(--g-spacing-2) 0 0" }}>
+        <Text as="p" className="rh-prose" color="complementary" style={{ margin: "var(--g-spacing-2) 0 0" }}>
           {r.title}
         </Text>
       )}
@@ -584,7 +634,15 @@ function ScoreBand({ card }: { card: Card }) {
     <Card view="outlined" className="rh-score-band">
       <Flex direction="column" gap={3}>
         <Flex gap={6} wrap>
-          <ScoreFigure title="HealthCraft Index" help={INDEX_HELP} total={score.healthcraftIndex} coverage={score.indexCoverage} withBar />
+          <ScoreFigure
+            title="HealthCraft Index"
+            help={INDEX_HELP}
+            total={score.healthcraftIndex}
+            coverage={score.indexCoverage}
+            rank={score.rank}
+            rankedTotal={score.rankedTotal}
+            withBar
+          />
           {score.fullLocked ? (
             <Flex direction="column" gap={1} style={{ flex: "1 1 240px", minWidth: 0 }}>
               <Flex gap={1} alignItems="center">
@@ -636,12 +694,16 @@ function ScoreFigure({
   help,
   total,
   coverage,
+  rank,
+  rankedTotal,
   withBar = false,
 }: {
   title: string;
   help: string;
   total: number | null;
   coverage: number;
+  rank?: number | null;
+  rankedTotal?: number | null;
   withBar?: boolean;
 }) {
   return (
@@ -668,6 +730,16 @@ function ScoreFigure({
           <Label theme={scoreLabelTheme(total)} size="s">
             {sentence(scoreWord(total))}
           </Label>
+          {/* Доводка 21.09: место в рейтинге — не плашка, а серый текст на
+              полступени жирнее соседей: оценку несёт цветной чип, позиция
+              рядом с ним справка. Прижат к правому краю ПОЛОСЫ (та же мера
+              360px), поэтому строка значения и полоса под ней заканчиваются
+              на одной вертикали. */}
+          {rank !== null && rank !== undefined && rankedTotal ? (
+            <Text color="secondary" className="rh-score-figure__rank" title="Место в публичном рейтинге по HealthCraft Index">
+              #{fmtCount(rank)} из {fmtCount(rankedTotal)}
+            </Text>
+          ) : null}
         </Flex>
       )}
       {/* В4.6 (У21): полоса измеряет САМ показатель, а не покрытие; мера 360px
@@ -680,7 +752,7 @@ function ScoreFigure({
       {/* покрытие — строкой, без своей полосы (находка Z5 дизайн-пары).
           Круг 2 (Р12): «данных хватило: N%» → «Покрытие: N%» — прежняя фраза
           звучала как вердикт («хватило»), хотя это измеренная доля. */}
-      <Text variant="body-short" color="secondary">
+      <Text variant="body-short" color="secondary" style={{ marginBlockStart: 2 }}>
         Покрытие: {fmtCoverage(coverage)}
       </Text>
     </Flex>
@@ -865,20 +937,70 @@ function CategoryRow({
       {key === "security" && <AppsecEngines card={card} />}
       {open && (
         <div className="rh-subrows">
+          {/* Доводка 21.09: шапка подписывает ТОЛЬКО числовые колонки — над
+              именем метрики подпись не нужна, там и так имя. Подписи 11px
+              приглушённые, без линии под ними (вариант B). Колонки общие со
+              строками: сетка живёт на `.rh-subrows`, строки раскрываются в
+              неё через `display: contents`, иначе у каждой строки был бы свой
+              `auto` и подпись не встала бы над значениями. */}
+          <div className="rh-subrows__head">
+            <span>Значение</span>
+            <span>Балл</span>
+          </div>
           {subs.map(([subKey, sub]) => (
             <div key={subKey} className="rh-subrow">
-              <Text>{submetricTitle(key, subKey)}</Text>
-              <Text color="complementary">
-                {displayOnly(key, subKey) ? "показ, без веса" : sub.score === null ? NO_DATA : `${fmtSubmetric(sub.score)} / 100`}
-              </Text>
-              {/* В4.6 круг 2 (Р20): доля округляется до 2 знаков (`roundFacts`),
-                  целое остаётся как есть — «0.8723404255319149» на первом
-                  экране карточки было шумом, а не фактом. Поповер «Основание»
-                  ниже печатает значение СЫРЫМ: это доказательная база. */}
-              <Text color="secondary" wordBreak="break-word">
-                значение: {fmtFactValue(roundFacts(sub.value))}
-                {sub.note ? ` (${sub.note})` : ""}
-              </Text>
+              {/* Доводка 21.09: имя, пунктирный лидер и значение — ОДНА ячейка.
+                  Раньше имя и значение стояли в разных колонках грида, между
+                  ними зияла растянутая пустота, и строка распадалась надвое.
+                  Лидер физически ведёт глаз от названия к числу.
+                  Цвет имени говорит о весе: справочные подметрики («показ, без
+                  веса») набраны приглушённым, взвешенные — основным. */}
+              <span className="rh-subrow__head">
+                <Text color="secondary" className="rh-subrow__icon">
+                  <Icon data={submetricIcon(key, subKey)} size={14} />
+                </Text>
+                <Text color={displayOnly(key, subKey) ? "secondary" : undefined} className="rh-subrow__name">
+                  {submetricTitle(key, subKey)}
+                </Text>
+                <span className="rh-subrow__lead" aria-hidden="true" />
+                {/* В4.6 круг 2 (Р20): доля округляется до 2 знаков
+                    (`roundFacts`), целое остаётся как есть — «0.87234042553»
+                    на первом экране карточки было шумом, а не фактом. Поповер
+                    «Основание» ниже печатает значение СЫРЫМ: это
+                    доказательная база.
+                    Доводка 21.09: слово «значение» из строки убрано — оно
+                    повторялось в каждой из девяти строк; полная форма
+                    осталась в подсказке. */}
+                <Text
+                  color="secondary"
+                  className="rh-subrow__value"
+                  title={`значение: ${fmtFactValue(roundFacts(sub.value))}${sub.note ? ` (${sub.note})` : ""}`}
+                >
+                  {fmtFactValue(roundFacts(sub.value))}
+                  {sub.note ? ` (${sub.note})` : ""}
+                </Text>
+              </span>
+              {/* В колонке балла — только балл, и полос у подметрик нет вовсе:
+                  в плотных списках платформы (файловое дерево, коммиты, теги)
+                  нет ни полос, ни чипов, читаемость держится на одном кегле,
+                  колонках и двух уровнях яркости.
+                  Слова «без веса» и «нет данных» отсюда убраны: они были
+                  вдвое-втрое шире числа и сбивали правый столбик, ради
+                  которого колонка и заведена. Вместо слова прочерк — тот же
+                  знак, каким продукт показывает отсутствующее число везде
+                  (`fmtScore`), и он никогда не читается нулём (закон 2). Что
+                  именно отсутствует, говорят подсказка и цвет имени. */}
+              {displayOnly(key, subKey) || sub.score === null ? (
+                <Text
+                  className="rh-subrow__score"
+                  color="secondary"
+                  title={displayOnly(key, subKey) ? "Показывается для справки, в балл категории не входит" : NO_DATA}
+                >
+                  —
+                </Text>
+              ) : (
+                <Text className="rh-subrow__score">{fmtSubmetric(sub.score)}</Text>
+              )}
             </div>
           ))}
         </div>
@@ -980,7 +1102,13 @@ function RecommendationRow({ rec, evidence }: { rec: Recommendation; evidence: M
     <li className="rh-list__item">
       <Flex direction="column" gap={2}>
         <Flex gap={2} alignItems="baseline" wrap>
-          <Text color="secondary">#{rec.priority}</Text>
+          {/* Доводка 21.09: «#1/#2/#3» снят. Он сообщал только позицию в
+              списке, которая и так видна сверху вниз, и занимал место слева
+              от заголовка — там, где у платформы стоит признак важности.
+              Сам признак НЕ введён: `priority` в recommend.ts — это
+              `r.priority = i + 1`, порядковый номер после сортировки, а не
+              важность. Назвать его «Критический/Высокий» значило бы выдать
+              позицию за оценку срочности. */}
           <Text variant="subheader-2">{rec.problem}</Text>
           {rec.deltaScore !== null ? (
             <Label theme="success" size="xs" title="Прирост показателя, если выполнить только эту рекомендацию">
@@ -993,7 +1121,12 @@ function RecommendationRow({ rec, evidence }: { rec: Recommendation; evidence: M
           ) : null}
         </Flex>
         <Text>{rec.action}</Text>
-        {rec.expectedImpact && <Text color="complementary">Эффект: {rec.expectedImpact}</Text>}
+        {/* Доводка 21.09: «Эффект» печатался рядом с чипом прироста и повторял
+            его дословно («+2.3 к HealthCraft Index» чипом и «Эффект: +2.3 к
+            HealthCraft Index» строкой). Строка остаётся там, где чипа с
+            дельтой нет — у активационных рекомендаций она несёт другое
+            («CI/CD: 50 → до 100 по фактическим прогонам»). */}
+        {rec.expectedImpact && rec.deltaScore === null && <Text color="complementary">Эффект: {rec.expectedImpact}</Text>}
         <Flex gap={2} wrap alignItems="center">
           {/* В4.6 круг 2 (Р19, замечание владельца 19): «Основано на фактах» →
               «Основание». Прежняя формулировка была оправданием («мы не
@@ -1143,6 +1276,49 @@ function submetricTitle(category: string, sub: string): string {
 }
 
 /**
+ * Иконка подметрики — по одной на каждую из 28 (доводка 21.09).
+ * Иконка здесь не украшение: строк в раскрытой категории до девяти, все
+ * набраны одним кеглем, и глиф слева даёт строке опознавательный знак,
+ * по которому её находят повторно, не перечитывая название. Все взяты из
+ * `@gravity-ui/icons` — своих рисунков не заводим (правило 3а
+ * docs/ui/gravity-uikit.md). Незнакомый ключ получает нейтральную точку.
+ */
+const SUBMETRIC_ICONS: Record<string, IconData> = {
+  "documentation.readme": FileText,
+  "documentation.license": ScalesBalanced,
+  "documentation.contributing": Persons,
+  "documentation.codeowners": PersonGear,
+  "cicd.config": Pipeline,
+  "cicd.pass_rate": CircleCheck,
+  "cicd.duration": Stopwatch,
+  "security.density": Bug,
+  "security.resolved": ShieldCheck,
+  "security.secrets": Key,
+  "activity.fresh": Clock,
+  "activity.freq": Pulse,
+  "activity.contributors": Persons,
+  "activity.pulls_90d": CodePullRequest,
+  "activity.releases_12m": Rocket,
+  "activity.mirror_likeness": Copy,
+  "activity.commits_90d": CodeCommits,
+  "activity.commits_365d": Calendar,
+  "activity.sync_bursts": Thunderbolt,
+  "issues.stale": Hourglass,
+  "issues.close_days": ClockArrowRotateLeft,
+  "issues.resolution": SquareCheck,
+  "issues.first_resp": Comment,
+  "issues.tracker_unused": CommentSlash,
+  "code.density": Flag,
+  "code.old_share": CalendarXmark,
+  "code.root": FolderTree,
+  "code.todo_total": Hashtag,
+};
+
+function submetricIcon(category: string, sub: string): IconData {
+  return SUBMETRIC_ICONS[`${category}.${sub}`] ?? Circle;
+}
+
+/**
  * Разбивка находок AppSec ПО ДВИЖКАМ (В4.6, У17). Счётчики коллектор уже
  * собирает (`appsec.ts`, поле `backlog.engines`) — до этой вехи они лежали в
  * факте и никуда не показывались, то есть зритель видел одно число «столько-то
@@ -1237,10 +1413,10 @@ function securityNote(card: Card): string {
  * в sessionStorage, DDL нет. Заполненная звезда не светится.
  */
 function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: string; doneKey: string | null; loggedIn: boolean }) {
+  const toaster = useToaster();
   const [state, setState] = useState<"loading" | "on" | "off" | "anon">("loading");
   const [error, setError] = useState<string | null>(null);
   const [glow, setGlow] = useState(false);
-  const probed = useRef(false);
   useEffect(() => {
     if (!doneKey || state !== "off") return;
     try {
@@ -1260,8 +1436,16 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
       setState("anon");
       return;
     }
-    if (probed.current) return;
-    probed.current = true;
+    // Доводка 21.09: здесь стоял ref `probed`, разрешавший запрос ОДИН раз за
+    // жизнь компонента. Он навсегда запирал звезду у вошедшего зрителя:
+    // `/api/me` перезапрашивается (и на время перезапроса `kind` снова
+    // "loading", то есть `loggedIn` на миг false). Порядок выходил такой —
+    // эффект с loggedIn=true поднимал флаг и слал запрос; следующий эффект с
+    // loggedIn=false отменял его через `stop` и ставил "anon"; третий, уже с
+    // loggedIn=true, видел поднятый флаг и выходил БЕЗ запроса. Состояние
+    // оставалось "anon", кнопка — неактивной с подсказкой «Войдите», хотя
+    // зритель вошёл. От зонда-401 у анонима защищает проверка выше, а от
+    // гонки ответов — `stop` ниже; ref не нужен ни для того, ни для другого.
     let stop = false;
     fetch(`/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`)
       .then(async (res) => {
@@ -1290,7 +1474,13 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
       stop = true;
     };
   }, [org, repo, loggedIn]);
-  if (state === "loading") return null;
+  // Доводка 21.09: на время проверки кнопка больше НЕ исчезает. Прежний
+  // `return null` убирал её из шапки до ответа `/api/me/favorites`, и при
+  // переходе из рейтинга у вошедшего зрителя звезда пропадала на время
+  // запроса, а соседняя иконка перехода прыгала на её место. Теперь во время
+  // проверки показывается та же кнопка, только неактивная: габарит шапки
+  // постоянен, а состояние честно названо подсказкой.
+  const checking = state === "loading";
   const toggle = async () => {
     setError(null);
     if (state === "anon") return; // задизейблена: подсказка в title
@@ -1298,9 +1488,25 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
     setState(next);
     try {
       await mutateJson(`/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`, next === "on" ? "PUT" : "DELETE");
+      // Доводка 21.09: у действия появился отклик. Смена оттенка звезды —
+      // единственное, что происходило, и на мелкой иконке её не замечали;
+      // тост ещё и называет, КУДА репозиторий попал, — раздел «Мои
+      // репозитории» иначе приходится искать самому.
+      toaster.add({
+        name: `favorite:${org}/${repo}`,
+        theme: next === "on" ? "success" : "info",
+        title: next === "on" ? "Добавлено в избранное" : "Убрано из избранного",
+        content: next === "on" ? `${slugOf(org, repo)} — в разделе «Мои репозитории»` : slugOf(org, repo),
+      });
     } catch (e) {
       setState(state); // откат — звезда не врёт
       setError(e instanceof Error ? e.message : String(e));
+      toaster.add({
+        name: `favorite-failed:${org}/${repo}`,
+        theme: "danger",
+        title: next === "on" ? "Не удалось добавить в избранное" : "Не удалось убрать из избранного",
+        content: e instanceof Error ? e.message : String(e),
+      });
     }
   };
   return (
@@ -1317,7 +1523,7 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
         className={["rh-favorite-star", state === "on" ? "rh-favorite-star_on" : "", glow ? "rh-star-glow" : ""]
           .filter(Boolean)
           .join(" ")}
-        disabled={state === "anon"}
+        disabled={state === "anon" || checking}
         /* В4.6 (У16): объяснение границы доступа прямо там, где зритель
            нажимает звезду. Сервис НЕ перечисляет репозитории зрителя сам —
            списка «все мои репозитории» у него нет и быть не может без
@@ -1325,9 +1531,11 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
            избранное, а не автоматический список (решение favorites-only
            18.09). Раздел настроек вынесен на `/settings` в В4.6, круг 3. */
         title={
-          state === "anon"
-            ? "Войдите через Я ID, чтобы добавлять в избранное"
-            : "В избранное. Раздел «Мои репозитории» содержит выбранные вами репозитории. Права на закрытые данные проверяются в Настройках."
+          checking
+            ? "Проверяем избранное…"
+            : state === "anon"
+              ? "Войдите через Я ID, чтобы добавлять в избранное"
+              : "В избранное. Раздел «Мои репозитории» содержит выбранные вами репозитории. Права на закрытые данные проверяются в Настройках."
         }
         onClick={() => void toggle()}
       >

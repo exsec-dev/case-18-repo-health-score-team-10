@@ -110,7 +110,7 @@ export function scanStatusText(status: string): string {
 
 /**
  * Уровень Score для цвета полос (дисплей, не методика): ≥70 — хорошо,
- * 40–69 — есть над чем работать, <40 — плохо. Нет данных — нейтрально
+ * 40–69 — требует внимания, <40 — плохо. Нет данных — нейтрально
  * (закон 2: отсутствие данных никогда не красное).
  */
 export function scoreTheme(value: number | null | undefined): "success" | "warning" | "danger" | "misc" {
@@ -132,7 +132,7 @@ export function scoreTheme(value: number | null | undefined): "success" | "warni
  */
 export const SCORE_WORDS: Record<"success" | "warning" | "danger", string> = {
   success: "здоров",
-  warning: "есть над чем работать",
+  warning: "требует внимания",
   danger: "в зоне риска",
 };
 

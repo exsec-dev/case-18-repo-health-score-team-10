@@ -175,7 +175,7 @@
   --g-color-text-utility: #9a63d1;
   --g-color-text-utility-heavy: #a575d6;
   --g-color-text-warning: #ffcb00;
-  --g-color-text-warning-heavy: #ffd01a;
+  --g-color-text-warning-heavy: #ecd89a; /* В4.6 доводка: было #ffd01a (S=90%) — единственный неоновый тон в ряду чипов, где danger #f59b99 (S=38%) и positive #8ccb89 (S=33%) уже пастельные. S=35% встаёт между ними; контраст не упал, а вырос: 8,47→8,81 на фоне и 5,28→5,49 на чипе */
 
   /* навигация (@gravity-ui/navigation): rail светлее контента, как у платформы */
   --gn-aside-header-collapsed-background-color: #3e3e3e;

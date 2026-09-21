@@ -323,13 +323,20 @@ const routes = {
       });
     },
     // ---------- auth: Я ID OAuth (Б1) ----------
+    // Вход ВСЕГДА с выбором аккаунта (решение владельца 21.09). Наш «Выход»
+    // отзывает только нашу сессию — сессия Яндекса живёт в его домене и
+    // переживает её, поэтому при следующем `/authorize` он молча возвращал
+    // прежнего пользователя, и сменить аккаунт из интерфейса было нельзя.
+    // `force_confirm=yes` показывает экран выбора; цена — один лишний клик
+    // при обычном входе, и она принята ради того, чтобы вход вообще был
+    // управляемым. Отдельной кнопки «в другой аккаунт» больше нет.
     "/auth/ya": () => {
       if (!config.auth.appSecret) {
         return Response.json({ error: { code: "unconfigured", message: "APP_SECRET не задан: сессии выключены" } }, { status: 503 });
       }
       try {
         const state = makeOAuthState();
-        const url = buildAuthUrl(yaCreds(), state, yaEndpoints());
+        const url = buildAuthUrl(yaCreds(), state, yaEndpoints(), { forceConfirm: true });
         return new Response(null, { status: 302, headers: { location: url, "set-cookie": oauthStateCookieHeader(ck, state) } });
       } catch (e) {
         return Response.json({ error: { code: "unconfigured", message: String((e as Error).message) } }, { status: 503 });

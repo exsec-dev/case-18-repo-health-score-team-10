@@ -37,7 +37,7 @@ const TEXT: Record<"dark" | "light", Record<string, number>> = {
     "--g-color-text-danger": 5.16,
     "--g-color-text-danger-heavy": 5.95,
     "--g-color-text-warning": 8.18,
-    "--g-color-text-warning-heavy": 8.47,
+    "--g-color-text-warning-heavy": 8.81,
     "--g-color-text-misc": 4.21,
     "--g-color-text-misc-heavy": 5.55,
     "--g-color-text-link": 5.37,
@@ -64,7 +64,7 @@ const TEXT: Record<"dark" | "light", Record<string, number>> = {
 const CHIPS: Record<"dark" | "light", [label: string, token: string, tone: string, expected: number][]> = {
   dark: [
     ["success", "--g-color-text-positive-heavy", "positive", 4.71],
-    ["warning", "--g-color-text-warning-heavy", "warning", 5.28],
+    ["warning", "--g-color-text-warning-heavy", "warning", 5.49],
     ["danger", "--g-color-text-danger-heavy", "danger", 4.92],
     ["normal", "--g-color-text-misc-heavy", "misc", 4.46],
     ["unknown", "--g-color-text-complementary", "neutral", 5.45],

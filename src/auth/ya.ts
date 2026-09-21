@@ -68,7 +68,20 @@ export const liveYaHttp: YaHttp = {
 };
 
 /** URL начала OAuth-потока (state — CSRF-токен, генерирует вызываемый). */
-export function buildAuthUrl(creds: YaIdCredentials, state: string, endpoints: YaEndpoints = DEFAULT_YA_ENDPOINTS): string {
+export function buildAuthUrl(
+  creds: YaIdCredentials,
+  state: string,
+  endpoints: YaEndpoints = DEFAULT_YA_ENDPOINTS,
+  /**
+   * `forceConfirm` — параметр Я ID `force_confirm=yes`: экран подтверждения
+   * показывается ДАЖЕ когда в браузере живёт сессия Яндекса и доступ
+   * приложению однажды выдан. Без него сменить аккаунт из нашего интерфейса
+   * нельзя в принципе — Яндекс молча возвращает прежнего пользователя, и
+   * наш «Выход» на это не влияет: та сессия живёт на стороне Яндекса.
+   * По умолчанию выключено: обычному входу лишний экран не нужен.
+   */
+  opts: { forceConfirm?: boolean } = {},
+): string {
   if (!creds.clientId) {
     throw new Error("YA_CLIENT_ID не задан: приложение Я ID не сконфигурировано (env)");
   }
@@ -78,6 +91,7 @@ export function buildAuthUrl(creds: YaIdCredentials, state: string, endpoints: Y
     redirect_uri: creds.redirect,
     state,
   });
+  if (opts.forceConfirm) params.set("force_confirm", "yes");
   return `${endpoints.oauthBase}/authorize?${params.toString()}`;
 }
 

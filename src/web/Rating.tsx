@@ -6,7 +6,6 @@
 // тулбар одной строкой (size m), таблица, методика в правой панели.
 import { BarsAscendingAlignLeft, BarsDescendingAlignLeft, Magnifier, SquareListUl } from "@gravity-ui/icons";
 import {
-  ActionTooltip,
   Alert,
   Button,
   DefinitionList,
@@ -27,6 +26,7 @@ import {
   TextInput,
 } from "@gravity-ui/uikit";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import type { SortKey } from "../api/repos";
 import type { MetaResponse, RatingResponse } from "./api";
 import { useJson } from "./api";
 import {
@@ -57,17 +57,6 @@ type Item = RatingResponse["items"][number];
 const LANG_ALL = " all";
 const LANG_NONE = " none";
 
-const SORT_OPTIONS = [
-  { value: "index", content: "HealthCraft Index" },
-  { value: "likes", content: "Лайки" },
-  { value: "activity", content: "Последняя активность" },
-  { value: "coverage", content: "Покрытие данными" },
-  // В4.6 (У30, замечание владельца 5): прежняя подпись называла ФОРМУ ЗАПИСИ
-  // слага вместо того, по чему идёт сортировка; зрителю нужно слово, а не
-  // синтаксис. Сортировка сама не менялась — только её имя в списке.
-  { value: "name", content: "Название" },
-];
-
 /**
  * CI/CD и Security в публичный рейтинг не входят: API отдаёт их в строке
  * всегда null (данные каналов с правами не публикуются), поэтому в таблице
@@ -75,8 +64,26 @@ const SORT_OPTIONS = [
  */
 const NOT_IN_RATING = new Set(["cicd", "security"]);
 
+/**
+ * Подписи колонок — один словарь на шапку таблицы и на список «Колонки».
+ * Категорийные колонки сюда не входят: их имена приходят из /api/meta.
+ * «#» в шапке — знак, а не слово; в списке настройки он ничего не называл,
+ * поэтому там колонка зовётся «Позиция» (решение владельца 21.09).
+ */
+const COLUMN_TITLES: Record<string, string> = {
+  rank: "Позиция",
+  repo: "Репозиторий",
+  index: "HealthCraft Index",
+  lang: "Язык",
+  likes: "Лайки",
+  forks: "Форки",
+  activity: "Последняя активность",
+  coverage: "Покрытие",
+  scanned: "Скан",
+};
+
 /** Лайки — сортировкой и в настройке колонок, но не в виде по умолчанию: рейтинг не про популярность. */
-const HIDDEN_BY_DEFAULT = ["lang", "likes", "forks", "activity", "scanned"];
+const HIDDEN_BY_DEFAULT = ["lang", "likes", "forks", "activity", "coverage", "scanned"];
 
 export function Rating({ search, meta }: { search: string; meta: MetaResponse | null }) {
   const params = useMemo(() => new URLSearchParams(search), [search]);
@@ -131,10 +138,21 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
   const titleOf = (key: string): string => categoryNames[key] ?? CATEGORY_TITLES_RU[key] ?? key;
   const categories = useMemo(() => (meta?.categories ?? []).filter((c) => !NOT_IN_RATING.has(c.key)), [meta]);
   const rankOffset = data ? (data.page - 1) * data.perPage : 0;
-  const allColumns = useMemo(() => buildColumns(categories, rankOffset), [categories, rankOffset]);
+  const onSort = (key: SortKey, next: "asc" | "desc"): void => setParams({ sort: key, order: next });
+  const allColumns = useMemo(
+    () => buildColumns(categories, rankOffset, { sort, order, onSort }),
+    // `onSort` пересоздаётся каждый рендер (замыкает setParams) и в список
+    // зависимостей не идёт намеренно: колонки перестраивает смена самой
+    // сортировки, а не идентичность обработчика
+    [categories, rankOffset, sort, order],
+  );
+  // Доводка 21.09: у сортируемых колонок `name` — функция-заголовок, и прежний
+  // фолбэк печатал в настройке технический id («repo», «index», «activity»).
+  // Список настройки и шапка таблицы обязаны называть колонку ОДИНАКОВО,
+  // поэтому подписи берутся из одного словаря, а не выводятся из разметки.
   const setupItems: TableColumnSetupItem[] = allColumns.map((c) => ({
     id: c.id,
-    title: typeof c.name === "string" ? c.name : c.id,
+    title: COLUMN_TITLES[c.id] ?? (typeof c.name === "string" ? c.name : c.id),
     selected: !hidden.includes(c.id),
     required: c.id === "rank" || c.id === "repo" || c.id === "index",
   }));
@@ -189,38 +207,18 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
             setParams({ lang: picked === LANG_ALL ? null : picked === LANG_NONE ? "" : picked });
           }}
         />
-        <Flex>
-          {/* В4.6 круг 2 (Р21, находка приёмки круга 1 / ДП8): прежние 230px
-              резали собственное значение контрола («Сортировка: HealthCraft
-              In…»). `width="auto"` вместо нового магического числа: контрол
-              берёт ширину по содержимому, то есть НЕ РЕЖЕТ ни одну опцию — в
-              том числе самую длинную («Последняя активность») и в любой теме,
-              где метрика шрифта другая. Фиксированное число пришлось бы
-              пересчитывать при каждой правке списка сортировок. */}
-          <Select
-            label="Сортировка:"
-            size="m"
-            width="auto"
-            pin="round-brick"
-            value={[sort]}
-            options={SORT_OPTIONS}
-            onUpdate={(v) => setParams({ sort: v[0] ?? "index" })}
+        {/* Доводка 21.09: пара «Сортировка: …» + кнопка направления снята —
+            сортировка живёт в заголовках колонок (`SortableHeader`), как в
+            таблицах платформы. Освободившееся место занял второй ряд: выбор
+            колонок и переключатель выборки поднялись сюда, и тулбар стал
+            однострочным — поиск, язык, колонки, выборка. */}
+        {view === "scored" && !isPhone && (
+          <TableColumnSetup
+            items={setupItems}
+            showStatus
+            onUpdate={(updated) => setHidden(updated.filter((i) => !i.selected).map((i) => i.id))}
           />
-          <ActionTooltip title={order === "desc" ? "По убыванию" : "По возрастанию"}>
-            <Button
-              view="outlined"
-              size="m"
-              pin="brick-round"
-              onClick={() => setParams({ order: order === "desc" ? "asc" : "desc" })}
-              aria-label={order === "desc" ? "По убыванию – переключить на возрастание" : "По возрастанию – переключить на убывание"}
-            >
-              <Icon data={order === "desc" ? BarsDescendingAlignLeft : BarsAscendingAlignLeft} size={16} />
-            </Button>
-          </ActionTooltip>
-        </Flex>
-      </Flex>
-
-      <Flex gap={2} wrap alignItems="center" justifyContent="space-between">
+        )}
         <SegmentedRadioGroup
           size="m"
           value={view}
@@ -230,13 +228,6 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
           <SegmentedRadioGroup.Option value="scored">Оценены{data ? ` ${data.total}` : ""}</SegmentedRadioGroup.Option>
           <SegmentedRadioGroup.Option value="unscored">Без оценки{data ? ` ${data.nulls}` : ""}</SegmentedRadioGroup.Option>
         </SegmentedRadioGroup>
-        {view === "scored" && !isPhone && (
-          <TableColumnSetup
-            items={setupItems}
-            showStatus
-            onUpdate={(updated) => setHidden(updated.filter((i) => !i.selected).map((i) => i.id))}
-          />
-        )}
       </Flex>
     </Flex>
   );
@@ -406,6 +397,15 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
   // В4.6 (У27): панель начинается с легенды шкалы (3 чипа + абзац) и двух блоков
   if (!meta) return <SkeletonRows rows={4} height={96} />;
   const ratingWeight = meta.categories.reduce((sum, c) => sum + (c.indexWeight ?? 0), 0);
+  // доли считаются один раз: их читают и полоса, и легенда под ней
+  const ratingCategories = meta.categories
+    .filter((c) => !NOT_IN_RATING.has(c.key))
+    .map((c) => ({
+      key: c.key,
+      title: c.title,
+      weight: c.indexWeight,
+      share: Math.round(((c.indexWeight ?? 0) / Math.max(1, ratingWeight)) * 100),
+    }));
   return (
     <>
       {/* В4.6 (У22): шкала — первое, что читается в панели: без неё число не с чем сравнить */}
@@ -430,15 +430,30 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
           </HelpMark>
         }
       >
-        <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
-          {meta.categories
-            .filter((c) => !NOT_IN_RATING.has(c.key))
-            .map((c) => (
-              <DefinitionList.Item key={c.key} name={c.title}>
-                <span title={`вес в HealthCraft Index – ${c.indexWeight}`}>{Math.round(((c.indexWeight ?? 0) / Math.max(1, ratingWeight)) * 100)}%</span>
-              </DefinitionList.Item>
+        {/* Доводка 21.09: доли, дающие в сумме сто, показаны полосой-стеком с
+            легендой под ней — приём панели SourceCraft («Top languages»:
+            точка, имя, доля). Пары «имя — число» в `DefinitionList` этого
+            родства не показывали: было четыре независимых факта вместо одного
+            разделённого целого.
+            Цвета сегментов — оттенки ОДНОГО акцента, не шкала здоровья:
+            зелёный и красный в этой панели уже заняты легендой оценки, и
+            категория, покрашенная в красный, читалась бы как плохая. */}
+        <div className="rh-contrib">
+          <div className="rh-contrib__bar">
+            {ratingCategories.map((c, i) => (
+              <i key={c.key} className={`rh-contrib__seg rh-contrib__seg_${i + 1}`} style={{ width: `${c.share}%` }} />
             ))}
-        </DefinitionList>
+          </div>
+          {ratingCategories.map((c, i) => (
+            <div key={c.key} className="rh-contrib__row" title={`вес в HealthCraft Index – ${c.weight}`}>
+              <i className={`rh-contrib__dot rh-contrib__seg_${i + 1}`} />
+              <Text variant="body-1">{c.title}</Text>
+              <Text variant="body-1" color="secondary" className="rh-contrib__share">
+                {c.share}%
+              </Text>
+            </div>
+          ))}
+        </div>
       </AsideSection>
 
       <AsideSection title="Расчет">
@@ -530,7 +545,57 @@ function RepoCell({ item }: { item: Item }) {
   );
 }
 
-function buildColumns(categories: MetaResponse["categories"], rankOffset: number): TableColumnConfig<Item>[] {
+/**
+ * Заголовок колонки, по которой можно сортировать.
+ *
+ * Доводка 21.09: сортировка переехала из тулбара в шапку таблицы — так она
+ * устроена у платформы (таблица Labels: «Name ↑↓ · Updated date ↓»), и так её
+ * ищет читатель: в самой колонке. Освободились 264px тулбара, которые занимали
+ * `Select` шириной по содержимому и кнопка направления.
+ *
+ * Сортировка остаётся СЕРВЕРНОЙ (`sort`/`order` в query, выборку считает API),
+ * поэтому `withTableSorting` не подходит — он про клиентскую сортировку
+ * данных страницы. Здесь заголовок это просто кнопка, меняющая query.
+ */
+function SortableHeader({
+  label,
+  columnKey,
+  sort,
+  order,
+  onSort,
+}: {
+  label: string;
+  columnKey: SortKey;
+  sort: string;
+  order: string;
+  onSort: (key: SortKey, next: "asc" | "desc") => void;
+}) {
+  const active = sort === columnKey;
+  const next: "asc" | "desc" = active && order === "desc" ? "asc" : "desc";
+  return (
+    <Button
+      view="flat"
+      size="xs"
+      className="rh-th-sort"
+      onClick={() => onSort(columnKey, next)}
+      title={active ? (order === "desc" ? "По убыванию – переключить на возрастание" : "По возрастанию – переключить на убывание") : `Сортировать по «${label}»`}
+    >
+      {label}
+      <Icon
+        data={order === "asc" && active ? BarsAscendingAlignLeft : BarsDescendingAlignLeft}
+        size={12}
+        className={active ? "rh-th-sort__mark rh-th-sort__mark_on" : "rh-th-sort__mark"}
+      />
+    </Button>
+  );
+}
+
+function buildColumns(
+  categories: MetaResponse["categories"],
+  rankOffset: number,
+  sortProps: { sort: string; order: string; onSort: (key: SortKey, next: "asc" | "desc") => void },
+): TableColumnConfig<Item>[] {
+  const sortable = (label: string, columnKey: SortKey) => () => <SortableHeader label={label} columnKey={columnKey} {...sortProps} />;
   const categoryColumns: TableColumnConfig<Item>[] = categories.map((c) => ({
     id: `cat:${c.key}`,
     name: c.title,
@@ -547,16 +612,19 @@ function buildColumns(categories: MetaResponse["categories"], rankOffset: number
       sticky: "start",
       template: (_item: Item, index: number) => <Text color="secondary">{rankOffset + index + 1}</Text>,
     },
-    { id: "repo", name: "Репозиторий", primary: true, sticky: "start", template: (item: Item) => <RepoCell item={item} /> },
-    { id: "index", name: "HealthCraft Index", align: "end", width: 136, template: (item: Item) => <ScoreCell item={item} /> },
+    { id: "repo", name: sortable("Репозиторий", "name"), primary: true, sticky: "start", template: (item: Item) => <RepoCell item={item} /> },
+    { id: "index", name: sortable("HealthCraft Index", "index"), align: "end", width: 136, template: (item: Item) => <ScoreCell item={item} /> },
     ...categoryColumns,
     // В4.6 круг 2 (Р3): название языка снова стоит в строке репозитория;
     // колонка остаётся для сортируемого/копируемого вида, выключенной по умолчанию
     { id: "lang", name: "Язык", template: (item: Item) => <LanguageName name={item.language} color={item.languageColor} /> },
-    { id: "likes", name: "Лайки", align: "end", template: (item: Item) => fmtNumber(item.likes) },
+    { id: "likes", name: sortable("Лайки", "likes"), align: "end", template: (item: Item) => fmtNumber(item.likes) },
     { id: "forks", name: "Форки", align: "end", template: (item: Item) => fmtNumber(item.forks) },
     // не «Активность»: так называется категория Score, а это дата из каталога
-    { id: "activity", name: "Последняя активность", align: "end", template: (item: Item) => fmtDate(item.lastActivityAt) },
+    { id: "activity", name: sortable("Последняя активность", "activity"), align: "end", template: (item: Item) => fmtDate(item.lastActivityAt) },
+    // колонка заведена вместе с переносом сортировки: «Покрытие данными» было
+    // в списке сортировок, но своей колонки не имело — сортировать стало бы не по чему
+    { id: "coverage", name: sortable("Покрытие", "coverage"), align: "end", template: (item: Item) => fmtCoverage(item.coverage) },
     {
       id: "scanned",
       name: "Скан",

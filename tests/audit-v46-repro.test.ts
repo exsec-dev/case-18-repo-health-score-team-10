@@ -134,7 +134,7 @@ describe("В4.6-3 (У22): словесная шкала здоровья вид�
   test("format.ts отдаёт слово шкалы чистой функцией (одна копия на страницу и отчёт)", async () => {
     const { scoreWord } = (await import("../src/web/format")) as { scoreWord?: (v: number | null) => string };
     expect(typeof scoreWord).toBe("function");
-    expect([scoreWord!(83), scoreWord!(55), scoreWord!(12)]).toEqual(["здоров", "есть над чем работать", "в зоне риска"]);
+    expect([scoreWord!(83), scoreWord!(55), scoreWord!(12)]).toEqual(["здоров", "требует внимания", "в зоне риска"]);
   });
 
   // Б2: фраза легенды живёт в ОДНОМ месте (format.ts SCORE_LEGEND_TITLE) и
@@ -171,7 +171,7 @@ describe("В4.6-3 (У22): словесная шкала здоровья вид�
   // ЗАКРЫТО блоком Б2 (шкала и кодирование).
   test("MD: строка итога называет то же слово шкалы", () => {
     const out = md();
-    expect(/\*\*HealthCraft Index \(4 категории\): 67 из 100[^\n]*есть над чем работать/.test(out)).toBe(true);
+    expect(/\*\*HealthCraft Index \(4 категории\): 67 из 100[^\n]*требует внимания/.test(out)).toBe(true);
   });
 });
 
@@ -378,9 +378,15 @@ describe("В4.6-9 (У27–У32): консистентность вне каби�
   });
 
   // ЗАКРЫТО блоком Б7 (консистентность и мелкие замечания владельца).
-  test("У30: опция сортировки «Название» вместо «Имя (org/repo)»", () => {
+  // Доводка 21.09: список сортировок снят вместе с селектом — сортировка живёт
+  // в заголовках колонок. Утверждение не ослаблено, а перенесено на заголовок:
+  // жаргонной формы записи слага в интерфейсе по-прежнему нет.
+  test("У30: сортировка по имени названа словом, а не формой записи слага", () => {
     const src = srcOf("Rating.tsx");
-    expect({ plain: src.includes('content: "Название"'), jargon: src.includes("Имя (org/repo)") }).toEqual({ plain: true, jargon: false });
+    expect({ plain: src.includes('sortable("Репозиторий", "name")'), jargon: src.includes("Имя (org/repo)") }).toEqual({
+      plain: true,
+      jargon: false,
+    });
   });
 
   // Б7: имя класса в ассерте было взято на слух. AsideHeader 6.6.0 рисует

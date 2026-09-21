@@ -266,13 +266,21 @@ body {
   padding: var(--g-spacing-5);
 }
 
-/* В4.6 (У23): мера основной колонки. На 1920 без неё полоса категории
- * растягивалась до 840px и перестала быть измерительным инструментом, а
- * строка итога расползалась на длину, которую глаз не держит. 1120px —
- * предложение дизайн-аудита; применяется ТОЛЬКО к `document` (карточка,
- * кабинет): в `fill` основная колонка несёт таблицу рейтинга, и мера там
- * создала бы мёртвое поле рядом с колонками, которые зритель включил сам. */
-.rh-page_document .rh-page__main {
+/* В4.6 (У23): мера 1120px стояла на самой КОЛОНКЕ и защищала две разные
+ * вещи — полосу категории от растягивания до 840px и строку итога от длины,
+ * которую глаз не держит.
+ *
+ * Доводка 21.09: мера снята с колонки и оставлена только прозе. Полосу
+ * защищать колонкой больше не нужно — у неё есть своя, более точная защита
+ * `minmax(80px, 360px)` в гриде строки категории (см. `.rh-category`).
+ * А колонка с мерой давала мёртвое поле СПРАВА ОТ ПАНЕЛИ: `__body` — флексбокс
+ * с `justify-content: flex-start`, `main` упирался в 1120, `aside` фиксирован
+ * на 320, и весь остаток копился за панелью. Замерено на 1700px: 24px при
+ * развёрнутом рейле и 204px при свёрнутом — окно шире, а контенту не
+ * достаётся ничего. В рейтинге (`fill`) меры нет, и он так себя не ведёт;
+ * карточка теперь тоже отдаёт прирост содержимому. */
+.rh-page_document .rh-prose,
+.rh-page_document .rh-locked-note {
   max-width: 1120px;
 }
 
@@ -378,6 +386,13 @@ body {
   border-bottom: 1px solid var(--g-color-line-generic);
 }
 
+/* Доводка 21.09: у последнего пункта границы нет — линия под ним ничего не
+ * отделяла, список просто заканчивался чертой. Верхняя граница списка
+ * (`.rh-list`) остаётся: она отбивает его от того, что выше. */
+.rh-list__item:last-child {
+  border-bottom: 0;
+}
+
 /* ---------- шапка карточки репозитория: аватар на высоту «название + мета» ---------- */
 
 .rh-repo-head {
@@ -413,7 +428,9 @@ body {
   flex-wrap: wrap;
   align-items: center;
   gap: var(--g-spacing-1) var(--g-spacing-3);
-  margin-top: var(--g-spacing-half);
+  /* Доводка 21.09: +2px к прежнему полушагу — имя и реквизиты стояли слишком
+     тесно, строка читалась продолжением заголовка, а не подписью под ним. */
+  margin-top: calc(var(--g-spacing-half) + 2px);
   color: var(--g-color-text-secondary);
 }
 
@@ -474,7 +491,11 @@ body {
    * Излишек ширины забирает трек ярлыков, а не графика.
    * Круг 2 (Р14): плашка вклада стала ПОСЛЕДНИМ треком — «прижата к правому
    * краю» по замечанию владельца; излишек по-прежнему у ярлыков (5-й трек). */
-  grid-template-columns: 16px minmax(120px, 180px) minmax(0, 1fr) minmax(80px, 360px) 40px auto;
+  /* Доводка 21.09: трек числа 40px -> 28px. В сорокапиксельном треке число
+   * прижималось к правому краю и вставало вплотную к плашке вклада, а от
+   * полосы, которую оно и подписывает, его отделяла пустота. 28px — ширина
+   * трёх цифр 15px tabular плюс запас. */
+  grid-template-columns: 16px minmax(120px, 180px) minmax(0, 1fr) minmax(80px, 360px) 28px auto;
   align-items: center;
   gap: var(--g-spacing-3);
   box-sizing: border-box;
@@ -512,6 +533,139 @@ button.rh-category:focus-visible {
   justify-self: end;
 }
 
+/* Пустое состояние 1:1 с платформой. Замерено на их Milestones и Pull
+ * requests: подложка `base-generic` без рамки, радиус 16, поля 32 по кругу,
+ * иллюстрация 120px справа, колонка текста прижата влево и выровнена с
+ * иллюстрацией по центру высоты. Порядок слева направо — заголовок 17/24,
+ * описание 15/20 приглушённым, действие (если оно есть).
+ *
+ * Прежняя доводка «текст к верхней кромке» отменена: на их эталоне колонка
+ * текста и иллюстрация центрированы друг относительно друга, и при коротком
+ * тексте это и даёт ту самую посадку, которую видно на скриншоте. */
+.rh-empty.g-placeholder-container {
+  width: 100%;
+  padding: var(--g-spacing-8);
+  border-radius: 16px;
+  background: var(--g-color-base-generic);
+}
+
+.rh-empty.g-placeholder-container .g-placeholder-container__body {
+  width: 100%;
+  max-width: none;
+  align-items: center;
+}
+
+/* иллюстрация справа: стоковый `direction="row"` ставит её первой. Порядок
+ * меняется `order`, а не `row-reverse`, — в DOM она остаётся первой, и
+ * порядок чтения для скринридера прежний. */
+.rh-empty.g-placeholder-container_direction_row.g-placeholder-container_size_m .g-placeholder-container__image {
+  order: 1;
+}
+
+.rh-empty.g-placeholder-container_direction_row.g-placeholder-container_size_m .g-placeholder-container__content {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  margin-inline: 0 var(--g-spacing-8);
+}
+
+/* Кликабельный заголовок колонки. Кнопка не должна выглядеть кнопкой: у
+ * платформы это обычный заголовок, у которого появляется стрелка. Отсюда
+ * flat-вид, отрицательные поля (чтобы текст стоял ровно там же, где стоял
+ * неинтерактивный заголовок) и наследование цвета шапки. */
+.rh-th-sort.g-button {
+  --g-button-padding: 0;
+
+  height: auto;
+  margin-inline: -2px;
+  color: inherit;
+  font: inherit;
+}
+
+.rh-th-sort .g-button__text {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+
+/* Доводка 21.09: стрелка у НЕАКТИВНОЙ колонки видна всегда, а не по
+ * наведению. Появление только на hover прятало саму возможность сортировать:
+ * зритель не наводит на то, что не выглядит интерактивным, — а других
+ * признаков у заголовка нет, прежний селект из тулбара снят. Приглушённая
+ * стрелка отличает «можно сортировать» от «сортируется сейчас» яркостью,
+ * а не наличием. */
+.rh-th-sort__mark {
+  opacity: 0.35;
+  transition: opacity 0.1s ease-out;
+}
+
+.rh-th-sort:hover .rh-th-sort__mark {
+  opacity: 0.7;
+}
+
+.rh-th-sort__mark_on,
+.rh-th-sort:hover .rh-th-sort__mark_on {
+  opacity: 1;
+}
+
+/* Вклад категорий: полоса-стек и легенда под ней (приём «Top languages» из
+ * панели SourceCraft). Оттенки — один акцент разной плотности, а не шкала
+ * здоровья: зелёный и красный в этой же панели заняты легендой оценки.
+ * Плотность задаётся `color-mix` от семантического токена, своих цветов в
+ * файле не появляется. */
+.rh-contrib__bar {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  margin-bottom: var(--g-spacing-2);
+}
+
+.rh-contrib__seg {
+  display: block;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.rh-contrib__row {
+  display: flex;
+  gap: var(--g-spacing-2);
+  align-items: center;
+  padding: 2px 0;
+}
+
+.rh-contrib__dot {
+  flex: 0 0 8px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.rh-contrib__share {
+  margin-inline-start: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Доводка 21.09: градации одного акцента заменены на РАЗНЫЕ тона. Градиент
+ * читался как порядок («темнее — больше»), хотя доли почти равны, и соседние
+ * ступени не различались на 8px полосе. Тона взяты непрозрачные `-heavy`/
+ * `-medium`: сегменты лежат друг к другу вплотную, и полупрозрачные смешались
+ * бы с фоном по-разному. */
+.rh-contrib__seg_1 {
+  background: var(--g-color-base-info-heavy);
+}
+
+.rh-contrib__seg_2 {
+  background: var(--g-color-base-positive-medium);
+}
+
+.rh-contrib__seg_3 {
+  background: var(--g-color-base-warning-medium);
+}
+
+.rh-contrib__seg_4 {
+  background: var(--g-color-base-utility-heavy);
+}
+
 /* Заголовок блока правой панели и список определений под ним стояли слишком
  * тесно: gap={2} задуман под содержимое со своей высотой строки — плашки
  * легенды (24px) и абзацы отбивают заголовок сами, а `DefinitionList` кладёт
@@ -519,7 +673,8 @@ button.rh-category:focus-visible {
  * добавляется по ТИПУ содержимого, а не троим блокам поимённо: так «Вклад
  * категорий», «Расчет» и «Параметры расчета» держат один ритм, и следующий
  * такой блок получит его без правки. */
-.rh-aside-section > .g-definition-list {
+.rh-aside-section > .g-definition-list,
+.rh-aside-section > .rh-contrib {
   margin-block-start: var(--g-spacing-1);
 }
 
@@ -568,8 +723,22 @@ button.rh-category:focus-visible {
   line-height: 8px;
 }
 
+/* Строка значения держит ту же меру, что полоса под ней (360px): чип места
+ * уходит вправо `margin-inline-start: auto`, и правые края строки и полосы
+ * встают на одну вертикаль. Без меры чип уезжал бы к краю колонки. */
 .rh-score-figure__value {
   align-items: baseline;
+  max-width: 360px;
+}
+
+/* Доводка 21.09: место в рейтинге — не плашка, а текст. Плашка равняла его
+ * по весу со словом шкалы, хотя это справка, а не оценка. Серый текст на
+ * полступени жирнее соседей отличает ранг от подписей, не вводя третий чип
+ * в строку значения. */
+.rh-score-figure__rank {
+  margin-inline-start: auto;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
 
 .rh-favorite-star {
@@ -585,18 +754,97 @@ button.rh-category:focus-visible {
 /* В4.6 круг 2 (Р14): отступ между шапкой коллапс-блока и раскрытым
  * содержимым — без него подметрики начинались вплотную к строке категории и
  * читались её частью, а не раскрытием. */
+/* Сетка списка подметрик живёт ЗДЕСЬ, а строки раскрываются в неё
+ * (`display: contents`): колонки общие на шапку и на все строки.
+ *
+ * Колонки ДВЕ, а не три: имя, лидер и значение лежат в одной ячейке, иначе
+ * при отдельной колонке значения лидер обрывался на её границе, а короткое
+ * значение («0») уезжало к правому краю — между пунктиром и текстом зияла
+ * дыра шириной с самое длинное значение списка. Теперь лидер тянется ровно
+ * до текста, а сам текст всё равно прижат вправо: его прижимает лидер,
+ * забирающий весь остаток строки.
+ *
+ * Список повторяет сетку строки категории: тот же отступ слева (12px), тот
+ * же слот 16px под значок и тот же зазор 12px до текста. Значок подметрики
+ * встаёт точно под шевроном раскрытия, а её имя — точно под именем
+ * категории. Верхнего поля у списка нет: шапка «Значение / Балл» и так
+ * отбивает его от строки категории. */
 .rh-subrows {
-  display: flex;
-  flex-direction: column;
-  gap: var(--g-spacing-1);
-  padding: var(--g-spacing-2) var(--g-spacing-3) var(--g-spacing-3) calc(16px + var(--g-spacing-6));
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  column-gap: var(--g-spacing-2);
+  align-items: baseline;
+  padding: 0 var(--g-spacing-3) var(--g-spacing-3) var(--g-spacing-3);
 }
 
+.rh-subrows__head {
+  display: contents;
+  color: var(--g-color-text-secondary);
+}
+
+.rh-subrows__head > span {
+  padding-block-end: var(--g-spacing-half);
+  font-size: 11px;
+  line-height: 16px;
+  text-align: right;
+}
+
+/* строка раскрывается в сетку списка: собственного грида у неё нет, иначе
+ * колонки строк и шапки разъехались бы */
 .rh-subrow {
-  display: grid;
-  grid-template-columns: minmax(160px, 260px) 120px 1fr;
-  gap: var(--g-spacing-3);
+  display: contents;
+}
+
+/* высоту строки держат сами ячейки: `display: contents` не переносит
+ * ни min-height, ни padding с самой строки */
+.rh-subrow > * {
+  padding-block: 4px;
+}
+
+.rh-subrow__head {
+  display: flex;
+  gap: var(--g-spacing-2);
   align-items: baseline;
+  min-width: 0;
+}
+
+.rh-subrow__icon {
+  display: flex;
+  flex: 0 0 16px;
+  justify-content: center;
+  align-self: center;
+  /* +4px к общему зазору строки (8px) = 12px, как gap грида категории */
+  margin-inline-end: var(--g-spacing-1);
+}
+
+.rh-subrow__name {
+  flex: 0 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* пунктир занимает весь остаток строки: он и есть «мост» от имени к
+ * значению, и он же прижимает значение к правому краю */
+.rh-subrow__lead {
+  flex: 1 1 auto;
+  min-width: var(--g-spacing-4);
+  border-bottom: 1px dotted var(--g-color-line-generic);
+  transform: translateY(-3px);
+}
+
+.rh-subrow__value {
+  flex: 0 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+
+.rh-subrow__score {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .rh-code {

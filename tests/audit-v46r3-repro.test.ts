@@ -1,6 +1,8 @@
 // Контракт интерактивной доводки В4.6, круг 3, пакет П1.
 // Проверяет решения владельца без живых запросов к SourceCraft.
 import { describe, expect, test } from "bun:test";
+import { getRepoCard } from "../src/api/repos";
+import { cardFacts, makeApiDb, seedRepo, seedScan, seedScore } from "./api-fixtures";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -63,8 +65,11 @@ describe("В4.6 круг 3: карточка", () => {
     expect(figure).toContain('alignItems="baseline"');
     expect(band).toMatch(/title="Repo Health Score"[\s\S]{0,240}\bwithBar/);
     expect(row.indexOf('className="rh-category__bar"')).toBeLessThan(row.indexOf('className="rh-category__weight"'));
-    expect(css).toContain("grid-template-columns: 16px minmax(120px, 180px) minmax(0, 1fr) minmax(80px, 360px) 40px auto");
-    expect(css).toMatch(/\.rh-aside-section > \.g-definition-list\s*\{[^}]*margin-block-start:\s*var\(--g-spacing-1\)/);
+    // трек числа сужен 40px -> 28px (доводка 21.09): число подписывает полосу
+    // и стоит у неё, а не у плашки вклада. Остальные треки не менялись.
+    expect(css).toContain("grid-template-columns: 16px minmax(120px, 180px) minmax(0, 1fr) minmax(80px, 360px) 28px auto");
+    // селектор стал составным: тот же отступ получил блок «Вклад категорий»
+    expect(css).toMatch(/\.rh-aside-section > \.g-definition-list,[\s\S]{0,80}\{[^}]*margin-block-start:\s*var\(--g-spacing-1\)/);
   });
 
   test("недоступные каналы — Alert, нижний CTA снят, основания раскрываемы", () => {
@@ -91,7 +96,7 @@ describe("В4.6 круг 3: карточка", () => {
     expect(repo).toMatch(/linkProps\("\/settings"\)[\s\S]{0,60}>Добавить токен доступа</);
     const star = repo.slice(repo.indexOf("function FavoriteStar"));
     expect(star).toContain('className={["rh-favorite-star"');
-    expect(star).toMatch(/<Button[\s\S]{0,1300}<Icon data=\{state === "on" \? StarFill : Star\} size=\{14\} \/>/);
+    expect(star).toMatch(/<Button[\s\S]{0,2000}<Icon data=\{state === "on" \? StarFill : Star\} size=\{14\} \/>/);
     expect(star).not.toContain("rh-favorite-star__icon");
     expect(css).toContain("--g-button-text-color: var(--g-color-text-secondary)");
   });
@@ -120,5 +125,57 @@ describe("В4.6 круг 3: разделы пользователя и обол�
   test("нижнее затухание удалено полностью", () => {
     expect(web("layout.css")).not.toContain("rh-fade");
     expect(web("Shell.tsx")).not.toContain("rh-fade");
+  });
+});
+
+// --- Пакет П4 (21.09): место в рейтинге на карточке -------------------------
+// Утверждение поведенческое, а не текстовое: «#N из M» — обещание про выборку
+// рейтинга, и цену ошибки платит не вёрстка, а число на экране.
+describe("В4.6 круг 3, П4: место в рейтинге", () => {
+  test("публичный оценённый получает место по тем же условиям, что рейтинг", () => {
+    const t = makeApiDb();
+    try {
+      const facts = cardFacts();
+      const mk = (repo: string, total: number): void => {
+        const id = seedRepo(t, { org: "rank", repo });
+        seedScore(t, id, seedScan(t, id, { facts }), { total });
+      };
+      mk("top", 90);
+      mk("mid", 70);
+      mk("low", 50);
+      const card = getRepoCard(t.db, "rank", "mid", { access: { cicd: "granted", appsec: "granted", repo: "granted" } })!;
+      expect(card.score!.rank).toBe(2);
+      expect(card.score!.rankedTotal).toBe(3);
+    } finally {
+      t.close();
+    }
+  });
+
+  test("приватный репозиторий места не получает: в публичном рейтинге его нет", () => {
+    const t = makeApiDb();
+    try {
+      const facts = cardFacts();
+      const pub = seedRepo(t, { org: "rank", repo: "public-one" });
+      seedScore(t, pub, seedScan(t, pub, { facts }), { total: 40 });
+      const priv = seedRepo(t, { org: "rank", repo: "private-one" });
+      t.db.query("UPDATE repos SET visibility = 'private' WHERE id = ?").run(priv);
+      seedScore(t, priv, seedScan(t, priv, { facts }), { total: 95 });
+      const card = getRepoCard(t.db, "rank", "private-one", { access: { cicd: "granted", appsec: "granted", repo: "granted" } })!;
+      // индекс у приватного есть — его видят участники репозитория
+      expect(card.score!.healthcraftIndex).toBe(95);
+      // а места нет: иначе карточка печатала бы «#1 из 1» про чужую выборку
+      expect(card.score!.rank).toBeNull();
+      expect(card.score!.rankedTotal).toBeNull();
+    } finally {
+      t.close();
+    }
+  });
+
+  test("место печатается серым текстом «#N из M», а не чипом", () => {
+    const repo = web("RepoPage.tsx");
+    const figure = repo.slice(repo.indexOf("function ScoreFigure"));
+    expect(figure).toMatch(/rank !== null && rank !== undefined && rankedTotal/);
+    expect(figure).toMatch(/#\{fmtCount\(rank\)\} из \{fmtCount\(rankedTotal\)\}/);
+    expect(figure).toContain('className="rh-score-figure__rank"');
   });
 });

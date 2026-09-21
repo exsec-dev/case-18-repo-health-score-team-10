@@ -47,11 +47,16 @@ export function App() {
       {route.kind === "settings" && <SettingsPage />}
       {route.kind === "not-found" && (
         <Page crumbs={[{ text: "Страница не найдена" }]}>
+          {/* Доводка 21.09: перечисление маршрутов убрано. «/repo/{org}/{repo}»
+              ничего не говорит человеку, перешедшему по старой ссылке, — это
+              отладочный вывод, показанный посетителю. У платформы на 404 ровно
+              две строки и действие; сам адрес зритель видит в адресной
+              строке браузера. */}
           <EmptyState
             icon={CircleQuestion}
             title="Страница не найдена"
-            description={`Адрес ${route.path} не соответствует ни одному экрану. Рейтинг живет на «/», карточка репозитория – на «/repo/{org}/{repo}», «Мои репозитории» – на «/me», настройки – на «/settings».`}
-            actions={[{ text: "К рейтингу", view: "action", onClick: () => navigate("/") }]}
+            description="Такого адреса нет или он изменился."
+            actions={[{ text: "К рейтингу", view: "action", size: "l", onClick: () => navigate("/") }]}
           />
         </Page>
       )}

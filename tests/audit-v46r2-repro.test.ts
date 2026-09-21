@@ -193,7 +193,9 @@ describe("Р20: значения подметрик округлены, дока
     expect({
       mdRounded: out.includes("| density | 80 | 0.87 |"),
       mdRaw: out.includes("0.8723404255319149"),
-      pageUsesRounding: /значение: \{fmtFactValue\(roundFacts\(sub\.value\)\)\}/.test(page),
+      // слово «значение» из строки убрано (доводка 21.09) и живёт в подсказке;
+      // утверждение о САМОМ округлении не менялось
+      pageUsesRounding: /\{fmtFactValue\(roundFacts\(sub\.value\)\)\}/.test(page),
       proofStaysRaw: between(page, "function FactProof", "function factStatusText").includes("fmtFactValue(fact.value)"),
     }).toEqual({ mdRounded: true, mdRaw: false, pageUsesRounding: true, proofStaysRaw: true });
   });
@@ -362,10 +364,18 @@ describe("Б4 (Р14, Р16): список категорий и контейне�
     }).toEqual({ groupsByReason: true, singular: true, plural: true, lastInList: true });
   });
 
-  test("Р14: отступ между шапкой коллапс-блока и раскрытым содержимым", () => {
+  // Доводка 21.09: верхнее поле у списка снято решением владельца — раскрытое
+  // содержимое отбивает от строки категории ШАПКА «Значение / Балл», которой
+  // в круге 2 ещё не было. Утверждение переведено с конкретного отступа на
+  // саму отбивку: список по-прежнему не начинается вплотную.
+  test("Р14: раскрытое содержимое отбито от шапки коллапс-блока", () => {
     const css = srcOf("layout.css");
+    const src = codeOf("RepoPage.tsx");
     const subrows = between(css, ".rh-subrows {", "}");
-    expect(/padding: var\(--g-spacing-2\)/.test(subrows)).toBe(true);
+    expect({
+      topPaddingGone: /padding: var\(--g-spacing-2\)/.test(subrows),
+      headerSeparates: src.includes('<div className="rh-subrows__head">'),
+    }).toEqual({ topPaddingGone: false, headerSeparates: true });
   });
 
   test("Р16: табы и коллапс-блоки — в контейнере с границами, как блок величины", () => {
@@ -395,10 +405,17 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
     expect({
       grey: meta.includes('color="secondary"'),
       steelGone: meta.includes('color="misc"'),
-      topGap: /\.rh-meta \{[^}]*margin-top: var\(--g-spacing-half\)/.test(srcOf("layout.css")),
+      // отступ по-прежнему берётся от полушага; доводка 21.09 добавила к нему 2px
+      topGap: /\.rh-meta \{[^}]*margin-top: [^;]*var\(--g-spacing-half\)/.test(srcOf("layout.css")),
+      // Доводка 21.09: перенос реквизитов в панель ОТМЕНЁН владельцем — строка
+      // снова в шапке. Слово «активность» вернулось в другой форме («обновлен
+      // 17.09.2026»): без него иконка часов читалась как время скана. Запрет
+      // Р11 касался формы «активность {fmtDate}», и она по-прежнему не
+      // используется.
       wordGone: head.includes("активность {fmtDate"),
       tooltipKept: head.includes('title="Последняя активность"'),
-    }).toEqual({ grey: true, steelGone: false, topGap: true, wordGone: false, tooltipKept: true });
+      dateNamed: head.includes("обновлен {fmtDate(r.lastActivityAt)}"),
+    }).toEqual({ grey: true, steelGone: false, topGap: true, wordGone: false, tooltipKept: true, dateNamed: true });
   });
 
   test("Р12: «Покрытие: N%», чип размера панели, мелкий текст замка и ссылка в кабинет на всех ветках", async () => {
@@ -502,13 +519,16 @@ describe("Б2 (Р3, Р21): строка рейтинга и контрол со�
     }).toEqual({ normalNumber: true, boldNumberGone: false, colouredNumber: true, readableBar: true, tighterGap: true, widths: true });
   });
 
-  test("Р21: у Select сортировки нет ширины-обрезки — контрол берёт ширину по содержимому", () => {
+  // Доводка 21.09: контрол снят целиком — сортировка переехала в заголовки
+  // колонок (манера таблиц платформы). Обрезать нечего, и утверждение
+  // ПЕРЕВЁРНУТО на отсутствие селекта: вернуть его молча уже не получится.
+  test("Р21: селекта сортировки в тулбаре нет — сортируют заголовки колонок", () => {
     const src = codeOf("Rating.tsx");
-    const sort = between(src, 'label="Сортировка:"', "/>");
-    expect({ autoWidth: sort.includes('width="auto"'), oldFixedWidth: sort.includes("width={230}") }).toEqual({
-      autoWidth: true,
-      oldFixedWidth: false,
-    });
+    expect({
+      selectGone: src.includes('label="Сортировка:"'),
+      oldFixedWidth: src.includes("width={230}"),
+      headerSorts: src.includes("function SortableHeader"),
+    }).toEqual({ selectGone: false, oldFixedWidth: false, headerSorts: true });
   });
 });
 

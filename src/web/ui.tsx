@@ -41,7 +41,11 @@ export function PageHeader({ title, description, end }: { title: ReactNode; desc
  */
 export function AsideSection({ title, help, children }: { title: ReactNode; help?: ReactNode; children: ReactNode }) {
   return (
-    <Flex as="section" className="rh-aside-section" direction="column" gap={2} style={{ marginBottom: "var(--g-spacing-6)" }}>
+    /* Доводка 21.09: шаг между блоками панели поднят с 6 (20px) до 7 (24px).
+       Блоки идут подряд и без разделителей, и на прежнем шаге легенда шкалы,
+       вклад категорий и расчёт читались одним полотном. Мера общая на все
+       разделы: компонент один. */
+    <Flex as="section" className="rh-aside-section" direction="column" gap={2} style={{ marginBottom: "var(--g-spacing-7)" }}>
       <Flex gap={1} alignItems="center">
         <Text variant="subheader-2" as="h2">
           {title}
@@ -190,7 +194,17 @@ export function SkeletonRows({ rows, height = 44 }: { rows: number; height?: num
   );
 }
 
-/** Пустое/служебное состояние: иконка вместо иллюстрации, заголовок, действие. */
+/**
+ * Пустое/служебное состояние в манере платформы: текст слева, иллюстрация
+ * СПРАВА, действие под текстом.
+ *
+ * Доводка 21.09. До неё блок стоял колонкой по центру с иконкой 48px — так не
+ * сделано ни одно пустое состояние SourceCraft. У них это всегда
+ * `direction="row"`, а иллюстрация заметно крупнее: замерено 120×120 на пустых
+ * разделах (Pull requests, Milestones, Releases) и 100×100 на странице 404.
+ * Иллюстрация у нас СВОЯ (иконка): бренд-ассеты платформы не переносим,
+ * правило 3 docs/ui/gravity-uikit.md — отсюда 120px иконкой, а не картинкой.
+ */
 export function EmptyState({
   icon,
   title,
@@ -204,16 +218,16 @@ export function EmptyState({
 }) {
   return (
     <PlaceholderContainer
+      className="rh-empty"
       size="m"
-      align="center"
-      direction="column"
+      align="left"
+      direction="row"
       title={title}
       description={description}
       actions={actions}
-      maxWidth={520}
       image={
-        <Text color="secondary">
-          <Icon data={icon} size={48} />
+        <Text color="secondary" style={{ display: "flex" }}>
+          <Icon data={icon} size={120} />
         </Text>
       }
     />

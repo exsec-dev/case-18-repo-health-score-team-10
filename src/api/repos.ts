@@ -404,6 +404,17 @@ export interface CardScore {
   repoHealthCoverage: number | null;
   /** true = зрителю закрыт хотя бы один из каналов CI/Security — полный показатель не показывается */
   fullLocked: boolean;
+  /**
+   * Место в публичном рейтинге по HealthCraft Index и размер выборки.
+   * Считается по тому же набору, что сам рейтинг (rating_active, public,
+   * последний пригодный скан текущей модели) и БЕЗ фильтров зрителя: это
+   * позиция среди всех оценённых, а не среди отфильтрованных. Оба поля null,
+   * когда индекса нет — места у неоценённого репозитория не существует, — и
+   * когда сам репозиторий в этот набор не входит (приватный: он виден своим
+   * участникам и имеет индекс, но в публичном рейтинге его нет).
+   */
+  rank: number | null;
+  rankedTotal: number | null;
   modelVersion: string;
   computedAt: string;
   noData: string[];
@@ -733,6 +744,36 @@ export function getRepoCard(
       }
     }
   }
+  // Место в рейтинге: сколько оценённых репозиториев стоит выше. Условия —
+  // те же, что в RATING_SQL, поэтому «3-е из 13 323» совпадает с позицией
+  // строки на первой странице рейтинга без фильтров.
+  // Приёмка 21.09: место считается ТОЛЬКО репозиторию, который сам стоит в
+  // этом наборе. Приватный репо виден своим участникам и имеет индекс (из
+  // последнего не-bad скана), но в публичный рейтинг не входит — без этой
+  // проверки его карточка печатала «#1 из 13 323», то есть место в выборке,
+  // которой репозитория нет. Это тот же случай, что и оговорённый в CardScore
+  // «места у неоценённого репозитория не существует».
+  const inRating = r.visibility === "public" && r.rating_active === 1;
+  const ranking =
+    !inRating || publicRow.healthcraft_index === null
+      ? null
+      : (db
+          .query(
+            `SELECT
+               (SELECT COUNT(*) FROM scores sc JOIN repos r ON r.id = sc.repo_id
+                 WHERE sc.model_version = ? AND r.rating_active = 1 AND r.visibility = 'public'
+                   AND sc.scan_id = ${LAST_ELIGIBLE_SCAN_SQL}
+                   AND sc.healthcraft_index > ?) AS above,
+               (SELECT COUNT(*) FROM scores sc JOIN repos r ON r.id = sc.repo_id
+                 WHERE sc.model_version = ? AND r.rating_active = 1 AND r.visibility = 'public'
+                   AND sc.scan_id = ${LAST_ELIGIBLE_SCAN_SQL}
+                   AND sc.healthcraft_index IS NOT NULL) AS scored`,
+          )
+          .get(MODEL_VERSION, MODEL_VERSION, publicRow.healthcraft_index, MODEL_VERSION, MODEL_VERSION) as {
+          above: number;
+          scored: number;
+        } | null);
+
   const score: CardScore = {
     healthcraftIndex: publicRow.healthcraft_index,
     indexCoverage: publicRow.index_coverage,
@@ -740,6 +781,8 @@ export function getRepoCard(
     repoHealthScore: fullOpen ? roundTotal(fullTotals.repoHealthScore) : null,
     repoHealthCoverage: fullOpen ? Math.round(fullTotals.repoHealthCoverage * 1000) / 1000 : null,
     fullLocked: !fullOpen,
+    rank: ranking === null ? null : ranking.above + 1,
+    rankedTotal: ranking === null ? null : ranking.scored,
     modelVersion: publicRow.model_version,
     computedAt: publicRow.computed_at,
     // причины no-data закрытых категорий — тоже данные канала (напр. «config-only cap»)
