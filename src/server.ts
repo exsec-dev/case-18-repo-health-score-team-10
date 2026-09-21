@@ -7,9 +7,22 @@
 // рейтинга появляются исключительно сканом.
 import { loadConfig } from "./config";
 import { openDb, setMetaValue } from "./db";
-import { getMeta, getRepoCardForViewer, listRepos, parseReposQuery } from "./api/repos";
+import { getMeta, listRepos, parseReposQuery, resolveCardForViewer, type RepoCard } from "./api/repos";
 import { getHealth } from "./api/health";
-import { makeAccessCache, resolveAccess, type AccessRepo, type AccessResult } from "./auth/access";
+import {
+  classifyScStatus,
+  isOwnRepo,
+  makeAccessCache,
+  probeIoOf,
+  probeRepoAccess,
+  resolveAccess,
+  visibilityOf,
+  type AccessRepo,
+  type AccessResult,
+  type ChannelAccess,
+  type NormalizedAccess,
+  type ProbeIo,
+} from "./auth/access";
 import { makeAppsecClient } from "./collectors/appsec";
 import {
   addFavoriteCapped,
@@ -19,13 +32,22 @@ import {
   listFavorites,
   listMyRepos,
   myJobs,
+  myRepoEntryOf,
   parseFavoriteInput,
   removeFavorite,
   requestUserScan,
+  resetFavoriteRights,
   seedFavoritesFromNamespace,
-  type FavoriteCheckResponse,
+  staleFavoriteSlugs,
+  userScanCheapGate,
+  viewerMayReadRepo,
+  type FavoriteCheckResult,
+  type FavoriteEnqueue,
   type PatSeed,
+  type UserScanResponse,
 } from "./api/me";
+import { makeRecheckPump } from "./api/recheck";
+import { recordRefusedUserJob } from "./jobs/scheduler";
 import { renderRepoReport } from "./report/markdown";
 import { pdfResponse } from "./report/pdf";
 import { catalogClientBudget, closeOwnRunningScans, maintenanceTick, returnOwnRunningJobs, startMaintenance, startScheduler, startWorkerLoop } from "./jobs/scheduler";
@@ -86,6 +108,31 @@ function allowInWindow(windows: Map<number, number[]>, userId: number, limit: nu
   window.push(now);
   windows.set(userId, window);
   return true;
+}
+
+/** В4.8.5 (К8.5.6): есть ли место в окне — БЕЗ списания (проба PAT списывает только вердикт). */
+function windowHasRoom(windows: Map<number, number[]>, userId: number, limit: number, windowMs: number, now = Date.now()): boolean {
+  const stamps = (windows.get(userId) ?? []).filter((ts) => ts > now - windowMs);
+  return stamps.length < limit;
+}
+
+/** Списать одну отметку окна. */
+function windowPush(windows: Map<number, number[]>, userId: number, now = Date.now()): void {
+  const stamps = windows.get(userId) ?? [];
+  stamps.push(now);
+  windows.set(userId, stamps);
+}
+
+/** В4.8.5 (К8.5.7): через сколько секунд освободится место в окне — значение `Retry-After`. */
+function windowRetryAfterSec(windows: Map<number, number[]>, userId: number, windowMs: number, now = Date.now()): number {
+  const alive = (windows.get(userId) ?? []).filter((ts) => ts > now - windowMs);
+  if (alive.length === 0) return 1;
+  return Math.max(1, Math.ceil((Math.min(...alive) + windowMs - now) / 1000));
+}
+
+/** В4.8.5 (К8.5.7, С9-14): каждый 429 несёт `Retry-After`. */
+function rateLimited(message: string, retryAfterSec: number): Response {
+  return Response.json({ error: { code: "rate_limited", message } }, { status: 429, headers: { "retry-after": String(Math.max(1, Math.round(retryAfterSec))) } });
 }
 
 /** Минутное окно проверок прав избранного: true = пропустить. */
@@ -149,9 +196,6 @@ function hardenRoutes<T extends Record<string, unknown>>(routes: T): T {
 /** Живая проба токена = оракул валидности PAT; сервис не переборщик (ПОРТ S1). */
 const PAT_PROBES_PER_HOUR = 10;
 
-/** Часовое окно живых проб PAT: true = пропустить. */
-const allowPatProbe = (userId: number, now = Date.now()): boolean => allowInWindow(patProbes, userId, PAT_PROBES_PER_HOUR, 60 * 60_000, now);
-
 const db = openDb(config);
 
 // Ф2.7 (В4.2b): имена/атрибуты cookie по схеме YA_REDIRECT_URI — на https
@@ -172,11 +216,15 @@ const forbidden = (message: string): Response =>
   Response.json({ error: { code: "forbidden", message } }, { status: 403 });
 
 /** В4.4 (кластер K/З6): окно мутаций избранного исчерпано — 429. */
-const favoriteRateLimited = (): Response =>
-  Response.json(
-    { error: { code: "rate_limited", message: `не больше ${config.queue.favoritesMutationsPerMinute ?? 30} изменений избранного в минуту — попробуйте чуть позже` } },
-    { status: 429 },
+const favoriteRateLimited = (userId: number): Response =>
+  rateLimited(
+    `не больше ${config.queue.favoritesMutationsPerMinute ?? 30} изменений избранного в минуту — попробуйте чуть позже`,
+    windowRetryAfterSec(favMutations, userId, 60_000),
   );
+
+/** В4.4 (кластер G): окно открытий карточки (карточка, MD, PDF) исчерпано — 429 с Retry-After. */
+const cardRateLimited = (userId: number): Response =>
+  rateLimited(`не больше ${config.queue.cardPerMinute ?? 30} открытий карточки в минуту — попробуйте чуть позже`, windowRetryAfterSec(cardViews, userId, 60_000));
 
 /** Ф2.21: предел избранного — 409 без меты репо и без факта существования приватного. */
 const favoriteLimit = (max: number): Response =>
@@ -262,6 +310,174 @@ function viewerAccess(req: Request): (repo: AccessRepo) => Promise<AccessResult>
   };
 }
 
+/** PAT пользователя, если он читается текущим ключом; иначе null. */
+function patOf(userId: number): string | null {
+  return config.auth.appSecret ? getPat(db, config.auth.appSecret, userId) : null;
+}
+
+/** Ввод-вывод живой проверки прав (К8.5.14) на PAT пользователя: интерактивный ретрай, общий ритм токена. */
+function probeIoFor(pat: string): ProbeIo {
+  const rest = makeScClient({ retry: INTERACTIVE_RETRY, token: pat, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 8, timeoutMs: config.scan.rest.timeoutMs });
+  // П3 (Н2 HIGH): адрес AppSec — из конфига, не боевой по умолчанию
+  const appsec = makeAppsecClient({ token: pat, baseUrl: config.api.appsecBase, minIntervalMs: config.scan.rest.appsecMinIntervalMs, retryMaxWaitMs: INTERACTIVE_RETRY.maxWaitMs });
+  return probeIoOf(rest, appsec);
+}
+
+/**
+ * В4.8.5 (К8.5.14 (д)): фоновая перепроверка прав избранного — насос в
+ * памяти процесса; окно проверок человека не расходует, анализ не ставит.
+ * Клиенты — на PAT пользователя, ритм общий с остальными его запросами.
+ */
+const recheckPump = makeRecheckPump({
+  db,
+  probeIo: (userId) => {
+    const pat = patOf(userId);
+    return pat ? probeIoFor(pat) : null;
+  },
+  log: (m) => console.log(m),
+});
+
+/** Причина доступа зрителя карточки (К8.5.8): нет сессии / нет токена / токен есть. */
+function viewerAuthOf(req: Request): "no-session" | "no-pat" | "pat" {
+  const user = sessionOf(req);
+  if (!user) return "no-session";
+  return patOf(user.userId) ? "pat" : "no-pat";
+}
+
+/**
+ * Карточка для зрителя запроса (карточка, MD, PDF — одна сборка, К2) или
+ * готовый отказ. В4.8.5 (К8.5.6, С6-1): владелец приватного репозитория с
+ * доказанными правами при сбое проверки получает «проверка не удалась» /
+ * «токен отклонён», а не «не найден»; прочим — прежний нейтральный 404.
+ */
+async function cardOrRefusal(req: Request, org: string, repo: string): Promise<RepoCard | Response> {
+  const viewer = sessionOf(req);
+  const auth = viewerAuthOf(req);
+  const out = await resolveCardForViewer(db, org, repo, viewerAccess(req), {
+    limits: config.scan,
+    viewerUserId: viewer?.userId,
+    viewerAuth: auth,
+    provenRights: () => viewer !== null && viewerMayReadRepo(db, viewer.userId, org, repo, { savedRightsValid: auth === "pat" }),
+  });
+  if (out.kind === "card") return out.card;
+  if (out.kind === "check_failed") {
+    return Response.json(
+      { error: { code: "check_failed", message: "SourceCraft сейчас не отвечает – не удалось проверить доступ к репозиторию, попробуйте позже" } },
+      { status: 503 },
+    );
+  }
+  if (out.kind === "token_rejected") {
+    return Response.json({ error: { code: "pat_rejected", message: "SourceCraft отклонил ваш токен – замените его в Настройках" } }, { status: 409 });
+  }
+  return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
+}
+
+/**
+ * В4.8.5 (К8.5.14 (д), (е)): добавление в избранное — звезда и «Добавить» —
+ * с автопроверкой прав СИНХРОННО в том же PUT (до 3 запросов, как прежняя
+ * «Проверить доступ»). Первый анализ своего ставится только здесь, при явном
+ * добавлении (§2-Р1): кулдаун и капы — как у прежней автопостановки
+ * (`requestUserScan` целиком, тело repo-GET прокинуто). Окно проверок
+ * человека исчерпано — запись «не проверена», уходит в фоновый насос (без
+ * анализа). Ответ — обновлённая запись строки (К8.5.7: список не
+ * перечитывается целиком) и исход проверки.
+ */
+async function addFavoriteAndCheck(userId: number, org: string, repo: string): Promise<Response> {
+  const outcome = addFavoriteCapped(db, userId, org, repo, config.queue.favoritesMax);
+  if (outcome === "limit") return favoriteLimit(config.queue.favoritesMax);
+  const pat = patOf(userId);
+  let check: { status: FavoriteCheckResult | "deferred" | "no_pat"; enqueue: FavoriteEnqueue | null } = { status: "no_pat", enqueue: null };
+  if (pat !== null) {
+    if (!allowFavoriteCheck(userId)) {
+      check = { status: "deferred", enqueue: null };
+      recheckPump.enqueue(userId, [{ org, repo }]);
+    } else {
+      const io = probeIoFor(pat);
+      const rest = userClient(userId)!;
+      const result = await checkFavoriteAccess(db, userId, org, repo, { ...io, cooldownMs: config.queue.favoriteOwnCooldownMs }, async (repoRes) =>
+        // Н1: постановка ЦЕЛИКОМ через requestUserScan — дедуп, too_many_active,
+        // rate_limited и транзакцию Ф1.5 не обойти; repo-GET не повторяется
+        favoriteEnqueueOf(await requestUserScan(db, rest, userId, org, repo, config.queue, new Date(), repoRes)),
+      );
+      check = { status: result.result, enqueue: result.enqueue };
+    }
+  }
+  const saved = listFavorites(db, userId).find((f) => f.org === org && f.repo === repo) ?? null;
+  return Response.json({
+    ok: true,
+    favorite: true,
+    entry: myRepoEntryOf(db, userId, org, repo, { savedRightsValid: pat !== null }),
+    access: saved?.access ?? null,
+    lastCheckedAt: saved?.lastCheckedAt ?? null,
+    check,
+  });
+}
+
+/** Исход «свой ли репозиторий» для запуска анализа (К8.5.14 (б)). */
+type Ownership =
+  | { kind: "own"; repoRes: { status: number; json: unknown } }
+  | { kind: "not_own" }
+  | { kind: "denied" }
+  | { kind: "token_rejected" }
+  | { kind: "unknown" };
+
+async function ownershipOf(req: Request, userId: number, org: string, repo: string): Promise<Ownership> {
+  const row = db.query("SELECT id, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number; visibility: string } | null;
+  let access: NormalizedAccess;
+  let repoRes: { status: number; json: unknown };
+  if (row) {
+    // общий резолвер доступа карточки — с её кэшем (повторный запуск с
+    // карточки не делает новых запросов)
+    const res = await viewerAccess(req)({ id: row.id, org, repo, visibility: row.visibility });
+    access = { repo: res.repo, cicd: res.cicd, appsec: res.appsec, visibility: visibilityOf(row.visibility) };
+    repoRes = { status: res.repo === "granted" ? 200 : 0, json: { visibility: row.visibility } };
+  } else {
+    const pat = patOf(userId);
+    if (!pat) return { kind: "unknown" };
+    const probe = await probeRepoAccess(probeIoFor(pat), org, repo);
+    access = probe.access;
+    repoRes = probe.repoRes;
+  }
+  if (isOwnRepo(access)) return { kind: "own", repoRes };
+  if (access.repo === "pat-expired") return { kind: "token_rejected" };
+  if (access.repo === "denied") return { kind: "denied" };
+  if (access.repo !== "granted") return { kind: "unknown" };
+  // репо видно, но каналы не проверились — «свой» не определён: не вердикт
+  const undecided = (c: ChannelAccess) => c === "check-failed" || c === "pat-expired";
+  if (undecided(access.cicd) || undecided(access.appsec)) return { kind: "unknown" };
+  return { kind: "not_own" };
+}
+
+/** Отказ запуска по «своему» (К8.5.14 (б)); `record` — строка отказа предпроверки (лимит частоты, как у прочих отказов). */
+function scanRefusal(own: Exclude<Ownership, { kind: "own" }>, org: string, repo: string): { status: number; body: unknown; record: boolean } {
+  switch (own.kind) {
+    case "not_own":
+      return {
+        status: 403,
+        body: { error: { code: "not_own", message: `анализ запускается только для своих репозиториев – ${org}/${repo} обновляется ночным обходом` } },
+        record: true,
+      };
+    case "denied":
+      return { status: 403, body: { error: { code: "no_access", message: `ваш токен не дает доступа к ${org}/${repo}` } }, record: true };
+    case "token_rejected":
+      return { status: 401, body: { error: { code: "pat_expired", message: "SourceCraft отклонил ваш токен – замените его в Настройках" } }, record: true };
+    default:
+      // К8.5.6: сбой проверки — не вердикт и не списание лимита запусков
+      return {
+        status: 503,
+        body: { error: { code: "check_failed", message: `SourceCraft сейчас не отвечает – не удалось проверить доступ к ${org}/${repo}, попробуйте позже` } },
+        record: false,
+      };
+  }
+}
+
+/** Ответ `requestUserScan` → HTTP; 429 — с `Retry-After` (К8.5.7). */
+function scanResponse(out: UserScanResponse): Response {
+  const res = Response.json(out.body, { status: out.status });
+  if (out.status === 429) res.headers.set("retry-after", String(out.retryAfterSec ?? 60));
+  return res;
+}
+
 /** config.auth → креды Я ID (имена полей разъезжаются — склеиваем в одном месте). */
 const yaCreds = () => ({
   clientId: config.auth.yaClientId,
@@ -298,14 +514,9 @@ const routes = {
       }
       const viewer = sessionOf(req);
       // В4.4 (кластер G): 429 — до резолва доступа (не тратим PAT-запросы)
-      if (viewer && !allowCardView(viewer.userId)) {
-        return Response.json(
-          { error: { code: "rate_limited", message: `не больше ${config.queue.cardPerMinute ?? 30} открытий карточки в минуту — попробуйте чуть позже` } },
-          { status: 429 },
-        );
-      }
-      const card = await getRepoCardForViewer(db, org!, repo!, viewerAccess(req), { limits: config.scan, viewerUserId: viewer?.userId });
-      if (!card) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
+      if (viewer && !allowCardView(viewer.userId)) return cardRateLimited(viewer.userId);
+      const card = await cardOrRefusal(req, org!, repo!);
+      if (card instanceof Response) return card;
       return Response.json(card);
     },
     "/api/repos/:org/:repo/report.md": async (req) => {
@@ -315,15 +526,10 @@ const routes = {
       }
       const viewer = sessionOf(req);
       // В4.4 (кластер G): MD-выгрузка — та же карточка, тот же лимит
-      if (viewer && !allowCardView(viewer.userId)) {
-        return Response.json(
-          { error: { code: "rate_limited", message: `не больше ${config.queue.cardPerMinute ?? 30} открытий карточки в минуту — попробуйте чуть позже` } },
-          { status: 429 },
-        );
-      }
+      if (viewer && !allowCardView(viewer.userId)) return cardRateLimited(viewer.userId);
       // тот же сборщик карточки с тем же зрителем (К2)
-      const card = await getRepoCardForViewer(db, org!, repo!, viewerAccess(req), { limits: config.scan, viewerUserId: viewer?.userId });
-      if (!card) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
+      const card = await cardOrRefusal(req, org!, repo!);
+      if (card instanceof Response) return card;
       return new Response(renderRepoReport(card), {
         headers: {
           "content-type": "text/markdown; charset=utf-8",
@@ -342,14 +548,9 @@ const routes = {
         return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
       }
       const viewer = sessionOf(req);
-      if (viewer && !allowCardView(viewer.userId)) {
-        return Response.json(
-          { error: { code: "rate_limited", message: `не больше ${config.queue.cardPerMinute ?? 30} открытий карточки в минуту — попробуйте чуть позже` } },
-          { status: 429 },
-        );
-      }
-      const card = await getRepoCardForViewer(db, org!, repo!, viewerAccess(req), { limits: config.scan, viewerUserId: viewer?.userId });
-      if (!card) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
+      if (viewer && !allowCardView(viewer.userId)) return cardRateLimited(viewer.userId);
+      const card = await cardOrRefusal(req, org!, repo!);
+      if (card instanceof Response) return card;
       return pdfResponse(card);
     },
     // ---------- auth: Я ID OAuth (Б1) ----------
@@ -453,16 +654,15 @@ const routes = {
       }
       if (req.method === "PUT") {
         // ПОРТ hq-parallel (S1/security): живая проба токена = оракул
-        // валидности PAT — окно на юзера (10/час), сервис не переборщик
-        if (!allowPatProbe(user.userId)) {
-          return Response.json(
-            { error: { code: "rate_limited", message: "Слишком много проверок токена — попробуйте через час" } },
-            { status: 429 },
-          );
+        // валидности PAT — окно на юзера (10/час), сервис не переборщик.
+        // В4.8.5 (К8.5.6, С2-1): окно списывает только ВЕРДИКТ платформы
+        // (токен принят или отклонён); сбой SourceCraft пробу не сжигает
+        if (!windowHasRoom(patProbes, user.userId, PAT_PROBES_PER_HOUR, 60 * 60_000)) {
+          return rateLimited("Слишком много проверок токена — попробуйте через час", windowRetryAfterSec(patProbes, user.userId, 60 * 60_000));
         }
         const body = (await req.json().catch(() => null)) as { token?: unknown } | null;
         if (typeof body?.token !== "string" || body.token.length < 8) return badQuery("token: ожидается строка PAT");
-        // живая проверка GET /user: 401 = токен отклонён платформой
+        // живая проверка GET /user: вердикт — по общему классификатору (К8.5.6)
         const probe = makeScClient({
           token: body.token,
           retry: INTERACTIVE_RETRY,
@@ -472,14 +672,22 @@ const routes = {
           timeoutMs: config.scan.rest.timeoutMs,
         });
         const who = await probe.get("/user");
-        if (who.status !== 200) {
+        const verdict = classifyScStatus(who.status);
+        if (verdict === "unavailable") {
           return Response.json(
-            { error: { code: "bad_token", message: `SourceCraft отклонил токен (HTTP ${who.status})` } },
-            { status: 400 },
+            { error: { code: "sourcecraft_unavailable", message: "SourceCraft сейчас не отвечает – токен не проверен и не сохранен, попробуйте позже" } },
+            { status: 503 },
           );
+        }
+        windowPush(patProbes, user.userId);
+        if (verdict !== "ok") {
+          return Response.json({ error: { code: "bad_token", message: `SourceCraft отклонил токен (HTTP ${who.status})` } }, { status: 400 });
         }
         storePat(db, config.auth.appSecret!, user.userId, body.token);
         accessCache.clearUser(user.userId); // новый PAT — новые права
+        // В4.8.5 (К8.5.9, К8.5.14): права избранного — поколения прежнего
+        // токена: гасятся, а новые проверяет фоновый насос (анализ он не ставит)
+        resetFavoriteRights(db, user.userId);
         const username = (who.json as { username?: unknown } | null)?.username ?? null;
         // Ф2.20: PAT уже сохранён — посев избранного fail-soft, любой его
         // исход сохранение не откатывает. Отдельный клиент с бюджетом 6
@@ -498,11 +706,16 @@ const routes = {
           });
           seed = await seedFavoritesFromNamespace(db, seeder, username, user.userId, config.queue.favoritesMax);
         }
+        // перепроверка — все записи (и посеянные): их права «не проверены»
+        recheckPump.enqueue(user.userId, staleFavoriteSlugs(db, user.userId));
         return Response.json({ ok: true, tokenOwner: typeof username === "string" ? username : null, seed });
       }
       if (req.method === "DELETE") {
         deletePat(db, user.userId);
         accessCache.clearUser(user.userId);
+        // К8.5.9 (С2-3): удаление токена гасит права, проверенные им
+        resetFavoriteRights(db, user.userId);
+        recheckPump.clear(user.userId);
         return Response.json({ ok: true });
       }
       return Response.json({ error: { code: "bad_query", message: "ожидался PUT или DELETE" } }, { status: 405 });
@@ -513,14 +726,19 @@ const routes = {
       // Ф2.8 (LOW-11): минутное окно чтений на юзера — в кабинете список
       // перечитывается; 429 — до какой-либо работы маршрута
       if (!allowMyReposView(user.userId)) {
-        return Response.json(
-          { error: { code: "rate_limited", message: `не больше ${config.queue.myReposPerMinute} обновлений списка в минуту — попробуйте позже` } },
-          { status: 429 },
+        return rateLimited(
+          `не больше ${config.queue.myReposPerMinute} обновлений списка в минуту — попробуйте позже`,
+          windowRetryAfterSec(myReposViews, user.userId, 60_000),
         );
       }
       // Ф2.20: кабинет читает ТОЛЬКО избранное — PAT здесь не нужен и в сеть
-      // маршрут не ходит вовсе
-      const result = await listMyRepos(db, user.userId);
+      // маршрут не ходит. К8.5.9: сохранённые права — только поколения
+      // читаемого PAT (ротация APP_SECRET гасит их на чтении)
+      const pat = patOf(user.userId);
+      const result = await listMyRepos(db, user.userId, { savedRightsValid: pat !== null });
+      // К8.5.14 (д): записи «не проверено» или старше суток — в фон, по
+      // нескольку за раз; ответ не ждёт (итог — при следующем чтении списка)
+      if (pat !== null) recheckPump.enqueue(user.userId, staleFavoriteSlugs(db, user.userId));
       return Response.json({ username: result.username, entries: result.entries });
     },
     // ПОРТ 5: панель заданий — колокольчик/«Мои задания» (диагноз UX «очереди не видно»)
@@ -540,19 +758,18 @@ const routes = {
       if (req.method === "PUT") {
         const csrf = guardOrigin(req);
         if (csrf) return csrf;
-        // S-7 (круг 2): сессия читается ОДИН раз — выше
-        if (!allowFavMutation(user.userId)) return favoriteRateLimited();
+        // В4.8.5 (К8.5.7, С3-4): отказ 400 окно мутаций не списывает — разбор
+        // ввода ДО окна; S-7 (круг 2): сессия читается ОДИН раз — выше
         const body = (await req.json().catch(() => null)) as { repository?: unknown } | null;
         if (typeof body?.repository !== "string") return badQuery("repository: ожидается строка org/repo или URL");
         const parsed = parseFavoriteInput(body.repository);
         if (!parsed) return badQuery("repository: ожидается org/repo или http(s)-URL; пустые и точечные сегменты не принимаются");
-        const outcome = addFavoriteCapped(db, user.userId, parsed.org, parsed.repo, config.queue.favoritesMax);
-        if (outcome === "limit") return favoriteLimit(config.queue.favoritesMax);
-        return Response.json({ ok: true, favorite: true });
+        if (!allowFavMutation(user.userId)) return favoriteRateLimited(user.userId);
+        return addFavoriteAndCheck(user.userId, parsed.org, parsed.repo);
       }
       return Response.json({ error: { code: "bad_query", message: "ожидался GET или PUT" } }, { status: 405 });
     },
-    "/api/me/favorites/:org/:repo": (req) => {
+    "/api/me/favorites/:org/:repo": async (req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
         return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
@@ -564,19 +781,15 @@ const routes = {
       const user = sessionOf(req);
       if (!user) return unauthorized();
       if (req.method === "PUT") {
-        // S-7 (круг 2): сессия читается ОДИН раз — выше
-        if (!allowFavMutation(user.userId)) return favoriteRateLimited();
-        // общий парсер (Ф2.20) применён и к path-роуту звезды
+        // общий парсер (Ф2.20) применён и к path-роуту звезды; разбор — до окна (К8.5.7)
         const parsed = parseFavoriteInput(`${org}/${repo}`);
         if (!parsed) return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
-        // Ф2.21: повтор существующего идемпотентен и лимит не расходует;
-        // сверх QUEUE_FAVORITES_MAX — 409 favorite_limit
-        const outcome = addFavoriteCapped(db, user.userId, parsed.org, parsed.repo, config.queue.favoritesMax);
-        if (outcome === "limit") return favoriteLimit(config.queue.favoritesMax);
-        return Response.json({ ok: true, favorite: true });
+        // S-7 (круг 2): сессия читается ОДИН раз — выше
+        if (!allowFavMutation(user.userId)) return favoriteRateLimited(user.userId);
+        return addFavoriteAndCheck(user.userId, parsed.org, parsed.repo);
       }
       if (req.method === "DELETE") {
-        if (!allowFavMutation(user.userId)) return favoriteRateLimited();
+        if (!allowFavMutation(user.userId)) return favoriteRateLimited(user.userId);
         removeFavorite(db, user.userId, org!, repo!);
         return Response.json({ ok: true, favorite: false });
       }
@@ -585,60 +798,12 @@ const routes = {
       }
       return Response.json({ error: { code: "bad_query", message: "ожидался GET/PUT/DELETE" } }, { status: 405 });
     },
-    "/api/me/favorites/:org/:repo/check": async (req) => {
-      const { org, repo } = req.params;
-      if (!validSlugSegment(org) || !validSlugSegment(repo)) {
-        return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
-      }
-      if (req.method !== "POST") {
-        return Response.json({ error: { code: "bad_query", message: "ожидался POST" } }, { status: 405 });
-      }
-      const csrf = guardOrigin(req);
-      if (csrf) return csrf;
-      const user = sessionOf(req);
-      if (!user) return unauthorized();
-      const orgSlug = org!;
-      const repoSlug = repo!;
-      if (!isFavorite(db, user.userId, orgSlug, repoSlug)) {
-        return Response.json({ error: { code: "not_favorite", message: "сначала добавьте репозиторий в избранное" } }, { status: 404 });
-      }
-      const pat = config.auth.appSecret ? getPat(db, config.auth.appSecret, user.userId) : null;
-      if (!pat) {
-        return Response.json({ error: { code: "no_pat", message: "для проверки прав нужен PAT SourceCraft" } }, { status: 409 });
-      }
-      // В4.2-port-fix (П2, вторая половина Н1): каждый вызов — до 3 живых
-      // запросов PAT-ом зрителя, лимита не было вовсе. Окно минутное, счётчик
-      // по схеме patProbes, но С ЧИСТКОЙ (Map без очистки течёт). 429 стоит
-      // ПОСЛЕ not_favorite (404) и no_pat (409): перебор несуществующих
-      // слагов не должен жечь лимит.
-      if (!allowFavoriteCheck(user.userId)) {
-        return Response.json(
-          { error: { code: "rate_limited", message: `не больше ${config.queue.favoriteChecksPerMinute} проверок прав в минуту — попробуйте позже` } },
-          { status: 429 },
-        );
-      }
-      const rest = makeScClient({ retry: INTERACTIVE_RETRY, token: pat, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 8, timeoutMs: config.scan.rest.timeoutMs });
-      // П3 (Н2 HIGH): адрес из конфига обязателен — без baseUrl модуль
-      // подставлял боевой appsec.sourcecraft.tech, и PAT зрителя уходил туда
-      // даже с APPSEC_API_BASE на мок
-      const appsec = makeAppsecClient({ token: pat, baseUrl: config.api.appsecBase, minIntervalMs: config.scan.rest.appsecMinIntervalMs, retryMaxWaitMs: INTERACTIVE_RETRY.maxWaitMs });
-      const result: FavoriteCheckResponse = await checkFavoriteAccess(
-        db,
-        user.userId,
-        orgSlug,
-        repoSlug,
-        {
-          restGet: (path: string) => rest.get(path).then((r) => ({ status: r.status, json: r.json })),
-          appsecLatest: (gitRepo: string) => appsec.get("/v1/scans/latest", { gitRepo }).then((r) => ({ status: r.status })),
-          cooldownMs: config.queue.favoriteOwnCooldownMs,
-        },
-        // Н1: постановка идёт ЦЕЛИКОМ через requestUserScan — его дедуп,
-        // too_many_active, rate_limited и транзакцию Ф1.5 не обойти; тело
-        // repo-GET прокидывается, чтобы не делать его второй раз
-        async (repoRes) => favoriteEnqueueOf(await requestUserScan(db, rest, user.userId, orgSlug, repoSlug, config.queue, new Date(), repoRes)),
-      );
-      return Response.json(result);
-    },
+    // В4.8.5 (К8.5.14 (г), §2-В1): маршрута «Проверить доступ»
+    // (`POST /api/me/favorites/:org/:repo/check`) больше нет — права
+    // проверяются сами при добавлении в избранное и фоном; его инварианты
+    // (порядок отказов, лимит проверок, кулдаун по own-скану зрителя, AppSec
+    // на APPSEC_API_BASE, «не свой — без постановки», капы requestUserScan)
+    // перенесены на путь добавления. Прежний адрес отвечает общим JSON-404.
     "/api/me/repos/:org/:repo/scan": async (req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
@@ -655,10 +820,22 @@ const routes = {
       if (!client) {
         return Response.json({ error: { code: "no_pat", message: "сначала сохраните PAT SourceCraft" } }, { status: 409 });
       }
-      // H1/LOW-3 (К3): до постановки — repo-GET с PAT юзера; строка repos
-      // и заявка появляются только при подтверждённом доступе
-      const out = await requestUserScan(db, client, user.userId, org!, repo!, config.queue);
-      return Response.json(out.body, { status: out.status });
+      // К4/Ф1.7: дешёвые отказы (дедуп, активные, часовой лимит) — ДО сети
+      const cheap = userScanCheapGate(db, user.userId, org!, repo!, config.queue);
+      if (cheap) return scanResponse(cheap);
+      // В4.8.5 (К8.5.14 (б), §2-В1): анализ — только своих. «Свой» — общее
+      // правило над доступом из общего резолвера (с кэшем карточки); строки
+      // репо ещё нет — живая проверка теми же правилами. Неизвестно — не свой
+      const own = await ownershipOf(req, user.userId, org!, repo!);
+      if (own.kind !== "own") {
+        const refusal = scanRefusal(own, org!, repo!);
+        if (refusal.record) recordRefusedUserJob(db, user.userId, new Date(), `${org}/${repo}`);
+        return Response.json(refusal.body, { status: refusal.status });
+      }
+      // H1/LOW-3 (К3): repo-GET уже сделан (или доступ подтверждён кэшем
+      // карточки) — строка repos и заявка появляются только при доказанном доступе
+      const out = await requestUserScan(db, client, user.userId, org!, repo!, config.queue, new Date(), own.repoRes);
+      return scanResponse(out);
     },
     // неизвестный /api/* обязан остаться JSON-404, а не отдать HTML
     "/api/*": () => notFound("неизвестный endpoint"),

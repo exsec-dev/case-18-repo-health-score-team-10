@@ -457,15 +457,21 @@ interface MyReposBody {
   entries: { org: string; repo: string; title: string | null; language: string | null; lastScanAt: string | null; healthcraftIndex: number | null }[];
 }
 
+// ПЕРЕНОС (В4.8.5, К8.5.14 (г), §2-В1): маршрута «Проверить доступ» (`/check`)
+// больше нет — тот же инвариант (постановка ЦЕЛИКОМ через requestUserScan,
+// капы, «отказ по капу не роняет права») держит автопроверка при явном
+// добавлении в избранное (звезда, `PUT /api/me/favorites/:org/:repo`);
+// утверждения прежние, меняется только путь и форма ответа (исход — в `check`)
 describe("П2 (Н1): проверка избранного ставит сканы через requestUserScan — со всеми капами", () => {
   test("8 своих избранных → активных юзерских job ровно userActiveMax, остальные — enqueue.refused/too_many_active", async () => {
     const put = await fetch(at("/api/me/pat"), as("fav", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: "pat-fav-000000000" }) }));
     expect(put.status).toBe(200);
     const outcomes: CheckBody[] = [];
     for (let i = 1; i <= 8; i++) {
-      const res = await fetch(at(`/api/me/favorites/fav/f${i}/check`), as("fav", { method: "POST" }));
+      const res = await fetch(at(`/api/me/favorites/fav/f${i}`), as("fav", { method: "PUT" }));
       expect(res.status).toBe(200);
-      outcomes.push((await res.json()) as CheckBody);
+      const body = (await res.json()) as { access?: CheckBody["access"]; check?: { enqueue?: CheckBody["enqueue"] } };
+      outcomes.push({ access: body.access, enqueue: body.check?.enqueue ?? undefined });
     }
     const active = (probe!.query("SELECT COUNT(*) AS c FROM jobs WHERE user_id = ? AND status IN ('queued','running')").get(ids.fav!) as { c: number }).c;
     expect({
@@ -531,18 +537,27 @@ describe("П10 (Н-1, круг 2): признак прав читает пару
   }, 30_000);
 
   // вторая половина контракта П10 («остальные два дизъюнкта не трогаются»)
-  // зелена и до исправления — это охрана от пере-затягивания признака, не репро
-  test("тот же репо владельцу (own-скан) виден по-прежнему: мета и Score на месте", async () => {
+  // зелена и до исправления — это охрана от пере-затягивания признака, не репро.
+  // ПЕРЕВОРОТ (В4.8.5, К8.5.9, С6-2 — строже, не слабее): «права строки = права
+  // карточки». Выбывший из рейтинга публичный репозиторий карточка и MD отдают
+  // 404 ВСЕМ, включая автора своего скана, — строка кабинета его больше не
+  // раскрывает и автору (раньше строка показывала мету и оценку, а по клику
+  // открывался 404). Для НЕ выбывшего репо own-скан по-прежнему доказывает права
+  // (tests/v485-access.test.ts)
+  test("тот же репо владельцу (own-скан): выбывший не раскрывается и ему — строка равна карточке (404)", async () => {
     const res = await fetch(at("/api/me/repos"), as("own"));
     expect(res.status).toBe(200);
     const body = (await res.json()) as MyReposBody;
     const entry = body.entries.find((e) => e.org === "evicted" && e.repo === "pub");
     expect(entry).toBeDefined();
-    expect({ title: entry!.title, language: entry!.language, healthcraftIndex: entry!.healthcraftIndex }).toEqual({
-      title: "Вытесненный",
-      language: "Go",
-      healthcraftIndex: 55,
+    expect({ title: entry!.title, language: entry!.language, healthcraftIndex: entry!.healthcraftIndex, mayRead: (entry as { mayRead?: boolean }).mayRead }).toEqual({
+      title: null,
+      language: null,
+      healthcraftIndex: null,
+      mayRead: false,
     });
+    const card = await fetch(at("/api/repos/evicted/pub"), as("own"));
+    expect(card.status).toBe(404);
   }, 30_000);
 });
 

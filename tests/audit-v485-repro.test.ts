@@ -340,7 +340,7 @@ const as = (name: string, init: RequestInit = {}): RequestInit => ({
 const at = (path: string): string => `${server!.base}${path}`;
 
 describe("HTTP: права, токен и запуск анализа", () => {
-  repro("С2-1: сбой SourceCraft на пробе токена — не «отклонил токен» и не списывает окно проб", async () => {
+  test("С2-1: сбой SourceCraft на пробе токена — не «отклонил токен» и не списывает окно проб", async () => {
     const put = () =>
       fetch(at("/api/me/pat"), as("probe", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: "tok-probe-0001" }) }));
     userMode = "503";
@@ -352,7 +352,7 @@ describe("HTTP: права, токен и запуск анализа", () => {
     expect({ rejectedAsBadToken: firstCode === "bad_token", afterFailures: after.status }).toEqual({ rejectedAsBadToken: false, afterFailures: 200 });
   }, 60_000);
 
-  repro("С3-1: добавление в избранное само проверяет права, а сбой SourceCraft при повторной проверке их не затирает", async () => {
+  test("С3-1: добавление в избранное само проверяет права, а сбой SourceCraft при повторной проверке их не затирает", async () => {
     repoMode = "ok";
     await fetch(at("/api/me/favorites/own/star-priv"), as("star", { method: "PUT" }));
     const read = async () =>
@@ -367,7 +367,7 @@ describe("HTTP: права, токен и запуск анализа", () => {
     expect({ afterAdd: afterAdd?.clone ?? null, afterFailure: afterFailure?.clone ?? null }).toEqual({ afterAdd: true, afterFailure: true });
   }, 60_000);
 
-  repro("С6-1: владелец своей приватной карточки при сбое SourceCraft не получает «не найден»", async () => {
+  test("С6-1: владелец своей приватной карточки при сбое SourceCraft не получает «не найден»", async () => {
     repoMode = "503";
     const res = await fetch(at("/api/repos/own/owner-priv"), as("owner"));
     repoMode = "ok";
@@ -375,14 +375,14 @@ describe("HTTP: права, токен и запуск анализа", () => {
     expect({ status: res.status, code: body.error?.code ?? null }).toEqual({ status: 503, code: "check_failed" });
   }, 60_000);
 
-  repro("С2-3: удаление токена гасит сохраненные права — строка приватного без меты", async () => {
+  test("С2-3: удаление токена гасит сохраненные права — строка приватного без меты", async () => {
     const del = await fetch(at("/api/me/pat"), as("del", { method: "DELETE" }));
     const repos = (await (await fetch(at("/api/me/repos"), as("del"))).json()) as { entries: { repo: string; mayRead: boolean; title: string | null }[] };
     const row = repos.entries.find((e) => e.repo === "del-priv");
     expect({ del: del.status, mayRead: row?.mayRead, title: row?.title }).toEqual({ del: 200, mayRead: false, title: null });
   }, 60_000);
 
-  repro("С4-11: POST /scan чужого публичного репозитория — отказ с кодом, задание не ставится", async () => {
+  test("С4-11: POST /scan чужого публичного репозитория — отказ с кодом, задание не ставится", async () => {
     repoMode = "ok";
     const res = await fetch(at("/api/me/repos/foreign/pub/scan"), as("stranger", { method: "POST" }));
     const body = (await res.json()) as { error?: { code?: string } };

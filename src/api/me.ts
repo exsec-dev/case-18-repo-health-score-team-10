@@ -9,7 +9,7 @@ import type { Database } from "bun:sqlite";
 import { ScClient } from "../collectors/http";
 import { upsertRepo } from "../jobs/runner";
 import { LAST_ELIGIBLE_SCAN_SQL, LAST_NOT_BAD_SCAN_SQL, getRepoCard, jobLeaseExpired } from "./repos";
-import type { AccessResult, ChannelAccess } from "../auth/access";
+import { classifyScStatus, isOwnRepo, probeRepoAccess, type AccessResult, type ChannelAccess, type NormalizedAccess, type ProbeIo } from "../auth/access";
 import { MODEL_VERSION } from "../score/model";
 import { countActiveUserJobs, countRecentUserJobs, enqueueScan, findActiveUserJob, recordRefusedUserJob } from "../jobs/scheduler";
 import type { QueueConfig } from "../config";
@@ -119,16 +119,22 @@ function ratingScoreOf(db: Database, org: string, repo: string): { healthcraftIn
  * дефолта 'public'). Неизвестно → «нет прав» (fail-closed, как Ф1.10).
  * Третье слагаемое снимает коллизию с П4: own-скан = доказанные права.
  */
-function viewerMayReadRepo(db: Database, userId: number | null, org: string, repo: string): boolean {
+export function viewerMayReadRepo(db: Database, userId: number | null, org: string, repo: string, opts: SavedRightsOptions = {}): boolean {
   const row = db.query("SELECT id, visibility, rating_active FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as
     | { id: number; visibility: string; rating_active: number }
     | null;
   if (row && row.visibility === "public" && row.rating_active === 1) return true;
+  // В4.8.5 (К8.5.9, С6-2): выбывший из рейтинга публичный репозиторий карточка
+  // не покажет никому (404) — строка его тоже не раскрывает, какие бы права ни
+  // были сохранены
+  if (row && row.visibility === "public" && row.rating_active !== 1) return false;
   if (userId === null) return false;
   const fav = db.query("SELECT last_access FROM favorites WHERE user_id = ? AND org_slug = ? AND repo_slug = ?").get(userId, org, repo) as
     | { last_access: string | null }
     | null;
-  if (fav?.last_access) {
+  // К8.5.9: сохранённая проверка действует только для поколения PAT, которым
+  // сделана; нечитаемый PAT (ротация APP_SECRET) — проверка не в счёт
+  if (fav?.last_access && opts.savedRightsValid !== false) {
     try {
       if ((JSON.parse(fav.last_access) as FavoriteAccess).clone === true) return true;
     } catch {
@@ -146,10 +152,10 @@ function viewerMayReadRepo(db: Database, userId: number | null, org: string, rep
  * как у карточки. `repo` — granted: вызывается лишь для записей с
  * доказанными правами (`viewerMayReadRepo`).
  */
-function savedAccessOf(db: Database, userId: number | null, org: string, repo: string): AccessResult {
+function savedAccessOf(db: Database, userId: number | null, org: string, repo: string, opts: SavedRightsOptions = {}): AccessResult {
   const channel = (v: boolean | null | undefined): ChannelAccess => (v === true ? "granted" : v === false ? "denied" : "check-failed");
   let saved: Partial<FavoriteAccess> | null = null;
-  if (userId !== null) {
+  if (userId !== null && opts.savedRightsValid !== false) {
     const fav = db.query("SELECT last_access FROM favorites WHERE user_id = ? AND org_slug = ? AND repo_slug = ?").get(userId, org, repo) as
       | { last_access: string | null }
       | null;
@@ -167,9 +173,9 @@ function savedAccessOf(db: Database, userId: number | null, org: string, repo: s
  * сети, тем же сборщиком карточки (место в рейтинге не считается). null —
  * прав нет или карточки нет (репозитория нет в каталоге).
  */
-function recommendationsCountOf(db: Database, userId: number | null, org: string, repo: string, mayRead: boolean): number | null {
+function recommendationsCountOf(db: Database, userId: number | null, org: string, repo: string, mayRead: boolean, opts: SavedRightsOptions = {}): number | null {
   if (!mayRead) return null;
-  const card = getRepoCard(db, org, repo, { access: savedAccessOf(db, userId, org, repo), withRank: false });
+  const card = getRepoCard(db, org, repo, { access: savedAccessOf(db, userId, org, repo, opts), withRank: false });
   return card ? card.recommendations.length : null;
 }
 
@@ -304,50 +310,88 @@ export async function seedFavoritesFromNamespace(
  * Namespace- и own-scan-объединение удалены. Мета и Score по-прежнему
  * только записям с правами (признак П6/П10 — viewerMayReadRepo не тронут).
  */
-export async function listMyRepos(db: Database, userId: number | null): Promise<MyReposResult> {
+export async function listMyRepos(db: Database, userId: number | null, opts: SavedRightsOptions = {}): Promise<MyReposResult> {
   const favs = db
     .query("SELECT org_slug, repo_slug FROM favorites WHERE user_id = ? ORDER BY added_at DESC")
     .all(userId ?? -1) as { org_slug: string; repo_slug: string }[];
-  const entries: MyRepoEntry[] = favs.map((f) => {
-    const mayRead = viewerMayReadRepo(db, userId, f.org_slug, f.repo_slug);
-    // UX-8: признак «в каталоге» — один дешёвый lookup (JOIN'а в listMyRepos
-    // нет; строку repos поднимает viewerMayReadRepo и выбрасывает)
-    const inCatalog = db.query("SELECT 1 FROM repos WHERE org_slug = ? AND repo_slug = ?").get(f.org_slug, f.repo_slug) !== null;
-    // В4.8 (круг 2, замечание 4 Екатерины): логотип, цвет языка и дата
-    // активности читаются из той же строки `repos`, что название и язык, —
-    // до этого поля контракта стояли литералом null, и кабинет терял аватары
-    // и цвета, которые рейтинг показывал для того же репозитория. Гейт прав
-    // прежний: без прав мета не раскрывается (П6).
-    const row = mayRead
-      ? (db
-          .query("SELECT title, language, logo_url, language_color, last_activity_at FROM repos WHERE org_slug = ? AND repo_slug = ?")
-          .get(f.org_slug, f.repo_slug) as {
-          title: string | null;
-          language: string | null;
-          logo_url: string | null;
-          language_color: string | null;
-          last_activity_at: string | null;
-        } | null)
-      : null;
-    const known = mayRead ? ratingScoreOf(db, f.org_slug, f.repo_slug) : { healthcraftIndex: null, lastScanAt: null, lastScanStatus: null };
-    return {
-      org: f.org_slug,
-      repo: f.repo_slug,
-      title: row?.title ?? null,
-      language: row?.language ?? null,
-      lastActivityAt: row?.last_activity_at ?? null,
-      logoUrl: row?.logo_url ?? null,
-      languageColor: row?.language_color ?? null,
-      healthcraftIndex: known.healthcraftIndex,
-      lastScanAt: known.lastScanAt,
-      lastScanStatus: known.lastScanStatus,
-      inCatalog,
-      mayRead,
-      planned: plannedWork(db, userId, f.org_slug, f.repo_slug),
-      recommendationsCount: recommendationsCountOf(db, userId, f.org_slug, f.repo_slug, mayRead),
-    };
-  });
+  const entries: MyRepoEntry[] = favs.map((f) => myRepoEntryOf(db, userId, f.org_slug, f.repo_slug, opts));
   return { username: null, entries };
+}
+
+/**
+ * Одна запись «Моих репозиториев» (В4.8.5, К8.5.7: мутации избранного
+ * возвращают обновлённую запись строки, список не перечитывается целиком).
+ * Та же сборка, что у `listMyRepos` — число и поля строки равны списку.
+ */
+export function myRepoEntryOf(db: Database, userId: number | null, org: string, repo: string, opts: SavedRightsOptions = {}): MyRepoEntry {
+  const f = { org_slug: org, repo_slug: repo };
+  const mayRead = viewerMayReadRepo(db, userId, f.org_slug, f.repo_slug, opts);
+  // UX-8: признак «в каталоге» — один дешёвый lookup (JOIN'а в listMyRepos
+  // нет; строку repos поднимает viewerMayReadRepo и выбрасывает)
+  const inCatalog = db.query("SELECT 1 FROM repos WHERE org_slug = ? AND repo_slug = ?").get(f.org_slug, f.repo_slug) !== null;
+  // В4.8 (круг 2, замечание 4 Екатерины): логотип, цвет языка и дата
+  // активности читаются из той же строки `repos`, что название и язык, —
+  // до этого поля контракта стояли литералом null, и кабинет терял аватары
+  // и цвета, которые рейтинг показывал для того же репозитория. Гейт прав
+  // прежний: без прав мета не раскрывается (П6).
+  const row = mayRead
+    ? (db
+        .query("SELECT title, language, logo_url, language_color, last_activity_at FROM repos WHERE org_slug = ? AND repo_slug = ?")
+        .get(f.org_slug, f.repo_slug) as {
+        title: string | null;
+        language: string | null;
+        logo_url: string | null;
+        language_color: string | null;
+        last_activity_at: string | null;
+      } | null)
+    : null;
+  const known = mayRead ? ratingScoreOf(db, f.org_slug, f.repo_slug) : { healthcraftIndex: null, lastScanAt: null, lastScanStatus: null };
+  return {
+    org: f.org_slug,
+    repo: f.repo_slug,
+    title: row?.title ?? null,
+    language: row?.language ?? null,
+    lastActivityAt: row?.last_activity_at ?? null,
+    logoUrl: row?.logo_url ?? null,
+    languageColor: row?.language_color ?? null,
+    healthcraftIndex: known.healthcraftIndex,
+    lastScanAt: known.lastScanAt,
+    lastScanStatus: known.lastScanStatus,
+    inCatalog,
+    mayRead,
+    planned: plannedWork(db, userId, f.org_slug, f.repo_slug),
+    recommendationsCount: recommendationsCountOf(db, userId, f.org_slug, f.repo_slug, mayRead, opts),
+  };
+}
+
+/** К8.5.9: сохранённые права действуют только для текущего поколения PAT. */
+export interface SavedRightsOptions {
+  /** false — PAT не читается текущим ключом (ротация APP_SECRET): сохранённые проверки не в счёт */
+  savedRightsValid?: boolean;
+}
+
+/**
+ * В4.8.5 (К8.5.9, К8.5.14; С2-3): гашение сохранённых прав при удалении,
+ * замене или сохранении PAT — права принадлежат поколению токена, которым
+ * проверены. Обнуляется и `last_checked_at`: правило фоновой перепроверки
+ * «не проверено или старше суток» подхватит все записи при следующем чтении
+ * списка (и после рестарта, когда очередь насоса в памяти потеряна).
+ */
+export function resetFavoriteRights(db: Database, userId: number): number {
+  return db.query("UPDATE favorites SET last_access = NULL, last_checked_at = NULL WHERE user_id = ?").run(userId).changes;
+}
+
+/** В4.8.5 (К8.5.14 (д)): возраст сохранённой проверки, после которого запись перепроверяется в фоне. */
+export const RECHECK_AFTER_MS = 24 * 60 * 60_000;
+
+/** Записи избранного без проверки прав или с проверкой старше суток — кандидаты фоновой перепроверки. */
+export function staleFavoriteSlugs(db: Database, userId: number, now = new Date(), maxAgeMs = RECHECK_AFTER_MS): { org: string; repo: string }[] {
+  const cutoff = new Date(now.getTime() - maxAgeMs).toISOString();
+  return (
+    db
+      .query("SELECT org_slug, repo_slug FROM favorites WHERE user_id = ? AND (last_checked_at IS NULL OR last_checked_at < ?) ORDER BY added_at DESC")
+      .all(userId, cutoff) as { org_slug: string; repo_slug: string }[]
+  ).map((r) => ({ org: r.org_slug, repo: r.repo_slug }));
 }
 
 // ---------- запуск анализа юзером (В4.1, К3) ----------
@@ -355,6 +399,8 @@ export async function listMyRepos(db: Database, userId: number | null): Promise<
 export interface UserScanResponse {
   status: number;
   body: Record<string, unknown>;
+  /** В4.8.5 (К8.5.7): у 429 — через сколько секунд повторить (заголовок Retry-After) */
+  retryAfterSec?: number;
 }
 
 /**
@@ -381,21 +427,13 @@ export async function requestUserScan(
   // вторая половина Н1 ровно про усилитель запросов
   prefetched?: { status: number; json: unknown },
 ): Promise<UserScanResponse> {
-  const existing = db.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number } | null;
-  const active = existing ? findActiveUserJob(db, userId, existing.id) : null;
-  if (active !== null) {
-    return { status: 202, body: { queued: true, jobId: active, slug: `${org}/${repo}`, deduplicated: true } };
-  }
-  if (countActiveUserJobs(db, userId) >= queue.userActiveMax) {
-    return tooManyActive(queue);
-  }
-  if (countRecentUserJobs(db, userId, now) >= queue.userScansPerHour) {
-    return rateLimited(queue);
-  }
+  const cheap = userScanCheapGate(db, userId, org, repo, queue, now);
+  if (cheap) return cheap;
   const res = prefetched ?? (await client.get(`/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`));
-  // Ф1.6 + круг 2 (LOW-6): любой неуспех предпроверки (403/404, 401,
-  // 0/429/5xx) учитывается лимитом частоты — POST не усилитель запросов
-  if (res.status !== 200) recordRefusedUserJob(db, userId, now, `${org}/${repo}`);
+  // Ф1.6 + круг 2 (LOW-6): отказ предпроверки (403/404, 401) учитывается
+  // лимитом частоты — POST не усилитель запросов. В4.8.5 (К8.5.6, С4-13):
+  // сбой платформы (0/429/5xx) — не вердикт о правах, лимит запусков не списывает
+  if (res.status !== 200 && classifyScStatus(res.status) !== "unavailable") recordRefusedUserJob(db, userId, now, `${org}/${repo}`);
   if (res.status === 403 || res.status === 404) {
     return { status: 403, body: { error: { code: "no_access", message: `ваш PAT не дает доступа к ${org}/${repo}` } } };
   }
@@ -403,7 +441,7 @@ export async function requestUserScan(
     return { status: 401, body: { error: { code: "pat_expired", message: "SourceCraft отклонил PAT – обновите токен в кабинете" } } };
   }
   if (res.status !== 200) {
-    return { status: 503, body: { error: { code: "check_failed", message: `не удалось проверить доступ к ${org}/${repo} (HTTP ${res.status})` } } };
+    return { status: 503, body: { error: { code: "check_failed", message: `не удалось проверить доступ к ${org}/${repo}: SourceCraft сейчас не отвечает` } } };
   }
   const body = res.json as { visibility?: unknown; name?: unknown } | null;
   const visibility = typeof body?.visibility === "string" ? body.visibility : null;
@@ -420,7 +458,7 @@ export async function requestUserScan(
       return tooManyActive(queue);
     }
     if (countRecentUserJobs(db, userId, now) >= queue.userScansPerHour) {
-      return rateLimited(queue);
+      return rateLimited(db, userId, queue, now);
     }
     // К-Ф1.1: заявка вставляет только НОВУЮ строку (видимость из тела repo-GET
     // или 'private' до подтверждения); существующую строку не обновляет —
@@ -436,17 +474,43 @@ export async function requestUserScan(
   })();
 }
 
+/**
+ * Дешёвые отказы запуска БЕЗ сети (К4, Ф1.7): активная заявка того же
+ * (юзер, репо) → 202 deduplicated; активных сверх предела → 429
+ * too_many_active; часовой лимит исчерпан → 429 rate_limited. null — можно
+ * идти в сеть. В4.8.5: вынесено, чтобы маршрут запуска проверял «свой»
+ * (сеть) только после них; внутри транзакции постановки проверки повторяются.
+ */
+export function userScanCheapGate(db: Database, userId: number, org: string, repo: string, queue: QueueConfig, now = new Date()): UserScanResponse | null {
+  const existing = db.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number } | null;
+  const active = existing ? findActiveUserJob(db, userId, existing.id) : null;
+  if (active !== null) {
+    return { status: 202, body: { queued: true, jobId: active, slug: `${org}/${repo}`, deduplicated: true } };
+  }
+  if (countActiveUserJobs(db, userId) >= queue.userActiveMax) return tooManyActive(queue);
+  if (countRecentUserJobs(db, userId, now) >= queue.userScansPerHour) return rateLimited(db, userId, queue, now);
+  return null;
+}
+
 function tooManyActive(queue: QueueConfig): UserScanResponse {
   return {
     status: 429,
     body: { error: { code: "too_many_active", message: `не больше ${queue.userActiveMax} анализов в очереди одновременно — дождитесь завершения` } },
+    // место освободится, когда закончится анализ — точного времени нет, минута — честный шаг опроса
+    retryAfterSec: 60,
   };
 }
 
-function rateLimited(queue: QueueConfig): UserScanResponse {
+function rateLimited(db: Database, userId: number, queue: QueueConfig, now: Date): UserScanResponse {
+  const since = new Date(now.getTime() - 3600_000).toISOString();
+  const oldest = db
+    .query("SELECT MIN(created_at) AS t FROM jobs WHERE user_id = ? AND trigger_kind = 'user' AND created_at > ?")
+    .get(userId, since) as { t: string | null };
+  const retryAfterSec = oldest.t ? Math.max(1, Math.ceil((Date.parse(oldest.t) + 3600_000 - now.getTime()) / 1000)) : 60;
   return {
     status: 429,
     body: { error: { code: "rate_limited", message: `не больше ${queue.userScansPerHour} запусков анализа в час — попробуйте позже` } },
+    retryAfterSec,
   };
 }
 
@@ -583,9 +647,7 @@ export function listFavorites(db: import("bun:sqlite").Database, userId: number)
   });
 }
 
-export interface AccessProbeDeps {
-  restGet: (path: string) => Promise<{ status: number; json: unknown }>;
-  appsecLatest: (gitRepo: string) => Promise<{ status: number }>;
+export interface AccessProbeDeps extends ProbeIo {
   /** Config.queue.favoriteOwnCooldownMs (П2): модульной константы больше нет */
   cooldownMs: number;
   now?: Date;
@@ -606,6 +668,8 @@ export type FavoriteEnqueueCode =
   | "check_failed"
   | "not_own"
   | "cooldown"
+  /** В4.8.5 (К8.5.14 (е), §2-Р1): фоновая перепроверка анализ не ставит */
+  | "background"
   | null;
 
 export interface FavoriteEnqueue {
@@ -614,18 +678,30 @@ export interface FavoriteEnqueue {
 }
 
 /**
- * Ответ POST /api/me/favorites/:org/:repo/check — читается MePage.tsx (П2-UI).
+ * В4.8.5 (К8.5.6): итог проверки прав. `checked` — вердикт записан;
+ * `failed` — SourceCraft не ответил (0/429/5xx): сохранённые права НЕ
+ * тронуты; `token_rejected` — SourceCraft отклонил токен (401): права
+ * перезаписаны отказом (по сути верно), человеку — «замените токен».
+ */
+export type FavoriteCheckResult = "checked" | "failed" | "token_rejected";
+
+/**
+ * Ответ проверки прав избранного.
  *
  * М1 (круг 2): поле зовётся `lastOwnScanAt`, а не `lastScanAt`. Одно имя
  * несло два смысла: у `MyRepoEntry.lastScanAt` — последний скан репо ЛЮБОГО
  * автора, здесь — последний завершённый own-скан ИМЕННО этого зрителя
  * (основание кулдауна, К-П П2). Имена разведены.
+ * В4.8.5: маршрута `/check` больше нет — проверка идёт сама при добавлении
+ * в избранное (К8.5.14) и фоном; форма ответа живёт в ответе добавления.
  */
 export interface FavoriteCheckResponse {
+  /** при `failed` — прежние сохранённые права (или «неизвестно»), не результат этой проверки */
   access: FavoriteAccess;
   enqueue: FavoriteEnqueue;
-  /** последний завершённый own-скан зрителя (`scans.user_id = зритель`); основание кулдауна */
+  /** последний завершённый не-bad own-скан зрителя (`scans.user_id = зритель`); основание кулдауна */
   lastOwnScanAt: string | null;
+  result: FavoriteCheckResult;
 }
 
 /** `requestUserScan` → форма исхода для ответа проверки избранного (П2). */
@@ -637,18 +713,51 @@ export function favoriteEnqueueOf(out: UserScanResponse): FavoriteEnqueue {
   return { status: "refused", code: (typeof code === "string" ? code : "check_failed") as FavoriteEnqueueCode };
 }
 
+/** Нормализованный доступ живой проверки → сохраняемая форма прав (tri-state каналов). */
+export function favoriteAccessOf(a: NormalizedAccess): FavoriteAccess {
+  const tri = (c: ChannelAccess): boolean | null => (c === "granted" ? true : c === "denied" ? false : null);
+  const clone = a.repo === "granted";
+  return {
+    clone,
+    visibility: clone ? a.visibility : "unknown",
+    ci: clone ? tri(a.cicd) : null,
+    appsec: clone ? tri(a.appsec) : null,
+    own: isOwnRepo(a),
+  };
+}
+
+function savedFavoriteAccess(db: Database, userId: number, org: string, repo: string): FavoriteAccess | null {
+  const row = db.query("SELECT last_access FROM favorites WHERE user_id = ? AND org_slug = ? AND repo_slug = ?").get(userId, org, repo) as
+    | { last_access: string | null }
+    | null;
+  if (!row?.last_access) return null;
+  try {
+    return JSON.parse(row.last_access) as FavoriteAccess;
+  } catch {
+    return null;
+  }
+}
+
+const UNKNOWN_ACCESS: FavoriteAccess = { clone: false, visibility: "unknown", ci: null, appsec: null, own: false };
+
 /**
- * Живая проверка прав по факту (cache-then-revalidate): repo-GET →
- * cicd/runs (listCIFlux) → scans/latest (useAppSecScan). При собственных
- * правах и простывшем кулдауне — заявка на анализ (механика; LLM никогда).
+ * Живая проверка прав по факту (repo-GET → cicd/runs → AppSec scans/latest —
+ * общая `probeRepoAccess`, те же правила, что у карточки) и, при своих правах
+ * и простывшем кулдауне, заявка на анализ (механика; LLM никогда).
+ *
+ * В4.8.5: вызывается автоматически — при явном добавлении в избранное (с
+ * `enqueueUserScan`: первый анализ своего ставится только здесь, §2-Р1) и
+ * фоновым насосом перепроверки (без него: права пишутся, анализ не ставится).
+ * К8.5.6: сбой SourceCraft (0/429/5xx) — не вердикт: сохранённые права и
+ * время проверки не трогаются, заявка не ставится.
  *
  * В4.2-port-fix (П2, Н1 HIGH): колбэк постановки АСИНХРОННЫЙ и отдаёт исход
- * `FavoriteEnqueue`, а не `number | null`, — за ним стоит `requestUserScan`
- * целиком (дешёвая предпроверка, дедуп, `too_many_active`, `rate_limited`,
- * транзакция Ф1.5, строки `refused`); ScClient связывает вызывающий, он же
- * прокидывает УЖЕ полученное тело repo-GET (4-го живого запроса нет).
- * Отказ по капу не роняет проверку прав — её результат зритель видит всё
- * равно. Кулдаун считается по последнему own-скану ИМЕННО этого зрителя.
+ * `FavoriteEnqueue` — за ним стоит `requestUserScan` целиком (дешёвая
+ * предпроверка, дедуп, `too_many_active`, `rate_limited`, транзакция Ф1.5,
+ * строки `refused`); вызывающий прокидывает УЖЕ полученное тело repo-GET
+ * (4-го живого запроса нет). Отказ по капу не роняет проверку прав — её
+ * результат зритель видит всё равно. Кулдаун — по последнему не-bad own-скану
+ * ИМЕННО этого зрителя.
  */
 export async function checkFavoriteAccess(
   db: import("bun:sqlite").Database,
@@ -656,24 +765,10 @@ export async function checkFavoriteAccess(
   org: string,
   repo: string,
   deps: AccessProbeDeps,
-  enqueueUserScan: (repoRes: { status: number; json: unknown }) => Promise<FavoriteEnqueue>,
+  enqueueUserScan: ((repoRes: { status: number; json: unknown }) => Promise<FavoriteEnqueue>) | null,
 ): Promise<FavoriteCheckResponse> {
-  const repoRes = await deps.restGet(`/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`);
-  const access: FavoriteAccess = { clone: false, visibility: "unknown", ci: null, appsec: null, own: false };
-  if (repoRes.status === 200) {
-    access.clone = true;
-    const body = repoRes.json as { visibility?: unknown; id?: unknown } | null;
-    access.visibility = body?.visibility === "private" ? "private" : body?.visibility === "public" ? "public" : "unknown";
-    const ci = await deps.restGet(`/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/cicd/runs?page_size=1`);
-    access.ci = ci.status === 200 ? true : ci.status === 403 ? false : null;
-    const uuid = typeof body?.id === "string" ? body.id : null;
-    if (uuid) {
-      const sec = await deps.appsecLatest(uuid);
-      access.appsec = sec.status === 200 ? true : sec.status === 403 ? false : null;
-    }
-  }
-  access.own = access.ci === true || access.appsec === true || access.visibility === "private";
-
+  const probe = await probeRepoAccess(deps, org, repo);
+  const verdict = classifyScStatus(probe.repoRes.status);
   const now = deps.now ?? new Date();
   // К-П П2: own-скан ЭТОГО зрителя (scans.user_id = userId, не IS NOT NULL —
   // иначе скан другого юзера блокирует автопостановку на 6 часов).
@@ -686,12 +781,27 @@ export async function checkFavoriteAccess(
     )
     .get(org, repo, userId) as { f: string | null };
   const lastOwnScanAt = last?.f ?? null;
+  if (verdict === "unavailable") {
+    // С3-1: сбой платформы не затирает доказанные права
+    return {
+      access: savedFavoriteAccess(db, userId, org, repo) ?? { ...UNKNOWN_ACCESS },
+      enqueue: { status: "skipped", code: "check_failed" },
+      lastOwnScanAt,
+      result: "failed",
+    };
+  }
+  const access = favoriteAccessOf(probe.access);
   const cooldownPassed = lastOwnScanAt === null || now.getTime() - Date.parse(lastOwnScanAt) >= deps.cooldownMs;
-  const enqueue: FavoriteEnqueue = !access.own
-    ? { status: "skipped", code: "not_own" }
-    : !cooldownPassed
-      ? { status: "skipped", code: "cooldown" }
-      : await enqueueUserScan(repoRes);
+  const enqueue: FavoriteEnqueue =
+    verdict === "token-rejected"
+      ? { status: "skipped", code: "pat_expired" }
+      : !access.own
+        ? { status: "skipped", code: "not_own" }
+        : enqueueUserScan === null
+          ? { status: "skipped", code: "background" }
+          : !cooldownPassed
+            ? { status: "skipped", code: "cooldown" }
+            : await enqueueUserScan(probe.repoRes);
   db.query("UPDATE favorites SET last_access = ?, last_checked_at = ? WHERE user_id = ? AND org_slug = ? AND repo_slug = ?").run(
     JSON.stringify(access),
     now.toISOString(),
@@ -699,5 +809,5 @@ export async function checkFavoriteAccess(
     org,
     repo,
   );
-  return { access, enqueue, lastOwnScanAt };
+  return { access, enqueue, lastOwnScanAt, result: verdict === "token-rejected" ? "token_rejected" : "checked" };
 }

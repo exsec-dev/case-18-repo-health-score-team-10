@@ -9,7 +9,7 @@ import type { Database } from "bun:sqlite";
 import { CHANNEL_KINDS, PUBLIC_KINDS, computeFromFacts, totalsFromCategories, type CategoryScore } from "../score/compute";
 import { orderRecommendations, recommendFromFacts, round4, type DeltaEvaluator } from "../score/recommend";
 import { categoryOf, parseFactValue } from "../collectors/facts";
-import { NO_PAT_ACCESS, type AccessRepo, type AccessResult, type ChannelAccess } from "../auth/access";
+import { isOwnRepo, NO_PAT_ACCESS, visibilityOf, type AccessRepo, type AccessResult, type ChannelAccess } from "../auth/access";
 import { DEFAULT_SCAN, defaultLeaseMs, type ScanConfig } from "../config";
 import type { GitLimitsMarker } from "../web/format";
 import type { DerivedMetrics } from "../score/derived";
@@ -517,9 +517,27 @@ export interface CardAccess {
   appsec: ChannelAccess;
 }
 
+/**
+ * В4.8.5: кто смотрит карточку — без новых запросов, из доступа, который
+ * карточка и так резолвит при показе.
+ * `own` (К8.5.14 (а), §2-Р2) — «свой» по общему правилу `isOwnRepo`: кнопка
+ * анализа есть на любом своём репозитории, даже не в избранном; неизвестно
+ * (сбой, нет токена, нет сессии) — не свой.
+ * `auth` (К8.5.8) — отдельное поле, `ChannelAccess` не трогается (иначе
+ * `src/report` без ключа писал бы «Не удалось проверить»): `no-session` —
+ * зритель без сессии (аноним или сессия истекла), `no-pat` — сессия без
+ * читаемого токена, `pat` — токен есть.
+ */
+export interface CardViewer {
+  own: boolean;
+  auth: "no-session" | "no-pat" | "pat";
+}
+
 export interface RepoCard {
   repo: CardRepo;
   access: CardAccess;
+  /** В4.8.5: «свой» и причина доступа зрителя (optional — литералы карточек в тестах отчёта) */
+  viewer?: CardViewer;
   markers: CardMarkers;
   scan: CardScan | null;
   /** живая job зрителя (Ф2.15) — очередь без позиции; аноним/без заявки → null */
@@ -638,14 +656,41 @@ export async function getRepoCardForViewer(
   org: string,
   repo: string,
   resolve: (repo: AccessRepo) => Promise<AccessResult>,
-  opts: { limits?: ScanConfig; viewerUserId?: number } = {},
+  opts: { limits?: ScanConfig; viewerUserId?: number; viewerAuth?: CardViewer["auth"] } = {},
 ): Promise<RepoCard | null> {
+  const out = await resolveCardForViewer(db, org, repo, resolve, opts);
+  return out.kind === "card" ? out.card : null;
+}
+
+/**
+ * В4.8.5 (К8.5.6, С6-1): исход показа карточки. Приватный репозиторий, чью
+ * проверку доступа SourceCraft не подтвердил из-за СБОЯ (0/429/5xx) или
+ * отклонённого токена (401), — не «не найден» для владельца с ДОКАЗАННЫМИ
+ * правами (сохранённая проверка текущего поколения PAT или свой скан):
+ * ему — «проверка не удалась» / «токен отклонён». Всем прочим — прежний
+ * нейтральный 404, неотличимый от несуществующего (чужой приватный не
+ * раскрывается).
+ */
+export type CardOutcome = { kind: "card"; card: RepoCard } | { kind: "not_found" } | { kind: "check_failed" } | { kind: "token_rejected" };
+
+export async function resolveCardForViewer(
+  db: Database,
+  org: string,
+  repo: string,
+  resolve: (repo: AccessRepo) => Promise<AccessResult>,
+  opts: { limits?: ScanConfig; viewerUserId?: number; viewerAuth?: CardViewer["auth"]; provenRights?: () => boolean } = {},
+): Promise<CardOutcome> {
   const r = findRepoRow(db, org, repo);
-  if (!r) return null;
+  if (!r) return { kind: "not_found" };
   // эвиктированный публичный — 404 всем, проверять доступ незачем
-  if (r.visibility === "public" && r.rating_active !== 1) return null;
+  if (r.visibility === "public" && r.rating_active !== 1) return { kind: "not_found" };
   const access = await resolve({ id: r.id, org: r.org_slug, repo: r.repo_slug, visibility: r.visibility });
-  return getRepoCard(db, org, repo, { access, limits: opts.limits, viewerUserId: opts.viewerUserId });
+  const card = getRepoCard(db, org, repo, { access, limits: opts.limits, viewerUserId: opts.viewerUserId, viewerAuth: opts.viewerAuth });
+  if (card) return { kind: "card", card };
+  if (r.visibility !== "public" && (access.repo === "check-failed" || access.repo === "pat-expired") && opts.provenRights?.() === true) {
+    return { kind: access.repo === "check-failed" ? "check_failed" : "token_rejected" };
+  }
+  return { kind: "not_found" };
 }
 
 /**
@@ -663,7 +708,7 @@ export function getRepoCard(
    * каталогу, а кабинету из карточки нужны только рекомендации. Остальная
    * сборка — та же, поэтому число рекомендаций равно карточке построением.
    */
-  opts: { access?: AccessResult; limits?: ScanConfig; viewerUserId?: number; withRank?: boolean } = {},
+  opts: { access?: AccessResult; limits?: ScanConfig; viewerUserId?: number; withRank?: boolean; viewerAuth?: CardViewer["auth"] } = {},
 ): RepoCard | null {
   const access = opts.access ?? NO_PAT_ACCESS;
   const r = findRepoRow(db, org, repo);
@@ -672,6 +717,12 @@ export function getRepoCard(
   const ciOpen = access.cicd === "granted";
   const secOpen = access.appsec === "granted";
   const cardAccess: CardAccess = { cicd: access.cicd, appsec: access.appsec };
+  // В4.8.5 (К8.5.14 (а), §2-Р2): «свой» — из того же доступа, что уже
+  // резолвлен для показа (без новых запросов); видимость — из БД
+  const viewer: CardViewer = {
+    own: isOwnRepo({ repo: access.repo, cicd: access.cicd, appsec: access.appsec, visibility: visibilityOf(r.visibility) }),
+    auth: opts.viewerAuth ?? (opts.access ? "pat" : "no-session"),
+  };
 
   const cardRepo: CardRepo = {
     org: r.org_slug,
@@ -730,6 +781,7 @@ export function getRepoCard(
     return {
       repo: cardRepo,
       access: cardAccess,
+      viewer,
       markers: { historyTruncatedSince: null, ciConfigOnlyCap: false, staleFacts: false, codeEmpty: false, gitLimits: null },
       scan,
       job: liveViewerJob(db, org, repo, opts.viewerUserId),
@@ -966,6 +1018,7 @@ export function getRepoCard(
   return {
     repo: cardRepo,
     access: cardAccess,
+    viewer,
     markers,
     scan,
     job: liveViewerJob(db, org, repo, opts.viewerUserId),

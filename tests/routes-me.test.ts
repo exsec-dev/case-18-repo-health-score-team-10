@@ -100,9 +100,13 @@ describe("POST /api/me/repos/:org/:repo/scan — коды ответа (Ф1.13)"
     expect(await postScan(null, "own/a1")).toEqual({ status: 401, code: "unauthorized", deduplicated: null });
   });
 
-  test("429 rate_limited: отказанные предпроверки учитываются лимитом частоты", async () => {
+  // ПЕРЕВОРОТ (В4.8.5, К8.5.6, С4-13): отказ предпроверки (403/404/401)
+  // учитывается лимитом, СБОЙ платформы (`broken`, 500) — нет. Прежний список
+  // из пяти давал лимит 6 вместе с `b1`; теперь пять отказов-вердиктов плюс
+  // сбой: будь сбой учтён, уже `b1` получил бы 429
+  test("429 rate_limited: отказанные предпроверки учитываются лимитом частоты, сбой платформы — нет", async () => {
     expect((await putPat("rate", "pat-rate-00000000")).status).toBe(200);
-    for (const slug of ["forbidden", "missing", "expired", "broken", "forbidden"]) {
+    for (const slug of ["forbidden", "missing", "expired", "broken", "forbidden", "missing"]) {
       expect((await postScan("rate", `enum/${slug}`)).status).not.toBe(202);
     }
     expect(await postScan("rate", "enum/b1")).toEqual({ status: 202, code: null, deduplicated: false });

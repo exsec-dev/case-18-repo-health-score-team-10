@@ -120,12 +120,128 @@ export interface AccessDeps {
   now?: () => number;
 }
 
-/** HTTP-статус чтения → доступ к каналу (контракт К2; AppSec 404 — отдельно, Ф1.4). */
-export function accessFromStatus(status: number): ChannelAccess {
-  if (status === 200) return "granted";
+/**
+ * В4.8.5 (К8.5.6): ОДИН классификатор ответа SourceCraft для пробы PAT,
+ * проверки прав избранного, доступа карточки и предпроверки запуска.
+ * Вердикт о правах — только 200 / 403-404 / 401; сбой платформы (сеть,
+ * таймаут = 0, 429, 5xx, прочее) — «проверка не удалась», а не «прав нет»:
+ * такой ответ не пишется в сохранённые права, не кэшируется как `denied`,
+ * не списывает окна проб и запусков.
+ * 401 — токен отклонён (перезапись прав при нём верна, ложен был только текст);
+ * 401 или 403 у ИСТЕКШЕГО токена — предположение ступени 1, проверка — сессией
+ * владельца на гейте.
+ */
+export type ScVerdict = "ok" | "denied" | "token-rejected" | "unavailable";
+
+export function classifyScStatus(status: number): ScVerdict {
+  if (status === 200) return "ok";
+  if (status === 401) return "token-rejected";
   if (status === 403 || status === 404) return "denied";
-  if (status === 401) return "pat-expired";
-  return "check-failed";
+  return "unavailable";
+}
+
+/** HTTP-статус чтения → доступ к каналу (контракт К2; AppSec 404 — отдельно, Ф1.4) — через общий классификатор. */
+export function accessFromStatus(status: number): ChannelAccess {
+  switch (classifyScStatus(status)) {
+    case "ok":
+      return "granted";
+    case "denied":
+      return "denied";
+    case "token-rejected":
+      return "pat-expired";
+    default:
+      return "check-failed";
+  }
+}
+
+/**
+ * AppSec `scans/latest` 404 («скана ещё нет»): право есть, только если его
+ * подтверждает другой канал (CI granted или приватный с repo granted —
+ * Ф1.4 + круг 2 LOW-5). В4.8.5 (К8.5.6, С8-6): если подтверждающий канал сам
+ * не проверился (сбой CI, отклонённый токен), 404 — «неизвестно», а не отказ:
+ * иначе сбой CI превращался в `denied` Security, закэшированный на 15 минут.
+ */
+export function appsecOn404(cicd: ChannelAccess, isPublic: boolean, repoAccess: ChannelAccess): ChannelAccess {
+  const corroborated = cicd === "granted" || (!isPublic && repoAccess === "granted");
+  if (corroborated) return "granted";
+  if (cicd === "check-failed" || cicd === "pat-expired") return "check-failed";
+  return "denied";
+}
+
+// ---------- В4.8.5 (К8.5.14): «свой» — одно определение для сервера и UI ----------
+
+/** Доступ зрителя к репозиторию, нормализованный для правила «свой». */
+export interface NormalizedAccess {
+  repo: ChannelAccess;
+  cicd: ChannelAccess;
+  appsec: ChannelAccess;
+  /** видимость: карточка — из БД, живая проверка — из тела repo-GET */
+  visibility: "public" | "private" | "unknown";
+}
+
+/**
+ * «Свой» репозиторий (правило `me.ts:668` до В4.8.5, вынесенное в общую
+ * функцию): CI или Security доступны токену, или репозиторий приватный и
+ * виден токену. Неизвестно (сбой проверки, нет токена, нет сессии) — НЕ свой
+ * (fail-closed). Известная граница: публичный репозиторий, где токен не видит
+ * ни CI, ни Security, своим не считается.
+ */
+export function isOwnRepo(a: NormalizedAccess): boolean {
+  return a.cicd === "granted" || a.appsec === "granted" || (a.visibility === "private" && a.repo === "granted");
+}
+
+/** Видимость строки `repos` → нормализованная. */
+export function visibilityOf(raw: unknown): NormalizedAccess["visibility"] {
+  return raw === "private" ? "private" : raw === "public" ? "public" : "unknown";
+}
+
+/** Исход живой проверки прав одного репозитория (repo-GET → cicd/runs → AppSec). */
+export interface RepoProbe {
+  access: NormalizedAccess;
+  /** тело repo-GET — чтобы предпроверка запуска не делала его второй раз */
+  repoRes: { status: number; json: unknown };
+}
+
+/**
+ * Живая проверка прав PAT зрителя на один репозиторий — ОДНА для
+ * автопроверки при добавлении в избранное, фоновой перепроверки и
+ * предпроверки запуска (К8.5.14): до 3 запросов (repo-GET, cicd/runs,
+ * AppSec scans/latest), те же правила, что у карточки (`resolveAccess`).
+ * repo-GET не дал доступа — каналы закрыты той же причиной, без запросов.
+ */
+export async function probeRepoAccess(io: ProbeIo, org: string, repo: string): Promise<RepoProbe> {
+  const slugPath = `/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`;
+  const res = await io.restGet(slugPath);
+  const repoAccess = accessFromStatus(res.status);
+  const body = (res.status === 200 ? res.json : null) as { visibility?: unknown; id?: unknown } | null;
+  const visibility = visibilityOf(body?.visibility);
+  const repoRes = { status: res.status, json: res.json };
+  if (repoAccess !== "granted") {
+    return { access: { repo: repoAccess, cicd: repoAccess, appsec: repoAccess, visibility }, repoRes };
+  }
+  const ci = await io.restGet(`${slugPath}/cicd/runs?page_size=1`);
+  const cicd = accessFromStatus(ci.status);
+  const id = typeof body?.id === "string" && body.id !== "" ? body.id : null;
+  let appsecAccess: ChannelAccess = "check-failed"; // форма ответа без id — не знание о правах
+  if (id !== null) {
+    const sec = await io.appsecLatest(id);
+    appsecAccess = sec.status === 404 ? appsecOn404(cicd, visibility === "public", repoAccess) : accessFromStatus(sec.status);
+  }
+  return { access: { repo: repoAccess, cicd, appsec: appsecAccess, visibility }, repoRes };
+}
+
+/** Ввод-вывод живой проверки: REST GET и AppSec scans/latest (тесты — фейки, сервер — клиенты на PAT зрителя). */
+export interface ProbeIo {
+  restGet: (path: string) => Promise<{ status: number; json: unknown }>;
+  appsecLatest: (gitRepo: string) => Promise<{ status: number }>;
+}
+
+/** Клиенты на PAT → ввод-вывод проверки. */
+export function probeIoOf(rest: ScClient, appsec: AppsecClient): ProbeIo {
+  return {
+    restGet: (path) => rest.get(path).then((r) => ({ status: r.status, json: r.json })),
+    appsecLatest: (gitRepo) => appsec.get("/v1/scans/latest", { gitRepo }).then((r) => ({ status: r.status })),
+  };
 }
 
 export async function resolveAccess(deps: AccessDeps, viewer: AccessViewer | null, repo: AccessRepo): Promise<AccessResult> {
@@ -197,9 +313,9 @@ async function resolveUncached(deps: AccessDeps, viewer: { userId: number; pat: 
       const res = await deps.appsecClient(pat).get("/v1/scans/latest", { gitRepo: r.id });
       // Ф1.4 + круг 2 (LOW-5): 404 «скана ещё нет» считается доступом только
       // при другом подтверждении прав PAT — CI granted или приватный репо с
-      // repo granted; иначе 404 — отказ (живой зонд чужим PAT — Ф2.6)
-      const corroborated = cicd === "granted" || (!isPublic && repoAccess === "granted");
-      appsec = res.status === 404 ? (corroborated ? "granted" : "denied") : accessFromStatus(res.status);
+      // repo granted; иначе 404 — отказ (живой зонд чужим PAT — Ф2.6).
+      // В4.8.5 (К8.5.6, С8-6): неподтверждённый из-за СБОЯ CI 404 — «неизвестно»
+      appsec = res.status === 404 ? appsecOn404(cicd, isPublic, repoAccess) : accessFromStatus(res.status);
     }
     store("appsec", appsec);
   }

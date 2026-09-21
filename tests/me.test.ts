@@ -85,7 +85,10 @@ describe("requestUserScan: предпроверка доступа PAT (К3)", (
     expect(client.paths).toEqual([]);
   });
 
-  test("401 → 401 pat_expired; 0/429/5xx → 503 check_failed; без постановки; отказ учтён строкой refused (круг 2, LOW-6)", async () => {
+  // ПЕРЕВОРОТ (В4.8.5, К8.5.6, С4-13): сбой платформы (0/429/5xx) — не вердикт
+  // о правах и часовой лимит запусков НЕ списывает; строкой refused учитывается
+  // только отказ (401). Было: «отказ учтён строкой refused» для всех пяти
+  test("401 → 401 pat_expired (учтён строкой refused); 0/429/5xx → 503 check_failed без строки refused; без постановки", async () => {
     const before = jobsOf(user);
     const refusedBefore = refusedOf(user);
     const expired = await requestUserScan(db, statusClient(401), user, "x", "expired", QUEUE);
@@ -98,8 +101,8 @@ describe("requestUserScan: предпроверка доступа PAT (К3)", (
       expect(repoRow("x", `flaky-${status}`)).toBeNull();
     }
     expect(repoRow("x", "expired")).toBeNull();
-    expect(refusedOf(user)).toBe(refusedBefore + 5);
-    expect(jobsOf(user)).toBe(before + 5); // только refused-строки
+    expect(refusedOf(user)).toBe(refusedBefore + 1);
+    expect(jobsOf(user)).toBe(before + 1); // только refused-строка отказа 401
     expect((db.query("SELECT COUNT(*) AS c FROM jobs WHERE user_id = ? AND status IN ('queued', 'running')").get(user) as { c: number }).c).toBe(1);
   });
 
