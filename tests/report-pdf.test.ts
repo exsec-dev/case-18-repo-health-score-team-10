@@ -17,7 +17,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import pdfmake from "pdfmake";
 import { buildReportModel } from "../src/report/markdown";
-import { FONT_DIR, FONT_FILES, PDF_FAILED_MESSAGE, buildPdfDocument, pdfResponse, renderRepoPdf } from "../src/report/pdf";
+import { BREAK, FONT_DIR, FONT_FILES, MAX_UNBROKEN, PDF_FAILED_MESSAGE, breakable, buildPdfDocument, pdfResponse, renderRepoPdf } from "../src/report/pdf";
 import { REPORT_FIXTURES, fixtureCard, goldenPath } from "./report-fixtures";
 
 const ROOT = join(import.meta.dir, "..");
@@ -65,7 +65,8 @@ function mdText(md: string): string {
   return normalize(parts.join(" "));
 }
 
-const normalize = (s: string): string => s.replace(/\s+/g, " ").trim();
+// U+200B — точка переноса вёрстки (breakable), не содержание: в сверку не идёт
+const normalize = (s: string): string => s.replace(/​/g, "").replace(/\s+/g, " ").trim();
 
 /**
  * Текст описания pdfmake: каждый блок, пункт списка и ячейка таблицы —
@@ -189,6 +190,48 @@ describe("П1: содержание PDF равно содержанию MD", () 
       expect(json).toMatch(/\{"text":"HealthCraft Index \(4 категории\): 55 из 100 – требует внимания","bold":true\}/);
       expect(json).not.toContain("**");
       expect(json).not.toContain("\\\\[");
+    } finally {
+      close();
+    }
+  });
+});
+
+describe("П1 (приёмка HQ): ячейки таблиц переносятся и не вылезают за поле", () => {
+  // Дефект приёмки HQ 21.09: JSON фактов без пробелов не переносился, и колонка
+  // «Значение» «Доказательной базы» уходила за правый край — PDF терял
+  // содержание, которое MD показывает целиком. Сверка текста его не ловила:
+  // она читает описание ДО вёрстки.
+  const longestUnbroken = (s: string): number => Math.max(0, ...s.split(new RegExp(`[\\s${BREAK}]+`)).map((w) => w.length));
+
+  test("breakable: точки переноса после знаков структуры и внутри длинных слов, текст не меняется", () => {
+    const json = '{"commits":2,"authors":2,"first":"2025-08-16T10:00:00Z","path":".sourcecraft/ci.yaml"}';
+    const out = breakable(json);
+    expect(out.replaceAll(BREAK, "")).toBe(json);
+    expect(longestUnbroken(out)).toBeLessThanOrEqual(MAX_UNBROKEN);
+    expect(breakable("x".repeat(100)).replaceAll(BREAK, "")).toBe("x".repeat(100));
+    expect(longestUnbroken(breakable("x".repeat(100)))).toBeLessThanOrEqual(MAX_UNBROKEN);
+    // короткие значения не трогаются: текстовый слой PDF без лишних пробелов
+    for (const short of ["12:00", "CI/CD", "rest:cicd", "TODO/FIXME", "2026-09-16 12:00"]) expect(breakable(short)).toBe(short);
+  });
+
+  test.each([...REPORT_FIXTURES])("фикстура %s: ни в одной ячейке нет неразрывного куска длиннее порога", (name) => {
+    const { card, close } = fixtureCard(name);
+    try {
+      const doc = buildPdfDocument(buildReportModel(card)) as { content: Record<string, unknown>[] };
+      const textOf = (v: unknown): string =>
+        typeof v === "string" ? v : Array.isArray(v) ? v.map(textOf).join("") : v && typeof v === "object" ? textOf((v as { text?: unknown }).text ?? "") : "";
+      let cells = 0;
+      for (const node of doc.content) {
+        if (!("table" in node)) continue;
+        for (const row of (node.table as { body: unknown[][] }).body.slice(1)) {
+          for (const cell of row) {
+            cells++;
+            expect(longestUnbroken(textOf(cell))).toBeLessThanOrEqual(MAX_UNBROKEN);
+          }
+        }
+      }
+      // у never (скана нет) таблиц нет вовсе; у остальных — есть
+      if (name !== "never") expect(cells).toBeGreaterThan(0);
     } finally {
       close();
     }

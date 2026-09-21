@@ -87,6 +87,38 @@ function inlineNode(fragment: Inline): PdfText {
   }
 }
 
+/** Невидимая точка переноса (U+200B, в Inter нулевой ширины). */
+export const BREAK = "\u200B";
+/** Длиннее этого значение без пробелов не остаётся — иначе ячейка вылезает за поле. */
+export const MAX_UNBROKEN = 24;
+
+/**
+ * Приёмка HQ В4.7: значение факта — JSON без пробелов, переносить его негде,
+ * и последняя колонка «Доказательной базы» уходила за правый край страницы —
+ * PDF терял часть содержания, которое MD показывает целиком. Точки переноса
+ * ставятся только в слова длиннее порога — после знаков структуры и, если
+ * их не хватает, через каждые MAX_UNBROKEN символов; короткие значения
+ * («12:00», «CI/CD») не трогаются, чтобы текстовый слой PDF не получал
+ * лишних пробелов при копировании. Текст не меняется — U+200B нулевой
+ * ширины, сверка с MD его выбрасывает.
+ */
+export function breakable(text: string): string {
+  return text.replace(/\S+/g, (word) => {
+    if (word.length <= MAX_UNBROKEN) return word;
+    let out = "";
+    let run = 0;
+    for (const ch of word) {
+      out += ch;
+      run++;
+      if (",:{[".includes(ch) || run >= MAX_UNBROKEN) {
+        out += BREAK;
+        run = 0;
+      }
+    }
+    return out;
+  });
+}
+
 const lineNodes = (line: InlineLine): PdfText[] => line.map(inlineNode);
 
 function blockNode(block: Block): PdfNode {
@@ -108,7 +140,7 @@ function blockNode(block: Block): PdfNode {
           widths: block.columns.map((_, i) => (i === last ? "*" : "auto")),
           body: [
             block.columns.map((c) => ({ text: c.title, style: "tableHeader", alignment: c.align })),
-            ...block.rows.map((row) => row.map((cellLine, i) => ({ text: lineNodes(cellLine), alignment: block.columns[i]?.align ?? "left" }))),
+            ...block.rows.map((row) => row.map((cellLine, i) => ({ text: lineNodes(cellLine).map((n) => ({ ...n, text: breakable(n.text) })), alignment: block.columns[i]?.align ?? "left" }))),
           ],
         },
         layout: {
