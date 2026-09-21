@@ -123,7 +123,10 @@ export function needsRescore(db: Database): boolean {
   // собственный скор-хук при завершении.
   const cursor = Number(getMetaValue(db, RESCORE_CURSOR) ?? "0") || 0;
   const maxId = (db.query("SELECT COALESCE(MAX(id), 0) AS m FROM scans WHERE status NOT IN ('running', 'queued')").get() as { m: number }).m;
-  return cursor < maxId;
+  if (cursor < maxId) return true;
+  // В4.8.5 (К8.5.12, С10-1): знак перешагнул идущий скан, тот завершился без
+  // своей оценки — проход обязан его досчитать
+  return hasFinishedDeferred(db);
 }
 
 /** Прогресс асинхронного прохода для /api/health (кросс-процессно из meta). */
@@ -154,13 +157,76 @@ export function rescoreState(db: Database): RescoreState {
  * их посчитает проход (батч/старт), прыжок через них потерял бы их навсегда.
  */
 export function bumpRescoreCursor(db: Database, scanId: number): void {
+  // К8.5.12: этот скан оценён своим хуком — из отложенных он уходит
+  undeferScan(db, scanId);
   const cursor = Number(getMetaValue(db, RESCORE_CURSOR) ?? "0") || 0;
   if (scanId <= cursor) return;
   const unprocessed = db
     .query("SELECT 1 FROM scans WHERE id > ? AND id < ? AND status NOT IN ('running', 'queued') LIMIT 1")
     .get(cursor, scanId);
   if (unprocessed !== null) return;
+  // К8.5.12 (С10-1): идущие сканы, которые знак перешагивает, не теряются —
+  // они отложены до завершения (их либо оценит свой хук, либо проход)
+  deferScans(db, (db.query("SELECT id FROM scans WHERE id > ? AND id < ? AND status IN ('running', 'queued')").all(cursor, scanId) as { id: number }[]).map((r) => r.id));
   setMetaValue(db, RESCORE_CURSOR, String(scanId));
+}
+
+// ---------- В4.8.5 (К8.5.12, С10-1): отложенные идущие сканы ----------
+
+/**
+ * Водяной знак пересчёта минует `running`-сканы в расчёте на их собственный
+ * скор-хук. Если хук не дошёл (процесс умер, хук упал до записи), скан
+ * остаётся без оценки навсегда: `needsRescore` уже ложен. Поэтому каждый
+ * `running`-скан, который знак перешагнул, записывается сюда (meta, JSON-список
+ * id; без DDL) и остаётся до завершения: завершённый без оценки — пересчитывается
+ * проходом, оценённый хуком — снимается хуком.
+ */
+export const RESCORE_DEFERRED = "derived_rescore_deferred";
+const DEFERRED_MAX = 1000;
+
+function readDeferred(db: Database): number[] {
+  const raw = getMetaValue(db, RESCORE_DEFERRED);
+  if (raw === null) return [];
+  try {
+    const list = JSON.parse(raw) as unknown;
+    return Array.isArray(list) ? list.filter((x): x is number => typeof x === "number" && Number.isInteger(x) && x > 0) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeDeferred(db: Database, ids: number[]): void {
+  if (ids.length === 0) db.query("DELETE FROM meta WHERE key = ?").run(RESCORE_DEFERRED);
+  else setMetaValue(db, RESCORE_DEFERRED, JSON.stringify(ids.slice(-DEFERRED_MAX)));
+}
+
+export function deferScans(db: Database, ids: number[]): void {
+  if (ids.length === 0) return;
+  const set = new Set(readDeferred(db));
+  let changed = false;
+  for (const id of ids) {
+    if (!set.has(id)) {
+      set.add(id);
+      changed = true;
+    }
+  }
+  if (changed) writeDeferred(db, [...set].sort((a, b) => a - b));
+}
+
+function undeferScan(db: Database, scanId: number): void {
+  const list = readDeferred(db);
+  if (!list.includes(scanId)) return;
+  writeDeferred(db, list.filter((id) => id !== scanId));
+}
+
+/** Есть отложенный скан, который уже завершился (его пора оценить). */
+function hasFinishedDeferred(db: Database): boolean {
+  const list = readDeferred(db);
+  if (list.length === 0) return false;
+  const row = db
+    .query(`SELECT 1 FROM scans WHERE id IN (${list.map(() => "?").join(", ")}) AND status NOT IN ('running', 'queued') LIMIT 1`)
+    .get(...list);
+  return row !== null;
 }
 
 interface ScanRow {
@@ -256,6 +322,8 @@ export function rescoreAll(db: Database, opts: RescoreOptions = {}): RescoreResu
     // В4.4: синхронный проход (скрипты) закрывает водяной знак целиком;
     // startup-подмножество закрывает читаемые сканы, история — своим курсором
     const maxId = (db.query("SELECT COALESCE(MAX(id), 0) AS m FROM scans").get() as { m: number }).m;
+    // К8.5.12: идущие сканы под знаком — в отложенные (их оценит хук или проход)
+    deferScans(db, (db.query("SELECT id FROM scans WHERE status IN ('running', 'queued')").all() as { id: number }[]).map((r) => r.id));
     setMetaValue(db, RESCORE_CURSOR, String(maxId));
     // стартовый пересчёт покрыл только читаемые сканы — остальная история фоном
     if (scope === "startup") setMetaValue(db, HISTORY_CURSOR, "0");
@@ -318,8 +386,13 @@ export function rescoreBatchByCursor(db: Database, opts: { limit?: number; log?:
     .query(`SELECT ${SCAN_COLS} FROM scans s JOIN repos r ON r.id = s.repo_id WHERE s.id > ? ORDER BY s.id LIMIT ?`)
     .all(cursor, limit) as ScanRow[];
   const result: RescoreResult = { scans: 0, skipped: 0, ratingScored: 0, ratingNull: 0, eligible: 0, errors: 0, fatal: 0 };
+  // В4.8.5 (К8.5.12, С10-1): сперва — отложенные идущие сканы, которые уже
+  // завершились: знак их перешагнул, собственной оценки у них может не быть
+  const healed = healDeferred(db, result, log);
   // схемная ошибка летит из rescoreScan как есть — runStartupRescore ловит её
   for (const scan of scans) rescoreScan(db, scan, result, {}, log);
+  // идущие сканы, которые знак сейчас минует, — в отложенные (не теряются)
+  deferScans(db, scans.filter((s) => s.status === "running" || s.status === "queued").map((s) => s.id));
   const done = scans.length < limit;
   if (done) {
     const maxId = (db.query("SELECT COALESCE(MAX(id), 0) AS m FROM scans").get() as { m: number }).m;
@@ -332,7 +405,36 @@ export function rescoreBatchByCursor(db: Database, opts: { limit?: number; log?:
   } else {
     setMetaValue(db, RESCORE_CURSOR, String(scans[scans.length - 1]!.id));
   }
+  void healed; // счётчик прохода — строки за курсором (контракт В4.4); отложенные учтены в result
   return { processed: scans.length, done };
+}
+
+/**
+ * К8.5.12: отложенные сканы, которые уже завершились, — оценить (если своей
+ * оценки текущей модели нет) и снять с учёта; идущие остаются; исчезнувшие
+ * снимаются. Возвращает число обработанных завершённых.
+ */
+function healDeferred(db: Database, result: RescoreResult, log: (m: string) => void): number {
+  const list = readDeferred(db);
+  if (list.length === 0) return 0;
+  const keep: number[] = [];
+  let healed = 0;
+  for (const id of list) {
+    const scan = db.query(`SELECT ${SCAN_COLS} FROM scans s JOIN repos r ON r.id = s.repo_id WHERE s.id = ?`).get(id) as ScanRow | null;
+    if (!scan) continue;
+    if (scan.status === "running" || scan.status === "queued") {
+      keep.push(id);
+      continue;
+    }
+    const scored = db.query("SELECT 1 FROM scores WHERE scan_id = ? AND model_version = ?").get(id, MODEL_VERSION) !== null;
+    if (!scored) {
+      rescoreScan(db, scan, result, {}, log);
+      log(`rescore: deferred scan ${id} finished without its own score — scored by the pass`);
+    }
+    healed++;
+  }
+  writeDeferred(db, keep);
+  return healed;
 }
 
 /** Исход асинхронного прохода: чем он остановился. */

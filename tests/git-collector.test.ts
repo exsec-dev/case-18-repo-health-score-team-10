@@ -681,6 +681,44 @@ describe("Ф2.3: обрыв cat-file → loc no-data, а не нулевой LOC
     }
   }, 60_000);
 
+  // В4.8.5 (К8.5.12, С10-8): git умер раньше, чем писатель отдал ему sha, —
+  // отказ писателя обработан, а не всплывает необработанным rejection (в Bun
+  // это exit 1 процесса сервера посреди скана)
+  test("писатель cat-file упал (поток закрыт): извлечение завершается, необработанных отказов нет", async () => {
+    const src = buildFixtureRepo();
+    const clone = await cloneBare(src, tmpdir(), LIMITS);
+    expect(clone.ok).toBe(true);
+    if (!clone.ok) return;
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => void unhandled.push(reason);
+    process.on("unhandledRejection", onUnhandled);
+    try {
+      const facts = await extractFacts(clone.dir, {
+        ...EXTRACT,
+        now: NOW,
+        catFile: () => ({
+          stdin: {
+            write: () => {
+              throw new Error("EPIPE: writer closed");
+            },
+            end: () => 0,
+          },
+          // поток закрывается не сразу — отказ писателя успевает «повиснуть» без обработчика
+          stdout: new ReadableStream<Uint8Array>({ start: (c) => void setTimeout(() => c.close(), 100) }),
+          exited: Promise.resolve(141),
+          kill: () => {},
+        }),
+      });
+      await Bun.sleep(50);
+      const tree = facts.find((f) => f.key === "tree.stats")!.value as { loc: number | null; loc_note?: string };
+      expect({ loc: tree.loc, locNote: tree.loc_note, unhandled: unhandled.length }).toEqual({ loc: null, locNote: "incomplete", unhandled: 0 });
+    } finally {
+      process.off("unhandledRejection", onUnhandled);
+      cleanupClone(clone.dir);
+      rmSync(src, { recursive: true, force: true });
+    }
+  }, 60_000);
+
   test("целый поток: loc > 0, пометок неполноты нет", async () => {
     const src = buildFixtureRepo();
     const clone = await cloneBare(src, tmpdir(), LIMITS);

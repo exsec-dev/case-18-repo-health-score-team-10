@@ -51,21 +51,33 @@ export const DEFAULT_YA_ENDPOINTS: YaEndpoints = {
   loginBase: "https://login.yandex.ru",
 };
 
-/** Живой шов на fetch (ретраи не нужны: две короткие операции входа). */
-export const liveYaHttp: YaHttp = {
-  async postForm(url, form) {
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams(form).toString(),
-    });
-    return { status: res.status, json: await res.json().catch(() => null) };
-  },
-  async getJson(url, headers) {
-    const res = await fetch(url, { headers });
-    return { status: res.status, json: await res.json().catch(() => null) };
-  },
-};
+/**
+ * В4.8.5 (К8.5.12, С10-15): таймаут одной операции входа. Без него обмен кода
+ * висел до `idleTimeout` сервера (120 с), и человек получал обрыв соединения
+ * вместо плашки «вход не удался».
+ */
+export const YA_HTTP_TIMEOUT_MS = 10_000;
+
+/** Живой шов на fetch (ретраи не нужны: две короткие операции входа) с таймаутом каждой операции. */
+export function makeYaHttp(timeoutMs = YA_HTTP_TIMEOUT_MS): YaHttp {
+  return {
+    async postForm(url, form) {
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams(form).toString(),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      return { status: res.status, json: await res.json().catch(() => null) };
+    },
+    async getJson(url, headers) {
+      const res = await fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
+      return { status: res.status, json: await res.json().catch(() => null) };
+    },
+  };
+}
+
+export const liveYaHttp: YaHttp = makeYaHttp();
 
 /** URL начала OAuth-потока (state — CSRF-токен, генерирует вызываемый). */
 export function buildAuthUrl(

@@ -460,7 +460,9 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
           }
           continue;
         }
-        if (Date.now() - job.startedAt > leaseMs) {
+        // В4.8.5 (К8.5.2b): «затянулось» — признак сервера (лиз задания
+        // истёк), а не таймер страницы от leaseMs
+        if (serverJobs?.active.some((j) => j.slug === slug && j.stalled)) {
           setJobs((prev) => ({ ...prev, [slug]: { ...job, phase: "stalled" } }));
           continue;
         }
@@ -469,7 +471,7 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
           const card = await fetchJson<RepoCard>(`/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`);
           if (card.scan && card.scan.id > job.sinceScanId) {
             const outcome = analysisOutcome(card.scan);
-            if (outcome !== "pending") {
+            if (outcome !== "pending" && outcome !== "interrupted") {
               setJobs((prev) => {
                 const next = { ...prev };
                 delete next[slug];

@@ -8,7 +8,7 @@
 import type { Database } from "bun:sqlite";
 import { ScClient } from "../collectors/http";
 import { upsertRepo } from "../jobs/runner";
-import { LAST_ELIGIBLE_SCAN_SQL, LAST_NOT_BAD_SCAN_SQL, getRepoCard } from "./repos";
+import { LAST_ELIGIBLE_SCAN_SQL, LAST_NOT_BAD_SCAN_SQL, getRepoCard, jobLeaseExpired } from "./repos";
 import type { AccessResult, ChannelAccess } from "../auth/access";
 import { MODEL_VERSION } from "../score/model";
 import { countActiveUserJobs, countRecentUserJobs, enqueueScan, findActiveUserJob, recordRefusedUserJob } from "../jobs/scheduler";
@@ -470,6 +470,12 @@ export interface MyJob {
    * `repos` — null.
    */
   logoUrl: string | null;
+  /**
+   * В4.8.5 (К8.5.2b, §2-Р4): «затянулось» — признак сервера: задание `running`
+   * с истекшим лизом (его воркер умер или цикл событий стоит дольше лиза). Тот
+   * же признак краснит /api/health (К8.5.5c). UI не считает его от `leaseMs`.
+   */
+  stalled: boolean;
 }
 
 /** Активные (queued/running) + последние завершённые заявки юзера.
@@ -513,11 +519,12 @@ export function myJobs(db: import("bun:sqlite").Database, userId: number, doneLi
         typeof row.logo_url === "string" && row.logo_url !== "" && viewerMayReadRepo(db, userId, String(row.org_slug), String(row.repo_slug))
           ? row.logo_url
           : null,
+      stalled: phase === "running" && jobLeaseExpired(typeof row.lease_until === "string" ? row.lease_until : null),
     };
   };
     // LEFT JOIN: refused живёт без строки repos (repo_id = 0)
   const base =
-    "SELECT j.id, j.status, j.claimed_at, j.error, r.org_slug, r.repo_slug, r.logo_url FROM jobs j LEFT JOIN repos r ON r.id = j.repo_id WHERE j.user_id = ?";
+    "SELECT j.id, j.status, j.claimed_at, j.lease_until, j.error, r.org_slug, r.repo_slug, r.logo_url FROM jobs j LEFT JOIN repos r ON r.id = j.repo_id WHERE j.user_id = ?";
   const active = (db.query(base + " AND j.status IN ('queued','running') ORDER BY j.id").all(userId) as Record<string, unknown>[]).map(toJob);
   const recent = (db.query(base + " AND j.status IN ('done','failed','refused') ORDER BY j.id DESC LIMIT ?").all(userId, doneLimit) as Record<string, unknown>[]).map(toJob);
   return { active, recent };
@@ -669,11 +676,13 @@ export async function checkFavoriteAccess(
 
   const now = deps.now ?? new Date();
   // К-П П2: own-скан ЭТОГО зрителя (scans.user_id = userId, не IS NOT NULL —
-  // иначе скан другого юзера блокирует автопостановку на 6 часов)
+  // иначе скан другого юзера блокирует автопостановку на 6 часов).
+  // В4.8.5 (К8.5.2a, С8-8): `bad`-скан (shutdown, orphaned, сбой канала,
+  // score_failed) кулдаун не включает — анализа по сути не было
   const last = db
     .query(
       `SELECT MAX(s.finished_at) AS f FROM scans s JOIN repos r ON r.id = s.repo_id
-       WHERE r.org_slug = ? AND r.repo_slug = ? AND s.user_id = ? AND s.finished_at IS NOT NULL`,
+       WHERE r.org_slug = ? AND r.repo_slug = ? AND s.user_id = ? AND s.finished_at IS NOT NULL AND s.status != 'bad'`,
     )
     .get(org, repo, userId) as { f: string | null };
   const lastOwnScanAt = last?.f ?? null;

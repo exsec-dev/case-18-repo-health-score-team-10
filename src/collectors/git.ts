@@ -924,10 +924,14 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
         }));
     const proc = catFile(cloneDir);
     const enc = new TextEncoder();
+    // В4.8.5 (К8.5.12, С10-8): отказ писателя (git умер раньше, поток закрыт)
+    // обработан СРАЗУ — иначе отказ промиса до `finally` ниже был бы
+    // необработанным и ронял процесс (Bun: unhandled rejection → exit 1).
+    // Неполноту чтения поток сам покажет читателю (locIncomplete)
     const writer = (async () => {
       for (const b of candidates) proc.stdin.write(enc.encode(`${b.sha}\n`));
       await proc.stdin.end();
-    })();
+    })().catch(() => undefined);
     const reader = new ByteReader(proc.stdout.getReader());
     try {
       for (let i = 0; i < candidates.length; i++) {

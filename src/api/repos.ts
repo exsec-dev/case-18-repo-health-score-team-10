@@ -401,6 +401,20 @@ export interface CardScan {
   finishedAt: string | null;
   status: string;
   trigger: string;
+  /**
+   * В4.8.5 (К8.5.2a): почему скан закрыт `bad` без сбоя сбора — прерван
+   * штатной остановкой (`shutdown`), закрыт свипом/перехватом как сирота
+   * (`orphaned`), не посчиталась оценка (`score_failed`); иначе null.
+   * Прерванный скан — не «ошибка» для пользователя (`analysisOutcome`).
+   */
+  detail?: ScanDetail | null;
+}
+
+export type ScanDetail = "shutdown" | "orphaned" | "score_failed";
+
+/** status_detail скана → закрытый список причин наружу (прочие строки — служебные, наружу не едут). */
+export function scanDetailOf(raw: string | null | undefined): ScanDetail | null {
+  return raw === "shutdown" || raw === "orphaned" || raw === "score_failed" ? raw : null;
 }
 
 /**
@@ -411,6 +425,13 @@ export interface CardScan {
  */
 export interface CardJob {
   status: "queued" | "running";
+  /**
+   * В4.8.5 (К8.5.2b, §2-Р4): «затянулось» — признак СЕРВЕРА: задание
+   * `running`, а его лиз истёк (живой воркер продлевает лиз каждые leaseMs/3;
+   * истёк — процесс умер или цикл событий стоит). UI не считает это сам от
+   * `leaseMs`: при лизе 10 мин штатный 20-минутный клон выглядел бы зависшим.
+   */
+  stalled: boolean;
 }
 
 export interface CardCategory extends CategoryScore {
@@ -688,9 +709,9 @@ export function getRepoCard(
       .get(r.id, MODEL_VERSION, MODEL_VERSION) as ScoreRow | null;
   }
   const scanRow = db
-    .query("SELECT id, started_at, finished_at, status, public_status, trigger FROM scans WHERE repo_id = ? ORDER BY id DESC LIMIT 1")
+    .query("SELECT id, started_at, finished_at, status, public_status, trigger, status_detail FROM scans WHERE repo_id = ? ORDER BY id DESC LIMIT 1")
     .get(r.id) as
-    | { id: number; started_at: string; finished_at: string | null; status: string; public_status: string | null; trigger: string }
+    | { id: number; started_at: string; finished_at: string | null; status: string; public_status: string | null; trigger: string; status_detail: string | null }
     | null;
   // статус без каналов (Ф1.11) — всем
   const scan: CardScan | null = scanRow
@@ -700,6 +721,7 @@ export function getRepoCard(
         finishedAt: scanRow.finished_at,
         status: scanRow.public_status ?? scanRow.status,
         trigger: scanRow.trigger,
+        detail: scanDetailOf(scanRow.status_detail),
       }
     : null;
 
@@ -959,12 +981,21 @@ function liveViewerJob(db: Database, org: string, repo: string, viewerUserId: nu
   if (viewerUserId === undefined) return null;
   const row = db
     .query(
-      `SELECT j.status FROM jobs j JOIN repos r ON r.id = j.repo_id
+      `SELECT j.status, j.lease_until FROM jobs j JOIN repos r ON r.id = j.repo_id
        WHERE r.org_slug = ? AND r.repo_slug = ? AND j.user_id = ? AND j.status IN ('queued','running')
        ORDER BY j.id DESC LIMIT 1`,
     )
-    .get(org, repo, viewerUserId) as { status: string } | null;
-  return row ? { status: row.status === "running" ? "running" : "queued" } : null;
+    .get(org, repo, viewerUserId) as { status: string; lease_until: string | null } | null;
+  if (!row) return null;
+  const running = row.status === "running";
+  return { status: running ? "running" : "queued", stalled: running && jobLeaseExpired(row.lease_until) };
+}
+
+/** К8.5.2b: лиз `running`-задания истёк (нет лиза у running — тоже истёк: живой воркер его держит). */
+export function jobLeaseExpired(leaseUntil: string | null, now = Date.now()): boolean {
+  if (leaseUntil === null) return true;
+  const t = Date.parse(leaseUntil);
+  return !Number.isFinite(t) || t < now;
 }
 
 /** Текст канального presence-правила без числа (С4): Δ Repo Health Score виден только при доступе к CI и Security. */
@@ -986,8 +1017,11 @@ const splitRefs = (raw: string): string[] =>
  */
 export function channelSources(db: Database, repoId: number): { cicdScanId: number | null; securityScanId: number | null; cicdFacts: FactRow[]; securityFacts: FactRow[] } {
   const okIn = (kind: string) => `EXISTS (SELECT 1 FROM facts f WHERE f.scan_id = s.id AND f.key = '${kind}' AND f.status = 'ok')`;
+  // В4.8.5 (К8.5.12, С10-14): источник канала — только ЗАВЕРШЁННЫЙ не-bad скан:
+  // `running` ещё пишет факты, `bad` (shutdown, orphaned, score_failed, сбой
+  // сбора) — не доказательство
   const lastScan = (cond: string) =>
-    (db.query(`SELECT s.id FROM scans s WHERE s.repo_id = ? AND ${cond} ORDER BY s.id DESC LIMIT 1`).get(repoId) as { id: number } | null)?.id ?? null;
+    (db.query(`SELECT s.id FROM scans s WHERE s.repo_id = ? AND s.status NOT IN ('running', 'queued', 'bad') AND ${cond} ORDER BY s.id DESC LIMIT 1`).get(repoId) as { id: number } | null)?.id ?? null;
   const cicdScanId = lastScan(`${okIn("cicd.configs")} AND ${okIn("cicd.runs")}`) ?? lastScan(okIn("cicd.configs"));
   const securityScanId = lastScan(`${okIn("appsec.findings")} AND ${okIn("tree.stats")}`);
   const okFacts = (scanId: number | null, kinds: string[]) =>

@@ -81,8 +81,9 @@ export interface SchedulerConfig {
   catalogIntervalMs: number;
   /** форс-полный рескан: игнорировать дифф last_updated, поставить все репо */
   fullRescan: boolean;
-  /** лиз job'а: время, на которое job закрепляется за воркером; дефолт (К4) =
-   *  clone.timeout + degrade.timeout + 15 мин (60 мин), воркер продлевает каждые leaseMs/3 */
+  /** лиз job'а: время, на которое job закрепляется за воркером; воркер продлевает
+   *  его каждые leaseMs/3. В4.8.5 (§2-В2): дефолт 10 мин (DEFAULT_LEASE_MS),
+   *  пол «худший скан» снят — см. leaseMsFromEnv */
   leaseMs: number;
   /** задержка первого обхода после старта сервера: окно управления стендом
    *  (обход с живым токеном ставит в очередь первый скан всего каталога —
@@ -245,35 +246,47 @@ export function scanFromEnv(env: Record<string, string>): ScanConfig {
 }
 
 /**
- * Пол лиза (Ф2.19, К4): ЧЕСТНЫЙ худший случай одного скана —
- * клон + (деградационный ярус, если включён) + извлечение + 15 мин запаса.
- * На дефолтах 20 + 25 + 25 + 15 = 85 мин. Прежняя формула забывала
- * извлечение (60 мин), и воркер терял лиз посреди живого скана: job
- * переклеймалась другим процессом, а первый продолжал писать факты.
+ * ЧЕСТНЫЙ худший случай одного скана (Ф2.19, К4) — клон + (деградационный
+ * ярус, если включён) + извлечение + 15 мин запаса; на дефолтах
+ * 20 + 25 + 25 + 15 = 85 мин.
+ * В4.8.5 (К8.5.2b, решение владельца §2-В2): это больше НЕ пол лиза (функция
+ * называлась `leaseFloorMs`). Им меряется то, что живёт столько же, сколько
+ * скан: возраст свипа каталогов клонов (свип не сносит клон работающего git —
+ * дефект Ф2.19) и признак «задание зависло» в health.
  */
 export function worstCaseScanMs(scan: ScanConfig): number {
   return scan.clone.timeoutMs + (scan.degrade.enabled ? scan.degrade.timeoutMs : 0) + scan.extract.timeoutMs + 15 * 60_000;
 }
 
-export const leaseFloorMs = worstCaseScanMs;
+/**
+ * Лиз задания (К8.5.2b, решение владельца §2-В2 22.09): 10 минут, продление
+ * каждые leaseMs/3 (3 мин 20 с) живым воркером. Сирота жёсткого завершения
+ * уходит за 10 минут, а не за 85; цена — запись в БД раз в 3 минуты на
+ * задание и перехват, если цикл событий процесса стоит дольше лиза.
+ */
+export const DEFAULT_LEASE_MS = 10 * 60_000;
 
-/** Дефолт лиза = пол (совместимость имени с В4.1). */
-export function defaultLeaseMs(scan: ScanConfig): number {
-  return leaseFloorMs(scan);
+/** Нижняя граница SCHEDULER_LEASE_MS: продление раз в треть лиза не чаще раза в 20 с. */
+export const MIN_LEASE_MS = 60_000;
+
+/** Дефолт лиза (имя — совместимость с В4.1; аргумент больше не влияет). */
+export function defaultLeaseMs(_scan?: ScanConfig): number {
+  return DEFAULT_LEASE_MS;
 }
 
 /**
- * Лиз из env, но НЕ ниже пола: оператор, выставивший 30 мин, иначе получал
- * бы двойное исполнение долгих сканов. Предупреждение без секретов.
+ * `SCHEDULER_LEASE_MS` (В4.8.5): длительность лиза, которую держит живой
+ * воркер продлением каждые leaseMs/3, — горизонт «процесс умер → задание
+ * снова в очереди». Пол «худший скан» снят: длинный скан держится
+ * продлением, а не длиной лиза. Значение ниже минуты поднимается до минуты.
  */
-export function leaseMsFromEnv(env: Record<string, string>, scan: ScanConfig): number {
-  const floor = leaseFloorMs(scan);
+export function leaseMsFromEnv(env: Record<string, string>, _scan?: ScanConfig): number {
   const wanted = envInt(env, "SCHEDULER_LEASE_MS");
-  if (wanted !== null && wanted < floor) {
-    console.error(`[config] SCHEDULER_LEASE_MS=${wanted} ms is below the worst-case scan budget (${floor} ms): using ${floor} ms`);
-    return floor;
+  if (wanted !== null && wanted < MIN_LEASE_MS) {
+    console.error(`[config] SCHEDULER_LEASE_MS=${wanted} ms is below ${MIN_LEASE_MS} ms: using ${MIN_LEASE_MS} ms`);
+    return MIN_LEASE_MS;
   }
-  return wanted ?? floor;
+  return wanted ?? DEFAULT_LEASE_MS;
 }
 
 export function loadConfig(): Config {

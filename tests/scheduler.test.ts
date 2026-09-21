@@ -10,7 +10,7 @@ import type { Database } from "bun:sqlite";
 import { existsSync, mkdtempSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadConfig, DEFAULT_SCAN } from "../src/config";
+import { loadConfig, DEFAULT_SCAN, worstCaseScanMs } from "../src/config";
 import { openDb } from "../src/db";
 import type { ScClient, ScResponse } from "../src/collectors/http";
 import {
@@ -1408,15 +1408,20 @@ describe("Ф2.10 (M10): канальные 403 не эвиктят — пров�
 // короче даже одного лиза.
 // ---------------------------------------------------------------------------
 
-describe("Ф2.19: возраст свипа клонов ≥ 2 × lease", () => {
+describe("Ф2.19: возраст свипа клонов — от худшего скана (В4.8.5)", () => {
   const base = loadConfig();
 
-  test("возраст свипа — не меньше двух лизов и не меньше часа", () => {
-    const cfg = { ...base, scheduler: { ...base.scheduler, leaseMs: 85 * 60_000 } };
-    expect(orphanCloneAgeMs(cfg)).toBe(2 * 85 * 60_000);
-    // сверхкороткий лиз не опускает свип ниже часа
+  // ПЕРЕВОРОТ (В4.8.5, К8.5.2b, §2-Р4): было «не меньше двух лизов и не меньше
+  // часа». При лизе 10 мин это давало 60 мин < худшего скана 85 мин — свип
+  // сносил бы клон работающего git (дефект Ф2.19). Инвариант «живой клон не
+  // сносится» перенесён на худший скан и от лиза больше не зависит
+  test("возраст свипа = худший случай скана, от лиза не зависит", () => {
+    const cfg = { ...base, scheduler: { ...base.scheduler, leaseMs: 10 * 60_000 } };
+    expect(orphanCloneAgeMs(cfg)).toBe(worstCaseScanMs(cfg.scan));
+    expect(worstCaseScanMs(DEFAULT_SCAN)).toBe(85 * 60_000);
     const short = { ...base, scheduler: { ...base.scheduler, leaseMs: 1000 } };
-    expect(orphanCloneAgeMs(short)).toBe(60 * 60_000);
+    expect(orphanCloneAgeMs(short)).toBe(worstCaseScanMs(short.scan));
+    expect(orphanCloneAgeMs(cfg)).toBeGreaterThan(cfg.scheduler.leaseMs);
   });
 
   test("клон моложе худшего бюджета скана выживает, заведомая сирота удаляется", async () => {
@@ -1494,7 +1499,7 @@ describe("В4.4: первая волна — по лайкам", () => {
 // ---------------------------------------------------------------------------
 
 describe("В4.4 (кластер L): штатное завершение", () => {
-  test("returnOwnRunningJobs: своя running-заявка → queued с NULL-лизом; чужая не трогается; attempts целы", async () => {
+  test("returnOwnRunningJobs: своя running-заявка → queued с NULL-лизом; чужая не трогается; попытка откатывается (К8.5.2a)", async () => {
     // гермитичность: очередь файла делится между тестами — гасим хвосты
     db.query("UPDATE jobs SET status = 'done' WHERE status IN ('queued', 'running')").run();
     const repoId = seedRepo("sig", "mine");
@@ -1520,7 +1525,7 @@ describe("В4.4 (кластер L): штатное завершение", () => 
 
     const returned = returnOwnRunningJobs(db);
     expect(returned).toBe(1);
-    expect(db.query("SELECT status, claimed_at, attempts FROM jobs WHERE id = ?").get(myJob)).toEqual({ status: "queued", claimed_at: null, attempts: 1 });
+    expect(db.query("SELECT status, claimed_at, attempts FROM jobs WHERE id = ?").get(myJob)).toEqual({ status: "queued", claimed_at: null, attempts: 0 }); // ПЕРЕВОРОТ (В4.8.5, К8.5.2a): попытка откатывается — было attempts: 1
     // чужая running-заявка не тронута
     expect((db.query("SELECT status FROM jobs WHERE id = ?").get(foreignJob) as { status: string }).status).toBe("running");
 
@@ -1669,17 +1674,20 @@ describe("П-5 (круг 2 В4.4): сирота-скан при штатном �
       const jobId = enqueueScan(pdb, p5Repo, { userId: u, triggerKind: "user" });
       // (заявку клеим сам workerTick — ручной claim поставил бы лиз и
       // заблокировал бы воркер до его истечения)
-      // running-скан этого процесса (как его создаёт runScan)
-      pdb.query("INSERT INTO scans (repo_id, started_at, status, public_status, trigger, user_id) VALUES (?, ?, 'running', 'running', 'user', ?)").run(
-        p5Repo,
-        new Date().toISOString(),
-        u,
-      );
-      const scanId = (pdb.query("SELECT id FROM scans WHERE repo_id = ? AND status = 'running'").get(p5Repo) as { id: number }).id;
+      // running-скан этого процесса создаётся ВНУТРИ зависшего runScan — как
+      // его создаёт настоящий runScan, после claim. В4.8.5 (К8.5.2b, сетап —
+      // утверждения прежние): running-скан, созданный ДО claim, claim теперь
+      // закрывает как сироту прежнего исполнителя
+      let scanId = 0;
       // регистрация в liveClaims — через workerTick с зависшим runScan
       let release: () => void = () => {};
       const gate = new Promise<void>((res) => (release = res));
       const hang = (async () => {
+        scanId = Number(
+          pdb
+            .query("INSERT INTO scans (repo_id, started_at, status, public_status, trigger, user_id) VALUES (?, ?, 'running', 'running', 'user', ?)")
+            .run(p5Repo, new Date().toISOString(), u).lastInsertRowid,
+        );
         await gate;
         return { scanId, repoId: p5Repo, status: "ok", repoAccess: "ok" } as ScanResult;
       }) as unknown as typeof runScanType;
@@ -1702,7 +1710,7 @@ describe("П-5 (круг 2 В4.4): сирота-скан при штатном �
         finished: true,
       });
       expect(returnOwnRunningJobs(pdb)).toBe(1);
-      expect(pdb.query("SELECT status, claimed_at, attempts FROM jobs WHERE id = ?").get(jobId)).toEqual({ status: "queued", claimed_at: null, attempts: 1 });
+      expect(pdb.query("SELECT status, claimed_at, attempts FROM jobs WHERE id = ?").get(jobId)).toEqual({ status: "queued", claimed_at: null, attempts: 0 }); // ПЕРЕВОРОТ (В4.8.5, К8.5.2a): было attempts: 1 — сожженная попытка С4-5
       release();
       await tick;
       // finishJob по возвращённой заявке не матчится (claimed_at NULL) — queued цела

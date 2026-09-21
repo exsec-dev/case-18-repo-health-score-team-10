@@ -88,6 +88,8 @@ export interface ScanResult {
   /** скан пригоден для рейтинга (К-Ф1.1): записан хуком в scans.rating_eligible */
   ratingEligible: boolean;
   elapsedMs: number;
+  /** В4.8.5 (К8.5.12): скор-хук упал — скан закрыт `bad` (score_failed), задание — failed */
+  scoreFailed?: boolean;
 }
 
 const DEFAULT_GIT_BASE = "https://git.sourcecraft.dev";
@@ -381,19 +383,25 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
   );
 
   const finishedAt = new Date().toISOString();
-  deps.db.query("UPDATE scans SET status = ?, public_status = ?, finished_at = ? WHERE id = ?").run(status, publicStatus, finishedAt, scanId);
 
-  // --- score-hook (В2/Б5): конец скана → compute + recommend; сбой хука
-  // не роняет скан (факты уже записаны, скор пересчитается CLI/пересканом)
+  // --- score-hook (В2/Б5): конец скана → compute + recommend.
   // К-Ф1.1: пригодность — по фактам скана; оценка, рекомендации, флаг
-  // пригодности и мета репо — одной транзакцией (хук упал → ничего из этого)
+  // пригодности и мета репо — одной транзакцией.
+  // В4.8.5 (К8.5.12, С10-1): финальный СТАТУС скана пишется в той же
+  // транзакции. Раньше статус коммитился до хука, и упавший хук (BUSY,
+  // исключение в compute) или гибель процесса между ними оставляли «скан
+  // `ok` без оценки»: задание `done`, тост «Анализ завершен», оценка прежняя.
+  // Теперь упавший хук закрывает скан `bad` с причиной `score_failed`, а
+  // задание — `failed` с причиной «не удалось посчитать оценку».
   let scoreSummary: ScanResult["score"] = null;
   let eligible = false;
+  let scoreFailed = false;
   try {
     const scores = compute(deps.db, scanId);
     const recs = recommend(deps.db, scanId, { scores });
     eligible = ratingEligible(facts, { status, userId: opts.userId ?? null });
     deps.db.transaction(() => {
+      deps.db.query("UPDATE scans SET status = ?, public_status = ?, finished_at = ? WHERE id = ?").run(status, publicStatus, finishedAt, scanId);
       writeScores(deps.db, scores);
       writeRecommendations(deps.db, scanId, scores.modelVersion, recs);
       deps.db.query("UPDATE scans SET rating_eligible = ? WHERE id = ?").run(eligible ? 1 : 0, scanId);
@@ -404,13 +412,24 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
     })();
     scoreSummary = { healthcraftIndex: scores.healthcraftIndex, indexCoverage: scores.indexCoverage, repoHealthScore: scores.repoHealthScore, repoHealthCoverage: scores.repoHealthCoverage };
   } catch (e) {
+    scoreFailed = true;
+    eligible = false;
     console.error(`[scan ${scanId}] score hook failed: ${String((e as Error).message).slice(0, 200)}`);
+    try {
+      deps.db
+        .query("UPDATE scans SET status = 'bad', public_status = 'bad', finished_at = ?, status_detail = 'score_failed', rating_eligible = 0 WHERE id = ?")
+        .run(finishedAt, scanId);
+    } catch (closeError) {
+      // скан остаётся `running` — его закроет свип сирот (К8.5.2b), задание — failed ниже
+      console.error(`[scan ${scanId}] closing after score hook failure failed: ${String((closeError as Error).message).slice(0, 200)}`);
+    }
   }
 
   return {
     scanId,
     repoId,
-    status,
+    status: scoreFailed ? "bad" : status,
+    ...(scoreFailed ? { scoreFailed: true } : {}),
     startedAt,
     finishedAt,
     counts,

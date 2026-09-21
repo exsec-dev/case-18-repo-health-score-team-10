@@ -333,8 +333,14 @@ export function scanTriggerText(trigger: string): string {
  * праздновался success-тостом «Анализ завершен»), ok/partial — успех,
  * running/нет скана — ещё не закончился. Тост рисует UI — здесь только исход.
  */
-export function analysisOutcome(scan: { status: string; finishedAt: string | null } | null | undefined): "pending" | "ok" | "failed" {
+export function analysisOutcome(
+  scan: { status: string; finishedAt: string | null; detail?: string | null } | null | undefined,
+): "pending" | "ok" | "failed" | "interrupted" {
   if (!scan || scan.finishedAt === null || scan.status === "running" || scan.status === "queued") return "pending";
+  // В4.8.5 (К8.5.2a): скан, прерванный перезапуском сервера или закрытый как
+  // сирота, — не провал анализа: задание вернулось в очередь и повторится.
+  // Сигнатура прежняя — `detail` необязателен (audit-v44-repro.test.ts:318-324)
+  if (scan.status === "bad" && (scan.detail === "shutdown" || scan.detail === "orphaned")) return "interrupted";
   return scan.status === "bad" ? "failed" : "ok";
 }
 

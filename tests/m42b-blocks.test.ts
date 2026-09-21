@@ -322,8 +322,10 @@ describe("Б4 (Ф2.15): карточка несёт только статус ж
       const uid = (t.db.query("SELECT id FROM users WHERE ya_id = 'ya-jobby'").get() as { id: number }).id;
       enqueueScan(t.db, repoId, { userId: uid, triggerKind: "user" });
       const withViewer = getRepoCard(t.db, "m42b", "jobby", { viewerUserId: uid });
-      expect(withViewer?.job).toEqual({ status: "queued" });
-      expect(Object.keys(withViewer?.job ?? {})).toEqual(["status"]);
+      // ПЕРЕВОРОТ (В4.8.5, К8.5.2b): карточка несёт серверный признак «затянулось» — `stalled`;
+      // инвариант Ф2.15 (ни позиции в очереди, ни id) прежний
+      expect(withViewer?.job).toEqual({ status: "queued", stalled: false });
+      expect(Object.keys(withViewer?.job ?? {})).toEqual(["status", "stalled"]);
       const anon = getRepoCard(t.db, "m42b", "jobby", {});
       expect(anon?.job).toBeNull();
     } finally {
@@ -340,7 +342,7 @@ describe("Б4 (Ф2.15): карточка несёт только статус ж
       const jobId = enqueueScan(t.db, repoId, { userId: uid, triggerKind: "user" });
       t.db.query("UPDATE jobs SET status = 'running', claimed_at = ? WHERE id = ?").run("2026-09-19T00:00:00Z", jobId);
       const card = getRepoCard(t.db, "m42b", "first-run", { viewerUserId: uid });
-      expect({ job: card?.job, score: card?.score, scan: card?.scan }).toEqual({ job: { status: "running" }, score: null, scan: null });
+      expect({ job: card?.job, score: card?.score, scan: card?.scan }).toEqual({ job: { status: "running", stalled: true }, score: null, scan: null }); // ПЕРЕВОРОТ (К8.5.2b): running без лиза не держит ни один живой воркер — «затянулось»
     } finally {
       t.close();
     }

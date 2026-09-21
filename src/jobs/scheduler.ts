@@ -29,7 +29,7 @@ import { makeAppsecClient } from "../collectors/appsec";
 import { worstCaseScanMs, type Config } from "../config";
 import { getMetaValue, setMetaValue } from "../db";
 import { CATALOG_SUSPICIOUS_AT, SCHED_META } from "../api/health";
-import { needsRescore, rescoreBatchByCursor, rescoreHistoryBatch } from "../score/rescore";
+import { isBusyError, needsRescore, rescoreBatchByCursor, rescoreHistoryBatch } from "../score/rescore";
 
 export interface ClaimedJob {
   id: number;
@@ -173,9 +173,19 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
        )
        RETURNING id, repo_id, user_id, trigger_kind, claimed_at, attempts`,
   );
-  // предохранитель цикла: каждая итерация переводит одну job в running или failed
-  for (let guard = 0; guard < 1000; guard++) {
-    const claimed = claimStmt.get(nowIso, leaseIso, nowIso, maxAttempts, queue, queue, queue) as {
+  // В4.8.5 (К8.5.2b, С8-9): перехват заявки после истекшего лиза закрывает
+  // её прежний `running`-скан того же (репо, автор) В ТОЙ ЖЕ транзакции, что
+  // и claim. Живого скана под этим ключом быть не может: у живого скана есть
+  // живая заявка с непросроченным лизом, а активная заявка на (юзер, репо) и
+  // живая периодическая на репо — по одной (дедуп постановки и гард обхода).
+  // Прежде сирота жила до свипа, а новый лиз её ещё и прикрывал от свипа
+  // (уточнение приемки 6)
+  const closeStale = db.query(
+    `UPDATE scans SET status = 'bad', public_status = 'bad', finished_at = ?, status_detail = 'orphaned'
+     WHERE repo_id = ? AND user_id IS ? AND status = 'running'`,
+  );
+  const claimTx = db.transaction(() => {
+    const row = claimStmt.get(nowIso, leaseIso, nowIso, maxAttempts, queue, queue, queue) as {
       id: number;
       repo_id: number;
       user_id: number | null;
@@ -183,6 +193,15 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
       claimed_at: string;
       attempts: number;
     } | null;
+    if (row) {
+      const closed = closeStale.run(nowIso, row.repo_id, row.user_id);
+      if (closed.changes > 0) console.log(`[claim] job ${row.id}: stale running scans closed as orphaned: ${closed.changes}`);
+    }
+    return row;
+  });
+  // предохранитель цикла: каждая итерация переводит одну job в running или failed
+  for (let guard = 0; guard < 1000; guard++) {
+    const claimed = claimTx();
     if (!claimed) return null;
     const repo = db.query("SELECT org_slug, repo_slug FROM repos WHERE id = ?").get(claimed.repo_id) as
       | { org_slug: string; repo_slug: string }
@@ -239,6 +258,25 @@ export function claimAny(db: Database, order: Array<"user" | "rating">, now = ne
   return null;
 }
 
+/**
+ * К8.5.2b / К8.5.12: запись с повтором SQLITE_BUSY — до `attempts` попыток с
+ * асинхронным бэкоффом (цикл событий не блокируется сверх busy_timeout
+ * соединения); прочие ошибки и исчерпание попыток летят наружу.
+ */
+export async function withBusyRetry<T>(fn: () => T, label: string, opts: { attempts?: number; baseMs?: number } = {}): Promise<T> {
+  const attempts = Math.max(1, opts.attempts ?? 4);
+  const baseMs = opts.baseMs ?? 500;
+  for (let i = 1; ; i++) {
+    try {
+      return fn();
+    } catch (e) {
+      if (!isBusyError(e) || i >= attempts) throw e;
+      console.warn(`[worker] ${label}: SQLITE_BUSY (attempt ${i}/${attempts}) — retrying`);
+      await new Promise((r) => setTimeout(r, baseMs * 2 ** (i - 1)));
+    }
+  }
+}
+
 /** Продление лиза своей заявки (К4): чужой/перезаявленный claimed_at — no-op. */
 export function renewLease(db: Database, jobId: number, claimedAt: string, leaseMs: number, now = new Date()): boolean {
   const r = db
@@ -260,6 +298,8 @@ export const JOB_ERRORS = {
   noPat: "нет действующего токена",
   attempts: "превышено число попыток",
   internal: "внутренняя ошибка",
+  /** К8.5.12 (С10-1): скан собрал факты, но оценку посчитать не удалось — скан закрыт `bad` (score_failed) */
+  scoreFailed: "не удалось посчитать оценку",
   /** `bad`-скан: какие каналы не собрались (ScanResult.channels) */
   channels: (channels: string[]): string => `сбор данных не удался: ${channels.join(", ")}`.slice(0, JOB_ERROR_MAX),
 } as const;
@@ -681,8 +721,10 @@ export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<Sca
 
 /**
  * В4.4 (кластер L/З1): заявки, заявленные ЭТИМ процессом (id → claimed_at).
- * SIGTERM возвращает их в queued (claimed_at NULL, attempts без изменений —
- * административная остановка не считается попыткой); registry живёт
+ * SIGTERM возвращает их в queued (claimed_at NULL) и ОТКАТЫВАЕТ попытку —
+ * административная остановка не считается попыткой (В4.8.5, К8.5.2a: до
+ * этого комментарий обещал «attempts без изменений», а claim уже сделал +1,
+ * и три рестарта во время скана давали «превышено число попыток»); registry живёт
  * в памяти процесса — чужие заявки не трогаются никогда.
  * П-5 (круг 2): реестр несёт repoId/userId — прерванный завершением скан
  * этого процесса закрывается честным квартетом (см. closeOwnRunningScans),
@@ -723,7 +765,9 @@ export function returnOwnRunningJobs(db: Database): number {
   for (const [id, claim] of liveClaims) {
     try {
       const r = db
-        .query("UPDATE jobs SET status = 'queued', claimed_at = NULL, lease_until = NULL WHERE id = ? AND claimed_at = ? AND status = 'running'")
+        .query(
+          "UPDATE jobs SET status = 'queued', claimed_at = NULL, lease_until = NULL, attempts = MAX(attempts - 1, 0) WHERE id = ? AND claimed_at = ? AND status = 'running'",
+        )
         .run(id, claim.claimedAt);
       if (r.changes > 0) returned++;
     } catch (e) {
@@ -809,12 +853,12 @@ export async function workerTick(
   state.busy = true;
   state.currentSince = Date.now();
   liveClaims.set(claimed.id, { claimedAt: claimed.claimedAt, repoId: claimed.repoId, userId: claimed.userId });
+  // К8.5.2b: продление каждые leaseMs/3; SQLITE_BUSY повторяется (при лизе
+  // 10 мин три пропуска подряд = перехват живого скана)
   const heartbeat = setInterval(() => {
-    try {
-      renewLease(deps.db, claimed.id, claimed.claimedAt, leaseMs);
-    } catch (e) {
-      console.error(`[worker] job ${claimed.id} lease renew failed: ${String((e as Error).message).slice(0, 200)}`);
-    }
+    void withBusyRetry(() => renewLease(deps.db, claimed.id, claimed.claimedAt, leaseMs), `job ${claimed.id} lease renew`).catch((e) =>
+      console.error(`[worker] job ${claimed.id} lease renew failed: ${String((e as Error).message).slice(0, 200)}`),
+    );
   }, Math.max(1, Math.floor(leaseMs / 3)));
   try {
     const result = await processJob(deps, claimed);
@@ -824,14 +868,25 @@ export async function workerTick(
         ? JOB_ERRORS.gone
         : result === "no-pat"
           ? JOB_ERRORS.noPat
-          : result.status === "bad"
-            ? JOB_ERRORS.channels(failedChannelsOf(result.channels))
-            : null;
-    finishJob(deps.db, claimed.id, claimed.claimedAt, failure === null ? "done" : "failed", failure ?? undefined);
+          : result.scoreFailed === true
+            ? JOB_ERRORS.scoreFailed
+            : result.status === "bad"
+              ? JOB_ERRORS.channels(failedChannelsOf(result.channels))
+              : null;
+    // К8.5.12 (С10-2): итог задания — с повтором SQLITE_BUSY: готовый скан не
+    // оставляет задание `running` до лиза и не сжигает попытку повтором
+    await withBusyRetry(
+      () => finishJob(deps.db, claimed.id, claimed.claimedAt, failure === null ? "done" : "failed", failure ?? undefined),
+      `job ${claimed.id} finish`,
+    );
     return failure === null ? "done" : "failed";
   } catch (e) {
     console.error(`[worker] job ${claimed.id} (${claimed.slug}) crashed: ${String((e as Error).message).slice(0, 200)}`);
-    finishJob(deps.db, claimed.id, claimed.claimedAt, "failed", JOB_ERRORS.internal);
+    try {
+      await withBusyRetry(() => finishJob(deps.db, claimed.id, claimed.claimedAt, "failed", JOB_ERRORS.internal), `job ${claimed.id} finish`);
+    } catch (finishError) {
+      console.error(`[worker] job ${claimed.id} finish failed: ${String((finishError as Error).message).slice(0, 200)}`);
+    }
     return "failed";
   } finally {
     liveClaims.delete(claimed.id);
@@ -894,12 +949,15 @@ export function startWorkerLoop(
 
 /**
  * Возраст, начиная с которого каталог клона считается осиротевшим (Ф2.19):
- * не меньше ДВУХ лизов. Живой скан держит клон всё время своего лиза, а
- * портовый час был короче даже одного лиза — свип сносил каталог из-под
- * работающего git, и скан падал «сам по себе».
+ * живой скан держит клон всё время своей работы, а портовый час был короче —
+ * свип сносил каталог из-под работающего git, и скан падал «сам по себе».
+ * В4.8.5 (К8.5.2b): возраст — от ХУДШЕГО СКАНА (`worstCaseScanMs`, 85 мин на
+ * дефолтах), а не от лиза: при лизе 10 мин прежняя формула `max(2·лиз, 60 мин)`
+ * дала бы 60 мин < 85 и вернула дефект Ф2.19, а обслуживание в любой роли
+ * сносило бы клоны соседнего процесса. Мерило каталога клона — длина скана.
  */
 export function orphanCloneAgeMs(config: Config): number {
-  return Math.max(2 * config.scheduler.leaseMs, 60 * 60_000);
+  return worstCaseScanMs(config.scan);
 }
 
 /** ПОРТ hq-parallel (S3): свип осиротевших rh-clone-* (crash/OOM-убитые
@@ -1184,10 +1242,23 @@ export function startScheduler(
   // тик зовётся с периодом частой фазы; какая из фаз исполнится — решают
   // due-метки внутри тика, а не расписание таймера
   const timer = setInterval(run, Math.max(1, Math.min(config.scheduler.catalogIntervalMs, config.scheduler.intervalMs)));
-  const sweepTimer = setInterval(armoredTimerCallback("sweep", () => maintenance(db, config)), 60 * 60_000); // ПОРТ S3 + Ф2.2/Ф2.13
+  const stopMaintenance = startMaintenance(db, config, { maintenance });
   return () => {
     clearTimeout(first);
     clearInterval(timer);
-    clearInterval(sweepTimer);
+    stopMaintenance();
   };
+}
+
+/**
+ * Часовое обслуживание (ПОРТ S3 + Ф2.2/Ф2.13): сироты-сканы, ретеншен jobs,
+ * каталоги клонов. В4.8.5 (К8.5.2b, С10-4): таймер запускается в ЛЮБОЙ роли —
+ * роль web без него держала скан-сироту «Сканируется» до своего рестарта.
+ * Свипы идемпотентны, конкурирующие роли друг другу не мешают (возраст свипа
+ * клонов — от худшего скана).
+ */
+export function startMaintenance(db: Database, config: Config, seams: { maintenance?: typeof maintenanceTick; periodMs?: number } = {}): () => void {
+  const maintenance = seams.maintenance ?? maintenanceTick;
+  const timer = setInterval(armoredTimerCallback("sweep", () => maintenance(db, config)), seams.periodMs ?? 60 * 60_000);
+  return () => clearInterval(timer);
 }

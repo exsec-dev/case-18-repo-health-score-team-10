@@ -135,23 +135,15 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   // доедет до скана; не дольше leaseMs (худший случай одного скана).
   // UX-10 (круг 2 В4.4): после leaseMs опрос прекращается ЗАМЕТКОЙ «затянулось»
   // (симметрично кабинету), а не молчаливым зависанием спиннера
-  const [jobStalled, setJobStalled] = useState(false);
+  // В4.8.5 (К8.5.2b): «затянулось» — признак сервера (лиз задания истёк),
+  // а не таймер страницы от leaseMs
+  const jobStalled = state.kind === "ok" && state.data.job?.stalled === true;
   const jobLive = state.kind === "ok" && state.data.job !== null;
   useEffect(() => {
-    if (!jobLive) {
-      setJobStalled(false);
-      return;
-    }
-    const started = Date.now();
-    const timer = setInterval(() => {
-      if (Date.now() - started > leaseMs) {
-        setJobStalled(true);
-        return;
-      }
-      reload();
-    }, 3000);
+    if (!jobLive) return;
+    const timer = setInterval(() => reload(), 3000);
     return () => clearInterval(timer);
-  }, [jobLive, leaseMs, reload]);
+  }, [jobLive, reload]);
 
   const crumbs: Crumb[] = [{ text: "Рейтинг", href: "/" }, { text: `${org} / ${repo}` }];
   const refreshButton = canRefresh && (
@@ -349,7 +341,7 @@ function useRefreshAnalysis(org: string, repo: string, cardUrl: string, sinceSca
           // В4.4 (кластер E): исход — по статусу скана; bad больше не
           // празднуется success-тостом «Анализ завершен»
           const outcome = analysisOutcome(card.scan);
-          if (outcome === "pending") return;
+          if (outcome === "pending" || outcome === "interrupted") return;
           setPhase("idle");
           if (outcome === "ok") {
             if (jobIdRef.current !== null) setDoneKey(`${org}/${repo}:${jobIdRef.current}`);

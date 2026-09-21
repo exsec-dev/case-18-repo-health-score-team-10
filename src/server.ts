@@ -28,7 +28,7 @@ import {
 } from "./api/me";
 import { renderRepoReport } from "./report/markdown";
 import { pdfResponse } from "./report/pdf";
-import { catalogClientBudget, closeOwnRunningScans, maintenanceTick, returnOwnRunningJobs, startScheduler, startWorkerLoop } from "./jobs/scheduler";
+import { catalogClientBudget, closeOwnRunningScans, maintenanceTick, returnOwnRunningJobs, startMaintenance, startScheduler, startWorkerLoop } from "./jobs/scheduler";
 import { killActiveClones } from "./collectors/git";
 import {
   clearOAuthStateCookieHeader,
@@ -754,6 +754,11 @@ if (needsRescore(db)) {
 if (role === "web" || role === "all") {
   stopWorkerLoops.push(startWorkerLoop({ db, config, serverClient }, { user: true, rating: role === "all" }));
 }
+// В4.8.5 (К8.5.2b, С10-4): часовое обслуживание (сироты-сканы, ретеншен,
+// каталоги клонов) — в ЛЮБОЙ роли; у rating/all его запускает startScheduler
+if (role === "web") {
+  stopWorkerLoops.push(startMaintenance(db, config));
+}
 if (role === "rating" || role === "all") {
   stopWorkerLoops.push(startScheduler(db, catalogClient, config));
   if (role === "rating") {
@@ -771,7 +776,7 @@ void maintenanceTick(db, config);
 // В4.4 (кластер L/З1 код-аудита): SIGTERM/SIGINT — ШТАТНОЕ завершение ≤ 5 с,
 // а не мгновенный выход с сиротами до лиза (85 мин) и свипа (170 мин):
 // перестаём принимать, свои running-заявки возвращаем в queued (claimed_at
-// NULL, attempts не трогаем — сбой не считается попыткой), живые группы
+// NULL, попытка откатывается — В4.8.5, К8.5.2a: остановка не считается попыткой), живые группы
 // клонов гасим, таймеры снимаем.
 let shuttingDown = false;
 function shutdown(signal: string): void {
