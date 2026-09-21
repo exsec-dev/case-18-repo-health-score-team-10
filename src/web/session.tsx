@@ -37,9 +37,11 @@ interface AnalysisValue {
   jobs: JobsResponse | null;
   refresh: () => void;
   live: (slug: string) => LiveAnalysis | null;
+  /** С9-13: последний опрос заданий не удался (сеть, 5xx) — показанное могло устареть */
+  failing: boolean;
 }
 
-const AnalysisContext = createContext<AnalysisValue>({ jobs: null, refresh: () => {}, live: () => null });
+const AnalysisContext = createContext<AnalysisValue>({ jobs: null, refresh: () => {}, live: () => null, failing: false });
 
 /** Текущая сессия: одно состояние `/api/me` на всё приложение. */
 export function useSession(): SessionValue {
@@ -91,6 +93,7 @@ function AnalysisState({ login, visible, onIdentityChanged, children }: { login:
   const toaster = useToaster();
   const [jobs, setJobs] = useState<JobsResponse | null>(null);
   const [tick, setTick] = useState(0);
+  const [failing, setFailing] = useState(false);
   const tracker = useRef(newTracker());
   const identity = useLatest({ login, onIdentityChanged });
   const refresh = useCallback(() => setTick((n) => n + 1), []);
@@ -104,6 +107,7 @@ function AnalysisState({ login, visible, onIdentityChanged, children }: { login:
   useEffect(() => {
     tracker.current = newTracker();
     setJobs(null);
+    setFailing(false);
   }, [login]);
 
   useEffect(() => {
@@ -126,6 +130,8 @@ function AnalysisState({ login, visible, onIdentityChanged, children }: { login:
         /* сеть — следующий тик */
       }
       if (stop) return;
+      // С9-13: сбой опроса не молчит — «Задания» помечают, что список мог устареть
+      setFailing(next === null);
       if (next !== null) {
         if (identityChanged(identity.current.login, next)) {
           identity.current.onIdentityChanged();
@@ -150,5 +156,5 @@ function AnalysisState({ login, visible, onIdentityChanged, children }: { login:
   }, [login, visible, tick, toaster, identity]);
 
   const live = useCallback((slug: string) => liveFor(jobs, slug), [jobs]);
-  return <AnalysisContext.Provider value={{ jobs, refresh, live }}>{children}</AnalysisContext.Provider>;
+  return <AnalysisContext.Provider value={{ jobs, refresh, live, failing }}>{children}</AnalysisContext.Provider>;
 }

@@ -567,6 +567,8 @@ const FULL_HELP =
 
 /** Короткая причина закрытия полного итога: первый закрытый канал (CI, затем Security). */
 function fullLockShortReason(card: Card): string {
+  // В4.8.5 (К8.5.8): зрителю без сессии причина — вход, а не «токен не добавлен»
+  if (card.viewer?.auth === "no-session") return "Нужно войти через Я ID и добавить токен доступа SourceCraft.";
   return accessLockShort(card.access.cicd) ?? accessLockShort(card.access.appsec) ?? ACCESS_LOCK_SHORT["check-failed"];
 }
 

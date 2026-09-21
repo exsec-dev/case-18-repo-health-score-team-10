@@ -1017,8 +1017,11 @@ function RepoRow({
  * списка (`rh-busy` / `StatePill`); снизу у активных — куда придет итог, без
  * оценки времени.
  */
+/** С9-13: опрос заданий не удался — список мог устареть (сбой не молчит) */
+export const JOBS_STALE_TEXT = "Не удалось обновить задания – список мог устареть, повторим автоматически.";
+
 export function JobsBell() {
-  const { jobs } = useAnalysis();
+  const { jobs, failing } = useAnalysis();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"active" | "history" | null>(null);
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
@@ -1048,7 +1051,7 @@ export function JobsBell() {
         onClick={() => (open ? close() : setOpen(true))}
         aria-expanded={open}
         aria-haspopup="dialog"
-        title={busy ? "Ваши анализы идут" : alarm ? "Последний анализ завершился ошибкой" : "Ваши анализы"}
+        title={failing ? JOBS_STALE_TEXT : busy ? "Ваши анализы идут" : alarm ? "Последний анализ завершился ошибкой" : "Ваши анализы"}
       >
         <Icon data={alarm ? CircleExclamation : ListCheck} size={16} className={alarm ? "rh-state__icon_danger" : undefined} />
         Задания
@@ -1066,6 +1069,11 @@ export function JobsBell() {
         aria-label="Ваши задания"
       >
         <div className="rh-jobs">
+          {failing && (
+            <Text as="div" variant="caption-2" color="secondary">
+              {JOBS_STALE_TEXT}
+            </Text>
+          )}
           <div className="rh-jobs__tabs">
             <SegmentedRadioGroup size="s" width="max" value={shown} onUpdate={(v) => setTab(v === "active" ? "active" : "history")} aria-label="Какие задания показать">
               <SegmentedRadioGroup.Option value="active">{`Активные ${active.length}`}</SegmentedRadioGroup.Option>

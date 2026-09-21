@@ -112,6 +112,9 @@ describe("К8.5.1: итог анализа — по заданию", () => {
     expect((session.match(/fetch\("\/api\/me\/jobs"\)/g) ?? []).length).toBe(1);
     expect(session).toContain("if (login === null || !visible) return;");
     expect(session).toContain("toaster.add({ name: `analysis-finished:${job.jobId}`");
+    // С9-13: сбой опроса заданий не молчит — «Задания» показывают, что список мог устареть
+    expect(session).toContain("setFailing(next === null);");
+    expect(src("MePage.tsx")).toContain("{failing && (");
     for (const f of ["MePage.tsx", "RepoPage.tsx"]) {
       expect(src(f)).not.toContain('fetch("/api/me/jobs")');
       expect(src(f)).not.toMatch(/обычно до/);
@@ -149,5 +152,32 @@ describe("К8.5.8: сессия — одно состояние", () => {
     const session = src("session.tsx");
     expect(session).toContain("window.addEventListener(SESSION_LOST, reloadMe)");
     expect(session).toContain("if (visible && !wasVisible.current) reloadMe();");
+  });
+});
+
+describe("поверхности без отдельной растяжки (source-assert вёрстки и проводки)", () => {
+  test("С6-4: ссылка под замком полного Score — по причине: нет сессии — вход, нет токена — Настройки, токен есть — без ссылки", () => {
+    const page = src("RepoPage.tsx");
+    expect(page).toContain('card.viewer?.auth === "pat" ? null : card.viewer?.auth === "no-session" ? (');
+    expect(page).toContain('<Link href="/auth/ya">Войти через Я ID</Link>');
+    expect(page).toContain('if (card.viewer?.auth === "no-session") return "Нужно войти через Я ID и добавить токен доступа SourceCraft.";');
+  });
+
+  test("С9-15/С6-6: звезда до ответа /api/me — «неизвестно», а не «войдите»; «Повторить» нет на 404/400", () => {
+    const page = src("RepoPage.tsx");
+    expect(page).toContain("starLoggedIn={meData === null ? null : loggedIn}");
+    expect(page).toContain("if (loggedIn === null) {");
+    expect(page).toContain('state.kind === "error" && (state.status === 404 || state.status === 400) ? undefined');
+  });
+
+  test("С9-16: после запуска анализа (и при потерянном ответе) состояние берется у сервера; повтор — «уже идет»", () => {
+    const page = src("RepoPage.tsx");
+    expect(page).toMatch(/\.finally\(\(\) => \{\s*setSending\(false\);[\s\S]{0,120}announceJobsChanged\(\);\s*analysis\.refresh\(\);/);
+    expect(page).toContain('res.deduplicated ? "Анализ уже идет" : "Анализ в очереди"');
+  });
+
+  test("С10-4: часовое обслуживание запускается и в роли web", () => {
+    const server = readFileSync(join(import.meta.dir, "..", "src", "server.ts"), "utf8");
+    expect(server).toMatch(/if \(role === "web"\) \{\s*stopWorkerLoops\.push\(startMaintenance\(db, config\)\);/);
   });
 });
