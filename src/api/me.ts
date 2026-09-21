@@ -8,7 +8,8 @@
 import type { Database } from "bun:sqlite";
 import { ScClient } from "../collectors/http";
 import { upsertRepo } from "../jobs/runner";
-import { LAST_ELIGIBLE_SCAN_SQL, LAST_NOT_BAD_SCAN_SQL } from "./repos";
+import { LAST_ELIGIBLE_SCAN_SQL, LAST_NOT_BAD_SCAN_SQL, getRepoCard } from "./repos";
+import type { AccessResult, ChannelAccess } from "../auth/access";
 import { MODEL_VERSION } from "../score/model";
 import { countActiveUserJobs, countRecentUserJobs, enqueueScan, findActiveUserJob, recordRefusedUserJob } from "../jobs/scheduler";
 import type { QueueConfig } from "../config";
@@ -43,6 +44,18 @@ export interface MyRepoEntry {
    * источник — `jobs`, не `scans`.
    */
   planned: boolean;
+  /**
+   * В4.7 (П3.4, контракт У26; решение В2 21.09 — без сети): сколько
+   * рекомендаций покажет карточка этого репозитория. Считается тем же
+   * сборщиком карточки (`getRepoCard`) с доступом из СОХРАНЁННОЙ проверки
+   * прав (`favorites.last_access`): публичные правила — по пригодному скану,
+   * канальные (CI/CD, Security) — только если последняя проверка сказала
+   * «доступ есть» по этому каналу. При актуальной проверке прав число равно
+   * карточке; после смены прав расходится до следующей «Проверки прав»
+   * (цена принята владельцем). Без прав (`mayRead === false`) — null, а не 0;
+   * права есть, скана нет — 0, как на карточке.
+   */
+  recommendationsCount: number | null;
   /** ПОРТ 5: поле `sources` удалено (Ф2.20, решение 18.09 — кабинет favorites-only) */
 }
 
@@ -124,6 +137,40 @@ function viewerMayReadRepo(db: Database, userId: number | null, org: string, rep
   }
   if (row && db.query("SELECT 1 FROM scans WHERE repo_id = ? AND user_id = ? LIMIT 1").get(row.id, userId) !== null) return true;
   return false;
+}
+
+/**
+ * Доступ зрителя к каналам по СОХРАНЁННОЙ проверке прав (В4.7, решение В2):
+ * true → granted, false → denied, неизвестно или проверки не было →
+ * check-failed. Канал открыт только при явном «доступ есть» — fail-closed,
+ * как у карточки. `repo` — granted: вызывается лишь для записей с
+ * доказанными правами (`viewerMayReadRepo`).
+ */
+function savedAccessOf(db: Database, userId: number | null, org: string, repo: string): AccessResult {
+  const channel = (v: boolean | null | undefined): ChannelAccess => (v === true ? "granted" : v === false ? "denied" : "check-failed");
+  let saved: Partial<FavoriteAccess> | null = null;
+  if (userId !== null) {
+    const fav = db.query("SELECT last_access FROM favorites WHERE user_id = ? AND org_slug = ? AND repo_slug = ?").get(userId, org, repo) as
+      | { last_access: string | null }
+      | null;
+    try {
+      saved = fav?.last_access ? (JSON.parse(fav.last_access) as Partial<FavoriteAccess>) : null;
+    } catch {
+      saved = null; // мусор в JSON — «неизвестно», каналы закрыты
+    }
+  }
+  return { cicd: channel(saved?.ci), appsec: channel(saved?.appsec), repo: "granted" };
+}
+
+/**
+ * В4.7 (П3.4, У26): число рекомендаций карточки для записи кабинета — без
+ * сети, тем же сборщиком карточки (место в рейтинге не считается). null —
+ * прав нет или карточки нет (репозитория нет в каталоге).
+ */
+function recommendationsCountOf(db: Database, userId: number | null, org: string, repo: string, mayRead: boolean): number | null {
+  if (!mayRead) return null;
+  const card = getRepoCard(db, org, repo, { access: savedAccessOf(db, userId, org, repo), withRank: false });
+  return card ? card.recommendations.length : null;
 }
 
 /**
@@ -286,6 +333,7 @@ export async function listMyRepos(db: Database, userId: number | null): Promise<
       inCatalog,
       mayRead,
       planned: plannedWork(db, userId, f.org_slug, f.repo_slug),
+      recommendationsCount: recommendationsCountOf(db, userId, f.org_slug, f.repo_slug, mayRead),
     };
   });
   return { username: null, entries };

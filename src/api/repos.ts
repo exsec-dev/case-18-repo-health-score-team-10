@@ -636,7 +636,13 @@ export function getRepoCard(
   db: Database,
   org: string,
   repo: string,
-  opts: { access?: AccessResult; limits?: ScanConfig; viewerUserId?: number } = {},
+  /**
+   * `withRank: false` (В4.7, счётчик рекомендаций кабинета) — место в рейтинге
+   * не считается (rank/rankedTotal = null): это два подсчёта по всему
+   * каталогу, а кабинету из карточки нужны только рекомендации. Остальная
+   * сборка — та же, поэтому число рекомендаций равно карточке построением.
+   */
+  opts: { access?: AccessResult; limits?: ScanConfig; viewerUserId?: number; withRank?: boolean } = {},
 ): RepoCard | null {
   const access = opts.access ?? NO_PAT_ACCESS;
   const r = findRepoRow(db, org, repo);
@@ -780,7 +786,7 @@ export function getRepoCard(
   // «места у неоценённого репозитория не существует».
   const inRating = r.visibility === "public" && r.rating_active === 1;
   const ranking =
-    !inRating || publicRow.healthcraft_index === null
+    opts.withRank === false || !inRating || publicRow.healthcraft_index === null
       ? null
       : (db
           .query(

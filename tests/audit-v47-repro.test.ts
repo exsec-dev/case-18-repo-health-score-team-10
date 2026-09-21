@@ -99,7 +99,7 @@ describe("П3: кабинет «Мои репозитории»", () => {
   const me = (): string => stripComments(src("web/MePage.tsx"));
   const section = (): string => between(me(), "function MyReposSection", "\nfunction RepoRow");
 
-  repro("П3.3: без PAT на /me есть блок «добавьте токен» со ссылкой на /settings (не тост и не title)", () => {
+  test("П3.3: без PAT на /me есть блок «добавьте токен» со ссылкой на /settings (не тост и не title)", () => {
     const s = section();
     expect({
       branch: /hasPat\s*===\s*false|!hasPat/.test(s),
@@ -107,20 +107,20 @@ describe("П3: кабинет «Мои репозитории»", () => {
     }).toEqual({ branch: true, link: true });
   });
 
-  repro("П3.2: строка без проверки прав говорит, что делать, а не «еще не проверяли»", () => {
+  test("П3.2: строка без проверки прав говорит, что делать, а не «еще не проверяли»", () => {
     const row = between(me(), "function accessRow", "\n}\n");
     expect(/не проверяли/.test(row)).toBe(false);
   });
 
-  repro("П3.4: tri-state прав — компонентами, а не глифами ✓ ✗ ?", () => {
+  test("П3.4: tri-state прав — компонентами, а не глифами ✓ ✗ ?", () => {
     expect({ check: me().includes("✓"), cross: me().includes("✗") }).toEqual({ check: false, cross: false });
   });
 
-  repro("П3.4: один Alert по theme/view/size — единственное место <Alert в кабинете", () => {
+  test("П3.4: один Alert по theme/view/size — единственное место <Alert в кабинете", () => {
     expect((me().match(/<Alert\b/g) ?? []).length).toBe(1);
   });
 
-  repro("П3.4 (У26): /api/me/repos несет recommendationsCount (null без прав, не 0)", async () => {
+  test("П3.4 (У26): /api/me/repos несет recommendationsCount (null без прав, не 0)", async () => {
     const t = makeApiDb();
     try {
       const u = upsertUser(t.db, "ya-v47", "v47");

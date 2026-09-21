@@ -948,3 +948,11 @@ button.rh-category:focus-visible {
 .rh-lang-option {
   min-width: 0;
 }
+
+/* В4.7 (П3.4): карточки кабинета («Мои задания» и выпадающая панель
+ * заданий) — тот же паддинг, что у контейнеров карточки репозитория
+ * (`rh-score-band`, `rh-tabs-card`): одно значение на роль «контейнер». */
+.rh-me-card {
+  box-sizing: border-box;
+  padding: var(--g-spacing-3) var(--g-spacing-4);
+}

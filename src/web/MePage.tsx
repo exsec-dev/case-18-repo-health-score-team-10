@@ -6,19 +6,40 @@
 // зашифрованное хранение, замена/удаление; исход посева из namespace
 // показывается тостом (кластер I). Ссылки ведут на единую карточку /repo/...
 // Токен НИКОГДА не возвращается API и не логируется.
-import { ArrowRightFromSquare, Clock, Key, Person } from "@gravity-ui/icons";
-import { Alert, Button, Card, Dialog, Flex, Icon, Label, Link, Spin, Text, TextInput, useToaster } from "@gravity-ui/uikit";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowRightFromSquare, CircleCheck, CircleQuestion, Clock, Key, Lock, Person, Star } from "@gravity-ui/icons";
+import { Alert, type AlertProps, Button, Card, Dialog, Flex, Icon, type IconData, Label, Link, Spin, Text, TextInput, useToaster } from "@gravity-ui/uikit";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { type MeResponse, type MetaResponse, type MyReposResponse, type RepoCard, fetchJson, logout, mutateJson, useJson } from "./api";
-import { analysisOutcome, authErrorText, fmtDateTime, fmtScore } from "./format";
+import { analysisOutcome, authErrorText, fmtDateTime, fmtScore, recommendationsText, slugOf } from "./format";
+import { TAB_RECOMMENDATIONS } from "./RepoPage";
 import { linkProps, repoHref } from "./router";
 import { Page, UserAvatar, displayName, logoutFailedToast } from "./Shell";
-import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, SkeletonRows } from "./ui";
+import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, RepoSlug, SkeletonRows } from "./ui";
 
 const REPOS_CRUMBS = [{ text: "Мои репозитории" }];
 const SETTINGS_CRUMBS = [{ text: "Настройки" }];
 
 type ScanJobState = { sinceScanId: number; startedAt: number; seenScanId: number | null; phase: "queued" | "running" | "stalled" };
+
+/**
+ * В4.7 (П3.4): ОДНА плашка кабинета. До вехи семь `Alert` стояли в трёх
+ * сочетаниях view/size и двух темах на одно и то же событие «не загрузилось».
+ * Теперь view и size общие для всех, тема — по смыслу: ошибка (`danger`) или
+ * подсказка, что делать дальше (`info`, плашка про токен П3.3).
+ */
+function CabinetAlert({
+  theme = "danger",
+  title,
+  message,
+  actions,
+}: {
+  theme?: "danger" | "info";
+  title: string;
+  message?: ReactNode;
+  actions?: AlertProps["actions"];
+}) {
+  return <Alert theme={theme} view="outlined" size="m" title={title} message={message} actions={actions} />;
+}
 
 export function MePage({ meta }: { meta: MetaResponse | null }) {
   const me = useJson<MeResponse>("/api/me");
@@ -40,13 +61,7 @@ export function MePage({ meta }: { meta: MetaResponse | null }) {
     // В4.4 (кластер M-3): сбой /api/me — честная ошибка с повтором, не LoginOffer
     return (
       <Page crumbs={REPOS_CRUMBS}>
-        <Alert
-          theme="danger"
-          view="outlined"
-          title="Не удалось загрузить список репозиториев"
-          message={me.state.message}
-          actions={[{ text: "Повторить", handler: me.reload }]}
-        />
+        <CabinetAlert title="Не удалось загрузить список репозиториев" message={me.state.message} actions={[{ text: "Повторить", handler: me.reload }]} />
       </Page>
     );
   }
@@ -80,7 +95,7 @@ export function SettingsPage() {
   if (me.state.kind === "error") {
     return (
       <Page crumbs={SETTINGS_CRUMBS}>
-        <Alert theme="danger" view="outlined" title="Не удалось загрузить настройки" message={me.state.message} actions={[{ text: "Повторить", handler: me.reload }]} />
+        <CabinetAlert title="Не удалось загрузить настройки" message={me.state.message} actions={[{ text: "Повторить", handler: me.reload }]} />
       </Page>
     );
   }
@@ -142,7 +157,7 @@ function LoginOffer({ pageTitle }: { pageTitle: "Мои репозитории" 
       <PageHeader title={pageTitle} />
       {authError && (
         <Flex direction="column" gap={3} style={{ marginBottom: "var(--g-spacing-4)" }}>
-          <Alert theme="danger" view="outlined" title="Вход через Я ID не завершен" message={authErrorText(authError)} />
+          <CabinetAlert title="Вход через Я ID не завершен" message={authErrorText(authError)} />
         </Flex>
       )}
       <EmptyState
@@ -311,13 +326,7 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
           </Flex>
         )}
         {error && (
-          <Alert
-            theme="danger"
-            view="outlined"
-            size="s"
-            title={failedOp === "save" ? "Токен не сохранен" : "Токен не удален"}
-            message={error}
-          />
+          <CabinetAlert title={failedOp === "save" ? "Токен не сохранен" : "Токен не удален"} message={error} />
         )}
 
         <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)} size="s" aria-label="Удаление токена">
@@ -462,7 +471,8 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
         `/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/check`,
         "POST",
       );
-      setNote({ text: `${org}/${repo}: ${accessRow(res.access)} — ${enqueueNote(res.enqueue)}`, danger: false });
+      // права видны в строке репозитория (компонентами) — заметка говорит об исходе
+      setNote({ text: `${slugOf(org, repo)}: доступ проверен – ${enqueueNote(res.enqueue)}`, danger: false });
       favs.reload();
       reposReloadRef.current();
     } catch (e) {
@@ -508,6 +518,23 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
         </Text>
       </Flex>
 
+      {/* В4.7 (П3.3): без токена — блок с тем, что делать, и ссылкой в
+          Настройки. Не тост (исчезает) и не подсказка в title (не видна):
+          без токена кабинет не проверяет доступ и не запускает анализ своих
+          репозиториев, и зритель должен узнать об этом до первого клика. */}
+      {!hasPat && (
+        <CabinetAlert
+          theme="info"
+          title="Добавьте токен доступа SourceCraft"
+          message="С токеном можно проверить доступ к своим репозиториям, запустить их анализ и увидеть CI/CD и Security на карточке. Токен добавляется в Настройках."
+          actions={
+            <Button view="action" size="m" {...linkProps("/settings")}>
+              Перейти в Настройки
+            </Button>
+          }
+        />
+      )}
+
       <Flex gap={2} alignItems="flex-start" wrap>
         <div style={{ flex: "1 1 240px", maxWidth: 360 }}>
           <TextInput
@@ -529,18 +556,21 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
 
       {repos.state.kind === "loading" && <SkeletonRows rows={3} height={60} />}
       {repos.state.kind === "error" && (
-        <Alert theme="warning" view="outlined" title="Список не получился" message={repos.state.message} actions={[{ text: "Повторить", handler: repos.reload }]} />
+        <CabinetAlert title="Список не получился" message={repos.state.message} actions={[{ text: "Повторить", handler: repos.reload }]} />
       )}
       {/* З1 (круг 2 В4.4): сбой /api/me/favorites больше не глотается в пустой Map —
           строки списка без прав-ряда врут «ещё не проверяли», хотя проверка упала */}
       {favs.state.kind === "error" && (
-        <Alert theme="warning" view="outlined" title="Раздел избранного не получился" message={favs.state.message} actions={[{ text: "Повторить", handler: favs.reload }]} />
+        <CabinetAlert title="Раздел избранного не получился" message={favs.state.message} actions={[{ text: "Повторить", handler: favs.reload }]} />
       )}
-      {/* В4.4 (кластер I): пустое состояние ОДНО — список один */}
+      {/* В4.4 (кластер I): пустое состояние ОДНО — список один.
+          В4.7 (П3.4): тем же `EmptyState`, что у остальных пустых экранов. */}
       {repos.state.kind === "ok" && entries.length === 0 && (
-        <Text color="secondary">
-          В избранном пока пусто — отметьте репозиторий звёздочкой на его странице или добавьте слагом/ссылкой выше.
-        </Text>
+        <EmptyState
+          icon={Star}
+          title="В избранном пока пусто"
+          description="Отметьте репозиторий звездочкой на его странице или добавьте его выше по идентификатору org/repo или ссылке."
+        />
       )}
       {repos.state.kind === "ok" && entries.length > 0 && (
         <ul className="rh-list">
@@ -565,11 +595,8 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
           })}
         </ul>
       )}
-      {note && note.danger && <Alert theme="danger" title="Проверка прав не получилась" message={note.text} />}
+      {note && note.danger && <CabinetAlert title="Проверка доступа не получилась" message={note.text} />}
       {note && !note.danger && <Text color="secondary">{note.text}</Text>}
-      <Text variant="body-short" color="secondary">
-        ✓ право есть · ✗ права нет · ? проверка не удалась или неизвестно
-      </Text>
     </Flex>
   );
 }
@@ -676,10 +703,9 @@ function RepoRow({
       <Flex gap={4} alignItems="center" wrap>
         <RepoAvatar repo={repo} logoUrl={entry.logoUrl} size="m" />
         <Flex direction="column" gap={1} style={{ flex: "1 1 240px", minWidth: 0 }}>
+          {/* В4.7 (П3.4): слаг — общим `RepoSlug`, как на рейтинге и карточке */}
           <Link {...linkProps(repoHref(org, repo))} view="primary">
-            <Text variant="subheader-2">
-              {org} / {repo}
-            </Text>
+            <RepoSlug org={org} repo={repo} variant="subheader-2" />
           </Link>
           {entry.title && entry.title !== repo && <Text color="complementary">{entry.title}</Text>}
           <Meta>
@@ -687,19 +713,24 @@ function RepoRow({
               <LanguageName name={entry.language} color={entry.languageColor} />
             </MetaItem>
             {entry.lastActivityAt && <MetaItem icon={Clock}>активность {fmtDateTime(entry.lastActivityAt)}</MetaItem>}
-            <MetaItem>
-              {accessRow(access)}
-              {lastCheckedAt ? ` · проверено ${fmtDateTime(lastCheckedAt)}` : ""}
-            </MetaItem>
+            {lastCheckedAt && <MetaItem>доступ проверен {fmtDateTime(lastCheckedAt)}</MetaItem>}
+            {/* В4.7 (П3.4, У26): счётчик рекомендаций — ссылкой на карточку с
+                открытым табом. null (прав нет) — строки нет: не 0 */}
+            {entry.recommendationsCount !== null && (
+              <MetaItem>
+                <Link {...linkProps(`${repoHref(org, repo)}?tab=${TAB_RECOMMENDATIONS}`)}>{recommendationsText(entry.recommendationsCount)}</Link>
+              </MetaItem>
+            )}
           </Meta>
+          <AccessRights access={access} hasPat={hasPat} />
         </Flex>
 
         {statusCell}
 
         <Flex gap={2} alignItems="center">
           {hasPat && (
-            <Button size="m" view="outlined" disabled={busy} onClick={onCheck}>
-              Проверить права
+            <Button size="m" view="outlined" disabled={busy} onClick={onCheck} title="Узнать по вашему токену, какие данные этого репозитория вам открыты">
+              Проверить доступ
             </Button>
           )}
           <Button size="m" view={scored ? "normal" : "action"} onClick={onScan} disabled={job !== null || serverJob !== null}>
@@ -790,22 +821,24 @@ export function JobsBell() {
       <summary style={{ cursor: "pointer", listStyle: "none", whiteSpace: "nowrap" }} title="ваши анализы в очереди">
         <Label theme={active.length > 0 ? "info" : "danger"}>Задания {active.length > 0 ? `◷ ${active.length}` : `⚠ ${failed}`}</Label>
       </summary>
-      <Card view="outlined" style={{ position: "absolute", right: 0, top: "100%", zIndex: 10, marginTop: "var(--g-spacing-2)", minWidth: 360, padding: "var(--g-spacing-4)" }}>
+      <Card view="outlined" className="rh-me-card" style={{ position: "absolute", right: 0, top: "100%", zIndex: 10, marginTop: "var(--g-spacing-2)", minWidth: 360 }}>
         <Flex direction="column" gap={2}>
           <Text variant="subheader-3">Ваши задания</Text>
           {active.map((j) => (
-            <Text key={j.jobId} color="secondary">
-              <Text variant="code-1">{j.slug}</Text> — {jobPhaseLabel(j)}
-            </Text>
+            <Flex key={j.jobId} gap={2} alignItems="baseline">
+              <JobSlug slug={j.slug} />
+              <Text color="secondary">— {jobPhaseLabel(j)}</Text>
+            </Flex>
           ))}
           {active.length === 0 && <Text color="secondary">активных нет; последняя ошибка ниже</Text>}
           {jobs?.recent
             .filter((j) => j.phase === "failed")
             .slice(0, 1)
             .map((j) => (
-              <Text key={j.jobId} color="danger">
-                <Text variant="code-1">{j.slug}</Text> — {j.error ?? "ошибка"}
-              </Text>
+              <Flex key={j.jobId} gap={2} alignItems="baseline">
+                <JobSlug slug={j.slug} />
+                <Text color="danger">— {j.error ?? "ошибка"}</Text>
+              </Flex>
             ))}
           <Link {...linkProps("/me")}>весь список – в разделе «Мои репозитории»</Link>
         </Flex>
@@ -823,7 +856,7 @@ function JobsPanel(props: { jobs: JobsResponse | null; reload: () => void; lease
   // M-4: горизонт ожидания — лиз job из /api/meta, не хардкод
   const eta = `обычно до ${Math.max(1, Math.round(leaseMs / 60_000))} минут`;
   return (
-    <Card view="outlined" style={{ padding: "var(--g-spacing-5)", marginBottom: "var(--g-spacing-5)" }}>
+    <Card view="outlined" className="rh-me-card" style={{ marginBottom: "var(--g-spacing-5)" }}>
       <Flex direction="column" gap={3}>
         <Flex direction="column" gap={1}>
           <Text variant="subheader-2">Мои задания</Text>
@@ -833,30 +866,21 @@ function JobsPanel(props: { jobs: JobsResponse | null; reload: () => void; lease
         {active.map((j) => (
           <Flex key={j.jobId} gap={3} alignItems="center" wrap>
             <Label theme={j.phase === "running" ? "info" : "unknown"}>{jobPhaseLabel(j)}</Label>
-            <Text>
-              <Text variant="code-1">{j.slug}</Text>
-            </Text>
+            <JobSlug slug={j.slug} />
             <Text color="secondary">{eta}</Text>
           </Flex>
         ))}
         {recent.length > 0 && (
           <Flex direction="column" gap={2}>
             <Text variant="subheader-3">Последние</Text>
-            {recent.map((j) => {
-              const [org, repo] = j.slug.split("/");
-              return (
-                <Flex key={j.jobId} gap={3} alignItems="baseline" wrap>
-                  <Label theme={j.phase === "failed" ? "danger" : j.phase === "refused" ? "unknown" : "success"}>{jobPhaseLabel(j)}</Label>
-                  {/* Ф2.20: «Последние» кликабельны — карточка в одном клике */}
-                  <Text>
-                    <Link {...linkProps(repoHref(org ?? "", repo ?? ""))} view="primary">
-                      <Text variant="code-1">{j.slug}</Text>
-                    </Link>
-                    {j.error ? ` — ${j.error}` : ""}
-                  </Text>
-                </Flex>
-              );
-            })}
+            {recent.map((j) => (
+              <Flex key={j.jobId} gap={3} alignItems="baseline" wrap>
+                <Label theme={j.phase === "failed" ? "danger" : j.phase === "refused" ? "unknown" : "success"}>{jobPhaseLabel(j)}</Label>
+                {/* Ф2.20: «Последние» кликабельны — карточка в одном клике */}
+                <JobSlug slug={j.slug} link />
+                {j.error && <Text color="secondary">— {j.error}</Text>}
+              </Flex>
+            ))}
           </Flex>
         )}
         <Button size="m" view="outlined" onClick={reload}>
@@ -871,10 +895,72 @@ interface FavoritesResponse {
   entries: import("../api/me").FavoriteEntry[];
 }
 
-function accessRow(access: import("../api/me").FavoriteEntry["access"]): string {
-  if (!access) return "права ещё не проверяли";
-  const mark = (v: boolean | null) => (v === null ? "?" : v ? "✓" : "✗");
-  return `клон ${mark(access.clone)} · CI ${mark(access.ci)} · Security ${mark(access.appsec)}${access.own ? " · ваш" : ""}`;
+/**
+ * Слаг задания: серверная строка `org/repo` — общим `RepoSlug` (В4.7, П3.4:
+ * один способ набрать слаг). У отклонённой без строки репозитория слага может
+ * не быть вовсе («—») — тогда просто текст.
+ */
+function JobSlug({ slug, link = false }: { slug: string; link?: boolean }) {
+  const [org, repo, ...rest] = slug.split("/");
+  if (!org || !repo || rest.length > 0) return <Text color="secondary">{slug}</Text>;
+  const view = <RepoSlug org={org} repo={repo} variant="body-1" />;
+  return link ? (
+    <Link {...linkProps(repoHref(org, repo))} view="primary">
+      {view}
+    </Link>
+  ) : (
+    view
+  );
+}
+
+/** Каналы доступа в строке репозитория: ключ сохранённой проверки → подпись. */
+const ACCESS_CHANNELS: { key: "clone" | "ci" | "appsec"; title: string }[] = [
+  { key: "clone", title: "Код" },
+  { key: "ci", title: "CI/CD" },
+  { key: "appsec", title: "Security" },
+];
+
+/** Tri-state одного канала: есть доступ / нет доступа / неизвестно — иконкой и темой, словами — в подсказке. */
+const ACCESS_STATES: Record<"yes" | "no" | "unknown", { theme: "success" | "unknown"; icon: IconData; hint: string }> = {
+  yes: { theme: "success", icon: CircleCheck, hint: "доступ есть" },
+  no: { theme: "unknown", icon: Lock, hint: "доступа нет" },
+  unknown: { theme: "unknown", icon: CircleQuestion, hint: "проверка не удалась или результат неизвестен" },
+};
+
+/**
+ * В4.7 (П3.2, П3.4): права зрителя на репозиторий — компонентами, как на
+ * карточке (`Label` с иконкой; закрытое — замком), а не текстовыми глифами
+ * с отдельной легендой. Без проверки — не «еще не проверяли» (наше
+ * внутреннее состояние), а что сделать, чтобы узнать.
+ */
+function AccessRights({ access, hasPat }: { access: import("../api/me").FavoriteEntry["access"]; hasPat: boolean }) {
+  if (!access) {
+    return (
+      <Text variant="body-short" color="secondary">
+        {hasPat
+          ? "Нажмите «Проверить доступ», чтобы узнать, какие данные репозитория открывает ваш токен."
+          : "Добавьте токен в Настройках, чтобы проверить доступ к данным репозитория."}
+      </Text>
+    );
+  }
+  return (
+    <Flex gap={1} alignItems="center" wrap>
+      {ACCESS_CHANNELS.map(({ key, title }) => {
+        const value = access[key];
+        const state = ACCESS_STATES[value === true ? "yes" : value === false ? "no" : "unknown"];
+        return (
+          <Label key={key} theme={state.theme} size="xs" icon={<Icon data={state.icon} size={12} />} title={`${title}: ${state.hint}`}>
+            {title}
+          </Label>
+        );
+      })}
+      {access.own && (
+        <Label theme="info" size="xs" title="У вас есть доступ к данным CI/CD или Security, либо репозиторий приватный">
+          ваш
+        </Label>
+      )}
+    </Flex>
+  );
 }
 
 /**

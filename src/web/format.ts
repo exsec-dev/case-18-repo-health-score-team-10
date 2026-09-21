@@ -47,6 +47,19 @@ export function fmtDateTime(iso: string | null | undefined): string {
   return d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+/**
+ * «N рекомендаций» с русским согласованием числа (В4.7, П3.4, счётчик в
+ * «Моих репозиториях»): 1 рекомендация, 2-4 рекомендации, 5-20 рекомендаций,
+ * 21 рекомендация… Цифрой, а не словом (правило языка UI).
+ */
+export function recommendationsText(count: number): string {
+  const mod10 = count % 10;
+  const mod100 = count % 100;
+  const word =
+    mod10 === 1 && mod100 !== 11 ? "рекомендация" : mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) ? "рекомендации" : "рекомендаций";
+  return `${fmtCount(count)} ${word}`;
+}
+
 /** Крупные счётчики — с разделителем разрядов: «27 621» читается, «27621» нет. */
 export function fmtCount(value: number): string {
   return value.toLocaleString("ru-RU");

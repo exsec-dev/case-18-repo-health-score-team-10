@@ -145,7 +145,7 @@ export function LanguageName({ name, color }: { name: string | null; color: stri
  * экране; `title` всегда несёт полную текстовую форму из `slugOf`, чтобы
  * обрезанное имя можно было прочесть наведением.
  */
-export function RepoSlug({ org, repo, variant }: { org: string; repo: string; variant: "subheader-1" | "header-1" }) {
+export function RepoSlug({ org, repo, variant }: { org: string; repo: string; variant: "body-1" | "subheader-1" | "subheader-2" | "header-1" }) {
   return (
     <Text variant={variant} as={variant === "header-1" ? "h1" : "span"} ellipsis title={slugOf(org, repo)} style={{ display: "block" }}>
       {org} / {repo}
