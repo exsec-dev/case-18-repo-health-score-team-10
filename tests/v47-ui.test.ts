@@ -128,7 +128,7 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
     expect((code.match(/<CabinetAlert\b/g) ?? []).length).toBe(7);
   });
 
-  test("П3.4: слаг — общим RepoSlug; пустое состояние — EmptyState; паддинг карточек — один класс", () => {
+  test("П3.4: слаг — общим RepoSlug; пустое состояние — EmptyState; карточек `rh-me-card` в кабинете нет (В4.8)", () => {
     const code = me();
     expect({
       repoSlug: code.includes('<RepoSlug org={org} repo={repo} variant="subheader-2" />'),

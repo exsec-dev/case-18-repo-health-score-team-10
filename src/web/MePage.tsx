@@ -57,7 +57,7 @@ import { type MeResponse, type MetaResponse, type MyReposResponse, type RepoCard
 import { analysisOutcome, authErrorText, fmtDateTime, fmtScore, recommendationsText, scoreTheme, scoreWord, sentence, slugOf } from "./format";
 import { TAB_RECOMMENDATIONS } from "./RepoPage";
 import { type Band, BANDS, type RepoEntry, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
-import { linkProps, repoHref } from "./router";
+import { linkProps, navigate, repoHref } from "./router";
 import { Page, UserAvatar, displayName, logoutFailedToast } from "./Shell";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, RepoSlug, SkeletonRows } from "./ui";
 
@@ -666,6 +666,11 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
                     className="rh-summary__tile"
                     onClick={() => setBand((cur) => (cur === b.key ? null : b.key))}
                     title={b.hint}
+                    // ревью закрытия: `Card type="selection"` ставит role="radio" и
+                    // aria-checked, а плитка — переключатель (повторный клик снимает
+                    // фильтр): роль кнопки и aria-pressed
+                    role="button"
+                    aria-checked={undefined}
                     aria-pressed={band === b.key}
                   >
                     <div className="rh-summary__top">
@@ -829,7 +834,7 @@ function AddRepoDialog({ open, onClose, onAdded }: { open: boolean; onClose: () 
               setError(null);
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter") void add();
+              if (e.key === "Enter" && !busy) void add();
             }}
             hasClear
             controlProps={{ "aria-label": "Идентификатор org/repo или ссылка на репозиторий" }}
@@ -952,7 +957,9 @@ function RepoRow({
       ? [{ text: "Проверить доступ", action: onCheck, disabled: busy, title: "Узнать по вашему токену, какие данные этого репозитория вам открыты" }]
       : []),
     ...(entry.recommendationsCount !== null && entry.recommendationsCount > 0
-      ? [{ text: "Открыть рекомендации", href: `${href}?tab=${TAB_RECOMMENDATIONS}` }]
+      ? // ревью закрытия: не `href` — пункт меню рендерится обычной ссылкой без
+        // `linkProps` и перезагружал страницу; навигация — внутри приложения
+        [{ text: "Открыть рекомендации", action: () => navigate(`${href}?tab=${TAB_RECOMMENDATIONS}`) }]
       : []),
     { text: "Убрать из избранного", action: onRemove, disabled: busy, theme: "danger" as const },
   ];
@@ -1119,7 +1126,10 @@ export function JobsBell() {
   const recent = jobs?.recent ?? [];
   const failed = recent.filter((j) => j.phase === "failed").length;
   const busy = active.length > 0;
-  const alarm = !busy && failed > 0;
+  // ревью закрытия В4.8: тревога — только если ПОСЛЕДНЕЕ завершенное задание
+  // упало (recent идет от новых к старым); прежнее «есть ошибка среди 8
+  // последних» держало кнопку красной после трех успешных анализов подряд
+  const alarm = !busy && recent[0]?.phase === "failed";
   // вкладка по умолчанию — где есть что смотреть: идут анализы → «Активные», иначе «История»
   const shown = tab ?? (busy ? "active" : "history");
   const close = () => {
@@ -1150,6 +1160,7 @@ export function JobsBell() {
         anchorElement={anchor}
         placement="bottom-end"
         offset={4}
+        role="dialog"
         aria-label="Ваши задания"
       >
         <div className="rh-jobs">

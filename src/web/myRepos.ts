@@ -88,7 +88,9 @@ export function sortEntries<T extends Pick<RepoEntry, "org" | "repo" | "healthcr
 
 /**
  * История «Заданий» лентой по дням (исследование панели, выбор 4c, 21.09):
- * группы в порядке прихода (сервер отдает недавние от новых к старым),
+ * группы и строки — по времени от новых к старым (ревью закрытия: сервер
+ * сортирует по id, а `claimed_at` перезаписывается при повторном захвате
+ * по истекшей аренде — порядок id и времени может расходиться),
  * заголовок — «Сегодня», «Вчера» или дата (`fmtDate`), у
  * строки — время `HH:mm`. Время — `claimedAt` (взято в работу; времени
  * завершения API не отдает). Задание без времени (отклоненное предпроверкой
@@ -109,12 +111,14 @@ export function groupJobsByDay<T extends { claimedAt: string | null }>(jobs: T[]
   const groups: JobDayGroup<T>[] = [];
   const byKey = new Map<string, JobDayGroup<T>>();
   const untimed: JobDayGroup<T> = { label: NO_TIME_GROUP, rows: [] };
+  const timed: { job: T; d: Date }[] = [];
   for (const job of jobs) {
     const d = job.claimedAt ? new Date(job.claimedAt) : null;
-    if (!d || Number.isNaN(d.getTime())) {
-      untimed.rows.push({ job, time: null });
-      continue;
-    }
+    if (!d || Number.isNaN(d.getTime())) untimed.rows.push({ job, time: null });
+    else timed.push({ job, d });
+  }
+  timed.sort((x, y) => y.d.getTime() - x.d.getTime());
+  for (const { job, d } of timed) {
     const key = dayKey(d);
     let group = byKey.get(key);
     if (!group) {

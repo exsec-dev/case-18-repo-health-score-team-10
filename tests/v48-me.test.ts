@@ -81,7 +81,8 @@ describe("В4.8: история «Заданий» лентой по дням (�
   const at = (d: number, h: number, m: number) => new Date(2026, 8, d, h, m).toISOString();
   const job = (id: number, claimedAt: string | null) => ({ id, claimedAt });
 
-  test("группы в порядке прихода: «Сегодня», «Вчера», дата; время HH:mm; повторы одного репо различимы по времени", () => {
+  test("группы «Сегодня», «Вчера», дата; время HH:mm; два запуска одного репозитория — разные строки со своим временем", () => {
+    // 1 и 2 — один и тот же репозиторий, запущенный дважды за день
     const groups = groupJobsByDay([job(1, at(21, 20, 50)), job(2, at(21, 9, 5)), job(3, at(20, 23, 59)), job(4, at(15, 12, 0))], now);
     expect(groups.map((g) => ({ label: g.label, rows: g.rows.map((r) => [r.job.id, r.time]) }))).toEqual([
       { label: "Сегодня", rows: [[1, "20:50"], [2, "09:05"]] },
@@ -98,6 +99,14 @@ describe("В4.8: история «Заданий» лентой по дням (�
     ]);
     expect(groupJobsByDay([], now)).toEqual([]);
   });
+
+  test("ревью закрытия: порядок — по времени, а не по приходу (id и claimed_at могут расходиться после повторного захвата)", () => {
+    const groups = groupJobsByDay([job(1, at(20, 10, 0)), job(2, at(21, 8, 0)), job(3, at(21, 19, 30))], now);
+    expect(groups.map((g) => [g.label, g.rows.map((r) => r.job.id)])).toEqual([
+      ["Сегодня", [3, 2]],
+      ["Вчера", [1]],
+    ]);
+  });
 });
 
 describe("В4.8: вёрстка раздела (source-assert)", () => {
@@ -112,7 +121,7 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     expect(src).toContain("export function JobsBell");
   });
 
-  test("«Задания»: кнопка со штриховкой (Т1), панель — Popup с переключателем без заголовка (П3), ссылки на /me нет", () => {
+  test("«Задания»: кнопка со штриховкой (Т1), панель — Popup с переключателем без заголовка (П3), ссылка в раздел — SPA", () => {
     const bell = src.slice(src.indexOf("export function JobsBell"), src.indexOf("function JobRow"));
     const row = src.slice(src.indexOf("function JobRow"), src.indexOf("interface FavoritesResponse"));
     expect(bell).toContain('className={busy ? "rh-jobs-btn rh-jobs-btn_busy" : "rh-jobs-btn"}');
@@ -143,6 +152,9 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     expect(css).toMatch(/\.rh-jobs-btn_busy::before \{[^}]*animation: g-loading-animation/);
     // круг 4 (замечание 4): кнопка видна всегда; счетчик отделен от слова; запуск анализа будит опрос шапки
     expect(bell).not.toContain("return null");
+    // ревью закрытия: тревога — только когда упало последнее завершенное; панель — role="dialog"
+    expect(bell).toContain('const alarm = !busy && recent[0]?.phase === "failed";');
+    expect(bell).toMatch(/offset=\{4\}\s*role="dialog"/);
     expect(bell).toContain('className={alarm ? "rh-jobs-btn__count rh-jobs-btn__count_danger" : "rh-jobs-btn__count"}');
     // пустые состояния — на каждую вкладку панели (П3)
     expect(src).toContain('<JobsEmpty title="Анализов пока не было">');
@@ -199,6 +211,11 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     expect(src).toMatch(/access\.visibility === "private" && \(\s*<span className="rh-pill"[^>]*>\s*<Icon data=\{Lock\} size=\{12\} \/>\s*Приватный/);
     expect(rowSrc).toContain("<DropdownMenu");
     expect(rowSrc).toContain('text: "Убрать из избранного"');
+    // ревью закрытия: пункт «Открыть рекомендации» — навигация SPA, не href
+    expect(rowSrc).toContain("action: () => navigate(`${href}?tab=${TAB_RECOMMENDATIONS}`)");
+    expect(rowSrc).not.toMatch(/text: "Открыть рекомендации", href:/);
+    // плитки сводки — переключатели: роль кнопки и aria-pressed вместо радио
+    expect(src).toMatch(/role="button"\s*aria-checked=\{undefined\}\s*aria-pressed=\{band === b\.key\}/);
     expect(rowSrc).not.toContain("Убрать ★");
   });
 

@@ -78,4 +78,12 @@ describe("В4.8: задания зрителя несут логотип реп�
       { slug: "jobs/no-logo", logoUrl: null },
     ]);
   });
+
+  test("ревью закрытия: логотип задания — под тем же признаком прав, что мета списка (fail-closed)", () => {
+    const hidden = seedRepo(t, { org: "jobs", repo: "private-no-rights" });
+    t.db.query("UPDATE repos SET logo_url = ?, visibility = 'private' WHERE id = ?").run(LOGO, hidden);
+    t.db.query("INSERT INTO jobs (repo_id, status, user_id, trigger_kind) VALUES (?, 'done', ?, 'user')").run(hidden, user);
+    const job = myJobs(t.db, user).recent.find((j) => j.slug === "jobs/private-no-rights");
+    expect(job?.logoUrl).toBeNull();
+  });
 });

@@ -464,8 +464,10 @@ export interface MyJob {
   /**
    * В4.8 (панель «Заданий», решение Екатерины 21.09): логотип репозитория из
    * `repos.logo_url` — тот же, что у строки «Моих репозиториев» и рейтинга.
-   * Задание — заявка самого зрителя, поэтому отдельного гейта прав нет (слаг
-   * он и так видит); у отказанной без строки `repos` — null.
+   * Ревью закрытия: под тем же признаком прав `viewerMayReadRepo` (П6), что
+   * мета `listMyRepos`, — логотип входит в закрытую мету, и «задание свое»
+   * не довод раскрывать его без прав (fail-closed); у отказанной без строки
+   * `repos` — null.
    */
   logoUrl: string | null;
 }
@@ -507,7 +509,10 @@ export function myJobs(db: import("bun:sqlite").Database, userId: number, doneLi
       claimedAt: typeof row.claimed_at === "string" ? row.claimed_at : null,
       // refused: error — машинный JSON со слагом, человеку показывается слаг в `slug`
       error: phase === "refused" ? null : typeof row.error === "string" ? row.error : null,
-      logoUrl: typeof row.logo_url === "string" && row.logo_url !== "" ? row.logo_url : null,
+      logoUrl:
+        typeof row.logo_url === "string" && row.logo_url !== "" && viewerMayReadRepo(db, userId, String(row.org_slug), String(row.repo_slug))
+          ? row.logo_url
+          : null,
     };
   };
     // LEFT JOIN: refused живёт без строки repos (repo_id = 0)

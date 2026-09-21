@@ -1264,6 +1264,8 @@ button.rh-category:focus-visible {
 .rh-repo-item__name,
 .rh-repo-item__link,
 .rh-repo-item__labels,
+.rh-repo-item__content .rh-meta__item[title],
+.rh-repo-item__desc,
 .rh-repo-item__state,
 .rh-repo-item__actions {
   position: relative;
