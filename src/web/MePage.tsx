@@ -146,7 +146,7 @@ export function SettingsPage() {
     <Page crumbs={SETTINGS_CRUMBS} aside={<AccountSection me={data} />}>
       {/* В4.8.5 (К8.5.3, С2-4): секция токена не перемонтируется по дате
           проверки — строка «Токен принадлежит…» после сохранения остаётся */}
-      <PatSection hasPat={data.hasPat} checkedAt={data.patCheckedAt} onChanged={reloadMe} />
+      <PatSection hasPat={data.hasPat} unreadable={data.patUnreadable === true} checkedAt={data.patCheckedAt} onChanged={reloadMe} />
     </Page>
   );
 }
@@ -235,7 +235,7 @@ function seedNote(seed: import("../api/me").PatSeed | undefined): string {
   return `Посев избранного остановлен: ${why} (добавлено ${seed.added}).`;
 }
 
-function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checkedAt: string | null; onChanged: () => void }) {
+function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasPat: boolean; unreadable?: boolean; checkedAt: string | null; onChanged: () => void }) {
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -324,7 +324,7 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
                 Сохранен
               </Label>
               <Text variant="body-short" color="secondary">
-                проверен {fmtDateTime(checkedAt)}
+                проверен при сохранении {fmtDateTime(checkedAt)}
               </Text>
             </Flex>
             {owner && <Text color="complementary">Токен принадлежит пользователю {owner}.</Text>}
@@ -355,16 +355,18 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
           <Flex direction="column" gap={3}>
             <Flex gap={2} alignItems="center" wrap>
               <Label theme="warning" size="xs">
-                Не задан
+                {unreadable ? "Нужно сохранить заново" : "Не задан"}
               </Label>
+              {/* В4.8.5 (К8.5.4, С2-5, С2-6): без жаргона и с причиной */}
               <Text variant="body-short" color="secondary">
-                свои репозитории недоступны
+                {unreadable
+                  ? "сохраненный токен больше не читается после смены ключа сервиса"
+                  : "закрытые данные и анализ своих репозиториев недоступны"}
               </Text>
             </Flex>
             <Text variant="body-short" color="complementary">
               SourceCraft: Домой → Доступ → Персональные токены доступа → Сгенерировать новый токен. Токен показывается один
-              раз – скопируйте его сразу. Перед сохранением мы проверяем его живым запросом GET /user: неверный токен
-              платформа отклонит, и он не сохранится.
+              раз – скопируйте его сразу. Перед сохранением токен проверяется в SourceCraft: неверный токен не сохранится.
             </Text>
             {tokenForm("Токен доступа SourceCraft", "Проверить и сохранить")}
           </Flex>

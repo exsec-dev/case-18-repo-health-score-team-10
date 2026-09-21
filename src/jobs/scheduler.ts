@@ -300,9 +300,12 @@ export const JOB_ERRORS = {
   internal: "внутренняя ошибка",
   /** К8.5.12 (С10-1): скан собрал факты, но оценку посчитать не удалось — скан закрыт `bad` (score_failed) */
   scoreFailed: "не удалось посчитать оценку",
-  /** `bad`-скан: какие каналы не собрались (ScanResult.channels) */
-  channels: (channels: string[]): string => `сбор данных не удался: ${channels.join(", ")}`.slice(0, JOB_ERROR_MAX),
+  /** `bad`-скан: какие каналы не собрались (ScanResult.channels); В4.8.5 (К8.5.4, С4-12) — словами, не кодами каналов */
+  channels: (channels: string[]): string => `сбор данных не удался: ${channels.map((c) => CHANNEL_NAMES[c] ?? c).join(", ")}`.slice(0, JOB_ERROR_MAX),
 } as const;
+
+/** Каналы скана языком продукта: причина падения показывается в «Заданиях» дословно. */
+const CHANNEL_NAMES: Record<string, string> = { git: "клон репозитория", rest: "данные SourceCraft", appsec: "Security" };
 
 /**
  * Каналы `bad`-скана, которые не собрались, — для текста причины (П8).

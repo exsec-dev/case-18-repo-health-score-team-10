@@ -126,7 +126,7 @@ export function parseReposQuery(params: URLSearchParams): ParseResult {
   const sort = params.get("sort");
   if (sort !== null) {
     if (!SORT_KEYS.includes(sort as SortKey)) {
-      return { ok: false, message: `sort: ожидается одно из ${SORT_KEYS.join("|")}, получено "${sort}"` };
+      return { ok: false, message: "в адресе рейтинга неизвестный порядок сортировки" };
     }
     query.sort = sort as SortKey;
   }
@@ -134,7 +134,7 @@ export function parseReposQuery(params: URLSearchParams): ParseResult {
   const order = params.get("order");
   if (order !== null) {
     if (order !== "desc" && order !== "asc") {
-      return { ok: false, message: `order: ожидается desc|asc, получено "${order}"` };
+      return { ok: false, message: "в адресе рейтинга неизвестное направление сортировки" };
     }
     query.order = order;
   }
@@ -156,7 +156,7 @@ export function parseReposQuery(params: URLSearchParams): ParseResult {
   const page = params.get("page");
   if (page !== null) {
     const n = Number(page);
-    if (!Number.isInteger(n) || n < 1) return { ok: false, message: `page: ожидается целое ≥ 1, получено "${page}"` };
+    if (!Number.isInteger(n) || n < 1) return { ok: false, message: "в адресе рейтинга неверный номер страницы" };
     query.page = n;
   }
 
@@ -164,7 +164,7 @@ export function parseReposQuery(params: URLSearchParams): ParseResult {
   if (perPage !== null) {
     const n = Number(perPage);
     if (!Number.isInteger(n) || n < 1 || n > 100) {
-      return { ok: false, message: `per_page: ожидается целое 1…100, получено "${perPage}"` };
+      return { ok: false, message: "в адресе рейтинга неверный размер страницы: от 1 до 100" };
     }
     query.perPage = n;
   }

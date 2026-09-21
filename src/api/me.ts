@@ -435,10 +435,10 @@ export async function requestUserScan(
   // сбой платформы (0/429/5xx) — не вердикт о правах, лимит запусков не списывает
   if (res.status !== 200 && classifyScStatus(res.status) !== "unavailable") recordRefusedUserJob(db, userId, now, `${org}/${repo}`);
   if (res.status === 403 || res.status === 404) {
-    return { status: 403, body: { error: { code: "no_access", message: `ваш PAT не дает доступа к ${org}/${repo}` } } };
+    return { status: 403, body: { error: { code: "no_access", message: `ваш токен не дает доступа к ${org}/${repo}` } } };
   }
   if (res.status === 401) {
-    return { status: 401, body: { error: { code: "pat_expired", message: "SourceCraft отклонил PAT – обновите токен в кабинете" } } };
+    return { status: 401, body: { error: { code: "pat_expired", message: "SourceCraft отклонил ваш токен – замените его в Настройках" } } };
   }
   if (res.status !== 200) {
     return { status: 503, body: { error: { code: "check_failed", message: `не удалось проверить доступ к ${org}/${repo}: SourceCraft сейчас не отвечает` } } };
@@ -495,7 +495,7 @@ export function userScanCheapGate(db: Database, userId: number, org: string, rep
 function tooManyActive(queue: QueueConfig): UserScanResponse {
   return {
     status: 429,
-    body: { error: { code: "too_many_active", message: `не больше ${queue.userActiveMax} анализов в очереди одновременно — дождитесь завершения` } },
+    body: { error: { code: "too_many_active", message: `не больше ${queue.userActiveMax} анализов в очереди одновременно – дождитесь завершения` } },
     // место освободится, когда закончится анализ — точного времени нет, минута — честный шаг опроса
     retryAfterSec: 60,
   };
@@ -509,7 +509,7 @@ function rateLimited(db: Database, userId: number, queue: QueueConfig, now: Date
   const retryAfterSec = oldest.t ? Math.max(1, Math.ceil((Date.parse(oldest.t) + 3600_000 - now.getTime()) / 1000)) : 60;
   return {
     status: 429,
-    body: { error: { code: "rate_limited", message: `не больше ${queue.userScansPerHour} запусков анализа в час — попробуйте позже` } },
+    body: { error: { code: "rate_limited", message: `не больше ${queue.userScansPerHour} запусков анализа в час – попробуйте позже` } },
     retryAfterSec,
   };
 }

@@ -210,7 +210,7 @@ const badQuery = (message: string): Response =>
   Response.json({ error: { code: "bad_query", message } }, { status: 400 });
 const notFound = (message: string): Response =>
   Response.json({ error: { code: "not_found", message } }, { status: 404 });
-const unauthorized = (message = "требуется вход (Я ID)"): Response =>
+const unauthorized = (message = "нужно войти через Я ID"): Response =>
   Response.json({ error: { code: "unauthorized", message } }, { status: 401 });
 const forbidden = (message: string): Response =>
   Response.json({ error: { code: "forbidden", message } }, { status: 403 });
@@ -218,17 +218,17 @@ const forbidden = (message: string): Response =>
 /** В4.4 (кластер K/З6): окно мутаций избранного исчерпано — 429. */
 const favoriteRateLimited = (userId: number): Response =>
   rateLimited(
-    `не больше ${config.queue.favoritesMutationsPerMinute ?? 30} изменений избранного в минуту — попробуйте чуть позже`,
+    `не больше ${config.queue.favoritesMutationsPerMinute ?? 30} изменений избранного в минуту – попробуйте чуть позже`,
     windowRetryAfterSec(favMutations, userId, 60_000),
   );
 
 /** В4.4 (кластер G): окно открытий карточки (карточка, MD, PDF) исчерпано — 429 с Retry-After. */
 const cardRateLimited = (userId: number): Response =>
-  rateLimited(`не больше ${config.queue.cardPerMinute ?? 30} открытий карточки в минуту — попробуйте чуть позже`, windowRetryAfterSec(cardViews, userId, 60_000));
+  rateLimited(`не больше ${config.queue.cardPerMinute ?? 30} открытий карточки в минуту – попробуйте чуть позже`, windowRetryAfterSec(cardViews, userId, 60_000));
 
 /** Ф2.21: предел избранного — 409 без меты репо и без факта существования приватного. */
 const favoriteLimit = (max: number): Response =>
-  Response.json({ error: { code: "favorite_limit", message: `в избранном не больше ${max} репозиториев — уберите лишние, чтобы добавить новый` } }, { status: 409 });
+  Response.json({ error: { code: "favorite_limit", message: `в избранном не больше ${max} репозиториев – уберите лишние, чтобы добавить новый` } }, { status: 409 });
 
 // Ф2.8 (LOW-6): CSRF-гард по Origin на мутирующих /api/me/* и /auth/logout.
 // Заголовка нет → пропустить (межсайтовой POST закрыт SameSite=Lax); есть и
@@ -251,7 +251,7 @@ const allowedOrigins = (): Set<string> => {
 function guardOrigin(req: Request): Response | null {
   const origin = req.headers.get("origin");
   if (origin === null || origin === "") return null;
-  return allowedOrigins().has(origin) ? null : forbidden("чужой Origin: запрос отклонён");
+  return allowedOrigins().has(origin) ? null : forbidden("запрос отклонен: он пришел с чужой страницы");
 }
 
 /**
@@ -510,7 +510,7 @@ const routes = {
     "/api/repos/:org/:repo": async (req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
-        return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
+        return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
       }
       const viewer = sessionOf(req);
       // В4.4 (кластер G): 429 — до резолва доступа (не тратим PAT-запросы)
@@ -522,7 +522,7 @@ const routes = {
     "/api/repos/:org/:repo/report.md": async (req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
-        return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
+        return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
       }
       const viewer = sessionOf(req);
       // В4.4 (кластер G): MD-выгрузка — та же карточка, тот же лимит
@@ -545,7 +545,7 @@ const routes = {
     "/api/repos/:org/:repo/report.pdf": async (req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
-        return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
+        return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
       }
       const viewer = sessionOf(req);
       if (viewer && !allowCardView(viewer.userId)) return cardRateLimited(viewer.userId);
@@ -563,14 +563,14 @@ const routes = {
     // управляемым. Отдельной кнопки «в другой аккаунт» больше нет.
     "/auth/ya": () => {
       if (!config.auth.appSecret) {
-        return Response.json({ error: { code: "unconfigured", message: "APP_SECRET не задан: сессии выключены" } }, { status: 503 });
+        return Response.json({ error: { code: "unconfigured", message: "вход на сервере не настроен – обратитесь к администратору" } }, { status: 503 });
       }
       try {
         const state = makeOAuthState();
         const url = buildAuthUrl(yaCreds(), state, yaEndpoints(), { forceConfirm: true });
         return new Response(null, { status: 302, headers: { location: url, "set-cookie": oauthStateCookieHeader(ck, state) } });
       } catch (e) {
-        return Response.json({ error: { code: "unconfigured", message: String((e as Error).message) } }, { status: 503 });
+        return Response.json({ error: { code: "unconfigured", message: "вход через Я ID на сервере не настроен – обратитесь к администратору" } }, { status: 503 });
       }
     },
     // выход: сессия отзывается в БД, cookie гасится; PAT пользователя остаётся
@@ -642,6 +642,9 @@ const routes = {
         avatarUrl: profile.avatarId ? yaAvatarUrl(profile.avatarId) : null,
         hasPat: meta?.hasPat === true && readable,
         patCheckedAt: meta && meta.hasPat && readable ? meta.checkedAt : null,
+        // В4.8.5 (К8.5.4, С2-6): токен сохранен, но текущим ключом не читается
+        // (ротация APP_SECRET) — «Не задан» получает причину
+        patUnreadable: meta?.hasPat === true && !readable,
       });
     },
     "/api/me/pat": async (req) => {
@@ -650,7 +653,7 @@ const routes = {
       const user = sessionOf(req);
       if (!user) return unauthorized();
       if (!config.auth.appSecret) {
-        return Response.json({ error: { code: "unconfigured", message: "APP_SECRET не задан: PAT хранить нельзя" } }, { status: 503 });
+        return Response.json({ error: { code: "unconfigured", message: "хранение токенов на сервере не настроено – обратитесь к администратору" } }, { status: 503 });
       }
       if (req.method === "PUT") {
         // ПОРТ hq-parallel (S1/security): живая проба токена = оракул
@@ -658,10 +661,10 @@ const routes = {
         // В4.8.5 (К8.5.6, С2-1): окно списывает только ВЕРДИКТ платформы
         // (токен принят или отклонён); сбой SourceCraft пробу не сжигает
         if (!windowHasRoom(patProbes, user.userId, PAT_PROBES_PER_HOUR, 60 * 60_000)) {
-          return rateLimited("Слишком много проверок токена — попробуйте через час", windowRetryAfterSec(patProbes, user.userId, 60 * 60_000));
+          return rateLimited("слишком много проверок токена – попробуйте позже", windowRetryAfterSec(patProbes, user.userId, 60 * 60_000));
         }
         const body = (await req.json().catch(() => null)) as { token?: unknown } | null;
-        if (typeof body?.token !== "string" || body.token.length < 8) return badQuery("token: ожидается строка PAT");
+        if (typeof body?.token !== "string" || body.token.length < 8) return badQuery("это не похоже на токен доступа SourceCraft");
         // живая проверка GET /user: вердикт — по общему классификатору (К8.5.6)
         const probe = makeScClient({
           token: body.token,
@@ -681,7 +684,7 @@ const routes = {
         }
         windowPush(patProbes, user.userId);
         if (verdict !== "ok") {
-          return Response.json({ error: { code: "bad_token", message: `SourceCraft отклонил токен (HTTP ${who.status})` } }, { status: 400 });
+          return Response.json({ error: { code: "bad_token", message: "SourceCraft отклонил токен – проверьте, что он скопирован целиком и не отозван" } }, { status: 400 });
         }
         storePat(db, config.auth.appSecret!, user.userId, body.token);
         accessCache.clearUser(user.userId); // новый PAT — новые права
@@ -718,7 +721,7 @@ const routes = {
         recheckPump.clear(user.userId);
         return Response.json({ ok: true });
       }
-      return Response.json({ error: { code: "bad_query", message: "ожидался PUT или DELETE" } }, { status: 405 });
+      return Response.json({ error: { code: "bad_query", message: "метод запроса не поддерживается" } }, { status: 405 });
     },
     "/api/me/repos": async (req) => {
       const user = sessionOf(req);
@@ -727,7 +730,7 @@ const routes = {
       // перечитывается; 429 — до какой-либо работы маршрута
       if (!allowMyReposView(user.userId)) {
         return rateLimited(
-          `не больше ${config.queue.myReposPerMinute} обновлений списка в минуту — попробуйте позже`,
+          `не больше ${config.queue.myReposPerMinute} обновлений списка в минуту – попробуйте позже`,
           windowRetryAfterSec(myReposViews, user.userId, 60_000),
         );
       }
@@ -764,18 +767,18 @@ const routes = {
         // В4.8.5 (К8.5.7, С3-4): отказ 400 окно мутаций не списывает — разбор
         // ввода ДО окна; S-7 (круг 2): сессия читается ОДИН раз — выше
         const body = (await req.json().catch(() => null)) as { repository?: unknown } | null;
-        if (typeof body?.repository !== "string") return badQuery("repository: ожидается строка org/repo или URL");
+        if (typeof body?.repository !== "string") return badQuery("укажите репозиторий как org/repo или ссылкой на него");
         const parsed = parseFavoriteInput(body.repository);
-        if (!parsed) return badQuery("repository: ожидается org/repo или http(s)-URL; пустые и точечные сегменты не принимаются");
+        if (!parsed) return badQuery("укажите репозиторий как org/repo или ссылкой на него");
         if (!allowFavMutation(user.userId)) return favoriteRateLimited(user.userId);
         return addFavoriteAndCheck(user.userId, parsed.org, parsed.repo);
       }
-      return Response.json({ error: { code: "bad_query", message: "ожидался GET или PUT" } }, { status: 405 });
+      return Response.json({ error: { code: "bad_query", message: "метод запроса не поддерживается" } }, { status: 405 });
     },
     "/api/me/favorites/:org/:repo": async (req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
-        return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
+        return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
       }
       if (req.method !== "GET") {
         const csrf = guardOrigin(req);
@@ -786,7 +789,7 @@ const routes = {
       if (req.method === "PUT") {
         // общий парсер (Ф2.20) применён и к path-роуту звезды; разбор — до окна (К8.5.7)
         const parsed = parseFavoriteInput(`${org}/${repo}`);
-        if (!parsed) return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
+        if (!parsed) return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
         // S-7 (круг 2): сессия читается ОДИН раз — выше
         if (!allowFavMutation(user.userId)) return favoriteRateLimited(user.userId);
         return addFavoriteAndCheck(user.userId, parsed.org, parsed.repo);
@@ -799,7 +802,7 @@ const routes = {
       if (req.method === "GET") {
         return Response.json({ favorite: isFavorite(db, user.userId, org!, repo!) });
       }
-      return Response.json({ error: { code: "bad_query", message: "ожидался GET/PUT/DELETE" } }, { status: 405 });
+      return Response.json({ error: { code: "bad_query", message: "метод запроса не поддерживается" } }, { status: 405 });
     },
     // В4.8.5 (К8.5.14 (г), §2-В1): маршрута «Проверить доступ»
     // (`POST /api/me/favorites/:org/:repo/check`) больше нет — права
@@ -810,10 +813,10 @@ const routes = {
     "/api/me/repos/:org/:repo/scan": async (req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
-        return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
+        return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
       }
       if (req.method !== "POST") {
-        return Response.json({ error: { code: "bad_query", message: "ожидался POST" } }, { status: 405 });
+        return Response.json({ error: { code: "bad_query", message: "метод запроса не поддерживается" } }, { status: 405 });
       }
       const csrf = guardOrigin(req);
       if (csrf) return csrf;
@@ -821,7 +824,7 @@ const routes = {
       if (!user) return unauthorized();
       const client = userClient(user.userId);
       if (!client) {
-        return Response.json({ error: { code: "no_pat", message: "сначала сохраните PAT SourceCraft" } }, { status: 409 });
+        return Response.json({ error: { code: "no_pat", message: "сначала добавьте токен доступа SourceCraft в Настройках" } }, { status: 409 });
       }
       // К4/Ф1.7: дешёвые отказы (дедуп, активные, часовой лимит) — ДО сети
       const cheap = userScanCheapGate(db, user.userId, org!, repo!, config.queue);
@@ -841,7 +844,7 @@ const routes = {
       return scanResponse(out);
     },
     // неизвестный /api/* обязан остаться JSON-404, а не отдать HTML
-    "/api/*": () => notFound("неизвестный endpoint"),
+    "/api/*": () => notFound("такого адреса нет"),
     // catch-all фронтенда: маршруты /repo/{org}/{repo} живут в History API,
     // прямая ссылка и F5 на карточке должны отдавать тот же бандл
     // HTML-импорт — готовый Response: заголовки выставляются один раз (идемпотентно)

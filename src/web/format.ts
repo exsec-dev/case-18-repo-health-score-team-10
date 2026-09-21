@@ -395,10 +395,53 @@ export interface ErrorInput {
   retryAfter?: string | null;
 }
 
-/** Текст ошибки запроса для человека. */
+/**
+ * В4.8.5 (К8.5.4): клиентский словарь «код ошибки / HTTP-статус / сетевой
+ * сбой → русский текст». Сервер отдаёт `message` уже языком продукта (без
+ * длинного тире, «ё», кодов, «HTTP N», «PAT», имён переменных и регулярок) —
+ * он и показывается, если в словаре кода нет своей формулировки. Коды с
+ * одной формулировкой на любой экран — здесь; без ответа сервера (сеть,
+ * прокси 502 при деплое, не-JSON) — текст по статусу.
+ */
+export const ERROR_TEXTS: Record<string, string> = {
+  unauthorized: "Сессия закончилась – войдите через Я ID",
+  forbidden: "Запрос отклонен",
+  internal: "Внутренняя ошибка сервера – попробуйте позже",
+  unconfigured: "Эта функция на сервере не настроена – обратитесь к администратору",
+  sourcecraft_unavailable: "SourceCraft сейчас не отвечает – попробуйте позже",
+  bad_body: "Сервер вернул неожиданный ответ – попробуйте позже",
+  pdf_failed: "Не удалось собрать PDF",
+};
+
+/** Текст по статусу, когда ответа сервера с кодом нет. */
+function statusText(status: number): string {
+  if (status === 0) return "Нет связи с сервером – проверьте подключение и повторите";
+  if (status === 401) return ERROR_TEXTS.unauthorized!;
+  if (status === 403) return ERROR_TEXTS.forbidden!;
+  if (status === 404) return "Не найдено";
+  if (status === 429) return "Слишком много запросов – повторите чуть позже";
+  if (status === 502 || status === 503 || status === 504) return "Сервис временно недоступен – повторите через минуту";
+  if (status >= 500) return ERROR_TEXTS.internal!;
+  return "Запрос не выполнен – повторите";
+}
+
+/** «через 45 с» / «через 3 мин» — из Retry-After (секунды). */
+function retryHint(raw: string | null | undefined): string {
+  const sec = raw ? Number(raw) : Number.NaN;
+  if (!Number.isFinite(sec) || sec <= 0) return "";
+  return sec < 90 ? ` Повторить можно через ${Math.ceil(sec)} с.` : ` Повторить можно через ${Math.ceil(sec / 60)} мин.`;
+}
+
+/** Первая буква заглавная — серверные сообщения строчные, в тостах и плашках они начинают фразу. */
+function capitalize(text: string): string {
+  return text.length === 0 ? text : text[0]!.toUpperCase() + text.slice(1);
+}
+
+/** Текст ошибки запроса для человека (К8.5.4). */
 export function errorText(e: ErrorInput): string {
-  if (e.message) return e.message;
-  return e.status === 0 ? "нет связи с сервером" : `HTTP ${e.status}`;
+  const fixed = e.code !== null ? ERROR_TEXTS[e.code] : undefined;
+  const base = fixed ?? (e.message ? capitalize(e.message) : statusText(e.status));
+  return e.status === 429 ? `${base}${retryHint(e.retryAfter)}` : base;
 }
 
 /**
@@ -523,8 +566,12 @@ export function accessLockText(access: string | undefined): string | null {
  * компонент, его нельзя импортировать в bun test (CJS-CSS зависимости).
  */
 export function authErrorText(raw: string): string {
-  if (raw === "state") return "Не сошелся проверочный код входа (state) – начните вход заново. Так работает защита от подмены.";
-  if (raw === "no_code") return "Провайдер входа не передал код подтверждения – попробуйте войти еще раз.";
+  // В4.8.5 (К8.5.4, С1-6): коды провайдера и наши — словами, без «(state)» и «access_denied»
+  if (raw === "state") return "Проверочный код входа не сошелся – начните вход заново. Так работает защита от подмены.";
+  if (raw === "no_code") return "Яндекс ID не передал код подтверждения – попробуйте войти еще раз.";
+  if (raw === "access_denied") return "Вход отменен на странице Яндекс ID – чтобы войти, подтвердите доступ.";
+  // прочие коды провайдера OAuth (латиница с подчёркиванием) — общей фразой, код наружу не идёт
+  if (/^[a-z_]+$/.test(raw)) return "Яндекс ID не подтвердил вход – попробуйте войти еще раз.";
   // В4.4 (кластер K/З4): отражаемый текст ограничен — обрезка 200 символов и
   // отсечение управляющих символов (фишинг авторитетностью официального Alert)
   const safe = raw.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 200);

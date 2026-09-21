@@ -207,7 +207,9 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
           view="outlined"
           title={`Не удалось открыть ${slugOf(org, repo)}`}
           message={state.kind === "error" ? state.message : undefined}
-          actions={[{ text: "Повторить", handler: reload }]}
+          // В4.8.5 (К8.5.4, С6-6): «Повторить» — только там, где повтор может помочь;
+          // на постоянном 404/400 он повторял бы тот же отказ
+          actions={state.kind === "error" && (state.status === 404 || state.status === 400) ? undefined : [{ text: "Повторить", handler: reload }]}
         />
       </Page>
     );

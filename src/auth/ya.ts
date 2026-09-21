@@ -118,7 +118,7 @@ export async function exchangeCode(
   endpoints: YaEndpoints = DEFAULT_YA_ENDPOINTS,
 ): Promise<ExchangeResult> {
   if (!creds.clientId || !creds.clientSecret) {
-    return { ok: false, error: "приложение Я ID не сконфигурировано (YA_CLIENT_ID/SECRET)" };
+    return { ok: false, error: "вход через Я ID на сервере не настроен" };
   }
   let tokenRes: { status: number; json: unknown };
   try {
@@ -129,19 +129,18 @@ export async function exchangeCode(
       client_secret: creds.clientSecret,
       redirect_uri: creds.redirect,
     });
-  } catch (e) {
-    return { ok: false, error: `сеть Я ID: ${String((e as Error).message).slice(0, 120)}` };
+  } catch {
+    return { ok: false, error: "Яндекс ID не ответил – попробуйте войти еще раз" };
   }
   const tokenBody = tokenRes.json as { access_token?: unknown; error_description?: unknown } | null;
   if (tokenRes.status !== 200 || typeof tokenBody?.access_token !== "string") {
-    const desc = typeof tokenBody?.error_description === "string" ? tokenBody.error_description : `HTTP ${tokenRes.status}`;
-    return { ok: false, error: `Я ID отклонил код: ${desc.slice(0, 160)}` };
+    return { ok: false, error: "Яндекс ID не подтвердил вход – попробуйте войти еще раз" };
   }
   let infoRes: { status: number; json: unknown };
   try {
     infoRes = await http.getJson(`${endpoints.loginBase}/info`, { Authorization: `OAuth ${tokenBody.access_token}` });
-  } catch (e) {
-    return { ok: false, error: `сеть Я ID (info): ${String((e as Error).message).slice(0, 120)}` };
+  } catch {
+    return { ok: false, error: "Яндекс ID не ответил – попробуйте войти еще раз" };
   }
   const info = infoRes.json as {
     id?: unknown;
@@ -154,7 +153,7 @@ export async function exchangeCode(
     is_avatar_empty?: unknown;
   } | null;
   if (infoRes.status !== 200 || (typeof info?.id !== "number" && typeof info?.id !== "string") || typeof info?.login !== "string") {
-    return { ok: false, error: `Я ID info: HTTP ${infoRes.status}, форма ответа неожиданна` };
+    return { ok: false, error: "Яндекс ID вернул неожиданный ответ – попробуйте войти еще раз" };
   }
   // ФИО важнее публичного имени: display_name у Я ID по умолчанию равен логину
   const str = (v: unknown): string | null => (typeof v === "string" && v.trim() !== "" ? v.trim() : null);

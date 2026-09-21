@@ -17,6 +17,8 @@ export interface MeResponse {
   avatarUrl: string | null;
   hasPat: boolean;
   patCheckedAt: string | null;
+  /** В4.8.5 (С2-6): токен сохранен, но текущим ключом сервиса не читается — его нужно сохранить заново */
+  patUnreadable?: boolean;
 }
 
 export interface MyReposResponse {
@@ -121,7 +123,7 @@ export async function mutateJson<T>(url: string, method: string, body?: unknown)
  * В4.8.5 (К8.5.3): `ok.refreshError` — повторная загрузка не удалась, но
  * данные на экране остаются (мягкая пометка вместо замены экрана ошибкой).
  */
-export type AsyncState<T> = { kind: "loading"; stale?: T } | { kind: "ok"; data: T; refreshError?: string } | { kind: "error"; message: string };
+export type AsyncState<T> = { kind: "loading"; stale?: T } | { kind: "ok"; data: T; refreshError?: string } | { kind: "error"; message: string; status?: number };
 
 /**
  * Загрузка по URL с отменой устаревшего запроса и ручным повтором.
@@ -140,10 +142,10 @@ export function stateOnReload<T>(prev: AsyncState<T>, keepPrevious: boolean): As
  * В4.8.5 (К8.5.3): сбой загрузки. С `keepPrevious` и данными на экране —
  * «данные + ошибка» (экран не пропадает, опросы живы); без данных — ошибка.
  */
-export function stateOnError<T>(prev: AsyncState<T>, message: string, keepPrevious: boolean): AsyncState<T> {
+export function stateOnError<T>(prev: AsyncState<T>, message: string, keepPrevious: boolean, status?: number): AsyncState<T> {
   const data = dataOf(prev);
   if (keepPrevious && data !== null) return { kind: "ok", data, refreshError: message };
-  return { kind: "error", message };
+  return status === undefined ? { kind: "error", message } : { kind: "error", message, status };
 }
 
 /** Данные состояния: свежие или прежние (перечитывание с `keepPrevious`); нет — null. */
@@ -166,7 +168,7 @@ export function useJson<T>(url: string, opts: { keepPrevious?: boolean } = {}): 
       .catch((e: unknown) => {
         // отмена — это не ошибка показа: пришёл более свежий запрос
         if (ctrl.signal.aborted) return;
-        setState((prev) => stateOnError(prev, e instanceof Error ? e.message : String(e), keepPrevious));
+        setState((prev) => stateOnError(prev, e instanceof Error ? e.message : String(e), keepPrevious, e instanceof RequestError ? e.status : undefined));
       });
     return () => ctrl.abort();
   }, [url, attempt, keepPrevious]);

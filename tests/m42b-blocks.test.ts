@@ -298,11 +298,16 @@ describe("Б3 (Ф2.9): маркер codeEmpty виден на карточке �
 });
 
 describe("Б3 (Ф2.9): текст auth_error для /me", () => {
-  test("известные коды — человеческие фразы, остальное — текст провайдера", () => {
-    expect(authErrorText("state")).toContain("state");
+  // ПЕРЕВОРОТ (В4.8.5, К8.5.4, С1-6): коды наружу не идут — «(state)» и
+  // «Вход не удался: access_denied» были кодами в тексте; фразы остаются
+  // человеческими, текст провайдера (не код) — по-прежнему в «Вход не удался: …»
+  test("известные коды — человеческие фразы без кодов, прочий текст провайдера — как был", () => {
+    expect(authErrorText("state")).not.toContain("state");
+    expect(authErrorText("state")).toContain("начните вход заново");
     // Б5 В4.6 (У31): «ещё» → «еще» в текстах интерфейса
     expect(authErrorText("no_code")).toContain("еще раз");
-    expect(authErrorText("access_denied")).toBe("Вход не удался: access_denied");
+    expect(authErrorText("access_denied")).toBe("Вход отменен на странице Яндекс ID – чтобы войти, подтвердите доступ.");
+    expect(authErrorText("Яндекс ID не ответил – попробуйте войти еще раз")).toBe("Вход не удался: Яндекс ID не ответил – попробуйте войти еще раз");
   });
 });
 

@@ -318,7 +318,8 @@ describe("Б5 (Р18, Р19): правило языка в текстах движ
   test("Р18: две названные пользовательские строки API — по правилу языка", async () => {
     const { CHANNEL_DELTA_HIDDEN_TEXT } = (await import("../src/api/repos")) as { CHANNEL_DELTA_HIDDEN_TEXT: string };
     expect(CHANNEL_DELTA_HIDDEN_TEXT).toBe("улучшит CI/CD – прирост Repo Health Score виден при доступе к CI и Security");
-    expect(textOf("src/api/me.ts")).toContain("SourceCraft отклонил PAT – обновите токен в кабинете");
+    // ПЕРЕВОРОТ (В4.8.5, К8.5.4, С4-12): без «PAT» и «кабинета» — правило языка прежнее (среднее тире)
+    expect(textOf("src/api/me.ts")).toContain("SourceCraft отклонил ваш токен – замените его в Настройках");
   });
 
   test("Р19: подпись фактов рекомендации — «Основание»", () => {
