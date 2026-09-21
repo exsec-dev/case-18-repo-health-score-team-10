@@ -121,7 +121,10 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
     p.delete("view");
     return p.toString();
   }, [search]);
-  const { state, reload } = useJson<RatingResponse>(`/api/repos${apiSearch ? `?${apiSearch}` : ""}`);
+  // В4.7 круг 2 (Р2.6): при смене фильтра, сортировки или страницы прежняя
+  // выдача остаётся на экране приглушённой, пока не придёт новая, — без
+  // скелетона, скачка ширины вкладок и пропадающей пагинации
+  const { state, reload } = useJson<RatingResponse>(`/api/repos${apiSearch ? `?${apiSearch}` : ""}`, { keepPrevious: true });
 
   const sort = params.get("sort") ?? "index";
   const order = params.get("order") ?? "desc";
@@ -160,7 +163,8 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
     navigate(qs === "" ? "/" : `/?${qs}`, { replace: opts.replace });
   }
 
-  const data = state.kind === "ok" ? state.data : null;
+  const data = state.kind === "ok" ? state.data : state.kind === "loading" ? (state.stale ?? null) : null;
+  const refreshing = state.kind === "loading" && state.stale !== undefined;
   // В4.7 круг 2 (Р2.1): пока грузится новый набор, список языков строится из
   // фасетов последнего успешного ответа — иначе на время загрузки из него
   // пропадали все опции, кроме выбранных, и у тех — цвет и счётчик. Фасеты
@@ -271,6 +275,7 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
           value={view}
           onUpdate={(v) => setParams({ view: v === "unscored" ? "unscored" : null }, { keepPage: v === "scored" })}
           aria-label="Какие репозитории показать"
+          className="rh-view-tabs"
         >
           <SegmentedRadioGroup.Option value="scored">Оценены{data ? ` ${data.total}` : ""}</SegmentedRadioGroup.Option>
           <SegmentedRadioGroup.Option value="unscored">Без оценки{data ? ` ${data.nulls}` : ""}</SegmentedRadioGroup.Option>
@@ -312,7 +317,9 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
       {/* В4.6 (У27): скелетон держит РИТМ содержимого. Круг 2 (Р3) вернул в
           строку название языка, и её высота снова 56px — 46px оставили бы
           прыжок раскладки в момент загрузки, то есть ровно ту находку пары. */}
-      {state.kind === "loading" && <SkeletonRows rows={10} height={56} />}
+      {/* скелетон — только при первой загрузке; при обновлении — полоса сверху */}
+      {state.kind === "loading" && !refreshing && <SkeletonRows rows={10} height={56} />}
+      <div className={refreshing ? "rh-refresh-bar rh-refresh-bar_on" : "rh-refresh-bar"} role="progressbar" aria-hidden={!refreshing} aria-label="Обновляем рейтинг" />
 
       {state.kind === "error" && (
         <Alert
@@ -329,10 +336,10 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
         (data.items.length === 0 ? (
           <NothingFound hasFilters={hasFilters} />
         ) : isPhone ? (
-          <PhoneList items={data.items} rankOffset={rankOffset} />
+          <PhoneList items={data.items} rankOffset={rankOffset} refreshing={refreshing} />
         ) : (
           <Table
-            className="rh-table-fill"
+            className={refreshing ? "rh-table-fill rh-refreshing" : "rh-table-fill"}
             data={data.items}
             columns={columns}
             width="max"
@@ -346,7 +353,7 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
           />
         ))}
 
-      {data && view === "unscored" && <UnscoredTable items={data.nullItems} meta={meta} hasFilters={hasFilters} />}
+      {data && view === "unscored" && <UnscoredTable items={data.nullItems} meta={meta} hasFilters={hasFilters} refreshing={refreshing} />}
     </Page>
   );
 }
@@ -397,7 +404,7 @@ function NothingFound({ hasFilters }: { hasFilters: boolean }) {
 }
 
 /** Группа «нет данных» — витрина закона 2: счётчик виден всегда, список — по переключателю. */
-function UnscoredTable({ items, meta, hasFilters }: { items: Item[]; meta: MetaResponse | null; hasFilters: boolean }) {
+function UnscoredTable({ items, meta, hasFilters, refreshing }: { items: Item[]; meta: MetaResponse | null; hasFilters: boolean; refreshing: boolean }) {
   const titleOf = (key: string): string => meta?.categories.find((c) => c.key === key)?.title ?? CATEGORY_TITLES_RU[key] ?? key;
   const columns: TableColumnConfig<Item>[] = [
     { id: "repo", name: "Репозиторий", primary: true, template: (item) => <RepoCell item={item} /> },
@@ -427,7 +434,7 @@ function UnscoredTable({ items, meta, hasFilters }: { items: Item[]; meta: MetaR
   const rest = items.length - shown.length;
   const failedScan = items.some((i) => i.scanStatus === "bad");
   return (
-    <Flex direction="column" gap={3}>
+    <Flex direction="column" gap={3} className={refreshing ? "rh-refreshing" : undefined}>
       <Text variant="body-1" color="complementary">
         Эти репозитории не получили HealthCraft Index. При покрытии данных ниже
         {meta ? ` ${fmtCoverage(meta.coverageNullBelow)}` : " установленного порога"} оценка не рассчитывается. Отсутствующие
@@ -552,9 +559,9 @@ function LangSummaryPart({ value, index, values }: { value: string; index: numbe
   return <></>;
 }
 
-function PhoneList({ items, rankOffset }: { items: Item[]; rankOffset: number }) {
+function PhoneList({ items, rankOffset, refreshing }: { items: Item[]; rankOffset: number; refreshing: boolean }) {
   return (
-    <ul className="rh-list">
+    <ul className={refreshing ? "rh-list rh-refreshing" : "rh-list"}>
       {items.map((item, index) => (
         <li key={`${item.org}/${item.repo}`} className="rh-list__item">
           <Flex gap={3} alignItems="center">

@@ -55,16 +55,33 @@ export async function mutateJson<T>(url: string, method: string, body?: unknown)
   return data as T;
 }
 
-export type AsyncState<T> = { kind: "loading" } | { kind: "ok"; data: T } | { kind: "error"; message: string };
+/**
+ * `stale` — данные прошлого успешного ответа, пока грузится новый (только с
+ * опцией `keepPrevious`); без опции загрузка всегда «пустая», как раньше.
+ */
+export type AsyncState<T> = { kind: "loading"; stale?: T } | { kind: "ok"; data: T } | { kind: "error"; message: string };
 
-/** Загрузка по URL с отменой устаревшего запроса и ручным повтором. */
-export function useJson<T>(url: string): { state: AsyncState<T>; reload: () => void } {
+/**
+ * Загрузка по URL с отменой устаревшего запроса и ручным повтором.
+ * В4.7 круг 2 (Р2.6): `keepPrevious` — при смене URL прежние данные остаются
+ * на экране (`loading.stale`), пока не придёт новый ответ: каркас страницы не
+ * перерисовывается через скелетон и не прыгает. Первая загрузка — без `stale`.
+ */
+export function stateOnReload<T>(prev: AsyncState<T>, keepPrevious: boolean): AsyncState<T> {
+  if (!keepPrevious) return { kind: "loading" };
+  if (prev.kind === "ok") return { kind: "loading", stale: prev.data };
+  if (prev.kind === "loading" && prev.stale !== undefined) return prev;
+  return { kind: "loading" };
+}
+
+export function useJson<T>(url: string, opts: { keepPrevious?: boolean } = {}): { state: AsyncState<T>; reload: () => void } {
   const [state, setState] = useState<AsyncState<T>>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
+  const keepPrevious = opts.keepPrevious === true;
 
   useEffect(() => {
     const ctrl = new AbortController();
-    setState({ kind: "loading" });
+    setState((prev) => stateOnReload(prev, keepPrevious));
     fetchJson<T>(url, ctrl.signal)
       .then((data) => setState({ kind: "ok", data }))
       .catch((e: unknown) => {
@@ -73,7 +90,7 @@ export function useJson<T>(url: string): { state: AsyncState<T>; reload: () => v
         setState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
       });
     return () => ctrl.abort();
-  }, [url, attempt]);
+  }, [url, attempt, keepPrevious]);
 
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
   return { state, reload };

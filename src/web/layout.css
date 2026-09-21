@@ -963,3 +963,44 @@ button.rh-category:focus-visible {
   box-sizing: border-box;
   padding: var(--g-spacing-3) var(--g-spacing-4);
 }
+
+/* В4.7 круг 2 (Р2.6): обновление рейтинга без моргания — прежняя выдача
+   приглушена и не кликается, сверху бежит тонкая полоса. Высота полосы
+   зарезервирована всегда, чтобы её появление не сдвигало таблицу. */
+.rh-refresh-bar {
+  height: 2px;
+  margin-bottom: 2px;
+  border-radius: 1px;
+  overflow: hidden;
+}
+
+.rh-refresh-bar_on {
+  background: linear-gradient(90deg, transparent 0%, var(--g-color-line-brand) 50%, transparent 100%);
+  background-size: 40% 100%;
+  background-repeat: no-repeat;
+  animation: rh-refresh-run 1.1s linear infinite;
+}
+
+@keyframes rh-refresh-run {
+  from { background-position: -40% 0; }
+  to { background-position: 140% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rh-refresh-bar_on {
+    animation: none;
+    background: var(--g-color-line-brand);
+  }
+}
+
+.rh-refreshing {
+  opacity: 0.55;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+/* Р2.6: цифры счётчиков вкладок одной ширины — новое число той же
+   разрядности не меняет ширину кнопки */
+.rh-view-tabs {
+  font-variant-numeric: tabular-nums;
+}

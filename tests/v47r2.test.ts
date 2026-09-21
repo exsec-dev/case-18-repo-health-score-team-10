@@ -119,3 +119,37 @@ describe("Р2.5: PDF — синяя ссылка и аватар из букв; 
     expect(srcOf("src/web/ui.tsx")).toMatch(/import \{[^}]*avatarTone[^}]*\} from "\.\/format"/);
   });
 });
+
+describe("Р2.6: обновление рейтинга без моргания (stale-while-revalidate)", () => {
+  test("stateOnReload: с keepPrevious прежние данные остаются как stale; без — пустая загрузка, как раньше", async () => {
+    const { stateOnReload } = await import("../src/web/api");
+    const ok = { kind: "ok" as const, data: { n: 1 } };
+    expect(stateOnReload(ok, true)).toEqual({ kind: "loading", stale: { n: 1 } });
+    expect(stateOnReload(ok, false)).toEqual({ kind: "loading" });
+    // вторая смена URL до ответа — stale не теряется
+    expect(stateOnReload({ kind: "loading", stale: { n: 1 } }, true)).toEqual({ kind: "loading", stale: { n: 1 } });
+    // первая загрузка и после ошибки — без stale (скелетон / честная ошибка)
+    expect(stateOnReload({ kind: "loading" }, true)).toEqual({ kind: "loading" });
+    expect(stateOnReload({ kind: "error", message: "x" }, true)).toEqual({ kind: "loading" });
+  });
+
+  test("рейтинг: keepPrevious, данные из stale, скелетон только при первой загрузке, выдача приглушена и не кликается", () => {
+    const src = srcOf("src/web/Rating.tsx");
+    expect(src).toContain("{ keepPrevious: true });");
+    expect(src).toContain('state.kind === "loading" ? (state.stale ?? null) : null');
+    expect(src).toContain('{state.kind === "loading" && !refreshing && <SkeletonRows');
+    expect(src).toContain('className={refreshing ? "rh-table-fill rh-refreshing" : "rh-table-fill"}');
+    // все три вида выдачи: таблица, список на телефоне, «Без оценки»
+    expect(src).toContain('<ul className={refreshing ? "rh-list rh-refreshing" : "rh-list"}>');
+    expect(src).toContain('className={refreshing ? "rh-refreshing" : undefined}');
+    const css = srcOf("src/web/layout.css");
+    expect(css).toMatch(/\.rh-refreshing \{[^}]*pointer-events: none;/);
+    // полоса зарезервирована всегда — её появление не сдвигает таблицу
+    expect(css).toMatch(/\.rh-refresh-bar \{[^}]*height: 2px;/);
+    expect(src).toContain('className="rh-view-tabs"');
+    expect(css).toMatch(/\.rh-view-tabs \{\s*font-variant-numeric: tabular-nums;/);
+    expect(css).toMatch(/prefers-reduced-motion: reduce\) \{\s*\.rh-refresh-bar_on/);
+    // остальные экраны — без изменений: опция только у рейтинга
+    for (const f of ["RepoPage.tsx", "MePage.tsx"]) expect(srcOf(`src/web/${f}`)).not.toContain("keepPrevious");
+  });
+});
