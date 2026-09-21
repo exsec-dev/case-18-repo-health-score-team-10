@@ -18,7 +18,7 @@ import {
 } from "../api/repos";
 import { COVERAGE_NULL_BELOW, INDEX_WEIGHTS, SCORE_WEIGHTS, type CategoryKey } from "../score/model";
 // копии про Security и заглушки доступа — одни и те же на странице и в отчёте
-import { SECURITY_PUBLIC_NOTE, accessLockText, contributionText, fmtSigned, gitLimitsText, roundFacts, scanStatusText, scanTriggerText, scoreWord, summaryLine } from "../web/format";
+import { SECURITY_PUBLIC_NOTE, accessLockText, contributionText, fmtSigned, gitLimitsText, scanStatusText, scanTriggerText, scoreWord, summaryLine } from "../web/format";
 import {
   CELL_MAX_CHARS,
   cellValue,
@@ -34,6 +34,7 @@ import {
   type ReportModel,
   type TableColumn,
 } from "./model";
+import { formatSubmetricValue, submetricContext, submetricTitle } from "./submetrics";
 
 export { SECURITY_PUBLIC_NOTE };
 
@@ -308,14 +309,18 @@ function categoriesDetail(card: RepoCard): Block[] {
       continue;
     }
     const rows: InlineLine[][] = [];
+    // «N дней» у свежести — на момент скана (время расчета оценки), а не
+    // открытия отчета: одинаково на странице, в MD и PDF (решение В3)
+    const ctx = submetricContext(card.score.computedAt);
     for (const [subKey, sub] of subs) {
       // submetric приходит долей 0..1 — в отчёте показывается ×100, как и на странице
       const value = sub.score === null ? "—" : String(Math.round(sub.score * 100));
-      // В4.6 круг 2 (Р20): значение подметрики округляется тем же правилом,
-      // что на странице (`roundFacts`) — доли до 2 знаков, целые без хвоста.
-      // Раздел «Доказательная база» ниже печатает значения СЫРЫМИ: там их
-      // задача — воспроизводимость, а не читаемость.
-      rows.push([line(subKey), line(value), [cellValue(roundFacts(sub.value))], [cellValue(sub.note ?? "")]]);
+      // В4.7 (П4.2, решение В3): название и значение — из словаря подметрик
+      // (`submetrics.ts`), того же, что у строки подметрики на карточке:
+      // русское название вместо ключа, единица и масштаб, составное значение —
+      // короткой строкой без многоточия. Раздел «Доказательная база» ниже
+      // печатает значения СЫРЫМИ: там их задача — воспроизводимость.
+      rows.push([line(submetricTitle(key, subKey)), line(value), [cellValue(formatSubmetricValue(key, subKey, sub.value, ctx))], [cellValue(sub.note ?? "")]]);
     }
     out.push(
       table(

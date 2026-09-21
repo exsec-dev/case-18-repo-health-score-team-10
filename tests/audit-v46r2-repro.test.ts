@@ -191,11 +191,13 @@ describe("Р20: значения подметрик округлены, дока
     const out = mdOpen();
     const page = srcOf("RepoPage.tsx");
     expect({
-      mdRounded: out.includes("| density | 80 | 0.87 |"),
+      // В4.7 (Б7, П4.2): строка — русское название и единица словаря; доля по-прежнему округлена
+      mdRounded: out.includes("| Плотность TODO/FIXME | 80 | 0.87 на 1 тыс. строк |"),
       mdRaw: out.includes("0.8723404255319149"),
       // слово «значение» из строки убрано (доводка 21.09) и живёт в подсказке;
       // утверждение о САМОМ округлении не менялось
-      pageUsesRounding: /\{fmtFactValue\(roundFacts\(sub\.value\)\)\}/.test(page),
+      // В4.7 (Б7, П4.2): страница берет значение из словаря подметрик (округление — внутри него)
+      pageUsesRounding: /\{formatSubmetricValue\(key, subKey, sub\.value, submetricContext\(card\.score\?\.computedAt\)\)\}/.test(page),
       proofStaysRaw: between(page, "function FactProof", "function factStatusText").includes("fmtFactValue(fact.value)"),
     }).toEqual({ mdRounded: true, mdRaw: false, pageUsesRounding: true, proofStaysRaw: true });
   });
@@ -258,7 +260,8 @@ describe("Р10: пункт «Свежесть» в панели рейтинга
       oldName: src.includes('name="Свежесть"'),
       newName: src.includes('name="Частота"'),
       note: src.includes("Обход каталога выполняется ежесуточно"),
-      submetricTitleKept: srcOf("RepoPage.tsx").includes("Свежесть последнего коммита человека"),
+      // В4.7 (Б7, П4.2): названия подметрик переехали в словарь src/report/submetrics.ts
+      submetricTitleKept: readFileSync(join(import.meta.dir, "..", "src", "report", "submetrics.ts"), "utf8").includes("Свежесть последнего коммита человека"),
     }).toEqual({ oldName: false, newName: true, note: true, submetricTitleKept: true });
   });
 });

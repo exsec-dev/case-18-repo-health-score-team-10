@@ -72,6 +72,7 @@ import {
 } from "@gravity-ui/uikit";
 import { useEffect, useRef, useState } from "react";
 import type { CardCategory } from "../api/repos";
+import { formatSubmetricValue, submetricContext, submetricTitle } from "../report/submetrics";
 import type { MeResponse, MetaResponse, RepoCard } from "./api";
 import { fetchJson, mutateJson, useJson } from "./api";
 import {
@@ -94,7 +95,6 @@ import {
   fmtScore,
   fmtSubmetric,
   gitLimitsText,
-  roundFacts,
   scanStatusText,
   scanTriggerText,
   DEFINITION_NAME_WIDTH,
@@ -994,20 +994,21 @@ function CategoryRow({
                   {submetricTitle(key, subKey)}
                 </Text>
                 <span className="rh-subrow__lead" aria-hidden="true" />
-                {/* В4.6 круг 2 (Р20): доля округляется до 2 знаков
-                    (`roundFacts`), целое остаётся как есть — «0.87234042553»
-                    на первом экране карточки было шумом, а не фактом. Поповер
-                    «Основание» ниже печатает значение СЫРЫМ: это
-                    доказательная база.
+                {/* В4.7 (П4.2): значение — по словарю подметрик
+                    (`src/report/submetrics.ts`), тому же, что у MD и PDF:
+                    единица и масштаб, составное значение — короткой строкой,
+                    без многоточия (строка может перенестись). Доли по-прежнему
+                    округлены (Р20). Поповер «Основание» ниже печатает значение
+                    СЫРЫМ: это доказательная база.
                     Доводка 21.09: слово «значение» из строки убрано — оно
                     повторялось в каждой из девяти строк; полная форма
                     осталась в подсказке. */}
                 <Text
                   color="secondary"
                   className="rh-subrow__value"
-                  title={`значение: ${fmtFactValue(roundFacts(sub.value))}${sub.note ? ` (${sub.note})` : ""}`}
+                  title={`значение: ${formatSubmetricValue(key, subKey, sub.value, submetricContext(card.score?.computedAt))}${sub.note ? ` (${sub.note})` : ""}`}
                 >
-                  {fmtFactValue(roundFacts(sub.value))}
+                  {formatSubmetricValue(key, subKey, sub.value, submetricContext(card.score?.computedAt))}
                   {sub.note ? ` (${sub.note})` : ""}
                 </Text>
               </span>
@@ -1271,40 +1272,8 @@ function displayOnly(category: string, sub: string): boolean {
   return DISPLAY_ONLY.has(`${category}.${sub}`);
 }
 
-const SUBMETRIC_TITLES: Record<string, string> = {
-  "documentation.readme": "README (наличие и качество)",
-  "documentation.license": "Лицензия",
-  "documentation.contributing": "CONTRIBUTING",
-  "documentation.codeowners": "CODEOWNERS",
-  "cicd.config": "Конфигурация CI со шагами",
-  "cicd.pass_rate": "Доля успешных прогонов",
-  "cicd.duration": "Медианная длительность пайплайна",
-  "security.density": "Плотность находок на 10К строк",
-  "security.resolved": "Доля закрытых находок",
-  "security.secrets": "Отсутствие критичных утечек",
-  "activity.fresh": "Свежесть последнего коммита человека",
-  "activity.freq": "Частота коммитов",
-  "activity.contributors": "Число авторов",
-  "activity.pulls_90d": "Merge-request'ы за 90 дней",
-  "activity.releases_12m": "Релизы за 12 месяцев",
-  "activity.mirror_likeness": "Похожесть на зеркало",
-  "activity.commits_90d": "Коммиты за 90 дней",
-  "activity.commits_365d": "Коммиты за год",
-  "activity.sync_bursts": "Всплески синхронизации",
-  "issues.stale": "Доля зависших issues",
-  "issues.close_days": "Медиана времени закрытия",
-  "issues.resolution": "Доля решенных",
-  "issues.first_resp": "Время до первого ответа",
-  "issues.tracker_unused": "Трекер не ведется",
-  "code.density": "Плотность TODO/FIXME",
-  "code.old_share": "Доля старых TODO",
-  "code.root": "Порядок в корне репозитория",
-  "code.todo_total": "Всего маркеров TODO/FIXME",
-};
-
-function submetricTitle(category: string, sub: string): string {
-  return SUBMETRIC_TITLES[`${category}.${sub}`] ?? sub;
-}
+// В4.7 (П4.2): названия подметрик переехали в словарь `src/report/submetrics.ts`
+// (одно правило на страницу, MD и PDF); иконки остаются здесь — это вид.
 
 /**
  * Иконка подметрики — по одной на каждую из 28 (доводка 21.09).

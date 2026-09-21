@@ -833,12 +833,14 @@ button.rh-category:focus-visible {
   transform: translateY(-3px);
 }
 
+/* В4.7 (П4.2): составное значение подметрики не обрезается многоточием —
+ * словарь собирает его в короткую строку, а если она всё же длиннее меры,
+ * строка переносится (прижата вправо, к колонке балла). */
 .rh-subrow__value {
   flex: 0 1 auto;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
   max-width: 320px;
+  text-align: right;
+  overflow-wrap: anywhere;
 }
 
 .rh-subrow__score {
