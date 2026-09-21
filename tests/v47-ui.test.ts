@@ -103,14 +103,20 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
     }).toEqual({ banner: true, alert: true, link: true, beforeList: true, notToast: true });
   });
 
-  test("П3.4: права — Label с иконкой (замок у закрытого), а не глифы; легенды глифов нет", () => {
+  // В4.8 круг 3 (5a, решение Екатерины): три `Label` каналов собраны в ОДНУ
+  // плашку с тремя иконками (Code / Terminal / Shield — как у SourceCraft);
+  // состояние — цветом иконки, закрытый канал — серым, без замка. Смысл П3.4
+  // (компоненты, а не глифы; без легенды) сохранен.
+  test("П3.4 → В4.8 круг 3: права — одна плашка с иконками каналов, а не глифы; замка и легенды нет", () => {
     const rights = slice("function AccessRights", "\n}\n");
     expect({
-      label: /<Label key=\{key\} theme=\{state\.theme\}[^>]*icon=\{<Icon data=\{state\.icon\}/.test(rights),
-      lock: /no: \{ theme: "unknown", icon: Lock/.test(me()),
+      onePill: /<span className="rh-pill rh-access" title=\{summary\} aria-label=\{summary\} role="img">/.test(rights),
+      icons: /<Icon key=\{c\.key\} data=\{c\.icon\} size=\{14\} className=\{`rh-access__icon \$\{c\.state\.cls\}`\} \/>/.test(rights),
+      channels: /\{ key: "clone", title: "Код", icon: Code \},\s*\{ key: "ci", title: "CI\/CD", icon: Terminal \},\s*\{ key: "appsec", title: "Security", icon: Shield \}/.test(me()),
+      lockForClosed: /no: \{[^}]*Lock/.test(me()),
       glyphs: /[✓✗]/.test(me()),
       legend: me().includes("право есть ·"),
-    }).toEqual({ label: true, lock: true, glyphs: false, legend: false });
+    }).toEqual({ onePill: true, icons: true, channels: true, lockForClosed: false, glyphs: false, legend: false });
   });
 
   test("П3.4: один Alert — view и size общие, тема по смыслу", () => {
@@ -131,15 +137,17 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
       emptyState: /entries\.length === 0 && \(\s*<EmptyState/.test(code),
       inlinePadding: /padding: "var\(--g-spacing-[45]\)"/.test(code),
       cardClass: (code.match(/className="rh-me-card"/g) ?? []).length,
-      // В4.8: 1 — карточка журнала заданий убрана из тела страницы, осталась у JobsBell
-    }).toEqual({ repoSlug: true, assembled: false, codeSlug: false, emptyState: true, inlinePadding: false, cardClass: 1 });
-    expect(web("layout.css")).toMatch(/\.rh-me-card \{[^}]*padding: var\(--g-spacing-3\) var\(--g-spacing-4\)/);
+      // В4.8: журнал заданий убран из тела страницы (круг 1), панель заданий
+      // стала `Popup` (круг 3) — карточек `rh-me-card` в кабинете нет, класс удален из CSS
+    }).toEqual({ repoSlug: true, assembled: false, codeSlug: false, emptyState: true, inlinePadding: false, cardClass: 0 });
+    expect(web("layout.css")).not.toContain(".rh-me-card");
   });
 
   test("П3.4 (У26): счётчик рекомендаций — ссылкой на карточку с открытым табом; null — строки нет", () => {
     const row = slice("function RepoRow", "\nfunction ");
     // В4.8: адрес карточки — одна константа строки `href`; у ссылки класс слоя над слоем-ссылкой строки
     expect(row).toContain("const href = repoHref(org, repo);");
-    expect(row).toMatch(/entry\.recommendationsCount !== null && \(\s*<MetaItem>\s*<Link \{\.\.\.linkProps\(`\$\{href\}\?tab=\$\{TAB_RECOMMENDATIONS\}`\)\}[^>]*>\s*\{recommendationsText\(entry\.recommendationsCount\)\}\s*<\/Link>/);
+    // В4.8 круг 2 (7a): перед текстом — иконка лампочки внутри ссылки
+    expect(row).toMatch(/entry\.recommendationsCount !== null && \(\s*<MetaItem>[\s\S]*?<Link \{\.\.\.linkProps\(`\$\{href\}\?tab=\$\{TAB_RECOMMENDATIONS\}`\)\}[^>]*>\s*<Icon data=\{Bulb\} size=\{14\} \/>\s*\{recommendationsText\(entry\.recommendationsCount\)\}\s*<\/Link>/);
   });
 });

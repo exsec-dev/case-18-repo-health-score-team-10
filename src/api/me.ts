@@ -313,10 +313,21 @@ export async function listMyRepos(db: Database, userId: number | null): Promise<
     // UX-8: признак «в каталоге» — один дешёвый lookup (JOIN'а в listMyRepos
     // нет; строку repos поднимает viewerMayReadRepo и выбрасывает)
     const inCatalog = db.query("SELECT 1 FROM repos WHERE org_slug = ? AND repo_slug = ?").get(f.org_slug, f.repo_slug) !== null;
+    // В4.8 (круг 2, замечание 4 Екатерины): логотип, цвет языка и дата
+    // активности читаются из той же строки `repos`, что название и язык, —
+    // до этого поля контракта стояли литералом null, и кабинет терял аватары
+    // и цвета, которые рейтинг показывал для того же репозитория. Гейт прав
+    // прежний: без прав мета не раскрывается (П6).
     const row = mayRead
-      ? (db.query("SELECT title, language FROM repos WHERE org_slug = ? AND repo_slug = ?").get(f.org_slug, f.repo_slug) as
-          | { title: string | null; language: string | null }
-          | null)
+      ? (db
+          .query("SELECT title, language, logo_url, language_color, last_activity_at FROM repos WHERE org_slug = ? AND repo_slug = ?")
+          .get(f.org_slug, f.repo_slug) as {
+          title: string | null;
+          language: string | null;
+          logo_url: string | null;
+          language_color: string | null;
+          last_activity_at: string | null;
+        } | null)
       : null;
     const known = mayRead ? ratingScoreOf(db, f.org_slug, f.repo_slug) : { healthcraftIndex: null, lastScanAt: null, lastScanStatus: null };
     return {
@@ -324,9 +335,9 @@ export async function listMyRepos(db: Database, userId: number | null): Promise<
       repo: f.repo_slug,
       title: row?.title ?? null,
       language: row?.language ?? null,
-      lastActivityAt: null,
-      logoUrl: null,
-      languageColor: null,
+      lastActivityAt: row?.last_activity_at ?? null,
+      logoUrl: row?.logo_url ?? null,
+      languageColor: row?.language_color ?? null,
       healthcraftIndex: known.healthcraftIndex,
       lastScanAt: known.lastScanAt,
       lastScanStatus: known.lastScanStatus,
@@ -450,6 +461,13 @@ export interface MyJob {
   queueAhead: number | null;
   claimedAt: string | null;
   error: string | null;
+  /**
+   * В4.8 (панель «Заданий», решение Екатерины 21.09): логотип репозитория из
+   * `repos.logo_url` — тот же, что у строки «Моих репозиториев» и рейтинга.
+   * Задание — заявка самого зрителя, поэтому отдельного гейта прав нет (слаг
+   * он и так видит); у отказанной без строки `repos` — null.
+   */
+  logoUrl: string | null;
 }
 
 /** Активные (queued/running) + последние завершённые заявки юзера.
@@ -489,11 +507,12 @@ export function myJobs(db: import("bun:sqlite").Database, userId: number, doneLi
       claimedAt: typeof row.claimed_at === "string" ? row.claimed_at : null,
       // refused: error — машинный JSON со слагом, человеку показывается слаг в `slug`
       error: phase === "refused" ? null : typeof row.error === "string" ? row.error : null,
+      logoUrl: typeof row.logo_url === "string" && row.logo_url !== "" ? row.logo_url : null,
     };
   };
     // LEFT JOIN: refused живёт без строки repos (repo_id = 0)
   const base =
-    "SELECT j.id, j.status, j.claimed_at, j.error, r.org_slug, r.repo_slug FROM jobs j LEFT JOIN repos r ON r.id = j.repo_id WHERE j.user_id = ?";
+    "SELECT j.id, j.status, j.claimed_at, j.error, r.org_slug, r.repo_slug, r.logo_url FROM jobs j LEFT JOIN repos r ON r.id = j.repo_id WHERE j.user_id = ?";
   const active = (db.query(base + " AND j.status IN ('queued','running') ORDER BY j.id").all(userId) as Record<string, unknown>[]).map(toJob);
   const recent = (db.query(base + " AND j.status IN ('done','failed','refused') ORDER BY j.id DESC LIMIT ?").all(userId, doneLimit) as Record<string, unknown>[]).map(toJob);
   return { active, recent };

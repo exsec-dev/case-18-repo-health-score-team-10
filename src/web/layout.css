@@ -956,13 +956,6 @@ button.rh-category:focus-visible {
   min-width: 0;
 }
 
-/* В4.7 (П3.4): карточки кабинета («Мои задания» и выпадающая панель
- * заданий) — тот же паддинг, что у контейнеров карточки репозитория
- * (`rh-score-band`, `rh-tabs-card`): одно значение на роль «контейнер». */
-.rh-me-card {
-  box-sizing: border-box;
-  padding: var(--g-spacing-3) var(--g-spacing-4);
-}
 
 /* В4.7 круг 2 (Р2.6): обновление рейтинга без моргания — прежняя выдача
    приглушена и не кликается, сверху бежит тонкая полоса. Высота полосы
@@ -1032,6 +1025,17 @@ button.rh-category:focus-visible {
   gap: var(--g-spacing-2);
 }
 
+.rh-me-head {
+  align-items: flex-start;
+}
+
+/* описание под заголовком (круг 2, 5b) — мера строки, как у рейтинга */
+.rh-me-head__title {
+  flex: 1 1 360px;
+  min-width: 0;
+  max-width: 720px;
+}
+
 .rh-me-search {
   width: 240px;
 }
@@ -1046,6 +1050,132 @@ button.rh-category:focus-visible {
   /* 4 полосы шкалы — 4 колонки; на узкой ширине 2×2, а не «3 + 1» */
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: var(--g-spacing-3);
+}
+
+/* ---------- В4.8 круг 2: цвет полос — в графике, число белое (3c) ---------- */
+
+.rh-summary-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-2);
+}
+
+.rh-summary__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--g-spacing-2);
+}
+
+/* иконки полос и дуга кольца — насыщенные базовые тоны (`-heavy`), а не
+   пастельные текстовые: это графика, порог 3:1, а не проза 4,5:1.
+   Круг 4: правила РАЗДЕЛЕНЫ — общий селектор давал иконке `stroke`, и ее
+   залитый контур обводился («жирность», замечание 1 кругов 3 и 4). */
+.rh-band-icon_success {
+  color: var(--g-color-base-positive-heavy);
+}
+
+.rh-ring_success .rh-ring__arc {
+  stroke: var(--g-color-base-positive-heavy);
+}
+
+.rh-band-icon_warning {
+  color: var(--g-color-base-warning-heavy);
+}
+
+.rh-ring_warning .rh-ring__arc {
+  stroke: var(--g-color-base-warning-heavy);
+}
+
+.rh-band-icon_danger {
+  color: var(--g-color-base-danger-heavy);
+}
+
+.rh-ring_danger .rh-ring__arc {
+  stroke: var(--g-color-base-danger-heavy);
+}
+
+/* кольцо-шкала оценки (8a) */
+.rh-ring {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  width: 44px;
+  height: 44px;
+}
+
+.rh-ring circle {
+  fill: none;
+  stroke-width: 4;
+}
+
+.rh-ring__track {
+  stroke: var(--g-color-line-generic);
+}
+
+.rh-ring__arc {
+  stroke-linecap: round;
+}
+
+.rh-ring__num {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* «Сканируется» (1a): серая плашка с бегущей штриховкой — рецепт состояния
+   загрузки кнопки Gravity (`.g-button_loading::before`, keyframes
+   `g-loading-animation` из пина uikit), цвета кнопки `normal` */
+/* Круг 3 (замечание 8): плашка состояния строки — серая, форма кнопки
+   `normal` (24px, радиус m, фон base-generic); `.rh-busy` добавляет к ней
+   штриховку загрузки. Цвет — только у иконки и только когда он значит. */
+.rh-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--g-spacing-1);
+  height: 24px;
+  padding: 0 var(--g-spacing-3);
+  border-radius: var(--g-border-radius-m);
+  background-color: var(--g-color-base-generic);
+  color: var(--g-color-text-complementary);
+  white-space: nowrap;
+}
+
+.rh-state__icon {
+  color: var(--g-color-text-secondary);
+}
+
+.rh-state__icon_danger {
+  color: var(--g-color-base-danger-heavy);
+}
+
+.rh-state__icon_warning {
+  color: var(--g-color-base-warning-heavy);
+}
+
+.rh-state__icon_success {
+  color: var(--g-color-base-positive-heavy);
+}
+
+.rh-busy {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--g-color-base-generic),
+    var(--g-color-base-generic) 4px,
+    var(--g-color-base-generic-hover) 4px,
+    var(--g-color-base-generic-hover) 8px
+  );
+  background-size: 150%;
+  animation: g-loading-animation 0.5s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rh-busy {
+    animation: none;
+  }
 }
 
 .rh-summary__tile.g-card {
@@ -1109,8 +1239,9 @@ button.rh-category:focus-visible {
 
 .rh-repo-item__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: var(--g-spacing-2);
+  gap: var(--g-spacing-1) var(--g-spacing-2);
   min-width: 0;
 }
 
@@ -1118,12 +1249,15 @@ button.rh-category:focus-visible {
   min-width: 0;
 }
 
+/* круг 2: метки не отнимают ширину у имени — при нехватке места уходят на
+   следующую строку (имя репозитория резалось до «lct-hac…») */
 .rh-repo-item__labels {
-  flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .rh-repo-item__content .rh-meta {
-  gap: var(--g-spacing-1) var(--g-spacing-2);
+  /* круг 2 (7a): без слов-ярлыков реквизиты разделяет только шаг — 12px */
+  gap: var(--g-spacing-1) var(--g-spacing-3);
   margin-top: 0;
 }
 
@@ -1145,9 +1279,15 @@ button.rh-category:focus-visible {
 
 .rh-repo-item__score {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  font-variant-numeric: tabular-nums;
+  align-items: center;
+  gap: var(--g-spacing-3);
+}
+
+/* иконка рекомендаций внутри ссылки красится вместе с текстом */
+.rh-repo-item__link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--g-spacing-1);
 }
 
 .rh-repo-item__actions {
@@ -1178,7 +1318,7 @@ button.rh-category:focus-visible {
   }
 
   .rh-repo-item__score {
-    align-items: flex-start;
+    flex-direction: row-reverse;
   }
 
   .rh-repo-item__actions {
@@ -1189,3 +1329,149 @@ button.rh-category:focus-visible {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* ---------- В4.8 круг 3: кнопка «Задания», ее панель, плашка прав ---------- */
+
+/* 6a: пока анализ идет — штриховка загрузки кнопки Gravity на самой кнопке
+   (фон кнопки рисует `::before`; рецепт `.g-button_loading::before`), но без
+   `loading`: тот блокирует клик, а панель должна открываться */
+.rh-jobs-btn_busy::before {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--g-button-background-color, var(--_--background-color)),
+    var(--g-button-background-color, var(--_--background-color)) 4px,
+    var(--g-button-background-color-hover, var(--_--background-color-hover)) 4px,
+    var(--g-button-background-color-hover, var(--_--background-color-hover)) 8px
+  );
+  background-size: 150%;
+  animation: g-loading-animation 0.5s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rh-jobs-btn_busy::before {
+    animation: none;
+  }
+}
+
+/* 7b: панель — фон и тень у `Popup` штатные (float), здесь только раскладка */
+.rh-jobs {
+  display: flex;
+  flex-direction: column;
+  /* 360: при 320 имя «org / repo» резалось уже на среднем слаге */
+  width: 360px;
+  max-width: calc(100vw - 32px);
+  padding: var(--g-spacing-1) 0;
+}
+
+/* П3 (исследование панели): без заголовка — сверху переключатель на всю
+   ширину; строка — логотип, имя, справа плашка состояния */
+.rh-jobs__tabs {
+  padding: var(--g-spacing-2) var(--g-spacing-3);
+}
+
+.rh-jobs__row {
+  display: flex;
+  align-items: center;
+  gap: var(--g-spacing-2);
+  padding: 6px var(--g-spacing-3);
+}
+
+.rh-jobs__row .g-avatar {
+  --g-avatar-size: 24px;
+  --_--border-radius: 6px;
+}
+
+.rh-jobs__body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* список панели прокручивается сам: не выше ~7 строк и не выше окна */
+.rh-jobs__list {
+  max-height: min(288px, 60vh);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* пустое состояние панели (круг 5, 2c): компактно по центру */
+.rh-jobs__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--g-spacing-1);
+  padding: var(--g-spacing-4) var(--g-spacing-4) var(--g-spacing-5);
+  text-align: center;
+}
+
+.rh-jobs__empty-icon {
+  margin-bottom: var(--g-spacing-1);
+  color: var(--g-color-text-secondary);
+}
+
+/* «История» лентой по дням (круг 5, 4c) */
+.rh-jobs__day {
+  display: block;
+  padding: var(--g-spacing-2) var(--g-spacing-3) var(--g-spacing-1);
+}
+
+.rh-jobs__time {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.rh-jobs__outcome {
+  display: inline-flex;
+  flex: none;
+}
+
+.rh-jobs__note {
+  display: block;
+  padding: var(--g-spacing-2) var(--g-spacing-3);
+}
+
+/* Серая «пилюля» у имени (круг 4, замечания 2-3): высота `Label` xs 20px,
+   полностью скругленные углы, фон base-generic, текст complementary. Одна
+   форма на метку «Приватный» и плашку прав. */
+.rh-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--g-spacing-1);
+  height: 20px;
+  padding: 0 var(--g-spacing-2);
+  border-radius: 10px;
+  background: var(--g-color-base-generic);
+  color: var(--g-color-text-complementary);
+  font-size: var(--g-text-body-short-font-size);
+  line-height: var(--g-text-body-short-line-height);
+  white-space: nowrap;
+}
+
+/* 5a: три канала одной плашкой; состояние — яркостью иконки, без зеленого
+   (круг 4): есть доступ — светло-серый, нет/неизвестно — серый */
+.rh-access {
+  gap: 6px;
+}
+
+.rh-access__icon_yes {
+  color: var(--g-color-text-primary);
+}
+
+.rh-access__icon_no,
+.rh-access__icon_unknown {
+  color: var(--g-color-text-hint);
+}
+
+/* круг 4 (замечание 4): счетчик отделен от слова — шаг и цвет hint, иначе
+   «Задания1» читалось одним словом */
+.rh-jobs-btn__count {
+  margin-inline-start: var(--g-spacing-2);
+  color: var(--g-color-text-hint);
+  font-variant-numeric: tabular-nums;
+}
+
+.rh-jobs-btn__count_danger {
+  color: var(--g-color-text-danger);
+}
+

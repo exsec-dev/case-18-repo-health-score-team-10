@@ -3,7 +3,7 @@
 // плитках и порядок строк закрываются поведенческим тестом на данных
 // (tests/v48-me.test.ts), а не чтением исходника (правило 21.09, AGENTS.md).
 import type { MyReposResponse } from "./api";
-import { scoreTheme, slugOf } from "./format";
+import { fmtDate, scoreTheme, slugOf } from "./format";
 
 export type RepoEntry = MyReposResponse["entries"][number];
 
@@ -84,4 +84,46 @@ export function sortEntries<T extends Pick<RepoEntry, "org" | "repo" | "healthcr
     const cmp = typeof va === "string" ? va.localeCompare(vb as string, "ru") : va - (vb as number);
     return desc ? -cmp : cmp;
   });
+}
+
+/**
+ * История «Заданий» лентой по дням (исследование панели, выбор 4c, 21.09):
+ * группы в порядке прихода (сервер отдает недавние от новых к старым),
+ * заголовок — «Сегодня», «Вчера» или дата (`fmtDate`), у
+ * строки — время `HH:mm`. Время — `claimedAt` (взято в работу; времени
+ * завершения API не отдает). Задание без времени (отклоненное предпроверкой
+ * в работу не бралось) и с нечитаемой датой — в последней группе без
+ * времени, а не в «сегодня»: неизвестное не выдается за свежее.
+ */
+export interface JobDayGroup<T> {
+  label: string;
+  rows: { job: T; time: string | null }[];
+}
+
+export const NO_TIME_GROUP = "Без времени";
+
+export function groupJobsByDay<T extends { claimedAt: string | null }>(jobs: T[], now: Date = new Date()): JobDayGroup<T>[] {
+  const dayKey = (d: Date): string => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+  const today = dayKey(now);
+  const yesterday = dayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+  const groups: JobDayGroup<T>[] = [];
+  const byKey = new Map<string, JobDayGroup<T>>();
+  const untimed: JobDayGroup<T> = { label: NO_TIME_GROUP, rows: [] };
+  for (const job of jobs) {
+    const d = job.claimedAt ? new Date(job.claimedAt) : null;
+    if (!d || Number.isNaN(d.getTime())) {
+      untimed.rows.push({ job, time: null });
+      continue;
+    }
+    const key = dayKey(d);
+    let group = byKey.get(key);
+    if (!group) {
+      group = { label: key === today ? "Сегодня" : key === yesterday ? "Вчера" : fmtDate(job.claimedAt), rows: [] };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    group.rows.push({ job, time: `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}` });
+  }
+  if (untimed.rows.length > 0) groups.push(untimed);
+  return groups;
 }
