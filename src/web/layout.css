@@ -931,3 +931,20 @@ button.rh-category:focus-visible {
     box-shadow: 0 0 0 0 transparent;
   }
 }
+
+/* ---------- фильтр языка рейтинга: мультивыбор (В4.7, П2) ---------- */
+
+/* Список ограничен по высоте и прокручивается: языков в каталоге десятки.
+ * Штатная галочка `multiple` скрыта — выбор показывает чекбокс опции
+ * (`LangOption` в Rating.tsx), две отметки на строке читались бы дублем. */
+.rh-lang-popup .g-select-list {
+  max-height: 320px;
+}
+
+.rh-lang-popup .g-select-list__tick-icon {
+  display: none;
+}
+
+.rh-lang-option {
+  min-width: 0;
+}

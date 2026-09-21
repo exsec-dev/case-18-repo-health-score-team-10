@@ -8,6 +8,7 @@ import { BarsAscendingAlignLeft, BarsDescendingAlignLeft, Magnifier, SquareListU
 import {
   Alert,
   Button,
+  Checkbox,
   DefinitionList,
   Flex,
   HelpMark,
@@ -18,6 +19,7 @@ import {
   Progress,
   SegmentedRadioGroup,
   Select,
+  type SelectOption,
   Table,
   TableColumnSetup,
   type TableColumnConfig,
@@ -53,9 +55,16 @@ import { AsideSection, EmptyState, LanguageName, PageHeader, RepoAvatar, RepoSlu
 
 type Item = RatingResponse["items"][number];
 
-/** «Все языки» и «язык не определён» — не значения языка, а режимы фильтра. */
-const LANG_ALL = " all";
+/**
+ * «Язык не определён» — не значение языка, а режим фильтра (`lang=` пустым).
+ * В4.7 (П2): опции «все» больше нет — все языки означает «ничего не выбрано»
+ * (параметра `lang` нет), решение владельца.
+ */
 const LANG_NONE = " none";
+const LANG_NONE_TITLE = "не определен";
+
+/** Сколько выбранных языков назвать в сводке поля до «+N» («Go, Rust +2»). */
+const LANG_SUMMARY_NAMES = 2;
 
 /**
  * CI/CD и Security в публичный рейтинг не входят: API отдаёт их в строке
@@ -98,7 +107,8 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
   const sort = params.get("sort") ?? "index";
   const order = params.get("order") ?? "desc";
   const view = params.get("view") === "unscored" ? "unscored" : "scored";
-  const langParam = params.has("lang") ? (params.get("lang") === "" ? LANG_NONE : params.get("lang")!) : LANG_ALL;
+  // В4.7 (П2): `lang` повторяемый; одиночная старая ссылка — набор из одного
+  const langValues = params.getAll("lang").map((v) => (v === "" ? LANG_NONE : v));
   const qParam = params.get("q") ?? "";
   const hasFilters = qParam !== "" || params.has("lang");
   // на телефоне таблица категорий не помещается — строки списком: место, имя, Score
@@ -116,11 +126,13 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
 
   const [hidden, setHidden] = useState<string[]>(HIDDEN_BY_DEFAULT);
 
-  function setParams(patch: Record<string, string | null>, opts: { replace?: boolean; keepPage?: boolean } = {}): void {
+  function setParams(patch: Record<string, string | string[] | null>, opts: { replace?: boolean; keepPage?: boolean } = {}): void {
     const next = new URLSearchParams(search);
     for (const [key, value] of Object.entries(patch)) {
-      if (value === null) next.delete(key);
-      else next.set(key, value);
+      next.delete(key);
+      // массив — повторяемый параметр (`lang`, В4.7): каждое значение отдельно
+      if (Array.isArray(value)) for (const v of value) next.append(key, v);
+      else if (value !== null) next.set(key, value);
     }
     // смена фильтра или сортировки сбрасывает страницу: иначе пользователь
     // попадает на пустую пятую страницу трёх результатов
@@ -196,16 +208,26 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
             controlProps={{ "aria-label": "Поиск по репозиториям" }}
           />
         </div>
+        {/* В4.7 (П2): мультивыбор языка. Чекбокс — неинтерактивный
+            `Checkbox` в `renderOption` (штатная галочка `multiple` скрыта
+            стилем попапа), у опции цветной кружок из фасета, список ограничен
+            по высоте со скроллом, выбранное — сводкой «Go, Rust +2».
+            Виртуализация выключена порогом: у виртуального списка своя
+            высота, и CSS-ограничение со скроллом на нём не работает. */}
         <Select
           label="Язык:"
           size="m"
           width={180}
-          value={[langParam]}
-          options={langOptions(data)}
-          onUpdate={(v) => {
-            const picked = v[0] ?? LANG_ALL;
-            setParams({ lang: picked === LANG_ALL ? null : picked === LANG_NONE ? "" : picked });
-          }}
+          multiple
+          hasClear
+          placeholder="все"
+          popupClassName="rh-lang-popup"
+          virtualizationThreshold={1000}
+          value={langValues}
+          options={langOptions(data, langValues)}
+          renderOption={(option) => <LangOption option={option} checked={langValues.includes(option.value)} />}
+          renderSelectedOption={(option, index) => <LangSummaryPart value={option.value} index={index} total={langValues.length} />}
+          onUpdate={(v) => setParams({ lang: v.length === 0 ? null : v.map((x) => (x === LANG_NONE ? "" : x)) })}
         />
         {/* Доводка 21.09: пара «Сортировка: …» + кнопка направления снята —
             сортировка живёт в заголовках колонок (`SortableHeader`), как в
@@ -485,15 +507,51 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
   );
 }
 
-function langOptions(data: RatingResponse | null): { value: string; content: string }[] {
+interface LangOptionData {
+  title: string;
+  count: number | null;
+  color: string | null;
+}
+
+/**
+ * Опции фильтра языка — из фасетов (по всему каталогу, без языкового
+ * фильтра). Выбранный язык, которого нет в фасетах (старая ссылка на язык,
+ * ушедший из каталога), остаётся опцией: иначе его нельзя было бы снять.
+ */
+function langOptions(data: RatingResponse | null, selected: string[]): SelectOption<LangOptionData>[] {
   const facets = data?.facets.languages ?? [];
-  return [
-    { value: LANG_ALL, content: "все" },
-    ...facets.map((f) => ({
-      value: f.language === null ? LANG_NONE : f.language,
-      content: `${f.language ?? "не определен"} (${f.count})`,
-    })),
-  ];
+  const options: SelectOption<LangOptionData>[] = facets.map((f) => ({
+    value: f.language === null ? LANG_NONE : f.language,
+    text: f.language ?? LANG_NONE_TITLE,
+    data: { title: f.language ?? LANG_NONE_TITLE, count: f.count, color: f.color },
+  }));
+  for (const value of selected) {
+    if (!options.some((o) => o.value === value)) {
+      const title = value === LANG_NONE ? LANG_NONE_TITLE : value;
+      options.push({ value, text: title, data: { title, count: null, color: null } });
+    }
+  }
+  return options;
+}
+
+/** Строка опции: неинтерактивный чекбокс (клик ловит сама опция), кружок языка, имя и счётчик. */
+function LangOption({ option, checked }: { option: SelectOption<LangOptionData>; checked: boolean }) {
+  const d = option.data;
+  return (
+    <Flex gap={2} alignItems="center" className="rh-lang-option">
+      <Checkbox size="m" checked={checked} controlProps={{ tabIndex: -1, "aria-hidden": true }} style={{ pointerEvents: "none" }} />
+      <LanguageName name={d?.title ?? option.value} color={d?.color ?? null} />
+      {d?.count !== null && d?.count !== undefined && <Text color="secondary">{fmtCount(d.count)}</Text>}
+    </Flex>
+  );
+}
+
+/** Сводка выбранного в поле: первые имена через запятую, остальное — «+N». */
+function LangSummaryPart({ value, index, total }: { value: string; index: number; total: number }) {
+  const title = value === LANG_NONE ? LANG_NONE_TITLE : value;
+  if (index < LANG_SUMMARY_NAMES) return <>{`${index > 0 ? ", " : ""}${title}`}</>;
+  if (index === LANG_SUMMARY_NAMES) return <>{` +${total - LANG_SUMMARY_NAMES}`}</>;
+  return <></>;
 }
 
 function PhoneList({ items, rankOffset }: { items: Item[]; rankOffset: number }) {
