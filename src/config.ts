@@ -104,7 +104,7 @@ export interface QueueConfig {
   favoriteOwnCooldownMs: number;
   /** ретеншен завершённых строк `jobs` (Ф2.13): 30 дней, env QUEUE_RETENTION_DAYS */
   retentionDays: number;
-  /** чтений /api/me/repos на юзера в минуту (Ф2.8): 6, env QUEUE_MY_REPOS_PER_MINUTE */
+  /** чтений /api/me/repos на юзера в минуту (Ф2.8): 30 (В4.8.5, §2-В3; было 6 — его съедали перечитывания списка после действий), env QUEUE_MY_REPOS_PER_MINUTE */
   myReposPerMinute: number;
   /** предел избранного на юзера (Ф2.21): 500, env QUEUE_FAVORITES_MAX */
   favoritesMax: number;
@@ -340,7 +340,7 @@ export function loadConfig(): Config {
       favoriteChecksPerMinute: envInt(env, "QUEUE_FAVORITE_CHECKS_PER_MINUTE") ?? 6,
       favoriteOwnCooldownMs: envInt(env, "QUEUE_FAVORITE_OWN_COOLDOWN_MS") ?? 6 * 60 * 60_000,
       retentionDays: envInt(env, "QUEUE_RETENTION_DAYS") ?? 30,
-      myReposPerMinute: envInt(env, "QUEUE_MY_REPOS_PER_MINUTE") ?? 6,
+      myReposPerMinute: envInt(env, "QUEUE_MY_REPOS_PER_MINUTE") ?? 30,
       favoritesMax: envInt(env, "QUEUE_FAVORITES_MAX") ?? 500,
       cardPerMinute: envInt(env, "QUEUE_CARD_PER_MINUTE") ?? 30,
       favoritesMutationsPerMinute: envInt(env, "QUEUE_FAVORITES_MUTATIONS_PER_MINUTE") ?? 30,

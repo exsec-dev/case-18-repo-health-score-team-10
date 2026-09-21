@@ -35,7 +35,8 @@ describe("очередь, лиз и доступ (В4.1, К2/К4)", () => {
       for (const k of keys) process.env[k] = "";
       const cfg = loadConfig();
       expect(cfg.scheduler.leaseMs).toBe(DEFAULT_LEASE_MS);
-      expect(cfg.queue).toEqual({ userScansPerHour: 10, maxAttempts: 3, userActiveMax: 2, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 21_600_000, retentionDays: 30, myReposPerMinute: 6, favoritesMax: 500, cardPerMinute: 30, favoritesMutationsPerMinute: 30 });
+      // ПЕРЕВОРОТ (В4.8.5, К8.5.7, §2-В3): чтений списка «Моих репозиториев» 30/мин (было 6)
+      expect(cfg.queue).toEqual({ userScansPerHour: 10, maxAttempts: 3, userActiveMax: 2, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 21_600_000, retentionDays: 30, myReposPerMinute: 30, favoritesMax: 500, cardPerMinute: 30, favoritesMutationsPerMinute: 30 });
       expect(cfg.access.cacheTtlMs).toBe(15 * 60_000);
       process.env.QUEUE_USER_SCANS_PER_HOUR = "4";
       process.env.QUEUE_MAX_ATTEMPTS = "5";
