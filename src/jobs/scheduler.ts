@@ -26,7 +26,7 @@ import { upsertRepo, runScan, scanCloneLimitsOf, type ScanResult } from "./runne
 import { getPat } from "../auth/pat";
 import { makeScClient } from "../collectors/http";
 import { makeAppsecClient } from "../collectors/appsec";
-import type { Config } from "../config";
+import { worstCaseScanMs, type Config } from "../config";
 import { getMetaValue, setMetaValue } from "../db";
 import { CATALOG_SUSPICIOUS_AT, SCHED_META } from "../api/health";
 import { needsRescore, rescoreBatchByCursor, rescoreHistoryBatch } from "../score/rescore";
@@ -746,6 +746,8 @@ export type WorkerTickOutcome = "busy" | "idle" | "claim-failed" | "done" | "fai
 /** Состояние воркер-лупа между тиками (гард «занят»): шов Б0 держит его снаружи. */
 export interface WorkerLoopState {
   busy: boolean;
+  /** В4.8.5 (С10-3): когда взято текущее задание (мс); нет — задания нет */
+  currentSince?: number;
   /** В4.4 (З2): время последнего редкого фонового батча (каденс при непустых очередях) */
   lastBackgroundTickAt?: number;
 }
@@ -805,6 +807,7 @@ export async function workerTick(
   }
   const claimed = job;
   state.busy = true;
+  state.currentSince = Date.now();
   liveClaims.set(claimed.id, { claimedAt: claimed.claimedAt, repoId: claimed.repoId, userId: claimed.userId });
   const heartbeat = setInterval(() => {
     try {
@@ -834,7 +837,14 @@ export async function workerTick(
     liveClaims.delete(claimed.id);
     clearInterval(heartbeat);
     state.busy = false;
+    state.currentSince = undefined;
   }
+}
+
+/** С10-3: тик считается живым, если он не `busy` или текущее задание ещё в пределах худшего бюджета скана. */
+export function loopTickIsAlive(outcome: WorkerTickOutcome, state: WorkerLoopState, config: Config, now = Date.now()): boolean {
+  if (outcome !== "busy") return true;
+  return state.currentSince !== undefined && now - state.currentSince <= worstCaseScanMs(config.scan);
 }
 
 export function startWorkerLoop(
@@ -852,11 +862,16 @@ export function startWorkerLoop(
     // отказ самого `setInterval`-колбэка) не должен ронять процесс
     try {
       void tick(deps, order, state, { historyRescore: queues.rating === true })
-        .then(() => {
-          // З6 (круг 2 В4.4): метка завершённого тика — только у rating-стороны
-          // лупа (иначе живой web-процесс маскировал бы мёртвую rating-роль).
-          // health читает её из meta кросс-процессно и краснеет по staleness
-          if (queues.rating) setMetaValue(deps.db, SCHED_META.tickAt, new Date().toISOString());
+        .then((outcome) => {
+          // З6 (круг 2 В4.4): метка живого тика — у rating-стороны лупа своя
+          // (иначе живой web-процесс маскировал бы мёртвую rating-роль);
+          // В4.8.5 (К8.5.5c): у user-стороны — своя, для health полосы.
+          // С10-3: тик `busy` — не признак жизни сам по себе: метка пишется,
+          // только пока текущее задание не вышло за худший бюджет скана
+          if (!loopTickIsAlive(outcome, state, deps.config)) return;
+          const at = new Date().toISOString();
+          if (queues.rating) setMetaValue(deps.db, SCHED_META.tickAt, at);
+          if (queues.user) setMetaValue(deps.db, SCHED_META.userTickAt, at);
         })
         .catch((e) => console.error(`[worker] tick failed: ${String((e as Error).message).slice(0, 200)}`));
     } catch (e) {
@@ -873,34 +888,9 @@ export function startWorkerLoop(
  * дизайн продукта, но оператор должен успеть это увидеть/отключить).
  * Расписание объясняется конфигурацией — раздел в отчёте воркера.
  */
-// ПОРТ hq-parallel (S3): реестр последнего обхода для /api/health —
-// «health зелёный при мёртвой периодике» больше не проходит незаметно
-const schedulerStateRef: {
-  /**
-   * К-Р5 (круг 2): результат последнего обхода, в котором ИСПОЛНЯЛАСЬ
-   * ночная фаза — часовая сверка этот факт НЕ трогает (прежде обновлял
-   * любой обход, и мёртвая ночная волна светила зелёным).
-   */
-  lastNightly: NightlyResult | { ok: false; error: string } | null;
-  /** Ф2.5: метки успеха фаз едут в /api/health — «зелёное» не врёт и про сверку */
-  lastReconcileAt: string | null;
-  lastNightlyAt: string | null;
-} = { lastNightly: null, lastReconcileAt: null, lastNightlyAt: null };
-
-export function schedulerHealthSnapshot(): {
-  lastNightly: NightlyResult | { ok: false; error: string } | null;
-  lastReconcileAt: string | null;
-  lastNightlyAt: string | null;
-} {
-  return { ...schedulerStateRef };
-}
-
-/** Шов тестов: метки фаз — модульное состояние, герметичность сбросом. */
-export function __resetSchedulerState(): void {
-  schedulerStateRef.lastNightly = null;
-  schedulerStateRef.lastReconcileAt = null;
-  schedulerStateRef.lastNightlyAt = null;
-}
+// В4.8.5 (К8.5.5b, С8-12): второе хранилище меток фаз в памяти процесса
+// (`schedulerStateRef`, `schedulerHealthSnapshot`) удалено — единственный
+// источник меток для health и для рестарта — meta (SCHED_META).
 
 /**
  * Возраст, начиная с которого каталог клона считается осиротевшим (Ф2.19):
@@ -1032,6 +1022,27 @@ export function newCatalogTickState(): CatalogTickState {
   return { walking: false, lastReconcileAt: null, lastNightlyAt: null };
 }
 
+/** Время из meta (ISO) или null; метка из будущего (сбитые часы) не принимается. */
+function metaDate(db: Database, key: string, now: Date): Date | null {
+  const raw = getMetaValue(db, key);
+  if (raw === null) return null;
+  const t = Date.parse(raw);
+  if (!Number.isFinite(t) || t > now.getTime() + 5 * 60_000) return null;
+  return new Date(t);
+}
+
+/** К8.5.5b: пустые метки состояния — из ключей УСПЕХА фаз в meta. */
+export function loadPhaseMarks(db: Database, state: CatalogTickState, now = new Date()): void {
+  if (state.lastReconcileAt === null) state.lastReconcileAt = metaDate(db, SCHED_META.reconcileAt, now);
+  if (state.lastNightlyAt === null) state.lastNightlyAt = metaDate(db, SCHED_META.nightlyOkAt, now);
+}
+
+/** С8-4: ошибка сверки — в meta (стирает её только дочитанная сверка). */
+function recordReconcileError(db: Database, error: string, now: Date): void {
+  setMetaValue(db, SCHED_META.reconcileError, error.slice(0, 200));
+  setMetaValue(db, SCHED_META.reconcileErrorAt, now.toISOString());
+}
+
 /** Бюджет запросов клиента одного обхода (К-Ф2.5): потолок страниц + 10. */
 export function catalogClientBudget(config: Config): number {
   return config.scan.catalog.maxPages + 10;
@@ -1065,13 +1076,22 @@ export async function catalogTick(
     return null;
   }
   const now = opts.now ?? new Date();
+  // В4.8.5 (К8.5.5b, С8-2): метки УСПЕХА фаз переживают рестарт — пустая
+  // метка в памяти (первый тик процесса) берётся из meta. Ночная — из
+  // отдельного ключа успеха (`sched_last_nightly_at` значит «попытка»)
+  loadPhaseMarks(db, state, now);
   const due = (last: Date | null, everyMs: number) => last === null || now.getTime() - last.getTime() >= everyMs;
   const reconcileDue = due(state.lastReconcileAt, config.scheduler.catalogIntervalMs);
   const nightlyDue = due(state.lastNightlyAt, config.scheduler.intervalMs);
   if (!reconcileDue && !nightlyDue) return null;
   // новый клиент (и бюджет) на каждый обход — H2
   const client = serverClient();
-  if (!client) return null; // без серверного токена каталог не читается
+  if (!client) {
+    // без серверного токена каталог не читается — С8-10: health это видит
+    setMetaValue(db, SCHED_META.noTokenAt, now.toISOString());
+    return null;
+  }
+  if (getMetaValue(db, SCHED_META.noTokenAt) !== null) db.query("DELETE FROM meta WHERE key = ?").run(SCHED_META.noTokenAt);
   state.walking = true;
   try {
     // сверка исполняется на КАЖДОМ обходе: каталог всё равно перечислен —
@@ -1087,7 +1107,6 @@ export async function catalogTick(
     // факт дублируется в meta — кросс-процессно (web-роль читает состоянием
     // планировщика, которого в её процессе нет)
     if (nightlyDue) {
-      schedulerStateRef.lastNightly = result;
       setMetaValue(db, SCHED_META.nightlyAt, now.toISOString());
       setMetaValue(db, SCHED_META.nightlyOk, result.ok ? "1" : "0");
       if (result.ok) {
@@ -1098,18 +1117,22 @@ export async function catalogTick(
     }
     if (!result.ok) {
       console.error(`[scheduler] catalog walk failed: ${result.error ?? "unknown"}`);
+      // С8-4: сверка не удалась — след в meta (health судит по нему и по возрасту успеха)
+      recordReconcileError(db, result.error ?? "catalog walk failed", now);
       return result;
     }
     if (result.catalogComplete) {
       state.lastReconcileAt = now;
-      schedulerStateRef.lastReconcileAt = now.toISOString();
       setMetaValue(db, SCHED_META.reconcileAt, now.toISOString());
+      db.query("DELETE FROM meta WHERE key IN (?, ?)").run(SCHED_META.reconcileError, SCHED_META.reconcileErrorAt);
+    } else {
+      recordReconcileError(db, "catalog incomplete: page cap reached", now);
     }
     // К-Р3: ночная метка — по исполнению фазы (обход ok), НЕ по полноте
     // каталога; метка сверки выше — по-прежнему только по дочитанному
     if (nightlyDue && result.ok) {
       state.lastNightlyAt = now;
-      schedulerStateRef.lastNightlyAt = now.toISOString();
+      setMetaValue(db, SCHED_META.nightlyOkAt, now.toISOString());
     }
     console.log(
       `[scheduler] catalog: ${result.pages} pages, ${result.entriesSeen} repos; phases reconcile+${nightlyDue ? "nightly" : "-"}; queued ${result.enqueued.length} (${result.enqueued.filter((e) => e.reason === "new").length} new), evicted ${result.evicted.length}, returned ${result.returned.length}${result.catalogComplete ? "" : "; catalog INCOMPLETE - eviction skipped, reconcile mark kept"}`,

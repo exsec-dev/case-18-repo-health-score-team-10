@@ -251,9 +251,11 @@ export function scanFromEnv(env: Record<string, string>): ScanConfig {
  * извлечение (60 мин), и воркер терял лиз посреди живого скана: job
  * переклеймалась другим процессом, а первый продолжал писать факты.
  */
-export function leaseFloorMs(scan: ScanConfig): number {
+export function worstCaseScanMs(scan: ScanConfig): number {
   return scan.clone.timeoutMs + (scan.degrade.enabled ? scan.degrade.timeoutMs : 0) + scan.extract.timeoutMs + 15 * 60_000;
 }
+
+export const leaseFloorMs = worstCaseScanMs;
 
 /** Дефолт лиза = пол (совместимость имени с В4.1). */
 export function defaultLeaseMs(scan: ScanConfig): number {

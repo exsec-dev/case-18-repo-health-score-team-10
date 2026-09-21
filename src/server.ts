@@ -222,11 +222,20 @@ function sessionOf(req: Request) {
   return getSessionUser(db, config.auth.appSecret, cookies[ck.session]);
 }
 
+/**
+ * В4.8.5 (К8.5.5a): политика ретраев 429/503 клиентов, которые отвечают
+ * человеку в том же HTTP-запросе (проба токена, карточка, проверка прав,
+ * предпроверка запуска): один повтор и короткий потолок ожидания — запрос не
+ * должен висеть десятки секунд. Фоновые клиенты (каталог, скан) — дефолт
+ * `http.ts` (3 повтора, потолок 30 с).
+ */
+const INTERACTIVE_RETRY = { maxRetries: 1, maxWaitMs: 2_000, baseBackoffMs: 500 } as const;
+
 /** REST-клиент с юзерским PAT (PAT-окно/«мои репо»); PAT нет → null. */
 function userClient(userId: number) {
   const pat = config.auth.appSecret ? getPat(db, config.auth.appSecret, userId) : null;
   if (!pat) return null;
-  return makeScClient({ token: pat, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, timeoutMs: config.scan.rest.timeoutMs });
+  return makeScClient({ retry: INTERACTIVE_RETRY, token: pat, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, timeoutMs: config.scan.rest.timeoutMs });
 }
 
 // К2: доступ зрителя к каналам карточки — прямые чтения PAT зрителя с
@@ -242,9 +251,9 @@ function viewerAccess(req: Request): (repo: AccessRepo) => Promise<AccessResult>
     return resolveAccess(
       {
         restClient: (token) =>
-          makeScClient({ token, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 4, timeoutMs: config.scan.rest.timeoutMs }),
+          makeScClient({ retry: INTERACTIVE_RETRY, token, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 4, timeoutMs: config.scan.rest.timeoutMs }),
         appsecClient: (token) =>
-          makeAppsecClient({ token, baseUrl: config.api.appsecBase, minIntervalMs: config.scan.rest.appsecMinIntervalMs, maxRequests: 2, timeoutMs: 10_000 }),
+          makeAppsecClient({ token, baseUrl: config.api.appsecBase, minIntervalMs: config.scan.rest.appsecMinIntervalMs, maxRequests: 2, timeoutMs: 10_000, retryMaxWaitMs: INTERACTIVE_RETRY.maxWaitMs }),
         cache: accessCache,
       },
       user ? { userId: user.userId, pat } : null,
@@ -456,6 +465,7 @@ const routes = {
         // живая проверка GET /user: 401 = токен отклонён платформой
         const probe = makeScClient({
           token: body.token,
+          retry: INTERACTIVE_RETRY,
           baseUrl: config.api.restBase,
           minIntervalMs: config.scan.rest.minIntervalMs,
           maxRequests: 2,
@@ -480,6 +490,7 @@ const routes = {
         if (typeof username === "string" && username !== "") {
           const seeder = makeScClient({
             token: body.token,
+            retry: INTERACTIVE_RETRY,
             baseUrl: config.api.restBase,
             minIntervalMs: config.scan.rest.minIntervalMs,
             maxRequests: 6,
@@ -606,11 +617,11 @@ const routes = {
           { status: 429 },
         );
       }
-      const rest = makeScClient({ token: pat, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 8, timeoutMs: config.scan.rest.timeoutMs });
+      const rest = makeScClient({ retry: INTERACTIVE_RETRY, token: pat, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 8, timeoutMs: config.scan.rest.timeoutMs });
       // П3 (Н2 HIGH): адрес из конфига обязателен — без baseUrl модуль
       // подставлял боевой appsec.sourcecraft.tech, и PAT зрителя уходил туда
       // даже с APPSEC_API_BASE на мок
-      const appsec = makeAppsecClient({ token: pat, baseUrl: config.api.appsecBase, minIntervalMs: config.scan.rest.appsecMinIntervalMs });
+      const appsec = makeAppsecClient({ token: pat, baseUrl: config.api.appsecBase, minIntervalMs: config.scan.rest.appsecMinIntervalMs, retryMaxWaitMs: INTERACTIVE_RETRY.maxWaitMs });
       const result: FavoriteCheckResponse = await checkFavoriteAccess(
         db,
         user.userId,

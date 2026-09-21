@@ -5,7 +5,7 @@
 // из каталога; неполный каталог НЕ эвиктит; возврат флагом; канальные
 // 403 cicd — не эвикция — отдельный процессJob-тест). Сети нет:
 // каталог и runScan — фейки.
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { existsSync, mkdtempSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1056,6 +1056,13 @@ describe("Ф2.5: catalogTick — две фазы, один обход, един�
   };
   const T0 = new Date("2026-09-18T00:00:00.000Z");
   const at = (ms: number) => new Date(T0.getTime() + ms);
+  // В4.8.5 (К8.5.5b): метки успеха фаз переживают «рестарт» — новое состояние
+  // тика берёт их из meta. Тесты этого блока — независимые сценарии на ОДНОЙ
+  // базе; герметичность — чистка sched_* meta перед каждым (сетап, утверждения
+  // не менялись)
+  beforeEach(() => {
+    db.query("DELETE FROM meta WHERE key LIKE 'sched_%'").run();
+  });
 
   /** Клиент каталога со счётчиком запросов (один бюджет на snapshot). */
   function countingClient(pages: { repos: Record<string, unknown>[]; next: string | null }[]) {

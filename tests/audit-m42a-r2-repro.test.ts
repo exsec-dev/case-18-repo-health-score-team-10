@@ -19,7 +19,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig, type Config } from "../src/config";
 import type { ScClient, ScResponse } from "../src/collectors/http";
-import { catalogTick, newCatalogTickState, nightlyCatalog, schedulerHealthSnapshot, startScheduler, __resetSchedulerState } from "../src/jobs/scheduler";
+import { catalogTick, newCatalogTickState, nightlyCatalog, startScheduler } from "../src/jobs/scheduler";
+import { getHealth } from "../src/api/health";
 import { cloneBare, cleanupClone, gitVersion, splitCredentialUrl, __resetGitVersionCache, type SpawnedGit } from "../src/collectors/git";
 import { collectAppsec, makeAppsecClient, type AppsecClient, type AppsecGet } from "../src/collectors/appsec";
 import { runScan } from "../src/jobs/runner";
@@ -300,25 +301,26 @@ describe("Р5: /api/health — часовая сверка не трогает �
   // закрыто блоком Б11 — обёртка снята, утверждения не менялись (уточнён
   // сетап: модульный schedulerStateRef отделён от state тика, ночной факт
   // сперва ставится настоящей ночной фазой, иначе сверке нечего «не трогать»)
+  // В4.8.5 (К8.5.5b, С8-12 — перенос, не снятие): второе хранилище
+  // `schedulerStateRef`/`schedulerHealthSnapshot` удалено; тот же инвариант
+  // читается там, где его читает /api/health, — getHealth по meta
   test("обход с фазой сверки не обновляет lastNightly/lastNightlyAt", async () => {
-    __resetSchedulerState();
     const t = tempDb();
     const cfg = catalogConfig({ catalogIntervalMs: HOUR, intervalMs: 24 * HOUR, maxPages: 100 });
     // ночной тик в T0: обе фазы due — ставит ночной факт health
     const state = newCatalogTickState();
     const nightlyOut = await catalogTick(t.db, () => catalogPagesClient([{ repos: [], next: null }]), cfg, state, { now: T0 });
     expect(nightlyOut?.phases.nightly).toBe(true);
-    expect(schedulerHealthSnapshot().lastNightlyAt).toBe(T0.toISOString());
+    expect(getHealth(t.db, cfg).lastNightlyAt).toBe(T0.toISOString());
     // часовой тик: только сверка — ночной факт не трогается
     const out = await catalogTick(t.db, () => catalogPagesClient([{ repos: [], next: null }]), cfg, state, { now: at(HOUR) });
     expect(out?.phases).toEqual({ reconcile: true, nightly: false });
-    const snap = schedulerHealthSnapshot();
-    expect({ lastNightlyOk: (snap.lastNightly as { ok: boolean } | null)?.ok ?? null, lastNightlyAt: snap.lastNightlyAt, lastReconcileAt: snap.lastReconcileAt }).toEqual({
+    const snap = getHealth(t.db, cfg);
+    expect({ lastNightlyOk: snap.lastNightly?.ok ?? null, lastNightlyAt: snap.lastNightlyAt, lastReconcileAt: snap.lastReconcileAt }).toEqual({
       lastNightlyOk: true, // ночной факт — от ночного тика, не от сверки
       lastNightlyAt: T0.toISOString(),
       lastReconcileAt: at(HOUR).toISOString(),
     });
-    __resetSchedulerState();
   });
 });
 

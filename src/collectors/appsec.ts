@@ -13,7 +13,7 @@
 // no-data no-scan; неполный ответ → no-data incomplete («не трактовать
 // ошибку как отсутствие уязвимостей» — докам вслед, наш закон 2).
 import { noDataFact, okFact, type Fact } from "./facts";
-import type { ScClient } from "./http";
+import { isRetryableStatus, parseRetryAfter, reserveSlot, retryDelayMs, rhythmKey, type ScClient } from "./http";
 
 export const APPSEC_BASE_URL = "https://appsec.sourcecraft.tech";
 
@@ -43,18 +43,32 @@ export interface AppsecClientOptions {
   minIntervalMs?: number;
   maxRequests?: number;
   timeoutMs?: number;
+  /** К8.5.5a: потолок ожидания `Retry-After`, мс (дефолт — общий потолок http.ts) */
+  retryMaxWaitMs?: number;
+  /** шов фейковых часов (тест паузы ретрая) */
+  sleep?: (ms: number) => Promise<void>;
 }
 
-/** Живой клиент: интервал, таймаут, один ретрай на временные сбои (429/5xx/сеть). */
+/**
+ * Живой клиент: интервал, таймаут, один ретрай на временные сбои (429/5xx/сеть).
+ * В4.8.5 (К8.5.5a): интервал — общий ритм (хост AppSec, токен) реестра
+ * `http.ts`: все AppSec-клиенты одного PAT в процессе делят его. Пауза
+ * ретрая 429/503 — `Retry-After`, если платформа его дала и он не длиннее
+ * потолка (длиннее — повтор не выполняется, ответ отдаётся как есть); без
+ * заголовка — прежние 600 мс.
+ */
 export function makeAppsecClient(opts: AppsecClientOptions): AppsecClient {
   const baseUrl = opts.baseUrl;
   const minInterval = opts.minIntervalMs ?? 100;
   const maxRequests = opts.maxRequests ?? 40;
   const timeoutMs = opts.timeoutMs ?? 15_000;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  const key = rhythmKey(baseUrl, opts.token);
   let count = 0;
-  let lastAt = 0;
 
-  const once = async (path: string, params: Record<string, string>): Promise<Omit<AppsecGet, "attempts">> => {
+  const once = async (path: string, params: Record<string, string>): Promise<{ get: Omit<AppsecGet, "attempts">; retryAfterMs: number | null }> => {
+    const wait = reserveSlot(key, minInterval, Date.now());
+    if (wait > 0) await sleep(wait);
     const qs = new URLSearchParams(params).toString();
     try {
       const res = await fetch(`${baseUrl}${path}${qs ? `?${qs}` : ""}`, {
@@ -68,9 +82,10 @@ export function makeAppsecClient(opts: AppsecClientOptions): AppsecClient {
       } catch {
         /* не json — остаётся в error-тексте ниже */
       }
-      return { status: res.status, json, error: json === null ? bodyText.slice(0, 120) : undefined };
+      const retryAfterMs = isRetryableStatus(res.status) ? parseRetryAfter(res.headers.get("retry-after"), Date.now()) : null;
+      return { get: { status: res.status, json, error: json === null ? bodyText.slice(0, 120) : undefined }, retryAfterMs };
     } catch (e) {
-      return { status: 0, json: null, error: String((e as Error).message ?? e).slice(0, 160) };
+      return { get: { status: 0, json: null, error: String((e as Error).message ?? e).slice(0, 160) }, retryAfterMs: null };
     }
   };
 
@@ -79,19 +94,19 @@ export function makeAppsecClient(opts: AppsecClientOptions): AppsecClient {
       if (count >= maxRequests) {
         return { status: 0, json: null, error: `budget exhausted: ${maxRequests} requests`, attempts: 0 };
       }
-      const wait = minInterval - (Date.now() - lastAt);
-      if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-      lastAt = Date.now();
       count++;
       const first = await once(path, params);
       // ретрай только временные: сеть (status 0), 429, 5xx
-      if (first.status === 0 || first.status === 429 || first.status >= 500) {
-        await new Promise((r) => setTimeout(r, 600));
+      const s = first.get.status;
+      if (s === 0 || s === 429 || s >= 500) {
+        const delay = first.retryAfterMs !== null ? retryDelayMs(first.retryAfterMs, 0, { maxWaitMs: opts.retryMaxWaitMs }) : 600;
+        if (delay === null) return { ...first.get, attempts: 1 };
+        await sleep(delay);
         const second = await once(path, params);
         count++;
-        return { ...second, attempts: 2 };
+        return { ...second.get, attempts: 2 };
       }
-      return { ...first, attempts: 1 };
+      return { ...first.get, attempts: 1 };
     },
     requestCount: () => count,
   };
