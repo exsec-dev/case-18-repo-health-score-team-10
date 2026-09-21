@@ -6,12 +6,47 @@
 // зашифрованное хранение, замена/удаление; исход посева из namespace
 // показывается тостом (кластер I). Ссылки ведут на единую карточку /repo/...
 // Токен НИКОГДА не возвращается API и не логируется.
-import { ArrowRightFromSquare, CircleCheck, CircleQuestion, Clock, Key, Lock, Person, Star } from "@gravity-ui/icons";
-import { Alert, type AlertProps, Button, Card, Dialog, Flex, Icon, type IconData, Label, Link, Spin, Text, TextInput, useToaster } from "@gravity-ui/uikit";
+import {
+  ArrowRightFromSquare,
+  ArrowsRotateRight,
+  BarsAscendingAlignLeft,
+  BarsDescendingAlignLeft,
+  CircleCheck,
+  CircleQuestion,
+  Clock,
+  Ellipsis,
+  Key,
+  Lock,
+  Magnifier,
+  Person,
+  Plus,
+  Star,
+} from "@gravity-ui/icons";
+import {
+  ActionTooltip,
+  Alert,
+  type AlertProps,
+  Button,
+  Card,
+  Dialog,
+  DropdownMenu,
+  Flex,
+  HelpMark,
+  Icon,
+  type IconData,
+  Label,
+  Link,
+  Select,
+  Spin,
+  Text,
+  TextInput,
+  useToaster,
+} from "@gravity-ui/uikit";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { type MeResponse, type MetaResponse, type MyReposResponse, type RepoCard, fetchJson, logout, mutateJson, useJson } from "./api";
-import { analysisOutcome, authErrorText, fmtDate, fmtDateTime, fmtScore, recommendationsText, slugOf } from "./format";
+import { analysisOutcome, authErrorText, fmtDate, fmtDateTime, fmtScore, recommendationsText, scoreColor, scoreWord, slugOf } from "./format";
 import { TAB_RECOMMENDATIONS } from "./RepoPage";
+import { type Band, BANDS, type RepoEntry, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, sortEntries } from "./myRepos";
 import { linkProps, repoHref } from "./router";
 import { Page, UserAvatar, displayName, logoutFailedToast } from "./Shell";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, RepoSlug, SkeletonRows } from "./ui";
@@ -70,12 +105,11 @@ export function MePage({ meta }: { meta: MetaResponse | null }) {
   }
   const data = me.state.data;
   return (
-    <Page
-      crumbs={REPOS_CRUMBS}
-      aside={<AccountSection me={data} />}
-    >
-      <PageHeader title="Мои репозитории" />
-      <JobsPanel jobs={jobs.jobs} reload={jobs.reload} leaseMs={leaseMs} />
+    // В4.8 (вариант A, решение 21.09): одна колонна — список, как у списков
+    // SourceCraft. Журнал «Мои задания» из тела страницы убран: статус анализа
+    // живет в строке, история — в «Заданиях» шапки (`JobsBell`). Правая
+    // панель «Аккаунт» здесь дублировала аватар rail — осталась в Настройках.
+    <Page crumbs={REPOS_CRUMBS}>
       {/* В4.4 (кластер I): список favorites-only живет и без PAT;
           токен нужен для проверки прав, автозапуска и посева из namespace */}
       <MyReposSection hasPat={data.hasPat} leaseMs={leaseMs} serverJobs={jobs.jobs} />
@@ -353,13 +387,17 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
 /** Светлая клиентская проверка ручного ввода: слаг org/repo или http(s)-ссылка; точную грамматику держит сервер. */
 const INPUT_LIKELY = /^([a-z0-9_.-]+\/[a-z0-9_.-]+|https?:\/\/\S+)$/i;
 
+
 function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leaseMs: number; serverJobs: JobsResponse | null }) {
   const repos = useJson<MyReposResponse>("/api/me/repos");
   const favs = useJson<FavoritesResponse>("/api/me/favorites");
   const [jobs, setJobs] = useState<Record<string, ScanJobState>>({});
-  const [manualSlug, setManualSlug] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
-  const [note, setNote] = useState<{ text: string; danger: boolean } | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [query, setQuery] = useState("");
+  const [band, setBand] = useState<Band | null>(null);
+  const [sortKey, setSortKey] = useState<SortKey>("index");
+  const [sortDesc, setSortDesc] = useState(true);
   const toaster = useToaster();
   const reposReloadRef = useRef(repos.reload);
   reposReloadRef.current = repos.reload;
@@ -396,7 +434,7 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
         const job = jobs[slug]!;
         if (job.phase === "stalled") {
           // З2 (круг 2 В4.4): stalled не замораживает строку навсегда — когда
-          // серверная job ушла из active (исход есть в панели заданий), метка
+          // серверная job ушла из active (исход есть в заданиях шапки), метка
           // снимается и строка перечитывает серверную правду
           const stillActive = serverJobs?.active.some((j) => j.slug === slug) ?? true;
           if (!stillActive) {
@@ -431,7 +469,7 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
                   name: `scan-failed:${slug}`,
                   theme: "danger",
                   title: "Анализ завершился ошибкой",
-                  content: `${slug}: сбор данных не удался – подробности в «Моих заданиях»`,
+                  content: `${slug}: сбор данных не удался – подробности в «Заданиях» в шапке`,
                 });
               }
               reposReloadRef.current();
@@ -447,23 +485,8 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
     return () => clearInterval(timer);
   }, [jobs, toaster, leaseMs, serverJobs]);
 
-  // Ф2.20: ручной ввод добавляет в избранное (слаг или URL); парсер —
-  // серверный, клиент лишь не пускает заведомо не похожее
-  const addManual = async () => {
-    try {
-      await mutateJson("/api/me/favorites", "PUT", { repository: manualSlug });
-      setManualSlug("");
-      toaster.add({ name: "fav-added", theme: "success", title: "Добавлено в избранное", content: manualSlug });
-      repos.reload();
-      favs.reload();
-    } catch (e) {
-      toaster.add({ name: "fav-failed", theme: "danger", title: "Не добавлено", content: e instanceof Error ? e.message : String(e) });
-    }
-  };
-
   const check = async (org: string, repo: string) => {
     setBusy(`${org}/${repo}`);
-    setNote(null);
     try {
       // П2-UI: тип ответа экспортирован из src/api/me.ts — переименование
       // поля ловит tsc, а не пользователь (условие решения (1) 18.09)
@@ -471,12 +494,12 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
         `/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/check`,
         "POST",
       );
-      // права видны в строке репозитория (компонентами) — заметка говорит об исходе
-      setNote({ text: `${slugOf(org, repo)}: доступ проверен – ${enqueueNote(res.enqueue)}`, danger: false });
+      // В4.8: исход — тостом, как у остальных действий строки; права видны в строке
+      toaster.add({ name: `check:${org}/${repo}`, theme: "success", title: "Доступ проверен", content: `${slugOf(org, repo)}: ${enqueueNote(res.enqueue)}` });
       favs.reload();
       reposReloadRef.current();
     } catch (e) {
-      setNote({ text: e instanceof Error ? e.message : String(e), danger: true });
+      toaster.add({ name: `check-failed:${org}/${repo}`, theme: "danger", title: "Проверка доступа не получилась", content: e instanceof Error ? e.message : String(e) });
     } finally {
       setBusy(null);
     }
@@ -486,11 +509,11 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
     setBusy(`${org}/${repo}`);
     try {
       await mutateJson(`/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`, "DELETE");
+      toaster.add({ name: `fav-removed:${org}/${repo}`, theme: "info", title: "Убрано из избранного", content: slugOf(org, repo) });
       favs.reload();
       reposReloadRef.current();
     } catch (e) {
-      // UX-7 (круг 2 В4.4): сбой снятия не глотается — соседние действия
-      // (addManual/check) тостят, асимметрия внутри одного списка заметна
+      // UX-7 (круг 2 В4.4): сбой снятия не глотается
       toaster.add({
         name: `fav-remove-failed:${org}/${repo}`,
         theme: "danger",
@@ -502,105 +525,276 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
     }
   };
 
-  const slugError = manualSlug !== "" && !INPUT_LIKELY.test(manualSlug) ? "формат: org/repo или ссылка" : undefined;
   const entries = repos.state.kind === "ok" ? repos.state.data.entries : [];
   const accessBySlug = new Map((favs.state.kind === "ok" ? favs.state.data.entries : []).map((f) => [`${f.org}/${f.repo}`, f]));
+  const counts = countBands(entries);
+  const shown = sortEntries(filterEntries(entries, query, band), sortKey, sortDesc);
+
+  const addButton = (
+    <Button view="action" size="m" onClick={() => setAdding(true)}>
+      <Icon data={Plus} size={16} />
+      Добавить
+    </Button>
+  );
 
   return (
-    <Flex direction="column" gap={3}>
-      <Flex direction="column" gap={1}>
-        <Text variant="subheader-2" as="h2">
-          Мои репозитории
-        </Text>
-        <Text color="complementary">
-          В разделе отображаются репозитории, добавленные в избранное на их страницах. Репозиторий также можно добавить
-          вручную по идентификатору org/repo или ссылке.
-        </Text>
-      </Flex>
+    <Flex direction="column" gap={4}>
+      {/* В4.8: шапка списка по образцу SourceCraft («Active issues 39»):
+          заголовок header-1, счетчик цветом hint, справа поиск, сортировка и
+          единственное action-действие страницы. Абзац-инструкция уехал в
+          подсказку у заголовка: первый экран — под список, а не под механику. */}
+      <div className="rh-me-head">
+        <Flex gap={2} alignItems="center" style={{ minWidth: 0 }}>
+          <Text variant="header-1" as="h1">
+            Мои репозитории
+          </Text>
+          {repos.state.kind === "ok" && (
+            <Text variant="header-1" color="hint">
+              {entries.length}
+            </Text>
+          )}
+          <HelpMark iconSize="m" aria-label="Откуда берутся репозитории">
+            Здесь ваше избранное: отметьте репозиторий звездочкой на его странице или добавьте его по идентификатору org/repo или
+            ссылке.
+          </HelpMark>
+        </Flex>
+        <div className="rh-me-tools">
+          <TextInput
+            size="m"
+            className="rh-me-search"
+            placeholder="Найти репозиторий"
+            value={query}
+            onUpdate={setQuery}
+            hasClear
+            startContent={<Icon data={Magnifier} size={14} className="rh-me-search__icon" />}
+            controlProps={{ "aria-label": "Найти репозиторий в избранном" }}
+          />
+          <Flex>
+            <Select
+              size="m"
+              pin="round-brick"
+              width="auto"
+              value={[sortKey]}
+              options={SORT_OPTIONS}
+              onUpdate={([v]) => {
+                const key = (v as SortKey) ?? "index";
+                setSortKey(key);
+                setSortDesc(SORT_DEFAULT_DESC[key]);
+              }}
+              aria-label="Сортировка"
+            />
+            <ActionTooltip title={sortDesc ? "По убыванию" : "По возрастанию"}>
+              <Button view="normal" size="m" pin="brick-round" onClick={() => setSortDesc((d) => !d)} aria-label="Сменить направление сортировки">
+                <Icon data={sortDesc ? BarsDescendingAlignLeft : BarsAscendingAlignLeft} size={16} />
+              </Button>
+            </ActionTooltip>
+          </Flex>
+          {addButton}
+        </div>
+      </div>
 
       {/* В4.7 (П3.3): без токена — блок с тем, что делать, и ссылкой в
-          Настройки. Не тост (исчезает) и не подсказка в title (не видна):
-          без токена кабинет не проверяет доступ и не запускает анализ своих
-          репозиториев, и зритель должен узнать об этом до первого клика. */}
+          Настройки. Не тост (исчезает) и не подсказка в title (не видна). */}
       {!hasPat && (
         <CabinetAlert
           theme="info"
           title="Добавьте токен доступа SourceCraft"
           message="С токеном можно проверить доступ к своим репозиториям, запустить их анализ и увидеть CI/CD и Security на карточке. Токен добавляется в Настройках."
           actions={
-            <Button view="action" size="m" {...linkProps("/settings")}>
+            <Button view="normal" size="m" {...linkProps("/settings")}>
               Перейти в Настройки
             </Button>
           }
         />
       )}
 
-      <Flex gap={2} alignItems="flex-start" wrap>
-        <div style={{ flex: "1 1 240px", maxWidth: 360 }}>
-          <TextInput
-            size="m"
-            placeholder="org/repo или ссылка"
-            value={manualSlug}
-            onUpdate={(v) => setManualSlug(v.trim())}
-            hasClear
-            controlProps={{ "aria-label": "Добавить репозиторий в избранное по слагу или ссылке" }}
-            errorPlacement="outside"
-            validationState={slugError ? "invalid" : undefined}
-            errorMessage={slugError}
-          />
-        </div>
-        <Button view="action" size="m" disabled={!INPUT_LIKELY.test(manualSlug)} onClick={() => void addManual()}>
-          Добавить в избранное
-        </Button>
-      </Flex>
-
-      {repos.state.kind === "loading" && <SkeletonRows rows={3} height={60} />}
+      {repos.state.kind === "loading" && <SkeletonRows rows={3} height={66} />}
       {repos.state.kind === "error" && (
         <CabinetAlert title="Список не получился" message={repos.state.message} actions={[{ text: "Повторить", handler: repos.reload }]} />
       )}
-      {/* З1 (круг 2 В4.4): сбой /api/me/favorites больше не глотается в пустой Map —
-          строки списка без прав-ряда врут «ещё не проверяли», хотя проверка упала */}
+      {/* З1 (круг 2 В4.4): сбой /api/me/favorites больше не глотается */}
       {favs.state.kind === "error" && (
         <CabinetAlert title="Раздел избранного не получился" message={favs.state.message} actions={[{ text: "Повторить", handler: favs.reload }]} />
       )}
-      {/* В4.4 (кластер I): пустое состояние ОДНО — список один.
-          В4.7 (П3.4): тем же `EmptyState`, что у остальных пустых экранов. */}
+
       {repos.state.kind === "ok" && entries.length === 0 && (
         <EmptyState
           icon={Star}
           title="В избранном пока пусто"
-          description="Отметьте репозиторий звездочкой на его странице или добавьте его выше по идентификатору org/repo или ссылке."
+          description="Отметьте репозиторий звездочкой на его странице или добавьте его по идентификатору org/repo или ссылке."
+          actions={[{ text: "Добавить репозиторий", view: "action", size: "m", onClick: () => setAdding(true) }]}
         />
       )}
+
       {repos.state.kind === "ok" && entries.length > 0 && (
-        <ul className="rh-list">
-          {entries.map((entry) => {
-            const slug = `${entry.org}/${entry.repo}`;
-            return (
-              <RepoRow
-                key={slug}
-                entry={entry}
-                access={accessBySlug.get(slug)?.access ?? null}
-                lastCheckedAt={accessBySlug.get(slug)?.lastCheckedAt ?? null}
-                hasPat={hasPat}
-                job={jobs[slug] ?? null}
-                serverJob={serverJobs?.active.find((j) => j.slug === slug) ?? null}
-                busy={busy !== null}
-                etaNote={`обычно до ${Math.max(1, Math.round(leaseMs / 60_000))} минут`}
-                onScan={() => void startScan(slug)}
-                onCheck={() => void check(entry.org, entry.repo)}
-                onRemove={() => void removeFav(entry.org, entry.repo)}
-              />
-            );
-          })}
-        </ul>
+        <>
+          {/* В4.8 (плитки варианта C): сводка по полосам шкалы — она же фильтр.
+              Карточка `selection` Gravity: повторный клик снимает фильтр. */}
+          <div className="rh-summary" role="group" aria-label="Сводка по шкале HealthCraft Index">
+            {BANDS.map((b) => (
+              <Card
+                key={b.key}
+                type="selection"
+                view="outlined"
+                selected={band === b.key}
+                className="rh-summary__tile"
+                onClick={() => setBand((cur) => (cur === b.key ? null : b.key))}
+                title={b.hint}
+                aria-pressed={band === b.key}
+              >
+                <Text variant="header-1" color={counts[b.key] > 0 && b.key !== "none" ? BAND_COLOR[b.key] : "primary"}>
+                  {counts[b.key]}
+                </Text>
+                <Text color="secondary">{b.title}</Text>
+              </Card>
+            ))}
+          </div>
+
+          {shown.length === 0 ? (
+            <EmptyState
+              icon={Magnifier}
+              title="Ничего не нашлось"
+              description="Под поиск и выбранную плитку сводки не подходит ни один репозиторий."
+              actions={[
+                {
+                  text: "Сбросить",
+                  view: "normal",
+                  size: "m",
+                  onClick: () => {
+                    setQuery("");
+                    setBand(null);
+                  },
+                },
+              ]}
+            />
+          ) : (
+            <ul className="rh-repo-list">
+              {shown.map((entry) => {
+                const slug = `${entry.org}/${entry.repo}`;
+                return (
+                  <RepoRow
+                    key={slug}
+                    entry={entry}
+                    access={accessBySlug.get(slug)?.access ?? null}
+                    lastCheckedAt={accessBySlug.get(slug)?.lastCheckedAt ?? null}
+                    hasPat={hasPat}
+                    job={jobs[slug] ?? null}
+                    serverJob={serverJobs?.active.find((j) => j.slug === slug) ?? null}
+                    busy={busy !== null}
+                    etaNote={`обычно до ${Math.max(1, Math.round(leaseMs / 60_000))} минут`}
+                    onScan={() => void startScan(slug)}
+                    onCheck={() => void check(entry.org, entry.repo)}
+                    onRemove={() => void removeFav(entry.org, entry.repo)}
+                  />
+                );
+              })}
+            </ul>
+          )}
+        </>
       )}
-      {note && note.danger && <CabinetAlert title="Проверка доступа не получилась" message={note.text} />}
-      {note && !note.danger && <Text color="secondary">{note.text}</Text>}
+
+      <AddRepoDialog
+        open={adding}
+        onClose={() => setAdding(false)}
+        onAdded={() => {
+          setAdding(false);
+          repos.reload();
+          favs.reload();
+        }}
+      />
     </Flex>
   );
 }
 
+const BAND_COLOR: Record<Exclude<Band, "none">, "positive-heavy" | "warning-heavy" | "danger-heavy"> = {
+  success: "positive-heavy",
+  warning: "warning-heavy",
+  danger: "danger-heavy",
+};
+
+/**
+ * В4.8: добавление — редкое действие, поэтому диалогом по кнопке в шапке
+ * списка, а не полем над списком. Ф2.20: слаг или URL; парсер серверный,
+ * клиент лишь не пускает заведомо не похожее.
+ */
+function AddRepoDialog({ open, onClose, onAdded }: { open: boolean; onClose: () => void; onAdded: () => void }) {
+  const [value, setValue] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const toaster = useToaster();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const slugError = value !== "" && !INPUT_LIKELY.test(value) ? "Формат: org/repo или ссылка на репозиторий" : undefined;
+
+  const close = () => {
+    setValue("");
+    setError(null);
+    onClose();
+  };
+
+  const add = async () => {
+    if (!INPUT_LIKELY.test(value)) {
+      setError("Введите org/repo или ссылку на репозиторий");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await mutateJson("/api/me/favorites", "PUT", { repository: value });
+      toaster.add({ name: "fav-added", theme: "success", title: "Добавлено в избранное", content: value });
+      setValue("");
+      onAdded();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onClose={close} size="s" aria-label="Добавить репозиторий" initialFocus={inputRef}>
+      <Dialog.Header caption="Добавить репозиторий" />
+      <Dialog.Body>
+        <Flex direction="column" gap={2} className="rh-add-repo">
+          <Text color="secondary">Репозиторий попадет в избранное и появится в этом списке.</Text>
+          <TextInput
+            size="m"
+            controlRef={inputRef}
+            placeholder="org/repo или ссылка"
+            value={value}
+            onUpdate={(v) => {
+              setValue(v.trim());
+              setError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void add();
+            }}
+            hasClear
+            controlProps={{ "aria-label": "Идентификатор org/repo или ссылка на репозиторий" }}
+            errorPlacement="outside"
+            validationState={slugError || error ? "invalid" : undefined}
+            errorMessage={slugError ?? error ?? undefined}
+          />
+        </Flex>
+      </Dialog.Body>
+      <Dialog.Footer
+        textButtonApply="Добавить"
+        textButtonCancel="Отмена"
+        onClickButtonApply={() => void add()}
+        onClickButtonCancel={close}
+        loading={busy}
+      />
+    </Dialog>
+  );
+}
+
+/**
+ * В4.8: строка репозитория по образцу `ListingItem` SourceCraft (замер
+ * 21.09): отступ 12px, шаг 16px, квадратный аватар 40px, имя subheader-2,
+ * мета-строка 13px вторичным цветом, делитель — `line-generic`. Строка
+ * целиком ведет в карточку (слой-ссылка под содержимым), интерактивные
+ * элементы стоят над ним. Справа — оценка словом шкалы или состояние
+ * анализа; действия — одна кнопка по состоянию и меню.
+ */
 function RepoRow({
   entry,
   access,
@@ -614,7 +808,7 @@ function RepoRow({
   onCheck,
   onRemove,
 }: {
-  entry: MyReposResponse["entries"][number];
+  entry: RepoEntry;
   access: import("../api/me").FavoriteAccess | null;
   lastCheckedAt: string | null;
   hasPat: boolean;
@@ -628,120 +822,138 @@ function RepoRow({
   onRemove: () => void;
 }) {
   const { org, repo } = entry;
+  const href = repoHref(org, repo);
   const scored = entry.healthcraftIndex !== null;
+  const inWork = job !== null || serverJob !== null;
   // В4.4 (кластер M-14): серверный статус job — приоритетнее локального опроса
-  const statusCell = serverJob ? (
-    <Flex gap={2} alignItems="center" title={etaNote}>
-      <Spin size="xs" />
-      <Text color="complementary">{serverJob.phase === "queued" ? "В очереди" : "Сканируется"}</Text>
-    </Flex>
-  ) : job ? (
-    job.phase === "stalled" ? (
-      <Label theme="warning" size="xs">
-        затянулось – смотрите панель заданий
+  const phase = serverJob ? serverJob.phase : job ? job.phase : null;
+
+  const state =
+    phase === "stalled" ? (
+      <Label theme="warning" size="xs" title="Анализ идет дольше обычного – его исход появится в «Заданиях» в шапке">
+        затянулось
+      </Label>
+    ) : phase !== null ? (
+      <Label theme="info" size="xs" icon={<Spin size="xs" />} title={etaNote}>
+        {phase === "queued" ? "В очереди" : "Сканируется"}
+      </Label>
+    ) : entry.planned ? (
+      // Ф2.17 (решение 18.09): «данных нет» ≠ «данных не будет»; мета и Score
+      // по-прежнему скрыты (fail-closed)
+      <Label theme="info" size="xs" title="Анализ запланирован, данные скоро будут">
+        Запланирован
+      </Label>
+    ) : scored ? (
+      <div className="rh-repo-item__score" title="HealthCraft Index – публичная оценка репозитория">
+        <Text variant="header-1" color={scoreColor(entry.healthcraftIndex)}>
+          {fmtScore(entry.healthcraftIndex)}
+        </Text>
+        <Text variant="body-short" color="secondary">
+          {scoreWord(entry.healthcraftIndex)}
+        </Text>
+      </div>
+    ) : entry.lastScanStatus === "running" ? (
+      // З4 (круг 2 В4.4): running — легальный транзитный статус последнего скана
+      <Label theme="info" size="xs" icon={<Spin size="xs" />} title={etaNote}>
+        Сканируется
+      </Label>
+    ) : entry.lastScanStatus === "bad" ? (
+      // З4: последний скан упал — честный статус; пригодный старый индекс
+      // сработал бы веткой выше
+      <Label theme="danger" size="xs" title="Анализ завершился ошибкой – запустите его еще раз">
+        Ошибка анализа
+      </Label>
+    ) : entry.lastScanAt !== null ? (
+      <Label theme="unknown" size="xs" title="Проанализировали – данных для оценки не хватило">
+        Нет оценки
+      </Label>
+    ) : !entry.inCatalog ? (
+      // UX-8 (круг 2 В4.4): явные признаки вместо прокси `title === null`
+      <Label theme="unknown" size="xs">
+        Нет в каталоге
+      </Label>
+    ) : !entry.mayRead ? (
+      <Label theme="unknown" size="xs">
+        Нет прав
       </Label>
     ) : (
-      <Flex gap={2} alignItems="center" title={etaNote}>
-        <Spin size="xs" />
-        <Text color="complementary">{job.phase === "queued" ? "В очереди" : "Сканируется"}</Text>
-      </Flex>
-    )
-  ) : entry.planned ? (
-    // Ф2.17 (решение 18.09): «данных нет» ≠ «данных не будет» — пока
-    // заявка жива, кабинет показывает план вместо пустой строки; мета
-    // и Score по-прежнему скрыты (fail-closed)
-    <Label theme="info" size="xs">
-      анализ запланирован, данные скоро будут
-    </Label>
-  ) : scored ? (
-    <Flex direction="column" alignItems="flex-end" gap={0} title="HealthCraft Index – публичная оценка репозитория">
-      <Flex gap={1} alignItems="baseline">
-        <Text variant="subheader-3">{fmtScore(entry.healthcraftIndex)}</Text>
-        <Text color="secondary">/ 100 в рейтинге</Text>
-      </Flex>
-      {entry.lastScanAt && (
-        <Text variant="body-short" color="secondary">
-          {fmtDateTime(entry.lastScanAt)}
-        </Text>
-      )}
-    </Flex>
-  ) : entry.lastScanStatus === "running" ? (
-    // З4 (круг 2 В4.4): running — легальный транзитный статус последнего скана
-    <Flex gap={2} alignItems="center" title={etaNote}>
-      <Spin size="xs" />
-      <Text color="complementary">Сканируется</Text>
-    </Flex>
-  ) : entry.lastScanStatus === "bad" ? (
-    // З4: последний скан упал — честный статус вместо «Проанализировали»;
-    // текст согласован с тостом опросщика и панелью заданий. Пригодный старый
-    // индекс сработал бы веткой выше — статус-текст только там, где оценки нет
-    <Label theme="danger" size="xs">
-      Анализ завершился ошибкой – повторите
-    </Label>
-  ) : entry.lastScanAt !== null ? (
-    <Label theme="unknown" size="xs">
-      Проанализировали – данных для оценки не хватило
-    </Label>
-  ) : !entry.inCatalog ? (
-    // UX-8 (круг 2 В4.4): явные признаки вместо прокси `title === null` —
-    // публичное репо без title тоже без title, прежний ярлык врал в причинах
-    <Label theme="unknown" size="xs">
-      Нет в каталоге
-    </Label>
-  ) : !entry.mayRead ? (
-    <Label theme="unknown" size="xs">
-      Нет прав
-    </Label>
-  ) : (
-    <Label theme="unknown" size="xs">
-      Еще не анализировали
-    </Label>
-  );
+      <Label theme="unknown" size="xs">
+        Еще не анализировали
+      </Label>
+    );
+
+  const menuItems = [
+    ...(hasPat
+      ? [{ text: "Проверить доступ", action: onCheck, disabled: busy, title: "Узнать по вашему токену, какие данные этого репозитория вам открыты" }]
+      : []),
+    ...(entry.recommendationsCount !== null && entry.recommendationsCount > 0
+      ? [{ text: "Открыть рекомендации", href: `${href}?tab=${TAB_RECOMMENDATIONS}` }]
+      : []),
+    { text: "Убрать из избранного", action: onRemove, disabled: busy, theme: "danger" as const },
+  ];
 
   return (
-    <li className="rh-list__item">
-      <Flex gap={4} alignItems="center" wrap>
-        <RepoAvatar repo={repo} logoUrl={entry.logoUrl} size="m" />
-        <Flex direction="column" gap={1} style={{ flex: "1 1 240px", minWidth: 0 }}>
+    <li className="rh-repo-item">
+      {/* слой-ссылка: клик по пустому месту строки ведет в карточку; с клавиатуры
+          и для скринридера ссылка — имя репозитория, слой из обхода убран */}
+      <a className="rh-repo-item__cover" {...linkProps(href)} tabIndex={-1} aria-hidden="true" />
+      <RepoAvatar repo={repo} logoUrl={entry.logoUrl} size="l" />
+      <div className="rh-repo-item__content">
+        <div className="rh-repo-item__head">
           {/* В4.7 (П3.4): слаг — общим `RepoSlug`, как на рейтинге и карточке */}
-          <Link {...linkProps(repoHref(org, repo))} view="primary">
+          <Link {...linkProps(href)} view="primary" className="rh-repo-item__name">
             <RepoSlug org={org} repo={repo} variant="subheader-2" />
           </Link>
-          {entry.title && entry.title !== repo && <Text color="complementary">{entry.title}</Text>}
-          <Meta>
+          <AccessRights access={access} lastCheckedAt={lastCheckedAt} />
+        </div>
+        <Meta>
+          <MetaItem>
+            <LanguageName name={entry.language} color={entry.languageColor} />
+          </MetaItem>
+          {/* П5 (В4): у последней активности времени по смыслу нет — дата без времени */}
+          {entry.lastActivityAt && <MetaItem icon={Clock}>активность {fmtDate(entry.lastActivityAt)}</MetaItem>}
+          {entry.lastScanAt && scored && <MetaItem>анализ {fmtDateTime(entry.lastScanAt)}</MetaItem>}
+          {/* В4.7 (П3.4, У26): счётчик рекомендаций — ссылкой на карточку с
+              открытым табом. null (прав нет) — строки нет: не 0 */}
+          {entry.recommendationsCount !== null && (
             <MetaItem>
-              <LanguageName name={entry.language} color={entry.languageColor} />
+              <Link {...linkProps(`${href}?tab=${TAB_RECOMMENDATIONS}`)} className="rh-repo-item__link">
+                {recommendationsText(entry.recommendationsCount)}
+              </Link>
             </MetaItem>
-            {/* П5 (В4): у последней активности времени по смыслу нет — дата без времени */}
-            {entry.lastActivityAt && <MetaItem icon={Clock}>активность {fmtDate(entry.lastActivityAt)}</MetaItem>}
-            {lastCheckedAt && <MetaItem>доступ проверен {fmtDateTime(lastCheckedAt)}</MetaItem>}
-            {/* В4.7 (П3.4, У26): счётчик рекомендаций — ссылкой на карточку с
-                открытым табом. null (прав нет) — строки нет: не 0 */}
-            {entry.recommendationsCount !== null && (
-              <MetaItem>
-                <Link {...linkProps(`${repoHref(org, repo)}?tab=${TAB_RECOMMENDATIONS}`)}>{recommendationsText(entry.recommendationsCount)}</Link>
-              </MetaItem>
-            )}
-          </Meta>
-          <AccessRights access={access} hasPat={hasPat} />
-        </Flex>
+          )}
+        </Meta>
+        {entry.title && entry.title !== repo && (
+          <Text color="complementary" ellipsis className="rh-repo-item__desc">
+            {entry.title}
+          </Text>
+        )}
+      </div>
 
-        {statusCell}
+      <div className="rh-repo-item__state">{state}</div>
 
-        <Flex gap={2} alignItems="center">
-          {hasPat && (
-            <Button size="m" view="outlined" disabled={busy} onClick={onCheck} title="Узнать по вашему токену, какие данные этого репозитория вам открыты">
-              Проверить доступ
+      <div className="rh-repo-item__actions">
+        {scored ? (
+          <ActionTooltip title="Обновить анализ">
+            <Button view="flat" size="m" onClick={onScan} disabled={inWork} aria-label="Обновить анализ">
+              <Icon data={ArrowsRotateRight} size={16} />
+            </Button>
+          </ActionTooltip>
+        ) : (
+          <Button view="outlined" size="m" onClick={onScan} disabled={inWork}>
+            Запустить анализ
+          </Button>
+        )}
+        <DropdownMenu
+          items={menuItems}
+          popupProps={{ placement: "bottom-end" }}
+          renderSwitcher={(props) => (
+            <Button {...props} view="flat" size="m" aria-label="Действия с репозиторием">
+              <Icon data={Ellipsis} size={16} />
             </Button>
           )}
-          <Button size="m" view={scored ? "normal" : "action"} onClick={onScan} disabled={job !== null || serverJob !== null}>
-            {scored ? "Обновить анализ" : "Запустить анализ"}
-          </Button>
-          <Button size="m" view="flat" disabled={busy} onClick={onRemove}>
-            Убрать ★
-          </Button>
-        </Flex>
-      </Flex>
+        />
+      </div>
     </li>
   );
 }
@@ -848,50 +1060,6 @@ export function JobsBell() {
   );
 }
 
-/** Панель «Мои задания» кабинета: активные с ожиданием + последние с исходом. */
-function JobsPanel(props: { jobs: JobsResponse | null; reload: () => void; leaseMs: number }) {
-  const { jobs, reload, leaseMs } = props;
-  if (jobs === null) return null;
-  const { active, recent } = jobs;
-  if (active.length === 0 && recent.length === 0) return null;
-  // M-4: горизонт ожидания — лиз job из /api/meta, не хардкод
-  const eta = `обычно до ${Math.max(1, Math.round(leaseMs / 60_000))} минут`;
-  return (
-    <Card view="outlined" className="rh-me-card" style={{ marginBottom: "var(--g-spacing-5)" }}>
-      <Flex direction="column" gap={3}>
-        <Flex direction="column" gap={1}>
-          <Text variant="subheader-2">Мои задания</Text>
-          {/* M-12: без жаргона про «ночная волна/клоны» */}
-          <Text color="secondary">Ваши сканы идут в отдельной быстрой очереди – ночной обход рейтинга им не мешает.</Text>
-        </Flex>
-        {active.map((j) => (
-          <Flex key={j.jobId} gap={3} alignItems="center" wrap>
-            <Label theme={j.phase === "running" ? "info" : "unknown"}>{jobPhaseLabel(j)}</Label>
-            <JobSlug slug={j.slug} />
-            <Text color="secondary">{eta}</Text>
-          </Flex>
-        ))}
-        {recent.length > 0 && (
-          <Flex direction="column" gap={2}>
-            <Text variant="subheader-3">Последние</Text>
-            {recent.map((j) => (
-              <Flex key={j.jobId} gap={3} alignItems="baseline" wrap>
-                <Label theme={j.phase === "failed" ? "danger" : j.phase === "refused" ? "unknown" : "success"}>{jobPhaseLabel(j)}</Label>
-                {/* Ф2.20: «Последние» кликабельны — карточка в одном клике */}
-                <JobSlug slug={j.slug} link />
-                {j.error && <Text color="secondary">– {j.error}</Text>}
-              </Flex>
-            ))}
-          </Flex>
-        )}
-        <Button size="m" view="outlined" onClick={reload}>
-          Обновить
-        </Button>
-      </Flex>
-    </Card>
-  );
-}
-
 interface FavoritesResponse {
   entries: import("../api/me").FavoriteEntry[];
 }
@@ -930,33 +1098,28 @@ const ACCESS_STATES: Record<"yes" | "no" | "unknown", { theme: "success" | "unkn
 
 /**
  * В4.7 (П3.2, П3.4): права зрителя на репозиторий — компонентами, как на
- * карточке (`Label` с иконкой; закрытое — замком), а не текстовыми глифами
- * с отдельной легендой. Без проверки — не «еще не проверяли» (наше
- * внутреннее состояние), а что сделать, чтобы узнать.
+ * карточке (`Label` с иконкой; закрытое — замком), а не текстовыми глифами.
+ * В4.8: чипы стоят рядом с именем, как «Protected» и «Default» у веток
+ * SourceCraft. Без проверки строка молчит — фраза-инструкция в каждой строке
+ * была шумом; путь «узнать» — пункт «Проверить доступ» в меню строки.
+ * Дата проверки — в подсказке чипа, а не отдельным реквизитом.
  */
-function AccessRights({ access, hasPat }: { access: import("../api/me").FavoriteEntry["access"]; hasPat: boolean }) {
-  if (!access) {
-    return (
-      <Text variant="body-short" color="secondary">
-        {hasPat
-          ? "Нажмите «Проверить доступ», чтобы узнать, какие данные репозитория открывает ваш токен."
-          : "Добавьте токен в Настройках, чтобы проверить доступ к данным репозитория."}
-      </Text>
-    );
-  }
+function AccessRights({ access, lastCheckedAt }: { access: import("../api/me").FavoriteEntry["access"]; lastCheckedAt: string | null }) {
+  if (!access) return null;
+  const checked = lastCheckedAt ? ` (проверено ${fmtDateTime(lastCheckedAt)})` : "";
   return (
-    <Flex gap={1} alignItems="center" wrap>
+    <Flex gap={1} alignItems="center" className="rh-repo-item__labels">
       {ACCESS_CHANNELS.map(({ key, title }) => {
         const value = access[key];
         const state = ACCESS_STATES[value === true ? "yes" : value === false ? "no" : "unknown"];
         return (
-          <Label key={key} theme={state.theme} size="xs" icon={<Icon data={state.icon} size={12} />} title={`${title}: ${state.hint}`}>
+          <Label key={key} theme={state.theme} size="xs" icon={<Icon data={state.icon} size={12} />} title={`${title}: ${state.hint}${checked}`}>
             {title}
           </Label>
         );
       })}
       {access.own && (
-        <Label theme="info" size="xs" title="У вас есть доступ к данным CI/CD или Security, либо репозиторий приватный">
+        <Label theme="utility" size="xs" title="У вас есть доступ к данным CI/CD или Security, либо репозиторий приватный">
           ваш
         </Label>
       )}

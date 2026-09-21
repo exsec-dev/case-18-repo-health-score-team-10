@@ -1004,3 +1004,188 @@ button.rh-category:focus-visible {
 .rh-view-tabs {
   font-variant-numeric: tabular-nums;
 }
+
+/* ---------- «Мои репозитории» (В4.8, вариант A + плитки C) ----------
+ * Ориентир — списки SourceCraft, замер computed style 21.09.2026
+ * (sourcecraft.dev/sourcecraft/repos, …/issues, …/branches):
+ *   шапка: заголовок header-1 20/24, счетчик рядом цветом hint, справа
+ *     TextInput m (28px) и пара Select + кнопка направления (pin);
+ *   строка `ListingItem`: padding 12px, gap 16px, квадратный аватар 40px
+ *     радиусом 8px, колонка содержимого с шагом 6px, имя subheader-2
+ *     15/20, мета 13/16 вторичным цветом с шагом 8px, делитель 1px
+ *     `line-generic` (rgba(255,255,255,.15) в темной теме), ховер строки;
+ *   карточка-сводка (бейдж качества репозитория): Card outlined, радиус 12px,
+ *     padding 12px, число header-1, подпись body-1 secondary. */
+
+.rh-me-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--g-spacing-3);
+}
+
+.rh-me-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--g-spacing-2);
+}
+
+.rh-me-search {
+  width: 240px;
+}
+
+.rh-me-search__icon {
+  margin-inline: var(--g-spacing-2);
+  color: var(--g-color-text-secondary);
+}
+
+.rh-summary {
+  display: grid;
+  /* 4 полосы шкалы — 4 колонки; на узкой ширине 2×2, а не «3 + 1» */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--g-spacing-3);
+}
+
+.rh-summary__tile.g-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  box-sizing: border-box;
+  padding: var(--g-spacing-3);
+  border-radius: 12px;
+  text-align: start;
+}
+
+/* место под текст ошибки поля (errorPlacement="outside"), чтобы он не
+   прижимался к подвалу диалога */
+.rh-add-repo {
+  min-height: 84px;
+}
+
+.rh-repo-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rh-repo-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--g-spacing-4);
+  padding: var(--g-spacing-3);
+  border-bottom: 1px solid var(--g-color-line-generic);
+}
+
+.rh-repo-item:last-child {
+  border-bottom: 0;
+}
+
+.rh-repo-item:hover {
+  background: var(--g-color-base-simple-hover);
+}
+
+/* Слой-ссылка на всю строку: лежит над статичным содержимым, поэтому клик по
+   пустому месту уходит в карточку; ссылки и кнопки подняты над ним. */
+.rh-repo-item__cover {
+  position: absolute;
+  inset: 0;
+}
+
+.rh-repo-item .g-avatar {
+  --g-avatar-size: 40px;
+  --_--border-radius: 8px;
+}
+
+.rh-repo-item__content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.rh-repo-item__head {
+  display: flex;
+  align-items: center;
+  gap: var(--g-spacing-2);
+  min-width: 0;
+}
+
+.rh-repo-item__name {
+  min-width: 0;
+}
+
+.rh-repo-item__labels {
+  flex-shrink: 0;
+}
+
+.rh-repo-item__content .rh-meta {
+  gap: var(--g-spacing-1) var(--g-spacing-2);
+  margin-top: 0;
+}
+
+.rh-repo-item__name,
+.rh-repo-item__link,
+.rh-repo-item__labels,
+.rh-repo-item__state,
+.rh-repo-item__actions {
+  position: relative;
+  z-index: 1;
+}
+
+.rh-repo-item__state {
+  display: flex;
+  flex: none;
+  justify-content: flex-end;
+  min-width: 128px;
+}
+
+.rh-repo-item__score {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  font-variant-numeric: tabular-nums;
+}
+
+.rh-repo-item__actions {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--g-spacing-1);
+}
+
+@media (max-width: 720px) {
+  .rh-me-search {
+    width: 100%;
+  }
+
+  .rh-repo-item {
+    flex-wrap: wrap;
+    row-gap: var(--g-spacing-2);
+  }
+
+  .rh-repo-item__content {
+    flex-basis: calc(100% - 56px);
+  }
+
+  .rh-repo-item__state {
+    justify-content: flex-start;
+    min-width: 0;
+    margin-inline-start: 56px;
+  }
+
+  .rh-repo-item__score {
+    align-items: flex-start;
+  }
+
+  .rh-repo-item__actions {
+    margin-inline-start: auto;
+  }
+
+  .rh-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

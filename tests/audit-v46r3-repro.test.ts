@@ -110,7 +110,10 @@ describe("В4.6 круг 3: разделы пользователя и обол�
     const app = web("App.tsx");
     const reposPage = me.slice(me.indexOf("export function MePage"), me.indexOf("export function SettingsPage"));
     const settingsPage = me.slice(me.indexOf("export function SettingsPage"), me.indexOf("function AccountSection"));
-    expect(reposPage).toContain('<PageHeader title="Мои репозитории" />');
+    // В4.8: заголовок раздела переехал в шапку списка (образец SourceCraft) —
+    // `PageHeader` над отдельным `h2` дублировал его; страница — это список
+    expect(reposPage).toContain("<MyReposSection");
+    expect(me).toMatch(/<Text variant="header-1" as="h1">\s*Мои репозитории\s*<\/Text>/);
     expect(reposPage).not.toContain("<PatSection");
     expect(settingsPage).not.toContain('<PageHeader title="Настройки"');
     expect(settingsPage).toContain("<PatSection");

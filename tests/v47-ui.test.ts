@@ -78,15 +78,17 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
     return start < 0 ? "" : src.slice(start, src.indexOf(to, start + from.length));
   };
 
-  test("П3.2: кнопка и строка без проверки говорят, что делать", () => {
+  // В4.8 (решение 21.09, вариант A): фраза-инструкция в КАЖДОЙ строке без
+  // проверки была шумом — строка без проверки молчит, путь «узнать» — пункт
+  // меню строки с прежним названием действия; без токена путь — плашка П3.3.
+  test("П3.2 → В4.8: действие «Проверить доступ» — пунктом меню строки; строка без проверки молчит", () => {
     const rights = slice("function AccessRights", "\n}\n");
     expect({
-      button: /<Button[^>]*onClick=\{onCheck\}[^>]*>\s*Проверить доступ\s*<\/Button>/.test(me()),
+      menuItem: /\{ text: "Проверить доступ", action: onCheck/.test(me()),
       oldButton: me().includes("Проверить права"),
-      withPat: rights.includes("Нажмите «Проверить доступ», чтобы узнать, какие данные репозитория открывает ваш токен."),
-      withoutPat: rights.includes("Добавьте токен в Настройках, чтобы проверить доступ к данным репозитория."),
+      silentWithoutCheck: /if \(!access\) return null;/.test(rights),
       internalState: /проверяли/.test(me()),
-    }).toEqual({ button: true, oldButton: false, withPat: true, withoutPat: true, internalState: false });
+    }).toEqual({ menuItem: true, oldButton: false, silentWithoutCheck: true, internalState: false });
   });
 
   test("П3.3: плашка без PAT — CabinetAlert со ссылкой-кнопкой на /settings, до списка", () => {
@@ -96,7 +98,7 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
       banner: section.includes("{!hasPat && ("),
       alert: /^\{!hasPat && \(\s*<CabinetAlert\s+theme="info"/.test(banner),
       link: /linkProps\("\/settings"\)/.test(banner.slice(0, 800)),
-      beforeList: section.indexOf("{!hasPat && (") < section.indexOf('<ul className="rh-list">'),
+      beforeList: section.indexOf("{!hasPat && (") < section.indexOf('<ul className="rh-repo-list">'),
       notToast: !/toaster\.add\([^)]*токен/.test(section),
     }).toEqual({ banner: true, alert: true, link: true, beforeList: true, notToast: true });
   });
@@ -116,7 +118,8 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
     expect((code.match(/<Alert\b/g) ?? []).length).toBe(1);
     expect(code).toMatch(/<Alert theme=\{theme\} view="outlined" size="m"/);
     // все плашки кабинета идут через обёртку
-    expect((code.match(/<CabinetAlert\b/g) ?? []).length).toBe(8);
+    // В4.8: 7 — плашка исхода «Проверки доступа» стала тостом, как у остальных действий строки
+    expect((code.match(/<CabinetAlert\b/g) ?? []).length).toBe(7);
   });
 
   test("П3.4: слаг — общим RepoSlug; пустое состояние — EmptyState; паддинг карточек — один класс", () => {
@@ -128,12 +131,15 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
       emptyState: /entries\.length === 0 && \(\s*<EmptyState/.test(code),
       inlinePadding: /padding: "var\(--g-spacing-[45]\)"/.test(code),
       cardClass: (code.match(/className="rh-me-card"/g) ?? []).length,
-    }).toEqual({ repoSlug: true, assembled: false, codeSlug: false, emptyState: true, inlinePadding: false, cardClass: 2 });
+      // В4.8: 1 — карточка журнала заданий убрана из тела страницы, осталась у JobsBell
+    }).toEqual({ repoSlug: true, assembled: false, codeSlug: false, emptyState: true, inlinePadding: false, cardClass: 1 });
     expect(web("layout.css")).toMatch(/\.rh-me-card \{[^}]*padding: var\(--g-spacing-3\) var\(--g-spacing-4\)/);
   });
 
   test("П3.4 (У26): счётчик рекомендаций — ссылкой на карточку с открытым табом; null — строки нет", () => {
     const row = slice("function RepoRow", "\nfunction ");
-    expect(row).toMatch(/entry\.recommendationsCount !== null && \(\s*<MetaItem>\s*<Link \{\.\.\.linkProps\(`\$\{repoHref\(org, repo\)\}\?tab=\$\{TAB_RECOMMENDATIONS\}`\)\}>\{recommendationsText\(entry\.recommendationsCount\)\}<\/Link>/);
+    // В4.8: адрес карточки — одна константа строки `href`; у ссылки класс слоя над слоем-ссылкой строки
+    expect(row).toContain("const href = repoHref(org, repo);");
+    expect(row).toMatch(/entry\.recommendationsCount !== null && \(\s*<MetaItem>\s*<Link \{\.\.\.linkProps\(`\$\{href\}\?tab=\$\{TAB_RECOMMENDATIONS\}`\)\}[^>]*>\s*\{recommendationsText\(entry\.recommendationsCount\)\}\s*<\/Link>/);
   });
 });

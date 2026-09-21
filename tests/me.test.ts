@@ -171,7 +171,10 @@ describe("UI-ветки круга 2 (source-assert, Б2)", () => {
   test("З4: bad-статус имеет честный текст; ветка индекса срабатывает раньше статус-текста", () => {
     const src = srcOf("MePage.tsx");
     // В4.7 (Б6, П4.3): правило языка UI в кабинете — среднее тире вместо длинного
-    expect(src.includes("Анализ завершился ошибкой – повторите")).toBe(true);
+    // В4.8: состояние — короткой плашкой «Ошибка анализа» (как метки SourceCraft),
+    // что делать — в подсказке; смысл З4 тот же
+    expect(src.includes("Ошибка анализа")).toBe(true);
+    expect(src.includes("Анализ завершился ошибкой – запустите его еще раз")).toBe(true);
     const indexBranch = src.indexOf("entry.healthcraftIndex !== null");
     const badBranch = src.indexOf('entry.lastScanStatus === "bad"');
     expect({ indexBranch, badBranch, indexFirst: indexBranch < badBranch }).toMatchObject({ indexFirst: true });
