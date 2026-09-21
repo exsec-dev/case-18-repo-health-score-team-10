@@ -14,7 +14,7 @@ import {
   type PlaceholderContainerActionProps,
 } from "@gravity-ui/uikit";
 import { useEffect, useState, type ReactNode } from "react";
-import { SCORE_LEGEND_TITLE, SCORE_SCALE, fmtCoverage, sentence, slugOf } from "./format";
+import { SCORE_LEGEND_TITLE, SCORE_SCALE, avatarTone, fmtCoverage, sentence, slugOf } from "./format";
 
 /** Заголовок страницы: header-1 20/24 и одна строка пояснения, как у SourceCraft. */
 export function PageHeader({ title, description, end }: { title: ReactNode; description?: ReactNode; end?: ReactNode }) {
@@ -93,16 +93,8 @@ export function ScoreLegend({ coverageNullBelow }: { coverageNullBelow?: number 
 /**
  * Аватар репозитория: logo.url платформы, а без него или при ошибке загрузки
  * (нет сети, битая ссылка) — инициалы: внешняя картинка не обязательна для UI.
+ * Тон инициалов — `avatarTone` из `format.ts`, общий с PDF-отчётом (В4.7 круг 2).
  */
-/** Цвет инициалов по имени — стабильный, из спокойных семантических тонов темы. */
-const AVATAR_TONES = ["info", "utility", "positive", "misc"] as const;
-
-function avatarTone(name: string): (typeof AVATAR_TONES)[number] {
-  let h = 0;
-  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return AVATAR_TONES[h % AVATAR_TONES.length]!;
-}
-
 export function RepoAvatar({ repo, logoUrl, size }: { repo: string; logoUrl: string | null; size: AvatarSize }) {
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -129,11 +121,20 @@ export function RepoAvatar({ repo, logoUrl, size }: { repo: string; logoUrl: str
   );
 }
 
-/** Язык с цветной точкой, как в списках SourceCraft; цвет — language.color платформы. */
-export function LanguageName({ name, color }: { name: string | null; color: string | null }) {
+/**
+ * Язык с цветной точкой, как в списках SourceCraft; цвет — language.color платформы.
+ * В4.7 круг 2 (Р2.3): у известного языка без цвета платформы (на 21.09 —
+ * Rich Text Format) точка нейтральная, а не пропадает — цвет не выдумывается.
+ * «Язык не определен» (`name === null` или `noLanguage`) точки не получает:
+ * это отсутствие языка, а не язык.
+ */
+export function LanguageName({ name, color, noLanguage = false }: { name: string | null; color: string | null; noLanguage?: boolean }) {
+  const known = name !== null && !noLanguage;
   return (
     <span className="rh-lang">
-      {color && <span className="rh-lang__dot" style={{ background: color }} aria-hidden="true" />}
+      {known && (
+        <span className={color ? "rh-lang__dot" : "rh-lang__dot rh-lang__dot_neutral"} style={color ? { background: color } : undefined} aria-hidden="true" />
+      )}
       {name ?? "язык не определен"}
     </span>
   );

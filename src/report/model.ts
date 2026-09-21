@@ -17,6 +17,9 @@
  *  - `em`       — `_курсив_` с `mdEscape` внутри (заголовок репозитория);
  *  - `strong`   — `**полужирный**`, содержимое как есть;
  *  - `cell`     — значение ячейки таблицы через `cell()` (JSON, сплющивание, кап 300);
+ *  - `link`     — адрес (ссылка на репозиторий в SourceCraft): в MD — голый URL
+ *                 как есть (MD не меняется, В4.7 круг 2), в PDF — синяя
+ *                 кликабельная ссылка;
  *  - `prepared` — готовый MD-фрагмент и его же плоский текст, собранные
  *                 вызывающим раздельно (строка итога `summaryLine`: в MD ей
  *                 передаётся экранированная проблема, в текст — сырая).
@@ -28,6 +31,7 @@ export type Inline =
   | { kind: "em"; text: string }
   | { kind: "strong"; text: string }
   | { kind: "cell"; value: unknown }
+  | { kind: "link"; text: string }
   | { kind: "prepared"; md: string; text: string };
 
 /** Строка — последовательность фрагментов. */
@@ -61,6 +65,7 @@ export const code = (value: string): Inline => ({ kind: "code", text: value });
 export const em = (value: string): Inline => ({ kind: "em", text: value });
 export const strong = (value: string): Inline => ({ kind: "strong", text: value });
 export const cellValue = (value: unknown): Inline => ({ kind: "cell", value });
+export const link = (url: string): Inline => ({ kind: "link", text: url });
 export const prepared = (md: string, plain: string): Inline => ({ kind: "prepared", md, text: plain });
 
 // ---------- плоский текст ----------

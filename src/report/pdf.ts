@@ -23,6 +23,7 @@ import pdfmake from "pdfmake";
 import { join, resolve, sep } from "node:path";
 import type { RepoCard } from "../api/repos";
 import { buildReportModel } from "./markdown";
+import { avatarInitials, avatarTone, type AvatarTone } from "../web/format";
 import { cellPlain, type Block, type Inline, type InlineLine, type ReportModel } from "./model";
 
 /** Каталог шрифта — от модуля, не от cwd: сервер запускают из разных мест. */
@@ -59,7 +60,7 @@ pdfmake.setLocalAccessPolicy(insideFontDir);
 
 // ---------- модель → описание документа pdfmake ----------
 
-type PdfText = { text: string; style?: string; bold?: boolean; italics?: boolean };
+type PdfText = { text: string; style?: string; bold?: boolean; italics?: boolean; link?: string };
 type PdfNode = Record<string, unknown>;
 
 const COLORS = {
@@ -68,7 +69,38 @@ const COLORS = {
   rule: "#d1d9e0",
   headerFill: "#f3f5f7",
   codeFill: "#eef1f4",
+  link: "#0969da",
 };
+
+/**
+ * Тона аватара для PDF — светлая тема Gravity (фон `base-<tone>-light`, текст
+ * `text-<tone>`), снятые в hex: печатный документ живёт на белом и CSS-токенов
+ * не знает. Карточка берёт те же тона токенами (`RepoAvatar`).
+ */
+const AVATAR_COLORS: Record<AvatarTone, { bg: string; fg: string }> = {
+  info: { bg: "#e5f0fc", fg: "#0b62c5" },
+  utility: { bg: "#f1e8fc", fg: "#8f33d9" },
+  positive: { bg: "#e5f5e9", fg: "#2e8540" },
+  misc: { bg: "#eef0f2", fg: "#5c6570" },
+};
+
+const AVATAR_SIZE = 26;
+
+/**
+ * В4.7 круг 2 (Р2.5, вариант (а) владельца 21.09): аватар из букв рядом с
+ * названием — рисуется локально, без сети (логотип платформы не качается).
+ * Оформление, а не содержание: в MD его нет, сверка текста его не видит.
+ */
+function avatarNode(name: string): PdfNode {
+  const { bg, fg } = AVATAR_COLORS[avatarTone(name)];
+  return {
+    width: AVATAR_SIZE,
+    stack: [
+      { canvas: [{ type: "rect", x: 0, y: 0, w: AVATAR_SIZE, h: AVATAR_SIZE, r: 5, color: bg }] },
+      { text: avatarInitials(name), color: fg, bold: true, fontSize: 10, alignment: "center", relativePosition: { x: 0, y: -AVATAR_SIZE + 7 } },
+    ],
+  };
+}
 
 function inlineNode(fragment: Inline): PdfText {
   switch (fragment.kind) {
@@ -80,6 +112,9 @@ function inlineNode(fragment: Inline): PdfText {
       return { text: fragment.text, bold: true };
     case "cell":
       return { text: cellPlain(fragment.value) };
+    case "link":
+      // В4.7 круг 2 (Р2.5): ссылка на оригинал в SourceCraft — синяя и кликабельная
+      return { text: fragment.text, link: fragment.text, style: "link" };
     case "prepared":
       return { text: fragment.text };
     default:
@@ -163,7 +198,13 @@ function blockNode(block: Block): PdfNode {
  * текста с MD (tests/report-pdf.test.ts): текст собирается из описания ДО
  * рендера, эталон — MD фикстурных карточек.
  */
-export function buildPdfDocument(model: ReportModel): PdfNode {
+export function buildPdfDocument(model: ReportModel, opts: { avatarName?: string } = {}): PdfNode {
+  const content = model.blocks.map(blockNode);
+  const first = model.blocks[0];
+  // заголовок отчёта — рядом с аватаром из букв (Р2.5); текст заголовка тот же
+  if (opts.avatarName && first?.kind === "heading" && first.level === 1) {
+    content[0] = { columns: [avatarNode(opts.avatarName), { ...content[0], width: "*", margin: [10, 2, 0, 8] }], columnGap: 0, marginBottom: 4 };
+  }
   return {
     info: { title: model.title, creator: "SourceCraft Repo Health" },
     pageSize: "A4",
@@ -178,6 +219,7 @@ export function buildPdfDocument(model: ReportModel): PdfNode {
       table: { fontSize: 8, margin: [0, 2, 0, 8] },
       tableHeader: { bold: true, color: COLORS.secondary },
       code: { background: COLORS.codeFill },
+      link: { color: COLORS.link },
       footer: { fontSize: 7.5, color: COLORS.secondary },
     },
     // колонтитул — оформление, а не содержание: имя отчёта и номер страницы
@@ -188,13 +230,13 @@ export function buildPdfDocument(model: ReportModel): PdfNode {
       ],
       margin: [40, 16, 40, 0],
     }),
-    content: model.blocks.map(blockNode),
+    content,
   };
 }
 
 /** PDF отчёта карточки — те же данные, что `renderRepoReport` (MD). */
 export async function renderRepoPdf(card: RepoCard): Promise<Buffer> {
-  return pdfmake.createPdf(buildPdfDocument(buildReportModel(card))).getBuffer();
+  return pdfmake.createPdf(buildPdfDocument(buildReportModel(card), { avatarName: card.repo.repo })).getBuffer();
 }
 
 /** Текст честной ошибки PDF — пользователю (кнопка показывает его как есть). */

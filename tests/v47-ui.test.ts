@@ -33,7 +33,8 @@ describe("Б2 (П2): мультивыбор языка в рейтинге", () 
 
   test("у каждой опции цветной кружок из фасета (LanguageName с facet.color)", () => {
     const src = rating();
-    expect(src).toMatch(/color: f\.color/);
+    // В4.7 круг 2: построение опций переехало в чистый модуль lang-filter.ts (Р2.1, Р2.2)
+    expect(web("lang-filter.ts")).toMatch(/color: f\.color/);
     expect(src).toMatch(/function LangOption[\s\S]{0,600}<LanguageName name=\{[^}]+\} color=\{d\?\.color \?\? null\}/);
   });
 

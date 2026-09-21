@@ -27,7 +27,7 @@ import {
   Text,
   TextInput,
 } from "@gravity-ui/uikit";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { SortKey } from "../api/repos";
 import type { MetaResponse, RatingResponse } from "./api";
 import { useJson } from "./api";
@@ -52,6 +52,7 @@ import { useMediaQuery } from "./prefs";
 import { linkProps, navigate, repoHref } from "./router";
 import { Page } from "./Shell";
 import { AsideSection, EmptyState, LanguageName, PageHeader, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows } from "./ui";
+import { LANG_NONE, LANG_NONE_TITLE, langOptions, type Facets, type LangOptionData } from "./lang-filter";
 
 type Item = RatingResponse["items"][number];
 
@@ -60,8 +61,6 @@ type Item = RatingResponse["items"][number];
  * В4.7 (П2): опции «все» больше нет — все языки означает «ничего не выбрано»
  * (параметра `lang` нет), решение владельца.
  */
-const LANG_NONE = " none";
-const LANG_NONE_TITLE = "не определен";
 
 /**
  * Сводка выбранного в поле («Go, Rust +2»): имена идут, пока укладываются в
@@ -162,6 +161,12 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
   }
 
   const data = state.kind === "ok" ? state.data : null;
+  // В4.7 круг 2 (Р2.1): пока грузится новый набор, список языков строится из
+  // фасетов последнего успешного ответа — иначе на время загрузки из него
+  // пропадали все опции, кроме выбранных, и у тех — цвет и счётчик. Фасеты
+  // от языкового фильтра не зависят, поэтому прежние верны для нового набора.
+  const lastFacets = useRef<Facets>([]);
+  if (data) lastFacets.current = data.facets.languages;
   // M-9: без /api/meta категории не сыплются ключами — имена из констант
   const categoryNames: Record<string, string> = useMemo(
     () => Object.fromEntries((meta?.categories ?? []).map((c) => [c.key, c.title])),
@@ -244,7 +249,7 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
           popupClassName="rh-lang-popup"
           virtualizationThreshold={1000}
           value={langValues}
-          options={langOptions(data, langValues)}
+          options={langOptions(lastFacets.current, langValues)}
           renderOption={(option) => <LangOption option={option} checked={langValues.includes(option.value)} />}
           renderSelectedOption={(option, index) => <LangSummaryPart value={option.value} index={index} values={langValues} />}
           onUpdate={(v) => setParams({ lang: v.length === 0 ? null : v.map((x) => (x === LANG_NONE ? "" : x)) })}
@@ -527,40 +532,13 @@ function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generat
   );
 }
 
-interface LangOptionData {
-  title: string;
-  count: number | null;
-  color: string | null;
-}
-
-/**
- * Опции фильтра языка — из фасетов (по всему каталогу, без языкового
- * фильтра). Выбранный язык, которого нет в фасетах (старая ссылка на язык,
- * ушедший из каталога), остаётся опцией: иначе его нельзя было бы снять.
- */
-function langOptions(data: RatingResponse | null, selected: string[]): SelectOption<LangOptionData>[] {
-  const facets = data?.facets.languages ?? [];
-  const options: SelectOption<LangOptionData>[] = facets.map((f) => ({
-    value: f.language === null ? LANG_NONE : f.language,
-    text: f.language ?? LANG_NONE_TITLE,
-    data: { title: f.language ?? LANG_NONE_TITLE, count: f.count, color: f.color },
-  }));
-  for (const value of selected) {
-    if (!options.some((o) => o.value === value)) {
-      const title = value === LANG_NONE ? LANG_NONE_TITLE : value;
-      options.push({ value, text: title, data: { title, count: null, color: null } });
-    }
-  }
-  return options;
-}
-
 /** Строка опции: неинтерактивный чекбокс (клик ловит сама опция), кружок языка, имя и счётчик. */
 function LangOption({ option, checked }: { option: SelectOption<LangOptionData>; checked: boolean }) {
   const d = option.data;
   return (
     <Flex gap={2} alignItems="center" className="rh-lang-option">
       <Checkbox size="m" checked={checked} controlProps={{ tabIndex: -1, "aria-hidden": true }} style={{ pointerEvents: "none" }} />
-      <LanguageName name={d?.title ?? option.value} color={d?.color ?? null} />
+      <LanguageName name={d?.title ?? option.value} color={d?.color ?? null} noLanguage={option.value === LANG_NONE} />
       {d?.count !== null && d?.count !== undefined && <Text color="secondary">{fmtCount(d.count)}</Text>}
     </Flex>
   );

@@ -307,7 +307,8 @@ function ReportMenu({ mdHref, pdfHref, pdfName }: { mdHref: string; pdfHref: str
       size="m"
       popupProps={{ placement: "bottom-end" }}
       renderSwitcher={(props) => (
-        <Button {...props} view="normal" size="m" aria-haspopup="menu">
+        // В4.7 круг 2 (Р2.4): пока PDF собирается, кнопка показывает спиннер
+        <Button {...props} view="normal" size="m" aria-haspopup="menu" loading={pdfBusy}>
           <Icon data={ArrowDownToLine} size={16} />
           Отчет
           <Icon data={ChevronDown} size={16} />

@@ -22,6 +22,7 @@ import { SECURITY_PUBLIC_NOTE, accessLockText, contributionText, fmtSigned, gitL
 import {
   CELL_MAX_CHARS,
   cellValue,
+  link,
   code,
   em,
   escaped,
@@ -103,6 +104,8 @@ function inlineMd(fragment: Inline): string {
       return `**${fragment.text}**`;
     case "cell":
       return cell(fragment.value);
+    case "link":
+      return fragment.text;
     case "prepared":
       return fragment.md;
   }
@@ -141,7 +144,7 @@ function headerSection(card: RepoCard): Block[] {
   if (repo.title && repo.title !== repo.repo) out.push(para([em(repo.title)]));
   out.push(
     list([
-      line(`Репозиторий: ${repo.webUrl}`),
+      [text("Репозиторий: "), link(repo.webUrl)],
       // Ф2.9: один язык (RU) — статусы и триггеры словами, как на карточке
       line(`Скан: ${scan ? `#${scan.id} от ${fmtDateTime(scan.finishedAt ?? scan.startedAt)} (статус ${scanStatusText(scan.status)}, запуск ${scanTriggerText(scan.trigger)})` : "не выполнялся"}`),
       line(`Модель: ${score ? score.modelVersion : "—"}`),
