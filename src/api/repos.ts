@@ -879,6 +879,22 @@ export function getRepoCard(
           scored: number;
         } | null);
 
+  // В4.8.5 (К8.5.10, С6-6): при РАВНЫХ индексах рейтинг упорядочивает строки
+  // по org/repo (compareItems) — место на карточке считается тем же правилом,
+  // иначе «#3» на карточке расходилось с позицией строки
+  const tiesBefore =
+    ranking === null
+      ? 0
+      : (
+          db
+            .query(
+              `SELECT r.org_slug, r.repo_slug FROM scores sc JOIN repos r ON r.id = sc.repo_id
+               WHERE sc.model_version = ? AND r.rating_active = 1 AND r.visibility = 'public'
+                 AND sc.scan_id = ${LAST_ELIGIBLE_SCAN_SQL} AND sc.healthcraft_index = ?`,
+            )
+            .all(MODEL_VERSION, MODEL_VERSION, publicRow.healthcraft_index) as { org_slug: string; repo_slug: string }[]
+        ).filter((t) => `${t.org_slug}/${t.repo_slug}`.localeCompare(`${r.org_slug}/${r.repo_slug}`) < 0).length;
+
   const score: CardScore = {
     healthcraftIndex: publicRow.healthcraft_index,
     indexCoverage: publicRow.index_coverage,
@@ -886,7 +902,7 @@ export function getRepoCard(
     repoHealthScore: fullOpen ? roundTotal(fullTotals.repoHealthScore) : null,
     repoHealthCoverage: fullOpen ? Math.round(fullTotals.repoHealthCoverage * 1000) / 1000 : null,
     fullLocked: !fullOpen,
-    rank: ranking === null ? null : ranking.above + 1,
+    rank: ranking === null ? null : ranking.above + tiesBefore + 1,
     rankedTotal: ranking === null ? null : ranking.scored,
     modelVersion: publicRow.model_version,
     computedAt: publicRow.computed_at,

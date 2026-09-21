@@ -53,16 +53,21 @@ describe("Б4 (П1): кнопка PDF на карточке", () => {
     return src.slice(start, src.indexOf("\n}\n", start));
   };
 
-  test("PDF качается через fetch + blob, на сбое — тост с текстом сервера, MD-пункт не тронут", () => {
+  // ПЕРЕВОРОТ (В4.8.5, К8.5.11, С7-1/С7-2): MD качается так же, как PDF
+  // (fetch + blob), а не ссылкой `href` — любой сбой теперь тост в приложении, а
+  // не сырой JSON вместо приложения; текст тоста — по коду ответа
+  // (`reportFailureText`), а не сырым сообщением сервера с советом про MD
+  test("PDF и MD качаются через fetch + blob, на сбое — тост с текстом по коду", () => {
     const m = menu();
     expect({
-      fetches: m.includes("await fetch(pdfHref)"),
+      fetches: m.includes("res = await fetch(href)"),
       blob: m.includes("URL.createObjectURL(await res.blob())"),
-      checksType: m.includes('startsWith("application/pdf")'),
+      checksType: m.includes('kind === "md" ? "text/markdown" : "application/pdf"') && m.includes(".startsWith(expected)"),
       toast: /toaster\.add\(\{[\s\S]{0,200}theme: "danger"/.test(m),
-      serverMessage: m.includes("body?.error?.message"),
-      mdLink: m.includes('{ text: "Markdown (.md)", iconStart: <Icon data={LogoMarkdown} size={16} />, href: mdHref }'),
-    }).toEqual({ fetches: true, blob: true, checksType: true, toast: true, serverMessage: true, mdLink: true });
+      textByCode: m.includes("reportFailureText(kind, status, code)"),
+      mdAction: m.includes('{ text: "Markdown (.md)", iconStart: <Icon data={LogoMarkdown} size={16} />, disabled: busy !== null, action: () => void download("md") }'),
+      mdHref: m.includes("href: mdHref"),
+    }).toEqual({ fetches: true, blob: true, checksType: true, toast: true, textByCode: true, mdAction: true, mdHref: false });
   });
 
   test("адрес и имя файла — от слага карточки, рядом с report.md (MD-адрес прежний)", () => {
@@ -81,14 +86,17 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
   // В4.8 (решение 21.09, вариант A): фраза-инструкция в КАЖДОЙ строке без
   // проверки была шумом — строка без проверки молчит, путь «узнать» — пункт
   // меню строки с прежним названием действия; без токена путь — плашка П3.3.
-  test("П3.2 → В4.8: действие «Проверить доступ» — пунктом меню строки; строка без проверки молчит", () => {
+  // ПЕРЕВОРОТ (В4.8.5, К8.5.14 (г), §2-В1): пункта «Проверить доступ» нет —
+  // права проверяются сами (при добавлении, после смены токена, фоном);
+  // остальное прежнее: кнопки «Проверить права» нет, строка без проверки молчит
+  test("П3.2 → В4.8 → В4.8.5: ручного действия проверки прав нет; строка без проверки молчит", () => {
     const rights = slice("function AccessRights", "\n}\n");
     expect({
-      menuItem: /\{ text: "Проверить доступ", action: onCheck/.test(me()),
+      menuItem: me().includes("Проверить доступ"),
       oldButton: me().includes("Проверить права"),
       silentWithoutCheck: /if \(!access\) return null;/.test(rights),
       internalState: /проверяли/.test(me()),
-    }).toEqual({ menuItem: true, oldButton: false, silentWithoutCheck: true, internalState: false });
+    }).toEqual({ menuItem: false, oldButton: false, silentWithoutCheck: true, internalState: false });
   });
 
   test("П3.3: плашка без PAT — CabinetAlert со ссылкой-кнопкой на /settings, до списка", () => {

@@ -327,6 +327,65 @@ export function scanTriggerText(trigger: string): string {
   }
 }
 
+/** Исход автопроверки прав при добавлении в избранное (ответ PUT, К8.5.14). */
+export interface FavoriteAddCheck {
+  status: "checked" | "failed" | "token_rejected" | "deferred" | "no_pat";
+  enqueue: { status: string; code: string | null } | null;
+}
+
+/**
+ * В4.8.5 (К8.5.14 (д), (е)): что случилось после добавления в избранное —
+ * права проверены сами, первый анализ своего поставлен сам. Ни одной фразы
+ * «запустите анализ» про чужой репозиторий (К8.5.14 (ж)).
+ */
+export function favoriteAddedText(check: FavoriteAddCheck | undefined): string {
+  if (!check) return "Добавлено в «Мои репозитории».";
+  switch (check.status) {
+    case "no_pat":
+      return "Добавьте токен в Настройках – сервис сам проверит права и откроет данные своих репозиториев.";
+    case "deferred":
+      return "Права проверим в фоне – итог появится в строке списка.";
+    case "failed":
+      return "Проверить права не удалось: SourceCraft сейчас не отвечает – проверим позже.";
+    case "token_rejected":
+      return "SourceCraft отклонил ваш токен – замените его в Настройках.";
+    default:
+      break;
+  }
+  const e = check.enqueue;
+  if (!e) return "Права проверены.";
+  if (e.status === "queued") return "Права проверены – запущен анализ, итог придет уведомлением.";
+  if (e.status === "deduplicated") return "Права проверены – анализ уже идет.";
+  if (e.status === "skipped") {
+    if (e.code === "not_own") return "Права проверены. Анализ запускается только для своих репозиториев – этот обновит ночной обход.";
+    if (e.code === "cooldown") return "Права проверены – анализ запускали недавно.";
+    return "Права проверены.";
+  }
+  switch (e.code) {
+    case "too_many_active":
+      return "Права проверены. Анализ не запущен: слишком много ваших анализов в очереди – дождитесь завершения.";
+    case "rate_limited":
+      return "Права проверены. Анализ не запущен: исчерпан часовой лимит запусков – попробуйте позже.";
+    default:
+      return "Права проверены. Анализ не запущен – попробуйте позже.";
+  }
+}
+
+/**
+ * В4.8.5 (К8.5.11, С7-2): текст тоста о сбое выгрузки отчёта — по коду.
+ * Совет «скачайте другой формат» — только когда другой формат действительно
+ * поможет (сбой сборки PDF); при 429/404/сети он упадёт так же.
+ */
+export function reportFailureText(kind: "md" | "pdf", status: number, code: string | null): string {
+  if (status === 0) return "Нет связи с сервером – проверьте подключение и повторите.";
+  if (status === 429) return "Слишком много открытий карточки за минуту – повторите чуть позже.";
+  if (status === 404) return "Репозиторий не найден или недоступен. Если вы входили, проверьте, не истекла ли сессия.";
+  if (code === "check_failed" || status === 503) return "SourceCraft сейчас не отвечает – не удалось проверить доступ, попробуйте позже.";
+  if (code === "pat_rejected") return "SourceCraft отклонил ваш токен – замените его в Настройках.";
+  if (kind === "pdf") return "Не удалось собрать PDF. Markdown-выгрузка – в этом же меню.";
+  return "Не удалось собрать отчет – попробуйте позже.";
+}
+
 /** Ошибка запроса для словаря текстов (К8.5.4): HTTP-статус (0 — сети нет), код и сообщение сервера. */
 export interface ErrorInput {
   status: number;

@@ -62,8 +62,10 @@ describe("Р2.3: язык без цвета платформы — нейтра�
 });
 
 describe("Р2.4: спиннер на кнопке «Отчет»", () => {
-  test("кнопка показывает loading, пока PDF собирается", () => {
-    expect(srcOf("src/web/RepoPage.tsx")).toContain('aria-haspopup="menu" loading={pdfBusy}');
+  // ПЕРЕВОРОТ (В4.8.5, К8.5.11): MD тоже качается через fetch — спиннер
+  // стоит, пока собирается любой из двух форматов (был только PDF)
+  test("кнопка показывает loading, пока отчет собирается", () => {
+    expect(srcOf("src/web/RepoPage.tsx")).toContain('aria-haspopup="menu" loading={busy !== null}');
   });
 });
 

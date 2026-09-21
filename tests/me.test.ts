@@ -190,10 +190,15 @@ describe("UI-ветки круга 2 (source-assert, Б2)", () => {
     expect({ indexBranch, badBranch, indexFirst: indexBranch < badBranch }).toMatchObject({ indexFirst: true });
   });
 
-  test("UX-6: слово «первый» в подсказке про токен — только на ветке без скана", () => {
+  // ПЕРЕВОРОТ (В4.8.5, К8.5.14 (ж), §2-В1): CTA «Добавьте токен … – и запустите
+  // анализ» противоречил правилу «анализ только своих» — без токена «свой» не
+  // известен, CTA анализ не обещает. Смысл UX-6 («не обещать того, чего не
+  // случится») сохранён строже: ни «первого», ни просто анализа в CTA нет
+  test("UX-6: подсказка про токен не обещает анализ (ни «первый», ни просто «запустите анализ»)", () => {
     const src = srcOf("RepoPage.tsx");
-    expect(src.includes('card.scan ? "Добавьте токен в Настройках – и запустите анализ" : "Добавьте токен в Настройках – и запустите первый анализ"')).toBe(true);
-    expect(src).toContain('href: "/settings"');
+    expect(src.includes('{ text: "Добавить токен в Настройках", view: "action", size: "l", href: "/settings" }')).toBe(true);
+    expect(src.includes("и запустите анализ")).toBe(false);
+    expect(src.includes("и запустите первый анализ")).toBe(false);
   });
 
   test("UX-7: сбой снятия звезды показывается тостом, не молчит", () => {

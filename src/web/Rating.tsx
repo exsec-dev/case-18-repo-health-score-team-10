@@ -31,6 +31,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { SortKey } from "../api/repos";
 import type { MetaResponse, RatingResponse } from "./api";
 import { useJson } from "./api";
+import { firstSortOrder, normalizeRatingSearch, pageBeyond } from "./ratingParams";
 import {
   CATEGORY_TITLES_RU,
   DEFINITION_NAME_WIDTH,
@@ -93,6 +94,18 @@ function langSummaryNames(values: string[]): number {
 const NOT_IN_RATING = new Set(["cicd", "security"]);
 
 /**
+ * В4.8.5 (К8.5.10, С5-3): категории рейтинга без /api/meta — имена из
+ * клиентских констант (порядок `CATEGORY_ORDER` сервера); веса неизвестны —
+ * панель методики их не рисует, колонки рисуются.
+ */
+const FALLBACK_CATEGORIES: MetaResponse["categories"] = ["documentation", "cicd", "security", "activity", "issues", "code"].map((key) => ({
+  key: key as MetaResponse["categories"][number]["key"],
+  title: CATEGORY_TITLES_RU[key] ?? key,
+  indexWeight: null,
+  scoreWeight: 0,
+}));
+
+/**
  * Подписи колонок — один словарь на шапку таблицы и на список «Колонки».
  * Категорийные колонки сюда не входят: их имена приходят из /api/meta.
  * «#» в шапке — знак, а не слово; в списке настройки он ничего не называл,
@@ -113,7 +126,14 @@ const COLUMN_TITLES: Record<string, string> = {
 /** Лайки — сортировкой и в настройке колонок, но не в виде по умолчанию: рейтинг не про популярность. */
 const HIDDEN_BY_DEFAULT = ["lang", "likes", "forks", "activity", "coverage", "scanned"];
 
-export function Rating({ search, meta }: { search: string; meta: MetaResponse | null }) {
+export function Rating({ search: rawSearch, meta, metaFailed = false }: { search: string; meta: MetaResponse | null; metaFailed?: boolean }) {
+  // В4.8.5 (К8.5.10, С5-2): неверные sort/order/per_page/page из старой ссылки
+  // заменяются дефолтом, адрес исправляется — сервер не получает заведомый 400
+  const normalized = useMemo(() => normalizeRatingSearch(rawSearch), [rawSearch]);
+  const search = normalized.search;
+  useEffect(() => {
+    if (normalized.changed) navigate(search === "" ? "/" : `/?${search}`, { replace: true });
+  }, [normalized.changed, search]);
   const params = useMemo(() => new URLSearchParams(search), [search]);
   // view — только режим показа страницы, серверу он не нужен
   const apiSearch = useMemo(() => {
@@ -149,7 +169,10 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
   const [hidden, setHidden] = useState<string[]>(HIDDEN_BY_DEFAULT);
 
   function setParams(patch: Record<string, string | string[] | null>, opts: { replace?: boolean; keepPage?: boolean } = {}): void {
-    const next = new URLSearchParams(search);
+    // В4.8.5 (К8.5.10, С5-5): база — ТЕКУЩИЙ адрес, а не снимок рендера:
+    // отложенный таймер поиска иначе откатывал выбранные за 300 мс язык,
+    // сортировку или страницу
+    const next = new URLSearchParams(window.location.search);
     for (const [key, value] of Object.entries(patch)) {
       next.delete(key);
       // массив — повторяемый параметр (`lang`, В4.7): каждое значение отдельно
@@ -165,6 +188,14 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
 
   const data = state.kind === "ok" ? state.data : state.kind === "loading" ? (state.stale ?? null) : null;
   const refreshing = state.kind === "loading" && state.stale !== undefined;
+  // В4.8.5 (К8.5.10, С5-1): страница за пределами выдачи (старая ссылка
+  // `?page=5` при трёх результатах) — последняя существующая, а не «Рейтинг еще пуст»
+  const lastPage = state.kind === "ok" ? pageBeyond(state.data) : null;
+  useEffect(() => {
+    if (lastPage !== null) setParams({ page: lastPage === 1 ? null : String(lastPage) }, { replace: true, keepPage: true });
+    // setParams читает текущий адрес — в зависимостях не нужен
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastPage]);
   // В4.7 круг 2 (Р2.1): пока грузится новый набор, список языков строится из
   // фасетов последнего успешного ответа — иначе на время загрузки из него
   // пропадали все опции, кроме выбранных, и у тех — цвет и счётчик. Фасеты
@@ -177,7 +208,9 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
     [meta],
   );
   const titleOf = (key: string): string => categoryNames[key] ?? CATEGORY_TITLES_RU[key] ?? key;
-  const categories = useMemo(() => (meta?.categories ?? []).filter((c) => !NOT_IN_RATING.has(c.key)), [meta]);
+  // В4.8.5 (К8.5.10, С5-3): без /api/meta категорийные колонки строятся из
+  // клиентских констант — плашка «показаны запасными значениями» больше не врёт
+  const categories = useMemo(() => (meta?.categories ?? FALLBACK_CATEGORIES).filter((c) => !NOT_IN_RATING.has(c.key)), [meta]);
   const rankOffset = data ? (data.page - 1) * data.perPage : 0;
   const onSort = (key: SortKey, next: "asc" | "desc"): void => setParams({ sort: key, order: next });
   const allColumns = useMemo(
@@ -288,7 +321,7 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
     <Page
       mode="fill"
       crumbs={[{ text: "Рейтинг" }]}
-      aside={<RatingAside meta={meta} generatedAt={data?.generatedAt ?? null} />}
+      aside={<RatingAside meta={meta} metaFailed={metaFailed} generatedAt={data?.generatedAt ?? null} />}
       header={
         <>
           {/* В4.6 круг 2 (Р5, замечание владельца 5): заголовок, подзаголовок и
@@ -447,8 +480,20 @@ function UnscoredTable({ items, meta, hasFilters, refreshing }: { items: Item[];
   );
 }
 
-function RatingAside({ meta, generatedAt }: { meta: MetaResponse | null; generatedAt: string | null }) {
+function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResponse | null; metaFailed?: boolean; generatedAt: string | null }) {
   // В4.6 (У27): панель начинается с легенды шкалы (3 чипа + абзац) и двух блоков
+  // В4.8.5 (К8.5.10, С5-3): сбой /api/meta — не вечный скелетон: шкала из
+  // клиентских констант и честная строка о том, чего не хватает
+  if (!meta && metaFailed) {
+    return (
+      <>
+        <ScoreLegend />
+        <AsideSection title="Методика">
+          <Text color="complementary">Веса категорий и версия модели появятся, когда загрузится справочник сервиса.</Text>
+        </AsideSection>
+      </>
+    );
+  }
   if (!meta) return <SkeletonRows rows={4} height={96} />;
   const ratingWeight = meta.categories.reduce((sum, c) => sum + (c.indexWeight ?? 0), 0);
   // доли считаются один раз: их читают и полоса, и легенда под ней
@@ -634,7 +679,8 @@ function SortableHeader({
   onSort: (key: SortKey, next: "asc" | "desc") => void;
 }) {
   const active = sort === columnKey;
-  const next: "asc" | "desc" = active && order === "desc" ? "asc" : "desc";
+  // В4.8.5 (К8.5.10, С5-8): первый клик по «Репозиторию» — А→Я, по числам — по убыванию
+  const next: "asc" | "desc" = active ? (order === "desc" ? "asc" : "desc") : firstSortOrder(columnKey);
   return (
     <Button
       view="flat"

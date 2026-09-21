@@ -83,6 +83,9 @@ import {
   NO_DATA_SHORT,
   NOT_COUNTED,
   NO_SCORE,
+  reportFailureText,
+  favoriteAddedText,
+  type FavoriteAddCheck,
   SECURITY_PUBLIC_NOTE,
   accessLockShort,
   fmtCount,
@@ -121,10 +124,9 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   // В4.8.5 (К8.5.3): перечитывание не мигает скелетоном — прежние данные на
   // экране, пока не придёт новый ответ; сбой перечитывания — мягкая пометка
   const { state, reload } = useJson<Card>(cardUrl, { keepPrevious: true });
-  const { me } = useSession();
+  const { me, reloadMe } = useSession();
   const meData = dataOf(me);
   const loggedIn = meData !== null && meData.login !== null;
-  const canRefresh = loggedIn && meData!.hasPat;
   // В4.8.5 (К8.5.1): фаза анализа — из общего опроса заданий вкладки (по
   // заданию, а не по «появился ли скан с номером больше»); карточка сама
   // себя ради итога не опрашивает
@@ -141,6 +143,18 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   });
 
   const data = dataOf(state);
+  // В4.8.5 (К8.5.14 (а), (в); §2-В1, §2-Р2): анализ — только своего
+  // репозитория. «Свой» карточка считает сама по доступу, который она и так
+  // резолвит при показе (`viewer.own`), — кнопка есть на любом своём
+  // репозитории, даже не в избранном; чужой, аноним, неизвестно — кнопки нет
+  // вовсе (элемента нет, а не неактивен)
+  const canRefresh = data?.viewer?.own === true && data.viewer.auth === "pat";
+  // К8.5.8: сервер не видит сессии, а вкладка считает зрителя вошедшим —
+  // сессия истекла или вышли в соседней вкладке: приложение перечитывает /api/me
+  const sessionGone = loggedIn && data?.viewer?.auth === "no-session";
+  useEffect(() => {
+    if (sessionGone) reloadMe();
+  }, [sessionGone, reloadMe]);
   // С6-3: у карточки идёт чужой или периодический скан — она показывает «идёт
   // анализ» и изредка перечитывает себя (окно открытий карточки 30/мин не
   // съедается: раз в 30 с)
@@ -223,7 +237,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
           />
         </div>
       )}
-      <Header card={card} starDoneKey={doneKey} starLoggedIn={loggedIn} />
+      <Header card={card} starDoneKey={doneKey} starLoggedIn={meData === null ? null : loggedIn} />
       {card.score !== null && <ScoreBand card={card} />}
       {card.score === null ? (
         own !== null || foreignRunning ? (
@@ -248,17 +262,18 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
             title={card.scan ? "Скан был – данных для оценки не хватило" : "Репозиторий есть в каталоге, но еще не сканировался"}
             description={
               card.scan
-                ? `Последний скан (${sentence(scanStatusText(card.scan.status))}) не собрал достаточно фактов для честного числа – это отсутствие данных, а не плохая оценка. Повторный анализ соберет факты заново.`
+                ? `Последний скан (${sentence(scanStatusText(card.scan.status))}) не собрал достаточно фактов для честного числа – это отсутствие данных, а не плохая оценка. Следующий анализ соберет факты заново.`
                 : "Score появится после первого скана: его считает код по фактам, а фактов пока нет."
             }
             actions={
               canRefresh
                 ? [{ text: card.scan ? "Повторить анализ" : "Запустить анализ", view: "action", size: "l", onClick: start.start }]
-                : loggedIn
+                : card.viewer?.auth === "no-pat"
                   ? [
-                      // UX-6 (круг 2 В4.4): на ветке «Скан был» анализа уже были —
-                      // слово «первый» обещало то, чего не случится
-                      { text: card.scan ? "Добавьте токен в Настройках – и запустите анализ" : "Добавьте токен в Настройках – и запустите первый анализ", view: "action", size: "l", href: "/settings" },
+                      // В4.8.5 (К8.5.14 (ж)): без токена «свой» не известен — CTA
+                      // не обещает анализ (прежний CTA звал к анализу без токена): токен
+                      // открывает CI/CD и Security, анализ — только своих
+                      { text: "Добавить токен в Настройках", view: "action", size: "l", href: "/settings" },
                     ]
                   : undefined
             }
@@ -282,51 +297,75 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
  * JSON-ошибкой, и зритель видит её тостом, а не пустой файл; пункт MD
  * от этого не зависит.
  */
+/** Сбой выгрузки: HTTP-статус (0 — сети нет) и код сервера — для текста тоста. */
+class ReportError extends Error {
+  constructor(
+    readonly status: number,
+    readonly code: string | null,
+  ) {
+    super(`report ${status}`);
+  }
+}
+
 function ReportMenu({ mdHref, pdfHref, pdfName }: { mdHref: string; pdfHref: string; pdfName: string }) {
   const toaster = useToaster();
-  const [pdfBusy, setPdfBusy] = useState(false);
-  const downloadPdf = async (): Promise<void> => {
-    setPdfBusy(true);
+  const [busy, setBusy] = useState<"md" | "pdf" | null>(null);
+  const mdName = pdfName.replace(/\.pdf$/, ".md");
+  // В4.8.5 (К8.5.11, С7-1): обе выгрузки — fetch + blob; любой сбой — тост в
+  // приложении (раньше MD открывался ссылкой, и 429/404/500 заменяли
+  // приложение сырым JSON). Текст тоста — по коду (reportFailureText)
+  const download = async (kind: "md" | "pdf"): Promise<void> => {
+    setBusy(kind);
+    const href = kind === "md" ? mdHref : pdfHref;
+    const expected = kind === "md" ? "text/markdown" : "application/pdf";
     try {
-      const res = await fetch(pdfHref);
-      if (!res.ok || !(res.headers.get("content-type") ?? "").startsWith("application/pdf")) {
-        const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
-        throw new Error(body?.error?.message ?? `сервер ответил HTTP ${res.status}`);
+      let res: Response;
+      try {
+        res = await fetch(href);
+      } catch {
+        throw new ReportError(0, null);
+      }
+      if (!res.ok || !(res.headers.get("content-type") ?? "").startsWith(expected)) {
+        const body = (await res.json().catch(() => null)) as { error?: { code?: string } } | null;
+        throw new ReportError(res.ok ? 500 : res.status, body?.error?.code ?? null);
       }
       const url = URL.createObjectURL(await res.blob());
       const link = document.createElement("a");
       link.href = url;
-      link.download = pdfName;
+      link.download = kind === "md" ? mdName : pdfName;
       document.body.append(link);
       link.click();
       link.remove();
       setTimeout(() => URL.revokeObjectURL(url), 10_000);
     } catch (e) {
+      const status = e instanceof ReportError ? e.status : 500;
+      const code = e instanceof ReportError ? e.code : null;
       toaster.add({
-        name: `report-pdf-failed:${pdfHref}`,
+        name: `report-${kind}-failed:${href}`,
         theme: "danger",
-        title: "PDF не скачан",
-        content: `${e instanceof Error ? e.message : String(e)} Markdown-выгрузка работает – она в этом же меню.`,
+        title: kind === "md" ? "Markdown не скачан" : "PDF не скачан",
+        content: reportFailureText(kind, status, code),
       });
     } finally {
-      setPdfBusy(false);
+      setBusy(null);
     }
   };
+  const pdfBusy = busy === "pdf";
   return (
     <DropdownMenu
       size="m"
       popupProps={{ placement: "bottom-end" }}
       renderSwitcher={(props) => (
         // В4.7 круг 2 (Р2.4): пока PDF собирается, кнопка показывает спиннер
-        <Button {...props} view="normal" size="m" aria-haspopup="menu" loading={pdfBusy}>
+        <Button {...props} view="normal" size="m" aria-haspopup="menu" loading={busy !== null}>
           <Icon data={ArrowDownToLine} size={16} />
           Отчет
           <Icon data={ChevronDown} size={16} />
         </Button>
       )}
       items={[
-        { text: "Markdown (.md)", iconStart: <Icon data={LogoMarkdown} size={16} />, href: mdHref },
-        { text: pdfBusy ? "PDF (.pdf) – готовим…" : "PDF (.pdf)", iconStart: <Icon data={FileText} size={16} />, disabled: pdfBusy, action: () => void downloadPdf() },
+        { text: "Markdown (.md)", iconStart: <Icon data={LogoMarkdown} size={16} />, disabled: busy !== null, action: () => void download("md") },
+        { text: pdfBusy ? "PDF (.pdf) – готовим…" : "PDF (.pdf)", iconStart: <Icon data={FileText} size={16} />, disabled: busy !== null, action: () => void download("pdf") },
       ]}
     />
   );
@@ -371,7 +410,7 @@ function useStartAnalysis(org: string, repo: string): { sending: boolean; start:
   return { sending, start };
 }
 
-function Header({ card, starDoneKey, starLoggedIn }: { card: Card; starDoneKey: string | null; starLoggedIn: boolean }) {
+function Header({ card, starDoneKey, starLoggedIn }: { card: Card; starDoneKey: string | null; starLoggedIn: boolean | null }) {
   const { repo: r } = card;
   return (
     <div style={{ marginBottom: "var(--g-spacing-4)" }}>
@@ -690,9 +729,17 @@ function ScoreBand({ card }: { card: Card }) {
               <Text variant="body-1" color="complementary">
                 {fullLockShortReason(card)}
               </Text>
-              <Text variant="body-1">
-                <Link {...linkProps("/settings")}>Добавить токен доступа</Link>
-              </Text>
+              {/* В4.8.5 (К8.5.8, С6-4): ссылка — по причине: нет сессии — вход,
+                  нет токена — Настройки, токен есть, но прав нет — без ссылки */}
+              {card.viewer?.auth === "pat" ? null : card.viewer?.auth === "no-session" ? (
+                <Text variant="body-1">
+                  <Link href="/auth/ya">Войти через Я ID</Link>
+                </Text>
+              ) : (
+                <Text variant="body-1">
+                  <Link {...linkProps("/settings")}>Добавить токен доступа</Link>
+                </Text>
+              )}
             </Flex>
           ) : (
             <ScoreFigure
@@ -1402,7 +1449,7 @@ function securityNote(card: Card): string {
  * переход active→done в текущей browser-session: ключ `<org>/<repo>:<jobId>`
  * в sessionStorage, DDL нет. Заполненная звезда не светится.
  */
-function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: string; doneKey: string | null; loggedIn: boolean }) {
+function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: string; doneKey: string | null; loggedIn: boolean | null }) {
   const toaster = useToaster();
   const [state, setState] = useState<"loading" | "on" | "off" | "anon">("loading");
   const [error, setError] = useState<string | null>(null);
@@ -1422,6 +1469,11 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
   useEffect(() => {
     // аноним: звезда выключена без живого запроса — 401-зонд мусорил консоль
     // браузера (планка В4.5 «ноль ошибок консоли»), а вход уже виден в /api/me
+    // В4.8.5 (К8.5.8, С6-6): сессия ещё грузится — звезда «проверяем», а не «войдите»
+    if (loggedIn === null) {
+      setState("loading");
+      return;
+    }
     if (!loggedIn) {
       setState("anon");
       return;
@@ -1477,20 +1529,27 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
     const next = state === "on" ? "off" : "on";
     setState(next);
     try {
-      await mutateJson(`/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`, next === "on" ? "PUT" : "DELETE");
+      const res = await mutateJson<{ check?: FavoriteAddCheck } | null>(
+        `/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`,
+        next === "on" ? "PUT" : "DELETE",
+      );
       // Доводка 21.09: у действия появился отклик. Смена оттенка звезды —
       // единственное, что происходило, и на мелкой иконке её не замечали;
       // тост ещё и называет, КУДА репозиторий попал, — раздел «Мои
       // репозитории» иначе приходится искать самому.
+      // В4.8.5 (К8.5.14 (д)): права проверяются сами при добавлении — тост
+      // говорит, чем кончилась проверка и поставлен ли первый анализ своего
       toaster.add({
         name: `favorite:${org}/${repo}`,
         theme: next === "on" ? "success" : "info",
-        title: next === "on" ? "Добавлено в избранное" : "Убрано из избранного",
-        content: next === "on" ? `${slugOf(org, repo)} — в разделе «Мои репозитории»` : slugOf(org, repo),
+        title: next === "on" ? "Добавлено в «Мои репозитории»" : "Убрано из избранного",
+        content: next === "on" ? `${slugOf(org, repo)}. ${favoriteAddedText(res?.check)}` : slugOf(org, repo),
       });
+      // первый анализ своего мог встать — «Задания» и карточка узнают сразу
+      if (next === "on") announceJobsChanged();
     } catch (e) {
       setState(state); // откат — звезда не врёт
-      setError(e instanceof Error ? e.message : String(e));
+      // С3-6: ошибка — одним тостом (раньше и тост, и строка под звездой)
       toaster.add({
         name: `favorite-failed:${org}/${repo}`,
         theme: "danger",
@@ -1525,7 +1584,7 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
             ? "Проверяем избранное…"
             : state === "anon"
               ? "Войдите через Я ID, чтобы добавлять в избранное"
-              : "В избранное. Раздел «Мои репозитории» содержит выбранные вами репозитории. Права на закрытые данные проверяются в Настройках."
+              : "В избранное. Раздел «Мои репозитории» содержит выбранные вами репозитории; права на закрытые данные сервис проверит сам при добавлении."
         }
         onClick={() => void toggle()}
       >

@@ -56,7 +56,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { type MeResponse, type MetaResponse, type MyReposResponse, dataOf, logout, mutateJson, useJson, useLatest } from "./api";
 import type { LiveAnalysis } from "./analysis";
 import { announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
-import { authErrorText, fmtDateTime, fmtScore, recommendationsText, scoreTheme, scoreWord, sentence, slugOf } from "./format";
+import { authErrorText, favoriteAddedText, fmtDateTime, fmtScore, recommendationsText, scoreTheme, scoreWord, sentence, slugOf, type FavoriteAddCheck } from "./format";
 import { TAB_RECOMMENDATIONS } from "./RepoPage";
 import { type Band, BANDS, type RepoEntry, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
 import { linkProps, navigate, repoHref } from "./router";
@@ -209,7 +209,7 @@ function LoginOffer({ pageTitle }: { pageTitle: "Мои репозитории" 
         description={
           pageTitle === "Настройки"
             ? "Войдите через Я ID, чтобы настроить токен доступа SourceCraft."
-            : "Войдите через Я ID, чтобы управлять избранными репозиториями и запускать их анализ."
+            : "Войдите через Я ID, чтобы следить за избранными репозиториями и запускать анализ своих."
         }
         actions={[{ text: "Войти через Я ID", view: "action", size: "l", href: "/auth/ya" }]}
       />
@@ -446,35 +446,17 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
     [toaster, starting, analysis],
   );
 
-  const check = async (org: string, repo: string) => {
-    setBusy(`${org}/${repo}`);
-    try {
-      // П2-UI: тип ответа экспортирован из src/api/me.ts — переименование
-      // поля ловит tsc, а не пользователь (условие решения (1) 18.09)
-      const res = await mutateJson<import("../api/me").FavoriteCheckResponse>(
-        `/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/check`,
-        "POST",
-      );
-      // В4.8: исход — тостом, как у остальных действий строки; права видны в строке
-      toaster.add({ name: `check:${org}/${repo}`, theme: "success", title: "Доступ проверен", content: `${slugOf(org, repo)}: ${enqueueNote(res.enqueue)}` });
-      favs.reload();
-      reposReloadRef.current();
-      // проверка прав может поставить own-анализ (enqueue) — шапка узнает сразу
-      announceJobsChanged();
-    } catch (e) {
-      toaster.add({ name: `check-failed:${org}/${repo}`, theme: "danger", title: "Проверка доступа не получилась", content: e instanceof Error ? e.message : String(e) });
-    } finally {
-      setBusy(null);
-    }
-  };
-
   const removeFav = async (org: string, repo: string) => {
     setBusy(`${org}/${repo}`);
     try {
       await mutateJson(`/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`, "DELETE");
       toaster.add({ name: `fav-removed:${org}/${repo}`, theme: "info", title: "Убрано из избранного", content: slugOf(org, repo) });
-      favs.reload();
-      reposReloadRef.current();
+      // В4.8.5 (К8.5.7, §2-В3): после действия обновляется только строка —
+      // список целиком не перечитывается (его окно — 30 чтений в минуту)
+      const current = dataOf(repos.state);
+      if (current) repos.set({ ...current, entries: current.entries.filter((e) => !(e.org === org && e.repo === repo)) });
+      const currentFavs = dataOf(favs.state);
+      if (currentFavs) favs.set({ entries: currentFavs.entries.filter((f) => !(f.org === org && f.repo === repo)) });
     } catch (e) {
       // UX-7 (круг 2 В4.4): сбой снятия не глотается
       toaster.add({
@@ -567,7 +549,7 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
         <CabinetAlert
           theme="info"
           title="Добавьте токен доступа SourceCraft"
-          message="С токеном можно проверить доступ к своим репозиториям, запустить их анализ и увидеть CI/CD и Security на карточке. Токен добавляется в Настройках."
+          message="С токеном сервис сам проверит ваши права на избранные репозитории, откроет анализ своих репозиториев и покажет CI/CD и Security на карточке. Токен добавляется в Настройках."
           actions={
             <Button view="normal" size="m" {...linkProps("/settings")}>
               Перейти в Настройки
@@ -665,7 +647,6 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
                     starting={starting.has(slug)}
                     busy={busy !== null}
                     onScan={() => void startScan(slug)}
-                    onCheck={() => void check(entry.org, entry.repo)}
                     onRemove={() => void removeFav(entry.org, entry.repo)}
                   />
                 );
@@ -678,10 +659,25 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
       <AddRepoDialog
         open={adding}
         onClose={() => setAdding(false)}
-        onAdded={() => {
+        onAdded={(res) => {
           setAdding(false);
-          repos.reload();
-          favs.reload();
+          // К8.5.7: ответ добавления — обновлённая запись строки; список не перечитывается
+          const current = dataOf(repos.state);
+          if (current && res.entry) {
+            const rest = current.entries.filter((e) => !(e.org === res.entry!.org && e.repo === res.entry!.repo));
+            repos.set({ ...current, entries: [res.entry, ...rest] });
+          } else {
+            repos.reload();
+          }
+          const currentFavs = dataOf(favs.state);
+          if (currentFavs && res.entry) {
+            const key = (f: { org: string; repo: string }) => `${f.org}/${f.repo}`;
+            const slug = key(res.entry);
+            const others = currentFavs.entries.filter((f) => key(f) !== slug);
+            favs.set({ entries: [{ org: res.entry.org, repo: res.entry.repo, addedAt: new Date().toISOString(), access: res.access ?? null, lastCheckedAt: res.lastCheckedAt ?? null, score: null }, ...others] });
+          }
+          // первый анализ своего мог встать — «Задания» и строка узнают сразу
+          announceJobsChanged();
         }}
       />
     </Flex>
@@ -733,7 +729,15 @@ function ScoreRing({ value }: { value: number }) {
  * списка, а не полем над списком. Ф2.20: слаг или URL; парсер серверный,
  * клиент лишь не пускает заведомо не похожее.
  */
-function AddRepoDialog({ open, onClose, onAdded }: { open: boolean; onClose: () => void; onAdded: () => void }) {
+/** Ответ добавления в избранное (К8.5.7, К8.5.14): обновлённая запись строки и исход автопроверки прав. */
+interface FavoriteAddResponse {
+  entry?: import("../api/me").MyRepoEntry;
+  access?: import("../api/me").FavoriteAccess | null;
+  lastCheckedAt?: string | null;
+  check?: FavoriteAddCheck;
+}
+
+function AddRepoDialog({ open, onClose, onAdded }: { open: boolean; onClose: () => void; onAdded: (res: FavoriteAddResponse) => void }) {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -755,10 +759,11 @@ function AddRepoDialog({ open, onClose, onAdded }: { open: boolean; onClose: () 
     setBusy(true);
     setError(null);
     try {
-      await mutateJson("/api/me/favorites", "PUT", { repository: value });
-      toaster.add({ name: "fav-added", theme: "success", title: "Добавлено в избранное", content: value });
+      const res = (await mutateJson<FavoriteAddResponse>("/api/me/favorites", "PUT", { repository: value })) ?? {};
+      // В4.8.5 (К8.5.14 (д)): права проверены сами — тост говорит, чем кончилось
+      toaster.add({ name: "fav-added", theme: "success", title: "Добавлено в избранное", content: `${value}. ${favoriteAddedText(res.check)}` });
       setValue("");
-      onAdded();
+      onAdded(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -820,7 +825,6 @@ function RepoRow({
   starting,
   busy,
   onScan,
-  onCheck,
   onRemove,
 }: {
   entry: RepoEntry;
@@ -833,13 +837,13 @@ function RepoRow({
   starting: boolean;
   busy: boolean;
   onScan: () => void;
-  onCheck: () => void;
   onRemove: () => void;
 }) {
   const { org, repo } = entry;
   const href = repoHref(org, repo);
   const scored = entry.healthcraftIndex !== null;
   const inWork = live !== null || starting;
+  const canAnalyze = hasPat && access?.own === true;
   // В4.8.5 (К8.5.1, К8.5.2b): фаза — по заданию; «затянулось» — признак сервера
   const phase = live === null ? null : live.stalled ? "stalled" : live.phase;
 
@@ -887,11 +891,13 @@ function RepoRow({
       </StatePill>
     ) : !entry.inCatalog ? (
       // UX-8 (круг 2 В4.4): явные признаки вместо прокси `title === null`
-      <StatePill icon={CircleQuestion} title="Репозитория нет в каталоге SourceCraft">
+      // В4.8.5 (К8.5.9, С3-3): речь о каталоге СЕРВИСА — репозиторий на
+      // SourceCraft может быть, у нас его ещё не анализировали
+      <StatePill icon={CircleQuestion} title="Репозитория пока нет в каталоге сервиса: его еще не анализировали, или адрес указан с ошибкой">
         Нет в каталоге
       </StatePill>
     ) : !entry.mayRead ? (
-      <StatePill icon={Lock} title="Нет прав на данные репозитория – проверьте доступ">
+      <StatePill icon={Lock} title="Ваш токен не дает доступа к данным этого репозитория">
         Нет прав
       </StatePill>
     ) : (
@@ -900,10 +906,9 @@ function RepoRow({
       </StatePill>
     );
 
+  // В4.8.5 (К8.5.14 (г), §2-В1): пункта ручной проверки прав нет — права
+  // проверяются сами при добавлении, после смены токена и фоном
   const menuItems = [
-    ...(hasPat
-      ? [{ text: "Проверить доступ", action: onCheck, disabled: busy, title: "Узнать по вашему токену, какие данные этого репозитория вам открыты" }]
-      : []),
     ...(entry.recommendationsCount !== null && entry.recommendationsCount > 0
       ? // ревью закрытия: не `href` — пункт меню рендерится обычной ссылкой без
         // `linkProps` и перезагружал страницу; навигация — внутри приложения
@@ -961,7 +966,10 @@ function RepoRow({
       <div className="rh-repo-item__state">{state}</div>
 
       <div className="rh-repo-item__actions">
-        {scored ? (
+        {/* В4.8.5 (К8.5.14 (в)): кнопка анализа — только на СВОЕМ репозитории
+            (сохранённая проверка прав: own); у чужого и непроверенного её нет
+            вовсе — элемента нет, а не неактивен */}
+        {!canAnalyze ? null : scored ? (
           <ActionTooltip title="Обновить анализ">
             <Button view="flat" size="m" onClick={onScan} disabled={inWork} aria-label="Обновить анализ">
               <Icon data={ArrowsRotateRight} size={16} />
@@ -1167,7 +1175,8 @@ function JobsEmpty({ title, children }: { title: string; children: ReactNode }) 
 const HISTORY_OUTCOME: Record<"done" | "failed" | "refused", { icon: IconData; cls: string; text: string }> = {
   done: { icon: CircleCheck, cls: "rh-state__icon_success", text: "Готово" },
   failed: { icon: CircleExclamation, cls: "rh-state__icon_danger", text: "Ошибка" },
-  refused: { icon: CircleExclamation, cls: "rh-state__icon", text: "Отклонено предпроверкой токена" },
+  // В4.8.5 (К8.5.6, С4-12): отказом считается только вердикт о правах (сбой SourceCraft запуск не отклоняет)
+  refused: { icon: CircleExclamation, cls: "rh-state__icon", text: "Не запущен: нет прав на анализ этого репозитория" },
 };
 
 /**
@@ -1239,7 +1248,7 @@ const ACCESS_STATES: Record<"yes" | "no" | "unknown", { cls: string; hint: strin
 
 /**
  * В4.7 (П3.2, П3.4): права зрителя — компонентами, а не глифами. В4.8: без
- * проверки строка молчит; путь «узнать» — пункт меню «Проверить доступ».
+ * проверки строка молчит. В4.8.5 (К8.5.14): права проверяются сами — ручного пункта нет.
  * Круг 2 (2a): у приватного — серая метка видимости с замком.
  * Круг 3 (5a): три канала — ОДНОЙ плашкой с тремя иконками вместо трех
  * `Label`; расшифровка и дата проверки — в подсказке и `aria-label`.
@@ -1269,32 +1278,4 @@ function AccessRights({ access, lastCheckedAt }: { access: import("../api/me").F
       </span>
     </Flex>
   );
-}
-
-/**
- * П2-UI (решения (1) и (2) 18.09): исход автопостановки анализа читается из
- * единственного поля `enqueue: {status, code}` — поля `enqueued` больше нет.
- * Причина отказа показывается человеку, а не глотается молча.
- */
-function enqueueNote(enqueue: import("../api/me").FavoriteEnqueue): string {
-  // М9 (круг 2): число часов из текста убрано — кулдаун настраивается
-  // (`QUEUE_FAVORITE_OWN_COOLDOWN_MS`), а в тексте оно было зашито и врало бы
-  // на любом стенде с другим значением
-  if (enqueue.status === "queued") return "запущен анализ";
-  if (enqueue.status === "deduplicated") return "анализ уже в очереди";
-  if (enqueue.status === "skipped") {
-    return enqueue.code === "not_own" ? "анализ доступен только для своих репозиториев" : "анализ запускали недавно";
-  }
-  switch (enqueue.code) {
-    case "too_many_active":
-      return "анализ не запущен: слишком много ваших анализов в очереди – дождитесь завершения";
-    case "rate_limited":
-      return "анализ не запущен: исчерпан часовой лимит запусков – попробуйте позже";
-    case "no_access":
-      return "анализ не запущен: ваш PAT не дает доступа к этому репозиторию";
-    case "pat_expired":
-      return "анализ не запущен: SourceCraft отклонил PAT – обновите токен";
-    default:
-      return "анализ не запущен: не удалось проверить доступ к репозиторию";
-  }
 }

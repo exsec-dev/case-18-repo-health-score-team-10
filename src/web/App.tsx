@@ -53,7 +53,7 @@ function Routes() {
           />
         </Flex>
       )}
-      {route.kind === "rating" && <Rating search={route.search} meta={metaData} />}
+      {route.kind === "rating" && <Rating search={route.search} meta={metaData} metaFailed={metaFailed !== null} />}
       {/* В4.8.5 (К8.5.1, С9-2): `key` по слагу — состояние карточки A (фаза
           анализа, опросы) не переезжает на карточку B при SPA-переходе */}
       {route.kind === "repo" && <RepoPage key={`${route.org}/${route.repo}`} org={route.org} repo={route.repo} meta={metaData} />}
