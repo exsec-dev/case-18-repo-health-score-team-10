@@ -203,7 +203,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   const reportHref = `${cardUrl}/report.md`;
   const actions = (
     <Flex gap={2} alignItems="center">
-      {card.score !== null && <ReportMenu mdHref={reportHref} />}
+      {card.score !== null && <ReportMenu mdHref={reportHref} pdfHref={`${cardUrl}/report.pdf`} pdfName={`${org}-${repo}-health.pdf`} />}
       {refreshButton}
     </Flex>
   );
@@ -267,10 +267,41 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
 
 /**
  * «Отчёт»: формат выбирается в меню. MD — тот же генератор, что рисует
- * страницу (§2.3); PDF заложен в интерфейс, генератора пока нет — пункт
- * виден, но ничего не делает.
+ * страницу (§2.3); PDF (В4.7, П1) — та же модель отчёта, отрисованная
+ * сервером. PDF качается через `fetch` + blob: на сбое сервер отвечает
+ * JSON-ошибкой, и зритель видит её тостом, а не пустой файл; пункт MD
+ * от этого не зависит.
  */
-function ReportMenu({ mdHref }: { mdHref: string }) {
+function ReportMenu({ mdHref, pdfHref, pdfName }: { mdHref: string; pdfHref: string; pdfName: string }) {
+  const toaster = useToaster();
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const downloadPdf = async (): Promise<void> => {
+    setPdfBusy(true);
+    try {
+      const res = await fetch(pdfHref);
+      if (!res.ok || !(res.headers.get("content-type") ?? "").startsWith("application/pdf")) {
+        const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+        throw new Error(body?.error?.message ?? `сервер ответил HTTP ${res.status}`);
+      }
+      const url = URL.createObjectURL(await res.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = pdfName;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (e) {
+      toaster.add({
+        name: `report-pdf-failed:${pdfHref}`,
+        theme: "danger",
+        title: "PDF не скачан",
+        content: `${e instanceof Error ? e.message : String(e)} Markdown-выгрузка работает – она в этом же меню.`,
+      });
+    } finally {
+      setPdfBusy(false);
+    }
+  };
   return (
     <DropdownMenu
       size="m"
@@ -284,7 +315,7 @@ function ReportMenu({ mdHref }: { mdHref: string }) {
       )}
       items={[
         { text: "Markdown (.md)", iconStart: <Icon data={LogoMarkdown} size={16} />, href: mdHref },
-        { text: "PDF (.pdf)", iconStart: <Icon data={FileText} size={16} />, action: () => {} },
+        { text: pdfBusy ? "PDF (.pdf) – готовим…" : "PDF (.pdf)", iconStart: <Icon data={FileText} size={16} />, disabled: pdfBusy, action: () => void downloadPdf() },
       ]}
     />
   );

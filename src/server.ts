@@ -27,6 +27,7 @@ import {
   type PatSeed,
 } from "./api/me";
 import { renderRepoReport } from "./report/markdown";
+import { pdfResponse } from "./report/pdf";
 import { catalogClientBudget, closeOwnRunningScans, maintenanceTick, returnOwnRunningJobs, startScheduler, startWorkerLoop } from "./jobs/scheduler";
 import { killActiveClones } from "./collectors/git";
 import {
@@ -321,6 +322,26 @@ const routes = {
           "content-disposition": `attachment; filename="${org}-${repo}-health.md"`,
         },
       });
+    },
+    // В4.7 (П1): PDF того же отчёта — зеркало report.md: тот же гард слага,
+    // то же минутное окно карточки, тот же сборщик карточки с тем же зрителем
+    // (закрытые каналы — без чисел и фактов), приватный/эвиктированный — 404.
+    // Сбой генерации — честная 500 без стека (`pdfResponse`), MD не задет.
+    "/api/repos/:org/:repo/report.pdf": async (req) => {
+      const { org, repo } = req.params;
+      if (!validSlugSegment(org) || !validSlugSegment(repo)) {
+        return badQuery("слаг org/repo: ожидается [a-z0-9_.-]");
+      }
+      const viewer = sessionOf(req);
+      if (viewer && !allowCardView(viewer.userId)) {
+        return Response.json(
+          { error: { code: "rate_limited", message: `не больше ${config.queue.cardPerMinute ?? 30} открытий карточки в минуту — попробуйте чуть позже` } },
+          { status: 429 },
+        );
+      }
+      const card = await getRepoCardForViewer(db, org!, repo!, viewerAccess(req), { limits: config.scan, viewerUserId: viewer?.userId });
+      if (!card) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
+      return pdfResponse(card);
     },
     // ---------- auth: Я ID OAuth (Б1) ----------
     // Вход ВСЕГДА с выбором аккаунта (решение владельца 21.09). Наш «Выход»

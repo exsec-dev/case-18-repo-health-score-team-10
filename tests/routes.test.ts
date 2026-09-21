@@ -104,6 +104,40 @@ describe("роуты единой карточки (К2)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// В4.7 (П1): report.pdf — зеркало report.md: те же правила доступа и 404.
+// ---------------------------------------------------------------------------
+
+describe("В4.7: PDF-выгрузка по HTTP", () => {
+  test("публичный репо: application/pdf, attachment с именем от слага, настоящий PDF", async () => {
+    const res = await fetch(`${base}/api/repos/pub/repo/report.pdf`, asStranger);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("application/pdf");
+    expect(res.headers.get("content-disposition")).toBe('attachment; filename="pub-repo-health.pdf"');
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    expect(new TextDecoder("latin1").decode(bytes.subarray(0, 5))).toBe("%PDF-");
+    // заголовки защиты — как у остальных ответов маршрутов
+    expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+
+  test("приватный репо: 404 как у .md — и анониму, и вошедшему без PAT", async () => {
+    for (const init of [{}, asStranger]) {
+      const [md, pdf] = await Promise.all([
+        fetch(`${base}/api/repos/acme/secret-repo/report.md`, init),
+        fetch(`${base}/api/repos/acme/secret-repo/report.pdf`, init),
+      ]);
+      expect({ md: md.status, pdf: pdf.status }).toEqual({ md: 404, pdf: 404 });
+      expect(await pdf.json()).toEqual(await md.json());
+    }
+  });
+
+  test("несуществующий репо — 404, кривой слаг — 400, как у .md", async () => {
+    expect((await fetch(`${base}/api/repos/nope/nope/report.pdf`)).status).toBe(404);
+    const bad = await fetch(`${base}/api/repos/a%25zz/b/report.pdf`);
+    expect(bad.status).toBe(400);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // В4.4 (кластер K): заголовки защиты на JSON-ответах + churn-лимит мутаций
 // избранного. Отклонение (проверено воркером живьём): HTML-бандл Bun-маршрута
 // заголовков не получает — механизм HTML-import не даёт управлять ответом.

@@ -44,3 +44,27 @@ describe("Б2 (П2): мультивыбор языка в рейтинге", () 
     expect(src).toMatch(/next\.append\(key, v\)/);
   });
 });
+
+describe("Б4 (П1): кнопка PDF на карточке", () => {
+  const menu = () => {
+    const src = stripComments(web("RepoPage.tsx"));
+    const start = src.indexOf("function ReportMenu");
+    return src.slice(start, src.indexOf("\n}\n", start));
+  };
+
+  test("PDF качается через fetch + blob, на сбое — тост с текстом сервера, MD-пункт не тронут", () => {
+    const m = menu();
+    expect({
+      fetches: m.includes("await fetch(pdfHref)"),
+      blob: m.includes("URL.createObjectURL(await res.blob())"),
+      checksType: m.includes('startsWith("application/pdf")'),
+      toast: /toaster\.add\(\{[\s\S]{0,200}theme: "danger"/.test(m),
+      serverMessage: m.includes("body?.error?.message"),
+      mdLink: m.includes('{ text: "Markdown (.md)", iconStart: <Icon data={LogoMarkdown} size={16} />, href: mdHref }'),
+    }).toEqual({ fetches: true, blob: true, checksType: true, toast: true, serverMessage: true, mdLink: true });
+  });
+
+  test("адрес и имя файла — от слага карточки, рядом с report.md", () => {
+    expect(web("RepoPage.tsx")).toContain("pdfHref={`${cardUrl}/report.pdf`} pdfName={`${org}-${repo}-health.pdf`}");
+  });
+});

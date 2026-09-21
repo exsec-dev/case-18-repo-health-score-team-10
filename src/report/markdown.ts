@@ -55,7 +55,7 @@ export function buildReportModel(card: RepoCard): ReportModel {
     ...evidenceSection(card),
     ...methodSection(card),
   ];
-  return { fileStem: `${card.repo.org}-${card.repo.repo}-health`, blocks };
+  return { title: `Repo Health: ${card.repo.org}/${card.repo.repo}`, fileStem: `${card.repo.org}-${card.repo.repo}-health`, blocks };
 }
 
 // ---------- MD-сериализатор ----------

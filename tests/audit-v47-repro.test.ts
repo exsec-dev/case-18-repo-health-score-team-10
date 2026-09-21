@@ -52,7 +52,7 @@ afterAll(() => rating.close());
 // ---------------------------------------------------------------------------
 
 describe("П1: PDF-выгрузка", () => {
-  repro("кнопка PDF качает файл, а не молчит (ReportMenu без пустого обработчика)", () => {
+  test("кнопка PDF качает файл, а не молчит (ReportMenu без пустого обработчика)", () => {
     const menu = between(src("web/RepoPage.tsx"), "function ReportMenu", "\n}\n");
     expect({
       emptyHandler: /action:\s*\(\)\s*=>\s*\{\s*\}/.test(menu),
@@ -60,7 +60,7 @@ describe("П1: PDF-выгрузка", () => {
     }).toEqual({ emptyHandler: false, fetchesPdf: true });
   });
 
-  repro("маршрут /api/repos/:org/:repo/report.pdf существует рядом с report.md", () => {
+  test("маршрут /api/repos/:org/:repo/report.pdf существует рядом с report.md", () => {
     const server = src("server.ts");
     expect({ md: server.includes('"/api/repos/:org/:repo/report.md"'), pdf: server.includes('"/api/repos/:org/:repo/report.pdf"') }).toEqual({ md: true, pdf: true });
   });
