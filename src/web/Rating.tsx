@@ -63,8 +63,28 @@ type Item = RatingResponse["items"][number];
 const LANG_NONE = " none";
 const LANG_NONE_TITLE = "не определен";
 
-/** Сколько выбранных языков назвать в сводке поля до «+N» («Go, Rust +2»). */
-const LANG_SUMMARY_NAMES = 2;
+/**
+ * Сводка выбранного в поле («Go, Rust +2»): имена идут, пока укладываются в
+ * бюджет символов, остальное — «+N». Бюджет снят с живого поля (харнесс 21.09):
+ * при ширине 220px на текст остаётся ~117px, это ~18 знаков Inter 13px, из
+ * них 3-4 уходят на «+N». Первое имя показывается всегда.
+ */
+const LANG_SUMMARY_CHARS = 13;
+
+const langTitle = (value: string): string => (value === LANG_NONE ? LANG_NONE_TITLE : value);
+
+/** Сколько первых выбранных языков назвать по имени до «+N». */
+function langSummaryNames(values: string[]): number {
+  let used = 0;
+  let shown = 0;
+  for (const value of values) {
+    const cost = langTitle(value).length + (shown > 0 ? 2 : 0);
+    if (shown > 0 && used + cost > LANG_SUMMARY_CHARS) break;
+    used += cost;
+    shown++;
+  }
+  return shown;
+}
 
 /**
  * CI/CD и Security в публичный рейтинг не входят: API отдаёт их в строке
@@ -217,7 +237,7 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
         <Select
           label="Язык:"
           size="m"
-          width={180}
+          width={220}
           multiple
           hasClear
           placeholder="все"
@@ -226,7 +246,7 @@ export function Rating({ search, meta }: { search: string; meta: MetaResponse | 
           value={langValues}
           options={langOptions(data, langValues)}
           renderOption={(option) => <LangOption option={option} checked={langValues.includes(option.value)} />}
-          renderSelectedOption={(option, index) => <LangSummaryPart value={option.value} index={index} total={langValues.length} />}
+          renderSelectedOption={(option, index) => <LangSummaryPart value={option.value} index={index} values={langValues} />}
           onUpdate={(v) => setParams({ lang: v.length === 0 ? null : v.map((x) => (x === LANG_NONE ? "" : x)) })}
         />
         {/* Доводка 21.09: пара «Сортировка: …» + кнопка направления снята —
@@ -547,10 +567,10 @@ function LangOption({ option, checked }: { option: SelectOption<LangOptionData>;
 }
 
 /** Сводка выбранного в поле: первые имена через запятую, остальное — «+N». */
-function LangSummaryPart({ value, index, total }: { value: string; index: number; total: number }) {
-  const title = value === LANG_NONE ? LANG_NONE_TITLE : value;
-  if (index < LANG_SUMMARY_NAMES) return <>{`${index > 0 ? ", " : ""}${title}`}</>;
-  if (index === LANG_SUMMARY_NAMES) return <>{` +${total - LANG_SUMMARY_NAMES}`}</>;
+function LangSummaryPart({ value, index, values }: { value: string; index: number; values: string[] }) {
+  const shown = langSummaryNames(values);
+  if (index < shown) return <>{`${index > 0 ? ", " : ""}${langTitle(value)}`}</>;
+  if (index === shown) return <>{` +${values.length - shown}`}</>;
   return <></>;
 }
 

@@ -198,8 +198,13 @@ async function run(): Promise<void> {
         // уже другой селект. Инвариант оставлен (тот же дефект достанет язык и
         // размер страницы), но назван честно и считает ВСЕ селекты: узлов нет
         // или хоть один режет значение — красный.
+        //
+        // В4.7 (П2): у фильтра языка больше нет опции «все» — без выбора поле
+        // показывает ПЛЕЙСХОЛДЕР («все»), а не выбранную опцию, и узла
+        // option-text на странице нет вовсе. Инвариант тот же, узлов два вида:
+        // текст выбранного и плейсхолдер одинаково не должны резаться.
         "селекты не режут значение":
-          "(() => { const ns = [...document.querySelectorAll('[class*=\"select-control__option-text\"]')]; if (!ns.length) return 0; return ns.every((n) => n.scrollWidth <= n.clientWidth + 1) ? 1 : 0; })()",
+          "(() => { const ns = [...document.querySelectorAll('[class*=\"select-control__option-text\"], [class*=\"select-control__placeholder\"]')]; if (!ns.length) return 0; return ns.every((n) => n.scrollWidth <= n.clientWidth + 1) ? 1 : 0; })()",
       },
       // В4.6 (У22/У23): ниже 1440 правая панель рейтинга уезжает в закрытый Drawer,
       // и легенды в DOM нет ПО ЗАМЫСЛУ — требовать её там значило бы ловить
