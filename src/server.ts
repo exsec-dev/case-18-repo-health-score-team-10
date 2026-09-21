@@ -745,7 +745,10 @@ const routes = {
     "/api/me/jobs": (req) => {
       const user = sessionOf(req);
       if (!user) return unauthorized();
-      return Response.json(myJobs(db, user.userId));
+      // В4.8.5 (К8.5.8, С9-1): ответ несёт `login` — вкладка, показывающая
+      // другую личность (выход/вход другим аккаунтом в соседней вкладке),
+      // замечает расхождение на ближайшем опросе и перечитывает /api/me
+      return Response.json({ login: user.login, ...myJobs(db, user.userId) });
     },
     "/api/me/favorites": async (req) => {
       const user = sessionOf(req);

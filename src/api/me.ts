@@ -540,6 +540,72 @@ export interface MyJob {
    * же признак краснит /api/health (К8.5.5c). UI не считает его от `leaseMs`.
    */
   stalled: boolean;
+  /**
+   * В4.8.5 (К8.5.1): скан этого задания — связь без DDL: первый скан того же
+   * (репо, автор) со `started_at ≥ claimed_at` задания. null — скана ещё нет
+   * (в очереди, упало до скана, отказано).
+   */
+  scanId: number | null;
+  /**
+   * Исход скана задания: `ok`/`partial` — собран; `bad` — сбор не удался;
+   * `interrupted` — прерван перезапуском сервера или закрыт как сирота
+   * (не ошибка для пользователя, К8.5.2a); null — скана нет или он идёт.
+   */
+  outcome: "ok" | "partial" | "bad" | "interrupted" | null;
+  /**
+   * К8.5.1 (С4-10): изменилась ли публичная оценка — HealthCraft Index
+   * карточки после скана не равен индексу до него (скан, ставший непригодным
+   * из-за таймаута клона, оценку не меняет). null — скан не завершён.
+   */
+  scoreChanged: boolean | null;
+}
+
+/** Первый скан задания: тот же (репо, автор), начат не раньше взятия задания в работу. */
+function scanOfJob(db: Database, repoId: number, userId: number, claimedAt: string | null): { id: number; status: string; status_detail: string | null } | null {
+  if (claimedAt === null || repoId <= 0) return null;
+  return db
+    .query("SELECT id, status, status_detail FROM scans WHERE repo_id = ? AND user_id = ? AND started_at >= ? ORDER BY id LIMIT 1")
+    .get(repoId, userId, claimedAt) as { id: number; status: string; status_detail: string | null } | null;
+}
+
+/**
+ * HealthCraft Index карточки по состоянию «после скана `upTo`» — правило
+ * карточки (последний пригодный скан; приватный без него — последний не-bad),
+ * ограниченное сканами с id ≤ `upTo`.
+ */
+function indexAsOf(db: Database, repoId: number, upTo: number): number | null {
+  const eligible = db
+    .query(
+      `SELECT sc.healthcraft_index AS v FROM scores sc JOIN scans s ON s.id = sc.scan_id
+       WHERE sc.repo_id = ? AND sc.model_version = ? AND s.rating_eligible = 1 AND s.id <= ? ORDER BY s.id DESC LIMIT 1`,
+    )
+    .get(repoId, MODEL_VERSION, upTo) as { v: number | null } | null;
+  if (eligible) return eligible.v;
+  const vis = db.query("SELECT visibility FROM repos WHERE id = ?").get(repoId) as { visibility: string } | null;
+  if (!vis || vis.visibility === "public") return null;
+  const notBad = db
+    .query(
+      `SELECT sc.healthcraft_index AS v FROM scores sc JOIN scans s ON s.id = sc.scan_id
+       WHERE sc.repo_id = ? AND sc.model_version = ? AND s.status NOT IN ('bad', 'running', 'queued') AND s.id <= ? ORDER BY s.id DESC LIMIT 1`,
+    )
+    .get(repoId, MODEL_VERSION, upTo) as { v: number | null } | null;
+  return notBad?.v ?? null;
+}
+
+/** Исход задания по его скану (К8.5.1): скан, исход, изменилась ли публичная оценка. */
+export function jobScanOutcome(
+  db: Database,
+  repoId: number,
+  userId: number,
+  claimedAt: string | null,
+): { scanId: number | null; outcome: MyJob["outcome"]; scoreChanged: boolean | null } {
+  const scan = scanOfJob(db, repoId, userId, claimedAt);
+  if (!scan) return { scanId: null, outcome: null, scoreChanged: null };
+  if (scan.status === "running" || scan.status === "queued") return { scanId: scan.id, outcome: null, scoreChanged: null };
+  const interrupted = scan.status === "bad" && (scan.status_detail === "shutdown" || scan.status_detail === "orphaned");
+  const outcome: MyJob["outcome"] = interrupted ? "interrupted" : scan.status === "ok" || scan.status === "partial" ? scan.status : "bad";
+  const scoreChanged = outcome === "ok" || outcome === "partial" ? indexAsOf(db, repoId, scan.id) !== indexAsOf(db, repoId, scan.id - 1) : false;
+  return { scanId: scan.id, outcome, scoreChanged };
 }
 
 /** Активные (queued/running) + последние завершённые заявки юзера.
@@ -584,11 +650,14 @@ export function myJobs(db: import("bun:sqlite").Database, userId: number, doneLi
           ? row.logo_url
           : null,
       stalled: phase === "running" && jobLeaseExpired(typeof row.lease_until === "string" ? row.lease_until : null),
+      ...(phase === "refused"
+        ? { scanId: null, outcome: null, scoreChanged: null }
+        : jobScanOutcome(db, Number(row.repo_id), userId, typeof row.claimed_at === "string" ? row.claimed_at : null)),
     };
   };
     // LEFT JOIN: refused живёт без строки repos (repo_id = 0)
   const base =
-    "SELECT j.id, j.status, j.claimed_at, j.lease_until, j.error, r.org_slug, r.repo_slug, r.logo_url FROM jobs j LEFT JOIN repos r ON r.id = j.repo_id WHERE j.user_id = ?";
+    "SELECT j.id, j.repo_id, j.status, j.claimed_at, j.lease_until, j.error, r.org_slug, r.repo_slug, r.logo_url FROM jobs j LEFT JOIN repos r ON r.id = j.repo_id WHERE j.user_id = ?";
   const active = (db.query(base + " AND j.status IN ('queued','running') ORDER BY j.id").all(userId) as Record<string, unknown>[]).map(toJob);
   const recent = (db.query(base + " AND j.status IN ('done','failed','refused') ORDER BY j.id DESC LIMIT ?").all(userId, doneLimit) as Record<string, unknown>[]).map(toJob);
   return { active, recent };
