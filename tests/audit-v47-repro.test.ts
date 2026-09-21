@@ -71,7 +71,7 @@ describe("П1: PDF-выгрузка", () => {
 // ---------------------------------------------------------------------------
 
 describe("П2: контракт языка", () => {
-  repro("?lang=Go&lang=Kotlin отдаёт оба языка по всему каталогу (сейчас берётся одно значение)", () => {
+  test("?lang=Go&lang=Kotlin отдаёт оба языка по всему каталогу (сейчас берётся одно значение)", () => {
     const parsed = parseReposQuery(new URLSearchParams("lang=Go&lang=Kotlin&per_page=100"));
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
@@ -80,7 +80,7 @@ describe("П2: контракт языка", () => {
     expect([...langs].sort()).toEqual(["Go", "Kotlin"]);
   });
 
-  repro("фасет несёт цвет языка (LanguageFacet.color из language_color)", () => {
+  test("фасет несёт цвет языка (LanguageFacet.color из language_color)", () => {
     const parsed = parseReposQuery(new URLSearchParams(""));
     if (!parsed.ok) throw new Error(parsed.message);
     const facets = listRepos(rating.db, parsed.query).facets.languages as { language: string | null; color?: string | null }[];

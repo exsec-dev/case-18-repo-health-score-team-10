@@ -64,6 +64,13 @@ export interface RatingItem {
 export interface LanguageFacet {
   language: string | null;
   count: number;
+  /**
+   * В4.7 (П2, ревизия 4): цвет языка (`repos.language_color`, #rrggbb) — у
+   * каждой опции мультивыбора свой кружок. Без поля цвет знали бы только
+   * строки текущей страницы, и язык с чужой страницы остался бы без кружка.
+   * null — у языка нет цвета платформы (или язык не определён).
+   */
+  color: string | null;
 }
 
 export interface RatingResponse {
@@ -85,8 +92,13 @@ export type SortOrder = "desc" | "asc";
 export interface ReposQuery {
   sort: SortKey;
   order: SortOrder;
-  /** undefined = фильтра нет; null = «язык не определён» (lang= пустым) */
-  lang?: string | null;
+  /**
+   * В4.7 (П2): множество языков из повторяемого `lang` (`?lang=Go&lang=Rust`).
+   * undefined = параметра нет, фильтра нет (все языки); элемент null =
+   * «язык не определён» (`lang=` пустым). Одиночный `lang=Go` — множество из
+   * одного элемента: старые ссылки и закладки работают как раньше.
+   */
+  lang?: (string | null)[];
   q?: string;
   page: number;
   perPage: number;
@@ -128,8 +140,12 @@ export function parseReposQuery(params: URLSearchParams): ParseResult {
   }
 
   if (params.has("lang")) {
-    const lang = params.get("lang")!;
-    query.lang = lang === "" ? null : lang;
+    const langs: (string | null)[] = [];
+    for (const raw of params.getAll("lang")) {
+      const lang = raw === "" ? null : raw;
+      if (!langs.includes(lang)) langs.push(lang);
+    }
+    query.lang = langs;
   }
 
   if (params.has("q")) {
@@ -312,13 +328,22 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
   // фасеты считаются БЕЗ фильтра языка (иначе выбранный язык схлопывает
   // список выбора и из него некуда вернуться), но С учётом поиска
   const byQ = query.q === undefined ? all : all.filter((i) => matchesQ(i, query.q!));
+  // Мультивыбор (В4.7, П2) это решение не отменяет: выбранный набор не
+  // схлопывает список, из которого его выбирали.
   const counts = new Map<string | null, number>();
-  for (const item of byQ) counts.set(item.language, (counts.get(item.language) ?? 0) + 1);
+  const colors = new Map<string | null, string | null>();
+  for (const item of byQ) {
+    counts.set(item.language, (counts.get(item.language) ?? 0) + 1);
+    // цвет — первый известный у строк этого языка (платформа отдаёт его на язык, а не на репо)
+    if (!colors.get(item.language)) colors.set(item.language, item.language === null ? null : item.languageColor);
+  }
   const languages: LanguageFacet[] = [...counts.entries()]
-    .map(([language, count]) => ({ language, count }))
+    .map(([language, count]) => ({ language, count, color: colors.get(language) ?? null }))
     .sort((a, b) => b.count - a.count || (a.language ?? "￿").localeCompare(b.language ?? "￿"));
 
-  const filtered = query.lang === undefined ? byQ : byQ.filter((i) => i.language === query.lang);
+  // фильтр — принадлежность множеству (В4.7, П2); сортировка от него не зависит
+  const langs = query.lang;
+  const filtered = langs === undefined ? byQ : byQ.filter((i) => langs.includes(i.language));
   const scored = filtered.filter((i) => i.healthcraftIndex !== null);
   const nullItems = filtered
     .filter((i) => i.healthcraftIndex === null)

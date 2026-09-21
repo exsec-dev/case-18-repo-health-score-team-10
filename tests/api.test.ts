@@ -160,13 +160,13 @@ describe("рейтинг: сортировки", () => {
 
 describe("рейтинг: фильтры и фасеты", () => {
   test("lang — точное значение", () => {
-    const res = listRepos(t.db, q({ lang: "Go" }));
+    const res = listRepos(t.db, q({ lang: ["Go"] }));
     expect(names(res.items)).toEqual(["k-5-45mm/dozzle-plus", "hex21h/datahint", "tail/no-meta"]);
     expect(res.total).toBe(3);
   });
 
   test("lang= (пустой) — группа «язык не определён»", () => {
-    const res = listRepos(t.db, q({ lang: null }));
+    const res = listRepos(t.db, q({ lang: [null] }));
     expect(names(res.items)).toEqual(["yandex-cloud-examples/cloudapp-hugo", "raph/its-wednesday-my-dudes"]);
   });
 
@@ -177,7 +177,7 @@ describe("рейтинг: фильтры и фасеты", () => {
   });
 
   test("фасеты считаются без учёта lang, но с учётом q", () => {
-    const withLang = listRepos(t.db, q({ lang: "Go" }));
+    const withLang = listRepos(t.db, q({ lang: ["Go"] }));
     const facet = (r: { facets: { languages: { language: string | null; count: number }[] } }, lang: string | null) =>
       r.facets.languages.find((f) => f.language === lang)?.count;
     expect(facet(withLang, "Go")).toBe(3);
@@ -186,7 +186,8 @@ describe("рейтинг: фильтры и фасеты", () => {
     expect(facet(withLang, "C++")).toBe(1);
     expect(facet(withLang, null)).toBe(2);
     const withQ = listRepos(t.db, q({ q: "div" }));
-    expect(withQ.facets.languages).toEqual([{ language: "Kotlin", count: 1 }]);
+    // В4.7 (П2): фасет несёт цвет языка; у сид-набора цветов нет — null
+    expect(withQ.facets.languages).toEqual([{ language: "Kotlin", count: 1, color: null }]);
   });
 
   test("пагинация: срез и totalPages", () => {
@@ -201,14 +202,15 @@ describe("разбор query-параметров", () => {
   test("дефолты и известные значения", () => {
     const res = parseReposQuery(new URLSearchParams("sort=likes&order=asc&page=2&per_page=10&lang=Go&q=div"));
     expect(res.ok).toBe(true);
-    if (res.ok) expect(res.query).toEqual({ sort: "likes", order: "asc", page: 2, perPage: 10, lang: "Go", q: "div" });
+    // В4.7 (П2): lang — множество; одиночный lang=Go — множество из одного элемента
+    if (res.ok) expect(res.query).toEqual({ sort: "likes", order: "asc", page: 2, perPage: 10, lang: ["Go"], q: "div" });
     const empty = parseReposQuery(new URLSearchParams(""));
     if (empty.ok) expect(empty.query).toEqual(DEFAULT_QUERY);
   });
 
   test("lang= отличается от отсутствующего lang", () => {
     const withEmpty = parseReposQuery(new URLSearchParams("lang="));
-    if (withEmpty.ok) expect(withEmpty.query.lang).toBeNull();
+    if (withEmpty.ok) expect(withEmpty.query.lang).toEqual([null]);
     const without = parseReposQuery(new URLSearchParams(""));
     if (without.ok) expect("lang" in without.query).toBe(false);
   });
