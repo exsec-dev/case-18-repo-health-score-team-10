@@ -187,7 +187,7 @@ function seedNote(seed: import("../api/me").PatSeed | undefined): string {
         ? "прочитаны не все страницы namespace"
         : seed.error?.code === "no_username"
           ? // UX-9 (круг 2 В4.4): namespace не опрашивался — не обвинять его
-            "не удалось начать посев — SourceCraft не вернул имя пользователя"
+            "не удалось начать посев – SourceCraft не вернул имя пользователя"
           : "namespace ответил сбоем";
   return `Посев избранного остановлен: ${why} (добавлено ${seed.added}).`;
 }
@@ -319,7 +319,7 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
             </Flex>
             <Text variant="body-short" color="complementary">
               SourceCraft: Домой → Доступ → Персональные токены доступа → Сгенерировать новый токен. Токен показывается один
-              раз — скопируйте его сразу. Перед сохранением мы проверяем его живым запросом GET /user: неверный токен
+              раз – скопируйте его сразу. Перед сохранением мы проверяем его живым запросом GET /user: неверный токен
               платформа отклонит, и он не сохранится.
             </Text>
             {tokenForm("Токен доступа SourceCraft", "Проверить и сохранить")}
@@ -431,7 +431,7 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
                   name: `scan-failed:${slug}`,
                   theme: "danger",
                   title: "Анализ завершился ошибкой",
-                  content: `${slug}: сбор данных не удался — подробности в «Моих заданиях»`,
+                  content: `${slug}: сбор данных не удался – подробности в «Моих заданиях»`,
                 });
               }
               reposReloadRef.current();
@@ -638,7 +638,7 @@ function RepoRow({
   ) : job ? (
     job.phase === "stalled" ? (
       <Label theme="warning" size="xs">
-        затянулось — смотрите панель заданий
+        затянулось – смотрите панель заданий
       </Label>
     ) : (
       <Flex gap={2} alignItems="center" title={etaNote}>
@@ -654,7 +654,7 @@ function RepoRow({
       анализ запланирован, данные скоро будут
     </Label>
   ) : scored ? (
-    <Flex direction="column" alignItems="flex-end" gap={0} title="HealthCraft Index — публичная оценка репозитория">
+    <Flex direction="column" alignItems="flex-end" gap={0} title="HealthCraft Index – публичная оценка репозитория">
       <Flex gap={1} alignItems="baseline">
         <Text variant="subheader-3">{fmtScore(entry.healthcraftIndex)}</Text>
         <Text color="secondary">/ 100 в рейтинге</Text>
@@ -676,11 +676,11 @@ function RepoRow({
     // текст согласован с тостом опросщика и панелью заданий. Пригодный старый
     // индекс сработал бы веткой выше — статус-текст только там, где оценки нет
     <Label theme="danger" size="xs">
-      Анализ завершился ошибкой — повторите
+      Анализ завершился ошибкой – повторите
     </Label>
   ) : entry.lastScanAt !== null ? (
     <Label theme="unknown" size="xs">
-      Проанализировали — данных для оценки не хватило
+      Проанализировали – данных для оценки не хватило
     </Label>
   ) : !entry.inCatalog ? (
     // UX-8 (круг 2 В4.4): явные признаки вместо прокси `title === null` —
@@ -827,7 +827,7 @@ export function JobsBell() {
           {active.map((j) => (
             <Flex key={j.jobId} gap={2} alignItems="baseline">
               <JobSlug slug={j.slug} />
-              <Text color="secondary">— {jobPhaseLabel(j)}</Text>
+              <Text color="secondary">– {jobPhaseLabel(j)}</Text>
             </Flex>
           ))}
           {active.length === 0 && <Text color="secondary">активных нет; последняя ошибка ниже</Text>}
@@ -837,7 +837,7 @@ export function JobsBell() {
             .map((j) => (
               <Flex key={j.jobId} gap={2} alignItems="baseline">
                 <JobSlug slug={j.slug} />
-                <Text color="danger">— {j.error ?? "ошибка"}</Text>
+                <Text color="danger">– {j.error ?? "ошибка"}</Text>
               </Flex>
             ))}
           <Link {...linkProps("/me")}>весь список – в разделе «Мои репозитории»</Link>
@@ -861,7 +861,7 @@ function JobsPanel(props: { jobs: JobsResponse | null; reload: () => void; lease
         <Flex direction="column" gap={1}>
           <Text variant="subheader-2">Мои задания</Text>
           {/* M-12: без жаргона про «ночная волна/клоны» */}
-          <Text color="secondary">Ваши сканы идут в отдельной быстрой очереди — ночной обход рейтинга им не мешает.</Text>
+          <Text color="secondary">Ваши сканы идут в отдельной быстрой очереди – ночной обход рейтинга им не мешает.</Text>
         </Flex>
         {active.map((j) => (
           <Flex key={j.jobId} gap={3} alignItems="center" wrap>
@@ -878,7 +878,7 @@ function JobsPanel(props: { jobs: JobsResponse | null; reload: () => void; lease
                 <Label theme={j.phase === "failed" ? "danger" : j.phase === "refused" ? "unknown" : "success"}>{jobPhaseLabel(j)}</Label>
                 {/* Ф2.20: «Последние» кликабельны — карточка в одном клике */}
                 <JobSlug slug={j.slug} link />
-                {j.error && <Text color="secondary">— {j.error}</Text>}
+                {j.error && <Text color="secondary">– {j.error}</Text>}
               </Flex>
             ))}
           </Flex>
@@ -979,13 +979,13 @@ function enqueueNote(enqueue: import("../api/me").FavoriteEnqueue): string {
   }
   switch (enqueue.code) {
     case "too_many_active":
-      return "анализ не запущен: слишком много ваших анализов в очереди — дождитесь завершения";
+      return "анализ не запущен: слишком много ваших анализов в очереди – дождитесь завершения";
     case "rate_limited":
-      return "анализ не запущен: исчерпан часовой лимит запусков — попробуйте позже";
+      return "анализ не запущен: исчерпан часовой лимит запусков – попробуйте позже";
     case "no_access":
-      return "анализ не запущен: ваш PAT не даёт доступа к этому репозиторию";
+      return "анализ не запущен: ваш PAT не дает доступа к этому репозиторию";
     case "pat_expired":
-      return "анализ не запущен: SourceCraft отклонил PAT — обновите токен";
+      return "анализ не запущен: SourceCraft отклонил PAT – обновите токен";
     default:
       return "анализ не запущен: не удалось проверить доступ к репозиторию";
   }

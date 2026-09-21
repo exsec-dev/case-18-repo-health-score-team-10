@@ -170,7 +170,8 @@ describe("UI-ветки круга 2 (source-assert, Б2)", () => {
 
   test("З4: bad-статус имеет честный текст; ветка индекса срабатывает раньше статус-текста", () => {
     const src = srcOf("MePage.tsx");
-    expect(src.includes("Анализ завершился ошибкой — повторите")).toBe(true);
+    // В4.7 (Б6, П4.3): правило языка UI в кабинете — среднее тире вместо длинного
+    expect(src.includes("Анализ завершился ошибкой – повторите")).toBe(true);
     const indexBranch = src.indexOf("entry.healthcraftIndex !== null");
     const badBranch = src.indexOf('entry.lastScanStatus === "bad"');
     expect({ indexBranch, badBranch, indexFirst: indexBranch < badBranch }).toMatchObject({ indexFirst: true });
@@ -239,7 +240,8 @@ describe("UI-ветки круга 2 (source-assert, Б4)", () => {
 
   test("UX-9: seedNote при отсутствующем username не обвиняет namespace", () => {
     const meSrc = srcOf("MePage.tsx");
-    expect(meSrc.includes("не удалось начать посев — SourceCraft не вернул имя пользователя")).toBe(true);
+    // В4.7 (Б6, П4.3): правило языка UI в кабинете — среднее тире вместо длинного
+    expect(meSrc.includes("не удалось начать посев – SourceCraft не вернул имя пользователя")).toBe(true);
     const serverSrc = readFileSync(join(import.meta.dir, "..", "src", "server.ts"), "utf8");
     expect(serverSrc.includes('code: "no_username"')).toBe(true);
   });
