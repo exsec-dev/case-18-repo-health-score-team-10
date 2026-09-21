@@ -53,8 +53,10 @@ import {
   useToaster,
 } from "@gravity-ui/uikit";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { type MeResponse, type MetaResponse, type MyReposResponse, type RepoCard, fetchJson, logout, mutateJson, useJson } from "./api";
-import { analysisOutcome, authErrorText, fmtDateTime, fmtScore, recommendationsText, scoreTheme, scoreWord, sentence, slugOf } from "./format";
+import { type MeResponse, type MetaResponse, type MyReposResponse, dataOf, logout, mutateJson, useJson, useLatest } from "./api";
+import type { LiveAnalysis } from "./analysis";
+import { announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
+import { authErrorText, fmtDateTime, fmtScore, recommendationsText, scoreTheme, scoreWord, sentence, slugOf } from "./format";
 import { TAB_RECOMMENDATIONS } from "./RepoPage";
 import { type Band, BANDS, type RepoEntry, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
 import { linkProps, navigate, repoHref } from "./router";
@@ -63,8 +65,6 @@ import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, Rep
 
 const REPOS_CRUMBS = [{ text: "Мои репозитории" }];
 const SETTINGS_CRUMBS = [{ text: "Настройки" }];
-
-type ScanJobState = { sinceScanId: number; startedAt: number; seenScanId: number | null; phase: "queued" | "running" | "stalled" };
 
 /**
  * В4.7 (П3.4): ОДНА плашка кабинета. До вехи семь `Alert` стояли в трёх
@@ -86,34 +86,31 @@ function CabinetAlert({
   return <Alert theme={theme} view="outlined" size="m" title={title} message={message} actions={actions} />;
 }
 
-export function MePage({ meta }: { meta: MetaResponse | null }) {
-  const me = useJson<MeResponse>("/api/me");
-  // Ф2.9: горизонт опросов анализа — лиз job из /api/meta, не хардкод 20 минут
-  const leaseMs = meta?.queue.leaseMs ?? 85 * 60_000;
-  // В4.4 (кластер M-14): ОДИН источник статусов — серверные jobs; строка
-  // списка предпочитает их локальному опросу (диагноз UX: два источника).
-  // Аноним не опрашивает вовсе (см. useMyJobs)
-  const jobs = useMyJobs(5000, me.state.kind === "ok" && me.state.data.login !== null);
+export function MePage(_props: { meta: MetaResponse | null }) {
+  // В4.8.5 (К8.5.8): сессия — одно состояние приложения (session.tsx), а
+  // не своя копия `/api/me` у каждой страницы; статусы анализа — из общего
+  // опроса заданий вкладки (К8.5.1)
+  const { me, reloadMe } = useSession();
+  const data = dataOf(me);
 
-  if (me.state.kind === "loading") {
+  if (data === null && me.kind !== "error") {
     return (
       <Page crumbs={REPOS_CRUMBS}>
         <SkeletonRows rows={4} height={56} />
       </Page>
     );
   }
-  if (me.state.kind === "error") {
+  if (data === null) {
     // В4.4 (кластер M-3): сбой /api/me — честная ошибка с повтором, не LoginOffer
     return (
       <Page crumbs={REPOS_CRUMBS}>
-        <CabinetAlert title="Не удалось загрузить список репозиториев" message={me.state.message} actions={[{ text: "Повторить", handler: me.reload }]} />
+        <CabinetAlert title="Не удалось загрузить список репозиториев" message={me.kind === "error" ? me.message : undefined} actions={[{ text: "Повторить", handler: reloadMe }]} />
       </Page>
     );
   }
-  if (me.state.data.login === null) {
+  if (data.login === null) {
     return <LoginOffer pageTitle="Мои репозитории" />;
   }
-  const data = me.state.data;
   return (
     // В4.8 (вариант A, решение 21.09): одна колонна — список, как у списков
     // SourceCraft. Журнал «Мои задания» из тела страницы убран: статус анализа
@@ -122,32 +119,34 @@ export function MePage({ meta }: { meta: MetaResponse | null }) {
     <Page crumbs={REPOS_CRUMBS}>
       {/* В4.4 (кластер I): список favorites-only живет и без PAT;
           токен нужен для проверки прав, автозапуска и посева из namespace */}
-      <MyReposSection hasPat={data.hasPat} leaseMs={leaseMs} serverJobs={jobs.jobs} />
+      <MyReposSection hasPat={data.hasPat} />
     </Page>
   );
 }
 
 export function SettingsPage() {
-  const me = useJson<MeResponse>("/api/me");
-  if (me.state.kind === "loading") {
+  const { me, reloadMe } = useSession();
+  const data = dataOf(me);
+  if (data === null && me.kind !== "error") {
     return (
       <Page crumbs={SETTINGS_CRUMBS}>
         <SkeletonRows rows={4} height={56} />
       </Page>
     );
   }
-  if (me.state.kind === "error") {
+  if (data === null) {
     return (
       <Page crumbs={SETTINGS_CRUMBS}>
-        <CabinetAlert title="Не удалось загрузить настройки" message={me.state.message} actions={[{ text: "Повторить", handler: me.reload }]} />
+        <CabinetAlert title="Не удалось загрузить настройки" message={me.kind === "error" ? me.message : undefined} actions={[{ text: "Повторить", handler: reloadMe }]} />
       </Page>
     );
   }
-  if (me.state.data.login === null) return <LoginOffer pageTitle="Настройки" />;
-  const data = me.state.data;
+  if (data.login === null) return <LoginOffer pageTitle="Настройки" />;
   return (
     <Page crumbs={SETTINGS_CRUMBS} aside={<AccountSection me={data} />}>
-      <PatSection key={data.patCheckedAt ?? "no-pat"} hasPat={data.hasPat} checkedAt={data.patCheckedAt} onChanged={me.reload} />
+      {/* В4.8.5 (К8.5.3, С2-4): секция токена не перемонтируется по дате
+          проверки — строка «Токен принадлежит…» после сохранения остаётся */}
+      <PatSection hasPat={data.hasPat} checkedAt={data.patCheckedAt} onChanged={reloadMe} />
     </Page>
   );
 }
@@ -261,6 +260,7 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
       );
       setOwner(res.tokenOwner);
       setToken("");
+      setReplacing(false);
       toaster.add({
         name: "pat-saved",
         theme: "success",
@@ -398,10 +398,12 @@ function PatSection({ hasPat, checkedAt, onChanged }: { hasPat: boolean; checked
 const INPUT_LIKELY = /^([a-z0-9_.-]+\/[a-z0-9_.-]+|https?:\/\/\S+)$/i;
 
 
-function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leaseMs: number; serverJobs: JobsResponse | null }) {
-  const repos = useJson<MyReposResponse>("/api/me/repos");
-  const favs = useJson<FavoritesResponse>("/api/me/favorites");
-  const [jobs, setJobs] = useState<Record<string, ScanJobState>>({});
+function MyReposSection({ hasPat }: { hasPat: boolean }) {
+  // В4.8.5 (К8.5.3): перечитывание не мигает и не пропадает при сбое
+  const repos = useJson<MyReposResponse>("/api/me/repos", { keepPrevious: true });
+  const favs = useJson<FavoritesResponse>("/api/me/favorites", { keepPrevious: true });
+  // С4-13: запуск на время отправки блокирует повторный клик по строке
+  const [starting, setStarting] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [query, setQuery] = useState("");
@@ -409,96 +411,40 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
   const [sortKey, setSortKey] = useState<SortKey>("index");
   const [sortDesc, setSortDesc] = useState(true);
   const toaster = useToaster();
+  // В4.8.5 (К8.5.1): фаза анализа строки — из общего опроса заданий вкладки
+  // (по заданию); тост об итоге даёт он же, из любого экрана
+  const analysis = useAnalysis();
   const reposReloadRef = useRef(repos.reload);
   reposReloadRef.current = repos.reload;
+  const listed = useLatest(repos.state.kind === "ok" ? repos.state.data.entries : []);
+  // итог анализа пришёл — строка перечитывается (один раз на пачку итогов)
+  useAnalysisFinished((jobs) => {
+    if (jobs.some((j) => listed.current.some((e) => `${e.org}/${e.repo}` === j.slug))) reposReloadRef.current();
+  });
 
   const startScan = useCallback(
     async (slug: string) => {
+      if (starting.has(slug)) return;
+      setStarting((prev) => new Set(prev).add(slug));
       try {
-        // отсчёт: последний видимый скан, чтобы поймать появление нового
-        let since = 0;
-        try {
-          const [org, repo] = slug.split("/");
-          const card = await fetchJson<RepoCard>(`/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`);
-          since = card.scan?.id ?? 0;
-        } catch {
-          /* карточки может ещё не быть — значит since = 0 */
-        }
-        await mutateJson(`/api/me/repos/${slug.split("/").map(encodeURIComponent).join("/")}/scan`, "POST");
-        // круг 4 (замечание 4): «Задания» в шапке узнают о запуске сразу, а не
-        // на следующем тике своего 20-секундного опроса
-        announceJobsChanged();
-        setJobs((prev) => ({ ...prev, [slug]: { sinceScanId: since, startedAt: Date.now(), seenScanId: null, phase: "queued" } }));
+        const res = await mutateJson<{ deduplicated?: boolean }>(`/api/me/repos/${slug.split("/").map(encodeURIComponent).join("/")}/scan`, "POST");
+        if (res?.deduplicated) toaster.add({ name: `scan-dedup:${slug}`, theme: "info", title: "Анализ уже идет", content: slug });
       } catch (e) {
         toaster.add({ name: `scan-failed:${slug}`, theme: "danger", title: "Анализ не запущен", content: e instanceof Error ? e.message : String(e) });
+      } finally {
+        setStarting((prev) => {
+          const next = new Set(prev);
+          next.delete(slug);
+          return next;
+        });
+        // круг 4 (замечание 4) + С9-16: «Задания» и строка узнают о запуске сразу —
+        // и тогда, когда ответ на запуск потерялся, а задание встало
+        announceJobsChanged();
+        analysis.refresh();
       }
     },
-    [toaster],
+    [toaster, starting, analysis],
   );
-
-  // опрос статуса запущенных анализов: 3с, не дольше лиза job (Ф2.9).
-  // В4.4 (кластер E): исход — по СТАТУСУ скана (bad → ошибка, не success);
-  // В4.4 (кластер M-5): после leaseMs — «затянулось», не молчаливое снятие
-  useEffect(() => {
-    const slugs = Object.keys(jobs);
-    if (slugs.length === 0) return;
-    const timer = setInterval(async () => {
-      for (const slug of slugs) {
-        const job = jobs[slug]!;
-        if (job.phase === "stalled") {
-          // З2 (круг 2 В4.4): stalled не замораживает строку навсегда — когда
-          // серверная job ушла из active (исход есть в заданиях шапки), метка
-          // снимается и строка перечитывает серверную правду
-          const stillActive = serverJobs?.active.some((j) => j.slug === slug) ?? true;
-          if (!stillActive) {
-            setJobs((prev) => {
-              const next = { ...prev };
-              delete next[slug];
-              return next;
-            });
-            reposReloadRef.current();
-          }
-          continue;
-        }
-        // В4.8.5 (К8.5.2b): «затянулось» — признак сервера (лиз задания
-        // истёк), а не таймер страницы от leaseMs
-        if (serverJobs?.active.some((j) => j.slug === slug && j.stalled)) {
-          setJobs((prev) => ({ ...prev, [slug]: { ...job, phase: "stalled" } }));
-          continue;
-        }
-        try {
-          const [org, repo] = slug.split("/");
-          const card = await fetchJson<RepoCard>(`/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`);
-          if (card.scan && card.scan.id > job.sinceScanId) {
-            const outcome = analysisOutcome(card.scan);
-            if (outcome !== "pending" && outcome !== "interrupted") {
-              setJobs((prev) => {
-                const next = { ...prev };
-                delete next[slug];
-                return next;
-              });
-              if (outcome === "ok") {
-                toaster.add({ name: `scan-done:${slug}`, theme: "success", title: "Анализ завершен", content: slug });
-              } else {
-                toaster.add({
-                  name: `scan-failed:${slug}`,
-                  theme: "danger",
-                  title: "Анализ завершился ошибкой",
-                  content: `${slug}: сбор данных не удался – подробности в «Заданиях» в шапке`,
-                });
-              }
-              reposReloadRef.current();
-            } else {
-              setJobs((prev) => ({ ...prev, [slug]: { ...job, seenScanId: card.scan!.id, phase: "running" } }));
-            }
-          }
-        } catch {
-          /* карточка ещё не готова — следующий тик */
-        }
-      }
-    }, 3000);
-    return () => clearInterval(timer);
-  }, [jobs, toaster, leaseMs, serverJobs]);
 
   const check = async (org: string, repo: string) => {
     setBusy(`${org}/${repo}`);
@@ -542,8 +488,9 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
     }
   };
 
-  const entries = repos.state.kind === "ok" ? repos.state.data.entries : [];
-  const accessBySlug = new Map((favs.state.kind === "ok" ? favs.state.data.entries : []).map((f) => [`${f.org}/${f.repo}`, f]));
+  const reposData = dataOf(repos.state);
+  const entries = reposData?.entries ?? [];
+  const accessBySlug = new Map((dataOf(favs.state)?.entries ?? []).map((f) => [`${f.org}/${f.repo}`, f]));
   const counts = countBands(entries);
   const shown = sortEntries(filterEntries(entries, query, band), sortKey, sortDesc);
 
@@ -714,10 +661,9 @@ function MyReposSection({ hasPat, leaseMs, serverJobs }: { hasPat: boolean; leas
                     access={accessBySlug.get(slug)?.access ?? null}
                     lastCheckedAt={accessBySlug.get(slug)?.lastCheckedAt ?? null}
                     hasPat={hasPat}
-                    job={jobs[slug] ?? null}
-                    serverJob={serverJobs?.active.find((j) => j.slug === slug) ?? null}
+                    live={analysis.live(slug)}
+                    starting={starting.has(slug)}
                     busy={busy !== null}
-                    etaNote={`обычно до ${Math.max(1, Math.round(leaseMs / 60_000))} минут`}
                     onScan={() => void startScan(slug)}
                     onCheck={() => void check(entry.org, entry.repo)}
                     onRemove={() => void removeFav(entry.org, entry.repo)}
@@ -870,10 +816,9 @@ function RepoRow({
   access,
   lastCheckedAt,
   hasPat,
-  job,
-  serverJob,
+  live,
+  starting,
   busy,
-  etaNote,
   onScan,
   onCheck,
   onRemove,
@@ -882,11 +827,11 @@ function RepoRow({
   access: import("../api/me").FavoriteAccess | null;
   lastCheckedAt: string | null;
   hasPat: boolean;
-  job: ScanJobState | null;
-  serverJob: import("../api/me").MyJob | null;
+  /** В4.8.5 (К8.5.1): живое задание зрителя по этому репозиторию — из общего опроса вкладки */
+  live: LiveAnalysis | null;
+  /** запуск отправляется (повторный клик заблокирован, С4-13) */
+  starting: boolean;
   busy: boolean;
-  /** M-4: «обычно до N минут» — из лиза job (/api/meta) */
-  etaNote: string;
   onScan: () => void;
   onCheck: () => void;
   onRemove: () => void;
@@ -894,9 +839,9 @@ function RepoRow({
   const { org, repo } = entry;
   const href = repoHref(org, repo);
   const scored = entry.healthcraftIndex !== null;
-  const inWork = job !== null || serverJob !== null;
-  // В4.4 (кластер M-14): серверный статус job — приоритетнее локального опроса
-  const phase = serverJob ? serverJob.phase : job ? job.phase : null;
+  const inWork = live !== null || starting;
+  // В4.8.5 (К8.5.1, К8.5.2b): фаза — по заданию; «затянулось» — признак сервера
+  const phase = live === null ? null : live.stalled ? "stalled" : live.phase;
 
   // Круг 3 (замечание 8): все состояния без оценки — ОДНА серая плашка
   // `StatePill` (та же форма, что у «Сканируется»), смысл — иконкой и
@@ -910,7 +855,8 @@ function RepoRow({
     ) : phase !== null ? (
       // Круг 2 (1a): серая плашка с бегущей штриховкой — ровно состояние
       // загрузки кнопки Gravity (как «Отчет» на карточке), а не тег со спиннером
-      <span className="rh-state rh-busy" title={etaNote}>
+      // §2-В5: «идет анализ» — без обещания времени
+      <span className="rh-state rh-busy" title="Идет анализ – итог придет уведомлением">
         {phase === "queued" ? "В очереди" : "Сканируется"}
       </span>
     ) : entry.planned ? (
@@ -926,7 +872,7 @@ function RepoRow({
       </div>
     ) : entry.lastScanStatus === "running" ? (
       // З4 (круг 2 В4.4): running — легальный транзитный статус последнего скана
-      <span className="rh-state rh-busy" title={etaNote}>
+      <span className="rh-state rh-busy" title="Идет анализ">
         Сканируется
       </span>
     ) : entry.lastScanStatus === "bad" ? (
@@ -1043,66 +989,10 @@ function RepoRow({
 
 // ========== ПОРТ 5 (hq-parallel): панель заданий ==========
 
-interface JobsResponse {
-  active: import("../api/me").MyJob[];
-  recent: import("../api/me").MyJob[];
-}
-
-/** Опрос /api/me/jobs: чаще при активных (честная позиция вместо спиннера);
- *  бэкофф ×2 до 5 мин на сбоях/401 после успешных данных — истёкшая сессия
- *  не крутит вечный 20-секундный опрос (ищейка-7). `enabled=false` (аноним)
- *  не шлёт ни одного запроса — 401-зонд мусорил бы консоль (планка «ноль
- *  ошибок консоли» харнесса). */
-/** Событие «задания изменились» (В4.8 круг 4): запуск анализа в строке будит все опросы `useMyJobs`. */
-const JOBS_CHANGED = "rh-jobs-changed";
-
-function announceJobsChanged(): void {
-  window.dispatchEvent(new Event(JOBS_CHANGED));
-}
-
-function useMyJobs(idleMs = 5000, enabled = true): { jobs: JobsResponse | null; reload: () => void } {
-  const [jobs, setJobs] = useState<JobsResponse | null>(null);
-  const [tick, setTick] = useState(0);
-  const hadData = useRef(false);
-  const reload = useCallback(() => setTick((x) => x + 1), []);
-  useEffect(() => {
-    window.addEventListener(JOBS_CHANGED, reload);
-    return () => window.removeEventListener(JOBS_CHANGED, reload);
-  }, [reload]);
-  useEffect(() => {
-    if (!enabled) return;
-    let stop = false;
-    let timer: ReturnType<typeof setTimeout>;
-    let backoff = 1;
-    const poll = async () => {
-      let delay = idleMs;
-      try {
-        const res = await fetch("/api/me/jobs");
-        if (res.status === 401 && hadData.current) {
-          delay = Math.min(idleMs * backoff, 5 * 60_000);
-          backoff = Math.min(backoff * 2, 60);
-        } else if (res.ok) {
-          const data = (await res.json()) as JobsResponse;
-          if (!stop) {
-            setJobs(data);
-            hadData.current = true;
-            backoff = 1;
-            if (data.active.length > 0) delay = 3000;
-          }
-        }
-      } catch {
-        /* сеть — тихо */
-      }
-      if (!stop) timer = setTimeout(poll, delay);
-    };
-    void poll();
-    return () => {
-      stop = true;
-      clearTimeout(timer);
-    };
-  }, [tick, idleMs, enabled]);
-  return { jobs, reload };
-}
+// В4.8.5 (К8.5.1): свой опрос `/api/me/jobs` у страницы и у «Заданий» шапки
+// убран — один опрос на вкладку живёт в session.tsx (пауза в скрытой
+// вкладке, 401 переводит приложение в «вы вышли», К8.5.8); событие
+// «задания изменились» — там же (`announceJobsChanged`).
 
 /**
  * Кнопка «Задания» в шапке и ее панель.
@@ -1118,7 +1008,7 @@ function useMyJobs(idleMs = 5000, enabled = true): { jobs: JobsResponse | null; 
  * оценки времени.
  */
 export function JobsBell() {
-  const { jobs } = useMyJobs(20000);
+  const { jobs } = useAnalysis();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"active" | "history" | null>(null);
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);

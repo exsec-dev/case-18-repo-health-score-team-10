@@ -70,11 +70,12 @@ import {
   Text,
   useToaster,
 } from "@gravity-ui/uikit";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { CardCategory } from "../api/repos";
 import { formatSubmetricValue, submetricContext, submetricTitle } from "../report/submetrics";
-import type { MeResponse, MetaResponse, RepoCard } from "./api";
-import { fetchJson, mutateJson, useJson } from "./api";
+import type { MetaResponse, RepoCard } from "./api";
+import { dataOf, mutateJson, useJson } from "./api";
+import { announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
 import {
   ACCESS_LOCK_SHORT,
   CATEGORY_TITLES_RU,
@@ -84,7 +85,6 @@ import {
   NO_SCORE,
   SECURITY_PUBLIC_NOTE,
   accessLockShort,
-  analysisOutcome,
   fmtCount,
   fmtCoverage,
   fmtDate,
@@ -116,53 +116,62 @@ type Evidence = Card["evidence"][number];
 type Recommendation = Card["recommendations"][number];
 
 export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta: MetaResponse | null }) {
+  const slug = `${org}/${repo}`;
   const cardUrl = `/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`;
-  const { state, reload } = useJson<Card>(cardUrl);
-  const me = useJson<MeResponse>("/api/me");
-  const loggedIn = me.state.kind === "ok" && me.state.data.login !== null;
-  const canRefresh = loggedIn && me.state.kind === "ok" && me.state.data.hasPat;
-  const sinceScanId = state.kind === "ok" ? (state.data.scan?.id ?? 0) : 0;
-  // Ф2.9/Ф2.15: горизонт опросов анализа — лиз job из /api/meta, не хардкод
-  const leaseMs = meta?.queue.leaseMs ?? 85 * 60_000;
-  // З3 (круг 2 В4.4): после успешного старта карточка ПЕРЕЧИТЫВАЕТСЯ —
-  // тело переключается в job-ветку («Анализ запланирован/Сканируем») вслед
-  // за заголовком, а не спорит с ним до конца скана
-  const refresh = useRefreshAnalysis(org, repo, cardUrl, sinceScanId, reload, leaseMs, reload);
-  // M-4: честное ожидание — из лиза job (горизонт одного скана), не хардкод
-  const etaNote = `обычно до ${Math.max(1, Math.round(leaseMs / 60_000))} минут`;
+  // В4.8.5 (К8.5.3): перечитывание не мигает скелетоном — прежние данные на
+  // экране, пока не придёт новый ответ; сбой перечитывания — мягкая пометка
+  const { state, reload } = useJson<Card>(cardUrl, { keepPrevious: true });
+  const { me } = useSession();
+  const meData = dataOf(me);
+  const loggedIn = meData !== null && meData.login !== null;
+  const canRefresh = loggedIn && meData!.hasPat;
+  // В4.8.5 (К8.5.1): фаза анализа — из общего опроса заданий вкладки (по
+  // заданию, а не по «появился ли скан с номером больше»); карточка сама
+  // себя ради итога не опрашивает
+  const analysis = useAnalysis();
+  const live = analysis.live(slug);
+  const start = useStartAnalysis(org, repo);
+  const [doneKey, setDoneKey] = useState<string | null>(null);
+  useAnalysisFinished((jobs) => {
+    const mine = jobs.find((j) => j.slug === slug);
+    if (!mine) return;
+    reload();
+    // Ф2.20: звезда светится один раз после УСПЕШНОГО своего анализа
+    if (mine.phase === "done") setDoneKey(`${slug}:${mine.jobId}`);
+  });
 
-  // Ф2.15: живая job зрителя — опрос карточки каждые 3 с, пока заявка не
-  // доедет до скана; не дольше leaseMs (худший случай одного скана).
-  // UX-10 (круг 2 В4.4): после leaseMs опрос прекращается ЗАМЕТКОЙ «затянулось»
-  // (симметрично кабинету), а не молчаливым зависанием спиннера
-  // В4.8.5 (К8.5.2b): «затянулось» — признак сервера (лиз задания истёк),
-  // а не таймер страницы от leaseMs
-  const jobStalled = state.kind === "ok" && state.data.job?.stalled === true;
-  const jobLive = state.kind === "ok" && state.data.job !== null;
+  const data = dataOf(state);
+  // С6-3: у карточки идёт чужой или периодический скан — она показывает «идёт
+  // анализ» и изредка перечитывает себя (окно открытий карточки 30/мин не
+  // съедается: раз в 30 с)
+  const foreignRunning = data !== null && data.scan?.status === "running" && live === null && data.job === null;
   useEffect(() => {
-    if (!jobLive) return;
-    const timer = setInterval(() => reload(), 3000);
+    if (!foreignRunning) return;
+    const timer = setInterval(() => reload(), 30_000);
     return () => clearInterval(timer);
-  }, [jobLive, reload]);
+  }, [foreignRunning, reload]);
 
   const crumbs: Crumb[] = [{ text: "Рейтинг", href: "/" }, { text: `${org} / ${repo}` }];
+  const own = live ?? (data?.job ? { phase: data.job.status, stalled: data.job.stalled } : null);
+  const jobStalled = own?.stalled === true;
+  const analysisRunning = own !== null;
   const refreshButton = canRefresh && (
-    <Button view="action" size="m" onClick={refresh.start} disabled={refresh.phase !== "idle"} loading={refresh.phase === "sending"}>
+    <Button view="action" size="m" onClick={start.start} disabled={analysisRunning || start.sending} loading={start.sending}>
       {/* Доводка 21.09: спиннер живёт в слоте `Button.Icon`, а не голым узлом
           рядом с текстом. Слот сам держит габарит в высоту кнопки и гасит
           паддинг отрицательным полем (`.g-button__icon`); голый `Spin` был
           обычным inline-block и вставал к тексту вплотную — крутящееся кольцо
           налезало на первую букву. */}
-      {refresh.phase === "queued" && (
+      {analysisRunning && (
         <Button.Icon side="start">
           <Spin size="xs" />
         </Button.Icon>
       )}
-      {refresh.phase === "queued" ? "Анализ в очереди" : "Обновить анализ"}
+      {analysisRunning ? "Идет анализ" : "Обновить анализ"}
     </Button>
   );
 
-  if (state.kind === "loading") {
+  if (data === null && state.kind !== "error") {
     return (
       // В4.6 (У27): ритм скелетона = ритм содержимого — блок-полоса величины
       // (~150px) и шесть строк категорий по 45px, панель начинается с легенды
@@ -174,25 +183,25 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
       </Page>
     );
   }
-  if (state.kind === "error") {
-    // UX-5 (круг 2 В4.4): «Обновить анализ» на error-странице скрыт — здесь
-    // sinceScanId = 0, опрос взял бы первый СТАРЫЙ скан и отпраздновал
-    // false-success без нового скана; повтор — только «Повторить» (reload)
+  if (data === null) {
+    // UX-5 (круг 2 В4.4): «Обновить анализ» на странице ошибки скрыт; повтор —
+    // «Повторить» (reload)
     return (
       <Page crumbs={crumbs}>
         <Alert
           theme="danger"
           view="outlined"
           title={`Не удалось открыть ${slugOf(org, repo)}`}
-          message={state.message}
+          message={state.kind === "error" ? state.message : undefined}
           actions={[{ text: "Повторить", handler: reload }]}
         />
       </Page>
     );
   }
 
-  const card = state.data;
+  const card = data;
   const reportHref = `${cardUrl}/report.md`;
+  const refreshError = state.kind === "ok" ? state.refreshError : undefined;
   const actions = (
     <Flex gap={2} alignItems="center">
       {card.score !== null && <ReportMenu mdHref={reportHref} pdfHref={`${cardUrl}/report.pdf`} pdfName={`${org}-${repo}-health.pdf`} />}
@@ -201,25 +210,34 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   );
 
   return (
-    <Page crumbs={crumbs} actions={actions} aside={<ScoreAside card={card} meta={meta} leaseMs={leaseMs} jobStalled={jobStalled} />}>
-      <Header
-        card={card}
-        starDoneKey={refresh.doneKey}
-        starLoggedIn={me.state.kind === "ok" && me.state.data.login !== null}
-      />
+    <Page crumbs={crumbs} actions={actions} aside={<ScoreAside card={card} meta={meta} analysis={own} foreignRunning={foreignRunning} />}>
+      {/* К8.5.3: перечитывание не удалось — данные остаются, пометка видна */}
+      {refreshError && (
+        <div style={{ marginBottom: "var(--g-spacing-3)" }}>
+          <Alert
+            theme="warning"
+            view="outlined"
+            size="s"
+            message={`Данные могли устареть: обновить карточку не удалось – ${refreshError}`}
+            actions={[{ text: "Повторить", handler: reload }]}
+          />
+        </div>
+      )}
+      <Header card={card} starDoneKey={doneKey} starLoggedIn={loggedIn} />
       {card.score !== null && <ScoreBand card={card} />}
       {card.score === null ? (
-        card.job ? (
-          // Ф2.15: первый анализ — статус живой job вместо лжи «скана ещё не было»
+        own !== null || foreignRunning ? (
+          // Ф2.15 + К8.5.1 (С6-3): идёт анализ — свой или чужой/периодический;
+          // без обещания времени (§2-В5)
           <EmptyState
             icon={SquareListUl}
-            title={card.job.status === "queued" ? "Анализ запланирован" : "Сканируем…"}
+            title={own?.phase === "queued" ? "Анализ запланирован" : "Идет анализ"}
             description={
-              (card.job.status === "queued"
-                ? `Заявка стоит в очереди – ее возьмут в работу, и здесь появится статус скана. ${etaNote}.`
-                : `Скан собирает факты из репозитория; Score появится после завершения. ${etaNote}.`) +
-              // UX-10 (круг 2 В4.4): симметричная кабинету заметка после leaseMs
-              (jobStalled ? " Затянулось – смотрите панель заданий в разделе «Мои репозитории»." : "")
+              (own?.phase === "queued"
+                ? "Заявка стоит в очереди – ее возьмут в работу, и здесь появится итог."
+                : "Скан собирает факты из репозитория; оценка появится после завершения.") +
+              // UX-10 (круг 2 В4.4): заметка, когда задание зависло (признак сервера)
+              (jobStalled ? " Анализ затянулся – его итог появится в «Заданиях»." : "")
             }
           />
         ) : (
@@ -235,7 +253,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
             }
             actions={
               canRefresh
-                ? [{ text: card.scan ? "Повторить анализ" : "Запустить анализ", view: "action", size: "l", onClick: refresh.start }]
+                ? [{ text: card.scan ? "Повторить анализ" : "Запустить анализ", view: "action", size: "l", onClick: start.start }]
                 : loggedIn
                   ? [
                       // UX-6 (круг 2 В4.4): на ветке «Скан был» анализа уже были —
@@ -315,79 +333,42 @@ function ReportMenu({ mdHref, pdfHref, pdfName }: { mdHref: string; pdfHref: str
 }
 
 /**
- * «Обновить анализ» — зрителю с сессией и PAT (К2). Сервер проверяет доступ
- * PAT до постановки (К3); ответ показывается как есть, опрос карточки — до
- * появления нового завершённого скана, но не дольше leaseMs из /api/meta
- * (Ф2.9: раньше горизонт был зашит на 60 минут). Итог — тостом, как у платформы.
+ * «Обновить анализ» — запуск (К2, К3: сервер проверяет доступ PAT до
+ * постановки). В4.8.5 (К8.5.1): итог узнаётся не опросом карточки, а общим
+ * опросом заданий вкладки (session.tsx) — по номеру задания; тост об итоге
+ * даёт он же, из любого экрана. Здесь — только отправка и её исход; повторный
+ * клик на время отправки заблокирован (С4-13).
  */
-function useRefreshAnalysis(org: string, repo: string, cardUrl: string, sinceScanId: number, onDone: () => void, leaseMs: number, onStarted: () => void) {
-  const [phase, setPhase] = useState<"idle" | "sending" | "queued">("idle");
-  /** ключ sessionStorage `<org>/<repo>:<jobId>` скана, чей переход active→done увиден в этой сессии (Ф2.20) */
-  const [doneKey, setDoneKey] = useState<string | null>(null);
-  const jobIdRef = useRef<number | null>(null);
+function useStartAnalysis(org: string, repo: string): { sending: boolean; start: () => void } {
+  const [sending, setSending] = useState(false);
   const toaster = useToaster();
+  const analysis = useAnalysis();
 
-  useEffect(() => {
-    if (phase !== "queued") return;
-    const started = Date.now();
-    const timer = setInterval(async () => {
-      if (Date.now() - started > leaseMs) {
-        setPhase("idle");
-        return;
-      }
-      try {
-        const card = await fetchJson<Card>(cardUrl);
-        if (card.scan && card.scan.id > sinceScanId) {
-          // В4.4 (кластер E): исход — по статусу скана; bad больше не
-          // празднуется success-тостом «Анализ завершен»
-          const outcome = analysisOutcome(card.scan);
-          if (outcome === "pending" || outcome === "interrupted") return;
-          setPhase("idle");
-          if (outcome === "ok") {
-            if (jobIdRef.current !== null) setDoneKey(`${org}/${repo}:${jobIdRef.current}`);
-            toaster.add({ name: `scan-done:${org}/${repo}`, theme: "success", title: "Анализ завершен", content: "Карточка обновлена по новому скану." });
-          } else {
-            toaster.add({
-              name: `scan-failed:${org}/${repo}`,
-              theme: "danger",
-              title: "Анализ завершился ошибкой",
-              content: "Сбор данных не удался – подробности в «Моих заданиях» раздела «Мои репозитории».",
-            });
-          }
-          onDone();
-        }
-      } catch {
-        /* карточки ещё нет — следующий тик */
-      }
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [phase, cardUrl, sinceScanId, onDone, toaster, org, repo, leaseMs]);
-
-  async function start() {
-    setPhase("sending");
-    try {
-      const res = await mutateJson<{ queued?: boolean; jobId?: number }>(
-        `/api/me/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/scan`,
-        "POST",
-      );
-      jobIdRef.current = typeof res.jobId === "number" ? res.jobId : null;
-      setPhase("queued");
-      // З3: перечитывание сразу после постановки — card.job появляется и
-      // подхватывает свой 3-секундный опрос
-      onStarted();
-      toaster.add({ name: `scan-queued:${org}/${repo}`, theme: "info", title: "Анализ в очереди", content: "Карточка обновится после скана." });
-    } catch (e) {
-      setPhase("idle");
-      toaster.add({
-        name: `scan-failed:${org}/${repo}`,
-        theme: "danger",
-        title: "Анализ не запущен",
-        content: e instanceof Error ? e.message : String(e),
+  const start = () => {
+    if (sending) return;
+    setSending(true);
+    void mutateJson<{ queued?: boolean; jobId?: number; deduplicated?: boolean }>(`/api/me/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/scan`, "POST")
+      .then((res) => {
+        // задание уже стояло (повтор, потерянный ответ, другая вкладка) — не «запущен заново»
+        toaster.add({
+          name: `scan-queued:${org}/${repo}`,
+          theme: "info",
+          title: res.deduplicated ? "Анализ уже идет" : "Анализ в очереди",
+          content: "Итог придет уведомлением – можно уйти со страницы.",
+        });
+      })
+      .catch((e: unknown) => {
+        toaster.add({ name: `scan-failed:${org}/${repo}`, theme: "danger", title: "Анализ не запущен", content: e instanceof Error ? e.message : String(e) });
+      })
+      .finally(() => {
+        setSending(false);
+        // С9-16: даже если ответ потерян, задание могло встать — узнаём у сервера
+        announceJobsChanged();
+        analysis.refresh();
       });
-    }
-  }
+  };
 
-  return { phase, start, doneKey };
+  return { sending, start };
 }
 
 function Header({ card, starDoneKey, starLoggedIn }: { card: Card; starDoneKey: string | null; starLoggedIn: boolean }) {
@@ -557,8 +538,20 @@ function fullLockShortReason(card: Card): string {
  * получила однородное содержание (охранный пункт 10 не просто соблюдён, а
  * усилен: панель никуда не исчезает и в модальные окна не переезжает).
  */
-function ScoreAside({ card, meta, leaseMs, jobStalled }: { card: Card; meta: MetaResponse | null; leaseMs: number; jobStalled: boolean }) {
-  const { score, scan, job } = card;
+function ScoreAside({
+  card,
+  meta,
+  analysis,
+  foreignRunning,
+}: {
+  card: Card;
+  meta: MetaResponse | null;
+  /** свой идущий анализ (фаза и признак сервера «затянулось»); null — нет */
+  analysis: { phase: "queued" | "running"; stalled: boolean } | null;
+  /** идёт чужой или периодический скан (С6-3) */
+  foreignRunning: boolean;
+}) {
+  const { score, scan } = card;
   const threshold = meta ? fmtCoverage(meta.coverageNullBelow) : "порога";
   return (
     <>
@@ -594,7 +587,24 @@ function ScoreAside({ card, meta, leaseMs, jobStalled }: { card: Card; meta: Met
           собраны ОДНИМ блоком под честным заголовком и стоят последними —
           первый взгляд просил убрать их с видного места, но не терять */}
       <AsideSection title="Параметры расчета">
-        {scan ? (
+        {/* К8.5.1 (С4-9): на карточке с оценкой идущий анализ тоже виден —
+            свой (по заданию) или чужой/периодический (по скану); без
+            обещания времени (§2-В5) */}
+        {(analysis !== null || foreignRunning) && (
+          <Flex gap={2} alignItems="center" style={{ marginBottom: "var(--g-spacing-2)" }}>
+            {analysis?.stalled ? (
+              <Label theme="warning" size="xs">
+                анализ затянулся – итог появится в «Заданиях»
+              </Label>
+            ) : (
+              <>
+                <Spin size="xs" />
+                <Text color="secondary">{analysis?.phase === "queued" ? "анализ в очереди" : "идет анализ"}</Text>
+              </>
+            )}
+          </Flex>
+        )}
+        {scan && scan.status !== "running" ? (
           <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
             <DefinitionList.Item name="Завершен">{fmtDateTime(scan.finishedAt ?? scan.startedAt)}</DefinitionList.Item>
             <DefinitionList.Item name="Статус">
@@ -616,20 +626,7 @@ function ScoreAside({ card, meta, leaseMs, jobStalled }: { card: Card; meta: Met
               </DefinitionList.Item>
             )}
           </DefinitionList>
-        ) : job ? (
-          // Ф2.15: живая job зрителя — «в очереди/сканируем», а не «скана не было»; M-4 — ожидание по лизу.
-          // UX-10 (круг 2 В4.4): после leaseMs — заметка «затянулось», не вечный спиннер
-          jobStalled ? (
-            <Label theme="warning" size="xs">
-              затянулось – смотрите панель заданий
-            </Label>
-          ) : (
-            <Flex gap={2} alignItems="center" title={`обычно до ${Math.max(1, Math.round(leaseMs / 60_000))} минут`}>
-              <Spin size="xs" />
-              <Text color="secondary">{job.status === "queued" ? "в очереди" : "сканируем…"}</Text>
-            </Flex>
-          )
-        ) : (
+        ) : analysis !== null || foreignRunning ? null : (
           <Text color="secondary">Скана еще не было</Text>
         )}
       </AsideSection>

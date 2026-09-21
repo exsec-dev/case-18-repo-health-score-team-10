@@ -327,6 +327,21 @@ export function scanTriggerText(trigger: string): string {
   }
 }
 
+/** Ошибка запроса для словаря текстов (К8.5.4): HTTP-статус (0 — сети нет), код и сообщение сервера. */
+export interface ErrorInput {
+  status: number;
+  code: string | null;
+  message: string | null;
+  /** заголовок Retry-After ответа (секунды), если был */
+  retryAfter?: string | null;
+}
+
+/** Текст ошибки запроса для человека. */
+export function errorText(e: ErrorInput): string {
+  if (e.message) return e.message;
+  return e.status === 0 ? "нет связи с сервером" : `HTTP ${e.status}`;
+}
+
 /**
  * В4.4 (кластер E код-аудита): исход анализа для опросщиков (MePage/RepoPage).
  * Finished-скан со статусом bad — ОШИБКА (раньше любой доехавший скан

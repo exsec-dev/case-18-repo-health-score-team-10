@@ -149,7 +149,9 @@ describe("Р2.6: обновление рейтинга без моргания (
     expect(src).toContain('className="rh-view-tabs"');
     expect(css).toMatch(/\.rh-view-tabs \{\s*font-variant-numeric: tabular-nums;/);
     expect(css).toMatch(/prefers-reduced-motion: reduce\) \{\s*\.rh-refresh-bar_on/);
-    // остальные экраны — без изменений: опция только у рейтинга
-    for (const f of ["RepoPage.tsx", "MePage.tsx"]) expect(srcOf(`src/web/${f}`)).not.toContain("keepPrevious");
+    // ПЕРЕВОРОТ (В4.8.5, К8.5.3): было «остальные экраны — без изменений: опция
+    // только у рейтинга». Карточка и «Мои репозитории» перечитываются теперь без
+    // мигания тем же механизмом (поведение — tests/v485-ui.test.ts)
+    for (const f of ["RepoPage.tsx", "MePage.tsx"]) expect(srcOf(`src/web/${f}`)).toContain("keepPrevious: true");
   });
 });

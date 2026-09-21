@@ -3,23 +3,35 @@
 // приложение: версия модели, имена и веса категорий, порог NULL приходят
 // с сервера, чтобы экран и методика не разъезжались при смене
 // model_version. Сессия (В4) нужна каркасу: вход в rail или логин.
+// В4.8.5: сессия и задания — одно состояние на вкладку (`AppState`,
+// session.tsx): один `/api/me`, один опрос `/api/me/jobs`, тост об итоге
+// анализа из любого экрана.
 import { CircleQuestion } from "@gravity-ui/icons";
 import { Alert, Flex } from "@gravity-ui/uikit";
-import type { MeResponse, MetaResponse } from "./api";
-import { useJson } from "./api";
+import type { MetaResponse } from "./api";
+import { dataOf, useJson } from "./api";
 import { JobsBell, MePage, SettingsPage } from "./MePage";
 import { Rating } from "./Rating";
 import { RepoPage } from "./RepoPage";
 import { navigate, useRoute } from "./router";
+import { AppState, useSession } from "./session";
 import { Page, Shell, type Section } from "./Shell";
 import { EmptyState } from "./ui";
 
 export function App() {
+  return (
+    <AppState>
+      <Routes />
+    </AppState>
+  );
+}
+
+function Routes() {
   const route = useRoute();
   const meta = useJson<MetaResponse>("/api/meta");
-  const me = useJson<MeResponse>("/api/me");
+  const { me } = useSession();
   const metaData = meta.state.kind === "ok" ? meta.state.data : null;
-  const meData = me.state.kind === "ok" ? me.state.data : null;
+  const meData = dataOf(me);
   // В4.4 (кластер M-9): сбой /api/meta больше не молчит скелетоном —
   // честный Alert с повтором; страницы живут на RU-именах из констант
   const metaFailed = meta.state.kind === "error" ? meta.state.message : null;
@@ -42,7 +54,9 @@ export function App() {
         </Flex>
       )}
       {route.kind === "rating" && <Rating search={route.search} meta={metaData} />}
-      {route.kind === "repo" && <RepoPage org={route.org} repo={route.repo} meta={metaData} />}
+      {/* В4.8.5 (К8.5.1, С9-2): `key` по слагу — состояние карточки A (фаза
+          анализа, опросы) не переезжает на карточку B при SPA-переходе */}
+      {route.kind === "repo" && <RepoPage key={`${route.org}/${route.repo}`} org={route.org} repo={route.repo} meta={metaData} />}
       {route.kind === "me" && <MePage meta={metaData} />}
       {route.kind === "settings" && <SettingsPage />}
       {route.kind === "not-found" && (

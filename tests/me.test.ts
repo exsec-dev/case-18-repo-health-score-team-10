@@ -157,18 +157,25 @@ describe("UI-ветки круга 2 (source-assert, Б2)", () => {
     expect(srcOf("MePage.tsx").includes('title="Раздел избранного не получился"')).toBe(true);
   });
 
-  test("З2: stalled-метка снимается, когда серверная job ушла из active", () => {
+  // ПЕРЕНОС (В4.8.5, К8.5.1, К8.5.2b): «затянулось» — признак сервера из
+  // общего опроса заданий (`live.stalled`), локальной stalled-метки строки больше
+  // нет — снимать нечего; задание ушло из active — строка не «затянулась»
+  // (поведение — tests/v485-ui.test.ts, liveFor)
+  test("З2: stalled строки — признак сервера из опроса заданий, не локальная метка", () => {
     const src = srcOf("MePage.tsx");
-    expect({ hasClearing: src.includes("stillActive"), keepsSkip: src.includes('job.phase === "stalled"') }).toEqual({
-      hasClearing: true,
-      keepsSkip: true,
+    expect({ serverFlag: src.includes("live.stalled"), localState: src.includes("stillActive") || src.includes("ScanJobState") }).toEqual({
+      serverFlag: true,
+      localState: false,
     });
   });
 
-  test("З3: RepoPage перечитывает карточку сразу после успешного старта анализа", () => {
+  // ПЕРЕНОС (В4.8.5, К8.5.1): после старта карточка не опрашивает себя —
+  // сразу будится общий опрос заданий, и тело карточки переключается в ветку
+  // «идет анализ» по живому заданию (`own = live ?? card.job`)
+  test("З3: RepoPage после успешного старта будит опрос заданий, тело — по живому заданию", () => {
     const src = srcOf("RepoPage.tsx");
-    expect(src.includes("useRefreshAnalysis(org, repo, cardUrl, sinceScanId, reload, leaseMs, reload)")).toBe(true);
-    expect(src.includes("onStarted()")).toBe(true);
+    expect(src.includes("analysis.refresh();")).toBe(true);
+    expect(src.includes("const own = live ?? (data?.job ? { phase: data.job.status, stalled: data.job.stalled } : null);")).toBe(true);
   });
 
   test("З4: bad-статус имеет честный текст; ветка индекса срабатывает раньше статус-текста", () => {
@@ -252,11 +259,14 @@ describe("UI-ветки круга 2 (source-assert, Б4)", () => {
     expect(serverSrc.includes('code: "no_username"')).toBe(true);
   });
 
-  test("UX-10: карточка после leaseMs показывает «затянулось», а не вечный спиннер", () => {
+  // ПЕРЕВОРОТ (В4.8.5, К8.5.2b): «затянулось» — признак сервера (лиз задания
+  // истёк), а не «прошло leaseMs»; текст заметки новый (правило языка UI)
+  test("UX-10: карточка при зависшем задании показывает «затянулось», а не вечный спиннер", () => {
     const src = srcOf("RepoPage.tsx");
-    expect({ stalled: src.includes("jobStalled"), // Б5 (У31): проверяется КАРТОЧКА — в ней тире стало средним; та же фраза
-      // в MePage.tsx не тронута: кабинет целиком отдан вехе В4.7 (П3.4)
-      note: src.includes("затянулось – смотрите панель заданий") }).toEqual({
+    expect({
+      stalled: src.includes("jobStalled"),
+      note: src.includes("Анализ затянулся – его итог появится в «Заданиях».") && src.includes("анализ затянулся – итог появится в «Заданиях»"),
+    }).toEqual({
       stalled: true,
       note: true,
     });

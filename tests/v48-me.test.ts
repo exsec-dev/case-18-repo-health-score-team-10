@@ -159,7 +159,9 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     // пустые состояния — на каждую вкладку панели (П3)
     expect(src).toContain('<JobsEmpty title="Анализов пока не было">');
     expect((src.match(/announceJobsChanged\(\);/g) ?? []).length).toBe(2);
-    expect(src).toMatch(/window\.addEventListener\(JOBS_CHANGED, reload\)/);
+    // ПЕРЕНОС (В4.8.5, К8.5.1): опрос заданий — один на вкладку (session.tsx),
+    // событие «задания изменились» будит его там, а не отдельные опросы страниц
+    expect(readFileSync(join(import.meta.dir, "..", "src", "web", "session.tsx"), "utf8")).toMatch(/window\.addEventListener\(JOBS_CHANGED, refresh\)/);
     // круг 4 (замечания 2-3): пилюля с полностью скругленными углами; иконки прав без зеленого
     expect(css).toMatch(/\.rh-pill \{[^}]*border-radius: 10px;/);
     expect(css).not.toMatch(/\.rh-access__icon_yes \{[^}]*positive/);
@@ -199,7 +201,10 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     expect(rowSrc).toContain("<ScoreRing value={entry.healthcraftIndex!} />");
     expect(rowSrc).not.toContain("scoreColor(");
     // круг 2 (1a): «Сканируется» — штриховка загрузки кнопки Gravity, не Label со спиннером
-    expect(rowSrc).toContain('<span className="rh-state rh-busy" title={etaNote}>');
+    // ПЕРЕВОРОТ (В4.8.5, §2-В5): подсказка «обычно до N минут» (etaNote) снята —
+    // «идет анализ» без обещания времени; форма плашки прежняя
+    expect(rowSrc).toContain('<span className="rh-state rh-busy" title="Идет анализ – итог придет уведомлением">');
+    expect(rowSrc).not.toContain("etaNote");
     // круг 3 (замечание 8): остальные состояния — серые `StatePill` с иконкой, цветных `Label` в состоянии строки нет
     const stateSrc = rowSrc.slice(rowSrc.indexOf("const state ="), rowSrc.indexOf("const menuItems"));
     expect((stateSrc.match(/<StatePill icon=\{/g) ?? []).length).toBe(7);
