@@ -165,7 +165,7 @@ describe("П4: подметрики, язык кабинета, 404", () => {
     expect({ dashes: (withoutGlyph.match(/—/g) ?? []).length, yo: (code.match(/[ёЁ]/g) ?? []).length }).toEqual({ dashes: 0, yo: 0 });
   });
 
-  repro("П4.4: not-found больше не несет route.path", () => {
+  test("П4.4: not-found больше не несет route.path", () => {
     expect(parseRoute("/unknown/page")).toEqual({ kind: "not-found" } as ReturnType<typeof parseRoute>);
   });
 });
@@ -175,7 +175,7 @@ describe("П4: подметрики, язык кабинета, 404", () => {
 // ---------------------------------------------------------------------------
 
 describe("П5: формат дат UI", () => {
-  repro("fmtDate — «15 сент. 2026» (без времени), fmtDateTime — «12:00 18 янв. 2023»", () => {
+  test("fmtDate — «15 сент. 2026» (без времени), fmtDateTime — «12:00 18 янв. 2023»", () => {
     expect({
       date: fmtDate(new Date(2026, 8, 15, 12, 0).toISOString()),
       dateTime: fmtDateTime(new Date(2023, 0, 18, 12, 0).toISOString()),

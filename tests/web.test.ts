@@ -33,7 +33,8 @@ describe("router: разбор маршрутов", () => {
   test("прочее — not-found; /me/repo/... удалён без перенаправления (В4.1, К2)", () => {
     expect(parseRoute("/me")).toEqual({ kind: "me" });
     expect(parseRoute("/settings")).toEqual({ kind: "settings" });
-    expect(parseRoute("/me/repo/x/y")).toEqual({ kind: "not-found", path: "/me/repo/x/y" });
+    // В4.7 (П4.4): поле path в not-found удалено решением владельца (вопрос 29)
+    expect(parseRoute("/me/repo/x/y")).toEqual({ kind: "not-found" });
     expect(parseRoute("/repo/only-org")).toMatchObject({ kind: "not-found" });
     expect(parseRoute("/unknown/page")).toMatchObject({ kind: "not-found" });
   });

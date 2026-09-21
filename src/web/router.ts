@@ -12,7 +12,9 @@ export type Route =
   | { kind: "repo"; org: string; repo: string }
   | { kind: "me" }
   | { kind: "settings" }
-  | { kind: "not-found"; path: string };
+  // В4.7 (П4.4, вопрос 29 закрыт 21.09): поле `path` удалено — UI 404 его
+  // не читает с тех пор, как страница перестала перечислять маршруты
+  | { kind: "not-found" };
 
 /** Событие своей навигации: popstate браузер шлёт только на назад/вперёд. */
 const NAV_EVENT = "rh:navigate";
@@ -25,7 +27,7 @@ export function parseRoute(pathname: string, search = ""): Route {
   if (parts[0] === "repo" && parts.length === 3) {
     return { kind: "repo", org: safeDecode(parts[1]!), repo: safeDecode(parts[2]!) };
   }
-  return { kind: "not-found", path: pathname };
+  return { kind: "not-found" };
 }
 
 /** Кривой percent-encoding в адресной строке не должен ронять приложение. */

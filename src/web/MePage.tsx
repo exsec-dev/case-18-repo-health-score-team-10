@@ -10,7 +10,7 @@ import { ArrowRightFromSquare, CircleCheck, CircleQuestion, Clock, Key, Lock, Pe
 import { Alert, type AlertProps, Button, Card, Dialog, Flex, Icon, type IconData, Label, Link, Spin, Text, TextInput, useToaster } from "@gravity-ui/uikit";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { type MeResponse, type MetaResponse, type MyReposResponse, type RepoCard, fetchJson, logout, mutateJson, useJson } from "./api";
-import { analysisOutcome, authErrorText, fmtDateTime, fmtScore, recommendationsText, slugOf } from "./format";
+import { analysisOutcome, authErrorText, fmtDate, fmtDateTime, fmtScore, recommendationsText, slugOf } from "./format";
 import { TAB_RECOMMENDATIONS } from "./RepoPage";
 import { linkProps, repoHref } from "./router";
 import { Page, UserAvatar, displayName, logoutFailedToast } from "./Shell";
@@ -712,7 +712,8 @@ function RepoRow({
             <MetaItem>
               <LanguageName name={entry.language} color={entry.languageColor} />
             </MetaItem>
-            {entry.lastActivityAt && <MetaItem icon={Clock}>активность {fmtDateTime(entry.lastActivityAt)}</MetaItem>}
+            {/* П5 (В4): у последней активности времени по смыслу нет — дата без времени */}
+            {entry.lastActivityAt && <MetaItem icon={Clock}>активность {fmtDate(entry.lastActivityAt)}</MetaItem>}
             {lastCheckedAt && <MetaItem>доступ проверен {fmtDateTime(lastCheckedAt)}</MetaItem>}
             {/* В4.7 (П3.4, У26): счётчик рекомендаций — ссылкой на карточку с
                 открытым табом. null (прав нет) — строки нет: не 0 */}

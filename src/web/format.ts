@@ -33,18 +33,44 @@ export function fmtNumber(value: number | null | undefined): string {
   return Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100);
 }
 
-export function fmtDate(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric" });
+/**
+ * В4.7 (П5, решения 21.09 «единый формат дат UI» и В4): русские сокращения
+ * месяцев — ЗАКРЫТОЙ таблицей, а не `Intl`: вывод `toLocale*` зависит от
+ * браузера и его ICU (запятые, «г.», ведущие нули), а формат обязан быть
+ * одинаковым везде.
+ */
+export const MONTHS_SHORT_RU = ["янв.", "февр.", "мар.", "апр.", "мая", "июн.", "июл.", "авг.", "сент.", "окт.", "нояб.", "дек."] as const;
+
+/**
+ * Разбор даты для показа. Чистая дата `YYYY-MM-DD` (например, начало
+ * усеченной истории) — полночь по ЛОКАЛЬНОМУ времени: как UTC-полночь она
+ * показала бы западнее Гринвича предыдущий день. Остальное — как умеет `Date`.
+ */
+function parseShown(iso: string): Date {
+  const day = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!day) return new Date(iso);
+  const d = new Date(Number(day[1]), Number(day[2]) - 1, Number(day[3]));
+  // «2026-13-45» не перекатывается в другой месяц: невалидная строка остается невалидной
+  return d.getMonth() === Number(day[2]) - 1 && d.getDate() === Number(day[3]) ? d : new Date(Number.NaN);
 }
 
+const pad2 = (n: number): string => String(n).padStart(2, "0");
+
+/** Дата без времени — поле, у которого времени по смыслу нет: «15 сент. 2026». Пусто — «—», мусор — как пришел. */
+export function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = parseShown(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  // день без ведущего нуля, полный год, без запятой и «г.»; пояс — локальный браузера
+  return `${d.getDate()} ${MONTHS_SHORT_RU[d.getMonth()]} ${d.getFullYear()}`;
+}
+
+/** Дата и время: время `HH:mm` (24 часа) первым — «12:00 18 янв. 2023». Пусто — «—», мусор — как пришел. */
 export function fmtDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";
-  const d = new Date(iso);
+  const d = parseShown(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("ru-RU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())} ${fmtDate(iso)}`;
 }
 
 /**
