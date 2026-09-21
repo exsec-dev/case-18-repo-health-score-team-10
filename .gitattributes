@@ -1,1 +1,13 @@
+# Line endings: the repository stores LF, and every checkout gets LF too,
+# regardless of core.autocrlf. Tests that read sources as strings (source
+# asserts, golden reports) must not depend on the machine (ERROR_LOG
+# 21.09.2026, closing V4.7).
+* text=auto eol=lf
+
+# Binary files: never convert.
+*.ttf binary
+*.pdf binary
+*.png binary
+
+# Golden reports are compared byte for byte (V4.7, B0).
 tests/fixtures/** -text
