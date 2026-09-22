@@ -626,7 +626,8 @@ function appendixB(card: RepoCard, metric: Metric | null): Block[] {
       rows.push([
         line(`${submetricTitle(key, sub)}: ${shown}`),
         line("—"),
-        [code(`${key}.${sub}`), text(` → ${rawValue(entry.value)}${typeof entry.score === "number" ? `; балл ${fmtDecimal(entry.score * 100, 1, { trim: true })}` : ""}`)],
+        // приемка HQ 22.09: `activity.fresh` — метка времени (мс), читателю — дата, не 13 цифр
+        [code(`${key}.${sub}`), text(` → ${key === "activity" && sub === "fresh" && typeof entry.value === "number" ? fmtDateTime(new Date(entry.value).toISOString()) : rawValue(entry.value)}${typeof entry.score === "number" ? `; балл ${fmtDecimal(entry.score * 100, 1, { trim: true })}` : ""}`)],
         line(sourcesOf(card, key)),
         line(subLimit),
       ]);

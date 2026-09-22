@@ -137,3 +137,18 @@ describe("Д4: усеченная история — ограничение да
     }
   });
 });
+
+// Приемка HQ 22.09: в приложении Б `activity.fresh` печатался меткой времени
+// в миллисекундах («→ 1789510426000») — поле читателю показывается датой.
+describe("приложение Б: метки времени показываются датой", () => {
+  for (const name of REPORT_FIXTURES.filter((n) => n !== "never")) {
+    test(`${name}: в MD нет 13-значных меток времени`, () => {
+      const { card, close } = fixtureCard(name);
+      try {
+        expect(renderRepoReport(card).match(/\b\d{13}\b/g) ?? []).toEqual([]);
+      } finally {
+        close();
+      }
+    });
+  }
+});
