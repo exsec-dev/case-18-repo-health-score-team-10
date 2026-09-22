@@ -177,7 +177,10 @@ export function fixtureCard(name: ReportFixture): FixtureCard {
         trigger: "user",
         facts: [
           { key: "tree.stats", source: "git", value: { top_level: [{ name: "src", type: "tree" }], file_count: 10, bytes: 1000, loc: 5000 } },
-          { key: "code.todo", source: "git", value: { count: 4, fixme: 1, older_180d: 2, todo_files: 3, blamed_files: 3 } },
+          // пометок нет вовсе → «Доля старых TODO» без данных: вес показателя
+          // делится между остальными, и доли расчета расходятся с номинальными
+          // (А5 аудита — так же, как у живого `bayselonarrend/openintegrations`)
+          { key: "code.todo", source: "git", value: { count: 0, fixme: 0, older_180d: 0, todo_files: 0, blamed_files: 0 } },
           { key: "cicd.configs", source: "git", value: { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: true } },
           { key: "cicd.runs", source: "rest:cicd", value: { last_status: "success", success_rate: 0.9, duration_p50: 600, runs_count: 12 } },
           { key: "appsec.findings", source: "appsec:api", value: { severity_counts: { critical: 0, high: 0, medium: 1, low: 2 }, resolved_share: 0.75, secrets_critical: false } },
