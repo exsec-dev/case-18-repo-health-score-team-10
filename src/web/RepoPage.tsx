@@ -74,8 +74,8 @@ import { useEffect, useState } from "react";
 import type { CardCategory } from "../api/repos";
 import { formatSubmetricValue, submetricContext, submetricTitle } from "../report/submetrics";
 import type { MetaResponse, RepoCard } from "./api";
-import { dataOf, mutateJson, useJson } from "./api";
-import { announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
+import { dataOf, mutateJson, useJson, useVisible } from "./api";
+import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
 import {
   ACCESS_LOCK_SHORT,
   CATEGORY_TITLES_RU,
@@ -158,13 +158,14 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   }, [sessionGone, reloadMe]);
   // С6-3: у карточки идёт чужой или периодический скан — она показывает «идёт
   // анализ» и изредка перечитывает себя (окно открытий карточки 30/мин не
-  // съедается: раз в 30 с)
+  // съедается: раз в 30 с). Круг 2 (Н5): в скрытой вкладке — пауза
   const foreignRunning = data !== null && data.scan?.status === "running" && live === null && data.job === null;
+  const visible = useVisible();
   useEffect(() => {
-    if (!foreignRunning) return;
+    if (!foreignRunning || !visible) return;
     const timer = setInterval(() => reload(), 30_000);
     return () => clearInterval(timer);
-  }, [foreignRunning, reload]);
+  }, [foreignRunning, visible, reload]);
 
   const crumbs: Crumb[] = [{ text: "Рейтинг", href: "/" }, { text: `${org} / ${repo}` }];
   const own = live ?? (data?.job ? { phase: data.job.status, stalled: data.job.stalled } : null);
@@ -391,6 +392,8 @@ function useStartAnalysis(org: string, repo: string): { sending: boolean; start:
     setSending(true);
     void mutateJson<{ queued?: boolean; jobId?: number; deduplicated?: boolean }>(`/api/me/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/scan`, "POST")
       .then((res) => {
+        // круг 2 (Н5): итог этого задания объявится и в ответе базовой линии опроса
+        announceJobStarted(res?.jobId);
         // задание уже стояло (повтор, потерянный ответ, другая вкладка) — не «запущен заново»
         toaster.add({
           name: `scan-queued:${org}/${repo}`,

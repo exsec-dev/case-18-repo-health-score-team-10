@@ -8,8 +8,10 @@
 //    строка «Моих репозиториев», карточка, «Задания» — читают один ответ;
 //  - событие «анализ закончился» — ровно одно на задание, из любого экрана,
 //    в том числе после ухода со страницы запуска;
-//  - базовая линия «уже видел» — первый ответ: после F5 старые итоги тостами
-//    не всплывают;
+//  - базовая линия «уже видел» — первый УДАЧНЫЙ ответ: после F5 старые итоги
+//    тостами не всплывают; итог задания, запущенного из этой вкладки, всплывает
+//    и в нем (первый опрос мог не удаться — круг 2, Н5);
+//  - 401 останавливает опрос до подтверждения сессии через /api/me (Н5);
 //  - прерванный перезапуском сервера анализ — не итог: задание вернулось в
 //    очередь и повторится (К8.5.2a);
 //  - «идёт анализ» — без обещания времени (§2-В5).
@@ -27,10 +29,39 @@ export interface AnalysisTracker {
   baseline: boolean;
   /** итоги каких заданий уже показаны (или были до базовой линии) */
   announced: ReadonlySet<number>;
+  /**
+   * Круг 2 (Н5): задания, запущенные из этой вкладки. Их итог объявляется и
+   * в ответе, ставшем базовой линией: первый опрос мог не удаться, а анализ —
+   * успеть закончиться до первого удачного ответа. Прочие итоги базовой
+   * линии — прошлое, без тостов.
+   */
+  expected: ReadonlySet<number>;
+  /** Круг 2 (Н5): опрос остановлен ответом 401 — ждет подтверждения сессии через /api/me */
+  halted: boolean;
 }
 
 export function newTracker(): AnalysisTracker {
-  return { baseline: false, announced: new Set() };
+  return { baseline: false, announced: new Set(), expected: new Set(), halted: false };
+}
+
+/** Задание запущено из этой вкладки: его итог будет объявлен и в ответе базовой линии. */
+export function expectJob(t: AnalysisTracker, jobId: number): AnalysisTracker {
+  if (t.announced.has(jobId) || t.expected.has(jobId)) return t;
+  return { ...t, expected: new Set([...t.expected, jobId]) };
+}
+
+/** Ответ 401 на опрос заданий: опрос стоит до подтверждения сессии. */
+export function haltOnLost(t: AnalysisTracker): AnalysisTracker {
+  return { ...t, halted: true };
+}
+
+/**
+ * `/api/me` подтвердил сессию: опрос, остановленный ответом 401, перезапускается
+ * (ровно один раз). Та же личность — эффект опроса сам не перезапустился бы:
+ * его зависимости не изменились.
+ */
+export function resumeOnSession(t: AnalysisTracker): { tracker: AnalysisTracker; resume: boolean } {
+  return t.halted ? { tracker: { ...t, halted: false }, resume: true } : { tracker: t, resume: false };
 }
 
 const FINISHED: ReadonlySet<MyJob["phase"]> = new Set(["done", "failed"]);
@@ -43,13 +74,15 @@ const FINISHED: ReadonlySet<MyJob["phase"]> = new Set(["done", "failed"]);
  */
 export function trackJobs(prev: AnalysisTracker, res: JobsResponse): { tracker: AnalysisTracker; finished: MyJob[] } {
   const announced = new Set(prev.announced);
+  const expected = new Set(prev.expected);
   const finished: MyJob[] = [];
   for (const job of res.recent) {
     if (!FINISHED.has(job.phase) || announced.has(job.jobId)) continue;
     announced.add(job.jobId);
-    if (prev.baseline) finished.push(job);
+    if (prev.baseline || expected.has(job.jobId)) finished.push(job);
+    expected.delete(job.jobId);
   }
-  return { tracker: { baseline: true, announced }, finished };
+  return { tracker: { ...prev, baseline: true, announced, expected }, finished };
 }
 
 /** Анализ репозитория, который идёт сейчас (у зрителя есть живое задание). */

@@ -55,7 +55,7 @@ import {
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { type MeResponse, type MetaResponse, type MyReposResponse, dataOf, logout, mutateJson, useJson, useLatest } from "./api";
 import type { LiveAnalysis } from "./analysis";
-import { announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
+import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
 import { authErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, recommendationsText, scoreTheme, scoreWord, sentence, slugOf, type FavoriteAddCheck } from "./format";
 import { TAB_RECOMMENDATIONS } from "./RepoPage";
 import { type Band, BANDS, type RepoEntry, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
@@ -429,7 +429,9 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
       if (starting.has(slug)) return;
       setStarting((prev) => new Set(prev).add(slug));
       try {
-        const res = await mutateJson<{ deduplicated?: boolean }>(`/api/me/repos/${slug.split("/").map(encodeURIComponent).join("/")}/scan`, "POST");
+        const res = await mutateJson<{ deduplicated?: boolean; jobId?: number }>(`/api/me/repos/${slug.split("/").map(encodeURIComponent).join("/")}/scan`, "POST");
+        // круг 2 (Н5): итог этого задания объявится и в ответе базовой линии опроса
+        announceJobStarted(res?.jobId);
         if (res?.deduplicated) toaster.add({ name: `scan-dedup:${slug}`, theme: "info", title: "Анализ уже идет", content: slug });
       } catch (e) {
         toaster.add({ name: `scan-failed:${slug}`, theme: "danger", title: "Анализ не запущен", content: e instanceof Error ? e.message : String(e) });

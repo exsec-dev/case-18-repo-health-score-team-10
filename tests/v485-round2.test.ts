@@ -14,6 +14,8 @@ import { addFavorite, checkFavoriteAccess, listFavorites, myJobs, staleFavoriteS
 import { makeRecheckPump } from "../src/api/recheck";
 import { upsertUser } from "../src/auth/session";
 import * as format from "../src/web/format";
+import * as analysis from "../src/web/analysis";
+import type { MyJob } from "../src/api/me";
 import { seedRepo, seedScan, type ApiTestDb } from "./api-fixtures";
 
 // круг 2: хелперы П2/П3 — через пространство имен, чтобы красный «до» был
@@ -233,10 +235,73 @@ describe("П3: причина замка — одно правило для по
     });
   });
 
-  test("карточка зовет общий хелпер в обоих местах", () => {
+  test("карточка зовет общий хелпер в обоих местах (проводка)", () => {
     const page = webSrc("RepoPage.tsx");
     expect(page).toContain("lockReasonShort([card.access.cicd, card.access.appsec], card.viewer?.auth)");
     expect(page).toContain("lockReasonShort([cat.locked], card.viewer?.auth)");
     expect(page).not.toContain("accessLockShort(cat.locked)");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Н5: опросы — пауза в скрытой вкладке, перезапуск после 401, базовая линия
+// ---------------------------------------------------------------------------
+
+type Tracker = analysis.AnalysisTracker;
+type Ext = {
+  haltOnLost?: (t: Tracker) => Tracker;
+  resumeOnSession?: (t: Tracker) => { tracker: Tracker; resume: boolean };
+  expectJob?: (t: Tracker, jobId: number) => Tracker;
+};
+// через пространство имен: красный «до» — падение ассерта, а не импорта
+const ext = analysis as unknown as Ext;
+const doneJob = (jobId: number): MyJob => ({
+  jobId,
+  slug: `o/r${jobId}`,
+  status: "done",
+  phase: "done",
+  queueAhead: null,
+  claimedAt: null,
+  error: null,
+  logoUrl: null,
+  stalled: false,
+  scanId: jobId,
+  outcome: "ok",
+  scoreChanged: true,
+});
+
+describe("Н5: опрос заданий", () => {
+  test("401 останавливает опрос; подтверждение сессии через /api/me перезапускает его ровно один раз", () => {
+    const halted = ext.haltOnLost ? ext.haltOnLost(analysis.newTracker()) : analysis.newTracker();
+    const first = ext.resumeOnSession ? ext.resumeOnSession(halted) : { tracker: halted, resume: false };
+    const second = ext.resumeOnSession ? ext.resumeOnSession(first.tracker) : { tracker: halted, resume: false };
+    const idle = ext.resumeOnSession ? ext.resumeOnSession(analysis.newTracker()) : { tracker: halted, resume: true };
+    expect({ first: first.resume, second: second.resume, notHalted: idle.resume }).toEqual({ first: true, second: false, notHalted: false });
+  });
+
+  test("первый опрос не удался, а анализ из этой вкладки успел закончиться — первый удачный ответ дает тост о нем, но не о прошлом", () => {
+    // первый опрос упал: trackJobs не звали; вкладка запустила задание 7
+    let t = analysis.newTracker();
+    if (ext.expectJob) t = ext.expectJob(t, 7);
+    const out = analysis.trackJobs(t, { active: [], recent: [doneJob(7), doneJob(3)] });
+    const again = analysis.trackJobs(out.tracker, { active: [], recent: [doneJob(7), doneJob(3)] });
+    expect({ first: out.finished.map((j) => j.jobId), again: again.finished.length }).toEqual({ first: [7], again: 0 });
+  });
+
+  test("проводка: 401 — haltOnLost, подтвержденная сессия — resumeOnSession, запуск — announceJobStarted", () => {
+    const session = webSrc("session.tsx");
+    expect(session).toContain("tracker.current = haltOnLost(tracker.current);");
+    expect(session).toContain("const r = resumeOnSession(tracker.current);");
+    expect(session).toContain("window.addEventListener(JOB_STARTED, onStarted)");
+    for (const f of ["RepoPage.tsx", "MePage.tsx"]) expect(webSrc(f)).toContain("announceJobStarted(res?.jobId)");
+  });
+});
+
+describe("Н5: опрос чужого идущего скана на карточке", () => {
+  test("в скрытой вкладке — пауза (проводка useVisible)", () => {
+    const page = webSrc("RepoPage.tsx");
+    expect(page).toContain("const visible = useVisible();");
+    expect(page).toContain("if (!foreignRunning || !visible) return;");
+    expect(page).toContain("}, [foreignRunning, visible, reload]);");
   });
 });

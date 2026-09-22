@@ -14,13 +14,32 @@ import { useToaster } from "@gravity-ui/uikit";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { MyJob } from "../api/me";
 import { SESSION_LOST, useJson, useLatest, useVisible, type AsyncState, type MeResponse } from "./api";
-import { finishedToast, identityChanged, liveFor, newTracker, pollDelay, trackJobs, type JobsResponse, type LiveAnalysis } from "./analysis";
+import {
+  expectJob,
+  finishedToast,
+  haltOnLost,
+  identityChanged,
+  liveFor,
+  newTracker,
+  pollDelay,
+  resumeOnSession,
+  trackJobs,
+  type JobsResponse,
+  type LiveAnalysis,
+} from "./analysis";
 
 /** Событие «задания изменились» (запуск анализа, добавление в избранное): опрос сразу, а не по таймеру. */
 export const JOBS_CHANGED = "rh-jobs-changed";
 
 export function announceJobsChanged(): void {
   window.dispatchEvent(new Event(JOBS_CHANGED));
+}
+
+/** Круг 2 (Н5): событие «вкладка запустила задание» — detail: jobId; его итог объявится и в ответе базовой линии. */
+export const JOB_STARTED = "rh-job-started";
+
+export function announceJobStarted(jobId: number | undefined): void {
+  if (typeof jobId === "number") window.dispatchEvent(new CustomEvent(JOB_STARTED, { detail: jobId }));
 }
 
 /** Событие «анализ закончился»: detail — закончившиеся задания (MyJob[]); страницы перечитывают только своё. */
@@ -79,17 +98,36 @@ export function AppState({ children }: { children: ReactNode }) {
     wasVisible.current = visible;
   }, [visible, reloadMe]);
 
+  // Круг 2 (Н5): каждый удачный ответ /api/me — подтверждение сессии; опрос
+  // заданий, остановленный 401, по нему перезапускается
+  const [sessionEpoch, setSessionEpoch] = useState(0);
+  useEffect(() => {
+    if (me.state.kind === "ok") setSessionEpoch((n) => n + 1);
+  }, [me.state]);
+
   const login = me.state.kind === "ok" ? me.state.data.login : me.state.kind === "loading" ? (me.state.stale?.login ?? null) : null;
   return (
     <SessionContext.Provider value={{ me: me.state, reloadMe }}>
-      <AnalysisState login={login} visible={visible} onIdentityChanged={reloadMe}>
+      <AnalysisState login={login} visible={visible} sessionEpoch={sessionEpoch} onIdentityChanged={reloadMe}>
         {children}
       </AnalysisState>
     </SessionContext.Provider>
   );
 }
 
-function AnalysisState({ login, visible, onIdentityChanged, children }: { login: string | null; visible: boolean; onIdentityChanged: () => void; children: ReactNode }) {
+function AnalysisState({
+  login,
+  visible,
+  sessionEpoch,
+  onIdentityChanged,
+  children,
+}: {
+  login: string | null;
+  visible: boolean;
+  sessionEpoch: number;
+  onIdentityChanged: () => void;
+  children: ReactNode;
+}) {
   const toaster = useToaster();
   const [jobs, setJobs] = useState<JobsResponse | null>(null);
   const [tick, setTick] = useState(0);
@@ -102,6 +140,25 @@ function AnalysisState({ login, visible, onIdentityChanged, children }: { login:
     window.addEventListener(JOBS_CHANGED, refresh);
     return () => window.removeEventListener(JOBS_CHANGED, refresh);
   }, [refresh]);
+
+  // Круг 2 (Н5): задание, запущенное из этой вкладки, — его итог объявится и
+  // тогда, когда первый удачный ответ опроса станет базовой линией
+  useEffect(() => {
+    const onStarted = (e: Event) => {
+      const jobId = (e as CustomEvent<unknown>).detail;
+      if (typeof jobId === "number") tracker.current = expectJob(tracker.current, jobId);
+    };
+    window.addEventListener(JOB_STARTED, onStarted);
+    return () => window.removeEventListener(JOB_STARTED, onStarted);
+  }, []);
+
+  // Круг 2 (Н5): опрос, остановленный 401, перезапускается, когда /api/me
+  // подтвердил сессию (та же личность — эффект опроса сам не перезапустился бы)
+  useEffect(() => {
+    const r = resumeOnSession(tracker.current);
+    tracker.current = r.tracker;
+    if (r.resume) refresh();
+  }, [sessionEpoch, refresh]);
 
   // смена личности — базовая линия заново (итоги чужого аккаунта не всплывают)
   useEffect(() => {
@@ -121,7 +178,9 @@ function AnalysisState({ login, visible, onIdentityChanged, children }: { login:
       try {
         const res = await fetch("/api/me/jobs");
         if (res.status === 401) {
-          // сессии нет — App перечитает /api/me и уберёт опрос
+          // сессии нет — App перечитает /api/me и уберёт опрос; подтвердит
+          // сессию — опрос перезапустится (круг 2, Н5)
+          tracker.current = haltOnLost(tracker.current);
           identity.current.onIdentityChanged();
           return;
         }
