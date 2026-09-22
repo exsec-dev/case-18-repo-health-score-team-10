@@ -87,7 +87,8 @@ import {
   favoriteAddedText,
   type FavoriteAddCheck,
   SECURITY_PUBLIC_NOTE,
-  accessLockShort,
+  lockReasonShort,
+  SIGN_IN_LOCK_SHORT,
   fmtCount,
   fmtCoverage,
   fmtDate,
@@ -567,9 +568,12 @@ const FULL_HELP =
 
 /** Короткая причина закрытия полного итога: первый закрытый канал (CI, затем Security). */
 function fullLockShortReason(card: Card): string {
-  // В4.8.5 (К8.5.8): зрителю без сессии причина — вход, а не «токен не добавлен»
-  if (card.viewer?.auth === "no-session") return "Нужно войти через Я ID и добавить токен доступа SourceCraft.";
-  return accessLockShort(card.access.cicd) ?? accessLockShort(card.access.appsec) ?? ACCESS_LOCK_SHORT["check-failed"];
+  // В4.8.5 (К8.5.8): зрителю без сессии причина — вход, а не «токен не добавлен»;
+  // круг 2 (П3): то же правило, что у строки закрытых категорий (`lockReasonShort`)
+  return (
+    lockReasonShort([card.access.cicd, card.access.appsec], card.viewer?.auth) ??
+    (card.viewer?.auth === "no-session" ? SIGN_IN_LOCK_SHORT : ACCESS_LOCK_SHORT["check-failed"])
+  );
 }
 
 /**
@@ -862,7 +866,8 @@ function Categories({ card, meta }: { card: Card; meta: MetaResponse | null }) {
   const shown = entries.filter(([, cat]) => cat.locked === undefined);
   const locked = entries
     .filter(([, cat]) => cat.locked !== undefined)
-    .map(([key, cat]) => ({ title: titleOf(key), reason: accessLockShort(cat.locked) ?? ACCESS_LOCK_SHORT["check-failed"] }));
+    // круг 2 (П3): анониму и при истекшей сессии — «войти», как у замка полного Score
+    .map(([key, cat]) => ({ title: titleOf(key), reason: lockReasonShort([cat.locked], card.viewer?.auth) ?? ACCESS_LOCK_SHORT["check-failed"] }));
 
   return (
     <>

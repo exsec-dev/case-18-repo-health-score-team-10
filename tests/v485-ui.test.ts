@@ -160,7 +160,10 @@ describe("поверхности без отдельной растяжки (sou
     const page = src("RepoPage.tsx");
     expect(page).toContain('card.viewer?.auth === "pat" ? null : card.viewer?.auth === "no-session" ? (');
     expect(page).toContain('<Link href="/auth/ya">Войти через Я ID</Link>');
-    expect(page).toContain('if (card.viewer?.auth === "no-session") return "Нужно войти через Я ID и добавить токен доступа SourceCraft.";');
+    // ПЕРЕНОС (В4.8.5 круг 2, П3): причина замка — общим хелпером, тот же текст «войти»
+    expect(page).toContain("lockReasonShort([card.access.cicd, card.access.appsec], card.viewer?.auth)");
+    expect(page).toContain('card.viewer?.auth === "no-session" ? SIGN_IN_LOCK_SHORT');
+    expect(src("format.ts")).toContain('SIGN_IN_LOCK_SHORT = "Нужно войти через Я ID и добавить токен доступа SourceCraft."');
   });
 
   test("С9-15/С6-6: звезда до ответа /api/me — «неизвестно», а не «войдите»; «Повторить» нет на 404/400", () => {

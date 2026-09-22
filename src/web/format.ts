@@ -518,6 +518,35 @@ export function accessLockShort(access: string | undefined): string | null {
   return ACCESS_LOCK_SHORT[access as keyof typeof ACCESS_LOCK_SHORT] ?? ACCESS_LOCK_SHORT["check-failed"];
 }
 
+/**
+ * В4.8.5 (К8.5.8), круг 2 (П3): причина закрытия зрителю без сессии (аноним,
+ * истекшая сессия) — вход, а не «токен не добавлен»: до входа токен добавить
+ * негде. Короткая форма, как `ACCESS_LOCK_SHORT`.
+ */
+export const SIGN_IN_LOCK_SHORT = "Нужно войти через Я ID и добавить токен доступа SourceCraft.";
+
+/**
+ * Круг 2 (П3): ОДНО правило короткой причины замка для полного Score и строки
+ * закрытых категорий на карточке. Первый закрытый канал из списка (порядок —
+ * у вызывающего: CI, затем Security); нет сессии — вход для любого закрытого
+ * канала; все открыты — null.
+ */
+export function lockReasonShort(accesses: (string | undefined)[], auth: string | undefined): string | null {
+  const closed = accesses.find((a) => a !== undefined && a !== "granted");
+  if (closed === undefined) return null;
+  if (auth === "no-session") return SIGN_IN_LOCK_SHORT;
+  return accessLockShort(closed);
+}
+
+/**
+ * Круг 2 (П2, К8.5.14 (ж)): подсказка строки «последний анализ завершился
+ * ошибкой». Призыв запустить — только тому, у кого есть кнопка анализа
+ * (свой репозиторий, есть токен); прочим — нейтрально, без призыва.
+ */
+export function failedAnalysisHint(canAnalyze: boolean): string {
+  return canAnalyze ? "Анализ завершился ошибкой – запустите его еще раз" : "Последний анализ завершился ошибкой";
+}
+
 /** Размер человекочитаемо: ГБ с двумя знаками или МБ. */
 export function fmtBytes(bytes: number): string {
   const gb = bytes / 1024 / 1024 / 1024;

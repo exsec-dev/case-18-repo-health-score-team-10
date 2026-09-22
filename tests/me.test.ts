@@ -184,7 +184,10 @@ describe("UI-ветки круга 2 (source-assert, Б2)", () => {
     // В4.8: состояние — короткой плашкой «Ошибка анализа» (как метки SourceCraft),
     // что делать — в подсказке; смысл З4 тот же
     expect(src.includes("Ошибка анализа")).toBe(true);
-    expect(src.includes("Анализ завершился ошибкой – запустите его еще раз")).toBe(true);
+    // ПЕРЕНОС (В4.8.5 круг 2, П2, К8.5.14 (ж)): текст с призывом живет в
+    // `failedAnalysisHint` (format.ts) и показывается только при кнопке анализа
+    expect(src.includes("title={failedAnalysisHint(canAnalyze)}")).toBe(true);
+    expect(srcOf("format.ts").includes("Анализ завершился ошибкой – запустите его еще раз")).toBe(true);
     const indexBranch = src.indexOf("entry.healthcraftIndex !== null");
     const badBranch = src.indexOf('entry.lastScanStatus === "bad"');
     expect({ indexBranch, badBranch, indexFirst: indexBranch < badBranch }).toMatchObject({ indexFirst: true });

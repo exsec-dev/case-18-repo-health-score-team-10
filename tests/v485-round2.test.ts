@@ -4,7 +4,7 @@
 // БД и фейки ввода-вывода; живых запросов нет.
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config";
@@ -13,7 +13,17 @@ import type { ProbeIo } from "../src/auth/access";
 import { addFavorite, checkFavoriteAccess, listFavorites, myJobs, staleFavoriteSlugs } from "../src/api/me";
 import { makeRecheckPump } from "../src/api/recheck";
 import { upsertUser } from "../src/auth/session";
+import * as format from "../src/web/format";
 import { seedRepo, seedScan, type ApiTestDb } from "./api-fixtures";
+
+// круг 2: хелперы П2/П3 — через пространство имен, чтобы красный «до» был
+// падением ассерта, а не импорта
+const failedAnalysisHint = (canAnalyze: boolean): string =>
+  (format as unknown as { failedAnalysisHint?: (c: boolean) => string }).failedAnalysisHint?.(canAnalyze) ?? "<нет хелпера>";
+const lockReasonShort = (accesses: (string | undefined)[], auth: string | undefined): string | null => {
+  const fn = (format as unknown as { lockReasonShort?: (a: (string | undefined)[], u: string | undefined) => string | null }).lockReasonShort;
+  return fn ? fn(accesses, auth) : "<нет хелпера>";
+};
 
 const dirs: string[] = [];
 const dbs: Database[] = [];
@@ -179,5 +189,54 @@ describe("Н4: связь задания со сканом", () => {
     insJob.run(repoId, "queued", null, uid, "2026-09-22T11:00:00.000Z");
     const job = myJobs(db, uid).recent.find((j) => j.jobId === j1)!;
     expect({ scanId: job.scanId, outcome: job.outcome }).toEqual({ scanId: scan1, outcome: "partial" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// П2 (К8.5.14 (ж)): призыв «запустите еще раз» — только тому, кто может запустить
+// П3 (остаток С1-3, К8.5.8): причина замка анониму и при истекшей сессии — вход
+// ---------------------------------------------------------------------------
+
+const webSrc = (f: string) => readFileSync(join(import.meta.dir, "..", "src", "web", f), "utf8");
+
+describe("П2: подсказки состояния строки «Моих репозиториев»", () => {
+  test("ошибка анализа: своему — призыв запустить, чужому — нейтрально, без призыва", () => {
+    expect({ own: failedAnalysisHint(true), foreign: failedAnalysisHint(false) }).toEqual({
+      own: "Анализ завершился ошибкой – запустите его еще раз",
+      foreign: "Последний анализ завершился ошибкой",
+    });
+  });
+
+  test("строка берет подсказку ошибки по canAnalyze; других призывов запустить в строке нет", () => {
+    const me = webSrc("MePage.tsx");
+    expect(me).toContain("title={failedAnalysisHint(canAnalyze)}");
+    expect(me).not.toMatch(/запустите/i);
+  });
+});
+
+describe("П3: причина замка — одно правило для полного Score и строки под категориями", () => {
+  test("нет сессии — «войти через Я ID» для любого закрытого канала; с сессией — причина канала", () => {
+    expect({
+      anonCategory: lockReasonShort(["no-pat"], "no-session"),
+      anonFull: lockReasonShort(["no-pat", "no-pat"], "no-session"),
+      noPat: lockReasonShort(["no-pat"], "no-pat"),
+      denied: lockReasonShort(["denied"], "pat"),
+      failedFirst: lockReasonShort(["granted", "check-failed"], "pat"),
+      nothing: lockReasonShort(["granted"], "pat"),
+    }).toEqual({
+      anonCategory: "Нужно войти через Я ID и добавить токен доступа SourceCraft.",
+      anonFull: "Нужно войти через Я ID и добавить токен доступа SourceCraft.",
+      noPat: "Токен доступа SourceCraft не добавлен.",
+      denied: "У вашего токена нет прав на эти данные репозитория.",
+      failedFirst: "Не удалось проверить доступ к этим данным.",
+      nothing: null,
+    });
+  });
+
+  test("карточка зовет общий хелпер в обоих местах", () => {
+    const page = webSrc("RepoPage.tsx");
+    expect(page).toContain("lockReasonShort([card.access.cicd, card.access.appsec], card.viewer?.auth)");
+    expect(page).toContain("lockReasonShort([cat.locked], card.viewer?.auth)");
+    expect(page).not.toContain("accessLockShort(cat.locked)");
   });
 });

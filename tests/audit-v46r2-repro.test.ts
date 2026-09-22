@@ -343,7 +343,9 @@ describe("Б4 (Р14, Р16): список категорий и контейне�
       rowsFiltered: /cat\.locked === undefined/.test(categories),
       noteAfterList: categories.indexOf("</ul>") < categories.indexOf("<LockedCategories"),
       namesActualCategories: note.includes("titles.join"),
-      reasonFromAccessLock: /accessLockShort\(cat\.locked\)/.test(categories),
+      // ПЕРЕНОС (В4.8.5 круг 2, П3): причина — по-прежнему своя у каждой
+      // закрытой категории, через общий хелпер замка (без сессии — «войти»)
+      reasonFromAccessLock: /lockReasonShort\(\[cat\.locked\], card\.viewer\?\.auth\)/.test(categories),
       // фиксированная фраза «CI/CD и Security» была бы ложью при закрытой одной
       hardcodedPair: src.includes("CI/CD и Security – недоступны"),
       lockBranchGoneFromRow: /cat\.locked !== undefined/.test(row),

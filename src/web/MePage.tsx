@@ -56,7 +56,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { type MeResponse, type MetaResponse, type MyReposResponse, dataOf, logout, mutateJson, useJson, useLatest } from "./api";
 import type { LiveAnalysis } from "./analysis";
 import { announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
-import { authErrorText, favoriteAddedText, fmtDateTime, fmtScore, recommendationsText, scoreTheme, scoreWord, sentence, slugOf, type FavoriteAddCheck } from "./format";
+import { authErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, recommendationsText, scoreTheme, scoreWord, sentence, slugOf, type FavoriteAddCheck } from "./format";
 import { TAB_RECOMMENDATIONS } from "./RepoPage";
 import { type Band, BANDS, type RepoEntry, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
 import { linkProps, navigate, repoHref } from "./router";
@@ -883,8 +883,9 @@ function RepoRow({
       </span>
     ) : entry.lastScanStatus === "bad" ? (
       // З4: последний скан упал — честный статус; пригодный старый индекс
-      // сработал бы веткой выше
-      <StatePill icon={CircleExclamation} tone="danger" title="Анализ завершился ошибкой – запустите его еще раз">
+      // сработал бы веткой выше. Круг 2 (П2, К8.5.14 (ж)): призыв запустить —
+      // только при кнопке анализа (свой и есть токен), чужому — нейтрально
+      <StatePill icon={CircleExclamation} tone="danger" title={failedAnalysisHint(canAnalyze)}>
         Ошибка анализа
       </StatePill>
     ) : entry.lastScanAt !== null ? (
