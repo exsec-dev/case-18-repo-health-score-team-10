@@ -70,6 +70,29 @@ describe("К9.2: словарь запрещенных слов в основн�
   }
 });
 
+describe("К9.6: MD читается в рендере", () => {
+  for (const name of REPORT_FIXTURES) {
+    test(`${name}: без HTML, таблицы основного текста не шире 4 колонок, без переносов «два пробела»`, () => {
+      const { card, close } = fixtureCard(name);
+      try {
+        const md = renderRepoReport(card);
+        const main = mainText(md);
+        expect(md).not.toMatch(/<\/?[a-z][^>]*>/i);
+        const widths = main
+          .split("\n")
+          .filter((l) => l.startsWith("| "))
+          .map((l) => l.split(/(?<!\\)\|/).length - 2);
+        for (const w of widths) expect(w).toBeLessThanOrEqual(4);
+        expect(md).not.toMatch(/ {2}$/m);
+        // первый экран строкой «**N из 100 · слово**» или «**Оценки нет**»
+        expect(main).toMatch(/: \*\*(\d+ из 100 · (здоров|требует внимания|в зоне риска)|Оценки нет)\*\*/);
+      } finally {
+        close();
+      }
+    });
+  }
+});
+
 describe("К9.1: первый экран у фикстур с оценкой", () => {
   for (const name of ["anon", "full", "grant-ci"] as const) {
     (ENABLED.firstScreen ? test : test.todo)(`${name}: показатель с плашкой, вердикт, вклады и действия — до разбора`, () => {

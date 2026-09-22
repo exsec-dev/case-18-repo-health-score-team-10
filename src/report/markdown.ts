@@ -35,8 +35,9 @@ function blockLines(block: Block): string[] {
     case "heading":
       return [`${"#".repeat(block.level)} ${lineMd(block.content)}`];
     case "paragraph":
-      // строки абзаца — отдельными строками MD (перенос строки — два пробела в конце)
-      return [block.lines.map(lineMd).join("  \n")];
+      // К9.6: строки абзаца — отдельными абзацами MD (пустая строка между ними):
+      // перенос «два пробела в конце» теряется в редакторах и просмотрщиках
+      return [block.lines.map(lineMd).join("\n\n")];
     case "list":
       return block.items.map((item) => `- ${lineMd(item)}`);
     case "table":
@@ -50,7 +51,7 @@ function blockLines(block: Block): string[] {
     case "hero": {
       const value = block.value === null ? `**${block.noneText}**` : `**${block.value} из 100 · ${block.chip!.text.toLowerCase()}**`;
       const out = [`${block.label}: ${value}`, "", block.verdict];
-      if (block.notes.length > 0) out.push("", block.notes.map(lineMd).join("  \n"));
+      for (const note of block.notes) out.push("", lineMd(note));
       return out;
     }
     case "contributions": {
