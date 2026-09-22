@@ -8,3 +8,4 @@ data/
 reports/shots/
 .idea/
 package-lock.json
+.claude/worktrees/
