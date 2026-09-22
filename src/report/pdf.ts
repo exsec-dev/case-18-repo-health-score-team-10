@@ -264,24 +264,40 @@ function zonesNodes(block: Extract<Block, { kind: "contributions" }>): PdfNode[]
 }
 
 function contributionsNode(block: Extract<Block, { kind: "contributions" }>): PdfNode {
-  const title = { text: block.title, fontSize: 10, bold: true, margin: [0, 14, 0, 6], headlineLevel: 2 };
+  const title = { text: block.title, fontSize: 10, bold: true, margin: [0, 14, 0, 6] };
   const body: PdfNode[] = [];
   if (block.note !== null) {
     body.push({ text: block.note, fontSize: 8.5, color: COLORS.ink2, lineHeight: 1.15, margin: [0, 0, 0, 4] });
   } else {
     // подписи над сегментами: влезают — по сегменту; нет — одной строкой под полосой (тот же текст)
-    const labelW = (s: { title: string; value: string }) => Math.max(width(s.title, 7.5), width(s.value, 8, true)) + 4;
-    const fits = block.segments.every((s) => labelW(s) <= s.share * W) && (!block.rest || labelW(block.rest) <= Math.max(block.rest.share * W, 40));
+    // подпись встает над началом своего сегмента; если предыдущая длиннее своего
+    // сегмента — сдвигается вправо (зазор 4 pt); не влезли в строку — одна строка текстом
+    const labelW = (s: { title: string; value: string }) => Math.max(width(s.title, 7.5), width(s.value, 8, true));
+    const placed: { gap: number; w: number; s: (typeof block.segments)[number] }[] = [];
+    let start = 0;
+    let end = 0;
+    for (const s of block.segments) {
+      const x = Math.max(start, end > 0 ? end + 4 : 0);
+      const w = labelW(s) + 1;
+      placed.push({ gap: x - end, w, s });
+      end = x + w;
+      start += s.share * W;
+    }
+    const restW = block.rest ? labelW(block.rest) + 1 : 0;
+    const fits = end + (block.rest ? restW + 6 : 0) <= W;
     if (fits) {
       body.push({
         columns: [
-          ...block.segments.map((s) => ({
-            width: s.share * W,
-            stack: [
-              { text: s.title, fontSize: 7.5, color: COLORS.ink2, noWrap: true, lineHeight: 1.05 },
-              { text: s.value, fontSize: 8, bold: true, noWrap: true, fontFeatures: ["tnum"] },
-            ],
-          })),
+          ...placed.flatMap(({ gap, w, s }) => [
+            ...(gap > 0.01 ? [{ width: gap, text: "" }] : []),
+            {
+              width: w,
+              stack: [
+                { text: s.title, fontSize: 7.5, color: COLORS.ink2, noWrap: true, lineHeight: 1.05 },
+                { text: s.value, fontSize: 8, bold: true, noWrap: true, fontFeatures: ["tnum"] },
+              ],
+            },
+          ]),
           ...(block.rest
             ? [
                 {
@@ -323,7 +339,7 @@ function coverageNode(block: Extract<Block, { kind: "coverage" }>): PdfNode {
   return {
     unbreakable: true,
     stack: [
-      { text: block.title, fontSize: 10, bold: true, margin: [0, 16, 0, 6], headlineLevel: 2 },
+      { text: block.title, fontSize: 10, bold: true, margin: [0, 16, 0, 6] },
       {
         canvas: [
           { type: "rect", x: 0, y: 0, w: W, h: 10, color: COLORS.track },
@@ -553,7 +569,12 @@ export function buildPdfDocument(model: ReportModel): PdfNode {
     const next = blocks[i + 1];
     // заголовок + первый блок — неразрывно (К9.5); длинный блок — заголовок не сирота (pageBreakBefore)
     if (block.kind === "heading" && next && smallFollower(next) && !(next.kind === "actions" && next.items.length > 3)) {
-      content.push({ stack: [blockNode(block), blockNode(next)], unbreakable: true });
+      // внутри неразрывного стека заголовок без headlineLevel: pageBreakBefore
+      // на вложенном узле неразрывного блока pdfmake обрабатывает неверно
+      // (пустые страницы и потерянный текст — найдено по отрисованному PDF)
+      const head = blockNode(block);
+      delete head.headlineLevel;
+      content.push({ stack: [head, blockNode(next)], unbreakable: true });
       i++;
       continue;
     }
