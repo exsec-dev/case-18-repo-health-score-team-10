@@ -136,7 +136,7 @@ export type Block =
   | { kind: "coverage"; title: string; share: number; threshold: number; collected: string; thresholdText: string }
   /** строки категорий первого экрана; `columns` — подписи колонок (текст шапки MD-таблицы) */
   | { kind: "categories"; columns: [string, string, string, string]; rows: CategoryRow[] }
-  /** карточки действий; `compact` — список «Все рекомендации» */
+  /** карточки действий; `compact` — список раздела «Рекомендации» */
   | { kind: "actions"; compact: boolean; items: ActionItem[] }
   /** категория в разборе: заголовок с баллом и плашкой, таблица показателей, примечания */
   | { kind: "detail"; title: string; scoreText: string; chip: Chip; table: { columns: TableColumn[]; rows: InlineLine[][] } | null; notes: InlineLine[] }
@@ -148,9 +148,9 @@ export interface ReportModel {
   title: string;
   /** имя файла выгрузки без расширения: `<org>-<repo>-health` */
   fileStem: string;
-  /** колонтитул PDF: «org/repo – отчет Repo Health от дата» */
+  /** колонтитул PDF: «org/repo – отчет HealthCraft от дата» */
   footer: string;
-  /** шапка страниц PDF со 2-й: [репозиторий, «Отчет Repo Health, дата»] */
+  /** шапка страниц PDF со 2-й: [репозиторий, «Отчет HealthCraft, дата»] */
   runningHead: [string, string];
   /**
    * К9.8: слот AI-summary В5 в первом экране — пустой до В5 и не печатается
