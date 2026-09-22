@@ -54,7 +54,7 @@ describe("П4.2: полнота словаря", () => {
     expect(submetricTitle("activity", "fresh")).toBe("Свежесть последнего коммита человека");
     expect(submetricTitle("code", "brand_new")).toBe("brand_new");
     expect(fmt("code.brand_new", { a: 1 })).toBe('{"a":1}');
-    expect(fmt("code.brand_new", 0.8723404255319149)).toBe("0.87");
+    expect(fmt("code.brand_new", 0.8723404255319149)).toBe("0,87");
   });
 });
 
@@ -77,7 +77,7 @@ describe("П4.2: форма значений — единица, масштаб,
 
   test("Security: плотность на 10 тыс. строк, доля закрытых, утечки словом", () => {
     expect(fmt("security.density", 38)).toBe("38 на 10 тыс. строк");
-    expect(fmt("security.density", 3.456)).toBe("3.46 на 10 тыс. строк");
+    expect(fmt("security.density", 3.456)).toBe("3,46 на 10 тыс. строк");
     expect(fmt("security.resolved", 0.8)).toBe("80%");
     expect([fmt("security.secrets", true), fmt("security.secrets", false)]).toEqual(["найдены", "нет"]);
   });
@@ -98,7 +98,7 @@ describe("П4.2: форма значений — единица, масштаб,
     expect(fmt("activity.fresh", daysAgo(5), submetricContext("2026-09-16T12:00:00Z"))).toBe("5 дней");
     // момента скана нет — «—», а не сырая отметка времени
     expect(fmt("activity.fresh", daysAgo(5), { at: null })).toBe(NO_VALUE);
-    expect(fmt("activity.freq", 4.333333)).toBe("4.3 в месяц");
+    expect(fmt("activity.freq", 4.333333)).toBe("4,3 в месяц");
     expect([fmt("activity.contributors", 1), fmt("activity.contributors", 3), fmt("activity.contributors", 12)]).toEqual(["1 автор", "3 автора", "12 авторов"]);
     expect(fmt("activity.mirror_likeness", { sync_share: 0.125, authors: 2, committers: 3 })).toBe("синхронизаций 13%, авторов 2, коммитеров 3");
     expect([fmt("activity.pulls_90d", 3), fmt("activity.releases_12m", 0), fmt("activity.commits_90d", 13), fmt("activity.commits_365d", 40), fmt("activity.sync_bursts", 0)]).toEqual([
@@ -112,13 +112,13 @@ describe("П4.2: форма значений — единица, масштаб,
 
   test("issues: доли процентом, дни и часы, трекер составным значением", () => {
     expect([fmt("issues.stale", 0.5), fmt("issues.resolution", 0.7142857142857143)]).toEqual(["50%", "71%"]);
-    expect([fmt("issues.close_days", 1), fmt("issues.close_days", 5), fmt("issues.close_days", 2.5)]).toEqual(["1 день", "5 дней", "2.5 дня"]);
+    expect([fmt("issues.close_days", 1), fmt("issues.close_days", 5), fmt("issues.close_days", 2.5)]).toEqual(["1 день", "5 дней", "2,5 дня"]);
     expect(fmt("issues.first_resp", 30)).toBe("30 ч");
     expect(fmt("issues.tracker_unused", { open: 0, closed: 0 })).toBe("открытых 0, закрытых 0");
   });
 
   test("код: плотность на 1 тыс. строк (доля округлена), доля старых, корень, счетчик", () => {
-    expect(fmt("code.density", 0.8723404255319149)).toBe("0.87 на 1 тыс. строк");
+    expect(fmt("code.density", 0.8723404255319149)).toBe("0,87 на 1 тыс. строк");
     expect(fmt("code.old_share", 0.5)).toBe("50%");
     expect([fmt("code.root", 1), fmt("code.root", 4), fmt("code.root", 11)]).toEqual(["1 элемент", "4 элемента", "11 элементов"]);
     expect(fmt("code.todo_total", 5)).toBe("5");

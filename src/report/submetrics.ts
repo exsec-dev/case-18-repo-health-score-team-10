@@ -24,6 +24,8 @@
 //   issues.tracker_unused     — {open, closed};
 //   доли — 0..1 (показ в процентах); без значения — «—».
 
+import { fmtDecimal } from "../web/format";
+
 /** Глиф «нет данных» (tri-state, закон 2): тот же, что у `fmtScore` и ячеек MD. */
 export const NO_VALUE = "—";
 
@@ -50,11 +52,13 @@ export interface SubmetricSpec {
 
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
-/** Число без локали: целое как есть, дробное — до `digits` знаков (точка, как во всем отчете). */
+/**
+ * Число без локали: целое как есть, дробное — до `digits` знаков. В4.9
+ * (К9.11): десятичная запятая и минус «−» — одна копия правила (`fmtDecimal`).
+ */
 function num(value: number, digits = 2): string {
   if (Number.isInteger(value)) return String(value);
-  const p = 10 ** digits;
-  return String(Math.round(value * p) / p);
+  return fmtDecimal(value, digits, { trim: true });
 }
 
 /** Русское согласование с числом: 1 день, 2 дня, 5 дней (дробное — родительный ед.: 2.5 дня). */

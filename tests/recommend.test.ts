@@ -43,7 +43,8 @@ describe("presence-правила: реальный прирост итога (�
     const gain = realGain(base, fixed, "rating");
     expect(rec.deltaScore).toBe(gain);
     expect(gain).toBeCloseTo(0.25 * 23, 3); // вес лицензии в Доках × INDEX_WEIGHTS.documentation (четвёрка с полным покрытием; словарь индекса суммируется в 100 — перенормировки нет)
-    expect(rec.expectedImpact).toBe(`+${gain.toFixed(1)} к HealthCraft Index`);
+    // В4.9 (К9.11): десятичная запятая
+    expect(rec.expectedImpact).toBe(`+${gain.toFixed(1).replace(".", ",")} к HealthCraft Index`);
     expect(rec.factRefs).toContain("docs.presence");
   });
 
@@ -77,7 +78,7 @@ describe("presence-правила: реальный прирост итога (�
     const rec1 = recommend(t.db, noCi, { now: NOW }).find((r) => r.ruleId === "ci-missing")!;
     expect(rec1.deltaScore).toBe(realGain(noCiFacts, withFacts(noCiFacts, { key: "cicd.configs", value: { has_ci_yaml: true, has_steps: true } }), "full"));
     expect(rec1.deltaScore!).toBeGreaterThan(0);
-    expect(rec1.expectedImpact).toBe(`+${rec1.deltaScore!.toFixed(1)} к Repo Health Score`);
+    expect(rec1.expectedImpact).toBe(`+${rec1.deltaScore!.toFixed(1).replace(".", ",")} к Repo Health Score`);
     // CI-правила существуют в одной выдаче, но только с каналом cicd —
     // карточка скрывает их от зрителя без доступа к CI (К2)
     const ciRules = recommend(t.db, noCi, { now: NOW }).filter((r) => ["ci-missing", "ci-no-steps", "grant-ci-runs"].includes(r.ruleId));
@@ -102,7 +103,7 @@ describe("presence-правила: реальный прирост итога (�
     );
     const ci = recommend(t.db, seedScan(t, capped), { now: NOW }).find((r) => r.ruleId === "ci-missing")!;
     // В4.9 (К9.10): причины Δ = 0 — словами читателя (закрытый список текстов в отчете воркера); Δ и условия не менялись
-    expect({ delta: ci.deltaScore, impact: ci.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к Repo Health Score – Repo Health Score ограничен 49 баллами из-за утекших секретов" });
+    expect({ delta: ci.deltaScore, impact: ci.expectedImpact }).toEqual({ delta: 0, impact: "+0,0 к Repo Health Score – Repo Health Score ограничен 49 баллами из-за утекших секретов" });
 
     const empty = withFacts(
       healthyFacts(),
@@ -110,12 +111,12 @@ describe("presence-правила: реальный прирост итога (�
       { key: "docs.presence", value: { readme: true, license: false, contributing: true, codeowners: true } },
     );
     const lic = recommend(t.db, seedScan(t, empty), { now: NOW }).find((r) => r.ruleId === "license-missing")!;
-    expect({ delta: lic.deltaScore, impact: lic.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к HealthCraft Index – в репозитории нет кода" });
+    expect({ delta: lic.deltaScore, impact: lic.expectedImpact }).toEqual({ delta: 0, impact: "+0,0 к HealthCraft Index – в репозитории нет кода" });
 
     // только git-документация: покрытие рейтинга < 0.4 → итог NULL
     const sparse: FactSpec[] = [{ key: "docs.presence", value: { readme: true, license: false, contributing: true, codeowners: true } }];
     const nul = recommend(t.db, seedScan(t, sparse), { now: NOW }).find((r) => r.ruleId === "license-missing")!;
-    expect({ delta: nul.deltaScore, impact: nul.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к HealthCraft Index – оценка появится, когда данных станет больше" });
+    expect({ delta: nul.deltaScore, impact: nul.expectedImpact }).toEqual({ delta: 0, impact: "+0,0 к HealthCraft Index – оценка появится, когда данных станет больше" });
   });
 });
 

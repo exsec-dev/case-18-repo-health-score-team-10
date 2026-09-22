@@ -28,9 +28,10 @@ export function fmtSubmetric(value: number | null | undefined): string {
   return value === null || value === undefined ? "—" : `${Math.round(value * 100)}`;
 }
 
+/** Число для показа (В4.9, К9.11): целое как есть, дробное — до 2 знаков, запятая и минус «−». */
 export function fmtNumber(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
-  return Number.isInteger(value) ? String(value) : String(Math.round(value * 100) / 100);
+  return fmtDecimal(value, 2, { trim: true });
 }
 
 /**
@@ -684,7 +685,8 @@ export function analysisOutcome(
 
 /** Прирост Score — одним знаком после точки, как в тексте эффекта рекомендации. */
 export function fmtDelta(delta: number): string {
-  return `+${(Math.round(delta * 10) / 10).toFixed(1)}`;
+  // В4.9 (К9.11): десятичная запятая — «+1,2»
+  return `+${fmtDecimal(delta, 1)}`;
 }
 
 /**
@@ -693,8 +695,9 @@ export function fmtDelta(delta: number): string {
  * берётся из фактической разности. Одна копия для страницы и MD.
  */
 export function fmtSigned(delta: number): string {
+  // В4.9 (К9.11): русские числа — «+1,2», «−12,1» (минус U+2212, не дефис)
   const v = Math.round(delta * 10) / 10;
-  return `${v < 0 ? "-" : "+"}${Math.abs(v).toFixed(1)}`;
+  return `${v < 0 ? MINUS : "+"}${fmtDecimal(Math.abs(v), 1)}`;
 }
 
 /**
@@ -771,14 +774,14 @@ export function failedAnalysisHint(canAnalyze: boolean): string {
 /** Размер человекочитаемо: ГБ с двумя знаками или МБ. */
 export function fmtBytes(bytes: number): string {
   const gb = bytes / 1024 / 1024 / 1024;
-  if (gb >= 1) return `${Math.round(gb * 100) / 100} ГБ`;
+  if (gb >= 1) return `${fmtDecimal(gb, 2, { trim: true })} ГБ`;
   return `${Math.round(bytes / 1024 / 1024)} МБ`;
 }
 
 /** Длительность человекочитаемо: часы или минуты. */
 export function fmtMinutes(ms: number): string {
   const min = ms / 60_000;
-  return min >= 60 ? `${Math.round((min / 60) * 10) / 10} ч` : `${Math.round(min)} мин`;
+  return min >= 60 ? `${fmtDecimal(min / 60, 1, { trim: true })} ч` : `${Math.round(min)} мин`;
 }
 
 /** Лимиты клона оператора на момент показа (К5): только код ← env, без пользовательских настроек. */

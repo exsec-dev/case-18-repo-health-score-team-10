@@ -146,7 +146,8 @@ describe("Ф3.4: signed-дельта рекомендаций", () => {
       issuesScore: null,
     });
     const rec = recs.find((r) => r.ruleId === "license-missing")!;
-    expect(rec.expectedImpact).toBe("-2.5 к HealthCraft Index");
+    // В4.9 (К9.11): минус — знак U+2212, десятичная запятая
+    expect(rec.expectedImpact).toBe("−2,5 к HealthCraft Index");
     expect(rec.expectedImpact!.startsWith("+")).toBe(false);
   });
 });

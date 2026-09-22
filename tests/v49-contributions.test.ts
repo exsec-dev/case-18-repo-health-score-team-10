@@ -7,7 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import { totalsFromCategories } from "../src/score/compute";
 import { INDEX_WEIGHTS, SCORE_WEIGHTS, SECRETS_CRITICAL_TOTAL_CAP, type CategoryKey } from "../src/score/model";
-import { SECRETS_CAP, categoryContributions, fmtContribution, fmtLoss, type ContributionInput } from "../src/web/format";
+import { SECRETS_CAP, categoryContributions, fmtBytes, fmtContribution, fmtDecimal, fmtDelta, fmtLoss, fmtNumber, fmtSigned, type ContributionInput } from "../src/web/format";
 import { buildReportModel } from "../src/report/markdown";
 import { REPORT_FIXTURES, fixtureCard } from "./report-fixtures";
 
@@ -99,4 +99,26 @@ describe("К9.1: сумма показанных вкладов = показат
       }
     });
   }
+});
+
+describe("К9.11: русские числа в UI и отчете — одна копия форматтеров", () => {
+  test("десятичная запятая и минус U+2212, а не точка и дефис", () => {
+    expect([fmtSigned(1.25), fmtSigned(-12.14), fmtSigned(0), fmtSigned(-0.04)]).toEqual(["+1,3", "−12,1", "+0,0", "+0,0"]);
+    expect([fmtDelta(3.45), fmtNumber(0.8723), fmtNumber(-2.5), fmtNumber(47), fmtNumber(null)]).toEqual(["+3,5", "0,87", "−2,5", "47", "—"]);
+    expect([fmtDecimal(69.86, 1), fmtDecimal(0.5, 2, { trim: true }), fmtDecimal(-0.01, 1)]).toEqual(["69,9", "0,5", "0,0"]);
+    expect(fmtBytes(1.5 * 1024 ** 3)).toBe("1,5 ГБ");
+  });
+
+  test("в UI и отчете нет своих копий: `toFixed` только внутри fmtDecimal", () => {
+    const { readFileSync, readdirSync } = require("node:fs") as typeof import("node:fs");
+    const { join } = require("node:path") as typeof import("node:path");
+    const root = join(import.meta.dir, "..", "src");
+    for (const dir of ["web", "report"]) {
+      for (const file of readdirSync(join(root, dir)).filter((f: string) => /\.tsx?$/.test(f))) {
+        const src = readFileSync(join(root, dir, file), "utf8");
+        const uses = (src.match(/\.toFixed\(/g) ?? []).length;
+        expect({ file, uses }).toEqual({ file, uses: file === "format.ts" ? 1 : 0 });
+      }
+    }
+  });
 });
