@@ -541,13 +541,14 @@ describe("единая карточка: матрица доступа зрит�
 
   test("MD-отчёт строится тем же сборщиком и следует тем же правилам", () => {
     const anonMd = renderRepoReport(view(ANON)!);
-    for (const leak of ["severity_counts", "runs_count", "fix-red-runs", "appsec-critical", "Repo Health Score (6 категорий, с CI/CD и Безопасностью): 49"]) {
+    // В4.9: полный показатель — крупно («Repo Health Score: **49 из 100 · …**»), факты — таблицами приложения В
+    for (const leak of ["severity_counts", "runs_count", "fix-red-runs", "appsec-critical", "Repo Health Score: **", "Repo Health Score 49"]) {
       expect(anonMd).not.toContain(leak);
     }
     expect(anonMd).toContain("войдите и добавьте персональный токен доступа");
     const fullMd = renderRepoReport(view({ cicd: "granted", appsec: "granted", repo: "granted" })!);
-    expect(fullMd).toContain("Repo Health Score (6 категорий, с CI/CD и Безопасностью): 49 из 100");
-    expect(fullMd).toContain("runs_count");
+    expect(fullMd).toContain("Repo Health Score: **49 из 100");
+    expect(fullMd).toContain("| runs_count |");
   });
 });
 

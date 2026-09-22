@@ -187,6 +187,72 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   "code.todo_total": { title: "Всего маркеров TODO/FIXME", unit: "штуки", format: plain },
 };
 
+/**
+ * Показ-без-веса (§7.3 методики): число объясняет картину, но в балл
+ * категории не идет. Одна копия для карточки, MD и PDF.
+ */
+export const DISPLAY_ONLY = new Set(["activity.mirror_likeness", "activity.commits_90d", "activity.commits_365d", "activity.sync_bursts", "code.todo_total"]);
+
+export function displayOnly(category: string, sub: string): boolean {
+  return DISPLAY_ONLY.has(`${category}.${sub}`);
+}
+
+/**
+ * Ключ веса подметрики в `SUBWEIGHTS` методики: у двух подметрик ключ веса
+ * короче ключа значения (`pulls_90d` → `pulls`, `releases_12m` → `releases`).
+ */
+export function subweightKey(sub: string): string {
+  return sub === "pulls_90d" ? "pulls" : sub === "releases_12m" ? "releases" : sub;
+}
+
+/**
+ * В4.9 (К9.9): служебные заметки расчета (`submetrics[*].note`, по-английски,
+ * `compute.ts` / `derived.ts`) — показ для читателя. Сопоставление — по КЛЮЧУ
+ * подметрики и факту наличия заметки, не по точной строке: в БД лежат оценки
+ * прошлых версий кода. `value` — что печатается вместо «—» в колонке
+ * значения; `remark` — примечание под таблицей. Неизвестная заметка не
+ * показывается вовсе (null): сырой `note` читателю не печатается никогда.
+ */
+export interface NoteText {
+  value?: string;
+  remark?: string;
+}
+
+export function submetricNote(category: string, sub: string, note: string | null | undefined): NoteText | null {
+  if (typeof note !== "string" || note === "") return null;
+  const key = `${category}.${sub}`;
+  if (key === "issues.tracker_unused") return { remark: "Задач в трекере нет, поэтому категория получает минимальный балл." };
+  if (key === "cicd.pass_rate" || key === "cicd.duration") {
+    if (note.startsWith("no declared CI")) return { value: "CI не настроен" };
+    if (note.startsWith("runs no-data")) return { value: "запуски недоступны" };
+    return null;
+  }
+  if (key === "code.old_share") return { value: "не посчитано: прочитаны не все файлы" };
+  return null;
+}
+
+/** Подметрики «есть/нет», у которых расчет хранит только балл (значения нет): показ — по баллу. */
+const PRESENCE_BY_SCORE = new Set(["documentation.license", "documentation.contributing", "documentation.codeowners"]);
+
+/**
+ * Значение подметрики для показа с учетом заметки: «—» заменяется словами
+ * заметки (К9.9); у файлов «есть/нет» без значения — слово по баллу
+ * (лицензия с баллом 100 — «есть», а не «—»).
+ */
+export function submetricShownValue(
+  category: string,
+  sub: string,
+  entry: { score?: number | null; value?: unknown; note?: string | null },
+  ctx: SubmetricContext,
+): string {
+  const shown = formatSubmetricValue(category, sub, entry.value, ctx);
+  if (shown !== NO_VALUE) return shown;
+  const n = submetricNote(category, sub, entry.note);
+  if (n?.value) return n.value;
+  if (PRESENCE_BY_SCORE.has(`${category}.${sub}`) && typeof entry.score === "number") return entry.score >= 1 ? "есть" : "нет";
+  return shown;
+}
+
 /** Название подметрики; незнакомый ключ — как есть (показ не падает). */
 export function submetricTitle(category: string, sub: string): string {
   return SUBMETRICS[`${category}.${sub}`]?.title ?? sub;

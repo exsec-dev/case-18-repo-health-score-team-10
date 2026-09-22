@@ -79,14 +79,18 @@ describe("П5: один шов на все экраны, MD не тронут", 
     }
   });
 
-  test("отчет держит свои форматтеры (срез ISO) и общие из web/format не импортирует", () => {
-    const md = readFileSync(join(import.meta.dir, "..", "src", "report", "markdown.ts"), "utf8");
-    const importLine = md.split("\n").find((l) => l.includes('from "../web/format"')) ?? "";
-    expect({ importsDate: /\bfmtDate(Time)?\b/.test(importLine), localDate: md.includes('return iso ? iso.slice(0, 10) : "—";'), localDateTime: md.includes('return iso ? iso.replace("T", " ").slice(0, 16) : "—";') }).toEqual({
-      importsDate: false,
-      localDate: true,
-      localDateTime: true,
-    });
+  // В4.9 (К9.7, решение 22.09): граница В4.7 «MD не меняется» снята — отчет
+  // (MD и PDF, включая приложение) печатает даты форматтерами UI; своих срезов ISO нет
+  test("отчет берет форматтеры дат из web/format, своих срезов ISO нет", () => {
+    const dir = join(import.meta.dir, "..", "src", "report");
+    const build = readFileSync(join(dir, "build.ts"), "utf8");
+    const importBlock = build.slice(build.indexOf("import {"), build.indexOf('} from "../web/format"'));
+    const all = ["build.ts", "markdown.ts", "pdf.ts", "model.ts"].map((f) => readFileSync(join(dir, f), "utf8")).join("\n");
+    expect({
+      importsDate: /\bfmtDate\b/.test(importBlock) && /\bfmtDateTime\b/.test(importBlock),
+      localDate: all.includes("iso.slice(0, 10)"),
+      localDateTime: all.includes('iso.replace("T", " ")'),
+    }).toEqual({ importsDate: true, localDate: false, localDateTime: false });
   });
 
   // В4.8 круг 3 (замечание 4 Екатерины): дата последней активности в кабинете

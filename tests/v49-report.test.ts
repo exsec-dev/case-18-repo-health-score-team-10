@@ -14,7 +14,7 @@ import { describe, expect, test } from "bun:test";
 import { renderRepoReport } from "../src/report/markdown";
 import { REPORT_FIXTURES, fixtureCard } from "./report-fixtures";
 
-const ENABLED = { dictionary: false, firstScreen: false };
+const ENABLED = { dictionary: false, firstScreen: true };
 
 /** Закрытый словарь К9.2: [что ищем, почему нельзя]. */
 export const FORBIDDEN_MAIN_TEXT: [RegExp, string][] = [

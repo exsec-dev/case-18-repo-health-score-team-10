@@ -21,6 +21,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { getRepoCard } from "../src/api/repos";
 import { renderRepoReport } from "../src/report/markdown";
+import { scoreWord } from "../src/web/format";
 import { cardFacts, makeApiDb, seedRecommendation, seedRepo, seedScan, seedScore, type ApiTestDb } from "./api-fixtures";
 import { contrast, flatten, pageBackground, parseColor, progressFill, progressTrack, themeTokens } from "./theme-contrast";
 
@@ -116,7 +117,8 @@ describe("В4.6-2 (У25): «вклад 0%» заменён на «не учит�
   // ЗАКРЫТО блоком Б6 (вариант А компоновки карточки).
   test("MD: в таблице категорий у Security стоит «не учитывается», а не «0%»", () => {
     const out = md();
-    expect({ honest: out.includes("| Безопасность | 20% | — | не учитывается |"), zero: out.includes("| 0% |") }).toEqual({
+    // В4.9 (К9.2): таблица категорий — «—» и «нет данных», вес в приложении А — «не входит»
+    expect({ honest: out.includes("| Безопасность | — | нет данных |") && out.includes("| Безопасность | — | не входит | — |"), zero: out.includes("| 0% |") }).toEqual({
       honest: true,
       zero: false,
     });
@@ -171,7 +173,10 @@ describe("В4.6-3 (У22): словесная шкала здоровья вид�
   // ЗАКРЫТО блоком Б2 (шкала и кодирование).
   test("MD: строка итога называет то же слово шкалы", () => {
     const out = md();
-    expect(/\*\*HealthCraft Index \(4 категории\): 67 из 100[^\n]*требует внимания/.test(out)).toBe(true);
+    // В4.9 (К9.1): первый экран строкой «**N из 100 · слово**» — слово то же, что scoreWord у числа
+    const m = /(?:HealthCraft Index|Repo Health Score): \*\*(\d+) из 100 · ([^*]+)\*\*/.exec(out);
+    expect(m).not.toBeNull();
+    expect(m![2]).toBe(scoreWord(Number(m![1])));
   });
 });
 
@@ -313,7 +318,8 @@ describe("В4.6-8 (У26/У13/У38): вариант А — карточка на�
   test("генератор строки итога — чистая функция src/web/format.ts, MD её вызывает", async () => {
     const mod = (await import("../src/web/format")) as { summaryLine?: unknown };
     expect(typeof mod.summaryLine).toBe("function");
-    expect(reportSrc()).toContain("summaryLine");
+    // В4.9 (К9.1): строку итога заменил вердикт первого экрана — чистый шаблон из баллов (build.ts), MD и PDF берут его из модели
+    expect(readFileSync(join(import.meta.dir, "..", "src", "report", "build.ts"), "utf8")).toContain("export function verdictText(");
   });
 
   // Б6: проверяется ПОРЯДОК РЕНДЕРА, а не порядок объявления функций в файле.

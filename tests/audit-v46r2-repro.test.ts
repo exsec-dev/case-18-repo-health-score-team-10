@@ -29,6 +29,7 @@ const repro = process.env.AUDIT_STRICT ? test : test.failing;
 
 const srcOf = (file: string): string => readFileSync(join(import.meta.dir, "..", "src", "web", file), "utf8");
 const reportSrc = (): string => readFileSync(join(import.meta.dir, "..", "src", "report", "markdown.ts"), "utf8");
+const buildSrc = (): string => readFileSync(join(import.meta.dir, "..", "src", "report", "build.ts"), "utf8");
 
 /**
  * Исходник БЕЗ комментариев — для утверждений «такого пользовательского слова
@@ -160,9 +161,11 @@ describe("Р12 (MD): «закрыто»/«закрыто доступом» → 
   // ЗАКРЫТО блоком Б5 (тексты и язык) — обёртка снята, утверждение не менялось.
   test("таблица категорий и заголовки разбора говорят «Недоступно»", () => {
     const out = mdLocked();
+    // В4.9 (К9.13, круг 2 эталона): закрытая категория — плашка «Нет данных» и фраза по причине
+    // доступа, одна на карточке и в отчете; «Недоступно» заменено этим словом с заменой ассерта
     expect({
-      statusCell: out.includes("| CI/CD | 15% | — | не учитывается | Недоступно |"),
-      detailHeader: out.includes("### Безопасность – Недоступно"),
+      statusCell: out.includes("| CI/CD | — | нет данных | У вашего токена нет прав на эти данные репозитория. |"),
+      detailHeader: out.includes("### Безопасность – нет данных"),
       oldStatusCell: out.includes("закрыто доступом"),
       oldDetailHeader: /### [^\n]* – закрыто$/m.test(out),
     }).toEqual({ statusCell: true, detailHeader: true, oldStatusCell: false, oldDetailHeader: false });
@@ -192,7 +195,8 @@ describe("Р20: значения подметрик округлены, дока
     const page = srcOf("RepoPage.tsx");
     expect({
       // В4.7 (Б7, П4.2): строка — русское название и единица словаря; доля по-прежнему округлена
-      mdRounded: out.includes("| Плотность TODO/FIXME | 80 | 0.87 на 1 тыс. строк |"),
+      // В4.9 (К9.6): колонки разбора «Показатель | Значение | Балл | Вес» (эталон вида)
+      mdRounded: out.includes("| Плотность TODO/FIXME | 0.87 на 1 тыс. строк | 80 | 40% |"),
       mdRaw: out.includes("0.8723404255319149"),
       // слово «значение» из строки убрано (доводка 21.09) и живёт в подсказке;
       // утверждение о САМОМ округлении не менялось
@@ -219,8 +223,9 @@ describe("Р13 + П1.10: нижний ярус показателей полно
       cta: src.includes("Что делать"),
       counterLink: /Рекомендаций: \{card\.recommendations\.length\}/.test(band),
       summaryOnPage: band.includes("summaryLine"),
-      reportStillUsesSummary: reportSrc().includes("summaryLine"),
-    }).toEqual({ cta: false, counterLink: false, summaryOnPage: false, reportStillUsesSummary: true });
+      // В4.9 (К9.1): строку итога отчета заменил вердикт первого экрана (шаблон build.ts)
+      reportHasVerdict: buildSrc().includes("export function verdictText("),
+    }).toEqual({ cta: false, counterLink: false, summaryOnPage: false, reportHasVerdict: true });
   });
 });
 
@@ -470,7 +475,8 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
         src.includes("Показатель доступен только для репозиториев, к которым у вас есть доступ"),
       helpOnLockedBranch: /score\.fullLocked \?[\s\S]{0,1200}<HelpMark/.test(band),
       // MD-отчёт свою формулировку сохраняет: документ читается без наведения
-      mdKeepsParagraph: reportSrc().includes("Разницу с HealthCraft Index дают CI/CD и Безопасность"),
+      // (В4.9, К9.1: второй показатель — строкой под крупным, «по открытым данным, по нему строится рейтинг»)
+      mdKeepsParagraph: buildSrc().includes("по открытым данным, по нему строится рейтинг"),
     }).toEqual({ paragraphGone: false, indexHelp: true, fullHelp: true, helpOnLockedBranch: true, mdKeepsParagraph: true });
   });
 
@@ -572,10 +578,11 @@ describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечан
   test("Р6: в числовых диапазонах дефис — шкала, MD-таблица подметрик, слот сравнения", async () => {
     const { SCORE_SCALE } = (await import("../src/web/format")) as { SCORE_SCALE: { range: string }[] };
     expect(SCORE_SCALE.map((s) => s.range)).toEqual(["70-100", "40-69", "0-39"]);
-    expect(reportSrc()).toContain("Балл (0-100)");
+    // В4.9 (К9.6): «Балл (0-100)» ушел вместе с прежней таблицей подметрик; диапазоны — шкала словами в MD
+    expect(mdLocked()).toContain("в зоне риска 0-39 · требует внимания 40-69 · здоров 70-100");
     expect(srcOf("slots.ts")).toContain("2-3 репозиториев");
     // глиф «нет данных» (длинное тире) правилом не затронут — охранный пункт 1
-    expect(reportSrc()).toContain('return "—"');
+    expect(mdLocked()).toContain("| CI/CD | — | нет данных |");
   });
 
   test("Р8: абзац под «Вклад категорий» снят, сведения — в подсказке у заголовка", () => {

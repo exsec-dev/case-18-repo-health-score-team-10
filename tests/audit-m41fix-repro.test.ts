@@ -20,7 +20,7 @@ import { extractFacts, gitFactsNoData } from "../src/collectors/git";
 import type { ScClient, ScResponse } from "../src/collectors/http";
 import { upsertUser } from "../src/auth/session";
 import { getRepoCard } from "../src/api/repos";
-import { renderRepoReport } from "../src/report/markdown";
+import { mdEscape, renderRepoReport } from "../src/report/markdown";
 import { runScan, type ScanDeps } from "../src/jobs/runner";
 import { claimNext, nightlyCatalog } from "../src/jobs/scheduler";
 import { SCORE_WEIGHTS, type CategoryKey } from "../src/score/model";
@@ -234,7 +234,11 @@ describe("С4: Δ канальных правил не раскрывает Secu
     const rule = card.recommendations.find((r) => r.ruleId === "ci-missing")!;
     expect(rule).toBeDefined();
     const md = renderRepoReport(card);
-    const mdBlock = md.slice(md.indexOf(rule.problem), md.indexOf("- Правило: `ci-missing`"));
+    // В4.9: рекомендация в MD — карточкой действия одной строкой («N. **действие.** причина. эффект.»);
+    // номер позиции в списке — не число Δ, поэтому снимается
+    const mdLines = md.split("\n").filter((l) => l.includes(mdEscape(rule.problem)));
+    expect(mdLines.length).toBeGreaterThan(0);
+    const mdBlock = mdLines.map((l) => l.replace(/^\d+\. /, "")).join("\n");
     expect({
       delta: rule.deltaScore,
       impactHasNumber: /\d/.test(rule.expectedImpact ?? ""),

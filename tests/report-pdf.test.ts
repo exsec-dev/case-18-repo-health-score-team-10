@@ -1,14 +1,16 @@
-// report-pdf.test.ts — PDF-выгрузка отчёта (В4.7, контракт П1, блок Б4).
+// report-pdf.test.ts — PDF-выгрузка отчёта (В4.7, контракт П1, блок Б4; В4.9, К9.5).
 //
-// 1. Содержание PDF = содержание MD. Текст собирается из описания документа
-//    pdfmake ДО рендера и сравнивается с текстом эталонного MD фикстурных
-//    карточек, из которого разметка снята ТЕСТОВЫМ хелпером (разбор MD в
-//    тесте разрешён законом вехи; в продуктовом коде его нет). Тавтологию
-//    «модель против модели» закрывают эталоны: они сняты в Б0 до модели.
+// 1. Содержание PDF = содержание MD (В4.9: обход ВСЕГО дерева описания
+//    pdfmake — стеки, колонки, таблицы, списки; canvas текста не несет).
+//    Сравниваются слова и числа по порядку: MD печатает первый экран строкой
+//    `**70 из 100 · здоров**`, PDF — числом и плашкой «Здоров»; разметка,
+//    регистр и знаки препинания в сверку не идут, слова — идут. MD фикстур
+//    закреплен эталонами (report-golden.test.ts), поэтому сверка PDF с MD
+//    той же карточки — сверка с эталоном.
 // 2. Глифы: каждый символ строковых литералов генератора (src/report,
-//    тексты правил src/score/recommend.ts, словари src/web/format.ts) и
-//    эталонных MD есть в cmap всех четырёх начертаний Inter. Таблица cmap
-//    читается здесь же, без зависимостей.
+//    тексты правил src/score/recommend.ts, словари src/web/format.ts),
+//    эталонных MD и синтетической строки обязательных символов есть в cmap
+//    всех четырёх начертаний Inter. Таблица cmap читается здесь же.
 // 3. Политики pdfmake закрыты: URL — никогда, диск — только каталог шрифта.
 // 4. Сбойный путь — честная 500 JSON без стека; неизвестный глиф во внешних
 //    данных генерацию не роняет.
@@ -16,74 +18,40 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import pdfmake from "pdfmake";
-import { buildReportModel } from "../src/report/markdown";
-import { BREAK, FONT_DIR, FONT_FILES, MAX_UNBROKEN, PDF_FAILED_MESSAGE, breakable, buildPdfDocument, pdfResponse, renderRepoPdf } from "../src/report/pdf";
+import { buildReportModel, renderRepoReport } from "../src/report/markdown";
+import { BREAK, COLORS, FONT_DIR, FONT_FILES, MAX_UNBROKEN, PDF_FAILED_MESSAGE, breakable, buildPdfDocument, pdfResponse, renderRepoPdf } from "../src/report/pdf";
 import { REPORT_FIXTURES, fixtureCard, goldenPath } from "./report-fixtures";
 
 const ROOT = join(import.meta.dir, "..");
 
 // ---------------------------------------------------------------------------
-// тестовые хелперы: текст MD без разметки и текст описания pdfmake
+// тестовые хелперы: слова MD без разметки и слова всего дерева pdfmake
 // ---------------------------------------------------------------------------
 
-/** Инлайн-разметка MD → текст: бэкслеш-эскейпы, `код`, **полужирный**, сущности. */
-function mdInlineText(src: string): string {
-  let out = "";
-  for (let i = 0; i < src.length; i++) {
-    const ch = src[i]!;
-    if (ch === "\\" && i + 1 < src.length) {
-      out += src[++i];
-    } else if (ch === "`") {
-      const end = src.indexOf("`", i + 1);
-      out += src.slice(i + 1, end);
-      i = end;
-    } else if (ch === "*" && src[i + 1] === "*") {
-      i++;
-    } else {
-      out += ch;
-    }
-  }
-  return out.replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+/** Слова и числа по порядку: буквы и цифры, без регистра; разметка и пунктуация не в счет. */
+export function words(text: string): string[] {
+  return (text.replace(/​/g, "").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []);
 }
 
-/** Документ MD → поток текста: заголовки, абзацы, пункты, ячейки таблиц; строка выравнивания таблицы выброшена. */
-function mdText(md: string): string {
-  const parts: string[] = [];
-  for (const raw of md.split("\n")) {
-    if (raw === "" || /^\|(-{3}:?\|)+$/.test(raw)) continue;
-    let line = raw.replace(/^#{1,3} /, "").replace(/^- /, "");
-    if (line.startsWith("| ") && line.endsWith(" |")) {
-      // ячейки делит неэкранированная черта; экранированная `\|` — часть значения
-      const cells = line.slice(2, -2).split(/(?<!\\) \| /);
-      parts.push(...cells.map(mdInlineText));
-      continue;
-    }
-    // строка-курсив целиком (заголовок репозитория): `_..._`
-    if (/^_.*_$/.test(line) && !line.endsWith("\\_")) line = line.slice(1, -1);
-    parts.push(mdInlineText(line));
-  }
-  return normalize(parts.join(" "));
+/** MD → слова: адреса ссылок `](url)` и HTML-сущности — не текст читателя. */
+export function mdWords(md: string): string[] {
+  return words(md.replace(/\]\([^)]*\)/g, "]").replace(/&lt;/g, "<").replace(/&gt;/g, ">"));
 }
 
-// U+200B — точка переноса вёрстки (breakable), не содержание: в сверку не идёт
-const normalize = (s: string): string => s.replace(/​/g, "").replace(/\s+/g, " ").trim();
-
-/**
- * Текст описания pdfmake: каждый блок, пункт списка и ячейка таблицы —
- * отдельная часть; фрагменты одной строки склеиваются без разделителя, как в
- * MD. Колонтитул — оформление, не содержание: в сверку не идёт.
- */
-function pdfBlocksText(doc: Record<string, unknown>): string {
-  const parts: string[] = [];
-  const textOf = (value: unknown): string =>
-    typeof value === "string" ? value : Array.isArray(value) ? value.map(textOf).join("") : value && typeof value === "object" ? textOf((value as { text?: unknown }).text ?? "") : "";
-  for (const node of doc.content as Record<string, unknown>[]) {
-    if ("text" in node) parts.push(textOf(node.text));
-    if ("ul" in node) parts.push(...(node.ul as unknown[]).map(textOf));
-    if ("table" in node) for (const row of (node.table as { body: unknown[][] }).body) parts.push(...row.map(textOf));
+/** Все строки `text` дерева описания pdfmake — по порядку документа. */
+export function pdfTreeText(node: unknown, out: string[] = []): string[] {
+  if (typeof node === "string") out.push(node);
+  else if (Array.isArray(node)) for (const n of node) pdfTreeText(n, out);
+  else if (node && typeof node === "object") {
+    const o = node as Record<string, unknown>;
+    if ("text" in o) pdfTreeText(o.text, out);
+    for (const key of ["stack", "columns", "ul", "ol"]) if (key in o) pdfTreeText(o[key], out);
+    if ("table" in o) pdfTreeText((o.table as { body: unknown }).body, out);
   }
-  return normalize(parts.join(" "));
+  return out;
 }
+
+const pdfWords = (doc: Record<string, unknown>): string[] => words(pdfTreeText(doc.content).join(" "));
 
 // ---------------------------------------------------------------------------
 // cmap TrueType: формат 4 (BMP) и 12 (полный Unicode)
@@ -156,40 +124,58 @@ function literalChars(file: string): Set<string> {
 
 // ---------------------------------------------------------------------------
 
+
+// ---------------------------------------------------------------------------
+
 describe("П1: содержание PDF равно содержанию MD", () => {
   for (const name of REPORT_FIXTURES) {
-    test(`${name}: текст описания pdfmake = текст эталонного MD без разметки`, () => {
+    test(`${name}: слова всего дерева pdfmake = слова MD (эталон) по порядку`, () => {
       const { card, close } = fixtureCard(name);
       try {
+        const md = renderRepoReport(card);
+        expect(md).toBe(readFileSync(goldenPath(name), "utf8"));
         const doc = buildPdfDocument(buildReportModel(card));
-        expect(pdfBlocksText(doc)).toBe(mdText(readFileSync(goldenPath(name), "utf8")));
+        expect(pdfWords(doc)).toEqual(mdWords(md));
       } finally {
         close();
       }
     });
   }
 
-  test("карточка без прав: закрытые каналы в PDF не раскрываются (ни чисел, ни фактов, ни правил)", () => {
+  test("обход дерева видит вложенные узлы: подписи полосы, плашки, строки категорий, карточки действий", () => {
     const { card, close } = fixtureCard("anon");
     try {
-      const text = pdfBlocksText(buildPdfDocument(buildReportModel(card)));
-      for (const leak of ["cicd.runs", "cicd.configs", "appsec.findings", "grant-ci-runs", "pass_rate", "has_ci_yaml"]) expect(text).not.toContain(leak);
-      expect(text).toContain("CI/CD – Недоступно");
+      const text = pdfTreeText(buildPdfDocument(buildReportModel(card)).content).join(" ");
+      for (const s of ["Вклад категорий в оценку", "не набрано", "здоров 70-100", "Требует внимания", "Видна участникам репозитория.", "ожидаемый эффект"]) expect(text).toContain(s);
     } finally {
       close();
     }
   });
 
-  test("разметка MD в PDF — стилем, а не символами: код, курсив, полужирный", () => {
+  test("карточка без прав: закрытые каналы в PDF не раскрываются (ни чисел, ни фактов, ни правил)", () => {
+    const { card, close } = fixtureCard("anon");
+    try {
+      const text = pdfTreeText(buildPdfDocument(buildReportModel(card)).content).join(" ");
+      for (const leak of ["cicd.runs", "cicd.configs", "appsec.findings", "grant-ci-runs", "pass_rate", "has_ci_yaml", "Настройте CI", "Подключите проверку AppSec"]) expect(text).not.toContain(leak);
+      // К9.13: закрытая категория анониму — «Видна участникам репозитория.», без чисел
+      expect(text).toMatch(/CI\/CD\s+—\s+Нет данных\s+Видна участникам репозитория\./);
+    } finally {
+      close();
+    }
+  });
+
+  test("разметка MD в PDF — стилем, а не символами: код, курсив, полужирный, ссылка", () => {
     const { card, close } = fixtureCard("grant-ci");
     try {
       const doc = buildPdfDocument(buildReportModel(card));
       const json = JSON.stringify(doc.content);
-      expect(json).toContain('{"text":"grant-ci-runs","style":"code"}');
+      expect(json).toContain(`{"text":"docs.presence","color":"${COLORS.muted}","fontSize":7}`);
       expect(json).toContain('{"text":"CI [config] `only` | pipes","italics":true}');
-      expect(json).toMatch(/\{"text":"HealthCraft Index \(4 категории\): 44 из 100 – требует внимания","bold":true\}/);
+      expect(json).toMatch(/\{"text":"(Документация|Задачи|Активность|Состояние кода)","bold":true,"color":"#262626"\}/);
+      expect(json).toContain(`"link":"${card.repo.webUrl}"`);
       expect(json).not.toContain("**");
       expect(json).not.toContain("\\\\[");
+      expect(json).not.toContain("](");
     } finally {
       close();
     }
@@ -197,10 +183,8 @@ describe("П1: содержание PDF равно содержанию MD", () 
 });
 
 describe("П1 (приёмка HQ): ячейки таблиц переносятся и не вылезают за поле", () => {
-  // Дефект приёмки HQ 21.09: JSON фактов без пробелов не переносился, и колонка
-  // «Значение» «Доказательной базы» уходила за правый край — PDF терял
-  // содержание, которое MD показывает целиком. Сверка текста его не ловила:
-  // она читает описание ДО вёрстки.
+  // Дефект приёмки HQ 21.09: длинное значение без пробелов не переносилось и
+  // уходило за правый край — PDF терял содержание, которое MD показывает.
   const longestUnbroken = (s: string): number => Math.max(0, ...s.split(new RegExp(`[\\s${BREAK}]+`)).map((w) => w.length));
 
   test("breakable: точки переноса после знаков структуры и внутри длинных слов, текст не меняется", () => {
@@ -214,24 +198,38 @@ describe("П1 (приёмка HQ): ячейки таблиц переносят�
     for (const short of ["12:00", "CI/CD", "rest:cicd", "TODO/FIXME", "2026-09-16 12:00"]) expect(breakable(short)).toBe(short);
   });
 
-  test.each([...REPORT_FIXTURES])("фикстура %s: ни в одной ячейке нет неразрывного куска длиннее порога", (name) => {
+  test.each([...REPORT_FIXTURES])("фикстура %s: ни в одной ячейке ни одной таблицы (включая вложенные) нет неразрывного куска длиннее порога", (name) => {
     const { card, close } = fixtureCard(name);
     try {
-      const doc = buildPdfDocument(buildReportModel(card)) as { content: Record<string, unknown>[] };
-      const textOf = (v: unknown): string =>
-        typeof v === "string" ? v : Array.isArray(v) ? v.map(textOf).join("") : v && typeof v === "object" ? textOf((v as { text?: unknown }).text ?? "") : "";
+      const doc = buildPdfDocument(buildReportModel(card));
       let cells = 0;
-      for (const node of doc.content) {
-        if (!("table" in node)) continue;
-        for (const row of (node.table as { body: unknown[][] }).body.slice(1)) {
-          for (const cell of row) {
-            cells++;
-            expect(longestUnbroken(textOf(cell))).toBeLessThanOrEqual(MAX_UNBROKEN);
+      const visit = (node: unknown): void => {
+        if (Array.isArray(node)) return node.forEach(visit);
+        if (!node || typeof node !== "object") return;
+        const o = node as Record<string, unknown>;
+        if ("table" in o) {
+          for (const row of (o.table as { body: unknown[][] }).body.slice(1)) {
+            for (const cell of row) {
+              cells++;
+              expect(longestUnbroken(pdfTreeText(cell).join(" "))).toBeLessThanOrEqual(MAX_UNBROKEN);
+            }
           }
         }
-      }
+        for (const key of ["stack", "columns"]) if (key in o) visit(o[key]);
+      };
+      visit(doc.content);
       // у never (скана нет) таблиц нет вовсе; у остальных — есть
       if (name !== "never") expect(cells).toBeGreaterThan(0);
+    } finally {
+      close();
+    }
+  });
+
+  test("в PDF нет JSON: значения фактов — таблицами «поле – значение» (К9.4)", () => {
+    const { card, close } = fixtureCard("full");
+    try {
+      const text = pdfTreeText(buildPdfDocument(buildReportModel(card)).content).join(" ");
+      expect(text).not.toMatch(/\{"|":\s*[\[{"\d]/);
     } finally {
       close();
     }
@@ -246,7 +244,7 @@ describe("П1: шрифт Inter покрывает все символы ген�
     expect(readFileSync(join(FONT_DIR, "LICENSE.txt"), "utf8")).toContain("SIL Open Font License");
   });
 
-  test("литералы src/report, recommend.ts, format.ts и эталонные MD рисуются всеми начертаниями", () => {
+  test("литералы src/report, recommend.ts, format.ts, эталонные MD и обязательные символы рисуются всеми начертаниями", () => {
     const sources = [
       ...readdirSync(join(ROOT, "src", "report"))
         .filter((f) => f.endsWith(".ts"))
@@ -257,12 +255,15 @@ describe("П1: шрифт Inter покрывает все символы ген�
     const chars = new Set<string>();
     for (const file of sources) for (const ch of literalChars(file)) chars.add(ch);
     for (const name of REPORT_FIXTURES) for (const ch of readFileSync(goldenPath(name), "utf8")) if (ch !== "\n") chars.add(ch);
-    // факт 21.09: кириллица и `→ ≤ … § « » – —` — они обязаны быть в наборе
-    for (const must of ["→", "≤", "…", "§", "«", "»", "–", "—", "Д", "ю"]) expect(chars.has(must)).toBe(true);
+    // синтетическая строка обязательных символов: «→» и «≤» из прежних текстов
+    // (внешние данные могут их нести), «−» (U+2212) — минус русских чисел (К9.11)
+    for (const ch of "→≤…§«»–—−≈×· ДЮю") chars.add(ch);
+    for (const must of ["→", "≤", "…", "§", "«", "»", "–", "—", "−", "≈", "×", "·", "Д", "ю"]) expect(chars.has(must)).toBe(true);
     const missing = fontCmaps.map(({ file, cps }) => ({ file, missing: [...chars].filter((ch) => !cps.has(ch.codePointAt(0)!)) }));
     expect(missing).toEqual(fontCmaps.map(({ file }) => ({ file, missing: [] })));
   });
 });
+
 
 describe("П1: рендер, политики и сбойный путь", () => {
   test("рендер фикстуры с «→» — настоящий PDF за доли секунды", async () => {

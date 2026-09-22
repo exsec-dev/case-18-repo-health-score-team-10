@@ -1,28 +1,28 @@
-// model.ts — модель отчёта по карточке (В4.7, контракт П1): документ как
-// последовательность блоков (заголовок, абзац, список, таблица) с инлайн-
-// фрагментами. Из ОДНОЙ модели рендерятся обе выгрузки: MD-сериализатор
-// (`markdown.ts`) и PDF-рендерер (`pdf.ts`). Одинаковость MD и PDF держится
-// построением, а не аккуратностью: обратного разбора готовой MD-строки в
-// продуктовом коде нет (экранирование `mdEscape` сделало бы его хрупким).
+// model.ts — модель отчёта по карточке (В4.7, контракт П1; В4.9, К9.1-К9.8):
+// документ как последовательность блоков с инлайн-фрагментами. Из ОДНОЙ
+// модели рендерятся обе выгрузки: MD-сериализатор (`markdown.ts`) и
+// PDF-рендерер (`pdf.ts`). Одинаковость MD и PDF держится построением:
+// обратного разбора готовой MD-строки в продуктовом коде нет.
 //
-// Модуль чистый: ни БД, ни `pdfmake`, ни знания о формате вывода — только
-// формы данных и «плоский текст» фрагмента, общий для PDF и сверки.
+// В4.9: к общим блокам (заголовок, абзац, список, таблица) добавлены блоки
+// первого экрана и разбора — шапка, показатель с плашкой, полоса вкладов,
+// полоса покрытия, строки категорий, карточки действий, блок категории в
+// разборе и заголовок приложения. У каждого визуального элемента (полоса,
+// плашка, шкала) есть текстовый эквивалент в самом блоке: MD печатает его
+// словами, PDF рисует и подписывает теми же словами (тест «текст PDF = текст
+// MD» обходит всё дерево описания pdfmake).
+//
+// Модуль чистый: ни БД, ни `pdfmake`, ни знания о формате вывода.
 
 /**
  * Инлайн-фрагмент строки. Экранирование MD — забота сериализатора, здесь
  * лишь указано, КАК фрагмент в MD попадает:
- *  - `text`     — как есть (текст движка и шаблонов; в MD не экранировался и до В4.7);
- *  - `escaped`  — через `mdEscape` (данные извне: слаг, язык, проблема рекомендации);
- *  - `code`     — `` `код` `` (ключи фактов, id правил); в PDF — фоновой плашкой;
+ *  - `text`     — как есть (тексты шаблонов отчёта);
+ *  - `escaped`  — через `mdEscape` (данные извне: слаг, язык, сохраненный текст рекомендации);
+ *  - `code`     — `` `код` `` (ключи фактов в приложении); в PDF — мелким серым;
  *  - `em`       — `_курсив_` с `mdEscape` внутри (заголовок репозитория);
  *  - `strong`   — `**полужирный**`, содержимое как есть;
- *  - `cell`     — значение ячейки таблицы через `cell()` (JSON, сплющивание, кап 300);
- *  - `link`     — адрес (ссылка на репозиторий в SourceCraft): в MD — голый URL
- *                 как есть (MD не меняется, В4.7 круг 2), в PDF — синяя
- *                 кликабельная ссылка;
- *  - `prepared` — готовый MD-фрагмент и его же плоский текст, собранные
- *                 вызывающим раздельно (строка итога `summaryLine`: в MD ей
- *                 передаётся экранированная проблема, в текст — сырая).
+ *  - `link`     — ссылка: в MD `[текст](адрес)`, в PDF — синяя кликабельная.
  */
 export type Inline =
   | { kind: "text"; text: string }
@@ -30,9 +30,7 @@ export type Inline =
   | { kind: "code"; text: string }
   | { kind: "em"; text: string }
   | { kind: "strong"; text: string }
-  | { kind: "cell"; value: unknown }
-  | { kind: "link"; text: string }
-  | { kind: "prepared"; md: string; text: string };
+  | { kind: "link"; text: string; url: string };
 
 /** Строка — последовательность фрагментов. */
 export type InlineLine = Inline[];
@@ -40,20 +38,97 @@ export type InlineLine = Inline[];
 export interface TableColumn {
   title: string;
   align: "left" | "right";
+  /** ширина колонки в PDF (pt, без полей ячейки); нет — по содержимому, последняя — остаток */
+  width?: number;
+}
+
+/** Тема плашки — как `Label` UI (`scoreLabelTheme`). */
+export type ChipTheme = "success" | "warning" | "danger" | "unknown";
+
+/** Плашка: тема и слово в регистре предложения («Здоров», «Нет данных»). */
+export interface Chip {
+  theme: ChipTheme;
+  text: string;
+}
+
+/** Сегмент полосы вкладов и его подпись («Документация», «+21,0»). */
+export interface Segment {
+  title: string;
+  value: string;
+  /** доля ширины полосы 0..1 */
+  share: number;
+}
+
+export interface CategoryRow {
+  name: string;
+  /** балл для полосы (0..100); null — категории нет в оценке, полосы нет */
+  score: number | null;
+  /** балл словами — целое или «—» */
+  scoreText: string;
+  chip: Chip;
+  /** «почему» — шаблон из фактов, фраза закрытой или пустой категории */
+  why: string;
+}
+
+export interface ActionItem {
+  n: number;
+  /** заголовок — глагол (`action` правила) */
+  title: InlineLine;
+  /** пояснение — причина (`problem` правила) */
+  why: InlineLine;
+  /** эффект (`expectedImpact`): «+1,2 к HealthCraft Index» или «повысит балл категории «Задачи»» */
+  effect: string;
+  /** подпись под числовым эффектом («ожидаемый эффект»); null — у эффекта без числа */
+  effectNote: string | null;
 }
 
 export type Block =
   | { kind: "heading"; level: 1 | 2 | 3; content: InlineLine }
   /** абзац; несколько строк — одна MD-группа без пустой строки между ними */
-  | { kind: "paragraph"; lines: InlineLine[] }
+  /** `tone`: muted — вводная; fine — мелкая сноска; subhead — подзаголовок таблицы; caption — подпись таблицы */
+  | { kind: "paragraph"; lines: InlineLine[]; tone?: "muted" | "fine" | "subhead" | "caption" }
   | { kind: "list"; items: InlineLine[] }
-  | { kind: "table"; columns: TableColumn[]; rows: InlineLine[][] };
+  /** таблица; `total` — последняя строка итоговая; `small` — мелкий кегль приложения */
+  | { kind: "table"; columns: TableColumn[]; rows: InlineLine[][]; total?: boolean; small?: boolean }
+  /** шапка: репозиторий, ссылка, название документа и дата анализа */
+  | { kind: "header"; slug: string; title: InlineLine | null; link: { text: string; url: string }; doc: string; date: string | null }
+  /** крупный показатель с плашкой вердикта; `value` null — «Оценки нет» */
+  | { kind: "hero"; label: string; value: number | null; noneText: string; chip: Chip | null; verdict: string; notes: InlineLine[] }
+  /** полоса «Вклад категорий в оценку» со шкалой 3 зон; `note` — строка вместо полосы (потолок, нет кода) */
+  | {
+      kind: "contributions";
+      title: string;
+      segments: Segment[];
+      rest: Segment | null;
+      zones: { theme: "danger" | "warning" | "success"; text: string; share: number }[];
+      loss: InlineLine | null;
+      note: string | null;
+    }
+  /** полоса покрытия данными с отметкой порога (страница без оценки) */
+  | { kind: "coverage"; title: string; share: number; threshold: number; collected: string; thresholdText: string }
+  /** строки категорий первого экрана; `columns` — подписи колонок (текст шапки MD-таблицы) */
+  | { kind: "categories"; columns: [string, string, string, string]; rows: CategoryRow[] }
+  /** карточки действий; `compact` — список «Все рекомендации» */
+  | { kind: "actions"; compact: boolean; items: ActionItem[] }
+  /** категория в разборе: заголовок с баллом и плашкой, таблица показателей, примечания */
+  | { kind: "detail"; title: string; scoreText: string; chip: Chip; table: { columns: TableColumn[]; rows: InlineLine[][] } | null; notes: InlineLine[] }
+  /** заголовок приложения — в PDF с новой страницы */
+  | { kind: "appendix"; title: string; intro: string };
 
 export interface ReportModel {
-  /** заголовок документа плоским текстом («Repo Health: org/repo») — свойства и колонтитул PDF */
+  /** заголовок документа плоским текстом («Repo Health: org/repo») — свойства PDF */
   title: string;
   /** имя файла выгрузки без расширения: `<org>-<repo>-health` */
   fileStem: string;
+  /** колонтитул PDF: «org/repo – отчет Repo Health от дата» */
+  footer: string;
+  /** шапка страниц PDF со 2-й: [репозиторий, «Отчет Repo Health, дата»] */
+  runningHead: [string, string];
+  /**
+   * К9.8: слот AI-summary В5 в первом экране — пустой до В5 и не печатается
+   * ни в MD, ни в PDF (содержание и валидатор — В5).
+   */
+  aiSummary: string | null;
   blocks: Block[];
 }
 
@@ -64,38 +139,13 @@ export const escaped = (value: string): Inline => ({ kind: "escaped", text: valu
 export const code = (value: string): Inline => ({ kind: "code", text: value });
 export const em = (value: string): Inline => ({ kind: "em", text: value });
 export const strong = (value: string): Inline => ({ kind: "strong", text: value });
-export const cellValue = (value: unknown): Inline => ({ kind: "cell", value });
-export const link = (url: string): Inline => ({ kind: "link", text: url });
-export const prepared = (md: string, plain: string): Inline => ({ kind: "prepared", md, text: plain });
+export const link = (value: string, url: string): Inline => ({ kind: "link", text: value, url });
 
 // ---------- плоский текст ----------
 
-/** Кап ячейки таблицы (символов): длинный JSON факта в отчёте не разворачивается целиком. */
-export const CELL_MAX_CHARS = 300;
-
-/**
- * Значение ячейки плоским текстом: то же правило, что `cell()` MD-сериализатора
- * (пусто — «—», объект — JSON, переносы сплющены, кап 300 с «…»), но без
- * экранирования `|`. Расхождение возможно только у значения длиннее капа с
- * вертикальной чертой внутри: MD считает кап по экранированной строке.
- */
-export function cellPlain(value: unknown): string {
-  if (value === undefined || value === null || value === "") return "—";
-  const raw = typeof value === "string" ? value : JSON.stringify(value);
-  const flat = raw.replace(/\s*\n\s*/g, " ");
-  return flat.length > CELL_MAX_CHARS ? `${flat.slice(0, CELL_MAX_CHARS)}…` : flat;
-}
-
 /** Плоский текст фрагмента — то, что читатель видит в PDF (стиль отдельно). */
 export function inlinePlain(fragment: Inline): string {
-  switch (fragment.kind) {
-    case "cell":
-      return cellPlain(fragment.value);
-    case "prepared":
-      return fragment.text;
-    default:
-      return fragment.text;
-  }
+  return fragment.text;
 }
 
 export function linePlain(line: InlineLine): string {

@@ -274,8 +274,9 @@ describe("Б3 (Ф2.9): маркер codeEmpty виден на карточке �
       const card = getRepoCard(t.db, "m42b", "empty", {});
       expect(card?.markers.codeEmpty).toBe(true);
       const md = renderRepoReport(card!);
-      expect(md).toContain("В репозитории нет кода");
-      expect(md).toContain("не отсутствие оценки");
+      // В4.9 (К9.1, texts-inventory §2.1 п. 12): строка вместо полосы вкладов — «проекта нет» словами читателя
+      expect(md).toContain("В репозитории нет ни одного файла, поэтому оценка – 0.");
+      expect(md).toContain("Это не ошибка сервиса: оценивать нечего.");
     } finally {
       t.close();
     }
@@ -288,8 +289,9 @@ describe("Б3 (Ф2.9): маркер codeEmpty виден на карточке �
       const scanId = seedScan(t, repoId, { facts: cardFacts(), trigger: "periodic" });
       seedScore(t, repoId, scanId, { total: 60 });
       const md = renderRepoReport(getRepoCard(t.db, "m42b", "words", {})!);
-      expect(md).toContain("статус полный");
-      expect(md).toMatch(/запуск (по расписанию|вручную|проба)/);
+      // В4.9 (К9.4): статус и режим запуска — в паспорте анализа (приложение Г), словами
+      expect(md).toContain("| Статус анализа | полный |");
+      expect(md).toMatch(/\| Режим запуска \| (по расписанию|вручную|проба) \|/);
       expect(md).not.toContain("(stale)");
     } finally {
       t.close();
@@ -593,13 +595,13 @@ describe("В4.6 (приёмка круга 2): строка итога и счё
     }).toEqual({ reportNamesCount: true, pageOmitsCount: true, bothKeepBestWorst: true, pageKeepsTop: true, pageStartsCapitalized: true });
   });
 
-  test("карточка больше не печатает итоговую строку и ссылку; MD сохраняет общий генератор", () => {
+  test("карточка больше не печатает итоговую строку и ссылку; отчет открывается вердиктом-шаблоном (В4.9, К9.1)", () => {
     const card = src("RepoPage.tsx");
-    const report = src("../report/markdown.ts");
+    const report = src("../report/build.ts");
     expect({
       asksWithoutCount: /summaryLine\(\{[\s\S]{0,600}?\}, \{ withCount: false \}\)/.test(card),
       linkStillThere: card.includes("Рекомендаций: {card.recommendations.length}"),
-      reportStillUsesGenerator: report.includes("summaryLine"),
-    }).toEqual({ asksWithoutCount: false, linkStillThere: false, reportStillUsesGenerator: true });
+      reportUsesVerdict: report.includes("verdictText(value,"),
+    }).toEqual({ asksWithoutCount: false, linkStillThere: false, reportUsesVerdict: true });
   });
 });

@@ -72,6 +72,24 @@ const TIMELINE: FactSpec = {
   },
 };
 
+/** Итог истории — согласован с TIMELINE; `truncatedSince` — история усечена с этой даты (Д4). */
+function summary(truncatedSince: string | null): FactSpec {
+  return {
+    key: "activity.git.summary",
+    source: "git",
+    value: {
+      commits: 6,
+      authors: 4,
+      committers: 4,
+      robot_commits: 0,
+      robot_ratio: 0,
+      first_committed_at: "2025-10-02T10:00:00Z",
+      last_committed_at: "2026-09-10T10:00:00Z",
+      ...(truncatedSince ? { history_truncated_since: truncatedSince } : {}),
+    },
+  };
+}
+
 export function fixtureCard(name: ReportFixture): FixtureCard {
   const t = makeApiDb();
   const done = (org: string, repo: string, access: AccessResult, viewerAuth: CardViewer["auth"]): FixtureCard => {
@@ -82,17 +100,13 @@ export function fixtureCard(name: ReportFixture): FixtureCard {
   switch (name) {
     case "anon": {
       const repoId = seedRepo(t, { org: "m47", repo: "anon", title: "Anon *demo* <b>", language: "Go", likes: 11, forks: 2, lastActivityAt: "2026-09-15T00:00:00Z" });
-      scoredScan(t, repoId, { status: "partial", trigger: "user", facts: factsWith(TIMELINE) });
+      scoredScan(t, repoId, { status: "partial", trigger: "user", facts: factsWith(TIMELINE, summary("2025-08-16")) });
       return done("m47", "anon", NO_PAT, "no-session");
     }
     case "full": {
       const facts = factsWith(
         TIMELINE,
-        {
-          key: "activity.git.summary",
-          source: "git",
-          value: { commits: 6, authors: 4, committers: 4, robot_commits: 0, robot_ratio: 0, first_committed_at: "2025-10-02T10:00:00Z", last_committed_at: "2026-09-10T10:00:00Z" },
-        },
+        summary(null),
         { key: "cicd.runs", source: "rest:cicd", value: { last_status: "success", success_rate: 0.95, duration_p50: 420, runs_count: 20 } },
         {
           key: "issues.stats",
@@ -118,6 +132,7 @@ export function fixtureCard(name: ReportFixture): FixtureCard {
     case "grant-ci": {
       const facts = factsWith(
         TIMELINE,
+        summary(null),
         { key: "docs.presence", source: "git", value: { readme: false, license: true, contributing: false, codeowners: false } },
         { key: "docs.readme", source: "git", value: { present: false } },
         { key: "issues.stats", source: "rest:issues", value: { open: 0, closed: 0, median_close_days: null, stale_90d: 0, fetched_count: 0 } },

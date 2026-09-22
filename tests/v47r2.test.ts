@@ -6,7 +6,7 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildReportModel, renderRepoReport } from "../src/report/markdown";
-import { buildPdfDocument } from "../src/report/pdf";
+import { COLORS, buildPdfDocument } from "../src/report/pdf";
 import { avatarInitials, avatarTone } from "../src/web/format";
 import { langOptions } from "../src/web/lang-filter";
 import { fixtureCard, goldenPath } from "./report-fixtures";
@@ -69,44 +69,43 @@ describe("Р2.4: спиннер на кнопке «Отчет»", () => {
   });
 });
 
-describe("Р2.5: PDF — синяя ссылка и аватар из букв; MD не меняется", () => {
-  test("MD всех фикстур байт-в-байт равен эталонам (ссылка в MD — голый URL, как было)", () => {
+describe("Р2.5: PDF — синяя ссылка; аватар снят (В4.9, К9.5); MD — эталоны", () => {
+  // В4.9 (К9.6): ссылка в MD — `[адрес](url)` вместо голого URL (MD переписан заново, эталоны — закрытым списком)
+  test("MD всех фикстур байт-в-байт равен эталонам; ссылка в MD — markdown-ссылкой", () => {
     for (const name of ["anon", "full", "grant-ci", "null", "never"] as const) {
       const { card, close } = fixtureCard(name);
       try {
-        expect(renderRepoReport(card)).toBe(readFileSync(goldenPath(name), "utf8"));
+        const md = renderRepoReport(card);
+        expect(md).toBe(readFileSync(goldenPath(name), "utf8"));
+        expect(md).toContain(`[sourcecraft.dev/m47/${name}](${card.repo.webUrl})`);
       } finally {
         close();
       }
     }
   });
 
-  test("ссылка на репозиторий в PDF — кликабельная и синяя", () => {
+  test("ссылка на репозиторий в PDF — кликабельная и синяя (токен text-link UI)", () => {
     const { card, close } = fixtureCard("full");
     try {
-      const doc = buildPdfDocument(buildReportModel(card)) as { content: { ul?: { text: { text: string; link?: string; style?: string }[] }[] }[]; styles: Record<string, { color?: string }> };
-      const list = doc.content.find((n) => n.ul)!;
-      const link = list.ul![0]!.text.find((f) => f.link);
-      expect(link).toEqual({ text: card.repo.webUrl, link: card.repo.webUrl, style: "link" });
-      expect(doc.styles.link?.color).toBe("#0969da");
+      const doc = buildPdfDocument(buildReportModel(card)) as { content: Record<string, unknown>[] };
+      const json = JSON.stringify(doc.content[0]);
+      expect(json).toContain(`"text":"sourcecraft.dev/m47/full","link":"${card.repo.webUrl}","color":"${COLORS.link}"`);
+      expect(COLORS.link).toBe("#4768c2");
     } finally {
       close();
     }
   });
 
-  test("аватар из букв стоит рядом с заголовком, без сети (canvas + текст, никаких картинок)", () => {
+  // ПЕРЕВОРОТ (В4.9, эталон вида круг 3-4): аватар из букв снят как «ИИ-маркер» —
+  // шапка PDF: имя репозитория и ссылка; картинок и монограммы нет
+  test("в шапке PDF нет аватара: ни монограммы, ни картинки; сеть не нужна", () => {
     const { card, close } = fixtureCard("full");
     try {
-      const doc = buildPdfDocument(buildReportModel(card), { avatarName: card.repo.repo }) as { content: Record<string, unknown>[] };
-      const head = doc.content[0] as { columns: Record<string, unknown>[] };
-      expect(head.columns).toHaveLength(2);
-      const json = JSON.stringify(head.columns[0]);
-      expect(json).toContain('"canvas"');
-      expect(json).toContain(`"text":"${avatarInitials(card.repo.repo)}"`);
+      const doc = buildPdfDocument(buildReportModel(card)) as { content: Record<string, unknown>[] };
+      const json = JSON.stringify(doc.content[0]);
+      expect(json).not.toContain(`"text":"${avatarInitials(card.repo.repo)}"`);
       expect(json).not.toContain("image");
-      // без имени — прежний заголовок без колонок
-      const plain = buildPdfDocument(buildReportModel(card)) as { content: Record<string, unknown>[] };
-      expect(plain.content[0]).not.toHaveProperty("columns");
+      expect(json).toContain('"text":"m47 / full"');
     } finally {
       close();
     }

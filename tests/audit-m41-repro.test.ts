@@ -125,7 +125,8 @@ describe("Ф1.3 (MED-1): номера рекомендаций после фил
     seedRecommendation(t, scanId, { ruleId: "reduce-stale-issues", priority: 4, factRef: "issues.stats" });
     const card = getRepoCard(t.db, "pub", "numbers")!;
     const md = renderRepoReport(card);
-    const mdNumbers = [...md.matchAll(/^### (\d+)\. /gm)].map((m) => Number(m[1]));
+    // В4.9: действия — карточками «N. **действие.** …» в «Что сделать первым»
+    const mdNumbers = [...md.matchAll(/^(\d+)\. \*\*/gm)].map((m) => Number(m[1]));
     expect({ card: card.recommendations.map((r) => [r.ruleId, r.priority]), md: mdNumbers }).toEqual({
       card: [
         ["license-missing", 1],

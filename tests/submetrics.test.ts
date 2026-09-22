@@ -138,13 +138,14 @@ describe("П4.2: одно правило на страницу, MD и PDF", () =
   test("страница и MD берут название и значение из словаря; сырые значения — только в доказательствах", () => {
     const root = join(import.meta.dir, "..", "src");
     const page = readFileSync(join(root, "web", "RepoPage.tsx"), "utf8");
-    const md = readFileSync(join(root, "report", "markdown.ts"), "utf8");
+    // В4.9: модель отчета строит build.ts; значение — `submetricShownValue` (словарь + заметка К9.9)
+    const md = readFileSync(join(root, "report", "build.ts"), "utf8");
     expect({
       pageImports: page.includes('import { formatSubmetricValue, submetricContext, submetricTitle } from "../report/submetrics";'),
       pageValue: page.includes("{formatSubmetricValue(key, subKey, sub.value, submetricContext(card.score?.computedAt))}"),
       pageTitle: page.includes("{submetricTitle(key, subKey)}"),
-      mdRow: md.includes("rows.push([line(submetricTitle(key, subKey)), line(value), [cellValue(formatSubmetricValue(key, subKey, sub.value, ctx))]"),
-      mdContext: md.includes("const ctx = submetricContext(card.score.computedAt);"),
+      mdRow: md.includes("const value = submetricShownValue(key, sub, entry, ctx);") && md.includes("line(submetricTitle(key, sub)),"),
+      mdContext: md.includes("const ctx = submetricContext(score.computedAt);"),
       proofRaw: page.includes("{fmtFactValue(fact.value)}"),
     }).toEqual({ pageImports: true, pageValue: true, pageTitle: true, mdRow: true, mdContext: true, proofRaw: true });
     // строка значения больше не режется многоточием

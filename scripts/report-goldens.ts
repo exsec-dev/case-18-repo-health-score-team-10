@@ -4,6 +4,8 @@
 // Каждый перезаписанный эталон сверяется глазами с эталоном вида и
 // называется в отчёте воркера закрытым списком — генератор этого не отменяет.
 // Сети и живой БД нет: фикстуры живут во временных БД.
+// часовой пояс — как у `bun test` (UTC): время в приложении эталона не зависит от машины
+process.env.TZ = "UTC";
 import { writeFileSync } from "node:fs";
 import { renderRepoReport } from "../src/report/markdown";
 import { REPORT_FIXTURES, fixtureCard, goldenPath } from "../tests/report-fixtures";

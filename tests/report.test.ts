@@ -1,19 +1,15 @@
-// report.test.ts — MD-отчёт (В3/Б4) по сид-набору: семь разделов §6,
-// Score и категории, причины no-data, каждая рекомендация со своими
-// fact_ref, «недостаточно данных» вместо нуля у репо со Score = NULL.
-// Отчёт — чистая функция от карточки, поэтому сети и HTTP здесь нет.
+// report.test.ts — MD-отчёт (В3/Б4; В4.9 — новая модель, К9.1-К9.8) по
+// сид-набору: разделы по эталону вида, показатель с плашкой, категории,
+// причины «нет данных», действия, приложение с путем «число → факт»,
+// «оценки нет» вместо нуля. Отчёт — чистая функция от карточки.
+//
+// В4.9: утверждения прежней структуры («Итог», «Доказательная база», «Вклад
+// после перенормировки», «Порядок задан движком», «(источник: rule)»)
+// перевернуты с заменой — закрытый список в reports/m49-worker-report.md.
 import { afterAll, describe, expect, test } from "bun:test";
 import { getRepoCard } from "../src/api/repos";
 import { renderRepoReport } from "../src/report/markdown";
-import {
-  cardFacts,
-  makeApiDb,
-  seedRecommendation,
-  seedRepo,
-  seedScan,
-  seedScore,
-  type ApiTestDb,
-} from "./api-fixtures";
+import { cardFacts, makeApiDb, seedRecommendation, seedRepo, seedScan, seedScore, type ApiTestDb } from "./api-fixtures";
 
 const t: ApiTestDb = makeApiDb();
 afterAll(() => t.close());
@@ -49,97 +45,113 @@ seedRecommendation(t, scoredScan, {
 // отчёт зрителя с доступом к каналам: полный разбор (матрица доступа — api.test.ts)
 const GRANTED = { cicd: "granted", appsec: "granted", repo: "granted" } as const;
 const md = renderRepoReport(getRepoCard(t.db, "report", "sample", { access: GRANTED })!);
+const main = md.slice(0, md.indexOf("## Приложение"));
+const appendix = md.slice(md.indexOf("## Приложение"));
 
 describe("MD-отчёт: структура", () => {
-  test("семь разделов плана §6 на месте", () => {
-    expect(md.startsWith("# Repo Health: report/sample")).toBe(true);
-    for (const heading of [
-      "## Итог",
+  test("разделы эталона вида — по порядку, приложение последним", () => {
+    expect(md.startsWith("# report/sample")).toBe(true);
+    const order = [
+      "Repo Health Score: **",
+      "## Вклад категорий в оценку",
       "## Категории",
+      "## Что сделать первым",
+      "## Ограничения данных",
       "## Разбор по категориям",
-      "## Рекомендации",
-      "## Доказательная база",
-      "## Как считается и что это не значит",
-    ]) {
-      expect(md).toContain(heading);
-    }
+      "## Как считается",
+      "## Приложение. Расчет оценки и исходные данные",
+      "### А. Расчет итоговой оценки",
+      "### Б. Источники чисел отчета",
+      "### В. Исходные данные",
+      "### Г. Версия методики, номер анализа и режим запуска",
+    ].map((h) => md.indexOf(h));
+    for (const at of order) expect(at).toBeGreaterThan(-1);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
 
-  test("шапка: ссылка на репозиторий, скан, версия модели (режима больше нет — К1)", () => {
-    expect(md).toContain("https://sourcecraft.dev/report/sample");
-    expect(md).toContain(`#${scoredScan} от 2026-09-16`);
-    expect(md).toContain("4.0.0-hci");
+  test("шапка: ссылка на репозиторий и дата анализа; номер анализа и версия методики — в приложении (К9.4)", () => {
+    expect(main).toContain("[sourcecraft.dev/report/sample](https://sourcecraft.dev/report/sample)");
+    expect(main).toContain("Отчет Repo Health. Анализ 16 сент. 2026.");
+    expect(main).not.toContain(`#${scoredScan}`);
+    expect(main).not.toContain("4.0.0-hci");
+    expect(appendix).toContain(`| Последний анализ | #${scoredScan}, завершен 12:00 16 сент. 2026 |`);
+    expect(appendix).toContain("| Версия методики | 4.0.0-hci |");
     expect(md).not.toContain("режим:");
   });
 });
 
 describe("MD-отчёт: числа и tri-state", () => {
-  test("Score и покрытие в итоге", () => {
-    // В4.6 (Б2, У22): у числа появилось слово шкалы — одно и то же на карточке и в отчёте
-    expect(md).toContain("**HealthCraft Index (4 категории): 67 из 100 – требует внимания**");
-    // круг 2: полный Score складывается из показанных категорий (60·15+50·15+70·15+40·15+80·20)/80 = 61
-    expect(md).toContain("Repo Health Score (6 категорий, с CI/CD и Безопасностью): 61 из 100 при покрытии данными 80%");
-    expect(md).toContain("покрытии данными 100%");
+  test("зрителю с обоими показателями крупно Repo Health Score, HealthCraft Index строкой ниже (К9.1)", () => {
+    // полный Score складывается из показанных категорий (60·15+50·15+70·15+40·15+80·20)/80 = 61
+    expect(main).toContain("Repo Health Score: **61 из 100 · требует внимания**");
+    expect(main).toContain("**HealthCraft Index 67** – по открытым данным, по нему строится рейтинг.");
   });
 
-  test("все шесть категорий с весом и вкладом после перенормировки", () => {
-    for (const title of ["Документация", "CI/CD", "Безопасность", "Активность", "Задачи", "Состояние кода"]) {
-      expect(md).toContain(`| ${title} |`);
-    }
-    // 15 из 80 весовых пунктов с данными = 19% вклада
-    expect(md).toContain("| Документация | 15% | 60 | 19% | данные есть |");
-    // В4.6 (Б6, У25): у категории БЕЗ данных вклад не печатается нулём —
-    // «0%» читалось как «Security дала ноль», опровергая tri-state
-    expect(md).toContain("| Безопасность | 20% | — | не учитывается | нет данных |");
+  test("все шесть категорий: балл и слово шкалы; у Безопасности без данных — «—», а не 0 (tri-state)", () => {
+    for (const title of ["Документация", "CI/CD", "Безопасность", "Активность", "Задачи", "Состояние кода"]) expect(main).toContain(`| ${title} |`);
+    expect(main).toContain("| Документация | 60 | требует внимания |");
+    expect(main).toContain("| Безопасность | — | нет данных |");
+    // вес — в приложении А: 15 из 80 весовых пунктов с данными = 18,8%; у категории без данных веса нет
+    expect(appendix).toContain("| Документация | 60,0 | 18,8% | 11,3 |");
+    expect(appendix).toContain("| Безопасность | — | не входит | — |");
+    expect(md).not.toMatch(/Безопасность \| [^|]* \| 0%/);
   });
 
-  test("Security объясняется доступом, а не «данных нет по неизвестной причине»", () => {
-    expect(md).toContain("без них категория исключена с перенормировкой, а не занижена");
-    expect(md).toContain("Категория не снизила");
+  test("Безопасность без данных — причина и опорная фраза «не участвует и ее не снижает» (К9.2)", () => {
+    expect(main).toContain("Безопасность считается по данным AppSec SourceCraft, а они видны только с правом доступа. Категория в оценке не участвует и ее не снижает.");
   });
 
-  test("причина no-data у категории с данными тоже проговаривается (CI-потолок)", () => {
-    expect(md).toContain("прогоны CI недоступны");
-    expect(md).toContain("потолком 50");
+  test("причина потолка у категории с данными тоже проговаривается (CI без результатов запусков)", () => {
+    expect(main).toContain("Результаты запусков CI недоступны");
+    expect(main).toContain("не больше 50 из 100");
   });
 
-  test("подметрики показаны баллом 0–100, а не долей", () => {
-    // readme в фикстуре — 0.72 доли → 72 на экране и в отчёте.
-    // В4.7 (Б7, П4.2, решение В3): первая колонка — русское название, не ключ
-    expect(md).toContain("| README (наличие и качество) | 72 |");
+  test("подметрики показаны баллом 0–100, а не долей; название — из словаря", () => {
+    // readme в фикстуре — 0.72 доли → 72 в разборе
+    expect(main).toContain("| README (наличие и качество) | 8000 байт | 72 | 45% |");
   });
 });
 
-describe("MD-отчёт: рекомендации и доказательства", () => {
-  test("каждая рекомендация со своим fact_ref и эффектом", () => {
-    expect(md).toContain("### 1. Нет CONTRIBUTING");
-    expect(md).toContain("+2.3 к HealthCraft Index");
-    expect(md).toContain("`docs.presence`");
-    expect(md).toContain("### 2. Безопасность без данных");
-    expect(md).toContain("`appsec.findings` (факта нет по построению)");
+describe("MD-отчёт: действия и приложение", () => {
+  test("действия — рекомендации движка с эффектом; ключей правил и фактов в основном тексте нет", () => {
+    expect(main).toMatch(/^1\. \*\*.+\*\* .+ – ожидаемый эффект\.$/m);
+    expect(main).not.toContain("`docs.presence`");
+    expect(main).not.toContain("(источник: rule)");
+    expect(main).not.toContain("contributing-missing`");
   });
 
-  test("доказательная база перечисляет факты с источником и временем сбора", () => {
-    expect(md).toContain("| `docs.presence` | documentation | данные есть | git |");
-    expect(md).toContain("| `cicd.runs` | cicd | данных нет | rest:cicd |");
+  test("приложение В: факты таблицами «поле – значение» с источником и временем сбора", () => {
+    expect(appendix).toContain("`docs.presence` – Документация, данные есть, история git, 12:00 16 сент. 2026");
+    expect(appendix).toContain("`cicd.runs` – CI/CD, данных нет, API SourceCraft, 12:00 16 сент. 2026");
+    expect(appendix).toContain("| contributing | нет |");
   });
 
-  test("история коммитов — агрегатом, сырьё в отчёт не едет", () => {
-    expect(md).toContain('{"events":2');
+  test("история коммитов — итогом, сырьё в отчёт не едет", () => {
+    expect(appendix).toContain("`activity.git.timeline`");
+    expect(appendix).toContain("| events | 2 |");
     expect(md).not.toContain('"sha"');
+    expect(md).not.toContain("a1");
   });
 
-  test("раздел о методике: веса, перенормировка, порог и ограничения", () => {
-    expect(md).toContain("Перенормировка (tri-state)");
-    expect(md).toContain("ниже 40%");
-    expect(md).toContain("Ограничения методики");
-    expect(md).toMatch(/reports\/.+\.md/);
-    expect(md).toContain("без участия LLM");
+  test("приложение Б: путь «число → откуда взято» для итога, категорий и показателей", () => {
+    expect(appendix).toContain("| **Repo Health Score 61** | сумма по категориям: балл × вес, приложение А |");
+    expect(appendix).toContain("| **Документация 60** | сумма по показателям: балл × вес, приложение А | `documentation.score` → 60 |");
+    expect(appendix).toMatch(/\| README \(наличие и качество\): 8000 байт \| — \| `documentation\.readme` → bytes 8000; балл 72 \|/);
+  });
+
+  test("«Как считается»: веса, порог, пределы оценки; без внутренних путей и LLM-жаргона (К9.3)", () => {
+    const method = main.slice(main.indexOf("## Как считается"));
+    expect(method).toContain("Документация 23%, Активность 23%, Задачи 23%, Состояние кода 31%");
+    expect(method).toContain("меньше 40%");
+    expect(method).toContain("Популярность (реакции и ответвления) в оценку не входит");
+    expect(md).not.toMatch(/reports\/.+\.md/);
+    expect(appendix).toContain("Нейросети в расчете не участвуют.");
+    expect(method.split("\n").filter((l) => l.startsWith("- "))).toHaveLength(7);
   });
 });
 
-describe("MD-отчёт: репозитории без Score", () => {
-  test("Score = NULL — «недостаточно данных», а не 0", () => {
+describe("MD-отчёт: репозитории без оценки", () => {
+  test("индекс NULL — «Оценки нет», покрытие и порог; не 0 и без «Как считается» (К9.1)", () => {
     const repoId = seedRepo(t, { org: "report", repo: "dark", language: "C++" });
     const scanId = seedScan(t, repoId, { status: "partial", facts: [] });
     seedScore(t, repoId, scanId, {
@@ -156,18 +168,21 @@ describe("MD-отчёт: репозитории без Score", () => {
       },
     });
     const dark = renderRepoReport(getRepoCard(t.db, "report", "dark", { access: GRANTED })!);
-    expect(dark).toContain("**Недостаточно данных для оценки.**");
-    expect(dark).toContain("Покрытие данными – 38% при пороге 40%");
-    expect(dark).toContain("git-канал не отдал данные");
+    expect(dark).toContain("HealthCraft Index: **Оценки нет**");
+    expect(dark).toContain("Собрано 38% данных, а оценка рассчитывается начиная с 40%.");
+    expect(dark).toContain("Не удалось скачать репозиторий");
+    expect(dark).toContain("Оценка рассчитывается при объеме данных от 40%.");
     expect(dark).not.toContain("Score: 0");
+    expect(dark).not.toContain("## Как считается");
+    expect(dark).not.toContain("улучшать нечего");
   });
 
-  test("репо в каталоге без скана — отчёт объясняет отсутствие фактов", () => {
+  test("репо в каталоге без скана — «еще не сканировался», как на карточке", () => {
     seedRepo(t, { org: "report", repo: "never-scanned" });
     const never = renderRepoReport(getRepoCard(t.db, "report", "never-scanned")!);
     // Б5 (У31): «ё» в текстах отчёта заменена на «е»
     expect(never).toContain("еще не сканировался");
-    expect(never).toContain("## Как считается и что это не значит");
+    expect(never).not.toContain("## Как считается");
   });
 });
 
@@ -190,26 +205,29 @@ describe("В4.4: экранирование заголовков MD", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Круг 2 В4.4 (Б5): mdEscape-дыры — repo.language (S-1) и top.problem в
-// «Итоге» (S-2) экранируются, как title и rec.problem до круга 2.
+// Круг 2 В4.4 (Б5): mdEscape-дыры — repo.language (S-1) и текст рекомендации
+// (S-2) экранируются, как title.
 // ---------------------------------------------------------------------------
 
 describe("Б5 (круг 2 В4.4): mdEscape-дыры", () => {
   test("S-1: repo.language с разметкой не становится картинкой/HTML в отчёте", () => {
-    seedRepo(t, { org: "esc2", repo: "lang", language: "x ![t](https://evil.example/l) <s>" });
+    const repoId = seedRepo(t, { org: "esc2", repo: "lang", language: "x ![t](https://evil.example/l) <s>" });
+    const scanId = seedScan(t, repoId, {});
+    seedScore(t, repoId, scanId, { total: 60 });
     const md = renderRepoReport(getRepoCard(t.db, "esc2", "lang", { access: GRANTED })!);
-    expect(md).toContain("- Язык: x \\!\\[t\\]\\(https://evil.example/l\\) &lt;s&gt;");
+    // В4.9: язык — в паспорте анализа (приложение Г)
+    expect(md).toContain("| Язык | x \\!\\[t\\]\\(https://evil.example/l\\) &lt;s&gt; |");
     expect(md).not.toMatch(/!\[[^\]]*\]\(https:\/\/evil\.example\/l\)/);
     expect(md).not.toContain("<s>");
   });
 
-  test("S-2: top.problem в «Итоге» экранирован, как rec.problem в рекомендациях", () => {
+  test("S-2: сохраненный текст рекомендации экранирован в действиях первого экрана", () => {
     const repoId = seedRepo(t, { org: "esc2", repo: "top" });
     const scanId = seedScan(t, repoId, {});
     seedScore(t, repoId, scanId, { total: 60 });
     seedRecommendation(t, scanId, { ruleId: "top-esc", priority: 1, problem: "p ![x](https://evil.example/t)", factRef: "docs.presence", deltaScore: 1.5 });
     const md = renderRepoReport(getRepoCard(t.db, "esc2", "top", { access: GRANTED })!);
-    expect(md).toContain("наибольший измеримый прирост дает «p \\!\\[x\\]\\(https://evil.example/t\\)»");
+    expect(md).toContain("p \\!\\[x\\]\\(https://evil.example/t\\)");
     expect(md).not.toMatch(/!\[[^\]]*\]\(https:\/\/evil\.example\/t\)/);
   });
 });

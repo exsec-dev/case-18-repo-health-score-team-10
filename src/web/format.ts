@@ -308,6 +308,227 @@ export function contributionText(score: number | null | undefined, contribution:
   return score === null || score === undefined ? NOT_COUNTED : `${contribution}%`;
 }
 
+/** Знак минус (U+2212) — у отрицательных чисел в тексте, не дефис (К9.11). */
+export const MINUS = "\u2212";
+
+/**
+ * В4.9 (К9.11): русское число — десятичная запятая и минус «−». `digits` —
+ * знаков после запятой; `trim` убирает хвостовые нули («0,5», а не «0,50»;
+ * целое — без запятой). Одна копия для UI и отчета.
+ */
+export function fmtDecimal(value: number, digits = 1, opts: { trim?: boolean } = {}): string {
+  const p = 10 ** digits;
+  const rounded = Math.round(Math.abs(value) * p) / p;
+  let body = rounded.toFixed(digits);
+  if (opts.trim && body.includes(".")) body = body.replace(/\.?0+$/, "");
+  const sign = value < 0 && rounded !== 0 ? MINUS : "";
+  return `${sign}${body.replace(".", ",")}`;
+}
+
+/** Потолок Repo Health Score при утекших секретах (методика, `SECRETS_CRITICAL_TOTAL_CAP`; веб не импортирует `src/score`). */
+export const SECRETS_CAP = 49;
+
+/** Категория для расчета вкладов: балл (null — данных нет) и вес в показателе. */
+export interface ContributionInput {
+  key: string;
+  title: string;
+  score: number | null;
+  weight: number;
+}
+
+/** Вклад категории в показатель: точный (приложение) и показанный (десятые, метод наибольшего остатка). */
+export interface ContributionSegment {
+  key: string;
+  title: string;
+  /** балл × вес / Σ весов категорий с данными — без округления */
+  exact: number;
+  /** показанный вклад в десятых балла (21,0 → 210); сумма показанных = показатель × 10 */
+  tenths: number;
+  /** сколько категория недобирает с учетом веса: вес / Σ весов × (100 − балл) */
+  loss: number;
+  /** доля веса категории среди категорий с данными (0..1) */
+  share: number;
+}
+
+export type Contributions =
+  /** обычный случай: сумма показанных вкладов = показатель */
+  | { kind: "bar"; total: number; segments: ContributionSegment[]; missing: number; losses: ContributionSegment[] }
+  /** итог ограничен потолком за утекшие секреты: вклады дали бы больше показателя */
+  | { kind: "capped"; total: number; uncapped: number; segments: ContributionSegment[] }
+  /** в репозитории нет кода: показатель 0 по правилу методики, вкладов нет */
+  | { kind: "empty"; total: number };
+
+/**
+ * В4.9 (К9.1, К9.12): «Вклад категорий в оценку» — ОДНА чистая функция для
+ * отчета и карточки. Вклад категории = балл × вес / Σ весов категорий с
+ * данными (та же формула, что `totalsFromCategories`; веса — аргументом:
+ * карточка берет их из `/api/meta`, отчет — из карточки и `INDEX_WEIGHTS`).
+ * Показ — до десятых МЕТОДОМ НАИБОЛЬШЕГО ОСТАТКА к показанному (целому)
+ * показателю: сумма показанных вкладов равна показанному числу, «не набрано»
+ * = 100 − показатель. Округление каждого вклада отдельно этого не
+ * гарантирует (uikit: 20,9 + 18,3 + 11,8 + 18,8 = 69,8 при показателе 70).
+ * Потолок 49 и пустой репозиторий — отдельные виды: у них вклады не
+ * складываются в показатель, и полоса их не рисует.
+ */
+export function categoryContributions(cats: ContributionInput[], total: number | null, opts: { codeEmpty?: boolean } = {}): Contributions | null {
+  if (total === null) return null;
+  const shown = Math.round(total);
+  if (opts.codeEmpty) return { kind: "empty", total: shown };
+  const withData = cats.filter((c): c is ContributionInput & { score: number } => c.score !== null && c.weight > 0);
+  const weightSum = withData.reduce((s, c) => s + c.weight, 0);
+  if (weightSum === 0) return null;
+  const segments: ContributionSegment[] = withData.map((c) => ({
+    key: c.key,
+    title: c.title,
+    exact: (c.score * c.weight) / weightSum,
+    tenths: 0,
+    loss: (c.weight / weightSum) * (100 - c.score),
+    share: c.weight / weightSum,
+  }));
+  const uncapped = segments.reduce((s, c) => s + c.exact, 0);
+  if (Math.round(uncapped) > shown && shown <= SECRETS_CAP) {
+    // сумма вкладов больше показателя только у потолка за утекшие секреты
+    for (const s of segments) s.tenths = Math.round(s.exact * 10);
+    return { kind: "capped", total: shown, uncapped, segments };
+  }
+  largestRemainder(segments, shown * 10);
+  const losses = [...segments].filter((s) => s.loss >= 0.05).sort((a, b) => b.loss - a.loss || a.key.localeCompare(b.key)).slice(0, 2);
+  return { kind: "bar", total: shown, segments, missing: 100 - shown, losses };
+}
+
+/** Распределение целых десятых так, чтобы их сумма была ровно `target` (метод наибольшего остатка). */
+function largestRemainder(segments: ContributionSegment[], target: number): void {
+  // шум двоичной арифметики (20.999999) не должен решать, кому достанется десятая
+  const scaled = segments.map((s) => Math.round(s.exact * 10 * 1e6) / 1e6);
+  segments.forEach((s, i) => (s.tenths = Math.floor(scaled[i]!)));
+  let diff = target - segments.reduce((sum, s) => sum + s.tenths, 0);
+  const rest = (i: number) => scaled[i]! - Math.floor(scaled[i]!);
+  const order = segments.map((_, i) => i);
+  if (diff > 0) {
+    order.sort((a, b) => rest(b) - rest(a) || a - b);
+    for (let k = 0; diff > 0; k = (k + 1) % order.length, diff--) segments[order[k]!]!.tenths++;
+  } else if (diff < 0) {
+    order.sort((a, b) => rest(a) - rest(b) || a - b);
+    for (let k = 0, guard = 0; diff < 0 && guard < 10_000; k = (k + 1) % order.length, guard++) {
+      const s = segments[order[k]!]!;
+      if (s.tenths > 0) {
+        s.tenths--;
+        diff++;
+      }
+    }
+  }
+}
+
+/** Показанный вклад: «+21,0». */
+export function fmtContribution(tenths: number): string {
+  return `+${fmtDecimal(tenths / 10, 1)}`;
+}
+
+/** Потеря с учетом веса: «−12,1». */
+export function fmtLoss(loss: number): string {
+  return `${MINUS}${fmtDecimal(loss, 1)}`;
+}
+
+// ---------- В4.9 (К9.2, К9.13): состояния категорий одними словами везде ----------
+
+/** Опорная фраза «категории нет в оценке» — одна на карточку, рейтинг, MD и PDF. */
+export const NOT_IN_SCORE = "Категория в оценке не участвует и ее не снижает.";
+
+/** Закрытая категория у зрителя без сессии (аноним, истекшая сессия). */
+export const LOCKED_FOR_ANON = "Видна участникам репозитория.";
+
+/**
+ * К9.13: фраза закрытой зрителю категории — по причине доступа. Анониму —
+ * «Видна участникам репозитория.»; вошедшему — причина (`accessLockText`:
+ * нет токена, нет прав, токен отклонен). Одна функция для карточки и отчета.
+ */
+export function lockedCategoryText(access: string | undefined, auth: string | undefined): string {
+  if (auth === undefined || auth === "no-session") return LOCKED_FOR_ANON;
+  return accessLockText(access) ?? ACCESS_LOCK_TEXT["check-failed"];
+}
+
+/**
+ * Причина «нет данных» категории — предложением для читателя (К9.2).
+ * Причины расчет пишет по-английски (`compute.ts`, данные скана не
+ * меняются); здесь — их показ. Неизвестная причина наружу не идет:
+ * печатается нейтральное «Данных нет.» (К9.9 — сырой английский не
+ * показывается никогда).
+ */
+export function noDataReason(key: string, reason: string | null | undefined): string {
+  const r = (reason ?? "").trim();
+  if (key === "security" || r.startsWith("AppSec data unavailable")) return SECURITY_NO_DATA;
+  if (r.startsWith("ci runs no-data")) return CI_RUNS_CAP_TEXT;
+  if (r === "git channel no-data") return "Не удалось скачать репозиторий – произошла ошибка или он больше лимита сервиса.";
+  if (r === "git+rest channels no-data") return "Нет данных ни из репозитория, ни от SourceCraft.";
+  if (r === "issues channel no-data") return "Список задач недоступен.";
+  return "Данных нет.";
+}
+
+/** Потолок CI без результатов запусков — одна фраза для «почему», маркера и приложения. */
+export const CI_RUNS_CAP_TEXT = "Результаты запусков CI недоступны (нет прав или запусков не было), поэтому категория получает не больше 50 из 100.";
+
+/** Безопасность без данных: откуда берутся данные категории. */
+export const SECURITY_NO_DATA = "Безопасность считается по данным AppSec SourceCraft, а они видны только с правом доступа.";
+
+/** Пустая категория (данных нет): причина + опорная фраза. */
+export function emptyCategoryText(key: string, reason: string | null | undefined): string {
+  return `${noDataReason(key, reason)} ${NOT_IN_SCORE}`;
+}
+
+/**
+ * «Каких данных не хватило» — строка списка: категория и причина. Вход —
+ * строка `noData` оценки («documentation: git channel no-data»). ОДНА копия
+ * (до В4.9 их было две: карточка и MD, совпадавшие только аккуратностью).
+ */
+export function humanNoData(raw: string): string {
+  const [category = "", ...rest] = raw.split(":");
+  const reason = rest.join(":").trim();
+  const title = CATEGORY_TITLES_RU[category] ?? category;
+  const sentenceText = noDataReason(category, reason);
+  return category === "security" ? sentenceText : `${title}: ${sentenceText.charAt(0).toLowerCase()}${sentenceText.slice(1)}`;
+}
+
+/**
+ * Причина «нет данных» Безопасности при открытом канале — по причине факта
+ * `appsec.findings` (no-data: access / no-scan / incomplete). Одна копия для
+ * карточки и отчета; прочее — общая фраза.
+ */
+export function securityNoDataReason(fact: { status: string; value: unknown } | undefined): string {
+  const reason = fact && fact.status === "no-data" ? (fact.value as { reason?: unknown } | null)?.reason : undefined;
+  if (reason === "access") return "У токена, с которым шел анализ, нет права на данные AppSec (src.repositories.useAppSecScan).";
+  if (reason === "no-scan") return "AppSec еще не проверял этот репозиторий или проверка не закончилась.";
+  if (reason === "incomplete") return "AppSec ответил не полностью, поэтому данных о безопасности нет. Это не значит, что уязвимостей нет.";
+  return SECURITY_NO_DATA;
+}
+
+/**
+ * Д3 (В4.9, «как сейчас в UI»): пустое состояние без оценки — ОДИН текст
+ * для карточки и отчета. Скан был, оценки нет — «данных не хватило»; скана
+ * не было — «еще не сканировался».
+ */
+export function noScoreText(scan: { status: string } | null): { title: string; description: string } {
+  if (scan) {
+    return {
+      title: "Скан был – данных для оценки не хватило",
+      description: `Последний скан (${sentence(scanStatusText(scan.status))}) не собрал достаточно фактов для честного числа – это отсутствие данных, а не плохая оценка. Следующий анализ соберет факты заново.`,
+    };
+  }
+  return { title: "Репозиторий есть в каталоге, но еще не сканировался", description: "Оценка появится после первого анализа репозитория." };
+}
+
+/**
+ * Д5: оговорка сборщика задач «дата закрытия подменена датой изменения»
+ * (`issues.stats.close_date_note`, по-английски: «completed_at missing on
+ * N/M closed — used updated_at fallback») — предложением для читателя.
+ * Числа берутся из заметки; форма не узнана — общая фраза без чисел.
+ */
+export function closeDateText(note: unknown): string | null {
+  if (typeof note !== "string" || note === "") return null;
+  const m = /(\d+)\s*\/\s*(\d+)/.exec(note);
+  const counts = m ? `у ${m[1]} из ${m[2]} закрытых задач ` : "";
+  return `Срок закрытия задач приблизительный: ${counts}дата закрытия не передается, использована дата последнего изменения.`;
+}
+
 /** Первая буква заглавная — для меток (Label): у платформы они в регистре предложения. */
 export function sentence(text: string): string {
   return text.length === 0 ? text : text[0]!.toUpperCase() + text.slice(1);
