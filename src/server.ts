@@ -240,7 +240,11 @@ const allowedOrigins = (): Set<string> => {
   } catch {
     /* кривой redirect — остаются локальные дефолты ниже */
   }
-  if (out.size === 0) {
+  // гейт В4.8.5: локальный стенд на своем PORT — те же локальные адреса и на
+  // фактическом порту (без YA_REDIRECT_URI дефолт redirect смотрит на 8418,
+  // и стенд на другом порту отклонял любое изменение как «чужую страницу»)
+  const local = [...out].some((o) => /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(o));
+  if (out.size === 0 || local) {
     out.add(`http://localhost:${config.port}`);
     out.add(`http://127.0.0.1:${config.port}`);
   }
@@ -399,6 +403,16 @@ async function addFavoriteAndCheck(userId: number, org: string, repo: string): P
         // rate_limited и транзакцию Ф1.5 не обойти; repo-GET не повторяется
         favoriteEnqueueOf(await requestUserScan(db, rest, userId, org, repo, config.queue, new Date(), repoRes)),
       );
+      // гейт В4.8.5 (Екатерина): репозиторий, которого SourceCraft не отдает
+      // токену (нет такого или нет доступа), в избранное не добавляется —
+      // прежняя запись (повторная звезда) остается
+      if (outcome === "added" && result.result === "checked" && !result.access.clone) {
+        removeFavorite(db, userId, org, repo);
+        return Response.json(
+          { error: { code: "repo_not_found", message: `репозиторий ${org}/${repo} не найден в SourceCraft или ваш токен его не видит` } },
+          { status: 404 },
+        );
+      }
       check = { status: result.result, enqueue: result.enqueue };
       // круг 2 (П1): сбой проверки (платформа или каналы) — не вердикт; запись
       // остаётся «не проверенной» и уходит в насос (он анализ не ставит)

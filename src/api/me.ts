@@ -686,7 +686,7 @@ export function myJobs(db: import("bun:sqlite").Database, userId: number, doneLi
 
 export interface FavoriteAccess {
   clone: boolean;
-  visibility: "public" | "private" | "unknown";
+  visibility: "public" | "internal" | "private" | "unknown";
   ci: boolean | null;
   appsec: boolean | null;
   own: boolean;

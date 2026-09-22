@@ -176,7 +176,7 @@ export interface NormalizedAccess {
   cicd: ChannelAccess;
   appsec: ChannelAccess;
   /** видимость: карточка — из БД, живая проверка — из тела repo-GET */
-  visibility: "public" | "private" | "unknown";
+  visibility: "public" | "internal" | "private" | "unknown";
 }
 
 /**
@@ -207,7 +207,10 @@ export function ownUndecided(a: NormalizedAccess): boolean {
 
 /** Видимость строки `repos` → нормализованная. */
 export function visibilityOf(raw: unknown): NormalizedAccess["visibility"] {
-  return raw === "private" ? "private" : raw === "public" ? "public" : "unknown";
+  // гейт В4.8.5: у SourceCraft три значения (`Repository.Visibility`:
+  // public, internal, private); internal видят все вошедшие в SourceCraft —
+  // это не «свой» и не публичный рейтинг
+  return raw === "private" ? "private" : raw === "public" ? "public" : raw === "internal" ? "internal" : "unknown";
 }
 
 /** Исход живой проверки прав одного репозитория (repo-GET → cicd/runs → AppSec). */

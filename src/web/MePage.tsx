@@ -26,6 +26,7 @@ import {
   Magnifier,
   OctagonXmark,
   Person,
+  Persons,
   Plus,
   Shield,
   Star,
@@ -1282,6 +1283,13 @@ function AccessRights({ access, lastCheckedAt }: { access: import("../api/me").F
         <span className="rh-pill" title={`Приватный репозиторий${checked}`}>
           <Icon data={Lock} size={12} />
           Приватный
+        </span>
+      )}
+      {/* гейт В4.8.5: третье значение видимости SourceCraft */}
+      {access.visibility === "internal" && (
+        <span className="rh-pill" title={`Внутренний репозиторий: виден всем, кто вошел в SourceCraft${checked}`}>
+          <Icon data={Persons} size={12} />
+          Внутренний
         </span>
       )}
       <span className="rh-pill rh-access" title={summary} aria-label={summary} role="img">
