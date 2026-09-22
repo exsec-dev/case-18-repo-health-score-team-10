@@ -11,6 +11,9 @@
 // Трипвай включается в блоке, который его закрывает (`ENABLED`); до этого он
 // `test.todo`, чтобы каждый коммит оставался зелёным.
 import { describe, expect, test } from "bun:test";
+import { Database } from "bun:sqlite";
+import { join } from "node:path";
+import { getRepoCard } from "../src/api/repos";
 import { renderRepoReport } from "../src/report/markdown";
 import { REPORT_FIXTURES, fixtureCard } from "./report-fixtures";
 
@@ -67,6 +70,34 @@ describe("К9.2: словарь запрещенных слов в основн�
         close();
       }
     });
+  }
+});
+
+// Б8: тот же словарь — на пяти живых репозиториях исследования. Только по КОПИИ
+// живой БД (`VACUUM INTO` с readonly-хендла) и только по явной переменной:
+//   V49_LIVE_DATA_DIR=<каталог копии> bun test tests/v49-report.test.ts
+// Копия открывается readonly — тест ничего в нее не пишет.
+const LIVE_DIR = process.env.V49_LIVE_DATA_DIR;
+const LIVE_REPOS = ["bayselonarrend/openintegrations", "divkit/divkit", "sourcecraft/template-tg-bot", "gravity-ui/uikit", "qipparu/2"];
+
+(LIVE_DIR ? describe : describe.skip)("К9.2 на живых репозиториях (копия БД)", () => {
+  for (const slug of LIVE_REPOS) {
+    for (const viewer of ["anon", "full"] as const) {
+      test(`${slug} (${viewer}): в основном тексте нет слов словаря`, () => {
+        const db = new Database(join(LIVE_DIR!, "repo-health.db"), { readonly: true });
+        try {
+          const [org, repo] = slug.split("/") as [string, string];
+          const card =
+            viewer === "full"
+              ? getRepoCard(db, org, repo, { access: { cicd: "granted", appsec: "granted", repo: "granted" }, viewerAuth: "pat" })
+              : getRepoCard(db, org, repo);
+          expect(card).not.toBeNull();
+          expect(dictionaryHits(mainText(renderRepoReport(card!)))).toEqual([]);
+        } finally {
+          db.close();
+        }
+      });
+    }
   }
 });
 

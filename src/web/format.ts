@@ -404,7 +404,10 @@ function largestRemainder(segments: ContributionSegment[], target: number): void
   segments.forEach((s, i) => (s.tenths = Math.floor(scaled[i]!)));
   let diff = target - segments.reduce((sum, s) => sum + s.tenths, 0);
   const rest = (i: number) => scaled[i]! - Math.floor(scaled[i]!);
-  const order = segments.map((_, i) => i);
+  // десятые получают только категории с ненулевым вкладом: у балла 0 вклад 0,
+  // даже если округление итога требует раздать больше десятых, чем остатков
+  const order = segments.map((_, i) => i).filter((i) => scaled[i]! > 0);
+  if (order.length === 0) return;
   if (diff > 0) {
     order.sort((a, b) => rest(b) - rest(a) || a - b);
     for (let k = 0; diff > 0; k = (k + 1) % order.length, diff--) segments[order[k]!]!.tenths++;

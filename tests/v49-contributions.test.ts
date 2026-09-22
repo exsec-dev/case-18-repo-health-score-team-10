@@ -57,6 +57,22 @@ describe("К9.1: сумма показанных вкладов = показат
     ]);
   });
 
+  test("категория с баллом 0 не получает десятых при распределении остатка (живой uikit с CI/CD 0)", () => {
+    const cats: ContributionInput[] = [
+      { key: "documentation", title: "d", score: 91.0528, weight: 15 },
+      { key: "cicd", title: "c", score: 0, weight: 15 },
+      { key: "activity", title: "a", score: 79.7676, weight: 15 },
+      { key: "issues", title: "i", score: 51.1504, weight: 15 },
+      { key: "code", title: "k", score: 60.6801, weight: 20 },
+    ];
+    const total = cats.reduce((s, c) => s + c.score! * c.weight, 0) / 80;
+    const c = categoryContributions(cats, Math.round(total))!;
+    expect(c.kind).toBe("bar");
+    if (c.kind !== "bar") return;
+    expect(c.segments.find((s) => s.key === "cicd")!.tenths).toBe(0);
+    expect(c.segments.reduce((s, x) => s + x.tenths, 0)).toBe(Math.round(total) * 10);
+  });
+
   test("категория без данных в полосу не входит, ее вес делится между остальными", () => {
     const scores = { documentation: 80, activity: null, issues: 40, code: 60 };
     const total = engineIndex(scores)!;
