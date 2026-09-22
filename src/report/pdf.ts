@@ -75,8 +75,15 @@ export const COLORS = {
   track: "#f2f2f2",
   /** text-link */
   link: "#4768c2",
-  /** все шкалы (полоса вклада, полосы баллов, покрытие) — один темно-серый тон (круг 4) */
-  bar: "#6b6b6b",
+  /**
+   * Все шкалы (полоса вклада, полосы баллов, покрытие) — один серый тон.
+   * В8 гейта: светлее прежнего `#6b6b6b` круга 4; п.4 круга 2 — еще светлее,
+   * дорожку владелец просил не трогать. С дорожкой `#f2f2f2` контраст 2,7:1
+   * (порог WCAG 1.4.11 для нетекстовых — 3:1), решение владельца 22.09.
+   */
+  bar: "#949494",
+  /** В14 гейта: подложка примечаний под таблицами разбора */
+  noteBg: "#f7f7f7",
   white: "#ffffff",
 } as const;
 
@@ -116,6 +123,19 @@ function linesOf(s: string, size: number, colWidth: number, bold = false): numbe
     }
   }
   return lines;
+}
+
+/**
+ * В18 гейта: у длинного имени репозитория строка колонтитула переносилась и
+ * теряла хвост («…от 16» вместо даты), а шапка страницы наезжала на номер.
+ * Обрезаем по ширине с многоточием — это оформление, в сверку с MD не идет
+ * (колонтитулы туда и не входят).
+ */
+function fitOneLine(s: string, size: number, max: number): string {
+  if (width(s, size) <= max) return s;
+  let out = s;
+  while (out.length > 1 && width(`${out}…`, size) > max) out = out.slice(0, -1);
+  return `${out.trimEnd()}…`;
 }
 
 // ---------- инлайн ----------
@@ -170,25 +190,43 @@ const lineNodes = (line: InlineLine, breakLong = false): PdfText[] => line.map((
 
 // ---------- элементы ----------
 
-const LABEL_SIZES = { xs: { h: 15, pad: 6, r: 2.25 }, s: { h: 18, pad: 7.5, r: 3.75 } } as const;
+const LABEL_SIZES = { xxs: { h: 12, pad: 4.5, r: 2 }, xs: { h: 15, pad: 6, r: 2.25 }, s: { h: 18, pad: 7.5, r: 3.75 } } as const;
 const LABEL_FONT = 9.5;
+/** Кегль плашки доступа в шапке (п.1 круга 2: мельче остальных). */
+const LABEL_FONT_XXS = 8;
 /** высота строки Inter 9.5 pt при lineHeight 1 (ascender − descender ≈ 1.21 em) */
 const LABEL_LINE = LABEL_FONT * 1.21;
 
 /** Плашка как `Label` UI: скругленный прямоугольник canvas и текст поверх него. */
-export function labelNode(chip: Chip, size: "xs" | "s" = "xs"): PdfNode {
+export function labelNode(chip: Chip, size: "xxs" | "xs" | "s" = "xs"): PdfNode {
   const { h, pad, r } = LABEL_SIZES[size];
   const { bg, fg } = LABEL_COLORS[chip.theme];
-  const w = Math.ceil(width(chip.text, LABEL_FONT) + 2 * pad + 1);
-  const inset = (h - LABEL_LINE) / 2;
+  const font = size === "xxs" ? LABEL_FONT_XXS : LABEL_FONT;
+  const w = Math.ceil(width(chip.text, font) + 2 * pad + 1);
+  const inset = (h - font * 1.21) / 2;
   return {
     width: w,
     stack: [
       { canvas: [{ type: "rect", x: 0, y: 0, w, h, r, color: bg }] },
-      { text: chip.text, color: fg, fontSize: LABEL_FONT, lineHeight: 1, noWrap: true, margin: [pad, -h + inset, 0, inset] },
+      { text: chip.text, color: fg, fontSize: font, lineHeight: 1, noWrap: true, margin: [pad, -h + inset, 0, inset] },
     ],
   };
 }
+
+/**
+ * Иконка информации — `circle-info` из `@gravity-ui/icons` (MIT), тот же
+ * рисунок, что в UI; путь скопирован в код дословно, чтобы сборка PDF не
+ * читала файлы вне каталога шрифта. Своих рисунков не заводим (правило 3а).
+ */
+const INFO_PATH =
+  "M8 13.5a5.5 5.5 0 1 0 0-11 5.5 5.5 0 0 0 0 11M8 15A7 7 0 1 0 8 1a7 7 0 0 0 0 14m1-9.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0m-.25 3a.75.75 0 0 0-1.5 0V11a.75.75 0 0 0 1.5 0z";
+const INFO_SIZE = 9.5;
+
+const infoIcon = (): PdfNode => ({
+  svg: `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="none" viewBox="0 0 16 16"><path fill="${COLORS.muted}" fill-rule="evenodd" d="${INFO_PATH}" clip-rule="evenodd"/></svg>`,
+  width: INFO_SIZE,
+  height: INFO_SIZE,
+});
 
 /** Горизонтальная линейка на всю ширину. */
 const rule = (color: string = COLORS.rule, lineWidth = 0.75, margin: number[] = [0, 0, 0, 0]): PdfNode => ({
@@ -214,8 +252,19 @@ function headerNode(block: Extract<Block, { kind: "header" }>): PdfNode {
   const left: PdfNode[] = [{ text: block.slug.replace("/", " / "), fontSize: 16, bold: true, lineHeight: 1 }];
   if (block.title) left.push({ text: lineNodes(block.title), fontSize: 8, color: COLORS.muted, margin: [0, 2, 0, 0] });
   left.push({ text: block.link.text, link: block.link.url, color: COLORS.link, fontSize: 8, margin: [0, 2, 0, 0] });
-  const right: PdfNode[] = [{ text: block.doc, bold: true, fontSize: 9, alignment: "right" }];
-  if (block.date) right.push({ text: block.date, fontSize: 8, color: COLORS.muted, alignment: "right", margin: [0, 1, 0, 0] });
+  // п.1 круга 2: название документа первой строкой, дата и плашка доступа — второй
+  const right: PdfNode[] = [{ text: block.doc, bold: true, fontSize: 9, alignment: "right", noWrap: true }];
+  const dateNode: PdfNode | null = block.date ? { width: "auto", text: block.date, fontSize: 8, color: COLORS.muted, noWrap: true, margin: [0, 2, 0, 0] } : null;
+  if (block.docChip) {
+    const chipNode = labelNode(block.docChip, "xxs");
+    right.push({
+      columns: [{ width: "*", text: "" }, ...(dateNode ? [dateNode] : []), { ...chipNode, width: (chipNode.width as number) + 6, margin: [6, 1, 0, 0] }],
+      columnGap: 0,
+      margin: [0, 1, 0, 0],
+    });
+  } else if (dateNode) {
+    right.push({ text: block.date, fontSize: 8, color: COLORS.muted, alignment: "right", margin: [0, 1, 0, 0] });
+  }
   return {
     stack: [
       { columns: [{ width: "*", stack: left }, { width: "auto", stack: right, margin: [10, 6, 0, 0] }] },
@@ -224,113 +273,160 @@ function headerNode(block: Extract<Block, { kind: "header" }>): PdfNode {
   };
 }
 
+/** Отступ плашки от «из 100» в ряду показателя. */
+const CHIP_INDENT = 12;
+
+/** Столбец показателя: подпись, крупное число, «из 100» и плашка. */
+function metricColumn(label: string, value: number | null, noneText: string, chip: Chip | null, align: "left" | "right"): PdfNode {
+  const head: PdfNode = { text: label, fontSize: 9, color: COLORS.muted, alignment: align, margin: [0, 0, 0, 1] };
+  if (value === null) {
+    return { stack: [head, { text: noneText, fontSize: 26, bold: true, color: COLORS.ink2, lineHeight: 1, alignment: align, margin: [0, 6, 0, 4] }] };
+  }
+  // отступ слева входит в ширину колонки: иначе у прижатого вправо показателя
+  // распорка «*» съедала его и плашка уезжала за правое поле (трипвай
+  // `report-check.py` на отрисованном PDF)
+  const chipNode = chip ? labelNode(chip, "s") : null;
+  const cells: PdfNode[] = [
+    { width: "auto", text: String(value), fontSize: 40, bold: true, characterSpacing: -0.8, lineHeight: 1, fontFeatures: ["tnum"] },
+    { width: "auto", text: "из 100", fontSize: 10, color: COLORS.muted, margin: [6, 30, 0, 0] },
+    ...(chipNode ? [{ ...chipNode, width: (chipNode.width as number) + CHIP_INDENT, margin: [CHIP_INDENT, 25, 0, 0] }] : []),
+  ];
+  // строка чисел прижимается вправо распоркой: alignment столбцы не наследуют
+  return { stack: [head, { columns: align === "right" ? [{ width: "*", text: "" }, ...cells] : cells, columnGap: 0 }] };
+}
+
+/** Ширина столбца показателя в ряду из двух (В6): половина полосы набора. */
+const HERO_GAP = 16;
+const HERO_COL = (W - HERO_GAP) / 2;
+
 function heroNode(block: Extract<Block, { kind: "hero" }>): PdfNode {
-  const row: PdfNode =
-    block.value === null
-      ? { text: block.noneText, fontSize: 26, bold: true, color: COLORS.ink2, lineHeight: 1, margin: [0, 6, 0, 4] }
-      : {
-          columns: [
-            { width: "auto", text: String(block.value), fontSize: 40, bold: true, characterSpacing: -0.8, lineHeight: 1, fontFeatures: ["tnum"] },
-            { width: "auto", text: "из 100", fontSize: 10, color: COLORS.muted, margin: [6, 30, 0, 0] },
-            ...(block.chip ? [{ ...labelNode(block.chip, "s"), margin: [12, 25, 0, 0] }] : []),
-          ],
-          columnGap: 0,
-        };
+  const main = metricColumn(block.label, block.value, block.noneText, block.chip, "left");
+  // В6 гейта: второй показатель — справа в том же ряду, тем же стилем; его
+  // пояснение остается мелкой строкой под числом.
+  const row: PdfNode = block.secondary
+    ? {
+        columns: [
+          { width: HERO_COL, ...main },
+          {
+            width: HERO_COL,
+            stack: [
+              metricColumn(block.secondary.label, block.secondary.value, block.secondary.noneText, block.secondary.chip, "left"),
+              ...(block.secondary.note ? [{ text: block.secondary.note, fontSize: 8, color: COLORS.muted, lineHeight: 1.15, margin: [0, 4, 0, 0] }] : []),
+            ],
+          },
+        ],
+        columnGap: HERO_GAP,
+      }
+    : main;
   return {
     stack: [
-      { text: block.label, fontSize: 9, color: COLORS.muted, margin: [0, 12, 0, 1] },
-      row,
-      { text: block.verdict, fontSize: 12, lineHeight: 1.1, margin: [0, 6, 0, 0] },
-      ...block.notes.map((n) => ({ text: lineNodes(n), fontSize: 8.5, color: COLORS.ink2, lineHeight: 1.15, margin: [0, 4, 0, 0] })),
+      { ...row, margin: [0, 12, 0, 0] },
+      ...(block.verdict ? [{ text: block.verdict, fontSize: 12, lineHeight: 1.1, margin: [0, 8, 0, 0] }] : []),
+      // В4 гейта: перед строкой-пояснением — иконка информации
+      ...block.notes.map((n) => {
+        const body: PdfNode = { text: lineNodes(n.line), fontSize: 8.5, color: COLORS.ink2, lineHeight: 1.2 };
+        // п.10: строка с иконкой и строка без нее держат один отступ сверху;
+        // текст с иконкой выровнен по ее левому краю переносом строки
+        return n.info
+          ? { columns: [{ width: INFO_SIZE, ...infoIcon(), margin: [0, 2, 0, 0] }, { width: "*", ...body }], columnGap: 6, margin: [0, 10, 0, 0] }
+          : { ...body, margin: [0, 10, 0, 0] };
+      }),
     ],
   };
 }
 
-function zonesNodes(block: Extract<Block, { kind: "contributions" }>): PdfNode[] {
-  let x = 0;
-  const strip = block.zones.map((z) => {
-    const w = z.share * W;
-    const rect = { type: "rect", x, y: 0, w: Math.max(0, w - (x + w < W - 0.5 ? 1.5 : 0)), h: 3, color: ZONE_COLORS[z.theme] };
-    x += w;
-    return rect;
-  });
-  return [
-    { canvas: strip, margin: [0, 2, 0, 0] },
-    {
-      columns: block.zones.map((z, i) => ({ width: z.share * W, text: z.text, fontSize: 7.5, color: COLORS.ink2, margin: [i === 0 ? 0 : 3, 3, 0, 0] })),
-      columnGap: 0,
-    },
-  ];
+/** Высота строки подписей сегмента (две строки 7,5 и 8 pt). */
+const SEG_LABEL_H = 19;
+/** Высота полосы и цветной полоски зон под ней. */
+const BAR_H = 12;
+const ZONE_H = 3;
+const ZONE_TOP = BAR_H + 2;
+/** Длина засечки у начала сегмента (круг 3 гейта). */
+const TICK = 3.5;
+
+/**
+ * Подпись сегмента — ВСЕГДА две строки: у сегмента без подписи в этой строке
+ * они пустые. Так все колонки одной высоты по построению, и куски полосы в
+ * них встают на одном уровне (круг 3 гейта: отрезки скакали по высоте, когда
+ * пустая ячейка схлопывалась).
+ */
+function segmentLabel(s: { title: string; value: string } | null, align: "left" | "right", muted: boolean): PdfNode {
+  const color = muted ? COLORS.muted : COLORS.ink2;
+  return {
+    stack: [
+      { text: s ? s.title : " ", fontSize: 7.5, color, noWrap: true, alignment: align, lineHeight: 1.05 },
+      { text: s ? s.value : " ", fontSize: 8, bold: true, noWrap: true, alignment: align, color: muted ? COLORS.muted : COLORS.ink, fontFeatures: ["tnum"] },
+    ],
+  };
 }
 
+/**
+ * Полоса вкладов. п.5 круга 2: подписи сегментов идут через одну — первая над
+ * шкалой, вторая под, третья над; соседние больше не наезжают друг на друга.
+ * Каждый сегмент — своя колонка со своей подписью, своим куском полосы и
+ * своим куском цветной полоски зон: порядок узлов в дереве описания остается
+ * порядком чтения, и сверка «текст PDF = текст MD» видит те же слова подряд.
+ */
 function contributionsNode(block: Extract<Block, { kind: "contributions" }>): PdfNode {
-  const title = { text: block.title, fontSize: 10, bold: true, margin: [0, 14, 0, 6] };
-  const body: PdfNode[] = [];
+  const title = { text: block.title, fontSize: 10, bold: true, margin: [0, BLOCK_GAP, 0, 6] };
   if (block.note !== null) {
-    body.push({ text: block.note, fontSize: 8.5, color: COLORS.ink2, lineHeight: 1.15, margin: [0, 0, 0, 4] });
-  } else {
-    // подписи над сегментами: влезают — по сегменту; нет — одной строкой под полосой (тот же текст)
-    // подпись встает над началом своего сегмента; если предыдущая длиннее своего
-    // сегмента — сдвигается вправо (зазор 4 pt); не влезли в строку — одна строка текстом
-    const labelW = (s: { title: string; value: string }) => Math.max(width(s.title, 7.5), width(s.value, 8, true));
-    const placed: { gap: number; w: number; s: (typeof block.segments)[number] }[] = [];
-    let start = 0;
-    let end = 0;
-    for (const s of block.segments) {
-      const x = Math.max(start, end > 0 ? end + 4 : 0);
-      const w = labelW(s) + 1;
-      placed.push({ gap: x - end, w, s });
-      end = x + w;
-      start += s.share * W;
-    }
-    const restW = block.rest ? labelW(block.rest) + 1 : 0;
-    const fits = end + (block.rest ? restW + 6 : 0) <= W;
-    if (fits) {
-      body.push({
-        columns: [
-          ...placed.flatMap(({ gap, w, s }) => [
-            ...(gap > 0.01 ? [{ width: gap, text: "" }] : []),
-            {
-              width: w,
-              stack: [
-                { text: s.title, fontSize: 7.5, color: COLORS.ink2, noWrap: true, lineHeight: 1.05 },
-                { text: s.value, fontSize: 8, bold: true, noWrap: true, fontFeatures: ["tnum"] },
-              ],
-            },
-          ]),
-          ...(block.rest
-            ? [
-                {
-                  width: "*",
-                  stack: [
-                    { text: block.rest.title, fontSize: 7.5, color: COLORS.muted, alignment: "right", noWrap: true, lineHeight: 1.05 },
-                    { text: block.rest.value, fontSize: 8, bold: true, color: COLORS.muted, alignment: "right", noWrap: true },
-                  ],
-                },
-              ]
-            : []),
-        ],
-        columnGap: 0,
-      });
-    }
-    let x = 0;
-    const segs: PdfNode[] = [{ type: "rect", x: 0, y: 0, w: W, h: 12, color: COLORS.track }];
-    for (const s of block.segments) {
-      const w = s.share * W;
-      segs.push({ type: "rect", x, y: 0, w: Math.max(0, w), h: 12, color: COLORS.bar });
-      x += w;
-      segs.push({ type: "line", x1: x, y1: 0, x2: x, y2: 12, lineWidth: 1.5, lineColor: COLORS.white });
-    }
-    body.push({ canvas: segs, margin: [0, 3, 0, 0] });
-    if (!fits) {
-      const parts = block.segments.map((s) => `${s.title} ${s.value}`);
-      if (block.rest) parts.push(`${block.rest.title} ${block.rest.value}`);
-      body.push({ text: parts.join(" · "), fontSize: 7.5, color: COLORS.ink2, margin: [0, 3, 0, 0] });
-    }
+    return {
+      stack: [title, { text: block.note, fontSize: 8.5, color: COLORS.ink2, lineHeight: 1.15, margin: [0, 0, 0, 4] }, zoneStrip(block, 0, W)],
+      unbreakable: true,
+    };
   }
-  body.push(...zonesNodes(block));
-  if (block.loss) body.push({ text: lineNodes(block.loss), fontSize: 8.5, color: COLORS.ink2, margin: [0, 8, 0, 0] });
-  return { stack: [title, ...body], unbreakable: true };
+  const items = [
+    ...block.segments.map((s) => ({ s, fill: COLORS.bar, muted: false, align: "left" as const })),
+    ...(block.rest ? [{ s: block.rest, fill: COLORS.track, muted: true, align: "right" as const }] : []),
+  ];
+  let x = 0;
+  const columns = items.map((it, i) => {
+    const w = Math.max(0.5, it.s.share * W);
+    const x0 = x;
+    x += w;
+    const last = i === items.length - 1;
+    const above = i % 2 === 0;
+    return {
+      width: last ? "*" : w,
+      stack: [
+        segmentLabel(above ? it.s : null, it.align, it.muted),
+        {
+          canvas: [
+            // круг 3 гейта: полоса не режется на куски — соседние прямоугольники
+            // перекрываются на полпункта и читаются как одна линия; начало
+            // сегмента отмечает засечка со стороны его подписи
+            { type: "rect", x: 0, y: 0, w: w + (last ? 0 : 0.6), h: BAR_H, color: it.fill },
+            ...(i === 0 ? [] : [{ type: "line", x1: 0, y1: above ? -TICK : BAR_H, x2: 0, y2: above ? 0 : BAR_H + TICK, lineWidth: 0.75, lineColor: COLORS.muted }]),
+            ...zoneRects(block, x0, x0 + w),
+          ],
+          margin: [0, 5, 0, 0],
+        },
+        { ...segmentLabel(above ? null : it.s, it.align, it.muted), margin: [0, ZONE_TOP - BAR_H + 4, 0, 0] },
+      ],
+    };
+  });
+  return { stack: [title, { columns, columnGap: 0 }], unbreakable: true };
+}
+
+/** Куски цветной полоски зон, попадающие в отрезок [x0, x1] полосы. */
+function zoneRects(block: Extract<Block, { kind: "contributions" }>, x0: number, x1: number): PdfNode[] {
+  const out: PdfNode[] = [];
+  let zx = 0;
+  for (const z of block.zones) {
+    const zw = z.share * W;
+    const from = Math.max(x0, zx);
+    const to = Math.min(x1, zx + zw);
+    zx += zw;
+    if (to - from <= 0.01) continue;
+    const gap = zx < W - 0.5 && to >= zx - 0.01 ? 1.5 : 0;
+    out.push({ type: "rect", x: from - x0, y: ZONE_TOP, w: Math.max(0, to - from - gap), h: ZONE_H, color: ZONE_COLORS[z.theme] });
+  }
+  return out;
+}
+
+/** Полоска зон во всю ширину — для случая, когда полосы вкладов нет. */
+function zoneStrip(block: Extract<Block, { kind: "contributions" }>, x0: number, x1: number): PdfNode {
+  return { canvas: zoneRects(block, x0, x1).map((r) => ({ ...(r as Record<string, unknown>), y: 0 })), margin: [0, 6, 0, 0] };
 }
 
 function coverageNode(block: Extract<Block, { kind: "coverage" }>): PdfNode {
@@ -339,7 +435,7 @@ function coverageNode(block: Extract<Block, { kind: "coverage" }>): PdfNode {
   return {
     unbreakable: true,
     stack: [
-      { text: block.title, fontSize: 10, bold: true, margin: [0, 16, 0, 6] },
+      { text: block.title, fontSize: 10, bold: true, margin: [0, BLOCK_GAP, 0, 6] },
       {
         canvas: [
           { type: "rect", x: 0, y: 0, w: W, h: 10, color: COLORS.track },
@@ -360,8 +456,12 @@ function coverageNode(block: Extract<Block, { kind: "coverage" }>): PdfNode {
   };
 }
 
-/** Колонки строки категории (эталон, круг 3): имя 84, полоса 60, балл 18, плашка 98, «почему» — остаток; зазор 8. */
-const CAT_COLS = [84, 60, 18, 98] as const;
+/**
+ * Колонки строки категории (эталон, круг 3): имя 84, полоса 60, балл, плашка
+ * 98, «почему» — остаток; зазор 8. В10 гейта: под балл 24 pt — трехзначный
+ * «100» в 18 pt уходил в перенос строки.
+ */
+const CAT_COLS = [84, 60, 24, 98] as const;
 const GAP = 8;
 const WHY_W = W - CAT_COLS.reduce((a, b) => a + b, 0) - GAP * 4;
 
@@ -371,9 +471,10 @@ function categoryCells(row: CategoryRow): PdfNode[] {
   const h = Math.max(30, whyLines * 11 + 2);
   const mid = (elem: number) => Math.max(0, (h - elem) / 2);
   return [
-    { text: row.name, bold: !off, color: off ? COLORS.ink2 : COLORS.ink, margin: [0, mid(12), 0, 0], lineHeight: 1.05 },
+    // В10 гейта: имя категории — обычным начертанием
+    { text: row.name, color: off ? COLORS.ink2 : COLORS.ink, margin: [0, mid(12), 0, 0], lineHeight: 1.05 },
     { ...scoreBar(row.score, CAT_COLS[1]), margin: [0, mid(6), 0, 0] },
-    { text: row.scoreText, bold: !off, color: off ? COLORS.muted : COLORS.ink, alignment: "right", margin: [0, mid(12), 0, 0], fontFeatures: ["tnum"], lineHeight: 1.05 },
+    { text: row.scoreText, color: off ? COLORS.muted : COLORS.ink, alignment: "right", noWrap: true, margin: [0, mid(12), 0, 0], fontFeatures: ["tnum"], lineHeight: 1.05 },
     { columns: [labelNode(row.chip, "xs")], margin: [0, mid(15), 0, 0] },
     { text: row.why, fontSize: 8, color: COLORS.ink2, lineHeight: 1.12, margin: [0, mid(whyLines * 11), 0, 0] },
   ];
@@ -420,10 +521,11 @@ function actionRow(a: ActionItem, compact: boolean): PdfNode[] {
       ],
     },
     {
+      // В16 гейта: подпись «ожидаемый эффект» — строкой НАД числом
       stack: [
-        { text: effectText(a.effect, compact), fontSize: 8.5, color: COLORS.ink2, alignment: "right", lineHeight: 1.15 },
         ...(a.effectNote && !compact ? [{ text: a.effectNote, fontSize: 8.5, color: COLORS.ink2, alignment: "right", lineHeight: 1.15 }] : []),
         ...(a.effectNote && compact ? [{ text: a.effectNote, fontSize: 7.5, color: COLORS.muted, alignment: "right" }] : []),
+        { text: effectText(a.effect, compact), fontSize: 8.5, color: COLORS.ink2, alignment: "right", lineHeight: 1.15 },
       ],
     },
   ];
@@ -482,6 +584,17 @@ function tableNode(columns: TableColumn[], rows: InlineLine[][], opts: { total?:
   };
 }
 
+/** Примечание под таблицей разбора: текст на подложке во всю ширину набора. */
+const NOTE_PAD = 7;
+
+function noteBox(note: InlineLine, top = 5): PdfNode {
+  return {
+    table: { widths: [W], body: [[{ text: lineNodes(note, true), fontSize: 8, color: COLORS.ink2, lineHeight: 1.12, fillColor: COLORS.noteBg }]] },
+    layout: { hLineWidth: () => 0, vLineWidth: () => 0, paddingLeft: () => NOTE_PAD, paddingRight: () => NOTE_PAD, paddingTop: () => 5, paddingBottom: () => 5 },
+    margin: [-NOTE_PAD, top, -NOTE_PAD, 0],
+  };
+}
+
 function detailNode(block: Extract<Block, { kind: "detail" }>): PdfNode {
   const head: PdfNode = {
     columns: [
@@ -494,13 +607,16 @@ function detailNode(block: Extract<Block, { kind: "detail" }>): PdfNode {
   };
   const parts: PdfNode[] = [head];
   if (block.table) parts.push(tableNode(block.table.columns, block.table.rows));
-  for (const note of block.notes) parts.push({ text: lineNodes(note, true), fontSize: 8, color: COLORS.ink2, lineHeight: 1.12, margin: [0, 4, 0, 0] });
+  // В14 гейта: примечание под таблицей — на светло-серой подложке
+  for (const note of block.notes) parts.push(noteBox(note));
   const small = (block.table?.rows.length ?? 0) <= 6;
-  return { stack: parts, margin: [0, 9, 0, 0], unbreakable: small };
+  return { stack: parts, margin: [0, 16, 0, 0], unbreakable: small };
 }
 
 function paragraphNode(block: Extract<Block, { kind: "paragraph" }>): PdfNode {
   const lines = block.lines.flatMap((l, i) => (i === 0 ? lineNodes(l, true) : [{ text: "\n" }, ...lineNodes(l, true)]));
+  // п.9 круга 2: примечания во всех разделах — на одной подложке
+  if (block.tone === "note") return noteBox(block.lines.flat(), 6);
   if (block.tone === "subhead") return { text: lines, fontSize: 10, bold: true, color: COLORS.ink, margin: [0, 12, 0, 5], headlineLevel: 4 };
   if (block.tone === "caption") return { text: lines, fontSize: 8.5, color: COLORS.ink2, lineHeight: 1.15, margin: [0, 10, 0, 3], headlineLevel: 4 };
   if (block.tone === "fine") return { text: lines, fontSize: 7.5, color: COLORS.muted, lineHeight: 1.15, margin: [0, 5, 0, 0] };
@@ -508,10 +624,17 @@ function paragraphNode(block: Extract<Block, { kind: "paragraph" }>): PdfNode {
   return { text: lines, fontSize: 8.5, color: COLORS.ink2, lineHeight: 1.15, margin: [0, 0, 0, 3] };
 }
 
+/**
+ * В7 гейта: один шаг отступа между крупными смысловыми блоками. Шкала от
+ * кегля основного текста (9,5): 24 — между блоками, 16 — перед подзаголовком
+ * внутри блока, 6 — внутри блока.
+ */
+const BLOCK_GAP = 24;
+
 const HEADING_STYLE: Record<1 | 2 | 3, PdfNode> = {
   1: { fontSize: 16, bold: true, margin: [0, 0, 0, 8] },
-  2: { fontSize: 12, bold: true, margin: [0, 15, 0, 4] },
-  3: { fontSize: 10.5, bold: true, margin: [0, 12, 0, 5] },
+  2: { fontSize: 12, bold: true, margin: [0, BLOCK_GAP, 0, 6] },
+  3: { fontSize: 10.5, bold: true, margin: [0, 16, 0, 5] },
 };
 
 function blockNode(block: Block): PdfNode {
@@ -562,11 +685,20 @@ function smallFollower(block: Block | undefined): boolean {
  * описания ДО рендера.
  */
 export function buildPdfDocument(model: ReportModel): PdfNode {
+  // колонки колонтитулов заданы шириной: у длинного имени репозитория строка
+  // иначе съедала номер страницы (В18 гейта)
+  const FOOT_NUM = Math.ceil(width("000/000", 7.5)) + 4;
+  const RUN_RIGHT = Math.ceil(width(model.runningHead[1], 7.5)) + 4;
   const content: PdfNode[] = [];
   const blocks = model.blocks;
   for (let i = 0; i < blocks.length; i++) {
     const block = blocks[i]!;
     const next = blocks[i + 1];
+    // п.9 круга 2: мелкая сноска сразу под таблицей — на подложке примечания
+    if (block.kind === "paragraph" && block.tone === "fine" && blocks[i - 1]?.kind === "table") {
+      content.push(noteBox(block.lines.flat(), 5));
+      continue;
+    }
     // заголовок + первый блок — неразрывно (К9.5); длинный блок — заголовок не сирота (pageBreakBefore)
     if (block.kind === "heading" && next && smallFollower(next) && !(next.kind === "actions" && next.items.length > 3)) {
       // внутри неразрывного стека заголовок без headlineLevel: pageBreakBefore
@@ -594,8 +726,8 @@ export function buildPdfDocument(model: ReportModel): PdfNode {
             stack: [
               {
                 columns: [
-                  { text: model.runningHead[0], fontSize: 7.5, color: COLORS.muted },
-                  { text: model.runningHead[1], fontSize: 7.5, color: COLORS.muted, alignment: "right" },
+                  { width: W - RUN_RIGHT, text: fitOneLine(model.runningHead[0], 7.5, W - RUN_RIGHT - 4), fontSize: 7.5, color: COLORS.muted, noWrap: true },
+                  { width: RUN_RIGHT, text: model.runningHead[1], fontSize: 7.5, color: COLORS.muted, alignment: "right", noWrap: true },
                 ],
               },
               { canvas: [{ type: "line", x1: 0, y1: 4, x2: W, y2: 4, lineWidth: 0.75, lineColor: COLORS.rule }] },
@@ -603,8 +735,8 @@ export function buildPdfDocument(model: ReportModel): PdfNode {
           },
     footer: (current: number, count: number) => ({
       columns: [
-        { text: model.footer, fontSize: 7.5, color: COLORS.muted },
-        { text: `${current} из ${count}`, fontSize: 7.5, color: COLORS.muted, alignment: "right" },
+        { width: W - FOOT_NUM, text: fitOneLine(model.footer, 7.5, W - FOOT_NUM - 4), fontSize: 7.5, color: COLORS.muted, noWrap: true },
+        { width: FOOT_NUM, text: `${current}/${count}`, fontSize: 7.5, color: COLORS.muted, alignment: "right" },
       ],
       margin: [SIDE, 16, SIDE, 0],
     }),

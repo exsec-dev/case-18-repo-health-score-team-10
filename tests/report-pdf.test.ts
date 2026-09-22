@@ -171,7 +171,9 @@ describe("П1: содержание PDF равно содержанию MD", () 
       const json = JSON.stringify(doc.content);
       expect(json).toContain(`{"text":"docs.presence","color":"${COLORS.muted}","fontSize":7}`);
       expect(json).toContain('{"text":"CI [config] `only` | pipes","italics":true}');
-      expect(json).toMatch(/\{"text":"(Документация|Задачи|Активность|Состояние кода)","bold":true,"color":"#262626"\}/);
+      // полужирное в отчёте — заголовок действия; имя категории с В10 гейта обычным начертанием
+      expect(json).toMatch(/"text":\[[^\]]*"bold":true[^\]]*\],"fontSize":8\.5/);
+      expect(json).toMatch(/\{"text":"(Документация|Задачи|Активность|Состояние кода)","color":"#262626"/);
       expect(json).toContain(`"link":"${card.repo.webUrl}"`);
       expect(json).not.toContain("**");
       expect(json).not.toContain("\\\\[");

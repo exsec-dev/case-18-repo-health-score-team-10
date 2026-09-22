@@ -1166,9 +1166,9 @@ function CategoryRow({
                 <Text
                   color="secondary"
                   className="rh-subrow__value"
-                  title={`значение: ${submetricShownValue(key, subKey, sub, submetricContext(card.score?.computedAt))}${submetricNote(key, subKey, sub.note)?.remark ? `. ${submetricNote(key, subKey, sub.note)!.remark}` : ""}`}
+                  title={`значение: ${submetricShownValue(key, subKey, sub, submetricContext(card.score?.computedAt), cat.submetrics)}${submetricNote(key, subKey, sub.note)?.remark ? `. ${submetricNote(key, subKey, sub.note)!.remark}` : ""}`}
                 >
-                  {submetricShownValue(key, subKey, sub, submetricContext(card.score?.computedAt))}
+                  {submetricShownValue(key, subKey, sub, submetricContext(card.score?.computedAt), cat.submetrics)}
                 </Text>
               </span>
               {/* В колонке балла — только балл, и полос у подметрик нет вовсе:

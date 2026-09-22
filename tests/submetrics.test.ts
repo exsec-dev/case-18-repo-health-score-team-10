@@ -79,7 +79,8 @@ describe("П4.2: форма значений — единица, масштаб,
     expect(fmt("security.density", 38)).toBe("38 на 10 тыс. строк");
     expect(fmt("security.density", 3.456)).toBe("3,46 на 10 тыс. строк");
     expect(fmt("security.resolved", 0.8)).toBe("80%");
-    expect([fmt("security.secrets", true), fmt("security.secrets", false)]).toEqual(["найдены", "нет"]);
+    // Г1.4 гейта: без двойного отрицания — название «Критичные утечки секретов»
+    expect([fmt("security.secrets", true), fmt("security.secrets", false)]).toEqual(["найдены", "не найдены"]);
   });
 
   test("активность: «N дней» на момент скана, частота, авторы, зеркало составным значением", () => {
@@ -143,9 +144,10 @@ describe("П4.2: одно правило на страницу, MD и PDF", () =
     expect({
       // В4.9 (К9.9): страница берет значение через `submetricShownValue` — тот же словарь, что отчет
       pageImports: page.includes('import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle } from "../report/submetrics";'),
-      pageValue: page.includes("{submetricShownValue(key, subKey, sub, submetricContext(card.score?.computedAt))}"),
+      // Г1.9 гейта: соседние подметрики — пятым доводом и на странице, и в отчете
+      pageValue: page.includes("{submetricShownValue(key, subKey, sub, submetricContext(card.score?.computedAt), cat.submetrics)}"),
       pageTitle: page.includes("{submetricTitle(key, subKey)}"),
-      mdRow: md.includes("const value = submetricShownValue(key, sub, entry, ctx);") && md.includes("line(submetricTitle(key, sub)),"),
+      mdRow: md.includes("const value = submetricShownValue(key, sub, entry, ctx, cat.submetrics);") && md.includes("line(submetricTitle(key, sub)),"),
       mdContext: md.includes("const ctx = submetricContext(score.computedAt);"),
       proofRaw: page.includes("{fmtFactValue(fact.value)}"),
     }).toEqual({ pageImports: true, pageValue: true, pageTitle: true, mdRow: true, mdContext: true, proofRaw: true });

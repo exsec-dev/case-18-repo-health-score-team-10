@@ -203,7 +203,8 @@ describe("Р20: значения подметрик округлены, дока
       // утверждение о САМОМ округлении не менялось
       // В4.7 (Б7, П4.2): страница берет значение из словаря подметрик (округление — внутри него)
       // В4.9 (К9.9): значение — `submetricShownValue` (словарь + слова заметки вместо «—»)
-      pageUsesRounding: /\{submetricShownValue\(key, subKey, sub, submetricContext\(card\.score\?\.computedAt\)\)\}/.test(page),
+      // Г1.9 гейта: пятым доводом идут соседние подметрики (прочерк доли старых TODO при нуле пометок)
+      pageUsesRounding: /\{submetricShownValue\(key, subKey, sub, submetricContext\(card\.score\?\.computedAt\), cat\.submetrics\)\}/.test(page),
       proofStaysRaw: between(page, "function FactProof", "function factStatusText").includes("fmtFactValue(fact.value)"),
     }).toEqual({ mdRounded: true, mdRaw: false, pageUsesRounding: true, proofStaysRaw: true });
   });
@@ -225,9 +226,10 @@ describe("Р13 + П1.10: нижний ярус показателей полно
       cta: src.includes("Что делать"),
       counterLink: /Рекомендаций: \{card\.recommendations\.length\}/.test(band),
       summaryOnPage: band.includes("summaryLine"),
-      // В4.9 (К9.1): строку итога отчета заменил вердикт первого экрана (шаблон build.ts)
-      reportHasVerdict: buildSrc().includes("export function verdictText("),
-    }).toEqual({ cta: false, counterLink: false, summaryOnPage: false, reportHasVerdict: true });
+      // В4.9 (К9.1) вердикт первого экрана заменил строку итога; гейт 22.09 (В3)
+      // убрал и его: вывод отчета — крупное число с плашкой зоны.
+      reportHasChip: buildSrc().includes("chip: scoreChip(value)"),
+    }).toEqual({ cta: false, counterLink: false, summaryOnPage: false, reportHasChip: true });
   });
 });
 
@@ -481,9 +483,10 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
         src.includes("Рассчитывается по 6 категориям") &&
         src.includes("Показатель доступен только для репозиториев, к которым у вас есть доступ"),
       helpOnLockedBranch: /score\.fullLocked \?[\s\S]{0,1200}<HelpMark/.test(band),
-      // MD-отчёт свою формулировку сохраняет: документ читается без наведения
-      // (В4.9, К9.1: второй показатель — строкой под крупным, «по открытым данным, по нему строится рейтинг»)
-      mdKeepsParagraph: buildSrc().includes("по открытым данным, по нему строится рейтинг"),
+      // MD-отчёт свою формулировку сохраняет: документ читается без наведения.
+      // Круг 2 гейта, п.3: отличие показателей объясняет одна строка под обоими
+      // числами, поэтому фраза переехала в нее (прежде — подпись под вторым числом).
+      mdKeepsParagraph: buildSrc().includes("считается по открытым данным – по нему строится рейтинг"),
     }).toEqual({ paragraphGone: false, indexHelp: true, fullHelp: true, helpOnLockedBranch: true, mdKeepsParagraph: true });
   });
 
@@ -585,8 +588,9 @@ describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечан
   test("Р6: в числовых диапазонах дефис — шкала, MD-таблица подметрик, слот сравнения", async () => {
     const { SCORE_SCALE } = (await import("../src/web/format")) as { SCORE_SCALE: { range: string }[] };
     expect(SCORE_SCALE.map((s) => s.range)).toEqual(["70-100", "40-69", "0-39"]);
-    // В4.9 (К9.6): «Балл (0-100)» ушел вместе с прежней таблицей подметрик; диапазоны — шкала словами в MD
-    expect(mdLocked()).toContain("в зоне риска 0-39 · требует внимания 40-69 · здоров 70-100");
+    // В4.9 (К9.6): «Балл (0-100)» ушел вместе с прежней таблицей подметрик; диапазоны — шкала словами в MD.
+    // Круг 2 гейта, п.5: подписи зон под полосой вкладов убраны, словесная шкала осталась в «Как считается».
+    expect(mdLocked()).toContain("Шкала: здоров 70-100, требует внимания 40-69, в зоне риска 0-39.");
     expect(srcOf("slots.ts")).toContain("2-3 репозиториев");
     // глиф «нет данных» (длинное тире) правилом не затронут — охранный пункт 1
     expect(mdLocked()).toContain("| CI/CD | — | нет данных |");

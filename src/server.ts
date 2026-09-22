@@ -49,6 +49,7 @@ import {
 import { makeRecheckPump } from "./api/recheck";
 import { recordRefusedUserJob } from "./jobs/scheduler";
 import { renderRepoReport } from "./report/markdown";
+import { REPORT_NO_SCORE } from "./report/build";
 import { pdfResponse } from "./report/pdf";
 import { catalogClientBudget, closeOwnRunningScans, maintenanceTick, returnOwnRunningJobs, startMaintenance, startScheduler, startWorkerLoop } from "./jobs/scheduler";
 import { killActiveClones } from "./collectors/git";
@@ -558,6 +559,9 @@ const routes = {
       // тот же сборщик карточки с тем же зрителем (К2)
       const card = await cardOrRefusal(req, org!, repo!);
       if (card instanceof Response) return card;
+      // решение владельца 22.09: без оценки отчета нет (кнопки выгрузки у
+      // такого репозитория на карточке тоже нет — отказ ловит прямую ссылку)
+      if (!card.score) return notFound(REPORT_NO_SCORE);
       return new Response(renderRepoReport(card), {
         headers: {
           "content-type": "text/markdown; charset=utf-8",
@@ -579,6 +583,7 @@ const routes = {
       if (viewer && !allowCardView(viewer.userId)) return cardRateLimited(viewer.userId);
       const card = await cardOrRefusal(req, org!, repo!);
       if (card instanceof Response) return card;
+      if (!card.score) return notFound(REPORT_NO_SCORE);
       return pdfResponse(card);
     },
     // ---------- auth: Я ID OAuth (Б1) ----------

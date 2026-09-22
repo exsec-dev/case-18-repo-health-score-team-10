@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { getRepoCard } from "../src/api/repos";
 import { buildReportModel } from "../src/report/build";
 import { renderRepoReport } from "../src/report/markdown";
+import { REPORT_NO_SCORE } from "../src/report/build";
 import { noScoreText } from "../src/web/format";
 import { cardFacts, makeApiDb, seedRepo, type ApiTestDb } from "./api-fixtures";
 import { REPORT_FIXTURES, fixtureCard, scoredScan } from "./report-fixtures";
@@ -60,7 +61,18 @@ describe("К9.4: каждое число отчета прослеживаетс
           const calc = tables.find((b) => b.kind === "table" && b.columns[0]?.title === "Категория");
           if (calc?.kind !== "table") throw new Error("нет таблицы А");
           const total = calc.rows.at(-1)!.at(-1)!.map((f) => f.text).join("");
-          expect(total).toMatch(new RegExp(` ≈ ${hero.value}$`));
+          // Г1.1 гейта: «баллов в итог» — те же десятые, что в полосе вкладов
+          // (наибольший остаток), поэтому строки складываются в показатель РОВНО
+          // и «Итого» печатается числом; «≈» остается только у потолка за секреты.
+          expect(total).toMatch(new RegExp(`(^|≈ )${hero.value}$`));
+          if (!total.includes("≈")) {
+            const parts = calc.rows
+              .slice(0, -1)
+              .map((r) => r.at(-1)!.map((f) => f.text).join(""))
+              .filter((v) => v !== "—");
+            const sum = parts.reduce((acc, v) => acc + Number(v.replace(",", ".")), 0);
+            expect(Math.round(sum * 10) / 10).toBe(hero.value);
+          }
           const sum = calc.rows.slice(0, -1).reduce((s, r) => s + (r[3]![0]!.text === "—" ? 0 : num(r[3]![0]!.text)), 0);
           expect(Math.abs(sum - num(total.split(" ≈ ")[0]!))).toBeLessThan(0.35);
         }
@@ -83,35 +95,31 @@ describe("К9.4: каждое число отчета прослеживаетс
   });
 });
 
-describe("Д3: отчет повторяет пустое состояние карточки", () => {
+describe("Д3: без оценки отчета нет, пустое состояние остается на карточке", () => {
   const t: ApiTestDb = makeApiDb();
   afterAll(() => t.close());
 
-  test("скан был, но непригоден для рейтинга (как qipparu/2 #6397): карточка без оценки, отчет — «Скан был – данных не хватило»", () => {
+  // Решение владельца 22.09 (круг 3 гейта): «Не выдавать отчет, если оценки
+  // нет». Прежде документ повторял пустое состояние карточки (Д3), но получить
+  // его в продукте было нельзя — кнопки выгрузки у такого репозитория нет.
+  // Тексты пустого состояния остались общими с карточкой (`noScoreText`).
+  test("скан был, но непригоден для рейтинга (как qipparu/2 #6397): карточка без оценки, отчет не собирается", () => {
     const repoId = seedRepo(t, { org: "d3", repo: "ineligible" });
-    // скан с оценкой, но непригодный: у публичного репо правило К-Ф1.1 его не берет
     const scanId = scoredScan(t, repoId, { status: "partial", facts: cardFacts(), ratingEligible: false });
     const card = getRepoCard(t.db, "d3", "ineligible")!;
     expect({ score: card.score, scan: card.scan?.id }).toEqual({ score: null, scan: scanId });
-    const md = renderRepoReport(card);
+    expect(() => renderRepoReport(card)).toThrow(REPORT_NO_SCORE);
     const { title, description } = noScoreText(card.scan);
     expect(title).toBe("Скан был – данных для оценки не хватило");
-    expect(md).toContain(`${title}.`);
-    expect(md).toContain(description);
-    expect(md).toContain("отсутствие данных, а не плохая оценка");
-    expect(md).toContain("Следующий анализ соберет факты заново.");
-    // без покрытия, баллов и «Как считается»; не «еще не сканировался»
-    for (const absent of ["еще не сканировался", "## Категории", "Собрано", "## Как считается", "улучшать нечего"]) expect(md).not.toContain(absent);
+    expect(description).toContain("Следующий анализ соберет факты заново.");
   });
 
-  test("скана не было — «еще не сканировался», как на карточке", () => {
+  test("скана не было — отчета тоже нет, карточка говорит «еще не сканировался»", () => {
     seedRepo(t, { org: "d3", repo: "never" });
     const card = getRepoCard(t.db, "d3", "never")!;
     expect(card.scan).toBeNull();
-    const md = renderRepoReport(card);
-    expect(md).toContain(`${noScoreText(null).title}.`);
-    expect(md).toContain(noScoreText(null).description);
-    expect(md).not.toContain("Скан был");
+    expect(() => renderRepoReport(card)).toThrow(REPORT_NO_SCORE);
+    expect(noScoreText(null).title).toBe("Репозиторий есть в каталоге, но еще не сканировался");
   });
 
   test("карточка берет те же тексты (одна функция `noScoreText`)", () => {
@@ -130,7 +138,8 @@ describe("Д4: усеченная история — ограничение да
       scoredScan(t, repoId, { status: "ok", facts: cardFacts() });
       const md = renderRepoReport(getRepoCard(t.db, "d4", "big")!);
       const limits = md.slice(md.indexOf("## Ограничения данных"), md.indexOf("## Разбор"));
-      expect(limits).toContain("История коммитов загружена частично: для крупных репозиториев загружается только недавняя история – с 16 авг. 2025.");
+      // Г1.7 гейта: причина не в размере репозитория — сервис читает окно истории
+      expect(limits).toContain("История коммитов загружена частично: сервис читает только недавнюю историю – с 16 авг. 2025.");
       expect(md).toContain("| Статус анализа | полный |");
     } finally {
       t.close();

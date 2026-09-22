@@ -45,13 +45,24 @@ function blockLines(block: Block): string[] {
     case "header": {
       const out = [`# ${mdEscape(block.slug)}`];
       if (block.title) out.push("", lineMd(block.title));
-      out.push("", `[${mdEscape(block.link.text)}](${block.link.url})`, "", `${block.doc}.${block.date ? ` ${block.date}.` : ""}`);
+      // п.1 круга 2: в PDF плашка доступа стоит ПОСЛЕ даты, второй строкой —
+      // MD держит тот же порядок слов (сверка «текст PDF = текст MD»)
+      const chip = block.docChip ? ` (${block.docChip.text.toLowerCase()})` : "";
+      out.push("", `[${mdEscape(block.link.text)}](${block.link.url})`, "", `${block.doc}.${block.date ? ` ${block.date}${chip}.` : `${chip}`}`);
       return out;
     }
     case "hero": {
-      const value = block.value === null ? `**${block.noneText}**` : `**${block.value} из 100 · ${block.chip!.text.toLowerCase()}**`;
-      const out = [`${block.label}: ${value}`, "", block.verdict];
-      for (const note of block.notes) out.push("", lineMd(note));
+      // В6: второй показатель в PDF стоит справа в том же ряду; в MD ряда нет —
+      // он идет следующей строкой тем же шаблоном, с подписью через тире.
+      const metric = (label: string, value: number | null, noneText: string, chipText: string | null): string =>
+        `${label}: ${value === null ? `**${noneText}**` : `**${value} из 100 · ${chipText}**`}`;
+      const out = [metric(block.label, block.value, block.noneText, block.chip?.text.toLowerCase() ?? null)];
+      if (block.secondary) {
+        const s = block.secondary;
+        out.push("", `${metric(s.label, s.value, s.noneText, s.chip?.text.toLowerCase() ?? null)}${s.note ? ` – ${s.note}.` : ""}`);
+      }
+      if (block.verdict) out.push("", block.verdict);
+      for (const note of block.notes) out.push("", lineMd(note.line));
       return out;
     }
     case "contributions": {
@@ -63,8 +74,8 @@ function blockLines(block: Block): string[] {
         if (block.rest) parts.push(`${block.rest.title} ${block.rest.value}`);
         out.push(parts.join(" · "));
       }
-      out.push("", block.zones.map((z) => z.text).join(" · "));
-      if (block.loss) out.push("", lineMd(block.loss));
+      // п.5 круга 2: подписи зон под шкалой убраны (в PDF осталась цветная
+      // полоска без слов); словесная шкала целиком есть в «Как считается»
       return out;
     }
     case "coverage":
@@ -84,7 +95,8 @@ function blockLines(block: Block): string[] {
         const title = lineMd(a.title);
         const why = lineMd(a.why);
         const eff = mdEscape(a.effect);
-        const effect = a.effectNote ? `${eff} – ${a.effectNote}.` : `${eff.charAt(0).toUpperCase()}${eff.slice(1)}.`;
+        // В16 гейта: подпись эффекта — перед числом, как в PDF
+        const effect = a.effectNote ? `${a.effectNote.charAt(0).toUpperCase()}${a.effectNote.slice(1)}: ${eff}.` : `${eff.charAt(0).toUpperCase()}${eff.slice(1)}.`;
         return `${a.n}. **${title}.** ${why}${/[.!?]$/.test(why) ? "" : "."} ${effect}`;
       });
     case "detail": {
@@ -124,10 +136,21 @@ function inlineMd(fragment: Inline): string {
  * текст рекомендации) экранируются — «![](url)» или <img> в них не должны
  * становиться tracking-pixel'ем в выгрузке. Бэкслеш-эскейп MD-спецсимволов
  * разметки ссылок/картинок/выделения + HTML-уголки сущностями.
+ *
+ * Г1.10 гейта: эскейп ставится только там, где символ действительно создаёт
+ * разметку, — сырой MD читают глазами, а «\(сейчас 6 из 100\)» и
+ * «completed\_at» читать мешали. Ссылку и картинку убивает экранированная
+ * скобка `[`, поэтому круглые скобки остаются как есть; `_` внутри слова
+ * выделения не начинает (CommonMark), `!` опасен только перед `[`, `#` —
+ * только в начале строки. Набор «убивающих разметку» символов не сужен.
  */
 export function mdEscape(value: string): string {
   return value
-    .replace(/([\\`*_\[\]()!#|])/g, "\\$1")
+    .replace(/([\\`*\[\]|])/g, "\\$1")
+    .replace(/(^|[^\p{L}\p{N}])_/gu, "$1\\_")
+    .replace(/_(?=[^\p{L}\p{N}]|$)/gu, "\\_")
+    .replace(/!(?=\\?\[)/g, "\\!")
+    .replace(/^#/gm, "\\#")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
 }

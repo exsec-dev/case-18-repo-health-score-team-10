@@ -9,7 +9,7 @@ import { buildReportModel, renderRepoReport } from "../src/report/markdown";
 import { COLORS, buildPdfDocument } from "../src/report/pdf";
 import { avatarInitials, avatarTone } from "../src/web/format";
 import { langOptions } from "../src/web/lang-filter";
-import { fixtureCard, goldenPath } from "./report-fixtures";
+import { REPORT_FIXTURES, fixtureCard, goldenPath } from "./report-fixtures";
 
 const ROOT = join(import.meta.dir, "..");
 const srcOf = (path: string): string => readFileSync(join(ROOT, path), "utf8");
@@ -72,7 +72,8 @@ describe("Р2.4: спиннер на кнопке «Отчет»", () => {
 describe("Р2.5: PDF — синяя ссылка; аватар снят (В4.9, К9.5); MD — эталоны", () => {
   // В4.9 (К9.6): ссылка в MD — `[адрес](url)` вместо голого URL (MD переписан заново, эталоны — закрытым списком)
   test("MD всех фикстур байт-в-байт равен эталонам; ссылка в MD — markdown-ссылкой", () => {
-    for (const name of ["anon", "full", "grant-ci", "null", "never"] as const) {
+    // решение владельца 22.09: без оценки отчета нет — фикстура `never` документом не снимается
+    for (const name of REPORT_FIXTURES) {
       const { card, close } = fixtureCard(name);
       try {
         const md = renderRepoReport(card);

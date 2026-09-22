@@ -29,8 +29,16 @@ import { MODEL_VERSION } from "../src/score/model";
 import { recommend, writeRecommendations } from "../src/score/recommend";
 import { NOW, cardFacts, makeApiDb, seedRepo, seedScan, type ApiTestDb, type FactSpec, type ScanSpec } from "./api-fixtures";
 
-export const REPORT_FIXTURES = ["anon", "full", "grant-ci", "null", "never"] as const;
-export type ReportFixture = (typeof REPORT_FIXTURES)[number];
+/**
+ * Фикстуры, по которым снимается ДОКУМЕНТ отчета. Решение владельца 22.09
+ * (круг 3 гейта): без оценки отчет не выдается, поэтому `never` (репозиторий
+ * без единого скана) сюда больше не входит — карточка такого репо проверяется
+ * отдельно (`v49-appendix.test.ts`, Д3). Сама фикстура остается: ее берут
+ * тесты карточки и доступа.
+ */
+export const ALL_FIXTURES = ["anon", "full", "grant-ci", "null", "never"] as const;
+export type ReportFixture = (typeof ALL_FIXTURES)[number];
+export const REPORT_FIXTURES: readonly ReportFixture[] = ["anon", "full", "grant-ci", "null"];
 
 const NO_PAT: AccessResult = { cicd: "no-pat", appsec: "no-pat", repo: "no-pat" };
 const GRANTED: AccessResult = { cicd: "granted", appsec: "granted", repo: "granted" };

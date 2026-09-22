@@ -601,7 +601,11 @@ describe("В4.6 (приёмка круга 2): строка итога и счё
     expect({
       asksWithoutCount: /summaryLine\(\{[\s\S]{0,600}?\}, \{ withCount: false \}\)/.test(card),
       linkStillThere: card.includes("Рекомендаций: {card.recommendations.length}"),
-      reportUsesVerdict: report.includes("verdictText(value,"),
-    }).toEqual({ asksWithoutCount: false, linkStillThere: false, reportUsesVerdict: true });
+      // Гейт 22.09 (В3): предложения-вывода в отчете нет — вывод несут крупное
+      // число, плашка зоны и колонка «почему» у категорий. Шаблон `verdictText`
+      // вместе с ним удален, поэтому проверяется его отсутствие.
+      reportUsesVerdict: report.includes("verdictText("),
+      reportHasChip: report.includes("chip: scoreChip(value)"),
+    }).toEqual({ asksWithoutCount: false, linkStillThere: false, reportUsesVerdict: false, reportHasChip: true });
   });
 });

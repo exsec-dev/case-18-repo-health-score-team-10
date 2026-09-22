@@ -126,19 +126,23 @@ describe("К9.6: MD читается в рендере", () => {
 
 describe("К9.1: первый экран у фикстур с оценкой", () => {
   for (const name of ["anon", "full", "grant-ci"] as const) {
-    (ENABLED.firstScreen ? test : test.todo)(`${name}: показатель с плашкой, вердикт, вклады и действия — до разбора`, () => {
+    // Гейт 22.09: вердикта-предложения под оценкой в отчете больше нет (В3),
+    // блок «Что сделать первым» снят, раздел рекомендаций один и стоит сразу
+    // после категорий (В11, В15). Порядок первого экрана проверяется по ним.
+    (ENABLED.firstScreen ? test : test.todo)(`${name}: показатель с плашкой, вклады и рекомендации — до разбора`, () => {
       const { card, close } = fixtureCard(name);
       try {
         const md = renderRepoReport(card);
         const hero = md.search(/\*\*\d+ из 100 · (здоров|требует внимания|в зоне риска)\*\*/u);
-        const verdict = md.search(/Репозиторий (в хорошем состоянии|требует внимания|в зоне риска)\./u);
         const contrib = md.indexOf("## Вклад категорий в оценку");
-        const actions = md.indexOf("## Что сделать первым");
+        const cats = md.indexOf("## Категории");
+        const actions = md.indexOf("## Рекомендации");
         const detail = md.indexOf("## Разбор по категориям");
-        for (const at of [hero, verdict, contrib, actions, detail]) expect(at).toBeGreaterThan(-1);
-        expect(hero).toBeLessThan(verdict);
-        expect(verdict).toBeLessThan(contrib);
-        expect(contrib).toBeLessThan(actions);
+        for (const at of [hero, contrib, cats, actions, detail]) expect(at).toBeGreaterThan(-1);
+        expect(md).not.toMatch(/Репозиторий (в хорошем состоянии|требует внимания|в зоне риска)\./u);
+        expect(hero).toBeLessThan(contrib);
+        expect(contrib).toBeLessThan(cats);
+        expect(cats).toBeLessThan(actions);
         expect(actions).toBeLessThan(detail);
       } finally {
         close();

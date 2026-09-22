@@ -318,8 +318,9 @@ describe("В4.6-8 (У26/У13/У38): вариант А — карточка на�
   test("генератор строки итога — чистая функция src/web/format.ts, MD её вызывает", async () => {
     const mod = (await import("../src/web/format")) as { summaryLine?: unknown };
     expect(typeof mod.summaryLine).toBe("function");
-    // В4.9 (К9.1): строку итога заменил вердикт первого экрана — чистый шаблон из баллов (build.ts), MD и PDF берут его из модели
-    expect(readFileSync(join(import.meta.dir, "..", "src", "report", "build.ts"), "utf8")).toContain("export function verdictText(");
+    // В4.9 (К9.1) строку итога заменил вердикт первого экрана; гейт 22.09 (В3)
+    // убрал предложение-вывод из отчета — итог несет крупное число с плашкой зоны.
+    expect(readFileSync(join(import.meta.dir, "..", "src", "report", "build.ts"), "utf8")).toContain("chip: scoreChip(value)");
   });
 
   // Б6: проверяется ПОРЯДОК РЕНДЕРА, а не порядок объявления функций в файле.

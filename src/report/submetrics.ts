@@ -168,9 +168,11 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   "cicd.config": { title: "Конфигурация CI со шагами", unit: "признаки ci.yaml", format: ciConfig },
   "cicd.pass_rate": { title: "Доля успешных прогонов", unit: "доля, %", format: share },
   "cicd.duration": { title: "Медианная длительность пайплайна", unit: "секунды → с/мин/ч", format: duration },
-  "security.density": { title: "Плотность находок на 10К строк", unit: "на 10 тыс. строк", format: perLines("10 тыс.") },
+  // Г1.5 гейта: мера — в значении, в названии ее повторять незачем
+  "security.density": { title: "Плотность находок", unit: "на 10 тыс. строк", format: perLines("10 тыс.") },
   "security.resolved": { title: "Доля закрытых находок", unit: "доля, %", format: share },
-  "security.secrets": { title: "Отсутствие критичных утечек", unit: "найдены/нет", format: (v) => (typeof v === "boolean" ? (v ? "найдены" : "нет") : null) },
+  // Г1.4 гейта: без двойного отрицания — «Отсутствие критичных утечек – нет» читалось наоборот
+  "security.secrets": { title: "Критичные утечки секретов", unit: "найдены/не найдены", format: (v) => (typeof v === "boolean" ? (v ? "найдены" : "не найдены") : null) },
   "activity.fresh": { title: "Свежесть последнего коммита человека", unit: "дни на момент скана", format: daysSince },
   "activity.freq": { title: "Частота коммитов", unit: "коммитов в месяц", format: (v) => (isNum(v) ? `${num(v, 1)} в месяц` : null) },
   "activity.contributors": { title: "Число авторов", unit: "авторы", format: count("автор", "автора", "авторов") },
@@ -248,9 +250,13 @@ export function submetricShownValue(
   sub: string,
   entry: { score?: number | null; value?: unknown; note?: string | null },
   ctx: SubmetricContext,
+  peers?: Record<string, { value?: unknown }>,
 ): string {
   const shown = formatSubmetricValue(category, sub, entry.value, ctx);
   if (shown !== NO_VALUE) return shown;
+  // Г1.9 гейта: доли старых TODO нет, потому что пометок нет вовсе — иначе
+  // читатель видел прочерк без причины рядом с «Всего маркеров – 0»
+  if (`${category}.${sub}` === "code.old_share" && Number(peers?.["todo_total"]?.value) === 0) return "пометок нет";
   const n = submetricNote(category, sub, entry.note);
   if (n?.value) return n.value;
   if (PRESENCE_BY_SCORE.has(`${category}.${sub}`) && typeof entry.score === "number") return entry.score >= 1 ? "есть" : "нет";

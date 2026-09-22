@@ -35,7 +35,6 @@ import {
   gitLimitsText,
   lockedCategoryText,
   noDataReason,
-  noScoreText,
   scanStatusText,
   scanTriggerText,
   scoreLabelTheme,
@@ -45,12 +44,15 @@ import {
   sentence,
   type Contributions,
 } from "../web/format";
-import { code, em, escaped, strong, text, type ActionItem, type Block, type CategoryRow, type Chip, type InlineLine, type ReportModel, type TableColumn } from "./model";
+import { code, em, escaped, strong, text, type ActionItem, type Block, type CategoryRow, type Chip, type HeroNote, type HeroSecondary, type InlineLine, type ReportModel, type TableColumn } from "./model";
 import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle, subweightKey, type SubmetricContext } from "./submetrics";
+
+/** Отчета без оценки нет (решение владельца 22.09): текст отказа маршрутов. */
+export const REPORT_NO_SCORE = "Отчет появится после первого анализа: пока у репозитория нет оценки, собирать в документ нечего.";
 
 const INDEX = "HealthCraft Index";
 const FULL = "Repo Health Score";
-const DOC = "Отчет Repo Health";
+const DOC = "Отчет HealthCraft";
 const PUBLIC: CategoryKey[] = CATEGORY_ORDER.filter((k) => k in INDEX_WEIGHTS);
 const NBSP = "\u00a0";
 /** Действий на первом экране — не больше трех (эталон вида). */
@@ -87,31 +89,6 @@ function contributionsOf(card: RepoCard, metric: Metric): Contributions | null {
 }
 
 // ---------- шаблоны (закрытый набор, К9.1) ----------
-
-const VERDICT_FIRST: Record<"success" | "warning" | "danger", string> = {
-  success: "Репозиторий в хорошем состоянии.",
-  warning: "Репозиторий требует внимания.",
-  danger: "Репозиторий в зоне риска.",
-};
-
-/**
- * Вердикт: зона шкалы + «Сильнее всего – A и B, слабее всего – C.» по баллам
- * категорий с данными (2 категории — «Сильнее – A, слабее – B.», одна — только
- * зона). Равные баллы — в порядке категорий.
- */
-export function verdictText(value: number, cats: { title: string; score: number | null }[]): string {
-  const zone = scoreTheme(value);
-  const first = VERDICT_FIRST[zone === "misc" ? "danger" : zone];
-  const scored = cats.filter((c): c is { title: string; score: number } => c.score !== null).map((c, i) => ({ ...c, i }));
-  const desc = [...scored].sort((a, b) => b.score - a.score || a.i - b.i);
-  if (desc.length >= 3) {
-    const weakest = [...scored].sort((a, b) => a.score - b.score || a.i - b.i)[0]!;
-    const strong2 = desc.filter((c) => c !== weakest).slice(0, 2);
-    return `${first} Сильнее всего – ${strong2[0]!.title} и ${strong2[1]!.title}, слабее${NBSP}всего${NBSP}–${NBSP}${weakest.title}.`;
-  }
-  if (desc.length === 2) return `${first} Сильнее – ${desc[0]!.title}, слабее – ${desc[1]!.title}.`;
-  return first;
-}
 
 /** Строка «близко к порогу» — если показатель в пределах 2 баллов от границы зоны. */
 export function thresholdNote(value: number): string | null {
@@ -178,7 +155,8 @@ function limitations(card: RepoCard): string[] {
   const close = closeDateNote(card);
   if (close) out.push(close);
   if (card.markers.historyTruncatedSince) {
-    out.push(`История коммитов загружена частично: для крупных репозиториев загружается только недавняя история – с ${fmtDate(card.markers.historyTruncatedSince)}.`);
+    // Г1.7 гейта: причина не в размере репозитория — сервис читает окно истории
+    out.push(`История коммитов загружена частично: сервис читает только недавнюю историю – с ${fmtDate(card.markers.historyTruncatedSince)}.`);
   }
   if (card.markers.staleFacts) out.push("Часть данных взята из прошлого анализа: источник не ответил. Оценка от этого не выросла и не снизилась.");
   if (card.markers.gitLimits) out.push(gitLimitsText(card.markers.gitLimits));
@@ -232,9 +210,13 @@ export function buildReportModel(card: RepoCard): ReportModel {
   const slug = `${card.repo.org}/${card.repo.repo}`;
   const dateIso = card.score?.computedAt ?? card.scan?.finishedAt ?? card.scan?.startedAt ?? null;
   const date = dateIso ? fmtDate(dateIso) : null;
+  // Решение владельца 22.09 (круг 3 гейта): отчет без оценки не выдается —
+  // собирать в документ нечего, а в интерфейсе кнопки выгрузки у такого
+  // репозитория и не было. Маршруты `.md` и `.pdf` отказывают до сборки
+  // (`server.ts`), здесь — страховка контракта.
   const blocks: Block[] = [headerBlock(card, date)];
   if (!card.score) {
-    blocks.push(...noScoreSection(card));
+    throw new Error(REPORT_NO_SCORE);
   } else {
     const metric = bigMetric(card);
     if (metric.value === null) blocks.push(...indexNullSection(card));
@@ -250,6 +232,16 @@ export function buildReportModel(card: RepoCard): ReportModel {
   };
 }
 
+/**
+ * В2 гейта: плашка рядом с названием документа — «Полный», когда зрителю
+ * доступен Repo Health Score (закрытые категории открыты), иначе
+ * «Публичный». Без оценки доступ ещё не известен — плашки нет.
+ */
+function docChip(card: RepoCard): Chip | null {
+  if (!card.score) return null;
+  return { theme: "unknown", text: card.score.fullLocked ? "Публичный" : "Полный" };
+}
+
 function headerBlock(card: RepoCard, date: string | null): Block {
   const { repo } = card;
   const host = repo.webUrl.replace(/^https?:\/\//, "");
@@ -259,15 +251,9 @@ function headerBlock(card: RepoCard, date: string | null): Block {
     title: repo.title && repo.title !== repo.repo ? [em(repo.title)] : null,
     link: { text: host, url: repo.webUrl },
     doc: DOC,
-    date: date ? `Анализ ${date}` : null,
+    docChip: docChip(card),
+    date,
   };
-}
-
-// ---------- отчёт без оценки (Д3: как карточка) ----------
-
-function noScoreSection(card: RepoCard): Block[] {
-  const { title, description } = noScoreText(card.scan);
-  return [{ kind: "hero", label: INDEX, value: null, noneText: "Оценки нет", chip: null, verdict: `${title}.`, notes: [line(description)] }];
 }
 
 // ---------- оценка есть, индекса нет (покрытие ниже порога) ----------
@@ -277,8 +263,8 @@ function indexNullSection(card: RepoCard): Block[] {
   const ctx = submetricContext(score.computedAt);
   const collected = fmtCoverage(score.indexCoverage);
   const threshold = fmtCoverage(COVERAGE_NULL_BELOW);
-  const notes: InlineLine[] = [line("Отсутствие оценки означает недостаток данных, а не плохое состояние репозитория.")];
-  if (score.fullLocked) notes.push(line(`Полная оценка ${FULL} с категориями CI/CD и Безопасность видна участникам репозитория.`));
+  const notes: HeroNote[] = [{ line: line("Отсутствие оценки означает недостаток данных, а не плохое состояние репозитория.") }];
+  if (score.fullLocked) notes.push({ line: line(`Полная оценка ${FULL} с категориями CI/CD и Безопасность видна участникам репозитория.`), info: true });
   const out: Block[] = [
     {
       kind: "hero",
@@ -286,6 +272,7 @@ function indexNullSection(card: RepoCard): Block[] {
       value: null,
       noneText: "Оценки нет",
       chip: null,
+      secondary: null,
       verdict: `Собрано ${collected} данных, а оценка рассчитывается начиная с ${threshold}.`,
       notes,
     },
@@ -297,7 +284,7 @@ function indexNullSection(card: RepoCard): Block[] {
   if (card.recommendations.length > 0) out.push({ kind: "actions", compact: false, items: card.recommendations.map((r, i) => actionItem(r, i + 1)) });
   out.push(para(line(`Оценка рассчитывается при объеме данных от ${threshold}.`)));
   const limits = limitations(card);
-  if (limits.length > 0) out.push(h2("Ограничения данных"), ...limits.map((l) => para(line(l))));
+  if (limits.length > 0) out.push(h2("Ограничения данных"), ...limits.map((l) => ({ kind: "paragraph" as const, tone: "note" as const, lines: [line(l)] })));
   out.push(...appendix(card, null));
   return out;
 }
@@ -310,20 +297,34 @@ function scoredSection(card: RepoCard, metric: Metric): Block[] {
   const value = metric.value!;
   const cats = card.score!.categories;
   const contributions = contributionsOf(card, metric);
-  const notes: InlineLine[] = [];
+  const notes: HeroNote[] = [];
   const near = thresholdNote(value);
-  if (near) notes.push(line(near));
+  if (near) notes.push({ line: line(near) });
+  // Круг 2, п.3 (вариант 2 владельца): пояснение к числам — ОДНОЙ строкой под
+  // обоими показателями, с иконкой информации. Полного показателя зритель не
+  // видит — остается только фраза про индекс и путь к полной оценке (Г1.15).
+  let secondary: HeroSecondary | null = null;
   if (metric.name === INDEX) {
-    notes.push(
-      line(score.fullLocked ? `Полная оценка ${FULL} с категориями CI/CD и Безопасность видна участникам репозитория.` : `${FULL}: данных для оценки недостаточно.`),
-    );
+    notes.push({
+      line: line(
+        score.fullLocked
+          ? `${INDEX} считается по открытым данным – по нему строится рейтинг. Полная оценка ${FULL} с категориями CI/CD и Безопасность видна участникам репозитория: войдите и добавьте персональный токен доступа в Настройках.`
+          : `${INDEX} считается по открытым данным – по нему строится рейтинг. ${FULL}: данных для оценки недостаточно.`,
+      ),
+      info: true,
+    });
   } else {
-    notes.push(line("Оценка по 6 категориям, включая CI/CD и Безопасность. Она видна только участникам репозитория."));
-    notes.push(
-      score.healthcraftIndex === null
-        ? [strong(`${INDEX}: оценки нет`), text(" – по открытым данным его недостаточно.")]
-        : [strong(`${INDEX} ${fmtScore(score.healthcraftIndex)}`), text(" – по открытым данным, по нему строится рейтинг.")],
-    );
+    notes.push({
+      line: line(`${FULL} учитывает 6 категорий, включая CI/CD и Безопасность. ${INDEX} считается по открытым данным – по нему строится рейтинг.`),
+      info: true,
+    });
+    secondary = {
+      label: INDEX,
+      value: score.healthcraftIndex === null ? null : Math.round(score.healthcraftIndex),
+      noneText: "Оценки нет",
+      chip: score.healthcraftIndex === null ? null : scoreChip(score.healthcraftIndex),
+      note: null,
+    };
   }
   const out: Block[] = [
     {
@@ -332,33 +333,31 @@ function scoredSection(card: RepoCard, metric: Metric): Block[] {
       value: Math.round(value),
       noneText: "Оценки нет",
       chip: scoreChip(value),
-      verdict: verdictText(value, metric.keys.map((k) => ({ title: CATEGORY_TITLES[k], score: cats[k]?.score ?? null }))),
+      secondary,
+      // В3 гейта: предложения общего вывода под оценкой в отчете нет
+      verdict: null,
       notes,
     },
-    contributionsBlock(contributions),
+    contributionsBlock(contributions, metric.name),
     h2("Категории"),
     categoriesBlock(card, ctx),
-    h2("Что сделать первым"),
   ];
+  // В11 и В15 гейта: блока «Что сделать первым» нет, раздел рекомендаций один
+  // и стоит сразу после категорий.
   const recs = card.recommendations;
+  out.push(h2("Рекомендации"));
   if (recs.length === 0) {
     out.push(para(line("По собранным данным улучшать нечего.")));
   } else {
-    out.push({ kind: "actions", compact: false, items: recs.slice(0, FIRST_ACTIONS).map((r, i) => actionItem(r, i + 1)) });
-    const more = recs.length - FIRST_ACTIONS;
-    if (more > 0) out.push({ kind: "paragraph", tone: "muted", lines: [line(`Еще ${more} ${recWord(more)} – в разделе «Все рекомендации».`)] });
+    // п.8 круга 2: вводной строки у раздела нет (вместе с ней ушло и ложное
+    // обещание порядка «по убыванию влияния» — Г1.2)
+    out.push({ kind: "actions", compact: true, items: recs.map((r, i) => actionItem(r, i + 1)) });
   }
   const limits = limitations(card);
-  if (limits.length > 0) out.push(h2("Ограничения данных"), ...limits.map((l) => para(line(l))));
+  // п.9 круга 2: ограничения данных — такие же примечания, как под таблицами
+  if (limits.length > 0) out.push(h2("Ограничения данных"), ...limits.map((l) => ({ kind: "paragraph" as const, tone: "note" as const, lines: [line(l)] })));
 
   out.push(...detailSection(card, ctx));
-  if (recs.length > FIRST_ACTIONS) {
-    out.push(
-      h2("Все рекомендации"),
-      { kind: "paragraph", tone: "muted", lines: [line("Первыми указаны действия с наибольшим ожидаемым влиянием на оценку. Действия без числового эффекта повышают балл указанной категории.")] },
-      { kind: "actions", compact: true, items: recs.map((r, i) => actionItem(r, i + 1)) },
-    );
-  }
   out.push(...methodSection(card, metric, contributions));
   out.push(...appendix(card, metric));
   return out;
@@ -378,21 +377,20 @@ function zones(): { theme: "danger" | "warning" | "success"; text: string; share
   });
 }
 
-function contributionsBlock(c: Contributions | null): Block {
+function contributionsBlock(c: Contributions | null, metricName?: string): Block {
   // заголовок, строка вместо полосы и строка потерь — общие с карточкой (format.ts, К9.12)
-  const title = CONTRIBUTIONS_TITLE;
-  if (c === null) return { kind: "contributions", title, segments: [], rest: null, zones: zones(), loss: null, note: "Вклады категорий не рассчитаны: у показателя нет категорий с данными." };
+  // п.6 круга 2: в отчете к заголовку добавлен показатель — полоса строится то
+  // по Repo Health Score, то по HealthCraft Index, и по ней это должно быть видно
+  const title = metricName ? `${CONTRIBUTIONS_TITLE} – ${metricName}` : CONTRIBUTIONS_TITLE;
+  if (c === null) return { kind: "contributions", title, segments: [], rest: null, zones: zones(), note: "Вклады категорий не рассчитаны: у показателя нет категорий с данными." };
   const note = contributionsNote(c);
-  if (c.kind !== "bar") return { kind: "contributions", title, segments: [], rest: null, zones: zones(), loss: null, note };
-  const parts = lossParts(c);
-  const loss: InlineLine | null = parts === null ? null : parts.map((p) => (p.strong ? strong(p.text) : text(p.text)));
+  if (c.kind !== "bar") return { kind: "contributions", title, segments: [], rest: null, zones: zones(), note };
   return {
     kind: "contributions",
     title,
     segments: c.segments.map((s) => ({ title: s.title, value: fmtContribution(s.tenths), share: s.tenths / 1000 })),
     rest: { title: CONTRIBUTIONS_REST, value: String(c.missing), share: c.missing / 100 },
     zones: zones(),
-    loss,
     note: null,
   };
 }
@@ -418,7 +416,7 @@ function detailSection(card: RepoCard, ctx: SubmetricContext): Block[] {
     const target = RULE_SUBMETRIC[r.ruleId];
     if (target && !actionOf.has(target)) actionOf.set(target, i + 1);
   });
-  const out: Block[] = [h2("Разбор по категориям"), { kind: "paragraph", tone: "muted", lines: [line("Категории расположены от слабой к сильной. Балл категории – среднее баллов показателей с учетом их весов.")] }];
+  const out: Block[] = [h2("Разбор по категориям")];
   for (const key of withData) out.push(detailBlock(card, key, cats[key]!, ctx, actionOf));
   for (const key of without) {
     const row = categoryRow(card, key, cats[key]!, ctx);
@@ -433,7 +431,7 @@ function detailBlock(card: RepoCard, key: CategoryKey, cat: CardCategory, ctx: S
   const remarks: string[] = [];
   const weights = SUBWEIGHTS[key] as Record<string, number>;
   for (const [sub, entry] of Object.entries(cat.submetrics)) {
-    const value = submetricShownValue(key, sub, entry, ctx);
+    const value = submetricShownValue(key, sub, entry, ctx, cat.submetrics);
     const remark = submetricNote(key, sub, entry.note)?.remark;
     if (remark) remarks.push(remark);
     if (displayOnly(key, sub)) {
@@ -498,7 +496,7 @@ function methodSection(card: RepoCard, metric: Metric, c: Contributions | null):
 const APPENDIX_TITLE = "Приложение. Расчет оценки и исходные данные";
 
 function appendix(card: RepoCard, metric: Metric | null): Block[] {
-  const out: Block[] = [{ kind: "appendix", title: APPENDIX_TITLE, intro: "В приложении приведен расчет оценки и источники чисел отчета. Значения показаны без округления." }];
+  const out: Block[] = [{ kind: "appendix", title: APPENDIX_TITLE, intro: "В приложении приведен расчет оценки и источники чисел отчета. Баллы и доли показаны с точностью до десятых." }];
   out.push(...appendixA(card, metric));
   out.push(...appendixB(card, metric));
   out.push(...appendixC(card));
@@ -512,9 +510,16 @@ function appendixA(card: RepoCard, metric: Metric | null): Block[] {
   const score = card.score!;
   const cats = score.categories;
   const out: Block[] = [h3("А. Расчет итоговой оценки")];
+  const contributions = metric === null ? null : contributionsOf(card, metric);
   if (metric !== null && metric.value !== null) {
     const withData = metric.keys.filter((k) => cats[k]?.score !== null && cats[k]?.score !== undefined);
     const wsum = withData.reduce((s, k) => s + metric.weight(k), 0);
+    // Г1.1: десятые вкладов берутся из той же функции, что полоса первого
+    // экрана (`categoryContributions`, метод наибольшего остатка). Иначе
+    // приложение и полоса расходились на 0,1-0,2, а строки приложения не
+    // складывались в собственное «Итого» (69,8 при показателе 70).
+    const tenths = new Map<string, number>();
+    if (contributions !== null && contributions.kind !== "empty") for (const seg of contributions.segments) tenths.set(seg.key, seg.tenths);
     const rows: InlineLine[][] = [];
     let total = 0;
     for (const key of CATEGORY_ORDER) {
@@ -526,10 +531,13 @@ function appendixA(card: RepoCard, metric: Metric | null): Block[] {
         continue;
       }
       const share = metric.weight(key) / wsum;
-      total += cat.score * share;
-      rows.push([line(CATEGORY_TITLES[key]), line(fmtDecimal(cat.score, 1)), line(pct1(share)), line(fmtDecimal(cat.score * share, 1))]);
+      const part = tenths.has(key) ? tenths.get(key)! / 10 : cat.score * share;
+      total += part;
+      rows.push([line(CATEGORY_TITLES[key]), line(fmtDecimal(cat.score, 1)), line(pct1(share)), line(fmtDecimal(part, 1))]);
     }
-    rows.push([line("Итого"), line(""), line("100%"), line(`${fmtDecimal(total, 1)} ≈ ${Math.round(metric.value)}`)]);
+    const shown = Math.round(metric.value);
+    const sumText = fmtDecimal(total, 1);
+    rows.push([line("Итого"), line(""), line("100%"), line(Number(sumText.replace(",", ".")) === shown ? String(shown) : `${sumText} ≈ ${shown}`)]);
     out.push({
       kind: "table",
       columns: [col("Категория", "left", 184), col("Балл", "right", 84), col(`Вес в ${metric.name}`, "right", 114), col("Баллов в итог", "right")],
@@ -621,11 +629,14 @@ function appendixB(card: RepoCard, metric: Metric | null): Block[] {
     const limit = cat.stale ? "данные прошлого анализа" : key === "cicd" && cat.no_data ? "результаты запусков недоступны" : "—";
     rows.push([[strong(`${CATEGORY_TITLES[key]} ${fmtScore(cat.score)}`)], line("сумма по показателям: балл × вес, приложение А"), [code(`${key}.score`), text(` → ${fmtDecimal(cat.score, 4, { trim: true })}`)], line(at), line(limit)]);
     for (const [sub, entry] of Object.entries(cat.submetrics)) {
-      const shown = submetricShownValue(key, sub, entry, ctx);
+      const shown = submetricShownValue(key, sub, entry, ctx, cat.submetrics);
       const subLimit = key === "issues" && sub === "close_days" && close ? "дата закрытия заменена датой изменения" : key === "activity" && truncated ? truncated : "—";
+      // Г1.11 гейта: столбец «Порядок расчета» у показателей стоял пустым —
+      // пишем, с каким весом показатель входит в балл категории
+      const weight = (SUBWEIGHTS[key] as Record<string, number>)[subweightKey(sub)];
       rows.push([
         line(`${submetricTitle(key, sub)}: ${shown}`),
-        line("—"),
+        line(displayOnly(key, sub) || weight === undefined ? "справочно, в балл не входит" : `балл показателя × вес ${fmtDecimal(weight * 100, 0)}% в балле категории`),
         // приемка HQ 22.09: `activity.fresh` — метка времени (мс), читателю — дата, не 13 цифр
         [code(`${key}.${sub}`), text(` → ${key === "activity" && sub === "fresh" && typeof entry.value === "number" ? fmtDateTime(new Date(entry.value).toISOString()) : rawValue(entry.value)}${typeof entry.score === "number" ? `; балл ${fmtDecimal(entry.score * 100, 1, { trim: true })}` : ""}`)],
         line(sourcesOf(card, key)),
@@ -680,6 +691,23 @@ export function flatten(value: unknown, prefix = ""): [string, string][] {
   return [[prefix, scalarText(value)]];
 }
 
+/**
+ * Г1.20 гейта: сырые поля приложения В, которые читаются как противоречие
+ * основному тексту. Значение не меняется — рядом с именем поля появляется
+ * короткое пояснение, что это за число и почему оно другое.
+ */
+const RAW_FIELD_NOTE: Record<string, string> = {
+  "activity.rest.contributors": "счетчик API; в оценке — число авторов из истории git",
+  "activity.git.timeline.truncated": "история обрезана окном сбора, а не статусом анализа",
+};
+
+/** Г1.20: служебная заметка коллектора по-английски — читателю по-русски. */
+function rawFieldValue(field: string, value: string): string {
+  const m = /^completed_at missing on (\d+)\/(\d+) closed/.exec(value);
+  if (field === "close_date_note" && m) return `дата закрытия не передана у ${m[1]} из ${m[2]} закрытых задач, использована дата последнего изменения`;
+  return value;
+}
+
 function factStatusWord(status: string): string {
   return status === "ok" ? "данные есть" : status === "no-data" ? "данных нет" : status === "bad" ? "источник не ответил" : status;
 }
@@ -697,7 +725,10 @@ function appendixC(card: RepoCard): Block[] {
     out.push({
       kind: "table",
       columns: [col("Поле", "left", 180), col("Значение")],
-      rows: flatten(fact.value).map(([k, v]) => [line(k === "" ? "значение" : k), [escaped(v)]]),
+      rows: flatten(fact.value).map(([k, v]) => {
+        const note = RAW_FIELD_NOTE[`${fact.key}.${k}`];
+        return [[text(k === "" ? "значение" : k), ...(note ? [text(` – ${note}`)] : [])], [escaped(rawFieldValue(k, v))]];
+      }),
       small: true,
     });
   }
@@ -726,6 +757,5 @@ function appendixD(card: RepoCard): Block[] {
   return [
     h3("Г. Версия методики, номер анализа и режим запуска"),
     { kind: "table", columns: [col("Поле", "left", 180), col("Значение")], rows, small: true },
-    { kind: "paragraph", tone: "fine", lines: [line("Отчет собран автоматически по фиксированным правилам: те же данные – тот же отчет. Нейросети в расчете не участвуют.")] },
   ];
 }

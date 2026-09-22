@@ -8,6 +8,7 @@
 // перевернуты с заменой — закрытый список в reports/m49-worker-report.md.
 import { afterAll, describe, expect, test } from "bun:test";
 import { getRepoCard } from "../src/api/repos";
+import { REPORT_NO_SCORE } from "../src/report/build";
 import { renderRepoReport } from "../src/report/markdown";
 import { cardFacts, makeApiDb, seedRecommendation, seedRepo, seedScan, seedScore, type ApiTestDb } from "./api-fixtures";
 
@@ -55,7 +56,8 @@ describe("MD-отчёт: структура", () => {
       "Repo Health Score: **",
       "## Вклад категорий в оценку",
       "## Категории",
-      "## Что сделать первым",
+      // В11/В15 гейта: блока «Что сделать первым» нет, раздел рекомендаций один и стоит после категорий
+      "## Рекомендации",
       "## Ограничения данных",
       "## Разбор по категориям",
       "## Как считается",
@@ -71,7 +73,9 @@ describe("MD-отчёт: структура", () => {
 
   test("шапка: ссылка на репозиторий и дата анализа; номер анализа и версия методики — в приложении (К9.4)", () => {
     expect(main).toContain("[sourcecraft.dev/report/sample](https://sourcecraft.dev/report/sample)");
-    expect(main).toContain("Отчет Repo Health. Анализ 16 сент. 2026.");
+    // В2 гейта: имя документа и плашка доступа зрителя; п.1 круга 2: дата без
+    // слова «Анализ», плашка после нее (в PDF — второй строкой шапки)
+    expect(main).toContain("Отчет HealthCraft. 16 сент. 2026 (полный).");
     expect(main).not.toContain(`#${scoredScan}`);
     expect(main).not.toContain("4.0.0-hci");
     expect(appendix).toContain(`| Последний анализ | #${scoredScan}, завершен 12:00 16 сент. 2026 |`);
@@ -84,21 +88,27 @@ describe("MD-отчёт: числа и tri-state", () => {
   test("зрителю с обоими показателями крупно Repo Health Score, HealthCraft Index строкой ниже (К9.1)", () => {
     // полный Score складывается из показанных категорий (60·15+50·15+70·15+40·15+80·20)/80 = 61
     expect(main).toContain("Repo Health Score: **61 из 100 · требует внимания**");
-    expect(main).toContain("**HealthCraft Index 67** – по открытым данным, по нему строится рейтинг.");
+    // В6 гейта: второй показатель тем же шаблоном (в PDF — справа в том же ряду).
+    // Круг 2, п.3: что это за числа, объясняет одна строка под обоими.
+    expect(main).toContain("HealthCraft Index: **67 из 100 · требует внимания**");
+    expect(main).toContain("Repo Health Score учитывает 6 категорий, включая CI/CD и Безопасность. HealthCraft Index считается по открытым данным – по нему строится рейтинг.");
   });
 
   test("все шесть категорий: балл и слово шкалы; у Безопасности без данных — «—», а не 0 (tri-state)", () => {
     for (const title of ["Документация", "CI/CD", "Безопасность", "Активность", "Задачи", "Состояние кода"]) expect(main).toContain(`| ${title} |`);
     expect(main).toContain("| Документация | 60 | требует внимания |");
     expect(main).toContain("| Безопасность | — | нет данных |");
-    // вес — в приложении А: 15 из 80 весовых пунктов с данными = 18,8%; у категории без данных веса нет
-    expect(appendix).toContain("| Документация | 60,0 | 18,8% | 11,3 |");
+    // вес — в приложении А: 15 из 80 весовых пунктов с данными = 18,8%; у категории без данных веса нет.
+    // Г1.1 гейта: «баллов в итог» — те же десятые, что в полосе вкладов (наибольший остаток), поэтому 11,2, а не 11,3
+    expect(appendix).toContain("| Документация | 60,0 | 18,8% | 11,2 |");
+    expect(main).toContain("Документация +11,2");
     expect(appendix).toContain("| Безопасность | — | не входит | — |");
     expect(md).not.toMatch(/Безопасность \| [^|]* \| 0%/);
   });
 
   test("Безопасность без данных — причина и опорная фраза «не участвует и ее не снижает» (К9.2)", () => {
-    expect(main).toContain("Безопасность считается по данным AppSec SourceCraft, а они видны только с правом доступа. Категория в оценке не участвует и ее не снижает.");
+    // Г1.8 гейта: зрителю с доступом причина прочерка — та же, что в действии движка
+    expect(main).toContain("Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Категория в оценке не участвует и ее не снижает.");
   });
 
   test("причина потолка у категории с данными тоже проговаривается (CI без результатов запусков)", () => {
@@ -114,7 +124,8 @@ describe("MD-отчёт: числа и tri-state", () => {
 
 describe("MD-отчёт: действия и приложение", () => {
   test("действия — рекомендации движка с эффектом; ключей правил и фактов в основном тексте нет", () => {
-    expect(main).toMatch(/^1\. \*\*.+\*\* .+ – ожидаемый эффект\.$/m);
+    // В16 гейта: подпись эффекта — перед числом
+    expect(main).toMatch(/^1\. \*\*.+\*\* .+ Ожидаемый эффект: \+\d+,\d+ к .+\.$/m);
     expect(main).not.toContain("`docs.presence`");
     expect(main).not.toContain("(источник: rule)");
     expect(main).not.toContain("contributing-missing`");
@@ -136,7 +147,8 @@ describe("MD-отчёт: действия и приложение", () => {
   test("приложение Б: путь «число → откуда взято» для итога, категорий и показателей", () => {
     expect(appendix).toContain("| **Repo Health Score 61** | сумма по категориям: балл × вес, приложение А |");
     expect(appendix).toContain("| **Документация 60** | сумма по показателям: балл × вес, приложение А | `documentation.score` → 60 |");
-    expect(appendix).toMatch(/\| README \(наличие и качество\): 8000 байт \| — \| `documentation\.readme` → bytes 8000; балл 72 \|/);
+    // Г1.11 гейта: «Порядок расчета» у показателя больше не пустой — там вес в балле категории
+    expect(appendix).toMatch(/\| README \(наличие и качество\): 8000 байт \| балл показателя × вес 45% в балле категории \| `documentation\.readme` → bytes 8000; балл 72 \|/);
   });
 
   test("«Как считается»: веса, порог, пределы оценки; без внутренних путей и LLM-жаргона (К9.3)", () => {
@@ -145,7 +157,8 @@ describe("MD-отчёт: действия и приложение", () => {
     expect(method).toContain("меньше 40%");
     expect(method).toContain("Популярность (реакции и ответвления) в оценку не входит");
     expect(md).not.toMatch(/reports\/.+\.md/);
-    expect(appendix).toContain("Нейросети в расчете не участвуют.");
+    // В17 гейта: сноска «собран автоматически… нейросети не участвуют» из документа убрана
+    expect(md).not.toContain("Нейросети в расчете не участвуют.");
     expect(method.split("\n").filter((l) => l.startsWith("- "))).toHaveLength(7);
   });
 });
@@ -177,12 +190,11 @@ describe("MD-отчёт: репозитории без оценки", () => {
     expect(dark).not.toContain("улучшать нечего");
   });
 
-  test("репо в каталоге без скана — «еще не сканировался», как на карточке", () => {
+  // Решение владельца 22.09 (круг 3 гейта): «Не выдавать отчет, если оценки
+  // нет» — пустое состояние остается на карточке, документ не собирается.
+  test("репо в каталоге без скана — отчета нет", () => {
     seedRepo(t, { org: "report", repo: "never-scanned" });
-    const never = renderRepoReport(getRepoCard(t.db, "report", "never-scanned")!);
-    // Б5 (У31): «ё» в текстах отчёта заменена на «е»
-    expect(never).toContain("еще не сканировался");
-    expect(never).not.toContain("## Как считается");
+    expect(() => renderRepoReport(getRepoCard(t.db, "report", "never-scanned")!)).toThrow(REPORT_NO_SCORE);
   });
 });
 
@@ -194,6 +206,9 @@ describe("MD-отчёт: репозитории без оценки", () => {
 describe("В4.4: экранирование заголовков MD", () => {
   test("title с ![img](url) и <img> не становится разметкой/HTML в отчёте", () => {
     const repoId = seedRepo(t, { org: "esc", repo: "pixel", title: "x ![t](https://evil.example/pixel) <img src=x> *em*" });
+    // с решения 22.09 отчет выдается только при наличии оценки
+    const escScan = seedScan(t, repoId, { facts: cardFacts() });
+    seedScore(t, repoId, escScan, { total: 60 });
     const card = getRepoCard(t.db, "esc", "pixel", { access: GRANTED })!;
     const md = renderRepoReport(card);
     expect(md).not.toMatch(/!\[[^\]]*\]\(https:\/\/evil\.example\/pixel\)/);
@@ -216,7 +231,8 @@ describe("Б5 (круг 2 В4.4): mdEscape-дыры", () => {
     seedScore(t, repoId, scanId, { total: 60 });
     const md = renderRepoReport(getRepoCard(t.db, "esc2", "lang", { access: GRANTED })!);
     // В4.9: язык — в паспорте анализа (приложение Г)
-    expect(md).toContain("| Язык | x \\!\\[t\\]\\(https://evil.example/l\\) &lt;s&gt; |");
+    // Г1.10 гейта: ссылку убивает экранированная «[», круглые скобки читаются как текст
+    expect(md).toContain("| Язык | x \\!\\[t\\](https://evil.example/l) &lt;s&gt; |");
     expect(md).not.toMatch(/!\[[^\]]*\]\(https:\/\/evil\.example\/l\)/);
     expect(md).not.toContain("<s>");
   });
@@ -227,7 +243,7 @@ describe("Б5 (круг 2 В4.4): mdEscape-дыры", () => {
     seedScore(t, repoId, scanId, { total: 60 });
     seedRecommendation(t, scanId, { ruleId: "top-esc", priority: 1, problem: "p ![x](https://evil.example/t)", factRef: "docs.presence", deltaScore: 1.5 });
     const md = renderRepoReport(getRepoCard(t.db, "esc2", "top", { access: GRANTED })!);
-    expect(md).toContain("p \\!\\[x\\]\\(https://evil.example/t\\)");
+    expect(md).toContain("p \\!\\[x\\](https://evil.example/t)");
     expect(md).not.toMatch(/!\[[^\]]*\]\(https:\/\/evil\.example\/t\)/);
   });
 });

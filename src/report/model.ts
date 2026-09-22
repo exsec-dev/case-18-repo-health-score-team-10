@@ -70,6 +70,26 @@ export interface CategoryRow {
   why: string;
 }
 
+/**
+ * Строка пояснения под показателем. `info` — перед строкой рисуется иконка
+ * информации (В4 гейта): в PDF это рисунок, в MD у него текста нет, поэтому
+ * сверка «текст PDF = текст MD» иконку не видит.
+ */
+export interface HeroNote {
+  line: InlineLine;
+  info?: boolean;
+}
+
+/** Второй показатель первого экрана — справа, тем же стилем (В6 гейта). */
+export interface HeroSecondary {
+  label: string;
+  value: number | null;
+  noneText: string;
+  chip: Chip | null;
+  /** подпись мелким под числом («по открытым данным, по нему строится рейтинг») */
+  note: string | null;
+}
+
 export interface ActionItem {
   n: number;
   /** заголовок — глагол (`action` правила) */
@@ -85,15 +105,24 @@ export interface ActionItem {
 export type Block =
   | { kind: "heading"; level: 1 | 2 | 3; content: InlineLine }
   /** абзац; несколько строк — одна MD-группа без пустой строки между ними */
-  /** `tone`: muted — вводная; fine — мелкая сноска; subhead — подзаголовок таблицы; caption — подпись таблицы */
-  | { kind: "paragraph"; lines: InlineLine[]; tone?: "muted" | "fine" | "subhead" | "caption" }
+  /**
+   * `tone`: muted — вводная; fine — мелкая сноска; subhead — подзаголовок
+   * таблицы; caption — подпись таблицы; note — примечание на подложке (п.9
+   * круга 2: в PDF светло-серый фон, в MD — обычный абзац).
+   */
+  | { kind: "paragraph"; lines: InlineLine[]; tone?: "muted" | "fine" | "subhead" | "caption" | "note" }
   | { kind: "list"; items: InlineLine[] }
   /** таблица; `total` — последняя строка итоговая; `small` — мелкий кегль приложения */
   | { kind: "table"; columns: TableColumn[]; rows: InlineLine[][]; total?: boolean; small?: boolean }
-  /** шапка: репозиторий, ссылка, название документа и дата анализа */
-  | { kind: "header"; slug: string; title: InlineLine | null; link: { text: string; url: string }; doc: string; date: string | null }
-  /** крупный показатель с плашкой вердикта; `value` null — «Оценки нет» */
-  | { kind: "hero"; label: string; value: number | null; noneText: string; chip: Chip | null; verdict: string; notes: InlineLine[] }
+  /** шапка: репозиторий, ссылка, название документа, плашка доступа и дата анализа */
+  | { kind: "header"; slug: string; title: InlineLine | null; link: { text: string; url: string }; doc: string; docChip: Chip | null; date: string | null }
+  /**
+   * Крупный показатель с плашкой; `value` null — «Оценки нет». `secondary` —
+   * второй показатель справа в том же ряду (В6 гейта). `verdict` — строка под
+   * числом; у отчёта с оценкой её нет (В3 гейта), у отчётов без оценки она
+   * несёт факт («Скан был…», «Собрано 23% данных…»).
+   */
+  | { kind: "hero"; label: string; value: number | null; noneText: string; chip: Chip | null; secondary: HeroSecondary | null; verdict: string | null; notes: HeroNote[] }
   /** полоса «Вклад категорий в оценку» со шкалой 3 зон; `note` — строка вместо полосы (потолок, нет кода) */
   | {
       kind: "contributions";
@@ -101,7 +130,6 @@ export type Block =
       segments: Segment[];
       rest: Segment | null;
       zones: { theme: "danger" | "warning" | "success"; text: string; share: number }[];
-      loss: InlineLine | null;
       note: string | null;
     }
   /** полоса покрытия данными с отметкой порога (страница без оценки) */

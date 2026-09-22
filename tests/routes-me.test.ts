@@ -42,6 +42,10 @@ beforeAll(async () => {
   const t: ApiTestDb = { db, close: () => db.close() };
   const repoId = seedRepo(t, { org: "pub", repo: "repo" });
   seedScore(t, repoId, seedScan(t, repoId, { facts: cardFacts() }), { total: 60 });
+  // решение владельца 22.09: отчета без оценки нет — репо со сканом, но без
+  // оценки, и репо вовсе без скана проверяют отказ маршрутов
+  seedScan(t, seedRepo(t, { org: "pub", repo: "unscored" }), { facts: cardFacts() });
+  seedRepo(t, { org: "pub", repo: "never" });
   for (const name of ["active", "rate", "cache", "nopat", "leaving"]) {
     cookies[name] = createSession(db, SECRET, upsertUser(db, `ya-${name}`, name));
   }
@@ -113,6 +117,27 @@ describe("POST /api/me/repos/:org/:repo/scan — коды ответа (Ф1.13)"
     const before = mock.requests.length;
     expect(await postScan("rate", "enum/b2")).toEqual({ status: 429, code: "rate_limited", deduplicated: null });
     expect(mock.requests.length).toBe(before); // дешёвая проверка до сети
+  });
+});
+
+describe("отчет без оценки не выдается (решение владельца 22.09)", () => {
+  // Кнопки выгрузки у такого репозитория на карточке нет (`RepoPage.tsx`:
+  // меню рисуется только при `card.score !== null`), отказ ловит прямую ссылку.
+  test("скан был, оценки нет и скана не было: .md и .pdf — 404 с человеческим текстом", async () => {
+    for (const slug of ["pub/unscored", "pub/never"]) {
+      for (const ext of ["md", "pdf"]) {
+        const res = await fetch(url(`/api/repos/${slug}/report.${ext}`));
+        expect({ slug, ext, status: res.status }).toEqual({ slug, ext, status: 404 });
+        const body = (await res.json()) as { error: { code: string; message: string } };
+        expect(body.error.code).toBe("not_found");
+        expect(body.error.message).toContain("Отчет появится после первого анализа");
+      }
+    }
+  });
+
+  test("у репозитория с оценкой оба маршрута по-прежнему отдают документ", async () => {
+    expect((await fetch(url("/api/repos/pub/repo/report.md"))).status).toBe(200);
+    expect((await fetch(url("/api/repos/pub/repo/report.pdf"))).status).toBe(200);
   });
 });
 

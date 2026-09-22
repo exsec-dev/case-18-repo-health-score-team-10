@@ -19,7 +19,11 @@ describe("К9.12: «Вклад категорий в оценку» на кар�
   test("карточка и отчет зовут одну функцию и одни подписи (format.ts)", () => {
     const band = between(src("web/RepoPage.tsx"), "function ContributionBand", "\n}\n");
     const report = src("report/build.ts");
-    for (const token of ["categoryContributions(", "CONTRIBUTIONS_TITLE", "CONTRIBUTIONS_REST", "contributionsNote(", "lossParts(", "fmtContribution("]) {
+    // Гейт 22.09 (В9): строку итога под шкалой («Сильнее всего итог снижают…»)
+    // из документа убрали, на карточке она осталась — `lossParts` теперь
+    // только у карточки; расчет вкладов и подписи по-прежнему общие.
+    expect({ card: band.includes("lossParts("), report: report.includes("lossParts(") }).toEqual({ card: true, report: false });
+    for (const token of ["categoryContributions(", "CONTRIBUTIONS_TITLE", "CONTRIBUTIONS_REST", "contributionsNote(", "fmtContribution("]) {
       expect({ token, card: band.includes(token), report: report.includes(token) }).toEqual({ token, card: true, report: true });
     }
     // веса — аргументом: индекса — из /api/meta, полного — из карточки
