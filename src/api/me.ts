@@ -542,7 +542,8 @@ export interface MyJob {
   stalled: boolean;
   /**
    * В4.8.5 (К8.5.1): скан этого задания — связь без DDL: первый скан того же
-   * (репо, автор) со `started_at ≥ claimed_at` задания. null — скана ещё нет
+   * (репо, автор) со `started_at ≥ claimed_at` задания и раньше взятия
+   * следующего задания того же автора на том же репо. null — скана ещё нет
    * (в очереди, упало до скана, отказано).
    */
   scanId: number | null;
@@ -560,12 +561,31 @@ export interface MyJob {
   scoreChanged: boolean | null;
 }
 
-/** Первый скан задания: тот же (репо, автор), начат не раньше взятия задания в работу. */
-function scanOfJob(db: Database, repoId: number, userId: number, claimedAt: string | null): { id: number; status: string; status_detail: string | null } | null {
+/**
+ * Первый скан задания: тот же (репо, автор), начат не раньше взятия задания в
+ * работу. Круг 2 (Н4): и раньше взятия СЛЕДУЮЩЕГО задания того же автора на
+ * том же репо — иначе задание, упавшее до скана, получало скан следующего
+ * (колонки `finished_at` у заданий нет; без DDL граница — `claimed_at`
+ * следующего).
+ */
+function scanOfJob(
+  db: Database,
+  jobId: number,
+  repoId: number,
+  userId: number,
+  claimedAt: string | null,
+): { id: number; status: string; status_detail: string | null } | null {
   if (claimedAt === null || repoId <= 0) return null;
+  const next = db
+    .query("SELECT MIN(claimed_at) AS c FROM jobs WHERE repo_id = ? AND user_id = ? AND id > ? AND claimed_at IS NOT NULL")
+    .get(repoId, userId, jobId) as { c: string | null } | null;
+  const until = next?.c ?? null;
   return db
-    .query("SELECT id, status, status_detail FROM scans WHERE repo_id = ? AND user_id = ? AND started_at >= ? ORDER BY id LIMIT 1")
-    .get(repoId, userId, claimedAt) as { id: number; status: string; status_detail: string | null } | null;
+    .query(
+      `SELECT id, status, status_detail FROM scans WHERE repo_id = ? AND user_id = ? AND started_at >= ?
+       AND (? IS NULL OR started_at < ?) ORDER BY id LIMIT 1`,
+    )
+    .get(repoId, userId, claimedAt, until, until) as { id: number; status: string; status_detail: string | null } | null;
 }
 
 /**
@@ -595,11 +615,12 @@ function indexAsOf(db: Database, repoId: number, upTo: number): number | null {
 /** Исход задания по его скану (К8.5.1): скан, исход, изменилась ли публичная оценка. */
 export function jobScanOutcome(
   db: Database,
+  jobId: number,
   repoId: number,
   userId: number,
   claimedAt: string | null,
 ): { scanId: number | null; outcome: MyJob["outcome"]; scoreChanged: boolean | null } {
-  const scan = scanOfJob(db, repoId, userId, claimedAt);
+  const scan = scanOfJob(db, jobId, repoId, userId, claimedAt);
   if (!scan) return { scanId: null, outcome: null, scoreChanged: null };
   if (scan.status === "running" || scan.status === "queued") return { scanId: scan.id, outcome: null, scoreChanged: null };
   const interrupted = scan.status === "bad" && (scan.status_detail === "shutdown" || scan.status_detail === "orphaned");
@@ -652,7 +673,7 @@ export function myJobs(db: import("bun:sqlite").Database, userId: number, doneLi
       stalled: phase === "running" && jobLeaseExpired(typeof row.lease_until === "string" ? row.lease_until : null),
       ...(phase === "refused"
         ? { scanId: null, outcome: null, scoreChanged: null }
-        : jobScanOutcome(db, Number(row.repo_id), userId, typeof row.claimed_at === "string" ? row.claimed_at : null)),
+        : jobScanOutcome(db, Number(row.id), Number(row.repo_id), userId, typeof row.claimed_at === "string" ? row.claimed_at : null)),
     };
   };
     // LEFT JOIN: refused живёт без строки repos (repo_id = 0)
@@ -850,8 +871,12 @@ export async function checkFavoriteAccess(
     )
     .get(org, repo, userId) as { f: string | null };
   const lastOwnScanAt = last?.f ?? null;
-  if (verdict === "unavailable") {
-    // С3-1: сбой платформы не затирает доказанные права
+  // С3-1: сбой платформы не затирает доказанные права. Круг 2 (П1): то же,
+  // когда репо видно, а CI или AppSec не ответили (0/429/5xx) и правило
+  // «свой» без них не выполнено — «свой» неизвестен, как в предпроверке
+  // `/scan`: прежние права и время проверки не трогаются (запись «не
+  // проверена» остаётся кандидатом насоса), заявка не делает вывод «не свой»
+  if (verdict === "unavailable" || (verdict === "ok" && probe.channelsFailed && !isOwnRepo(probe.access))) {
     return {
       access: savedFavoriteAccess(db, userId, org, repo) ?? { ...UNKNOWN_ACCESS },
       enqueue: { status: "skipped", code: "check_failed" },

@@ -190,6 +190,21 @@ export function isOwnRepo(a: NormalizedAccess): boolean {
   return a.cicd === "granted" || a.appsec === "granted" || (a.visibility === "private" && a.repo === "granted");
 }
 
+/**
+ * «Свой» НЕ ОПРЕДЕЛЁН (К8.5.6, круг 2 П1): репозиторий виден токену, правило
+ * «свой» не выполнено, но хотя бы один канал (CI, Security) не проверился —
+ * сбой SourceCraft/AppSec (0/429/5xx) или отклонённый токен. Это не вердикт
+ * «не свой»: прежние права не перезаписываются, заявка не делает вывода, ждём
+ * удачной проверки. Предпроверка `/scan` (доступ карточки из кэша); проверка
+ * прав избранного — то же правило по `RepoProbe.channelsFailed` живой пробы
+ * (там видно, спрашивался ли AppSec).
+ */
+export function ownUndecided(a: NormalizedAccess): boolean {
+  if (isOwnRepo(a) || a.repo !== "granted") return false;
+  const undecided = (c: ChannelAccess) => c === "check-failed" || c === "pat-expired";
+  return undecided(a.cicd) || undecided(a.appsec);
+}
+
 /** Видимость строки `repos` → нормализованная. */
 export function visibilityOf(raw: unknown): NormalizedAccess["visibility"] {
   return raw === "private" ? "private" : raw === "public" ? "public" : "unknown";
@@ -200,6 +215,12 @@ export interface RepoProbe {
   access: NormalizedAccess;
   /** тело repo-GET — чтобы предпроверка запуска не делала его второй раз */
   repoRes: { status: number; json: unknown };
+  /**
+   * Круг 2 (П1): спрошенный канал (CI или AppSec) не ответил — сбой
+   * (0/429/5xx) или отклонённый токен. Неспрошенный AppSec (тело repo-GET
+   * без `id`) сбоем не считается: это форма ответа, а не отказ платформы.
+   */
+  channelsFailed: boolean;
 }
 
 /**
@@ -217,7 +238,7 @@ export async function probeRepoAccess(io: ProbeIo, org: string, repo: string): P
   const visibility = visibilityOf(body?.visibility);
   const repoRes = { status: res.status, json: res.json };
   if (repoAccess !== "granted") {
-    return { access: { repo: repoAccess, cicd: repoAccess, appsec: repoAccess, visibility }, repoRes };
+    return { access: { repo: repoAccess, cicd: repoAccess, appsec: repoAccess, visibility }, repoRes, channelsFailed: false };
   }
   const ci = await io.restGet(`${slugPath}/cicd/runs?page_size=1`);
   const cicd = accessFromStatus(ci.status);
@@ -227,7 +248,9 @@ export async function probeRepoAccess(io: ProbeIo, org: string, repo: string): P
     const sec = await io.appsecLatest(id);
     appsecAccess = sec.status === 404 ? appsecOn404(cicd, visibility === "public", repoAccess) : accessFromStatus(sec.status);
   }
-  return { access: { repo: repoAccess, cicd, appsec: appsecAccess, visibility }, repoRes };
+  const failed = (c: ChannelAccess) => c === "check-failed" || c === "pat-expired";
+  const channelsFailed = failed(cicd) || (id !== null && failed(appsecAccess));
+  return { access: { repo: repoAccess, cicd, appsec: appsecAccess, visibility }, repoRes, channelsFailed };
 }
 
 /** Ввод-вывод живой проверки: REST GET и AppSec scans/latest (тесты — фейки, сервер — клиенты на PAT зрителя). */

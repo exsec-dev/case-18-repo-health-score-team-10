@@ -102,7 +102,11 @@ export function makeRecheckPump(deps: RecheckPumpDeps): RecheckPump {
         if (!queue.includes(slug)) queue.push(slug);
       }
       queues.set(userId, queue);
-      if (!runs.has(userId)) runs.set(userId, run(userId));
+      // Н3 (круг 2): проход стартует следующим микротиком, ПОСЛЕ `runs.set`.
+      // Прямой `runs.set(userId, run(userId))` при синхронном завершении
+      // прохода (токена нет, очередь пуста) выполнял `runs.delete` в `finally`
+      // раньше `runs.set` — насос «шёл» вечно и новые записи не проверял.
+      if (!runs.has(userId)) runs.set(userId, Promise.resolve().then(() => run(userId)));
     },
     pending: (userId) => queues.get(userId)?.length ?? 0,
     running: (userId) => runs.has(userId),

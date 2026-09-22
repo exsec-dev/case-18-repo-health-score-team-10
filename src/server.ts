@@ -14,12 +14,12 @@ import {
   isOwnRepo,
   makeAccessCache,
   probeIoOf,
+  ownUndecided,
   probeRepoAccess,
   resolveAccess,
   visibilityOf,
   type AccessRepo,
   type AccessResult,
-  type ChannelAccess,
   type NormalizedAccess,
   type ProbeIo,
 } from "./auth/access";
@@ -400,6 +400,9 @@ async function addFavoriteAndCheck(userId: number, org: string, repo: string): P
         favoriteEnqueueOf(await requestUserScan(db, rest, userId, org, repo, config.queue, new Date(), repoRes)),
       );
       check = { status: result.result, enqueue: result.enqueue };
+      // круг 2 (П1): сбой проверки (платформа или каналы) — не вердикт; запись
+      // остаётся «не проверенной» и уходит в насос (он анализ не ставит)
+      if (result.result === "failed") recheckPump.enqueue(userId, [{ org, repo }]);
     }
   }
   const saved = listFavorites(db, userId).find((f) => f.org === org && f.repo === repo) ?? null;
@@ -443,8 +446,7 @@ async function ownershipOf(req: Request, userId: number, org: string, repo: stri
   if (access.repo === "denied") return { kind: "denied" };
   if (access.repo !== "granted") return { kind: "unknown" };
   // репо видно, но каналы не проверились — «свой» не определён: не вердикт
-  const undecided = (c: ChannelAccess) => c === "check-failed" || c === "pat-expired";
-  if (undecided(access.cicd) || undecided(access.appsec)) return { kind: "unknown" };
+  if (ownUndecided(access)) return { kind: "unknown" };
   return { kind: "not_own" };
 }
 
