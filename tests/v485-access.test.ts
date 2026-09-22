@@ -97,8 +97,8 @@ describe("К8.5.6: один классификатор ответа SourceCraft"
       r: { cicd: "check-failed", appsec: "check-failed", repo: "granted" },
       cachedAfter61s: null,
     });
-    expect(appsecOn404("denied", true, "granted")).toBe("denied");
-    expect(appsecOn404("granted", true, "granted")).toBe("granted");
+    expect(appsecOn404("denied", "public", "granted")).toBe("denied");
+    expect(appsecOn404("granted", "public", "granted")).toBe("granted");
   });
 
   test("С3-1: сбой SourceCraft при проверке прав не затирает сохраненные права и время проверки", async () => {

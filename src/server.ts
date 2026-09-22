@@ -382,7 +382,8 @@ async function cardOrRefusal(req: Request, org: string, repo: string): Promise<R
  * «Проверить доступ»). Первый анализ своего ставится только здесь, при явном
  * добавлении (§2-Р1): кулдаун и капы — как у прежней автопостановки
  * (`requestUserScan` целиком, тело repo-GET прокинуто). Окно проверок
- * человека исчерпано — запись «не проверена», уходит в фоновый насос (без
+ * исчерпано — новый репозиторий не добавляется (429 с `Retry-After`),
+ * повторная звезда существующей записи уходит в фоновый насос (без
  * анализа). Ответ — обновлённая запись строки (К8.5.7: список не
  * перечитывается целиком) и исход проверки.
  */
@@ -393,6 +394,17 @@ async function addFavoriteAndCheck(userId: number, org: string, repo: string): P
   let check: { status: FavoriteCheckResult | "deferred" | "no_pat"; enqueue: FavoriteEnqueue | null } = { status: "no_pat", enqueue: null };
   if (pat !== null) {
     if (!allowFavoriteCheck(userId)) {
+      // закрытие В4.8.5 (ревью; решение Екатерины 22.09): новый репозиторий
+      // без проверки существования не добавляется — окно проверок исчерпано
+      // нашим лимитом, а не сбоем SourceCraft; повторная звезда существующей
+      // записи уходит в фон, как было
+      if (outcome === "added") {
+        removeFavorite(db, userId, org, repo);
+        return rateLimited(
+          "не больше " + config.queue.favoriteChecksPerMinute + " добавлений в избранное в минуту – повторите чуть позже",
+          windowRetryAfterSec(favoriteChecks, userId, 60_000),
+        );
+      }
       check = { status: "deferred", enqueue: null };
       recheckPump.enqueue(userId, [{ org, repo }]);
     } else {

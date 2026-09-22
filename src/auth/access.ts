@@ -161,8 +161,12 @@ export function accessFromStatus(status: number): ChannelAccess {
  * не проверился (сбой CI, отклонённый токен), 404 — «неизвестно», а не отказ:
  * иначе сбой CI превращался в `denied` Security, закэшированный на 15 минут.
  */
-export function appsecOn404(cicd: ChannelAccess, isPublic: boolean, repoAccess: ChannelAccess): ChannelAccess {
-  const corroborated = cicd === "granted" || (!isPublic && repoAccess === "granted");
+export function appsecOn404(cicd: ChannelAccess, visibility: string, repoAccess: ChannelAccess): ChannelAccess {
+  // закрытие В4.8.5 (ревью): «репо виден токену» подтверждает права только у
+  // ПРИВАТНОГО — internal видит любой вошедший в SourceCraft токен (живой
+  // зонд 22.09), а «неизвестно» ничего не доказывает; иначе чужой internal с
+  // 404 AppSec становился «своим» (К8.5.14) и открывал Security
+  const corroborated = cicd === "granted" || (visibility === "private" && repoAccess === "granted");
   if (corroborated) return "granted";
   if (cicd === "check-failed" || cicd === "pat-expired") return "check-failed";
   return "denied";
@@ -249,7 +253,7 @@ export async function probeRepoAccess(io: ProbeIo, org: string, repo: string): P
   let appsecAccess: ChannelAccess = "check-failed"; // форма ответа без id — не знание о правах
   if (id !== null) {
     const sec = await io.appsecLatest(id);
-    appsecAccess = sec.status === 404 ? appsecOn404(cicd, visibility === "public", repoAccess) : accessFromStatus(sec.status);
+    appsecAccess = sec.status === 404 ? appsecOn404(cicd, visibility, repoAccess) : accessFromStatus(sec.status);
   }
   const failed = (c: ChannelAccess) => c === "check-failed" || c === "pat-expired";
   const channelsFailed = failed(cicd) || (id !== null && failed(appsecAccess));
@@ -341,7 +345,7 @@ async function resolveUncached(deps: AccessDeps, viewer: { userId: number; pat: 
       // при другом подтверждении прав PAT — CI granted или приватный репо с
       // repo granted; иначе 404 — отказ (живой зонд чужим PAT — Ф2.6).
       // В4.8.5 (К8.5.6, С8-6): неподтверждённый из-за СБОЯ CI 404 — «неизвестно»
-      appsec = res.status === 404 ? appsecOn404(cicd, isPublic, repoAccess) : accessFromStatus(res.status);
+      appsec = res.status === 404 ? appsecOn404(cicd, repo.visibility, repoAccess) : accessFromStatus(res.status);
     }
     store("appsec", appsec);
   }

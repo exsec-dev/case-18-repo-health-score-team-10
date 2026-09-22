@@ -126,11 +126,27 @@ describe("автопроверка прав при добавлении — по
     }
   }, 60_000);
 
-  test("четвёртое добавление в минуту: запись не проверена синхронно — уходит в фон, анализ не ставится (Config.queue.favoriteChecksPerMinute)", async () => {
+  // ПЕРЕВОРОТ (закрытие В4.8.5, ревью; решение Екатерины 22.09): новый
+  // репозиторий сверх окна проверок больше не добавляется без проверки
+  // существования — 429 с Retry-After, записи нет; повторная звезда уже
+  // добавленного сверх окна по-прежнему уходит в фон. Инвариант «сверх окна
+  // анализ не ставится» — прежний.
+  test("четвёртое НОВОЕ добавление в минуту — 429 с Retry-After, записи нет; повторная звезда существующего — в фон; анализ сверх окна не ставится (Config.queue.favoriteChecksPerMinute)", async () => {
     expect((await putPat("lim", "pat-lim-000000000")).status).toBe(200);
     const checks: string[] = [];
-    for (const slug of ["lim/l1", "lim/l2", "lim/l3", "lim/l4"]) checks.push((await add("lim", slug)).body?.check.status ?? "?");
-    expect(checks).toEqual(["checked", "checked", "checked", "deferred"]);
+    for (const slug of ["lim/l1", "lim/l2", "lim/l3"]) checks.push((await add("lim", slug)).body?.check.status ?? "?");
+    expect(checks).toEqual(["checked", "checked", "checked"]);
+    const over = await add("lim", "lim/l4");
+    expect(over.status).toBe(429);
+    const favs = (await (await fetch(at("/api/me/favorites"), as("lim"))).json()) as { entries: { repo: string }[] };
+    expect(favs.entries.some((f) => f.repo === "l4")).toBe(false);
+    const again = await add("lim", "lim/l1");
+    expect({ status: again.status, check: again.body?.check.status }).toEqual({ status: 200, check: "deferred" });
+    // дождаться фоновой перепроверки l1 — иначе ее запросы к моку попадут в
+    // счет запросов следующего теста
+    const l1Probes = () => mock.requests.filter((r) => r.path.startsWith("/repos/lim/l1/cicd/runs")).length;
+    for (let i = 0; i < 100 && l1Probes() < 2; i++) await Bun.sleep(50);
+    expect(l1Probes()).toBe(2);
     // фон проверяет права, но заявку не ставит (§2-Р1)
     await settled("lim");
     const jobs = (await (await fetch(at("/api/me/jobs"), as("lim"))).json()) as { active: { slug: string }[] };

@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { loadConfig } from "../src/config";
 import { openDb } from "../src/db";
 import { createSession, SESSION_COOKIE, upsertUser } from "../src/auth/session";
-import { visibilityOf } from "../src/auth/access";
+import { appsecOn404, visibilityOf } from "../src/auth/access";
 import type { FavoriteAccess } from "../src/api/me";
 import { spawnServer, startMockApi, type SpawnedServer } from "./server-harness";
 
@@ -25,6 +25,8 @@ const SECRET = "v485-gate-secret-0123456789abcdef-xyz";
 const mock = startMockApi((_req, url) => {
   const p = url.pathname;
   if (p === "/user") return Response.json({ username: "gatetester" });
+  // AppSec «скана нет» — 404 без проверки прав (закрытие В4.8.5, ревью)
+  if (p === "/v1/scans/latest") return Response.json({ error: "no scans" }, { status: 404 });
   if (/^\/orgs\/[^/]+\/repos$/.test(p)) return Response.json({ repositories: [] });
   if (/^\/repos\/[^/]+\/[^/]+\/cicd\/runs$/.test(p)) return Response.json({ error: "denied" }, { status: 403 });
   const repo = p.match(/^\/repos\/([^/]+)\/([^/]+)$/);
@@ -32,7 +34,9 @@ const mock = startMockApi((_req, url) => {
     if (repo[1] === "ghost") {
       return Response.json({ error_code: "RepositoryNotFound", message: `repository#${repo[2]} does not exist` }, { status: 404 });
     }
-    return Response.json({ name: repo[2], visibility: repo[1] === "inner" ? "internal" : "public" });
+    const body: Record<string, unknown> = { name: repo[2], visibility: repo[1] === "inner" ? "internal" : repo[1] === "priv" ? "private" : "public" };
+    if (repo[2].startsWith("withid")) body.id = `gid-${repo[1]}-${repo[2]}`;
+    return Response.json(body);
   }
   return null;
 });
@@ -130,6 +134,34 @@ describe("гейт В4.8.5: видимость internal", () => {
   });
 });
 
+describe("закрытие В4.8.5 (ревью): AppSec 404 не делает чужой internal «своим»", () => {
+  test("подтверждение «репо виден токену» — только у приватного", () => {
+    expect(appsecOn404("denied", "private", "granted")).toBe("granted");
+    expect(appsecOn404("denied", "internal", "granted")).toBe("denied");
+    expect(appsecOn404("denied", "unknown", "granted")).toBe("denied");
+    expect(appsecOn404("denied", "public", "granted")).toBe("denied");
+    expect(appsecOn404("granted", "internal", "granted")).toBe("granted");
+  });
+
+  test("internal-репо: CI 403, AppSec 404 — Security не открыт, не «свой», анализ не ставится", async () => {
+    const res = await put("/api/me/favorites", { repository: "inner/withid-team" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { check: { enqueue: { status: string; code: string | null } | null } };
+    expect(body.check.enqueue?.code).toBe("not_own");
+    const row = (await favorites()).find((f) => f.org === "inner" && f.repo === "withid-team");
+    expect(row?.access?.visibility).toBe("internal");
+    expect(row?.access?.appsec).toBe(false);
+    expect(row?.access?.own).toBe(false);
+  });
+
+  test("приватный, видимый токену, при AppSec 404 — по-прежнему «свой» (правило Ф1.4 не сломано)", async () => {
+    await put("/api/me/favorites", { repository: "priv/withid-mine" });
+    const row = (await favorites()).find((f) => f.org === "priv" && f.repo === "withid-mine");
+    expect(row?.access?.visibility).toBe("private");
+    expect(row?.access?.own).toBe(true);
+  });
+});
+
 describe("гейт В4.8.5: Origin на фактическом порту стенда", () => {
   test("redirect смотрит на 8418, стенд на другом порту — своя страница проходит гард (401, не 403)", async () => {
     const base = otherPortServer!.base;
@@ -141,6 +173,56 @@ describe("гейт В4.8.5: Origin на фактическом порту сте
     });
     expect(res.status).toBe(401);
   });
+
+  test("настоящий дефолт: YA_REDIRECT_URI не задан, .env нет, стенд не на 8418 — своя страница проходит гард", async () => {
+    const cwd = mkdtempSync(join(tmpdir(), "rh-gate-default-"));
+    dirs.push(cwd);
+    const port = 20000 + Math.floor(Math.random() * 20000);
+    const env: Record<string, string> = {
+      PATH: process.env.PATH ?? "",
+      SYSTEMROOT: process.env.SYSTEMROOT ?? "",
+      TEMP: process.env.TEMP ?? tmpdir(),
+      TMP: process.env.TMP ?? tmpdir(),
+      DATA_DIR: cwd,
+      PORT: String(port),
+      PROCESS_ROLE: "rating",
+      SCHEDULER_START_DELAY_MS: "86400000",
+      APP_SECRET: SECRET,
+      SOURCECRAFT_TOKEN: "",
+      SOURCECRAFT_API_BASE: mock.url,
+      APPSEC_API_BASE: mock.url,
+      SOURCECRAFT_GIT_BASE: mock.url,
+      YA_OAUTH_BASE: mock.url,
+      YA_LOGIN_BASE: mock.url,
+    };
+    const proc = Bun.spawn(["bun", join(import.meta.dir, "..", "src", "server.ts")], { cwd, env, stdout: "ignore", stderr: "ignore" });
+    try {
+      let up = false;
+      for (let i = 0; i < 100 && !up; i++) {
+        try {
+          up = (await fetch(`http://127.0.0.1:${port}/api/health`)).ok;
+        } catch {
+          await Bun.sleep(100);
+        }
+      }
+      expect(up).toBe(true);
+      const own = await fetch(`http://127.0.0.1:${port}/api/me/pat`, {
+        method: "PUT",
+        headers: { origin: `http://localhost:${port}`, "content-type": "application/json" },
+        body: "{}",
+      });
+      expect(own.status).toBe(401);
+      const evil = await fetch(`http://127.0.0.1:${port}/api/me/pat`, {
+        method: "PUT",
+        headers: { origin: "http://localhost.evil.example", "content-type": "application/json" },
+        body: "{}",
+      });
+      expect(evil.status).toBe(403);
+    } finally {
+      proc.kill();
+      await proc.exited;
+    }
+  }, 30_000);
 
   test("чужой Origin по-прежнему 403", async () => {
     const res = await fetch(`${otherPortServer!.base}/api/me/pat`, {
