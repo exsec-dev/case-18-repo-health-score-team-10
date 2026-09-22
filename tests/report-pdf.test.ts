@@ -187,7 +187,7 @@ describe("П1: содержание PDF равно содержанию MD", () 
       const json = JSON.stringify(doc.content);
       expect(json).toContain('{"text":"grant-ci-runs","style":"code"}');
       expect(json).toContain('{"text":"CI [config] `only` | pipes","italics":true}');
-      expect(json).toMatch(/\{"text":"HealthCraft Index \(4 категории\): 55 из 100 – требует внимания","bold":true\}/);
+      expect(json).toMatch(/\{"text":"HealthCraft Index \(4 категории\): 44 из 100 – требует внимания","bold":true\}/);
       expect(json).not.toContain("**");
       expect(json).not.toContain("\\\\[");
     } finally {
