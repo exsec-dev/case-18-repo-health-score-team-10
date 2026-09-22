@@ -747,7 +747,7 @@ function buildColumns(
             color="secondary"
             title={
               item.scanStatus === "bad"
-                ? "Последний скан завершился сбоем: часть источников не ответила. Score посчитан по последнему успешному скану – сбой не понижает оценку."
+                ? "Последний анализ завершился сбоем: часть источников не ответила. Оценка взята из последнего успешного анализа – сбой ее не снижает."
                 : undefined
             }
           >
@@ -791,7 +791,7 @@ function ScoreCell({ item }: { item: Item }) {
     <Flex gap={0} alignItems="center" justifyContent="flex-end">
       {/* «Из истории» — левее полосы: ярлык редкий и не должен раздвигать числовой ряд */}
       {item.staleFacts && (
-        <Label theme="warning" size="xs" title="Часть фактов взята из истории при сбое канала">
+        <Label theme="warning" size="xs" title="Часть данных взята из прошлого анализа: источник не ответил">
           Из истории
         </Label>
       )}
@@ -826,7 +826,7 @@ function ScoreCell({ item }: { item: Item }) {
 function CategoryCell({ value }: { value: number | null }) {
   if (value === null) {
     return (
-      <Label theme="unknown" size="xs" title={`${NO_SCORE}: категория исключена с перенормировкой, а не занижена`}>
+      <Label theme="unknown" size="xs" title="Нет данных: категория в оценке не участвует и ее не снижает">
         {NO_DATA_SHORT}
       </Label>
     );

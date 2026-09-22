@@ -16,10 +16,16 @@
 // оценщика Δ; карточка собирает канальные правила на ПОКАЗАННЫХ фактах
 // (CI/Security из своих сканов) своим оценщиком; порядок — одна функция
 // orderRecommendations для движка и для объединённой выдачи карточки.
+// В4.9 (К9.10): тексты правил — ОДНА чистая функция `recommendationText`
+// (ключ правила + параметры из фактов). Движок зовёт её при записи, карточка
+// (`api/repos.ts`) — при чтении, подставляя параметры из фактов того же
+// скана: новые формулировки видны без пересчёта каталога. Условия
+// срабатывания, Δ и порядок не менялись — только тексты.
 import type { Database } from "bun:sqlite";
 import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
 import { SCORE_WEIGHTS, CategoryKey, SECRETS_CRITICAL_TOTAL_CAP } from "./model";
 import { compute, computeFromFacts, effectiveFacts, Scores } from "./compute";
+import { fmtDecimal, fmtScore, fmtSigned } from "../web/format";
 
 /** Канал правила: данные, видимые только зрителю с доступом (К2). */
 export type RecommendationChannel = "cicd" | "appsec";
@@ -44,14 +50,16 @@ export interface RecommendOptions {
   scores?: Scores;
 }
 
-const round1 = (x: number): number => Math.round(x * 10) / 10;
 export const round4 = (x: number): number => Math.round(x * 10000) / 10000;
+
+/** Почему прирост presence-правила равен нулю (текст — `recommendationText`). */
+export type DeltaReason = "code-empty" | "no-total" | "cap";
 
 /** Реальный прирост итога правила при подмене фактов (К-Ф1.2); reason — причина Δ = 0. */
 export type DeltaEvaluator = (
   channel: RecommendationChannel | null,
   patch: (facts: Map<string, unknown>) => void,
-) => { delta: number; reason: string | null };
+) => { delta: number; reason: DeltaReason | null };
 
 export interface RecommendFactsContext {
   delta: DeltaEvaluator;
@@ -59,6 +67,216 @@ export interface RecommendFactsContext {
   issuesScore: number | null;
   /** "channel" — только правила каналов CI/Security (карточка, круг 2) */
   only?: "all" | "channel";
+}
+
+// ---------- тексты правил (К9.10): одна функция для записи и чтения ----------
+
+/** README: разделы, которые ищет сервис (флаги факта `docs.readme`). */
+export type ReadmeSection = "install" | "build" | "test";
+
+/** Параметры шаблона — все восстанавливаются из фактов и баллов того же скана. */
+export interface RecommendationParams {
+  /** presence: прирост показателя (знаковый) */
+  delta?: number;
+  /** presence: почему прирост 0 */
+  reason?: DeltaReason | null;
+  /** presence: канал правила — к какому показателю прирост */
+  channel?: RecommendationChannel | null;
+  /** readme-sections-missing: каких разделов нет (флаги `docs.readme`) */
+  missing?: ReadmeSection[];
+  /** start-tracker: балл категории Задачи */
+  issuesScore?: number | null;
+  /** speed-up-pipeline: медиана длительности, минуты */
+  minutes?: number;
+  /** appsec-critical: есть утекшие секреты (потолок 49 действует только при них, Д1) */
+  secrets?: boolean;
+  /** resolve-old-todos: пометок старше 180 дней и всего */
+  older?: number;
+  total?: number;
+  /** reduce-stale-issues: доля открытых задач без движения, % */
+  percent?: number;
+  /** speed-up-issue-close: медиана закрытия, дни (Д2: округляется до целых) */
+  days?: number;
+}
+
+/** Роли текста действия (К9.10): заголовок — глагол, пояснение — причина, эффект. */
+export interface RecommendationText {
+  action: string;
+  problem: string;
+  expectedImpact: string;
+}
+
+const DELTA_REASON_TEXT: Record<DeltaReason, string> = {
+  "code-empty": "в репозитории нет кода",
+  "no-total": "оценка появится, когда данных станет больше",
+  cap: "Repo Health Score ограничен 49 баллами из-за утекших секретов",
+};
+
+const SECTION_WORDS: Record<ReadmeSection, { title: string; en: string; about: string }> = {
+  install: { title: "Установка", en: "Install", about: "установке" },
+  build: { title: "Сборка", en: "Build", about: "сборке" },
+  test: { title: "Тесты", en: "Test", about: "тестах" },
+};
+
+const joinAnd = (items: string[]): string => (items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} и ${items.at(-1)}`);
+
+/** Родительный падеж после «из N»: из 1 пометки, из 5 пометок, из 21 пометки. */
+const fromWord = (n: number, one: string, many: string): string => (n % 10 === 1 && n % 100 !== 11 ? one : many);
+
+/** Дни: 1 день, 2 дня, 5 дней. */
+const daysWord = (n: number): string => {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  return m10 === 1 && m100 !== 11 ? "день" : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? "дня" : "дней";
+};
+
+const categoryImpact = (title: string): string => `повысит балл категории «${title}»`;
+
+function presenceImpact(p: RecommendationParams): string | null {
+  if (typeof p.delta !== "number") return null;
+  const scope = p.channel ? "к Repo Health Score" : "к HealthCraft Index";
+  return `${fmtSigned(p.delta)} ${scope}${p.reason ? ` – ${DELTA_REASON_TEXT[p.reason]}` : ""}`;
+}
+
+/**
+ * Тексты правила по ключу и параметрам. null — ключ неизвестен или параметр
+ * не восстановился: тогда карточка показывает сохраненный текст (запасной
+ * путь К9.10). Формальный тон эталона вида, термины SourceCraft (22.09).
+ */
+export function recommendationText(ruleId: string, p: RecommendationParams): RecommendationText | null {
+  const presence = (action: string, problem: string): RecommendationText | null => {
+    const impact = presenceImpact(p);
+    return impact === null ? null : { action, problem, expectedImpact: impact };
+  };
+  switch (ruleId) {
+    case "license-missing":
+      return presence("Добавьте файл лицензии", "В репозитории нет лицензии: без нее другие не могут законно использовать код. Подойдет, например, MIT или Apache-2.0.");
+    case "contributing-missing":
+      return presence("Добавьте файл CONTRIBUTING.md", "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.");
+    case "codeowners-missing":
+      return presence("Добавьте файл CODEOWNERS", "Не указано, кто отвечает за код. С CODEOWNERS предложения изменений сразу попадают к ответственным.");
+    case "readme-missing":
+      return presence("Добавьте файл README.md", "В репозитории нет README – описания проекта и порядка запуска. Его первым читает любой новый участник.");
+    case "readme-sections-missing": {
+      const missing = (p.missing ?? []).filter((k) => k in SECTION_WORDS);
+      if (missing.length === 0) return null;
+      const many = missing.length > 1;
+      const titles = joinAnd(missing.map((k) => `«${SECTION_WORDS[k].title}»`));
+      const about = missing.map((k, i) => (i === 0 ? `${k === "install" ? "об" : "о"} ${SECTION_WORDS[k].about}` : SECTION_WORDS[k].about));
+      return presence(
+        `Добавьте в README ${many ? "разделы" : "раздел"} ${titles}`,
+        `В README нет ${many ? "разделов" : "раздела"} ${joinAnd(about)}. Сервис находит ${many ? "их по заголовкам" : "его по заголовку"} ${titles} или ${missing.map((k) => SECTION_WORDS[k].en).join(", ")}.`,
+      );
+    }
+    case "ci-missing":
+      return presence("Настройте CI", "Нет файла .sourcecraft/ci.yaml: изменения не собираются и не проверяются автоматически.");
+    case "ci-no-steps":
+      return presence("Добавьте команды в ci.yaml", "Файл .sourcecraft/ci.yaml есть, но в нем нет ни одной задачи с командой, поэтому CI ничего не проверяет.");
+    case "start-tracker":
+      if (typeof p.issuesScore !== "number") return null;
+      return {
+        action: "Ведите задачи в трекере",
+        problem: "В трекере нет ни одной задачи. По задачам видно, как быстро проект отвечает пользователям.",
+        expectedImpact: `${categoryImpact("Задачи")} (сейчас ${fmtScore(p.issuesScore)} из 100)`,
+      };
+    case "connect-appsec":
+      return {
+        action: "Подключите проверку AppSec",
+        problem: "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+        expectedImpact: "добавит в Repo Health Score категорию «Безопасность»",
+      };
+    case "grant-ci-runs":
+      return {
+        action: "Откройте доступ к результатам CI",
+        problem: "CI настроен, но результаты запусков сервису недоступны. Для своего репозитория добавьте в Настройках токен с правом читать запуски CI.",
+        expectedImpact: "CI/CD: сейчас не больше 50 из 100, с результатами запусков – до 100",
+      };
+    case "fix-red-runs":
+      return { action: "Почините CI", problem: "Последний запуск CI завершился ошибкой или успешны меньше 90% запусков.", expectedImpact: categoryImpact("CI/CD") };
+    case "speed-up-pipeline":
+      if (typeof p.minutes !== "number") return null;
+      return {
+        action: "Ускорьте CI",
+        problem: `Обычно запуск CI длится ${fmtDecimal(p.minutes, 1, { trim: true })} мин. Кеш зависимостей и параллельные задачи сократят ожидание.`,
+        expectedImpact: categoryImpact("CI/CD"),
+      };
+    case "appsec-critical":
+      if (typeof p.secrets !== "boolean") return null;
+      // Д1: потолок 49 действует только при утекших секретах — без них его не обещаем
+      return p.secrets
+        ? {
+            action: "Устраните утечки секретов",
+            problem: "AppSec нашел в коде утекшие ключи или пароли. Пока они в коде, Repo Health Score не может быть выше 49: замените секреты и удалите их из кода.",
+            expectedImpact: "снимет ограничение Repo Health Score в 49 баллов",
+          }
+        : {
+            action: "Устраните критичные находки AppSec",
+            problem: "AppSec нашел в коде критичные уязвимости.",
+            expectedImpact: categoryImpact("Безопасность"),
+          };
+    case "resolve-old-todos":
+      if (typeof p.older !== "number" || typeof p.total !== "number") return null;
+      return {
+        action: "Разберите устаревшие пометки TODO и FIXME",
+        problem: `${p.older} из ${p.total} ${fromWord(p.total, "пометки", "пометок")} старше 180 дней. Выполните отложенные работы, перенесите их в задачи или удалите пометки.`,
+        expectedImpact: categoryImpact("Состояние кода"),
+      };
+    case "reduce-stale-issues":
+      if (typeof p.percent !== "number") return null;
+      return {
+        action: "Разберите задачи без движения",
+        problem: `${p.percent}% открытых задач без движения более 90 дней. Закройте неактуальные, по остальным дайте ответ и назначьте ответственного.`,
+        expectedImpact: categoryImpact("Задачи"),
+      };
+    case "speed-up-issue-close": {
+      if (typeof p.days !== "number") return null;
+      const days = Math.round(p.days);
+      return {
+        action: "Ускорьте обработку новых задач",
+        problem: `Типичный срок закрытия задачи – ${days} ${daysWord(days)}. Назначьте ответственного за разбор, добавьте шаблоны и метки приоритета.`,
+        expectedImpact: categoryImpact("Задачи"),
+      };
+    }
+    default:
+      return null;
+  }
+}
+
+/**
+ * Параметры шаблона правила из эффективных фактов скана (те же, что видел
+ * движок при записи). Presence-прирост и его причина — из сохраненных
+ * колонок (`delta`, `reason`), они не восстанавливаются из фактов.
+ */
+export function recommendationParams(ruleId: string, ok: Map<string, unknown>, extra: RecommendationParams = {}): RecommendationParams {
+  const p: RecommendationParams = { ...extra };
+  if (ruleId === "readme-sections-missing") {
+    const readme = ok.get("docs.readme") as { flags?: Record<string, unknown>; present?: unknown } | undefined;
+    if (readme && readme.present !== false) {
+      const flags = readme.flags ?? {};
+      p.missing = (["install", "build", "test"] as ReadmeSection[]).filter((k) => flags[k] !== true);
+    }
+  }
+  if (ruleId === "speed-up-pipeline") {
+    const runs = ok.get("cicd.runs") as { duration_p50?: unknown } | undefined;
+    if (typeof runs?.duration_p50 === "number") p.minutes = runs.duration_p50 / 60;
+  }
+  if (ruleId === "appsec-critical") {
+    const appsec = ok.get("appsec.findings") as { secrets_critical?: unknown } | undefined;
+    if (appsec) p.secrets = appsec.secrets_critical === true;
+  }
+  if (ruleId === "resolve-old-todos") {
+    const todo = ok.get("code.todo") as { older_180d?: unknown; count?: unknown; fixme?: unknown } | undefined;
+    if (todo) {
+      p.total = ((todo.count ?? 0) as number) + ((todo.fixme ?? 0) as number);
+      p.older = (todo.older_180d ?? 0) as number;
+    }
+  }
+  if (ruleId === "reduce-stale-issues" || ruleId === "speed-up-issue-close") {
+    const stats = ok.get("issues.stats") as { open?: unknown; stale_90d?: unknown; median_close_days?: unknown } | undefined;
+    if (stats && typeof stats.open === "number" && stats.open > 0) p.percent = Math.round((((stats.stale_90d ?? 0) as number) / Math.max(1, stats.open)) * 100);
+    if (typeof stats?.median_close_days === "number") p.days = stats.median_close_days;
+  }
+  return p;
 }
 
 /** Порядок score-правил движка (§8) — общий для движка и объединённой выдачи карточки. */
@@ -137,17 +355,17 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
   const input = { scanId, repoId: scores.repoId, stale: eff.stale, staleCats: eff.staleCats };
   const base = computeFromFacts(ok, input, now);
   const secretsCritical = (ok.get("appsec.findings") as { secrets_critical?: unknown } | undefined)?.secrets_critical === true;
-  const realDelta = (channel: RecommendationChannel | null, patch: (facts: Map<string, unknown>) => void): { delta: number; reason: string | null } => {
+  const realDelta: DeltaEvaluator = (channel, patch) => {
     const facts = new Map(ok);
     patch(facts);
     const after = computeFromFacts(facts, input, now);
     const pick = (s: Scores) => (channel === null ? s.healthcraftIndex : s.repoHealthScore);
-    if (base.codeEmpty) return { delta: 0, reason: "в репозитории нет кода" };
+    if (base.codeEmpty) return { delta: 0, reason: "code-empty" };
     const b = pick(base);
     const a = pick(after);
-    if (b === null || a === null) return { delta: 0, reason: "итог появится при большем покрытии" };
+    if (b === null || a === null) return { delta: 0, reason: "no-total" };
     const delta = round4(a - b);
-    if (delta === 0 && channel !== null && secretsCritical && b >= SECRETS_CRITICAL_TOTAL_CAP) return { delta: 0, reason: "упирается в кап 49" };
+    if (delta === 0 && channel !== null && secretsCritical && b >= SECRETS_CRITICAL_TOTAL_CAP) return { delta: 0, reason: "cap" };
     return { delta, reason: null };
   };
   return recommendFromFacts(ok, { delta: realDelta, issuesScore: scores.categories.issues.score });
@@ -160,33 +378,24 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
   const presence: Recommendation[] = [];
   const activation: Recommendation[] = [];
   const scoreRules: Recommendation[] = [];
-  const presenceRule = (
-    ruleId: string,
-    problem: string,
-    action: string,
-    factRefs: string[],
-    patch: (facts: Map<string, unknown>) => void,
-    channel: RecommendationChannel | null = null,
-  ) => presence.push(mk(ruleId, problem, action, factRefs, realDelta(channel, patch), channel));
+  const presenceRule = (ruleId: string, factRefs: string[], patch: (facts: Map<string, unknown>) => void, channel: RecommendationChannel | null = null) => {
+    const real = realDelta(channel, patch);
+    const texts = recommendationText(ruleId, recommendationParams(ruleId, ok, { delta: real.delta, reason: real.reason, channel }))!;
+    presence.push({ ruleId, kind: "presence", priority: 0, ...texts, factRefs, deltaScore: real.delta, opensCategory: null, channel });
+  };
   const withPresence = (field: keyof DocsPresenceValue) => (facts: Map<string, unknown>) => {
     facts.set("docs.presence", { ...(facts.get("docs.presence") as DocsPresenceValue), [field]: true });
   };
 
   const presence_ = ok.get("docs.presence") as DocsPresenceValue | undefined;
   if (pub && presence_) {
-    if (presence_.license !== true) {
-      presenceRule("license-missing", "В репозитории нет файла лицензии", "Добавьте LICENSE (MIT/Apache-2.0) в корень – лицензия условие переиспользования", ["docs.presence"], withPresence("license"));
-    }
-    if (presence_.contributing !== true) {
-      presenceRule("contributing-missing", "Нет CONTRIBUTING – как вносить правки не описано", "Добавьте CONTRIBUTING.md с процессом контрибуции", ["docs.presence"], withPresence("contributing"));
-    }
-    if (presence_.codeowners !== true) {
-      presenceRule("codeowners-missing", "Нет CODEOWNERS – код без ответственных", "Добавьте CODEOWNERS с владельцами каталогов", ["docs.presence"], withPresence("codeowners"));
-    }
+    if (presence_.license !== true) presenceRule("license-missing", ["docs.presence"], withPresence("license"));
+    if (presence_.contributing !== true) presenceRule("contributing-missing", ["docs.presence"], withPresence("contributing"));
+    if (presence_.codeowners !== true) presenceRule("codeowners-missing", ["docs.presence"], withPresence("codeowners"));
     const readme = ok.get("docs.readme") as DocsReadmeValue | undefined;
     if (presence_.readme !== true) {
       // обещание: README появился (подмена К-Ф1.2 — присутствие без объёма и секций)
-      presenceRule("readme-missing", "В репозитории нет README", "Добавьте README с описанием проекта и базовыми инструкциями", ["docs.presence", "docs.readme"], (facts) => {
+      presenceRule("readme-missing", ["docs.presence", "docs.readme"], (facts) => {
         withPresence("readme")(facts);
         facts.set("docs.readme", { present: true, bytes: 0, flags: {} });
       });
@@ -194,8 +403,7 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
       const flags = readme.flags ?? {};
       const missing = ["install", "build", "test"].filter((k) => flags[k as keyof typeof flags] !== true);
       if (missing.length > 0) {
-        const names = missing.map((k) => ({ install: "запуска/установки", build: "сборки", test: "тестов" })[k]).join("/");
-        presenceRule("readme-sections-missing", `README без инструкции ${names}`, `Добавьте секцию ${names} в README (заголовки Install/Build/Test или Установка/Сборка/Тесты)`, ["docs.readme"], (facts) => {
+        presenceRule("readme-sections-missing", ["docs.readme"], (facts) => {
           const current = facts.get("docs.readme") as { flags?: Record<string, unknown> };
           facts.set("docs.readme", { ...current, flags: { ...(current.flags ?? {}), ...Object.fromEntries(missing.map((k) => [k, true])) } });
         });
@@ -209,10 +417,6 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
     const hasYaml = cicdCfg.has_ci_yaml === true;
     presenceRule(
       hasYaml ? "ci-no-steps" : "ci-missing",
-      hasYaml ? "ci.yaml есть, но без шагов – CI фактически не заявлен" : "CI не заявлен: нет .sourcecraft/ci.yaml",
-      hasYaml
-        ? "Добавьте в ci.yaml хотя бы один task с непустой командой (build/test)"
-        : "Добавьте .sourcecraft/ci.yaml с task и командой (образец – ci.yaml этого проекта)",
       ["cicd.configs"],
       (facts) => {
         facts.set("cicd.configs", hasYaml ? { ...(facts.get("cicd.configs") as object), has_steps: true } : { has_ci_yaml: true, has_steps: true });
@@ -224,136 +428,57 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
   // ---------- активационные (без числа; «открывает категорию») ----------
   const stats = ok.get("issues.stats") as { open?: unknown; closed?: unknown } | undefined;
   if (pub && stats && (stats.open ?? 0) === 0 && (stats.closed ?? 0) === 0) {
-    activation.push(
-      act("start-tracker", "issues", "Трекер не ведется: 0 открытых и 0 закрытых задач", "Начните вести трекер задач (баги + планы) – источник метрик поддержки", ["issues.stats"], `Задачи: скор с минимума категории (${ctx.issuesScore ?? 0}/100) до фактического по данным`),
-    );
+    activation.push(act("start-tracker", "issues", ["issues.stats"], { issuesScore: ctx.issuesScore ?? 0 }));
   }
   if (!ok.has("appsec.findings")) {
     // нейтральный текст (К1): рекомендация видна только зрителю с доступом
     // к Security, а данных AppSec у скана нет — ни подключения, ни скана
-    activation.push(
-      act(
-        "connect-appsec",
-        "security",
-        "Безопасность без данных: результатов AppSec SourceCraft по репозиторию нет",
-        "Подключите AppSec к репозиторию и дождитесь завершенного скана – SAST/SCA/secrets закроют 20% Repo Health Score",
-        ["appsec.findings"],
-        "AppSec-данные недоступны: проверьте право персонального токена доступа src.repositories.useAppSecScan и завершенность скана – Безопасность заработает в Repo Health Score",
-        "appsec",
-      ),
-    );
+    activation.push(act("connect-appsec", "security", ["appsec.findings"], {}, "appsec"));
   }
   const runsFact = ok.get("cicd.runs");
   if (!runsFact && cicdCfg?.has_ci_yaml === true && cicdCfg?.has_steps === true) {
-    activation.push(
-      act("grant-ci-runs", "cicd", "CI заявлен, но статусы прогонов недоступны (403 для чужих репо)", "Дайте доступ к прогонам CI (свой репо / права токена) – доказательства вместо потолка", ["cicd.runs", "cicd.configs"], "CI/CD: 50 → до 100 по фактическим прогонам", "cicd"),
-    );
+    activation.push(act("grant-ci-runs", "cicd", ["cicd.runs", "cicd.configs"], {}, "cicd"));
   }
 
   // ---------- скор-правила (после появления данных; влияние текстом) ----------
+  const score = (ruleId: string, factRefs: string[], channel: RecommendationChannel | null = null) =>
+    scoreRules.push(mkScore(ruleId, factRefs, recommendationParams(ruleId, ok), channel));
   if (runsFact && typeof (runsFact as { runs_count?: unknown }).runs_count === "number" && (runsFact as { runs_count?: number }).runs_count! > 0) {
     const rf = runsFact as { last_status?: unknown; success_rate?: unknown; duration_p50?: unknown };
-    if (rf.last_status !== "success" || (typeof rf.success_rate === "number" && rf.success_rate < 0.9)) {
-      scoreRules.push(
-        mkScore("fix-red-runs", "Красные прогоны CI: свежий статус не success", "Почините пайплайн: последние прогоны падают", ["cicd.runs"], "повысит категорию CI/CD", "cicd"),
-      );
-    }
-    if (typeof rf.duration_p50 === "number" && rf.duration_p50 > 15 * 60) {
-      scoreRules.push(
-        mkScore("speed-up-pipeline", `Долгий пайплайн: медиана ${round1(rf.duration_p50 / 60)} мин`, "Ускорьте пайплайн (кэш, параллельные задачи, узкие шаги)", ["cicd.runs"], "повысит категорию CI/CD", "cicd"),
-      );
-    }
+    if (rf.last_status !== "success" || (typeof rf.success_rate === "number" && rf.success_rate < 0.9)) score("fix-red-runs", ["cicd.runs"], "cicd");
+    if (typeof rf.duration_p50 === "number" && rf.duration_p50 > 15 * 60) score("speed-up-pipeline", ["cicd.runs"], "cicd");
   }
   const appsec = ok.get("appsec.findings") as AppsecFindingsValue | undefined;
   if (appsec) {
     const crit = (appsec.severity_counts?.critical as number | undefined) ?? 0;
-    if (appsec.secrets_critical === true || crit > 0) {
-      scoreRules.push(
-        mkScore("appsec-critical", "Критичные находки AppSec (secrets/SAST critical)", "Закройте критичные находки: утечки секретов капят Repo Health Score на 49", ["appsec.findings"], "снимет кап Repo Health Score ≤ 49 и поднимет Безопасность", "appsec"),
-      );
-    }
+    if (appsec.secrets_critical === true || crit > 0) score("appsec-critical", ["appsec.findings"], "appsec");
   }
   const todo = ok.get("code.todo") as { older_180d?: unknown; count?: unknown; fixme?: unknown } | undefined;
   if (pub && todo) {
     const total = ((todo.count ?? 0) as number) + ((todo.fixme ?? 0) as number);
     const older = (todo.older_180d ?? 0) as number;
-    if (total > 0 && older / total >= 0.3) {
-      scoreRules.push(
-        mkScore("resolve-old-todos", `Старые TODO: ${older} из ${total} маркеров старше 180 дней`, "Разберите накопленный техдолг: закрыть или удалить устаревшие TODO/FIXME", ["code.todo"], "повысит категорию Состояние кода"),
-      );
-    }
+    if (total > 0 && older / total >= 0.3) score("resolve-old-todos", ["code.todo"]);
   }
   const statsFull = ok.get("issues.stats") as { open?: unknown; stale_90d?: unknown; median_close_days?: unknown } | undefined;
   const openCount = typeof statsFull?.open === "number" ? statsFull.open : 0;
   if (pub && statsFull && openCount > 0) {
     const share = ((statsFull.stale_90d ?? 0) as number) / Math.max(1, openCount);
-    if (share >= 0.5) {
-      scoreRules.push(
-        mkScore("reduce-stale-issues", `Зависшие задачи: ${Math.round(share * 100)}% открытых без активности 90+ дней`, "Закройте или оживите зависшие задачи (триаж + автозакрытие)", ["issues.stats"], "повысит категорию Задачи"),
-      );
-    }
-    if (typeof statsFull.median_close_days === "number" && statsFull.median_close_days >= 30) {
-      scoreRules.push(
-        mkScore("speed-up-issue-close", `Медленное закрытие задач: медиана ${statsFull.median_close_days} дн.`, "Ускорьте обработку: шаблоны, приоритеты, ответственный за триаж", ["issues.stats"], "повысит категорию Задачи"),
-      );
-    }
+    if (share >= 0.5) score("reduce-stale-issues", ["issues.stats"]);
+    if (typeof statsFull.median_close_days === "number" && statsFull.median_close_days >= 30) score("speed-up-issue-close", ["issues.stats"]);
   }
 
   // ---------- порядок (§8): реальный Δ desc (затем rule_id) → активационные по весу desc → score ----------
   return orderRecommendations([...presence, ...activation, ...scoreRules]);
 }
 
-function mk(
-  ruleId: string,
-  problem: string,
-  action: string,
-  factRefs: string[],
-  real: { delta: number; reason: string | null },
-  channel: RecommendationChannel | null = null,
-): Recommendation {
-  // Δ канального правила — к Repo Health Score, публичного — к HealthCraft
-  // Index (К-Ф1.2, В4.3). Дельта ЗНАКОВАЯ: инверсия законна (плохие
-  // CI/Security опускают полный Score ниже индекса) — «+» безусловно
-  // рисовало «+-2.5»; знак берётся из фактического прироста.
-  // В4.6 круг 2 (Р18): разделитель в тексте эффекта — среднее тире (правило
-  // языка UI): строка едет на карточку и в MD-отчёт как есть.
-  const scope = channel === null ? "к HealthCraft Index" : "к Repo Health Score";
-  const sign = real.delta < 0 ? "-" : "+";
-  return {
-    ruleId,
-    kind: "presence",
-    priority: 0,
-    problem,
-    action,
-    factRefs,
-    expectedImpact: `${sign}${Math.abs(real.delta).toFixed(1)} ${scope}${real.reason ? ` – ${real.reason}` : ""}`,
-    deltaScore: real.delta,
-    opensCategory: null,
-    channel,
-  };
+function act(ruleId: string, opens: CategoryKey, factRefs: string[], params: RecommendationParams, channel: RecommendationChannel | null = null): Recommendation {
+  const texts = recommendationText(ruleId, params)!;
+  return { ruleId, kind: "activation", priority: 0, ...texts, factRefs, deltaScore: null, opensCategory: opens, channel };
 }
 
-function act(
-  ruleId: string,
-  opens: CategoryKey,
-  problem: string,
-  action: string,
-  factRefs: string[],
-  impact: string,
-  channel: RecommendationChannel | null = null,
-): Recommendation {
-  return { ruleId, kind: "activation", priority: 0, problem, action, factRefs, expectedImpact: impact, deltaScore: null, opensCategory: opens, channel };
-}
-
-function mkScore(
-  ruleId: string,
-  problem: string,
-  action: string,
-  factRefs: string[],
-  impact: string,
-  channel: RecommendationChannel | null = null,
-): Recommendation {
-  return { ruleId, kind: "score", priority: 0, problem, action, factRefs, expectedImpact: impact, deltaScore: null, opensCategory: null, channel };
+function mkScore(ruleId: string, factRefs: string[], params: RecommendationParams, channel: RecommendationChannel | null = null): Recommendation {
+  const texts = recommendationText(ruleId, params)!;
+  return { ruleId, kind: "score", priority: 0, ...texts, factRefs, deltaScore: null, opensCategory: null, channel };
 }
 
 /** Запись: PK (scan_id, model_version, rule_id) — пересчёт не дублирует. */

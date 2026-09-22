@@ -101,7 +101,8 @@ describe("presence-правила: реальный прирост итога (�
       { key: "appsec.findings", value: { severity_counts: { critical: 0, high: 0, medium: 0, low: 0 }, resolved_share: 1, secrets_critical: true } },
     );
     const ci = recommend(t.db, seedScan(t, capped), { now: NOW }).find((r) => r.ruleId === "ci-missing")!;
-    expect({ delta: ci.deltaScore, impact: ci.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к Repo Health Score – упирается в кап 49" });
+    // В4.9 (К9.10): причины Δ = 0 — словами читателя (закрытый список текстов в отчете воркера); Δ и условия не менялись
+    expect({ delta: ci.deltaScore, impact: ci.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к Repo Health Score – Repo Health Score ограничен 49 баллами из-за утекших секретов" });
 
     const empty = withFacts(
       healthyFacts(),
@@ -114,7 +115,7 @@ describe("presence-правила: реальный прирост итога (�
     // только git-документация: покрытие рейтинга < 0.4 → итог NULL
     const sparse: FactSpec[] = [{ key: "docs.presence", value: { readme: true, license: false, contributing: true, codeowners: true } }];
     const nul = recommend(t.db, seedScan(t, sparse), { now: NOW }).find((r) => r.ruleId === "license-missing")!;
-    expect({ delta: nul.deltaScore, impact: nul.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к HealthCraft Index – итог появится при большем покрытии" });
+    expect({ delta: nul.deltaScore, impact: nul.expectedImpact }).toEqual({ delta: 0, impact: "+0.0 к HealthCraft Index – оценка появится, когда данных станет больше" });
   });
 });
 
@@ -141,7 +142,9 @@ describe("активационная ветка (без числа)", () => {
     const recs = recommend(t.db, scanId, { now: NOW });
     const appsec = recs.find((r) => r.ruleId === "connect-appsec")!;
     expect(appsec.channel).toBe("appsec");
-    expect(appsec.expectedImpact).toContain("src.repositories.useAppSecScan");
+    // В4.9 (К9.10): право токена названо в пояснении (`problem`), эффект — «добавит в Repo Health Score категорию «Безопасность»»
+    expect(appsec.problem).toContain("src.repositories.useAppSecScan");
+    expect(appsec.expectedImpact).toBe("добавит в Repo Health Score категорию «Безопасность»");
     expect(appsec.expectedImpact).not.toMatch(/coverage 1\.00→1\.00/); // пустой текст В3 умер
     expect(`${appsec.problem} ${appsec.action} ${appsec.expectedImpact}`).not.toMatch(/публичн|своего репо/i);
     const grant = recs.find((r) => r.ruleId === "grant-ci-runs")!;

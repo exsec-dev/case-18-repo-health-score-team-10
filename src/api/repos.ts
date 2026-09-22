@@ -6,8 +6,8 @@
 // такие репо уезжают в отдельный массив, иначе «нет данных» оказалось бы
 // лучшим или худшим результатом в зависимости от направления сортировки.
 import type { Database } from "bun:sqlite";
-import { CHANNEL_KINDS, PUBLIC_KINDS, computeFromFacts, totalsFromCategories, type CategoryScore } from "../score/compute";
-import { orderRecommendations, recommendFromFacts, round4, type DeltaEvaluator } from "../score/recommend";
+import { CHANNEL_KINDS, PUBLIC_KINDS, computeFromFacts, effectiveFacts, totalsFromCategories, type CategoryScore } from "../score/compute";
+import { orderRecommendations, recommendFromFacts, recommendationParams, recommendationText, round4, type DeltaEvaluator } from "../score/recommend";
 import { categoryOf, parseFactValue } from "../collectors/facts";
 import { isOwnRepo, NO_PAT_ACCESS, visibilityOf, type AccessRepo, type AccessResult, type ChannelAccess } from "../auth/access";
 import { DEFAULT_SCAN, defaultLeaseMs, type ScanConfig } from "../config";
@@ -925,19 +925,31 @@ export function getRepoCard(
     `SELECT rule_id, priority, problem, action, fact_ref, expected_impact, delta_score, opens_category, source, channel
      FROM recommendations WHERE scan_id = ? AND model_version = ? AND channel IS NULL ORDER BY priority ASC`,
   );
-  const publicRecs: CardRecommendation[] = (recQuery.all(publicRow.scan_id, MODEL_VERSION) as RecRow[]).map((rec) => ({
-    ruleId: rec.rule_id,
-    kind: ruleKind(rec),
-    priority: rec.priority,
-    problem: rec.problem,
-    action: rec.action,
-    factRefs: splitRefs(rec.fact_ref).map((key) => ({ key, missing: false })),
-    expectedImpact: rec.expected_impact,
-    deltaScore: rec.delta_score,
-    opensCategory: rec.opens_category,
-    source: rec.source,
-    channel: rec.channel,
-  }));
+  // В4.9 (К9.10, вариант (а)): текст публичного правила — по ключу при чтении.
+  // Параметры — из эффективных фактов ТОГО ЖЕ скана (как у движка при записи)
+  // и сохраненных колонок (Δ); причина Δ = 0 восстанавливается по признакам
+  // скана. Ключ неизвестен или параметр не восстановился — сохраненный текст.
+  const scanFacts = effectiveFacts(db, publicRow.scan_id, r.id).ok;
+  const publicRecs: CardRecommendation[] = (recQuery.all(publicRow.scan_id, MODEL_VERSION) as RecRow[]).map((rec) => {
+    const reason = rec.delta_score === 0 ? (publicRow.code_empty === 1 ? "code-empty" : publicRow.healthcraft_index === null ? "no-total" : null) : null;
+    const texts = recommendationText(
+      rec.rule_id,
+      recommendationParams(rec.rule_id, scanFacts, { delta: rec.delta_score ?? undefined, reason, channel: null, issuesScore: publicCats.issues?.score ?? null }),
+    );
+    return {
+      ruleId: rec.rule_id,
+      kind: ruleKind(rec),
+      priority: rec.priority,
+      problem: texts?.problem ?? rec.problem,
+      action: texts?.action ?? rec.action,
+      factRefs: splitRefs(rec.fact_ref).map((key) => ({ key, missing: false })),
+      expectedImpact: texts ? texts.expectedImpact : rec.expected_impact,
+      deltaScore: rec.delta_score,
+      opensCategory: rec.opens_category,
+      source: rec.source,
+      channel: rec.channel,
+    };
+  });
   const baseFull = fullTotals.repoHealthScore;
   const channelDelta: DeltaEvaluator = (ruleChannel, patch) => {
     if (ruleChannel === null) throw new Error("card: public rules come from the eligible scan");
@@ -947,10 +959,10 @@ export function getRepoCard(
       { ...shownCats, cicd: categoryOfFacts(facts, "cicd"), security: categoryOfFacts(facts, "security") },
       { codeEmpty, secretsCritical: secretsOf(facts) },
     ).repoHealthScore;
-    if (codeEmpty) return { delta: 0, reason: "в репозитории нет кода" };
-    if (baseFull === null || after === null) return { delta: 0, reason: "итог появится при большем покрытии" };
+    if (codeEmpty) return { delta: 0, reason: "code-empty" };
+    if (baseFull === null || after === null) return { delta: 0, reason: "no-total" };
     const delta = round4(after - baseFull);
-    if (delta === 0 && secretsOf(channelFacts) && baseFull >= SECRETS_CRITICAL_TOTAL_CAP) return { delta: 0, reason: "упирается в кап 49" };
+    if (delta === 0 && secretsOf(channelFacts) && baseFull >= SECRETS_CRITICAL_TOTAL_CAP) return { delta: 0, reason: "cap" };
     return { delta, reason: null };
   };
   const channelRecs: CardRecommendation[] = recommendFromFacts(channelFacts, {
@@ -1068,7 +1080,7 @@ export function jobLeaseExpired(leaseUntil: string | null, now = Date.now()): bo
 }
 
 /** Текст канального presence-правила без числа (С4): Δ Repo Health Score виден только при доступе к CI и Security. */
-export const CHANNEL_DELTA_HIDDEN_TEXT = "улучшит CI/CD – прирост Repo Health Score виден при доступе к CI/CD и Безопасности";
+export const CHANNEL_DELTA_HIDDEN_TEXT = "повысит балл категории «CI/CD»; насколько вырастет Repo Health Score, видно при доступе к CI/CD и Безопасности";
 
 const roundTotal = (x: number | null): number | null => (x === null ? null : Math.round(x));
 const splitRefs = (raw: string): string[] =>

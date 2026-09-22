@@ -201,7 +201,8 @@ describe("Р20: значения подметрик округлены, дока
       // слово «значение» из строки убрано (доводка 21.09) и живёт в подсказке;
       // утверждение о САМОМ округлении не менялось
       // В4.7 (Б7, П4.2): страница берет значение из словаря подметрик (округление — внутри него)
-      pageUsesRounding: /\{formatSubmetricValue\(key, subKey, sub\.value, submetricContext\(card\.score\?\.computedAt\)\)\}/.test(page),
+      // В4.9 (К9.9): значение — `submetricShownValue` (словарь + слова заметки вместо «—»)
+      pageUsesRounding: /\{submetricShownValue\(key, subKey, sub, submetricContext\(card\.score\?\.computedAt\)\)\}/.test(page),
       proofStaysRaw: between(page, "function FactProof", "function factStatusText").includes("fmtFactValue(fact.value)"),
     }).toEqual({ mdRounded: true, mdRaw: false, pageUsesRounding: true, proofStaysRaw: true });
   });
@@ -322,7 +323,9 @@ describe("Б5 (Р18, Р19): правило языка в текстах движ
 
   test("Р18: две названные пользовательские строки API — по правилу языка", async () => {
     const { CHANNEL_DELTA_HIDDEN_TEXT } = (await import("../src/api/repos")) as { CHANNEL_DELTA_HIDDEN_TEXT: string };
-    expect(CHANNEL_DELTA_HIDDEN_TEXT).toBe("улучшит CI/CD – прирост Repo Health Score виден при доступе к CI/CD и Безопасности");
+    // ПЕРЕВОРОТ (В4.9, К9.10): тексты правил в форме эффекта «повысит балл категории «…»»; правило языка прежнее
+    expect(CHANNEL_DELTA_HIDDEN_TEXT).toBe("повысит балл категории «CI/CD»; насколько вырастет Repo Health Score, видно при доступе к CI/CD и Безопасности");
+    expect(CHANNEL_DELTA_HIDDEN_TEXT).not.toMatch(/[—ё\d]/);
     // ПЕРЕВОРОТ (В4.8.5, К8.5.4, С4-12): без «PAT» и «кабинета» — правило языка прежнее (среднее тире)
     expect(textOf("src/api/me.ts")).toContain("SourceCraft отклонил ваш токен – замените его в Настройках");
   });

@@ -141,8 +141,9 @@ describe("П4.2: одно правило на страницу, MD и PDF", () =
     // В4.9: модель отчета строит build.ts; значение — `submetricShownValue` (словарь + заметка К9.9)
     const md = readFileSync(join(root, "report", "build.ts"), "utf8");
     expect({
-      pageImports: page.includes('import { formatSubmetricValue, submetricContext, submetricTitle } from "../report/submetrics";'),
-      pageValue: page.includes("{formatSubmetricValue(key, subKey, sub.value, submetricContext(card.score?.computedAt))}"),
+      // В4.9 (К9.9): страница берет значение через `submetricShownValue` — тот же словарь, что отчет
+      pageImports: page.includes('import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle } from "../report/submetrics";'),
+      pageValue: page.includes("{submetricShownValue(key, subKey, sub, submetricContext(card.score?.computedAt))}"),
       pageTitle: page.includes("{submetricTitle(key, subKey)}"),
       mdRow: md.includes("const value = submetricShownValue(key, sub, entry, ctx);") && md.includes("line(submetricTitle(key, sub)),"),
       mdContext: md.includes("const ctx = submetricContext(score.computedAt);"),

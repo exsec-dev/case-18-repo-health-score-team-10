@@ -72,7 +72,7 @@ import {
 } from "@gravity-ui/uikit";
 import { useEffect, useState } from "react";
 import type { CardCategory } from "../api/repos";
-import { formatSubmetricValue, submetricContext, submetricTitle } from "../report/submetrics";
+import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle } from "../report/submetrics";
 import type { MetaResponse, RepoCard } from "./api";
 import { dataOf, mutateJson, useJson, useVisible } from "./api";
 import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
@@ -99,6 +99,11 @@ import {
   fmtScore,
   fmtSubmetric,
   gitLimitsText,
+  humanNoData,
+  noDataReason,
+  noScoreText,
+  NOT_IN_SCORE,
+  securityNoDataReason,
   scanStatusText,
   scanTriggerText,
   DEFINITION_NAME_WIDTH,
@@ -261,14 +266,11 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
         ) : (
           // В4.4 (кластер E): «скана не было» ≠ «скан был — сбой/мало данных»;
           // CTA — по возможностям зрителя (запуск/токен/объяснение)
+          // Д3 (В4.9): текст пустого состояния — общий с отчетом (`noScoreText`)
           <EmptyState
             icon={SquareListUl}
-            title={card.scan ? "Скан был – данных для оценки не хватило" : "Репозиторий есть в каталоге, но еще не сканировался"}
-            description={
-              card.scan
-                ? `Последний скан (${sentence(scanStatusText(card.scan.status))}) не собрал достаточно фактов для честного числа – это отсутствие данных, а не плохая оценка. Следующий анализ соберет факты заново.`
-                : "Score появится после первого скана: его считает код по фактам, а фактов пока нет."
-            }
+            title={noScoreText(card.scan).title}
+            description={noScoreText(card.scan).description}
             actions={
               canRefresh
                 ? [{ text: card.scan ? "Повторить анализ" : "Запустить анализ", view: "action", size: "l", onClick: start.start }]
@@ -939,11 +941,12 @@ function CategoryRow({
    * собирает в одну строку под списком). Осталось tri-state: «нет данных» с
    * причиной и оговоркой про перенормировку.
    */
+  // В4.9 (К9.2, К9.13): причина и опорная фраза — те же, что в отчете (format.ts)
   const note =
     cat.score === null
-      ? `${key === "security" ? securityNote(card) : humanNoData(`${key}: ${cat.no_data ?? ""}`)} Категория не снизила Score: ее вес выброшен, остальные перенормированы.`
+      ? `${key === "security" ? securityNoDataReason(card.evidence.find((e) => e.key === "appsec.findings")) : noDataReason(key, cat.no_data)} ${NOT_IN_SCORE}`
       : cat.no_data
-        ? humanNoData(`${key}: ${cat.no_data}`)
+        ? noDataReason(key, cat.no_data)
         : null;
 
   const row = (
@@ -989,7 +992,7 @@ function CategoryRow({
         theme="normal"
         size="xs"
         className="rh-category__weight"
-        title={`номинальный вес категории в Repo Health Score – ${cat.weight}% → вклад после перенормировки`}
+        title={`Вес категории в Repo Health Score – ${cat.weight}%. Вклад – ее доля в итоге среди категорий, по которым есть данные.`}
       >
         {cat.score === null ? NOT_COUNTED : `Вклад ${contribution}%`}
       </Label>
@@ -1052,13 +1055,15 @@ function CategoryRow({
                     Доводка 21.09: слово «значение» из строки убрано — оно
                     повторялось в каждой из девяти строк; полная форма
                     осталась в подсказке. */}
+                {/* В4.9 (К9.9): служебная заметка расчета не печатается — вместо «—» стоят
+                    слова заметки из словаря подметрик, примечание уходит в подсказку;
+                    неизвестная заметка не показывается вовсе */}
                 <Text
                   color="secondary"
                   className="rh-subrow__value"
-                  title={`значение: ${formatSubmetricValue(key, subKey, sub.value, submetricContext(card.score?.computedAt))}${sub.note ? ` (${sub.note})` : ""}`}
+                  title={`значение: ${submetricShownValue(key, subKey, sub, submetricContext(card.score?.computedAt))}${submetricNote(key, subKey, sub.note)?.remark ? `. ${submetricNote(key, subKey, sub.note)!.remark}` : ""}`}
                 >
-                  {formatSubmetricValue(key, subKey, sub.value, submetricContext(card.score?.computedAt))}
-                  {sub.note ? ` (${sub.note})` : ""}
+                  {submetricShownValue(key, subKey, sub, submetricContext(card.score?.computedAt))}
                 </Text>
               </span>
               {/* В колонке балла — только балл, и полос у подметрик нет вовсе:
@@ -1107,7 +1112,7 @@ function Markers({ card }: { card: Card }) {
     rows.push({
       key: "stale",
       label: "Факты из истории",
-      text: "Часть источников ответила сбоем канала, поэтому в расчет пошли последние успешные факты предыдущих сканов. Сбой трубы – не отсутствие данных, и он не превращается в премию или штраф.",
+      text: "Часть источников не ответила, поэтому взяты данные предыдущего успешного анализа. Оценка от этого не выросла и не снизилась.",
       theme: "warning",
     });
   }
@@ -1120,7 +1125,7 @@ function Markers({ card }: { card: Card }) {
     rows.push({
       key: "code-empty",
       label: "В репозитории нет кода",
-      text: "В репозитории нет ни одного файла, поэтому по методике Score равен 0 – это данные о проекте («проекта нет»), а не отсутствие оценки или сбой сбора.",
+      text: "В репозитории нет ни одного файла, поэтому оценка – 0. Это не ошибка сервиса: оценивать нечего.",
       theme: "info",
     });
   }
@@ -1128,7 +1133,7 @@ function Markers({ card }: { card: Card }) {
     rows.push({
       key: "truncated",
       label: "История усечена",
-      text: `Репозиторий слишком велик для полного клона, сработал деградационный ярус: git-история видна с ${fmtDate(m.historyTruncatedSince)}. Метрики активности и возраста TODO посчитаны по видимой части.`,
+      text: `Репозиторий слишком большой, поэтому скачана только недавняя история – с ${fmtDate(m.historyTruncatedSince)}. Активность и возраст TODO посчитаны по этой части.`,
       theme: "info",
     });
   }
@@ -1136,7 +1141,7 @@ function Markers({ card }: { card: Card }) {
     rows.push({
       key: "ci-cap",
       label: "CI заявлен, прогоны недоступны",
-      text: "Конфигурация CI в репозитории есть, но статусы прогонов закрыты правами (403 для чужих репозиториев). Заявленный CI дает максимум 50 из 100 – доказательства дают прогоны.",
+      text: "Файл CI в репозитории есть, но результаты запусков сервису недоступны. Без них категория CI/CD получает не больше 50 из 100.",
       theme: "warning",
     });
   }
@@ -1163,7 +1168,7 @@ function Recommendations({ card }: { card: Card }) {
       <EmptyState
         icon={SquareListUl}
         title="Рекомендаций нет"
-        description="Правила движка не нашли, к чему придраться на текущих фактах."
+        description="По собранным данным улучшать нечего."
       />
     );
   }
@@ -1190,7 +1195,8 @@ function RecommendationRow({ rec, evidence }: { rec: Recommendation; evidence: M
               `r.priority = i + 1`, порядковый номер после сортировки, а не
               важность. Назвать его «Критический/Высокий» значило бы выдать
               позицию за оценку срочности. */}
-          <Text variant="subheader-2">{rec.problem}</Text>
+          {/* В4.9 (К9.10): роли текста — заголовок = действие (глагол), ниже — причина; как в отчете */}
+          <Text variant="subheader-2">{rec.action}</Text>
           {rec.deltaScore !== null ? (
             <Label theme="success" size="xs" title="Прирост показателя, если выполнить только эту рекомендацию">
               {fmtSigned(rec.deltaScore)} к {rec.channel ? "Repo Health Score" : "HealthCraft Index"}
@@ -1201,7 +1207,7 @@ function RecommendationRow({ rec, evidence }: { rec: Recommendation; evidence: M
             </Label>
           ) : null}
         </Flex>
-        <Text>{rec.action}</Text>
+        <Text>{rec.problem}</Text>
         {/* Доводка 21.09: «Эффект» печатался рядом с чипом прироста и повторял
             его дословно («+2.3 к HealthCraft Index» чипом и «Эффект: +2.3 к
             HealthCraft Index» строкой). Строка остаётся там, где чипа с
@@ -1242,7 +1248,7 @@ function FactProof({ factKey, fact }: { factKey: string; fact: Evidence | undefi
   if (!fact) {
     return (
       <Flex direction="column" gap={1} style={{ maxWidth: 420, padding: "var(--g-spacing-3)" }}>
-        <Text variant="subheader-1">{factKey} – факта нет по построению</Text>
+        <Text variant="subheader-1">{factKey} – эти данные вам недоступны</Text>
         <Text color="complementary">{SECURITY_PUBLIC_NOTE}</Text>
       </Flex>
     );
@@ -1272,54 +1278,15 @@ function factStatusText(status: string): string {
     case "no-data":
       return "данных нет";
     case "bad":
-      return "сбой канала";
+      return "источник не ответил";
     default:
       return status;
   }
 }
 
-/**
- * Причины no-data движок пишет по-английски и кодами каналов — экран
- * переводит их в человеческую фразу, не теряя исходной строки смысла.
- */
-export function humanNoData(raw: string): string {
-  const [category = "", ...rest] = raw.split(":");
-  const reason = rest.join(":").trim();
-  const prefix = category === "security" ? "" : `${categoryWord(category)}: `;
-  if (category === "security" || reason.startsWith("AppSec data unavailable")) return SECURITY_PUBLIC_NOTE;
-  if (reason.startsWith("ci runs no-data")) {
-    return `${prefix}прогоны CI недоступны (закрыты правами или их нет) – категория ограничена потолком 50.`;
-  }
-  if (reason === "git channel no-data") return `${prefix}git-канал не отдал данные (клон не удался или уперся в лимиты).`;
-  if (reason === "git+rest channels no-data") return `${prefix}ни git-, ни REST-канал не отдали данных.`;
-  if (reason === "issues channel no-data") return `${prefix}данные трекера задач недоступны.`;
-  return `${prefix}${reason || NO_DATA}`;
-}
-
-function categoryWord(key: string): string {
-  const words: Record<string, string> = {
-    documentation: "Документация",
-    cicd: "CI/CD",
-    security: "Безопасность",
-    activity: "Активность",
-    issues: "Задачи",
-    code: "Состояние кода",
-  };
-  return words[key] ?? key;
-}
-
-/** Показ-без-веса (§7.3 методики): число объясняет картину, но в Score не идёт. */
-const DISPLAY_ONLY = new Set([
-  "activity.mirror_likeness",
-  "activity.commits_90d",
-  "activity.commits_365d",
-  "activity.sync_bursts",
-  "code.todo_total",
-]);
-
-function displayOnly(category: string, sub: string): boolean {
-  return DISPLAY_ONLY.has(`${category}.${sub}`);
-}
+// В4.9 (К9.2): причины «нет данных» — `humanNoData`/`noDataReason` из format.ts
+// (одна копия на карточку, MD и PDF; до В4.9 здесь жила вторая копия).
+// Показ-без-веса — `displayOnly` словаря подметрик (src/report/submetrics.ts).
 
 // В4.7 (П4.2): названия подметрик переехали в словарь `src/report/submetrics.ts`
 // (одно правило на страницу, MD и PDF); иконки остаются здесь — это вид.
@@ -1408,7 +1375,7 @@ function AppsecEngines({ card }: { card: Card }) {
   return (
     <Flex direction="column" gap={1} style={{ padding: "0 var(--g-spacing-3) var(--g-spacing-2) calc(16px + var(--g-spacing-6))" }}>
       <Text variant="body-2" color="complementary">
-        Находки AppSec по движкам{breakdown.openFindings !== null ? ` (всего открытых: ${fmtNumber(breakdown.openFindings)})` : ""}:
+        Находки AppSec по видам проверок{breakdown.openFindings !== null ? ` (всего открытых: ${fmtNumber(breakdown.openFindings)})` : ""}:
       </Text>
       <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
         {breakdown.engines.map(([name, count]) => (
@@ -1424,7 +1391,7 @@ function AppsecEngines({ card }: { card: Card }) {
       </DefinitionList>
       {breakdown.sca === null && (
         <Text variant="body-2" color="complementary">
-          Отдельного счетчика SCA платформа по этому скану не вернула – значит показывать его нечем.
+          SourceCraft не вернул отдельное число находок в зависимостях (SCA).
         </Text>
       )}
       {breakdown.truncated && (
@@ -1436,21 +1403,6 @@ function AppsecEngines({ card }: { card: Card }) {
   );
 }
 
-/** Причина no-data Security при открытом канале — из факта appsec.findings (честный tri-state). */
-function securityNote(card: Card): string {
-  const fact = card.evidence.find((e) => e.key === "appsec.findings");
-  const reason = fact && fact.status === "no-data" ? (fact.value as { reason?: string }).reason : undefined;
-  if (reason === "access") {
-    return "AppSec этого репозитория недоступен токену скана: право src.repositories.useAppSecScan не выдано. Это отсутствие данных, не ноль – вес категории выброшен.";
-  }
-  if (reason === "no-scan") {
-    return "Завершенного скана AppSec нет (не запускался или еще идет). Это отсутствие данных, не ноль.";
-  }
-  if (reason === "incomplete") {
-    return "AppSec API ответил неполно (канал/пагинация). Ошибка – не отсутствие уязвимостей: вес категории выброшен до успешного пересбора.";
-  }
-  return SECURITY_PUBLIC_NOTE;
-}
 
 
 // ========== ПОРТ 6 (hq-parallel): избранное на карточке ==========
