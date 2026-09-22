@@ -116,8 +116,8 @@ const COLUMN_TITLES: Record<string, string> = {
   repo: "Репозиторий",
   index: "HealthCraft Index",
   lang: "Язык",
-  likes: "Лайки",
-  forks: "Форки",
+  likes: "Реакции",
+  forks: "Ответвления",
   activity: "Последняя активность",
   coverage: "Покрытие",
   scanned: "Скан",
@@ -404,7 +404,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
  * а смысл «что такое индекс» от знаменателя не зависит.
  */
 function ratingLead(meta: MetaResponse | null): ReactNode {
-  const about = "HealthCraft Index показывает состояние открытых репозиториев SourceCraft по 4 категориям: документация, активность, issues и состояние кода.";
+  const about = "HealthCraft Index показывает состояние открытых репозиториев SourceCraft по 4 категориям: документация, активность, задачи и состояние кода.";
   if (!meta) return about;
   const { scored, catalog } = meta.repos;
   return (
@@ -524,7 +524,7 @@ function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResp
            объяснение списка стоит у списка, а не отдельным абзацем панели. */
         help={
           <HelpMark iconSize="s" aria-label="Что показывает вклад категорий">
-            Доля в HealthCraft Index. Категории CI/CD и Security учитываются только в показателе Repo Health Score для
+            Доля в HealthCraft Index. Категории CI/CD и Безопасность учитываются только в показателе Repo Health Score для
             репозиториев, к которым у вас есть доступ
           </HelpMark>
         }
@@ -727,8 +727,8 @@ function buildColumns(
     // В4.6 круг 2 (Р3): название языка снова стоит в строке репозитория;
     // колонка остаётся для сортируемого/копируемого вида, выключенной по умолчанию
     { id: "lang", name: "Язык", template: (item: Item) => <LanguageName name={item.language} color={item.languageColor} /> },
-    { id: "likes", name: sortable("Лайки", "likes"), align: "end", template: (item: Item) => fmtNumber(item.likes) },
-    { id: "forks", name: "Форки", align: "end", template: (item: Item) => fmtNumber(item.forks) },
+    { id: "likes", name: sortable("Реакции", "likes"), align: "end", template: (item: Item) => fmtNumber(item.likes) },
+    { id: "forks", name: "Ответвления", align: "end", template: (item: Item) => fmtNumber(item.forks) },
     // не «Активность»: так называется категория Score, а это дата из каталога
     { id: "activity", name: sortable("Последняя активность", "activity"), align: "end", template: (item: Item) => fmtDate(item.lastActivityAt) },
     // колонка заведена вместе с переносом сортировки: «Покрытие данными» было

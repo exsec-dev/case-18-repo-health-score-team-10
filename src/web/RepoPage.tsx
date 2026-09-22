@@ -450,10 +450,10 @@ function Header({ card, starDoneKey, starLoggedIn }: { card: Card; starDoneKey: 
             <MetaItem title="Язык">
               <LanguageName name={r.language} color={r.languageColor} />
             </MetaItem>
-            <MetaItem icon={Heart} title="Лайки">
+            <MetaItem icon={Heart} title="Реакции">
               {fmtNumber(r.likes)}
             </MetaItem>
-            <MetaItem icon={CodeFork} title="Форки">
+            <MetaItem icon={CodeFork} title="Ответвления">
               {fmtNumber(r.forks)}
             </MetaItem>
             <MetaItem icon={Clock} title="Последняя активность">
@@ -562,11 +562,11 @@ function CardSlots() {
  * MD-отчёт свою формулировку сохраняет: документ читается без наведения.
  */
 const INDEX_HELP =
-  "Публичная оценка по 4 категориям: документация, активность, issues и состояние кода. " +
+  "Публичная оценка по 4 категориям: документация, активность, задачи и состояние кода. " +
   "Считается для всех открытых репозиториев и является основой общего рейтинга";
 
 const FULL_HELP =
-  "Рассчитывается по 6 категориям: 4 категориям HealthCraft Index, а также CI/CD и Security. " +
+  "Рассчитывается по 6 категориям: 4 категориям HealthCraft Index, а также CI/CD и Безопасность. " +
   "Показатель доступен только для репозиториев, к которым у вас есть доступ";
 
 /** Короткая причина закрытия полного итога: первый закрытый канал (CI, затем Security). */
@@ -614,7 +614,7 @@ function ScoreAside({
               однострочных подписей. П1 дал body-2, П2.12 уменьшил его до
               body-1 13/18; complementary сохраняет контраст прозы. */}
           <Text as="p" variant="body-1" color="complementary">
-            HealthCraft Index рассчитывается по 4 категориям на основе публичных данных. Категории CI/CD и Security учитываются
+            HealthCraft Index рассчитывается по 4 категориям на основе публичных данных. Категории CI/CD и Безопасность учитываются
             только в Repo Health Score, доступном участникам репозитория.
             {meta ? ` При покрытии ниже ${threshold} соответствующий показатель не рассчитывается.` : ""}
           </Text>
@@ -748,7 +748,7 @@ function ScoreBand({ card }: { card: Card }) {
                 </Text>
               ) : (
                 <Text variant="body-1">
-                  <Link {...linkProps("/settings")}>Добавить токен доступа</Link>
+                  <Link {...linkProps("/settings")}>Добавить персональный токен доступа</Link>
                 </Text>
               )}
             </Flex>
@@ -1300,10 +1300,10 @@ function categoryWord(key: string): string {
   const words: Record<string, string> = {
     documentation: "Документация",
     cicd: "CI/CD",
-    security: "Security",
+    security: "Безопасность",
     activity: "Активность",
-    issues: "Issues",
-    code: "Code health",
+    issues: "Задачи",
+    code: "Состояние кода",
   };
   return words[key] ?? key;
 }
@@ -1417,7 +1417,7 @@ function AppsecEngines({ card }: { card: Card }) {
           </DefinitionList.Item>
         ))}
         {breakdown.sca && (
-          <DefinitionList.Item name={`${breakdown.sca[0]} (зависимости, SCA)`} note="Находки в зависимостях показываются отдельно и в оценку Security не входят: формула категории не менялась.">
+          <DefinitionList.Item name={`${breakdown.sca[0]} (зависимости, SCA)`} note="Находки в зависимостях показываются отдельно и в оценку Безопасности не входят: формула категории не менялась.">
             {fmtNumber(breakdown.sca[1])}
           </DefinitionList.Item>
         )}

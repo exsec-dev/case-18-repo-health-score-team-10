@@ -225,7 +225,7 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
   const stats = ok.get("issues.stats") as { open?: unknown; closed?: unknown } | undefined;
   if (pub && stats && (stats.open ?? 0) === 0 && (stats.closed ?? 0) === 0) {
     activation.push(
-      act("start-tracker", "issues", "Трекер не ведется: 0 открытых и 0 закрытых issues", "Начните вести трекер issues (баги + планы) – источник метрик поддержки", ["issues.stats"], `Issues: скор с минимума категории (${ctx.issuesScore ?? 0}/100) до фактического по данным`),
+      act("start-tracker", "issues", "Трекер не ведется: 0 открытых и 0 закрытых задач", "Начните вести трекер задач (баги + планы) – источник метрик поддержки", ["issues.stats"], `Задачи: скор с минимума категории (${ctx.issuesScore ?? 0}/100) до фактического по данным`),
     );
   }
   if (!ok.has("appsec.findings")) {
@@ -235,10 +235,10 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
       act(
         "connect-appsec",
         "security",
-        "Security без данных: результатов AppSec SourceCraft по репозиторию нет",
+        "Безопасность без данных: результатов AppSec SourceCraft по репозиторию нет",
         "Подключите AppSec к репозиторию и дождитесь завершенного скана – SAST/SCA/secrets закроют 20% Repo Health Score",
         ["appsec.findings"],
-        "AppSec-данные недоступны: проверьте право PAT src.repositories.useAppSecScan и завершенность скана – Security заработает в Repo Health Score",
+        "AppSec-данные недоступны: проверьте право персонального токена доступа src.repositories.useAppSecScan и завершенность скана – Безопасность заработает в Repo Health Score",
         "appsec",
       ),
     );
@@ -269,7 +269,7 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
     const crit = (appsec.severity_counts?.critical as number | undefined) ?? 0;
     if (appsec.secrets_critical === true || crit > 0) {
       scoreRules.push(
-        mkScore("appsec-critical", "Критичные находки AppSec (secrets/SAST critical)", "Закройте критичные находки: утечки секретов капят Repo Health Score на 49", ["appsec.findings"], "снимет кап Repo Health Score ≤ 49 и поднимет Security", "appsec"),
+        mkScore("appsec-critical", "Критичные находки AppSec (secrets/SAST critical)", "Закройте критичные находки: утечки секретов капят Repo Health Score на 49", ["appsec.findings"], "снимет кап Repo Health Score ≤ 49 и поднимет Безопасность", "appsec"),
       );
     }
   }
@@ -279,7 +279,7 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
     const older = (todo.older_180d ?? 0) as number;
     if (total > 0 && older / total >= 0.3) {
       scoreRules.push(
-        mkScore("resolve-old-todos", `Старые TODO: ${older} из ${total} маркеров старше 180 дней`, "Разберите накопленный техдолг: закрыть или удалить устаревшие TODO/FIXME", ["code.todo"], "повысит категорию Code health"),
+        mkScore("resolve-old-todos", `Старые TODO: ${older} из ${total} маркеров старше 180 дней`, "Разберите накопленный техдолг: закрыть или удалить устаревшие TODO/FIXME", ["code.todo"], "повысит категорию Состояние кода"),
       );
     }
   }
@@ -289,12 +289,12 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
     const share = ((statsFull.stale_90d ?? 0) as number) / Math.max(1, openCount);
     if (share >= 0.5) {
       scoreRules.push(
-        mkScore("reduce-stale-issues", `Зависшие issues: ${Math.round(share * 100)}% открытых без активности 90+ дней`, "Закройте или оживите зависшие issues (триаж + автозакрытие)", ["issues.stats"], "повысит категорию Issues"),
+        mkScore("reduce-stale-issues", `Зависшие задачи: ${Math.round(share * 100)}% открытых без активности 90+ дней`, "Закройте или оживите зависшие задачи (триаж + автозакрытие)", ["issues.stats"], "повысит категорию Задачи"),
       );
     }
     if (typeof statsFull.median_close_days === "number" && statsFull.median_close_days >= 30) {
       scoreRules.push(
-        mkScore("speed-up-issue-close", `Медленное закрытие issues: медиана ${statsFull.median_close_days} дн.`, "Ускорьте обработку: шаблоны, приоритеты, ответственный за триаж", ["issues.stats"], "повысит категорию Issues"),
+        mkScore("speed-up-issue-close", `Медленное закрытие задач: медиана ${statsFull.median_close_days} дн.`, "Ускорьте обработку: шаблоны, приоритеты, ответственный за триаж", ["issues.stats"], "повысит категорию Задачи"),
       );
     }
   }

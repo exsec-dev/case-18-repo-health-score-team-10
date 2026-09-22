@@ -31,9 +31,9 @@ describe("В4.6 круг 3: рейтинг", () => {
     const api = readFileSync(join(import.meta.dir, "..", "src", "api", "repos.ts"), "utf8");
     expect(rating).toContain("Поиск по владельцу, репозиторию и заголовку");
     expect(api).toMatch(/function matchesQ[\s\S]{0,300}item\.org[\s\S]{0,150}item\.repo[\s\S]{0,150}item\.title/);
-    expect(rating).toContain("HealthCraft Index показывает состояние открытых репозиториев SourceCraft по 4 категориям: документация, активность, issues и состояние кода.");
+    expect(rating).toContain("HealthCraft Index показывает состояние открытых репозиториев SourceCraft по 4 категориям: документация, активность, задачи и состояние кода.");
     expect(rating).toMatch(/\{about\}\s*<br \/>\s*Оценено \{fmtCount\(scored\)\} из \{fmtCount\(catalog\)\} репозиториев\./);
-    expect(rating).toContain("Категории CI/CD и Security учитываются только в показателе Repo Health Score");
+    expect(rating).toContain("Категории CI/CD и Безопасность учитываются только в показателе Repo Health Score");
     expect(rating).toContain("репозиториев, к которым у вас есть доступ\n");
     expect(rating).toContain("Обход каталога выполняется ежесуточно. Дата последнего анализа указана в колонке «Скан»");
   });
@@ -93,7 +93,7 @@ describe("В4.6 круг 3: карточка", () => {
     const repo = web("RepoPage.tsx");
     const css = web("layout.css");
     // переход встроен ссылкой в блок закрытого показателя, отдельной кнопки нет
-    expect(repo).toMatch(/linkProps\("\/settings"\)[\s\S]{0,60}>Добавить токен доступа</);
+    expect(repo).toMatch(/linkProps\("\/settings"\)[\s\S]{0,60}>Добавить персональный токен доступа</);
     const star = repo.slice(repo.indexOf("function FavoriteStar"));
     expect(star).toContain('className={["rh-favorite-star"');
     expect(star).toMatch(/<Button[\s\S]{0,2000}<Icon data=\{state === "on" \? StarFill : Star\} size=\{14\} \/>/);

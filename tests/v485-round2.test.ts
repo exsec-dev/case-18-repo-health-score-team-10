@@ -226,9 +226,9 @@ describe("П3: причина замка — одно правило для по
       failedFirst: lockReasonShort(["granted", "check-failed"], "pat"),
       nothing: lockReasonShort(["granted"], "pat"),
     }).toEqual({
-      anonCategory: "Нужно войти через Я ID и добавить токен доступа SourceCraft.",
-      anonFull: "Нужно войти через Я ID и добавить токен доступа SourceCraft.",
-      noPat: "Токен доступа SourceCraft не добавлен.",
+      anonCategory: "Нужно войти через Я ID и добавить персональный токен доступа SourceCraft.",
+      anonFull: "Нужно войти через Я ID и добавить персональный токен доступа SourceCraft.",
+      noPat: "Персональный токен доступа SourceCraft не добавлен.",
       denied: "У вашего токена нет прав на эти данные репозитория.",
       failedFirst: "Не удалось проверить доступ к этим данным.",
       nothing: null,

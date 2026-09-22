@@ -148,7 +148,7 @@ function headerSection(card: RepoCard): Block[] {
       // Ф2.9: один язык (RU) — статусы и триггеры словами, как на карточке
       line(`Скан: ${scan ? `#${scan.id} от ${fmtDateTime(scan.finishedAt ?? scan.startedAt)} (статус ${scanStatusText(scan.status)}, запуск ${scanTriggerText(scan.trigger)})` : "не выполнялся"}`),
       line(`Модель: ${score ? score.modelVersion : "—"}`),
-      [text("Язык: "), repo.language ? escaped(repo.language) : text("не определен"), text(`; лайки: ${num(repo.likes)}; форки: ${num(repo.forks)}`)],
+      [text("Язык: "), repo.language ? escaped(repo.language) : text("не определен"), text(`; реакции: ${num(repo.likes)}; ответвления: ${num(repo.forks)}`)],
       line(`Последняя активность: ${fmtDate(repo.lastActivityAt)}`),
     ]),
   );
@@ -203,7 +203,7 @@ function summarySection(card: RepoCard): Block[] {
   );
   out.push(para(...fullScoreLine(card).map(line)));
   out.push(
-    para(line("Индекс построен из публичных данных: CI/CD и Security в нем не участвуют по правилам платформы – разницу с полным показателем дают только они.")),
+    para(line("Индекс построен из публичных данных: CI/CD и Безопасность в нем не участвуют по правилам платформы – разницу с полным показателем дают только они.")),
   );
   // В4.6 (У26/У13): СТРОКА ИТОГА берётся из общего генератора
   // (`src/web/format.ts`), чтобы на карточке и в отчёте стояла ОДНА
@@ -235,21 +235,21 @@ function summarySection(card: RepoCard): Block[] {
 function fullScoreLine(card: RepoCard): string[] {
   const score = card.score!;
   if (score.fullLocked) {
-    return ["Repo Health Score (с CI и Security) виден зрителю с доступом к CI и Security этого репозитория."];
+    return ["Repo Health Score (с CI/CD и Безопасностью) виден зрителю с доступом к CI/CD и Безопасности этого репозитория."];
   }
   if (score.repoHealthScore === null || score.repoHealthCoverage === null) {
-    return ["Repo Health Score (с CI и Security): недостаточно данных для оценки."];
+    return ["Repo Health Score (с CI/CD и Безопасностью): недостаточно данных для оценки."];
   }
   const lines = [
-    `Repo Health Score (6 категорий, с CI и Security): ${Math.round(score.repoHealthScore)} из 100 при покрытии данными ${pct(score.repoHealthCoverage)}.`,
+    `Repo Health Score (6 категорий, с CI/CD и Безопасностью): ${Math.round(score.repoHealthScore)} из 100 при покрытии данными ${pct(score.repoHealthCoverage)}.`,
   ];
   if (score.healthcraftIndex !== null) {
     const d = score.repoHealthScore - score.healthcraftIndex;
     // M-13: |Δ| < 0.05 — «разницы нет», не «+0.0» (паритет со страницей)
     lines.push(
       Math.abs(d) < 0.05
-        ? "Разницы нет: CI и Security на этом скане нейтральны."
-        : `Разницу с HealthCraft Index дают CI и Security: ${fmtSigned(d)} – вклад двух каналов при их фактических данных.`,
+        ? "Разницы нет: CI/CD и Безопасность на этом скане нейтральны."
+        : `Разницу с HealthCraft Index дают CI/CD и Безопасность: ${fmtSigned(d)} – вклад двух каналов при их фактических данных.`,
     );
   }
   return lines;
@@ -469,12 +469,12 @@ function methodSection(card: RepoCard): Block[] {
         ` при покрытии ниже ${pct(COVERAGE_NULL_BELOW)} показатель не выставляется вовсе (значение NULL), потому что честного числа на таких данных нет.`,
       ),
       item(
-        "CI/CD и Security:",
+        "CI/CD и Безопасность:",
         ` в HealthCraft Index не входят (раны чужих репо и AppSec платформа публично не отдает); Repo Health Score с ними виден зрителю с доступом к этим данным. ${SECURITY_PUBLIC_NOTE}`,
       ),
       item(
         "Что это НЕ значит:",
-        " показатели не измеряют популярность (лайки и форки в формулу не входят), не оценивают качество кода по существу и не заменяют ревью. Они измеряют наблюдаемые признаки здоровья репозитория теми данными, которые доступны.",
+        " показатели не измеряют популярность (реакции и ответвления в формулу не входят), не оценивают качество кода по существу и не заменяют ревью. Они измеряют наблюдаемые признаки здоровья репозитория теми данными, которые доступны.",
       ),
       item(
         "Ограничения методики:",

@@ -116,7 +116,7 @@ describe("В4.6-2 (У25): «вклад 0%» заменён на «не учит�
   // ЗАКРЫТО блоком Б6 (вариант А компоновки карточки).
   test("MD: в таблице категорий у Security стоит «не учитывается», а не «0%»", () => {
     const out = md();
-    expect({ honest: out.includes("| Security | 20% | — | не учитывается |"), zero: out.includes("| 0% |") }).toEqual({
+    expect({ honest: out.includes("| Безопасность | 20% | — | не учитывается |"), zero: out.includes("| 0% |") }).toEqual({
       honest: true,
       zero: false,
     });

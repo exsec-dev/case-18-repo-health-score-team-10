@@ -12,10 +12,10 @@ export const NO_SCORE = "Недостаточно данных";
 export const CATEGORY_TITLES_RU: Record<string, string> = {
   documentation: "Документация",
   cicd: "CI/CD",
-  security: "Security",
+  security: "Безопасность",
   activity: "Активность",
-  issues: "Issues",
-  code: "Code health",
+  issues: "Задачи",
+  code: "Состояние кода",
 };
 
 /** Балл категории 0..100 — целым: дробь тут ничего не объясняет. */
@@ -482,7 +482,7 @@ export function fmtSigned(delta: number): string {
  * правом, а не публичностью репозитория. Одна строка на странице и в MD.
  */
 export const SECURITY_PUBLIC_NOTE =
-  "Security считается только по данным AppSec SourceCraft, доступным по правам; " +
+  "Безопасность считается только по данным AppSec SourceCraft, доступным по правам; " +
   "без них категория исключена с перенормировкой, а не занижена.";
 
 /**
@@ -490,7 +490,7 @@ export const SECURITY_PUBLIC_NOTE =
  * ChannelAccess без "granted". Строка — одна для страницы и MD-отчёта.
  */
 export const ACCESS_LOCK_TEXT: Record<"no-pat" | "denied" | "pat-expired" | "check-failed", string> = {
-  "no-pat": "Данные видны участникам репозитория: войдите и добавьте токен доступа SourceCraft в Настройках.",
+  "no-pat": "Данные видны участникам репозитория: войдите и добавьте персональный токен доступа SourceCraft в Настройках.",
   denied: "У вашего токена нет прав на эти данные репозитория.",
   "pat-expired": "SourceCraft отклонил ваш токен доступа – обновите его в Настройках.",
   "check-failed": "Не удалось проверить доступ к этим данным – попробуйте открыть карточку позже.",
@@ -506,7 +506,7 @@ export const ACCESS_LOCK_TEXT: Record<"no-pat" | "denied" | "pat-expired" | "che
  * Ключи и порядок те же — один источник, две длины.
  */
 export const ACCESS_LOCK_SHORT: Record<"no-pat" | "denied" | "pat-expired" | "check-failed", string> = {
-  "no-pat": "Токен доступа SourceCraft не добавлен.",
+  "no-pat": "Персональный токен доступа SourceCraft не добавлен.",
   denied: "У вашего токена нет прав на эти данные репозитория.",
   "pat-expired": "SourceCraft отклонил ваш токен доступа.",
   "check-failed": "Не удалось проверить доступ к этим данным.",
@@ -523,7 +523,7 @@ export function accessLockShort(access: string | undefined): string | null {
  * истекшая сессия) — вход, а не «токен не добавлен»: до входа токен добавить
  * негде. Короткая форма, как `ACCESS_LOCK_SHORT`.
  */
-export const SIGN_IN_LOCK_SHORT = "Нужно войти через Я ID и добавить токен доступа SourceCraft.";
+export const SIGN_IN_LOCK_SHORT = "Нужно войти через Я ID и добавить персональный токен доступа SourceCraft.";
 
 /**
  * Круг 2 (П3): ОДНО правило короткой причины замка для полного Score и строки

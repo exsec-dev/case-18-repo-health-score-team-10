@@ -120,7 +120,7 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
     expect({
       onePill: /<span className="rh-pill rh-access" title=\{summary\} aria-label=\{summary\} role="img">/.test(rights),
       icons: /<Icon key=\{c\.key\} data=\{c\.icon\} size=\{14\} className=\{`rh-access__icon \$\{c\.state\.cls\}`\} \/>/.test(rights),
-      channels: /\{ key: "clone", title: "Код", icon: Code \},\s*\{ key: "ci", title: "CI\/CD", icon: Terminal \},\s*\{ key: "appsec", title: "Security", icon: Shield \}/.test(me()),
+      channels: /\{ key: "clone", title: "Код", icon: Code \},\s*\{ key: "ci", title: "CI\/CD", icon: Terminal \},\s*\{ key: "appsec", title: "Безопасность", icon: Shield \}/.test(me()),
       lockForClosed: /no: \{[^}]*Lock/.test(me()),
       glyphs: /[✓✗]/.test(me()),
       legend: me().includes("право есть ·"),

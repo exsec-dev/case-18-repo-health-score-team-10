@@ -192,7 +192,7 @@ function LoginOffer({ pageTitle }: { pageTitle: "Мои репозитории" 
       aside={
         <AsideSection title="Как это устроено">
           <Text color="complementary">
-            Публичный рейтинг работает и без входа – раздел «Рейтинг». Блоки CI/CD и Security на карточке репозитория
+            Публичный рейтинг работает и без входа – раздел «Рейтинг». Блоки CI/CD и Безопасность на карточке репозитория
             видны только тем, у кого есть к ним доступ на SourceCraft; в общий рейтинг они не вкладываются.
           </Text>
         </AsideSection>
@@ -209,7 +209,7 @@ function LoginOffer({ pageTitle }: { pageTitle: "Мои репозитории" 
         title={pageTitle === "Настройки" ? "Настройки доступны после входа" : "Мои репозитории доступны после входа"}
         description={
           pageTitle === "Настройки"
-            ? "Войдите через Я ID, чтобы настроить токен доступа SourceCraft."
+            ? "Войдите через Я ID, чтобы настроить персональный токен доступа SourceCraft."
             : "Войдите через Я ID, чтобы следить за избранными репозиториями и запускать анализ своих."
         }
         actions={[{ text: "Войти через Я ID", view: "action", size: "l", href: "/auth/ya" }]}
@@ -335,7 +335,7 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
             </Text>
             {replacing ? (
               <Flex direction="column" gap={2}>
-                {tokenForm("Новый токен доступа", "Проверить и заменить")}
+                {tokenForm("Новый персональный токен доступа", "Проверить и заменить")}
                 {/* В4.4 (кластер M-8): выход из режима замены — явная «Отмена» */}
                 <Button view="normal" size="m" width="max" onClick={() => setReplacing(false)} disabled={busy}>
                   Отмена
@@ -369,7 +369,7 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
               SourceCraft: Домой → Доступ → Персональные токены доступа → Сгенерировать новый токен. Токен показывается один
               раз – скопируйте его сразу. Перед сохранением токен проверяется в SourceCraft: неверный токен не сохранится.
             </Text>
-            {tokenForm("Токен доступа SourceCraft", "Проверить и сохранить")}
+            {tokenForm("Персональный токен доступа SourceCraft", "Проверить и сохранить")}
           </Flex>
         )}
         {error && (
@@ -553,8 +553,8 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
       {!hasPat && (
         <CabinetAlert
           theme="info"
-          title="Добавьте токен доступа SourceCraft"
-          message="С токеном сервис сам проверит ваши права на избранные репозитории, откроет анализ своих репозиториев и покажет CI/CD и Security на карточке. Токен добавляется в Настройках."
+          title="Добавьте персональный токен доступа SourceCraft"
+          message="С токеном сервис сам проверит ваши права на избранные репозитории, откроет анализ своих репозиториев и покажет CI/CD и Безопасность на карточке. Токен добавляется в Настройках."
           actions={
             <Button view="normal" size="m" {...linkProps("/settings")}>
               Перейти в Настройки
@@ -1245,7 +1245,7 @@ interface FavoritesResponse {
 const ACCESS_CHANNELS: { key: "clone" | "ci" | "appsec"; title: string; icon: IconData }[] = [
   { key: "clone", title: "Код", icon: Code },
   { key: "ci", title: "CI/CD", icon: Terminal },
-  { key: "appsec", title: "Security", icon: Shield },
+  { key: "appsec", title: "Безопасность", icon: Shield },
 ];
 
 /**

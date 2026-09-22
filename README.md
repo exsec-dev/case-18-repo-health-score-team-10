@@ -50,7 +50,7 @@
 - Git-история и метаданные SourceCraft;
 - Результаты security-сканирования AppSec SourceCraft;
 - CI-конфиги и статусы пайплайнов SourceCraft;
-- Данные по лайкам репозиториев SourceCraft;
+- Данные по реакциям на репозитории SourceCraft;
 - Метаданные issues, merge requests, contributors и релизов.
 
 &nbsp;

@@ -162,7 +162,7 @@ describe("Р12 (MD): «закрыто»/«закрыто доступом» → 
     const out = mdLocked();
     expect({
       statusCell: out.includes("| CI/CD | 15% | — | не учитывается | Недоступно |"),
-      detailHeader: out.includes("### Security – Недоступно"),
+      detailHeader: out.includes("### Безопасность – Недоступно"),
       oldStatusCell: out.includes("закрыто доступом"),
       oldDetailHeader: /### [^\n]* – закрыто$/m.test(out),
     }).toEqual({ statusCell: true, detailHeader: true, oldStatusCell: false, oldDetailHeader: false });
@@ -317,7 +317,7 @@ describe("Б5 (Р18, Р19): правило языка в текстах движ
 
   test("Р18: две названные пользовательские строки API — по правилу языка", async () => {
     const { CHANNEL_DELTA_HIDDEN_TEXT } = (await import("../src/api/repos")) as { CHANNEL_DELTA_HIDDEN_TEXT: string };
-    expect(CHANNEL_DELTA_HIDDEN_TEXT).toBe("улучшит CI/CD – прирост Repo Health Score виден при доступе к CI и Security");
+    expect(CHANNEL_DELTA_HIDDEN_TEXT).toBe("улучшит CI/CD – прирост Repo Health Score виден при доступе к CI/CD и Безопасности");
     // ПЕРЕВОРОТ (В4.8.5, К8.5.4, С4-12): без «PAT» и «кабинета» — правило языка прежнее (среднее тире)
     expect(textOf("src/api/me.ts")).toContain("SourceCraft отклонил ваш токен – замените его в Настройках");
   });
@@ -347,7 +347,7 @@ describe("Б4 (Р14, Р16): список категорий и контейне�
       // закрытой категории, через общий хелпер замка (без сессии — «войти»)
       reasonFromAccessLock: /lockReasonShort\(\[cat\.locked\], card\.viewer\?\.auth\)/.test(categories),
       // фиксированная фраза «CI/CD и Security» была бы ложью при закрытой одной
-      hardcodedPair: src.includes("CI/CD и Security – недоступны"),
+      hardcodedPair: src.includes("CI/CD и Безопасность – недоступны"),
       lockBranchGoneFromRow: /cat\.locked !== undefined/.test(row),
     }).toEqual({
       rowsFiltered: true,
@@ -444,7 +444,7 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
         !src.includes("FullLockMessage"),
       buttonGone: lock.includes("Открыть личный кабинет"),
       // переход к токену ОДИН на экран и стоит у самого показателя
-      linkInText: /linkProps\("\/settings"\)[\s\S]{0,80}>Добавить токен доступа</.test(lock),
+      linkInText: /linkProps\("\/settings"\)[\s\S]{0,80}>Добавить персональный токен доступа</.test(lock),
       lockTextStillShared: Object.keys(ACCESS_LOCK_TEXT).sort().join(",") === "check-failed,denied,no-pat,pat-expired",
       shortKeysMatchFull: Object.keys(ACCESS_LOCK_SHORT).sort().join(",") === Object.keys(ACCESS_LOCK_TEXT).sort().join(","),
     }).toEqual({
@@ -463,14 +463,14 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
     const src = codeOf("RepoPage.tsx");
     const band = between(src, "function ScoreBand", "function ScoreFigure");
     expect({
-      paragraphGone: band.includes("Разницу с HealthCraft Index дают CI и Security:"),
+      paragraphGone: band.includes("Разницу с HealthCraft Index дают CI/CD и Безопасность:"),
       indexHelp: src.includes("Публичная оценка по 4 категориям") && src.includes("и является основой общего рейтинга"),
       fullHelp:
         src.includes("Рассчитывается по 6 категориям") &&
         src.includes("Показатель доступен только для репозиториев, к которым у вас есть доступ"),
       helpOnLockedBranch: /score\.fullLocked \?[\s\S]{0,1200}<HelpMark/.test(band),
       // MD-отчёт свою формулировку сохраняет: документ читается без наведения
-      mdKeepsParagraph: reportSrc().includes("Разницу с HealthCraft Index дают CI и Security"),
+      mdKeepsParagraph: reportSrc().includes("Разницу с HealthCraft Index дают CI/CD и Безопасность"),
     }).toEqual({ paragraphGone: false, indexHelp: true, fullHelp: true, helpOnLockedBranch: true, mdKeepsParagraph: true });
   });
 

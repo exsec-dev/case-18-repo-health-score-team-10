@@ -78,19 +78,19 @@ describe("MD-отчёт: числа и tri-state", () => {
     // В4.6 (Б2, У22): у числа появилось слово шкалы — одно и то же на карточке и в отчёте
     expect(md).toContain("**HealthCraft Index (4 категории): 67 из 100 – требует внимания**");
     // круг 2: полный Score складывается из показанных категорий (60·15+50·15+70·15+40·15+80·20)/80 = 61
-    expect(md).toContain("Repo Health Score (6 категорий, с CI и Security): 61 из 100 при покрытии данными 80%");
+    expect(md).toContain("Repo Health Score (6 категорий, с CI/CD и Безопасностью): 61 из 100 при покрытии данными 80%");
     expect(md).toContain("покрытии данными 100%");
   });
 
   test("все шесть категорий с весом и вкладом после перенормировки", () => {
-    for (const title of ["Документация", "CI/CD", "Security", "Активность", "Issues", "Code health"]) {
+    for (const title of ["Документация", "CI/CD", "Безопасность", "Активность", "Задачи", "Состояние кода"]) {
       expect(md).toContain(`| ${title} |`);
     }
     // 15 из 80 весовых пунктов с данными = 19% вклада
     expect(md).toContain("| Документация | 15% | 60 | 19% | данные есть |");
     // В4.6 (Б6, У25): у категории БЕЗ данных вклад не печатается нулём —
     // «0%» читалось как «Security дала ноль», опровергая tri-state
-    expect(md).toContain("| Security | 20% | — | не учитывается | нет данных |");
+    expect(md).toContain("| Безопасность | 20% | — | не учитывается | нет данных |");
   });
 
   test("Security объясняется доступом, а не «данных нет по неизвестной причине»", () => {
@@ -115,7 +115,7 @@ describe("MD-отчёт: рекомендации и доказательств�
     expect(md).toContain("### 1. Нет CONTRIBUTING");
     expect(md).toContain("+2.3 к HealthCraft Index");
     expect(md).toContain("`docs.presence`");
-    expect(md).toContain("### 2. Security без данных");
+    expect(md).toContain("### 2. Безопасность без данных");
     expect(md).toContain("`appsec.findings` (факта нет по построению)");
   });
 

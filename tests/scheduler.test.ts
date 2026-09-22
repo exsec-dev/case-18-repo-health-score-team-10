@@ -858,7 +858,7 @@ describe("П8: причина падения job пишется в jobs.error", 
   test("все причины, которые пишет код, принадлежат закрытому списку JOB_ERRORS", () => {
     const fixed: string[] = [JOB_ERRORS.gone, JOB_ERRORS.noPat, JOB_ERRORS.attempts, JOB_ERRORS.internal];
     // В4.8.5: закрытый список прежний (+ scoreFailed, К8.5.12), каналы — словами (К8.5.4)
-    const ch = "(клон репозитория|данные SourceCraft|Security)";
+    const ch = "(клон репозитория|данные SourceCraft|Безопасность)";
     const belongs = (text: string) => [...fixed, JOB_ERRORS.scoreFailed].includes(text) || new RegExp(`^сбор данных не удался: ${ch}(, ${ch})*$`).test(text);
     const written = (e.query("SELECT DISTINCT error FROM jobs WHERE error IS NOT NULL").all() as { error: string }[]).map((r) => r.error);
     // строка теста про обрезку — единственная искусственная, её исключаем явно

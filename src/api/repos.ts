@@ -20,10 +20,10 @@ import { INDEX_WEIGHTS, SCORE_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, ty
 export const CATEGORY_TITLES: Record<CategoryKey, string> = {
   documentation: "Документация",
   cicd: "CI/CD",
-  security: "Security",
+  security: "Безопасность",
   activity: "Активность",
-  issues: "Issues",
-  code: "Code health",
+  issues: "Задачи",
+  code: "Состояние кода",
 };
 
 /** Порядок категорий на всех поверхностях — вес модели, затем ключ. */
@@ -1068,7 +1068,7 @@ export function jobLeaseExpired(leaseUntil: string | null, now = Date.now()): bo
 }
 
 /** Текст канального presence-правила без числа (С4): Δ Repo Health Score виден только при доступе к CI и Security. */
-export const CHANNEL_DELTA_HIDDEN_TEXT = "улучшит CI/CD – прирост Repo Health Score виден при доступе к CI и Security";
+export const CHANNEL_DELTA_HIDDEN_TEXT = "улучшит CI/CD – прирост Repo Health Score виден при доступе к CI/CD и Безопасности";
 
 const roundTotal = (x: number | null): number | null => (x === null ? null : Math.round(x));
 const splitRefs = (raw: string): string[] =>

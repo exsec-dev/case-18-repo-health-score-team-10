@@ -692,7 +692,7 @@ const routes = {
           return rateLimited("слишком много проверок токена – попробуйте позже", windowRetryAfterSec(patProbes, user.userId, 60 * 60_000));
         }
         const body = (await req.json().catch(() => null)) as { token?: unknown } | null;
-        if (typeof body?.token !== "string" || body.token.length < 8) return badQuery("это не похоже на токен доступа SourceCraft");
+        if (typeof body?.token !== "string" || body.token.length < 8) return badQuery("это не похоже на персональный токен доступа SourceCraft");
         // живая проверка GET /user: вердикт — по общему классификатору (К8.5.6)
         const probe = makeScClient({
           token: body.token,
@@ -852,7 +852,7 @@ const routes = {
       if (!user) return unauthorized();
       const client = userClient(user.userId);
       if (!client) {
-        return Response.json({ error: { code: "no_pat", message: "сначала добавьте токен доступа SourceCraft в Настройках" } }, { status: 409 });
+        return Response.json({ error: { code: "no_pat", message: "сначала добавьте персональный токен доступа SourceCraft в Настройках" } }, { status: 409 });
       }
       // К4/Ф1.7: дешёвые отказы (дедуп, активные, часовой лимит) — ДО сети
       const cheap = userScanCheapGate(db, user.userId, org!, repo!, config.queue);
