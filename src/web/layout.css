@@ -500,7 +500,8 @@ body {
    * прижималось к правому краю и вставало вплотную к плашке вклада, а от
    * полосы, которую оно и подписывает, его отделяла пустота. 28px — ширина
    * трёх цифр 15px tabular плюс запас. */
-  grid-template-columns: 16px minmax(120px, 180px) minmax(0, 1fr) minmax(80px, 360px) 28px auto;
+  /* В4.9 (К9.14): трек плашки слова шкалы (150px — «Требует внимания» в Label xs без обрезки) после числа */
+  grid-template-columns: 16px minmax(120px, 180px) minmax(0, 1fr) minmax(80px, 360px) 28px 150px auto;
   align-items: center;
   gap: var(--g-spacing-3);
   box-sizing: border-box;
@@ -530,6 +531,72 @@ button.rh-category:focus-visible {
 
 .rh-category__value {
   text-align: right;
+}
+
+/* ---------- В4.9 (К9.12): «Вклад категорий в оценку» на карточке ----------
+ * Тот же расчет и те же подписи, что у полосы отчета (эталон вида, круг 4):
+ * сегменты одним темно-серым тоном (`text-secondary` — в светлой теме #6b6b6b,
+ * как в PDF), остаток — дорожка, под полосой — шкала 3 зон тонами Progress.
+ * Только токены темы; ширины сегментов — долей показателя. */
+.rh-contrib-band {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-1);
+}
+
+.rh-contrib-band__rows {
+  margin-top: var(--g-spacing-2);
+}
+
+.rh-contrib-band__strip {
+  display: flex;
+  height: 12px;
+  background: var(--g-color-base-generic);
+}
+
+.rh-contrib-band__seg {
+  height: 100%;
+  background: var(--g-color-text-secondary);
+  box-shadow: inset -2px 0 0 var(--g-color-base-background);
+}
+
+.rh-contrib-band__zones {
+  display: flex;
+  gap: 2px;
+  height: 3px;
+}
+
+.rh-contrib-band__zone_danger {
+  flex: 40 1 0;
+  background: var(--g-color-base-danger-medium);
+}
+
+.rh-contrib-band__zone_warning {
+  flex: 30 1 0;
+  background: var(--g-color-base-warning-medium);
+}
+
+.rh-contrib-band__zone_success {
+  flex: 30 1 0;
+  background: var(--g-color-base-positive-medium);
+}
+
+.rh-contrib-band__legend {
+  display: flex;
+  gap: 2px;
+}
+
+.rh-contrib-band__legend-item_danger {
+  flex: 40 1 0;
+}
+
+.rh-contrib-band__legend-item_warning,
+.rh-contrib-band__legend-item_success {
+  flex: 30 1 0;
+}
+
+.rh-contrib-band__note {
+  margin: var(--g-spacing-1) 0 0;
 }
 
 /* В4.6 круг 2 (Р14): плашка вклада прижата к правому краю своего трека —
@@ -813,11 +880,16 @@ button.rh-category:focus-visible {
   min-width: 0;
 }
 
+/* В4.9 (К9.9): иконка стоит на уровне ПЕРВОЙ строки названия при любом
+ * переносе значения — `align-self: center` центрировал ее по высоте всей
+ * головы строки, и при значении в две строки иконка уезжала вниз.
+ * Отступ 2px — (высота строки body-1 18px − иконка 14px) / 2. */
 .rh-subrow__icon {
   display: flex;
   flex: 0 0 16px;
   justify-content: center;
-  align-self: center;
+  align-self: flex-start;
+  margin-top: 2px;
   /* +4px к общему зазору строки (8px) = 12px, как gap грида категории */
   margin-inline-end: var(--g-spacing-1);
 }
@@ -906,6 +978,7 @@ button.rh-category:focus-visible {
 
   .rh-category__bar,
   .rh-category__weight,
+  .rh-category__word,
   .rh-category__tags {
     display: none;
   }

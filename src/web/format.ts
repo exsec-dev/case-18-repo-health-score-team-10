@@ -420,6 +420,33 @@ function largestRemainder(segments: ContributionSegment[], target: number): void
   }
 }
 
+/** Заголовок полосы вкладов — один на карточке и в отчете (эталон вида, круг 2). */
+export const CONTRIBUTIONS_TITLE = "Вклад категорий в оценку";
+
+/** Подпись остатка полосы: «не набрано 30». */
+export const CONTRIBUTIONS_REST = "не набрано";
+
+/** Строка вместо полосы, когда вклады не складываются в показатель (потолок 49, нет кода). */
+export function contributionsNote(c: Contributions): string | null {
+  if (c.kind === "empty") return "В репозитории нет ни одного файла, поэтому оценка – 0. Это не ошибка сервиса: оценивать нечего.";
+  if (c.kind === "capped") return `Итог ограничен ${c.total} баллами: AppSec нашел утекшие секреты. Без ограничения категории дали бы ${fmtDecimal(c.uncapped, 1)}.`;
+  return null;
+}
+
+/** «Сильнее всего итог снижают X (−N,N) и Y (−N,N).» — части строки (имя выделяется полужирным). */
+export function lossParts(c: Contributions): { text: string; strong?: boolean }[] | null {
+  if (c.kind !== "bar" || c.losses.length === 0) return null;
+  const [a, b] = c.losses;
+  if (!b) return [{ text: "Сильнее всего итог снижает " }, { text: a!.title, strong: true }, { text: ` (${fmtLoss(a!.loss)}).` }];
+  return [
+    { text: "Сильнее всего итог снижают " },
+    { text: a!.title, strong: true },
+    { text: ` (${fmtLoss(a!.loss)}) и ` },
+    { text: b.title, strong: true },
+    { text: ` (${fmtLoss(b.loss)}).` },
+  ];
+}
+
 /** Показанный вклад: «+21,0». */
 export function fmtContribution(tenths: number): string {
   return `+${fmtDecimal(tenths / 10, 1)}`;

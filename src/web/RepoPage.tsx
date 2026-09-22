@@ -99,6 +99,14 @@ import {
   fmtScore,
   fmtSubmetric,
   gitLimitsText,
+  CONTRIBUTIONS_REST,
+  CONTRIBUTIONS_TITLE,
+  SCORE_SCALE,
+  categoryContributions,
+  contributionsNote,
+  fmtContribution,
+  lockedCategoryText,
+  lossParts,
   humanNoData,
   noDataReason,
   noScoreText,
@@ -610,6 +618,11 @@ function ScoreAside({
       {/* В4.6 (У22): тот же блок, что на рейтинге — вариант А кладёт шкалу в методику карточки */}
       {score && <ScoreLegend coverageNullBelow={meta?.coverageNullBelow} />}
 
+      {/* В4.9 (К9.12): «Вклад категорий в оценку» — в методической панели, как
+          «Вклад категорий» на рейтинге: главная колонка на 1366 сохраняет
+          «величина и открытые категории в одном экране» (приемка варианта А) */}
+      {score && <ContributionBand card={card} meta={meta} />}
+
       {score && (
         <AsideSection title="Что учитывается">
           {/* В4.6 (У24): семистрочный абзац был набран вариантом для
@@ -764,9 +777,81 @@ function ScoreBand({ card }: { card: Card }) {
             />
           )}
         </Flex>
-
       </Flex>
     </Card>
+  );
+}
+
+/**
+ * В4.9 (К9.12): полоса «Вклад категорий в оценку» — тот же расчет, что в
+ * отчете (`categoryContributions`, одна функция; веса — аргументом: индекса —
+ * из `/api/meta`, полного показателя — из карточки). Показатель — тот, что
+ * отчет печатает крупно: полный Repo Health Score зрителю с обоими каналами,
+ * иначе HealthCraft Index. Сегменты — одним темно-серым тоном (как в отчете,
+ * круг 4 эталона), под ними — шкала 3 зон; у каждого визуального элемента
+ * подпись словами.
+ */
+function ContributionBand({ card, meta }: { card: Card; meta: MetaResponse | null }) {
+  const score = card.score!;
+  const full = !score.fullLocked && score.repoHealthScore !== null;
+  const titleOf = (key: string): string => meta?.categories.find((c) => c.key === key)?.title ?? CATEGORY_TITLES_RU[key] ?? key;
+  const inputs = full
+    ? Object.entries(score.categories).map(([key, cat]) => ({ key, title: titleOf(key), score: cat.locked !== undefined ? null : cat.score, weight: cat.weight }))
+    : (meta?.categories ?? [])
+        .filter((c) => c.indexWeight !== null)
+        .map((c) => ({ key: c.key, title: titleOf(c.key), score: score.categories[c.key]?.score ?? null, weight: c.indexWeight! }));
+  if (inputs.length === 0) return null;
+  const c = categoryContributions(inputs, full ? score.repoHealthScore : score.healthcraftIndex, { codeEmpty: card.markers.codeEmpty });
+  if (c === null) return null;
+  const note = contributionsNote(c);
+  const loss = lossParts(c);
+  const zones = [...SCORE_SCALE].reverse();
+  // узкая панель: полоса во всю ширину, под ней — шкала зон и подписи
+  // строками «категория … +21,0» (прием «Вклада категорий» рейтинга), тот же текст, что в отчете
+  return (
+    <AsideSection title={CONTRIBUTIONS_TITLE}>
+      <div className="rh-contrib-band" role="group" aria-label={CONTRIBUTIONS_TITLE}>
+        {note !== null || c.kind !== "bar" ? (
+          <Text as="p" color="complementary" className="rh-contrib-band__note">
+            {note}
+          </Text>
+        ) : (
+          <div className="rh-contrib-band__strip" aria-hidden="true">
+            {c.segments.map((s) => (
+              <span key={s.key} className="rh-contrib-band__seg" style={{ width: `${s.tenths / 10}%` }} />
+            ))}
+          </div>
+        )}
+        <div className="rh-contrib-band__zones" aria-hidden="true">
+          {zones.map((z) => (
+            <span key={z.theme} className={`rh-contrib-band__zone rh-contrib-band__zone_${z.theme}`} />
+          ))}
+        </div>
+        {/* подписи зон — легенда «Шкала оценки» над этим блоком той же панели:
+            в узкой колонке второй экземпляр переносился по слогам */}
+        {c.kind === "bar" && (
+          <div className="rh-contrib-band__rows">
+            {c.segments.map((s) => (
+              <div key={s.key} className="rh-contrib__row">
+                <Text color="complementary">{s.title}</Text>
+                <Text className="rh-contrib__share">{fmtContribution(s.tenths)}</Text>
+              </div>
+            ))}
+            <div className="rh-contrib__row">
+              <Text color="secondary">{CONTRIBUTIONS_REST}</Text>
+              <Text color="secondary" className="rh-contrib__share">
+                {c.missing}
+              </Text>
+            </div>
+          </div>
+        )}
+        {loss && (
+          <Text as="p" color="complementary" className="rh-contrib-band__note">
+            {loss.map((p, i) => (p.strong ? <b key={i}>{p.text}</b> : <span key={i}>{p.text}</span>))}
+          </Text>
+        )}
+      </div>
+    </AsideSection>
   );
 }
 
@@ -871,8 +956,9 @@ function Categories({ card, meta }: { card: Card; meta: MetaResponse | null }) {
   const shown = entries.filter(([, cat]) => cat.locked === undefined);
   const locked = entries
     .filter(([, cat]) => cat.locked !== undefined)
-    // круг 2 (П3): анониму и при истекшей сессии — «войти», как у замка полного Score
-    .map(([key, cat]) => ({ title: titleOf(key), reason: lockReasonShort([cat.locked], card.viewer?.auth) ?? ACCESS_LOCK_SHORT["check-failed"] }));
+    // В4.9 (К9.13): фраза закрытой категории — та же, что в отчете: анониму
+    // «Видна участникам репозитория.», вошедшему — причина доступа
+    .map(([key, cat]) => ({ title: titleOf(key), reason: lockedCategoryText(cat.locked, card.viewer?.auth) }));
 
   return (
     <>
@@ -906,14 +992,25 @@ function Categories({ card, meta }: { card: Card; meta: MetaResponse | null }) {
  * «только CI», где фиксированная пара была бы ложью).
  */
 function LockedCategories({ items }: { items: { title: string; reason: string }[] }) {
-  const groups = new Map<string, string[]>();
-  for (const item of items) groups.set(item.reason, [...(groups.get(item.reason) ?? []), item.title]);
-  const sentences = [...groups].map(
-    ([reason, titles]) =>
-      `${titles.length > 1 ? "Категории" : "Категория"} ${titles.join(" и ")} ${titles.length > 1 ? "недоступны" : "недоступна"}. ${reason}`,
+  // В4.9 (К9.13): одна строка на закрытую категорию — «название — фраза», те же
+  // слова, что строка категории в отчете (название и фраза — разные ячейки)
+  return (
+    <Alert
+      theme="info"
+      view="outlined"
+      size="s"
+      className="rh-locked-note"
+      message={
+        <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
+          {items.map((item) => (
+            <DefinitionList.Item key={item.title} name={item.title}>
+              {item.reason}
+            </DefinitionList.Item>
+          ))}
+        </DefinitionList>
+      }
+    />
   );
-
-  return <Alert theme="info" view="outlined" size="s" className="rh-locked-note" message={sentences.join(" ")} />;
 }
 
 function CategoryRow({
@@ -976,9 +1073,17 @@ function CategoryRow({
           {NO_DATA_SHORT}
         </Label>
       ) : (
-        <Text variant="subheader-2" color={scoreColor(cat.score)} className="rh-category__value" title={sentence(scoreWord(cat.score))}>
+        <Text variant="subheader-2" color={scoreColor(cat.score)} className="rh-category__value">
           {fmtScore(cat.score)}
         </Text>
+      )}
+      {/* В4.9 (К9.14): слово шкалы у категории — плашкой `Label` (как в отчете), не текстом рядом с названием */}
+      {cat.score === null ? (
+        <span />
+      ) : (
+        <Label theme={scoreLabelTheme(cat.score)} size="xs" className="rh-category__word">
+          {sentence(scoreWord(cat.score))}
+        </Label>
       )}
       {/* В4.6 (У25, ДП6): у категории без данных «вклад 0%» превращался в
           «категория дала ноль» — единственное место, где продукт своими руками

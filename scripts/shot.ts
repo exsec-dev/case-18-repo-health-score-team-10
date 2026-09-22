@@ -227,7 +227,9 @@ async function run(): Promise<void> {
       url: `${base}/settings`,
       checks: {
         "заголовок настроек": "document.body.innerText.includes('Настройки') ? 1 : 0",
-        "объяснение входа для настроек": "document.body.innerText.includes('настроить токен доступа SourceCraft') ? 1 : 0",
+        // В4.9: текст экрана сменился в 63b73ab («персональный токен доступа», термины
+        // SourceCraft), проверка харнесса отставала — ложная ошибка консоли
+        "объяснение входа для настроек": "document.body.innerText.includes('настроить персональный токен доступа SourceCraft') ? 1 : 0",
       },
     },
     {
@@ -240,6 +242,8 @@ async function run(): Promise<void> {
         "tri-state NULL": "document.body.textContent?.includes('Отсутствующие данные не учитываются как нулевые значения') ? 1 : 0",
         "объяснение закрытых каналов": "document.body.innerText.includes('учитываются только в Repo Health Score') ? 1 : 0",
         "кнопка отчета": "[...document.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'Отчет').length",
+        // В4.9 (К9.12): полоса «Вклад категорий в оценку» — тем же расчетом, что в отчете
+        "вклад категорий в оценку": "document.querySelectorAll('.rh-contrib-band').length",
         // В4.6, приёмка вариантa А (пункт 5): величина И весь список категорий
         // в ОДНОМ экране. Проверяется не на глаз, а геометрией: нижняя кромка
         // последней строки категории обязана лежать внутри окна. Целевое

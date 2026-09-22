@@ -67,7 +67,8 @@ describe("В4.6 круг 3: карточка", () => {
     expect(row.indexOf('className="rh-category__bar"')).toBeLessThan(row.indexOf('className="rh-category__weight"'));
     // трек числа сужен 40px -> 28px (доводка 21.09): число подписывает полосу
     // и стоит у неё, а не у плашки вклада. Остальные треки не менялись.
-    expect(css).toContain("grid-template-columns: 16px minmax(120px, 180px) minmax(0, 1fr) minmax(80px, 360px) 28px auto");
+    // В4.9 (К9.14): после числа — трек плашки слова шкалы (150px); остальные треки прежние
+    expect(css).toContain("grid-template-columns: 16px minmax(120px, 180px) minmax(0, 1fr) minmax(80px, 360px) 28px 150px auto");
     // селектор стал составным: тот же отступ получил блок «Вклад категорий»
     expect(css).toMatch(/\.rh-aside-section > \.g-definition-list,[\s\S]{0,80}\{[^}]*margin-block-start:\s*var\(--g-spacing-1\)/);
   });
@@ -78,7 +79,8 @@ describe("В4.6 круг 3: карточка", () => {
     const band = repo.slice(repo.indexOf("function ScoreBand"), repo.indexOf("function ScoreFigure"));
     expect(locked).toContain('<Alert');
     expect(locked).toContain('theme="info"');
-    expect(locked).toContain("недоступны");
+    // В4.9 (К9.13): вместо фразы «недоступны» — строки «категория — фраза отчета»
+    expect(locked).toContain("<DefinitionList");
     // ссылка из строки убрана: переход к токену живёт у показателя (решение 21.09)
     expect(locked).not.toContain('linkProps("/settings")');
     expect(web("layout.css")).toMatch(/\.rh-locked-note\s*\{[^}]*margin-top:[^}]*\}/);

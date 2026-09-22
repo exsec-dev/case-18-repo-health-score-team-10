@@ -17,8 +17,12 @@
 import { CATEGORY_ORDER, CATEGORY_TITLES, type CardCategory, type CardEvidence, type CardRecommendation, type RepoCard } from "../api/repos";
 import { COVERAGE_NULL_BELOW, INDEX_WEIGHTS, SCORE_WEIGHTS, SUBWEIGHTS, type CategoryKey } from "../score/model";
 import {
+  CONTRIBUTIONS_REST,
+  CONTRIBUTIONS_TITLE,
   SCORE_SCALE,
   categoryContributions,
+  contributionsNote,
+  lossParts,
   closeDateText,
   NOT_IN_SCORE,
   fmtContribution,
@@ -375,33 +379,18 @@ function zones(): { theme: "danger" | "warning" | "success"; text: string; share
 }
 
 function contributionsBlock(c: Contributions | null): Block {
-  const title = "Вклад категорий в оценку";
+  // заголовок, строка вместо полосы и строка потерь — общие с карточкой (format.ts, К9.12)
+  const title = CONTRIBUTIONS_TITLE;
   if (c === null) return { kind: "contributions", title, segments: [], rest: null, zones: zones(), loss: null, note: "Вклады категорий не рассчитаны: у показателя нет категорий с данными." };
-  if (c.kind === "empty") {
-    return { kind: "contributions", title, segments: [], rest: null, zones: zones(), loss: null, note: "В репозитории нет ни одного файла, поэтому оценка – 0. Это не ошибка сервиса: оценивать нечего." };
-  }
-  if (c.kind === "capped") {
-    return {
-      kind: "contributions",
-      title,
-      segments: [],
-      rest: null,
-      zones: zones(),
-      loss: null,
-      note: `Итог ограничен ${c.total} баллами: AppSec нашел утекшие секреты. Без ограничения категории дали бы ${fmtDecimal(c.uncapped, 1)}.`,
-    };
-  }
-  const loss: InlineLine | null =
-    c.losses.length === 0
-      ? null
-      : c.losses.length === 1
-        ? [text("Сильнее всего итог снижает "), strong(c.losses[0]!.title), text(` (${fmtLoss(c.losses[0]!.loss)}).`)]
-        : [text("Сильнее всего итог снижают "), strong(c.losses[0]!.title), text(` (${fmtLoss(c.losses[0]!.loss)}) и `), strong(c.losses[1]!.title), text(` (${fmtLoss(c.losses[1]!.loss)}).`)];
+  const note = contributionsNote(c);
+  if (c.kind !== "bar") return { kind: "contributions", title, segments: [], rest: null, zones: zones(), loss: null, note };
+  const parts = lossParts(c);
+  const loss: InlineLine | null = parts === null ? null : parts.map((p) => (p.strong ? strong(p.text) : text(p.text)));
   return {
     kind: "contributions",
     title,
     segments: c.segments.map((s) => ({ title: s.title, value: fmtContribution(s.tenths), share: s.tenths / 1000 })),
-    rest: { title: "не набрано", value: String(c.missing), share: c.missing / 100 },
+    rest: { title: CONTRIBUTIONS_REST, value: String(c.missing), share: c.missing / 100 },
     zones: zones(),
     loss,
     note: null,

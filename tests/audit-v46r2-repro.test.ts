@@ -351,10 +351,11 @@ describe("Б4 (Р14, Р16): список категорий и контейне�
     expect({
       rowsFiltered: /cat\.locked === undefined/.test(categories),
       noteAfterList: categories.indexOf("</ul>") < categories.indexOf("<LockedCategories"),
-      namesActualCategories: note.includes("titles.join"),
-      // ПЕРЕНОС (В4.8.5 круг 2, П3): причина — по-прежнему своя у каждой
-      // закрытой категории, через общий хелпер замка (без сессии — «войти»)
-      reasonFromAccessLock: /lockReasonShort\(\[cat\.locked\], card\.viewer\?\.auth\)/.test(categories),
+      // ПЕРЕНОС (В4.9, К9.13): каждая закрытая категория — своей строкой «название — фраза»
+      namesActualCategories: note.includes("name={item.title}"),
+      // ПЕРЕНОС (В4.8.5 круг 2, П3 → В4.9, К9.13): причина — своя у каждой закрытой
+      // категории, фразой отчета по доступу зрителя (без сессии — «Видна участникам репозитория.»)
+      reasonFromAccessLock: /lockedCategoryText\(cat\.locked, card\.viewer\?\.auth\)/.test(categories),
       // фиксированная фраза «CI/CD и Security» была бы ложью при закрытой одной
       hardcodedPair: src.includes("CI/CD и Безопасность – недоступны"),
       lockBranchGoneFromRow: /cat\.locked !== undefined/.test(row),
@@ -368,15 +369,17 @@ describe("Б4 (Р14, Р16): список категорий и контейне�
     });
   });
 
-  test("Р14: строка склеивает категории по ПРИЧИНЕ и согласует число (одна — «недоступна»)", () => {
+  // ПЕРЕВОРОТ (В4.9, К9.13): склейка «Категории X и Y недоступны. причина» заменена
+  // строками «название — фраза отчета» — одна фраза на карточке и в отчете; согласовывать число нечего
+  test("Р14 → К9.13: строка на каждую закрытую категорию с фразой отчета, панель под списком", () => {
     const src = codeOf("RepoPage.tsx");
     const note = between(src, "function LockedCategories", "function CategoryRow");
     expect({
-      groupsByReason: note.includes("groups.set(item.reason"),
-      singular: note.includes('"недоступна"'),
-      plural: note.includes('"недоступны"'),
+      perCategory: note.includes("items.map((item)"),
+      phraseAsIs: note.includes("{item.reason}"),
+      noAgreementGlue: note.includes('"недоступна"') || note.includes('"недоступны"'),
       lastInList: /\.rh-locked-note \{[^}]*margin-top:\s*var\(--g-spacing-3\)/.test(srcOf("layout.css")),
-    }).toEqual({ groupsByReason: true, singular: true, plural: true, lastInList: true });
+    }).toEqual({ perCategory: true, phraseAsIs: true, noAgreementGlue: false, lastInList: true });
   });
 
   // Доводка 21.09: верхнее поле у списка снято решением владельца — раскрытое

@@ -238,7 +238,10 @@ describe("П3: причина замка — одно правило для по
   test("карточка зовет общий хелпер в обоих местах (проводка)", () => {
     const page = webSrc("RepoPage.tsx");
     expect(page).toContain("lockReasonShort([card.access.cicd, card.access.appsec], card.viewer?.auth)");
-    expect(page).toContain("lockReasonShort([cat.locked], card.viewer?.auth)");
+    // ПЕРЕНОС (В4.9, К9.13): строка закрытых категорий берет фразу отчета по доступу
+    // зрителя (`lockedCategoryText`, без сессии — «Видна участникам репозитория.»);
+    // у полного Score — прежний общий хелпер короткой причины
+    expect(page).toContain("lockedCategoryText(cat.locked, card.viewer?.auth)");
     expect(page).not.toContain("accessLockShort(cat.locked)");
   });
 });
