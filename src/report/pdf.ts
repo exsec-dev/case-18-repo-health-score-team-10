@@ -343,9 +343,12 @@ const ZONE_H = 3;
 const ZONE_TOP = BAR_H + 2;
 /**
  * Засечка у начала сегмента (круг 3 гейта; п.1 круга 5 — черная, жирнее,
- * пересекает шкалу насквозь и выходит на 4 pt к своей подписи).
+ * пересекает шкалу насквозь и тянется к своей подписи). Доводка: засечка
+ * стоит и у первого сегмента, у последнего (остаток «не набрано») ее нет —
+ * там граница видна сменой тона; рисуется ПОВЕРХ полосы и полоски зон.
  */
-const TICK = 4;
+const TICK_UP = 5;
+const TICK_DOWN = 10;
 const TICK_WIDTH = 1.25;
 
 /**
@@ -398,10 +401,11 @@ function contributionsNode(block: Extract<Block, { kind: "contributions" }>): Pd
           canvas: [
             // круг 3 гейта: полоса не режется на куски — соседние прямоугольники
             // перекрываются на полпункта и читаются как одна линия; начало
-            // сегмента отмечает засечка со стороны его подписи
+            // сегмента отмечает засечка со стороны его подписи. Порядок важен:
+            // засечка рисуется последней и потому лежит поверх полоски зон.
             { type: "rect", x: 0, y: 0, w: w + (last ? 0 : 0.6), h: BAR_H, color: it.fill },
-            ...(i === 0 ? [] : [{ type: "line", x1: 0, y1: above ? -TICK : 0, x2: 0, y2: above ? BAR_H : BAR_H + TICK, lineWidth: TICK_WIDTH, lineColor: COLORS.ink }]),
             ...zoneRects(block, x0, x0 + w),
+            ...(last ? [] : [{ type: "line", x1: 0, y1: above ? -TICK_UP : 0, x2: 0, y2: above ? BAR_H : BAR_H + TICK_DOWN, lineWidth: TICK_WIDTH, lineColor: COLORS.ink }]),
           ],
           margin: [0, 5, 0, 0],
         },
