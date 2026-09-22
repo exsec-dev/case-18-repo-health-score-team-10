@@ -15,6 +15,7 @@ import { Database } from "bun:sqlite";
 import { join } from "node:path";
 import { getRepoCard } from "../src/api/repos";
 import { renderRepoReport } from "../src/report/markdown";
+import { REPORT_NO_SCORE } from "../src/report/build";
 import { REPORT_FIXTURES, fixtureCard } from "./report-fixtures";
 
 const ENABLED = { dictionary: true, firstScreen: true };
@@ -78,7 +79,10 @@ describe("К9.2: словарь запрещенных слов в основн�
 //   V49_LIVE_DATA_DIR=<каталог копии> bun test tests/v49-report.test.ts
 // Копия открывается readonly — тест ничего в нее не пишет.
 const LIVE_DIR = process.env.V49_LIVE_DATA_DIR;
-const LIVE_REPOS = ["bayselonarrend/openintegrations", "divkit/divkit", "sourcecraft/template-tg-bot", "gravity-ui/uikit", "qipparu/2"];
+// Круг 3 гейта (решение владельца 22.09): без оценки отчет не выдается, поэтому
+// `qipparu/2` вышел из набора снимаемых документов — по нему проверяется отказ.
+const LIVE_REPOS = ["bayselonarrend/openintegrations", "divkit/divkit", "sourcecraft/template-tg-bot", "gravity-ui/uikit"];
+const LIVE_NO_SCORE = "qipparu/2";
 
 (LIVE_DIR ? describe : describe.skip)("К9.2 на живых репозиториях (копия БД)", () => {
   for (const slug of LIVE_REPOS) {
@@ -99,6 +103,19 @@ const LIVE_REPOS = ["bayselonarrend/openintegrations", "divkit/divkit", "sourcec
       });
     }
   }
+
+  test(`${LIVE_NO_SCORE}: оценки нет — документ не собирается (круг 3 гейта)`, () => {
+    const db = new Database(join(LIVE_DIR!, "repo-health.db"), { readonly: true });
+    try {
+      const [org, repo] = LIVE_NO_SCORE.split("/") as [string, string];
+      const card = getRepoCard(db, org, repo);
+      expect(card).not.toBeNull();
+      expect(card!.score).toBeNull();
+      expect(() => renderRepoReport(card!)).toThrow(REPORT_NO_SCORE);
+    } finally {
+      db.close();
+    }
+  });
 });
 
 describe("К9.6: MD читается в рендере", () => {
