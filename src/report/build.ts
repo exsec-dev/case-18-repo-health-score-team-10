@@ -437,7 +437,8 @@ function contributionsBlock(c: Contributions | null, metricName?: string): Block
   // заголовок, строка вместо полосы и строка потерь — общие с карточкой (format.ts, К9.12)
   // п.6 круга 2: в отчете к заголовку добавлен показатель — полоса строится то
   // по Repo Health Score, то по HealthCraft Index, и по ней это должно быть видно
-  const title = metricName ? `${CONTRIBUTIONS_TITLE} – ${metricName}` : CONTRIBUTIONS_TITLE;
+  // п.3 круга 5: показатель прямо в заголовке, без «в оценку – …»
+  const title = metricName ? `Вклад категорий в ${metricName}` : CONTRIBUTIONS_TITLE;
   if (c === null) return { kind: "contributions", title, segments: [], rest: null, zones: zones(), note: "Вклады категорий не рассчитаны: у показателя нет категорий с данными." };
   const note = contributionsNote(c);
   if (c.kind !== "bar") return { kind: "contributions", title, segments: [], rest: null, zones: zones(), note };
@@ -455,7 +456,7 @@ function categoriesBlock(card: RepoCard, ctx: SubmetricContext): Block {
   const cats = card.score!.categories;
   return {
     kind: "categories",
-    columns: ["Категория", "Балл", "Уровень", "Почему"],
+    columns: ["Категория", "Балл", "Уровень", "Основание"],
     rows: CATEGORY_ORDER.filter((k) => cats[k] !== undefined).map((k) => categoryRow(card, k, cats[k]!, ctx)),
   };
 }
@@ -678,7 +679,8 @@ function metricCalc(card: RepoCard, metric: ShownMetric, named: boolean): Block[
   if (named) out.push({ kind: "paragraph", tone: "subhead", lines: [[strong(`Расчет ${metric.name}`)]] });
   out.push({
     kind: "table",
-    columns: [col("Категория", "left", 184), col("Балл", "right", 84), col(`Вес в ${metric.name}`, "right", 114), col("Баллов в итог", "right")],
+    // п.6 круга 5: таблиц две и каждая подписана показателем — повторять его в шапке столбца незачем
+    columns: [col("Категория", "left", 184), col("Балл", "right", 84), col(named ? "Вес" : `Вес в ${metric.name}`, "right", 114), col("Баллов в итог", "right")],
     rows,
     total: true,
   });

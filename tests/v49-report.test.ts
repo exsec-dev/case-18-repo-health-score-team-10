@@ -151,7 +151,7 @@ describe("К9.1: первый экран у фикстур с оценкой", (
       try {
         const md = renderRepoReport(card);
         const hero = md.search(/\*\*\d+ из 100 · (здоров|требует внимания|в зоне риска)\*\*/u);
-        const contrib = md.indexOf("## Вклад категорий в оценку");
+        const contrib = md.indexOf("## Вклад категорий в ");
         const cats = md.indexOf("## Категории");
         const actions = md.indexOf("## Рекомендации");
         const detail = md.indexOf("## Разбор по категориям");

@@ -54,7 +54,8 @@ describe("MD-отчёт: структура", () => {
     expect(md.startsWith("# report/sample")).toBe(true);
     const order = [
       "Repo Health Score: **",
-      "## Вклад категорий в оценку",
+      // п.3 круга 5: показатель назван прямо в заголовке полосы
+      "## Вклад категорий в HealthCraft Index",
       "## Категории",
       // В11/В15 гейта: блока «Что сделать первым» нет, раздел рекомендаций один и стоит после категорий
       "## Рекомендации",
@@ -98,8 +99,8 @@ describe("MD-отчёт: числа и tri-state", () => {
     // и в строке-пояснении публичный показатель назван первым
     expect(main).toContain("HealthCraft Index считается по открытым данным – по нему строится рейтинг. Repo Health Score учитывает 6 категорий, включая CI/CD и Безопасность.");
     // полос вклада две, публичная первой
-    expect(at("## Вклад категорий в оценку – HealthCraft Index")).toBeGreaterThan(-1);
-    expect(at("## Вклад категорий в оценку – HealthCraft Index")).toBeLessThan(at("## Вклад категорий в оценку – Repo Health Score"));
+    expect(at("## Вклад категорий в HealthCraft Index")).toBeGreaterThan(-1);
+    expect(at("## Вклад категорий в HealthCraft Index")).toBeLessThan(at("## Вклад категорий в Repo Health Score"));
   });
 
   test("все шесть категорий: балл и слово шкалы; у Безопасности без данных — «—», а не 0 (tri-state)", () => {

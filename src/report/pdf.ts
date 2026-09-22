@@ -341,8 +341,12 @@ const SEG_LABEL_H = 19;
 const BAR_H = 12;
 const ZONE_H = 3;
 const ZONE_TOP = BAR_H + 2;
-/** Длина засечки у начала сегмента (круг 3 гейта). */
-const TICK = 3.5;
+/**
+ * Засечка у начала сегмента (круг 3 гейта; п.1 круга 5 — черная, жирнее,
+ * пересекает шкалу насквозь и выходит на 4 pt к своей подписи).
+ */
+const TICK = 4;
+const TICK_WIDTH = 1.25;
 
 /**
  * Подпись сегмента — ВСЕГДА две строки: у сегмента без подписи в этой строке
@@ -396,7 +400,7 @@ function contributionsNode(block: Extract<Block, { kind: "contributions" }>): Pd
             // перекрываются на полпункта и читаются как одна линия; начало
             // сегмента отмечает засечка со стороны его подписи
             { type: "rect", x: 0, y: 0, w: w + (last ? 0 : 0.6), h: BAR_H, color: it.fill },
-            ...(i === 0 ? [] : [{ type: "line", x1: 0, y1: above ? -TICK : BAR_H, x2: 0, y2: above ? 0 : BAR_H + TICK, lineWidth: 0.75, lineColor: COLORS.muted }]),
+            ...(i === 0 ? [] : [{ type: "line", x1: 0, y1: above ? -TICK : 0, x2: 0, y2: above ? BAR_H : BAR_H + TICK, lineWidth: TICK_WIDTH, lineColor: COLORS.ink }]),
             ...zoneRects(block, x0, x0 + w),
           ],
           margin: [0, 5, 0, 0],
@@ -465,18 +469,28 @@ const CAT_COLS = [84, 60, 24, 98] as const;
 const GAP = 8;
 const WHY_W = W - CAT_COLS.reduce((a, b) => a + b, 0) - GAP * 4;
 
+/**
+ * Высота строки текста в Inter: кегль × 1,21 (ascender − descender) × межстрочный.
+ * п.4 круга 5: строка таблицы центрировалась по выдуманной высоте (11 pt на
+ * строку «основания» и пол ряда не меньше 30), а pdfmake считал настоящую —
+ * содержимое вставало ниже середины. Теперь обе высоты одна и та же.
+ */
+const textH = (size: number, lineHeight: number): number => size * 1.21 * lineHeight;
+const NAME_H = textH(9.5, 1.05);
+const WHY_H = textH(8, 1.12);
+
 function categoryCells(row: CategoryRow): PdfNode[] {
   const off = row.score === null;
   const whyLines = linesOf(row.why, 8, WHY_W);
-  const h = Math.max(30, whyLines * 11 + 2);
+  const h = Math.max(whyLines * WHY_H, LABEL_SIZES.xs.h, NAME_H);
   const mid = (elem: number) => Math.max(0, (h - elem) / 2);
   return [
     // В10 гейта: имя категории — обычным начертанием
-    { text: row.name, color: off ? COLORS.ink2 : COLORS.ink, margin: [0, mid(12), 0, 0], lineHeight: 1.05 },
+    { text: row.name, color: off ? COLORS.ink2 : COLORS.ink, margin: [0, mid(NAME_H), 0, 0], lineHeight: 1.05 },
     { ...scoreBar(row.score, CAT_COLS[1]), margin: [0, mid(6), 0, 0] },
-    { text: row.scoreText, color: off ? COLORS.muted : COLORS.ink, alignment: "right", noWrap: true, margin: [0, mid(12), 0, 0], fontFeatures: ["tnum"], lineHeight: 1.05 },
-    { columns: [labelNode(row.chip, "xs")], margin: [0, mid(15), 0, 0] },
-    { text: row.why, fontSize: 8, color: COLORS.ink2, lineHeight: 1.12, margin: [0, mid(whyLines * 11), 0, 0] },
+    { text: row.scoreText, color: off ? COLORS.muted : COLORS.ink, alignment: "right", noWrap: true, margin: [0, mid(NAME_H), 0, 0], fontFeatures: ["tnum"], lineHeight: 1.05 },
+    { columns: [labelNode(row.chip, "xs")], margin: [0, mid(LABEL_SIZES.xs.h), 0, 0] },
+    { text: row.why, fontSize: 8, color: COLORS.ink2, lineHeight: 1.12, margin: [0, mid(whyLines * WHY_H), 0, 0] },
   ];
 }
 
@@ -498,8 +512,8 @@ function categoriesNode(block: Extract<Block, { kind: "categories" }>): PdfNode 
       hLineColor: () => COLORS.rule,
       paddingLeft: (i: number) => (i === 0 ? 0 : GAP),
       paddingRight: () => 0,
-      paddingTop: (i: number) => (i === 0 ? 0 : 3),
-      paddingBottom: (i: number) => (i === 0 ? 3 : 3),
+      paddingTop: (i: number) => (i === 0 ? 0 : 7),
+      paddingBottom: (i: number) => (i === 0 ? 3 : 7),
     },
   };
 }
@@ -610,7 +624,7 @@ function detailNode(block: Extract<Block, { kind: "detail" }>): PdfNode {
   // В14 гейта: примечание под таблицей — на светло-серой подложке
   for (const note of block.notes) parts.push(noteBox(note));
   const small = (block.table?.rows.length ?? 0) <= 6;
-  return { stack: parts, margin: [0, 16, 0, 0], unbreakable: small };
+  return { stack: parts, margin: [0, 20, 0, 0], unbreakable: small };
 }
 
 function paragraphNode(block: Extract<Block, { kind: "paragraph" }>): PdfNode {
@@ -629,12 +643,12 @@ function paragraphNode(block: Extract<Block, { kind: "paragraph" }>): PdfNode {
  * кегля основного текста (9,5): 24 — между блоками, 16 — перед подзаголовком
  * внутри блока, 6 — внутри блока.
  */
-const BLOCK_GAP = 24;
+const BLOCK_GAP = 30;
 
 const HEADING_STYLE: Record<1 | 2 | 3, PdfNode> = {
   1: { fontSize: 16, bold: true, margin: [0, 0, 0, 8] },
   2: { fontSize: 12, bold: true, margin: [0, BLOCK_GAP, 0, 6] },
-  3: { fontSize: 10.5, bold: true, margin: [0, 16, 0, 5] },
+  3: { fontSize: 10.5, bold: true, margin: [0, 20, 0, 5] },
 };
 
 function blockNode(block: Block): PdfNode {

@@ -29,8 +29,26 @@ const heroOf = (model: ReturnType<typeof buildReportModel>) => {
 
 const bars = (model: ReturnType<typeof buildReportModel>) => model.blocks.filter((b) => b.kind === "contributions").map((b) => (b.kind === "contributions" ? b.title : ""));
 
-/** Заголовки таблиц приложения А — по шапке столбца «Вес в <показатель>». */
-const calcTables = (model: ReturnType<typeof buildReportModel>) =>
+/**
+ * Таблицы приложения А по порядку. п.6 круга 5: когда таблиц две, показатель
+ * назван подзаголовком («Расчет <показатель>»), а столбец — просто «Вес»;
+ * когда таблица одна, подзаголовка нет и показатель стоит в шапке столбца.
+ */
+const calcTables = (model: ReturnType<typeof buildReportModel>) => {
+  const out: string[] = [];
+  let subhead: string | null = null;
+  for (const b of model.blocks) {
+    if (b.kind === "paragraph" && b.tone === "subhead") subhead = b.lines[0]!.map((f) => f.text).join("");
+    if (b.kind === "table" && b.columns[0]?.title === "Категория") {
+      out.push(subhead ?? b.columns[2]!.title);
+      subhead = null;
+    }
+  }
+  return out;
+};
+
+/** Шапка столбца веса в таблицах приложения А. */
+const weightColumns = (model: ReturnType<typeof buildReportModel>) =>
   model.blocks.filter((b) => b.kind === "table" && b.columns[0]?.title === "Категория").map((b) => (b.kind === "table" ? b.columns[2]!.title : ""));
 
 // ---------------------------------------------------------------------------
@@ -50,7 +68,7 @@ describe("А1 (блок А): полный отчет считает ОБА по�
 
   test("full: полос вклада две, публичная первой, и каждая складывается в СВОЙ показатель", () => {
     const { model } = report("full");
-    expect(bars(model)).toEqual(["Вклад категорий в оценку – HealthCraft Index", "Вклад категорий в оценку – Repo Health Score"]);
+    expect(bars(model)).toEqual(["Вклад категорий в HealthCraft Index", "Вклад категорий в Repo Health Score"]);
     const hero = heroOf(model);
     const values = [hero.value!, hero.secondary!.value!];
     model.blocks
@@ -65,7 +83,9 @@ describe("А1 (блок А): полный отчет считает ОБА по�
 
   test("full: приложение А — две таблицы, публичная первой; приложение Б — две верхние строки", () => {
     const { md, model } = report("full");
-    expect(calcTables(model)).toEqual(["Вес в HealthCraft Index", "Вес в Repo Health Score"]);
+    expect(calcTables(model)).toEqual(["Расчет HealthCraft Index", "Расчет Repo Health Score"]);
+    // п.6 круга 5: показатель назван подзаголовком, в шапке столбца его нет
+    expect(weightColumns(model)).toEqual(["Вес", "Вес"]);
     const appendix = md.slice(md.indexOf("## Приложение"));
     expect(appendix).toContain("| **HealthCraft Index 62** | сумма по 4 открытым категориям: балл × вес, приложение А |");
     expect(appendix).toContain("| **Repo Health Score 64** | сумма по 6 категориям: балл × вес, приложение А |");
@@ -79,8 +99,9 @@ describe("А1 (блок А): полный отчет считает ОБА по�
     const { model } = report("anon");
     const hero = heroOf(model);
     expect({ label: hero.label, secondary: hero.secondary }).toEqual({ label: "HealthCraft Index", secondary: null });
-    expect(bars(model)).toEqual(["Вклад категорий в оценку – HealthCraft Index"]);
+    expect(bars(model)).toEqual(["Вклад категорий в HealthCraft Index"]);
     expect(calcTables(model)).toEqual(["Вес в HealthCraft Index"]);
+    expect(weightColumns(model)).toEqual(["Вес в HealthCraft Index"]);
   });
 });
 
@@ -122,8 +143,9 @@ describe("Блок А, пункт 7: полный доступ есть, HealthC
     expect(md).not.toContain("## Данные по категориям");
     expect(md).not.toContain("## Объем собранных данных");
     // полоса и таблица приложения А — только у Score
-    expect(bars(model)).toEqual(["Вклад категорий в оценку – Repo Health Score"]);
+    expect(bars(model)).toEqual(["Вклад категорий в Repo Health Score"]);
     expect(calcTables(model)).toEqual(["Вес в Repo Health Score"]);
+    expect(weightColumns(model)).toEqual(["Вес в Repo Health Score"]);
     expect(md.slice(md.indexOf("### Б."))).not.toContain("**HealthCraft Index");
     // и читателю сказано, почему индекса нет
     expect(hero.notes.at(-1)!.line.map((f) => f.text).join("")).toContain("открытых данных собрано меньше 40%, поэтому он не рассчитан");
