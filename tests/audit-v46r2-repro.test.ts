@@ -24,6 +24,24 @@ import { join } from "node:path";
 import { getRepoCard } from "../src/api/repos";
 import { renderRepoReport } from "../src/report/markdown";
 import { cardFacts, makeApiDb, seedRecommendation, seedRepo, seedScan, seedScore, type ApiTestDb } from "./api-fixtures";
+import { buildReportModel } from "../src/report/build";
+import { fixtureCard } from "./report-fixtures";
+
+/**
+ * Круг 4 гейта: первый экран отчета несет плашку зоны. Проверка переведена с
+ * поиска строки в исходнике на МОДЕЛЬ отчета — источник переименовался
+ * (показателей в ряду стало два), а утверждение то же и проверяется по данным.
+ */
+function reportHeroHasChip(): boolean {
+  const { card, close } = fixtureCard("full");
+  try {
+    const hero = buildReportModel(card).blocks.find((b) => b.kind === "hero");
+    return hero?.kind === "hero" && hero.chip !== null && hero.chip.text.length > 0;
+  } finally {
+    close();
+  }
+}
+
 
 const repro = process.env.AUDIT_STRICT ? test : test.failing;
 
@@ -228,7 +246,7 @@ describe("Р13 + П1.10: нижний ярус показателей полно
       summaryOnPage: band.includes("summaryLine"),
       // В4.9 (К9.1) вердикт первого экрана заменил строку итога; гейт 22.09 (В3)
       // убрал и его: вывод отчета — крупное число с плашкой зоны.
-      reportHasChip: buildSrc().includes("chip: scoreChip(value)"),
+      reportHasChip: reportHeroHasChip(),
     }).toEqual({ cta: false, counterLink: false, summaryOnPage: false, reportHasChip: true });
   });
 });

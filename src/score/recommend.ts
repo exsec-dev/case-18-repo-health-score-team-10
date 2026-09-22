@@ -123,8 +123,9 @@ const joinAnd = (items: string[]): string => (items.length <= 1 ? (items[0] ?? "
 /** Родительный падеж после «из N»: из 1 пометки, из 5 пометок, из 21 пометки. */
 const fromWord = (n: number, one: string, many: string): string => (n % 10 === 1 && n % 100 !== 11 ? one : many);
 
-/** Дни: 1 день, 2 дня, 5 дней. */
+/** Дни: 1 день, 2 дня, 5 дней; дробное — родительный ед. («48,8 дня»), как в словаре подметрик. */
 const daysWord = (n: number): string => {
+  if (!Number.isInteger(n)) return "дня";
   const m10 = n % 10;
   const m100 = n % 100;
   return m10 === 1 && m100 !== 11 ? "день" : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? "дня" : "дней";
@@ -230,10 +231,13 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
       };
     case "speed-up-issue-close": {
       if (typeof p.days !== "number") return null;
-      const days = Math.round(p.days);
+      // А13 аудита (круг 4): срок закрытия назывался двумя числами — «49 дней»
+      // в действии против «48,8 дня» в таблице и приложении. Число одно и
+      // показывается так же, как в таблице показателей (десятые, `fmtDecimal`).
+      const days = Math.round(p.days * 10) / 10;
       return {
         action: "Ускорьте обработку новых задач",
-        problem: `Типичный срок закрытия задачи – ${days} ${daysWord(days)}. Назначьте ответственного за разбор, добавьте шаблоны и метки приоритета.`,
+        problem: `Типичный срок закрытия задачи – ${fmtDecimal(days, 1, { trim: true })} ${daysWord(days)}. Назначьте ответственного за разбор, добавьте шаблоны и метки приоритета.`,
         expectedImpact: categoryImpact("Задачи"),
       };
     }

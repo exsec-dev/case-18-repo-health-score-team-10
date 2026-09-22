@@ -14,8 +14,8 @@
 // и вердиктом → «Вклад категорий в оценку» → категории → «Что сделать
 // первым» → «Ограничения данных» → разбор → все рекомендации → «Как
 // считается» → приложение (в PDF с новой страницы).
-import { CATEGORY_ORDER, CATEGORY_TITLES, type CardCategory, type CardEvidence, type CardRecommendation, type RepoCard } from "../api/repos";
-import { COVERAGE_NULL_BELOW, INDEX_WEIGHTS, SCORE_WEIGHTS, SUBWEIGHTS, type CategoryKey } from "../score/model";
+import { CATEGORY_ORDER, CATEGORY_TITLES, CHANNEL_TREE_KEY, type CardCategory, type CardEvidence, type CardRecommendation, type RepoCard } from "../api/repos";
+import { COVERAGE_NULL_BELOW, INDEX_WEIGHTS, SCORE_WEIGHTS, SEVERITY_WEIGHTS, SUBWEIGHTS, type CategoryKey } from "../score/model";
 import {
   CONTRIBUTIONS_REST,
   CONTRIBUTIONS_TITLE,
@@ -68,16 +68,28 @@ interface Metric {
 }
 
 /**
- * Зрителю с обоими показателями крупно — Repo Health Score, HealthCraft
- * Index строкой ниже; анониму и зрителю без прав — Index (решение
- * владельца 22.09). Полный показатель без данных — крупно Index.
+ * Показатели документа в порядке «сначала публичный, потом полный»
+ * (решение владельца 22.09, круг 4 гейта): HealthCraft Index считается по
+ * открытым данным и идет первым, Repo Health Score — вторым и только там,
+ * где зрителю открыты CI/CD и Безопасность. Порядок один для ряда первого
+ * экрана, полос вклада, приложений А и Б и раздела «Как считается».
+ *
+ * Index в списке есть всегда — даже когда его значение NULL: у зрителя с
+ * полным доступом слева печатается «Оценки нет», а справа Score со своей
+ * полосой (пункт 7 блока А круга 4). Считается и печатается в приложениях
+ * только показатель со значением.
  */
-function bigMetric(card: RepoCard): Metric {
+function metricsOf(card: RepoCard): Metric[] {
   const score = card.score!;
   const index: Metric = { name: INDEX, value: score.healthcraftIndex, keys: PUBLIC, weight: (k) => INDEX_WEIGHTS[k as keyof typeof INDEX_WEIGHTS] ?? 0 };
-  if (score.fullLocked || score.repoHealthScore === null) return index;
-  return { name: FULL, value: score.repoHealthScore, keys: CATEGORY_ORDER, weight: (k) => score.categories[k]?.weight ?? SCORE_WEIGHTS[k] };
+  if (score.fullLocked || score.repoHealthScore === null) return [index];
+  return [index, { name: FULL, value: score.repoHealthScore, keys: CATEGORY_ORDER, weight: (k) => score.categories[k]?.weight ?? SCORE_WEIGHTS[k] }];
 }
+
+/** Показатели, у которых есть значение: только они получают полосу и столбцы приложений. */
+type ShownMetric = Metric & { value: number };
+
+const withValue = (metrics: Metric[]): ShownMetric[] => metrics.filter((m): m is ShownMetric => m.value !== null);
 
 function contributionsOf(card: RepoCard, metric: Metric): Contributions | null {
   const cats = card.score!.categories;
@@ -149,14 +161,55 @@ function closeDateNote(card: RepoCard): string | null {
   return closeDateText((stats?.value as { close_date_note?: unknown } | null)?.close_date_note);
 }
 
+/** Значение факта по ключу — только у факта со статусом «данные есть». */
+function factValue(card: RepoCard, key: string): Record<string, unknown> | null {
+  const fact = card.evidence.find((e) => e.key === key && e.status === "ok");
+  return fact && fact.value !== null && typeof fact.value === "object" ? (fact.value as Record<string, unknown>) : null;
+}
+
+/**
+ * А11 аудита: оговорка про обрезанную историю печаталась и там, где обрезки
+ * не было. Дата отсечения раньше первого коммита репозитория означает, что
+ * окно сбора накрыло всю историю и ничего не потеряно (`fx-anon`: отсечение
+ * 16 авг. 2025 при первом коммите 2 окт. 2025). Первый коммит берется из
+ * итога истории в самих данных.
+ */
+function historyTruncatedSince(card: RepoCard): string | null {
+  const since = card.markers.historyTruncatedSince;
+  if (!since) return null;
+  const first = factValue(card, "activity.git.timeline")?.first;
+  if (typeof first === "string" && first !== "" && since < first.slice(0, 10)) return null;
+  return since;
+}
+
+/**
+ * А3 аудита: «Релизы за 12 месяцев – 0» и «Предложения изменений за 90 дней
+ * – 0» стоят рядом со счетчиками API, где релизы и предложения есть. Окна
+ * считаются по ДАТАМ событий, и когда API их не передал, окно пусто. Балл от
+ * этого не становится неверным — это ограничение данных, как `closeDateNote`.
+ */
+function restDatesNote(card: RepoCard): string | null {
+  const rest = factValue(card, "activity.rest");
+  if (!rest) return null;
+  const gaps: string[] = [];
+  const empty = (dates: unknown, counter: unknown): boolean => Array.isArray(dates) && dates.length === 0 && typeof counter === "number" && counter > 0;
+  if (empty(rest.releases_released_at, rest.releases)) gaps.push(`релизов по счетчику ${rest.releases}`);
+  if (empty(rest.pulls_created_at, rest.pulls_open)) gaps.push(`открытых предложений изменений по счетчику ${rest.pulls_open}`);
+  if (gaps.length === 0) return null;
+  return `Дат событий SourceCraft не передал: ${gaps.join(", ")}, но без дат в окна «за 90 дней» и «за 12 месяцев» не попадает ничего, поэтому в разборе у них 0.`;
+}
+
 /** «Ограничения данных» — только ограничения данных (закрытые категории сюда не входят). */
 function limitations(card: RepoCard): string[] {
   const out: string[] = [];
   const close = closeDateNote(card);
   if (close) out.push(close);
-  if (card.markers.historyTruncatedSince) {
+  const rest = restDatesNote(card);
+  if (rest) out.push(rest);
+  const since = historyTruncatedSince(card);
+  if (since) {
     // Г1.7 гейта: причина не в размере репозитория — сервис читает окно истории
-    out.push(`История коммитов загружена частично: сервис читает только недавнюю историю – с ${fmtDate(card.markers.historyTruncatedSince)}.`);
+    out.push(`История коммитов загружена частично: сервис читает только недавнюю историю – с ${fmtDate(since)}.`);
   }
   if (card.markers.staleFacts) out.push("Часть данных взята из прошлого анализа: источник не ответил. Оценка от этого не выросла и не снизилась.");
   if (card.markers.gitLimits) out.push(gitLimitsText(card.markers.gitLimits));
@@ -218,9 +271,9 @@ export function buildReportModel(card: RepoCard): ReportModel {
   if (!card.score) {
     throw new Error(REPORT_NO_SCORE);
   } else {
-    const metric = bigMetric(card);
-    if (metric.value === null) blocks.push(...indexNullSection(card));
-    else blocks.push(...scoredSection(card, metric));
+    const metrics = metricsOf(card);
+    if (withValue(metrics).length === 0) blocks.push(...indexNullSection(card));
+    else blocks.push(...scoredSection(card, metrics));
   }
   return {
     title: `Repo Health: ${slug}`,
@@ -285,60 +338,63 @@ function indexNullSection(card: RepoCard): Block[] {
   out.push(para(line(`Оценка рассчитывается при объеме данных от ${threshold}.`)));
   const limits = limitations(card);
   if (limits.length > 0) out.push(h2("Ограничения данных"), ...limits.map((l) => ({ kind: "paragraph" as const, tone: "note" as const, lines: [line(l)] })));
-  out.push(...appendix(card, null));
+  out.push(...appendix(card, []));
   return out;
 }
 
 // ---------- полный отчёт ----------
 
-function scoredSection(card: RepoCard, metric: Metric): Block[] {
+function scoredSection(card: RepoCard, metrics: Metric[]): Block[] {
   const score = card.score!;
   const ctx = submetricContext(score.computedAt);
-  const value = metric.value!;
-  const cats = card.score!.categories;
-  const contributions = contributionsOf(card, metric);
+  const shown = withValue(metrics);
+  const contributions = new Map(shown.map((m) => [m.name, contributionsOf(card, m)] as const));
   const notes: HeroNote[] = [];
-  const near = thresholdNote(value);
-  if (near) notes.push({ line: line(near) });
-  // Круг 2, п.3 (вариант 2 владельца): пояснение к числам — ОДНОЙ строкой под
-  // обоими показателями, с иконкой информации. Полного показателя зритель не
-  // видит — остается только фраза про индекс и путь к полной оценке (Г1.15).
-  let secondary: HeroSecondary | null = null;
-  if (metric.name === INDEX) {
-    notes.push({
-      line: line(
-        score.fullLocked
-          ? `${INDEX} считается по открытым данным – по нему строится рейтинг. Полная оценка ${FULL} с категориями CI/CD и Безопасность видна участникам репозитория: войдите и добавьте персональный токен доступа в Настройках.`
-          : `${INDEX} считается по открытым данным – по нему строится рейтинг. ${FULL}: данных для оценки недостаточно.`,
-      ),
-      info: true,
-    });
-  } else {
-    notes.push({
-      line: line(`${FULL} учитывает 6 категорий, включая CI/CD и Безопасность. ${INDEX} считается по открытым данным – по нему строится рейтинг.`),
-      info: true,
-    });
-    secondary = {
-      label: INDEX,
-      value: score.healthcraftIndex === null ? null : Math.round(score.healthcraftIndex),
-      noneText: "Оценки нет",
-      chip: score.healthcraftIndex === null ? null : scoreChip(score.healthcraftIndex),
-      note: null,
-    };
+  // строка «близко к порогу» относится к конкретному числу: когда чисел два,
+  // она называет свой показатель
+  for (const m of shown) {
+    const near = thresholdNote(m.value);
+    if (near) notes.push({ line: line(shown.length > 1 ? `${m.name}: ${near}` : near) });
   }
+  // Круг 2, п.3 (вариант 2 владельца): пояснение к числам — ОДНОЙ строкой под
+  // обоими показателями, с иконкой информации. Круг 4: и в ней публичный
+  // показатель называется первым.
+  const hasIndex = shown.some((m) => m.name === INDEX);
+  const hasFull = shown.some((m) => m.name === FULL);
+  const publicFirst = `${INDEX} считается по открытым данным – по нему строится рейтинг.`;
+  notes.push({
+    line: line(
+      hasIndex && hasFull
+        ? `${publicFirst} ${FULL} учитывает 6 категорий, включая CI/CD и Безопасность.`
+        : hasIndex
+          ? score.fullLocked
+            ? `${publicFirst} Полная оценка ${FULL} с категориями CI/CD и Безопасность видна участникам репозитория: войдите и добавьте персональный токен доступа в Настройках.`
+            : `${publicFirst} ${FULL}: данных для оценки недостаточно.`
+          : // пункт 7 блока А круга 4: полный доступ есть, индекса нет
+            `${INDEX} считается по открытым данным – по нему строится рейтинг, но открытых данных собрано меньше ${fmtCoverage(COVERAGE_NULL_BELOW)}, поэтому он не рассчитан. ${FULL} учитывает 6 категорий, включая CI/CD и Безопасность.`,
+    ),
+    info: true,
+  });
+  const head = metrics[0]!;
+  const second = metrics[1];
+  const secondary: HeroSecondary | null = second
+    ? { label: second.name, value: second.value === null ? null : Math.round(second.value), noneText: "Оценки нет", chip: second.value === null ? null : scoreChip(second.value), note: null }
+    : null;
   const out: Block[] = [
     {
       kind: "hero",
-      label: metric.name,
-      value: Math.round(value),
+      label: head.name,
+      value: head.value === null ? null : Math.round(head.value),
       noneText: "Оценки нет",
-      chip: scoreChip(value),
+      chip: head.value === null ? null : scoreChip(head.value),
       secondary,
       // В3 гейта: предложения общего вывода под оценкой в отчете нет
       verdict: null,
       notes,
     },
-    contributionsBlock(contributions, metric.name),
+    // полос вклада столько же, сколько показателей со значением, и в том же
+    // порядке: сначала публичный
+    ...shown.map((m) => contributionsBlock(contributions.get(m.name)!, m.name)),
     h2("Категории"),
     categoriesBlock(card, ctx),
   ];
@@ -358,8 +414,8 @@ function scoredSection(card: RepoCard, metric: Metric): Block[] {
   if (limits.length > 0) out.push(h2("Ограничения данных"), ...limits.map((l) => ({ kind: "paragraph" as const, tone: "note" as const, lines: [line(l)] })));
 
   out.push(...detailSection(card, ctx));
-  out.push(...methodSection(card, metric, contributions));
-  out.push(...appendix(card, metric));
+  out.push(...methodSection(shown, contributions));
+  out.push(...appendix(card, shown));
   return out;
 }
 
@@ -425,6 +481,60 @@ function detailSection(card: RepoCard, ctx: SubmetricContext): Block[] {
   return out;
 }
 
+/** Причина «данных нет» из самого факта (`{reason, detail}` реестра фактов) — по-русски. */
+const NO_DATA_FACT_REASON: Record<string, string> = {
+  access: "у сервиса нет прав на эти данные",
+  limits: "данные больше лимита сервиса",
+  empty: "источник вернул пусто",
+  "no-scan": "проверка не запускалась",
+  incomplete: "источник отдал данные не полностью",
+  "bad-channel": "источник не ответил",
+  other: "источник данных не дал",
+};
+
+function noDataFactReason(value: unknown): string | null {
+  if (value === null || typeof value !== "object") return null;
+  const raw = (value as { reason?: unknown }).reason;
+  return typeof raw === "string" ? (NO_DATA_FACT_REASON[raw] ?? null) : null;
+}
+
+/** Число из факта — только настоящее число (сырые поля бывают строками и null). */
+const numOf = (value: unknown): number | null => (typeof value === "number" && Number.isFinite(value) ? value : null);
+
+/**
+ * Примечание, которое делает число категории пересчитываемым по приложению:
+ * А8 (окно частоты коммитов не объявлено) и А9 (плотность находок взвешена по
+ * важности, поэтому «38 на 10 тыс. строк» не сходится с числом находок).
+ */
+function categoryRemark(card: RepoCard, key: CategoryKey, cat: CardCategory): string | null {
+  if (key === "activity") {
+    const freq = numOf(cat.submetrics["freq"]?.value);
+    const c90 = numOf(cat.submetrics["commits_90d"]?.value);
+    if (freq === null || c90 === null) return null;
+    return `Частота коммитов считается по последним 90 дням: ${fmtDecimal(c90, 0)} ÷ 3 = ${fmtDecimal(freq, 1, { trim: true })} в месяц. Коммиты за год показаны справочно и в балл не входят.`;
+  }
+  if (key === "security") {
+    const per10k = numOf(cat.submetrics["density"]?.value);
+    if (per10k === null) return null;
+    const counts = (factValue(card, "appsec.findings")?.severity_counts ?? null) as Record<string, unknown> | null;
+    // плотность считается по дереву того скана, по которому взяты находки
+    const loc = numOf(factValue(card, CHANNEL_TREE_KEY)?.loc) ?? numOf(factValue(card, "tree.stats")?.loc);
+    if (counts === null || loc === null || loc <= 0) return null;
+    const words: Record<string, string> = { critical: "критичная", high: "высокая", medium: "средняя", low: "низкая" };
+    const parts: string[] = [];
+    let weighted = 0;
+    for (const [level, weight] of Object.entries(SEVERITY_WEIGHTS)) {
+      const n = numOf(counts[level]) ?? 0;
+      if (n === 0) continue;
+      weighted += weight * n;
+      parts.push(`${words[level] ?? level} ${n} × ${weight}`);
+    }
+    if (parts.length === 0) return null;
+    return `Находки считаются с весом важности: ${parts.join(", ")} = ${fmtDecimal(weighted, 1, { trim: true })} на ${fmtDecimal(loc, 0)} строк кода, то есть ${fmtDecimal(per10k, 1, { trim: true })} на 10 тыс. строк.`;
+  }
+  return null;
+}
+
 function detailBlock(card: RepoCard, key: CategoryKey, cat: CardCategory, ctx: SubmetricContext, actionOf: Map<string, number>): Block {
   const rows: InlineLine[][] = [];
   const reference: string[] = [];
@@ -448,10 +558,20 @@ function detailBlock(card: RepoCard, key: CategoryKey, cat: CardCategory, ctx: S
     ]);
   }
   if (key === "cicd" && cat.no_data) remarks.push(noDataReason(key, cat.no_data));
+  // А4 аудита: нехватку данных CI документ объяснял в трех местах по-разному, а
+  // точную причину прятал сырым полем приложения В. Причина одна и берется из
+  // самого факта — здесь она названа теми же словами, что в приложении.
+  if (key === "cicd") {
+    const runs = card.evidence.find((e) => e.key === "cicd.runs");
+    const why = runs && runs.status !== "ok" ? noDataFactReason(runs.value) : null;
+    if (why) remarks.push(`Результаты запусков CI сервис не получил: ${why}. Та же причина стоит в приложении В, у исходных данных о запусках.`);
+  }
   if (key === "issues") {
     const close = closeDateNote(card);
     if (close) remarks.push(close);
   }
+  const extra = categoryRemark(card, key, cat);
+  if (extra) remarks.push(extra);
   const notes: InlineLine[] = [];
   for (const r of remarks) notes.push([text("Примечание. "), text(r)]);
   if (reference.length > 0) notes.push([text("Справочно, в балл не входит: "), text(`${reference.join("; ")}.`)]);
@@ -471,23 +591,33 @@ function weightsText(keys: CategoryKey[], weightOf: (k: CategoryKey) => number):
   return keys.map((k) => `${CATEGORY_TITLES[k]} ${weightOf(k)}%`).join(", ");
 }
 
-function methodSection(card: RepoCard, metric: Metric, c: Contributions | null): Block[] {
+function methodSection(shown: ShownMetric[], contributions: Map<string, Contributions | null>): Block[] {
   const indexWeights = weightsText(PUBLIC, (k) => INDEX_WEIGHTS[k as keyof typeof INDEX_WEIGHTS]);
   const fullWeights = weightsText(CATEGORY_ORDER, (k) => SCORE_WEIGHTS[k]);
-  const sum =
-    c?.kind === "bar"
-      ? ` В этом отчете: ${c.segments.map((s) => `${s.title} ${fmtContribution(s.tenths)}`).join(", ")} = ${c.total}.`
-      : "";
+  /** «В этом отчете: …» — только у показателя, который в ЭТОМ документе посчитан. */
+  const sumOf = (name: string): string => {
+    const c = contributions.get(name);
+    return c?.kind === "bar" ? ` В этом отчете: ${c.segments.map((s) => `${s.title} ${fmtContribution(s.tenths)}`).join(", ")} = ${c.total}.` : "";
+  };
+  const hasIndex = shown.some((m) => m.name === INDEX);
+  const hasFull = shown.some((m) => m.name === FULL);
+  // А2 аудита: первая строка описывает ровно те показатели, которые есть в
+  // ЭТОМ документе, — «оценка складывается из 4 категорий» в полном отчете
+  // спорило и с первым экраном, и с шестью строками приложения А.
+  const first = hasIndex && hasFull
+    ? `В отчете два показателя: ${INDEX} – по 4 открытым категориям (документация, активность, задачи и состояние кода), ${FULL} – по всем 6, включая CI/CD и безопасность.`
+    : hasFull
+      ? `В отчете один показатель – ${FULL}: он складывается из 6 категорий (документация, CI/CD, безопасность, активность, задачи и состояние кода).`
+      : "Оценка складывается из 4 категорий: документация, активность, задачи и состояние кода. Участникам репозитория видны еще 2 – CI/CD и безопасность.";
   const items: InlineLine[] = [
-    line("Оценка складывается из 4 категорий: документация, активность, задачи и состояние кода. Участникам репозитория видны еще 2 – CI/CD и безопасность."),
+    line(first),
     line("Каждая категория получает балл от 0 до 100 из нескольких показателей. Например, для документации: README, лицензия, CONTRIBUTING, CODEOWNERS."),
-    line(`${INDEX} – взвешенное среднее баллов категорий: ${indexWeights}.${metric.name === INDEX ? sum : ""}`),
-    line(`${FULL} учитывает 6 категорий: ${fullWeights}. Если в коде найдены утекшие секреты, он не выше 49.${metric.name === FULL ? sum : ""}`),
+    line(`${INDEX} – взвешенное среднее баллов категорий: ${indexWeights}.${sumOf(INDEX)}`),
+    line(`${FULL} учитывает 6 категорий: ${fullWeights}. Если в коде найдены утекшие секреты, он не выше 49.${sumOf(FULL)}`),
     line(`Шкала: ${SCORE_SCALE.map((z) => `${z.word} ${z.range}`).join(", ")}.`),
     line(`Категория без данных не получает 0: она в оценке не участвует и ее не снижает. Если данных меньше ${fmtCoverage(COVERAGE_NULL_BELOW)}, оценка не рассчитывается.`),
     line("Популярность (реакции и ответвления) в оценку не входит, качество кода по существу не оценивается – только наблюдаемые признаки ухода за ним. Расчет и исходные данные – в приложении."),
   ];
-  void card;
   return [h2("Как считается"), { kind: "list", items }];
 }
 
@@ -495,10 +625,10 @@ function methodSection(card: RepoCard, metric: Metric, c: Contributions | null):
 
 const APPENDIX_TITLE = "Приложение. Расчет оценки и исходные данные";
 
-function appendix(card: RepoCard, metric: Metric | null): Block[] {
+function appendix(card: RepoCard, shown: ShownMetric[]): Block[] {
   const out: Block[] = [{ kind: "appendix", title: APPENDIX_TITLE, intro: "В приложении приведен расчет оценки и источники чисел отчета. Баллы и доли показаны с точностью до десятых." }];
-  out.push(...appendixA(card, metric));
-  out.push(...appendixB(card, metric));
+  out.push(...appendixA(card, shown));
+  out.push(...appendixB(card, shown));
   out.push(...appendixC(card));
   out.push(...appendixD(card));
   return out;
@@ -506,62 +636,118 @@ function appendix(card: RepoCard, metric: Metric | null): Block[] {
 
 const pct1 = (share: number): string => `${fmtDecimal(share * 100, 1)}%`;
 
-function appendixA(card: RepoCard, metric: Metric | null): Block[] {
+/**
+ * Расчет одного показателя: строка на категорию, «Итого» числом. Ширина
+ * набора PDF (499 pt) не дает удвоить столбцы одной таблицы, поэтому у
+ * каждого показателя своя таблица — публичная первой (круг 4 блока А).
+ */
+function metricCalc(card: RepoCard, metric: ShownMetric, named: boolean): Block[] {
+  const cats = card.score!.categories;
+  const contributions = contributionsOf(card, metric);
+  const withData = metric.keys.filter((k) => cats[k]?.score !== null && cats[k]?.score !== undefined);
+  const wsum = withData.reduce((s, k) => s + metric.weight(k), 0);
+  // Г1.1: десятые вкладов берутся из той же функции, что полоса первого
+  // экрана (`categoryContributions`, метод наибольшего остатка). Иначе
+  // приложение и полоса расходились на 0,1-0,2, а строки приложения не
+  // складывались в собственное «Итого» (69,8 при показателе 70).
+  const tenths = new Map<string, number>();
+  if (contributions !== null && contributions.kind !== "empty") for (const seg of contributions.segments) tenths.set(seg.key, seg.tenths);
+  const rows: InlineLine[][] = [];
+  let total = 0;
+  for (const key of CATEGORY_ORDER) {
+    const cat = cats[key];
+    if (!cat) continue;
+    const inMetric = metric.keys.includes(key);
+    if (!inMetric || cat.score === null) {
+      // «не входит» — про состав показателя, «нет данных» — про данные: у
+      // категории показателя без данных первое читалось как исключение из
+      // методики, хотя вес просто перешел к остальным
+      rows.push([line(CATEGORY_TITLES[key]), line(cat.score === null ? "—" : fmtDecimal(cat.score, 1)), line(inMetric ? "нет данных" : "не входит"), line("—")]);
+      continue;
+    }
+    const share = metric.weight(key) / wsum;
+    const part = tenths.has(key) ? tenths.get(key)! / 10 : cat.score * share;
+    total += part;
+    rows.push([line(CATEGORY_TITLES[key]), line(fmtDecimal(cat.score, 1)), line(pct1(share)), line(fmtDecimal(part, 1))]);
+  }
+  const value = Math.round(metric.value);
+  const sumText = fmtDecimal(total, 1);
+  rows.push([line("Итого"), line(""), line("100%"), line(Number(sumText.replace(",", ".")) === value ? String(value) : `${sumText} ≈ ${value}`)]);
+  const out: Block[] = [];
+  // подзаголовок нужен, только когда таблиц две: иначе показатель назван в шапке столбца
+  if (named) out.push({ kind: "paragraph", tone: "subhead", lines: [[strong(`Расчет ${metric.name}`)]] });
+  out.push({
+    kind: "table",
+    columns: [col("Категория", "left", 184), col("Балл", "right", 84), col(`Вес в ${metric.name}`, "right", 114), col("Баллов в итог", "right")],
+    rows,
+    total: true,
+  });
+  const weights =
+    metric.name === INDEX
+      ? `Веса ${INDEX}: ${weightsText(PUBLIC, (k) => INDEX_WEIGHTS[k as keyof typeof INDEX_WEIGHTS])}.`
+      : `Веса ${FULL}: ${weightsText(CATEGORY_ORDER, (k) => SCORE_WEIGHTS[k])}.`;
+  const tail = metric.name === INDEX ? " CI/CD и Безопасность в HealthCraft Index не участвуют и его не снижают." : "";
+  out.push({
+    kind: "paragraph",
+    tone: "fine",
+    lines: [line(`Баллов в итог = балл × вес. ${weights} Вес категории без данных делится между остальными пропорционально: такая категория в оценке не участвует и ее не снижает.${tail}`)],
+  });
+  if (Math.round(total) > value) out.push({ kind: "paragraph", tone: "fine", lines: [line(`Итог ограничен ${value} баллами: AppSec нашел утекшие секреты.`)] });
+  return out;
+}
+
+function appendixA(card: RepoCard, shown: ShownMetric[]): Block[] {
   const score = card.score!;
   const cats = score.categories;
   const out: Block[] = [h3("А. Расчет итоговой оценки")];
-  const contributions = metric === null ? null : contributionsOf(card, metric);
-  if (metric !== null && metric.value !== null) {
-    const withData = metric.keys.filter((k) => cats[k]?.score !== null && cats[k]?.score !== undefined);
-    const wsum = withData.reduce((s, k) => s + metric.weight(k), 0);
-    // Г1.1: десятые вкладов берутся из той же функции, что полоса первого
-    // экрана (`categoryContributions`, метод наибольшего остатка). Иначе
-    // приложение и полоса расходились на 0,1-0,2, а строки приложения не
-    // складывались в собственное «Итого» (69,8 при показателе 70).
-    const tenths = new Map<string, number>();
-    if (contributions !== null && contributions.kind !== "empty") for (const seg of contributions.segments) tenths.set(seg.key, seg.tenths);
-    const rows: InlineLine[][] = [];
-    let total = 0;
-    for (const key of CATEGORY_ORDER) {
-      const cat = cats[key];
-      if (!cat) continue;
-      const inMetric = metric.keys.includes(key);
-      if (!inMetric || cat.score === null) {
-        rows.push([line(CATEGORY_TITLES[key]), line(cat.score === null ? "—" : fmtDecimal(cat.score, 1)), line("не входит"), line("—")]);
-        continue;
-      }
-      const share = metric.weight(key) / wsum;
-      const part = tenths.has(key) ? tenths.get(key)! / 10 : cat.score * share;
-      total += part;
-      rows.push([line(CATEGORY_TITLES[key]), line(fmtDecimal(cat.score, 1)), line(pct1(share)), line(fmtDecimal(part, 1))]);
-    }
-    const shown = Math.round(metric.value);
-    const sumText = fmtDecimal(total, 1);
-    rows.push([line("Итого"), line(""), line("100%"), line(Number(sumText.replace(",", ".")) === shown ? String(shown) : `${sumText} ≈ ${shown}`)]);
-    out.push({
-      kind: "table",
-      columns: [col("Категория", "left", 184), col("Балл", "right", 84), col(`Вес в ${metric.name}`, "right", 114), col("Баллов в итог", "right")],
-      rows,
-      total: true,
-    });
-    const weights =
-      metric.name === INDEX
-        ? `Веса ${INDEX}: ${weightsText(PUBLIC, (k) => INDEX_WEIGHTS[k as keyof typeof INDEX_WEIGHTS])}.`
-        : `Веса ${FULL}: ${weightsText(CATEGORY_ORDER, (k) => SCORE_WEIGHTS[k])}.`;
-    const tail = metric.name === INDEX ? " CI/CD и Безопасность в HealthCraft Index не участвуют и его не снижают." : "";
-    out.push({
-      kind: "paragraph",
-      tone: "fine",
-      lines: [line(`Баллов в итог = балл × вес. ${weights} Вес категории без данных делится между остальными пропорционально: такая категория в оценке не участвует и ее не снижает.${tail}`)],
-    });
-    if (Math.round(total) > Math.round(metric.value)) out.push({ kind: "paragraph", tone: "fine", lines: [line(`Итог ограничен ${Math.round(metric.value)} баллами: AppSec нашел утекшие секреты.`)] });
-  }
+  for (const metric of shown) out.push(...metricCalc(card, metric, shown.length > 1));
+  if (shown.length === 0) out.push(...coverageCalc(card));
   for (const key of CATEGORY_ORDER) {
     const cat = cats[key];
     if (!cat || cat.locked !== undefined || cat.score === null) continue;
     out.push(...categoryCalc(key, cat));
   }
   return out;
+}
+
+/**
+ * А7 аудита: «собрано N% данных» объяснялось «65 весовыми пунктами», а
+ * такого числа в документе не было. Здесь объем данных считается строками, в
+ * которых каждое число видно: вес каждой из 4 открытых категорий, есть по
+ * ней данные или нет, и итог «M из 65».
+ */
+function coverageCalc(card: RepoCard): Block[] {
+  const score = card.score!;
+  const cats = score.categories;
+  const rows: InlineLine[][] = [];
+  let collected = 0;
+  let base = 0;
+  for (const key of PUBLIC) {
+    const weight = SCORE_WEIGHTS[key];
+    base += weight;
+    const has = cats[key]?.score !== null && cats[key]?.score !== undefined;
+    if (has) collected += weight;
+    rows.push([line(CATEGORY_TITLES[key]), line(String(weight)), line(has ? "есть" : "нет"), line(has ? String(weight) : "—")]);
+  }
+  rows.push([line("Итого"), line(String(base)), line(""), line(String(collected))]);
+  return [
+    { kind: "paragraph", tone: "subhead", lines: [[strong("Объем собранных данных")]] },
+    {
+      kind: "table",
+      columns: [col("Открытая категория", "left", 184), col("Вес", "right", 84), col("Данные", "right", 114), col("Весовых пунктов с данными", "right")],
+      rows,
+      total: true,
+    },
+    {
+      kind: "paragraph",
+      tone: "fine",
+      lines: [
+        line(
+          `Объем данных = вес категорий с данными ÷ вес 4 открытых категорий: ${collected} ÷ ${base} = ${fmtCoverage(score.indexCoverage)}. Веса здесь – веса ${FULL}: в ${INDEX} они пересчитаны на сотню.`,
+        ),
+      ],
+    },
+  ];
 }
 
 /** Балл категории из показателей: вес × балл; особые правила (трекер пуст, CI без запусков) — строкой. */
@@ -581,7 +767,23 @@ function categoryCalc(key: CategoryKey, cat: CardCategory): Block[] {
   if (parts.length === 0 || wsum === 0) return [title, { kind: "paragraph", tone: "fine", lines: [line(`Балл категории – ${fmtDecimal(cat.score!, 1)}.`)] }];
   const rows: InlineLine[][] = parts.map((p) => [line(submetricTitle(key, p.sub)), line(fmtDecimal(p.score * 100, 1)), line(pct1(p.w / wsum)), line(fmtDecimal((p.score * 100 * p.w) / wsum, 1))]);
   rows.push([line("Итого"), line(""), line("100%"), line(fmtDecimal(cat.score!, 1))]);
-  return [title, { kind: "table", columns: [col("Показатель", "left", 184), col("Балл", "right", 84), col("Вес", "right", 114), col("Баллов в категорию", "right")], rows, total: true }];
+  const out: Block[] = [title, { kind: "table", columns: [col("Показатель", "left", 184), col("Балл", "right", 84), col("Вес", "right", 114), col("Баллов в категорию", "right")], rows, total: true }];
+  // А5 аудита: в разборе по категориям стоит номинальный вес показателя, здесь
+  // — вес после перераспределения. Оба числа верны; отличаются они только
+  // тогда, когда у показателя категории нет данных, — об этом и строка.
+  if (Math.abs(wsum - 1) > 0.0005) {
+    const ex = parts[0]!;
+    out.push({
+      kind: "paragraph",
+      tone: "fine",
+      lines: [
+        line(
+          `Показатель без данных в расчет не идет, его вес делится между остальными пропорционально, поэтому доли здесь отличаются от номинальных: у «${submetricTitle(key, ex.sub)}» номинальный вес ${Math.round(ex.w * 100)}% (он и стоит в разборе по категориям), в расчете – ${pct1(ex.w / wsum)}.`,
+        ),
+      ],
+    });
+  }
+  return out;
 }
 
 const SOURCE_WORDS: [RegExp, string][] = [
@@ -610,17 +812,30 @@ function rawValue(value: unknown): string {
     .join(", ");
 }
 
-function appendixB(card: RepoCard, metric: Metric | null): Block[] {
+function appendixB(card: RepoCard, shown: ShownMetric[]): Block[] {
   const score = card.score!;
   const cats = score.categories;
   const rows: InlineLine[][] = [];
   const at = `расчет оценки, ${fmtDateTime(score.computedAt)}`;
-  if (metric !== null && metric.value !== null) {
-    rows.push([[strong(`${metric.name} ${Math.round(metric.value)}`)], line("сумма по категориям: балл × вес, приложение А"), line("баллы категорий"), line(at), line("—")]);
+  // Круг 4 блока А: удваивается ТОЛЬКО строка самого показателя (публичная
+  // первой) — балл категории и балл показателя у обеих шкал один.
+  if (shown.length > 0) {
+    for (const metric of shown) {
+      rows.push([
+        [strong(`${metric.name} ${Math.round(metric.value)}`)],
+        line(`сумма по ${metric.keys.length === PUBLIC.length ? "4 открытым категориям" : "6 категориям"}: балл × вес, приложение А`),
+        line("баллы категорий"),
+        line(at),
+        line("—"),
+      ]);
+    }
   } else {
-    rows.push([[strong(`Собрано ${fmtCoverage(score.indexCoverage)} данных`)], line("вес категорий с данными из 65 весовых пунктов 4 открытых категорий"), [code("scores.index_coverage"), text(` → ${fmtDecimal(score.indexCoverage, 3, { trim: true })}`)], line(at), line("—")]);
+    // А7 аудита: «65 весовых пунктов» заменено ссылкой на расчет приложения А,
+    // где каждое слагаемое напечатано
+    rows.push([[strong(`Собрано ${fmtCoverage(score.indexCoverage)} данных`)], line("вес открытых категорий с данными ÷ вес 4 открытых категорий, приложение А"), [code("scores.index_coverage"), text(` → ${fmtDecimal(score.indexCoverage, 3, { trim: true })}`)], line(at), line("—")]);
   }
-  const truncated = card.markers.historyTruncatedSince ? `история загружена с ${fmtDate(card.markers.historyTruncatedSince)}` : null;
+  const since = historyTruncatedSince(card);
+  const truncated = since ? `история загружена с ${fmtDate(since)}` : null;
   const close = closeDateNote(card);
   const ctx = submetricContext(score.computedAt);
   for (const key of CATEGORY_ORDER) {
@@ -634,9 +849,18 @@ function appendixB(card: RepoCard, metric: Metric | null): Block[] {
       // Г1.11 гейта: столбец «Порядок расчета» у показателей стоял пустым —
       // пишем, с каким весом показатель входит в балл категории
       const weight = (SUBWEIGHTS[key] as Record<string, number>)[subweightKey(sub)];
+      // А10 аудита: у «Трекер не ведется» стояло «справочно, в балл не входит»
+      // и тут же «балл 6» — тот самый балл категории. Веса у показателя нет не
+      // потому, что он справочный, а потому, что балл категории равен его баллу.
+      const order =
+        key === "issues" && sub === "tracker_unused"
+          ? "задач в трекере нет: балл категории равен баллу этого показателя, приложение А"
+          : displayOnly(key, sub) || weight === undefined
+            ? "справочно, в балл не входит"
+            : `балл показателя × вес ${fmtDecimal(weight * 100, 0)}% в балле категории`;
       rows.push([
         line(`${submetricTitle(key, sub)}: ${shown}`),
-        line(displayOnly(key, sub) || weight === undefined ? "справочно, в балл не входит" : `балл показателя × вес ${fmtDecimal(weight * 100, 0)}% в балле категории`),
+        line(order),
         // приемка HQ 22.09: `activity.fresh` — метка времени (мс), читателю — дата, не 13 цифр
         [code(`${key}.${sub}`), text(` → ${key === "activity" && sub === "fresh" && typeof entry.value === "number" ? fmtDateTime(new Date(entry.value).toISOString()) : rawValue(entry.value)}${typeof entry.score === "number" ? `; балл ${fmtDecimal(entry.score * 100, 1, { trim: true })}` : ""}`)],
         line(sourcesOf(card, key)),
@@ -698,14 +922,61 @@ export function flatten(value: unknown, prefix = ""): [string, string][] {
  */
 const RAW_FIELD_NOTE: Record<string, string> = {
   "activity.rest.contributors": "счетчик API; в оценке — число авторов из истории git",
-  "activity.git.timeline.truncated": "история обрезана окном сбора, а не статусом анализа",
+  // А11 аудита: поле стоит «да» у каждого анализа — это не флаг обрезки
+  // истории, а форма ответа: коммиты в документ не выгружаются
+  "activity.git.timeline.truncated": "поле ответа: сами коммиты в документ не выгружаются, показан итог",
+  // А12 аудита: «старых» больше, чем «всего», потому что поля считают разное
+  "code.todo.count": "пометок TODO, без FIXME",
+  "code.todo.fixme": "пометок FIXME",
+  "code.todo.older_180d": "пометок TODO и FIXME старше 180 дней (из count + fixme)",
+  "code.todo.todo_files": "файлов с пометками",
+  "code.todo.blamed_files": "файлов, у которых удалось прочитать даты пометок",
+  // А15 аудита: выборка задач для времени первого ответа — не число задач в трекере
+  "issues.comments_sample.issues": "задач в выборке для времени первого ответа; число задач трекера — в issues.stats",
 };
 
-/** Г1.20: служебная заметка коллектора по-английски — читателю по-русски. */
+/** Г1.20, А6: служебная заметка коллектора по-английски — читателю по-русски. */
 function rawFieldValue(field: string, value: string): string {
   const m = /^completed_at missing on (\d+)\/(\d+) closed/.exec(value);
   if (field === "close_date_note" && m) return `дата закрытия не передана у ${m[1]} из ${m[2]} закрытых задач, использована дата последнего изменения`;
+  if (field === "reason") return NO_DATA_FACT_REASON[value] ?? value;
+  if (field === "last_status") return RUN_STATUS_WORD[value] ?? value;
+  if (field === "detail" || field.endsWith(".detail")) return detailWords(value);
   return value;
+}
+
+/** А6: служебная подробность отказа источника — по-русски, число ответа сохраняется. */
+function detailWords(value: string): string {
+  const status = /^status (\d+(?:\/\d+)?)$/.exec(value);
+  if (status) return `ответ API ${status[1]}`;
+  const on = /^([\d/]+) on [\w/,\s]+$/.exec(value);
+  if (on) return `ответ API ${on[1]}`;
+  if (value === "no SOURCECRAFT_TOKEN") return "токена SourceCraft у сервиса нет";
+  return value;
+}
+
+/** Статус последнего прогона CI — словами (А6: английских значений в документе нет). */
+const RUN_STATUS_WORD: Record<string, string> = {
+  success: "успешно",
+  failure: "с ошибкой",
+  failed: "с ошибкой",
+  cancelled: "отменен",
+  canceled: "отменен",
+  running: "идет",
+  pending: "в очереди",
+  unknown: "неизвестен",
+};
+
+/**
+ * А6 аудита: служебные ветви сырых значений, которые ничего не доказывают
+ * читателю (идентификаторы запуска проверки AppSec). Сами данные не
+ * вычищаются — К9.4 требует показывать сырые значения, — убираются только
+ * служебные ветви.
+ */
+const RAW_FIELD_SKIP = [/^provenance(\.|$)/];
+
+function rawFieldShown(field: string): boolean {
+  return !RAW_FIELD_SKIP.some((re) => re.test(field));
 }
 
 function factStatusWord(status: string): string {
@@ -719,16 +990,26 @@ function appendixC(card: RepoCard): Block[] {
     return out;
   }
   out.push({ kind: "paragraph", tone: "fine", lines: [line("Данные анализа в виде таблиц «поле – значение». История коммитов показана итогом, сами коммиты сервис не хранит.")] });
-  for (const fact of card.evidence as CardEvidence[]) {
+  // А6 аудита: дерево канального скана едет своим ключом и на одном скане
+  // повторяет публичное `tree.stats` слово в слово — второй такой таблицы в
+  // документе быть не должно.
+  const publicTree = card.evidence.find((e) => e.key === "tree.stats");
+  const facts = (card.evidence as CardEvidence[]).filter(
+    (f) => !(f.key === CHANNEL_TREE_KEY && publicTree !== undefined && JSON.stringify(f.value) === JSON.stringify(publicTree.value)),
+  );
+  for (const fact of facts) {
     const catTitle = CATEGORY_TITLES[fact.category as CategoryKey] ?? fact.category;
-    out.push({ kind: "paragraph", tone: "caption", lines: [[code(fact.key), text(` – ${catTitle}, ${factStatusWord(fact.status)}, ${sourceWord(fact.source)}, ${fmtDateTime(fact.collectedAt)}`)]] });
+    const caption = fact.key === CHANNEL_TREE_KEY ? " (дерево того анализа, по которому посчитана плотность находок)" : "";
+    out.push({ kind: "paragraph", tone: "caption", lines: [[code(fact.key), text(` – ${catTitle}, ${factStatusWord(fact.status)}, ${sourceWord(fact.source)}, ${fmtDateTime(fact.collectedAt)}${caption}`)]] });
     out.push({
       kind: "table",
       columns: [col("Поле", "left", 180), col("Значение")],
-      rows: flatten(fact.value).map(([k, v]) => {
-        const note = RAW_FIELD_NOTE[`${fact.key}.${k}`];
-        return [[text(k === "" ? "значение" : k), ...(note ? [text(` – ${note}`)] : [])], [escaped(rawFieldValue(k, v))]];
-      }),
+      rows: flatten(fact.value)
+        .filter(([k]) => rawFieldShown(k))
+        .map(([k, v]) => {
+          const note = RAW_FIELD_NOTE[`${fact.key}.${k}`];
+          return [[text(k === "" ? "значение" : k), ...(note ? [text(` – ${note}`)] : [])], [escaped(rawFieldValue(k, v))]];
+        }),
       small: true,
     });
   }
@@ -749,7 +1030,9 @@ function appendixD(card: RepoCard): Block[] {
     );
   }
   rows.push(
-    [line("Язык"), repo.language ? [escaped(repo.language)] : line("не определен")],
+    // А14 аудита: язык приходит из каталога SourceCraft, а не из скачанного
+    // репозитория, — поэтому он есть и там, где скачать репозиторий не удалось
+    [line("Язык (по каталогу SourceCraft)"), repo.language ? [escaped(repo.language)] : line("не определен")],
     [line("Реакции"), line(repo.likes === null ? "—" : String(repo.likes))],
     [line("Ответвления"), line(repo.forks === null ? "—" : String(repo.forks))],
     [line("Последняя активность"), line(fmtDate(repo.lastActivityAt))],

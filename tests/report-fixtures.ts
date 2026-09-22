@@ -21,6 +21,9 @@
 //               Безопасность закрыта правами; README нет, трекер не ведётся,
 //               язык не определён, заголовок с разметкой;
 //   null      — оценка есть, индекса нет: данные только по задачам (23%);
+//   full-null — полный доступ, Repo Health Score есть, HealthCraft Index NULL
+//               (открытых данных 23% при пороге 40%, а с CI/CD и Безопасностью
+//               полного покрытия хватает) — пункт 7 блока А круга 4 гейта;
 //   never     — репозиторий в каталоге без единого скана.
 import type { AccessResult } from "../src/auth/access";
 import { getRepoCard, type CardViewer, type RepoCard } from "../src/api/repos";
@@ -36,9 +39,9 @@ import { NOW, cardFacts, makeApiDb, seedRepo, seedScan, type ApiTestDb, type Fac
  * отдельно (`v49-appendix.test.ts`, Д3). Сама фикстура остается: ее берут
  * тесты карточки и доступа.
  */
-export const ALL_FIXTURES = ["anon", "full", "grant-ci", "null", "never"] as const;
+export const ALL_FIXTURES = ["anon", "full", "grant-ci", "null", "full-null", "never"] as const;
 export type ReportFixture = (typeof ALL_FIXTURES)[number];
-export const REPORT_FIXTURES: readonly ReportFixture[] = ["anon", "full", "grant-ci", "null"];
+export const REPORT_FIXTURES: readonly ReportFixture[] = ["anon", "full", "grant-ci", "null", "full-null"];
 
 const NO_PAT: AccessResult = { cicd: "no-pat", appsec: "no-pat", repo: "no-pat" };
 const GRANTED: AccessResult = { cicd: "granted", appsec: "granted", repo: "granted" };
@@ -144,6 +147,10 @@ export function fixtureCard(name: ReportFixture): FixtureCard {
         { key: "docs.presence", source: "git", value: { readme: false, license: true, contributing: false, codeowners: false } },
         { key: "docs.readme", source: "git", value: { present: false } },
         { key: "issues.stats", source: "rest:issues", value: { open: 0, closed: 0, median_close_days: null, stale_90d: 0, fetched_count: 0 } },
+        // А15 аудита: у репозитория с пустым трекером не может быть выборки из
+        // 4 задач для времени первого ответа — данные фикстуры спорили сами с
+        // собой, и документ печатал это противоречие
+        { key: "issues.comments_sample", source: "rest:comments", value: { issues: 0, with_comments: 0, median_first_comment_delay_hours: null, delays_hours: [] } },
       );
       const repoId = seedRepo(t, { org: "m47", repo: "grant-ci", title: "CI [config] `only` | pipes", language: null, likes: null, forks: 0, lastActivityAt: null });
       scoredScan(t, repoId, { status: "ok", trigger: "user", facts });
@@ -158,6 +165,25 @@ export function fixtureCard(name: ReportFixture): FixtureCard {
         facts: [{ key: "issues.stats", source: "rest:issues", value: { open: 0, closed: 0, median_close_days: null, stale_90d: 0, fetched_count: 0 } }],
       });
       return done("m47", "null", NO_PAT, "no-session");
+    }
+    case "full-null": {
+      // пункт 7 блока А круга 4: зрителю открыты CI/CD и Безопасность, полного
+      // покрытия хватает (Состояние кода 20 + CI/CD 15 + Безопасность 20 из
+      // 100 = 55%), а открытых данных — нет (только Состояние кода: 20 из 65 =
+      // 31% при пороге 40%), поэтому Index NULL, а Score посчитан.
+      const repoId = seedRepo(t, { org: "m47", repo: "full-null", title: "Full access, index NULL", language: "Rust", likes: 3, forks: 0, lastActivityAt: "2026-09-12T00:00:00Z" });
+      scoredScan(t, repoId, {
+        status: "partial",
+        trigger: "user",
+        facts: [
+          { key: "tree.stats", source: "git", value: { top_level: [{ name: "src", type: "tree" }], file_count: 10, bytes: 1000, loc: 5000 } },
+          { key: "code.todo", source: "git", value: { count: 4, fixme: 1, older_180d: 2, todo_files: 3, blamed_files: 3 } },
+          { key: "cicd.configs", source: "git", value: { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: true } },
+          { key: "cicd.runs", source: "rest:cicd", value: { last_status: "success", success_rate: 0.9, duration_p50: 600, runs_count: 12 } },
+          { key: "appsec.findings", source: "appsec:api", value: { severity_counts: { critical: 0, high: 0, medium: 1, low: 2 }, resolved_share: 0.75, secrets_critical: false } },
+        ],
+      });
+      return done("m47", "full-null", GRANTED, "pat");
     }
     case "never": {
       seedRepo(t, { org: "m47", repo: "never", language: "Rust", likes: 1 });

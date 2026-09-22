@@ -26,6 +26,24 @@ import { authErrorText } from "../src/web/format";
 import { cardFacts, makeApiDb, seedRepo, seedScan, seedScore, type ApiTestDb } from "./api-fixtures";
 import { spawnServer, startMockApi, type SpawnedServer } from "./server-harness";
 import { readFileSync } from "node:fs";
+import { buildReportModel } from "../src/report/build";
+import { fixtureCard } from "./report-fixtures";
+
+/**
+ * Круг 4 гейта: первый экран отчета несет плашку зоны. Проверка переведена с
+ * поиска строки в исходнике на МОДЕЛЬ отчета — источник переименовался
+ * (показателей в ряду стало два), а утверждение то же и проверяется по данным.
+ */
+function reportHeroHasChip(): boolean {
+  const { card, close } = fixtureCard("full");
+  try {
+    const hero = buildReportModel(card).blocks.find((b) => b.kind === "hero");
+    return hero?.kind === "hero" && hero.chip !== null && hero.chip.text.length > 0;
+  } finally {
+    close();
+  }
+}
+
 
 const SECRET = "m42b-blocks-test-secret-0123456789abcdef";
 const ROOT = mkdtempSync(join(tmpdir(), "rh-m42b-blocks-"));
@@ -605,7 +623,7 @@ describe("В4.6 (приёмка круга 2): строка итога и счё
       // число, плашка зоны и колонка «почему» у категорий. Шаблон `verdictText`
       // вместе с ним удален, поэтому проверяется его отсутствие.
       reportUsesVerdict: report.includes("verdictText("),
-      reportHasChip: report.includes("chip: scoreChip(value)"),
+      reportHasChip: reportHeroHasChip(),
     }).toEqual({ asksWithoutCount: false, linkStillThere: false, reportUsesVerdict: false, reportHasChip: true });
   });
 });

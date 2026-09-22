@@ -100,16 +100,25 @@ describe("К9.1: сумма показанных вкладов = показат
       try {
         const model = buildReportModel(card);
         const hero = model.blocks.find((b) => b.kind === "hero");
-        const bar = model.blocks.find((b) => b.kind === "contributions");
-        if (!hero || hero.kind !== "hero" || hero.value === null) {
-          expect(bar).toBeUndefined();
-          return;
+        const bars = model.blocks.filter((b) => b.kind === "contributions");
+        if (!hero || hero.kind !== "hero") throw new Error("нет первого экрана");
+        // Круг 4 гейта: показателей в ряду бывает два, и полос столько же,
+        // сколько показателей СО ЗНАЧЕНИЕМ, в том же порядке (публичный
+        // первым). У зрителя с полным доступом и NULL-индексом слева стоит
+        // «Оценки нет» без полосы, а полоса есть у второго показателя.
+        const shown = [hero.value === null ? null : { label: hero.label, value: hero.value }, hero.secondary && hero.secondary.value !== null ? { label: hero.secondary.label, value: hero.secondary.value } : null].filter(
+          (m): m is { label: string; value: number } => m !== null,
+        );
+        expect(bars).toHaveLength(shown.length);
+        for (const [i, metric] of shown.entries()) {
+          const bar = bars[i]!;
+          if (bar.kind !== "contributions") throw new Error("не полоса вкладов");
+          expect(bar.title).toContain(metric.label);
+          if (bar.note !== null) continue;
+          const tenths = bar.segments.reduce((s, x) => s + Math.round(Number(x.value.replace("+", "").replace(",", ".")) * 10), 0);
+          expect(tenths).toBe(metric.value * 10);
+          expect(Number(bar.rest!.value)).toBe(100 - metric.value);
         }
-        expect(bar?.kind).toBe("contributions");
-        if (bar?.kind !== "contributions" || bar.note !== null) return;
-        const tenths = bar.segments.reduce((s, x) => s + Math.round(Number(x.value.replace("+", "").replace(",", ".")) * 10), 0);
-        expect(tenths).toBe(hero.value * 10);
-        expect(Number(bar.rest!.value)).toBe(100 - hero.value);
       } finally {
         close();
       }

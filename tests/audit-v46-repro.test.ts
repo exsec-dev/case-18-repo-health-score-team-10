@@ -24,6 +24,24 @@ import { renderRepoReport } from "../src/report/markdown";
 import { scoreWord } from "../src/web/format";
 import { cardFacts, makeApiDb, seedRecommendation, seedRepo, seedScan, seedScore, type ApiTestDb } from "./api-fixtures";
 import { contrast, flatten, pageBackground, parseColor, progressFill, progressTrack, themeTokens } from "./theme-contrast";
+import { buildReportModel } from "../src/report/build";
+import { fixtureCard } from "./report-fixtures";
+
+/**
+ * Круг 4 гейта: первый экран отчета несет плашку зоны. Проверка переведена с
+ * поиска строки в исходнике на МОДЕЛЬ отчета — источник переименовался
+ * (показателей в ряду стало два), а утверждение то же и проверяется по данным.
+ */
+function reportHeroHasChip(): boolean {
+  const { card, close } = fixtureCard("full");
+  try {
+    const hero = buildReportModel(card).blocks.find((b) => b.kind === "hero");
+    return hero?.kind === "hero" && hero.chip !== null && hero.chip.text.length > 0;
+  } finally {
+    close();
+  }
+}
+
 
 /**
  * Импорт модуля, которого на Б0-коммите ЕЩЁ НЕТ: путь — переменная, чтобы
@@ -320,7 +338,7 @@ describe("В4.6-8 (У26/У13/У38): вариант А — карточка на�
     expect(typeof mod.summaryLine).toBe("function");
     // В4.9 (К9.1) строку итога заменил вердикт первого экрана; гейт 22.09 (В3)
     // убрал предложение-вывод из отчета — итог несет крупное число с плашкой зоны.
-    expect(readFileSync(join(import.meta.dir, "..", "src", "report", "build.ts"), "utf8")).toContain("chip: scoreChip(value)");
+    expect(reportHeroHasChip()).toBe(true);
   });
 
   // Б6: проверяется ПОРЯДОК РЕНДЕРА, а не порядок объявления функций в файле.

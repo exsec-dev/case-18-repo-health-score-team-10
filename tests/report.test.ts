@@ -85,13 +85,21 @@ describe("MD-отчёт: структура", () => {
 });
 
 describe("MD-отчёт: числа и tri-state", () => {
-  test("зрителю с обоими показателями крупно Repo Health Score, HealthCraft Index строкой ниже (К9.1)", () => {
+  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ решением владельца 22.09 (TASK.md §2, «круг 4
+  // гейта»): порядок везде «сначала публичный, потом полный», поэтому крупно
+  // слева — HealthCraft Index, справа — Repo Health Score. Контракт К9.1 §0
+  // спеки в части «какой показатель крупно» этой записью отменен.
+  test("зрителю с обоими показателями первым — HealthCraft Index, вторым Repo Health Score (TASK.md §2, круг 4)", () => {
+    const at = (s: string) => main.indexOf(s);
+    expect(main).toContain("HealthCraft Index: **67 из 100 · требует внимания**");
     // полный Score складывается из показанных категорий (60·15+50·15+70·15+40·15+80·20)/80 = 61
     expect(main).toContain("Repo Health Score: **61 из 100 · требует внимания**");
-    // В6 гейта: второй показатель тем же шаблоном (в PDF — справа в том же ряду).
-    // Круг 2, п.3: что это за числа, объясняет одна строка под обоими.
-    expect(main).toContain("HealthCraft Index: **67 из 100 · требует внимания**");
-    expect(main).toContain("Repo Health Score учитывает 6 категорий, включая CI/CD и Безопасность. HealthCraft Index считается по открытым данным – по нему строится рейтинг.");
+    expect(at("HealthCraft Index: **67")).toBeLessThan(at("Repo Health Score: **61"));
+    // и в строке-пояснении публичный показатель назван первым
+    expect(main).toContain("HealthCraft Index считается по открытым данным – по нему строится рейтинг. Repo Health Score учитывает 6 категорий, включая CI/CD и Безопасность.");
+    // полос вклада две, публичная первой
+    expect(at("## Вклад категорий в оценку – HealthCraft Index")).toBeGreaterThan(-1);
+    expect(at("## Вклад категорий в оценку – HealthCraft Index")).toBeLessThan(at("## Вклад категорий в оценку – Repo Health Score"));
   });
 
   test("все шесть категорий: балл и слово шкалы; у Безопасности без данных — «—», а не 0 (tri-state)", () => {
@@ -145,7 +153,11 @@ describe("MD-отчёт: действия и приложение", () => {
   });
 
   test("приложение Б: путь «число → откуда взято» для итога, категорий и показателей", () => {
-    expect(appendix).toContain("| **Repo Health Score 61** | сумма по категориям: балл × вес, приложение А |");
+    // Круг 4: удваивается только строка самого показателя, публичная первой;
+    // в «порядке расчета» названо, по скольким категориям он считается
+    expect(appendix).toContain("| **HealthCraft Index 67** | сумма по 4 открытым категориям: балл × вес, приложение А |");
+    expect(appendix).toContain("| **Repo Health Score 61** | сумма по 6 категориям: балл × вес, приложение А |");
+    expect(appendix.indexOf("| **HealthCraft Index 67**")).toBeLessThan(appendix.indexOf("| **Repo Health Score 61**"));
     expect(appendix).toContain("| **Документация 60** | сумма по показателям: балл × вес, приложение А | `documentation.score` → 60 |");
     // Г1.11 гейта: «Порядок расчета» у показателя больше не пустой — там вес в балле категории
     expect(appendix).toMatch(/\| README \(наличие и качество\): 8000 байт \| балл показателя × вес 45% в балле категории \| `documentation\.readme` → bytes 8000; балл 72 \|/);
@@ -232,7 +244,9 @@ describe("Б5 (круг 2 В4.4): mdEscape-дыры", () => {
     const md = renderRepoReport(getRepoCard(t.db, "esc2", "lang", { access: GRANTED })!);
     // В4.9: язык — в паспорте анализа (приложение Г)
     // Г1.10 гейта: ссылку убивает экранированная «[», круглые скобки читаются как текст
-    expect(md).toContain("| Язык | x \\!\\[t\\](https://evil.example/l) &lt;s&gt; |");
+    // А14 аудита: в имени поля названо, откуда язык, — из каталога, а не из
+    // скачанного репозитория (он есть и там, где скачать не удалось)
+    expect(md).toContain("| Язык (по каталогу SourceCraft) | x \\!\\[t\\](https://evil.example/l) &lt;s&gt; |");
     expect(md).not.toMatch(/!\[[^\]]*\]\(https:\/\/evil\.example\/l\)/);
     expect(md).not.toContain("<s>");
   });
