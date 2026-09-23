@@ -76,7 +76,10 @@ describe("MD-отчёт: структура", () => {
     expect(main).toContain("[sourcecraft.dev/report/sample](https://sourcecraft.dev/report/sample)");
     // В2 гейта: имя документа и плашка доступа зрителя; п.1 круга 2: дата без
     // слова «Анализ», плашка после нее (в PDF — второй строкой шапки)
-    expect(main).toContain("Отчет HealthCraft. 16 сент. 2026 (полный).");
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, §2 23.09 «правки по финальным виджетам»
+    // п.8, блок Е1): плашка называет оценку — «Полная оценка»/«Публичная оценка»
+    expect(main).toContain("Отчет HealthCraft. 16 сент. 2026 (полная оценка).");
+    expect(main).not.toContain("(полный).");
     expect(main).not.toContain(`#${scoredScan}`);
     expect(main).not.toContain("4.0.0-hci");
     expect(appendix).toContain(`| Последний анализ | #${scoredScan}, завершен 12:00 16 сент. 2026 |`);

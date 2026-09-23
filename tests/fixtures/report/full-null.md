@@ -4,7 +4,7 @@ _Full access, index NULL_
 
 [sourcecraft.dev/m47/full-null](https://sourcecraft.dev/m47/full-null)
 
-Отчет HealthCraft. 16 сент. 2026 (полный).
+Отчет HealthCraft. 16 сент. 2026 (полная оценка).
 
 HealthCraft Index: **Оценки нет**
 

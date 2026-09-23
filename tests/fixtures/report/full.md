@@ -4,7 +4,7 @@ _Full access_
 
 [sourcecraft.dev/m47/full](https://sourcecraft.dev/m47/full)
 
-Отчет HealthCraft. 16 сент. 2026 (полный).
+Отчет HealthCraft. 16 сент. 2026 (полная оценка).
 
 HealthCraft Index: **62 из 100 · требует внимания**
 

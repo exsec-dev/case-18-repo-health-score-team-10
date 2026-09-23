@@ -545,7 +545,10 @@ describe("единая карточка: матрица доступа зрит�
     for (const leak of ["severity_counts", "runs_count", "fix-red-runs", "appsec-critical", "Repo Health Score: **", "Repo Health Score 49"]) {
       expect(anonMd).not.toContain(leak);
     }
-    expect(anonMd).toContain("войдите и добавьте персональный токен доступа");
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, §2 23.09 ответ 1): путь к полной оценке —
+    // по типу зрителя; здесь доступ «нет токена» — без «войдите» (Г2.2)
+    expect(anonMd).toContain("Добавьте персональный токен доступа в Настройках – откроются CI/CD и Безопасность.");
+    expect(anonMd).not.toContain("войдите и добавьте");
     const fullMd = renderRepoReport(view({ cicd: "granted", appsec: "granted", repo: "granted" })!);
     expect(fullMd).toContain("Repo Health Score: **49 из 100");
     expect(fullMd).toContain("| runs_count |");

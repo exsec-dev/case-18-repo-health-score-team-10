@@ -546,9 +546,10 @@ export const SECURITY_NO_SCAN = "Данных AppSec по репозиторию
  */
 export function noScoreText(scan: { status: string } | null): { title: string; description: string } {
   if (scan) {
+    // В4.9 ч.2 (А10, Г2.3): без «скана» и «фактов» — словами читателя
     return {
-      title: "Скан был – данных для оценки не хватило",
-      description: `Последний скан (${sentence(scanStatusText(scan.status))}) не собрал достаточно фактов для честного числа – это отсутствие данных, а не плохая оценка. Следующий анализ соберет факты заново.`,
+      title: "Оценки пока нет",
+      description: "Анализ прошел, но данных для оценки не хватило. Это не плохая оценка: при следующем анализе данные соберутся заново.",
     };
   }
   return { title: "Репозиторий есть в каталоге, но еще не сканировался", description: "Оценка появится после первого анализа репозитория." };
@@ -750,8 +751,42 @@ export const SECURITY_PUBLIC_NOTE =
  * Заглушки закрытых зрителю каналов (К2 В4.1) по причине доступа. Ключи —
  * ChannelAccess без "granted". Строка — одна для страницы и MD-отчёта.
  */
+// ---------- В4.9, часть 2 гейта: путь к полной оценке (А2, Е2) ----------
+
+/** Кусок строки пути: `settings` — слово «Настройках», на карточке ссылка на `/settings`, в отчете — текст. */
+export interface PathPart {
+  text: string;
+  settings?: boolean;
+}
+
+const SETTINGS_WORD = "Настройках";
+
+/** Вошедшему без токена (Г2.2): без «войдите» — он уже вошел. */
+const PATH_NO_PAT: PathPart[] = [{ text: "Добавьте персональный токен доступа в " }, { text: SETTINGS_WORD, settings: true }, { text: " – откроются CI/CD и Безопасность." }];
+
+/** Не вошедшему (аноним, истекшая сессия). */
+const PATH_SIGN_IN: PathPart[] = [{ text: "Войдите через Я ID и добавьте персональный токен доступа в " }, { text: SETTINGS_WORD, settings: true }, { text: "." }];
+
+export const pathText = (parts: PathPart[]): string => parts.map((p) => p.text).join("");
+
+/**
+ * Строка пути к полной оценке (Repo Health Score) — ОДНА копия для карточки,
+ * MD и PDF по типу зрителя (§2 23.09, ответ 1 на аудит-пару): не вошел —
+ * войти и добавить токен; вошел без токена — добавить токен; токен есть, прав
+ * нет — причина без призыва (короткая форма, первый закрытый канал: CI, затем
+ * Безопасность).
+ */
+export function fullScorePath(auth: string | undefined, accesses: (string | undefined)[]): PathPart[] {
+  if (auth === undefined || auth === "no-session") return PATH_SIGN_IN;
+  // канал закрыт «нет токена» — зрителю нужен токен, как бы ни пришел признак входа
+  const closed = accesses.find((a) => a !== undefined && a !== "granted");
+  if (auth === "no-pat" || closed === "no-pat") return PATH_NO_PAT;
+  return [{ text: lockReasonShort(accesses, auth) ?? ACCESS_LOCK_SHORT["check-failed"] }];
+}
+
 export const ACCESS_LOCK_TEXT: Record<"no-pat" | "denied" | "pat-expired" | "check-failed", string> = {
-  "no-pat": "Данные видны участникам репозитория: войдите и добавьте персональный токен доступа SourceCraft в Настройках.",
+  // А2: призыв — той же строкой пути, что у полной оценки (без «войдите» вошедшему)
+  "no-pat": `Данные видны участникам репозитория. ${pathText(PATH_NO_PAT)}`,
   denied: "У вашего токена нет прав на эти данные репозитория.",
   "pat-expired": "SourceCraft отклонил ваш токен доступа – обновите его в Настройках.",
   "check-failed": "Не удалось проверить доступ к этим данным – попробуйте открыть карточку позже.",

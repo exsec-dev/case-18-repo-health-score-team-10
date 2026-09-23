@@ -110,8 +110,10 @@ describe("Д3: без оценки отчета нет, пустое состо�
     expect({ score: card.score, scan: card.scan?.id }).toEqual({ score: null, scan: scanId });
     expect(() => renderRepoReport(card)).toThrow(REPORT_NO_SCORE);
     const { title, description } = noScoreText(card.scan);
-    expect(title).toBe("Скан был – данных для оценки не хватило");
-    expect(description).toContain("Следующий анализ соберет факты заново.");
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А10, Г2.3): без «скана» и «фактов»
+    expect(title).toBe("Оценки пока нет");
+    expect(description).toBe("Анализ прошел, но данных для оценки не хватило. Это не плохая оценка: при следующем анализе данные соберутся заново.");
+    expect(`${title} ${description}`).not.toMatch(/скан|факт/i);
   });
 
   test("скана не было — отчета тоже нет, карточка говорит «еще не сканировался»", () => {

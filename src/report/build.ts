@@ -29,7 +29,9 @@ import {
   fmtDecimal,
   fmtLoss,
   fmtScore,
+  fullScorePath,
   noDataReason,
+  pathText,
   scanStatusText,
   scanTriggerText,
   scoreLabelTheme,
@@ -157,7 +159,9 @@ export function buildReportModel(card: RepoCard): ReportModel {
  */
 function docChip(card: RepoCard): Chip | null {
   if (!card.score) return null;
-  return { theme: "unknown", text: card.score.fullLocked ? "Публичный" : "Полный" };
+  // В4.9 ч.2 (Е1): «Полный»/«Публичный» совпадали с видимостью «Публичный»
+  // на карточке — плашка называет оценку, а не репозиторий
+  return { theme: "unknown", text: card.score.fullLocked ? "Публичная оценка" : "Полная оценка" };
 }
 
 function headerBlock(card: RepoCard, date: string | null): Block {
@@ -174,6 +178,15 @@ function headerBlock(card: RepoCard, date: string | null): Block {
   };
 }
 
+/**
+ * В4.9 ч.2 (Е2, §2 23.09 ответ 1): путь к полной оценке — той же строкой, что
+ * под закрытым Repo Health Score на карточке (`fullScorePath`), по типу
+ * зрителя; в документе без ссылки.
+ */
+function fullPathText(card: RepoCard): string {
+  return pathText(fullScorePath(card.viewer?.auth, [card.access.cicd, card.access.appsec]));
+}
+
 // ---------- оценка есть, индекса нет (покрытие ниже порога) ----------
 
 function indexNullSection(card: RepoCard): Block[] {
@@ -182,7 +195,7 @@ function indexNullSection(card: RepoCard): Block[] {
   const collected = fmtCoverage(score.indexCoverage);
   const threshold = fmtCoverage(COVERAGE_NULL_BELOW);
   const notes: HeroNote[] = [{ line: line("Отсутствие оценки означает недостаток данных, а не плохое состояние репозитория.") }];
-  if (score.fullLocked) notes.push({ line: line(`Полная оценка ${FULL} с категориями CI/CD и Безопасность видна участникам репозитория.`), info: true });
+  if (score.fullLocked) notes.push({ line: line(`Полная оценка ${FULL} с категориями CI/CD и Безопасность видна участникам репозитория. ${fullPathText(card)}`), info: true });
   const out: Block[] = [
     {
       kind: "hero",
@@ -233,7 +246,7 @@ function scoredSection(card: RepoCard, metrics: Metric[]): Block[] {
         ? `${publicFirst} ${FULL} учитывает 6 категорий, включая CI/CD и Безопасность.`
         : hasIndex
           ? score.fullLocked
-            ? `${publicFirst} Полная оценка ${FULL} с категориями CI/CD и Безопасность видна участникам репозитория: войдите и добавьте персональный токен доступа в Настройках.`
+            ? `${publicFirst} Полная оценка ${FULL} с категориями CI/CD и Безопасность видна участникам репозитория. ${fullPathText(card)}`
             : `${publicFirst} ${FULL}: данных для оценки недостаточно.`
           : // пункт 7 блока А круга 4: полный доступ есть, индекса нет
             `${INDEX} считается по открытым данным – по нему строится рейтинг, но открытых данных собрано меньше ${fmtCoverage(COVERAGE_NULL_BELOW)}, поэтому он не рассчитан. ${FULL} учитывает 6 категорий, включая CI/CD и Безопасность.`,
