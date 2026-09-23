@@ -51,7 +51,8 @@ import {
 } from "./format";
 import { useMediaQuery } from "./prefs";
 import { linkProps, navigate, repoHref } from "./router";
-import { Page } from "./Shell";
+import { Page, showAside, useAsideControl } from "./Shell";
+import { categoryColorClass } from "./cardView";
 import { AsideSection, EmptyState, LanguageName, PageHeader, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows } from "./ui";
 import { LANG_NONE, LANG_NONE_TITLE, langOptions, type Facets, type LangOptionData } from "./lang-filter";
 
@@ -123,8 +124,13 @@ const COLUMN_TITLES: Record<string, string> = {
   scanned: "Скан",
 };
 
-/** Лайки — сортировкой и в настройке колонок, но не в виде по умолчанию: рейтинг не про популярность. */
-const HIDDEN_BY_DEFAULT = ["lang", "likes", "forks", "activity", "coverage", "scanned"];
+/**
+ * В4.9 ч.2 (U10-b): «Реакции» и «Последняя активность» видны по умолчанию —
+ * узкими колонками вторичным цветом. Рейтинг не про популярность, но это
+ * держит вес индекса (реакции в него не входят и порядок не меняют), а не
+ * скрытие колонки: зритель видит популярность рядом и сортирует по ней сам.
+ */
+const HIDDEN_BY_DEFAULT = ["lang", "forks", "coverage", "scanned"];
 
 export function Rating({ search: rawSearch, meta, metaFailed = false }: { search: string; meta: MetaResponse | null; metaFailed?: boolean }) {
   // В4.8.5 (К8.5.10, С5-2): неверные sort/order/per_page/page из старой ссылки
@@ -405,14 +411,38 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
  */
 function ratingLead(meta: MetaResponse | null): ReactNode {
   const about = "HealthCraft Index показывает состояние открытых репозиториев SourceCraft по 4 категориям: документация, активность, задачи и состояние кода.";
-  if (!meta) return about;
+  if (!meta) return (
+    <>
+      {about} <HowCountedLink />
+    </>
+  );
   const { scored, catalog } = meta.repos;
   return (
     <>
-      {about}
+      {about} <HowCountedLink />
       <br />
       Оценено {fmtCount(scored)} из {fmtCount(catalog)} репозиториев.
     </>
+  );
+}
+
+/**
+ * В4.9 ч.2 (U14): «Как считается» в подзаголовке — ниже 1440 открывает
+ * выезжающую панель (ту же, что кнопка ActionBar), на 1440+ прокручивает к
+ * панели. Компонент, а не строка: состояние панели живет в `Page`.
+ */
+function HowCountedLink() {
+  const aside = useAsideControl();
+  return (
+    <Link
+      href="#"
+      onClick={(e) => {
+        e.preventDefault();
+        showAside(aside);
+      }}
+    >
+      Как считается
+    </Link>
   );
 }
 
@@ -539,13 +569,14 @@ function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResp
             категория, покрашенная в красный, читалась бы как плохая. */}
         <div className="rh-contrib">
           <div className="rh-contrib__bar">
-            {ratingCategories.map((c, i) => (
-              <i key={c.key} className={`rh-contrib__seg rh-contrib__seg_${i + 1}`} style={{ width: `${c.share}%` }} />
+            {/* В4.9 ч.2 (А3): цвет — по ключу категории, как на карточке */}
+            {ratingCategories.map((c) => (
+              <i key={c.key} className={`rh-contrib__seg ${categoryColorClass(c.key)}`} style={{ width: `${c.share}%` }} />
             ))}
           </div>
-          {ratingCategories.map((c, i) => (
+          {ratingCategories.map((c) => (
             <div key={c.key} className="rh-contrib__row" title={`вес в HealthCraft Index – ${c.weight}`}>
-              <i className={`rh-contrib__dot rh-contrib__seg_${i + 1}`} />
+              <i className={`rh-contrib__dot ${categoryColorClass(c.key)}`} />
               <Text variant="body-1">{c.title}</Text>
               <Text variant="body-1" color="secondary" className="rh-contrib__share">
                 {c.share}%
@@ -575,7 +606,8 @@ function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResp
               В4.6 круг 2 (Р10, замечание владельца 10): пункт называется «Частота» —
               «Свежесть» обещала давность данных, а речь о периодичности обхода;
               значение и пояснение — формулировки владельца. */}
-          <DefinitionList.Item name="Частота" note="Обход каталога выполняется ежесуточно. Дата последнего анализа указана в колонке «Скан»">
+          {/* В4.9 ч.2 (Б): колонка «Скан» скрыта по умолчанию — подсказка ведет на карточку */}
+          <DefinitionList.Item name="Частота" note="Обход каталога выполняется ежесуточно. Дата последнего анализа – на карточке репозитория.">
             ежесуточно
           </DefinitionList.Item>
         </DefinitionList>
@@ -727,10 +759,22 @@ function buildColumns(
     // В4.6 круг 2 (Р3): название языка снова стоит в строке репозитория;
     // колонка остаётся для сортируемого/копируемого вида, выключенной по умолчанию
     { id: "lang", name: "Язык", template: (item: Item) => <LanguageName name={item.language} color={item.languageColor} /> },
-    { id: "likes", name: sortable("Реакции", "likes"), align: "end", template: (item: Item) => fmtNumber(item.likes) },
+    {
+      id: "likes",
+      name: sortable("Реакции", "likes"),
+      align: "end",
+      width: 96,
+      template: (item: Item) => <Text color="secondary">{fmtNumber(item.likes)}</Text>,
+    },
     { id: "forks", name: "Ответвления", align: "end", template: (item: Item) => fmtNumber(item.forks) },
     // не «Активность»: так называется категория Score, а это дата из каталога
-    { id: "activity", name: sortable("Последняя активность", "activity"), align: "end", template: (item: Item) => fmtDate(item.lastActivityAt) },
+    {
+      id: "activity",
+      name: sortable("Последняя активность", "activity"),
+      align: "end",
+      width: 132,
+      template: (item: Item) => <Text color="secondary">{fmtDate(item.lastActivityAt)}</Text>,
+    },
     // колонка заведена вместе с переносом сортировки: «Покрытие данными» было
     // в списке сортировок, но своей колонки не имело — сортировать стало бы не по чему
     { id: "coverage", name: sortable("Покрытие", "coverage"), align: "end", template: (item: Item) => fmtCoverage(item.coverage) },

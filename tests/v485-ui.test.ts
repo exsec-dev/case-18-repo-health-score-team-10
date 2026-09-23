@@ -157,12 +157,19 @@ describe("К8.5.8: сессия — одно состояние", () => {
 
 describe("поверхности без отдельной растяжки (source-assert вёрстки и проводки)", () => {
   test("С6-4: ссылка под замком полного Score — по причине: нет сессии — вход, нет токена — Настройки, токен есть — без ссылки", () => {
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А2; §2 23.09 правки по виджетам п.1 и
+    // ответ 1): под замком — строка пути по типу зрителя (`fullScorePath`, одна
+    // копия с отчетом): нет сессии — «Войдите через Я ID…» и КНОПКА входа (вид
+    // «Войти» rail), нет токена — «Добавьте… в Настройках» (слово-ссылка), токен
+    // есть — причина без призыва. Тексты веток — поведенческий тест v49-ui-r1-card.
     const page = src("RepoPage.tsx");
-    expect(page).toContain('card.viewer?.auth === "pat" ? null : card.viewer?.auth === "no-session" ? (');
-    expect(page).toContain('<Link href="/auth/ya">Войти через Я ID</Link>');
-    // ПЕРЕНОС (В4.8.5 круг 2, П3): причина замка — общим хелпером, тот же текст «войти»
-    expect(page).toContain("lockReasonShort([card.access.cicd, card.access.appsec], card.viewer?.auth)");
-    expect(page).toContain('card.viewer?.auth === "no-session" ? SIGN_IN_LOCK_SHORT');
+    const view = src("cardView.ts");
+    expect(page).toContain("{view.signIn && (");
+    expect(page).toContain("<LoginButton compact={false} inline />");
+    expect(page).not.toContain('<Link href="/auth/ya">Войти через Я ID</Link>');
+    expect(view).toContain('signIn: score.fullLocked && (auth === undefined || auth === "no-session")');
+    expect(view).toContain("fullScorePath(auth, [card.access.cicd, card.access.appsec])");
+    expect(src("Shell.tsx")).toMatch(/export function LoginButton[\s\S]{0,400}view="action"/);
     expect(src("format.ts")).toContain('SIGN_IN_LOCK_SHORT = "Нужно войти через Я ID и добавить персональный токен доступа SourceCraft."');
   });
 

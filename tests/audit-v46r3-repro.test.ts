@@ -32,10 +32,13 @@ describe("В4.6 круг 3: рейтинг", () => {
     expect(rating).toContain("Поиск по владельцу, репозиторию и заголовку");
     expect(api).toMatch(/function matchesQ[\s\S]{0,300}item\.org[\s\S]{0,150}item\.repo[\s\S]{0,150}item\.title/);
     expect(rating).toContain("HealthCraft Index показывает состояние открытых репозиториев SourceCraft по 4 категориям: документация, активность, задачи и состояние кода.");
-    expect(rating).toMatch(/\{about\}\s*<br \/>\s*Оценено \{fmtCount\(scored\)\} из \{fmtCount\(catalog\)\} репозиториев\./);
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, Б2 / U14): в подзаголовке — ссылка «Как считается»
+    expect(rating).toMatch(/\{about\} <HowCountedLink \/>\s*<br \/>\s*Оценено \{fmtCount\(scored\)\} из \{fmtCount\(catalog\)\} репозиториев\./);
     expect(rating).toContain("Категории CI/CD и Безопасность учитываются только в показателе Repo Health Score");
     expect(rating).toContain("репозиториев, к которым у вас есть доступ\n");
-    expect(rating).toContain("Обход каталога выполняется ежесуточно. Дата последнего анализа указана в колонке «Скан»");
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, Б): колонка «Скан» скрыта — подсказка ведет на карточку
+    expect(rating).toContain("Обход каталога выполняется ежесуточно. Дата последнего анализа – на карточке репозитория.");
+    expect(rating).not.toContain("указана в колонке «Скан»");
   });
 });
 
@@ -50,7 +53,11 @@ describe("В4.6 круг 3: карточка", () => {
     expect(format).toContain("ACCESS_LOCK_SHORT");
     expect(repo).toContain("Рассчитывается по 6 категориям");
     expect(repo).toContain('title="Что учитывается"');
-    expect(repo).toContain('title="Параметры расчета"');
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А8 / U4-A): «Параметры расчета» → паспорт «Анализ» + «Реквизиты»
+    expect(repo).toContain('title="Анализ"');
+    expect(repo).not.toContain('title="Параметры расчета"');
+    // абзац легенды на карточке отключен пропом; на рейтинге он остается (ui.tsx ниже)
+    expect(repo).toContain("<ScoreLegend withNote={false} />");
     expect(ui).toContain('variant="body-1"');
     expect(ui).toContain("При покрытии данных ниже");
     expect(ui).toContain("Отсутствующие данные не учитываются как нулевые значения");
@@ -63,12 +70,16 @@ describe("В4.6 круг 3: карточка", () => {
     const figure = repo.slice(repo.indexOf("function ScoreFigure"), repo.indexOf("// ---------- категории"));
     const row = repo.slice(repo.indexOf("function CategoryRow"), repo.indexOf("function AppsecEngines"));
     expect(figure).toContain('alignItems="baseline"');
-    expect(band).toMatch(/title="Repo Health Score"[\s\S]{0,240}\bwithBar/);
-    expect(row.indexOf('className="rh-category__bar"')).toBeLessThan(row.indexOf('className="rh-category__weight"'));
-    // трек числа сужен 40px -> 28px (доводка 21.09): число подписывает полосу
-    // и стоит у неё, а не у плашки вклада. Остальные треки не менялись.
-    // В4.9 (К9.14): после числа — трек плашки слова шкалы (150px); остальные треки прежние
-    expect(css).toContain("grid-template-columns: 16px minmax(120px, 180px) minmax(0, 1fr) minmax(80px, 360px) 28px 150px auto");
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А2-А4): полоса показателя есть у обоих
+    // чисел без флага; в строке категории — полоса · балл · плашка, плашки вклада
+    // нет, название и основание — одним треком, плашка не растягивается
+    expect(band).toMatch(/title="Repo Health Score" help=\{FULL_HELP\}/);
+    expect(figure).toMatch(/total !== null && \([\s\S]{0,120}<Progress value=\{Math\.round\(total\)\}/);
+    expect(row.indexOf('className="rh-category__bar"')).toBeLessThan(row.indexOf('className="rh-category__value"'));
+    expect(row.indexOf('className="rh-category__value"')).toBeLessThan(row.indexOf('className="rh-category__word"'));
+    expect(row).not.toContain("rh-category__weight");
+    expect(css).toContain("grid-template-columns: 16px minmax(0, 1fr) minmax(80px, 240px) 28px 150px;");
+    expect(css).toMatch(/\.rh-category__word \{[^}]*justify-self: start/);
     // селектор стал составным: тот же отступ получил блок «Вклад категорий»
     expect(css).toMatch(/\.rh-aside-section > \.g-definition-list,[\s\S]{0,80}\{[^}]*margin-block-start:\s*var\(--g-spacing-1\)/);
   });
@@ -79,23 +90,28 @@ describe("В4.6 круг 3: карточка", () => {
     const band = repo.slice(repo.indexOf("function ScoreBand"), repo.indexOf("function ScoreFigure"));
     expect(locked).toContain('<Alert');
     expect(locked).toContain('theme="info"');
-    // В4.9 (К9.13): вместо фразы «недоступны» — строки «категория — фраза отчета»
-    expect(locked).toContain("<DefinitionList");
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А4): строки «категория — фраза» → заголовок и одно предложение
+    expect(locked).not.toContain("<DefinitionList");
+    expect(locked).toContain("title={title}");
     // ссылка из строки убрана: переход к токену живёт у показателя (решение 21.09)
     expect(locked).not.toContain('linkProps("/settings")');
     expect(web("layout.css")).toMatch(/\.rh-locked-note\s*\{[^}]*margin-top:[^}]*\}/);
     expect(web("layout.css")).not.toMatch(/\.rh-locked-note\s*\{[^}]*padding:/);
     expect(band).not.toContain("summaryLine");
     expect(band).not.toContain("Рекомендаций:");
-    expect(repo).toMatch(/<Label theme=\{ref\.missing[\s\S]{0,220}<Icon data=\{ChevronDown\}/);
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А5 / U8): основание — словами (ярлык
+    // подметрики), раскрывается по клику; ключ факта — мелко в поповере
+    expect(repo).toMatch(/<Label theme="info" size="xs" interactive>[\s\S]{0,120}\{item\.label\}[\s\S]{0,80}<Icon data=\{ChevronDown\}/);
     expect(repo).not.toContain("Порядок задан движком правил");
   });
 
   test("переход к токену встроен в текст, иконка избранного центрирована", () => {
     const repo = web("RepoPage.tsx");
     const css = web("layout.css");
-    // переход встроен ссылкой в блок закрытого показателя, отдельной кнопки нет
-    expect(repo).toMatch(/linkProps\("\/settings"\)[\s\S]{0,60}>Добавить персональный токен доступа</);
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А2): переход встроен в строку пути —
+    // слово «Настройках» ссылкой (`PathLine`), отдельной строки-ссылки нет
+    expect(repo).toMatch(/p\.settings \?[\s\S]{0,80}linkProps\("\/settings"\)/);
+    expect(repo).not.toContain(">Добавить персональный токен доступа<");
     const star = repo.slice(repo.indexOf("function FavoriteStar"));
     expect(star).toContain('className={["rh-favorite-star"');
     expect(star).toMatch(/<Button[\s\S]{0,2000}<Icon data=\{state === "on" \? StarFill : Star\} size=\{14\} \/>/);

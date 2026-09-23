@@ -131,3 +131,28 @@ export function groupJobsByDay<T extends { claimedAt: string | null }>(jobs: T[]
   if (untimed.rows.length > 0) groups.push(untimed);
   return groups;
 }
+
+// ---------- В4.9 ч.2 (В1, U11-b): 3 шага владельца вместо alert о токене ----------
+
+export type StepState = "done" | "current" | "next";
+
+export interface OwnerStep {
+  n: number;
+  state: StepState;
+  text: string;
+}
+
+/**
+ * Шаги владельца на месте alert «Добавьте персональный токен…» —
+ * показываются, пока токена нет (`hasPat`), как раньше alert. Вход уже
+ * выполнен (кабинет виден только вошедшему), токен — текущий шаг (с кнопкой
+ * «Перейти в Настройки»), анализ — следующий. С токеном шагов нет: `null`.
+ */
+export function ownerSteps(hasPat: boolean): OwnerStep[] | null {
+  if (hasPat) return null;
+  return [
+    { n: 1, state: "done", text: "Вы вошли через Я ID" },
+    { n: 2, state: "current", text: "Добавьте персональный токен доступа SourceCraft – откроются CI/CD и Безопасность" },
+    { n: 3, state: "next", text: "Запустите анализ своего репозитория – кнопка в строке списка" },
+  ];
+}

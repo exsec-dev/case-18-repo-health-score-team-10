@@ -278,20 +278,24 @@ function RailFooter({ me, compact, section }: { me: MeResponse | null; compact: 
   );
 }
 
-/** Вход — главный акцент rail, как у платформы, но action (белая в тёмной теме). */
-function LoginButton({ compact }: { compact: boolean }) {
+/**
+ * Вход — главный акцент rail, как у платформы, но action (белая в тёмной теме).
+ * В4.9 ч.2 (А2): та же кнопка стоит под закрытым Repo Health Score карточки —
+ * `inline` дает ей ширину по тексту и полную подпись «Войти через Я ID».
+ */
+export function LoginButton({ compact, inline = false }: { compact: boolean; inline?: boolean }) {
   const button = (
     <Button
       view="action"
-      size="l"
-      width={compact ? "auto" : "max"}
+      size={inline ? "m" : "l"}
+      width={compact || inline ? "auto" : "max"}
       href="/auth/ya"
       aria-label="Войти через Я ID"
       // узкий rail: квадрат 36×36 — ширина не зависит от колонки футера
       style={compact ? { width: 36, flexShrink: 0 } : undefined}
     >
       <Icon data={ArrowRightToSquare} size={16} />
-      {!compact && "Войти"}
+      {inline ? "Войти через Я ID" : !compact && "Войти"}
     </Button>
   );
   return compact ? (
@@ -387,10 +391,43 @@ export interface Crumb {
   href?: string;
 }
 
+/**
+ * В4.9 ч.2 (А9, Б2): состояние выезжающей панели доступно странице — ссылка
+ * «Как считается» в тексте открывает ту же панель, что кнопка ActionBar; на
+ * широком экране (панель стоит колонкой) — прокручивает к ней.
+ */
+interface AsideControl {
+  /** панель сейчас в Drawer (узкий экран и страница включила `asideDrawer`) */
+  inDrawer: boolean;
+  open: () => void;
+}
+
+const AsideControlContext = createContext<AsideControl>({ inDrawer: false, open: () => {} });
+
+export function useAsideControl(): AsideControl {
+  return useContext(AsideControlContext);
+}
+
+/** Показать правую панель: в Drawer — открыть, колонкой — прокрутить к ней. */
+export function showAside(control: AsideControl): void {
+  if (control.inDrawer) {
+    control.open();
+    return;
+  }
+  document.querySelector(".rh-page__aside")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
 interface PageProps {
   crumbs: Crumb[];
   actions?: ReactNode;
   aside?: ReactNode;
+  /**
+   * Явный opt-in выезжающей панели ниже 1440 для страниц в режиме `document`
+   * (А9 В4.9 ч.2): включают только карточка и рейтинг (у рейтинга — режим
+   * `fill`, как прежде). Панели /me и /settings на узких экранах ведут себя
+   * как раньше — уходят под основную колонку.
+   */
+  asideDrawer?: boolean;
   /** document (по умолчанию) — колонки прокручиваются; fill — данные на высоту экрана */
   mode?: "document" | "fill";
   /** fill: закреплено над прокручиваемой областью */
@@ -400,7 +437,7 @@ interface PageProps {
   children: ReactNode;
 }
 
-export function Page({ crumbs, actions, aside, mode = "document", header, footer, children }: PageProps) {
+export function Page({ crumbs, actions, aside, asideDrawer = false, mode = "document", header, footer, children }: PageProps) {
   const globalActions = useContext(GlobalActionsContext);
   /**
    * В4.6 (У23, решение владельца 20.09 — вариант (iii)): порог 1440, а не
@@ -414,25 +451,26 @@ export function Page({ crumbs, actions, aside, mode = "document", header, footer
    */
   const wide = useMediaQuery("(min-width: 1440px)");
   const [asideOpen, setAsideOpen] = useState(false);
-  const asideInDrawer = mode === "fill" && !wide && aside !== undefined;
+  const asideInDrawer = (mode === "fill" || asideDrawer) && !wide && aside !== undefined;
 
   const barActions =
     actions || globalActions || asideInDrawer ? (
       <Flex gap={2} alignItems="center">
         {globalActions}
         {actions}
+        {/* В4.9 ч.2 (А9): кнопка с подписью — иконка без слова не находилась */}
         {asideInDrawer && (
-          <ActionTooltip title="Как считается">
-            <Button view="flat" size="m" onClick={() => setAsideOpen(true)} aria-label="Как считается">
-              <Icon data={CircleInfo} size={16} />
-            </Button>
-          </ActionTooltip>
+          <Button view="flat" size="m" onClick={() => setAsideOpen(true)}>
+            <Icon data={CircleInfo} size={16} />
+            Как считается
+          </Button>
         )}
       </Flex>
     ) : null;
 
   return (
-    <div className={`rh-page rh-page_${mode}`}>
+    <AsideControlContext.Provider value={{ inDrawer: asideInDrawer, open: () => setAsideOpen(true) }}>
+    <div className={`rh-page rh-page_${mode}${asideDrawer ? " rh-page_aside-drawer" : ""}`}>
       <ActionBar className="rh-actionbar" aria-label="Путь и действия страницы">
         <ActionBar.Section>
           <ActionBar.Group pull="left-grow">
@@ -478,5 +516,6 @@ export function Page({ crumbs, actions, aside, mode = "document", header, footer
         </Drawer>
       )}
     </div>
+    </AsideControlContext.Provider>
   );
 }

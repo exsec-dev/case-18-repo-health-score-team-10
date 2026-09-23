@@ -101,13 +101,20 @@ describe("В4.6-1 (У20): качество категорий закодиров
   });
 
   // ЗАКРЫТО блоком Б2 (шкала и кодирование).
-  test("карточка: число категории окрашено теми же порогами, «нет данных» остаётся нейтральным", () => {
+  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А4 / U2-a, §2 23.09 «выбор по вариантам»
+  // п.2): полосы категорий серые, число не окрашено — уровень несет ТОЛЬКО
+  // плашка (тема `scoreLabelTheme`, та же, что у плашки отчета). «Нет данных» —
+  // нейтральная плашка view-модели (поведенческий тест — v49-ui-r1-card).
+  test("карточка: уровень категории несет плашка по порогам, число и полоса нейтральны, «нет данных» нейтрально", () => {
     const src = srcOf("RepoPage.tsx");
     const row = src.slice(src.indexOf("function CategoryRow"), src.indexOf("// ---------- маркеры расчёта"));
+    const view = srcOf("cardView.ts");
     expect({
       valueColored: /rh-category__value[\s\S]{0,400}scoreColor|scoreColor[\s\S]{0,400}rh-category__value/.test(row),
-      noDataNeutral: /theme="unknown"/.test(row),
-    }).toEqual({ valueColored: true, noDataNeutral: true });
+      chipByThreshold: /<Label theme=\{c\.chip\.theme\}/.test(row) && view.includes("theme: scoreLabelTheme(cat.score)"),
+      barNeutral: row.includes("rh-cat-bar__fill") && !/<Progress[^>]*theme=\{scoreTheme/.test(row),
+      noDataNeutral: view.includes('cat.score === null ? "Нет данных"'),
+    }).toEqual({ valueColored: false, chipByThreshold: true, barNeutral: true, noDataNeutral: true });
   });
 });
 
@@ -125,11 +132,16 @@ describe("В4.6-2 (У25): «вклад 0%» заменён на «не учит�
   // утверждение покраснело по ложной причине; оно переведено на константу,
   // то есть проверяет ровно то же и уже не зависит от прозы комментариев.
   test("карточка: у категории без данных вклад не печатается нулём", () => {
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А4: чип «Вклад N%» снят, Г2.1; сигнал
+    // «не учитывается» у строки ушел, Р11): у категории без данных нет НИ
+    // «вклада 0%», ни чипа вклада вообще — вместо числа «—» и плашка «Нет
+    // данных», причина — строкой основания (поведенческий тест — v49-ui-r1-card).
     const src = srcOf("RepoPage.tsx");
-    expect({ hasHonestWording: src.includes("NOT_COUNTED"), printsZeroContribution: /вклад \{contribution\}%/.test(src) }).toEqual({
-      hasHonestWording: true,
-      printsZeroContribution: false,
-    });
+    expect({
+      contributionChip: src.includes("NOT_COUNTED") || /Вклад \$\{contribution\}%/.test(src),
+      printsZeroContribution: /вклад \{contribution\}%/i.test(src),
+      dashInsteadOfBar: /c\.score === null \?[\s\S]{0,120}—/.test(src),
+    }).toEqual({ contributionChip: false, printsZeroContribution: false, dashInsteadOfBar: true });
   });
 
   // ЗАКРЫТО блоком Б6 (вариант А компоновки карточки).
@@ -358,7 +370,9 @@ describe("В4.6-8 (У26/У13/У38): вариант А — карточка на�
       bandIsMainChild: pageOpen >= 0 && bandMount > pageOpen,
       bandHasOwnClass: src.includes('className="rh-score-band"'),
       asideKeepsFigure: /display-2/.test(asideBody),
-      asideIsMethodOnly: asideBody.includes("<ScoreLegend ") && asideBody.includes("Параметры расчета"),
+      // В4.9 ч.2 (А8, U4-A): «Параметры расчета» → паспорт «Анализ» и свернутые
+      // «Реквизиты»; шкала на месте. ПЕРЕВЕРНУТО С ЗАМЕНОЙ (имена разделов).
+      asideIsMethodOnly: asideBody.includes("<ScoreLegend ") && asideBody.includes('title="Анализ"') && asideBody.includes("Реквизиты"),
     }).toEqual({ bandIsMainChild: true, bandHasOwnClass: true, asideKeepsFigure: false, asideIsMethodOnly: true });
   });
 

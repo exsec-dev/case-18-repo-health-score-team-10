@@ -235,14 +235,19 @@ describe("П3: причина замка — одно правило для по
     });
   });
 
+  // ПЕРЕНОС С ЗАМЕНОЙ (В4.9 ч.2, А2 и А4): у закрытого Repo Health Score —
+  // строка пути `fullScorePath` (одна копия с отчетом), она берет причину
+  // зрителя с токеном тем же `lockReasonShort`; плашка закрытых категорий —
+  // `ACCESS_LOCK_SHORT` по причине, основание категории в отчете —
+  // `lockedCategoryText` (sections.ts). Поведение — v49-ui-r1-card.
   test("карточка зовет общий хелпер в обоих местах (проводка)", () => {
-    const page = webSrc("RepoPage.tsx");
-    expect(page).toContain("lockReasonShort([card.access.cicd, card.access.appsec], card.viewer?.auth)");
-    // ПЕРЕНОС (В4.9, К9.13): строка закрытых категорий берет фразу отчета по доступу
-    // зрителя (`lockedCategoryText`, без сессии — «Видна участникам репозитория.»);
-    // у полного Score — прежний общий хелпер короткой причины
-    expect(page).toContain("lockedCategoryText(cat.locked, card.viewer?.auth)");
-    expect(page).not.toContain("accessLockShort(cat.locked)");
+    const view = webSrc("cardView.ts");
+    const format = webSrc("format.ts");
+    expect(view).toContain("fullScorePath(auth, [card.access.cicd, card.access.appsec])");
+    expect(format).toMatch(/export function fullScorePath[\s\S]{0,700}lockReasonShort\(accesses, auth\)/);
+    expect(view).toContain("ACCESS_LOCK_SHORT[cats[k]!.locked");
+    expect(readFileSync(join(import.meta.dir, "..", "src", "report", "sections.ts"), "utf8")).toContain("lockedCategoryText(cat.locked, card.viewer?.auth)");
+    expect(webSrc("RepoPage.tsx")).not.toContain("accessLockShort(cat.locked)");
   });
 });
 

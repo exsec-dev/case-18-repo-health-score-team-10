@@ -16,28 +16,40 @@ const between = (text: string, from: string, to: string): string => {
 };
 
 describe("К9.12: «Вклад категорий в оценку» на карточке — тот же расчет, что в отчете", () => {
-  test("карточка и отчет зовут одну функцию и одни подписи (format.ts)", () => {
-    const band = between(src("web/RepoPage.tsx"), "function ContributionBand", "\n}\n");
-    // В4.9 ч.2 (предпосылка круга 1): вклады и основания отчета переехали в
-    // чистый `report/sections.ts` — «отчет» здесь это build.ts вместе с ним
-    const report = src("report/build.ts") + src("report/sections.ts");
-    // Гейт 22.09 (В9): строку итога под шкалой («Сильнее всего итог снижают…»)
-    // из документа убрали, на карточке она осталась — `lossParts` теперь
-    // только у карточки; расчет вкладов и подписи по-прежнему общие.
-    expect({ card: band.includes("lossParts("), report: report.includes("lossParts(") }).toEqual({ card: true, report: false });
+  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А3; Г2.8): полоса ушла из панели под
+  // числа; сборка полосы — ОДНА функция `contributionBar` (sections.ts), ее
+  // зовут и отчет (`contributionsBlock`), и view-модель карточки
+  // (`contributionBars`); строки «Сильнее всего…» нет нигде — `lossParts`
+  // удален. Равенство полей — поведенческий тест v49-ui-r1-card.
+  test("карточка и отчет собирают полосу одной функцией (sections.ts)", () => {
+    const view = src("web/cardView.ts");
+    const sections = src("report/sections.ts");
+    const report = src("report/build.ts");
+    expect({ view: view.includes("lossParts"), report: report.includes("lossParts"), format: src("web/format.ts").includes("export function lossParts") }).toEqual({ view: false, report: false, format: false });
     for (const token of ["categoryContributions(", "CONTRIBUTIONS_TITLE", "CONTRIBUTIONS_REST", "contributionsNote(", "fmtContribution("]) {
-      expect({ token, card: band.includes(token), report: report.includes(token) }).toEqual({ token, card: true, report: true });
+      expect({ token, sections: sections.includes(token) }).toEqual({ token, sections: true });
     }
-    // веса — аргументом: индекса — из /api/meta, полного — из карточки
-    expect(band).toContain("c.indexWeight");
-    expect(band).toContain("weight: cat.weight");
+    expect(view).toContain("contributionBars(card)");
+    expect(report).toContain("contributionBar(c, metricName)");
+    // веса — те же, что у отчета: индекса — INDEX_WEIGHTS, полного — вес категории из карточки
+    expect(sections).toContain("INDEX_WEIGHTS[k as keyof typeof INDEX_WEIGHTS]");
+    expect(sections).toContain("score.categories[k]?.weight ?? SCORE_WEIGHTS[k]");
   });
 
-  test("сегменты — один темно-серый тон (как полосы отчета), без цветов категорий", () => {
+  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, §2 23.09 «финальный вид подтвержден» п.1):
+  // на карточке цвет категорий возвращен — тот же, что в панели «Вклад
+  // категорий» рейтинга, по КЛЮЧУ категории; К9.15 снят только для карточки,
+  // PDF остается серым (pdf.ts не менялся).
+  test("сегменты карточки и рейтинга — цвет по ключу категории, CI/CD и Безопасность — два новых тона", () => {
     const css = src("web/layout.css");
-    const seg = between(css, ".rh-contrib-band__seg {", "}");
-    expect(seg).toContain("background: var(--g-color-text-secondary)");
-    expect(css).not.toMatch(/\.rh-contrib-band__seg_\d/);
+    expect(css).not.toMatch(/\.rh-contrib-band__seg/);
+    expect(css).not.toMatch(/\.rh-contrib__seg_\d/);
+    expect(between(css, ".rh-cat-color_cicd {", "}")).toContain("var(--g-color-base-misc-heavy)");
+    expect(between(css, ".rh-cat-color_security {", "}")).toContain("var(--g-color-base-utility-medium)");
+    expect(between(css, ".rh-cat-color_documentation {", "}")).toContain("var(--g-color-base-info-heavy)");
+    expect(src("web/Rating.tsx")).toContain("categoryColorClass(c.key)");
+    expect(src("web/Rating.tsx")).not.toMatch(/rh-contrib__seg_\$\{i/);
+    expect(src("web/RepoPage.tsx")).toContain("className={`rh-contrib__seg ${s.colorClass}`}");
   });
 });
 
@@ -55,11 +67,16 @@ describe("К9.13: закрытая категория — одна фраза н
     expect(noDataReason("code", "что-то новое по-английски")).toBe("Данных нет.");
   });
 
-  test("карточка и отчет берут фразы из format.ts, склейки «недоступны» нет", () => {
+  // ПЕРЕНОС С ЗАМЕНОЙ (В4.9 ч.2, А4, инвариант 1): основание любой категории
+  // на карточке и в отчете — одна функция `categoryWhy` (sections.ts), в
+  // которой живут `lockedCategoryText` и опорная фраза `NOT_IN_SCORE`.
+  test("карточка и отчет берут основание одной функцией, склейки «недоступны» нет", () => {
     const page = src("web/RepoPage.tsx");
-    expect(page).toContain("lockedCategoryText(cat.locked, card.viewer?.auth)");
-    expect(page).toContain("${NOT_IN_SCORE}");
-    expect(src("report/sections.ts")).toContain("lockedCategoryText(cat.locked, card.viewer?.auth)");
+    const sections = src("report/sections.ts");
+    expect(src("web/cardView.ts")).toContain("categoryWhy(card, key, ctx)");
+    expect(src("report/build.ts")).toContain("categoryWhy(card, key, ctx)");
+    expect(sections).toContain("${NOT_IN_SCORE}");
+    expect(sections).toContain("lockedCategoryText(cat.locked, card.viewer?.auth)");
     expect(page).not.toContain("Категория не снизила Score");
   });
 });
@@ -67,7 +84,9 @@ describe("К9.13: закрытая категория — одна фраза н
 describe("К9.14: слово шкалы у категории — плашкой", () => {
   test("в строке категории — Label темы scoreLabelTheme; слова в подсказке числа нет", () => {
     const row = between(src("web/RepoPage.tsx"), "function CategoryRow", "function Markers");
-    expect(row).toMatch(/<Label theme=\{scoreLabelTheme\(cat\.score\)\} size="xs" className="rh-category__word">/);
+    // ПЕРЕНОС (В4.9 ч.2): плашку собирает view-модель (`chip`), тема — scoreLabelTheme, как у отчета
+    expect(row).toMatch(/<Label theme=\{c\.chip\.theme\} size="xs" className="rh-category__word">/);
+    expect(src("web/cardView.ts")).toContain("chip: { theme: scoreLabelTheme(cat.score)");
     expect(row).not.toMatch(/rh-category__value" title=\{sentence\(scoreWord/);
   });
 });

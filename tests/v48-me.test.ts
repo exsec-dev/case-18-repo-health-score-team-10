@@ -213,11 +213,15 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     // круг 2 (2a): метки «ваш» нет; у приватного — серая метка видимости с замком
     expect(src).not.toMatch(/>\s*ваш\s*</);
     // круг 4 (замечание 3): «Приватный» — серая пилюля, не `Label theme="normal"` (в палитре — стальной misc)
-    expect(src).toMatch(/access\.visibility === "private" && \(\s*<span className="rh-pill"[^>]*>\s*<Icon data=\{Lock\} size=\{12\} \/>\s*Приватный/);
+    // ПЕРЕНОС С ЗАМЕНОЙ (В4.9 ч.2, В2): плашка видимости — общим `VisibilityPill`
+    // (та же серая пилюля с замком у приватного), теперь и у публичных
+    expect(src).toContain("<VisibilityPill value={access.visibility} titleSuffix={checked} />");
+    expect(readFileSync(join(import.meta.dir, "..", "src", "web", "ui.tsx"), "utf8")).toMatch(/pill\.kind === "internal" \? Persons : Lock[\s\S]{0,120}<span className="rh-pill"/);
     expect(rowSrc).toContain("<DropdownMenu");
     expect(rowSrc).toContain('text: "Убрать из избранного"');
     // ревью закрытия: пункт «Открыть рекомендации» — навигация SPA, не href
-    expect(rowSrc).toContain("action: () => navigate(`${href}?tab=${TAB_RECOMMENDATIONS}`)");
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А1): пункт ведет к разделу якорем
+    expect(rowSrc).toContain("action: () => navigate(recommendationsHref(href))");
     expect(rowSrc).not.toMatch(/text: "Открыть рекомендации", href:/);
     // плитки сводки — переключатели: роль кнопки и aria-pressed вместо радио
     expect(src).toMatch(/role="button"\s*aria-checked=\{undefined\}\s*aria-pressed=\{band === b\.key\}/);

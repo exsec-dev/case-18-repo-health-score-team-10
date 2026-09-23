@@ -99,16 +99,18 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
     }).toEqual({ menuItem: false, oldButton: false, silentWithoutCheck: true, internalState: false });
   });
 
-  test("П3.3: плашка без PAT — CabinetAlert со ссылкой-кнопкой на /settings, до списка", () => {
+  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, В1 / U11-b): вместо CabinetAlert — плашка
+  // из 3 шагов, текущий шаг — кнопка «Перейти в Настройки»; место — то же, до списка.
+  test("П3.3 → В1: без PAT — 3 шага с кнопкой-ссылкой на /settings, до списка", () => {
     const section = slice("function MyReposSection", "\nfunction RepoRow");
-    const banner = section.slice(section.indexOf("{!hasPat && ("));
+    const steps = slice("function OwnerSteps", "\nexport function MePage");
     expect({
-      banner: section.includes("{!hasPat && ("),
-      alert: /^\{!hasPat && \(\s*<CabinetAlert\s+theme="info"/.test(banner),
-      link: /linkProps\("\/settings"\)/.test(banner.slice(0, 800)),
-      beforeList: section.indexOf("{!hasPat && (") < section.indexOf('<ul className="rh-repo-list">'),
+      banner: section.includes("<OwnerSteps hasPat={hasPat} />"),
+      alert: /<CabinetAlert\s+theme="info"\s+title="Добавьте персональный токен доступа SourceCraft"/.test(section),
+      link: /<Button view="normal" size="m" \{\.\.\.linkProps\("\/settings"\)\}>\s*Перейти в Настройки/.test(steps),
+      beforeList: section.indexOf("<OwnerSteps") < section.indexOf('<ul className="rh-repo-list">'),
       notToast: !/toaster\.add\([^)]*токен/.test(section),
-    }).toEqual({ banner: true, alert: true, link: true, beforeList: true, notToast: true });
+    }).toEqual({ banner: true, alert: false, link: true, beforeList: true, notToast: true });
   });
 
   // В4.8 круг 3 (5a, решение Екатерины): три `Label` каналов собраны в ОДНУ
@@ -133,7 +135,8 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
     expect(code).toMatch(/<Alert theme=\{theme\} view="outlined" size="m"/);
     // все плашки кабинета идут через обёртку
     // В4.8: 7 — плашка исхода «Проверки доступа» стала тостом, как у остальных действий строки
-    expect((code.match(/<CabinetAlert\b/g) ?? []).length).toBe(7);
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, В1): 6 — alert о токене стал плашкой из 3 шагов
+    expect((code.match(/<CabinetAlert\b/g) ?? []).length).toBe(6);
   });
 
   test("П3.4: слаг — общим RepoSlug; пустое состояние — EmptyState; карточек `rh-me-card` в кабинете нет (В4.8)", () => {
@@ -156,6 +159,9 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
     // В4.8: адрес карточки — одна константа строки `href`; у ссылки класс слоя над слоем-ссылкой строки
     expect(row).toContain("const href = repoHref(org, repo);");
     // В4.8 круг 2 (7a): перед текстом — иконка лампочки внутри ссылки
-    expect(row).toMatch(/entry\.recommendationsCount !== null && \(\s*<MetaItem>[\s\S]*?<Link \{\.\.\.linkProps\(`\$\{href\}\?tab=\$\{TAB_RECOMMENDATIONS\}`\)\}[^>]*>\s*<Icon data=\{Bulb\} size=\{14\} \/>\s*\{recommendationsText\(entry\.recommendationsCount\)\}\s*<\/Link>/);
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А1): табов нет — ссылка ведет к разделу
+    // «Рекомендации» якорем (`recommendationsHref` → `#recommendations`)
+    expect(row).toMatch(/entry\.recommendationsCount !== null && \(\s*<MetaItem>[\s\S]*?<Link \{\.\.\.linkProps\(recommendationsHref\(href\)\)\}[^>]*>\s*<Icon data=\{Bulb\} size=\{14\} \/>\s*\{recommendationsText\(entry\.recommendationsCount\)\}\s*<\/Link>/);
+    expect(row).not.toContain("?tab=");
   });
 });

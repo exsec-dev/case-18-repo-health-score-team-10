@@ -456,13 +456,27 @@ body {
   padding: var(--g-spacing-3) var(--g-spacing-4);
 }
 
-/* В4.6 круг 2 (Р16): табы «Категории»/«Рекомендации» вместе с коллапс-блоками
- * живут в контейнере с границами — по образцу блока-полосы величины сверху
- * (`rh-score-band`): тот же `Card view="outlined"` и тот же паддинг, чтобы на
- * карточке было ДВА одинаковых контейнера, а не блок с рамкой и список без. */
-.rh-tabs-card {
+/* В4.9 ч.2 (А1, U1-A): табов нет — разделы ленты («Категории»,
+ * «Рекомендации») живут в том же `Card view="outlined"` с тем же паддингом,
+ * что блок показателей: на карточке один вид контейнера (В4.6 круг 2, Р16). */
+.rh-section-card {
   box-sizing: border-box;
   padding: var(--g-spacing-3) var(--g-spacing-4);
+}
+
+/* Заголовок раздела ленты — над контейнером, как заголовки разделов PDF. */
+.rh-section__title {
+  display: block;
+  margin: 0 0 var(--g-spacing-2);
+}
+
+.rh-card-head {
+  margin-bottom: var(--g-spacing-4);
+}
+
+/* подпись «Войти через Я ID» под строкой пути: кнопка по ширине текста */
+.rh-score-band__signin {
+  margin-top: var(--g-spacing-2);
 }
 
 /* Круг 3, П2: Alert сохраняет штатные внутренние отступы Gravity UI; класс
@@ -501,7 +515,11 @@ body {
    * полосы, которую оно и подписывает, его отделяла пустота. 28px — ширина
    * трёх цифр 15px tabular плюс запас. */
   /* В4.9 (К9.14): трек плашки слова шкалы (150px — «Требует внимания» в Label xs без обрезки) после числа */
-  grid-template-columns: 16px minmax(120px, 180px) minmax(0, 1fr) minmax(80px, 360px) 28px 150px auto;
+  /* В4.9 ч.2 (А4): раскрытие · название с основанием второй строкой · полоса ·
+   * балл · плашка. Трек плашки фиксирован (150px — «Требует внимания» в Label
+   * xs), сама плашка по ширине текста (`justify-self: start`). Чип «Вклад»
+   * снят — последнего трека больше нет. */
+  grid-template-columns: 16px minmax(0, 1fr) minmax(80px, 240px) 28px 150px;
   align-items: center;
   gap: var(--g-spacing-3);
   box-sizing: border-box;
@@ -531,78 +549,54 @@ button.rh-category:focus-visible {
 
 .rh-category__value {
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
-/* ---------- В4.9 (К9.12): «Вклад категорий в оценку» на карточке ----------
- * Тот же расчет и те же подписи, что у полосы отчета (эталон вида, круг 4):
- * сегменты одним темно-серым тоном (`text-secondary` — в светлой теме #6b6b6b,
- * как в PDF), остаток — дорожка, под полосой — шкала 3 зон тонами Progress.
- * Только токены темы; ширины сегментов — долей показателя. */
-.rh-contrib-band {
+.rh-category__name {
   display: flex;
   flex-direction: column;
-  gap: var(--g-spacing-1);
+  gap: 2px;
+  min-width: 0;
 }
 
-.rh-contrib-band__rows {
-  margin-top: var(--g-spacing-2);
-}
-
-.rh-contrib-band__strip {
+.rh-category__title {
   display: flex;
-  height: 12px;
+  flex-wrap: wrap;
+  gap: var(--g-spacing-2);
+  align-items: center;
+}
+
+/* основание — проза под названием, переносится; мера держит строку читаемой */
+.rh-category__why {
+  max-width: 72ch;
+}
+
+/* плашка уровня не растягивается на ширину трека (замечание владельца 23.09) */
+.rh-category__word {
+  justify-self: start;
+}
+
+/* Полоса категории — нейтральный серый (эквивалент #949494 PDF): цвет несет
+ * только плашка уровня (U2-a). Дорожка — `base-generic`, как у Progress. */
+.rh-cat-bar {
+  display: block;
+  overflow: hidden;
+  height: 6px;
+  border-radius: 3px;
   background: var(--g-color-base-generic);
 }
 
-.rh-contrib-band__seg {
+.rh-cat-bar__fill {
+  display: block;
   height: 100%;
-  background: var(--g-color-text-secondary);
-  box-shadow: inset -2px 0 0 var(--g-color-base-background);
+  border-radius: 3px;
+  background: var(--g-color-base-neutral-heavy);
 }
 
-.rh-contrib-band__zones {
-  display: flex;
-  gap: 2px;
-  height: 3px;
-}
-
-.rh-contrib-band__zone_danger {
-  flex: 40 1 0;
-  background: var(--g-color-base-danger-medium);
-}
-
-.rh-contrib-band__zone_warning {
-  flex: 30 1 0;
-  background: var(--g-color-base-warning-medium);
-}
-
-.rh-contrib-band__zone_success {
-  flex: 30 1 0;
-  background: var(--g-color-base-positive-medium);
-}
-
-.rh-contrib-band__legend {
-  display: flex;
-  gap: 2px;
-}
-
-.rh-contrib-band__legend-item_danger {
-  flex: 40 1 0;
-}
-
-.rh-contrib-band__legend-item_warning,
-.rh-contrib-band__legend-item_success {
-  flex: 30 1 0;
-}
-
-.rh-contrib-band__note {
-  margin: var(--g-spacing-1) 0 0;
-}
-
-/* В4.6 круг 2 (Р14): плашка вклада прижата к правому краю своего трека —
- * сам трек стоит последним, поэтому это и есть правый край строки. */
-.rh-category__weight {
-  justify-self: end;
+/* примечание частичной нехватки данных — первой строкой раскрытия, во всю ширину */
+.rh-subrows__note {
+  grid-column: 1 / -1;
+  padding-block: var(--g-spacing-1) var(--g-spacing-2);
 }
 
 /* Пустое состояние 1:1 с платформой. Замерено на их Milestones и Pull
@@ -721,21 +715,91 @@ button.rh-category:focus-visible {
  * читался как порядок («темнее — больше»), хотя доли почти равны, и соседние
  * ступени не различались на 8px полосе. Тона взяты непрозрачные `-heavy`/
  * `-medium`: сегменты лежат друг к другу вплотную, и полупрозрачные смешались
- * бы с фоном по-разному. */
-.rh-contrib__seg_1 {
+ * бы с фоном по-разному.
+ *
+ * В4.9 ч.2 (А3): цвет привязан к КЛЮЧУ категории, а не к позиции в массиве —
+ * одна категория один цвет на карточке и в панели рейтинга. Прежние 4 тона
+ * остались за теми же категориями; CI/CD и Безопасность (только в полосе
+ * Repo Health Score) — `misc-heavy` и `utility-medium`. «Не набрано» —
+ * нейтральная дорожка. */
+.rh-cat-color_documentation {
   background: var(--g-color-base-info-heavy);
 }
 
-.rh-contrib__seg_2 {
+.rh-cat-color_activity {
   background: var(--g-color-base-positive-medium);
 }
 
-.rh-contrib__seg_3 {
+.rh-cat-color_issues {
   background: var(--g-color-base-warning-medium);
 }
 
-.rh-contrib__seg_4 {
+.rh-cat-color_code {
   background: var(--g-color-base-utility-heavy);
+}
+
+.rh-cat-color_cicd {
+  background: var(--g-color-base-misc-heavy);
+}
+
+.rh-cat-color_security {
+  background: var(--g-color-base-utility-medium);
+}
+
+.rh-cat-color_rest,
+.rh-cat-color_none {
+  background: var(--g-color-base-generic-medium);
+}
+
+/* Полоса вклада на карточке (Ш2): заголовок, стек 8px с зазором 2px, легенда
+ * точками в строку с переносом — «Категория – +N», последним «не набрано». */
+.rh-contrib_card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-2);
+  padding-top: var(--g-spacing-3);
+  border-top: 1px solid var(--g-color-line-generic);
+}
+
+.rh-contrib_card .rh-contrib__bar {
+  margin-bottom: 0;
+}
+
+.rh-contrib_card .rh-contrib__seg {
+  flex-basis: 0;
+  min-width: 2px;
+}
+
+.rh-contrib__title {
+  margin: 0;
+}
+
+.rh-contrib__note {
+  margin: 0;
+}
+
+.rh-contrib__legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--g-spacing-1) var(--g-spacing-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rh-contrib__item {
+  display: inline-flex;
+  gap: var(--g-spacing-1);
+  align-items: center;
+  white-space: nowrap;
+}
+
+.rh-contrib__item .rh-contrib__dot {
+  margin-inline-end: 2px;
+}
+
+.rh-contrib__item .rh-contrib__share {
+  margin-inline-start: 0;
 }
 
 /* Заголовок блока правой панели и список определений под ним стояли слишком
@@ -972,15 +1036,26 @@ button.rh-category:focus-visible {
     padding: var(--g-spacing-4);
   }
 
+  /* телефон: раскрытие · название с основанием · балл; полоса и плашка
+   * уходят, уровень несет число (tri-state — «—») */
   .rh-category {
-    grid-template-columns: 16px 1fr 40px;
+    grid-template-columns: 16px minmax(0, 1fr) 28px;
   }
 
   .rh-category__bar,
-  .rh-category__weight,
-  .rh-category__word,
-  .rh-category__tags {
+  .rh-category__word {
     display: none;
+  }
+
+  /* рекомендация: номер · текст, эффект — строкой под текстом */
+  .rh-recs .rh-rec {
+    grid-template-columns: 20px minmax(0, 1fr);
+  }
+
+  .rh-recs .rh-rec__effect {
+    grid-column: 2;
+    align-items: flex-start;
+    text-align: left;
   }
 
   .rh-subrows {
@@ -991,6 +1066,133 @@ button.rh-category:focus-visible {
     grid-template-columns: 1fr;
     gap: 0;
   }
+}
+
+/* ---------- В4.9 ч.2 (В1, U11-b): 3 шага владельца в кабинете ----------
+ * Та же рамка, что у info-плашки (голубая, outlined), внутри — шаги
+ * столбиком: метка 24px (галочка / номер), текст и действие текущего шага.
+ * Выполненный — позитивный тон метки, текущий — акцент, следующий —
+ * приглушенный. */
+.rh-steps {
+  box-sizing: border-box;
+  padding: var(--g-spacing-3) var(--g-spacing-4);
+  border: 1px solid var(--g-color-line-info);
+  border-radius: var(--g-border-radius-l);
+}
+
+.rh-steps__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rh-steps__item {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: var(--g-spacing-3);
+  align-items: start;
+}
+
+.rh-steps__mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  font-size: var(--g-text-caption-2-font-size);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.rh-steps__item_done .rh-steps__mark {
+  color: var(--g-color-text-positive);
+}
+
+.rh-steps__item_current .rh-steps__mark {
+  background: var(--g-color-base-info-heavy);
+  color: var(--g-color-text-light-primary);
+}
+
+.rh-steps__item_next .rh-steps__mark {
+  border: 1px solid var(--g-color-line-generic-solid);
+  box-sizing: border-box;
+  color: var(--g-color-text-secondary);
+}
+
+/* ---------- В4.9 ч.2 (А5): строка рекомендации ----------
+ * Номер слева (порядок выдачи, как в PDF), действие и причина, справа —
+ * «ожидаемый эффект» строкой над плашкой прироста. */
+.rh-rec {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: var(--g-spacing-2) var(--g-spacing-3);
+  align-items: start;
+}
+
+.rh-recs {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rh-rec__n {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.rh-rec__body {
+  min-width: 0;
+}
+
+.rh-rec__basis {
+  margin-top: var(--g-spacing-1);
+}
+
+.rh-rec__effect {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-end;
+  max-width: 260px;
+  text-align: right;
+}
+
+/* поповер основания: мера и воздух; кнопка «Исходные данные» — без вида кнопки */
+.rh-proof {
+  box-sizing: border-box;
+  max-width: 480px;
+  padding: var(--g-spacing-3);
+}
+
+.rh-proof__toggle,
+.rh-aside-details__toggle {
+  display: inline-flex;
+  gap: var(--g-spacing-1);
+  align-items: center;
+  width: fit-content;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.rh-proof__toggle:focus-visible,
+.rh-aside-details__toggle:focus-visible {
+  border-radius: var(--g-border-radius-s);
+  box-shadow: 0 0 0 2px var(--g-color-line-focus);
+}
+
+.rh-aside-details {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-2);
+  margin-bottom: var(--g-spacing-7);
 }
 
 /* В4.2b (Ф2.20, решение 18.09): одноразовый зелёный glow НЕзаполненной

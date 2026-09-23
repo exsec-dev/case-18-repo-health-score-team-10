@@ -137,14 +137,18 @@ describe("Р15 + П1.13: затухание полностью снято по �
 
 describe("Р14: вклад категории — одна плашка, а не строка «вес → вклад»", () => {
   // ЗАКРЫТО блоком Б4 (карточка, категории) — обёртка снята, утверждение не менялось.
-  test("CategoryRow: Label theme=\"normal\" со словом «Вклад», старой строки нет", () => {
+  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А4: чип «Вклад N%» снят — Г2.1, §2 23.09
+  // «выбор по вариантам» п.2): у строки категории нет ни плашки вклада, ни
+  // строки «вес → вклад», ни «не учитывается»; вклад — полосой под числами (А3).
+  test("CategoryRow: плашки «Вклад» нет, старой строки нет, «не учитывается» нет", () => {
     const row = between(codeOf("RepoPage.tsx"), "function CategoryRow", "function Markers");
     expect({
-      plate: /<Label[\s\S]{0,200}rh-category__weight/.test(row) || /rh-category__weight[\s\S]{0,200}Вклад/.test(row),
+      plate: /rh-category__weight/.test(row) || /Вклад \$\{/.test(row),
       normalTheme: /theme="normal"/.test(row),
       oldWeightLine: /вес \{cat\.weight\}% → вклад/.test(row),
       notCountedFromFormat: row.includes("NOT_COUNTED"),
-    }).toEqual({ plate: true, normalTheme: true, oldWeightLine: false, notCountedFromFormat: true });
+      contributionUnderFigures: /<ContributionStrip/.test(between(codeOf("RepoPage.tsx"), "function ScoreBand", "function ContributionStrip")),
+    }).toEqual({ plate: false, normalTheme: false, oldWeightLine: false, notCountedFromFormat: false, contributionUnderFigures: true });
   });
 });
 
@@ -268,8 +272,11 @@ describe("П3/1 отменяет Р4: в рейтинге подсвечены �
       exceptionsLabeled: /scoreLabelTheme\(value\)[\s\S]{0,100}rh-cat-chip/.test(cell),
       ratingInlineColor: /scoreColor\(/.test(cell),
       ratingNullStaysUnknown: /theme="unknown"/.test(cell),
+      // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А4 / U2-a): на карточке цвет несет
+      // только плашка уровня, число и полоса нейтральны
       cardKeepsColor: /scoreColor\(/.test(row),
-    }).toEqual({ healthyPlain: true, exceptionsLabeled: true, ratingInlineColor: false, ratingNullStaysUnknown: true, cardKeepsColor: true });
+      cardChipCarriesColor: /<Label theme=\{c\.chip\.theme\}/.test(row),
+    }).toEqual({ healthyPlain: true, exceptionsLabeled: true, ratingInlineColor: false, ratingNullStaysUnknown: true, cardKeepsColor: false, cardChipCarriesColor: true });
   });
 });
 
@@ -363,19 +370,21 @@ describe("Б5 (Р18, Р19): правило языка в текстах движ
 // ---------------------------------------------------------------------------
 
 describe("Б4 (Р14, Р16): список категорий и контейнер табов", () => {
-  test("Р14: закрытые категории не строки, а ОДНА строка под списком, с их конкретной причиной", () => {
+  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А4; §2 23.09 «финальный вид подтвержден»
+  // п.2): закрытые по-прежнему НЕ строки и стоят плашкой под списком, но
+  // внутри — заголовок с именами именно закрытых категорий и пояснение одним
+  // предложением `ACCESS_LOCK_SHORT` по причине (собирает `lockedView`,
+  // поведенческий тест — v49-ui-r1-card).
+  test("Р14: закрытые категории не строки, а ОДНА плашка под списком, с их конкретной причиной", () => {
     const src = codeOf("RepoPage.tsx");
+    const view = codeOf("cardView.ts");
     const categories = between(src, "function Categories", "function LockedCategories");
-    const note = between(src, "function LockedCategories", "function CategoryRow");
     const row = between(src, "function CategoryRow", "function Markers");
     expect({
-      rowsFiltered: /cat\.locked === undefined/.test(categories),
+      rowsFiltered: /score\.categories\[k\]!\.locked === undefined/.test(view),
       noteAfterList: categories.indexOf("</ul>") < categories.indexOf("<LockedCategories"),
-      // ПЕРЕНОС (В4.9, К9.13): каждая закрытая категория — своей строкой «название — фраза»
-      namesActualCategories: note.includes("name={item.title}"),
-      // ПЕРЕНОС (В4.8.5 круг 2, П3 → В4.9, К9.13): причина — своя у каждой закрытой
-      // категории, фразой отчета по доступу зрителя (без сессии — «Видна участникам репозитория.»)
-      reasonFromAccessLock: /lockedCategoryText\(cat\.locked, card\.viewer\?\.auth\)/.test(categories),
+      namesActualCategories: /const titles = locked\.map\(\(k\) => CATEGORY_TITLES\[k\]\)/.test(view),
+      reasonFromAccessLock: /ACCESS_LOCK_SHORT\[cats\[k\]!\.locked/.test(view),
       // фиксированная фраза «CI/CD и Security» была бы ложью при закрытой одной
       hardcodedPair: src.includes("CI/CD и Безопасность – недоступны"),
       lockBranchGoneFromRow: /cat\.locked !== undefined/.test(row),
@@ -391,15 +400,17 @@ describe("Б4 (Р14, Р16): список категорий и контейне�
 
   // ПЕРЕВОРОТ (В4.9, К9.13): склейка «Категории X и Y недоступны. причина» заменена
   // строками «название — фраза отчета» — одна фраза на карточке и в отчете; согласовывать число нечего
-  test("Р14 → К9.13: строка на каждую закрытую категорию с фразой отчета, панель под списком", () => {
+  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А4): строки «название — фраза» заменены
+  // заголовком и пояснением одним предложением; склейки «недоступны» нет.
+  test("Р14 → А4: заголовок и пояснение одним предложением, панель под списком", () => {
     const src = codeOf("RepoPage.tsx");
     const note = between(src, "function LockedCategories", "function CategoryRow");
     expect({
-      perCategory: note.includes("items.map((item)"),
-      phraseAsIs: note.includes("{item.reason}"),
+      titleAndSentence: note.includes("title={title}") && note.includes('message={sentences.join(" ")}'),
+      perCategoryRows: note.includes("items.map((item)"),
       noAgreementGlue: note.includes('"недоступна"') || note.includes('"недоступны"'),
       lastInList: /\.rh-locked-note \{[^}]*margin-top:\s*var\(--g-spacing-3\)/.test(srcOf("layout.css")),
-    }).toEqual({ perCategory: true, phraseAsIs: true, noAgreementGlue: false, lastInList: true });
+    }).toEqual({ titleAndSentence: true, perCategoryRows: false, noAgreementGlue: false, lastInList: true });
   });
 
   // Доводка 21.09: верхнее поле у списка снято решением владельца — раскрытое
@@ -416,16 +427,20 @@ describe("Б4 (Р14, Р16): список категорий и контейне�
     }).toEqual({ topPaddingGone: false, headerSeparates: true });
   });
 
-  test("Р16: табы и коллапс-блоки — в контейнере с границами, как блок величины", () => {
+  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А1 / U1-A): табов нет — разделы ленты
+  // «Категории» и «Рекомендации» живут в том же контейнере, что блок величины.
+  test("Р16 → А1: разделы ленты — в контейнере с границами, как блок величины; табов нет", () => {
     const src = codeOf("RepoPage.tsx");
-    const tabs = between(src, "function CardTabs", "function CardSlots");
+    const categories = between(src, "function Categories", "function LockedCategories");
+    const recs = between(src, "function Recommendations", "function RecommendationRow");
     const css = srcOf("layout.css");
     expect({
-      container: /<Card view="outlined" className="rh-tabs-card">/.test(tabs),
+      container: /<Card view="outlined" className="rh-section-card">/.test(categories) && /<Card view="outlined" className="rh-section-card">/.test(recs),
+      tabsGone: /<TabList|CardTabs|rh-tabs-card/.test(src),
       sameAsBand:
-        between(css, ".rh-tabs-card {", "}").includes("padding: var(--g-spacing-3) var(--g-spacing-4)") &&
+        between(css, ".rh-section-card {", "}").includes("padding: var(--g-spacing-3) var(--g-spacing-4)") &&
         between(css, ".rh-score-band {", "}").includes("padding: var(--g-spacing-3) var(--g-spacing-4)"),
-    }).toEqual({ container: true, sameAsBand: true });
+    }).toEqual({ container: true, tabsGone: false, sameAsBand: true });
   });
 });
 
@@ -439,7 +454,7 @@ describe("Б4 (Р14, Р16): список категорий и контейне�
 describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по замечаниям 11-13, 17 и Р22", () => {
   test("Р11: мета-строка серая, выровнена отступом сверху, без слова «активность»", () => {
     const meta = between(codeOf("ui.tsx"), "function MetaItem", "function SkeletonRows");
-    const head = between(codeOf("RepoPage.tsx"), "function Header", "export const TAB_RECOMMENDATIONS");
+    const head = between(codeOf("RepoPage.tsx"), "function Header", "export const RECOMMENDATIONS_ID");
     expect({
       grey: meta.includes('color="secondary"'),
       steelGone: meta.includes('color="misc"'),
@@ -450,37 +465,49 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
       // 17.09.2026»): без него иконка часов читалась как время скана. Запрет
       // Р11 касался формы «активность {fmtDate}», и она по-прежнему не
       // используется.
+      // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А7; §2 23.09 ответ 4 — прочтение HQ):
+      // «обновлен» → «активность» рядом с «анализ <время>»: две даты различены
+      // словом явно, поэтому форма «активность {fmtDate» вернулась
       wordGone: head.includes("активность {fmtDate"),
-      tooltipKept: head.includes('title="Последняя активность"'),
+      tooltipKept: head.includes('title="Последняя активность'),
       dateNamed: head.includes("обновлен {fmtDate(r.lastActivityAt)}"),
-    }).toEqual({ grey: true, steelGone: false, topGap: true, wordGone: false, tooltipKept: true, dateNamed: true });
+      analysisNamed: head.includes("анализ {fmtDateTime(view.analysisAt)}"),
+    }).toEqual({ grey: true, steelGone: false, topGap: true, wordGone: true, tooltipKept: true, dateNamed: false, analysisNamed: true });
   });
 
   test("Р12: «Покрытие: N%», чип размера панели, мелкий текст замка и ссылка в кабинет на всех ветках", async () => {
     const src = codeOf("RepoPage.tsx");
     const figure = between(src, "function ScoreFigure", "// ---------- категории");
-    const lock = between(src, "score.fullLocked ?", "function ScoreFigure");
+    const lock = between(src, "view.fullPath ?", "function ContributionStrip");
+    const aside = between(src, "function ScoreAside", "function PathLine");
+    const pathLine = between(src, "function PathLine", "function ScoreBand");
     const { ACCESS_LOCK_TEXT, ACCESS_LOCK_SHORT } = (await import("../src/web/format")) as {
       ACCESS_LOCK_TEXT: Record<string, string>;
       ACCESS_LOCK_SHORT: Record<string, string>;
     };
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А2 и А8): «Покрытие: N%» ушло из блока
+    // показателей в паспорт анализа справа — с подсказкой ⓘ (термин тот же,
+    // §2 23.09 ответ 3); строка замка — путь к полной оценке по типу зрителя
+    // (`fullScorePath`, одна копия с отчетом), «Настройках» в ней — ссылка.
     expect({
       coverageWord: figure.includes("Покрытие: {fmtCoverage(coverage)}"),
+      coverageInAside: /name=\{full \? "Покрытие HealthCraft Index" : "Покрытие"\} note=\{coverageHelp\}/.test(aside),
       oldCoverageWord: figure.includes("данных хватило"),
       chipLikeAside: /scoreLabelTheme\(total\)\} size="s"/.test(figure),
-      // блок не схлопывается в метку: заголовок, конкретная причина короткой
-      // формой и переход — приём карточки показателя у платформы
+      // блок не схлопывается в метку: заголовок, путь по типу зрителя и
+      // переход — приём карточки показателя у платформы
       lockIsInvite:
         lock.includes("Виден участникам репозитория") &&
-        /fullLockShortReason\(card\)/.test(lock) &&
+        /<PathLine parts=\{view\.fullPath\} \/>/.test(lock) &&
         !src.includes("FullLockMessage"),
       buttonGone: lock.includes("Открыть личный кабинет"),
-      // переход к токену ОДИН на экран и стоит у самого показателя
-      linkInText: /linkProps\("\/settings"\)[\s\S]{0,80}>Добавить персональный токен доступа</.test(lock),
+      // переход к токену ОДИН на экран и стоит у самого показателя: слово «Настройках» — ссылка
+      linkInText: /p\.settings \?[\s\S]{0,80}linkProps\("\/settings"\)/.test(pathLine),
       lockTextStillShared: Object.keys(ACCESS_LOCK_TEXT).sort().join(",") === "check-failed,denied,no-pat,pat-expired",
       shortKeysMatchFull: Object.keys(ACCESS_LOCK_SHORT).sort().join(",") === Object.keys(ACCESS_LOCK_TEXT).sort().join(","),
     }).toEqual({
-      coverageWord: true,
+      coverageWord: false,
+      coverageInAside: true,
       oldCoverageWord: false,
       chipLikeAside: true,
       lockIsInvite: true,
@@ -500,7 +527,8 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
       fullHelp:
         src.includes("Рассчитывается по 6 категориям") &&
         src.includes("Показатель доступен только для репозиториев, к которым у вас есть доступ"),
-      helpOnLockedBranch: /score\.fullLocked \?[\s\S]{0,1200}<HelpMark/.test(band),
+      // В4.9 ч.2: ветка закрытого показателя теперь по `view.fullPath` (А2) — ПЕРЕНОС
+      helpOnLockedBranch: /view\.fullPath \?[\s\S]{0,1200}<HelpMark/.test(band),
       // MD-отчёт свою формулировку сохраняет: документ читается без наведения.
       // Круг 2 гейта, п.3: отличие показателей объясняет одна строка под обоими
       // числами, поэтому фраза переехала в нее (прежде — подпись под вторым числом).
@@ -514,7 +542,9 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
     const star = src.slice(src.indexOf("function FavoriteStar"));
     const link = between(src, "Открыть на sourcecraft.dev", "</ActionTooltip>");
     expect({
-      modelPlate: /name="Модель"[\s\S]{0,200}<Label theme="normal" size="xs">/.test(aside),
+      // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А10): «Модель» → «Версия методики» на
+      // карточке (в свернутых «Реквизитах»); плашка та же, что в панели рейтинга
+      modelPlate: /name="Версия методики"[\s\S]{0,200}<Label theme="normal" size="xs">/.test(aside) && !aside.includes('name="Модель"'),
       sameAsRating: /name="Модель"[\s\S]{0,200}<Label theme="normal" size="xs">/.test(codeOf("Rating.tsx")),
       starIcon14: /data=\{state === "on" \? StarFill : Star\} size=\{14\}/.test(star),
       linkIcon14: /data=\{ArrowUpRightFromSquare\} size=\{14\}/.test(link),

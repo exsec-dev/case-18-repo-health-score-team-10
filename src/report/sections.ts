@@ -11,8 +11,12 @@
 import type { CardCategory, CardRecommendation, RepoCard } from "../api/repos";
 import { INDEX_WEIGHTS, SCORE_WEIGHTS, type CategoryKey } from "../score/model";
 import {
+  CONTRIBUTIONS_REST,
+  CONTRIBUTIONS_TITLE,
   NOT_IN_SCORE,
   categoryContributions,
+  contributionsNote,
+  fmtContribution,
   closeDateText,
   fmtDate,
   gitLimitsText,
@@ -70,6 +74,53 @@ export function contributionsOf(card: RepoCard, metric: Metric): Contributions |
     metric.value,
     { codeEmpty: card.markers.codeEmpty },
   );
+}
+
+/** Сегмент полосы вклада: `key` — категория (карточка красит сегмент по ключу). */
+export interface BarSegment {
+  key: string;
+  title: string;
+  value: string;
+  share: number;
+}
+
+/** Полоса «Вклад категорий в <показатель>»: сегменты и остаток либо строка вместо полосы. */
+export interface ContributionBar {
+  title: string;
+  segments: BarSegment[];
+  rest: { title: string; value: string; share: number } | null;
+  note: string | null;
+}
+
+/**
+ * Полоса вклада — ОДНА сборка для отчета и карточки (А3, инвариант 1):
+ * заголовок называет показатель, строка вместо полосы — у потолка 49, пустого
+ * репозитория и показателя без категорий с данными.
+ */
+export function contributionBar(c: Contributions | null, metricName?: string): ContributionBar {
+  // п.6 круга 2: в отчете к заголовку добавлен показатель — полоса строится то
+  // по Repo Health Score, то по HealthCraft Index, и по ней это должно быть видно
+  // п.3 круга 5: показатель прямо в заголовке, без «в оценку – …»
+  const title = metricName ? `Вклад категорий в ${metricName}` : CONTRIBUTIONS_TITLE;
+  if (c === null) return { title, segments: [], rest: null, note: "Вклады категорий не рассчитаны: у показателя нет категорий с данными." };
+  const note = contributionsNote(c);
+  if (c.kind !== "bar") return { title, segments: [], rest: null, note };
+  return {
+    title,
+    segments: c.segments.map((s) => ({ key: s.key, title: s.title, value: fmtContribution(s.tenths), share: s.tenths / 1000 })),
+    rest: { title: CONTRIBUTIONS_REST, value: String(c.missing), share: c.missing / 100 },
+    note: null,
+  };
+}
+
+/** Полосы вклада показателей со значением — в порядке «сначала публичный». */
+export function contributionBars(card: RepoCard): ContributionBar[] {
+  return withValue(metricsOf(card)).map((m) => contributionBar(contributionsOf(card, m), m.name));
+}
+
+/** Момент анализа — дата шапки отчета и «анализ …» в шапке карточки (А7): расчет оценки, иначе скан. */
+export function analysisDate(card: RepoCard): string | null {
+  return card.score?.computedAt ?? card.scan?.finishedAt ?? card.scan?.startedAt ?? null;
 }
 
 // ---------- основание категории (колонка «Основание») ----------

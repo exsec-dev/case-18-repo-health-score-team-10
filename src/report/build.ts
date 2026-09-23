@@ -17,11 +17,7 @@
 import { CATEGORY_ORDER, CATEGORY_TITLES, CHANNEL_TREE_KEY, type CardCategory, type CardEvidence, type CardRecommendation, type RepoCard } from "../api/repos";
 import { COVERAGE_NULL_BELOW, INDEX_WEIGHTS, SCORE_WEIGHTS, SEVERITY_WEIGHTS, SUBWEIGHTS, type CategoryKey } from "../score/model";
 import {
-  CONTRIBUTIONS_REST,
-  CONTRIBUTIONS_TITLE,
   SCORE_SCALE,
-  contributionsNote,
-  lossParts,
   fmtContribution,
   fmtCoverage,
   fmtDate,
@@ -48,6 +44,8 @@ import {
   RULE_SUBMETRIC,
   categoryWhy,
   closeDateNote,
+  analysisDate,
+  contributionBar,
   contributionsOf,
   factValue,
   historyTruncatedSince,
@@ -128,7 +126,7 @@ const col = (title: string, align: "left" | "right" = "left", width?: number): T
 /** Модель отчёта карточки — общий источник MD и PDF. */
 export function buildReportModel(card: RepoCard): ReportModel {
   const slug = `${card.repo.org}/${card.repo.repo}`;
-  const dateIso = card.score?.computedAt ?? card.scan?.finishedAt ?? card.scan?.startedAt ?? null;
+  const dateIso = analysisDate(card);
   const date = dateIso ? fmtDate(dateIso) : null;
   // Решение владельца 22.09 (круг 3 гейта): отчет без оценки не выдается —
   // собирать в документ нечего, а в интерфейсе кнопки выгрузки у такого
@@ -312,22 +310,9 @@ function zones(): { theme: "danger" | "warning" | "success"; text: string; share
 }
 
 function contributionsBlock(c: Contributions | null, metricName?: string): Block {
-  // заголовок, строка вместо полосы и строка потерь — общие с карточкой (format.ts, К9.12)
-  // п.6 круга 2: в отчете к заголовку добавлен показатель — полоса строится то
-  // по Repo Health Score, то по HealthCraft Index, и по ней это должно быть видно
-  // п.3 круга 5: показатель прямо в заголовке, без «в оценку – …»
-  const title = metricName ? `Вклад категорий в ${metricName}` : CONTRIBUTIONS_TITLE;
-  if (c === null) return { kind: "contributions", title, segments: [], rest: null, zones: zones(), note: "Вклады категорий не рассчитаны: у показателя нет категорий с данными." };
-  const note = contributionsNote(c);
-  if (c.kind !== "bar") return { kind: "contributions", title, segments: [], rest: null, zones: zones(), note };
-  return {
-    kind: "contributions",
-    title,
-    segments: c.segments.map((s) => ({ title: s.title, value: fmtContribution(s.tenths), share: s.tenths / 1000 })),
-    rest: { title: CONTRIBUTIONS_REST, value: String(c.missing), share: c.missing / 100 },
-    zones: zones(),
-    note: null,
-  };
+  // заголовок, сегменты и строка вместо полосы — общие с карточкой (`sections.ts`, А3)
+  const bar = contributionBar(c, metricName);
+  return { kind: "contributions", title: bar.title, segments: bar.segments.map(({ title, value, share }) => ({ title, value, share })), rest: bar.rest, zones: zones(), note: bar.note };
 }
 
 function categoriesBlock(card: RepoCard, ctx: SubmetricContext): Block {

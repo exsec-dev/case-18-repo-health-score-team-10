@@ -14,6 +14,8 @@ import {
   type PlaceholderContainerActionProps,
 } from "@gravity-ui/uikit";
 import { useEffect, useState, type ReactNode } from "react";
+import { Globe, Lock, Persons } from "@gravity-ui/icons";
+import { visibilityPill } from "./cardView";
 import { SCORE_LEGEND_TITLE, SCORE_SCALE, avatarTone, fmtCoverage, sentence, slugOf } from "./format";
 
 /** Заголовок страницы: header-1 20/24 и одна строка пояснения, как у SourceCraft. */
@@ -66,7 +68,7 @@ export function AsideSection({ title, help, children }: { title: ReactNode; help
  * MD-отчёте не разъехалась. «Нет данных» в легенду НЕ входит: это не полоса
  * шкалы, а отсутствие числа (закон 2) — про него говорит отдельная строка.
  */
-export function ScoreLegend({ coverageNullBelow }: { coverageNullBelow?: number }) {
+export function ScoreLegend({ coverageNullBelow, withNote = true }: { coverageNullBelow?: number; withNote?: boolean }) {
   return (
     <AsideSection title={SCORE_LEGEND_TITLE}>
       <Flex direction="column" gap={2}>
@@ -81,11 +83,15 @@ export function ScoreLegend({ coverageNullBelow }: { coverageNullBelow?: number 
           </Flex>
         ))}
       </Flex>
+      {/* В4.9 ч.2 (А8): на карточке абзац снят пропом — фраза tri-state стоит
+          там в «Что учитывается»; рейтинг не меняется */}
+      {withNote && (
       <Text variant="body-1" color="complementary">
         {coverageNullBelow === undefined
           ? "При недостаточном покрытии данных оценка не рассчитывается. Отсутствующие данные не учитываются как нулевые значения."
           : `При покрытии данных ниже ${fmtCoverage(coverageNullBelow)} оценка не рассчитывается. Отсутствующие данные не учитываются как нулевые значения.`}
       </Text>
+      )}
     </AsideSection>
   );
 }
@@ -151,6 +157,23 @@ export function RepoSlug({ org, repo, variant }: { org: string; repo: string; va
     <Text variant={variant} as={variant === "header-1" ? "h1" : "span"} ellipsis title={slugOf(org, repo)} style={{ display: "block" }}>
       {org} / {repo}
     </Text>
+  );
+}
+
+/**
+ * Плашка видимости SourceCraft у имени репозитория (В4.9 ч.2, А7 и В2): одна
+ * на карточку и избранное — значение приходит от экрана (у карточки поле
+ * ответа, у избранного — проверка прав). «Неизвестно» плашки не получает.
+ */
+export function VisibilityPill({ value, titleSuffix = "" }: { value: string | null | undefined; titleSuffix?: string }) {
+  const pill = visibilityPill(value);
+  if (!pill) return null;
+  const icon = pill.kind === "public" ? Globe : pill.kind === "internal" ? Persons : Lock;
+  return (
+    <span className="rh-pill" title={`${pill.title}${titleSuffix}`}>
+      <Icon data={icon} size={12} />
+      {pill.text}
+    </span>
   );
 }
 

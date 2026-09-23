@@ -99,11 +99,15 @@ describe("П3: кабинет «Мои репозитории»", () => {
   const me = (): string => stripComments(src("web/MePage.tsx"));
   const section = (): string => between(me(), "function MyReposSection", "\nfunction RepoRow");
 
-  test("П3.3: без PAT на /me есть блок «добавьте токен» со ссылкой на /settings (не тост и не title)", () => {
+  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, В1 / U11-b): alert о токене заменен
+  // плашкой из 3 шагов; ветка «нет токена» — в `ownerSteps(hasPat)` (поведенческий
+  // тест — v49-ui-r1-card), ссылка на /settings — у текущего шага.
+  test("П3.3 → В1: без PAT на /me есть шаги с переходом на /settings (не тост и не title)", () => {
     const s = section();
+    const steps = between(me(), "function OwnerSteps", "\nexport function MePage");
     expect({
-      branch: /hasPat\s*===\s*false|!hasPat/.test(s),
-      link: /!hasPat[\s\S]{0,800}\/settings|hasPat\s*===\s*false[\s\S]{0,800}\/settings/.test(s),
+      branch: s.includes("<OwnerSteps hasPat={hasPat} />") && /const steps = ownerSteps\(hasPat\);\s*if \(!steps\) return null;/.test(steps),
+      link: /step\.state === "current"[\s\S]{0,300}linkProps\("\/settings"\)/.test(steps),
     }).toEqual({ branch: true, link: true });
   });
 

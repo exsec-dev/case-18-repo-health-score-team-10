@@ -436,19 +436,8 @@ export function contributionsNote(c: Contributions): string | null {
   return null;
 }
 
-/** «Сильнее всего итог снижают X (−N,N) и Y (−N,N).» — части строки (имя выделяется полужирным). */
-export function lossParts(c: Contributions): { text: string; strong?: boolean }[] | null {
-  if (c.kind !== "bar" || c.losses.length === 0) return null;
-  const [a, b] = c.losses;
-  if (!b) return [{ text: "Сильнее всего итог снижает " }, { text: a!.title, strong: true }, { text: ` (${fmtLoss(a!.loss)}).` }];
-  return [
-    { text: "Сильнее всего итог снижают " },
-    { text: a!.title, strong: true },
-    { text: ` (${fmtLoss(a!.loss)}) и ` },
-    { text: b.title, strong: true },
-    { text: ` (${fmtLoss(b.loss)}).` },
-  ];
-}
+// В4.9 ч.2 (А3, Г2.8): строки «Сильнее всего итог снижают…» нет ни в отчете,
+// ни на карточке — `lossParts` удален вместе с последним вызовом.
 
 /** Показанный вклад: «+21,0». */
 export function fmtContribution(tenths: number): string {

@@ -5,10 +5,17 @@
 // приходят без чисел и показываются заглушкой по причине доступа.
 // Главное правило экрана — трекер-закон в UI: ни одной фразы без факта
 // либо без честного объяснения, почему факта нет.
-// Раскладка как у страницы репозитория SourceCraft: действия в ActionBar,
-// содержимое во вкладках, итоговая оценка — в правой панели.
+//
+// В4.9, часть 2 гейта, круг 1 (U1-A): табов нет — страница читается одной
+// лентой по линии PDF: шапка → предупреждения → показатели и вклад категорий →
+// «Категории» с основанием → «Рекомендации» → «Ограничения данных» →
+// карточки «готовится». Все утверждения о данных собирает view-модель
+// `cardView.ts` из тех же функций, что отчет (инвариант 1). Правая панель —
+// паспорт анализа и короткая справка (U4-A); ниже 1440 она выезжает по кнопке
+// «Как считается» (U5-a).
 import {
   ArrowDownToLine,
+  ArrowsRotateRight,
   ArrowUpRightFromSquare,
   Bug,
   Calendar,
@@ -63,74 +70,49 @@ import {
   Popover,
   Progress,
   Spin,
-  Tab,
-  TabList,
-  TabPanel,
-  TabProvider,
   Text,
   useToaster,
 } from "@gravity-ui/uikit";
 import { useEffect, useState } from "react";
-import type { CardCategory } from "../api/repos";
+import { COVERAGE_NULL_BELOW } from "../score/model";
 import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle } from "../report/submetrics";
 import type { MetaResponse, RepoCard } from "./api";
 import { dataOf, mutateJson, useJson, useVisible } from "./api";
+import { cardView, factSource, type CardView, type CategoryView, type RecommendationView } from "./cardView";
 import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
 import {
-  ACCESS_LOCK_SHORT,
-  CATEGORY_TITLES_RU,
   NO_DATA,
-  NO_DATA_SHORT,
-  NOT_COUNTED,
   NO_SCORE,
   reportFailureText,
   favoriteAddedText,
   type FavoriteAddCheck,
+  type PathPart,
   SECURITY_PUBLIC_NOTE,
-  lockReasonShort,
-  SIGN_IN_LOCK_SHORT,
   fmtCount,
   fmtCoverage,
   fmtDate,
   fmtDateTime,
-  fmtSigned,
   fmtFactValue,
   fmtNumber,
   fmtScore,
   fmtSubmetric,
-  gitLimitsText,
-  CONTRIBUTIONS_REST,
-  CONTRIBUTIONS_TITLE,
-  SCORE_SCALE,
-  categoryContributions,
-  contributionsNote,
-  fmtContribution,
-  lockedCategoryText,
-  lossParts,
-  humanNoData,
-  noDataReason,
   noScoreText,
-  NOT_IN_SCORE,
-  securityNoDataReason,
   scanStatusText,
   scanTriggerText,
   DEFINITION_NAME_WIDTH,
-  scoreColor,
   scoreLabelTheme,
   scoreTheme,
   scoreWord,
   sentence,
   slugOf,
 } from "./format";
-import { linkProps, navigate, useQueryParam } from "./router";
-import { Page, type Crumb } from "./Shell";
+import { linkProps } from "./router";
+import { LoginButton, Page, type Crumb } from "./Shell";
 import { SLOT_EMPTY } from "./slots";
-import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows } from "./ui";
+import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
 
 type Card = RepoCard;
-type Category = CardCategory;
 type Evidence = Card["evidence"][number];
-type Recommendation = Card["recommendations"][number];
 
 export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta: MetaResponse | null }) {
   const slug = `${org}/${repo}`;
@@ -157,6 +139,8 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   });
 
   const data = dataOf(state);
+  // А1: прокрутка к «Рекомендациям» по якорю и старому `?tab=` — после загрузки
+  useRecommendationsAnchor(data !== null && data.score !== null, slug);
   // В4.8.5 (К8.5.14 (а), (в); §2-В1, §2-Р2): анализ — только своего
   // репозитория. «Свой» карточка считает сама по доступу, который она и так
   // резолвит при показе (`viewer.own`), — кнопка есть на любом своём
@@ -204,7 +188,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
     return (
       // В4.6 (У27): ритм скелетона = ритм содержимого — блок-полоса величины
       // (~150px) и шесть строк категорий по 45px, панель начинается с легенды
-      <Page crumbs={crumbs} aside={<SkeletonRows rows={3} height={96} />}>
+      <Page crumbs={crumbs} aside={<SkeletonRows rows={3} height={96} />} asideDrawer>
         <Flex direction="column" gap={3}>
           <SkeletonRows rows={1} height={150} />
           <SkeletonRows rows={6} height={45} />
@@ -231,6 +215,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   }
 
   const card = data;
+  const view = cardView(card);
   const reportHref = `${cardUrl}/report.md`;
   const refreshError = state.kind === "ok" ? state.refreshError : undefined;
   const actions = (
@@ -241,7 +226,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   );
 
   return (
-    <Page crumbs={crumbs} actions={actions} aside={<ScoreAside card={card} meta={meta} analysis={own} foreignRunning={foreignRunning} />}>
+    <Page crumbs={crumbs} actions={actions} aside={<ScoreAside card={card} meta={meta} analysis={own} foreignRunning={foreignRunning} />} asideDrawer>
       {/* К8.5.3: перечитывание не удалось — данные остаются, пометка видна */}
       {refreshError && (
         <div style={{ marginBottom: "var(--g-spacing-3)" }}>
@@ -254,8 +239,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
           />
         </div>
       )}
-      <Header card={card} starDoneKey={doneKey} starLoggedIn={meData === null ? null : loggedIn} />
-      {card.score !== null && <ScoreBand card={card} />}
+      <Header card={card} view={view} starDoneKey={doneKey} starLoggedIn={meData === null ? null : loggedIn} />
       {card.score === null ? (
         own !== null || foreignRunning ? (
           // Ф2.15 + К8.5.1 (С6-3): идёт анализ — свой или чужой/периодический;
@@ -266,7 +250,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
             description={
               (own?.phase === "queued"
                 ? "Заявка стоит в очереди – ее возьмут в работу, и здесь появится итог."
-                : "Скан собирает факты из репозитория; оценка появится после завершения.") +
+                : "Идет анализ: данные собираются.") +
               // UX-10 (круг 2 В4.4): заметка, когда задание зависло (признак сервера)
               (jobStalled ? " Анализ затянулся – его итог появится в «Заданиях»." : "")
             }
@@ -294,9 +278,15 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
           />
         )
       ) : (
-        <Flex direction="column" gap={4}>
-          <Markers card={card} />
-          <CardTabs card={card} meta={meta} />
+        // А1 (U1-A): одна лента по линии PDF, табов нет
+        <Flex direction="column" gap={6}>
+          <Flex direction="column" gap={3}>
+            <Markers view={view} />
+            <ScoreBand card={card} view={view} />
+          </Flex>
+          <Categories card={card} view={view} />
+          <Recommendations view={view} />
+          <Limitations items={view.limitations} />
           <CardSlots />
         </Flex>
       )}
@@ -426,36 +416,40 @@ function useStartAnalysis(org: string, repo: string): { sending: boolean; start:
   return { sending, start };
 }
 
-function Header({ card, starDoneKey, starLoggedIn }: { card: Card; starDoneKey: string | null; starLoggedIn: boolean | null }) {
+function Header({ card, view, starDoneKey, starLoggedIn }: { card: Card; view: CardView; starDoneKey: string | null; starLoggedIn: boolean | null }) {
   const { repo: r } = card;
   return (
-    <div style={{ marginBottom: "var(--g-spacing-4)" }}>
+    <div className="rh-card-head">
       {/* аватар l (42px) ровно на высоту блока «название 24 + мета 16» */}
       <div className="rh-repo-head">
         <RepoAvatar repo={r.repo} logoUrl={r.logoUrl} size="l" />
         <Flex direction="column" justifyContent="space-between" style={{ minWidth: 0 }}>
-          <Flex gap={1} alignItems="center" style={{ minWidth: 0 }}>
+          <Flex gap={2} alignItems="center" style={{ minWidth: 0 }}>
             {/* В4.6 (У27): тот же компонент слага, что в строке рейтинга */}
             <RepoSlug org={r.org} repo={r.repo} variant="header-1" />
-            <FavoriteStar org={r.org} repo={r.repo} doneKey={starDoneKey} loggedIn={starLoggedIn} />
-            <ActionTooltip title="Открыть на sourcecraft.dev">
-              <Button
-                view="flat-secondary"
-                size="s"
-                href={r.webUrl}
-                target="_blank"
-                rel="noreferrer"
-                aria-label="Открыть репозиторий на sourcecraft.dev"
-              >
-                <Icon data={ArrowUpRightFromSquare} size={14} />
-              </Button>
-            </ActionTooltip>
+            {/* В4.9 ч.2 (А7, U6-1 с поправкой владельца): видимость SourceCraft —
+                той же плашкой, что в избранном; «неизвестно» плашки не дает */}
+            <VisibilityPill value={view.visibility} />
+            <Flex gap={1} alignItems="center">
+              <FavoriteStar org={r.org} repo={r.repo} doneKey={starDoneKey} loggedIn={starLoggedIn} />
+              <ActionTooltip title="Открыть на sourcecraft.dev">
+                <Button
+                  view="flat-secondary"
+                  size="s"
+                  href={r.webUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label="Открыть репозиторий на sourcecraft.dev"
+                >
+                  <Icon data={ArrowUpRightFromSquare} size={14} />
+                </Button>
+              </ActionTooltip>
+            </Flex>
           </Flex>
-          {/* Реквизиты остаются в шапке (решение владельца 21.09 — перенос в
-              панель отменён). Изменения к прежнему виду два: у языка иконки
-              НЕТ (цветная точка сама его и обозначает), а дата снова названа
-              словом «обновлен» — иконка часов без слова читалась как время
-              скана, а не как активность репозитория. */}
+          {/* В4.9 ч.2 (А7; §2 23.09 ответ 4 — прочтение HQ): «обновлен» →
+              «активность» рядом с «анализ». Две даты различены словом: одна —
+              активность репозитория по каталогу, другая — момент анализа, та же,
+              что в шапке отчета (`analysisDate`). */}
           <Meta>
             <MetaItem title="Язык">
               <LanguageName name={r.language} color={r.languageColor} />
@@ -466,9 +460,14 @@ function Header({ card, starDoneKey, starLoggedIn }: { card: Card; starDoneKey: 
             <MetaItem icon={CodeFork} title="Ответвления">
               {fmtNumber(r.forks)}
             </MetaItem>
-            <MetaItem icon={Clock} title="Последняя активность">
-              обновлен {fmtDate(r.lastActivityAt)}
+            <MetaItem icon={Clock} title="Последняя активность в репозитории">
+              активность {fmtDate(r.lastActivityAt)}
             </MetaItem>
+            {view.analysisAt && (
+              <MetaItem icon={ArrowsRotateRight} title="Момент анализа – та же дата, что в шапке отчета">
+                анализ {fmtDateTime(view.analysisAt)}
+              </MetaItem>
+            )}
           </Meta>
         </Flex>
       </div>
@@ -482,45 +481,28 @@ function Header({ card, starDoneKey, starLoggedIn }: { card: Card; starDoneKey: 
 }
 
 /**
- * В4.6 (У26, ДП7): значение таба живёт в query (`?tab=recommendations`), а не
- * в локальном состоянии. Раньше ссылку на рекомендации дать было нельзя,
- * «назад» из них не работал и привести зрителя прямо к следующему шагу (из
- * кабинета, из письма, из питча) было невозможно — именно это делало
- * следующий шаг спрятанным. `replace: true` у сброса на «Категории»: дефолт
- * не должен засорять историю браузера.
+ * В4.9 ч.2 (А1): табов нет — «Рекомендации» стоят разделом ленты с якорем
+ * `#recommendations`. Роутер работает только с `pushState` и якорь сам не
+ * прокручивает, а карточка грузится асинхронно, поэтому прокрутка — эффектом
+ * после загрузки: по `#recommendations` и по старой ссылке `?tab=recommendations`
+ * (письма, закладки, прежние ссылки кабинета продолжают вести к разделу).
  */
-export const TAB_RECOMMENDATIONS = "recommendations";
+export const RECOMMENDATIONS_ID = "recommendations";
 
-function CardTabs({ card, meta }: { card: Card; meta: MetaResponse | null }) {
-  const tab = useQueryParam("tab") === TAB_RECOMMENDATIONS ? TAB_RECOMMENDATIONS : "categories";
-  const setTab = (next: string): void => {
-    const url = next === TAB_RECOMMENDATIONS ? `${window.location.pathname}?tab=${TAB_RECOMMENDATIONS}` : window.location.pathname;
-    navigate(url, { replace: next !== TAB_RECOMMENDATIONS });
-  };
-  return (
-    // В4.6 круг 2 (Р16, замечание владельца 16): табы и коллапс-блоки обёрнуты
-    // в контейнер с границами — тот же `Card view="outlined"`, что у блока
-    // величины сверху. До этого верх карточки имел рамку, а список категорий
-    // висел в воздухе: два одинаковых по весу блока читались по-разному.
-    <Card view="outlined" className="rh-tabs-card">
-      <TabProvider value={tab} onUpdate={setTab}>
-        <TabList size="m">
-          <Tab value="categories">Категории</Tab>
-          <Tab value="recommendations" counter={card.recommendations.length}>
-            Рекомендации
-          </Tab>
-        </TabList>
-        <div style={{ paddingTop: "var(--g-spacing-3)" }}>
-          <TabPanel value="categories">
-            <Categories card={card} meta={meta} />
-          </TabPanel>
-          <TabPanel value="recommendations">
-            <Recommendations card={card} />
-          </TabPanel>
-        </div>
-      </TabProvider>
-    </Card>
-  );
+/** Ссылка на раздел «Рекомендации» карточки — кабинет ведет сюда. */
+export function recommendationsHref(cardHref: string): string {
+  return `${cardHref}#${RECOMMENDATIONS_ID}`;
+}
+
+function useRecommendationsAnchor(ready: boolean, key: string): void {
+  useEffect(() => {
+    if (!ready) return;
+    const wants = window.location.hash === `#${RECOMMENDATIONS_ID}` || new URLSearchParams(window.location.search).get("tab") === RECOMMENDATIONS_ID;
+    if (!wants) return;
+    // кадр на отрисовку раздела — затем прокрутка к нему
+    const frame = requestAnimationFrame(() => document.getElementById(RECOMMENDATIONS_ID)?.scrollIntoView({ block: "start" }));
+    return () => cancelAnimationFrame(frame);
+  }, [ready, key]);
 }
 
 /**
@@ -579,24 +561,17 @@ const FULL_HELP =
   "Рассчитывается по 6 категориям: 4 категориям HealthCraft Index, а также CI/CD и Безопасность. " +
   "Показатель доступен только для репозиториев, к которым у вас есть доступ";
 
-/** Короткая причина закрытия полного итога: первый закрытый канал (CI, затем Security). */
-function fullLockShortReason(card: Card): string {
-  // В4.8.5 (К8.5.8): зрителю без сессии причина — вход, а не «токен не добавлен»;
-  // круг 2 (П3): то же правило, что у строки закрытых категорий (`lockReasonShort`)
-  return (
-    lockReasonShort([card.access.cicd, card.access.appsec], card.viewer?.auth) ??
-    (card.viewer?.auth === "no-session" ? SIGN_IN_LOCK_SHORT : ACCESS_LOCK_SHORT["check-failed"])
-  );
+/** «Данные собраны» паспорта анализа (А8): ok — «полностью», partial — «частично», прочее — словом статуса. */
+function collectedText(status: string): string {
+  return status === "ok" ? "полностью" : status === "partial" ? "частично" : scanStatusText(status);
 }
 
 /**
- * В4.6 (вариант А компоновки, решение владельца 20.09): правая панель стала
- * ЧИСТО МЕТОДИЧЕСКОЙ. Величина уехала в главную колонку (`ScoreBand`), потому
- * что здесь она стояла на x = 80% ширины окна, последней в DOM и последней для
- * глаза при чтении слева направо. Осталось только «как читать оценку», «что
- * считаем», «каких данных не хватило» и реквизиты расчёта — панель впервые
- * получила однородное содержание (охранный пункт 10 не просто соблюдён, а
- * усилен: панель никуда не исчезает и в модальные окна не переезжает).
+ * В4.9 ч.2 (А8, U4-A): правая панель — паспорт анализа и короткая справка.
+ * «Анализ» — место, покрытие, полнота сбора, запуск; «Шкала оценки» —
+ * плашки без абзаца; «Что учитывается» — 2 строки; «Реквизиты» свернуты.
+ * Вклад, «Сильнее всего…» и «Каких данных не хватило» ушли: вклад — под
+ * числами, недостающие данные — основанием у строки категории.
  */
 function ScoreAside({
   card,
@@ -612,51 +587,17 @@ function ScoreAside({
   foreignRunning: boolean;
 }) {
   const { score, scan } = card;
-  const threshold = meta ? fmtCoverage(meta.coverageNullBelow) : "порога";
+  const threshold = fmtCoverage(meta?.coverageNullBelow ?? COVERAGE_NULL_BELOW);
+  const coverageHelp = `Доля веса категорий, по которым есть данные. Ниже ${threshold} оценка не ставится.`;
+  const full = score !== null && !score.fullLocked;
+  const [detailsOpen, setDetailsOpen] = useState(false);
   return (
     <>
-      {/* В4.6 (У22): тот же блок, что на рейтинге — вариант А кладёт шкалу в методику карточки */}
-      {score && <ScoreLegend coverageNullBelow={meta?.coverageNullBelow} />}
-
-      {/* В4.9 (К9.12): «Вклад категорий в оценку» — в методической панели, как
-          «Вклад категорий» на рейтинге: главная колонка на 1366 сохраняет
-          «величина и открытые категории в одном экране» (приемка варианта А) */}
-      {score && <ContributionBand card={card} meta={meta} />}
-
-      {score && (
-        <AsideSection title="Что учитывается">
-          {/* В4.6 (У24): семистрочный абзац был набран вариантом для
-              однострочных подписей. П1 дал body-2, П2.12 уменьшил его до
-              body-1 13/18; complementary сохраняет контраст прозы. */}
-          <Text as="p" variant="body-1" color="complementary">
-            HealthCraft Index рассчитывается по 4 категориям на основе публичных данных. Категории CI/CD и Безопасность учитываются
-            только в Repo Health Score, доступном участникам репозитория.
-            {meta ? ` При покрытии ниже ${threshold} соответствующий показатель не рассчитывается.` : ""}
-          </Text>
-        </AsideSection>
-      )}
-
-      {score && score.noData.length > 0 && (
-        <AsideSection title="Каких данных не хватило">
-          <Flex as="ul" direction="column" gap={2} style={{ margin: 0, paddingInlineStart: "var(--g-spacing-4)" }}>
-            {score.noData.map((raw) => (
-              <li key={raw}>
-                <Text color="complementary">{humanNoData(raw)}</Text>
-              </li>
-            ))}
-          </Flex>
-        </AsideSection>
-      )}
-
-      {/* В4.6 (вариант А): жаргон и идентификаторы (номер скана, версия модели)
-          собраны ОДНИМ блоком под честным заголовком и стоят последними —
-          первый взгляд просил убрать их с видного места, но не терять */}
-      <AsideSection title="Параметры расчета">
-        {/* К8.5.1 (С4-9): на карточке с оценкой идущий анализ тоже виден —
-            свой (по заданию) или чужой/периодический (по скану); без
-            обещания времени (§2-В5) */}
+      <AsideSection title="Анализ">
+        {/* К8.5.1 (С4-9): идущий анализ виден и на карточке с оценкой — свой
+            (по заданию) или чужой/периодический (по скану); без обещания времени */}
         {(analysis !== null || foreignRunning) && (
-          <Flex gap={2} alignItems="center" style={{ marginBottom: "var(--g-spacing-2)" }}>
+          <Flex gap={2} alignItems="center">
             {analysis?.stalled ? (
               <Label theme="warning" size="xs">
                 анализ затянулся – итог появится в «Заданиях»
@@ -669,209 +610,188 @@ function ScoreAside({
             )}
           </Flex>
         )}
-        {scan && scan.status !== "running" ? (
+        {scan || score ? (
           <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
-            <DefinitionList.Item name="Завершен">{fmtDateTime(scan.finishedAt ?? scan.startedAt)}</DefinitionList.Item>
-            <DefinitionList.Item name="Статус">
-              <Label theme={scan.status === "ok" ? "success" : scan.status === "bad" ? "danger" : "warning"} size="xs">
-                {sentence(scanStatusText(scan.status))}
-              </Label>
-            </DefinitionList.Item>
-            <DefinitionList.Item name="Запуск">{scanTriggerText(scan.trigger)}</DefinitionList.Item>
-            <DefinitionList.Item name="Номер">#{scan.id}</DefinitionList.Item>
-            {/* В4.6 круг 2 (Р17, замечание владельца 17): версия модели —
-                с фоном-выделением, как тот же реквизит в панели рейтинга
-                (`Rating.tsx`, Label theme="normal" size="xs"): это код, а не
-                проза, и читается он как код только в плашке. */}
             {score && (
-              <DefinitionList.Item name="Модель">
-                <Label theme="normal" size="xs">
-                  {score.modelVersion}
-                </Label>
+              <DefinitionList.Item name="Место в рейтинге">
+                {score.rank !== null && score.rankedTotal ? `#${fmtCount(score.rank)} из ${fmtCount(score.rankedTotal)}` : "—"}
               </DefinitionList.Item>
             )}
+            {score && (
+              <DefinitionList.Item name={full ? "Покрытие HealthCraft Index" : "Покрытие"} note={coverageHelp}>
+                {fmtCoverage(score.indexCoverage)}
+              </DefinitionList.Item>
+            )}
+            {score && full && (
+              <DefinitionList.Item name="Покрытие Repo Health Score" note={coverageHelp}>
+                {fmtCoverage(score.repoHealthCoverage ?? 0)}
+              </DefinitionList.Item>
+            )}
+            {scan && scan.status !== "running" && <DefinitionList.Item name="Данные собраны">{collectedText(scan.status)}</DefinitionList.Item>}
+            {scan && scan.status !== "running" && <DefinitionList.Item name="Запуск">{scanTriggerText(scan.trigger)}</DefinitionList.Item>}
           </DefinitionList>
         ) : analysis !== null || foreignRunning ? null : (
-          <Text color="secondary">Скана еще не было</Text>
+          <Text color="secondary">Анализа еще не было</Text>
         )}
       </AsideSection>
+
+      {/* В4.6 (У22): та же легенда, что на рейтинге; абзац под ней на карточке снят (А8) */}
+      {score && <ScoreLegend withNote={false} />}
+
+      {score && (
+        <AsideSection title="Что учитывается">
+          <Flex direction="column" gap={1}>
+            <Text variant="body-1" color="complementary">
+              HealthCraft Index – 4 открытые категории, Repo Health Score – все 6.
+            </Text>
+            <Text variant="body-1" color="complementary">
+              Отсутствующие данные не учитываются как нулевые.
+            </Text>
+          </Flex>
+        </AsideSection>
+      )}
+
+      {scan && (
+        <section className="rh-aside-section rh-aside-details">
+          <button type="button" className="rh-aside-details__toggle" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(!detailsOpen)}>
+            <ArrowToggle direction={detailsOpen ? "bottom" : "right"} size={14} />
+            <Text variant="subheader-2" as="h2">
+              Реквизиты
+            </Text>
+          </button>
+          {detailsOpen && (
+            <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
+              <DefinitionList.Item name="Анализ">№ {scan.id}</DefinitionList.Item>
+              {score && (
+                <DefinitionList.Item name="Версия методики">
+                  <Label theme="normal" size="xs">
+                    {score.modelVersion}
+                  </Label>
+                </DefinitionList.Item>
+              )}
+            </DefinitionList>
+          )}
+        </section>
+      )}
+    </>
+  );
+}
+
+/** Строка пути к полной оценке: слово «Настройках» — ссылка SPA на /settings (в отчете — текст). */
+function PathLine({ parts }: { parts: PathPart[] }) {
+  return (
+    <>
+      {parts.map((p, i) =>
+        p.settings ? (
+          <Link key={i} {...linkProps("/settings")}>
+            {p.text}
+          </Link>
+        ) : (
+          <span key={i}>{p.text}</span>
+        ),
+      )}
     </>
   );
 }
 
 /**
- * ВЕЛИЧИНА — блок-полоса первым экраном главной колонки (В4.6, вариант А
- * компоновки; замечание владельца 13 и корни ДП2/ДП4/ДП7 дизайн-пары).
- *
- * Что именно это лечит, числами замера 20.09: раньше «83» стояло на x = 1136
- * из 1418 (80% ширины окна вправо), `Page` рендерил `main` и только потом
- * `aside` — то есть главная величина была последней и для глаза, и для
- * скринридера, а первое, что попадало в главную колонку, — номинальные веса.
- * Контент колонки заканчивался на 59% её высоты, остальное был фон.
- *
- * Три яруса блока: величины, покрытие строкой, итог с действием.
- * Полоса покрытия СНЯТА (находка Z5 пары): рядом с 83 стояла полная полоса,
- * измеряющая не его, а покрытие данными — она конкурировала с самим
- * показателем. Покрытие осталось строкой текста, полоса отдана величине.
+ * ВЕЛИЧИНА — блок первым экраном главной колонки: два показателя рядом (В4.6,
+ * вариант А), под ними — вклад категорий во всю ширину блока (В4.9 ч.2, А3,
+ * стиль Ш2). Пояснения к показателям — только в подсказках у названий;
+ * покрытие — в паспорте анализа справа (А8).
  */
-function ScoreBand({ card }: { card: Card }) {
+function ScoreBand({ card, view }: { card: Card; view: CardView }) {
   const score = card.score!;
   return (
     <Card view="outlined" className="rh-score-band">
-      <Flex direction="column" gap={3}>
+      <Flex direction="column" gap={4}>
         <Flex gap={6} wrap>
-          <ScoreFigure
-            title="HealthCraft Index"
-            help={INDEX_HELP}
-            total={score.healthcraftIndex}
-            coverage={score.indexCoverage}
-            rank={score.rank}
-            rankedTotal={score.rankedTotal}
-            withBar
-          />
-          {score.fullLocked ? (
+          <ScoreFigure title="HealthCraft Index" help={INDEX_HELP} total={score.healthcraftIndex} rank={score.rank} rankedTotal={score.rankedTotal} />
+          {view.fullPath ? (
             <Flex direction="column" gap={1} style={{ flex: "1 1 240px", minWidth: 0 }}>
               <Flex gap={1} alignItems="center">
                 <Text color="secondary">Repo Health Score</Text>
-                {/* В4.6 круг 2 (Р13): в ЗАКРЫТОЙ ветке подсказки не было вовсе —
-                    а именно здесь зритель и спрашивает, чем полный показатель
-                    отличается от публичного. Теперь подсказка есть у обоих. */}
                 <HelpMark iconSize="s" aria-label="Что такое «Repo Health Score»">
                   {FULL_HELP}
                 </HelpMark>
               </Flex>
-              {/* Закрытый показатель НЕ схлопывается в метку — это приём самой
-                  платформы: у репозитория без рейтинга карточка `scoring-card`
-                  держит свой габарит и наполняется приглашением («Rate this
-                  repository» 15/20 500 + объяснение 13/18 приглушённым + сами
-                  реакции нулями), а не исчезает. Здесь то же: заголовок говорит,
-                  кому показатель виден, строка под ним — ПОЧЕМУ он закрыт именно
-                  у этого зрителя, ссылка — что с этим сделать.
-                  Причина берётся короткой формой (`ACCESS_LOCK_SHORT`): полная
-                  несёт ещё и призыв, который здесь уже сказан ссылкой.
-                  Пара по высоте сходится с левым показателем без распорок:
-                  три строки против «число + полоса + покрытие». */}
+              {/* Закрытый показатель не схлопывается в метку (прием платформы):
+                  заголовок — кому он виден, строка — путь к нему по типу зрителя,
+                  одной копией с отчетом (`fullScorePath`, §2 23.09 ответ 1) */}
               <Text variant="subheader-2">Виден участникам репозитория</Text>
               <Text variant="body-1" color="complementary">
-                {fullLockShortReason(card)}
+                <PathLine parts={view.fullPath} />
               </Text>
-              {/* В4.8.5 (К8.5.8, С6-4): ссылка — по причине: нет сессии — вход,
-                  нет токена — Настройки, токен есть, но прав нет — без ссылки */}
-              {card.viewer?.auth === "pat" ? null : card.viewer?.auth === "no-session" ? (
-                <Text variant="body-1">
-                  <Link href="/auth/ya">Войти через Я ID</Link>
-                </Text>
-              ) : (
-                <Text variant="body-1">
-                  <Link {...linkProps("/settings")}>Добавить персональный токен доступа</Link>
-                </Text>
+              {view.signIn && (
+                <div className="rh-score-band__signin">
+                  <LoginButton compact={false} inline />
+                </div>
               )}
             </Flex>
           ) : (
-            <ScoreFigure
-              title="Repo Health Score"
-              help={FULL_HELP}
-              total={score.repoHealthScore}
-              coverage={score.repoHealthCoverage ?? 0}
-              withBar
-            />
+            <ScoreFigure title="Repo Health Score" help={FULL_HELP} total={score.repoHealthScore} />
           )}
         </Flex>
+        {view.contributions.map((bar) => (
+          <ContributionStrip key={bar.title} bar={bar} />
+        ))}
       </Flex>
     </Card>
   );
 }
 
 /**
- * В4.9 (К9.12): полоса «Вклад категорий в оценку» — тот же расчет, что в
- * отчете (`categoryContributions`, одна функция; веса — аргументом: индекса —
- * из `/api/meta`, полного показателя — из карточки). Показатель — тот, что
- * отчет печатает крупно: полный Repo Health Score зрителю с обоими каналами,
- * иначе HealthCraft Index. Сегменты — одним темно-серым тоном (как в отчете,
- * круг 4 эталона), под ними — шкала 3 зон; у каждого визуального элемента
- * подпись словами.
+ * В4.9 ч.2 (А3, Ш2): «Вклад категорий в <показатель>» — тонкий стек 8 px с
+ * зазором 2 px и легенда точками в строку с переносом, как «Top languages»
+ * SourceCraft и панель «Вклад категорий» рейтинга. Одна категория — один
+ * цвет на обоих экранах (`categoryColorClass`); «не набрано» — последним,
+ * нейтральным. Засечек и ленты зон нет. Расчет — `categoryContributions`
+ * через `contributionBar`, общий с отчетом.
  */
-function ContributionBand({ card, meta }: { card: Card; meta: MetaResponse | null }) {
-  const score = card.score!;
-  const full = !score.fullLocked && score.repoHealthScore !== null;
-  const titleOf = (key: string): string => meta?.categories.find((c) => c.key === key)?.title ?? CATEGORY_TITLES_RU[key] ?? key;
-  const inputs = full
-    ? Object.entries(score.categories).map(([key, cat]) => ({ key, title: titleOf(key), score: cat.locked !== undefined ? null : cat.score, weight: cat.weight }))
-    : (meta?.categories ?? [])
-        .filter((c) => c.indexWeight !== null)
-        .map((c) => ({ key: c.key, title: titleOf(c.key), score: score.categories[c.key]?.score ?? null, weight: c.indexWeight! }));
-  if (inputs.length === 0) return null;
-  const c = categoryContributions(inputs, full ? score.repoHealthScore : score.healthcraftIndex, { codeEmpty: card.markers.codeEmpty });
-  if (c === null) return null;
-  const note = contributionsNote(c);
-  const loss = lossParts(c);
-  const zones = [...SCORE_SCALE].reverse();
-  // узкая панель: полоса во всю ширину, под ней — шкала зон и подписи
-  // строками «категория … +21,0» (прием «Вклада категорий» рейтинга), тот же текст, что в отчете
+function ContributionStrip({ bar }: { bar: CardView["contributions"][number] }) {
   return (
-    <AsideSection title={CONTRIBUTIONS_TITLE}>
-      <div className="rh-contrib-band" role="group" aria-label={CONTRIBUTIONS_TITLE}>
-        {note !== null || c.kind !== "bar" ? (
-          <Text as="p" color="complementary" className="rh-contrib-band__note">
-            {note}
-          </Text>
-        ) : (
-          <div className="rh-contrib-band__strip" aria-hidden="true">
-            {c.segments.map((s) => (
-              <span key={s.key} className="rh-contrib-band__seg" style={{ width: `${s.tenths / 10}%` }} />
+    <div className="rh-contrib rh-contrib_card" role="group" aria-label={bar.title}>
+      <Text variant="subheader-1" as="h2" className="rh-contrib__title">
+        {bar.title}
+      </Text>
+      {bar.note !== null ? (
+        <Text as="p" color="complementary" className="rh-contrib__note">
+          {bar.note}
+        </Text>
+      ) : (
+        <>
+          <div className="rh-contrib__bar" aria-hidden="true">
+            {bar.segments.map((s) => (
+              <i key={s.key} className={`rh-contrib__seg ${s.colorClass}`} style={{ flexGrow: s.share * 1000 }} />
             ))}
+            {bar.rest && bar.rest.share > 0 && <i className="rh-contrib__seg rh-cat-color_rest" style={{ flexGrow: bar.rest.share * 1000 }} />}
           </div>
-        )}
-        <div className="rh-contrib-band__zones" aria-hidden="true">
-          {zones.map((z) => (
-            <span key={z.theme} className={`rh-contrib-band__zone rh-contrib-band__zone_${z.theme}`} />
-          ))}
-        </div>
-        {/* подписи зон — легенда «Шкала оценки» над этим блоком той же панели:
-            в узкой колонке второй экземпляр переносился по слогам */}
-        {c.kind === "bar" && (
-          <div className="rh-contrib-band__rows">
-            {c.segments.map((s) => (
-              <div key={s.key} className="rh-contrib__row">
-                <Text color="complementary">{s.title}</Text>
-                <Text className="rh-contrib__share">{fmtContribution(s.tenths)}</Text>
-              </div>
+          <ul className="rh-contrib__legend">
+            {bar.segments.map((s) => (
+              <li key={s.key} className="rh-contrib__item">
+                <i className={`rh-contrib__dot ${s.colorClass}`} aria-hidden="true" />
+                <Text variant="body-1">{s.title}</Text>
+                <Text variant="body-1" color="secondary" className="rh-contrib__share">
+                  – {s.value}
+                </Text>
+              </li>
             ))}
-            <div className="rh-contrib__row">
-              <Text color="secondary">{CONTRIBUTIONS_REST}</Text>
-              <Text color="secondary" className="rh-contrib__share">
-                {c.missing}
-              </Text>
-            </div>
-          </div>
-        )}
-        {loss && (
-          <Text as="p" color="complementary" className="rh-contrib-band__note">
-            {loss.map((p, i) => (p.strong ? <b key={i}>{p.text}</b> : <span key={i}>{p.text}</span>))}
-          </Text>
-        )}
-      </div>
-    </AsideSection>
+            {bar.rest && (
+              <li className="rh-contrib__item">
+                <i className="rh-contrib__dot rh-cat-color_rest" aria-hidden="true" />
+                <Text variant="body-1" color="secondary">
+                  {bar.rest.title} – {bar.rest.value}
+                </Text>
+              </li>
+            )}
+          </ul>
+        </>
+      )}
+    </div>
   );
 }
 
-function ScoreFigure({
-  title,
-  help,
-  total,
-  coverage,
-  rank,
-  rankedTotal,
-  withBar = false,
-}: {
-  title: string;
-  help: string;
-  total: number | null;
-  coverage: number;
-  rank?: number | null;
-  rankedTotal?: number | null;
-  withBar?: boolean;
-}) {
+function ScoreFigure({ title, help, total, rank, rankedTotal }: { title: string; help: string; total: number | null; rank?: number | null; rankedTotal?: number | null }) {
   return (
     <Flex direction="column" gap={1} style={{ flex: "1 1 240px", minWidth: 0 }}>
       <Flex gap={1} alignItems="center">
@@ -881,26 +801,19 @@ function ScoreFigure({
         </HelpMark>
       </Flex>
       {total === null ? (
-        <Label theme="unknown" size="s">
-          {NO_SCORE}
-        </Label>
+        <span className="rh-chip-fit">
+          <Label theme="unknown" size="s">
+            {NO_SCORE}
+          </Label>
+        </span>
       ) : (
         <Flex gap={2} alignItems="baseline" wrap className="rh-score-figure__value">
           <Text variant="display-2">{fmtScore(total)}</Text>
           <Text color="secondary">из 100</Text>
-          {/* В4.6 (У22): шкала вплотную к числу — иначе «83» не с чем сравнить.
-              Круг 2 (Р12): размер чипа приведён к чипам правой панели
-              (`size="s"`, легенда `ScoreLegend`) — у плашки «Здоров» были
-              паддинги на шаг крупнее, и рядом с легендой это читалось как две
-              разные сущности. Тема чипа не менялась. */}
           <Label theme={scoreLabelTheme(total)} size="s">
             {sentence(scoreWord(total))}
           </Label>
-          {/* Доводка 21.09: место в рейтинге — не плашка, а серый текст на
-              полступени жирнее соседей: оценку несёт цветной чип, позиция
-              рядом с ним справка. Прижат к правому краю ПОЛОСЫ (та же мера
-              360px), поэтому строка значения и полоса под ней заканчиваются
-              на одной вертикали. */}
+          {/* место в рейтинге — серый текст справа, прижат к правому краю полосы */}
           {rank !== null && rank !== undefined && rankedTotal ? (
             <Text color="secondary" className="rh-score-figure__rank" title="Место в публичном рейтинге по HealthCraft Index">
               #{fmtCount(rank)} из {fmtCount(rankedTotal)}
@@ -908,198 +821,95 @@ function ScoreFigure({
           ) : null}
         </Flex>
       )}
-      {/* В4.6 (У21): полоса измеряет САМ показатель, а не покрытие; мера 360px
-          из варианта А — иначе на 1920 она превращается в декоративную линию */}
-      {withBar && total !== null && (
+      {/* В4.6 (У21): полоса измеряет САМ показатель; мера 360px */}
+      {total !== null && (
         <div style={{ maxWidth: 360 }}>
           <Progress value={Math.round(total)} size="s" theme={scoreTheme(total)} />
         </div>
       )}
-      {/* покрытие — строкой, без своей полосы (находка Z5 дизайн-пары).
-          Круг 2 (Р12): «данных хватило: N%» → «Покрытие: N%» — прежняя фраза
-          звучала как вердикт («хватило»), хотя это измеренная доля. */}
-      <Text variant="body-short" color="secondary" style={{ marginBlockStart: 2 }}>
-        Покрытие: {fmtCoverage(coverage)}
-      </Text>
     </Flex>
   );
 }
 
 // ---------- категории ----------
 
-function Categories({ card, meta }: { card: Card; meta: MetaResponse | null }) {
-  const score = card.score!;
-  const entries = Object.entries(score.categories) as [string, Category][];
-  // фактический вклад после перенормировки: вес категории делится на сумму
-  // весов тех категорий, у которых данные есть (§4 методики)
-  const dataWeight = entries.reduce((sum, [, cat]) => (cat.score === null ? sum : sum + cat.weight), 0);
-  const titleOf = (key: string): string => meta?.categories.find((c) => c.key === key)?.title ?? CATEGORY_TITLES_RU[key] ?? key;
-  /**
-   * В4.6 (вариант А): ХУДШАЯ категория раскрыта по умолчанию — низ экрана
-   * занимают доказательства, а не фон (корень ДП4: контент главной колонки
-   * заканчивался на 59% её высоты). Она же — то место, куда ведёт строка
-   * итога «слабее всего», поэтому раскрытие совпадает с прочитанным.
-   * Категории без данных в расчёт худшей не идут: «нет данных» не плохо.
-   */
-  const worstKey = entries
-    .filter(([, cat]) => cat.score !== null)
-    .sort((a, b) => (a[1].score ?? 0) - (b[1].score ?? 0))[0]?.[0];
-
-  /**
-   * В4.6 круг 2 (Р14, замечание владельца 14): закрытые зрителю категории
-   * больше НЕ занимают по строке каждая. Владелец прошла по живому интерфейсу:
-   * два блока с замком и без чисел давали половину списка визуального шума.
-   * Сведения при этом обязаны остаться (закон 2 и ТЗ §3.4 «сведения об
-   * отсутствии данных») — они собраны в ОДНУ строку под Code health, и строка
-   * называет ИМЕННО закрытые категории с их конкретной причиной.
-   */
-  const shown = entries.filter(([, cat]) => cat.locked === undefined);
-  const locked = entries
-    .filter(([, cat]) => cat.locked !== undefined)
-    // В4.9 (К9.13): фраза закрытой категории — та же, что в отчете: анониму
-    // «Видна участникам репозитория.», вошедшему — причина доступа
-    .map(([key, cat]) => ({ title: titleOf(key), reason: lockedCategoryText(cat.locked, card.viewer?.auth) }));
-
+/**
+ * В4.9 ч.2 (А4, U2-a): строка категории — раскрытие · название · полоса ·
+ * балл · плашка уровня, вторая строка под названием — основание (тот же
+ * текст, что колонка «Основание» PDF). Полосы серые — цвет несет только
+ * плашка; чипа «Вклад N%» нет. Закрытые зрителю CI/CD и Безопасность — не
+ * строками: плашка с голубой рамкой под списком (решение В4.6 круг 2 п.4 в
+ * силе, §2 23.09 «финальный вид подтвержден» п.2).
+ */
+function Categories({ card, view }: { card: Card; view: CardView }) {
   return (
-    <>
-      <ul className="rh-list" style={{ borderTop: 0 }}>
-        {shown.map(([key, cat]) => (
-          <CategoryRow
-            key={key}
-            categoryKey={key}
-            title={titleOf(key)}
-            cat={cat}
-            contribution={cat.score === null ? 0 : Math.round((cat.weight / Math.max(1, dataWeight)) * 100)}
-            card={card}
-            defaultOpen={key === worstKey}
-          />
-        ))}
-      </ul>
-      {locked.length > 0 && <LockedCategories items={locked} />}
-    </>
+    <section className="rh-section" aria-labelledby="rh-categories-title">
+      <Text variant="subheader-3" as="h2" id="rh-categories-title" className="rh-section__title">
+        Категории
+      </Text>
+      <Card view="outlined" className="rh-section-card">
+        <ul className="rh-list" style={{ borderTop: 0 }}>
+          {view.categories.map((c) => (
+            <CategoryRow key={c.key} category={c} card={card} defaultOpen={c.key === view.worstKey} />
+          ))}
+        </ul>
+        {view.locked && <LockedCategories title={view.locked.title} sentences={view.locked.sentences} />}
+      </Card>
+    </section>
   );
 }
 
 /**
- * Строка о недоступных категориях — ПОСЛЕДНЕЙ, под Code health (уточнение
- * владельца: не вверху).
- *
- * Фиксированная ветка под пару CI/CD+Security без PAT (П2.11) снята вместе со
- * своей ссылкой: переход к токену теперь стоит ОДИН раз — у самого показателя,
- * где зритель и упирается в закрытое число (решение владельца 21.09). Здесь
- * остаётся констатация и короткая причина, поэтому одна группировка на все
- * случаи — и на пару, и на одну категорию (см. tests/api.test.ts, ветка
- * «только CI», где фиксированная пара была бы ложью).
+ * Плашка закрытых категорий (А4): заголовок и пояснение одним предложением —
+ * `ACCESS_LOCK_SHORT` по причине (одна копия с отчетом, К9.13); при разных
+ * причинах — по предложению на категорию. Призыва внутри нет: единственный
+ * призыв стоит у закрытого Repo Health Score.
  */
-function LockedCategories({ items }: { items: { title: string; reason: string }[] }) {
-  // В4.9 (К9.13): одна строка на закрытую категорию — «название — фраза», те же
-  // слова, что строка категории в отчете (название и фраза — разные ячейки)
-  return (
-    <Alert
-      theme="info"
-      view="outlined"
-      size="s"
-      className="rh-locked-note"
-      message={
-        <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
-          {items.map((item) => (
-            <DefinitionList.Item key={item.title} name={item.title}>
-              {item.reason}
-            </DefinitionList.Item>
-          ))}
-        </DefinitionList>
-      }
-    />
-  );
+function LockedCategories({ title, sentences }: { title: string; sentences: string[] }) {
+  return <Alert theme="info" view="outlined" size="s" className="rh-locked-note" title={title} message={sentences.join(" ")} />;
 }
 
-function CategoryRow({
-  categoryKey: key,
-  title,
-  cat,
-  contribution,
-  card,
-  defaultOpen = false,
-}: {
-  categoryKey: string;
-  title: string;
-  cat: Category;
-  contribution: number;
-  card: Card;
-  defaultOpen?: boolean;
-}) {
+function CategoryRow({ category: c, card, defaultOpen = false }: { category: CategoryView; card: Card; defaultOpen?: boolean }) {
+  const key = c.key;
+  const cat = card.score!.categories[key]!;
   const [open, setOpen] = useState(defaultOpen);
   const subs = Object.entries(cat.submetrics);
-  const expandable = subs.length > 0;
-
-  /**
-   * В4.6 круг 2 (Р14): ветки закрытого канала здесь больше нет — закрытые
-   * категории до строки не доходят (`Categories` их отфильтровывает и
-   * собирает в одну строку под списком). Осталось tri-state: «нет данных» с
-   * причиной и оговоркой про перенормировку.
-   */
-  // В4.9 (К9.2, К9.13): причина и опорная фраза — те же, что в отчете (format.ts)
-  const note =
-    cat.score === null
-      ? `${key === "security" ? securityNoDataReason(card.evidence.find((e) => e.key === "appsec.findings")) : noDataReason(key, cat.no_data)} ${NOT_IN_SCORE}`
-      : cat.no_data
-        ? noDataReason(key, cat.no_data)
-        : null;
+  const expandable = subs.length > 0 || c.partialNote !== null;
 
   const row = (
     <>
       {expandable ? <ArrowToggle direction={open ? "bottom" : "right"} size={14} /> : <span />}
-      <Text variant="subheader-1" ellipsis>
-        {title}
-      </Text>
-      <span className="rh-category__tags">
-        {cat.stale && (
-          <Label theme="warning" size="xs">
-            Факты из истории
-          </Label>
-        )}
-      </span>
-      <span className="rh-category__bar">
-        {cat.score === null ? (
-          <Text color="secondary">{NO_DATA}</Text>
-        ) : (
-          <Progress value={Math.round(cat.score)} size="s" theme={scoreTheme(cat.score)} />
-        )}
-      </span>
-      {/* В4.6 (У20): число окрашено теми же порогами, что полоса; отсутствие данных —
-          ДРУГОЙ тип ячейки (нейтральный Label), а не бледное значение (закон 2) */}
-      {cat.score === null ? (
-        <Label theme="unknown" size="xs" className="rh-category__value" title={NO_SCORE}>
-          {NO_DATA_SHORT}
-        </Label>
-      ) : (
-        <Text variant="subheader-2" color={scoreColor(cat.score)} className="rh-category__value">
-          {fmtScore(cat.score)}
+      <span className="rh-category__name">
+        <span className="rh-category__title">
+          <Text variant="subheader-1">{c.title}</Text>
+          {c.stale && (
+            <Label theme="warning" size="xs">
+              Данные из прошлого анализа
+            </Label>
+          )}
+        </span>
+        {/* основание — вторая строка, тот же текст, что колонка «Основание» PDF */}
+        <Text variant="body-1" color="complementary" className="rh-category__why">
+          {c.why}
         </Text>
-      )}
-      {/* В4.9 (К9.14): слово шкалы у категории — плашкой `Label` (как в отчете), не текстом рядом с названием */}
-      {cat.score === null ? (
-        <span />
-      ) : (
-        <Label theme={scoreLabelTheme(cat.score)} size="xs" className="rh-category__word">
-          {sentence(scoreWord(cat.score))}
-        </Label>
-      )}
-      {/* В4.6 (У25, ДП6): у категории без данных «вклад 0%» превращался в
-          «категория дала ноль» — единственное место, где продукт своими руками
-          опровергал собственный tri-state. Поэтому там стоит `NOT_COUNTED`.
-          Круг 2 (Р14): вместо строки «вес N% → вклад M%» — ОДНА плашка в стиле
-          чипа величины (`theme="normal"`), последней в сетке строки, то есть
-          прижатой к правому краю. Номинальный вес не потерян: он в подсказке
-          по наведению — на экране остаётся то, что зритель спрашивает
-          («сколько эта категория дала»), а не то, из чего это выведено. */}
-      <Label
-        theme="normal"
-        size="xs"
-        className="rh-category__weight"
-        title={`Вес категории в Repo Health Score – ${cat.weight}%. Вклад – ее доля в итоге среди категорий, по которым есть данные.`}
-      >
-        {cat.score === null ? NOT_COUNTED : `Вклад ${contribution}%`}
+      </span>
+      {/* Tri-state: без данных — «—» вместо полосы и числа, плашка «Нет данных» */}
+      <span className="rh-category__bar">
+        {c.score === null ? (
+          <Text color="secondary" title={NO_DATA}>
+            —
+          </Text>
+        ) : (
+          <span className="rh-cat-bar" role="img" aria-label={`${c.scoreText} из 100`}>
+            <span className="rh-cat-bar__fill" style={{ width: `${Math.max(0, Math.min(100, Math.round(c.score)))}%` }} />
+          </span>
+        )}
+      </span>
+      <Text variant="subheader-2" color={c.score === null ? "secondary" : undefined} className="rh-category__value">
+        {c.scoreText}
+      </Text>
+      <Label theme={c.chip.theme} size="xs" className="rh-category__word">
+        {c.chip.text}
       </Label>
     </>
   );
@@ -1113,18 +923,16 @@ function CategoryRow({
       ) : (
         <div className="rh-category">{row}</div>
       )}
-      {note && (
-        <div style={{ padding: "0 var(--g-spacing-3) var(--g-spacing-3) calc(16px + var(--g-spacing-6))", marginTop: "calc(-1 * var(--g-spacing-1))" }}>
-          <Text variant="body-2" color="complementary">
-            {note}
-          </Text>
-        </div>
-      )}
-      {/* В4.6 (У17): разбивка по движкам живёт под строкой Security — рядом с
-          числом, которое она объясняет, и только когда факт есть и он ok */}
+      {/* В4.6 (У17): разбивка по движкам живёт под строкой Security */}
       {key === "security" && <AppsecEngines card={card} />}
       {open && (
         <div className="rh-subrows">
+          {/* примечание частичной нехватки данных — внутри раскрытия (в MD его нет в строке) */}
+          {c.partialNote && (
+            <Text variant="body-1" color="complementary" className="rh-subrows__note">
+              {c.partialNote}
+            </Text>
+          )}
           {/* Доводка 21.09: шапка подписывает ТОЛЬКО числовые колонки — над
               именем метрики подпись не нужна, там и так имя. Подписи 11px
               приглушённые, без линии под ними (вариант B). Колонки общие со
@@ -1200,33 +1008,19 @@ function CategoryRow({
   );
 }
 
-// ---------- маркеры расчёта ----------
+// ---------- маркеры расчёта: предупреждения наверху и «Ограничения данных» ----------
 
 /**
- * Маркеры расчёта (В4.6, З4 систематика): у них ДВА разных смысла, а рисовались
- * они одним жёлтым. Теперь `info` — граница данных (что источники смогли
- * отдать: лимит клона, усечённая история, пустой репозиторий), `warning` —
- * оговорка о самом расчёте (факты из истории, потолок CI без прогонов).
- * Порядок стопки: сначала оговорки, потом границы данных — оговорка меняет
- * чтение чисел, а граница объясняет их происхождение.
+ * Предупреждения наверху (В4.6, З4 систематика): `warning` — оговорка о самом
+ * расчете, `info` — граница данных. В4.9 ч.2 (А6, §2 23.09 ответ 2): наверху
+ * остаются только те, которых нет в «Ограничениях данных», — данные из
+ * прошлого анализа, лимит сервиса и усеченная история стоят одним списком
+ * внизу, тем же текстом, что PDF.
  */
-function Markers({ card }: { card: Card }) {
-  const m = card.markers;
+function Markers({ view }: { view: CardView }) {
   const rows: { key: string; label: string; text: string; theme: "info" | "warning" }[] = [];
-  if (m.staleFacts) {
-    rows.push({
-      key: "stale",
-      label: "Факты из истории",
-      text: "Часть источников не ответила, поэтому взяты данные предыдущего успешного анализа. Оценка от этого не выросла и не снизилась.",
-      theme: "warning",
-    });
-  }
-  if (m.gitLimits) {
-    rows.push({ key: "git-limits", label: "Репозиторий больше лимита сервиса", text: gitLimitsText(m.gitLimits), theme: "info" });
-  }
-  // Ф2.9 (LOW-9): маркер codeEmpty API отдаёт, но карточка молчала — зритель
-  // видел Score 0 без объяснения, хотя это данные о проекте (Q&A №13)
-  if (m.codeEmpty) {
+  // Ф2.9 (LOW-9): маркер codeEmpty — зритель видел Score 0 без объяснения
+  if (view.topMarkers.includes("code-empty")) {
     rows.push({
       key: "code-empty",
       label: "В репозитории нет кода",
@@ -1234,15 +1028,7 @@ function Markers({ card }: { card: Card }) {
       theme: "info",
     });
   }
-  if (m.historyTruncatedSince) {
-    rows.push({
-      key: "truncated",
-      label: "История усечена",
-      text: `Репозиторий слишком большой, поэтому скачана только недавняя история – с ${fmtDate(m.historyTruncatedSince)}. Активность и возраст TODO посчитаны по этой части.`,
-      theme: "info",
-    });
-  }
-  if (m.ciConfigOnlyCap) {
+  if (view.topMarkers.includes("ci-cap")) {
     rows.push({
       key: "ci-cap",
       label: "CI заявлен, прогоны недоступны",
@@ -1251,12 +1037,8 @@ function Markers({ card }: { card: Card }) {
     });
   }
   if (rows.length === 0) return null;
-
   return (
     <Flex direction="column" gap={2} role="region" aria-label="Особенности расчета">
-      {/* У27: один способ применения Alert вне кабинета — сбой страницы идёт
-          размером по умолчанию, встроенная заметка `size="s"`; `view` всегда
-          outlined, `theme` НЕСЁТ СМЫСЛ и больше не один на все случаи */}
       {[...rows].sort((a, b) => (a.theme === b.theme ? 0 : a.theme === "warning" ? -1 : 1)).map((row) => (
         <Alert key={row.key} theme={row.theme} view="outlined" size="s" title={row.label} message={row.text} />
       ))}
@@ -1264,118 +1046,149 @@ function Markers({ card }: { card: Card }) {
   );
 }
 
-// ---------- рекомендации ----------
-
-function Recommendations({ card }: { card: Card }) {
-  const evidence = new Map(card.evidence.map((e) => [e.key, e]));
-  if (card.recommendations.length === 0) {
-    return (
-      <EmptyState
-        icon={SquareListUl}
-        title="Рекомендаций нет"
-        description="По собранным данным улучшать нечего."
-      />
-    );
-  }
+/** «Ограничения данных» (А6): `limitations` отчета тем же текстом, пункт — info-плашка; пусто — раздела нет. */
+function Limitations({ items }: { items: string[] }) {
+  if (items.length === 0) return null;
   return (
-    <Flex direction="column" gap={3}>
-      <ul className="rh-list" style={{ borderTop: 0 }}>
-        {card.recommendations.map((rec) => (
-          <RecommendationRow key={rec.ruleId} rec={rec} evidence={evidence} />
+    <section className="rh-section" aria-labelledby="rh-limitations-title">
+      <Text variant="subheader-3" as="h2" id="rh-limitations-title" className="rh-section__title">
+        Ограничения данных
+      </Text>
+      <Flex direction="column" gap={2}>
+        {items.map((text) => (
+          <Alert key={text} theme="info" view="outlined" size="s" message={text} />
         ))}
-      </ul>
-    </Flex>
+      </Flex>
+    </section>
   );
 }
 
-function RecommendationRow({ rec, evidence }: { rec: Recommendation; evidence: Map<string, Evidence> }) {
+// ---------- рекомендации ----------
+
+/**
+ * В4.9 ч.2 (А5, U13 и U8): раздел виден без клика. Номер слева — порядок
+ * выдачи движка (как в PDF; словом «приоритет» не подписан — это позиция, не
+ * срочность), действие заголовком, причина, справа «ожидаемый эффект» над
+ * плашкой прироста. Основание — словами: подметрика правила и ее значение;
+ * по клику — источник, время сбора и сырые данные.
+ */
+function Recommendations({ view }: { view: CardView }) {
   return (
-    <li className="rh-list__item">
-      <Flex direction="column" gap={2}>
-        <Flex gap={2} alignItems="baseline" wrap>
-          {/* Доводка 21.09: «#1/#2/#3» снят. Он сообщал только позицию в
-              списке, которая и так видна сверху вниз, и занимал место слева
-              от заголовка — там, где у платформы стоит признак важности.
-              Сам признак НЕ введён: `priority` в recommend.ts — это
-              `r.priority = i + 1`, порядковый номер после сортировки, а не
-              важность. Назвать его «Критический/Высокий» значило бы выдать
-              позицию за оценку срочности. */}
-          {/* В4.9 (К9.10): роли текста — заголовок = действие (глагол), ниже — причина; как в отчете */}
-          <Text variant="subheader-2">{rec.action}</Text>
-          {rec.deltaScore !== null ? (
-            <Label theme="success" size="xs" title="Прирост показателя, если выполнить только эту рекомендацию">
-              {fmtSigned(rec.deltaScore)} к {rec.channel ? "Repo Health Score" : "HealthCraft Index"}
-            </Label>
-          ) : rec.opensCategory ? (
-            <Label theme="info" size="xs" title="Категория без данных станет считаемой">
-              Откроет категорию
-            </Label>
-          ) : null}
-        </Flex>
-        <Text>{rec.problem}</Text>
-        {/* Доводка 21.09: «Эффект» печатался рядом с чипом прироста и повторял
-            его дословно («+2.3 к HealthCraft Index» чипом и «Эффект: +2.3 к
-            HealthCraft Index» строкой). Строка остаётся там, где чипа с
-            дельтой нет — у активационных рекомендаций она несёт другое
-            («CI/CD: 50 → до 100 по фактическим прогонам»). */}
-        {rec.expectedImpact && rec.deltaScore === null && <Text color="complementary">Эффект: {rec.expectedImpact}</Text>}
-        <Flex gap={2} wrap alignItems="center">
-          {/* В4.6 круг 2 (Р19, замечание владельца 19): «Основано на фактах» →
-              «Основание». Прежняя формулировка была оправданием («мы не
-              выдумали»), новая называет саму вещь: ниже стоят факты, по клику
-              открывается их значение и источник. */}
+    <section className="rh-section" id={RECOMMENDATIONS_ID} aria-labelledby="rh-recommendations-title">
+      <Text variant="subheader-3" as="h2" id="rh-recommendations-title" className="rh-section__title">
+        Рекомендации
+      </Text>
+      {view.recommendations.length === 0 ? (
+        <EmptyState icon={SquareListUl} title="Рекомендаций нет" description="По собранным данным улучшать нечего." />
+      ) : (
+        <Card view="outlined" className="rh-section-card">
+          <ol className="rh-list rh-recs" style={{ borderTop: 0 }}>
+            {view.recommendations.map((r) => (
+              <RecommendationRow key={r.rec.ruleId} item={r} />
+            ))}
+          </ol>
+        </Card>
+      )}
+    </section>
+  );
+}
+
+function RecommendationRow({ item }: { item: RecommendationView }) {
+  const { rec } = item;
+  return (
+    <li className="rh-list__item rh-rec">
+      <Text variant="subheader-2" color="secondary" className="rh-rec__n">
+        {item.n}
+      </Text>
+      <Flex direction="column" gap={1} className="rh-rec__body">
+        {/* В4.9 (К9.10): заголовок = действие (глагол), ниже — причина; как в отчете */}
+        <Text variant="subheader-2">{rec.action}</Text>
+        <Text color="complementary">{rec.problem}</Text>
+        <Flex gap={2} wrap alignItems="center" className="rh-rec__basis">
           <Text variant="body-short" color="secondary">
             Основание:
           </Text>
-          {rec.factRefs.map((ref) => (
-            <Popover
-              key={ref.key}
-              trigger="click"
-              placement={["bottom-start", "top-start"]}
-              content={<FactProof factKey={ref.key} fact={evidence.get(ref.key)} />}
-            >
-              <Label theme={ref.missing ? "unknown" : "info"} size="xs" interactive>
-                <Flex gap={1} alignItems="center">
-                  {ref.key}
-                  <Icon data={ChevronDown} size={12} />
-                </Flex>
-              </Label>
-            </Popover>
-          ))}
+          <Popover trigger="click" placement={["bottom-start", "top-start"]} content={<FactProof item={item} />}>
+            <Label theme="info" size="xs" interactive>
+              <Flex gap={1} alignItems="center">
+                {item.label}
+                <Icon data={ChevronDown} size={12} />
+              </Flex>
+            </Label>
+          </Popover>
         </Flex>
       </Flex>
+      <div className="rh-rec__effect">
+        {item.effectNote !== null ? (
+          <>
+            <Text variant="caption-2" color="secondary">
+              {item.effectNote}
+            </Text>
+            <Label theme="success" size="xs" title="Прирост показателя, если выполнить только эту рекомендацию">
+              {item.effect}
+            </Label>
+          </>
+        ) : (
+          <Text variant="body-short" color="complementary">
+            {item.effect}
+          </Text>
+        )}
+      </div>
     </li>
   );
 }
 
-/** Содержимое поповера факта: значение либо объяснение, почему факта нет. */
-function FactProof({ factKey, fact }: { factKey: string; fact: Evidence | undefined }) {
-  if (!fact) {
-    return (
-      <Flex direction="column" gap={1} style={{ maxWidth: 420, padding: "var(--g-spacing-3)" }}>
-        <Text variant="subheader-1">{factKey} – эти данные вам недоступны</Text>
-        <Text color="complementary">{SECURITY_PUBLIC_NOTE}</Text>
-      </Flex>
-    );
-  }
+/** Поповер основания: заголовок-ярлык; по каждому факту — источник словами, время сбора, сырые данные свернутыми и ключ мелко. */
+function FactProof({ item }: { item: RecommendationView }) {
   return (
-    <Flex direction="column" gap={2} style={{ maxWidth: 480, padding: "var(--g-spacing-3)" }}>
-      <Flex gap={2} wrap alignItems="center">
-        <Text variant="subheader-1">{fact.key}</Text>
-        <Label theme={fact.status === "ok" ? "success" : fact.status === "bad" ? "warning" : "unknown"} size="xs">
-          {sentence(factStatusText(fact.status))}
-        </Label>
-      </Flex>
-      <Text variant="body-short" color="secondary">
-        источник {fact.source}, собрано {fmtDateTime(fact.collectedAt)}
-      </Text>
-      <pre className="rh-code" style={{ maxHeight: 280, overflow: "auto" }}>
-        {fmtFactValue(fact.value)}
-      </pre>
+    <Flex direction="column" gap={3} className="rh-proof">
+      <Text variant="subheader-1">{item.label}</Text>
+      {item.facts.map(({ key, fact }) => (
+        <FactBlock key={key} factKey={key} fact={fact} />
+      ))}
     </Flex>
   );
 }
 
+function FactBlock({ factKey, fact }: { factKey: string; fact: Evidence | null }) {
+  const [raw, setRaw] = useState(false);
+  if (!fact) {
+    return (
+      <Flex direction="column" gap={1}>
+        <Text color="complementary">Эти данные вам недоступны. {SECURITY_PUBLIC_NOTE}</Text>
+        <Text variant="caption-2" color="hint">
+          {factKey}
+        </Text>
+      </Flex>
+    );
+  }
+  return (
+    <Flex direction="column" gap={1}>
+      <Flex gap={2} wrap alignItems="center">
+        <Text variant="body-short" color="secondary">
+          Источник: {factSource(fact)} · собрано {fmtDateTime(fact.collectedAt)}
+        </Text>
+        {fact.status !== "ok" && (
+          <Label theme={fact.status === "bad" ? "warning" : "unknown"} size="xs">
+            {sentence(factStatusText(fact.status))}
+          </Label>
+        )}
+      </Flex>
+      <button type="button" className="rh-proof__toggle" aria-expanded={raw} onClick={() => setRaw(!raw)}>
+        <ArrowToggle direction={raw ? "bottom" : "right"} size={12} />
+        <Text variant="body-short">Исходные данные</Text>
+      </button>
+      {raw && (
+        <pre className="rh-code" style={{ maxHeight: 280, overflow: "auto" }}>
+          {fmtFactValue(fact.value)}
+        </pre>
+      )}
+      <Text variant="caption-2" color="hint">
+        {fact.key}
+      </Text>
+    </Flex>
+  );
+}
 function factStatusText(status: string): string {
   switch (status) {
     case "ok":

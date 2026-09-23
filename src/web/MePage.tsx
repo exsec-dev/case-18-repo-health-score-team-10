@@ -26,7 +26,6 @@ import {
   Magnifier,
   OctagonXmark,
   Person,
-  Persons,
   Plus,
   Shield,
   Star,
@@ -58,11 +57,11 @@ import { type MeResponse, type MetaResponse, type MyReposResponse, dataOf, logou
 import type { LiveAnalysis } from "./analysis";
 import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
 import { authErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, recommendationsText, scoreTheme, scoreWord, sentence, slugOf, type FavoriteAddCheck } from "./format";
-import { TAB_RECOMMENDATIONS } from "./RepoPage";
-import { type Band, BANDS, type RepoEntry, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
+import { recommendationsHref } from "./RepoPage";
+import { type Band, BANDS, type RepoEntry, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, ownerSteps, sortEntries } from "./myRepos";
 import { linkProps, navigate, repoHref } from "./router";
 import { Page, UserAvatar, displayName, logoutFailedToast } from "./Shell";
-import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, RepoSlug, SkeletonRows } from "./ui";
+import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, RepoSlug, SkeletonRows, VisibilityPill } from "./ui";
 
 const REPOS_CRUMBS = [{ text: "Мои репозитории" }];
 const SETTINGS_CRUMBS = [{ text: "Настройки" }];
@@ -85,6 +84,42 @@ function CabinetAlert({
   actions?: AlertProps["actions"];
 }) {
   return <Alert theme={theme} view="outlined" size="m" title={title} message={message} actions={actions} />;
+}
+
+/**
+ * В4.9 ч.2 (В1, U11-b): 3 шага владельца вместо alert о токене. Состояние
+ * шагов — чистая функция `ownerSteps` (myRepos.ts, поведенческий тест);
+ * здесь только вид: выполненный — галочкой, текущий — номером в акценте и
+ * кнопкой «Перейти в Настройки», следующий — приглушенным номером.
+ */
+function OwnerSteps({ hasPat }: { hasPat: boolean }) {
+  const steps = ownerSteps(hasPat);
+  if (!steps) return null;
+  return (
+    <section className="rh-steps" aria-label="Что сделать, чтобы увидеть все данные своих репозиториев">
+      <ol className="rh-steps__list">
+        {steps.map((step) => (
+          <li key={step.n} className={`rh-steps__item rh-steps__item_${step.state}`} aria-current={step.state === "current" ? "step" : undefined}>
+            <span className="rh-steps__mark" aria-hidden="true">
+              {step.state === "done" ? <Icon data={CircleCheck} size={16} /> : step.n}
+            </span>
+            <Flex direction="column" gap={2} style={{ minWidth: 0 }}>
+              <Text variant={step.state === "current" ? "subheader-2" : "body-2"} color={step.state === "next" ? "secondary" : undefined}>
+                {step.text}
+              </Text>
+              {step.state === "current" && (
+                <span>
+                  <Button view="normal" size="m" {...linkProps("/settings")}>
+                    Перейти в Настройки
+                  </Button>
+                </span>
+              )}
+            </Flex>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
 }
 
 export function MePage(_props: { meta: MetaResponse | null }) {
@@ -144,7 +179,19 @@ export function SettingsPage() {
   }
   if (data.login === null) return <LoginOffer pageTitle="Настройки" />;
   return (
-    <Page crumbs={SETTINGS_CRUMBS} aside={<AccountSection me={data} />}>
+    <Page
+      crumbs={SETTINGS_CRUMBS}
+      aside={
+        <>
+          <AccountSection me={data} />
+          {/* В4.9 ч.2 (Г, U4-A): зачем токен — рядом с полем токена. «Только для
+              чтения» проверено: запросов на запись к SourceCraft в src/ нет */}
+          <AsideSection title="Зачем токен">
+            <Text color="complementary">Нужен, чтобы видеть CI/CD и Безопасность своих репозиториев. Используется только для чтения.</Text>
+          </AsideSection>
+        </>
+      }
+    >
       {/* В4.8.5 (К8.5.3, С2-4): секция токена не перемонтируется по дате
           проверки — строка «Токен принадлежит…» после сохранения остаётся */}
       <PatSection hasPat={data.hasPat} unreadable={data.patUnreadable === true} checkedAt={data.patCheckedAt} onChanged={reloadMe} />
@@ -548,20 +595,10 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
         </div>
       </div>
 
-      {/* В4.7 (П3.3): без токена — блок с тем, что делать, и ссылкой в
-          Настройки. Не тост (исчезает) и не подсказка в title (не видна). */}
-      {!hasPat && (
-        <CabinetAlert
-          theme="info"
-          title="Добавьте персональный токен доступа SourceCraft"
-          message="С токеном сервис сам проверит ваши права на избранные репозитории, откроет анализ своих репозиториев и покажет CI/CD и Безопасность на карточке. Токен добавляется в Настройках."
-          actions={
-            <Button view="normal" size="m" {...linkProps("/settings")}>
-              Перейти в Настройки
-            </Button>
-          }
-        />
-      )}
+      {/* В4.9 ч.2 (В1, U11-b): без токена — 3 шага владельца на месте alert
+          (В4.7, П3.3): вход выполнен, токен — текущий шаг с кнопкой, анализ —
+          следующий. Показываются, пока токена нет. */}
+      <OwnerSteps hasPat={hasPat} />
 
       {repos.state.kind === "loading" && <SkeletonRows rows={3} height={66} />}
       {repos.state.kind === "error" && (
@@ -918,7 +955,7 @@ function RepoRow({
     ...(entry.recommendationsCount !== null && entry.recommendationsCount > 0
       ? // ревью закрытия: не `href` — пункт меню рендерится обычной ссылкой без
         // `linkProps` и перезагружал страницу; навигация — внутри приложения
-        [{ text: "Открыть рекомендации", action: () => navigate(`${href}?tab=${TAB_RECOMMENDATIONS}`) }]
+        [{ text: "Открыть рекомендации", action: () => navigate(recommendationsHref(href)) }]
       : []),
     { text: "Убрать из избранного", action: onRemove, disabled: busy, theme: "danger" as const },
   ];
@@ -955,7 +992,7 @@ function RepoRow({
           {entry.recommendationsCount !== null && (
             <MetaItem>
               {/* круг 2 (7a): иконка — внутри ссылки, чтобы красилась вместе с текстом */}
-              <Link {...linkProps(`${href}?tab=${TAB_RECOMMENDATIONS}`)} className="rh-repo-item__link">
+              <Link {...linkProps(recommendationsHref(href))} className="rh-repo-item__link">
                 <Icon data={Bulb} size={14} />
                 {recommendationsText(entry.recommendationsCount)}
               </Link>
@@ -1279,19 +1316,9 @@ function AccessRights({ access, lastCheckedAt }: { access: import("../api/me").F
     <Flex gap={1} alignItems="center" className="rh-repo-item__labels">
       {/* круг 4 (замечание 3): серая «пилюля», а не `Label theme="normal"` —
           в нашей палитре тот сопоставлен стальному misc и читался голубым */}
-      {access.visibility === "private" && (
-        <span className="rh-pill" title={`Приватный репозиторий${checked}`}>
-          <Icon data={Lock} size={12} />
-          Приватный
-        </span>
-      )}
-      {/* гейт В4.8.5: третье значение видимости SourceCraft */}
-      {access.visibility === "internal" && (
-        <span className="rh-pill" title={`Внутренний репозиторий: виден всем, кто вошел в SourceCraft${checked}`}>
-          <Icon data={Persons} size={12} />
-          Внутренний
-        </span>
-      )}
+      {/* В4.9 ч.2 (В2): видимость — общей плашкой с карточкой (А7), теперь и
+          у публичных; все 3 значения SourceCraft, «неизвестно» — без плашки */}
+      <VisibilityPill value={access.visibility} titleSuffix={checked} />
       <span className="rh-pill rh-access" title={summary} aria-label={summary} role="img">
         {channels.map((c) => (
           <Icon key={c.key} data={c.icon} size={14} className={`rh-access__icon ${c.state.cls}`} />
