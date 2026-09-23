@@ -1572,6 +1572,18 @@ button.rh-category:focus-visible {
   line-height: 26px;
 }
 
+/* круг 5 (4): инструкция по токену — серая плашка заглушек */
+.rh-howto-box {
+  padding: var(--g-spacing-3) var(--g-spacing-4);
+  border-radius: var(--g-border-radius-l);
+  background: var(--g-color-base-generic);
+}
+
+/* круг 5 (2): элемент колонки по ширине содержимого, у левого края */
+.rh-start {
+  align-self: flex-start;
+}
+
 /* круг 3 (12): серый тег посреди строки — по базовой линии текста */
 .rh-ui-tag {
   vertical-align: baseline;

@@ -869,8 +869,8 @@ function Categories({ card, view }: { card: Card; view: CardView }) {
  */
 function LockedCategories({ text }: { text: string }) {
   // круг 2 (Т3): одно предложение без заголовка
-  // круг 3 (5): иконка — по центру однострочного текста
-  return <Alert theme="info" view="outlined" size="s" align="center" className="rh-locked-note" message={text} />;
+  // круг 3 (5): иконка — по центру однострочного текста; круг 5 (1): светло-синий фон
+  return <Alert theme="info" view="filled" size="s" align="center" className="rh-locked-note" message={text} />;
 }
 
 function CategoryRow({ category: c, card, defaultOpen = false }: { category: CategoryView; card: Card; defaultOpen?: boolean }) {
@@ -1049,7 +1049,8 @@ function Markers({ view }: { view: CardView }) {
   return (
     <Flex direction="column" gap={2} role="region" aria-label="Особенности расчета">
       {[...rows].sort((a, b) => (a.theme === b.theme ? 0 : a.theme === "warning" ? -1 : 1)).map((row) => (
-        <Alert key={row.key} theme={row.theme} view="outlined" size="s" title={row.label} message={row.text} />
+        // круг 5 (1): info — заливкой, предупреждение — прежней рамкой
+        <Alert key={row.key} theme={row.theme} view={row.theme === "info" ? "filled" : "outlined"} size="s" title={row.label} message={row.text} />
       ))}
     </Flex>
   );
@@ -1066,7 +1067,8 @@ function Limitations({ items }: { items: string[] }) {
         </Text>
         <Flex direction="column" gap={2}>
           {items.map((text) => (
-            <Alert key={text} theme="info" view="outlined" size="s" message={text} />
+            // круг 5 (1): инфо-плашки — светло-синей заливкой, как «Токен показывается один раз»
+            <Alert key={text} theme="info" view="filled" size="s" message={text} />
           ))}
         </Flex>
       </Card>

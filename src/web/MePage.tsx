@@ -105,9 +105,10 @@ function TokenNotice({ hasPat }: { hasPat: boolean }) {
   if (hasPat) return null;
   return (
     // круг 3 (10): иконка ключа — синим (цвет info-темы), кнопка — под текстом
+    // круг 5 (1): светло-синей заливкой, как плашка «Токен показывается один раз»
     <Alert
       theme="info"
-      view="outlined"
+      view="filled"
       className="rh-token-notice"
       icon={<Icon data={Key} size={18} className="rh-info-icon" />}
       title="Добавьте персональный токен доступа SourceCraft"
@@ -222,11 +223,14 @@ function AccountSection({ me }: { me: MeResponse }) {
           </Text>
         </Flex>
       </Flex>
-      {/* круг 4 (8): кнопка по ширине текста, а не во всю панель */}
-      <Button view="outlined" size="m" onClick={() => void logout().catch((e: unknown) => toaster.add(logoutFailedToast(e)))}>
-        <Icon data={ArrowRightFromSquare} size={16} />
-        Выйти
-      </Button>
+      {/* круг 4 (8), круг 5 (2): кнопка по ширине текста — обертка держит ее у
+          левого края, иначе колонка панели (align-items: stretch) растягивает ее */}
+      <span className="rh-start">
+        <Button view="outlined" size="m" onClick={() => void logout().catch((e: unknown) => toaster.add(logoutFailedToast(e)))}>
+          <Icon data={ArrowRightFromSquare} size={16} />
+          Выйти
+        </Button>
+      </span>
     </AsideSection>
   );
 }
@@ -418,7 +422,8 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
             {/* Круг 2 части 2 (Е18, Н1, §2 23.09): инструкция — шагами, как в
                 документации SourceCraft (названия разделов — жирным), важное —
                 отдельной плашкой, полная инструкция — ссылкой */}
-            <Flex direction="column" gap={2}>
+            {/* круг 5 (4): вопрос, ссылка и шаги — в серой плашке, как заглушки */}
+            <Flex direction="column" gap={2} className="rh-howto-box">
               {/* круг 3 (11): «Как получить токен? Инструкция SourceCraft» — одной строкой */}
               {/* круг 4 (9): ссылка — обычным начертанием, рядом с вопросом */}
               <Flex gap={2} alignItems="baseline" wrap>

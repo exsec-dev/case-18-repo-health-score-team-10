@@ -46,17 +46,18 @@
  */
 
 .g-root.g-root_theme_dark {
-  /* Круг 4 части 2 В4.9 (§2 23.09 «выбор круга 4»): палитра Р1, Безопасность —
+  /* Круг 5 части 2 В4.9 (§2 23.09): палитра С1 — тона Р1 приглушены.
+   * Круг 4 (§2 23.09 «выбор круга 4»): палитра Р1, Безопасность —
    * неоновый желто-зеленый по слову владельца. Прежде — П2 круга 2 (Е2): цвета категорий в
    * полосах вклада карточки и панели рейтинга. Не зеленый, желтый и красный —
    * это цвета оценки. Тона одинаковы в обеих темах (проверены на белом и
    * #2d2d2d при выборе). */
-  --rh-cat-documentation: #3b82f6;
-  --rh-cat-cicd: #ec4899;
-  --rh-cat-security: #d4f53c;
-  --rh-cat-activity: #f97316;
-  --rh-cat-issues: #a855f7;
-  --rh-cat-code: #06b6d4;
+  --rh-cat-documentation: #5b8def;
+  --rh-cat-cicd: #d7729f;
+  --rh-cat-security: #c3d65a;
+  --rh-cat-activity: #e58a4e;
+  --rh-cat-issues: #9b7fd9;
+  --rh-cat-code: #3fb0c2;
   --rh-code-bg: #111111;
   --rh-code-text: #e8e8e8;
 
@@ -203,12 +204,12 @@
    * полосах вклада карточки и панели рейтинга. Не зеленый, желтый и красный —
    * это цвета оценки. Тона одинаковы в обеих темах (проверены на белом и
    * #2d2d2d при выборе). */
-  --rh-cat-documentation: #3b82f6;
-  --rh-cat-cicd: #ec4899;
-  --rh-cat-security: #d4f53c;
-  --rh-cat-activity: #f97316;
-  --rh-cat-issues: #a855f7;
-  --rh-cat-code: #06b6d4;
+  --rh-cat-documentation: #5b8def;
+  --rh-cat-cicd: #d7729f;
+  --rh-cat-security: #c3d65a;
+  --rh-cat-activity: #e58a4e;
+  --rh-cat-issues: #9b7fd9;
+  --rh-cat-code: #3fb0c2;
   --rh-code-bg: #111111;
   --rh-code-text: #e8e8e8;
 
