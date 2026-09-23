@@ -179,6 +179,7 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   "activity.pulls_90d": { title: "Предложения изменений за 90 дней", unit: "штуки", format: plain },
   "activity.releases_12m": { title: "Релизы за 12 месяцев", unit: "штуки", format: plain },
   "activity.mirror_likeness": { title: "Похожесть на зеркало", unit: "доля синхронизаций, авторы, коммитеры", format: mirror },
+  "activity.bus_factor": { title: "Bus factor", unit: "авторы половины коммитов за 90 дней (справочно, без веса)", format: plain },
   "activity.commits_90d": { title: "Коммиты за 90 дней", unit: "штуки", format: plain },
   "activity.commits_365d": { title: "Коммиты за год", unit: "штуки", format: plain },
   "activity.sync_bursts": { title: "Всплески синхронизации", unit: "штуки", format: plain },

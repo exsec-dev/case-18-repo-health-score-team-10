@@ -348,3 +348,15 @@
   --gn-aside-header-expanded-background-color: #f2f2f2;
   --gn-aside-header-item-current-background-color: rgba(0, 0, 0, .1);
 }
+
+/* Бейдж «Яндекс GPT» (smoke-круг 23.09): фирменный красный, крупнее обычного лейбла */
+.rh-ai-badge {
+  display: inline-block;
+  background: #fc3f1d;
+  color: #fff;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 20px;
+}

@@ -9,6 +9,7 @@
 // ключах issues/issue_comments/pull_requests/contributors/releases/runs,
 // закрытие issue = completed_at, статус — объект {slug}, counters — строки.
 import { Fact, badChannelFact, noDataFact, okFact } from "./facts";
+import { CI_RECENCY_BANDS } from "../score/model";
 import { hexColor } from "./catalog";
 import { ScClient } from "./http";
 
@@ -455,6 +456,59 @@ export async function collectRestFacts(
       })
       .filter((x): x is number => x !== null);
     const success = runs.filter((r) => r["status"] === "success").length;
+    // 23.09 (Алексей): доля за окно не отличает «навели порядок» от «сломали» —
+    // серия зелёных с конца даёт тренд; running серию не рвёт (статус не финальный)
+    let greenStreak = 0;
+    for (const r of runs) {
+      const st = asString(r["status"]);
+      if (st === "running") continue;
+      if (st === "success") greenStreak += 1;
+      else break;
+    }
+    // 23.09 (Алексей): ВЗВЕШЕННАЯ доля успеха по лентам свежести — свежие
+    // прогоны весомее; старше года вес 0. Для скоринга pass_rate.
+    let weightTotal = 0;
+    let greenWeight = 0;
+    for (const r of runs) {
+      const d = r["dates"] as Record<string, unknown> | undefined;
+      const started = isoMs(d?.["started_at"]);
+      if (started === null) continue;
+      const ageDays = (now.getTime() - started) / 86_400_000;
+      let w = 0;
+      for (const band of CI_RECENCY_BANDS) {
+        if (ageDays < band.days) {
+          w = band.w;
+          break;
+        }
+      }
+      weightTotal += w;
+      if (asString(r["status"]) === "success") greenWeight += w;
+    }
+    const weightedSuccessRate = weightTotal > 0 ? Math.round((greenWeight / weightTotal) * 100) / 100 : null;
+    // 23.09 (Алексей: «собрать больше полезной информации»): разрез по событиям,
+    // повторно падающие workflow и тексты ошибок недавних красных прогонов
+    const events: Record<string, number> = {};
+    const failingWorkflows = new Set<string>();
+    const errors: string[] = [];
+    for (const r of runs) {
+      const et = asString(r["event_type"]);
+      if (et) events[et] = (events[et] ?? 0) + 1;
+      const st = asString(r["status"]);
+      if (st === "success" || st === "running") continue;
+      const wfs = Array.isArray(r["workflows"]) ? (r["workflows"] as Array<Record<string, unknown>>) : [];
+      for (const w of wfs) {
+        const slug = asString(w["slug"]);
+        const wst = asString(w["status"]);
+        if (slug && wst !== "" && wst !== "success" && wst !== "running" && wst !== "skipped") failingWorkflows.add(slug);
+      }
+      const em = r["error_messages"];
+      if (Array.isArray(em)) {
+        for (const e of em) {
+          const s = (asString(e) ?? "").trim();
+          if (s && !errors.some((x) => x === s)) errors.push(s);
+        }
+      }
+    }
     facts.push(
       okFact(
         "cicd.runs",
@@ -464,6 +518,11 @@ export async function collectRestFacts(
           success_rate: runs.length ? Math.round((success / runs.length) * 100) / 100 : null,
           duration_p50: durations.length ? Math.round((median(durations) ?? 0) * 10) / 10 : null,
           runs_count: runs.length,
+          green_streak: runs.length ? greenStreak : null,
+          weighted_success_rate: weightedSuccessRate,
+          events,
+          failed_workflows: [...failingWorkflows].slice(0, 5),
+          error_top: errors.slice(0, 3).map((e) => e.slice(0, 140)),
         },
         "rest:cicd",
         nowIso,

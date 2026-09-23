@@ -560,7 +560,8 @@ describe("processJob: repo-сигнал эвикции и заявки юзер�
   test("repoAccess gone (repo-GET 403/404) → эвикция; канальные cicd-403 не эвиктят", async () => {
     const g = seedRepo("pj", "gone-repo");
     const { deps } = fakeWorker(() => ({ repoAccess: "gone" }));
-    const out = await processJob(deps, { id: 1, repoId: g, slug: "pj/gone-repo", userId: null, triggerKind: "periodic", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 });
+    const out = await processJob(deps, { id: 1, repoId: g, slug: "pj/gone-repo", userId: null, triggerKind: "periodic",
+    kind: "scan", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 });
     expect(out).toBe("gone");
     const row = db.query("SELECT rating_active, evict_reason FROM repos WHERE id = ?").get(g) as { rating_active: number; evict_reason: string };
     expect(row.rating_active).toBe(0);
@@ -569,7 +570,8 @@ describe("processJob: repo-сигнал эвикции и заявки юзер�
     // cicd-403: repoAccess ok (репо-GET прошёл) — эвикции нет
     const s = seedRepo("pj", "cicd-403");
     const { deps: d2 } = fakeWorker(() => ({ repoAccess: "ok" }));
-    const out2 = await processJob(d2, { id: 2, repoId: s, slug: "pj/cicd-403", userId: null, triggerKind: "periodic", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 });
+    const out2 = await processJob(d2, { id: 2, repoId: s, slug: "pj/cicd-403", userId: null, triggerKind: "periodic",
+    kind: "scan", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 });
     expect(out2).not.toBe("gone");
     expect((db.query("SELECT rating_active FROM repos WHERE id = ?").get(s) as { rating_active: number }).rating_active).toBe(1);
   });
@@ -578,7 +580,8 @@ describe("processJob: repo-сигнал эвикции и заявки юзер�
     db.query("INSERT OR REPLACE INTO users (ya_id, login, created_at, last_login_at) VALUES ('ya-2', 'u2', '2026', '2026')").run();
     const uid = (db.query("SELECT id FROM users WHERE ya_id = 'ya-2'").get() as { id: number }).id;
     const { deps, calls } = fakeWorker(() => ({ repoAccess: "ok" }));
-    const job: ClaimedJob = { id: 3, repoId: 1, slug: "pj/own", userId: uid, triggerKind: "user", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 };
+    const job: ClaimedJob = { id: 3, repoId: 1, slug: "pj/own", userId: uid, triggerKind: "user",
+    kind: "scan", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 };
     // PAT нет (getPat реальный, APP_SECRET инъектирован в конфиг) → failed без скана, серверный токен не берётся
     expect(await processJob(deps, job)).toBe("no-pat");
     expect(calls).toHaveLength(0);
@@ -592,10 +595,12 @@ describe("processJob: repo-сигнал эвикции и заявки юзер�
   test("H1: repo-GET 403/404 у заявки юзера НЕ эвиктирует; у периодики — эвиктирует", async () => {
     const r = seedRepo("pj", "popular");
     const { deps } = fakeWorker(() => ({ repoAccess: "gone" }));
-    const out = await processJob({ ...deps, getPat: () => "narrow-pat" }, { id: 4, repoId: r, slug: "pj/popular", userId: 1, triggerKind: "user", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 });
+    const out = await processJob({ ...deps, getPat: () => "narrow-pat" }, { id: 4, repoId: r, slug: "pj/popular", userId: 1, triggerKind: "user",
+    kind: "scan", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 });
     expect(out).not.toBe("gone");
     expect((db.query("SELECT rating_active FROM repos WHERE id = ?").get(r) as { rating_active: number }).rating_active).toBe(1);
-    const out2 = await processJob(deps, { id: 5, repoId: r, slug: "pj/popular", userId: null, triggerKind: "periodic", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 });
+    const out2 = await processJob(deps, { id: 5, repoId: r, slug: "pj/popular", userId: null, triggerKind: "periodic",
+    kind: "scan", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 });
     expect(out2).toBe("gone");
     returnRepo(db, r);
   });
@@ -617,8 +622,10 @@ describe("processJob: repo-сигнал эвикции и заявки юзер�
         return { scanId: 1, repoId: 1, status: "ok", repoAccess: "ok" } as ScanResult;
       }) as typeof import("../src/jobs/runner").runScan;
       const w = { db, config, serverClient, runScan: burn };
-      await processJob(w, { id: 6, repoId: 1, slug: "o/r", userId: null, triggerKind: "periodic", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 });
-      await processJob(w, { id: 7, repoId: 1, slug: "o/r", userId: null, triggerKind: "periodic", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 });
+      await processJob(w, { id: 6, repoId: 1, slug: "o/r", userId: null, triggerKind: "periodic",
+    kind: "scan", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 });
+      await processJob(w, { id: 7, repoId: 1, slug: "o/r", userId: null, triggerKind: "periodic",
+    kind: "scan", claimedAt: "2026-09-18T00:00:00.000Z", attempts: 1 });
       expect(made).toHaveLength(2);
       // бюджет исчерпан ВНУТРИ первой задачи, вторая начинает с полным
       expect(statuses).toEqual([
@@ -909,7 +916,8 @@ describe("Ф2.1: тик воркер-лупа и планировщика выз
       db,
       config,
       serverClient: () => null,
-      claimAny: (() => ({ id: jobId, repoId, slug: "tick/crash", userId: null, triggerKind: "periodic", claimedAt, attempts: 1 })) as unknown as typeof claimAny,
+      claimAny: (() => ({ id: jobId, repoId, slug: "tick/crash", userId: null, triggerKind: "periodic",
+    kind: "scan", claimedAt, attempts: 1 })) as unknown as typeof claimAny,
       runScan: (async () => {
         throw new Error("boom");
       }) as unknown as typeof runScanType,
@@ -1390,6 +1398,7 @@ describe("Ф2.10 (M10): канальные 403 не эвиктят — пров�
         slug: "m10/chan403",
         userId: null,
         triggerKind: "periodic",
+    kind: "scan",
         claimedAt: new Date().toISOString(),
         attempts: 1,
       };
@@ -1422,7 +1431,8 @@ describe("Ф2.19: возраст свипа клонов — от худшего
   test("возраст свипа = худший случай скана, от лиза не зависит", () => {
     const cfg = { ...base, scheduler: { ...base.scheduler, leaseMs: 10 * 60_000 } };
     expect(orphanCloneAgeMs(cfg)).toBe(worstCaseScanMs(cfg.scan));
-    expect(worstCaseScanMs(DEFAULT_SCAN)).toBe(85 * 60_000);
+    // В5.1 (Прод-мелочь 7): формула включает фуз генерации (20+25+25+6+15)
+    expect(worstCaseScanMs(DEFAULT_SCAN)).toBe(91 * 60_000);
     const short = { ...base, scheduler: { ...base.scheduler, leaseMs: 1000 } };
     expect(orphanCloneAgeMs(short)).toBe(worstCaseScanMs(short.scan));
     expect(orphanCloneAgeMs(cfg)).toBeGreaterThan(cfg.scheduler.leaseMs);

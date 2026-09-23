@@ -91,6 +91,48 @@ describe("К8.5.1: итог анализа — по заданию", () => {
     });
   });
 
+  test("тост генерации описания — не «анализ»: текст оценку не меняет (трекер-закон, 23.09)", () => {
+    expect(finishedToast(job({ jobId: 9, slug: "a/b", phase: "done", status: "done", kind: "summary" }))).toEqual({
+      theme: "success",
+      title: "Описание готово",
+      content: "a/b: текст появился в карточке репозитория",
+    });
+    expect(finishedToast(job({ jobId: 9, slug: "a/b", phase: "failed", status: "failed", kind: "summary", error: "модель не ответила" }))).toEqual({
+      theme: "danger",
+      title: "Описание не сформировалось",
+      content: "a/b: модель не ответила",
+    });
+  });
+
+  test("smoke-круг 2 (23.09): запуск генерации объявляет jobId трекеру и дергает опрос заданий — прогон ~6 с успевает в тост", () => {
+    const act = src("RepoPage.tsx");
+    expect(act).toContain("announceJobStarted(body?.jobId ?? undefined);");
+    expect(act).toContain("announceJobsChanged();");
+    // кэш не называет «поставлено в генерацию» — тост честен об отказе
+    expect(act).toContain('"Описание этого скана уже готово"');
+    expect(act).toContain("Заметки последнего скана сформированы ранее.");
+    // круг 5 (Алексей): кнопка = полный цикл — анализ, затем описание
+    expect(act).toContain('"Анализ и описание в очереди"');
+    expect(act).toContain("Сначала соберутся свежие данные скана, затем описание обновится.");
+  });
+
+  test("круг 3 (23.09): тумблер автогенерации не ставит заявок — свой маршрут, карточка перечитывается по итогу", () => {
+    const act = src("RepoPage.tsx");
+    // развязка: Switch больше не зовёт POST/DELETE /summary
+    expect(act).not.toContain('void act(checked ? "POST" : "DELETE")');
+    expect(act).toContain("void actAuto(checked)");
+    expect(act).toContain("/summary-auto`");
+    // итог задания перечитывает карточку сразу — кнопка не висит disabled
+    expect(act).toContain("useAnalysisFinished((jobs) => {");
+  });
+
+  test("круг 4 (23.09): кулдаун объясняется языком пользователя — без внутренних денег", () => {
+    const act = src("RepoPage.tsx");
+    expect(act).toContain("Частые запуски ограничены – следующий после");
+    // «кредиты дороже повтора» — внутренняя причина, пользователю она ни о чём
+    expect(act).not.toContain("кредиты");
+  });
+
   test("фаза строки и «затянулось» — из ответа сервера; задание ушло из active — анализа нет", () => {
     const res: JobsResponse = { active: [job({ jobId: 7, slug: "x/y", phase: "running", status: "running", stalled: true })], recent: [] };
     expect(liveFor(res, "x/y")).toEqual({ jobId: 7, phase: "running", stalled: true });

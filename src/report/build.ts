@@ -20,8 +20,8 @@ import {
   SCORE_SCALE,
   fmtContribution,
   fmtCoverage,
-  fmtDate,
-  fmtDateTime,
+  fmtDateUtc as fmtDate,
+  fmtDateTimeUtc as fmtDateTime,
   fmtDecimal,
   fmtLoss,
   fmtScore,
@@ -143,6 +143,7 @@ export function buildReportModel(card: RepoCard): ReportModel {
     const metrics = metricsOf(card);
     if (withValue(metrics).length === 0) blocks.push(...indexNullSection(card));
     else blocks.push(...scoredSection(card, metrics));
+    blocks.push(...fraudBlock(card));
   }
   return {
     title: `Repo Health: ${slug}`,
@@ -837,6 +838,17 @@ const RAW_FIELD_SKIP = [/^provenance(\.|$)/];
 
 function rawFieldShown(field: string): boolean {
   return !RAW_FIELD_SKIP.some((re) => re.test(field));
+}
+
+/** В5 (К5.10): раздел фрода — только при флаге; подозрение, не оценка.
+ *  23.09: портирован в модель отчёта В4.9 при мерже v5 → main. */
+function fraudBlock(card: RepoCard): Block[] {
+  const fraud = card.ai?.fraud;
+  if (fraud === undefined || fraud === null || fraud.factors.length === 0) return [];
+  const out: Block[] = [h2("Подозрение на искусственную активность")];
+  out.push(para(line("Автоматический анализ нашёл pattern'ы, похожие на накрутку активности. Это подозрение для проверки человеком, а не приговор: оценка репозитория от него не меняется.")));
+  out.push({ kind: "list", items: fraud.factors.map((f) => [strong(f.key), text(` – ${f.note}`)] as InlineLine) });
+  return out;
 }
 
 function factStatusWord(status: string): string {

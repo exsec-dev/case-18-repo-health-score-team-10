@@ -22,10 +22,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { enumerateCatalog, type CatalogEntry, type CatalogResult } from "../collectors/catalog";
 import type { ScClient } from "../collectors/http";
-import { upsertRepo, runScan, scanCloneLimitsOf, type ScanResult } from "./runner";
+import { upsertRepo, runScan, scanCloneLimitsOf, scanGitUrl, type ScanResult } from "./runner";
 import { getPat } from "../auth/pat";
 import { makeScClient } from "../collectors/http";
 import { makeAppsecClient } from "../collectors/appsec";
+import { makeAutoSummary } from "../summary/pipeline";
+import { makeLlm } from "../llm";
+import { runSummary as runSummaryPipeline, type SummaryRunResult } from "../summary/pipeline";
+import { materializeWorktree, removeWorktree } from "../summary/tools";
+import { cleanupClone, cloneWithDegrade } from "../collectors/git";
 import { worstCaseScanMs, type Config } from "../config";
 import { getMetaValue, setMetaValue } from "../db";
 import { CATALOG_SUSPICIOUS_AT, SCHED_META } from "../api/health";
@@ -38,16 +43,23 @@ export interface ClaimedJob {
   /** автор заявки; null = периодика (серверный токен) */
   userId: number | null;
   triggerKind: string;
+  /** род заявки (В5, v2.0): scan | summary — summary исполняет AI-генерацию */
+  kind: string;
   /** метка заявки: продление лиза и finishJob — только своей заявки (К4) */
   claimedAt: string;
   /** номер попытки (после инкремента при claim) */
   attempts: number;
 }
 
-/** Активная (queued/running) заявка юзера на репо — для дедупа (К4). */
+/**
+ * Активная (queued/running) СКАН-заявка юзера на репо — для дедупа (К4).
+ * В5.1 (Прод-С1): фильтр kind='scan' — живая summary-заявка не перехватывает
+ * POST анализа (прежде клик «Сканировать» при живой генерации возвращал 202
+ * с id генерации, и скан не вставал никогда).
+ */
 export function findActiveUserJob(db: Database, userId: number, repoId: number): number | null {
   const row = db
-    .query("SELECT id FROM jobs WHERE user_id = ? AND repo_id = ? AND status IN ('queued', 'running') ORDER BY id LIMIT 1")
+    .query("SELECT id FROM jobs WHERE user_id = ? AND repo_id = ? AND kind = 'scan' AND status IN ('queued', 'running') ORDER BY id LIMIT 1")
     .get(userId, repoId) as { id: number } | null;
   return row ? row.id : null;
 }
@@ -69,20 +81,35 @@ export function recordRefusedUserJob(db: Database, userId: number, now = new Dat
   return Number(r.lastInsertRowid);
 }
 
-/** Активных (queued/running) юзерских заявок юзера — предел Config.queue.userActiveMax (Ф1.7). */
+/**
+ * Активных (queued/running) юзерских СКАН-заявок на юзера — предел
+ * Config.queue.userActiveMax (Ф1.7). В5.1 (Прод-С1): summary-заявки не
+ * занимают слоты анализов (у них свой кап — `countActiveSummaryJobs`).
+ */
 export function countActiveUserJobs(db: Database, userId: number): number {
   return (
-    db.query("SELECT COUNT(*) AS c FROM jobs WHERE user_id = ? AND status IN ('queued', 'running')").get(userId) as { c: number }
+    db.query("SELECT COUNT(*) AS c FROM jobs WHERE user_id = ? AND kind = 'scan' AND status IN ('queued', 'running')").get(userId) as { c: number }
   ).c;
 }
 
-/** Новых юзерских заявок за скользящий час, включая отказанные предпроверки (дубли строк не создают — не считаются). */
+/** В5.1 (Security-З3): активных summary-заявок юзера — свой кап (кредиты организаторов — сжигаемый ресурс). */
+export function countActiveSummaryJobs(db: Database, userId: number): number {
+  return (
+    db.query("SELECT COUNT(*) AS c FROM jobs WHERE user_id = ? AND kind = 'summary' AND status IN ('queued', 'running')").get(userId) as { c: number }
+  ).c;
+}
+
+/**
+ * Новых юзерских СКАН-заявок за скользящий час, включая отказанные
+ * предпроверки (дубли строк не создают — не считаются). В5.1 (Прод-С1):
+ * summary-постановки не съедают часовой лимит сканов.
+ */
 export function countRecentUserJobs(db: Database, userId: number, now = new Date()): number {
   const since = new Date(now.getTime() - 3600_000).toISOString();
   return (
-    db.query("SELECT COUNT(*) AS c FROM jobs WHERE user_id = ? AND trigger_kind = 'user' AND created_at > ?").get(userId, since) as {
-      c: number;
-    }
+    db
+      .query("SELECT COUNT(*) AS c FROM jobs WHERE user_id = ? AND kind = 'scan' AND trigger_kind = 'user' AND created_at > ?")
+      .get(userId, since) as { c: number }
   ).c;
 }
 
@@ -104,6 +131,71 @@ export function enqueueScan(
     .query(`INSERT INTO jobs (repo_id, status, user_id, trigger_kind, created_at) VALUES (?, 'queued', ?, ?, ?)`)
     .run(repoId, opts.userId ?? null, opts.triggerKind ?? "periodic", (opts.now ?? new Date()).toISOString());
   return Number(r.lastInsertRowid);
+}
+
+/** Итог постановки summary-заявки (В5; В5.1 добавляет cached и too_many). */
+export type SummaryEnqueue =
+  | { kind: "ok"; jobId: number }
+  | { kind: "active"; jobId: number }
+  | { kind: "cached" }
+  | { kind: "too_many"; activeMax: number }
+  | { kind: "cooldown"; until: string };
+
+/** В5.1 (Security-З3): дефолт пер-юзер капа активных summary-заявок (симметрично userActiveMax). */
+export const DEFAULT_SUMMARY_ACTIVE_MAX = 2;
+
+/**
+ * Постановка AI-генерации (clone-job, спека §3.4): jobs.kind='summary',
+ * полоса user (кнопка — юзерское действие). Гард:
+ *  - живая summary-заявка этого репо → active (дедуп по репо, не по юзеру —
+ *    генерация одна на скан);
+ *  - В5.1 (Ищейка-С1, кэш по скану): у последнего завершённого скана уже
+ *    есть ai_notes → cached (вторая генерация того же скана не запускается —
+ *    кнопка поверх авто-генерации дублировала девятку строк и сжигала кредиты);
+ *  - В5.1 (Security-З3): активных summary-заявок юзера ≥ activeMax → too_many;
+ *  - кулдаун per-repo Config.queue.summaryCooldownMs от последней
+ *    ПОСТАВЛЕННОЙ summary-заявки (включая failed — кредиты дороже повтора).
+ */
+export function enqueueSummary(
+  db: Database,
+  repoId: number,
+  opts: { userId: number; cooldownMs?: number; activeMax?: number; now?: Date; skipCached?: boolean },
+): SummaryEnqueue {
+  const active = db
+    .query("SELECT id FROM jobs WHERE repo_id = ? AND kind = 'summary' AND status IN ('queued', 'running') ORDER BY id DESC LIMIT 1")
+    .get(repoId) as { id: number } | null;
+  if (active !== null) return { kind: "active", jobId: active.id };
+  const scanId = lastFinishedScan(db, repoId);
+  // 23.09 (Алексей): кэш снимается ТЕМ же флагом, что и кулдаун, — дебаг
+  // (QUEUE_SUMMARY_COOLDOWN_MS=1) означает «генерацию гоняем постоянно»,
+  // кэш по скану в этом режиме только мешает итерации по хартиям
+  const cooldownMs = opts.cooldownMs ?? 60 * 60_000;
+  if ((opts.skipCached !== true) && cooldownMs > 1 && scanId !== null && db.query("SELECT 1 FROM ai_notes WHERE scan_id = ? LIMIT 1").get(scanId) !== null) {
+    return { kind: "cached" };
+  }
+  const activeMax = opts.activeMax ?? DEFAULT_SUMMARY_ACTIVE_MAX;
+  if (countActiveSummaryJobs(db, opts.userId) >= activeMax) return { kind: "too_many", activeMax };
+  const last = db
+    .query("SELECT created_at FROM jobs WHERE repo_id = ? AND kind = 'summary' AND created_at IS NOT NULL ORDER BY id DESC LIMIT 1")
+    .get(repoId) as { created_at: string } | null;
+  if (last !== null) {
+    const elapsed = (opts.now ?? new Date()).getTime() - Date.parse(last.created_at);
+    if (Number.isFinite(elapsed) && elapsed < cooldownMs) {
+      return { kind: "cooldown", until: new Date(Date.parse(last.created_at) + cooldownMs).toISOString() };
+    }
+  }
+  const r = db
+    .query("INSERT INTO jobs (repo_id, status, user_id, trigger_kind, kind, created_at) VALUES (?, 'queued', ?, 'user', 'summary', ?)")
+    .run(repoId, opts.userId, (opts.now ?? new Date()).toISOString());
+  return { kind: "ok", jobId: Number(r.lastInsertRowid) };
+}
+
+/** Последний ЗАВЕРШЁННЫЙ скан репо, пригодный для генерации (спека §3.4). */
+export function lastFinishedScan(db: Database, repoId: number): number | null {
+  const row = db
+    .query("SELECT id FROM scans WHERE repo_id = ? AND status IN ('ok', 'partial') ORDER BY id DESC LIMIT 1")
+    .get(repoId) as { id: number } | null;
+  return row?.id ?? null;
 }
 
 export interface ClaimOptions {
@@ -171,7 +263,7 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
                   id
          LIMIT 1
        )
-       RETURNING id, repo_id, user_id, trigger_kind, claimed_at, attempts`,
+       RETURNING id, repo_id, user_id, trigger_kind, kind, claimed_at, attempts`,
   );
   // В4.8.5 (К8.5.2b, С8-9): перехват заявки после истекшего лиза закрывает
   // её прежний `running`-скан того же (репо, автор) В ТОЙ ЖЕ транзакции, что
@@ -190,10 +282,15 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
       repo_id: number;
       user_id: number | null;
       trigger_kind: string;
+      kind: string;
       claimed_at: string;
       attempts: number;
     } | null;
-    if (row) {
+    // В5.1 (Ищейка-З4б): перехват СКАН-заявки закрывает её прежний running-скан.
+    // При claim summary-заявки живой running-скан того же (репо, автор) —
+    // чужой законный скан (например, юзерский анализ другой реплики): его
+    // нельзя помечать orphaned — у скана своя живая заявка со своим лизом.
+    if (row && row.kind !== "summary") {
       const closed = closeStale.run(nowIso, row.repo_id, row.user_id);
       if (closed.changes > 0) console.log(`[claim] job ${row.id}: stale running scans closed as orphaned: ${closed.changes}`);
     }
@@ -217,6 +314,7 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
     slug: `${repo.org_slug}/${repo.repo_slug}`,
     userId: claimed.user_id,
     triggerKind: claimed.trigger_kind,
+    kind: claimed.kind,
     claimedAt: claimed.claimed_at,
     attempts: claimed.attempts,
   };
@@ -663,6 +761,8 @@ export interface WorkerDeps {
   getPat?: typeof getPat;
   /** шов Б0: подмена claim (тест роняет БД внутри тика) */
   claimAny?: typeof claimAny;
+  /** шов В5: подмена конвейера генерации (тесты без LLM-мока) */
+  runSummary?: typeof runSummaryPipeline;
 }
 
 /**
@@ -709,6 +809,8 @@ export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<Sca
       restBase: deps.config.api.restBase,
       appsecBase: deps.config.api.appsecBase,
       appsecMinIntervalMs: deps.config.scan.rest.appsecMinIntervalMs,
+      // В5: авто-генерация в окне скана (оп-ин проверяется внутри фабрики)
+      summaryAutoRun: summaryAutoRunOf(deps),
     },
     job.slug,
     { userId: job.userId, userToken: pat, trigger: job.triggerKind },
@@ -718,6 +820,92 @@ export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<Sca
     return "gone";
   }
   return result;
+}
+
+/** Фабрика хука авто-генерации в окне скана (лениво: один callLlm на процесс). */
+let autoSummaryHook: ((ctx: { db: Database; repoId: number; scanId: number; org: string; repo: string; cloneDir: string }) => Promise<void>) | null = null;
+let autoSummaryConfig: Config | null = null;
+function summaryAutoRunOf(deps: WorkerDeps): (ctx: { db: Database; repoId: number; scanId: number; org: string; repo: string; cloneDir: string }) => Promise<void> {
+  if (autoSummaryHook === null || autoSummaryConfig !== deps.config) {
+    autoSummaryConfig = deps.config;
+    autoSummaryHook = makeAutoSummary(deps.config);
+  }
+  return autoSummaryHook;
+}
+
+/** Причины падения summary-заявки языком продукта (панель заданий). */
+export const SUMMARY_JOB_ERRORS = {
+  noPat: JOB_ERRORS.noPat,
+  noScan: "нет завершённого скана для генерации",
+  clone: (detail: string): string => `не удалось клонировать репозиторий: ${detail}`.slice(0, JOB_ERROR_MAX),
+  empty: "AI-описание не сформировано: ни один блок не прошёл проверку",
+  /** В5.1 (Прод-С3): провайдер недоступен (LlmError: сеть/429/5xx/stall) — не вина валидатора */
+  providerDown: "AI-провайдер недоступен: описание не сформировано (сеть или лимиты провайдера)",
+  internal: JOB_ERRORS.internal,
+} as const;
+
+/**
+ * В5.1 (Прод-С3): причина НУЛЕВОГО результата генерации — чистая функция.
+ * «Провайдер недоступен» — когда все несостоявшиеся роли упали на вызове
+ * модели (LlmError: сеть/429/5xx/stall, в reason — префикс «модель:»);
+ * роли без фактов (честный три-state, «нет фактов...») в классификации
+ * не участвуют. Иначе — «ни один блок не прошёл проверку».
+ */
+export function summaryEmptyErrorOf(res: Pick<SummaryRunResult, "outcomes">): string {
+  const failed = res.outcomes.filter((o) => !o.ok && !(o.reason ?? "").startsWith("нет фактов"));
+  const modelDown = failed.length > 0 && failed.every((o) => (o.reason ?? "").startsWith("модель:"));
+  return modelDown ? SUMMARY_JOB_ERRORS.providerDown : SUMMARY_JOB_ERRORS.empty;
+}
+
+/**
+ * Исполнить summary-заявку (В5, спека §3.4): PAT автора → клон (свежий,
+ * полный — история нужна git_log) → worktree → конвейер на фактах
+ * ПОСЛЕДНЕГО завершённого скана → ai_notes → уборка. Возвращает null при
+ * успехе или RU-причину для jobs.error. Score и очередь сканов не трогаются.
+ */
+export async function processSummaryJob(deps: WorkerDeps, job: ClaimedJob): Promise<string | null> {
+  const pat =
+    job.userId !== null && deps.config.auth.appSecret
+      ? (deps.getPat ?? getPat)(deps.db, deps.config.auth.appSecret, job.userId)
+      : null;
+  if (job.userId !== null && !pat) return SUMMARY_JOB_ERRORS.noPat;
+  const scanId = lastFinishedScan(deps.db, job.repoId);
+  if (scanId === null) return SUMMARY_JOB_ERRORS.noScan;
+  const limits = scanCloneLimitsOf(deps.config.scan);
+  const [org, repo] = job.slug.split("/");
+  const clone = await cloneWithDegrade(scanGitUrl(deps.config.api.gitBase, pat, org!, repo!), undefined, limits);
+  if (!clone.ok) return SUMMARY_JOB_ERRORS.clone(clone.detail.slice(0, 120));
+  let worktree: { root: string; gitDir: string } | null = null;
+  try {
+    worktree = await materializeWorktree(clone.dir);
+    const res: SummaryRunResult = await (deps.runSummary ?? runSummaryPipeline)(
+      {
+        db: deps.db,
+        org: org!,
+        repo: repo!,
+        callLlm: makeLlm(deps.config),
+        clone: { root: worktree.root, gitDir: worktree.gitDir },
+        models: { main: deps.config.llm.mainModel, side: deps.config.llm.sideModel },
+        // 23.09 (Алексей): дебаг-куладаун (1 мс) снимает и внутренний кэш
+        // пайплайна — регенерация перезаписывает заметки того же скана
+        cache: (deps.config.queue.summaryCooldownMs ?? 60 * 60_000) > 1,
+        // В5.1 (Прод-С3): лог-шов подключён — итог и outcomes с причинами
+        // видны оператору в консоли процесса
+        log: (m) => console.log(m),
+      },
+      { scanId },
+    );
+    // В5.1 (Ищейка-С1): кэш по скану — заметки уже были, генерации не было → задание done
+    if (res.cached === true) return null;
+    if (res.notes > 0) return null;
+    // В5.1 (Прод-С3): нулевой фейл различает «провайдер недоступен» от
+    // «ни один блок не прошёл валидацию» (классификация — ниже, чистая функция)
+    return summaryEmptyErrorOf(res);
+  } finally {
+    if (worktree !== null) await removeWorktree(worktree.root, worktree.gitDir);
+    const cleanupError = cleanupClone(clone.dir);
+    if (cleanupError) console.error(`[summary job ${job.id}] cleanup ${clone.dir}: ${cleanupError}`);
+  }
 }
 
 // ---------- циклы процесса сервера ----------
@@ -864,18 +1052,25 @@ export async function workerTick(
     );
   }, Math.max(1, Math.floor(leaseMs / 3)));
   try {
-    const result = await processJob(deps, claimed);
-    // П8: причина падения — в jobs.error, панель заданий показывает её дословно
-    const failure =
-      result === "gone"
-        ? JOB_ERRORS.gone
-        : result === "no-pat"
-          ? JOB_ERRORS.noPat
-          : result.scoreFailed === true
-            ? JOB_ERRORS.scoreFailed
-            : result.status === "bad"
-              ? JOB_ERRORS.channels(failedChannelsOf(result.channels))
-              : null;
+    // В5: род заявки определяет исполнителя — summary генерирует текст,
+    // scan собирает факты; итог в jobs.error одинаково честный
+    let failure: string | null;
+    if (claimed.kind === "summary") {
+      failure = await processSummaryJob(deps, claimed);
+    } else {
+      const result = await processJob(deps, claimed);
+      // П8: причина падения — в jobs.error, панель заданий показывает её дословно
+      failure =
+        result === "gone"
+          ? JOB_ERRORS.gone
+          : result === "no-pat"
+            ? JOB_ERRORS.noPat
+            : result.scoreFailed === true
+              ? JOB_ERRORS.scoreFailed
+              : result.status === "bad"
+                ? JOB_ERRORS.channels(failedChannelsOf(result.channels))
+                : null;
+    }
     // К8.5.12 (С10-2): итог задания — с повтором SQLITE_BUSY: готовый скан не
     // оставляет задание `running` до лиза и не сжигает попытку повтором
     await withBusyRetry(
@@ -954,7 +1149,7 @@ export function startWorkerLoop(
  * Возраст, начиная с которого каталог клона считается осиротевшим (Ф2.19):
  * живой скан держит клон всё время своей работы, а портовый час был короче —
  * свип сносил каталог из-под работающего git, и скан падал «сам по себе».
- * В4.8.5 (К8.5.2b): возраст — от ХУДШЕГО СКАНА (`worstCaseScanMs`, 85 мин на
+ * В4.8.5 (К8.5.2b): возраст — от ХУДШЕГО СКАНА (`worstCaseScanMs`, 91 мин на
  * дефолтах), а не от лиза: при лизе 10 мин прежняя формула `max(2·лиз, 60 мин)`
  * дала бы 60 мин < 85 и вернула дефект Ф2.19, а обслуживание в любой роли
  * сносило бы клоны соседнего процесса. Мерило каталога клона — длина скана.

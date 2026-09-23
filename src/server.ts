@@ -53,6 +53,11 @@ import { REPORT_NO_SCORE } from "./report/build";
 import { reportFileName } from "./web/format";
 import { pdfResponse } from "./report/pdf";
 import { catalogClientBudget, closeOwnRunningScans, maintenanceTick, returnOwnRunningJobs, startMaintenance, startScheduler, startWorkerLoop } from "./jobs/scheduler";
+import { enqueueSummary } from "./jobs/scheduler";
+import { setSummaryAuto } from "./summary/optin";
+import { getAiNotesHistory, getRepoHistory } from "./api/history";
+import { BADGE_CACHE_SECONDS, getPublicRepo, renderBadgeSvg } from "./api/public";
+import { NO_PAT_ACCESS } from "./auth/access";
 import { killActiveClones } from "./collectors/git";
 import {
   clearOAuthStateCookieHeader,
@@ -63,6 +68,7 @@ import {
   makeOAuthState,
   oauthStateCookieHeader,
   oauthStateFromCookie,
+  loopbackOriginRedirect,
   parseCookies,
   sessionCookieHeader,
   SESSION_TTL_MS,
@@ -73,6 +79,7 @@ import {
 import { deletePat, getPat, patMeta, patReadable, storePat } from "./auth/pat";
 import { buildAuthUrl, exchangeCode, yaAvatarUrl, type YaEndpoints } from "./auth/ya";
 import { makeScClient } from "./collectors/http";
+import { listSourcecraftRepos } from "./api/me";
 import { needsRescore, runStartupRescore, RESCORE_ERROR } from "./score/rescore";
 import index from "./web/index.html";
 
@@ -88,6 +95,42 @@ const myReposViews = new Map<number, number[]>();
 // доступа): минутное окно на ЗАЛОГИНЕННОГО зрителя; аноним — без лимита
 // (публичная карточка в сеть не ходит, проб нет).
 const cardViews = new Map<number, number[]>();
+// В5: запросов генерации описания на юзера в минуту (кнопка; кулдаун репо — отдельно)
+const summaryPosts = new Map<number, number[]>();
+const SUMMARY_POSTS_PER_MINUTE = 6;
+// В5 (К5.8): badge и публичный API — свой лимит по IP (README дергает badge чаще UI)
+const badgeHits = new Map<string, number[]>();
+const BADGE_PER_MINUTE_PER_IP = 120;
+// В5.1 (Прод-С2/Security-М6): потолок карты — спуфабельный XFF не растит память бесконечно
+const BADGE_KEYS_CAP = 10_000;
+function badgeWindowHasRoom(req: Request, now = Date.now()): boolean {
+  const key = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+  const windowMs = 60_000;
+  // чистка ВСЕЙ карты на каждый вызов (по образцу allowInWindow) + вытеснение
+  // старейших ключей сверх капа (Map хранит порядок вставки)
+  for (const [id, stamps] of badgeHits) {
+    const alive = stamps.filter((t) => now - t < windowMs);
+    if (alive.length === 0) badgeHits.delete(id);
+    else badgeHits.set(id, alive);
+  }
+  while (badgeHits.size >= BADGE_KEYS_CAP) {
+    const oldest = badgeHits.keys().next().value;
+    if (oldest === undefined) break;
+    badgeHits.delete(oldest);
+  }
+  const hits = badgeHits.get(key) ?? [];
+  if (hits.length >= BADGE_PER_MINUTE_PER_IP) return false;
+  hits.push(now);
+  badgeHits.set(key, hits);
+  return true;
+}
+/** Одинаковый 404 для приватного, эвицтированного и несуществующего (К5.8). */
+function publicNotFound(): Response {
+  return new Response("not found", {
+    status: 404,
+    headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
+  });
+}
 // В4.4 (кластер K/З6): churn-цикл PUT/DELETE избранного деградирует БД —
 // минутное окно мутаций на юзера (добавление/снятие звезды).
 const favMutations = new Map<number, number[]>();
@@ -363,6 +406,7 @@ async function cardOrRefusal(req: Request, org: string, repo: string): Promise<R
     limits: config.scan,
     viewerUserId: viewer?.userId,
     viewerAuth: auth,
+    summaryCooldownMs: config.queue.summaryCooldownMs,
     provenRights: () => viewer !== null && viewerMayReadRepo(db, viewer.userId, org, repo, { savedRightsValid: auth === "pat" }),
   });
   if (out.kind === "card") return out.card;
@@ -587,6 +631,186 @@ const routes = {
       if (!card.score) return notFound(REPORT_NO_SCORE);
       return pdfResponse(card);
     },
+    // ---------- В5 (К5.8): публичный API и badge ----------
+    // Без авторизации, только rating_active публичные; приватный/эвицтированный/
+    // несуществующий — одинаковый 404. Отдельный лимит по IP (badge дергают
+    // из README, он не должен мешать интерактиву); кэш-заголовки на 200.
+    "/api/v1/repos/:org/:repo": (req) => {
+      const { org, repo } = req.params;
+      if (!validSlugSegment(org) || !validSlugSegment(repo)) return notFound("not found");
+      if (!badgeWindowHasRoom(req)) return rateLimited("слишком много запросов – попробуйте позже", 60);
+      const proj = getPublicRepo(db, org!, repo!);
+      if (proj === null) return publicNotFound();
+      return Response.json(proj, { headers: { "cache-control": `public, max-age=${BADGE_CACHE_SECONDS}` } });
+    },
+    "/api/v1/repos/:org/:repo/badge.svg": (req) => {
+      const { org, repo } = req.params;
+      if (!validSlugSegment(org) || !validSlugSegment(repo)) return notFound("not found");
+      if (!badgeWindowHasRoom(req)) return rateLimited("слишком много запросов – попробуйте позже", 60);
+      const proj = getPublicRepo(db, org!, repo!);
+      if (proj === null) return publicNotFound();
+      return new Response(renderBadgeSvg(proj.healthcraftIndex), {
+        headers: {
+          "content-type": "image/svg+xml; charset=utf-8",
+          "cache-control": `public, max-age=${BADGE_CACHE_SECONDS}`,
+        },
+      });
+    },
+    // ---------- В5 (К5.7): история оценки и история LLM-взглядов ----------
+    // Публичная проекция строк scores + scans.head_sha; полного Score без
+    // прав нет, эвицтированный/приватный — 404 неотличимо от несуществующего
+    "/api/repos/:org/:repo/history": async (req) => {
+      const { org, repo } = req.params;
+      if (!validSlugSegment(org) || !validSlugSegment(repo)) {
+        return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
+      }
+      const viewer = sessionOf(req);
+      // В5.1 (Прод-З2/Security-З4): то же минутное окно, что у карточки —
+      // залогиненный не дергает историю без лимита по списку репо
+      if (viewer && !allowCardView(viewer.userId)) return cardRateLimited(viewer.userId);
+      const access = viewer === null ? NO_PAT_ACCESS : await viewerAccess(req)({ id: 0, org: org!, repo: repo!, visibility: "unknown" });
+      const history = getRepoHistory(db, org!, repo!, { access });
+      if (history === null) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
+      return Response.json(history);
+    },
+    // Текст — никогда не публичен (решение 22.09): не видно репо → 404,
+    // видно, но полный Score закрыт → 403 locked с честной причиной
+    "/api/repos/:org/:repo/ai-notes": async (req) => {
+      const { org, repo } = req.params;
+      if (!validSlugSegment(org) || !validSlugSegment(repo)) {
+        return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
+      }
+      const viewer = sessionOf(req);
+      // В5.1 (Прод-З2/Security-З4): то же минутное окно, что у карточки
+      if (viewer && !allowCardView(viewer.userId)) return cardRateLimited(viewer.userId);
+      const access = viewer === null ? NO_PAT_ACCESS : await viewerAccess(req)({ id: 0, org: org!, repo: repo!, visibility: "unknown" });
+      const notes = getAiNotesHistory(db, org!, repo!, { access });
+      if (notes === null) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
+      if (notes.locked) return Response.json({ error: { code: "locked", message: notes.reason } }, { status: 403 });
+      return Response.json(notes);
+    },
+    // ---------- В5 (К5.4): AI-описание — кнопка (POST) и оп-ин (DELETE) ----------
+    // Генерация — только владельцу («свой» по общему правилу карточки, fail-closed);
+    // POST ставит summary-заявку (кулдаун и дедуп — в enqueueSummary) и включает
+    // автозапуск на следующих сканах (решение 15.09); DELETE выключает автозапуск.
+    "/api/repos/:org/:repo/summary": {
+      POST: async (req) => {
+        const csrf = guardOrigin(req);
+        if (csrf) return csrf;
+        const user = sessionOf(req);
+        if (!user) return unauthorized();
+        const { org, repo } = req.params;
+        if (!validSlugSegment(org) || !validSlugSegment(repo)) {
+          return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
+        }
+        if (!windowHasRoom(summaryPosts, user.userId, SUMMARY_POSTS_PER_MINUTE, 60_000)) {
+          return rateLimited("слишком много запросов генерации – попробуйте позже", windowRetryAfterSec(summaryPosts, user.userId, 60_000));
+        }
+        // В5.1 (Security-З2): окно списывается ДО живых проб PAT и own-гейта —
+        // перебор чужих slug'ов больше не бесплатен (каждый отказ нёс до
+        // 4 REST + 2 AppSec запросов PAT зрителя при нулевой цене окна)
+        windowPush(summaryPosts, user.userId);
+        const card = await cardOrRefusal(req, org!, repo!);
+        if (card instanceof Response) return card;
+        if (card.viewer?.own !== true) {
+          return Response.json({ error: { code: "not_own", message: "генерация описания доступна владельцу репозитория" } }, { status: 403 });
+        }
+        const repoRow = db.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number } | null;
+        if (repoRow === null) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
+        // 23.09 (Алексей): «Обновить описание» без свежего анализа бессмысленна —
+        // кнопка запускает полный цикл: сначала скан, затем генерация по нему.
+        // Кулдаун проверяем ДО скана, чтобы не запускать анализ зря.
+        const cooldownMs = config.queue.summaryCooldownMs ?? 60 * 60_000;
+        const lastSummary = db
+          .query("SELECT created_at FROM jobs WHERE repo_id = ? AND kind = 'summary' AND created_at IS NOT NULL ORDER BY id DESC LIMIT 1")
+          .get(repoRow.id) as { created_at: string } | null;
+        if (lastSummary !== null && cooldownMs > 1) {
+          const elapsed = Date.now() - Date.parse(lastSummary.created_at);
+          if (Number.isFinite(elapsed) && elapsed < cooldownMs) {
+            return Response.json(
+              { error: { code: "cooldown", message: "описание недавно формировалось – следующий запуск будет доступен позже", until: new Date(Date.parse(lastSummary.created_at) + cooldownMs).toISOString() } },
+              { status: 429 },
+            );
+          }
+        }
+        // свежий скан best-effort: при лимитах (час/активные) генерация пойдёт
+        // по последнему скану, и пользователь получит честный toast
+        let scanQueued = false;
+        const scanClient = userClient(user.userId);
+        if (scanClient !== null) {
+          const scanOut = await requestUserScan(db, scanClient, user.userId, org!, repo!, config.queue, new Date());
+          scanQueued = scanOut.status === 202;
+        }
+        const out = enqueueSummary(db, repoRow.id, {
+          userId: user.userId,
+          cooldownMs: config.queue.summaryCooldownMs,
+          activeMax: config.queue.summaryActiveMax,
+          skipCached: scanQueued,
+        });
+        // В5.1 (Ищейка-С1): кэш по скану — заметки последнего скана есть, честный
+        // ответ без второй генерации; оп-ин всё равно включается (кнопка = намерение)
+        if (out.kind === "cached") {
+          setSummaryAuto(db, user.userId, `${org}/${repo}`, true);
+          // 23.09: отказ кэша не молчит — оператор видит в stdout, почему кнопка
+          // не создала заявку (и что новый скан даст новую генерацию)
+          console.log(`[summary] ${org}/${repo}: POST поверх готовых заметок последнего скана — кэш, заявка не создана`);
+          return Response.json({ ok: true, jobId: null, auto: true, cached: true, queued: false, scanQueued: false });
+        }
+        if (out.kind === "too_many") {
+          return Response.json(
+            { error: { code: "too_many_active", message: `не больше ${out.activeMax} генераций описания в очереди одновременно – дождитесь завершения` } },
+            { status: 429 },
+          );
+        }
+        if (out.kind === "cooldown") {
+          return Response.json(
+            { error: { code: "cooldown", message: "описание недавно формировалось – следующий запуск будет доступен позже", until: out.until } },
+            { status: 429 },
+          );
+        }
+        // кнопка = оп-ин: автозапуск на следующих сканах этого репо (решение 15.09)
+        setSummaryAuto(db, user.userId, `${org}/${repo}`, true);
+        return Response.json({ ok: true, jobId: out.jobId, auto: true, queued: out.kind === "active", scanQueued });
+      },
+      DELETE: async (req) => {
+        const csrf = guardOrigin(req);
+        if (csrf) return csrf;
+        const user = sessionOf(req);
+        if (!user) return unauthorized();
+        const { org, repo } = req.params;
+        if (!validSlugSegment(org) || !validSlugSegment(repo)) {
+          return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
+        }
+        setSummaryAuto(db, user.userId, `${org}/${repo}`, false);
+        return Response.json({ ok: true, auto: false });
+      },
+    },
+    // Тумблер «Пересчитывать при каждом скане» (23.09, репорт Алексея
+    // «по переключению автообновления задача добавилась в очередь — недопустимо»):
+    // переключатель — ТОЛЬКО политика на будущие сканы и заявок не ставит;
+    // генерацию сейчас запускает кнопка (POST /summary). Гард «свой» — тот же,
+    // что у POST: переключатель рисуется только владельцу, сервер не доверяет экрану.
+    "/api/repos/:org/:repo/summary-auto": {
+      PUT: async (req) => {
+        const csrf = guardOrigin(req);
+        if (csrf) return csrf;
+        const user = sessionOf(req);
+        if (!user) return unauthorized();
+        const { org, repo } = req.params;
+        if (!validSlugSegment(org) || !validSlugSegment(repo)) {
+          return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
+        }
+        const body = (await req.json().catch(() => null)) as { on?: unknown } | null;
+        if (typeof body?.on !== "boolean") return badQuery("укажите on: true или on: false");
+        const card = await cardOrRefusal(req, org!, repo!);
+        if (card instanceof Response) return card;
+        if (card.viewer?.own !== true) {
+          return Response.json({ error: { code: "not_own", message: "режим автогенерации доступен владельцу репозитория" } }, { status: 403 });
+        }
+        setSummaryAuto(db, user.userId, `${org}/${repo}`, body.on);
+        return Response.json({ ok: true, auto: body.on });
+      },
+    },
     // ---------- auth: Я ID OAuth (Б1) ----------
     // Вход ВСЕГДА с выбором аккаунта (решение владельца 21.09). Наш «Выход»
     // отзывает только нашу сессию — сессия Яндекса живёт в его домене и
@@ -595,9 +819,18 @@ const routes = {
     // `force_confirm=yes` показывает экран выбора; цена — один лишний клик
     // при обычном входе, и она принята ради того, чтобы вход вообще был
     // управляемым. Отдельной кнопки «в другой аккаунт» больше нет.
-    "/auth/ya": () => {
+    "/auth/ya": (req) => {
       if (!config.auth.appSecret) {
         return Response.json({ error: { code: "unconfigured", message: "вход на сервере не настроен – обратитесь к администратору" } }, { status: 503 });
+      }
+      // 23.09 (репорт Алексея «вход со второй попытки»): петлевой алиас хоста
+      // (127.0.0.1 при redirect_uri на localhost — или наоборот) рвал первую
+      // попытку: state-cookie оставалась на хосте входа, а callback Яндекс
+      // отдает на хост redirect_uri. Вход сначала канонизируется — state и
+      // callback живут в одной банке кук.
+      const hop = loopbackOriginRedirect(new URL(req.url), config.auth.redirect);
+      if (hop !== null) {
+        return new Response(null, { status: 302, headers: { location: hop } });
       }
       try {
         const state = makeOAuthState();
@@ -786,6 +1019,24 @@ const routes = {
       // другую личность (выход/вход другим аккаунтом в соседней вкладке),
       // замечает расхождение на ближайшем опросе и перечитывает /api/me
       return Response.json({ login: user.login, ...myJobs(db, user.userId) });
+    },
+    // Парковка 23.09 (организаторы: /me/repos): пикер «своих» репозиториев —
+    // только по PAT зрителя, то же минутное окно чтений, что у кабинета
+    "/api/me/sourcecraft-repos": async (req) => {
+      const user = sessionOf(req);
+      if (!user) return unauthorized();
+      const pat = patOf(user.userId);
+      if (pat === null) return Response.json({ error: { code: "no_pat" } }, { status: 409 });
+      if (!allowMyReposView(user.userId)) {
+        return rateLimited(
+          `не больше ${config.queue.myReposPerMinute} обновлений списка в минуту – попробуйте позже`,
+          windowRetryAfterSec(myReposViews, user.userId, 60_000),
+        );
+      }
+      const client = makeScClient({ retry: INTERACTIVE_RETRY, token: pat, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 3, timeoutMs: config.scan.rest.timeoutMs });
+      const result = await listSourcecraftRepos(client);
+      if (result.status === "source_http") return Response.json({ error: { code: "source_http" } }, { status: 502 });
+      return Response.json({ repos: result.repos, partial: result.partial });
     },
     "/api/me/favorites": async (req) => {
       const user = sessionOf(req);
@@ -991,7 +1242,7 @@ console.log(`  role: ${role} (PROCESS_ROLE)`);
 void maintenanceTick(db, config);
 
 // В4.4 (кластер L/З1 код-аудита): SIGTERM/SIGINT — ШТАТНОЕ завершение ≤ 5 с,
-// а не мгновенный выход с сиротами до лиза (85 мин) и свипа (170 мин):
+// а не мгновенный выход с сиротами до лиза (91 мин) и свипа (182 мин):
 // перестаём принимать, свои running-заявки возвращаем в queued (claimed_at
 // NULL, попытка откатывается — В4.8.5, К8.5.2a: остановка не считается попыткой), живые группы
 // клонов гасим, таймеры снимаем.
@@ -1037,3 +1288,5 @@ console.log(`repo-health слушает http://127.0.0.1:${server.port}`);
 console.log(`  llm: ${config.llm.provider} (main=${config.llm.mainModel}, side=${config.llm.sideModel})`);
 console.log(`  sourcecraft token: ${config.sourcecraftToken ? "есть" : "НЕТ (зонд 401)"}`);
 console.log(`  scheduler: интервал ${Math.round(config.scheduler.intervalMs / 60000)} мин, форс-полный ${config.scheduler.fullRescan ? "ВКЛ" : "выкл"}`);
+// 23.09: кулдаун генерации виден сразу — рассинхрон .env с процессом ловится по stdout
+console.log(`  summary cooldown: ${config.queue.summaryCooldownMs ?? 3_600_000} ms, кэш по скану ${(config.queue.summaryCooldownMs ?? 3_600_000) > 1 ? "ВКЛ" : "выкл (дебаг)"}`);

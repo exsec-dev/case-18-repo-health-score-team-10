@@ -60,6 +60,49 @@ function fullOkClient(overrides: Array<[string, ScResponse]> = []): ScClient & {
   return routerClient(table);
 }
 
+test("cicd.runs: green_streak — серия зелёных с конца; running серию не рвёт; events/errors собираются (23.09)", async () => {
+  const runs = [
+    {
+      status: "failed",
+      event_type: "push",
+      dates: { started_at: "2026-09-15T10:00:00Z", finished_at: "2026-09-15T10:00:30Z" },
+      workflows: [{ slug: "check", status: "failed" }],
+      error_messages: ["Step build exited 1"],
+    },
+    { status: "success", event_type: "push", dates: { started_at: "2026-09-15T09:00:00Z", finished_at: "2026-09-15T09:00:25Z" } },
+    { status: "running", event_type: "manual", dates: { started_at: "2026-09-15T08:00:00Z", finished_at: "2026-09-15T08:00:20Z" } },
+    { status: "success", event_type: "push", dates: { started_at: "2026-09-15T07:00:00Z", finished_at: "2026-09-15T07:00:22Z" } },
+    { status: "success", event_type: "push", dates: { started_at: "2026-09-15T06:00:00Z", finished_at: "2026-09-15T06:00:24Z" } },
+  ];
+  const client = fullOkClient([["/repos/o/r/cicd/runs", ok({ runs })]]);
+  const out = await collectRestFacts(client, "o/r", { commentsTopN: 3 });
+  const v = (k: string) => new Map(out.facts.map((f) => [f.key, f])).get(k)!.value as Record<string, unknown>;
+  // самый свежий failed → серия с конца нулевая, хотя 3 из 5 зелёные
+  expect(v("cicd.runs").green_streak).toBe(0);
+  expect(v("cicd.runs").last_status).toBe("failed");
+  expect(v("cicd.runs").success_rate).toBe(0.6);
+  // событийный разрез и разбор красного прогона: виновник и текст ошибки
+  expect(v("cicd.runs").events).toEqual({ push: 4, manual: 1 });
+  expect(v("cicd.runs").failed_workflows).toEqual(["check"]);
+  expect(v("cicd.runs").error_top).toEqual(["Step build exited 1"]);
+});
+
+test("cicd.runs: weighted_success_rate — ленты свежести Алексея (свежие прогоны весомее, старше года — 0)", async () => {
+  const runs = [
+    // свежий красный (1 день) и старые зелёные (60-100 дней, вес 10 и 5)
+    { status: "failed", dates: { started_at: "2026-09-15T10:00:00Z", finished_at: "2026-09-15T10:00:30Z" } },
+    { status: "success", dates: { started_at: "2026-09-15T09:00:00Z", finished_at: "2026-09-15T09:00:25Z" } },
+    { status: "success", dates: { started_at: "2026-09-14T09:00:00Z", finished_at: "2026-09-14T09:00:25Z" } },
+    { status: "success", dates: { started_at: "2026-07-01T09:00:00Z", finished_at: "2026-07-01T09:00:25Z" } },
+  ];
+  const client = fullOkClient([["/repos/o/r/cicd/runs", ok({ runs })]]);
+  const out = await collectRestFacts(client, "o/r", { commentsTopN: 3, now: new Date("2026-09-16T09:00:00Z") });
+  const v = (k: string) => new Map(out.facts.map((f) => [f.key, f])).get(k)!.value as Record<string, unknown>;
+  // веса: красный (1д) = 30, зелёные (1д, 2д, 76д) = 30+30+10 → 70/100 = 0.7
+  // против простой доли 0.75 — свежий провал тянет вниз сильнее старого успеха
+  expect(v("cicd.runs").weighted_success_rate).toBe(0.68);
+});
+
 describe("fetchResource: классификация ошибок канала", () => {
   test("403 → access, 429 → bad-channel, 500 → bad-channel, сеть → bad-channel", async () => {
     const mk = (res: ScResponse) => routerClient([[(p) => p.includes("/cicd/runs"), res]]);
@@ -117,6 +160,7 @@ describe("collectRestFacts: факты из живых форм", () => {
     expect(v("cicd.runs").last_status).toBe("success");
     expect(v("cicd.runs").success_rate).toBe(1);
     expect(v("cicd.runs").runs_count).toBe(2);
+    expect(v("cicd.runs").green_streak).toBe(2); // обе зелёные подряд с конца
     expect(v("cicd.runs").duration_p50).toBeGreaterThan(20); // фиксстура: ~22-24с ран
 
     // метa: title/language/likes/last_activity

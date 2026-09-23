@@ -65,7 +65,7 @@ describe("boot", () => {
     expect((db2.query("SELECT COUNT(*) AS c FROM scores").get() as { c: number }).c).toBe(0);
     // факты/сканы/репо не тронуты
     expect((db2.query("SELECT COUNT(*) AS c FROM facts").get() as { c: number }).c).toBe(1);
-    expect((db2.query("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value: string }).value).toBe("1.9");
+    expect((db2.query("SELECT value FROM meta WHERE key = 'schema_version'").get() as { value: string }).value).toBe(SCHEMA_VERSION);
     db2.close();
   });
 

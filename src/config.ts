@@ -6,6 +6,7 @@
 // дефолты в коде ← env (.env — правка без GUI/CI). Пользовательский
 // DB-override бюджетов удалён (К5 В4.1): лимиты скана — только оператор.
 import { DEFAULT_YA_ENDPOINTS } from "./auth/ya";
+import { DEFAULT_ZAI_BASE_URL } from "./llm";
 
 export interface CloneLimits {
   /** таймаут субпроцесса клонирования */
@@ -115,6 +116,17 @@ export interface QueueConfig {
   /** мутаций избранного (PUT/DELETE звезды) на юзера в минуту (В4.4, кластер K/З6): 30, env QUEUE_FAVORITES_MUTATIONS_PER_MINUTE.
    *  Optional — как cardPerMinute: замороженные аудит-литералы QueueConfig не правятся. */
   favoritesMutationsPerMinute?: number;
+  /** кулдаун генерации AI-summary на репозиторий (В5, спека §3.4): 60 мин,
+   *  env QUEUE_SUMMARY_COOLDOWN_MS. Кэш по скану (заметки уже есть —
+   *  генерации нет) и оп-ин сужают поверхность; кулдаун держит кредиты.
+   *  Optional ТОЛЬКО для старых литералов QueueConfig в замороженных
+   *  аудит-тестах (как cardPerMinute); loadConfig задаёт всегда. */
+  summaryCooldownMs?: number;
+  /** В5.1 (Security-З3): активных summary-заявок на юзера, сверх — 429
+   *  too_many_active (симметрично userActiveMax): 2, env QUEUE_SUMMARY_ACTIVE_MAX.
+   *  Optional ТОЛЬКО для старых литералов QueueConfig в замороженных
+   *  аудит-тестах (как summaryCooldownMs); loadConfig задаёт всегда. */
+  summaryActiveMax?: number;
 }
 
 export interface AccessConfig {
@@ -178,6 +190,10 @@ export interface Config {
     provider: "yandex" | "zai";
     mainModel: string;
     sideModel: string;
+    /** OpenAI-совместимый base URL (В5, К5.19): env LLM_BASE_URL — локальный
+     *  дев-цикл (Ollama/LM Studio/vLLM) и зонд тарифа; null = дефолт z.ai.
+     *  Только https, кроме localhost/127.0.0.1 (как apiBaseFromEnv). */
+    baseUrl: string | null;
     yandexApiKey: string | null;
     yandexFolderId: string | null;
     zaiApiKey: string | null;
@@ -246,16 +262,27 @@ export function scanFromEnv(env: Record<string, string>): ScanConfig {
 }
 
 /**
+ * Агрегатные капы генерации (спека В5 §3.3). В5.1 переехали из pipeline в
+ * config: формула худшего скана включает фуз генерации, а config не может
+ * импортировать pipeline (цикл).
+ */
+export const MAX_MODEL_CALLS = 48;
+export const GENERATION_FUSE_MS = 6 * 60_000;
+
+/**
  * ЧЕСТНЫЙ худший случай одного скана (Ф2.19, К4) — клон + (деградационный
- * ярус, если включён) + извлечение + 15 мин запаса; на дефолтах
- * 20 + 25 + 25 + 15 = 85 мин.
+ * ярус, если включён) + извлечение + фуз авто-генерации в окне скана + 15 мин
+ * запаса; на дефолтах 20 + 25 + 25 + 6 + 15 = 91 мин.
  * В4.8.5 (К8.5.2b, решение владельца §2-В2): это больше НЕ пол лиза (функция
  * называлась `leaseFloorMs`). Им меряется то, что живёт столько же, сколько
  * скан: возраст свипа каталогов клонов (свип не сносит клон работающего git —
  * дефект Ф2.19) и признак «задание зависло» в health.
+ * В5.1 (Прод-мелочь 7): фуз генерации (GENERATION_FUSE_MS) включён в формулу
+ * явно — подъём фуза выше ~10 мин без правки формулы открывал гонку «свип
+ * сносит клон под живой генерацией».
  */
 export function worstCaseScanMs(scan: ScanConfig): number {
-  return scan.clone.timeoutMs + (scan.degrade.enabled ? scan.degrade.timeoutMs : 0) + scan.extract.timeoutMs + 15 * 60_000;
+  return scan.clone.timeoutMs + (scan.degrade.enabled ? scan.degrade.timeoutMs : 0) + scan.extract.timeoutMs + GENERATION_FUSE_MS + 15 * 60_000;
 }
 
 /**
@@ -344,11 +371,14 @@ export function loadConfig(): Config {
       favoritesMax: envInt(env, "QUEUE_FAVORITES_MAX") ?? 500,
       cardPerMinute: envInt(env, "QUEUE_CARD_PER_MINUTE") ?? 30,
       favoritesMutationsPerMinute: envInt(env, "QUEUE_FAVORITES_MUTATIONS_PER_MINUTE") ?? 30,
+      summaryCooldownMs: envInt(env, "QUEUE_SUMMARY_COOLDOWN_MS") ?? 60 * 60_000,
+      summaryActiveMax: envInt(env, "QUEUE_SUMMARY_ACTIVE_MAX") ?? 2,
     },
     llm: {
       provider,
       mainModel,
       sideModel: env.SIDE_MODEL ?? mainModel,
+      baseUrl: env.LLM_BASE_URL ? apiBaseFromEnv(env, "LLM_BASE_URL", DEFAULT_ZAI_BASE_URL) : null,
       yandexApiKey: env.YAGPT_API_KEY ?? null,
       yandexFolderId: env.YAGPT_FOLDER_ID ?? null,
       zaiApiKey: env.ZAI_API_KEY ?? null,

@@ -86,6 +86,21 @@ describe("Ф2.10 (M10): маршруты /auth/* с моком Я ID", () => {
     expect(res.headers.getSetCookie().join(";")).toContain("rh_oauth_state");
   });
 
+  test("23.09: вход с петлевого алиаса redirect_uri канонизируется — state-cookie не встает на чужой хост", async () => {
+    // канонический харнессом хост — 127.0.0.1 (YA_REDIRECT_URI); вход с
+    // localhost — алиас того же сервера: 302 на канонический /auth/ya, без
+    // state-cookie (она встанет уже после переезда) и без вызова Я ID
+    const viaAlias = at("/auth/ya").replace("127.0.0.1", "localhost");
+    const res = await fetch(viaAlias, { redirect: "manual" });
+    expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBe(`${server!.base}/auth/ya`);
+    expect(res.headers.getSetCookie()).toEqual([]);
+    // после переезда вход с канонического хоста работает как раньше
+    const canon = await fetch(at("/auth/ya"), { redirect: "manual" });
+    expect(new URL(canon.headers.get("location")!).hostname).toBe("127.0.0.1");
+    expect(canon.headers.getSetCookie().join(";")).toContain("rh_oauth_state");
+  });
+
   test("callback с валидным state: сессия создана, редирект на /me, вход работает", async () => {
     const start = await fetch(at("/auth/ya"), { redirect: "manual" });
     const state = new URL(start.headers.get("location")!).searchParams.get("state")!;

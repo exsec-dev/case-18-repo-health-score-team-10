@@ -16,6 +16,7 @@ import {
   cookieNames,
   createSession,
   getSessionUser,
+  loopbackOriginRedirect,
   makeOAuthState,
   oauthStateCookieHeader,
   parseCookies,
@@ -36,6 +37,21 @@ afterAll(() => {
 const SECRET = "test-app-secret-0123456789abcdef";
 
 describe("Я ID OAuth: URL и обмен кода", () => {
+  test("петлевой алиас redirect_uri (23.09): переезд на канонический origin; чужой хост и другой порт — не алиас", () => {
+    expect(loopbackOriginRedirect(new URL("http://127.0.0.1:8418/me?auth_error=state"), "http://localhost:8418")).toBe(
+      "http://localhost:8418/me?auth_error=state",
+    );
+    expect(loopbackOriginRedirect(new URL("http://localhost:8418/auth/ya"), "http://127.0.0.1:8418")).toBe(
+      "http://127.0.0.1:8418/auth/ya",
+    );
+    // канонический хост уже открыт — переезда нет
+    expect(loopbackOriginRedirect(new URL("http://localhost:8418/auth/ya"), "http://localhost:8418")).toBeNull();
+    // чужой хост (LAN, стенд) и другой порт сервером не канонизируются
+    expect(loopbackOriginRedirect(new URL("http://192.168.1.5:8418/auth/ya"), "http://localhost:8418")).toBeNull();
+    expect(loopbackOriginRedirect(new URL("http://127.0.0.1:9999/auth/ya"), "http://localhost:8418")).toBeNull();
+    // мусор в конфиге — null, а не исключение
+    expect(loopbackOriginRedirect(new URL("http://127.0.0.1:8418/auth/ya"), "не URL")).toBeNull();
+  });
   const creds = { clientId: "ya-client", clientSecret: "ya-secret", redirect: "http://localhost:8418/auth/ya/callback" };
 
   test("buildAuthUrl: authorize + обязательные параметры + state", () => {

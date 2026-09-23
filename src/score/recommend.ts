@@ -190,7 +190,7 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
       return {
         action: "Откройте доступ к результатам CI",
         problem: "CI настроен, но результаты запусков сервису недоступны. Для своего репозитория добавьте в Настройках токен с правом читать запуски CI.",
-        expectedImpact: "CI/CD: сейчас не больше 50 из 100, с результатами запусков – до 100",
+        expectedImpact: "CI/CD: сейчас не оцениваем – с результатами запусков категория откроется",
       };
     case "fix-red-runs":
       return { action: "Почините CI", problem: "Последний запуск CI завершился ошибкой или успешны меньше 90% запусков.", expectedImpact: categoryImpact("CI/CD") };

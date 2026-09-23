@@ -734,6 +734,7 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
 
       <AddRepoDialog
         open={adding}
+        hasPat={hasPat}
         onClose={() => setAdding(false)}
         onAdded={(res) => {
           setAdding(false);
@@ -813,7 +814,91 @@ interface FavoriteAddResponse {
   check?: FavoriteAddCheck;
 }
 
-function AddRepoDialog({ open, onClose, onAdded }: { open: boolean; onClose: () => void; onAdded: (res: FavoriteAddResponse) => void }) {
+/** Пикер «своих» репозиториев (/me/repos по PAT зрителя; парковка 23.09). */
+interface ScRepoLite {
+  org: string;
+  slug: string;
+  name: string | null;
+  visibility: string | null;
+  isEmpty: boolean;
+}
+
+function ScRepoPicker({ onAdded }: { onAdded: (res: FavoriteAddResponse, label: string) => void }) {
+  const [state, setState] = useState<
+    { kind: "loading" } | { kind: "error"; message: string } | { kind: "ok"; repos: ScRepoLite[]; partial: boolean }
+  >({ kind: "loading" });
+  const [busy, setBusy] = useState<string | null>(null);
+  const toaster = useToaster();
+  useEffect(() => {
+    const ctrl = new AbortController();
+    fetch("/api/me/sourcecraft-repos", { signal: ctrl.signal })
+      .then(async (res) => {
+        const body = (await res.json().catch(() => null)) as
+          | { repos?: ScRepoLite[]; partial?: boolean; error?: { code?: string } }
+          | null;
+        if (!res.ok) {
+          const code = body?.error?.code;
+          setState({
+            kind: "error",
+            message:
+              code === "no_pat"
+                ? "Добавьте токен SourceCraft – тогда здесь появится список ваших репозиториев"
+                : code === "source_http"
+                  ? "SourceCraft не ответил – попробуйте еще раз"
+                  : "Список недоступен",
+          });
+          return;
+        }
+        setState({ kind: "ok", repos: body?.repos ?? [], partial: body?.partial === true });
+      })
+      .catch(() => {
+        if (!ctrl.signal.aborted) setState({ kind: "error", message: "Список недоступен" });
+      });
+    return () => ctrl.abort();
+  }, []);
+  const add = async (repo: ScRepoLite) => {
+    const label = `${repo.org}/${repo.slug}`;
+    setBusy(label);
+    try {
+      const res = (await mutateJson<FavoriteAddResponse>("/api/me/favorites", "PUT", { repository: label })) ?? {};
+      toaster.add({ name: `sc-add-${label}`, theme: "success", title: "Добавлено в избранное", content: `${label}. ${favoriteAddedText(res.check)}` });
+      onAdded(res, label);
+    } catch (e) {
+      toaster.add({ name: `sc-add-${label}`, theme: "danger", title: "Не добавилось", content: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <Flex direction="column" gap={2}>
+      <Text color="secondary">Ваши репозитории в SourceCraft:</Text>
+      {state.kind === "loading" && <Text color="complementary">Загружаем список…</Text>}
+      {state.kind === "error" && <Text color="complementary">{state.message}</Text>}
+      {state.kind === "ok" && (
+        <>
+          {state.repos.length === 0 && <Text color="complementary">В вашем аккаунте репозиториев не нашлось.</Text>}
+          {state.repos.map((repo) => {
+            const label = `${repo.org}/${repo.slug}`;
+            return (
+              <Flex key={label} gap={2} alignItems="center" justifyContent="space-between">
+                <Text variant="body-2">
+                  {label}
+                  {repo.isEmpty ? " – пустой" : ""}
+                </Text>
+                <Button view="outlined" size="xs" loading={busy === label} onClick={() => void add(repo)}>
+                  Добавить
+                </Button>
+              </Flex>
+            );
+          })}
+          {state.partial && <Text color="complementary">Показаны первые 300 – остальное по идентификатору org/repo.</Text>}
+        </>
+      )}
+    </Flex>
+  );
+}
+
+function AddRepoDialog({ open, onClose, onAdded, hasPat }: { open: boolean; onClose: () => void; onAdded: (res: FavoriteAddResponse) => void; hasPat: boolean }) {
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -852,7 +937,8 @@ function AddRepoDialog({ open, onClose, onAdded }: { open: boolean; onClose: () 
       <Dialog.Header caption="Добавить репозиторий" />
       <Dialog.Body>
         <Flex direction="column" gap={2} className="rh-add-repo">
-          <Text color="secondary">Репозиторий попадет в избранное и появится в этом списке.</Text>
+          {hasPat ? <ScRepoPicker onAdded={(res, label) => { setValue(label); onAdded(res); close(); }} /> : null}
+          <Text color="secondary">Репозиторий попадет в избранное и появится в этом списке. Или добавьте по идентификатору org/repo:</Text>
           <TextInput
             size="m"
             controlRef={inputRef}
@@ -1030,6 +1116,16 @@ function RepoRow({
                 <Icon data={Bulb} size={14} />
                 {recommendationsText(entry.recommendationsCount)}
               </Link>
+            </MetaItem>
+          )}
+          {/* В5 (К5.10): флаг фрода — факторы на показ владельцу; подозрение,
+              не оценка: Score от него не меняется, ссылка ведет к разделу
+              «Подозрение на искусственную активность» в MD-отчете карточки */}
+          {entry.fraudFlag?.flag === true && entry.fraudFlag.factors.length > 0 && (
+            <MetaItem icon={TriangleExclamation} title={entry.fraudFlag.factors.map((f) => `${f.key} – ${f.note}`).join("; ")}>
+              <Text color="warning" className="rh-repo-item__link">
+                Подозрение на искусственную активность
+              </Text>
             </MetaItem>
           )}
         </Meta>
@@ -1222,9 +1318,19 @@ function JobRow({ job, onNavigate }: { job: import("../api/me").MyJob; onNavigat
         ) : (
           <Text color="secondary">{job.slug}</Text>
         )}
+        {/* В5.1 (Прод-С1): панель различает анализ и генерацию описания —
+            прежде живая генерация выглядела «заданием» и маскировала запуск анализа */}
+        {job.kind === "summary" && (
+          <Text color="secondary" variant="caption-2">
+            описание AI
+          </Text>
+        )}
       </div>
       {/* Ф2.15 / LOW-8 (решение 18.09): очередью правит round-robin — статус без числа позиции */}
-      <span className="rh-state rh-busy">{job.phase === "queued" ? "В очереди" : "Идет анализ"}</span>
+      <span className="rh-state rh-busy">
+        {job.phase === "queued" ? "В очереди" : job.kind === "summary" ? "Генерация описания" : "Сканируется"}
+      </span>
+
     </div>
   );
 }
@@ -1284,6 +1390,11 @@ function HistoryRow({ job, time, onNavigate }: { job: import("../api/me").MyJob;
           </Link>
         ) : (
           <Text color="secondary">{job.slug}</Text>
+        )}
+        {job.kind === "summary" && (
+          <Text color="secondary" variant="caption-2">
+            описание AI
+          </Text>
         )}
         {job.phase === "failed" && job.error && (
           <Text color="secondary" variant="caption-2" ellipsis title={job.error}>

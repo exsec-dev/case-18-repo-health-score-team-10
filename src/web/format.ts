@@ -89,6 +89,25 @@ export function fmtDateTime(iso: string | null | undefined): string {
 }
 
 /**
+ * UTC-форматтеры для отчётов (решение 24.09, Алексей: «время должно быть
+ * в utc» — артефакт MD/PDF не зависит от машины рендера). Локальные
+ * fmtDate/fmtDateTime остаются для интерфейса.
+ */
+export function fmtDateUtc(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = parseShown(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${d.getUTCDate()} ${MONTHS_SHORT_RU[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+export function fmtDateTimeUtc(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = parseShown(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())} ${fmtDateUtc(iso)}`;
+}
+
+/**
  * «N рекомендаций» с русским согласованием числа (В4.7, П3.4, счётчик в
  * «Моих репозиториях»): 1 рекомендация, 2-4 рекомендации, 5-20 рекомендаций,
  * 21 рекомендация… Цифрой, а не словом (правило языка UI).
@@ -503,7 +522,7 @@ export function noDataReason(key: string, reason: string | null | undefined): st
 }
 
 /** Потолок CI без результатов запусков — одна фраза для «почему», маркера и приложения. */
-export const CI_RUNS_CAP_TEXT = "Результаты запусков CI недоступны (нет прав или запусков не было), поэтому категория получает не больше 50 из 100.";
+export const CI_RUNS_CAP_TEXT = "Результаты запусков CI не видны (нет прав или запусков не было) – категорию не оцениваем: честное отсутствие данных вместо догадок.";
 
 /** Безопасность без данных: откуда берутся данные категории. */
 export const SECURITY_NO_DATA = "Безопасность считается по данным AppSec SourceCraft, а они видны только с правом доступа.";

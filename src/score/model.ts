@@ -5,7 +5,16 @@
 // В4.3 (18.09, Алексей): модель описывает ДВА показателя — полный
 // Repo Health Score (6 категорий, SCORE_WEIGHTS) и публичную проекцию
 // HealthCraft Index (4 категории, INDEX_WEIGHTS).
-export const MODEL_VERSION = "4.0.0-hci";
+export const MODEL_VERSION = "4.1.0-hci";
+
+/**
+ * В5 (К5.9): bus factor — окно и доля покрытия. Справочный показатель БЕЗ
+ * веса: сколько авторов (людей, не-sync, не-robot по author-датам) покрывают
+ * долю BUS_FACTOR_SHARE человеческих коммитов за последние
+ * BUS_FACTOR_WINDOW_DAYS дней; нет коммитов в окне — null (no-data).
+ */
+export const BUS_FACTOR_WINDOW_DAYS = 90;
+export const BUS_FACTOR_SHARE = 0.5;
 
 /**
  * Публичный рейтинг = 4 категории (17.09, Алексей, Q&A №1: «в общий
@@ -232,8 +241,20 @@ export const README_QUALITY_SPLIT = { bytes: 0.5, sections: 0.5 } as const;
 
 // ---------- особые случаи (§5) ----------
 
-/** CI «конфиг без прогонов»: категория = конфиг-скор × 0.5 → потолок 50 (В2-9). */
-export const CI_CONFIG_ONLY_FACTOR = 0.5;
+/**
+ * Ленты свежести прогонов (23.09, Алексей): pass_rate считается по
+ * взвешенной доле успеха — чем свежее прогон, тем он весомее. Вес ленты
+ * действует до `days` дней возраста прогона; старше последней ленты — 0
+ * («после года 0»). Сумма весов не нормируется: взвешенная доля
+ * инвариантна к масштабу.
+ */
+export const CI_RECENCY_BANDS: ReadonlyArray<{ days: number; w: number }> = [
+  { days: 3, w: 30 },
+  { days: 13, w: 20 },
+  { days: 43, w: 10 },
+  { days: 133, w: 5 },
+  { days: 363, w: 2.5 },
+];
 
 /** критичные secrets-находки → жёсткий кап total ≤ 49 (В2-8, CHAOSS/OpenSSF-паттерн). */
 export const SECRETS_CRITICAL_TOTAL_CAP = 49;

@@ -36,6 +36,11 @@
 // setMetaValue(schema_version) переехал ПОСЛЕ всех DDL и ensureColumn.
 // Схема v1.9 (В4.3): scores — производная таблица публичного индекса
 // (healthcraft_index/index_coverage); полный итог не хранится.
+// Схема v2.0 (В5, Б1): ai_notes — ЕДИНСТВЕННАЯ невосстановимая таблица
+// (тексты LLM, append на скан — исходная, не производная; входит в
+// бэкап-дисциплину наравне с facts); scans.head_sha (git-коллектор знает HEAD —
+// честная привязка «на каком коммите измерено»); jobs.kind ('scan' | 'summary',
+// дефолт 'scan' — старые строки не тронуты). Миграция аддитивная, процедура 1.3.
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -57,8 +62,49 @@ import { publicStatusSql, ratingEligibleSql } from "./score/compute";
  * чтении. Таблица производная: миграция пересоздаёт её пустой, строки
  * восстанавливает rescoreAll из facts; старые totals не копируются как
  * источник.
+ * 2.0 (В5, Б1): `ai_notes` (append-история LLM-текстов: строка на роль на
+ * скан, не upsert — пользователь видит эволюцию взглядов; единственная
+ * исходная невосстановимая таблица проекта), `scans.head_sha`,
+ * `jobs.kind`. Всё аддитивно, данных не теряет.
+ * 2.1 (23.09, Алексей): `ai_fails` — честный отказ роли: причина
+ * несформирования показывается пользователю, а не молчит в логах.
  */
-export const SCHEMA_VERSION = "1.9";
+export const SCHEMA_VERSION = "2.1";
+
+const AI_NOTES_DDL = `CREATE TABLE IF NOT EXISTS ai_notes (
+  id INTEGER PRIMARY KEY,
+  repo_id INTEGER NOT NULL REFERENCES repos(id),
+  scan_id INTEGER NOT NULL REFERENCES scans(id),
+  role TEXT NOT NULL,             -- хартия-роль В5 (documentation..flagger)
+  text TEXT NOT NULL,             -- валидированный текст; флаг фрода — мини-JSON
+  fact_refs TEXT NOT NULL,        -- JSON: ключи фактов, к которым привязаны утверждения
+  charter_version TEXT NOT NULL,  -- версия хартии, по которой сгенерировано
+  model TEXT NOT NULL,            -- модель (main/side производная роли)
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_notes_scan ON ai_notes(scan_id);
+CREATE INDEX IF NOT EXISTS idx_ai_notes_repo ON ai_notes(repo_id, id);
+
+-- 2.1 (23.09, Алексей): честный отказ роли — причина видна пользователю
+CREATE TABLE IF NOT EXISTS ai_fails (
+  id INTEGER PRIMARY KEY,
+  repo_id INTEGER NOT NULL REFERENCES repos(id),
+  scan_id INTEGER NOT NULL REFERENCES scans(id),
+  role TEXT NOT NULL,             -- хартия-роль, которая не сформировалась
+  reason TEXT NOT NULL,           -- причина (валидатор/модель/нет фактов)
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_fails_scan ON ai_fails(scan_id);`;
+
+const AI_FAILS_DDL = `CREATE TABLE IF NOT EXISTS ai_fails (
+  id INTEGER PRIMARY KEY,
+  repo_id INTEGER NOT NULL REFERENCES repos(id),
+  scan_id INTEGER NOT NULL REFERENCES scans(id),
+  role TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ai_fails_scan ON ai_fails(scan_id);`;
 
 const SCORES_DDL = `CREATE TABLE IF NOT EXISTS scores (
   scan_id INTEGER NOT NULL REFERENCES scans(id),
@@ -112,7 +158,8 @@ CREATE TABLE IF NOT EXISTS scans (
   user_id INTEGER,              -- автор скана (users.id); NULL = периодика/серверный токен (v1.5, К3)
   rating_eligible INTEGER NOT NULL DEFAULT 0, -- 1 = скан пригоден для рейтинга (ratingEligible; пишет скор-хук)
   public_status TEXT,           -- статус по фактам PUBLIC_KINDS (Ф1.11): показывается всем
-  status_detail TEXT            -- 'orphaned' — скан закрыт свипом сирот (v1.8, Ф2.2)
+  status_detail TEXT,           -- 'orphaned' — скан закрыт свипом сирот (v1.8, Ф2.2)
+  head_sha TEXT                 -- git HEAD клона (v2.0): «на каком коммите измерено»
 );
 CREATE TABLE IF NOT EXISTS facts (
   scan_id INTEGER NOT NULL REFERENCES scans(id),
@@ -125,6 +172,8 @@ CREATE TABLE IF NOT EXISTS facts (
   PRIMARY KEY (scan_id, category, key)
 );
 ${SCORES_DDL}
+${AI_NOTES_DDL}
+${AI_FAILS_DDL}
 CREATE TABLE IF NOT EXISTS jobs (
   id INTEGER PRIMARY KEY,
   repo_id INTEGER NOT NULL REFERENCES repos(id),
@@ -133,6 +182,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   lease_until TEXT,             -- механика claim-loop (В4): NULL-lease матчится
   user_id INTEGER,              -- автор заявки (users.id): его PAT; NULL = периодика
   trigger_kind TEXT NOT NULL DEFAULT 'periodic', -- periodic|user
+  kind TEXT NOT NULL DEFAULT 'scan', -- scan | summary (v2.0): summary = AI-генерация по последнему скану
   attempts INTEGER NOT NULL DEFAULT 0, -- +1 при claim; предел Config.queue.maxAttempts (v1.5, К4)
   created_at TEXT               -- время постановки: лимит частоты юзерских заявок (v1.5, К4)
 );
@@ -283,6 +333,9 @@ export function openDb(config: Config): Database {
     }
     // v1.8 (В4.2a, Ф2.2): чем закрыт скан, если закрыт не собой — 'orphaned'
     ensureColumn(db, "scans", "status_detail", "TEXT");
+    // v2.0 (В5, Б1): привязка скана к коммиту; kind заявки (старые строки — 'scan')
+    ensureColumn(db, "scans", "head_sha", "TEXT");
+    ensureColumn(db, "jobs", "kind", "TEXT NOT NULL DEFAULT 'scan'");
     // v1.3 → v1.4 (В4): изоляция own/public и эвикция
     ensureColumn(db, "repos", "rating_active", "INTEGER NOT NULL DEFAULT 1");
     ensureColumn(db, "repos", "visibility", "TEXT NOT NULL DEFAULT 'public'");

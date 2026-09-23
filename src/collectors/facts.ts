@@ -53,7 +53,7 @@ export const KINDS = {
   // has_steps (§7.4: ≥1 task с ≥1 непустой командой script/cube);
   // steps_note при неудачном парсинге ci.yaml
   "cicd.configs": "{paths:[...],has_ci_yaml:boolean,has_steps:boolean,steps_note?} — пустой paths = ок",
-  "cicd.runs": "{last_status,success_rate,duration_p50,runs_count} | no-data",
+  "cicd.runs": "{last_status,success_rate,duration_p50,runs_count,green_streak} | no-data",
   // событийный JSON: author+committer (имя+email+дата UTC) + robot per-commit
   "activity.git.timeline": "{events:[{sha,author,committer,robot,robot_reasons}]}",
   // history_truncated_since — только у деградационного клона (§5.7)

@@ -71,6 +71,7 @@ import {
   Link,
   Popover,
   Spin,
+  Switch,
   Text,
   useToaster,
 } from "@gravity-ui/uikit";
@@ -79,6 +80,8 @@ import { COVERAGE_NULL_BELOW } from "../score/model";
 import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle } from "../report/submetrics";
 import { FULL, INDEX, metricWeights, sourceWord, submetricWeightText } from "../report/sections";
 import type { MetaResponse, RepoCard } from "./api";
+import type { AiNotesResponse, HistoryResponse } from "../summary/history-contract";
+import { evolutionTooEarly } from "../summary/history-contract";
 import { dataOf, mutateJson, useJson, useVisible } from "./api";
 import { cardView, type CardView, type CategoryView, type RecommendationView } from "./cardView";
 import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
@@ -291,7 +294,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
           <Categories card={card} view={view} />
           <Recommendations view={view} />
           <Limitations items={view.limitations} />
-          <CardSlots />
+          <CardSlots card={card} org={org} repo={repo} onChanged={reload} />
         </Flex>
       )}
     </Page>
@@ -510,37 +513,427 @@ function useRecommendationsAnchor(ready: boolean, key: string): void {
 }
 
 /**
- * Слоты под В5 (В4.6, У18). Стоят ПОСЛЕ табов сознательно: выше они отобрали бы
- * высоту у величины и шести категорий, а приёмка вехи требует видеть их в одном
- * экране на 1366x768. Ни одной кнопки внутри: место и честное состояние — да,
- * мёртвых действий — нет (критерий ТЗ 13.4). Контракты полей и формулировки —
- * `src/web/slots.ts`, имена берутся из спеки В5.
- *
- * Сравнение (К5.15) здесь НЕ монтируется: у него нет ни маршрута, ни пункта
- * rail до того, как В5 принесёт работающий сценарий — решение владельца 20.09.
- * Его контракт и пустое состояние живут в `slots.ts` и ждут там.
+ * Слоты В5 (В4.6, У18). Стоят ПОСЛЕ табов сознательно: выше они отобрали бы
+ * высоту у величины и шести категорий. Сравнение (К5.15) не монтируется до
+ * своего сценария (решение владельца 20.09); история и значок показывают
+ * честное пустое состояние до своих блоков (Б5/Б6).
+ * AI-описание (Б3): текст виден только зрителю с полным Score (решение 22.09
+ * – «текст никогда не публичен»); у владельца – кнопка генерации и тумблер
+ * автозапуска; невалидированный текст не показывается никогда – роль без
+ * текста честно помечена «не сформировано» (fail-soft виден в UI).
  */
-function CardSlots() {
+const AI_ROLE_TITLES: Record<string, string> = {
+  documentation: "Документация",
+  code: "Код",
+  activity: "Активность",
+  issues: "Задачи",
+  cicd: "CI/CD",
+  security: "Безопасность",
+  trajectory: "Динамика",
+  overview: "Общий взгляд",
+};
+
+function aiRoleTitle(role: string): string {
+  return AI_ROLE_TITLES[role] ?? role;
+}
+
+function CardSlots({ card, org, repo, onChanged }: { card: Card; org: string; repo: string; onChanged: () => void }) {
   return (
-    <Flex gap={3} wrap role="region" aria-label="Готовится">
-      {(["aiSummary", "scoreHistory", "badge"] as const).map((slot) => (
-        <Card key={slot} view="outlined" className="rh-slot">
-          <Flex direction="column" gap={1}>
-            <Flex gap={2} alignItems="center">
-              <Text variant="subheader-2" as="h2">
-                {SLOT_EMPTY[slot].title}
-              </Text>
-              <Label theme="unknown" size="xs">
-                готовится
-              </Label>
-            </Flex>
-            <Text variant="body-2" color="complementary">
-              {SLOT_EMPTY[slot].text}
-            </Text>
-          </Flex>
-        </Card>
-      ))}
+    <Flex gap={3} wrap role="region" aria-label="AI-описание, история и значок">
+      <AiSummarySlot card={card} org={org} repo={repo} onChanged={onChanged} />
+      <ScoreHistorySlot org={org} repo={repo} locked={card.ai === undefined} />
+      <BadgeSlot org={org} repo={repo} />
     </Flex>
+  );
+}
+
+/**
+ * Значок для README (Б6, К5.8): публичные данные рейтинга – анониму; для
+ * закрытых или выпавших из рейтинга репозиториев сервер отвечает 404, и слот
+ * честно это объясняет, не показывая битую картинку. В SVG – только число,
+ * подпись и цвет.
+ */
+function BadgeSlot({ org, repo }: { org: string; repo: string }) {
+  const base = `/api/v1/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`;
+  const [state, setState] = useState<{ kind: "loading" | "ok" | "gone" }>({ kind: "loading" });
+  useEffect(() => {
+    const ctrl = new AbortController();
+    setState({ kind: "loading" });
+    fetch(`${base}/badge.svg`, { signal: ctrl.signal })
+      .then((res) => setState({ kind: res.ok ? "ok" : "gone" }))
+      .catch(() => {
+        if (!ctrl.signal.aborted) setState({ kind: "gone" });
+      });
+    return () => ctrl.abort();
+  }, [base]);
+  return (
+    // data-slot: контракт У18 (badge)
+    <Card view="outlined" className="rh-slot" data-slot="badge">
+      <Flex direction="column" gap={2}>
+        <Flex gap={2} alignItems="center">
+          <Text variant="subheader-2" as="h2">
+            {SLOT_EMPTY.badge.title}
+          </Text>
+        </Flex>
+        {state.kind === "loading" ? (
+          <Text variant="body-2" color="complementary">
+            Проверяем доступность значка…
+          </Text>
+        ) : state.kind === "gone" ? (
+          <Text variant="body-2" color="complementary">
+            {SLOT_EMPTY.badge.text}
+          </Text>
+        ) : (
+          <>
+            <Text variant="body-2" color="complementary">
+              {"Значок показывает HealthCraft Index публичного репозитория: только число, подпись и цвет."}
+            </Text>
+            <img src={`${base}/badge.svg`} alt="Repo Health badge" width={110} height={20} />
+            <Text variant="body-2" color="complementary">
+              {"Код для README:"}
+            </Text>
+            <Text variant="body-2" color="secondary" className="rh-prose">
+              {`![Repo Health](${`${base}/badge.svg`})`}
+            </Text>
+            <Text variant="body-2" color="complementary">
+              {`Публичные данные без авторизации: ${base}`}
+            </Text>
+          </>
+        )}
+      </Flex>
+    </Card>
+  );
+}
+
+/**
+ * История оценки (Б5, К5.7): график публичного индекса по строкам scores
+ * (новых сборов нет), tri-state – разрыв там, где числа не было. Полный
+ * Score – вторая линия только зрителю с правами. Честные ограничения
+ * подписаны на экране: сопоставимость внутри одной версии модели.
+ */
+/**
+ * История LLM-взглядов (Б4, К5.16): append-заметки по сканам – зритель видит,
+ * как менялось описание. Экран эволюции – при истории не меньше 2 дней
+ * (решение 22.09); раньше – честное «слишком рано судить». Данные –
+ * /ai-notes (тексты не публичны, сервер сам закрывает по правам).
+ */
+function EvolutionSection({ org, repo, enabled }: { org: string; repo: string; enabled: boolean }) {
+  const { state } = useJson<AiNotesResponse>(`/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/ai-notes`);
+  const data = dataOf(state);
+  const [open, setOpen] = useState(false);
+  if (!enabled || data === null || data.locked) return null;
+  const byScan = new Map<number, typeof data.notes>();
+  for (const note of data.notes) {
+    const list = byScan.get(note.scanId) ?? [];
+    if (note.role === "overview") list.unshift(note);
+    else list.push(note);
+    byScan.set(note.scanId, list);
+  }
+  const groups = [...byScan.entries()].sort((a, b) => a[0] - b[0]);
+  const tooEarly = evolutionTooEarly(groups.map(([, notes]) => notes[0]?.scanFinishedAt ?? ""));
+  return (
+    <details className="rh-ai__details" open={open} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
+      <summary className="rh-ai__summary">
+        <Text variant="body-2" color="secondary">
+          Как менялись взгляды
+        </Text>
+      </summary>
+      {tooEarly ? (
+        <Text variant="body-2" color="complementary">
+          {"Слишком рано судить о динамике: истории меньше 2 дней. Сравнение взглядов появится, когда накопятся сканы за больший срок."}
+        </Text>
+      ) : (
+        <Flex direction="column" gap={2}>
+          {groups.map(([scanId, notes]) => {
+            const overview = notes.find((n) => n.role === "overview");
+            const head = overview?.headSha ? ` коммит ${overview.headSha.slice(0, 7)}` : "";
+            return (
+              <div key={scanId}>
+                <Text variant="body-2" color="secondary">
+                  {`${fmtDate(overview?.createdAt ?? null)}${head}`}
+                </Text>
+                <Text as="div" variant="body-2" color="complementary" className="rh-prose">
+                  {overview?.text ?? "Общее описание не сформировано."}
+                </Text>
+              </div>
+            );
+          })}
+        </Flex>
+      )}
+    </details>
+  );
+}
+
+function ScoreHistorySlot({ org, repo, locked }: { org: string; repo: string; locked: boolean }) {
+  const { state } = useJson<HistoryResponse>(`/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/history`);
+  const data = dataOf(state);
+  const points = data?.points ?? [];
+  const W = 320;
+  const H = 96;
+  const pad = 6;
+  const lineOf = (values: Array<number | null>): { d: string; segments: number } => {
+    let d = "";
+    let segments = 0;
+    let open = false;
+    points.forEach((_, i) => {
+      const v = values[i];
+      const x = points.length <= 1 ? W / 2 : pad + (i * (W - 2 * pad)) / (points.length - 1);
+      if (v === null || v === undefined) {
+        open = false;
+        return;
+      }
+      const y = H - pad - (Math.max(0, Math.min(100, v)) / 100) * (H - 2 * pad);
+      d += `${open ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)} `;
+      if (!open) segments++;
+      open = true;
+    });
+    return { d: d.trim(), segments };
+  };
+  const indexLine = lineOf(points.map((p) => p.healthcraftIndex));
+  const fullLine = data?.fullOpen === true ? lineOf(points.map((p) => p.repoHealthScore)) : null;
+  return (
+    // data-slot: контракт У18 (scoreHistory)
+    <Card view="outlined" className="rh-slot" data-slot="scoreHistory">
+      <Flex direction="column" gap={2}>
+        <Flex gap={2} alignItems="center">
+          <Text variant="subheader-2" as="h2">
+            История оценки
+          </Text>
+        </Flex>
+        {points.length === 0 ? (
+          <Text variant="body-2" color="complementary">
+            {SLOT_EMPTY.scoreHistory.text}
+          </Text>
+        ) : (
+          <>
+            <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="График оценки по сканам" style={{ width: "100%", height: "auto" }}>
+              {[0, 25, 50, 75, 100].map((g) => {
+                const y = H - pad - (g / 100) * (H - 2 * pad);
+                return <line key={g} x1={pad} x2={W - pad} y1={y} y2={y} stroke="var(--g-color-line-generic)" strokeDasharray="2 4" strokeWidth={1} />;
+              })}
+              {indexLine.d !== "" && (
+                <path d={indexLine.d} fill="none" stroke="var(--g-color-text-primary)" strokeWidth={2} strokeLinejoin="round" />
+              )}
+              {fullLine !== null && fullLine.d !== "" && (
+                <path d={fullLine.d} fill="none" stroke="var(--g-color-text-secondary)" strokeWidth={1.5} strokeDasharray="4 3" />
+              )}
+            </svg>
+            <Flex gap={3} wrap>
+              <Text variant="body-2" color="complementary">{`HealthCraft Index по ${points.length} сканам`}</Text>
+              {fullLine !== null && (
+                <Text variant="body-2" color="complementary">
+                  {"пунктир – полный Score (по правам зрителя)"}
+                </Text>
+              )}
+            </Flex>
+          </>
+        )}
+        <Text variant="body-2" color="complementary">
+          {locked
+            ? SLOT_EMPTY.scoreHistory.text
+            : `Оценка сопоставима только внутри одной версии модели (текущая – ${data?.modelVersion ?? "..."}): график наполняется по мере новых сканов, и линий там, где данных не было, нет – это то же правило tri-state, что и у категорий.`}
+        </Text>
+      </Flex>
+    </Card>
+  );
+}
+
+function AiSummarySlot({ card, org, repo, onChanged }: { card: Card; org: string; repo: string; onChanged: () => void }) {
+  const toaster = useToaster();
+  const [sending, setSending] = useState(false);
+  const own = card.viewer?.own === true;
+  const ai = card.ai;
+
+  // smoke-круг 23.09: job завершился, а карточка не перечитывалась —
+  // плашка «формируется» висела вечно. Пока jobActive — опрашиваем каждые 5 с
+  useEffect(() => {
+    if (ai === undefined || ai === null || !ai.jobActive) return;
+    const timer = setInterval(onChanged, 5000);
+    return () => clearInterval(timer);
+  }, [ai, onChanged]);
+
+  // 23.09: итог задания перечитывает карточку СРАЗУ — без этого кнопка висела
+  // «Формируется…» и disabled до 5 с после того, как панель заданий опустела
+  useAnalysisFinished((jobs) => {
+    if (jobs.some((j) => j.slug === `${org}/${repo}`)) onChanged();
+  });
+
+  // 23.09 (Алексей): тумблер — ТОЛЬКО политика автогенерации на будущие сканы;
+  // PUT /summary-auto заявок не ставит. Генерацию сейчас запускает кнопка.
+  // Свой флаг занятости: sending держит loading на кнопке — её мигание при
+  // переключении тумблера недопустимо (круг 5)
+  const [autoBusy, setAutoBusy] = useState(false);
+  const actAuto = async (on: boolean): Promise<void> => {
+    setAutoBusy(true);
+    try {
+      const res = await fetch(`/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/summary-auto`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ on }),
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+        toaster.add({
+          name: `summary-auto-fail:${org}/${repo}`,
+          theme: "danger",
+          title: "Режим не изменен",
+          content: err?.error?.message ?? `Ошибка ${res.status}`,
+        });
+        return;
+      }
+      onChanged();
+    } finally {
+      setAutoBusy(false);
+    }
+  };
+
+  const act = async (method: "POST" | "DELETE"): Promise<void> => {
+    setSending(true);
+    try {
+      const res = await fetch(`/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/summary`, { method });
+      const body = (await res.json().catch(() => null)) as { jobId?: number | null; cached?: boolean; scanQueued?: boolean } | null;
+      if (res.ok) {
+        // 23.09 (smoke-круг 2): генерация целиком идет ~6 с, опрос заданий в
+        // покое тикает раз в 15 с — без объявления jobId трекеру прогон не
+        // успевал мелькнуть ни в «Активных», ни тостом; объявленное задание
+        // тостится даже если первый опрос застал его уже завершенным (Н5)
+        const cached = body?.cached === true;
+        const scanQueued = body?.scanQueued === true;
+        announceJobStarted(body?.jobId ?? undefined);
+        if (!cached) announceJobsChanged();
+        onChanged();
+        // 23.09: кэш не «поставлено в генерацию» — тост называет вещи честно
+        toaster.add({
+          name: `summary-ok:${org}/${repo}`,
+          theme: "success",
+          title:
+            method === "POST"
+              ? cached
+                ? "Описание этого скана уже готово"
+                : scanQueued
+                  ? "Анализ и описание в очереди"
+                  : "Описание поставлено в генерацию"
+              : "Автопересчет выключен",
+          content:
+            method === "POST"
+              ? cached
+                ? "Заметки последнего скана сформированы ранее. Новое описание – после нового анализа репозитория."
+                : scanQueued
+                  ? "Сначала соберутся свежие данные скана, затем описание обновится."
+                  : "Описание появится здесь после генерации и проверки фактов."
+              : undefined,
+        });
+      } else {
+        const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+        toaster.add({
+          name: `summary-fail:${org}/${repo}`,
+          theme: "danger",
+          title: "Генерация не запущена",
+          content: body?.error?.message ?? `Ошибка ${res.status}`,
+        });
+      }
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const cooldownActive = ai?.cooldownUntil !== undefined && ai?.cooldownUntil !== null && Date.parse(ai.cooldownUntil) > Date.now();
+
+  return (
+    // data-slot держит имя слота из контракта У18 (aiSummary) на элементе
+    <Card view="outlined" className="rh-slot" data-slot="aiSummary">
+      <Flex direction="column" gap={2}>
+        <Flex gap={2} alignItems="center">
+          <Text variant="subheader-2" as="h2">
+            Описание для менеджера
+          </Text>
+          {/* решение 23.09 (Алексей, smoke-круг): бейдж честно называет
+             генератора; при смене провайдера текст меняется вслед за ним */}
+          <span className="rh-ai-badge">Яндекс GPT</span>
+        </Flex>
+        {ai === undefined || ai === null ? (
+          // Закрытый полный Score: текст не публичен по правам — не «пока»,
+          // а честная причина (решение 22.09 о видимости)
+          <Text variant="body-2" color="complementary">
+            {"Описание собирается по фактам скана и не меняет оценку: числа считает код, текст только пересказывает их человеческим языком. " +
+              "Текст не является публичным – он виден только зрителям с правами на полный Score (на приватном репозитории – только владельцу)."}
+          </Text>
+        ) : (
+          <>
+            {ai.overview === null ? (
+              <Text variant="body-2" color="complementary">
+                {ai.specialists.length > 0
+                  ? "Общее описание не сформировано – модель не прошла проверку фактов. Отдельные разделы ниже собраны и проверены."
+                  : "AI-описание не сформировано. Запуск – по кнопке; для репозитория можно включить пересчет при каждом скане."}
+              </Text>
+            ) : (
+              <Text as="div" variant="body-1" className="rh-prose">
+                {ai.overview.text}
+              </Text>
+            )}
+            {ai.specialists.length > 0 && (
+              <Flex direction="column" gap={1}>
+                {ai.specialists.map((note) => (
+                  <details key={note.role} className="rh-ai__details">
+                    <summary className="rh-ai__summary">
+                      <Text variant="body-2" color="secondary">
+                        {aiRoleTitle(note.role)}
+                      </Text>
+                    </summary>
+                    <Text as="div" variant="body-2" className="rh-prose">
+                      {note.text}
+                    </Text>
+                  </details>
+                ))}
+              </Flex>
+            )}
+            {(ai.failures ?? []).length > 0 && (
+              <Flex direction="column" gap={1}>
+                {ai.failures.map((f) => (
+                  <Text key={f.role} variant="caption-2" color="warning">
+                    {`${aiRoleTitle(f.role)} – не сформировано: ${f.reason}`}
+                  </Text>
+                ))}
+              </Flex>
+            )}
+            {ai.generatedAt !== null && (
+              <Text variant="body-2" color="complementary">
+                {`Собрано по скану от ${fmtDate(ai.generatedAt)}. Текст не является оценкой – числа считает код по метрикам.`}
+              </Text>
+            )}
+            {own && (
+              <Flex gap={3} alignItems="center" wrap>
+                <Button
+                  view="action"
+                  size="s"
+                  loading={sending}
+                  disabled={ai.jobActive || cooldownActive}
+                  onClick={() => void act("POST")}
+                  title={cooldownActive ? `Следующий запуск будет доступен после ${fmtDateTime(ai.cooldownUntil)}` : undefined}
+                >
+                  {ai.jobActive ? "Описание формируется…" : ai.overview === null ? "Сформировать описание" : "Обновить описание"}
+                </Button>
+                {cooldownActive && !ai.jobActive && (
+                  <Text variant="body-2" color="complementary">
+                    {`Частые запуски ограничены – следующий после ${fmtDateTime(ai.cooldownUntil)}.`}
+                  </Text>
+                )}
+                <Flex gap={1} alignItems="center">
+                  <Switch
+                    size="s"
+                    checked={ai.optIn}
+                    disabled={autoBusy}
+                    onUpdate={(checked) => void actAuto(checked)}
+                    content="Пересчитывать при каждом скане"
+                  />
+                </Flex>
+              </Flex>
+            )}
+            <EvolutionSection org={org} repo={repo} enabled={true} />
+          </>
+        )}
+      </Flex>
+    </Card>
   );
 }
 
@@ -1060,8 +1453,8 @@ function Markers({ view }: { view: CardView }) {
   if (view.topMarkers.includes("ci-cap")) {
     rows.push({
       key: "ci-cap",
-      label: "CI настроен, результаты запусков недоступны",
-      text: "Файл CI в репозитории есть, но результаты запусков сервису недоступны. Без них категория CI/CD получает не больше 50 из 100.",
+      label: "CI заявлен, прогоны недоступны",
+      text: "Конфигурация CI есть, но прогоны не видны (закрыты правами или их не было) – автоматизацию не оцениваем: честное отсутствие данных вместо догадок.",
       theme: "warning",
     });
   }
@@ -1280,6 +1673,7 @@ const SUBMETRIC_ICONS: Record<string, IconData> = {
   "security.secrets": Key,
   "activity.fresh": Clock,
   "activity.freq": Pulse,
+  "activity.bus_factor": Persons,
   "activity.contributors": Persons,
   "activity.pulls_90d": CodePullRequest,
   "activity.releases_12m": Rocket,

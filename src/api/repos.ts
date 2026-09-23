@@ -14,6 +14,7 @@ import { DEFAULT_SCAN, defaultLeaseMs, type ScanConfig } from "../config";
 import type { GitLimitsMarker } from "../web/format";
 import type { DerivedMetrics } from "../score/derived";
 import { INDEX_WEIGHTS, SCORE_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, type IndexCategoryKey, MODEL_VERSION, SECRETS_CRITICAL_TOTAL_CAP } from "../score/model";
+import { getSummaryAuto } from "../summary/optin";
 
 // ---------- общие формы ----------
 
@@ -544,6 +545,46 @@ export interface CardViewer {
   auth: "no-session" | "no-pat" | "pat";
 }
 
+/**
+ * В5 (К5.4): AI-описание в карточке — ТОЛЬКО зрителю с правами на полный
+ * Score (решение 22.09: текст никогда не публичен). Привязан к скану
+ * последней генерации (ai_notes append — «взгляды» на каждый скан).
+ */
+export interface CardAiNote {
+  role: string;
+  text: string;
+  refs: string[];
+  charterVersion: string;
+  model: string;
+  createdAt: string;
+}
+
+export interface CardAiFailure {
+  role: string;
+  reason: string;
+}
+
+export interface CardAi {
+  /** скан последней генерации */
+  scanId: number;
+  generatedAt: string | null;
+  overview: CardAiNote | null;
+  specialists: CardAiNote[];
+  /** 23.09: роли, не прошедшие формирование, с честной причиной для карточки */
+  failures: CardAiFailure[];
+  /** зритель-владелец включил автозапуск (тумблер слота) */
+  optIn: boolean;
+  /** живая summary-заявка — кнопка показывает «формируется» */
+  jobActive: boolean;
+  /** до какого времени кулдаун кнопки (Config.queue.summaryCooldownMs) */
+  cooldownUntil: string | null;
+  /**
+   * В5 (К5.10): флаг фрода — подозрение для проверки человеком; на показ
+   * только зрителю с полным Score (там же, где текст). Score не меняет.
+   */
+  fraud: { flag: boolean; factors: { key: string; note: string }[] } | null;
+}
+
 export interface RepoCard {
   repo: CardRepo;
   access: CardAccess;
@@ -555,6 +596,8 @@ export interface RepoCard {
   job: CardJob | null;
   score: CardScore | null;
   derived: DerivedMetrics | null;
+  /** В5: AI-описание; отсутствует (undefined), когда зрителю закрыт полный Score */
+  ai?: CardAi | null;
   recommendations: CardRecommendation[];
   evidence: CardEvidence[];
 }
@@ -689,14 +732,17 @@ export async function resolveCardForViewer(
   org: string,
   repo: string,
   resolve: (repo: AccessRepo) => Promise<AccessResult>,
-  opts: { limits?: ScanConfig; viewerUserId?: number; viewerAuth?: CardViewer["auth"]; provenRights?: () => boolean } = {},
+  opts: { limits?: ScanConfig; viewerUserId?: number; viewerAuth?: CardViewer["auth"]; summaryCooldownMs?: number; provenRights?: () => boolean } = {},
 ): Promise<CardOutcome> {
   const r = findRepoRow(db, org, repo);
   if (!r) return { kind: "not_found" };
   // эвиктированный публичный — 404 всем, проверять доступ незачем
   if (r.visibility === "public" && r.rating_active !== 1) return { kind: "not_found" };
   const access = await resolve({ id: r.id, org: r.org_slug, repo: r.repo_slug, visibility: r.visibility });
-  const card = getRepoCard(db, org, repo, { access, limits: opts.limits, viewerUserId: opts.viewerUserId, viewerAuth: opts.viewerAuth });
+  // 23.09: summaryCooldownMs обязана доехать до buildCardAi — раньше глохла
+  // здесь, и карточка молча брала дефолт 60 мин, игнорируя .env (дебаг-куладаун
+  // 1 мс работал у enqueue, но кнопка оставалась disabled)
+  const card = getRepoCard(db, org, repo, { access, limits: opts.limits, viewerUserId: opts.viewerUserId, viewerAuth: opts.viewerAuth, summaryCooldownMs: opts.summaryCooldownMs });
   if (card) return { kind: "card", card };
   if (r.visibility !== "public" && (access.repo === "check-failed" || access.repo === "pat-expired") && opts.provenRights?.() === true) {
     return { kind: access.repo === "check-failed" ? "check_failed" : "token_rejected" };
@@ -719,7 +765,7 @@ export function getRepoCard(
    * каталогу, а кабинету из карточки нужны только рекомендации. Остальная
    * сборка — та же, поэтому число рекомендаций равно карточке построением.
    */
-  opts: { access?: AccessResult; limits?: ScanConfig; viewerUserId?: number; withRank?: boolean; viewerAuth?: CardViewer["auth"] } = {},
+  opts: { access?: AccessResult; limits?: ScanConfig; viewerUserId?: number; withRank?: boolean; viewerAuth?: CardViewer["auth"]; summaryCooldownMs?: number } = {},
 ): RepoCard | null {
   const access = opts.access ?? NO_PAT_ACCESS;
   const r = findRepoRow(db, org, repo);
@@ -1049,11 +1095,15 @@ export function getRepoCard(
   const markers: CardMarkers = {
     historyTruncatedSince: typeof summaryValue?.history_truncated_since === "string" ? summaryValue.history_truncated_since : null,
     // маркер показанной CI-категории
-    ciConfigOnlyCap: ciOpen && cicdNoData.includes("config-only cap"),
+    ciConfigOnlyCap: ciOpen && cicdNoData.includes("прогоны не видны"),
     staleFacts: stale.length > 0,
     codeEmpty,
     gitLimits: gitLimitsHit(publicFacts) ? gitLimitsOf(opts.limits ?? DEFAULT_SCAN) : null,
   };
+
+  // В5 (К5.4): текст виден только зрителю с полным Score; сборка — не вызов,
+  // если генерации не было (ai = null при fullOpen, undefined при закрытом)
+  const ai = fullOpen ? buildCardAi(db, r.id, opts.viewerUserId, summaryCooldownMsOf(opts)) : undefined;
 
   return {
     repo: cardRepo,
@@ -1064,8 +1114,81 @@ export function getRepoCard(
     job: liveViewerJob(db, org, repo, opts.viewerUserId),
     score,
     derived: publicRow.derived === null ? null : (JSON.parse(publicRow.derived) as DerivedMetrics),
+    ai,
     recommendations,
     evidence,
+  };
+}
+
+const AI_DEFAULT_COOLDOWN_MS = 60 * 60_000;
+
+function summaryCooldownMsOf(opts: { summaryCooldownMs?: number }): number {
+  return opts.summaryCooldownMs ?? AI_DEFAULT_COOLDOWN_MS;
+}
+
+/** Последняя генерация репо (ai_notes append) + состояние кнопки для владельца. */
+function buildCardAi(db: Database, repoId: number, viewerUserId: number | undefined, cooldownMs: number): CardAi {
+  const last = db.query("SELECT MAX(scan_id) AS s FROM ai_notes WHERE repo_id = ?").get(repoId) as { s: number | null };
+  const slugRow = db.query("SELECT org_slug, repo_slug FROM repos WHERE id = ?").get(repoId) as { org_slug: string; repo_slug: string };
+  const slug = `${slugRow.org_slug}/${slugRow.repo_slug}`;
+  const optIn = viewerUserId !== undefined ? getSummaryAuto(db, viewerUserId, slug) : false;
+  // В5.1-smoke (23.09): bun:sqlite .get() возвращает null при пустом
+  // результате — сравнение с undefined делало jobActive константным true
+  const jobActive =
+    (db.query("SELECT 1 AS x FROM jobs WHERE repo_id = ? AND kind = 'summary' AND status IN ('queued', 'running') LIMIT 1").get(repoId) as { x: number } | null) !== null;
+  const lastJobAt = (db.query("SELECT MAX(created_at) AS t FROM jobs WHERE repo_id = ? AND kind = 'summary'").get(repoId) as { t: string | null }).t;
+  const cooldownUntil = lastJobAt === null ? null : new Date(Date.parse(lastJobAt) + cooldownMs).toISOString();
+  const fails = db
+    .query("SELECT role, reason FROM ai_fails WHERE scan_id = ? ORDER BY id")
+    .all(last.s) as { role: string; reason: string }[];
+  if (last.s === null) {
+    return { scanId: 0, generatedAt: null, overview: null, specialists: [], failures: [], optIn, jobActive, cooldownUntil, fraud: null };
+  }
+  const noteRows = db
+    .query("SELECT role, text, fact_refs, charter_version, model, created_at FROM ai_notes WHERE repo_id = ? AND scan_id = ? ORDER BY id")
+    .all(repoId, last.s) as { role: string; text: string; fact_refs: string; charter_version: string; model: string; created_at: string }[];
+  const toNote = (r: (typeof noteRows)[number]): CardAiNote => ({
+    role: r.role,
+    text: r.text,
+    refs: (JSON.parse(r.fact_refs) as string[]) ?? [],
+    charterVersion: r.charter_version,
+    model: r.model,
+    createdAt: r.created_at,
+  });
+  const overview = noteRows.find((r) => r.role === "overview");
+  const specialists = noteRows.filter((r) => r.role !== "overview" && r.role !== "flagger").map(toNote);
+  // флаг фрода — структурный JSON из заметки flagger последней генерации
+  const flagRow = noteRows.find((r) => r.role === "flagger");
+  let fraud: CardAi["fraud"] = null;
+  if (flagRow !== undefined) {
+    try {
+      const parsed = JSON.parse(flagRow.text) as { flag?: unknown; factors?: unknown };
+      if (typeof parsed.flag === "boolean" && Array.isArray(parsed.factors)) {
+        fraud = {
+          flag: parsed.flag,
+          factors: parsed.factors
+            .filter((f): f is { key: string; note: string } => {
+              const item = f as { key?: unknown; note?: unknown };
+              return typeof item.key === "string" && typeof item.note === "string";
+            })
+            .slice(0, 8),
+        };
+      }
+    } catch {
+      fraud = null; // повреждённый JSON флага — флага нет, а не флаг есть
+    }
+  }
+  const generatedAt = noteRows.reduce((acc, r) => (r.created_at > (acc ?? "") ? r.created_at : acc), null as string | null);
+  return {
+    scanId: last.s,
+    generatedAt,
+    overview: overview ? toNote(overview) : null,
+    specialists,
+    failures: fails,
+    optIn,
+    jobActive,
+    cooldownUntil,
+    fraud,
   };
 }
 

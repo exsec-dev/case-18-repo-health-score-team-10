@@ -114,7 +114,7 @@ export interface ScoreSpec {
 export function defaultCategories(): Record<CategoryKey, unknown> {
   return {
     documentation: { score: 60, submetrics: { readme: { score: 0.72, value: { bytes: 8000 } }, license: { score: 1 } } },
-    cicd: { score: 50, no_data: "ci runs no-data (access/absent) — config-only cap 50", submetrics: { config: { score: 1 } } },
+    cicd: { score: null, no_data: "ci runs no-data — прогоны не видны, автоматизацию не оцениваем", submetrics: { config: { score: 1 } } },
     security: { score: null, no_data: "AppSec data unavailable (no AppSec access or no finished scan)", submetrics: {} },
     activity: { score: 70, submetrics: { fresh: { score: 0.9, value: 1789481810000 } } },
     issues: { score: 40, submetrics: { stale: { score: 0.4, value: 0.5 } } },

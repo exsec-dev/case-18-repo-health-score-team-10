@@ -83,7 +83,7 @@ describe("MD-отчёт: структура", () => {
     expect(main).not.toContain(`#${scoredScan}`);
     expect(main).not.toContain("4.0.0-hci");
     expect(appendix).toContain(`| Последний анализ | #${scoredScan}, завершен 12:00 16 сент. 2026 |`);
-    expect(appendix).toContain("| Версия методики | 4.0.0-hci |");
+    expect(appendix).toContain("| Версия методики | 4.1.0-hci |");
     expect(md).not.toContain("режим:");
   });
 });
@@ -96,9 +96,9 @@ describe("MD-отчёт: числа и tri-state", () => {
   test("зрителю с обоими показателями первым — HealthCraft Index, вторым Repo Health Score (TASK.md §2, круг 4)", () => {
     const at = (s: string) => main.indexOf(s);
     expect(main).toContain("HealthCraft Index: **67 из 100 · требует внимания**");
-    // полный Score складывается из показанных категорий (60·15+50·15+70·15+40·15+80·20)/80 = 61
-    expect(main).toContain("Repo Health Score: **61 из 100 · требует внимания**");
-    expect(at("HealthCraft Index: **67")).toBeLessThan(at("Repo Health Score: **61"));
+    // 23.09: CI без прогонов — no-data, вес перенормирован: (60+70+40+80)/65·... = 64
+    expect(main).toContain("Repo Health Score: **64 из 100 · требует внимания**");
+    expect(at("HealthCraft Index: **67")).toBeLessThan(at("Repo Health Score: **64"));
     // и в строке-пояснении публичный показатель назван первым
     expect(main).toContain("HealthCraft Index считается по открытым данным – по нему строится рейтинг. Repo Health Score учитывает 6 категорий, включая CI/CD и Безопасность.");
     // полос вклада две, публичная первой
@@ -110,10 +110,10 @@ describe("MD-отчёт: числа и tri-state", () => {
     for (const title of ["Документация", "CI/CD", "Безопасность", "Активность", "Задачи", "Состояние кода"]) expect(main).toContain(`| ${title} |`);
     expect(main).toContain("| Документация | 60 | требует внимания |");
     expect(main).toContain("| Безопасность | — | нет данных |");
-    // вес — в приложении А: 15 из 80 весовых пунктов с данными = 18,8%; у категории без данных веса нет.
-    // Г1.1 гейта: «баллов в итог» — те же десятые, что в полосе вкладов (наибольший остаток), поэтому 11,2, а не 11,3
-    expect(appendix).toContain("| Документация | 60,0 | 18,8% | 11,2 |");
-    expect(main).toContain("Документация +11,2");
+    // вес — в приложении А: 15 из 65 весовых пунктов с данными = 23,1%; у категории без данных веса нет.
+    // Г1.1 гейта: «баллов в итог» — те же десятые, что в полосе вкладов (наибольший остаток), поэтому 13,9, а не 13,8
+    expect(appendix).toContain("| Документация | 60,0 | 23,1% | 13,9 |");
+    expect(main).toContain("Документация +13,9");
     expect(appendix).toContain("| Безопасность | — | не входит | — |");
     expect(md).not.toMatch(/Безопасность \| [^|]* \| 0%/);
   });
@@ -123,9 +123,9 @@ describe("MD-отчёт: числа и tri-state", () => {
     expect(main).toContain("Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Категория в оценке не участвует и ее не снижает.");
   });
 
-  test("причина потолка у категории с данными тоже проговаривается (CI без результатов запусков)", () => {
-    expect(main).toContain("Результаты запусков CI недоступны");
-    expect(main).toContain("не больше 50 из 100");
+  test("причина честного no-data у категории с конфигом проговаривается (23.09, кап 50 удалён)", () => {
+    expect(main).toContain("Результаты запусков CI не видны");
+    expect(main).toContain("категорию не оцениваем");
   });
 
   test("подметрики показаны баллом 0–100, а не долей; название — из словаря", () => {
@@ -160,8 +160,8 @@ describe("MD-отчёт: действия и приложение", () => {
     // Круг 4: удваивается только строка самого показателя, публичная первой;
     // в «порядке расчета» названо, по скольким категориям он считается
     expect(appendix).toContain("| **HealthCraft Index 67** | сумма по 4 открытым категориям: балл × вес, приложение А |");
-    expect(appendix).toContain("| **Repo Health Score 61** | сумма по 6 категориям: балл × вес, приложение А |");
-    expect(appendix.indexOf("| **HealthCraft Index 67**")).toBeLessThan(appendix.indexOf("| **Repo Health Score 61**"));
+    expect(appendix).toContain("| **Repo Health Score 64** | сумма по 6 категориям: балл × вес, приложение А |");
+    expect(appendix.indexOf("| **HealthCraft Index 67**")).toBeLessThan(appendix.indexOf("| **Repo Health Score 64**"));
     expect(appendix).toContain("| **Документация 60** | сумма по показателям: балл × вес, приложение А | `documentation.score` → 60 |");
     // Г1.11 гейта: «Порядок расчета» у показателя больше не пустой — там вес в балле категории
     expect(appendix).toMatch(/\| README \(наличие и качество\): 8000 байт \| балл показателя × вес 45% в балле категории \| `documentation\.readme` → bytes 8000; балл 72 \|/);

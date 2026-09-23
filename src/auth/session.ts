@@ -178,6 +178,31 @@ export function oauthStateFromCookie(cookieValue: string | undefined): string | 
   return typeof cookieValue === "string" && cookieValue.length > 8 ? cookieValue : null;
 }
 
+/** Хосты-петля одного локального сервера; у каждого своя банка кук. */
+const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "0.0.0.0", "[::1]", "::1"]);
+
+/**
+ * Вход с петлевого алиаса redirect_uri (23.09, репорт Алексея): state-cookie
+ * ставится на хост, откуда браузер пришёл на /auth/ya, а Яндекс возвращает
+ * его на хост redirect_uri — банки кук разные, cookie не едет, первая попытка
+ * входа падает с auth_error=state («вторая срабатывает»: после неудачи браузер
+ * уже на нужном хосте). Переезд на канонический origin ДО старта OAuth держит
+ * весь поток в одной банке. null — переезд не нужен или это не алиас (чужой
+ * хост или другой порт: такое не перенаправляем).
+ */
+export function loopbackOriginRedirect(url: URL, canonicalOrigin: string): string | null {
+  let canonical: URL;
+  try {
+    canonical = new URL(canonicalOrigin);
+  } catch {
+    return null;
+  }
+  if (canonical.host === url.host) return null;
+  if (url.port !== canonical.port) return null;
+  if (!LOOPBACK_HOSTNAMES.has(url.hostname) || !LOOPBACK_HOSTNAMES.has(canonical.hostname)) return null;
+  return canonical.origin + url.pathname + url.search;
+}
+
 /** Cookie-строка запроса → словарь ( Bun Request.headers уже даёт строку). */
 export function parseCookies(header: string | null): Record<string, string> {
   const out: Record<string, string> = {};

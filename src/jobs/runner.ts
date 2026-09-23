@@ -63,6 +63,12 @@ export interface ScanDeps {
   collectRest?: (slug: string) => Promise<RestCollectResult>;
   /** шов AppSec-сбора (тесты без сети; К-Р15 — bucket/attempts для status_detail) */
   collectAppsec?: (rest: ScClient, appsec: AppsecClient, slug: string) => Promise<{ fact: Fact | null; noData: { reason: string; detail: string; bucket?: string; attempts?: number } | null }>;
+  /**
+   * В5 (спека §3.4): авто-генерация AI-summary в ОКНЕ СКАНА — вызывается
+   * после успешного скор-хука, пока клон жив. Реализация — makeAutoSummary
+   * (оп-ин внутри); сбой генерации скан не роняет (fail-soft на месте вызова).
+   */
+  summaryAutoRun?: (ctx: { db: Database; repoId: number; scanId: number; org: string; repo: string; cloneDir: string }) => Promise<void>;
 }
 
 export interface ScanOptions {
@@ -94,11 +100,26 @@ export interface ScanResult {
 
 const DEFAULT_GIT_BASE = "https://git.sourcecraft.dev";
 
-const anonGitUrl = (base: string, org: string, repo: string) => {
-  const u = new URL(`${base.replace(/\/+$/, "")}/${org}/${repo}.git`);
-  u.username = "git";
+/**
+ * Git-URL скана/генерации: с PAT — креды в URL (существуют только внутри
+ * процесса, stderr скраббится), без — анонимный `git`-юзер. Общий для
+ * scan-job и summary-job (В5). user-info добавляется только на http(s):
+ * file:// (тесты, локальный дев) кредов не несёт.
+ */
+export function scanGitUrl(gitBase: string, pat: string | null, org: string, repo: string): string {
+  const u = new URL(`${gitBase.replace(/\/+$/, "")}/${org}/${repo}.git`);
+  if (/^https?:$/.test(u.protocol)) {
+    if (pat !== null) {
+      u.username = "repo-health";
+      u.password = encodeURIComponent(pat);
+    } else {
+      u.username = "git";
+    }
+  }
   return u.toString();
-};
+}
+
+const anonGitUrl = (base: string, org: string, repo: string) => scanGitUrl(base, null, org, repo);
 
 /**
  * Git-URL скана с PAT (дока PAT: `git clone https://anyname:<PAT>@…`):
@@ -106,12 +127,7 @@ const anonGitUrl = (base: string, org: string, repo: string) => {
  * failed (найдено живой приёмкой В4: наш репо приватный). Креды в URL
  * существуют только внутри процесса; stderr git скраббится (git.ts).
  */
-const patGitUrl = (base: string, pat: string, org: string, repo: string) => {
-  const u = new URL(`${base.replace(/\/+$/, "")}/${org}/${repo}.git`);
-  u.username = "repo-health";
-  u.password = encodeURIComponent(pat);
-  return u.toString();
-};
+const patGitUrl = (base: string, pat: string, org: string, repo: string) => scanGitUrl(base, pat, org, repo);
 
 /**
  * Причина no-data git-канала при неудачном клоне (круг 2, С5): limits —
@@ -246,6 +262,12 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
   const facts: Fact[] = [];
   // мета репо буферизуется до скор-хука (К-Ф1.1)
   let repoMeta: RestCollectResult["repoMeta"] = null;
+  // В5 (Б1, именованная правка — спека §3.4): окно клона продлено под
+  // агентную стадию. Раньше `cleanupClone` стоял в `finally` сразу после
+  // `extractFacts`; теперь клон живёт до конца скана — авто-генерация
+  // summary (оп-ин) исполняется в том же окне, инструменты агента читают
+  // один и тот же клон. Уборка — в `finally` ниже, сбой — по-прежнему fail-soft.
+  let cloneDir: string | null = null;
 
   // REST-клиент (К3): userToken → PAT автора (шов или новый клиент),
   // иначе серверный; ни того ни другого → REST честно no-data(access)
@@ -261,30 +283,44 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
         const out = await deps.collectGit(org, repo, limits);
         facts.push(...out.facts);
         if (out.failure) gitChannel = `no-data(${out.failure})`;
-      } else {
-        const url = gitUrlOf(org, repo);
-        const clone = await cloneWithDegrade(url, undefined, limits);
-        if (clone.ok) {
-          gitChannel = clone.historyTruncatedSince ? "ok(degraded)" : "ok";
-          try {
-            facts.push(
-              ...(await extractFacts(clone.dir, {
-                maxBlameFiles: extract.maxBlameFiles,
-                textCapBytes: extract.textCapBytes,
-                // Ф2.19: свой бюджет извлечения. Раньше сюда ехал
-                // `degrade.timeoutMs`, и выключение деградационного яруса
-                // молча меняло дедлайн разбора клона
-                deadlineMs: extract.timeoutMs,
-                historyTruncatedSince: clone.historyTruncatedSince ?? undefined,
-              })),
-            );
-          } finally {
-            // закон 3: клон удаляется всегда; сбой уборки — fail-soft
-            // (ERROR_LOG 16.09: EBUSY рушил успешно собранный канал)
-            const cleanupError = cleanupClone(clone.dir);
-            if (cleanupError) console.error(`[scan ${scanId}] cleanup ${clone.dir}: ${cleanupError}`);
-          }
         } else {
+          const url = gitUrlOf(org, repo);
+          const clone = await cloneWithDegrade(url, undefined, limits);
+          if (clone.ok) {
+            gitChannel = clone.historyTruncatedSince ? "ok(degraded)" : "ok";
+            const headBox: { headSha?: string | null } = {};
+            try {
+              facts.push(
+                ...(await extractFacts(clone.dir, {
+                  maxBlameFiles: extract.maxBlameFiles,
+                  textCapBytes: extract.textCapBytes,
+                  // Ф2.19: свой бюджет извлечения. Раньше сюда ехал
+                  // `degrade.timeoutMs`, и выключение деградационного яруса
+                  // молча меняло дедлайн разбора клона
+                  deadlineMs: extract.timeoutMs,
+                  historyTruncatedSince: clone.historyTruncatedSince ?? undefined,
+                  out: headBox,
+                })),
+              );
+            } catch (e) {
+              // извлечение упало до открытия окна — уборка на месте (прежняя
+              // семантика `finally`), окно не открывается
+              const cleanupError = cleanupClone(clone.dir);
+              if (cleanupError) console.error(`[scan ${scanId}] cleanup ${clone.dir}: ${cleanupError}`);
+              throw e;
+            }
+            cloneDir = clone.dir;
+            // В5 (Б1): транспорт head_sha — колонка пишется сразу после
+            // extractFacts (строка scans уже существует); сбой записи —
+            // fail-soft: колонка честно останется NULL, канал не роняется
+            if (headBox.headSha) {
+              try {
+                deps.db.query("UPDATE scans SET head_sha = ? WHERE id = ?").run(headBox.headSha, scanId);
+              } catch (e) {
+                console.error(`[scan ${scanId}] head_sha write failed: ${String((e as Error).message).slice(0, 120)}`);
+              }
+            }
+          } else {
           const reason = gitFailureReason(clone.reason, userToken !== null);
           gitChannel = `no-data(${reason})`;
           facts.push(...gitFactsNoData(reason, clone.detail, startedAt));
@@ -365,80 +401,104 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
     workerFatal = String((e as Error).message).slice(0, 200);
   }
 
-  insertFacts(deps.db, scanId, facts);
-
-  const counts = { ok: 0, noData: 0, bad: 0 };
-  for (const f of facts) {
-    if (f.status === "ok") counts.ok++;
-    else if (f.status === "no-data") counts.noData++;
-    else counts.bad++;
-  }
-  // «ядро» скана = ok-факты хотя бы из одного канала; ни одного ok-факта
-  // (все каналы bad-channel или всё no-data) — ядра нет, скан bad
-  const status: ScanResult["status"] = scanStatusOf(facts, workerFatal !== null);
-  // тот же алгоритм на фактах публичных категорий (Ф1.11): статус без каналов
-  const publicStatus = scanStatusOf(
-    facts.filter((f) => PUBLIC_KINDS.includes(f.key)),
-    workerFatal !== null,
-  );
-
-  const finishedAt = new Date().toISOString();
-
-  // --- score-hook (В2/Б5): конец скана → compute + recommend.
-  // К-Ф1.1: пригодность — по фактам скана; оценка, рекомендации, флаг
-  // пригодности и мета репо — одной транзакцией.
-  // В4.8.5 (К8.5.12, С10-1): финальный СТАТУС скана пишется в той же
-  // транзакции. Раньше статус коммитился до хука, и упавший хук (BUSY,
-  // исключение в compute) или гибель процесса между ними оставляли «скан
-  // `ok` без оценки»: задание `done`, тост «Анализ завершен», оценка прежняя.
-  // Теперь упавший хук закрывает скан `bad` с причиной `score_failed`, а
-  // задание — `failed` с причиной «не удалось посчитать оценку».
-  let scoreSummary: ScanResult["score"] = null;
-  let eligible = false;
-  let scoreFailed = false;
-  try {
-    const scores = compute(deps.db, scanId);
-    const recs = recommend(deps.db, scanId, { scores });
-    eligible = ratingEligible(facts, { status, userId: opts.userId ?? null });
-    deps.db.transaction(() => {
-      deps.db.query("UPDATE scans SET status = ?, public_status = ?, finished_at = ? WHERE id = ?").run(status, publicStatus, finishedAt, scanId);
-      writeScores(deps.db, scores);
-      writeRecommendations(deps.db, scanId, scores.modelVersion, recs);
-      deps.db.query("UPDATE scans SET rating_eligible = ? WHERE id = ?").run(eligible ? 1 : 0, scanId);
-      if (eligible && repoMeta) upsertRepo(deps.db, org, repo, repoMetaToUpsert(repoMeta));
-      // В4.4 (кластер A): скан только что получил оценки — водяной знак
-      // батчевого прохода не должен из-за него висеть «недогнанным»
-      bumpRescoreCursor(deps.db, scanId);
-    })();
-    scoreSummary = { healthcraftIndex: scores.healthcraftIndex, indexCoverage: scores.indexCoverage, repoHealthScore: scores.repoHealthScore, repoHealthCoverage: scores.repoHealthCoverage };
-  } catch (e) {
-    scoreFailed = true;
-    eligible = false;
-    console.error(`[scan ${scanId}] score hook failed: ${String((e as Error).message).slice(0, 200)}`);
-    try {
-      deps.db
-        .query("UPDATE scans SET status = 'bad', public_status = 'bad', finished_at = ?, status_detail = 'score_failed', rating_eligible = 0 WHERE id = ?")
-        .run(finishedAt, scanId);
-    } catch (closeError) {
-      // скан остаётся `running` — его закроет свип сирот (К8.5.2b), задание — failed ниже
-      console.error(`[scan ${scanId}] closing after score hook failure failed: ${String((closeError as Error).message).slice(0, 200)}`);
-    }
-  }
-
-  return {
-    scanId,
-    repoId,
-    status: scoreFailed ? "bad" : status,
-    ...(scoreFailed ? { scoreFailed: true } : {}),
-    startedAt,
-    finishedAt,
-    counts,
-    channels: { git: gitChannel, rest: restChannel, appsec: appsecChannel },
-    repoAccess,
-    score: scoreSummary,
-    ratingEligible: scoreSummary !== null && eligible,
-    elapsedMs: Date.now() - t0,
+  // --- хвост скана: факты → статус → скор-хук. Клон (окно В5) убирается
+  // при ЛЮБОМ исходе — закон 3 «код не храним»; сбой уборки — fail-soft
+  // (ERROR_LOG 16.09: EBUSY рушил успешно собранный канал) ---
+  const cleanupWindow = (): void => {
+    if (cloneDir === null) return;
+    const dir = cloneDir;
+    cloneDir = null;
+    const cleanupError = cleanupClone(dir);
+    if (cleanupError) console.error(`[scan ${scanId}] cleanup ${dir}: ${cleanupError}`);
   };
+  try {
+    insertFacts(deps.db, scanId, facts);
+
+    const counts = { ok: 0, noData: 0, bad: 0 };
+    for (const f of facts) {
+      if (f.status === "ok") counts.ok++;
+      else if (f.status === "no-data") counts.noData++;
+      else counts.bad++;
+    }
+    // «ядро» скана = ok-факты хотя бы из одного канала; ни одного ok-факта
+    // (все каналы bad-channel или всё no-data) — ядра нет, скан bad
+    const status: ScanResult["status"] = scanStatusOf(facts, workerFatal !== null);
+    // тот же алгоритм на фактах публичных категорий (Ф1.11): статус без каналов
+    const publicStatus = scanStatusOf(
+      facts.filter((f) => PUBLIC_KINDS.includes(f.key)),
+      workerFatal !== null,
+    );
+
+    const finishedAt = new Date().toISOString();
+
+    // --- score-hook (В2/Б5): конец скана → compute + recommend.
+    // К-Ф1.1: пригодность — по фактам скана; оценка, рекомендации, флаг
+    // пригодности и мета репо — одной транзакцией.
+    // В4.8.5 (К8.5.12, С10-1): финальный СТАТУС скана пишется в той же
+    // транзакции. Раньше статус коммитился до хука, и упавший хук (BUSY,
+    // исключение в compute) или гибель процесса между ними оставляли «скан
+    // `ok` без оценки»: задание `done`, тост «Анализ завершен», оценка прежняя.
+    // Теперь упавший хук закрывает скан `bad` с причиной `score_failed`, а
+    // задание — `failed` с причиной «не удалось посчитать оценку».
+    let scoreSummary: ScanResult["score"] = null;
+    let eligible = false;
+    let scoreFailed = false;
+    try {
+      const scores = compute(deps.db, scanId);
+      const recs = recommend(deps.db, scanId, { scores });
+      eligible = ratingEligible(facts, { status, userId: opts.userId ?? null });
+      deps.db.transaction(() => {
+        deps.db.query("UPDATE scans SET status = ?, public_status = ?, finished_at = ? WHERE id = ?").run(status, publicStatus, finishedAt, scanId);
+        writeScores(deps.db, scores);
+        writeRecommendations(deps.db, scanId, scores.modelVersion, recs);
+        deps.db.query("UPDATE scans SET rating_eligible = ? WHERE id = ?").run(eligible ? 1 : 0, scanId);
+        if (eligible && repoMeta) upsertRepo(deps.db, org, repo, repoMetaToUpsert(repoMeta));
+        // В4.4 (кластер A): скан только что получил оценки — водяной знак
+        // батчевого прохода не должен из-за него висеть «недогнанным»
+        bumpRescoreCursor(deps.db, scanId);
+      })();
+      scoreSummary = { healthcraftIndex: scores.healthcraftIndex, indexCoverage: scores.indexCoverage, repoHealthScore: scores.repoHealthScore, repoHealthCoverage: scores.repoHealthCoverage };
+    } catch (e) {
+      scoreFailed = true;
+      eligible = false;
+      console.error(`[scan ${scanId}] score hook failed: ${String((e as Error).message).slice(0, 200)}`);
+      try {
+        deps.db
+          .query("UPDATE scans SET status = 'bad', public_status = 'bad', finished_at = ?, status_detail = 'score_failed', rating_eligible = 0 WHERE id = ?")
+          .run(finishedAt, scanId);
+      } catch (closeError) {
+        // скан остаётся `running` — его закроет свип сирот (К8.5.2b), задание — failed ниже
+        console.error(`[scan ${scanId}] closing after score hook failure failed: ${String((closeError as Error).message).slice(0, 200)}`);
+      }
+    }
+
+    // В5: авто-генерация AI-summary (оп-ин) — ПОКА клон жив (окно §3.4);
+    // любой сбой — fail-soft: скан и оценка уже записаны и не ревертятся
+    if (!scoreFailed && cloneDir !== null && deps.summaryAutoRun) {
+      try {
+        await deps.summaryAutoRun({ db: deps.db, repoId, scanId, org, repo, cloneDir });
+      } catch (e) {
+        console.error(`[scan ${scanId}] auto summary failed (ignored): ${String((e as Error).message).slice(0, 200)}`);
+      }
+    }
+
+    return {
+      scanId,
+      repoId,
+      status: scoreFailed ? "bad" : status,
+      ...(scoreFailed ? { scoreFailed: true } : {}),
+      startedAt,
+      finishedAt,
+      counts,
+      channels: { git: gitChannel, rest: restChannel, appsec: appsecChannel },
+      repoAccess,
+      score: scoreSummary,
+      ratingEligible: scoreSummary !== null && eligible,
+      elapsedMs: Date.now() - t0,
+    };
+  } finally {
+    cleanupWindow();
+  }
 }
 
 /** Мета REST → upsert; видимость без значения не передаётся ключом (Ф1.10). */

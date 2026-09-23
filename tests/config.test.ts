@@ -7,9 +7,10 @@ import { apiBaseFromEnv, DEFAULT_LEASE_MS, DEFAULT_SCAN, defaultLeaseMs, leaseMs
 describe("очередь, лиз и доступ (В4.1, К2/К4)", () => {
   // ПЕРЕВОРОТ (В4.8.5, К8.5.2b, §2-В2): лиз 85 мин (сумма бюджетов) → 10 мин
   // с продлением раз в треть лиза; худший скан 85 мин остаётся мерилом свипа
-  test("дефолты: лиз 10 мин (худший скан 85 мин — отдельно); 10 заявок/час; 3 попытки; кэш доступа 15 мин", () => {
+  test("дефолты: лиз 10 мин (худший скан 91 мин — отдельно); 10 заявок/час; 3 попытки; кэш доступа 15 мин", () => {
     expect(defaultLeaseMs(DEFAULT_SCAN)).toBe(10 * 60_000);
-    expect(worstCaseScanMs(DEFAULT_SCAN)).toBe(85 * 60_000);
+    // В5.1 (Прод-мелочь 7): формула включает фуз генерации 6 мин (20+25+25+6+15)
+    expect(worstCaseScanMs(DEFAULT_SCAN)).toBe(91 * 60_000);
     const keys = [
       "SCHEDULER_LEASE_MS",
       "QUEUE_USER_SCANS_PER_HOUR",
@@ -28,6 +29,8 @@ describe("очередь, лиз и доступ (В4.1, К2/К4)", () => {
       "QUEUE_FAVORITES_MAX",
       "SCHEDULER_CATALOG_INTERVAL_MS",
       "SCAN_EXTRACT_TIMEOUT_MS",
+      // 23.09: дебаг-куладаун генерации в .env не должен протекать в дефолты
+      "QUEUE_SUMMARY_COOLDOWN_MS",
     ];
     const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
     try {
@@ -36,7 +39,8 @@ describe("очередь, лиз и доступ (В4.1, К2/К4)", () => {
       const cfg = loadConfig();
       expect(cfg.scheduler.leaseMs).toBe(DEFAULT_LEASE_MS);
       // ПЕРЕВОРОТ (В4.8.5, К8.5.7, §2-В3): чтений списка «Моих репозиториев» 30/мин (было 6)
-      expect(cfg.queue).toEqual({ userScansPerHour: 10, maxAttempts: 3, userActiveMax: 2, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 21_600_000, retentionDays: 30, myReposPerMinute: 30, favoritesMax: 500, cardPerMinute: 30, favoritesMutationsPerMinute: 30 });
+      // В5 (Б1): кулдаун AI-генерации на репо — 60 мин (QUEUE_SUMMARY_COOLDOWN_MS)
+      expect(cfg.queue).toEqual({ userScansPerHour: 10, maxAttempts: 3, userActiveMax: 2, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 21_600_000, retentionDays: 30, myReposPerMinute: 30, favoritesMax: 500, cardPerMinute: 30, favoritesMutationsPerMinute: 30, summaryCooldownMs: 3_600_000, summaryActiveMax: 2 });
       expect(cfg.access.cacheTtlMs).toBe(15 * 60_000);
       process.env.QUEUE_USER_SCANS_PER_HOUR = "4";
       process.env.QUEUE_MAX_ATTEMPTS = "5";
@@ -47,12 +51,14 @@ describe("очередь, лиз и доступ (В4.1, К2/К4)", () => {
       process.env.QUEUE_RETENTION_DAYS = "7";
       process.env.QUEUE_MY_REPOS_PER_MINUTE = "4";
       process.env.QUEUE_FAVORITES_MAX = "400";
+      process.env.QUEUE_SUMMARY_COOLDOWN_MS = "5000";
+      process.env.QUEUE_SUMMARY_ACTIVE_MAX = "3";
       const env = loadConfig();
-      expect(env.queue).toEqual({ userScansPerHour: 4, maxAttempts: 5, userActiveMax: 2, favoriteChecksPerMinute: 3, favoriteOwnCooldownMs: 1000, retentionDays: 7, myReposPerMinute: 4, favoritesMax: 400, cardPerMinute: 30, favoritesMutationsPerMinute: 30 });
+      expect(env.queue).toEqual({ userScansPerHour: 4, maxAttempts: 5, userActiveMax: 2, favoriteChecksPerMinute: 3, favoriteOwnCooldownMs: 1000, retentionDays: 7, myReposPerMinute: 4, favoritesMax: 400, cardPerMinute: 30, favoritesMutationsPerMinute: 30, summaryCooldownMs: 5000, summaryActiveMax: 3 });
       expect(env.access.cacheTtlMs).toBe(1000);
       // ПЕРЕВОРОТ (К8.5.2b): бюджет клона из env меняет худший скан (60 с +
-      // 25 + 25 + 15 мин), но не лиз — лиз от бюджетов больше не зависит
-      expect(worstCaseScanMs(env.scan)).toBe(60_000 + 25 * 60_000 + 25 * 60_000 + 15 * 60_000);
+      // 25 + 25 + фуз 6 + 15 мин), но не лиз — лиз от бюджетов больше не зависит
+      expect(worstCaseScanMs(env.scan)).toBe(60_000 + 25 * 60_000 + 25 * 60_000 + 6 * 60_000 + 15 * 60_000);
       expect(env.scheduler.leaseMs).toBe(DEFAULT_LEASE_MS);
       // лиз ниже минуты поднимается до минуты, а не принимается как есть
       process.env.SCHEDULER_LEASE_MS = "12345";
@@ -136,19 +142,19 @@ describe("круг 2 (LOW-11): адреса API только https (кроме l
 // (`worstCaseScanMs`) — формула и её утверждения прежние; им теперь меряются
 // свип клонов и «зависло», а не лиз
 describe("Ф2.19: худший случай скана и бюджет извлечения", () => {
-  test("худший скан = клон + деградация (если включена) + извлечение + 15 мин", () => {
+  test("худший скан = клон + деградация (если включена) + извлечение + фуз генерации + 15 мин", () => {
     const on = scanFromEnv({});
-    expect(worstCaseScanMs(on)).toBe(on.clone.timeoutMs + on.degrade.timeoutMs + on.extract.timeoutMs + 15 * 60_000);
+    expect(worstCaseScanMs(on)).toBe(on.clone.timeoutMs + on.degrade.timeoutMs + on.extract.timeoutMs + 6 * 60_000 + 15 * 60_000);
     // деградация выключена — её бюджет из худшего случая уходит, а не остаётся «на всякий»
     const off = scanFromEnv({ SCAN_DEGRADE_ENABLED: "false" });
-    expect(worstCaseScanMs(off)).toBe(off.clone.timeoutMs + off.extract.timeoutMs + 15 * 60_000);
+    expect(worstCaseScanMs(off)).toBe(off.clone.timeoutMs + off.extract.timeoutMs + 6 * 60_000 + 15 * 60_000);
     expect(worstCaseScanMs(off)).toBeLessThan(worstCaseScanMs(on));
   });
 
   test("бюджет извлечения — свой env, а не бюджет деградации", () => {
     const cfg = scanFromEnv({ SCAN_EXTRACT_TIMEOUT_MS: "90000", SCAN_DEGRADE_TIMEOUT_MS: "111000" });
     expect(cfg.extract.timeoutMs).toBe(90_000);
-    expect(worstCaseScanMs(cfg)).toBe(cfg.clone.timeoutMs + 111_000 + 90_000 + 15 * 60_000);
+    expect(worstCaseScanMs(cfg)).toBe(cfg.clone.timeoutMs + 111_000 + 90_000 + 6 * 60_000 + 15 * 60_000);
   });
 
   // ПЕРЕВОРОТ (К8.5.2b, §2-В2): было «ниже пола 85 мин поднимается до пола».

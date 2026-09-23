@@ -749,6 +749,13 @@ export interface ExtractOptions {
   now?: Date;
   /** шов Б0: подмена `git cat-file --batch` (обрыв потока на середине) */
   catFile?: CatFileSpawn;
+  /**
+   * Транспорт head_sha (В5, Б1 — спека §3.4): extractFacts и так делает
+   * `rev-parse --verify` — теперь вывод не выбрасывается, а выносится
+   * вызывающему (runner пишет scans.head_sha; строка scans уже существует).
+   * Возврат Fact[] не меняется — обратная совместимость вызовов и тестов.
+   */
+  out?: { headSha?: string | null };
 }
 
 /**
@@ -769,10 +776,14 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
   let branch = "HEAD";
   try {
     branch = (await git(["symbolic-ref", "--short", "HEAD"])).stdout.trim() || "HEAD";
-    await git(["rev-parse", "--verify", `${branch}^{commit}`]);
+    // В5 (Б1): sha выносится транспортом `out.headSha` (спека §3.4), а не
+    // выбрасывается; detached HEAD (symbolic-ref пуст) читается ниже
+    const sha = (await git(["rev-parse", "--verify", `${branch}^{commit}`])).stdout.trim();
+    if (opts.out) opts.out.headSha = sha || null;
   } catch (e) {
     // круг 2 (С5): empty — только однозначное «нет коммитов» (клон читается и
     // в нём нет ни одного объекта-коммита); иное исключение — other
+    if (opts.out) opts.out.headSha = null;
     const detail = String((e as Error).message).slice(0, 120);
     let noCommits = false;
     try {

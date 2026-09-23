@@ -14,7 +14,6 @@ import { categoryOf, parseFactValue } from "../collectors/facts";
 import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
 import { DerivedMetrics, deriveMetrics } from "./derived";
 import {
-  CI_CONFIG_ONLY_FACTOR,
   CLOSE_DAYS,
   COVERAGE_NULL_BELOW,
   FULL_COVERAGE_BASE,
@@ -492,7 +491,12 @@ function scoreDocumentation(ok: Map<string, unknown>, _derived: DerivedMetrics):
 
 function scoreCicd(ok: Map<string, unknown>): CategoryScore {
   const configs = ok.get("cicd.configs") as { has_ci_yaml?: unknown; has_steps?: unknown } | undefined;
-  const runs = ok.get("cicd.runs") as { runs_count?: unknown; success_rate?: unknown; duration_p50?: unknown } | undefined;
+  const runs = ok.get("cicd.runs") as {
+    runs_count?: unknown;
+    success_rate?: unknown;
+    weighted_success_rate?: unknown;
+    duration_p50?: unknown;
+  } | undefined;
   const configSub = configs ? (configs.has_ci_yaml === true && configs.has_steps === true ? 1 : 0) : null;
   if (configSub === null) {
     return { score: null, no_data: "git channel no-data", submetrics: {} };
@@ -511,10 +515,12 @@ function scoreCicd(ok: Map<string, unknown>): CategoryScore {
   }
   const runsAvailable = runs !== undefined && (num(runs.runs_count) ?? 0) > 0;
   if (!runsAvailable) {
-    // §5.1: конфиг без прогонов — потолок 50 (конфиг-скор × 0.5)
+    // 23.09 (Алексей): «конфиг без прогонов — проще не оценивать, честно
+    // написать "прогонов нет"; и уж точно не 50, за что так много?» —
+    // кап 50 удалён, категория честное no-data (три состояния, инвариант ТЗ)
     return {
-      score: configSub * CI_CONFIG_ONLY_FACTOR * 100,
-      no_data: "ci runs no-data (access/absent) — config-only cap 50",
+      score: null,
+      no_data: "ci runs no-data — прогоны не видны, автоматизацию не оцениваем",
       submetrics: {
         config: { score: configSub, value: configs },
         pass_rate: { score: null, note: "runs no-data" },
@@ -522,7 +528,10 @@ function scoreCicd(ok: Map<string, unknown>): CategoryScore {
       },
     };
   }
-  const passSub = num(runs!.success_rate) !== null ? anchorScore(PASS_RATE, num(runs!.success_rate)!) : null;
+  // 23.09 (Алексей): pass_rate по ВЗВЕШЕННОЙ доле успеха (ленты свежести —
+  // свежие прогоны весомее), fallback на простой агрегат старых фактов
+  const passInput = num(runs!.weighted_success_rate) ?? num(runs!.success_rate);
+  const passSub = passInput !== null ? anchorScore(PASS_RATE, passInput) : null;
   const durSub = num(runs!.duration_p50) !== null ? anchorScore(DURATION_MIN, num(runs!.duration_p50)! / 60) : null;
   const w = SUBWEIGHTS.cicd;
   const subs: [number, number | null][] = [
@@ -535,7 +544,7 @@ function scoreCicd(ok: Map<string, unknown>): CategoryScore {
     score: score !== null ? score * 100 : null,
     submetrics: {
       config: { score: configSub, value: configs },
-      pass_rate: { score: passSub, value: num(runs!.success_rate) },
+      pass_rate: { score: passSub, value: passInput },
       duration: { score: durSub, value: num(runs!.duration_p50) },
     },
   };
@@ -600,8 +609,9 @@ function scoreActivity(derived: DerivedMetrics, now: Date): CategoryScore {
       contributors: { score: contribSub, value: derived.contributorsTotal },
       pulls_90d: { score: pullsSub, value: derived.pulls90d },
       releases_12m: { score: relSub, value: derived.releases12m },
-      // показ-без-веса (§2): mirror-likeness и динамика двух окон
+      // показ-без-веса (§2): mirror-likeness, динамика двух окон и bus factor (К5.9)
       mirror_likeness: { score: null, value: derived.mirrorLikeness },
+      bus_factor: { score: null, value: derived.busFactor },
       commits_90d: { score: null, value: derived.commits90d },
       commits_365d: { score: null, value: derived.commits365d },
       sync_bursts: { score: null, value: derived.syncBursts },

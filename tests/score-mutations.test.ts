@@ -85,7 +85,7 @@ describe("§9 CI/CD (полный итог, В4.1)", () => {
     expect(green - red).toBeGreaterThanOrEqual(15);
   });
 
-  test("ci.yaml с echo-шагом добавлен: CI = 50 ровно; полный total +9.375 (номинал 7.5 = вес 15% × 50; при runs403 веса 80 → 15·50/80)", () => {
+  test("ci.yaml добавлен без прогонов: CI = no-data, итог НЕ двигается (23.09: за голый конфиг — ноль)", () => {
     // драфт §9 обещает «total +7.5» — НОМИНАЛЬНЫЙ вектор (15%×50);
     // фактический own-сдвиг = 15×50/80 = 9.375 с полными данными, с runs403
     // (CI=50 вместо 0, веса 80) — считаем ручной арифметикой ниже.
@@ -97,8 +97,10 @@ describe("§9 CI/CD (полный итог, В4.1)", () => {
       { key: "cicd.configs", value: { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: true } },
     );
     const s = compute(t.db, seedScan(t, afterFacts), { now: NOW });
-    expect(s.categories.cicd.score!).toBe(50);
-    expect(s.repoHealthScore! - before).toBeCloseTo(9.375, 10); // 15·(50−0)/80
+    expect(s.categories.cicd.score).toBeNull();
+    // 23.09 (Алексей): «CI нет = 0» → «конфиг есть, прогоны не видны = no-data» —
+    // нулевая категория выпадает из весов, итог растёт ТОЛЬКО перенормировкой
+    expect(s.repoHealthScore! - before).toBeCloseTo(15.591498679060635, 6);
   });
 
   test("инвариант изоляции (В4/Б4): CI/Security-мутации НЕ двигают публичный total", () => {

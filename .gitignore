@@ -9,3 +9,6 @@ reports/shots/
 .idea/
 package-lock.json
 .claude/worktrees/
+
+# личная агентская обвязка (MCP-серверы и пр.) — не для коммита
+.zcode/

@@ -11,7 +11,7 @@ import { loadConfig } from "../src/config";
 import { openDb } from "../src/db";
 import type { ScClient } from "../src/collectors/http";
 import { upsertUser } from "../src/auth/session";
-import { addFavorite, listMyRepos, requestUserScan } from "../src/api/me";
+import { addFavorite, listMyRepos, listSourcecraftRepos, requestUserScan } from "../src/api/me";
 
 const dir = mkdtempSync(join(tmpdir(), "rh-me-"));
 const db: Database = openDb({ ...loadConfig(), dataDir: dir });
@@ -286,4 +286,49 @@ describe("UI-ветки круга 2 (source-assert, Б4)", () => {
 test("S-7 (круг 2 В4.4): двойной sessionOf в PUT-ветках избранного убран", () => {
   const serverSrc = readFileSync(join(import.meta.dir, "..", "src", "server.ts"), "utf8");
   expect(serverSrc.includes("user0 = sessionOf(req)")).toBe(false);
+});
+
+// Парковка 23.09: пикер «своих» — пагинация /me/repos, маппинг, честный отказ
+describe("listSourcecraftRepos: пикер своих репозиториев по PAT", () => {
+  function pageClient(pages: { body: unknown; status?: number }[]): ScClient & { paths: string[] } {
+    const paths: string[] = [];
+    let call = 0;
+    return {
+      paths,
+      async get(path: string) {
+        paths.push(path);
+        const page = pages[Math.min(call, pages.length - 1)];
+        call++;
+        return { status: page.status ?? 200, json: page.body, bodyText: "" };
+      },
+    } as unknown as ScClient & { paths: string[] };
+  }
+
+  test("маппит org/slug/name/visibility/isEmpty и ходит по next_page_token", async () => {
+    const client = pageClient([
+      { body: { repositories: [
+        { organization: { slug: "acme" }, slug: "api", name: "API", visibility: "public", is_empty: false },
+        { slug: "без-орг", name: "мусор без организации" },
+      ], next_page_token: "t2" } },
+      { body: { repositories: [
+        { organization: { slug: "acme" }, slug: "empty", name: null, visibility: "private", is_empty: true },
+      ] } },
+    ]);
+    const res = await listSourcecraftRepos(client);
+    expect(res.status).toBe("ok");
+    expect(res.partial).toBe(false);
+    expect(res.repos).toEqual([
+      { org: "acme", slug: "api", name: "API", visibility: "public", isEmpty: false },
+      { org: "acme", slug: "empty", name: null, visibility: "private", isEmpty: true },
+    ]);
+    expect(client.paths[0]).toContain("/me/repos?page_size=100");
+    expect(client.paths[1]).toContain("page_token=t2");
+  });
+
+  test("не-200 → source_http и то, что успели собрать", async () => {
+    const client = pageClient([{ body: { error: "x" }, status: 502 }]);
+    const res = await listSourcecraftRepos(client, { maxPages: 1 });
+    expect(res.status).toBe("source_http");
+    expect(res.repos).toEqual([]);
+  });
 });

@@ -59,7 +59,7 @@ describe("compute: здоровое репо (ручная арифметика)
   const t: TestDb = makeDb();
   afterAll(() => t.close());
 
-  test("один скан — два показателя: HealthCraft Index из 4 категорий, Repo Health Score из 6 (4.0.0-hci, К1 В4.1 → Ф3.1)", () => {
+  test("один скан — два показателя: HealthCraft Index из 4 категорий, Repo Health Score из 6 (4.1.0-hci, К1 В4.1 → Ф3.1)", () => {
     const scanId = seedScan(t, healthyFacts());
     const s = compute(t.db, scanId, { now: NOW });
     // документация: readme 0.3+0.7·(0.5·0.72917+0.5·1)=0.90521; (0.45·0.90521+0.25+0.15)/0.85→0.80734
@@ -82,7 +82,7 @@ describe("compute: здоровое репо (ручная арифметика)
     expect(s.repoHealthCoverage).toBeCloseTo(0.8, 10);
     // (15·80.734 + 15·100 + 15·69.793 + 15·89.425 + 20·90.29)/80 = 86.31
     expect(s.repoHealthScore!).toBeCloseTo(86.31, 1);
-    expect(s.modelVersion).toBe("4.0.0-hci");
+    expect(s.modelVersion).toBe("4.1.0-hci");
     expect(s.codeEmpty).toBe(false);
     expect(s.stale).toEqual([]);
   });
@@ -95,12 +95,14 @@ describe("compute: здоровое репо (ручная арифметика)
     expect(s.noData.some((x) => x.startsWith("issues:"))).toBe(false);
   });
 
-  test("CI конфиг без прогонов: потолок 50 (§5.1) в полном итоге; без ci.yaml → 0; рейтинг не тронут", () => {
+  test("CI конфиг без прогонов: честное no-data (23.09, кап 50 удалён); без ci.yaml → 0; рейтинг не тронут", () => {
     const capped = seedScan(t, withFacts(healthyFacts(), { key: "cicd.runs", value: { reason: "access" }, status: "no-data" }));
     const s1 = compute(t.db, capped, { now: NOW });
-    expect(s1.categories.cicd.score!).toBe(50);
-    // (6905.08 − 1500 + 750)/80 = 76.94
-    expect(s1.repoHealthScore!).toBeCloseTo(76.94, 1);
+    // 23.09 (Алексей): «за что так много?» — конфиг без прогонов не оцениваем
+    expect(s1.categories.cicd.score).toBeNull();
+    expect(s1.categories.cicd.no_data).toContain("прогоны не видны");
+    // вес cicd перенормировался: итог поднялся с 76.94 до 83.15
+    expect(s1.repoHealthScore!).toBeCloseTo(83.15, 1);
 
     const noYaml = seedScan(t, withFacts(healthyFacts(), { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } }));
     const s2 = compute(t.db, noYaml, { now: NOW });
@@ -183,10 +185,10 @@ describe("compute: здоровое репо (ручная арифметика)
     expect(s2.repoHealthScore!).toBeCloseTo(base.repoHealthScore!, 9);
     expect(s2.indexCoverage).toBe(base.indexCoverage);
 
-    // без истории bad = no-data: cicd уходит в конфиг-потолок
+    // без истории bad = no-data: cicd — честное no-data (23.09, кап 50 удалён)
     const scan3 = seedScan(t, withFacts(healthyFacts(), { key: "cicd.runs", value: { reason: "bad-channel" }, status: "bad" }));
     const s3 = compute(t.db, scan3, { now: NOW });
-    expect(s3.categories.cicd.score!).toBe(50); // конфиг-кап
+    expect(s3.categories.cicd.score).toBeNull(); // прогоны не видны — не оцениваем
     expect(s3.stale).toEqual([]);
   });
 
@@ -251,7 +253,7 @@ describe("compute: здоровое репо (ручная арифметика)
     expect(rows1).toEqual([{ healthcraft_index: Math.round(s.healthcraftIndex!) }]); // полного итога в схеме нет (К-Ф3.3)
     writeScores(t.db, { ...s, modelVersion: "9.9.9-test" });
     const rows = t.db.query("SELECT model_version FROM scores WHERE scan_id = ? ORDER BY model_version").all(scanId) as { model_version: string }[];
-    expect(rows.map((r) => r.model_version)).toEqual(["4.0.0-hci", "9.9.9-test"]);
+    expect(rows.map((r) => r.model_version)).toEqual(["4.1.0-hci", "9.9.9-test"]);
     // immutable: старые строки не перезаписаны
     t.db.exec("DELETE FROM scores WHERE model_version = '9.9.9-test'");
   });

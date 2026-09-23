@@ -291,7 +291,7 @@ test("категории фактов фикстур (гигиена)", () => {
 });
 
 describe("правило карточки (круг 2): источники каналов и приватный без P", () => {
-  test("CI без скана с ok-ранами — из последнего скана с ok-конфигом (потолок «только конфиг»); приватный только с bad-сканами — score null", () => {
+  test("CI: конфиг есть, прогоны no-data — категория no-data (23.09, кап 50 удалён); приватный только с bad-сканами — score null", () => {
     const t = makeApiDb();
     cleanups.push(t.close);
     const repoId = seedRepo(t, { org: "ch", repo: "cfg" });
@@ -304,7 +304,8 @@ describe("правило карточки (круг 2): источники ка�
     seedScore(t, repoId, s1, { total: 50 });
     const granted = { cicd: "granted", appsec: "granted", repo: "granted" } as const;
     const card = getRepoCard(t.db, "ch", "cfg", { access: granted })!;
-    expect(card.score!.categories.cicd.score).toBe(50);
+    expect(card.score!.categories.cicd.score).toBeNull();
+    expect(card.score!.categories.cicd.no_data).toContain("прогоны не видны");
     expect(card.markers.ciConfigOnlyCap).toBe(true);
     expect(card.evidence.find((e) => e.key === "cicd.runs")?.status).toBe("no-data");
 

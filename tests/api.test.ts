@@ -259,7 +259,9 @@ describe("карточка репозитория", () => {
     expect(card.scan).toMatchObject({ id: scanId, status: "partial", trigger: "user" });
     expect(card.score?.healthcraftIndex).toBe(67);
     expect(card.score?.modelVersion).toBe(MODEL_VERSION);
-    expect(card.score?.noData[0]).toContain("security");
+    // 23.09: конфиг без прогонов — честное no-data по cicd наравне с security
+    expect(card.score?.noData.some((x) => x.startsWith("cicd"))).toBe(true);
+    expect(card.score?.noData.some((x) => x.startsWith("security"))).toBe(true);
     expect(card.derived).toMatchObject({ commitsPerMonth: 12 });
   });
 
@@ -428,7 +430,7 @@ describe("единая карточка: матрица доступа зрит�
         cicd: { score: 47, submetrics: { pass_rate: { score: 0.4, value: 0.5 } } },
         security: { score: 39, submetrics: { secrets: { score: 0, value: true } } },
       },
-      noData: ["cicd: ci runs no-data (access/absent) — config-only cap 50"],
+      noData: ["cicd: ci runs no-data — прогоны не видны, автоматизацию не оцениваем"],
       stale: ["cicd.runs", "appsec.findings", "issues.stats"],
     });
     seedRecommendation(m, scanId, { ruleId: "license-missing", priority: 1, factRef: "docs.presence", deltaScore: 3.75 });
@@ -613,7 +615,7 @@ describe("health (В4.4): ok вычисляемое, reasons по контрак
     const h = makeApiDb();
     seedRating(h);
     // актуальные производные: версии и водяной знак догнаны
-    h.db.query("INSERT INTO meta (key, value) VALUES ('derived_version', '5')").run();
+    h.db.query("INSERT INTO meta (key, value) VALUES ('derived_version', '6')").run();
     const maxId = (h.db.query("SELECT COALESCE(MAX(id), 0) AS m FROM scans").get() as { m: number }).m;
     h.db.query("INSERT INTO meta (key, value) VALUES ('derived_rescore_cursor', ?)").run(String(maxId));
     return h;
@@ -741,7 +743,7 @@ describe("В4.4: сжатый timeline читается как несжатый"
 describe("Б5 (круг 2 В4.4): капы текстов health", () => {
   test("S-5: derived_rescore_error в reason обрезан и без управляющих символов", () => {
     const h = makeApiDb();
-    h.db.query("INSERT INTO meta (key, value) VALUES ('derived_version', '5')").run();
+    h.db.query("INSERT INTO meta (key, value) VALUES ('derived_version', '6')").run();
     const maxId = (h.db.query("SELECT COALESCE(MAX(id), 0) AS m FROM scans").get() as { m: number }).m;
     h.db.query("INSERT INTO meta (key, value) VALUES ('derived_rescore_cursor', ?)").run(String(maxId));
     h.db.query("INSERT INTO meta (key, value) VALUES ('derived_rescore_error', ?)").run(`\u0007boom${"e".repeat(300)}`);

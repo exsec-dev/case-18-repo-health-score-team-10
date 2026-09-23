@@ -260,7 +260,7 @@ describe("В2/Б5: score-hook — конец скана пишет scores/recomm
     // В4.1 (К1): одна строка оценки на скан с двумя итогами
     const rows = db.query("SELECT healthcraft_index, model_version FROM scores WHERE scan_id = ?").all(res.scanId) as { healthcraft_index: number; model_version: string }[];
     expect(rows).toHaveLength(1);
-    expect(rows[0]!.model_version).toBe("4.0.0-hci");
+    expect(rows[0]!.model_version).toBe("4.1.0-hci");
     expect(rows[0]!.healthcraft_index).toBe(Math.round(res.score!.healthcraftIndex!));
     expect(res.score!.repoHealthScore).not.toBeNull(); // полный итог — дериватив: живёт в результате хука, в актуальной схеме не хранится (К-Ф3.3)
     const recs = db.query("SELECT rule_id FROM recommendations WHERE scan_id = ? ORDER BY priority").all(res.scanId) as { rule_id: string }[];

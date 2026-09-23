@@ -3,6 +3,7 @@
 // историей в compute), выход — сырые числа для score-модели и показа
 // (mirror_likeness — показ, без веса). Robot-истина — robot2
 // (v1-флаги в фактах игнорируются, Q18).
+import { BUS_FACTOR_SHARE, BUS_FACTOR_WINDOW_DAYS } from "./model";
 import { robot2Flags } from "./robot2";
 
 export interface TimelineEventValue {
@@ -30,6 +31,11 @@ export interface DerivedMetrics {
   mirrorLikeness: { sync_share: number; authors: number; committers: number } | null;
   /** авторы всего (пол 0.2 у соло) — все author-emails таймлайна */
   contributorsTotal: number | null;
+  /**
+   * В5 (К5.9): bus factor — сколько авторов покрывают половину человеческих
+   * коммитов за окно; нет коммитов в окне — null. Показ без веса.
+   */
+  busFactor: number | null;
   // --- issues ---
   staleShare: number | null;
   resolutionRatio: number | null;
@@ -112,6 +118,32 @@ export function deriveMetrics(ok: Map<string, unknown>, now: Date): DerivedMetri
         .filter((x) => x !== ""),
     ).size;
     const lastHuman = humanTs.length ? Math.max(...humanTs) : null;
+    // bus factor: авторы человеческих коммитов окна по убыванию вклада,
+    // накапливаем до BUS_FACTOR_SHARE суммарно (Классика T½; без веса)
+    const windowCommits = events
+      .map((e, i) => ({ e, f: flags[i]! }))
+      .filter(({ e, f }) => {
+        if (f.robot || f.sync) return false;
+        const at = tsOf(e.author?.date);
+        return at !== null && at >= now.getTime() - BUS_FACTOR_WINDOW_DAYS * DAY_MS;
+      })
+      .map(({ e }) => (e.author?.email || e.author?.name || "").toLowerCase())
+      .filter((x) => x !== "");
+    let busFactor: number | null = null;
+    if (windowCommits.length > 0) {
+      const perAuthor = new Map<string, number>();
+      for (const a of windowCommits) perAuthor.set(a, (perAuthor.get(a) ?? 0) + 1);
+      const sorted = [...perAuthor.values()].sort((a, b) => b - a);
+      let acc = 0;
+      let need = 0;
+      const threshold = Math.ceil(windowCommits.length * BUS_FACTOR_SHARE);
+      for (const c of sorted) {
+        acc += c;
+        need++;
+        if (acc >= threshold) break;
+      }
+      busFactor = need;
+    }
     return {
       humanCommits: humanTs.length,
       commits90d,
@@ -128,6 +160,7 @@ export function deriveMetrics(ok: Map<string, unknown>, now: Date): DerivedMetri
         committers: committersAll.size,
       },
       contributorsTotal: authorsAll.size,
+      busFactor,
       ...issuesCodeRest(ok, now),
     };
   }
@@ -143,6 +176,7 @@ export function deriveMetrics(ok: Map<string, unknown>, now: Date): DerivedMetri
     robotRatioV2: null,
     mirrorLikeness: null,
     contributorsTotal: null,
+    busFactor: null,
     ...issuesCodeRest(ok, now),
   };
 }

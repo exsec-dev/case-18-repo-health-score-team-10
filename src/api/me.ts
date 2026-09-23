@@ -56,6 +56,12 @@ export interface MyRepoEntry {
    * права есть, скана нет — 0, как на карточке.
    */
   recommendationsCount: number | null;
+  /**
+   * В5 (К5.10): флаг фрода последней генерации AI-описания этого репо —
+   * факторы на показ в кабинете. Подозрение для проверки человеком, Score
+   * не меняет; null — флага нет (не генерировали или модель не дала).
+   */
+  fraudFlag: { flag: boolean; factors: { key: string; note: string }[] } | null;
   /** ПОРТ 5: поле `sources` удалено (Ф2.20, решение 18.09 — кабинет favorites-only) */
 }
 
@@ -180,6 +186,17 @@ function recommendationsCountOf(db: Database, userId: number | null, org: string
 }
 
 /**
+ * В5 (К5.10): флаг фрода для записи кабинета — тем же сборщиком карточки
+ * (card.ai.fraud, доступ из сохранённой проверки прав). null — прав нет,
+ * карточки нет или флага нет.
+ */
+function fraudFlagOf(db: Database, userId: number | null, org: string, repo: string, mayRead: boolean, opts: SavedRightsOptions = {}): { flag: boolean; factors: { key: string; note: string }[] } | null {
+  if (!mayRead) return null;
+  const card = getRepoCard(db, org, repo, { access: savedAccessOf(db, userId, org, repo, opts), withRank: false });
+  return card?.ai?.fraud ?? null;
+}
+
+/**
  * Ф2.17: «работа запланирована» — у зрителя есть job в статусе
  * queued/running по этому репо (user_id = зритель, источник `jobs`) И нет
  * завершённого own-скана. Мета/Score не трогаются.
@@ -270,6 +287,53 @@ export function addFavoriteCapped(
  * favorite_limit; оставшийся next_page_token после пятой страницы —
  * partial/page_limit.
  */
+/** Репозиторий пользователя из /me/repos (23.09, парковка: пикер «своих»). */
+export interface ScRepoLite {
+  org: string;
+  slug: string;
+  name: string | null;
+  visibility: string | null;
+  isEmpty: boolean;
+}
+
+/** Пикер «своих» репозиториев: /me/repos с PAT зрителя, до 3 страниц по 100. */
+export async function listSourcecraftRepos(
+  client: ScClient,
+  opts: { maxPages?: number } = {},
+): Promise<{ status: "ok" | "source_http"; partial: boolean; repos: ScRepoLite[] }> {
+  const maxPages = opts.maxPages ?? 3;
+  let token: string | null = null;
+  let pages = 0;
+  const repos: ScRepoLite[] = [];
+  while (pages < maxPages) {
+    const path = `/me/repos?page_size=100${token ? `&page_token=${encodeURIComponent(token)}` : ""}`;
+    const res = await client.get(path);
+    if (res.status !== 200) return { status: "source_http", partial: true, repos };
+    pages++;
+    const body = res.json as {
+      repositories?: { organization?: { slug?: unknown }; slug?: unknown; name?: unknown; visibility?: unknown; is_empty?: unknown }[];
+      next_page_token?: unknown;
+    } | null;
+    const list = Array.isArray(body?.repositories) ? body!.repositories! : [];
+    for (const raw of list) {
+      const org = typeof raw.organization?.slug === "string" ? raw.organization.slug : null;
+      const slug = typeof raw.slug === "string" ? raw.slug : null;
+      if (!org || !slug) continue;
+      repos.push({
+        org,
+        slug,
+        name: typeof raw.name === "string" ? raw.name : null,
+        visibility: typeof raw.visibility === "string" ? raw.visibility : null,
+        isEmpty: raw.is_empty === true,
+      });
+    }
+    const next = body?.next_page_token;
+    if (typeof next !== "string" || next.length === 0) return { status: "ok", partial: false, repos };
+    token = next;
+  }
+  return { status: "ok", partial: true, repos };
+}
+
 export async function seedFavoritesFromNamespace(
   db: Database,
   client: ScClient,
@@ -361,6 +425,7 @@ export function myRepoEntryOf(db: Database, userId: number | null, org: string, 
     mayRead,
     planned: plannedWork(db, userId, f.org_slug, f.repo_slug),
     recommendationsCount: recommendationsCountOf(db, userId, f.org_slug, f.repo_slug, mayRead, opts),
+    fraudFlag: fraudFlagOf(db, userId, f.org_slug, f.repo_slug, mayRead, opts),
   };
 }
 
@@ -520,6 +585,15 @@ export interface MyJob {
   jobId: number;
   slug: string;
   status: string;
+  /**
+   * В5.1 (Прод-С1): род заявки — `scan` (анализ) | `summary` (описание AI).
+   * Панель различает их: прежде пользователь видел «задание» и не понимал,
+   * что живая генерация молча перехватила его запуск анализа.
+   * Optional ТОЛЬКО для старых литералов MyJob в замороженных аудит-тестах
+   * (как summaryCooldownMs в QueueConfig); myJobs задаёт всегда, absence
+   * трактуется панелью как анализ.
+   */
+  kind?: string;
   phase: "queued" | "running" | "done" | "failed" | "refused";
   /** позиция в user-очереди (только queued) — честное ожидание, не спиннер */
   queueAhead: number | null;
@@ -656,6 +730,8 @@ export function myJobs(db: import("bun:sqlite").Database, userId: number, doneLi
       jobId: Number(row.id),
       slug: slugOf(row),
       status,
+      // В5.1 (Прод-С1): род заявки в панели; legacy-строки без kind — сканы
+      kind: typeof row.kind === "string" && row.kind !== "" ? row.kind : "scan",
       phase,
       queueAhead:
         phase === "queued"
@@ -678,7 +754,7 @@ export function myJobs(db: import("bun:sqlite").Database, userId: number, doneLi
   };
     // LEFT JOIN: refused живёт без строки repos (repo_id = 0)
   const base =
-    "SELECT j.id, j.repo_id, j.status, j.claimed_at, j.lease_until, j.error, r.org_slug, r.repo_slug, r.logo_url FROM jobs j LEFT JOIN repos r ON r.id = j.repo_id WHERE j.user_id = ?";
+    "SELECT j.id, j.repo_id, j.status, j.kind, j.claimed_at, j.lease_until, j.error, r.org_slug, r.repo_slug, r.logo_url FROM jobs j LEFT JOIN repos r ON r.id = j.repo_id WHERE j.user_id = ?";
   const active = (db.query(base + " AND j.status IN ('queued','running') ORDER BY j.id").all(userId) as Record<string, unknown>[]).map(toJob);
   const recent = (db.query(base + " AND j.status IN ('done','failed','refused') ORDER BY j.id DESC LIMIT ?").all(userId, doneLimit) as Record<string, unknown>[]).map(toJob);
   return { active, recent };

@@ -44,7 +44,7 @@ import { DB_BUSY_TIMEOUT_MS, getMetaValue, setMetaValue } from "../db";
  * 5 (В4.3, Ф3.2): схема 1.9 — scores пересоздан под healthcraft_index без
  * сохранённого полного итога; строки восстанавливаются этим пересчётом.
  */
-export const DERIVED_VERSION = 5;
+export const DERIVED_VERSION = 6;
 
 /** Порция фонового пересчёта истории за тик воркера (≈25 мс на скан). */
 export const HISTORY_RESCORE_BATCH = 20;
