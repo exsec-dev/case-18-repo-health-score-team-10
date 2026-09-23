@@ -82,7 +82,7 @@ describe("Я ID OAuth: URL и обмен кода", () => {
       getJson: async () => ({ status: 0, json: null }),
     });
     expect(res.ok).toBe(false);
-    if (!res.ok) expect({ text: res.error, provider: res.error.includes("code expired") }).toEqual({ text: "Яндекс ID не подтвердил вход – попробуйте войти еще раз", provider: false });
+    if (!res.ok) expect({ text: res.error, provider: res.error.includes("code expired") }).toEqual({ text: "Я ID не подтвердил вход – попробуйте войти еще раз", provider: false }); // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): В-11 «Я ID»
   });
 
   test("exchangeCode: /info неожиданной формы → ошибка, не падение", async () => {

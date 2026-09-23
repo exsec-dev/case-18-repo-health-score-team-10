@@ -279,3 +279,17 @@ export function submetricWeightText(key: CategoryKey, sub: string): string {
   const weight = (SUBWEIGHTS[key] as Record<string, number>)[subweightKey(sub)];
   return weight === undefined ? "—" : `${Math.round(weight * 100)}%`;
 }
+
+/**
+ * Ступень 4 (В-1, §2 23.09): «рекомендаций нет» — по ситуации, одна фраза для
+ * карточки и отчета. «Улучшать нечего» — только когда все показанные категории
+ * здоровы; есть слабые — рекомендаций для них у движка нет; закрыты CI/CD и
+ * Безопасность — их рекомендации видны участникам репозитория.
+ */
+export function noRecommendationsText(card: RepoCard): string {
+  const cats = Object.values(card.score?.categories ?? {});
+  const weak = cats.some((c) => c && c.locked === undefined && c.score !== null && c.score < 70);
+  const locked = card.score?.fullLocked === true;
+  const head = weak ? "Автоматических рекомендаций для этих данных нет." : "Рекомендаций нет – по собранным данным улучшать нечего.";
+  return locked ? `${head} Рекомендации по CI/CD и Безопасности видны участникам репозитория.` : head;
+}

@@ -49,6 +49,12 @@ export interface RatingItem {
   languageColor: string | null;
   scannedAt: string | null;
   scanStatus: string;
+  /**
+   * Ступень 4 В4.9 (В-4, §2 23.09): место в публичном рейтинге по HealthCraft
+   * Index — то же правило, что на карточке (индекс по убыванию, при равенстве
+   * org/repo). Не зависит от поиска, фильтра и сортировки выдачи; null — без индекса.
+   */
+  rank: number | null;
   /** часть фактов взята из истории при сбое канала (§5.6) — НЕ «давность скана» */
   staleFacts: boolean;
   modelVersion: string;
@@ -252,6 +258,7 @@ function toRatingItem(row: RatingRow): RatingItem {
   // stale-маркер рейтинга — только по фактам, которые входят в рейтинг
   const stale = (JSON.parse(row.stale) as string[]).filter((k) => PUBLIC_KINDS.includes(k));
   return {
+    rank: null,
     org: row.org_slug,
     repo: row.repo_slug,
     title: row.title,
@@ -317,6 +324,11 @@ function matchesQ(item: RatingItem, q: string): boolean {
 export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } = {}): RatingResponse {
   const rows = db.query(RATING_SQL).all(MODEL_VERSION, MODEL_VERSION) as RatingRow[];
   const all = rows.map(toRatingItem);
+  // В-4: место — по всему рейтингу, до поиска и фильтров (правило карточки)
+  all
+    .filter((i) => i.healthcraftIndex !== null)
+    .sort((a, b) => compareItems(a, b, "index", "desc"))
+    .forEach((item, i) => (item.rank = i + 1));
 
   // фасеты считаются БЕЗ фильтра языка (иначе выбранный язык схлопывает
   // список выбора и из него некуда вернуться), но С учётом поиска

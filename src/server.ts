@@ -50,6 +50,7 @@ import { makeRecheckPump } from "./api/recheck";
 import { recordRefusedUserJob } from "./jobs/scheduler";
 import { renderRepoReport } from "./report/markdown";
 import { REPORT_NO_SCORE } from "./report/build";
+import { reportFileName } from "./web/format";
 import { pdfResponse } from "./report/pdf";
 import { catalogClientBudget, closeOwnRunningScans, maintenanceTick, returnOwnRunningJobs, startMaintenance, startScheduler, startWorkerLoop } from "./jobs/scheduler";
 import { killActiveClones } from "./collectors/git";
@@ -372,7 +373,7 @@ async function cardOrRefusal(req: Request, org: string, repo: string): Promise<R
     );
   }
   if (out.kind === "token_rejected") {
-    return Response.json({ error: { code: "pat_rejected", message: "SourceCraft отклонил ваш токен – замените его в Настройках" } }, { status: 409 });
+    return Response.json({ error: { code: "pat_rejected", message: "SourceCraft отклонил ваш токен – обновите его в Настройках" } }, { status: 409 });
   }
   return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
 }
@@ -489,7 +490,7 @@ function scanRefusal(own: Exclude<Ownership, { kind: "own" }>, org: string, repo
     case "denied":
       return { status: 403, body: { error: { code: "no_access", message: `ваш токен не дает доступа к ${org}/${repo}` } }, record: true };
     case "token_rejected":
-      return { status: 401, body: { error: { code: "pat_expired", message: "SourceCraft отклонил ваш токен – замените его в Настройках" } }, record: true };
+      return { status: 401, body: { error: { code: "pat_expired", message: "SourceCraft отклонил ваш токен – обновите его в Настройках" } }, record: true };
     default:
       // К8.5.6: сбой проверки — не вердикт и не списание лимита запусков
       return {
@@ -566,7 +567,7 @@ const routes = {
         headers: {
           "content-type": "text/markdown; charset=utf-8",
           // отчёт открывают как файл, а не читают в браузере
-          "content-disposition": `attachment; filename="${org}-${repo}-health.md"`,
+          "content-disposition": `attachment; filename="${reportFileName(org!, repo!, "md")}"`,
         },
       });
     },

@@ -158,7 +158,8 @@ describe("П1: содержание PDF равно содержанию MD", () 
       const text = pdfTreeText(buildPdfDocument(buildReportModel(card)).content).join(" ");
       for (const leak of ["cicd.runs", "cicd.configs", "appsec.findings", "grant-ci-runs", "pass_rate", "has_ci_yaml", "Настройте CI", "Подключите проверку AppSec"]) expect(text).not.toContain(leak);
       // К9.13: закрытая категория анониму — «Видна участникам репозитория.», без чисел
-      expect(text).toMatch(/CI\/CD\s+—\s+Нет данных\s+Видна участникам репозитория\./);
+      // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4, В-9): уровень закрытой — «Недоступно», не «Нет данных»
+      expect(text).toMatch(/CI\/CD\s+—\s+Недоступно\s+Видна участникам репозитория\./);
     } finally {
       close();
     }

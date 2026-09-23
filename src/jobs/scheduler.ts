@@ -305,7 +305,7 @@ export const JOB_ERRORS = {
 } as const;
 
 /** Каналы скана языком продукта: причина падения показывается в «Заданиях» дословно. */
-const CHANNEL_NAMES: Record<string, string> = { git: "клон репозитория", rest: "данные SourceCraft", appsec: "Безопасность" };
+const CHANNEL_NAMES: Record<string, string> = { git: "скачивание репозитория", rest: "данные SourceCraft", appsec: "Безопасность" };
 
 /**
  * Каналы `bad`-скана, которые не собрались, — для текста причины (П8).

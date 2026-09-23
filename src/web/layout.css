@@ -331,6 +331,15 @@ body {
   background: var(--g-color-base-background);
 }
 
+/* Ступень 4 (Ф4): у панели есть заголовок и крестик — на телефоне она во
+ * всю ширину, и закрыть ее тапом мимо было негде */
+.rh-drawer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--g-spacing-4);
+}
+
 /* document: каждая колонка — свой контейнер прокрутки */
 .rh-page_document .rh-page__main,
 .rh-page_document .rh-page__aside {
@@ -488,6 +497,13 @@ body {
   box-sizing: border-box;
   min-width: 0;
   padding: var(--g-spacing-3) var(--g-spacing-4) var(--g-spacing-4);
+}
+
+/* Ступень 4 (Ф14): длинный неразрывный адрес в сообщении не распирает плашку */
+.rh-break-anywhere,
+.rh-break-anywhere .g-alert__title,
+.rh-break-anywhere .g-alert__message {
+  overflow-wrap: anywhere;
 }
 
 /* круг 4 (З): закрытый показатель — светло-серый фон, как у заглушек */
@@ -1190,6 +1206,79 @@ button.rh-category:focus-visible {
     grid-template-columns: 1fr;
     gap: 0;
   }
+
+  /* Ступень 4 (Ф1): имя и значение подметрики — двумя строками; пунктир
+   * уходит, значение не рвется по букве */
+  .rh-subrow__head {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+
+  .rh-subrow__name {
+    flex: 1 1 0;
+    min-width: 0;
+    white-space: normal;
+  }
+
+  .rh-subrow__lead {
+    display: none;
+  }
+
+  .rh-subrow__value {
+    flex: 1 1 100%;
+    max-width: none;
+    padding-inline-start: 22px;
+    text-align: left;
+    overflow-wrap: normal;
+  }
+
+  /* Ступень 4 (Ф13): имя репозитория в шапке карточки переносится, а не срезается */
+  .rh-card-head__title .g-text_ellipsis {
+    overflow: visible;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  /* строка рейтинга: имя — до 2 строк */
+  .rh-phone-name .g-text_ellipsis {
+    display: -webkit-box !important;
+    overflow: hidden;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+  }
+
+  /* пагинация на узком телефоне переносится, а не режется */
+  .rh-pager,
+  .rh-pager .g-pagination {
+    flex-wrap: wrap;
+    row-gap: var(--g-spacing-2);
+  }
+
+  /* пустые состояния — столбиком: иллюстрация меньше и над текстом */
+  .rh-empty.g-placeholder-container {
+    padding: var(--g-spacing-5);
+  }
+
+  .rh-empty.g-placeholder-container .g-placeholder-container__body {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .rh-empty.g-placeholder-container_direction_row.g-placeholder-container_size_m .g-placeholder-container__content {
+    margin-inline: 0;
+  }
+
+  .rh-empty .g-placeholder-container__image svg {
+    width: 56px;
+    height: 56px;
+  }
+
+  /* реакции и ответвления — не разъезжаются по строкам */
+  .rh-meta__item {
+    white-space: nowrap;
+  }
 }
 
 /* ---------- В4.9 ч.2 (А5): строка рекомендации ----------
@@ -1233,6 +1322,24 @@ button.rh-category:focus-visible {
   gap: 2px;
   align-items: flex-end;
   max-width: 260px;
+  min-width: 0;
+  text-align: right;
+}
+
+/* Ступень 4 (Ф2): длинный эффект («+0,0 … – в репозитории нет кода»)
+ * переносится внутри колонки, а не наезжает на причину и не уходит за край */
+.rh-rec__effect .g-label {
+  height: auto;
+  max-width: 100%;
+}
+
+.rh-rec__effect .g-label__text,
+.rh-rec__effect .g-label__content {
+  overflow: visible;
+  padding-block: 2px;
+  line-height: 16px;
+  white-space: normal;
+  text-overflow: clip;
   text-align: right;
 }
 

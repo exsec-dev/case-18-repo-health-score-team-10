@@ -34,7 +34,8 @@ describe("В4.6 круг 3: рейтинг", () => {
     expect(api).toMatch(/function matchesQ[\s\S]{0,300}item\.org[\s\S]{0,150}item\.repo[\s\S]{0,150}item\.title/);
     expect(rating).toContain("HealthCraft Index показывает состояние открытых репозиториев SourceCraft по 4 категориям: документация, активность, задачи и состояние кода.");
     // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, Б2 / U14): в подзаголовке — ссылка «Как считается»
-    expect(rating).toMatch(/\{about\} <HowCountedLink \/>\s*<br \/>\s*Оценено \{fmtCount\(scored\)\} из \{fmtCount\(catalog\)\} репозиториев\./);
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): В-5 — строка охвата с числом неоцененных, одной функцией
+    expect(rating).toMatch(/\{about\} <HowCountedLink \/>\s*<br \/>\s*\{coverageLine\(meta\.repos\)\}/);
     expect(rating).toContain("Категории CI/CD и Безопасность учитываются только в показателе Repo Health Score");
     expect(rating).toContain("репозиториев, к которым у вас есть доступ\n");
     // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, Б): колонка «Скан» скрыта — подсказка ведет на карточку
@@ -138,7 +139,8 @@ describe("В4.6 круг 3: разделы пользователя и обол�
     // В4.8: заголовок раздела переехал в шапку списка (образец SourceCraft) —
     // `PageHeader` над отдельным `h2` дублировал его; страница — это список
     expect(reposPage).toContain("<MyReposSection");
-    expect(me).toMatch(/<Text variant="header-1" as="h1">\s*Мои репозитории\s*<\/Text>/);
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): раздел «Избранное»
+    expect(me).toMatch(/<Text variant="header-1" as="h1">\s*Избранное\s*<\/Text>/);
     expect(reposPage).not.toContain("<PatSection");
     expect(settingsPage).not.toContain('<PageHeader title="Настройки"');
     expect(settingsPage).toContain("<PatSection");
@@ -146,7 +148,8 @@ describe("В4.6 круг 3: разделы пользователя и обол�
     expect(me).toContain("Токен хранится в зашифрованном виде (AES-256-GCM)");
     expect(router).toContain('parts[0] === "settings"');
     expect(app).toContain('route.kind === "settings" && <SettingsPage />');
-    expect(shell).toContain('{ id: "me", title: "Мои репозитории"');
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): раздел «Избранное», иконка — закладка
+    expect(shell).toContain('{ id: "me", title: "Избранное", href: "/me", icon: Bookmark }');
     expect([me, router, shell, app].join("\n")).not.toMatch(/Личный кабинет|личный кабинет/);
   });
 

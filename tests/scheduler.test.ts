@@ -831,7 +831,8 @@ describe("П8: причина падения job пишется в jobs.error", 
   test("bad-скан → «сбор данных не удался: <каналы>»; myJobs отдаёт причину панели заданий", () => {
     expect(failedChannelsOf({ git: "no-data(limits)", rest: "ok", appsec: "skipped" })).toEqual(["git"]);
     // ПЕРЕВОРОТ (В4.8.5, К8.5.4, С4-12): каналы — словами, не кодами git/rest/appsec
-    expect(JOB_ERRORS.channels(["git", "rest"])).toBe("сбор данных не удался: клон репозитория, данные SourceCraft");
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): Ф20 — «клон» → «скачивание репозитория»
+    expect(JOB_ERRORS.channels(["git", "rest"])).toBe("сбор данных не удался: скачивание репозитория, данные SourceCraft");
     e.query("INSERT OR IGNORE INTO users (ya_id, login, created_at, last_login_at) VALUES ('ya-je2', 'je2', '2026', '2026')").run();
     const uid = (e.query("SELECT id FROM users WHERE ya_id = 'ya-je2'").get() as { id: number }).id;
     const id = enqueueScan(e, eRepo("bad-scan"), { userId: uid, triggerKind: "user" });
@@ -841,7 +842,7 @@ describe("П8: причина падения job пишется в jobs.error", 
     expect({ slug: recent?.slug, phase: recent?.phase, error: recent?.error }).toEqual({
       slug: "je/bad-scan",
       phase: "failed",
-      error: "сбор данных не удался: клон репозитория, данные SourceCraft",
+      error: "сбор данных не удался: скачивание репозитория, данные SourceCraft" /* Ф20 */,
     });
   });
 
@@ -858,7 +859,7 @@ describe("П8: причина падения job пишется в jobs.error", 
   test("все причины, которые пишет код, принадлежат закрытому списку JOB_ERRORS", () => {
     const fixed: string[] = [JOB_ERRORS.gone, JOB_ERRORS.noPat, JOB_ERRORS.attempts, JOB_ERRORS.internal];
     // В4.8.5: закрытый список прежний (+ scoreFailed, К8.5.12), каналы — словами (К8.5.4)
-    const ch = "(клон репозитория|данные SourceCraft|Безопасность)";
+    const ch = "(скачивание репозитория|данные SourceCraft|Безопасность)"; // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): Ф20
     const belongs = (text: string) => [...fixed, JOB_ERRORS.scoreFailed].includes(text) || new RegExp(`^сбор данных не удался: ${ch}(, ${ch})*$`).test(text);
     const written = (e.query("SELECT DISTINCT error FROM jobs WHERE error IS NOT NULL").all() as { error: string }[]).map((r) => r.error);
     // строка теста про обрезку — единственная искусственная, её исключаем явно

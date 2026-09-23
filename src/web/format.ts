@@ -3,7 +3,19 @@
 // нейтрально — «нет данных», никогда не 0 и никогда не красным.
 
 export const NO_DATA = "нет данных";
-export const NO_SCORE = "Недостаточно данных";
+// Ступень 4 (В-2, §2 23.09): одно название итога без оценки на всех экранах и в отчете
+export const NO_SCORE = "Оценки нет";
+
+/**
+ * Ступень 4 (Ф5): имя файла отчета. Слаг бывает длиной 243 символа — с ним
+ * Chrome на Windows молча отменял загрузку (0 байт, без тоста). Имя
+ * обрезается до 120 символов без хвостовых дефисов; одна функция для
+ * кнопки карточки и `content-disposition` сервера.
+ */
+export function reportFileName(org: string, repo: string, ext: "md" | "pdf"): string {
+  const base = `${org}-${repo}`.slice(0, 120).replace(/[-_.]+$/, "");
+  return `${base}-health.${ext}`;
+}
 
 /**
  * В4.4 (кластер M-9): RU-имена категорий из константы — фолбэк, когда
@@ -31,6 +43,8 @@ export function fmtSubmetric(value: number | null | undefined): string {
 /** Число для показа (В4.9, К9.11): целое как есть, дробное — до 2 знаков, запятая и минус «−». */
 export function fmtNumber(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
+  // Ступень 4 (Ф15): целые — с разрядами, как место в рейтинге («4 069»)
+  if (Number.isInteger(value)) return fmtCount(value);
   return fmtDecimal(value, 2, { trim: true });
 }
 
@@ -534,6 +548,13 @@ export const SECURITY_NO_SCAN = "Данных AppSec по репозиторию
  * не было — «еще не сканировался».
  */
 export function noScoreText(scan: { status: string } | null): { title: string; description: string } {
+  // Ступень 4 (Ф6): текст по статусу — сбой не называется «анализ прошел»
+  if (scan && scan.status === "bad") {
+    return {
+      title: "Оценки пока нет",
+      description: "Последний анализ завершился сбоем: источники данных не ответили. Это не плохая оценка – при следующем анализе данные соберутся заново.",
+    };
+  }
   if (scan) {
     // В4.9 ч.2 (А10, Г2.3): без «скана» и «фактов» — словами читателя
     return {
@@ -541,7 +562,8 @@ export function noScoreText(scan: { status: string } | null): { title: string; d
       description: "Анализ прошел, но данных для оценки не хватило. Это не плохая оценка: при следующем анализе данные соберутся заново.",
     };
   }
-  return { title: "Репозиторий есть в каталоге, но еще не сканировался", description: "Оценка появится после первого анализа репозитория." };
+  // Ступень 4 (В-3): «анализ», не «скан»
+  return { title: "Репозиторий есть в каталоге, но еще не анализировался", description: "Оценка появится после первого анализа репозитория." };
 }
 
 /**
@@ -588,7 +610,7 @@ export interface FavoriteAddCheck {
  * «запустите анализ» про чужой репозиторий (К8.5.14 (ж)).
  */
 export function favoriteAddedText(check: FavoriteAddCheck | undefined): string {
-  if (!check) return "Добавлено в «Мои репозитории».";
+  if (!check) return "Добавлено в избранное.";
   switch (check.status) {
     case "no_pat":
       return "Добавьте токен в Настройках – сервис сам проверит права и откроет данные своих репозиториев.";
@@ -597,7 +619,7 @@ export function favoriteAddedText(check: FavoriteAddCheck | undefined): string {
     case "failed":
       return "Проверить права не удалось: SourceCraft сейчас не отвечает – проверим позже.";
     case "token_rejected":
-      return "SourceCraft отклонил ваш токен – замените его в Настройках.";
+      return "SourceCraft отклонил ваш токен – обновите его в Настройках.";
     default:
       break;
   }
@@ -627,7 +649,7 @@ export function favoriteAddedText(check: FavoriteAddCheck | undefined): string {
  */
 export function reportFailureText(kind: "md" | "pdf", status: number, code: string | null): string {
   if (status === 0) return "Нет связи с сервером – проверьте подключение и повторите.";
-  if (status === 429) return "Слишком много открытий карточки за минуту – повторите чуть позже.";
+  if (status === 429) return "Слишком много запросов за минуту – повторите чуть позже.";
   if (status === 404) return "Репозиторий не найден или недоступен. Если вы входили, проверьте, не истекла ли сессия.";
   if (code === "check_failed" || status === 503) return "SourceCraft сейчас не отвечает – не удалось проверить доступ, попробуйте позже.";
   if (code === "pat_rejected") return "SourceCraft отклонил ваш токен – замените его в Настройках.";
@@ -864,7 +886,8 @@ export function gitLimitsText(l: GitLimitsMarker): string {
     : "";
   return (
     `Репозиторий больше лимита сервиса: ${full}${degrade}. ` +
-    "Документация, активность и код – нет данных; эти категории в оценке не участвуют и ее не снижают. Лимиты задает оператор сервиса."
+    // Ступень 4 (Ф9): не называть категории — активность может быть оценена по данным SourceCraft
+    "Показатели, которые считаются по коду и истории репозитория, не собраны – они в оценке не участвуют и ее не снижают. Лимиты задает оператор сервиса."
   );
 }
 
@@ -880,17 +903,25 @@ export function accessLockText(access: string | undefined): string | null {
  * остальное — текст провайдера. Живёт здесь, среди текстов: MePage —
  * компонент, его нельзя импортировать в bun test (CJS-CSS зависимости).
  */
+/** Сообщения сервера о сбое входа (`src/auth/ya.ts`), которые можно показать дословно. */
+export const AUTH_SERVER_MESSAGES = [
+  "Я ID не ответил – попробуйте войти еще раз",
+  "Я ID не подтвердил вход – попробуйте войти еще раз",
+  "Я ID вернул неожиданный ответ – попробуйте войти еще раз",
+  "вход через Я ID на сервере не настроен",
+];
+
 export function authErrorText(raw: string): string {
   // В4.8.5 (К8.5.4, С1-6): коды провайдера и наши — словами, без «(state)» и «access_denied»
   if (raw === "state") return "Проверочный код входа не сошелся – начните вход заново. Так работает защита от подмены.";
-  if (raw === "no_code") return "Яндекс ID не передал код подтверждения – попробуйте войти еще раз.";
-  if (raw === "access_denied") return "Вход отменен на странице Яндекс ID – чтобы войти, подтвердите доступ.";
+  if (raw === "no_code") return "Я ID не передал код подтверждения – попробуйте войти еще раз.";
+  if (raw === "access_denied") return "Вход отменен на странице Я ID – чтобы войти, подтвердите доступ.";
   // прочие коды провайдера OAuth (латиница с подчёркиванием) — общей фразой, код наружу не идёт
-  if (/^[a-z_]+$/.test(raw)) return "Яндекс ID не подтвердил вход – попробуйте войти еще раз.";
-  // В4.4 (кластер K/З4): отражаемый текст ограничен — обрезка 200 символов и
-  // отсечение управляющих символов (фишинг авторитетностью официального Alert)
-  const safe = raw.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 200);
-  return `Вход не удался: ${safe}`;
+  if (/^[a-z_]+$/.test(raw)) return "Я ID не подтвердил вход – попробуйте войти еще раз.";
+  // Ступень 4 (Ф17): текст из адреса НЕ печатается — только известные сообщения
+  // сервера (src/auth/ya.ts), остальное — общей фразой
+  if (AUTH_SERVER_MESSAGES.includes(raw)) return `Вход не удался: ${raw}`;
+  return "Вход не удался – попробуйте войти еще раз.";
 }
 
 /**

@@ -154,7 +154,8 @@ describe("UI-ветки круга 2 (source-assert, Б2)", () => {
   const srcOf = (file: string): string => readFileSync(join(import.meta.dir, "..", "src", "web", file), "utf8");
 
   test("З1: сбой /api/me/favorites показывает Alert над списком кабинета", () => {
-    expect(srcOf("MePage.tsx").includes('title="Раздел избранного не получился"')).toBe(true);
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): Ф20 — «не получился» → «Не удалось загрузить»
+    expect(srcOf("MePage.tsx").includes('title="Не удалось загрузить избранное"')).toBe(true);
   });
 
   // ПЕРЕНОС (В4.8.5, К8.5.1, К8.5.2b): «затянулось» — признак сервера из
@@ -262,7 +263,8 @@ describe("UI-ветки круга 2 (source-assert, Б4)", () => {
   test("UX-9: seedNote при отсутствующем username не обвиняет namespace", () => {
     const meSrc = srcOf("MePage.tsx");
     // В4.7 (Б6, П4.3): правило языка UI в кабинете — среднее тире вместо длинного
-    expect(meSrc.includes("не удалось начать посев – SourceCraft не вернул имя пользователя")).toBe(true);
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): В-7 — без «посева»; причина по-прежнему не обвиняет пространство
+    expect(meSrc.includes('"SourceCraft не вернул имя пользователя"')).toBe(true);
     const serverSrc = readFileSync(join(import.meta.dir, "..", "src", "server.ts"), "utf8");
     expect(serverSrc.includes('code: "no_username"')).toBe(true);
   });

@@ -166,7 +166,7 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
       const about = missing.map((k, i) => (i === 0 ? `${k === "install" ? "об" : "о"} ${SECTION_WORDS[k].about}` : SECTION_WORDS[k].about));
       return presence(
         `Добавьте в README ${many ? "разделы" : "раздел"} ${titles}`,
-        `В README нет ${many ? "разделов" : "раздела"} ${joinAnd(about)}. Сервис находит ${many ? "их по заголовкам" : "его по заголовку"} ${titles} или ${missing.map((k) => SECTION_WORDS[k].en).join(", ")}.`,
+        `В README нет ${many ? "разделов" : "раздела"} ${joinAnd(about)}. Сервис находит ${many ? "их по заголовкам" : "его по заголовку"} ${titles} или ${joinAnd(missing.map((k) => `«${SECTION_WORDS[k].en}»`))}.`,
       );
     }
     case "ci-missing":

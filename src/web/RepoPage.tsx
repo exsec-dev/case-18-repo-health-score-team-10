@@ -13,6 +13,7 @@
 // `cardView.ts` из тех же функций, что отчет (инвариант 1). Правая панель —
 // паспорт анализа и короткая справка (U4-A); ниже 1440 она выезжает по кнопке
 // «Как считается» (U5-a).
+import { lastRatingHref } from "./ratingReturn";
 import {
   ArrowDownToLine,
   ArrowsRotateRight,
@@ -98,6 +99,7 @@ import {
   fmtScore,
   fmtSubmetric,
   noScoreText,
+  reportFileName,
   scanStatusText,
   scanTriggerText,
   DEFINITION_NAME_WIDTH,
@@ -165,7 +167,8 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
     return () => clearInterval(timer);
   }, [foreignRunning, visible, reload]);
 
-  const crumbs: Crumb[] = [{ text: "Рейтинг", href: "/" }, { text: `${org} / ${repo}` }];
+  // Ступень 4 (В-10): крошка — на последнюю выдачу рейтинга (фильтр, сортировка, страница)
+  const crumbs: Crumb[] = [{ text: "Рейтинг", href: lastRatingHref() }, { text: `${org} / ${repo}` }];
   const own = live ?? (data?.job ? { phase: data.job.status, stalled: data.job.stalled } : null);
   const jobStalled = own?.stalled === true;
   const analysisRunning = own !== null;
@@ -205,6 +208,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
         <Alert
           theme="danger"
           view="outlined"
+          className="rh-break-anywhere"
           title={`Не удалось открыть ${slugOf(org, repo)}`}
           message={state.kind === "error" ? state.message : undefined}
           // В4.8.5 (К8.5.4, С6-6): «Повторить» — только там, где повтор может помочь;
@@ -221,7 +225,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   const refreshError = state.kind === "ok" ? state.refreshError : undefined;
   const actions = (
     <Flex gap={2} alignItems="center">
-      {card.score !== null && <ReportMenu mdHref={reportHref} pdfHref={`${cardUrl}/report.pdf`} pdfName={`${org}-${repo}-health.pdf`} />}
+      {card.score !== null && <ReportMenu mdHref={reportHref} pdfHref={`${cardUrl}/report.pdf`} pdfName={reportFileName(org, repo, "pdf")} />}
       {refreshButton}
     </Flex>
   );
@@ -251,7 +255,7 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
             description={
               (own?.phase === "queued"
                 ? "Заявка стоит в очереди – ее возьмут в работу, и здесь появится итог."
-                : "Идет анализ: данные собираются.") +
+                : "Данные собираются – итог появится здесь.") +
               // UX-10 (круг 2 В4.4): заметка, когда задание зависло (признак сервера)
               (jobStalled ? " Анализ затянулся – его итог появится в «Заданиях»." : "")
             }
@@ -562,12 +566,13 @@ const INDEX_HELP =
 const ASIDE_NAME_WIDTH = 150;
 
 const FULL_HELP =
-  "Рассчитывается по 6 категориям: 4 категориям HealthCraft Index, а также CI/CD и Безопасность. " +
+  "Рассчитывается по 6 категориям: 4 категориям HealthCraft Index, а также CI/CD и Безопасности. " +
   "Показатель доступен только для репозиториев, к которым у вас есть доступ";
 
 /** «Данные собраны» паспорта анализа (А8): ok — «полностью», partial — «частично», прочее — словом статуса. */
 function collectedText(status: string): string {
-  return status === "ok" ? "полностью" : status === "partial" ? "частично" : scanStatusText(status);
+  // Ступень 4 (Ф7): не «Данные собраны: сбойный» — для прочих статусов строка паспорта своя
+  return status === "ok" ? "полностью" : status === "partial" ? "частично" : status === "bad" ? "не полностью – анализ завершился сбоем" : scanStatusText(status);
 }
 
 /**
@@ -879,7 +884,8 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
   const cat = card.score!.categories[key]!;
   const [open, setOpen] = useState(defaultOpen);
   const subs = Object.entries(cat.submetrics);
-  const expandable = subs.length > 0 || c.partialNote !== null;
+  // Ступень 4 (Ф12): у категории без данных раскрывать нечего — одно состояние, один вид
+  const expandable = c.score !== null && (subs.length > 0 || c.partialNote !== null);
 
   const row = (
     <>
@@ -1041,7 +1047,7 @@ function Markers({ view }: { view: CardView }) {
   if (view.topMarkers.includes("ci-cap")) {
     rows.push({
       key: "ci-cap",
-      label: "CI заявлен, прогоны недоступны",
+      label: "CI настроен, результаты запусков недоступны",
       text: "Файл CI в репозитории есть, но результаты запусков сервису недоступны. Без них категория CI/CD получает не больше 50 из 100.",
       theme: "warning",
     });
@@ -1096,7 +1102,7 @@ function Recommendations({ view }: { view: CardView }) {
         <Card view="outlined" className="rh-section-card">
           <Flex gap={2} alignItems="center">
             <Icon data={CircleCheck} size={16} className="rh-muted-icon" />
-            <Text color="complementary">Рекомендаций нет – по собранным данным улучшать нечего.</Text>
+            <Text color="complementary">{view.noRecommendations}</Text>
           </Flex>
         </Card>
       </section>
@@ -1134,7 +1140,7 @@ function RecommendationRow({ item }: { item: RecommendationView }) {
         </Text>
         <Flex gap={2} wrap alignItems="center" className="rh-rec__basis">
           <Text variant="body-short" color="secondary">
-            Основание:
+            Причина:
           </Text>
           <Popover trigger="click" placement={["bottom-start", "top-start"]} content={<FactProof item={item} />}>
             <Label theme="info" size="xs" interactive>
@@ -1183,7 +1189,8 @@ function FactBlock({ factKey, fact }: { factKey: string; fact: Evidence | null }
   if (!fact) {
     return (
       <Flex direction="column" gap={1}>
-        <Text color="complementary">Эти данные вам недоступны. {SECURITY_PUBLIC_NOTE}</Text>
+        {/* Ступень 4 (Ф10): текст про AppSec — только у фактов Безопасности */}
+        <Text color="complementary">{factKey.startsWith("appsec") ? `Эти данные вам недоступны. ${SECURITY_PUBLIC_NOTE}` : "Эти данные видны участникам репозитория."}</Text>
         <Text variant="caption-2" color="hint">
           {factKey}
         </Text>
@@ -1445,7 +1452,7 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
       toaster.add({
         name: `favorite:${org}/${repo}`,
         theme: next === "on" ? "success" : "info",
-        title: next === "on" ? "Добавлено в «Мои репозитории»" : "Убрано из избранного",
+        title: next === "on" ? "Добавлено в избранное" : "Убрано из избранного",
         content: next === "on" ? `${slugOf(org, repo)}. ${favoriteAddedText(res?.check)}` : slugOf(org, repo),
       });
       // первый анализ своего мог встать — «Задания» и карточка узнают сразу
@@ -1487,7 +1494,7 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
             ? "Проверяем избранное…"
             : state === "anon"
               ? "Войдите через Я ID, чтобы добавлять в избранное"
-              : "В избранное. Раздел «Мои репозитории» содержит выбранные вами репозитории; права на закрытые данные сервис проверит сам при добавлении."
+              : "В избранное. Раздел «Избранное» содержит выбранные вами репозитории; права на закрытые данные сервис проверит сам при добавлении."
         }
         onClick={() => void toggle()}
       >

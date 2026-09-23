@@ -109,7 +109,8 @@ describe("А2 (блок А): «Как считается» описывает п
   test("full: первая строка не говорит про 4 категории — в документе их шесть и два показателя", () => {
     const { md } = report("full");
     const method = md.slice(md.indexOf("## Как считается"), md.indexOf("## Приложение"));
-    expect(method).toContain("В отчете два показателя: HealthCraft Index – по 4 открытым категориям");
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): Ф20 — цифра, где уместна
+    expect(method).toContain("В отчете 2 показателя: HealthCraft Index – по 4 открытым категориям");
     expect(method).not.toContain("Оценка складывается из 4 категорий");
     // у каждого показателя своя строка «В этом отчете: …»
     expect(method.match(/В этом отчете: /g) ?? []).toHaveLength(2);
@@ -320,12 +321,13 @@ describe("А15: выборка задач для времени ответа —
     expect(md).toContain("В трекере нет ни одной задачи.");
     const appendix = md.slice(md.indexOf("## Приложение"));
     expect(appendix).toContain("| open | 0 |");
-    expect(appendix).toContain("| issues – задач в выборке для времени первого ответа; число задач трекера — в issues.stats | 0 |");
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): Ф20 — длинное тире только глифом «нет данных»
+    expect(appendix).toContain("| issues – задач в выборке для времени первого ответа; число задач трекера – в issues.stats | 0 |");
   });
 
   test("full: у репозитория с задачами выборка подписана тем же именем", () => {
     const { md } = report("full");
     const appendix = md.slice(md.indexOf("## Приложение"));
-    expect(appendix).toContain("| issues – задач в выборке для времени первого ответа; число задач трекера — в issues.stats | 4 |");
+    expect(appendix).toContain("| issues – задач в выборке для времени первого ответа; число задач трекера – в issues.stats | 4 |"); // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): Ф20
   });
 });

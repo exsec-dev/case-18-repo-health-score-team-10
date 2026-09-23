@@ -19,6 +19,7 @@
 // SemiBold и 2 курсива). Покрытие глифов закрыто тестом по cmap
 // (tests/report-pdf.test.ts). Неизвестный глиф во внешних данных генерацию
 // не роняет — fontkit рисует на его месте .notdef.
+import { reportFileName } from "../web/format";
 import pdfmake from "pdfmake";
 import { join, resolve, sep } from "node:path";
 import type { RepoCard } from "../api/repos";
@@ -249,9 +250,10 @@ function scoreBar(score: number | null, w: number): PdfNode {
 // ---------- блоки ----------
 
 function headerNode(block: Extract<Block, { kind: "header" }>): PdfNode {
-  const left: PdfNode[] = [{ text: block.slug.replace("/", " / "), fontSize: 16, bold: true, lineHeight: 1 }];
+  // Ступень 4 (Ф3): неразрывный длинный слаг и ссылка переносятся, а не уходят за поле
+  const left: PdfNode[] = [{ text: breakable(block.slug.replace("/", " / ")), fontSize: 16, bold: true, lineHeight: 1 }];
   if (block.title) left.push({ text: lineNodes(block.title), fontSize: 8, color: COLORS.muted, margin: [0, 2, 0, 0] });
-  left.push({ text: block.link.text, link: block.link.url, color: COLORS.link, fontSize: 8, margin: [0, 2, 0, 0] });
+  left.push({ text: breakable(block.link.text), link: block.link.url, color: COLORS.link, fontSize: 8, margin: [0, 2, 0, 0] });
   // п.1 круга 2: название документа первой строкой, дата и плашка доступа — второй
   const right: PdfNode[] = [{ text: block.doc, bold: true, fontSize: 9, alignment: "right", noWrap: true }];
   const dateNode: PdfNode | null = block.date ? { width: "auto", text: block.date, fontSize: 8, color: COLORS.muted, noWrap: true, margin: [0, 2, 0, 0] } : null;
@@ -357,9 +359,15 @@ const TICK_WIDTH = 1.25;
  * них встают на одном уровне (круг 3 гейта: отрезки скакали по высоте, когда
  * пустая ячейка схлопывалась).
  */
-function segmentLabel(s: { title: string; value: string } | null, align: "left" | "right", muted: boolean): PdfNode {
+function segmentLabel(s: { title: string; value: string } | null, align: "left" | "right", muted: boolean, colW = Infinity): PdfNode {
   const color = muted ? COLORS.muted : COLORS.ink2;
+  // Ступень 4 (В5): подпись, прижатая вправо, шире своей узкой колонки (остаток
+  // «не набрано 8») — сдвигается влево, чтобы правый край совпал с краем полосы,
+  // а не уходил за поле. Ширина — оценкой по кеглю (Inter ≈ 0,55 em на знак).
+  const est = s ? Math.max(s.title.length * 7.5, s.value.length * 8) * 0.55 : 0;
+  const shift = align === "right" && est > colW ? colW - est : 0;
   return {
+    margin: [shift, 0, 0, 0],
     stack: [
       { text: s ? s.title : " ", fontSize: 7.5, color, noWrap: true, alignment: align, lineHeight: 1.05 },
       { text: s ? s.value : " ", fontSize: 8, bold: true, noWrap: true, alignment: align, color: muted ? COLORS.muted : COLORS.ink, fontFeatures: ["tnum"] },
@@ -396,7 +404,7 @@ function contributionsNode(block: Extract<Block, { kind: "contributions" }>): Pd
     return {
       width: last ? "*" : w,
       stack: [
-        segmentLabel(above ? it.s : null, it.align, it.muted),
+        segmentLabel(above ? it.s : null, it.align, it.muted, w),
         {
           canvas: [
             // круг 3 гейта: полоса не режется на куски — соседние прямоугольники
@@ -409,7 +417,7 @@ function contributionsNode(block: Extract<Block, { kind: "contributions" }>): Pd
           ],
           margin: [0, 5, 0, 0],
         },
-        { ...segmentLabel(above ? null : it.s, it.align, it.muted), margin: [0, ZONE_TOP - BAR_H + 4, 0, 0] },
+        { stack: [segmentLabel(above ? null : it.s, it.align, it.muted, w)], margin: [0, ZONE_TOP - BAR_H + 4, 0, 0] },
       ],
     };
   });
@@ -786,7 +794,7 @@ export async function pdfResponse(card: RepoCard, render: (card: RepoCard) => Pr
       headers: {
         "content-type": "application/pdf",
         // отчёт открывают как файл, а не читают в браузере
-        "content-disposition": `attachment; filename="${card.repo.org}-${card.repo.repo}-health.pdf"`,
+        "content-disposition": `attachment; filename="${reportFileName(card.repo.org, card.repo.repo, "pdf")}"`,
       },
     });
   } catch (error) {

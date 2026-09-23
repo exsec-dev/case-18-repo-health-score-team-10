@@ -186,8 +186,9 @@ describe("Р12 (MD): «закрыто»/«закрыто доступом» → 
     // В4.9 (К9.13, круг 2 эталона): закрытая категория — плашка «Нет данных» и фраза по причине
     // доступа, одна на карточке и в отчете; «Недоступно» заменено этим словом с заменой ассерта
     expect({
-      statusCell: out.includes("| CI/CD | — | нет данных | У вашего токена нет прав на эти данные репозитория. |"),
-      detailHeader: out.includes("### Безопасность – нет данных"),
+      // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): В-9 — закрытая категория в отчете «недоступно», не «нет данных»
+      statusCell: out.includes("| CI/CD | — | недоступно | У вашего токена нет прав на эти данные репозитория. |"),
+      detailHeader: out.includes("### Безопасность – недоступно"),
       oldStatusCell: out.includes("закрыто доступом"),
       oldDetailHeader: /### [^\n]* – закрыто$/m.test(out),
     }).toEqual({ statusCell: true, detailHeader: true, oldStatusCell: false, oldDetailHeader: false });
@@ -355,12 +356,14 @@ describe("Б5 (Р18, Р19): правило языка в текстах движ
     expect(CHANNEL_DELTA_HIDDEN_TEXT).toBe("повысит балл категории «CI/CD»; насколько вырастет Repo Health Score, видно при доступе к CI/CD и Безопасности");
     expect(CHANNEL_DELTA_HIDDEN_TEXT).not.toMatch(/[—ё\d]/);
     // ПЕРЕВОРОТ (В4.8.5, К8.5.4, С4-12): без «PAT» и «кабинета» — правило языка прежнее (среднее тире)
-    expect(textOf("src/api/me.ts")).toContain("SourceCraft отклонил ваш токен – замените его в Настройках");
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): Ф20 — одно слово «обновите» во всех сообщениях об отклоненном токене
+    expect(textOf("src/api/me.ts")).toContain("SourceCraft отклонил ваш токен – обновите его в Настройках");
   });
 
-  test("Р19: подпись фактов рекомендации — «Основание»", () => {
+  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): в рекомендациях «Основание:» → «Причина:» (слово владельца)
+  test("Р19: подпись фактов рекомендации — «Причина»", () => {
     const src = codeOf("RepoPage.tsx");
-    expect({ newWord: src.includes("Основание:"), oldWord: src.includes("Основано на фактах") }).toEqual({ newWord: true, oldWord: false });
+    expect({ newWord: src.includes("Причина:"), oldWord: src.includes("Основано на фактах") || src.includes("Основание:") }).toEqual({ newWord: true, oldWord: false });
   });
 });
 
@@ -555,7 +558,8 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
       // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А10): «Модель» → «Версия методики» на
       // карточке (в свернутых «Реквизитах»); плашка та же, что в панели рейтинга
       modelPlate: /name="Версия методики"[\s\S]{0,200}<Label theme="normal" size="xs">/.test(aside) && !aside.includes('name="Модель"'),
-      sameAsRating: /name="Модель"[\s\S]{0,200}<Label theme="normal" size="xs">/.test(codeOf("Rating.tsx")),
+      // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): Ф20 — и в панели рейтинга «Версия методики»
+      sameAsRating: /name="Версия методики"[\s\S]{0,200}<Label theme="normal" size="xs">/.test(codeOf("Rating.tsx")),
       starIcon14: /data=\{state === "on" \? StarFill : Star\} size=\{14\}/.test(star),
       linkIcon14: /data=\{ArrowUpRightFromSquare\} size=\{14\}/.test(link),
       // кнопки-обёртки совпадают по габариту: обе `size="s"`
@@ -639,7 +643,8 @@ describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечан
       secondParagraph: src.includes("<CoverageNote"),
       fromDb: /ratingLead[\s\S]{0,900}meta\.repos/.test(src),
       wave: src.includes("первыми идут самые заметные проекты"),
-      concise: src.includes("из {fmtCount(catalog)} репозиториев"),
+      // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): В-5 — охват одной функцией `coverageLine` (число — поведенческим тестом)
+      concise: src.includes("{coverageLine(meta.repos)}"),
     }).toEqual({ title: true, oneLead: true, oldSubheader: false, secondParagraph: false, fromDb: true, wave: false, concise: true });
   });
 
@@ -651,7 +656,8 @@ describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечан
     expect(mdLocked()).toContain("Шкала: здоров 70-100, требует внимания 40-69, в зоне риска 0-39.");
     expect(srcOf("slots.ts")).toContain("2-3 репозиториев");
     // глиф «нет данных» (длинное тире) правилом не затронут — охранный пункт 1
-    expect(mdLocked()).toContain("| CI/CD | — | нет данных |");
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): В-9 — закрытая категория «недоступно»; глиф «—» прежний
+    expect(mdLocked()).toContain("| CI/CD | — | недоступно |");
   });
 
   test("Р8: абзац под «Вклад категорий» снят, сведения — в подсказке у заголовка", () => {

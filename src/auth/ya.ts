@@ -130,17 +130,17 @@ export async function exchangeCode(
       redirect_uri: creds.redirect,
     });
   } catch {
-    return { ok: false, error: "Яндекс ID не ответил – попробуйте войти еще раз" };
+    return { ok: false, error: "Я ID не ответил – попробуйте войти еще раз" };
   }
   const tokenBody = tokenRes.json as { access_token?: unknown; error_description?: unknown } | null;
   if (tokenRes.status !== 200 || typeof tokenBody?.access_token !== "string") {
-    return { ok: false, error: "Яндекс ID не подтвердил вход – попробуйте войти еще раз" };
+    return { ok: false, error: "Я ID не подтвердил вход – попробуйте войти еще раз" };
   }
   let infoRes: { status: number; json: unknown };
   try {
     infoRes = await http.getJson(`${endpoints.loginBase}/info`, { Authorization: `OAuth ${tokenBody.access_token}` });
   } catch {
-    return { ok: false, error: "Яндекс ID не ответил – попробуйте войти еще раз" };
+    return { ok: false, error: "Я ID не ответил – попробуйте войти еще раз" };
   }
   const info = infoRes.json as {
     id?: unknown;
@@ -153,7 +153,7 @@ export async function exchangeCode(
     is_avatar_empty?: unknown;
   } | null;
   if (infoRes.status !== 200 || (typeof info?.id !== "number" && typeof info?.id !== "string") || typeof info?.login !== "string") {
-    return { ok: false, error: "Яндекс ID вернул неожиданный ответ – попробуйте войти еще раз" };
+    return { ok: false, error: "Я ID вернул неожиданный ответ – попробуйте войти еще раз" };
   }
   // ФИО важнее публичного имени: display_name у Я ID по умолчанию равен логину
   const str = (v: unknown): string | null => (typeof v === "string" && v.trim() !== "" ? v.trim() : null);

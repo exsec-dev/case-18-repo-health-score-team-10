@@ -1,0 +1,94 @@
+// Ступень 4 В4.9 (финальный проход, §2 23.09): поведенческие тесты на числа и
+// утверждения о данных, которые появились или изменились в круге по сводке
+// аудитов (reports/2026-09-23-m49-stage4-synthesis.md). Правило AGENTS.md
+// 21.09: число, названное местом или долей, закрывается тестом на данных.
+import { describe, expect, test } from "bun:test";
+import { DEFAULT_QUERY, getRepoCard, listRepos, type ReposQuery } from "../src/api/repos";
+import { noRecommendationsText } from "../src/report/sections";
+import { coverageLine as coverageLineRaw } from "../src/web/ratingParams";
+import { authErrorText, noScoreText, reportFileName } from "../src/web/format";
+import { cardFacts, makeApiDb, seedRepo, seedScan, seedScore } from "./api-fixtures";
+import { fixtureCard } from "./report-fixtures";
+
+const q = (patch: Partial<ReposQuery> = {}): ReposQuery => ({ ...DEFAULT_QUERY, ...patch });
+const GRANTED = { access: { cicd: "granted" as const, appsec: "granted" as const, repo: "granted" as const } };
+
+describe("В-4: колонка «#» — место в рейтинге, а не номер строки выдачи", () => {
+  test("при поиске и сортировке по другому полю место = место на карточке", () => {
+    const t = makeApiDb();
+    try {
+      const facts = cardFacts();
+      const mk = (repo: string, total: number): void => {
+        const id = seedRepo(t, { org: "rank", repo });
+        seedScore(t, id, seedScan(t, id, { facts }), { total });
+      };
+      mk("alpha", 90);
+      mk("beta", 70);
+      mk("gamma", 50);
+      // поиск оставляет одну строку; раньше «#» показывал бы 1
+      const found = listRepos(t.db, q({ q: "gamma" })).items;
+      expect(found.map((i) => i.rank)).toEqual([3]);
+      expect(getRepoCard(t.db, "rank", "gamma", GRANTED)!.score!.rank).toBe(3);
+      // сортировка по имени по убыванию: порядок строк другой, места — те же
+      const byName = listRepos(t.db, q({ sort: "name", order: "desc" })).items;
+      expect(byName.map((i) => [i.repo, i.rank])).toEqual([
+        ["gamma", 3],
+        ["beta", 2],
+        ["alpha", 1],
+      ]);
+    } finally {
+      t.close();
+    }
+  });
+});
+
+describe("В-5: строка охвата рейтинга", () => {
+  test("неоцененные называются числом; ноль — фразы нет", () => {
+    // разряды — неразрывным пробелом (`toLocaleString`), в ожиданиях — обычным
+    const coverageLine = (r: { scored: number; nullScore: number; catalog: number }): string => coverageLineRaw(r).replace(/ /g, " ");
+    expect(coverageLine({ scored: 27917, nullScore: 0, catalog: 27978 })).toBe("Оценено 27 917 из 27 978 репозиториев. Еще 61 пока не оценен.");
+    expect(coverageLine({ scored: 10, nullScore: 1, catalog: 11 })).toBe("Оценено 10 из 11 репозиториев.");
+    expect(coverageLine({ scored: 20, nullScore: 0, catalog: 21 })).toBe("Оценено 20 из 21 репозитория. Еще 1 пока не оценен.");
+    expect(coverageLine({ scored: 20, nullScore: 0, catalog: 25 })).toBe("Оценено 20 из 25 репозиториев. Еще 5 пока не оценены.");
+  });
+});
+
+describe("Ф5: имя файла отчета", () => {
+  test("длинный слаг обрезается, чтобы браузер не отменял загрузку; короткий — как был", () => {
+    expect(reportFileName("m47", "full", "pdf")).toBe("m47-full-health.pdf");
+    const long = reportFileName("alittlebear", "razrabotan-" + "x".repeat(240), "md");
+    expect(long.length).toBeLessThanOrEqual(130);
+    expect(long.endsWith("-health.md")).toBe(true);
+  });
+});
+
+describe("В-1: «рекомендаций нет» — по ситуации, одна фраза для карточки и отчета", () => {
+  test("слабая категория — не «улучшать нечего»; закрытые каналы названы", () => {
+    const { card, close } = fixtureCard("anon");
+    try {
+      const noRecs = { ...card, recommendations: [] };
+      const text = noRecommendationsText(noRecs);
+      // у фикстуры есть категории ниже 70 и закрыты CI/CD и Безопасность
+      expect(text).toContain("Автоматических рекомендаций для этих данных нет.");
+      expect(text).toContain("Рекомендации по CI/CD и Безопасности видны участникам репозитория.");
+      expect(text).not.toContain("улучшать нечего");
+    } finally {
+      close();
+    }
+  });
+});
+
+describe("Ф6: пустое состояние по статусу анализа", () => {
+  test("сбой — не «анализ прошел»", () => {
+    expect(noScoreText({ status: "bad" }).description).toContain("завершился сбоем");
+    expect(noScoreText({ status: "bad" }).description).not.toContain("Анализ прошел");
+    expect(noScoreText({ status: "partial" }).description).toContain("Анализ прошел");
+  });
+});
+
+describe("Ф17: текст из адреса входа не печатается", () => {
+  test("только известные сообщения сервера — дословно", () => {
+    expect(authErrorText("Я ID не ответил – попробуйте войти еще раз")).toBe("Вход не удался: Я ID не ответил – попробуйте войти еще раз");
+    expect(authErrorText("Позвоните по номеру 8-800")).toBe("Вход не удался – попробуйте войти еще раз.");
+  });
+});

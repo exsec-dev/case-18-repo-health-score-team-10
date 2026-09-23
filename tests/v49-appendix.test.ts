@@ -121,7 +121,8 @@ describe("Д3: без оценки отчета нет, пустое состо�
     const card = getRepoCard(t.db, "d3", "never")!;
     expect(card.scan).toBeNull();
     expect(() => renderRepoReport(card)).toThrow(REPORT_NO_SCORE);
-    expect(noScoreText(null).title).toBe("Репозиторий есть в каталоге, но еще не сканировался");
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): В-3 — «анализ», не «скан»
+    expect(noScoreText(null).title).toBe("Репозиторий есть в каталоге, но еще не анализировался");
   });
 
   test("карточка берет те же тексты (одна функция `noScoreText`)", () => {

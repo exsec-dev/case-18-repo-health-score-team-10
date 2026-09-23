@@ -100,7 +100,8 @@ function blockLines(block: Block): string[] {
         return `${a.n}. **${title}.** ${why}${/[.!?]$/.test(why) ? "" : "."} ${effect}`;
       });
     case "detail": {
-      const out = [`### ${block.title} – ${block.scoreText === "—" ? "нет данных" : `${block.scoreText}, ${block.chip.text.toLowerCase()}`}`];
+      // Ступень 4 (В-9): без балла — словом плашки («нет данных» или «недоступно»), как PDF
+      const out = [`### ${block.title} – ${block.scoreText === "—" ? block.chip.text.toLowerCase() : `${block.scoreText}, ${block.chip.text.toLowerCase()}`}`];
       if (block.table) out.push("", ...tableLines(block.table.columns, block.table.rows));
       for (const note of block.notes) out.push("", lineMd(note));
       return out;

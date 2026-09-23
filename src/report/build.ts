@@ -56,6 +56,7 @@ import {
   type Metric,
   type ShownMetric,
   submetricWeightText,
+  noRecommendationsText,
 } from "./sections";
 import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle, subweightKey, type SubmetricContext } from "./submetrics";
 
@@ -97,7 +98,9 @@ export function scoreChip(value: number | null): Chip {
 function categoryRow(card: RepoCard, key: CategoryKey, cat: CardCategory, ctx: SubmetricContext): CategoryRow {
   const name = CATEGORY_TITLES[key];
   const why = categoryWhy(card, key, ctx);
-  if (cat.locked !== undefined || cat.score === null) return { name, score: null, scoreText: "—", chip: scoreChip(null), why };
+  // Ступень 4 (В-9): закрытая зрителю категория — «Недоступно», а не «нет данных»
+  if (cat.locked !== undefined) return { name, score: null, scoreText: "—", chip: { theme: "unknown", text: "Недоступно" }, why };
+  if (cat.score === null) return { name, score: null, scoreText: "—", chip: scoreChip(null), why };
   return { name, score: cat.score, scoreText: fmtScore(cat.score), chip: scoreChip(cat.score), why };
 }
 
@@ -194,7 +197,7 @@ function indexNullSection(card: RepoCard): Block[] {
   const collected = fmtCoverage(score.indexCoverage);
   const threshold = fmtCoverage(COVERAGE_NULL_BELOW);
   const notes: HeroNote[] = [{ line: line("Отсутствие оценки означает недостаток данных, а не плохое состояние репозитория.") }];
-  if (score.fullLocked) notes.push({ line: line(`Полная оценка ${FULL} с категориями CI/CD и Безопасность видна участникам репозитория. ${fullPathText(card)}`), info: true });
+  if (score.fullLocked) notes.push({ line: line(`Полная оценка ${FULL}, включающая CI/CD и Безопасность, видна участникам репозитория. ${fullPathText(card)}`), info: true });
   const out: Block[] = [
     {
       kind: "hero",
@@ -207,9 +210,10 @@ function indexNullSection(card: RepoCard): Block[] {
       notes,
     },
     { kind: "coverage", title: "Объем собранных данных", share: score.indexCoverage, threshold: COVERAGE_NULL_BELOW, collected: `собрано ${collected}`, thresholdText: `порог ${threshold}: с него рассчитывается оценка` },
-    h2("Данные по категориям"),
+    // Ступень 4 (Ф21): те же имена разделов, что в обычном отчете и на карточке
+    h2("Категории"),
     categoriesBlock(card, ctx),
-    h2("Что сделать"),
+    h2("Рекомендации"),
   ];
   if (card.recommendations.length > 0) out.push({ kind: "actions", compact: false, items: card.recommendations.map((r, i) => actionItem(r, i + 1)) });
   out.push(para(line(`Оценка рассчитывается при объеме данных от ${threshold}.`)));
@@ -245,7 +249,7 @@ function scoredSection(card: RepoCard, metrics: Metric[]): Block[] {
         ? `${publicFirst} ${FULL} учитывает 6 категорий, включая CI/CD и Безопасность.`
         : hasIndex
           ? score.fullLocked
-            ? `${publicFirst} Полная оценка ${FULL} с категориями CI/CD и Безопасность видна участникам репозитория. ${fullPathText(card)}`
+            ? `${publicFirst} Полная оценка ${FULL}, включающая CI/CD и Безопасность, видна участникам репозитория. ${fullPathText(card)}`
             : `${publicFirst} ${FULL}: данных для оценки недостаточно.`
           : // пункт 7 блока А круга 4: полный доступ есть, индекса нет
             `${INDEX} считается по открытым данным – по нему строится рейтинг, но открытых данных собрано меньше ${fmtCoverage(COVERAGE_NULL_BELOW)}, поэтому он не рассчитан. ${FULL} учитывает 6 категорий, включая CI/CD и Безопасность.`,
@@ -280,7 +284,7 @@ function scoredSection(card: RepoCard, metrics: Metric[]): Block[] {
   const recs = card.recommendations;
   out.push(h2("Рекомендации"));
   if (recs.length === 0) {
-    out.push(para(line("По собранным данным улучшать нечего.")));
+    out.push(para(line(noRecommendationsText(card))));
   } else {
     // п.8 круга 2: вводной строки у раздела нет (вместе с ней ушло и ложное
     // обещание порядка «по убыванию влияния» — Г1.2)
@@ -350,7 +354,7 @@ function detailSection(card: RepoCard, ctx: SubmetricContext): Block[] {
 const NO_DATA_FACT_REASON: Record<string, string> = {
   access: "у сервиса нет прав на эти данные",
   limits: "данные больше лимита сервиса",
-  empty: "источник вернул пусто",
+  empty: "источник вернул пустой ответ",
   "no-scan": "проверка не запускалась",
   incomplete: "источник отдал данные не полностью",
   "bad-channel": "источник не ответил",
@@ -468,10 +472,10 @@ function methodSection(shown: ShownMetric[], contributions: Map<string, Contribu
   // ЭТОМ документе, — «оценка складывается из 4 категорий» в полном отчете
   // спорило и с первым экраном, и с шестью строками приложения А.
   const first = hasIndex && hasFull
-    ? `В отчете два показателя: ${INDEX} – по 4 открытым категориям (документация, активность, задачи и состояние кода), ${FULL} – по всем 6, включая CI/CD и безопасность.`
+    ? `В отчете 2 показателя: ${INDEX} – по 4 открытым категориям (документация, активность, задачи и состояние кода), ${FULL} – по всем 6, включая CI/CD и Безопасность.`
     : hasFull
-      ? `В отчете один показатель – ${FULL}: он складывается из 6 категорий (документация, CI/CD, безопасность, активность, задачи и состояние кода).`
-      : "Оценка складывается из 4 категорий: документация, активность, задачи и состояние кода. Участникам репозитория видны еще 2 – CI/CD и безопасность.";
+      ? `В отчете один показатель – ${FULL}: он складывается из 6 категорий (документация, CI/CD, Безопасность, активность, задачи и состояние кода).`
+      : "Оценка складывается из 4 категорий: документация, активность, задачи и состояние кода. Участникам репозитория видны еще 2 – CI/CD и Безопасность.";
   const items: InlineLine[] = [
     line(first),
     line("Каждая категория получает балл от 0 до 100 из нескольких показателей. Например, для документации: README, лицензия, CONTRIBUTING, CODEOWNERS."),
@@ -775,7 +779,7 @@ export function flatten(value: unknown, prefix = ""): [string, string][] {
  * короткое пояснение, что это за число и почему оно другое.
  */
 const RAW_FIELD_NOTE: Record<string, string> = {
-  "activity.rest.contributors": "счетчик API; в оценке — число авторов из истории git",
+  "activity.rest.contributors": "счетчик API; в оценке – число авторов из истории git",
   // А11 аудита: поле стоит «да» у каждого анализа — это не флаг обрезки
   // истории, а форма ответа: коммиты в документ не выгружаются
   "activity.git.timeline.truncated": "поле ответа: сами коммиты в документ не выгружаются, показан итог",
@@ -786,7 +790,7 @@ const RAW_FIELD_NOTE: Record<string, string> = {
   "code.todo.todo_files": "файлов с пометками",
   "code.todo.blamed_files": "файлов, у которых удалось прочитать даты пометок",
   // А15 аудита: выборка задач для времени первого ответа — не число задач в трекере
-  "issues.comments_sample.issues": "задач в выборке для времени первого ответа; число задач трекера — в issues.stats",
+  "issues.comments_sample.issues": "задач в выборке для времени первого ответа; число задач трекера – в issues.stats",
 };
 
 /** Г1.20, А6: служебная заметка коллектора по-английски — читателю по-русски. */

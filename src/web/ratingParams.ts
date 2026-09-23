@@ -8,6 +8,8 @@
 //    убыванию (С5-8).
 // Серверный контракт `parseReposQuery` (400 на неверное значение) не меняется.
 import type { SortKey } from "../api/repos";
+import { plural } from "../report/submetrics";
+import { fmtCount } from "./format";
 
 const SORTS: ReadonlySet<string> = new Set(["index", "likes", "activity", "coverage", "name"]);
 
@@ -44,4 +46,16 @@ export function pageBeyond(data: { page: number; totalPages: number; total: numb
 /** Направление первого клика по колонке: имя — А→Я, числа и даты — по убыванию. */
 export function firstSortOrder(key: SortKey): "asc" | "desc" {
   return key === "name" ? "asc" : "desc";
+}
+
+/**
+ * Ступень 4 (В-5, §2 23.09): охват каталога одной строкой. N неоцененных
+ * называется явно — иначе «Без оценки 0» рядом читается ошибкой счета: в
+ * «Без оценки» стоят проанализированные без оценки, а N еще не оценены вовсе.
+ * Чистая функция — число закрыто поведенческим тестом.
+ */
+export function coverageLine(repos: { scored: number; nullScore: number; catalog: number }): string {
+  const rest = Math.max(0, repos.catalog - repos.scored - repos.nullScore);
+  const head = `Оценено ${fmtCount(repos.scored)} из ${fmtCount(repos.catalog)} ${plural(repos.catalog, "репозитория", "репозиториев", "репозиториев")}.`;
+  return rest > 0 ? `${head} Еще ${fmtCount(rest)} пока не ${plural(rest, "оценен", "оценены", "оценены")}.` : head;
 }

@@ -4,6 +4,8 @@
 // отфильтрованным рейтингом можно поделиться ссылкой, и F5 его не теряет.
 // Раскладка — как соседние разделы SourceCraft: крошки в ActionBar,
 // тулбар одной строкой (size m), таблица, методика в правой панели.
+import { coverageLine } from "./ratingParams";
+import { loadRatingScroll, rememberRatingHref, saveRatingScroll } from "./ratingReturn";
 import { BarsAscendingAlignLeft, BarsDescendingAlignLeft, Magnifier, SquareListUl } from "@gravity-ui/icons";
 import {
   Alert,
@@ -27,7 +29,7 @@ import {
   Text,
   TextInput,
 } from "@gravity-ui/uikit";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { SortKey } from "../api/repos";
 import type { MetaResponse, RatingResponse } from "./api";
 import { useJson } from "./api";
@@ -121,7 +123,7 @@ const COLUMN_TITLES: Record<string, string> = {
   forks: "Ответвления",
   activity: "Последняя активность",
   coverage: "Покрытие",
-  scanned: "Скан",
+  scanned: "Анализ",
 };
 
 /**
@@ -151,6 +153,27 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
   // выдача остаётся на экране приглушённой, пока не придёт новая, — без
   // скелетона, скачка ширины вкладок и пропадающей пагинации
   const { state, reload } = useJson<RatingResponse>(`/api/repos${apiSearch ? `?${apiSearch}` : ""}`, { keepPrevious: true });
+  // Ступень 4 (В-10): адрес выдачи — для крошки «Рейтинг» на карточке;
+  // прокрутка таблицы (или списка телефона) — запоминается при уходе и
+  // возвращается, когда выдача с тем же адресом снова на экране
+  useEffect(() => rememberRatingHref(search), [search]);
+  const restoredFor = useRef<string | null>(null);
+  const scroller = (): HTMLElement | null =>
+    document.querySelector<HTMLElement>(".rh-table-fill .g-table__scroll-container") ?? document.querySelector<HTMLElement>(".rh-fill__content");
+  useEffect(() => {
+    const el = scroller();
+    if (!el) return;
+    const save = () => saveRatingScroll(search, el.scrollTop);
+    el.addEventListener("scroll", save, { passive: true });
+    return () => el.removeEventListener("scroll", save);
+  });
+  useLayoutEffect(() => {
+    if (state.kind !== "ok" || restoredFor.current === search) return;
+    restoredFor.current = search;
+    const top = loadRatingScroll(search);
+    const el = scroller();
+    if (el && top > 0) el.scrollTop = top;
+  }, [state.kind, search]);
 
   const sort = params.get("sort") ?? "index";
   const order = params.get("order") ?? "desc";
@@ -316,8 +339,8 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
           aria-label="Какие репозитории показать"
           className="rh-view-tabs"
         >
-          <SegmentedRadioGroup.Option value="scored">Оценены{data ? ` ${data.total}` : ""}</SegmentedRadioGroup.Option>
-          <SegmentedRadioGroup.Option value="unscored">Без оценки{data ? ` ${data.nulls}` : ""}</SegmentedRadioGroup.Option>
+          <SegmentedRadioGroup.Option value="scored">Оценены{data ? ` ${fmtCount(data.total)}` : ""}</SegmentedRadioGroup.Option>
+          <SegmentedRadioGroup.Option value="unscored">Без оценки{data ? ` ${fmtCount(data.nulls)}` : ""}</SegmentedRadioGroup.Option>
         </SegmentedRadioGroup>
       </Flex>
     </Flex>
@@ -346,6 +369,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
       footer={
         data && view === "scored" && data.total > data.perPage ? (
           <Pagination
+            className="rh-pager"
             page={data.page}
             pageSize={data.perPage}
             total={data.total}
@@ -363,6 +387,17 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
       {state.kind === "loading" && !refreshing && <SkeletonRows rows={10} height={56} />}
       <div className={refreshing ? "rh-refresh-bar rh-refresh-bar_on" : "rh-refresh-bar"} role="progressbar" aria-hidden={!refreshing} aria-label="Обновляем рейтинг" />
 
+      {/* Ступень 4 (Ф16): перечитывание не удалось — строки прежние, и это видно
+          (как на карточке, К8.5.3): иначе новая сортировка подсвечена над старыми строками */}
+      {state.kind === "ok" && state.refreshError && (
+        <Alert
+          theme="warning"
+          view="outlined"
+          size="s"
+          message={`Данные могли устареть: обновить рейтинг не удалось – ${state.refreshError}`}
+          actions={[{ text: "Повторить", handler: reload }]}
+        />
+      )}
       {state.kind === "error" && (
         <Alert
           theme="danger"
@@ -390,6 +425,11 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
             // клик по самой ссылке (и Ctrl/⌘-клик) обрабатывает ссылка
             onRowClick={(item, _index, e) => {
               if ((e.target as HTMLElement).closest("a")) return;
+              // Ступень 4 (Ф19): Ctrl/⌘-клик по строке — новая вкладка, как у ссылки
+              if (e.ctrlKey || e.metaKey) {
+                window.open(repoHref(item.org, item.repo), "_blank", "noopener");
+                return;
+              }
               navigate(repoHref(item.org, item.repo));
             }}
           />
@@ -419,12 +459,11 @@ function ratingLead(meta: MetaResponse | null): ReactNode {
       {about} <HowCountedLink />
     </>
   );
-  const { scored, catalog } = meta.repos;
   return (
     <>
       {about} <HowCountedLink />
       <br />
-      Оценено {fmtCount(scored)} из {fmtCount(catalog)} репозиториев.
+      {coverageLine(meta.repos)}
     </>
   );
 }
@@ -491,7 +530,7 @@ function UnscoredTable({ items, meta, hasFilters, refreshing }: { items: Item[];
     return hasFilters ? (
       <NothingFound hasFilters />
     ) : (
-      <EmptyState icon={SquareListUl} title="Все репозитории оценены" description="Покрытия данными хватило каждому репозиторию выборки." />
+      <EmptyState icon={SquareListUl} title="Все проанализированные репозитории оценены" description="Покрытия данными хватило каждому репозиторию выборки." />
     );
   }
   // Ф2.16: NULL-группа может быть огромной (весь не обходивший каталог) —
@@ -505,7 +544,7 @@ function UnscoredTable({ items, meta, hasFilters, refreshing }: { items: Item[];
         Эти репозитории не получили HealthCraft Index. При покрытии данных ниже
         {meta ? ` ${fmtCoverage(meta.coverageNullBelow)}` : " установленного порога"} оценка не рассчитывается. Отсутствующие
         данные не учитываются как нулевые значения.
-        {failedScan && " У части репозиториев последний скан завершился сбоем – для оценки он непригоден; повторный обход попробует снова."}
+        {failedScan && " У части репозиториев последний анализ завершился сбоем – для оценки он непригоден; повторный обход попробует снова."}
       </Text>
       <Table data={shown} columns={columns} width="max" verticalAlign="middle" />
       {rest > 0 && <Text color="complementary">…и еще {fmtNumber(rest)} – уточните поиск или фильтры, чтобы сузить список.</Text>}
@@ -522,7 +561,7 @@ function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResp
       <>
         <ScoreLegend />
         <AsideSection title="Методика">
-          <Text color="complementary">Веса категорий и версия модели появятся, когда загрузится справочник сервиса.</Text>
+          <Text color="complementary">Веса категорий и версия методики появятся, когда загрузится справочник сервиса.</Text>
         </AsideSection>
       </>
     );
@@ -600,7 +639,7 @@ function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResp
           >
             покрытие от {fmtCoverage(meta.coverageNullBelow)}
           </DefinitionList.Item>
-          <DefinitionList.Item name="Модель">
+          <DefinitionList.Item name="Версия методики">
             <Label theme="normal" size="xs">
               {meta.modelVersion}
             </Label>
@@ -646,12 +685,12 @@ function PhoneList({ items, rankOffset, refreshing }: { items: Item[]; rankOffse
         <li key={`${item.org}/${item.repo}`} className="rh-list__item">
           <Flex gap={3} alignItems="center">
             <Text color="secondary" style={{ minWidth: 24, textAlign: "right" }}>
-              {rankOffset + index + 1}
+              {item.rank === null ? "—" : fmtCount(item.rank)}
             </Text>
             {/* Круг 4 части 2: на телефоне строка репозитория сжимается (имя —
                 с многоточием), а число с полосой не сжимаются — раньше мера
                 строки в 180px выталкивала полосу поверх имени */}
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ flex: 1, minWidth: 0 }} className="rh-phone-name">
               <RepoCell item={item} compact />
             </div>
             <div style={{ flexShrink: 0 }}>
@@ -762,7 +801,9 @@ function buildColumns(
       align: "end",
       width: 36,
       sticky: "start",
-      template: (_item: Item, index: number) => <Text color="secondary">{rankOffset + index + 1}</Text>,
+      // Ступень 4 (В-4): настоящее место в рейтинге (поле `rank` ответа), а не номер
+      // строки выдачи — при поиске и фильтре «#» совпадает с местом на карточке
+      template: (item: Item) => <Text color="secondary">{item.rank === null ? "—" : fmtCount(item.rank)}</Text>,
     },
     { id: "repo", name: sortable("Репозиторий", "name"), primary: true, sticky: "start", template: (item: Item) => <RepoCell item={item} /> },
     { id: "index", name: sortable("HealthCraft Index", "index"), align: "end", width: 136, template: (item: Item) => <ScoreCell item={item} /> },
@@ -791,7 +832,7 @@ function buildColumns(
     { id: "coverage", name: sortable("Покрытие", "coverage"), align: "end", template: (item: Item) => fmtCoverage(item.coverage) },
     {
       id: "scanned",
-      name: "Скан",
+      name: "Анализ",
       align: "end",
       template: (item: Item) => (
         <Flex direction="column" gap={0} alignItems="flex-end">

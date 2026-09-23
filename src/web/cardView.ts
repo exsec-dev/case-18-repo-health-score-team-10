@@ -17,6 +17,7 @@ import {
   analysisDate,
   categoryWhy,
   contributionBars,
+  noRecommendationsText,
   limitationItems,
   recommendationEffect,
   sourceWord,
@@ -130,6 +131,8 @@ export interface CardView {
   /** под строкой пути — кнопка входа (зритель не вошел) */
   signIn: boolean;
   recommendations: RecommendationView[];
+  /** фраза вместо пустого раздела рекомендаций (В-1, одна копия с отчетом) */
+  noRecommendations: string;
   analysisAt: string | null;
   visibility: Visibility;
 }
@@ -167,8 +170,9 @@ export function lockedView(card: RepoCard): LockedView | null {
   // категории доступны только участникам репозитория, затем почему именно ему нет
   const why = (r: string): string => LOCKED_WHY[r as keyof typeof LOCKED_WHY] ?? LOCKED_WHY["check-failed"];
   const same = reasons.every((r) => r === reasons[0]);
-  if (same) return { text: `${names} ${verb} только участникам репозитория${why(reasons[0]!)}` };
-  return { text: locked.map((k, i) => `${CATEGORY_TITLES[k]} ${locked.length > 1 ? "видна" : verb} только участникам репозитория${why(reasons[i]!)}`).join(" ") };
+  const agree = (t: string): string => (locked.length > 1 ? t : t.replace("к ним", "к ней"));
+  if (same) return { text: `${names} ${verb} только участникам репозитория${agree(why(reasons[0]!))}` };
+  return { text: locked.map((k, i) => `${CATEGORY_TITLES[k]} видна только участникам репозитория${why(reasons[i]!).replace("к ним", "к ней")}`).join(" ") };
 }
 
 /** Ярлык основания рекомендации: подметрика правила и ее значение; без записи — «Исходные данные». */
@@ -203,12 +207,13 @@ export function cardView(card: RepoCard): CardView {
   });
   const limitations = limitationItems(card).map((l) => l.text);
   const topMarkers: CardView["topMarkers"] = [];
-  if (card.markers.codeEmpty) topMarkers.push("code-empty");
+  // Ступень 4 (Ф8): «в репозитории нет кода» уже сказано в плашке индекса — сверху не повторяется
   if (card.markers.ciConfigOnlyCap) topMarkers.push("ci-cap");
   const base = {
     limitations,
     topMarkers,
     recommendations,
+    noRecommendations: noRecommendationsText(card),
     analysisAt: analysisDate(card),
     visibility: card.repo.visibility,
   };

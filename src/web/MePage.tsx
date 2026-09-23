@@ -53,6 +53,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { type MeResponse, type MetaResponse, type MyReposResponse, dataOf, logout, mutateJson, useJson, useLatest } from "./api";
 import type { LiveAnalysis } from "./analysis";
 import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
+import { plural } from "../report/submetrics";
 import { authErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, recommendationsText, scoreTheme, scoreWord, sentence, slugOf, type FavoriteAddCheck } from "./format";
 import { recommendationsHref } from "./RepoPage";
 import { type Band, BANDS, type RepoEntry, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
@@ -60,7 +61,7 @@ import { linkProps, navigate, repoHref } from "./router";
 import { Page, UserAvatar, displayName, logoutFailedToast } from "./Shell";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, RepoSlug, SkeletonRows, VisibilityPill } from "./ui";
 
-const REPOS_CRUMBS = [{ text: "Мои репозитории" }];
+const REPOS_CRUMBS = [{ text: "Избранное" }];
 const SETTINGS_CRUMBS = [{ text: "Настройки" }];
 
 /**
@@ -112,7 +113,7 @@ function TokenNotice({ hasPat }: { hasPat: boolean }) {
       className="rh-token-notice"
       icon={<Icon data={Key} size={18} className="rh-info-icon" />}
       title="Добавьте персональный токен доступа SourceCraft"
-      message="С ним откроются CI/CD и Безопасность и анализ своих репозиториев."
+      message="С ним откроются CI/CD, Безопасность и анализ своих репозиториев."
       actions={
         // круг 4: кнопка по ширине текста, а не во всю плашку
         <span className="rh-token-notice__action">
@@ -148,7 +149,7 @@ export function MePage(_props: { meta: MetaResponse | null }) {
     );
   }
   if (data.login === null) {
-    return <LoginOffer pageTitle="Мои репозитории" />;
+    return <LoginOffer pageTitle="Избранное" />;
   }
   return (
     // В4.8 (вариант A, решение 21.09): одна колонна — список, как у списков
@@ -237,7 +238,7 @@ function AccountSection({ me }: { me: MeResponse }) {
 }
 
 /** Не вошедшему — объяснение слоёв и кнопка входа (живой клик — приёмка HQ). */
-function LoginOffer({ pageTitle }: { pageTitle: "Мои репозитории" | "Настройки" }) {
+function LoginOffer({ pageTitle }: { pageTitle: "Избранное" | "Настройки" }) {
   // Ф2.9: /me?auth_error=… после неудачного callback — причина показывается,
   // а не проглатывается
   const authError = new URLSearchParams(window.location.search).get("auth_error");
@@ -261,7 +262,7 @@ function LoginOffer({ pageTitle }: { pageTitle: "Мои репозитории" 
       )}
       <EmptyState
         icon={pageTitle === "Настройки" ? Key : Person}
-        title={pageTitle === "Настройки" ? "Настройки доступны после входа" : "Мои репозитории доступны после входа"}
+        title={pageTitle === "Настройки" ? "Настройки доступны после входа" : "Избранное доступно после входа"}
         description={
           pageTitle === "Настройки"
             ? "Войдите через Я ID, чтобы настроить персональный токен доступа SourceCraft."
@@ -277,18 +278,22 @@ function LoginOffer({ pageTitle }: { pageTitle: "Мои репозитории" 
 
 /** В4.4 (кластер I): исход посева избранного из namespace — человеческой строкой. */
 function seedNote(seed: import("../api/me").PatSeed | undefined): string {
-  if (seed === undefined) return "Посев избранного из вашего namespace не выполнялся.";
-  if (seed.status === "ok") return `Посев избранного из namespace: добавлено ${seed.added}.`;
+  // Ступень 4 (В-7): без «посева» и «namespace» — что сделано и сколько
+  if (seed === undefined) return "Репозитории вашего пространства SourceCraft в избранное не добавлялись.";
+  if (seed.status === "ok")
+    return seed.added > 0
+      ? `Из вашего пространства SourceCraft в избранное ${plural(seed.added, "добавлен", "добавлено", "добавлено")} ${seed.added} ${plural(seed.added, "репозиторий", "репозитория", "репозиториев")}.`
+      : "Новых репозиториев из вашего пространства SourceCraft для избранного нет.";
   const why =
     seed.error?.code === "favorite_limit"
       ? "достигнут предел избранного"
       : seed.error?.code === "page_limit"
-        ? "прочитаны не все страницы namespace"
+        ? "прочитаны не все страницы пространства"
         : seed.error?.code === "no_username"
           ? // UX-9 (круг 2 В4.4): namespace не опрашивался — не обвинять его
-            "не удалось начать посев – SourceCraft не вернул имя пользователя"
-          : "namespace ответил сбоем";
-  return `Посев избранного остановлен: ${why} (добавлено ${seed.added}).`;
+            "SourceCraft не вернул имя пользователя"
+          : "SourceCraft ответил сбоем";
+  return `Добавление репозиториев вашего пространства SourceCraft в избранное остановлено: ${why} (добавлено ${seed.added}).`;
 }
 
 function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasPat: boolean; unreadable?: boolean; checkedAt: string | null; onChanged: () => void }) {
@@ -373,7 +378,7 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
     <Card view="outlined" className="rh-settings-card">
       <Flex as="section" direction="column" gap={3}>
         <Text variant="subheader-2" as="h2">
-          Токен доступа SourceCraft
+          Персональный токен доступа SourceCraft
         </Text>
         {hasPat ? (
           <Flex direction="column" gap={3}>
@@ -457,7 +462,7 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
         <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)} size="s" aria-label="Удаление токена">
           <Dialog.Header caption="Удалить токен?" />
           <Dialog.Body>
-            <Text>Свои репозитории и запуск анализа станут недоступны, пока вы не добавите новый токен.</Text>
+            <Text>CI/CD, Безопасность и запуск анализа своих репозиториев станут недоступны, пока вы не добавите новый токен.</Text>
           </Dialog.Body>
           <Dialog.Footer
             preset="danger"
@@ -578,7 +583,7 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
         <Flex direction="column" gap={1} className="rh-me-head__title">
           <Flex gap={2} alignItems="baseline">
             <Text variant="header-1" as="h1">
-              Мои репозитории
+              Избранное
             </Text>
             {repos.state.kind === "ok" && (
               <Text variant="header-1" color="hint">
@@ -631,11 +636,11 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
 
       {repos.state.kind === "loading" && <SkeletonRows rows={3} height={66} />}
       {repos.state.kind === "error" && (
-        <CabinetAlert title="Список не получился" message={repos.state.message} actions={[{ text: "Повторить", handler: repos.reload }]} />
+        <CabinetAlert title="Не удалось загрузить список" message={repos.state.message} actions={[{ text: "Повторить", handler: repos.reload }]} />
       )}
       {/* З1 (круг 2 В4.4): сбой /api/me/favorites больше не глотается */}
       {favs.state.kind === "error" && (
-        <CabinetAlert title="Раздел избранного не получился" message={favs.state.message} actions={[{ text: "Повторить", handler: favs.reload }]} />
+        <CabinetAlert title="Не удалось загрузить избранное" message={favs.state.message} actions={[{ text: "Повторить", handler: favs.reload }]} />
       )}
 
       {repos.state.kind === "ok" && entries.length === 0 && (
@@ -932,12 +937,12 @@ function RepoRow({
       // загрузки кнопки Gravity (как «Отчет» на карточке), а не тег со спиннером
       // §2-В5: «идет анализ» — без обещания времени
       <span className="rh-state rh-busy" title="Идет анализ – итог придет уведомлением">
-        {phase === "queued" ? "В очереди" : "Сканируется"}
+        {phase === "queued" ? "В очереди" : "Идет анализ"}
       </span>
     ) : entry.planned ? (
       // Ф2.17 (решение 18.09): «данных нет» ≠ «данных не будет»; мета и Score
       // по-прежнему скрыты (fail-closed)
-      <StatePill icon={Clock} title="Анализ запланирован, данные скоро будут">
+      <StatePill icon={Clock} title="Анализ запланирован">
         Запланирован
       </StatePill>
     ) : scored ? (
@@ -948,7 +953,7 @@ function RepoRow({
     ) : entry.lastScanStatus === "running" ? (
       // З4 (круг 2 В4.4): running — легальный транзитный статус последнего скана
       <span className="rh-state rh-busy" title="Идет анализ">
-        Сканируется
+        Идет анализ
       </span>
     ) : entry.lastScanStatus === "bad" ? (
       // З4: последний скан упал — честный статус; пригодный старый индекс
@@ -959,7 +964,7 @@ function RepoRow({
       </StatePill>
     ) : entry.lastScanAt !== null ? (
       <StatePill icon={CircleDashed} title="Проанализировали – данных для оценки не хватило">
-        Нет оценки
+        Оценки нет
       </StatePill>
     ) : !entry.inCatalog ? (
       // UX-8 (круг 2 В4.4): явные признаки вместо прокси `title === null`
@@ -1157,7 +1162,7 @@ export function JobsBell() {
               <JobsEmpty title="Сейчас ничего не анализируется">
                 Запустить анализ можно в разделе{" "}
                 <Link {...navProps("/me", close)} view="normal" className="rh-nowrap">
-                  Мои репозитории
+                  Избранное
                 </Link>
               </JobsEmpty>
             ) : (
@@ -1219,7 +1224,7 @@ function JobRow({ job, onNavigate }: { job: import("../api/me").MyJob; onNavigat
         )}
       </div>
       {/* Ф2.15 / LOW-8 (решение 18.09): очередью правит round-robin — статус без числа позиции */}
-      <span className="rh-state rh-busy">{job.phase === "queued" ? "В очереди" : "Сканируется"}</span>
+      <span className="rh-state rh-busy">{job.phase === "queued" ? "В очереди" : "Идет анализ"}</span>
     </div>
   );
 }

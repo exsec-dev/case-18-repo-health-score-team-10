@@ -145,7 +145,7 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     // (2c): пустые состояния — иконка, заголовок, описание; ссылка в раздел — SPA-навигация + закрытие панели
     expect(bell).toContain("groupJobsByDay(recent)");
     expect(src).toContain("function HistoryRow");
-    expect(src).toMatch(/<JobsEmpty title="Сейчас ничего не анализируется">\s*Запустить анализ можно в разделе\{" "\}\s*<Link \{\.\.\.navProps\("\/me", close\)\} view="normal" className="rh-nowrap">\s*Мои репозитории/);
+    expect(src).toMatch(/<JobsEmpty title="Сейчас ничего не анализируется">\s*Запустить анализ можно в разделе\{" "\}\s*<Link \{\.\.\.navProps\("\/me", close\)\} view="normal" className="rh-nowrap">\s*Избранное/); // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): раздел «Избранное»
     // круг 2 части 2 (Е16): ссылка не рвется переносом
     expect(readFileSync(join(import.meta.dir, "..", "src", "web", "layout.css"), "utf8")).toMatch(/\.rh-nowrap \{[^}]*white-space: nowrap;/);
     expect(src).not.toMatch(/\{\.\.\.linkProps\([^)]*\)\}[^>]*onClick=/);
@@ -170,7 +170,8 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
   });
 
   test("шапка списка: заголовок, счетчик цветом hint, поиск, сортировка, одна action-кнопка", () => {
-    expect(src).toMatch(/<Text variant="header-1" as="h1">\s*Мои репозитории\s*<\/Text>/);
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): раздел «Избранное»
+    expect(src).toMatch(/<Text variant="header-1" as="h1">\s*Избранное\s*<\/Text>/);
     expect(src).toMatch(/<Text variant="header-1" color="hint">\s*\{entries\.length\}/);
     // круг 2 (замечание 6): плейсхолдер — «Поиск», как у рейтинга
     expect(src).toContain('placeholder="Поиск"');

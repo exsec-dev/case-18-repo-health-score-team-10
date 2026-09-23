@@ -48,7 +48,7 @@ function Routes() {
             theme="warning"
             view="outlined"
             title="Не удалось загрузить справочник сервиса"
-            message={`${metaFailed}. Имена категорий и пороги показаны запасными значениями.`}
+            message={`${metaFailed}. Названия категорий и пороги показаны по умолчанию.`}
             actions={[{ text: "Повторить", handler: meta.reload }]}
           />
         </Flex>

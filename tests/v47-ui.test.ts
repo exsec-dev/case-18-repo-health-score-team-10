@@ -71,7 +71,8 @@ describe("Б4 (П1): кнопка PDF на карточке", () => {
   });
 
   test("адрес и имя файла — от слага карточки, рядом с report.md (MD-адрес прежний)", () => {
-    expect(web("RepoPage.tsx")).toContain("pdfHref={`${cardUrl}/report.pdf`} pdfName={`${org}-${repo}-health.pdf`}");
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): Ф5 — имя файла одной функцией с обрезкой длинного слага
+    expect(web("RepoPage.tsx")).toContain('pdfHref={`${cardUrl}/report.pdf`} pdfName={reportFileName(org, repo, "pdf")}');
   });
 });
 

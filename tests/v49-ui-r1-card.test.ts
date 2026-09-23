@@ -110,7 +110,8 @@ describe("tri-state и доступ на карточке (инварианты 
   test("одна закрытая категория у зрителя с токеном — единственное число и причина отказа", () => {
     const c = card("grant-ci");
     // круг 4 части 2 (3): смысл — «только участникам», затем причина
-    expect(lockedView(c)).toEqual({ text: "Безопасность видна только участникам репозитория, а у вашего токена к ним нет доступа." });
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): Ф11 — согласование «к ней» у одной категории
+    expect(lockedView(c)).toEqual({ text: "Безопасность видна только участникам репозитория, а у вашего токена к ней нет доступа." });
   });
 
   test("разные причины двух категорий у зрителя с токеном — по предложению на категорию", () => {
@@ -118,7 +119,7 @@ describe("tri-state и доступ на карточке (инварианты 
     const cats = { ...base.score!.categories, cicd: { ...base.score!.categories.cicd, locked: "pat-expired" as const }, security: { ...base.score!.categories.security, locked: "denied" as const } };
     const mixed: RepoCard = { ...base, viewer: { own: false, auth: "pat" }, score: { ...base.score!, categories: cats } };
     expect(lockedView(mixed)!.text).toBe(
-      "CI/CD видна только участникам репозитория. SourceCraft отклонил ваш токен – обновите его в Настройках. Безопасность видна только участникам репозитория, а у вашего токена к ним нет доступа.",
+      "CI/CD видна только участникам репозитория. SourceCraft отклонил ваш токен – обновите его в Настройках. Безопасность видна только участникам репозитория, а у вашего токена к ней нет доступа.", // Ф11
     );
   });
 
@@ -203,7 +204,8 @@ describe("предупреждения наверху не повторяют «
       },
     };
     const view = cardView(c);
-    expect(view.topMarkers).toEqual(["code-empty", "ci-cap"]);
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): Ф8 — «нет кода» сказано в плашке индекса, сверху не повторяется
+    expect(view.topMarkers).toEqual(["ci-cap"]);
     expect(view.limitations.some((l) => l.startsWith("Часть данных взята из прошлого анализа"))).toBe(true);
     expect(view.limitations.some((l) => l.startsWith("Репозиторий больше лимита сервиса"))).toBe(true);
   });

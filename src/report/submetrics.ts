@@ -62,7 +62,7 @@ function num(value: number, digits = 2): string {
 }
 
 /** Русское согласование с числом: 1 день, 2 дня, 5 дней (дробное — родительный ед.: 2.5 дня). */
-function plural(value: number, one: string, few: string, many: string): string {
+export function plural(value: number, one: string, few: string, many: string): string {
   if (!Number.isInteger(value)) return few;
   const n = Math.abs(value);
   const mod10 = n % 10;
@@ -166,8 +166,8 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   "documentation.contributing": { title: "CONTRIBUTING", unit: "есть/нет", format: presence },
   "documentation.codeowners": { title: "CODEOWNERS", unit: "есть/нет", format: presence },
   "cicd.config": { title: "Конфигурация CI со шагами", unit: "признаки ci.yaml", format: ciConfig },
-  "cicd.pass_rate": { title: "Доля успешных прогонов", unit: "доля, %", format: share },
-  "cicd.duration": { title: "Медианная длительность пайплайна", unit: "секунды → с/мин/ч", format: duration },
+  "cicd.pass_rate": { title: "Доля успешных запусков CI", unit: "доля, %", format: share },
+  "cicd.duration": { title: "Медианная длительность запуска CI", unit: "секунды → с/мин/ч", format: duration },
   // Г1.5 гейта: мера — в значении, в названии ее повторять незачем
   "security.density": { title: "Плотность находок", unit: "на 10 тыс. строк", format: perLines("10 тыс.") },
   "security.resolved": { title: "Доля закрытых находок", unit: "доля, %", format: share },

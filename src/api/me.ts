@@ -438,7 +438,7 @@ export async function requestUserScan(
     return { status: 403, body: { error: { code: "no_access", message: `ваш токен не дает доступа к ${org}/${repo}` } } };
   }
   if (res.status === 401) {
-    return { status: 401, body: { error: { code: "pat_expired", message: "SourceCraft отклонил ваш токен – замените его в Настройках" } } };
+    return { status: 401, body: { error: { code: "pat_expired", message: "SourceCraft отклонил ваш токен – обновите его в Настройках" } } };
   }
   if (res.status !== 200) {
     return { status: 503, body: { error: { code: "check_failed", message: `не удалось проверить доступ к ${org}/${repo}: SourceCraft сейчас не отвечает` } } };

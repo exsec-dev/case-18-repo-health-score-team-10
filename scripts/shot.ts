@@ -97,7 +97,8 @@ const DEFAULT_VIEWPORTS: { width: number; height: number }[] = [
   { width: 1366, height: 768 },
 ];
 /** Высоты окон по ширине; 375 — телефон (В4.9 ч.2, приемка 6). */
-const HEIGHTS: Record<number, number> = { 1920: 1080, 1440: 1200, 1366: 768, 375: 812 };
+// Ступень 4 (Ф22): узкие телефоны 320 и 360 — там жили дефекты, которых 375 не показывал
+const HEIGHTS: Record<number, number> = { 1920: 1080, 1440: 1200, 1366: 768, 375: 812, 360: 780, 320: 640 };
 const VIEWPORTS: { width: number; height: number }[] = process.env.SHOT_WIDTHS
   ? process.env.SHOT_WIDTHS.split(",").map((w) => Number(w.trim())).filter((w) => w > 0).map((width) => ({ width, height: HEIGHTS[width] ?? 900 }))
   : DEFAULT_VIEWPORTS;
@@ -255,7 +256,8 @@ async function run(): Promise<void> {
       name: "me",
       url: `${base}/me`,
       checks: {
-        "заголовок моих репозиториев": "document.body.innerText.includes('Мои репозитории') ? 1 : 0",
+        // Ступень 4: раздел переименован в «Избранное» (слово владельца 23.09)
+        "заголовок избранного": "document.body.innerText.includes('Избранное') ? 1 : 0",
         "кнопка входа Я ID": `[...document.querySelectorAll('a,button')].filter((n) => n.textContent?.includes("Войти через Я ID")).length`,
       },
     },
@@ -456,6 +458,16 @@ async function shoot(
   const overflow = await evaluate<number>("document.documentElement.scrollWidth - document.documentElement.clientWidth");
   results.push(`перелив по горизонтали=${overflow}px`);
   if (overflow > 0) problems.push({ page: currentPage, kind: "layout", text: `страница шире окна на ${overflow}px` });
+  // Ступень 4 (Ф22, урок ERROR_LOG 23.09): перелив страницы не видит обрезку
+  // ВНУТРИ контейнеров — таблица подметрик на телефоне и плашка эффекта
+  // рекомендации уходили за край при нулевом переливе окна. Ищем видимые
+  // элементы, чей правый край за окном, кроме содержимого своих областей
+  // прокрутки (широкая таблица рейтинга прокручивается по замыслу).
+  const offscreen = await evaluate<string>(
+    "(() => { const w = window.innerWidth; const inScroller = (el) => { for (let p = el.parentElement; p; p = p.parentElement) { const o = getComputedStyle(p).overflowX; if (o === 'auto' || o === 'scroll') return true; } return false; }; const bad = [...document.querySelectorAll('.rh-page__main *')].filter((el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.right > w + 1 && !inScroller(el); }); return bad.slice(0, 3).map((el) => (el.className && typeof el.className === 'string' ? el.className.split(' ')[0] : el.tagName)).join(', ') + (bad.length ? ` (${bad.length})` : ''); })()",
+  );
+  results.push(`за правым краем=${offscreen || "0"}`);
+  if (offscreen) problems.push({ page: currentPage, kind: "layout", text: `элементы за правым краем окна: ${offscreen}` });
 
   // основной файл — РОВНО видимая область: на него смотрит приёмка «в одном экране»
   const viewShot = await call<{ data: string }>("Page.captureScreenshot", { format: "png" });

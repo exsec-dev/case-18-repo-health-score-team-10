@@ -123,7 +123,8 @@ describe("Ф2.10 (M10): маршруты /auth/* с моком Я ID", () => {
       const location = new URL(res.headers.get("location")!, server!.base);
       expect(location.pathname).toBe("/me");
       // ПЕРЕВОРОТ (В4.8.5, К8.5.4, С1-6): причина — фразой языка продукта, не кодом провайдера
-      expect(location.searchParams.get("auth_error")).toBe("Яндекс ID не подтвердил вход – попробуйте войти еще раз");
+      // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): В-11 «Я ID»
+      expect(location.searchParams.get("auth_error")).toBe("Я ID не подтвердил вход – попробуйте войти еще раз");
       expect(cookieOf(res, "rh_session")).toBeNull();
     } finally {
       ya.tokenStatus = 200;

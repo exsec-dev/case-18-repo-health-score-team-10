@@ -13,10 +13,10 @@
 //     прокручивается только область между ними (таблица — сама, с
 //     закреплённой строкой заголовков); уже 1440px (В4.6, У23) правая панель
 //     уходит в Drawer по кнопке в ActionBar — второй прокрутки на странице нет.
-import { ArrowRightFromSquare, ArrowRightToSquare, BookOpen, ChartColumn, CircleInfo, Gear, Moon, Person, Sun } from "@gravity-ui/icons";
+import { ArrowRightFromSquare, ArrowRightToSquare, BookOpen, Bookmark, ChartColumn, CircleInfo, Gear, Moon, Sun, Xmark } from "@gravity-ui/icons";
 import { ActionBar, AsideHeader, FooterItem, type AsideHeaderItem } from "@gravity-ui/navigation";
 import { ActionTooltip, Avatar, Breadcrumbs, Button, Drawer, Flex, Icon, Text, useThemeValue, useToaster, type IconData } from "@gravity-ui/uikit";
-import { createContext, useContext, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { logout, type MeResponse } from "./api";
 import { HealthCraftMark, PRODUCT_NAME } from "./logo";
@@ -34,7 +34,9 @@ interface SectionDef {
 
 const SECTIONS: SectionDef[] = [
   { id: "rating", title: "Рейтинг", href: "/", icon: ChartColumn },
-  { id: "me", title: "Мои репозитории", href: "/me", icon: Person },
+  // Ступень 4 (слово владельца 23.09): раздел — «Избранное»; иконка — закладка,
+  // звезда остается кнопкой добавления в избранное
+  { id: "me", title: "Избранное", href: "/me", icon: Bookmark },
 ];
 
 const GlobalActionsContext = createContext<ReactNode>(null);
@@ -454,6 +456,12 @@ interface PageProps {
 
 export function Page({ crumbs, actions, aside, asideDrawer = false, asideColumnFrom = 1440, mode = "document", header, footer, children }: PageProps) {
   const globalActions = useContext(GlobalActionsContext);
+  // Ступень 4 (Ф18): заголовок вкладки — по странице (последняя крошка), чтобы
+  // вкладки, история и закладки различались
+  const pageName = crumbs.length > 0 ? crumbs[crumbs.length - 1]!.text : "";
+  useEffect(() => {
+    document.title = pageName ? `${pageName} – HealthCraft` : "HealthCraft";
+  }, [pageName]);
   /**
    * В4.6 (У23, решение владельца 20.09 — вариант (iii)): порог 1440, а не
    * 1280. На 1366x768 прежний порог оставлял панель на месте, и она держала
@@ -532,8 +540,22 @@ export function Page({ crumbs, actions, aside, asideDrawer = false, asideColumnF
       </div>
 
       {asideInDrawer && (
-        <Drawer open={asideOpen} onOpenChange={setAsideOpen} placement="right" size={320} aria-label="Как считается?">
-          <div className="rh-drawer">{aside}</div>
+        // Ступень 4 (Ф4): на телефоне панель во всю ширину; заголовок и крестик
+        // закрывают ее без поиска «пустого места» для тапа
+        <Drawer open={asideOpen} onOpenChange={setAsideOpen} placement="right" size={phone ? window.innerWidth : 320} aria-label="Как считается?">
+          <div className="rh-drawer">
+            <div className="rh-drawer__head">
+              <Text variant="subheader-3" as="h2">
+                Как считается?
+              </Text>
+              <Button view="flat" size="m" onClick={() => setAsideOpen(false)} aria-label="Закрыть">
+                <Button.Icon>
+                  <Icon data={Xmark} size={16} />
+                </Button.Icon>
+              </Button>
+            </div>
+            {aside}
+          </div>
         </Drawer>
       )}
     </div>
