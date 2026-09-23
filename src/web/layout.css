@@ -682,10 +682,6 @@ button.rh-category:focus-visible {
   justify-self: end;
 }
 
-/* круг 2 (Е13): прочерк «нет данных» на месте полосы — у правого края трека */
-.rh-category__bar_empty {
-  justify-self: end;
-}
 
 /* Полоса категории — нейтральный серый (эквивалент #949494 PDF): цвет несет
  * только плашка уровня (U2-a). Дорожка — `base-generic`, как у Progress. */
@@ -893,9 +889,6 @@ button.rh-category:focus-visible {
   min-width: 2px;
 }
 
-.rh-contrib__title {
-  margin: 0;
-}
 
 .rh-contrib__note {
   margin: 0;
@@ -1362,33 +1355,6 @@ button.rh-category:focus-visible {
   color: var(--rh-code-text);
 }
 
-.rh-proof__toggle,
-.rh-aside-details__toggle {
-  display: inline-flex;
-  gap: var(--g-spacing-1);
-  align-items: center;
-  width: fit-content;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-
-.rh-proof__toggle:focus-visible,
-.rh-aside-details__toggle:focus-visible {
-  border-radius: var(--g-border-radius-s);
-  box-shadow: 0 0 0 2px var(--g-color-line-focus);
-}
-
-.rh-aside-details {
-  display: flex;
-  flex-direction: column;
-  gap: var(--g-spacing-2);
-  margin-bottom: var(--g-spacing-7);
-}
-
 /* В4.2b (Ф2.20, решение 18.09): одноразовый зелёный glow НЕзаполненной
    звезды после успешного own-скана. Узкий state-класс: сетка, палитра и
    токены не тронуты — цвет берётся из существующего семантического токена. */
@@ -1711,10 +1677,6 @@ button.rh-category:focus-visible {
   color: var(--g-color-text-secondary);
 }
 
-/* круг 5 (2): элемент колонки по ширине содержимого, у левого края */
-.rh-start {
-  align-self: flex-start;
-}
 
 /* круг 3 (12): серый тег посреди строки — по базовой линии текста */
 .rh-ui-tag {

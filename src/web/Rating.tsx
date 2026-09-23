@@ -160,20 +160,30 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
   const restoredFor = useRef<string | null>(null);
   const scroller = (): HTMLElement | null =>
     document.querySelector<HTMLElement>(".rh-table-fill .g-table__scroll-container") ?? document.querySelector<HTMLElement>(".rh-fill__content");
+  // ревью кода R4: слушатель — на адрес выдачи и появление контейнера, а не на
+  // каждую перерисовку; восстановление — только когда на экране данные НОВОЙ
+  // выдачи (при «назад» внутри рейтинга `useJson` еще показывает прежние строки)
+  const hasData = state.kind === "ok";
   useEffect(() => {
     const el = scroller();
     if (!el) return;
     const save = () => saveRatingScroll(search, el.scrollTop);
     el.addEventListener("scroll", save, { passive: true });
     return () => el.removeEventListener("scroll", save);
-  });
+  }, [search, hasData]);
+  const seenSearch = useRef<string | null>(null);
+  const dataAtSearch = useRef<unknown>(null);
   useLayoutEffect(() => {
-    if (state.kind !== "ok" || restoredFor.current === search) return;
+    if (seenSearch.current !== search) {
+      seenSearch.current = search;
+      dataAtSearch.current = state.kind === "ok" ? state.data : null;
+    }
+    if (state.kind !== "ok" || state.data === dataAtSearch.current || restoredFor.current === search) return;
     restoredFor.current = search;
     const top = loadRatingScroll(search);
     const el = scroller();
     if (el && top > 0) el.scrollTop = top;
-  }, [state.kind, search]);
+  }, [state, search]);
 
   const sort = params.get("sort") ?? "index";
   const order = params.get("order") ?? "desc";
@@ -240,14 +250,13 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
   // В4.8.5 (К8.5.10, С5-3): без /api/meta категорийные колонки строятся из
   // клиентских констант — плашка «показаны запасными значениями» больше не врёт
   const categories = useMemo(() => (meta?.categories ?? FALLBACK_CATEGORIES).filter((c) => !NOT_IN_RATING.has(c.key)), [meta]);
-  const rankOffset = data ? (data.page - 1) * data.perPage : 0;
   const onSort = (key: SortKey, next: "asc" | "desc"): void => setParams({ sort: key, order: next });
   const allColumns = useMemo(
-    () => buildColumns(categories, rankOffset, { sort, order, onSort }),
+    () => buildColumns(categories, { sort, order, onSort }),
     // `onSort` пересоздаётся каждый рендер (замыкает setParams) и в список
     // зависимостей не идёт намеренно: колонки перестраивает смена самой
     // сортировки, а не идентичность обработчика
-    [categories, rankOffset, sort, order],
+    [categories, sort, order],
   );
   // Доводка 21.09: у сортируемых колонок `name` — функция-заголовок, и прежний
   // фолбэк печатал в настройке технический id («repo», «index», «activity»).
@@ -413,7 +422,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
         (data.items.length === 0 ? (
           <NothingFound hasFilters={hasFilters} />
         ) : isPhone ? (
-          <PhoneList items={data.items} rankOffset={rankOffset} refreshing={refreshing} />
+          <PhoneList items={data.items} refreshing={refreshing} />
         ) : (
           <Table
             className={refreshing ? "rh-table-fill rh-refreshing" : "rh-table-fill"}
@@ -678,10 +687,10 @@ function LangSummaryPart({ value, index, values }: { value: string; index: numbe
   return <></>;
 }
 
-function PhoneList({ items, rankOffset, refreshing }: { items: Item[]; rankOffset: number; refreshing: boolean }) {
+function PhoneList({ items, refreshing }: { items: Item[]; refreshing: boolean }) {
   return (
     <ul className={refreshing ? "rh-list rh-refreshing" : "rh-list"}>
-      {items.map((item, index) => (
+      {items.map((item) => (
         <li key={`${item.org}/${item.repo}`} className="rh-list__item">
           <Flex gap={3} alignItems="center">
             <Text color="secondary" style={{ minWidth: 24, textAlign: "right" }}>
@@ -783,7 +792,6 @@ function SortableHeader({
 
 function buildColumns(
   categories: MetaResponse["categories"],
-  rankOffset: number,
   sortProps: { sort: string; order: string; onSort: (key: SortKey, next: "asc" | "desc") => void },
 ): TableColumnConfig<Item>[] {
   const sortable = (label: string, columnKey: SortKey, wrap = false) => () => <SortableHeader label={label} columnKey={columnKey} wrap={wrap} {...sortProps} />;

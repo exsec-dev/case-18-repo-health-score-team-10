@@ -17,6 +17,7 @@ import {
   analysisDate,
   categoryWhy,
   contributionBars,
+  noRecommendationsKind,
   noRecommendationsText,
   limitationItems,
   recommendationEffect,
@@ -125,21 +126,21 @@ export interface CardView {
   locked: LockedView | null;
   limitations: string[];
   /** предупреждения наверху — только те, которых нет в «Ограничениях данных» (А6) */
-  topMarkers: ("code-empty" | "ci-cap")[];
+  topMarkers: "ci-cap"[];
   /** строка пути к полной оценке (закрытый Repo Health Score); null — показатель открыт */
   fullPath: PathPart[] | null;
   /** под строкой пути — кнопка входа (зритель не вошел) */
   signIn: boolean;
   recommendations: RecommendationView[];
-  /** фраза вместо пустого раздела рекомендаций (В-1, одна копия с отчетом) */
+  /** фраза вместо пустого раздела рекомендаций (В-1, одна копия с отчетом) и ее вид (R3) */
   noRecommendations: string;
+  noRecommendationsKind: "healthy" | "weak" | "nodata";
   analysisAt: string | null;
   visibility: Visibility;
 }
 
 export const SOURCE_DATA_LABEL = "Исходные данные";
 
-const lowerFirst = (s: string): string => (/^[A-ZА-ЯЁ][a-zа-яё]+[A-ZА-ЯЁ]/.test(s) ? s : s.charAt(0).toLowerCase() + s.slice(1));
 
 /** Хвост фразы о закрытых категориях у зрителя с токеном — по причине отказа (круг 4, 3). */
 const LOCKED_WHY: Record<"denied" | "pat-expired" | "check-failed" | "no-pat", string> = {
@@ -186,11 +187,6 @@ export function recommendationLabel(card: RepoCard, rec: CardRecommendation): st
   return `${submetricTitle(cat, sub)} – ${submetricShownValue(cat, sub, entry, submetricContext(card.score.computedAt), category!.submetrics)}`;
 }
 
-/** Строка источника в поповере: «Источник: <слово> · собрано <время>» — время показывает страница. */
-export function factSource(fact: CardEvidence): string {
-  return sourceWord(fact.source);
-}
-
 export function cardView(card: RepoCard): CardView {
   const score = card.score;
   const evidence = new Map(card.evidence.map((e) => [e.key, e]));
@@ -214,6 +210,7 @@ export function cardView(card: RepoCard): CardView {
     topMarkers,
     recommendations,
     noRecommendations: noRecommendationsText(card),
+    noRecommendationsKind: noRecommendationsKind(card),
     analysisAt: analysisDate(card),
     visibility: card.repo.visibility,
   };

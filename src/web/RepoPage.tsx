@@ -24,6 +24,7 @@ import {
   ChevronDown,
   Circle,
   CircleCheck,
+  CircleInfo,
   Clock,
   ClockArrowRotateLeft,
   CodeCommits,
@@ -69,7 +70,6 @@ import {
   Label,
   Link,
   Popover,
-  Progress,
   Spin,
   Text,
   useToaster,
@@ -77,10 +77,10 @@ import {
 import { useEffect, useState } from "react";
 import { COVERAGE_NULL_BELOW } from "../score/model";
 import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle } from "../report/submetrics";
-import { submetricWeightText } from "../report/sections";
+import { sourceWord, submetricWeightText } from "../report/sections";
 import type { MetaResponse, RepoCard } from "./api";
 import { dataOf, mutateJson, useJson, useVisible } from "./api";
-import { cardView, factSource, type CardView, type CategoryView, type RecommendationView } from "./cardView";
+import { cardView, type CardView, type CategoryView, type RecommendationView } from "./cardView";
 import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
 import {
   NO_DATA,
@@ -104,7 +104,6 @@ import {
   scanTriggerText,
   DEFINITION_NAME_WIDTH,
   scoreLabelTheme,
-  scoreTheme,
   scoreWord,
   sentence,
   slugOf,
@@ -639,7 +638,7 @@ function ScoreAside({
             )}
             {score && full && (
               <DefinitionList.Item name="Покрытие RHS" note={`RHS – Repo Health Score. ${coverageHelp}`}>
-                {fmtCoverage(score.repoHealthCoverage ?? 0)}
+                {score.repoHealthCoverage === null ? "—" : fmtCoverage(score.repoHealthCoverage)}
               </DefinitionList.Item>
             )}
             {scan && scan.status !== "running" && <DefinitionList.Item name="Данные собраны">{collectedText(scan.status)}</DefinitionList.Item>}
@@ -882,6 +881,7 @@ function LockedCategories({ text }: { text: string }) {
 function CategoryRow({ category: c, card, defaultOpen = false }: { category: CategoryView; card: Card; defaultOpen?: boolean }) {
   const key = c.key;
   const cat = card.score!.categories[key]!;
+  // ревью кода R16: раскрыть по умолчанию можно только то, что раскрывается
   const [open, setOpen] = useState(defaultOpen);
   const subs = Object.entries(cat.submetrics);
   // Ступень 4 (Ф12): у категории без данных раскрывать нечего — одно состояние, один вид
@@ -905,7 +905,7 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
         </Text>
       </span>
       {/* Tri-state: без данных — «—» вместо полосы и числа, плашка «Нет данных» */}
-      <span className={c.score === null ? "rh-category__bar rh-category__bar_empty" : "rh-category__bar"}>
+      <span className="rh-category__bar">
         {/* круг 2 (Е13): у «нет данных» на месте полосы пусто — единственный
             прочерк стоит в колонке балла, у правого края, рядом с плашкой */}
         {c.score === null ? null : (
@@ -934,7 +934,7 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
       )}
       {/* В4.6 (У17): разбивка по движкам живёт под строкой Security */}
       {key === "security" && <AppsecEngines card={card} />}
-      {open && (
+      {open && expandable && (
         <div className="rh-subrows">
           {/* примечание частичной нехватки данных — внутри раскрытия (в MD его нет в строке) */}
           {c.partialNote && (
@@ -1035,15 +1035,6 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
  */
 function Markers({ view }: { view: CardView }) {
   const rows: { key: string; label: string; text: string; theme: "info" | "warning" }[] = [];
-  // Ф2.9 (LOW-9): маркер codeEmpty — зритель видел Score 0 без объяснения
-  if (view.topMarkers.includes("code-empty")) {
-    rows.push({
-      key: "code-empty",
-      label: "В репозитории нет кода",
-      text: "В репозитории нет ни одного файла, поэтому оценка – 0. Это не ошибка сервиса: оценивать нечего.",
-      theme: "info",
-    });
-  }
   if (view.topMarkers.includes("ci-cap")) {
     rows.push({
       key: "ci-cap",
@@ -1101,7 +1092,8 @@ function Recommendations({ view }: { view: CardView }) {
       <section className="rh-section" id={RECOMMENDATIONS_ID} aria-label="Рекомендации">
         <Card view="outlined" className="rh-section-card">
           <Flex gap={2} alignItems="center">
-            <Icon data={CircleCheck} size={16} className="rh-muted-icon" />
+            {/* ревью кода R3: галочка — только когда улучшать нечего */}
+            <Icon data={view.noRecommendationsKind === "healthy" ? CircleCheck : CircleInfo} size={16} className="rh-muted-icon" />
             <Text color="complementary">{view.noRecommendations}</Text>
           </Flex>
         </Card>
@@ -1178,19 +1170,26 @@ function FactProof({ item }: { item: RecommendationView }) {
   return (
     <Flex direction="column" gap={3} className="rh-proof">
       <Text variant="subheader-1">{item.label}</Text>
-      {item.facts.map(({ key, fact }) => (
-        <FactBlock key={key} factKey={key} fact={fact} />
+      {item.facts.map(({ key, fact, missing }) => (
+        <FactBlock key={key} factKey={key} fact={fact} missing={missing} />
       ))}
     </Flex>
   );
 }
 
-function FactBlock({ factKey, fact }: { factKey: string; fact: Evidence | null }) {
+function FactBlock({ factKey, fact, missing }: { factKey: string; fact: Evidence | null; missing: boolean }) {
   if (!fact) {
     return (
       <Flex direction="column" gap={1}>
         {/* Ступень 4 (Ф10): текст про AppSec — только у фактов Безопасности */}
-        <Text color="complementary">{factKey.startsWith("appsec") ? `Эти данные вам недоступны. ${SECURITY_PUBLIC_NOTE}` : "Эти данные видны участникам репозитория."}</Text>
+        {/* ревью кода R7: факта нет в анализе — так и говорим; закрыт доступом — про доступ */}
+        <Text color="complementary">
+          {missing
+            ? "Этих данных нет в последнем анализе."
+            : factKey.startsWith("appsec")
+              ? `Эти данные вам недоступны. ${SECURITY_PUBLIC_NOTE}`
+              : "Эти данные видны участникам репозитория."}
+        </Text>
         <Text variant="caption-2" color="hint">
           {factKey}
         </Text>
@@ -1201,7 +1200,7 @@ function FactBlock({ factKey, fact }: { factKey: string; fact: Evidence | null }
     <Flex direction="column" gap={1}>
       <Flex gap={2} wrap alignItems="center">
         <Text variant="body-short" color="secondary">
-          Источник: {factSource(fact)} · собрано {fmtDateTime(fact.collectedAt)}
+          Источник: {sourceWord(fact.source)} · собрано {fmtDateTime(fact.collectedAt)}
         </Text>
         {fact.status !== "ok" && (
           <Label theme={fact.status === "bad" ? "warning" : "unknown"} size="xs">

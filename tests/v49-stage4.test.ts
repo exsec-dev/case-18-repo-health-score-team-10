@@ -4,7 +4,8 @@
 // 21.09: число, названное местом или долей, закрывается тестом на данных.
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_QUERY, getRepoCard, listRepos, type ReposQuery } from "../src/api/repos";
-import { noRecommendationsText } from "../src/report/sections";
+import { noRecommendationsKind, noRecommendationsText } from "../src/report/sections";
+import { renderRepoReport } from "../src/report/markdown";
 import { coverageLine as coverageLineRaw } from "../src/web/ratingParams";
 import { authErrorText, noScoreText, reportFileName } from "../src/web/format";
 import { cardFacts, makeApiDb, seedRepo, seedScan, seedScore } from "./api-fixtures";
@@ -38,6 +39,64 @@ describe("В-4: колонка «#» — место в рейтинге, а не
       ]);
     } finally {
       t.close();
+    }
+  });
+});
+
+describe("В-4, ревью кода R15: место при равных индексах, фильтре и приватном", () => {
+  test("равные индексы — порядок org/repo, как на карточке; приватного в выдаче нет; фильтр языка места не меняет", () => {
+    const t = makeApiDb();
+    try {
+      const facts = cardFacts();
+      const mk = (repo: string, total: number, language: string | null = null): number => {
+        const id = seedRepo(t, { org: "tie", repo, language });
+        seedScore(t, id, seedScan(t, id, { facts }), { total });
+        return id;
+      };
+      mk("zeta", 80, "Go");
+      mk("alpha", 80, "Rust");
+      mk("mid", 60, "Go");
+      const priv = mk("hidden", 95, "Go");
+      t.db.query("UPDATE repos SET visibility = 'private' WHERE id = ?").run(priv);
+      const all = listRepos(t.db, q()).items;
+      expect(all.map((i) => [i.repo, i.rank])).toEqual([
+        ["alpha", 1],
+        ["zeta", 2],
+        ["mid", 3],
+      ]);
+      for (const i of all) expect(getRepoCard(t.db, "tie", i.repo, GRANTED)!.score!.rank).toBe(i.rank);
+      const goOnly = listRepos(t.db, q({ lang: ["Go"] })).items;
+      expect(goOnly.map((i) => [i.repo, i.rank])).toEqual([
+        ["zeta", 2],
+        ["mid", 3],
+      ]);
+    } finally {
+      t.close();
+    }
+  });
+});
+
+describe("ревью кода R1, R2: «рекомендаций нет» — одна фраза и в отчете без индекса", () => {
+  test("отчет «оценка есть, индекса нет» без рекомендаций печатает ту же фразу, что карточка", () => {
+    const { card, close } = fixtureCard("null");
+    try {
+      const noRecs = { ...card, recommendations: [] };
+      expect(renderRepoReport(noRecs)).toContain(noRecommendationsText(noRecs));
+    } finally {
+      close();
+    }
+  });
+
+  test("слабость — по округленному баллу: 69,6 — это «70, здоров», не слабая", () => {
+    const { card, close } = fixtureCard("anon");
+    try {
+      const cats = Object.fromEntries(
+        Object.entries(card.score!.categories).map(([k, c]) => [k, c.locked === undefined ? { ...c, score: 69.6 } : c]),
+      );
+      const healthy = { ...card, recommendations: [], score: { ...card.score!, categories: cats as NonNullable<typeof card.score>["categories"] } };
+      expect(noRecommendationsKind(healthy)).toBe("healthy");
+    } finally {
+      close();
     }
   });
 });

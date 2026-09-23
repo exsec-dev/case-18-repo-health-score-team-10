@@ -475,6 +475,13 @@ export function Page({ crumbs, actions, aside, asideDrawer = false, asideColumnF
   const wide = useMediaQuery(`(min-width: ${asideColumnFrom}px)`);
   const [asideOpen, setAsideOpen] = useState(false);
   const phone = useMediaQuery("(max-width: 767px)");
+  // ревью кода R6: на телефоне панель во всю ширину окна — и после поворота
+  const [viewportW, setViewportW] = useState(() => window.innerWidth);
+  useEffect(() => {
+    const onResize = () => setViewportW(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
   const asideInDrawer = (mode === "fill" || asideDrawer) && !wide && aside !== undefined;
 
   const barActions =
@@ -542,7 +549,7 @@ export function Page({ crumbs, actions, aside, asideDrawer = false, asideColumnF
       {asideInDrawer && (
         // Ступень 4 (Ф4): на телефоне панель во всю ширину; заголовок и крестик
         // закрывают ее без поиска «пустого места» для тапа
-        <Drawer open={asideOpen} onOpenChange={setAsideOpen} placement="right" size={phone ? window.innerWidth : 320} aria-label="Как считается?">
+        <Drawer open={asideOpen} onOpenChange={setAsideOpen} placement="right" size={phone ? viewportW : 320} aria-label="Как считается?">
           <div className="rh-drawer">
             <div className="rh-drawer__head">
               <Text variant="subheader-3" as="h2">

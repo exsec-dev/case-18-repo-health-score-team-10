@@ -652,7 +652,7 @@ export function reportFailureText(kind: "md" | "pdf", status: number, code: stri
   if (status === 429) return "Слишком много запросов за минуту – повторите чуть позже.";
   if (status === 404) return "Репозиторий не найден или недоступен. Если вы входили, проверьте, не истекла ли сессия.";
   if (code === "check_failed" || status === 503) return "SourceCraft сейчас не отвечает – не удалось проверить доступ, попробуйте позже.";
-  if (code === "pat_rejected") return "SourceCraft отклонил ваш токен – замените его в Настройках.";
+  if (code === "pat_rejected") return "SourceCraft отклонил ваш токен – обновите его в Настройках.";
   if (kind === "pdf") return "Не удалось собрать PDF. Markdown-выгрузка – в этом же меню.";
   return "Не удалось собрать отчет – попробуйте позже.";
 }
@@ -903,13 +903,9 @@ export function accessLockText(access: string | undefined): string | null {
  * остальное — текст провайдера. Живёт здесь, среди текстов: MePage —
  * компонент, его нельзя импортировать в bun test (CJS-CSS зависимости).
  */
-/** Сообщения сервера о сбое входа (`src/auth/ya.ts`), которые можно показать дословно. */
-export const AUTH_SERVER_MESSAGES = [
-  "Я ID не ответил – попробуйте войти еще раз",
-  "Я ID не подтвердил вход – попробуйте войти еще раз",
-  "Я ID вернул неожиданный ответ – попробуйте войти еще раз",
-  "вход через Я ID на сервере не настроен",
-];
+// Сообщения сервера о сбое входа — одна копия с `src/auth/ya.ts` (ревью кода R9)
+export { AUTH_SERVER_MESSAGES } from "../auth/messages";
+import { AUTH_SERVER_MESSAGES } from "../auth/messages";
 
 export function authErrorText(raw: string): string {
   // В4.8.5 (К8.5.4, С1-6): коды провайдера и наши — словами, без «(state)» и «access_denied»

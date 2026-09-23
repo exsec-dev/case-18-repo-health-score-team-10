@@ -216,6 +216,8 @@ function indexNullSection(card: RepoCard): Block[] {
     h2("Рекомендации"),
   ];
   if (card.recommendations.length > 0) out.push({ kind: "actions", compact: false, items: card.recommendations.map((r, i) => actionItem(r, i + 1)) });
+  // ревью кода R1: без рекомендаций — та же фраза, что на карточке (инвариант «карточка = отчет»)
+  else out.push(para(line(noRecommendationsText(card))));
   out.push(para(line(`Оценка рассчитывается при объеме данных от ${threshold}.`)));
   const limits = limitations(card);
   if (limits.length > 0) out.push(h2("Ограничения данных"), ...limits.map((l) => ({ kind: "paragraph" as const, tone: "note" as const, lines: [line(l)] })));

@@ -286,10 +286,22 @@ export function submetricWeightText(key: CategoryKey, sub: string): string {
  * здоровы; есть слабые — рекомендаций для них у движка нет; закрыты CI/CD и
  * Безопасность — их рекомендации видны участникам репозитория.
  */
+export function noRecommendationsKind(card: RepoCard): "healthy" | "weak" | "nodata" {
+  const shown = Object.values(card.score?.categories ?? {}).filter((c) => c && c.locked === undefined);
+  // ревью кода R2: слабость — по ОКРУГЛЕННОМУ баллу, как шкала (69,6 — это «70, здоров»)
+  if (shown.some((c) => c!.score !== null && Math.round(c!.score) < 70)) return "weak";
+  // нехватка данных — не «улучшать нечего» (tri-state: нет данных ≠ хорошо)
+  if (shown.length === 0 || shown.some((c) => c!.score === null)) return "nodata";
+  return "healthy";
+}
+
 export function noRecommendationsText(card: RepoCard): string {
-  const cats = Object.values(card.score?.categories ?? {});
-  const weak = cats.some((c) => c && c.locked === undefined && c.score !== null && c.score < 70);
-  const locked = card.score?.fullLocked === true;
-  const head = weak ? "Автоматических рекомендаций для этих данных нет." : "Рекомендаций нет – по собранным данным улучшать нечего.";
-  return locked ? `${head} Рекомендации по CI/CD и Безопасности видны участникам репозитория.` : head;
+  const kind = noRecommendationsKind(card);
+  const head =
+    kind === "healthy"
+      ? "Рекомендаций нет – по собранным данным улучшать нечего."
+      : kind === "weak"
+        ? "Автоматических рекомендаций для этих данных нет."
+        : "Автоматических рекомендаций для собранных данных нет: часть данных не собрана.";
+  return card.score?.fullLocked === true ? `${head} Рекомендации по CI/CD и Безопасности видны участникам репозитория.` : head;
 }

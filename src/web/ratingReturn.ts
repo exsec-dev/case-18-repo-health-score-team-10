@@ -11,7 +11,9 @@ const SCROLL_KEY = "rh:ratingScroll:";
 /** Адрес последней выдачи рейтинга для крошки карточки; нет — «/». */
 export function lastRatingHref(): string {
   try {
-    return sessionStorage.getItem(LAST_KEY) ?? "/";
+    const v = sessionStorage.getItem(LAST_KEY);
+    // ревью кода R5: только внутренний адрес рейтинга — не «javascript:», не «//чужой»
+    return v !== null && (v === "/" || v.startsWith("/?")) ? v : "/";
   } catch {
     return "/";
   }

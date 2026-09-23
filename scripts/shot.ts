@@ -281,7 +281,7 @@ async function run(): Promise<void> {
         checks: {
           // первый узел — готовность карточки (шапка), дальше — по наличию оценки
           "шапка карточки": "document.querySelectorAll('.rh-repo-head').length",
-          "блок Score или пустое состояние": `(${scored} && document.body.innerText.includes('из 100')) || document.body.innerText.includes('Оценки пока нет') || document.body.innerText.includes('еще не сканировался') ? 1 : 0`,
+          "блок Score или пустое состояние": `(${scored} && document.body.innerText.includes('из 100')) || document.body.innerText.includes('Оценки пока нет') || document.body.innerText.includes('еще не анализировался') ? 1 : 0`,
           // В4.9 ч.2 (А1): табов нет — ни TabList, ни переключателя в главной колонке
           "табов нет (А1)": "document.querySelectorAll('.rh-page__main [role=tablist]').length === 0 ? 1 : 0",
           // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А1): прежняя проверка «величина и

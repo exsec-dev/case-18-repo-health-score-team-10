@@ -5,6 +5,8 @@
 // HTTP-шов (fetch) инъектится — тесты без живой сети; живой вход
 // Алексея — приёмка HQ, воркер проверяет контракт моками.
 
+import { AUTH_NO_ANSWER, AUTH_NOT_CONFIGURED, AUTH_NOT_CONFIRMED, AUTH_UNEXPECTED } from "./messages";
+
 export interface YaIdCredentials {
   clientId: string | null;
   clientSecret: string | null;
@@ -118,7 +120,7 @@ export async function exchangeCode(
   endpoints: YaEndpoints = DEFAULT_YA_ENDPOINTS,
 ): Promise<ExchangeResult> {
   if (!creds.clientId || !creds.clientSecret) {
-    return { ok: false, error: "вход через Я ID на сервере не настроен" };
+    return { ok: false, error: AUTH_NOT_CONFIGURED };
   }
   let tokenRes: { status: number; json: unknown };
   try {
@@ -130,17 +132,17 @@ export async function exchangeCode(
       redirect_uri: creds.redirect,
     });
   } catch {
-    return { ok: false, error: "Я ID не ответил – попробуйте войти еще раз" };
+    return { ok: false, error: AUTH_NO_ANSWER };
   }
   const tokenBody = tokenRes.json as { access_token?: unknown; error_description?: unknown } | null;
   if (tokenRes.status !== 200 || typeof tokenBody?.access_token !== "string") {
-    return { ok: false, error: "Я ID не подтвердил вход – попробуйте войти еще раз" };
+    return { ok: false, error: AUTH_NOT_CONFIRMED };
   }
   let infoRes: { status: number; json: unknown };
   try {
     infoRes = await http.getJson(`${endpoints.loginBase}/info`, { Authorization: `OAuth ${tokenBody.access_token}` });
   } catch {
-    return { ok: false, error: "Я ID не ответил – попробуйте войти еще раз" };
+    return { ok: false, error: AUTH_NO_ANSWER };
   }
   const info = infoRes.json as {
     id?: unknown;
@@ -153,7 +155,7 @@ export async function exchangeCode(
     is_avatar_empty?: unknown;
   } | null;
   if (infoRes.status !== 200 || (typeof info?.id !== "number" && typeof info?.id !== "string") || typeof info?.login !== "string") {
-    return { ok: false, error: "Я ID вернул неожиданный ответ – попробуйте войти еще раз" };
+    return { ok: false, error: AUTH_UNEXPECTED };
   }
   // ФИО важнее публичного имени: display_name у Я ID по умолчанию равен логину
   const str = (v: unknown): string | null => (typeof v === "string" && v.trim() !== "" ? v.trim() : null);
