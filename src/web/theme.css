@@ -46,16 +46,17 @@
  */
 
 .g-root.g-root_theme_dark {
-  /* Круг 2 части 2 В4.9 (Е2, §2 23.09 — палитра П2): цвета категорий в
+  /* Круг 4 части 2 В4.9 (§2 23.09 «выбор круга 4»): палитра Р1, Безопасность —
+   * неоновый желто-зеленый по слову владельца. Прежде — П2 круга 2 (Е2): цвета категорий в
    * полосах вклада карточки и панели рейтинга. Не зеленый, желтый и красный —
    * это цвета оценки. Тона одинаковы в обеих темах (проверены на белом и
    * #2d2d2d при выборе). */
-  --rh-cat-documentation: #4f7cff;
-  --rh-cat-cicd: #19b5c4;
-  --rh-cat-security: #ff6fae;
-  --rh-cat-activity: #9d6bff;
-  --rh-cat-issues: #ff9f43;
-  --rh-cat-code: #d946ef;
+  --rh-cat-documentation: #3b82f6;
+  --rh-cat-cicd: #ec4899;
+  --rh-cat-security: #d4f53c;
+  --rh-cat-activity: #f97316;
+  --rh-cat-issues: #a855f7;
+  --rh-cat-code: #06b6d4;
   --rh-code-bg: #111111;
   --rh-code-text: #e8e8e8;
 
@@ -197,16 +198,17 @@
 }
 
 .g-root.g-root_theme_light {
-  /* Круг 2 части 2 В4.9 (Е2, §2 23.09 — палитра П2): цвета категорий в
+  /* Круг 4 части 2 В4.9 (§2 23.09 «выбор круга 4»): палитра Р1, Безопасность —
+   * неоновый желто-зеленый по слову владельца. Прежде — П2 круга 2 (Е2): цвета категорий в
    * полосах вклада карточки и панели рейтинга. Не зеленый, желтый и красный —
    * это цвета оценки. Тона одинаковы в обеих темах (проверены на белом и
    * #2d2d2d при выборе). */
-  --rh-cat-documentation: #4f7cff;
-  --rh-cat-cicd: #19b5c4;
-  --rh-cat-security: #ff6fae;
-  --rh-cat-activity: #9d6bff;
-  --rh-cat-issues: #ff9f43;
-  --rh-cat-code: #d946ef;
+  --rh-cat-documentation: #3b82f6;
+  --rh-cat-cicd: #ec4899;
+  --rh-cat-security: #d4f53c;
+  --rh-cat-activity: #f97316;
+  --rh-cat-issues: #a855f7;
+  --rh-cat-code: #06b6d4;
   --rh-code-bg: #111111;
   --rh-code-text: #e8e8e8;
 

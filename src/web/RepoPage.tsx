@@ -625,28 +625,23 @@ function ScoreAside({
                 {fmtCoverage(score.indexCoverage)}
               </DefinitionList.Item>
             )}
+            {/* круг 4 (П2): при двух показателях — короткие имена в одну строку,
+                аббревиатуры расшифрованы в подсказке */}
+            {score && full && (
+              <DefinitionList.Item name="Покрытие HCI" note={`HCI – HealthCraft Index. ${coverageHelp}`}>
+                {fmtCoverage(score.indexCoverage)}
+              </DefinitionList.Item>
+            )}
+            {score && full && (
+              <DefinitionList.Item name="Покрытие RHS" note={`RHS – Repo Health Score. ${coverageHelp}`}>
+                {fmtCoverage(score.repoHealthCoverage ?? 0)}
+              </DefinitionList.Item>
+            )}
             {scan && scan.status !== "running" && <DefinitionList.Item name="Данные собраны">{collectedText(scan.status)}</DefinitionList.Item>}
             {scan && scan.status !== "running" && <DefinitionList.Item name="Запуск">{scanTriggerText(scan.trigger)}</DefinitionList.Item>}
           </DefinitionList>
         ) : analysis !== null || foreignRunning ? null : (
           <Text color="secondary">Анализа еще не было</Text>
-        )}
-        {/* Круг 3 части 2 (9): у двух показателей покрытие — подзаголовком с
-            подсказкой и строками «показатель – доля»; длинные имена «Покрытие
-            HealthCraft Index» в колонке имени ломались на 3 строки */}
-        {score && full && (
-          <Flex direction="column" gap={1} className="rh-aside-sub">
-            <Flex gap={1} alignItems="center">
-              <Text color="secondary">Покрытие</Text>
-              <HelpMark iconSize="s" aria-label="Что такое покрытие">
-                {coverageHelp}
-              </HelpMark>
-            </Flex>
-            <DefinitionList nameMaxWidth={ASIDE_NAME_WIDTH}>
-              <DefinitionList.Item name="HealthCraft Index">{fmtCoverage(score.indexCoverage)}</DefinitionList.Item>
-              <DefinitionList.Item name="Repo Health Score">{fmtCoverage(score.repoHealthCoverage ?? 0)}</DefinitionList.Item>
-            </DefinitionList>
-          </Flex>
         )}
       </AsideSection>
 
@@ -719,7 +714,8 @@ function ScoreBand({ card, view }: { card: Card; view: CardView }) {
         <ScoreFigure title="HealthCraft Index" help={INDEX_HELP} total={score.healthcraftIndex} rank={score.rank} rankedTotal={score.rankedTotal} />
         <ContributionStrip bar={barOf("HealthCraft Index")} />
       </Card>
-      <Card view="outlined" className="rh-score-band">
+      {/* круг 4 (З): закрытый показатель — на светло-сером фоне заглушек */}
+      <Card view="outlined" className={view.fullPath ? "rh-score-band rh-score-band_locked" : "rh-score-band"}>
         {view.fullPath ? (
           <Flex direction="column" gap={1} style={{ minWidth: 0 }}>
             <Flex gap={1} alignItems="center">
@@ -1142,7 +1138,8 @@ function RecommendationRow({ item }: { item: RecommendationView }) {
             <Text variant="caption-2" color="secondary">
               {item.effectNote}
             </Text>
-            <Label theme="success" size="xs" title="Прирост показателя, если выполнить только эту рекомендацию">
+            {/* круг 4 (Э1): зеленый — только для здоровья; эффект — нейтральной серой плашкой */}
+            <Label theme="unknown" size="xs" title="Прирост показателя, если выполнить только эту рекомендацию">
               {item.effect}
             </Label>
           </>

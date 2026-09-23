@@ -490,6 +490,12 @@ body {
   padding: var(--g-spacing-3) var(--g-spacing-4) var(--g-spacing-4);
 }
 
+/* круг 4 (З): закрытый показатель — светло-серый фон, как у заглушек */
+.rh-score-band_locked {
+  /* фон Card задается своей переменной — обычный background ее не перебивает */
+  --g-card-background-color: var(--g-color-base-generic);
+}
+
 /* Круг 2 части 2 (Е12, вариант A): две плашки показателей — в ряд, пока
  * каждой хватает 360px, иначе столбиком. Высота ряда общая. */
 .rh-score-cards {
@@ -1546,11 +1552,6 @@ button.rh-category:focus-visible {
 
 /* Круг 2 части 2 (Е15): фон плиток сводки — светлый серый, рамка —
  * только у выбранной (ее рисует сам `Card type="selection"`). */
-/* круг 3 (9): блок «Покрытие» в паспорте — отбит от списка выше */
-.rh-aside-sub {
-  margin-top: var(--g-spacing-3);
-}
-
 /* круг 3 (10): серый фон — у всех плиток, выбранная выделена только рамкой */
 .rh-summary__tile.g-card {
   background: var(--g-color-base-generic);
