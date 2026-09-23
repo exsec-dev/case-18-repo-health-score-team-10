@@ -212,6 +212,8 @@ function AccountSection({ me }: { me: MeResponse }) {
   const name = displayName(me);
   return (
     <AsideSection title="Аккаунт">
+      {/* быстрая правка 23.09 (5): «Выйти» — шириной блока аккаунта над ней */}
+      <div className="rh-account">
       <Flex gap={3} alignItems="center">
         <UserAvatar me={me} />
         <Flex direction="column" style={{ minWidth: 0 }}>
@@ -225,12 +227,11 @@ function AccountSection({ me }: { me: MeResponse }) {
       </Flex>
       {/* круг 4 (8), круг 5 (2): кнопка по ширине текста — обертка держит ее у
           левого края, иначе колонка панели (align-items: stretch) растягивает ее */}
-      <span className="rh-start">
-        <Button view="outlined" size="m" onClick={() => void logout().catch((e: unknown) => toaster.add(logoutFailedToast(e)))}>
+        <Button view="outlined" size="m" width="max" onClick={() => void logout().catch((e: unknown) => toaster.add(logoutFailedToast(e)))}>
           <Icon data={ArrowRightFromSquare} size={16} />
           Выйти
         </Button>
-      </span>
+      </div>
     </AsideSection>
   );
 }
@@ -264,7 +265,7 @@ function LoginOffer({ pageTitle }: { pageTitle: "Мои репозитории" 
         description={
           pageTitle === "Настройки"
             ? "Войдите через Я ID, чтобы настроить персональный токен доступа SourceCraft."
-            : "Войдите через Я ID, чтобы следить за избранными репозиториями и запускать анализ своих."
+            : "Войдите через Я ID, чтобы следить за избранными репозиториями и запускать анализ собственных."
         }
         actions={[{ text: "Войти через Я ID", view: "action", size: "l", href: "/auth/ya" }]}
       />
@@ -349,8 +350,10 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
   }
 
   const tokenForm = (label: string, submit: string) => (
-    <Flex direction="column" gap={2}>
+    // быстрая правка 23.09 (1): поле и кнопка — в один ряд, растягивается поле
+    <Flex gap={2} alignItems="center">
       <TextInput
+        className="rh-grow"
         type="password"
         size="m"
         placeholder={label}
@@ -360,7 +363,7 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
         autoComplete="off"
         controlProps={{ "aria-label": label }}
       />
-      <Button view="action" size="m" width="max" onClick={save} loading={busy} disabled={busy || token.length < 8}>
+      <Button view="action" size="m" onClick={save} loading={busy} disabled={busy || token.length < 8}>
         {submit}
       </Button>
     </Flex>

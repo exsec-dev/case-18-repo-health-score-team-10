@@ -717,7 +717,8 @@ function ScoreBand({ card, view }: { card: Card; view: CardView }) {
       {/* круг 4 (З): закрытый показатель — на светло-сером фоне заглушек */}
       <Card view="outlined" className={view.fullPath ? "rh-score-band rh-score-band_locked" : "rh-score-band"}>
         {view.fullPath ? (
-          <Flex direction="column" gap={1} style={{ minWidth: 0 }}>
+          // быстрая правка 23.09 (2): колонка на всю высоту плашки — кнопка входа у нижнего края
+          <Flex direction="column" gap={1} style={{ minWidth: 0, flexGrow: 1 }}>
             <Flex gap={1} alignItems="center">
               <Text color="secondary">Repo Health Score</Text>
               <HelpMark iconSize="s" aria-label="Что такое «Repo Health Score»">
@@ -1087,8 +1088,19 @@ function Limitations({ items }: { items: string[] }) {
  */
 function Recommendations({ view }: { view: CardView }) {
   return (
-    // круг 2 (Е13): рекомендаций нет — раздела нет вовсе, без заголовка
-    view.recommendations.length === 0 ? null : (
+    // круг 2 (Е13): рекомендаций нет — без заголовка раздела; быстрая правка
+    // 23.09 (3): но строка «Рекомендаций нет» остается, иначе читатель не знает,
+    // потерялся раздел или улучшать нечего
+    view.recommendations.length === 0 ? (
+      <section className="rh-section" id={RECOMMENDATIONS_ID} aria-label="Рекомендации">
+        <Card view="outlined" className="rh-section-card">
+          <Flex gap={2} alignItems="center">
+            <Icon data={CircleCheck} size={16} className="rh-muted-icon" />
+            <Text color="complementary">Рекомендаций нет – по собранным данным улучшать нечего.</Text>
+          </Flex>
+        </Card>
+      </section>
+    ) : (
       <section className="rh-section" id={RECOMMENDATIONS_ID} aria-labelledby="rh-recommendations-title">
         <Card view="outlined" className="rh-section-card">
           <Text variant="subheader-3" as="h2" id="rh-recommendations-title" className="rh-section__title">

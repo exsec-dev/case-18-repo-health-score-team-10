@@ -1579,6 +1579,31 @@ button.rh-category:focus-visible {
   background: var(--g-color-base-generic);
 }
 
+/* быстрая правка 23.09: поле токена растягивается, кнопка — по тексту */
+.rh-grow {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* быстрая правка 23.09 (5): блок аккаунта по ширине содержимого, кнопка «Выйти» — его ширины */
+.rh-account {
+  display: inline-flex;
+  flex-direction: column;
+  gap: var(--g-spacing-3);
+  align-self: flex-start;
+  min-width: 200px;
+}
+
+/* быстрая правка 23.09 (2): кнопка входа в закрытой плашке — у нижнего края */
+.rh-score-band__signin {
+  margin-top: auto;
+  padding-top: var(--g-spacing-2);
+}
+
+.rh-muted-icon {
+  color: var(--g-color-text-secondary);
+}
+
 /* круг 5 (2): элемент колонки по ширине содержимого, у левого края */
 .rh-start {
   align-self: flex-start;
