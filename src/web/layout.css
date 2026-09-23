@@ -1981,3 +1981,17 @@ button.rh-category:focus-visible {
   color: var(--g-color-text-danger);
 }
 
+
+/* Мини-правка после закрытия В4.9 (23.09, Екатерина): синие инфо-плашки не
+ * растягиваются по длине — ширина по содержимому, не шире колонки. Класс
+ * темы ставит Card внутри Alert; `width` бьет растяжение flex-колонки. */
+.g-alert.g-card_theme_info {
+  width: fit-content;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* плашка чуть длиннее текста: запас справа у содержимого, отступы Alert штатные */
+.g-alert.g-card_theme_info .g-alert__main {
+  margin-inline-end: var(--g-spacing-4);
+}

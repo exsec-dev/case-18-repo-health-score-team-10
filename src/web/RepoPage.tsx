@@ -1087,8 +1087,9 @@ function Limitations({ items }: { items: string[] }) {
         </Text>
         <Flex direction="column" gap={2}>
           {items.map((text) => (
-            // круг 5 (1): инфо-плашки — светло-синей заливкой, как «Токен показывается один раз»
-            <Alert key={text} theme="info" view="filled" size="s" message={text} />
+            // круг 5 (1): инфо-плашки — светло-синей заливкой, как «Токен показывается один раз»;
+            // мини-правка после закрытия В4.9: иконка по центру строки, как у плашки закрытых
+            <Alert key={text} theme="info" view="filled" size="s" align="center" message={text} />
           ))}
         </Flex>
       </Card>
