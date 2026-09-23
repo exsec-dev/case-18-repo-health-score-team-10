@@ -703,12 +703,15 @@ function SortableHeader({
   sort,
   order,
   onSort,
+  wrap = false,
 }: {
   label: string;
   columnKey: SortKey;
   sort: string;
   order: string;
   onSort: (key: SortKey, next: "asc" | "desc") => void;
+  /** В4.9 ч.2 (U10-b): узкая колонка — подпись переносится в 2 строки, а не распирает колонку */
+  wrap?: boolean;
 }) {
   const active = sort === columnKey;
   // В4.8.5 (К8.5.10, С5-8): первый клик по «Репозиторию» — А→Я, по числам — по убыванию
@@ -717,7 +720,7 @@ function SortableHeader({
     <Button
       view="flat"
       size="xs"
-      className="rh-th-sort"
+      className={wrap ? "rh-th-sort rh-th-sort_wrap" : "rh-th-sort"}
       onClick={() => onSort(columnKey, next)}
       title={active ? (order === "desc" ? "По убыванию – переключить на возрастание" : "По возрастанию – переключить на убывание") : `Сортировать по «${label}»`}
     >
@@ -736,7 +739,7 @@ function buildColumns(
   rankOffset: number,
   sortProps: { sort: string; order: string; onSort: (key: SortKey, next: "asc" | "desc") => void },
 ): TableColumnConfig<Item>[] {
-  const sortable = (label: string, columnKey: SortKey) => () => <SortableHeader label={label} columnKey={columnKey} {...sortProps} />;
+  const sortable = (label: string, columnKey: SortKey, wrap = false) => () => <SortableHeader label={label} columnKey={columnKey} wrap={wrap} {...sortProps} />;
   const categoryColumns: TableColumnConfig<Item>[] = categories.map((c) => ({
     id: `cat:${c.key}`,
     name: c.title,
@@ -770,7 +773,7 @@ function buildColumns(
     // не «Активность»: так называется категория Score, а это дата из каталога
     {
       id: "activity",
-      name: sortable("Последняя активность", "activity"),
+      name: sortable("Последняя активность", "activity", true),
       align: "end",
       width: 132,
       template: (item: Item) => <Text color="secondary">{fmtDate(item.lastActivityAt)}</Text>,

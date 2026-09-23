@@ -424,7 +424,7 @@ function Header({ card, view, starDoneKey, starLoggedIn }: { card: Card; view: C
       <div className="rh-repo-head">
         <RepoAvatar repo={r.repo} logoUrl={r.logoUrl} size="l" />
         <Flex direction="column" justifyContent="space-between" style={{ minWidth: 0 }}>
-          <Flex gap={2} alignItems="center" style={{ minWidth: 0 }}>
+          <Flex gap={2} alignItems="center" wrap className="rh-card-head__title">
             {/* В4.6 (У27): тот же компонент слага, что в строке рейтинга */}
             <RepoSlug org={r.org} repo={r.repo} variant="header-1" />
             {/* В4.9 ч.2 (А7, U6-1 с поправкой владельца): видимость SourceCraft —

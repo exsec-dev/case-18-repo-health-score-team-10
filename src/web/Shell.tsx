@@ -460,9 +460,10 @@ export function Page({ crumbs, actions, aside, asideDrawer = false, mode = "docu
         {actions}
         {/* В4.9 ч.2 (А9): кнопка с подписью — иконка без слова не находилась */}
         {asideInDrawer && (
-          <Button view="flat" size="m" onClick={() => setAsideOpen(true)}>
+          <Button view="flat" size="m" className="rh-aside-btn" onClick={() => setAsideOpen(true)} aria-label="Как считается">
             <Icon data={CircleInfo} size={16} />
-            Как считается
+            {/* на телефоне подпись прячется (layout.css): строке действий не хватает ширины */}
+            <span className="rh-aside-btn__label">Как считается</span>
           </Button>
         )}
       </Flex>

@@ -16,6 +16,17 @@
 // Запуск:
 //   SHOT_MODE=production bun scripts/shot.ts [org/repo]
 //   SHOT_MODE=development bun scripts/shot.ts [org/repo]
+//
+// В4.9 ч.2, круг 1 (расширение харнесса, приемка 6 промпта):
+//   SHOT_SLUGS=org/a,org/b   — несколько карточек (первая — по-старому `repo`,
+//                               остальные — `repo-<org>-<repo>`);
+//   SHOT_WIDTHS=1366,1440,375 — ширины (375 — телефон: mobile-эмуляция);
+//   SHOT_THEMES=light,dark    — тема через localStorage["rh:theme"] до загрузки;
+//   SHOT_OUT=<каталог>        — куда класть PNG (по умолчанию reports/shots/<mode>).
+// Имена: <page>@<width>[-<theme>].png (+ `-full`, ниже 1440 и `-drawer`).
+// Сервер стенда поднимается СТРОГО изолированным (урок ERROR_LOG 21.09): роль
+// web, токен-заглушка, все внешние базы — на 127.0.0.1:1, ключи LLM —
+// непустые заглушки.
 // DATA_DIR задавать ЯВНО (урок инцидента 19.09, ERROR_LOG): без него харнесс
 // сам снимает файловую копию живой базы, но полагаться на дефолт нельзя.
 import { spawn, type ChildProcess } from "node:child_process";
@@ -52,10 +63,12 @@ function harnessDataDir(): string {
 }
 
 const SLUG = process.argv[2] ?? "bayselonarrend/openintegrations";
+const SLUGS = (process.env.SHOT_SLUGS ?? SLUG).split(",").map((s) => s.trim()).filter(Boolean);
+const THEMES = (process.env.SHOT_THEMES ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 const SERVER_PORT = Number(process.env.SHOT_PORT ?? 8519);
 const CDP_PORT = Number(process.env.SHOT_CDP_PORT ?? 9519);
 const MODE = parseMode(process.env.SHOT_MODE);
-const SHOTS_DIR = join("reports", "shots", MODE);
+const SHOTS_DIR = process.env.SHOT_OUT ?? join("reports", "shots", MODE);
 /**
  * Шрифты uikit грузит сам пакет (styles/fonts.css → @import) — не наш код.
  * Аватары (17.09, В4.5): logo.url репозиториев SourceCraft и портреты Я ID —
@@ -78,11 +91,17 @@ const ALLOWED_EXTERNAL = ["fonts.googleapis.com", "fonts.gstatic.com", "storage.
  */
 const WIDE_MIN = 1440;
 
-const VIEWPORTS: { width: number; height: number }[] = [
+const DEFAULT_VIEWPORTS: { width: number; height: number }[] = [
   { width: 1920, height: 1080 },
   { width: 1440, height: 1200 },
   { width: 1366, height: 768 },
 ];
+/** Высоты окон по ширине; 375 — телефон (В4.9 ч.2, приемка 6). */
+const HEIGHTS: Record<number, number> = { 1920: 1080, 1440: 1200, 1366: 768, 375: 812 };
+const VIEWPORTS: { width: number; height: number }[] = process.env.SHOT_WIDTHS
+  ? process.env.SHOT_WIDTHS.split(",").map((w) => Number(w.trim())).filter((w) => w > 0).map((width) => ({ width, height: HEIGHTS[width] ?? 900 }))
+  : DEFAULT_VIEWPORTS;
+const PHONE_MAX = 767;
 
 interface Problem {
   page: string;
@@ -122,6 +141,20 @@ async function run(): Promise<void> {
       NODE_ENV: MODE,
       // Приёмка UI не имеет права случайно запустить живой обход каталога.
       SCHEDULER_START_DELAY_MS: "86400000",
+      // В4.9 ч.2 (приемка 6): стенд изолирован от живых поверхностей — роль web
+      // (без планировщика и рейтинговых заданий), токен-заглушка, внешние базы
+      // на закрытый порт loopback, ключи LLM — непустые заглушки (пустая
+      // переменная `.env` не маскирует, ERROR_LOG 21.09).
+      PROCESS_ROLE: "web",
+      SOURCECRAFT_TOKEN: "stub-not-a-token",
+      SOURCECRAFT_API_BASE: "http://127.0.0.1:1",
+      APPSEC_API_BASE: "http://127.0.0.1:1",
+      SOURCECRAFT_GIT_BASE: "http://127.0.0.1:1",
+      YA_OAUTH_BASE: "http://127.0.0.1:1",
+      YA_LOGIN_BASE: "http://127.0.0.1:1",
+      YAGPT_API_KEY: "stub-not-a-key",
+      YAGPT_FOLDER_ID: "stub-not-a-folder",
+      ZAI_API_KEY: "stub-not-a-key",
     },
     stdio: "ignore",
   });
@@ -176,9 +209,8 @@ async function run(): Promise<void> {
   await call("Network.enable");
 
   mkdirSync(SHOTS_DIR, { recursive: true });
-  const [org, repo] = SLUG.split("/") as [string, string];
 
-  const pages: { name: string; url: string; checks: Record<string, string>; wideOnly?: Record<string, string> }[] = [
+  const pages: { name: string; url: string; checks: Record<string, string>; wideOnly?: Record<string, string>; drawer?: boolean }[] = [
     {
       name: "rating",
       url: `${base}/?sort=index&order=desc`,
@@ -212,6 +244,7 @@ async function run(): Promise<void> {
       wideOnly: {
         "легенда шкалы": "document.body.innerText.includes('Шкала оценки') ? 1 : 0",
       },
+      drawer: true,
     },
     {
       // «Мои репозитории» без сессии — витрина входа через Я ID.
@@ -232,49 +265,76 @@ async function run(): Promise<void> {
         "объяснение входа для настроек": "document.body.innerText.includes('настроить персональный токен доступа SourceCraft') ? 1 : 0",
       },
     },
-    {
-      name: "repo",
-      url: `${base}/repo/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`,
-      checks: {
-        "блок Score": "document.body.innerText.includes('из 100') ? 1 : 0",
-        категории: "document.body.innerText.includes('Категории') ? 1 : 0",
-        рекомендации: "document.body.innerText.includes('Рекомендации') ? 1 : 0",
-        "tri-state NULL": "document.body.textContent?.includes('Отсутствующие данные не учитываются как нулевые значения') ? 1 : 0",
-        "объяснение закрытых каналов": "document.body.innerText.includes('учитываются только в Repo Health Score') ? 1 : 0",
-        "кнопка отчета": "[...document.querySelectorAll('button')].filter((b) => b.textContent?.trim() === 'Отчет').length",
-        // В4.9 (К9.12): полоса «Вклад категорий в оценку» — тем же расчетом, что в отчете
-        "вклад категорий в оценку": "document.querySelectorAll('.rh-contrib-band').length",
-        // В4.6, приёмка вариантa А (пункт 5): величина И весь список категорий
-        // в ОДНОМ экране. Проверяется не на глаз, а геометрией: нижняя кромка
-        // последней строки категории обязана лежать внутри окна. Целевое
-        // разрешение 1366x768 — самое тесное из трёх.
-        // Круг 2 (Р14): строк столько, сколько категорий ОТКРЫТО зрителю —
-        // закрытые собраны в одну строку под списком, поэтому анонимному
-        // зрителю видно 4 строки, а не 6. Порог — «не меньше 4».
-        "величина и открытые категории в одном экране":
-          "(() => { const rows = [...document.querySelectorAll('.rh-category')]; if (rows.length < 4) return 0; return rows[rows.length - 1].getBoundingClientRect().bottom <= window.innerHeight ? 1 : 0; })()",
-        // Круг 2 (Р14): сведения о закрытых категориях не исчезли — строка
-        // стоит ПОСЛЕ последней строки категории (под Code health).
-        "строка недоступных категорий под списком":
-          "(() => { const note = document.querySelector('.rh-locked-note'); const rows = [...document.querySelectorAll('.rh-category')]; if (!note || rows.length === 0) return 0; return note.getBoundingClientRect().top >= rows[rows.length - 1].getBoundingClientRect().top ? 1 : 0; })()",
-        // В4.6 круг 3 (П1.10): под 2 показателями нет текста и CTA.
-        "нижний текст и ссылка показателей сняты":
-          "(() => { const band = document.querySelector('.rh-score-band'); if (!band || band.querySelector('.rh-score-band__summary')) return 0; return [...band.querySelectorAll('a')].every((a) => !/^Рекомендаций:/.test(a.textContent?.trim() ?? '')) ? 1 : 0; })()",
-      },
-    },
+    // В4.9 ч.2 (приемка 6): карточек несколько — первая по-старому `repo`
+    ...SLUGS.map((slug, i) => {
+      const [org, repo] = slug.split("/") as [string, string];
+      const scored = "document.querySelector('.rh-score-band')";
+      return {
+        name: i === 0 ? "repo" : `repo-${org}-${repo}`.replace(/[^\w.-]+/g, "_").slice(0, 80),
+        url: `${base}/repo/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`,
+        checks: {
+          // первый узел — готовность карточки (шапка), дальше — по наличию оценки
+          "шапка карточки": "document.querySelectorAll('.rh-repo-head').length",
+          "блок Score или пустое состояние": `(${scored} && document.body.innerText.includes('из 100')) || document.body.innerText.includes('Оценки пока нет') || document.body.innerText.includes('еще не сканировался') ? 1 : 0`,
+          // В4.9 ч.2 (А1): табов нет — ни TabList, ни переключателя в главной колонке
+          "табов нет (А1)": "document.querySelectorAll('.rh-page__main [role=tablist]').length === 0 ? 1 : 0",
+          // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А1): прежняя проверка «величина и
+          // открытые категории в одном экране» (вариант А В4.6) снята — лента по
+          // решению владельца 23.09 ставит под числа полосу вклада и основание у
+          // каждой категории. Вместо нее — порядок ленты по линии PDF.
+          "лента: показатели, категории, рекомендации, ограничения":
+            `(() => { if (!${scored}) return 1; const band = ${scored}.getBoundingClientRect(); const cat = document.querySelector('.rh-category'); const rec = document.getElementById('recommendations'); if (!cat || !rec) return 0; const lim = document.getElementById('rh-limitations-title'); const ok = band.bottom <= cat.getBoundingClientRect().top && cat.getBoundingClientRect().top < rec.getBoundingClientRect().top && (!lim || rec.getBoundingClientRect().top < lim.getBoundingClientRect().top); return ok ? 1 : 0; })()`,
+          // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А3): полоса вклада — под числами
+          // (было `.rh-contrib-band` в правой панели)
+          "вклад категорий под числами (А3)": `(() => { if (!${scored}) return 1; return document.querySelectorAll('.rh-score-band .rh-contrib_card').length > 0 ? 1 : 0; })()`,
+          // В4.9 ч.2 (А4): плашка уровня не растянута — уже своего трека (150px)
+          "плашки уровня не растянуты (А4)":
+            "(() => { const w = [...document.querySelectorAll('.rh-category__word')].filter((n) => n.getBoundingClientRect().width > 0); return w.every((n) => n.getBoundingClientRect().width < 149) ? 1 : 0; })()",
+          // Круг 2 (Р14) → В4.9 ч.2 (А4): закрытые категории — плашкой ПОД списком
+          // (ПЕРЕВЕРНУТО С ЗАМЕНОЙ: плашки может не быть — у полного доступа)
+          "плашка закрытых категорий под списком":
+            "(() => { const note = document.querySelector('.rh-locked-note'); const rows = [...document.querySelectorAll('.rh-category')]; if (!note) return 1; if (rows.length === 0) return 0; return note.getBoundingClientRect().top >= rows[rows.length - 1].getBoundingClientRect().top ? 1 : 0; })()",
+          // В4.6 круг 3 (П1.10): под 2 показателями нет текста и CTA.
+          "нижний текст и ссылка показателей сняты":
+            `(() => { const band = ${scored}; if (!band) return 1; if (band.querySelector('.rh-score-band__summary')) return 0; return [...band.querySelectorAll('a')].every((a) => !/^Рекомендаций:/.test(a.textContent?.trim() ?? '')) ? 1 : 0; })()`,
+        },
+        // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А8/А9): фраза tri-state живет в «Что
+        // учитывается» правой панели; ниже 1440 панель в Drawer, в DOM ее нет по
+        // замыслу. Проверка «объяснение закрытых каналов» («учитываются только в
+        // Repo Health Score») снята: абзаца нет, закрытые каналы объясняет плашка.
+        wideOnly: {
+          "tri-state NULL": `(() => { if (!${scored}) return 1; return document.body.textContent?.includes('Отсутствующие данные не учитываются как нулевые') ? 1 : 0; })()`,
+          "паспорт анализа": "document.querySelector('.rh-page__aside')?.textContent?.includes('Анализ') ? 1 : 0",
+        },
+        drawer: true,
+      };
+    }),
   ];
 
-  for (const viewport of VIEWPORTS) {
-    // Метрики задаются CDP, а не размером окна: --window-size у headless
-    // включает хром браузера, и фактический viewport оказывался уже
-    // заявленного — то есть «проверено на 1366» было бы неправдой.
-    await call("Emulation.setDeviceMetricsOverride", {
-      width: viewport.width,
-      height: viewport.height,
-      deviceScaleFactor: 1,
-      mobile: false,
-    });
-    for (const page of pages) await shoot(page.name, page.url, page.checks, viewport, page.wideOnly);
+  const themes: (string | null)[] = THEMES.length > 0 ? THEMES : [null];
+  let themeScript: string | null = null;
+  for (const theme of themes) {
+    // В4.9 ч.2: тема — через localStorage до загрузки приложения (prefs.ts, `rh:theme`)
+    if (themeScript) await call("Page.removeScriptToEvaluateOnNewDocument", { identifier: themeScript });
+    themeScript = null;
+    if (theme) {
+      const added = await call<{ identifier: string }>("Page.addScriptToEvaluateOnNewDocument", {
+        source: `try { localStorage.setItem("rh:theme", ${JSON.stringify(theme)}); } catch (e) {}`,
+      });
+      themeScript = added.identifier;
+    }
+    for (const viewport of VIEWPORTS) {
+      // Метрики задаются CDP, а не размером окна: --window-size у headless
+      // включает хром браузера, и фактический viewport оказывался уже
+      // заявленного — то есть «проверено на 1366» было бы неправдой.
+      await call("Emulation.setDeviceMetricsOverride", {
+        width: viewport.width,
+        height: viewport.height,
+        deviceScaleFactor: 1,
+        mobile: viewport.width <= PHONE_MAX,
+      });
+      for (const page of pages) await shoot(page.name, page.url, page.checks, viewport, page.wideOnly, theme, page.drawer === true);
+    }
   }
   await call("Emulation.clearDeviceMetricsOverride");
 
@@ -356,8 +416,11 @@ async function shoot(
   checks: Record<string, string>,
   viewport: { width: number; height: number },
   wideOnly: Record<string, string> = {},
+  theme: string | null = null,
+  drawer = false,
 ): Promise<void> {
-  currentPage = `${name}@${viewport.width}`;
+  const suffix = theme ? `-${theme}` : "";
+  currentPage = `${name}@${viewport.width}${suffix}`;
   loaded.fired = false;
   await call("Page.navigate", { url });
   await waitFor(async () => loaded.fired, `${currentPage}: страница не загрузилась`, 240, 250);
@@ -387,13 +450,49 @@ async function shoot(
 
   // основной файл — РОВНО видимая область: на него смотрит приёмка «в одном экране»
   const viewShot = await call<{ data: string }>("Page.captureScreenshot", { format: "png" });
-  const file = join(SHOTS_DIR, `${name}@${viewport.width}.png`);
+  const file = join(SHOTS_DIR, `${name}@${viewport.width}${suffix}.png`);
   writeFileSync(file, Buffer.from(viewShot.data, "base64"));
 
   // постраничный — вторым файлом, чтобы содержимое можно было прочесть целиком
   const fullShot = await call<{ data: string }>("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
-  const fullFile = join(SHOTS_DIR, `${name}@${viewport.width}-full.png`);
+  const fullFile = join(SHOTS_DIR, `${name}@${viewport.width}${suffix}-full.png`);
   writeFileSync(fullFile, Buffer.from(fullShot.data, "base64"));
+
+  // В4.9 ч.2 (А9, Б2): ниже 1440 правая панель — в выезжающей панели по
+  // кнопке «Как считается» (у рейтинга — и по ссылке в подзаголовке).
+  // Проверяется действием: клик → панель в DOM → снимок → Escape.
+  if (drawer && viewport.width < WIDE_MIN) {
+    const openedBy = async (expression: string, label: string, shotName: string | null): Promise<void> => {
+      const clicked = await evaluate<number>(expression);
+      let inDom = 0;
+      for (let i = 0; clicked && i < 40 && !inDom; i++) {
+        await delay(150);
+        inDom = await evaluate<number>("document.querySelectorAll('.rh-drawer').length");
+      }
+      results.push(`${label}=${inDom}`);
+      if (!inDom) problems.push({ page: currentPage, kind: "node", text: `Drawer не открылся: ${label}` });
+      else if (shotName) {
+        await delay(450);
+        const drawerShot = await call<{ data: string }>("Page.captureScreenshot", { format: "png" });
+        writeFileSync(join(SHOTS_DIR, shotName), Buffer.from(drawerShot.data, "base64"));
+      }
+      await call("Input.dispatchKeyEvent", { type: "keyDown", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+      await call("Input.dispatchKeyEvent", { type: "keyUp", key: "Escape", code: "Escape", windowsVirtualKeyCode: 27 });
+      for (let i = 0; i < 20 && (await evaluate<number>("document.querySelectorAll('.rh-drawer').length")) > 0; i++) await delay(100);
+    };
+    await openedBy(
+      "(() => { const b = [...document.querySelectorAll('.rh-actionbar button')].find((n) => n.textContent?.trim() === 'Как считается'); if (!b) return 0; b.click(); return 1; })()",
+      "Drawer по кнопке «Как считается»",
+      `${name}@${viewport.width}${suffix}-drawer.png`,
+    );
+    if (name === "rating") {
+      await openedBy(
+        "(() => { const a = [...document.querySelectorAll('.rh-page__main a')].find((n) => n.textContent?.trim() === 'Как считается'); if (!a) return 0; a.click(); return 1; })()",
+        "Drawer по ссылке «Как считается»",
+        null,
+      );
+    }
+  }
 
   console.log(`${currentPage}: ${url}`);
   console.log(`  ${results.join(", ")}`);

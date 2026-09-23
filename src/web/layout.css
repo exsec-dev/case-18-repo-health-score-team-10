@@ -474,6 +474,38 @@ body {
   margin-bottom: var(--g-spacing-4);
 }
 
+/* строка имени переносится: на узком экране плашка видимости и кнопки уходят
+ * на следующую строку, а не съедают имя до «k-5-…» */
+.rh-card-head__title {
+  min-width: 0;
+  row-gap: var(--g-spacing-1);
+}
+
+.rh-card-head__title > :first-child {
+  min-width: 0;
+  max-width: 100%;
+}
+
+/* основание рекомендации — ярлык переносится по словам (длинное значение подметрики) */
+.rh-rec__basis .g-label {
+  height: auto;
+  max-width: 100%;
+}
+
+.rh-rec__basis .g-label__main-button {
+  height: auto;
+  text-align: start;
+}
+
+.rh-rec__basis .g-label__text,
+.rh-rec__basis .g-label__content {
+  overflow: visible;
+  padding-block: 2px;
+  line-height: 16px;
+  white-space: normal;
+  text-overflow: clip;
+}
+
 /* подпись «Войти через Я ID» под строкой пути: кнопка по ширине текста */
 .rh-score-band__signin {
   margin-top: var(--g-spacing-2);
@@ -652,6 +684,14 @@ button.rh-category:focus-visible {
   display: inline-flex;
   gap: 4px;
   align-items: center;
+}
+
+/* В4.9 ч.2 (U10-b): «Последняя активность» — узкая колонка, подпись в 2 строки */
+.rh-th-sort_wrap .g-button__text {
+  max-width: 96px;
+  white-space: normal;
+  text-align: right;
+  line-height: 16px;
 }
 
 /* Доводка 21.09: стрелка у НЕАКТИВНОЙ колонки видна всегда, а не по
@@ -1045,6 +1085,24 @@ button.rh-category:focus-visible {
   .rh-category__bar,
   .rh-category__word {
     display: none;
+  }
+
+  /* кнопка панели «Как считается» — только иконкой: подпись не помещается */
+  .rh-aside-btn__label {
+    display: none;
+  }
+
+  /* В4.9 ч.2 (А9): на телефоне строка действий карточки («Отчет» и
+   * «Как считается») не помещалась рядом с крошками — секция ActionBar
+   * держала ширину содержимого и выталкивала кнопки за край. Крошки
+   * сжимаются и обрезаются (имя репозитория стоит в шапке карточки). */
+  .rh-actionbar > *,
+  .rh-actionbar > * > :first-child {
+    min-width: 0;
+  }
+
+  .rh-actionbar > * > :first-child {
+    overflow: hidden;
   }
 
   /* рекомендация: номер · текст, эффект — строкой под текстом */
