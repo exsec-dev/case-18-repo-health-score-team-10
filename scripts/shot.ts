@@ -210,7 +210,7 @@ async function run(): Promise<void> {
 
   mkdirSync(SHOTS_DIR, { recursive: true });
 
-  const pages: { name: string; url: string; checks: Record<string, string>; wideOnly?: Record<string, string>; drawer?: boolean }[] = [
+  const pages: { name: string; url: string; checks: Record<string, string>; wideOnly?: Record<string, string>; drawer?: boolean; wideMin?: number }[] = [
     {
       name: "rating",
       url: `${base}/?sort=index&order=desc`,
@@ -246,6 +246,9 @@ async function run(): Promise<void> {
         "легенда шкалы": "document.body.innerText.includes('Шкала оценки') ? 1 : 0",
       },
       drawer: true,
+      // круг 2 части 2 (Н1): панель рейтинга стоит колонкой только с 1600
+      // (`asideColumnFrom`), ниже — в Drawer; на 1440 легенды в DOM нет по замыслу
+      wideMin: 1600,
     },
     {
       // «Мои репозитории» без сессии — витрина входа через Я ID.
@@ -338,7 +341,7 @@ async function run(): Promise<void> {
         deviceScaleFactor: 1,
         mobile: viewport.width <= PHONE_MAX,
       });
-      for (const page of pages) await shoot(page.name, page.url, page.checks, viewport, page.wideOnly, theme, page.drawer === true);
+      for (const page of pages) await shoot(page.name, page.url, page.checks, viewport, page.wideOnly, theme, page.drawer === true, page.wideMin ?? WIDE_MIN);
     }
   }
   await call("Emulation.clearDeviceMetricsOverride");
@@ -423,6 +426,7 @@ async function shoot(
   wideOnly: Record<string, string> = {},
   theme: string | null = null,
   drawer = false,
+  wideMin = WIDE_MIN,
 ): Promise<void> {
   const suffix = theme ? `-${theme}` : "";
   currentPage = `${name}@${viewport.width}${suffix}`;
@@ -437,7 +441,7 @@ async function shoot(
   // репозиториев отвечает заметно позже. Без ожидания харнесс ругался на гонку
   // загрузки, а не на вёрстку.
   const results: string[] = [];
-  const applicable = viewport.width >= WIDE_MIN ? { ...checks, ...wideOnly } : checks;
+  const applicable = viewport.width >= wideMin ? { ...checks, ...wideOnly } : checks;
   for (const [label, expression] of Object.entries(applicable)) {
     let value = await evaluate<number>(expression);
     for (let i = 0; value === 0 && i < 40; i++) {
@@ -466,7 +470,7 @@ async function shoot(
   // В4.9 ч.2 (А9, Б2): ниже 1440 правая панель — в выезжающей панели по
   // кнопке «Как считается» (у рейтинга — и по ссылке в подзаголовке).
   // Проверяется действием: клик → панель в DOM → снимок → Escape.
-  if (drawer && viewport.width < WIDE_MIN) {
+  if (drawer && viewport.width < wideMin) {
     const openedBy = async (expression: string, label: string, shotName: string | null): Promise<void> => {
       const clicked = await evaluate<number>(expression);
       let inDom = 0;

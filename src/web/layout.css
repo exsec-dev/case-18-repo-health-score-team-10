@@ -306,6 +306,23 @@ body {
   border-left: 1px solid var(--g-color-line-generic);
 }
 
+/* круг 2 (Е1): «Как считается» на широком экране подсвечивает панель */
+.rh-page__aside_flash {
+  animation: rh-aside-flash 1.6s ease-out;
+}
+
+@keyframes rh-aside-flash {
+  0%,
+  40% {
+    box-shadow: inset 0 0 0 2px var(--g-color-line-brand);
+    background: var(--g-color-base-selection);
+  }
+  100% {
+    box-shadow: inset 0 0 0 2px transparent;
+    background: transparent;
+  }
+}
+
 .rh-drawer {
   box-sizing: border-box;
   height: 100%;
@@ -465,9 +482,20 @@ body {
  * карточки (У27: единый паддинг), линия отделяет нижний ярус «итог +
  * следующий шаг» от ярусa величин. Только токены. */
 .rh-score-band {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-4);
   box-sizing: border-box;
-  margin-bottom: var(--g-spacing-3);
-  padding: var(--g-spacing-3) var(--g-spacing-4);
+  min-width: 0;
+  padding: var(--g-spacing-3) var(--g-spacing-4) var(--g-spacing-4);
+}
+
+/* Круг 2 части 2 (Е12, вариант A): две плашки показателей — в ряд, пока
+ * каждой хватает 360px, иначе столбиком. Высота ряда общая. */
+.rh-score-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
+  gap: var(--g-spacing-3);
 }
 
 /* В4.9 ч.2 (А1, U1-A): табов нет — разделы ленты («Категории»,
@@ -478,10 +506,11 @@ body {
   padding: var(--g-spacing-3) var(--g-spacing-4);
 }
 
-/* Заголовок раздела ленты — над контейнером, как заголовки разделов PDF. */
+/* Заголовок раздела ленты. Круг 2 (Е4): внутри плашки — сверху отступ
+ * паддинга карточки, снизу тот же шаг, что между строками. */
 .rh-section__title {
   display: block;
-  margin: 0 0 var(--g-spacing-2);
+  margin: var(--g-spacing-1) 0 var(--g-spacing-2);
 }
 
 .rh-card-head {
@@ -617,9 +646,16 @@ button.rh-category:focus-visible {
   max-width: 72ch;
 }
 
-/* плашка уровня не растягивается на ширину трека (замечание владельца 23.09) */
+/* плашка уровня не растягивается на ширину трека (замечание владельца 23.09).
+ * Круг 2 (Е14): прижата вправо — у «все Здоров» свободное место уходит между
+ * баллом и плашкой, а правый край строк ровный. */
 .rh-category__word {
-  justify-self: start;
+  justify-self: end;
+}
+
+/* круг 2 (Е13): прочерк «нет данных» на месте полосы — у правого края трека */
+.rh-category__bar_empty {
+  justify-self: end;
 }
 
 /* Полоса категории — нейтральный серый (эквивалент #949494 PDF): цвет несет
@@ -775,29 +811,35 @@ button.rh-category:focus-visible {
  * одна категория один цвет на карточке и в панели рейтинга. Прежние 4 тона
  * остались за теми же категориями; CI/CD и Безопасность (только в полосе
  * Repo Health Score) — `misc-heavy` и `utility-medium`. «Не набрано» —
- * нейтральная дорожка. */
+ * нейтральная дорожка.
+ *
+ * В4.9 ч.2, круг 2 (Е2, §2 23.09 — палитра П2, Екатерина): зеленый, желтый и
+ * красный — цвета оценки, категории ими не красятся. Палитра — 6 разнесенных
+ * тонов, одинаковых в обеих темах (проверены на белом и #2d2d2d в виджете
+ * выбора); токенов Gravity с такими тонами нет — свои токены `--rh-cat-*`
+ * живут в theme.css (правило палитры: hex только там). */
 .rh-cat-color_documentation {
-  background: var(--g-color-base-info-heavy);
+  background: var(--rh-cat-documentation);
 }
 
 .rh-cat-color_activity {
-  background: var(--g-color-base-positive-medium);
+  background: var(--rh-cat-activity);
 }
 
 .rh-cat-color_issues {
-  background: var(--g-color-base-warning-medium);
+  background: var(--rh-cat-issues);
 }
 
 .rh-cat-color_code {
-  background: var(--g-color-base-utility-heavy);
+  background: var(--rh-cat-code);
 }
 
 .rh-cat-color_cicd {
-  background: var(--g-color-base-misc-heavy);
+  background: var(--rh-cat-cicd);
 }
 
 .rh-cat-color_security {
-  background: var(--g-color-base-utility-medium);
+  background: var(--rh-cat-security);
 }
 
 .rh-cat-color_rest,
@@ -811,8 +853,6 @@ button.rh-category:focus-visible {
   display: flex;
   flex-direction: column;
   gap: var(--g-spacing-2);
-  padding-top: var(--g-spacing-3);
-  border-top: 1px solid var(--g-color-line-generic);
 }
 
 .rh-contrib_card .rh-contrib__bar {
@@ -961,7 +1001,8 @@ button.rh-category:focus-visible {
  * отбивает его от строки категории. */
 .rh-subrows {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 40px;
+  /* круг 2 (Е6): значение · балл · вес */
+  grid-template-columns: minmax(0, 1fr) 40px 40px;
   column-gap: var(--g-spacing-2);
   align-items: baseline;
   padding: 0 var(--g-spacing-3) var(--g-spacing-3) var(--g-spacing-3);
@@ -1104,6 +1145,7 @@ button.rh-category:focus-visible {
    * на телефоне она остается: второй строкой под названием и основанием */
   .rh-category__word {
     grid-column: 2;
+    justify-self: start;
   }
 
   /* кнопка панели «Как считается» — только иконкой: подпись не помещается */
@@ -1131,61 +1173,6 @@ button.rh-category:focus-visible {
     grid-template-columns: 1fr;
     gap: 0;
   }
-}
-
-/* ---------- В4.9 ч.2 (В1, U11-b): 3 шага владельца в кабинете ----------
- * Та же рамка, что у info-плашки (голубая, outlined), внутри — шаги
- * столбиком: метка 24px (галочка / номер), текст и действие текущего шага.
- * Выполненный — позитивный тон метки, текущий — акцент, следующий —
- * приглушенный. */
-.rh-steps {
-  box-sizing: border-box;
-  padding: var(--g-spacing-3) var(--g-spacing-4);
-  border: 1px solid var(--g-color-line-info);
-  border-radius: var(--g-border-radius-l);
-}
-
-.rh-steps__list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--g-spacing-3);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.rh-steps__item {
-  display: grid;
-  grid-template-columns: 24px minmax(0, 1fr);
-  gap: var(--g-spacing-3);
-  align-items: start;
-}
-
-.rh-steps__mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  font-size: var(--g-text-caption-2-font-size);
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-}
-
-.rh-steps__item_done .rh-steps__mark {
-  color: var(--g-color-text-positive);
-}
-
-.rh-steps__item_current .rh-steps__mark {
-  background: var(--g-color-base-info-heavy);
-  color: var(--g-color-text-light-primary);
-}
-
-.rh-steps__item_next .rh-steps__mark {
-  border: 1px solid var(--g-color-line-generic-solid);
-  box-sizing: border-box;
-  color: var(--g-color-text-secondary);
 }
 
 /* ---------- В4.9 ч.2 (А5): строка рекомендации ----------
@@ -1231,6 +1218,13 @@ button.rh-category:focus-visible {
   box-sizing: border-box;
   max-width: 480px;
   padding: var(--g-spacing-3);
+}
+
+/* круг 2 (Ф2): исходные данные видны сразу; длинный факт прокручивается внутри */
+.rh-proof__raw {
+  max-height: 280px;
+  margin: 0;
+  overflow: auto;
 }
 
 .rh-proof__toggle,
@@ -1526,6 +1520,29 @@ button.rh-category:focus-visible {
   padding: var(--g-spacing-3);
   border-radius: 12px;
   text-align: start;
+}
+
+/* Круг 2 части 2 (Е15): фон плиток сводки — светлый серый, рамка —
+ * только у выбранной (ее рисует сам `Card type="selection"`). */
+.rh-summary__tile.g-card:not(.g-card_selected) {
+  border-color: transparent;
+  background: var(--g-color-base-generic);
+}
+
+.rh-summary__tile.g-card:not(.g-card_selected):hover {
+  background: var(--g-color-base-generic-hover);
+}
+
+/* Е18: шаги получения токена — нумерованный список в ритме текста */
+.rh-howto {
+  margin: 0;
+  padding-inline-start: var(--g-spacing-5);
+  line-height: 22px;
+}
+
+/* Е16: ссылка в пустом состоянии «Заданий» не рвется переносом */
+.rh-nowrap {
+  white-space: nowrap;
 }
 
 /* место под текст ошибки поля (errorPlacement="outside"), чтобы он не

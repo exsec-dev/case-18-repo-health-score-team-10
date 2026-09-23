@@ -44,9 +44,14 @@ describe("К9.12: «Вклад категорий в оценку» на кар�
     const css = src("web/layout.css");
     expect(css).not.toMatch(/\.rh-contrib-band__seg/);
     expect(css).not.toMatch(/\.rh-contrib__seg_\d/);
-    expect(between(css, ".rh-cat-color_cicd {", "}")).toContain("var(--g-color-base-misc-heavy)");
-    expect(between(css, ".rh-cat-color_security {", "}")).toContain("var(--g-color-base-utility-medium)");
-    expect(between(css, ".rh-cat-color_documentation {", "}")).toContain("var(--g-color-base-info-heavy)");
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (круг 2 части 2, Е2 — палитра П2): цвета категорий —
+    // свои токены `--rh-cat-*` в theme.css, не зеленый/желтый/красный оценки
+    for (const k of ["documentation", "cicd", "security", "activity", "issues", "code"]) {
+      expect(between(css, `.rh-cat-color_${k} {`, "}")).toContain(`var(--rh-cat-${k})`);
+    }
+    const theme = src("web/theme.css");
+    expect((theme.match(/--rh-cat-(documentation|cicd|security|activity|issues|code): #[0-9a-f]{6};/g) ?? []).length).toBe(12);
+    expect(css).not.toMatch(/\.rh-cat-color_\w+ \{[^}]*(positive|warning|danger)/);
     expect(src("web/Rating.tsx")).toContain("categoryColorClass(c.key)");
     expect(src("web/Rating.tsx")).not.toMatch(/rh-contrib__seg_\$\{i/);
     expect(src("web/RepoPage.tsx")).toContain("className={`rh-contrib__seg ${s.colorClass}`}");

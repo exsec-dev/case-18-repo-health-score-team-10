@@ -58,7 +58,7 @@ import type { LiveAnalysis } from "./analysis";
 import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
 import { authErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, recommendationsText, scoreTheme, scoreWord, sentence, slugOf, type FavoriteAddCheck } from "./format";
 import { recommendationsHref } from "./RepoPage";
-import { type Band, BANDS, type RepoEntry, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, ownerSteps, sortEntries } from "./myRepos";
+import { type Band, BANDS, type RepoEntry, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
 import { linkProps, navigate, repoHref } from "./router";
 import { Page, UserAvatar, displayName, logoutFailedToast } from "./Shell";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, RepoSlug, SkeletonRows, VisibilityPill } from "./ui";
@@ -72,6 +72,9 @@ const SETTINGS_CRUMBS = [{ text: "Настройки" }];
  * Теперь view и size общие для всех, тема — по смыслу: ошибка (`danger`) или
  * подсказка, что делать дальше (`info`, плашка про токен П3.3).
  */
+/** Инструкция SourceCraft по персональному токену (Е18). */
+const PAT_DOCS_URL = "https://sourcecraft.dev/portal/docs/ru/sourcecraft/security/pat";
+
 function CabinetAlert({
   theme = "danger",
   title,
@@ -87,38 +90,27 @@ function CabinetAlert({
 }
 
 /**
- * В4.9 ч.2 (В1, U11-b): 3 шага владельца вместо alert о токене. Состояние
- * шагов — чистая функция `ownerSteps` (myRepos.ts, поведенческий тест);
- * здесь только вид: выполненный — галочкой, текущий — номером в акценте и
- * кнопкой «Перейти в Настройки», следующий — приглушенным номером.
+ * Круг 2 части 2 (Е17, W1, §2 23.09): плашка из 3 шагов снята — ее видели
+ * только без токена, то есть она дублировала одно предупреждение. Вернулось
+ * предупреждение «нет токена» одной строкой: иконка ключа, заголовок и
+ * пояснение, кнопка справа. Видно, пока токена нет.
  */
-function OwnerSteps({ hasPat }: { hasPat: boolean }) {
-  const steps = ownerSteps(hasPat);
-  if (!steps) return null;
+function TokenNotice({ hasPat }: { hasPat: boolean }) {
+  if (hasPat) return null;
   return (
-    <section className="rh-steps" aria-label="Что сделать, чтобы увидеть все данные своих репозиториев">
-      <ol className="rh-steps__list">
-        {steps.map((step) => (
-          <li key={step.n} className={`rh-steps__item rh-steps__item_${step.state}`} aria-current={step.state === "current" ? "step" : undefined}>
-            <span className="rh-steps__mark" aria-hidden="true">
-              {step.state === "done" ? <Icon data={CircleCheck} size={16} /> : step.n}
-            </span>
-            <Flex direction="column" gap={2} style={{ minWidth: 0 }}>
-              <Text variant={step.state === "current" ? "subheader-2" : "body-2"} color={step.state === "next" ? "secondary" : undefined}>
-                {step.text}
-              </Text>
-              {step.state === "current" && (
-                <span>
-                  <Button view="normal" size="m" {...linkProps("/settings")}>
-                    Перейти в Настройки
-                  </Button>
-                </span>
-              )}
-            </Flex>
-          </li>
-        ))}
-      </ol>
-    </section>
+    <Alert
+      theme="info"
+      view="outlined"
+      layout="horizontal"
+      icon={<Icon data={Key} size={18} />}
+      title="Добавьте персональный токен доступа SourceCraft"
+      message="С ним откроются CI/CD и Безопасность и анализ своих репозиториев."
+      actions={
+        <Button view="normal" size="m" {...linkProps("/settings")}>
+          Перейти в Настройки
+        </Button>
+      }
+    />
   );
 }
 
@@ -412,10 +404,25 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
                   : "закрытые данные и анализ своих репозиториев недоступны"}
               </Text>
             </Flex>
-            <Text variant="body-short" color="complementary">
-              SourceCraft: Домой → Доступ → Персональные токены доступа → Сгенерировать новый токен. Токен показывается один
-              раз – скопируйте его сразу. Перед сохранением токен проверяется в SourceCraft: неверный токен не сохранится.
-            </Text>
+            {/* Круг 2 части 2 (Е18, Н1, §2 23.09): инструкция — шагами, как в
+                документации SourceCraft (названия разделов — жирным), важное —
+                отдельной плашкой, полная инструкция — ссылкой */}
+            <Flex direction="column" gap={2}>
+              <Text variant="subheader-1">Как получить токен</Text>
+              <ol className="rh-howto">
+                <li>
+                  В SourceCraft нажмите <b>Домой</b> и откройте <b>Доступ → Персональные токены доступа</b>.
+                </li>
+                <li>
+                  Нажмите <b>Сгенерировать новый токен</b> и выберите репозитории.
+                </li>
+                <li>Скопируйте токен и вставьте его в поле ниже.</li>
+              </ol>
+              <Alert theme="warning" view="filled" size="s" message="Токен показывается один раз. Перед сохранением мы проверим его в SourceCraft." />
+              <Link href={PAT_DOCS_URL} target="_blank" rel="noopener noreferrer">
+                Инструкция SourceCraft
+              </Link>
+            </Flex>
             {tokenForm("Персональный токен доступа SourceCraft", "Проверить и сохранить")}
           </Flex>
         )}
@@ -595,10 +602,8 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
         </div>
       </div>
 
-      {/* В4.9 ч.2 (В1, U11-b): без токена — 3 шага владельца на месте alert
-          (В4.7, П3.3): вход выполнен, токен — текущий шаг с кнопкой, анализ —
-          следующий. Показываются, пока токена нет. */}
-      <OwnerSteps hasPat={hasPat} />
+      {/* Круг 2 (Е17, W1): без токена — одна строка-предупреждение с кнопкой */}
+      <TokenNotice hasPat={hasPat} />
 
       {repos.state.kind === "loading" && <SkeletonRows rows={3} height={66} />}
       {repos.state.kind === "error" && (
@@ -1127,7 +1132,7 @@ export function JobsBell() {
               // по центру — иконка, заголовок, описание со ссылкой в раздел
               <JobsEmpty title="Сейчас ничего не анализируется">
                 Запустить анализ можно в разделе{" "}
-                <Link {...navProps("/me", close)} view="normal">
+                <Link {...navProps("/me", close)} view="normal" className="rh-nowrap">
                   Мои репозитории
                 </Link>
               </JobsEmpty>

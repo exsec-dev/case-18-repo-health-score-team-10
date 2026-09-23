@@ -145,7 +145,9 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     // (2c): пустые состояния — иконка, заголовок, описание; ссылка в раздел — SPA-навигация + закрытие панели
     expect(bell).toContain("groupJobsByDay(recent)");
     expect(src).toContain("function HistoryRow");
-    expect(src).toMatch(/<JobsEmpty title="Сейчас ничего не анализируется">\s*Запустить анализ можно в разделе\{" "\}\s*<Link \{\.\.\.navProps\("\/me", close\)\} view="normal">\s*Мои репозитории/);
+    expect(src).toMatch(/<JobsEmpty title="Сейчас ничего не анализируется">\s*Запустить анализ можно в разделе\{" "\}\s*<Link \{\.\.\.navProps\("\/me", close\)\} view="normal" className="rh-nowrap">\s*Мои репозитории/);
+    // круг 2 части 2 (Е16): ссылка не рвется переносом
+    expect(readFileSync(join(import.meta.dir, "..", "src", "web", "layout.css"), "utf8")).toMatch(/\.rh-nowrap \{[^}]*white-space: nowrap;/);
     expect(src).not.toMatch(/\{\.\.\.linkProps\([^)]*\)\}[^>]*onClick=/);
     expect(src).not.toContain("весь список – в разделе «Мои репозитории»");
     const css = readFileSync(join(import.meta.dir, "..", "src", "web", "layout.css"), "utf8");

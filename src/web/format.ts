@@ -751,7 +751,8 @@ export interface PathPart {
 const SETTINGS_WORD = "Настройках";
 
 /** Вошедшему без токена (Г2.2): без «войдите» — он уже вошел. */
-const PATH_NO_PAT: PathPart[] = [{ text: "Добавьте персональный токен доступа в " }, { text: SETTINGS_WORD, settings: true }, { text: " – откроются CI/CD и Безопасность." }];
+// круг 2 (Е5): без хвоста «– откроются CI/CD и Безопасность» — это уже сказано рядом
+const PATH_NO_PAT: PathPart[] = [{ text: "Добавьте персональный токен доступа в " }, { text: SETTINGS_WORD, settings: true }, { text: "." }];
 
 /** Не вошедшему (аноним, истекшая сессия). */
 const PATH_SIGN_IN: PathPart[] = [{ text: "Войдите через Я ID и добавьте персональный токен доступа в " }, { text: SETTINGS_WORD, settings: true }, { text: "." }];

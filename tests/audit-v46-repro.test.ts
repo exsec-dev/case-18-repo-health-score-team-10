@@ -140,7 +140,9 @@ describe("В4.6-2 (У25): «вклад 0%» заменён на «не учит�
     expect({
       contributionChip: src.includes("NOT_COUNTED") || /Вклад \$\{contribution\}%/.test(src),
       printsZeroContribution: /вклад \{contribution\}%/i.test(src),
-      dashInsteadOfBar: /c\.score === null \?[\s\S]{0,120}—/.test(src),
+      // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (круг 2 части 2, Е13): прочерк один — в колонке
+      // балла (`c.scoreText` = `fmtScore(null)` = «—»), место полосы пустое
+      dashInsteadOfBar: /c\.score === null \? null :/.test(src) && src.includes("{c.scoreText}"),
     }).toEqual({ contributionChip: false, printsZeroContribution: false, dashInsteadOfBar: true });
   });
 
@@ -309,8 +311,15 @@ describe("В4.6-7 (У23): границы сетки и разрешения", ()
   const layout = (): string => srcOf("layout.css");
 
   // ЗАКРЫТО блоком Б4 (границы сетки и разрешения).
-  test("рейтинг: JS-порог правой панели — 1440 (на ровно 1440 панель остаётся)", () => {
-    expect(srcOf("Shell.tsx")).toContain('useMediaQuery("(min-width: 1440px)")');
+  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (круг 2 части 2 В4.9, Н1): порог колонки панели стал
+  // пропом `asideColumnFrom` (по умолчанию 1440 — карточка и прочие страницы);
+  // рейтинг держит панель колонкой с 1600, чтобы на 1440 таблица вмещала
+  // «Реакции» и «Последнюю активность».
+  test("рейтинг: JS-порог правой панели — 1600, остальные страницы — 1440", () => {
+    const shell = srcOf("Shell.tsx");
+    expect(shell).toContain("asideColumnFrom = 1440");
+    expect(shell).toContain("useMediaQuery(`(min-width: ${asideColumnFrom}px)`)");
+    expect(srcOf("Rating.tsx")).toContain("asideColumnFrom={1600}");
   });
 
   // ЗАКРЫТО блоком Б4 (границы сетки и разрешения).

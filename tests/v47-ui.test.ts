@@ -99,18 +99,18 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
     }).toEqual({ menuItem: false, oldButton: false, silentWithoutCheck: true, internalState: false });
   });
 
-  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, В1 / U11-b): вместо CabinetAlert — плашка
-  // из 3 шагов, текущий шаг — кнопка «Перейти в Настройки»; место — то же, до списка.
-  test("П3.3 → В1: без PAT — 3 шага с кнопкой-ссылкой на /settings, до списка", () => {
+  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (круг 2 части 2 В4.9, Е17 / W1): плашка шагов снята,
+  // вернулось предупреждение одной строкой — заголовок, пояснение, кнопка справа.
+  test("П3.3 → Е17: без PAT — предупреждение с кнопкой-ссылкой на /settings, до списка", () => {
     const section = slice("function MyReposSection", "\nfunction RepoRow");
-    const steps = slice("function OwnerSteps", "\nexport function MePage");
+    const notice = slice("function TokenNotice", "\nexport function MePage");
     expect({
-      banner: section.includes("<OwnerSteps hasPat={hasPat} />"),
-      alert: /<CabinetAlert\s+theme="info"\s+title="Добавьте персональный токен доступа SourceCraft"/.test(section),
-      link: /<Button view="normal" size="m" \{\.\.\.linkProps\("\/settings"\)\}>\s*Перейти в Настройки/.test(steps),
-      beforeList: section.indexOf("<OwnerSteps") < section.indexOf('<ul className="rh-repo-list">'),
+      banner: section.includes("<TokenNotice hasPat={hasPat} />"),
+      oneLine: /layout="horizontal"/.test(notice) && /title="Добавьте персональный токен доступа SourceCraft"/.test(notice),
+      link: /<Button view="normal" size="m" \{\.\.\.linkProps\("\/settings"\)\}>\s*Перейти в Настройки/.test(notice),
+      beforeList: section.indexOf("<TokenNotice") < section.indexOf('<ul className="rh-repo-list">'),
       notToast: !/toaster\.add\([^)]*токен/.test(section),
-    }).toEqual({ banner: true, alert: false, link: true, beforeList: true, notToast: true });
+    }).toEqual({ banner: true, oneLine: true, link: true, beforeList: true, notToast: true });
   });
 
   // В4.8 круг 3 (5a, решение Екатерины): три `Label` каналов собраны в ОДНУ
@@ -129,9 +129,11 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
     }).toEqual({ onePill: true, icons: true, channels: true, lockForClosed: false, glyphs: false, legend: false });
   });
 
-  test("П3.4: один Alert — view и size общие, тема по смыслу", () => {
+  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (круг 2 части 2 В4.9, Е17 / Е18): 3 Alert — обертка,
+  // предупреждение «нет токена» одной строкой (W1) и плашка про одноразовый показ токена (Н1)
+  test("П3.4: Alert обертки — view и size общие, тема по смыслу", () => {
     const code = me();
-    expect((code.match(/<Alert\b/g) ?? []).length).toBe(1);
+    expect((code.match(/<Alert\b/g) ?? []).length).toBe(3);
     expect(code).toMatch(/<Alert theme=\{theme\} view="outlined" size="m"/);
     // все плашки кабинета идут через обёртку
     // В4.8: 7 — плашка исхода «Проверки доступа» стала тостом, как у остальных действий строки

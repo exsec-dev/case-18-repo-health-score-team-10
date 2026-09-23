@@ -74,12 +74,16 @@ describe("В4.6 круг 3: карточка", () => {
     // чисел без флага; в строке категории — полоса · балл · плашка, плашки вклада
     // нет, название и основание — одним треком, плашка не растягивается
     expect(band).toMatch(/title="Repo Health Score" help=\{FULL_HELP\}/);
-    expect(figure).toMatch(/total !== null && \([\s\S]{0,120}<Progress value=\{Math\.round\(total\)\}/);
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (круг 2 части 2, Е12 / Н2): цветной полосы балла под
+    // числом нет — под числом стоит полоса вклада своего показателя
+    expect(figure).not.toContain("<Progress");
+    expect(band).toContain('<ContributionStrip bar={barOf("HealthCraft Index")} />');
     expect(row.indexOf('className="rh-category__bar"')).toBeLessThan(row.indexOf('className="rh-category__value"'));
     expect(row.indexOf('className="rh-category__value"')).toBeLessThan(row.indexOf('className="rh-category__word"'));
     expect(row).not.toContain("rh-category__weight");
     expect(css).toContain("grid-template-columns: 16px minmax(0, 1fr) minmax(80px, 240px) 28px 150px;");
-    expect(css).toMatch(/\.rh-category__word \{[^}]*justify-self: start/);
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (круг 2, Е14): плашка уровня прижата вправо
+    expect(css).toMatch(/\.rh-category__word \{[^}]*justify-self: end/);
     // селектор стал составным: тот же отступ получил блок «Вклад категорий»
     expect(css).toMatch(/\.rh-aside-section > \.g-definition-list,[\s\S]{0,80}\{[^}]*margin-block-start:\s*var\(--g-spacing-1\)/);
   });
@@ -92,7 +96,9 @@ describe("В4.6 круг 3: карточка", () => {
     expect(locked).toContain('theme="info"');
     // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А4): строки «категория — фраза» → заголовок и одно предложение
     expect(locked).not.toContain("<DefinitionList");
-    expect(locked).toContain("title={title}");
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (круг 2, Т3): заголовка нет — одно предложение
+    expect(locked).not.toContain("title=");
+    expect(locked).toContain("message={text}");
     // ссылка из строки убрана: переход к токену живёт у показателя (решение 21.09)
     expect(locked).not.toContain('linkProps("/settings")');
     expect(web("layout.css")).toMatch(/\.rh-locked-note\s*\{[^}]*margin-top:[^}]*\}/);

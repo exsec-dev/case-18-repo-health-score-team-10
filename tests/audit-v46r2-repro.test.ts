@@ -383,8 +383,10 @@ describe("Б4 (Р14, Р16): список категорий и контейне�
     expect({
       rowsFiltered: /score\.categories\[k\]!\.locked === undefined/.test(view),
       noteAfterList: categories.indexOf("</ul>") < categories.indexOf("<LockedCategories"),
-      namesActualCategories: /const titles = locked\.map\(\(k\) => CATEGORY_TITLES\[k\]\)/.test(view),
-      reasonFromAccessLock: /ACCESS_LOCK_SHORT\[cats\[k\]!\.locked/.test(view),
+      // круг 2 (Т3): имена именно закрытых категорий в предложении; причина —
+      // `ACCESS_LOCK_SHORT` по праву зрителя с токеном
+      namesActualCategories: /const names = locked\.map\(\(k\) => CATEGORY_TITLES\[k\]\)\.join\(" и "\)/.test(view),
+      reasonFromAccessLock: /ACCESS_LOCK_SHORT\[r as keyof typeof ACCESS_LOCK_SHORT\]/.test(view),
       // фиксированная фраза «CI/CD и Security» была бы ложью при закрытой одной
       hardcodedPair: src.includes("CI/CD и Безопасность – недоступны"),
       lockBranchGoneFromRow: /cat\.locked !== undefined/.test(row),
@@ -402,11 +404,12 @@ describe("Б4 (Р14, Р16): список категорий и контейне�
   // строками «название — фраза отчета» — одна фраза на карточке и в отчете; согласовывать число нечего
   // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А4): строки «название — фраза» заменены
   // заголовком и пояснением одним предложением; склейки «недоступны» нет.
-  test("Р14 → А4: заголовок и пояснение одним предложением, панель под списком", () => {
+  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (круг 2 части 2, Т3): заголовка нет — одно предложение.
+  test("Р14 → Т3: одно предложение без заголовка, панель под списком", () => {
     const src = codeOf("RepoPage.tsx");
     const note = between(src, "function LockedCategories", "function CategoryRow");
     expect({
-      titleAndSentence: note.includes("title={title}") && note.includes('message={sentences.join(" ")}'),
+      titleAndSentence: !note.includes("title=") && note.includes("message={text}"),
       perCategoryRows: note.includes("items.map((item)"),
       noAgreementGlue: note.includes('"недоступна"') || note.includes('"недоступны"'),
       lastInList: /\.rh-locked-note \{[^}]*margin-top:\s*var\(--g-spacing-3\)/.test(srcOf("layout.css")),

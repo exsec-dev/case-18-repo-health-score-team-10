@@ -55,6 +55,7 @@ import {
   withValue,
   type Metric,
   type ShownMetric,
+  submetricWeightText,
 } from "./sections";
 import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle, subweightKey, type SubmetricContext } from "./submetrics";
 
@@ -403,7 +404,6 @@ function detailBlock(card: RepoCard, key: CategoryKey, cat: CardCategory, ctx: S
   const rows: InlineLine[][] = [];
   const reference: string[] = [];
   const remarks: string[] = [];
-  const weights = SUBWEIGHTS[key] as Record<string, number>;
   for (const [sub, entry] of Object.entries(cat.submetrics)) {
     const value = submetricShownValue(key, sub, entry, ctx, cat.submetrics);
     const remark = submetricNote(key, sub, entry.note)?.remark;
@@ -413,12 +413,11 @@ function detailBlock(card: RepoCard, key: CategoryKey, cat: CardCategory, ctx: S
       continue;
     }
     const action = actionOf.get(`${key}.${sub}`);
-    const weight = weights[subweightKey(sub)];
     rows.push([
       line(submetricTitle(key, sub)),
       action ? [text(value), text(` (действие ${action})`)] : line(value),
       line(entry.score === null || entry.score === undefined ? "—" : String(Math.round(entry.score * 100))),
-      line(weight === undefined ? "—" : `${Math.round(weight * 100)}%`),
+      line(submetricWeightText(key, sub)),
     ]);
   }
   if (key === "cicd" && cat.no_data) remarks.push(noDataReason(key, cat.no_data));

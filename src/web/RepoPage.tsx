@@ -76,6 +76,7 @@ import {
 import { useEffect, useState } from "react";
 import { COVERAGE_NULL_BELOW } from "../score/model";
 import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle } from "../report/submetrics";
+import { submetricWeightText } from "../report/sections";
 import type { MetaResponse, RepoCard } from "./api";
 import { dataOf, mutateJson, useJson, useVisible } from "./api";
 import { cardView, factSource, type CardView, type CategoryView, type RecommendationView } from "./cardView";
@@ -557,6 +558,9 @@ const INDEX_HELP =
   "Публичная оценка по 4 категориям: документация, активность, задачи и состояние кода. " +
   "Считается для всех открытых репозиториев и является основой общего рейтинга";
 
+/** круг 2 (Е10): «Место в рейтинге» в паспорте анализа — в одну строку */
+const ASIDE_NAME_WIDTH = 150;
+
 const FULL_HELP =
   "Рассчитывается по 6 категориям: 4 категориям HealthCraft Index, а также CI/CD и Безопасность. " +
   "Показатель доступен только для репозиториев, к которым у вас есть доступ";
@@ -590,7 +594,6 @@ function ScoreAside({
   const threshold = fmtCoverage(meta?.coverageNullBelow ?? COVERAGE_NULL_BELOW);
   const coverageHelp = `Доля веса категорий, по которым есть данные. Ниже ${threshold} оценка не ставится.`;
   const full = score !== null && !score.fullLocked;
-  const [detailsOpen, setDetailsOpen] = useState(false);
   return (
     <>
       <AsideSection title="Анализ">
@@ -611,7 +614,7 @@ function ScoreAside({
           </Flex>
         )}
         {scan || score ? (
-          <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
+          <DefinitionList nameMaxWidth={ASIDE_NAME_WIDTH}>
             {score && (
               <DefinitionList.Item name="Место в рейтинге">
                 {score.rank !== null && score.rankedTotal ? `#${fmtCount(score.rank)} из ${fmtCount(score.rankedTotal)}` : "—"}
@@ -652,15 +655,9 @@ function ScoreAside({
       )}
 
       {scan && (
-        <section className="rh-aside-section rh-aside-details">
-          <button type="button" className="rh-aside-details__toggle" aria-expanded={detailsOpen} onClick={() => setDetailsOpen(!detailsOpen)}>
-            <ArrowToggle direction={detailsOpen ? "bottom" : "right"} size={14} />
-            <Text variant="subheader-2" as="h2">
-              Реквизиты
-            </Text>
-          </button>
-          {detailsOpen && (
-            <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
+        // круг 2 (Е11): места в панели хватает — «Реквизиты» не свернуты
+        <AsideSection title="Реквизиты">
+          <DefinitionList nameMaxWidth={ASIDE_NAME_WIDTH}>
               <DefinitionList.Item name="Анализ">№ {scan.id}</DefinitionList.Item>
               {score && (
                 <DefinitionList.Item name="Версия методики">
@@ -669,9 +666,8 @@ function ScoreAside({
                   </Label>
                 </DefinitionList.Item>
               )}
-            </DefinitionList>
-          )}
-        </section>
+          </DefinitionList>
+        </AsideSection>
       )}
     </>
   );
@@ -695,65 +691,68 @@ function PathLine({ parts }: { parts: PathPart[] }) {
 }
 
 /**
- * ВЕЛИЧИНА — блок первым экраном главной колонки: два показателя рядом (В4.6,
- * вариант А), под ними — вклад категорий во всю ширину блока (В4.9 ч.2, А3,
- * стиль Ш2). Пояснения к показателям — только в подсказках у названий;
- * покрытие — в паспорте анализа справа (А8).
+ * ВЕЛИЧИНА — первый экран главной колонки. Круг 2 части 2 (Е12, вариант A,
+ * §2 23.09): у каждого показателя своя плашка — число, плашка уровня и под
+ * ним его полоса вклада; подписи над полосой нет, цветной полосы балла под
+ * числом нет (Н2). На широком экране плашки стоят в ряд, на узком — столбиком
+ * (`.rh-score-cards`, auto-fit). Закрытый Repo Health Score — своя плашка с
+ * путем к нему по типу зрителя.
  */
 function ScoreBand({ card, view }: { card: Card; view: CardView }) {
   const score = card.score!;
+  const barOf = (name: string) => view.contributions.find((b) => b.title.endsWith(name)) ?? null;
   return (
-    <Card view="outlined" className="rh-score-band">
-      <Flex direction="column" gap={4}>
-        <Flex gap={6} wrap>
-          <ScoreFigure title="HealthCraft Index" help={INDEX_HELP} total={score.healthcraftIndex} rank={score.rank} rankedTotal={score.rankedTotal} />
-          {view.fullPath ? (
-            <Flex direction="column" gap={1} style={{ flex: "1 1 240px", minWidth: 0 }}>
-              <Flex gap={1} alignItems="center">
-                <Text color="secondary">Repo Health Score</Text>
-                <HelpMark iconSize="s" aria-label="Что такое «Repo Health Score»">
-                  {FULL_HELP}
-                </HelpMark>
-              </Flex>
-              {/* Закрытый показатель не схлопывается в метку (прием платформы):
-                  заголовок — кому он виден, строка — путь к нему по типу зрителя,
-                  одной копией с отчетом (`fullScorePath`, §2 23.09 ответ 1) */}
-              <Text variant="subheader-2">Виден участникам репозитория</Text>
-              <Text variant="body-1" color="complementary">
-                <PathLine parts={view.fullPath} />
-              </Text>
-              {view.signIn && (
-                <div className="rh-score-band__signin">
-                  <LoginButton compact={false} inline />
-                </div>
-              )}
+    <div className="rh-score-cards">
+      <Card view="outlined" className="rh-score-band">
+        <ScoreFigure title="HealthCraft Index" help={INDEX_HELP} total={score.healthcraftIndex} rank={score.rank} rankedTotal={score.rankedTotal} />
+        <ContributionStrip bar={barOf("HealthCraft Index")} />
+      </Card>
+      <Card view="outlined" className="rh-score-band">
+        {view.fullPath ? (
+          <Flex direction="column" gap={1} style={{ minWidth: 0 }}>
+            <Flex gap={1} alignItems="center">
+              <Text color="secondary">Repo Health Score</Text>
+              <HelpMark iconSize="s" aria-label="Что такое «Repo Health Score»">
+                {FULL_HELP}
+              </HelpMark>
             </Flex>
-          ) : (
+            {/* Закрытый показатель не схлопывается в метку (прием платформы):
+                заголовок — кому он виден, строка — путь к нему по типу зрителя,
+                одной копией с отчетом (`fullScorePath`, §2 23.09 ответ 1) */}
+            <Text variant="subheader-2">Виден участникам репозитория</Text>
+            <Text variant="body-1" color="complementary">
+              <PathLine parts={view.fullPath} />
+            </Text>
+            {view.signIn && (
+              <div className="rh-score-band__signin">
+                <LoginButton compact={false} inline />
+              </div>
+            )}
+          </Flex>
+        ) : (
+          <>
             <ScoreFigure title="Repo Health Score" help={FULL_HELP} total={score.repoHealthScore} />
-          )}
-        </Flex>
-        {view.contributions.map((bar) => (
-          <ContributionStrip key={bar.title} bar={bar} />
-        ))}
-      </Flex>
-    </Card>
+            <ContributionStrip bar={barOf("Repo Health Score")} />
+          </>
+        )}
+      </Card>
+    </div>
   );
 }
 
 /**
- * В4.9 ч.2 (А3, Ш2): «Вклад категорий в <показатель>» — тонкий стек 8 px с
- * зазором 2 px и легенда точками в строку с переносом, как «Top languages»
- * SourceCraft и панель «Вклад категорий» рейтинга. Одна категория — один
- * цвет на обоих экранах (`categoryColorClass`); «не набрано» — последним,
- * нейтральным. Засечек и ленты зон нет. Расчет — `categoryContributions`
- * через `contributionBar`, общий с отчетом.
+ * Полоса вклада под своим числом (Ш2, круг 2 — палитра П2): тонкий стек
+ * 8 px с зазором 2 px и легенда точками в строку с переносом, как «Top
+ * languages» SourceCraft и панель «Вклад категорий» рейтинга. Одна категория
+ * — один цвет на обоих экранах (`categoryColorClass`); «не набрано» —
+ * последним, нейтральным. Заголовка нет (Е12): полоса стоит в плашке своего
+ * показателя, имя — в `aria-label`. Расчет — `categoryContributions`, общий
+ * с отчетом; на карточке вклад без «+» (Е3).
  */
-function ContributionStrip({ bar }: { bar: CardView["contributions"][number] }) {
+function ContributionStrip({ bar }: { bar: CardView["contributions"][number] | null }) {
+  if (!bar) return null;
   return (
     <div className="rh-contrib rh-contrib_card" role="group" aria-label={bar.title}>
-      <Text variant="subheader-1" as="h2" className="rh-contrib__title">
-        {bar.title}
-      </Text>
       {bar.note !== null ? (
         <Text as="p" color="complementary" className="rh-contrib__note">
           {bar.note}
@@ -793,7 +792,7 @@ function ContributionStrip({ bar }: { bar: CardView["contributions"][number] }) 
 
 function ScoreFigure({ title, help, total, rank, rankedTotal }: { title: string; help: string; total: number | null; rank?: number | null; rankedTotal?: number | null }) {
   return (
-    <Flex direction="column" gap={1} style={{ flex: "1 1 240px", minWidth: 0 }}>
+    <Flex direction="column" gap={1} style={{ minWidth: 0 }}>
       <Flex gap={1} alignItems="center">
         <Text color="secondary">{title}</Text>
         <HelpMark iconSize="s" aria-label={`Что такое «${title}»`}>
@@ -813,19 +812,13 @@ function ScoreFigure({ title, help, total, rank, rankedTotal }: { title: string;
           <Label theme={scoreLabelTheme(total)} size="s">
             {sentence(scoreWord(total))}
           </Label>
-          {/* место в рейтинге — серый текст справа, прижат к правому краю полосы */}
+          {/* место в рейтинге — серый текст справа */}
           {rank !== null && rank !== undefined && rankedTotal ? (
             <Text color="secondary" className="rh-score-figure__rank" title="Место в публичном рейтинге по HealthCraft Index">
               #{fmtCount(rank)} из {fmtCount(rankedTotal)}
             </Text>
           ) : null}
         </Flex>
-      )}
-      {/* В4.6 (У21): полоса измеряет САМ показатель; мера 360px */}
-      {total !== null && (
-        <div style={{ maxWidth: 360 }}>
-          <Progress value={Math.round(total)} size="s" theme={scoreTheme(total)} />
-        </div>
       )}
     </Flex>
   );
@@ -844,16 +837,17 @@ function ScoreFigure({ title, help, total, rank, rankedTotal }: { title: string;
 function Categories({ card, view }: { card: Card; view: CardView }) {
   return (
     <section className="rh-section" aria-labelledby="rh-categories-title">
-      <Text variant="subheader-3" as="h2" id="rh-categories-title" className="rh-section__title">
-        Категории
-      </Text>
+      {/* круг 2 (Е4): заголовок — внутри плашки, в ритме ее строк */}
       <Card view="outlined" className="rh-section-card">
+        <Text variant="subheader-3" as="h2" id="rh-categories-title" className="rh-section__title">
+          Категории
+        </Text>
         <ul className="rh-list" style={{ borderTop: 0 }}>
           {view.categories.map((c) => (
             <CategoryRow key={c.key} category={c} card={card} defaultOpen={c.key === view.worstKey} />
           ))}
         </ul>
-        {view.locked && <LockedCategories title={view.locked.title} sentences={view.locked.sentences} />}
+        {view.locked && <LockedCategories text={view.locked.text} />}
       </Card>
     </section>
   );
@@ -865,8 +859,9 @@ function Categories({ card, view }: { card: Card; view: CardView }) {
  * причинах — по предложению на категорию. Призыва внутри нет: единственный
  * призыв стоит у закрытого Repo Health Score.
  */
-function LockedCategories({ title, sentences }: { title: string; sentences: string[] }) {
-  return <Alert theme="info" view="outlined" size="s" className="rh-locked-note" title={title} message={sentences.join(" ")} />;
+function LockedCategories({ text }: { text: string }) {
+  // круг 2 (Т3): одно предложение без заголовка
+  return <Alert theme="info" view="outlined" size="s" className="rh-locked-note" message={text} />;
 }
 
 function CategoryRow({ category: c, card, defaultOpen = false }: { category: CategoryView; card: Card; defaultOpen?: boolean }) {
@@ -894,12 +889,10 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
         </Text>
       </span>
       {/* Tri-state: без данных — «—» вместо полосы и числа, плашка «Нет данных» */}
-      <span className="rh-category__bar">
-        {c.score === null ? (
-          <Text color="secondary" title={NO_DATA}>
-            —
-          </Text>
-        ) : (
+      <span className={c.score === null ? "rh-category__bar rh-category__bar_empty" : "rh-category__bar"}>
+        {/* круг 2 (Е13): у «нет данных» на месте полосы пусто — единственный
+            прочерк стоит в колонке балла, у правого края, рядом с плашкой */}
+        {c.score === null ? null : (
           <span className="rh-cat-bar" role="img" aria-label={`${c.scoreText} из 100`}>
             <span className="rh-cat-bar__fill" style={{ width: `${Math.max(0, Math.min(100, Math.round(c.score)))}%` }} />
           </span>
@@ -939,9 +932,12 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
               строками: сетка живёт на `.rh-subrows`, строки раскрываются в
               неё через `display: contents`, иначе у каждой строки был бы свой
               `auto` и подпись не встала бы над значениями. */}
+          {/* круг 2 (Е6): вес показателя внутри категории — та же колонка, что в
+              разборе PDF (`submetricWeightText`, одна копия); порядок колонок — как в PDF */}
           <div className="rh-subrows__head">
             <span>Значение</span>
             <span>Балл</span>
+            <span>Вес</span>
           </div>
           {subs.map(([subKey, sub]) => (
             <div key={subKey} className="rh-subrow">
@@ -1000,6 +996,9 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
               ) : (
                 <Text className="rh-subrow__score">{fmtSubmetric(sub.score)}</Text>
               )}
+              <Text className="rh-subrow__score" color="secondary">
+                {submetricWeightText(key, subKey)}
+              </Text>
             </div>
           ))}
         </div>
@@ -1051,14 +1050,16 @@ function Limitations({ items }: { items: string[] }) {
   if (items.length === 0) return null;
   return (
     <section className="rh-section" aria-labelledby="rh-limitations-title">
-      <Text variant="subheader-3" as="h2" id="rh-limitations-title" className="rh-section__title">
-        Ограничения данных
-      </Text>
-      <Flex direction="column" gap={2}>
-        {items.map((text) => (
-          <Alert key={text} theme="info" view="outlined" size="s" message={text} />
-        ))}
-      </Flex>
+      <Card view="outlined" className="rh-section-card">
+        <Text variant="subheader-3" as="h2" id="rh-limitations-title" className="rh-section__title">
+          Ограничения данных
+        </Text>
+        <Flex direction="column" gap={2}>
+          {items.map((text) => (
+            <Alert key={text} theme="info" view="outlined" size="s" message={text} />
+          ))}
+        </Flex>
+      </Card>
     </section>
   );
 }
@@ -1074,22 +1075,21 @@ function Limitations({ items }: { items: string[] }) {
  */
 function Recommendations({ view }: { view: CardView }) {
   return (
-    <section className="rh-section" id={RECOMMENDATIONS_ID} aria-labelledby="rh-recommendations-title">
-      <Text variant="subheader-3" as="h2" id="rh-recommendations-title" className="rh-section__title">
-        Рекомендации
-      </Text>
-      {view.recommendations.length === 0 ? (
-        <EmptyState icon={SquareListUl} title="Рекомендаций нет" description="По собранным данным улучшать нечего." />
-      ) : (
+    // круг 2 (Е13): рекомендаций нет — раздела нет вовсе, без заголовка
+    view.recommendations.length === 0 ? null : (
+      <section className="rh-section" id={RECOMMENDATIONS_ID} aria-labelledby="rh-recommendations-title">
         <Card view="outlined" className="rh-section-card">
+          <Text variant="subheader-3" as="h2" id="rh-recommendations-title" className="rh-section__title">
+            Рекомендации
+          </Text>
           <ol className="rh-list rh-recs" style={{ borderTop: 0 }}>
             {view.recommendations.map((r) => (
               <RecommendationRow key={r.rec.ruleId} item={r} />
             ))}
           </ol>
         </Card>
-      )}
-    </section>
+      </section>
+    )
   );
 }
 
@@ -1097,13 +1097,17 @@ function RecommendationRow({ item }: { item: RecommendationView }) {
   const { rec } = item;
   return (
     <li className="rh-list__item rh-rec">
-      <Text variant="subheader-2" color="secondary" className="rh-rec__n">
+      <Text variant="subheader-1" color="secondary" className="rh-rec__n">
         {item.n}
       </Text>
       <Flex direction="column" gap={1} className="rh-rec__body">
-        {/* В4.9 (К9.10): заголовок = действие (глагол), ниже — причина; как в отчете */}
-        <Text variant="subheader-2">{rec.action}</Text>
-        <Text color="complementary">{rec.problem}</Text>
+        {/* В4.9 (К9.10): заголовок = действие (глагол), ниже — причина; как в отчете.
+            Круг 2 (Е8): кегль и ритм — как у строки категории (название subheader-1,
+            основание body-1 complementary) */}
+        <Text variant="subheader-1">{rec.action}</Text>
+        <Text variant="body-1" color="complementary">
+          {rec.problem}
+        </Text>
         <Flex gap={2} wrap alignItems="center" className="rh-rec__basis">
           <Text variant="body-short" color="secondary">
             Основание:
@@ -1151,7 +1155,6 @@ function FactProof({ item }: { item: RecommendationView }) {
 }
 
 function FactBlock({ factKey, fact }: { factKey: string; fact: Evidence | null }) {
-  const [raw, setRaw] = useState(false);
   if (!fact) {
     return (
       <Flex direction="column" gap={1}>
@@ -1174,15 +1177,8 @@ function FactBlock({ factKey, fact }: { factKey: string; fact: Evidence | null }
           </Label>
         )}
       </Flex>
-      <button type="button" className="rh-proof__toggle" aria-expanded={raw} onClick={() => setRaw(!raw)}>
-        <ArrowToggle direction={raw ? "bottom" : "right"} size={12} />
-        <Text variant="body-short">Исходные данные</Text>
-      </button>
-      {raw && (
-        <pre className="rh-code" style={{ maxHeight: 280, overflow: "auto" }}>
-          {fmtFactValue(fact.value)}
-        </pre>
-      )}
+      {/* круг 2 (Ф2, §2 23.09): исходные данные целиком, без сворачивания */}
+      <pre className="rh-code rh-proof__raw">{fmtFactValue(fact.value)}</pre>
       <Text variant="caption-2" color="hint">
         {fact.key}
       </Text>

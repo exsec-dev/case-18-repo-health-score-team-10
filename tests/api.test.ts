@@ -547,7 +547,7 @@ describe("единая карточка: матрица доступа зрит�
     }
     // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, §2 23.09 ответ 1): путь к полной оценке —
     // по типу зрителя; здесь доступ «нет токена» — без «войдите» (Г2.2)
-    expect(anonMd).toContain("Добавьте персональный токен доступа в Настройках – откроются CI/CD и Безопасность.");
+    expect(anonMd).toContain("Добавьте персональный токен доступа в Настройках.");
     expect(anonMd).not.toContain("войдите и добавьте");
     const fullMd = renderRepoReport(view({ cicd: "granted", appsec: "granted", repo: "granted" })!);
     expect(fullMd).toContain("Repo Health Score: **49 из 100");

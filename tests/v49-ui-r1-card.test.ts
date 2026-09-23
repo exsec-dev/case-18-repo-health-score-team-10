@@ -12,7 +12,6 @@ import type { Block, Inline } from "../src/report/model";
 import { CATEGORY_TITLES } from "../src/report/categories";
 import { CATEGORY_COLOR, SOURCE_DATA_LABEL, cardView, categoryColorClass, lockedView, recommendationLabel, visibilityPill } from "../src/web/cardView";
 import { ACCESS_LOCK_SHORT, ACCESS_LOCK_TEXT, NOT_IN_SCORE, fullScorePath, pathText } from "../src/web/format";
-import { ownerSteps } from "../src/web/myRepos";
 import { REPORT_FIXTURES, fixtureCard, type FixtureCard } from "./report-fixtures";
 
 const opened: FixtureCard[] = [];
@@ -48,7 +47,8 @@ describe("инвариант 1: карточка = отчет по данным 
       // А3: полосы вклада — те же заголовки, сегменты, остаток и строка вместо полосы
       const bars = blocksOf(model.blocks, "contributions");
       expect(view.contributions.map(({ title, segments, rest, note }) => ({ title, segments: segments.map(({ title, value, share }) => ({ title, value, share })), rest, note }))).toEqual(
-        bars.map(({ title, segments, rest, note }) => ({ title, segments, rest, note })),
+        // круг 2 (Е3): на карточке вклад без «+» — то же число, что подпись сегмента в документе
+        bars.map(({ title, segments, rest, note }) => ({ title, segments: segments.map((s) => ({ ...s, value: s.value.replace(/^\+/, "") })), rest, note })),
       );
       // цвет сегмента — по ключу категории (один на карточке и в панели рейтинга)
       for (const bar of view.contributions) for (const s of bar.segments) expect(s.colorClass).toBe(`rh-cat-color_${s.key}`);
@@ -97,19 +97,26 @@ describe("tri-state и доступ на карточке (инварианты 
     expect(view.categories.map((c) => c.key)).not.toContain("cicd");
     expect(view.categories.map((c) => c.key)).not.toContain("security");
     for (const bar of view.contributions) for (const s of bar.segments) expect(["cicd", "security"]).not.toContain(s.key);
-    expect(view.locked).toEqual({ title: "CI/CD и Безопасность видны участникам репозитория", sentences: [ACCESS_LOCK_SHORT["no-pat"]] });
+    // круг 2 (Т3, §2 23.09): одно предложение без заголовка, путь по типу зрителя
+    expect(view.locked).toEqual({ text: "CI/CD и Безопасность видны участникам репозитория после входа и добавления персонального токена доступа." });
   });
 
-  test("одна закрытая категория — заголовок в единственном числе; причина по праву зрителя", () => {
+  test("Т3: вошедшему без токена — путь без «входа»", () => {
+    const base = card("anon");
+    const c: RepoCard = { ...base, viewer: { own: false, auth: "no-pat" } };
+    expect(lockedView(c)).toEqual({ text: "CI/CD и Безопасность видны участникам репозитория после добавления персонального токена доступа." });
+  });
+
+  test("одна закрытая категория у зрителя с токеном — единственное число и причина отказа", () => {
     const c = card("grant-ci");
-    expect(lockedView(c)).toEqual({ title: "Безопасность видна участникам репозитория", sentences: [ACCESS_LOCK_SHORT.denied] });
+    expect(lockedView(c)).toEqual({ text: `Безопасность – ${ACCESS_LOCK_SHORT.denied.charAt(0).toLowerCase()}${ACCESS_LOCK_SHORT.denied.slice(1)}` });
   });
 
-  test("разные причины двух категорий — по предложению на категорию, каждое с ее названием", () => {
+  test("разные причины двух категорий у зрителя с токеном — по предложению на категорию", () => {
     const base = card("anon");
     const cats = { ...base.score!.categories, cicd: { ...base.score!.categories.cicd, locked: "pat-expired" as const }, security: { ...base.score!.categories.security, locked: "denied" as const } };
-    const mixed: RepoCard = { ...base, score: { ...base.score!, categories: cats } };
-    expect(lockedView(mixed)!.sentences).toEqual(["CI/CD – SourceCraft отклонил ваш токен доступа.", "Безопасность – у вашего токена нет прав на эти данные репозитория."]);
+    const mixed: RepoCard = { ...base, viewer: { own: false, auth: "pat" }, score: { ...base.score!, categories: cats } };
+    expect(lockedView(mixed)!.text).toBe("CI/CD – SourceCraft отклонил ваш токен доступа. Безопасность – у вашего токена нет прав на эти данные репозитория.");
   });
 
   test("полный доступ: плашки закрытых нет, полоса Repo Health Score с 6 категориями и новыми тонами", () => {
@@ -133,12 +140,12 @@ describe("путь к полной оценке по 3 типам зрителя
     expect(renderRepoReport(c)).toContain(pathText(view.fullPath!));
   });
 
-  test("вошел без токена: без «войдите», «откроются CI/CD и Безопасность»; кнопки входа нет", () => {
+  test("вошел без токена: без «войдите» и без хвоста про CI/CD (Е5); кнопки входа нет", () => {
     const anon = card("anon");
     const c: RepoCard = { ...anon, viewer: { own: false, auth: "no-pat" } };
     const view = cardView(c);
     expect(view.signIn).toBe(false);
-    expect(pathText(view.fullPath!)).toBe("Добавьте персональный токен доступа в Настройках – откроются CI/CD и Безопасность.");
+    expect(pathText(view.fullPath!)).toBe("Добавьте персональный токен доступа в Настройках.");
     expect(pathText(view.fullPath!)).not.toMatch(/войдите/i);
     const md = renderRepoReport(c);
     expect(md).toContain(pathText(view.fullPath!));
@@ -223,21 +230,5 @@ describe("плашка видимости (А7, В2): все значения So
   });
 });
 
-describe("3 шага владельца в кабинете (В1)", () => {
-  test("без токена: вход выполнен, токен — текущий, анализ — следующий", () => {
-    expect(ownerSteps(false)!.map((s) => [s.n, s.state])).toEqual([
-      [1, "done"],
-      [2, "current"],
-      [3, "next"],
-    ]);
-    expect(ownerSteps(false)!.map((s) => s.text)).toEqual([
-      "Вы вошли через Я ID",
-      "Добавьте персональный токен доступа SourceCraft – откроются CI/CD и Безопасность",
-      "Запустите анализ своего репозитория – кнопка в строке списка",
-    ]);
-  });
-
-  test("с токеном шагов нет (как прежде alert)", () => {
-    expect(ownerSteps(true)).toBeNull();
-  });
-});
+// ПЕРЕВЕРНУТО С ЗАМЕНОЙ (круг 2 части 2, Е17): шаги владельца сняты вместе с
+// `ownerSteps`; предупреждение «нет токена» проверяют v47-ui и audit-v47.

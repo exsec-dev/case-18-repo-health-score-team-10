@@ -9,7 +9,7 @@
 // здесь только типы, значения — из `categories.ts`, `score/model.ts`,
 // `web/format.ts` и словаря подметрик.
 import type { CardCategory, CardRecommendation, RepoCard } from "../api/repos";
-import { INDEX_WEIGHTS, SCORE_WEIGHTS, type CategoryKey } from "../score/model";
+import { INDEX_WEIGHTS, SCORE_WEIGHTS, SUBWEIGHTS, type CategoryKey } from "../score/model";
 import {
   CONTRIBUTIONS_REST,
   CONTRIBUTIONS_TITLE,
@@ -26,7 +26,7 @@ import {
   type Contributions,
 } from "../web/format";
 import { CATEGORY_ORDER, CATEGORY_TITLES } from "./categories";
-import { displayOnly, submetricNote, submetricShownValue, submetricTitle, type SubmetricContext } from "./submetrics";
+import { displayOnly, submetricNote, submetricShownValue, submetricTitle, subweightKey, type SubmetricContext } from "./submetrics";
 
 export const INDEX = "HealthCraft Index";
 export const FULL = "Repo Health Score";
@@ -266,4 +266,16 @@ const SOURCE_WORDS: [RegExp, string][] = [
 /** Источник факта словами читателя (сырое имя канала — только если оно не узнано). */
 export function sourceWord(source: string): string {
   return SOURCE_WORDS.find(([re]) => re.test(source))?.[1] ?? source;
+}
+
+/**
+ * Вес показателя внутри категории — колонка «Вес» разбора PDF и таблицы
+ * подметрик карточки (круг 2 части 2, Е6): одна копия. Балл категории один
+ * для обоих показателей, поэтому и вес подметрики один. Справочные
+ * (`displayOnly`) и неизвестные — «—».
+ */
+export function submetricWeightText(key: CategoryKey, sub: string): string {
+  if (displayOnly(key, sub)) return "—";
+  const weight = (SUBWEIGHTS[key] as Record<string, number>)[subweightKey(sub)];
+  return weight === undefined ? "—" : `${Math.round(weight * 100)}%`;
 }

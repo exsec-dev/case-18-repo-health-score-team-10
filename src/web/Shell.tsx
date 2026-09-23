@@ -414,7 +414,16 @@ export function showAside(control: AsideControl): void {
     control.open();
     return;
   }
-  document.querySelector(".rh-page__aside")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  // Круг 2 (Е1): на широком экране панель уже видна колонкой, и одна прокрутка
+  // ничего не меняла — ссылка «никуда не вела». Панель прокручивается в вид и
+  // коротко подсвечивается рамкой: взгляд переходит к ней.
+  const panel = document.querySelector<HTMLElement>(".rh-page__aside");
+  if (!panel) return;
+  panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  panel.classList.remove("rh-page__aside_flash");
+  void panel.offsetWidth;
+  panel.classList.add("rh-page__aside_flash");
+  window.setTimeout(() => panel.classList.remove("rh-page__aside_flash"), 1600);
 }
 
 interface PageProps {
@@ -428,6 +437,12 @@ interface PageProps {
    * как раньше — уходят под основную колонку.
    */
   asideDrawer?: boolean;
+  /**
+   * Круг 2 части 2 (Н1): ширина, с которой панель стоит колонкой (по
+   * умолчанию 1440). Рейтингу нужно больше: на 1440 колонка панели сужала
+   * таблицу, и «Реакции» с «Последней активностью» уходили за прокрутку.
+   */
+  asideColumnFrom?: number;
   /** document (по умолчанию) — колонки прокручиваются; fill — данные на высоту экрана */
   mode?: "document" | "fill";
   /** fill: закреплено над прокручиваемой областью */
@@ -437,7 +452,7 @@ interface PageProps {
   children: ReactNode;
 }
 
-export function Page({ crumbs, actions, aside, asideDrawer = false, mode = "document", header, footer, children }: PageProps) {
+export function Page({ crumbs, actions, aside, asideDrawer = false, asideColumnFrom = 1440, mode = "document", header, footer, children }: PageProps) {
   const globalActions = useContext(GlobalActionsContext);
   /**
    * В4.6 (У23, решение владельца 20.09 — вариант (iii)): порог 1440, а не
@@ -449,7 +464,7 @@ export function Page({ crumbs, actions, aside, asideDrawer = false, mode = "docu
    * (RepoPage.tsx), Drawer там не работает ни на какой ширине — ей отвечает
    * CSS-медиазапрос layout.css, который кладёт панель ПОД основную колонку.
    */
-  const wide = useMediaQuery("(min-width: 1440px)");
+  const wide = useMediaQuery(`(min-width: ${asideColumnFrom}px)`);
   const [asideOpen, setAsideOpen] = useState(false);
   const asideInDrawer = (mode === "fill" || asideDrawer) && !wide && aside !== undefined;
 

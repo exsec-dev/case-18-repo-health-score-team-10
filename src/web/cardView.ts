@@ -98,8 +98,8 @@ export interface CategoryView {
 }
 
 export interface LockedView {
-  title: string;
-  sentences: string[];
+  /** одно предложение без заголовка (круг 2, Т3): кто видит и что открывает доступ */
+  text: string;
 }
 
 export interface RecommendationView {
@@ -139,18 +139,26 @@ export const SOURCE_DATA_LABEL = "Исходные данные";
 
 const lowerFirst = (s: string): string => (/^[A-ZА-ЯЁ][a-zа-яё]+[A-ZА-ЯЁ]/.test(s) ? s : s.charAt(0).toLowerCase() + s.slice(1));
 
-/** Закрытые зрителю CI/CD и Безопасность — заголовок и пояснение одним предложением (А4). */
+/**
+ * Закрытые зрителю CI/CD и Безопасность — одно предложение без заголовка
+ * (круг 2 части 2, Т3, §2 23.09): путь по типу зрителя. Не вошел — «после
+ * входа и добавления токена», вошел без токена — «после добавления токена»,
+ * токен есть — причина отказа (`ACCESS_LOCK_SHORT`, одна копия с отчетом).
+ */
 export function lockedView(card: RepoCard): LockedView | null {
   const cats = card.score?.categories;
   if (!cats) return null;
   const locked = CATEGORY_ORDER.filter((k) => cats[k]?.locked !== undefined);
   if (locked.length === 0) return null;
-  const titles = locked.map((k) => CATEGORY_TITLES[k]);
-  const title = locked.length > 1 ? `${titles.join(" и ")} видны участникам репозитория` : `${titles[0]} видна участникам репозитория`;
-  const short = (k: CategoryKey): string => ACCESS_LOCK_SHORT[cats[k]!.locked as keyof typeof ACCESS_LOCK_SHORT] ?? ACCESS_LOCK_SHORT["check-failed"];
-  const reasons = locked.map(short);
+  const names = locked.map((k) => CATEGORY_TITLES[k]).join(" и ");
+  const verb = locked.length > 1 ? "видны" : "видна";
+  const auth = card.viewer?.auth;
+  const reasons = locked.map((k) => cats[k]!.locked as string);
+  if (auth === undefined || auth === "no-session") return { text: `${names} ${verb} участникам репозитория после входа и добавления персонального токена доступа.` };
+  if (auth === "no-pat" || reasons.includes("no-pat")) return { text: `${names} ${verb} участникам репозитория после добавления персонального токена доступа.` };
+  const short = (r: string): string => ACCESS_LOCK_SHORT[r as keyof typeof ACCESS_LOCK_SHORT] ?? ACCESS_LOCK_SHORT["check-failed"];
   const same = reasons.every((r) => r === reasons[0]);
-  return { title, sentences: same ? [reasons[0]!] : locked.map((k, i) => `${CATEGORY_TITLES[k]} – ${lowerFirst(reasons[i]!)}`) };
+  return { text: same ? `${names} – ${lowerFirst(short(reasons[0]!))}` : locked.map((k, i) => `${CATEGORY_TITLES[k]} – ${lowerFirst(short(reasons[i]!))}`).join(" ") };
 }
 
 /** Ярлык основания рекомендации: подметрика правила и ее значение; без записи — «Исходные данные». */
@@ -217,7 +225,8 @@ export function cardView(card: RepoCard): CardView {
   const auth = card.viewer?.auth;
   return {
     ...base,
-    contributions: contributionBars(card).map((bar) => ({ ...bar, segments: bar.segments.map((s) => ({ ...s, colorClass: categoryColorClass(s.key) })) })),
+    // круг 2 (Е3): на карточке вклад без «+» — это доля итога, а не прибавка (в PDF подпись над сегментом прежняя)
+    contributions: contributionBars(card).map((bar) => ({ ...bar, segments: bar.segments.map((s) => ({ ...s, value: s.value.replace(/^\+/, ""), colorClass: categoryColorClass(s.key) })) })),
     categories,
     worstKey: worst?.key ?? null,
     locked: lockedView(card),
