@@ -118,16 +118,18 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
   // плашку с тремя иконками (Code / Terminal / Shield — как у SourceCraft);
   // состояние — цветом иконки, закрытый канал — серым, без замка. Смысл П3.4
   // (компоненты, а не глифы; без легенды) сохранен.
-  test("П3.4 → В4.8 круг 3: права — одна плашка с иконками каналов, а не глифы; замка и легенды нет", () => {
+  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (круг 4 части 2 В4.9, слово владельца 23.09): плашка
+  // из 3 иконок каналов доступа снята — в строке остается только видимость;
+  // глифов и легенды по-прежнему нет
+  test("П3.4 → круг 4: плашки каналов доступа нет, только видимость; глифов и легенды нет", () => {
     const rights = slice("function AccessRights", "\n}\n");
     expect({
-      onePill: /<span className="rh-pill rh-access" title=\{summary\} aria-label=\{summary\} role="img">/.test(rights),
-      icons: /<Icon key=\{c\.key\} data=\{c\.icon\} size=\{14\} className=\{`rh-access__icon \$\{c\.state\.cls\}`\} \/>/.test(rights),
-      channels: /\{ key: "clone", title: "Код", icon: Code \},\s*\{ key: "ci", title: "CI\/CD", icon: Terminal \},\s*\{ key: "appsec", title: "Безопасность", icon: Shield \}/.test(me()),
-      lockForClosed: /no: \{[^}]*Lock/.test(me()),
+      onePill: /rh-access/.test(me()),
+      visibility: /<VisibilityPill value=\{access\.visibility\}/.test(rights),
+      channels: /ACCESS_CHANNELS/.test(me()),
       glyphs: /[✓✗]/.test(me()),
       legend: me().includes("право есть ·"),
-    }).toEqual({ onePill: true, icons: true, channels: true, lockForClosed: false, glyphs: false, legend: false });
+    }).toEqual({ onePill: false, visibility: true, channels: false, glyphs: false, legend: false });
   });
 
   // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (круг 2 части 2 В4.9, Е17 / Е18): 3 Alert — обертка,

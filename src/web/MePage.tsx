@@ -17,7 +17,6 @@ import {
   CircleExclamation,
   CircleQuestion,
   Clock,
-  Code,
   Ellipsis,
   Hourglass,
   Key,
@@ -27,9 +26,7 @@ import {
   OctagonXmark,
   Person,
   Plus,
-  Shield,
   Star,
-  Terminal,
   TriangleExclamation,
 } from "@gravity-ui/icons";
 import {
@@ -111,13 +108,17 @@ function TokenNotice({ hasPat }: { hasPat: boolean }) {
     <Alert
       theme="info"
       view="outlined"
+      className="rh-token-notice"
       icon={<Icon data={Key} size={18} className="rh-info-icon" />}
       title="Добавьте персональный токен доступа SourceCraft"
       message="С ним откроются CI/CD и Безопасность и анализ своих репозиториев."
       actions={
-        <Button view="normal" size="m" {...linkProps("/settings")}>
-          Перейти в Настройки
-        </Button>
+        // круг 4: кнопка по ширине текста, а не во всю плашку
+        <span className="rh-token-notice__action">
+          <Button view="normal" size="m" {...linkProps("/settings")}>
+            Перейти в Настройки
+          </Button>
+        </span>
       }
     />
   );
@@ -221,7 +222,8 @@ function AccountSection({ me }: { me: MeResponse }) {
           </Text>
         </Flex>
       </Flex>
-      <Button view="outlined" size="m" width="max" onClick={() => void logout().catch((e: unknown) => toaster.add(logoutFailedToast(e)))}>
+      {/* круг 4 (8): кнопка по ширине текста, а не во всю панель */}
+      <Button view="outlined" size="m" onClick={() => void logout().catch((e: unknown) => toaster.add(logoutFailedToast(e)))}>
         <Icon data={ArrowRightFromSquare} size={16} />
         Выйти
       </Button>
@@ -418,16 +420,17 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
                 отдельной плашкой, полная инструкция — ссылкой */}
             <Flex direction="column" gap={2}>
               {/* круг 3 (11): «Как получить токен? Инструкция SourceCraft» — одной строкой */}
-              <Text variant="subheader-1">
-                Как получить токен?{" "}
+              {/* круг 4 (9): ссылка — обычным начертанием, рядом с вопросом */}
+              <Flex gap={2} alignItems="baseline" wrap>
+                <Text variant="subheader-1">Как получить токен?</Text>
                 <Link href={PAT_DOCS_URL} target="_blank" rel="noopener noreferrer">
                   Инструкция SourceCraft
                 </Link>
-              </Text>
+              </Flex>
               {/* круг 3 (12): названия разделов SourceCraft — серыми тегами, не жирным */}
               <ol className="rh-howto">
                 <li>
-                  В SourceCraft нажмите <UiTag>Домой</UiTag> и откройте <UiTag>Доступ → Персональные токены доступа</UiTag>.
+                  В SourceCraft нажмите <UiTag>Домой</UiTag> и откройте <UiTag>Доступ</UiTag> → <UiTag>Персональные токены доступа</UiTag>.
                 </li>
                 <li>
                   Нажмите <UiTag>Сгенерировать новый токен</UiTag> и выберите репозитории.
@@ -1292,30 +1295,6 @@ interface FavoritesResponse {
 }
 
 /**
- * Каналы доступа (В4.8 круг 3, 5a): иконки как у SourceCraft — `Code` (раздел
- * Code), `Terminal` (раздел Automations, там живет CI/CD), `Shield` (Security;
- * на карточке у подметрики «исправленные уязвимости» — `ShieldCheck`, здесь
- * без галочки, чтобы значок не спорил с состоянием).
- */
-const ACCESS_CHANNELS: { key: "clone" | "ci" | "appsec"; title: string; icon: IconData }[] = [
-  { key: "clone", title: "Код", icon: Code },
-  { key: "ci", title: "CI/CD", icon: Terminal },
-  { key: "appsec", title: "Безопасность", icon: Shield },
-];
-
-/**
- * Tri-state канала — яркостью иконки, словами — в подсказке. Круг 4
- * (замечание 2): без зеленого — есть доступ светло-серым, нет или неизвестно
- * серым (как у публичных репозиториев); «нет» и «неизвестно» различаются
- * словами в подсказке и `aria-label`.
- */
-const ACCESS_STATES: Record<"yes" | "no" | "unknown", { cls: string; hint: string }> = {
-  yes: { cls: "rh-access__icon_yes", hint: "доступ есть" },
-  no: { cls: "rh-access__icon_no", hint: "доступа нет" },
-  unknown: { cls: "rh-access__icon_unknown", hint: "неизвестно – проверка не удалась" },
-};
-
-/**
  * В4.7 (П3.2, П3.4): права зрителя — компонентами, а не глифами. В4.8: без
  * проверки строка молчит. В4.8.5 (К8.5.14): права проверяются сами — ручного пункта нет.
  * Круг 2 (2a): у приватного — серая метка видимости с замком.
@@ -1325,11 +1304,8 @@ const ACCESS_STATES: Record<"yes" | "no" | "unknown", { cls: string; hint: strin
 function AccessRights({ access, lastCheckedAt }: { access: import("../api/me").FavoriteEntry["access"]; lastCheckedAt: string | null }) {
   if (!access) return null;
   const checked = lastCheckedAt ? ` (проверено ${fmtDateTime(lastCheckedAt)})` : "";
-  const channels = ACCESS_CHANNELS.map(({ key, title, icon }) => {
-    const value = access[key];
-    return { key, title, icon, state: ACCESS_STATES[value === true ? "yes" : value === false ? "no" : "unknown"] };
-  });
-  const summary = `Доступ: ${channels.map((c) => `${c.title} – ${c.state.hint}`).join(", ")}${checked}`;
+  // Круг 4 части 2 (слово владельца 23.09): плашка из 3 иконок доступа
+  // (Код, CI/CD, Безопасность) снята — в строке остается только видимость
   return (
     <Flex gap={1} alignItems="center" className="rh-repo-item__labels">
       {/* круг 4 (замечание 3): серая «пилюля», а не `Label theme="normal"` —
@@ -1337,11 +1313,6 @@ function AccessRights({ access, lastCheckedAt }: { access: import("../api/me").F
       {/* В4.9 ч.2 (В2): видимость — общей плашкой с карточкой (А7), теперь и
           у публичных; все 3 значения SourceCraft, «неизвестно» — без плашки */}
       <VisibilityPill value={access.visibility} titleSuffix={checked} />
-      <span className="rh-pill rh-access" title={summary} aria-label={summary} role="img">
-        {channels.map((c) => (
-          <Icon key={c.key} data={c.icon} size={14} className={`rh-access__icon ${c.state.cls}`} />
-        ))}
-      </span>
     </Flex>
   );
 }

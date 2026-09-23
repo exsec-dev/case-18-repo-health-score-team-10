@@ -25,7 +25,6 @@ import {
 import { submetricContext, submetricShownValue, submetricTitle } from "../report/submetrics";
 import type { CategoryKey } from "../score/model";
 import {
-  ACCESS_LOCK_SHORT,
   fmtScore,
   fullScorePath,
   noDataReason,
@@ -139,11 +138,19 @@ export const SOURCE_DATA_LABEL = "Исходные данные";
 
 const lowerFirst = (s: string): string => (/^[A-ZА-ЯЁ][a-zа-яё]+[A-ZА-ЯЁ]/.test(s) ? s : s.charAt(0).toLowerCase() + s.slice(1));
 
+/** Хвост фразы о закрытых категориях у зрителя с токеном — по причине отказа (круг 4, 3). */
+const LOCKED_WHY: Record<"denied" | "pat-expired" | "check-failed" | "no-pat", string> = {
+  denied: ", а у вашего токена к ним нет доступа.",
+  "pat-expired": ". SourceCraft отклонил ваш токен – обновите его в Настройках.",
+  "check-failed": ". Проверить ваш доступ сейчас не удалось – откройте карточку позже.",
+  "no-pat": " после добавления персонального токена доступа.",
+};
+
 /**
  * Закрытые зрителю CI/CD и Безопасность — одно предложение без заголовка
  * (круг 2 части 2, Т3, §2 23.09): путь по типу зрителя. Не вошел — «после
  * входа и добавления токена», вошел без токена — «после добавления токена»,
- * токен есть — причина отказа (`ACCESS_LOCK_SHORT`, одна копия с отчетом).
+ * токен есть — «только участникам репозитория» и причина отказа (`LOCKED_WHY`).
  */
 export function lockedView(card: RepoCard): LockedView | null {
   const cats = card.score?.categories;
@@ -156,9 +163,12 @@ export function lockedView(card: RepoCard): LockedView | null {
   const reasons = locked.map((k) => cats[k]!.locked as string);
   if (auth === undefined || auth === "no-session") return { text: `${names} ${verb} участникам репозитория после входа и добавления персонального токена доступа.` };
   if (auth === "no-pat" || reasons.includes("no-pat")) return { text: `${names} ${verb} участникам репозитория после добавления персонального токена доступа.` };
-  const short = (r: string): string => ACCESS_LOCK_SHORT[r as keyof typeof ACCESS_LOCK_SHORT] ?? ACCESS_LOCK_SHORT["check-failed"];
+  // Круг 4 части 2 (3): зрителю с токеном — не обрывок причины, а смысл:
+  // категории доступны только участникам репозитория, затем почему именно ему нет
+  const why = (r: string): string => LOCKED_WHY[r as keyof typeof LOCKED_WHY] ?? LOCKED_WHY["check-failed"];
   const same = reasons.every((r) => r === reasons[0]);
-  return { text: same ? `${names} – ${lowerFirst(short(reasons[0]!))}` : locked.map((k, i) => `${CATEGORY_TITLES[k]} – ${lowerFirst(short(reasons[i]!))}`).join(" ") };
+  if (same) return { text: `${names} ${verb} только участникам репозитория${why(reasons[0]!)}` };
+  return { text: locked.map((k, i) => `${CATEGORY_TITLES[k]} ${locked.length > 1 ? "видна" : verb} только участникам репозитория${why(reasons[i]!)}`).join(" ") };
 }
 
 /** Ярлык основания рекомендации: подметрика правила и ее значение; без записи — «Исходные данные». */

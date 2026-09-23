@@ -386,7 +386,8 @@ describe("Б4 (Р14, Р16): список категорий и контейне�
       // круг 2 (Т3): имена именно закрытых категорий в предложении; причина —
       // `ACCESS_LOCK_SHORT` по праву зрителя с токеном
       namesActualCategories: /const names = locked\.map\(\(k\) => CATEGORY_TITLES\[k\]\)\.join\(" и "\)/.test(view),
-      reasonFromAccessLock: /ACCESS_LOCK_SHORT\[r as keyof typeof ACCESS_LOCK_SHORT\]/.test(view),
+      // круг 4 (3): причина зрителя с токеном — словарь `LOCKED_WHY` по причине отказа
+      reasonFromAccessLock: /LOCKED_WHY\[r as keyof typeof LOCKED_WHY\]/.test(view),
       // фиксированная фраза «CI/CD и Security» была бы ложью при закрытой одной
       hardcodedPair: src.includes("CI/CD и Безопасность – недоступны"),
       lockBranchGoneFromRow: /cat\.locked !== undefined/.test(row),

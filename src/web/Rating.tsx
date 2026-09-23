@@ -648,10 +648,15 @@ function PhoneList({ items, rankOffset, refreshing }: { items: Item[]; rankOffse
             <Text color="secondary" style={{ minWidth: 24, textAlign: "right" }}>
               {rankOffset + index + 1}
             </Text>
+            {/* Круг 4 части 2: на телефоне строка репозитория сжимается (имя —
+                с многоточием), а число с полосой не сжимаются — раньше мера
+                строки в 180px выталкивала полосу поверх имени */}
             <div style={{ flex: 1, minWidth: 0 }}>
-              <RepoCell item={item} />
+              <RepoCell item={item} compact />
             </div>
-            <ScoreCell item={item} />
+            <div style={{ flexShrink: 0 }}>
+              <ScoreCell item={item} narrow />
+            </div>
           </Flex>
         </li>
       ))}
@@ -671,9 +676,9 @@ function PhoneList({ items, rankOffset, refreshing }: { items: Item[]; rankOffse
  * 16px названия языка + аватар `m`), `perPage` 20 остаётся: видно ~15 строк
  * вместо 17, и это осознанная плата за читаемую строку.
  */
-function RepoCell({ item }: { item: Item }) {
+function RepoCell({ item, compact = false }: { item: Item; compact?: boolean }) {
   return (
-    <Flex gap={3} alignItems="center" style={{ minWidth: 180, maxWidth: 264 }}>
+    <Flex gap={3} alignItems="center" style={compact ? { minWidth: 0 } : { minWidth: 180, maxWidth: 264 }}>
       <RepoAvatar repo={item.repo} logoUrl={item.logoUrl} size="m" />
       <Flex direction="column" gap={0} style={{ minWidth: 0 }}>
         <Link {...linkProps(repoHref(item.org, item.repo))} view="primary">
@@ -829,7 +834,7 @@ function buildColumns(
  * В4.6 круг 3 П2.6 явно заменил типографику П1: число 14px/600, высота
  * полосы ровно 8px, зазор пары 0. Длина 80px и цвет по порогам сохранены.
  */
-function ScoreCell({ item }: { item: Item }) {
+function ScoreCell({ item, narrow = false }: { item: Item; narrow?: boolean }) {
   if (item.healthcraftIndex === null) {
     return (
       <Label theme="unknown" size="xs">
@@ -845,7 +850,7 @@ function ScoreCell({ item }: { item: Item }) {
           Из истории
         </Label>
       )}
-      <div className="rh-score-cell__bar">
+      <div className={narrow ? "rh-score-cell__bar rh-score-cell__bar_narrow" : "rh-score-cell__bar"}>
         <Progress value={item.healthcraftIndex} size="s" theme={scoreTheme(item.healthcraftIndex)} />
       </div>
       <Text color={scoreColor(item.healthcraftIndex)} className="rh-score-cell__num" title={sentence(scoreWord(item.healthcraftIndex))}>

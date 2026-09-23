@@ -109,14 +109,17 @@ describe("tri-state и доступ на карточке (инварианты 
 
   test("одна закрытая категория у зрителя с токеном — единственное число и причина отказа", () => {
     const c = card("grant-ci");
-    expect(lockedView(c)).toEqual({ text: `Безопасность – ${ACCESS_LOCK_SHORT.denied.charAt(0).toLowerCase()}${ACCESS_LOCK_SHORT.denied.slice(1)}` });
+    // круг 4 части 2 (3): смысл — «только участникам», затем причина
+    expect(lockedView(c)).toEqual({ text: "Безопасность видна только участникам репозитория, а у вашего токена к ним нет доступа." });
   });
 
   test("разные причины двух категорий у зрителя с токеном — по предложению на категорию", () => {
     const base = card("anon");
     const cats = { ...base.score!.categories, cicd: { ...base.score!.categories.cicd, locked: "pat-expired" as const }, security: { ...base.score!.categories.security, locked: "denied" as const } };
     const mixed: RepoCard = { ...base, viewer: { own: false, auth: "pat" }, score: { ...base.score!, categories: cats } };
-    expect(lockedView(mixed)!.text).toBe("CI/CD – SourceCraft отклонил ваш токен доступа. Безопасность – у вашего токена нет прав на эти данные репозитория.");
+    expect(lockedView(mixed)!.text).toBe(
+      "CI/CD видна только участникам репозитория. SourceCraft отклонил ваш токен – обновите его в Настройках. Безопасность видна только участникам репозитория, а у вашего токена к ним нет доступа.",
+    );
   });
 
   test("полный доступ: плашки закрытых нет, полоса Repo Health Score с 6 категориями и новыми тонами", () => {

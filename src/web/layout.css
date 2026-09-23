@@ -514,6 +514,12 @@ body {
   margin: var(--g-spacing-1) 0 var(--g-spacing-4);
 }
 
+/* круг 4 (2): отступ держится и внутри карточки — селектор специфичнее
+ * стилей `Text`, которые обнуляли поле у h2 */
+.rh-section-card > .rh-section__title.g-text {
+  margin-block: var(--g-spacing-1) var(--g-spacing-4);
+}
+
 .rh-card-head {
   margin-bottom: var(--g-spacing-4);
 }
@@ -948,6 +954,13 @@ button.rh-category:focus-visible {
   width: 80px;
 }
 
+/* круг 4: на телефоне полоса короче — строке репозитория нужно место */
+.rh-score-cell__bar_narrow {
+  flex-basis: 48px;
+  width: 48px;
+  margin-inline-end: var(--g-spacing-2);
+}
+
 .rh-score-cell__bar .g-progress,
 .rh-score-cell__bar .g-progress__stack {
   height: 8px;
@@ -1178,8 +1191,9 @@ button.rh-category:focus-visible {
  * «ожидаемый эффект» строкой над плашкой прироста. */
 .rh-rec {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto;
-  gap: var(--g-spacing-2) var(--g-spacing-3);
+  /* круг 4 (5): текст ближе к номеру — колонка номера 16px, зазор 8px */
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  gap: var(--g-spacing-2);
   align-items: start;
 }
 
@@ -1562,6 +1576,15 @@ button.rh-category:focus-visible {
   vertical-align: baseline;
 }
 
+/* круг 4: кнопка предупреждения о токене — по ширине текста, зазор над ней 8px */
+.rh-token-notice {
+  --g-alert-actions-margin: var(--g-spacing-2);
+}
+
+.rh-token-notice__action {
+  align-self: flex-start;
+}
+
 /* круг 3 (10): иконка предупреждения о токене — синим */
 .rh-info-icon {
   color: var(--g-color-text-info);
@@ -1832,21 +1855,6 @@ button.rh-category:focus-visible {
   font-size: var(--g-text-body-short-font-size);
   line-height: var(--g-text-body-short-line-height);
   white-space: nowrap;
-}
-
-/* 5a: три канала одной плашкой; состояние — яркостью иконки, без зеленого
-   (круг 4): есть доступ — светло-серый, нет/неизвестно — серый */
-.rh-access {
-  gap: 6px;
-}
-
-.rh-access__icon_yes {
-  color: var(--g-color-text-primary);
-}
-
-.rh-access__icon_no,
-.rh-access__icon_unknown {
-  color: var(--g-color-text-hint);
 }
 
 /* круг 4 (замечание 4): счетчик отделен от слова — шаг и цвет hint, иначе

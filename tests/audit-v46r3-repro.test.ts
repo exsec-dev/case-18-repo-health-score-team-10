@@ -13,7 +13,8 @@ describe("В4.6 круг 3: рейтинг", () => {
     const rating = web("Rating.tsx");
     const cell = rating.slice(rating.indexOf("function ScoreCell"), rating.indexOf("function CategoryCell"));
     const css = web("layout.css");
-    expect(cell).toContain('className="rh-score-cell__bar"');
+    // круг 4 части 2: на телефоне полоса короче (`_narrow`), на таблице — прежняя 80px
+    expect(cell).toContain('narrow ? "rh-score-cell__bar rh-score-cell__bar_narrow" : "rh-score-cell__bar"');
     expect(cell).toContain("scoreColor(item.healthcraftIndex)");
     expect(cell).toContain('<Flex gap={0} alignItems="center"');
     expect(css).toMatch(/\.rh-score-cell__bar\s*\{[^}]*flex:\s*0 0 80px[^}]*width:\s*80px/);

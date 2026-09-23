@@ -246,7 +246,8 @@ describe("П3: причина замка — одно правило для по
     expect(view).toContain("fullScorePath(auth, [card.access.cicd, card.access.appsec])");
     expect(format).toMatch(/export function fullScorePath[\s\S]{0,700}lockReasonShort\(accesses, auth\)/);
     // круг 2 (Т3): причина зрителя с токеном — тот же `ACCESS_LOCK_SHORT`
-    expect(view).toContain("ACCESS_LOCK_SHORT[r as keyof typeof ACCESS_LOCK_SHORT]");
+    // круг 4 (3): у зрителя с токеном — «только участникам репозитория» и причина (`LOCKED_WHY`)
+    expect(view).toContain("LOCKED_WHY[r as keyof typeof LOCKED_WHY]");
     expect(readFileSync(join(import.meta.dir, "..", "src", "report", "sections.ts"), "utf8")).toContain("lockedCategoryText(cat.locked, card.viewer?.auth)");
     expect(webSrc("RepoPage.tsx")).not.toContain("accessLockShort(cat.locked)");
   });
