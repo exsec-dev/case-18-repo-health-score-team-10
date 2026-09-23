@@ -559,14 +559,14 @@ function CardSlots() {
  */
 const INDEX_HELP =
   "Публичная оценка по 4 категориям: документация, активность, задачи и состояние кода. " +
-  "Считается для всех открытых репозиториев и является основой общего рейтинга";
+  "Считается для всех открытых репозиториев и является основой общего рейтинга.";
 
 /** круг 2 (Е10): «Место в рейтинге» в паспорте анализа — в одну строку; мера общая (У27) */
 const ASIDE_NAME_WIDTH = DEFINITION_NAME_WIDTH;
 
 const FULL_HELP =
   "Рассчитывается по 6 категориям: 4 категориям HealthCraft Index, а также CI/CD и Безопасности. " +
-  "Показатель доступен только для репозиториев, к которым у вас есть доступ";
+  "Показатель доступен только для репозиториев, к которым у вас есть доступ.";
 
 /** «Данные собраны» паспорта анализа (А8): ok — «полностью», partial — «частично», прочее — словом статуса. */
 function collectedText(status: string): string {
@@ -813,7 +813,8 @@ function MetricHelp({ text, name }: { text: string; name: typeof INDEX | typeof 
   return (
     <Flex direction="column" gap={2}>
       <Text>{text}</Text>
-      <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH} className="rh-weights">
+      {/* список на всю ширину подсказки: отточие тянется, вес — у правого края */}
+      <DefinitionList responsive className="rh-weights">
         {metricWeights(name).map((w) => (
           <DefinitionList.Item key={w.key} name={w.title}>
             {w.weight}
