@@ -106,7 +106,8 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
     const notice = slice("function TokenNotice", "\nexport function MePage");
     expect({
       banner: section.includes("<TokenNotice hasPat={hasPat} />"),
-      oneLine: /layout="horizontal"/.test(notice) && /title="Добавьте персональный токен доступа SourceCraft"/.test(notice),
+      // круг 3 (10): кнопка под текстом (без `layout="horizontal"`), иконка синим
+      oneLine: !/layout="horizontal"/.test(notice) && /rh-info-icon/.test(notice) && /title="Добавьте персональный токен доступа SourceCraft"/.test(notice),
       link: /<Button view="normal" size="m" \{\.\.\.linkProps\("\/settings"\)\}>\s*Перейти в Настройки/.test(notice),
       beforeList: section.indexOf("<TokenNotice") < section.indexOf('<ul className="rh-repo-list">'),
       notToast: !/toaster\.add\([^)]*токен/.test(section),

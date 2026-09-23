@@ -72,6 +72,15 @@ const SETTINGS_CRUMBS = [{ text: "Настройки" }];
  * Теперь view и size общие для всех, тема — по смыслу: ошибка (`danger`) или
  * подсказка, что делать дальше (`info`, плашка про токен П3.3).
  */
+/** Название раздела SourceCraft в инструкции — серым тегом (круг 3, 12). */
+function UiTag({ children }: { children: ReactNode }) {
+  return (
+    <Label theme="unknown" size="xs" className="rh-ui-tag">
+      {children}
+    </Label>
+  );
+}
+
 /** Инструкция SourceCraft по персональному токену (Е18). */
 const PAT_DOCS_URL = "https://sourcecraft.dev/portal/docs/ru/sourcecraft/security/pat";
 
@@ -98,11 +107,11 @@ function CabinetAlert({
 function TokenNotice({ hasPat }: { hasPat: boolean }) {
   if (hasPat) return null;
   return (
+    // круг 3 (10): иконка ключа — синим (цвет info-темы), кнопка — под текстом
     <Alert
       theme="info"
       view="outlined"
-      layout="horizontal"
-      icon={<Icon data={Key} size={18} />}
+      icon={<Icon data={Key} size={18} className="rh-info-icon" />}
       title="Добавьте персональный токен доступа SourceCraft"
       message="С ним откроются CI/CD и Безопасность и анализ своих репозиториев."
       actions={
@@ -408,20 +417,24 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
                 документации SourceCraft (названия разделов — жирным), важное —
                 отдельной плашкой, полная инструкция — ссылкой */}
             <Flex direction="column" gap={2}>
-              <Text variant="subheader-1">Как получить токен</Text>
+              {/* круг 3 (11): «Как получить токен? Инструкция SourceCraft» — одной строкой */}
+              <Text variant="subheader-1">
+                Как получить токен?{" "}
+                <Link href={PAT_DOCS_URL} target="_blank" rel="noopener noreferrer">
+                  Инструкция SourceCraft
+                </Link>
+              </Text>
+              {/* круг 3 (12): названия разделов SourceCraft — серыми тегами, не жирным */}
               <ol className="rh-howto">
                 <li>
-                  В SourceCraft нажмите <b>Домой</b> и откройте <b>Доступ → Персональные токены доступа</b>.
+                  В SourceCraft нажмите <UiTag>Домой</UiTag> и откройте <UiTag>Доступ → Персональные токены доступа</UiTag>.
                 </li>
                 <li>
-                  Нажмите <b>Сгенерировать новый токен</b> и выберите репозитории.
+                  Нажмите <UiTag>Сгенерировать новый токен</UiTag> и выберите репозитории.
                 </li>
                 <li>Скопируйте токен и вставьте его в поле ниже.</li>
               </ol>
               <Alert theme="warning" view="filled" size="s" message="Токен показывается один раз. Перед сохранением мы проверим его в SourceCraft." />
-              <Link href={PAT_DOCS_URL} target="_blank" rel="noopener noreferrer">
-                Инструкция SourceCraft
-              </Link>
             </Flex>
             {tokenForm("Персональный токен доступа SourceCraft", "Проверить и сохранить")}
           </Flex>

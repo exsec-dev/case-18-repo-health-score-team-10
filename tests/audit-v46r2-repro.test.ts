@@ -494,7 +494,12 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
     // (`fullScorePath`, одна копия с отчетом), «Настройках» в ней — ссылка.
     expect({
       coverageWord: figure.includes("Покрытие: {fmtCoverage(coverage)}"),
-      coverageInAside: /name=\{full \? "Покрытие HealthCraft Index" : "Покрытие"\} note=\{coverageHelp\}/.test(aside),
+      // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (круг 3 части 2, 9): у одного показателя — строка
+      // «Покрытие» с подсказкой; у двух — подзаголовок «Покрытие» с подсказкой и
+      // строки по именам показателей (длинные имена ломали колонку имени)
+      coverageInAside:
+        /name="Покрытие" note=\{coverageHelp\}/.test(aside) &&
+        /<DefinitionList\.Item name="HealthCraft Index">[\s\S]{0,200}<DefinitionList\.Item name="Repo Health Score">/.test(aside),
       oldCoverageWord: figure.includes("данных хватило"),
       chipLikeAside: /scoreLabelTheme\(total\)\} size="s"/.test(figure),
       // блок не схлопывается в метку: заголовок, путь по типу зрителя и

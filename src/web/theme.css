@@ -55,7 +55,9 @@
   --rh-cat-security: #ff6fae;
   --rh-cat-activity: #9d6bff;
   --rh-cat-issues: #ff9f43;
-  --rh-cat-code: #6f7ad3;
+  --rh-cat-code: #d946ef;
+  --rh-code-bg: #111111;
+  --rh-code-text: #e8e8e8;
 
   --g-color-base-background: #343434;
   --g-color-base-brand: #fff;
@@ -204,7 +206,9 @@
   --rh-cat-security: #ff6fae;
   --rh-cat-activity: #9d6bff;
   --rh-cat-issues: #ff9f43;
-  --rh-cat-code: #6f7ad3;
+  --rh-cat-code: #d946ef;
+  --rh-code-bg: #111111;
+  --rh-code-text: #e8e8e8;
 
   --g-color-base-background: #fff;
   --g-color-base-brand: #000;

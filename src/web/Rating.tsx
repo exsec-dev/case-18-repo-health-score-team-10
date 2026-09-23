@@ -444,7 +444,7 @@ function HowCountedLink() {
         showAside(aside);
       }}
     >
-      Как считается
+      Как считается?
     </Link>
   );
 }

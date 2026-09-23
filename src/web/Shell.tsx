@@ -466,6 +466,7 @@ export function Page({ crumbs, actions, aside, asideDrawer = false, asideColumnF
    */
   const wide = useMediaQuery(`(min-width: ${asideColumnFrom}px)`);
   const [asideOpen, setAsideOpen] = useState(false);
+  const phone = useMediaQuery("(max-width: 767px)");
   const asideInDrawer = (mode === "fill" || asideDrawer) && !wide && aside !== undefined;
 
   const barActions =
@@ -475,10 +476,14 @@ export function Page({ crumbs, actions, aside, asideDrawer = false, asideColumnF
         {actions}
         {/* В4.9 ч.2 (А9): кнопка с подписью — иконка без слова не находилась */}
         {asideInDrawer && (
-          <Button view="flat" size="m" className="rh-aside-btn" onClick={() => setAsideOpen(true)} aria-label="Как считается">
-            <Icon data={CircleInfo} size={16} />
-            {/* на телефоне подпись прячется (layout.css): строке действий не хватает ширины */}
-            <span className="rh-aside-btn__label">Как считается</span>
+          // Круг 3 части 2 (1, 2): подпись — вопросом; на телефоне кнопка —
+          // только иконка в слоте `Button.Icon`: скрытая подпись оставляла
+          // внутри кнопки пустое место справа
+          <Button view="flat" size="m" className="rh-aside-btn" onClick={() => setAsideOpen(true)} aria-label="Как считается?">
+            <Button.Icon side={phone ? undefined : "start"}>
+              <Icon data={CircleInfo} size={16} />
+            </Button.Icon>
+            {!phone && "Как считается?"}
           </Button>
         )}
       </Flex>
@@ -527,7 +532,7 @@ export function Page({ crumbs, actions, aside, asideDrawer = false, asideColumnF
       </div>
 
       {asideInDrawer && (
-        <Drawer open={asideOpen} onOpenChange={setAsideOpen} placement="right" size={320} aria-label="Как считается">
+        <Drawer open={asideOpen} onOpenChange={setAsideOpen} placement="right" size={320} aria-label="Как считается?">
           <div className="rh-drawer">{aside}</div>
         </Drawer>
       )}

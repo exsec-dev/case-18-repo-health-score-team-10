@@ -127,7 +127,9 @@ describe("П3: кабинет «Мои репозитории»", () => {
   test("П3.4 → Е17/Е18: Alert — обертка и 2 места с особым видом", () => {
     const alerts = me().match(/<Alert\b[^>]*/g) ?? [];
     expect(alerts.length).toBe(3);
-    expect(me()).toContain('layout="horizontal"');
+    // круг 3 (10): кнопка под текстом — горизонтальной раскладки нет, иконка — синим
+    expect(me()).not.toContain('layout="horizontal"');
+    expect(me()).toContain('className="rh-info-icon"');
     expect(me()).toMatch(/<Alert theme="warning" view="filled" size="s" message="Токен показывается один раз/);
   });
 

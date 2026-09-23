@@ -620,14 +620,9 @@ function ScoreAside({
                 {score.rank !== null && score.rankedTotal ? `#${fmtCount(score.rank)} из ${fmtCount(score.rankedTotal)}` : "—"}
               </DefinitionList.Item>
             )}
-            {score && (
-              <DefinitionList.Item name={full ? "Покрытие HealthCraft Index" : "Покрытие"} note={coverageHelp}>
+            {score && !full && (
+              <DefinitionList.Item name="Покрытие" note={coverageHelp}>
                 {fmtCoverage(score.indexCoverage)}
-              </DefinitionList.Item>
-            )}
-            {score && full && (
-              <DefinitionList.Item name="Покрытие Repo Health Score" note={coverageHelp}>
-                {fmtCoverage(score.repoHealthCoverage ?? 0)}
               </DefinitionList.Item>
             )}
             {scan && scan.status !== "running" && <DefinitionList.Item name="Данные собраны">{collectedText(scan.status)}</DefinitionList.Item>}
@@ -635,6 +630,23 @@ function ScoreAside({
           </DefinitionList>
         ) : analysis !== null || foreignRunning ? null : (
           <Text color="secondary">Анализа еще не было</Text>
+        )}
+        {/* Круг 3 части 2 (9): у двух показателей покрытие — подзаголовком с
+            подсказкой и строками «показатель – доля»; длинные имена «Покрытие
+            HealthCraft Index» в колонке имени ломались на 3 строки */}
+        {score && full && (
+          <Flex direction="column" gap={1} className="rh-aside-sub">
+            <Flex gap={1} alignItems="center">
+              <Text color="secondary">Покрытие</Text>
+              <HelpMark iconSize="s" aria-label="Что такое покрытие">
+                {coverageHelp}
+              </HelpMark>
+            </Flex>
+            <DefinitionList nameMaxWidth={ASIDE_NAME_WIDTH}>
+              <DefinitionList.Item name="HealthCraft Index">{fmtCoverage(score.indexCoverage)}</DefinitionList.Item>
+              <DefinitionList.Item name="Repo Health Score">{fmtCoverage(score.repoHealthCoverage ?? 0)}</DefinitionList.Item>
+            </DefinitionList>
+          </Flex>
         )}
       </AsideSection>
 
@@ -861,7 +873,8 @@ function Categories({ card, view }: { card: Card; view: CardView }) {
  */
 function LockedCategories({ text }: { text: string }) {
   // круг 2 (Т3): одно предложение без заголовка
-  return <Alert theme="info" view="outlined" size="s" className="rh-locked-note" message={text} />;
+  // круг 3 (5): иконка — по центру однострочного текста
+  return <Alert theme="info" view="outlined" size="s" align="center" className="rh-locked-note" message={text} />;
 }
 
 function CategoryRow({ category: c, card, defaultOpen = false }: { category: CategoryView; card: Card; defaultOpen?: boolean }) {
@@ -934,10 +947,11 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
               `auto` и подпись не встала бы над значениями. */}
           {/* круг 2 (Е6): вес показателя внутри категории — та же колонка, что в
               разборе PDF (`submetricWeightText`, одна копия); порядок колонок — как в PDF */}
+          {/* круг 3 (7): «Вес» перед «Балл» — на карточке; разбор PDF прежний */}
           <div className="rh-subrows__head">
             <span>Значение</span>
-            <span>Балл</span>
             <span>Вес</span>
+            <span>Балл</span>
           </div>
           {subs.map(([subKey, sub]) => (
             <div key={subKey} className="rh-subrow">
@@ -985,6 +999,9 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
                   знак, каким продукт показывает отсутствующее число везде
                   (`fmtScore`), и он никогда не читается нулём (закон 2). Что
                   именно отсутствует, говорят подсказка и цвет имени. */}
+              <Text className="rh-subrow__score" color="secondary">
+                {submetricWeightText(key, subKey)}
+              </Text>
               {displayOnly(key, subKey) || sub.score === null ? (
                 <Text
                   className="rh-subrow__score"
@@ -996,9 +1013,6 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
               ) : (
                 <Text className="rh-subrow__score">{fmtSubmetric(sub.score)}</Text>
               )}
-              <Text className="rh-subrow__score" color="secondary">
-                {submetricWeightText(key, subKey)}
-              </Text>
             </div>
           ))}
         </div>

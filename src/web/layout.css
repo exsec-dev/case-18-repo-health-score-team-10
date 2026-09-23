@@ -510,7 +510,8 @@ body {
  * паддинга карточки, снизу тот же шаг, что между строками. */
 .rh-section__title {
   display: block;
-  margin: var(--g-spacing-1) 0 var(--g-spacing-2);
+  /* круг 3 (4): заголовок не прижат к содержимому */
+  margin: var(--g-spacing-1) 0 var(--g-spacing-4);
 }
 
 .rh-card-head {
@@ -958,7 +959,8 @@ button.rh-category:focus-visible {
  * встают на одну вертикаль. Без меры чип уезжал бы к краю колонки. */
 .rh-score-figure__value {
   align-items: baseline;
-  max-width: 360px;
+  /* круг 3 (6): ряд во всю ширину плашки — место в рейтинге у правого края полосы */
+  width: 100%;
 }
 
 /* Доводка 21.09: место в рейтинге — не плашка, а текст. Плашка равняла его
@@ -1148,10 +1150,6 @@ button.rh-category:focus-visible {
     justify-self: start;
   }
 
-  /* кнопка панели «Как считается» — только иконкой: подпись не помещается */
-  .rh-aside-btn__label {
-    display: none;
-  }
 
 
   /* рекомендация: номер · текст, эффект — строкой под текстом */
@@ -1193,7 +1191,12 @@ button.rh-category:focus-visible {
 
 .rh-rec__n {
   font-variant-numeric: tabular-nums;
-  text-align: right;
+  /* круг 3 (8): номер — ровно под заголовком «Рекомендации» */
+  text-align: left;
+}
+
+.rh-recs .rh-rec.rh-list__item {
+  padding-inline: 0;
 }
 
 .rh-rec__body {
@@ -1225,6 +1228,11 @@ button.rh-category:focus-visible {
   max-height: 280px;
   margin: 0;
   overflow: auto;
+  /* круг 3 (8): исходные данные — на черной подложке со скруглением */
+  padding: var(--g-spacing-2) var(--g-spacing-3);
+  border-radius: var(--g-border-radius-m);
+  background: var(--rh-code-bg);
+  color: var(--rh-code-text);
 }
 
 .rh-proof__toggle,
@@ -1524,9 +1532,18 @@ button.rh-category:focus-visible {
 
 /* Круг 2 части 2 (Е15): фон плиток сводки — светлый серый, рамка —
  * только у выбранной (ее рисует сам `Card type="selection"`). */
+/* круг 3 (9): блок «Покрытие» в паспорте — отбит от списка выше */
+.rh-aside-sub {
+  margin-top: var(--g-spacing-3);
+}
+
+/* круг 3 (10): серый фон — у всех плиток, выбранная выделена только рамкой */
+.rh-summary__tile.g-card {
+  background: var(--g-color-base-generic);
+}
+
 .rh-summary__tile.g-card:not(.g-card_selected) {
   border-color: transparent;
-  background: var(--g-color-base-generic);
 }
 
 .rh-summary__tile.g-card:not(.g-card_selected):hover {
@@ -1537,7 +1554,17 @@ button.rh-category:focus-visible {
 .rh-howto {
   margin: 0;
   padding-inline-start: var(--g-spacing-5);
-  line-height: 22px;
+  line-height: 26px;
+}
+
+/* круг 3 (12): серый тег посреди строки — по базовой линии текста */
+.rh-ui-tag {
+  vertical-align: baseline;
+}
+
+/* круг 3 (10): иконка предупреждения о токене — синим */
+.rh-info-icon {
+  color: var(--g-color-text-info);
 }
 
 /* Е16: ссылка в пустом состоянии «Заданий» не рвется переносом */

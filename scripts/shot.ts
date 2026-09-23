@@ -469,6 +469,7 @@ async function shoot(
 
   // В4.9 ч.2 (А9, Б2): ниже 1440 правая панель — в выезжающей панели по
   // кнопке «Как считается» (у рейтинга — и по ссылке в подзаголовке).
+  // Круг 3 части 2: подпись — вопросом, на телефоне кнопка без подписи — ищем по aria-label.
   // Проверяется действием: клик → панель в DOM → снимок → Escape.
   if (drawer && viewport.width < wideMin) {
     const openedBy = async (expression: string, label: string, shotName: string | null): Promise<void> => {
@@ -490,13 +491,13 @@ async function shoot(
       for (let i = 0; i < 20 && (await evaluate<number>("document.querySelectorAll('.rh-drawer').length")) > 0; i++) await delay(100);
     };
     await openedBy(
-      "(() => { const b = [...document.querySelectorAll('.rh-actionbar button')].find((n) => n.textContent?.trim() === 'Как считается'); if (!b) return 0; b.click(); return 1; })()",
+      "(() => { const b = document.querySelector('.rh-actionbar button.rh-aside-btn'); if (!b) return 0; b.click(); return 1; })()",
       "Drawer по кнопке «Как считается»",
       `${name}@${viewport.width}${suffix}-drawer.png`,
     );
     if (name === "rating") {
       await openedBy(
-        "(() => { const a = [...document.querySelectorAll('.rh-page__main a')].find((n) => n.textContent?.trim() === 'Как считается'); if (!a) return 0; a.click(); return 1; })()",
+        "(() => { const a = [...document.querySelectorAll('.rh-page__main a')].find((n) => n.textContent?.trim() === 'Как считается?'); if (!a) return 0; a.click(); return 1; })()",
         "Drawer по ссылке «Как считается»",
         null,
       );
