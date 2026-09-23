@@ -18,7 +18,9 @@ const between = (text: string, from: string, to: string): string => {
 describe("К9.12: «Вклад категорий в оценку» на карточке — тот же расчет, что в отчете", () => {
   test("карточка и отчет зовут одну функцию и одни подписи (format.ts)", () => {
     const band = between(src("web/RepoPage.tsx"), "function ContributionBand", "\n}\n");
-    const report = src("report/build.ts");
+    // В4.9 ч.2 (предпосылка круга 1): вклады и основания отчета переехали в
+    // чистый `report/sections.ts` — «отчет» здесь это build.ts вместе с ним
+    const report = src("report/build.ts") + src("report/sections.ts");
     // Гейт 22.09 (В9): строку итога под шкалой («Сильнее всего итог снижают…»)
     // из документа убрали, на карточке она осталась — `lossParts` теперь
     // только у карточки; расчет вкладов и подписи по-прежнему общие.
@@ -57,7 +59,7 @@ describe("К9.13: закрытая категория — одна фраза н
     const page = src("web/RepoPage.tsx");
     expect(page).toContain("lockedCategoryText(cat.locked, card.viewer?.auth)");
     expect(page).toContain("${NOT_IN_SCORE}");
-    expect(src("report/build.ts")).toContain("lockedCategoryText(cat.locked, card.viewer?.auth)");
+    expect(src("report/sections.ts")).toContain("lockedCategoryText(cat.locked, card.viewer?.auth)");
     expect(page).not.toContain("Категория не снизила Score");
   });
 });

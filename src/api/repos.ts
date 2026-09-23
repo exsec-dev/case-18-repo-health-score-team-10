@@ -17,17 +17,10 @@ import { INDEX_WEIGHTS, SCORE_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, ty
 
 // ---------- общие формы ----------
 
-export const CATEGORY_TITLES: Record<CategoryKey, string> = {
-  documentation: "Документация",
-  cicd: "CI/CD",
-  security: "Безопасность",
-  activity: "Активность",
-  issues: "Задачи",
-  code: "Состояние кода",
-};
-
-/** Порядок категорий на всех поверхностях — вес модели, затем ключ. */
-export const CATEGORY_ORDER: CategoryKey[] = ["documentation", "cicd", "security", "activity", "issues", "code"];
+// В4.9, часть 2 гейта: значения переехали в чистый модуль (их берет и бандл
+// web через `src/report/sections.ts`); здесь — реэкспорт, формы API прежние.
+import { CATEGORY_ORDER, CATEGORY_TITLES } from "../report/categories";
+export { CATEGORY_ORDER, CATEGORY_TITLES };
 
 /** Путь к методике в репозитории (строка, не URL): футер и MD ссылаются сюда. */
 export const METHODOLOGY_PATH = "reports/2026-09-15-m2-methodology-draft.md";
