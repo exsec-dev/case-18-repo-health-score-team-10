@@ -34,6 +34,17 @@ export const FULL = "Repo Health Score";
 /** Публичная четверка HealthCraft Index в порядке категорий. */
 export const PUBLIC: CategoryKey[] = CATEGORY_ORDER.filter((k) => k in INDEX_WEIGHTS);
 
+/**
+ * Номинальные веса категорий показателя — подсказка к числу на карточке
+ * (завершающие правки В4.9, пункт 2): пользователь сам проверяет расчет.
+ * Та же пара словарей, что строка «Веса …» раздела «Как считается» отчета.
+ */
+export function metricWeights(name: typeof INDEX | typeof FULL): { key: CategoryKey; title: string; weight: string }[] {
+  const keys = name === INDEX ? PUBLIC : CATEGORY_ORDER;
+  const weightOf = (k: CategoryKey) => (name === INDEX ? INDEX_WEIGHTS[k as keyof typeof INDEX_WEIGHTS] : SCORE_WEIGHTS[k]);
+  return keys.map((key) => ({ key, title: CATEGORY_TITLES[key], weight: `${weightOf(key)}%` }));
+}
+
 // ---------- показатели и вклады (К9.1, К9.12) ----------
 
 export interface Metric {

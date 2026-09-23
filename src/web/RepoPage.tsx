@@ -77,7 +77,7 @@ import {
 import { useEffect, useState } from "react";
 import { COVERAGE_NULL_BELOW } from "../score/model";
 import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle } from "../report/submetrics";
-import { sourceWord, submetricWeightText } from "../report/sections";
+import { FULL, INDEX, metricWeights, sourceWord, submetricWeightText } from "../report/sections";
 import type { MetaResponse, RepoCard } from "./api";
 import { dataOf, mutateJson, useJson, useVisible } from "./api";
 import { cardView, type CardView, type CategoryView, type RecommendationView } from "./cardView";
@@ -561,8 +561,8 @@ const INDEX_HELP =
   "Публичная оценка по 4 категориям: документация, активность, задачи и состояние кода. " +
   "Считается для всех открытых репозиториев и является основой общего рейтинга";
 
-/** круг 2 (Е10): «Место в рейтинге» в паспорте анализа — в одну строку */
-const ASIDE_NAME_WIDTH = 150;
+/** круг 2 (Е10): «Место в рейтинге» в паспорте анализа — в одну строку; мера общая (У27) */
+const ASIDE_NAME_WIDTH = DEFINITION_NAME_WIDTH;
 
 const FULL_HELP =
   "Рассчитывается по 6 категориям: 4 категориям HealthCraft Index, а также CI/CD и Безопасности. " +
@@ -726,7 +726,7 @@ function ScoreBand({ card, view }: { card: Card; view: CardView }) {
             <Flex gap={1} alignItems="center">
               <Text color="secondary">Repo Health Score</Text>
               <HelpMark iconSize="s" aria-label="Что такое «Repo Health Score»">
-                {FULL_HELP}
+                <MetricHelp text={FULL_HELP} name={FULL} />
               </HelpMark>
             </Flex>
             {/* Закрытый показатель не схлопывается в метку (прием платформы):
@@ -803,13 +803,34 @@ function ContributionStrip({ bar }: { bar: CardView["contributions"][number] | n
   );
 }
 
+/**
+ * Подсказка показателя (завершающие правки В4.9, пункт 2): определение и веса
+ * категорий списком «Документация ····· 23%» — чтобы расчет можно было
+ * проверить самому. Веса номинальные и одинаковы для всех репозиториев,
+ * поэтому у закрытого Repo Health Score они тоже видны.
+ */
+function MetricHelp({ text, name }: { text: string; name: typeof INDEX | typeof FULL }) {
+  return (
+    <Flex direction="column" gap={2}>
+      <Text>{text}</Text>
+      <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH} className="rh-weights">
+        {metricWeights(name).map((w) => (
+          <DefinitionList.Item key={w.key} name={w.title}>
+            {w.weight}
+          </DefinitionList.Item>
+        ))}
+      </DefinitionList>
+    </Flex>
+  );
+}
+
 function ScoreFigure({ title, help, total, rank, rankedTotal }: { title: string; help: string; total: number | null; rank?: number | null; rankedTotal?: number | null }) {
   return (
     <Flex direction="column" gap={1} style={{ minWidth: 0 }}>
       <Flex gap={1} alignItems="center">
         <Text color="secondary">{title}</Text>
         <HelpMark iconSize="s" aria-label={`Что такое «${title}»`}>
-          {help}
+          <MetricHelp text={help} name={title === INDEX ? INDEX : FULL} />
         </HelpMark>
       </Flex>
       {total === null ? (
@@ -1132,7 +1153,7 @@ function RecommendationRow({ item }: { item: RecommendationView }) {
         </Text>
         <Flex gap={2} wrap alignItems="center" className="rh-rec__basis">
           <Text variant="body-short" color="secondary">
-            Причина:
+            Показатель:
           </Text>
           <Popover trigger="click" placement={["bottom-start", "top-start"]} content={<FactProof item={item} />}>
             <Label theme="info" size="xs" interactive>

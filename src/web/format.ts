@@ -253,8 +253,12 @@ export function slugOf(org: string, repo: string): string {
   return `${org}/${repo}`;
 }
 
-/** Мера имени в `DefinitionList` — одна на все панели (У27: единый nameMaxWidth). */
-export const DEFINITION_NAME_WIDTH = 140;
+/**
+ * Мера имени в `DefinitionList` — одна на все панели (У27: единый nameMaxWidth).
+ * Завершающие правки В4.9 (3): 140 → 150 — «Версия методики» в панели рейтинга
+ * уходила на вторую строку; карточка уже жила на 150 своей константой.
+ */
+export const DEFINITION_NAME_WIDTH = 150;
 
 /** Категория для строки итога: имя и балл (null — категория без данных, в итог не идёт). */
 export interface SummaryCategory {

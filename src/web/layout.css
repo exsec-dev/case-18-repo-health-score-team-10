@@ -226,6 +226,11 @@ body {
   box-sizing: border-box;
 }
 
+/* веса категорий в подсказке показателя — плотным списком (завершающие правки В4.9, п.2) */
+.rh-weights {
+  --g-definition-list-item-gap: var(--g-spacing-1);
+}
+
 .rh-rail-user:hover {
   background: var(--g-color-base-simple-hover);
 }

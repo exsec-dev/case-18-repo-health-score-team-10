@@ -4,7 +4,8 @@
 // 21.09: число, названное местом или долей, закрывается тестом на данных.
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_QUERY, getRepoCard, listRepos, type ReposQuery } from "../src/api/repos";
-import { noRecommendationsKind, noRecommendationsText } from "../src/report/sections";
+import { metricWeights, noRecommendationsKind, noRecommendationsText } from "../src/report/sections";
+import { INDEX_WEIGHTS, SCORE_WEIGHTS } from "../src/score/model";
 import { renderRepoReport } from "../src/report/markdown";
 import { coverageLine as coverageLineRaw } from "../src/web/ratingParams";
 import { authErrorText, noScoreText, reportFileName } from "../src/web/format";
@@ -149,5 +150,19 @@ describe("Ф17: текст из адреса входа не печатаетс�
   test("только известные сообщения сервера — дословно", () => {
     expect(authErrorText("Я ID не ответил – попробуйте войти еще раз")).toBe("Вход не удался: Я ID не ответил – попробуйте войти еще раз");
     expect(authErrorText("Позвоните по номеру 8-800")).toBe("Вход не удался – попробуйте войти еще раз.");
+  });
+});
+
+// Завершающие правки В4.9 (пункт 2): веса в подсказках показателей = словари расчета
+describe("веса в подсказках показателей", () => {
+  test("HealthCraft Index — 4 категории, веса INDEX_WEIGHTS; Repo Health Score — 6, SCORE_WEIGHTS", () => {
+    const index = metricWeights("HealthCraft Index");
+    const full = metricWeights("Repo Health Score");
+    expect(index.map((w) => [w.key, w.weight])).toEqual(index.map((w) => [w.key, `${INDEX_WEIGHTS[w.key as keyof typeof INDEX_WEIGHTS]}%`]));
+    expect(index).toHaveLength(4);
+    expect(full.map((w) => [w.key, w.weight])).toEqual(full.map((w) => [w.key, `${SCORE_WEIGHTS[w.key]}%`]));
+    expect(full).toHaveLength(6);
+    const sum = (ws: { weight: string }[]) => ws.reduce((a, w) => a + Number.parseInt(w.weight, 10), 0);
+    expect([sum(index), sum(full)]).toEqual([100, 100]);
   });
 });
