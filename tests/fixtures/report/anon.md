@@ -205,7 +205,7 @@ HealthCraft Index считается по открытым данным – по
 | robot_ratio | 0 |
 | first_committed_at | 10:00 2 окт. 2025 |
 | last_committed_at | 10:00 10 сент. 2026 |
-| history_truncated_since | 15 авг. 2025 |
+| history_truncated_since | 16 авг. 2025 |
 
 `activity.git.timeline` – Активность, данные есть, история git, 12:00 16 сент. 2026
 
