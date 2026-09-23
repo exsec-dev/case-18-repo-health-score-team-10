@@ -215,7 +215,8 @@ async function run(): Promise<void> {
       name: "rating",
       url: `${base}/?sort=index&order=desc`,
       checks: {
-        "строк таблицы": "document.querySelectorAll('table tbody tr').length",
+        // В4.9 ч.2: на телефоне (375) рейтинг — список строк, а не таблица
+        "строк таблицы": "document.querySelectorAll('table tbody tr').length || document.querySelectorAll('.rh-page__main .rh-list__item').length",
         // В4.6 круг 2 (Р5): заголовок — «Рейтинг здоровья ОТКРЫТЫХ репозиториев»
         "заголовок рейтинга": "document.body.innerText.includes('Рейтинг здоровья открытых репозиториев') ? 1 : 0",
         "колонка HealthCraft Index": "document.body.innerText.includes('HealthCraft Index') ? 1 : 0",
@@ -287,6 +288,10 @@ async function run(): Promise<void> {
           // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А3): полоса вклада — под числами
           // (было `.rh-contrib-band` в правой панели)
           "вклад категорий под числами (А3)": `(() => { if (!${scored}) return 1; return document.querySelectorAll('.rh-score-band .rh-contrib_card').length > 0 ? 1 : 0; })()`,
+          // В4.9 ч.2 (А9, крайний случай): кнопки строки действий видны целиком —
+          // длинный слаг в крошках выталкивал «Отчет» за край окна
+          "кнопки действий в окне":
+            "(() => { const bs = [...document.querySelectorAll('.rh-actionbar button')]; return bs.every((b) => b.getBoundingClientRect().right <= window.innerWidth + 1) ? 1 : 0; })()",
           // В4.9 ч.2 (А4): плашка уровня не растянута — уже своего трека (150px)
           "плашки уровня не растянуты (А4)":
             "(() => { const w = [...document.querySelectorAll('.rh-category__word')].filter((n) => n.getBoundingClientRect().width > 0); return w.every((n) => n.getBoundingClientRect().width < 149) ? 1 : 0; })()",
