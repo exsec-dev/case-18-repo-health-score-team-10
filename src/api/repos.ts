@@ -373,6 +373,12 @@ export interface CardRepo {
   logoUrl: string | null;
   languageColor: string | null;
   webUrl: string;
+  /**
+   * В4.9 ч.2 (блок Д, разрешение владельца 23.09): видимость SourceCraft —
+   * плашка у имени на карточке. Все 3 значения `Repository.Visibility` и
+   * явное «неизвестно» (мусор или NULL в строке) — `visibilityOf`.
+   */
+  visibility: "public" | "internal" | "private" | "unknown";
 }
 
 export interface CardMarkers {
@@ -729,6 +735,7 @@ export function getRepoCard(
     languageColor: r.language_color,
     // колонки в схеме нет — шаблон платформы, заводить колонку ради него незачем
     webUrl: `https://sourcecraft.dev/${r.org_slug}/${r.repo_slug}`,
+    visibility: visibilityOf(r.visibility),
   };
 
   // Правило карточки (круг 2, решение владельца 17.09; TASK.md §2 «Аудит
