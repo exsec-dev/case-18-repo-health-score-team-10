@@ -345,7 +345,33 @@ function FavoriteNotInCatalog({ org, repo, fallback, onRetry, onSection }: { org
       </Page>
     );
   }
-  const own = fav.access?.own === true;
+  return <FavoriteNotInCatalogState org={org} repo={repo} own={fav.access?.own === true} crumbs={crumbs} onRetry={onRetry} />;
+}
+
+/**
+ * Состояние «в избранном, но не в каталоге» (сценарий владельца 25.09): свой —
+ * «Запустить анализ» прямо здесь (сервер перепроверяет права живьем), итог
+ * задания перечитывает страницу; идет анализ — без кнопки; чужой — объяснение.
+ */
+function FavoriteNotInCatalogState({ org, repo, own, crumbs, onRetry }: { org: string; repo: string; own: boolean; crumbs: Crumb[]; onRetry: () => void }) {
+  const slug = `${org}/${repo}`;
+  const start = useStartAnalysis(org, repo);
+  const analysis = useAnalysis();
+  const live = analysis.live(slug);
+  useAnalysisFinished((jobs) => {
+    if (jobs.some((j) => j.slug === slug)) onRetry();
+  });
+  if (live !== null) {
+    return (
+      <Page crumbs={crumbs}>
+        <EmptyState
+          icon={SquareListUl}
+          title={live.phase === "queued" ? "Анализ запланирован" : "Идет анализ"}
+          description={live.phase === "queued" ? "Заявка стоит в очереди – ее возьмут в работу, и здесь появится итог." : "Данные собираются – итог появится здесь."}
+        />
+      </Page>
+    );
+  }
   return (
     <Page crumbs={crumbs}>
       <EmptyState
@@ -353,10 +379,14 @@ function FavoriteNotInCatalog({ org, repo, fallback, onRetry, onSection }: { org
         title="Оценки пока нет"
         description={
           own
-            ? "Репозиторий в вашем избранном, но анализа еще не было. Запустите его из «Избранного» – итог появится здесь."
-            : "Репозиторий в вашем избранном, но сервис его не анализировал: анализ запускается только для своих репозиториев (с правами на CI/CD или Безопасность), а закрытые репозитории в рейтинг не входят."
+            ? "Репозиторий в вашем избранном, но анализа еще не было. Запустите его – итог появится здесь."
+            : "Репозиторий в вашем избранном, но сервис его не анализировал: анализ запускается только для своих репозиториев – у вашего токена нет доступа к коду этого репозитория."
         }
-        actions={[{ text: "К избранному", view: "normal", size: "l", href: "/me" }]}
+        actions={
+          own
+            ? [{ text: start.sending ? "Запускаем…" : "Запустить анализ", view: "action", size: "l", onClick: start.start }]
+            : [{ text: "К избранному", view: "normal", size: "l", href: "/me" }]
+        }
       />
     </Page>
   );

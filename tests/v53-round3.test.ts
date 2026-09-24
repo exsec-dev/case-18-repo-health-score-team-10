@@ -269,3 +269,15 @@ describe("В5.3: «свой» — и internal, видимый токену", () 
     expect(isOwnRepo({ ...base, repo: "granted", visibility: "unknown" })).toBe(false);
   });
 });
+
+// ---------- В5.3 (25.09): права, сохраненные до смены правила, читаются по текущему правилу ----------
+import { savedAccessWithCurrentRule } from "../src/api/me";
+
+describe("В5.3: «свой» в сохраненных правах пересчитывается при чтении", () => {
+  test("internal с кодом, сохраненный как own:false до 25.09, — теперь свой; чужой публичный — нет", () => {
+    expect(savedAccessWithCurrentRule({ clone: true, visibility: "internal", ci: false, appsec: false, own: false }).own).toBe(true);
+    expect(savedAccessWithCurrentRule({ clone: true, visibility: "public", ci: false, appsec: false, own: false }).own).toBe(false);
+    expect(savedAccessWithCurrentRule({ clone: false, visibility: "unknown", ci: null, appsec: null, own: false }).own).toBe(false);
+    expect(savedAccessWithCurrentRule({ clone: true, visibility: "public", ci: true, appsec: false, own: false }).own).toBe(true);
+  });
+});

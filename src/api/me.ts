@@ -807,7 +807,7 @@ export function listFavorites(db: import("bun:sqlite").Database, userId: number)
   return rows.map((row) => {
     let access: FavoriteAccess | null = null;
     try {
-      access = row.last_access ? (JSON.parse(row.last_access) as FavoriteAccess) : null;
+      access = row.last_access ? savedAccessWithCurrentRule(JSON.parse(row.last_access) as FavoriteAccess) : null;
     } catch {
       access = null;
     }
@@ -901,13 +901,26 @@ export function favoriteAccessOf(a: NormalizedAccess): FavoriteAccess {
   };
 }
 
+/**
+ * В5.3 (25.09, находка владельца): «свой» в сохраненных правах пересчитывается
+ * при чтении по ТЕКУЩЕМУ правилу `isOwnRepo` из сохраненных каналов — иначе
+ * запись, проверенная до смены правила (internal по коду стал «своим»), навсегда
+ * оставалась «чужой» и кнопки анализа не было. Каналы не пересчитываются: это
+ * факты проверки; правило — код.
+ */
+export function savedAccessWithCurrentRule(a: FavoriteAccess): FavoriteAccess {
+  const ch = (v: boolean | null | undefined): ChannelAccess => (v === true ? "granted" : v === false ? "denied" : "check-failed");
+  const own = isOwnRepo({ repo: a.clone ? "granted" : "denied", cicd: ch(a.ci), appsec: ch(a.appsec), visibility: a.visibility ?? "unknown" });
+  return { ...a, own };
+}
+
 function savedFavoriteAccess(db: Database, userId: number, org: string, repo: string): FavoriteAccess | null {
   const row = db.query("SELECT last_access FROM favorites WHERE user_id = ? AND org_slug = ? AND repo_slug = ?").get(userId, org, repo) as
     | { last_access: string | null }
     | null;
   if (!row?.last_access) return null;
   try {
-    return JSON.parse(row.last_access) as FavoriteAccess;
+    return savedAccessWithCurrentRule(JSON.parse(row.last_access) as FavoriteAccess);
   } catch {
     return null;
   }
