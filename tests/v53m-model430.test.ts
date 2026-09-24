@@ -21,6 +21,8 @@ import { categoryContributions, contributionsNote, fmtScore, noDataReason, round
 import { adjustmentText, whyText } from "../src/report/sections";
 import { submetricContext, submetricNote, submetricShownValue } from "../src/report/submetrics";
 import { NOW, healthyFacts } from "./score-fixtures";
+import { fixtureCard } from "./report-fixtures";
+import { renderRepoReport } from "../src/report/markdown";
 
 const DAY = 24 * 3600_000;
 const iso = (t: number): string => new Date(t).toISOString();
@@ -244,6 +246,20 @@ describe("Н11: плотность находок Security — по строка
   });
 });
 
+describe("Н11: отчет называет тот же делитель, что расчет", () => {
+  test("Н11: «N на M строк кода» — по source_loc у новых фактов", () => {
+    const { card, close } = fixtureCard("full");
+    try {
+      // дерево канального скана (tree.stats@channel) и публичное — оба нового сборщика
+      const evidence = card.evidence.map((e) => (e.key.startsWith("tree.stats") && e.status === "ok" ? { ...e, value: { ...(e.value as object), source_loc: 2500 } } : e));
+      const md = renderRepoReport({ ...card, evidence });
+      expect(md).toContain("= 19 на 2500 строк кода");
+    } finally {
+      close();
+    }
+  });
+});
+
 describe("Р3: потолок «Безопасности» при открытых находках и порядок рекомендаций", () => {
   const big = tree({ loc: 600_000, source_loc: 500_000 });
   test("Р3 (J7): 2 открытые critical на 500 тыс. строк — Безопасность не выше 40; high — не выше 69", () => {
@@ -297,6 +313,19 @@ describe("Н7: рекомендации — те же условия, что б�
     expect(ids(recommendFromFacts(noYaml, { delta: noDelta, issuesScore: 50, categoryScores: { cicd: 0 } })).filter((x) => x === "fix-red-runs" || x === "speed-up-pipeline")).toEqual([]);
     const withYaml = facts({ "cicd.runs": red });
     expect(ids(recommendFromFacts(withYaml, { delta: noDelta, issuesScore: 50, categoryScores: { cicd: 30 } }))).toEqual(expect.arrayContaining(["fix-red-runs", "speed-up-pipeline"]));
+  });
+
+  test("Н7 + Р2: при 0 закрытых задач (≥ 1 ч) советов по задачам с обещанием балла нет", () => {
+    const ok = facts({ "issues.stats": { open: 16, closed: 3, closed_instant: 3, closed_counted: 0, median_close_days: null, stale_90d: 9, fetched_count: 19 } });
+    expect(score(ok).categories.issues.score).toBe(6);
+    expect(ids(recommendFromFacts(ok, { delta: noDelta, issuesScore: 6, categoryScores: { issues: 6 } })).filter((x) => x === "reduce-stale-issues" || x === "speed-up-issue-close")).toEqual([]);
+  });
+
+  test("Н8: запуски видны, но все идут — CI-правило без числа (иначе Δ дала бы перенормировка)", () => {
+    const ok = facts({ "cicd.configs": { paths: [], has_ci_yaml: false, has_steps: false }, "cicd.runs": { runs_count: 0, runs_total: 4 } });
+    const rec = recommendFromFacts(ok, { delta: () => ({ delta: 9.6, reason: null }), issuesScore: 50 }).find((r) => r.ruleId === "ci-missing")!;
+    expect(rec.deltaScore).toBeNull();
+    expect(rec.expectedImpact).toBe("CI/CD: оценка появится с запусками");
   });
 
   test("Н7 (D11): CI заявлен, запуски видны, их 0 — совет «Запустите CI»", () => {

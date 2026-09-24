@@ -26,6 +26,7 @@ import type { Database } from "bun:sqlite";
 import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
 import { SCORE_WEIGHTS, CategoryKey, OLD_SHARE_MIN_BASE, SECRETS_CRITICAL_TOTAL_CAP } from "./model";
 import { compute, computeFromFacts, effectiveFacts, licensePresent, Scores } from "./compute";
+import { issuesClosedCounted } from "./derived";
 import { fmtDecimal, fmtScore, fmtSigned } from "../web/format";
 import { runOutcome } from "../collectors/run-status";
 
@@ -476,7 +477,11 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
   if (cicdCfg && !ciUnparsed && !(cicdCfg.has_ci_yaml === true && cicdCfg.has_steps === true)) {
     const hasYaml = cicdCfg.has_ci_yaml === true;
     const ruleId = hasYaml ? "ci-no-steps" : "ci-missing";
-    if (runsFact === undefined) {
+    // запуски видны, но все идут (ни одного завершенного) — CI после правки
+    // будет «нет данных», и число дала бы перенормировка, а не CI (P7 приемки)
+    const rp = runsFact as { runs_count?: unknown; runs_total?: unknown } | undefined;
+    const runsPending = rp !== undefined && rp.runs_count === 0 && typeof rp.runs_total === "number" && rp.runs_total > 0;
+    if (runsFact === undefined || runsPending) {
       // 4.3.0 (Н8, F10): запуски не видны — CI «нет данных» при любом конфиге,
       // и совет не обещает числа (раньше прирост давала перенормировка, а не CI)
       const texts = recommendationText(ruleId, recommendationParams(ruleId, ok, { reason: "no-runs", channel: "cicd" }))!;
@@ -546,9 +551,12 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
     const older = (todo.older_180d ?? 0) as number;
     if (total > 0 && older / Math.max(total, OLD_SHARE_MIN_BASE) >= 0.3) score("resolve-old-todos", ["code.todo"]);
   }
-  const statsFull = ok.get("issues.stats") as { open?: unknown; stale_90d?: unknown; median_close_days?: unknown } | undefined;
+  const statsFull = ok.get("issues.stats") as { open?: unknown; closed?: unknown; closed_counted?: unknown; stale_90d?: unknown; median_close_days?: unknown } | undefined;
   const openCount = typeof statsFull?.open === "number" ? statsFull.open : 0;
-  if (pub && scored("issues") && statsFull && openCount > 0) {
+  // 4.3.0 (Н7 + Р2): при 0 закрытых (проживших ≥ 1 ч) балл задач сжат к
+  // минимуму целиком — «разберите зависшие» его не поднимет, обещания нет
+  const closedCounted = issuesClosedCounted(statsFull) ?? 0;
+  if (pub && scored("issues") && statsFull && openCount > 0 && closedCounted > 0) {
     const share = ((statsFull.stale_90d ?? 0) as number) / Math.max(1, openCount);
     if (share >= 0.5) score("reduce-stale-issues", ["issues.stats"]);
     if (typeof statsFull.median_close_days === "number" && statsFull.median_close_days >= 30) score("speed-up-issue-close", ["issues.stats"]);

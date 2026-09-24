@@ -427,7 +427,9 @@ function categoryRemark(card: RepoCard, key: CategoryKey, cat: CardCategory): st
     if (per10k === null) return null;
     const counts = (factValue(card, "appsec.findings")?.severity_counts ?? null) as Record<string, unknown> | null;
     // плотность считается по дереву того скана, по которому взяты находки
-    const loc = numOf(factValue(card, CHANNEL_TREE_KEY)?.loc) ?? numOf(factValue(card, "tree.stats")?.loc);
+    // 4.3.0 (Н11): делитель — строки кода (`source_loc`), у фактов до правки М2.3 — весь `loc`
+    const codeLines = (v: Record<string, unknown> | null): number | null => (v === null ? null : "source_loc" in v ? numOf(v.source_loc) : numOf(v.loc));
+    const loc = codeLines(factValue(card, CHANNEL_TREE_KEY)) ?? codeLines(factValue(card, "tree.stats"));
     if (counts === null || loc === null || loc <= 0) return null;
     const words: Record<string, string> = { critical: "критичная", high: "высокая", medium: "средняя", low: "низкая" };
     const parts: string[] = [];
