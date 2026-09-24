@@ -109,6 +109,13 @@ export interface RecommendationParams {
   minutes?: number;
   /** appsec-critical: есть утекшие секреты (потолок 49 действует только при них, Д1) */
   secrets?: boolean;
+  /**
+   * appsec-critical / appsec-high (круг 2, К6): потолок категории, который держат
+   * находки этого уровня сейчас (40 / 69), или null — балл ниже потолка
+   */
+  capLimit?: number | null;
+  /** appsec-critical / appsec-high (К6): устранение находок уровня поднимет балл категории (пересчет) */
+  gain?: boolean;
   /** resolve-old-todos: пометок старше 180 дней и всего */
   older?: number;
   total?: number;
@@ -159,6 +166,48 @@ function presenceImpact(p: RecommendationParams): string | null {
   if (typeof p.delta !== "number") return null;
   const scope = p.channel ? "к Repo Health Score" : "к HealthCraft Index";
   return `${fmtSigned(p.delta)} ${scope}${p.reason ? ` – ${DELTA_REASON_TEXT[p.reason]}` : ""}`;
+}
+
+/**
+ * Круг 2 (К6, G8, NP9): совет по открытым находкам AppSec уровня critical или
+ * high — текстом по факту. Потолок держит балл — «снимет потолок N»; балл ниже
+ * потолка и устранение его поднимет — «повысит балл»; не поднимет (плотность на
+ * полу от прочих находок) — роста не обещаем.
+ */
+function appsecLevelText(p: RecommendationParams, action: string, what: string): RecommendationText | null {
+  if (p.capLimit === undefined || typeof p.gain !== "boolean") return null;
+  const capped = typeof p.capLimit === "number";
+  return {
+    action,
+    problem: capped ? `AppSec нашел в коде ${what}. Пока они открыты, балл категории «Безопасность» не выше ${p.capLimit}.` : `AppSec нашел в коде ${what}.`,
+    expectedImpact: capped
+      ? `снимет потолок ${p.capLimit} с категории «Безопасность»`
+      : p.gain
+        ? categoryImpact("Безопасность")
+        : "балл категории «Безопасность» от этого не вырастет: его снижают и другие находки",
+  };
+}
+
+/** К2: доля файлов тестов, для которой совет `add-tests` считает эффект. */
+export const ADD_TESTS_SHARE = 0.1;
+
+/** Эпоха для пересчета «Безопасности»: категория от времени не зависит. */
+const SECURITY_EPOCH = new Date(0);
+
+/**
+ * К6: что даст устранение открытых находок уровня — по пересчету категории
+ * (не обещание): держат ли они сейчас потолок и вырастет ли балл.
+ */
+export function appsecFixEffect(ok: Map<string, unknown>, level: "critical" | "high"): { capLimit: number | null; gain: boolean } {
+  const before = computeFromFacts(ok, { scanId: 0, repoId: 0 }, SECURITY_EPOCH).categories.security;
+  const appsec = ok.get("appsec.findings") as AppsecFindingsValue;
+  const facts = new Map(ok);
+  facts.set("appsec.findings", { ...appsec, severity_counts: { ...(appsec.severity_counts ?? {}), [level]: 0 } });
+  const after = computeFromFacts(facts, { scanId: 0, repoId: 0 }, SECURITY_EPOCH).categories.security;
+  const adj = before.adjustment;
+  const capLimit = adj?.kind === "open-findings-cap" && adj.level === level ? adj.limit : null;
+  const gain = before.score !== null && after.score !== null && after.score > before.score + 1e-9;
+  return { capLimit, gain };
 }
 
 /**
@@ -239,17 +288,17 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
     case "appsec-critical":
       if (typeof p.secrets !== "boolean") return null;
       // Д1: потолок 49 действует только при утекших секретах — без них его не обещаем
-      return p.secrets
-        ? {
-            action: "Устраните утечки секретов",
-            problem: "AppSec нашел в коде утекшие ключи или пароли. Пока они в коде, Repo Health Score не может быть выше 49: замените секреты и удалите их из кода.",
-            expectedImpact: "снимет ограничение Repo Health Score в 49 баллов",
-          }
-        : {
-            action: "Устраните критичные находки AppSec",
-            problem: "AppSec нашел в коде критичные уязвимости.",
-            expectedImpact: categoryImpact("Безопасность"),
-          };
+      if (p.secrets) {
+        return {
+          action: "Устраните утечки секретов",
+          problem: "AppSec нашел в коде утекшие ключи или пароли. Пока они в коде, Repo Health Score не может быть выше 49: замените секреты и удалите их из кода.",
+          expectedImpact: "снимет ограничение Repo Health Score в 49 баллов",
+        };
+      }
+      return appsecLevelText(p, "Устраните критичные находки AppSec", "критичные уязвимости");
+    case "appsec-high":
+      // круг 2 (К6, G8б): открытые находки high без critical — потолок 69 без совета
+      return appsecLevelText(p, "Устраните находки AppSec высокой важности", "уязвимости высокой важности");
     case "resolve-old-todos":
       if (typeof p.older !== "number" || typeof p.total !== "number") return null;
       return {
@@ -264,6 +313,12 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
         problem: `${p.percent}% открытых задач без движения более 90 дней. Закройте неактуальные, по остальным дайте ответ и назначьте ответственного.`,
         expectedImpact: categoryImpact("Задачи"),
       };
+    case "add-tests":
+      // круг 2 (К2, NP9): «Тесты» — бонус «Кода»; эффект — пересчет для тестов в 10% файлов кода
+      return presence(
+        "Добавьте тесты",
+        "В репозитории нет файлов тестов. Сервис находит их в каталогах test, tests и spec и по именам test_*, *_test.*, *.test.*, *.spec.*; пустые файлы не засчитываются. Эффект посчитан для тестов в 10% файлов кода.",
+      );
     case "speed-up-issue-close": {
       if (typeof p.days !== "number") return null;
       // А13 аудита (круг 4): срок закрытия назывался двумя числами — «49 дней»
@@ -303,6 +358,9 @@ export function recommendationParams(ruleId: string, ok: Map<string, unknown>, e
     const appsec = ok.get("appsec.findings") as { secrets_critical?: unknown } | undefined;
     if (appsec) p.secrets = appsec.secrets_critical === true;
   }
+  if ((ruleId === "appsec-critical" || ruleId === "appsec-high") && ok.has("appsec.findings")) {
+    Object.assign(p, appsecFixEffect(ok, ruleId === "appsec-critical" ? "critical" : "high"));
+  }
   if (ruleId === "resolve-old-todos") {
     const todo = ok.get("code.todo") as { older_180d?: unknown; count?: unknown; fixme?: unknown } | undefined;
     if (todo) {
@@ -319,7 +377,7 @@ export function recommendationParams(ruleId: string, ok: Map<string, unknown>, e
 }
 
 /** Порядок score-правил движка (§8) — общий для движка и объединённой выдачи карточки. */
-export const SCORE_RULE_ORDER = ["appsec-critical", "fix-red-runs", "ci-never-ran", "speed-up-pipeline", "resolve-old-todos", "reduce-stale-issues", "speed-up-issue-close"];
+export const SCORE_RULE_ORDER = ["appsec-critical", "fix-red-runs", "appsec-high", "ci-never-ran", "speed-up-pipeline", "resolve-old-todos", "reduce-stale-issues", "speed-up-issue-close"];
 
 /**
  * 4.3.0 (Р3, J8): правила серьезности — первыми во всей выдаче, до presence:
@@ -467,6 +525,17 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
       }
     }
   }
+  // круг 2 (К2): «Код» оценен, сборщик 3 посчитал тесты — непустых нет. Эффект —
+  // реальный пересчет с тестами в 10% файлов кода; «Тесты» — бонус (В1), и если
+  // он при таких тестах балл не поднимает, совета с «+0» нет
+  const treeFact = ok.get("tree.stats") as { source_files?: unknown; test_files?: unknown } | undefined;
+  if (pub && scored("code") && treeFact && treeFact.test_files === 0 && typeof treeFact.source_files === "number" && treeFact.source_files > 0) {
+    const sourceFiles = treeFact.source_files;
+    const patch = (facts: Map<string, unknown>) => {
+      facts.set("tree.stats", { ...(facts.get("tree.stats") as object), test_files: Math.max(1, Math.round(sourceFiles * ADD_TESTS_SHARE)) });
+    };
+    if (realDelta(null, patch).delta > 0) presenceRule("add-tests", ["tree.stats"], patch);
+  }
   const cicdCfg = ok.get("cicd.configs") as { has_ci_yaml?: unknown; has_steps?: unknown; steps_note?: unknown } | undefined;
   // М2.1 аудита В5.3: ci.yaml не разобран — неизвестно, есть ли шаги; совета
   // «добавьте команды» нет, как нет и балла
@@ -543,6 +612,9 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
     // категории); критичные находки — при оцененной «Безопасности» (Н7; с Р3
     // они держат потолок категории 40)
     if (appsec.secrets_critical === true || (crit > 0 && scored("security"))) score("appsec-critical", ["appsec.findings"], "appsec");
+    // круг 2 (К6): открытые high без critical — свой совет (потолок 69)
+    const high = (appsec.severity_counts?.high as number | undefined) ?? 0;
+    if (crit === 0 && high > 0 && scored("security")) score("appsec-high", ["appsec.findings"], "appsec");
   }
   const todo = ok.get("code.todo") as { older_180d?: unknown; count?: unknown; fixme?: unknown; blamed_files?: unknown; todo_note?: unknown } | undefined;
   if (pub && scored("code") && todo && todo.todo_note !== "incomplete" && typeof todo.blamed_files === "number" && todo.blamed_files > 0) {
@@ -553,13 +625,15 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
   }
   const statsFull = ok.get("issues.stats") as { open?: unknown; closed?: unknown; closed_counted?: unknown; stale_90d?: unknown; median_close_days?: unknown } | undefined;
   const openCount = typeof statsFull?.open === "number" ? statsFull.open : 0;
-  // 4.3.0 (Н7 + Р2): при 0 закрытых (проживших ≥ 1 ч) балл задач сжат к
-  // минимуму целиком — «разберите зависшие» его не поднимет, обещания нет
+  // 4.3.0 (Н7 + Р2): при 0 закрытых (проживших ≥ 1 ч) медианы закрытия нет —
+  // «ускорьте закрытие» не про что. Круг 2 (К6, E6): «разберите зависшие» —
+  // при открытых зависших независимо от закрытых: совет велит закрыть
+  // неактуальные, закрытие растит засчитанную выборку и снимает сжатие
   const closedCounted = issuesClosedCounted(statsFull) ?? 0;
-  if (pub && scored("issues") && statsFull && openCount > 0 && closedCounted > 0) {
+  if (pub && scored("issues") && statsFull && openCount > 0) {
     const share = ((statsFull.stale_90d ?? 0) as number) / Math.max(1, openCount);
     if (share >= 0.5) score("reduce-stale-issues", ["issues.stats"]);
-    if (typeof statsFull.median_close_days === "number" && statsFull.median_close_days >= 30) score("speed-up-issue-close", ["issues.stats"]);
+    if (closedCounted > 0 && typeof statsFull.median_close_days === "number" && statsFull.median_close_days >= 30) score("speed-up-issue-close", ["issues.stats"]);
   }
 
   // ---------- порядок (§8, 4.3.0 Р3): серьезность → реальный Δ desc (затем rule_id) → активационные по весу desc → прочие score ----------

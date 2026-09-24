@@ -57,6 +57,16 @@ const SCENARIOS: [string, FactSpec[]][] = [
       APPSEC_SECRETS,
     ),
   ],
+  // В5.3-М круг 2 (К2, К6): новые правила add-tests и appsec-high — тем же контрактом чтения
+  [
+    "код без тестов с пометками, открытые high без critical",
+    withFacts(
+      healthyFacts(),
+      { key: "tree.stats", value: { top_level: Array.from({ length: 12 }, (_, i) => ({ name: `d${i}`, type: "tree" })), file_count: 300, bytes: 2_000_000, loc: 50_000, source_files: 200, source_loc: 40_000, test_files: 0 } },
+      { key: "code.todo", value: { count: 400, fixme: 0, older_180d: 200, todo_files: 50, blamed_files: 50 } },
+      { key: "appsec.findings", value: { severity_counts: { critical: 0, high: 2, medium: 0, low: 0 }, resolved_share: 0.5, secrets_critical: false } },
+    ),
+  ],
 ];
 
 const ALL_RULES = [
@@ -73,6 +83,8 @@ const ALL_RULES = [
   "fix-red-runs",
   "speed-up-pipeline",
   "appsec-critical",
+  "appsec-high",
+  "add-tests",
   "resolve-old-todos",
   "reduce-stale-issues",
   "speed-up-issue-close",
@@ -97,7 +109,7 @@ describe("К9.10: текст при чтении = текст движка на 
       }
     });
   });
-  test("сценарии покрывают все 16 правил движка", () => {
+  test("сценарии покрывают все 18 правил движка (круг 2 В5.3-М: + add-tests, appsec-high)", () => {
     expect([...seen].sort()).toEqual([...ALL_RULES].sort());
   });
 });
@@ -140,15 +152,16 @@ describe("К9.10: чтение по ключу и запасной путь", ()
 });
 
 describe("Д1, роли текста", () => {
+  // круг 2 (К6): текст critical без секретов — по факту (потолок 40 / рост по пересчету)
   test("appsec-critical: потолок 49 — только при утекших секретах", () => {
     const secrets = recommendationText("appsec-critical", { secrets: true })!;
-    const critical = recommendationText("appsec-critical", { secrets: false })!;
+    const critical = recommendationText("appsec-critical", { secrets: false, capLimit: null, gain: true })!;
     expect(`${secrets.problem} ${secrets.expectedImpact}`).toContain("49");
     expect(`${critical.action} ${critical.problem} ${critical.expectedImpact}`).not.toMatch(/49|потол|ограничен/);
   });
 
   test("заголовок — глагол в повелительном наклонении без точки; эффект без «≈»", () => {
-    const params = { delta: 1.25, reason: null, channel: null, missing: ["build" as const], issuesScore: 6, minutes: 20.5, secrets: false, older: 9, total: 20, percent: 80, days: 48.85 };
+    const params = { delta: 1.25, reason: null, channel: null, missing: ["build" as const], issuesScore: 6, minutes: 20.5, secrets: false, capLimit: null, gain: true, older: 9, total: 20, percent: 80, days: 48.85 };
     for (const rule of ALL_RULES) {
       const text = recommendationText(rule, params)!;
       expect({ rule, verb: /^(Добавьте|Настройте|Ведите|Подключите|Откройте|Почините|Ускорьте|Устраните|Разберите)\s/.test(text.action), dot: text.action.endsWith("."), approx: text.expectedImpact.includes("≈") }).toEqual({

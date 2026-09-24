@@ -7,7 +7,8 @@ import { computeFromFacts, codeEmptyKind, licensePresent, type Scores } from "..
 import { recommendFromFacts, orderRecommendations, type Recommendation } from "../src/score/recommend";
 import { burstSyncFlags, robot2Flags } from "../src/score/robot2";
 import {
-  CODE_MIN_LOC,
+  CODE_FULL_LOC,
+  CODE_NEUTRAL,
   ISSUES_ANCHOR_MIN,
   ISSUES_TRACKER_UNUSED,
   MODEL_VERSION,
@@ -77,11 +78,13 @@ describe("Н4: причины «нет данных» по виду", () => {
     expect(noDataReason("documentation", unread.categories.documentation.no_data)).toContain("Репозиторий не удалось прочитать");
   });
 
-  test("Н4: строки не прочитаны (loc = null) против «мало кода» — разные причины", () => {
+  // круг 2 (В3, К3): «мало кода» больше не причина «нет данных» — балл сжат к 50
+  test("Н4 + В3: строки не прочитаны (loc = null) — нет данных; мало кода — оценка со сжатием", () => {
     const unread = score(facts({ "tree.stats": tree({ source_loc: null, loc: null, loc_note: "incomplete" }) }));
-    expect(noDataReason("code", unread.categories.code.no_data)).toBe("Строки кода прочитать не удалось – категорию не оцениваем.");
+    expect(noDataReason("code", unread.categories.code.no_data)).toBe("Строки кода прочитать не удалось: файлы больше лимита сервиса, не текстовые или чтение прервалось – категорию не оцениваем.");
     const little = score(facts({ "tree.stats": tree({ source_loc: 12 }) }));
-    expect(noDataReason("code", little.categories.code.no_data)).toBe("Мало кода: меньше 50 строк – категорию не оцениваем.");
+    expect(little.categories.code.score).not.toBeNull();
+    expect(little.categories.code.adjustment?.kind).toBe("small-code");
   });
 
   test("Н4 (D4): строка вместо полосы вкладов — по виду; «нет ни одного файла» только без файлов", () => {
@@ -94,19 +97,22 @@ describe("Н4: причины «нет данных» по виду", () => {
   });
 });
 
-describe("Р4б: «Состояние кода» — от 50 строк кода", () => {
-  test("Р4б: 49 строк — нет данных «мало кода»; 50 — оценка есть; старые факты — по loc", () => {
-    expect(CODE_MIN_LOC).toBe(50);
-    expect(score(facts({ "tree.stats": tree({ source_loc: 49 }) })).categories.code.score).toBeNull();
-    expect(score(facts({ "tree.stats": tree({ source_loc: 50 }) })).categories.code.score).not.toBeNull();
+// круг 2 (В3): порог Р4б «от 50 строк» вытеснен плавным сжатием к 50
+describe("Р4б → В3: малый код сжимается к 50, порога нет", () => {
+  test("В3: 49 и 50 строк — оценка есть, без ступени; старые факты — по loc", () => {
+    expect([CODE_FULL_LOC, CODE_NEUTRAL]).toEqual([200, 50]);
+    const s49 = score(facts({ "tree.stats": tree({ source_loc: 49 }) })).categories.code.score!;
+    const s50 = score(facts({ "tree.stats": tree({ source_loc: 50 }) })).categories.code.score!;
+    expect(Math.abs(s50 - s49)).toBeLessThan(1);
     const legacy = { top_level: [{ name: "src", type: "tree" }], file_count: 3, bytes: 100, loc: 20 };
-    expect(score(facts({ "tree.stats": legacy })).categories.code.no_data).toBe("too little data — less than 50 lines of code");
+    const leg = score(facts({ "tree.stats": legacy })).categories.code;
+    expect(leg.adjustment).toMatchObject({ kind: "small-code", loc: 20, full: 200, center: 50 });
   });
 
-  test("Р4б (J5): README + однострочный main.py больше не дает индекс выше медианы — «Код» без числа", () => {
+  test("В3 (J5): README + однострочный main.py — «Код» около 50, а не 100", () => {
     const ok = facts({ "tree.stats": tree({ source_files: 1, source_loc: 1, loc: 5 }), "code.todo": { count: 0, fixme: 0, older_180d: 0, todo_files: 0, blamed_files: 0 } });
     const s = score(ok);
-    expect(s.categories.code.score).toBeNull();
+    expect(s.categories.code.score!).toBeCloseTo(50.25, 6);
     expect(s.codeEmpty).toBe(false);
   });
 });
@@ -117,11 +123,12 @@ describe("Р1: подметрика «Тесты» в «Состоянии ко�
     expect(SUBWEIGHTS.code).toEqual({ density: 0.35, old_share: 0.25, tests: 0.3, root: 0.1 });
   });
 
-  test("Р1: 0 тестов при коде — данные (0), не no-data; тесты повышают балл; старые факты — перенормировка", () => {
+  // круг 2 (В1): «0 тестов — данные (0)» решения Р1 вытеснено — «Тесты» только бонус
+  test("Р1 → В1: 0 тестов — вне расчета (как у старых фактов); тесты повышают балл", () => {
     const none = score(facts({ "tree.stats": tree({ test_files: 0 }) }));
     const some = score(facts({ "tree.stats": tree({ test_files: 6 }) })); // 20% файлов
-    expect(none.categories.code.submetrics.tests!.score).toBe(0);
-    expect(some.categories.code.score!).toBeGreaterThan(none.categories.code.score!);
+    expect(none.categories.code.submetrics.tests!.score).toBeNull();
+    expect(some.categories.code.score!).toBeGreaterThanOrEqual(none.categories.code.score!);
     const legacy = score(facts());
     expect(legacy.categories.code.submetrics.tests!.score).toBeNull();
     expect(legacy.categories.code.score).not.toBeNull();
@@ -315,10 +322,11 @@ describe("Н7: рекомендации — те же условия, что б�
     expect(ids(recommendFromFacts(withYaml, { delta: noDelta, issuesScore: 50, categoryScores: { cicd: 30 } }))).toEqual(expect.arrayContaining(["fix-red-runs", "speed-up-pipeline"]));
   });
 
-  test("Н7 + Р2: при 0 закрытых задач (≥ 1 ч) советов по задачам с обещанием балла нет", () => {
+  // круг 2 (К6, E6): «разберите зависшие» — и при 0 засчитанных закрытых (закрытие поднимет балл)
+  test("Н7 + Р2 → К6: при 0 закрытых задач (≥ 1 ч) — совет по зависшим есть, «ускорьте закрытие» нет", () => {
     const ok = facts({ "issues.stats": { open: 16, closed: 3, closed_instant: 3, closed_counted: 0, median_close_days: null, stale_90d: 9, fetched_count: 19 } });
     expect(score(ok).categories.issues.score).toBe(6);
-    expect(ids(recommendFromFacts(ok, { delta: noDelta, issuesScore: 6, categoryScores: { issues: 6 } })).filter((x) => x === "reduce-stale-issues" || x === "speed-up-issue-close")).toEqual([]);
+    expect(ids(recommendFromFacts(ok, { delta: noDelta, issuesScore: 6, categoryScores: { issues: 6 } })).filter((x) => x === "reduce-stale-issues" || x === "speed-up-issue-close")).toEqual(["reduce-stale-issues"]);
   });
 
   test("Н8: запуски видны, но все идут — CI-правило без числа (иначе Δ дала бы перенормировка)", () => {
@@ -357,11 +365,12 @@ describe("Н10: burst-коллапс и зеркала", () => {
     expect(s.categories.activity.score!).toBeGreaterThan(50);
   });
 
-  test("Н10: окно с двумя авторами или чужим коммиттером у большинства — синк", () => {
+  // круг 2 (К5): «≥ 2 авторов» и «чужой коммиттер» больше не признаки синка — по датам автора
+  test("Н10 → К5: окно с двумя авторами или чужим коммиттером при разнесенных author-датах — не синк", () => {
     const two = events(12, (i) => (i % 2 ? "a" : "b"), (i) => (i % 2 ? "a" : "b"), (i) => NOW.getTime() - (60 - i) * DAY, (i) => t0 + i * 100);
-    expect(robot2Flags(two).flags.every((f) => f.sync)).toBe(true);
+    expect(robot2Flags(two).flags.every((f) => !f.sync)).toBe(true);
     const mirror = events(12, () => "dev", () => "mirror-bot-sync", (i) => NOW.getTime() - (60 - i) * DAY, (i) => t0 + i * 100);
-    expect(robot2Flags(mirror).flags.every((f) => f.sync)).toBe(true);
+    expect(robot2Flags(mirror).flags.every((f) => !f.sync)).toBe(true);
     // сгенерированный всплеск одного автора (author-даты в том же окне) — синк (S6a)
     const spam = events(20, () => "dev", () => "dev", () => t0, () => t0);
     expect(robot2Flags(spam).flags.every((f) => f.sync)).toBe(true);
@@ -369,11 +378,12 @@ describe("Н10: burst-коллапс и зеркала", () => {
     expect(burstSyncFlags(Array.from({ length: 10 }, () => t0)).flags.every(Boolean)).toBe(true);
   });
 
-  test("Н10 (Q&A №10): история целиком из синков — Активность «нет данных», а не 0; только роботы — 0", () => {
+  // круг 2 (К5, решение 24.09 «зеркала — по датам автора»): вытесняет Н10 «нет данных»
+  test("Н10 → К5 (Q&A №10): зеркало — Активность по датам автора, а не «нет данных»; только роботы — 0", () => {
     const sync = events(12, (i) => `u${i}`, () => "mirror", (i) => NOW.getTime() - (400 + i) * DAY, (i) => t0 + i * 10);
     const s = score(facts({ "activity.git.timeline": { events: sync } }));
-    expect(s.categories.activity.score).toBeNull();
-    expect(noDataReason("activity", s.categories.activity.no_data)).toContain("только синхронизации");
+    expect(s.categories.activity.score).not.toBeNull();
+    expect(s.categories.activity.submetrics.contributors!.value).toBe(12);
     const bots = Array.from({ length: 3 }, (_, i) => ({ sha: `b${i}`, author: { name: "dependabot[bot]", email: "bot@x.io", date: iso(NOW.getTime() - (i + 1) * DAY) }, committer: { name: "dependabot[bot]", email: "bot@x.io", date: iso(NOW.getTime() - (i + 1) * DAY) } }));
     const robots = score(facts({ "activity.git.timeline": { events: bots } }));
     expect(robots.categories.activity.submetrics.fresh!.score).toBe(0);

@@ -243,6 +243,9 @@ export function submetricNote(category: string, sub: string, note: string | null
   }
   // Н9: открытые задачи есть, закрытых нет — худший балл, словами
   if (key === "issues.close_days" && note.startsWith("no issue closed")) return { value: "ни одна задача не закрыта" };
+  // круг 2 (В1): «Тесты» — бонус; нет непустых тестов — в балл не входит
+  if (key === "code.tests" && note.startsWith("no tests")) return { value: "тестов нет – в балл не входит" };
+  if (key === "code.tests" && note.startsWith("tests bonus not applied")) return null;
   // Н14б: оговорка «доля от не менее 5 пометок» — в показе значения (submetricShownValue)
   if (key === "code.old_share" && note.startsWith("share of at least")) return null;
   if (key === "code.old_share") return { value: "не посчитано: прочитаны не все файлы" };
@@ -270,6 +273,10 @@ export function submetricShownValue(
   // показывается 20%, и без оговорки число читалось бы ошибкой
   if (shown !== NO_VALUE && `${category}.${sub}` === "code.old_share" && typeof entry.note === "string" && entry.note.startsWith("share of at least")) {
     return `${shown} (доля от не менее 5 пометок)`;
+  }
+  // круг 2 (В1): доля тестов ниже прочих показателей — бонус не применен, число справочно
+  if (shown !== NO_VALUE && `${category}.${sub}` === "code.tests" && typeof entry.note === "string" && entry.note.startsWith("tests bonus not applied")) {
+    return `${shown} (в балл не входит: доля ниже прочих показателей)`;
   }
   if (shown !== NO_VALUE) return shown;
   // В5.3-М (Н14б): ветка «пометок нет» удалена — с 4.2.0 доля при 0 пометок

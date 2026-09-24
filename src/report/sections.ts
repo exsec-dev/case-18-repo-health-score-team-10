@@ -167,7 +167,8 @@ export function whyText(key: CategoryKey, cat: CardCategory, ctx: SubmetricConte
 /**
  * В5.3-М (Н5, Р3, Н14б): поправка к взвешенному среднему категории словами —
  * одна копия для карточки («почему»), разбора категории и приложения А.
- * Сжатие малой выборки задач и потолок «Безопасности» при открытых находках.
+ * Сжатие малой выборки задач, потолок «Безопасности» при открытых находках и
+ * (круг 2, В3) сжатие малого кода к 50.
  */
 export function adjustmentText(cat: Pick<CardCategory, "adjustment" | "score">): string | null {
   const a = cat.adjustment;
@@ -175,6 +176,11 @@ export function adjustmentText(cat: Pick<CardCategory, "adjustment" | "score">):
   if (a.kind === "small-sample") {
     const tasks = plural(a.n, "закрытая задача", "закрытые задачи", "закрытых задач");
     return `Малая выборка: ${a.n} ${tasks} из ${a.full} – балл сжат к минимуму ${fmtDecimal(a.floor, 0)}: ${fmtDecimal(a.raw, 1, { trim: true })} → ${fmtDecimal(cat.score ?? a.floor, 1, { trim: true })}.`;
+  }
+  if (a.kind === "small-code") {
+    // круг 2 (В3): сжатие малого кода к нейтрали 50 вместо порога «от 50 строк»
+    const lines = plural(a.loc, "строка", "строки", "строк");
+    return `Мало кода: ${a.loc} ${lines} из ${a.full} – балл сжат к ${fmtDecimal(a.center, 0)}: ${fmtDecimal(a.raw, 1, { trim: true })} → ${fmtDecimal(cat.score ?? a.center, 1, { trim: true })}.`;
   }
   const what = a.level === "critical" ? "критичные находки AppSec" : "находки AppSec высокой важности";
   return `Есть открытые ${what} – балл категории не выше ${a.limit}.`;
@@ -280,6 +286,9 @@ export const RULE_SUBMETRIC: Record<string, string> = {
   "fix-red-runs": "cicd.pass_rate",
   "speed-up-pipeline": "cicd.duration",
   "appsec-critical": "security.density",
+  // круг 2 (К6, К2): новые советы
+  "appsec-high": "security.density",
+  "add-tests": "code.tests",
   "start-tracker": "issues.tracker_unused",
   "reduce-stale-issues": "issues.stale",
   "speed-up-issue-close": "issues.close_days",

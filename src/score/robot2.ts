@@ -1,10 +1,11 @@
 // robot2.ts — robot v2 (§7.2, Q18: интервальный слой ВЫРЕЗАН — v1
 // ловил синки, но мимо ботов и с ФП на ровных человеческих сериях):
 // 1) burst-коллапс — ≥10 коммитов внутри скользящего окна 2с по
-//    COMMITTER-датам → всем sync=true (импорт-бурст зеркала); с 4.3.0
-//    (Н10) — только если в окне ≥2 авторов, или коммиттер ≠ автор у
-//    большинства, или и author-даты в том же окне (ребейз одного автора с
-//    разнесенными author-датами — не синк);
+//    COMMITTER-датам → всем sync=true; с 4.3.0 круга 2 (К5, решение
+//    владельца 24.09 «зеркала — по датам автора») — только если и
+//    author-даты окна в пределах окна (сгенерированный всплеск). Ребейз с
+//    любым числом авторов и импорт зеркала сохраняют разнесенные
+//    author-даты — их коммиты человеческие и считаются по датам автора;
 // 2) author-паттерны — [bot], bot@, -bot, dependabot/renovate/
 //    allcontributors + noreply-домены → robot.
 // Robot-паттерн доминирует над sync в семантике, флаги совместимы:
@@ -58,10 +59,11 @@ export function isRobotAuthor(authorName: string, authorEmail: string): boolean 
  * Возвращает {flags, bursts} — bursts = число максимальных burst-групп.
  */
 /**
- * В5.3-М (Н10, F12/J13): кто стоит за коммитом окна. Окно синка схлопывается,
- * только если в нем ≥ 2 авторов или коммиттер ≠ автор у большинства коммитов:
- * `git rebase` одного автора переписывает committer-даты в одну секунду, но
- * остается человеческой работой — ее коммиты считаются по author-датам.
+ * В5.3-М (Н10, F12/J13) → круг 2 (К5, G2/G5): кто стоит за коммитом окна.
+ * Признаки круга 1 («≥ 2 авторов», «чужой коммиттер у большинства») сняты:
+ * ребейз общей ветки двух авторов и зеркало (импорт чужой истории) — тоже
+ * человеческая работа, ее коммиты считаются по author-датам. Синк — только
+ * генерированный всплеск: author-даты окна лежат в пределах того же окна.
  */
 export interface BurstActor {
   author: string;
@@ -70,15 +72,11 @@ export interface BurstActor {
   authorTs?: number | null;
 }
 
-function isSyncWindow(actors: BurstActor[]): boolean {
-  if (new Set(actors.map((a) => a.author)).size >= 2) return true;
-  const foreign = actors.filter((a) => a.committer !== a.author).length;
-  if (foreign * 2 > actors.length) return true;
-  // отступление воркера (отчет В5.3-М): один автор, но и author-даты в том же
-  // окне — это не ребейз (он сохраняет author-даты), а сгенерированный всплеск
-  // (1000 пустых коммитов за секунду, сценарий жюри S6a) — синк, как раньше
+export function isSyncWindow(actors: BurstActor[]): boolean {
+  // К5: author-даты всех коммитов окна разобраны и лежат в пределах окна —
+  // 1000 пустых коммитов за секунду (сценарий жюри S6a) схлопываются, как раньше
   const ts = actors.map((a) => a.authorTs).filter((t): t is number => typeof t === "number" && Number.isFinite(t));
-  return ts.length === actors.length && Math.max(...ts) - Math.min(...ts) <= BURST_WINDOW_MS;
+  return ts.length === actors.length && ts.length > 0 && Math.max(...ts) - Math.min(...ts) <= BURST_WINDOW_MS;
 }
 
 export function burstSyncFlags(committerTs: (number | null)[], actors?: BurstActor[]): { flags: boolean[]; bursts: number } {
@@ -121,7 +119,7 @@ export function robot2Flags(events: CommitActor[]): { flags: Robot2Flags[]; burs
     const t = Date.parse(raw);
     return Number.isNaN(t) ? null : t;
   });
-  // Н10: окно синка — только при ≥ 2 авторах или чужом коммиттере у большинства
+  // К5: окно синка — только когда и author-даты окна в пределах окна
   const actors = events.map((e) => {
     const at = typeof e.author.date === "string" && e.author.date !== "" ? Date.parse(e.author.date) : Number.NaN;
     return {

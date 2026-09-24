@@ -17,7 +17,8 @@ import { DerivedMetrics, deriveMetrics, issuesClosedCounted } from "./derived";
 import { roundScore } from "../web/format";
 import {
   CLOSE_DAYS,
-  CODE_MIN_LOC,
+  CODE_FULL_LOC,
+  CODE_NEUTRAL,
   OLD_SHARE_MIN_BASE,
   SECURITY_OPEN_CAPS,
   TEST_SHARE,
@@ -71,7 +72,9 @@ export type CategoryAdjustment =
   /** Задачи: закрытых (проживших ≥ 1 ч) меньше полной выборки — балл сжат к минимуму */
   | { kind: "small-sample"; n: number; full: number; raw: number; floor: number }
   /** Безопасность: открытые находки critical/high — потолок категории */
-  | { kind: "open-findings-cap"; level: "critical" | "high"; limit: number; raw: number };
+  | { kind: "open-findings-cap"; level: "critical" | "high"; limit: number; raw: number }
+  /** Состояние кода (круг 2, В3): строк кода меньше `full` — балл сжат к нейтрали `center` */
+  | { kind: "small-code"; loc: number; full: number; raw: number; center: number };
 
 export interface CategoryScore {
   /** 0..100 | null = категория no-data */
@@ -503,12 +506,15 @@ export type CodeEmptyKind = "repository empty" | "no files" | "only non-code fil
  */
 export function codeEmptyKind(ok: Map<string, unknown>, git: GitState): CodeEmptyKind | null {
   if (git.empty) return "repository empty";
-  const tree = ok.get("tree.stats") as { file_count?: unknown; source_files?: unknown; source_loc?: unknown; top_level?: unknown } | undefined | null;
+  const tree = ok.get("tree.stats") as { file_count?: unknown; source_files?: unknown; source_loc?: unknown; source_unread?: unknown; top_level?: unknown } | undefined | null;
   if (tree === undefined || tree === null) return null;
   if (typeof tree.file_count === "number" && tree.file_count === 0) return "no files";
   if (tree.source_files === 0) return "only non-code files";
   if (!("source_files" in tree) && rootHasNoSource(tree.top_level)) return "only non-code files";
-  if (typeof tree.source_loc === "number" && tree.source_loc === 0) return "no lines of code";
+  // круг 2 (К3, E3): 0 строк при непрочитанных файлах кода (больше лимита
+  // текста, бинарные) — строки не прочитаны (незнание), а не «кода нет»
+  const unread = typeof tree.source_unread === "number" && tree.source_unread > 0;
+  if (typeof tree.source_loc === "number" && tree.source_loc === 0 && !unread) return "no lines of code";
   return null;
 }
 
@@ -780,11 +786,9 @@ function scoreActivity(derived: DerivedMetrics, now: Date, git: GitState): Categ
     // 4.3.0 (Н4, D6): без истории — по виду: пустой репо или не прочитан
     return { score: null, no_data: gitNoData(git), submetrics: {} };
   }
-  if (derived.syncOnly) {
-    // 4.3.0 (Н10, Q&A №10): история — только синк (зеркало, импорт): авторской
-    // активности по ней не видно — «нет данных», а не 0 («только роботы» — 0 ниже)
-    return { score: null, no_data: "too little data — history consists of sync bursts", submetrics: submetricsOf(null, null, null, null, null) };
-  }
+  // круг 2 (К5): правило Н10 «история из одних синков — нет данных» снято:
+  // зеркало и ребейз считаются по датам автора (robot2), синк — только
+  // генерированный всплеск, и история из одних всплесков — как «только роботы»
   // 4.2.0 (М1.2): история прочитана, а людей в ней нет — данные «человеческих
   // коммитов нет» (худший анкер), а не отсутствие данных
   const freshSub =
@@ -875,25 +879,54 @@ function scoreCode(derived: DerivedMetrics, hasTree: boolean): CategoryScore {
   const submetrics: Record<string, SubmetricScore> = {
     density: { score: densitySub, value: derived.todoDensityPerKloc },
     old_share: { score: oldSub, value: derived.oldShare, ...(oldNote ? { note: oldNote } : {}) },
-    tests: { score: testsSub, value: derived.testShare },
+    // круг 2 (В1): тестов нет — подметрика вне расчета с пометкой показа
+    tests: { score: testsSub, value: derived.testShare, ...(derived.testsNone ? { note: TESTS_NONE_NOTE } : {}) },
     root: { score: rootSub, value: derived.rootEntries },
     todo_total: { score: null, value: derived.todoTotal },
   };
-  // 4.3.0 (Н4, Р4б): причина «нет данных» по виду — строки не прочитаны
-  // (незнание) против «мало кода» (меньше CODE_MIN_LOC строк: одна строка
-  // `main.py` не дает категории 100, J5)
-  if (derived.codeLoc === null) return { score: null, no_data: "too little data — lines of code not read", submetrics };
-  if (derived.codeLoc < CODE_MIN_LOC) return { score: null, no_data: `too little data — less than ${CODE_MIN_LOC} lines of code`, submetrics };
+  // 4.3.0 (Н4): строки не прочитаны — незнание. Круг 2 (К3): сюда же 0
+  // прочитанных строк при непрочитанных файлах кода (derived → null) и 0 строк
+  // у фактов до М2.3 (ошибка счета М2.2: однострочные файлы без `\n`) —
+  // файлы кода есть, а строки не посчитаны. Причина «мало кода» (Р4б) снята (В3)
+  if (derived.codeLoc === null || derived.codeLoc === 0) return { score: null, no_data: "too little data — lines of code not read", submetrics };
   // якорь — плотность пометок (4.2.0, М1.2); без факта TODO категории нет
   if (densitySub === null) return { score: null, no_data: "git channel no-data", submetrics };
-  const score = weighted([
+  const base = weighted([
     [w.density, densitySub],
     [w.old_share, oldSub],
-    [w.tests, testsSub],
     [w.root, rootSub],
   ])!;
-  return { score: score * 100, submetrics };
+  // круг 2 (В1): «Тесты» — бонус. Доля непустых тестов входит в балл с весом
+  // 0,3 (анкеры круга 1), только если поднимает его: первый тест при хороших
+  // прочих показателях не снижает «Код» (P1 «+ непустой тест»), а у репо без
+  // тестов «Код» на фактах сборщика 3 и старых фактах одинаков (G3, E2)
+  let raw = base;
+  if (testsSub !== null) {
+    const withTests = weighted([
+      [w.density, densitySub],
+      [w.old_share, oldSub],
+      [w.tests, testsSub],
+      [w.root, rootSub],
+    ])!;
+    if (withTests >= base) raw = withTests;
+    else submetrics.tests = { score: null, value: derived.testShare, note: TESTS_BONUS_IDLE_NOTE };
+  }
+  // круг 2 (В3, вытесняет порог Р4б): плавное сжатие малого кода к нейтрали —
+  // Код = 50 + (сырой − 50) × min(1, строк / 200); ступени на 50-й строке нет
+  const rawScore = raw * 100;
+  const factor = Math.min(1, derived.codeLoc / CODE_FULL_LOC);
+  if (factor >= 1) return { score: rawScore, submetrics };
+  return {
+    score: CODE_NEUTRAL + (rawScore - CODE_NEUTRAL) * factor,
+    submetrics,
+    adjustment: { kind: "small-code", loc: derived.codeLoc, full: CODE_FULL_LOC, raw: rawScore, center: CODE_NEUTRAL },
+  };
 }
+
+/** Круг 2 (В1): сборщик 3 посчитал тесты, непустых нет — «тестов нет, в балл не входит». */
+export const TESTS_NONE_NOTE = "no tests — not scored (tests are a bonus)";
+/** Круг 2 (В1): тесты есть, но их доля ниже прочих показателей — бонус не применен. */
+export const TESTS_BONUS_IDLE_NOTE = "tests bonus not applied — share would lower the category";
 
 // ---------- запись (immutable: PK scan_id+model_version, идемпотентно) ----------
 

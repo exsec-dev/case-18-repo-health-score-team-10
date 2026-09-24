@@ -29,12 +29,8 @@ export interface DerivedMetrics {
   robotRatioV2: number | null;
   /** показ (§7.3): доля sync + authors/committers — без веса */
   mirrorLikeness: { sync_share: number; authors: number; committers: number } | null;
-  /**
-   * 4.3.0 (Н10, Q&A №10): история прочитана, человеческих коммитов нет, и
-   * ВСЕ исключенные коммиты — синк (не роботы): авторскую активность по такой
-   * истории не оценить — «нет данных», а не 0 (происхождение не влияет).
-   */
-  syncOnly: boolean;
+  // круг 2 (К5): признак «история только из синков» (Н10) снят вместе с правилом
+  // «Активность — нет данных»: зеркала считаются по датам автора (robot2)
   /** авторы-люди (пол 0.2 у соло): email человеческих коммитов — 4.2.0 (М1.6) без robot/sync */
   contributorsTotal: number | null;
   /**
@@ -62,8 +58,13 @@ export interface DerivedMetrics {
    * сборщика, иначе весь `loc` фактов до правки М2.3; null — не прочитаны
    */
   codeLoc: number | null;
-  /** 4.3.0 (Р1): доля файлов тестов среди файлов кода; null — у фактов без `test_files` */
+  /**
+   * 4.3.0 (Р1): доля файлов тестов среди файлов кода. Круг 2 (В1): null и у
+   * фактов без `test_files`, и при `test_files = 0` — «Тесты» только бонус
+   */
   testShare: number | null;
+  /** круг 2 (В1): сборщик 3 посчитал тесты, и непустых нет — показ «тестов нет» */
+  testsNone: boolean;
   // --- rest ---
   pulls90d: number | null;
   releases12m: number | null;
@@ -175,7 +176,6 @@ export function deriveMetrics(ok: Map<string, unknown>, now: Date): DerivedMetri
       },
       contributorsTotal: humanEmails.size,
       busFactor,
-      syncOnly: humanTs.length === 0 && events.length > 0 && flags.every((f) => f.sync && !f.robot),
       ...issuesCodeRest(ok, now),
     };
   }
@@ -192,7 +192,6 @@ export function deriveMetrics(ok: Map<string, unknown>, now: Date): DerivedMetri
     mirrorLikeness: null,
     contributorsTotal: null,
     busFactor: null,
-    syncOnly: false,
     ...issuesCodeRest(ok, now),
   };
 }
@@ -206,7 +205,7 @@ export function issuesClosedCounted(stats: { closed?: unknown; closed_counted?: 
   return typeof stats?.closed === "number" ? stats.closed : null;
 }
 
-function issuesCodeRest(ok: Map<string, unknown>, now: Date): Pick<DerivedMetrics, "staleShare" | "resolutionRatio" | "todoTotal" | "todoDensityPerKloc" | "oldShare" | "oldShareNoData" | "rootEntries" | "codeLoc" | "testShare" | "pulls90d" | "releases12m"> {
+function issuesCodeRest(ok: Map<string, unknown>, now: Date): Pick<DerivedMetrics, "staleShare" | "resolutionRatio" | "todoTotal" | "todoDensityPerKloc" | "oldShare" | "oldShareNoData" | "rootEntries" | "codeLoc" | "testShare" | "testsNone" | "pulls90d" | "releases12m"> {
   // issues.stats
   const stats = ok.get("issues.stats") as { open?: unknown; closed?: unknown; closed_counted?: unknown; stale_90d?: unknown } | undefined;
   const open = typeof stats?.open === "number" ? stats.open : null;
@@ -226,10 +225,22 @@ function issuesCodeRest(ok: Map<string, unknown>, now: Date): Pick<DerivedMetric
   const fixme = typeof todo?.fixme === "number" ? todo.fixme : null;
   const older = typeof todo?.older_180d === "number" ? todo.older_180d : null;
   const todoTotal = count !== null && fixme !== null ? count + fixme : null;
-  const tree = ok.get("tree.stats") as { top_level?: unknown[]; loc?: unknown; source_loc?: unknown; source_files?: unknown; test_files?: unknown } | undefined;
+  const tree = ok.get("tree.stats") as { top_level?: unknown[]; loc?: unknown; source_loc?: unknown; source_files?: unknown; test_files?: unknown; source_unread?: unknown } | undefined;
   // М2.3: плотность — по строкам кода (`source_loc`); у фактов до правки
-  // сборщика поля нет — берется весь LOC, как раньше
-  const loc = typeof tree?.source_loc === "number" ? tree.source_loc : "source_loc" in (tree ?? {}) ? null : typeof tree?.loc === "number" ? tree.loc : null;
+  // сборщика поля нет — берется весь LOC, как раньше.
+  // Круг 2 (К3, E3): 0 прочитанных строк при непрочитанных файлах кода
+  // (больше лимита текста, бинарные) — строки неизвестны (null), не «0 строк»
+  const unread = typeof tree?.source_unread === "number" && tree.source_unread > 0;
+  const loc =
+    typeof tree?.source_loc === "number"
+      ? tree.source_loc === 0 && unread
+        ? null
+        : tree.source_loc
+      : "source_loc" in (tree ?? {})
+        ? null
+        : typeof tree?.loc === "number"
+          ? tree.loc
+          : null;
   const todoDensityPerKloc = todoTotal !== null && loc !== null && loc > 0 ? (todoTotal / loc) * 1000 : null;
   const blamed = typeof todo?.blamed_files === "number" ? todo.blamed_files : null;
   // К-Р14: неполная выборка TODO (обрыв cat-file) → old_share no-data с
@@ -247,16 +258,18 @@ function issuesCodeRest(ok: Map<string, unknown>, now: Date): Pick<DerivedMetric
         : null;
   const oldShareNoData = todoIncomplete ? "todo sample incomplete (cat-file truncated) — old_share needs the full sample" : null;
   const rootEntries = Array.isArray(tree?.top_level) ? tree!.top_level!.length : null;
-  // Р1: доля тестов — только у фактов сборщика 3 (поле test_files) и при коде
-  const testShare =
-    typeof tree?.test_files === "number" && typeof tree?.source_files === "number" && tree.source_files > 0 ? tree.test_files / tree.source_files : null;
+  // Р1: доля тестов — только у фактов сборщика 3 (поле test_files) и при коде;
+  // круг 2 (В1): нет непустых тестов — подметрика вне расчета (бонус), а не 0
+  const testsCounted = typeof tree?.test_files === "number" && typeof tree?.source_files === "number" && tree.source_files > 0;
+  const testShare = testsCounted && (tree!.test_files as number) > 0 ? (tree!.test_files as number) / (tree!.source_files as number) : null;
+  const testsNone = testsCounted && tree!.test_files === 0;
 
   // activity.rest (событийные даты §7.4)
   const rest = ok.get("activity.rest") as { pulls_created_at?: unknown; releases_released_at?: unknown } | undefined;
   const pulls90d = Array.isArray(rest?.pulls_created_at) ? countRecent(rest!.pulls_created_at!, now, 90) : null;
   const releases12m = Array.isArray(rest?.releases_released_at) ? countRecent(rest!.releases_released_at!, now, 365) : null;
 
-  return { staleShare, resolutionRatio, todoTotal, todoDensityPerKloc, oldShare, oldShareNoData, rootEntries, codeLoc: loc, testShare, pulls90d, releases12m };
+  return { staleShare, resolutionRatio, todoTotal, todoDensityPerKloc, oldShare, oldShareNoData, rootEntries, codeLoc: loc, testShare, testsNone, pulls90d, releases12m };
 }
 
 function round3(x: number): number {

@@ -530,12 +530,13 @@ export function noDataReason(key: string, reason: string | null | undefined): st
   const r = (reason ?? "").trim();
   // 4.2.0 (М1.2, М2.1 аудита В5.3): причины «мало данных» — каждая своей веткой
   if (r.startsWith("too little data — no finding density")) return "Находки AppSec есть, но размер кода неизвестен и доля закрытых не посчитана – категорию не оцениваем.";
-  // 4.3.0 (Н4): причины по виду — пустой репо, нет кода, не прочитан, строки не прочитаны, мало кода
+  // 4.3.0 (Н4): причины по виду — пустой репо, нет кода, не прочитан, строки не прочитаны.
+  // Круг 2: причины «мало кода» (Р4б → сжатие В3) и «история из синков» (Н10 → К5)
+  // сняты; 4.3.0 не выкатывалась — старых оценок с ними нет
   if (r.startsWith("no source code — ")) return CODE_EMPTY_TEXT[r.slice("no source code — ".length)] ?? CODE_EMPTY_TEXT["only non-code files"]!;
   if (r === "repository empty") return REPOSITORY_EMPTY_TEXT;
-  if (r.startsWith("too little data — history consists of sync bursts")) return "История коммитов – только синхронизации (зеркало или импорт): по ней не видно, как работают авторы, поэтому активность не оцениваем.";
-  if (r.startsWith("too little data — lines of code not read")) return "Строки кода прочитать не удалось – категорию не оцениваем.";
-  if (r.startsWith("too little data — less than")) return "Мало кода: меньше 50 строк – категорию не оцениваем.";
+  // К3: файлы кода больше лимита сервиса или бинарные — строки не прочитаны
+  if (r.startsWith("too little data — lines of code not read")) return "Строки кода прочитать не удалось: файлы больше лимита сервиса, не текстовые или чтение прервалось – категорию не оцениваем.";
   // прежние модели (4.2.0): строки старых оценок
   if (r.startsWith("too little data — no commit history")) return "Истории коммитов нет – без нее активность не оцениваем: одни счетчики запросов на слияние и релизов категорию не определяют.";
   if (r.startsWith("too little data — no lines of code")) return "В репозитории нет строк кода, по которым считается плотность TODO, – категорию не оцениваем.";
