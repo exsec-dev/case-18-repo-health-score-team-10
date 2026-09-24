@@ -331,11 +331,16 @@ export async function collectRestFacts(
   // issues: закрытые (для median_close_days)
   const closedRes = await fetchResource(client, slug, "issues-closed", frOpts);
 
-  if (openRes.kind === "ok" && progressRes.kind === "ok" && closedRes.kind === "ok") {
+  // В5.3-М круг 2 (К4, E1): сбой одного запроса `in_progress` не делает факт
+  // задач `bad` (иначе скан непригоден для рейтинга): задачи считаются по
+  // `open` + `closed`, в факте — `in_progress: null` и пометка причины
+  const progressOk = progressRes.kind === "ok";
+  if (openRes.kind === "ok" && closedRes.kind === "ok") {
+    if (!progressOk) channelErrors.push({ resource: progressRes.resource, kind: progressRes.kind, status: progressRes.status, detail: progressRes.detail });
     const staleMs = 90 * 24 * 3600 * 1000;
     // открытые = open + in_progress, свежие первыми (выборка первого ответа)
     const seenIssue = new Set<string>();
-    const openIssues = [...openRes.items, ...progressRes.items]
+    const openIssues = [...openRes.items, ...(progressOk ? progressRes.items : [])]
       .filter((i) => {
         const key = asString(i["id"]) ?? asString(i["slug"]);
         if (key === null) return true;
@@ -379,7 +384,8 @@ export async function collectRestFacts(
         {
           open: openIssues.length,
           // Н6: из них в работе (in_progress) — разрез, в балл идут как открытые
-          in_progress: progressRes.items.length,
+          in_progress: progressOk ? progressRes.items.length : null,
+          ...(progressOk ? {} : { in_progress_note: `in_progress fetch failed (status ${progressRes.status}) — open counted without in_progress` }),
           closed: closedIssues.length,
           closed_instant: closedInstant,
           closed_counted: closedIssues.length - closedInstant,
@@ -455,14 +461,14 @@ export async function collectRestFacts(
       );
     }
   } else {
-    for (const r of [openRes, progressRes, closedRes]) {
+    for (const r of [openRes, closedRes]) {
       if (r.kind !== "ok") {
         channelErrors.push({ resource: r.resource, kind: r.kind, status: r.status, detail: r.detail });
       }
     }
     const statuses = `status ${openRes.status}/${progressRes.status}/${closedRes.status}`;
     for (const kind of ["issues.stats", "issues.comments_sample"]) {
-      if (openRes.kind === "access" || progressRes.kind === "access" || closedRes.kind === "access") {
+      if (openRes.kind === "access" || closedRes.kind === "access") {
         facts.push(noDataFact(kind, "access", "rest:issues", statuses, nowIso));
       } else {
         facts.push(badChannelFact(kind, "rest:issues", statuses, nowIso));

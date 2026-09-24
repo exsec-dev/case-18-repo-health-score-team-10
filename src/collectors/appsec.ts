@@ -57,7 +57,36 @@ export function appsecQuery(params: AppsecParams): string {
  */
 export const APPSEC_OPEN_STATUSES = ["OPEN", "TRIAGE_IN_PROGRESS", "TRIAGED_TP", "FIX_IN_PROGRESS"] as const;
 
-export function defectGroupStatusClass(status: unknown): "open" | "resolved" | "unrecognized" | "unknown" {
+/**
+ * Круг 2 (К7, живой зонд HQ 24.09: `status: 0`): платформа отдает статус
+ * группы ЧИСЛОМ — индексом в перечне `DefectGroupStatus` спеки
+ * (`docs/api-spec/appsec.openapi.yaml`), в порядке объявления. Число вне
+ * диапазона или дробное — неизвестное, как прежде.
+ */
+export const DEFECT_GROUP_STATUS_ORDER = [
+  "OPEN",
+  "RESOLVED_FIXED",
+  "RESOLVED_FP",
+  "RESOLVED_PROJECT_NOT_AFFECTED",
+  "RESOLVED_TOLERABLE",
+  "RESOLVED_DUPLICATE",
+  "TRIAGE_IN_PROGRESS",
+  "TRIAGED_TP",
+  "FIX_IN_PROGRESS",
+  "RESOLVED_AUTOFIXED",
+  "UNRECOGNIZED",
+] as const;
+
+/** Статус группы строкой спеки: строка — как есть, число — по порядку перечня; иначе — исходное значение. */
+export function defectGroupStatusName(status: unknown): unknown {
+  if (typeof status === "number" && Number.isInteger(status) && status >= 0 && status < DEFECT_GROUP_STATUS_ORDER.length) {
+    return DEFECT_GROUP_STATUS_ORDER[status];
+  }
+  return status;
+}
+
+export function defectGroupStatusClass(rawStatus: unknown): "open" | "resolved" | "unrecognized" | "unknown" {
+  const status = defectGroupStatusName(rawStatus);
   switch (status) {
     case "OPEN":
     case "TRIAGE_IN_PROGRESS":

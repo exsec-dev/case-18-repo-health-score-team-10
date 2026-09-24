@@ -61,7 +61,10 @@ export const KINDS = {
   "docs.presence": "{readme,license,contributing,codeowners}: boolean, content_checked?",
   // flags — словарь секций RU+EN §7.4 (install/build/test)
   "docs.readme": "{bytes,sections,flags:{install,build,test}} | {present:false} когда README нет",
-  "tree.stats": "{top_level:[{name,type}],file_count,bytes,loc,source_files?,source_loc?,test_files?}",
+  // сборщик 3, круг 2: test_files — только непустые файлы тестов (К2);
+  // source_unread — файлы кода, строки которых не прочитаны (больше лимита
+  // текста или бинарные, К3)
+  "tree.stats": "{top_level:[{name,type}],file_count,bytes,loc,source_files?,source_loc?,test_files?,source_unread?}",
   // полный список .sourcecraft/** (канон CI-детекта) + has_ci_yaml +
   // has_steps (§7.4: ≥1 task с ≥1 непустой командой script/cube);
   // steps_note при неудачном парсинге ci.yaml
@@ -76,7 +79,7 @@ export const KINDS = {
   // релизов released_at desc — источник pulls_90d/releases_12m
   "activity.rest": "{contributors,releases,pulls_open,latest_release_at?,pulls_created_at:[...],releases_released_at:[...],fetched_note?}",
   "issues.stats":
-    "{open,in_progress?,closed,closed_instant?,closed_counted?,median_close_days,stale_90d,fetched_count}",
+    "{open,in_progress?,in_progress_note?,closed,closed_instant?,closed_counted?,median_close_days,stale_90d,fetched_count}",
   // сборщик 3 (Н14а): answered + censored; сборщик до 3 — with_comments
   "issues.comments_sample":
     "{issues,answered?,censored?,with_comments?,median_first_comment_delay_hours,delays_hours:[...]}",

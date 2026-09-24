@@ -47,11 +47,18 @@ export function isSourcePath(path: string): boolean {
  */
 const TEST_DIRS = new Set(["test", "tests", "__tests__", "spec", "specs"]);
 const TEST_NAME = /^test_|_test\.|\.test\.|\.spec\./i;
+/**
+ * Круг 2 (К2, E5): данные тестов — не тесты. Файл внутри `fixtures/`,
+ * `testdata/`, `__snapshots__/`, `mocks/`, `data/` (на любой глубине) тестом
+ * не считается: `tests/fixtures/big.json` не поднимает долю тестов.
+ */
+const TEST_DATA_DIRS = new Set(["fixtures", "testdata", "__snapshots__", "mocks", "data"]);
 
 export function isTestPath(path: string): boolean {
   if (!isSourcePath(path)) return false;
   const parts = path.split("/");
   const base = parts.pop() ?? "";
+  if (parts.some((dir) => TEST_DATA_DIRS.has(dir.toLowerCase()))) return false;
   if (parts.some((dir) => TEST_DIRS.has(dir.toLowerCase()))) return true;
   return TEST_NAME.test(base);
 }

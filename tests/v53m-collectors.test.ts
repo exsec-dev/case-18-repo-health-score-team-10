@@ -115,7 +115,8 @@ describe("Н2: git blame — время строки по sha заголовка
 describe("Р4а: маркеры техдолга — без учета регистра и только в комментариях", () => {
   test("Р4а: маркер в комментарии любого регистра — пометка; HACK и XXX — в корзину fixme", () => {
     expect(todoMarkerKind("// todo: lower case")).toBe("TODO");
-    expect(todoMarkerKind("x = 1  # Todo later")).toBe("TODO");
+    // круг 2 (К1): `#` — комментарий только в начале строки
+    expect(todoMarkerKind("# Todo later")).toBe("TODO");
     expect(todoMarkerKind("/* FIXME */")).toBe("FIXME");
     expect(todoMarkerKind("  * hack around the api")).toBe("FIXME");
     expect(todoMarkerKind("-- XXX sql")).toBe("FIXME");
@@ -248,10 +249,15 @@ describe("Н6: перечисления спеки", () => {
     expect(sample.answered).toBe(1);
   });
 
-  test("Н6: сбой запроса in_progress — выборка задач не выдается за данные", async () => {
-    const out = await collectRestFacts(restClient({ progress: { status: 503, json: null, bodyText: "" } }), "o/r", { commentsTopN: 0, now: NOW });
+  // круг 2 (К4, E1): вытесняет «сбой in_progress — факт bad»
+  test("Н6 → К4: сбой запроса in_progress — задачи по open + closed с пометкой, факт не bad", async () => {
+    const out = await collectRestFacts(restClient({ open: [issue("1", "2026-09-10T00:00:00Z")], progress: { status: 503, json: null, bodyText: "" } }), "o/r", { commentsTopN: 0, now: NOW });
     const stats = out.facts.find((x) => x.key === "issues.stats")!;
-    expect(stats.status).toBe("bad");
+    expect(stats.status).toBe("ok");
+    const v = stats.value as Record<string, unknown>;
+    expect(v.open).toBe(1);
+    expect(v.in_progress).toBeNull();
+    expect(String(v.in_progress_note)).toContain("status 503");
   });
 
   test("Н6: релизы — только published; draft и discarded своей веткой, неизвестный статус — явной", async () => {
@@ -421,13 +427,14 @@ describe("Н1: версия сборщика и доочередь ночной 
     expect(out.enqueued.some((e) => e.slug === "rc/fresh")).toBe(false);
   });
 
-  test("Н1: порция по умолчанию — 3000 (переменная не задана), 0 выключает, мусор — дефолт", () => {
+  // круг 2 (К8, решение В2): дефолт 3000 → 5000
+  test("Н1 + К8: порция по умолчанию — 5000 (переменная не задана), 0 выключает, мусор — дефолт", () => {
     expect(recollectPerWave({})).toBe(RECOLLECT_PER_WAVE_DEFAULT);
-    expect(RECOLLECT_PER_WAVE_DEFAULT).toBe(3000);
+    expect(RECOLLECT_PER_WAVE_DEFAULT).toBe(5000);
     expect(recollectPerWave({ SCHEDULER_RECOLLECT_PER_WAVE: "0" })).toBe(0);
     expect(recollectPerWave({ SCHEDULER_RECOLLECT_PER_WAVE: "25" })).toBe(25);
-    expect(recollectPerWave({ SCHEDULER_RECOLLECT_PER_WAVE: "-4" })).toBe(3000);
-    expect(recollectPerWave({ SCHEDULER_RECOLLECT_PER_WAVE: "abc" })).toBe(3000);
+    expect(recollectPerWave({ SCHEDULER_RECOLLECT_PER_WAVE: "-4" })).toBe(5000);
+    expect(recollectPerWave({ SCHEDULER_RECOLLECT_PER_WAVE: "abc" })).toBe(5000);
   });
 
   test("Н1: runScan штампует скан текущей версией сборщика", async () => {

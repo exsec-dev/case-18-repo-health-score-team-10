@@ -708,34 +708,48 @@ interface BlobEntry {
 
 /**
  * В5.3-М (Р4а, модель 4.3.0-hci): маркеры техдолга — TODO, FIXME, HACK, XXX без
- * учета регистра и только в комментарии. До правки регулярка была
- * регистрозависимой (`TODO` → `todo` снимал все пометки, J4) и видела слово в
- * любом месте строки. Комментарий — префикс перед маркером на той же строке:
- * `//`, `/*`, `<!--`, `#`, `--`, `;`, `%` где угодно до маркера; `*`, `'`,
- * `REM` — только первым символом строки (продолжение блочного комментария,
- * VB, batch): иначе `a * todo` или строка `'todo'` стали бы пометкой.
- * Слово `todo` в коде (`todoList`, строка `"todo"`) — не маркер.
+ * учета регистра и только в комментарии (`TODO` → `todo` больше не снимает
+ * пометки, J4).
+ *
+ * Круг 2 (К1, E4): маркер — ПЕРВОЕ слово комментария. В круге 1 префиксы `#`,
+ * `--`, `;`, `%` искались в любом месте строки, а маркер — где угодно после
+ * них: `#todo-list {`, `i < todo.length;`, `printf("%d todo")`,
+ * `// update the todo list` становились техдолгом todo-приложений. Теперь:
+ * - `//`, `/*`, `<!--` — где угодно на строке (комментарий после кода);
+ * - `#`, `--`, `;`, `%`, `'`, `*`, `REM` — только в начале строки после отступа
+ *   (в середине строки это операторы, селекторы и форматы);
+ * - сразу после префикса — пробелы и `@` (`/* @todo *\/`), затем маркер, за ним
+ *   `:`, `(`, `!`, пробел, конец строки или `-`, после которого не буква
+ *   (`TODO - fix`, но не `todo-list`); у `#` вплотную к маркеру `:` — только
+ *   без буквы следом (`#TODO: fix` — пометка, `#todo:hover {` — CSS-селектор).
+ * Повтор префикса (`///`, `/**`, `##`, `;;`, `%%`) — тот же комментарий.
  */
-const MARKER_RE = /\b(todo|fixme|hack|xxx)\b/gi;
-const COMMENT_ANYWHERE = /\/\/|\/\*|<!--|#|--|;|%/;
-const COMMENT_LINE_START = /^\s*(?:\*|'|rem\b)/i;
+const MARKER_AFTER = /^[\s@]*(todo|fixme|hack|xxx)(?=$|[\s:(!]|-(?![\p{L}\p{N}_]))/iu;
+const MARKER_AFTER_TIGHT = /^(todo|fixme|hack|xxx)(?=$|[\s(!]|:(?![\p{L}\p{N}_])|-(?![\p{L}\p{N}_]))/iu;
+const COMMENT_ANYWHERE = /\/\/+!?|\/\*+!?|<!--/g;
+const COMMENT_LINE_START = /^\s*(?:#+|--+|;+|%+|'|\*+|rem\b)/i;
+
+function markerAt(rest: string, tight: boolean): "TODO" | "FIXME" | null {
+  const hit = (tight ? MARKER_AFTER_TIGHT : MARKER_AFTER).exec(rest);
+  if (!hit) return null;
+  return hit[1]!.toLowerCase() === "todo" ? "TODO" : "FIXME";
+}
 
 /** Вид маркера техдолга в строке (TODO → «TODO», FIXME/HACK/XXX → «FIXME») или null. */
 export function todoMarkerKind(line: string): "TODO" | "FIXME" | null {
-  let from: number;
-  const lead = line.match(COMMENT_LINE_START);
+  const lead = COMMENT_LINE_START.exec(line);
   if (lead) {
-    from = lead[0].length;
-  } else {
-    const m = COMMENT_ANYWHERE.exec(line);
-    if (!m) return null;
-    from = m.index + m[0].length;
+    const rest = line.slice(lead[0].length);
+    // `#todo-list {` — селектор CSS: `#` вплотную к маркеру требует пробела после него
+    const kind = markerAt(rest, lead[0].trimStart().startsWith("#") && !/^[\s@]/.test(rest));
+    if (kind) return kind;
   }
-  MARKER_RE.lastIndex = from;
-  const hit = MARKER_RE.exec(line);
-  MARKER_RE.lastIndex = 0;
-  if (!hit) return null;
-  return hit[1]!.toLowerCase() === "todo" ? "TODO" : "FIXME";
+  COMMENT_ANYWHERE.lastIndex = 0;
+  for (let m = COMMENT_ANYWHERE.exec(line); m !== null; m = COMMENT_ANYWHERE.exec(line)) {
+    const kind = markerAt(line.slice(m.index + m[0].length), false);
+    if (kind) return kind;
+  }
+  return null;
 }
 
 function toUtc(raw: string): { iso: string; ts: number | null } {
@@ -1008,8 +1022,13 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
   // lock-файлов и картинок; `source_files = 0` — «кода нет» (Q&A №13)
   let sourceLoc = 0;
   const sourceFiles = blobs.filter((b) => isSourcePath(b.path)).length;
-  // В5.3-М (Р1): файлы тестов среди файлов кода — сигнал «есть тесты»
-  const testFiles = blobs.filter((b) => isTestPath(b.path)).length;
+  // В5.3-М (Р1): файлы тестов среди файлов кода — сигнал «есть тесты»;
+  // круг 2 (К2, G4/E5): только НЕПУСТОЙ файл (хотя бы одна непробельная
+  // строка) — пустые `tests/t_*.py` и `.gitkeep` тестами не считаются
+  let testFiles = 0;
+  // круг 2 (К3, E3): файлы кода, строки которых не прочитаны — больше лимита
+  // текста или бинарные (`source_loc = 0` у них не «кода нет», а незнание)
+  let sourceUnread = blobs.filter((b) => b.size > textCap && isSourcePath(b.path)).length;
   // Ф2.3 (M5): ЛЮБОЙ обрыв потока `cat-file` — дедлайн, оборванный заголовок,
   // недочитанный блоб — делает LOC и TODO неполными. Раньше неполнота
   // помечалась только у дедлайна (`loc_note: "deadline"`), а обрыв заголовка
@@ -1050,7 +1069,10 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
         }
         // формат: "<sha> blob <size>" (или "<sha> missing")
         const m = header.match(/^([0-9a-f]+) (?:blob|tag|tree) (\d+)$/);
-        if (!m) continue;
+        if (!m) {
+          if (isSourcePath(entry.path)) sourceUnread++;
+          continue;
+        }
         const size = parseInt(m[2]!, 10);
         const buf = await reader.readExact(size);
         await reader.readByte(); // завершающий \n
@@ -1059,7 +1081,11 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
           break;
         }
         const probe = buf.subarray(0, Math.min(8192, buf.length));
-        if (probe.includes(0)) continue; // бинарный — не текст
+        if (probe.includes(0)) {
+          // бинарный — не текст (К3: у файла кода строки не прочитаны)
+          if (isSourcePath(entry.path)) sourceUnread++;
+          continue;
+        }
         const text = new TextDecoder("utf-8", { fatal: false }).decode(buf);
         const lines = text.split("\n");
         // М2.2: строка без завершающего перевода строки — тоже строка
@@ -1067,6 +1093,7 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
         loc += fileLoc;
         if (!isSourcePath(entry.path)) continue;
         sourceLoc += fileLoc;
+        if (isTestPath(entry.path) && /\S/.test(text)) testFiles++;
         for (let ln = 0; ln < lines.length; ln++) {
           const kind = todoKind(lines[ln]!);
           if (kind) todoOccs.push({ path: entry.path, line: ln + 1, kind });
@@ -1091,8 +1118,10 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
       bytes: blobs.reduce((s, b) => s + b.size, 0),
       loc: locIncomplete ? null : loc,
       source_files: sourceFiles,
-      test_files: testFiles,
+      // К2: при обрыве чтения непустоту всех файлов тестов не проверить
+      test_files: locIncomplete ? null : testFiles,
       source_loc: locIncomplete ? null : sourceLoc,
+      source_unread: locIncomplete ? null : sourceUnread,
       ...(locIncomplete ? { loc_note: "incomplete" } : {}),
     },
     "git",
