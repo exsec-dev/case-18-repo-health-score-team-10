@@ -9,11 +9,19 @@ export function parseYamlSubset(src: string): unknown {
   for (const raw of src.split(/\r?\n/)) {
     const noComment = stripComment(raw);
     if (!noComment.trim()) continue;
+    // В5.3-М (Н12): маркеры документа `---` и `...` в первой колонке — не
+    // содержимое (валидный YAML, раньше парсер бросал «unexpected content»)
+    if (/^(---|\.\.\.)(\s|$)/.test(noComment)) {
+      const rest = noComment.slice(3).trim();
+      if (rest === "") continue;
+      throw new Error("yamlmini: content after document marker");
+    }
     const indent = noComment.length - noComment.trimStart().length;
     if (noComment.slice(0, indent).includes("\t")) throw new Error("yamlmini: tabs in indentation");
     lines.push({ indent, text: noComment.trim() });
   }
   if (lines.length === 0) return {};
+  if (lines.length === 1 && /^\{\s*\}$/.test(lines[0]!.text)) return {};
   const { value, next } = parseBlock(lines, 0, lines[0]!.indent);
   if (next < lines.length) throw new Error(`yamlmini: unexpected content at line ${next + 1}`);
   return value;
@@ -146,6 +154,8 @@ function parseScalar(raw: string): unknown {
   if ((s.startsWith('"') && s.endsWith('"') && s.length >= 2) || (s.startsWith("'") && s.endsWith("'") && s.length >= 2)) {
     return s.slice(1, -1);
   }
+  // Н12: пустой flow-объект `{}` — пустое отображение
+  if (/^\{\s*\}$/.test(s)) return {};
   if (s.startsWith("[") && s.endsWith("]")) {
     const inner = s.slice(1, -1).trim();
     if (!inner) return [];

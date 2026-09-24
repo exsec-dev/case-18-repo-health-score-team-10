@@ -23,6 +23,7 @@ const RECENT_DATES_TOP_N = 50;
 export type RestResourceName =
   | "repo"
   | "issues-open"
+  | "issues-in-progress"
   | "issues-closed"
   | "pulls"
   | "contributors"
@@ -78,6 +79,10 @@ function resourcePath(resource: RestResourceName, slug: string, args: PathArgs):
       return { path: `/repos/${s}`, list: false };
     case "issues-open":
       return { path: `/repos/${s}/issues?filter=status%3Dopen&sort_by=-created_at&page_size=${ps}`, list: true };
+    case "issues-in-progress":
+      // В5.3-М (Н6): третье значение фильтра `status` спеки (open | in_progress |
+      // closed) — задачи в работе открыты: зависшие, выборка первого ответа
+      return { path: `/repos/${s}/issues?filter=status%3Din_progress&sort_by=-created_at&page_size=${ps}`, list: true };
     case "issues-closed":
       return { path: `/repos/${s}/issues?filter=status%3Dclosed&sort_by=-updated_at&page_size=${ps}`, list: true };
     case "pulls":
@@ -183,10 +188,31 @@ function median(xs: number[]): number | null {
 
 const asString = (v: unknown): string | null => (typeof v === "string" ? v : null);
 
-function issueStatusSlug(issue: Record<string, unknown>): string | null {
-  const st = issue["status"];
-  if (st && typeof st === "object") return asString((st as Record<string, unknown>)["slug"]);
-  return asString(st);
+/** Р2: закрытая задача, прожившая меньше часа, — «мгновенно закрытая» (фейковые открыл-закрыл, J2). */
+export const ISSUE_INSTANT_CLOSE_MS = 3600_000;
+
+/**
+ * В5.3-М (Н6): статус релиза по перечню спеки `Release.Status` (draft,
+ * published, discarded). В потоке релизов — только опубликованные; черновики и
+ * отмененные — своей веткой (токен владельца их видит), неизвестное — явной.
+ */
+export function releaseStatusClass(status: unknown): "published" | "draft" | "discarded" | "unknown" {
+  switch (status) {
+    case "published":
+      return "published";
+    case "draft":
+      return "draft";
+    case "discarded":
+      return "discarded";
+    default:
+      return "unknown";
+  }
+}
+
+/** Н6 (D15): момент запуска CI для клиентской сортировки — started_at, иначе created_at. */
+function runStartedMs(r: Record<string, unknown>): number | null {
+  const d = r["dates"] as Record<string, unknown> | undefined;
+  return isoMs(d?.["started_at"]) ?? isoMs(d?.["created_at"]) ?? isoMs(r["created_at"]);
 }
 
 // ---------- мета репо (repos-таблица) ----------
@@ -300,12 +326,24 @@ export async function collectRestFacts(
 
   // issues: открытые (сортировка -created_at — топ свежих для comments)
   const openRes = await fetchResource(client, slug, "issues-open", frOpts);
+  // Н6: задачи в работе (status=in_progress) — тоже открытые
+  const progressRes = await fetchResource(client, slug, "issues-in-progress", frOpts);
   // issues: закрытые (для median_close_days)
   const closedRes = await fetchResource(client, slug, "issues-closed", frOpts);
 
-  if (openRes.kind === "ok" && closedRes.kind === "ok") {
+  if (openRes.kind === "ok" && progressRes.kind === "ok" && closedRes.kind === "ok") {
     const staleMs = 90 * 24 * 3600 * 1000;
-    const openIssues = openRes.items;
+    // открытые = open + in_progress, свежие первыми (выборка первого ответа)
+    const seenIssue = new Set<string>();
+    const openIssues = [...openRes.items, ...progressRes.items]
+      .filter((i) => {
+        const key = asString(i["id"]) ?? asString(i["slug"]);
+        if (key === null) return true;
+        if (seenIssue.has(key)) return false;
+        seenIssue.add(key);
+        return true;
+      })
+      .sort((a, b) => (isoMs(b["created_at"]) ?? 0) - (isoMs(a["created_at"]) ?? 0));
     const closedIssues = closedRes.items;
     const stale90 = openIssues.filter((i) => {
       const u = isoMs(i["updated_at"]);
@@ -314,6 +352,11 @@ export async function collectRestFacts(
     // completed_at есть не у всех закрытых (manytask: НЕТ ни у одного,
     // dozzle-plus: есть) — fallback на updated_at с пометкой в факте
     let fallbackCloses = 0;
+    // В5.3-М (Р2): время жизни закрытой задачи; прожившие меньше часа —
+    // «мгновенно закрытые» (фейковые открыл-закрыл, J2): в медиану закрытия и
+    // долю решенных они не входят. Время жизни не восстановилось — задача
+    // засчитывается (мгновенность не доказана).
+    let closedInstant = 0;
     const closeDays = closedIssues
       .map((i) => {
         let c = isoMs(i["completed_at"]);
@@ -322,7 +365,12 @@ export async function collectRestFacts(
           if (c !== null) fallbackCloses++;
         }
         const a = isoMs(i["created_at"]);
-        return c !== null && a !== null && c >= a ? (c - a) / 86400000 : null;
+        const life = c !== null && a !== null && c >= a ? c - a : null;
+        if (life !== null && life < ISSUE_INSTANT_CLOSE_MS) {
+          closedInstant++;
+          return null;
+        }
+        return life !== null ? life / 86400000 : null;
       })
       .filter((x): x is number => x !== null);
     facts.push(
@@ -330,7 +378,11 @@ export async function collectRestFacts(
         "issues.stats",
         {
           open: openIssues.length,
+          // Н6: из них в работе (in_progress) — разрез, в балл идут как открытые
+          in_progress: progressRes.items.length,
           closed: closedIssues.length,
+          closed_instant: closedInstant,
+          closed_counted: closedIssues.length - closedInstant,
           median_close_days: median(closeDays.map((d) => Math.round(d * 10) / 10)),
           stale_90d: stale90,
           fetched_count: openIssues.length + closedIssues.length,
@@ -346,6 +398,9 @@ export async function collectRestFacts(
     // comments топ-N свежих issues (issues-open уже отсортированы -created_at)
     const top = openIssues.slice(0, topN);
     const delaysHours: number[] = [];
+    // Н14а: задачи с ответом и задачи без ответа дольше порога цензуры — раздельно
+    let answered = 0;
+    let censored = 0;
     let commentsErrors = 0;
     for (const issue of top) {
       const issueSlug = asString(issue["slug"]);
@@ -360,6 +415,7 @@ export async function collectRestFacts(
           const first = Math.min(...created);
           if (issueCreated !== null && first >= issueCreated) {
             delaysHours.push(Math.round(((first - issueCreated) / 3600000) * 10) / 10);
+            answered++;
           }
         } else if (issueCreated !== null && now.getTime() - issueCreated >= UNANSWERED_CENSOR_H * 3600000) {
           // М2.6 аудита В5.3: без ответа дольше худшего анкера — задержка не
@@ -367,6 +423,7 @@ export async function collectRestFacts(
           // ответил» оценивалось выше, чем «ответили поздно». Свежая задача без
           // ответа в выборку не входит — ответа еще можно ждать
           delaysHours.push(UNANSWERED_CENSOR_H);
+          censored++;
         }
       } else {
         commentsErrors++;
@@ -384,7 +441,11 @@ export async function collectRestFacts(
           "issues.comments_sample",
           {
             issues: top.length,
-            with_comments: delaysHours.length,
+            // Н14а (правило 23.09 об имени поля): `with_comments` считал и
+            // цензурированные задачи без ответа — имя не совпадало со смыслом.
+            // Теперь раздельно; факты прежнего сборщика несут `with_comments`
+            answered,
+            censored,
             median_first_comment_delay_hours: median(delaysHours),
             delays_hours: delaysHours,
           },
@@ -394,16 +455,17 @@ export async function collectRestFacts(
       );
     }
   } else {
-    for (const r of [openRes, closedRes]) {
+    for (const r of [openRes, progressRes, closedRes]) {
       if (r.kind !== "ok") {
         channelErrors.push({ resource: r.resource, kind: r.kind, status: r.status, detail: r.detail });
       }
     }
+    const statuses = `status ${openRes.status}/${progressRes.status}/${closedRes.status}`;
     for (const kind of ["issues.stats", "issues.comments_sample"]) {
-      if (openRes.kind === "access" || closedRes.kind === "access") {
-        facts.push(noDataFact(kind, "access", "rest:issues", `status ${openRes.status}/${closedRes.status}`, nowIso));
+      if (openRes.kind === "access" || progressRes.kind === "access" || closedRes.kind === "access") {
+        facts.push(noDataFact(kind, "access", "rest:issues", statuses, nowIso));
       } else {
-        facts.push(badChannelFact(kind, "rest:issues", `status ${openRes.status}/${closedRes.status}`, nowIso));
+        facts.push(badChannelFact(kind, "rest:issues", statuses, nowIso));
       }
     }
   }
@@ -413,7 +475,17 @@ export async function collectRestFacts(
   const relRes = await fetchResource(client, slug, "releases", frOpts);
   const pullsRes = await fetchResource(client, slug, "pulls", frOpts);
   if (contribRes.kind === "ok" && relRes.kind === "ok" && pullsRes.kind === "ok") {
-    const latest = relRes.items.find((r) => r["is_latest"] === true) ?? relRes.items[0];
+    // Н6 (D16): только опубликованные релизы; черновики и отмененные — своей
+    // веткой в разрезе, неизвестный статус — явной (в поток не идет, назван)
+    const releaseStatuses: Record<string, number> = {};
+    const unknownRelease = new Set<string>();
+    const published = relRes.items.filter((r) => {
+      const cls = releaseStatusClass(r["status"]);
+      releaseStatuses[cls] = (releaseStatuses[cls] ?? 0) + 1;
+      if (cls === "unknown") unknownRelease.add(String(r["status"] ?? "missing"));
+      return cls === "published";
+    });
+    const latest = published.find((r) => r["is_latest"] === true) ?? published[0];
     const latestAt = latest ? asString(latest["released_at"]) : null;
     // событийные даты (§7.4): топ-N недавних pulls created_at и релизов
     // released_at desc — источник pulls_90d/releases_12m в score-слое
@@ -422,7 +494,7 @@ export async function collectRestFacts(
       .filter((x): x is string => x !== null)
       .sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))
       .slice(0, RECENT_DATES_TOP_N);
-    const releasesReleasedAt = relRes.items
+    const releasesReleasedAt = published
       .map((r) => asString(r["released_at"]))
       .filter((x): x is string => x !== null)
       .sort((a, b) => (a < b ? 1 : a > b ? -1 : 0))
@@ -435,7 +507,9 @@ export async function collectRestFacts(
         "activity.rest",
         {
           contributors: contribRes.items.length,
-          releases: relRes.items.length,
+          releases: published.length,
+          release_statuses: releaseStatuses,
+          ...(unknownRelease.size ? { release_status_note: `unknown release statuses: ${[...unknownRelease].slice(0, 3).join(", ")}` } : {}),
           pulls_open: pullsRes.items.filter((p) => asString(p["status"]) === "open").length,
           latest_release_at: latestAt,
           pulls_created_at: pullsCreatedAt,
@@ -460,7 +534,13 @@ export async function collectRestFacts(
   // cicd.runs: чужие → 403 (no-data access), свои → окна статусов
   const runsRes = await fetchResource(client, slug, "cicd-runs", frOpts);
   if (runsRes.kind === "ok") {
-    const all = runsRes.items;
+    // В5.3-М (Н6, D15): у `/cicd/runs` в спеке нет `sort_by` — «последний
+    // запуск», серия зеленых и ленты свежести не полагаются на порядок ответа:
+    // запуски сортируются по дате начала на клиенте, свежие первыми (без даты — в хвост)
+    const all = runsRes.items
+      .map((r, i) => ({ r, i, t: runStartedMs(r) }))
+      .sort((a, b) => (b.t ?? -Infinity) - (a.t ?? -Infinity) || a.i - b.i)
+      .map((x) => x.r);
     // М2.5 аудита В5.3: доля успеха — по ЗАВЕРШЕННЫМ запускам (успех или
     // провал); идущие и нейтральные (отмена, пропуск, отклонение) в нее не
     // входят. «Последний запуск» — последний завершенный.
@@ -469,7 +549,10 @@ export async function collectRestFacts(
       return o === "success" || o === "failure";
     });
     const unknownStatuses = [...new Set(all.map((r) => asString(r["status"]) ?? "").filter((st) => runOutcome(st) === "unknown"))];
+    // В5.3-М (Н8б, F11): длительность — по УСПЕШНЫМ запускам: быстрый провал
+    // не лучше медленного успеха
     const durations = runs
+      .filter((r) => runOutcome(asString(r["status"])) === "success")
       .map((r) => {
         const d = r["dates"] as Record<string, unknown> | undefined;
         const f = isoMs(d?.["finished_at"]);

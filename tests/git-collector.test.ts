@@ -45,7 +45,8 @@ function buildFixtureRepo(): string {
   // базовый коммит 2024-01-01 (TODO из него будет older_180d)
   const d2024 = "2024-01-01T00:00:00+00:00";
   writeFileSync(join(dir, "README.md"), "# Title\n\nSome intro text.\n\n## Usage\n\nRun it.\n");
-  writeFileSync(join(dir, "LICENSE"), "MIT License\n");
+  // В5.3-М (Р4в): лицензия засчитывается по тексту (не меньше 16 непробельных символов)
+  writeFileSync(join(dir, "LICENSE"), "MIT License\n\nCopyright (c) 2024 Dev\n");
   mkdirSync(join(dir, ".sourcecraft/security"), { recursive: true });
   mkdirSync(join(dir, "src"), { recursive: true });
   mkdirSync(join(dir, "assets"), { recursive: true });
@@ -143,7 +144,7 @@ describe("extractFacts (локальный bare-клон, без сети)", () 
       const by = new Map(facts.map((f) => [f.key, f]));
       const val = (k: string) => by.get(k)!.value as Record<string, unknown>;
 
-      expect(val("docs.presence")).toEqual({ readme: true, license: true, contributing: false, codeowners: false });
+      expect(val("docs.presence")).toEqual({ readme: true, license: true, contributing: false, codeowners: false, content_checked: true });
       expect((val("docs.readme").sections as number) >= 2).toBe(true);
       expect((val("docs.readme").bytes as number) > 30).toBe(true);
 
@@ -363,21 +364,24 @@ describe("В2/Б1: деградационная попытка cloneWithDegrade 
 });
 
 describe("В2/Б1: флаги секций README (словарь RU+EN §7.4)", () => {
+  // В5.3-М (Р4в): раздел засчитывается только с непустым телом — словарь
+  // проверяется на заголовках, под которыми есть строка текста
+  const b = (md: string): string => md.replace(/^(#{1,6} .*)$/gm, "$1\nтекст раздела");
   test("RU+EN заголовки → install/build/test", () => {
-    expect(readmeSectionFlags("# Проект\n\n## Установка\n\n## Сборка\n\n## Тесты\n")).toEqual({ install: true, build: true, test: true });
-    expect(readmeSectionFlags("# X\n\n## Getting Started\n\n### Build instructions\n\n### Running tests\n")).toEqual({ install: true, build: true, test: true });
-    expect(readmeSectionFlags("# X\n\n## Быстрый старт\n\n## Testing\n")).toEqual({ install: true, build: false, test: true });
-    expect(readmeSectionFlags("# X\n\n## Setup\n\n## Запуск\n")).toEqual({ install: true, build: false, test: false });
+    expect(readmeSectionFlags(b("# Проект\n\n## Установка\n\n## Сборка\n\n## Тесты\n"))).toEqual({ install: true, build: true, test: true });
+    expect(readmeSectionFlags(b("# X\n\n## Getting Started\n\n### Build instructions\n\n### Running tests\n"))).toEqual({ install: true, build: true, test: true });
+    expect(readmeSectionFlags(b("# X\n\n## Быстрый старт\n\n## Testing\n"))).toEqual({ install: true, build: false, test: true });
+    expect(readmeSectionFlags(b("# X\n\n## Setup\n\n## Запуск\n"))).toEqual({ install: true, build: false, test: false });
   });
 
   test("«Запуск тестов» → test, НЕ install (коллизия фразы/слова)", () => {
-    expect(readmeSectionFlags("# X\n\n## Запуск тестов\n")).toEqual({ install: false, build: false, test: true });
-    expect(readmeSectionFlags("# X\n\n## Установка и запуск\n")).toEqual({ install: true, build: false, test: false });
+    expect(readmeSectionFlags(b("# X\n\n## Запуск тестов\n"))).toEqual({ install: false, build: false, test: true });
+    expect(readmeSectionFlags(b("# X\n\n## Установка и запуск\n"))).toEqual({ install: true, build: false, test: false });
   });
 
   test("слова-подстроки не матчатся (тестирование ≠ тесты), нет заголовков → все false", () => {
-    expect(readmeSectionFlags("# X\n\n## Тестирование\n")).toEqual({ install: false, build: false, test: false });
-    expect(readmeSectionFlags("просто текст без заголовков\n## \n")).toEqual({ install: false, build: false, test: false });
+    expect(readmeSectionFlags(b("# X\n\n## Тестирование\n"))).toEqual({ install: false, build: false, test: false });
+    expect(readmeSectionFlags(b("просто текст без заголовков\n## \n"))).toEqual({ install: false, build: false, test: false });
   });
 });
 
@@ -403,7 +407,8 @@ describe("В2/Б1: has_steps (ci.yaml, §7.4)", () => {
     git(dir, ["config", "user.email", "a@x.y"]);
     mkdirSync(join(dir, ".sourcecraft"), { recursive: true });
     writeFileSync(join(dir, ".sourcecraft/ci.yaml"), "on: [push]\n");
-    writeFileSync(join(dir, "README.md"), "# X\n\n## Install\n");
+    // В5.3-М (Р4в): раздел засчитывается с непустым телом
+    writeFileSync(join(dir, "README.md"), "# X\n\n## Install\n\nnpm install\n");
     git(dir, ["add", "-A"]);
     git(dir, ["commit", "-q", "-m", "init"]);
     const work = mkdtempSync(join(tmpdir(), "rh-steps-work-"));

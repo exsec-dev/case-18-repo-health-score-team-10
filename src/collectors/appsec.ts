@@ -30,9 +30,52 @@ export interface AppsecGet {
   attempts?: number;
 }
 
+/** Параметры запроса: массив — повтор ключа (`status=OPEN&status=TRIAGED_TP`, спека AppSec). */
+export type AppsecParams = Record<string, string | string[]>;
+
 export interface AppsecClient {
-  get(path: string, params: Record<string, string>): Promise<AppsecGet>;
+  get(path: string, params: AppsecParams): Promise<AppsecGet>;
   requestCount(): number;
+}
+
+/** Строка запроса с повтором ключа для массивов. */
+export function appsecQuery(params: AppsecParams): string {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (Array.isArray(v)) for (const item of v) qs.append(k, item);
+    else qs.append(k, v);
+  }
+  return qs.toString();
+}
+
+/**
+ * В5.3-М (Н6, D10): статус группы дефектов по перечню спеки
+ * `DefectGroupStatus`. Без параметра `status` `/v1/defect-groups` отдает группы
+ * ВСЕХ статусов — в плотность, признак утекших секретов (потолок 49) и бэклог
+ * попадали закрытые (исправленные, ложные, дубли). Открытые — те, что еще
+ * требуют работы; каждое значение — своей веткой, неизвестное — явной.
+ */
+export const APPSEC_OPEN_STATUSES = ["OPEN", "TRIAGE_IN_PROGRESS", "TRIAGED_TP", "FIX_IN_PROGRESS"] as const;
+
+export function defectGroupStatusClass(status: unknown): "open" | "resolved" | "unrecognized" | "unknown" {
+  switch (status) {
+    case "OPEN":
+    case "TRIAGE_IN_PROGRESS":
+    case "TRIAGED_TP":
+    case "FIX_IN_PROGRESS":
+      return "open";
+    case "RESOLVED_FIXED":
+    case "RESOLVED_FP":
+    case "RESOLVED_PROJECT_NOT_AFFECTED":
+    case "RESOLVED_TOLERABLE":
+    case "RESOLVED_DUPLICATE":
+    case "RESOLVED_AUTOFIXED":
+      return "resolved";
+    case "UNRECOGNIZED":
+      return "unrecognized";
+    default:
+      return "unknown";
+  }
 }
 
 export interface AppsecClientOptions {
@@ -66,10 +109,10 @@ export function makeAppsecClient(opts: AppsecClientOptions): AppsecClient {
   const key = rhythmKey(baseUrl, opts.token);
   let count = 0;
 
-  const once = async (path: string, params: Record<string, string>): Promise<{ get: Omit<AppsecGet, "attempts">; retryAfterMs: number | null }> => {
+  const once = async (path: string, params: AppsecParams): Promise<{ get: Omit<AppsecGet, "attempts">; retryAfterMs: number | null }> => {
     const wait = reserveSlot(key, minInterval, Date.now());
     if (wait > 0) await sleep(wait);
-    const qs = new URLSearchParams(params).toString();
+    const qs = appsecQuery(params);
     try {
       const res = await fetch(`${baseUrl}${path}${qs ? `?${qs}` : ""}`, {
         headers: { Authorization: `Bearer ${opts.token}`, Accept: "application/json" },
@@ -157,6 +200,8 @@ export interface AppsecFindingsFactValue {
     severity_raw_counts: Record<string, number>;
     fetched_groups: number;
     truncated: boolean;
+    /** Н6: разрез статусов полученных групп по `DefectGroupStatus` */
+    status_counts?: Record<string, number>;
   };
   provenance: {
     scan_uuid: string;
@@ -235,6 +280,8 @@ export async function collectAppsec(
   const severityRaw: Record<string, number> = {};
   const groupIds: AppsecFindingsFactValue["provenance"]["group_ids"] = [];
   let openFindings = 0;
+  const statusCounts: Record<string, number> = {};
+  let skippedResolved = 0;
   let fetched = 0;
   let truncated = false;
   let totalSize: number | null = null;
@@ -247,6 +294,7 @@ export async function collectAppsec(
     const res = await appsec.get("/v1/defect-groups", {
       gitRepo,
       scanUuid,
+      status: [...APPSEC_OPEN_STATUSES],
       pageSize: String(GROUPS_PAGE_SIZE),
       pageToken: token,
     });
@@ -257,6 +305,14 @@ export async function collectAppsec(
     const body = res.json as { data?: unknown[]; nextPageToken?: unknown; totalSize?: unknown } | null;
     const data = Array.isArray(body?.data) ? body!.data! : [];
     for (const g of data as Record<string, unknown>[]) {
+      // Н6: платформа проигнорировала фильтр и отдала закрытую группу — в
+      // бэклог она не идет; разрез статусов — в факте
+      const cls = defectGroupStatusClass(g["status"]);
+      statusCounts[cls] = (statusCounts[cls] ?? 0) + 1;
+      if (cls === "resolved") {
+        skippedResolved++;
+        continue;
+      }
       fetched++;
       const engine = typeof g["engine"] === "string" ? g.engine : null;
       if (engine) engines[engine] = (engines[engine] ?? 0) + 1;
@@ -284,20 +340,23 @@ export async function collectAppsec(
     token = next;
     if (pages === pagesCap) truncated = true;
   }
-  if (totalSize === null) totalSize = fetched;
+  if (totalSize === null) totalSize = fetched + skippedResolved;
   // получено БОЛЬШЕ, чем платформа обещала: страницы пересеклись, агрегаты
   // не сходятся — честнее не считать вовсе, чем показать завышенный бэклог
-  if (fetched > totalSize) {
+  if (fetched + skippedResolved > totalSize) {
     return noData("incomplete", `defect-groups: fetched ${fetched} groups against totalSize ${totalSize} (overlapping pages)`);
   }
-  if (fetched < totalSize) truncated = true;
+  if (fetched + skippedResolved < totalSize) truncated = true;
+  // бэклог — только открытые группы (закрытые, отданные вопреки фильтру, вычтены)
+  totalSize -= skippedResolved;
 
   // --- severity-классификация платформой (именованные фильтры) ---
   const counts: AppsecFindingsFactValue["severity_counts"] = { critical: 0, high: 0, medium: 0, low: 0 };
   for (const bucket of SEVERITY_BUCKETS) {
     // CRITICAL берём страницей побольше: заодно движки критичных групп
     const pageSize = bucket === "CRITICAL" ? String(GROUPS_PAGE_SIZE) : "1";
-    const res = await appsec.get("/v1/defect-groups", { gitRepo, scanUuid, severity: bucket, pageSize, pageToken: "" });
+    // Н6: счетчики серьезности — только открытые группы (плотность не штрафует за закрытое)
+    const res = await appsec.get("/v1/defect-groups", { gitRepo, scanUuid, severity: bucket, status: [...APPSEC_OPEN_STATUSES], pageSize, pageToken: "" });
     if (res.status !== 200) {
       return noData("incomplete", `defect-groups severity=${bucket} → ${res.status}${res.error ? `: ${res.error}` : ""} (after ${res.attempts ?? 1} attempts)`, { bucket: `severity=${bucket}`, attempts: res.attempts ?? 1 });
     }
@@ -319,6 +378,8 @@ export async function collectAppsec(
     gitRepo,
     scanUuid,
     type: SECRETS_TYPE,
+    // Н6: исправленный или ложный секрет потолок 49 больше не держит
+    status: [...APPSEC_OPEN_STATUSES],
     severity: "CRITICAL",
     pageSize: "1",
     pageToken: "",
@@ -348,6 +409,8 @@ export async function collectAppsec(
       severity_raw_counts: severityRaw,
       fetched_groups: fetched,
       truncated,
+      // Н6: разрез статусов полученных групп (open | resolved | unrecognized | unknown)
+      status_counts: statusCounts,
     },
     provenance: {
       scan_uuid: scanUuid,

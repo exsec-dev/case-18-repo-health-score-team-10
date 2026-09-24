@@ -12,7 +12,7 @@ import { lstat, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Fact, GIT_KINDS, noDataFact, okFact, scrubDetail } from "./facts";
-import { isSourcePath } from "./source-path";
+import { isSourcePath, isTestPath } from "./source-path";
 import { parseYamlSubset } from "./yamlmini";
 import type { CloneLimits, ScanCloneLimits } from "../config";
 
@@ -585,10 +585,40 @@ function headingMatchesWord(heading: string, word: string): boolean {
   return re.test(heading);
 }
 
-/** Флаги {install, build, test} по заголовкам README (RU+EN словарь §7.4). */
+/**
+ * В5.3-М (Р4в): заголовки README с непустым телом — под заголовком до
+ * следующего заголовка того же или более высокого уровня есть строка текста
+ * или блок кода с содержимым (пустой заголовок «## Install» раздела не дает, J6).
+ * Строки ограды блока кода (```/~~~) и HTML-комментарии содержанием не считаются.
+ */
+export function readmeHeadingsWithBody(text: string): string[] {
+  const lines = text.split(/\r?\n/);
+  const heads: { i: number; level: number; line: string }[] = [];
+  let fence = false;
+  lines.forEach((l, i) => {
+    if (/^[ \t]{0,3}(```|~~~)/.test(l)) fence = !fence;
+    if (fence) return;
+    const m = l.match(/^[ \t]{0,3}(#{1,6}) \S.*$/);
+    if (m) heads.push({ i, level: m[1]!.length, line: l });
+  });
+  const out: string[] = [];
+  heads.forEach((h, k) => {
+    const next = heads.slice(k + 1).find((n) => n.level <= h.level);
+    const body = lines.slice(h.i + 1, next ? next.i : lines.length);
+    const meaningful = body.some((l) => {
+      const t = l.trim();
+      if (t === "" || /^(```|~~~)\S*$/.test(t) || /^#{1,6}( |$)/.test(t)) return false;
+      return t.replace(/<!--.*?-->/g, "").trim() !== "";
+    });
+    if (meaningful) out.push(h.line);
+  });
+  return out;
+}
+
+/** Флаги {install, build, test} по заголовкам README (RU+EN словарь §7.4); Р4в — только заголовки с непустым телом. */
 export function readmeSectionFlags(text: string): { install: boolean; build: boolean; test: boolean } {
   const flags = { install: false, build: false, test: false };
-  const headings = text.match(/^[ \t]{0,3}#{1,6} \S.*$/gm) ?? [];
+  const headings = readmeHeadingsWithBody(text);
   for (const hRaw of headings) {
     const h = hRaw.replace(/^[ \t]{0,3}#{1,6}\s+/, "").trim().toLowerCase();
     // коллизия словаря: «Запуск тестов» (test) содержит «Запуск» (install) —
@@ -645,7 +675,8 @@ export function ciHasSteps(parsed: unknown): boolean {
       }
     }
   }
-  const scriptNonEmpty = (s: unknown): boolean => Array.isArray(s) && s.some(nonEmptyCommand);
+  // В5.3-М (Н12): `script: echo hi` (строка, не список) и `script: |` — тоже шаг
+  const scriptNonEmpty = (s: unknown): boolean => (Array.isArray(s) ? s.some(nonEmptyCommand) : nonEmptyCommand(s));
   for (const t of tasks) {
     if (!t || typeof t !== "object") continue;
     const task = t as { script?: unknown; cubes?: unknown };
@@ -675,7 +706,37 @@ interface BlobEntry {
   size: number;
 }
 
-const TODO_RE = /\b(TODO|FIXME)\b/;
+/**
+ * В5.3-М (Р4а, модель 4.3.0-hci): маркеры техдолга — TODO, FIXME, HACK, XXX без
+ * учета регистра и только в комментарии. До правки регулярка была
+ * регистрозависимой (`TODO` → `todo` снимал все пометки, J4) и видела слово в
+ * любом месте строки. Комментарий — префикс перед маркером на той же строке:
+ * `//`, `/*`, `<!--`, `#`, `--`, `;`, `%` где угодно до маркера; `*`, `'`,
+ * `REM` — только первым символом строки (продолжение блочного комментария,
+ * VB, batch): иначе `a * todo` или строка `'todo'` стали бы пометкой.
+ * Слово `todo` в коде (`todoList`, строка `"todo"`) — не маркер.
+ */
+const MARKER_RE = /\b(todo|fixme|hack|xxx)\b/gi;
+const COMMENT_ANYWHERE = /\/\/|\/\*|<!--|#|--|;|%/;
+const COMMENT_LINE_START = /^\s*(?:\*|'|rem\b)/i;
+
+/** Вид маркера техдолга в строке (TODO → «TODO», FIXME/HACK/XXX → «FIXME») или null. */
+export function todoMarkerKind(line: string): "TODO" | "FIXME" | null {
+  let from: number;
+  const lead = line.match(COMMENT_LINE_START);
+  if (lead) {
+    from = lead[0].length;
+  } else {
+    const m = COMMENT_ANYWHERE.exec(line);
+    if (!m) return null;
+    from = m.index + m[0].length;
+  }
+  MARKER_RE.lastIndex = from;
+  const hit = MARKER_RE.exec(line);
+  MARKER_RE.lastIndex = 0;
+  if (!hit) return null;
+  return hit[1]!.toLowerCase() === "todo" ? "TODO" : "FIXME";
+}
 
 function toUtc(raw: string): { iso: string; ts: number | null } {
   const d = new Date(raw);
@@ -897,14 +958,34 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
   // --- 4. документация (+ флаги секций README, §7.4) ---
   const rootNames = topLevel.map((t) => t.name);
   const hasRoot = (re: RegExp) => rootNames.some((n) => re.test(n));
+  // В5.3-М (Р4в): файл документа засчитывается, только если в нем есть текст —
+  // не меньше DOC_MIN_CHARS непробельных символов (пустой LICENSE не лицензия,
+  // J6). Каталог (`LICENSES/`) — если такой текст есть хотя бы в одном файле.
+  const docWithContent = async (re: RegExp): Promise<boolean> => {
+    for (const entry of topLevel.filter((t) => re.test(t.name))) {
+      const files = entry.type === "tree" ? blobs.filter((b) => b.path.startsWith(`${entry.name}/`)).slice(0, 20) : blobs.filter((b) => b.path === entry.name);
+      for (const b of files) {
+        if (b.size < DOC_MIN_CHARS) continue;
+        try {
+          if (docHasContent((await git(["cat-file", "blob", b.sha])).stdout)) return true;
+        } catch {
+          /* блоб не прочитан — содержания не доказано */
+        }
+      }
+    }
+    return false;
+  };
   const docsPresenceFact = okFact(
     "docs.presence",
     {
       readme: hasRoot(/^readme(\.|$)/i),
       // М1.13 аудита В5.3: и LICENSE-MIT, COPYING, UNLICENSE, каталог LICENSES
-      license: hasRoot(/^(licen[cs]es?|copying|unlicense)([._-].*)?$/i),
-      contributing: hasRoot(/^contributing(\.|$)/i),
-      codeowners: hasRoot(/^codeowners(\.|$)/i),
+      license: await docWithContent(/^(licen[cs]es?|copying|unlicense)([._-].*)?$/i),
+      contributing: await docWithContent(/^contributing(\.|$)/i),
+      codeowners: await docWithContent(/^codeowners(\.|$)/i),
+      // Р4в: признак нового сборщика — файлы проверены по содержанию
+      // (расчет не подменяет их именем файла в корне)
+      content_checked: true,
     },
     "git",
     nowIso,
@@ -927,6 +1008,8 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
   // lock-файлов и картинок; `source_files = 0` — «кода нет» (Q&A №13)
   let sourceLoc = 0;
   const sourceFiles = blobs.filter((b) => isSourcePath(b.path)).length;
+  // В5.3-М (Р1): файлы тестов среди файлов кода — сигнал «есть тесты»
+  const testFiles = blobs.filter((b) => isTestPath(b.path)).length;
   // Ф2.3 (M5): ЛЮБОЙ обрыв потока `cat-file` — дедлайн, оборванный заголовок,
   // недочитанный блоб — делает LOC и TODO неполными. Раньше неполнота
   // помечалась только у дедлайна (`loc_note: "deadline"`), а обрыв заголовка
@@ -1008,6 +1091,7 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
       bytes: blobs.reduce((s, b) => s + b.size, 0),
       loc: locIncomplete ? null : loc,
       source_files: sourceFiles,
+      test_files: testFiles,
       source_loc: locIncomplete ? null : sourceLoc,
       ...(locIncomplete ? { loc_note: "incomplete" } : {}),
     },
@@ -1028,19 +1112,9 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
     if (Date.now() > deadline) break;
     try {
       const out = await git(["blame", "--porcelain", "-w", "-M", branch, "--", path], 60_000);
-      let currentTs: number | null = null;
-      let lineNo = 0;
-      for (const line of out.stdout.split("\n")) {
-        const hm = line.match(/^author-time (\d+)$/);
-        if (hm) {
-          currentTs = parseInt(hm[1]!, 10) * 1000;
-          continue;
-        }
-        if (line.startsWith("\t")) {
-          lineNo++;
-          const kind = todoKind(line.slice(1));
-          if (kind && currentTs !== null && now.getTime() - currentTs > MS_180D) older180++;
-        }
+      // Н2: время — по sha заголовка строки, а не последнее прочитанное
+      for (const { text, ts } of blameLineTimes(out.stdout)) {
+        if (todoKind(text) && ts !== null && now.getTime() - ts > MS_180D) older180++;
       }
       blamedFiles++;
     } catch {
@@ -1066,10 +1140,40 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
   return [timelineFact, summaryFact, docsPresenceFact, readmeFact, treeStatsFact, cicdConfigsFact, codeTodoFact];
 }
 
-function todoKind(line: string): "TODO" | "FIXME" | null {
-  const m = line.match(TODO_RE);
-  if (!m) return null;
-  return m[1] === "FIXME" ? "FIXME" : "TODO";
+const todoKind = todoMarkerKind;
+
+/** Р4в: в файле документа есть содержание — не меньше DOC_MIN_CHARS непробельных символов. */
+export const DOC_MIN_CHARS = 16;
+
+export function docHasContent(text: string): boolean {
+  return text.replace(/\s+/g, "").length >= DOC_MIN_CHARS;
+}
+
+/**
+ * В5.3-М (Н2): время строки `git blame --porcelain` — по sha ее заголовка.
+ * Porcelain печатает `author-time` только при ПЕРВОМ появлении коммита, у
+ * повторных групп есть лишь заголовок `<sha> <orig> <final> [<n>]`; прежний
+ * разбор брал последнее прочитанное время — старый TODO после свежей вставки
+ * другим коммитом считался свежим. Возврат: время (мс) каждой строки файла.
+ */
+export function blameLineTimes(porcelain: string): { text: string; ts: number | null }[] {
+  const times = new Map<string, number>();
+  const out: { text: string; ts: number | null }[] = [];
+  let sha: string | null = null;
+  for (const line of porcelain.split("\n")) {
+    const header = line.match(/^([0-9a-f]{40}) \d+ \d+(?: \d+)?$/);
+    if (header) {
+      sha = header[1]!;
+      continue;
+    }
+    const at = line.match(/^author-time (\d+)$/);
+    if (at && sha !== null) {
+      times.set(sha, parseInt(at[1]!, 10) * 1000);
+      continue;
+    }
+    if (line.startsWith("\t")) out.push({ text: line.slice(1), ts: sha !== null ? (times.get(sha) ?? null) : null });
+  }
+  return out;
 }
 
 function round3(x: number): number {

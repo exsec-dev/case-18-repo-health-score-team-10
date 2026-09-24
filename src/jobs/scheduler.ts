@@ -21,6 +21,7 @@ import { rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { enumerateCatalog, type CatalogEntry, type CatalogResult } from "../collectors/catalog";
+import { COLLECTOR_VERSION } from "../collectors/facts";
 import type { ScClient } from "../collectors/http";
 import { upsertRepo, runScan, scanCloneLimitsOf, scanGitUrl, type ScanResult } from "./runner";
 import { getPat } from "../auth/pat";
@@ -449,8 +450,26 @@ export function returnRepo(db: Database, repoId: number): void {
 
 export interface NightlyEnqueued {
   slug: string;
-  /** retry-ineligible — последний завершённый периодический скан непригоден для рейтинга (С3, круг 2) */
-  reason: "new" | "changed" | "forced" | "retry-failed" | "retry-ineligible";
+  /**
+   * retry-ineligible — последний завершённый периодический скан непригоден для рейтинга (С3, круг 2);
+   * recollect — последний пригодный скан собран сборщиком старше COLLECTOR_VERSION (В5.3-М, Н1)
+   */
+  reason: "new" | "changed" | "forced" | "retry-failed" | "retry-ineligible" | "recollect";
+}
+
+/** В5.3-М (Н1): порция доочереди «собрано старым сборщиком» за одну ночную волну (дефолт). */
+export const RECOLLECT_PER_WAVE_DEFAULT = 3000;
+
+/**
+ * `SCHEDULER_RECOLLECT_PER_WAVE` — порция пересборки фактов за волну: единственный
+ * рычаг нагрузки на живой API. Читается здесь, а не в `config.ts` (зона В5.2);
+ * мусор и отрицательное — дефолт, 0 — доочередь выключена.
+ */
+export function recollectPerWave(env: Record<string, string | undefined> = process.env): number {
+  const raw = env["SCHEDULER_RECOLLECT_PER_WAVE"];
+  if (raw === undefined || raw.trim() === "") return RECOLLECT_PER_WAVE_DEFAULT;
+  const n = Number(raw);
+  return Number.isInteger(n) && n >= 0 ? n : RECOLLECT_PER_WAVE_DEFAULT;
 }
 
 export interface NightlyResult {
@@ -475,6 +494,8 @@ export interface NightlyOptions {
   now?: Date;
   /** какие фазы исполняются на этом snapshot (Ф2.5) */
   phases?: CatalogPhases;
+  /** В5.3-М (Н1): порция доочереди «собрано старым сборщиком»; по умолчанию — recollectPerWave() */
+  recollectPerWave?: number;
 }
 
 /**
@@ -587,6 +608,8 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
   // полям уже собранного перечисления; дифф last_updated не меняется.
   // Кандидаты собираются с прежними гард'ами, ставятся после обхода батчами.
   const waveCandidates: { repoId: number; slug: string; reason: NightlyEnqueued["reason"]; likes: number | null }[] = [];
+  const recollectCandidates: typeof waveCandidates = [];
+  const recollectIds = new Set<number>();
   // П5: признак полосы сразу через trigger_kind (единый признак — П8);
   // строки refused несут trigger_kind='user' и в полосу периодики не попадают
   const hasLivePeriodicJob = (repoId: number): boolean =>
@@ -657,7 +680,24 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
         reason: fullRescan ? "forced" : changed ? "changed" : retryFailed ? "retry-failed" : "retry-ineligible",
         likes: entry.likes ?? existing.likes,
       });
+      continue;
     }
+    // В5.3-М (Н1): неизменный репо, чей последний пригодный скан собран
+    // сборщиком старше текущего (или до учета версий — NULL), — кандидат
+    // доочереди: правки сборщика иначе не дошли бы до рейтинга (D1)
+    const lastEligible = db
+      .query("SELECT collector_version FROM scans WHERE repo_id = ? AND rating_eligible = 1 ORDER BY id DESC LIMIT 1")
+      .get(repoId) as { collector_version: number | null } | null;
+    if (!recollectIds.has(repoId) && lastEligible !== null && (lastEligible.collector_version === null || lastEligible.collector_version < COLLECTOR_VERSION)) {
+      recollectIds.add(repoId);
+      recollectCandidates.push({ repoId, slug, reason: "recollect", likes: entry.likes ?? existing.likes });
+    }
+  }
+  // Н1: порция по лайкам (убывание) — бережно к живому API
+  recollectCandidates.sort((a, b) => (b.likes ?? -1) - (a.likes ?? -1));
+  for (const cand of recollectCandidates.slice(0, Math.max(0, opts.recollectPerWave ?? recollectPerWave()))) {
+    enqueuedRepoIds.add(cand.repoId);
+    waveCandidates.push(cand);
   }
 
   // В4.4 (кластер F): лайки по убыванию (нет лайков — в хвост), постановка —

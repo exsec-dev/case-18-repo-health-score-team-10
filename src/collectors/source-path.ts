@@ -40,6 +40,23 @@ export function isSourcePath(path: string): boolean {
 }
 
 /**
+ * В5.3-М (Р1, модель 4.3.0-hci): файл тестов среди файлов кода — путь содержит
+ * каталог `test/`, `tests/`, `__tests__/`, `spec/`, `specs/` или имя файла
+ * `test_*`, `*_test.*`, `*.test.*`, `*.spec.*` (регистр не важен). Считается
+ * только среди `isSourcePath`: документ в `tests/` тестом не становится.
+ */
+const TEST_DIRS = new Set(["test", "tests", "__tests__", "spec", "specs"]);
+const TEST_NAME = /^test_|_test\.|\.test\.|\.spec\./i;
+
+export function isTestPath(path: string): boolean {
+  if (!isSourcePath(path)) return false;
+  const parts = path.split("/");
+  const base = parts.pop() ?? "";
+  if (parts.some((dir) => TEST_DIRS.has(dir.toLowerCase()))) return true;
+  return TEST_NAME.test(base);
+}
+
+/**
  * Признак «кода нет» по корню (`tree.stats.top_level`) для фактов без
  * `source_files`: в корне только файлы (каталогов нет — значит, других файлов
  * в репозитории нет), и ни один из них не код. Корень пуст — решает
