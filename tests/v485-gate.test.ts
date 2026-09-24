@@ -125,12 +125,14 @@ describe("гейт В4.8.5: видимость internal", () => {
     expect(visibilityOf("weird")).toBe("unknown");
   });
 
-  test("права строки internal-репо несут visibility internal; «свой» по одной видимости не выводится", async () => {
+  // В5.3 (25.09, Екатерина): internal, код которого виден токену, — «свой» для анализа
+  // (вытесняет «по одной видимости не выводится» В4.8.5)
+  test("права строки internal-репо несут visibility internal; виден токену — «свой»", async () => {
     const res = await put("/api/me/favorites", { repository: "inner/team-repo" });
     expect(res.status).toBe(200);
     const row = (await favorites()).find((f) => f.org === "inner" && f.repo === "team-repo");
     expect(row?.access?.visibility).toBe("internal");
-    expect(row?.access?.own).toBe(false);
+    expect(row?.access?.own).toBe(true);
   });
 });
 
@@ -143,15 +145,17 @@ describe("закрытие В4.8.5 (ревью): AppSec 404 не делает ч
     expect(appsecOn404("granted", "internal", "granted")).toBe("granted");
   });
 
-  test("internal-репо: CI 403, AppSec 404 — Security не открыт, не «свой», анализ не ставится", async () => {
+  // В5.3 (25.09): Security у чужого internal по-прежнему не открывается (AppSec 404 не
+  // подтверждение), но «свой» теперь по доступу к коду — анализ ставится, AI-обзор нет
+  test("internal-репо: CI 403, AppSec 404 — Security не открыт, но «свой» по коду, анализ не отказан как чужой", async () => {
     const res = await put("/api/me/favorites", { repository: "inner/withid-team" });
     expect(res.status).toBe(200);
     const body = (await res.json()) as { check: { enqueue: { status: string; code: string | null } | null } };
-    expect(body.check.enqueue?.code).toBe("not_own");
+    expect(body.check.enqueue?.code).not.toBe("not_own");
     const row = (await favorites()).find((f) => f.org === "inner" && f.repo === "withid-team");
     expect(row?.access?.visibility).toBe("internal");
     expect(row?.access?.appsec).toBe(false);
-    expect(row?.access?.own).toBe(false);
+    expect(row?.access?.own).toBe(true);
   });
 
   test("приватный, видимый токену, при AppSec 404 — по-прежнему «свой» (правило Ф1.4 не сломано)", async () => {

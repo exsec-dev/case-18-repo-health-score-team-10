@@ -727,6 +727,15 @@ const routes = {
         if (card.viewer?.own !== true) {
           return Response.json({ error: { code: "not_own", message: "генерация описания доступна владельцу репозитория" } }, { status: 403 });
         }
+        // В5.3 (25.09): «свой» по доступу к коду (internal/private без прав на CI и
+        // AppSec) анализируется, но AI-обзор — только при полном Score: текст модели
+        // виден лишь зрителю с обоими каналами (решение 22.09), генерировать его зря нельзя
+        if (card.access?.cicd !== "granted" || card.access?.appsec !== "granted") {
+          return Response.json(
+            { error: { code: "no_full_access", message: "AI-обзор доступен, когда токену открыты CI/CD и Безопасность этого репозитория" } },
+            { status: 403 },
+          );
+        }
         const repoRow = db.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number } | null;
         if (repoRow === null) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
         // 23.09 (Алексей): «Обновить описание» без свежего анализа бессмысленна —

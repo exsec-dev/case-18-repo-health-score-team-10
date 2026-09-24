@@ -255,3 +255,17 @@ describe("В5.3: bus factor — без веса методики, показыв
     expect(displayOnly("activity", "bus_factor")).toBe(true);
   });
 });
+
+// ---------- В5.3 (25.09): анализ internal-репо по доступу к коду; AI-обзор — только при полном Score ----------
+import { isOwnRepo } from "../src/auth/access";
+
+describe("В5.3: «свой» — и internal, видимый токену", () => {
+  test("internal/private с доступом к коду — свой; публичный без CI/AppSec — нет; без доступа — нет", () => {
+    const base = { cicd: "denied", appsec: "denied" } as const;
+    expect(isOwnRepo({ ...base, repo: "granted", visibility: "internal" })).toBe(true);
+    expect(isOwnRepo({ ...base, repo: "granted", visibility: "private" })).toBe(true);
+    expect(isOwnRepo({ ...base, repo: "granted", visibility: "public" })).toBe(false);
+    expect(isOwnRepo({ ...base, repo: "denied", visibility: "internal" })).toBe(false);
+    expect(isOwnRepo({ ...base, repo: "granted", visibility: "unknown" })).toBe(false);
+  });
+});

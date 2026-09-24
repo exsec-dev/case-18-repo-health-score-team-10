@@ -191,7 +191,14 @@ export interface NormalizedAccess {
  * ни CI, ни Security, своим не считается.
  */
 export function isOwnRepo(a: NormalizedAccess): boolean {
-  return a.cicd === "granted" || a.appsec === "granted" || (a.visibility === "private" && a.repo === "granted");
+  // В5.3 (25.09, Екатерина): internal-репозиторий, код которого виден токену, — тоже
+  // «свой» для анализа (как приватный): «у нас же есть доступ к коду». AI-обзор ему
+  // при этом недоступен без прав на CI/CD и Безопасность (гейт маршрута /summary)
+  return (
+    a.cicd === "granted" ||
+    a.appsec === "granted" ||
+    ((a.visibility === "private" || a.visibility === "internal") && a.repo === "granted")
+  );
 }
 
 /**
