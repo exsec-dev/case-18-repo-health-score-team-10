@@ -113,7 +113,7 @@ import {
 } from "./format";
 import { linkProps } from "./router";
 import { LoginButton, Page, type Crumb } from "./Shell";
-import { SLOT_EMPTY } from "./slots";
+import { SLOT_EMPTY, scoreHistoryView } from "./slots";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
 
 type Card = RepoCard;
@@ -541,7 +541,7 @@ function CardSlots({ card, org, repo, onChanged }: { card: Card; org: string; re
   return (
     <Flex gap={3} wrap role="region" aria-label="AI-описание, история и значок">
       <AiSummarySlot card={card} org={org} repo={repo} onChanged={onChanged} />
-      <ScoreHistorySlot org={org} repo={repo} locked={card.ai === undefined} />
+      <ScoreHistorySlot org={org} repo={repo} />
       <BadgeSlot org={org} repo={repo} />
     </Flex>
   );
@@ -640,7 +640,7 @@ function EvolutionSection({ org, repo, enabled }: { org: string; repo: string; e
       </summary>
       {tooEarly ? (
         <Text variant="body-2" color="complementary">
-          {"Слишком рано судить о динамике: истории меньше 2 дней. Сравнение взглядов появится, когда накопятся сканы за больший срок."}
+          {"Слишком рано судить о динамике: истории меньше 2 дней. Сравнение взглядов появится, когда накопятся анализы за больший срок."}
         </Text>
       ) : (
         <Flex direction="column" gap={2}>
@@ -664,10 +664,11 @@ function EvolutionSection({ org, repo, enabled }: { org: string; repo: string; e
   );
 }
 
-function ScoreHistorySlot({ org, repo, locked }: { org: string; repo: string; locked: boolean }) {
+function ScoreHistorySlot({ org, repo }: { org: string; repo: string }) {
   const { state } = useJson<HistoryResponse>(`/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/history`);
   const data = dataOf(state);
   const points = data?.points ?? [];
+  const view = scoreHistoryView(data);
   const W = 320;
   const H = 96;
   const pad = 6;
@@ -700,13 +701,9 @@ function ScoreHistorySlot({ org, repo, locked }: { org: string; repo: string; lo
             История оценки
           </Text>
         </Flex>
-        {points.length === 0 ? (
-          <Text variant="body-2" color="complementary">
-            {SLOT_EMPTY.scoreHistory.text}
-          </Text>
-        ) : (
+        {view.chart && (
           <>
-            <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="График оценки по сканам" style={{ width: "100%", height: "auto" }}>
+            <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="График оценки по анализам" style={{ width: "100%", height: "auto" }}>
               {[0, 25, 50, 75, 100].map((g) => {
                 const y = H - pad - (g / 100) * (H - 2 * pad);
                 return <line key={g} x1={pad} x2={W - pad} y1={y} y2={y} stroke="var(--g-color-line-generic)" strokeDasharray="2 4" strokeWidth={1} />;
@@ -719,19 +716,13 @@ function ScoreHistorySlot({ org, repo, locked }: { org: string; repo: string; lo
               )}
             </svg>
             <Flex gap={3} wrap>
-              <Text variant="body-2" color="complementary">{`HealthCraft Index по ${points.length} сканам`}</Text>
-              {fullLine !== null && (
-                <Text variant="body-2" color="complementary">
-                  {"пунктир – полный Score (по правам зрителя)"}
-                </Text>
-              )}
+              <Text variant="body-2" color="complementary">{view.count}</Text>
+              <Text variant="body-2" color="complementary">{view.full}</Text>
             </Flex>
           </>
         )}
         <Text variant="body-2" color="complementary">
-          {locked
-            ? SLOT_EMPTY.scoreHistory.text
-            : `Оценка сопоставима только внутри одной версии модели (текущая – ${data?.modelVersion ?? "..."}): график наполняется по мере новых сканов, и линий там, где данных не было, нет – это то же правило tri-state, что и у категорий.`}
+          {view.text}
         </Text>
       </Flex>
     </Card>

@@ -25,6 +25,7 @@ import {
   fmtDecimal,
   fmtLoss,
   fmtScore,
+  fmtSigned,
   fullScorePath,
   noDataReason,
   pathText,
@@ -74,8 +75,21 @@ export const FIRST_ACTIONS = 3;
 
 // ---------- шаблоны (закрытый набор, К9.1) ----------
 
-/** Строка «близко к порогу» — если показатель в пределах 2 баллов от границы зоны. */
-export function thresholdNote(value: number): string | null {
+/** Действие-кандидат для строки порога: номер в разделе «Рекомендации» и эффект в шкале показателя. */
+export interface ThresholdAction {
+  n: number;
+  action: string;
+  delta: number;
+}
+
+/**
+ * Строка «близко к порогу» — если показатель в пределах 2 баллов от границы зоны.
+ * Г1.16 (§2 24.09 «Вопрос 31 §4», вариант А): ниже границы строка называет
+ * первое действие, которое ОДНО переводит оценку в следующую зону. Эффекты не
+ * складываются — каждый посчитан при прочих равных; `actions` — только с
+ * эффектом в шкале этого показателя (отбор — `thresholdActions`).
+ */
+export function thresholdNote(value: number, actions: readonly ThresholdAction[] = []): string | null {
   const v = Math.round(value);
   const [success, warning] = [SCORE_SCALE[0]!, SCORE_SCALE[1]!];
   const bounds: [number, string, string][] = [
@@ -84,9 +98,23 @@ export function thresholdNote(value: number): string | null {
   ];
   for (const [t, upperZone, lowerZone] of bounds) {
     if (v >= t && v - t <= 2) return `${t} – нижняя граница зоны «${upperZone}»: при ${t - 1} баллах оценка относилась бы к зоне «${lowerZone}».`;
-    if (v < t && t - v <= 2) return `${t - 1} – верхняя граница зоны «${lowerZone}»: при ${t} баллах оценка относилась бы к зоне «${upperZone}».`;
+    if (v < t && t - v <= 2) {
+      const base = `${t - 1} – верхняя граница зоны «${lowerZone}»: при ${t} баллах оценка относилась бы к зоне «${upperZone}».`;
+      const lift = actions.find((a) => a.delta > 0 && Math.round(value + a.delta) >= t);
+      return lift ? `${base} Рекомендация ${lift.n} одна переводит оценку в эту зону: «${lift.action.replace(/\.\s*$/, "")}» (${fmtSigned(lift.delta)}).` : base;
+    }
   }
   return null;
+}
+
+/**
+ * Действия с эффектом в шкале показателя (В4.3): у правила без канала эффект
+ * посчитан в HealthCraft Index, у канального (CI/CD, AppSec) — в Repo Health Score.
+ */
+export function thresholdActions(recs: readonly CardRecommendation[], metric: string): ThresholdAction[] {
+  return recs.flatMap((r, i) =>
+    r.deltaScore !== null && (metric === INDEX ? r.channel === null : r.channel !== null) ? [{ n: i + 1, action: r.action, delta: r.deltaScore }] : [],
+  );
 }
 
 /** Плашка балла категории/показателя — как `Label` UI. */
@@ -237,7 +265,7 @@ function scoredSection(card: RepoCard, metrics: Metric[]): Block[] {
   // строка «близко к порогу» относится к конкретному числу: когда чисел два,
   // она называет свой показатель
   for (const m of shown) {
-    const near = thresholdNote(m.value);
+    const near = thresholdNote(m.value, thresholdActions(card.recommendations, m.name));
     if (near) notes.push({ line: line(shown.length > 1 ? `${m.name}: ${near}` : near) });
   }
   // Круг 2, п.3 (вариант 2 владельца): пояснение к числам — ОДНОЙ строкой под
@@ -621,14 +649,15 @@ function coverageCalc(card: RepoCard): Block[] {
   ];
 }
 
-/** Балл категории из показателей: вес × балл; особые правила (трекер пуст, CI без запусков) — строкой. */
+/**
+ * Балл категории из показателей: вес × балл; особое правило (трекер пуст) — строкой.
+ * CI без запусков при модели 4.1.0 — категория без данных, сюда не попадает
+ * (Г1.17, §2 24.09 «Вопрос 31 §4»).
+ */
 function categoryCalc(key: CategoryKey, cat: CardCategory): Block[] {
   const title: Block = { kind: "paragraph", tone: "subhead", lines: [[strong(`Балл категории ${CATEGORY_TITLES[key]}`)]] };
   if (key === "issues" && "tracker_unused" in cat.submetrics) {
     return [title, { kind: "paragraph", tone: "fine", lines: [line(`Задач в трекере нет, поэтому категория получает минимальный балл: ${fmtDecimal(cat.score!, 1)}.`)] }];
-  }
-  if (key === "cicd" && cat.no_data) {
-    return [title, { kind: "paragraph", tone: "fine", lines: [line(`Результаты запусков CI недоступны, поэтому балл категории – половина балла конфигурации CI: ${fmtDecimal(cat.score!, 1)}.`)] }];
   }
   const weights = SUBWEIGHTS[key] as Record<string, number>;
   const parts = Object.entries(cat.submetrics)
@@ -844,9 +873,11 @@ function rawFieldShown(field: string): boolean {
  *  23.09: портирован в модель отчёта В4.9 при мерже v5 → main. */
 function fraudBlock(card: RepoCard): Block[] {
   const fraud = card.ai?.fraud;
-  if (fraud === undefined || fraud === null || fraud.factors.length === 0) return [];
+  // флаггер может вернуть факторы при flag: false (валидатор это пропускает) —
+  // подозрение печатается только при флаге, как в кабинете (`MePage.tsx`)
+  if (fraud === undefined || fraud === null || fraud.flag !== true || fraud.factors.length === 0) return [];
   const out: Block[] = [h2("Подозрение на искусственную активность")];
-  out.push(para(line("Автоматический анализ нашёл pattern'ы, похожие на накрутку активности. Это подозрение для проверки человеком, а не приговор: оценка репозитория от него не меняется.")));
+  out.push(para(line("Автоматический анализ нашел признаки, похожие на накрутку активности. Это подозрение для проверки человеком, а не приговор: оценка репозитория от него не меняется.")));
   out.push({ kind: "list", items: fraud.factors.map((f) => [strong(f.key), text(` – ${f.note}`)] as InlineLine) });
   return out;
 }

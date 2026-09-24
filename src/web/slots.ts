@@ -17,6 +17,8 @@
 // Источники: К5.4 (AI-summary и ступень оп-ина), К5.7 (история Score),
 // К5.8 (публичный API и badge), К5.15 (сравнение репозиториев).
 
+import type { HistoryResponse } from "../summary/history-contract";
+
 /**
  * Контракты полей слотов. Ключ — слот, значение — имена полей, которые В5
  * обязана отдать (или, для `compare`, имена столбцов сравнения). Проверяются
@@ -72,8 +74,8 @@ export const SLOT_EMPTY: Record<keyof typeof SLOT_CONTRACTS, { title: string; te
   scoreHistory: {
     title: "История оценки",
     text:
-      "Пока показывать нечего: нужна хотя бы вторая оценка по той же версии методики. " +
-      "График будет пополняться после каждого анализа; там, где данных не было, точек не будет.",
+      "Пока показывать нечего: по текущей версии методики у репозитория еще нет оценок. " +
+      "График будет пополняться после каждого анализа.",
   },
   badge: {
     title: "Значок для README",
@@ -87,3 +89,42 @@ export const SLOT_EMPTY: Record<keyof typeof SLOT_CONTRACTS, { title: string; te
       "Где данных нет, будет «нет данных», а не ноль.",
   },
 };
+
+/**
+ * К-2 В5.3: что показывает слот истории — по точкам и правам на историю, а не по
+ * правам на AI-текст (история HealthCraft Index публична; прежняя подпись брала
+ * `card.ai === undefined` и у зрителя без прав печатала «показывать нечего» под
+ * нарисованным графиком). Правило AGENTS.md 23.09: пустое состояние — тестом на
+ * данных. Точка графика — оценка с числом; одна точка линии не образует.
+ */
+export interface ScoreHistoryView {
+  chart: boolean;
+  /** подпись под графиком — сколько анализов на нем */
+  count: string | null;
+  /** что с Repo Health Score: пунктир (права есть) или кому он виден */
+  full: string | null;
+  text: string;
+}
+
+const HISTORY_ONE =
+  "Пока есть одна оценка по текущей версии методики – для графика нужна хотя бы вторая. Новая точка появляется после каждого анализа.";
+const HISTORY_FOOTER = "На графике – оценки по текущей версии методики; где данных не было, линия прерывается.";
+
+export function scoreHistoryView(data: Pick<HistoryResponse, "points" | "fullOpen"> | null): ScoreHistoryView {
+  const points = data?.points ?? [];
+  const fullOpen = data?.fullOpen === true;
+  const drawn = (key: "healthcraftIndex" | "repoHealthScore"): number => points.filter((p) => p[key] !== null).length;
+  const best = Math.max(drawn("healthcraftIndex"), fullOpen ? drawn("repoHealthScore") : 0);
+  if (best === 0) return { chart: false, count: null, full: null, text: SLOT_EMPTY.scoreHistory.text };
+  if (best === 1) return { chart: false, count: null, full: null, text: HISTORY_ONE };
+  const n = points.length;
+  const word = n % 10 === 1 && n % 100 !== 11 ? "анализу" : "анализам";
+  return {
+    chart: true,
+    count: `HealthCraft Index по ${n} ${word}`,
+    full: fullOpen
+      ? "пунктир – Repo Health Score: 6 категорий, включая CI/CD и Безопасность"
+      : "Repo Health Score на графике виден участникам репозитория.",
+    text: HISTORY_FOOTER,
+  };
+}
