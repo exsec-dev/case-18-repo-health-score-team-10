@@ -11,7 +11,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { lstat, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Fact, GIT_KINDS, noDataFact, okFact } from "./facts";
+import { Fact, GIT_KINDS, noDataFact, okFact, scrubDetail } from "./facts";
+import { isSourcePath } from "./source-path";
 import { parseYamlSubset } from "./yamlmini";
 import type { CloneLimits, ScanCloneLimits } from "../config";
 
@@ -487,7 +488,7 @@ async function cleanupFailedClone(dir: string): Promise<void> {
 
 /** Полный набор git-фактов как no-data (клон не удался/пустой). */
 export function gitFactsNoData(reason: "limits" | "empty" | "other", detail: string, collectedAt = new Date().toISOString()): Fact[] {
-  return GIT_KINDS.map((k) => noDataFact(k, reason, "git", detail, collectedAt));
+  return GIT_KINDS.map((k) => noDataFact(k, reason, "git", scrubDetail(detail), collectedAt));
 }
 
 // ---------- robot-эвристика v1 (план В1; сменяема — сырьё хранится полностью;
@@ -872,7 +873,9 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
   // --- 3. CI-конфиги (канон: полный список .sourcecraft/** + has_steps) ---
   const scPaths = blobs.map((b) => b.path).filter((p) => p.startsWith(".sourcecraft/")).sort();
   const hasCiYaml = scPaths.includes(".sourcecraft/ci.yaml");
-  let hasSteps = false;
+  // М2.1 аудита В5.3: неразобранный ci.yaml — `has_steps: null` (неизвестно),
+  // а не «шагов нет»; расчет дает CI «нет данных»
+  let hasSteps: boolean | null = false;
   let stepsNote: string | undefined;
   if (hasCiYaml) {
     const ciBlob = blobs.find((b) => b.path === ".sourcecraft/ci.yaml")!;
@@ -880,6 +883,7 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
       const content = await git(["cat-file", "blob", ciBlob.sha]);
       hasSteps = ciHasSteps(parseYamlSubset(content.stdout));
     } catch (e) {
+      hasSteps = null;
       stepsNote = `ci.yaml parse failed: ${String((e as Error).message).slice(0, 80)}`;
     }
   }
@@ -897,7 +901,8 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
     "docs.presence",
     {
       readme: hasRoot(/^readme(\.|$)/i),
-      license: hasRoot(/^licen[cs]e(\.|$)/i),
+      // М1.13 аудита В5.3: и LICENSE-MIT, COPYING, UNLICENSE, каталог LICENSES
+      license: hasRoot(/^(licen[cs]es?|copying|unlicense)([._-].*)?$/i),
       contributing: hasRoot(/^contributing(\.|$)/i),
       codeowners: hasRoot(/^codeowners(\.|$)/i),
     },
@@ -918,6 +923,10 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
   // --- 5. LOC + TODO/FIXME потоково (git cat-file --batch) ---
   const candidates = blobs.filter((b) => b.size > 0 && b.size <= textCap);
   let loc = 0;
+  // М2.3 аудита В5.3: строки и пометки КОДА — без документов, лицензий,
+  // lock-файлов и картинок; `source_files = 0` — «кода нет» (Q&A №13)
+  let sourceLoc = 0;
+  const sourceFiles = blobs.filter((b) => isSourcePath(b.path)).length;
   // Ф2.3 (M5): ЛЮБОЙ обрыв потока `cat-file` — дедлайн, оборванный заголовок,
   // недочитанный блоб — делает LOC и TODO неполными. Раньше неполнота
   // помечалась только у дедлайна (`loc_note: "deadline"`), а обрыв заголовка
@@ -970,7 +979,11 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
         if (probe.includes(0)) continue; // бинарный — не текст
         const text = new TextDecoder("utf-8", { fatal: false }).decode(buf);
         const lines = text.split("\n");
-        loc += lines.length - 1;
+        // М2.2: строка без завершающего перевода строки — тоже строка
+        const fileLoc = lines.length - (text.endsWith("\n") ? 1 : 0);
+        loc += fileLoc;
+        if (!isSourcePath(entry.path)) continue;
+        sourceLoc += fileLoc;
         for (let ln = 0; ln < lines.length; ln++) {
           const kind = todoKind(lines[ln]!);
           if (kind) todoOccs.push({ path: entry.path, line: ln + 1, kind });
@@ -994,6 +1007,8 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
       file_count: blobs.length,
       bytes: blobs.reduce((s, b) => s + b.size, 0),
       loc: locIncomplete ? null : loc,
+      source_files: sourceFiles,
+      source_loc: locIncomplete ? null : sourceLoc,
       ...(locIncomplete ? { loc_note: "incomplete" } : {}),
     },
     "git",

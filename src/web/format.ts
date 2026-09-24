@@ -513,6 +513,11 @@ export function lockedCategoryText(access: string | undefined, auth: string | un
  */
 export function noDataReason(key: string, reason: string | null | undefined): string {
   const r = (reason ?? "").trim();
+  // 4.2.0 (М1.2, М2.1 аудита В5.3): причины «мало данных» — каждая своей веткой
+  if (r.startsWith("too little data — no finding density")) return "Находки AppSec есть, но размер кода неизвестен и доля закрытых не посчитана – категорию не оцениваем.";
+  if (r.startsWith("too little data — no commit history")) return "Истории коммитов нет – без нее активность не оцениваем: одни счетчики запросов на слияние и релизов категорию не определяют.";
+  if (r.startsWith("too little data — no lines of code")) return "В репозитории нет строк кода, по которым считается плотность TODO, – категорию не оцениваем.";
+  if (r.startsWith("ci.yaml not parsed")) return "Файл .sourcecraft/ci.yaml не удалось разобрать – есть ли в нем шаги, неизвестно, поэтому категорию не оцениваем.";
   if (key === "security" || r.startsWith("AppSec data unavailable")) return SECURITY_NO_DATA;
   if (r.startsWith("ci runs no-data")) return CI_RUNS_CAP_TEXT;
   if (r === "git channel no-data") return "Не удалось скачать репозиторий – произошла ошибка или он больше лимита сервиса.";

@@ -2,6 +2,7 @@
 // compute (категории, tri-state перенормировка, coverage/NULL, CI-cap,
 // secrets-кап, bad-channel stale-замещение, идемпотентность записи).
 // Ручная арифметика ожиданий — в комментариях против проверок.
+import { MODEL_VERSION } from "../src/score/model";
 import { afterAll, describe, expect, test } from "bun:test";
 import {
   CLOSE_DAYS,
@@ -82,7 +83,7 @@ describe("compute: здоровое репо (ручная арифметика)
     expect(s.repoHealthCoverage).toBeCloseTo(0.8, 10);
     // (15·80.734 + 15·100 + 15·69.793 + 15·89.425 + 20·90.29)/80 = 86.31
     expect(s.repoHealthScore!).toBeCloseTo(86.31, 1);
-    expect(s.modelVersion).toBe("4.1.0-hci");
+    expect(s.modelVersion).toBe(MODEL_VERSION);
     expect(s.codeEmpty).toBe(false);
     expect(s.stale).toEqual([]);
   });
@@ -253,7 +254,7 @@ describe("compute: здоровое репо (ручная арифметика)
     expect(rows1).toEqual([{ healthcraft_index: Math.round(s.healthcraftIndex!) }]); // полного итога в схеме нет (К-Ф3.3)
     writeScores(t.db, { ...s, modelVersion: "9.9.9-test" });
     const rows = t.db.query("SELECT model_version FROM scores WHERE scan_id = ? ORDER BY model_version").all(scanId) as { model_version: string }[];
-    expect(rows.map((r) => r.model_version)).toEqual(["4.1.0-hci", "9.9.9-test"]);
+    expect(rows.map((r) => r.model_version)).toEqual([MODEL_VERSION, "9.9.9-test"]);
     // immutable: старые строки не перезаписаны
     t.db.exec("DELETE FROM scores WHERE model_version = '9.9.9-test'");
   });

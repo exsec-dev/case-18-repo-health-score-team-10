@@ -110,8 +110,9 @@ describe("presence-правила: реальный прирост итога (�
       { key: "tree.stats", value: { top_level: [], file_count: 0, bytes: 0, loc: 0 } },
       { key: "docs.presence", value: { readme: true, license: false, contributing: true, codeowners: true } },
     );
-    const lic = recommend(t.db, seedScan(t, empty), { now: NOW }).find((r) => r.ruleId === "license-missing")!;
-    expect({ delta: lic.deltaScore, impact: lic.expectedImpact }).toEqual({ delta: 0, impact: "+0,0 к HealthCraft Index – в репозитории нет кода" });
+    // 4.2.0 (М1.14): репо без кода получает один совет — добавить код; россыпи «+0,0» нет
+    const emptyRecs = recommend(t.db, seedScan(t, empty), { now: NOW });
+    expect(emptyRecs.map((r) => r.ruleId)).toEqual(["add-code"]);
 
     // только git-документация: покрытие рейтинга < 0.4 → итог NULL
     const sparse: FactSpec[] = [{ key: "docs.presence", value: { readme: true, license: false, contributing: true, codeowners: true } }];

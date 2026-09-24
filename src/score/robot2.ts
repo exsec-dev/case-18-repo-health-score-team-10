@@ -8,7 +8,7 @@
 // коммит может быть robot=true И sync=true; оба исключаются из
 // частоты и freshness (compute игнорирует v1-флаги в фактах —
 // истина robot2). Сырьё (author+committer+обе даты) в фактах полно.
-import { NOREPLY_DOMAINS, ROBOT_NAME_MARKERS } from "./model";
+import { NOREPLY_DOMAINS, ROBOT_EMAILS, ROBOT_NAME_MARKERS } from "./model";
 
 /** ширина скользящего окна burst-коллапса */
 export const BURST_WINDOW_MS = 2_000;
@@ -40,8 +40,10 @@ export function isRobotAuthor(authorName: string, authorEmail: string): boolean 
     if (n.includes(marker) || e.includes(marker)) return true;
   }
   if (localEndsWithBot(e)) return true;
+  // 4.2.0 (М1.7): точное совпадение — поддомены (`users.noreply.github.com`) не роботы
+  if (ROBOT_EMAILS.includes(e)) return true;
   const domain = e.split("@")[1] ?? "";
-  if (domain && NOREPLY_DOMAINS.some((d) => domain === d || domain.endsWith(`.${d}`))) return true;
+  if (domain && NOREPLY_DOMAINS.includes(domain)) return true;
   return false;
 }
 

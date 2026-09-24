@@ -2,6 +2,7 @@
 // публичная проекция points (индекс/покрытие всем, полный Score по правам),
 // tri-state NULL-точки, обрыв на MODEL_VERSION, привязка head_sha,
 // append-история ai_notes и её видимость (текст не публичен).
+import { MODEL_VERSION } from "../src/score/model";
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -52,7 +53,7 @@ describe("getRepoHistory: проекция, tri-state, версия модели
     expect(anon.points.map((p) => p.healthcraftIndex)).toEqual([40, 61]);
     expect(anon.points.every((p) => p.repoHealthScore === null)).toBe(true); // полный итог не публичен
     expect(anon.points.map((p) => p.headSha)).toEqual(["aaa111", "bbb222"]);
-    expect(anon.modelVersion).toBe("4.1.0-hci");
+    expect(anon.modelVersion).toBe(MODEL_VERSION);
 
     const open = getRepoHistory(db, "v5", "h", { access: OPEN })!;
     expect(open.fullOpen).toBe(true);

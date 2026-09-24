@@ -3,7 +3,7 @@
 // историей в compute), выход — сырые числа для score-модели и показа
 // (mirror_likeness — показ, без веса). Robot-истина — robot2
 // (v1-флаги в фактах игнорируются, Q18).
-import { BUS_FACTOR_SHARE, BUS_FACTOR_WINDOW_DAYS } from "./model";
+import { BUS_FACTOR_SHARE, BUS_FACTOR_WINDOW_DAYS, OLD_SHARE_MIN_BASE } from "./model";
 import { robot2Flags } from "./robot2";
 
 export interface TimelineEventValue {
@@ -29,7 +29,7 @@ export interface DerivedMetrics {
   robotRatioV2: number | null;
   /** показ (§7.3): доля sync + authors/committers — без веса */
   mirrorLikeness: { sync_share: number; authors: number; committers: number } | null;
-  /** авторы всего (пол 0.2 у соло) — все author-emails таймлайна */
+  /** авторы-люди (пол 0.2 у соло): email человеческих коммитов — 4.2.0 (М1.6) без robot/sync */
   contributorsTotal: number | null;
   /**
    * В5 (К5.9): bus factor — сколько авторов покрывают половину человеческих
@@ -98,7 +98,8 @@ export function deriveMetrics(ok: Map<string, unknown>, now: Date): DerivedMetri
       if (flags[i]!.sync) syncCount++;
       if (flags[i]!.robot) robotCount++;
       const at = tsOf(e.author?.date);
-      if (excluded || at === null) return;
+      // 4.2.0 (М1.11): дата автора из будущего не делает репо «свежим навсегда»
+      if (excluded || at === null || at > now.getTime() + DAY_MS) return;
       humanTs.push(at);
       if (email) humanEmails.add(email);
       activeMonth.add(new Date(at).toISOString().slice(0, 7));
@@ -112,7 +113,7 @@ export function deriveMetrics(ok: Map<string, unknown>, now: Date): DerivedMetri
         .filter(({ e, f }) => {
           if (f.robot || f.sync) return false;
           const at = tsOf(e.author?.date);
-          return at !== null && at >= from90;
+          return at !== null && at >= from90 && at <= now.getTime() + DAY_MS;
         })
         .map(({ e }) => (e.author?.email ?? "").toLowerCase())
         .filter((x) => x !== ""),
@@ -159,7 +160,7 @@ export function deriveMetrics(ok: Map<string, unknown>, now: Date): DerivedMetri
         authors: authorsAll.size,
         committers: committersAll.size,
       },
-      contributorsTotal: authorsAll.size,
+      contributorsTotal: humanEmails.size,
       busFactor,
       ...issuesCodeRest(ok, now),
     };
@@ -187,7 +188,10 @@ function issuesCodeRest(ok: Map<string, unknown>, now: Date): Pick<DerivedMetric
   const open = typeof stats?.open === "number" ? stats.open : null;
   const closed = typeof stats?.closed === "number" ? stats.closed : null;
   const stale90 = typeof stats?.stale_90d === "number" ? stats.stale_90d : null;
-  const staleShare = open !== null && open > 0 && stale90 !== null ? stale90 / open : null;
+  // 4.2.0 (М1.3): открытых 0 при закрытых — «зависших нет» (данные, доля 0);
+  // no-data только у пустого трекера (0/0 — отдельное правило категории)
+  const staleShare =
+    open !== null && open > 0 && stale90 !== null ? stale90 / open : open === 0 && closed !== null && closed > 0 ? 0 : null;
   const resolutionRatio = open !== null && closed !== null && open + closed > 0 ? closed / (open + closed) : null;
 
   // code.todo + tree.stats
@@ -196,14 +200,25 @@ function issuesCodeRest(ok: Map<string, unknown>, now: Date): Pick<DerivedMetric
   const fixme = typeof todo?.fixme === "number" ? todo.fixme : null;
   const older = typeof todo?.older_180d === "number" ? todo.older_180d : null;
   const todoTotal = count !== null && fixme !== null ? count + fixme : null;
-  const tree = ok.get("tree.stats") as { top_level?: unknown[]; loc?: unknown } | undefined;
-  const loc = typeof tree?.loc === "number" ? tree.loc : null;
+  const tree = ok.get("tree.stats") as { top_level?: unknown[]; loc?: unknown; source_loc?: unknown } | undefined;
+  // М2.3: плотность — по строкам кода (`source_loc`); у фактов до правки
+  // сборщика поля нет — берется весь LOC, как раньше
+  const loc = typeof tree?.source_loc === "number" ? tree.source_loc : "source_loc" in (tree ?? {}) ? null : typeof tree?.loc === "number" ? tree.loc : null;
   const todoDensityPerKloc = todoTotal !== null && loc !== null && loc > 0 ? (todoTotal / loc) * 1000 : null;
   const blamed = typeof todo?.blamed_files === "number" ? todo.blamed_files : null;
   // К-Р14: неполная выборка TODO (обрыв cat-file) → old_share no-data с
   // причиной, а не число по частичной выборке
   const todoIncomplete = todo?.todo_note === "incomplete";
-  const oldShare = !todoIncomplete && todoTotal !== null && todoTotal > 0 && older !== null && blamed !== null && blamed > 0 ? older / todoTotal : null;
+  // 4.2.0 (М1.4, М1.5): 0 пометок при полной выборке — «старых нет» (доля 0);
+  // доля считается от не меньше OLD_SHARE_MIN_BASE пометок — одна старая
+  // пометка не обрушивает категорию
+  const oldShare = todoIncomplete || todoTotal === null
+    ? null
+    : todoTotal === 0
+      ? 0
+      : older !== null && blamed !== null && blamed > 0
+        ? older / Math.max(todoTotal, OLD_SHARE_MIN_BASE)
+        : null;
   const oldShareNoData = todoIncomplete ? "todo sample incomplete (cat-file truncated) — old_share needs the full sample" : null;
   const rootEntries = Array.isArray(tree?.top_level) ? tree!.top_level!.length : null;
 

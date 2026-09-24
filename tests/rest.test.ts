@@ -60,7 +60,7 @@ function fullOkClient(overrides: Array<[string, ScResponse]> = []): ScClient & {
   return routerClient(table);
 }
 
-test("cicd.runs: green_streak — серия зелёных с конца; running серию не рвёт; events/errors собираются (23.09)", async () => {
+test("cicd.runs: green_streak — серия зелёных с конца; идущий запуск серию не рвёт и в долю не входит; events/errors собираются (23.09, М2.5)", async () => {
   const runs = [
     {
       status: "failed",
@@ -70,7 +70,8 @@ test("cicd.runs: green_streak — серия зелёных с конца; runni
       error_messages: ["Step build exited 1"],
     },
     { status: "success", event_type: "push", dates: { started_at: "2026-09-15T09:00:00Z", finished_at: "2026-09-15T09:00:25Z" } },
-    { status: "running", event_type: "manual", dates: { started_at: "2026-09-15T08:00:00Z", finished_at: "2026-09-15T08:00:20Z" } },
+    // М2.5: `processing` — идущий запуск по перечню Run.Status спеки
+    { status: "processing", event_type: "manual", dates: { started_at: "2026-09-15T08:00:00Z", finished_at: "2026-09-15T08:00:20Z" } },
     { status: "success", event_type: "push", dates: { started_at: "2026-09-15T07:00:00Z", finished_at: "2026-09-15T07:00:22Z" } },
     { status: "success", event_type: "push", dates: { started_at: "2026-09-15T06:00:00Z", finished_at: "2026-09-15T06:00:24Z" } },
   ];
@@ -80,7 +81,11 @@ test("cicd.runs: green_streak — серия зелёных с конца; runni
   // самый свежий failed → серия с конца нулевая, хотя 3 из 5 зелёные
   expect(v("cicd.runs").green_streak).toBe(0);
   expect(v("cicd.runs").last_status).toBe("failed");
-  expect(v("cicd.runs").success_rate).toBe(0.6);
+  // М2.5: доля — по завершенным (3 зеленых из 4), идущий запуск не провал
+  expect(v("cicd.runs").success_rate).toBe(0.75);
+  expect(v("cicd.runs").runs_count).toBe(4);
+  expect(v("cicd.runs").runs_total).toBe(5);
+  expect(v("cicd.runs").status_note).toBeUndefined();
   // событийный разрез и разбор красного прогона: виновник и текст ошибки
   expect(v("cicd.runs").events).toEqual({ push: 4, manual: 1 });
   expect(v("cicd.runs").failed_workflows).toEqual(["check"]);
@@ -283,5 +288,64 @@ describe("В2/Б1: расширения — событийные даты, forks
     const client = fullOkClient();
     await collectRestFacts(client, "o/r", { commentsTopN: 0 });
     expect(client.calls.some((p) => p.includes("/rating"))).toBe(false);
+  });
+});
+
+test("М2.5: неизвестный статус запуска — отдельная ветка: в долю не входит и назван в status_note", async () => {
+  const runs = [
+    { status: "success", dates: { started_at: "2026-09-15T09:00:00Z", finished_at: "2026-09-15T09:00:25Z" } },
+    { status: "exploded", dates: { started_at: "2026-09-15T08:00:00Z", finished_at: "2026-09-15T08:00:25Z" } },
+    { status: "canceled", dates: { started_at: "2026-09-15T07:00:00Z", finished_at: "2026-09-15T07:00:25Z" } },
+  ];
+  const client = fullOkClient([["/repos/o/r/cicd/runs", ok({ runs })]]);
+  const out = await collectRestFacts(client, "o/r", { commentsTopN: 3 });
+  const v = new Map(out.facts.map((f) => [f.key, f])).get("cicd.runs")!.value as Record<string, unknown>;
+  expect(v.success_rate).toBe(1);
+  expect(v.runs_count).toBe(1);
+  expect(v.status_note).toBe("unknown run statuses: exploded");
+});
+
+describe("В5.3 аудит методики: MR всех статусов (М2.4) и цензура первого ответа (М2.6)", () => {
+  test("М2.4: поток MR — созданные запросы любого статуса; открытые считаются по статусу", async () => {
+    const pulls = [
+      { status: "merged", created_at: "2026-09-10T00:00:00Z" },
+      { status: "open", created_at: "2026-09-12T00:00:00Z" },
+      { status: "discarded", created_at: "2026-08-01T00:00:00Z" },
+    ];
+    const client = fullOkClient([["/repos/o/r/pulls", ok({ pull_requests: pulls })]]);
+    const out = await collectRestFacts(client, "o/r", { commentsTopN: 3, now: new Date("2026-09-15T00:00:00Z") });
+    const pullCalls = client.calls.filter((p) => get(p) === "/repos/o/r/pulls");
+    expect(pullCalls.length).toBeGreaterThan(0);
+    for (const p of pullCalls) expect(p).not.toContain("filter=");
+    const rest = out.facts.find((f) => f.key === "activity.rest")!;
+    expect(rest.status).toBe("ok");
+    const v = rest.value as { pulls_open: number; pulls_created_at: string[] };
+    expect(v.pulls_open).toBe(1);
+    expect(v.pulls_created_at).toHaveLength(3);
+  });
+
+  test("М2.6: задача без ответа дольше 30 дней — задержка 720 ч; свежая без ответа — вне выборки", async () => {
+    const now = new Date("2026-09-15T00:00:00Z");
+    const open = [
+      { slug: "old", created_at: "2026-07-01T00:00:00Z" },
+      { slug: "fresh", created_at: "2026-09-14T00:00:00Z" },
+    ];
+    const client = routerClient([
+      [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Dopen"), ok({ issues: open })],
+      [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Dclosed"), ok({ issues: [] })],
+      [(p) => get(p).includes("/comments"), ok({ comments: [] })],
+      [(p) => get(p) === "/repos/o/r/contributors", ok(contributorsFx)],
+      [(p) => get(p) === "/repos/o/r/releases", ok(releasesFx)],
+      [(p) => get(p) === "/repos/o/r/pulls", ok(pullsFx)],
+      [(p) => get(p) === "/repos/o/r/cicd/runs", ok(runsOwnFx)],
+      [(p) => get(p) === "/repos/o/r", ok(repoFx)],
+      [(p) => get(p) === "/repos/o/r/rating", ok(ratingFx)],
+    ]);
+    const out = await collectRestFacts(client, "o/r", { commentsTopN: 3, now });
+    const sample = out.facts.find((f) => f.key === "issues.comments_sample")!;
+    expect(sample.status).toBe("ok");
+    const v = sample.value as { delays_hours: number[]; median_first_comment_delay_hours: number | null };
+    expect(v.delays_hours).toEqual([720]);
+    expect(v.median_first_comment_delay_hours).toBe(720);
   });
 });

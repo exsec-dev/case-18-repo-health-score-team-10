@@ -60,8 +60,12 @@ describe("author-паттерны (§7.2)", () => {
     expect(isRobotAuthor("Deploy Unit", "bot@renovate.example")).toBe(true); // bot@-паттерн локальной части
     expect(isRobotAuthor("Some Bot", "some-bot@company.example")).toBe(true); // -bot
     expect(isRobotAuthor("release-bot", "rb@company.example")).toBe(true);
-    expect(isRobotAuthor("H", "49699333+user@users.noreply.github.com")).toBe(true); // noreply-домен
-    expect(isRobotAuthor("H", "user@github.com")).toBe(true); // домен из списка модели
+    // 4.2.0 (М1.7): приватная почта GitHub — человек; бот на ней ловится маркером
+    expect(isRobotAuthor("H", "49699333+user@users.noreply.github.com")).toBe(false);
+    expect(isRobotAuthor("dependabot[bot]", "49699333+dependabot[bot]@users.noreply.github.com")).toBe(true);
+    expect(isRobotAuthor("GitHub", "noreply@github.com")).toBe(true); // адрес автоматизации — точным совпадением
+    expect(isRobotAuthor("H", "user@noreply.github.com")).toBe(true); // noreply-домен
+    expect(isRobotAuthor("H", "user@github.com")).toBe(false); // сотрудник GitHub — не робот
     expect(isRobotAuthor("Alexey", "alexey@example.com")).toBe(false);
     expect(isRobotAuthor("Кирилл Боталов", "k@example.com")).toBe(false); // «бот» внутри слова не матчится
   });
@@ -126,7 +130,7 @@ describe("derived §7.3 (robot2-истина, без re-clone)", () => {
     expect(d.syncBursts).toBe(1);
     expect(d.robotRatioV2).toBe(round3(1 / 16));
     expect(d.mirrorLikeness).toEqual({ sync_share: round3(12 / 16), authors: 14, committers: 1 });
-    expect(d.contributorsTotal).toBe(14); // все авторы таймлайна (соло-пол)
+    expect(d.contributorsTotal).toBe(1); // 4.2.0 (М1.6): только люди — синки и бот не авторы
   });
 
   test("issues/code/rest derived + git no-data → git-поля null", () => {
@@ -149,16 +153,16 @@ describe("derived §7.3 (robot2-истина, без re-clone)", () => {
     expect(d.releases12m).toBe(1);
   });
 
-  test("stale_share no-data при open=0; old_share no-data без маркеров/блэйма", () => {
+  test("4.2.0 (М1.3, М1.4): open=0 при закрытых — «зависших нет»; 0 маркеров — «старых нет»", () => {
     const ok = new Map<string, unknown>([
       ["issues.stats", { open: 0, closed: 3, stale_90d: 0 }],
       ["code.todo", { count: 0, fixme: 0, older_180d: 0, todo_files: 0, blamed_files: 0 }],
     ]);
     const d = deriveMetrics(ok, NOW);
-    expect(d.staleShare).toBeNull();
+    expect(d.staleShare).toBe(0);
     expect(d.resolutionRatio).toBe(1);
     expect(d.todoTotal).toBe(0);
-    expect(d.oldShare).toBeNull();
+    expect(d.oldShare).toBe(0);
     expect(d.todoDensityPerKloc).toBeNull();
   });
 });

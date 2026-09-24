@@ -198,7 +198,17 @@ describe("А5: номинальный вес разбора и перенорм�
   });
 
   test("full-null: у «Состояния кода» без доли старых TODO номинальный и расчетный вес названы оба", () => {
-    const { md } = report("full-null");
+    // 4.2.0 (М1.4): 0 пометок — уже данные «старых нет»; доля без данных
+    // остается при неполной выборке TODO — ее и моделирует правка карточки
+    const { card, close } = fixtureCard("full-null");
+    let md: string;
+    try {
+      const code = card.score!.categories.code!;
+      const subs = { ...code.submetrics, old_share: { ...code.submetrics.old_share!, score: null, value: null } };
+      md = renderRepoReport({ ...card, score: { ...card.score!, categories: { ...card.score!.categories, code: { ...code, submetrics: subs } } } });
+    } finally {
+      close();
+    }
     // в разборе по категориям стоит номинальный вес показателя
     expect(md).toContain("| Плотность TODO/FIXME | 0 на 1 тыс. строк | 100 | 40% |");
     // в расчете категории — доля среди показателей с данными, и разница объяснена

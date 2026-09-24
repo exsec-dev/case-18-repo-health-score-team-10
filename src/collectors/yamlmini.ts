@@ -19,8 +19,12 @@ export function parseYamlSubset(src: string): unknown {
   return value;
 }
 
-function stripComment(line: string): string {
-  // '#' в начале строки или после пробела (в наших значениях '#' не встречается)
+export function stripComment(line: string): string {
+  // строка-комментарий целиком (в том числе с `#` в первой колонке — аудит
+  // В5.3, A4: 714 публичных ci.yaml начинались с комментария и читались как
+  // «CI без шагов»)
+  if (/^\s*#/.test(line)) return "";
+  // '#' после пробела (в наших значениях '#' не встречается)
   const m = line.match(/^(\s*)(.*?)\s#.*$/);
   if (m && !m[2].startsWith('"') && !m[2].startsWith("'")) return m[1]! + m[2];
   return line.replace(/\s+$/, "");

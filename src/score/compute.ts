@@ -11,6 +11,7 @@
 // константы model.ts.
 import type { Database } from "bun:sqlite";
 import { categoryOf, parseFactValue } from "../collectors/facts";
+import { rootHasNoSource } from "../collectors/source-path";
 import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
 import { DerivedMetrics, deriveMetrics } from "./derived";
 import {
@@ -25,6 +26,7 @@ import {
   DURATION_MIN,
   FIRST_COMMENT_H,
   FRESH_MONTHS,
+  ISSUES_FULL_SAMPLE,
   ISSUES_TRACKER_UNUSED,
   MODEL_VERSION,
   OLD_SHARE,
@@ -270,6 +272,12 @@ export interface EffectiveFacts {
   ok: Map<string, unknown>;
   stale: string[];
   staleCats: Set<string>;
+  /**
+   * 4.2.0 (М1.1 аудита В5.3): git-канал подтвердил, что коммитов нет (no-data
+   * с причиной `empty` у сканов до правки сборщика М2). Пустота — факт
+   * «проекта нет» (Q&A №13), а не отсутствие данных.
+   */
+  emptyRepo: boolean;
 }
 
 /**
@@ -286,6 +294,8 @@ export function effectiveFacts(db: Database, scanId: number, repoId: number): Ef
   const ok = new Map<string, unknown>();
   const stale: string[] = [];
   const staleCats = new Set<string>();
+  const treeRow = rows.find((r) => r.key === "tree.stats");
+  const emptyRepo = treeRow?.status === "no-data" && (parseFactValue(treeRow.value) as { reason?: unknown } | null)?.reason === "empty";
   for (const kind of READ_KINDS) {
     const row = rows.find((r) => r.key === kind);
     if (row && row.status === "ok") {
@@ -308,7 +318,7 @@ export function effectiveFacts(db: Database, scanId: number, repoId: number): Ef
     }
     // без истории → kind отсутствует в ok → no-data субметрик
   }
-  return { ok, stale, staleCats };
+  return { ok, stale, staleCats, emptyRepo };
 }
 
 export function compute(db: Database, scanId: number, opts: { now?: Date } = {}): Scores {
@@ -316,7 +326,7 @@ export function compute(db: Database, scanId: number, opts: { now?: Date } = {})
   const scan = db.query("SELECT repo_id FROM scans WHERE id = ?").get(scanId) as { repo_id: number } | null;
   if (!scan) throw new Error(`scan ${scanId} not found`);
   const eff = effectiveFacts(db, scanId, scan.repo_id);
-  return computeFromFacts(eff.ok, { scanId, repoId: scan.repo_id, stale: eff.stale, staleCats: eff.staleCats }, now);
+  return computeFromFacts(eff.ok, { scanId, repoId: scan.repo_id, stale: eff.stale, staleCats: eff.staleCats, emptyRepo: eff.emptyRepo }, now);
 }
 
 /** Происхождение фактов для computeFromFacts: идентификаторы скана и маркеры замещения историей. */
@@ -326,6 +336,8 @@ export interface ComputeInput {
   /** kinds, взятые из истории (effectiveFacts) */
   stale?: string[];
   staleCats?: Set<string>;
+  /** git-канал подтвердил пустой репозиторий (EffectiveFacts.emptyRepo) */
+  emptyRepo?: boolean;
 }
 
 /**
@@ -358,8 +370,17 @@ export function computeFromFacts(ok: Map<string, unknown>, input: ComputeInput, 
   // обрыва `git cat-file` (теперь loc = null), у репо из одних бинарных
   // файлов и у файлов больше textCap. Жёсткий Score 0 по такому признаку —
   // нарушение закона 2 (отсутствие данных не ухудшает Score).
-  const tree = ok.get("tree.stats") as { file_count?: unknown } | undefined | null;
-  const codeEmpty = tree !== undefined && tree !== null && typeof tree.file_count === "number" && tree.file_count === 0;
+  const tree = ok.get("tree.stats") as { file_count?: unknown; source_files?: unknown; top_level?: unknown } | undefined | null;
+  // 4.2.0 (М1.1): и репо без единого коммита — сборщик до М2 писал его no-data;
+  // (М2.3) и репо без файлов кода — только README, лицензия, картинки
+  const codeEmpty =
+    input.emptyRepo === true ||
+    (tree !== undefined &&
+      tree !== null &&
+      ((typeof tree.file_count === "number" && tree.file_count === 0) ||
+        tree.source_files === 0 ||
+        // факты до правки сборщика: кода нет, если в корне только не-код и нет каталогов
+        (!("source_files" in tree) && rootHasNoSource(tree.top_level))));
 
   const allKeys = Object.keys(categories) as CategoryKey[];
   const noData: string[] = [];
@@ -471,9 +492,10 @@ function scoreDocumentation(ok: Map<string, unknown>, _derived: DerivedMetrics):
   }
   const readmeSub = README_SPLIT.presence * (hasReadme ? 1 : 0) + README_SPLIT.quality * quality;
   const w = SUBWEIGHTS.documentation;
+  const license = presence.license === true || licenseInRoot(ok) ? 1 : 0;
   const subs: [number, number | null][] = [
     [w.readme, readmeSub],
-    [w.license, presence.license === true ? 1 : 0],
+    [w.license, license],
     [w.contributing, presence.contributing === true ? 1 : 0],
     [w.codeowners, presence.codeowners === true ? 1 : 0],
   ];
@@ -482,21 +504,42 @@ function scoreDocumentation(ok: Map<string, unknown>, _derived: DerivedMetrics):
     score: score !== null ? score * 100 : null,
     submetrics: {
       readme: { score: readmeSub, value: readme },
-      license: { score: presence.license === true ? 1 : 0 },
+      license: { score: license },
       contributing: { score: presence.contributing === true ? 1 : 0 },
       codeowners: { score: presence.codeowners === true ? 1 : 0 },
     },
   };
 }
 
+/**
+ * 4.2.0 (М1.13): лицензия под иным именем — `LICENSE-MIT`, `LICENSE.APACHE`,
+ * `COPYING*`, `UNLICENSE`, каталог `LICENSES/` (сборщик до М2 искал только
+ * `licen[cs]e*`); корень хранится в `tree.stats.top_level`.
+ */
+const LICENSE_NAME = /^(licen[cs]es?|copying|unlicense)([._-].*)?$/i;
+
+function licenseInRoot(ok: Map<string, unknown>): boolean {
+  const tree = ok.get("tree.stats") as { top_level?: unknown } | undefined;
+  if (!Array.isArray(tree?.top_level)) return false;
+  return tree!.top_level!.some((e) => {
+    const name = typeof e === "string" ? e : (e as { name?: unknown } | null)?.name;
+    return typeof name === "string" && LICENSE_NAME.test(name);
+  });
+}
+
 function scoreCicd(ok: Map<string, unknown>): CategoryScore {
-  const configs = ok.get("cicd.configs") as { has_ci_yaml?: unknown; has_steps?: unknown } | undefined;
+  const configs = ok.get("cicd.configs") as { has_ci_yaml?: unknown; has_steps?: unknown; steps_note?: unknown } | undefined;
   const runs = ok.get("cicd.runs") as {
     runs_count?: unknown;
     success_rate?: unknown;
     weighted_success_rate?: unknown;
     duration_p50?: unknown;
   } | undefined;
+  if (configs && configs.has_ci_yaml === true && (typeof configs.has_steps !== "boolean" || typeof configs.steps_note === "string")) {
+    // 4.2.0 (М2.1 аудита): ci.yaml не разобран — неизвестно, есть ли шаги;
+    // это не «CI без шагов = 0», а отсутствие данных
+    return { score: null, no_data: "ci.yaml not parsed — steps unknown", submetrics: {} };
+  }
   const configSub = configs ? (configs.has_ci_yaml === true && configs.has_steps === true ? 1 : 0) : null;
   if (configSub === null) {
     return { score: null, no_data: "git channel no-data", submetrics: {} };
@@ -513,7 +556,32 @@ function scoreCicd(ok: Map<string, unknown>): CategoryScore {
       },
     };
   }
-  const runsAvailable = runs !== undefined && (num(runs.runs_count) ?? 0) > 0;
+  // 4.2.0 (М1.8): запуски ВИДНЫ и их 0 — данные «CI заявлен, но не запускался»
+  // (заглушка ci.yaml не выгоднее настоящего CI); все запуски старше
+  // последней ленты свежести (поле есть, значение null) — то же «за год не
+  // запускался». Решение 23.09 о невидимых запусках (no-data) не меняется.
+  const runsCount = runs !== undefined ? num(runs.runs_count) : null;
+  // М2.5: запуски есть, но ни один не завершен (идут, отменены) — результата
+  // еще нет: это не «не запускался», а отсутствие данных
+  const pendingOnly = runsCount === 0 && (num((runs as { runs_total?: unknown } | undefined)?.runs_total) ?? 0) > 0;
+  const staleOnly = runsCount !== null && runsCount > 0 && runs !== undefined && "weighted_success_rate" in runs && runs.weighted_success_rate === null;
+  if (runs !== undefined && !pendingOnly && (runsCount === 0 || staleOnly)) {
+    const wn = SUBWEIGHTS.cicd;
+    const s = weighted([
+      [wn.config, configSub],
+      [wn.pass_rate, 0],
+      [wn.duration, null],
+    ]);
+    return {
+      score: s !== null ? s * 100 : null,
+      submetrics: {
+        config: { score: configSub, value: configs },
+        pass_rate: { score: 0, value: 0, note: runsCount === 0 ? "no runs" : "no runs within a year" },
+        duration: { score: null, note: "no recent runs" },
+      },
+    };
+  }
+  const runsAvailable = runs !== undefined && (runsCount ?? 0) > 0 && !pendingOnly;
   if (!runsAvailable) {
     // 23.09 (Алексей): «конфиг без прогонов — проще не оценивать, честно
     // написать "прогонов нет"; и уж точно не 50, за что так много?» —
@@ -567,6 +635,19 @@ function scoreSecurity(ok: Map<string, unknown>): CategoryScore {
   const densitySub = per10k !== null ? anchorScore(SEVERITY_PER_10K, per10k) : null;
   const resolvedSub = num(appsec.resolved_share) !== null ? anchorScore(RESOLVED_SHARE, num(appsec.resolved_share)!) : null;
   const secretsSub = appsec.secrets_critical === true ? 0 : 1;
+  if (densitySub === null && resolvedSub === null) {
+    // 4.2.0 (М1.2): без плотности и доли закрытых категорию нес бы один
+    // признак утечки — 100 при любом числе критичных находок
+    return {
+      score: null,
+      no_data: "too little data — no finding density (LOC unknown) and no resolved share",
+      submetrics: {
+        density: { score: null, value: per10k },
+        resolved: { score: null, value: num(appsec.resolved_share) },
+        secrets: { score: secretsSub, value: appsec.secrets_critical === true },
+      },
+    };
+  }
   const w = SUBWEIGHTS.security;
   const score = weighted([
     [w.density, densitySub],
@@ -584,16 +665,23 @@ function scoreSecurity(ok: Map<string, unknown>): CategoryScore {
 }
 
 function scoreActivity(derived: DerivedMetrics, now: Date): CategoryScore {
+  // 4.2.0 (М1.2): история прочитана, а людей в ней нет — данные «человеческих
+  // коммитов нет» (худший анкер), а не отсутствие данных
   const freshSub =
     derived.lastHumanCommitTs !== null
       ? anchorScore(FRESH_MONTHS, Math.max(0, (now.getTime() - derived.lastHumanCommitTs) / MONTH_MS))
-      : null;
+      : derived.humanCommits === 0
+        ? 0
+        : null;
   const freqSub = derived.commitsPerMonth !== null ? commitsPerMonthScore(derived.commitsPerMonth) : null;
   const contribSub = derived.contributorsTotal !== null && derived.contributorsTotal > 0 ? contributorsScore(derived.contributorsTotal) : null;
   const pullsSub = derived.pulls90d !== null ? anchorScoreLog(PULLS_90D, derived.pulls90d) : null;
   const relSub = derived.releases12m !== null ? anchorScoreLog(RELEASES_12M, derived.releases12m) : null;
   const w = SUBWEIGHTS.activity;
-  const score = weighted([
+  // 4.2.0 (М1.2): без git (свежесть и частота) категорию несли бы счетчики MR
+  // и релизов с полом 0,2 — у пустых и недочитанных репо это «Активность 20»
+  const anchored = freshSub !== null || freqSub !== null;
+  const score = !anchored ? null : weighted([
     [w.fresh, freshSub],
     [w.freq, freqSub],
     [w.contributors, contribSub],
@@ -602,7 +690,7 @@ function scoreActivity(derived: DerivedMetrics, now: Date): CategoryScore {
   ]);
   return {
     score: score !== null ? score * 100 : null,
-    no_data: score === null ? "git+rest channels no-data" : undefined,
+    no_data: score === null ? (derived.humanCommits === null ? "too little data — no commit history" : "git+rest channels no-data") : undefined,
     submetrics: {
       fresh: { score: freshSub, value: derived.lastHumanCommitTs },
       freq: { score: freqSub, value: derived.commitsPerMonth },
@@ -639,12 +727,16 @@ function scoreIssues(ok: Map<string, unknown>, derived: DerivedMetrics): Categor
   const comments = ok.get("issues.comments_sample") as { median_first_comment_delay_hours?: unknown } | undefined;
   const firstSub = num(comments?.median_first_comment_delay_hours) !== null ? anchorScore(FIRST_COMMENT_H, num(comments!.median_first_comment_delay_hours)!) : null;
   const w = SUBWEIGHTS.issues;
-  const score = weighted([
+  const raw = weighted([
     [w.stale, staleSub],
     [w.close_days, closeSub],
     [w.resolution, resSub],
     [w.first_resp, firstSub],
   ]);
+  // 4.2.0 (М1.9): на малой выборке балл сжимается к минимуму «трекер не
+  // ведется» — одна закрытая задача не дает трекеру 97,5
+  const sample = Math.min(1, (open + closed) / ISSUES_FULL_SAMPLE);
+  const score = raw === null ? null : (ISSUES_TRACKER_UNUSED + Math.max(0, raw * 100 - ISSUES_TRACKER_UNUSED) * sample) / 100;
   return {
     score: score !== null ? score * 100 : null,
     submetrics: {
@@ -661,14 +753,16 @@ function scoreCode(derived: DerivedMetrics): CategoryScore {
   const oldSub = derived.oldShare !== null ? anchorScore(OLD_SHARE, derived.oldShare) : null;
   const rootSub = derived.rootEntries !== null ? anchorScore(ROOT_ENTRIES, derived.rootEntries) : null;
   const w = SUBWEIGHTS.code;
-  const score = weighted([
+  // 4.2.0 (М1.2): без плотности TODO (нет строк кода) категорию нес бы один
+  // «порядок в корне» — «Состояние кода 100» у репо из одного README
+  const score = densitySub === null ? null : weighted([
     [w.density, densitySub],
     [w.old_share, oldSub],
     [w.root, rootSub],
   ]);
   return {
     score: score !== null ? score * 100 : null,
-    no_data: score === null ? "git channel no-data" : undefined,
+    no_data: score === null ? (derived.rootEntries !== null ? "too little data — no lines of code to measure" : "git channel no-data") : undefined,
     submetrics: {
       density: { score: densitySub, value: derived.todoDensityPerKloc },
       // К-Р14: неполная выборка TODO — причина no-data рядом со значением

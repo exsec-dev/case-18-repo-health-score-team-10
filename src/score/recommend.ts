@@ -23,9 +23,10 @@
 // срабатывания, Δ и порядок не менялись — только тексты.
 import type { Database } from "bun:sqlite";
 import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
-import { SCORE_WEIGHTS, CategoryKey, SECRETS_CRITICAL_TOTAL_CAP } from "./model";
+import { SCORE_WEIGHTS, CategoryKey, OLD_SHARE_MIN_BASE, SECRETS_CRITICAL_TOTAL_CAP } from "./model";
 import { compute, computeFromFacts, effectiveFacts, Scores } from "./compute";
 import { fmtDecimal, fmtScore, fmtSigned } from "../web/format";
+import { runOutcome } from "../collectors/run-status";
 
 /** Канал правила: данные, видимые только зрителю с доступом (К2). */
 export type RecommendationChannel = "cicd" | "appsec";
@@ -67,6 +68,12 @@ export interface RecommendFactsContext {
   issuesScore: number | null;
   /** "channel" — только правила каналов CI/Security (карточка, круг 2) */
   only?: "all" | "channel";
+  /**
+   * 4.2.0 (М1.14 аудита В5.3): в репозитории нет кода (пустой или без
+   * файлов) — оценка 0 по Q&A №13, и совет один: добавить код. Трекер и
+   * россыпь presence-правил с эффектом «+0,0» такому репо ничего не дают.
+   */
+  codeEmpty?: boolean;
 }
 
 // ---------- тексты правил (К9.10): одна функция для записи и чтения ----------
@@ -173,6 +180,12 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
       return presence("Настройте CI", "Нет файла .sourcecraft/ci.yaml: изменения не собираются и не проверяются автоматически.");
     case "ci-no-steps":
       return presence("Добавьте команды в ci.yaml", "Файл .sourcecraft/ci.yaml есть, но в нем нет ни одной задачи с командой, поэтому CI ничего не проверяет.");
+    case "add-code":
+      return {
+        action: "Добавьте код проекта",
+        problem: "В репозитории нет кода. Такой репозиторий получает оценку 0: оценивать пока нечего.",
+        expectedImpact: "оценка появится после анализа репозитория с кодом",
+      };
     case "start-tracker":
       if (typeof p.issuesScore !== "number") return null;
       return {
@@ -356,7 +369,7 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
   // канальные — к полному Score (кап 49 учитывается). Один вызов
   // computeFromFacts на правило; подмены — таблица плана К-Ф1.2.
   const now = opts.now ?? new Date(scores.computedAt);
-  const input = { scanId, repoId: scores.repoId, stale: eff.stale, staleCats: eff.staleCats };
+  const input = { scanId, repoId: scores.repoId, stale: eff.stale, staleCats: eff.staleCats, emptyRepo: eff.emptyRepo };
   const base = computeFromFacts(ok, input, now);
   const secretsCritical = (ok.get("appsec.findings") as { secrets_critical?: unknown } | undefined)?.secrets_critical === true;
   const realDelta: DeltaEvaluator = (channel, patch) => {
@@ -372,12 +385,13 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
     if (delta === 0 && channel !== null && secretsCritical && b >= SECRETS_CRITICAL_TOTAL_CAP) return { delta: 0, reason: "cap" };
     return { delta, reason: null };
   };
-  return recommendFromFacts(ok, { delta: realDelta, issuesScore: scores.categories.issues.score });
+  return recommendFromFacts(ok, { delta: realDelta, issuesScore: scores.categories.issues.score, codeEmpty: base.codeEmpty });
 }
 
 /** Чистый движок правил на эффективных фактах (без БД). */
 export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFactsContext): Recommendation[] {
   const pub = ctx.only !== "channel";
+  if (ctx.codeEmpty === true) return pub ? [act("add-code", "code", ["tree.stats"], {})] : [];
   const realDelta = ctx.delta;
   const presence: Recommendation[] = [];
   const activation: Recommendation[] = [];
@@ -414,10 +428,13 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
       }
     }
   }
-  const cicdCfg = ok.get("cicd.configs") as { has_ci_yaml?: unknown; has_steps?: unknown } | undefined;
+  const cicdCfg = ok.get("cicd.configs") as { has_ci_yaml?: unknown; has_steps?: unknown; steps_note?: unknown } | undefined;
+  // М2.1 аудита В5.3: ci.yaml не разобран — неизвестно, есть ли шаги; совета
+  // «добавьте команды» нет, как нет и балла
+  const ciUnparsed = cicdCfg?.has_ci_yaml === true && (typeof cicdCfg.has_steps !== "boolean" || typeof cicdCfg.steps_note === "string");
   // CI-правила — канал cicd: Δ по CI-весу исполняется только в полном
   // Score, поэтому правило видит лишь зритель с доступом к CI (К2)
-  if (cicdCfg && !(cicdCfg.has_ci_yaml === true && cicdCfg.has_steps === true)) {
+  if (cicdCfg && !ciUnparsed && !(cicdCfg.has_ci_yaml === true && cicdCfg.has_steps === true)) {
     const hasYaml = cicdCfg.has_ci_yaml === true;
     presenceRule(
       hasYaml ? "ci-no-steps" : "ci-missing",
@@ -448,20 +465,28 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
   const score = (ruleId: string, factRefs: string[], channel: RecommendationChannel | null = null) =>
     scoreRules.push(mkScore(ruleId, factRefs, recommendationParams(ruleId, ok), channel));
   if (runsFact && typeof (runsFact as { runs_count?: unknown }).runs_count === "number" && (runsFact as { runs_count?: number }).runs_count! > 0) {
-    const rf = runsFact as { last_status?: unknown; success_rate?: unknown; duration_p50?: unknown };
-    if (rf.last_status !== "success" || (typeof rf.success_rate === "number" && rf.success_rate < 0.9)) score("fix-red-runs", ["cicd.runs"], "cicd");
+    const rf = runsFact as { last_status?: unknown; success_rate?: unknown; weighted_success_rate?: unknown; duration_p50?: unknown };
+    // 4.2.0 (B8 аудита): условие — от той же доли, что считает балл (взвешенная
+    // свежестью, иначе простая); идущий запуск ошибкой не считается
+    const passInput = typeof rf.weighted_success_rate === "number" ? rf.weighted_success_rate : rf.success_rate;
+    // М2.5: last_status — последний ЗАВЕРШЕННЫЙ запуск (сборщик); провал — по перечню спеки
+    const lastFailed = runOutcome(typeof rf.last_status === "string" ? rf.last_status : null) === "failure";
+    if (lastFailed || (typeof passInput === "number" && passInput < 0.9)) score("fix-red-runs", ["cicd.runs"], "cicd");
     if (typeof rf.duration_p50 === "number" && rf.duration_p50 > 15 * 60) score("speed-up-pipeline", ["cicd.runs"], "cicd");
   }
   const appsec = ok.get("appsec.findings") as AppsecFindingsValue | undefined;
   if (appsec) {
     const crit = (appsec.severity_counts?.critical as number | undefined) ?? 0;
-    if (appsec.secrets_critical === true || crit > 0) score("appsec-critical", ["appsec.findings"], "appsec");
+    // B8: критичные находки входят в балл только через плотность (нужен LOC)
+    const loc = (ok.get("tree.stats") as { loc?: unknown } | undefined)?.loc;
+    if (appsec.secrets_critical === true || (crit > 0 && typeof loc === "number" && loc > 0)) score("appsec-critical", ["appsec.findings"], "appsec");
   }
-  const todo = ok.get("code.todo") as { older_180d?: unknown; count?: unknown; fixme?: unknown } | undefined;
-  if (pub && todo) {
+  const todo = ok.get("code.todo") as { older_180d?: unknown; count?: unknown; fixme?: unknown; blamed_files?: unknown; todo_note?: unknown } | undefined;
+  if (pub && todo && todo.todo_note !== "incomplete" && typeof todo.blamed_files === "number" && todo.blamed_files > 0) {
+    // B8: та же доля, что в балле (derived.ts: знаменатель не меньше OLD_SHARE_MIN_BASE)
     const total = ((todo.count ?? 0) as number) + ((todo.fixme ?? 0) as number);
     const older = (todo.older_180d ?? 0) as number;
-    if (total > 0 && older / total >= 0.3) score("resolve-old-todos", ["code.todo"]);
+    if (total > 0 && older / Math.max(total, OLD_SHARE_MIN_BASE) >= 0.3) score("resolve-old-todos", ["code.todo"]);
   }
   const statsFull = ok.get("issues.stats") as { open?: unknown; stale_90d?: unknown; median_close_days?: unknown } | undefined;
   const openCount = typeof statsFull?.open === "number" ? statsFull.open : 0;

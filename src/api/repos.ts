@@ -8,7 +8,7 @@
 import type { Database } from "bun:sqlite";
 import { CHANNEL_KINDS, PUBLIC_KINDS, computeFromFacts, effectiveFacts, totalsFromCategories, type CategoryScore } from "../score/compute";
 import { orderRecommendations, recommendFromFacts, recommendationParams, recommendationText, round4, type DeltaEvaluator } from "../score/recommend";
-import { categoryOf, parseFactValue } from "../collectors/facts";
+import { categoryOf, parseFactValue, scrubDetail } from "../collectors/facts";
 import { isOwnRepo, NO_PAT_ACCESS, visibilityOf, type AccessRepo, type AccessResult, type ChannelAccess } from "../auth/access";
 import { DEFAULT_SCAN, defaultLeaseMs, type ScanConfig } from "../config";
 import type { GitLimitsMarker } from "../web/format";
@@ -1027,6 +1027,7 @@ export function getRepoCard(
     delta: channelDelta,
     issuesScore: shownCats.issues.score,
     only: "channel",
+    codeEmpty,
   })
     .filter((rec) => rec.channel !== null && !closedChannels.has(rec.channel))
     .map((rec) => {
@@ -1083,7 +1084,10 @@ export function getRepoCard(
   const evidence: CardEvidence[] = factRows
     .filter((f) => addressable.has(f.key))
     .map((f) => {
-      const parsed = parseFactValue(f.value) as unknown;
+      const raw = parseFactValue(f.value) as unknown;
+      // М2.7: у фактов до правки сборщика путь временного клона — в `detail`
+      const detail = (raw as { detail?: unknown } | null)?.detail;
+      const parsed = typeof detail === "string" ? { ...(raw as object), detail: scrubDetail(detail) } : raw;
       const value = f.key === "activity.git.timeline" ? timelineAggregate(parsed) : capValue(parsed);
       return { key: f.key, category: f.category, status: f.status, source: f.source, collectedAt: f.collected_at, value };
     })

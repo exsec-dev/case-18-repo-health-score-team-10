@@ -11,6 +11,10 @@
 import { Fact, badChannelFact, noDataFact, okFact } from "./facts";
 import { CI_RECENCY_BANDS } from "../score/model";
 import { hexColor } from "./catalog";
+import { runOutcome } from "./run-status";
+
+/** М2.6: худший анкер первого ответа (FIRST_COMMENT_H, 30 дней) — порог цензуры. */
+const UNANSWERED_CENSOR_H = 720;
 import { ScClient } from "./http";
 
 /** кап событийных дат в activity.rest (анкеры pulls ≥30 / releases ≥6 — выше бесполезно) */
@@ -20,7 +24,7 @@ export type RestResourceName =
   | "repo"
   | "issues-open"
   | "issues-closed"
-  | "pulls-open"
+  | "pulls"
   | "contributors"
   | "releases"
   | "cicd-runs"
@@ -76,11 +80,14 @@ function resourcePath(resource: RestResourceName, slug: string, args: PathArgs):
       return { path: `/repos/${s}/issues?filter=status%3Dopen&sort_by=-created_at&page_size=${ps}`, list: true };
     case "issues-closed":
       return { path: `/repos/${s}/issues?filter=status%3Dclosed&sort_by=-updated_at&page_size=${ps}`, list: true };
-    case "pulls-open":
-    case "pulls-open":
+    case "pulls":
       // sort_by=-created_at: недавние первыми (для pulls_90d); даты ещё
-      // раз сортируются клиентски — устойчиво к игнору сервером
-      return { path: `/repos/${s}/pulls?filter=status%3Dopen&sort_by=-created_at&page_size=${ps}`, list: true };
+      // раз сортируются клиентски — устойчиво к игнору сервером.
+      // М2.4 аудита В5.3: ВСЕ статусы (draft, open, discarded, merging,
+      // merged — enum спеки PullRequest.Status): поток MR за 90 дней — это
+      // созданные запросы, а не только еще открытые (смерженные раньше
+      // пропадали — у 110 из 124 активных командных репо поток был 0)
+      return { path: `/repos/${s}/pulls?sort_by=-created_at&page_size=${ps}`, list: true };
     case "contributors":
       return { path: `/repos/${s}/contributors?page_size=${ps}`, list: true };
     case "releases":
@@ -117,6 +124,7 @@ function extractList(json: unknown): { listKey: string; items: Record<string, un
  * → RawJson + классификация ошибок). Пагинация ≤maxPages (5 по умолчанию),
  * интервал/бюджет — на клиенте (http.ts), инвентаризация — колбэком.
  */
+
 export async function fetchResource(
   client: ScClient,
   slug: string,
@@ -347,12 +355,18 @@ export async function collectRestFacts(
         // первая страница при sort_by=created_at (asc) — берём минимум из
         // полученного: устойчиво и к игнору сортировки, и к desc
         const created = cRes.items.map((c) => isoMs(c["created_at"])).filter((x): x is number => x !== null);
+        const issueCreated = isoMs(issue["created_at"]);
         if (created.length > 0) {
           const first = Math.min(...created);
-          const issueCreated = isoMs(issue["created_at"]);
           if (issueCreated !== null && first >= issueCreated) {
             delaysHours.push(Math.round(((first - issueCreated) / 3600000) * 10) / 10);
           }
+        } else if (issueCreated !== null && now.getTime() - issueCreated >= UNANSWERED_CENSOR_H * 3600000) {
+          // М2.6 аудита В5.3: без ответа дольше худшего анкера — задержка не
+          // меньше анкера (цензура); раньше такая задача выпадала, и «никто не
+          // ответил» оценивалось выше, чем «ответили поздно». Свежая задача без
+          // ответа в выборку не входит — ответа еще можно ждать
+          delaysHours.push(UNANSWERED_CENSOR_H);
         }
       } else {
         commentsErrors++;
@@ -397,7 +411,7 @@ export async function collectRestFacts(
   // activity.rest: contributors / releases / pulls_open + событийные даты
   const contribRes = await fetchResource(client, slug, "contributors", frOpts);
   const relRes = await fetchResource(client, slug, "releases", frOpts);
-  const pullsRes = await fetchResource(client, slug, "pulls-open", frOpts);
+  const pullsRes = await fetchResource(client, slug, "pulls", frOpts);
   if (contribRes.kind === "ok" && relRes.kind === "ok" && pullsRes.kind === "ok") {
     const latest = relRes.items.find((r) => r["is_latest"] === true) ?? relRes.items[0];
     const latestAt = latest ? asString(latest["released_at"]) : null;
@@ -422,7 +436,7 @@ export async function collectRestFacts(
         {
           contributors: contribRes.items.length,
           releases: relRes.items.length,
-          pulls_open: pullsRes.items.length,
+          pulls_open: pullsRes.items.filter((p) => asString(p["status"]) === "open").length,
           latest_release_at: latestAt,
           pulls_created_at: pullsCreatedAt,
           releases_released_at: releasesReleasedAt,
@@ -446,7 +460,15 @@ export async function collectRestFacts(
   // cicd.runs: чужие → 403 (no-data access), свои → окна статусов
   const runsRes = await fetchResource(client, slug, "cicd-runs", frOpts);
   if (runsRes.kind === "ok") {
-    const runs = runsRes.items;
+    const all = runsRes.items;
+    // М2.5 аудита В5.3: доля успеха — по ЗАВЕРШЕННЫМ запускам (успех или
+    // провал); идущие и нейтральные (отмена, пропуск, отклонение) в нее не
+    // входят. «Последний запуск» — последний завершенный.
+    const runs = all.filter((r) => {
+      const o = runOutcome(asString(r["status"]));
+      return o === "success" || o === "failure";
+    });
+    const unknownStatuses = [...new Set(all.map((r) => asString(r["status"]) ?? "").filter((st) => runOutcome(st) === "unknown"))];
     const durations = runs
       .map((r) => {
         const d = r["dates"] as Record<string, unknown> | undefined;
@@ -460,9 +482,7 @@ export async function collectRestFacts(
     // серия зелёных с конца даёт тренд; running серию не рвёт (статус не финальный)
     let greenStreak = 0;
     for (const r of runs) {
-      const st = asString(r["status"]);
-      if (st === "running") continue;
-      if (st === "success") greenStreak += 1;
+      if (asString(r["status"]) === "success") greenStreak += 1;
       else break;
     }
     // 23.09 (Алексей): ВЗВЕШЕННАЯ доля успеха по лентам свежести — свежие
@@ -490,16 +510,15 @@ export async function collectRestFacts(
     const events: Record<string, number> = {};
     const failingWorkflows = new Set<string>();
     const errors: string[] = [];
-    for (const r of runs) {
+    // разрез по событиям — по всем запускам страницы, провалы — по завершенным
+    for (const r of all) {
       const et = asString(r["event_type"]);
       if (et) events[et] = (events[et] ?? 0) + 1;
-      const st = asString(r["status"]);
-      if (st === "success" || st === "running") continue;
+      if (runOutcome(asString(r["status"])) !== "failure") continue;
       const wfs = Array.isArray(r["workflows"]) ? (r["workflows"] as Array<Record<string, unknown>>) : [];
       for (const w of wfs) {
         const slug = asString(w["slug"]);
-        const wst = asString(w["status"]);
-        if (slug && wst !== "" && wst !== "success" && wst !== "running" && wst !== "skipped") failingWorkflows.add(slug);
+        if (slug && runOutcome(asString(w["status"])) === "failure") failingWorkflows.add(slug);
       }
       const em = r["error_messages"];
       if (Array.isArray(em)) {
@@ -518,6 +537,10 @@ export async function collectRestFacts(
           success_rate: runs.length ? Math.round((success / runs.length) * 100) / 100 : null,
           duration_p50: durations.length ? Math.round((median(durations) ?? 0) * 10) / 10 : null,
           runs_count: runs.length,
+          // М2.5: все запуски страницы, включая идущие и нейтральные; 0
+          // завершенных при runs_total > 0 — «результата еще нет», не «не запускался»
+          runs_total: all.length,
+          ...(unknownStatuses.length ? { status_note: `unknown run statuses: ${unknownStatuses.slice(0, 3).join(", ")}` } : {}),
           green_streak: runs.length ? greenStreak : null,
           weighted_success_rate: weightedSuccessRate,
           events,

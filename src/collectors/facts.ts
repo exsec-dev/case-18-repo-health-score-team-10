@@ -158,3 +158,15 @@ export function parseFactValue(raw: string): unknown {
     return { reason: "other" };
   }
 }
+
+/**
+ * М2.7 аудита В5.3: текст сбоя без путей машины сервиса — временный клон
+ * (`…/rh-clone-XXXX`) и прочие абсолютные пути заменяются меткой. Причина
+ * сбоя видна пользователю в «Исходных данных» карточки и отчета.
+ */
+export function scrubDetail(detail: string): string {
+  return detail
+    .replace(/(?:[A-Za-z]:)?[\\/][^\s'"()]*rh-clone-[^\s'"()]*/g, "<временный клон>")
+    .replace(/[A-Za-z]:\\[^\s'"()]+/g, "<путь>")
+    .replace(/(?<![\w.])\/(?:tmp|var|home|root|Users)\/[^\s'"()]+/g, "<путь>");
+}

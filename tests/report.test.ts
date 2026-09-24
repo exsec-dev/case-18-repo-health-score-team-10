@@ -6,6 +6,7 @@
 // В4.9: утверждения прежней структуры («Итог», «Доказательная база», «Вклад
 // после перенормировки», «Порядок задан движком», «(источник: rule)»)
 // перевернуты с заменой — закрытый список в reports/m49-worker-report.md.
+import { MODEL_VERSION } from "../src/score/model";
 import { afterAll, describe, expect, test } from "bun:test";
 import { getRepoCard } from "../src/api/repos";
 import { REPORT_NO_SCORE } from "../src/report/build";
@@ -83,7 +84,7 @@ describe("MD-отчёт: структура", () => {
     expect(main).not.toContain(`#${scoredScan}`);
     expect(main).not.toContain("4.0.0-hci");
     expect(appendix).toContain(`| Последний анализ | #${scoredScan}, завершен 12:00 16 сент. 2026 |`);
-    expect(appendix).toContain("| Версия методики | 4.1.0-hci |");
+    expect(appendix).toContain(`| Версия методики | ${MODEL_VERSION} |`);
     expect(md).not.toContain("режим:");
   });
 });

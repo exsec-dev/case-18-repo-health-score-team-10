@@ -5,7 +5,7 @@
 // В4.3 (18.09, Алексей): модель описывает ДВА показателя — полный
 // Repo Health Score (6 категорий, SCORE_WEIGHTS) и публичную проекцию
 // HealthCraft Index (4 категории, INDEX_WEIGHTS).
-export const MODEL_VERSION = "4.1.0-hci";
+export const MODEL_VERSION = "4.2.0-hci";
 
 /**
  * В5 (К5.9): bus factor — окно и доля покрытия. Справочный показатель БЕЗ
@@ -26,8 +26,14 @@ export const BUS_FACTOR_SHARE = 0.5;
  */
 export const PUBLIC_CATEGORIES: CategoryKey[] = ["documentation", "activity", "issues", "code"];
 
-/** noreply-домены автоматизации (§7.2; список — часть модели). */
-export const NOREPLY_DOMAINS: string[] = ["github.com", "users.noreply.github.com", "noreply.github.com"];
+/**
+ * noreply-адреса автоматизации (§7.2; список — часть модели). 4.2.0 (М1.7
+ * аудита В5.3): только точное совпадение. `users.noreply.github.com` — это
+ * приватная почта ЧЕЛОВЕКА на GitHub (коммит через веб или со скрытым адресом),
+ * не автоматизация; боты на нем (`dependabot[bot]@…`) ловятся маркерами имени.
+ */
+export const NOREPLY_DOMAINS: string[] = ["noreply.github.com"];
+export const ROBOT_EMAILS: string[] = ["noreply@github.com"];
 
 /** Author-паттерны роботов (§7.2): имя содержит подстроку. */
 export const ROBOT_NAME_MARKERS: string[] = ["[bot]", "-bot", "dependabot", "renovate", "allcontributors"];
@@ -82,6 +88,8 @@ export function contributorsScore(x: number): number {
 
 /** readme bytes: <500Б→0.2, 2КБ→0.6, 20КБ→1.0, выше плоско (рабочий кап от воды). */
 export const README_BYTES: Anchor[] = [
+  // 4.2.0 (М1.10): пустой README — 0, а не плоский пол 0,2 до 500 байт
+  { x: 0, y: 0 },
   { x: 500, y: 0.2 },
   { x: 2048, y: 0.6 },
   { x: 20480, y: 1.0 },
@@ -117,6 +125,8 @@ export const RESOLVED_SHARE: Anchor[] = [
   { x: 0, y: 0.1 },
   { x: 0.5, y: 0.55 },
   { x: 0.9, y: 0.95 },
+  // 4.2.0 (М1.12): закрыть все — максимум, а не 0,95
+  { x: 1, y: 1 },
 ];
 
 /** stale_share открытых issues. */
@@ -158,6 +168,15 @@ export const OLD_SHARE: Anchor[] = [
   { x: 0.3, y: 0.7 },
   { x: 0.8, y: 0.1 },
 ];
+
+/**
+ * 4.2.0 (М1.9): полная выборка трекера — с этого числа задач балл Задач
+ * считается без сжатия к минимуму ISSUES_TRACKER_UNUSED.
+ */
+export const ISSUES_FULL_SAMPLE = 10;
+
+/** 4.2.0 (М1.5): минимальный знаменатель доли старых TODO. */
+export const OLD_SHARE_MIN_BASE = 5;
 
 /** записей в корне репозитория (top_level, лог-шкала духом — плоские края). */
 export const ROOT_ENTRIES: Anchor[] = [
