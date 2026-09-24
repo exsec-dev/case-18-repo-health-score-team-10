@@ -82,7 +82,8 @@ describe("Н4: причины «нет данных» по виду", () => {
   test("Н4 + В3: строки не прочитаны (loc = null) — нет данных; мало кода — оценка со сжатием", () => {
     const unread = score(facts({ "tree.stats": tree({ source_loc: null, loc: null, loc_note: "incomplete" }) }));
     expect(noDataReason("code", unread.categories.code.no_data)).toBe("Строки кода прочитать не удалось: файлы больше лимита сервиса, не текстовые или чтение прервалось – категорию не оцениваем.");
-    const little = score(facts({ "tree.stats": tree({ source_loc: 12 }) }));
+    // приемка HQ (уточнение В3: сжатие только вниз): поправка есть у сырого выше 50 — без пометок
+    const little = score(facts({ "tree.stats": tree({ source_loc: 12 }), "code.todo": { count: 0, fixme: 0, older_180d: 0, todo_files: 0, blamed_files: 0 } }));
     expect(little.categories.code.score).not.toBeNull();
     expect(little.categories.code.adjustment?.kind).toBe("small-code");
   });
@@ -105,7 +106,7 @@ describe("Р4б → В3: малый код сжимается к 50, порог�
     const s50 = score(facts({ "tree.stats": tree({ source_loc: 50 }) })).categories.code.score!;
     expect(Math.abs(s50 - s49)).toBeLessThan(1);
     const legacy = { top_level: [{ name: "src", type: "tree" }], file_count: 3, bytes: 100, loc: 20 };
-    const leg = score(facts({ "tree.stats": legacy })).categories.code;
+    const leg = score(facts({ "tree.stats": legacy, "code.todo": { count: 0, fixme: 0, older_180d: 0, todo_files: 0, blamed_files: 0 } })).categories.code;
     expect(leg.adjustment).toMatchObject({ kind: "small-code", loc: 20, full: 200, center: 50 });
   });
 

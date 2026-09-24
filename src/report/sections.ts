@@ -174,6 +174,8 @@ export function adjustmentText(cat: Pick<CardCategory, "adjustment" | "score">):
   const a = cat.adjustment;
   if (!a) return null;
   if (a.kind === "small-sample") {
+    // приемка HQ (E11): ни одной засчитанной закрытой — не «0 из 10»
+    if (a.n === 0) return `Ни одна задача не закрыта – балл категории минимальный: ${fmtDecimal(cat.score ?? a.floor, 0)}.`;
     const tasks = plural(a.n, "закрытая задача", "закрытые задачи", "закрытых задач");
     return `Малая выборка: ${a.n} ${tasks} из ${a.full} – балл сжат к минимуму ${fmtDecimal(a.floor, 0)}: ${fmtDecimal(a.raw, 1, { trim: true })} → ${fmtDecimal(cat.score ?? a.floor, 1, { trim: true })}.`;
   }

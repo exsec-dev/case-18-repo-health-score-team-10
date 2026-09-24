@@ -888,6 +888,9 @@ function scoreCode(derived: DerivedMetrics, hasTree: boolean): CategoryScore {
   // прочитанных строк при непрочитанных файлах кода (derived → null) и 0 строк
   // у фактов до М2.3 (ошибка счета М2.2: однострочные файлы без `\n`) —
   // файлы кода есть, а строки не посчитаны. Причина «мало кода» (Р4б) снята (В3)
+  // приемка HQ (E15): у фактов до М2.3 `loc = 0` — ошибка счета прежнего
+  // сборщика (М2.2), а не «файлы не прочитаны» — своя причина и текст
+  if (derived.codeLoc === 0 && derived.codeLocLegacy) return { score: null, no_data: "too little data — lines miscounted by an older collector", submetrics };
   if (derived.codeLoc === null || derived.codeLoc === 0) return { score: null, no_data: "too little data — lines of code not read", submetrics };
   // якорь — плотность пометок (4.2.0, М1.2); без факта TODO категории нет
   if (densitySub === null) return { score: null, no_data: "git channel no-data", submetrics };
@@ -912,12 +915,15 @@ function scoreCode(derived: DerivedMetrics, hasTree: boolean): CategoryScore {
     else submetrics.tests = { score: null, value: derived.testShare, note: TESTS_BONUS_IDLE_NOTE };
   }
   // круг 2 (В3, вытесняет порог Р4б): плавное сжатие малого кода к нейтрали —
-  // Код = 50 + (сырой − 50) × min(1, строк / 200); ступени на 50-й строке нет
+  // Код = 50 + (сырой − 50) × min(1, строк / 200); ступени на 50-й строке нет.
+  // Приемка HQ (уточнение В3, Екатерина 24.09): только ВНИЗ — плохой малый код
+  // к 50 не подтягивается (иначе удалить строки выгодно, дописать — снижение)
   const rawScore = raw * 100;
   const factor = Math.min(1, derived.codeLoc / CODE_FULL_LOC);
-  if (factor >= 1) return { score: rawScore, submetrics };
+  const compressed = CODE_NEUTRAL + (rawScore - CODE_NEUTRAL) * factor;
+  if (factor >= 1 || compressed >= rawScore) return { score: rawScore, submetrics };
   return {
-    score: CODE_NEUTRAL + (rawScore - CODE_NEUTRAL) * factor,
+    score: compressed,
     submetrics,
     adjustment: { kind: "small-code", loc: derived.codeLoc, full: CODE_FULL_LOC, raw: rawScore, center: CODE_NEUTRAL },
   };

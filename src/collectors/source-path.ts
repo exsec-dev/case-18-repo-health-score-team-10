@@ -9,7 +9,13 @@
 // не по тексту README.
 
 const NON_SOURCE_NAME = /^(readme|licen[cs]es?|copying|unlicense|notice|authors|contributors|changelog|changes|history|contributing|codeowners|code_of_conduct|security|maintainers)([._-].*)?$/i;
-const NON_SOURCE_EXT = new Set(["md", "markdown", "rst", "txt", "adoc", "asciidoc", "png", "jpg", "jpeg", "gif", "svg", "ico", "webp", "bmp", "pdf"]);
+const NON_SOURCE_EXT = new Set([
+  "md", "markdown", "rst", "txt", "adoc", "asciidoc", "png", "jpg", "jpeg", "gif", "svg", "ico", "webp", "bmp", "pdf",
+  // приемка HQ (H1): архивы, офисные документы, медиа и собранные бинарники — не код
+  "zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "apk", "aab", "ipa", "exe", "msi", "dll", "so", "dylib", "jar", "war", "class",
+  "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp", "mp3", "mp4", "wav", "avi", "mov", "mkv", "ttf", "otf", "woff", "woff2",
+  "psd", "iso", "dmg", "bin",
+]);
 const NON_SOURCE_FILES = new Set([
   ".gitignore",
   ".gitattributes",
@@ -58,8 +64,11 @@ export function isTestPath(path: string): boolean {
   if (!isSourcePath(path)) return false;
   const parts = path.split("/");
   const base = parts.pop() ?? "";
-  if (parts.some((dir) => TEST_DATA_DIRS.has(dir.toLowerCase()))) return false;
-  if (parts.some((dir) => TEST_DIRS.has(dir.toLowerCase()))) return true;
+  // приемка HQ (E17): каталоги данных — не тесты только ВНУТРИ каталога тестов
+  // (`tests/fixtures/x.json`), а не где угодно (`src/data/test_loader.py` — тест)
+  const testDir = parts.findIndex((dir) => TEST_DIRS.has(dir.toLowerCase()));
+  if (testDir >= 0 && parts.slice(testDir + 1).some((dir) => TEST_DATA_DIRS.has(dir.toLowerCase()))) return false;
+  if (testDir >= 0) return true;
   return TEST_NAME.test(base);
 }
 

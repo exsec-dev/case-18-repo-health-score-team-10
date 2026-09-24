@@ -269,12 +269,11 @@ describe("В3: плавное сжатие малого кода", () => {
       expect(cat.score!).toBeCloseTo(50 + (100 - 50) * (loc / 200), 9);
       expect(cat.adjustment).toEqual({ kind: "small-code", loc, full: 200, raw: 100, center: 50 });
     }
-    // сырой ниже 50 сжимается к 50 снизу (симметрично, по решению В3)
+    // приемка HQ (уточнение В3, Екатерина 24.09 — «только вниз»): сырой ниже 50
+    // к 50 НЕ подтягивается — поправки нет, балл = сырой
     const bad = score(facts({ "tree.stats": tree({ source_loc: 100 }), "code.todo": { count: 20, fixme: 0, older_180d: 20, todo_files: 1, blamed_files: 1 } })).categories.code;
-    expect(bad.adjustment!.kind).toBe("small-code");
-    const raw = (bad.adjustment as { raw: number }).raw;
-    expect(raw).toBeLessThan(50);
-    expect(bad.score!).toBeCloseTo(50 + (raw - 50) * 0.5, 9);
+    expect(bad.adjustment).toBeUndefined();
+    expect(bad.score!).toBeLessThan(50);
   });
 
   test("В3 (G1): ступени на 50-й строке нет; «мало кода» больше не причина «нет данных»", () => {
@@ -332,11 +331,16 @@ describe("К3: строки кода не прочитаны", () => {
     expect(s.healthcraftIndex).not.toBe(0);
   });
 
-  test("К3: бинарный файл кода — не прочитан; пустой файл кода — по-прежнему «кода нет»", async () => {
+  test("К3 + H1 (приемка HQ): бинарный файл — не код («кода нет»), а не «не прочитан»; пустой файл кода — «кода нет»", async () => {
     const bin = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0, 0, 1, 2, 3]);
     const f = await factsOf({ "README.md": "# app\n", "app.apk": bin });
-    expect(f.get("tree.stats")!.source_unread).toBe(1);
-    expect(score(facts({ "tree.stats": f.get("tree.stats") })).codeEmpty).toBe(false);
+    expect(f.get("tree.stats")!.source_files).toBe(0);
+    expect(score(facts({ "tree.stats": f.get("tree.stats") })).codeEmpty).toBe(true);
+    // бинарник с «кодовым» именем — тоже не код
+    const g = await factsOf({ "README.md": "# app\n", "app.py": bin });
+    expect(g.get("tree.stats")!.source_files).toBe(0);
+    expect(g.get("tree.stats")!.source_unread).toBe(0);
+    expect(score(facts({ "tree.stats": g.get("tree.stats") })).codeEmpty).toBe(true);
     const e = await factsOf({ "README.md": "# app\n", "a.js": "" });
     expect(e.get("tree.stats")!.source_unread).toBe(0);
     expect(score(facts({ "tree.stats": e.get("tree.stats") })).codeEmpty).toBe(true);

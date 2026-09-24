@@ -58,6 +58,8 @@ export interface DerivedMetrics {
    * сборщика, иначе весь `loc` фактов до правки М2.3; null — не прочитаны
    */
   codeLoc: number | null;
+  /** приемка HQ (E15): строки взяты из `loc` факта до М2.3 (поля `source_loc` нет) */
+  codeLocLegacy: boolean;
   /**
    * 4.3.0 (Р1): доля файлов тестов среди файлов кода. Круг 2 (В1): null и у
    * фактов без `test_files`, и при `test_files = 0` — «Тесты» только бонус
@@ -205,7 +207,7 @@ export function issuesClosedCounted(stats: { closed?: unknown; closed_counted?: 
   return typeof stats?.closed === "number" ? stats.closed : null;
 }
 
-function issuesCodeRest(ok: Map<string, unknown>, now: Date): Pick<DerivedMetrics, "staleShare" | "resolutionRatio" | "todoTotal" | "todoDensityPerKloc" | "oldShare" | "oldShareNoData" | "rootEntries" | "codeLoc" | "testShare" | "testsNone" | "pulls90d" | "releases12m"> {
+function issuesCodeRest(ok: Map<string, unknown>, now: Date): Pick<DerivedMetrics, "staleShare" | "resolutionRatio" | "todoTotal" | "todoDensityPerKloc" | "oldShare" | "oldShareNoData" | "rootEntries" | "codeLoc" | "codeLocLegacy" | "testShare" | "testsNone" | "pulls90d" | "releases12m"> {
   // issues.stats
   const stats = ok.get("issues.stats") as { open?: unknown; closed?: unknown; closed_counted?: unknown; stale_90d?: unknown } | undefined;
   const open = typeof stats?.open === "number" ? stats.open : null;
@@ -269,7 +271,7 @@ function issuesCodeRest(ok: Map<string, unknown>, now: Date): Pick<DerivedMetric
   const pulls90d = Array.isArray(rest?.pulls_created_at) ? countRecent(rest!.pulls_created_at!, now, 90) : null;
   const releases12m = Array.isArray(rest?.releases_released_at) ? countRecent(rest!.releases_released_at!, now, 365) : null;
 
-  return { staleShare, resolutionRatio, todoTotal, todoDensityPerKloc, oldShare, oldShareNoData, rootEntries, codeLoc: loc, testShare, testsNone, pulls90d, releases12m };
+  return { staleShare, resolutionRatio, todoTotal, todoDensityPerKloc, oldShare, oldShareNoData, rootEntries, codeLoc: loc, codeLocLegacy: tree !== undefined && tree !== null && !("source_loc" in tree), testShare, testsNone, pulls90d, releases12m };
 }
 
 function round3(x: number): number {

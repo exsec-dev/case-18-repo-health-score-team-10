@@ -536,6 +536,7 @@ export function noDataReason(key: string, reason: string | null | undefined): st
   if (r.startsWith("no source code — ")) return CODE_EMPTY_TEXT[r.slice("no source code — ".length)] ?? CODE_EMPTY_TEXT["only non-code files"]!;
   if (r === "repository empty") return REPOSITORY_EMPTY_TEXT;
   // К3: файлы кода больше лимита сервиса или бинарные — строки не прочитаны
+  if (r.startsWith("too little data — lines miscounted by an older collector")) return "Строки кода посчитаны прежней версией сборщика с ошибкой – категория оценится после повторного анализа репозитория.";
   if (r.startsWith("too little data — lines of code not read")) return "Строки кода прочитать не удалось: файлы больше лимита сервиса, не текстовые или чтение прервалось – категорию не оцениваем.";
   // прежние модели (4.2.0): строки старых оценок
   if (r.startsWith("too little data — no commit history")) return "Истории коммитов нет – без нее активность не оцениваем: одни счетчики запросов на слияние и релизов категорию не определяют.";

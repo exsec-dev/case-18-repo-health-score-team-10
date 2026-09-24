@@ -1029,6 +1029,8 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
   // круг 2 (К3, E3): файлы кода, строки которых не прочитаны — больше лимита
   // текста или бинарные (`source_loc = 0` у них не «кода нет», а незнание)
   let sourceUnread = blobs.filter((b) => b.size > textCap && isSourcePath(b.path)).length;
+  // приемка HQ (H1): файлы с «кодовым» именем, оказавшиеся бинарными, — не код
+  let sourceBinary = 0;
   // Ф2.3 (M5): ЛЮБОЙ обрыв потока `cat-file` — дедлайн, оборванный заголовок,
   // недочитанный блоб — делает LOC и TODO неполными. Раньше неполнота
   // помечалась только у дедлайна (`loc_note: "deadline"`), а обрыв заголовка
@@ -1082,8 +1084,9 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
         }
         const probe = buf.subarray(0, Math.min(8192, buf.length));
         if (probe.includes(0)) {
-          // бинарный — не текст (К3: у файла кода строки не прочитаны)
-          if (isSourcePath(entry.path)) sourceUnread++;
+          // приемка HQ (H1): бинарный файл — не код (не «строки не прочитаны»):
+          // README + app.bin — по-прежнему «кода нет»
+          if (isSourcePath(entry.path)) sourceBinary++;
           continue;
         }
         const text = new TextDecoder("utf-8", { fatal: false }).decode(buf);
@@ -1117,7 +1120,7 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
       file_count: blobs.length,
       bytes: blobs.reduce((s, b) => s + b.size, 0),
       loc: locIncomplete ? null : loc,
-      source_files: sourceFiles,
+      source_files: sourceFiles - sourceBinary,
       // К2: при обрыве чтения непустоту всех файлов тестов не проверить
       test_files: locIncomplete ? null : testFiles,
       source_loc: locIncomplete ? null : sourceLoc,
