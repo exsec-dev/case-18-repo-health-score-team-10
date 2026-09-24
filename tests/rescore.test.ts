@@ -492,16 +492,17 @@ describe("З5 (круг 2 В4.4): busy_timeout восстанавливаетс�
 });
 
 describe("В5.3: смена MODEL_VERSION сбрасывает водяной знак", () => {
-  test("знак на последнем скане, одна свежая строка новой версии, метка старой модели — проход пересчитывает всю историю", () => {
+  test("знак на последнем скане, одна свежая строка новой версии, строки прежней версии — проход пересчитывает всю историю", () => {
     const dir = tempDir();
     const db = openDb({ ...loadConfig(), dataDir: dir });
     const t = { db, close: () => db.close() };
     const repoId = seedRepo(t, { org: "mv", repo: "r" });
     const ids = [1, 2, 3].map((i) => seedScan(t, repoId, { facts: healthySpecs(), startedAt: `2026-03-0${i}T00:00:00Z` }));
     rescoreBatchByCursor(db, { limit: 10 });
-    // состояние живой БД 24.09: знак догнал max(scan_id), проход прежней версии
-    db.query("DELETE FROM scores WHERE scan_id <> ?").run(ids[2]!);
-    setMetaValue(db, RESCORE_MODEL, "4.1.0-hci");
+    // состояние живой БД 24.09: знак догнал max(scan_id), у двух сканов — только
+    // строки прежней версии, у свежего — уже новой; метки версии в meta нет
+    db.query("UPDATE scores SET model_version = '4.1.0-hci' WHERE scan_id <> ?").run(ids[2]!);
+    db.query("DELETE FROM meta WHERE key = ?").run(RESCORE_MODEL);
     setMetaValue(db, RESCORE_CURSOR, String(ids[2]));
     expect(needsRescore(db)).toBe(true);
     const out = rescoreBatchByCursor(db, { limit: 10 });
@@ -510,6 +511,22 @@ describe("В5.3: смена MODEL_VERSION сбрасывает водяной з
     const rows = (db.query("SELECT COUNT(*) AS c FROM scores WHERE model_version = ?").get(MODEL_VERSION) as { c: number }).c;
     expect(rows).toBe(3);
     expect(needsRescore(db)).toBe(false);
+    // строки прежней версии не удалены (история не перезаписывается)
+    expect((db.query("SELECT COUNT(*) AS c FROM scores WHERE model_version = '4.1.0-hci'").get() as { c: number }).c).toBe(2);
     db.close();
   });
+});
+
+test("В5.3: база без метки версии, но без строк прежней модели — пересчет не нужен, метка ставится", () => {
+  const dir = tempDir();
+  const db = openDb({ ...loadConfig(), dataDir: dir });
+  const t = { db, close: () => db.close() };
+  const repoId = seedRepo(t, { org: "mv2", repo: "r" });
+  seedScan(t, repoId, { facts: healthySpecs(), startedAt: "2026-03-01T00:00:00Z" });
+  rescoreBatchByCursor(db, { limit: 10 });
+  db.query("DELETE FROM meta WHERE key = ?").run(RESCORE_MODEL);
+  expect(needsRescore(db)).toBe(false);
+  expect(rescoreBatchByCursor(db, { limit: 10 }).processed).toBe(0);
+  expect(getMetaValue(db, RESCORE_MODEL)).toBe(MODEL_VERSION);
+  db.close();
 });

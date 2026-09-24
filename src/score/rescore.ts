@@ -65,6 +65,23 @@ export const RESCORE_CURSOR = "derived_rescore_cursor";
 export const RESCORE_MODEL = "derived_rescore_model";
 
 /**
+ * Есть ли оценки прежней версии модели без пары в текущей (В5.3). Метка
+ * RESCORE_MODEL — быстрый путь: совпала с MODEL_VERSION — проверять нечего.
+ * Иначе решают данные, а не метка (базы до В5.3 и тестовые метки не знают).
+ */
+export function modelStale(db: Database): boolean {
+  if (getMetaValue(db, RESCORE_MODEL) === MODEL_VERSION) return false;
+  return (
+    db
+      .query(
+        `SELECT 1 FROM scores s WHERE s.model_version <> ?
+           AND NOT EXISTS (SELECT 1 FROM scores c WHERE c.scan_id = s.scan_id AND c.model_version = ?) LIMIT 1`,
+      )
+      .get(MODEL_VERSION, MODEL_VERSION) !== null
+  );
+}
+
+/**
  * Флаг «проход идёт» (кросс-процессно): значение — ISO-метка последнего
  * сердцебиения (обновляется после каждого батча). Умерший процесс оставляет
  * метку стареть: RESCORE_HEARTBEAT_STALE_MS — порог, после которого running
@@ -117,7 +134,7 @@ export function needsRescore(db: Database): boolean {
   if (!Number.isFinite(stored) || stored < DERIVED_VERSION) return true;
   const scans = (db.query("SELECT COUNT(*) AS c FROM scans WHERE status NOT IN ('running', 'queued')").get() as { c: number }).c;
   if (scans === 0) return false;
-  if (getMetaValue(db, RESCORE_MODEL) !== MODEL_VERSION) return true;
+  if (modelStale(db)) return true;
   const rows = (db.query("SELECT COUNT(*) AS c FROM scores WHERE model_version = ?").get(MODEL_VERSION) as { c: number }).c;
   if (rows === 0) return true;
   // круг 2 (LOW-10): следы старого процесса — завершённые сканы без public_status
@@ -394,9 +411,11 @@ export function rescoreBatchByCursor(db: Database, opts: { limit?: number; log?:
   // воркер); метка ставится сразу, чтобы рестарт посреди прохода продолжил с
   // курсора, а не начал заново
   if (getMetaValue(db, RESCORE_MODEL) !== MODEL_VERSION) {
-    setMetaValue(db, RESCORE_CURSOR, "0");
+    if (modelStale(db)) {
+      setMetaValue(db, RESCORE_CURSOR, "0");
+      log(`rescore: model ${MODEL_VERSION} — watermark reset, full history pass`);
+    }
     setMetaValue(db, RESCORE_MODEL, MODEL_VERSION);
-    log(`rescore: model ${MODEL_VERSION} — watermark reset, full history pass`);
   }
   const cursor = Number(getMetaValue(db, RESCORE_CURSOR) ?? "0") || 0;
   const scans = db
