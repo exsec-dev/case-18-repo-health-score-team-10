@@ -18,6 +18,7 @@ import {
   isBusyError,
   needsRescore,
   RESCORE_CURSOR,
+  RESCORE_MODEL,
   RESCORE_ERROR,
   RESCORE_RUNNING,
   rescoreAll,
@@ -486,6 +487,29 @@ describe("З5 (круг 2 В4.4): busy_timeout восстанавливаетс�
     expect(done).toEqual({ stopped: "done" });
     const bt = (db.query("PRAGMA busy_timeout").get() as { timeout: number }).timeout;
     expect(bt).toBe(5000);
+    db.close();
+  });
+});
+
+describe("В5.3: смена MODEL_VERSION сбрасывает водяной знак", () => {
+  test("знак на последнем скане, одна свежая строка новой версии, метка старой модели — проход пересчитывает всю историю", () => {
+    const dir = tempDir();
+    const db = openDb({ ...loadConfig(), dataDir: dir });
+    const t = { db, close: () => db.close() };
+    const repoId = seedRepo(t, { org: "mv", repo: "r" });
+    const ids = [1, 2, 3].map((i) => seedScan(t, repoId, { facts: healthySpecs(), startedAt: `2026-03-0${i}T00:00:00Z` }));
+    rescoreBatchByCursor(db, { limit: 10 });
+    // состояние живой БД 24.09: знак догнал max(scan_id), проход прежней версии
+    db.query("DELETE FROM scores WHERE scan_id <> ?").run(ids[2]!);
+    setMetaValue(db, RESCORE_MODEL, "4.1.0-hci");
+    setMetaValue(db, RESCORE_CURSOR, String(ids[2]));
+    expect(needsRescore(db)).toBe(true);
+    const out = rescoreBatchByCursor(db, { limit: 10 });
+    expect(out).toEqual({ processed: 3, done: true });
+    expect(getMetaValue(db, RESCORE_MODEL)).toBe(MODEL_VERSION);
+    const rows = (db.query("SELECT COUNT(*) AS c FROM scores WHERE model_version = ?").get(MODEL_VERSION) as { c: number }).c;
+    expect(rows).toBe(3);
+    expect(needsRescore(db)).toBe(false);
     db.close();
   });
 });

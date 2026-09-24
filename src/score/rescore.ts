@@ -56,6 +56,13 @@ export const RESCORE_BATCH = 50;
 
 /** Watermark scan_id пройденного батчами (пишется после каждого батча). */
 export const RESCORE_CURSOR = "derived_rescore_cursor";
+/**
+ * В5.3 (модель 4.2.0): под какую MODEL_VERSION пройден водяной знак. Без него
+ * смена версии модели была незаметна пересчету: знак уже стоял на последнем
+ * скане, одна свежая строка новой версии гасила проверку «строк модели нет» —
+ * и рейтинг текущей версии оставался пустым.
+ */
+export const RESCORE_MODEL = "derived_rescore_model";
 
 /**
  * Флаг «проход идёт» (кросс-процессно): значение — ISO-метка последнего
@@ -110,6 +117,7 @@ export function needsRescore(db: Database): boolean {
   if (!Number.isFinite(stored) || stored < DERIVED_VERSION) return true;
   const scans = (db.query("SELECT COUNT(*) AS c FROM scans WHERE status NOT IN ('running', 'queued')").get() as { c: number }).c;
   if (scans === 0) return false;
+  if (getMetaValue(db, RESCORE_MODEL) !== MODEL_VERSION) return true;
   const rows = (db.query("SELECT COUNT(*) AS c FROM scores WHERE model_version = ?").get(MODEL_VERSION) as { c: number }).c;
   if (rows === 0) return true;
   // круг 2 (LOW-10): следы старого процесса — завершённые сканы без public_status
@@ -325,6 +333,7 @@ export function rescoreAll(db: Database, opts: RescoreOptions = {}): RescoreResu
     // К8.5.12: идущие сканы под знаком — в отложенные (их оценит хук или проход)
     deferScans(db, (db.query("SELECT id FROM scans WHERE status IN ('running', 'queued')").all() as { id: number }[]).map((r) => r.id));
     setMetaValue(db, RESCORE_CURSOR, String(maxId));
+    setMetaValue(db, RESCORE_MODEL, MODEL_VERSION);
     // стартовый пересчёт покрыл только читаемые сканы — остальная история фоном
     if (scope === "startup") setMetaValue(db, HISTORY_CURSOR, "0");
     else db.query("DELETE FROM meta WHERE key = ?").run(HISTORY_CURSOR);
@@ -381,6 +390,14 @@ export interface CursorBatchResult {
 export function rescoreBatchByCursor(db: Database, opts: { limit?: number; log?: (m: string) => void } = {}): CursorBatchResult {
   const log = opts.log ?? (() => {});
   const limit = Math.max(1, opts.limit ?? RESCORE_BATCH);
+  // В5.3: новая версия модели — знак с начала (любой вызывающий: старт или
+  // воркер); метка ставится сразу, чтобы рестарт посреди прохода продолжил с
+  // курсора, а не начал заново
+  if (getMetaValue(db, RESCORE_MODEL) !== MODEL_VERSION) {
+    setMetaValue(db, RESCORE_CURSOR, "0");
+    setMetaValue(db, RESCORE_MODEL, MODEL_VERSION);
+    log(`rescore: model ${MODEL_VERSION} — watermark reset, full history pass`);
+  }
   const cursor = Number(getMetaValue(db, RESCORE_CURSOR) ?? "0") || 0;
   const scans = db
     .query(`SELECT ${SCAN_COLS} FROM scans s JOIN repos r ON r.id = s.repo_id WHERE s.id > ? ORDER BY s.id LIMIT ?`)
@@ -540,6 +557,7 @@ async function startupRescorePass(
     log("rescore: nothing to do (cursor caught up)");
     return { stopped: "done" };
   }
+
   const migrated = await busyGuarded(
     () => {
       migrateEligibility(db);
