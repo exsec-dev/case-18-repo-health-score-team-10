@@ -60,7 +60,7 @@ describe("А1 (блок А): полный отчет считает ОБА по�
     const { md, model } = report("full");
     const hero = heroOf(model);
     expect({ left: hero.label, right: hero.secondary?.label }).toEqual({ left: "HealthCraft Index", right: "Repo Health Score" });
-    expect({ leftValue: hero.value, rightValue: hero.secondary?.value }).toEqual({ leftValue: 62, rightValue: 64 });
+    expect({ leftValue: hero.value, rightValue: hero.secondary?.value }).toEqual({ leftValue: 62, rightValue: 62 }); // 4.3.0 (Р3): открытая critical — Безопасность не выше 40
     // строка-пояснение одна и начинается с публичного показателя
     expect(hero.notes.filter((n) => n.info === true)).toHaveLength(1);
     expect(hero.notes.at(-1)!.line.map((f) => f.text).join("")).toStartWith("HealthCraft Index считается по открытым данным");
@@ -88,8 +88,8 @@ describe("А1 (блок А): полный отчет считает ОБА по�
     expect(weightColumns(model)).toEqual(["Вес", "Вес"]);
     const appendix = md.slice(md.indexOf("## Приложение"));
     expect(appendix).toContain("| **HealthCraft Index 62** | сумма по 4 открытым категориям: балл × вес, приложение А |");
-    expect(appendix).toContain("| **Repo Health Score 64** | сумма по 6 категориям: балл × вес, приложение А |");
-    expect(appendix.indexOf("**HealthCraft Index 62**")).toBeLessThan(appendix.indexOf("**Repo Health Score 64**"));
+    expect(appendix).toContain("| **Repo Health Score 62** | сумма по 6 категориям: балл × вес, приложение А |");
+    expect(appendix.indexOf("**HealthCraft Index 62**")).toBeLessThan(appendix.indexOf("**Repo Health Score 62**"));
     // строки категорий и подметрик — одинарные: балл категории у обеих шкал один
     expect(appendix.match(/\| \*\*Документация 55\*\* \|/g) ?? []).toHaveLength(1);
     expect(appendix.match(/\| Лицензия: есть \|/g) ?? []).toHaveLength(1);
@@ -177,7 +177,7 @@ describe("А4: причина отсутствия результатов CI —
   test("grant-ci: причина названа теми же словами в разборе и в приложении В", () => {
     const { md } = report("grant-ci");
     // 23.09: конфиг без прогонов — честное no-data вместо потолка 50 (решение владельца)
-    expect(md).toContain("Результаты запусков CI не видны (нет прав или запусков не было) – категорию не оцениваем");
+    expect(md).toContain("Результаты запусков CI сервису не видны – категорию не оцениваем");
     const appendix = md.slice(md.indexOf("## Приложение"));
     expect(appendix).toContain("| reason | у сервиса нет прав на эти данные |");
     expect(appendix).not.toContain("| reason | access |");
@@ -193,7 +193,7 @@ describe("А5: номинальный вес разбора и перенорм�
   test("grant-ci: у CI/CD без прогонов категория честно исключена (23.09, кап 50 удалён)", () => {
     // в фикстуре `grant-ci` перенормировка есть у CI/CD (два показателя без данных)
     const { md } = report("grant-ci");
-    expect(md).toContain("Результаты запусков CI не видны (нет прав или запусков не было) – категорию не оцениваем");
+    expect(md).toContain("Результаты запусков CI сервису не видны – категорию не оцениваем");
     expect(md).toContain("Категория в оценке не участвует и ее не снижает.");
   });
 
@@ -210,12 +210,12 @@ describe("А5: номинальный вес разбора и перенорм�
       close();
     }
     // в разборе по категориям стоит номинальный вес показателя
-    expect(md).toContain("| Плотность TODO/FIXME | 0 на 1 тыс. строк | 100 | 40% |");
+    expect(md).toContain("| Плотность TODO/FIXME | 0 на 1 тыс. строк | 100 | 35% |");
     // в расчете категории — доля среди показателей с данными, и разница объяснена
     const calc = md.slice(md.indexOf("**Балл категории Состояние кода**"));
-    expect(calc).toContain("| Плотность TODO/FIXME | 100,0 | 61,5% | 61,5 |");
+    expect(calc).toContain("| Плотность TODO/FIXME | 100,0 | 77,8% | 77,8 |");
     expect(calc).toContain(
-      "Показатель без данных в расчет не идет, его вес делится между остальными пропорционально, поэтому доли здесь отличаются от номинальных: у «Плотность TODO/FIXME» номинальный вес 40% (он и стоит в разборе по категориям), в расчете – 61,5%.",
+      "Показатель без данных в расчет не идет, его вес делится между остальными пропорционально, поэтому доли здесь отличаются от номинальных: у «Плотность TODO/FIXME» номинальный вес 35% (он и стоит в разборе по категориям), в расчете – 77,8%.",
     );
   });
 });
@@ -261,7 +261,7 @@ describe("А9: плотность находок пересчитывается 
   test("full: «38 на 10 тыс. строк» разложено на веса важности и строки кода", () => {
     const { md } = report("full");
     const security = md.slice(md.indexOf("### Безопасность"), md.indexOf("### Активность"));
-    expect(security).toContain("| Плотность находок | 38 на 10 тыс. строк (действие 4) | 10 | 50% |");
+    expect(security).toContain("| Плотность находок | 38 на 10 тыс. строк (действие 1) | 10 | 50% |");
     expect(security).toContain("Находки считаются с весом важности: критичная 1 × 8, высокая 1 × 4, средняя 2 × 2, низкая 3 × 1 = 19 на 5000 строк кода, то есть 38 на 10 тыс. строк.");
   });
 });
@@ -321,7 +321,7 @@ describe("А13: срок закрытия задач назван ОДНИМ ч�
 describe("А14: язык подписан источником", () => {
   test("null: репозиторий не скачался, а язык есть — потому что он из каталога", () => {
     const { md } = report("null");
-    expect(md).toContain("Не удалось скачать репозиторий");
+    expect(md).toContain("Репозиторий не удалось прочитать"); // 4.3.0 (Н4)
     expect(md).toContain("| Язык (по каталогу SourceCraft) | C++ |");
     expect(md).not.toContain("| Язык | C++ |");
   });

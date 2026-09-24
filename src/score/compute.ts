@@ -13,9 +13,14 @@ import type { Database } from "bun:sqlite";
 import { categoryOf, parseFactValue } from "../collectors/facts";
 import { rootHasNoSource } from "../collectors/source-path";
 import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
-import { DerivedMetrics, deriveMetrics } from "./derived";
+import { DerivedMetrics, deriveMetrics, issuesClosedCounted } from "./derived";
+import { roundScore } from "../web/format";
 import {
   CLOSE_DAYS,
+  CODE_MIN_LOC,
+  OLD_SHARE_MIN_BASE,
+  SECURITY_OPEN_CAPS,
+  TEST_SHARE,
   COVERAGE_NULL_BELOW,
   FULL_COVERAGE_BASE,
   INDEX_COVERAGE_BASE,
@@ -57,12 +62,25 @@ export interface SubmetricScore {
   note?: string;
 }
 
+/**
+ * 4.3.0 (Н5, Р3): поправка к взвешенному среднему категории — таблица
+ * «Балл категории» приложения сходится с итогом, а карточка называет причину.
+ * `raw` — балл до поправки (0..100).
+ */
+export type CategoryAdjustment =
+  /** Задачи: закрытых (проживших ≥ 1 ч) меньше полной выборки — балл сжат к минимуму */
+  | { kind: "small-sample"; n: number; full: number; raw: number; floor: number }
+  /** Безопасность: открытые находки critical/high — потолок категории */
+  | { kind: "open-findings-cap"; level: "critical" | "high"; limit: number; raw: number };
+
 export interface CategoryScore {
   /** 0..100 | null = категория no-data */
   score: number | null;
   no_data?: string;
   stale?: boolean;
   submetrics: Record<string, SubmetricScore>;
+  /** 4.3.0: поправка к взвешенному среднему (сжатие малой выборки, потолок) */
+  adjustment?: CategoryAdjustment;
 }
 
 /**
@@ -351,36 +369,22 @@ export function computeFromFacts(ok: Map<string, unknown>, input: ComputeInput, 
   const staleCats = input.staleCats ?? new Set<string>();
 
   const derived = deriveMetrics(ok, now);
-  const categories = {
-    documentation: scoreDocumentation(ok, derived),
-    cicd: scoreCicd(ok),
+  const git: GitState = { empty: input.emptyRepo === true };
+  const emptyKind = codeEmptyKind(ok, git);
+  const codeEmpty = emptyKind !== null;
+  const categories: Record<CategoryKey, CategoryScore> = {
+    documentation: scoreDocumentation(ok, git),
+    cicd: scoreCicd(ok, git),
     security: scoreSecurity(ok),
-    activity: scoreActivity(derived, now),
+    activity: scoreActivity(derived, now, git),
     issues: scoreIssues(ok, derived),
-    code: scoreCode(derived),
+    // 4.3.0 (Н3): «кода нет» — и «Состояние кода» без числа (не 100 рядом с
+    // индексом 0), причина — вид пустоты (Н4)
+    code: emptyKind !== null ? { score: null, no_data: `no source code — ${emptyKind}`, submetrics: {} } : scoreCode(derived, ok.has("tree.stats")),
   };
   for (const [k, cat] of Object.entries(categories)) {
     if (staleCats.has(k)) cat.stale = true;
   }
-
-  // без-кодовое репо (Q&A №13): ok-факт говорит file_count=0 — «проекта нет»
-  // = Score 0 как данные, не NULL и не no-data.
-  // Ф2.3 (M5, В4.2a — явное исключение из «модель не трогать»): признаком
-  // был ещё и `loc === 0`, а нулевой LOC при живом дереве штатно бывает у
-  // обрыва `git cat-file` (теперь loc = null), у репо из одних бинарных
-  // файлов и у файлов больше textCap. Жёсткий Score 0 по такому признаку —
-  // нарушение закона 2 (отсутствие данных не ухудшает Score).
-  const tree = ok.get("tree.stats") as { file_count?: unknown; source_files?: unknown; top_level?: unknown } | undefined | null;
-  // 4.2.0 (М1.1): и репо без единого коммита — сборщик до М2 писал его no-data;
-  // (М2.3) и репо без файлов кода — только README, лицензия, картинки
-  const codeEmpty =
-    input.emptyRepo === true ||
-    (tree !== undefined &&
-      tree !== null &&
-      ((typeof tree.file_count === "number" && tree.file_count === 0) ||
-        tree.source_files === 0 ||
-        // факты до правки сборщика: кода нет, если в корне только не-код и нет каталогов
-        (!("source_files" in tree) && rootHasNoSource(tree.top_level))));
 
   const allKeys = Object.keys(categories) as CategoryKey[];
   const noData: string[] = [];
@@ -475,11 +479,56 @@ export function totalsFromCategories(
 
 // ---------- категории ----------
 
-function scoreDocumentation(ok: Map<string, unknown>, _derived: DerivedMetrics): CategoryScore {
+/** Что git-канал сказал о репозитории: пустой (нет коммитов) — факт, а не «не прочитан». */
+interface GitState {
+  empty: boolean;
+}
+
+/**
+ * 4.3.0 (Н4): причина «нет данных» у git-категорий по виду — репозиторий пуст
+ * (коммитов нет, данные) или не прочитан (лимит, ошибка — незнание).
+ */
+const gitNoData = (git: GitState): string => (git.empty ? "repository empty" : "git channel no-data");
+
+/** Вид «кода нет» (Q&A №13: оценка 0 как данные) или null — код есть или неизвестно. */
+export type CodeEmptyKind = "repository empty" | "no files" | "only non-code files" | "no lines of code";
+
+/**
+ * Без-кодовое репо (Q&A №13): «проекта нет» = Score 0 как данные, не NULL.
+ * 4.2.0 (М1.1): и репо без единого коммита; (М2.3) и репо без файлов кода —
+ * только README, лицензия, картинки; факты до правки сборщика — по корню
+ * без каталогов. 4.3.0 (Н3): и файлы кода без единой строки (`source_loc = 0`
+ * у новых фактов) — пустой `a.js` признак не снимает (F16). `source_loc = null`
+ * (обрыв чтения) — не «кода нет»: это незнание (Ф2.3, закон 2).
+ */
+export function codeEmptyKind(ok: Map<string, unknown>, git: GitState): CodeEmptyKind | null {
+  if (git.empty) return "repository empty";
+  const tree = ok.get("tree.stats") as { file_count?: unknown; source_files?: unknown; source_loc?: unknown; top_level?: unknown } | undefined | null;
+  if (tree === undefined || tree === null) return null;
+  if (typeof tree.file_count === "number" && tree.file_count === 0) return "no files";
+  if (tree.source_files === 0) return "only non-code files";
+  if (!("source_files" in tree) && rootHasNoSource(tree.top_level)) return "only non-code files";
+  if (typeof tree.source_loc === "number" && tree.source_loc === 0) return "no lines of code";
+  return null;
+}
+
+/**
+ * Лицензия засчитана — ОДНО выражение для расчета и рекомендации (Н7, F7):
+ * признак сборщика; у фактов до Р4в (без `content_checked`) — и имя в корне
+ * (М1.13: `LICENSE-MIT`, `COPYING`…). Сборщик 3 проверил содержимое — имя
+ * пустого файла лицензию не дает.
+ */
+export function licensePresent(ok: Map<string, unknown>): boolean {
+  const presence = ok.get("docs.presence") as (DocsPresenceValue & { content_checked?: unknown }) | undefined;
+  if (!presence) return false;
+  return presence.license === true || (presence.content_checked !== true && licenseInRoot(ok));
+}
+
+function scoreDocumentation(ok: Map<string, unknown>, git: GitState): CategoryScore {
   const presence = ok.get("docs.presence") as DocsPresenceValue | undefined;
   const readme = ok.get("docs.readme") as DocsReadmeValue | undefined;
   if (!presence) {
-    return { score: null, no_data: "git channel no-data", submetrics: {} };
+    return { score: null, no_data: gitNoData(git), submetrics: {} };
   }
   const hasReadme = presence.readme === true;
   let quality = 0;
@@ -492,16 +541,17 @@ function scoreDocumentation(ok: Map<string, unknown>, _derived: DerivedMetrics):
   }
   const readmeSub = README_SPLIT.presence * (hasReadme ? 1 : 0) + README_SPLIT.quality * quality;
   const w = SUBWEIGHTS.documentation;
-  const license = presence.license === true || licenseInRoot(ok) ? 1 : 0;
+  const license = licensePresent(ok) ? 1 : 0;
   const subs: [number, number | null][] = [
     [w.readme, readmeSub],
     [w.license, license],
     [w.contributing, presence.contributing === true ? 1 : 0],
     [w.codeowners, presence.codeowners === true ? 1 : 0],
   ];
-  const score = weighted(subs);
+  // все четыре подметрики — числа: взвешенное среднее всегда есть
+  const score = weighted(subs)!;
   return {
-    score: score !== null ? score * 100 : null,
+    score: score * 100,
     submetrics: {
       readme: { score: readmeSub, value: readme },
       license: { score: license },
@@ -527,7 +577,7 @@ function licenseInRoot(ok: Map<string, unknown>): boolean {
   });
 }
 
-function scoreCicd(ok: Map<string, unknown>): CategoryScore {
+function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
   const configs = ok.get("cicd.configs") as { has_ci_yaml?: unknown; has_steps?: unknown; steps_note?: unknown } | undefined;
   const runs = ok.get("cicd.runs") as {
     runs_count?: unknown;
@@ -540,9 +590,25 @@ function scoreCicd(ok: Map<string, unknown>): CategoryScore {
     // это не «CI без шагов = 0», а отсутствие данных
     return { score: null, no_data: "ci.yaml not parsed — steps unknown", submetrics: {} };
   }
-  const configSub = configs ? (configs.has_ci_yaml === true && configs.has_steps === true ? 1 : 0) : null;
-  if (configSub === null) {
-    return { score: null, no_data: "git channel no-data", submetrics: {} };
+  if (!configs) {
+    return { score: null, no_data: gitNoData(git), submetrics: {} };
+  }
+  const configSub = configs.has_ci_yaml === true && configs.has_steps === true ? 1 : 0;
+  if (runs === undefined) {
+    // 4.3.0 (Н8, J11/F10): запуски не видны — «нет данных» НЕЗАВИСИМО от
+    // ci.yaml. Раньше «нет ci.yaml» давало 0, а заглушка ci.yaml без видимых
+    // запусков — «нет данных»: перенормировка поднимала полный Score на
+    // +15,6 за конфиг без доказательства. Решение 23.09 (Алексей) о невидимых
+    // запусках распространено и на репо без конфига: без запусков CI не оцениваем.
+    return {
+      score: null,
+      no_data: CI_RUNS_INVISIBLE,
+      submetrics: {
+        config: { score: configSub, value: configs },
+        pass_rate: { score: null, note: "runs no-data" },
+        duration: { score: null, note: "runs no-data" },
+      },
+    };
   }
   if (configSub === 0) {
     // §5.1: нет ci.yaml / ci.yaml без шагов = CI нет = 0 (данные) —
@@ -560,35 +626,45 @@ function scoreCicd(ok: Map<string, unknown>): CategoryScore {
   // (заглушка ci.yaml не выгоднее настоящего CI); все запуски старше
   // последней ленты свежести (поле есть, значение null) — то же «за год не
   // запускался». Решение 23.09 о невидимых запусках (no-data) не меняется.
-  const runsCount = runs !== undefined ? num(runs.runs_count) : null;
+  const runsCount = num(runs.runs_count);
   // М2.5: запуски есть, но ни один не завершен (идут, отменены) — результата
   // еще нет: это не «не запускался», а отсутствие данных
-  const pendingOnly = runsCount === 0 && (num((runs as { runs_total?: unknown } | undefined)?.runs_total) ?? 0) > 0;
-  const staleOnly = runsCount !== null && runsCount > 0 && runs !== undefined && "weighted_success_rate" in runs && runs.weighted_success_rate === null;
-  if (runs !== undefined && !pendingOnly && (runsCount === 0 || staleOnly)) {
+  const pendingOnly = runsCount === 0 && (num((runs as { runs_total?: unknown }).runs_total) ?? 0) > 0;
+  if (pendingOnly) {
+    // 4.3.0 (Н14б, D11): своя причина — «не видны» здесь было бы ложью
+    return {
+      score: null,
+      no_data: "ci runs pending — запуски идут, завершенных нет",
+      submetrics: {
+        config: { score: configSub, value: configs },
+        pass_rate: { score: null, note: "runs pending" },
+        duration: { score: null, note: "runs pending" },
+      },
+    };
+  }
+  const staleOnly = runsCount !== null && runsCount > 0 && "weighted_success_rate" in runs && runs.weighted_success_rate === null;
+  if (runsCount === 0 || staleOnly) {
     const wn = SUBWEIGHTS.cicd;
     const s = weighted([
       [wn.config, configSub],
       [wn.pass_rate, 0],
       [wn.duration, null],
-    ]);
+    ])!;
     return {
-      score: s !== null ? s * 100 : null,
+      score: s * 100,
       submetrics: {
         config: { score: configSub, value: configs },
-        pass_rate: { score: 0, value: 0, note: runsCount === 0 ? "no runs" : "no runs within a year" },
+        // Н14б: значения доли нет — «не запускался» словами, а не «0%» («все упали»)
+        pass_rate: { score: 0, value: null, note: runsCount === 0 ? "no runs" : "no runs within a year" },
         duration: { score: null, note: "no recent runs" },
       },
     };
   }
-  const runsAvailable = runs !== undefined && (runsCount ?? 0) > 0 && !pendingOnly;
-  if (!runsAvailable) {
-    // 23.09 (Алексей): «конфиг без прогонов — проще не оценивать, честно
-    // написать "прогонов нет"; и уж точно не 50, за что так много?» —
-    // кап 50 удалён, категория честное no-data (три состояния, инвариант ТЗ)
+  if (runsCount === null) {
+    // факт запусков без счетчика — формы не знаем, оценки не даем
     return {
       score: null,
-      no_data: "ci runs no-data — прогоны не видны, автоматизацию не оцениваем",
+      no_data: CI_RUNS_INVISIBLE,
       submetrics: {
         config: { score: configSub, value: configs },
         pass_rate: { score: null, note: "runs no-data" },
@@ -598,46 +674,59 @@ function scoreCicd(ok: Map<string, unknown>): CategoryScore {
   }
   // 23.09 (Алексей): pass_rate по ВЗВЕШЕННОЙ доле успеха (ленты свежести —
   // свежие прогоны весомее), fallback на простой агрегат старых фактов
-  const passInput = num(runs!.weighted_success_rate) ?? num(runs!.success_rate);
+  const passInput = num(runs.weighted_success_rate) ?? num(runs.success_rate);
   const passSub = passInput !== null ? anchorScore(PASS_RATE, passInput) : null;
-  const durSub = num(runs!.duration_p50) !== null ? anchorScore(DURATION_MIN, num(runs!.duration_p50)! / 60) : null;
+  // Н8б: длительность нового сборщика — по успешным запускам
+  const durSub = num(runs.duration_p50) !== null ? anchorScore(DURATION_MIN, num(runs.duration_p50)! / 60) : null;
   const w = SUBWEIGHTS.cicd;
   const subs: [number, number | null][] = [
     [w.config, configSub],
     [w.pass_rate, passSub],
     [w.duration, durSub],
   ];
-  const score = weighted(subs);
+  const score = weighted(subs)!;
   return {
-    score: score !== null ? score * 100 : null,
+    score: score * 100,
     submetrics: {
       config: { score: configSub, value: configs },
       pass_rate: { score: passSub, value: passInput },
-      duration: { score: durSub, value: num(runs!.duration_p50) },
+      duration: { score: durSub, value: num(runs.duration_p50) },
     },
   };
 }
+
+/**
+ * Причина «нет данных» CI без видимых запусков (23.09, Алексей; 4.3.0 — и без
+ * ci.yaml). Подстрока «прогоны не видны» — маркер карточки (`ciConfigOnlyCap`).
+ */
+export const CI_RUNS_INVISIBLE = "ci runs no-data — прогоны не видны, автоматизацию не оцениваем";
 
 function scoreSecurity(ok: Map<string, unknown>): CategoryScore {
   const appsec = ok.get("appsec.findings") as AppsecFindingsValue | undefined;
   if (!appsec) {
     return { score: null, no_data: "AppSec data unavailable (no AppSec access or no finished scan)", submetrics: {} };
   }
-  const tree = ok.get("tree.stats") as { loc?: unknown } | undefined;
-  const loc = num(tree?.loc);
+  // 4.3.0 (Н11, F21/J20): плотность — по строкам КОДА (`source_loc`), как у
+  // TODO; факты до правки М2.3 — весь `loc`; обрыв чтения (`source_loc = null`) — неизвестно
+  const tree = ok.get("tree.stats") as { loc?: unknown; source_loc?: unknown } | undefined;
+  const loc = tree !== undefined && "source_loc" in tree ? num(tree.source_loc) : num(tree?.loc);
   const sc = appsec.severity_counts ?? {};
+  const critical = num(sc.critical) ?? 0;
+  const high = num(sc.high) ?? 0;
   const weightedDensity =
-    SEVERITY_WEIGHTS.critical * (num(sc.critical) ?? 0) +
-    SEVERITY_WEIGHTS.high * (num(sc.high) ?? 0) +
+    SEVERITY_WEIGHTS.critical * critical +
+    SEVERITY_WEIGHTS.high * high +
     SEVERITY_WEIGHTS.medium * (num(sc.medium) ?? 0) +
     SEVERITY_WEIGHTS.low * (num(sc.low) ?? 0);
-  const per10k = loc !== null && loc > 0 ? weightedDensity / (loc / 10_000) : null;
+  // 4.3.0: находок нет — плотность 0 и без числа строк (подтвержденное отсутствие — данные)
+  const per10k = weightedDensity === 0 ? 0 : loc !== null && loc > 0 ? weightedDensity / (loc / 10_000) : null;
   const densitySub = per10k !== null ? anchorScore(SEVERITY_PER_10K, per10k) : null;
   const resolvedSub = num(appsec.resolved_share) !== null ? anchorScore(RESOLVED_SHARE, num(appsec.resolved_share)!) : null;
   const secretsSub = appsec.secrets_critical === true ? 0 : 1;
   if (densitySub === null && resolvedSub === null) {
     // 4.2.0 (М1.2): без плотности и доли закрытых категорию нес бы один
-    // признак утечки — 100 при любом числе критичных находок
+    // признак утечки — 100 при любом числе критичных находок. С 4.3.0 сюда
+    // приходят только находки > 0 при неизвестном числе строк.
     return {
       score: null,
       no_data: "too little data — no finding density (LOC unknown) and no resolved share",
@@ -649,66 +738,77 @@ function scoreSecurity(ok: Map<string, unknown>): CategoryScore {
     };
   }
   const w = SUBWEIGHTS.security;
-  const score = weighted([
-    [w.density, densitySub],
-    [w.resolved, resolvedSub],
-    [w.secrets, secretsSub],
-  ]);
+  // плотность или доля закрытых есть, признак утечки — всегда: среднее есть
+  const raw =
+    weighted([
+      [w.density, densitySub],
+      [w.resolved, resolvedSub],
+      [w.secrets, secretsSub],
+    ])! * 100;
+  // 4.3.0 (Р3, J7): открытая critical — не выше 40, открытая high — не выше 69
+  // (после взвешивания): на большом репо плотность пары критичных не видит
+  const level: "critical" | "high" | null = critical > 0 ? "critical" : high > 0 ? "high" : null;
+  const limit = level !== null ? SECURITY_OPEN_CAPS[level] : null;
+  const capped = limit !== null && raw > limit;
+  const capNote = level === "critical" ? "category capped — open critical findings" : "category capped — open high findings";
   return {
-    score: score !== null ? score * 100 : null,
+    score: capped ? limit : raw,
     submetrics: {
-      density: { score: densitySub, value: per10k },
+      density: { score: densitySub, value: per10k, ...(capped ? { note: capNote } : {}) },
       resolved: { score: resolvedSub, value: num(appsec.resolved_share) },
       secrets: { score: secretsSub, value: appsec.secrets_critical === true },
     },
+    ...(capped ? { adjustment: { kind: "open-findings-cap" as const, level: level!, limit: limit!, raw } } : {}),
   };
 }
 
-function scoreActivity(derived: DerivedMetrics, now: Date): CategoryScore {
+function scoreActivity(derived: DerivedMetrics, now: Date, git: GitState): CategoryScore {
+  const submetricsOf = (fresh: number | null, freq: number | null, contrib: number | null, pulls: number | null, rel: number | null): Record<string, SubmetricScore> => ({
+    fresh: { score: fresh, value: derived.lastHumanCommitTs },
+    freq: { score: freq, value: derived.commitsPerMonth },
+    contributors: { score: contrib, value: derived.contributorsTotal },
+    pulls_90d: { score: pulls, value: derived.pulls90d },
+    releases_12m: { score: rel, value: derived.releases12m },
+    // показ-без-веса (§2): mirror-likeness, динамика двух окон и bus factor (К5.9)
+    mirror_likeness: { score: null, value: derived.mirrorLikeness },
+    bus_factor: { score: null, value: derived.busFactor },
+    commits_90d: { score: null, value: derived.commits90d },
+    commits_365d: { score: null, value: derived.commits365d },
+    sync_bursts: { score: null, value: derived.syncBursts },
+  });
+  if (derived.humanCommits === null) {
+    // 4.3.0 (Н4, D6): без истории — по виду: пустой репо или не прочитан
+    return { score: null, no_data: gitNoData(git), submetrics: {} };
+  }
+  if (derived.syncOnly) {
+    // 4.3.0 (Н10, Q&A №10): история — только синк (зеркало, импорт): авторской
+    // активности по ней не видно — «нет данных», а не 0 («только роботы» — 0 ниже)
+    return { score: null, no_data: "too little data — history consists of sync bursts", submetrics: submetricsOf(null, null, null, null, null) };
+  }
   // 4.2.0 (М1.2): история прочитана, а людей в ней нет — данные «человеческих
   // коммитов нет» (худший анкер), а не отсутствие данных
   const freshSub =
-    derived.lastHumanCommitTs !== null
-      ? anchorScore(FRESH_MONTHS, Math.max(0, (now.getTime() - derived.lastHumanCommitTs) / MONTH_MS))
-      : derived.humanCommits === 0
-        ? 0
-        : null;
-  const freqSub = derived.commitsPerMonth !== null ? commitsPerMonthScore(derived.commitsPerMonth) : null;
+    derived.lastHumanCommitTs !== null ? anchorScore(FRESH_MONTHS, Math.max(0, (now.getTime() - derived.lastHumanCommitTs) / MONTH_MS)) : 0;
+  const freqSub = commitsPerMonthScore(derived.commitsPerMonth ?? 0);
   const contribSub = derived.contributorsTotal !== null && derived.contributorsTotal > 0 ? contributorsScore(derived.contributorsTotal) : null;
   const pullsSub = derived.pulls90d !== null ? anchorScoreLog(PULLS_90D, derived.pulls90d) : null;
   const relSub = derived.releases12m !== null ? anchorScoreLog(RELEASES_12M, derived.releases12m) : null;
   const w = SUBWEIGHTS.activity;
-  // 4.2.0 (М1.2): без git (свежесть и частота) категорию несли бы счетчики MR
-  // и релизов с полом 0,2 — у пустых и недочитанных репо это «Активность 20»
-  const anchored = freshSub !== null || freqSub !== null;
-  const score = !anchored ? null : weighted([
+  // 4.2.0 (М1.2): якорь — прочитанная история (свежесть и частота); без нее
+  // категорию несли бы счетчики MR и релизов с полом 0,2. В5.3-М (Н15):
+  // ветка «git+rest channels no-data» была недостижима — удалена
+  const score = weighted([
     [w.fresh, freshSub],
     [w.freq, freqSub],
     [w.contributors, contribSub],
     [w.pulls, pullsSub],
     [w.releases, relSub],
-  ]);
-  return {
-    score: score !== null ? score * 100 : null,
-    no_data: score === null ? (derived.humanCommits === null ? "too little data — no commit history" : "git+rest channels no-data") : undefined,
-    submetrics: {
-      fresh: { score: freshSub, value: derived.lastHumanCommitTs },
-      freq: { score: freqSub, value: derived.commitsPerMonth },
-      contributors: { score: contribSub, value: derived.contributorsTotal },
-      pulls_90d: { score: pullsSub, value: derived.pulls90d },
-      releases_12m: { score: relSub, value: derived.releases12m },
-      // показ-без-веса (§2): mirror-likeness, динамика двух окон и bus factor (К5.9)
-      mirror_likeness: { score: null, value: derived.mirrorLikeness },
-      bus_factor: { score: null, value: derived.busFactor },
-      commits_90d: { score: null, value: derived.commits90d },
-      commits_365d: { score: null, value: derived.commits365d },
-      sync_bursts: { score: null, value: derived.syncBursts },
-    },
-  };
+  ])!;
+  return { score: score * 100, submetrics: submetricsOf(freshSub, freqSub, contribSub, pullsSub, relSub) };
 }
 
 function scoreIssues(ok: Map<string, unknown>, derived: DerivedMetrics): CategoryScore {
-  const stats = ok.get("issues.stats") as { open?: unknown; closed?: unknown; median_close_days?: unknown } | undefined;
+  const stats = ok.get("issues.stats") as { open?: unknown; closed?: unknown; closed_counted?: unknown; median_close_days?: unknown } | undefined;
   if (!stats) {
     return { score: null, no_data: "issues channel no-data", submetrics: {} };
   }
@@ -721,61 +821,84 @@ function scoreIssues(ok: Map<string, unknown>, derived: DerivedMetrics): Categor
       submetrics: { tracker_unused: { score: ISSUES_TRACKER_UNUSED / 100, value: { open: 0, closed: 0 }, note: "tracker not maintained — category minimum (Q14)" } },
     };
   }
+  // 4.3.0 (Р2): в выборку идут закрытые задачи, прожившие не меньше часа;
+  // у фактов прежнего сборщика — все закрытые
+  const closedN = issuesClosedCounted(stats) ?? 0;
   const staleSub = derived.staleShare !== null ? anchorScore(STALE_SHARE, derived.staleShare) : null;
-  const closeSub = num(stats.median_close_days) !== null ? anchorScore(CLOSE_DAYS, num(stats.median_close_days)!) : null;
+  // 4.3.0 (Н9, F4): открытые есть, а закрыта ни одна — «ни одна не закрыта»
+  // (данные, худший анкер), а не отсутствие медианы: первое закрытие больше
+  // не снижает балл
+  const noneClosed = closedN === 0 && open > 0;
+  const closeDays = num(stats.median_close_days);
+  const closeSub = noneClosed ? 0 : closeDays !== null ? anchorScore(CLOSE_DAYS, closeDays) : null;
   const resSub = derived.resolutionRatio !== null ? anchorScore(RESOLVED_SHARE, derived.resolutionRatio) : null;
   const comments = ok.get("issues.comments_sample") as { median_first_comment_delay_hours?: unknown } | undefined;
   const firstSub = num(comments?.median_first_comment_delay_hours) !== null ? anchorScore(FIRST_COMMENT_H, num(comments!.median_first_comment_delay_hours)!) : null;
   const w = SUBWEIGHTS.issues;
-  const raw = weighted([
-    [w.stale, staleSub],
-    [w.close_days, closeSub],
-    [w.resolution, resSub],
-    [w.first_resp, firstSub],
-  ]);
-  // 4.2.0 (М1.9): на малой выборке балл сжимается к минимуму «трекер не
-  // ведется» — одна закрытая задача не дает трекеру 97,5
-  const sample = Math.min(1, (open + closed) / ISSUES_FULL_SAMPLE);
-  const score = raw === null ? null : (ISSUES_TRACKER_UNUSED + Math.max(0, raw * 100 - ISSUES_TRACKER_UNUSED) * sample) / 100;
+  // трекер не пуст: доля зависших или доля решенных есть всегда — среднее есть
+  // (В5.3-М, Н15: защиты `raw === null` и `Math.max(0, …)` были недостижимы:
+  // минимум по анкерам — ровно ISSUES_TRACKER_UNUSED)
+  const raw =
+    weighted([
+      [w.stale, staleSub],
+      [w.close_days, closeSub],
+      [w.resolution, resSub],
+      [w.first_resp, firstSub],
+    ])! * 100;
+  // 4.2.0 (М1.9) → 4.3.0 (Р2): на малой выборке ЗАКРЫТЫХ задач балл сжимается
+  // к минимуму «трекер не ведется»; открытые в размер выборки не входят —
+  // спам пустыми задачами и открыл-закрыл за минуту балл не поднимают (J2, F1)
+  const sample = Math.min(1, closedN / ISSUES_FULL_SAMPLE);
+  const score = ISSUES_TRACKER_UNUSED + (raw - ISSUES_TRACKER_UNUSED) * sample;
   return {
-    score: score !== null ? score * 100 : null,
+    score,
     submetrics: {
       stale: { score: staleSub, value: derived.staleShare },
-      close_days: { score: closeSub, value: num(stats.median_close_days) },
+      close_days: { score: closeSub, value: noneClosed ? null : closeDays, ...(noneClosed ? { note: "no issue closed" } : {}) },
       resolution: { score: resSub, value: derived.resolutionRatio },
       first_resp: { score: firstSub, value: num(comments?.median_first_comment_delay_hours) },
     },
+    ...(sample < 1 ? { adjustment: { kind: "small-sample" as const, n: closedN, full: ISSUES_FULL_SAMPLE, raw, floor: ISSUES_TRACKER_UNUSED } } : {}),
   };
 }
 
-function scoreCode(derived: DerivedMetrics): CategoryScore {
+function scoreCode(derived: DerivedMetrics, hasTree: boolean): CategoryScore {
+  if (!hasTree) return { score: null, no_data: "git channel no-data", submetrics: {} };
   const densitySub = derived.todoDensityPerKloc !== null ? anchorScore(TODO_PER_KLOC, derived.todoDensityPerKloc) : null;
   const oldSub = derived.oldShare !== null ? anchorScore(OLD_SHARE, derived.oldShare) : null;
+  const testsSub = derived.testShare !== null ? anchorScore(TEST_SHARE, derived.testShare) : null;
   const rootSub = derived.rootEntries !== null ? anchorScore(ROOT_ENTRIES, derived.rootEntries) : null;
   const w = SUBWEIGHTS.code;
-  // 4.2.0 (М1.2): без плотности TODO (нет строк кода) категорию нес бы один
-  // «порядок в корне» — «Состояние кода 100» у репо из одного README
-  const score = densitySub === null ? null : weighted([
+  // К-Р14: неполная выборка TODO — причина no-data рядом со значением;
+  // 4.3.0 (Н14б): доля старых при 1-4 пометках — от не менее 5 (оговорка показа)
+  const oldNote = derived.oldShareNoData ?? (derived.todoTotal !== null && derived.todoTotal > 0 && derived.todoTotal < OLD_SHARE_MIN_BASE ? "share of at least 5 markers" : null);
+  const submetrics: Record<string, SubmetricScore> = {
+    density: { score: densitySub, value: derived.todoDensityPerKloc },
+    old_share: { score: oldSub, value: derived.oldShare, ...(oldNote ? { note: oldNote } : {}) },
+    tests: { score: testsSub, value: derived.testShare },
+    root: { score: rootSub, value: derived.rootEntries },
+    todo_total: { score: null, value: derived.todoTotal },
+  };
+  // 4.3.0 (Н4, Р4б): причина «нет данных» по виду — строки не прочитаны
+  // (незнание) против «мало кода» (меньше CODE_MIN_LOC строк: одна строка
+  // `main.py` не дает категории 100, J5)
+  if (derived.codeLoc === null) return { score: null, no_data: "too little data — lines of code not read", submetrics };
+  if (derived.codeLoc < CODE_MIN_LOC) return { score: null, no_data: `too little data — less than ${CODE_MIN_LOC} lines of code`, submetrics };
+  // якорь — плотность пометок (4.2.0, М1.2); без факта TODO категории нет
+  if (densitySub === null) return { score: null, no_data: "git channel no-data", submetrics };
+  const score = weighted([
     [w.density, densitySub],
     [w.old_share, oldSub],
+    [w.tests, testsSub],
     [w.root, rootSub],
-  ]);
-  return {
-    score: score !== null ? score * 100 : null,
-    no_data: score === null ? (derived.rootEntries !== null ? "too little data — no lines of code to measure" : "git channel no-data") : undefined,
-    submetrics: {
-      density: { score: densitySub, value: derived.todoDensityPerKloc },
-      // К-Р14: неполная выборка TODO — причина no-data рядом со значением
-      old_share: { score: oldSub, value: derived.oldShare, ...(derived.oldShareNoData ? { note: derived.oldShareNoData } : {}) },
-      root: { score: rootSub, value: derived.rootEntries },
-      todo_total: { score: null, value: derived.todoTotal },
-    },
-  };
+  ])!;
+  return { score: score * 100, submetrics };
 }
 
 // ---------- запись (immutable: PK scan_id+model_version, идемпотентно) ----------
 
-const roundTotal = (x: number | null): number | null => (x === null ? null : Math.round(x));
+// 4.3.0 (Н13, F20): индекс округляется устойчиво к двоичному шуму (39,4999… → 40)
+const roundTotal = (x: number | null): number | null => (x === null ? null : roundScore(x));
 const roundCoverage = (x: number): number => Math.round(x * 1000) / 1000;
 
 /**

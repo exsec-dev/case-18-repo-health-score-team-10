@@ -34,10 +34,12 @@ describe("§9 Security (полный итог, В4.1)", () => {
 
   test("SAST crit → resolved → Security ↑, Score ↑", () => {
     const dirty = totalOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0, secrets_critical: false } }), "full")!;
-    const clean = totalOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0.95, secrets_critical: false } }), "full")!;
+    // 4.3.0 (Н6, Р3): счетчики серьезности — только открытые группы, поэтому
+    // закрытые критичные уходят и из счетчика; открытые critical держат потолок 40
+    const clean = totalOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 0, high: 0, medium: 0, low: 0 }, resolved_share: 0.95, secrets_critical: false } }), "full")!;
     expect(clean).toBeGreaterThan(dirty);
     const catDirty = catOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0, secrets_critical: false } }), "security")!;
-    const catClean = catOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0.95, secrets_critical: false } }), "security")!;
+    const catClean = catOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 0, high: 0, medium: 0, low: 0 }, resolved_share: 0.95, secrets_critical: false } }), "security")!;
     expect(catClean).toBeGreaterThan(catDirty);
   });
 });
@@ -85,12 +87,15 @@ describe("§9 CI/CD (полный итог, В4.1)", () => {
     expect(green - red).toBeGreaterThanOrEqual(15);
   });
 
-  test("ci.yaml добавлен без прогонов: CI = no-data, итог НЕ двигается (23.09: за голый конфиг — ноль)", () => {
-    // драфт §9 обещает «total +7.5» — НОМИНАЛЬНЫЙ вектор (15%×50);
-    // фактический own-сдвиг = 15×50/80 = 9.375 с полными данными, с runs403
-    // (CI=50 вместо 0, веса 80) — считаем ручной арифметикой ниже.
+  test("Н8: ci.yaml добавлен при невидимых запусках — CI «нет данных» до и после, итог не двигается", () => {
+    // В5.3-М (Н8, J11/F10): до 4.3.0 этот тест назывался «итог НЕ двигается», а
+    // утверждал +15,59: «нет ci.yaml» давало CI 0, заглушка без видимых
+    // запусков — «нет данных», и перенормировка поднимала итог за конфиг без
+    // доказательства. Теперь запуски не видны — «нет данных» при любом конфиге.
     const runs403: FactSpec = { key: "cicd.runs", value: { reason: "access" }, status: "no-data" };
-    const before = totalOf(withFacts(healthyFacts(), runs403, { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } }), "full")!;
+    const beforeFacts = withFacts(healthyFacts(), runs403, { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } });
+    const before = compute(t.db, seedScan(t, beforeFacts), { now: NOW });
+    expect(before.categories.cicd.score).toBeNull();
     const afterFacts = withFacts(
       healthyFacts(),
       runs403,
@@ -98,9 +103,7 @@ describe("§9 CI/CD (полный итог, В4.1)", () => {
     );
     const s = compute(t.db, seedScan(t, afterFacts), { now: NOW });
     expect(s.categories.cicd.score).toBeNull();
-    // 23.09 (Алексей): «CI нет = 0» → «конфиг есть, прогоны не видны = no-data» —
-    // нулевая категория выпадает из весов, итог растёт ТОЛЬКО перенормировкой
-    expect(s.repoHealthScore! - before).toBeCloseTo(15.591498679060635, 6);
+    expect(s.repoHealthScore! - before.repoHealthScore!).toBe(0);
   });
 
   test("инвариант изоляции (В4/Б4): CI/Security-мутации НЕ двигают публичный total", () => {
@@ -111,8 +114,13 @@ describe("§9 CI/CD (полный итог, В4.1)", () => {
     const pubBase = totalOf(noCi)!;
     expect(totalOf(withCi)!).toBe(pubBase); // CI не влияет публично
     expect(totalOf(withSec)!).toBe(pubBase); // Security не влияет публично
-    // при этом own-режим их видит
-    expect(totalOf(withCi, "full")!).toBeGreaterThan(totalOf(noCi, "full")!);
+    // при этом own-режим их видит (4.3.0, Н8: CI — при видимых запусках)
+    const runsOk: FactSpec = { key: "cicd.runs", value: { last_status: "success", success_rate: 1, duration_p50: 120, runs_count: 20 } };
+    const noCiRuns = withFacts(healthyFacts(), runsOk, { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } });
+    const withCiRuns = withFacts(healthyFacts(), runsOk, { key: "cicd.configs", value: { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: true } });
+    expect(totalOf(withCiRuns)!).toBe(totalOf(noCiRuns)!);
+    expect(totalOf(withCiRuns, "full")!).toBeGreaterThan(totalOf(noCiRuns, "full")!);
+    expect(totalOf(withSec, "full")!).toBeLessThan(totalOf(noCi, "full")!);
   });
 });
 

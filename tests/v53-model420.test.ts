@@ -51,7 +51,8 @@ describe("М1.2: категория получает число только п�
   test("Активность без истории коммитов — нет данных, а не 100 по одним MR и релизам", () => {
     const s = score(facts(noGit()));
     expect(s.categories.activity.score).toBeNull();
-    expect(noDataReason("activity", s.categories.activity.no_data)).toContain("Истории коммитов нет");
+    // 4.3.0 (Н4, D6): причина — из git-факта: не прочитан (а не «истории нет»)
+    expect(noDataReason("activity", s.categories.activity.no_data)).toContain("Репозиторий не удалось прочитать");
   });
 
   test("git недоступен (таймаут клона): индекс не считается по одним задачам", () => {
@@ -61,7 +62,8 @@ describe("М1.2: категория получает число только п�
   test("Состояние кода без строк кода — нет данных, а не 100 за порядок в корне", () => {
     const s = score(facts({ "tree.stats": { top_level: [{ name: "README.md", type: "blob" }], file_count: 1, bytes: 10, loc: 0 }, "code.todo": { count: 0, fixme: 0, older_180d: 0, todo_files: 0, blamed_files: 0 } }));
     expect(s.categories.code.score).toBeNull();
-    expect(noDataReason("code", s.categories.code.no_data)).toContain("нет строк кода");
+    // 4.3.0 (Н3, Н4): в корне один README — «кода нет», причина по виду
+    expect(noDataReason("code", s.categories.code.no_data)).toContain("нет файлов кода");
   });
 
   test("Безопасность при критичных находках без LOC и без доли закрытых — нет данных, а не 100", () => {
@@ -136,8 +138,9 @@ describe("анти-накрутка", () => {
     expect(s.categories.issues.score!).toBeGreaterThanOrEqual(6);
   });
 
-  test("М1.9: от 10 задач сжатия нет", () => {
-    const stats = { open: 2, closed: 8, median_close_days: 5, stale_90d: 0, fetched_count: 10 };
+  test("М1.9 → Р2: от 10 закрытых задач сжатия нет", () => {
+    // 4.3.0 (Р2): размер выборки — закрытые задачи, открытые в него не входят
+    const stats = { open: 2, closed: 10, median_close_days: 5, stale_90d: 0, fetched_count: 12 };
     const s = score(facts({ "issues.stats": stats }));
     expect(s.categories.issues.score!).toBeGreaterThan(80);
   });

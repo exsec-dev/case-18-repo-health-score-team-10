@@ -1,4 +1,4 @@
-// submetrics.ts — словарь 28 подметрик: название и форма показа значения
+// submetrics.ts — словарь подметрик (30 с моделью 4.3.0: + «Файлы тестов»): название и форма показа значения
 // (В4.7, контракт П4.2; вопрос 28 канвы закрыт 21.09 — «оба в В4.7»).
 //
 // Одно правило на страницу карточки, MD и PDF: строка подметрики на
@@ -190,6 +190,8 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   "issues.tracker_unused": { title: "Трекер не ведется", unit: "открытые и закрытые задачи", format: tracker },
   "code.density": { title: "Плотность TODO/FIXME", unit: "на 1 тыс. строк", format: perLines("1 тыс.") },
   "code.old_share": { title: "Доля старых TODO", unit: "доля, %", format: share },
+  // 4.3.0 (Р1): доля файлов тестов среди файлов кода
+  "code.tests": { title: "Файлы тестов", unit: "доля файлов кода, %", format: share },
   "code.root": { title: "Порядок в корне репозитория", unit: "элементы корня", format: count("элемент", "элемента", "элементов") },
   "code.todo_total": { title: "Всего маркеров TODO/FIXME", unit: "штуки", format: plain },
 };
@@ -232,8 +234,17 @@ export function submetricNote(category: string, sub: string, note: string | null
   if (key === "cicd.pass_rate" || key === "cicd.duration") {
     if (note.startsWith("no declared CI")) return { value: "CI не настроен" };
     if (note.startsWith("runs no-data")) return { value: "запуски недоступны" };
+    // 4.3.0 (Н14б, D11): «не запускался» — словами, а не «0%» («все запуски упали»)
+    if (note.startsWith("runs pending")) return { value: "запуски идут" };
+    if (note === "no runs") return { value: "CI не запускался" };
+    if (note.startsWith("no runs within a year")) return { value: "за год не запускался" };
+    if (note.startsWith("no recent runs")) return { value: "нет запусков за год" };
     return null;
   }
+  // Н9: открытые задачи есть, закрытых нет — худший балл, словами
+  if (key === "issues.close_days" && note.startsWith("no issue closed")) return { value: "ни одна задача не закрыта" };
+  // Н14б: оговорка «доля от не менее 5 пометок» — в показе значения (submetricShownValue)
+  if (key === "code.old_share" && note.startsWith("share of at least")) return null;
   if (key === "code.old_share") return { value: "не посчитано: прочитаны не все файлы" };
   return null;
 }
@@ -251,13 +262,18 @@ export function submetricShownValue(
   sub: string,
   entry: { score?: number | null; value?: unknown; note?: string | null },
   ctx: SubmetricContext,
-  peers?: Record<string, { value?: unknown }>,
+  /** соседние подметрики категории (вызовы карточки и отчета передают; с 4.3.0 показ их не читает) */
+  _peers?: Record<string, { value?: unknown }>,
 ): string {
   const shown = formatSubmetricValue(category, sub, entry.value, ctx);
+  // 4.3.0 (Н14б, D13): при 1-4 пометках доля старых считается от 5 — «1 старая из 1»
+  // показывается 20%, и без оговорки число читалось бы ошибкой
+  if (shown !== NO_VALUE && `${category}.${sub}` === "code.old_share" && typeof entry.note === "string" && entry.note.startsWith("share of at least")) {
+    return `${shown} (доля от не менее 5 пометок)`;
+  }
   if (shown !== NO_VALUE) return shown;
-  // Г1.9 гейта: доли старых TODO нет, потому что пометок нет вовсе — иначе
-  // читатель видел прочерк без причины рядом с «Всего маркеров – 0»
-  if (`${category}.${sub}` === "code.old_share" && Number(peers?.["todo_total"]?.value) === 0) return "пометок нет";
+  // В5.3-М (Н14б): ветка «пометок нет» удалена — с 4.2.0 доля при 0 пометок
+  // равна 0 (данные) и показывается числом, прочерка здесь не бывает
   const n = submetricNote(category, sub, entry.note);
   if (n?.value) return n.value;
   if (PRESENCE_BY_SCORE.has(`${category}.${sub}`) && typeof entry.score === "number") return entry.score >= 1 ? "есть" : "нет";

@@ -90,7 +90,7 @@ describe("К9.1: сумма показанных вкладов = показат
   });
 
   test("пустой репозиторий — показатель 0 без полосы; нет показателя — нет вкладов", () => {
-    expect(categoryContributions(indexInputs({ documentation: 50 }), 0, { codeEmpty: true })).toEqual({ kind: "empty", total: 0 });
+    expect(categoryContributions(indexInputs({ documentation: 50 }), 0, { codeEmpty: true })).toEqual({ kind: "empty", total: 0, reason: null });
     expect(categoryContributions(indexInputs({ documentation: 50 }), null)).toBeNull();
   });
 

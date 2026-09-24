@@ -6,7 +6,8 @@
 // Екатерины 17.09 «Прирост в рекомендациях — реальная цифра»); прежний
 // номинальный вектор 100 отменён. Активационные — отдельная ветка без числа:
 // приоритет «открывает категорию», Δ от NULL — текстом coverage X→Y.
-// Порядок: числовые Δ desc → активационные по весу категории desc →
+// Порядок (4.3.0, Р3): правила серьезности (appsec-critical, fix-red-runs) →
+// числовые Δ desc → активационные по весу категории desc → прочие
 // скор-правила. LLM (В5) ничего не решает — только формулировки.
 // В4.1 (К1): одна выдача на скан; правило несёт channel (cicd | appsec |
 // null = публичное) — карточка отфильтровывает правила закрытых зрителю
@@ -24,7 +25,7 @@
 import type { Database } from "bun:sqlite";
 import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
 import { SCORE_WEIGHTS, CategoryKey, OLD_SHARE_MIN_BASE, SECRETS_CRITICAL_TOTAL_CAP } from "./model";
-import { compute, computeFromFacts, effectiveFacts, Scores } from "./compute";
+import { compute, computeFromFacts, effectiveFacts, licensePresent, Scores } from "./compute";
 import { fmtDecimal, fmtScore, fmtSigned } from "../web/format";
 import { runOutcome } from "../collectors/run-status";
 
@@ -53,8 +54,12 @@ export interface RecommendOptions {
 
 export const round4 = (x: number): number => Math.round(x * 10000) / 10000;
 
-/** Почему прирост presence-правила равен нулю (текст — `recommendationText`). */
-export type DeltaReason = "code-empty" | "no-total" | "cap";
+/**
+ * Почему прирост presence-правила равен нулю (текст — `recommendationText`).
+ * 4.3.0 (Н8): `no-runs` — CI-правило при невидимых запусках: числа нет,
+ * эффект — текстом «оценка появится с запусками».
+ */
+export type DeltaReason = "code-empty" | "no-total" | "cap" | "no-runs";
 
 /** Реальный прирост итога правила при подмене фактов (К-Ф1.2); reason — причина Δ = 0. */
 export type DeltaEvaluator = (
@@ -74,6 +79,12 @@ export interface RecommendFactsContext {
    * россыпь presence-правил с эффектом «+0,0» такому репо ничего не дают.
    */
   codeEmpty?: boolean;
+  /**
+   * 4.3.0 (Н7, F8/F9): баллы категорий той же оценки. Скор-правило срабатывает
+   * только у оцененной категории — «повысит балл» категории без балла формула
+   * дать не может. Не передано — правила не фильтруются (прежнее поведение).
+   */
+  categoryScores?: Partial<Record<CategoryKey, number | null>>;
 }
 
 // ---------- тексты правил (К9.10): одна функция для записи и чтения ----------
@@ -117,6 +128,7 @@ const DELTA_REASON_TEXT: Record<DeltaReason, string> = {
   "code-empty": "в репозитории нет кода",
   "no-total": "оценка появится, когда данных станет больше",
   cap: "Repo Health Score ограничен 49 баллами из-за утекших секретов",
+  "no-runs": "CI/CD: оценка появится с запусками",
 };
 
 const SECTION_WORDS: Record<ReadmeSection, { title: string; en: string; about: string }> = {
@@ -141,6 +153,8 @@ const daysWord = (n: number): string => {
 const categoryImpact = (title: string): string => `повысит балл категории «${title}»`;
 
 function presenceImpact(p: RecommendationParams): string | null {
+  // Н8: запуски не видны — эффект словами, без числа (CI без запусков не оценивается)
+  if (p.reason === "no-runs") return DELTA_REASON_TEXT["no-runs"];
   if (typeof p.delta !== "number") return null;
   const scope = p.channel ? "к Repo Health Score" : "к HealthCraft Index";
   return `${fmtSigned(p.delta)} ${scope}${p.reason ? ` – ${DELTA_REASON_TEXT[p.reason]}` : ""}`;
@@ -207,6 +221,13 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
       };
     case "fix-red-runs":
       return { action: "Почините CI", problem: "Последний запуск CI завершился ошибкой или успешны меньше 90% запусков.", expectedImpact: categoryImpact("CI/CD") };
+    case "ci-never-ran":
+      // 4.3.0 (Н7, D11): CI заявлен, запуски видны, а их 0
+      return {
+        action: "Запустите CI",
+        problem: "Файл .sourcecraft/ci.yaml с командами есть, но CI ни разу не запускался: изменения не проверяются автоматически.",
+        expectedImpact: categoryImpact("CI/CD"),
+      };
     case "speed-up-pipeline":
       if (typeof p.minutes !== "number") return null;
       return {
@@ -297,7 +318,15 @@ export function recommendationParams(ruleId: string, ok: Map<string, unknown>, e
 }
 
 /** Порядок score-правил движка (§8) — общий для движка и объединённой выдачи карточки. */
-export const SCORE_RULE_ORDER = ["fix-red-runs", "speed-up-pipeline", "appsec-critical", "resolve-old-todos", "reduce-stale-issues", "speed-up-issue-close"];
+export const SCORE_RULE_ORDER = ["appsec-critical", "fix-red-runs", "ci-never-ran", "speed-up-pipeline", "resolve-old-todos", "reduce-stale-issues", "speed-up-issue-close"];
+
+/**
+ * 4.3.0 (Р3, J8): правила серьезности — первыми во всей выдаче, до presence:
+ * утечки секретов и критичные находки AppSec (`appsec-critical`), затем
+ * красный CI. Пример ТЗ 3.3: критичная уязвимость — высокий приоритет, а не
+ * шестая строка после «Добавьте CODEOWNERS».
+ */
+export const SEVERITY_RULES = ["appsec-critical", "fix-red-runs"];
 
 interface Orderable {
   ruleId: string;
@@ -315,7 +344,8 @@ interface Orderable {
  * (позиция не раскрывает величину); активационные — по весу категории убыв.,
  * rule_id; score-правила — слиянием выдач по порядку движка
  * (SCORE_RULE_ORDER; правило вне списка сохраняет место в своей выдаче).
- * Номера 1..N.
+ * 4.3.0 (Р3): правила серьезности (SEVERITY_RULES) выносятся в начало всей
+ * выдачи, прочие score-правила — в конце. Номера 1..N.
  */
 export function orderRecommendations<T extends Orderable>(...lists: T[][]): T[] {
   const all = lists.flat();
@@ -351,7 +381,10 @@ export function orderRecommendations<T extends Orderable>(...lists: T[][]): T[] 
     }
     scoreRules = merged;
   }
-  const out = [...presence, ...activation, ...scoreRules];
+  // Р3: серьезность → presence по Δ → активационные → прочие скор-правила
+  const severity = SEVERITY_RULES.flatMap((id) => scoreRules.filter((r) => r.ruleId === id));
+  const rest = scoreRules.filter((r) => !SEVERITY_RULES.includes(r.ruleId));
+  const out = [...severity, ...presence, ...activation, ...rest];
   out.forEach((r, i) => (r.priority = i + 1));
   return out;
 }
@@ -385,7 +418,8 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
     if (delta === 0 && channel !== null && secretsCritical && b >= SECRETS_CRITICAL_TOTAL_CAP) return { delta: 0, reason: "cap" };
     return { delta, reason: null };
   };
-  return recommendFromFacts(ok, { delta: realDelta, issuesScore: scores.categories.issues.score, codeEmpty: base.codeEmpty });
+  const categoryScores = Object.fromEntries(Object.entries(base.categories).map(([k, c]) => [k, c.score])) as Record<CategoryKey, number | null>;
+  return recommendFromFacts(ok, { delta: realDelta, issuesScore: scores.categories.issues.score, codeEmpty: base.codeEmpty, categoryScores });
 }
 
 /** Чистый движок правил на эффективных фактах (без БД). */
@@ -393,6 +427,8 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
   const pub = ctx.only !== "channel";
   if (ctx.codeEmpty === true) return pub ? [act("add-code", "code", ["tree.stats"], {})] : [];
   const realDelta = ctx.delta;
+  // Н7: скор-правило — только у оцененной категории (без сведений — как раньше)
+  const scored = (cat: CategoryKey): boolean => ctx.categoryScores === undefined || (ctx.categoryScores[cat] ?? null) !== null;
   const presence: Recommendation[] = [];
   const activation: Recommendation[] = [];
   const scoreRules: Recommendation[] = [];
@@ -407,7 +443,9 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
 
   const presence_ = ok.get("docs.presence") as DocsPresenceValue | undefined;
   if (pub && presence_) {
-    if (presence_.license !== true) presenceRule("license-missing", ["docs.presence"], withPresence("license"));
+    // Н7 (F7): тот же признак, что в расчете (`licensePresent`): лицензия
+    // под именем COPYING у фактов до Р4в уже в балле — совета с «+0» нет
+    if (!licensePresent(ok)) presenceRule("license-missing", ["docs.presence"], withPresence("license"));
     if (presence_.contributing !== true) presenceRule("contributing-missing", ["docs.presence"], withPresence("contributing"));
     if (presence_.codeowners !== true) presenceRule("codeowners-missing", ["docs.presence"], withPresence("codeowners"));
     const readme = ok.get("docs.readme") as DocsReadmeValue | undefined;
@@ -434,16 +472,25 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
   const ciUnparsed = cicdCfg?.has_ci_yaml === true && (typeof cicdCfg.has_steps !== "boolean" || typeof cicdCfg.steps_note === "string");
   // CI-правила — канал cicd: Δ по CI-весу исполняется только в полном
   // Score, поэтому правило видит лишь зритель с доступом к CI (К2)
+  const runsFact = ok.get("cicd.runs");
   if (cicdCfg && !ciUnparsed && !(cicdCfg.has_ci_yaml === true && cicdCfg.has_steps === true)) {
     const hasYaml = cicdCfg.has_ci_yaml === true;
-    presenceRule(
-      hasYaml ? "ci-no-steps" : "ci-missing",
-      ["cicd.configs"],
-      (facts) => {
-        facts.set("cicd.configs", hasYaml ? { ...(facts.get("cicd.configs") as object), has_steps: true } : { has_ci_yaml: true, has_steps: true });
-      },
-      "cicd",
-    );
+    const ruleId = hasYaml ? "ci-no-steps" : "ci-missing";
+    if (runsFact === undefined) {
+      // 4.3.0 (Н8, F10): запуски не видны — CI «нет данных» при любом конфиге,
+      // и совет не обещает числа (раньше прирост давала перенормировка, а не CI)
+      const texts = recommendationText(ruleId, recommendationParams(ruleId, ok, { reason: "no-runs", channel: "cicd" }))!;
+      presence.push({ ruleId, kind: "presence", priority: 0, ...texts, factRefs: ["cicd.configs"], deltaScore: null, opensCategory: null, channel: "cicd" });
+    } else {
+      presenceRule(
+        ruleId,
+        ["cicd.configs"],
+        (facts) => {
+          facts.set("cicd.configs", hasYaml ? { ...(facts.get("cicd.configs") as object), has_steps: true } : { has_ci_yaml: true, has_steps: true });
+        },
+        "cicd",
+      );
+    }
   }
 
   // ---------- активационные (без числа; «открывает категорию») ----------
@@ -456,7 +503,6 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
     // к Security, а данных AppSec у скана нет — ни подключения, ни скана
     activation.push(act("connect-appsec", "security", ["appsec.findings"], {}, "appsec"));
   }
-  const runsFact = ok.get("cicd.runs");
   if (!runsFact && cicdCfg?.has_ci_yaml === true && cicdCfg?.has_steps === true) {
     activation.push(act("grant-ci-runs", "cicd", ["cicd.runs", "cicd.configs"], {}, "cicd"));
   }
@@ -464,25 +510,37 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
   // ---------- скор-правила (после появления данных; влияние текстом) ----------
   const score = (ruleId: string, factRefs: string[], channel: RecommendationChannel | null = null) =>
     scoreRules.push(mkScore(ruleId, factRefs, recommendationParams(ruleId, ok), channel));
-  if (runsFact && typeof (runsFact as { runs_count?: unknown }).runs_count === "number" && (runsFact as { runs_count?: number }).runs_count! > 0) {
+  // Н7 (F9): CI-правила — только при ci.yaml со шагами и оцененной CI (те же
+  // условия, что у балла): без конфига «почините CI» формула вырастить не может
+  const ciDeclared = cicdCfg?.has_ci_yaml === true && cicdCfg.has_steps === true && !ciUnparsed;
+  const rc = runsFact as { runs_count?: unknown; runs_total?: unknown } | undefined;
+  if (ciDeclared && rc !== undefined && rc.runs_count === 0 && !(typeof rc.runs_total === "number" && rc.runs_total > 0) && scored("cicd")) {
+    // Н7 (D11): запуски видны, их 0 — «CI заявлен, но не запускался»
+    score("ci-never-ran", ["cicd.runs", "cicd.configs"], "cicd");
+  }
+  if (ciDeclared && scored("cicd") && runsFact && typeof (runsFact as { runs_count?: unknown }).runs_count === "number" && (runsFact as { runs_count?: number }).runs_count! > 0) {
     const rf = runsFact as { last_status?: unknown; success_rate?: unknown; weighted_success_rate?: unknown; duration_p50?: unknown };
     // 4.2.0 (B8 аудита): условие — от той же доли, что считает балл (взвешенная
     // свежестью, иначе простая); идущий запуск ошибкой не считается
+    // 4.3.0 (Н7): поле взвешенной доли есть и пусто — все запуски старше года:
+    // балл говорит «за год не запускался», и советов про красный или долгий CI нет
+    const staleOnly = "weighted_success_rate" in rf && rf.weighted_success_rate === null;
     const passInput = typeof rf.weighted_success_rate === "number" ? rf.weighted_success_rate : rf.success_rate;
     // М2.5: last_status — последний ЗАВЕРШЕННЫЙ запуск (сборщик); провал — по перечню спеки
     const lastFailed = runOutcome(typeof rf.last_status === "string" ? rf.last_status : null) === "failure";
-    if (lastFailed || (typeof passInput === "number" && passInput < 0.9)) score("fix-red-runs", ["cicd.runs"], "cicd");
-    if (typeof rf.duration_p50 === "number" && rf.duration_p50 > 15 * 60) score("speed-up-pipeline", ["cicd.runs"], "cicd");
+    if (!staleOnly && (lastFailed || (typeof passInput === "number" && passInput < 0.9))) score("fix-red-runs", ["cicd.runs"], "cicd");
+    if (!staleOnly && typeof rf.duration_p50 === "number" && rf.duration_p50 > 15 * 60) score("speed-up-pipeline", ["cicd.runs"], "cicd");
   }
   const appsec = ok.get("appsec.findings") as AppsecFindingsValue | undefined;
   if (appsec) {
     const crit = (appsec.severity_counts?.critical as number | undefined) ?? 0;
-    // B8: критичные находки входят в балл только через плотность (нужен LOC)
-    const loc = (ok.get("tree.stats") as { loc?: unknown } | undefined)?.loc;
-    if (appsec.secrets_critical === true || (crit > 0 && typeof loc === "number" && loc > 0)) score("appsec-critical", ["appsec.findings"], "appsec");
+    // утечка секретов — всегда (потолок 49 действует на итог при любой
+    // категории); критичные находки — при оцененной «Безопасности» (Н7; с Р3
+    // они держат потолок категории 40)
+    if (appsec.secrets_critical === true || (crit > 0 && scored("security"))) score("appsec-critical", ["appsec.findings"], "appsec");
   }
   const todo = ok.get("code.todo") as { older_180d?: unknown; count?: unknown; fixme?: unknown; blamed_files?: unknown; todo_note?: unknown } | undefined;
-  if (pub && todo && todo.todo_note !== "incomplete" && typeof todo.blamed_files === "number" && todo.blamed_files > 0) {
+  if (pub && scored("code") && todo && todo.todo_note !== "incomplete" && typeof todo.blamed_files === "number" && todo.blamed_files > 0) {
     // B8: та же доля, что в балле (derived.ts: знаменатель не меньше OLD_SHARE_MIN_BASE)
     const total = ((todo.count ?? 0) as number) + ((todo.fixme ?? 0) as number);
     const older = (todo.older_180d ?? 0) as number;
@@ -490,13 +548,13 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
   }
   const statsFull = ok.get("issues.stats") as { open?: unknown; stale_90d?: unknown; median_close_days?: unknown } | undefined;
   const openCount = typeof statsFull?.open === "number" ? statsFull.open : 0;
-  if (pub && statsFull && openCount > 0) {
+  if (pub && scored("issues") && statsFull && openCount > 0) {
     const share = ((statsFull.stale_90d ?? 0) as number) / Math.max(1, openCount);
     if (share >= 0.5) score("reduce-stale-issues", ["issues.stats"]);
     if (typeof statsFull.median_close_days === "number" && statsFull.median_close_days >= 30) score("speed-up-issue-close", ["issues.stats"]);
   }
 
-  // ---------- порядок (§8): реальный Δ desc (затем rule_id) → активационные по весу desc → score ----------
+  // ---------- порядок (§8, 4.3.0 Р3): серьезность → реальный Δ desc (затем rule_id) → активационные по весу desc → прочие score ----------
   return orderRecommendations([...presence, ...activation, ...scoreRules]);
 }
 

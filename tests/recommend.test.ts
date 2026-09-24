@@ -72,8 +72,17 @@ describe("presence-правила: реальный прирост итога (�
     expect(rec.deltaScore!).toBeGreaterThan(0);
   });
 
+  test("Н8: запуски не видны — CI-правило без числа, эффект словами «оценка появится с запусками»", () => {
+    const hiddenFacts = withFacts(healthyFacts(), { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } }, NO_RUNS);
+    const rec = recommend(t.db, seedScan(t, hiddenFacts), { now: NOW }).find((r) => r.ruleId === "ci-missing")!;
+    expect(rec.deltaScore).toBeNull();
+    expect(rec.expectedImpact).toBe("CI/CD: оценка появится с запусками");
+    expect(rec.channel).toBe("cicd");
+  });
+
   test("нет CI / ci.yaml без шагов → Δ к полному Score; CI-правила помечены каналом cicd", () => {
-    const noCiFacts = withFacts(healthyFacts(), { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } }, NO_RUNS);
+    // 4.3.0 (Н8): число — только при видимых запусках (у здоровой фикстуры они видны)
+    const noCiFacts = withFacts(healthyFacts(), { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } });
     const noCi = seedScan(t, noCiFacts);
     const rec1 = recommend(t.db, noCi, { now: NOW }).find((r) => r.ruleId === "ci-missing")!;
     expect(rec1.deltaScore).toBe(realGain(noCiFacts, withFacts(noCiFacts, { key: "cicd.configs", value: { has_ci_yaml: true, has_steps: true } }), "full"));
@@ -85,7 +94,7 @@ describe("presence-правила: реальный прирост итога (�
     expect(ciRules.length).toBeGreaterThan(0);
     expect(ciRules.every((r) => r.channel === "cicd")).toBe(true);
 
-    const noStepsFacts = withFacts(healthyFacts(), { key: "cicd.configs", value: { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: false } }, NO_RUNS);
+    const noStepsFacts = withFacts(healthyFacts(), { key: "cicd.configs", value: { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: false } });
     const noSteps = seedScan(t, noStepsFacts);
     const rec2 = recommend(t.db, noSteps, { now: NOW }).find((r) => r.ruleId === "ci-no-steps")!;
     const fixedSteps = withFacts(noStepsFacts, { key: "cicd.configs", value: { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: true } });
@@ -245,7 +254,8 @@ describe("orderRecommendations (круг 2, LOW-3/С4)", () => {
     const publicRecs = [r("license-missing", "presence", 5.8), r("start-tracker", "activation", null, "issues"), r("resolve-old-todos", "score", null)];
     const channelRecs = [r("ci-missing", "presence", null), r("connect-appsec", "activation", null, "security"), r("fix-red-runs", "score", null)];
     const out = orderRecommendations(publicRecs, channelRecs);
-    expect(out.map((x) => x.ruleId)).toEqual(["license-missing", "ci-missing", "connect-appsec", "start-tracker", "fix-red-runs", "resolve-old-todos"]);
+    // 4.3.0 (Р3): правило серьезности (красный CI) — первым во всей выдаче
+    expect(out.map((x) => x.ruleId)).toEqual(["fix-red-runs", "license-missing", "ci-missing", "connect-appsec", "start-tracker", "resolve-old-todos"]);
     expect(out.map((x) => x.priority)).toEqual([1, 2, 3, 4, 5, 6]);
     // числовой Δ канального правила (оба канала открыты) встаёт по величине
     const open = orderRecommendations([r("license-missing", "presence", 5.8)], [r("ci-missing", "presence", 7.5)]);
