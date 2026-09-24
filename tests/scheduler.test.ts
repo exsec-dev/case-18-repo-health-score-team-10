@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { loadConfig, DEFAULT_SCAN, worstCaseScanMs } from "../src/config";
 import { openDb } from "../src/db";
 import type { ScClient, ScResponse } from "../src/collectors/http";
+import { COLLECTOR_VERSION } from "../src/collectors/facts";
 import {
   __resetRoundRobin,
   armoredTimerCallback,
@@ -481,7 +482,8 @@ describe("ночной каталог: дифф, форс, эвикция", () =
     const r = seedRepo("ri", "dup", "2026-09-01T00:00:00Z");
     const ok = seedRepo("ri", "fine", "2026-09-01T00:00:00Z");
     db.query("INSERT INTO scans (repo_id, started_at, finished_at, status, trigger, rating_eligible) VALUES (?, '2026', '2026', 'partial', 'periodic', 0)").run(r);
-    db.query("INSERT INTO scans (repo_id, started_at, finished_at, status, trigger, rating_eligible) VALUES (?, '2026', '2026', 'ok', 'periodic', 1)").run(ok);
+    // В5.3-М (Н1): пригодный скан текущим сборщиком — доочереди «recollect» нет
+    db.query("INSERT INTO scans (repo_id, started_at, finished_at, status, trigger, rating_eligible, collector_version) VALUES (?, '2026', '2026', 'ok', 'periodic', 1, ?)").run(ok, COLLECTOR_VERSION);
     const pages = [{ repos: [repoOf("ri", "dup", "2026-09-01T00:00:00Z"), repoOf("ri", "dup", "2026-09-01T00:00:00Z"), repoOf("ri", "fine", "2026-09-01T00:00:00Z")], next: null }];
     const out = await nightlyCatalog(db, catalogClient(pages), { now: new Date() });
     expect(out.enqueued).toEqual([{ slug: "ri/dup", reason: "retry-ineligible" }]);

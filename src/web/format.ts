@@ -31,8 +31,18 @@ export const CATEGORY_TITLES_RU: Record<string, string> = {
 };
 
 /** Балл категории 0..100 — целым: дробь тут ничего не объясняет. */
+/**
+ * В5.3-М (Н13, F20): показанное целое балла — одно правило для карточки,
+ * рейтинга, отчета, значка и хранимого индекса. Сначала снимается двоичный шум
+ * (39,5 в расчете бывает 39.49999999999999 и без правки округлялось в 39 —
+ * «в зоне риска» вместо «требует внимания»), затем обычное округление.
+ */
+export function roundScore(value: number): number {
+  return Math.round(Math.round(value * 1e9) / 1e9);
+}
+
 export function fmtScore(value: number | null | undefined): string {
-  return value === null || value === undefined ? "—" : String(Math.round(value));
+  return value === null || value === undefined ? "—" : String(roundScore(value));
 }
 
 /** Балл submetric приходит долей 0..1 — на экране это проценты (§2.2 плана). */
@@ -188,8 +198,9 @@ export function scanStatusText(status: string): string {
  */
 export function scoreTheme(value: number | null | undefined): "success" | "warning" | "danger" | "misc" {
   if (value === null || value === undefined) return "misc";
-  // уровень — по тому же округлённому числу, что видит зритель (69.6 показан как 70)
-  const shown = Math.round(value);
+  // уровень — по тому же округлённому числу, что видит зритель (69.6 показан как 70);
+  // Н13: округление устойчиво к двоичному шуму (39.49999999999999 → 40)
+  const shown = roundScore(value);
   if (shown >= 70) return "success";
   if (shown >= 40) return "warning";
   return "danger";
@@ -393,8 +404,8 @@ export type Contributions =
   | { kind: "bar"; total: number; segments: ContributionSegment[]; missing: number; losses: ContributionSegment[] }
   /** итог ограничен потолком за утекшие секреты: вклады дали бы больше показателя */
   | { kind: "capped"; total: number; uncapped: number; segments: ContributionSegment[] }
-  /** в репозитории нет кода: показатель 0 по правилу методики, вкладов нет */
-  | { kind: "empty"; total: number };
+  /** в репозитории нет кода: показатель 0 по правилу методики, вкладов нет; reason — причина «Состояния кода» (Н4) */
+  | { kind: "empty"; total: number; reason?: string | null };
 
 /**
  * В4.9 (К9.1, К9.12): «Вклад категорий в оценку» — ОДНА чистая функция для
@@ -408,10 +419,10 @@ export type Contributions =
  * Потолок 49 и пустой репозиторий — отдельные виды: у них вклады не
  * складываются в показатель, и полоса их не рисует.
  */
-export function categoryContributions(cats: ContributionInput[], total: number | null, opts: { codeEmpty?: boolean } = {}): Contributions | null {
+export function categoryContributions(cats: ContributionInput[], total: number | null, opts: { codeEmpty?: boolean; codeEmptyReason?: string | null } = {}): Contributions | null {
   if (total === null) return null;
-  const shown = Math.round(total);
-  if (opts.codeEmpty) return { kind: "empty", total: shown };
+  const shown = roundScore(total);
+  if (opts.codeEmpty) return { kind: "empty", total: shown, reason: opts.codeEmptyReason ?? null };
   const withData = cats.filter((c): c is ContributionInput & { score: number } => c.score !== null && c.weight > 0);
   const weightSum = withData.reduce((s, c) => s + c.weight, 0);
   if (weightSum === 0) return null;
@@ -468,7 +479,11 @@ export const CONTRIBUTIONS_REST = "не набрано";
 
 /** Строка вместо полосы, когда вклады не складываются в показатель (потолок 49, нет кода). */
 export function contributionsNote(c: Contributions): string | null {
-  if (c.kind === "empty") return "В репозитории нет ни одного файла, поэтому оценка – 0. Это не ошибка сервиса: оценивать нечего.";
+  if (c.kind === "empty") {
+    // 4.3.0 (Н4, D4): причина по виду — «нет ни одного файла» только там, где файлов нет
+    const why = c.reason && c.reason.startsWith("no source code — ") ? noDataReason("code", c.reason) : "В репозитории нет кода.";
+    return `${why.replace(/ – оценивать нечего\.$/, ".")} Поэтому оценка – 0. Это не ошибка сервиса: оценивать нечего.`;
+  }
   if (c.kind === "capped") return `Итог ограничен ${c.total} баллами: AppSec нашел утекшие секреты. Без ограничения категории дали бы ${fmtDecimal(c.uncapped, 1)}.`;
   return null;
 }
@@ -515,19 +530,43 @@ export function noDataReason(key: string, reason: string | null | undefined): st
   const r = (reason ?? "").trim();
   // 4.2.0 (М1.2, М2.1 аудита В5.3): причины «мало данных» — каждая своей веткой
   if (r.startsWith("too little data — no finding density")) return "Находки AppSec есть, но размер кода неизвестен и доля закрытых не посчитана – категорию не оцениваем.";
+  // 4.3.0 (Н4): причины по виду — пустой репо, нет кода, не прочитан, строки не прочитаны.
+  // Круг 2: причины «мало кода» (Р4б → сжатие В3) и «история из синков» (Н10 → К5)
+  // сняты; 4.3.0 не выкатывалась — старых оценок с ними нет
+  if (r.startsWith("no source code — ")) return CODE_EMPTY_TEXT[r.slice("no source code — ".length)] ?? CODE_EMPTY_TEXT["only non-code files"]!;
+  if (r === "repository empty") return REPOSITORY_EMPTY_TEXT;
+  // К3: файлы кода больше лимита сервиса или бинарные — строки не прочитаны
+  if (r.startsWith("too little data — lines miscounted by an older collector")) return "Строки кода посчитаны прежней версией сборщика с ошибкой – категория оценится после повторного анализа репозитория.";
+  if (r.startsWith("too little data — lines of code not read")) return "Строки кода прочитать не удалось: файлы больше лимита сервиса, не текстовые или чтение прервалось – категорию не оцениваем.";
+  // прежние модели (4.2.0): строки старых оценок
   if (r.startsWith("too little data — no commit history")) return "Истории коммитов нет – без нее активность не оцениваем: одни счетчики запросов на слияние и релизов категорию не определяют.";
   if (r.startsWith("too little data — no lines of code")) return "В репозитории нет строк кода, по которым считается плотность TODO, – категорию не оцениваем.";
   if (r.startsWith("ci.yaml not parsed")) return "Файл .sourcecraft/ci.yaml не удалось разобрать – есть ли в нем шаги, неизвестно, поэтому категорию не оцениваем.";
   if (key === "security" || r.startsWith("AppSec data unavailable")) return SECURITY_NO_DATA;
+  if (r.startsWith("ci runs pending")) return "Запуски CI идут, завершенных пока нет – категорию не оцениваем.";
   if (r.startsWith("ci runs no-data")) return CI_RUNS_CAP_TEXT;
-  if (r === "git channel no-data") return "Не удалось скачать репозиторий – произошла ошибка или он больше лимита сервиса.";
+  if (r === "git channel no-data") return GIT_UNREAD_TEXT;
   if (r === "git+rest channels no-data") return "Нет данных ни из репозитория, ни от SourceCraft.";
   if (r === "issues channel no-data") return "Список задач недоступен.";
   return "Данных нет.";
 }
 
+/** Н4: репозиторий пуст — коммитов нет (данные, а не сбой скачивания). */
+export const REPOSITORY_EMPTY_TEXT = "В репозитории нет ни одного коммита – оценивать нечего.";
+
+/** Н4: репозиторий не прочитан (лимит, ошибка) — незнание. */
+export const GIT_UNREAD_TEXT = "Репозиторий не удалось прочитать – произошла ошибка или он больше лимита сервиса.";
+
+/** Н4: виды «кода нет» (`codeEmptyKind` расчета) — каждый своей фразой. */
+const CODE_EMPTY_TEXT: Record<string, string> = {
+  "repository empty": REPOSITORY_EMPTY_TEXT,
+  "no files": "В репозитории нет ни одного файла – оценивать нечего.",
+  "only non-code files": "В репозитории нет файлов кода – только документы, лицензии или картинки.",
+  "no lines of code": "Файлы кода в репозитории пустые – строк кода нет.",
+};
+
 /** Потолок CI без результатов запусков — одна фраза для «почему», маркера и приложения. */
-export const CI_RUNS_CAP_TEXT = "Результаты запусков CI не видны (нет прав или запусков не было) – категорию не оцениваем: честное отсутствие данных вместо догадок.";
+export const CI_RUNS_CAP_TEXT = "Результаты запусков CI сервису не видны – категорию не оцениваем: честное отсутствие данных вместо догадок.";
 
 /** Безопасность без данных: откуда берутся данные категории. */
 export const SECURITY_NO_DATA = "Безопасность считается по данным AppSec SourceCraft, а они видны только с правом доступа.";

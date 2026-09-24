@@ -5,7 +5,9 @@
 // В4.3 (18.09, Алексей): модель описывает ДВА показателя — полный
 // Repo Health Score (6 категорий, SCORE_WEIGHTS) и публичную проекцию
 // HealthCraft Index (4 категории, INDEX_WEIGHTS).
-export const MODEL_VERSION = "4.2.0-hci";
+// 4.3.0-hci (24.09, В5.3-М — workers/V5.3-method-oneshot.md): закрытие методики
+// по повторному аудиту (Н1-Н15) и решениям владельца Р1-Р4
+export const MODEL_VERSION = "4.3.0-hci";
 
 /**
  * В5 (К5.9): bus factor — окно и доля покрытия. Справочный показатель БЕЗ
@@ -51,15 +53,13 @@ export function anchorScore(anchors: Anchor[], x: number): number {
   if (x <= first.x) return first.y;
   const last = anchors[anchors.length - 1]!;
   if (x >= last.x) return last.y;
-  for (let i = 1; i < anchors.length; i++) {
-    const a = anchors[i]!;
-    if (x <= a.x) {
-      const b = anchors[i - 1]!;
-      const t = (x - b.x) / (a.x - b.x);
-      return b.y + t * (a.y - b.y);
-    }
-  }
-  return last.y;
+  // В5.3-М (Н15): first.x < x < last.x — отрезок находится всегда, запасного
+  // `return last.y` после цикла (недостижимого) больше нет
+  let i = 1;
+  while (x > anchors[i]!.x) i++;
+  const a = anchors[i]!;
+  const b = anchors[i - 1]!;
+  return b.y + ((x - b.x) / (a.x - b.x)) * (a.y - b.y);
 }
 
 /** Лог-интерполяция по log10(x+1) (0-анкер сохраняет смысл: x=0 → первый y). */
@@ -80,10 +80,13 @@ export function commitsPerMonthScore(x: number): number {
   return Math.min(1, Math.log10(x + 1) / Math.log10(31));
 }
 
-/** contributors (лог): 1→0.2 (соло-пол), 10→0.6, 100→1.0, выше плоско. */
+/**
+ * contributors (лог): 1→0.2 (соло-пол), 10→0.6, 100→1.0, выше плоско.
+ * В5.3-М (Н15): ветки `x < 1` нет — расчет зовет функцию только при x ≥ 1;
+ * пол держит Math.max, а не отдельная недостижимая ветка.
+ */
 export function contributorsScore(x: number): number {
-  if (x < 1) return 0.2;
-  return Math.min(1, 0.2 + 0.4 * Math.log10(x));
+  return Math.min(1, 0.2 + 0.4 * Math.log10(Math.max(1, x)));
 }
 
 /** readme bytes: <500Б→0.2, 2КБ→0.6, 20КБ→1.0, выше плоско (рабочий кап от воды). */
@@ -178,6 +181,35 @@ export const ISSUES_FULL_SAMPLE = 10;
 /** 4.2.0 (М1.5): минимальный знаменатель доли старых TODO. */
 export const OLD_SHARE_MIN_BASE = 5;
 
+/**
+ * 4.3.0 (Р1): доля файлов тестов среди файлов кода: 5% файлов — 0,5; 15% —
+ * 0,8; от 30% — максимум. Круг 2 (решение В1): «Тесты» — бонус. Нет непустых
+ * тестов — подметрика вне расчета (как у фактов до сборщика 3), а не 0; есть —
+ * входит в «Код» с весом 0,3, только если поднимает балл (`compute.ts`, `scoreCode`).
+ */
+export const TEST_SHARE: Anchor[] = [
+  { x: 0, y: 0 },
+  { x: 0.05, y: 0.5 },
+  { x: 0.15, y: 0.8 },
+  { x: 0.3, y: 1 },
+];
+
+/**
+ * Круг 2 (решение В3, вытесняет порог Р4б «от 50 строк»): плавное сжатие малого
+ * кода к нейтрали — `Код = 50 + (сырой − 50) × min(1, строк / 200)`. Одна строка
+ * `main.py` дает «Коду» почти ровно 50, а не 100 (J5); порога и ступени на
+ * 50-й строке нет (G1). Строки — `source_loc`, у фактов до М2.3 — `loc`.
+ */
+export const CODE_FULL_LOC = 200;
+export const CODE_NEUTRAL = 50;
+
+/**
+ * 4.3.0 (Р3): потолок «Безопасности» при открытых находках — после
+ * взвешивания: открытая critical — не выше 40, открытая high — не выше 69.
+ * На большом репо плотность почти не видит пару критичных (J7), потолок видит.
+ */
+export const SECURITY_OPEN_CAPS = { critical: 40, high: 69 } as const;
+
 /** записей в корне репозитория (top_level, лог-шкала духом — плоские края). */
 export const ROOT_ENTRIES: Anchor[] = [
   { x: 15, y: 1.0 },
@@ -251,7 +283,8 @@ export const SUBWEIGHTS = {
   security: { density: 0.5, resolved: 0.3, secrets: 0.2 },
   activity: { fresh: 0.35, freq: 0.25, contributors: 0.2, pulls: 0.1, releases: 0.1 },
   issues: { stale: 0.3, close_days: 0.3, resolution: 0.3, first_resp: 0.1 },
-  code: { density: 0.4, old_share: 0.35, root: 0.25 },
+  // 4.3.0 (Р1): + «Тесты» 0,3; корень 0,25 → 0,1 (второстепенное, J15)
+  code: { density: 0.35, old_share: 0.25, tests: 0.3, root: 0.1 },
 } as const;
 
 /** readme = presence 0.3 + quality 0.7; quality = bytes 0.5 + sections 0.5. */
@@ -287,16 +320,22 @@ export const COVERAGE_NULL_BELOW = 0.4;
 const anchorMin = (a: Anchor[]): number => Math.min(...a.map((x) => x.y));
 
 /**
- * Issues 0/0 = данные «трекер не ведётся»: скор = вычислимый минимум
- * категории по анкерам — все субметрики на худших узлах БЕЗ перенормировки
- * (перенормировка no-data субметрик поднимает частичный минимум выше
- * полного; полный минимум — нижняя грань любых честных данных, что и
- * гарантирует монотонность «ведение ≥ пустоты» по построению, Q14/§5.3).
- * ≈6: 0.3·0.1(stale) + 0.3·0(close) + 0.3·0.1(resolution) + 0.1·0(first).
+ * Вычислимый минимум категории «Задачи» по анкерам — все субметрики на худших
+ * узлах БЕЗ перенормировки: 0.3·0.1(stale) + 0.3·0(close) + 0.3·0.1(resolution)
+ * + 0.1·0(first) = 6 (в двоичной арифметике — 6.000000000000001).
  */
-export const ISSUES_TRACKER_UNUSED = 100 * (
+export const ISSUES_ANCHOR_MIN = 100 * (
   SUBWEIGHTS.issues.stale * anchorMin(STALE_SHARE) +
   SUBWEIGHTS.issues.close_days * anchorMin(CLOSE_DAYS) +
   SUBWEIGHTS.issues.resolution * anchorMin(RESOLVED_SHARE) +
   SUBWEIGHTS.issues.first_resp * anchorMin(FIRST_COMMENT_H)
 );
+
+/**
+ * Issues 0/0 = данные «трекер не ведётся»: скор = вычислимый минимум
+ * категории (ISSUES_ANCHOR_MIN; полный минимум — нижняя грань любых честных
+ * данных, что и гарантирует монотонность «ведение ≥ пустоты» по построению,
+ * Q14/§5.3). В5.3-М (Н15): точным числом 6 — сравнения на равенство с
+ * 6.000000000000001 были хрупки; совпадение с минимумом держит тест.
+ */
+export const ISSUES_TRACKER_UNUSED = 6;

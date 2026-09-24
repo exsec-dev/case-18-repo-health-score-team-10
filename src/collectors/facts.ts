@@ -6,6 +6,17 @@ import { deflateSync, inflateSync } from "node:zlib";
 // документируется на месте, В2 расширит.
 export type FactStatus = "ok" | "no-data" | "bad";
 
+/**
+ * В5.3-М (Н1): версия сборщика фактов, штамп `scans.collector_version`.
+ * 1 — сканы до правок М2 (`8053062`), 2 — после М2, 3 — сборщик модели
+ * 4.3.0-hci (blame по sha, маркеры в комментариях, файлы тестов, задачи в
+ * работе и мгновенно закрытые, открытые группы AppSec, содержимое документов).
+ * В старых строках — NULL («до учета», читается как старше текущего). Смена
+ * формы или смысла факта — новая версия: ночная волна доочередит репо, чей
+ * последний пригодный скан собран старым сборщиком (`scheduler.ts`).
+ */
+export const COLLECTOR_VERSION = 3;
+
 /** no-data reason — ключ внутри value-JSON (отдельной колонки нет).
  *  В4/Б2: no-scan/incomplete — ветки AppSec (скана нет/не завершён,
  *  неполный ответ ≠ отсутствие уязвимостей). */
@@ -45,10 +56,15 @@ export function categoryOf(kind: string): string {
 /** Мини-реестр kinds В1+В2 (план, раздел «Контракты»). Формы значений: */
 export const KINDS = {
   // булевы ok-факты; подтверждённое ОТСУТСТВИЕ файла = данные, НЕ no-data
-  "docs.presence": "{readme,license,contributing,codeowners}: boolean",
+  // content_checked (сборщик 3, Р4в): license/contributing/codeowners —
+  // только файл с ≥16 непробельными символами
+  "docs.presence": "{readme,license,contributing,codeowners}: boolean, content_checked?",
   // flags — словарь секций RU+EN §7.4 (install/build/test)
   "docs.readme": "{bytes,sections,flags:{install,build,test}} | {present:false} когда README нет",
-  "tree.stats": "{top_level:[{name,type}],file_count,bytes,loc}",
+  // сборщик 3, круг 2: test_files — только непустые файлы тестов (К2);
+  // source_unread — файлы кода, строки которых не прочитаны (больше лимита
+  // текста или бинарные, К3)
+  "tree.stats": "{top_level:[{name,type}],file_count,bytes,loc,source_files?,source_loc?,test_files?,source_unread?}",
   // полный список .sourcecraft/** (канон CI-детекта) + has_ci_yaml +
   // has_steps (§7.4: ≥1 task с ≥1 непустой командой script/cube);
   // steps_note при неудачном парсинге ci.yaml
@@ -63,9 +79,10 @@ export const KINDS = {
   // релизов released_at desc — источник pulls_90d/releases_12m
   "activity.rest": "{contributors,releases,pulls_open,latest_release_at?,pulls_created_at:[...],releases_released_at:[...],fetched_note?}",
   "issues.stats":
-    "{open,closed,median_close_days,stale_90d,fetched_count}",
+    "{open,in_progress?,in_progress_note?,closed,closed_instant?,closed_counted?,median_close_days,stale_90d,fetched_count}",
+  // сборщик 3 (Н14а): answered + censored; сборщик до 3 — with_comments
   "issues.comments_sample":
-    "{issues,with_comments,median_first_comment_delay_hours,delays_hours:[...]}",
+    "{issues,answered?,censored?,with_comments?,median_first_comment_delay_hours,delays_hours:[...]}",
   // семантика (сверено с кодом В1, uikit 21+6=27): count — только TODO,
   // fixme — только FIXME, older_180d — по ВСЕМ маркерам (TODO+FIXME,
   // blame-бюджет ≤ blamed_files файлов из todo_files)

@@ -19,14 +19,16 @@ import {
   fmtContribution,
   closeDateText,
   fmtDate,
+  fmtDecimal,
   gitLimitsText,
   lockedCategoryText,
   noDataReason,
   securityNoDataReason,
   type Contributions,
+  roundScore,
 } from "../web/format";
 import { CATEGORY_ORDER, CATEGORY_TITLES } from "./categories";
-import { displayOnly, submetricNote, submetricShownValue, submetricTitle, subweightKey, type SubmetricContext } from "./submetrics";
+import { displayOnly, plural, submetricNote, submetricShownValue, submetricTitle, subweightKey, type SubmetricContext } from "./submetrics";
 
 export const INDEX = "HealthCraft Index";
 export const FULL = "Repo Health Score";
@@ -83,7 +85,8 @@ export function contributionsOf(card: RepoCard, metric: Metric): Contributions |
   return categoryContributions(
     metric.keys.map((key) => ({ key, title: CATEGORY_TITLES[key], score: cats[key]?.score ?? null, weight: metric.weight(key) })),
     metric.value,
-    { codeEmpty: card.markers.codeEmpty },
+    // 4.3.0 (Н4): вид «кода нет» — из причины «Состояния кода» той же оценки
+    { codeEmpty: card.markers.codeEmpty, codeEmptyReason: cats.code?.no_data ?? null },
   );
 }
 
@@ -143,6 +146,10 @@ export function analysisDate(card: RepoCard): string | null {
  */
 export function whyText(key: CategoryKey, cat: CardCategory, ctx: SubmetricContext): string {
   if (key === "cicd" && cat.no_data) return noDataReason(key, cat.no_data);
+  // 4.3.0 (Н5, Р3): поправка к среднему (сжатие малой выборки, потолок) —
+  // первая причина балла; «Все показатели на максимуме» при сжатом балле — ложь
+  const adjusted = adjustmentText(cat);
+  if (adjusted) return adjusted;
   const subs = Object.entries(cat.submetrics);
   for (const [sub, entry] of subs) {
     const remark = submetricNote(key, sub, entry.note)?.remark;
@@ -155,6 +162,30 @@ export function whyText(key: CategoryKey, cat: CardCategory, ctx: SubmetricConte
     .slice(0, 2);
   if (weakest.length === 0) return "Все показатели категории на максимуме.";
   return weakest.map(({ sub, entry }) => `${submetricTitle(key, sub)} – ${submetricShownValue(key, sub, entry, ctx)}.`).join(" ");
+}
+
+/**
+ * В5.3-М (Н5, Р3, Н14б): поправка к взвешенному среднему категории словами —
+ * одна копия для карточки («почему»), разбора категории и приложения А.
+ * Сжатие малой выборки задач, потолок «Безопасности» при открытых находках и
+ * (круг 2, В3) сжатие малого кода к 50.
+ */
+export function adjustmentText(cat: Pick<CardCategory, "adjustment" | "score">): string | null {
+  const a = cat.adjustment;
+  if (!a) return null;
+  if (a.kind === "small-sample") {
+    // приемка HQ (E11): ни одной засчитанной закрытой — не «0 из 10»
+    if (a.n === 0) return `Ни одна задача не закрыта – балл категории минимальный: ${fmtDecimal(cat.score ?? a.floor, 0)}.`;
+    const tasks = plural(a.n, "закрытая задача", "закрытые задачи", "закрытых задач");
+    return `Малая выборка: ${a.n} ${tasks} из ${a.full} – балл сжат к минимуму ${fmtDecimal(a.floor, 0)}: ${fmtDecimal(a.raw, 1, { trim: true })} → ${fmtDecimal(cat.score ?? a.floor, 1, { trim: true })}.`;
+  }
+  if (a.kind === "small-code") {
+    // круг 2 (В3): сжатие малого кода к нейтрали 50 вместо порога «от 50 строк»
+    const lines = plural(a.loc, "строка", "строки", "строк");
+    return `Мало кода: ${a.loc} ${lines} из ${a.full} – балл сжат к ${fmtDecimal(a.center, 0)}: ${fmtDecimal(a.raw, 1, { trim: true })} → ${fmtDecimal(cat.score ?? a.center, 1, { trim: true })}.`;
+  }
+  const what = a.level === "critical" ? "критичные находки AppSec" : "находки AppSec высокой важности";
+  return `Есть открытые ${what} – балл категории не выше ${a.limit}.`;
 }
 
 /**
@@ -257,6 +288,9 @@ export const RULE_SUBMETRIC: Record<string, string> = {
   "fix-red-runs": "cicd.pass_rate",
   "speed-up-pipeline": "cicd.duration",
   "appsec-critical": "security.density",
+  // круг 2 (К6, К2): новые советы
+  "appsec-high": "security.density",
+  "add-tests": "code.tests",
   "start-tracker": "issues.tracker_unused",
   "reduce-stale-issues": "issues.stale",
   "speed-up-issue-close": "issues.close_days",
@@ -300,7 +334,7 @@ export function submetricWeightText(key: CategoryKey, sub: string): string {
 export function noRecommendationsKind(card: RepoCard): "healthy" | "weak" | "nodata" {
   const shown = Object.values(card.score?.categories ?? {}).filter((c) => c && c.locked === undefined);
   // ревью кода R2: слабость — по ОКРУГЛЕННОМУ баллу, как шкала (69,6 — это «70, здоров»)
-  if (shown.some((c) => c!.score !== null && Math.round(c!.score) < 70)) return "weak";
+  if (shown.some((c) => c!.score !== null && roundScore(c!.score) < 70)) return "weak";
   // нехватка данных — не «улучшать нечего» (tri-state: нет данных ≠ хорошо)
   if (shown.length === 0 || shown.some((c) => c!.score === null)) return "nodata";
   return "healthy";

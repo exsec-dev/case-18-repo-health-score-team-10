@@ -1,7 +1,11 @@
 // robot2.ts — robot v2 (§7.2, Q18: интервальный слой ВЫРЕЗАН — v1
 // ловил синки, но мимо ботов и с ФП на ровных человеческих сериях):
 // 1) burst-коллапс — ≥10 коммитов внутри скользящего окна 2с по
-//    COMMITTER-датам → всем sync=true (импорт-бурст зеркала);
+//    COMMITTER-датам → всем sync=true; с 4.3.0 круга 2 (К5, решение
+//    владельца 24.09 «зеркала — по датам автора») — только если и
+//    author-даты окна в пределах окна (сгенерированный всплеск). Ребейз с
+//    любым числом авторов и импорт зеркала сохраняют разнесенные
+//    author-даты — их коммиты человеческие и считаются по датам автора;
 // 2) author-паттерны — [bot], bot@, -bot, dependabot/renovate/
 //    allcontributors + noreply-домены → robot.
 // Robot-паттерн доминирует над sync в семантике, флаги совместимы:
@@ -54,7 +58,28 @@ export function isRobotAuthor(authorName: string, authorEmail: string): boolean 
  * не участвуют (не создают искусственных скоплений на ts=0).
  * Возвращает {flags, bursts} — bursts = число максимальных burst-групп.
  */
-export function burstSyncFlags(committerTs: (number | null)[]): { flags: boolean[]; bursts: number } {
+/**
+ * В5.3-М (Н10, F12/J13) → круг 2 (К5, G2/G5): кто стоит за коммитом окна.
+ * Признаки круга 1 («≥ 2 авторов», «чужой коммиттер у большинства») сняты:
+ * ребейз общей ветки двух авторов и зеркало (импорт чужой истории) — тоже
+ * человеческая работа, ее коммиты считаются по author-датам. Синк — только
+ * генерированный всплеск: author-даты окна лежат в пределах того же окна.
+ */
+export interface BurstActor {
+  author: string;
+  committer: string;
+  /** author-дата (мс); null — не разобрана */
+  authorTs?: number | null;
+}
+
+export function isSyncWindow(actors: BurstActor[]): boolean {
+  // К5: author-даты всех коммитов окна разобраны и лежат в пределах окна —
+  // 1000 пустых коммитов за секунду (сценарий жюри S6a) схлопываются, как раньше
+  const ts = actors.map((a) => a.authorTs).filter((t): t is number => typeof t === "number" && Number.isFinite(t));
+  return ts.length === actors.length && ts.length > 0 && Math.max(...ts) - Math.min(...ts) <= BURST_WINDOW_MS;
+}
+
+export function burstSyncFlags(committerTs: (number | null)[], actors?: BurstActor[]): { flags: boolean[]; bursts: number } {
   const flags = new Array<boolean>(committerTs.length).fill(false);
   const valid = committerTs
     .map((ts, i) => ({ ts, i }))
@@ -66,7 +91,9 @@ export function burstSyncFlags(committerTs: (number | null)[]): { flags: boolean
     if (j < i) j = i;
     while (j + 1 < valid.length && valid[j + 1]!.ts - valid[i]!.ts <= BURST_WINDOW_MS) j++;
     if (j - i + 1 >= BURST_MIN_COMMITS) {
-      for (let k = i; k <= j; k++) flags[valid[k]!.i] = true;
+      const window = valid.slice(i, j + 1);
+      if (actors && !isSyncWindow(window.map((v) => actors[v.i]!))) continue;
+      for (const v of window) flags[v.i] = true;
     }
   }
   // группы = связные компоненты помеченных коммитов: разрыв > окна → новый burst
@@ -92,7 +119,16 @@ export function robot2Flags(events: CommitActor[]): { flags: Robot2Flags[]; burs
     const t = Date.parse(raw);
     return Number.isNaN(t) ? null : t;
   });
-  const { flags: syncFlags, bursts } = burstSyncFlags(ts);
+  // К5: окно синка — только когда и author-даты окна в пределах окна
+  const actors = events.map((e) => {
+    const at = typeof e.author.date === "string" && e.author.date !== "" ? Date.parse(e.author.date) : Number.NaN;
+    return {
+      author: (e.author.email || e.author.name || "").toLowerCase(),
+      committer: (e.committer.email || e.committer.name || "").toLowerCase(),
+      authorTs: Number.isNaN(at) ? null : at,
+    };
+  });
+  const { flags: syncFlags, bursts } = burstSyncFlags(ts, actors);
   const flags = events.map((e, i) => {
     const robot = isRobotAuthor(e.author.name, e.author.email);
     const sync = syncFlags[i] === true;

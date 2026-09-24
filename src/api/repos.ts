@@ -11,7 +11,7 @@ import { orderRecommendations, recommendFromFacts, recommendationParams, recomme
 import { categoryOf, parseFactValue, scrubDetail } from "../collectors/facts";
 import { isOwnRepo, NO_PAT_ACCESS, visibilityOf, type AccessRepo, type AccessResult, type ChannelAccess } from "../auth/access";
 import { DEFAULT_SCAN, defaultLeaseMs, type ScanConfig } from "../config";
-import type { GitLimitsMarker } from "../web/format";
+import { roundScore, type GitLimitsMarker } from "../web/format";
 import type { DerivedMetrics } from "../score/derived";
 import { INDEX_WEIGHTS, SCORE_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, type IndexCategoryKey, MODEL_VERSION, SECRETS_CRITICAL_TOTAL_CAP } from "../score/model";
 import { getSummaryAuto } from "../summary/optin";
@@ -1028,6 +1028,8 @@ export function getRepoCard(
     issuesScore: shownCats.issues.score,
     only: "channel",
     codeEmpty,
+    // В5.3-М (Н7): скор-правила каналов — только у показанной оцененной категории
+    categoryScores: Object.fromEntries(CATEGORY_ORDER.map((k) => [k, shownCats[k].score])),
   })
     .filter((rec) => rec.channel !== null && !closedChannels.has(rec.channel))
     .map((rec) => {
@@ -1221,7 +1223,8 @@ export function jobLeaseExpired(leaseUntil: string | null, now = Date.now()): bo
 /** Текст канального presence-правила без числа (С4): Δ Repo Health Score виден только при доступе к CI и Security. */
 export const CHANNEL_DELTA_HIDDEN_TEXT = "повысит балл категории «CI/CD»; насколько вырастет Repo Health Score, видно при доступе к CI/CD и Безопасности";
 
-const roundTotal = (x: number | null): number | null => (x === null ? null : Math.round(x));
+// В5.3-М (Н13): одно правило округления с расчетом, отчетом и рейтингом
+const roundTotal = (x: number | null): number | null => (x === null ? null : roundScore(x));
 const splitRefs = (raw: string): string[] =>
   raw
     .split(",")

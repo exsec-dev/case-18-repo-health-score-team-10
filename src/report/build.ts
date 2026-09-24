@@ -38,6 +38,7 @@ import {
   scoreWord,
   sentence,
   type Contributions,
+  roundScore,
 } from "../web/format";
 import { code, em, escaped, strong, text, type ActionItem, type Block, type CategoryRow, type Chip, type HeroNote, type HeroSecondary, type InlineLine, type ReportModel, type TableColumn } from "./model";
 import {
@@ -45,6 +46,7 @@ import {
   INDEX,
   PUBLIC,
   RULE_SUBMETRIC,
+  adjustmentText,
   categoryWhy,
   closeDateNote,
   analysisDate,
@@ -92,7 +94,7 @@ export interface ThresholdAction {
  * эффектом в шкале этого показателя (отбор — `thresholdActions`).
  */
 export function thresholdNote(value: number, actions: readonly ThresholdAction[] = []): string | null {
-  const v = Math.round(value);
+  const v = roundScore(value);
   const [success, warning] = [SCORE_SCALE[0]!, SCORE_SCALE[1]!];
   const bounds: [number, string, string][] = [
     [Number(success.range.split("-")[0]), success.word, warning.word],
@@ -102,7 +104,7 @@ export function thresholdNote(value: number, actions: readonly ThresholdAction[]
     if (v >= t && v - t <= 2) return `${t} – нижняя граница зоны «${upperZone}»: при ${t - 1} баллах оценка относилась бы к зоне «${lowerZone}».`;
     if (v < t && t - v <= 2) {
       const base = `${t - 1} – верхняя граница зоны «${lowerZone}»: при ${t} баллах оценка относилась бы к зоне «${upperZone}».`;
-      const lift = actions.find((a) => a.delta > 0 && Math.round(value + a.delta) >= t);
+      const lift = actions.find((a) => a.delta > 0 && roundScore(value + a.delta) >= t);
       return lift ? `${base} Рекомендация ${lift.n} одна переводит оценку в эту зону: «${lift.action.replace(/\.\s*$/, "")}» (${fmtSigned(lift.delta)}).` : base;
     }
   }
@@ -294,13 +296,13 @@ function scoredSection(card: RepoCard, metrics: Metric[]): Block[] {
   const head = metrics[0]!;
   const second = metrics[1];
   const secondary: HeroSecondary | null = second
-    ? { label: second.name, value: second.value === null ? null : Math.round(second.value), noneText: "Оценки нет", chip: second.value === null ? null : scoreChip(second.value), note: null }
+    ? { label: second.name, value: second.value === null ? null : roundScore(second.value), noneText: "Оценки нет", chip: second.value === null ? null : scoreChip(second.value), note: null }
     : null;
   const out: Block[] = [
     {
       kind: "hero",
       label: head.name,
-      value: head.value === null ? null : Math.round(head.value),
+      value: head.value === null ? null : roundScore(head.value),
       noneText: "Оценки нет",
       chip: head.value === null ? null : scoreChip(head.value),
       secondary,
@@ -425,7 +427,9 @@ function categoryRemark(card: RepoCard, key: CategoryKey, cat: CardCategory): st
     if (per10k === null) return null;
     const counts = (factValue(card, "appsec.findings")?.severity_counts ?? null) as Record<string, unknown> | null;
     // плотность считается по дереву того скана, по которому взяты находки
-    const loc = numOf(factValue(card, CHANNEL_TREE_KEY)?.loc) ?? numOf(factValue(card, "tree.stats")?.loc);
+    // 4.3.0 (Н11): делитель — строки кода (`source_loc`), у фактов до правки М2.3 — весь `loc`
+    const codeLines = (v: Record<string, unknown> | null): number | null => (v === null ? null : "source_loc" in v ? numOf(v.source_loc) : numOf(v.loc));
+    const loc = codeLines(factValue(card, CHANNEL_TREE_KEY)) ?? codeLines(factValue(card, "tree.stats"));
     if (counts === null || loc === null || loc <= 0) return null;
     const words: Record<string, string> = { critical: "критичная", high: "высокая", medium: "средняя", low: "низкая" };
     const parts: string[] = [];
@@ -463,6 +467,9 @@ function detailBlock(card: RepoCard, key: CategoryKey, cat: CardCategory, ctx: S
     ]);
   }
   if (key === "cicd" && cat.no_data) remarks.push(noDataReason(key, cat.no_data));
+  // 4.3.0 (Н5, Р3): сжатие малой выборки и потолок — своей фразой
+  const adjusted = adjustmentText(cat);
+  if (adjusted) remarks.push(adjusted);
   // А4 аудита: нехватку данных CI документ объяснял в трех местах по-разному, а
   // точную причину прятал сырым полем приложения В. Причина одна и берется из
   // самого факта — здесь она названа теми же словами, что в приложении.
@@ -575,7 +582,7 @@ function metricCalc(card: RepoCard, metric: ShownMetric, named: boolean): Block[
     total += part;
     rows.push([line(CATEGORY_TITLES[key]), line(fmtDecimal(cat.score, 1)), line(pct1(share)), line(fmtDecimal(part, 1))]);
   }
-  const value = Math.round(metric.value);
+  const value = roundScore(metric.value);
   const sumText = fmtDecimal(total, 1);
   rows.push([line("Итого"), line(""), line("100%"), line(Number(sumText.replace(",", ".")) === value ? String(value) : `${sumText} ≈ ${value}`)]);
   const out: Block[] = [];
@@ -598,7 +605,7 @@ function metricCalc(card: RepoCard, metric: ShownMetric, named: boolean): Block[
     tone: "fine",
     lines: [line(`Баллов в итог = балл × вес. ${weights} Вес категории без данных делится между остальными пропорционально: такая категория в оценке не участвует и ее не снижает.${tail}`)],
   });
-  if (Math.round(total) > value) out.push({ kind: "paragraph", tone: "fine", lines: [line(`Итог ограничен ${value} баллами: AppSec нашел утекшие секреты.`)] });
+  if (roundScore(total) > value) out.push({ kind: "paragraph", tone: "fine", lines: [line(`Итог ограничен ${value} баллами: AppSec нашел утекшие секреты.`)] });
   return out;
 }
 
@@ -658,8 +665,11 @@ function coverageCalc(card: RepoCard): Block[] {
 
 /**
  * Балл категории из показателей: вес × балл; особое правило (трекер пуст) — строкой.
- * CI без запусков при модели 4.1.0 — категория без данных, сюда не попадает
- * (Г1.17, §2 24.09 «Вопрос 31 §4»).
+ * В5.3-М (Н15): CI с видимыми запусками, которых 0, — данные «не запускался»
+ * (4.2.0, М1.8) и попадает сюда строками таблицы; CI без видимых запусков —
+ * категория без данных, сюда не попадает. 4.3.0 (Н5, Р3): поправка к среднему
+ * (сжатие малой выборки задач, потолок «Безопасности») — своей строкой таблицы,
+ * так что строки складываются в «Итого».
  */
 function categoryCalc(key: CategoryKey, cat: CardCategory): Block[] {
   const title: Block = { kind: "paragraph", tone: "subhead", lines: [[strong(`Балл категории ${CATEGORY_TITLES[key]}`)]] };
@@ -673,6 +683,17 @@ function categoryCalc(key: CategoryKey, cat: CardCategory): Block[] {
   const wsum = parts.reduce((s, p) => s + p.w, 0);
   if (parts.length === 0 || wsum === 0) return [title, { kind: "paragraph", tone: "fine", lines: [line(`Балл категории – ${fmtDecimal(cat.score!, 1)}.`)] }];
   const rows: InlineLine[][] = parts.map((p) => [line(submetricTitle(key, p.sub)), line(fmtDecimal(p.score * 100, 1)), line(pct1(p.w / wsum)), line(fmtDecimal((p.score * 100 * p.w) / wsum, 1))]);
+  const adj = cat.adjustment;
+  if (adj) {
+    // строка поправки: сколько она сняла со взвешенной суммы (сумма столбца = итог)
+    const title =
+      adj.kind === "small-sample"
+        ? `Малая выборка: ${adj.n} из ${adj.full} закрытых задач`
+        : adj.kind === "small-code"
+          ? `Мало кода: ${adj.loc} из ${adj.full} строк, сжатие к ${adj.center}`
+          : `Потолок: открытые находки ${adj.level === "critical" ? "critical" : "high"}`;
+    rows.push([line(title), line(""), line(""), line(fmtDecimal(cat.score! - adj.raw, 1))]);
+  }
   rows.push([line("Итого"), line(""), line("100%"), line(fmtDecimal(cat.score!, 1))]);
   const out: Block[] = [title, { kind: "table", columns: [col("Показатель", "left", 184), col("Балл", "right", 84), col("Вес", "right", 114), col("Баллов в категорию", "right")], rows, total: true }];
   // А5 аудита: в разборе по категориям стоит номинальный вес показателя, здесь
@@ -719,7 +740,7 @@ function appendixB(card: RepoCard, shown: ShownMetric[]): Block[] {
   if (shown.length > 0) {
     for (const metric of shown) {
       rows.push([
-        [strong(`${metric.name} ${Math.round(metric.value)}`)],
+        [strong(`${metric.name} ${roundScore(metric.value)}`)],
         line(`сумма по ${metric.keys.length === PUBLIC.length ? "4 открытым категориям" : "6 категориям"}: балл × вес, приложение А`),
         line("баллы категорий"),
         line(at),

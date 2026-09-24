@@ -125,7 +125,8 @@ describe("MD-отчёт: числа и tri-state", () => {
   });
 
   test("причина честного no-data у категории с конфигом проговаривается (23.09, кап 50 удалён)", () => {
-    expect(main).toContain("Результаты запусков CI не видны");
+    // 4.3.0 (Н14б): фраза — только о невидимых запусках
+    expect(main).toContain("Результаты запусков CI сервису не видны");
     expect(main).toContain("категорию не оцениваем");
   });
 
@@ -200,7 +201,8 @@ describe("MD-отчёт: репозитории без оценки", () => {
     const dark = renderRepoReport(getRepoCard(t.db, "report", "dark", { access: GRANTED })!);
     expect(dark).toContain("HealthCraft Index: **Оценки нет**");
     expect(dark).toContain("Собрано 38% данных, а оценка рассчитывается начиная с 40%.");
-    expect(dark).toContain("Не удалось скачать репозиторий");
+    // 4.3.0 (Н4): не прочитан — своей фразой (пустой репо — другой)
+    expect(dark).toContain("Репозиторий не удалось прочитать");
     expect(dark).toContain("Оценка рассчитывается при объеме данных от 40%.");
     expect(dark).not.toContain("Score: 0");
     expect(dark).not.toContain("## Как считается");

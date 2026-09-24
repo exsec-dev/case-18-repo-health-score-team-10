@@ -1672,6 +1672,8 @@ const SUBMETRIC_ICONS: Record<string, IconData> = {
   "issues.tracker_unused": CommentSlash,
   "code.density": Flag,
   "code.old_share": CalendarXmark,
+  // В5.3-М (Р1): новая подметрика к существующему компоненту, иконка из уже подключенных
+  "code.tests": CircleCheck,
   "code.root": FolderTree,
   "code.todo_total": Hashtag,
 };

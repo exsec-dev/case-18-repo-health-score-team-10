@@ -69,20 +69,21 @@ describe("compute: здоровое репо (ручная арифметика)
     expect(s.categories.activity.score!).toBeCloseTo(69.793, 2);
     // issues: 0.3·0.9 + 0.3·0.91 + 0.3·0.85 + 0.1·0.9625 = 0.89425
     expect(s.categories.issues.score!).toBeCloseTo(89.425, 2);
-    // code: 0.4·0.976 + 0.35·0.75 + 0.25·1 = 0.9029
-    expect(s.categories.code.score!).toBeCloseTo(90.29, 2);
+    // code (4.3.0, Р1): веса 0.35/0.25/0.3(тесты)/0.1; у фактов без test_files
+    // «Тесты» — no-data, перенормировка: (0.35·0.976 + 0.25·0.75 + 0.1·1)/0.7 = 0.89871
+    expect(s.categories.code.score!).toBeCloseTo(89.871, 2);
     // CI/Security хранятся со своими данными: CI есть, AppSec-факта нет
     expect(s.categories.cicd.score!).toBeCloseTo(100, 10);
     expect(s.categories.security.score).toBeNull();
     expect(s.categories.security.no_data).toContain("AppSec data unavailable");
     // индекс: coverage = (15+15+15+20)/65 = 1.0 (масса SCORE_WEIGHTS с данными)
     expect(s.indexCoverage).toBe(1.0);
-    // (23·80.734 + 23·69.793 + 23·89.425 + 31·90.29)/100 = 83.179 (INDEX_WEIGHTS)
-    expect(s.healthcraftIndex!).toBeCloseTo(83.18, 1);
+    // (23·80.734 + 23·69.793 + 23·89.425 + 31·89.871)/100 = 83.049 (INDEX_WEIGHTS)
+    expect(s.healthcraftIndex!).toBeCloseTo(83.05, 1);
     // полный: coverage = 80/100 — Security no-data
     expect(s.repoHealthCoverage).toBeCloseTo(0.8, 10);
-    // (15·80.734 + 15·100 + 15·69.793 + 15·89.425 + 20·90.29)/80 = 86.31
-    expect(s.repoHealthScore!).toBeCloseTo(86.31, 1);
+    // (15·80.734 + 15·100 + 15·69.793 + 15·89.425 + 20·89.871)/80 = 86.21
+    expect(s.repoHealthScore!).toBeCloseTo(86.21, 1);
     expect(s.modelVersion).toBe(MODEL_VERSION);
     expect(s.codeEmpty).toBe(false);
     expect(s.stale).toEqual([]);
@@ -102,15 +103,15 @@ describe("compute: здоровое репо (ручная арифметика)
     // 23.09 (Алексей): «за что так много?» — конфиг без прогонов не оцениваем
     expect(s1.categories.cicd.score).toBeNull();
     expect(s1.categories.cicd.no_data).toContain("прогоны не видны");
-    // вес cicd перенормировался: итог поднялся с 76.94 до 83.15
-    expect(s1.repoHealthScore!).toBeCloseTo(83.15, 1);
+    // вес cicd перенормировался (4.3.0: Код 89.871): (15·80.734+15·69.793+15·89.425+20·89.871)/65 = 83.03
+    expect(s1.repoHealthScore!).toBeCloseTo(83.03, 1);
 
     const noYaml = seedScan(t, withFacts(healthyFacts(), { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } }));
     const s2 = compute(t.db, noYaml, { now: NOW });
     expect(s2.categories.cicd.score!).toBe(0);
     // рейтинг: CI не входит — потолки на него не влияют
-    expect(s1.healthcraftIndex!).toBeCloseTo(83.18, 1);
-    expect(s2.healthcraftIndex!).toBeCloseTo(83.18, 1);
+    expect(s1.healthcraftIndex!).toBeCloseTo(83.05, 1);
+    expect(s2.healthcraftIndex!).toBeCloseTo(83.05, 1);
   });
 
   test("code_empty (Q&A №13): file_count=0 при ok-фактах → оба итога 0 как данные", () => {
@@ -159,7 +160,7 @@ describe("compute: здоровое репо (ручная арифметика)
     expect(s2.categories.security.score!).toBeCloseTo(98.5, 1); // 0.5 + 0.3·0.95 + 0.2
     expect(s2.repoHealthScore!).toBeGreaterThan(s1.repoHealthScore!);
     // рейтинг: Security не входит, кап 49 не применяется
-    expect(s1.healthcraftIndex!).toBeCloseTo(83.18, 1);
+    expect(s1.healthcraftIndex!).toBeCloseTo(83.05, 1);
   });
 
   test("bad-channel: stale-факты последнего успешного kind, итоги не двигаются (§5.6)", () => {

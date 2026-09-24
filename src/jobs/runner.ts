@@ -16,7 +16,7 @@
 // активности; видимость применяет любой скан, если поле есть в ответе.
 // scans.public_status (Ф1.11) — статус по фактам публичных категорий.
 import type { Database } from "bun:sqlite";
-import { encodeFactValue, Fact, noDataFact } from "../collectors/facts";
+import { COLLECTOR_VERSION, encodeFactValue, Fact, noDataFact } from "../collectors/facts";
 import { cloneWithDegrade, cleanupClone, extractFacts, gitFactsNoData } from "../collectors/git";
 import { ScClient, makeScClient } from "../collectors/http";
 import { RestCollectResult, collectRestFacts } from "../collectors/rest";
@@ -250,8 +250,10 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
     (userToken ? (org: string, repo: string) => patGitUrl(gitBase, userToken, org, repo) : (org: string, repo: string) => anonGitUrl(gitBase, org, repo));
   const repoId = upsertRepo(deps.db, org, repo);
   const scan = deps.db
-    .query("INSERT INTO scans (repo_id, started_at, status, public_status, trigger, user_id) VALUES (?, ?, 'running', 'running', ?, ?)")
-    .run(repoId, startedAt, opts.trigger ?? "probe", opts.userId ?? null);
+    // В5.3-М (Н1): штамп версии сборщика — по нему ночная волна доочередит
+    // репо, чьи факты собраны старым сборщиком
+    .query("INSERT INTO scans (repo_id, started_at, status, public_status, trigger, user_id, collector_version) VALUES (?, ?, 'running', 'running', ?, ?, ?)")
+    .run(repoId, startedAt, opts.trigger ?? "probe", opts.userId ?? null, COLLECTOR_VERSION);
   const scanId = Number(scan.lastInsertRowid);
 
   let gitChannel = "ok";

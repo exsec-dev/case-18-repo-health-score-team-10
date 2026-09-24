@@ -20,7 +20,7 @@ if (!token) {
   process.exit(1);
 }
 const API = "https://api.sourcecraft.tech";
-const APPSEC = config.appsecBase ?? "https://appsec.sourcecraft.tech";
+const APPSEC = config.api.appsecBase;
 const enc = (slug: string) => slug.split("/").map(encodeURIComponent).join("/");
 let calls = 0;
 

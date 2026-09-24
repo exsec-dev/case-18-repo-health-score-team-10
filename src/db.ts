@@ -68,8 +68,10 @@ import { publicStatusSql, ratingEligibleSql } from "./score/compute";
  * `jobs.kind`. Всё аддитивно, данных не теряет.
  * 2.1 (23.09, Алексей): `ai_fails` — честный отказ роли: причина
  * несформирования показывается пользователю, а не молчит в логах.
+ * 2.2 (24.09, В5.3-М, Н1): `scans.collector_version` — версия сборщика фактов
+ * (`COLLECTOR_VERSION`); старые строки — NULL («до учета»). Аддитивно.
  */
-export const SCHEMA_VERSION = "2.1";
+export const SCHEMA_VERSION = "2.2";
 
 const AI_NOTES_DDL = `CREATE TABLE IF NOT EXISTS ai_notes (
   id INTEGER PRIMARY KEY,
@@ -159,7 +161,8 @@ CREATE TABLE IF NOT EXISTS scans (
   rating_eligible INTEGER NOT NULL DEFAULT 0, -- 1 = скан пригоден для рейтинга (ratingEligible; пишет скор-хук)
   public_status TEXT,           -- статус по фактам PUBLIC_KINDS (Ф1.11): показывается всем
   status_detail TEXT,           -- 'orphaned' — скан закрыт свипом сирот (v1.8, Ф2.2)
-  head_sha TEXT                 -- git HEAD клона (v2.0): «на каком коммите измерено»
+  head_sha TEXT,                -- git HEAD клона (v2.0): «на каком коммите измерено»
+  collector_version INTEGER     -- версия сборщика фактов (v2.2, COLLECTOR_VERSION); NULL — до учета
 );
 CREATE TABLE IF NOT EXISTS facts (
   scan_id INTEGER NOT NULL REFERENCES scans(id),
@@ -335,6 +338,8 @@ export function openDb(config: Config): Database {
     ensureColumn(db, "scans", "status_detail", "TEXT");
     // v2.0 (В5, Б1): привязка скана к коммиту; kind заявки (старые строки — 'scan')
     ensureColumn(db, "scans", "head_sha", "TEXT");
+    // v2.2 (В5.3-М, Н1): версия сборщика скана; старые строки — NULL («до учета»)
+    ensureColumn(db, "scans", "collector_version", "INTEGER");
     ensureColumn(db, "jobs", "kind", "TEXT NOT NULL DEFAULT 'scan'");
     // v1.3 → v1.4 (В4): изоляция own/public и эвикция
     ensureColumn(db, "repos", "rating_active", "INTEGER NOT NULL DEFAULT 1");

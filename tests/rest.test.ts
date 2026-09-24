@@ -50,6 +50,8 @@ function fullOkClient(overrides: Array<[string, ScResponse]> = []): ScClient & {
     [(p) => get(p) === "/repos/o/r", ok(repoFx)],
     [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Dopen"), ok(issuesOpenFx)],
     [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Dclosed"), ok(issuesClosedFx)],
+    // В5.3-М (Н6): задачи в работе — третий запрос фильтра status
+    [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Din_progress"), ok({ issues: [] })],
     [(p) => get(p) === "/repos/o/r/contributors", ok(contributorsFx)],
     [(p) => get(p) === "/repos/o/r/releases", ok(releasesFx)],
     [(p) => get(p) === "/repos/o/r/pulls", ok(pullsFx)],
@@ -226,6 +228,8 @@ describe("collectRestFacts: факты из живых форм", () => {
       [(p) => get(p) === "/repos/o/r", ok(repoFx)],
       [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Dopen"), ok(issuesOpenFx)],
       [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Dclosed"), ok(issuesClosedFx)],
+      // В5.3-М (Н6): задачи в работе — третий запрос фильтра status
+      [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Din_progress"), ok({ issues: [] })],
       [(p) => get(p) === "/repos/o/r/contributors", ok(contributorsFx)],
       [(p) => get(p) === "/repos/o/r/releases", ok(releasesFx)],
       [(p) => get(p) === "/repos/o/r/pulls", ok(pullsFx)],
@@ -235,9 +239,9 @@ describe("collectRestFacts: факты из живых форм", () => {
     ]);
     const out = await collectRestFacts(patched, "o/r", { commentsTopN: 1 });
     const sample = out.facts.find((f) => f.key === "issues.comments_sample")!;
-    const val = sample.value as { issues: number; with_comments: number; delays_hours: number[] };
+    const val = sample.value as { issues: number; answered: number; censored: number; delays_hours: number[] };
     expect(val.issues).toBe(1);
-    expect(val.with_comments).toBe(1);
+    expect(val.answered).toBe(1);
     expect(val.delays_hours[0]).toBe(2);
   });
 });
@@ -249,6 +253,8 @@ describe("круг 2 (LOW-4): частичный сбой выборки ком�
       [(p) => get(p) === "/repos/o/r", ok(repoFx)],
       [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Dopen"), ok(issuesOpenFx)],
       [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Dclosed"), ok(issuesClosedFx)],
+      // В5.3-М (Н6): задачи в работе — третий запрос фильтра status
+      [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Din_progress"), ok({ issues: [] })],
       [(p) => get(p) === "/repos/o/r/contributors", ok(contributorsFx)],
       [(p) => get(p) === "/repos/o/r/releases", ok(releasesFx)],
       [(p) => get(p) === "/repos/o/r/pulls", ok(pullsFx)],
@@ -333,6 +339,8 @@ describe("В5.3 аудит методики: MR всех статусов (М2.4
     const client = routerClient([
       [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Dopen"), ok({ issues: open })],
       [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Dclosed"), ok({ issues: [] })],
+      // В5.3-М (Н6): задачи в работе — третий запрос фильтра status
+      [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Din_progress"), ok({ issues: [] })],
       [(p) => get(p).includes("/comments"), ok({ comments: [] })],
       [(p) => get(p) === "/repos/o/r/contributors", ok(contributorsFx)],
       [(p) => get(p) === "/repos/o/r/releases", ok(releasesFx)],

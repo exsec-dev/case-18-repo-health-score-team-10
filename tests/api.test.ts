@@ -498,7 +498,8 @@ describe("единая карточка: матрица доступа зрит�
     expect(card.score!.categories.security.locked).toBe("denied");
     expect(card.score!.fullLocked).toBe(true);
     expect(card.score!.repoHealthScore).toBeNull();
-    expect(rules(card)).toEqual(["license-missing", "fix-red-runs", "speed-up-pipeline"]);
+    // 4.3.0 (Р3): правила серьезности — первыми
+    expect(rules(card)).toEqual(["fix-red-runs", "license-missing", "speed-up-pipeline"]);
     expect(keys(card)).toContain("cicd.runs");
     expect(keys(card)).not.toContain("appsec.findings");
     const json = JSON.stringify(card);
@@ -511,7 +512,7 @@ describe("единая карточка: матрица доступа зрит�
     expect(card.score!.categories.security.score).toBe(channelCats.security.score);
     expect(card.score!.categories.cicd.locked).toBe("denied");
     expect(card.score!.repoHealthScore).toBeNull();
-    expect(rules(card)).toEqual(["license-missing", "appsec-critical"]);
+    expect(rules(card)).toEqual(["appsec-critical", "license-missing"]);
     const json = JSON.stringify(card);
     expect(json).toContain("severity_counts");
     expect(json).not.toContain("runs_count");
@@ -522,7 +523,7 @@ describe("единая карточка: матрица доступа зрит�
     expect(card.score!.fullLocked).toBe(false);
     expect(card.score!.repoHealthScore).toBe(49);
     expect(card.score!.repoHealthCoverage).toBe(1);
-    expect(rules(card)).toEqual(["license-missing", "fix-red-runs", "speed-up-pipeline", "appsec-critical"]);
+    expect(rules(card)).toEqual(["appsec-critical", "fix-red-runs", "license-missing", "speed-up-pipeline"]);
     // канальные данные берутся из скана, где они собраны ok, — фолбэка «из истории» у них нет (круг 2)
     expect(card.score!.stale).toEqual(["issues.stats"]);
   });

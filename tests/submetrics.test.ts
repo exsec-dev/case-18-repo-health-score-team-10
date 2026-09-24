@@ -33,8 +33,8 @@ describe("П4.2: полнота словаря", () => {
       ]);
     const tracker = cardFacts().map((f) => (f.key === "issues.stats" ? { key: "issues.stats", value: { open: 0, closed: 0 } } : f));
     const produced = [...new Set([...computedKeys(full), ...computedKeys(tracker)])].sort();
-    // В5 (К5.9): + bus factor (показ без веса)
-    expect(produced.length).toBe(29);
+    // В5 (К5.9): + bus factor (показ без веса); 4.3.0 (Р1): + «Файлы тестов»
+    expect(produced.length).toBe(30);
     expect(Object.keys(SUBMETRICS).sort()).toEqual(produced);
     for (const key of produced) {
       const spec = SUBMETRICS[key]!;
