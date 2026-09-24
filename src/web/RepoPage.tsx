@@ -93,6 +93,8 @@ import {
   type FavoriteAddCheck,
   type PathPart,
   SECURITY_PUBLIC_NOTE,
+  aiModelName,
+  aiRoleTitle,
   fmtCount,
   fmtCoverage,
   fmtDate,
@@ -522,19 +524,9 @@ function useRecommendationsAnchor(ready: boolean, key: string): void {
  * автозапуска; невалидированный текст не показывается никогда – роль без
  * текста честно помечена «не сформировано» (fail-soft виден в UI).
  */
-const AI_ROLE_TITLES: Record<string, string> = {
-  documentation: "Документация",
-  code: "Код",
-  activity: "Активность",
-  issues: "Задачи",
-  cicd: "CI/CD",
-  security: "Безопасность",
-  trajectory: "Динамика",
-  overview: "Общий взгляд",
-};
-
-function aiRoleTitle(role: string): string {
-  return AI_ROLE_TITLES[role] ?? role;
+function aiBadgeText(ai: Card["ai"]): string {
+  const model = ai?.overview?.model ?? ai?.specialists[0]?.model;
+  return model ? aiModelName(model) : "YandexGPT";
 }
 
 function CardSlots({ card, org, repo, onChanged }: { card: Card; org: string; repo: string; onChanged: () => void }) {
@@ -839,8 +831,9 @@ function AiSummarySlot({ card, org, repo, onChanged }: { card: Card; org: string
             Описание для менеджера
           </Text>
           {/* решение 23.09 (Алексей, smoke-круг): бейдж честно называет
-             генератора; при смене провайдера текст меняется вслед за ним */}
-          <span className="rh-ai-badge">Яндекс GPT</span>
+             генератора; К-7 В5.3 (§2 24.09): официальным названием модели
+             последней заметки, как в отчете; без заметок — семейство */}
+          <span className="rh-ai-badge">{aiBadgeText(ai)}</span>
         </Flex>
         {ai === undefined || ai === null ? (
           // Закрытый полный Score: текст не публичен по правам — не «пока»,

@@ -963,3 +963,48 @@ export function avatarInitials(name: string): string {
   if (words.length <= 1) return name.slice(0, 2).toUpperCase();
   return [words[0]![0], words[1]![0]].filter(Boolean).join("").toUpperCase();
 }
+
+/**
+ * Официальное название модели AI-текста (К-7 В5.3, §2 24.09 «В5.3, круг 2»):
+ * в заметке хранится имя из конфига (`MAIN_MODEL`/`SIDE_MODEL`), шлюз строит из
+ * него URI `gpt://<каталог>/<имя>[/latest]` (`llm.ts`). По документации Yandex
+ * AI Studio (24.09.2026) `yandexgpt/latest` и `yandexgpt/rc` — устаревшие
+ * псевдонимы YandexGPT Pro 5 и YandexGPT Pro 5.1. Неизвестное имя — как есть.
+ */
+export function aiModelName(model: string): string {
+  const id = model.replace(/^gpt:\/\/[^/]+\//, "");
+  switch (id) {
+    case "yandexgpt":
+    case "yandexgpt/latest":
+    case "yandexgpt-5-pro":
+    case "yandexgpt-5-pro/latest":
+      return "YandexGPT Pro 5";
+    case "yandexgpt/rc":
+    case "yandexgpt-5.1":
+    case "yandexgpt-5.1/latest":
+      return "YandexGPT Pro 5.1";
+    case "yandexgpt-lite":
+    case "yandexgpt-lite/latest":
+    case "yandexgpt-5-lite":
+    case "yandexgpt-5-lite/latest":
+      return "YandexGPT Lite 5";
+    default:
+      return id;
+  }
+}
+
+/** Названия ролей AI-заметок — одна копия для карточки и отчета. */
+export const AI_ROLE_TITLES: Record<string, string> = {
+  documentation: "Документация",
+  code: "Код",
+  activity: "Активность",
+  issues: "Задачи",
+  cicd: "CI/CD",
+  security: "Безопасность",
+  trajectory: "Динамика",
+  overview: "Общий взгляд",
+};
+
+export function aiRoleTitle(role: string): string {
+  return AI_ROLE_TITLES[role] ?? role;
+}

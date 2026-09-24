@@ -27,6 +27,8 @@ import {
   fmtScore,
   fmtSigned,
   fullScorePath,
+  aiModelName,
+  aiRoleTitle,
   noDataReason,
   pathText,
   scanStatusText,
@@ -171,7 +173,6 @@ export function buildReportModel(card: RepoCard): ReportModel {
     const metrics = metricsOf(card);
     if (withValue(metrics).length === 0) blocks.push(...indexNullSection(card));
     else blocks.push(...scoredSection(card, metrics));
-    blocks.push(...fraudBlock(card));
   }
   return {
     title: `Repo Health: ${slug}`,
@@ -250,6 +251,9 @@ function indexNullSection(card: RepoCard): Block[] {
   out.push(para(line(`Оценка рассчитывается при объеме данных от ${threshold}.`)));
   const limits = limitations(card);
   if (limits.length > 0) out.push(h2("Ограничения данных"), ...limits.map((l) => ({ kind: "paragraph" as const, tone: "note" as const, lines: [line(l)] })));
+  // К-5, К-7 В5.3 (§2 24.09 «В5.3, круг 2»): подозрение фрода и AI-описание —
+  // после ограничений данных, до разбора и приложений
+  out.push(...fraudBlock(card), ...aiBlock(card));
   out.push(...appendix(card, []));
   return out;
 }
@@ -324,6 +328,9 @@ function scoredSection(card: RepoCard, metrics: Metric[]): Block[] {
   const limits = limitations(card);
   // п.9 круга 2: ограничения данных — такие же примечания, как под таблицами
   if (limits.length > 0) out.push(h2("Ограничения данных"), ...limits.map((l) => ({ kind: "paragraph" as const, tone: "note" as const, lines: [line(l)] })));
+  // К-5, К-7 В5.3 (§2 24.09 «В5.3, круг 2»): подозрение фрода и AI-описание —
+  // после ограничений данных, до разбора и приложений
+  out.push(...fraudBlock(card), ...aiBlock(card));
 
   out.push(...detailSection(card, ctx));
   out.push(...methodSection(shown, contributions));
@@ -878,7 +885,54 @@ function fraudBlock(card: RepoCard): Block[] {
   if (fraud === undefined || fraud === null || fraud.flag !== true || fraud.factors.length === 0) return [];
   const out: Block[] = [h2("Подозрение на искусственную активность")];
   out.push(para(line("Автоматический анализ нашел признаки, похожие на накрутку активности. Это подозрение для проверки человеком, а не приговор: оценка репозитория от него не меняется.")));
-  out.push({ kind: "list", items: fraud.factors.map((f) => [strong(f.key), text(` – ${f.note}`)] as InlineLine) });
+  out.push({ kind: "list", items: fraud.factors.map((f) => [strong(fraudFactorTitle(f.key)), text(` – ${f.note}`)] as InlineLine) });
+  return out;
+}
+
+/**
+ * К-5 (§2 24.09 «В5.3, круг 2»): название факта вместо сырого ключа; ключ
+ * остается в приложении «Исходные данные». Флаггер видит только факты
+ * категории «Активность» (`pipeline.ts` `scopedFacts`, реестр `KINDS`) — у
+ * каждого своя ветка; неизвестный ключ — явная ветка «прочее»: ключ как есть,
+ * чтобы его можно было найти в приложении (правило AGENTS.md 22.09 об enum).
+ */
+export function fraudFactorTitle(key: string): string {
+  switch (key) {
+    case "activity.git.timeline":
+      return "История коммитов";
+    case "activity.git.summary":
+      return "Сводка истории git";
+    case "activity.rest":
+      return "Участники, релизы и запросы на слияние";
+    default:
+      return key;
+  }
+}
+
+/**
+ * К-7 (§2 24.09 «В5.3, круг 2», вариант а): AI-описание печатается тем же
+ * зрителям, что видят его на карточке, — `card.ai` приходит только с правами
+ * на полный Score (на приватном репозитории — владельцу), маршрут отчета
+ * строит ту же карточку. Текст — тот же валидированный, что на карточке
+ * (закон 1), одна копия; модель — официальным названием.
+ */
+function aiBlock(card: RepoCard): Block[] {
+  const ai = card.ai;
+  if (ai === undefined || ai === null) return [];
+  const notes = [...(ai.overview ? [{ title: null as string | null, note: ai.overview }] : []), ...ai.specialists.map((n) => ({ title: aiRoleTitle(n.role), note: n }))];
+  if (notes.length === 0) return [];
+  const out: Block[] = [h2("Описание для менеджера")];
+  for (const { title, note } of notes) {
+    if (title !== null) out.push({ kind: "paragraph", tone: "subhead", lines: [[strong(title)]] });
+    out.push(para(...note.text.split(/\n+/).filter((l) => l.trim() !== "").map((l) => [escaped(l)] as InlineLine)));
+  }
+  const models = [...new Set(notes.map((n) => aiModelName(n.note.model)))].join(", ");
+  const when = ai.generatedAt ? ` от ${fmtDate(ai.generatedAt)}` : "";
+  out.push({
+    kind: "paragraph",
+    tone: "fine",
+    lines: [line(`Текст написан моделью ${models} по фактам анализа${when}; каждое утверждение проверено по фактам. Текст пересказывает оценку и на нее не влияет – числа считает код по метрикам.`)],
+  });
   return out;
 }
 
