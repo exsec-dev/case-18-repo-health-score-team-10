@@ -349,14 +349,18 @@
   --gn-aside-header-item-current-background-color: rgba(0, 0, 0, .1);
 }
 
-/* Бейдж «Яндекс GPT» (smoke-круг 23.09): фирменный красный, крупнее обычного лейбла */
-.rh-ai-badge {
-  display: inline-block;
-  background: #fc3f1d;
-  color: #fff;
-  border-radius: 999px;
-  padding: 3px 10px;
-  font-size: 15px;
-  font-weight: 600;
-  line-height: 20px;
+/* В5.3, круг 3 (§2 24.09, Екатерина): цвета AI — фирменный градиент Алисы,
+   сняты с alice.yandex.ru 24.09 (--depot-color-bro-operator-bg-gradient
+   #6b89e9 → #a88cff; акцент --depot-color-text-brand #7a55ff). Исключение из
+   «только токены» названо в docs/ui/gravity-uikit.md п.3а; прежний красный
+   бейдж модели (.rh-ai-badge, #fc3f1d) снят — метка модели теперь Label utility. */
+.g-root {
+  --rh-ai-from: #6b89e9;
+  --rh-ai-to: #aa86fb; /* замечания 25.09: фиолетовый к розовому — умеренно */
+  --rh-ai-pink: #d07fe3;
+  --rh-ai-accent: #7a55ff;
+}
+
+.g-root.g-root_theme_dark {
+  --rh-ai-accent: #a88cff;
 }

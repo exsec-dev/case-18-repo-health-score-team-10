@@ -87,7 +87,7 @@ describe("badge SVG: только число, подпись, цвет", () => {
     expect(badgeColor(null)).toBe("#8b8b8b");
     const svg = renderBadgeSvg(74);
     expect(svg).toContain(">74<");
-    expect(svg).toContain("health");
+    expect(svg).toContain("HealthCraft Index"); // В5.3 круг 3: подпись — имя показателя
     expect(/https?:\/\/(?!www\.w3\.org)/.test(svg)).toBe(false);
     expect(renderBadgeSvg(null)).toContain("n/a");
   });

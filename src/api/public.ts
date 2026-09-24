@@ -94,20 +94,25 @@ export const BADGE_CACHE_SECONDS = 300;
 export function renderBadgeSvg(index: number | null): string {
   const value = index === null ? "n/a" : String(index);
   const color = badgeColor(index);
+  // В5.3 (круг 3, §2 24.09): подпись — имя показателя «HealthCraft Index»,
+  // левая половина — нейтральный серый, как у бейджей shields (прежний фон
+  // #2d2c33 — тема сервиса до 17.09). Ширина подписи — под Verdana 11
+  const label = "HealthCraft Index";
+  const labelWidth = 114;
   const valueWidth = 8 + value.length * 11;
-  const width = 62 + valueWidth;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="20" role="img" aria-label="repo health: ${value}">
-  <title>Repo Health: ${value}</title>
+  const width = labelWidth + valueWidth;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="20" role="img" aria-label="${label}: ${value}">
+  <title>${label}: ${value}</title>
   <linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient>
   <clipPath id="r"><rect width="${width}" height="20" rx="3" fill="#fff"/></clipPath>
   <g clip-path="url(#r)">
-    <rect width="62" height="20" fill="#2d2c33"/>
-    <rect x="62" width="${valueWidth}" height="20" fill="${color}"/>
+    <rect width="${labelWidth}" height="20" fill="#555"/>
+    <rect x="${labelWidth}" width="${valueWidth}" height="20" fill="${color}"/>
     <rect width="${width}" height="20" fill="url(#s)"/>
   </g>
   <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
-    <text x="31" y="14">health</text>
-    <text x="${62 + valueWidth / 2}" y="14" font-weight="bold">${value}</text>
+    <text x="${labelWidth / 2}" y="14">${label}</text>
+    <text x="${labelWidth + valueWidth / 2}" y="14" font-weight="bold">${value}</text>
   </g>
 </svg>`;
 }

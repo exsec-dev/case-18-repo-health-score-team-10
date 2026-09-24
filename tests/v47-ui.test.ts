@@ -167,7 +167,8 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
     // В4.8 круг 2 (7a): перед текстом — иконка лампочки внутри ссылки
     // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А1): табов нет — ссылка ведет к разделу
     // «Рекомендации» якорем (`recommendationsHref` → `#recommendations`)
-    expect(row).toMatch(/entry\.recommendationsCount !== null && \(\s*<MetaItem>[\s\S]*?<Link \{\.\.\.linkProps\(recommendationsHref\(href\)\)\}[^>]*>\s*<Icon data=\{Bulb\} size=\{14\} \/>\s*\{recommendationsText\(entry\.recommendationsCount\)\}\s*<\/Link>/);
+    // В5.3 (25.09, Екатерина): 0 рекомендаций — строки нет, как и null
+    expect(row).toMatch(/entry\.recommendationsCount !== null && entry\.recommendationsCount > 0 && \(\s*<MetaItem>[\s\S]*?<Link \{\.\.\.linkProps\(recommendationsHref\(href\)\)\}[^>]*>\s*<Icon data=\{Bulb\} size=\{14\} \/>\s*\{recommendationsText\(entry\.recommendationsCount\)\}\s*<\/Link>/);
     expect(row).not.toContain("?tab=");
   });
 });

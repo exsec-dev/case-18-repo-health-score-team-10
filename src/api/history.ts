@@ -74,6 +74,8 @@ export function getRepoHistory(db: Database, org: string, repo: string, opts: { 
       repoHealthScore: score === null ? null : Math.round(score * 10) / 10,
       modelVersion: MODEL_VERSION,
       headSha: row.head_sha,
+      // В5.3 круг 3 (§2 24.09): нули первого пуша не читаются ростом — точка помечена
+      codeEmpty: row.code_empty === 1,
     };
   });
   return { points, modelVersion: MODEL_VERSION, fullOpen };

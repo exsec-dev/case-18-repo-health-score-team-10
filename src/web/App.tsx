@@ -8,6 +8,7 @@
 // анализа из любого экрана.
 import { CircleQuestion } from "@gravity-ui/icons";
 import { Alert, Flex } from "@gravity-ui/uikit";
+import { useState } from "react";
 import type { MetaResponse } from "./api";
 import { dataOf, useJson } from "./api";
 import { JobsBell, MePage, SettingsPage } from "./MePage";
@@ -36,9 +37,24 @@ function Routes() {
   // честный Alert с повтором; страницы живут на RU-именах из констант
   const metaFailed = meta.state.kind === "error" ? meta.state.message : null;
 
-  // карточка репозитория — часть раздела «Рейтинг»: туда ведут его строки
+  // карточка репозитория — часть раздела «Рейтинг»: туда ведут его строки.
+  // В5.3 (25.09): закрытый репозиторий в рейтинг не входит — его карточка
+  // принадлежит «Избранному» (как и крошка); раздел сообщает сама карточка,
+  // только она знает видимость. Смена адреса сбрасывает сообщение
+  const [repoSection, setRepoSection] = useState<{ key: string; section: Section } | null>(null);
+  const repoKey = route.kind === "repo" ? `${route.org}/${route.repo}` : null;
   const section: Section =
-    route.kind === "rating" || route.kind === "repo" ? "rating" : route.kind === "me" ? "me" : route.kind === "settings" ? "settings" : null;
+    route.kind === "repo"
+      ? repoSection !== null && repoSection.key === repoKey
+        ? repoSection.section
+        : "rating"
+      : route.kind === "rating"
+        ? "rating"
+        : route.kind === "me"
+          ? "me"
+          : route.kind === "settings"
+            ? "settings"
+            : null;
 
   return (
     <Shell section={section} me={meData} globalActions={meData?.login ? <JobsBell /> : null}>
@@ -56,7 +72,7 @@ function Routes() {
       {route.kind === "rating" && <Rating search={route.search} meta={metaData} metaFailed={metaFailed !== null} />}
       {/* В4.8.5 (К8.5.1, С9-2): `key` по слагу — состояние карточки A (фаза
           анализа, опросы) не переезжает на карточку B при SPA-переходе */}
-      {route.kind === "repo" && <RepoPage key={`${route.org}/${route.repo}`} org={route.org} repo={route.repo} meta={metaData} />}
+      {route.kind === "repo" && <RepoPage key={`${route.org}/${route.repo}`} org={route.org} repo={route.repo} meta={metaData} onSection={(s) => setRepoSection({ key: `${route.org}/${route.repo}`, section: s })} />}
       {route.kind === "me" && <MePage meta={metaData} />}
       {route.kind === "settings" && <SettingsPage />}
       {route.kind === "not-found" && (

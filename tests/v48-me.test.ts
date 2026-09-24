@@ -192,7 +192,8 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
 
   test("добавление — диалогом, а не полем над списком", () => {
     expect(src).toContain("function AddRepoDialog");
-    expect(src).toContain('caption="Добавить репозиторий"');
+    // В5.3 (25.09, вариант A): заголовок окна — «Добавить в избранное»
+    expect(src).toContain('caption="Добавить в избранное"');
     expect(src).not.toContain("Добавить в избранное</Button>");
   });
 

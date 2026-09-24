@@ -711,6 +711,16 @@ button.rh-category:focus-visible {
   padding-block: var(--g-spacing-1) var(--g-spacing-2);
 }
 
+/* В5.3 круг 3: подзаголовок группы строк в раскрытии (находки AppSec по видам) */
+.rh-subrows__group {
+  grid-column: 1 / -1;
+  padding-top: var(--g-spacing-3);
+}
+
+.rh-subrows__note_after {
+  padding-block: var(--g-spacing-1) 0;
+}
+
 /* Пустое состояние 1:1 с платформой. Замерено на их Milestones и Pull
  * requests: подложка `base-generic` без рамки, радиус 16, поля 32 по кругу,
  * иллюстрация 120px справа, колонка текста прижата влево и выровнена с
@@ -1786,7 +1796,8 @@ button.rh-category:focus-visible {
 .rh-repo-item__content .rh-meta__item[title],
 .rh-repo-item__desc,
 .rh-repo-item__state,
-.rh-repo-item__actions {
+.rh-repo-item__actions,
+.rh-fraud-mark {
   position: relative;
   z-index: 1;
 }
@@ -1994,34 +2005,371 @@ button.rh-category:focus-visible {
 /* плашка чуть длиннее текста: запас справа у содержимого, отступы Alert штатные */
 .g-alert.g-card_theme_info .g-alert__main {
   margin-inline-end: var(--g-spacing-4);
-/* В5 (Б3): мини-тексты специалистов внутри слота AI-описания —
-   схлопываемые секции без «мёртвых» элементов; summary без маркера списка */
-.rh-ai__details {
-  border-top: 1px solid var(--g-color-line-generic);
-  padding-top: var(--g-spacing-1);
 }
 
-.rh-ai__summary {
-  cursor: pointer;
-  list-style: none;
+/* В5.3, круг 3 (§2 24.09): AI-обзор — раздел ленты под показателями в рамке
+   фирменного градиента Алисы (исключение из «только токены» — как знак
+   HealthCraft: цвета — токены --rh-ai-* в theme.css). Рамка — двойной фон:
+   заливка по padding-box, градиент по border-box, поэтому радиус сохраняется. */
+/* замечания 2 (25.09) и 1 (25.09, лаги): цвета перетекают вдоль рамки.
+   Прежняя анимация угла conic-gradient через @property перерисовывала фон
+   всего раздела на каждом кадре. Теперь градиент — отдельный слой ::before,
+   который только ПОВОРАЧИВАЕТСЯ (transform — работа композитора, без
+   перерисовки); ::after — заливка внутри рамки. reduce-motion — без движения. */
+.rh-ai-section {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: var(--g-border-radius-xl);
+  padding: calc(var(--g-spacing-4) + 2px) calc(var(--g-spacing-5) + 2px);
 }
 
-.rh-ai__summary::-webkit-details-marker {
+.rh-ai-section::before {
+  content: "";
+  position: absolute;
+  z-index: -2;
+  left: 50%;
+  top: 50%;
+  width: 1600px;
+  height: 1600px;
+  margin: -800px 0 0 -800px;
+  background: conic-gradient(var(--rh-ai-from), var(--rh-ai-to), var(--rh-ai-pink), var(--rh-ai-to), var(--rh-ai-from));
+  animation: rh-ai-spin 6s linear infinite;
+  will-change: transform;
+}
+
+.rh-ai-section::after {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 2px;
+  border-radius: calc(var(--g-border-radius-xl) - 2px);
+  background: var(--g-color-base-background);
+}
+
+/* замечание 7 и 1 (25.09): пустой обзор — серая заглушка, как закрытый Repo
+   Health Score, БЕЗ градиентной рамки (градиент — только у готового обзора) */
+.rh-ai-section_empty::before {
   display: none;
 }
 
-.rh-ai__summary::before {
-  content: "›";
+.rh-ai-section_empty::after {
+  inset: 0;
+  border-radius: var(--g-border-radius-xl);
+  border: 1px solid var(--g-color-line-generic);
+  /* generic полупрозрачный — поверх непрозрачного фона */
+  background: linear-gradient(var(--g-color-base-generic), var(--g-color-base-generic)), var(--g-color-base-background);
+}
+
+.rh-ai-button-icon {
+  color: var(--rh-ai-accent);
+}
+
+/* замечание 6 (25.09): история без графика — такая же серая заглушка */
+.rh-placeholder-card {
+  --g-card-background-color: var(--g-color-base-generic);
+}
+
+.rh-ai-section__label {
+  margin: 0;
+  font: inherit;
+}
+
+@keyframes rh-ai-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rh-ai-section::before {
+    animation: none;
+  }
+}
+
+/* «Показать полностью» — без полей: начало строки совпадает с абзацем */
+.rh-ai-more {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--g-spacing-1);
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: var(--g-text-body-1-font-size);
+  line-height: var(--g-text-body-1-line-height);
+  color: var(--g-color-text-secondary);
+  cursor: pointer;
+}
+
+.rh-ai-more:hover {
+  color: var(--g-color-text-primary);
+}
+
+.rh-ai-more:focus-visible {
+  outline: 2px solid var(--g-color-line-focus);
+  outline-offset: 2px;
+}
+
+/* разборы модели (категория, динамика) — info-плашкой, абзацы с отбивкой;
+   замечание 4 (25.09): на всю ширину (перебивает fit-content синих плашек) и
+   воздух между заголовком и текстом */
+.g-alert.g-card_theme_info.rh-ai-plate {
+  width: 100%;
+}
+
+.rh-ai-plate__text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-1);
+  margin-top: var(--g-spacing-2);
+}
+
+.rh-ai-plate__text p {
+  margin: 0;
+}
+
+/* длинный текст: затухание по высоте ~6 строк body-1 и «Показать полностью» */
+.rh-ai-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-2);
+}
+
+.rh-ai-text_clamped {
+  max-height: calc(var(--g-text-body-1-line-height) * 6);
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, black 55%, transparent);
+  mask-image: linear-gradient(to bottom, black 55%, transparent);
+}
+
+.rh-ai-text p {
+  margin: 0;
+}
+
+/* разбор модели в раскрытии категории — над таблицей подметрик */
+/* разбор модели в категории — под таблицей подметрик, на всю ширину сетки */
+.rh-cat-ai {
+  grid-column: 1 / -1;
+  padding: var(--g-spacing-3) 0 var(--g-spacing-2);
+}
+
+/* кабинет (замечание 7): флаг фрода — иконкой рядом с видимостью */
+.rh-fraud-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  /* замечание 25.09: warning-light полупрозрачный — кладется поверх непрозрачного фона, аватар не просвечивает */
+  background: linear-gradient(var(--g-color-base-warning-light), var(--g-color-base-warning-light)), var(--g-color-base-background);
+  color: var(--g-color-text-warning-heavy);
+  cursor: default;
+}
+
+.rh-fraud-mark__tip {
+  padding: var(--g-spacing-2) var(--g-spacing-3);
+}
+
+.rh-cat-ai__mark {
+  display: inline-flex;
+  color: var(--g-color-text-secondary);
+}
+
+.rh-cat-ai__mark_ready {
+  color: var(--rh-ai-accent);
+}
+
+/* В5.3 круг 3, вариант B (25.09): флаг фрода — одна строка + подсказка */
+.rh-fraud__line {
+  display: inline;
+}
+
+.rh-fraud__help {
+  margin-inline-start: var(--g-spacing-1);
+  vertical-align: middle;
+}
+
+.rh-fraud__pop {
+  max-width: 320px;
+  padding: var(--g-spacing-1) 0;
+}
+
+/* В5.3 круг 3 (3-B): история оценки — график, легенда, список анализов */
+/* замечание 4 (25.09): график на всю ширину колонки — viewBox по измеренной ширине */
+.rh-history__chart-wrap {
+  width: 100%;
+}
+
+.rh-history__chart {
+  display: block;
+}
+
+.rh-history__key {
   display: inline-block;
-  margin-right: var(--g-spacing-1);
-  transition: transform 0.15s ease;
+  width: 16px;
+  vertical-align: middle;
+  border-top: 2px solid var(--g-color-text-primary);
 }
 
-.rh-ai__details[open] .rh-ai__summary::before {
-  transform: rotate(90deg);
+.rh-history__key_full {
+  border-top: 2px dashed var(--g-color-text-secondary);
 }
 
-.rh-ai__details > .rh-prose {
-  margin: var(--g-spacing-1) 0 0 calc(var(--g-spacing-3));
-  color: var(--g-color-text-complementary);
+.rh-history__list {
+  margin: var(--g-spacing-2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rh-history__row {
+  padding: var(--g-spacing-2) 0;
+  border-top: 1px solid var(--g-color-line-generic);
+}
+
+.rh-history__line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--g-spacing-1) var(--g-spacing-4);
+}
+
+/* замечание 5 (25.09): описание анализа — иконкой у правого края строки */
+.rh-history__note-mark {
+  display: inline-flex;
+  margin-inline-start: auto;
+  color: var(--rh-ai-accent);
+  cursor: pointer;
+}
+
+.rh-history__note {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--g-spacing-2);
+  max-width: 420px;
+  padding: var(--g-spacing-3);
+}
+
+.rh-history__note p {
+  margin: 0;
+}
+
+.rh-cat-ai p {
+  margin: 0;
+}
+
+/* В5.3 круг 3 (5-A): поповер бейджа, как Clone у SourceCraft */
+.rh-badge-pop {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-2);
+  width: min(360px, calc(100vw - 32px));
+  padding: var(--g-spacing-4);
+}
+
+.rh-badge-pop__preview {
+  display: flex;
+  padding: var(--g-spacing-3);
+  border-radius: var(--g-border-radius-m);
+  background: var(--g-color-base-generic);
+}
+
+.rh-badge-pop__preview img {
+  display: block;
+  max-width: 100%;
+}
+
+.rh-history__placeholder-list {
+  margin-top: var(--g-spacing-3);
+}
+
+/* выбор C (25.09): флаг фрода — кружок с иконкой в углу аватара */
+.rh-repo-item__avatar {
+  position: relative;
+  display: inline-flex;
+  flex: none;
+  align-self: flex-start;
+}
+
+.rh-fraud-mark_avatar {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  width: 18px;
+  height: 18px;
+  box-shadow: 0 0 0 2px var(--g-color-base-background);
+}
+
+/* В5.3 (25.09, вариант A): окно «Добавить в избранное» — поле + список строк */
+.rh-add-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.rh-add-row {
+  display: flex;
+  align-items: center;
+  gap: var(--g-spacing-3);
+  min-height: 44px;
+  padding: var(--g-spacing-1) 0;
+  border-top: 1px solid var(--g-color-line-generic);
+}
+
+.rh-add-row:first-child {
+  border-top: 0;
+}
+
+.rh-add-row__main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.rh-add-row__slug {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rh-add-row__meta {
+  display: flex;
+  gap: var(--g-spacing-1);
+  align-items: center;
+}
+
+.rh-add-repo__lens {
+  margin-inline-start: var(--g-spacing-2);
+  color: var(--g-color-text-secondary);
+}
+
+/* О4 аудита 25.09: uikit держит max-width 480 для maxWidth="s" и на телефоне
+   (мобильный режим Modal у нас не включен) — окно выходило за края 375.
+   Не шире экрана минус 16 px с каждой стороны; селектор специфичнее стокового */
+.g-root .g-dialog__modal:has(.rh-dialog-fit) {
+  --g-modal-max-width: min(480px, calc(100vw - 32px));
+}
+
+.g-root .rh-dialog-fit {
+  --_--side-padding: 16px;
+}
+
+@media (min-width: 480px) {
+  .g-root .rh-dialog-fit {
+    --_--side-padding: 32px;
+  }
+}
+
+/* В5.3 (25.09, Екатерина): в ленте карточки репозитория синие инфо-плашки —
+   на всю ширину (пересматривает мини-правку 23.09 «по содержимому» для карточки;
+   в прочих разделах правило 23.09 в силе) */
+.rh-repo-feed .g-alert.g-card_theme_info {
+  width: 100%;
 }

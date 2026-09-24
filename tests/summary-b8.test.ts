@@ -1,3 +1,4 @@
+import { fmtDateUtc, fraudFactorFact } from "../src/web/format";
 // summary-b8.test.ts — фрод-флаггер (Б8 В5, К5.10): структурный флаг + факторы
 // на показ (карточка, кабинет, MD-раздел «Подозрение на искусственную
 // активность»); БЕЗ скидки Score и бампа MODEL_VERSION — прямые тесты.
@@ -116,8 +117,10 @@ describe("Показ флага: карточка (по правам) и MD-ра
     const withFlag = getRepoCard(db, "v5", "md", { access: OPEN })!;
     const md = renderRepoReport(withFlag);
     expect(md).toContain("Подозрение на искусственную активность");
-    expect(md).toContain("ровные интервалы между коммитами");
-    expect(md).toContain("activity.git.summary");
+    // В5.3 круг 3 (способ 2): фактор — названием факта и текстом, который код
+    // строит из этого факта (равно источнику); сырой ключ — только в приложении
+    const summaryFact = withFlag.evidence.find((e) => e.key === "activity.git.summary")?.value;
+    expect(md).toContain(`**Сводка истории git** – ${fraudFactorFact("activity.git.summary", summaryFact, fmtDateUtc) ?? "ровные интервалы между коммитами"}`);
     // Score-таблица отчёта не изменилась флагом: раздел не трогает итог
     expect(md).toContain("55");
     // без генерации — раздела нет вовсе

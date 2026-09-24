@@ -142,9 +142,9 @@ describe("К9.11: русские числа в UI и отчете — одна �
       for (const file of readdirSync(join(root, dir)).filter((f: string) => /\.tsx?$/.test(f))) {
         const src = readFileSync(join(root, dir, file), "utf8");
         const uses = (src.match(/\.toFixed\(/g) ?? []).length;
-        // RepoPage.tsx: 1 — координаты SVG-полилинии истории (геометрия пути,
-        // не русские числа; 23.09 — слот истории в карточке)
-        const allowed = file === "format.ts" ? 1 : file === "RepoPage.tsx" ? 2 : 0;
+        // RepoV5.tsx: 2 — координаты SVG-пути истории (геометрия, не русские
+        // числа; В5.3 круг 3 — график истории переехал из RepoPage.tsx)
+        const allowed = file === "format.ts" ? 1 : file === "RepoV5.tsx" ? 2 : 0;
         expect({ file, uses }).toEqual({ file, uses: allowed });
       }
     }

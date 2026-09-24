@@ -5,7 +5,7 @@
 import { describe, expect, test } from "bun:test";
 import { getRepoCard } from "../src/api/repos";
 import type { AccessResult } from "../src/auth/access";
-import { fraudFactorTitle } from "../src/report/build";
+import { fmtDateUtc, fraudFactorFact, fraudFactorTitle } from "../src/web/format";
 import { renderRepoReport } from "../src/report/markdown";
 import { aiModelName } from "../src/web/format";
 import { cardFacts, makeApiDb, seedRepo, type ApiTestDb } from "./api-fixtures";
@@ -36,7 +36,7 @@ describe("К-7: AI-описание в отчете", () => {
     const { t, card } = seeded();
     try {
       const md = renderRepoReport(card(GRANTED)!);
-      expect(md).toContain("## Описание для менеджера");
+      expect(md).toContain("## AI-обзор репозитория"); // В5.3 круг 3: заголовок раздела
       expect(md).toContain("Репозиторий живой: README есть, задачи закрываются.");
       expect(md).toContain("Слабое место – нет CONTRIBUTING.");
       expect(md).toContain(DOCS);
@@ -52,7 +52,7 @@ describe("К-7: AI-описание в отчете", () => {
     const { t, card } = seeded();
     try {
       const md = renderRepoReport(card(NO_PAT)!);
-      expect(md).not.toContain("Описание для менеджера");
+      expect(md).not.toContain("AI-обзор репозитория");
       expect(md).not.toContain("Репозиторий живой");
       expect(md).not.toContain(DOCS);
       expect(md).not.toContain("Подозрение на искусственную активность");
@@ -67,7 +67,7 @@ describe("К-7: AI-описание в отчете", () => {
       const repoId = seedRepo(t, { org: "v53", repo: "bare" });
       scoredScan(t, repoId, { status: "ok", trigger: "periodic", facts: cardFacts() });
       const md = renderRepoReport(getRepoCard(t.db, "v53", "bare", { access: GRANTED, viewerAuth: "pat" })!);
-      expect(md).not.toContain("Описание для менеджера");
+      expect(md).not.toContain("AI-обзор репозитория");
     } finally {
       t.close();
     }
@@ -92,9 +92,11 @@ describe("К-5: раздел фрода — после ограничений д
       expect(at("## Рекомендации")).toBeGreaterThan(-1);
       expect(at("## Подозрение на искусственную активность")).toBeGreaterThan(at("## Рекомендации"));
       if (at("## Ограничения данных") > -1) expect(at("## Подозрение на искусственную активность")).toBeGreaterThan(at("## Ограничения данных"));
-      expect(at("## Описание для менеджера")).toBeGreaterThan(at("## Подозрение на искусственную активность"));
-      expect(at("### А. Расчет итоговой оценки")).toBeGreaterThan(at("## Описание для менеджера"));
-      expect(md).toContain("**История коммитов** – всплеск коммитов одного автора");
+      expect(at("## AI-обзор репозитория")).toBeGreaterThan(at("## Подозрение на искусственную активность"));
+      expect(at("### А. Расчет итоговой оценки")).toBeGreaterThan(at("## AI-обзор репозитория"));
+      // В5.3 круг 3 (способ 2): текст фактора строит код из факта; нет факта — формулировка модели
+      const timeline = card(GRANTED)!.evidence.find((e) => e.key === "activity.git.timeline")?.value;
+      expect(md).toContain(`**История коммитов** – ${fraudFactorFact("activity.git.timeline", timeline, fmtDateUtc) ?? "всплеск коммитов одного автора"}`);
       expect(md).not.toContain("**activity.git.timeline**");
     } finally {
       t.close();

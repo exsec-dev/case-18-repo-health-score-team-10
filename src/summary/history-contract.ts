@@ -12,6 +12,8 @@ export interface HistoryPoint {
   modelVersion: string;
   /** «на каком коммите измерено» (К5.17); у старых сканов честный null */
   headSha: string | null;
+  /** В5.3 круг 3: на момент анализа в репозитории не было кода (правило codeEmpty) */
+  codeEmpty: boolean;
 }
 
 export interface HistoryResponse {

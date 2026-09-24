@@ -182,6 +182,13 @@ export interface Config {
   api: ApiConfig;
   dataDir: string;
   sourcecraftToken: string | null;
+  /**
+   * В5.3 (круг 3, О5): публичный адрес сервиса без завершающего «/» — из него
+   * строится код бейджа для README (относительный путь в чужом README не
+   * покажет картинку). PUBLIC_BASE_URL; по умолчанию — origin YA_REDIRECT_URI:
+   * адрес возврата Я ID и есть внешний адрес стенда.
+   */
+  publicBaseUrl: string;
   auth: AuthConfig;
   scheduler: SchedulerConfig;
   access: AccessConfig;
@@ -316,6 +323,19 @@ export function leaseMsFromEnv(env: Record<string, string>, _scan?: ScanConfig):
   return wanted ?? DEFAULT_LEASE_MS;
 }
 
+
+/** Публичный адрес сервиса (В5.3, О5): PUBLIC_BASE_URL или origin адреса возврата Я ID. */
+export function publicBaseUrlFromEnv(env: Record<string, string | undefined>): string {
+  const raw = env.PUBLIC_BASE_URL ?? env.YA_REDIRECT_URI ?? "http://localhost:8418/auth/ya/callback";
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:" && url.protocol !== "http:") throw new Error("scheme");
+    return env.PUBLIC_BASE_URL ? raw.replace(/\/+$/, "") : url.origin;
+  } catch {
+    throw new Error(`PUBLIC_BASE_URL: нужен адрес вида https://host — получено «${raw}»`);
+  }
+}
+
 export function loadConfig(): Config {
   const env = { ...envFile(), ...process.env } as Record<string, string>;
   const scan = scanFromEnv(env);
@@ -340,6 +360,7 @@ export function loadConfig(): Config {
       gitBase: apiBaseFromEnv(env, "SOURCECRAFT_GIT_BASE", DEFAULT_API.gitBase),
     },
     sourcecraftToken: env.SOURCECRAFT_TOKEN ?? null,
+    publicBaseUrl: publicBaseUrlFromEnv(env),
     auth: {
       yaClientId: env.YA_CLIENT_ID ?? null,
       yaClientSecret: env.YA_CLIENT_SECRET ?? null,

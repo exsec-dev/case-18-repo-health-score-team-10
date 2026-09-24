@@ -1,3 +1,4 @@
+import { FRAUD_EXPLAIN } from "../src/web/format";
 // В5.3, круг 1 (однозначное, §2 24.09 «Порядок исполнения В5.3»): Г1.17, Г1.16,
 // язык и условие раздела фрода (К-5), подпись истории оценки (К-2). Правило
 // AGENTS.md 21.09/23.09: утверждение о данных и пустое состояние — тестом на
@@ -100,7 +101,7 @@ describe("К-5: раздел фрода в отчете", () => {
     try {
       const md = renderRepoReport(withFraud(card, { flag: true, factors }));
       expect(md).toContain("Подозрение на искусственную активность");
-      expect(md).toContain("Автоматический анализ нашел признаки");
+      expect(md).toContain(FRAUD_EXPLAIN); // В5.3 круг 3: одна копия с карточкой
       expect(md).not.toMatch(/pattern|нашёл/);
     } finally {
       close();
@@ -126,6 +127,7 @@ describe("К-2: слот истории оценки — по точкам и п
     repoHealthScore: rhs,
     modelVersion: "m",
     headSha: null,
+    codeEmpty: false,
   });
 
   test("нет точек — пустое состояние, графика нет", () => {

@@ -23,12 +23,25 @@ export function setSummaryAuto(db: Database, userId: number, slug: string, auto:
   const row = db.query("SELECT scan FROM user_settings WHERE user_id = ?").get(userId) as { scan: string } | null;
   const settings = row === null ? {} : readSettings(row.scan);
   const repos = { ...(settings.summary?.repos ?? {}) };
-  if (auto) repos[slug] = true;
-  else delete repos[slug];
+  // В5.3 (25.09, Екатерина): выключение хранится явным false — кнопка
+  // «Обновить обзор» больше не включает автообновление, которое выключил человек
+  repos[slug] = auto;
   const next = { ...settings, summary: { ...(settings.summary ?? {}), repos } };
   db.query(
     "INSERT INTO user_settings (user_id, scan, updated_at) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET scan = excluded.scan, updated_at = excluded.updated_at",
   ).run(userId, JSON.stringify(next), new Date().toISOString());
+}
+
+/**
+ * Кнопка генерации = намерение (решение 15.09) — включает автообновление, но
+ * только если человек его явно не выключал (В5.3, 25.09). Возвращает итог.
+ */
+export function enableSummaryAutoUnlessOptedOut(db: Database, userId: number, slug: string): boolean {
+  const row = db.query("SELECT scan FROM user_settings WHERE user_id = ?").get(userId) as { scan: string } | null;
+  const current = row === null ? undefined : readSettings(row.scan).summary?.repos?.[slug];
+  if (current === false) return false;
+  setSummaryAuto(db, userId, slug, true);
+  return true;
 }
 
 export function getSummaryAuto(db: Database, userId: number, slug: string): boolean {

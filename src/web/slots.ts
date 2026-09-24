@@ -17,7 +17,8 @@
 // Источники: К5.4 (AI-summary и ступень оп-ина), К5.7 (история Score),
 // К5.8 (публичный API и badge), К5.15 (сравнение репозиториев).
 
-import type { HistoryResponse } from "../summary/history-contract";
+import type { HistoryPoint, HistoryResponse } from "../summary/history-contract";
+import { AI_SECTION_TITLE } from "./format";
 
 /**
  * Контракты полей слотов. Ключ — слот, значение — имена полей, которые В5
@@ -66,7 +67,7 @@ export const SLOT_CONTRACTS: Record<"aiSummary" | "scoreHistory" | "badge" | "co
 // «версия модели») и без обещаний кнопок и настроек; вид карточек прежний.
 export const SLOT_EMPTY: Record<keyof typeof SLOT_CONTRACTS, { title: string; text: string }> = {
   aiSummary: {
-    title: "Описание для менеджера",
+    title: AI_SECTION_TITLE,
     text:
       "Пока не сформировано. Это будет короткий пересказ оценки обычным языком: " +
       "числа по-прежнему считает сервис, описание их только объясняет и на оценку не влияет.",
@@ -78,9 +79,8 @@ export const SLOT_EMPTY: Record<keyof typeof SLOT_CONTRACTS, { title: string; te
       "График будет пополняться после каждого анализа.",
   },
   badge: {
-    title: "Значок для README",
-    text:
-      "Пока не выдается. Значок покажет оценку и ее уровень – только для публичных репозиториев из рейтинга.",
+    title: "Бейдж для README",
+    text: "Бейдж выдается только публичным репозиториям из рейтинга.",
   },
   compare: {
     title: "Сравнение репозиториев",
@@ -127,4 +127,34 @@ export function scoreHistoryView(data: Pick<HistoryResponse, "points" | "fullOpe
       : "Repo Health Score на графике виден участникам репозитория.",
     text: HISTORY_FOOTER,
   };
+}
+
+/**
+ * В5.3 круг 3 (О12): точки истории — по времени анализа, а не по номеру скана
+ * (номер растет с каждой заявкой, а завершаются они не по порядку: 19.09 стоял
+ * перед 18.09). Точки без времени — в конец, в порядке номера.
+ */
+export function historyByTime(points: readonly HistoryPoint[]): HistoryPoint[] {
+  const t = (p: HistoryPoint): number => (p.finishedAt === null ? Number.POSITIVE_INFINITY : Date.parse(p.finishedAt));
+  return [...points].sort((a, b) => t(a) - t(b) || a.scanId - b.scanId);
+}
+
+/**
+ * Вид блока «прежних описаний» в истории (О11, §2 24.09 выбор 4-A): описание
+ * каждого анализа стоит в его строке; подпись над списком нужна только когда
+ * описаний хотя бы 2, а между первым и последним меньше 2 дней. При 1 описании
+ * сравнивать не с чем — подписи нет (прежний текст «истории меньше 2 дней»
+ * называл не ту причину).
+ */
+export function aiNotesCaption(finishedAt: readonly (string | null)[], tooEarly: (dates: string[]) => boolean): string | null {
+  const dates = finishedAt.filter((d): d is string => d !== null);
+  if (dates.length < 2) return null;
+  return tooEarly(dates) ? "Описания между анализами меньше 2 дней – о динамике судить рано." : null;
+}
+
+/** Код для README (О5): абсолютные адреса, картинка ведет на карточку. */
+export function badgeMarkdown(publicBaseUrl: string, org: string, repo: string): string {
+  const base = publicBaseUrl.replace(/\/+$/, "");
+  const path = `${encodeURIComponent(org)}/${encodeURIComponent(repo)}`;
+  return `[![HealthCraft Index](${base}/api/v1/repos/${path}/badge.svg)](${base}/repo/${path})`;
 }

@@ -393,7 +393,8 @@ describe("В4.6-8 (У26/У13/У38): вариант А — карточка на�
       summary: false,
       recommendationLink: false,
       tabInQuery: true,
-      worstOpen: true,
+      // В5.3 (25.09, Екатерина): худшая категория при первом заходе больше не раскрывается — путала
+      worstOpen: false,
     });
   });
 });
@@ -463,7 +464,8 @@ describe("В4.6-9 (У27–У32): консистентность вне каби�
 describe("В4.6-10 (У18): слоты под В5 заложены честными состояниями", () => {
   // ЗАКРЫТО блоком Б8 (слоты под В5).
   test("слоты AI-summary, истории Score и badge видны с состоянием «пока нет данных»", () => {
-    const src = srcOf("RepoPage.tsx");
+    // В5.3 круг 3: элементы В5 переехали в RepoV5.tsx (AI-обзор, история, бейдж)
+    const src = srcOf("RepoV5.tsx");
     expect({ ai: src.includes("aiSummary"), history: src.includes("scoreHistory"), badge: src.includes("badge") }).toEqual({
       ai: true,
       history: true,

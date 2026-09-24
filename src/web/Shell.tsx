@@ -87,7 +87,9 @@ export function Shell({
       logo={{
         text: PRODUCT_NAME,
         icon: HealthCraftMark,
-        iconSize: 26,
+        // В5.3 (25.09): знак крупнее — у SourceCraft марка заполняет 26 px целиком,
+        // наш шестиугольник вписан с полями и при 26 читался мельче
+        iconSize: 32,
         textSize: 20,
         href: "/",
         "aria-label": `${PRODUCT_NAME} – к рейтингу`,

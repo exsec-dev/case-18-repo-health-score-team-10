@@ -54,7 +54,7 @@ import { type MeResponse, type MetaResponse, type MyReposResponse, dataOf, logou
 import type { LiveAnalysis } from "./analysis";
 import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
 import { plural } from "../report/submetrics";
-import { authErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, recommendationsText, scoreTheme, scoreWord, sentence, slugOf, type FavoriteAddCheck } from "./format";
+import { FRAUD_TITLE, authErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, recommendationsText, scoreTheme, scoreWord, sentence, slugOf, type FavoriteAddCheck } from "./format";
 import { recommendationsHref } from "./RepoPage";
 import { type Band, BANDS, type RepoEntry, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
 import { linkProps, navigate, repoHref } from "./router";
@@ -459,7 +459,7 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
           <CabinetAlert title={failedOp === "save" ? "Токен не сохранен" : "Токен не удален"} message={error} />
         )}
 
-        <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)} size="s" aria-label="Удаление токена">
+        <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)} maxWidth="s" fullWidth className="rh-dialog-fit" aria-label="Удаление токена">
           <Dialog.Header caption="Удалить токен?" />
           <Dialog.Body>
             <Text>CI/CD, Безопасность и запуск анализа своих репозиториев станут недоступны, пока вы не добавите новый токен.</Text>
@@ -735,9 +735,10 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
       <AddRepoDialog
         open={adding}
         hasPat={hasPat}
+        favorites={new Set((dataOf(favs.state)?.entries ?? []).map((f) => `${f.org}/${f.repo}`.toLowerCase()))}
         onClose={() => setAdding(false)}
         onAdded={(res) => {
-          setAdding(false);
+          // В5.3 (вариант A): окно остается открытым — можно добавить несколько
           // К8.5.7: ответ добавления — обновлённая запись строки; список не перечитывается
           const current = dataOf(repos.state);
           if (current && res.entry) {
@@ -814,7 +815,7 @@ interface FavoriteAddResponse {
   check?: FavoriteAddCheck;
 }
 
-/** Пикер «своих» репозиториев (/me/repos по PAT зрителя; парковка 23.09). */
+/** Репозиторий, доступный токену зрителя (/me/repos по PAT; не «свой» — признака владения в ответе нет). */
 interface ScRepoLite {
   org: string;
   slug: string;
@@ -823,28 +824,33 @@ interface ScRepoLite {
   isEmpty: boolean;
 }
 
-function ScRepoPicker({ onAdded }: { onAdded: (res: FavoriteAddResponse, label: string) => void }) {
-  const [state, setState] = useState<
-    { kind: "loading" } | { kind: "error"; message: string } | { kind: "ok"; repos: ScRepoLite[]; partial: boolean }
-  >({ kind: "loading" });
-  const [busy, setBusy] = useState<string | null>(null);
-  const toaster = useToaster();
+type ScListState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "error"; message: string; retry: boolean }
+  | { kind: "ok"; repos: ScRepoLite[]; partial: boolean };
+
+function useScRepos(enabled: boolean): { state: ScListState; reload: () => void } {
+  const [state, setState] = useState<ScListState>({ kind: enabled ? "loading" : "idle" });
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
+    if (!enabled) return;
     const ctrl = new AbortController();
+    setState({ kind: "loading" });
     fetch("/api/me/sourcecraft-repos", { signal: ctrl.signal })
       .then(async (res) => {
-        const body = (await res.json().catch(() => null)) as
-          | { repos?: ScRepoLite[]; partial?: boolean; error?: { code?: string } }
-          | null;
+        const body = (await res.json().catch(() => null)) as { repos?: ScRepoLite[]; partial?: boolean; error?: { code?: string; message?: string } } | null;
         if (!res.ok) {
-          const code = body?.error?.code;
+          // О9 аудита 25.09: ошибки по кодам; лимит — с временем повтора
+          const retryAfter = Number(res.headers.get("retry-after"));
           setState({
             kind: "error",
+            retry: true,
             message:
-              code === "no_pat"
-                ? "Добавьте токен SourceCraft – тогда здесь появится список ваших репозиториев"
-                : code === "source_http"
-                  ? "SourceCraft не ответил – попробуйте еще раз"
+              res.status === 429
+                ? `Список обновляли слишком часто – повторите${Number.isFinite(retryAfter) && retryAfter > 0 ? ` через ${Math.ceil(retryAfter)} с` : " позже"}`
+                : body?.error?.code === "source_http"
+                  ? "SourceCraft не ответил"
                   : "Список недоступен",
           });
           return;
@@ -852,122 +858,202 @@ function ScRepoPicker({ onAdded }: { onAdded: (res: FavoriteAddResponse, label: 
         setState({ kind: "ok", repos: body?.repos ?? [], partial: body?.partial === true });
       })
       .catch(() => {
-        if (!ctrl.signal.aborted) setState({ kind: "error", message: "Список недоступен" });
+        if (!ctrl.signal.aborted) setState({ kind: "error", message: "Список недоступен", retry: true });
       });
     return () => ctrl.abort();
-  }, []);
-  const add = async (repo: ScRepoLite) => {
-    const label = `${repo.org}/${repo.slug}`;
-    setBusy(label);
-    try {
-      const res = (await mutateJson<FavoriteAddResponse>("/api/me/favorites", "PUT", { repository: label })) ?? {};
-      toaster.add({ name: `sc-add-${label}`, theme: "success", title: "Добавлено в избранное", content: `${label}. ${favoriteAddedText(res.check)}` });
-      onAdded(res, label);
-    } catch (e) {
-      toaster.add({ name: `sc-add-${label}`, theme: "danger", title: "Не добавилось", content: e instanceof Error ? e.message : String(e) });
-    } finally {
-      setBusy(null);
-    }
-  };
-  return (
-    <Flex direction="column" gap={2}>
-      <Text color="secondary">Ваши репозитории в SourceCraft:</Text>
-      {state.kind === "loading" && <Text color="complementary">Загружаем список…</Text>}
-      {state.kind === "error" && <Text color="complementary">{state.message}</Text>}
-      {state.kind === "ok" && (
-        <>
-          {state.repos.length === 0 && <Text color="complementary">В вашем аккаунте репозиториев не нашлось.</Text>}
-          {state.repos.map((repo) => {
-            const label = `${repo.org}/${repo.slug}`;
-            return (
-              <Flex key={label} gap={2} alignItems="center" justifyContent="space-between">
-                <Text variant="body-2">
-                  {label}
-                  {repo.isEmpty ? " – пустой" : ""}
-                </Text>
-                <Button view="outlined" size="xs" loading={busy === label} onClick={() => void add(repo)}>
-                  Добавить
-                </Button>
-              </Flex>
-            );
-          })}
-          {state.partial && <Text color="complementary">Показаны первые 300 – остальное по идентификатору org/repo.</Text>}
-        </>
-      )}
-    </Flex>
-  );
+  }, [enabled, attempt]);
+  return { state, reload: () => setAttempt((n) => n + 1) };
 }
 
-function AddRepoDialog({ open, onClose, onAdded, hasPat }: { open: boolean; onClose: () => void; onAdded: (res: FavoriteAddResponse) => void; hasPat: boolean }) {
+/**
+ * В5.3 (25.09, вариант A аудита reports/2026-09-25-m53-add-repo-audit.md):
+ * одно поле — поиск по доступным токену репозиториям и ввод org/repo или ссылки;
+ * строка списка — аватар, слаг, видимость; уже добавленные помечены «В
+ * избранном». Окно не закрывается после добавления — можно добавить несколько.
+ */
+function AddRepoDialog({
+  open,
+  onClose,
+  onAdded,
+  hasPat,
+  favorites,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onAdded: (res: FavoriteAddResponse) => void;
+  hasPat: boolean;
+  favorites: ReadonlySet<string>;
+}) {
   const [value, setValue] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [added, setAdded] = useState<ReadonlySet<string>>(new Set());
   const toaster = useToaster();
   const inputRef = useRef<HTMLInputElement>(null);
-  const slugError = value !== "" && !INPUT_LIKELY.test(value) ? "Формат: org/repo или ссылка на репозиторий" : undefined;
+  const list = useScRepos(open && hasPat);
 
+  const inFav = (slug: string): boolean => favorites.has(slug.toLowerCase()) || added.has(slug.toLowerCase());
   const close = () => {
     setValue("");
     setError(null);
+    setAdded(new Set());
     onClose();
   };
 
-  const add = async () => {
-    if (!INPUT_LIKELY.test(value)) {
-      setError("Введите org/repo или ссылку на репозиторий");
+  const add = async (repository: string) => {
+    if (inFav(repository)) {
+      toaster.add({ name: `fav-exists:${repository}`, theme: "info", title: "Уже в избранном", content: repository });
       return;
     }
-    setBusy(true);
+    setBusy(repository);
     setError(null);
     try {
-      const res = (await mutateJson<FavoriteAddResponse>("/api/me/favorites", "PUT", { repository: value })) ?? {};
+      const res = (await mutateJson<FavoriteAddResponse>("/api/me/favorites", "PUT", { repository })) ?? {};
+      const slug = res.entry ? `${res.entry.org}/${res.entry.repo}` : repository;
       // В4.8.5 (К8.5.14 (д)): права проверены сами — тост говорит, чем кончилось
-      toaster.add({ name: "fav-added", theme: "success", title: "Добавлено в избранное", content: `${value}. ${favoriteAddedText(res.check)}` });
-      setValue("");
+      toaster.add({ name: `fav-added:${slug}`, theme: "success", title: "Добавлено в избранное", content: `${slug}. ${favoriteAddedText(res.check, res.access?.visibility)}` });
+      setAdded((prev) => new Set(prev).add(slug.toLowerCase()).add(repository.toLowerCase()));
+      if (repository === value) setValue("");
       onAdded(res);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
-      setBusy(false);
+      setBusy(null);
     }
   };
 
+  const q = value.trim().toLowerCase();
+  const repos = list.state.kind === "ok" ? list.state.repos : [];
+  const shown = q === "" ? repos : repos.filter((r) => `${r.org}/${r.slug}`.toLowerCase().includes(q) || (r.name ?? "").toLowerCase().includes(q));
+  // ручной ввод: похоже на org/repo или ссылку и не совпало со строкой списка — строка «Добавить …»
+  const manual = INPUT_LIKELY.test(value.trim()) && !repos.some((r) => `${r.org}/${r.slug}`.toLowerCase() === q) ? value.trim() : null;
+
+  const onEnter = () => {
+    if (busy) return;
+    if (manual) return void add(manual);
+    if (shown.length === 1) return void add(`${shown[0]!.org}/${shown[0]!.slug}`);
+    // О6: формат проверяется по Enter, не на каждом нажатии
+    if (value.trim() !== "") setError("Нужен вид org/repo или ссылка на репозиторий");
+  };
+
+  const row = (key: string, label: ReactNode, slug: string, meta: ReactNode) => {
+    const has = inFav(slug);
+    return (
+      <li key={key} className="rh-add-row">
+        <RepoAvatar repo={slug.split("/")[1] ?? slug} logoUrl={null} size="s" />
+        <span className="rh-add-row__main">
+          <span className="rh-add-row__slug" title={slug}>
+            {label}
+          </span>
+          {meta}
+        </span>
+        {has ? (
+          <Label theme="success" size="xs" icon={<Icon data={CircleCheck} size={12} />}>
+            В избранном
+          </Label>
+        ) : (
+          <Button view="flat" size="m" loading={busy === slug} disabled={busy !== null && busy !== slug} onClick={() => void add(slug)} aria-label={`Добавить ${slug}`}>
+            <Icon data={Plus} size={16} />
+          </Button>
+        )}
+      </li>
+    );
+  };
+
   return (
-    <Dialog open={open} onClose={close} size="s" aria-label="Добавить репозиторий" initialFocus={inputRef}>
-      <Dialog.Header caption="Добавить репозиторий" />
+    // О4: ширина по экрану телефона (maxWidth + fullWidth вместо устаревшего size)
+    <Dialog open={open} onClose={close} maxWidth="s" fullWidth className="rh-dialog-fit" aria-label="Добавить в избранное" initialFocus={inputRef}>
+      <Dialog.Header caption="Добавить в избранное" />
       <Dialog.Body>
         <Flex direction="column" gap={2} className="rh-add-repo">
-          {hasPat ? <ScRepoPicker onAdded={(res, label) => { setValue(label); onAdded(res); close(); }} /> : null}
-          <Text color="secondary">Репозиторий попадет в избранное и появится в этом списке. Или добавьте по идентификатору org/repo:</Text>
           <TextInput
-            size="m"
+            size="l"
             controlRef={inputRef}
-            placeholder="org/repo или ссылка"
+            placeholder={hasPat ? "Найдите репозиторий или вставьте ссылку" : "org/repo или ссылка на репозиторий"}
             value={value}
+            startContent={<Icon data={Magnifier} size={16} className="rh-add-repo__lens" />}
             onUpdate={(v) => {
-              setValue(v.trim());
+              setValue(v);
               setError(null);
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && !busy) void add();
+              if (e.key === "Enter") onEnter();
             }}
             hasClear
-            controlProps={{ "aria-label": "Идентификатор org/repo или ссылка на репозиторий" }}
+            controlProps={{ "aria-label": "Поиск репозитория, org/repo или ссылка" }}
             errorPlacement="outside"
-            validationState={slugError || error ? "invalid" : undefined}
-            errorMessage={slugError ?? error ?? undefined}
+            validationState={error ? "invalid" : undefined}
+            errorMessage={error ?? undefined}
           />
+          {hasPat ? (
+            <Text variant="body-1" color="secondary">
+              Доступны вашему токену в SourceCraft
+            </Text>
+          ) : (
+            <Text variant="body-1" color="complementary">
+              {"Добавьте токен в "}
+              <Link {...linkProps("/settings")}>Настройках</Link>
+              {" – тогда здесь появятся репозитории, доступные вашему токену. Пока можно вставить org/repo или ссылку."}
+            </Text>
+          )}
+          <ul className="rh-add-list" aria-label="Репозитории">
+            {manual !== null && row(`manual:${manual}`, <>Добавить <b>{manual}</b></>, manual, null)}
+            {list.state.kind === "loading" && <SkeletonRows rows={4} height={40} />}
+            {shown.map((r) => {
+              const slug = `${r.org}/${r.slug}`;
+              return row(
+                slug,
+                <RepoSlug org={r.org} repo={r.slug} variant="body-1" />,
+                slug,
+                <span className="rh-add-row__meta">
+                  <VisibilityPill value={r.visibility} />
+                  {r.isEmpty && (
+                    <Label theme="normal" size="xs">
+                      пустой
+                    </Label>
+                  )}
+                </span>,
+              );
+            })}
+          </ul>
+          {list.state.kind === "error" && (
+            <Flex gap={2} alignItems="center" wrap>
+              <Text variant="body-1" color="complementary">
+                {list.state.message}
+              </Text>
+              {list.state.retry && (
+                <Button view="outlined" size="s" onClick={list.reload}>
+                  Повторить
+                </Button>
+              )}
+            </Flex>
+          )}
+          {list.state.kind === "ok" && repos.length === 0 && (
+            <Text variant="body-1" color="complementary">
+              SourceCraft не вернул ни одного репозитория – вставьте org/repo или ссылку.
+            </Text>
+          )}
+          {list.state.kind === "ok" && repos.length > 0 && q !== "" && shown.length === 0 && manual === null && (
+            <Text variant="body-1" color="complementary">
+              {`Среди ${repos.length} загруженных нет «${value.trim()}» – вставьте org/repo целиком.`}
+            </Text>
+          )}
+          {list.state.kind === "ok" && list.state.partial && (
+            // О2: счетчик — по данным
+            <Text variant="body-1" color="secondary">
+              {addListPartialText(repos.length)}
+            </Text>
+          )}
         </Flex>
       </Dialog.Body>
-      <Dialog.Footer
-        textButtonApply="Добавить"
-        textButtonCancel="Отмена"
-        onClickButtonApply={() => void add()}
-        onClickButtonCancel={close}
-        loading={busy}
-      />
+      <Dialog.Footer textButtonApply="Готово" onClickButtonApply={close} />
     </Dialog>
   );
+}
+
+/** О2 аудита 25.09: подпись неполного списка — число строк из данных, без литерала. */
+export function addListPartialText(count: number): string {
+  return `Показано ${count} – остальные найдутся по org/repo`;
 }
 
 /**
@@ -1085,7 +1171,15 @@ function RepoRow({
       {/* слой-ссылка: клик по пустому месту строки ведет в карточку; с клавиатуры
           и для скринридера ссылка — имя репозитория, слой из обхода убран */}
       <a className="rh-repo-item__cover" {...linkProps(href)} tabIndex={-1} aria-hidden="true" />
-      <RepoAvatar repo={repo} logoUrl={entry.logoUrl} size="l" />
+      {/* выбор C владельца (25.09): флаг фрода — кружком с иконкой в углу аватара, без подсказки */}
+      <span className="rh-repo-item__avatar">
+        <RepoAvatar repo={repo} logoUrl={entry.logoUrl} size="l" />
+        {entry.fraudFlag?.flag === true && entry.fraudFlag.factors.length > 0 && (
+          <span className="rh-fraud-mark rh-fraud-mark_avatar" role="img" aria-label={FRAUD_TITLE}>
+            <Icon data={TriangleExclamation} size={10} />
+          </span>
+        )}
+      </span>
       <div className="rh-repo-item__content">
         <div className="rh-repo-item__head">
           {/* В4.7 (П3.4): слаг — общим `RepoSlug`, как на рейтинге и карточке */}
@@ -1109,23 +1203,14 @@ function RepoRow({
           )}
           {/* В4.7 (П3.4, У26): счётчик рекомендаций — ссылкой на карточку с
               открытым табом. null (прав нет) — строки нет: не 0 */}
-          {entry.recommendationsCount !== null && (
+          {/* замечание 25.09: 0 рекомендаций — строки нет (улучшать нечего — не повод для ссылки) */}
+          {entry.recommendationsCount !== null && entry.recommendationsCount > 0 && (
             <MetaItem>
               {/* круг 2 (7a): иконка — внутри ссылки, чтобы красилась вместе с текстом */}
               <Link {...linkProps(recommendationsHref(href))} className="rh-repo-item__link">
                 <Icon data={Bulb} size={14} />
                 {recommendationsText(entry.recommendationsCount)}
               </Link>
-            </MetaItem>
-          )}
-          {/* В5 (К5.10): флаг фрода — факторы на показ владельцу; подозрение,
-              не оценка: Score от него не меняется, ссылка ведет к разделу
-              «Подозрение на искусственную активность» в MD-отчете карточки */}
-          {entry.fraudFlag?.flag === true && entry.fraudFlag.factors.length > 0 && (
-            <MetaItem icon={TriangleExclamation} title={entry.fraudFlag.factors.map((f) => `${f.key} – ${f.note}`).join("; ")}>
-              <Text color="warning" className="rh-repo-item__link">
-                Подозрение на искусственную активность
-              </Text>
             </MetaItem>
           )}
         </Meta>

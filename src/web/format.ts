@@ -676,7 +676,7 @@ export interface FavoriteAddCheck {
  * права проверены сами, первый анализ своего поставлен сам. Ни одной фразы
  * «запустите анализ» про чужой репозиторий (К8.5.14 (ж)).
  */
-export function favoriteAddedText(check: FavoriteAddCheck | undefined): string {
+export function favoriteAddedText(check: FavoriteAddCheck | undefined, visibility?: "public" | "internal" | "private" | "unknown"): string {
   if (!check) return "Добавлено в избранное.";
   switch (check.status) {
     case "no_pat":
@@ -695,7 +695,14 @@ export function favoriteAddedText(check: FavoriteAddCheck | undefined): string {
   if (e.status === "queued") return "Права проверены – запущен анализ, итог придет уведомлением.";
   if (e.status === "deduplicated") return "Права проверены – анализ уже идет.";
   if (e.status === "skipped") {
-    if (e.code === "not_own") return "Права проверены. Анализ запускается только для своих репозиториев – этот обновит ночной обход.";
+    // В5.3 (25.09, находка владельца на internal-репо хакатона): ночной обход
+    // берет только публичные репо рейтинга — закрытому чужому он не поможет,
+    // и обещать его нельзя (правило 23.09: утверждение о данных — по статусу)
+    if (e.code === "not_own") {
+      return visibility === "public"
+        ? "Права проверены. Анализ запускается только для своих репозиториев – этот обновит ночной обход."
+        : "Права проверены. У вашего токена нет прав на CI/CD и Безопасность этого репозитория, а в рейтинг закрытые репозитории не входят – оценки у него не будет.";
+    }
     if (e.code === "cooldown") return "Права проверены – анализ запускали недавно.";
     return "Права проверены.";
   }
@@ -1051,4 +1058,98 @@ export const AI_ROLE_TITLES: Record<string, string> = {
 
 export function aiRoleTitle(role: string): string {
   return AI_ROLE_TITLES[role] ?? role;
+}
+
+// ---------- В5.3, круг 3: флаг фрода (К-3), заголовок AI-раздела ----------
+
+/** Заголовок AI-раздела карточки и отчета (§2 24.09 «круг 3»): что внутри и что это текст модели. */
+export const AI_SECTION_TITLE = "AI-обзор репозитория";
+
+export const FRAUD_TITLE = "Подозрение на искусственную активность";
+export const FRAUD_EXPLAIN =
+  "Автоматическая проверка нашла признаки накрутки. Это повод проверить вручную, а не вывод: оценка от него не меняется.";
+
+/**
+ * Название факта-фактора фрода вместо сырого ключа (К-5, §2 24.09): одна копия
+ * для карточки, кабинета и отчета. Флаггер видит только факты «Активности» —
+ * у каждого своя ветка; неизвестный ключ — явная ветка «прочее»: ключ как есть,
+ * чтобы его можно было найти в приложении (правило AGENTS.md 22.09 об enum).
+ */
+export function fraudFactorTitle(key: string): string {
+  switch (key) {
+    case "activity.git.timeline":
+      return "История коммитов";
+    case "activity.git.summary":
+      return "Сводка истории git";
+    case "activity.rest":
+      return "Участники, релизы и запросы на слияние";
+    default:
+      return key;
+  }
+}
+
+/** Доля 0..1 → «99%» (целые проценты, без пробела — как в таблице подметрик; ненулевая меньше 1% — «<1%»). */
+function sharePercent(share: number): string {
+  const pct = Math.round(share * 100);
+  return pct === 0 && share > 0 ? "<1%" : `${pct}%`;
+}
+
+function plural(n: number, one: string, few: string, many: string): string {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
+}
+
+/**
+ * Текст фактора фрода — КОДОМ из факта (выбор владельца 24.09, способ (2);
+ * закон 5: число — из факта, не из формулировки модели). Возвращает null, если
+ * факта нет или ключ неизвестен — тогда показывается формулировка модели.
+ */
+export function fraudFactorFact(key: string, value: unknown, date: (iso: string) => string = fmtDate): string | null {
+  if (value === null || typeof value !== "object") return null;
+  const v = value as Record<string, unknown>;
+  const num = (k: string): number | null => (typeof v[k] === "number" && Number.isFinite(v[k]) ? (v[k] as number) : null);
+  switch (key) {
+    case "activity.git.summary": {
+      const commits = num("commits");
+      const robots = num("robot_commits");
+      const authors = num("authors");
+      const committers = num("committers");
+      const parts: string[] = [];
+      if (commits !== null && commits > 0 && robots !== null) {
+        parts.push(`${robots} из ${commits} ${plural(commits, "коммита", "коммитов", "коммитов")} – от роботов (${sharePercent(robots / commits)})`);
+      }
+      if (authors !== null && committers !== null) {
+        parts.push(`${authors} ${plural(authors, "автор", "автора", "авторов")} при ${committers} ${plural(committers, "коммиттере", "коммиттерах", "коммиттерах")}`);
+      }
+      return parts.length > 0 ? parts.join("; ") : null;
+    }
+    case "activity.git.timeline": {
+      const events = num("events");
+      if (events === null) return null;
+      const first = typeof v.first === "string" ? date(v.first) : null;
+      const last = typeof v.last === "string" ? date(v.last) : null;
+      const span = first && last ? ` с ${first} по ${last}` : "";
+      return `${events} ${plural(events, "коммит", "коммита", "коммитов")}${span}`;
+    }
+    case "activity.rest": {
+      const contributors = num("contributors");
+      const releases = num("releases");
+      const pulls = Array.isArray(v.pulls_created_at) ? v.pulls_created_at.length : null;
+      const parts: string[] = [];
+      if (contributors !== null) parts.push(`${contributors} ${plural(contributors, "участник", "участника", "участников")}`);
+      if (releases !== null) parts.push(`${releases} ${plural(releases, "релиз", "релиза", "релизов")}`);
+      if (pulls !== null) parts.push(`${pulls} ${plural(pulls, "запрос", "запроса", "запросов")} на слияние`);
+      return parts.length > 0 ? parts.join(", ") : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/** Абзацы AI-текста (О3): одна функция для карточки и отчета — по переводам строк. */
+export function aiParagraphs(text: string): string[] {
+  return text.split(/\n+/).map((l) => l.trim()).filter((l) => l !== "");
 }

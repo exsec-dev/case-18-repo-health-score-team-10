@@ -1312,10 +1312,12 @@ export interface MetaResponse {
   /** Ф2.9/Ф2.15: лиз job из конфига планировщика — UI опрашивает анализ до этого горизонта */
   queue: { leaseMs: number };
   methodology: string;
+  /** В5.3 (О5): публичный адрес сервиса — абсолютный код бейджа для README */
+  publicBaseUrl: string;
   generatedAt: string;
 }
 
-export function getMeta(db: Database, opts: { now?: Date; leaseMs?: number } = {}): MetaResponse {
+export function getMeta(db: Database, opts: { now?: Date; leaseMs?: number; publicBaseUrl?: string } = {}): MetaResponse {
   const rows = db.query(RATING_SQL).all(MODEL_VERSION, MODEL_VERSION) as RatingRow[];
   return {
     modelVersion: MODEL_VERSION,
@@ -1337,6 +1339,7 @@ export function getMeta(db: Database, opts: { now?: Date; leaseMs?: number } = {
     },
     queue: { leaseMs: opts.leaseMs ?? defaultLeaseMs(DEFAULT_SCAN) },
     methodology: METHODOLOGY_PATH,
+    publicBaseUrl: opts.publicBaseUrl ?? "http://localhost:8418",
     generatedAt: (opts.now ?? new Date()).toISOString(),
   };
 }

@@ -105,30 +105,32 @@ describe("К8.5.1: итог анализа — по заданию", () => {
   });
 
   test("smoke-круг 2 (23.09): запуск генерации объявляет jobId трекеру и дергает опрос заданий — прогон ~6 с успевает в тост", () => {
-    const act = src("RepoPage.tsx");
+    // В5.3 круг 3: AI-обзор — RepoV5.tsx; «скан» в текстах заменен «анализом» (О10)
+    const act = src("RepoV5.tsx");
     expect(act).toContain("announceJobStarted(body?.jobId ?? undefined);");
     expect(act).toContain("announceJobsChanged();");
     // кэш не называет «поставлено в генерацию» — тост честен об отказе
-    expect(act).toContain('"Описание этого скана уже готово"');
-    expect(act).toContain("Заметки последнего скана сформированы ранее.");
-    // круг 5 (Алексей): кнопка = полный цикл — анализ, затем описание
-    expect(act).toContain('"Анализ и описание в очереди"');
-    expect(act).toContain("Сначала соберутся свежие данные скана, затем описание обновится.");
+    expect(act).toContain('"Обзор этого анализа уже готов"');
+    expect(act).toContain("Новый обзор появится после нового анализа репозитория.");
+    // круг 5 (Алексей): кнопка = полный цикл — анализ, затем обзор
+    expect(act).toContain('"Анализ и обзор в очереди"');
+    expect(act).toContain("Сначала соберутся свежие данные, затем обзор обновится.");
+    expect(act).not.toMatch(/"[^"]*скан[^"]*"/);
   });
 
   test("круг 3 (23.09): тумблер автогенерации не ставит заявок — свой маршрут, карточка перечитывается по итогу", () => {
-    const act = src("RepoPage.tsx");
-    // развязка: Switch больше не зовёт POST/DELETE /summary
+    const act = src("RepoV5.tsx");
+    // развязка: переключатель (В5.3 круг 3 — на месте кнопки) не зовёт POST/DELETE /summary
     expect(act).not.toContain('void act(checked ? "POST" : "DELETE")');
-    expect(act).toContain("void actAuto(checked)");
+    expect(act).toContain("onUpdate={(on) => void actions.setAuto(on)}"); // замечание 2 (25.09): переключатель на виду
     expect(act).toContain("/summary-auto`");
     // итог задания перечитывает карточку сразу — кнопка не висит disabled
     expect(act).toContain("useAnalysisFinished((jobs) => {");
   });
 
   test("круг 4 (23.09): кулдаун объясняется языком пользователя — без внутренних денег", () => {
-    const act = src("RepoPage.tsx");
-    expect(act).toContain("Частые запуски ограничены – следующий после");
+    const act = src("RepoV5.tsx");
+    expect(act).toContain("Следующий запуск – после");
     // «кредиты дороже повтора» — внутренняя причина, пользователю она ни о чём
     expect(act).not.toContain("кредиты");
   });

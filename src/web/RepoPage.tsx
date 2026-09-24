@@ -71,7 +71,6 @@ import {
   Link,
   Popover,
   Spin,
-  Switch,
   Text,
   useToaster,
 } from "@gravity-ui/uikit";
@@ -80,8 +79,6 @@ import { COVERAGE_NULL_BELOW } from "../score/model";
 import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle } from "../report/submetrics";
 import { FULL, INDEX, metricWeights, sourceWord, submetricWeightText } from "../report/sections";
 import type { MetaResponse, RepoCard } from "./api";
-import type { AiNotesResponse, HistoryResponse } from "../summary/history-contract";
-import { evolutionTooEarly } from "../summary/history-contract";
 import { dataOf, mutateJson, useJson, useVisible } from "./api";
 import { cardView, type CardView, type CategoryView, type RecommendationView } from "./cardView";
 import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
@@ -93,8 +90,6 @@ import {
   type FavoriteAddCheck,
   type PathPart,
   SECURITY_PUBLIC_NOTE,
-  aiModelName,
-  aiRoleTitle,
   fmtCount,
   fmtCoverage,
   fmtDate,
@@ -115,13 +110,13 @@ import {
 } from "./format";
 import { linkProps } from "./router";
 import { LoginButton, Page, type Crumb } from "./Shell";
-import { SLOT_EMPTY, scoreHistoryView } from "./slots";
+import { AiOverviewSection, BadgeButton, CategoryAiMark, CategoryAiNote, FraudAlert, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor } from "./RepoV5";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
 
 type Card = RepoCard;
 type Evidence = Card["evidence"][number];
 
-export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta: MetaResponse | null }) {
+export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: string; meta: MetaResponse | null; onSection?: (s: "rating" | "me") => void }) {
   const slug = `${org}/${repo}`;
   const cardUrl = `/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`;
   // В4.8.5 (К8.5.3): перечитывание не мигает скелетоном — прежние данные на
@@ -172,7 +167,13 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   }, [foreignRunning, visible, reload]);
 
   // Ступень 4 (В-10): крошка — на последнюю выдачу рейтинга (фильтр, сортировка, страница)
-  const crumbs: Crumb[] = [{ text: "Рейтинг", href: lastRatingHref() }, { text: `${org} / ${repo}` }];
+  // Замечание 25.09: закрытый (приватный/внутренний) репозиторий в рейтинг не входит —
+  // первая крошка ведет в «Избранное», откуда на него и попадают; публичным — «Рейтинг»
+  const closedRepo = data?.repo?.visibility === "private" || data?.repo?.visibility === "internal";
+  useEffect(() => {
+    if (data) onSection?.(closedRepo ? "me" : "rating");
+  }, [data !== null, closedRepo]); // eslint-disable-line react-hooks/exhaustive-deps
+  const crumbs: Crumb[] = [closedRepo ? { text: "Избранное", href: "/me" } : { text: "Рейтинг", href: lastRatingHref() }, { text: `${org} / ${repo}` }];
   const own = live ?? (data?.job ? { phase: data.job.status, stalled: data.job.stalled } : null);
   const jobStalled = own?.stalled === true;
   const analysisRunning = own !== null;
@@ -204,6 +205,12 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
       </Page>
     );
   }
+  if (data === null && state.kind === "error" && state.status === 404 && loggedIn) {
+    // В5.3 (25.09, находка владельца): репо из избранного, которого нет в каталоге
+    // (закрытый, ни разу не анализировался) — не ошибка «не удалось открыть», а
+    // честное пустое состояние; не в избранном — прежняя ошибка
+    return <FavoriteNotInCatalog org={org} repo={repo} fallback={state.message} onRetry={reload} onSection={onSection} />;
+  }
   if (data === null) {
     // UX-5 (круг 2 В4.4): «Обновить анализ» на странице ошибки скрыт; повтор —
     // «Повторить» (reload)
@@ -229,6 +236,8 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
   const refreshError = state.kind === "ok" ? state.refreshError : undefined;
   const actions = (
     <Flex gap={2} alignItems="center">
+      {/* 5-A (§2 24.09): бейдж — кнопкой в шапке, как Clone у SourceCraft */}
+      {card.score !== null && <BadgeButton org={org} repo={repo} own={card.viewer?.own === true} publicBaseUrl={meta?.publicBaseUrl ?? window.location.origin} />}
       {card.score !== null && <ReportMenu mdHref={reportHref} pdfHref={`${cardUrl}/report.pdf`} pdfName={reportFileName(org, repo, "pdf")} />}
       {refreshButton}
     </Flex>
@@ -288,17 +297,67 @@ export function RepoPage({ org, repo, meta }: { org: string; repo: string; meta:
         )
       ) : (
         // А1 (U1-A): одна лента по линии PDF, табов нет
-        <Flex direction="column" gap={6}>
+        // В5.3 круг 3 (§2 24.09): флаг фрода — над показателями (6-A); AI-обзор —
+        // сразу под ними (2-A); история — разделом после рекомендаций (3-B)
+        <Flex direction="column" gap={6} className="rh-repo-feed">
           <Flex direction="column" gap={3}>
             <Markers view={view} />
+            <FraudAlert card={card} />
             <ScoreBand card={card} view={view} />
           </Flex>
+          <AiOverviewSection card={card} org={org} repo={repo} onChanged={reload} />
           <Categories card={card} view={view} />
           <Recommendations view={view} />
+          <HistorySection card={card} org={org} repo={repo} />
           <Limitations items={view.limitations} />
-          <CardSlots card={card} org={org} repo={repo} onChanged={reload} />
         </Flex>
       )}
+    </Page>
+  );
+}
+
+/**
+ * Карточка репозитория из избранного, которого нет в каталоге сервиса (В5.3,
+ * 25.09): закрытый репозиторий попадает в каталог только своим анализом, а
+ * анализ запускается только для своих (права на CI/CD или Безопасность). Текст —
+ * по сохраненным правам строки избранного (`last_access`), без обещаний.
+ */
+function FavoriteNotInCatalog({ org, repo, fallback, onRetry, onSection }: { org: string; repo: string; fallback: string; onRetry: () => void; onSection?: (s: "rating" | "me") => void }) {
+  const favs = useJson<{ entries: { org: string; repo: string; access: { visibility: string; own: boolean } | null }[] }>("/api/me/favorites");
+  const data = dataOf(favs.state);
+  const inFavs = data?.entries.some((e) => e.org.toLowerCase() === org.toLowerCase() && e.repo.toLowerCase() === repo.toLowerCase()) === true;
+  useEffect(() => {
+    if (inFavs) onSection?.("me");
+  }, [inFavs]); // eslint-disable-line react-hooks/exhaustive-deps
+  const crumbs: Crumb[] = [{ text: "Избранное", href: "/me" }, { text: `${org} / ${repo}` }];
+  if (favs.state.kind === "loading") {
+    return (
+      <Page crumbs={crumbs}>
+        <SkeletonRows rows={1} height={150} />
+      </Page>
+    );
+  }
+  const fav = data?.entries.find((e) => e.org.toLowerCase() === org.toLowerCase() && e.repo.toLowerCase() === repo.toLowerCase()) ?? null;
+  if (fav === null) {
+    return (
+      <Page crumbs={[{ text: "Рейтинг", href: lastRatingHref() }, { text: `${org} / ${repo}` }]}>
+        <Alert theme="danger" view="outlined" className="rh-break-anywhere" title={`Не удалось открыть ${slugOf(org, repo)}`} message={fallback} actions={[{ text: "Повторить", handler: onRetry }]} />
+      </Page>
+    );
+  }
+  const own = fav.access?.own === true;
+  return (
+    <Page crumbs={crumbs}>
+      <EmptyState
+        icon={SquareListUl}
+        title="Оценки пока нет"
+        description={
+          own
+            ? "Репозиторий в вашем избранном, но анализа еще не было. Запустите его из «Избранного» – итог появится здесь."
+            : "Репозиторий в вашем избранном, но сервис его не анализировал: анализ запускается только для своих репозиториев (с правами на CI/CD или Безопасность), а закрытые репозитории в рейтинг не входят."
+        }
+        actions={[{ text: "К избранному", view: "normal", size: "l", href: "/me" }]}
+      />
     </Page>
   );
 }
@@ -514,413 +573,6 @@ function useRecommendationsAnchor(ready: boolean, key: string): void {
   }, [ready, key]);
 }
 
-/**
- * Слоты В5 (В4.6, У18). Стоят ПОСЛЕ табов сознательно: выше они отобрали бы
- * высоту у величины и шести категорий. Сравнение (К5.15) не монтируется до
- * своего сценария (решение владельца 20.09); история и значок показывают
- * честное пустое состояние до своих блоков (Б5/Б6).
- * AI-описание (Б3): текст виден только зрителю с полным Score (решение 22.09
- * – «текст никогда не публичен»); у владельца – кнопка генерации и тумблер
- * автозапуска; невалидированный текст не показывается никогда – роль без
- * текста честно помечена «не сформировано» (fail-soft виден в UI).
- */
-function aiBadgeText(ai: Card["ai"]): string {
-  const model = ai?.overview?.model ?? ai?.specialists[0]?.model;
-  return model ? aiModelName(model) : "YandexGPT";
-}
-
-function CardSlots({ card, org, repo, onChanged }: { card: Card; org: string; repo: string; onChanged: () => void }) {
-  return (
-    <Flex gap={3} wrap role="region" aria-label="AI-описание, история и значок">
-      <AiSummarySlot card={card} org={org} repo={repo} onChanged={onChanged} />
-      <ScoreHistorySlot org={org} repo={repo} />
-      <BadgeSlot org={org} repo={repo} />
-    </Flex>
-  );
-}
-
-/**
- * Значок для README (Б6, К5.8): публичные данные рейтинга – анониму; для
- * закрытых или выпавших из рейтинга репозиториев сервер отвечает 404, и слот
- * честно это объясняет, не показывая битую картинку. В SVG – только число,
- * подпись и цвет.
- */
-function BadgeSlot({ org, repo }: { org: string; repo: string }) {
-  const base = `/api/v1/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`;
-  const [state, setState] = useState<{ kind: "loading" | "ok" | "gone" }>({ kind: "loading" });
-  useEffect(() => {
-    const ctrl = new AbortController();
-    setState({ kind: "loading" });
-    fetch(`${base}/badge.svg`, { signal: ctrl.signal })
-      .then((res) => setState({ kind: res.ok ? "ok" : "gone" }))
-      .catch(() => {
-        if (!ctrl.signal.aborted) setState({ kind: "gone" });
-      });
-    return () => ctrl.abort();
-  }, [base]);
-  return (
-    // data-slot: контракт У18 (badge)
-    <Card view="outlined" className="rh-slot" data-slot="badge">
-      <Flex direction="column" gap={2}>
-        <Flex gap={2} alignItems="center">
-          <Text variant="subheader-2" as="h2">
-            {SLOT_EMPTY.badge.title}
-          </Text>
-        </Flex>
-        {state.kind === "loading" ? (
-          <Text variant="body-2" color="complementary">
-            Проверяем доступность значка…
-          </Text>
-        ) : state.kind === "gone" ? (
-          <Text variant="body-2" color="complementary">
-            {SLOT_EMPTY.badge.text}
-          </Text>
-        ) : (
-          <>
-            <Text variant="body-2" color="complementary">
-              {"Значок показывает HealthCraft Index публичного репозитория: только число, подпись и цвет."}
-            </Text>
-            <img src={`${base}/badge.svg`} alt="Repo Health badge" width={110} height={20} />
-            <Text variant="body-2" color="complementary">
-              {"Код для README:"}
-            </Text>
-            <Text variant="body-2" color="secondary" className="rh-prose">
-              {`![Repo Health](${`${base}/badge.svg`})`}
-            </Text>
-            <Text variant="body-2" color="complementary">
-              {`Публичные данные без авторизации: ${base}`}
-            </Text>
-          </>
-        )}
-      </Flex>
-    </Card>
-  );
-}
-
-/**
- * История оценки (Б5, К5.7): график публичного индекса по строкам scores
- * (новых сборов нет), tri-state – разрыв там, где числа не было. Полный
- * Score – вторая линия только зрителю с правами. Честные ограничения
- * подписаны на экране: сопоставимость внутри одной версии модели.
- */
-/**
- * История LLM-взглядов (Б4, К5.16): append-заметки по сканам – зритель видит,
- * как менялось описание. Экран эволюции – при истории не меньше 2 дней
- * (решение 22.09); раньше – честное «слишком рано судить». Данные –
- * /ai-notes (тексты не публичны, сервер сам закрывает по правам).
- */
-function EvolutionSection({ org, repo, enabled }: { org: string; repo: string; enabled: boolean }) {
-  const { state } = useJson<AiNotesResponse>(`/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/ai-notes`);
-  const data = dataOf(state);
-  const [open, setOpen] = useState(false);
-  if (!enabled || data === null || data.locked) return null;
-  const byScan = new Map<number, typeof data.notes>();
-  for (const note of data.notes) {
-    const list = byScan.get(note.scanId) ?? [];
-    if (note.role === "overview") list.unshift(note);
-    else list.push(note);
-    byScan.set(note.scanId, list);
-  }
-  const groups = [...byScan.entries()].sort((a, b) => a[0] - b[0]);
-  const tooEarly = evolutionTooEarly(groups.map(([, notes]) => notes[0]?.scanFinishedAt ?? ""));
-  return (
-    <details className="rh-ai__details" open={open} onToggle={(e) => setOpen((e.target as HTMLDetailsElement).open)}>
-      <summary className="rh-ai__summary">
-        <Text variant="body-2" color="secondary">
-          Как менялись взгляды
-        </Text>
-      </summary>
-      {tooEarly ? (
-        <Text variant="body-2" color="complementary">
-          {"Слишком рано судить о динамике: истории меньше 2 дней. Сравнение взглядов появится, когда накопятся анализы за больший срок."}
-        </Text>
-      ) : (
-        <Flex direction="column" gap={2}>
-          {groups.map(([scanId, notes]) => {
-            const overview = notes.find((n) => n.role === "overview");
-            const head = overview?.headSha ? ` коммит ${overview.headSha.slice(0, 7)}` : "";
-            return (
-              <div key={scanId}>
-                <Text variant="body-2" color="secondary">
-                  {`${fmtDate(overview?.createdAt ?? null)}${head}`}
-                </Text>
-                <Text as="div" variant="body-2" color="complementary" className="rh-prose">
-                  {overview?.text ?? "Общее описание не сформировано."}
-                </Text>
-              </div>
-            );
-          })}
-        </Flex>
-      )}
-    </details>
-  );
-}
-
-function ScoreHistorySlot({ org, repo }: { org: string; repo: string }) {
-  const { state } = useJson<HistoryResponse>(`/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/history`);
-  const data = dataOf(state);
-  const points = data?.points ?? [];
-  const view = scoreHistoryView(data);
-  const W = 320;
-  const H = 96;
-  const pad = 6;
-  const lineOf = (values: Array<number | null>): { d: string; segments: number } => {
-    let d = "";
-    let segments = 0;
-    let open = false;
-    points.forEach((_, i) => {
-      const v = values[i];
-      const x = points.length <= 1 ? W / 2 : pad + (i * (W - 2 * pad)) / (points.length - 1);
-      if (v === null || v === undefined) {
-        open = false;
-        return;
-      }
-      const y = H - pad - (Math.max(0, Math.min(100, v)) / 100) * (H - 2 * pad);
-      d += `${open ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)} `;
-      if (!open) segments++;
-      open = true;
-    });
-    return { d: d.trim(), segments };
-  };
-  const indexLine = lineOf(points.map((p) => p.healthcraftIndex));
-  const fullLine = data?.fullOpen === true ? lineOf(points.map((p) => p.repoHealthScore)) : null;
-  return (
-    // data-slot: контракт У18 (scoreHistory)
-    <Card view="outlined" className="rh-slot" data-slot="scoreHistory">
-      <Flex direction="column" gap={2}>
-        <Flex gap={2} alignItems="center">
-          <Text variant="subheader-2" as="h2">
-            История оценки
-          </Text>
-        </Flex>
-        {view.chart && (
-          <>
-            <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label="График оценки по анализам" style={{ width: "100%", height: "auto" }}>
-              {[0, 25, 50, 75, 100].map((g) => {
-                const y = H - pad - (g / 100) * (H - 2 * pad);
-                return <line key={g} x1={pad} x2={W - pad} y1={y} y2={y} stroke="var(--g-color-line-generic)" strokeDasharray="2 4" strokeWidth={1} />;
-              })}
-              {indexLine.d !== "" && (
-                <path d={indexLine.d} fill="none" stroke="var(--g-color-text-primary)" strokeWidth={2} strokeLinejoin="round" />
-              )}
-              {fullLine !== null && fullLine.d !== "" && (
-                <path d={fullLine.d} fill="none" stroke="var(--g-color-text-secondary)" strokeWidth={1.5} strokeDasharray="4 3" />
-              )}
-            </svg>
-            <Flex gap={3} wrap>
-              <Text variant="body-2" color="complementary">{view.count}</Text>
-              <Text variant="body-2" color="complementary">{view.full}</Text>
-            </Flex>
-          </>
-        )}
-        <Text variant="body-2" color="complementary">
-          {view.text}
-        </Text>
-      </Flex>
-    </Card>
-  );
-}
-
-function AiSummarySlot({ card, org, repo, onChanged }: { card: Card; org: string; repo: string; onChanged: () => void }) {
-  const toaster = useToaster();
-  const [sending, setSending] = useState(false);
-  const own = card.viewer?.own === true;
-  const ai = card.ai;
-
-  // smoke-круг 23.09: job завершился, а карточка не перечитывалась —
-  // плашка «формируется» висела вечно. Пока jobActive — опрашиваем каждые 5 с
-  useEffect(() => {
-    if (ai === undefined || ai === null || !ai.jobActive) return;
-    const timer = setInterval(onChanged, 5000);
-    return () => clearInterval(timer);
-  }, [ai, onChanged]);
-
-  // 23.09: итог задания перечитывает карточку СРАЗУ — без этого кнопка висела
-  // «Формируется…» и disabled до 5 с после того, как панель заданий опустела
-  useAnalysisFinished((jobs) => {
-    if (jobs.some((j) => j.slug === `${org}/${repo}`)) onChanged();
-  });
-
-  // 23.09 (Алексей): тумблер — ТОЛЬКО политика автогенерации на будущие сканы;
-  // PUT /summary-auto заявок не ставит. Генерацию сейчас запускает кнопка.
-  // Свой флаг занятости: sending держит loading на кнопке — её мигание при
-  // переключении тумблера недопустимо (круг 5)
-  const [autoBusy, setAutoBusy] = useState(false);
-  const actAuto = async (on: boolean): Promise<void> => {
-    setAutoBusy(true);
-    try {
-      const res = await fetch(`/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/summary-auto`, {
-        method: "PUT",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ on }),
-      });
-      if (!res.ok) {
-        const err = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
-        toaster.add({
-          name: `summary-auto-fail:${org}/${repo}`,
-          theme: "danger",
-          title: "Режим не изменен",
-          content: err?.error?.message ?? `Ошибка ${res.status}`,
-        });
-        return;
-      }
-      onChanged();
-    } finally {
-      setAutoBusy(false);
-    }
-  };
-
-  const act = async (method: "POST" | "DELETE"): Promise<void> => {
-    setSending(true);
-    try {
-      const res = await fetch(`/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/summary`, { method });
-      const body = (await res.json().catch(() => null)) as { jobId?: number | null; cached?: boolean; scanQueued?: boolean } | null;
-      if (res.ok) {
-        // 23.09 (smoke-круг 2): генерация целиком идет ~6 с, опрос заданий в
-        // покое тикает раз в 15 с — без объявления jobId трекеру прогон не
-        // успевал мелькнуть ни в «Активных», ни тостом; объявленное задание
-        // тостится даже если первый опрос застал его уже завершенным (Н5)
-        const cached = body?.cached === true;
-        const scanQueued = body?.scanQueued === true;
-        announceJobStarted(body?.jobId ?? undefined);
-        if (!cached) announceJobsChanged();
-        onChanged();
-        // 23.09: кэш не «поставлено в генерацию» — тост называет вещи честно
-        toaster.add({
-          name: `summary-ok:${org}/${repo}`,
-          theme: "success",
-          title:
-            method === "POST"
-              ? cached
-                ? "Описание этого скана уже готово"
-                : scanQueued
-                  ? "Анализ и описание в очереди"
-                  : "Описание поставлено в генерацию"
-              : "Автопересчет выключен",
-          content:
-            method === "POST"
-              ? cached
-                ? "Заметки последнего скана сформированы ранее. Новое описание – после нового анализа репозитория."
-                : scanQueued
-                  ? "Сначала соберутся свежие данные скана, затем описание обновится."
-                  : "Описание появится здесь после генерации и проверки фактов."
-              : undefined,
-        });
-      } else {
-        const body = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
-        toaster.add({
-          name: `summary-fail:${org}/${repo}`,
-          theme: "danger",
-          title: "Генерация не запущена",
-          content: body?.error?.message ?? `Ошибка ${res.status}`,
-        });
-      }
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const cooldownActive = ai?.cooldownUntil !== undefined && ai?.cooldownUntil !== null && Date.parse(ai.cooldownUntil) > Date.now();
-
-  return (
-    // data-slot держит имя слота из контракта У18 (aiSummary) на элементе
-    <Card view="outlined" className="rh-slot" data-slot="aiSummary">
-      <Flex direction="column" gap={2}>
-        <Flex gap={2} alignItems="center">
-          <Text variant="subheader-2" as="h2">
-            Описание для менеджера
-          </Text>
-          {/* решение 23.09 (Алексей, smoke-круг): бейдж честно называет
-             генератора; К-7 В5.3 (§2 24.09): официальным названием модели
-             последней заметки, как в отчете; без заметок — семейство */}
-          <span className="rh-ai-badge">{aiBadgeText(ai)}</span>
-        </Flex>
-        {ai === undefined || ai === null ? (
-          // Закрытый полный Score: текст не публичен по правам — не «пока»,
-          // а честная причина (решение 22.09 о видимости)
-          <Text variant="body-2" color="complementary">
-            {"Описание собирается по фактам скана и не меняет оценку: числа считает код, текст только пересказывает их человеческим языком. " +
-              "Текст не является публичным – он виден только зрителям с правами на полный Score (на приватном репозитории – только владельцу)."}
-          </Text>
-        ) : (
-          <>
-            {ai.overview === null ? (
-              <Text variant="body-2" color="complementary">
-                {ai.specialists.length > 0
-                  ? "Общее описание не сформировано – модель не прошла проверку фактов. Отдельные разделы ниже собраны и проверены."
-                  : "AI-описание не сформировано. Запуск – по кнопке; для репозитория можно включить пересчет при каждом скане."}
-              </Text>
-            ) : (
-              <Text as="div" variant="body-1" className="rh-prose">
-                {ai.overview.text}
-              </Text>
-            )}
-            {ai.specialists.length > 0 && (
-              <Flex direction="column" gap={1}>
-                {ai.specialists.map((note) => (
-                  <details key={note.role} className="rh-ai__details">
-                    <summary className="rh-ai__summary">
-                      <Text variant="body-2" color="secondary">
-                        {aiRoleTitle(note.role)}
-                      </Text>
-                    </summary>
-                    <Text as="div" variant="body-2" className="rh-prose">
-                      {note.text}
-                    </Text>
-                  </details>
-                ))}
-              </Flex>
-            )}
-            {(ai.failures ?? []).length > 0 && (
-              <Flex direction="column" gap={1}>
-                {ai.failures.map((f) => (
-                  <Text key={f.role} variant="caption-2" color="warning">
-                    {`${aiRoleTitle(f.role)} – не сформировано: ${f.reason}`}
-                  </Text>
-                ))}
-              </Flex>
-            )}
-            {ai.generatedAt !== null && (
-              <Text variant="body-2" color="complementary">
-                {`Собрано по скану от ${fmtDate(ai.generatedAt)}. Текст не является оценкой – числа считает код по метрикам.`}
-              </Text>
-            )}
-            {own && (
-              <Flex gap={3} alignItems="center" wrap>
-                <Button
-                  view="action"
-                  size="s"
-                  loading={sending}
-                  disabled={ai.jobActive || cooldownActive}
-                  onClick={() => void act("POST")}
-                  title={cooldownActive ? `Следующий запуск будет доступен после ${fmtDateTime(ai.cooldownUntil)}` : undefined}
-                >
-                  {ai.jobActive ? "Описание формируется…" : ai.overview === null ? "Сформировать описание" : "Обновить описание"}
-                </Button>
-                {cooldownActive && !ai.jobActive && (
-                  <Text variant="body-2" color="complementary">
-                    {`Частые запуски ограничены – следующий после ${fmtDateTime(ai.cooldownUntil)}.`}
-                  </Text>
-                )}
-                <Flex gap={1} alignItems="center">
-                  <Switch
-                    size="s"
-                    checked={ai.optIn}
-                    disabled={autoBusy}
-                    onUpdate={(checked) => void actAuto(checked)}
-                    content="Пересчитывать при каждом скане"
-                  />
-                </Flex>
-              </Flex>
-            )}
-            <EvolutionSection org={org} repo={repo} enabled={true} />
-          </>
-        )}
-      </Flex>
-    </Card>
-  );
-}
-
 // ---------- правая панель: итог ----------
 
 /**
@@ -980,19 +632,12 @@ function ScoreAside({
       <AsideSection title="Анализ">
         {/* К8.5.1 (С4-9): идущий анализ виден и на карточке с оценкой — свой
             (по заданию) или чужой/периодический (по скану); без обещания времени */}
-        {(analysis !== null || foreignRunning) && (
-          <Flex gap={2} alignItems="center">
-            {analysis?.stalled ? (
-              <Label theme="warning" size="xs">
-                анализ затянулся – итог появится в «Заданиях»
-              </Label>
-            ) : (
-              <>
-                <Spin size="xs" />
-                <Text color="secondary">{analysis?.phase === "queued" ? "анализ в очереди" : "идет анализ"}</Text>
-              </>
-            )}
-          </Flex>
+        {/* замечание 25.09: «идет анализ» со спиннером в панели снят — ход анализа
+            показывают кнопка в шапке и «Задания»; остается только затянувшийся */}
+        {analysis?.stalled === true && (
+          <Label theme="warning" size="xs">
+            анализ затянулся – итог появится в «Заданиях»
+          </Label>
         )}
         {scan || score ? (
           <DefinitionList nameMaxWidth={ASIDE_NAME_WIDTH}>
@@ -1256,7 +901,8 @@ function Categories({ card, view }: { card: Card; view: CardView }) {
         </Text>
         <ul className="rh-list" style={{ borderTop: 0 }}>
           {view.categories.map((c) => (
-            <CategoryRow key={c.key} category={c} card={card} defaultOpen={c.key === view.worstKey} />
+            // замечание 25.09: при первом заходе ни одна категория не раскрыта (раскрытие худшей путало)
+            <CategoryRow key={c.key} category={c} card={card} />
           ))}
         </ul>
         {view.locked && <LockedCategories text={view.locked.text} />}
@@ -1282,6 +928,15 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
   const cat = card.score!.categories[key]!;
   // ревью кода R16: раскрыть по умолчанию можно только то, что раскрывается
   const [open, setOpen] = useState(defaultOpen);
+  // В5.3 круг 3: ссылки «К категории…» (фрод, AI-обзор) раскрывают строку
+  useEffect(() => {
+    const onOpen = (e: Event): void => {
+      if ((e as CustomEvent<string>).detail === key) setOpen(true);
+    };
+    window.addEventListener(OPEN_CATEGORY_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_CATEGORY_EVENT, onOpen);
+  }, [key]);
+  const aiNote = categoryAiNote(card, key);
   const subs = Object.entries(cat.submetrics);
   // Ступень 4 (Ф12): у категории без данных раскрывать нечего — одно состояние, один вид
   const expandable = c.score !== null && (subs.length > 0 || c.partialNote !== null);
@@ -1292,6 +947,8 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
       <span className="rh-category__name">
         <span className="rh-category__title">
           <Text variant="subheader-1">{c.title}</Text>
+          {/* 3-B (§2 24.09): искра — разбор модели есть (фиолетовая) или появится после обзора (серая) */}
+          <CategoryAiMark card={card} categoryKey={key} hasData={c.score !== null} />
           {c.stale && (
             <Label theme="warning" size="xs">
               Данные из прошлого анализа
@@ -1323,7 +980,7 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
   );
 
   return (
-    <li className="rh-list__item" style={{ padding: 0 }}>
+    <li className="rh-list__item" style={{ padding: 0 }} id={categoryAnchor(key)}>
       {expandable ? (
         <button type="button" className="rh-category" aria-expanded={open} onClick={() => setOpen(!open)}>
           {row}
@@ -1331,8 +988,6 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
       ) : (
         <div className="rh-category">{row}</div>
       )}
-      {/* В4.6 (У17): разбивка по движкам живёт под строкой Security */}
-      {key === "security" && <AppsecEngines card={card} />}
       {open && expandable && (
         <div className="rh-subrows">
           {/* примечание частичной нехватки данных — внутри раскрытия (в MD его нет в строке) */}
@@ -1417,6 +1072,10 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
               )}
             </div>
           ))}
+          {/* В4.6 (У17): разбивка по движкам — в раскрытии Security, строками таблицы */}
+          {key === "security" && <AppsecEngines card={card} />}
+          {/* замечание 3 (25.09): текст модели — под таблицей метрик */}
+          {aiNote !== null && <CategoryAiNote note={aiNote} />}
         </div>
       )}
     </li>
@@ -1717,41 +1376,61 @@ function appsecBreakdown(card: Card): AppsecBreakdown | null {
   };
 }
 
+/**
+ * Находки AppSec по видам проверок (В4.6, У17). В5.3 круг 3 (замечание 25.09):
+ * стоял под строкой «Безопасности» всегда, крупным кеглем и списком определений
+ * другой ширины — не похоже на метрики. Теперь — внутри раскрытия, под таблицей
+ * подметрик, теми же строками (имя, лидер, значение; колонки веса и балла —
+ * прочерк: в балл категории разбивка не входит).
+ */
 function AppsecEngines({ card }: { card: Card }) {
   const breakdown = appsecBreakdown(card);
   if (!breakdown || (breakdown.engines.length === 0 && breakdown.sca === null)) return null;
+  const rows: { name: string; count: number; note?: string }[] = [
+    ...breakdown.engines.map(([name, count]) => ({ name, count })),
+    ...(breakdown.sca
+      ? [{ name: `${breakdown.sca[0]} (зависимости, SCA)`, count: breakdown.sca[1], note: "Находки в зависимостях показываются отдельно и в оценку Безопасности не входят." }]
+      : []),
+  ];
+  const notes = [
+    breakdown.sca === null ? "SourceCraft не вернул отдельное число находок в зависимостях (SCA)." : null,
+    breakdown.truncated ? "Список групп находок усечен предохранителем пагинации: счетчики показывают собранную часть." : null,
+  ].filter((n): n is string => n !== null);
   return (
-    <Flex direction="column" gap={1} style={{ padding: "0 var(--g-spacing-3) var(--g-spacing-2) calc(16px + var(--g-spacing-6))" }}>
-      <Text variant="body-2" color="complementary">
-        Находки AppSec по видам проверок{breakdown.openFindings !== null ? ` (всего открытых: ${fmtNumber(breakdown.openFindings)})` : ""}:
+    <>
+      <Text variant="caption-2" color="secondary" className="rh-subrows__group">
+        {`Открытые находки по видам проверок${breakdown.openFindings !== null ? ` – всего ${fmtNumber(breakdown.openFindings)}` : ""}`}
       </Text>
-      <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
-        {breakdown.engines.map(([name, count]) => (
-          <DefinitionList.Item key={name} name={name}>
-            {fmtNumber(count)}
-          </DefinitionList.Item>
-        ))}
-        {breakdown.sca && (
-          <DefinitionList.Item name={`${breakdown.sca[0]} (зависимости, SCA)`} note="Находки в зависимостях показываются отдельно и в оценку Безопасности не входят: формула категории не менялась.">
-            {fmtNumber(breakdown.sca[1])}
-          </DefinitionList.Item>
-        )}
-      </DefinitionList>
-      {breakdown.sca === null && (
-        <Text variant="body-2" color="complementary">
-          SourceCraft не вернул отдельное число находок в зависимостях (SCA).
+      {rows.map((r) => (
+        <div key={r.name} className="rh-subrow" title={r.note}>
+          <span className="rh-subrow__head">
+            <Text color="secondary" className="rh-subrow__icon">
+              <Icon data={Bug} size={14} />
+            </Text>
+            <Text color="secondary" className="rh-subrow__name">
+              {r.name}
+            </Text>
+            <span className="rh-subrow__lead" aria-hidden="true" />
+            <Text color="secondary" className="rh-subrow__value">
+              {fmtNumber(r.count)}
+            </Text>
+          </span>
+          <Text className="rh-subrow__score" color="secondary">
+            —
+          </Text>
+          <Text className="rh-subrow__score" color="secondary" title="Разбивка показывается для справки, в балл категории не входит">
+            —
+          </Text>
+        </div>
+      ))}
+      {notes.map((n) => (
+        <Text key={n} variant="body-1" color="complementary" className="rh-subrows__note rh-subrows__note_after">
+          {n}
         </Text>
-      )}
-      {breakdown.truncated && (
-        <Text variant="body-2" color="complementary">
-          Список групп находок усечен предохранителем пагинации: счетчики показывают собранную часть.
-        </Text>
-      )}
-    </Flex>
+      ))}
+    </>
   );
 }
-
-
 
 // ========== ПОРТ 6 (hq-parallel): избранное на карточке ==========
 

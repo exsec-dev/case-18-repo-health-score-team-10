@@ -66,9 +66,13 @@ describe("К8.5.14: анализ — только своих; права — с�
 
   test("исход автопроверки при добавлении — человеческим текстом, анализ чужого не обещается", () => {
     expect(favoriteAddedText({ status: "checked", enqueue: { status: "queued", code: null } })).toBe("Права проверены – запущен анализ, итог придет уведомлением.");
-    expect(favoriteAddedText({ status: "checked", enqueue: { status: "skipped", code: "not_own" } })).toBe(
+    // В5.3 (25.09): ночной обход обещается только публичному; закрытому — честно «оценки не будет»
+    expect(favoriteAddedText({ status: "checked", enqueue: { status: "skipped", code: "not_own" } }, "public")).toBe(
       "Права проверены. Анализ запускается только для своих репозиториев – этот обновит ночной обход.",
     );
+    for (const v of ["internal", "private", "unknown", undefined] as const) {
+      expect(favoriteAddedText({ status: "checked", enqueue: { status: "skipped", code: "not_own" } }, v)).not.toContain("ночной обход");
+    }
     expect(favoriteAddedText({ status: "failed", enqueue: null })).toBe("Проверить права не удалось: SourceCraft сейчас не отвечает – проверим позже.");
     expect(favoriteAddedText({ status: "deferred", enqueue: null })).toBe("Права проверим в фоне – итог появится в строке списка.");
   });

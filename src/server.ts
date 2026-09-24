@@ -54,7 +54,7 @@ import { reportFileName } from "./web/format";
 import { pdfResponse } from "./report/pdf";
 import { catalogClientBudget, closeOwnRunningScans, maintenanceTick, returnOwnRunningJobs, startMaintenance, startScheduler, startWorkerLoop } from "./jobs/scheduler";
 import { enqueueSummary } from "./jobs/scheduler";
-import { setSummaryAuto } from "./summary/optin";
+import { enableSummaryAutoUnlessOptedOut, setSummaryAuto } from "./summary/optin";
 import { getAiNotesHistory, getRepoHistory } from "./api/history";
 import { BADGE_CACHE_SECONDS, getPublicRepo, renderBadgeSvg } from "./api/public";
 import { NO_PAT_ACCESS } from "./auth/access";
@@ -359,6 +359,18 @@ function viewerAccess(req: Request): (repo: AccessRepo) => Promise<AccessResult>
   };
 }
 
+/**
+ * Доступ зрителя к репо по строке каталога — как у карточки: ключ кэша прав —
+ * настоящий repos.id, видимость — из каталога. В5.3 (О1): история и AI-заметки
+ * звали резолвер с `id: 0`, и все репо делили одну запись кэша — чужой репо
+ * получал права своего. Нет строки — прав нет (ответ всё равно 404).
+ */
+async function accessBySlug(req: Request, org: string, repo: string): Promise<AccessResult> {
+  const row = db.query("SELECT id, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number; visibility: string } | null;
+  if (!row) return { ...NO_PAT_ACCESS };
+  return viewerAccess(req)({ id: row.id, org, repo, visibility: row.visibility });
+}
+
 /** PAT пользователя, если он читается текущим ключом; иначе null. */
 function patOf(userId: number): string | null {
   return config.auth.appSecret ? getPat(db, config.auth.appSecret, userId) : null;
@@ -572,7 +584,7 @@ const routes = {
       // остаётся (здоровье читают по телу, порт-гарды ждут статус)
       return Response.json(getHealth(db, config));
     },
-    "/api/meta": () => Response.json(getMeta(db, { leaseMs: config.scheduler.leaseMs })),
+    "/api/meta": () => Response.json(getMeta(db, { leaseMs: config.scheduler.leaseMs, publicBaseUrl: config.publicBaseUrl })),
     "/api/repos": (req) => {
       const parsed = parseReposQuery(new URL(req.url).searchParams);
       if (!parsed.ok) return badQuery(parsed.message);
@@ -668,7 +680,7 @@ const routes = {
       // В5.1 (Прод-З2/Security-З4): то же минутное окно, что у карточки —
       // залогиненный не дергает историю без лимита по списку репо
       if (viewer && !allowCardView(viewer.userId)) return cardRateLimited(viewer.userId);
-      const access = viewer === null ? NO_PAT_ACCESS : await viewerAccess(req)({ id: 0, org: org!, repo: repo!, visibility: "unknown" });
+      const access = viewer === null ? NO_PAT_ACCESS : await accessBySlug(req, org!, repo!);
       const history = getRepoHistory(db, org!, repo!, { access });
       if (history === null) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
       return Response.json(history);
@@ -683,7 +695,7 @@ const routes = {
       const viewer = sessionOf(req);
       // В5.1 (Прод-З2/Security-З4): то же минутное окно, что у карточки
       if (viewer && !allowCardView(viewer.userId)) return cardRateLimited(viewer.userId);
-      const access = viewer === null ? NO_PAT_ACCESS : await viewerAccess(req)({ id: 0, org: org!, repo: repo!, visibility: "unknown" });
+      const access = viewer === null ? NO_PAT_ACCESS : await accessBySlug(req, org!, repo!);
       const notes = getAiNotesHistory(db, org!, repo!, { access });
       if (notes === null) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
       if (notes.locked) return Response.json({ error: { code: "locked", message: notes.reason } }, { status: 403 });
@@ -750,11 +762,11 @@ const routes = {
         // В5.1 (Ищейка-С1): кэш по скану — заметки последнего скана есть, честный
         // ответ без второй генерации; оп-ин всё равно включается (кнопка = намерение)
         if (out.kind === "cached") {
-          setSummaryAuto(db, user.userId, `${org}/${repo}`, true);
+          const auto = enableSummaryAutoUnlessOptedOut(db, user.userId, `${org}/${repo}`);
           // 23.09: отказ кэша не молчит — оператор видит в stdout, почему кнопка
           // не создала заявку (и что новый скан даст новую генерацию)
           console.log(`[summary] ${org}/${repo}: POST поверх готовых заметок последнего скана — кэш, заявка не создана`);
-          return Response.json({ ok: true, jobId: null, auto: true, cached: true, queued: false, scanQueued: false });
+          return Response.json({ ok: true, jobId: null, auto, cached: true, queued: false, scanQueued: false });
         }
         if (out.kind === "too_many") {
           return Response.json(
@@ -768,9 +780,10 @@ const routes = {
             { status: 429 },
           );
         }
-        // кнопка = оп-ин: автозапуск на следующих сканах этого репо (решение 15.09)
-        setSummaryAuto(db, user.userId, `${org}/${repo}`, true);
-        return Response.json({ ok: true, jobId: out.jobId, auto: true, queued: out.kind === "active", scanQueued });
+        // кнопка = оп-ин: автозапуск на следующих сканах этого репо (решение 15.09);
+        // В5.3 (25.09): явное выключение человеком кнопка не перебивает
+        const auto = enableSummaryAutoUnlessOptedOut(db, user.userId, `${org}/${repo}`);
+        return Response.json({ ok: true, jobId: out.jobId, auto, queued: out.kind === "active", scanQueued });
       },
       DELETE: async (req) => {
         const csrf = guardOrigin(req);
@@ -1033,7 +1046,8 @@ const routes = {
           windowRetryAfterSec(myReposViews, user.userId, 60_000),
         );
       }
-      const client = makeScClient({ retry: INTERACTIVE_RETRY, token: pat, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 3, timeoutMs: config.scan.rest.timeoutMs });
+      // В5.3 (25.09): бюджет запросов — под полный обход страниц (платформа отдает по 1-2 записи)
+      const client = makeScClient({ retry: INTERACTIVE_RETRY, token: pat, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 40, timeoutMs: config.scan.rest.timeoutMs });
       const result = await listSourcecraftRepos(client);
       if (result.status === "source_http") return Response.json({ error: { code: "source_http" } }, { status: 502 });
       return Response.json({ repos: result.repos, partial: result.partial });

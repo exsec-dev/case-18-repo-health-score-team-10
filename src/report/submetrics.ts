@@ -200,7 +200,8 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
  * Показ-без-веса (§7.3 методики): число объясняет картину, но в балл
  * категории не идет. Одна копия для карточки, MD и PDF.
  */
-export const DISPLAY_ONLY = new Set(["activity.mirror_likeness", "activity.commits_90d", "activity.commits_365d", "activity.sync_bursts", "code.todo_total"]);
+// В5.3 (25.09): bus_factor — без веса в SUBWEIGHTS методики (подпись «справочно, без веса»), серым как прочие
+export const DISPLAY_ONLY = new Set(["activity.mirror_likeness", "activity.commits_90d", "activity.commits_365d", "activity.sync_bursts", "activity.bus_factor", "code.todo_total"]);
 
 export function displayOnly(category: string, sub: string): boolean {
   return DISPLAY_ONLY.has(`${category}.${sub}`);

@@ -296,19 +296,27 @@ export interface ScRepoLite {
   isEmpty: boolean;
 }
 
-/** Пикер «своих» репозиториев: /me/repos с PAT зрителя, до 3 страниц по 100. */
+/**
+ * Репозитории, ДОСТУПНЫЕ токену зрителя (/me/repos): это не «свои» — в ответе
+ * SourceCraft нет признака владения (аудит 25.09, reports/2026-09-25-m53-add-repo-audit.md).
+ * В5.3 (25.09, О1 аудита): платформа не соблюдает `page_size` и отдает по 1-2
+ * записи на страницу — прежний потолок в 3 страницы давал 5 строк при подписи
+ * «первые 300». Теперь — по `next_page_token` до конца с потолками по записям и
+ * страницам; сбой на странице N > 1 — собранное с `partial`, а не 502.
+ */
 export async function listSourcecraftRepos(
   client: ScClient,
-  opts: { maxPages?: number } = {},
+  opts: { maxPages?: number; maxItems?: number } = {},
 ): Promise<{ status: "ok" | "source_http"; partial: boolean; repos: ScRepoLite[] }> {
-  const maxPages = opts.maxPages ?? 3;
+  const maxPages = opts.maxPages ?? 40;
+  const maxItems = opts.maxItems ?? 200;
   let token: string | null = null;
   let pages = 0;
   const repos: ScRepoLite[] = [];
   while (pages < maxPages) {
     const path = `/me/repos?page_size=100${token ? `&page_token=${encodeURIComponent(token)}` : ""}`;
     const res = await client.get(path);
-    if (res.status !== 200) return { status: "source_http", partial: true, repos };
+    if (res.status !== 200) return repos.length > 0 ? { status: "ok", partial: true, repos } : { status: "source_http", partial: true, repos };
     pages++;
     const body = res.json as {
       repositories?: { organization?: { slug?: unknown }; slug?: unknown; name?: unknown; visibility?: unknown; is_empty?: unknown }[];
@@ -329,6 +337,7 @@ export async function listSourcecraftRepos(
     }
     const next = body?.next_page_token;
     if (typeof next !== "string" || next.length === 0) return { status: "ok", partial: false, repos };
+    if (repos.length >= maxItems) return { status: "ok", partial: true, repos: repos.slice(0, maxItems) };
     token = next;
   }
   return { status: "ok", partial: true, repos };

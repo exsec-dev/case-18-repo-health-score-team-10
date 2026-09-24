@@ -27,8 +27,14 @@ import {
   fmtScore,
   fmtSigned,
   fullScorePath,
+  AI_SECTION_TITLE,
+  FRAUD_EXPLAIN,
+  FRAUD_TITLE,
   aiModelName,
+  aiParagraphs,
   aiRoleTitle,
+  fraudFactorFact,
+  fraudFactorTitle,
   noDataReason,
   pathText,
   scanStatusText,
@@ -904,31 +910,18 @@ function fraudBlock(card: RepoCard): Block[] {
   // флаггер может вернуть факторы при flag: false (валидатор это пропускает) —
   // подозрение печатается только при флаге, как в кабинете (`MePage.tsx`)
   if (fraud === undefined || fraud === null || fraud.flag !== true || fraud.factors.length === 0) return [];
-  const out: Block[] = [h2("Подозрение на искусственную активность")];
-  out.push(para(line("Автоматический анализ нашел признаки, похожие на накрутку активности. Это подозрение для проверки человеком, а не приговор: оценка репозитория от него не меняется.")));
-  out.push({ kind: "list", items: fraud.factors.map((f) => [strong(fraudFactorTitle(f.key)), text(` – ${f.note}`)] as InlineLine) });
+  const out: Block[] = [h2(FRAUD_TITLE)];
+  out.push(para(line(FRAUD_EXPLAIN)));
+  // круг 3 В5.3 (§2 24.09, способ (2)): текст фактора строит код из факта, та же
+  // функция, что на карточке; формулировка модели — если факта нет
+  const factOf = (key: string): unknown => card.evidence.find((e) => e.key === key)?.value;
+  out.push({
+    kind: "list",
+    items: fraud.factors.map((f) => [strong(fraudFactorTitle(f.key)), text(` – ${fraudFactorFact(f.key, factOf(f.key), (iso) => fmtDate(iso)) ?? f.note}`)] as InlineLine),
+  });
   return out;
 }
 
-/**
- * К-5 (§2 24.09 «В5.3, круг 2»): название факта вместо сырого ключа; ключ
- * остается в приложении «Исходные данные». Флаггер видит только факты
- * категории «Активность» (`pipeline.ts` `scopedFacts`, реестр `KINDS`) — у
- * каждого своя ветка; неизвестный ключ — явная ветка «прочее»: ключ как есть,
- * чтобы его можно было найти в приложении (правило AGENTS.md 22.09 об enum).
- */
-export function fraudFactorTitle(key: string): string {
-  switch (key) {
-    case "activity.git.timeline":
-      return "История коммитов";
-    case "activity.git.summary":
-      return "Сводка истории git";
-    case "activity.rest":
-      return "Участники, релизы и запросы на слияние";
-    default:
-      return key;
-  }
-}
 
 /**
  * К-7 (§2 24.09 «В5.3, круг 2», вариант а): AI-описание печатается тем же
@@ -942,10 +935,10 @@ function aiBlock(card: RepoCard): Block[] {
   if (ai === undefined || ai === null) return [];
   const notes = [...(ai.overview ? [{ title: null as string | null, note: ai.overview }] : []), ...ai.specialists.map((n) => ({ title: aiRoleTitle(n.role), note: n }))];
   if (notes.length === 0) return [];
-  const out: Block[] = [h2("Описание для менеджера")];
+  const out: Block[] = [h2(AI_SECTION_TITLE)];
   for (const { title, note } of notes) {
     if (title !== null) out.push({ kind: "paragraph", tone: "subhead", lines: [[strong(title)]] });
-    out.push(para(...note.text.split(/\n+/).filter((l) => l.trim() !== "").map((l) => [escaped(l)] as InlineLine)));
+    out.push(para(...aiParagraphs(note.text).map((l) => [escaped(l)] as InlineLine)));
   }
   const models = [...new Set(notes.map((n) => aiModelName(n.note.model)))].join(", ");
   const when = ai.generatedAt ? ` от ${fmtDate(ai.generatedAt)}` : "";
