@@ -9,8 +9,10 @@
 // снимку и только repo-уровневым сигналам (Q&A №16). Инкрементальность: в
 // очередь ставятся только изменившиеся и новые репо — «умный рескан»
 // 17.09. NULL-lease матчится (SQLite NULL<now ложно — потому IS NULL OR).
-// Воркер-луп живёт в процессе сервера, одну job за раз (tmp-диск стенда
-// конечен); лиз истёк → job снова доступен (упавший воркер не блокирует
+// Воркер-лупы живут в процессе сервера: ~~одну job за раз~~ с В5.2 (очередь, 25.09) — свой
+// цикл на каждую пару «полоса роли × род заявки» (`workerLoopPlan`), тяжелые репо — только в
+// одном слоте каждого пользовательского рода (tmp-диск стенда конечен: одновременно не больше
+// 4 тяжелых клонов в роли `all`); лиз истёк → job снова доступен (упавший воркер не блокирует
 // очередь).
 // В4.1 (К3): режима у job нет — автор (user_id) определяет токен скана;
 // эвикция только у задач без автора (периодика, серверный токен);
@@ -33,7 +35,7 @@ import { AI_CACHED_NOTE, AI_REJECTED_ERRORS, type QuotaRefusal } from "./ai-quot
 import type { AiAudience } from "../db";
 import { materializeWorktree, removeWorktree } from "../summary/tools";
 import { cleanupClone, cloneWithDegrade } from "../collectors/git";
-import { loopSlots, worstCaseScanMs, type Config } from "../config";
+import { DEFAULT_HEAVY_SCAN_MS, loopSlots, worstCaseScanMs, type Config } from "../config";
 import { listRepos } from "../api/repos";
 import { getMetaValue, setMetaValue } from "../db";
 import { CATALOG_SUSPICIOUS_AT, SCHED_META } from "../api/health";
@@ -276,6 +278,14 @@ export interface ClaimOptions {
    * одному. Смысл имеет только в полосе `user` (у плановых заявок автора нет).
    */
   perUserExclusive?: boolean;
+  /**
+   * В5.2 (аудит очереди О2): слот только для легких репо — заявку на репо, у которого какой-то
+   * скан шел дольше `heavyMs`, не берет. Тяжелые идут в первом слоте рода, остальные слоты
+   * держат поток легких: два тяжелых репо двух людей не занимают все слоты.
+   */
+  lightOnly?: boolean;
+  /** порог «тяжелого» репо, мс (Config.queue.heavyScanMs) */
+  heavyMs?: number;
 }
 
 /** Роды заявок (`jobs.kind`): у каждого — свой цикл в каждой полосе роли (`workerLoopPlan`). */
@@ -321,6 +331,8 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
   const queue = opts.queue ?? "user";
   const kindOnly = opts.kind ?? null;
   const exclusive = opts.perUserExclusive === true ? 1 : 0;
+  const lightOnly = opts.lightOnly === true ? 1 : 0;
+  const heavyMs = opts.heavyMs ?? DEFAULT_HEAVY_SCAN_MS;
   const claimStmt = db.query(
       `UPDATE jobs SET status = 'running', claimed_at = ?, lease_until = ?, attempts = attempts + 1
        WHERE id = (
@@ -336,14 +348,27 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
                  SELECT 1 FROM jobs r
                  WHERE r.status = 'running' AND r.lease_until >= ? AND r.id != jobs.id
                    AND r.user_id = jobs.user_id AND r.kind = jobs.kind))
+           -- В5.2 (аудит очереди О2): слот легких не берет тяжелый репо — у него был скан дольше
+           -- порога (закрытые свипом сирот не в счет: их длительность — время до свипа)
+           AND (? = 0 OR NOT EXISTS (
+                 SELECT 1 FROM scans h
+                 WHERE h.repo_id = jobs.repo_id AND h.status_detail IS NOT 'orphaned'
+                   AND (julianday(COALESCE(h.finished_at, ?)) - julianday(h.started_at)) * 86400000.0 > ?))
            -- В5.2 (там же): «сначала анализ, потом обзор» прежде держался одной очередью; с
            -- отдельными циклами — явно: AI-заявка пользователя ждет его более ранний скан того
-           -- же репо (иначе обзор и проверка ушли бы по прошлому анализу). Полоса рейтинга не
-           -- ждет: плановый скан может стоять в очереди сутками, а топ берет последний анализ
-           AND (kind = 'scan' OR trigger_kind != 'user' OR NOT EXISTS (
-                 SELECT 1 FROM jobs s
-                 WHERE s.kind = 'scan' AND s.status IN ('queued', 'running') AND s.trigger_kind = 'user'
-                   AND s.repo_id = jobs.repo_id AND s.user_id IS jobs.user_id AND s.id < jobs.id))
+           -- же репо (иначе обзор и проверка ушли бы по прошлому анализу). Полоса рейтинга ждет
+           -- только ИДУЩИЙ плановый скан того же репо (аудит О6): стоящий в очереди — нет, он
+           -- может ждать сутками, а топ берет последний анализ
+           AND (kind = 'scan' OR (CASE WHEN trigger_kind = 'user'
+                 THEN NOT EXISTS (
+                   SELECT 1 FROM jobs s
+                   WHERE s.kind = 'scan' AND s.status IN ('queued', 'running') AND s.trigger_kind = 'user'
+                     AND s.repo_id = jobs.repo_id AND s.user_id IS jobs.user_id AND s.id < jobs.id)
+                 ELSE NOT EXISTS (
+                   SELECT 1 FROM jobs s
+                   WHERE s.kind = 'scan' AND s.status = 'running' AND s.lease_until >= ? AND s.trigger_kind != 'user'
+                     AND s.repo_id = jobs.repo_id)
+                 END))
          -- В4.2-port-fix (П7): круговой порядок между юзерами (Ф1.7) — свойство
          -- ПОЛОСЫ user. У периодических job user_id всегда NULL, но порты
          -- распространили коррелированный подзапрос и на полосу rating, где он
@@ -356,8 +381,9 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
          -- автора) — раньше волны сканов: иначе тексты топа ждут конца ночного обхода. В полосе
          -- user порядок прежний — «сначала анализ, потом обзор» держится очередью
          ORDER BY CASE WHEN ? = 'user' THEN 0 WHEN kind = 'scan' THEN 1 ELSE 0 END,
-                  CASE WHEN ? = 'user' THEN ((SELECT MAX(j2.claimed_at) FROM jobs j2 WHERE j2.user_id = jobs.user_id) IS NOT NULL) ELSE 0 END,
-                  CASE WHEN ? = 'user' THEN (SELECT MAX(j2.claimed_at) FROM jobs j2 WHERE j2.user_id = jobs.user_id) ELSE NULL END ASC,
+                  -- аудит очереди О11б: круговой порядок — по роду (проверка не отодвигает скан)
+                  CASE WHEN ? = 'user' THEN ((SELECT MAX(j2.claimed_at) FROM jobs j2 WHERE j2.user_id = jobs.user_id AND j2.kind = jobs.kind) IS NOT NULL) ELSE 0 END,
+                  CASE WHEN ? = 'user' THEN (SELECT MAX(j2.claimed_at) FROM jobs j2 WHERE j2.user_id = jobs.user_id AND j2.kind = jobs.kind) ELSE NULL END ASC,
                   id
          LIMIT 1
        )
@@ -375,7 +401,7 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
      WHERE repo_id = ? AND user_id IS ? AND status = 'running'`,
   );
   const claimTx = db.transaction(() => {
-    const row = claimStmt.get(nowIso, leaseIso, nowIso, maxAttempts, kindOnly, kindOnly, queue, exclusive, nowIso, queue, queue, queue) as {
+    const row = claimStmt.get(nowIso, leaseIso, nowIso, maxAttempts, kindOnly, kindOnly, queue, exclusive, nowIso, lightOnly, nowIso, heavyMs, nowIso, queue, queue, queue) as {
       id: number;
       repo_id: number;
       user_id: number | null;
@@ -1051,7 +1077,8 @@ export async function processSummaryJob(deps: WorkerDeps, job: ClaimedJob): Prom
         db: deps.db,
         org: org!,
         repo: repo!,
-        callLlm: makeLlm(deps.config),
+        // аудит очереди О1: обзор пользователя — впереди полосы рейтинга в семафоре провайдера
+        callLlm: makeLlm(deps.config, undefined, { priority: job.triggerKind === "user" ? "interactive" : "background" }),
         clone: { root: worktree.root, gitDir: worktree.gitDir },
         models: { main: deps.config.llm.mainModel, side: deps.config.llm.sideModel },
         // 23.09 (Алексей): дебаг-куладаун (1 мс) снимает и внутренний кэш
@@ -1097,7 +1124,8 @@ export async function processCheckJob(deps: WorkerDeps, job: ClaimedJob): Promis
       db: deps.db,
       org: org!,
       repo: repo!,
-      callLlm: makeLlm(deps.config),
+      // аудит очереди О1: проверка пользователя — первой в семафоре провайдера
+      callLlm: makeLlm(deps.config, undefined, { priority: job.triggerKind === "user" ? "check" : "background" }),
       models: { main: deps.config.llm.mainModel, side: deps.config.llm.sideModel },
       log: (m) => console.log(m),
     },
@@ -1124,7 +1152,7 @@ export async function processCheckJob(deps: WorkerDeps, job: ClaimedJob): Promis
  * этого процесса закрывается честным квартетом (см. closeOwnRunningScans),
  * а не висит running до свипа сирот.
  */
-const liveClaims = new Map<number, { claimedAt: string; repoId: number; userId: number | null }>();
+const liveClaims = new Map<number, { claimedAt: string; repoId: number; userId: number | null; kind: string }>();
 
 /**
  * П-5 (круг 2 В4.4): сканы ЭТОГО процесса, прерванные штатным завершением, —
@@ -1138,6 +1166,9 @@ export function closeOwnRunningScans(db: Database): number {
   const nowIso = new Date().toISOString();
   let closed = 0;
   for (const claim of liveClaims.values()) {
+    // аудит очереди О7: сканы закрываются только за СКАН-заявки — обзор или проверка
+    // скана не ведут, и живой скан того же (репо, автор) у соседней реплики не трогается
+    if (claim.kind !== "scan") continue;
     try {
       const r = db
         .query(
@@ -1216,7 +1247,7 @@ export async function workerTick(
   deps: WorkerDeps,
   order: Array<"user" | "rating">,
   state: WorkerLoopState,
-  opts: { historyRescore?: boolean; kind?: JobKind; perUserExclusive?: boolean } = {},
+  opts: { historyRescore?: boolean; kind?: JobKind; perUserExclusive?: boolean; lightOnly?: boolean } = {},
 ): Promise<WorkerTickOutcome> {
   const dueBackground =
     opts.historyRescore === true && (state.lastBackgroundTickAt === undefined || Date.now() - state.lastBackgroundTickAt >= BACKGROUND_RESCORE_CADENCE_MS);
@@ -1233,6 +1264,8 @@ export async function workerTick(
       maxAttempts: deps.config.queue.maxAttempts,
       kind: opts.kind,
       perUserExclusive: opts.perUserExclusive,
+      lightOnly: opts.lightOnly,
+      heavyMs: deps.config.queue.heavyScanMs,
     });
   } catch (e) {
     console.error(`[worker] claim failed: ${String((e as Error).message).slice(0, 200)}`);
@@ -1250,7 +1283,7 @@ export async function workerTick(
   const claimed = job;
   state.busy = true;
   state.currentSince = Date.now();
-  liveClaims.set(claimed.id, { claimedAt: claimed.claimedAt, repoId: claimed.repoId, userId: claimed.userId });
+  liveClaims.set(claimed.id, { claimedAt: claimed.claimedAt, repoId: claimed.repoId, userId: claimed.userId, kind: claimed.kind });
   // К8.5.2b: продление каждые leaseMs/3; SQLITE_BUSY повторяется (при лизе
   // 10 мин три пропуска подряд = перехват живого скана)
   const heartbeat = setInterval(() => {
@@ -1319,7 +1352,7 @@ export function startWorkerLoop(
   pollMs = 5000,
   seams: { tick?: typeof workerTick } = {},
   // В5.2 (очередь): цикл одного рода; метки живости пишет только цикл сканов своей полосы
-  only: { kind?: JobKind; perUserExclusive?: boolean; historyRescore?: boolean; tickMarks?: boolean } = {},
+  only: { kind?: JobKind; perUserExclusive?: boolean; lightOnly?: boolean; historyRescore?: boolean; tickMarks?: boolean } = {},
 ): () => void {
   const order: Array<"user" | "rating"> = queues.user && queues.rating ? ["user", "rating"] : queues.user ? ["user"] : queues.rating ? ["rating"] : [];
   if (order.length === 0) return () => {};
@@ -1331,7 +1364,7 @@ export function startWorkerLoop(
     // тик целиком в броне и на уровне таймера: синхронный бросок шва (или
     // отказ самого `setInterval`-колбэка) не должен ронять процесс
     try {
-      void tick(deps, order, state, { historyRescore, kind: only.kind, perUserExclusive: only.perUserExclusive })
+      void tick(deps, order, state, { historyRescore, kind: only.kind, perUserExclusive: only.perUserExclusive, lightOnly: only.lightOnly })
         .then((outcome) => {
           if (!tickMarks) return;
           // З6 (круг 2 В4.4): метка живого тика — у rating-стороны лупа своя
@@ -1366,6 +1399,8 @@ export interface WorkerLoopSpec {
   kind: JobKind;
   /** параллельных циклов (у каждого свое состояние «занят») */
   slots: number;
+  /** сколько первых слотов берут и тяжелые репо (аудит очереди О2); прочие — только легкие */
+  heavySlots: number;
   pollMs: number;
   /** у одного автора одновременно одна заявка этого рода (только полоса user) */
   perUserExclusive: boolean;
@@ -1380,10 +1415,12 @@ export function workerLoopPlan(role: Config["processRole"], queue: Config["queue
   const plan: WorkerLoopSpec[] = [];
   for (const lane of lanes) {
     const user = lane === "user";
-    plan.push({ lane, kind: "scan", slots: user ? loopSlots(queue.userScanSlots) : 1, pollMs: 5000, perUserExclusive: user, historyRescore: !user, tickMarks: true });
-    plan.push({ lane, kind: "summary", slots: user ? loopSlots(queue.userAiSlots) : 1, pollMs: 5000, perUserExclusive: user, historyRescore: false, tickMarks: false });
+    // аудит очереди О2: тяжелый репо (клон и разбор до ~90 мин) берет только первый слот рода —
+    // два тяжелых репо двух людей не занимают все слоты; в полосе рейтинга слот один и берет все
+    plan.push({ lane, kind: "scan", slots: user ? loopSlots(queue.userScanSlots) : 1, heavySlots: 1, pollMs: 5000, perUserExclusive: user, historyRescore: !user, tickMarks: true });
+    plan.push({ lane, kind: "summary", slots: user ? loopSlots(queue.userAiSlots) : 1, heavySlots: 1, pollMs: 5000, perUserExclusive: user, historyRescore: false, tickMarks: false });
     // проверка — секунды без клона: одного цикла на полосу хватает
-    plan.push({ lane, kind: "check", slots: 1, pollMs: 2000, perUserExclusive: false, historyRescore: false, tickMarks: false });
+    plan.push({ lane, kind: "check", slots: 1, heavySlots: 1, pollMs: 2000, perUserExclusive: false, historyRescore: false, tickMarks: false });
   }
   return plan;
 }
@@ -1397,6 +1434,7 @@ export function startWorkerLoops(deps: WorkerDeps, plan: WorkerLoopSpec[], seams
         startWorkerLoop(deps, { [spec.lane]: true }, spec.pollMs, seams, {
           kind: spec.kind,
           perUserExclusive: spec.perUserExclusive,
+          lightOnly: i >= spec.heavySlots,
           historyRescore: spec.historyRescore,
           tickMarks: spec.tickMarks,
         }),

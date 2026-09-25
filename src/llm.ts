@@ -100,29 +100,97 @@ function requireKey(config: Config): string {
 
 // ---------- семафор параллелизма провайдера (спека §3.3: не больше 3) ----------
 
-class Semaphore {
-  private free: number;
-  private readonly waiters: (() => void)[] = [];
+/**
+ * Приоритет вызова модели (В5.2, аудит очереди О1, 25.09). Семафор — один на процесс, а циклы
+ * заявок с В5.2 разведены: без приоритета проверка пользователя стояла в общей FIFO-очереди за
+ * вызовами чужих обзоров и обзоров топа, и ожидание съедало ее предохранитель (ложное
+ * «AI-провайдер недоступен»). Порядок: `check` (проверка оценки пользователя, секунды) →
+ * `interactive` (обзор пользователя) → `background` (полоса рейтинга: топ-10). Внутри
+ * приоритета — порядок прихода. Фоновым вызовам достается не больше `BACKGROUND_MAX` мест.
+ */
+export type LlmPriority = "check" | "interactive" | "background";
+const PRIORITY_RANK: Record<LlmPriority, number> = { check: 0, interactive: 1, background: 2 };
 
-  constructor(n: number) {
-    this.free = Math.max(1, n);
+interface GateWaiter {
+  rank: number;
+  seq: number;
+  background: boolean;
+  grant: () => void;
+}
+
+export class ProviderGate {
+  private busy = 0;
+  private busyBackground = 0;
+  private seq = 0;
+  private readonly waiters: GateWaiter[] = [];
+
+  constructor(
+    private readonly capacity: number,
+    private readonly backgroundMax: number,
+  ) {}
+
+  /** Занятые места (для тестов и логов). */
+  get inFlight(): number {
+    return this.busy;
   }
 
-  async run<T>(fn: () => Promise<T>): Promise<T> {
-    if (this.free === 0) await new Promise<void>((res) => this.waiters.push(res));
-    else this.free--;
+  async run<T>(fn: () => Promise<T>, priority: LlmPriority = "interactive", signal?: AbortSignal): Promise<T> {
+    const background = priority === "background";
+    await this.acquire(PRIORITY_RANK[priority], background, signal);
     try {
       return await fn();
     } finally {
-      const next = this.waiters.shift();
-      if (next) next();
-      else this.free++;
+      this.busy--;
+      if (background) this.busyBackground--;
+      this.pump();
+    }
+  }
+
+  private acquire(rank: number, background: boolean, signal?: AbortSignal): Promise<void> {
+    // аудит О1: ожидание места слушает отмену — предохранитель снимает ожидающего, а не
+    // оставляет его занять место после того, как задание уже закрыто
+    if (signal?.aborted) return Promise.reject(new LlmError("aborted", "вызов отменён (бюджет генерации)"));
+    return new Promise<void>((resolve, reject) => {
+      const waiter: GateWaiter = { rank, seq: this.seq++, background, grant: resolve };
+      const onAbort = (): void => {
+        const i = this.waiters.indexOf(waiter);
+        if (i < 0) return; // место уже выдано — отмену обработает сам вызов
+        this.waiters.splice(i, 1);
+        reject(new LlmError("aborted", "вызов отменён (бюджет генерации)"));
+      };
+      waiter.grant = () => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      };
+      signal?.addEventListener("abort", onAbort, { once: true });
+      this.waiters.push(waiter);
+      this.pump();
+    });
+  }
+
+  /** Выдать свободные места: сначала высший приоритет, внутри — порядок прихода. */
+  private pump(): void {
+    while (this.busy < this.capacity) {
+      let best = -1;
+      for (let i = 0; i < this.waiters.length; i++) {
+        const w = this.waiters[i]!;
+        if (w.background && this.busyBackground >= this.backgroundMax) continue;
+        const b = best < 0 ? null : this.waiters[best]!;
+        if (b === null || w.rank < b.rank || (w.rank === b.rank && w.seq < b.seq)) best = i;
+      }
+      if (best < 0) return;
+      const [w] = this.waiters.splice(best, 1);
+      this.busy++;
+      if (w!.background) this.busyBackground++;
+      w!.grant();
     }
   }
 }
 
 export const PROVIDER_CONCURRENCY = 3;
-const providerGate = new Semaphore(PROVIDER_CONCURRENCY);
+/** Фоновой полосе (топ рейтинга) — не больше 1 места из 3: остальные держатся за пользователями. */
+export const BACKGROUND_MAX = 1;
+const providerGate = new ProviderGate(PROVIDER_CONCURRENCY, BACKGROUND_MAX);
 
 // ---------- z.ai: OpenAI-совместимый стрим с tool_calls (порт dndy-llama) ----------
 
@@ -341,6 +409,8 @@ export interface MakeLlmOptions {
   fetchImpl?: typeof fetch;
   /** stall-гард, мс (тесты ставят маленький) */
   stallMs?: number;
+  /** В5.2 (аудит очереди О1): приоритет вызовов этого клиента в семафоре провайдера */
+  priority?: LlmPriority;
 }
 
 export function makeLlm(config: Config, override?: (role: LlmRoleKey) => CallLlm, opts: MakeLlmOptions = {}): CallLlm {
@@ -371,7 +441,7 @@ export function makeLlm(config: Config, override?: (role: LlmRoleKey) => CallLlm
         fetchImpl: opts.fetchImpl,
         stallMs: opts.stallMs,
       };
-      return providerGate.run(() => callZai(yandex, callOpts));
+      return providerGate.run(() => callZai(yandex, callOpts), opts.priority, callOpts.signal);
     }
     const zai: ZaiOptions = {
       apiKey: requireKey(config),
@@ -381,6 +451,6 @@ export function makeLlm(config: Config, override?: (role: LlmRoleKey) => CallLlm
       fetchImpl: opts.fetchImpl,
       stallMs: opts.stallMs,
     };
-    return providerGate.run(() => callZai(zai, callOpts));
+    return providerGate.run(() => callZai(zai, callOpts), opts.priority, callOpts.signal);
   };
 }

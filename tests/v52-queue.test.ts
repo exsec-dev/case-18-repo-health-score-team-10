@@ -231,3 +231,229 @@ describe("живые циклы: плановый скан тяжелого ре
     }
   });
 });
+
+// ---------- аудит очереди (reports/2026-09-25-m52-queue-audit.md): правки О1-О11 ----------
+
+import { getHealth } from "../src/api/health";
+import { makeLlm, ProviderGate } from "../src/llm";
+import { closeOwnRunningScans, workerTick, type WorkerLoopSpec } from "../src/jobs/scheduler";
+
+const tick = () => new Promise((r) => setTimeout(r, 5));
+
+describe("О1: семафор провайдера — пользователь впереди фона, отмена снимает ожидающего", () => {
+  test("проверка обгоняет очередь обзоров; фону не больше 1 места; внутри приоритета — порядок прихода", async () => {
+    const gate = new ProviderGate(3, 1);
+    const order: string[] = [];
+    const releases: Array<() => void> = [];
+    const call = (name: string, p: "check" | "interactive" | "background") =>
+      gate.run(
+        () =>
+          new Promise<void>((r) => {
+            order.push(name);
+            releases.push(r);
+          }),
+        p,
+      );
+    const all = [call("bg1", "background"), call("bg2", "background"), call("u1", "interactive"), call("u2", "interactive"), call("u3", "interactive"), call("c1", "check")];
+    await tick();
+    // фону — одно место (bg2 ждет, хотя места есть), u1, u2 — оставшиеся
+    expect(order).toEqual(["bg1", "u1", "u2"]);
+    releases.shift()!(); // bg1 закончился
+    await tick();
+    // первой — проверка, хотя пришла последней
+    expect(order.at(-1)).toBe("c1");
+    while (releases.length > 0) {
+      releases.shift()!();
+      await tick();
+    }
+    await Promise.all(all);
+    expect(order).toEqual(["bg1", "u1", "u2", "c1", "u3", "bg2"]);
+  });
+  test("ожидание места слушает отмену: предохранитель снимает ожидающего, место ему не выдается", async () => {
+    const gate = new ProviderGate(1, 1);
+    let release!: () => void;
+    const first = gate.run(() => new Promise<void>((r) => (release = r)), "interactive");
+    const ac = new AbortController();
+    let ran = false;
+    const waiting = gate.run(
+      async () => {
+        ran = true;
+      },
+      "check",
+      ac.signal,
+    );
+    ac.abort();
+    await expect(waiting).rejects.toMatchObject({ code: "aborted" });
+    release();
+    await first;
+    await tick();
+    expect(ran).toBe(false);
+    expect(gate.inFlight).toBe(0);
+  });
+  test("makeLlm передает приоритет в общий семафор: фоновые вызовы не занимают больше 1 места", async () => {
+    const base = loadConfig();
+    const config = { ...base, llm: { ...base.llm, provider: "zai", zaiApiKey: "k", baseUrl: "http://127.0.0.1:9" } } as Config;
+    let fetches = 0;
+    const fetchImpl = ((_u: unknown, init?: { signal?: AbortSignal }) =>
+      new Promise((_r, reject) => {
+        fetches++;
+        init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
+      })) as unknown as typeof fetch;
+    const ac = new AbortController();
+    const bg = makeLlm(config, undefined, { fetchImpl, priority: "background" });
+    const userCall = makeLlm(config, undefined, { fetchImpl, priority: "check" });
+    const calls = [0, 1, 2].map(() => bg({ messages: [{ role: "user", content: "x" }], signal: ac.signal }).catch(() => null));
+    await tick();
+    expect(fetches).toBe(1);
+    const c = userCall({ messages: [{ role: "user", content: "x" }], signal: ac.signal }).catch(() => null);
+    await tick();
+    expect(fetches).toBe(2);
+    ac.abort();
+    await Promise.all([...calls, c]);
+  });
+});
+
+describe("О2: тяжелые репо — только первый слот рода", () => {
+  const longScan = (db: Database, repoId: number, minutes: number, detail: string | null, finished: boolean) => {
+    const start = new Date(Date.now() - minutes * 60_000 - 60_000).toISOString();
+    const end = finished ? new Date(Date.now() - 60_000).toISOString() : null;
+    db.query("INSERT INTO scans (repo_id, started_at, finished_at, status, trigger, status_detail) VALUES (?, ?, ?, ?, 'periodic', ?)").run(repoId, start, end, finished ? "bad" : "running", detail);
+  };
+  test("скан дольше порога (и прерванный перезапуском, и идущий) — тяжелый; закрытый свипом сирот — нет", () => {
+    const db = freshDb();
+    user(db, 1);
+    const shut = seeded(db, "shut");
+    const live = seeded(db, "live");
+    const orphan = seeded(db, "orphan");
+    const light = seeded(db, "light");
+    longScan(db, shut.repoId, 24, "shutdown", true);
+    longScan(db, live.repoId, 12, null, false);
+    longScan(db, orphan.repoId, 3000, "orphaned", true);
+    const ids = [shut, live, orphan, light].map((r) => job(db, r.repoId, { user: 1 }));
+    const claimLight = () => claimNext(db, new Date(), 60_000, { queue: "user", kind: "scan", lightOnly: true, heavyMs: 5 * 60_000 })?.id;
+    expect([claimLight(), claimLight(), claimLight()]).toEqual([ids[2], ids[3], undefined]);
+    // слот «любой» берет и тяжелый
+    expect(claimNext(db, new Date(), 60_000, { queue: "user", kind: "scan", heavyMs: 5 * 60_000 })!.id).toBe(ids[0]);
+  });
+  test("проводка: первый слот рода берет тяжелые, остальные — только легкие; пересчет — только цикл сканов рейтинга", async () => {
+    const seen: { lane: string; kind?: string; lightOnly?: boolean; historyRescore?: boolean; state: object }[] = [];
+    const plan: WorkerLoopSpec[] = workerLoopPlan("all", { ...loadConfig().queue, userScanSlots: 3 }).map((s) => ({ ...s, pollMs: 5 }));
+    const stop = startWorkerLoops({ db: null as never, config: loadConfig(), serverClient: () => null }, plan, {
+      tick: (async (_d: unknown, order: string[], state: object, opts: { kind?: string; lightOnly?: boolean; historyRescore?: boolean }) => {
+        seen.push({ lane: order.join(","), kind: opts.kind, lightOnly: opts.lightOnly, historyRescore: opts.historyRescore, state });
+        return "idle";
+      }) as never,
+    });
+    await new Promise((r) => setTimeout(r, 60));
+    stop();
+    const loops = new Map<object, (typeof seen)[number]>();
+    for (const s of seen) loops.set(s.state, s);
+    const v = [...loops.values()];
+    const userScans = v.filter((s) => s.lane === "user" && s.kind === "scan");
+    expect(userScans.map((s) => s.lightOnly).sort()).toEqual([false, true, true]);
+    expect(v.filter((s) => s.historyRescore).map((s) => `${s.lane}/${s.kind}`)).toEqual(["rating/scan"]);
+    expect(v).toHaveLength(3 + 2 + 1 + 1 + 1 + 1);
+  });
+});
+
+describe("О5-О7: ожидание в полосе рейтинга, исчерпанный скан, SIGTERM, health", () => {
+  test("О6: обзор топа ждет ИДУЩИЙ плановый скан того же репо, стоящий в очереди — нет", () => {
+    const db = freshDb();
+    const a = seeded(db, "a");
+    const scan = job(db, a.repoId, { status: "running", claimed: new Date().toISOString(), lease: future() });
+    const top = job(db, a.repoId, { kind: "summary", audience: "public" });
+    expect(claimNext(db, new Date(), 60_000, { queue: "rating", kind: "summary" })).toBeNull();
+    db.query("UPDATE jobs SET status = 'queued', claimed_at = NULL, lease_until = NULL WHERE id = ?").run(scan);
+    expect(claimNext(db, new Date(), 60_000, { queue: "rating", kind: "summary" })!.id).toBe(top);
+  });
+  test("исчерпанный скан закрывается и снимает ожидание обзора", () => {
+    const db = freshDb();
+    user(db, 1);
+    const a = seeded(db, "a");
+    const scan = job(db, a.repoId, { user: 1 });
+    db.query("UPDATE jobs SET attempts = 3 WHERE id = ?").run(scan);
+    const summary = job(db, a.repoId, { user: 1, kind: "summary" });
+    expect(claimNext(db, new Date(), 60_000, { queue: "user", kind: "summary", maxAttempts: 3 })!.id).toBe(summary);
+    expect(statusOf(db, scan)).toBe("failed");
+  });
+  test("О7: SIGTERM закрывает сканы только за скан-заявки — идущая проверка не закрывает чужой живой скан", async () => {
+    const db = freshDb();
+    user(db, 1);
+    const a = seeded(db, "a");
+    db.query("INSERT INTO scans (repo_id, started_at, status, trigger, user_id) VALUES (?, ?, 'running', 'user', 1)").run(a.repoId, new Date().toISOString());
+    job(db, a.repoId, { user: 1, kind: "check", audience: "public" });
+    let release!: () => void;
+    const hang = new Promise<void>((r) => (release = r));
+    const deps = {
+      db,
+      config: loadConfig(),
+      serverClient: () => null,
+      runFraudCheck: async () => {
+        await hang;
+        return { scanId: 1, ok: true, flag: null, signals: null, answered: 1 };
+      },
+    } as never;
+    const running = workerTick(deps, ["user"], { busy: false }, { kind: "check" });
+    await tick();
+    expect(closeOwnRunningScans(db)).toBe(0);
+    release();
+    expect(await running).toBe("done");
+  });
+  test("О5: health показывает, сколько ждет самая старая пользовательская заявка каждого рода", () => {
+    const db = freshDb();
+    user(db, 1);
+    const a = seeded(db, "a");
+    const id = job(db, a.repoId, { user: 1, kind: "summary" });
+    db.query("UPDATE jobs SET created_at = ? WHERE id = ?").run(new Date(Date.now() - 20 * 60_000).toISOString(), id);
+    const h = getHealth(db, loadConfig());
+    expect(h.userQueueOldestMs.scan).toBeNull();
+    expect(h.userQueueOldestMs.check).toBeNull();
+    expect(h.userQueueOldestMs.summary!).toBeGreaterThanOrEqual(20 * 60_000 - 1000);
+  });
+});
+
+describe("живые циклы: два тяжелых репо двух людей не держат третьего", () => {
+  test("тяжелые ждут друг друга в первом слоте, легкий третьего идет во втором", async () => {
+    const db = freshDb();
+    for (const n of [1, 2, 3]) user(db, n);
+    const h1 = seeded(db, "h1");
+    const h2 = seeded(db, "h2");
+    const l3 = seeded(db, "l3");
+    for (const r of [h1, h2]) {
+      db.query("INSERT INTO scans (repo_id, started_at, finished_at, status, trigger) VALUES (?, ?, ?, 'partial', 'periodic')").run(
+        r.repoId,
+        new Date(Date.now() - 40 * 60_000).toISOString(),
+        new Date(Date.now() - 10 * 60_000).toISOString(),
+      );
+    }
+    const j1 = job(db, h1.repoId, { user: 1 });
+    const j2 = job(db, h2.repoId, { user: 2 });
+    const j3 = job(db, l3.repoId, { user: 3 });
+    let release!: () => void;
+    const hang = new Promise<void>((r) => (release = r));
+    const base = loadConfig();
+    const config = { ...base, auth: { ...base.auth, appSecret: base.auth.appSecret ?? "test-secret-test-secret-test-secret" } } as Config;
+    const deps: WorkerDeps = {
+      db,
+      config,
+      serverClient: () => null,
+      getPat: () => "PAT",
+      runScan: (async (_d: unknown, slug: string) => {
+        if (slug !== "q/l3") await hang;
+        return { status: "ok", scanId: 1, channels: {}, repoAccess: "granted" };
+      }) as never,
+    };
+    const plan = workerLoopPlan("web", { ...config.queue, userScanSlots: 2 }).map((s) => ({ ...s, pollMs: 10 }));
+    const stop = startWorkerLoops(deps, plan);
+    try {
+      const deadline = Date.now() + 5000;
+      while (Date.now() < deadline && statusOf(db, j3) !== "done") await new Promise((r) => setTimeout(r, 20));
+      expect(statusOf(db, j3)).toBe("done");
+      expect([statusOf(db, j1), statusOf(db, j2)].sort()).toEqual(["queued", "running"]);
+    } finally {
+      release();
+      await new Promise((r) => setTimeout(r, 60));
+      stop();
+    }
+  });
+});

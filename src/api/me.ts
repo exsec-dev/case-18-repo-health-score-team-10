@@ -720,8 +720,9 @@ export function myJobs(db: import("bun:sqlite").Database, userId: number, doneLi
       queueAhead:
         phase === "queued"
           ? (db
-              .query("SELECT COUNT(*) AS n FROM jobs WHERE id < ? AND status = 'queued' AND trigger_kind = 'user'")
-              .get(Number(row.id)) as { n: number }).n
+              // аудит очереди В5.2 О11а: у каждого рода свой цикл — впереди только заявки того же рода
+              .query("SELECT COUNT(*) AS n FROM jobs WHERE id < ? AND status = 'queued' AND trigger_kind = 'user' AND kind = ?")
+              .get(Number(row.id), typeof row.kind === "string" && row.kind !== "" ? row.kind : "scan") as { n: number }).n
           : null,
       claimedAt: typeof row.claimed_at === "string" ? row.claimed_at : null,
       // refused: error — машинный JSON со слагом, человеку показывается слаг в `slug`

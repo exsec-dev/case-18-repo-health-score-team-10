@@ -134,13 +134,31 @@ export interface QueueConfig {
   /** В5.2 (там же): параллельных пользовательских AI-обзоров в процессе (обзор тоже клонирует
    *  репо для инструментов модели): 2, env QUEUE_USER_AI_SLOTS (1-8). Optional — как выше. */
   userAiSlots?: number;
+  /** В5.2 (аудит очереди О2): репо «тяжелый», если какой-то его скан (кроме закрытых свипом
+   *  сирот) шел дольше порога; тяжелые берет только первый слот пользовательских сканов и
+   *  обзоров: 5 мин (p99 скана на стенде 25.09 — 0,93 мин; тяжелых 38 из ~28 тыс.),
+   *  env QUEUE_HEAVY_SCAN_MS. Optional — как выше. */
+  heavyScanMs?: number;
 }
+
+/** Дефолт порога «тяжелого» репо (аудит очереди О2). */
+export const DEFAULT_HEAVY_SCAN_MS = 5 * 60_000;
 
 /** В5.2 (очередь): предел слотов цикла — защита от опечатки в env (каждый слот — свой клон). */
 export const MAX_LOOP_SLOTS = 8;
 /** Слоты цикла из конфига: дефолт 2, в пределах 1..MAX_LOOP_SLOTS. */
 export function loopSlots(value: number | undefined): number {
   return Math.min(MAX_LOOP_SLOTS, Math.max(1, value ?? 2));
+}
+
+/** Аудит очереди О9: слоты из env — зажим и отброшенное значение не молчат. */
+function slotsFromEnv(env: Record<string, string>, name: string): number {
+  const raw = env[name];
+  const parsed = envInt(env, name);
+  const slots = loopSlots(parsed ?? undefined);
+  if (raw !== undefined && raw !== "" && parsed === null) console.warn(`[config] ${name}=${raw.slice(0, 20)} is not a positive integer, using default ${slots}`);
+  else if (parsed !== null && parsed !== slots) console.warn(`[config] ${name}=${parsed} is above the limit, using ${slots}`);
+  return slots;
 }
 
 export interface AccessConfig {
@@ -480,8 +498,9 @@ export function loadConfig(): Config {
       favoritesMutationsPerMinute: envInt(env, "QUEUE_FAVORITES_MUTATIONS_PER_MINUTE") ?? 30,
       summaryCooldownMs: envInt(env, "QUEUE_SUMMARY_COOLDOWN_MS") ?? 60 * 60_000,
       summaryActiveMax: envInt(env, "QUEUE_SUMMARY_ACTIVE_MAX") ?? 2,
-      userScanSlots: loopSlots(envInt(env, "QUEUE_USER_SCAN_SLOTS") ?? undefined),
-      userAiSlots: loopSlots(envInt(env, "QUEUE_USER_AI_SLOTS") ?? undefined),
+      userScanSlots: slotsFromEnv(env, "QUEUE_USER_SCAN_SLOTS"),
+      userAiSlots: slotsFromEnv(env, "QUEUE_USER_AI_SLOTS"),
+      heavyScanMs: envInt(env, "QUEUE_HEAVY_SCAN_MS") ?? DEFAULT_HEAVY_SCAN_MS,
     },
     llm: {
       provider,

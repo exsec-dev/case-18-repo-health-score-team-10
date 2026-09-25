@@ -50,6 +50,10 @@ export interface HealthStatus {
   repos: number;
   llmProvider: string;
   queue: { user: number; rating: number };
+  /** В5.2 (аудит очереди О5): сколько ждет самая старая пользовательская заявка каждого рода,
+   *  мс (null — не ждет никто). Информационно: живость циклов проверяют `stuck`/`expired`,
+   *  а это число показывает оператору ожидание, которое метки живости не видят */
+  userQueueOldestMs: { scan: number | null; summary: number | null; check: number | null };
   failedJobs24h: number;
   /** прогресс асинхронного рескора (кластер A) */
   rescore: RescoreState;
@@ -70,6 +74,12 @@ export function getHealth(db: Database, config: Config): HealthStatus {
     user: (db.query("SELECT COUNT(*) AS c FROM jobs WHERE status IN ('queued','running') AND trigger_kind = 'user'").get() as { c: number }).c,
     rating: (db.query("SELECT COUNT(*) AS c FROM jobs WHERE status IN ('queued','running') AND trigger_kind != 'user'").get() as { c: number }).c,
   };
+  const oldestOf = (kind: string): number | null => {
+    const row = db.query("SELECT MIN(created_at) AS t FROM jobs WHERE status = 'queued' AND trigger_kind = 'user' AND kind = ? AND created_at IS NOT NULL").get(kind) as { t: string | null };
+    const age = row.t === null ? NaN : Date.now() - Date.parse(row.t);
+    return Number.isFinite(age) ? Math.max(0, age) : null;
+  };
+  const userQueueOldestMs = { scan: oldestOf("scan"), summary: oldestOf("summary"), check: oldestOf("check") };
   const failed24h = (
     db.query("SELECT COUNT(*) AS c FROM jobs WHERE status = 'failed' AND created_at > ?").get(new Date(Date.now() - 24 * 60 * 60_000).toISOString()) as { c: number }
   ).c;
@@ -155,6 +165,7 @@ export function getHealth(db: Database, config: Config): HealthStatus {
     repos,
     llmProvider: config.llm.provider,
     queue,
+    userQueueOldestMs,
     failedJobs24h: failed24h,
     rescore,
     catalogSuspiciousAt: suspiciousAt,
