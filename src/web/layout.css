@@ -2016,33 +2016,44 @@ button.rh-category:focus-visible {
    всего раздела на каждом кадре. Теперь градиент — отдельный слой ::before,
    который только ПОВОРАЧИВАЕТСЯ (transform — работа композитора, без
    перерисовки); ::after — заливка внутри рамки. reduce-motion — без движения. */
-/* §2 25.09 (вариант 4 по референсам Gemini / Яндекс Нейро): готовый обзор — рамка как у
-   соседних разделов и мягкая дымка цветов Алисы в углах фона; градиент больше не
-   движется постоянно. Пока обзор формируется (`_live`) — вращающаяся рамка градиента
-   (как у Copilot): отдельный слой ::before только поворачивается (transform — работа
-   композитора, без перерисовки), ::after — заливка с той же дымкой. */
+/* §2 25.09 (выбор владельца — «вариант 3»): готовый обзор — мягкая дымка цветов Алисы в
+   углах фона (референсы Gemini / Яндекс Нейро) и тонкий статичный градиентный контур 1 px,
+   приглушенный до 55% (Linear / Vercel); постоянного движения нет. Контур — фон border-box
+   под заливкой padding-box. Пока обзор формируется (`_live`) — вращающаяся рамка градиента
+   (как у Copilot): слой ::before только поворачивается (transform, без перерисовки),
+   ::after — заливка с той же дымкой. */
 .rh-ai-section {
+  --rh-ai-haze-from: color-mix(in srgb, var(--rh-ai-from) 16%, transparent);
+  --rh-ai-haze-pink: color-mix(in srgb, var(--rh-ai-pink) 12%, transparent);
   --rh-ai-haze:
-    radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--rh-ai-from) 16%, transparent), transparent 55%),
-    radial-gradient(90% 80% at 100% 0%, color-mix(in srgb, var(--rh-ai-pink) 12%, transparent), transparent 55%),
+    radial-gradient(120% 90% at 0% 0%, var(--rh-ai-haze-from), transparent 55%),
+    radial-gradient(90% 80% at 100% 0%, var(--rh-ai-haze-pink), transparent 55%),
     var(--g-color-base-background);
   position: relative;
   isolation: isolate;
   overflow: hidden;
   box-sizing: border-box;
-  border: 1px solid var(--g-color-line-generic);
+  border: 1px solid transparent;
   border-radius: var(--g-border-radius-xl);
   padding: calc(var(--g-spacing-4) + 1px) calc(var(--g-spacing-5) + 1px);
-  background: var(--rh-ai-haze);
+  background:
+    radial-gradient(120% 90% at 0% 0%, var(--rh-ai-haze-from), transparent 55%) padding-box,
+    radial-gradient(90% 80% at 100% 0%, var(--rh-ai-haze-pink), transparent 55%) padding-box,
+    linear-gradient(var(--g-color-base-background), var(--g-color-base-background)) padding-box,
+    linear-gradient(
+        120deg,
+        color-mix(in srgb, var(--rh-ai-from) 55%, transparent),
+        color-mix(in srgb, var(--rh-ai-to) 55%, transparent),
+        color-mix(in srgb, var(--rh-ai-pink) 55%, transparent)
+      )
+      border-box;
 }
 
 /* светлая тема: на белом дымка той же силы почти не видна — чуть плотнее */
 .g-root_theme_light .rh-ai-section,
 .g-root_theme_light-hc .rh-ai-section {
-  --rh-ai-haze:
-    radial-gradient(120% 90% at 0% 0%, color-mix(in srgb, var(--rh-ai-from) 20%, transparent), transparent 55%),
-    radial-gradient(90% 80% at 100% 0%, color-mix(in srgb, var(--rh-ai-pink) 16%, transparent), transparent 55%),
-    var(--g-color-base-background);
+  --rh-ai-haze-from: color-mix(in srgb, var(--rh-ai-from) 20%, transparent);
+  --rh-ai-haze-pink: color-mix(in srgb, var(--rh-ai-pink) 16%, transparent);
 }
 
 .rh-ai-section__spark {
@@ -2081,6 +2092,7 @@ button.rh-category:focus-visible {
 /* замечание 7 и 1 (25.09): пустой обзор — серая заглушка, как закрытый Repo
    Health Score, без градиента и дымки */
 .rh-ai-section_empty {
+  border-color: var(--g-color-line-generic);
   /* generic полупрозрачный — поверх непрозрачного фона */
   background: linear-gradient(var(--g-color-base-generic), var(--g-color-base-generic)), var(--g-color-base-background);
 }

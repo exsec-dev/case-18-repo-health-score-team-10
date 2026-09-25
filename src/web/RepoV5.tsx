@@ -58,10 +58,10 @@ const apiBase = (org: string, repo: string): string => `/api/repos/${encodeURICo
 
 // ---------- общая метка модели ----------
 
-/** Метка AI — одна форма на всех экранах (§2 24.09): Label utility + Sparkles + официальное имя. */
+/** Метка AI — одна форма на всех экранах (§2 24.09): официальное имя; §2 25.09 — чисто серая (`unknown`), без иконки. */
 export function AiModelLabel({ model }: { model: string }) {
   return (
-    <Label theme="utility" size="xs" icon={<Icon data={Sparkles} size={12} />}>
+    <Label theme="unknown" size="xs">
       {aiModelName(model)}
     </Label>
   );
@@ -337,7 +337,8 @@ export function AiOverviewSection({ card, org, repo, onChanged }: { card: Card; 
     ) : null;
 
   return (
-    // §2 25.09 (вариант 4): рамка градиента движется только пока обзор формируется
+    // §2 25.09: готовый обзор — дымка Алисы в углах и тонкий градиентный контур; рамка
+    // градиента движется только пока обзор формируется
     <section className={jobActive ? "rh-ai-section rh-ai-section_live" : "rh-ai-section"} aria-labelledby="rh-ai-title" aria-busy={jobActive} data-slot="aiSummary">
       <Flex direction="column" gap={3}>
         <Flex gap={2} alignItems="center" wrap>
