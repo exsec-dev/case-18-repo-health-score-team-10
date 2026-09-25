@@ -54,7 +54,7 @@ import { type MeResponse, type MetaResponse, type MyReposResponse, dataOf, logou
 import type { LiveAnalysis } from "./analysis";
 import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
 import { plural } from "../report/submetrics";
-import { FRAUD_TITLE, authErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, recommendationsText, scoreTheme, scoreWord, sentence, slugOf, type ActionQuotaView, type AiQuotaView, type FavoriteAddCheck, type QuotaWindowView } from "./format";
+import { FRAUD_TITLE, authErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, quotaCell, recommendationsText, scoreTheme, scoreWord, sentence, slugOf, type ActionQuotaView, type AiQuotaView, type FavoriteAddCheck, type QuotaWindowView } from "./format";
 import { recommendationsHref } from "./RepoPage";
 import { type Band, BANDS, type RepoEntry, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
 import { linkProps, navigate, repoHref } from "./router";
@@ -198,19 +198,22 @@ export function SettingsPage() {
     >
       {/* В4.8.5 (К8.5.3, С2-4): секция токена не перемонтируется по дате
           проверки — строка «Токен принадлежит…» после сохранения остаётся */}
-      <PatSection hasPat={data.hasPat} unreadable={data.patUnreadable === true} checkedAt={data.patCheckedAt} onChanged={reloadMe} />
-      {/* В5.2 (Б6, выбор 5A): «Лимиты AI» всем вошедшим; «Доступ без лимитов» — если пароль настроен */}
-      <AiLimitsSections />
+      {/* UX-проход В5.2 25.09 (замечание 2): карточки настроек — с зазором, не вплотную */}
+      <Flex direction="column" gap={4}>
+        <PatSection hasPat={data.hasPat} unreadable={data.patUnreadable === true} checkedAt={data.patCheckedAt} onChanged={reloadMe} />
+        {/* В5.2 (Б6, выбор 5A): «Лимиты AI» всем вошедшим; «Доступ без лимитов» — если пароль настроен */}
+        <AiLimitsSections />
+      </Flex>
     </Page>
   );
 }
 /**
  * Остаток лимитов AI (В5.2, Б6, выбор 5A — отдельная карточка «Лимиты AI», всем вошедшим).
- * Форма чисел совпадает с кнопками карточки (решение 3): «осталось N из M». Аудит дизайна
- * О10: первый заголовок пустой, числа не переносятся.
+ * Форма чисел совпадает с кнопками карточки (решение 3): остаток «N/M» (UX-проход 25.09,
+ * замечание 4). Аудит дизайна О10: первый заголовок пустой, числа не переносятся.
  */
 function AiQuotaTable({ data }: { data: AiQuotaView }) {
-  const cell = (w: QuotaWindowView | null, none: string): string => (w === null ? none : `${Math.max(0, w.limit - w.used)} из ${w.limit}`);
+  const cell = (w: QuotaWindowView | null, none: string): string => (w === null ? none : quotaCell(w));
   const rows: { title: string; q: ActionQuotaView }[] = [
     { title: "AI-обзоры", q: data.overview },
     { title: "Проверки оценки", q: data.check },
@@ -223,6 +226,8 @@ function AiQuotaTable({ data }: { data: AiQuotaView }) {
     </th>
   );
   return (
+    // UX-проход 25.09 (замечание 3): таблица на сером фоне и по ширине содержимого
+    <div className="rh-ai-quota-box">
     <table className="rh-ai-quota">
       <thead>
         <tr>
@@ -251,6 +256,7 @@ function AiQuotaTable({ data }: { data: AiQuotaView }) {
         ))}
       </tbody>
     </table>
+    </div>
   );
 }
 
@@ -593,6 +599,8 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
                   : "закрытые данные и анализ своих репозиториев недоступны"}
               </Text>
             </Flex>
+            {/* UX-проход В5.2 25.09 (замечание 1): поле — сразу под статусом, инструкция под ним */}
+            {tokenForm("Персональный токен доступа SourceCraft", "Проверить и сохранить")}
             {/* Круг 2 части 2 (Е18, Н1, §2 23.09): инструкция — шагами, как в
                 документации SourceCraft (названия разделов — жирным), важное —
                 отдельной плашкой, полная инструкция — ссылкой */}
@@ -614,11 +622,10 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
                 <li>
                   Нажмите <UiTag>Сгенерировать новый токен</UiTag> и выберите репозитории.
                 </li>
-                <li>Скопируйте токен и вставьте его в поле ниже.</li>
+                <li>Скопируйте токен и вставьте его в поле выше.</li>
               </ol>
               <Alert theme="warning" view="filled" size="s" message="Токен показывается один раз. Перед сохранением мы проверим его в SourceCraft." />
             </Flex>
-            {tokenForm("Персональный токен доступа SourceCraft", "Проверить и сохранить")}
           </Flex>
         )}
         {error && (

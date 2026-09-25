@@ -3030,3 +3030,48 @@ button.rh-category:focus-visible {
   display: inline-flex;
   flex-shrink: 0;
 }
+
+/* UX-проход В5.2 25.09 (замечание 3): таблица лимитов — на сером фоне и по ширине
+   содержимого; растягивается только карточка */
+.rh-ai-quota-box {
+  box-sizing: border-box;
+  width: fit-content;
+  max-width: 100%;
+  overflow-x: auto;
+  padding: var(--g-spacing-2) var(--g-spacing-4);
+  border-radius: var(--g-border-radius-l);
+  background: var(--g-color-base-generic);
+}
+.rh-ai-quota-box .rh-ai-quota {
+  width: auto;
+}
+
+/* UX-проход В5.2 25.09 (замечание 5): знак вопроса — внутри плашки «По открытым данным» */
+.rh-open-data .g-label__content {
+  overflow: visible;
+}
+.rh-open-data__text {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--g-spacing-1);
+}
+.rh-open-data .g-help-mark {
+  --g-help-mark-size: 12px;
+  color: var(--g-color-text-secondary);
+}
+
+/* UX-проход В5.2 25.09 (замечание 7): признаки накрутки — желтой плашкой в подвале
+   HealthCraft Index рядом с кнопкой проверки; разделитель не нужен — плашка сама граница */
+.rh-check-foot_flagged {
+  padding-top: 0;
+  border-top: 0;
+}
+/* кнопка под текстом признака — по ширине текста, у левого края (колонка Alert растягивает ее) */
+.rh-check-foot_flagged .g-alert__main > .g-button {
+  align-self: flex-start;
+}
+@media (max-width: 480px) {
+  .rh-check-foot_flagged .g-alert__main > .g-button {
+    align-self: stretch;
+  }
+}

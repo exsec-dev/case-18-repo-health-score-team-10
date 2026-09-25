@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { loadConfig } from "../src/config";
 import { openDb } from "../src/db";
 import { listRepos, parseReposQuery, DEFAULT_QUERY } from "../src/api/repos";
-import { aiParagraphs, quotaBlockedText, quotaCounter, withCounter, type ActionQuotaView } from "../src/web/format";
+import { aiParagraphs, quotaBlockedText, quotaCell, quotaCounter, withCounter, type ActionQuotaView } from "../src/web/format";
 import { normalizeRatingSearch } from "../src/web/ratingParams";
 import { fraudCheckState } from "../src/web/RepoV5";
 import { seedRepo, seedScan, seedScore, cardFacts } from "./api-fixtures";
@@ -62,6 +62,20 @@ const ai = (check: Partial<Ai["check"]>, fraud: Ai["fraud"] = null): Ai =>
   }) as Ai;
 const flag = (on: boolean) => ({ flag: on, factors: on ? [{ key: "activity.rhythm", note: "x" }] : [], signals: {} });
 
+describe("UX-проход 25.09: таблица лимитов «N/M», дата проверки без слова «проверено»", () => {
+  test("ячейка — остаток/лимит, перерасход не уходит в минус", () => {
+    expect(quotaCell({ used: 0, limit: 6 })).toBe("6/6");
+    expect(quotaCell({ used: 4, limit: 6 })).toBe("2/6");
+    expect(quotaCell({ used: 9, limit: 6 })).toBe("0/6");
+  });
+  test("рядом со статусом — только дата", () => {
+    const st = fraudCheckState(ai({ scanId: 5, checkedAt: "2026-09-25T18:01:00Z" }, flag(false)), true);
+    expect(st.date).not.toBeNull();
+    expect(st.date!).not.toContain("провер");
+    expect(st.date!).toContain("2026");
+  });
+});
+
 describe("выбор 1A: 7 состояний проверки оценки (таблица §3.1, О3-О5)", () => {
   test("не проверялось — вошедшему кнопка, анониму — кто может запустить", () => {
     expect(fraudCheckState(ai({}), true)).toMatchObject({ kind: "none", text: "Оценка не проверялась на накрутку", button: "Проверить оценку" });
@@ -70,7 +84,7 @@ describe("выбор 1A: 7 состояний проверки оценки (т�
   test("идет, признаков нет, есть признаки", () => {
     expect(fraudCheckState(ai({ active: true }), true)).toMatchObject({ kind: "active", button: null });
     expect(fraudCheckState(ai({ scanId: 5, checkedAt: "2026-09-25T15:15:00Z" }, flag(false)), true)).toMatchObject({ kind: "clean", text: "Признаков накрутки нет", button: null });
-    expect(fraudCheckState(ai({ scanId: 5, checkedAt: "2026-09-25T15:15:00Z" }, flag(true)), true)).toMatchObject({ kind: "flagged", text: "Есть признаки накрутки – подробности выше", button: null });
+    expect(fraudCheckState(ai({ scanId: 5, checkedAt: "2026-09-25T15:15:00Z" }, flag(true)), true)).toMatchObject({ kind: "flagged", text: "Есть признаки накрутки", button: null });
   });
   test("не сформировалась — повтор; нечего проверять — факт без кнопки (О3); устарела — снова проверить", () => {
     expect(fraudCheckState(ai({ scanId: 5, failure: "AI-провайдер не ответил – попробуйте позже", retryable: true }), true)).toMatchObject({
@@ -85,7 +99,7 @@ describe("выбор 1A: 7 состояний проверки оценки (т�
     });
     expect(fraudCheckState(ai({ scanId: 3, checkedAt: "2026-09-25T15:15:00Z" }, flag(false)), true)).toMatchObject({ kind: "stale", button: "Проверить оценку" });
     // О5: флаг прошлого анализа не повторяется — текст подвала тот же, кнопка появляется
-    expect(fraudCheckState(ai({ scanId: 3 }, flag(true)), true)).toMatchObject({ kind: "flagged", text: "Есть признаки накрутки – подробности выше", button: "Проверить оценку" });
+    expect(fraudCheckState(ai({ scanId: 3 }, flag(true)), true)).toMatchObject({ kind: "flagged", text: "Есть признаки накрутки", button: "Проверить оценку" });
   });
 });
 

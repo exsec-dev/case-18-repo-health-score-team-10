@@ -1249,6 +1249,11 @@ export interface QuotaWindowView {
   limit: number;
 }
 
+/** Ячейка таблицы «Лимиты AI»: остаток «N/M», как в тексте кнопок (UX-проход В5.2 25.09, замечание 4). */
+export function quotaCell(w: QuotaWindowView): string {
+  return `${Math.max(0, w.limit - w.used)}/${w.limit}`;
+}
+
 /** Ответ `/api/me/ai-quota` по одному действию (jobs/ai-quota.ts, ActionQuota). */
 export interface ActionQuotaView {
   unlocked: boolean;

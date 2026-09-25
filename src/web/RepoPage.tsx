@@ -111,7 +111,7 @@ import {
 } from "./format";
 import { linkProps } from "./router";
 import { LoginButton, Page, type Crumb } from "./Shell";
-import { AiOverviewSection, BadgeButton, CategoryAiMark, CategoryAiNote, FraudAlert, FraudCheckFooter, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
+import { AiOverviewSection, BadgeButton, CategoryAiMark, CategoryAiNote, FraudCheckFooter, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
 
 type Card = RepoCard;
@@ -306,8 +306,8 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
         <Flex direction="column" gap={6} className="rh-repo-feed">
           <Flex direction="column" gap={3}>
             <Markers view={view} />
-            <FraudAlert card={card} />
-            {/* В5.2 (Б6, выбор 1A): проверка оценки — подвалом плашки HealthCraft Index */}
+            {/* В5.2 (Б6, выбор 1A): проверка оценки — подвалом плашки HealthCraft Index; UX-проход
+                25.09 (замечание 7): признаки накрутки — там же, рядом с кнопкой */}
             <ScoreBand card={card} view={view} footer={<FraudCheckFooter card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} quota={aiQuota.quota} onQuota={aiQuota.reload} />} />
           </Flex>
           <AiOverviewSection card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} quota={aiQuota.quota} onQuota={aiQuota.reload} />
@@ -1153,8 +1153,9 @@ function Markers({ view }: { view: CardView }) {
   if (view.topMarkers.includes("ci-cap")) {
     rows.push({
       key: "ci-cap",
-      label: "CI заявлен, прогоны недоступны",
-      text: "Конфигурация CI есть, но прогоны не видны (закрыты правами или их не было) – автоматизацию не оцениваем: честное отсутствие данных вместо догадок.",
+      // UX-проход 25.09 (замечание 8): без жаргона
+      label: "CI настроен, но запусков не видно",
+      text: "В репозитории есть настройки CI, но результаты сборок нам не видны: доступ к ним закрыт или сборки еще не запускались. Поэтому автоматизацию не оцениваем – без данных оценка не снижается.",
       theme: "warning",
     });
   }
@@ -1162,8 +1163,9 @@ function Markers({ view }: { view: CardView }) {
   return (
     <Flex direction="column" gap={2} role="region" aria-label="Особенности расчета">
       {[...rows].sort((a, b) => (a.theme === b.theme ? 0 : a.theme === "warning" ? -1 : 1)).map((row) => (
-        // круг 5 (1): info — заливкой, предупреждение — прежней рамкой
-        <Alert key={row.key} theme={row.theme} view={row.theme === "info" ? "filled" : "outlined"} size="s" title={row.label} message={row.text} />
+        // круг 5 (1): info — заливкой; UX-проход 25.09 (замечание 8): предупреждение тоже
+        // заливкой — желтый фон, как у прочих предупреждений
+        <Alert key={row.key} theme={row.theme} view="filled" size="s" title={row.label} message={row.text} />
       ))}
     </Flex>
   );

@@ -1,7 +1,8 @@
 // RepoV5.tsx — элементы В5 на карточке репозитория, переверстанные кругом 3
 // вехи В5.3 по дизайн-аудиту (reports/2026-09-24-m53-ui-design-audit.md) и
 // выбору владельца (TASK.md §2 24.09 «В5.3, круг 3»):
-//   - флаг фрода — предупреждение над показателями, текст фактора строит код (6-A, способ 2);
+//   - флаг фрода — текст фактора строит код (6-A, способ 2); с UX-прохода В5.2 25.09 — в подвале
+//     плашки HealthCraft Index рядом с кнопкой проверки;
 //   - AI-обзор — раздел сразу под показателями в рамке градиента Алисы (2-A);
 //     разбор модели по категориям — в раскрытии категории, отметка в строке (3-B + плашка);
 //   - история оценки — раздел ленты: ось времени, пороги, список анализов (3-B),
@@ -98,7 +99,12 @@ export function openCategory(key: string): void {
 
 // ---------- флаг фрода (К-3, выбор 6-A) ----------
 
-export function FraudAlert({ card }: { card: Card }) {
+/**
+ * Строка подозрения на накрутку: заголовок, главный признак и подсказка с остальными.
+ * UX-проход 25.09 (замечание 7, Екатерина): живет в подвале плашки HealthCraft Index
+ * рядом с кнопкой проверки, а не отдельной плашкой над показателями.
+ */
+function FraudFlagMessage({ card }: { card: Card }) {
   const fraud = card.ai?.fraud;
   // подозрение — только при флаге, как в кабинете и отчете
   if (fraud === undefined || fraud === null || fraud.flag !== true || fraud.factors.length === 0) return null;
@@ -109,14 +115,6 @@ export function FraudAlert({ card }: { card: Card }) {
   const lines = fraud.factors.flatMap((f) => (fraudFactorFact(f.key, factOf(f.key)) ?? f.note).split("; "));
   const [lead, ...rest] = lines;
   return (
-    // замечание 1 (25.09): желтый фон, как у прочих предупреждений; без кнопки перехода
-    <Alert
-      theme="warning"
-      view="filled"
-      size="s"
-      align="center"
-      className="rh-fraud"
-      message={
         <span className="rh-fraud__line">
           <Text variant="subheader-1">{`${FRAUD_TITLE}: `}</Text>
           {/* аудит надежности М2: флаг прошлого анализа не выдается за текущий */}
@@ -139,17 +137,9 @@ export function FraudAlert({ card }: { card: Card }) {
               <Text variant="caption-2" color="secondary">
                 {`Признаки: ${fraud.factors.map((f) => fraudFactorTitle(f.key)).join(", ")}. Подробности – в разделе отчета.`}
               </Text>
-              {/* аудит дизайна О6: у серьезного вывода — время проверки */}
-              {card.ai?.check.checkedAt && (
-                <Text variant="caption-2" color="secondary">
-                  {`Проверено ${fmtDateTime(card.ai.check.checkedAt)}.`}
-                </Text>
-              )}
             </Flex>
           </HelpMark>
         </span>
-      }
-    />
   );
 }
 
@@ -323,12 +313,13 @@ export interface FraudCheckState {
 /**
  * Тексты 7 состояний — таблица §3.1 аудита дизайна (reports/2026-09-25-m52-ui-design-audit.md);
  * имя действия одно — «проверка оценки» (О4); «нет истории коммитов» — факт, не сбой (О3);
- * флаг прошлого анализа не повторяется — его несет желтая плашка (О5).
+ * флаг прошлого анализа несет желтая плашка подвала с пометкой «по прошлому анализу» (О5).
  */
 export function fraudCheckState(ai: CardAi, loggedIn: boolean): FraudCheckState {
   const { check, fraud } = ai;
   const stale = check.scanId !== null && check.latestScanId !== null && check.scanId < check.latestScanId;
-  const date = check.checkedAt ? `проверено ${fmtDateTime(check.checkedAt)}` : null;
+  // UX-проход 25.09 (замечание 6): рядом со статусом — только дата, без «проверено»
+  const date = check.checkedAt ? fmtDateTime(check.checkedAt) : null;
   if (check.active) return { kind: "active", text: "Проверка оценки идет – результат появится здесь", date: null, button: null };
   if (check.failure !== null && !check.retryable) return { kind: "nothing", text: "Проверять нечего: в анализе нет истории коммитов", date: null, button: null };
   const run = loggedIn && check.latestScanId !== null;
@@ -340,7 +331,8 @@ export function fraudCheckState(ai: CardAi, loggedIn: boolean): FraudCheckState 
       button: run ? "Повторить проверку" : null,
     };
   }
-  if (fraud !== null && fraud.flag) return { kind: "flagged", text: "Есть признаки накрутки – подробности выше", date, button: run && stale ? "Проверить оценку" : null };
+  // UX-проход 25.09 (замечание 7): признаки — в самом подвале, «подробности выше» больше не нужно
+  if (fraud !== null && fraud.flag) return { kind: "flagged", text: "Есть признаки накрутки", date, button: run && stale ? "Проверить оценку" : null };
   if (fraud !== null && stale) return { kind: "stale", text: "Признаков накрутки нет по прошлому анализу", date, button: run ? "Проверить оценку" : null };
   if (fraud !== null) return { kind: "clean", text: "Признаков накрутки нет", date, button: null };
   return {
@@ -382,6 +374,50 @@ export function FraudCheckFooter({ card, org, repo, onChanged, loggedIn, quota, 
   const counter = quotaCounter(quota?.check);
   const blocked = counter !== null && counter.left === 0 && quota !== null ? quotaBlockedText("check", quota.check, counter) : null;
   const icon = CHECK_ICON[st.kind];
+  const button =
+    st.button !== null ? (
+      <Button view={st.kind === "flagged" ? "normal-contrast" : "outlined"} size="s" loading={action.sending} disabled={blocked !== null} onClick={() => void action.start()}>
+        <Button.Icon side="start">
+          <Icon data={ShieldCheck} size={14} />
+        </Button.Icon>
+        {withCounter(st.button, counter)}
+      </Button>
+    ) : null;
+  const why =
+    st.button !== null && blocked !== null ? (
+      <Text variant="caption-2" color="secondary" as="p" className="rh-check-foot__why">
+        {blocked}
+      </Text>
+    ) : null;
+  // UX-проход 25.09 (замечание 7, Екатерина): признаки накрутки — желтой плашкой в самом
+  // подвале, рядом с кнопкой проверки; отдельной плашки над показателями больше нет
+  const flagLine = st.kind === "flagged" ? <FraudFlagMessage card={card} /> : null;
+  if (flagLine !== null && ai.fraud?.factors.length) {
+    return (
+      <div className="rh-check-foot rh-check-foot_flagged" aria-live="polite">
+        <Alert
+          theme="warning"
+          view="filled"
+          size="s"
+          align="center"
+          // кнопка — под текстом: в узкой плашке индекса сбоку она сжимает строку признака
+          className="rh-fraud"
+          message={
+            <Flex direction="column" gap={1}>
+              {flagLine}
+              {st.date !== null && (
+                <Text variant="caption-2" color="secondary">
+                  {st.date}
+                </Text>
+              )}
+            </Flex>
+          }
+          actions={button ?? undefined}
+        />
+        {why}
+      </div>
+    );
+  }
   return (
     <div className="rh-check-foot" aria-live="polite">
       <Flex gap={2} alignItems="center" justifyContent="space-between" wrap>
@@ -394,20 +430,9 @@ export function FraudCheckFooter({ card, org, repo, onChanged, loggedIn, quota, 
             </Text>
           )}
         </Flex>
-        {st.button !== null && (
-          <Button view="outlined" size="s" loading={action.sending} disabled={blocked !== null} onClick={() => void action.start()}>
-            <Button.Icon side="start">
-              <Icon data={ShieldCheck} size={14} />
-            </Button.Icon>
-            {withCounter(st.button, counter)}
-          </Button>
-        )}
+        {button}
       </Flex>
-      {st.button !== null && blocked !== null && (
-        <Text variant="caption-2" color="secondary" as="p" className="rh-check-foot__why">
-          {blocked}
-        </Text>
-      )}
+      {why}
     </div>
   );
 }
@@ -542,14 +567,15 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
           {model !== null && <AiModelLabel model={model} />}
           {/* выбор 2A (25.09): объем публичной версии — меткой в заголовке, пояснение в подсказке */}
           {publicVersion && hasOverview && (
-            <Flex gap={1} alignItems="center">
-              <Label theme="unknown" size="xs">
+            // UX-проход 25.09 (замечание 5): знак вопроса — внутри плашки
+            <Label theme="unknown" size="xs" className="rh-open-data">
+              <span className="rh-open-data__text">
                 По открытым данным
-              </Label>
-              <HelpMark iconSize="s" aria-label="Что значит «по открытым данным»">
-                4 категории: документация, состояние кода, активность, задачи. CI/CD и Безопасность не входят – их видят участники репозитория.
-              </HelpMark>
-            </Flex>
+                <HelpMark iconSize="s" aria-label="Что значит «по открытым данным»">
+                  4 категории: документация, состояние кода, активность, задачи. CI/CD и Безопасность не входят – их видят участники репозитория.
+                </HelpMark>
+              </span>
+            </Label>
           )}
           <span style={{ flex: 1 }} />
           {ownerActions}
