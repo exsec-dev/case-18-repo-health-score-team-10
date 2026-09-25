@@ -268,6 +268,8 @@ export interface ClaimOptions {
   maxAttempts?: number;
   /** ПОРТ S2: какую очередь обслуживает этот claim — user | rating */
   queue?: "user" | "rating";
+  /** В5.2: только заявки этого рода (легкий цикл проверок берет только `check`) */
+  kind?: string;
 }
 
 /**
@@ -307,6 +309,7 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
   // даёт round-robin в claimAny (П1). Внутри user-очереди сохранён их
   // круговой порядок между юзерами (Ф1.7); attempts (K4) неприкосновенны.
   const queue = opts.queue ?? "user";
+  const kindOnly = opts.kind ?? null;
   const claimStmt = db.query(
       `UPDATE jobs SET status = 'running', claimed_at = ?, lease_until = ?, attempts = attempts + 1
        WHERE id = (
@@ -314,6 +317,7 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
          WHERE (lease_until IS NULL OR lease_until < ?)
            AND status IN ('queued', 'running')
            AND attempts < ?
+           AND (? IS NULL OR kind = ?)
            AND (CASE WHEN ? = 'user' THEN trigger_kind = 'user' ELSE trigger_kind != 'user' END)
          -- В4.2-port-fix (П7): круговой порядок между юзерами (Ф1.7) — свойство
          -- ПОЛОСЫ user. У периодических job user_id всегда NULL, но порты
@@ -346,7 +350,7 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
      WHERE repo_id = ? AND user_id IS ? AND status = 'running'`,
   );
   const claimTx = db.transaction(() => {
-    const row = claimStmt.get(nowIso, leaseIso, nowIso, maxAttempts, queue, queue, queue, queue) as {
+    const row = claimStmt.get(nowIso, leaseIso, nowIso, maxAttempts, kindOnly, kindOnly, queue, queue, queue, queue) as {
       id: number;
       repo_id: number;
       user_id: number | null;
@@ -1187,7 +1191,7 @@ export async function workerTick(
   deps: WorkerDeps,
   order: Array<"user" | "rating">,
   state: WorkerLoopState,
-  opts: { historyRescore?: boolean } = {},
+  opts: { historyRescore?: boolean; kind?: string } = {},
 ): Promise<WorkerTickOutcome> {
   const dueBackground =
     opts.historyRescore === true && (state.lastBackgroundTickAt === undefined || Date.now() - state.lastBackgroundTickAt >= BACKGROUND_RESCORE_CADENCE_MS);
@@ -1200,7 +1204,7 @@ export async function workerTick(
   // ПОРТ S2/ищейка-8: весь тик в броне — бросок БД не валит процесс
   let job: ClaimedJob | null = null;
   try {
-    job = (deps.claimAny ?? claimAny)(deps.db, order, new Date(), leaseMs, { maxAttempts: deps.config.queue.maxAttempts });
+    job = (deps.claimAny ?? claimAny)(deps.db, order, new Date(), leaseMs, { maxAttempts: deps.config.queue.maxAttempts, kind: opts.kind });
   } catch (e) {
     console.error(`[worker] claim failed: ${String((e as Error).message).slice(0, 200)}`);
     return "claim-failed";
@@ -1269,6 +1273,27 @@ export async function workerTick(
     state.busy = false;
     state.currentSince = undefined;
   }
+}
+
+/**
+ * В5.2 (решение Екатерины 25.09): легкий цикл проверок оценки. Проверка — секунды и без
+ * клона; в общем цикле она ждала конца текущего скана (у тяжелого репо — до 15-45 мин:
+ * живой случай 25.09, podshivka 1,74 ГБ). Свой цикл со своим состоянием берет ТОЛЬКО
+ * заявки `check` из полос роли; аренда, продление, итог и учет ошибок — общие (`workerTick`).
+ * Общий цикл проверки тоже может взять — claim атомарен, заявка исполняется один раз.
+ */
+export function startCheckLoop(deps: WorkerDeps, lanes: Array<"user" | "rating">, pollMs = 2000, seams: { tick?: typeof workerTick } = {}): () => void {
+  if (lanes.length === 0) return () => {};
+  const state: WorkerLoopState = { busy: false };
+  const tick = seams.tick ?? workerTick;
+  const timer = setInterval(() => {
+    try {
+      void tick(deps, lanes, state, { kind: "check" }).catch((e) => console.error(`[check-loop] tick failed: ${String((e as Error).message).slice(0, 200)}`));
+    } catch (e) {
+      console.error(`[check-loop] tick failed: ${String((e as Error).message).slice(0, 200)}`);
+    }
+  }, pollMs);
+  return () => clearInterval(timer);
 }
 
 /** С10-3: тик считается живым, если он не `busy` или текущее задание ещё в пределах худшего бюджета скана. */

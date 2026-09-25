@@ -53,7 +53,7 @@ import { renderRepoReport } from "./report/markdown";
 import { REPORT_NO_SCORE } from "./report/build";
 import { reportFileName } from "./web/format";
 import { pdfResponse } from "./report/pdf";
-import { catalogClientBudget, closeOwnRunningScans, maintenanceTick, returnOwnRunningJobs, startMaintenance, startScheduler, startWorkerLoop } from "./jobs/scheduler";
+import { catalogClientBudget, closeOwnRunningScans, maintenanceTick, returnOwnRunningJobs, startCheckLoop, startMaintenance, startScheduler, startWorkerLoop } from "./jobs/scheduler";
 import { enqueueCheck, enqueueSummary, lastFinishedScan } from "./jobs/scheduler";
 import { aiQuota, clearUnlock, isUnlocked, quotaRefusal, tryUnlock, type QuotaRefusal } from "./jobs/ai-quota";
 import type { AiAudience } from "./db";
@@ -1382,6 +1382,10 @@ if (needsRescore(db)) {
 if (role === "web" || role === "all") {
   stopWorkerLoops.push(startWorkerLoop({ db, config, serverClient }, { user: true, rating: role === "all" }));
 }
+// В5.2 (решение 25.09): проверки оценки — своим легким циклом, не ждут текущий скан
+stopWorkerLoops.push(
+  startCheckLoop({ db, config, serverClient }, role === "web" ? ["user"] : role === "rating" ? ["rating"] : ["user", "rating"]),
+);
 // В4.8.5 (К8.5.2b, С10-4): часовое обслуживание (сироты-сканы, ретеншен,
 // каталоги клонов) — в ЛЮБОЙ роли; у rating/all его запускает startScheduler
 if (role === "web") {

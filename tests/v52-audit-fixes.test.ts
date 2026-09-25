@@ -210,3 +210,35 @@ describe("UX-1 (б): подпись под скелетоном обзора п�
     expect(aiProgressText(false, false)).toBe("Обзор формируется – раздел обновится сам.");
   });
 });
+
+import { workerTick } from "../src/jobs/scheduler";
+
+describe("легкий цикл проверок (решение 25.09): проверка не ждет текущий скан", () => {
+  test("claim с kind='check' берет только проверку; общий цикл занят сканом — проверка все равно исполняется", async () => {
+    const db = freshDb();
+    const { repoId } = seeded(db, "loop");
+    const t = new Date().toISOString();
+    db.query("INSERT INTO jobs (repo_id, status, trigger_kind, kind, created_at) VALUES (?, 'queued', 'periodic', 'scan', ?)").run(repoId, t);
+    db.query("INSERT INTO jobs (repo_id, status, user_id, trigger_kind, kind, created_at, audience) VALUES (?, 'queued', 1, 'user', 'check', ?, 'public')").run(repoId, t);
+    // общий цикл «занят» сканом: берем его как running
+    expect(claimNext(db, new Date(), 60_000, { queue: "rating" })!.kind).toBe("scan");
+    // фильтр рода: из полосы рейтинга проверок нет — null; из полосы user — проверка
+    expect(claimNext(db, new Date(), 60_000, { queue: "rating", kind: "check" })).toBeNull();
+    db.query("UPDATE jobs SET status = 'queued', claimed_at = NULL, lease_until = NULL, attempts = 0 WHERE kind = 'check'").run();
+    let ran = 0;
+    const deps = {
+      db,
+      config: loadConfig(),
+      serverClient: () => null,
+      runFraudCheck: async () => {
+        ran++;
+        return { scanId: 1, ok: true, flag: null, signals: null, answered: 1 };
+      },
+    } as never;
+    const out = await workerTick(deps, ["user", "rating"], { busy: false }, { kind: "check" });
+    expect(out).toBe("done");
+    expect(ran).toBe(1);
+    expect((db.query("SELECT status FROM jobs WHERE kind = 'check'").get() as { status: string }).status).toBe("done");
+    expect((db.query("SELECT status FROM jobs WHERE kind = 'scan'").get() as { status: string }).status).toBe("running");
+  });
+});
