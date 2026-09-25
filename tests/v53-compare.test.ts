@@ -22,6 +22,10 @@ import {
   comparabilityNotes,
   compareHref,
   compareSlugsOf,
+  commonYear,
+  exceptionLabel,
+  COMPARE_FULL_LINE,
+  COMPARE_REFERENCE,
   fullRows,
   indexCategoriesCounted,
   rowLeaders,
@@ -276,7 +280,7 @@ describe("К-1: заметки сопоставимости и «по N кате
     const [note] = comparabilityNotes(res.items);
     expect(note).toStartWith("Индекс cmp/");
     expect(note).toContain("…");
-    expect(note).toContain("…orm-team-112 посчитан по 3 категориям, остальных – по 4 категориям.");
+    expect(note).toContain("…orm-team-112 посчитан по 3 категориям из 4, остальных – по 4. Вес категории без данных переходит к остальным");
   });
 
   test(`разрыв дат ≥ ${DATE_GAP_DAYS} дней — заметка с числом дней; ${DATE_GAP_DAYS - 1} — нет`, async () => {
@@ -326,6 +330,22 @@ describe("К-1: адрес набора, маршрут, тексты", () => {
     expect(shown.length).toBe(20);
     expect(shown.endsWith("s-team-112")).toBe(true);
     expect(middleEllipsis("short", 20)).toBe("short");
+  });
+
+  test("Д8 Б: общий год дат — только если он один; мусор и пустые даты не мешают", () => {
+    expect(commonYear(["2026-09-23T10:00:00Z", "2026-09-24T10:00:00Z", null])).toBe(2026);
+    expect(commonYear(["2025-12-31T10:00:00Z", "2026-01-02T10:00:00Z"])).toBeNull();
+    expect(commonYear([null, "garbage"])).toBeNull();
+  });
+
+  test("Д7: метка столбца-исключения — своя на каждый статус (enum элемента целиком)", () => {
+    const labels = (["noscore", "unavailable", "check_failed", "token_rejected"] as const).map(exceptionLabel);
+    expect(new Set(labels).size).toBe(4);
+    for (const l of [...labels, COMPARE_FULL_LINE, COMPARE_REFERENCE]) {
+      expect(l).not.toContain("ё");
+      expect(l).not.toContain("—");
+    }
+    expect(COMPARE_REFERENCE).toBe("Справочно, в балл не входит");
   });
 
   test("текст недоступного — по зрителю, не по репозиторию; тексты по правилу языка", () => {

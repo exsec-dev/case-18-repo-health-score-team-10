@@ -115,10 +115,11 @@ export function comparabilityNotes(items: CompareItem[]): string[] {
     const by = (n: number) => categoriesCountedText(n, 4).replace(/ из 4$/, "");
     const odd = counts.findIndex((n) => counts.filter((m) => m === n).length === 1);
     const oneOff = indexed.length >= 3 && new Set(counts).size === 2 && odd !== -1;
+    // аудит Д11 (§2.11): без повтора «категориям» и без двух тире в одной фразе
     const head = oneOff
-      ? `Индекс ${noteSlug(indexed[odd]!)} посчитан ${by(counts[odd]!)}, остальных – ${by(counts[(odd + 1) % counts.length]!)}`
+      ? `Индекс ${noteSlug(indexed[odd]!)} посчитан ${by(counts[odd]!)} из 4, остальных – по ${counts[(odd + 1) % counts.length]!}`
       : `Индексы посчитаны по разному числу категорий: ${indexed.map((c, i) => `${noteSlug(c)} – ${by(counts[i]!)}`).join(", ")}`;
-    notes.push(`${head}. Вес категорий без данных делится между остальными – точнее сравнивать по категориям.`);
+    notes.push(`${head}. Вес категории без данных переходит к остальным, поэтому точнее сравнивать по категориям.`);
   }
 
   // Т17: разнесенные даты анализа — «Активность» считается на дату анализа
@@ -168,6 +169,31 @@ export function fullRows(items: CompareItem[]): { rows: FullKey[]; partial: bool
 
 export const COMPARE_TITLE = "Сравнение репозиториев";
 export const COMPARE_LIMIT_TEXT = "Сравнить можно до 3 репозиториев – уберите один, чтобы добавить другой.";
+/** Д4 А (§2 25.09): при 3 из 3 вместо выключенного поля — строка под заголовком. */
+export const COMPARE_FULL_LINE = "В сравнении 3 из 3 – уберите репозиторий, чтобы добавить другой.";
+export const COMPARE_ADD = "Добавить репозиторий";
+/** Д10: одна формулировка с MD/PDF (`src/report/build.ts`). */
+export const COMPARE_REFERENCE = "Справочно, в балл не входит";
+
+/** Д7: столбец-исключение на телефоне — короткая метка в шапке, полный текст под таблицей. */
+export function exceptionLabel(kind: "noscore" | "unavailable" | "check_failed" | "token_rejected"): string {
+  switch (kind) {
+    case "noscore":
+      return "оценки нет";
+    case "unavailable":
+      return "не найден";
+    case "check_failed":
+      return "нет ответа";
+    case "token_rejected":
+      return "токен отклонен";
+  }
+}
+
+/** Д8 Б: год всех дат анализа, если он один; иначе null (тогда дата — с годом в ячейке). */
+export function commonYear(isos: (string | null)[]): number | null {
+  const years = new Set(isos.filter((i): i is string => i !== null && !Number.isNaN(Date.parse(i))).map((i) => new Date(i).getFullYear()));
+  return years.size === 1 ? [...years][0]! : null;
+}
 export const COMPARE_ONE_TEXT = "Добавьте еще 1 или 2 репозитория, чтобы сравнить.";
 export const COMPARE_DUPLICATE_TEXT = "Этот репозиторий уже в сравнении.";
 export const COMPARE_BAD_INPUT_TEXT = "Не похоже на адрес репозитория: нужен вид org/repo или ссылка SourceCraft.";
