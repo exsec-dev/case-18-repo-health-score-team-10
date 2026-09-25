@@ -337,9 +337,13 @@ export function AiOverviewSection({ card, org, repo, onChanged }: { card: Card; 
     ) : null;
 
   return (
-    <section className="rh-ai-section" aria-labelledby="rh-ai-title" data-slot="aiSummary">
+    // §2 25.09 (вариант 4): рамка градиента движется только пока обзор формируется
+    <section className={jobActive ? "rh-ai-section rh-ai-section_live" : "rh-ai-section"} aria-labelledby="rh-ai-title" aria-busy={jobActive} data-slot="aiSummary">
       <Flex direction="column" gap={3}>
         <Flex gap={2} alignItems="center" wrap>
+          <span className="rh-ai-section__spark" aria-hidden="true">
+            <Icon data={Sparkles} size={16} />
+          </span>
           <Text variant="subheader-3" as="h2" id="rh-ai-title">
             {AI_SECTION_TITLE}
           </Text>
