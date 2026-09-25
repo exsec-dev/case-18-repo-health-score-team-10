@@ -60,6 +60,7 @@ describe("конфиг AI: дефолт — числа решения §2, ав�
     expect(c.overview).toEqual({ perHour: 2, perDay: 6, globalPerDay: 30 });
     expect(c.check).toEqual({ perHour: 5, perDay: 20, globalPerDay: 60 });
     expect(c.unlockedOverviewPerDay).toBe(100);
+    expect(c.unlockedCheckPerDay).toBe(100);
     expect(c.unlockPassword).toBeNull();
     expect(c.topAuto).toBe(false);
     expect(c.topAutoSize).toBe(10);
@@ -174,8 +175,8 @@ describe("пароль неограниченного доступа", () => {
     expect(aiQuota(db, other, "overview", c, NOW).global).toEqual({ used: 0, limit: 30 });
     for (let i = 0; i < 60; i++) job(db, { user: vip, at: new Date(NOW.getTime() - (i + 41) * MIN), unlocked: 1 });
     expect(quotaRefusal(aiQuota(db, vip, "overview", c, NOW))!.code).toBe("quota_global");
-    // проверок оценки с паролем — без потолка
-    expect(aiQuota(db, vip, "check", c, NOW).global).toBeNull();
+    // проверки оценки с паролем — свой потолок 100 в сутки (решение 25.09)
+    expect(aiQuota(db, vip, "check", c, NOW).global).toEqual({ used: 0, limit: 100 });
   });
 });
 
@@ -322,6 +323,8 @@ describe("маршруты на живом сервере", () => {
       const after = (await (await fetch(`${server.base}/api/me/ai-quota`, { headers: h })).json()) as { unlocked: boolean; check: { hour: unknown } };
       expect(after.unlocked).toBe(true);
       expect(after.check.hour).toBeNull();
+      // проверка выше поставлена ДО пароля — в потолок по паролю она не входит
+      expect((after.check as unknown as { global: unknown }).global).toEqual({ used: 0, limit: 100 });
       const off = await fetch(`${server.base}/api/me/ai-unlock`, { method: "DELETE", headers: h });
       expect(off.status).toBe(200);
       expect(((await (await fetch(`${server.base}/api/me/ai-quota`, { headers: h })).json()) as { unlocked: boolean }).unlocked).toBe(false);

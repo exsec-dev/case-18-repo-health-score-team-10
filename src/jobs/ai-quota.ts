@@ -85,13 +85,14 @@ export function aiQuota(db: Database, userId: number, action: AiAction, cfg: AiC
     count(db, `kind = ? AND user_id IS NOT NULL AND ai_unlocked = ? AND created_at >= ? AND ${CHARGED}`, kind, unlockedJobs, dayFrom, rejected);
 
   if (unlocked) {
-    const cap = action === "overview" ? cfg.unlockedOverviewPerDay : null;
+    // аварийный потолок для всех с паролем: обзоры и проверки — по 100 в сутки (п.6, 25.09)
+    const cap = action === "overview" ? cfg.unlockedOverviewPerDay : cfg.unlockedCheckPerDay;
     return {
       action,
       unlocked,
       hour: null,
       day: null,
-      global: cap === null ? null : { used: globalUsed(1), limit: cap },
+      global: { used: globalUsed(1), limit: cap },
       hourResetAt: null,
       dayResetAt,
     };

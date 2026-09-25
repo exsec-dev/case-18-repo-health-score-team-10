@@ -225,6 +225,8 @@ export interface AiConfig {
   check: AiActionLimits;
   /** аварийный потолок обзоров в сутки для пользователей с паролем (на весь сервис, п.6) */
   unlockedOverviewPerDay: number;
+  /** то же для проверок оценки (решение Екатерины 25.09: «лимит 100 по паролю») */
+  unlockedCheckPerDay: number;
   /** пароль неограниченного доступа — секрет .env (AI_UNLOCK_PASSWORD); null — функции нет */
   unlockPassword: string | null;
   /** состояние пароля для строки старта: задан / не задан / короче UNLOCK_PASSWORD_MIN (функция выключена) */
@@ -242,6 +244,7 @@ export const DEFAULT_AI: AiConfig = {
   overview: { perHour: 2, perDay: 6, globalPerDay: 30 },
   check: { perHour: 5, perDay: 20, globalPerDay: 60 },
   unlockedOverviewPerDay: 100,
+  unlockedCheckPerDay: 100,
   unlockPassword: null,
   unlockStatus: "off",
   unlockKey: null,
@@ -268,6 +271,7 @@ export function aiConfigFromEnv(env: Record<string, string>): AiConfig {
       globalPerDay: envInt(env, "AI_CHECK_GLOBAL_PER_DAY") ?? DEFAULT_AI.check.globalPerDay,
     },
     unlockedOverviewPerDay: envInt(env, "AI_UNLOCKED_OVERVIEW_PER_DAY") ?? DEFAULT_AI.unlockedOverviewPerDay,
+    unlockedCheckPerDay: envInt(env, "AI_UNLOCKED_CHECK_PER_DAY") ?? DEFAULT_AI.unlockedCheckPerDay,
     unlockPassword: status === "on" ? password : null,
     unlockStatus: status,
     unlockKey: env.APP_SECRET ? env.APP_SECRET : null,
