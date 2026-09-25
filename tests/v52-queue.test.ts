@@ -340,7 +340,8 @@ describe("О2: тяжелые репо — только первый слот р
   test("проводка: первый слот рода берет тяжелые, остальные — только легкие; пересчет — только цикл сканов рейтинга", async () => {
     const seen: { lane: string; kind?: string; lightOnly?: boolean; historyRescore?: boolean; state: object }[] = [];
     const plan: WorkerLoopSpec[] = workerLoopPlan("all", { ...loadConfig().queue, userScanSlots: 3 }).map((s) => ({ ...s, pollMs: 5 }));
-    const stop = startWorkerLoops({ db: null as never, config: loadConfig(), serverClient: () => null }, plan, {
+    // настоящая БД: циклы сканов пишут метки живости в meta после тика
+    const stop = startWorkerLoops({ db: freshDb(), config: loadConfig(), serverClient: () => null }, plan, {
       tick: (async (_d: unknown, order: string[], state: object, opts: { kind?: string; lightOnly?: boolean; historyRescore?: boolean }) => {
         seen.push({ lane: order.join(","), kind: opts.kind, lightOnly: opts.lightOnly, historyRescore: opts.historyRescore, state });
         return "idle";
