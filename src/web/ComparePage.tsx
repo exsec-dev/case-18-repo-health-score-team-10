@@ -662,7 +662,8 @@ function CompareTable({ items, fullKeys, hasPat, onRemove }: { items: CompareIte
     <div key={`line${r}`} aria-hidden="true" className={`rh-cmp-line rh-cmp-line_${row.kind}`} style={{ gridRow: labelRow(r), gridColumn: "1 / -1" }} />
   ));
 
-  const template = phone ? `repeat(${n}, minmax(0, 1fr))` : `minmax(160px, 248px) repeat(${n}, minmax(0, ${n <= 2 ? 360 : 300}px))`;
+  // §2 25.09 (просмотр первого исполнения, п.4): таблица — на всю ширину экрана; столбцы репо делят остаток поровну
+  const template = phone ? `repeat(${n}, minmax(0, 1fr))` : `minmax(180px, 248px) repeat(${n}, minmax(0, 1fr))`;
   return (
     <div role="table" aria-label={`${COMPARE_TITLE}: ${items.length} из ${COMPARE_MAX}`} className={phone ? "rh-cmp rh-cmp_phone" : "rh-cmp"} style={{ gridTemplateColumns: template }}>
       {!phone && <div role="columnheader" className="rh-cmp-head rh-cmp-head_corner" style={at(headRow, 1)} />}

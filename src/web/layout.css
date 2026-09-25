@@ -2475,8 +2475,7 @@ button.rh-category:focus-visible {
 /* таблица — в рамке, как разделы карточки; overflow не режем: шапка закрепляется при прокрутке колонки */
 .rh-cmp-wrap {
   box-sizing: border-box;
-  width: fit-content;
-  max-width: 100%;
+  width: 100%;
   border: 1px solid var(--g-color-line-generic);
   border-radius: var(--g-border-radius-xl);
   transition: opacity 0.15s;
@@ -2869,8 +2868,3 @@ button.rh-category:focus-visible {
   padding-top: var(--g-spacing-3);
 }
 
-@media (max-width: 767px) {
-  .rh-cmp-wrap {
-    width: 100%;
-  }
-}

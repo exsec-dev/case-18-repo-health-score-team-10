@@ -917,41 +917,42 @@ export function getRepoCard(
   // которой репозитория нет. Это тот же случай, что и оговорённый в CardScore
   // «места у неоценённого репозитория не существует».
   const inRating = r.visibility === "public" && r.rating_active === 1;
+  // В5.3 круг 4 (§2 25.09 «просмотр первого исполнения», п.1): место — ОДНИМ
+  // проходом. Прежде три подсчета (выше, всего, равные) шли каждый по всем
+  // оценкам с коррелированным LAST_ELIGIBLE_SCAN_SQL на строку — 1,2 с на
+  // карточку на живой базе (28 тыс. репо), ×3 в сравнении. Здесь «последний
+  // пригодный скан» считается один раз на репо (GROUP BY), выше/всего — одной
+  // агрегацией, равные — списком слагов (их единицы). Набор и порядок те же,
+  // что у RATING_SQL, поэтому место по-прежнему равно позиции строки рейтинга.
   const ranking =
     opts.withRank === false || !inRating || publicRow.healthcraft_index === null
       ? null
       : (db
           .query(
-            `SELECT
-               (SELECT COUNT(*) FROM scores sc JOIN repos r ON r.id = sc.repo_id
-                 WHERE sc.model_version = ? AND r.rating_active = 1 AND r.visibility = 'public'
-                   AND sc.scan_id = ${LAST_ELIGIBLE_SCAN_SQL}
-                   AND sc.healthcraft_index > ?) AS above,
-               (SELECT COUNT(*) FROM scores sc JOIN repos r ON r.id = sc.repo_id
-                 WHERE sc.model_version = ? AND r.rating_active = 1 AND r.visibility = 'public'
-                   AND sc.scan_id = ${LAST_ELIGIBLE_SCAN_SQL}
-                   AND sc.healthcraft_index IS NOT NULL) AS scored`,
+            `WITH last AS (
+               SELECT sc2.repo_id, MAX(sc2.scan_id) AS scan_id FROM scores sc2 JOIN scans s2 ON s2.id = sc2.scan_id
+               WHERE sc2.model_version = ? AND s2.rating_eligible = 1 GROUP BY sc2.repo_id)
+             SELECT COALESCE(SUM(sc.healthcraft_index > ?), 0) AS above,
+                    COUNT(sc.healthcraft_index) AS scored,
+                    GROUP_CONCAT(CASE WHEN sc.healthcraft_index = ? THEN r.org_slug || '/' || r.repo_slug END, char(10)) AS ties
+             FROM last
+             JOIN scores sc ON sc.scan_id = last.scan_id AND sc.model_version = ?
+             JOIN repos r ON r.id = last.repo_id
+             WHERE r.rating_active = 1 AND r.visibility = 'public'`,
           )
-          .get(MODEL_VERSION, MODEL_VERSION, publicRow.healthcraft_index, MODEL_VERSION, MODEL_VERSION) as {
+          .get(MODEL_VERSION, publicRow.healthcraft_index, publicRow.healthcraft_index, MODEL_VERSION) as {
           above: number;
           scored: number;
+          ties: string | null;
         } | null);
 
   // В4.8.5 (К8.5.10, С6-6): при РАВНЫХ индексах рейтинг упорядочивает строки
   // по org/repo (compareItems) — место на карточке считается тем же правилом,
   // иначе «#3» на карточке расходилось с позицией строки
   const tiesBefore =
-    ranking === null
+    ranking === null || ranking.ties === null
       ? 0
-      : (
-          db
-            .query(
-              `SELECT r.org_slug, r.repo_slug FROM scores sc JOIN repos r ON r.id = sc.repo_id
-               WHERE sc.model_version = ? AND r.rating_active = 1 AND r.visibility = 'public'
-                 AND sc.scan_id = ${LAST_ELIGIBLE_SCAN_SQL} AND sc.healthcraft_index = ?`,
-            )
-            .all(MODEL_VERSION, MODEL_VERSION, publicRow.healthcraft_index) as { org_slug: string; repo_slug: string }[]
-        ).filter((t) => `${t.org_slug}/${t.repo_slug}`.localeCompare(`${r.org_slug}/${r.repo_slug}`) < 0).length;
+      : ranking.ties.split("\n").filter((t) => t.localeCompare(`${r.org_slug}/${r.repo_slug}`) < 0).length;
 
   const score: CardScore = {
     healthcraftIndex: publicRow.healthcraft_index,
