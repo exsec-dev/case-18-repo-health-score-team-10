@@ -126,7 +126,9 @@ describe("А2 (блок А): «Как считается» описывает п
   test("full-null: показатель один — Repo Health Score, и строка говорит про 6 категорий", () => {
     const { md } = report("full-null");
     const method = md.slice(md.indexOf("## Как считается"), md.indexOf("## Приложение"));
-    expect(method).toContain("В отчете один показатель – Repo Health Score");
+    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (ревью В5.3, 25.09): правило цифр — «1 показатель», не «один»
+    expect(method).toContain("В отчете 1 показатель – Repo Health Score");
+    expect(method).not.toContain("один показатель");
     expect(method.match(/В этом отчете: /g) ?? []).toHaveLength(1);
   });
 });

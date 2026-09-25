@@ -318,7 +318,10 @@ describe("Авто-генерация в окне скана по оп-ину (�
     const { db } = freshDb("rh-v5b3-autosum-");
     try {
       const repoId = seedRepo(wrap(db), { org: "v5", repo: "sha" });
-      const scanId = seedScan(wrap(db), repoId, { facts: cardFacts() });
+      // ревью В5.3 (25.09): автозапуск не идет по скану с закрытым каналом (scanChannelDenied) —
+      // здесь проверяется оп-ин, поэтому CI/CD в скане открыт (в cardFacts он no-data «access»)
+      const facts = cardFacts().filter((f) => f.key !== "cicd.runs");
+      const scanId = seedScan(wrap(db), repoId, { facts });
       seedScore(wrap(db), repoId, scanId, { total: 55 });
       const base = loadConfig();
       const config = { llm: { ...base.llm, provider: "zai" as const, zaiApiKey: "test-key", baseUrl: mock.url, mainModel: "m1", sideModel: "m2" } };
