@@ -1450,3 +1450,5 @@ console.log(`  sourcecraft token: ${config.sourcecraftToken ? "есть" : "НЕ
 console.log(`  scheduler: интервал ${Math.round(config.scheduler.intervalMs / 60000)} мин, форс-полный ${config.scheduler.fullRescan ? "ВКЛ" : "выкл"}`);
 // 23.09: кулдаун генерации виден сразу — рассинхрон .env с процессом ловится по stdout
 console.log(`  summary cooldown: ${config.queue.summaryCooldownMs ?? 3_600_000} ms, кэш по скану ${(config.queue.summaryCooldownMs ?? 3_600_000) > 1 ? "ВКЛ" : "выкл (дебаг)"}`);
+// В5.2 (аудит М5): пароль короче 20 символов выключает функцию — это видно в строке старта
+console.log(`  AI: пароль доступа — ${config.ai.unlockStatus === "on" ? "задан" : config.ai.unlockStatus === "too_short" ? "КОРОЧЕ 20 СИМВОЛОВ, доступ по паролю выключен" : "не задан"}; автозапуск топа — ${config.ai.topAuto ? `вкл (топ-${config.ai.topAutoSize})` : "выкл"}; лимиты обзора ${config.ai.overview.perHour}/${config.ai.overview.perDay}/${config.ai.overview.globalPerDay}, проверки ${config.ai.check.perHour}/${config.ai.check.perDay}/${config.ai.check.globalPerDay}`);
