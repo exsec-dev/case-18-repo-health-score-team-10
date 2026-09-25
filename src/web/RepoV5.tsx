@@ -376,10 +376,8 @@ export function FraudCheckFooter({ card, org, repo, onChanged, loggedIn, quota, 
   const icon = CHECK_ICON[st.kind];
   const button =
     st.button !== null ? (
+      // UX-проход 25.09, круг 2 (замечание 2): кнопка без иконки во всех состояниях
       <Button view={st.kind === "flagged" ? "normal-contrast" : "outlined"} size="s" loading={action.sending} disabled={blocked !== null} onClick={() => void action.start()}>
-        <Button.Icon side="start">
-          <Icon data={ShieldCheck} size={14} />
-        </Button.Icon>
         {withCounter(st.button, counter)}
       </Button>
     ) : null;
@@ -399,7 +397,8 @@ export function FraudCheckFooter({ card, org, repo, onChanged, loggedIn, quota, 
           theme="warning"
           view="filled"
           size="s"
-          align="center"
+          // UX-проход 25.09, круг 2 (замечание 2): иконка — по первой строке текста
+          align="baseline"
           // кнопка — под текстом: в узкой плашке индекса сбоку она сжимает строку признака
           className="rh-fraud"
           message={

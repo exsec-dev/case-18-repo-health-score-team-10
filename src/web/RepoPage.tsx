@@ -305,7 +305,8 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
         // сразу под ними (2-A); история — разделом после рекомендаций (3-B)
         <Flex direction="column" gap={6} className="rh-repo-feed">
           <Flex direction="column" gap={3}>
-            <Markers view={view} />
+            {/* UX-проход В5.2 25.09, круг 2 (замечание 4): плашка CI — в карточке Repo Health
+                Score (CI/CD входит только в него), не над обоими показателями */}
             {/* В5.2 (Б6, выбор 1A): проверка оценки — подвалом плашки HealthCraft Index; UX-проход
                 25.09 (замечание 7): признаки накрутки — там же, рядом с кнопкой */}
             <ScoreBand card={card} view={view} footer={<FraudCheckFooter card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} quota={aiQuota.quota} onQuota={aiQuota.reload} />} />
@@ -820,6 +821,8 @@ function ScoreBand({ card, view, footer }: { card: Card; view: CardView; footer?
             <ContributionStrip bar={barOf("Repo Health Score")} />
           </>
         )}
+        {/* плашка CI — и в закрытой карточке: доступ к CI есть, к Безопасности нет */}
+        <Markers view={view} />
       </Card>
     </div>
   );
@@ -1142,6 +1145,9 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
 // ---------- маркеры расчёта: предупреждения наверху и «Ограничения данных» ----------
 
 /**
+ * UX-проход В5.2 25.09, круг 2 (замечание 4, Екатерина): единственное предупреждение (CI
+ * настроен, запусков не видно) касается только категории CI/CD, а она входит только в Repo
+ * Health Score, — поэтому оно стоит внизу его плашки, как признаки накрутки у индекса.
  * Предупреждения наверху (В4.6, З4 систематика): `warning` — оговорка о самом
  * расчете, `info` — граница данных. В4.9 ч.2 (А6, §2 23.09 ответ 2): наверху
  * остаются только те, которых нет в «Ограничениях данных», — данные из
@@ -1161,11 +1167,11 @@ function Markers({ view }: { view: CardView }) {
   }
   if (rows.length === 0) return null;
   return (
-    <Flex direction="column" gap={2} role="region" aria-label="Особенности расчета">
+    <Flex direction="column" gap={2} role="region" aria-label="Особенности расчета" className="rh-score-band__foot">
       {[...rows].sort((a, b) => (a.theme === b.theme ? 0 : a.theme === "warning" ? -1 : 1)).map((row) => (
         // круг 5 (1): info — заливкой; UX-проход 25.09 (замечание 8): предупреждение тоже
         // заливкой — желтый фон, как у прочих предупреждений
-        <Alert key={row.key} theme={row.theme} view="filled" size="s" title={row.label} message={row.text} />
+        <Alert key={row.key} theme={row.theme} view="filled" size="s" align="baseline" title={row.label} message={row.text} />
       ))}
     </Flex>
   );

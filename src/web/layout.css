@@ -516,6 +516,11 @@ body {
   /* фон Card задается своей переменной — обычный background ее не перебивает */
   --g-card-background-color: var(--g-color-base-generic);
 }
+/* круг 2 UX-прохода В5.2 (25.09): переменная наследуется во вложенные Card — желтая плашка CI
+   внутри закрытой карточки становилась серой; вложенным возвращается их собственный фон */
+.rh-score-band_locked .g-card {
+  --g-card-background-color: initial;
+}
 
 /* Круг 2 части 2 (Е12, вариант A): две плашки показателей — в ряд, пока
  * каждой хватает 360px, иначе столбиком. Высота ряда общая. */
@@ -3036,6 +3041,8 @@ button.rh-category:focus-visible {
 .rh-ai-quota-box {
   box-sizing: border-box;
   width: fit-content;
+  /* круг 2 (замечание 3): чуть шире — колонки не жмутся к числам */
+  min-width: min(100%, 480px);
   max-width: 100%;
   overflow-x: auto;
   padding: var(--g-spacing-2) var(--g-spacing-4);
@@ -3043,7 +3050,11 @@ button.rh-category:focus-visible {
   background: var(--g-color-base-generic);
 }
 .rh-ai-quota-box .rh-ai-quota {
-  width: auto;
+  width: 100%;
+}
+.rh-ai-quota-box .rh-ai-quota th,
+.rh-ai-quota-box .rh-ai-quota td {
+  padding-right: var(--g-spacing-6);
 }
 
 /* UX-проход В5.2 25.09 (замечание 5): знак вопроса — внутри плашки «По открытым данным» */
@@ -3065,6 +3076,11 @@ button.rh-category:focus-visible {
 .rh-check-foot_flagged {
   padding-top: 0;
   border-top: 0;
+}
+
+/* круг 2 (замечание 4): плашка CI — внизу карточки Repo Health Score */
+.rh-score-band__foot {
+  margin-top: auto;
 }
 /* кнопка под текстом признака — по ширине текста, у левого края (колонка Alert растягивает ее) */
 .rh-check-foot_flagged .g-alert__main > .g-button {
