@@ -82,12 +82,16 @@ export interface SummaryRunResult {
   /** роли без фактов своей категории — вызова не было (tri-state) */
   skipped: string[];
   outcomes: SummaryRoleOutcome[];
+  /** В5.2 (аудит М3): вызовов модели с ответом; 0 — модель не ответила ни разу (лимит не списывается) */
+  answered?: number;
   /** В5.1 (Ищейка-С1): у скана уже есть ai_notes — генерация не запускалась */
   cached?: boolean;
 }
 
 interface RunBudget {
   calls: number;
+  /** В5.2 (аудит М3): вызовов, на которые модель ОТВЕТИЛА — от них зависит списание лимита */
+  answered: number;
   max: number;
   ac: AbortController;
 }
@@ -107,7 +111,9 @@ function budgetedCallLlm(callLlm: CallLlm, budget: RunBudget): CallLlm {
     opts.signal?.addEventListener("abort", relay, { once: true });
     budget.ac.signal.addEventListener("abort", relay, { once: true });
     try {
-      return await callLlm({ ...opts, signal: ac.signal });
+      const res = await callLlm({ ...opts, signal: ac.signal });
+      budget.answered++;
+      return res;
     } finally {
       opts.signal?.removeEventListener("abort", relay);
       budget.ac.signal.removeEventListener("abort", relay);
@@ -131,7 +137,29 @@ export function scopedFacts(db: Database, scanId: number, role: SummaryRole, aud
     .filter((r) => audience === "full" || publicFactKey(r.key))
     .map((r) => ({ key: r.key, value: parseFactValue(r.value) }))
     .filter((f) => roleFactsAllowed(role, f.key))
-    .map(capTimelineFact);
+    .map(capTimelineFact)
+    .map((f) => (audience === "public" ? withoutEmails(f) : f));
+}
+
+/**
+ * Аудит безопасности М7: публичный обзор видят анонимы и печатает PDF — адреса почты
+ * авторов и коммиттеров из ленты во вход модели не идут (имена и даты остаются: ритм и
+ * авторство видны и без адресов).
+ */
+function withoutEmails(f: FactInput): FactInput {
+  const raw = f.value as { events?: unknown } | null;
+  if (f.key !== "activity.git.timeline" || raw === null || typeof raw !== "object" || !Array.isArray(raw.events)) return f;
+  const strip = (p: unknown): unknown => {
+    if (p === null || typeof p !== "object") return p;
+    const { email: _email, ...rest } = p as Record<string, unknown>;
+    return rest;
+  };
+  const events = raw.events.map((e) => {
+    if (e === null || typeof e !== "object") return e;
+    const ev = e as Record<string, unknown>;
+    return { ...ev, author: strip(ev.author), committer: strip(ev.committer) };
+  });
+  return { ...f, value: { ...(raw as Record<string, unknown>), events } };
 }
 
 /** Факт открыт публичной аудитории: категория из 4 открытых и не канал с правами. */
@@ -401,7 +429,7 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
   // одного скана — два разных текста
   if (deps.cache !== false && deps.db.query("SELECT 1 FROM ai_notes WHERE scan_id = ? AND role != 'flagger' AND audience = ? LIMIT 1").get(req.scanId, audience) !== null) {
     deps.log?.(`[summary] ${deps.org}/${deps.repo} scan ${req.scanId} (${audience}): cached (notes already exist for this scan)`);
-    return { scanId: req.scanId, notes: 0, failSoft: [], skipped: [], outcomes: [], cached: true };
+    return { scanId: req.scanId, notes: 0, failSoft: [], skipped: [], outcomes: [], answered: 0, cached: true };
   }
   if (deps.cache === false) {
     const gone = deps.db.query("DELETE FROM ai_notes WHERE scan_id = ? AND role != 'flagger' AND audience = ?").run(req.scanId, audience);
@@ -412,6 +440,7 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
   }
   const budget: RunBudget = {
     calls: 0,
+    answered: 0,
     max: deps.budgets?.maxModelCalls ?? MAX_MODEL_CALLS,
     ac: new AbortController(),
   };
@@ -531,7 +560,7 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
         .join("; ")}`,
     );
   }
-  return { scanId: req.scanId, notes, failSoft, skipped, outcomes };
+  return { scanId: req.scanId, notes, failSoft, skipped, outcomes, answered: budget.answered };
 }
 
 export interface FraudCheckResult {
@@ -545,6 +574,8 @@ export interface FraudCheckResult {
   reason?: string;
   /** у скана уже есть проверка — вызова не было */
   cached?: boolean;
+  /** В5.2 (аудит М3): вызовов модели с ответом; 0 — модель не ответила (лимит не списывается) */
+  answered?: number;
 }
 
 /** Бюджет проверки: 1 вызов на попытку × ROLE_ATTEMPTS, с запасом на ретраи провайдера. */
@@ -565,16 +596,16 @@ export async function runFraudCheck(deps: SummaryDeps, req: SummaryRequest): Pro
   const tag = `[fraud-check] ${deps.org}/${deps.repo} scan ${req.scanId}`;
   if (deps.cache !== false && deps.db.query("SELECT 1 FROM ai_notes WHERE scan_id = ? AND role = 'flagger' LIMIT 1").get(req.scanId) !== null) {
     deps.log?.(`${tag}: cached (check already exists for this scan)`);
-    return { scanId: req.scanId, ok: true, flag: null, signals: null, cached: true };
+    return { scanId: req.scanId, ok: true, flag: null, signals: null, cached: true, answered: 0 };
   }
   deps.db.query("DELETE FROM ai_notes WHERE scan_id = ? AND role = 'flagger'").run(req.scanId);
   deps.db.query("DELETE FROM ai_fails WHERE scan_id = ? AND role = 'flagger'").run(req.scanId);
-  const fail = (reason: string, signals: RhythmSignals | null): FraudCheckResult => {
+  const fail = (reason: string, signals: RhythmSignals | null, answered = 0): FraudCheckResult => {
     deps.db
       .query("INSERT INTO ai_fails (repo_id, scan_id, role, reason, created_at, audience) VALUES (?, ?, 'flagger', ?, ?, 'public')")
       .run(repoId, req.scanId, reason.slice(0, 200), now.toISOString());
     deps.log?.(`${tag}: no flag — ${reason.slice(0, 160)}`);
-    return { scanId: req.scanId, ok: false, flag: null, signals, reason };
+    return { scanId: req.scanId, ok: false, flag: null, signals, reason, answered };
   };
 
   const rows = deps.db
@@ -592,7 +623,7 @@ export async function runFraudCheck(deps: SummaryDeps, req: SummaryRequest): Pro
 
   const facts: FactInput[] = [{ key: RHYTHM_KEY, value: signals }];
   if (rest) facts.push({ key: "activity.rest", value: parseFactValue(rest.value) });
-  const budget: RunBudget = { calls: 0, max: deps.budgets?.maxModelCalls ?? FRAUD_CHECK_MAX_CALLS, ac: new AbortController() };
+  const budget: RunBudget = { calls: 0, answered: 0, max: deps.budgets?.maxModelCalls ?? FRAUD_CHECK_MAX_CALLS, ac: new AbortController() };
   const fuse = setTimeout(() => budget.ac.abort(), deps.budgets?.fuseMs ?? FRAUD_CHECK_FUSE_MS);
   let res: Awaited<ReturnType<typeof runFlagger>>;
   try {
@@ -600,20 +631,22 @@ export async function runFraudCheck(deps: SummaryDeps, req: SummaryRequest): Pro
   } finally {
     clearTimeout(fuse);
   }
-  if (!res.ok) return fail(res.reason, signals);
+  if (!res.ok) return fail(res.reason, signals, budget.answered);
   writeNote(
     deps,
     req.scanId,
     repoId,
     "flagger",
-    JSON.stringify({ flag: res.flag.flag, factors: res.flag.factors, signals }),
+    // аудит надежности М3: вход проверки хранится с ней — фактор печатается по тем данным,
+    // что видела модель, а не по фактам более нового анализа
+    JSON.stringify({ flag: res.flag.flag, factors: res.flag.factors, signals, inputs: rest ? { "activity.rest": parseFactValue(rest.value) } : {} }),
     res.flag.factors.map((f) => f.key),
     now,
     // вход флаггера — только публичные данные активности: метку видят все (§2 п.2)
     "public",
   );
   deps.log?.(`${tag}: flag=${res.flag.flag}, factors=[${res.flag.factors.map((f) => f.key).join(",")}], calls=${budget.calls}`);
-  return { scanId: req.scanId, ok: true, flag: res.flag, signals };
+  return { scanId: req.scanId, ok: true, flag: res.flag, signals, answered: budget.answered };
 }
 
 /** Причина «не проверялось»: в скане нет ленты коммитов — вызова модели не было. */
@@ -660,7 +693,8 @@ async function runFlagger(
     }
     lastRaw = text;
     const cleaned = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-    // В5.1 (Ищейка-З1): числа в note — только из входных фактов
+    // форма и ключи — validateFlagOutput; текст фактора на карточке и в отчете строит код
+    // из признаков (fraudFactorFact), note модели — только запасной вариант
     const verdict = validateFlagOutput(cleaned, keys);
     if (verdict.ok && verdict.flag !== null) return { ok: true, flag: verdict.flag };
     lastReason = verdict.reason ?? "форма не JSON";

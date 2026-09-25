@@ -251,6 +251,8 @@ export function validateFlagOutput(raw: string, factKeys: Set<string>): FlagVali
     if (typeof item.key !== "string" || !factKeys.has(item.key)) return fail(`ключ фактора вне входа: ${String(item.key).slice(0, 40)}`);
     if (typeof item.note !== "string" || item.note.length === 0 || item.note.length > 200) return fail("note фактора пуста или длиннее 200");
     if (/https?:\/\/|www\./i.test(item.note)) return fail("note содержит адрес");
+    // аудит безопасности М8: управляющие и bidi-символы в note — как в прочих текстах модели
+    if (/[\u0000-\u0008\u000b-\u001f\u007f\u202a-\u202e\u2066-\u2069]/.test(item.note)) return fail("note содержит управляющие символы");
     factors.push({ key: item.key, note: item.note });
   }
   return { ok: true, reason: null, flag: { flag: obj.flag, factors } };

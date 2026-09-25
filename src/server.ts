@@ -897,6 +897,15 @@ const routes = {
         windowPush(summaryPosts, user.userId);
         const card = await cardOrRefusal(req, org!, repo!);
         if (card instanceof Response) return card;
+        // аудиты В5.2 (безопасность М6, надежность М4): результат проверки живет в AI-блоке
+        // карточки; зрителю, которому AI-блок не открыт (закрытый репо без прав на CI/CD и
+        // Безопасность), проверку не ставим — кредиты ушли бы на невидимый ему результат
+        if (card.ai === undefined) {
+          return Response.json(
+            { error: { code: "no_full_access", message: "проверка закрытого репозитория доступна, когда токену открыты CI/CD и Безопасность" } },
+            { status: 403 },
+          );
+        }
         const repoRow = db.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number } | null;
         if (repoRow === null) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
         const out = enqueueCheck(db, repoRow.id, {
@@ -1148,9 +1157,16 @@ const routes = {
       if (config.ai.unlockPassword === null) {
         return Response.json({ error: { code: "unlock_disabled", message: "доступ по паролю на этом сервере не настроен" } }, { status: 404 });
       }
+      // аудит М5: попытки не ограничены — тело и пароль ограничены по размеру, чтобы перебор
+      // не превращался в хэширование мегабайтных тел
+      if (Number(req.headers.get("content-length") ?? "0") > 4096) {
+        return Response.json({ error: { code: "too_large", message: "слишком длинный запрос" } }, { status: 413 });
+      }
       const body = (await req.json().catch(() => null)) as { password?: unknown } | null;
       if (typeof body?.password !== "string" || body.password.length === 0) return badQuery("введите пароль");
-      if (!tryUnlock(db, user.userId, body.password, config.ai)) {
+      if (body.password.length > 256) return badQuery("пароль длиннее 256 символов");
+      // надежность М12: пароль в .env читается без пробелов по краям — введенный тоже
+      if (!tryUnlock(db, user.userId, body.password.trim(), config.ai)) {
         return Response.json({ error: { code: "wrong_password", message: "пароль не подошел" } }, { status: 403 });
       }
       return Response.json({ ok: true, unlocked: true });

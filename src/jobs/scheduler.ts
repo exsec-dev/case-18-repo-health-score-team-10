@@ -29,7 +29,7 @@ import { makeScClient } from "../collectors/http";
 import { makeAppsecClient } from "../collectors/appsec";
 import { makeLlm } from "../llm";
 import { runSummary as runSummaryPipeline, runFraudCheck as runFraudCheckPipeline, NO_RHYTHM_REASON, type SummaryRunResult } from "../summary/pipeline";
-import { AI_REJECTED_ERRORS, type QuotaRefusal } from "./ai-quota";
+import { AI_CACHED_NOTE, AI_REJECTED_ERRORS, type QuotaRefusal } from "./ai-quota";
 import type { AiAudience } from "../db";
 import { materializeWorktree, removeWorktree } from "../summary/tools";
 import { cleanupClone, cloneWithDegrade } from "../collectors/git";
@@ -323,7 +323,11 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
          -- не «медленнее», а мёртвый синхронный claim. CASE коротко замыкается в
          -- рантайме (EXPLAIN QUERY PLAN у обоих вариантов одинаков — по плану
          -- «исправлять» подзапрос не надо).
-         ORDER BY CASE WHEN ? = 'user' THEN ((SELECT MAX(j2.claimed_at) FROM jobs j2 WHERE j2.user_id = jobs.user_id) IS NOT NULL) ELSE 0 END,
+         -- В5.2 (аудит надежности С3): в полосе рейтинга AI-заявки топа (summary/check, без
+         -- автора) — раньше волны сканов: иначе тексты топа ждут конца ночного обхода. В полосе
+         -- user порядок прежний — «сначала анализ, потом обзор» держится очередью
+         ORDER BY CASE WHEN ? = 'user' THEN 0 WHEN kind = 'scan' THEN 1 ELSE 0 END,
+                  CASE WHEN ? = 'user' THEN ((SELECT MAX(j2.claimed_at) FROM jobs j2 WHERE j2.user_id = jobs.user_id) IS NOT NULL) ELSE 0 END,
                   CASE WHEN ? = 'user' THEN (SELECT MAX(j2.claimed_at) FROM jobs j2 WHERE j2.user_id = jobs.user_id) ELSE NULL END ASC,
                   id
          LIMIT 1
@@ -342,7 +346,7 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
      WHERE repo_id = ? AND user_id IS ? AND status = 'running'`,
   );
   const claimTx = db.transaction(() => {
-    const row = claimStmt.get(nowIso, leaseIso, nowIso, maxAttempts, queue, queue, queue) as {
+    const row = claimStmt.get(nowIso, leaseIso, nowIso, maxAttempts, queue, queue, queue, queue) as {
       id: number;
       repo_id: number;
       user_id: number | null;
@@ -940,6 +944,14 @@ export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<Sca
   return result;
 }
 
+/**
+ * Токен клона summary-заявки (В5.2, аудит безопасности S1): публичная версия — всегда без
+ * токена (только то, что открыто всем); полная — токеном автора.
+ */
+export function summaryCloneToken(audience: AiAudience, pat: string | null): string | null {
+  return audience === "public" ? null : pat;
+}
+
 /** Причины падения summary-заявки языком продукта (панель заданий). */
 export const SUMMARY_JOB_ERRORS = {
   noPat: JOB_ERRORS.noPat,
@@ -959,7 +971,11 @@ export const SUMMARY_JOB_ERRORS = {
  * роли без фактов (честный три-state, «нет фактов...») в классификации
  * не участвуют. Иначе — «ни один блок не прошёл проверку».
  */
-export function summaryEmptyErrorOf(res: Pick<SummaryRunResult, "outcomes">): string {
+export function summaryEmptyErrorOf(res: Pick<SummaryRunResult, "outcomes" | "answered">): string {
+  // В5.2 (аудит М3): решает число ответов модели — 0 ответов = провайдер недоступен (не
+  // списывается); хоть один ответ — модель отработала, текст не прошел проверку (списывается).
+  // Прежняя классификация по причинам ролей держится для швов без счетчика
+  if (res.answered !== undefined) return res.answered === 0 ? SUMMARY_JOB_ERRORS.providerDown : SUMMARY_JOB_ERRORS.empty;
   const failed = res.outcomes.filter((o) => !o.ok && !(o.reason ?? "").startsWith("нет фактов"));
   const modelDown = failed.length > 0 && failed.every((o) => (o.reason ?? "").startsWith("модель:"));
   return modelDown ? SUMMARY_JOB_ERRORS.providerDown : SUMMARY_JOB_ERRORS.empty;
@@ -989,11 +1005,14 @@ export async function processSummaryJob(deps: WorkerDeps, job: ClaimedJob): Prom
     deps.db.query("SELECT 1 FROM ai_notes WHERE scan_id = ? AND role != 'flagger' AND audience = ? LIMIT 1").get(scanId, job.audience ?? "full") !== null
   ) {
     console.log(`[summary job ${job.id}] ${job.slug}: notes already exist for scan ${scanId} — no clone, no generation`);
-    return null;
+    return AI_CACHED_NOTE;
   }
   const limits = scanCloneLimitsOf(deps.config.scan);
   const [org, repo] = job.slug.split("/");
-  const clone = await cloneWithDegrade(scanGitUrl(deps.config.api.gitBase, pat, org!, repo!), undefined, limits);
+  // В5.2 (аудит безопасности S1): публичная версия клонируется БЕЗ токена автора — репо,
+  // ставший закрытым до обхода каталога, не клонируется, и его код не попадает в публичный текст
+  const cloneToken = summaryCloneToken(job.audience ?? "full", pat);
+  const clone = await cloneWithDegrade(scanGitUrl(deps.config.api.gitBase, cloneToken, org!, repo!), undefined, limits);
   if (!clone.ok) return SUMMARY_JOB_ERRORS.clone(clone.detail.slice(0, 120));
   let worktree: { root: string; gitDir: string } | null = null;
   try {
@@ -1016,7 +1035,7 @@ export async function processSummaryJob(deps: WorkerDeps, job: ClaimedJob): Prom
       { scanId, audience: job.audience ?? "full" },
     );
     // В5.1 (Ищейка-С1): кэш по скану — заметки уже были, генерации не было → задание done
-    if (res.cached === true) return null;
+    if (res.cached === true) return AI_CACHED_NOTE;
     if (res.notes > 0) return null;
     // В5.1 (Прод-С3): нулевой фейл различает «провайдер недоступен» от
     // «ни один блок не прошёл валидацию» (классификация — ниже, чистая функция)
@@ -1055,8 +1074,11 @@ export async function processCheckJob(deps: WorkerDeps, job: ClaimedJob): Promis
     },
     { scanId },
   );
+  if (res.cached === true) return AI_CACHED_NOTE;
   if (res.ok) return null;
   if (res.reason === NO_RHYTHM_REASON) return CHECK_JOB_ERRORS.noRhythm;
+  // В5.2 (аудит М3): решает число ответов модели, а не текст причины последней попытки
+  if (res.answered !== undefined) return res.answered === 0 ? CHECK_JOB_ERRORS.providerDown : CHECK_JOB_ERRORS.rejected;
   return (res.reason ?? "").startsWith("модель:") ? CHECK_JOB_ERRORS.providerDown : CHECK_JOB_ERRORS.rejected;
 }
 
@@ -1228,10 +1250,11 @@ export async function workerTick(
     // К8.5.12 (С10-2): итог задания — с повтором SQLITE_BUSY: готовый скан не
     // оставляет задание `running` до лиза и не сжигает попытку повтором
     await withBusyRetry(
-      () => finishJob(deps.db, claimed.id, claimed.claimedAt, failure === null ? "done" : "failed", failure ?? undefined),
+      // В5.2 (аудит М3): «текст уже был» — done с пометкой: лимит такую заявку не списывает
+      () => finishJob(deps.db, claimed.id, claimed.claimedAt, failure === null || failure === AI_CACHED_NOTE ? "done" : "failed", failure ?? undefined),
       `job ${claimed.id} finish`,
     );
-    return failure === null ? "done" : "failed";
+    return failure === null || failure === AI_CACHED_NOTE ? "done" : "failed";
   } catch (e) {
     console.error(`[worker] job ${claimed.id} (${claimed.slug}) crashed: ${String((e as Error).message).slice(0, 200)}`);
     try {
@@ -1379,12 +1402,20 @@ export function sweepOrphanScans(db: Database, opts: { leaseMs: number; now?: Da
  * трогаем никогда; строки без `created_at` (legacy) — тоже, их возраст
  * неизвестен, а гадать по id нельзя.
  */
+/** Сколько хранятся AI-заявки при любом ретеншене — окно учета лимитов (аудит надежности М8). */
+const AI_JOBS_KEEP_MS = 2 * 24 * 3600_000;
+
 export function purgeOldJobs(db: Database, opts: { retentionDays: number; now?: Date }): number {
   const now = opts.now ?? new Date();
   const cutoff = new Date(now.getTime() - opts.retentionDays * 24 * 60 * 60_000).toISOString();
+  // аудит надежности М8: AI-заявки — учет лимитов (сутки МСК, час); моложе 2 суток они не
+  // удаляются при любом ретеншене, иначе QUEUE_RETENTION_DAYS=0 обнулял бы лимиты
+  const aiKeep = new Date(now.getTime() - AI_JOBS_KEEP_MS).toISOString();
   const r = db
-    .query("DELETE FROM jobs WHERE status IN ('done', 'failed', 'refused') AND created_at IS NOT NULL AND created_at < ?")
-    .run(cutoff);
+    .query(
+      "DELETE FROM jobs WHERE status IN ('done', 'failed', 'refused') AND created_at IS NOT NULL AND created_at < ? AND (kind = 'scan' OR created_at < ?)",
+    )
+    .run(cutoff, aiKeep);
   if (r.changes > 0) console.log(`[sweep] удалено завершённых job старше ${opts.retentionDays} дней: ${r.changes}`);
   return r.changes;
 }
@@ -1442,6 +1473,12 @@ export function topAutoTick(db: Database, config: Pick<Config, "ai">, now: Date 
   if (!config.ai.topAuto) return out;
   const size = config.ai.topAutoSize;
   const top = listRepos(db, { sort: "index", order: "desc", page: 1, perPage: size }).items.filter((i) => i.rank !== null && i.rank <= size);
+  // аудит надежности М5: проверка «заявки нет» и вставка — одной транзакцией (такт идет в
+  // нескольких ролях процесса; дубль был бы дешев — ушел бы в кэш, — но не нужен)
+  return db.transaction(() => topAutoEnqueue(db, top, now, out)).immediate();
+}
+
+function topAutoEnqueue(db: Database, top: { org: string; repo: string }[], now: Date, out: { summaries: number; checks: number }): { summaries: number; checks: number } {
   const since = new Date(now.getTime() - TOP_AUTO_INTERVAL_MS).toISOString();
   for (const item of top) {
     const repo = db.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(item.org, item.repo) as { id: number } | null;

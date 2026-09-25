@@ -648,6 +648,8 @@ export interface CardAi {
      * считает код) — из той же заметки; null у проверок до В5.2
      */
     signals?: Record<string, unknown> | null;
+    /** аудит надежности М3: прочие факты входа проверки (activity.rest) — из ее заметки */
+    inputs?: Record<string, unknown>;
   } | null;
 }
 
@@ -1179,7 +1181,10 @@ export function getRepoCard(
   // В5.2 (Б2): зрителю без полного Score публичного репо — публичная версия
   // (только открытые категории); у закрытого репо без полных прав AI нет
   const aiAudiences: AiAudience[] = fullOpen ? (r.visibility === "public" ? ["full", "public"] : ["full"]) : r.visibility === "public" ? ["public"] : [];
-  const ai = aiAudiences.length > 0 ? buildCardAi(db, r.id, opts.viewerUserId, summaryCooldownMsOf(opts), aiAudiences) : undefined;
+  // аудит надежности С1: кнопка «Сформировать/Обновить» показывает состояние той версии,
+  // которую поставит сервер (POST /summary): свой с полными правами — полная, иначе публичная
+  const runAudience: AiAudience = viewer.own && fullOpen ? "full" : "public";
+  const ai = aiAudiences.length > 0 ? buildCardAi(db, r.id, opts.viewerUserId, summaryCooldownMsOf(opts), aiAudiences, runAudience) : undefined;
 
   return {
     repo: cardRepo,
@@ -1209,7 +1214,14 @@ function summaryCooldownMsOf(opts: { summaryCooldownMs?: number }): number {
  * публичного репо); остальным — только публичная. Обзор и проверка на накрутку
  * — разные заявки: у каждой свой последний скан (Б1).
  */
-function buildCardAi(db: Database, repoId: number, viewerUserId: number | undefined, cooldownMs: number, audiences: readonly AiAudience[]): CardAi {
+function buildCardAi(
+  db: Database,
+  repoId: number,
+  viewerUserId: number | undefined,
+  cooldownMs: number,
+  audiences: readonly AiAudience[],
+  runAudience: AiAudience,
+): CardAi {
   const lastOf = (a: AiAudience): number | null =>
     (db.query("SELECT MAX(scan_id) AS s FROM ai_notes WHERE repo_id = ? AND role != 'flagger' AND audience = ?").get(repoId, a) as { s: number | null }).s;
   const audience = audiences.find((a) => lastOf(a) !== null) ?? audiences[0]!;
@@ -1217,8 +1229,8 @@ function buildCardAi(db: Database, repoId: number, viewerUserId: number | undefi
   // В5.1-smoke (23.09): bun:sqlite .get() возвращает null при пустом
   // результате — сравнение с undefined делало jobActive константным true
   const jobActive =
-    (db.query("SELECT 1 AS x FROM jobs WHERE repo_id = ? AND kind = 'summary' AND audience = ? AND status IN ('queued', 'running') LIMIT 1").get(repoId, audience) as { x: number } | null) !== null;
-  const lastJobAt = (db.query("SELECT MAX(created_at) AS t FROM jobs WHERE repo_id = ? AND kind = 'summary' AND audience = ?").get(repoId, audience) as { t: string | null }).t;
+    (db.query("SELECT 1 AS x FROM jobs WHERE repo_id = ? AND kind = 'summary' AND audience = ? AND status IN ('queued', 'running') LIMIT 1").get(repoId, runAudience) as { x: number } | null) !== null;
+  const lastJobAt = (db.query("SELECT MAX(created_at) AS t FROM jobs WHERE repo_id = ? AND kind = 'summary' AND audience = ?").get(repoId, runAudience) as { t: string | null }).t;
   const cooldownUntil = lastJobAt === null ? null : new Date(Date.parse(lastJobAt) + cooldownMs).toISOString();
   const fraud = fraudOf(db, repoId);
   const check = checkOf(db, repoId);
@@ -1226,9 +1238,13 @@ function buildCardAi(db: Database, repoId: number, viewerUserId: number | undefi
     return { scanId: 0, audience, generatedAt: null, overview: null, specialists: [], failures: [], jobActive, cooldownUntil, check, fraud };
   }
   // В5.2 (Б1): проверка на накрутку — отдельная заявка; ее отказ не отказ обзора
-  const fails = db
-    .query("SELECT role, reason FROM ai_fails WHERE scan_id = ? AND role != 'flagger' AND audience = ? ORDER BY id")
-    .all(lastScan, audience) as { role: string; reason: string }[];
+  // В5.2 (аудит безопасности М1): наружу — причина языком продукта; технический текст
+  // (тело ответа провайдера, фрагменты валидатора) остается в ai_fails для оператора
+  const fails = (
+    db
+      .query("SELECT role, reason FROM ai_fails WHERE scan_id = ? AND role != 'flagger' AND audience = ? ORDER BY id")
+      .all(lastScan, audience) as { role: string; reason: string }[]
+  ).map((f) => ({ role: f.role, reason: aiFailureText(f.reason) }));
   const noteRows = db
     .query("SELECT role, text, fact_refs, charter_version, model, created_at FROM ai_notes WHERE repo_id = ? AND scan_id = ? AND role != 'flagger' AND audience = ? ORDER BY id")
     .all(repoId, lastScan, audience) as { role: string; text: string; fact_refs: string; charter_version: string; model: string; created_at: string }[];
@@ -1280,6 +1296,18 @@ function checkOf(db: Database, repoId: number): CardAiCheck {
 }
 
 /**
+ * Причина несформированного блока AI-обзора языком продукта (аудит М1). Честные пропуски
+ * («нет фактов…», «нет точек…») отдаются как есть — по ним карточка отличает «не было
+ * данных» от отказа.
+ */
+export function aiFailureText(reason: string): string {
+  if (reason.startsWith("нет ")) return reason;
+  if (reason.startsWith("модель:")) return "AI-провайдер не ответил";
+  if (reason.startsWith("валидатор:")) return "текст не прошел проверку фактами";
+  return "блок не сформирован";
+}
+
+/**
  * Причина отказа проверки языком продукта: ai_fails хранит технический текст
  * («модель: сеть: …», «валидатор: …») — на карточку он не выводится.
  */
@@ -1300,11 +1328,12 @@ function fraudOf(db: Database, repoId: number): CardAi["fraud"] {
     .get(repoId) as { text: string } | null;
   if (row === null) return null;
   try {
-    const parsed = JSON.parse(row.text) as { flag?: unknown; factors?: unknown; signals?: unknown };
+    const parsed = JSON.parse(row.text) as { flag?: unknown; factors?: unknown; signals?: unknown; inputs?: unknown };
     if (typeof parsed.flag !== "boolean" || !Array.isArray(parsed.factors)) return null;
     return {
       flag: parsed.flag,
       signals: parsed.signals !== null && typeof parsed.signals === "object" ? (parsed.signals as Record<string, unknown>) : null,
+      inputs: parsed.inputs !== null && typeof parsed.inputs === "object" ? (parsed.inputs as Record<string, unknown>) : {},
       factors: parsed.factors
         .filter((f): f is { key: string; note: string } => {
           const item = f as { key?: unknown; note?: unknown };
@@ -1317,13 +1346,14 @@ function fraudOf(db: Database, repoId: number): CardAi["fraud"] {
   }
 }
 
-/** Ф2.15: статус живой job ИМЕННО зрителя (queued/running); queueAhead наружу не едет. */
+/** Ф2.15: статус живой job ИМЕННО зрителя (queued/running); queueAhead наружу не едет.
+ *  В5.2 (аудит надежности С2): только СКАН — AI-заявки (обзор, проверка) анализом не являются. */
 function liveViewerJob(db: Database, org: string, repo: string, viewerUserId: number | undefined): CardJob | null {
   if (viewerUserId === undefined) return null;
   const row = db
     .query(
       `SELECT j.status, j.lease_until FROM jobs j JOIN repos r ON r.id = j.repo_id
-       WHERE r.org_slug = ? AND r.repo_slug = ? AND j.user_id = ? AND j.status IN ('queued','running')
+       WHERE r.org_slug = ? AND r.repo_slug = ? AND j.user_id = ? AND j.kind = 'scan' AND j.status IN ('queued','running')
        ORDER BY j.id DESC LIMIT 1`,
     )
     .get(org, repo, viewerUserId) as { status: string; lease_until: string | null } | null;

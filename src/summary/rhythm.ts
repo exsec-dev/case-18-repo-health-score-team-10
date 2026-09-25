@@ -16,6 +16,8 @@ export const RHYTHM_KEY = "activity.rhythm";
 export const RECENT_WINDOW_DAYS = 7;
 /** Сколько недель до окна берется для обычного недельного темпа. */
 export const BASELINE_WEEKS = 12;
+/** Окно детектора ровных серий: последние N коммитов людей (аудит надежности М10). */
+export const REGULAR_WINDOW = 2000;
 
 const DAY_MS = 24 * 3600_000;
 
@@ -39,7 +41,7 @@ export interface RhythmSignals {
   foreign_committer_share: number | null;
   /** наибольшее число разных авторов, чьи коммиты закоммитил один и тот же человек (не сам автор) */
   authors_via_one_committer: number;
-  /** доля коммитов людей в сериях из 6+ коммитов с ровными интервалами (±20% от медианы серии); null — меньше 6 коммитов */
+  /** доля коммитов людей в сериях из 6+ коммитов с ровными интервалами (±20% от медианы серии) среди последних REGULAR_WINDOW; null — меньше 6 коммитов */
   regular_share: number | null;
   /** медианный интервал между коммитами людей, минуты; null — меньше 2 коммитов */
   interval_median_minutes: number | null;
@@ -118,7 +120,10 @@ export function rhythmSignals(events: TimelineEvent[], asOf: Date): RhythmSignal
   for (let k = 1; k < stamps.length; k++) intervals.push(stamps[k]! - stamps[k - 1]!);
   // серии ровных интервалов — тот же детектор, что был в robot v1 (≥6 подряд, ±20%
   // от медианы серии): для Score он вырезан, для подозрения на накрутку — признак
-  const regular = stamps.length >= 6 ? robotIntervalFlags(stamps.map((ts) => ({ ts }))).filter(Boolean).length : null;
+  // аудит надежности М10: детектор серий квадратичен на «почти ровной» ленте (ровно на
+  // паттерне накрутки) — доля считается по последним REGULAR_WINDOW коммитам людей
+  const window = stamps.slice(-REGULAR_WINDOW);
+  const regular = window.length >= 6 ? robotIntervalFlags(window.map((ts) => ({ ts }))).filter(Boolean).length : null;
 
   const end = asOf.getTime();
   const recentFrom = end - RECENT_WINDOW_DAYS * DAY_MS;
@@ -141,7 +146,7 @@ export function rhythmSignals(events: TimelineEvent[], asOf: Date): RhythmSignal
     platform_commits: human.length - direct.length,
     foreign_committer_share: direct.length > 0 ? round2(foreign.length / direct.length) : null,
     authors_via_one_committer: viaOne,
-    regular_share: regular === null ? null : round2(regular / stamps.length),
+    regular_share: regular === null ? null : round2(regular / window.length),
     interval_median_minutes: intervals.length > 0 ? Math.round(median(intervals) / 60_000) : null,
     recent_week_commits: recent,
     baseline_week_median: median(weeks),

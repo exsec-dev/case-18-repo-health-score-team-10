@@ -64,11 +64,16 @@ describe("конфиг AI: дефолт — числа решения §2, ав�
     expect(c.topAuto).toBe(false);
     expect(c.topAutoSize).toBe(10);
   });
-  test("переменные читаются; мусор в числе — дефолт", () => {
-    const c = aiConfigFromEnv({ AI_OVERVIEW_PER_HOUR: "3", AI_CHECK_GLOBAL_PER_DAY: "abc", AI_UNLOCK_PASSWORD: " s3cret ", AI_TOP_AUTO: "1" });
+  test("переменные читаются; мусор в числе — дефолт; пароль короче 20 — функция выключена", () => {
+    const c = aiConfigFromEnv({ AI_OVERVIEW_PER_HOUR: "3", AI_CHECK_GLOBAL_PER_DAY: "abc", AI_UNLOCK_PASSWORD: " s3cret-long-enough-for-us ", AI_TOP_AUTO: "1", APP_SECRET: "k" });
     expect(c.overview.perHour).toBe(3);
     expect(c.check.globalPerDay).toBe(60);
-    expect(c.unlockPassword).toBe("s3cret");
+    expect(c.unlockPassword).toBe("s3cret-long-enough-for-us");
+    expect(c.unlockStatus).toBe("on");
+    expect(c.unlockKey).toBe("k");
+    const short = aiConfigFromEnv({ AI_UNLOCK_PASSWORD: "short" });
+    expect(short.unlockPassword).toBeNull();
+    expect(short.unlockStatus).toBe("too_short");
     expect(c.topAuto).toBe(true);
   });
 });
@@ -139,15 +144,18 @@ describe("пароль неограниченного доступа", () => {
   test("неверный — нет отметки; верный — отметка-отпечаток, а не пароль; смена пароля отзывает", () => {
     const { db } = freshDb();
     const u = user(db, 1);
-    const c = cfg({ unlockPassword: "very-long-secret" });
+    const c = cfg({ unlockPassword: "very-long-secret", unlockKey: "server-secret" });
     expect(tryUnlock(db, u, "wrong", c)).toBe(false);
     expect(isUnlocked(db, u, c)).toBe(false);
     expect(tryUnlock(db, u, "very-long-secret", c)).toBe(true);
     const stored = (db.query("SELECT ai_unlock FROM users WHERE id = ?").get(u) as { ai_unlock: string }).ai_unlock;
-    expect(stored).toBe(unlockFingerprint("very-long-secret"));
+    // аудит М5: HMAC с ключом сервера — без APP_SECRET отпечаток не воспроизводится
+    expect(stored).toBe(unlockFingerprint("very-long-secret", "server-secret"));
+    expect(stored).not.toBe(unlockFingerprint("very-long-secret", null));
     expect(stored).not.toContain("very-long-secret");
     expect(isUnlocked(db, u, c)).toBe(true);
-    expect(isUnlocked(db, u, cfg({ unlockPassword: "rotated" }))).toBe(false);
+    expect(isUnlocked(db, u, cfg({ unlockPassword: "rotated", unlockKey: "server-secret" }))).toBe(false);
+    expect(isUnlocked(db, u, cfg({ unlockPassword: "very-long-secret", unlockKey: "other-secret" }))).toBe(false);
     expect(isUnlocked(db, u, cfg({ unlockPassword: null }))).toBe(false);
   });
 
@@ -335,7 +343,9 @@ describe("Б7 (задержка Б1): заявка обзора не клони�
     const job = (audience: "public" | "full"): ClaimedJob => ({ id: 7, repoId, slug: "q/noclone", userId: null, triggerKind: "periodic", kind: "summary", audience, claimedAt: "t", attempts: 1 });
     db.query("INSERT INTO ai_notes (repo_id, scan_id, role, text, fact_refs, charter_version, model, created_at, audience) VALUES (?, ?, 'overview', 'x', '[]', '1', 'm', '2026', 'public')").run(repoId, scanId);
     const { processSummaryJob } = await import("../src/jobs/scheduler");
-    expect(await processSummaryJob({ db, config, serverClient: () => null } as never, job("public"))).toBeNull();
+    // аудит М3: итог «текст уже был» — done с пометкой, лимит его не считает
+    const { AI_CACHED_NOTE } = await import("../src/jobs/ai-quota");
+    expect(await processSummaryJob({ db, config, serverClient: () => null } as never, job("public"))).toBe(AI_CACHED_NOTE);
     // у полной версии заметок нет — дошло до клона и честно упало на нем
     expect(await processSummaryJob({ db, config, serverClient: () => null } as never, job("full"))).toContain("не удалось клонировать");
   }, 60_000);

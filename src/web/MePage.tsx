@@ -310,6 +310,9 @@ function AiUnlockSection() {
     try {
       await mutateJson<{ ok: boolean }>("/api/me/ai-unlock", "DELETE");
       quota.reload();
+    } catch (e) {
+      // аудит надежности: сбой отключения не молчит
+      toaster.add({ name: "ai-lock-fail", theme: "danger", title: "Доступ не отключен", content: e instanceof Error ? e.message : String(e) });
     } finally {
       setBusy(false);
     }

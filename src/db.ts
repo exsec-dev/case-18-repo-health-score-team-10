@@ -355,10 +355,7 @@ export function openDb(config: Config): Database {
     // 'full' (сгенерированы по всем фактам). Отметка пароля неограниченного доступа (Б4).
     ensureColumn(db, "ai_notes", "audience", "TEXT NOT NULL DEFAULT 'full'");
     ensureColumn(db, "ai_fails", "audience", "TEXT NOT NULL DEFAULT 'full'");
-    ensureColumn(db, "jobs", "audience", "TEXT NOT NULL DEFAULT 'full'");
     ensureColumn(db, "users", "ai_unlock", "TEXT");
-    // заявка AI поставлена пользователем с паролем: общий лимит ее не считает (Б4)
-    ensureColumn(db, "jobs", "ai_unlocked", "INTEGER NOT NULL DEFAULT 0");
     // v1.3 → v1.4 (В4): изоляция own/public и эвикция
     ensureColumn(db, "repos", "rating_active", "INTEGER NOT NULL DEFAULT 1");
     ensureColumn(db, "repos", "visibility", "TEXT NOT NULL DEFAULT 'public'");
@@ -419,6 +416,13 @@ export function openDb(config: Config): Database {
     // ПОРТ 5 (hq-parallel): панель заданий (jobs.error — причина падения)
     // и избранное (сейвить что угодно строкой слага; права-ряд по факту)
     ensureColumn(db, "jobs", "error", "TEXT");
+    // v2.3 (В5.2, Б2/Б4): аудитория AI-заявки и признак «поставлена с паролем» (общий лимит
+    // ее не считает). Аудит надежности М6: ПОСЛЕ пересборки очереди v1.4 — иначе на очень
+    // старой базе пересборка из SCHEMA теряла бы эти колонки (как и jobs.error выше)
+    ensureColumn(db, "jobs", "audience", "TEXT NOT NULL DEFAULT 'full'");
+    ensureColumn(db, "jobs", "ai_unlocked", "INTEGER NOT NULL DEFAULT 0");
+    // аудит надежности М7: общий суточный счетчик лимита AI — по (kind, created_at)
+    db.exec("CREATE INDEX IF NOT EXISTS idx_jobs_kind_created ON jobs(kind, created_at)");
     db.exec(`CREATE TABLE IF NOT EXISTS favorites (
       user_id INTEGER NOT NULL REFERENCES users(id),
       org_slug TEXT NOT NULL,

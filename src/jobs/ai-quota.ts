@@ -8,7 +8,7 @@
 // и заявки, где модель не расходовала кредиты (сбой до модели, провайдер не
 // ответил); отказ валидатора списывается — вызовы уже сделаны.
 import type { Database } from "bun:sqlite";
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import type { AiActionLimits, AiConfig } from "../config";
 
 export type AiAction = "overview" | "check";
@@ -58,7 +58,13 @@ export interface ActionQuota {
   dayResetAt: string;
 }
 
-const CHARGED = "(status IN ('queued', 'running', 'done') OR (status = 'failed' AND error = ?))";
+/**
+ * Итог заявки «текст этого анализа уже был — модель не вызывалась»: заявка done, но
+ * лимит не списывается (аудит М3: прежде такой done считался).
+ */
+export const AI_CACHED_NOTE = "текст этого анализа уже был – модель не вызывалась";
+
+const CHARGED = `(status IN ('queued', 'running') OR (status = 'done' AND (error IS NULL OR error != '${AI_CACHED_NOTE}')) OR (status = 'failed' AND error = ?))`;
 
 function count(db: Database, sql: string, ...args: (string | number)[]): number {
   return (db.query(`SELECT COUNT(*) AS c FROM jobs WHERE ${sql}`).get(...args) as { c: number }).c;
@@ -140,25 +146,28 @@ export function quotaRefusal(q: ActionQuota): QuotaRefusal | null {
 
 // ---------- пароль неограниченного доступа ----------
 
-/** Отпечаток пароля в users.ai_unlock: сам пароль в БД не пишется. */
-export function unlockFingerprint(password: string): string {
-  return `sha256:${createHash("sha256").update(password, "utf8").digest("hex")}`;
+/**
+ * Отпечаток пароля в users.ai_unlock: сам пароль в БД не пишется. Аудит М5: HMAC-SHA256 с
+ * ключом APP_SECRET — по копии БД пароль не подбирается без секрета сервера.
+ */
+export function unlockFingerprint(password: string, key: string | null): string {
+  return `hmac-sha256:${createHmac("sha256", key ?? "").update(password, "utf8").digest("hex")}`;
 }
 
 /** Отметка действует, только пока пароль в .env тот же: смена пароля отзывает все отметки. */
-export function isUnlocked(db: Database, userId: number, cfg: Pick<AiConfig, "unlockPassword">): boolean {
+export function isUnlocked(db: Database, userId: number, cfg: Pick<AiConfig, "unlockPassword" | "unlockKey">): boolean {
   if (cfg.unlockPassword === null) return false;
   const row = db.query("SELECT ai_unlock FROM users WHERE id = ?").get(userId) as { ai_unlock: string | null } | null;
-  return row?.ai_unlock != null && row.ai_unlock === unlockFingerprint(cfg.unlockPassword);
+  return row?.ai_unlock != null && row.ai_unlock === unlockFingerprint(cfg.unlockPassword, cfg.unlockKey);
 }
 
 /** Проверка введенного пароля (сравнение за постоянное время); верный — отметка пользователю. */
-export function tryUnlock(db: Database, userId: number, candidate: string, cfg: Pick<AiConfig, "unlockPassword">): boolean {
+export function tryUnlock(db: Database, userId: number, candidate: string, cfg: Pick<AiConfig, "unlockPassword" | "unlockKey">): boolean {
   if (cfg.unlockPassword === null) return false;
-  const want = Buffer.from(unlockFingerprint(cfg.unlockPassword));
-  const got = Buffer.from(unlockFingerprint(candidate));
+  const want = Buffer.from(unlockFingerprint(cfg.unlockPassword, cfg.unlockKey));
+  const got = Buffer.from(unlockFingerprint(candidate, cfg.unlockKey));
   if (!timingSafeEqual(want, got)) return false;
-  db.query("UPDATE users SET ai_unlock = ? WHERE id = ?").run(unlockFingerprint(cfg.unlockPassword), userId);
+  db.query("UPDATE users SET ai_unlock = ? WHERE id = ?").run(unlockFingerprint(cfg.unlockPassword, cfg.unlockKey), userId);
   return true;
 }
 

@@ -95,7 +95,9 @@ export interface LiveAnalysis {
 
 /** Живое задание зрителя по слагу, если есть. */
 export function liveFor(res: JobsResponse | null, slug: string): LiveAnalysis | null {
-  const job = res?.active.find((j) => j.slug === slug);
+  // В5.2 (аудит надежности С2): «идет анализ» — только скан; AI-заявки (обзор, проверка)
+  // анализом не являются и кнопку анализа не блокируют
+  const job = res?.active.find((j) => j.slug === slug && (j.kind === undefined || j.kind === "scan"));
   if (!job) return null;
   return { jobId: job.jobId, phase: job.phase === "running" ? "running" : "queued", stalled: job.stalled === true };
 }

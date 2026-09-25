@@ -1116,9 +1116,17 @@ export function fraudFactorValue(
   key: string,
   signals: Record<string, unknown> | null | undefined,
   evidence: readonly { key: string; value: unknown }[],
+  inputs?: Record<string, unknown>,
 ): unknown {
   if (key === "activity.rhythm") return signals ?? undefined;
+  // аудит надежности М3: вход проверки из ее заметки — те данные, что видела модель
+  if (inputs !== undefined && key in inputs) return inputs[key];
   return evidence.find((e) => e.key === key)?.value;
+}
+
+/** Проверка на накрутку сделана по прошлому анализу — после нее был новый (аудит надежности М2). */
+export function fraudCheckStale(check: { scanId: number | null; latestScanId: number | null } | undefined): boolean {
+  return check !== undefined && check.scanId !== null && check.latestScanId !== null && check.scanId < check.latestScanId;
 }
 
 /** Доля 0..1 → «99%» (целые проценты, без пробела — как в таблице подметрик; ненулевая меньше 1% — «<1%»). */

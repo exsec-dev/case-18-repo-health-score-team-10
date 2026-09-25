@@ -43,6 +43,7 @@ import {
   fmtScore,
   fraudFactorFact,
   fraudFactorValue,
+  fraudCheckStale,
   fraudFactorTitle, AI_DISCLAIMER, AI_OVERVIEW_REJECTED
 } from "./format";
 import { announceJobStarted, announceJobsChanged, useAnalysisFinished } from "./session";
@@ -96,7 +97,7 @@ export function FraudAlert({ card }: { card: Card }) {
   const fraud = card.ai?.fraud;
   // подозрение — только при флаге, как в кабинете и отчете
   if (fraud === undefined || fraud === null || fraud.flag !== true || fraud.factors.length === 0) return null;
-  const factOf = (key: string): unknown => fraudFactorValue(key, fraud.signals, card.evidence);
+  const factOf = (key: string): unknown => fraudFactorValue(key, fraud.signals, card.evidence, fraud.inputs);
   // вариант B (25.09): одна строка — заголовок и главный признак; пояснение и
   // остальные признаки — в подсказке; формулировка модели — только в отчете.
   // Признак — строка кода из факта (способ 2), без факта — формулировка модели
@@ -113,7 +114,8 @@ export function FraudAlert({ card }: { card: Card }) {
       message={
         <span className="rh-fraud__line">
           <Text variant="subheader-1">{`${FRAUD_TITLE}: `}</Text>
-          <Text variant="body-1">{lead}</Text>
+          {/* аудит надежности М2: флаг прошлого анализа не выдается за текущий */}
+          <Text variant="body-1">{fraudCheckStale(card.ai?.check) ? `${lead} (по прошлому анализу)` : lead}</Text>
           <HelpMark iconSize="s" aria-label="Что значит подозрение на искусственную активность" className="rh-fraud__help">
             <Flex direction="column" gap={2} className="rh-fraud__pop">
               <Text variant="body-1">{FRAUD_EXPLAIN}</Text>

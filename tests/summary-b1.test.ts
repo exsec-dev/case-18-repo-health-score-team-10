@@ -59,6 +59,8 @@ describe("Миграция 2.0→2.1 (Б1 В5 + 23.09 ai_fails)", () => {
     db.query("INSERT INTO jobs (repo_id, status, trigger_kind) VALUES (?, 'queued', 'periodic')").run(repoId);
     db.exec("DROP TABLE ai_notes");
     db.exec("ALTER TABLE scans DROP COLUMN head_sha");
+    // индекса 2.3 (kind, created_at) у базы 1.9 не было — сносим его, как и прочие артефакты
+    db.exec("DROP INDEX IF EXISTS idx_jobs_kind_created");
     db.exec("ALTER TABLE jobs DROP COLUMN kind");
     db.query("UPDATE meta SET value = '1.9' WHERE key = 'schema_version'").run();
     db.close();

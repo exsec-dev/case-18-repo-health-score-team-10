@@ -227,6 +227,10 @@ export interface AiConfig {
   unlockedOverviewPerDay: number;
   /** пароль неограниченного доступа — секрет .env (AI_UNLOCK_PASSWORD); null — функции нет */
   unlockPassword: string | null;
+  /** состояние пароля для строки старта: задан / не задан / короче UNLOCK_PASSWORD_MIN (функция выключена) */
+  unlockStatus: "on" | "off" | "too_short";
+  /** ключ отпечатка пароля — APP_SECRET (аудит М5: HMAC, а не голый sha256); null — не задан */
+  unlockKey: string | null;
   /** обзор и проверка для топа рейтинга после нового скана (п.4): AI_TOP_AUTO, по умолчанию выключено */
   topAuto: boolean;
   /** размер топа (AI_TOP_AUTO_SIZE, по умолчанию 10) */
@@ -239,13 +243,19 @@ export const DEFAULT_AI: AiConfig = {
   check: { perHour: 5, perDay: 20, globalPerDay: 60 },
   unlockedOverviewPerDay: 100,
   unlockPassword: null,
+  unlockStatus: "off",
+  unlockKey: null,
   topAuto: false,
   topAutoSize: 10,
 };
 
 /** Чистая функция env → AiConfig (тесты инъекцией). Мусор в числах — дефолт (envInt). */
+/** Минимальная длина пароля доступа к AI (аудит М5): попытки не ограничены — пароль обязан быть длинным. */
+export const UNLOCK_PASSWORD_MIN = 20;
+
 export function aiConfigFromEnv(env: Record<string, string>): AiConfig {
   const password = (env.AI_UNLOCK_PASSWORD ?? "").trim();
+  const status: AiConfig["unlockStatus"] = password === "" ? "off" : password.length < UNLOCK_PASSWORD_MIN ? "too_short" : "on";
   return {
     overview: {
       perHour: envInt(env, "AI_OVERVIEW_PER_HOUR") ?? DEFAULT_AI.overview.perHour,
@@ -258,7 +268,9 @@ export function aiConfigFromEnv(env: Record<string, string>): AiConfig {
       globalPerDay: envInt(env, "AI_CHECK_GLOBAL_PER_DAY") ?? DEFAULT_AI.check.globalPerDay,
     },
     unlockedOverviewPerDay: envInt(env, "AI_UNLOCKED_OVERVIEW_PER_DAY") ?? DEFAULT_AI.unlockedOverviewPerDay,
-    unlockPassword: password === "" ? null : password,
+    unlockPassword: status === "on" ? password : null,
+    unlockStatus: status,
+    unlockKey: env.APP_SECRET ? env.APP_SECRET : null,
     topAuto: envBool(env, "AI_TOP_AUTO") ?? DEFAULT_AI.topAuto,
     topAutoSize: envInt(env, "AI_TOP_AUTO_SIZE") ?? DEFAULT_AI.topAutoSize,
   };

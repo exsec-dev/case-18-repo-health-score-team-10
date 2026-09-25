@@ -137,8 +137,9 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
     const mine = jobs.find((j) => j.slug === slug);
     if (!mine) return;
     reload();
-    // Ф2.20: звезда светится один раз после УСПЕШНОГО своего анализа
-    if (mine.phase === "done") setDoneKey(`${slug}:${mine.jobId}`);
+    // Ф2.20: звезда светится один раз после УСПЕШНОГО своего анализа; В5.2 (аудит С2) —
+    // именно анализа: итог AI-заявки (обзор, проверка) звезду не зажигает
+    if (mine.phase === "done" && (mine.kind === undefined || mine.kind === "scan")) setDoneKey(`${slug}:${mine.jobId}`);
   });
 
   const data = dataOf(state);
