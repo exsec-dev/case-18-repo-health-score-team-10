@@ -127,6 +127,20 @@ export interface QueueConfig {
    *  Optional ТОЛЬКО для старых литералов QueueConfig в замороженных
    *  аудит-тестах (как summaryCooldownMs); loadConfig задаёт всегда. */
   summaryActiveMax?: number;
+  /** В5.2 (очередь, решение Екатерины 25.09): параллельных пользовательских СКАНОВ в процессе —
+   *  у одного пользователя одновременно один, тяжелый репо одного не держит остальных:
+   *  2, env QUEUE_USER_SCAN_SLOTS (1-8). Optional — как summaryActiveMax. */
+  userScanSlots?: number;
+  /** В5.2 (там же): параллельных пользовательских AI-обзоров в процессе (обзор тоже клонирует
+   *  репо для инструментов модели): 2, env QUEUE_USER_AI_SLOTS (1-8). Optional — как выше. */
+  userAiSlots?: number;
+}
+
+/** В5.2 (очередь): предел слотов цикла — защита от опечатки в env (каждый слот — свой клон). */
+export const MAX_LOOP_SLOTS = 8;
+/** Слоты цикла из конфига: дефолт 2, в пределах 1..MAX_LOOP_SLOTS. */
+export function loopSlots(value: number | undefined): number {
+  return Math.min(MAX_LOOP_SLOTS, Math.max(1, value ?? 2));
 }
 
 export interface AccessConfig {
@@ -466,6 +480,8 @@ export function loadConfig(): Config {
       favoritesMutationsPerMinute: envInt(env, "QUEUE_FAVORITES_MUTATIONS_PER_MINUTE") ?? 30,
       summaryCooldownMs: envInt(env, "QUEUE_SUMMARY_COOLDOWN_MS") ?? 60 * 60_000,
       summaryActiveMax: envInt(env, "QUEUE_SUMMARY_ACTIVE_MAX") ?? 2,
+      userScanSlots: loopSlots(envInt(env, "QUEUE_USER_SCAN_SLOTS") ?? undefined),
+      userAiSlots: loopSlots(envInt(env, "QUEUE_USER_AI_SLOTS") ?? undefined),
     },
     llm: {
       provider,

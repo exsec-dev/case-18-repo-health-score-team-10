@@ -31,6 +31,9 @@ describe("очередь, лиз и доступ (В4.1, К2/К4)", () => {
       "SCAN_EXTRACT_TIMEOUT_MS",
       // 23.09: дебаг-куладаун генерации в .env не должен протекать в дефолты
       "QUEUE_SUMMARY_COOLDOWN_MS",
+      // В5.2 (очередь, 25.09): слоты пользовательских циклов
+      "QUEUE_USER_SCAN_SLOTS",
+      "QUEUE_USER_AI_SLOTS",
     ];
     const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
     try {
@@ -40,7 +43,7 @@ describe("очередь, лиз и доступ (В4.1, К2/К4)", () => {
       expect(cfg.scheduler.leaseMs).toBe(DEFAULT_LEASE_MS);
       // ПЕРЕВОРОТ (В4.8.5, К8.5.7, §2-В3): чтений списка «Моих репозиториев» 30/мин (было 6)
       // В5 (Б1): кулдаун AI-генерации на репо — 60 мин (QUEUE_SUMMARY_COOLDOWN_MS)
-      expect(cfg.queue).toEqual({ userScansPerHour: 10, maxAttempts: 3, userActiveMax: 2, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 21_600_000, retentionDays: 30, myReposPerMinute: 30, favoritesMax: 500, cardPerMinute: 30, favoritesMutationsPerMinute: 30, summaryCooldownMs: 3_600_000, summaryActiveMax: 2 });
+      expect(cfg.queue).toEqual({ userScansPerHour: 10, maxAttempts: 3, userActiveMax: 2, favoriteChecksPerMinute: 6, favoriteOwnCooldownMs: 21_600_000, retentionDays: 30, myReposPerMinute: 30, favoritesMax: 500, cardPerMinute: 30, favoritesMutationsPerMinute: 30, summaryCooldownMs: 3_600_000, summaryActiveMax: 2, userScanSlots: 2, userAiSlots: 2 });
       expect(cfg.access.cacheTtlMs).toBe(15 * 60_000);
       process.env.QUEUE_USER_SCANS_PER_HOUR = "4";
       process.env.QUEUE_MAX_ATTEMPTS = "5";
@@ -53,8 +56,11 @@ describe("очередь, лиз и доступ (В4.1, К2/К4)", () => {
       process.env.QUEUE_FAVORITES_MAX = "400";
       process.env.QUEUE_SUMMARY_COOLDOWN_MS = "5000";
       process.env.QUEUE_SUMMARY_ACTIVE_MAX = "3";
+      process.env.QUEUE_USER_SCAN_SLOTS = "3";
+      // сверх предела — предел (каждый слот — свой клон)
+      process.env.QUEUE_USER_AI_SLOTS = "12";
       const env = loadConfig();
-      expect(env.queue).toEqual({ userScansPerHour: 4, maxAttempts: 5, userActiveMax: 2, favoriteChecksPerMinute: 3, favoriteOwnCooldownMs: 1000, retentionDays: 7, myReposPerMinute: 4, favoritesMax: 400, cardPerMinute: 30, favoritesMutationsPerMinute: 30, summaryCooldownMs: 5000, summaryActiveMax: 3 });
+      expect(env.queue).toEqual({ userScansPerHour: 4, maxAttempts: 5, userActiveMax: 2, favoriteChecksPerMinute: 3, favoriteOwnCooldownMs: 1000, retentionDays: 7, myReposPerMinute: 4, favoritesMax: 400, cardPerMinute: 30, favoritesMutationsPerMinute: 30, summaryCooldownMs: 5000, summaryActiveMax: 3, userScanSlots: 3, userAiSlots: 8 });
       expect(env.access.cacheTtlMs).toBe(1000);
       // ПЕРЕВОРОТ (К8.5.2b): бюджет клона из env меняет худший скан (60 с +
       // 25 + 25 + фуз 6 + 15 мин), но не лиз — лиз от бюджетов больше не зависит

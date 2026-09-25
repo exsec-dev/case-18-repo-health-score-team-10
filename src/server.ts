@@ -53,7 +53,7 @@ import { renderRepoReport } from "./report/markdown";
 import { REPORT_NO_SCORE } from "./report/build";
 import { reportFileName } from "./web/format";
 import { pdfResponse } from "./report/pdf";
-import { catalogClientBudget, closeOwnRunningScans, maintenanceTick, returnOwnRunningJobs, startCheckLoop, startMaintenance, startScheduler, startWorkerLoop } from "./jobs/scheduler";
+import { catalogClientBudget, closeOwnRunningScans, maintenanceTick, returnOwnRunningJobs, startMaintenance, startScheduler, startWorkerLoops, workerLoopPlan, workerLoopSummary } from "./jobs/scheduler";
 import { enqueueCheck, enqueueSummary, lastFinishedScan } from "./jobs/scheduler";
 import { aiQuota, clearUnlock, isUnlocked, quotaRefusal, tryUnlock, type QuotaRefusal } from "./jobs/ai-quota";
 import type { AiAudience } from "./db";
@@ -1379,13 +1379,10 @@ if (needsRescore(db)) {
     console.log("[startup] stored scores are outdated or missing: rescore runs in the rating process (PROCESS_ROLE=web)");
   }
 }
-if (role === "web" || role === "all") {
-  stopWorkerLoops.push(startWorkerLoop({ db, config, serverClient }, { user: true, rating: role === "all" }));
-}
-// В5.2 (решение 25.09): проверки оценки — своим легким циклом, не ждут текущий скан
-stopWorkerLoops.push(
-  startCheckLoop({ db, config, serverClient }, role === "web" ? ["user"] : role === "rating" ? ["rating"] : ["user", "rating"]),
-);
+// В5.2 (очередь, решение Екатерины 25.09): у каждой пары «полоса роли × род заявки» свой
+// цикл — плановый скан тяжелого репо не держит пользователей, скан не держит AI-обзор
+const loopPlan = workerLoopPlan(role, config.queue);
+stopWorkerLoops.push(startWorkerLoops({ db, config, serverClient }, loopPlan));
 // В4.8.5 (К8.5.2b, С10-4): часовое обслуживание (сироты-сканы, ретеншен,
 // каталоги клонов) — в ЛЮБОЙ роли; у rating/all его запускает startScheduler
 if (role === "web") {
@@ -1393,11 +1390,8 @@ if (role === "web") {
 }
 if (role === "rating" || role === "all") {
   stopWorkerLoops.push(startScheduler(db, catalogClient, config));
-  if (role === "rating") {
-    stopWorkerLoops.push(startWorkerLoop({ db, config, serverClient }, { rating: true }));
-  }
 }
-console.log(`  role: ${role} (PROCESS_ROLE)`);
+console.log(`  role: ${role} (PROCESS_ROLE); worker loops: ${workerLoopSummary(loopPlan)}`);
 
 // ПОРТ hq-parallel (S3) + Ф2.2 (В4.2a): стартовое обслуживание — осиротевшие
 // каталоги клонов в tmp (после crash/OOM их не подбирал никто) И осиротевшие

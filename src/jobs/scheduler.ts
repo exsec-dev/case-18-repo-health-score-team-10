@@ -33,7 +33,7 @@ import { AI_CACHED_NOTE, AI_REJECTED_ERRORS, type QuotaRefusal } from "./ai-quot
 import type { AiAudience } from "../db";
 import { materializeWorktree, removeWorktree } from "../summary/tools";
 import { cleanupClone, cloneWithDegrade } from "../collectors/git";
-import { worstCaseScanMs, type Config } from "../config";
+import { loopSlots, worstCaseScanMs, type Config } from "../config";
 import { listRepos } from "../api/repos";
 import { getMetaValue, setMetaValue } from "../db";
 import { CATALOG_SUSPICIOUS_AT, SCHED_META } from "../api/health";
@@ -268,9 +268,19 @@ export interface ClaimOptions {
   maxAttempts?: number;
   /** ПОРТ S2: какую очередь обслуживает этот claim — user | rating */
   queue?: "user" | "rating";
-  /** В5.2: только заявки этого рода (легкий цикл проверок берет только `check`) */
-  kind?: string;
+  /** В5.2: только заявки этого рода (у каждого рода в каждой полосе свой цикл) */
+  kind?: JobKind;
+  /**
+   * В5.2 (очередь, решение 25.09): не брать заявку автора, у которого уже идет заявка того же
+   * рода с живым лизом, — слоты пользовательской полосы делятся между людьми, а не уходят
+   * одному. Смысл имеет только в полосе `user` (у плановых заявок автора нет).
+   */
+  perUserExclusive?: boolean;
 }
+
+/** Роды заявок (`jobs.kind`): у каждого — свой цикл в каждой полосе роли (`workerLoopPlan`). */
+export const JOB_KINDS = ["scan", "summary", "check"] as const;
+export type JobKind = (typeof JOB_KINDS)[number];
 
 /**
  * Заявить одну job: атомарный UPDATE … WHERE (lease_until IS NULL OR
@@ -310,6 +320,7 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
   // круговой порядок между юзерами (Ф1.7); attempts (K4) неприкосновенны.
   const queue = opts.queue ?? "user";
   const kindOnly = opts.kind ?? null;
+  const exclusive = opts.perUserExclusive === true ? 1 : 0;
   const claimStmt = db.query(
       `UPDATE jobs SET status = 'running', claimed_at = ?, lease_until = ?, attempts = attempts + 1
        WHERE id = (
@@ -319,6 +330,20 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
            AND attempts < ?
            AND (? IS NULL OR kind = ?)
            AND (CASE WHEN ? = 'user' THEN trigger_kind = 'user' ELSE trigger_kind != 'user' END)
+           -- В5.2 (очередь, решение 25.09): у автора одновременно одна заявка каждого рода —
+           -- второй слот полосы достается другому человеку, а не второй заявке того же
+           AND (? = 0 OR NOT EXISTS (
+                 SELECT 1 FROM jobs r
+                 WHERE r.status = 'running' AND r.lease_until >= ? AND r.id != jobs.id
+                   AND r.user_id = jobs.user_id AND r.kind = jobs.kind))
+           -- В5.2 (там же): «сначала анализ, потом обзор» прежде держался одной очередью; с
+           -- отдельными циклами — явно: AI-заявка пользователя ждет его более ранний скан того
+           -- же репо (иначе обзор и проверка ушли бы по прошлому анализу). Полоса рейтинга не
+           -- ждет: плановый скан может стоять в очереди сутками, а топ берет последний анализ
+           AND (kind = 'scan' OR trigger_kind != 'user' OR NOT EXISTS (
+                 SELECT 1 FROM jobs s
+                 WHERE s.kind = 'scan' AND s.status IN ('queued', 'running') AND s.trigger_kind = 'user'
+                   AND s.repo_id = jobs.repo_id AND s.user_id IS jobs.user_id AND s.id < jobs.id))
          -- В4.2-port-fix (П7): круговой порядок между юзерами (Ф1.7) — свойство
          -- ПОЛОСЫ user. У периодических job user_id всегда NULL, но порты
          -- распространили коррелированный подзапрос и на полосу rating, где он
@@ -350,7 +375,7 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
      WHERE repo_id = ? AND user_id IS ? AND status = 'running'`,
   );
   const claimTx = db.transaction(() => {
-    const row = claimStmt.get(nowIso, leaseIso, nowIso, maxAttempts, kindOnly, kindOnly, queue, queue, queue, queue) as {
+    const row = claimStmt.get(nowIso, leaseIso, nowIso, maxAttempts, kindOnly, kindOnly, queue, exclusive, nowIso, queue, queue, queue) as {
       id: number;
       repo_id: number;
       user_id: number | null;
@@ -1191,7 +1216,7 @@ export async function workerTick(
   deps: WorkerDeps,
   order: Array<"user" | "rating">,
   state: WorkerLoopState,
-  opts: { historyRescore?: boolean; kind?: string } = {},
+  opts: { historyRescore?: boolean; kind?: JobKind; perUserExclusive?: boolean } = {},
 ): Promise<WorkerTickOutcome> {
   const dueBackground =
     opts.historyRescore === true && (state.lastBackgroundTickAt === undefined || Date.now() - state.lastBackgroundTickAt >= BACKGROUND_RESCORE_CADENCE_MS);
@@ -1204,7 +1229,11 @@ export async function workerTick(
   // ПОРТ S2/ищейка-8: весь тик в броне — бросок БД не валит процесс
   let job: ClaimedJob | null = null;
   try {
-    job = (deps.claimAny ?? claimAny)(deps.db, order, new Date(), leaseMs, { maxAttempts: deps.config.queue.maxAttempts, kind: opts.kind });
+    job = (deps.claimAny ?? claimAny)(deps.db, order, new Date(), leaseMs, {
+      maxAttempts: deps.config.queue.maxAttempts,
+      kind: opts.kind,
+      perUserExclusive: opts.perUserExclusive,
+    });
   } catch (e) {
     console.error(`[worker] claim failed: ${String((e as Error).message).slice(0, 200)}`);
     return "claim-failed";
@@ -1275,26 +1304,8 @@ export async function workerTick(
   }
 }
 
-/**
- * В5.2 (решение Екатерины 25.09): легкий цикл проверок оценки. Проверка — секунды и без
- * клона; в общем цикле она ждала конца текущего скана (у тяжелого репо — до 15-45 мин:
- * живой случай 25.09, podshivka 1,74 ГБ). Свой цикл со своим состоянием берет ТОЛЬКО
- * заявки `check` из полос роли; аренда, продление, итог и учет ошибок — общие (`workerTick`).
- * Общий цикл проверки тоже может взять — claim атомарен, заявка исполняется один раз.
- */
-export function startCheckLoop(deps: WorkerDeps, lanes: Array<"user" | "rating">, pollMs = 2000, seams: { tick?: typeof workerTick } = {}): () => void {
-  if (lanes.length === 0) return () => {};
-  const state: WorkerLoopState = { busy: false };
-  const tick = seams.tick ?? workerTick;
-  const timer = setInterval(() => {
-    try {
-      void tick(deps, lanes, state, { kind: "check" }).catch((e) => console.error(`[check-loop] tick failed: ${String((e as Error).message).slice(0, 200)}`));
-    } catch (e) {
-      console.error(`[check-loop] tick failed: ${String((e as Error).message).slice(0, 200)}`);
-    }
-  }, pollMs);
-  return () => clearInterval(timer);
-}
+// В5.2 (решение Екатерины 25.09): легкий цикл проверок оценки `startCheckLoop` вошел в общий
+// план циклов (`workerLoopPlan`): у проверок в каждой полосе свой цикл, как у сканов и обзоров.
 
 /** С10-3: тик считается живым, если он не `busy` или текущее задание ещё в пределах худшего бюджета скана. */
 export function loopTickIsAlive(outcome: WorkerTickOutcome, state: WorkerLoopState, config: Config, now = Date.now()): boolean {
@@ -1307,17 +1318,22 @@ export function startWorkerLoop(
   queues: { user?: boolean; rating?: boolean },
   pollMs = 5000,
   seams: { tick?: typeof workerTick } = {},
+  // В5.2 (очередь): цикл одного рода; метки живости пишет только цикл сканов своей полосы
+  only: { kind?: JobKind; perUserExclusive?: boolean; historyRescore?: boolean; tickMarks?: boolean } = {},
 ): () => void {
   const order: Array<"user" | "rating"> = queues.user && queues.rating ? ["user", "rating"] : queues.user ? ["user"] : queues.rating ? ["rating"] : [];
   if (order.length === 0) return () => {};
   const state: WorkerLoopState = { busy: false };
   const tick = seams.tick ?? workerTick;
+  const historyRescore = only.historyRescore ?? queues.rating === true;
+  const tickMarks = only.tickMarks ?? true;
   const timer = setInterval(() => {
     // тик целиком в броне и на уровне таймера: синхронный бросок шва (или
     // отказ самого `setInterval`-колбэка) не должен ронять процесс
     try {
-      void tick(deps, order, state, { historyRescore: queues.rating === true })
+      void tick(deps, order, state, { historyRescore, kind: only.kind, perUserExclusive: only.perUserExclusive })
         .then((outcome) => {
+          if (!tickMarks) return;
           // З6 (круг 2 В4.4): метка живого тика — у rating-стороны лупа своя
           // (иначе живой web-процесс маскировал бы мёртвую rating-роль);
           // В4.8.5 (К8.5.5c): у user-стороны — своя, для health полосы.
@@ -1334,6 +1350,67 @@ export function startWorkerLoop(
     }
   }, pollMs);
   return () => clearInterval(timer);
+}
+
+/**
+ * В5.2 (очередь, решение Екатерины 25.09 — «ничто не должно блокировать пользовательские
+ * запросы; большие репозитории не должны блочить все»): рабочие циклы процесса. Прежде в роли
+ * `all` один цикл вел обе полосы и все роды — плановый скан тяжелого репо (до ~90 мин) держал
+ * и анализ, и обзор пользователя. Теперь у каждой пары «полоса роли × род заявки» свой цикл
+ * со своим состоянием: плановая волна не держит пользователей, скан не держит обзор, тяжелый
+ * репо одного пользователя занимает один слот из `userScanSlots`. Claim атомарен (одна
+ * инструкция UPDATE), поэтому параллельные циклы одной полосы не берут заявку дважды.
+ */
+export interface WorkerLoopSpec {
+  lane: "user" | "rating";
+  kind: JobKind;
+  /** параллельных циклов (у каждого свое состояние «занят») */
+  slots: number;
+  pollMs: number;
+  /** у одного автора одновременно одна заявка этого рода (только полоса user) */
+  perUserExclusive: boolean;
+  /** фоновый пересчет истории — только цикл сканов рейтинга (как прежде rating-сторона) */
+  historyRescore: boolean;
+  /** метка живого тика полосы для health — только циклы сканов (смысл метки прежний) */
+  tickMarks: boolean;
+}
+
+export function workerLoopPlan(role: Config["processRole"], queue: Config["queue"]): WorkerLoopSpec[] {
+  const lanes: Array<"user" | "rating"> = role === "web" ? ["user"] : role === "rating" ? ["rating"] : ["user", "rating"];
+  const plan: WorkerLoopSpec[] = [];
+  for (const lane of lanes) {
+    const user = lane === "user";
+    plan.push({ lane, kind: "scan", slots: user ? loopSlots(queue.userScanSlots) : 1, pollMs: 5000, perUserExclusive: user, historyRescore: !user, tickMarks: true });
+    plan.push({ lane, kind: "summary", slots: user ? loopSlots(queue.userAiSlots) : 1, pollMs: 5000, perUserExclusive: user, historyRescore: false, tickMarks: false });
+    // проверка — секунды без клона: одного цикла на полосу хватает
+    plan.push({ lane, kind: "check", slots: 1, pollMs: 2000, perUserExclusive: false, historyRescore: false, tickMarks: false });
+  }
+  return plan;
+}
+
+/** Запустить циклы плана; возвращает одну остановку на все. */
+export function startWorkerLoops(deps: WorkerDeps, plan: WorkerLoopSpec[], seams: { tick?: typeof workerTick } = {}): () => void {
+  const stops: Array<() => void> = [];
+  for (const spec of plan) {
+    for (let i = 0; i < spec.slots; i++) {
+      stops.push(
+        startWorkerLoop(deps, { [spec.lane]: true }, spec.pollMs, seams, {
+          kind: spec.kind,
+          perUserExclusive: spec.perUserExclusive,
+          historyRescore: spec.historyRescore,
+          tickMarks: spec.tickMarks,
+        }),
+      );
+    }
+  }
+  return () => {
+    for (const stop of stops) stop();
+  };
+}
+
+/** Строка старта: какие циклы подняты (оператор видит слоты без чтения кода). */
+export function workerLoopSummary(plan: WorkerLoopSpec[]): string {
+  return plan.map((s) => `${s.lane}/${s.kind}×${s.slots}`).join(", ");
 }
 
 /**
