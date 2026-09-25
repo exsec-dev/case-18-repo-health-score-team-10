@@ -2465,7 +2465,8 @@ button.rh-category:focus-visible {
 /* фон карточки непрозрачный (полупрозрачный generic поверх фона страницы) — закрепленная
    шапка перекрывает прокручиваемые строки */
 .rh-cmp {
-  --rh-cmp-card: linear-gradient(var(--g-color-base-generic), var(--g-color-base-generic)), var(--g-color-base-background);
+  /* §2 25.09: карточка темнее фона страницы в обеих темах (непрозрачная — для закрепленной шапки) */
+  --rh-cmp-card: color-mix(in srgb, var(--g-color-base-background) 92%, var(--g-color-text-dark-primary));
   display: grid;
   column-gap: var(--g-spacing-3);
 }
@@ -2476,6 +2477,11 @@ button.rh-category:focus-visible {
 
 .rh-cmp-row {
   display: contents;
+}
+
+.g-root_theme_dark .rh-cmp,
+.g-root_theme_dark-hc .rh-cmp {
+  --rh-cmp-card: color-mix(in srgb, var(--g-color-base-background) 80%, var(--g-color-text-dark-primary));
 }
 
 .rh-cmp-colcard {
@@ -2670,7 +2676,9 @@ button.rh-category:focus-visible {
 
 .rh-cmp-colhead_invite {
   display: flex;
+  flex-direction: column;
   align-items: flex-start;
+  gap: var(--g-spacing-2);
   padding-top: var(--g-spacing-1);
 }
 
@@ -2839,24 +2847,11 @@ button.rh-category:focus-visible {
   gap: var(--g-spacing-2);
 }
 
-.rh-cmp-skeleton {
-  display: flex;
-  gap: var(--g-spacing-4);
-  padding: var(--g-spacing-4);
-}
-
-.rh-cmp-skeleton__col {
-  display: flex;
-  flex-direction: column;
-  gap: var(--g-spacing-3);
-  flex: 0 1 200px;
-  min-width: 0;
-}
-
-.rh-cmp-skeleton__slug {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+.rh-cmp-skeleton.g-skeleton {
+  display: block;
+  width: 100%;
+  height: 480px;
+  border-radius: var(--g-border-radius-xl);
 }
 
 /* телефон: подпись строки во всю ширину, под ней 2-3 равные ячейки; карточек нет —

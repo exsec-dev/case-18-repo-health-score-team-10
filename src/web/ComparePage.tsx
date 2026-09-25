@@ -35,6 +35,7 @@ import {
   COMPARE_FOOTER,
   COMPARE_FULL_LINE,
   COMPARE_FULL_PARTIAL,
+  COMPARE_LEAD,
   COMPARE_LEADER_LEGEND,
   COMPARE_LIMIT_TEXT,
   COMPARE_MAX,
@@ -174,7 +175,17 @@ export function ComparePage({ search }: { search: string }) {
         {/* Д4 А + окно добавления (§2 25.09): кнопка у заголовка; при 3 из 3 — строка вместо поля */}
         <PageHeader
           title={COMPARE_TITLE}
-          description={isFull ? COMPARE_FULL_LINE : undefined}
+          description={
+            <>
+              {COMPARE_LEAD}
+              {isFull && (
+                <>
+                  <br />
+                  {COMPARE_FULL_LINE}
+                </>
+              )}
+            </>
+          }
           end={
             // при 1 репо добавление — в столбце-приглашении (одна кнопка на экране, не три)
             !isFull && slugs.length > 1 ? (
@@ -205,7 +216,15 @@ export function ComparePage({ search }: { search: string }) {
                 <Alert theme="danger" view="outlined" title="Не удалось загрузить сравнение" message={error} actions={[{ text: "Повторить", handler: reload }]} />
               </div>
             )}
-            {/* Д11: плашка по содержимому, не шире 820 (правило 23.09 вне карточки) */}
+            {items ? (
+              <div className={loading ? "rh-cmp-wrap rh-cmp-wrap_busy" : "rh-cmp-wrap"} aria-busy={loading}>
+                <CompareTable items={items} fullKeys={full.rows} hasPat={hasPat} phone={phone} onRemove={remove} onAdd={openDialog} />
+              </div>
+            ) : state?.kind === "error" ? null : (
+              <CompareSkeleton slugs={slugs} />
+            )}
+            {items && phone && <PhoneExceptions items={items} hasPat={hasPat} />}
+            {/* Д11: плашка по содержимому, не шире 820; §2 25.09 — под таблицей */}
             {notes.length === 1 && (
               <div className="rh-cmp-alert">
                 <Alert theme="info" view="filled" size="s" message={notes[0]} />
@@ -228,14 +247,6 @@ export function ComparePage({ search }: { search: string }) {
                 />
               </div>
             )}
-            {items ? (
-              <div className={loading ? "rh-cmp-wrap rh-cmp-wrap_busy" : "rh-cmp-wrap"} aria-busy={loading}>
-                <CompareTable items={items} fullKeys={full.rows} hasPat={hasPat} phone={phone} onRemove={remove} onAdd={openDialog} />
-              </div>
-            ) : state?.kind === "error" ? null : (
-              <CompareSkeleton slugs={slugs} />
-            )}
-            {items && phone && <PhoneExceptions items={items} hasPat={hasPat} />}
             {items && full.partial && (
               <Text as="p" variant="body-1" color="complementary" className="rh-cmp-foot">
                 {COMPARE_FULL_PARTIAL}
@@ -301,21 +312,10 @@ function HowItWorks() {
 }
 
 function CompareSkeleton({ slugs }: { slugs: string[] }) {
+  // §2 25.09: загрузка — один большой скелетон в форме таблицы, без названий и мелких полос
   return (
-    <div className="rh-cmp-wrap" aria-busy="true" aria-label="Загрузка сравнения">
-      <div className="rh-cmp-skeleton">
-        {slugs.map((s) => (
-          <div key={s} className="rh-cmp-skeleton__col">
-            <Text color="secondary" className="rh-cmp-skeleton__slug">
-              {s}
-            </Text>
-            <Skeleton style={{ height: 28, width: "100%", maxWidth: 90 }} />
-            {INDEX_KEYS.map((k) => (
-              <Skeleton key={k} style={{ height: 16, width: "100%", maxWidth: 60 }} />
-            ))}
-          </div>
-        ))}
-      </div>
+    <div className="rh-cmp-wrap" aria-busy="true" aria-label={`Загрузка сравнения: ${slugs.length} из ${COMPARE_MAX}`}>
+      <Skeleton className="rh-cmp-skeleton" />
     </div>
   );
 }
@@ -403,7 +403,11 @@ function AddCompareDialog({
   const favMatches: Suggestion[] = (favorites ?? [])
     .filter((f) => lower === "" || `${f.org}/${f.repo}`.toLowerCase().includes(lower))
     .slice(0, 8)
-    .map((f) => ({ slug: `${f.org}/${f.repo}`, org: f.org, repo: f.repo, section: "fav", logoUrl: null, meta: <VisibilityPill value={f.access?.visibility} /> }));
+    .map((f) => ({ slug: `${f.org}/${f.repo}`, org: f.org, repo: f.repo, section: "fav", logoUrl: null, meta: (
+      <span className="rh-add-row__meta">
+        <VisibilityPill value={f.access?.visibility} />
+      </span>
+    ) }));
   const ratingMatches: Suggestion[] =
     rating && rating.q === q
       ? rating.items
@@ -1079,12 +1083,14 @@ function fullCounted(card: CompareCard): number {
 function ColumnHead({ col, phone, onRemove, onAdd }: { col: Col; phone: boolean; onRemove: (slug: string) => void; onAdd: () => void }) {
   if (col.kind === "invite") {
     // Д14: шапка приглашения — кнопка
+    // §2 25.09: пояснение — сразу под кнопкой, а не посреди столбца
     return (
       <span className="rh-cmp-colhead rh-cmp-colhead_invite">
         <Button view="outlined" size="m" onClick={onAdd}>
           <Icon data={Plus} size={16} />
           {COMPARE_ADD}
         </Button>
+        <Text color="complementary">{COMPARE_ONE_TEXT}</Text>
       </span>
     );
   }
@@ -1222,14 +1228,7 @@ function FitName({ text, variant, secondary = false }: { text: string; variant: 
 }
 
 function MergedCell({ col, hasPat }: { col: Col; hasPat: boolean }) {
-  if (col.kind === "invite") {
-    return (
-      <div className="rh-cmp-merged rh-cmp-merged_invite">
-        <Text color="complementary">{COMPARE_ONE_TEXT}</Text>
-      </div>
-    );
-  }
-  if (col.kind === "scored") return null;
+  if (col.kind === "invite" || col.kind === "scored") return null;
   const t = exceptionText(col, hasPat);
   return (
     <div className="rh-cmp-merged">
