@@ -50,13 +50,25 @@ export type LlmRoleKey = "main" | "side" | SummaryRole;
 export class LlmError extends Error {
   readonly code: string;
   readonly raw: string | null;
+  /** В5.2 (Б7): пауза, которую просит провайдер (Retry-After у 429/503), мс; null — не прислал */
+  readonly retryAfterMs: number | null;
 
-  constructor(code: string, message: string, raw: string | null = null) {
+  constructor(code: string, message: string, raw: string | null = null, retryAfterMs: number | null = null) {
     super(message);
     this.name = "LlmError";
     this.code = code;
     this.raw = raw;
+    this.retryAfterMs = retryAfterMs;
   }
+}
+
+/** Retry-After: секунды или HTTP-дата → мс; мусор и прошлое — null. */
+export function retryAfterMsOf(header: string | null, now: number = Date.now()): number | null {
+  if (header === null || header.trim() === "") return null;
+  const sec = Number(header.trim());
+  if (Number.isFinite(sec)) return sec >= 0 ? Math.round(sec * 1000) : null;
+  const at = Date.parse(header);
+  return Number.isFinite(at) && at > now ? at - now : null;
 }
 
 export type CallLlm = (opts: {
@@ -241,7 +253,7 @@ async function callZai(o: ZaiOptions, opts: Parameters<CallLlm>[0]): Promise<Llm
   }
   if (!resp.ok) {
     const raw = await resp.text().catch(() => "");
-    throw new LlmError(String(resp.status), `HTTP ${resp.status}: ${excerpt(raw)}`, raw);
+    throw new LlmError(String(resp.status), `HTTP ${resp.status}: ${excerpt(raw)}`, raw, retryAfterMsOf(resp.headers.get("retry-after")));
   }
   if (resp.body === null) {
     throw new LlmError("no_body", "пустое тело ответа");
@@ -297,6 +309,12 @@ async function callZai(o: ZaiOptions, opts: Parameters<CallLlm>[0]): Promise<Llm
         }
       }
     }
+  } catch (e) {
+    // В5.2 (Б7, долг аудита В5.1, reliability «мелочь 1»): обрыв в фазе стрима — те же
+    // коды, что в фазе запроса; сырой DOMException в outcomes и логи не едет
+    if (e instanceof LlmError) throw e;
+    if (opts.signal?.aborted) throw new LlmError("aborted", "вызов отменён (бюджет генерации)");
+    throw new LlmError("network", `сеть (стрим): ${(e as Error).message}`);
   } finally {
     if (timer !== null) clearTimeout(timer);
     clearTimeout(hard);

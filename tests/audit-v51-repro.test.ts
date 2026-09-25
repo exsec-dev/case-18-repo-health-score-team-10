@@ -540,13 +540,13 @@ describe("В5.1 Б5: хартии и входы ролей", () => {
   test("В5.1-20: ключи хартий реальны (scores.points, docs.readme), обещания входа честные, доклад инъекции снят", async () => {
     const { loadCharter } = await import("../src/summary/charters");
     const trajectory = loadCharter("trajectory");
-    expect(trajectory.version).toBe("3");
+    expect(trajectory.version).toBe("4"); // В5.2 (Б7): типографика хартий — версия поднята
     expect(trajectory.text).toContain("{f:scores.points}");
     expect(trajectory.text).not.toContain("{f:scores.point}");
     expect(trajectory.text).toContain("ТОЛЬКО числовые точки");
     const overview = loadCharter("overview");
     // 23.09: v3 — «синтез, а не склейка» (дословный пересказ специалистов = брак)
-    expect(overview.version).toBe("4");
+    expect(overview.version).toBe("5"); // В5.2 (Б7): типографика хартий — версия поднята
     expect(overview.text).toContain("Синтез, а не склейка");
     expect(overview.text).not.toContain("healthcraft.index");
     expect(overview.text).not.toContain("флаги");

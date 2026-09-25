@@ -25,19 +25,28 @@ interface ScoreHistoryRow {
   head_sha: string | null;
 }
 
-function secretsCriticalOf(db: Database, scanId: number): boolean {
-  const row = db.query("SELECT value, status FROM facts WHERE scan_id = ? AND key = 'appsec.findings'").get(scanId) as
-    | { value: string; status: string }
-    | null;
-  if (!row || row.status !== "ok") return false;
-  return (parseFactValue(row.value) as { secrets_critical?: unknown } | null)?.secrets_critical === true;
+/**
+ * Сканы репо с критичными секретами (флаг ok-факта appsec.findings) — ОДНИМ запросом на
+ * репо. В5.2 (Б7, долг аудита В5.1, reliability «мелочь 6»): прежде — запрос на точку (N+1).
+ */
+function secretsCriticalScans(db: Database, repoId: number): Set<number> {
+  const rows = db
+    .query(
+      "SELECT f.scan_id, f.value FROM facts f JOIN scans s ON s.id = f.scan_id WHERE s.repo_id = ? AND f.key = 'appsec.findings' AND f.status = 'ok'",
+    )
+    .all(repoId) as { scan_id: number; value: string }[];
+  const out = new Set<number>();
+  for (const r of rows) {
+    if ((parseFactValue(r.value) as { secrets_critical?: unknown } | null)?.secrets_critical === true) out.add(r.scan_id);
+  }
+  return out;
 }
 
-function totalsOf(db: Database, row: ScoreHistoryRow): { score: number | null; coverage: number } {
+function totalsOf(row: ScoreHistoryRow, secretsCritical: boolean): { score: number | null; coverage: number } {
   const cats = JSON.parse(row.categories) as Record<string, CategoryScore>;
   // кап критичных секретов применяется тем же правилом, что и при скане:
   // флаг читается из фактов ЭТОГО скана — исторический итог не переписывается
-  const totals = totalsFromCategories(cats as never, { codeEmpty: row.code_empty === 1, secretsCritical: secretsCriticalOf(db, row.scan_id) });
+  const totals = totalsFromCategories(cats as never, { codeEmpty: row.code_empty === 1, secretsCritical });
   return { score: totals.repoHealthScore, coverage: totals.repoHealthCoverage };
 }
 
@@ -63,10 +72,11 @@ export function getRepoHistory(db: Database, org: string, repo: string, opts: { 
        ORDER BY sc.scan_id ASC`,
     )
     .all(r.id, MODEL_VERSION) as ScoreHistoryRow[];
+  const secrets = fullOpen ? secretsCriticalScans(db, r.id) : new Set<number>();
   const points: HistoryPoint[] = rows.map((row) => {
     // полный итог — из записанных категорий этой строки и её же фактов
     // (тот же дериватив, что на карточке); не fullOpen → null
-    const { score } = fullOpen ? totalsOf(db, row) : { score: null };
+    const { score } = fullOpen ? totalsOf(row, secrets.has(row.scan_id)) : { score: null };
     return {
       scanId: row.scan_id,
       finishedAt: row.finished_at,

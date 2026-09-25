@@ -18,6 +18,8 @@ export const MAX_ATTEMPTS = 2;
 export const DEFAULT_ROUND_BUDGET_MS = 6 * 60_000;
 /** Бэкофф перед повторной попыткой (429/сеть), мс. */
 export const RETRY_BACKOFF_MS = 1_000;
+/** Потолок паузы по Retry-After провайдера (В5.2, Б7), мс. */
+export const RETRY_AFTER_CAP_MS = 30_000;
 
 /** 429/5xx и транспортные срывы — повторяем; остальное — форма/патология. */
 export function retryable(e: unknown): boolean {
@@ -123,7 +125,10 @@ export async function generateWithTools(deps: AgentDeps, messages: ChatMessage[]
       const lastAttempt = attempt >= MAX_ATTEMPTS;
       if (!retryable(e) || lastAttempt) throw e;
       deps.log?.(`[${deps.role}] retryable error, attempt ${attempt}/${MAX_ATTEMPTS}: ${String((e as Error).message).slice(0, 120)}`);
-      await new Promise((r) => setTimeout(r, backoffMs));
+      // В5.2 (Б7, долг аудита В5.1): Retry-After провайдера уважается, но не дольше
+      // RETRY_AFTER_CAP_MS — ожидание не должно съесть предохранитель генерации
+      const asked = e instanceof LlmError ? e.retryAfterMs : null;
+      await new Promise((r) => setTimeout(r, asked === null ? backoffMs : Math.max(backoffMs, Math.min(asked, RETRY_AFTER_CAP_MS))));
     } finally {
       clearTimeout(fuse);
     }

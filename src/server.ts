@@ -291,8 +291,10 @@ const ck = cookieNames(config.auth);
 
 const badQuery = (message: string): Response =>
   Response.json({ error: { code: "bad_query", message } }, { status: 400 });
+// В5.2 (Б7, долг аудита В5.1, reliability «мелочь 3»): 404 API не кэшируется — как
+// publicNotFound; иначе ответ на кривой слаг мог осесть в кэше прокси или браузера
 const notFound = (message: string): Response =>
-  Response.json({ error: { code: "not_found", message } }, { status: 404 });
+  Response.json({ error: { code: "not_found", message } }, { status: 404, headers: { "cache-control": "no-store" } });
 const unauthorized = (message = "нужно войти через Я ID"): Response =>
   Response.json({ error: { code: "unauthorized", message } }, { status: 401 });
 const forbidden = (message: string): Response =>

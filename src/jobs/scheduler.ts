@@ -980,6 +980,17 @@ export async function processSummaryJob(deps: WorkerDeps, job: ClaimedJob): Prom
   if (job.userId !== null && !pat && job.audience !== "public") return SUMMARY_JOB_ERRORS.noPat;
   const scanId = lastFinishedScan(deps.db, job.repoId);
   if (scanId === null) return SUMMARY_JOB_ERRORS.noScan;
+  // В5.2 (Б7, разбор задержки Б1 — reports/2026-09-25-m53-ai-latency.md): заметки этой
+  // аудитории у скана уже есть — клон не нужен (прежде репозиторий скачивался, чтобы
+  // конвейер после клона ответил «кэш»); дебаг-куладаун (1 мс) кэш снимает, как в конвейере
+  const cacheOn = (deps.config.queue.summaryCooldownMs ?? 60 * 60_000) > 1;
+  if (
+    cacheOn &&
+    deps.db.query("SELECT 1 FROM ai_notes WHERE scan_id = ? AND role != 'flagger' AND audience = ? LIMIT 1").get(scanId, job.audience ?? "full") !== null
+  ) {
+    console.log(`[summary job ${job.id}] ${job.slug}: notes already exist for scan ${scanId} — no clone, no generation`);
+    return null;
+  }
   const limits = scanCloneLimitsOf(deps.config.scan);
   const [org, repo] = job.slug.split("/");
   const clone = await cloneWithDegrade(scanGitUrl(deps.config.api.gitBase, pat, org!, repo!), undefined, limits);

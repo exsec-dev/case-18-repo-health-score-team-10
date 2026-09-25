@@ -59,6 +59,10 @@ const SECRET_DENYLIST: RegExp[] = [
   /(^|\/)\.netrc$/i,
   /(^|\/)\.htpasswd$/i,
   /(^|\/)service-account[^/]*\.json$/i,
+  // В5.2 (Б7, хвосты аудита В5.1): SSH-ключи любого алгоритма вне .ssh/ (deploy/id_ed25519,
+  // id_ecdsa, id_dsa) и ключи сервисных аккаунтов Firebase
+  /(^|\/)id_(rsa|dsa|ecdsa|ed25519)(_sk)?[^/]*$/i,
+  /(^|\/)[^/]*firebase-adminsdk[^/]*\.json$/i,
 ];
 
 export function isDeniedPath(relPath: string): boolean {

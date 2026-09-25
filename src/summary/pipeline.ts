@@ -228,6 +228,17 @@ function factsDigest(facts: FactInput[]): string {
 }
 
 /**
+ * В5.2 (Б7): правило языка продукта для пользовательских текстов (AGENTS.md, решение
+ * 20.09 Екатерины) — длинное тире заменяется средним, «ё» — на «е». Модель нарушает
+ * его и при прямом запрете в хартии (живой прогон 25.09: 4 «ё» и 1 тире на 6 заметок),
+ * поэтому замена детерминированная и до валидатора. Только орфография: числа, маркеры
+ * и слова не меняются.
+ */
+export function normalizeTypography(text: string): string {
+  return text.replaceAll("—", "–").replaceAll("ё", "е").replaceAll("Ё", "Е");
+}
+
+/**
  * Попыток генерации на роль: ретрай с причинами валидатора — «попросить
  * модель поправиться» (23.09, Алексей: запросы дешёвые, отказ — только после
  * трёх попыток; прежний лимит 2 молча топил роли на одной опечатке).
@@ -313,7 +324,7 @@ async function runRole(
         },
         callMessages,
       );
-      text = res.text;
+      text = normalizeTypography(res.text);
       calls = res.modelCalls;
       tools = res.toolCalls;
     } catch (e) {
@@ -643,7 +654,7 @@ async function runFlagger(
         { callLlm: budgetedCallLlm(deps.callLlm, budget), role: "flagger", executor: null, backoffMs: deps.agentBackoffMs },
         messages,
       );
-      text = res.text;
+      text = normalizeTypography(res.text);
     } catch (e) {
       return { ok: false, reason: `модель: ${String((e as Error).message).slice(0, 160)}` };
     }

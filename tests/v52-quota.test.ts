@@ -325,3 +325,18 @@ describe("маршруты на живом сервере", () => {
     }
   }, 120_000);
 });
+
+describe("Б7 (задержка Б1): заявка обзора не клонирует, если заметки аудитории уже есть", () => {
+  test("заметки есть — null без клона (адрес клона заведомо битый); нет — честная ошибка клона", async () => {
+    const { db } = freshDb();
+    const { repoId, scanId } = seedScanned(db, "noclone");
+    const base = loadConfig();
+    const config = { ...base, api: { ...base.api, gitBase: "file:///definitely/not/here" }, queue: { ...base.queue, summaryCooldownMs: 3_600_000 } };
+    const job = (audience: "public" | "full"): ClaimedJob => ({ id: 7, repoId, slug: "q/noclone", userId: null, triggerKind: "periodic", kind: "summary", audience, claimedAt: "t", attempts: 1 });
+    db.query("INSERT INTO ai_notes (repo_id, scan_id, role, text, fact_refs, charter_version, model, created_at, audience) VALUES (?, ?, 'overview', 'x', '[]', '1', 'm', '2026', 'public')").run(repoId, scanId);
+    const { processSummaryJob } = await import("../src/jobs/scheduler");
+    expect(await processSummaryJob({ db, config, serverClient: () => null } as never, job("public"))).toBeNull();
+    // у полной версии заметок нет — дошло до клона и честно упало на нем
+    expect(await processSummaryJob({ db, config, serverClient: () => null } as never, job("full"))).toContain("не удалось клонировать");
+  }, 60_000);
+});
