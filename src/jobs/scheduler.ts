@@ -273,9 +273,9 @@ export interface ClaimOptions {
   /** В5.2: только заявки этого рода (у каждого рода в каждой полосе свой цикл) */
   kind?: JobKind;
   /**
-   * В5.2 (очередь, решение 25.09): не брать заявку автора, у которого уже идет заявка того же
-   * рода с живым лизом, — слоты пользовательской полосы делятся между людьми, а не уходят
-   * одному. Смысл имеет только в полосе `user` (у плановых заявок автора нет).
+   * В5.2 (очередь, решение 25.09; аудит О4): заявка автора, у которого уже идет заявка того же
+   * рода с живым лизом, — в конец очереди: слот сначала другому человеку, но не простаивает.
+   * Смысл имеет только в полосе `user` (у плановых заявок автора нет).
    */
   perUserExclusive?: boolean;
   /**
@@ -342,12 +342,6 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
            AND attempts < ?
            AND (? IS NULL OR kind = ?)
            AND (CASE WHEN ? = 'user' THEN trigger_kind = 'user' ELSE trigger_kind != 'user' END)
-           -- В5.2 (очередь, решение 25.09): у автора одновременно одна заявка каждого рода —
-           -- второй слот полосы достается другому человеку, а не второй заявке того же
-           AND (? = 0 OR NOT EXISTS (
-                 SELECT 1 FROM jobs r
-                 WHERE r.status = 'running' AND r.lease_until >= ? AND r.id != jobs.id
-                   AND r.user_id = jobs.user_id AND r.kind = jobs.kind))
            -- В5.2 (аудит очереди О2): слот легких не берет тяжелый репо — у него был скан дольше
            -- порога (закрытые свипом сирот не в счет: их длительность — время до свипа)
            AND (? = 0 OR NOT EXISTS (
@@ -381,6 +375,13 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
          -- автора) — раньше волны сканов: иначе тексты топа ждут конца ночного обхода. В полосе
          -- user порядок прежний — «сначала анализ, потом обзор» держится очередью
          ORDER BY CASE WHEN ? = 'user' THEN 0 WHEN kind = 'scan' THEN 1 ELSE 0 END,
+                  -- В5.2 (очередь, решение 25.09; аудит О4 — слово Екатерины «делай»): у кого уже
+                  -- идет заявка того же рода — в конец очереди: свободный слот сначала другому
+                  -- человеку, но не простаивает, если ждет только он (прежде — запрет в WHERE)
+                  CASE WHEN ? = 1 THEN EXISTS (
+                    SELECT 1 FROM jobs r
+                    WHERE r.status = 'running' AND r.lease_until >= ? AND r.id != jobs.id
+                      AND r.user_id = jobs.user_id AND r.kind = jobs.kind) ELSE 0 END,
                   -- аудит очереди О11б: круговой порядок — по роду (проверка не отодвигает скан)
                   CASE WHEN ? = 'user' THEN ((SELECT MAX(j2.claimed_at) FROM jobs j2 WHERE j2.user_id = jobs.user_id AND j2.kind = jobs.kind) IS NOT NULL) ELSE 0 END,
                   CASE WHEN ? = 'user' THEN (SELECT MAX(j2.claimed_at) FROM jobs j2 WHERE j2.user_id = jobs.user_id AND j2.kind = jobs.kind) ELSE NULL END ASC,
@@ -401,7 +402,7 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
      WHERE repo_id = ? AND user_id IS ? AND status = 'running'`,
   );
   const claimTx = db.transaction(() => {
-    const row = claimStmt.get(nowIso, leaseIso, nowIso, maxAttempts, kindOnly, kindOnly, queue, exclusive, nowIso, lightOnly, nowIso, heavyMs, nowIso, queue, queue, queue) as {
+    const row = claimStmt.get(nowIso, leaseIso, nowIso, maxAttempts, kindOnly, kindOnly, queue, lightOnly, nowIso, heavyMs, nowIso, queue, exclusive, nowIso, queue, queue) as {
       id: number;
       repo_id: number;
       user_id: number | null;

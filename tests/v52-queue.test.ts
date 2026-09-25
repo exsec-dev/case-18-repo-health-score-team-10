@@ -94,7 +94,7 @@ describe("план циклов: у каждой пары «полоса рол�
   });
 });
 
-describe("claim: у автора одна заявка каждого рода одновременно", () => {
+describe("claim: у кого уже идет заявка рода — в конец очереди (аудит О4: приоритет, не запрет)", () => {
   test("второй слот достается другому человеку, а не второй заявке того же", () => {
     const db = freshDb();
     user(db, 1);
@@ -110,10 +110,10 @@ describe("claim: у автора одна заявка каждого рода �
     expect(claimNext(db, new Date(), 60_000, { queue: "user", kind: "scan" })!.id).toBe(b1);
     db.query("UPDATE jobs SET status = 'queued', claimed_at = NULL, lease_until = NULL, attempts = 0 WHERE id = ?").run(b1);
     expect(claimNext(db, new Date(), 60_000, { queue: "user", kind: "scan", perUserExclusive: true })!.id).toBe(c2);
-    // у обоих идет скан — третьему слоту брать нечего
-    expect(claimNext(db, new Date(), 60_000, { queue: "user", kind: "scan", perUserExclusive: true })).toBeNull();
+    // ждет только человек 1 — свободный слот не простаивает (аудит О4, слово Екатерины «делай»)
+    expect(claimNext(db, new Date(), 60_000, { queue: "user", kind: "scan", perUserExclusive: true })!.id).toBe(b1);
   });
-  test("зависшая заявка (лиз истек) автора не держит; заявка другого рода — тоже", () => {
+  test("зависшая заявка (лиз истек) автора не отодвигает; заявка другого рода — тоже", () => {
     const db = freshDb();
     user(db, 1);
     const a = seeded(db, "a");
@@ -123,7 +123,7 @@ describe("claim: у автора одна заявка каждого рода �
     // первый — перехват зависшей (она сама running с истекшим лизом), второй — следующая
     const first = claimNext(db, new Date(), 60_000, { queue: "user", kind: "summary", perUserExclusive: true })!;
     expect(first.id).not.toBe(next);
-    expect(claimNext(db, new Date(), 60_000, { queue: "user", kind: "summary", perUserExclusive: true })).toBeNull();
+    expect(claimNext(db, new Date(), 60_000, { queue: "user", kind: "summary", perUserExclusive: true })!.id).toBe(next);
     // скан того же автора по другому репо — другой род, не ждет
     const scan = job(db, b.repoId, { user: 1 });
     expect(claimNext(db, new Date(), 60_000, { queue: "user", kind: "scan", perUserExclusive: true })!.id).toBe(scan);
@@ -213,17 +213,19 @@ describe("живые циклы: плановый скан тяжелого ре
     const stop = startWorkerLoops(deps, plan);
     try {
       const deadline = Date.now() + 5000;
-      while (Date.now() < deadline && [lightUser, summary, check].some((id) => statusOf(db, id) !== "done")) await new Promise((r) => setTimeout(r, 20));
+      while (Date.now() < deadline && [lightUser, summary, check, secondOfUser1].some((id) => statusOf(db, id) !== "done")) await new Promise((r) => setTimeout(r, 20));
       expect({ light: statusOf(db, lightUser), summary: statusOf(db, summary), check: statusOf(db, check) }).toEqual({ light: "done", summary: "done", check: "done" });
-      // тяжелые идут; вторая заявка человека 1 ждет его первую, хотя слот свободен
+      // тяжелые идут; вторая заявка человека 1 — после заявки человека 2, но свободный слот
+      // не простаивает (аудит О4: приоритет, не запрет)
       expect(statusOf(db, periodic)).toBe("running");
       expect(statusOf(db, heavyUser)).toBe("running");
-      expect(statusOf(db, secondOfUser1)).toBe("queued");
+      expect(statusOf(db, secondOfUser1)).toBe("done");
+      const claimedAt = (id: number) => (db.query("SELECT claimed_at FROM jobs WHERE id = ?").get(id) as { claimed_at: string }).claimed_at;
+      expect(claimedAt(lightUser) <= claimedAt(secondOfUser1)).toBe(true);
       expect(started.filter((s) => s === "q/heavy")).toHaveLength(1);
       release();
       const deadline2 = Date.now() + 5000;
-      while (Date.now() < deadline2 && statusOf(db, secondOfUser1) !== "done") await new Promise((r) => setTimeout(r, 20));
-      expect(statusOf(db, secondOfUser1)).toBe("done");
+      while (Date.now() < deadline2 && statusOf(db, periodic) !== "done") await new Promise((r) => setTimeout(r, 20));
       expect(statusOf(db, periodic)).toBe("done");
     } finally {
       release();
