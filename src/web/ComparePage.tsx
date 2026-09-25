@@ -696,10 +696,8 @@ function CompareTable({
     const { weighted, reference } = subKeysOf(cols, key);
     rows.push({ kind: "subhead", cat: key });
     for (const sub of weighted) rows.push({ kind: "sub", cat: key, sub });
-    if (reference.length > 0) {
-      rows.push({ kind: "refhead", cat: key });
-      for (const sub of reference) rows.push({ kind: "sub", cat: key, sub });
-    }
+    // §2 25.09: подписи «Справочно…» нет — справочные идут следом, серым, с «—» вместо балла
+    for (const sub of reference) rows.push({ kind: "sub", cat: key, sub });
   };
   for (const key of INDEX_KEYS) pushCategory(key);
   if (fullKeys.length > 0) {
@@ -1048,21 +1046,23 @@ function CellValue({ row, card, leader, phone, year, sharedTotal }: { row: Row; 
     case "sub": {
       const cat = score.categories[row.cat]!;
       const entry = cat.submetrics[row.sub];
-      if (!entry) return <NoDataGlyph reason={NO_DATA} />;
-      const shown = submetricShownValue(row.cat, row.sub, entry, submetricContext(score.computedAt), cat.submetrics);
       const ref = displayOnly(row.cat, row.sub);
-      const scoreNode = ref ? null : entry.score === null || entry.score === undefined ? (
-        <NoDataGlyph reason={NO_DATA} />
-      ) : (
-        <Lead leader={leader} plain>
-          <Text variant="body-1">{phone ? `балл ${fmtSubmetric(entry.score)}` : fmtSubmetric(entry.score)}</Text>
-        </Lead>
-      );
+      // §2 25.09: пустое значение и пустой балл — «—» на своих местах (балл — у правого края подстолбца)
+      const shown = entry ? submetricShownValue(row.cat, row.sub, entry, submetricContext(score.computedAt), cat.submetrics) : "—";
+      const scoreNode =
+        ref || !entry || entry.score === null || entry.score === undefined ? (
+          <NoDataGlyph reason={ref ? "Показывается для справки, в балл категории не входит" : NO_DATA} />
+        ) : (
+          <Lead leader={leader} plain>
+            <Text variant="body-1">{phone ? `балл ${fmtSubmetric(entry.score)}` : fmtSubmetric(entry.score)}</Text>
+          </Lead>
+        );
       return (
         <span className="rh-cmp-sub">
-          {/* справочные — без балла: пустой подстолбец держит значения на одной вертикали */}
-          {(!phone || scoreNode) && <span className="rh-cmp-sub__score">{scoreNode}</span>}
-          <Text variant="body-1" color={ref ? "secondary" : "complementary"} className="rh-cmp-sub__value">
+          {/* телефон: у справочных балла нет и подстолбца тоже — прочерк отдельной строкой был бы шумом */}
+          {!(phone && ref) && <span className="rh-cmp-sub__score">{scoreNode}</span>}
+          {/* §2 25.09: значение — одной строкой с многоточием, полный текст в title */}
+          <Text variant="body-1" color={ref ? "secondary" : "complementary"} className="rh-cmp-sub__value" title={shown}>
             {shown}
           </Text>
         </span>

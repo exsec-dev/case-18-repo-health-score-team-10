@@ -2462,11 +2462,11 @@ button.rh-category:focus-visible {
   opacity: 0.6;
 }
 
-/* фон карточки непрозрачный (полупрозрачный generic поверх фона страницы) — закрепленная
-   шапка перекрывает прокручиваемые строки */
+/* фон карточки непрозрачный — закрепленная шапка перекрывает прокручиваемые строки */
 .rh-cmp {
-  /* §2 25.09: карточка темнее фона страницы в обеих темах (непрозрачная — для закрепленной шапки) */
-  --rh-cmp-card: color-mix(in srgb, var(--g-color-base-background) 92%, var(--g-color-text-dark-primary));
+  /* §2 25.09: цвет владельца #4d4d4d — ближайший нейтральный непрозрачный токен:
+     simple-hover-solid (темная #525252, светлая #f2f2f2) */
+  --rh-cmp-card: var(--g-color-base-simple-hover-solid);
   display: grid;
   column-gap: var(--g-spacing-3);
 }
@@ -2477,11 +2477,6 @@ button.rh-category:focus-visible {
 
 .rh-cmp-row {
   display: contents;
-}
-
-.g-root_theme_dark .rh-cmp,
-.g-root_theme_dark-hc .rh-cmp {
-  --rh-cmp-card: color-mix(in srgb, var(--g-color-base-background) 80%, var(--g-color-text-dark-primary));
 }
 
 .rh-cmp-colcard {
@@ -2818,15 +2813,18 @@ button.rh-category:focus-visible {
 }
 
 .rh-cmp-sub__score {
+  display: flex;
   flex: 0 0 52px;
-  text-align: right;
+  justify-content: flex-end;
   font-variant-numeric: tabular-nums;
 }
 
 .rh-cmp-sub__value {
+  flex: 1;
   min-width: 0;
-  overflow-wrap: break-word;
-  hyphens: auto;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .rh-cmp-cell_empty-cat {
@@ -2903,7 +2901,12 @@ button.rh-category:focus-visible {
 
 .rh-cmp_phone .rh-cmp-sub__score {
   flex: none;
-  text-align: left;
+  justify-content: flex-start;
+}
+
+.rh-cmp_phone .rh-cmp-sub__value {
+  flex: none;
+  width: 100%;
 }
 
 .rh-cmp_phone .rh-cmp-total__num.g-text {
