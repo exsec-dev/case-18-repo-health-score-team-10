@@ -34,6 +34,7 @@ import {
   aiParagraphs,
   aiRoleTitle,
   fraudFactorFact,
+  fraudFactorValue,
   fraudFactorTitle,
   noDataReason,
   pathText,
@@ -919,7 +920,7 @@ function fraudBlock(card: RepoCard): Block[] {
   out.push(para(line(FRAUD_EXPLAIN)));
   // круг 3 В5.3 (§2 24.09, способ (2)): текст фактора строит код из факта, та же
   // функция, что на карточке; формулировка модели — если факта нет
-  const factOf = (key: string): unknown => card.evidence.find((e) => e.key === key)?.value;
+  const factOf = (key: string): unknown => fraudFactorValue(key, fraud.signals, card.evidence);
   out.push({
     kind: "list",
     items: fraud.factors.map((f) => [strong(fraudFactorTitle(f.key)), text(` – ${fraudFactorFact(f.key, factOf(f.key), (iso) => fmtDate(iso)) ?? f.note}`)] as InlineLine),

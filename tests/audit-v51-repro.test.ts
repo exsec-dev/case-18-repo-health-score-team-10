@@ -594,7 +594,8 @@ describe("В5.1 Б5: хартии и входы ролей", () => {
       }) as CallLlm;
       const pipe = await import("../src/summary/pipeline");
       const res = await pipe.runSummary({ db, org: "v51", repo: "roles", callLlm, clone: { root, gitDir: null }, agentBackoffMs: 0 }, { scanId });
-      expect(res.notes).toBe(9);
+      // В5.2 (Б1): флаггер — отдельная проверка (runFraudCheck), обзор пишет 8 заметок
+      expect(res.notes).toBe(8);
       // security: только факты AppSec, без недоверенного контента
       const securityIn = seen.get("security") ?? "";
       expect(securityIn).toContain("appsec.findings");

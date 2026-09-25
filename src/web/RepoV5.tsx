@@ -43,6 +43,7 @@ import {
   fmtDateTime,
   fmtScore,
   fraudFactorFact,
+  fraudFactorValue,
   fraudFactorTitle, AI_DISCLAIMER, AI_OVERVIEW_REJECTED
 } from "./format";
 import { announceJobStarted, announceJobsChanged, useAnalysisFinished } from "./session";
@@ -96,7 +97,7 @@ export function FraudAlert({ card }: { card: Card }) {
   const fraud = card.ai?.fraud;
   // подозрение — только при флаге, как в кабинете и отчете
   if (fraud === undefined || fraud === null || fraud.flag !== true || fraud.factors.length === 0) return null;
-  const factOf = (key: string): unknown => card.evidence.find((e) => e.key === key)?.value;
+  const factOf = (key: string): unknown => fraudFactorValue(key, fraud.signals, card.evidence);
   // вариант B (25.09): одна строка — заголовок и главный признак; пояснение и
   // остальные признаки — в подсказке; формулировка модели — только в отчете.
   // Признак — строка кода из факта (способ 2), без факта — формулировка модели

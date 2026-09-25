@@ -27,6 +27,7 @@ import type { SummaryRole } from "./roles";
 import { modelTierOf, ROLE_FACT_CATEGORIES, SPECIALIST_ROLES, toolsAllowed, type SpecialistRole } from "./roles";
 import { anySummaryAuto } from "./optin";
 import { categoryOf } from "../collectors/facts";
+import { rhythmSignals, RHYTHM_KEY, type RhythmSignals } from "./rhythm";
 
 export interface SummaryDeps {
   db: Database;
@@ -75,8 +76,6 @@ export interface SummaryRunResult {
   /** роли без фактов своей категории — вызова не было (tri-state) */
   skipped: string[];
   outcomes: SummaryRoleOutcome[];
-  /** флаг фрода (Б8); в Б3 не заполняется */
-  flag?: FraudFlag | null;
   /** В5.1 (Ищейка-С1): у скана уже есть ai_notes — генерация не запускалась */
   cached?: boolean;
 }
@@ -194,12 +193,14 @@ export function segmentsOf(texts: Record<string, string>): { segments: string[];
  */
 export const TIMELINE_EVENTS_CAP = 60;
 
-function capTimelineFact(f: FactInput): FactInput {
+export function capTimelineFact(f: FactInput): FactInput {
   const raw = f.value as { events?: unknown } | null;
   if (f.key !== "activity.git.timeline" || raw === null || typeof raw !== "object" || !Array.isArray(raw.events)) return f;
   const events = raw.events;
   if (events.length <= TIMELINE_EVENTS_CAP) return f;
-  return { ...f, value: { events: events.slice(-TIMELINE_EVENTS_CAP), capped: true, total: events.length } };
+  // В5.2 (Б1): `git log` отдает события от новых к старым (collectors/git.ts) —
+  // последние N это ГОЛОВА массива; прежний `slice(-N)` отдавал самые старые
+  return { ...f, value: { events: events.slice(0, TIMELINE_EVENTS_CAP), capped: true, total: events.length } };
 }
 
 function factsDigest(facts: FactInput[]): string {
@@ -360,13 +361,15 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
   // 23.09 (Алексей): дебаг-куладаун снимает и ЭТОТ кэш — регенерация
   // перезаписывает заметки скана (у скана всегда ≤1 набор, все читатели —
   // карточка, ai-notes, эволюция — остаются верны без правок)
-  if (deps.cache !== false && deps.db.query("SELECT 1 FROM ai_notes WHERE scan_id = ? LIMIT 1").get(req.scanId) !== null) {
+  // В5.2 (Б1): проверка на накрутку — своя заявка со своим кэшем (runFraudCheck);
+  // ее заметка не делает обзор «уже сформированным», и регенерация обзора ее не стирает
+  if (deps.cache !== false && deps.db.query("SELECT 1 FROM ai_notes WHERE scan_id = ? AND role != 'flagger' LIMIT 1").get(req.scanId) !== null) {
     deps.log?.(`[summary] ${deps.org}/${deps.repo} scan ${req.scanId}: cached (notes already exist for this scan)`);
-    return { scanId: req.scanId, notes: 0, failSoft: [], skipped: [], outcomes: [], flag: null, cached: true };
+    return { scanId: req.scanId, notes: 0, failSoft: [], skipped: [], outcomes: [], cached: true };
   }
   if (deps.cache === false) {
-    const gone = deps.db.query("DELETE FROM ai_notes WHERE scan_id = ?").run(req.scanId);
-    deps.db.query("DELETE FROM ai_fails WHERE scan_id = ?").run(req.scanId);
+    const gone = deps.db.query("DELETE FROM ai_notes WHERE scan_id = ? AND role != 'flagger'").run(req.scanId);
+    deps.db.query("DELETE FROM ai_fails WHERE scan_id = ? AND role != 'flagger'").run(req.scanId);
     if (Number(gone.changes) > 0) {
       deps.log?.(`[summary] ${deps.org}/${deps.repo} scan ${req.scanId}: regen — previous notes replaced (${Number(gone.changes)} rows)`);
     }
@@ -382,7 +385,6 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
   const failSoft: string[] = [];
   const skipped: string[] = [];
   let notes = 0;
-  let flag: FraudFlag | null = null;
   const specialistTexts: Record<string, string> = {};
 
   try {
@@ -426,32 +428,8 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
       }
     }
 
-    // --- флаггер (Б8, К5.10): независимо, только activity-факты; вывод —
-    // строгий мини-JSON; нет LLM-вывода — нет флага, Score не трогается ---
-    const flaggerFacts = scopedFacts(deps.db, req.scanId, "flagger").filter((f) => categoryOf(f.key) === "activity");
-    if (flaggerFacts.length === 0) {
-      skipped.push("flagger");
-      outcomes.push({ role: "flagger", ok: false, reason: "нет фактов активности — вызова не было" });
-    } else {
-      const res = await runFlagger(deps, budget, flaggerFacts);
-      if (res.ok) {
-        flag = res.flag;
-        writeNote(
-          deps,
-          req.scanId,
-          repoId,
-          "flagger",
-          JSON.stringify({ flag: res.flag.flag, factors: res.flag.factors }),
-          res.flag.factors.map((f) => f.key),
-          now,
-        );
-        notes++;
-        outcomes.push({ role: "flagger", ok: true, retries: 0 });
-      } else {
-        failSoft.push("flagger");
-        outcomes.push({ role: "flagger", ok: false, reason: res.reason });
-      }
-    }
+    // флаггер в обзор не входит (В5.2, Б1): проверка на накрутку — отдельная
+    // заявка runFraudCheck, со своей кнопкой и лимитом
 
     // --- динамика (Б4, К5.16): числовые точки истории; без точек вызова нет ---
     const points = historyPoints(deps.db, req.scanId);
@@ -517,8 +495,91 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
         .join("; ")}`,
     );
   }
-  return { scanId: req.scanId, notes, failSoft, skipped, outcomes, flag };
+  return { scanId: req.scanId, notes, failSoft, skipped, outcomes };
 }
+
+export interface FraudCheckResult {
+  scanId: number;
+  /** флаг записан (flag true или false) */
+  ok: boolean;
+  flag: FraudFlag | null;
+  /** признаки ритма, по которым шла проверка; null — ленты нет */
+  signals: RhythmSignals | null;
+  /** почему флага нет: ленты нет (вызова не было) или отказ модели/валидатора */
+  reason?: string;
+  /** у скана уже есть проверка — вызова не было */
+  cached?: boolean;
+}
+
+/** Бюджет проверки: 1 вызов на попытку × ROLE_ATTEMPTS, с запасом на ретраи провайдера. */
+const FRAUD_CHECK_MAX_CALLS = ROLE_ATTEMPTS * 2;
+const FRAUD_CHECK_FUSE_MS = 2 * 60_000;
+
+/**
+ * Проверка на накрутку (В5.2, Б1; кнопка «Проверить оценку»): один вызов лёгкой
+ * модели по фактам скана из БД — без клона и без инструментов. Вход — признаки
+ * ритма `activity.rhythm`, посчитанные кодом по полной ленте (rhythm.ts), и
+ * `activity.rest`. Заметка flagger = {flag, factors, signals}: карточка и отчет
+ * печатают факторы по тем же признакам, что видела модель. Score не трогается.
+ * Tri-state: ленты нет — вызова нет, причина в ai_fails («не проверялось»).
+ */
+export async function runFraudCheck(deps: SummaryDeps, req: SummaryRequest): Promise<FraudCheckResult> {
+  const now = req.now ?? new Date();
+  const repoId = repoIdOf(deps);
+  const tag = `[fraud-check] ${deps.org}/${deps.repo} scan ${req.scanId}`;
+  if (deps.cache !== false && deps.db.query("SELECT 1 FROM ai_notes WHERE scan_id = ? AND role = 'flagger' LIMIT 1").get(req.scanId) !== null) {
+    deps.log?.(`${tag}: cached (check already exists for this scan)`);
+    return { scanId: req.scanId, ok: true, flag: null, signals: null, cached: true };
+  }
+  deps.db.query("DELETE FROM ai_notes WHERE scan_id = ? AND role = 'flagger'").run(req.scanId);
+  deps.db.query("DELETE FROM ai_fails WHERE scan_id = ? AND role = 'flagger'").run(req.scanId);
+  const fail = (reason: string, signals: RhythmSignals | null): FraudCheckResult => {
+    deps.db
+      .query("INSERT INTO ai_fails (repo_id, scan_id, role, reason, created_at) VALUES (?, ?, 'flagger', ?, ?)")
+      .run(repoId, req.scanId, reason.slice(0, 200), now.toISOString());
+    deps.log?.(`${tag}: no flag — ${reason.slice(0, 160)}`);
+    return { scanId: req.scanId, ok: false, flag: null, signals, reason };
+  };
+
+  const rows = deps.db
+    .query("SELECT key, value FROM facts WHERE scan_id = ? AND status = 'ok' AND key IN ('activity.git.timeline', 'activity.rest')")
+    .all(req.scanId) as { key: string; value: string }[];
+  const timeline = rows.find((r) => r.key === "activity.git.timeline");
+  const rest = rows.find((r) => r.key === "activity.rest");
+  const events = (timeline ? (parseFactValue(timeline.value) as { events?: unknown } | null)?.events : null) ?? null;
+  const scan = deps.db.query("SELECT finished_at, started_at FROM scans WHERE id = ?").get(req.scanId) as
+    | { finished_at: string | null; started_at: string }
+    | null;
+  const asOf = new Date(scan?.finished_at ?? scan?.started_at ?? now.toISOString());
+  const signals = Array.isArray(events) ? rhythmSignals(events as Parameters<typeof rhythmSignals>[0], asOf) : null;
+  if (signals === null) return fail(NO_RHYTHM_REASON, null);
+
+  const facts: FactInput[] = [{ key: RHYTHM_KEY, value: signals }];
+  if (rest) facts.push({ key: "activity.rest", value: parseFactValue(rest.value) });
+  const budget: RunBudget = { calls: 0, max: deps.budgets?.maxModelCalls ?? FRAUD_CHECK_MAX_CALLS, ac: new AbortController() };
+  const fuse = setTimeout(() => budget.ac.abort(), deps.budgets?.fuseMs ?? FRAUD_CHECK_FUSE_MS);
+  let res: Awaited<ReturnType<typeof runFlagger>>;
+  try {
+    res = await runFlagger(deps, budget, facts);
+  } finally {
+    clearTimeout(fuse);
+  }
+  if (!res.ok) return fail(res.reason, signals);
+  writeNote(
+    deps,
+    req.scanId,
+    repoId,
+    "flagger",
+    JSON.stringify({ flag: res.flag.flag, factors: res.flag.factors, signals }),
+    res.flag.factors.map((f) => f.key),
+    now,
+  );
+  deps.log?.(`${tag}: flag=${res.flag.flag}, factors=[${res.flag.factors.map((f) => f.key).join(",")}], calls=${budget.calls}`);
+  return { scanId: req.scanId, ok: true, flag: res.flag, signals };
+}
+
+/** Причина «не проверялось»: в скане нет ленты коммитов — вызова модели не было. */
+export const NO_RHYTHM_REASON = "нет истории коммитов — проверка не проводилась";
 
 /**
  * Флаг фрода (К5.10): один вызов + один ретрай с припиской причин; вывод —

@@ -1100,9 +1100,25 @@ export function fraudFactorTitle(key: string): string {
       return "Сводка истории git";
     case "activity.rest":
       return "Участники, релизы и запросы на слияние";
+    case "activity.rhythm":
+      return "Ритм коммитов";
     default:
       return key;
   }
+}
+
+/**
+ * В5.2 (Б1): значение, по которому печатается фактор фрода. Признаки ритма
+ * (`activity.rhythm`) считает код при проверке и хранит в ее заметке — фактом
+ * карточки они не являются; прочие ключи — факты карточки.
+ */
+export function fraudFactorValue(
+  key: string,
+  signals: Record<string, unknown> | null | undefined,
+  evidence: readonly { key: string; value: unknown }[],
+): unknown {
+  if (key === "activity.rhythm") return signals ?? undefined;
+  return evidence.find((e) => e.key === key)?.value;
 }
 
 /** Доля 0..1 → «99%» (целые проценты, без пробела — как в таблице подметрик; ненулевая меньше 1% — «<1%»). */
@@ -1160,6 +1176,37 @@ export function fraudFactorFact(key: string, value: unknown, date: (iso: string)
       if (releases !== null) parts.push(`${releases} ${plural(releases, "релиз", "релиза", "релизов")}`);
       if (pulls !== null) parts.push(`${pulls} ${plural(pulls, "запрос", "запроса", "запросов")} на слияние`);
       return parts.length > 0 ? parts.join(", ") : null;
+    }
+    case "activity.rhythm": {
+      // В5.2 (Б1): признаки ритма (rhythm.ts) — только ненулевые, без оценки их силы
+      const commits = num("commits");
+      const robots = num("robot_commits");
+      const bursts = num("sync_bursts");
+      const sync = num("sync_commits");
+      const regular = num("regular_share");
+      const interval = num("interval_median_minutes");
+      const viaOne = num("authors_via_one_committer");
+      const recent = num("recent_week_commits");
+      const baseline = num("baseline_week_median");
+      const parts: string[] = [];
+      if (commits !== null && commits > 0 && robots !== null && robots > 0) {
+        parts.push(`${robots} из ${commits} ${plural(commits, "коммита", "коммитов", "коммитов")} – от роботов (${sharePercent(robots / commits)})`);
+      }
+      if (bursts !== null && bursts > 0) {
+        const tail = sync !== null && sync > 0 ? ` (${sync} ${plural(sync, "коммит", "коммита", "коммитов")})` : "";
+        parts.push(`${bursts} ${plural(bursts, "всплеск", "всплеска", "всплесков")} синхронизации${tail}`);
+      }
+      if (regular !== null && regular > 0) {
+        const every = interval !== null && interval > 0 ? `, обычно раз в ${fmtMinutes(interval * 60_000)}` : "";
+        parts.push(`${sharePercent(regular)} коммитов людей идут с ровными интервалами${every}`);
+      }
+      if (viaOne !== null && viaOne >= 2) parts.push(`${viaOne} ${plural(viaOne, "автор", "автора", "авторов")} при одном коммиттере`);
+      if (recent !== null && baseline !== null && recent > baseline) {
+        parts.push(
+          `${recent} ${plural(recent, "коммит", "коммита", "коммитов")} за последнюю неделю при обычных ${fmtDecimal(baseline, 1, { trim: true })} в неделю`,
+        );
+      }
+      return parts.length > 0 ? parts.join("; ") : null;
     }
     default:
       return null;

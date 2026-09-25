@@ -618,7 +618,15 @@ export interface CardAi {
    * В5 (К5.10): флаг фрода — подозрение для проверки человеком; на показ
    * только зрителю с полным Score (там же, где текст). Score не меняет.
    */
-  fraud: { flag: boolean; factors: { key: string; note: string }[] } | null;
+  fraud: {
+    flag: boolean;
+    factors: { key: string; note: string }[];
+    /**
+     * В5.2 (Б1): признаки ритма, по которым шла проверка (`activity.rhythm`,
+     * считает код) — из той же заметки; null у проверок до В5.2
+     */
+    signals?: Record<string, unknown> | null;
+  } | null;
 }
 
 export interface RepoCard {
@@ -1181,8 +1189,9 @@ function buildCardAi(db: Database, repoId: number, viewerUserId: number | undefi
     (db.query("SELECT 1 AS x FROM jobs WHERE repo_id = ? AND kind = 'summary' AND status IN ('queued', 'running') LIMIT 1").get(repoId) as { x: number } | null) !== null;
   const lastJobAt = (db.query("SELECT MAX(created_at) AS t FROM jobs WHERE repo_id = ? AND kind = 'summary'").get(repoId) as { t: string | null }).t;
   const cooldownUntil = lastJobAt === null ? null : new Date(Date.parse(lastJobAt) + cooldownMs).toISOString();
+  // В5.2 (Б1): проверка на накрутку — отдельная заявка; ее отказ не отказ обзора
   const fails = db
-    .query("SELECT role, reason FROM ai_fails WHERE scan_id = ? ORDER BY id")
+    .query("SELECT role, reason FROM ai_fails WHERE scan_id = ? AND role != 'flagger' ORDER BY id")
     .all(last.s) as { role: string; reason: string }[];
   if (last.s === null) {
     return { scanId: 0, generatedAt: null, overview: null, specialists: [], failures: [], optIn, jobActive, cooldownUntil, fraud: null };
@@ -1205,10 +1214,11 @@ function buildCardAi(db: Database, repoId: number, viewerUserId: number | undefi
   let fraud: CardAi["fraud"] = null;
   if (flagRow !== undefined) {
     try {
-      const parsed = JSON.parse(flagRow.text) as { flag?: unknown; factors?: unknown };
+      const parsed = JSON.parse(flagRow.text) as { flag?: unknown; factors?: unknown; signals?: unknown };
       if (typeof parsed.flag === "boolean" && Array.isArray(parsed.factors)) {
         fraud = {
           flag: parsed.flag,
+          signals: parsed.signals !== null && typeof parsed.signals === "object" ? (parsed.signals as Record<string, unknown>) : null,
           factors: parsed.factors
             .filter((f): f is { key: string; note: string } => {
               const item = f as { key?: unknown; note?: unknown };
@@ -1221,7 +1231,9 @@ function buildCardAi(db: Database, repoId: number, viewerUserId: number | undefi
       fraud = null; // повреждённый JSON флага — флага нет, а не флаг есть
     }
   }
-  const generatedAt = noteRows.reduce((acc, r) => (r.created_at > (acc ?? "") ? r.created_at : acc), null as string | null);
+  const generatedAt = noteRows
+    .filter((r) => r.role !== "flagger")
+    .reduce((acc, r) => (r.created_at > (acc ?? "") ? r.created_at : acc), null as string | null);
   return {
     scanId: last.s,
     generatedAt,

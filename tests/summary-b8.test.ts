@@ -14,7 +14,7 @@ import { getRepoCard } from "../src/api/repos";
 import { listMyRepos } from "../src/api/me";
 import { renderRepoReport } from "../src/report/markdown";
 import { MODEL_VERSION } from "../src/score/model";
-import { runSummary } from "../src/summary/pipeline";
+import { runFraudCheck, runSummary } from "../src/summary/pipeline";
 import type { CallLlm } from "../src/llm";
 import { cardFacts, seedRepo, seedScan, seedScore } from "./api-fixtures";
 import { NO_PAT_ACCESS, type AccessResult } from "../src/auth/access";
@@ -59,28 +59,30 @@ const VALID_TEXTS: Record<string, string> = {
   overview: "Проект имеет README и CI {f:docs.presence} {f:cicd.configs}; специалист по коду отметил задачи по долгу {sp:code:1}.",
 };
 
-const FLAG_TRUE = '{"flag":true,"factors":[{"key":"activity.git.summary","note":"ровные интервалы между коммитами"}]}';
+// В5.2 (Б1): фактор — признаки ритма, которые считает код (`activity.rhythm`)
+const FLAG_TRUE = '{"flag":true,"factors":[{"key":"activity.rhythm","note":"ровные интервалы между коммитами"}]}';
 
-describe("flagger в конвейере: структурный флаг, tri-state, fail-soft", () => {
-  test("валидный флаг пишется заметкой role=flagger и возвращается в результате", async () => {
+describe("проверка на накрутку (runFraudCheck): структурный флаг, tri-state, fail-soft", () => {
+  test("валидный флаг пишется заметкой role=flagger вместе с признаками и возвращается в результате", async () => {
     const { db } = freshDb("rh-v5b8-ok-");
     const scanId = seedFull(db);
-    const res = await runSummary({ db, org: "v5", repo: "flag", callLlm: fakeWithFlagger(FLAG_TRUE, VALID_TEXTS), agentBackoffMs: 0 }, { scanId });
+    const res = await runFraudCheck({ db, org: "v5", repo: "flag", callLlm: fakeWithFlagger(FLAG_TRUE, VALID_TEXTS), agentBackoffMs: 0 }, { scanId });
     expect(res.flag).not.toBeNull();
     expect(res.flag?.flag).toBe(true);
-    expect(res.flag?.factors[0]?.key).toBe("activity.git.summary");
+    expect(res.flag?.factors[0]?.key).toBe("activity.rhythm");
     const row = db.query("SELECT text FROM ai_notes WHERE scan_id = ? AND role = 'flagger'").get(scanId) as { text: string };
-    expect(JSON.parse(row.text)).toMatchObject({ flag: true });
+    expect(JSON.parse(row.text)).toMatchObject({ flag: true, signals: { commits: 2, human_commits: 2 } });
     void dirs;
   });
 
-  test("мусор вместо JSON после ретрая — failSoft, флага нет", async () => {
+  test("мусор вместо JSON после ретраев — флага нет, причина в ai_fails", async () => {
     const { db } = freshDb("rh-v5b8-bad-");
     const scanId = seedFull(db, "bad");
-    const res = await runSummary({ db, org: "v5", repo: "bad", callLlm: fakeWithFlagger("Подозрений нет, проект честный.", VALID_TEXTS), agentBackoffMs: 0 }, { scanId });
+    const res = await runFraudCheck({ db, org: "v5", repo: "bad", callLlm: fakeWithFlagger("Подозрений нет, проект честный.", VALID_TEXTS), agentBackoffMs: 0 }, { scanId });
+    expect(res.ok).toBe(false);
     expect(res.flag).toBeNull();
-    expect(res.failSoft).toContain("flagger");
     expect((db.query("SELECT COUNT(*) AS c FROM ai_notes WHERE role = 'flagger'").get() as { c: number }).c).toBe(0);
+    expect((db.query("SELECT reason FROM ai_fails WHERE role = 'flagger'").get() as { reason: string }).reason).toMatch(/^валидатор:/);
   });
 });
 
@@ -90,7 +92,7 @@ describe("К5.10: флаг без скидки — Score и версия мод�
     const scanId = seedFull(db, "score");
     const before = db.query("SELECT * FROM scores").all();
     const beforeVersion = (db.query("SELECT model_version FROM scores LIMIT 1").get() as { model_version: string }).model_version;
-    await runSummary({ db, org: "v5", repo: "score", callLlm: fakeWithFlagger(FLAG_TRUE, VALID_TEXTS), agentBackoffMs: 0 }, { scanId });
+    await runFraudCheck({ db, org: "v5", repo: "score", callLlm: fakeWithFlagger(FLAG_TRUE, VALID_TEXTS), agentBackoffMs: 0 }, { scanId });
     expect(db.query("SELECT * FROM scores").all()).toEqual(before);
     expect(beforeVersion).toBe(MODEL_VERSION);
     expect((db.query("SELECT model_version FROM scores LIMIT 1").get() as { model_version: string }).model_version).toBe(beforeVersion);
@@ -101,9 +103,9 @@ describe("Показ флага: карточка (по правам) и MD-ра
   test("карточка: полный Score → ai.fraud; аноним → текст и флаг не утекают", async () => {
     const { db } = freshDb("rh-v5b8-card-");
     const scanId = seedFull(db, "card");
-    await runSummary({ db, org: "v5", repo: "card", callLlm: fakeWithFlagger(FLAG_TRUE, VALID_TEXTS), agentBackoffMs: 0 }, { scanId });
+    await runFraudCheck({ db, org: "v5", repo: "card", callLlm: fakeWithFlagger(FLAG_TRUE, VALID_TEXTS), agentBackoffMs: 0 }, { scanId });
     const open = getRepoCard(db, "v5", "card", { access: OPEN, viewerUserId: 1, viewerAuth: "pat" })!;
-    expect(open.ai?.fraud).toMatchObject({ flag: true, factors: [{ key: "activity.git.summary" }] });
+    expect(open.ai?.fraud).toMatchObject({ flag: true, factors: [{ key: "activity.rhythm" }], signals: { commits: 2 } });
     const anon = getRepoCard(db, "v5", "card", { access: NO_PAT_ACCESS })!;
     expect(anon.ai).toBeUndefined();
     expect(JSON.stringify(anon)).not.toContain("накрутку");
@@ -113,14 +115,17 @@ describe("Показ флага: карточка (по правам) и MD-ра
   test("MD: раздел появляется только с флагом, содержит факторы; без флага — раздела нет", async () => {
     const { db } = freshDb("rh-v5b8-md-");
     const scanId = seedFull(db, "md");
-    await runSummary({ db, org: "v5", repo: "md", callLlm: fakeWithFlagger(FLAG_TRUE, VALID_TEXTS), agentBackoffMs: 0 }, { scanId });
+    await runFraudCheck({ db, org: "v5", repo: "md", callLlm: fakeWithFlagger(FLAG_TRUE, VALID_TEXTS), agentBackoffMs: 0 }, { scanId });
     const withFlag = getRepoCard(db, "v5", "md", { access: OPEN })!;
     const md = renderRepoReport(withFlag);
     expect(md).toContain("Подозрение на искусственную активность");
     // В5.3 круг 3 (способ 2): фактор — названием факта и текстом, который код
     // строит из этого факта (равно источнику); сырой ключ — только в приложении
-    const summaryFact = withFlag.evidence.find((e) => e.key === "activity.git.summary")?.value;
-    expect(md).toContain(`**Сводка истории git** – ${fraudFactorFact("activity.git.summary", summaryFact, fmtDateUtc) ?? "ровные интервалы между коммитами"}`);
+    // В5.2 (Б1): признаки ритма — из заметки проверки (у 2 обычных коммитов
+    // заметного нет — печатается формулировка модели)
+    const signals = withFlag.ai?.fraud?.signals;
+    expect(signals).toMatchObject({ commits: 2 });
+    expect(md).toContain(`**Ритм коммитов** – ${fraudFactorFact("activity.rhythm", signals, fmtDateUtc) ?? "ровные интервалы между коммитами"}`);
     // Score-таблица отчёта не изменилась флагом: раздел не трогает итог
     expect(md).toContain("55");
     // без генерации — раздела нет вовсе
@@ -135,7 +140,7 @@ describe("Показ флага: карточка (по правам) и MD-ра
     const repoId = seedRepo(wrap(db), { org: "v5", repo: "me" });
     const scanId = seedScan(wrap(db), repoId, { facts: cardFacts() });
     seedScore(wrap(db), repoId, scanId, { total: 55 });
-    await runSummary({ db, org: "v5", repo: "me", callLlm: fakeWithFlagger(FLAG_TRUE, VALID_TEXTS), agentBackoffMs: 0 }, { scanId });
+    await runFraudCheck({ db, org: "v5", repo: "me", callLlm: fakeWithFlagger(FLAG_TRUE, VALID_TEXTS), agentBackoffMs: 0 }, { scanId });
     // избранное с сохранённой проверкой обоих каналов
     db.query(
       "INSERT INTO favorites (user_id, org_slug, repo_slug, added_at, last_access) VALUES (7, 'v5', 'me', '2026-09-01T00:00:00Z', ?)",
