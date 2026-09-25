@@ -255,16 +255,9 @@ function factsDigest(facts: FactInput[]): string {
   return facts.map((f) => `- ${f.key}: ${JSON.stringify(f.value)}`).join("\n");
 }
 
-/**
- * В5.2 (Б7): правило языка продукта для пользовательских текстов (AGENTS.md, решение
- * 20.09 Екатерины) — длинное тире заменяется средним, «ё» — на «е». Модель нарушает
- * его и при прямом запрете в хартии (живой прогон 25.09: 4 «ё» и 1 тире на 6 заметок),
- * поэтому замена детерминированная и до валидатора. Только орфография: числа, маркеры
- * и слова не меняются.
- */
-export function normalizeTypography(text: string): string {
-  return text.replaceAll("—", "–").replaceAll("ё", "е").replaceAll("Ё", "Е");
-}
+// В5.2 (Б7): нормализация типографики — общий модуль (его берет и веб-бандл, О7)
+export { normalizeTypography } from "./typography";
+import { normalizeTypography } from "./typography";
 
 /**
  * Попыток генерации на роль: ретрай с причинами валидатора — «попросить

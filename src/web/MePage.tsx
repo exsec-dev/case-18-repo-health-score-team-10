@@ -54,7 +54,7 @@ import { type MeResponse, type MetaResponse, type MyReposResponse, dataOf, logou
 import type { LiveAnalysis } from "./analysis";
 import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
 import { plural } from "../report/submetrics";
-import { FRAUD_TITLE, authErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, recommendationsText, scoreTheme, scoreWord, sentence, slugOf, type FavoriteAddCheck } from "./format";
+import { FRAUD_TITLE, authErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, recommendationsText, scoreTheme, scoreWord, sentence, slugOf, type ActionQuotaView, type AiQuotaView, type FavoriteAddCheck, type QuotaWindowView } from "./format";
 import { recommendationsHref } from "./RepoPage";
 import { type Band, BANDS, type RepoEntry, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
 import { linkProps, navigate, repoHref } from "./router";
@@ -199,59 +199,37 @@ export function SettingsPage() {
       {/* В4.8.5 (К8.5.3, С2-4): секция токена не перемонтируется по дате
           проверки — строка «Токен принадлежит…» после сохранения остаётся */}
       <PatSection hasPat={data.hasPat} unreadable={data.patUnreadable === true} checkedAt={data.patCheckedAt} onChanged={reloadMe} />
-      {/* В5.2 (Б4): пароль неограниченного доступа к AI — только если он настроен на сервере */}
-      <AiUnlockSection />
+      {/* В5.2 (Б6, выбор 5A): «Лимиты AI» всем вошедшим; «Доступ без лимитов» — если пароль настроен */}
+      <AiLimitsSections />
     </Page>
   );
 }
-/** Ответ `/api/me/ai-quota` (В5.2, Б4) — поля, которые читает раздел «Доступ к AI». */
-type QuotaWindowView = { used: number; limit: number } | null;
-interface AiActionQuotaView {
-  hour: QuotaWindowView;
-  day: QuotaWindowView;
-  global: QuotaWindowView;
-}
-interface AiQuotaResponse {
-  unlockAvailable: boolean;
-  unlocked: boolean;
-  overview: AiActionQuotaView;
-  check: AiActionQuotaView;
-}
-
 /**
- * Лимиты и текущее использование рядом с паролем (решение Екатерины 25.09): по каждому
- * действию — час, сутки и общий дневной лимит сервиса; с паролем — «без личных лимитов».
+ * Остаток лимитов AI (В5.2, Б6, выбор 5A — отдельная карточка «Лимиты AI», всем вошедшим).
+ * Форма чисел совпадает с кнопками карточки (решение 3): «осталось N из M». Аудит дизайна
+ * О10: первый заголовок пустой, числа не переносятся.
  */
-function AiQuotaTable({ data }: { data: AiQuotaResponse }) {
-  const cell = (w: QuotaWindowView, none: string): string => (w === null ? none : `${w.used} из ${w.limit}`);
-  const rows: { title: string; q: AiActionQuotaView }[] = [
+function AiQuotaTable({ data }: { data: AiQuotaView }) {
+  const cell = (w: QuotaWindowView | null, none: string): string => (w === null ? none : `${Math.max(0, w.limit - w.used)} из ${w.limit}`);
+  const rows: { title: string; q: ActionQuotaView }[] = [
     { title: "AI-обзоры", q: data.overview },
     { title: "Проверки оценки", q: data.check },
   ];
+  const head = (text: string) => (
+    <th scope="col">
+      <Text variant="caption-2" color="secondary">
+        {text}
+      </Text>
+    </th>
+  );
   return (
     <table className="rh-ai-quota">
       <thead>
         <tr>
-          <th scope="col">
-            <Text variant="caption-2" color="secondary">
-              Использовано
-            </Text>
-          </th>
-          <th scope="col">
-            <Text variant="caption-2" color="secondary">
-              За час
-            </Text>
-          </th>
-          <th scope="col">
-            <Text variant="caption-2" color="secondary">
-              За сутки
-            </Text>
-          </th>
-          <th scope="col">
-            <Text variant="caption-2" color="secondary">
-              {data.unlocked ? "Потолок по паролю за сутки" : "Всего на сервисе за сутки"}
-            </Text>
-          </th>
+          <th scope="col" aria-label="Действие" />
+          {head("За час")}
+          {head("За сутки")}
+          {head(data.unlocked ? "Потолок по паролю за сутки" : "Сервис за сутки")}
         </tr>
       </thead>
       <tbody>
@@ -277,12 +255,12 @@ function AiQuotaTable({ data }: { data: AiQuotaResponse }) {
 }
 
 /**
- * «Доступ к AI без лимитов» (В5.2, Б4; §2 «В5.2 — публичный AI-обзор…» п.6): пароль
- * выдается организаторам. Без пароля — обычные лимиты. Расположение и вид — через
- * дизайн-анализ Б6; здесь рабочий минимум по образцу секции токена.
+ * «Лимиты AI» и «Доступ без лимитов» (В5.2, Б6, выбор 5A: две карточки). Лимиты видит каждый
+ * вошедший; пароль — только если он настроен на сервере. Поле и кнопка пароля — одной строкой,
+ * на телефоне столбиком (аудит дизайна О9).
  */
-function AiUnlockSection() {
-  const quota = useJson<AiQuotaResponse>("/api/me/ai-quota");
+function AiLimitsSections() {
+  const quota = useJson<AiQuotaView>("/api/me/ai-quota");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -319,51 +297,63 @@ function AiUnlockSection() {
   }
 
   return (
-    <Card view="outlined" className="rh-settings-card">
-      <Flex as="section" direction="column" gap={3}>
-        <Text variant="subheader-2" as="h2">
-          {data.unlockAvailable ? "Доступ к AI без лимитов" : "Лимиты AI"}
-        </Text>
-        {data.unlocked ? (
-          <Flex direction="column" gap={3}>
+    <>
+      <Card view="outlined" className="rh-settings-card">
+        <Flex as="section" direction="column" gap={3}>
+          <Text variant="subheader-2" as="h2">
+            Лимиты AI
+          </Text>
+          <Text variant="body-short" color="secondary">
+            Сколько AI-обзоров и проверок оценки еще можно запустить. Сутки считаются с 00:00 по московскому времени.
+          </Text>
+          <AiQuotaTable data={data} />
+        </Flex>
+      </Card>
+      {data.unlockAvailable && (
+        <Card view="outlined" className="rh-settings-card">
+          <Flex as="section" direction="column" gap={3}>
             <Flex gap={2} alignItems="center" wrap>
-              <Label theme="success" size="xs">
-                Включен
-              </Label>
-              <Text variant="body-short" color="secondary">
-                AI-обзоры и проверки оценки не ограничены личными лимитами.
+              <Text variant="subheader-2" as="h2">
+                Доступ без лимитов
               </Text>
+              {data.unlocked ? (
+                <Label theme="success" size="xs">
+                  Включен
+                </Label>
+              ) : (
+                <Label theme="unknown" size="xs">
+                  Не включен
+                </Label>
+              )}
             </Flex>
-            <AiQuotaTable data={data} />
-            <Flex gap={2}>
-              <Button view="normal" size="m" onClick={() => void lock()} loading={busy}>
-                Отключить
-              </Button>
-            </Flex>
-          </Flex>
-        ) : (
-          <Flex direction="column" gap={3}>
             <Text variant="body-short" color="secondary">
-              {`Сутки считаются с 00:00 по московскому времени.${data.unlockAvailable ? " Пароль снимает личные лимиты." : ""}`}
+              {data.unlocked
+                ? "AI-обзоры и проверки оценки не ограничены личными лимитами."
+                : "Для организаторов и жюри: пароль выдает команда проекта. Он снимает личные лимиты AI."}
             </Text>
-            <AiQuotaTable data={data} />
-            {data.unlockAvailable && (
-            <Flex gap={2} alignItems="flex-start" wrap>
-              <TextInput
-                className="rh-grow"
-                type="password"
-                size="m"
-                placeholder="Пароль доступа"
-                value={password}
-                onUpdate={setPassword}
-                hasClear
-                autoComplete="off"
-                controlProps={{ "aria-label": "Пароль доступа к AI без лимитов" }}
-              />
-              <Button view="action" size="m" onClick={() => void unlock()} loading={busy} disabled={busy || password.length === 0}>
-                Включить
-              </Button>
-            </Flex>
+            {data.unlocked ? (
+              <Flex gap={2}>
+                <Button view="normal" size="m" onClick={() => void lock()} loading={busy}>
+                  Отключить
+                </Button>
+              </Flex>
+            ) : (
+              <Flex gap={2} alignItems="center" className="rh-inline-form">
+                <TextInput
+                  className="rh-grow"
+                  type="password"
+                  size="m"
+                  placeholder="Пароль доступа"
+                  value={password}
+                  onUpdate={setPassword}
+                  hasClear
+                  autoComplete="off"
+                  controlProps={{ "aria-label": "Пароль доступа к AI без лимитов" }}
+                />
+                <Button view="action" size="m" onClick={() => void unlock()} loading={busy} disabled={busy || password.length === 0}>
+                  Включить
+                </Button>
+              </Flex>
             )}
             {error && (
               <Text color="danger" variant="body-short">
@@ -371,9 +361,9 @@ function AiUnlockSection() {
               </Text>
             )}
           </Flex>
-        )}
-      </Flex>
-    </Card>
+        </Card>
+      )}
+    </>
   );
 }
 
@@ -530,8 +520,9 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
   }
 
   const tokenForm = (label: string, submit: string) => (
-    // быстрая правка 23.09 (1): поле и кнопка — в один ряд, растягивается поле
-    <Flex gap={2} alignItems="center">
+    // быстрая правка 23.09 (1): поле и кнопка — в один ряд, растягивается поле;
+    // В5.2 (аудит дизайна О9): на телефоне столбиком — поле не сжимается до «Персона…»
+    <Flex gap={2} alignItems="center" className="rh-inline-form">
       <TextInput
         className="rh-grow"
         type="password"

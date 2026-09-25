@@ -34,6 +34,9 @@ export function normalizeRatingSearch(search: string): { search: string; changed
   if (perPage !== null && !validInt(perPage, 1, 100)) drop("per_page");
   const page = params.get("page");
   if (page !== null && !validInt(page, 1, Number.MAX_SAFE_INTEGER)) drop("page");
+  // В5.2 (Б6): фильтр «С AI-обзором» — только `ai=1`
+  const ai = params.get("ai");
+  if (ai !== null && ai !== "1") drop("ai");
   return { search: changed ? params.toString() : search.replace(/^\?/, ""), changed };
 }
 

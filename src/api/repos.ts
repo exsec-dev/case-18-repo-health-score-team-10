@@ -57,6 +57,11 @@ export interface RatingItem {
    * org/repo). Не зависит от поиска, фильтра и сортировки выдачи; null — без индекса.
    */
   rank: number | null;
+  /**
+   * В5.2 (Б6, выбор 4C): у репо есть ПУБЛИЧНЫЙ AI-обзор (тот, что видят все) — искра у
+   * имени в рейтинге и фильтр «С AI-обзором»
+   */
+  aiOverview: boolean;
   /** часть фактов взята из истории при сбое канала (§5.6) — НЕ «давность скана» */
   staleFacts: boolean;
   modelVersion: string;
@@ -83,6 +88,8 @@ export interface RatingResponse {
   total: number;
   totalPages: number;
   nulls: number;
+  /** В5.2 (Б6): оцененных репо с публичным AI-обзором — с учетом поиска и языка, до фильтра `ai` */
+  aiCount: number;
   facets: { languages: LanguageFacet[] };
   generatedAt: string;
 }
@@ -101,6 +108,8 @@ export interface ReposQuery {
    */
   lang?: (string | null)[];
   q?: string;
+  /** В5.2 (Б6): только репо с публичным AI-обзором (`ai=1`) */
+  ai?: boolean;
   page: number;
   perPage: number;
 }
@@ -159,6 +168,12 @@ export function parseReposQuery(params: URLSearchParams): ParseResult {
     const n = Number(page);
     if (!Number.isInteger(n) || n < 1) return { ok: false, message: "в адресе рейтинга неверный номер страницы" };
     query.page = n;
+  }
+
+  const ai = params.get("ai");
+  if (ai !== null) {
+    if (ai !== "1") return { ok: false, message: "в адресе рейтинга неизвестный фильтр AI-обзора" };
+    query.ai = true;
   }
 
   const perPage = params.get("per_page");
@@ -287,6 +302,7 @@ function toRatingItem(row: RatingRow): RatingItem {
   const stale = (JSON.parse(row.stale) as string[]).filter((k) => PUBLIC_KINDS.includes(k));
   return {
     rank: null,
+    aiOverview: false,
     org: row.org_slug,
     repo: row.repo_slug,
     title: row.title,
@@ -356,6 +372,15 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
   // порядок сохраняют, и выдаче по умолчанию (индекс по убыванию) вторая
   // сортировка не нужна; NULL-индексы стоят в хвосте (compareItems)
   const all = rows.map(toRatingItem).sort((a, b) => compareItems(a, b, "index", "desc"));
+  // В5.2 (Б6): публичный AI-обзор — одним запросом на выдачу (заметки overview аудитории public)
+  const withAi = new Set(
+    (
+      db
+        .query("SELECT DISTINCT r.org_slug || '/' || r.repo_slug AS slug FROM ai_notes n JOIN repos r ON r.id = n.repo_id WHERE n.role = 'overview' AND n.audience = 'public'")
+        .all() as { slug: string }[]
+    ).map((r) => r.slug),
+  );
+  for (const item of all) item.aiOverview = withAi.has(`${item.org}/${item.repo}`);
   all.forEach((item, i) => {
     if (item.healthcraftIndex !== null) item.rank = i + 1;
   });
@@ -386,7 +411,9 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
 
   // фильтр — принадлежность множеству (В4.7, П2); сортировка от него не зависит
   const langs = query.lang;
-  const filtered = langs === undefined ? byQ : byQ.filter((i) => langs.includes(i.language));
+  const byLang = langs === undefined ? byQ : byQ.filter((i) => langs.includes(i.language));
+  const aiCount = byLang.filter((i) => i.healthcraftIndex !== null && i.aiOverview).length;
+  const filtered = query.ai === true ? byLang.filter((i) => i.aiOverview) : byLang;
   const scored = filtered.filter((i) => i.healthcraftIndex !== null);
   const nullItems = filtered
     .filter((i) => i.healthcraftIndex === null)
@@ -404,6 +431,7 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
     total,
     totalPages,
     nulls: nullItems.length,
+    aiCount,
     facets: { languages },
     generatedAt: (opts.now ?? new Date()).toISOString(),
   };

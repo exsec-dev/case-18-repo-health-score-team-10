@@ -6,8 +6,9 @@
 // тулбар одной строкой (size m), таблица, методика в правой панели.
 import { coverageLine } from "./ratingParams";
 import { loadRatingScroll, rememberRatingHref, saveRatingScroll } from "./ratingReturn";
-import { BarsAscendingAlignLeft, BarsDescendingAlignLeft, Magnifier, SquareListUl } from "@gravity-ui/icons";
+import { BarsAscendingAlignLeft, BarsDescendingAlignLeft, Magnifier, Sparkles, SquareListUl } from "@gravity-ui/icons";
 import {
+  ActionTooltip,
   Alert,
   Button,
   Checkbox,
@@ -191,7 +192,8 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
   // В4.7 (П2): `lang` повторяемый; одиночная старая ссылка — набор из одного
   const langValues = params.getAll("lang").map((v) => (v === "" ? LANG_NONE : v));
   const qParam = params.get("q") ?? "";
-  const hasFilters = qParam !== "" || params.has("lang");
+  const aiOnly = params.get("ai") === "1";
+  const hasFilters = qParam !== "" || params.has("lang") || aiOnly;
   // на телефоне таблица категорий не помещается — строки списком: место, имя, Score
   const isPhone = useMediaQuery("(max-width: 767px)");
 
@@ -351,6 +353,16 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
           <SegmentedRadioGroup.Option value="scored">Оценены{data ? ` ${fmtCount(data.total)}` : ""}</SegmentedRadioGroup.Option>
           <SegmentedRadioGroup.Option value="unscored">Без оценки{data ? ` ${fmtCount(data.nulls)}` : ""}</SegmentedRadioGroup.Option>
         </SegmentedRadioGroup>
+        {/* В5.2 (Б6, выбор 4C): фильтр «С AI-обзором» — путь к обзорам с первого экрана; кнопки
+            нет, пока таких репо 0 (и фильтр не включен) */}
+        {view === "scored" && data && (data.aiCount > 0 || aiOnly) && (
+          <Button view="outlined" size="m" selected={aiOnly} onClick={() => setParams({ ai: aiOnly ? null : "1" })}>
+            <Button.Icon side="start">
+              <Icon data={Sparkles} size={16} className="rh-ai-mark-icon" />
+            </Button.Icon>
+            {`С AI-обзором ${fmtCount(data.aiCount)}`}
+          </Button>
+        )}
       </Flex>
     </Flex>
   );
@@ -729,10 +741,20 @@ function RepoCell({ item, compact = false }: { item: Item; compact?: boolean }) 
     <Flex gap={3} alignItems="center" style={compact ? { minWidth: 0 } : { minWidth: 180, maxWidth: 264 }}>
       <RepoAvatar repo={item.repo} logoUrl={item.logoUrl} size="m" />
       <Flex direction="column" gap={0} style={{ minWidth: 0 }}>
-        <Link {...linkProps(repoHref(item.org, item.repo))} view="primary">
-          {/* В4.6 (У27): слаг — один компонент на рейтинг и карточку */}
-          <RepoSlug org={item.org} repo={item.repo} variant="subheader-1" />
-        </Link>
+        <Flex gap={1} alignItems="center" style={{ minWidth: 0 }}>
+          <Link {...linkProps(repoHref(item.org, item.repo))} view="primary" className="rh-rating-name">
+            {/* В4.6 (У27): слаг — один компонент на рейтинг и карточку */}
+            <RepoSlug org={item.org} repo={item.repo} variant="subheader-1" />
+          </Link>
+          {/* В5.2 (Б6, выбор 4C): у репо есть публичный AI-обзор — искра у имени */}
+          {item.aiOverview && (
+            <ActionTooltip title="Есть AI-обзор">
+              <span className="rh-rating-ai" role="img" aria-label="Есть AI-обзор">
+                <Icon data={Sparkles} size={14} />
+              </span>
+            </ActionTooltip>
+          )}
+        </Flex>
         <Text variant="body-short" color="secondary" ellipsis>
           <LanguageName name={item.language} color={item.languageColor} />
         </Text>

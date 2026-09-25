@@ -2971,15 +2971,62 @@ button.rh-category:focus-visible {
   gap: 0;
 }
 
-/* В5.2 (Б4): лимиты AI рядом с паролем в «Настройках» — компактная таблица без рамок */
+/* В5.2 (Б4, Б6): таблица лимитов AI в «Настройках» (аудит дизайна О10: числа не
+   переносятся, отступы — шкалой Gravity) */
 .rh-ai-quota {
   border-collapse: collapse;
   width: 100%;
 }
 .rh-ai-quota th,
 .rh-ai-quota td {
-  padding: 4px 12px 4px 0;
+  padding: var(--g-spacing-1) var(--g-spacing-3) var(--g-spacing-1) 0;
   text-align: left;
   font-weight: normal;
   vertical-align: baseline;
+}
+.rh-ai-quota td {
+  white-space: nowrap;
+}
+.rh-ai-quota th:last-child,
+.rh-ai-quota td:last-child {
+  padding-right: 0;
+}
+
+/* В5.2 (аудит дизайна О9): поле и кнопка форм «Настроек» — строкой, на телефоне столбиком */
+@media (max-width: 480px) {
+  .rh-inline-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .rh-inline-form .g-button {
+    width: 100%;
+  }
+}
+
+/* В5.2 (Б6, выбор 1A): подвал плашки HealthCraft Index — состояние проверки оценки */
+.rh-check-foot {
+  margin-top: var(--g-spacing-3);
+  padding-top: var(--g-spacing-3);
+  border-top: 1px solid var(--g-color-line-generic);
+}
+.rh-check-foot__why {
+  margin: var(--g-spacing-1) 0 0;
+}
+@media (max-width: 480px) {
+  .rh-check-foot .g-button {
+    width: 100%;
+  }
+}
+
+/* В5.2 (Б6, выбор 4C): искра «есть AI-обзор» у имени в рейтинге — цвет AI-отметок категорий */
+.rh-rating-name {
+  min-width: 0;
+}
+.rh-rating-ai,
+.rh-ai-mark-icon {
+  color: var(--rh-ai-accent);
+}
+.rh-rating-ai {
+  display: inline-flex;
+  flex-shrink: 0;
 }

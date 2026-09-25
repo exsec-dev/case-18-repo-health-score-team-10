@@ -9,7 +9,7 @@
 //   - бейдж для README — кнопка в шапке с поповером, как Clone у SourceCraft (5-A).
 // Видимость текстов модели — прежняя (решение 22.09): `card.ai` приходит только
 // зрителю с правами на полный Score; без прав этих блоков нет вовсе.
-import { ChevronDown, EllipsisVertical, SealCheck, Sparkles } from "@gravity-ui/icons";
+import { ChevronDown, CircleExclamation, ClockArrowRotateLeft, EllipsisVertical, SealCheck, Shield, ShieldCheck, ShieldExclamation, Sparkles } from "@gravity-ui/icons";
 import {
   Alert,
   Button,
@@ -24,6 +24,7 @@ import {
   Link,
   Popover,
   Skeleton,
+  Spin,
   Text,
   TextInput,
   useToaster,
@@ -44,7 +45,11 @@ import {
   fraudFactorFact,
   fraudFactorValue,
   fraudCheckStale,
-  fraudFactorTitle, AI_DISCLAIMER, AI_OVERVIEW_REJECTED
+  fraudFactorTitle, AI_DISCLAIMER, AI_OVERVIEW_REJECTED,
+  quotaBlockedText,
+  quotaCounter,
+  withCounter,
+  type AiQuotaView,
 } from "./format";
 import { announceJobStarted, announceJobsChanged, useAnalysisFinished } from "./session";
 import { SLOT_EMPTY, aiNotesCaption, badgeMarkdown, historyByTime, scoreHistoryView } from "./slots";
@@ -134,6 +139,12 @@ export function FraudAlert({ card }: { card: Card }) {
               <Text variant="caption-2" color="secondary">
                 {`Признаки: ${fraud.factors.map((f) => fraudFactorTitle(f.key)).join(", ")}. Подробности – в разделе отчета.`}
               </Text>
+              {/* аудит дизайна О6: у серьезного вывода — время проверки */}
+              {card.ai?.check.checkedAt && (
+                <Text variant="caption-2" color="secondary">
+                  {`Проверено ${fmtDateTime(card.ai.check.checkedAt)}.`}
+                </Text>
+              )}
             </Flex>
           </HelpMark>
         </span>
@@ -188,10 +199,41 @@ function Collapsible({ children, resetKey }: { children: React.ReactNode; resetK
   );
 }
 
-/** В5.2 (Б4): текст отказа по лимиту — сообщение сервера и время, когда можно повторить. */
-function refusalText(error: { code?: string; message?: string; until?: string } | undefined, status: number): string {
+/**
+ * Тост отказа (аудит дизайна О8): лимит — штатное состояние, желтым «Лимит исчерпан» с
+ * текстом сервера и временем; красным — только настоящие сбои.
+ */
+function refusalToast(error: { code?: string; message?: string; until?: string } | undefined, status: number, failTitle: string): { theme: "warning" | "danger"; title: string; content: string } {
   const message = error?.message ?? `Ошибка ${status}`;
-  return error?.code === "quota_hour" && error.until ? `${message}. Следующий запуск – после ${fmtDateTime(error.until)}` : message;
+  if (error?.code?.startsWith("quota_")) {
+    const tail = error.code === "quota_hour" && error.until ? `. Следующий запуск – после ${fmtDateTime(error.until)}` : "";
+    return { theme: "warning", title: "Лимит исчерпан", content: `${message}${tail}` };
+  }
+  return { theme: "danger", title: failTitle, content: message };
+}
+
+/**
+ * Остаток лимитов AI зрителя (В5.2, Б6, решение 3): один запрос на карточку, только
+ * вошедшему (аноним не шлет запрос — 401 в консоли не нужен). `reload` — после
+ * постановки заявки и по итогу задания.
+ */
+export function useAiQuota(loggedIn: boolean): { quota: AiQuotaView | null; reload: () => void } {
+  const [quota, setQuota] = useState<AiQuotaView | null>(null);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!loggedIn) {
+      setQuota(null);
+      return;
+    }
+    const ctrl = new AbortController();
+    fetch("/api/me/ai-quota", { signal: ctrl.signal })
+      .then((r) => (r.ok ? (r.json() as Promise<AiQuotaView>) : null))
+      .then((q) => setQuota(q))
+      .catch(() => {});
+    return () => ctrl.abort();
+  }, [loggedIn, tick]);
+  useAnalysisFinished(() => setTick((t) => t + 1));
+  return { quota, reload: () => setTick((t) => t + 1) };
 }
 
 function useSummaryActions(org: string, repo: string, onChanged: () => void) {
@@ -203,7 +245,7 @@ function useSummaryActions(org: string, repo: string, onChanged: () => void) {
       const res = await fetch(`${apiBase(org, repo)}/summary`, { method: "POST" });
       const body = (await res.json().catch(() => null)) as { jobId?: number | null; cached?: boolean; scanQueued?: boolean; error?: { code?: string; message?: string; until?: string } } | null;
       if (!res.ok) {
-        toaster.add({ name: `summary-fail:${org}/${repo}`, theme: "danger", title: "Обзор не запущен", content: refusalText(body?.error, res.status) });
+        toaster.add({ name: `summary-fail:${org}/${repo}`, ...refusalToast(body?.error, res.status, "Обзор не запущен") });
         return;
       }
       // 23.09 (smoke-круг 2): объявленное задание тостится, даже если опрос застал его завершенным
@@ -251,7 +293,7 @@ function useCheckAction(org: string, repo: string, onChanged: () => void) {
       const res = await fetch(`${apiBase(org, repo)}/check`, { method: "POST" });
       const body = (await res.json().catch(() => null)) as { jobId?: number | null; cached?: boolean; error?: { code?: string; message?: string; until?: string } } | null;
       if (!res.ok) {
-        toaster.add({ name: `check-fail:${org}/${repo}`, theme: "danger", title: "Проверка не запущена", content: refusalText(body?.error, res.status) });
+        toaster.add({ name: `check-fail:${org}/${repo}`, ...refusalToast(body?.error, res.status, "Проверка не запущена") });
         return;
       }
       announceJobStarted(body?.jobId ?? undefined);
@@ -270,56 +312,119 @@ function useCheckAction(org: string, repo: string, onChanged: () => void) {
   return { sending, start };
 }
 
+/** Состояние проверки оценки для подвала (аудит дизайна §3.1): иконка, текст, дата, кнопка. */
+export interface FraudCheckState {
+  kind: "none" | "active" | "clean" | "flagged" | "failed" | "nothing" | "stale";
+  text: string;
+  date: string | null;
+  button: "Проверить оценку" | "Повторить проверку" | null;
+}
+
 /**
- * Состояние проверки на накрутку и кнопка «Проверить оценку» (В5.2, Б3; §2 п.2).
- * ВРЕМЕННОЕ расположение — строка под меткой фрода; место и вид решает
- * дизайн-анализ Б6. Три состояния: не проверялось / признаков нет / есть признаки
- * (последнее рисует FraudAlert). Кнопка — вошедшему, если проверки этого анализа нет.
+ * Тексты 7 состояний — таблица §3.1 аудита дизайна (reports/2026-09-25-m52-ui-design-audit.md);
+ * имя действия одно — «проверка оценки» (О4); «нет истории коммитов» — факт, не сбой (О3);
+ * флаг прошлого анализа не повторяется — его несет желтая плашка (О5).
  */
-export function FraudCheckRow({ card, org, repo, onChanged, loggedIn }: { card: Card; org: string; repo: string; onChanged: () => void; loggedIn: boolean }) {
+export function fraudCheckState(ai: CardAi, loggedIn: boolean): FraudCheckState {
+  const { check, fraud } = ai;
+  const stale = check.scanId !== null && check.latestScanId !== null && check.scanId < check.latestScanId;
+  const date = check.checkedAt ? `проверено ${fmtDateTime(check.checkedAt)}` : null;
+  if (check.active) return { kind: "active", text: "Проверка оценки идет – результат появится здесь", date: null, button: null };
+  if (check.failure !== null && !check.retryable) return { kind: "nothing", text: "Проверять нечего: в анализе нет истории коммитов", date: null, button: null };
+  const run = loggedIn && check.latestScanId !== null;
+  if (check.failure !== null) {
+    return {
+      kind: "failed",
+      text: loggedIn ? `Проверка оценки не сформировалась: ${check.failure}` : "Проверка оценки не сформировалась",
+      date: null,
+      button: run ? "Повторить проверку" : null,
+    };
+  }
+  if (fraud !== null && fraud.flag) return { kind: "flagged", text: "Есть признаки накрутки – подробности выше", date, button: run && stale ? "Проверить оценку" : null };
+  if (fraud !== null && stale) return { kind: "stale", text: "Признаков накрутки нет по прошлому анализу", date, button: run ? "Проверить оценку" : null };
+  if (fraud !== null) return { kind: "clean", text: "Признаков накрутки нет", date, button: null };
+  return {
+    kind: "none",
+    text: loggedIn ? "Оценка не проверялась на накрутку" : "Проверку может запустить любой вошедший пользователь",
+    date: null,
+    button: run ? "Проверить оценку" : null,
+  };
+}
+
+const CHECK_ICON: Record<FraudCheckState["kind"], { data: typeof Shield; color: string } | null> = {
+  none: { data: Shield, color: "var(--g-color-text-secondary)" },
+  active: null,
+  clean: { data: ShieldCheck, color: "var(--g-color-text-positive)" },
+  flagged: { data: ShieldExclamation, color: "var(--g-color-text-warning)" },
+  failed: { data: CircleExclamation, color: "var(--g-color-text-secondary)" },
+  nothing: { data: Shield, color: "var(--g-color-text-secondary)" },
+  stale: { data: ClockArrowRotateLeft, color: "var(--g-color-text-secondary)" },
+};
+
+/**
+ * Подвал плашки HealthCraft Index (В5.2, Б6, выбор 1A): состояние проверки оценки и
+ * кнопка «Проверить оценку N/M» (решение 3 — остаток в тексте кнопки). Статус меняется
+ * опросом — `aria-live` (О11); причина неактивной кнопки — видимой подписью (О2).
+ */
+export function FraudCheckFooter({ card, org, repo, onChanged, loggedIn, quota, onQuota }: { card: Card; org: string; repo: string; onChanged: () => void; loggedIn: boolean; quota: AiQuotaView | null; onQuota: () => void }) {
   const ai = card.ai;
-  const action = useCheckAction(org, repo, onChanged);
+  const action = useCheckAction(org, repo, () => {
+    onChanged();
+    onQuota();
+  });
   useEffect(() => {
     if (ai === undefined || ai === null || !ai.check.active) return;
     const timer = setTimeout(onChanged, 5000);
     return () => clearTimeout(timer);
   }, [ai, onChanged]);
   if (ai === undefined || ai === null) return null;
-  const { check, fraud } = ai;
-  const stale = check.scanId !== null && check.latestScanId !== null && check.scanId < check.latestScanId;
-  // повтор — если проверки этого анализа нет, она устарела или не сформировалась по вине модели
-  const canRun = loggedIn && !check.active && check.latestScanId !== null && (check.scanId === null || stale || check.retryable);
-  let text: string;
-  if (check.active) text = "Проверка на накрутку выполняется – результат появится здесь.";
-  else if (fraud !== null && fraud.flag) text = stale ? "Признаки накрутки найдены в прошлом анализе." : "";
-  else if (fraud !== null && check.failure === null) {
-    text = `Признаков накрутки нет${check.checkedAt ? ` – проверено ${fmtDateTime(check.checkedAt)}` : ""}${stale ? ", после проверки был новый анализ" : ""}.`;
-  } else if (check.failure !== null) text = `Проверка на накрутку не сформировалась: ${check.failure}.`;
-  else text = "Проверка на накрутку не проводилась.";
-  if (text === "" && !canRun) return null;
+  const st = fraudCheckState(ai, loggedIn);
+  const counter = quotaCounter(quota?.check);
+  const blocked = counter !== null && counter.left === 0 && quota !== null ? quotaBlockedText("check", quota.check, counter) : null;
+  const icon = CHECK_ICON[st.kind];
   return (
-    <Flex gap={2} alignItems="center" wrap className="rh-fraud-check">
-      {text !== "" && (
-        <Text variant="body-1" color="secondary">
-          {text}
+    <div className="rh-check-foot" aria-live="polite">
+      <Flex gap={2} alignItems="center" justifyContent="space-between" wrap>
+        <Flex gap={2} alignItems="center" style={{ minWidth: 0 }}>
+          {icon === null ? <Spin size="xs" /> : <Icon data={icon.data} size={16} style={{ color: icon.color, flexShrink: 0 }} />}
+          <Text variant="body-short">{st.text}</Text>
+          {st.date !== null && (
+            <Text variant="caption-2" color="hint">
+              {st.date}
+            </Text>
+          )}
+        </Flex>
+        {st.button !== null && (
+          <Button view="outlined" size="s" loading={action.sending} disabled={blocked !== null} onClick={() => void action.start()}>
+            <Button.Icon side="start">
+              <Icon data={ShieldCheck} size={14} />
+            </Button.Icon>
+            {withCounter(st.button, counter)}
+          </Button>
+        )}
+      </Flex>
+      {st.button !== null && blocked !== null && (
+        <Text variant="caption-2" color="secondary" as="p" className="rh-check-foot__why">
+          {blocked}
         </Text>
       )}
-      {canRun && (
-        <Button view="outlined" size="s" loading={action.sending} onClick={() => void action.start()}>
-          Проверить оценку
-        </Button>
-      )}
-    </Flex>
+    </div>
   );
 }
 
-export function AiOverviewSection({ card, org, repo, onChanged, loggedIn }: { card: Card; org: string; repo: string; onChanged: () => void; loggedIn: boolean }) {
+export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota, onQuota }: { card: Card; org: string; repo: string; onChanged: () => void; loggedIn: boolean; quota: AiQuotaView | null; onQuota: () => void }) {
   const ai = card.ai;
   const own = card.viewer?.own === true;
   // В5.2 (Б3): публичный обзор публичного репо запускает любой вошедший; закрытого — владелец
   const canRun = loggedIn && (own || card.repo.visibility === "public");
   const publicVersion = ai?.audience === "public";
-  const actions = useSummaryActions(org, repo, onChanged);
+  const actions = useSummaryActions(org, repo, () => {
+    onChanged();
+    onQuota();
+  });
+  // решение 3 (25.09): остаток — в тексте кнопки; при нуле кнопка неактивна, причина видна (О2)
+  const counter = quotaCounter(quota?.overview);
+  const quotaBlocked = counter !== null && counter.left === 0 && quota !== null ? quotaBlockedText("overview", quota.overview, counter) : null;
 
   // smoke-круг 23.09: пока задание идет — карточка перечитывается раз в 5 с.
   // Разбор задержки 25.09 (Ф1, reports/2026-09-25-m53-ai-latency.md): setInterval
@@ -364,20 +469,18 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn }: { ca
           </Text>
           {canRun && (
             <div className="rh-score-band__signin">
-              <Button
-                view="action"
-                size="m"
-                loading={actions.sending}
-                disabled={cooldown}
-                title={cooldown && ai ? `Следующий запуск – после ${fmtDateTime(ai.cooldownUntil)}` : undefined}
-                onClick={() => void actions.start()}
-              >
+              <Button view="action" size="m" loading={actions.sending} disabled={cooldown || quotaBlocked !== null} onClick={() => void actions.start()}>
                 <Button.Icon side="start">
                   <Icon data={Sparkles} size={16} className="rh-ai-button-icon" />
                 </Button.Icon>
-                Сформировать обзор
+                {withCounter("Сформировать обзор", counter)}
               </Button>
             </div>
+          )}
+          {canRun && (cooldown || quotaBlocked !== null) && (
+            <Text variant="caption-2" color="secondary">
+              {quotaBlocked ?? `Следующий запуск – после ${fmtDateTime(ai!.cooldownUntil)}`}
+            </Text>
           )}
         </Flex>
       </section>
@@ -391,8 +494,11 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn }: { ca
   const hasOverview = ai?.overview != null;
   const failures = (ai?.failures ?? []).filter((f) => f.role !== "trajectory" && !isNoFacts(f.reason));
 
-  // В5.2 (Б3): переключатель автообновления удален; запуск — в меню «три точки»
-  const ownerActions = canRun && ai !== null && (
+  // В5.2 (Б3): переключатель автообновления удален; запуск — в меню «три точки».
+  // Аудит дизайна О1: не-владельцу пункт нужен, только если после обзора был новый
+  // анализ (иначе — холостой «уже готов»); нет пункта — нет и «⋮»
+  const newerAnalysis = ai !== null && ai.check.latestScanId !== null && ai.scanId < ai.check.latestScanId;
+  const ownerActions = canRun && ai !== null && (own || newerAnalysis) && (
     <Flex gap={2} alignItems="center">
       <DropdownMenu
         renderSwitcher={(props) => (
@@ -402,8 +508,8 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn }: { ca
         )}
         items={[
           {
-            text: hasOverview ? "Обновить обзор" : "Сформировать обзор",
-            disabled: jobActive || cooldownActive || actions.sending,
+            text: withCounter(hasOverview ? "Обновить обзор" : "Сформировать обзор", counter),
+            disabled: jobActive || cooldownActive || actions.sending || quotaBlocked !== null,
             action: () => void actions.start(),
           },
         ]}
@@ -415,8 +521,9 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn }: { ca
     ai !== null && ai.generatedAt !== null && !jobActive ? (
       // замечание 25.09: подпись — отдельной строкой под текстом (сдвиг вправо отменен), цвет на ступень темнее
       <Text variant="caption-2" color="hint">
-        {`Обзор от ${fmtDateTime(ai.generatedAt)}${publicVersion ? " по открытым данным, без CI/CD и Безопасности" : ""}. ${AI_DISCLAIMER}`}
+        {`Обзор от ${fmtDateTime(ai.generatedAt)}. ${AI_DISCLAIMER}`}
         {cooldownActive ? ` Следующий запуск – после ${fmtDateTime(ai.cooldownUntil)}.` : ""}
+        {canRun && quotaBlocked !== null ? ` ${quotaBlocked}.` : ""}
       </Text>
     ) : null;
 
@@ -433,6 +540,17 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn }: { ca
             {AI_SECTION_TITLE}
           </Text>
           {model !== null && <AiModelLabel model={model} />}
+          {/* выбор 2A (25.09): объем публичной версии — меткой в заголовке, пояснение в подсказке */}
+          {publicVersion && hasOverview && (
+            <Flex gap={1} alignItems="center">
+              <Label theme="unknown" size="xs">
+                По открытым данным
+              </Label>
+              <HelpMark iconSize="s" aria-label="Что значит «по открытым данным»">
+                4 категории: документация, состояние кода, активность, задачи. CI/CD и Безопасность не входят – их видят участники репозитория.
+              </HelpMark>
+            </Flex>
+          )}
           <span style={{ flex: 1 }} />
           {ownerActions}
         </Flex>

@@ -2,6 +2,8 @@
 // AGENTS.md) живёт здесь: отсутствие данных везде выглядит одинаково
 // нейтрально — «нет данных», никогда не 0 и никогда не красным.
 
+import { normalizeTypography } from "../summary/typography";
+
 export const NO_DATA = "нет данных";
 // Ступень 4 (В-2, §2 23.09): одно название итога без оценки на всех экранах и в отчете
 export const NO_SCORE = "Оценки нет";
@@ -1223,7 +1225,8 @@ export function fraudFactorFact(key: string, value: unknown, date: (iso: string)
 
 /** Абзацы AI-текста (О3): одна функция для карточки и отчета — по переводам строк. */
 export function aiParagraphs(text: string): string[] {
-  return text.split(/\n+/).map((l) => l.trim()).filter((l) => l !== "");
+  // аудит дизайна В5.2 (О7): правило языка и при выводе — для текстов, записанных до него
+  return normalizeTypography(text).split(/\n+/).map((l) => l.trim()).filter((l) => l !== "");
 }
 
 /**
@@ -1237,4 +1240,68 @@ export function notOwnReason(access: { visibility: string; own: boolean } | null
   if (access.visibility === "public") return `${lead}. Публичный репозиторий появится в рейтинге после ночного обхода каталога.`;
   // закрытый или внутренний с доступом к коду — «свой» (решение 25.09); не свой — значит кода токен не видит
   return `${lead} – у вашего токена нет доступа к коду этого репозитория.`;
+}
+
+// ---------- В5.2 (Б6): лимиты AI у кнопок и в «Настройках» ----------
+
+export interface QuotaWindowView {
+  used: number;
+  limit: number;
+}
+
+/** Ответ `/api/me/ai-quota` по одному действию (jobs/ai-quota.ts, ActionQuota). */
+export interface ActionQuotaView {
+  unlocked: boolean;
+  hour: QuotaWindowView | null;
+  day: QuotaWindowView | null;
+  global: QuotaWindowView | null;
+  hourResetAt: string | null;
+  dayResetAt: string;
+}
+
+export interface AiQuotaView {
+  unlockAvailable: boolean;
+  unlocked: boolean;
+  overview: ActionQuotaView;
+  check: ActionQuotaView;
+}
+
+export type AiAction = "overview" | "check";
+
+export interface QuotaCounter {
+  left: number;
+  limit: number;
+  window: "hour" | "day" | "global";
+}
+
+/**
+ * Остаток для текста кнопки (выбор Екатерины 25.09: «Сформировать обзор 2/3»): остаток /
+ * лимит самого тесного окна — часа, суток или общего. С паролем числа нет (null).
+ */
+export function quotaCounter(q: ActionQuotaView | null | undefined): QuotaCounter | null {
+  if (!q || q.unlocked) return null;
+  let best: QuotaCounter | null = null;
+  for (const window of ["hour", "day", "global"] as const) {
+    const w = q[window];
+    if (w === null) continue;
+    const left = Math.max(0, w.limit - w.used);
+    if (best === null || left < best.left) best = { left, limit: w.limit, window };
+  }
+  return best;
+}
+
+/** Текст кнопки со счетчиком: «Сформировать обзор 2/3»; без счетчика — как есть. */
+export function withCounter(label: string, counter: QuotaCounter | null): string {
+  return counter === null ? label : `${label} ${counter.left}/${counter.limit}`;
+}
+
+/** Видимая причина, почему кнопка неактивна (аудит дизайна О2): окно, которое держит, и время. */
+export function quotaBlockedText(action: AiAction, q: ActionQuotaView, counter: QuotaCounter): string {
+  const one = action === "overview" ? "Следующий обзор" : "Следующая проверка";
+  const many = action === "overview" ? "обзоров" : "проверок";
+  if (counter.window === "hour") {
+    return `${one} – после ${q.hourResetAt ? fmtDateTime(q.hourResetAt) : "окончания часа"} (не больше ${counter.limit} в час)`;
+  }
+  if (counter.window === "day") return `Лимит ${many} на сегодня исчерпан (${counter.limit} в сутки) – откроется в 00:00 МСК`;
+  return `Общий лимит ${many} сервиса на сегодня исчерпан – откроется в 00:00 МСК`;
 }

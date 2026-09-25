@@ -74,7 +74,7 @@ import {
   Text,
   useToaster,
 } from "@gravity-ui/uikit";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { COVERAGE_NULL_BELOW } from "../score/model";
 import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle } from "../report/submetrics";
 import { FULL, INDEX, metricWeights, sourceWord, strengthsLine, submetricWeightText } from "../report/sections";
@@ -111,7 +111,7 @@ import {
 } from "./format";
 import { linkProps } from "./router";
 import { LoginButton, Page, type Crumb } from "./Shell";
-import { AiOverviewSection, BadgeButton, CategoryAiMark, CategoryAiNote, FraudAlert, FraudCheckRow, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor } from "./RepoV5";
+import { AiOverviewSection, BadgeButton, CategoryAiMark, CategoryAiNote, FraudAlert, FraudCheckFooter, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
 
 type Card = RepoCard;
@@ -126,6 +126,8 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
   const { me, reloadMe } = useSession();
   const meData = dataOf(me);
   const loggedIn = meData !== null && meData.login !== null;
+  // В5.2 (Б6, решение 3): остаток лимитов AI — для текста кнопок обзора и проверки
+  const aiQuota = useAiQuota(loggedIn);
   // В4.8.5 (К8.5.1): фаза анализа — из общего опроса заданий вкладки (по
   // заданию, а не по «появился ли скан с номером больше»); карточка сама
   // себя ради итога не опрашивает
@@ -305,10 +307,10 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
           <Flex direction="column" gap={3}>
             <Markers view={view} />
             <FraudAlert card={card} />
-            <FraudCheckRow card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} />
-            <ScoreBand card={card} view={view} />
+            {/* В5.2 (Б6, выбор 1A): проверка оценки — подвалом плашки HealthCraft Index */}
+            <ScoreBand card={card} view={view} footer={<FraudCheckFooter card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} quota={aiQuota.quota} onQuota={aiQuota.reload} />} />
           </Flex>
-          <AiOverviewSection card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} />
+          <AiOverviewSection card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} quota={aiQuota.quota} onQuota={aiQuota.reload} />
           <Categories card={card} view={view} />
           <Recommendations view={view} />
           <HistorySection card={card} org={org} repo={repo} />
@@ -778,7 +780,7 @@ function PathLine({ parts }: { parts: PathPart[] }) {
  * (`.rh-score-cards`, auto-fit). Закрытый Repo Health Score — своя плашка с
  * путем к нему по типу зрителя.
  */
-function ScoreBand({ card, view }: { card: Card; view: CardView }) {
+function ScoreBand({ card, view, footer }: { card: Card; view: CardView; footer?: ReactNode }) {
   const score = card.score!;
   const barOf = (name: string) => view.contributions.find((b) => b.title.endsWith(name)) ?? null;
   return (
@@ -786,6 +788,7 @@ function ScoreBand({ card, view }: { card: Card; view: CardView }) {
       <Card view="outlined" className="rh-score-band">
         <ScoreFigure title="HealthCraft Index" help={INDEX_HELP} total={score.healthcraftIndex} rank={score.rank} rankedTotal={score.rankedTotal} />
         <ContributionStrip bar={barOf("HealthCraft Index")} />
+        {footer}
       </Card>
       {/* круг 4 (З): закрытый показатель — на светло-сером фоне заглушек */}
       <Card view="outlined" className={view.fullPath ? "rh-score-band rh-score-band_locked" : "rh-score-band"}>
