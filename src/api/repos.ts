@@ -366,10 +366,18 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
   // схлопывает список, из которого его выбирали.
   const counts = new Map<string | null, number>();
   const colors = new Map<string | null, string | null>();
+  // цвет — известный цвет строки этого языка с наименьшим org/repo (платформа отдает его на
+  // язык, а не на репо); ревью 25.09: выбор не зависит от порядка списка (он теперь по месту)
+  const colorFrom = new Map<string | null, string>();
   for (const item of byQ) {
     counts.set(item.language, (counts.get(item.language) ?? 0) + 1);
-    // цвет — первый известный у строк этого языка (платформа отдаёт его на язык, а не на репо)
-    if (!colors.get(item.language)) colors.set(item.language, item.language === null ? null : item.languageColor);
+    if (item.language === null || !item.languageColor) continue;
+    const name = fullName(item);
+    const seen = colorFrom.get(item.language);
+    if (seen === undefined || name.localeCompare(seen) < 0) {
+      colorFrom.set(item.language, name);
+      colors.set(item.language, item.languageColor);
+    }
   }
   const languages: LanguageFacet[] = [...counts.entries()]
     .map(([language, count]) => ({ language, count, color: colors.get(language) ?? null }))

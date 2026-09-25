@@ -207,6 +207,19 @@ const allowCardViews = (userId: number, n: number, now = Date.now()): boolean =>
   return true;
 };
 
+/**
+ * Ревью 25.09: `Retry-After` сравнения — до освобождения N-го места, а не одного
+ * (иначе повтор в срок снова получал 429).
+ */
+function cardViewsRetryAfterSec(userId: number, n: number, now = Date.now()): number {
+  const limit = config.queue.cardPerMinute ?? 30;
+  const alive = (cardViews.get(userId) ?? []).filter((ts) => ts > now - 60_000).sort((a, b) => a - b);
+  const needFree = alive.length + n - limit;
+  if (needFree <= 0) return 1;
+  const stamp = alive[needFree - 1];
+  return stamp === undefined ? 60 : Math.max(1, Math.ceil((stamp + 60_000 - now) / 1000));
+}
+
 /** Минутное окно мутаций избранного (В4.4, кластер K/З6): true = пропустить. */
 const allowFavMutation = (userId: number, now = Date.now()): boolean =>
   allowInWindow(favMutations, userId, config.queue.favoritesMutationsPerMinute ?? 30, 60_000, now);
@@ -635,7 +648,17 @@ const routes = {
       if (!parsed.ok) return badQuery(parsed.message);
       const viewer = sessionOf(req);
       // 429 — до резолва доступа, как у карточки; списывается по открытию на репо
-      if (viewer && !allowCardViews(viewer.userId, parsed.slugs.length)) return cardRateLimited(viewer.userId);
+      if (viewer) {
+        const limit = config.queue.cardPerMinute ?? 30;
+        // сравнение шире минутного окна не пройдет никогда — честный отказ, а не вечный 429
+        if (parsed.slugs.length > limit) return badQuery(`сравнить можно не больше ${limit} репозиториев в минуту`);
+        if (!allowCardViews(viewer.userId, parsed.slugs.length)) {
+          return rateLimited(
+            `не больше ${limit} открытий карточки в минуту – сравнение ${parsed.slugs.length} репозиториев откроется чуть позже`,
+            cardViewsRetryAfterSec(viewer.userId, parsed.slugs.length),
+          );
+        }
+      }
       const body = await buildCompare(parsed.slugs, (org, repo) => cardOutcome(req, org, repo));
       return Response.json(body, { headers: { "cache-control": "private, no-store" } });
     },

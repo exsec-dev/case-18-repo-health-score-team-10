@@ -12,7 +12,7 @@ import { parseFavoriteInput } from "../api/slug-input";
 import { analysisDate } from "../report/sections";
 import { plural } from "../report/submetrics";
 import type { IndexCategoryKey } from "../score/model";
-import { fmtDate, middleEllipsis, roundScore } from "./format";
+import { fmtCount, fmtDate, middleEllipsis, roundScore } from "./format";
 
 export { COMPARE_MAX };
 
@@ -93,6 +93,36 @@ export function rowLeaders(values: LeaderInput[]): boolean[] {
   return shown.map((v) => v === top);
 }
 
+/**
+ * Балл подметрики для лидерства — ТО ЖЕ целое, что на экране (`fmtSubmetric`:
+ * `Math.round(score * 100)`). Ревью 25.09: сравнение по `score * 100` через
+ * `roundScore` расходилось с показанным на половинках (0,285 → на экране 28,
+ * в лидерстве 29) — стрелка стояла у одного из двух одинаковых «28».
+ */
+export function submetricLeaderValue(score: number | null | undefined): number | null {
+  return score === null || score === undefined ? null : Math.round(score * 100);
+}
+
+// ---------- реквизиты столбца ----------
+
+/**
+ * Место в рейтинге: «#N» и размер выборки (на телефоне при общем размере — в
+ * подписи строки); без места — причина по видимости: публичный без индекса —
+ * «индекс не выставлен», прочие (internal/private/unknown) — «не в публичном рейтинге».
+ */
+export function rankCell(card: CompareCard, sharedTotal: number | null): { rank: string; total: string | null } | { none: string } {
+  const s = card.score;
+  if (s && s.rank !== null && s.rankedTotal !== null) return { rank: `#${fmtCount(s.rank)}`, total: sharedTotal === null ? ` из ${fmtCount(s.rankedTotal)}` : null };
+  return { none: card.repo.visibility === "public" ? "без места – индекс не выставлен" : "не в публичном рейтинге" };
+}
+
+/** Подпись строки реквизита (Д8 Б, Д9 на телефоне: общий год и общий размер рейтинга — в подписи). */
+export function metaRowLabel(key: "language" | "rank" | "date", year: number | null, sharedTotal: number | null): string {
+  if (key === "language") return "Язык";
+  if (key === "rank") return sharedTotal !== null ? `Место из ${fmtCount(sharedTotal)}` : "Место в рейтинге";
+  return year !== null ? `Анализ, ${year}` : "Анализ";
+}
+
 // ---------- заметки сопоставимости ----------
 
 /** Слаг в заметке: длинное имя — многоточием в середине, хвост виден (дизайн §4.10); полный — в шапке столбца. */
@@ -108,8 +138,9 @@ export function comparabilityNotes(items: CompareItem[]): string[] {
   const cards = items.map(scoredCard).filter((c): c is CompareCard => c !== null);
   const notes: string[] = [];
 
-  // Т16: разная основа индекса — только у столбцов, где индекс выставлен
-  const indexed = cards.filter((c) => c.score!.healthcraftIndex !== null);
+  // Т16: разная основа индекса — только у столбцов, где индекс выставлен перевзвешиванием;
+  // у пустого репо индекс 0 по правилу методики, не взвешен — в заметку не идет (ревью 25.09)
+  const indexed = cards.filter((c) => c.score!.healthcraftIndex !== null && !c.markers.codeEmpty);
   const counts = indexed.map(indexCategoriesCounted);
   if (new Set(counts).size > 1) {
     const by = (n: number) => categoriesCountedText(n, 4).replace(/ из 4$/, "");

@@ -2494,26 +2494,12 @@ button.rh-category:focus-visible {
   border: 1px dashed var(--g-color-line-generic-accent);
 }
 
-/* вариант А: подложка строки подметрик — поперек подписи и карточек, над фоном карточки,
-   под текстом; при наведении — плотнее */
-.rh-cmp-stripe {
-  position: relative;
-  z-index: 1;
-  border-radius: var(--g-border-radius-s);
-  background: var(--g-color-base-generic);
-  pointer-events: none;
-}
-
-.rh-cmp-stripe_hover {
-  background: var(--g-color-base-generic-hover);
-}
-
 /* ячейки поверх карточек */
 .rh-cmp-label,
 .rh-cmp-cell,
 .rh-cmp-merged-wrap {
   position: relative;
-  z-index: 2;
+  z-index: 1;
 }
 
 /* линия строки — сегментами: по подписи и по карточкам с оценкой (аудит Д2) */
@@ -2592,22 +2578,6 @@ button.rh-category:focus-visible {
 .rh-cmp-sublabel {
   padding-inline-start: 22px;
 }
-
-/* вариант А: ровные строки подметрик — подпись в одну строку, высота строки 32 px */
-.rh-cmp-sublabel_line {
-  display: block;
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.rh-cmp-label_sub,
-.rh-cmp-cell_sub {
-  min-height: 32px !important;
-}
-
 
 .rh-cmp-toggle {
   display: flex;
@@ -2823,16 +2793,6 @@ button.rh-category:focus-visible {
 
 .rh-cmp-lead_legend {
   background: var(--g-color-base-generic);
-}
-
-.rh-cmp-lead_text {
-  padding: 0;
-  background: none;
-  font-weight: 600;
-}
-
-.rh-cmp-lead_text .g-text {
-  font-weight: 600;
 }
 
 .rh-cmp-lead_bare {

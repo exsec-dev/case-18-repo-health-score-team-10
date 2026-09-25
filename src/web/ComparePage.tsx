@@ -54,8 +54,11 @@ import {
   exceptionLabel,
   fullRows,
   indexCategoriesCounted,
+  metaRowLabel,
+  rankCell,
   rowLeaders,
   scoredCard,
+  submetricLeaderValue,
   unavailableText,
   type LeaderInput,
 } from "./compareView";
@@ -107,9 +110,13 @@ function useCompare(slugs: string[]): { state: AsyncState<CompareResponse> | nul
       .catch((e: unknown) => {
         if (ctrl.signal.aborted) return;
         const message = e instanceof Error ? e.message : String(e);
+        // ревью 25.09: прежние данные остаются только для ТОГО ЖЕ набора (повтор); у нового набора
+        // сбой — ошибка, иначе скелетон висел бы рядом с ней бесконечно
         setState((prev) => {
           const data = prev ? dataOf(prev) : null;
-          return data ? { kind: "ok", data, refreshError: message } : { kind: "error", message, status: e instanceof RequestError ? e.status : undefined };
+          return data && sameSlugs(data.slugs, slugs)
+            ? { kind: "ok", data, refreshError: message }
+            : { kind: "error", message, status: e instanceof RequestError ? e.status : undefined };
         });
       });
     return () => ctrl.abort();
@@ -442,7 +449,7 @@ function AddCompareDialog({
   const noMatches = text !== "" && parsed === null && !searching && list.length === 0;
 
   // аудит Д5: активна первая выбираемая строка
-  useEffect(() => setActive(selectable[0] ?? -1), [value, favorites, rating, slugs.join("|")]);
+  useEffect(() => setActive(selectable[0] ?? -1), [value, q, favorites, rating, slugs.join("|")]);
 
   const choose = (s: Suggestion) => {
     if (slugs.includes(s.slug)) return setError(COMPARE_DUPLICATE_TEXT);
@@ -453,6 +460,8 @@ function AddCompareDialog({
   };
 
   const onEnter = () => {
+    // ревью 25.09: пока поиск не догнал ввод, выдача устарела — Enter ничего не добавляет
+    if (parsed === null && (text !== q || searching)) return;
     const pick = active >= 0 ? list[active] : undefined;
     if (pick) return choose(pick);
     if (text === "") return;
@@ -683,8 +692,7 @@ function CompareTable({
   const year = phone ? commonYear(scored.map((c) => analysisDate(c.card))) : null;
   const totals = new Set(scored.map((c) => c.card.score!.rankedTotal).filter((t): t is number => t !== null));
   const sharedTotal = phone && totals.size === 1 ? [...totals][0]! : null;
-  const metaLabel = (key: "language" | "rank" | "date"): string =>
-    key === "language" ? "Язык" : key === "rank" ? (sharedTotal !== null ? `Место из ${fmtCount(sharedTotal)}` : "Место в рейтинге") : year !== null ? `Анализ, ${year}` : "Анализ";
+  const metaLabel = (key: "language" | "rank" | "date"): string => metaRowLabel(key, year, sharedTotal);
 
   const rows: Row[] = [{ kind: "meta", key: "language" }, { kind: "meta", key: "rank" }, { kind: "meta", key: "date" }];
   // Д16 А: группа «Оценка» — только когда ниже есть «Полная оценка»
@@ -726,31 +734,7 @@ function CompareTable({
 
   // оформление (aria-hidden): карточки столбцов (десктоп) и линии строк — по сегментам,
   // только по подписи и столбцам с оценкой: объединенные ячейки линии не пересекают (аудит Д2)
-  // вариант А (§2 25.09): подстроки раскрытия — ровные строки, через одну легкая подложка
-  // поперек подписи и всех карточек; при наведении строка подсвечивается целиком
-  const [hoverRow, setHoverRow] = useState<number | null>(null);
-  const zebra = new Set<number>();
-  let subIndex = 0;
-  rows.forEach((row, r) => {
-    if (row.kind !== "sub") {
-      subIndex = 0;
-      return;
-    }
-    if (subIndex % 2 === 1) zebra.add(r);
-    subIndex++;
-  });
   const decor: ReactNode[] = [];
-  rows.forEach((row, r) => {
-    if (row.kind !== "sub" || (!zebra.has(r) && hoverRow !== r)) return;
-    decor.push(
-      <div
-        key={`zb${r}`}
-        aria-hidden="true"
-        className={hoverRow === r ? "rh-cmp-stripe rh-cmp-stripe_hover" : "rh-cmp-stripe"}
-        style={{ gridRow: phone ? `${labelRow(r)} / span 2` : labelRow(r), gridColumn: "1 / -1" }}
-      />,
-    );
-  });
   if (!phone) {
     cols.forEach((c, i) =>
       decor.push(<div key={`bg${i}`} aria-hidden="true" className={c.kind === "invite" ? "rh-cmp-colcard rh-cmp-colcard_invite" : "rh-cmp-colcard"} style={{ gridRow: `1 / ${lastRow + 1}`, gridColumn: cellCol(i) }} />),
@@ -768,9 +752,6 @@ function CompareTable({
       decor.push(<div key={`ln${r}c${i}`} aria-hidden="true" className="rh-cmp-line rh-cmp-line_card" style={{ gridRow: labelRow(r), gridColumn: cellCol(i) }} />);
     });
   });
-
-  const hoverProps = (r: number) =>
-    rows[r]?.kind === "sub" ? { onMouseEnter: () => setHoverRow(r), onMouseLeave: () => setHoverRow((h) => (h === r ? null : h)) } : {};
 
   const bodyRows: ReactNode[] = rows.map((row, r) => {
     const values = cols.map((c) => (c.kind === "scored" ? leaderInput(row, c.card) : undefined));
@@ -809,7 +790,7 @@ function CompareTable({
           return;
         }
         cells.push(
-          <div key={`c${i}`} role="cell" className={`rh-cmp-cell rh-cmp-cell_card rh-cmp-cell_${row.kind}`} style={at(cellRow(r), cellCol(i))} {...hoverProps(r)}>
+          <div key={`c${i}`} role="cell" className={`rh-cmp-cell rh-cmp-cell_card rh-cmp-cell_${row.kind}`} style={at(cellRow(r), cellCol(i))}>
             <CellValue row={row} card={c.card} leader={leaders[i] === true} phone={phone} year={year} sharedTotal={sharedTotal} />
           </div>,
         );
@@ -817,13 +798,7 @@ function CompareTable({
     }
     return (
       <div key={`r${r}`} role="row" className="rh-cmp-row">
-        <div
-          role="rowheader"
-          id={firstSub ? firstSubId((row as { cat: CategoryKey }).cat) : undefined}
-          className={`rh-cmp-label rh-cmp-label_${row.kind}`}
-          style={at(labelRow(r), labelCol)}
-          {...hoverProps(r)}
-        >
+        <div role="rowheader" id={firstSub ? firstSubId((row as { cat: CategoryKey }).cat) : undefined} className={`rh-cmp-label rh-cmp-label_${row.kind}`} style={at(labelRow(r), labelCol)}>
           <RowLabel row={row} metaLabel={metaLabel} open={row.kind === "category" && openCats.has(row.key)} expandable={row.kind === "category" && expandable(row.key)} controls={row.kind === "category" ? firstSubId(row.key) : undefined} onToggle={toggle} />
         </div>
         {cells}
@@ -861,7 +836,7 @@ function leaderInput(row: Row, card: CompareCard): LeaderInput {
   if (row.kind === "sub") {
     if (displayOnly(row.cat, row.sub)) return undefined;
     const entry = score.categories[row.cat]?.submetrics[row.sub];
-    return entry?.score === null || entry?.score === undefined ? null : entry.score * 100;
+    return submetricLeaderValue(entry?.score);
   }
   return undefined;
 }
@@ -912,9 +887,8 @@ function RowLabel({
         </Text>
       );
     case "sub":
-      // вариант А: подпись в одну строку, полное имя — в подсказке
       return (
-        <Text variant="body-1" color={displayOnly(row.cat, row.sub) ? "secondary" : "complementary"} className="rh-cmp-sublabel rh-cmp-sublabel_line" title={submetricTitle(row.cat, row.sub)}>
+        <Text variant="body-1" color={displayOnly(row.cat, row.sub) ? "secondary" : "complementary"} className="rh-cmp-sublabel">
           {submetricTitle(row.cat, row.sub)}
         </Text>
       );
@@ -925,11 +899,10 @@ function RowLabel({
  * Число с отметкой лидера: стрелка всегда; подложка — только под нейтральным
  * числом (контраст, дизайн §6.4). На серой карточке подложка — на ступень темнее.
  */
-function Lead({ leader, plain, text = false, children }: { leader: boolean; plain: boolean; text?: boolean; children: ReactNode }) {
+function Lead({ leader, plain, children }: { leader: boolean; plain: boolean; children: ReactNode }) {
   if (!leader) return <>{children}</>;
-  // вариант А: в подстроках лидер — жирным со стрелкой, без плашки (столбик баллов ровный)
   return (
-    <span className={text ? "rh-cmp-lead rh-cmp-lead_text" : plain ? "rh-cmp-lead" : "rh-cmp-lead rh-cmp-lead_bare"}>
+    <span className={plain ? "rh-cmp-lead" : "rh-cmp-lead rh-cmp-lead_bare"}>
       <Icon data={CaretUp} size={14} />
       {children}
       <span className="rh-sr-only">, лучший балл строки</span>
@@ -960,14 +933,16 @@ function CellValue({ row, card, leader, phone, year, sharedTotal }: { row: Row; 
         return <Text>{year !== null ? dateWithoutYear(at) : fmtDate(at)}</Text>;
       }
       // Д9: место как на карточке — «#4» и «из 28 145» приглушенно (на телефоне размер — в подписи строки)
-      if (score.rank !== null && score.rankedTotal !== null)
+      {
+        const rank = rankCell(card, sharedTotal);
+        if ("none" in rank) return <Text color="secondary">{rank.none}</Text>;
         return (
           <Text style={{ fontVariantNumeric: "tabular-nums" }}>
-            #{fmtCount(score.rank)}
-            {sharedTotal === null && <Text color="secondary">{` из ${fmtCount(score.rankedTotal)}`}</Text>}
+            {rank.rank}
+            {rank.total !== null && <Text color="secondary">{rank.total}</Text>}
           </Text>
         );
-      return <Text color="secondary">{card.repo.visibility === "public" ? "без места – индекс не выставлен" : "не в публичном рейтинге"}</Text>;
+      }
     case "index":
     case "rhs": {
       const total = row.kind === "index" ? score.healthcraftIndex : score.repoHealthScore;
@@ -990,7 +965,8 @@ function CellValue({ row, card, leader, phone, year, sharedTotal }: { row: Row; 
         );
       }
       // решение 25.09 (вопрос по смыслу): пустой репо — метка «нет кода» вместо слова шкалы,
-      // число — нейтральное (это данные «оценивать нечего», не зона риска); в лидерах не участвует
+      // число — нейтральное (это данные «оценивать нечего», не зона риска); в лидерах не участвует;
+      // основы («по N из 4») нет: индекс 0 по правилу методики, он не перевзвешивается (ревью 25.09)
       if (row.kind === "index" && card.markers.codeEmpty) {
         return (
           <span className="rh-cmp-total">
@@ -1002,11 +978,6 @@ function CellValue({ row, card, leader, phone, year, sharedTotal }: { row: Row; 
                 нет кода
               </Label>
             </span>
-            {countLine && (
-              <Text variant="caption-2" color="secondary">
-                {countLine}
-              </Text>
-            )}
           </span>
         );
       }
@@ -1088,7 +1059,7 @@ function CellValue({ row, card, leader, phone, year, sharedTotal }: { row: Row; 
         ref || !entry || entry.score === null || entry.score === undefined ? (
           <NoDataGlyph reason={ref ? "Показывается для справки, в балл категории не входит" : NO_DATA} />
         ) : (
-          <Lead leader={leader} plain text>
+          <Lead leader={leader} plain>
             <Text variant="body-1">{phone ? `балл ${fmtSubmetric(entry.score)}` : fmtSubmetric(entry.score)}</Text>
           </Lead>
         );
@@ -1211,7 +1182,8 @@ function exceptionText(col: Exclude<Col, { kind: "scored" } | { kind: "invite" }
     const t = noScoreText(col.card.scan);
     return { title: t.title, text: t.description };
   }
-  if (col.status === "check_failed") return { title: COMPARE_UNAVAILABLE_TITLE, text: checkFailedText(col.slug) };
+  // К8.5.6: владелец с доказанными правами получает «проверка не удалась», а не «не найден» (ревью 25.09)
+  if (col.status === "check_failed") return { title: "Не удалось проверить доступ", text: checkFailedText(col.slug) };
   if (col.status === "token_rejected")
     return {
       title: "SourceCraft отклонил ваш токен",

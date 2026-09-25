@@ -24,6 +24,9 @@ import {
   compareSlugsOf,
   commonYear,
   exceptionLabel,
+  metaRowLabel,
+  rankCell,
+  submetricLeaderValue,
   COMPARE_FULL_LINE,
   COMPARE_REFERENCE,
   fullRows,
@@ -241,6 +244,53 @@ describe("К-1: лидер строки (П9)", () => {
   });
 });
 
+describe("ревью 25.09: лидер подметрики и пустой репо", () => {
+  test("лидер подметрики — по показанному целому: 0,285 и 0,28 — оба «28», лидера нет; 0,285 и 0,29 — лидер «29»", () => {
+    expect(submetricLeaderValue(0.285)).toBe(Math.round(0.285 * 100));
+    expect(rowLeaders([submetricLeaderValue(0.285), submetricLeaderValue(0.28)])).toEqual([false, false]);
+    expect(rowLeaders([submetricLeaderValue(0.285), submetricLeaderValue(0.29)])).toEqual([false, true]);
+    expect(submetricLeaderValue(null)).toBeNull();
+  });
+
+  test("пустой репо (code_empty) не дает заметки о разной основе индекса: его 0 не перевзвешен", async () => {
+    const { t, seed } = fixture();
+    seed("cmp", "full");
+    const emptyId = seed("cmp", "empty", { total: 0, categories: { issues: { score: null, no_data: "issues channel no-data", submetrics: {} } } });
+    t.db.query("UPDATE scores SET code_empty = 1 WHERE repo_id = ?").run(emptyId);
+    const res = await buildCompare(slugsOf("cmp/full", "cmp/empty"), resolveWith(t, NO_PAT_ACCESS));
+    const notes = comparabilityNotes(res.items);
+    expect(notes.some((n) => n.startsWith("Индекс"))).toBe(false);
+    expect(notes).toEqual([expect.stringContaining("cmp/empty нет кода")]);
+  });
+});
+
+describe("ревью 25.09: реквизиты столбца — на данных (правило 23.09)", () => {
+  test("место: публичный из рейтинга — «#N» и «из M»; публичный без индекса, internal, private, unknown — своя фраза", async () => {
+    const { t, seed } = fixture();
+    seed("cmp", "pub", { total: 80 });
+    seed("cmp", "noidx", { total: null });
+    seed("cmp", "int", { visibility: "internal" });
+    seed("cmp", "priv", { visibility: "private" });
+    seed("cmp", "unk", { visibility: "garbage" });
+    const res = await buildCompare(slugsOf("cmp/pub", "cmp/noidx", "cmp/int"), resolveWith(t, GRANTED));
+    const res2 = await buildCompare(slugsOf("cmp/priv", "cmp/unk"), resolveWith(t, GRANTED));
+    const cells = [...res.items, ...res2.items].map((i) => (i.status === "ok" ? rankCell(i.card, null) : null));
+    expect(cells[0]).toEqual({ rank: "#1", total: " из 1" });
+    expect(cells[1]).toEqual({ none: "без места – индекс не выставлен" });
+    for (const c of cells.slice(2)) expect(c).toEqual({ none: "не в публичном рейтинге" });
+    // на телефоне при общем размере рейтинга «из M» уходит в подпись строки
+    if (res.items[0]!.status === "ok") expect(rankCell(res.items[0]!.card, 1)).toEqual({ rank: "#1", total: null });
+  });
+
+  test("подписи реквизитов: общий год и общий размер — в подписи; иначе прежние", () => {
+    expect(metaRowLabel("date", 2026, null)).toBe("Анализ, 2026");
+    expect(metaRowLabel("date", null, null)).toBe("Анализ");
+    expect(metaRowLabel("rank", null, 28145)).toBe(`Место из ${(28145).toLocaleString("ru-RU")}`);
+    expect(metaRowLabel("rank", null, null)).toBe("Место в рейтинге");
+    expect(metaRowLabel("language", 2026, 1)).toBe("Язык");
+  });
+});
+
 describe("К-1: заметки сопоставимости и «по N категориям» (П8, П10)", () => {
   const cardWith = async (cats: Record<string, unknown>[], dates?: string[]) => {
     const { t, seed } = fixture();
@@ -396,5 +446,51 @@ describe("К-1: маршрут /api/compare (П12, П13)", () => {
     expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
     // и окно общее с карточкой: карточка тоже упирается
     expect((await fetch(`${server.base}/api/repos/cmp/a`, { headers: { cookie } })).status).toBe(429);
+  }, 30_000);
+
+  test("ревью 25.09: почти полное окно — сравнение отказано целиком и ничего не списывает; шире окна — 400", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rh-v53-cmp2-"));
+    dirs.push(dir);
+    const SECRET = "z".repeat(32);
+    const db = openDb({ ...loadConfig(), dataDir: dir });
+    const wrap = { db, close: () => {} };
+    for (const repo of ["a", "b", "c"]) {
+      const id = seedRepo(wrap, { org: "cmp", repo });
+      seedScore(wrap, id, seedScan(wrap, id, { facts: cardFacts() }), { total: 70 });
+    }
+    const userId = upsertUser(db, "ya-cmp2", "cmpuser2");
+    const cookie = `${SESSION_COOKIE}=${createSession(db, SECRET, userId)}`;
+    db.close();
+    const mock = startMockApi(() => null);
+    mocks.push(mock);
+    const server = await spawnServer({ dataDir: dir, mock, appSecret: SECRET, env: { QUEUE_CARD_PER_MINUTE: "4" } });
+    servers.push(server);
+    const get = (path: string) => fetch(`${server.base}${path}`, { headers: { cookie } });
+    expect((await get("/api/repos/cmp/a")).status).toBe(200);
+    expect((await get("/api/repos/cmp/b")).status).toBe(200);
+    // 2 + 3 > 4 — отказ целиком
+    const refused = await get("/api/compare?r=cmp/a&r=cmp/b&r=cmp/c");
+    expect(refused.status).toBe(429);
+    expect(Number(refused.headers.get("retry-after"))).toBeGreaterThan(0);
+    // отказ ничего не списал: еще 2 открытия проходят, пятое — нет
+    expect((await get("/api/repos/cmp/c")).status).toBe(200);
+    expect((await get("/api/repos/cmp/a")).status).toBe(200);
+    expect((await get("/api/repos/cmp/b")).status).toBe(429);
+  }, 30_000);
+
+  test("ревью 25.09: сравнение шире минутного окна — 400, а не вечный 429", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "rh-v53-cmp3-"));
+    dirs.push(dir);
+    const SECRET = "w".repeat(32);
+    const db = openDb({ ...loadConfig(), dataDir: dir });
+    const userId = upsertUser(db, "ya-cmp3", "cmpuser3");
+    const cookie = `${SESSION_COOKIE}=${createSession(db, SECRET, userId)}`;
+    db.close();
+    const mock = startMockApi(() => null);
+    mocks.push(mock);
+    const server = await spawnServer({ dataDir: dir, mock, appSecret: SECRET, env: { QUEUE_CARD_PER_MINUTE: "2" } });
+    servers.push(server);
+    const res = await fetch(`${server.base}/api/compare?r=a/1&r=a/2&r=a/3`, { headers: { cookie } });
+    expect(res.status).toBe(400);
   }, 30_000);
 });
