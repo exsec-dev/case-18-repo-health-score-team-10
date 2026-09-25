@@ -2970,3 +2970,16 @@ button.rh-category:focus-visible {
   font-size: 0;
   gap: 0;
 }
+
+/* В5.2 (Б4): лимиты AI рядом с паролем в «Настройках» — компактная таблица без рамок */
+.rh-ai-quota {
+  border-collapse: collapse;
+  width: 100%;
+}
+.rh-ai-quota th,
+.rh-ai-quota td {
+  padding: 4px 12px 4px 0;
+  text-align: left;
+  font-weight: normal;
+  vertical-align: baseline;
+}

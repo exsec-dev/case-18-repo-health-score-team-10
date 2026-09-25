@@ -633,7 +633,9 @@ async function runFlagger(
         : [
             ...base,
             { role: "assistant", content: lastRaw },
-            { role: "user", content: `Предыдущий вывод ОТКЛОНЁН: ${lastReason}. Исправь и выдай ТОЛЬКО JSON формы {"flag":bool,"factors":[{"key":"...","note":"..."}]}.` },
+            // В5.2 (Б8, живой прогон 25.09): модель брала ключом поле факта (regular_share) —
+            // ретрай называет допустимые ключи явно; автопочинки ключа нет (решение 23.09)
+            { role: "user", content: `Предыдущий вывод ОТКЛОНЁН: ${lastReason}. Ключ фактора — только имя факта целиком: ${[...keys].join(", ")}. Исправь и выдай ТОЛЬКО JSON формы {"flag":bool,"factors":[{"key":"...","note":"..."}]}.` },
           ];
     let text: string;
     try {

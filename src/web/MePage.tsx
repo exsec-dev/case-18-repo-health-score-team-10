@@ -205,11 +205,75 @@ export function SettingsPage() {
   );
 }
 /** Ответ `/api/me/ai-quota` (В5.2, Б4) — поля, которые читает раздел «Доступ к AI». */
+type QuotaWindowView = { used: number; limit: number } | null;
+interface AiActionQuotaView {
+  hour: QuotaWindowView;
+  day: QuotaWindowView;
+  global: QuotaWindowView;
+}
 interface AiQuotaResponse {
   unlockAvailable: boolean;
   unlocked: boolean;
-  overview: { hour: { used: number; limit: number } | null; day: { used: number; limit: number } | null };
-  check: { hour: { used: number; limit: number } | null; day: { used: number; limit: number } | null };
+  overview: AiActionQuotaView;
+  check: AiActionQuotaView;
+}
+
+/**
+ * Лимиты и текущее использование рядом с паролем (решение Екатерины 25.09): по каждому
+ * действию — час, сутки и общий дневной лимит сервиса; с паролем — «без личных лимитов».
+ */
+function AiQuotaTable({ data }: { data: AiQuotaResponse }) {
+  const cell = (w: QuotaWindowView, none: string): string => (w === null ? none : `${w.used} из ${w.limit}`);
+  const rows: { title: string; q: AiActionQuotaView }[] = [
+    { title: "AI-обзоры", q: data.overview },
+    { title: "Проверки оценки", q: data.check },
+  ];
+  return (
+    <table className="rh-ai-quota">
+      <thead>
+        <tr>
+          <th scope="col">
+            <Text variant="caption-2" color="secondary">
+              Использовано
+            </Text>
+          </th>
+          <th scope="col">
+            <Text variant="caption-2" color="secondary">
+              За час
+            </Text>
+          </th>
+          <th scope="col">
+            <Text variant="caption-2" color="secondary">
+              За сутки
+            </Text>
+          </th>
+          <th scope="col">
+            <Text variant="caption-2" color="secondary">
+              {data.unlocked ? "Потолок по паролю за сутки" : "Всего на сервисе за сутки"}
+            </Text>
+          </th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={r.title}>
+            <th scope="row">
+              <Text variant="body-short">{r.title}</Text>
+            </th>
+            <td>
+              <Text variant="body-short">{cell(r.q.hour, "без лимита")}</Text>
+            </td>
+            <td>
+              <Text variant="body-short">{cell(r.q.day, "без лимита")}</Text>
+            </td>
+            <td>
+              <Text variant="body-short">{cell(r.q.global, "без потолка")}</Text>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
 }
 
 /**
@@ -224,8 +288,7 @@ function AiUnlockSection() {
   const [error, setError] = useState<string | null>(null);
   const toaster = useToaster();
   const data = dataOf(quota.state);
-  if (data === null || !data.unlockAvailable) return null;
-  const left = (w: { used: number; limit: number } | null): string => (w === null ? "без лимита" : `${Math.max(0, w.limit - w.used)} из ${w.limit}`);
+  if (data === null) return null;
 
   async function unlock() {
     setBusy(true);
@@ -256,7 +319,7 @@ function AiUnlockSection() {
     <Card view="outlined" className="rh-settings-card">
       <Flex as="section" direction="column" gap={3}>
         <Text variant="subheader-2" as="h2">
-          Доступ к AI без лимитов
+          {data.unlockAvailable ? "Доступ к AI без лимитов" : "Лимиты AI"}
         </Text>
         {data.unlocked ? (
           <Flex direction="column" gap={3}>
@@ -268,6 +331,7 @@ function AiUnlockSection() {
                 AI-обзоры и проверки оценки не ограничены личными лимитами.
               </Text>
             </Flex>
+            <AiQuotaTable data={data} />
             <Flex gap={2}>
               <Button view="normal" size="m" onClick={() => void lock()} loading={busy}>
                 Отключить
@@ -277,8 +341,10 @@ function AiUnlockSection() {
         ) : (
           <Flex direction="column" gap={3}>
             <Text variant="body-short" color="secondary">
-              {`Сейчас на сегодня осталось: AI-обзоров – ${left(data.overview.day)}, проверок оценки – ${left(data.check.day)}. Пароль снимает личные лимиты.`}
+              {`Сутки считаются с 00:00 по московскому времени.${data.unlockAvailable ? " Пароль снимает личные лимиты." : ""}`}
             </Text>
+            <AiQuotaTable data={data} />
+            {data.unlockAvailable && (
             <Flex gap={2} alignItems="flex-start" wrap>
               <TextInput
                 className="rh-grow"
@@ -295,6 +361,7 @@ function AiUnlockSection() {
                 Включить
               </Button>
             </Flex>
+            )}
             {error && (
               <Text color="danger" variant="body-short">
                 {error}
