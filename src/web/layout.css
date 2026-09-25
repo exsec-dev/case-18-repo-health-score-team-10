@@ -2393,6 +2393,11 @@ button.rh-category:focus-visible {
   min-width: 0;
 }
 
+/* §2 25.09: от описания до таблицы — один шаг раздела, без поля заголовка */
+.rh-cmp-page > .g-flex:first-child {
+  margin-bottom: 0 !important;
+}
+
 .rh-cmp-empty {
   max-width: 820px;
 }
@@ -2464,9 +2469,9 @@ button.rh-category:focus-visible {
 
 /* фон карточки непрозрачный — закрепленная шапка перекрывает прокручиваемые строки */
 .rh-cmp {
-  /* §2 25.09: цвет владельца #4d4d4d — ближайший нейтральный непрозрачный токен:
-     simple-hover-solid (темная #525252, светлая #f2f2f2) */
-  --rh-cmp-card: var(--g-color-base-simple-hover-solid);
+  /* §2 25.09: цвет владельца #3e3e3e — точный токен фона бокового меню
+     (темная #3e3e3e, светлая #f2f2f2): карточки одного тона с rail */
+  --rh-cmp-card: var(--gn-aside-header-expanded-background-color);
   display: grid;
   column-gap: var(--g-spacing-3);
 }
@@ -2489,12 +2494,26 @@ button.rh-category:focus-visible {
   border: 1px dashed var(--g-color-line-generic-accent);
 }
 
+/* вариант А: подложка строки подметрик — поперек подписи и карточек, над фоном карточки,
+   под текстом; при наведении — плотнее */
+.rh-cmp-stripe {
+  position: relative;
+  z-index: 1;
+  border-radius: var(--g-border-radius-s);
+  background: var(--g-color-base-generic);
+  pointer-events: none;
+}
+
+.rh-cmp-stripe_hover {
+  background: var(--g-color-base-generic-hover);
+}
+
 /* ячейки поверх карточек */
 .rh-cmp-label,
 .rh-cmp-cell,
 .rh-cmp-merged-wrap {
   position: relative;
-  z-index: 1;
+  z-index: 2;
 }
 
 /* линия строки — сегментами: по подписи и по карточкам с оценкой (аудит Д2) */
@@ -2573,6 +2592,22 @@ button.rh-category:focus-visible {
 .rh-cmp-sublabel {
   padding-inline-start: 22px;
 }
+
+/* вариант А: ровные строки подметрик — подпись в одну строку, высота строки 32 px */
+.rh-cmp-sublabel_line {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rh-cmp-label_sub,
+.rh-cmp-cell_sub {
+  min-height: 32px !important;
+}
+
 
 .rh-cmp-toggle {
   display: flex;
@@ -2788,6 +2823,16 @@ button.rh-category:focus-visible {
 
 .rh-cmp-lead_legend {
   background: var(--g-color-base-generic);
+}
+
+.rh-cmp-lead_text {
+  padding: 0;
+  background: none;
+  font-weight: 600;
+}
+
+.rh-cmp-lead_text .g-text {
+  font-weight: 600;
 }
 
 .rh-cmp-lead_bare {

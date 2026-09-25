@@ -726,7 +726,31 @@ function CompareTable({
 
   // оформление (aria-hidden): карточки столбцов (десктоп) и линии строк — по сегментам,
   // только по подписи и столбцам с оценкой: объединенные ячейки линии не пересекают (аудит Д2)
+  // вариант А (§2 25.09): подстроки раскрытия — ровные строки, через одну легкая подложка
+  // поперек подписи и всех карточек; при наведении строка подсвечивается целиком
+  const [hoverRow, setHoverRow] = useState<number | null>(null);
+  const zebra = new Set<number>();
+  let subIndex = 0;
+  rows.forEach((row, r) => {
+    if (row.kind !== "sub") {
+      subIndex = 0;
+      return;
+    }
+    if (subIndex % 2 === 1) zebra.add(r);
+    subIndex++;
+  });
   const decor: ReactNode[] = [];
+  rows.forEach((row, r) => {
+    if (row.kind !== "sub" || (!zebra.has(r) && hoverRow !== r)) return;
+    decor.push(
+      <div
+        key={`zb${r}`}
+        aria-hidden="true"
+        className={hoverRow === r ? "rh-cmp-stripe rh-cmp-stripe_hover" : "rh-cmp-stripe"}
+        style={{ gridRow: phone ? `${labelRow(r)} / span 2` : labelRow(r), gridColumn: "1 / -1" }}
+      />,
+    );
+  });
   if (!phone) {
     cols.forEach((c, i) =>
       decor.push(<div key={`bg${i}`} aria-hidden="true" className={c.kind === "invite" ? "rh-cmp-colcard rh-cmp-colcard_invite" : "rh-cmp-colcard"} style={{ gridRow: `1 / ${lastRow + 1}`, gridColumn: cellCol(i) }} />),
@@ -744,6 +768,9 @@ function CompareTable({
       decor.push(<div key={`ln${r}c${i}`} aria-hidden="true" className="rh-cmp-line rh-cmp-line_card" style={{ gridRow: labelRow(r), gridColumn: cellCol(i) }} />);
     });
   });
+
+  const hoverProps = (r: number) =>
+    rows[r]?.kind === "sub" ? { onMouseEnter: () => setHoverRow(r), onMouseLeave: () => setHoverRow((h) => (h === r ? null : h)) } : {};
 
   const bodyRows: ReactNode[] = rows.map((row, r) => {
     const values = cols.map((c) => (c.kind === "scored" ? leaderInput(row, c.card) : undefined));
@@ -782,7 +809,7 @@ function CompareTable({
           return;
         }
         cells.push(
-          <div key={`c${i}`} role="cell" className={`rh-cmp-cell rh-cmp-cell_card rh-cmp-cell_${row.kind}`} style={at(cellRow(r), cellCol(i))}>
+          <div key={`c${i}`} role="cell" className={`rh-cmp-cell rh-cmp-cell_card rh-cmp-cell_${row.kind}`} style={at(cellRow(r), cellCol(i))} {...hoverProps(r)}>
             <CellValue row={row} card={c.card} leader={leaders[i] === true} phone={phone} year={year} sharedTotal={sharedTotal} />
           </div>,
         );
@@ -790,7 +817,13 @@ function CompareTable({
     }
     return (
       <div key={`r${r}`} role="row" className="rh-cmp-row">
-        <div role="rowheader" id={firstSub ? firstSubId((row as { cat: CategoryKey }).cat) : undefined} className={`rh-cmp-label rh-cmp-label_${row.kind}`} style={at(labelRow(r), labelCol)}>
+        <div
+          role="rowheader"
+          id={firstSub ? firstSubId((row as { cat: CategoryKey }).cat) : undefined}
+          className={`rh-cmp-label rh-cmp-label_${row.kind}`}
+          style={at(labelRow(r), labelCol)}
+          {...hoverProps(r)}
+        >
           <RowLabel row={row} metaLabel={metaLabel} open={row.kind === "category" && openCats.has(row.key)} expandable={row.kind === "category" && expandable(row.key)} controls={row.kind === "category" ? firstSubId(row.key) : undefined} onToggle={toggle} />
         </div>
         {cells}
@@ -879,8 +912,9 @@ function RowLabel({
         </Text>
       );
     case "sub":
+      // вариант А: подпись в одну строку, полное имя — в подсказке
       return (
-        <Text variant="body-1" color={displayOnly(row.cat, row.sub) ? "secondary" : "complementary"} className="rh-cmp-sublabel">
+        <Text variant="body-1" color={displayOnly(row.cat, row.sub) ? "secondary" : "complementary"} className="rh-cmp-sublabel rh-cmp-sublabel_line" title={submetricTitle(row.cat, row.sub)}>
           {submetricTitle(row.cat, row.sub)}
         </Text>
       );
@@ -891,10 +925,11 @@ function RowLabel({
  * Число с отметкой лидера: стрелка всегда; подложка — только под нейтральным
  * числом (контраст, дизайн §6.4). На серой карточке подложка — на ступень темнее.
  */
-function Lead({ leader, plain, children }: { leader: boolean; plain: boolean; children: ReactNode }) {
+function Lead({ leader, plain, text = false, children }: { leader: boolean; plain: boolean; text?: boolean; children: ReactNode }) {
   if (!leader) return <>{children}</>;
+  // вариант А: в подстроках лидер — жирным со стрелкой, без плашки (столбик баллов ровный)
   return (
-    <span className={plain ? "rh-cmp-lead" : "rh-cmp-lead rh-cmp-lead_bare"}>
+    <span className={text ? "rh-cmp-lead rh-cmp-lead_text" : plain ? "rh-cmp-lead" : "rh-cmp-lead rh-cmp-lead_bare"}>
       <Icon data={CaretUp} size={14} />
       {children}
       <span className="rh-sr-only">, лучший балл строки</span>
@@ -1053,7 +1088,7 @@ function CellValue({ row, card, leader, phone, year, sharedTotal }: { row: Row; 
         ref || !entry || entry.score === null || entry.score === undefined ? (
           <NoDataGlyph reason={ref ? "Показывается для справки, в балл категории не входит" : NO_DATA} />
         ) : (
-          <Lead leader={leader} plain>
+          <Lead leader={leader} plain text>
             <Text variant="body-1">{phone ? `балл ${fmtSubmetric(entry.score)}` : fmtSubmetric(entry.score)}</Text>
           </Lead>
         );
