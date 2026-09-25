@@ -14,8 +14,8 @@ import { DEFAULT_SCAN, defaultLeaseMs, type ScanConfig } from "../config";
 import { roundScore, type GitLimitsMarker } from "../web/format";
 import type { DerivedMetrics } from "../score/derived";
 import { INDEX_WEIGHTS, SCORE_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, type IndexCategoryKey, MODEL_VERSION, SECRETS_CRITICAL_TOTAL_CAP } from "../score/model";
-import { getSummaryAuto } from "../summary/optin";
 import type { AiAudience } from "../db";
+import { NO_RHYTHM_REASON } from "../summary/pipeline";
 
 // ---------- общие формы ----------
 
@@ -601,6 +601,21 @@ export interface CardAiFailure {
   reason: string;
 }
 
+export interface CardAiCheck {
+  /** живая заявка проверки по репо */
+  active: boolean;
+  /** скан последней проверки (с флагом или отказом); null — проверок не было */
+  scanId: number | null;
+  /** когда проверка записана */
+  checkedAt: string | null;
+  /** причина языком продукта, если последняя проверка не сформировалась (ленты нет, модель, валидатор) */
+  failure: string | null;
+  /** проверку этого анализа можно повторить: отказ модели или валидатора (ленты нет — повторять нечего) */
+  retryable: boolean;
+  /** последний завершенный скан репо — проверка устарела, если он новее */
+  latestScanId: number | null;
+}
+
 export interface CardAi {
   /** скан последней генерации */
   scanId: number;
@@ -611,8 +626,6 @@ export interface CardAi {
   specialists: CardAiNote[];
   /** 23.09: роли, не прошедшие формирование, с честной причиной для карточки */
   failures: CardAiFailure[];
-  /** зритель-владелец включил автозапуск (тумблер слота) */
-  optIn: boolean;
   /** живая summary-заявка — кнопка показывает «формируется» */
   jobActive: boolean;
   /** до какого времени кулдаун кнопки (Config.queue.summaryCooldownMs) */
@@ -621,6 +634,12 @@ export interface CardAi {
    * В5 (К5.10): флаг фрода — подозрение для проверки человеком; на показ
    * только зрителю с полным Score (там же, где текст). Score не меняет.
    */
+  /**
+   * В5.2 (Б3): состояние проверки на накрутку — для кнопки «Проверить оценку» и
+   * трех состояний метки: fraud = null — «не проверялось» (или отказ, failure),
+   * flag false — «признаков нет», flag true — «есть признаки»
+   */
+  check: CardAiCheck;
   fraud: {
     flag: boolean;
     factors: { key: string; note: string }[];
@@ -1195,9 +1214,6 @@ function buildCardAi(db: Database, repoId: number, viewerUserId: number | undefi
     (db.query("SELECT MAX(scan_id) AS s FROM ai_notes WHERE repo_id = ? AND role != 'flagger' AND audience = ?").get(repoId, a) as { s: number | null }).s;
   const audience = audiences.find((a) => lastOf(a) !== null) ?? audiences[0]!;
   const lastScan = lastOf(audience);
-  const slugRow = db.query("SELECT org_slug, repo_slug FROM repos WHERE id = ?").get(repoId) as { org_slug: string; repo_slug: string };
-  const slug = `${slugRow.org_slug}/${slugRow.repo_slug}`;
-  const optIn = viewerUserId !== undefined ? getSummaryAuto(db, viewerUserId, slug) : false;
   // В5.1-smoke (23.09): bun:sqlite .get() возвращает null при пустом
   // результате — сравнение с undefined делало jobActive константным true
   const jobActive =
@@ -1205,8 +1221,9 @@ function buildCardAi(db: Database, repoId: number, viewerUserId: number | undefi
   const lastJobAt = (db.query("SELECT MAX(created_at) AS t FROM jobs WHERE repo_id = ? AND kind = 'summary' AND audience = ?").get(repoId, audience) as { t: string | null }).t;
   const cooldownUntil = lastJobAt === null ? null : new Date(Date.parse(lastJobAt) + cooldownMs).toISOString();
   const fraud = fraudOf(db, repoId);
+  const check = checkOf(db, repoId);
   if (lastScan === null) {
-    return { scanId: 0, audience, generatedAt: null, overview: null, specialists: [], failures: [], optIn, jobActive, cooldownUntil, fraud };
+    return { scanId: 0, audience, generatedAt: null, overview: null, specialists: [], failures: [], jobActive, cooldownUntil, check, fraud };
   }
   // В5.2 (Б1): проверка на накрутку — отдельная заявка; ее отказ не отказ обзора
   const fails = db
@@ -1233,11 +1250,43 @@ function buildCardAi(db: Database, repoId: number, viewerUserId: number | undefi
     overview: overview ? toNote(overview) : null,
     specialists,
     failures: fails,
-    optIn,
     jobActive,
     cooldownUntil,
+    check,
     fraud,
   };
+}
+
+/** Состояние проверки на накрутку (В5.2, Б3): живая заявка, последняя проверка или ее отказ. */
+function checkOf(db: Database, repoId: number): CardAiCheck {
+  const active = db.query("SELECT 1 FROM jobs WHERE repo_id = ? AND kind = 'check' AND status IN ('queued', 'running') LIMIT 1").get(repoId) !== null;
+  const note = db
+    .query("SELECT scan_id, created_at FROM ai_notes WHERE repo_id = ? AND role = 'flagger' ORDER BY scan_id DESC, id DESC LIMIT 1")
+    .get(repoId) as { scan_id: number; created_at: string } | null;
+  const fail = db
+    .query("SELECT scan_id, reason, created_at FROM ai_fails WHERE repo_id = ? AND role = 'flagger' ORDER BY scan_id DESC, id DESC LIMIT 1")
+    .get(repoId) as { scan_id: number; reason: string; created_at: string } | null;
+  const latest = db.query("SELECT id FROM scans WHERE repo_id = ? AND status IN ('ok', 'partial') ORDER BY id DESC LIMIT 1").get(repoId) as { id: number } | null;
+  // отказ показывается, только если он новее последней записанной проверки
+  const failNewer = fail !== null && (note === null || fail.scan_id > note.scan_id || (fail.scan_id === note.scan_id && fail.created_at > note.created_at));
+  return {
+    active,
+    scanId: failNewer ? fail!.scan_id : (note?.scan_id ?? null),
+    checkedAt: failNewer ? fail!.created_at : (note?.created_at ?? null),
+    failure: failNewer ? checkFailureText(fail!.reason) : null,
+    retryable: failNewer && fail!.reason !== NO_RHYTHM_REASON,
+    latestScanId: latest?.id ?? null,
+  };
+}
+
+/**
+ * Причина отказа проверки языком продукта: ai_fails хранит технический текст
+ * («модель: сеть: …», «валидатор: …») — на карточку он не выводится.
+ */
+export function checkFailureText(reason: string): string {
+  if (reason === NO_RHYTHM_REASON) return "в анализе нет истории коммитов – проверять нечего";
+  if (reason.startsWith("модель:")) return "AI-провайдер не ответил – попробуйте позже";
+  return "ответ модели не прошел проверку фактами – можно повторить";
 }
 
 /**

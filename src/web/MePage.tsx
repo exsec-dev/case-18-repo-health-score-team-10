@@ -199,9 +199,114 @@ export function SettingsPage() {
       {/* В4.8.5 (К8.5.3, С2-4): секция токена не перемонтируется по дате
           проверки — строка «Токен принадлежит…» после сохранения остаётся */}
       <PatSection hasPat={data.hasPat} unreadable={data.patUnreadable === true} checkedAt={data.patCheckedAt} onChanged={reloadMe} />
+      {/* В5.2 (Б4): пароль неограниченного доступа к AI — только если он настроен на сервере */}
+      <AiUnlockSection />
     </Page>
   );
 }
+/** Ответ `/api/me/ai-quota` (В5.2, Б4) — поля, которые читает раздел «Доступ к AI». */
+interface AiQuotaResponse {
+  unlockAvailable: boolean;
+  unlocked: boolean;
+  overview: { hour: { used: number; limit: number } | null; day: { used: number; limit: number } | null };
+  check: { hour: { used: number; limit: number } | null; day: { used: number; limit: number } | null };
+}
+
+/**
+ * «Доступ к AI без лимитов» (В5.2, Б4; §2 «В5.2 — публичный AI-обзор…» п.6): пароль
+ * выдается организаторам. Без пароля — обычные лимиты. Расположение и вид — через
+ * дизайн-анализ Б6; здесь рабочий минимум по образцу секции токена.
+ */
+function AiUnlockSection() {
+  const quota = useJson<AiQuotaResponse>("/api/me/ai-quota");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const toaster = useToaster();
+  const data = dataOf(quota.state);
+  if (data === null || !data.unlockAvailable) return null;
+  const left = (w: { used: number; limit: number } | null): string => (w === null ? "без лимита" : `${Math.max(0, w.limit - w.used)} из ${w.limit}`);
+
+  async function unlock() {
+    setBusy(true);
+    setError(null);
+    try {
+      await mutateJson<{ ok: boolean }>("/api/me/ai-unlock", "POST", { password });
+      setPassword("");
+      toaster.add({ name: "ai-unlocked", theme: "success", title: "Доступ без лимитов включен", content: "AI-обзоры и проверки оценки больше не ограничены личными лимитами." });
+      quota.reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function lock() {
+    setBusy(true);
+    try {
+      await mutateJson<{ ok: boolean }>("/api/me/ai-unlock", "DELETE");
+      quota.reload();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card view="outlined" className="rh-settings-card">
+      <Flex as="section" direction="column" gap={3}>
+        <Text variant="subheader-2" as="h2">
+          Доступ к AI без лимитов
+        </Text>
+        {data.unlocked ? (
+          <Flex direction="column" gap={3}>
+            <Flex gap={2} alignItems="center" wrap>
+              <Label theme="success" size="xs">
+                Включен
+              </Label>
+              <Text variant="body-short" color="secondary">
+                AI-обзоры и проверки оценки не ограничены личными лимитами.
+              </Text>
+            </Flex>
+            <Flex gap={2}>
+              <Button view="normal" size="m" onClick={() => void lock()} loading={busy}>
+                Отключить
+              </Button>
+            </Flex>
+          </Flex>
+        ) : (
+          <Flex direction="column" gap={3}>
+            <Text variant="body-short" color="secondary">
+              {`Сейчас на сегодня осталось: AI-обзоров – ${left(data.overview.day)}, проверок оценки – ${left(data.check.day)}. Пароль снимает личные лимиты.`}
+            </Text>
+            <Flex gap={2} alignItems="flex-start" wrap>
+              <TextInput
+                className="rh-grow"
+                type="password"
+                size="m"
+                placeholder="Пароль доступа"
+                value={password}
+                onUpdate={setPassword}
+                hasClear
+                autoComplete="off"
+                controlProps={{ "aria-label": "Пароль доступа к AI без лимитов" }}
+              />
+              <Button view="action" size="m" onClick={() => void unlock()} loading={busy} disabled={busy || password.length === 0}>
+                Включить
+              </Button>
+            </Flex>
+            {error && (
+              <Text color="danger" variant="body-short">
+                {error}
+              </Text>
+            )}
+          </Flex>
+        )}
+      </Flex>
+    </Card>
+  );
+}
+
 
 /**
  * «Аккаунт» — кто вошёл и выход. Здесь выход доступен всегда, в том числе при
@@ -1410,10 +1515,16 @@ function JobRow({ job, onNavigate }: { job: import("../api/me").MyJob; onNavigat
             описание AI
           </Text>
         )}
+        {/* В5.2 (Б3): проверка на накрутку — свой род заявки */}
+        {job.kind === "check" && (
+          <Text color="secondary" variant="caption-2">
+            проверка оценки
+          </Text>
+        )}
       </div>
       {/* Ф2.15 / LOW-8 (решение 18.09): очередью правит round-robin — статус без числа позиции */}
       <span className="rh-state rh-busy">
-        {job.phase === "queued" ? "В очереди" : job.kind === "summary" ? "Генерация описания" : "Сканируется"}
+        {job.phase === "queued" ? "В очереди" : job.kind === "summary" ? "Генерация описания" : job.kind === "check" ? "Проверка оценки" : "Сканируется"}
       </span>
 
     </div>
@@ -1479,6 +1590,12 @@ function HistoryRow({ job, time, onNavigate }: { job: import("../api/me").MyJob;
         {job.kind === "summary" && (
           <Text color="secondary" variant="caption-2">
             описание AI
+          </Text>
+        )}
+        {/* В5.2 (Б3): проверка на накрутку — свой род заявки */}
+        {job.kind === "check" && (
+          <Text color="secondary" variant="caption-2">
+            проверка оценки
           </Text>
         )}
         {job.phase === "failed" && job.error && (

@@ -14,8 +14,6 @@ import { openDb } from "../src/db";
 import { cardFacts, seedRepo, seedScan, seedScore, seedRecommendation } from "./api-fixtures";
 import { runScan } from "../src/jobs/runner";
 import { claimNext, enqueueSummary, finishJob, lastFinishedScan, processSummaryJob, type ClaimedJob } from "../src/jobs/scheduler";
-import { makeAutoSummary } from "../src/summary/pipeline";
-import { setSummaryAuto, anySummaryAuto, getSummaryAuto } from "../src/summary/optin";
 import { runSummary } from "../src/summary/pipeline";
 import type { CallLlm } from "../src/llm";
 import { startMockApi } from "./server-harness";
@@ -282,12 +280,15 @@ describe("processSummaryJob: клон → конвейер → ai_notes (мок 
   }, 60_000);
 });
 
-describe("Авто-генерация в окне скана по оп-ину (спека §3.4)", () => {
-  test("runScan вызывает хук только с живым клоном; оп-ин решает внутри фабрики", async () => {
+// В5.2 (Б3, §2 «В5.2 — публичный AI-обзор…» п.3): автообновление по оп-ину удалено —
+// скан AI не запускает, даже если в user_settings остался прежний оп-ин
+describe("Автообновления по оп-ину нет (В5.2)", () => {
+  test("runScan не генерирует обзор и не ставит AI-заявок при старом оп-ине в настройках", async () => {
     const srcRoot = buildFixtureRepo();
     const { db } = freshDb("rh-v5b3-auto-");
-    const repoId = seedRepo(wrap(db), { org: "v5", repo: "sha" });
-    const calls: { scanId: number; cloneDir: string | null }[] = [];
+    seedRepo(wrap(db), { org: "v5", repo: "sha" });
+    db.query("INSERT INTO users (id, ya_id, login, created_at, last_login_at) VALUES (42, 'ya-42', 'u42', '2026', '2026')").run();
+    db.query("INSERT INTO user_settings (user_id, scan, updated_at) VALUES (42, ?, '2026')").run(JSON.stringify({ summary: { repos: { "v5/sha": true } } }));
     const res = await runScan(
       {
         db,
@@ -296,57 +297,13 @@ describe("Авто-генерация в окне скана по оп-ину (�
         appsecBase: "http://127.0.0.1:1",
         gitUrl: () => `file://${srcRoot}/v5/sha`,
         collectRest: async () => ({ facts: [], repoMeta: null, channelErrors: [] }),
-        summaryAutoRun: async (ctx) => {
-          calls.push({ scanId: ctx.scanId, cloneDir: ctx.cloneDir });
-          return Promise.resolve();
-        },
       },
       "v5/sha",
       { trigger: "test" },
     );
     expect(res.status).not.toBe("bad");
-    expect(calls.length).toBe(1);
-    expect(calls[0]!.scanId).toBe(res.scanId);
-    expect(calls[0]!.cloneDir).not.toBeNull();
-    // после выхода из runScan клон уже убран
-    expect(calls[0]!.cloneDir ? require("node:fs").existsSync(calls[0]!.cloneDir) : false).toBe(false);
-  }, 120_000);
-
-  test("makeAutoSummary: без оп-ина молча выходит; с оп-ином генерирует (мок LLM) и убирает worktree", async () => {
-    const srcRoot = buildFixtureRepo();
-    const mock = startLlmMock();
-    const { db } = freshDb("rh-v5b3-autosum-");
-    try {
-      const repoId = seedRepo(wrap(db), { org: "v5", repo: "sha" });
-      // ревью В5.3 (25.09): автозапуск не идет по скану с закрытым каналом (scanChannelDenied) —
-      // здесь проверяется оп-ин, поэтому CI/CD в скане открыт (в cardFacts он no-data «access»)
-      const facts = cardFacts().filter((f) => f.key !== "cicd.runs");
-      const scanId = seedScan(wrap(db), repoId, { facts });
-      seedScore(wrap(db), repoId, scanId, { total: 55 });
-      const base = loadConfig();
-      const config = { llm: { ...base.llm, provider: "zai" as const, zaiApiKey: "test-key", baseUrl: mock.url, mainModel: "m1", sideModel: "m2" } };
-      const hook = makeAutoSummary(config);
-      const cloneDir = `${mkdtempSync(join(tmpdir(), "rh-v5b3-bare-"))}`;
-      dirs.push(cloneDir);
-      execFileSync("git", ["clone", "-q", "--bare", `file://${srcRoot}/v5/sha`, cloneDir], { stdio: ["ignore", "pipe", "pipe"] });
-      // без оп-ина — тихий выход
-      await hook({ db, repoId, scanId, org: "v5", repo: "sha", cloneDir });
-      expect((db.query("SELECT COUNT(*) AS c FROM ai_notes").get() as { c: number }).c).toBe(0);
-      // с оп-ином — генерация
-      setSummaryAuto(db, 42, "v5/sha", true);
-      expect(getSummaryAuto(db, 42, "v5/sha")).toBe(true);
-      expect(anySummaryAuto(db, "v5/sha")).toBe(true);
-      await hook({ db, repoId, scanId, org: "v5", repo: "sha", cloneDir });
-      const notes = db.query("SELECT role FROM ai_notes WHERE scan_id = ?").all(scanId) as { role: string }[];
-      expect(notes.map((n) => n.role)).toContain("overview");
-      // worktree сиблинг убран
-      expect(require("node:fs").existsSync(`${cloneDir}.wt`)).toBe(false);
-      // оп-ин выключение
-      setSummaryAuto(db, 42, "v5/sha", false);
-      expect(anySummaryAuto(db, "v5/sha")).toBe(false);
-    } finally {
-      mock.stop();
-    }
+    expect((db.query("SELECT COUNT(*) AS c FROM ai_notes").get() as { c: number }).c).toBe(0);
+    expect((db.query("SELECT COUNT(*) AS c FROM jobs WHERE kind != 'scan'").get() as { c: number }).c).toBe(0);
   }, 120_000);
 });
 
@@ -407,7 +364,7 @@ describe("Видимость AI-текста: полные права откры
     expect(open?.ai).toBeDefined();
     expect(open?.ai?.overview?.text).toContain("README и CI");
     expect(open?.ai?.specialists.length).toBe(5);
-    expect(open?.ai?.optIn).toBe(false);
+    expect(open?.ai).not.toHaveProperty("optIn"); // В5.2 (Б3): оп-ина нет
     expect(open?.ai?.audience).toBe("full");
     const anon = getRepoCard(db, "v5", "vis", { access: NO_PAT_ACCESS });
     expect(anon?.ai?.audience).toBe("public");
@@ -418,7 +375,7 @@ describe("Видимость AI-текста: полные права откры
     db.close();
   });
 
-  test("живой сервер: аноним — 401 на POST, карточка без полного текста; чужой со сессией — 403 not_own", async () => {
+  test("живой сервер: аноним — 401 на POST, карточка без полного текста; вошедший не-владелец — публичный обзор", async () => {
     const dir = mkdtempSync(join(tmpdir(), "rh-v5b3-routes-"));
     moreDirs.push(dir);
     const db = openDb({ ...loadConfig(), dataDir: dir });
@@ -442,11 +399,15 @@ describe("Видимость AI-текста: полные права откры
     // аноним: POST — 401
     const anonPost = await fetch(`${server.base}/api/repos/v5/vis/summary`, { method: "POST" });
     expect(anonPost.status).toBe(401);
-    // вошедший «не свой» (публичный без CI/Security прав) — 403 not_own
+    // В5.2 (Б3, §2 п.1): вошедший «не свой» на публичном репо ставит ПУБЛИЧНЫЙ обзор
     const ownPost = await fetch(`${server.base}/api/repos/v5/vis/summary`, { method: "POST", headers: { cookie } });
-    const body = (await ownPost.json()) as { error?: { code?: string } };
-    expect(ownPost.status).toBe(403);
-    expect(body.error?.code).toBe("not_own");
+    const body = (await ownPost.json()) as { audience?: string; jobId?: number | null };
+    expect(ownPost.status).toBe(200);
+    expect(body.audience).toBe("public");
+    const dbAfter = openDb({ ...loadConfig(), dataDir: dir });
+    const job = dbAfter.query("SELECT audience, user_id FROM jobs WHERE kind = 'summary' ORDER BY id DESC LIMIT 1").get() as { audience: string; user_id: number };
+    dbAfter.close();
+    expect(job).toEqual({ audience: "public", user_id: userId });
   }, 120_000);
 });
 
@@ -496,7 +457,8 @@ describe("В5.1-smoke: jobActive честный (null-vs-undefined регрес�
     expect(c3.ai?.jobActive).toBe(true);
   });
 
-  test("PUT /summary-auto — только политика: оп-ин меняется, заявок не создается (23.09)", async () => {
+  // В5.2 (Б3): маршрут переключателя удален вместе с автообновлением
+  test("PUT /summary-auto и DELETE /summary больше не существуют — заявок и настроек не меняют", async () => {
     const dir = mkdtempSync(join(tmpdir(), "rh-v51-auto-"));
     moreDirs.push(dir);
     const db = openDb({ ...loadConfig(), dataDir: dir });
@@ -505,37 +467,25 @@ describe("В5.1-smoke: jobActive честный (null-vs-undefined регрес�
     seedScoreFx(wrap(db), repoId, scanId, { total: 50 });
     const userId = upsertUser(db, "ya-v51", "v51user");
     const cookie = `${SESSION_COOKIE}=${createSession(db, "x".repeat(32), userId)}`;
-    const { storePat } = await import("../src/auth/pat");
-    storePat(db, "x".repeat(32), userId, "PAT-TOKEN");
     db.close();
     const mock = startMockApi((req, url) => {
       if (url.pathname.endsWith("/repos/v51/flag")) return Response.json({ id: "777", visibility: "public", slug: "flag", organization: { slug: "v51" } });
-      if (url.pathname.endsWith("/v1/scans/latest")) return Response.json({ findings: [] });
-      if (url.pathname.endsWith("/cicd/runs")) return Response.json({ runs: [], items: [] });
       return null;
     });
     mocks.push(mock);
     const server = await spawnServer({ dataDir: dir, mock, appSecret: "x".repeat(32) });
     servers.push(server);
-    const url = `${server.base}/api/repos/v51/flag/summary-auto`;
     const headers = { cookie, "content-type": "application/json" };
-    // on: true — 200, оп-ин в карточке виден, summary-заявок НЕ создано
-    const on = await fetch(url, { method: "PUT", headers, body: JSON.stringify({ on: true }) });
-    expect(on.status).toBe(200);
-    const card1 = (await (await fetch(`${server.base}/api/repos/v51/flag`, { headers: { cookie } })).json()) as { ai?: { optIn?: boolean } };
-    expect(card1.ai?.optIn).toBe(true);
+    const put = await fetch(`${server.base}/api/repos/v51/flag/summary-auto`, { method: "PUT", headers, body: JSON.stringify({ on: true }) });
+    expect(put.status).toBeGreaterThanOrEqual(400);
+    const del = await fetch(`${server.base}/api/repos/v51/flag/summary`, { method: "DELETE", headers });
+    expect(del.status).toBeGreaterThanOrEqual(400);
     const db2 = openDb({ ...loadConfig(), dataDir: dir });
-    const jobs = db2.query("SELECT COUNT(*) AS n FROM jobs WHERE repo_id = ? AND kind = 'summary'").get(repoId) as { n: number };
+    const jobs = db2.query("SELECT COUNT(*) AS n FROM jobs WHERE repo_id = ? AND kind != 'scan'").get(repoId) as { n: number };
+    const settings = db2.query("SELECT COUNT(*) AS n FROM user_settings").get() as { n: number };
     db2.close();
     expect(jobs.n).toBe(0);
-    // on: false — 200, оп-ин снят
-    const off = await fetch(url, { method: "PUT", headers, body: JSON.stringify({ on: false }) });
-    expect(off.status).toBe(200);
-    const card2 = (await (await fetch(`${server.base}/api/repos/v51/flag`, { headers: { cookie } })).json()) as { ai?: { optIn?: boolean } };
-    expect(card2.ai?.optIn).toBe(false);
-    // мусорный body — 400, окно мутаций не списывается (К8.5.7)
-    const bad = await fetch(url, { method: "PUT", headers, body: JSON.stringify({}) });
-    expect(bad.status).toBe(400);
+    expect(settings.n).toBe(0);
   });
 
   test("куладаун на карточке уважает дебаг-куладаун из env (23.09: пламб рвался в resolveCardForViewer)", async () => {

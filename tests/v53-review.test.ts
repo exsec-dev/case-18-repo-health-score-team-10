@@ -9,7 +9,6 @@ import { join } from "node:path";
 import { loadConfig } from "../src/config";
 import { openDb } from "../src/db";
 import { createSession, SESSION_COOKIE, upsertUser } from "../src/auth/session";
-import { scanChannelDenied } from "../src/summary/pipeline";
 import { favoriteAddedText, notOwnReason } from "../src/web/format";
 import { scoreHistoryView } from "../src/web/slots";
 import { makeApiDb, seedRepo, seedScan } from "./api-fixtures";
@@ -80,29 +79,10 @@ describe("ревью В5.3: AI-обзор без прав на CI/CD и Безо
     }
   }, 30_000);
 
-  test("PUT /summary-auto on:true — 403 no_full_access; выключить можно всегда", async () => {
-    const on = await call("PUT", "/api/repos/inner/code-only/summary-auto", { on: true });
-    expect(on.status).toBe(403);
-    expect(((await on.json()) as { error: { code: string } }).error.code).toBe("no_full_access");
-    const off = await call("PUT", "/api/repos/inner/code-only/summary-auto", { on: false });
-    expect(off.status).toBe(200);
-  }, 30_000);
 });
 
-describe("ревью В5.3: автозапуск обзора не идет по скану с закрытым каналом", () => {
-  test("факт канала no-data(access) — обзор не генерируется; открытые каналы — генерируется", () => {
-    const t = makeApiDb();
-    try {
-      const id = seedRepo(t, { org: "a", repo: "b" });
-      const denied = seedScan(t, id, { facts: [{ key: "cicd.runs", value: { reason: "access", detail: "status 403" }, status: "no-data" }] });
-      const open = seedScan(t, id, { facts: [{ key: "appsec.findings", value: { reason: "no-scan" }, status: "no-data" }] });
-      expect(scanChannelDenied(t.db, denied)).toBe(true);
-      expect(scanChannelDenied(t.db, open)).toBe(false);
-    } finally {
-      t.close();
-    }
-  });
-});
+// В5.2 (Б3): переключатель автообновления и гейт автозапуска по скану (scanChannelDenied)
+// удалены вместе с автообновлением по оп-ину (§2 «В5.2 — публичный AI-обзор…» п.3)
 
 describe("ревью В5.3: число и пустые состояния на данных", () => {
   const pt = (scanId: number, idx: number | null) => ({ scanId, finishedAt: `2026-09-2${scanId}T10:00:00Z`, healthcraftIndex: idx, indexCoverage: 1, repoHealthScore: null, modelVersion: "x", headSha: null, codeEmpty: false });

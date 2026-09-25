@@ -552,7 +552,8 @@ function tooManyActive(queue: QueueConfig): UserScanResponse {
 function rateLimited(db: Database, userId: number, queue: QueueConfig, now: Date): UserScanResponse {
   const since = new Date(now.getTime() - 3600_000).toISOString();
   const oldest = db
-    .query("SELECT MIN(created_at) AS t FROM jobs WHERE user_id = ? AND trigger_kind = 'user' AND created_at > ?")
+    // В5.2: время повтора — по тем же заявкам, что считает лимит (только сканы, countRecentUserJobs)
+    .query("SELECT MIN(created_at) AS t FROM jobs WHERE user_id = ? AND trigger_kind = 'user' AND kind = 'scan' AND created_at > ?")
     .get(userId, since) as { t: string | null };
   const retryAfterSec = oldest.t ? Math.max(1, Math.ceil((Date.parse(oldest.t) + 3600_000 - now.getTime()) / 1000)) : 60;
   return {

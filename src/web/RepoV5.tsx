@@ -24,7 +24,6 @@ import {
   Link,
   Popover,
   Skeleton,
-  Switch,
   Text,
   TextInput,
   useToaster,
@@ -187,17 +186,22 @@ function Collapsible({ children, resetKey }: { children: React.ReactNode; resetK
   );
 }
 
+/** В5.2 (Б4): текст отказа по лимиту — сообщение сервера и время, когда можно повторить. */
+function refusalText(error: { code?: string; message?: string; until?: string } | undefined, status: number): string {
+  const message = error?.message ?? `Ошибка ${status}`;
+  return error?.code === "quota_hour" && error.until ? `${message}. Следующий запуск – после ${fmtDateTime(error.until)}` : message;
+}
+
 function useSummaryActions(org: string, repo: string, onChanged: () => void) {
   const toaster = useToaster();
   const [sending, setSending] = useState(false);
-  const [autoBusy, setAutoBusy] = useState(false);
   const start = async (): Promise<void> => {
     setSending(true);
     try {
       const res = await fetch(`${apiBase(org, repo)}/summary`, { method: "POST" });
-      const body = (await res.json().catch(() => null)) as { jobId?: number | null; cached?: boolean; scanQueued?: boolean; error?: { message?: string } } | null;
+      const body = (await res.json().catch(() => null)) as { jobId?: number | null; cached?: boolean; scanQueued?: boolean; error?: { code?: string; message?: string; until?: string } } | null;
       if (!res.ok) {
-        toaster.add({ name: `summary-fail:${org}/${repo}`, theme: "danger", title: "Обзор не запущен", content: body?.error?.message ?? `Ошибка ${res.status}` });
+        toaster.add({ name: `summary-fail:${org}/${repo}`, theme: "danger", title: "Обзор не запущен", content: refusalText(body?.error, res.status) });
         return;
       }
       // 23.09 (smoke-круг 2): объявленное задание тостится, даже если опрос застал его завершенным
@@ -220,27 +224,88 @@ function useSummaryActions(org: string, repo: string, onChanged: () => void) {
       setSending(false);
     }
   };
-  // 23.09 (Алексей): тумблер — только политика автогенерации на будущие анализы, заявок не ставит
-  const setAuto = async (on: boolean): Promise<void> => {
-    setAutoBusy(true);
-    try {
-      const res = await fetch(`${apiBase(org, repo)}/summary-auto`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ on }) });
-      if (!res.ok) {
-        const err = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
-        toaster.add({ name: `summary-auto-fail:${org}/${repo}`, theme: "danger", title: "Режим не изменен", content: err?.error?.message ?? `Ошибка ${res.status}` });
-        return;
-      }
-      onChanged();
-    } finally {
-      setAutoBusy(false);
-    }
-  };
-  return { sending, autoBusy, start, setAuto };
+  // В5.2 (Б3): переключатель автообновления удален — обзор запускается только кнопкой
+  return { sending, start };
 }
 
-export function AiOverviewSection({ card, org, repo, onChanged }: { card: Card; org: string; repo: string; onChanged: () => void }) {
+/** «Проверить оценку» (В5.2, Б3): постановка проверки на накрутку. */
+function useCheckAction(org: string, repo: string, onChanged: () => void) {
+  const toaster = useToaster();
+  const [sending, setSending] = useState(false);
+  const start = async (): Promise<void> => {
+    setSending(true);
+    try {
+      const res = await fetch(`${apiBase(org, repo)}/check`, { method: "POST" });
+      const body = (await res.json().catch(() => null)) as { jobId?: number | null; cached?: boolean; error?: { code?: string; message?: string; until?: string } } | null;
+      if (!res.ok) {
+        toaster.add({ name: `check-fail:${org}/${repo}`, theme: "danger", title: "Проверка не запущена", content: refusalText(body?.error, res.status) });
+        return;
+      }
+      announceJobStarted(body?.jobId ?? undefined);
+      if (body?.cached !== true) announceJobsChanged();
+      onChanged();
+      toaster.add({
+        name: `check-ok:${org}/${repo}`,
+        theme: "success",
+        title: body?.cached === true ? "Этот анализ уже проверен" : "Проверка запущена",
+        content: body?.cached === true ? "Результат – в карточке. Новая проверка станет доступна после нового анализа." : "Результат появится в карточке через несколько секунд.",
+      });
+    } finally {
+      setSending(false);
+    }
+  };
+  return { sending, start };
+}
+
+/**
+ * Состояние проверки на накрутку и кнопка «Проверить оценку» (В5.2, Б3; §2 п.2).
+ * ВРЕМЕННОЕ расположение — строка под меткой фрода; место и вид решает
+ * дизайн-анализ Б6. Три состояния: не проверялось / признаков нет / есть признаки
+ * (последнее рисует FraudAlert). Кнопка — вошедшему, если проверки этого анализа нет.
+ */
+export function FraudCheckRow({ card, org, repo, onChanged, loggedIn }: { card: Card; org: string; repo: string; onChanged: () => void; loggedIn: boolean }) {
+  const ai = card.ai;
+  const action = useCheckAction(org, repo, onChanged);
+  useEffect(() => {
+    if (ai === undefined || ai === null || !ai.check.active) return;
+    const timer = setTimeout(onChanged, 5000);
+    return () => clearTimeout(timer);
+  }, [ai, onChanged]);
+  if (ai === undefined || ai === null) return null;
+  const { check, fraud } = ai;
+  const stale = check.scanId !== null && check.latestScanId !== null && check.scanId < check.latestScanId;
+  // повтор — если проверки этого анализа нет, она устарела или не сформировалась по вине модели
+  const canRun = loggedIn && !check.active && check.latestScanId !== null && (check.scanId === null || stale || check.retryable);
+  let text: string;
+  if (check.active) text = "Проверка на накрутку выполняется – результат появится здесь.";
+  else if (fraud !== null && fraud.flag) text = stale ? "Признаки накрутки найдены в прошлом анализе." : "";
+  else if (fraud !== null && check.failure === null) {
+    text = `Признаков накрутки нет${check.checkedAt ? ` – проверено ${fmtDateTime(check.checkedAt)}` : ""}${stale ? ", после проверки был новый анализ" : ""}.`;
+  } else if (check.failure !== null) text = `Проверка на накрутку не сформировалась: ${check.failure}.`;
+  else text = "Проверка на накрутку не проводилась.";
+  if (text === "" && !canRun) return null;
+  return (
+    <Flex gap={2} alignItems="center" wrap className="rh-fraud-check">
+      {text !== "" && (
+        <Text variant="body-1" color="secondary">
+          {text}
+        </Text>
+      )}
+      {canRun && (
+        <Button view="outlined" size="s" loading={action.sending} onClick={() => void action.start()}>
+          Проверить оценку
+        </Button>
+      )}
+    </Flex>
+  );
+}
+
+export function AiOverviewSection({ card, org, repo, onChanged, loggedIn }: { card: Card; org: string; repo: string; onChanged: () => void; loggedIn: boolean }) {
   const ai = card.ai;
   const own = card.viewer?.own === true;
+  // В5.2 (Б3): публичный обзор публичного репо запускает любой вошедший; закрытого — владелец
+  const canRun = loggedIn && (own || card.repo.visibility === "public");
+  const publicVersion = ai?.audience === "public";
   const actions = useSummaryActions(org, repo, onChanged);
 
   // smoke-круг 23.09: пока задание идет — карточка перечитывается раз в 5 с.
@@ -276,11 +341,15 @@ export function AiOverviewSection({ card, org, repo, onChanged }: { card: Card; 
           {/* ревью В5.3 (25.09): генерация была, но ни одна роль не прошла проверку — не «пока нет» */}
           <Text variant="subheader-2">{rejected ? "Обзор не прошел проверку фактами" : "Обзора пока нет"}</Text>
           <Text variant="body-1" color="complementary">
-            {own
-              ? "Модель перескажет оценку обычным языком и разберет каждую категорию. На расчет обзор не влияет."
-              : "Обзор запускает владелец репозитория. Модель пересказывает оценку и на расчет не влияет."}
+            {canRun
+              ? publicVersion
+                ? "Модель перескажет оценку обычным языком по открытым данным – 4 категориям без CI/CD и Безопасности. На расчет обзор не влияет."
+                : "Модель перескажет оценку обычным языком и разберет каждую категорию. На расчет обзор не влияет."
+              : card.repo.visibility === "public"
+                ? "Обзор может сформировать любой вошедший пользователь. Модель пересказывает оценку и на расчет не влияет."
+                : "Обзор запускает владелец репозитория. Модель пересказывает оценку и на расчет не влияет."}
           </Text>
-          {own && (
+          {canRun && (
             <div className="rh-score-band__signin">
               <Button
                 view="action"
@@ -309,10 +378,9 @@ export function AiOverviewSection({ card, org, repo, onChanged }: { card: Card; 
   const hasOverview = ai?.overview != null;
   const failures = (ai?.failures ?? []).filter((f) => f.role !== "trajectory" && !isNoFacts(f.reason));
 
-  // замечание 2 (25.09): на виду — переключатель автообновления; запуск — в меню «три точки»
-  const ownerActions = own && ai !== null && (
+  // В5.2 (Б3): переключатель автообновления удален; запуск — в меню «три точки»
+  const ownerActions = canRun && ai !== null && (
     <Flex gap={2} alignItems="center">
-      <Switch size="m" checked={ai.optIn} disabled={actions.autoBusy} onUpdate={(on) => void actions.setAuto(on)} content="Обновлять после каждого анализа" />
       <DropdownMenu
         renderSwitcher={(props) => (
           <Button {...props} view="flat-secondary" size="s" aria-label="Действия с обзором" loading={actions.sending}>
@@ -334,7 +402,7 @@ export function AiOverviewSection({ card, org, repo, onChanged }: { card: Card; 
     ai !== null && ai.generatedAt !== null && !jobActive ? (
       // замечание 25.09: подпись — отдельной строкой под текстом (сдвиг вправо отменен), цвет на ступень темнее
       <Text variant="caption-2" color="hint">
-        {`Обзор от ${fmtDateTime(ai.generatedAt)}. ${AI_DISCLAIMER}`}
+        {`Обзор от ${fmtDateTime(ai.generatedAt)}${publicVersion ? " по открытым данным, без CI/CD и Безопасности" : ""}. ${AI_DISCLAIMER}`}
         {cooldownActive ? ` Следующий запуск – после ${fmtDateTime(ai.cooldownUntil)}.` : ""}
       </Text>
     ) : null;
@@ -368,7 +436,7 @@ export function AiOverviewSection({ card, org, repo, onChanged }: { card: Card; 
           </Flex>
         ) : ai === null || (!hasOverview && specialists.length === 0) ? (
           <Text variant="body-1" color="complementary">
-            {own ? "Обзора пока нет. Он пересказывает оценку обычным языком и на нее не влияет." : "Обзора пока нет – его запускает владелец репозитория."}
+            {canRun ? "Обзора пока нет. Он пересказывает оценку обычным языком и на нее не влияет." : card.repo.visibility === "public" ? "Обзора пока нет – его может сформировать любой вошедший пользователь." : "Обзора пока нет – его запускает владелец репозитория."}
           </Text>
         ) : hasOverview ? (
           <Collapsible resetKey={`${ai.scanId}`}>

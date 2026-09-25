@@ -424,7 +424,9 @@ describe("В5.1 репро: очередь (Прод-С1, Ищейка-С1 relia
 
   // В5.1 (Security-З2): окно POST /summary списывается и на отказах own-гейта —
   // до живых проб PAT. Чёрный ящик: 7 POST «не своего» репо → 6×403, 7-й — 429.
-  test("В5.1-16: POST /summary списывает окно до own-гейта — перебор чужих slug не бесплатен", async () => {
+  // В5.2 (Б3): чужой публичный репо без анализа — 409 no_scan (прежде 403 not_own); окно по-прежнему
+  // списывается до гейтов карточки
+  test("В5.1-16: POST /summary списывает окно до гейтов карточки — перебор чужих slug не бесплатен", async () => {
     const dir = mkdtempSync(join(tmpdir(), "rh-v51-window-"));
     dirs.push(dir);
     const db = openDb({ ...loadConfig(), dataDir: dir });
@@ -440,7 +442,7 @@ describe("В5.1 репро: очередь (Прод-С1, Ищейка-С1 relia
         const res = await fetch(`${server.base}/api/repos/v51/foreign/summary`, { method: "POST", headers: { cookie } });
         codes.push(res.status);
       }
-      expect(codes.slice(0, 6)).toEqual([403, 403, 403, 403, 403, 403]);
+      expect(codes.slice(0, 6)).toEqual([409, 409, 409, 409, 409, 409]);
       expect(codes[6]).toBe(429);
     } finally {
       await server.stop();

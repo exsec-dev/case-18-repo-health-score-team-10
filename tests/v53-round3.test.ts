@@ -230,26 +230,10 @@ describe("В5.3: список репозиториев токена — все �
 });
 
 // ---------- В5.3 (25.09): автообновление обзора — явное выключение не перебивается кнопкой ----------
-import { enableSummaryAutoUnlessOptedOut, getSummaryAuto, setSummaryAuto } from "../src/summary/optin";
 import { displayOnly } from "../src/report/submetrics";
 
-describe("В5.3: кнопка обзора включает автообновление, только если его не выключали", () => {
-  test("не трогали — кнопка включает; выключили — кнопка не включает; включили снова — включено", () => {
-    const t = makeApiDb();
-    try {
-      const uid = upsertUser(t.db, "ya-opt", "optuser");
-      expect(enableSummaryAutoUnlessOptedOut(t.db, uid, "o/r")).toBe(true);
-      expect(getSummaryAuto(t.db, uid, "o/r")).toBe(true);
-      setSummaryAuto(t.db, uid, "o/r", false);
-      expect(enableSummaryAutoUnlessOptedOut(t.db, uid, "o/r")).toBe(false);
-      expect(getSummaryAuto(t.db, uid, "o/r")).toBe(false);
-      setSummaryAuto(t.db, uid, "o/r", true);
-      expect(getSummaryAuto(t.db, uid, "o/r")).toBe(true);
-    } finally {
-      t.close();
-    }
-  });
-});
+// В5.2 (Б3): автообновление по оп-ину удалено — тест «кнопка включает автообновление» снят
+// вместе с модулем summary/optin.ts (§2 «В5.2 — публичный AI-обзор…» п.3)
 
 describe("В5.3: bus factor — без веса методики, показывается как справочная подметрика", () => {
   test("displayOnly(activity.bus_factor) — да", () => {

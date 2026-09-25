@@ -118,12 +118,11 @@ describe("К8.5.1: итог анализа — по заданию", () => {
     expect(act).not.toMatch(/"[^"]*скан[^"]*"/);
   });
 
-  test("круг 3 (23.09): тумблер автогенерации не ставит заявок — свой маршрут, карточка перечитывается по итогу", () => {
+  // В5.2 (Б3): тумблер автогенерации удален вместе с автообновлением по оп-ину
+  test("В5.2: переключателя автообновления нет; карточка перечитывается по итогу задания", () => {
     const act = src("RepoV5.tsx");
-    // развязка: переключатель (В5.3 круг 3 — на месте кнопки) не зовёт POST/DELETE /summary
-    expect(act).not.toContain('void act(checked ? "POST" : "DELETE")');
-    expect(act).toContain("onUpdate={(on) => void actions.setAuto(on)}"); // замечание 2 (25.09): переключатель на виду
-    expect(act).toContain("/summary-auto`");
+    expect(act).not.toContain("setAuto");
+    expect(act).not.toContain("/summary-auto");
     // итог задания перечитывает карточку сразу — кнопка не висит disabled
     expect(act).toContain("useAnalysisFinished((jobs) => {");
   });

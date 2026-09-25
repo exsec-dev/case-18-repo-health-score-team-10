@@ -54,8 +54,9 @@ import { REPORT_NO_SCORE } from "./report/build";
 import { reportFileName } from "./web/format";
 import { pdfResponse } from "./report/pdf";
 import { catalogClientBudget, closeOwnRunningScans, maintenanceTick, returnOwnRunningJobs, startMaintenance, startScheduler, startWorkerLoop } from "./jobs/scheduler";
-import { enqueueSummary } from "./jobs/scheduler";
-import { enableSummaryAutoUnlessOptedOut, setSummaryAuto } from "./summary/optin";
+import { enqueueCheck, enqueueSummary, lastFinishedScan } from "./jobs/scheduler";
+import { aiQuota, clearUnlock, isUnlocked, quotaRefusal, tryUnlock, type QuotaRefusal } from "./jobs/ai-quota";
+import type { AiAudience } from "./db";
 import { getAiNotesHistory, getRepoHistory } from "./api/history";
 import { BADGE_CACHE_SECONDS, getPublicRepo, renderBadgeSvg } from "./api/public";
 import { NO_PAT_ACCESS } from "./auth/access";
@@ -179,6 +180,15 @@ function windowRetryAfterSec(windows: Map<number, number[]>, userId: number, win
 /** В4.8.5 (К8.5.7, С9-14): каждый 429 несёт `Retry-After`. */
 function rateLimited(message: string, retryAfterSec: number): Response {
   return Response.json({ error: { code: "rate_limited", message } }, { status: 429, headers: { "retry-after": String(Math.max(1, Math.round(retryAfterSec))) } });
+}
+
+/** В5.2 (Б4): отказ по лимиту AI — код окна, текст и время, когда можно повторить. */
+function quotaResponse(refusal: QuotaRefusal): Response {
+  const retryAfterSec = Math.max(1, Math.round((Date.parse(refusal.until) - Date.now()) / 1000));
+  return Response.json(
+    { error: { code: refusal.code, message: refusal.message, until: refusal.until } },
+    { status: 429, headers: { "retry-after": String(retryAfterSec) } },
+  );
 }
 
 /** Минутное окно проверок прав избранного: true = пропустить. */
@@ -758,10 +768,12 @@ const routes = {
       if (notes.locked) return Response.json({ error: { code: "locked", message: notes.reason } }, { status: 403 });
       return Response.json(notes);
     },
-    // ---------- В5 (К5.4): AI-описание — кнопка (POST) и оп-ин (DELETE) ----------
-    // Генерация — только владельцу («свой» по общему правилу карточки, fail-closed);
-    // POST ставит summary-заявку (кулдаун и дедуп — в enqueueSummary) и включает
-    // автозапуск на следующих сканах (решение 15.09); DELETE выключает автозапуск.
+    // ---------- В5 (К5.4) + В5.2 (Б3-Б4): AI-обзор и проверка на накрутку — кнопками ----------
+    // В5.2 (§2 «В5.2 — публичный AI-обзор…»): автообновление по оп-ину убрано (п.3) —
+    // пользователь запускает обзор и проверку только кнопкой. Аудиторию обзора решает
+    // сервер: свой репо с правами на CI/CD и Безопасность — полная версия; любой
+    // вошедший на публичном репо — публичная (4 открытые категории). Лимиты — в БД
+    // (jobs/ai-quota.ts), проверяются после бесплатных исходов (кэш, дедуп).
     "/api/repos/:org/:repo/summary": {
       POST: async (req) => {
         const csrf = guardOrigin(req);
@@ -781,27 +793,38 @@ const routes = {
         windowPush(summaryPosts, user.userId);
         const card = await cardOrRefusal(req, org!, repo!);
         if (card instanceof Response) return card;
-        if (card.viewer?.own !== true) {
-          return Response.json({ error: { code: "not_own", message: "генерация описания доступна владельцу репозитория" } }, { status: 403 });
-        }
-        // В5.3 (25.09): «свой» по доступу к коду (internal/private без прав на CI и
-        // AppSec) анализируется, но AI-обзор — только при полном Score: текст модели
-        // виден лишь зрителю с обоими каналами (решение 22.09), генерировать его зря нельзя
-        if (card.access?.cicd !== "granted" || card.access?.appsec !== "granted") {
+        const own = card.viewer?.own === true;
+        const fullAccess = card.access?.cicd === "granted" && card.access?.appsec === "granted";
+        let audience: AiAudience;
+        if (own && fullAccess) audience = "full";
+        else if (card.repo.visibility === "public") audience = "public";
+        else if (own) {
+          // В5.3 (25.09): «свой» по доступу к коду (internal/private без прав на CI и
+          // AppSec) — полного обзора нет, а публичного у закрытого репо не бывает
           return Response.json(
             { error: { code: "no_full_access", message: "AI-обзор доступен, когда токену открыты CI/CD и Безопасность этого репозитория" } },
             { status: 403 },
           );
+        } else {
+          return Response.json({ error: { code: "not_own", message: "AI-обзор закрытого репозитория доступен его владельцу" } }, { status: 403 });
         }
         const repoRow = db.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number } | null;
         if (repoRow === null) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
+        // публичная версия строится по готовому анализу — свежий скан она не запускает
+        if (audience === "public" && lastFinishedScan(db, repoRow.id) === null) {
+          return Response.json({ error: { code: "no_scan", message: "у репозитория еще нет завершенного анализа – обзор строить не по чему" } }, { status: 409 });
+        }
+        const quota = (): QuotaRefusal | null => quotaRefusal(aiQuota(db, user.userId, "overview", config.ai));
+        const unlocked = isUnlocked(db, user.userId, config.ai);
         // 23.09 (Алексей): «Обновить описание» без свежего анализа бессмысленна —
         // кнопка запускает полный цикл: сначала скан, затем генерация по нему.
-        // Кулдаун проверяем ДО скана, чтобы не запускать анализ зря.
+        // Кулдаун и лимит проверяем ДО скана, чтобы не запускать анализ зря.
+        // В5.2: свежий анализ — только у своего репо (полная версия); публичная
+        // версия строится по последнему завершенному скану
         const cooldownMs = config.queue.summaryCooldownMs ?? 60 * 60_000;
         const lastSummary = db
-          .query("SELECT created_at FROM jobs WHERE repo_id = ? AND kind = 'summary' AND created_at IS NOT NULL ORDER BY id DESC LIMIT 1")
-          .get(repoRow.id) as { created_at: string } | null;
+          .query("SELECT created_at FROM jobs WHERE repo_id = ? AND kind = 'summary' AND audience = ? AND created_at IS NOT NULL ORDER BY id DESC LIMIT 1")
+          .get(repoRow.id, audience) as { created_at: string } | null;
         if (lastSummary !== null && cooldownMs > 1) {
           const elapsed = Date.now() - Date.parse(lastSummary.created_at);
           if (Number.isFinite(elapsed) && elapsed < cooldownMs) {
@@ -811,29 +834,34 @@ const routes = {
             );
           }
         }
-        // свежий скан best-effort: при лимитах (час/активные) генерация пойдёт
-        // по последнему скану, и пользователь получит честный toast
         let scanQueued = false;
-        const scanClient = userClient(user.userId);
-        if (scanClient !== null) {
-          const scanOut = await requestUserScan(db, scanClient, user.userId, org!, repo!, config.queue, new Date());
-          scanQueued = scanOut.status === 202;
+        if (audience === "full") {
+          const early = quota();
+          if (early !== null) return quotaResponse(early);
+          // свежий скан best-effort: при лимитах (час/активные) генерация пойдёт
+          // по последнему скану, и пользователь получит честный toast
+          const scanClient = userClient(user.userId);
+          if (scanClient !== null) {
+            const scanOut = await requestUserScan(db, scanClient, user.userId, org!, repo!, config.queue, new Date());
+            scanQueued = scanOut.status === 202;
+          }
         }
         const out = enqueueSummary(db, repoRow.id, {
           userId: user.userId,
           cooldownMs: config.queue.summaryCooldownMs,
           activeMax: config.queue.summaryActiveMax,
           skipCached: scanQueued,
+          audience,
+          unlocked,
+          quota,
         });
         // В5.1 (Ищейка-С1): кэш по скану — заметки последнего скана есть, честный
-        // ответ без второй генерации; оп-ин всё равно включается (кнопка = намерение)
+        // ответ без второй генерации (лимит не списывается: заявки нет)
         if (out.kind === "cached") {
-          const auto = enableSummaryAutoUnlessOptedOut(db, user.userId, `${org}/${repo}`);
-          // 23.09: отказ кэша не молчит — оператор видит в stdout, почему кнопка
-          // не создала заявку (и что новый скан даст новую генерацию)
-          console.log(`[summary] ${org}/${repo}: POST поверх готовых заметок последнего скана — кэш, заявка не создана`);
-          return Response.json({ ok: true, jobId: null, auto, cached: true, queued: false, scanQueued: false });
+          console.log(`[summary] ${org}/${repo} (${audience}): POST поверх готовых заметок последнего скана — кэш, заявка не создана`);
+          return Response.json({ ok: true, jobId: null, audience, cached: true, queued: false, scanQueued: false });
         }
+        if (out.kind === "quota") return quotaResponse(out.refusal);
         if (out.kind === "too_many") {
           return Response.json(
             { error: { code: "too_many_active", message: `не больше ${out.activeMax} генераций описания в очереди одновременно – дождитесь завершения` } },
@@ -846,31 +874,13 @@ const routes = {
             { status: 429 },
           );
         }
-        // кнопка = оп-ин: автозапуск на следующих сканах этого репо (решение 15.09);
-        // В5.3 (25.09): явное выключение человеком кнопка не перебивает
-        const auto = enableSummaryAutoUnlessOptedOut(db, user.userId, `${org}/${repo}`);
-        return Response.json({ ok: true, jobId: out.jobId, auto, queued: out.kind === "active", scanQueued });
-      },
-      DELETE: async (req) => {
-        const csrf = guardOrigin(req);
-        if (csrf) return csrf;
-        const user = sessionOf(req);
-        if (!user) return unauthorized();
-        const { org, repo } = req.params;
-        if (!validSlugSegment(org) || !validSlugSegment(repo)) {
-          return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
-        }
-        setSummaryAuto(db, user.userId, `${org}/${repo}`, false);
-        return Response.json({ ok: true, auto: false });
+        return Response.json({ ok: true, jobId: out.jobId, audience, queued: out.kind === "active", scanQueued });
       },
     },
-    // Тумблер «Пересчитывать при каждом скане» (23.09, репорт Алексея
-    // «по переключению автообновления задача добавилась в очередь — недопустимо»):
-    // переключатель — ТОЛЬКО политика на будущие сканы и заявок не ставит;
-    // генерацию сейчас запускает кнопка (POST /summary). Гард «свой» — тот же,
-    // что у POST: переключатель рисуется только владельцу, сервер не доверяет экрану.
-    "/api/repos/:org/:repo/summary-auto": {
-      PUT: async (req) => {
+    // «Проверить оценку» (В5.2, Б3): проверка на накрутку по фактам последнего
+    // анализа — любому вошедшему, кому видна карточка; результат видят все
+    "/api/repos/:org/:repo/check": {
+      POST: async (req) => {
         const csrf = guardOrigin(req);
         if (csrf) return csrf;
         const user = sessionOf(req);
@@ -879,23 +889,32 @@ const routes = {
         if (!validSlugSegment(org) || !validSlugSegment(repo)) {
           return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
         }
-        const body = (await req.json().catch(() => null)) as { on?: unknown } | null;
-        if (typeof body?.on !== "boolean") return badQuery("укажите on: true или on: false");
+        if (!windowHasRoom(summaryPosts, user.userId, SUMMARY_POSTS_PER_MINUTE, 60_000)) {
+          return rateLimited("слишком много запросов – попробуйте позже", windowRetryAfterSec(summaryPosts, user.userId, 60_000));
+        }
+        windowPush(summaryPosts, user.userId);
         const card = await cardOrRefusal(req, org!, repo!);
         if (card instanceof Response) return card;
-        if (card.viewer?.own !== true) {
-          return Response.json({ error: { code: "not_own", message: "режим автогенерации доступен владельцу репозитория" } }, { status: 403 });
+        const repoRow = db.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number } | null;
+        if (repoRow === null) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
+        const out = enqueueCheck(db, repoRow.id, {
+          userId: user.userId,
+          activeMax: config.queue.summaryActiveMax,
+          unlocked: isUnlocked(db, user.userId, config.ai),
+          quota: () => quotaRefusal(aiQuota(db, user.userId, "check", config.ai)),
+        });
+        if (out.kind === "cached") return Response.json({ ok: true, jobId: null, cached: true, queued: false });
+        if (out.kind === "no_scan") {
+          return Response.json({ error: { code: "no_scan", message: "у репозитория еще нет завершенного анализа – проверять нечего" } }, { status: 409 });
         }
-        // ревью В5.3 (25.09): тот же гейт, что у POST /summary — автозапуск без прав на CI/CD
-        // и Безопасность тратил бы кредиты на обзор, который зритель не увидит; выключить можно всегда
-        if (body.on && (card.access?.cicd !== "granted" || card.access?.appsec !== "granted")) {
+        if (out.kind === "quota") return quotaResponse(out.refusal);
+        if (out.kind === "too_many") {
           return Response.json(
-            { error: { code: "no_full_access", message: "AI-обзор доступен, когда токену открыты CI/CD и Безопасность этого репозитория" } },
-            { status: 403 },
+            { error: { code: "too_many_active", message: `не больше ${out.activeMax} проверок в очереди одновременно – дождитесь завершения` } },
+            { status: 429 },
           );
         }
-        setSummaryAuto(db, user.userId, `${org}/${repo}`, body.on);
-        return Response.json({ ok: true, auto: body.on });
+        return Response.json({ ok: true, jobId: out.jobId, cached: false, queued: out.kind === "active" });
       },
     },
     // ---------- auth: Я ID OAuth (Б1) ----------
@@ -1099,6 +1118,41 @@ const routes = {
       return Response.json({ username: result.username, entries: result.entries });
     },
     // ПОРТ 5: панель заданий — колокольчик/«Мои задания» (диагноз UX «очереди не видно»)
+    // В5.2 (Б4): остаток лимитов AI зрителя — для счетчика у кнопок
+    "/api/me/ai-quota": (req) => {
+      const user = sessionOf(req);
+      if (!user) return unauthorized();
+      const now = new Date();
+      return Response.json({
+        unlockAvailable: config.ai.unlockPassword !== null,
+        unlocked: isUnlocked(db, user.userId, config.ai),
+        overview: aiQuota(db, user.userId, "overview", config.ai, now),
+        check: aiQuota(db, user.userId, "check", config.ai, now),
+      });
+    },
+    // В5.2 (Б4, §2 п.6): пароль неограниченного доступа к AI. Попытки не
+    // ограничиваются (решение владельца: пароль очень длинный); пароль не
+    // пишется ни в БД (только отпечаток), ни в лог
+    "/api/me/ai-unlock": async (req) => {
+      const csrf = guardOrigin(req);
+      if (csrf) return csrf;
+      const user = sessionOf(req);
+      if (!user) return unauthorized();
+      if (req.method === "DELETE") {
+        clearUnlock(db, user.userId);
+        return Response.json({ ok: true, unlocked: false });
+      }
+      if (req.method !== "POST") return Response.json({ error: { code: "method", message: "метод не поддерживается" } }, { status: 405 });
+      if (config.ai.unlockPassword === null) {
+        return Response.json({ error: { code: "unlock_disabled", message: "доступ по паролю на этом сервере не настроен" } }, { status: 404 });
+      }
+      const body = (await req.json().catch(() => null)) as { password?: unknown } | null;
+      if (typeof body?.password !== "string" || body.password.length === 0) return badQuery("введите пароль");
+      if (!tryUnlock(db, user.userId, body.password, config.ai)) {
+        return Response.json({ error: { code: "wrong_password", message: "пароль не подошел" } }, { status: 403 });
+      }
+      return Response.json({ ok: true, unlocked: true });
+    },
     "/api/me/jobs": (req) => {
       const user = sessionOf(req);
       if (!user) return unauthorized();

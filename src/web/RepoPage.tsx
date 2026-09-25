@@ -111,7 +111,7 @@ import {
 } from "./format";
 import { linkProps } from "./router";
 import { LoginButton, Page, type Crumb } from "./Shell";
-import { AiOverviewSection, BadgeButton, CategoryAiMark, CategoryAiNote, FraudAlert, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor } from "./RepoV5";
+import { AiOverviewSection, BadgeButton, CategoryAiMark, CategoryAiNote, FraudAlert, FraudCheckRow, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor } from "./RepoV5";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
 
 type Card = RepoCard;
@@ -304,9 +304,10 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
           <Flex direction="column" gap={3}>
             <Markers view={view} />
             <FraudAlert card={card} />
+            <FraudCheckRow card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} />
             <ScoreBand card={card} view={view} />
           </Flex>
-          <AiOverviewSection card={card} org={org} repo={repo} onChanged={reload} />
+          <AiOverviewSection card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} />
           <Categories card={card} view={view} />
           <Recommendations view={view} />
           <HistorySection card={card} org={org} repo={repo} />

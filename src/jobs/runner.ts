@@ -63,12 +63,8 @@ export interface ScanDeps {
   collectRest?: (slug: string) => Promise<RestCollectResult>;
   /** шов AppSec-сбора (тесты без сети; К-Р15 — bucket/attempts для status_detail) */
   collectAppsec?: (rest: ScClient, appsec: AppsecClient, slug: string) => Promise<{ fact: Fact | null; noData: { reason: string; detail: string; bucket?: string; attempts?: number } | null }>;
-  /**
-   * В5 (спека §3.4): авто-генерация AI-summary в ОКНЕ СКАНА — вызывается
-   * после успешного скор-хука, пока клон жив. Реализация — makeAutoSummary
-   * (оп-ин внутри); сбой генерации скан не роняет (fail-soft на месте вызова).
-   */
-  summaryAutoRun?: (ctx: { db: Database; repoId: number; scanId: number; org: string; repo: string; cloneDir: string }) => Promise<void>;
+  // В5.2 (Б3): шов авто-генерации в окне скана (summaryAutoRun) удален вместе с
+  // автообновлением по оп-ину; топ рейтинга — такт обслуживания (topAutoTick)
 }
 
 export interface ScanOptions {
@@ -471,16 +467,6 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
       } catch (closeError) {
         // скан остаётся `running` — его закроет свип сирот (К8.5.2b), задание — failed ниже
         console.error(`[scan ${scanId}] closing after score hook failure failed: ${String((closeError as Error).message).slice(0, 200)}`);
-      }
-    }
-
-    // В5: авто-генерация AI-summary (оп-ин) — ПОКА клон жив (окно §3.4);
-    // любой сбой — fail-soft: скан и оценка уже записаны и не ревертятся
-    if (!scoreFailed && cloneDir !== null && deps.summaryAutoRun) {
-      try {
-        await deps.summaryAutoRun({ db: deps.db, repoId, scanId, org, repo, cloneDir });
-      } catch (e) {
-        console.error(`[scan ${scanId}] auto summary failed (ignored): ${String((e as Error).message).slice(0, 200)}`);
       }
     }
 

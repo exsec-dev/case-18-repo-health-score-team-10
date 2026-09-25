@@ -73,7 +73,8 @@ import { publicStatusSql, ratingEligibleSql } from "./score/compute";
  * 2.3 (25.09, В5.2, Б2): `ai_notes.audience`, `ai_fails.audience`, `jobs.audience`
  * ('public' | 'full', прежние строки — 'full') — публичный AI-обзор из публичных
  * фактов хранится отдельно от полного; `users.ai_unlock` — отпечаток пароля
- * неограниченного доступа к AI (Б4; NULL — отметки нет). Аддитивно.
+ * неограниченного доступа к AI (Б4; NULL — отметки нет); `jobs.ai_unlocked` — заявка
+ * поставлена с паролем (общий лимит ее не считает). Аддитивно.
  */
 export const SCHEMA_VERSION = "2.3";
 
@@ -356,6 +357,8 @@ export function openDb(config: Config): Database {
     ensureColumn(db, "ai_fails", "audience", "TEXT NOT NULL DEFAULT 'full'");
     ensureColumn(db, "jobs", "audience", "TEXT NOT NULL DEFAULT 'full'");
     ensureColumn(db, "users", "ai_unlock", "TEXT");
+    // заявка AI поставлена пользователем с паролем: общий лимит ее не считает (Б4)
+    ensureColumn(db, "jobs", "ai_unlocked", "INTEGER NOT NULL DEFAULT 0");
     // v1.3 → v1.4 (В4): изоляция own/public и эвикция
     ensureColumn(db, "repos", "rating_active", "INTEGER NOT NULL DEFAULT 1");
     ensureColumn(db, "repos", "visibility", "TEXT NOT NULL DEFAULT 'public'");

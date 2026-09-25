@@ -111,6 +111,12 @@ export function finishedToast(job: MyJob): FinishedToast {
   // 23.09 (smoke-круг 2): генерация описания — не анализ, оценка она не меняет
   // (трекер-закон); прежний тост обещал «оценка обновлена» там, где обновился
   // только текст карточки
+  // В5.2 (Б3): проверка на накрутку оценку не меняет — результат только в карточке
+  if (job.kind === "check") {
+    return job.phase === "failed"
+      ? { theme: "danger", title: "Проверка не сформировалась", content: `${job.slug}: ${job.error ?? "причина – в «Заданиях»"}` }
+      : { theme: "success", title: "Проверка готова", content: `${job.slug}: результат – в карточке репозитория` };
+  }
   if (job.kind === "summary") {
     return job.phase === "failed"
       ? { theme: "danger", title: "Описание не сформировалось", content: `${job.slug}: ${job.error ?? "причина – в «Заданиях»"}` }

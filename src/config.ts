@@ -205,7 +205,63 @@ export interface Config {
     yandexFolderId: string | null;
     zaiApiKey: string | null;
   };
+  /** В5.2 (Б4, Б5): лимиты AI, пароль неограниченного доступа, автозапуск топа рейтинга */
+  ai: AiConfig;
   scan: ScanConfig;
+}
+
+/** Лимиты одного действия AI (§2 «В5.2 — публичный AI-обзор…» п.5). */
+export interface AiActionLimits {
+  /** на человека за скользящий час */
+  perHour: number;
+  /** на человека за сутки (календарные, МСК) */
+  perDay: number;
+  /** на весь сервис за сутки — пользователи без пароля */
+  globalPerDay: number;
+}
+
+export interface AiConfig {
+  overview: AiActionLimits;
+  check: AiActionLimits;
+  /** аварийный потолок обзоров в сутки для пользователей с паролем (на весь сервис, п.6) */
+  unlockedOverviewPerDay: number;
+  /** пароль неограниченного доступа — секрет .env (AI_UNLOCK_PASSWORD); null — функции нет */
+  unlockPassword: string | null;
+  /** обзор и проверка для топа рейтинга после нового скана (п.4): AI_TOP_AUTO, по умолчанию выключено */
+  topAuto: boolean;
+  /** размер топа (AI_TOP_AUTO_SIZE, по умолчанию 10) */
+  topAutoSize: number;
+}
+
+/** Дефолты — числа решения §2 «В5.2 — публичный AI-обзор…» (25.09) п.5-6. */
+export const DEFAULT_AI: AiConfig = {
+  overview: { perHour: 2, perDay: 6, globalPerDay: 30 },
+  check: { perHour: 5, perDay: 20, globalPerDay: 60 },
+  unlockedOverviewPerDay: 100,
+  unlockPassword: null,
+  topAuto: false,
+  topAutoSize: 10,
+};
+
+/** Чистая функция env → AiConfig (тесты инъекцией). Мусор в числах — дефолт (envInt). */
+export function aiConfigFromEnv(env: Record<string, string>): AiConfig {
+  const password = (env.AI_UNLOCK_PASSWORD ?? "").trim();
+  return {
+    overview: {
+      perHour: envInt(env, "AI_OVERVIEW_PER_HOUR") ?? DEFAULT_AI.overview.perHour,
+      perDay: envInt(env, "AI_OVERVIEW_PER_DAY") ?? DEFAULT_AI.overview.perDay,
+      globalPerDay: envInt(env, "AI_OVERVIEW_GLOBAL_PER_DAY") ?? DEFAULT_AI.overview.globalPerDay,
+    },
+    check: {
+      perHour: envInt(env, "AI_CHECK_PER_HOUR") ?? DEFAULT_AI.check.perHour,
+      perDay: envInt(env, "AI_CHECK_PER_DAY") ?? DEFAULT_AI.check.perDay,
+      globalPerDay: envInt(env, "AI_CHECK_GLOBAL_PER_DAY") ?? DEFAULT_AI.check.globalPerDay,
+    },
+    unlockedOverviewPerDay: envInt(env, "AI_UNLOCKED_OVERVIEW_PER_DAY") ?? DEFAULT_AI.unlockedOverviewPerDay,
+    unlockPassword: password === "" ? null : password,
+    topAuto: envBool(env, "AI_TOP_AUTO") ?? DEFAULT_AI.topAuto,
+    topAutoSize: envInt(env, "AI_TOP_AUTO_SIZE") ?? DEFAULT_AI.topAutoSize,
+  };
 }
 
 function envFile(): Record<string, string> {
@@ -404,6 +460,7 @@ export function loadConfig(): Config {
       yandexFolderId: env.YAGPT_FOLDER_ID ?? null,
       zaiApiKey: env.ZAI_API_KEY ?? null,
     },
+    ai: aiConfigFromEnv(env),
     scan,
   };
 }

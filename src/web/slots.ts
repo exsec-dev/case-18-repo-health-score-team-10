@@ -35,7 +35,8 @@ export const SLOT_CONTRACTS: Record<"aiSummary" | "scoreHistory" | "badge" | "co
    * Закон 1 остаётся: LLM пишет ТЕКСТ, каждая фраза привязана к `fact_ref`
    * и проходит валидатор; новых рекомендаций модель не порождает.
    */
-  aiSummary: ["text", "factRefs", "charterVersion", "modelVersion", "generatedAt", "optIn"],
+  // В5.2 (Б3): оп-ин автообновления удален
+  aiSummary: ["text", "factRefs", "charterVersion", "modelVersion", "generatedAt"],
   /**
    * К5.7. Публичная проекция по сканам: индекс и покрытие; полный Score —
    * только зрителю с правами, как на карточке. Источник — существующие строки

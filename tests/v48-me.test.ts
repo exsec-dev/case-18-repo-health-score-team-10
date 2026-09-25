@@ -184,9 +184,10 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     expect(src).not.toContain("Репозитории, которые вы отметили звездочкой на их странице или добавили сюда по ссылке.");
     expect(src).toContain('pin="round-brick"');
     expect(src).toContain('pin="brick-round"');
-    // JSX-кнопки view="action" в файле: «Добавить» в шапке списка и форма токена
-    // (другая страница, /settings); плашка про токен на /me — view="normal"
-    expect((src.match(/<Button view="action"/g) ?? []).length).toBe(2);
+    // JSX-кнопки view="action" в файле: «Добавить» в шапке списка, форма токена и
+    // (В5.2, Б4) пароль доступа к AI — обе на другой странице, /settings; плашка про
+    // токен на /me — view="normal"
+    expect((src.match(/<Button view="action"/g) ?? []).length).toBe(3);
     expect(src).toMatch(/<Button view="normal" size="m" \{\.\.\.linkProps\("\/settings"\)\}>/);
   });
 

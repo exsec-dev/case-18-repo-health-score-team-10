@@ -10,9 +10,8 @@ import type { Database } from "bun:sqlite";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { CallLlm, ChatMessage } from "../llm";
-import { LlmError, makeLlm } from "../llm";
-import type { Config } from "../config";
-import { GENERATION_FUSE_MS, loadConfig, MAX_MODEL_CALLS } from "../config";
+import { LlmError } from "../llm";
+import { GENERATION_FUSE_MS, MAX_MODEL_CALLS } from "../config";
 // Капы генерации живут в config (В5.1: формула худшего скана включает фуз);
 // ре-экспорт держит прежний импорт-контракт модуля
 export { GENERATION_FUSE_MS, MAX_MODEL_CALLS };
@@ -20,12 +19,11 @@ import { parseFactValue } from "../collectors/facts";
 import { MODEL_VERSION } from "../score/model";
 import { loadCharter } from "./charters";
 import { generateWithTools } from "./agent";
-import { makeCalculatorExecutor, makeToolExecutor, materializeWorktree, removeWorktree, sanitizeUntrusted, MAX_PLAIN_READ_BYTES } from "./tools";
+import { makeCalculatorExecutor, makeToolExecutor, sanitizeUntrusted, MAX_PLAIN_READ_BYTES } from "./tools";
 import { frameUntrusted, makeNonce } from "./input";
 import { validateFlagOutput, validateOutput, type FraudFlag, type FactInput } from "./validator";
 import type { SummaryRole } from "./roles";
 import { modelTierOf, PUBLIC_CATEGORIES, PUBLIC_SPECIALIST_ROLES, ROLE_FACT_CATEGORIES, SPECIALIST_ROLES, toolsAllowed, type SpecialistRole } from "./roles";
-import { anySummaryAuto } from "./optin";
 import { categoryOf } from "../collectors/facts";
 import { rhythmSignals, RHYTHM_KEY, type RhythmSignals } from "./rhythm";
 import { CHANNEL_KINDS } from "../score/compute";
@@ -673,61 +671,5 @@ async function readReadme(deps: SummaryDeps): Promise<string | null> {
   }
 }
 
-// ---------- авто-генерация в окне скана (спека §3.4, оп-ин) ----------
-
-export interface AutoSummaryCtx {
-  db: Database;
-  repoId: number;
-  scanId: number;
-  org: string;
-  repo: string;
-  cloneDir: string;
-}
-
-/** Канал CI или AppSec в скане закрыт токену (факт no-data с причиной `access`). */
-export function scanChannelDenied(db: Database, scanId: number): boolean {
-  const rows = db
-    .query("SELECT value FROM facts WHERE scan_id = ? AND key IN ('cicd.runs', 'appsec.findings') AND status = 'no-data'")
-    .all(scanId) as { value: string }[];
-  return rows.some((r) => {
-    const v = parseFactValue(r.value) as { reason?: unknown } | null;
-    return v !== null && typeof v === "object" && v.reason === "access";
-  });
-}
-
-/**
- * Фабрика хука автозапуска (вызывается раннером в конце скана при открытом
- * окне клона): оп-ин есть → worktree из bare-клона → runSummary → уборка.
- * Любая ошибка — fail-soft в лог: генерация не роняет собранный скан.
- * В5.1 (Прод-С3): deps.log подключён — строка итога и outcomes с причинами
- * уходят в консоль процесса, отказ LLM-слоя больше не невидим оператору.
- */
-export function makeAutoSummary(
-  config: Pick<Config, "llm">,
-): (ctx: AutoSummaryCtx) => Promise<void> {
-  const callLlm = makeLlm({ ...loadConfig(), llm: config.llm } as Config);
-  return async (ctx: AutoSummaryCtx): Promise<void> => {
-    const slug = `${ctx.org}/${ctx.repo}`;
-    if (!anySummaryAuto(ctx.db, slug)) return;
-    // ревью В5.3 (25.09): оп-ин мог быть включен до гейта полных прав — обзор по скану, где
-    // токену закрыт CI или AppSec, не генерируется (текст виден только при полном Score)
-    if (scanChannelDenied(ctx.db, ctx.scanId)) return;
-    const wt = await materializeWorktree(ctx.cloneDir);
-    try {
-      await runSummary(
-        {
-          db: ctx.db,
-          org: ctx.org,
-          repo: ctx.repo,
-          callLlm,
-          clone: { root: wt.root, gitDir: wt.gitDir },
-          models: { main: config.llm.mainModel, side: config.llm.sideModel },
-          log: (m) => console.log(m),
-        },
-        { scanId: ctx.scanId },
-      );
-    } finally {
-      await removeWorktree(wt.root, wt.gitDir);
-    }
-  };
-}
+// В5.2 (Б3): авто-генерация в окне скана по оп-ину (makeAutoSummary) удалена вместе с
+// автообновлением; топ рейтинга — такт обслуживания (jobs/scheduler.ts, topAutoTick).
