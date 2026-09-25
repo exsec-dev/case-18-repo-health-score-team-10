@@ -107,6 +107,7 @@ import {
   scoreWord,
   sentence,
   slugOf,
+  notOwnReason,
 } from "./format";
 import { linkProps } from "./router";
 import { LoginButton, Page, type Crumb } from "./Shell";
@@ -345,7 +346,7 @@ function FavoriteNotInCatalog({ org, repo, fallback, onRetry, onSection }: { org
       </Page>
     );
   }
-  return <FavoriteNotInCatalogState org={org} repo={repo} own={fav.access?.own === true} crumbs={crumbs} onRetry={onRetry} />;
+  return <FavoriteNotInCatalogState org={org} repo={repo} own={fav.access?.own === true} access={fav.access} crumbs={crumbs} onRetry={onRetry} />;
 }
 
 /**
@@ -353,7 +354,21 @@ function FavoriteNotInCatalog({ org, repo, fallback, onRetry, onSection }: { org
  * «Запустить анализ» прямо здесь (сервер перепроверяет права живьем), итог
  * задания перечитывает страницу; идет анализ — без кнопки; чужой — объяснение.
  */
-function FavoriteNotInCatalogState({ org, repo, own, crumbs, onRetry }: { org: string; repo: string; own: boolean; crumbs: Crumb[]; onRetry: () => void }) {
+function FavoriteNotInCatalogState({
+  org,
+  repo,
+  own,
+  access,
+  crumbs,
+  onRetry,
+}: {
+  org: string;
+  repo: string;
+  own: boolean;
+  access: { visibility: string; own: boolean } | null | undefined;
+  crumbs: Crumb[];
+  onRetry: () => void;
+}) {
   const slug = `${org}/${repo}`;
   const start = useStartAnalysis(org, repo);
   const analysis = useAnalysis();
@@ -380,7 +395,7 @@ function FavoriteNotInCatalogState({ org, repo, own, crumbs, onRetry }: { org: s
         description={
           own
             ? "Репозиторий в вашем избранном, но анализа еще не было. Запустите его – итог появится здесь."
-            : "Репозиторий в вашем избранном, но сервис его не анализировал: анализ запускается только для своих репозиториев – у вашего токена нет доступа к коду этого репозитория."
+            : notOwnReason(access)
         }
         actions={
           own
@@ -529,7 +544,7 @@ function Header({ card, view, starDoneKey, starLoggedIn }: { card: Card; view: C
                 той же плашкой, что в избранном; «неизвестно» плашки не дает */}
             <VisibilityPill value={view.visibility} />
             <Flex gap={1} alignItems="center">
-              <FavoriteStar org={r.org} repo={r.repo} doneKey={starDoneKey} loggedIn={starLoggedIn} />
+              <FavoriteStar org={r.org} repo={r.repo} visibility={r.visibility} doneKey={starDoneKey} loggedIn={starLoggedIn} />
               <ActionTooltip title="Открыть на sourcecraft.dev">
                 <Button
                   view="flat-secondary"
@@ -1477,7 +1492,7 @@ function AppsecEngines({ card }: { card: Card }) {
  * переход active→done в текущей browser-session: ключ `<org>/<repo>:<jobId>`
  * в sessionStorage, DDL нет. Заполненная звезда не светится.
  */
-function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: string; doneKey: string | null; loggedIn: boolean | null }) {
+function FavoriteStar({ org, repo, visibility, doneKey, loggedIn }: { org: string; repo: string; visibility: "public" | "internal" | "private" | "unknown"; doneKey: string | null; loggedIn: boolean | null }) {
   const toaster = useToaster();
   const [state, setState] = useState<"loading" | "on" | "off" | "anon">("loading");
   const [error, setError] = useState<string | null>(null);
@@ -1557,7 +1572,7 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
     const next = state === "on" ? "off" : "on";
     setState(next);
     try {
-      const res = await mutateJson<{ check?: FavoriteAddCheck } | null>(
+      const res = await mutateJson<{ check?: FavoriteAddCheck; access?: { visibility?: "public" | "internal" | "private" | "unknown" } } | null>(
         `/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`,
         next === "on" ? "PUT" : "DELETE",
       );
@@ -1571,7 +1586,8 @@ function FavoriteStar({ org, repo, doneKey, loggedIn }: { org: string; repo: str
         name: `favorite:${org}/${repo}`,
         theme: next === "on" ? "success" : "info",
         title: next === "on" ? "Добавлено в избранное" : "Убрано из избранного",
-        content: next === "on" ? `${slugOf(org, repo)}. ${favoriteAddedText(res?.check)}` : slugOf(org, repo),
+        // ревью В5.3 (25.09): видимость — из ответа или с карточки, иначе тост считал публичный закрытым
+        content: next === "on" ? `${slugOf(org, repo)}. ${favoriteAddedText(res?.check, res?.access?.visibility ?? visibility)}` : slugOf(org, repo),
       });
       // первый анализ своего мог встать — «Задания» и карточка узнают сразу
       if (next === "on") announceJobsChanged();

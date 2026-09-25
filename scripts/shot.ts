@@ -271,6 +271,16 @@ async function run(): Promise<void> {
         "объяснение входа для настроек": "document.body.innerText.includes('настроить персональный токен доступа SourceCraft') ? 1 : 0",
       },
     },
+    // В5.3 круг 4: раздел «Сравнение» — набор из первых (до 3) слагов харнесса
+    {
+      name: "compare",
+      url: `${base}/compare?${SLUGS.slice(0, 3).map((s) => `r=${s}`).join("&")}`,
+      checks: {
+        // первой — проверка, которую ждет харнесс: таблица приходит после ответа API
+        "столбцов сравнения": "document.querySelectorAll('.rh-cmp-head:not(.rh-cmp-head_corner)').length",
+        "заголовок сравнения": "document.body.innerText.includes('Сравнение репозиториев') ? 1 : 0",
+      },
+    },
     // В4.9 ч.2 (приемка 6): карточек несколько — первая по-старому `repo`
     ...SLUGS.map((slug, i) => {
       const [org, repo] = slug.split("/") as [string, string];

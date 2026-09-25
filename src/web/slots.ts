@@ -108,7 +108,7 @@ export interface ScoreHistoryView {
 }
 
 const HISTORY_ONE =
-  "Пока есть одна оценка по текущей версии методики – для графика нужна хотя бы вторая. Новая точка появляется после каждого анализа.";
+  "Пока есть 1 оценка по текущей версии методики – для графика нужны хотя бы 2. Новая точка появляется после каждого анализа.";
 const HISTORY_FOOTER = "На графике – оценки по текущей версии методики; где данных не было, линия прерывается.";
 
 export function scoreHistoryView(data: Pick<HistoryResponse, "points" | "fullOpen"> | null): ScoreHistoryView {
@@ -118,7 +118,8 @@ export function scoreHistoryView(data: Pick<HistoryResponse, "points" | "fullOpe
   const best = Math.max(drawn("healthcraftIndex"), fullOpen ? drawn("repoHealthScore") : 0);
   if (best === 0) return { chart: false, count: null, full: null, text: SLOT_EMPTY.scoreHistory.text };
   if (best === 1) return { chart: false, count: null, full: null, text: HISTORY_ONE };
-  const n = points.length;
+  // ревью В5.3 (25.09): число о размере выборки — анализы с числом индекса (точки графика)
+  const n = drawn("healthcraftIndex");
   const word = n % 10 === 1 && n % 100 !== 11 ? "анализу" : "анализам";
   return {
     chart: true,

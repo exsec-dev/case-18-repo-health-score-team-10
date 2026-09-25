@@ -594,6 +594,17 @@ export interface AutoSummaryCtx {
   cloneDir: string;
 }
 
+/** Канал CI или AppSec в скане закрыт токену (факт no-data с причиной `access`). */
+export function scanChannelDenied(db: Database, scanId: number): boolean {
+  const rows = db
+    .query("SELECT value FROM facts WHERE scan_id = ? AND key IN ('cicd.runs', 'appsec.findings') AND status = 'no-data'")
+    .all(scanId) as { value: string }[];
+  return rows.some((r) => {
+    const v = parseFactValue(r.value) as { reason?: unknown } | null;
+    return v !== null && typeof v === "object" && v.reason === "access";
+  });
+}
+
 /**
  * Фабрика хука автозапуска (вызывается раннером в конце скана при открытом
  * окне клона): оп-ин есть → worktree из bare-клона → runSummary → уборка.
@@ -608,6 +619,9 @@ export function makeAutoSummary(
   return async (ctx: AutoSummaryCtx): Promise<void> => {
     const slug = `${ctx.org}/${ctx.repo}`;
     if (!anySummaryAuto(ctx.db, slug)) return;
+    // ревью В5.3 (25.09): оп-ин мог быть включен до гейта полных прав — обзор по скану, где
+    // токену закрыт CI или AppSec, не генерируется (текст виден только при полном Score)
+    if (scanChannelDenied(ctx.db, ctx.scanId)) return;
     const wt = await materializeWorktree(ctx.cloneDir);
     try {
       await runSummary(

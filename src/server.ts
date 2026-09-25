@@ -886,6 +886,14 @@ const routes = {
         if (card.viewer?.own !== true) {
           return Response.json({ error: { code: "not_own", message: "режим автогенерации доступен владельцу репозитория" } }, { status: 403 });
         }
+        // ревью В5.3 (25.09): тот же гейт, что у POST /summary — автозапуск без прав на CI/CD
+        // и Безопасность тратил бы кредиты на обзор, который зритель не увидит; выключить можно всегда
+        if (body.on && (card.access?.cicd !== "granted" || card.access?.appsec !== "granted")) {
+          return Response.json(
+            { error: { code: "no_full_access", message: "AI-обзор доступен, когда токену открыты CI/CD и Безопасность этого репозитория" } },
+            { status: 403 },
+          );
+        }
         setSummaryAuto(db, user.userId, `${org}/${repo}`, body.on);
         return Response.json({ ok: true, auto: body.on });
       },

@@ -139,7 +139,7 @@ describe("К-2: слот истории оценки — по точкам и п
   test("одна оценка — просит вторую, не «показывать нечего»", () => {
     const v = scoreHistoryView({ points: [pt(1, 60)], fullOpen: false });
     expect(v.chart).toBe(false);
-    expect(v.text).toContain("одна оценка");
+    expect(v.text).toContain("1 оценка");
     expect(v.text).not.toContain("нечего");
   });
 

@@ -44,7 +44,7 @@ import {
   scoreWord,
   sentence,
   type Contributions,
-  roundScore,
+  roundScore, AI_DISCLAIMER, AI_OVERVIEW_REJECTED
 } from "../web/format";
 import { code, em, escaped, strong, text, type ActionItem, type Block, type CategoryRow, type Chip, type HeroNote, type HeroSecondary, type InlineLine, type ReportModel, type TableColumn } from "./model";
 import {
@@ -530,7 +530,7 @@ function methodSection(shown: ShownMetric[], contributions: Map<string, Contribu
   const first = hasIndex && hasFull
     ? `В отчете 2 показателя: ${INDEX} – по 4 открытым категориям (документация, активность, задачи и состояние кода), ${FULL} – по всем 6, включая CI/CD и Безопасность.`
     : hasFull
-      ? `В отчете один показатель – ${FULL}: он складывается из 6 категорий (документация, CI/CD, Безопасность, активность, задачи и состояние кода).`
+      ? `В отчете 1 показатель – ${FULL}: он складывается из 6 категорий (документация, CI/CD, Безопасность, активность, задачи и состояние кода).`
       : "Оценка складывается из 4 категорий: документация, активность, задачи и состояние кода. Участникам репозитория видны еще 2 – CI/CD и Безопасность.";
   const items: InlineLine[] = [
     line(first),
@@ -941,6 +941,8 @@ function aiBlock(card: RepoCard): Block[] {
   const notes = [...(ai.overview ? [{ title: null as string | null, note: ai.overview }] : []), ...ai.specialists.map((n) => ({ title: aiRoleTitle(n.role), note: n }))];
   if (notes.length === 0) return [];
   const out: Block[] = [h2(AI_SECTION_TITLE)];
+  // ревью В5.3 (25.09): отказ проверки общего обзора печатается и в отчете, как на карточке
+  if (!ai.overview && ai.specialists.length > 0) out.push(para(line(AI_OVERVIEW_REJECTED)));
   for (const { title, note } of notes) {
     if (title !== null) out.push({ kind: "paragraph", tone: "subhead", lines: [[strong(title)]] });
     out.push(para(...aiParagraphs(note.text).map((l) => [escaped(l)] as InlineLine)));
@@ -950,7 +952,7 @@ function aiBlock(card: RepoCard): Block[] {
   out.push({
     kind: "paragraph",
     tone: "fine",
-    lines: [line(`Текст написан моделью ${models} по фактам анализа${when}; каждое утверждение проверено по фактам. Текст пересказывает оценку и на нее не влияет – числа считает код по метрикам.`)],
+    lines: [line(`Текст написан моделью ${models} по фактам анализа${when}; каждое утверждение проверено по фактам. ${AI_DISCLAIMER}`)],
   });
   return out;
 }

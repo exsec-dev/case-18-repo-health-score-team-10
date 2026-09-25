@@ -43,7 +43,7 @@ import {
   fmtDateTime,
   fmtScore,
   fraudFactorFact,
-  fraudFactorTitle,
+  fraudFactorTitle, AI_DISCLAIMER, AI_OVERVIEW_REJECTED
 } from "./format";
 import { announceJobStarted, announceJobsChanged, useAnalysisFinished } from "./session";
 import { SLOT_EMPTY, aiNotesCaption, badgeMarkdown, historyByTime, scoreHistoryView } from "./slots";
@@ -265,13 +265,15 @@ export function AiOverviewSection({ card, org, repo, onChanged }: { card: Card; 
   const empty = ai === null || (ai.overview === null && ai.specialists.length === 0 && !ai.jobActive);
   if (empty) {
     const cooldown = ai?.cooldownUntil != null && Date.parse(ai.cooldownUntil) > Date.now();
+    const rejected = (ai?.failures ?? []).some((f) => !isNoFacts(f.reason));
     return (
       <section className="rh-ai-section rh-ai-section_empty" aria-labelledby="rh-ai-title" data-slot="aiSummary">
         <Flex direction="column" gap={1} alignItems="flex-start">
           <Text color="secondary" id="rh-ai-title" as="h2" className="rh-ai-section__label">
             {AI_SECTION_TITLE}
           </Text>
-          <Text variant="subheader-2">Обзора пока нет</Text>
+          {/* ревью В5.3 (25.09): генерация была, но ни одна роль не прошла проверку — не «пока нет» */}
+          <Text variant="subheader-2">{rejected ? "Обзор не прошел проверку фактами" : "Обзора пока нет"}</Text>
           <Text variant="body-1" color="complementary">
             {own
               ? "Модель перескажет оценку обычным языком и разберет каждую категорию. На расчет обзор не влияет."
@@ -331,7 +333,7 @@ export function AiOverviewSection({ card, org, repo, onChanged }: { card: Card; 
     ai !== null && ai.generatedAt !== null && !jobActive ? (
       // замечание 25.09: подпись — отдельной строкой под текстом (сдвиг вправо отменен), цвет на ступень темнее
       <Text variant="caption-2" color="hint">
-        {`Обзор от ${fmtDateTime(ai.generatedAt)}. Модель пересказывает оценку и на расчет не влияет.`}
+        {`Обзор от ${fmtDateTime(ai.generatedAt)}. ${AI_DISCLAIMER}`}
         {cooldownActive ? ` Следующий запуск – после ${fmtDateTime(ai.cooldownUntil)}.` : ""}
       </Text>
     ) : null;
@@ -374,7 +376,7 @@ export function AiOverviewSection({ card, org, repo, onChanged }: { card: Card; 
         ) : (
           <Flex direction="column" gap={1}>
             <Text variant="body-1" color="complementary">
-              Общий обзор не прошел проверку фактами – разбор по категориям ниже.
+              {AI_OVERVIEW_REJECTED}
             </Text>
           </Flex>
         )}
@@ -610,12 +612,38 @@ function HistoryWithNotes({ card, org, repo }: { card: Card; org: string; repo: 
 }
 
 function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo: string; notes: AiNotesResponse | null }) {
-  const { state, reload } = useJson<HistoryResponse>(`${apiBase(org, repo)}/history`);
+  const { state, reload } = useJson<HistoryResponse>(`${apiBase(org, repo)}/history`, { keepPrevious: true });
   // Ф2 (25.09): новая точка истории появляется без F5 — по итогу задания этого репо
   useAnalysisFinished((jobs) => {
     if (jobs.some((j) => j.slug === `${org}/${repo}`)) reload();
   });
   const data = dataOf(state);
+  const [listOpen, setListOpen] = useState(false);
+  // ревью В5.3 (25.09): пока история не пришла или не загрузилась — не «оценок нет»
+  // (429 в общем окне карточки или перечитывание после анализа печатали ложное пустое состояние)
+  if (data === null) {
+    return (
+      <section className="rh-section" aria-labelledby="rh-history-title" data-slot="scoreHistory" aria-busy={state.kind === "loading"}>
+        <Card view="outlined" className="rh-section-card rh-placeholder-card">
+          <Flex direction="column" gap={2} alignItems="flex-start">
+            <Text color="secondary" as="h2" id="rh-history-title" className="rh-ai-section__label">
+              {SLOT_EMPTY.scoreHistory.title}
+            </Text>
+            {state.kind === "error" ? (
+              <>
+                <Text variant="body-1" color="complementary">{`История не загрузилась: ${state.message}`}</Text>
+                <Button view="outlined" size="s" onClick={reload}>
+                  Повторить
+                </Button>
+              </>
+            ) : (
+              <Skeleton style={{ height: 120, width: "100%" }} />
+            )}
+          </Flex>
+        </Card>
+      </section>
+    );
+  }
   const overviewByScan = new Map<number, AiNoteHistoryItem>();
   if (notes && !notes.locked) for (const n of notes.notes) if (n.role === "overview") overviewByScan.set(n.scanId, n);
   const points = historyByTime(data?.points ?? []);
@@ -626,7 +654,6 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
     points.filter((p) => overviewByScan.has(p.scanId)).map((p) => p.finishedAt),
     evolutionTooEarly,
   );
-  const [listOpen, setListOpen] = useState(false);
   const list = points.length > 0 && (
     <Disclosure size="m" expanded={listOpen} onUpdate={setListOpen} summary={`Все анализы (${points.length})`}>
       {caption && (
