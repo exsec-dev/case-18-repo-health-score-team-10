@@ -230,6 +230,17 @@ function useSummaryActions(org: string, repo: string, onChanged: () => void) {
   return { sending, start };
 }
 
+/**
+ * Подпись под скелетоном обзора по фазе (UX-1, вариант (б), решение Екатерины 25.09):
+ * «Обновить обзор» у владельца — сначала анализ, потом текст; два уведомления остаются,
+ * а подпись честно говорит, что происходит сейчас.
+ */
+export function aiProgressText(analysisRunning: boolean, ownFullCycle: boolean): string {
+  if (analysisRunning) return "Идет анализ – затем обзор обновится сам.";
+  if (ownFullCycle) return "Анализ готов, обзор дописывается – раздел обновится сам.";
+  return "Обзор формируется – раздел обновится сам.";
+}
+
 /** «Проверить оценку» (В5.2, Б3): постановка проверки на накрутку. */
 function useCheckAction(org: string, repo: string, onChanged: () => void) {
   const toaster = useToaster();
@@ -433,7 +444,7 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn }: { ca
             <Skeleton style={{ height: 18, width: "92%" }} />
             <Skeleton style={{ height: 18, width: "60%" }} />
             <Text variant="caption-2" color="secondary">
-              Обзор формируется – раздел обновится сам.
+              {aiProgressText(card.job !== null, own && ai?.audience === "full")}
             </Text>
           </Flex>
         ) : ai === null || (!hasOverview && specialists.length === 0) ? (

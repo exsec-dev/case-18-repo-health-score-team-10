@@ -200,3 +200,13 @@ describe("надежность М10: детектор ровных серий н
     expect(s.regular_share).toBeGreaterThan(0.9);
   });
 });
+
+import { aiProgressText } from "../src/web/RepoV5";
+
+describe("UX-1 (б): подпись под скелетоном обзора по фазе", () => {
+  test("идет анализ / анализ готов, обзор дописывается / публичная генерация", () => {
+    expect(aiProgressText(true, true)).toBe("Идет анализ – затем обзор обновится сам.");
+    expect(aiProgressText(false, true)).toBe("Анализ готов, обзор дописывается – раздел обновится сам.");
+    expect(aiProgressText(false, false)).toBe("Обзор формируется – раздел обновится сам.");
+  });
+});
