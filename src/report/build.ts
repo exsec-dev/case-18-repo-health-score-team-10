@@ -68,6 +68,7 @@ import {
   type ShownMetric,
   submetricWeightText,
   noRecommendationsText,
+  strengthsLine,
 } from "./sections";
 import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle, subweightKey, type SubmetricContext } from "./submetrics";
 
@@ -250,6 +251,8 @@ function indexNullSection(card: RepoCard): Block[] {
     { kind: "coverage", title: "Объем собранных данных", share: score.indexCoverage, threshold: COVERAGE_NULL_BELOW, collected: `собрано ${collected}`, thresholdText: `порог ${threshold}: с него рассчитывается оценка` },
     // Ступень 4 (Ф21): те же имена разделов, что в обычном отчете и на карточке
     h2("Категории"),
+    // К-4 В5.3 (§2 25.09): сильные стороны / требует внимания — одна копия с карточкой
+    ...(strengthsLine(card) !== null ? [para(line(strengthsLine(card)!))] : []),
     categoriesBlock(card, ctx),
     h2("Рекомендации"),
   ];
@@ -320,6 +323,8 @@ function scoredSection(card: RepoCard, metrics: Metric[]): Block[] {
     // порядке: сначала публичный
     ...shown.map((m) => contributionsBlock(contributions.get(m.name)!, m.name)),
     h2("Категории"),
+    // К-4 В5.3 (§2 25.09): сильные стороны / требует внимания — одна копия с карточкой
+    ...(strengthsLine(card) !== null ? [para(line(strengthsLine(card)!))] : []),
     categoriesBlock(card, ctx),
   ];
   // В11 и В15 гейта: блока «Что сделать первым» нет, раздел рекомендаций один

@@ -77,7 +77,7 @@ import {
 import { useEffect, useState } from "react";
 import { COVERAGE_NULL_BELOW } from "../score/model";
 import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle } from "../report/submetrics";
-import { FULL, INDEX, metricWeights, sourceWord, submetricWeightText } from "../report/sections";
+import { FULL, INDEX, metricWeights, sourceWord, strengthsLine, submetricWeightText } from "../report/sections";
 import type { MetaResponse, RepoCard } from "./api";
 import { dataOf, mutateJson, useJson, useVisible } from "./api";
 import { cardView, type CardView, type CategoryView, type RecommendationView } from "./cardView";
@@ -929,6 +929,13 @@ function Categories({ card, view }: { card: Card; view: CardView }) {
         <Text variant="subheader-3" as="h2" id="rh-categories-title" className="rh-section__title">
           Категории
         </Text>
+        {/* К-4 В5.3 (§2 25.09, вариант Б): сильные стороны / требует внимания — строкой под
+            заголовком, без фона и цвета; одна копия с MD/PDF (`strengthsLine`) */}
+        {strengthsLine(card) !== null && (
+          <Text as="p" variant="body-1" color="complementary" className="rh-strengths">
+            {strengthsLine(card)}
+          </Text>
+        )}
         <ul className="rh-list" style={{ borderTop: 0 }}>
           {view.categories.map((c) => (
             // замечание 25.09: при первом заходе ни одна категория не раскрыта (раскрытие худшей путало)

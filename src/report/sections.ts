@@ -340,6 +340,35 @@ export function noRecommendationsKind(card: RepoCard): "healthy" | "weak" | "nod
   return "healthy";
 }
 
+/**
+ * К-4 В5.3 (§2 25.09, вариант Б): сильные стороны и то, что требует внимания, —
+ * одной короткой строкой под заголовком «Категории» (буква ТЗ §3.4 «сильные и
+ * слабые стороны»). Одна копия для карточки и MD/PDF. Только показанные
+ * категории с данными (закрытые и «нет данных» не участвуют — tri-state), по
+ * округленному баллу, как шкала: сильные — до 2 лучших от 70, «требует
+ * внимания» — до 2 худших ниже 70; части без категорий нет. У пустого репо
+ * (`codeEmpty`) строки нет: оценивать нечего. Новых баллов нет — только выбор
+ * из показанных.
+ */
+export function strengthsLine(card: RepoCard): string | null {
+  const score = card.score;
+  if (!score || card.markers.codeEmpty) return null;
+  const shown = CATEGORY_ORDER.map((key) => ({ key, cat: score.categories[key] }))
+    .filter((e): e is { key: CategoryKey; cat: CardCategory } => e.cat !== undefined && e.cat.locked === undefined && e.cat.score !== null)
+    .map((e) => ({ key: e.key, value: roundScore(e.cat.score!) }));
+  const name = (key: CategoryKey): string => {
+    const t = CATEGORY_TITLES[key];
+    // «CI/CD» — аббревиатура, регистр не меняется
+    return t.length > 1 && t[1] === t[1]!.toUpperCase() && t[1] !== t[1]!.toLowerCase() ? t : t.charAt(0).toLowerCase() + t.slice(1);
+  };
+  const strong = shown.filter((e) => e.value >= 70).sort((a, b) => b.value - a.value).slice(0, 2);
+  const weak = shown.filter((e) => e.value < 70).sort((a, b) => a.value - b.value).slice(0, 2);
+  const parts: string[] = [];
+  if (strong.length > 0) parts.push(`Сильные стороны: ${strong.map((e) => name(e.key)).join(", ")}.`);
+  if (weak.length > 0) parts.push(`Требует внимания: ${weak.map((e) => name(e.key)).join(", ")}.`);
+  return parts.length > 0 ? parts.join(" ") : null;
+}
+
 export function noRecommendationsText(card: RepoCard): string {
   const kind = noRecommendationsKind(card);
   const head =

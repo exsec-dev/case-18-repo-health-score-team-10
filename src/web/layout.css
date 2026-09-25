@@ -547,6 +547,12 @@ body {
   margin-block: var(--g-spacing-1) var(--g-spacing-4);
 }
 
+/* К-4 В5.3: строка сильных сторон под заголовком «Категории» — обычный текст, отбивка
+   до списка как у заголовка */
+.rh-strengths.g-text {
+  margin: calc(-1 * var(--g-spacing-2)) 0 var(--g-spacing-3);
+}
+
 .rh-card-head {
   margin-bottom: var(--g-spacing-4);
 }
