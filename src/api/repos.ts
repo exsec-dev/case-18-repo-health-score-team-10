@@ -186,7 +186,11 @@ interface RatingRow {
   language_color: string | null;
   total: number | null;
   coverage: number;
-  categories: string;
+  /** баллы 4 категорий индекса (`json_extract`); NULL — нет данных или ключа нет */
+  c_documentation: number | null;
+  c_activity: number | null;
+  c_issues: number | null;
+  c_code: number | null;
   stale: string;
   model_version: string;
   scan_status: string;
@@ -220,17 +224,34 @@ const LAST_SCAN_SQL = `(SELECT MAX(l2.id) FROM scans l2 WHERE l2.repo_id = r.id)
 // не входят); статус и время — последнего скана L (круг 2, LOW-2: как
 // карточка), статус — public_status; только rating_active=1 AND
 // visibility='public'. Проверок доступа нет.
+// В5.3 (§2 25.09 «скорость рейтинга — вариант 1»): тот же набор тем же правилом,
+// одним проходом. «Последний пригодный скан» (как LAST_ELIGIBLE_SCAN_SQL) и
+// «последний скан» L (как LAST_SCAN_SQL) считаются по одному разу на репо
+// (`GROUP BY`), а не коррелированным подзапросом на каждую строку; из JSON
+// категорий SQLite достает только 4 балла индекса (`json_extract`) — строка
+// категорий (~1,4 КБ) в JS не едет и не разбирается. Было ~1 с на запрос при
+// 28 тыс. репо (650 мс SQL + 120 мс JSON), ответ не изменился (сверка построчно
+// на копии БД — журнал плана В5.3).
 const RATING_SQL = `
+WITH last AS (
+  SELECT sc2.repo_id, MAX(sc2.scan_id) AS scan_id FROM scores sc2 JOIN scans s2 ON s2.id = sc2.scan_id
+  WHERE sc2.model_version = ? AND s2.rating_eligible = 1 GROUP BY sc2.repo_id),
+lastscan AS (SELECT repo_id, MAX(id) AS id FROM scans GROUP BY repo_id)
 SELECT r.org_slug, r.repo_slug, r.title, r.language, r.likes, r.forks, r.last_activity_at, r.logo_url, r.language_color,
-       sc.healthcraft_index AS total, sc.index_coverage AS coverage, sc.categories, sc.stale, sc.model_version,
+       sc.healthcraft_index AS total, sc.index_coverage AS coverage,
+       json_extract(sc.categories, '$.documentation.score') AS c_documentation,
+       json_extract(sc.categories, '$.activity.score') AS c_activity,
+       json_extract(sc.categories, '$.issues.score') AS c_issues,
+       json_extract(sc.categories, '$.code.score') AS c_code,
+       sc.stale, sc.model_version,
        COALESCE(l.public_status, l.status) AS scan_status, l.started_at, l.finished_at
-FROM scores sc
-JOIN repos r ON r.id = sc.repo_id
-JOIN scans l ON l.id = ${LAST_SCAN_SQL}
-WHERE sc.model_version = ?
-  AND r.rating_active = 1
-  AND r.visibility = 'public'
-  AND sc.scan_id = ${LAST_ELIGIBLE_SCAN_SQL}`;
+FROM last
+JOIN scores sc ON sc.scan_id = last.scan_id AND sc.model_version = ?
+JOIN repos r ON r.id = last.repo_id
+JOIN lastscan ls ON ls.repo_id = r.id
+JOIN scans l ON l.id = ls.id
+WHERE r.rating_active = 1
+  AND r.visibility = 'public'`;
 
 /** Категории каналов с правами зрителя (К2): в рейтинге и без доступа — закрыты. */
 export const CHANNEL_CATEGORIES: CategoryKey[] = ["cicd", "security"];
@@ -251,10 +272,15 @@ export const CHANNEL_CATEGORIES: CategoryKey[] = ["cicd", "security"];
 export const CHANNEL_TREE_KEY = "tree.stats@channel";
 
 function toRatingItem(row: RatingRow): RatingItem {
-  const cats = JSON.parse(row.categories) as Record<string, CategoryScore>;
+  const indexScores: Partial<Record<CategoryKey, number | null>> = {
+    documentation: row.c_documentation,
+    activity: row.c_activity,
+    issues: row.c_issues,
+    code: row.c_code,
+  };
   const categories = {} as Record<CategoryKey, number | null>;
   for (const key of CATEGORY_ORDER) {
-    categories[key] = CHANNEL_CATEGORIES.includes(key) ? null : (cats[key]?.score ?? null);
+    categories[key] = CHANNEL_CATEGORIES.includes(key) ? null : (indexScores[key] ?? null);
   }
   // stale-маркер рейтинга — только по фактам, которые входят в рейтинг
   const stale = (JSON.parse(row.stale) as string[]).filter((k) => PUBLIC_KINDS.includes(k));
@@ -324,12 +350,14 @@ function matchesQ(item: RatingItem, q: string): boolean {
 
 export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } = {}): RatingResponse {
   const rows = db.query(RATING_SQL).all(MODEL_VERSION, MODEL_VERSION) as RatingRow[];
-  const all = rows.map(toRatingItem);
-  // В-4: место — по всему рейтингу, до поиска и фильтров (правило карточки)
-  all
-    .filter((i) => i.healthcraftIndex !== null)
-    .sort((a, b) => compareItems(a, b, "index", "desc"))
-    .forEach((item, i) => (item.rank = i + 1));
+  // В-4: место — по всему рейтингу, до поиска и фильтров (правило карточки).
+  // В5.3 (вариант 1): весь список сортируется по месту ОДИН раз — фильтры его
+  // порядок сохраняют, и выдаче по умолчанию (индекс по убыванию) вторая
+  // сортировка не нужна; NULL-индексы стоят в хвосте (compareItems)
+  const all = rows.map(toRatingItem).sort((a, b) => compareItems(a, b, "index", "desc"));
+  all.forEach((item, i) => {
+    if (item.healthcraftIndex !== null) item.rank = i + 1;
+  });
 
   // фасеты считаются БЕЗ фильтра языка (иначе выбранный язык схлопывает
   // список выбора и из него некуда вернуться), но С учётом поиска
@@ -354,7 +382,7 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
   const nullItems = filtered
     .filter((i) => i.healthcraftIndex === null)
     .sort((a, b) => fullName(a).localeCompare(fullName(b)));
-  scored.sort((a, b) => compareItems(a, b, query.sort, query.order));
+  if (query.sort !== "index" || query.order !== "desc") scored.sort((a, b) => compareItems(a, b, query.sort, query.order));
 
   const total = scored.length;
   const totalPages = Math.max(1, Math.ceil(total / query.perPage));
@@ -1319,7 +1347,19 @@ export interface MetaResponse {
 }
 
 export function getMeta(db: Database, opts: { now?: Date; leaseMs?: number; publicBaseUrl?: string } = {}): MetaResponse {
-  const rows = db.query(RATING_SQL).all(MODEL_VERSION, MODEL_VERSION) as RatingRow[];
+  // В5.3 (§2 25.09, вариант 1): счетчики — легким запросом по тому же набору, без строк рейтинга
+  const counts = db
+    .query(
+      `WITH last AS (
+         SELECT sc2.repo_id, MAX(sc2.scan_id) AS scan_id FROM scores sc2 JOIN scans s2 ON s2.id = sc2.scan_id
+         WHERE sc2.model_version = ? AND s2.rating_eligible = 1 GROUP BY sc2.repo_id)
+       SELECT COUNT(sc.healthcraft_index) AS scored, COALESCE(SUM(sc.healthcraft_index IS NULL), 0) AS nullScore
+       FROM last
+       JOIN scores sc ON sc.scan_id = last.scan_id AND sc.model_version = ?
+       JOIN repos r ON r.id = last.repo_id
+       WHERE r.rating_active = 1 AND r.visibility = 'public'`,
+    )
+    .get(MODEL_VERSION, MODEL_VERSION) as { scored: number; nullScore: number };
   return {
     modelVersion: MODEL_VERSION,
     categories: CATEGORY_ORDER.map((key) => ({
@@ -1332,8 +1372,8 @@ export function getMeta(db: Database, opts: { now?: Date; leaseMs?: number; publ
     fullMetricTitle: "Repo Health Score",
     coverageNullBelow: COVERAGE_NULL_BELOW,
     repos: {
-      scored: rows.filter((r) => r.total !== null).length,
-      nullScore: rows.filter((r) => r.total === null).length,
+      scored: counts.scored,
+      nullScore: counts.nullScore,
       // тот же фильтр, что у RATING_SQL (rating_active + public), но без
       // JOIN на scores: знаменатель охвата — каталог, а не оценённая часть
       catalog: (db.query("SELECT COUNT(*) AS c FROM repos WHERE rating_active = 1 AND visibility = 'public'").get() as { c: number }).c,
