@@ -24,10 +24,12 @@ import { makeCalculatorExecutor, makeToolExecutor, materializeWorktree, removeWo
 import { frameUntrusted, makeNonce } from "./input";
 import { validateFlagOutput, validateOutput, type FraudFlag, type FactInput } from "./validator";
 import type { SummaryRole } from "./roles";
-import { modelTierOf, ROLE_FACT_CATEGORIES, SPECIALIST_ROLES, toolsAllowed, type SpecialistRole } from "./roles";
+import { modelTierOf, PUBLIC_CATEGORIES, PUBLIC_SPECIALIST_ROLES, ROLE_FACT_CATEGORIES, SPECIALIST_ROLES, toolsAllowed, type SpecialistRole } from "./roles";
 import { anySummaryAuto } from "./optin";
 import { categoryOf } from "../collectors/facts";
 import { rhythmSignals, RHYTHM_KEY, type RhythmSignals } from "./rhythm";
+import { CHANNEL_KINDS } from "../score/compute";
+import type { AiAudience } from "../db";
 
 export interface SummaryDeps {
   db: Database;
@@ -52,6 +54,12 @@ export interface SummaryDeps {
 export interface SummaryRequest {
   scanId: number;
   now?: Date;
+  /**
+   * В5.2 (Б2): аудитория текста. 'public' — только 4 открытые категории и их
+   * факты (без CI/CD и Безопасности), текст видят все; 'full' (дефолт) — все
+   * факты скана, текст только зрителю с полным Score.
+   */
+  audience?: AiAudience;
 }
 
 export interface SummaryRoleOutcome {
@@ -109,8 +117,12 @@ function budgetedCallLlm(callLlm: CallLlm, budget: RunBudget): CallLlm {
   };
 }
 
-/** Ок-факты скана, скоупированные по категории роли. */
-export function scopedFacts(db: Database, scanId: number, role: SummaryRole): FactInput[] {
+/**
+ * Ок-факты скана, скоупированные по категории роли. В5.2 (Б2): для публичной
+ * аудитории — только факты 4 открытых категорий и никаких фактов каналов с
+ * правами (CHANNEL_KINDS: конфиги и запуски CI, находки AppSec).
+ */
+export function scopedFacts(db: Database, scanId: number, role: SummaryRole, audience: AiAudience = "full"): FactInput[] {
   const rows = db.query("SELECT key, value, status FROM facts WHERE scan_id = ?").all(scanId) as {
     key: string;
     value: string;
@@ -118,9 +130,15 @@ export function scopedFacts(db: Database, scanId: number, role: SummaryRole): Fa
   }[];
   return rows
     .filter((r) => r.status === "ok")
+    .filter((r) => audience === "full" || publicFactKey(r.key))
     .map((r) => ({ key: r.key, value: parseFactValue(r.value) }))
     .filter((f) => roleFactsAllowed(role, f.key))
     .map(capTimelineFact);
+}
+
+/** Факт открыт публичной аудитории: категория из 4 открытых и не канал с правами. */
+export function publicFactKey(key: string): boolean {
+  return !CHANNEL_KINDS.includes(key) && (PUBLIC_CATEGORIES as readonly string[]).includes(categoryOf(key));
 }
 
 function roleFactsAllowed(role: SummaryRole, key: string): boolean {
@@ -143,7 +161,7 @@ export interface TrajectoryPoint {
  * категории. Прошлые LLM-тексты в точках не участвуют по построению
  * (самореференция исчезает). Без точек роль динамики не запускается.
  */
-export function historyPoints(db: Database, scanId: number): TrajectoryPoint[] {
+export function historyPoints(db: Database, scanId: number, audience: AiAudience = "full"): TrajectoryPoint[] {
   const row = db.query("SELECT repo_id FROM scans WHERE id = ?").get(scanId) as { repo_id: number } | null;
   if (!row) return [];
   const rows = db
@@ -165,7 +183,11 @@ export function historyPoints(db: Database, scanId: number): TrajectoryPoint[] {
       cats = {};
     }
     const categories: Record<string, number | null> = {};
-    for (const [key, value] of Object.entries(cats)) categories[key] = value?.score ?? null;
+    for (const [key, value] of Object.entries(cats)) {
+      // В5.2 (Б2): публичной аудитории — баллы только открытых категорий
+      if (audience === "public" && !(PUBLIC_CATEGORIES as readonly string[]).includes(key)) continue;
+      categories[key] = value?.score ?? null;
+    }
     return { date: r.finished_at, headSha: r.head_sha, index: r.idx, coverage: r.coverage, categories };
   });
 }
@@ -331,13 +353,14 @@ function writeNote(
   text: string,
   refs: string[],
   now: Date,
+  audience: AiAudience,
 ): void {
   const model = modelTierOf(role) === "main" ? (deps.models?.main ?? "main") : (deps.models?.side ?? "side");
   deps.db
     .query(
-      "INSERT INTO ai_notes (repo_id, scan_id, role, text, fact_refs, charter_version, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO ai_notes (repo_id, scan_id, role, text, fact_refs, charter_version, model, created_at, audience) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
-    .run(repoId, scanId, role, text, JSON.stringify(refs), loadCharter(role).version, model, now.toISOString());
+    .run(repoId, scanId, role, text, JSON.stringify(refs), loadCharter(role).version, model, now.toISOString(), audience);
 }
 
 function repoIdOf(deps: SummaryDeps): number {
@@ -355,6 +378,8 @@ function repoIdOf(deps: SummaryDeps): number {
 export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promise<SummaryRunResult> {
   const now = req.now ?? new Date();
   const repoId = repoIdOf(deps);
+  const audience: AiAudience = req.audience ?? "full";
+  const roles: readonly SpecialistRole[] = audience === "public" ? PUBLIC_SPECIALIST_ROLES : SPECIALIST_ROLES;
   // В5.1 (Ищейка-С1, кэш по скану): заметки этого скана уже записаны (авто-
   // генерация, повтор claim после падения воркера) — вторая генерация того
   // же скана не запускается: кредиты и append-лог чисты.
@@ -362,14 +387,16 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
   // перезаписывает заметки скана (у скана всегда ≤1 набор, все читатели —
   // карточка, ai-notes, эволюция — остаются верны без правок)
   // В5.2 (Б1): проверка на накрутку — своя заявка со своим кэшем (runFraudCheck);
-  // ее заметка не делает обзор «уже сформированным», и регенерация обзора ее не стирает
-  if (deps.cache !== false && deps.db.query("SELECT 1 FROM ai_notes WHERE scan_id = ? AND role != 'flagger' LIMIT 1").get(req.scanId) !== null) {
-    deps.log?.(`[summary] ${deps.org}/${deps.repo} scan ${req.scanId}: cached (notes already exist for this scan)`);
+  // ее заметка не делает обзор «уже сформированным», и регенерация обзора ее не стирает.
+  // В5.2 (Б2): кэш и регенерация — в пределах аудитории: публичный и полный обзор
+  // одного скана — два разных текста
+  if (deps.cache !== false && deps.db.query("SELECT 1 FROM ai_notes WHERE scan_id = ? AND role != 'flagger' AND audience = ? LIMIT 1").get(req.scanId, audience) !== null) {
+    deps.log?.(`[summary] ${deps.org}/${deps.repo} scan ${req.scanId} (${audience}): cached (notes already exist for this scan)`);
     return { scanId: req.scanId, notes: 0, failSoft: [], skipped: [], outcomes: [], cached: true };
   }
   if (deps.cache === false) {
-    const gone = deps.db.query("DELETE FROM ai_notes WHERE scan_id = ? AND role != 'flagger'").run(req.scanId);
-    deps.db.query("DELETE FROM ai_fails WHERE scan_id = ? AND role != 'flagger'").run(req.scanId);
+    const gone = deps.db.query("DELETE FROM ai_notes WHERE scan_id = ? AND role != 'flagger' AND audience = ?").run(req.scanId, audience);
+    deps.db.query("DELETE FROM ai_fails WHERE scan_id = ? AND role != 'flagger' AND audience = ?").run(req.scanId, audience);
     if (Number(gone.changes) > 0) {
       deps.log?.(`[summary] ${deps.org}/${deps.repo} scan ${req.scanId}: regen — previous notes replaced (${Number(gone.changes)} rows)`);
     }
@@ -380,7 +407,7 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
     ac: new AbortController(),
   };
   const fuse = setTimeout(() => budget.ac.abort(), deps.budgets?.fuseMs ?? GENERATION_FUSE_MS);
-  deps.log?.(`[summary] ${deps.org}/${deps.repo} scan ${req.scanId}: start (budget ${budget.max} calls)`);
+  deps.log?.(`[summary] ${deps.org}/${deps.repo} scan ${req.scanId} (${audience}): start (budget ${budget.max} calls)`);
   const outcomes: SummaryRoleOutcome[] = [];
   const failSoft: string[] = [];
   const skipped: string[] = [];
@@ -397,8 +424,8 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
     const sharedContent = contents.filter((c) => c.length > 0);
 
     const settled = await Promise.all(
-      SPECIALIST_ROLES.map(async (role) => {
-        const facts = scopedFacts(deps.db, req.scanId, role);
+      roles.map(async (role) => {
+        const facts = scopedFacts(deps.db, req.scanId, role, audience);
         if (facts.length === 0) {
           return { role, outcome: { role, ok: false, reason: "нет фактов категории — вызова не было" } as SummaryRoleOutcome, text: null };
         }
@@ -420,7 +447,7 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
       outcomes.push(s.outcome);
       if (s.text !== null) {
         specialistTexts[s.role] = s.text.clean;
-        writeNote(deps, req.scanId, repoId, s.role, s.text.clean, s.text.refs, now);
+        writeNote(deps, req.scanId, repoId, s.role, s.text.clean, s.text.refs, now, audience);
         notes++;
       } else {
         const reason = s.outcome.reason ?? "";
@@ -432,7 +459,7 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
     // заявка runFraudCheck, со своей кнопкой и лимитом
 
     // --- динамика (Б4, К5.16): числовые точки истории; без точек вызова нет ---
-    const points = historyPoints(deps.db, req.scanId);
+    const points = historyPoints(deps.db, req.scanId, audience);
     if (points.length === 0) {
       skipped.push("trajectory");
       outcomes.push({ role: "trajectory", ok: false, reason: "нет точек истории — вызова не было" });
@@ -441,7 +468,7 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
       const res = await runRole(deps, budget, "trajectory", trajectoryFacts, [], null);
       if (res.ok) {
         specialistTexts.trajectory = res.clean;
-        writeNote(deps, req.scanId, repoId, "trajectory", res.clean, res.refs, now);
+        writeNote(deps, req.scanId, repoId, "trajectory", res.clean, res.refs, now, audience);
         notes++;
         outcomes.push({ role: "trajectory", ok: true, chars: res.clean.length, retries: res.retries, ms: res.ms, calls: res.calls, tools: res.tools });
       } else {
@@ -458,10 +485,10 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
       outcomes.push({ role: "overview", ok: false, reason: "нет ни одного ответа специалистов" });
     } else {
       const segs = segmentsOf(specialistTexts);
-      const facts = scopedFacts(deps.db, req.scanId, "overview");
+      const facts = scopedFacts(deps.db, req.scanId, "overview", audience);
       const res = await runRole(deps, budget, "overview", facts, [], segs);
       if (res.ok) {
-        writeNote(deps, req.scanId, repoId, "overview", res.clean, res.refs, now);
+        writeNote(deps, req.scanId, repoId, "overview", res.clean, res.refs, now, audience);
         notes++;
         outcomes.push({ role: "overview", ok: true, chars: res.clean.length, retries: res.retries, ms: res.ms, calls: res.calls, tools: res.tools });
       } else {
@@ -479,11 +506,11 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
   // 23.09 (Алексей): причина несформирования — ДЛЯ ПОЛЬЗОВАТЕЛЯ, не только в
   // лог; карточка читает ai_fails по последнему скану
   const failInsert = deps.db.query(
-    "INSERT INTO ai_fails (repo_id, scan_id, role, reason, created_at) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO ai_fails (repo_id, scan_id, role, reason, created_at, audience) VALUES (?, ?, ?, ?, ?, ?)",
   );
   for (const o of outcomes) {
     if (o.ok) continue;
-    failInsert.run(repoId, req.scanId, o.role, (o.reason ?? "не прошла проверку").slice(0, 200), now.toISOString());
+    failInsert.run(repoId, req.scanId, o.role, (o.reason ?? "не прошла проверку").slice(0, 200), now.toISOString(), audience);
   }
   // В5.1 (Прод-С3): при частичном или полном фейле — строка outcomes с причинами:
   // оператор различает «провайдер недоступен» (модель: сеть/429/stall) от
@@ -535,7 +562,7 @@ export async function runFraudCheck(deps: SummaryDeps, req: SummaryRequest): Pro
   deps.db.query("DELETE FROM ai_fails WHERE scan_id = ? AND role = 'flagger'").run(req.scanId);
   const fail = (reason: string, signals: RhythmSignals | null): FraudCheckResult => {
     deps.db
-      .query("INSERT INTO ai_fails (repo_id, scan_id, role, reason, created_at) VALUES (?, ?, 'flagger', ?, ?)")
+      .query("INSERT INTO ai_fails (repo_id, scan_id, role, reason, created_at, audience) VALUES (?, ?, 'flagger', ?, ?, 'public')")
       .run(repoId, req.scanId, reason.slice(0, 200), now.toISOString());
     deps.log?.(`${tag}: no flag — ${reason.slice(0, 160)}`);
     return { scanId: req.scanId, ok: false, flag: null, signals, reason };
@@ -573,6 +600,8 @@ export async function runFraudCheck(deps: SummaryDeps, req: SummaryRequest): Pro
     JSON.stringify({ flag: res.flag.flag, factors: res.flag.factors, signals }),
     res.flag.factors.map((f) => f.key),
     now,
+    // вход флаггера — только публичные данные активности: метку видят все (§2 п.2)
+    "public",
   );
   deps.log?.(`${tag}: flag=${res.flag.flag}, factors=[${res.flag.factors.map((f) => f.key).join(",")}], calls=${budget.calls}`);
   return { scanId: req.scanId, ok: true, flag: res.flag, signals };

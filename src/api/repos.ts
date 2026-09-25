@@ -15,6 +15,7 @@ import { roundScore, type GitLimitsMarker } from "../web/format";
 import type { DerivedMetrics } from "../score/derived";
 import { INDEX_WEIGHTS, SCORE_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, type IndexCategoryKey, MODEL_VERSION, SECRETS_CRITICAL_TOTAL_CAP } from "../score/model";
 import { getSummaryAuto } from "../summary/optin";
+import type { AiAudience } from "../db";
 
 // ---------- общие формы ----------
 
@@ -603,6 +604,8 @@ export interface CardAiFailure {
 export interface CardAi {
   /** скан последней генерации */
   scanId: number;
+  /** В5.2 (Б2): какая версия текста отдана — публичная (4 открытые категории) или полная */
+  audience: AiAudience;
   generatedAt: string | null;
   overview: CardAiNote | null;
   specialists: CardAiNote[];
@@ -1154,7 +1157,10 @@ export function getRepoCard(
 
   // В5 (К5.4): текст виден только зрителю с полным Score; сборка — не вызов,
   // если генерации не было (ai = null при fullOpen, undefined при закрытом)
-  const ai = fullOpen ? buildCardAi(db, r.id, opts.viewerUserId, summaryCooldownMsOf(opts)) : undefined;
+  // В5.2 (Б2): зрителю без полного Score публичного репо — публичная версия
+  // (только открытые категории); у закрытого репо без полных прав AI нет
+  const aiAudiences: AiAudience[] = fullOpen ? (r.visibility === "public" ? ["full", "public"] : ["full"]) : r.visibility === "public" ? ["public"] : [];
+  const ai = aiAudiences.length > 0 ? buildCardAi(db, r.id, opts.viewerUserId, summaryCooldownMsOf(opts), aiAudiences) : undefined;
 
   return {
     repo: cardRepo,
@@ -1177,28 +1183,38 @@ function summaryCooldownMsOf(opts: { summaryCooldownMs?: number }): number {
   return opts.summaryCooldownMs ?? AI_DEFAULT_COOLDOWN_MS;
 }
 
-/** Последняя генерация репо (ai_notes append) + состояние кнопки для владельца. */
-function buildCardAi(db: Database, repoId: number, viewerUserId: number | undefined, cooldownMs: number): CardAi {
-  const last = db.query("SELECT MAX(scan_id) AS s FROM ai_notes WHERE repo_id = ?").get(repoId) as { s: number | null };
+/**
+ * Последняя генерация репо (ai_notes append) + состояние кнопки.
+ * В5.2 (Б2): `audiences` — какие версии текста зрителю открыты, в порядке
+ * предпочтения: зрителю с полным Score — полная, если ее нет — публичная (у
+ * публичного репо); остальным — только публичная. Обзор и проверка на накрутку
+ * — разные заявки: у каждой свой последний скан (Б1).
+ */
+function buildCardAi(db: Database, repoId: number, viewerUserId: number | undefined, cooldownMs: number, audiences: readonly AiAudience[]): CardAi {
+  const lastOf = (a: AiAudience): number | null =>
+    (db.query("SELECT MAX(scan_id) AS s FROM ai_notes WHERE repo_id = ? AND role != 'flagger' AND audience = ?").get(repoId, a) as { s: number | null }).s;
+  const audience = audiences.find((a) => lastOf(a) !== null) ?? audiences[0]!;
+  const lastScan = lastOf(audience);
   const slugRow = db.query("SELECT org_slug, repo_slug FROM repos WHERE id = ?").get(repoId) as { org_slug: string; repo_slug: string };
   const slug = `${slugRow.org_slug}/${slugRow.repo_slug}`;
   const optIn = viewerUserId !== undefined ? getSummaryAuto(db, viewerUserId, slug) : false;
   // В5.1-smoke (23.09): bun:sqlite .get() возвращает null при пустом
   // результате — сравнение с undefined делало jobActive константным true
   const jobActive =
-    (db.query("SELECT 1 AS x FROM jobs WHERE repo_id = ? AND kind = 'summary' AND status IN ('queued', 'running') LIMIT 1").get(repoId) as { x: number } | null) !== null;
-  const lastJobAt = (db.query("SELECT MAX(created_at) AS t FROM jobs WHERE repo_id = ? AND kind = 'summary'").get(repoId) as { t: string | null }).t;
+    (db.query("SELECT 1 AS x FROM jobs WHERE repo_id = ? AND kind = 'summary' AND audience = ? AND status IN ('queued', 'running') LIMIT 1").get(repoId, audience) as { x: number } | null) !== null;
+  const lastJobAt = (db.query("SELECT MAX(created_at) AS t FROM jobs WHERE repo_id = ? AND kind = 'summary' AND audience = ?").get(repoId, audience) as { t: string | null }).t;
   const cooldownUntil = lastJobAt === null ? null : new Date(Date.parse(lastJobAt) + cooldownMs).toISOString();
+  const fraud = fraudOf(db, repoId);
+  if (lastScan === null) {
+    return { scanId: 0, audience, generatedAt: null, overview: null, specialists: [], failures: [], optIn, jobActive, cooldownUntil, fraud };
+  }
   // В5.2 (Б1): проверка на накрутку — отдельная заявка; ее отказ не отказ обзора
   const fails = db
-    .query("SELECT role, reason FROM ai_fails WHERE scan_id = ? AND role != 'flagger' ORDER BY id")
-    .all(last.s) as { role: string; reason: string }[];
-  if (last.s === null) {
-    return { scanId: 0, generatedAt: null, overview: null, specialists: [], failures: [], optIn, jobActive, cooldownUntil, fraud: null };
-  }
+    .query("SELECT role, reason FROM ai_fails WHERE scan_id = ? AND role != 'flagger' AND audience = ? ORDER BY id")
+    .all(lastScan, audience) as { role: string; reason: string }[];
   const noteRows = db
-    .query("SELECT role, text, fact_refs, charter_version, model, created_at FROM ai_notes WHERE repo_id = ? AND scan_id = ? ORDER BY id")
-    .all(repoId, last.s) as { role: string; text: string; fact_refs: string; charter_version: string; model: string; created_at: string }[];
+    .query("SELECT role, text, fact_refs, charter_version, model, created_at FROM ai_notes WHERE repo_id = ? AND scan_id = ? AND role != 'flagger' AND audience = ? ORDER BY id")
+    .all(repoId, lastScan, audience) as { role: string; text: string; fact_refs: string; charter_version: string; model: string; created_at: string }[];
   const toNote = (r: (typeof noteRows)[number]): CardAiNote => ({
     role: r.role,
     text: r.text,
@@ -1208,34 +1224,11 @@ function buildCardAi(db: Database, repoId: number, viewerUserId: number | undefi
     createdAt: r.created_at,
   });
   const overview = noteRows.find((r) => r.role === "overview");
-  const specialists = noteRows.filter((r) => r.role !== "overview" && r.role !== "flagger").map(toNote);
-  // флаг фрода — структурный JSON из заметки flagger последней генерации
-  const flagRow = noteRows.find((r) => r.role === "flagger");
-  let fraud: CardAi["fraud"] = null;
-  if (flagRow !== undefined) {
-    try {
-      const parsed = JSON.parse(flagRow.text) as { flag?: unknown; factors?: unknown; signals?: unknown };
-      if (typeof parsed.flag === "boolean" && Array.isArray(parsed.factors)) {
-        fraud = {
-          flag: parsed.flag,
-          signals: parsed.signals !== null && typeof parsed.signals === "object" ? (parsed.signals as Record<string, unknown>) : null,
-          factors: parsed.factors
-            .filter((f): f is { key: string; note: string } => {
-              const item = f as { key?: unknown; note?: unknown };
-              return typeof item.key === "string" && typeof item.note === "string";
-            })
-            .slice(0, 8),
-        };
-      }
-    } catch {
-      fraud = null; // повреждённый JSON флага — флага нет, а не флаг есть
-    }
-  }
-  const generatedAt = noteRows
-    .filter((r) => r.role !== "flagger")
-    .reduce((acc, r) => (r.created_at > (acc ?? "") ? r.created_at : acc), null as string | null);
+  const specialists = noteRows.filter((r) => r.role !== "overview").map(toNote);
+  const generatedAt = noteRows.reduce((acc, r) => (r.created_at > (acc ?? "") ? r.created_at : acc), null as string | null);
   return {
-    scanId: last.s,
+    scanId: lastScan,
+    audience,
     generatedAt,
     overview: overview ? toNote(overview) : null,
     specialists,
@@ -1245,6 +1238,34 @@ function buildCardAi(db: Database, repoId: number, viewerUserId: number | undefi
     cooldownUntil,
     fraud,
   };
+}
+
+/**
+ * Флаг фрода — последняя проверка на накрутку по репо (заметка flagger). Вход
+ * проверки — публичные данные активности, поэтому метку видят все, кому видна
+ * карточка (§2 «В5.2 — публичный AI-обзор…» п.2).
+ */
+function fraudOf(db: Database, repoId: number): CardAi["fraud"] {
+  const row = db
+    .query("SELECT text FROM ai_notes WHERE repo_id = ? AND role = 'flagger' ORDER BY scan_id DESC, id DESC LIMIT 1")
+    .get(repoId) as { text: string } | null;
+  if (row === null) return null;
+  try {
+    const parsed = JSON.parse(row.text) as { flag?: unknown; factors?: unknown; signals?: unknown };
+    if (typeof parsed.flag !== "boolean" || !Array.isArray(parsed.factors)) return null;
+    return {
+      flag: parsed.flag,
+      signals: parsed.signals !== null && typeof parsed.signals === "object" ? (parsed.signals as Record<string, unknown>) : null,
+      factors: parsed.factors
+        .filter((f): f is { key: string; note: string } => {
+          const item = f as { key?: unknown; note?: unknown };
+          return typeof item.key === "string" && typeof item.note === "string";
+        })
+        .slice(0, 8),
+    };
+  } catch {
+    return null; // повреждённый JSON флага — флага нет, а не флаг есть
+  }
 }
 
 /** Ф2.15: статус живой job ИМЕННО зрителя (queued/running); queueAhead наружу не едет. */

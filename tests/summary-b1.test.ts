@@ -31,7 +31,8 @@ describe("Миграция 2.0→2.1 (Б1 В5 + 23.09 ai_fails)", () => {
     const { db } = freshDb();
     expect(getMetaValue(db, "schema_version")).toBe(SCHEMA_VERSION);
     // В5.3-М (Н1): 2.2 — scans.collector_version (аддитивно, таблицы 2.1 на месте)
-    expect(SCHEMA_VERSION).toBe("2.2");
+    // В5.2 (Б2): 2.3 — аудитория AI-текста и отметка пароля (аддитивно)
+    expect(SCHEMA_VERSION).toBe("2.3");
     expect(columnsOf(db, "scans").has("head_sha")).toBe(true);
     expect(columnsOf(db, "jobs").has("kind")).toBe(true);
     db.query("INSERT INTO jobs (repo_id, status, trigger_kind) VALUES (0, 'queued', 'periodic')").run();

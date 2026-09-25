@@ -405,7 +405,7 @@ describe("Н1: версия сборщика и доочередь ночной 
   }
 
   test("Н1: схема 2.2 — колонка scans.collector_version; openDb повторно идемпотентен", () => {
-    expect(SCHEMA_VERSION).toBe("2.2");
+    expect(SCHEMA_VERSION).toBe("2.3"); // В5.2 (Б2): поверх 2.2 — аддитивно
     const cols = (db.query("PRAGMA table_info(scans)").all() as { name: string }[]).map((c) => c.name);
     expect(cols).toContain("collector_version");
     const again = openDb({ ...loadConfig(), dataDir: dir });

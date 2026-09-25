@@ -8,6 +8,14 @@ export const SPECIALIST_ROLES = ["documentation", "code", "activity", "issues", 
 
 export const SUMMARY_ROLES = [...SPECIALIST_ROLES, "overview", "trajectory", "flagger"] as const;
 
+/**
+ * В5.2 (Б2): категории публичного AI-обзора — те, что открыты всем (4 категории
+ * HealthCraft Index). CI/CD и Безопасность — каналы с правами: их специалисты в
+ * публичный прогон не входят, их факты и баллы во вход не попадают.
+ */
+export const PUBLIC_CATEGORIES = ["documentation", "code", "activity", "issues"] as const;
+export const PUBLIC_SPECIALIST_ROLES = ["documentation", "code", "activity", "issues"] as const satisfies readonly (typeof SPECIALIST_ROLES)[number][];
+
 export type SpecialistRole = (typeof SPECIALIST_ROLES)[number];
 export type SummaryRole = (typeof SUMMARY_ROLES)[number];
 

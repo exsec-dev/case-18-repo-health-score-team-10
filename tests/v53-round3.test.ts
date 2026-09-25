@@ -29,7 +29,7 @@ afterAll(() => {
 const SECRET = "x".repeat(32);
 
 describe("В5.3 О1: права истории и AI-заметок — по строке репо, не общим кэшем", () => {
-  test("свой репо с правами прогрел кэш → чужой без прав: RHS в истории нет, заметки 403", async () => {
+  test("свой репо с правами прогрел кэш → чужой без прав: RHS в истории нет, заметки только публичные", async () => {
     const dir = mkdtempSync(join(tmpdir(), "rh-v53-o1-"));
     dirs.push(dir);
     const db = openDb({ ...loadConfig(), dataDir: dir });
@@ -71,9 +71,10 @@ describe("В5.3 О1: права истории и AI-заметок — по с�
     expect(other.fullOpen).toBe(false);
     expect(other.points.length).toBeGreaterThan(0);
     expect(other.points.every((p) => p.repoHealthScore === null)).toBe(true);
+    // В5.2 (Б2): чужой публичный — публичная версия текстов, полная не открывается кэшем прав
     const notes = await get("/api/repos/v53/other/ai-notes");
-    expect(notes.status).toBe(403);
-    expect(((await notes.json()) as { error: { code: string } }).error.code).toBe("locked");
+    expect(notes.status).toBe(200);
+    expect(((await notes.json()) as { audience: string }).audience).toBe("public");
 
     // и карточка чужого согласна с историей (один источник прав)
     const card = (await (await get("/api/repos/v53/other")).json()) as { score: { fullLocked: boolean } };

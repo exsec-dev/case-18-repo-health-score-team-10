@@ -70,8 +70,16 @@ import { publicStatusSql, ratingEligibleSql } from "./score/compute";
  * несформирования показывается пользователю, а не молчит в логах.
  * 2.2 (24.09, В5.3-М, Н1): `scans.collector_version` — версия сборщика фактов
  * (`COLLECTOR_VERSION`); старые строки — NULL («до учета»). Аддитивно.
+ * 2.3 (25.09, В5.2, Б2): `ai_notes.audience`, `ai_fails.audience`, `jobs.audience`
+ * ('public' | 'full', прежние строки — 'full') — публичный AI-обзор из публичных
+ * фактов хранится отдельно от полного; `users.ai_unlock` — отпечаток пароля
+ * неограниченного доступа к AI (Б4; NULL — отметки нет). Аддитивно.
  */
-export const SCHEMA_VERSION = "2.2";
+export const SCHEMA_VERSION = "2.3";
+
+/** Аудитория AI-текста (В5.2, Б2): публичная версия — из публичных фактов, для всех. */
+export type AiAudience = "public" | "full";
+export const AI_AUDIENCES: readonly AiAudience[] = ["public", "full"];
 
 const AI_NOTES_DDL = `CREATE TABLE IF NOT EXISTS ai_notes (
   id INTEGER PRIMARY KEY,
@@ -341,6 +349,13 @@ export function openDb(config: Config): Database {
     // v2.2 (В5.3-М, Н1): версия сборщика скана; старые строки — NULL («до учета»)
     ensureColumn(db, "scans", "collector_version", "INTEGER");
     ensureColumn(db, "jobs", "kind", "TEXT NOT NULL DEFAULT 'scan'");
+    // v2.3 (В5.2, Б2): аудитория AI-текста — 'public' (только публичные факты, видят
+    // все) | 'full' (все факты скана, только зрителю с полным Score); прежние строки —
+    // 'full' (сгенерированы по всем фактам). Отметка пароля неограниченного доступа (Б4).
+    ensureColumn(db, "ai_notes", "audience", "TEXT NOT NULL DEFAULT 'full'");
+    ensureColumn(db, "ai_fails", "audience", "TEXT NOT NULL DEFAULT 'full'");
+    ensureColumn(db, "jobs", "audience", "TEXT NOT NULL DEFAULT 'full'");
+    ensureColumn(db, "users", "ai_unlock", "TEXT");
     // v1.3 → v1.4 (В4): изоляция own/public и эвикция
     ensureColumn(db, "repos", "rating_active", "INTEGER NOT NULL DEFAULT 1");
     ensureColumn(db, "repos", "visibility", "TEXT NOT NULL DEFAULT 'public'");

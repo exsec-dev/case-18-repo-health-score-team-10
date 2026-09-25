@@ -8,6 +8,7 @@ import { parseFactValue } from "../collectors/facts";
 import { MODEL_VERSION } from "../score/model";
 import { totalsFromCategories, type CategoryScore } from "../score/compute";
 import { NO_PAT_ACCESS, type AccessResult } from "../auth/access";
+import type { AiAudience } from "../db";
 
 import type { AiNoteHistoryItem, AiNotesResponse, HistoryPoint, HistoryResponse } from "../summary/history-contract";
 
@@ -87,8 +88,11 @@ export function getRepoHistory(db: Database, org: string, repo: string, opts: { 
  * История взглядов: append-строки ai_notes по всем сканам (пользователь
  * видит эволюцию). В5.1 (Прод-З2): LIMIT последних 50 строк — append-лог
  * растёт линейно со сканами, неограниченная выдача не нужна никому.
- * ВИДИМОСТЬ: репо не видно → null (404); видно, но полный Score закрыт →
- * locked (текст не публичен, решение 22.09).
+ * ВИДИМОСТЬ: репо не видно → null (404). В5.2 (Б2, §2 «В5.2 — публичный
+ * AI-обзор…»): зритель с полным Score получает полные тексты (нет их — публичные
+ * у публичного репо); остальные — только публичные тексты публичного репо;
+ * закрытый репо без полного Score → locked. Заметки проверки на накрутку
+ * (flagger) — не взгляды обзора, в историю не входят.
  */
 export function getAiNotesHistory(db: Database, org: string, repo: string, opts: { access?: AccessResult } = {}): AiNotesResponse | null {
   const r = db
@@ -97,21 +101,27 @@ export function getAiNotesHistory(db: Database, org: string, repo: string, opts:
   if (!r) return null;
   if (r.visibility === "public" ? r.rating_active !== 1 : (opts.access ?? NO_PAT_ACCESS).repo !== "granted") return null;
   const access = opts.access ?? NO_PAT_ACCESS;
-  if (!(access.cicd === "granted" && access.appsec === "granted")) {
-    return { locked: true, reason: "AI-текст не является публичным – он виден только зрителям с правами на полный Score" };
+  const fullOpen = access.cicd === "granted" && access.appsec === "granted";
+  const audiences: AiAudience[] = fullOpen ? (r.visibility === "public" ? ["full", "public"] : ["full"]) : r.visibility === "public" ? ["public"] : [];
+  if (audiences.length === 0) {
+    return { locked: true, reason: "AI-текст этого репозитория виден только зрителям с правами на полный Score" };
   }
+  const has = (a: AiAudience): boolean =>
+    db.query("SELECT 1 FROM ai_notes WHERE repo_id = ? AND role != 'flagger' AND audience = ? LIMIT 1").get(r.id, a) !== null;
+  const audience = audiences.find(has) ?? audiences[0]!;
   const rows = db
     .query(
       `SELECT n.scan_id, n.role, n.text, n.fact_refs, n.charter_version, n.model, n.created_at, s.head_sha, s.finished_at
        FROM ai_notes n JOIN scans s ON s.id = n.scan_id
-       WHERE n.repo_id = ?
+       WHERE n.repo_id = ? AND n.role != 'flagger' AND n.audience = ?
        ORDER BY n.scan_id DESC, n.id DESC
        LIMIT 50`,
     )
-    .all(r.id) as { scan_id: number; role: string; text: string; fact_refs: string; charter_version: string; model: string; created_at: string; head_sha: string | null; finished_at: string | null }[];
+    .all(r.id, audience) as { scan_id: number; role: string; text: string; fact_refs: string; charter_version: string; model: string; created_at: string; head_sha: string | null; finished_at: string | null }[];
   rows.reverse(); // хронология по возрастанию, как прежде
   return {
     locked: false,
+    audience,
     notes: rows.map((row) => ({
       scanId: row.scan_id,
       role: row.role,

@@ -38,7 +38,8 @@ export interface AiNoteHistoryItem {
 
 export type AiNotesResponse =
   | { locked: true; reason: string }
-  | { locked: false; notes: AiNoteHistoryItem[] };
+  // В5.2 (Б2): какая версия текстов отдана — публичная (4 открытые категории) или полная
+  | { locked: false; audience: "public" | "full"; notes: AiNoteHistoryItem[] };
 
 /** Порог эволюции (решение 22.09): экран сравнения взглядов – при истории не меньше 2 дней. */
 export function evolutionTooEarly(createdAtDates: string[], now: Date = new Date()): boolean {

@@ -99,17 +99,18 @@ describe("К5.10: флаг без скидки — Score и версия мод�
   });
 });
 
-describe("Показ флага: карточка (по правам) и MD-раздел", () => {
-  test("карточка: полный Score → ai.fraud; аноним → текст и флаг не утекают", async () => {
+// В5.2 (Б2, §2 «В5.2 — публичный AI-обзор…» п.2; пересматривает К-3 (а)): вход проверки —
+// публичные данные активности, метку фрода видят все, кому видна карточка
+describe("Показ флага: карточка (всем зрителям) и MD-раздел", () => {
+  test("карточка: полный Score и аноним видят один и тот же флаг", async () => {
     const { db } = freshDb("rh-v5b8-card-");
     const scanId = seedFull(db, "card");
     await runFraudCheck({ db, org: "v5", repo: "card", callLlm: fakeWithFlagger(FLAG_TRUE, VALID_TEXTS), agentBackoffMs: 0 }, { scanId });
     const open = getRepoCard(db, "v5", "card", { access: OPEN, viewerUserId: 1, viewerAuth: "pat" })!;
     expect(open.ai?.fraud).toMatchObject({ flag: true, factors: [{ key: "activity.rhythm" }], signals: { commits: 2 } });
     const anon = getRepoCard(db, "v5", "card", { access: NO_PAT_ACCESS })!;
-    expect(anon.ai).toBeUndefined();
-    expect(JSON.stringify(anon)).not.toContain("накрутку");
-    expect(JSON.stringify(anon)).not.toContain("ровные интервалы");
+    expect(anon.ai?.audience).toBe("public");
+    expect(anon.ai?.fraud).toEqual(open.ai!.fraud);
   });
 
   test("MD: раздел появляется только с флагом, содержит факторы; без флага — раздела нет", async () => {
@@ -135,7 +136,7 @@ describe("Показ флага: карточка (по правам) и MD-ра
     void noFlag;
   });
 
-  test("кабинет: запись списка несёт fraudFlag при правах, null без них", async () => {
+  test("кабинет: запись списка несёт fraudFlag и без сохраненной проверки каналов", async () => {
     const { db } = freshDb("rh-v5b8-me-");
     const repoId = seedRepo(wrap(db), { org: "v5", repo: "me" });
     const scanId = seedScan(wrap(db), repoId, { facts: cardFacts() });
@@ -147,12 +148,12 @@ describe("Показ флага: карточка (по правам) и MD-ра
     ).run(JSON.stringify({ ci: true, appsec: true }));
     const { entries } = await listMyRepos(db, 7);
     expect(entries[0]?.fraudFlag).toMatchObject({ flag: true });
-    // без сохранённой проверки каналов полный Score закрыт — флага в кабинете нет
+    // без сохранённой проверки каналов полный Score закрыт, но метка фрода — публичная (В5.2)
     db.query(
       "INSERT INTO favorites (user_id, org_slug, repo_slug, added_at, last_access) VALUES (8, 'v5', 'me', '2026-09-01T00:00:00Z', NULL)",
     ).run();
     const { entries: entries2 } = await listMyRepos(db, 8);
-    expect(entries2[0]?.fraudFlag).toBeNull();
+    expect(entries2[0]?.fraudFlag).toMatchObject({ flag: true });
   });
 });
 

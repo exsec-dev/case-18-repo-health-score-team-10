@@ -93,7 +93,7 @@ describe("Г1.16: строка порога называет одно дейст
 
 describe("К-5: раздел фрода в отчете", () => {
   const withFraud = (card: RepoCard, fraud: CardAi["fraud"]): RepoCard =>
-    ({ ...card, ai: { scanId: 1, generatedAt: null, overview: null, specialists: [], failures: [], optIn: false, jobActive: false, cooldownUntil: null, fraud } }) as RepoCard;
+    ({ ...card, ai: { scanId: 1, audience: "full", generatedAt: null, overview: null, specialists: [], failures: [], optIn: false, jobActive: false, cooldownUntil: null, fraud } }) as RepoCard;
   const factors = [{ key: "activity.git.timeline", note: "всплеск коммитов одного автора" }];
 
   test("флаг поднят — раздел есть, текст по правилу языка", () => {

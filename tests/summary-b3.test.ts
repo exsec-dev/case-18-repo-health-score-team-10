@@ -394,7 +394,9 @@ describe("Видимость AI-текста: полные права откры
     for (const d of moreDirs) rmSync(d, { recursive: true, force: true });
   });
 
-  test("карточка на уровне сборки: granted → ai с overview; аноним → ai отсутствует", async () => {
+  // В5.2 (Б2, §2 «В5.2 — публичный AI-обзор…»): аноним публичного репо получает
+  // ПУБЛИЧНУЮ версию AI-блока; полный текст (все факты) до него не доходит
+  test("карточка на уровне сборки: granted → полный ai с overview; аноним → только публичная версия, полного текста нет", async () => {
     const { db, dir } = freshDb("rh-v5b3-card-");
     moreDirs.push(dir);
     const repoId = seedRepo(wrap(db), { org: "v5", repo: "vis" });
@@ -406,14 +408,17 @@ describe("Видимость AI-текста: полные права откры
     expect(open?.ai?.overview?.text).toContain("README и CI");
     expect(open?.ai?.specialists.length).toBe(5);
     expect(open?.ai?.optIn).toBe(false);
+    expect(open?.ai?.audience).toBe("full");
     const anon = getRepoCard(db, "v5", "vis", { access: NO_PAT_ACCESS });
-    expect(anon?.ai).toBeUndefined();
+    expect(anon?.ai?.audience).toBe("public");
+    expect(anon?.ai?.overview).toBeNull();
+    expect(anon?.ai?.specialists).toEqual([]);
     // текст не утекает в другом поле карточки
     expect(JSON.stringify(anon)).not.toContain("README и CI");
     db.close();
   });
 
-  test("живой сервер: аноним — 401 на POST, карточка без ai; чужой со сессией — 403 not_own", async () => {
+  test("живой сервер: аноним — 401 на POST, карточка без полного текста; чужой со сессией — 403 not_own", async () => {
     const dir = mkdtempSync(join(tmpdir(), "rh-v5b3-routes-"));
     moreDirs.push(dir);
     const db = openDb({ ...loadConfig(), dataDir: dir });
@@ -430,8 +435,9 @@ describe("Видимость AI-текста: полные права откры
     const server = await spawnServer({ dataDir: dir, mock, appSecret: "x".repeat(32) });
     servers.push(server);
     // аноним: карточка без ai
-    const anonCard = (await (await fetch(`${server.base}/api/repos/v5/vis`)).json()) as { ai?: unknown };
-    expect(anonCard.ai).toBeUndefined();
+    const anonCard = (await (await fetch(`${server.base}/api/repos/v5/vis`)).json()) as { ai?: { audience?: string; overview?: unknown } };
+    expect(anonCard.ai?.audience).toBe("public");
+    expect(anonCard.ai?.overview).toBeNull();
     expect(JSON.stringify(anonCard)).not.toContain("README и CI");
     // аноним: POST — 401
     const anonPost = await fetch(`${server.base}/api/repos/v5/vis/summary`, { method: "POST" });

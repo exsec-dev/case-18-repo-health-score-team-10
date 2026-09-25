@@ -115,7 +115,9 @@ describe("getAiNotesHistory: append-история взглядов и её ви
     return s2;
   }
 
-  test("оба скана в истории по порядку; аноним получает locked без текста", async () => {
+  // В5.2 (Б2): аноним публичного репо — публичная версия (здесь публичных текстов
+  // нет, только полные) — пустой список, полного текста нет; закрытый — 404/locked
+  test("оба скана в истории по порядку; аноним — публичная версия без полного текста", async () => {
     const { db } = freshDb("rh-v5b5-notes-");
     await seedTwoGenerations(db);
     const open = getAiNotesHistory(db, "v5", "n", { access: OPEN })!;
@@ -126,15 +128,16 @@ describe("getAiNotesHistory: append-история взглядов и её ви
       expect(open.notes.every((n) => n.text.length > 0)).toBe(true);
       expect(open.notes.every((n) => n.charterVersion.length > 0)).toBe(true);
     }
+    if (!open.locked) expect(open.audience).toBe("full");
     const anon = getAiNotesHistory(db, "v5", "n")!;
-    expect(anon).toEqual({ locked: true, reason: expect.any(String) });
+    expect(anon).toEqual({ locked: false, audience: "public", notes: [] });
     // приватный без прав — как карточка: 404
     const priv = seedRepo(wrap(db), { org: "v5", repo: "p" });
     db.query("UPDATE repos SET visibility = 'private' WHERE id = ?").run(priv);
     expect(getAiNotesHistory(db, "v5", "p")).toBeNull();
   });
 
-  test("карточка и /ai-notes не дублируют утечки: locked-ответ без текста", async () => {
+  test("карточка и /ai-notes не дублируют утечки: публичный ответ без полного текста", async () => {
     const { db } = freshDb("rh-v5b5-leak-");
     await seedTwoGenerations(db);
     const anon = getAiNotesHistory(db, "v5", "n")!;
@@ -143,7 +146,7 @@ describe("getAiNotesHistory: append-история взглядов и её ви
 });
 
 describe("Маршруты истории на живом сервере", () => {
-  test("GET /history анониму отдаёт публичную проекцию; /ai-notes анониму — 403 locked", async () => {
+  test("GET /history анониму отдаёт публичную проекцию; /ai-notes анониму — публичная версия", async () => {
     const dir = mkdtempSync(join(tmpdir(), "rh-v5b5-routes-"));
     dirs.push(dir);
     const db = openDb({ ...loadConfig(), dataDir: dir });
@@ -161,9 +164,8 @@ describe("Маршруты истории на живом сервере", () =>
     const body = (await hist.json()) as { points: { healthcraftIndex: number; repoHealthScore: number | null; headSha: string }[] };
     expect(body.points[0]).toMatchObject({ healthcraftIndex: 44, repoHealthScore: null, headSha: "f00d" });
     const notes = await fetch(`${server.base}/api/repos/v5/h/ai-notes`);
-    expect(notes.status).toBe(403);
-    const notesBody = (await notes.json()) as { error?: { code?: string } };
-    expect(notesBody.error?.code).toBe("locked");
+    expect(notes.status).toBe(200);
+    expect(await notes.json()).toEqual({ locked: false, audience: "public", notes: [] });
     // несуществующий — 404
     expect((await fetch(`${server.base}/api/repos/v5/nope/history`)).status).toBe(404);
   }, 120_000);
