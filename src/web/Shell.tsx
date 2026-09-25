@@ -13,7 +13,7 @@
 //     прокручивается только область между ними (таблица — сама, с
 //     закреплённой строкой заголовков); уже 1440px (В4.6, У23) правая панель
 //     уходит в Drawer по кнопке в ActionBar — второй прокрутки на странице нет.
-import { ArrowRightFromSquare, ArrowRightToSquare, BookOpen, Bookmark, ChartColumn, CircleInfo, Gear, Moon, Sun, Xmark } from "@gravity-ui/icons";
+import { ArrowRightFromSquare, ArrowRightToSquare, BookOpen, Bookmark, ChartColumn, CircleInfo, Gear, Moon, ScalesBalanced, Sun, Xmark } from "@gravity-ui/icons";
 import { ActionBar, AsideHeader, FooterItem, type AsideHeaderItem } from "@gravity-ui/navigation";
 import { ActionTooltip, Avatar, Breadcrumbs, Button, Drawer, Flex, Icon, Text, useThemeValue, useToaster, type IconData } from "@gravity-ui/uikit";
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
@@ -23,7 +23,7 @@ import { HealthCraftMark, PRODUCT_NAME } from "./logo";
 import { useAppTheme, useMediaQuery, useRailCompact, type AppTheme } from "./prefs";
 import { linkProps, navigate } from "./router";
 
-export type Section = "rating" | "me" | "settings" | null;
+export type Section = "rating" | "me" | "compare" | "settings" | null;
 
 interface SectionDef {
   id: Exclude<Section, null>;
@@ -37,6 +37,8 @@ const SECTIONS: SectionDef[] = [
   // Ступень 4 (слово владельца 23.09): раздел — «Избранное»; иконка — закладка,
   // звезда остается кнопкой добавления в избранное
   { id: "me", title: "Избранное", href: "/me", icon: Bookmark },
+  // В5.3 круг 4 (§2 25.09): сравнение — только третьим пунктом; ссылок «сравнить» в других разделах нет
+  { id: "compare", title: "Сравнение", href: "/compare", icon: ScalesBalanced },
 ];
 
 const GlobalActionsContext = createContext<ReactNode>(null);

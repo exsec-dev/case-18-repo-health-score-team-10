@@ -11,6 +11,7 @@ import { Alert, Flex } from "@gravity-ui/uikit";
 import { useState } from "react";
 import type { MetaResponse } from "./api";
 import { dataOf, useJson } from "./api";
+import { ComparePage } from "./ComparePage";
 import { JobsBell, MePage, SettingsPage } from "./MePage";
 import { Rating } from "./Rating";
 import { RepoPage } from "./RepoPage";
@@ -52,6 +53,8 @@ function Routes() {
         ? "rating"
         : route.kind === "me"
           ? "me"
+          : route.kind === "compare"
+            ? "compare"
           : route.kind === "settings"
             ? "settings"
             : null;
@@ -74,6 +77,7 @@ function Routes() {
           анализа, опросы) не переезжает на карточку B при SPA-переходе */}
       {route.kind === "repo" && <RepoPage key={`${route.org}/${route.repo}`} org={route.org} repo={route.repo} meta={metaData} onSection={(s) => setRepoSection({ key: `${route.org}/${route.repo}`, section: s })} />}
       {route.kind === "me" && <MePage meta={metaData} />}
+      {route.kind === "compare" && <ComparePage search={route.search} />}
       {route.kind === "settings" && <SettingsPage />}
       {route.kind === "not-found" && (
         <Page crumbs={[{ text: "Страница не найдена" }]}>

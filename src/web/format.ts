@@ -284,6 +284,18 @@ export function slugOf(org: string, repo: string): string {
 }
 
 /**
+ * В5.3 круг 4 (дизайн сравнения §4.10): длинное имя — многоточие В СЕРЕДИНЕ с
+ * сохранением хвоста. У команд хакатона общий org и общий префикс
+ * (`case-13-…-team-112`), различие — в хвосте, и обрезка с конца спрятала бы
+ * именно его. Короче порога — без изменений.
+ */
+export function middleEllipsis(text: string, max: number, tail = 10): string {
+  if (text.length <= max) return text;
+  const keepTail = Math.min(tail, max - 2);
+  return `${text.slice(0, max - keepTail - 1)}…${text.slice(text.length - keepTail)}`;
+}
+
+/**
  * Мера имени в `DefinitionList` — одна на все панели (У27: единый nameMaxWidth).
  * Завершающие правки В4.9 (3): 140 → 150 — «Версия методики» в панели рейтинга
  * уходила на вторую строку; карточка уже жила на 150 своей константой.

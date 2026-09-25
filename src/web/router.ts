@@ -12,6 +12,8 @@ export type Route =
   | { kind: "repo"; org: string; repo: string }
   | { kind: "me" }
   | { kind: "settings" }
+  // В5.3 круг 4 (К-1): набор сравнения — в query (`?r=org/a&r=org/b`), ссылкой можно поделиться
+  | { kind: "compare"; search: string }
   // В4.7 (П4.4, вопрос 29 закрыт 21.09): поле `path` удалено — UI 404 его
   // не читает с тех пор, как страница перестала перечислять маршруты
   | { kind: "not-found" };
@@ -24,6 +26,7 @@ export function parseRoute(pathname: string, search = ""): Route {
   if (parts.length === 0) return { kind: "rating", search };
   if (parts[0] === "me" && parts.length === 1) return { kind: "me" };
   if (parts[0] === "settings" && parts.length === 1) return { kind: "settings" };
+  if (parts[0] === "compare" && parts.length === 1) return { kind: "compare", search };
   if (parts[0] === "repo" && parts.length === 3) {
     return { kind: "repo", org: safeDecode(parts[1]!), repo: safeDecode(parts[2]!) };
   }

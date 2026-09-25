@@ -480,17 +480,19 @@ describe("В4.6-10 (У18): слоты под В5 заложены честным
     expect(Object.keys(contracts ?? {}).sort()).toEqual(["aiSummary", "badge", "compare", "scoreHistory"]);
   });
 
-  // ЗАКРЫТО блоком Б8 (слоты под В5).
-  test("сравнение: контракт и пустое состояние есть, маршрута и пункта rail нет", async () => {
+  // ЗАКРЫТО блоком Б8 (слоты под В5). В5.3 круг 4 (TASK.md §2 25.09): решение
+  // 20.09 «раздел появляется вместе с работающим сценарием» исполнено — маршрут
+  // и третий пункт rail есть; поведение раздела — tests/v53-compare.test.ts.
+  test("сравнение: контракт и пустое состояние есть, маршрут и третий пункт rail — с работающим сценарием", async () => {
     const mod = await importLater("../src/web/slots");
     const contracts = mod.SLOT_CONTRACTS as Record<string, readonly string[]> | undefined;
+    const router = await importLater("../src/web/router");
     const shell = srcOf("Shell.tsx");
-    const router = srcOf("router.ts");
     expect({
       contract: (contracts?.compare ?? []).length > 0,
-      noRailItem: !shell.includes("Сравнение"),
-      noRoute: !router.includes("compare"),
-    }).toEqual({ contract: true, noRailItem: true, noRoute: true });
+      railItem: shell.includes('{ id: "compare", title: "Сравнение", href: "/compare"'),
+      route: (router.parseRoute as (p: string, s?: string) => unknown)("/compare", "r=a/b"),
+    }).toEqual({ contract: true, railItem: true, route: { kind: "compare", search: "r=a/b" } });
   });
 });
 

@@ -7,7 +7,8 @@
 // рейтинга появляются исключительно сканом.
 import { loadConfig } from "./config";
 import { openDb, setMetaValue } from "./db";
-import { getMeta, listRepos, parseReposQuery, resolveCardForViewer, type RepoCard } from "./api/repos";
+import { getMeta, listRepos, parseReposQuery, resolveCardForViewer, type CardOutcome, type RepoCard } from "./api/repos";
+import { buildCompare, parseCompareQuery } from "./api/compare";
 import { getHealth } from "./api/health";
 import {
   classifyScStatus,
@@ -191,6 +192,20 @@ const allowMyReposView = (userId: number, now = Date.now()): boolean =>
 /** Минутное окно показов карточки залогиненным зрителем (В4.4, кластер G): true = пропустить. */
 const allowCardView = (userId: number, now = Date.now()): boolean =>
   allowInWindow(cardViews, userId, config.queue.cardPerMinute ?? 30, 60_000, now);
+
+/**
+ * В5.3 круг 4: сравнение N репозиториев списывает N открытий карточки — и
+ * только если в окне есть место под все N (сравнение 3 репо стоит как 3
+ * карточки, нагрузка на проверки прав не растет). true = пропустить.
+ */
+const allowCardViews = (userId: number, n: number, now = Date.now()): boolean => {
+  const limit = config.queue.cardPerMinute ?? 30;
+  const alive = (cardViews.get(userId) ?? []).filter((ts) => ts > now - 60_000);
+  if (alive.length + n > limit) return false;
+  cardViews.set(userId, alive);
+  for (let i = 0; i < n; i++) windowPush(cardViews, userId, now);
+  return true;
+};
 
 /** Минутное окно мутаций избранного (В4.4, кластер K/З6): true = пропустить. */
 const allowFavMutation = (userId: number, now = Date.now()): boolean =>
@@ -406,21 +421,29 @@ function viewerAuthOf(req: Request): "no-session" | "no-pat" | "pat" {
 }
 
 /**
- * Карточка для зрителя запроса (карточка, MD, PDF — одна сборка, К2) или
- * готовый отказ. В4.8.5 (К8.5.6, С6-1): владелец приватного репозитория с
- * доказанными правами при сбое проверки получает «проверка не удалась» /
- * «токен отклонён», а не «не найден»; прочим — прежний нейтральный 404.
+ * Исход показа карточки зрителю запроса — одна сборка для карточки, MD, PDF и
+ * сравнения (В5.3 круг 4: сравнение идет через тот же гейт, без своих прав).
  */
-async function cardOrRefusal(req: Request, org: string, repo: string): Promise<RepoCard | Response> {
+function cardOutcome(req: Request, org: string, repo: string): Promise<CardOutcome> {
   const viewer = sessionOf(req);
   const auth = viewerAuthOf(req);
-  const out = await resolveCardForViewer(db, org, repo, viewerAccess(req), {
+  return resolveCardForViewer(db, org, repo, viewerAccess(req), {
     limits: config.scan,
     viewerUserId: viewer?.userId,
     viewerAuth: auth,
     summaryCooldownMs: config.queue.summaryCooldownMs,
     provenRights: () => viewer !== null && viewerMayReadRepo(db, viewer.userId, org, repo, { savedRightsValid: auth === "pat" }),
   });
+}
+
+/**
+ * Карточка для зрителя запроса (карточка, MD, PDF — одна сборка, К2) или
+ * готовый отказ. В4.8.5 (К8.5.6, С6-1): владелец приватного репозитория с
+ * доказанными правами при сбое проверки получает «проверка не удалась» /
+ * «токен отклонён», а не «не найден»; прочим — прежний нейтральный 404.
+ */
+async function cardOrRefusal(req: Request, org: string, repo: string): Promise<RepoCard | Response> {
+  const out = await cardOutcome(req, org, repo);
   if (out.kind === "card") return out.card;
   if (out.kind === "check_failed") {
     return Response.json(
@@ -604,6 +627,17 @@ const routes = {
       const card = await cardOrRefusal(req, org!, repo!);
       if (card instanceof Response) return card;
       return Response.json(card);
+    },
+    // В5.3 круг 4 (К-1): сравнение 1-3 репозиториев — карточки того же зрителя
+    // без AI, рекомендаций и фактов; недоступный — элемент `unavailable`, не 404
+    "/api/compare": async (req) => {
+      const parsed = parseCompareQuery(new URL(req.url).searchParams);
+      if (!parsed.ok) return badQuery(parsed.message);
+      const viewer = sessionOf(req);
+      // 429 — до резолва доступа, как у карточки; списывается по открытию на репо
+      if (viewer && !allowCardViews(viewer.userId, parsed.slugs.length)) return cardRateLimited(viewer.userId);
+      const body = await buildCompare(parsed.slugs, (org, repo) => cardOutcome(req, org, repo));
+      return Response.json(body, { headers: { "cache-control": "private, no-store" } });
     },
     "/api/repos/:org/:repo/report.md": async (req) => {
       const { org, repo } = req.params;

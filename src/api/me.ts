@@ -228,34 +228,8 @@ export interface PatSeed {
   error?: { code: "source_http" | "favorite_limit" | "page_limit" | "no_username" };
 }
 
-/**
- * Ф2.20: строка ручного ввода → пара слагов. `org/repo` принимается как есть;
- * http(s)-URL — ПЕРВЫЕ ДВА сегмента пути (хвосты вида /tree/main, query и
- * fragment отбрасываются); домен НЕ валидируется — избранное может указывать
- * куда угодно, права резолвятся при проверке. Пустые/точечные сегменты и
- * мусорный charset → null (маршрут отдаёт 400 bad_query). Парсер общий:
- * им пользуются и PUT /api/me/favorites, и path-роут звезды.
- */
-export function parseFavoriteInput(raw: string): { org: string; repo: string } | null {
-  const value = raw.trim();
-  if (value === "") return null;
-  const segmentOk = (seg: string | undefined): seg is string =>
-    typeof seg === "string" && seg !== "" && /^[a-z0-9_.-]+$/i.test(seg) && !/^[.]+$/.test(seg);
-  if (/^https?:\/\//i.test(value)) {
-    try {
-      const url = new URL(value);
-      const [org, repo] = url.pathname.split("/").filter((p) => p !== "");
-      if (!segmentOk(org) || !segmentOk(repo)) return null;
-      return { org, repo };
-    } catch {
-      return null;
-    }
-  }
-  const parts = value.split("/");
-  if (parts.length !== 2) return null;
-  if (!segmentOk(parts[0]) || !segmentOk(parts[1])) return null;
-  return { org: parts[0]!, repo: parts[1]! };
-}
+// Ф2.20: разбор ручного ввода — одна копия с вебом (В5.3 круг 4: вынесен в чистый модуль)
+export { parseFavoriteInput } from "./slug-input";
 
 /**
  * Ф2.21: добавление избранного с пределом на юзера. Повтор существующего
