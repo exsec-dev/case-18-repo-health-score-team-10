@@ -8,6 +8,7 @@
 //    убыванию (С5-8).
 // Серверный контракт `parseReposQuery` (400 на неверное значение) не меняется.
 import type { SortKey } from "../api/repos";
+import { CI_VALUES, SIZE_BUCKETS } from "../api/rating-filters";
 import { plural } from "../report/submetrics";
 import { fmtCount } from "./format";
 
@@ -37,6 +38,16 @@ export function normalizeRatingSearch(search: string): { search: string; changed
   // В5.2 (Б6): фильтр «С AI-обзором» — только `ai=1`
   const ai = params.get("ai");
   if (ai !== null && ai !== "1") drop("ai");
+  // В5.5 тур 2 (W3): размер — повторяемый, неизвестные значения убираются, верные остаются
+  const sizes = params.getAll("size");
+  const validSizes = sizes.filter((v, i) => (SIZE_BUCKETS as readonly string[]).includes(v) && sizes.indexOf(v) === i);
+  if (validSizes.length !== sizes.length) {
+    drop("size");
+    for (const v of validSizes) params.append("size", v);
+  }
+  // CI — одно значение `yes`/`no`; иное (и повтор) — сброс фильтра
+  const cis = params.getAll("ci");
+  if (cis.length > 1 || (cis.length === 1 && !(CI_VALUES as readonly string[]).includes(cis[0]!))) drop("ci");
   return { search: changed ? params.toString() : search.replace(/^\?/, ""), changed };
 }
 
@@ -61,4 +72,27 @@ export function coverageLine(repos: { scored: number; nullScore: number; catalog
   const rest = Math.max(0, repos.catalog - repos.scored - repos.nullScore);
   const head = `Оценено ${fmtCount(repos.scored)} из ${fmtCount(repos.catalog)} ${plural(repos.catalog, "репозитория", "репозиториев", "репозиториев")}.`;
   return rest > 0 ? `${head} Еще ${fmtCount(rest)} пока не ${plural(rest, "оценен", "оценены", "оценены")}.` : head;
+}
+
+/**
+ * В5.5 тур 2 (W3): какие фильтры выдачи включены — названия для пустого
+ * состояния «Под фильтр ничего не подошло». Пусто — фильтров нет, и пустая
+ * выдача значит «рейтинг еще пуст». Правило 23.09: утверждение пустого
+ * состояния закрывается тестом на статусе, поэтому это чистая функция адреса.
+ */
+export function activeRatingFilters(search: string): string[] {
+  const params = new URLSearchParams(search);
+  const active: string[] = [];
+  if ((params.get("q") ?? "") !== "") active.push("поиск");
+  if (params.has("lang")) active.push("язык");
+  if (params.has("size")) active.push("размер");
+  if (params.has("ci")) active.push("CI");
+  if (params.get("ai") === "1") active.push("AI-обзор");
+  return active;
+}
+
+/** Текст пустой выдачи при фильтрах: называет включенные фильтры (прежний текст знал только поиск и язык). */
+export function nothingFoundDescription(active: string[]): string {
+  const head = active.length === 1 ? "с фильтром" : "с фильтрами";
+  return `Ни один репозиторий выборки не совпал ${head}: ${active.join(", ")}. Данные при этом на месте – сброс фильтров вернет полный рейтинг.`;
 }
