@@ -1,4 +1,4 @@
-// submetrics.ts — словарь подметрик (30 с моделью 4.3.0: + «Файлы тестов»): название и форма показа значения
+// submetrics.ts — словарь подметрик (30 с моделью 4.3.0: + «Файлы тестов»; 33 с 4.4.0: + динамика CI и задач): название и форма показа значения
 // (В4.7, контракт П4.2; вопрос 28 канвы закрыт 21.09 — «оба в В4.7»).
 //
 // Одно правило на страницу карточки, MD и PDF: строка подметрики на
@@ -22,6 +22,10 @@
 //                               человека → «N дней» на момент скана (решение В3);
 //   activity.mirror_likeness  — {sync_share, authors, committers};
 //   issues.tracker_unused     — {open, closed};
+//   cicd.stability            — {trend, recent_share, previous_share, window} |
+//                               {trend: null, few_runs, completed, needed} (4.4.0, ТП-1);
+//   issues.backlog_trend      — {created, closed, balance, direction} (4.4.0, ТП-9);
+//   issues.monthly_flow       — [{from, created, closed}] от старых окон к новым (4.4.0, ТП-9);
 //   доли — 0..1 (показ в процентах); без значения — «—».
 
 import { fmtDecimal } from "../web/format";
@@ -157,6 +161,46 @@ const tracker: Formatter = (v) => {
   return `открытых ${num(t.open)}, закрытых ${num(t.closed)}`;
 };
 
+/**
+ * 4.4.0 (ТП-1): «стабильнее, 90% успешных у последних 10 запусков против 60% у 10
+ * до них». Без двоеточий и тире внутри: строка встает после «Название – » и
+ * «Название: » (справочная строка раздела и приложение Б отчета).
+ */
+const ciStability: Formatter = (v) => {
+  const c = obj(v);
+  if (!c) return null;
+  if (c.few_runs === true && isNum(c.completed) && isNum(c.needed)) {
+    return `нет данных, мало запусков (${num(c.completed)} ${plural(c.completed, "завершенный", "завершенных", "завершенных")}, нужно от ${num(c.needed)})`;
+  }
+  const word = c.trend === "better" ? "стабильнее" : c.trend === "worse" ? "хуже" : c.trend === "same" ? "без изменений" : null;
+  if (word === null || !isNum(c.recent_share) || !isNum(c.previous_share) || !isNum(c.window)) return null;
+  const n = num(c.window);
+  return `${word}, ${Math.round(c.recent_share * 100)}% успешных у последних ${n} ${plural(c.window, "запуска", "запусков", "запусков")} против ${Math.round(c.previous_share * 100)}% у ${n} до них`;
+};
+
+/** Знак баланса: «+5», «−4», «0» (минус — «−», как у `fmtDecimal`). */
+const signed = (n: number): string => (n > 0 ? `+${num(n)}` : n < 0 ? fmtDecimal(n, 0) : "0");
+
+/** 4.4.0 (ТП-9): «бэклог растет, +5 за 90 дней (создано 12, закрыто 7)». */
+const backlogTrend: Formatter = (v) => {
+  const b = obj(v);
+  if (!b || !isNum(b.created) || !isNum(b.closed) || !isNum(b.balance)) return null;
+  if (b.created === 0 && b.closed === 0) return "без движения, за 90 дней задачи не создавались и не закрывались";
+  const word = b.direction === "growing" ? "бэклог растет" : b.direction === "shrinking" ? "бэклог разбирается" : b.direction === "stable" ? "бэклог стабилен" : null;
+  if (word === null) return null;
+  return `${word}, ${signed(b.balance)} за 90 дней (создано ${num(b.created)}, закрыто ${num(b.closed)})`;
+};
+
+/** 4.4.0 (ТП-9): «2/1, 0/0, 3/2, 4/2, 5/3, 3/2 (создано/закрыто за 30 дней, от старых к новым)»; окно без данных — «—». */
+const monthlyFlow: Formatter = (v) => {
+  if (!Array.isArray(v) || v.length === 0) return null;
+  const cells = v.map((w) => {
+    const o = obj(w);
+    return o && isNum(o.created) && isNum(o.closed) ? `${num(o.created)}/${num(o.closed)}` : NO_VALUE;
+  });
+  return `${cells.join(", ")} (создано/закрыто за 30 дней, от старых к новым)`;
+};
+
 // ---------- словарь ----------
 
 /** Ключ — `<категория>.<подметрика>`, как в `categories[*].submetrics` оценки. */
@@ -168,6 +212,8 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   "cicd.config": { title: "Конфигурация CI со шагами", unit: "признаки ci.yaml", format: ciConfig },
   "cicd.pass_rate": { title: "Доля успешных запусков CI", unit: "доля, %", format: share },
   "cicd.duration": { title: "Медианная длительность запуска CI", unit: "секунды → с/мин/ч", format: duration },
+  // 4.4.0 (ТП-1): справочно, без веса
+  "cicd.stability": { title: "Стабильность CI в динамике", unit: "доля успешных: последние запуски против предыдущих (справочно, без веса)", format: ciStability },
   // Г1.5 гейта: мера — в значении, в названии ее повторять незачем
   "security.density": { title: "Плотность находок", unit: "на 10 тыс. строк", format: perLines("10 тыс.") },
   "security.resolved": { title: "Доля закрытых находок", unit: "доля, %", format: share },
@@ -188,6 +234,9 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   "issues.resolution": { title: "Доля решенных", unit: "доля, %", format: share },
   "issues.first_resp": { title: "Время до первого ответа", unit: "часы", format: (v) => (isNum(v) ? `${num(v, 1)} ч` : null) },
   "issues.tracker_unused": { title: "Трекер не ведется", unit: "открытые и закрытые задачи", format: tracker },
+  // 4.4.0 (ТП-9): справочно, без веса
+  "issues.backlog_trend": { title: "Динамика бэклога за 90 дней", unit: "создано минус закрыто (справочно, без веса)", format: backlogTrend },
+  "issues.monthly_flow": { title: "Создано и закрыто задач по месяцам", unit: "6 окон по 30 дней (справочно, без веса)", format: monthlyFlow },
   // 4.3.1 (В5.5, М1): пометки считаются только в коде — файлы тестов исключены
   "code.density": { title: "Плотность TODO/FIXME в коде", unit: "на 1 тыс. строк", format: perLines("1 тыс.") },
   "code.old_share": { title: "Доля старых TODO", unit: "доля, %", format: share },
@@ -202,7 +251,18 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
  * категории не идет. Одна копия для карточки, MD и PDF.
  */
 // В5.3 (25.09): bus_factor — без веса в SUBWEIGHTS методики (подпись «справочно, без веса»), серым как прочие
-export const DISPLAY_ONLY = new Set(["activity.mirror_likeness", "activity.commits_90d", "activity.commits_365d", "activity.sync_bursts", "activity.bus_factor", "code.todo_total"]);
+// 4.4.0 (В5.5 тур 2, решение §2 п.3): динамика CI (ТП-1) и задач (ТП-9) — справочно, без веса
+export const DISPLAY_ONLY = new Set([
+  "activity.mirror_likeness",
+  "activity.commits_90d",
+  "activity.commits_365d",
+  "activity.sync_bursts",
+  "activity.bus_factor",
+  "code.todo_total",
+  "cicd.stability",
+  "issues.backlog_trend",
+  "issues.monthly_flow",
+]);
 
 export function displayOnly(category: string, sub: string): boolean {
   return DISPLAY_ONLY.has(`${category}.${sub}`);
@@ -233,6 +293,15 @@ export function submetricNote(category: string, sub: string, note: string | null
   if (typeof note !== "string" || note === "") return null;
   const key = `${category}.${sub}`;
   if (key === "issues.tracker_unused") return { remark: "Задач в трекере нет, поэтому категория получает минимальный балл." };
+  // 4.4.0 (ТП-1, ТП-9): справочные показатели динамики — причина «нет данных» словами
+  if (key === "cicd.stability" || key === "issues.backlog_trend" || key === "issues.monthly_flow") {
+    if (note.startsWith("older collector")) return { value: "нет данных, анализ собран до версии 5 сборщика" };
+    if (key !== "cicd.stability" && note.startsWith("tracker not maintained")) return { value: "трекер не ведется" };
+    if (key === "issues.backlog_trend" && note.startsWith("issue list truncated")) return { value: "нет данных, список задач обрезан и 90 дней не покрыты" };
+    if (key === "cicd.stability" && note.startsWith("no declared CI")) return { value: "CI не настроен" };
+    if (key === "cicd.stability" && note.startsWith("runs no-data")) return { value: "запуски недоступны" };
+    return null;
+  }
   if (key === "cicd.pass_rate" || key === "cicd.duration") {
     if (note.startsWith("no declared CI")) return { value: "CI не настроен" };
     if (note.startsWith("runs no-data")) return { value: "запуски недоступны" };
