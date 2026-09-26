@@ -1556,7 +1556,8 @@ export function sweepOrphanScans(db: Database, opts: { leaseMs: number; now?: Da
  * строк в год в той же БД, что и чтение рейтинга. `queued`/`running` не
  * трогаем никогда; строки без `created_at` (legacy) — тоже, их возраст
  * неизвестен, а гадать по id нельзя.
- *//** Сколько хранятся AI-заявки при любом ретеншене — окно учета лимитов (аудит надежности М8). */
+ */
+/** Сколько хранятся AI-заявки при любом ретеншене — окно учета лимитов (аудит надежности М8). */
 const AI_JOBS_KEEP_MS = 2 * 24 * 3600_000;
 
 export function purgeOldJobs(db: Database, opts: { retentionDays: number; now?: Date }): number {

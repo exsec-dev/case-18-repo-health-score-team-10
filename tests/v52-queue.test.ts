@@ -196,7 +196,15 @@ describe("живые циклы: плановый скан тяжелого ре
     const hang = new Promise<void>((r) => (release = r));
     const started: string[] = [];
     const base = loadConfig();
-    const config = { ...base, auth: { ...base.auth, appSecret: base.auth.appSecret ?? "test-secret-test-secret-test-secret" } } as Config;
+    // приёмка В5.5 тур 1 (HQ): кэш summary-заявки зависит от дефолта кулдауна —
+    // .env стенда с дебаг-кулдауном (QUEUE_SUMMARY_COOLDOWN_MS=1) снимал кэш,
+    // и «заявка закрывается без клона» уходила в настоящий git clone. Пин —
+    // тест идёт на дефолте, не на ambient-окружении (правило 22.09 наоборот).
+    const config = {
+      ...base,
+      auth: { ...base.auth, appSecret: base.auth.appSecret ?? "test-secret-test-secret-test-secret" },
+      queue: { ...base.queue, summaryCooldownMs: 60 * 60_000 },
+    } as Config;
     const deps: WorkerDeps = {
       db,
       config,
@@ -435,7 +443,15 @@ describe("живые циклы: два тяжелых репо двух люд�
     let release!: () => void;
     const hang = new Promise<void>((r) => (release = r));
     const base = loadConfig();
-    const config = { ...base, auth: { ...base.auth, appSecret: base.auth.appSecret ?? "test-secret-test-secret-test-secret" } } as Config;
+    // приёмка В5.5 тур 1 (HQ): кэш summary-заявки зависит от дефолта кулдауна —
+    // .env стенда с дебаг-кулдауном (QUEUE_SUMMARY_COOLDOWN_MS=1) снимал кэш,
+    // и «заявка закрывается без клона» уходила в настоящий git clone. Пин —
+    // тест идёт на дефолте, не на ambient-окружении (правило 22.09 наоборот).
+    const config = {
+      ...base,
+      auth: { ...base.auth, appSecret: base.auth.appSecret ?? "test-secret-test-secret-test-secret" },
+      queue: { ...base.queue, summaryCooldownMs: 60 * 60_000 },
+    } as Config;
     const deps: WorkerDeps = {
       db,
       config,
