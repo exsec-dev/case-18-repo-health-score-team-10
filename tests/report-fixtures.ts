@@ -101,6 +101,25 @@ function summary(truncatedSince: string | null): FactSpec {
   };
 }
 
+/** Сборщик 5 (ТП-1): 20 завершенных запусков, свежие первыми — 9 из 10 успешных против 6 из 10 до них. */
+const RECENT_RUNS = Array.from({ length: 20 }, (_, i) => ({
+  outcome: (i < 10 ? i !== 3 : i % 5 !== 0 && i !== 13) ? "success" : "failure",
+  at: new Date(Date.parse("2026-09-16T10:00:00Z") - i * 86_400_000).toISOString(),
+}));
+
+/** Сборщик 5 (ТП-9): 6 окон по 30 дней от старых к новым; за 90 дней создано 6, закрыто 2. */
+const ISSUE_FLOW = {
+  window_days: 30,
+  windows: [
+    { from: "2026-03-20", created: 2, closed: 1, instant: 0 },
+    { from: "2026-04-19", created: 1, closed: 2, instant: 0 },
+    { from: "2026-05-19", created: 2, closed: 2, instant: 1 },
+    { from: "2026-06-18", created: 3, closed: 1, instant: 0 },
+    { from: "2026-07-18", created: 2, closed: 1, instant: 0 },
+    { from: "2026-08-17", created: 1, closed: 0, instant: 0 },
+  ],
+};
+
 export function fixtureCard(name: ReportFixture): FixtureCard {
   const t = makeApiDb();
   const done = (org: string, repo: string, access: AccessResult, viewerAuth: CardViewer["auth"]): FixtureCard => {
@@ -118,11 +137,21 @@ export function fixtureCard(name: ReportFixture): FixtureCard {
       const facts = factsWith(
         TIMELINE,
         summary(null),
-        { key: "cicd.runs", source: "rest:cicd", value: { last_status: "success", success_rate: 0.95, duration_p50: 420, runs_count: 20 } },
+        // В5.5 тур 2 (сборщик 5): лента стабильности CI и поток задач по окнам —
+        // эталон показывает оба справочных показателя с числами
+        { key: "cicd.runs", source: "rest:cicd", value: { last_status: "success", success_rate: 0.95, duration_p50: 420, runs_count: 20, recent_runs: RECENT_RUNS } },
         {
           key: "issues.stats",
           source: "rest:issues",
-          value: { open: 4, closed: 10, median_close_days: 48.849999999999994, stale_90d: 3, fetched_count: 14, close_date_note: "completed_at missing on 10/10 closed — used updated_at fallback" },
+          value: {
+            open: 4,
+            closed: 10,
+            median_close_days: 48.849999999999994,
+            stale_90d: 3,
+            fetched_count: 14,
+            close_date_note: "completed_at missing on 10/10 closed — used updated_at fallback",
+            flow: ISSUE_FLOW,
+          },
         },
         {
           key: "appsec.findings",

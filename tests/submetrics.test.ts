@@ -24,7 +24,7 @@ function computedKeys(facts: { key: string; value: unknown }[]): string[] {
 }
 
 describe("П4.2: полнота словаря", () => {
-  test("у всех 28 подметрик скоринга есть название и форма показа", () => {
+  test("у всех 33 подметрик скоринга есть название и форма показа", () => {
     const full = cardFacts()
       .filter((f) => f.status !== "no-data")
       .concat([
@@ -33,8 +33,9 @@ describe("П4.2: полнота словаря", () => {
       ]);
     const tracker = cardFacts().map((f) => (f.key === "issues.stats" ? { key: "issues.stats", value: { open: 0, closed: 0 } } : f));
     const produced = [...new Set([...computedKeys(full), ...computedKeys(tracker)])].sort();
-    // В5 (К5.9): + bus factor (показ без веса); 4.3.0 (Р1): + «Файлы тестов»
-    expect(produced.length).toBe(30);
+    // В5 (К5.9): + bus factor (показ без веса); 4.3.0 (Р1): + «Файлы тестов»;
+    // 4.4.0 (В5.5 тур 2): + стабильность CI, динамика бэклога, поток задач (справочно)
+    expect(produced.length).toBe(33);
     expect(Object.keys(SUBMETRICS).sort()).toEqual(produced);
     for (const key of produced) {
       const spec = SUBMETRICS[key]!;

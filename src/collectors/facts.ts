@@ -12,12 +12,15 @@ export type FactStatus = "ok" | "no-data" | "bad";
  * 4.3.0-hci (blame по sha, маркеры в комментариях, файлы тестов, задачи в
  * работе и мгновенно закрытые, открытые группы AppSec, содержимое документов),
  * 4 — сборщик модели 4.3.1-hci (В5.5 тур 1, М1: маркеры техдолга только в коде
- * вне тестов, пропущенные в тестах — аддитивным `test_markers` в `code.todo`).
+ * вне тестов, пропущенные в тестах — аддитивным `test_markers` в `code.todo`),
+ * 5 — сборщик модели 4.4.0-hci (В5.5 тур 2, ТП-1/ТП-9: аддитивные
+ * `cicd.runs.recent_runs` — исход и момент последних завершенных запусков — и
+ * `issues.stats.flow` — создано/закрыто по 30-дневным окнам за 180 дней).
  * В старых строках — NULL («до учета», читается как старше текущего). Смена
  * формы или смысла факта — новая версия: ночная волна доочередит репо, чей
  * последний пригодный скан собран старым сборщиком (`scheduler.ts`).
  */
-export const COLLECTOR_VERSION = 4;
+export const COLLECTOR_VERSION = 5;
 
 /** no-data reason — ключ внутри value-JSON (отдельной колонки нет).
  *  В4/Б2: no-scan/incomplete — ветки AppSec (скана нет/не завершён,
@@ -71,7 +74,8 @@ export const KINDS = {
   // has_steps (§7.4: ≥1 task с ≥1 непустой командой script/cube);
   // steps_note при неудачном парсинге ci.yaml
   "cicd.configs": "{paths:[...],has_ci_yaml:boolean,has_steps:boolean,steps_note?} — пустой paths = ок",
-  "cicd.runs": "{last_status,success_rate,duration_p50,runs_count,green_streak} | no-data",
+  // сборщик 5 (ТП-1): recent_runs — до 20 последних завершенных, свежие первыми
+  "cicd.runs": "{last_status,success_rate,duration_p50,runs_count,green_streak,recent_runs?:[{outcome:success|failure,at}]} | no-data",
   // событийный JSON: author+committer (имя+email+дата UTC) + robot per-commit
   "activity.git.timeline": "{events:[{sha,author,committer,robot,robot_reasons}]}",
   // history_truncated_since — только у деградационного клона (§5.7)
@@ -80,8 +84,10 @@ export const KINDS = {
   // событийные даты (§7.4): топ-50 недавних pulls created_at /
   // релизов released_at desc — источник pulls_90d/releases_12m
   "activity.rest": "{contributors,releases,pulls_open,latest_release_at?,pulls_created_at:[...],releases_released_at:[...],fetched_note?}",
+  // сборщик 5 (ТП-9): flow — 6 окон по 30 дней от старых к новым; окно раньше
+  // complete_since (обрезка списка капом страниц) — null-счетчики
   "issues.stats":
-    "{open,in_progress?,in_progress_note?,closed,closed_instant?,closed_counted?,median_close_days,stale_90d,fetched_count}",
+    "{open,in_progress?,in_progress_note?,closed,closed_instant?,closed_counted?,median_close_days,stale_90d,fetched_count,flow?:{window_days,windows:[{from,created,closed,instant}],complete_since?}}",
   // сборщик 3 (Н14а): answered + censored; сборщик до 3 — with_comments
   "issues.comments_sample":
     "{issues,answered?,censored?,with_comments?,median_first_comment_delay_hours,delays_hours:[...]}",

@@ -9,7 +9,7 @@
 // ключах issues/issue_comments/pull_requests/contributors/releases/runs,
 // закрытие issue = completed_at, статус — объект {slug}, counters — строки.
 import { Fact, badChannelFact, noDataFact, okFact } from "./facts";
-import { CI_RECENCY_BANDS } from "../score/model";
+import { CI_RECENCY_BANDS, CI_STABILITY_WINDOW, ISSUE_FLOW_WINDOWS, ISSUE_FLOW_WINDOW_DAYS } from "../score/model";
 import { hexColor } from "./catalog";
 import { runOutcome } from "./run-status";
 
@@ -44,6 +44,8 @@ export interface ResourceOutcome {
   /** первая страница целиком (инвентаризация: ключи/структура) */
   firstPage: unknown;
   detail?: string;
+  /** сборщик 5: выборка уперлась в кап страниц, а сервер обещал еще (next_page_token) — список обрезан */
+  capped?: boolean;
 }
 
 export interface DivergenceNote {
@@ -165,10 +167,14 @@ export async function fetchResource(
     if (pages === 1) firstPage = res.json;
     if (spec.list) items.push(...extractList(res.json).items);
     const next = body?.["next_page_token"];
-    if (typeof next !== "string" || next.length === 0) break;
+    if (typeof next !== "string" || next.length === 0) {
+      token = null;
+      break;
+    }
     token = next;
   }
-  return { resource, kind: "ok", status: 200, pages, items, firstPage };
+  // цикл вышел по капу страниц с непустым токеном — сервер отдал бы еще
+  return { resource, kind: "ok", status: 200, pages, items, firstPage, capped: token !== null };
 }
 
 // ---------- вычислители ----------
@@ -207,6 +213,106 @@ export function releaseStatusClass(status: unknown): "published" | "draft" | "di
     default:
       return "unknown";
   }
+}
+
+/**
+ * 4.4.0 (ТП-1): исход запуска для ленты стабильности `recent_runs` — каждое
+ * значение `Run.Status` спеки своей веткой через `runOutcome` (правило 22.09).
+ * В ленту идут только завершенные с результатом кода (успех, провал/таймаут);
+ * отмена, пропуск, отклонение — не результат кода (neutral), идущие — результата
+ * еще нет (pending), незнакомый статус — явная ветка: в ленту не идет и назван
+ * в `status_note` факта.
+ */
+export function stabilityOutcome(status: string | null): "success" | "failure" | null {
+  switch (runOutcome(status)) {
+    case "success":
+      return "success";
+    case "failure":
+      return "failure";
+    case "neutral":
+      return null;
+    case "pending":
+      return null;
+    case "unknown":
+      return null;
+  }
+}
+
+/** 4.4.0 (ТП-1): момент исхода запуска — завершение, иначе начало, иначе создание. */
+function runFinishedIso(r: Record<string, unknown>): string | null {
+  const d = r["dates"] as Record<string, unknown> | undefined;
+  for (const v of [d?.["finished_at"], d?.["started_at"], d?.["created_at"], r["created_at"]]) {
+    if (isoMs(v) !== null) return v as string;
+  }
+  return null;
+}
+
+/** Окно потока задач: начало (дата UTC), создано, закрыто, мгновенно закрыто; null — окно не покрыто выборкой. */
+export interface IssueFlowWindow {
+  from: string;
+  created: number | null;
+  closed: number | null;
+  instant: number | null;
+}
+
+/**
+ * 4.4.0 (ТП-9): поток задач по 30-дневным окнам за 180 дней (от старых к
+ * новым), из уже полученных списков — без новых запросов. Создана — по
+ * `created_at` открытых, в работе и закрытых; закрыта — по `completed_at`
+ * (иначе `updated_at`, как у медианы закрытия). Мгновенно закрытые (прожили
+ * меньше часа, правило 4.3.0) в бэклог не входили: не считаются ни созданными,
+ * ни закрытыми, их число — отдельно (`instant`, по дате создания).
+ * Список, упершийся в кап страниц, теряет самые старые записи: окна раньше
+ * `complete_since` (самая старая дата обрезанного списка по его сортировке)
+ * не покрыты и получают null — пометка, а не тихое занижение.
+ */
+export function issueFlow(
+  lists: { open: Record<string, unknown>[]; closed: Record<string, unknown>[] },
+  /** по обрезанному списку — его самая старая дата сортировки; null — список полный */
+  cutoffs: (string | null)[],
+  now: Date,
+): { window_days: number; windows: IssueFlowWindow[]; complete_since?: string } {
+  const windowMs = ISSUE_FLOW_WINDOW_DAYS * 86_400_000;
+  const end = now.getTime();
+  const start = end - ISSUE_FLOW_WINDOWS * windowMs;
+  const idx = (t: number | null): number | null => (t === null || t < start || t > end ? null : Math.min(ISSUE_FLOW_WINDOWS - 1, Math.floor((t - start) / windowMs)));
+  const created = new Array<number>(ISSUE_FLOW_WINDOWS).fill(0);
+  const closed = new Array<number>(ISSUE_FLOW_WINDOWS).fill(0);
+  const instant = new Array<number>(ISSUE_FLOW_WINDOWS).fill(0);
+  for (const i of lists.open) {
+    const w = idx(isoMs(i["created_at"]));
+    if (w !== null) created[w]! += 1;
+  }
+  for (const i of lists.closed) {
+    const a = isoMs(i["created_at"]);
+    const c = isoMs(i["completed_at"]) ?? isoMs(i["updated_at"]);
+    const wa = idx(a);
+    if (c !== null && a !== null && c >= a && c - a < ISSUE_INSTANT_CLOSE_MS) {
+      if (wa !== null) instant[wa]! += 1;
+      continue;
+    }
+    if (wa !== null) created[wa]! += 1;
+    const wc = idx(c);
+    if (wc !== null) closed[wc]! += 1;
+  }
+  const since = cutoffs.map(isoMs).filter((x): x is number => x !== null);
+  const completeSince = since.length ? Math.max(...since) : null;
+  const windows: IssueFlowWindow[] = created.map((n, k) => {
+    const from = start + k * windowMs;
+    const covered = completeSince === null || from >= completeSince;
+    return { from: new Date(from).toISOString().slice(0, 10), created: covered ? n : null, closed: covered ? closed[k]! : null, instant: covered ? instant[k]! : null };
+  });
+  return { window_days: ISSUE_FLOW_WINDOW_DAYS, windows, ...(completeSince !== null ? { complete_since: new Date(completeSince).toISOString() } : {}) };
+}
+
+/** Самая старая дата поля в списке (ISO) — граница полноты обрезанного списка. */
+function oldestIso(items: Record<string, unknown>[], field: string): string | null {
+  let min: number | null = null;
+  for (const i of items) {
+    const t = isoMs(i[field]);
+    if (t !== null && (min === null || t < min)) min = t;
+  }
+  return min === null ? null : new Date(min).toISOString();
 }
 
 /** Н6 (D15): момент запуска CI для клиентской сортировки — started_at, иначе created_at. */
@@ -378,6 +484,14 @@ export async function collectRestFacts(
         return life !== null ? life / 86400000 : null;
       })
       .filter((x): x is number => x !== null);
+    // 4.4.0 (ТП-9): поток по окнам; список, упершийся в кап страниц, обрезан по
+    // своей сортировке (открытые и в работе — -created_at, закрытые — -updated_at)
+    const cappedAt = (r: ResourceOutcome, field: string): string | null => (r.capped === true ? oldestIso(r.items, field) : null);
+    const flow = issueFlow(
+      { open: openIssues, closed: closedIssues },
+      [cappedAt(openRes, "created_at"), progressOk ? cappedAt(progressRes, "created_at") : null, cappedAt(closedRes, "updated_at")],
+      now,
+    );
     facts.push(
       okFact(
         "issues.stats",
@@ -395,6 +509,8 @@ export async function collectRestFacts(
           ...(fallbackCloses > 0
             ? { close_date_note: `completed_at missing on ${fallbackCloses}/${closedIssues.length} closed — used updated_at fallback` }
             : {}),
+          // сборщик 5 (ТП-9): создано/закрыто по 30-дневным окнам за 180 дней
+          flow,
         },
         "rest:issues",
         nowIso,
@@ -617,6 +733,13 @@ export async function collectRestFacts(
         }
       }
     }
+    // 4.4.0 (ТП-1): лента для сравнения двух окон — 2 × окно завершенных
+    const recentRuns: { outcome: "success" | "failure"; at: string | null }[] = [];
+    for (const r of all) {
+      if (recentRuns.length >= 2 * CI_STABILITY_WINDOW) break;
+      const outcome = stabilityOutcome(asString(r["status"]));
+      if (outcome !== null) recentRuns.push({ outcome, at: runFinishedIso(r) });
+    }
     facts.push(
       okFact(
         "cicd.runs",
@@ -635,6 +758,9 @@ export async function collectRestFacts(
           events,
           failed_workflows: [...failingWorkflows].slice(0, 5),
           error_top: errors.slice(0, 3).map((e) => e.slice(0, 140)),
+          // сборщик 5 (ТП-1): исход и момент последних завершенных запусков,
+          // свежие первыми — лента стабильности CI; без сообщений и имен
+          recent_runs: recentRuns,
         },
         "rest:cicd",
         nowIso,

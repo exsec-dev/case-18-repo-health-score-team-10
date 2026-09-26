@@ -17,10 +17,13 @@ import { lastRatingHref } from "./ratingReturn";
 import {
   ArrowDownToLine,
   ArrowsRotateRight,
+  ArrowUpArrowDown,
   ArrowUpRightFromSquare,
   Bug,
   Calendar,
   CalendarXmark,
+  ChartColumn,
+  ChartLine,
   ChevronDown,
   Circle,
   CircleCheck,
@@ -1376,6 +1379,8 @@ const SUBMETRIC_ICONS: Record<string, IconData> = {
   "cicd.config": Pipeline,
   "cicd.pass_rate": CircleCheck,
   "cicd.duration": Stopwatch,
+  // 4.4.0 (ТП-1, ТП-9): справочные показатели динамики
+  "cicd.stability": ChartLine,
   "security.density": Bug,
   "security.resolved": ShieldCheck,
   "security.secrets": Key,
@@ -1394,6 +1399,8 @@ const SUBMETRIC_ICONS: Record<string, IconData> = {
   "issues.resolution": SquareCheck,
   "issues.first_resp": Comment,
   "issues.tracker_unused": CommentSlash,
+  "issues.backlog_trend": ArrowUpArrowDown,
+  "issues.monthly_flow": ChartColumn,
   "code.density": Flag,
   "code.old_share": CalendarXmark,
   // В5.3-М (Р1): новая подметрика к существующему компоненту, иконка из уже подключенных
