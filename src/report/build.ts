@@ -28,9 +28,11 @@ import {
   fmtSigned,
   fullScorePath,
   AI_SECTION_TITLE,
+  AI_STALE_REPORT_TEXT,
   FRAUD_EXPLAIN,
   FRAUD_TITLE,
   aiModelName,
+  aiNotesStale,
   aiParagraphs,
   aiRoleTitle,
   fraudFactorFact,
@@ -980,6 +982,10 @@ function aiBlock(card: RepoCard): Block[] {
   const notes = [...(ai.overview ? [{ title: null as string | null, note: ai.overview }] : []), ...ai.specialists.map((n) => ({ title: aiRoleTitle(n.role), note: n }))];
   if (notes.length === 0) return [];
   const out: Block[] = [h2(AI_SECTION_TITLE)];
+  // 27.09 (Екатерина; дефект 2 оценки Алексея 27.09): обзор по прошлому анализу —
+  // плашкой сразу под заголовком, как метка «Устарел» на карточке; иначе цифры
+  // текста спорят с таблицами того же документа
+  if (aiNotesStale(ai)) out.push({ kind: "paragraph", tone: "note", lines: [[strong("Обзор устарел:"), text(` ${AI_STALE_REPORT_TEXT}`)]] });
   // ревью В5.3 (25.09): отказ проверки общего обзора печатается и в отчете, как на карточке
   if (!ai.overview && ai.specialists.length > 0) out.push(para(line(AI_OVERVIEW_REJECTED)));
   for (const { title, note } of notes) {

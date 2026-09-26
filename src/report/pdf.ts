@@ -737,6 +737,13 @@ export function buildPdfDocument(model: ReportModel): PdfNode {
       i++;
       continue;
     }
+    // 27.09: обычный абзац сразу под плашкой примечания (плашка «Обзор устарел»
+    // над AI-текстом) — с отступом, иначе текст прилипает к подложке
+    const prev = blocks[i - 1];
+    if (block.kind === "paragraph" && block.tone === undefined && prev?.kind === "paragraph" && prev.tone === "note") {
+      content.push({ ...blockNode(block), margin: [0, 6, 0, 3] });
+      continue;
+    }
     content.push(blockNode(block));
   }
   return {

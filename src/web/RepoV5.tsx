@@ -38,6 +38,7 @@ import {
   FRAUD_EXPLAIN,
   FRAUD_TITLE,
   aiModelName,
+  aiNotesStale,
   aiParagraphs,
   aiRoleTitle,
   fmtDate,
@@ -654,15 +655,6 @@ export function CategoryAiMark({ card, categoryKey, hasData }: { card: Card; cat
  * Текст модели в категории и разбор динамики (замечания 3, 6 от 25.09): стиль
  * info-плашки AI-обзора, без метки модели (она уже в заголовке обзора).
  */
-/**
- * Тур 3 В5.5 (круг 2, 26.09, Екатерина): AI-текст сделан по НЕпоследнему
- * анализу — после него был новый, цифры в тексте могут не совпасть с карточкой.
- * Условие то же, что у пункта «Обновить обзор» для не-владельца (аудит О1).
- */
-export function aiNotesStale(ai: Card["ai"]): boolean {
-  return ai != null && ai.check.latestScanId !== null && ai.scanId < ai.check.latestScanId;
-}
-
 /**
  * Знак «текст устарел» у всех AI-плашек — сразу после заголовка. Круг 4 тура 3
  * (26.09, Екатерина, вариант 5 виджета HQ): текстовая метка «Устарел» того же

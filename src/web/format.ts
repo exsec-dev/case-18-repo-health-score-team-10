@@ -1131,6 +1131,19 @@ export function fraudCheckStale(check: { scanId: number | null; latestScanId: nu
   return check !== undefined && check.scanId !== null && check.latestScanId !== null && check.scanId < check.latestScanId;
 }
 
+/**
+ * Тур 3 В5.5 (круг 2, 26.09, Екатерина): AI-текст сделан по НЕпоследнему
+ * анализу — после него был новый, цифры в тексте могут не совпасть с карточкой.
+ * Условие то же, что у пункта «Обновить обзор» для не-владельца (аудит О1).
+ * Одно условие для карточки (метка «Устарел») и отчета (плашка, 27.09).
+ */
+export function aiNotesStale(ai: { scanId: number; check: { latestScanId: number | null } } | null | undefined): boolean {
+  return ai != null && ai.check.latestScanId !== null && ai.scanId < ai.check.latestScanId;
+}
+
+/** Плашка устаревшего AI-обзора в отчете MD/PDF (27.09, Екатерина — по оценке Алексея 27.09, дефект 2). */
+export const AI_STALE_REPORT_TEXT = "сделан по прошлому анализу – после него был новый, цифры в тексте могут не совпадать с остальным отчетом. Обновить обзор можно на карточке репозитория.";
+
 /** Доля 0..1 → «99%» (целые проценты, без пробела — как в таблице подметрик; ненулевая меньше 1% — «<1%»). */
 function sharePercent(share: number): string {
   const pct = Math.round(share * 100);
