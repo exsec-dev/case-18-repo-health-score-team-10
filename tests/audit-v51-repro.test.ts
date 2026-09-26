@@ -546,7 +546,7 @@ describe("В5.1 Б5: хартии и входы ролей", () => {
     expect(trajectory.text).toContain("ТОЛЬКО числовые точки");
     const overview = loadCharter("overview");
     // 23.09: v3 — «синтез, а не склейка» (дословный пересказ специалистов = брак)
-    expect(overview.version).toBe("5"); // В5.2 (Б7): типографика хартий — версия поднята
+    expect(overview.version).toBe("6"); // В5.5 тур 1: опровергнутые выводы специалистов не переносятся (факт-чек repo-vitals, в)
     expect(overview.text).toContain("Синтез, а не склейка");
     expect(overview.text).not.toContain("healthcraft.index");
     expect(overview.text).not.toContain("флаги");
