@@ -7,7 +7,7 @@
 // Tri-state: клон не удался/пустой → факты no-data, не bad.
 // Лимиты — из Config.scan (src/config.ts), не константами здесь.
 import { execFile, execFile as execFileCb } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, statfsSync } from "node:fs";
 import { lstat, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -65,6 +65,60 @@ export interface CloneSeams {
   gitVersion?: [number, number, number] | null;
   /** вызывается с каталогом успешного клона ДО того, как его увидит вызывающий */
   onCloneDir?: (dir: string) => void | Promise<void>;
+  /** шов В5.4: свободные байты в каталоге (по умолчанию statfs) */
+  freeBytes?: (dir: string) => number;
+  /** шов В5.4: ожидание места на диске — пауза опроса и предел ожидания */
+  diskWait?: { pollMs: number; maxWaitMs: number };
+}
+
+/** В5.4 (О3): опрос свободного места раз в 30 с, не дольше 15 мин (лиз заявки — 85 мин). */
+export const DISK_WAIT = { pollMs: 30_000, maxWaitMs: 15 * 60_000 };
+
+function statfsFreeBytes(dir: string): number {
+  const s = statfsSync(dir);
+  return Number(s.bavail) * Number(s.bsize);
+}
+
+/**
+ * В5.4 (аудит очереди О3): одновременные клоны делят один диск — ENOSPC одного клона
+ * ронял соседние. Перед клоном: свободного места меньше резерва — ждать, пока соседние
+ * клоны закончатся и уберутся. Смысл скана не меняется: после предела ожидания клон идет
+ * как раньше (исход решает git), ожидание только разводит клоны по времени.
+ * Ошибка statfs — не повод стоять: проверка пропускается.
+ */
+export async function waitForDiskRoom(
+  dir: string,
+  minFreeBytes: number | undefined,
+  seams: Pick<CloneSeams, "freeBytes" | "diskWait"> = {},
+): Promise<{ waitedMs: number; freeBytes: number | null; room: boolean }> {
+  if (!minFreeBytes || minFreeBytes <= 0) return { waitedMs: 0, freeBytes: null, room: true };
+  const free = seams.freeBytes ?? statfsFreeBytes;
+  const { pollMs, maxWaitMs } = seams.diskWait ?? DISK_WAIT;
+  const started = Date.now();
+  let warned = false;
+  for (;;) {
+    let bytes: number;
+    try {
+      bytes = free(dir);
+    } catch (e) {
+      console.error(`[git] statfs ${dir} failed, disk check skipped: ${String((e as Error).message).slice(0, 120)}`);
+      return { waitedMs: Date.now() - started, freeBytes: null, room: true };
+    }
+    const waitedMs = Date.now() - started;
+    if (bytes >= minFreeBytes) {
+      if (warned) console.log(`[git] disk room is back: ${Math.round(bytes / 2 ** 20)} MB free after ${Math.round(waitedMs / 1000)} s`);
+      return { waitedMs, freeBytes: bytes, room: true };
+    }
+    if (waitedMs >= maxWaitMs) {
+      console.error(`[git] low disk: ${Math.round(bytes / 2 ** 20)} MB free < reserve ${Math.round(minFreeBytes / 2 ** 20)} MB after ${Math.round(waitedMs / 1000)} s — cloning anyway`);
+      return { waitedMs, freeBytes: bytes, room: false };
+    }
+    if (!warned) {
+      console.log(`[git] low disk: ${Math.round(bytes / 2 ** 20)} MB free < reserve ${Math.round(minFreeBytes / 2 ** 20)} MB — waiting for other clones`);
+      warned = true;
+    }
+    await sleep(pollMs);
+  }
 }
 
 interface ExecResult {
@@ -300,6 +354,8 @@ export async function cloneBare(
   limits: CloneLimits,
   opts: { shallowSince?: string } & CloneSeams = {},
 ): Promise<CloneOutcome> {
+  // В5.4 (О3): до mkdtemp и до отсчета таймаута — ожидание места не съедает бюджет клона
+  await waitForDiskRoom(tmpDir, limits.minFreeBytes, opts);
   const dir = mkdtempSync(join(tmpDir, "rh-clone-"));
   const started = Date.now();
   // ПОРТ hq-parallel (S1/security): креды НЕ едут в argv (world-readable
@@ -442,7 +498,7 @@ export async function cloneWithDegrade(
   const second = await cloneBare(
     url,
     tmpDir,
-    { timeoutMs: limits.degrade.timeoutMs, maxBytes: limits.degrade.maxBytes, pollMs: limits.pollMs },
+    { timeoutMs: limits.degrade.timeoutMs, maxBytes: limits.degrade.maxBytes, pollMs: limits.pollMs, minFreeBytes: limits.minFreeBytes },
     { ...seams, shallowSince: `${limits.degrade.sinceMonths}.months` },
   );
   if (second.ok) {

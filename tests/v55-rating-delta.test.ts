@@ -12,6 +12,7 @@ import { loadConfig } from "../src/config";
 import { makeApiDb, seedRepo, seedScan, seedScore, type ApiTestDb } from "./api-fixtures";
 
 const DAY = new Date("2026-09-26T08:00:00Z");
+const NEXT_DAY = new Date("2026-09-27T10:00:00Z");
 
 /** репо с одним сканом и оценкой `total` (HealthCraft Index) */
 function seedRated(t: ApiTestDb, org: string, repo: string, total: number): number {
@@ -36,7 +37,10 @@ function seedFlaggerNote(t: ApiTestDb, repoId: number, scanId: number, text: str
 const FLAG_TRUE = JSON.stringify({ flag: true, factors: [{ key: "activity.rhythm", note: "роботы" }], signals: {}, inputs: {} });
 const FLAG_FALSE = JSON.stringify({ flag: false, factors: [], signals: {}, inputs: {} });
 
-const itemOf = (t: ApiTestDb, repo: string) => listRepos(t.db, { ...DEFAULT_QUERY, perPage: 100 }).items.find((i) => i.repo === repo);
+// «сейчас» выдачи — явно: база динамики — снимок до текущих UTC-суток, часы
+// теста не должны решать, какой снимок «вчерашний»
+const itemOf = (t: ApiTestDb, repo: string, now: Date = NEXT_DAY) =>
+  listRepos(t.db, { ...DEFAULT_QUERY, perPage: 100 }, { now }).items.find((i) => i.repo === repo);
 
 // ---------- Р1: снимок мест ----------
 
@@ -140,11 +144,19 @@ describe("Р1: rankDelta строки рейтинга", () => {
     expect(itemOf(t, "ddd")?.rankDelta).toBeNull(); // новый: в снимке его нет
   });
 
-  test("delta считается к ПОСЛЕДНЕМУ снимку, не к вчерашнему вообще", () => {
-    // снимок следующего дня отражает текущий порядок — delta обнуляется
+  test("база — последний снимок ДО текущих суток: свой снимок дня стрелки не гасит", () => {
+    // приёмка тура 1: снимок 27-го пишется сразу после ночной волны и равен
+    // текущему порядку; днем 27-го стрелки по-прежнему — к снимку 26-го
     takeRatingSnapshot(t.db, { now: new Date("2026-09-27T01:00:00Z") });
-    expect(itemOf(t, "ccc")?.rankDelta).toBe(0);
-    expect(itemOf(t, "ddd")?.rankDelta).toBe(0);
+    expect(itemOf(t, "ccc", NEXT_DAY)?.rankDelta).toBe(2);
+    expect(itemOf(t, "bbb", NEXT_DAY)?.rankDelta).toBe(-2);
+    expect(itemOf(t, "ddd", NEXT_DAY)?.rankDelta).toBeNull();
+    // на следующие сутки база — снимок 27-го: порядок не менялся — 0, ddd уже в снимке
+    const day28 = new Date("2026-09-28T10:00:00Z");
+    expect(itemOf(t, "ccc", day28)?.rankDelta).toBe(0);
+    expect(itemOf(t, "ddd", day28)?.rankDelta).toBe(0);
+    // в сутки единственного снимка базы нет — пустота, а не «0»
+    expect(itemOf(t, "ccc", DAY)?.rankDelta).toBeNull();
   });
 });
 

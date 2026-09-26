@@ -15,6 +15,12 @@ export interface CloneLimits {
   maxBytes: number;
   /** интервал du-поллинга watchdog'а */
   pollMs: number;
+  /**
+   * В5.4 (аудит очереди О3): резерв свободного места в tmp перед клоном, байт. Нет или 0 —
+   * проверки нет (дефолт; стенд задает SCAN_MIN_FREE_MB в deploy/compose.yaml). Меньше
+   * резерва — клон ждет, пока соседние клоны освободят диск (waitForDiskRoom).
+   */
+  minFreeBytes?: number;
 }
 
 export interface DegradeLimits {
@@ -356,6 +362,8 @@ export function scanFromEnv(env: Record<string, string>): ScanConfig {
       timeoutMs: envInt(env, "SCAN_CLONE_TIMEOUT_MS") ?? d.clone.timeoutMs,
       maxBytes: envInt(env, "SCAN_CLONE_MAX_BYTES") ?? d.clone.maxBytes,
       pollMs: d.clone.pollMs,
+      // В5.4: ключ появляется только при заданной переменной — дефолт без проверки места
+      ...(envInt(env, "SCAN_MIN_FREE_MB") !== null ? { minFreeBytes: envInt(env, "SCAN_MIN_FREE_MB")! * 1024 * 1024 } : {}),
     },
     degrade: {
       sinceMonths: d.degrade.sinceMonths,

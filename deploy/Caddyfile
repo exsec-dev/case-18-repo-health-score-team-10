@@ -1,0 +1,33 @@
+# HealthCraft — прокси стенда (В5.4).
+# SITE_ADDRESS — адреса через запятую (Caddy сам выпускает и продлевает сертификаты
+# Let's Encrypt), например "health-craft.ru, www.health-craft.ru"; ":80" — только HTTP, пока
+# домена нет. CANONICAL_HOST — основной хост: остальные адреса переадресуются на него
+# (вход Я ID, cookie и Origin-гард мутаций привязаны к одному origin — YA_REDIRECT_URI).
+{$SITE_ADDRESS} {
+	@alias expression `"{$CANONICAL_HOST}" != "" && {host} != "{$CANONICAL_HOST}"`
+	redir @alias https://{$CANONICAL_HOST}{uri} permanent
+
+	encode zstd gzip
+
+	# Заголовки защиты на ВСЕ ответы, включая HTML-страницу: Bun не дает поставить их
+	# на HTML-бандл (src/server.ts, отклонение В4.4) — закрывает прокси.
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# внешнее: шрифт Inter (Google Fonts, импорт uikit), картинки — аватары Я ID и логотипы
+		# репозиториев SourceCraft (https:), иконка — data:
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+		-Server
+	}
+
+	reverse_proxy web:8418 {
+		# X-Forwarded-For: Caddy по умолчанию НЕ доверяет входящему заголовку (trusted_proxies
+		# не заданы) и ставит адрес клиента сам — ключ лимита badge по IP (src/server.ts) не спуфится
+		# «думающие» обработчики живут до 120 с (idleTimeout сервера)
+		transport http {
+			read_timeout 130s
+		}
+	}
+}

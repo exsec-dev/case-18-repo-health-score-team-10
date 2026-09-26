@@ -322,7 +322,10 @@ export function openDb(config: Config): Database {
   // версии больше не может оставить базу полумигрированной: либо все DDL и
   // schema_version, либо ничего. PRAGMA journal_mode — снаружи (в транзакции
   // no-op); вложенные db.transaction (П11, Ф2.11) становятся сейвпоинтами.
-  db.transaction(() => {
+  // В5.4 (живой старт стенда 26.09): транзакция IMMEDIATE — блокировка записи берется на BEGIN и
+  // ждет busy_timeout. Отложенная (deferred) читала схему, а запись schema_version после чужого
+  // коммита получала SQLITE_BUSY без ожидания (устаревший снимок) — роль rating падала на старте.
+  const migrate = db.transaction(() => {
     db.exec(SCHEMA);
     // v1.1 → v1.2: repos-колонки В2 (forks/reaction_counts)
     ensureColumn(db, "repos", "forks", "INTEGER");
@@ -469,6 +472,7 @@ export function openDb(config: Config): Database {
     // что favorites и jobs.error в базе действительно есть. В4.4: внутри общей
     // транзакции — атомарно с самими DDL.
     setMetaValue(db, "schema_version", SCHEMA_VERSION);
-  })();
+  });
+  migrate.immediate();
   return db;
 }

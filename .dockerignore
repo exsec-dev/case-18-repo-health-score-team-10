@@ -1,0 +1,9 @@
+# В образ едет только то, что нужно процессу (Dockerfile): остальное — исключено
+# белым списком. .env, data/, отчеты и тесты в образ не попадают никогда.
+*
+!package.json
+!bun.lock
+!tsconfig.json
+!prompts
+!src
+!deploy/entrypoint.sh

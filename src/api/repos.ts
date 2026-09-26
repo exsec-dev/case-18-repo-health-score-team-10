@@ -58,9 +58,10 @@ export interface RatingItem {
    */
   rank: number | null;
   /**
-   * В5.5 тур 1 (W2, Р1): динамика позиции — место в последнем снимке
-   * (`rating_snapshots`) минус текущее место; положительное = вырос.
-   * null — снимка нет или репо в нем отсутствует (новый / вне ранжирования).
+   * В5.5 тур 1 (W2, Р1): динамика позиции — место в последнем снимке до
+   * текущих UTC-суток (`rating_snapshots`) минус текущее место; положительное
+   * = вырос. null — такого снимка нет или репо в нем отсутствует (новый / вне
+   * ранжирования).
    */
   rankDelta: number | null;
   /**
@@ -416,11 +417,15 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
   // снимком мест (Р1) и заметкой flagger (Р2)
   const idBySlug = new Map(rows.map((r) => [`${r.org_slug}/${r.repo_slug}`, r.repo_id]));
 
-  // В5.5 тур 1 (W2, Р1): динамика позиции — последний снимок читается ОДИН
+  // В5.5 тур 1 (W2, Р1): динамика позиции — базовый снимок читается ОДИН
   // раз в Map, без per-row запросов (рейтинг ~0,58 с на 28k строк до правки).
   // delta = место в снимке − место сейчас (положительное = вырос); снимка нет
   // или репо в нем отсутствует (новый, вышел из ранжирования) — null.
-  const snapDay = (db.query("SELECT MAX(taken_at) AS d FROM rating_snapshots").get() as { d: string | null }).d;
+  // Приёмка тура 1 (26.09): база — последний снимок ДО текущих UTC-суток.
+  // Сегодняшний снимок пишется сразу после ночной волны и совпадает с текущим
+  // порядком — сравнение с ним гасило стрелки до «–» на весь день.
+  const today = (opts.now ?? new Date()).toISOString().slice(0, 10);
+  const snapDay = (db.query("SELECT MAX(taken_at) AS d FROM rating_snapshots WHERE taken_at < ?").get(today) as { d: string | null }).d;
   if (snapDay !== null) {
     const snapRank = new Map(
       (db.query("SELECT repo_id, rank FROM rating_snapshots WHERE taken_at = ?").all(snapDay) as { repo_id: number; rank: number }[]).map((r) => [
