@@ -67,6 +67,8 @@ services:
     environment:
       # домен стенда (HTTPS выпускается сам) или ":80" — только HTTP, пока домена нет
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+      # основной хост (без него — переадресации нет); пусто в режиме ":80"
+      CANONICAL_HOST: ${CANONICAL_HOST:-}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

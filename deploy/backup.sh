@@ -16,7 +16,7 @@ STAMP="$(date -u +%Y%m%d-%H%M)"
 mkdir -p "$OUT"
 
 TMP="$OUT/.repo-health-$STAMP.db"
-sqlite3 "$DIR/data/repo-health.db" "PRAGMA busy_timeout = 60000; VACUUM INTO '$TMP'"
+sqlite3 -cmd '.timeout 60000' "$DIR/data/repo-health.db" "VACUUM INTO '$TMP'"
 CHECK="$(sqlite3 "$TMP" 'PRAGMA quick_check')"
 if [ "$CHECK" != "ok" ]; then
   echo "backup $STAMP: quick_check failed: $CHECK" >&2
