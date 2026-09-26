@@ -135,6 +135,48 @@ export function fixtureCard(name: ReportFixture): FixtureCard {
             provenance: { scan_uuid: "u-1", commit_hash: "deadbeef", time_finished: "2026-09-16T11:00:00Z", group_ids: [] },
           },
         },
+        // В5.5 тур 2 (W4, ЗН-2): справочные review PR и карта владельцев файлов
+        {
+          key: "activity.pr_review",
+          source: "rest:pulls",
+          value: {
+            pulls: 4,
+            statuses: { draft: 1, open: 1, merging: 0, merged: 2, discarded: 0, unknown: 0 },
+            sampled: 3,
+            answered: 2,
+            median_first_response_hours: 6.5,
+            open_sampled: 1,
+            waiting_over_threshold: 1,
+            threshold_hours: 72,
+            review_comments_total: 4,
+            median_review_comments: 1,
+            comments_capped: 0,
+            appsec_comments: 0,
+            decisions: { approve: 2, trust: 0, block: 0, abstain: 0, pending: 1, unknown: 0 },
+            merged: 2,
+            median_merge_hours: 30,
+            merge_time_basis: "updated_at",
+            requests: 6,
+          },
+        },
+        {
+          key: "code.ownership",
+          source: "git",
+          value: {
+            window_days: 365,
+            threshold: 0.8,
+            commits: 6,
+            robot_commits_skipped: 0,
+            changes: 10,
+            single_owner_share: 0.4,
+            dirs_total: 2,
+            dirs_single_owner: 1,
+            dirs: [
+              { dir: "src", changes: 6, authors: 3, owner: "alice", owner_share: 0.5 },
+              { dir: ".", changes: 4, authors: 1, owner: "bob", owner_share: 1 },
+            ],
+          },
+        },
       );
       const repoId = seedRepo(t, { org: "m47", repo: "full", title: "Full access", language: "TypeScript", likes: 40, forks: 5, lastActivityAt: "2026-09-10T08:30:00Z" });
       scoredScan(t, repoId, { status: "ok", trigger: "periodic", facts });
