@@ -11,8 +11,10 @@ import { mkdtempSync, rmSync, statfsSync } from "node:fs";
 import { lstat, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { Fact, GIT_KINDS, noDataFact, okFact, scrubDetail } from "./facts";
+import { Fact, GIT_KINDS, badChannelFact, noDataFact, okFact, scrubDetail } from "./facts";
 import { isSourcePath, isTestPath } from "./source-path";
+import { OWNERSHIP_LOG_FORMAT, OWNERSHIP_MAX_COMMITS, OWNERSHIP_WINDOW_DAYS, aggregateOwnership, parseOwnershipLog } from "./ownership";
+import { robot2Flags } from "../score/robot2";
 import { parseYamlSubset } from "./yamlmini";
 import type { CloneLimits, ScanCloneLimits } from "../config";
 
@@ -980,6 +982,41 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
     nowIso,
   );
 
+  // --- 1б. В5.5 тур 2 (W4, ЗН-2): карта владельцев файлов — `code.ownership`
+  // (ownership.ts). Роботы и синхронизации — по sha из robot2 (истина расчета,
+  // не v1-флаг `robot` выше). Бюджет — OWNERSHIP_MAX_COMMITS коммитов за окно
+  // (--since по дате коммитера отсекает объем, окно по дате автора — в
+  // агрегаторе); обрезка помечается в факте. Сбой git log — факт `bad` без
+  // путей машины (не no-data: git-канал прочитан, пользовательский скан не
+  // теряет пригодность из-за справочного показателя).
+  let ownershipFact: Fact;
+  try {
+    const excluded = new Set<string>();
+    robot2Flags(events).flags.forEach((f, i) => {
+      if (f.robot || f.sync) excluded.add(events[i]!.sha);
+    });
+    const since = new Date(now.getTime() - (OWNERSHIP_WINDOW_DAYS + 1) * 86_400_000).toISOString();
+    const ownRaw = await git(
+      ["-c", "core.quotepath=off", "log", "--no-merges", `--since=${since}`, `--max-count=${OWNERSHIP_MAX_COMMITS + 1}`, `--format=${OWNERSHIP_LOG_FORMAT}`, "--name-only", branch],
+      120_000,
+    );
+    const commits = parseOwnershipLog(ownRaw.stdout);
+    const commitsTruncated = commits.length > OWNERSHIP_MAX_COMMITS;
+    ownershipFact = okFact(
+      "code.ownership",
+      aggregateOwnership(commitsTruncated ? commits.slice(0, OWNERSHIP_MAX_COMMITS) : commits, {
+        now,
+        excluded,
+        commitsTruncated,
+        historyTruncatedSince: opts.historyTruncatedSince,
+      }),
+      "git",
+      nowIso,
+    );
+  } catch {
+    ownershipFact = badChannelFact("code.ownership", "git", "git log for ownership failed", nowIso);
+  }
+
   // --- 2. дерево: ls-tree ---
   const treeRaw = await git(["ls-tree", "-l", "-r", "-z", branch], 300_000);
   const blobs: BlobEntry[] = [];
@@ -1239,7 +1276,7 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
     nowIso,
   );
 
-  return [timelineFact, summaryFact, docsPresenceFact, readmeFact, treeStatsFact, cicdConfigsFact, codeTodoFact];
+  return [timelineFact, summaryFact, docsPresenceFact, readmeFact, treeStatsFact, cicdConfigsFact, codeTodoFact, ownershipFact];
 }
 
 const todoKind = todoMarkerKind;

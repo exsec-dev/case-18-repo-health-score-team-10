@@ -15,7 +15,8 @@ export type FactStatus = "ok" | "no-data" | "bad";
  * вне тестов, пропущенные в тестах — аддитивным `test_markers` в `code.todo`),
  * 5 — сборщик модели 4.4.0-hci (В5.5 тур 2, ТП-1/ТП-9: аддитивные
  * `cicd.runs.recent_runs` — исход и момент последних завершенных запусков — и
- * `issues.stats.flow` — создано/закрыто по 30-дневным окнам за 180 дней).
+ * `issues.stats.flow` — создано/закрыто по 30-дневным окнам за 180 дней; ЗН-2 —
+ * новые справочные факты `activity.pr_review` и `code.ownership`, W4).
  * В старых строках — NULL («до учета», читается как старше текущего). Смена
  * формы или смысла факта — новая версия: ночная волна доочередит репо, чей
  * последний пригодный скан собран старым сборщиком (`scheduler.ts`).
@@ -102,6 +103,16 @@ export const KINDS = {
   // числовые severity хранятся как raw без декодирования)
   "appsec.findings":
     "{severity_counts,resolved_share,secrets_critical,backlog:{open_groups,open_findings,engines,severity_raw_counts},provenance:{scan_uuid,commit_hash,time_finished,group_ids}} | no-data{reason}",
+  // В5.5 тур 2 (W4, ЗН-2) — справочные (DISPLAY_ONLY), в Score не идут,
+  // в READ_KINDS/PUBLIC_KINDS не входят (пригодность скана от них не зависит).
+  // review и bottlenecks PR (pr-review.ts): выборка до 10 последних PR не
+  // черновиков; pulls = 0 — «PR не используются» (данные); сбой выборки — bad
+  "activity.pr_review":
+    "{pulls,statuses,status_note?,sampled,answered,median_first_response_hours,open_sampled,waiting_over_threshold,threshold_hours,review_comments_total,median_review_comments,comments_capped,appsec_comments,decisions,merged,median_merge_hours,merge_time_basis,requests} | no-data{reason} | bad",
+  // карта владельцев файлов (ownership.ts): агрегаты по верхнеуровневым
+  // каталогам за 365 дней без мерджей и роботов; только имя автора, без email
+  "code.ownership":
+    "{window_days,threshold,commits,robot_commits_skipped,changes,single_owner_share,dirs_total,dirs_single_owner,dirs:[{dir,changes,authors,owner,owner_share}],truncated?,truncated_note?,history_since?} | bad",
 } as const;
 
 export type Kind = keyof typeof KINDS;

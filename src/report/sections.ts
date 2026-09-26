@@ -155,6 +155,8 @@ export function whyText(key: CategoryKey, cat: CardCategory, ctx: SubmetricConte
   if (adjusted) return adjusted;
   const subs = Object.entries(cat.submetrics);
   for (const [sub, entry] of subs) {
+    // В5.5 тур 2 (W4): оговорка справочного показателя (время слияния PR) — не основание балла
+    if (displayOnly(key, sub)) continue;
     const remark = submetricNote(key, sub, entry.note)?.remark;
     if (remark) return remark;
   }
@@ -381,4 +383,65 @@ export function noRecommendationsText(card: RepoCard): string {
         ? "Автоматических рекомендаций для этих данных нет."
         : "Автоматических рекомендаций для собранных данных нет: часть данных не собрана.";
   return card.score?.fullLocked === true ? `${head} Рекомендации по CI/CD и Безопасности видны участникам репозитория.` : head;
+}
+
+// ---------- карта владельцев файлов (В5.5 тур 2, W4, ЗН-2) ----------
+
+/** Строка карты владельцев: каталог, главный автор (имя из git, без email), доля, авторов. */
+export interface OwnershipRow {
+  dir: string;
+  owner: string;
+  share: string;
+  authors: string;
+  /** главный автор сделал не меньше порога изменений каталога */
+  single: boolean;
+}
+
+export interface OwnershipView {
+  caption: string;
+  rows: OwnershipRow[];
+  notes: string[];
+}
+
+/** Подпись каталога: корзина файлов корня (`.`) — словами. */
+export function ownershipDirTitle(dir: string): string {
+  return dir === "." ? "(файлы в корне)" : dir;
+}
+
+/**
+ * Карта владельцев — ОДНА сборка для карточки и MD/PDF (инвариант «карточка =
+ * отчет»): значение справочной подметрики `code.ownership` (агрегат факта и
+ * признак CODEOWNERS). Нет карты (прежний сборщик, изменений за год нет,
+ * данные не собраны) — null: строка подметрики сама говорит, почему.
+ */
+export function ownershipView(cat: CardCategory | undefined): OwnershipView | null {
+  const value = cat?.submetrics?.["ownership"]?.value as Record<string, unknown> | null | undefined;
+  if (!value || typeof value !== "object") return null;
+  const dirs = Array.isArray(value.dirs) ? (value.dirs as Record<string, unknown>[]) : [];
+  if (dirs.length === 0) return null;
+  const threshold = typeof value.threshold === "number" ? value.threshold : 0.8;
+  const rows: OwnershipRow[] = dirs.map((d) => {
+    const share = typeof d.owner_share === "number" ? d.owner_share : 0;
+    const authors = typeof d.authors === "number" ? d.authors : 0;
+    return {
+      dir: ownershipDirTitle(String(d.dir ?? "")),
+      owner: String(d.owner ?? ""),
+      share: `${Math.round(share * 100)}%`,
+      authors: String(authors),
+      single: share >= threshold,
+    };
+  });
+  const total = typeof value.dirs_total === "number" ? value.dirs_total : rows.length;
+  const singles = typeof value.dirs_single_owner === "number" ? value.dirs_single_owner : rows.filter((r) => r.single).length;
+  const windowDays = typeof value.window_days === "number" ? value.window_days : 365;
+  const notes: string[] = [
+    `Единственный владелец – у ${singles} из ${total} ${plural(total, "каталога", "каталогов", "каталогов")}: главный автор сделал не меньше ${Math.round(threshold * 100)}% изменений каталога. Изменение – коммит человека за ${windowDays} ${plural(windowDays, "день", "дня", "дней")} без слияний, тронувший файл кода; коммиты роботов не учитываются.`,
+  ];
+  if (total > rows.length) notes.push(`Показаны ${rows.length} самых изменяемых каталогов из ${total}.`);
+  if (value.truncated === "commits") notes.push("Коммитов за год больше бюджета обхода – учтены только самые свежие.");
+  if (value.truncated === "changes") notes.push("Изменений за год больше бюджета обхода – учтена только часть.");
+  if (typeof value.history_since === "string") notes.push(`История загружена с ${fmtDate(value.history_since)} – окно короче года.`);
+  if (value.codeowners === true) notes.push("В репозитории есть CODEOWNERS.");
+  if (value.codeowners === false) notes.push("CODEOWNERS в репозитории нет.");
+  return { caption: "Карта владельцев файлов (справочно, в балл не входит)", rows, notes };
 }

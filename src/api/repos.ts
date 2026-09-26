@@ -6,7 +6,7 @@
 // такие репо уезжают в отдельный массив, иначе «нет данных» оказалось бы
 // лучшим или худшим результатом в зависимости от направления сортировки.
 import type { Database } from "bun:sqlite";
-import { CHANNEL_KINDS, PUBLIC_KINDS, computeFromFacts, effectiveFacts, totalsFromCategories, type CategoryScore } from "../score/compute";
+import { CHANNEL_KINDS, DISPLAY_KINDS, PUBLIC_KINDS, computeFromFacts, effectiveFacts, totalsFromCategories, type CategoryScore } from "../score/compute";
 import { orderRecommendations, recommendFromFacts, recommendationParams, recommendationText, round4, type DeltaEvaluator } from "../score/recommend";
 import { categoryOf, parseFactValue, scrubDetail } from "../collectors/facts";
 import { isOwnRepo, NO_PAT_ACCESS, visibilityOf, type AccessRepo, type AccessResult, type ChannelAccess } from "../auth/access";
@@ -1437,7 +1437,8 @@ export function getRepoCard(
   // адресуемые факты: те, на которые ссылаются рекомендации, плюс те,
   // что читает compute — сырьё остальных в ответ не едет
   const refKeys = recommendations.flatMap((rec) => rec.factRefs.map((ref) => ref.key));
-  const addressable = new Set<string>([...refKeys, ...PUBLIC_KINDS, ...CHANNEL_KINDS, CHANNEL_TREE_KEY]);
+  // В5.5 тур 2 (сведение W4): справочные факты ЗН-2 — в доказательной базе карточки и отчета
+  const addressable = new Set<string>([...refKeys, ...PUBLIC_KINDS, ...CHANNEL_KINDS, ...DISPLAY_KINDS, CHANNEL_TREE_KEY]);
   const evidence: CardEvidence[] = factRows
     .filter((f) => addressable.has(f.key))
     .map((f) => {

@@ -58,6 +58,8 @@ function fullOkClient(overrides: Array<[string, ScResponse]> = []): ScClient & {
     [(p) => get(p) === "/repos/o/r/cicd/runs", ok(runsOwnFx)],
     [(p) => get(p) === "/repos/o/r/rating", ok(ratingFx)],
     [(p) => get(p).includes("/comments"), ok(commentsFx)],
+    // В5.5 тур 2 (W4): ревьюеры PR — выборка review (activity.pr_review)
+    [(p) => get(p).endsWith("/reviewers"), ok({ reviewers: [] })],
   ];
   return routerClient(table);
 }
@@ -154,7 +156,8 @@ describe("collectRestFacts: факты из живых форм", () => {
     const by = new Map(out.facts.map((f) => [f.key, f]));
     const v = (k: string) => by.get(k)!.value as Record<string, unknown>;
 
-    expect(by.size).toBe(4);
+    // В5.5 тур 2 (W4): + activity.pr_review (справочный факт ЗН-2)
+    expect(by.size).toBe(5);
     expect([...by.values()].every((f) => f.status === "ok")).toBe(true);
     expect(v("issues.stats").open).toBe(3); // фиксстура issues-open: 3 записи
     expect(v("issues.stats").closed).toBe(2);
@@ -175,8 +178,8 @@ describe("collectRestFacts: факты из живых форм", () => {
     expect(out.repoMeta!.title).toBe("dozzle-plus");
     expect(out.repoMeta!.likes).toBe(25); // rating.value 25
     expect(out.channelErrors.length).toBe(0);
-    // comments: 3 issues × 1 запрос
-    const commentCalls = client.calls.filter((p) => p.includes("/comments")).length;
+    // comments: 3 issues × 1 запрос (комментарии PR — своя выборка W4)
+    const commentCalls = client.calls.filter((p) => p.includes("/issues/") && p.includes("/comments")).length;
     expect(commentCalls).toBe(3);
   });
 

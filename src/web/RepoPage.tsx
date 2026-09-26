@@ -32,9 +32,11 @@ import {
   ClockArrowRotateLeft,
   CodeCommits,
   CodeFork,
+  CodeMerge,
   CodePullRequest,
   Comment,
   CommentSlash,
+  Comments,
   Copy,
   FileText,
   Flag,
@@ -44,6 +46,7 @@ import {
   Hourglass,
   Key,
   LogoMarkdown,
+  Person,
   PersonGear,
   Persons,
   Pipeline,
@@ -80,7 +83,7 @@ import {
 import { useEffect, useState, type ReactNode } from "react";
 import { COVERAGE_NULL_BELOW } from "../score/model";
 import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle } from "../report/submetrics";
-import { FULL, INDEX, metricWeights, sourceWord, strengthsLine, submetricWeightText } from "../report/sections";
+import { FULL, INDEX, metricWeights, ownershipView, sourceWord, strengthsLine, submetricWeightText } from "../report/sections";
 import type { MetaResponse, RepoCard } from "./api";
 import { dataOf, mutateJson, useJson, useVisible } from "./api";
 import { cardView, type CardView, type CategoryView, type RecommendationView } from "./cardView";
@@ -1137,6 +1140,8 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
           ))}
           {/* В4.6 (У17): разбивка по движкам — в раскрытии Security, строками таблицы */}
           {key === "security" && <AppsecEngines card={card} />}
+          {/* В5.5 тур 2 (W4, ЗН-2): карта владельцев — в раскрытии «Состояния кода», теми же строками */}
+          {key === "code" && <OwnershipMap category={cat} />}
           {/* замечание 3 (25.09): текст модели — под таблицей метрик */}
           {aiNote !== null && <CategoryAiNote note={aiNote} />}
         </div>
@@ -1407,6 +1412,13 @@ const SUBMETRIC_ICONS: Record<string, IconData> = {
   "code.tests": CircleCheck,
   "code.root": FolderTree,
   "code.todo_total": Hashtag,
+  // В5.5 тур 2 (W4, ЗН-2): справочные показатели review PR и карта владельцев
+  "activity.pr_review": CodePullRequest,
+  "activity.pr_first_response": Comment,
+  "activity.pr_waiting": Hourglass,
+  "activity.pr_review_comments": Comments,
+  "activity.pr_merge_time": CodeMerge,
+  "code.ownership": Person,
 };
 
 function submetricIcon(category: string, sub: string): IconData {
@@ -1496,6 +1508,54 @@ function AppsecEngines({ card }: { card: Card }) {
         </div>
       ))}
       {notes.map((n) => (
+        <Text key={n} variant="body-1" color="complementary" className="rh-subrows__note rh-subrows__note_after">
+          {n}
+        </Text>
+      ))}
+    </>
+  );
+}
+
+/**
+ * В5.5 тур 2 (W4, ЗН-2): карта владельцев файлов — внутри раскрытия «Состояния
+ * кода», под таблицей подметрик, теми же строками, что разбивка AppSec
+ * (решение 25.09: разбивка внутри категории выглядит как метрики, а не как
+ * отдельный список; строки держат 375 px без перелива — значение переносится).
+ * Строки и тексты — `ownershipView` (одна копия с MD/PDF); имя автора — из
+ * git, email не показывается никогда. Колонки веса и балла — прочерк: в балл
+ * категории карта не входит.
+ */
+function OwnershipMap({ category }: { category: Parameters<typeof ownershipView>[0] }) {
+  const view = ownershipView(category);
+  if (!view) return null;
+  return (
+    <>
+      <Text variant="caption-2" color="secondary" className="rh-subrows__group">
+        {view.caption}
+      </Text>
+      {view.rows.map((r) => (
+        <div key={r.dir} className="rh-subrow">
+          <span className="rh-subrow__head">
+            <Text color="secondary" className="rh-subrow__icon">
+              <Icon data={FolderTree} size={14} />
+            </Text>
+            <Text color="secondary" className="rh-subrow__name rh-subrow__name_path">
+              {r.dir}
+            </Text>
+            <span className="rh-subrow__lead" aria-hidden="true" />
+            <Text color="secondary" className="rh-subrow__value rh-subrow__value_wrap">
+              {`${r.owner} – ${r.share}${r.single ? ", единственный" : ""}, авторов ${r.authors}`}
+            </Text>
+          </span>
+          <Text className="rh-subrow__score" color="secondary">
+            —
+          </Text>
+          <Text className="rh-subrow__score" color="secondary" title="Карта показывается для справки, в балл категории не входит">
+            —
+          </Text>
+        </div>
+      ))}
+      {view.notes.map((n) => (
         <Text key={n} variant="body-1" color="complementary" className="rh-subrows__note rh-subrows__note_after">
           {n}
         </Text>

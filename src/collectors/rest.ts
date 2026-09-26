@@ -12,6 +12,7 @@ import { Fact, badChannelFact, noDataFact, okFact } from "./facts";
 import { CI_RECENCY_BANDS, CI_STABILITY_WINDOW, ISSUE_FLOW_WINDOWS, ISSUE_FLOW_WINDOW_DAYS } from "../score/model";
 import { hexColor } from "./catalog";
 import { runOutcome } from "./run-status";
+import { PR_COMMENTS_PAGE, PR_REVIEWERS_PAGE, collectPrReview } from "./pr-review";
 
 /** М2.6: худший анкер первого ответа (FIRST_COMMENT_H, 30 дней) — порог цензуры. */
 const UNANSWERED_CENSOR_H = 720;
@@ -30,7 +31,10 @@ export type RestResourceName =
   | "releases"
   | "cicd-runs"
   | "rating"
-  | "issue-comments";
+  | "issue-comments"
+  // В5.5 тур 2 (W4, ЗН-2): выборка review PR — 1 страница на PR
+  | "pull-comments"
+  | "pull-reviewers";
 
 export type ChannelKind = "ok" | "access" | "bad-channel" | "other";
 
@@ -67,6 +71,8 @@ interface PathArgs {
   pageSize: number;
   /** slug issue для ресурса issue-comments */
   issueSlug?: string;
+  /** slug PR для ресурсов pull-comments / pull-reviewers (В5.5 тур 2, W4) */
+  pullSlug?: string;
 }
 
 /** Ф2.8: сегменты слага/issue в URL — encodeURIComponent (вход может быть извне). */
@@ -105,6 +111,11 @@ function resourcePath(resource: RestResourceName, slug: string, args: PathArgs):
       return { path: `/repos/${s}/rating`, list: false };
     case "issue-comments":
       return { path: `/repos/${s}/issues/${encSegment(args.issueSlug ?? "")}/comments?sort_by=created_at&page_size=${ps}`, list: true };
+    case "pull-comments":
+      // у `sort_by` комментариев PR в спеке нет created_at — порядок сервера, минимум страницы
+      return { path: `/repos/${s}/pulls/${encSegment(args.pullSlug ?? "")}/comments?page_size=${ps}`, list: true };
+    case "pull-reviewers":
+      return { path: `/repos/${s}/pulls/${encSegment(args.pullSlug ?? "")}/reviewers?page_size=${ps}`, list: true };
   }
 }
 
@@ -136,11 +147,11 @@ export async function fetchResource(
   client: ScClient,
   slug: string,
   resource: RestResourceName,
-  opts: FetchResourceOptions & { issueSlug?: string } = {},
+  opts: FetchResourceOptions & { issueSlug?: string; pullSlug?: string } = {},
 ): Promise<ResourceOutcome> {
   const maxPages = opts.maxPages ?? 5;
   const pageSize = opts.pageSize ?? 50;
-  const spec = resourcePath(resource, slug, { pageSize, issueSlug: opts.issueSlug });
+  const spec = resourcePath(resource, slug, { pageSize, issueSlug: opts.issueSlug, pullSlug: opts.pullSlug });
   const items: Record<string, unknown>[] = [];
   let token: string | null = null;
   let pages = 0;
@@ -772,6 +783,34 @@ export async function collectRestFacts(
   } else {
     facts.push(badChannelFact("cicd.runs", "rest:cicd", `status ${runsRes.status}`, nowIso));
     channelErrors.push({ resource: "cicd-runs", kind: runsRes.kind, status: runsRes.status, detail: runsRes.detail });
+  }
+
+  // В5.5 тур 2 (W4, ЗН-2): review и bottlenecks PR — справочный факт
+  // `activity.pr_review` (pr-review.ts) по уже полученному списку PR; бюджет —
+  // PR_REQUEST_BUDGET запросов на репо (0 без PR). Список PR не получен —
+  // факт повторяет причину activity.rest (права или сбой канала).
+  if (pullsRes.kind === "ok") {
+    const pr = await collectPrReview(
+      pullsRes.items,
+      async (resource, pullSlug) => {
+        const res = await fetchResource(client, slug, resource, {
+          pageSize: resource === "pull-comments" ? PR_COMMENTS_PAGE : PR_REVIEWERS_PAGE,
+          maxPages: 1,
+          pullSlug,
+        });
+        const next = (res.firstPage as Record<string, unknown> | null)?.["next_page_token"];
+        return { kind: res.kind, status: res.status, items: res.items, hasMore: typeof next === "string" && next.length > 0 };
+      },
+      now,
+    );
+    facts.push(pr.fact);
+    if (pr.failure && pr.failure.kind === "bad-channel") channelErrors.push({ resource: pr.failure.resource, kind: pr.failure.kind, status: pr.failure.status });
+  } else {
+    facts.push(
+      pullsRes.kind === "access"
+        ? noDataFact("activity.pr_review", "access", "rest:pulls", `status ${pullsRes.status}`, nowIso)
+        : badChannelFact("activity.pr_review", "rest:pulls", `status ${pullsRes.status}`, nowIso),
+    );
   }
 
   return { facts, repoMeta, channelErrors };
