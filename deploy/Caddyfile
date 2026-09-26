@@ -18,9 +18,8 @@
 	}
 
 	reverse_proxy web:8418 {
-		# адрес клиента — только тот, что видит прокси: входящий X-Forwarded-For не доверяется
-		# (ключ лимита badge по IP, src/server.ts)
-		header_up X-Forwarded-For {remote_host}
+		# X-Forwarded-For: Caddy по умолчанию НЕ доверяет входящему заголовку (trusted_proxies
+		# не заданы) и ставит адрес клиента сам — ключ лимита badge по IP (src/server.ts) не спуфится
 		# «думающие» обработчики живут до 120 с (idleTimeout сервера)
 		transport http {
 			read_timeout 130s

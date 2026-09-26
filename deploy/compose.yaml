@@ -27,6 +27,8 @@ services:
     environment:
       PROCESS_ROLE: web
       PORT: "8418"
+      # резерв свободного места перед клоном (В5.4, аудит очереди О3): меньше — клон ждет соседей
+      SCAN_MIN_FREE_MB: "4096"
     volumes:
       - ${HC_DIR:-/srv/healthcraft}/data:/data
       - ${HC_DIR:-/srv/healthcraft}/tmp/web:/tmp/clones
@@ -42,6 +44,12 @@ services:
     environment:
       PROCESS_ROLE: rating
       PORT: "8419"
+      SCAN_MIN_FREE_MB: "4096"
+    # после web: при одновременном старте оба процесса проверяют схему БД в транзакции,
+    # и второй получает SQLITE_BUSY (живой старт стенда 26.09, рестарт 1)
+    depends_on:
+      web:
+        condition: service_healthy
     volumes:
       - ${HC_DIR:-/srv/healthcraft}/data:/data
       - ${HC_DIR:-/srv/healthcraft}/tmp/rating:/tmp/clones
