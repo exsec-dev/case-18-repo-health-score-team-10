@@ -58,6 +58,21 @@ export interface RatingItem {
    */
   rank: number | null;
   /**
+   * В5.5 тур 1 (W2, Р1): динамика позиции — место в последнем снимке
+   * (`rating_snapshots`) минус текущее место; положительное = вырос.
+   * null — снимка нет или репо в нем отсутствует (новый / вне ранжирования).
+   */
+  rankDelta: number | null;
+  /**
+   * В5.5 тур 1 (W2, Р2): у последней проверки на накрутку (заметка flagger)
+   * стоит flag:true. Разбор JSON — как у карточки (fraudOf): битый JSON =
+   * флага нет. Подозрение, не приговор: на место, сортировку и фильтры флаг
+   * НЕ влияет (§2 «В5.5 — тур 1» п.2, «better safe than sorry»).
+   */
+  fraud: boolean;
+  /** В5.5 тур 1 (W2, Р3): страница репо на SourceCraft — иконка внешней ссылки в строке */
+  webUrl: string;
+  /**
    * В5.2 (Б6, выбор 4C): у репо есть ПУБЛИЧНЫЙ AI-обзор (тот, что видят все) — искра у
    * имени в рейтинге и фильтр «С AI-обзором»
    */
@@ -191,6 +206,8 @@ export function parseReposQuery(params: URLSearchParams): ParseResult {
 // ---------- рейтинг ----------
 
 interface RatingRow {
+  /** id репо — внутреннее: ключ стыковки со снимком мест и заметками flagger (в ответ не едет) */
+  repo_id: number;
   org_slug: string;
   repo_slug: string;
   title: string | null;
@@ -253,7 +270,7 @@ WITH last AS (
   SELECT sc2.repo_id, MAX(sc2.scan_id) AS scan_id FROM scores sc2 JOIN scans s2 ON s2.id = sc2.scan_id
   WHERE sc2.model_version = ? AND s2.rating_eligible = 1 GROUP BY sc2.repo_id),
 lastscan AS (SELECT repo_id, MAX(id) AS id FROM scans GROUP BY repo_id)
-SELECT r.org_slug, r.repo_slug, r.title, r.language, r.likes, r.forks, r.last_activity_at, r.logo_url, r.language_color,
+SELECT r.id AS repo_id, r.org_slug, r.repo_slug, r.title, r.language, r.likes, r.forks, r.last_activity_at, r.logo_url, r.language_color,
        sc.healthcraft_index AS total, sc.index_coverage AS coverage,
        json_extract(sc.categories, '$.documentation.score') AS c_documentation,
        json_extract(sc.categories, '$.activity.score') AS c_activity,
@@ -287,6 +304,14 @@ export const CHANNEL_CATEGORIES: CategoryKey[] = ["cicd", "security"];
  */
 export const CHANNEL_TREE_KEY = "tree.stats@channel";
 
+/**
+ * Страница репо на SourceCraft (шаблон платформы, колонки в схеме нет).
+ * ОДИН литерал на карточку (шапка RepoV5) и строку рейтинга (В5.5 тур 1, Р3).
+ */
+export function repoWebUrl(org: string, repo: string): string {
+  return `https://sourcecraft.dev/${org}/${repo}`;
+}
+
 function toRatingItem(row: RatingRow): RatingItem {
   const indexScores: Partial<Record<CategoryKey, number | null>> = {
     documentation: row.c_documentation,
@@ -302,6 +327,9 @@ function toRatingItem(row: RatingRow): RatingItem {
   const stale = (JSON.parse(row.stale) as string[]).filter((k) => PUBLIC_KINDS.includes(k));
   return {
     rank: null,
+    rankDelta: null,
+    fraud: false,
+    webUrl: repoWebUrl(row.org_slug, row.repo_slug),
     aiOverview: false,
     org: row.org_slug,
     repo: row.repo_slug,
@@ -384,6 +412,48 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
   all.forEach((item, i) => {
     if (item.healthcraftIndex !== null) item.rank = i + 1;
   });
+  // В5.5 тур 1 (W2): repo_id в ответ не едет — ключ стыковки строки со
+  // снимком мест (Р1) и заметкой flagger (Р2)
+  const idBySlug = new Map(rows.map((r) => [`${r.org_slug}/${r.repo_slug}`, r.repo_id]));
+
+  // В5.5 тур 1 (W2, Р1): динамика позиции — последний снимок читается ОДИН
+  // раз в Map, без per-row запросов (рейтинг ~0,58 с на 28k строк до правки).
+  // delta = место в снимке − место сейчас (положительное = вырос); снимка нет
+  // или репо в нем отсутствует (новый, вышел из ранжирования) — null.
+  const snapDay = (db.query("SELECT MAX(taken_at) AS d FROM rating_snapshots").get() as { d: string | null }).d;
+  if (snapDay !== null) {
+    const snapRank = new Map(
+      (db.query("SELECT repo_id, rank FROM rating_snapshots WHERE taken_at = ?").all(snapDay) as { repo_id: number; rank: number }[]).map((r) => [
+        r.repo_id,
+        r.rank,
+      ]),
+    );
+    for (const item of all) {
+      if (item.rank === null) continue;
+      const prev = snapRank.get(idBySlug.get(`${item.org}/${item.repo}`)!);
+      item.rankDelta = prev === undefined ? null : prev - item.rank;
+    }
+  }
+
+  // В5.5 тур 1 (W2, Р2): плашка фрода — последняя заметка flagger по репо.
+  // «Последняя» — тем же правилом, что fraudOf карточки (scan_id DESC, id DESC;
+  // здесь — окном по всем репо одним запросом); разбор JSON общий
+  // (parseFlaggerNote): битый JSON = флага нет. На место и сортировку не влияет.
+  const flagged = new Set<number>();
+  for (const row of db
+    .query(
+      `SELECT repo_id, text FROM (
+         SELECT repo_id, text, ROW_NUMBER() OVER (PARTITION BY repo_id ORDER BY scan_id DESC, id DESC) AS rn
+         FROM ai_notes WHERE role = 'flagger') WHERE rn = 1`,
+    )
+    .all() as { repo_id: number; text: string }[]) {
+    if (parseFlaggerNote(row.text)?.flag === true) flagged.add(row.repo_id);
+  }
+  if (flagged.size > 0) {
+    for (const item of all) {
+      if (flagged.has(idBySlug.get(`${item.org}/${item.repo}`)!)) item.fraud = true;
+    }
+  }
 
   // фасеты считаются БЕЗ фильтра языка (иначе выбранный язык схлопывает
   // список выбора и из него некуда вернуться), но С учётом поиска
@@ -887,8 +957,8 @@ export function getRepoCard(
     lastActivityAt: r.last_activity_at,
     logoUrl: r.logo_url,
     languageColor: r.language_color,
-    // колонки в схеме нет — шаблон платформы, заводить колонку ради него незачем
-    webUrl: `https://sourcecraft.dev/${r.org_slug}/${r.repo_slug}`,
+    // колонки в схеме нет — шаблон платформы (repoWebUrl: один литерал на карточку и рейтинг)
+    webUrl: repoWebUrl(r.org_slug, r.repo_slug),
     visibility: visibilityOf(r.visibility),
   };
 
@@ -1346,6 +1416,21 @@ export function checkFailureText(reason: string): string {
 }
 
 /**
+ * Разбор заметки flagger — ОДИН на карточку (fraudOf) и строку рейтинга
+ * (В5.5 тур 1, Р2). Невалидная форма (битый JSON, flag не boolean, factors не
+ * массив) = флага нет, а не флаг есть.
+ */
+function parseFlaggerNote(text: string): { flag: boolean; factors: unknown[]; signals: unknown; inputs: unknown } | null {
+  try {
+    const parsed = JSON.parse(text) as { flag?: unknown; factors?: unknown; signals?: unknown; inputs?: unknown };
+    if (typeof parsed.flag !== "boolean" || !Array.isArray(parsed.factors)) return null;
+    return { flag: parsed.flag, factors: parsed.factors, signals: parsed.signals, inputs: parsed.inputs };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Флаг фрода — последняя проверка на накрутку по репо (заметка flagger). Вход
  * проверки — публичные данные активности, поэтому метку видят все, кому видна
  * карточка (§2 «В5.2 — публичный AI-обзор…» п.2).
@@ -1355,23 +1440,19 @@ function fraudOf(db: Database, repoId: number): CardAi["fraud"] {
     .query("SELECT text FROM ai_notes WHERE repo_id = ? AND role = 'flagger' ORDER BY scan_id DESC, id DESC LIMIT 1")
     .get(repoId) as { text: string } | null;
   if (row === null) return null;
-  try {
-    const parsed = JSON.parse(row.text) as { flag?: unknown; factors?: unknown; signals?: unknown; inputs?: unknown };
-    if (typeof parsed.flag !== "boolean" || !Array.isArray(parsed.factors)) return null;
-    return {
-      flag: parsed.flag,
-      signals: parsed.signals !== null && typeof parsed.signals === "object" ? (parsed.signals as Record<string, unknown>) : null,
-      inputs: parsed.inputs !== null && typeof parsed.inputs === "object" ? (parsed.inputs as Record<string, unknown>) : {},
-      factors: parsed.factors
-        .filter((f): f is { key: string; note: string } => {
-          const item = f as { key?: unknown; note?: unknown };
-          return typeof item.key === "string" && typeof item.note === "string";
-        })
-        .slice(0, 8),
-    };
-  } catch {
-    return null; // повреждённый JSON флага — флага нет, а не флаг есть
-  }
+  const parsed = parseFlaggerNote(row.text);
+  if (parsed === null) return null;
+  return {
+    flag: parsed.flag,
+    signals: parsed.signals !== null && typeof parsed.signals === "object" ? (parsed.signals as Record<string, unknown>) : null,
+    inputs: parsed.inputs !== null && typeof parsed.inputs === "object" ? (parsed.inputs as Record<string, unknown>) : {},
+    factors: parsed.factors
+      .filter((f): f is { key: string; note: string } => {
+        const item = f as { key?: unknown; note?: unknown };
+        return typeof item.key === "string" && typeof item.note === "string";
+      })
+      .slice(0, 8),
+  };
 }
 
 /** Ф2.15: статус живой job ИМЕННО зрителя (queued/running); queueAhead наружу не едет.

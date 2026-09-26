@@ -75,8 +75,12 @@ import { publicStatusSql, ratingEligibleSql } from "./score/compute";
  * фактов хранится отдельно от полного; `users.ai_unlock` — отпечаток пароля
  * неограниченного доступа к AI (Б4; NULL — отметки нет); `jobs.ai_unlocked` — заявка
  * поставлена с паролем (общий лимит ее не считает). Аддитивно.
+ * 2.4 (26.09, В5.5 тур 1, W2): `rating_snapshots` — снимок мест публичного
+ * рейтинга на UTC-дату (динамика позиции, rankDelta в строке рейтинга).
+ * Производная таблица чисел (repo_id → место), код репозиториев не участвует
+ * (закон «код не храним» не задет). Аддитивно.
  */
-export const SCHEMA_VERSION = "2.3";
+export const SCHEMA_VERSION = "2.4";
 
 /** Аудитория AI-текста (В5.2, Б2): публичная версия — из публичных фактов, для всех. */
 export type AiAudience = "public" | "full";
@@ -227,6 +231,18 @@ CREATE TABLE IF NOT EXISTS meta (
   key TEXT PRIMARY KEY,         -- schema_version | derived_version (Ф1.9)
   value TEXT NOT NULL
 );
+-- v2.4 (В5.5 тур 1): снимок мест публичного рейтинга на UTC-дату — один снимок
+-- на дату (идемпотентно), ранг = место в выдаче публичного рейтинга
+-- (HealthCraft Index по убыванию, при равенстве org/repo); ретеншен 35 суток —
+-- purgeOldRatingSnapshots в часовом обслуживании
+CREATE TABLE IF NOT EXISTS rating_snapshots (
+  id INTEGER PRIMARY KEY,
+  taken_at TEXT NOT NULL,       -- UTC-дата снимка (YYYY-MM-DD)
+  repo_id INTEGER NOT NULL REFERENCES repos(id),
+  rank INTEGER NOT NULL,        -- место в публичном рейтинге на момент снимка
+  score_index REAL NOT NULL     -- HealthCraft Index на момент снимка
+);
+CREATE INDEX IF NOT EXISTS idx_rating_snapshots_taken ON rating_snapshots(taken_at, repo_id);
 CREATE INDEX IF NOT EXISTS idx_jobs_unclaimed ON jobs(claimed_at) WHERE claimed_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_jobs_claim ON jobs(status, id);
 CREATE INDEX IF NOT EXISTS idx_repos_language ON repos(language);

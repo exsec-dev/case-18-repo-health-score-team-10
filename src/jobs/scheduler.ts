@@ -37,6 +37,7 @@ import { materializeWorktree, removeWorktree } from "../summary/tools";
 import { cleanupClone, cloneWithDegrade } from "../collectors/git";
 import { DEFAULT_HEAVY_SCAN_MS, loopSlots, worstCaseScanMs, type Config } from "../config";
 import { listRepos } from "../api/repos";
+import { maybeTakeDailySnapshot, purgeOldRatingSnapshots } from "./rating-snapshot";
 import { getMetaValue, setMetaValue } from "../db";
 import { CATALOG_SUSPICIOUS_AT, SCHED_META } from "../api/health";
 import { isBusyError, needsRescore, rescoreBatchByCursor, rescoreHistoryBatch } from "../score/rescore";
@@ -1273,6 +1274,18 @@ export async function workerTick(
     return "claim-failed";
   }
   if (!job) {
+    // В5.5 тур 1 (W2, Р1): пустая очередь рейтинг-полосы = суточная волна
+    // разобрана — ленивая точка снимка мест (maybeTakeDailySnapshot сам решает
+    // «надо ли»: ночная фаза сегодня + снимка за дату еще нет). Только цикл
+    // сканов рейтинга: AI-заявки места не меняют, а web-роль рейтинг не пишет.
+    if (order.includes("rating") && (opts.kind === undefined || opts.kind === "scan")) {
+      try {
+        const snap = maybeTakeDailySnapshot(deps.db);
+        if (snap.taken) console.log(`[rating] snapshot ${snap.day}: ${snap.rows} rows`);
+      } catch (e) {
+        console.error(`[rating] snapshot failed: ${String((e as Error).message).slice(0, 200)}`);
+      }
+    }
     // обе наши очереди пусты — порция фонового пересчёта (LOW-7) КАЖДЫЙ тик:
     // В4.4 — сперва недогнанный курсор актуального прохода, затем история
     if (opts.historyRescore) {
@@ -1543,8 +1556,7 @@ export function sweepOrphanScans(db: Database, opts: { leaseMs: number; now?: Da
  * строк в год в той же БД, что и чтение рейтинга. `queued`/`running` не
  * трогаем никогда; строки без `created_at` (legacy) — тоже, их возраст
  * неизвестен, а гадать по id нельзя.
- */
-/** Сколько хранятся AI-заявки при любом ретеншене — окно учета лимитов (аудит надежности М8). */
+ *//** Сколько хранятся AI-заявки при любом ретеншене — окно учета лимитов (аудит надежности М8). */
 const AI_JOBS_KEEP_MS = 2 * 24 * 3600_000;
 
 export function purgeOldJobs(db: Database, opts: { retentionDays: number; now?: Date }): number {
@@ -1571,8 +1583,8 @@ export async function maintenanceTick(
   db: Database,
   config: Config,
   opts: { now?: Date; cloneDir?: string } = {},
-): Promise<{ scans: number; jobs: number; clones: number }> {
-  const out = { scans: 0, jobs: 0, clones: 0 };
+): Promise<{ scans: number; jobs: number; clones: number; snapshots: number }> {
+  const out = { scans: 0, jobs: 0, clones: 0, snapshots: 0 };
   const now = opts.now ?? new Date();
   try {
     out.scans = sweepOrphanScans(db, { leaseMs: config.scheduler.leaseMs, now }).length;
@@ -1583,6 +1595,12 @@ export async function maintenanceTick(
     out.jobs = purgeOldJobs(db, { retentionDays: config.queue.retentionDays, now });
   } catch (e) {
     console.error(`[sweep] jobs retention failed: ${String((e as Error).message).slice(0, 200)}`);
+  }
+  try {
+    // В5.5 тур 1 (W2, Р1): ретеншен снимков мест рейтинга — рядом с ретеншеном jobs
+    out.snapshots = purgeOldRatingSnapshots(db, { now });
+  } catch (e) {
+    console.error(`[sweep] rating snapshots retention failed: ${String((e as Error).message).slice(0, 200)}`);
   }
   try {
     out.clones = await sweepOrphanClones(opts.cloneDir, orphanCloneAgeMs(config));

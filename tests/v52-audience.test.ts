@@ -74,8 +74,12 @@ function fake(): { call: CallLlm; seen: Map<string, string> } {
 describe("схема 2.3: аудитория AI-текста", () => {
   test("колонки есть, прежние строки — 'full', значения перечисления — ровно public и full", () => {
     const db = freshDb();
-    expect(SCHEMA_VERSION).toBe("2.3");
+    expect(SCHEMA_VERSION).toBe("2.4"); // В5.5 тур 1 (W2): поверх 2.3 — rating_snapshots
     const cols = (t: string) => new Set((db.query(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name));
+    // 2.4: таблица снимков мест рейтинга (динамика позиции)
+    expect(cols("rating_snapshots").has("taken_at")).toBe(true);
+    expect(cols("rating_snapshots").has("rank")).toBe(true);
+    expect(cols("rating_snapshots").has("score_index")).toBe(true);
     expect(cols("ai_notes").has("audience")).toBe(true);
     expect(cols("ai_fails").has("audience")).toBe(true);
     expect(cols("jobs").has("audience")).toBe(true);
