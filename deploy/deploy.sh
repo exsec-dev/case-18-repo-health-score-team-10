@@ -38,4 +38,7 @@ ssh_stand "set -e
   test -f '$DIR/.env' || { echo 'нет $DIR/.env — секреты стенда не заданы' >&2; exit 1; }
   cd '$DIR/app'
   docker compose --env-file '$DIR/.env' -f deploy/compose.yaml up -d --build --remove-orphans
+  # Caddyfile смонтирован файлом из app/, а app/ заменен целиком — без рестарта caddy держит
+  # старую копию (прежний inode). Рестарт — секунда недоступности, сертификаты в томе
+  docker compose --env-file '$DIR/.env' -f deploy/compose.yaml restart caddy
   docker compose --env-file '$DIR/.env' -f deploy/compose.yaml ps"
