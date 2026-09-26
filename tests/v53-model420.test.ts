@@ -59,9 +59,10 @@ describe("М1.2: категория получает число только п�
     expect(score(facts(noGit())).healthcraftIndex).toBeNull();
   });
 
-  test("Состояние кода без строк кода — нет данных, а не 100 за порядок в корне", () => {
+  test("Состояние кода без строк кода — «кода нет» (балл 0), а не 100 за порядок в корне", () => {
     const s = score(facts({ "tree.stats": { top_level: [{ name: "README.md", type: "blob" }], file_count: 1, bytes: 10, loc: 0 }, "code.todo": { count: 0, fixme: 0, older_180d: 0, todo_files: 0, blamed_files: 0 } }));
-    expect(s.categories.code.score).toBeNull();
+    // 4.3.1 (В5.5, М2): явная ветка «кода нет» — 0 с причиной; 4.3.0 давала null
+    expect(s.categories.code.score).toBe(0);
     // 4.3.0 (Н3, Н4): в корне один README — «кода нет», причина по виду
     expect(noDataReason("code", s.categories.code.no_data)).toContain("нет файлов кода");
   });

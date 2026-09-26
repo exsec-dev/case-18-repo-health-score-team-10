@@ -104,15 +104,16 @@ describe("presence-правила: реальный прирост итога (�
     expect(ids).not.toContain("grant-ci-runs"); // шагов нет — активировать нечего
   });
 
-  test("Δ = 0 с причиной: кап 49 (только полный), нет кода, итог NULL", () => {
+  test("Δ = 0 — рекомендация не выводится (4.3.1, П-1): ни с капом 49, ни при итоге NULL", () => {
     const capped = withFacts(
       healthyFacts(),
       { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } },
       { key: "appsec.findings", value: { severity_counts: { critical: 0, high: 0, medium: 0, low: 0 }, resolved_share: 1, secrets_critical: true } },
     );
-    const ci = recommend(t.db, seedScan(t, capped), { now: NOW }).find((r) => r.ruleId === "ci-missing")!;
-    // В4.9 (К9.10): причины Δ = 0 — словами читателя (закрытый список текстов в отчете воркера); Δ и условия не менялись
-    expect({ delta: ci.deltaScore, impact: ci.expectedImpact }).toEqual({ delta: 0, impact: "+0,0 к Repo Health Score – Repo Health Score ограничен 49 баллами из-за утекших секретов" });
+    // до 4.3.1: «+0,0 к Repo Health Score – … ограничен 49 …»; тура В5.5 — таких строк нет
+    const cappedRecs = recommend(t.db, seedScan(t, capped), { now: NOW });
+    expect(cappedRecs.find((r) => r.ruleId === "ci-missing")).toBeUndefined();
+    expect(cappedRecs.every((r) => r.deltaScore === null || r.deltaScore > 0)).toBe(true);
 
     const empty = withFacts(
       healthyFacts(),
@@ -123,10 +124,12 @@ describe("presence-правила: реальный прирост итога (�
     const emptyRecs = recommend(t.db, seedScan(t, empty), { now: NOW });
     expect(emptyRecs.map((r) => r.ruleId)).toEqual(["add-code"]);
 
-    // только git-документация: покрытие рейтинга < 0.4 → итог NULL
+    // только git-документация: покрытие рейтинга < 0.4 → итог NULL, и совета
+    // с эффектом «+0,0 – оценка появится позже» тоже нет (4.3.1)
     const sparse: FactSpec[] = [{ key: "docs.presence", value: { readme: true, license: false, contributing: true, codeowners: true } }];
-    const nul = recommend(t.db, seedScan(t, sparse), { now: NOW }).find((r) => r.ruleId === "license-missing")!;
-    expect({ delta: nul.deltaScore, impact: nul.expectedImpact }).toEqual({ delta: 0, impact: "+0,0 к HealthCraft Index – оценка появится, когда данных станет больше" });
+    const nulRecs = recommend(t.db, seedScan(t, sparse), { now: NOW });
+    expect(nulRecs.find((r) => r.ruleId === "license-missing")).toBeUndefined();
+    expect(nulRecs.every((r) => r.deltaScore === null || r.deltaScore > 0)).toBe(true);
   });
 });
 

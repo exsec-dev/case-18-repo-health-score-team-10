@@ -1037,6 +1037,13 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
   // оставлял факт «ok, loc = 0» — и модель читала это как «кода нет».
   let locIncomplete = false;
   const todoOccs: TodoOccurrence[] = [];
+  // В5.5 тур 1 (М1, модель 4.3.1-hci): маркеры в файлах тестов в основной
+  // счетчик не идут — у сканеров TODO тесты и фикстуры состоят из намеренных
+  // маркеров (факт-чек repo-vitals 25.09: 196 пометок при 37 в комментариях
+  // кода), и долг считается по коду, а не по проверочным строкам сканера.
+  // Пропущенные маркеры — числом в `test_markers`, чтобы читатель факта видел,
+  // сколько отложено в сторону.
+  let testMarkers = 0;
   if (candidates.length > 0) {
     const catFile: CatFileSpawn =
       opts.catFile ??
@@ -1096,10 +1103,14 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
         loc += fileLoc;
         if (!isSourcePath(entry.path)) continue;
         sourceLoc += fileLoc;
-        if (isTestPath(entry.path) && /\S/.test(text)) testFiles++;
+        const testFile = isTestPath(entry.path);
+        if (testFile && /\S/.test(text)) testFiles++;
         for (let ln = 0; ln < lines.length; ln++) {
           const kind = todoKind(lines[ln]!);
-          if (kind) todoOccs.push({ path: entry.path, line: ln + 1, kind });
+          if (!kind) continue;
+          // М1 (4.3.1): маркеры тестов — отдельным числом, не в счетчик долга
+          if (testFile) testMarkers++;
+          else todoOccs.push({ path: entry.path, line: ln + 1, kind });
         }
       }
     } finally {
@@ -1161,6 +1172,9 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
       older_180d: older180,
       todo_files: todoFiles.length,
       blamed_files: blamedFiles,
+      // М1 (4.3.1): маркеры, найденные в файлах тестов и НЕ вошедшие в
+      // count/fixme/older_180d — честность для читателя факта
+      test_markers: testMarkers,
       // Ф2.3: счётчики TODO собраны тем же потоком `cat-file` — оборвался он,
       // неполны и они; читатель обязан видеть это по факту, а не гадать
       ...(locIncomplete ? { todo_note: "incomplete" } : {}),

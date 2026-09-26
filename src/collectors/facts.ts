@@ -10,12 +10,14 @@ export type FactStatus = "ok" | "no-data" | "bad";
  * В5.3-М (Н1): версия сборщика фактов, штамп `scans.collector_version`.
  * 1 — сканы до правок М2 (`8053062`), 2 — после М2, 3 — сборщик модели
  * 4.3.0-hci (blame по sha, маркеры в комментариях, файлы тестов, задачи в
- * работе и мгновенно закрытые, открытые группы AppSec, содержимое документов).
+ * работе и мгновенно закрытые, открытые группы AppSec, содержимое документов),
+ * 4 — сборщик модели 4.3.1-hci (В5.5 тур 1, М1: маркеры техдолга только в коде
+ * вне тестов, пропущенные в тестах — аддитивным `test_markers` в `code.todo`).
  * В старых строках — NULL («до учета», читается как старше текущего). Смена
  * формы или смысла факта — новая версия: ночная волна доочередит репо, чей
  * последний пригодный скан собран старым сборщиком (`scheduler.ts`).
  */
-export const COLLECTOR_VERSION = 3;
+export const COLLECTOR_VERSION = 4;
 
 /** no-data reason — ключ внутри value-JSON (отдельной колонки нет).
  *  В4/Б2: no-scan/incomplete — ветки AppSec (скана нет/не завершён,
@@ -86,7 +88,9 @@ export const KINDS = {
   // семантика (сверено с кодом В1, uikit 21+6=27): count — только TODO,
   // fixme — только FIXME, older_180d — по ВСЕМ маркерам (TODO+FIXME,
   // blame-бюджет ≤ blamed_files файлов из todo_files)
-  "code.todo": "{count,fixme,older_180d,todo_files,blamed_files}",
+  // сборщик 4 (М1, 4.3.1-hci): count/fixme/older_180d/todo_files — только код
+  // вне тестов; test_markers — маркеры, пропущенные в файлах тестов
+  "code.todo": "{count,fixme,older_180d,todo_files,blamed_files,test_markers?}",
   // В4/Б2 — официальный AppSec API (только агрегаты и стабильные id;
   // severity_counts классифицирует ПЛАТФОРМА именованными фильтрами,
   // числовые severity хранятся как raw без декодирования)

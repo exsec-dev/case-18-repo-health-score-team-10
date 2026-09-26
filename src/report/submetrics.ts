@@ -188,12 +188,13 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   "issues.resolution": { title: "Доля решенных", unit: "доля, %", format: share },
   "issues.first_resp": { title: "Время до первого ответа", unit: "часы", format: (v) => (isNum(v) ? `${num(v, 1)} ч` : null) },
   "issues.tracker_unused": { title: "Трекер не ведется", unit: "открытые и закрытые задачи", format: tracker },
-  "code.density": { title: "Плотность TODO/FIXME", unit: "на 1 тыс. строк", format: perLines("1 тыс.") },
+  // 4.3.1 (В5.5, М1): пометки считаются только в коде — файлы тестов исключены
+  "code.density": { title: "Плотность TODO/FIXME в коде", unit: "на 1 тыс. строк", format: perLines("1 тыс.") },
   "code.old_share": { title: "Доля старых TODO", unit: "доля, %", format: share },
   // 4.3.0 (Р1): доля файлов тестов среди файлов кода
   "code.tests": { title: "Файлы тестов", unit: "доля файлов кода, %", format: share },
   "code.root": { title: "Порядок в корне репозитория", unit: "элементы корня", format: count("элемент", "элемента", "элементов") },
-  "code.todo_total": { title: "Всего маркеров TODO/FIXME", unit: "штуки", format: plain },
+  "code.todo_total": { title: "Маркеров TODO/FIXME в коде", unit: "штуки", format: plain },
 };
 
 /**
