@@ -618,7 +618,10 @@ function metricCalc(card: RepoCard, metric: ShownMetric, named: boolean): Block[
     tone: "fine",
     lines: [line(`Баллов в итог = балл × вес. ${weights} Вес категории без данных делится между остальными пропорционально: такая категория в оценке не участвует и ее не снижает.${tail}`)],
   });
-  if (roundScore(total) > value) out.push({ kind: "paragraph", tone: "fine", lines: [line(`Итог ограничен ${value} баллами: AppSec нашел утекшие секреты.`)] });
+  // 4.3.1 (В5.5, М2): у без-кодового репо итог 0 по правилу «кода нет», а не
+  // по потолку секретов — строка про AppSec здесь была бы ложной
+  if (card.markers.codeEmpty) out.push({ kind: "paragraph", tone: "fine", lines: [line(`Итог – ${value}: в репозитории нет кода, поэтому оценка 0 (правило «кода нет», Q&A №13); баллы категорий выше – справочно.`)] });
+  else if (roundScore(total) > value) out.push({ kind: "paragraph", tone: "fine", lines: [line(`Итог ограничен ${value} баллами: AppSec нашел утекшие секреты.`)] });
   return out;
 }
 
@@ -857,11 +860,13 @@ const RAW_FIELD_NOTE: Record<string, string> = {
   // истории, а форма ответа: коммиты в документ не выгружаются
   "activity.git.timeline.truncated": "поле ответа: сами коммиты в документ не выгружаются, показан итог",
   // А12 аудита: «старых» больше, чем «всего», потому что поля считают разное
-  "code.todo.count": "пометок TODO, без FIXME",
-  "code.todo.fixme": "пометок FIXME",
+  "code.todo.count": "пометок TODO в коде (без файлов тестов), без FIXME",
+  "code.todo.fixme": "пометок FIXME в коде (без файлов тестов)",
   "code.todo.older_180d": "пометок TODO и FIXME старше 180 дней (из count + fixme)",
-  "code.todo.todo_files": "файлов с пометками",
+  "code.todo.todo_files": "файлов кода с пометками",
   "code.todo.blamed_files": "файлов, у которых удалось прочитать даты пометок",
+  // В5.5 (М1): маркеры тестов в счетчик долга не входят — числом для читателя
+  "code.todo.test_markers": "пометок в файлах тестов; в счетчики выше не входят",
   // А15 аудита: выборка задач для времени первого ответа — не число задач в трекере
   "issues.comments_sample.issues": "задач в выборке для времени первого ответа; число задач трекера – в issues.stats",
 };

@@ -493,6 +493,12 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
   const scoreRules: Recommendation[] = [];
   const presenceRule = (ruleId: string, factRefs: string[], patch: (facts: Map<string, unknown>) => void, channel: RecommendationChannel | null = null) => {
     const real = realDelta(channel, patch);
+    // 4.3.1 (В5.5 тур 1, П-1 парковки В4.9): рекомендация с эффектом «+0,0»
+    // не выводится вовсе — ни без причины, ни с ней (cap 49, итог NULL):
+    // совет, который пересчет не подтверждает числом, — не рекомендация
+    // (тот же фильтр, что у add-tests с круга 2: `delta > 0`). Отрицательная
+    // дельта (перенормировка против совета) подавляется тем же порогом.
+    if (real.delta <= 0) return;
     const texts = recommendationText(ruleId, recommendationParams(ruleId, ok, { delta: real.delta, reason: real.reason, channel }))!;
     presence.push({ ruleId, kind: "presence", priority: 0, ...texts, factRefs, deltaScore: real.delta, opensCategory: null, channel });
   };

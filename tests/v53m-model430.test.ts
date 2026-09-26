@@ -43,23 +43,27 @@ const ctx = submetricContext(NOW.toISOString());
 const noDelta = () => ({ delta: 0, reason: null });
 const ids = (recs: Recommendation[]) => recs.map((r) => r.ruleId);
 
-test("модель — 4.3.0-hci", () => {
-  expect(MODEL_VERSION).toBe("4.3.0-hci");
+test("модель — 4.3.1-hci", () => {
+  expect(MODEL_VERSION).toBe("4.3.1-hci");
 });
 
-describe("Н3: «кода нет» — и «Состояние кода» без числа", () => {
-  test("Н3: README-репо — индекс 0, «Состояние кода» не 100, а нет данных с причиной «кода нет»", () => {
+describe("Н3 → В5.5 (М2): «кода нет» — балл 0 с причиной, не «нет данных»", () => {
+  test("Н3 → М2: README-репо — индекс 0, «Состояние кода» 0 с причиной «кода нет»", () => {
     const s = score(facts({ "tree.stats": { top_level: [{ name: "README.md", type: "blob" }], file_count: 1, bytes: 300, loc: 10, source_files: 0, source_loc: 0 } }));
     expect(s.codeEmpty).toBe(true);
     expect(s.healthcraftIndex).toBe(0);
-    expect(s.categories.code.score).toBeNull();
+    // 4.3.1 (В5.5, П-1): ветка «кода нет» — 0 как факт о репо; 4.3.0 давала null
+    expect(s.categories.code.score).toBe(0);
     expect(s.categories.code.no_data).toBe("no source code — only non-code files");
+    // «нет данных» — про незнание; «кода нет» — данные: категория не в списке noData
+    expect(s.noData.some((r) => r.startsWith("code:"))).toBe(false);
   });
 
-  test("Н3 (F16): пустой файл кода не снимает «кода нет» — source_loc = 0", () => {
+  test("Н3 (F16) → М2: пустой файл кода не снимает «кода нет» — source_loc = 0", () => {
     const s = score(facts({ "tree.stats": tree({ source_files: 1, source_loc: 0, loc: 3 }) }));
     expect(s.codeEmpty).toBe(true);
     expect(s.healthcraftIndex).toBe(0);
+    expect(s.categories.code.score).toBe(0);
     expect(s.categories.code.no_data).toBe("no source code — no lines of code");
     // обрыв чтения (source_loc = null) — незнание, не «кода нет»
     expect(codeEmptyKind(facts({ "tree.stats": tree({ source_loc: null, loc: null, loc_note: "incomplete" }) }), { empty: false })).toBeNull();
@@ -300,11 +304,14 @@ describe("Н7: рекомендации — те же условия, что б�
   test("Н7 (F7): COPYING в корне у фактов до Р4в — лицензия засчитана, совета «добавьте лицензию» нет", () => {
     const ok = facts({ "docs.presence": { readme: true, license: false, contributing: true, codeowners: true }, "tree.stats": { ...tree(), top_level: [{ name: "COPYING", type: "blob" }, { name: "src", type: "tree" }] } });
     expect(licensePresent(ok)).toBe(true);
-    expect(ids(recommendFromFacts(ok, { delta: noDelta, issuesScore: 50 }))).not.toContain("license-missing");
+    // 4.3.1 (В5.5, П-1): дельта-стаб 0 подавил бы presence-правило — условие
+    // правила проверяем на положительной дельте (дельта здесь не предмет теста)
+    const posDelta = () => ({ delta: 1, reason: null });
+    expect(ids(recommendFromFacts(ok, { delta: posDelta, issuesScore: 50 }))).not.toContain("license-missing");
     // сборщик 3 проверил содержимое: пустой COPYING — не лицензия, совет есть
     const checked = facts({ "docs.presence": { readme: true, license: false, contributing: true, codeowners: true, content_checked: true }, "tree.stats": { ...tree(), top_level: [{ name: "COPYING", type: "blob" }] } });
     expect(licensePresent(checked)).toBe(false);
-    expect(ids(recommendFromFacts(checked, { delta: noDelta, issuesScore: 50 }))).toContain("license-missing");
+    expect(ids(recommendFromFacts(checked, { delta: posDelta, issuesScore: 50 }))).toContain("license-missing");
   });
 
   test("Н7 (F8): скор-правило у неоцененной категории не срабатывает", () => {

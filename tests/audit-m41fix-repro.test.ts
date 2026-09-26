@@ -20,7 +20,7 @@ import { extractFacts, gitFactsNoData } from "../src/collectors/git";
 import type { ScClient, ScResponse } from "../src/collectors/http";
 import { upsertUser } from "../src/auth/session";
 import { getRepoCard } from "../src/api/repos";
-import { mdEscape, renderRepoReport } from "../src/report/markdown";
+import { renderRepoReport } from "../src/report/markdown";
 import { runScan, type ScanDeps } from "../src/jobs/runner";
 import { claimNext, nightlyCatalog } from "../src/jobs/scheduler";
 import { SCORE_WEIGHTS, type CategoryKey } from "../src/score/model";
@@ -224,28 +224,21 @@ describe("С3: непригодный периодический скан пер
 // ---------------------------------------------------------------------------
 describe("С4: Δ канальных правил не раскрывает Security", () => {
   // закрыто Б9 (мех. 3)
-  test("зритель с CI без AppSec не видит числа Δ CI-правила и текста про кап 49 (карточка и MD)", async () => {
+  // 4.3.1 (В5.5, П-1): правило с Δ = 0 (кап 49 за секреты) подавлено движком —
+  // зритель не видит не только числа и текста про кап, но и самого правила
+  test("при капе 49 CI-правило с Δ = 0 не выводится никому; «+0,0» нет ни в карточке, ни в MD", async () => {
     const db = tempDb();
     const owner = upsertUser(db, "ya-ci-only", "cionly");
     const noCi = replace(healthy(), okFact("cicd.configs", { paths: [], has_ci_yaml: false, has_steps: false }, "git"));
     const secrets = okFact("appsec.findings", { severity_counts: { critical: 1, high: 0, medium: 0, low: 0 }, resolved_share: 0, secrets_critical: true }, "appsec:api");
     await scanWith(db, "leak/app", noCi, { userId: owner, appsec: secrets });
-    const card = getRepoCard(db, "leak", "app", { access: { cicd: "granted", appsec: "denied", repo: "granted" } })!;
-    const rule = card.recommendations.find((r) => r.ruleId === "ci-missing")!;
-    expect(rule).toBeDefined();
-    const md = renderRepoReport(card);
-    // В4.9: рекомендация в MD — карточкой действия одной строкой («N. **действие.** причина. эффект.»);
-    // номер позиции в списке — не число Δ, поэтому снимается
-    const mdLines = md.split("\n").filter((l) => l.includes(mdEscape(rule.problem)));
-    expect(mdLines.length).toBeGreaterThan(0);
-    const mdBlock = mdLines.map((l) => l.replace(/^\d+\. /, "")).join("\n");
-    expect({
-      delta: rule.deltaScore,
-      impactHasNumber: /\d/.test(rule.expectedImpact ?? ""),
-      impactMentionsCap: /кап|49/.test(rule.expectedImpact ?? ""),
-      mdHasNumber: /\d/.test(mdBlock.replace(/`[^`]*`/g, "")),
-      mdMentionsCap: /кап 49/.test(mdBlock),
-    }).toEqual({ delta: null, impactHasNumber: false, impactMentionsCap: false, mdHasNumber: false, mdMentionsCap: false });
+    for (const appsec of ["denied", "granted"] as const) {
+      const card = getRepoCard(db, "leak", "app", { access: { cicd: "granted", appsec, repo: "granted" } })!;
+      expect(card.recommendations.find((r) => r.ruleId === "ci-missing")).toBeUndefined();
+      expect(card.recommendations.every((r) => r.deltaScore === null || r.deltaScore > 0)).toBe(true);
+      const md = renderRepoReport(card);
+      expect(md).not.toContain("+0,0");
+    }
   });
 });
 

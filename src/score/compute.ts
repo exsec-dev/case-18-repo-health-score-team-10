@@ -381,9 +381,12 @@ export function computeFromFacts(ok: Map<string, unknown>, input: ComputeInput, 
     security: scoreSecurity(ok),
     activity: scoreActivity(derived, now, git),
     issues: scoreIssues(ok, derived),
-    // 4.3.0 (Н3): «кода нет» — и «Состояние кода» без числа (не 100 рядом с
-    // индексом 0), причина — вид пустоты (Н4)
-    code: emptyKind !== null ? { score: null, no_data: `no source code — ${emptyKind}`, submetrics: {} } : scoreCode(derived, ok.has("tree.stats")),
+    // 4.3.1 (В5.5 тур 1, П-1 парковки В4.9): «кода нет» — явная ветка балла 0
+    // с причиной, а не «нет данных»: код в репозитории ЗАВЕДОМО отсутствует
+    // (это факт о репо, Q&A №13), tri-state «no-data не ухудшает» про незнание,
+    // а не про подтвержденную пустоту. 4.3.0 (Н3) давала здесь null. Причина
+    // остается в `no_data` — её читают карточка (partialNote) и полоса вкладов.
+    code: emptyKind !== null ? { score: 0, no_data: `no source code — ${emptyKind}`, submetrics: {} } : scoreCode(derived, ok.has("tree.stats")),
   };
   for (const [k, cat] of Object.entries(categories)) {
     if (staleCats.has(k)) cat.stale = true;

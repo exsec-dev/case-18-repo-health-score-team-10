@@ -146,6 +146,9 @@ export function analysisDate(card: RepoCard): string | null {
  */
 export function whyText(key: CategoryKey, cat: CardCategory, ctx: SubmetricContext): string {
   if (key === "cicd" && cat.no_data) return noDataReason(key, cat.no_data);
+  // 4.3.1 (В5.5, М2): оцененная категория без подметрик — «кода нет» (балл 0
+  // как факт о репо): основание — причина пустоты, а не «все на максимуме»
+  if (cat.no_data && Object.keys(cat.submetrics).length === 0) return noDataReason(key, cat.no_data);
   // 4.3.0 (Н5, Р3): поправка к среднему (сжатие малой выборки, потолок) —
   // первая причина балла; «Все показатели на максимуме» при сжатом балле — ложь
   const adjusted = adjustmentText(cat);

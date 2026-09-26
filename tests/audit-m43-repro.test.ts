@@ -29,7 +29,7 @@ import { readFileSync } from "node:fs";
 import { afterAll, describe, expect, test } from "bun:test";
 import * as model from "../src/score/model";
 import { totalsFromCategories } from "../src/score/compute";
-import { recommendFromFacts } from "../src/score/recommend";
+import { recommendFromFacts, recommendationText } from "../src/score/recommend";
 import { DEFAULT_QUERY, getMeta, listRepos, parseReposQuery, type SortKey } from "../src/api/repos";
 import { makeApiDb, seedRating, type ApiTestDb } from "./api-fixtures";
 
@@ -139,16 +139,19 @@ describe("Ф3.2/Ф3.3: в scores нет сохранённого полного 
 
 describe("Ф3.4: signed-дельта рекомендаций", () => {
   // закрыто блоком Б1 — обёртка `repro` снята, утверждение не менялось
-  test("отрицательный Δ рендерится минусом и называет цель по имени, без безусловного «+»", () => {
+  // 4.3.1 (В5.5, П-1): отрицательный Δ не доходит до выдачи — движок подавляет
+  // правила с delta <= 0; контракт рендера минуса живет в чистой функции текстов
+  test("отрицательный Δ подавлен движком; текстовая функция рендерит минус и цель по имени, без безусловного «+»", () => {
     const facts = new Map<string, unknown>([["docs.presence", { readme: true, license: false, contributing: true, codeowners: true }]]);
     const recs = recommendFromFacts(facts, {
       delta: () => ({ delta: -2.5, reason: null }),
       issuesScore: null,
     });
-    const rec = recs.find((r) => r.ruleId === "license-missing")!;
+    expect(recs.find((r) => r.ruleId === "license-missing")).toBeUndefined();
     // В4.9 (К9.11): минус — знак U+2212, десятичная запятая
-    expect(rec.expectedImpact).toBe("−2,5 к HealthCraft Index");
-    expect(rec.expectedImpact!.startsWith("+")).toBe(false);
+    const texts = recommendationText("license-missing", { delta: -2.5, reason: null, channel: null })!;
+    expect(texts.expectedImpact).toBe("−2,5 к HealthCraft Index");
+    expect(texts.expectedImpact.startsWith("+")).toBe(false);
   });
 });
 
