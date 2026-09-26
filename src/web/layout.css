@@ -3121,3 +3121,14 @@ button.rh-category:focus-visible {
     align-self: stretch;
   }
 }
+
+/* В5.5 тур 2 (W4, ЗН-2): карта владельцев — имя каталога и автора приходят
+ * извне и бывают длинными без пробелов (правило 23.09 «крайний случай
+ * верстки»): переносятся в любом месте, а не срезаются многоточием и не
+ * уходят за край окна на 375 px */
+.rh-subrow__name_path,
+.rh-subrow__value_wrap {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}

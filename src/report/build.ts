@@ -71,6 +71,7 @@ import {
   submetricWeightText,
   noRecommendationsText,
   strengthsLine,
+  ownershipView,
 } from "./sections";
 import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle, subweightKey, type SubmetricContext } from "./submetrics";
 
@@ -395,12 +396,36 @@ function detailSection(card: RepoCard, ctx: SubmetricContext): Block[] {
     if (target && !actionOf.has(target)) actionOf.set(target, i + 1);
   });
   const out: Block[] = [h2("Разбор по категориям")];
-  for (const key of withData) out.push(detailBlock(card, key, cats[key]!, ctx, actionOf));
+  for (const key of withData) {
+    out.push(detailBlock(card, key, cats[key]!, ctx, actionOf));
+    // В5.5 тур 2 (W4, ЗН-2): карта владельцев — под разбором «Состояния кода»
+    if (key === "code") out.push(...ownershipBlocks(cats[key]!));
+  }
   for (const key of without) {
     const row = categoryRow(card, key, cats[key]!, ctx);
     out.push({ kind: "detail", title: row.name, scoreText: "—", chip: row.chip, table: null, notes: [line(row.why)] });
   }
   return out;
+}
+
+/**
+ * В5.5 тур 2 (W4): карта владельцев файлов — подпись, таблица (4 колонки, К9.6)
+ * и сноска. Сборка строк — `ownershipView` (одна копия с карточкой); имена
+ * каталогов и авторов — внешние строки, экранируются (`escaped`); длинное имя
+ * в PDF переносится (`breakable` ячеек таблицы).
+ */
+function ownershipBlocks(cat: CardCategory): Block[] {
+  const view = ownershipView(cat);
+  if (!view) return [];
+  return [
+    { kind: "paragraph", tone: "caption", lines: [line(view.caption)] },
+    {
+      kind: "table",
+      columns: [col("Каталог", "left", 170), col("Главный автор", "left", 170), col("Доля главного автора", "right", 90), col("Авторов", "right")],
+      rows: view.rows.map((r) => [[escaped(r.dir)], [escaped(r.owner)], line(r.single ? `${r.share}, единственный` : r.share), line(r.authors)]),
+    },
+    { kind: "paragraph", tone: "fine", lines: [line(view.notes.join(" "))] },
+  ];
 }
 
 /** Причина «данных нет» из самого факта (`{reason, detail}` реестра фактов) — по-русски. */
