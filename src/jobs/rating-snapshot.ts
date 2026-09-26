@@ -5,10 +5,13 @@
 // Идемпотентно: один снимок на UTC-дату; ранг считается тем же listRepos,
 // что обслуживает выдачу, — «тот же порядок и выборка» держится построением,
 // а не параллельным SQL.
+// Точка снимка (В5.5 тур 2, Т2-А) — ночная фаза `catalogTick` (scheduler.ts),
+// ДО обхода каталога: снимок «итог суток» = места до эвикции и новой волны.
+// Прежняя ленивая точка тура 1 (пустая очередь рейтинга после ночной фазы)
+// убрана: на стенде очередь не пустеет сутками (доочередь старых сканов), и
+// снимок не писался бы вовсе; idle слота «только легкие» наступал до конца волны.
 import type { Database } from "bun:sqlite";
-import { getMetaValue } from "../db";
 import { listRepos } from "../api/repos";
-import { SCHED_META } from "../api/health";
 
 /** Ретеншен снимков (сутки): месяц динамики + запас на пропуск дня. */
 export const RATING_SNAPSHOT_RETENTION_DAYS = 35;
@@ -59,24 +62,6 @@ export function takeRatingSnapshot(db: Database, opts: { now?: Date } = {}): Sna
     }
   })();
   return { taken: true, rows, day };
-}
-
-/**
- * Точка снимка — «суточная волна каталога завершена»: чистого события конца
- * волны в планировщике нет (волна — тысячи заявок, которые воркер разбирает
- * часами), поэтому снимок ЛЕНИВЫЙ: первый тик рейтинг-полосы, заставший (а)
- * ночную фазу уже исполненной СЕГОДНЯ по UTC (meta sched_last_nightly_ok_at —
- * её ставит catalogTick) и (б) очередь рейтинга пустой (вызывающий — ветка
- * idle workerTick), пишет снимок за текущую UTC-дату. Без ночной фазы сегодня
- * (стенд стоял, обход выключен) снимок не пишется — delta честно сравнивает с
- * прошлым снимком, а не обнуляется о снимок «только что».
- */
-export function maybeTakeDailySnapshot(db: Database, opts: { now?: Date } = {}): SnapshotResult {
-  const now = opts.now ?? new Date();
-  const day = utcDayOf(now);
-  const nightlyAt = getMetaValue(db, SCHED_META.nightlyOkAt);
-  if (nightlyAt === null || nightlyAt.slice(0, 10) !== day) return { taken: false, rows: 0, day };
-  return takeRatingSnapshot(db, { now });
 }
 
 /**
