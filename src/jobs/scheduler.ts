@@ -37,7 +37,7 @@ import { materializeWorktree, removeWorktree } from "../summary/tools";
 import { cleanupClone, cloneWithDegrade } from "../collectors/git";
 import { DEFAULT_HEAVY_SCAN_MS, loopSlots, worstCaseScanMs, type Config } from "../config";
 import { listRepos } from "../api/repos";
-import { maybeTakeDailySnapshot, purgeOldRatingSnapshots } from "./rating-snapshot";
+import { purgeOldRatingSnapshots, takeRatingSnapshot } from "./rating-snapshot";
 import { getMetaValue, setMetaValue } from "../db";
 import { CATALOG_SUSPICIOUS_AT, SCHED_META } from "../api/health";
 import { isBusyError, needsRescore, rescoreBatchByCursor, rescoreHistoryBatch } from "../score/rescore";
@@ -1274,18 +1274,8 @@ export async function workerTick(
     return "claim-failed";
   }
   if (!job) {
-    // В5.5 тур 1 (W2, Р1): пустая очередь рейтинг-полосы = суточная волна
-    // разобрана — ленивая точка снимка мест (maybeTakeDailySnapshot сам решает
-    // «надо ли»: ночная фаза сегодня + снимка за дату еще нет). Только цикл
-    // сканов рейтинга: AI-заявки места не меняют, а web-роль рейтинг не пишет.
-    if (order.includes("rating") && (opts.kind === undefined || opts.kind === "scan")) {
-      try {
-        const snap = maybeTakeDailySnapshot(deps.db);
-        if (snap.taken) console.log(`[rating] snapshot ${snap.day}: ${snap.rows} rows`);
-      } catch (e) {
-        console.error(`[rating] snapshot failed: ${String((e as Error).message).slice(0, 200)}`);
-      }
-    }
+    // В5.5 тур 2 (Т2-А): снимка мест здесь больше нет — точка снимка одна,
+    // ночная фаза catalogTick (пустая очередь на стенде может не наступать сутками)
     // обе наши очереди пусты — порция фонового пересчёта (LOW-7) КАЖДЫЙ тик:
     // В4.4 — сперва недогнанный курсор актуального прохода, затем история
     if (opts.historyRescore) {
@@ -1759,6 +1749,18 @@ export async function catalogTick(
   if (getMetaValue(db, SCHED_META.noTokenAt) !== null) db.query("DELETE FROM meta WHERE key = ?").run(SCHED_META.noTokenAt);
   state.walking = true;
   try {
+    // В5.5 тур 2 (Т2-А): снимок мест «итог суток» — в момент ночной фазы, ДО
+    // обхода: nightlyCatalog эвиктит исчезнувшие репо и ставит новую волну, снимок
+    // фиксирует места до них. Идемпотентно по UTC-дате (повтор ночной фазы после
+    // сбоя обхода в те же сутки снимок не дублирует); сбой снимка обход не валит.
+    if (nightlyDue) {
+      try {
+        const snap = takeRatingSnapshot(db, { now });
+        if (snap.taken) console.log(`[rating] snapshot ${snap.day}: ${snap.rows} rows`);
+      } catch (e) {
+        console.error(`[rating] snapshot failed: ${String((e as Error).message).slice(0, 200)}`);
+      }
+    }
     // сверка исполняется на КАЖДОМ обходе: каталог всё равно перечислен —
     // не воспользоваться им значит заплатить за обход и выбросить результат
     const result = await nightlyCatalog(db, client, {

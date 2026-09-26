@@ -6,7 +6,7 @@
 // дефолты в коде ← env (.env — правка без GUI/CI). Пользовательский
 // DB-override бюджетов удалён (К5 В4.1): лимиты скана — только оператор.
 import { DEFAULT_YA_ENDPOINTS } from "./auth/ya";
-import { DEFAULT_ZAI_BASE_URL } from "./llm";
+import { DEFAULT_LLM_CALL_TIMEOUT_MS, DEFAULT_ZAI_BASE_URL } from "./llm";
 
 export interface CloneLimits {
   /** таймаут субпроцесса клонирования */
@@ -244,6 +244,9 @@ export interface Config {
     yandexApiKey: string | null;
     yandexFolderId: string | null;
     zaiApiKey: string | null;
+    /** В5.5 тур 2 (Т2-Б): общий предел длительности одного вызова модели, мс (запрос +
+     *  весь стрим); env LLM_CALL_TIMEOUT_MS, дефолт DEFAULT_LLM_CALL_TIMEOUT_MS (180 с) */
+    callTimeoutMs: number;
   };
   /** В5.2 (Б4, Б5): лимиты AI, пароль неограниченного доступа, автозапуск топа рейтинга */
   ai: AiConfig;
@@ -450,6 +453,11 @@ export function publicBaseUrlFromEnv(env: Record<string, string | undefined>): s
   }
 }
 
+/** Т2-Б: общий предел вызова модели; не задан или мусор — дефолт (fail-soft, как envInt). */
+export function llmCallTimeoutMsFromEnv(env: Record<string, string | undefined>): number {
+  return envInt(env as Record<string, string>, "LLM_CALL_TIMEOUT_MS") ?? DEFAULT_LLM_CALL_TIMEOUT_MS;
+}
+
 export function loadConfig(): Config {
   const env = { ...envFile(), ...process.env } as Record<string, string>;
   const scan = scanFromEnv(env);
@@ -520,6 +528,7 @@ export function loadConfig(): Config {
       yandexApiKey: env.YAGPT_API_KEY ?? null,
       yandexFolderId: env.YAGPT_FOLDER_ID ?? null,
       zaiApiKey: env.ZAI_API_KEY ?? null,
+      callTimeoutMs: llmCallTimeoutMsFromEnv(env),
     },
     ai: aiConfigFromEnv(env),
     scan,

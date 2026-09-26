@@ -10,6 +10,8 @@
 // запросы к провайдеру; 429/5xx/сеть — retryable на уровне цикла (спека §3.3).
 // YandexGPT — прежний нек-стриминговый путь (tools на нём не поддержаны —
 // честная ошибка), температуры пер-ролевые применяются к обоим провайдерам.
+// В5.5 тур 2 (Т2-Б): общий предел длительности вызова (LLM_CALL_TIMEOUT_MS, 180 с)
+// покрывает и стрим после заголовков; превышение — LlmError network (ретрай цикла).
 import type { Config } from "./config";
 import type { SummaryRole } from "./summary/roles";
 import { modelTierOf, ROLE_TEMPERATURE } from "./summary/roles";
@@ -75,6 +77,7 @@ export type CallLlm = (opts: {
   messages: ChatMessage[];
   tools?: ToolSpec[];
   role?: LlmRoleKey;
+  /** таймаут ожидания ЗАГОЛОВКОВ ответа, мс (дефолт 120 с); общий предел вызова — Config.llm.callTimeoutMs */
   timeoutMs?: number;
   /** обрыв снаружи (wall-clock фуз цикла): рвёт запрос вместе с раундом */
   signal?: AbortSignal;
@@ -198,6 +201,19 @@ export const DEFAULT_ZAI_BASE_URL = "https://api.z.ai/api/paas/v4";
 /** OpenAI-совместимый шлюз YandexGPT (tools, стрим, usage — как у z.ai). */
 export const DEFAULT_YANDEX_BASE_URL = "https://ai.api.cloud.yandex.net/v1";
 const DEFAULT_STALL_MS = 120_000;
+/** Таймаут ожидания заголовков ответа (прежний «жесткий» таймаут вызова). */
+const DEFAULT_HEADERS_TIMEOUT_MS = 120_000;
+/**
+ * В5.5 тур 2 (Т2-Б): общий предел длительности ОДНОГО вызова модели — от запроса до
+ * конца стрима. До правки таймаут 120 с снимался после заголовков, и медленный, но живой
+ * стрим (каждый байт сбрасывает детектор тишины) держал слот провайдера до предохранителя
+ * генерации (6 мин). Дефолт 180 с: не короче таймаута заголовков (120 с — предел, который
+ * вызов и прежде имел до начала ответа) плюс минута на стрим; живые вызовы В5.2-В5.3 на
+ * порядок короче (вся генерация 9 ролей — 12-19 с по БД, reports/2026-09-25-m53-ai-latency.md),
+ * и предел вдвое короче предохранителя 6 мин — ретрай успевает в ту же генерацию.
+ * Переопределение — env LLM_CALL_TIMEOUT_MS (Config.llm.callTimeoutMs).
+ */
+export const DEFAULT_LLM_CALL_TIMEOUT_MS = 180_000;
 
 interface ZaiOptions {
   apiKey: string;
@@ -208,6 +224,8 @@ interface ZaiOptions {
   authScheme?: "bearer" | "api-key";
   fetchImpl?: typeof fetch;
   stallMs?: number;
+  /** общий предел вызова (Т2-Б), мс; дефолт DEFAULT_LLM_CALL_TIMEOUT_MS */
+  callTimeoutMs?: number;
 }
 
 function excerpt(s: string, n = 300): string {
@@ -264,142 +282,165 @@ function accumulateToolCalls(slots: Map<number, ToolSlot>, tcs: unknown): void {
 
 async function callZai(o: ZaiOptions, opts: Parameters<CallLlm>[0]): Promise<LlmResult> {
   const stallMs = o.stallMs ?? DEFAULT_STALL_MS;
+  const callTimeoutMs = o.callTimeoutMs ?? DEFAULT_LLM_CALL_TIMEOUT_MS;
+  const headersTimeoutMs = opts.timeoutMs ?? DEFAULT_HEADERS_TIMEOUT_MS;
   const ac = new AbortController();
   const onOuterAbort = (): void => ac.abort();
   opts.signal?.addEventListener("abort", onOuterAbort, { once: true });
   if (opts.signal?.aborted) ac.abort();
-  const hard = setTimeout(() => ac.abort(), opts.timeoutMs ?? 120_000);
+  let headersTimedOut = false;
+  const hard = setTimeout(() => {
+    headersTimedOut = true;
+    ac.abort();
+  }, headersTimeoutMs);
   let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
-  // stall-сигнал resolve-only (никогда не rejected — проигравшая сторона
-  // гонок ниже не рождает unhandled rejection)
-  let stallNow: (() => void) | null = null;
-  const stalled = new Promise<"stall">((res) => {
-    stallNow = () => res("stall");
+  // сигнал прерывания resolve-only (никогда не rejected — проигравшая сторона
+  // гонок ниже не рождает unhandled rejection): тишина трубы или общий предел вызова
+  let interrupt: ((why: "stall" | "deadline") => void) | null = null;
+  const interrupted = new Promise<"stall" | "deadline">((res) => {
+    interrupt = res;
   });
+  const cut = (why: "stall" | "deadline"): void => {
+    interrupt?.(why);
+    ac.abort();
+    reader?.cancel().catch(() => {});
+  };
   let timer: ReturnType<typeof setTimeout> | null = null;
   const arm = (): void => {
     if (timer !== null) clearTimeout(timer);
-    timer = setTimeout(() => {
-      stallNow?.();
-      ac.abort();
-      reader?.cancel().catch(() => {});
-    }, stallMs);
+    timer = setTimeout(() => cut("stall"), stallMs);
   };
+  // Т2-Б: общий предел — с самого запроса и до конца стрима; байты его НЕ сбрасывают
+  const deadline = setTimeout(() => cut("deadline"), callTimeoutMs);
+  // та же ветка, что у таймаута заголовков: код network — retryable в цикле
+  // генерации (summary/agent.ts), после попыток — fail-soft с причиной в ai_fails
+  const deadlineError = (got: number | null): LlmError =>
+    new LlmError(
+      "network",
+      `сеть: вызов модели дольше ${Math.round(callTimeoutMs / 1000)} с (общий предел вызова${got === null ? ", заголовков нет" : `, получено ${got} символов`})`,
+    );
 
-  let resp: Response | "stall";
   try {
-    arm(); // таймер с самого fetch: ожидание заголовков тоже покрыто
-    resp = await Promise.race([
-      (o.fetchImpl ?? fetch)(`${o.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: o.authScheme === "api-key" ? `Api-Key ${o.apiKey}` : `Bearer ${o.apiKey}`,
-        },
-        body: JSON.stringify({
-          model: o.model,
-          messages: wireMessages(opts.messages),
-          ...(opts.tools !== undefined && opts.tools.length > 0 ? { tools: opts.tools } : {}),
-          stream: true,
-          stream_options: { include_usage: true },
-          thinking: { type: "disabled" },
-          temperature: o.temperature,
+    let resp: Response | "stall" | "deadline";
+    try {
+      arm(); // таймер с самого fetch: ожидание заголовков тоже покрыто
+      resp = await Promise.race([
+        (o.fetchImpl ?? fetch)(`${o.baseUrl.replace(/\/+$/, "")}/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: o.authScheme === "api-key" ? `Api-Key ${o.apiKey}` : `Bearer ${o.apiKey}`,
+          },
+          body: JSON.stringify({
+            model: o.model,
+            messages: wireMessages(opts.messages),
+            ...(opts.tools !== undefined && opts.tools.length > 0 ? { tools: opts.tools } : {}),
+            stream: true,
+            stream_options: { include_usage: true },
+            thinking: { type: "disabled" },
+            temperature: o.temperature,
+          }),
+          signal: ac.signal,
         }),
-        signal: ac.signal,
-      }),
-      stalled,
-    ]);
-  } catch (e) {
-    if (opts.signal?.aborted) throw new LlmError("aborted", "вызов отменён (бюджет генерации)");
-    throw new LlmError("network", `сеть: ${(e as Error).message}`);
-  } finally {
-    if (timer !== null) clearTimeout(timer);
-    clearTimeout(hard);
-  }
-  if (resp === "stall") {
-    throw new LlmError("stall", `модель молчит: ни одного байта за ${Math.round(stallMs / 1000)} с (ожидание ответа)`);
-  }
-  if (!resp.ok) {
-    const raw = await resp.text().catch(() => "");
-    throw new LlmError(String(resp.status), `HTTP ${resp.status}: ${excerpt(raw)}`, raw, retryAfterMsOf(resp.headers.get("retry-after")));
-  }
-  if (resp.body === null) {
-    throw new LlmError("no_body", "пустое тело ответа");
-  }
-
-  reader = resp.body.getReader();
-  const dec = new TextDecoder();
-  let buf = "";
-  let text = "";
-  const toolSlots = new Map<number, ToolSlot>();
-  let usage: { in: number; out: number } | null = null;
-  let finish: string | null = null;
-  let done = false;
-
-  try {
-    arm();
-    outer: while (true) {
-      const chunk = await Promise.race([reader.read(), stalled]);
-      if (chunk === "stall") {
-        throw new LlmError("stall", `стрим замолчал на ${Math.round(stallMs / 1000)} с (получено ${text.length} символов)`);
-      }
-      const { done: streamDone, value } = chunk;
-      if (streamDone) break;
-      arm(); // любой байт сбрасывает детектор мёртвой трубы
-      buf += dec.decode(value, { stream: true });
-      let nl: number;
-      while ((nl = buf.indexOf("\n")) >= 0) {
-        const raw = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
-        if (!raw.startsWith("data:")) continue;
-        const data = raw.slice(5).trim();
-        if (data === "[DONE]") {
-          done = true;
-          break outer;
-        }
-        let j: unknown;
-        try {
-          j = JSON.parse(data);
-        } catch {
-          continue; // keep-alive шум терпим
-        }
-        const parsed = j as {
-          choices?: Array<{ delta?: { content?: string; tool_calls?: unknown }; finish_reason?: string | null }>;
-          usage?: { prompt_tokens?: number; completion_tokens?: number };
-        };
-        const choice = parsed.choices?.[0];
-        const delta = choice?.delta?.content;
-        if (typeof delta === "string" && delta.length > 0) text += delta;
-        if (choice?.delta?.tool_calls !== undefined) accumulateToolCalls(toolSlots, choice.delta.tool_calls);
-        if (choice?.finish_reason) finish = choice.finish_reason;
-        if (parsed.usage) {
-          usage = { in: parsed.usage.prompt_tokens ?? 0, out: parsed.usage.completion_tokens ?? 0 };
-        }
-      }
+        interrupted,
+      ]);
+    } catch (e) {
+      if (opts.signal?.aborted) throw new LlmError("aborted", "вызов отменён (бюджет генерации)");
+      if (headersTimedOut) throw new LlmError("network", `сеть: нет заголовков ответа за ${Math.round(headersTimeoutMs / 1000)} с`);
+      throw new LlmError("network", `сеть: ${(e as Error).message}`);
+    } finally {
+      if (timer !== null) clearTimeout(timer);
+      clearTimeout(hard);
     }
-  } catch (e) {
-    // В5.2 (Б7, долг аудита В5.1, reliability «мелочь 1»): обрыв в фазе стрима — те же
-    // коды, что в фазе запроса; сырой DOMException в outcomes и логи не едет
-    if (e instanceof LlmError) throw e;
-    if (opts.signal?.aborted) throw new LlmError("aborted", "вызов отменён (бюджет генерации)");
-    throw new LlmError("network", `сеть (стрим): ${(e as Error).message}`);
+    if (resp === "deadline") throw deadlineError(null);
+    if (resp === "stall") {
+      throw new LlmError("stall", `модель молчит: ни одного байта за ${Math.round(stallMs / 1000)} с (ожидание ответа)`);
+    }
+    if (!resp.ok) {
+      const raw = await resp.text().catch(() => "");
+      throw new LlmError(String(resp.status), `HTTP ${resp.status}: ${excerpt(raw)}`, raw, retryAfterMsOf(resp.headers.get("retry-after")));
+    }
+    if (resp.body === null) {
+      throw new LlmError("no_body", "пустое тело ответа");
+    }
+
+    reader = resp.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    let text = "";
+    const toolSlots = new Map<number, ToolSlot>();
+    let usage: { in: number; out: number } | null = null;
+    let finish: string | null = null;
+    let done = false;
+
+    try {
+      arm();
+      outer: while (true) {
+        const chunk = await Promise.race([reader.read(), interrupted]);
+        if (chunk === "deadline") throw deadlineError(text.length);
+        if (chunk === "stall") {
+          throw new LlmError("stall", `стрим замолчал на ${Math.round(stallMs / 1000)} с (получено ${text.length} символов)`);
+        }
+        const { done: streamDone, value } = chunk;
+        if (streamDone) break;
+        arm(); // любой байт сбрасывает детектор мёртвой трубы (но не общий предел)
+        buf += dec.decode(value, { stream: true });
+        let nl: number;
+        while ((nl = buf.indexOf("\n")) >= 0) {
+          const raw = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!raw.startsWith("data:")) continue;
+          const data = raw.slice(5).trim();
+          if (data === "[DONE]") {
+            done = true;
+            break outer;
+          }
+          let j: unknown;
+          try {
+            j = JSON.parse(data);
+          } catch {
+            continue; // keep-alive шум терпим
+          }
+          const parsed = j as {
+            choices?: Array<{ delta?: { content?: string; tool_calls?: unknown }; finish_reason?: string | null }>;
+            usage?: { prompt_tokens?: number; completion_tokens?: number };
+          };
+          const choice = parsed.choices?.[0];
+          const delta = choice?.delta?.content;
+          if (typeof delta === "string" && delta.length > 0) text += delta;
+          if (choice?.delta?.tool_calls !== undefined) accumulateToolCalls(toolSlots, choice.delta.tool_calls);
+          if (choice?.finish_reason) finish = choice.finish_reason;
+          if (parsed.usage) {
+            usage = { in: parsed.usage.prompt_tokens ?? 0, out: parsed.usage.completion_tokens ?? 0 };
+          }
+        }
+      }
+    } catch (e) {
+      // В5.2 (Б7, долг аудита В5.1, reliability «мелочь 1»): обрыв в фазе стрима — те же
+      // коды, что в фазе запроса; сырой DOMException в outcomes и логи не едет
+      if (e instanceof LlmError) throw e;
+      if (opts.signal?.aborted) throw new LlmError("aborted", "вызов отменён (бюджет генерации)");
+      throw new LlmError("network", `сеть (стрим): ${(e as Error).message}`);
+    } finally {
+      if (timer !== null) clearTimeout(timer);
+    }
+
+    const toolCalls = [...toolSlots.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, s]) => ({ id: s.id, name: s.name, arguments: s.args }))
+      .filter((tc) => tc.id.length > 0 && tc.name.length > 0);
+    if (text.length === 0 && toolCalls.length === 0) {
+      throw new LlmError("empty", done ? "пустой ответ модели" : `стрим оборван без контента (finish=${finish})`);
+    }
+    if (!done && finish === null && toolCalls.length === 0) {
+      throw new LlmError("stream_closed", `стрим оборван на середине (получено ${text.length} символов)`);
+    }
+    return { text, toolCalls, finish, usage };
   } finally {
-    if (timer !== null) clearTimeout(timer);
+    clearTimeout(deadline);
     clearTimeout(hard);
     opts.signal?.removeEventListener("abort", onOuterAbort);
   }
-
-  const toolCalls = [...toolSlots.entries()]
-    .sort((a, b) => a[0] - b[0])
-    .map(([, s]) => ({ id: s.id, name: s.name, arguments: s.args }))
-    .filter((tc) => tc.id.length > 0 && tc.name.length > 0);
-  if (text.length === 0 && toolCalls.length === 0) {
-    throw new LlmError("empty", done ? "пустой ответ модели" : `стрим оборван без контента (finish=${finish})`);
-  }
-  if (!done && finish === null && toolCalls.length === 0) {
-    throw new LlmError("stream_closed", `стрим оборван на середине (получено ${text.length} символов)`);
-  }
-  return { text, toolCalls, finish, usage };
 }
 
 // ---------- YandexGPT: прежний нек-стриминговый путь (логика не тронута) ----------
@@ -440,6 +481,7 @@ export function makeLlm(config: Config, override?: (role: LlmRoleKey) => CallLlm
         temperature,
         fetchImpl: opts.fetchImpl,
         stallMs: opts.stallMs,
+        callTimeoutMs: config.llm.callTimeoutMs,
       };
       return providerGate.run(() => callZai(yandex, callOpts), opts.priority, callOpts.signal);
     }
@@ -450,6 +492,7 @@ export function makeLlm(config: Config, override?: (role: LlmRoleKey) => CallLlm
       temperature,
       fetchImpl: opts.fetchImpl,
       stallMs: opts.stallMs,
+      callTimeoutMs: config.llm.callTimeoutMs,
     };
     return providerGate.run(() => callZai(zai, callOpts), opts.priority, callOpts.signal);
   };

@@ -4,11 +4,12 @@
 // (правила 21.09/23.09). Сиды — tests/api-fixtures.ts.
 import { afterAll, describe, expect, test } from "bun:test";
 import { listRepos, DEFAULT_QUERY, getRepoCard } from "../src/api/repos";
-import { maybeTakeDailySnapshot, purgeOldRatingSnapshots, takeRatingSnapshot, utcDayOf } from "../src/jobs/rating-snapshot";
-import { maintenanceTick, workerTick } from "../src/jobs/scheduler";
+import { purgeOldRatingSnapshots, takeRatingSnapshot, utcDayOf } from "../src/jobs/rating-snapshot";
+import { catalogTick, enqueueScan, maintenanceTick, newCatalogTickState, workerTick, type CatalogTickState } from "../src/jobs/scheduler";
 import { setMetaValue } from "../src/db";
 import { SCHED_META } from "../src/api/health";
-import { loadConfig } from "../src/config";
+import { DEFAULT_SCAN, loadConfig, type Config } from "../src/config";
+import type { ScClient, ScResponse } from "../src/collectors/http";
 import { makeApiDb, seedRepo, seedScan, seedScore, type ApiTestDb } from "./api-fixtures";
 
 const DAY = new Date("2026-09-26T08:00:00Z");
@@ -75,23 +76,6 @@ describe("Р1: снимок мест рейтинга", () => {
       const row = t.db.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(item.org, item.repo) as { id: number };
       expect(byRepoId.get(row.id)?.rank ?? null).toBe(item.rank);
       expect(byRepoId.get(row.id)?.score_index ?? null).toBe(item.healthcraftIndex);
-    }
-  });
-
-  test("ленивая точка: без ночной волны сегодня снимок не пишется, с волной — пишется", () => {
-    const lazy = makeApiDb();
-    try {
-      seedRated(lazy, "o2", "gamma", 70);
-      // метки ночной волны нет вовсе
-      expect(maybeTakeDailySnapshot(lazy.db, { now: DAY }).taken).toBe(false);
-      // волна была ВЧЕРА по UTC — снимок за сегодня не пишется (delta честно смотрит в прошлый снимок)
-      setMetaValue(lazy.db, SCHED_META.nightlyOkAt, "2026-09-25T22:00:00Z");
-      expect(maybeTakeDailySnapshot(lazy.db, { now: DAY }).taken).toBe(false);
-      // волна сегодня — снимок пишется
-      setMetaValue(lazy.db, SCHED_META.nightlyOkAt, "2026-09-26T03:00:00Z");
-      expect(maybeTakeDailySnapshot(lazy.db, { now: DAY })).toEqual({ taken: true, rows: 1, day: "2026-09-26" });
-    } finally {
-      lazy.close();
     }
   });
 
@@ -215,25 +199,175 @@ describe("Р3: внешняя ссылка на SourceCraft", () => {
   });
 });
 
-// ---------- интеграция с воркер-лупом ----------
+// ---------- В5.5 тур 2, Т2-А: точка снимка — ночная фаза catalogTick ----------
+// Тесты тура 1 закрепляли ленивую idle-точку (пустая очередь рейтинга после
+// ночной фазы) — переписаны: на стенде очередь рейтинга не пустеет сутками
+// (5 424 заявки через 5 ч после ночной фазы, 26.09), и снимок не писался бы.
+// Часы тестов — явный `now` (ERROR_LOG 26.09 п.1).
 
-describe("Р1: снимок из тика воркера (роль rating)", () => {
-  const t: ApiTestDb = makeApiDb();
-  afterAll(() => t.close());
+const HOUR = 60 * 60_000;
 
-  test("пустая очередь рейтинг-полосы после сегодняшней волны → снимок; полоса user → нет", async () => {
-    seedRated(t, "w", "wave", 66);
-    const today = utcDayOf(new Date());
-    setMetaValue(t.db, SCHED_META.nightlyOkAt, `${today}T04:00:00Z`);
-    const deps = { db: t.db, config: loadConfig(), serverClient: () => null };
-    // цикл сканов полосы user снимок не пишет
-    expect(await workerTick(deps, ["user"], { busy: false }, { kind: "scan" })).toBe("idle");
-    expect((t.db.query("SELECT COUNT(*) AS c FROM rating_snapshots").get() as { c: number }).c).toBe(0);
-    // цикл сканов полосы rating при пустой очереди — точка снимка
-    expect(await workerTick(deps, ["rating"], { busy: false }, { kind: "scan" })).toBe("idle");
-    expect((t.db.query("SELECT COUNT(*) AS c FROM rating_snapshots").get() as { c: number }).c).toBe(1);
-    // повторный тик — идемпотентно
-    expect(await workerTick(deps, ["rating"], { busy: false }, { kind: "scan" })).toBe("idle");
-    expect((t.db.query("SELECT COUNT(*) AS c FROM rating_snapshots").get() as { c: number }).c).toBe(1);
+/** Конфиг обхода: ночная фаза раз в сутки, сверка раз в час (как на стенде). */
+function tickConfig(overrides: Partial<Config["scheduler"]> = {}): Config {
+  const base = loadConfig();
+  return {
+    ...base,
+    scan: { ...DEFAULT_SCAN, catalog: { maxPages: 100 } },
+    scheduler: { ...base.scheduler, catalogIntervalMs: HOUR, intervalMs: 24 * HOUR, fullRescan: false, ...overrides },
+  };
+}
+
+/** Фейк-клиент каталога: одна страница из публичных репо `slugs` ("org/repo"). */
+function catalogOf(slugs: string[], lastUpdated = "2026-09-20T00:00:00Z"): ScClient {
+  let requests = 0;
+  return {
+    async get(path: string): Promise<ScResponse> {
+      requests++;
+      if (!path.startsWith("/repos")) return { status: 404, json: null, bodyText: "" };
+      const repositories = slugs.map((s) => {
+        const [org, slug] = s.split("/");
+        return { organization: { slug: org }, slug, name: slug, visibility: "public", last_updated: lastUpdated, language: null, rating: null };
+      });
+      return { status: 200, json: { repositories, next_page_token: "" }, bodyText: "" };
+    },
+    requestCount: () => requests,
+  };
+}
+
+const snapCount = (t: ApiTestDb, day?: string): number =>
+  day === undefined
+    ? (t.db.query("SELECT COUNT(*) AS c FROM rating_snapshots").get() as { c: number }).c
+    : (t.db.query("SELECT COUNT(*) AS c FROM rating_snapshots WHERE taken_at = ?").get(day) as { c: number }).c;
+
+const queuedRating = (t: ApiTestDb): number =>
+  (t.db.query("SELECT COUNT(*) AS c FROM jobs WHERE status = 'queued' AND user_id IS NULL AND kind = 'scan'").get() as { c: number }).c;
+
+describe("Т2-А: снимок мест пишется ночной фазой обхода каталога", () => {
+  test("непустая очередь рейтинга: ночная фаза пишет снимок; повтор в те же сутки — без дубля; сверка без ночной фазы — не пишет", async () => {
+    const t = makeApiDb();
+    try {
+      const a = seedRated(t, "n", "a", 90);
+      const b = seedRated(t, "n", "b", 80);
+      // доочередь прошлой волны: очередь рейтинга НЕ пуста весь день (факт стенда)
+      enqueueScan(t.db, a, { triggerKind: "periodic" });
+      enqueueScan(t.db, b, { triggerKind: "periodic" });
+      expect(queuedRating(t)).toBe(2);
+      const client = () => catalogOf(["n/a", "n/b"]);
+      const state: CatalogTickState = newCatalogTickState();
+      const nightly = new Date("2026-09-26T12:16:00Z");
+      const out = await catalogTick(t.db, client, tickConfig(), state, { now: nightly });
+      expect(out?.phases.nightly).toBe(true);
+      expect(snapCount(t, "2026-09-26")).toBe(2);
+      // очередь по-прежнему не пуста — снимку она больше не нужна
+      expect(queuedRating(t)).toBeGreaterThan(0);
+
+      // часовая сверка тех же суток (ночная фаза не due) — снимок не трогает
+      const hourly = await catalogTick(t.db, client, tickConfig(), state, { now: new Date(nightly.getTime() + HOUR) });
+      expect(hourly?.phases).toEqual({ reconcile: true, nightly: false });
+      expect(snapCount(t)).toBe(2);
+
+      // ночная фаза повторно в те же UTC-сутки (рестарт после сбоя обхода, короткий
+      // интервал) — идемпотентно: строк не добавилось, места не переписаны
+      rescan(t, b, 99); // порядок сменился, но снимок дня уже есть
+      const again = await catalogTick(t.db, client, tickConfig({ intervalMs: HOUR }), state, { now: new Date(nightly.getTime() + 3 * HOUR) });
+      expect(again?.phases.nightly).toBe(true);
+      expect(snapCount(t)).toBe(2);
+      const rankOfA = (t.db.query("SELECT rank FROM rating_snapshots WHERE repo_id = ?").get(a) as { rank: number }).rank;
+      expect(rankOfA).toBe(1);
+    } finally {
+      t.close();
+    }
+  });
+
+  test("снимок — места ДО обхода: репо, эвиктированный этой ночной фазой, в снимке есть, в выдаче после — нет", async () => {
+    const t = makeApiDb();
+    try {
+      const keep = seedRated(t, "e", "keep", 70);
+      const gone = seedRated(t, "e", "gone", 95);
+      void keep;
+      const nightly = new Date("2026-09-26T12:16:00Z");
+      // каталог уже без e/gone: обход эвиктит его (rating_active = 0)
+      const out = await catalogTick(t.db, () => catalogOf(["e/keep"]), tickConfig(), newCatalogTickState(), { now: nightly });
+      expect(out?.evicted).toContain("e/gone");
+      const snap = t.db.query("SELECT repo_id, rank FROM rating_snapshots WHERE taken_at = '2026-09-26' ORDER BY rank").all() as { repo_id: number; rank: number }[];
+      // места до обхода: gone 1-й, keep 2-й
+      expect(snap.map((r) => r.repo_id)).toEqual([gone, keep]);
+      // выдача после обхода — gone уже вне рейтинга, keep первый
+      const items = listRepos(t.db, { ...DEFAULT_QUERY, perPage: 100 }, { now: nightly }).items;
+      expect(items.map((i) => i.repo)).toEqual(["keep"]);
+      expect(items[0]?.rank).toBe(1);
+    } finally {
+      t.close();
+    }
+  });
+
+  test("сбой снимка не валит обход: ночная фаза исполняется и отмечается", async () => {
+    const t = makeApiDb();
+    try {
+      seedRated(t, "f", "x", 60);
+      t.db.exec("DROP TABLE rating_snapshots");
+      const state = newCatalogTickState();
+      const nightly = new Date("2026-09-26T12:16:00Z");
+      const out = await catalogTick(t.db, () => catalogOf(["f/x"]), tickConfig(), state, { now: nightly });
+      expect(out?.ok).toBe(true);
+      expect(out?.phases.nightly).toBe(true);
+      expect(state.lastNightlyAt).toEqual(nightly);
+    } finally {
+      t.close();
+    }
+  });
+
+  test("idle-тик воркера снимков больше не пишет (одна точка снимка)", async () => {
+    const t = makeApiDb();
+    try {
+      seedRated(t, "w", "wave", 66);
+      // ночная фаза сегодня исполнена — тур 1 здесь писал снимок
+      setMetaValue(t.db, SCHED_META.nightlyOkAt, `${utcDayOf(new Date())}T04:00:00Z`);
+      const deps = { db: t.db, config: loadConfig(), serverClient: () => null };
+      expect(await workerTick(deps, ["rating"], { busy: false }, { kind: "scan" })).toBe("idle");
+      expect(await workerTick(deps, ["rating"], { busy: false }, { kind: "scan", lightOnly: true })).toBe("idle");
+      expect(await workerTick(deps, ["user", "rating"], { busy: false })).toBe("idle");
+      expect(snapCount(t)).toBe(0);
+    } finally {
+      t.close();
+    }
+  });
+
+  test("интеграция rankDelta: база — снимок ночной фазы прошлых суток, весь следующий день", async () => {
+    const t = makeApiDb();
+    try {
+      const a = seedRated(t, "r", "aaa", 90);
+      const b = seedRated(t, "r", "bbb", 80);
+      const c = seedRated(t, "r", "ccc", 70);
+      void a;
+      void b;
+      const client = () => catalogOf(["r/aaa", "r/bbb", "r/ccc"]);
+      const state = newCatalogTickState();
+      const at = (iso: string) => new Date(iso);
+      const delta = (repo: string, now: Date) => itemOf(t, repo, now)?.rankDelta ?? null;
+
+      // сутки 26: ночная фаза 12:16 — снимок 26 (aaa 1, bbb 2, ccc 3)
+      await catalogTick(t.db, client, tickConfig(), state, { now: at("2026-09-26T12:16:00Z") });
+      expect(snapCount(t, "2026-09-26")).toBe(3);
+      // днем 26 волна двигает ccc на 1-е место; снимок единственный и сегодняшний — базы нет
+      rescan(t, c, 95);
+      expect(delta("ccc", at("2026-09-26T18:00:00Z"))).toBeNull();
+
+      // сутки 27 до ночной фазы: база — снимок 26
+      expect(delta("ccc", at("2026-09-27T06:00:00Z"))).toBe(2);
+      expect(delta("aaa", at("2026-09-27T06:00:00Z"))).toBe(-1);
+      // ночная фаза 27 — снимок 27 (ccc 1, aaa 2, bbb 3), места ДО новой волны
+      await catalogTick(t.db, client, tickConfig(), state, { now: at("2026-09-27T12:16:00Z") });
+      expect(snapCount(t, "2026-09-27")).toBe(3);
+      // после ночной фазы 27 стрелки не гаснут: база по-прежнему снимок 26
+      expect(delta("ccc", at("2026-09-27T20:00:00Z"))).toBe(2);
+      expect(delta("bbb", at("2026-09-27T20:00:00Z"))).toBe(-1);
+
+      // сутки 28: база — снимок 27; порядок с тех пор не менялся — 0
+      expect(delta("ccc", at("2026-09-28T06:00:00Z"))).toBe(0);
+      expect(delta("aaa", at("2026-09-28T06:00:00Z"))).toBe(0);
+    } finally {
+      t.close();
+    }
   });
 });

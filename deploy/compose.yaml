@@ -70,6 +70,9 @@ services:
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
       # основной хост (без него — переадресации нет); пусто в режиме ":80"
       CANONICAL_HOST: ${CANONICAL_HOST:-}
+      # IP стенда: http://IP → https://CANONICAL_HOST (В5.5 тур 2, Т2-Е; только вместе с
+      # CANONICAL_HOST). Пусто — заглушка .invalid: такого Host не бывает, блок не мешает
+      STAND_IP: ${STAND_IP:-stand-ip.invalid}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

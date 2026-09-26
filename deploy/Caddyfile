@@ -3,6 +3,17 @@
 # Let's Encrypt), например "health-craft.ru, www.health-craft.ru"; ":80" — только HTTP, пока
 # домена нет. CANONICAL_HOST — основной хост: остальные адреса переадресуются на него
 # (вход Я ID, cookie и Origin-гард мутаций привязаны к одному origin — YA_REDIRECT_URI).
+
+# В5.5 тур 2 (Т2-Е): запрос по IP стенда по HTTP. Без этого блока автоматическая
+# переадресация Caddy уводит http://IP на https://IP, а сертификата на IP у стенда нет —
+# браузер показывает ошибку TLS. Явный HTTP-сайт по IP стоит в маршрутах :80 раньше
+# автоматической переадресации и отправляет на основной хост. STAND_IP задается в .env
+# стенда вместе с CANONICAL_HOST; не задан — адрес-заглушка в зарезервированной зоне
+# .invalid (RFC 2606): такого Host не бывает, блок ничему не мешает (и в режиме ":80").
+http://{$STAND_IP:stand-ip.invalid} {
+	redir https://{$CANONICAL_HOST}{uri} permanent
+}
+
 {$SITE_ADDRESS} {
 	@alias expression `"{$CANONICAL_HOST}" != "" && {host} != "{$CANONICAL_HOST}"`
 	redir @alias https://{$CANONICAL_HOST}{uri} permanent
