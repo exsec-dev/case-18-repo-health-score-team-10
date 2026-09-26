@@ -2,7 +2,114 @@
 
 > Хакатон «Лидеры цифровой трансформации» (ЛЦТ) 2026 — конкурс Мэра Москвы для лучших ИТ-специалистов мира.
 
-> **Методика оценки (модель 4.3.0-hci):** [docs/methodology.md](docs/methodology.md) — формула, метрики, обработка отсутствия данных, рекомендации, ограничения. Инструкция сборки, запуска и развертывания — в работе (веха В5.4).
+> **Методика оценки (модель 4.3.0-hci):** [docs/methodology.md](docs/methodology.md) — формула, метрики, обработка отсутствия данных, рекомендации, ограничения. Сборка, запуск и развертывание — [ниже](#-сборка-запуск-и-развертывание).
+>
+> **Стенд:** https://health-craft.ru
+
+&nbsp;
+## 🛠 Сборка, запуск и развертывание
+
+### Что нужно
+
+| Для чего | Что |
+|---|---|
+| Запуск из исходников | [Bun](https://bun.sh) 1.4.2, git ≥ 2.31 |
+| Запуск в контейнерах | Docker с Compose v2 |
+| Данные | токен SourceCraft (`SOURCECRAFT_TOKEN`) — без него API отвечает 401 |
+| Вход и AI (необязательно) | OAuth-приложение Яндекс ID, ключ YandexGPT и каталог Yandex Cloud |
+
+Все настройки — переменные окружения, полный список с пояснениями — [`.env.example`](.env.example).
+Обязательная только `SOURCECRAFT_TOKEN`; без `APP_SECRET` (≥ 32 символов) и `YA_CLIENT_ID`/`YA_CLIENT_SECRET`
+сервис работает без входа, без ключей модели — без AI-обзоров.
+
+### Запуск из исходников
+
+```bash
+git clone ssh://ssh.sourcecraft.dev/lct-hackaton-2026/case-18-repo-health-score-team-10.git
+cd case-18-repo-health-score-team-10
+bun install
+cp .env.example .env        # вписать SOURCECRAFT_TOKEN и при желании остальное
+bun start                   # http://localhost:8418 (dev-сборка интерфейса с HMR)
+```
+
+`NODE_ENV=production bun start` — то же с минифицированной сборкой интерфейса. БД SQLite создается
+сама в `data/`. На пустой БД сервис обходит каталог SourceCraft и ставит сканы в очередь — сначала
+самые заметные репозитории (по реакциям); рейтинг наполняется по мере сканов. Один репозиторий
+сразу: `bun scripts/scan.ts <org>/<repo>`.
+
+Проверки (те же, что в CI SourceCraft — [`.sourcecraft/ci.yaml`](.sourcecraft/ci.yaml), на каждый push):
+
+```bash
+bun run tsc
+bun test --timeout 30000
+```
+
+### Запуск в контейнерах
+
+Один образ ([`Dockerfile`](Dockerfile)) на обе роли процесса, прокси с HTTPS — [`deploy/compose.yaml`](deploy/compose.yaml):
+
+| Контейнер | Роль |
+|---|---|
+| `web` | сайт и API, пользовательские сканы, AI-обзоры и проверки (`PROCESS_ROLE=web`) |
+| `rating` | обход каталога, плановые сканы рейтинга, пересчет оценок (`PROCESS_ROLE=rating`); стартует после `web`, уступает ему процессор |
+| `caddy` | HTTPS (Let's Encrypt), заголовки защиты, адрес клиента для лимитов |
+
+Оба процесса работают с одной SQLite на общем томе. Каталог данных задает `HC_DIR`
+(по умолчанию `/srv/healthcraft`): там `.env`, `data/` (БД) и `tmp/` (временные клоны).
+
+```bash
+mkdir -p .stand && cp .env.example .stand/.env    # вписать токен; SITE_ADDRESS=:80 — без домена
+echo "HC_DIR=$PWD/.stand" >> .stand/.env
+HTTP_PORT=8080 docker compose --env-file .stand/.env -f deploy/compose.yaml up -d --build
+curl http://localhost:8080/api/health             # "ok": true
+```
+
+`docker compose --env-file .stand/.env -f deploy/compose.yaml down` — остановить.
+
+### Развертывание на ВМ (Yandex Cloud)
+
+Стенд — одна ВМ Compute Cloud: Ubuntu 24.04, 4 vCPU, 8 ГБ, SSD 64 ГБ, статический IP; группа
+безопасности пропускает входящие TCP 22, 80, 443. Почему так и сколько это стоит —
+[`reports/2026-09-26-m54-vm-setup.md`](reports/2026-09-26-m54-vm-setup.md).
+
+1. **Подготовка ВМ** (один раз): `sudo apt install docker.io docker-compose-v2 sqlite3 zstd`,
+   пользователь в группе `docker`, каталог `/srv/healthcraft`, подкачка 4 ГБ.
+2. **Секреты** (один раз): `/srv/healthcraft/.env` с правами `600` — переменные из `.env.example`
+   плюс адрес стенда:
+   ```
+   SITE_ADDRESS=health-craft.ru, www.health-craft.ru
+   CANONICAL_HOST=health-craft.ru
+   PUBLIC_BASE_URL=https://health-craft.ru
+   YA_REDIRECT_URI=https://health-craft.ru/auth/ya/callback
+   ```
+   A-записи домена — на IP ВМ; `YA_REDIRECT_URI` добавляется в OAuth-приложение Яндекс ID.
+3. **Выкладка** (с машины разработчика, каждый раз):
+   ```bash
+   deploy/deploy.sh healthcraft@<IP ВМ>
+   ```
+   Скрипт везет код закоммиченного `HEAD` (без `.env` и данных), собирает образ на ВМ и
+   перезапускает контейнеры; прошлая версия остается в `app.prev`. Сертификат HTTPS Caddy
+   выпускает и продлевает сам.
+4. **Резервные копии:** [`deploy/backup.sh`](deploy/backup.sh) по cron раз в сутки — копия
+   работающей БД (`VACUUM INTO`), проверка целостности, сжатие, хранятся 3 последние.
+
+Состояние стенда — `GET /api/health`: `ok` вычисляется по живости очередей, обхода каталога и
+пересчета (HTTP всегда 200 — смотреть тело).
+
+### Устройство репозитория
+
+| Путь | Что там |
+|---|---|
+| `src/collectors/` | сбор фактов: REST SourceCraft, AppSec, git-клон (клон удаляется после сбора — код не храним) |
+| `src/score/` | методика: подметрики, категории, индекс, рекомендации |
+| `src/jobs/` | очередь заявок, планировщик обхода каталога, воркеры |
+| `src/summary/`, `prompts/` | AI-обзоры: хартии ролей, валидатор привязки к фактам |
+| `src/api/`, `src/server.ts` | HTTP API и сервер |
+| `src/web/` | интерфейс (React + Gravity UI) |
+| `src/report/` | отчеты MD и PDF |
+| `tests/` | тесты (`bun test`) |
+| `deploy/`, `Dockerfile` | контейнеры и развертывание |
+| `docs/methodology.md` | методика оценки |
 
 &nbsp;
 ## 📋 Общая информация
