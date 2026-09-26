@@ -1808,7 +1808,8 @@ button.rh-category:focus-visible {
 .rh-repo-item__desc,
 .rh-repo-item__state,
 .rh-repo-item__actions,
-.rh-fraud-mark {
+.rh-repo-item .rh-rating-fraud {
+  /* тур 3 В5.5 (п.3): флажок фрода в строке избранного — над слоем-ссылкой (подсказка) */
   position: relative;
   z-index: 1;
 }
@@ -2201,24 +2202,6 @@ button.rh-category:focus-visible {
   padding: var(--g-spacing-3) 0 var(--g-spacing-2);
 }
 
-/* кабинет (замечание 7): флаг фрода — иконкой рядом с видимостью */
-.rh-fraud-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  /* замечание 25.09: warning-light полупрозрачный — кладется поверх непрозрачного фона, аватар не просвечивает */
-  background: linear-gradient(var(--g-color-base-warning-light), var(--g-color-base-warning-light)), var(--g-color-base-background);
-  color: var(--g-color-text-warning-heavy);
-  cursor: default;
-}
-
-.rh-fraud-mark__tip {
-  padding: var(--g-spacing-2) var(--g-spacing-3);
-}
-
 .rh-cat-ai__mark {
   display: inline-flex;
   color: var(--g-color-text-secondary);
@@ -2341,15 +2324,6 @@ button.rh-category:focus-visible {
   align-self: flex-start;
 }
 
-.rh-fraud-mark_avatar {
-  position: absolute;
-  right: -4px;
-  bottom: -4px;
-  width: 18px;
-  height: 18px;
-  box-shadow: 0 0 0 2px var(--g-color-base-background);
-}
-
 /* В5.3 (25.09, вариант A): окно «Добавить в избранное» — поле + список строк */
 .rh-add-list {
   margin: 0;
@@ -2445,8 +2419,9 @@ button.rh-category:focus-visible {
   margin-bottom: 0 !important;
 }
 
+/* тур 3 В5.5 (п.7, 26.09): заглушка растянута по ширине, как в избранном (была 820px) */
 .rh-cmp-empty {
-  max-width: 820px;
+  width: 100%;
 }
 
 /* Д11: заметки и ошибка — по содержимому, не шире 820 (правило 23.09 вне карточки) */
@@ -3131,4 +3106,17 @@ button.rh-category:focus-visible {
   white-space: normal;
   overflow-wrap: anywhere;
   min-width: 0;
+}
+
+/* тур 3 В5.5 (п.12): обертка выключенной кнопки — носитель подсказки
+   (выключенная кнопка событий наведения не получает) */
+.rh-disabled-tip {
+  display: inline-flex;
+}
+
+/* Chrome не отдает события мыши выключенной кнопке и не пропускает их к обертке —
+   наведение ловит сама обертка */
+.rh-disabled-tip > .g-button:disabled,
+.rh-disabled-tip > .g-button.g-button_disabled {
+  pointer-events: none;
 }

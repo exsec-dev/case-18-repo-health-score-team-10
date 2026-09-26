@@ -18,6 +18,7 @@ import {
   CircleQuestion,
   Clock,
   Ellipsis,
+  Flag,
   Hourglass,
   Key,
   ListCheck,
@@ -54,7 +55,7 @@ import { type MeResponse, type MetaResponse, type MyReposResponse, dataOf, logou
 import type { LiveAnalysis } from "./analysis";
 import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
 import { plural } from "../report/submetrics";
-import { FRAUD_TITLE, authErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, quotaCell, recommendationsText, scoreTheme, scoreWord, sentence, slugOf, type ActionQuotaView, type AiQuotaView, type FavoriteAddCheck, type QuotaWindowView } from "./format";
+import { FRAUD_EXPLAIN, FRAUD_TITLE, authErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, quotaCell, recommendationsText, scoreTheme, scoreWord, sentence, slugOf, type ActionQuotaView, type AiQuotaView, type FavoriteAddCheck, type QuotaWindowView } from "./format";
 import { recommendationsHref } from "./RepoPage";
 import { type Band, BANDS, type RepoEntry, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
 import { linkProps, navigate, repoHref } from "./router";
@@ -1344,14 +1345,10 @@ function RepoRow({
       {/* слой-ссылка: клик по пустому месту строки ведет в карточку; с клавиатуры
           и для скринридера ссылка — имя репозитория, слой из обхода убран */}
       <a className="rh-repo-item__cover" {...linkProps(href)} tabIndex={-1} aria-hidden="true" />
-      {/* выбор C владельца (25.09): флаг фрода — кружком с иконкой в углу аватара, без подсказки */}
+      {/* тур 3 В5.5 (п.3, 26.09): флаг фрода — как в строке рейтинга (флажок у имени
+          с подсказкой); вытесняет выбор C 25.09 (кружок в углу аватара) */}
       <span className="rh-repo-item__avatar">
         <RepoAvatar repo={repo} logoUrl={entry.logoUrl} size="l" />
-        {entry.fraudFlag?.flag === true && entry.fraudFlag.factors.length > 0 && (
-          <span className="rh-fraud-mark rh-fraud-mark_avatar" role="img" aria-label={FRAUD_TITLE}>
-            <Icon data={TriangleExclamation} size={10} />
-          </span>
-        )}
       </span>
       <div className="rh-repo-item__content">
         <div className="rh-repo-item__head">
@@ -1359,6 +1356,13 @@ function RepoRow({
           <Link {...linkProps(href)} view="primary" className="rh-repo-item__name">
             <RepoSlug org={org} repo={repo} variant="subheader-2" />
           </Link>
+          {entry.fraudFlag?.flag === true && entry.fraudFlag.factors.length > 0 && (
+            <ActionTooltip title={FRAUD_TITLE} description={FRAUD_EXPLAIN}>
+              <span className="rh-rating-fraud" role="img" aria-label={FRAUD_TITLE}>
+                <Icon data={Flag} size={14} />
+              </span>
+            </ActionTooltip>
+          )}
           <AccessRights access={access} lastCheckedAt={lastCheckedAt} />
         </div>
         <Meta>

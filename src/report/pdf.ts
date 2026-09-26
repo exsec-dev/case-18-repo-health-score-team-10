@@ -251,7 +251,8 @@ function scoreBar(score: number | null, w: number): PdfNode {
 
 function headerNode(block: Extract<Block, { kind: "header" }>): PdfNode {
   // Ступень 4 (Ф3): неразрывный длинный слаг и ссылка переносятся, а не уходят за поле
-  const left: PdfNode[] = [{ text: breakable(block.slug.replace("/", " / ")), fontSize: 16, bold: true, lineHeight: 1 }];
+  // тур 3 В5.5 (п.8): слаг без пробелов вокруг слеша, как на экране и в MD
+  const left: PdfNode[] = [{ text: breakable(block.slug), fontSize: 16, bold: true, lineHeight: 1 }];
   if (block.title) left.push({ text: lineNodes(block.title), fontSize: 8, color: COLORS.muted, margin: [0, 2, 0, 0] });
   left.push({ text: breakable(block.link.text), link: block.link.url, color: COLORS.link, fontSize: 8, margin: [0, 2, 0, 0] });
   // п.1 круга 2: название документа первой строкой, дата и плашка доступа — второй

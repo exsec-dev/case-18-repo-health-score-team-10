@@ -371,3 +371,67 @@ describe("Т2-А: снимок мест пишется ночной фазой �
     }
   });
 });
+
+// ---------- В5.5 тур 3: снимок не пишется, пока идет пересчет после смены модели ----------
+// Локально 26.09 ночная фаза сняла снимок посреди пересчета на 4.4.0: 14 252 строки
+// из ~28 тыс. (у остальных еще не было строк текущей модели) — завтрашние стрелки
+// сравнивали бы с неполным списком. Снимок откладывается и дописывается следующим
+// обходом каталога в те же сутки.
+
+/** «Пересчет не закончен»: у скана есть оценка только прежней версии модели. */
+function staleScoreRow(t: ApiTestDb, repoId: number): number {
+  const scanId = seedScan(t, repoId);
+  t.db
+    .query(
+      "INSERT INTO scores (scan_id, model_version, repo_id, healthcraft_index, index_coverage, categories, no_data, stale, computed_at) VALUES (?, 'old-model', ?, 50, 1, '{}', '[]', '[]', ?)",
+    )
+    .run(scanId, repoId, "2026-09-25T00:00:00Z");
+  return scanId;
+}
+
+describe("тур 3: снимок отложен, пока идет пересчет после смены модели", () => {
+  test("ночная фаза при идущем пересчете — снимка нет; следующий обход тех же суток после пересчета — снимок есть", async () => {
+    const t = makeApiDb();
+    try {
+      seedRated(t, "r", "a", 90);
+      const b = seedRated(t, "r", "b", 80);
+      const staleScan = staleScoreRow(t, b);
+      const client = () => catalogOf(["r/a", "r/b"]);
+      const state: CatalogTickState = newCatalogTickState();
+      const nightly = new Date("2026-09-26T12:16:00Z");
+      const out = await catalogTick(t.db, client, tickConfig(), state, { now: nightly });
+      expect(out?.phases.nightly).toBe(true);
+      expect(snapCount(t, "2026-09-26")).toBe(0);
+
+      // пересчет еще идет — часовая сверка тоже не пишет
+      await catalogTick(t.db, client, tickConfig(), state, { now: new Date(nightly.getTime() + HOUR) });
+      expect(snapCount(t, "2026-09-26")).toBe(0);
+
+      // пересчет закончен: у скана появилась строка текущей модели
+      seedScore(t, b, staleScan, { total: 80 });
+      await catalogTick(t.db, client, tickConfig(), state, { now: new Date(nightly.getTime() + 2 * HOUR) });
+      expect(snapCount(t, "2026-09-26")).toBe(2);
+      // и больше не дублируется
+      await catalogTick(t.db, client, tickConfig(), state, { now: new Date(nightly.getTime() + 3 * HOUR) });
+      expect(snapCount(t)).toBe(2);
+    } finally {
+      t.close();
+    }
+  });
+
+  test("часовая сверка ДО ночной фазы суток снимок не пишет (отложенный — только после ночной фазы)", async () => {
+    const t = makeApiDb();
+    try {
+      seedRated(t, "s", "a", 90);
+      const client = () => catalogOf(["s/a"]);
+      const state: CatalogTickState = newCatalogTickState();
+      await catalogTick(t.db, client, tickConfig(), state, { now: new Date("2026-09-26T12:16:00Z") });
+      expect(snapCount(t, "2026-09-26")).toBe(1);
+      // следующие сутки, 03:00 UTC: сверка есть, ночной фазы еще не было — снимка за 27-е нет
+      await catalogTick(t.db, client, tickConfig(), state, { now: new Date("2026-09-27T03:00:00Z") });
+      expect(snapCount(t, "2026-09-27")).toBe(0);
+    } finally {
+      t.close();
+    }
+  });
+});

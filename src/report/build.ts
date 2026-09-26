@@ -986,6 +986,10 @@ function aiBlock(card: RepoCard): Block[] {
     if (title !== null) out.push({ kind: "paragraph", tone: "subhead", lines: [[strong(title)]] });
     out.push(para(...aiParagraphs(note.text).map((l) => [escaped(l)] as InlineLine)));
   }
+  // тур 3 В5.5 (п.10, 26.09): разборы, не прошедшие проверку фактами, — как на
+  // карточке и ДО строки с моделью и датой (без траектории и без «нет фактов»)
+  const failed = (ai.failures ?? []).filter((f) => f.role !== "trajectory" && !f.reason.startsWith("нет фактов"));
+  if (failed.length > 0) out.push({ kind: "paragraph", tone: "fine", lines: failed.map((f) => line(`Разбор «${aiRoleTitle(f.role)}» не прошел проверку фактами.`)) });
   const models = [...new Set(notes.map((n) => aiModelName(n.note.model)))].join(", ");
   const when = ai.generatedAt ? ` от ${fmtDate(ai.generatedAt)}` : "";
   out.push({

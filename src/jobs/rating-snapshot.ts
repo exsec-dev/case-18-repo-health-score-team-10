@@ -10,8 +10,14 @@
 // Прежняя ленивая точка тура 1 (пустая очередь рейтинга после ночной фазы)
 // убрана: на стенде очередь не пустеет сутками (доочередь старых сканов), и
 // снимок не писался бы вовсе; idle слота «только легкие» наступал до конца волны.
+// Тур 3 (26.09, дефект снимка): пока идет пересчет после смены модели, в выдаче
+// только часть репо (строки новой версии еще не у всех) — снимок откладывается и
+// дописывается следующим обходом каталога в те же сутки (`snapshotAtCatalogTick`).
 import type { Database } from "bun:sqlite";
 import { listRepos } from "../api/repos";
+import { getMetaValue } from "../db";
+import { SCHED_META } from "../api/health";
+import { modelStale } from "../score/rescore";
 
 /** Ретеншен снимков (сутки): месяц динамики + запас на пропуск дня. */
 export const RATING_SNAPSHOT_RETENTION_DAYS = 35;
@@ -76,4 +82,24 @@ export function purgeOldRatingSnapshots(db: Database, opts: { now?: Date; days?:
   const r = db.query("DELETE FROM rating_snapshots WHERE taken_at < ?").run(cutoff);
   if (r.changes > 0) console.log(`[sweep] удалено снимков рейтинга старше ${days} суток: ${r.changes}`);
   return r.changes;
+}
+
+export type CatalogSnapshotOutcome = SnapshotResult | { taken: false; rows: 0; day: string; deferred: "rescore" | "not-yet" };
+
+/**
+ * Снимок на обходе каталога (тур 3). Пишется, когда ночная фаза идет сейчас
+ * (`nightlyDue`, ДО обхода — места до эвикции и волны) или уже прошла сегодня
+ * (отложенный снимок), снимка за сутки еще нет и пересчет после смены модели
+ * завершен: иначе `listRepos` видит только часть рейтинга (строк текущей
+ * `MODEL_VERSION` еще нет у всех), и завтрашние стрелки сравнивали бы с неполным
+ * списком.
+ */
+export function snapshotAtCatalogTick(db: Database, opts: { now?: Date; nightlyDue: boolean }): CatalogSnapshotOutcome {
+  const now = opts.now ?? new Date();
+  const day = utcDayOf(now);
+  const nightlyToday = (getMetaValue(db, SCHED_META.nightlyOkAt) ?? "").slice(0, 10) === day;
+  if (!opts.nightlyDue && !nightlyToday) return { taken: false, rows: 0, day, deferred: "not-yet" };
+  if (db.query("SELECT 1 FROM rating_snapshots WHERE taken_at = ? LIMIT 1").get(day) !== null) return { taken: false, rows: 0, day };
+  if (modelStale(db)) return { taken: false, rows: 0, day, deferred: "rescore" };
+  return takeRatingSnapshot(db, { now });
 }

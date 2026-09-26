@@ -148,14 +148,15 @@ export function LanguageName({ name, color, noLanguage = false }: { name: string
 
 /**
  * В4.6 (У27): слаг репозитория — один компонент на рейтинг и карточку.
- * Пробелы вокруг слеша и обрезка по ширине решаются здесь, а не на каждом
- * экране; `title` всегда несёт полную текстовую форму из `slugOf`, чтобы
+ * Форма и обрезка по ширине решаются здесь, а не на каждом экране; тур 3
+ * В5.5 (26.09, Екатерина, п.8): `org/repo` БЕЗ пробелов вокруг слеша — как
+ * слаг копируется и вставляется (пробелы У27 сняты); `title` всегда несёт полную текстовую форму из `slugOf`, чтобы
  * обрезанное имя можно было прочесть наведением.
  */
 export function RepoSlug({ org, repo, variant }: { org: string; repo: string; variant: "body-1" | "subheader-1" | "subheader-2" | "header-1" }) {
   return (
     <Text variant={variant} as={variant === "header-1" ? "h1" : "span"} ellipsis title={slugOf(org, repo)} style={{ display: "block" }}>
-      {org} / {repo}
+      {slugOf(org, repo)}
     </Text>
   );
 }

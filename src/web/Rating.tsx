@@ -6,7 +6,7 @@
 // тулбар одной строкой (size m), таблица, методика в правой панели.
 import { coverageLine } from "./ratingParams";
 import { loadRatingScroll, rememberRatingHref, saveRatingScroll } from "./ratingReturn";
-import { ArrowDown, ArrowUp, ArrowUpRightFromSquare, BarsAscendingAlignLeft, BarsDescendingAlignLeft, Flag, Magnifier, Minus, Sparkles, SquareListUl } from "@gravity-ui/icons";
+import { ArrowDown, ArrowUp, ArrowUpRightFromSquare, BarsAscendingAlignLeft, BarsDescendingAlignLeft, Flag, Gear, Magnifier, Minus, Sparkles, SquareListUl } from "@gravity-ui/icons";
 import {
   ActionTooltip,
   Alert,
@@ -295,8 +295,10 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
   const toolbar = (
     <Flex direction="column" gap={3} style={{ marginBottom: "var(--g-spacing-3)" }}>
       <Flex gap={2} wrap alignItems="center">
-        {/* flex-обертка: блочная давала полю 27.3px против 28px у соседних Select */}
-        <div style={{ flex: "1 1 200px", minWidth: 200, display: "flex" }}>
+        {/* flex-обертка: блочная давала полю 27.3px против 28px у соседних Select.
+            Тур 3 В5.5 (п.2): основа 160px — тулбар на экранах ПК от 1366 в одну строку,
+            поле растягивается на остаток */}
+        <div style={{ flex: "1 1 160px", minWidth: 160, display: "flex" }}>
           {/* В4.6 (У29, замечание владельца 3): плейсхолдер называет ДЕЙСТВИЕ,
               а перечень полей уезжает в подсказку у правого края инпута. Текст
               подсказки сверен по коду (`repos.ts`, matchesQ), а не написан на
@@ -339,7 +341,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
         <Select
           label="Язык:"
           size="m"
-          width={220}
+          width={150}
           multiple
           hasClear
           placeholder="все"
@@ -357,7 +359,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
         <Select
           label="Размер:"
           size="m"
-          width={220}
+          width={150}
           multiple
           hasClear
           placeholder="любой"
@@ -371,7 +373,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
         <Select
           label="CI:"
           size="m"
-          width={170}
+          width={110}
           hasClear
           placeholder="все"
           value={ciValue === null ? [] : [ciValue]}
@@ -393,6 +395,19 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
             items={setupItems}
             showStatus
             onUpdate={(updated) => setHidden(updated.filter((i) => !i.selected).map((i) => i.id))}
+            /* тур 3 В5.5 (п.2): переключатель — иконкой, счетчик колонок — в подсказке
+               (место в строке тулбара отдано фильтрам) */
+            renderSwitcher={({ onClick, onKeyDown }) => {
+              const shown = setupItems.filter((i) => i.selected !== false).length;
+              const label = `Колонки: ${shown} из ${setupItems.length}`;
+              return (
+                <ActionTooltip title={label}>
+                  <Button view="outlined" size="m" onClick={onClick} onKeyDown={onKeyDown} aria-label={label}>
+                    <Icon data={Gear} size={16} />
+                  </Button>
+                </ActionTooltip>
+              );
+            }}
           />
         )}
         <SegmentedRadioGroup

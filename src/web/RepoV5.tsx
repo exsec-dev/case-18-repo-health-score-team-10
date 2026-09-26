@@ -606,8 +606,8 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
           </Flex>
         )}
 
-        {stamp}
-
+        {/* тур 3 В5.5 (п.10, 26.09): строки о непрошедших проверку разборах — ДО
+            строки с датой обзора (дата закрывает блок) */}
         {failures.length > 0 && (
           <Flex direction="column" gap={1}>
             {failures.map((f) => (
@@ -618,6 +618,7 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
           </Flex>
         )}
 
+        {stamp}
       </Flex>
     </section>
   );
@@ -944,16 +945,13 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
 // ---------- бейдж для README (выбор 5-A) ----------
 
 /**
- * Замечание 9 (25.09): бейдж ставит в README тот, кто этот README ведет, — кнопка
- * только у своего репозитория (бейджи CI у GitLab/GitHub выдаются в настройках
- * проекта, не посетителю). Публичный маршрут SVG открыт всем (К5.8).
+ * Бейдж для README. Тур 3 В5.5 (п.4, 26.09, Екатерина): кнопка у ЛЮБОГО публичного
+ * репозитория рейтинга, не только у своего (вытесняет замечание 9 от 25.09 —
+ * «только у своего»): маршрут SVG и так открыт всем (К5.8), бейдж чужого репо
+ * годится для подборок, статей и форков. Приватному и internal кнопки нет:
+ * публичный маршрут отвечает им 404 — проверка ниже.
  */
-export function BadgeButton({ org, repo, publicBaseUrl, own }: { org: string; repo: string; publicBaseUrl: string; own: boolean }) {
-  if (!own) return null;
-  return <BadgeButtonOwn org={org} repo={repo} publicBaseUrl={publicBaseUrl} />;
-}
-
-function BadgeButtonOwn({ org, repo, publicBaseUrl }: { org: string; repo: string; publicBaseUrl: string }) {
+export function BadgeButton({ org, repo, publicBaseUrl }: { org: string; repo: string; publicBaseUrl: string }) {
   const path = `/api/v1/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`;
   const [ok, setOk] = useState(false);
   useEffect(() => {

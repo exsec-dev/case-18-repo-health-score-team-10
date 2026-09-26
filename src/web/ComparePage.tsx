@@ -567,9 +567,9 @@ function AddCompareDialog({
                   onMouseEnter={() => !inSet && setActive(i)}
                 >
                   {s.section === "manual" ? (
-                    <span className="rh-cmp-add-plus">
-                      <Icon data={Plus} size={16} />
-                    </span>
+                    // тур 3 В5.5 (п.13): плюс только справа (кнопка); слева — пустое место
+                    // размера аватара, чтобы текст строки стоял в одну линию с остальными
+                    <span className="rh-cmp-add-plus" aria-hidden="true" />
                   ) : (
                     <RepoAvatar repo={s.repo} logoUrl={s.logoUrl} size="s" />
                   )}

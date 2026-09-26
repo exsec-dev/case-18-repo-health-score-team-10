@@ -106,7 +106,8 @@ describe("Р2.5: PDF — синяя ссылка; аватар снят (В4.9, 
       const json = JSON.stringify(doc.content[0]);
       expect(json).not.toContain(`"text":"${avatarInitials(card.repo.repo)}"`);
       expect(json).not.toContain("image");
-      expect(json).toContain('"text":"m47 / full"');
+      // тур 3 В5.5 (п.8, 26.09): слаг в шапке PDF без пробелов вокруг слеша
+      expect(json).toContain('"text":"m47/full"');
     } finally {
       close();
     }
