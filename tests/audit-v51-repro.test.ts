@@ -540,7 +540,7 @@ describe("В5.1 Б5: хартии и входы ролей", () => {
   test("В5.1-20: ключи хартий реальны (scores.points, docs.readme), обещания входа честные, доклад инъекции снят", async () => {
     const { loadCharter } = await import("../src/summary/charters");
     const trajectory = loadCharter("trajectory");
-    expect(trajectory.version).toBe("4"); // В5.2 (Б7): типографика хартий — версия поднята
+    expect(trajectory.version).toBe("5"); // В5.2 (Б7): типографика (4); В5.5 тур 2: покрытие — полнота данных, не тесты (5)
     expect(trajectory.text).toContain("{f:scores.points}");
     expect(trajectory.text).not.toContain("{f:scores.point}");
     expect(trajectory.text).toContain("ТОЛЬКО числовые точки");

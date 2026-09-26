@@ -8,8 +8,10 @@ import { loadAllCharters } from "../src/summary/charters";
 const all = loadAllCharters();
 
 test("charter versions bumped and load: issues 4->5, code 7->8, overview 5->6", () => {
-  expect(all.issues.version).toBe("5");
-  expect(all.code.version).toBe("8");
+  // V5.5 tour 2 (HQ acceptance, live repo-vitals rerun): issues 5->6, code 8->9 —
+  // pinned in tests/v55-t2-charters.test.ts; the tour-1 rules below still hold
+  expect(all.issues.version).toBe("6");
+  expect(all.code.version).toBe("9");
   expect(all.overview.version).toBe("6");
 });
 
