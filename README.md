@@ -173,7 +173,7 @@ bun scripts/scan.ts <org>/<repo>
 mkdir -p .stand && cp .env.example .stand/.env    # вписать токен; без SITE_ADDRESS прокси работает по HTTP
 echo "HC_DIR=$PWD/.stand" >> .stand/.env
 HTTP_PORT=8080 docker compose --env-file .stand/.env -f deploy/compose.yaml up -d --build
-curl http://localhost:8080/api/health             # "ok": true
+curl http://localhost:8080/api/health             # через несколько секунд – "ok": true
 ```
 
 Если на машине занят и порт 443, добавьте `HTTPS_PORT=8443` перед `docker compose`. Остановить:
