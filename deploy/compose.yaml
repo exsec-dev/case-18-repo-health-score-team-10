@@ -1,0 +1,69 @@
+# HealthCraft — стенд (В5.4): два процесса сервиса на одной SQLite + прокси с HTTPS.
+#
+#   web    — сайт и API, пользовательские сканы, AI-обзоры и проверки
+#   rating — обход каталога, плановые сканы рейтинга, стартовый пересчет, AI топа
+#   caddy  — HTTPS (Let's Encrypt), заголовки защиты, X-Forwarded-For = адрес клиента
+#
+# Каталог стенда HC_DIR (по умолчанию /srv/healthcraft): .env (секреты), data/ (БД),
+# tmp/ (клоны). Запуск: deploy/deploy.sh или `docker compose -f deploy/compose.yaml up -d --build`.
+# Наружу опубликован только caddy (80/443); порты сервиса доступны лишь внутри сети compose.
+name: healthcraft
+
+x-service: &service
+  build:
+    context: ..
+    dockerfile: Dockerfile
+  image: healthcraft:latest
+  restart: unless-stopped
+  init: true              # tini как PID 1: реапит осиротевшие git-процессы клонов
+  stop_grace_period: 30s  # SIGTERM: заявки возвращаются в очередь, клоны гасятся (В4.4)
+  env_file:
+    - path: ${HC_DIR:-/srv/healthcraft}/.env
+      required: false
+
+services:
+  web:
+    <<: *service
+    environment:
+      PROCESS_ROLE: web
+      PORT: "8418"
+    volumes:
+      - ${HC_DIR:-/srv/healthcraft}/data:/data
+      - ${HC_DIR:-/srv/healthcraft}/tmp/web:/tmp/clones
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:8418/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
+
+  rating:
+    <<: *service
+    environment:
+      PROCESS_ROLE: rating
+      PORT: "8419"
+    volumes:
+      - ${HC_DIR:-/srv/healthcraft}/data:/data
+      - ${HC_DIR:-/srv/healthcraft}/tmp/rating:/tmp/clones
+    # фон уступает процессор сайту и пользовательским заявкам (дефолт — 1024)
+    cpu_shares: 256
+
+  caddy:
+    image: caddy:2.10
+    restart: unless-stopped
+    depends_on:
+      - web
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # домен стенда (HTTPS выпускается сам) или ":80" — только HTTP, пока домена нет
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

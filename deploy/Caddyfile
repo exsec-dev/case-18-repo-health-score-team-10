@@ -1,0 +1,29 @@
+# HealthCraft — прокси стенда (В5.4).
+# SITE_ADDRESS — домен (Caddy сам выпускает и продлевает сертификат Let's Encrypt)
+# или ":80" — только HTTP, пока домена нет.
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# Заголовки защиты на ВСЕ ответы, включая HTML-страницу: Bun не дает поставить их
+	# на HTML-бандл (src/server.ts, отклонение В4.4) — закрывает прокси.
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		# внешнее: шрифт Inter (Google Fonts, импорт uikit), картинки — аватары Я ID и логотипы
+		# репозиториев SourceCraft (https:), иконка — data:
+		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+		-Server
+	}
+
+	reverse_proxy web:8418 {
+		# адрес клиента — только тот, что видит прокси: входящий X-Forwarded-For не доверяется
+		# (ключ лимита badge по IP, src/server.ts)
+		header_up X-Forwarded-For {remote_host}
+		# «думающие» обработчики живут до 120 с (idleTimeout сервера)
+		transport http {
+			read_timeout 130s
+		}
+	}
+}
