@@ -380,7 +380,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
           onUpdate={(v) => setParams({ ci: v[0] ?? null })}
         />
         {/* тематика и security status из ТЗ §7 — названное ограничение, а не фильтр */}
-        <HelpMark iconSize="m" aria-label="Почему нет фильтров по тематике и безопасности">
+        <HelpMark iconSize="m" aria-label="О фильтрах: тематика, безопасность, CI">
           {FILTER_LIMITS_NOTE}
         </HelpMark>
         {/* Доводка 21.09: пара «Сортировка: …» + кнопка направления снята —
