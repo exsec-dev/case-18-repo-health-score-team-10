@@ -24,6 +24,9 @@ ENV NODE_ENV=production \
     DATA_DIR=/data \
     TMPDIR=/tmp/clones
 
-USER bun
+# вход: отдает каталоги томов пользователю bun и запускает процесс от него (не от root)
+COPY deploy/entrypoint.sh /usr/local/bin/hc-entrypoint
+RUN chmod 755 /usr/local/bin/hc-entrypoint
 EXPOSE 8418
+ENTRYPOINT ["/usr/local/bin/hc-entrypoint"]
 CMD ["bun", "run", "src/server.ts"]

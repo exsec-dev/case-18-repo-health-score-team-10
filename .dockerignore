@@ -6,3 +6,4 @@
 !tsconfig.json
 !prompts
 !src
+!deploy/entrypoint.sh
