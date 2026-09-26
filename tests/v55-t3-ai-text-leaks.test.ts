@@ -200,7 +200,7 @@ describe("charters carry the rule with a bad -> good example (versions +1)", () 
     expect(all.issues.version).toBe("7");
     expect(all.security.version).toBe("6");
     expect(all.overview.version).toBe("7");
-    expect(all.trajectory.version).toBe("6");
+    expect(all.trajectory.version).toBe("7");
     expect(all.flagger.version).toBe("4");
   });
 

@@ -52,3 +52,21 @@ describe("adjustment texts without jargon (findings 16, 17, 6)", () => {
     }
   });
 });
+
+describe("trajectory input: categories named in Russian (live check 27.09)", () => {
+  test("keys become interface titles; values and other fields unchanged", async () => {
+    const { namedTrajectoryPoints } = await import("../src/summary/pipeline");
+    const out = namedTrajectoryPoints([{ date: "2026-09-25", headSha: "abc", index: 83, coverage: 1, categories: { documentation: 54, activity: 90, issues: 95, code: 88 } }]);
+    expect(out[0]!.categories).toEqual({ Документация: 54, Активность: 90, Задачи: 95, "Состояние кода": 88 });
+    expect(out[0]!.index).toBe(83);
+  });
+});
+
+describe("stripMarkers: markers listed with commas leave no ',,' (live check 27.09)", () => {
+  test("commas before the sentence end are dropped, runs of commas collapse", async () => {
+    const { stripMarkers } = await import("../src/summary/validator");
+    expect(stripMarkers("Проект часто обновляется{sp:activity:1},{sp:activity:2}.")).toBe("Проект часто обновляется.");
+    expect(stripMarkers("Есть README{f:docs.presence},, и лицензия.")).toBe("Есть README, и лицензия.");
+    expect(stripMarkers("Индекс 83{f:scores.points}, покрытие полное.")).toBe("Индекс 83, покрытие полное.");
+  });
+});
