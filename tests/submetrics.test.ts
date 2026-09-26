@@ -30,11 +30,17 @@ describe("П4.2: полнота словаря", () => {
       .concat([
         { key: "cicd.runs", value: { last_status: "success", success_rate: 0.9, duration_p50: 300, runs_count: 5 } },
         { key: "appsec.findings", value: { severity_counts: { critical: 0, high: 1, medium: 0, low: 0 }, resolved_share: 0.5, secrets_critical: false } },
+        // В5.5 тур 2 (W4, ЗН-2): справочные review PR и карта владельцев
+        { key: "activity.pr_review", value: { pulls: 3, sampled: 2, answered: 1, median_first_response_hours: 5, open_sampled: 1, waiting_over_threshold: 0, threshold_hours: 72, median_review_comments: 1, comments_capped: 0, merged: 1, median_merge_hours: 30 } },
+        { key: "code.ownership", value: { changes: 4, single_owner_share: 1, dirs: [{ dir: "src", changes: 4, authors: 1, owner: "Dev", owner_share: 1 }], dirs_total: 1, threshold: 0.8 } },
       ]);
     const tracker = cardFacts().map((f) => (f.key === "issues.stats" ? { key: "issues.stats", value: { open: 0, closed: 0 } } : f));
-    const produced = [...new Set([...computedKeys(full), ...computedKeys(tracker)])].sort();
-    // В5 (К5.9): + bus factor (показ без веса); 4.3.0 (Р1): + «Файлы тестов»
-    expect(produced.length).toBe(30);
+    // В5.5 тур 2 (W4): PR нет — одна строка «PR не используются» (своя ветка ключа)
+    const noPulls = [...cardFacts(), { key: "activity.pr_review", value: { pulls: 0, sampled: 0 } }];
+    const produced = [...new Set([...computedKeys(full), ...computedKeys(tracker), ...computedKeys(noPulls)])].sort();
+    // В5 (К5.9): + bus factor (показ без веса); 4.3.0 (Р1): + «Файлы тестов»;
+    // В5.5 тур 2 (W4): + 5 строк review PR и карта владельцев
+    expect(produced.length).toBe(36);
     expect(Object.keys(SUBMETRICS).sort()).toEqual(produced);
     for (const key of produced) {
       const spec = SUBMETRICS[key]!;

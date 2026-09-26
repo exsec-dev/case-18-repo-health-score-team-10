@@ -146,6 +146,15 @@ export const CHANNEL_KINDS = ["cicd.configs", "cicd.runs", "appsec.findings"];
 /** Kinds публичных категорий (Score в рейтинге): READ_KINDS минус CHANNEL_KINDS. */
 export const PUBLIC_KINDS = READ_KINDS.filter((k) => !CHANNEL_KINDS.includes(k));
 
+/**
+ * В5.5 тур 2 (W4, ЗН-2): справочные факты — review PR и карта владельцев.
+ * Расчет читает их ТОЛЬКО для показа (подметрики DISPLAY_ONLY, балл null) и
+ * НЕ включает в READ_KINDS: пригодность скана, public_status, замещение
+ * историей и Score от них не зависят (§2 тур 2 п.3). Факт не ok — строка
+ * показа «нет данных» с причиной, без подстановки из прошлого скана.
+ */
+export const DISPLAY_KINDS = ["activity.pr_review", "code.ownership"];
+
 /** Причины no-data, описывающие не репо, а права/сбой чтения — скан непригоден. */
 const INELIGIBLE_NO_DATA_REASONS = ["access", "other"];
 
@@ -299,6 +308,8 @@ export interface EffectiveFacts {
    * «проекта нет» (Q&A №13), а не отсутствие данных.
    */
   emptyRepo: boolean;
+  /** В5.5 тур 2 (W4): справочные факты скана не ok — kind → причина (`access`, `bad-channel`…) */
+  displayMissing?: Record<string, string>;
 }
 
 /**
@@ -339,7 +350,15 @@ export function effectiveFacts(db: Database, scanId: number, repoId: number): Ef
     }
     // без истории → kind отсутствует в ok → no-data субметрик
   }
-  return { ok, stale, staleCats, emptyRepo };
+  // В5.5 тур 2 (W4): справочные — без замещения историей; нет строки — нет показа
+  const displayMissing: Record<string, string> = {};
+  for (const kind of DISPLAY_KINDS) {
+    const row = rows.find((r) => r.key === kind);
+    if (!row) continue;
+    if (row.status === "ok") ok.set(kind, parseFactValue(row.value));
+    else displayMissing[kind] = String((parseFactValue(row.value) as { reason?: unknown } | null)?.reason ?? row.status);
+  }
+  return { ok, stale, staleCats, emptyRepo, displayMissing };
 }
 
 export function compute(db: Database, scanId: number, opts: { now?: Date } = {}): Scores {
@@ -347,7 +366,7 @@ export function compute(db: Database, scanId: number, opts: { now?: Date } = {})
   const scan = db.query("SELECT repo_id FROM scans WHERE id = ?").get(scanId) as { repo_id: number } | null;
   if (!scan) throw new Error(`scan ${scanId} not found`);
   const eff = effectiveFacts(db, scanId, scan.repo_id);
-  return computeFromFacts(eff.ok, { scanId, repoId: scan.repo_id, stale: eff.stale, staleCats: eff.staleCats, emptyRepo: eff.emptyRepo }, now);
+  return computeFromFacts(eff.ok, { scanId, repoId: scan.repo_id, stale: eff.stale, staleCats: eff.staleCats, emptyRepo: eff.emptyRepo, displayMissing: eff.displayMissing }, now);
 }
 
 /** Происхождение фактов для computeFromFacts: идентификаторы скана и маркеры замещения историей. */
@@ -359,6 +378,8 @@ export interface ComputeInput {
   staleCats?: Set<string>;
   /** git-канал подтвердил пустой репозиторий (EffectiveFacts.emptyRepo) */
   emptyRepo?: boolean;
+  /** В5.5 тур 2 (W4): справочные факты не ok — kind → причина (EffectiveFacts.displayMissing) */
+  displayMissing?: Record<string, string>;
 }
 
 /**
@@ -379,14 +400,14 @@ export function computeFromFacts(ok: Map<string, unknown>, input: ComputeInput, 
     documentation: scoreDocumentation(ok, git),
     cicd: scoreCicd(ok, git),
     security: scoreSecurity(ok),
-    activity: scoreActivity(derived, now, git),
+    activity: withPrReview(scoreActivity(derived, now, git), ok, input.displayMissing),
     issues: scoreIssues(ok, derived),
     // 4.3.1 (В5.5 тур 1, П-1 парковки В4.9): «кода нет» — явная ветка балла 0
     // с причиной, а не «нет данных»: код в репозитории ЗАВЕДОМО отсутствует
     // (это факт о репо, Q&A №13), tri-state «no-data не ухудшает» про незнание,
     // а не про подтвержденную пустоту. 4.3.0 (Н3) давала здесь null. Причина
     // остается в `no_data` — её читают карточка (partialNote) и полоса вкладов.
-    code: emptyKind !== null ? { score: 0, no_data: `no source code — ${emptyKind}`, submetrics: {} } : scoreCode(derived, ok.has("tree.stats")),
+    code: withOwnership(emptyKind !== null ? { score: 0, no_data: `no source code — ${emptyKind}`, submetrics: {} } : scoreCode(derived, ok.has("tree.stats")), ok, input.displayMissing),
   };
   for (const [k, cat] of Object.entries(categories)) {
     if (staleCats.has(k)) cat.stale = true;
@@ -930,6 +951,70 @@ function scoreCode(derived: DerivedMetrics, hasTree: boolean): CategoryScore {
     submetrics,
     adjustment: { kind: "small-code", loc: derived.codeLoc, full: CODE_FULL_LOC, raw: rawScore, center: CODE_NEUTRAL },
   };
+}
+
+// ---------- В5.5 тур 2 (W4, ЗН-2): справочные подметрики ----------
+
+/**
+ * Review и bottlenecks PR — строки показа «Активности» без веса (балл null,
+ * DISPLAY_ONLY): балл категории, индекс и покрытие не меняются (строка
+ * добавляется ПОСЛЕ расчета балла). Только у категории с подметриками (без
+ * истории git строк нет) и только если факт собран: у сканов прежнего
+ * сборщика строк нет вовсе. PR нет — одна строка «PR не используются»
+ * (данные); только черновики — она же; факт не ok — она же с причиной.
+ */
+export function withPrReview(cat: CategoryScore, ok: Map<string, unknown>, missing: Record<string, string> | undefined): CategoryScore {
+  if (Object.keys(cat.submetrics).length === 0) return cat;
+  const pr = ok.get("activity.pr_review") as Record<string, unknown> | undefined;
+  const miss = missing?.["activity.pr_review"];
+  if (!pr) {
+    if (miss !== undefined) cat.submetrics.pr_review = { score: null, value: null, note: `pr review no-data: ${miss}` };
+    return cat;
+  }
+  const sampled = num(pr.sampled) ?? 0;
+  if ((num(pr.pulls) ?? 0) === 0 || sampled === 0) {
+    cat.submetrics.pr_review = { score: null, value: { pulls: num(pr.pulls) ?? 0, sampled } };
+    return cat;
+  }
+  const answered = num(pr.answered) ?? 0;
+  const merged = num(pr.merged) ?? 0;
+  cat.submetrics.pr_first_response = {
+    score: null,
+    value: num(pr.median_first_response_hours),
+    ...(answered === 0 ? { note: "no reviewer response in sample" } : {}),
+  };
+  cat.submetrics.pr_waiting = { score: null, value: { waiting: num(pr.waiting_over_threshold) ?? 0, open: num(pr.open_sampled) ?? 0, threshold_hours: num(pr.threshold_hours) } };
+  cat.submetrics.pr_review_comments = {
+    score: null,
+    value: num(pr.median_review_comments),
+    ...((num(pr.comments_capped) ?? 0) > 0 ? { note: "comments page capped — at least" } : {}),
+  };
+  cat.submetrics.pr_merge_time = {
+    score: null,
+    value: num(pr.median_merge_hours),
+    note: merged === 0 ? "no merged pulls" : "merge time approximated by updated_at",
+  };
+  return cat;
+}
+
+/**
+ * Карта владельцев файлов — строка показа «Состояния кода» без веса
+ * (DISPLAY_ONLY): значение — сам агрегат факта (карточка и отчет рисуют по
+ * нему таблицу каталогов) плюс признак CODEOWNERS из `docs.presence`. У
+ * категории без подметрик («кода нет», git не прочитан) строки нет.
+ */
+export function withOwnership(cat: CategoryScore, ok: Map<string, unknown>, missing: Record<string, string> | undefined): CategoryScore {
+  if (Object.keys(cat.submetrics).length === 0) return cat;
+  const own = ok.get("code.ownership") as Record<string, unknown> | undefined;
+  const miss = missing?.["code.ownership"];
+  if (!own) {
+    if (miss !== undefined) cat.submetrics.ownership = { score: null, value: null, note: `ownership no-data: ${miss}` };
+    return cat;
+  }
+  const presence = ok.get("docs.presence") as { codeowners?: unknown } | undefined;
+  const codeowners = typeof presence?.codeowners === "boolean" ? presence.codeowners : null;
+  cat.submetrics.ownership = { score: null, value: { ...own, codeowners } };
+  return cat;
 }
 
 /** Круг 2 (В1): сборщик 3 посчитал тесты, непустых нет — «тестов нет, в балл не входит». */

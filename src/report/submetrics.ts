@@ -157,6 +157,41 @@ const tracker: Formatter = (v) => {
   return `открытых ${num(t.open)}, закрытых ${num(t.closed)}`;
 };
 
+// ---------- В5.5 тур 2 (W4, ЗН-2): review PR и карта владельцев ----------
+
+/** Часы: до 48 ч — «N ч», дольше — «N дней» (сутки из 24 ч). */
+const hoursOrDays: Formatter = (v) => {
+  if (!isNum(v)) return null;
+  if (v < 48) return `${num(v, 1)} ч`;
+  const days = Math.round((v / 24) * 10) / 10;
+  return `${num(days, 1)} ${plural(days, "день", "дня", "дней")}`;
+};
+
+/** Ревью PR без выборки: PR нет — «PR не используются» (данные); только черновики — числом. */
+const prReview: Formatter = (v) => {
+  const r = obj(v);
+  if (!r || !isNum(r.pulls)) return null;
+  if (r.pulls === 0) return "PR не используются";
+  return `только черновики: ${num(r.pulls)}`;
+};
+
+/** Bottleneck: {waiting, open} → «1 из 3 открытых»; открытых нет — словами. */
+const prWaiting: Formatter = (v) => {
+  const w = obj(v);
+  if (!w || !isNum(w.waiting) || !isNum(w.open)) return null;
+  if (w.open === 0) return "открытых PR нет";
+  return `${num(w.waiting)} из ${num(w.open)} ${plural(w.open, "открытого", "открытых", "открытых")}`;
+};
+
+/** Карта владельцев: доля изменений у единственного владельца; изменений нет — словами. */
+const ownership: Formatter = (v) => {
+  const o = obj(v);
+  if (!o) return null;
+  if (o.changes === 0) return "изменений кода за год нет";
+  if (!isNum(o.single_owner_share)) return null;
+  return `${Math.round(o.single_owner_share * 100)}% изменений за год`;
+};
+
 // ---------- словарь ----------
 
 /** Ключ — `<категория>.<подметрика>`, как в `categories[*].submetrics` оценки. */
@@ -195,6 +230,13 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   "code.tests": { title: "Файлы тестов", unit: "доля файлов кода, %", format: share },
   "code.root": { title: "Порядок в корне репозитория", unit: "элементы корня", format: count("элемент", "элемента", "элементов") },
   "code.todo_total": { title: "Маркеров TODO/FIXME в коде", unit: "штуки", format: plain },
+  // В5.5 тур 2 (W4, ЗН-2): справочные, без веса (DISPLAY_ONLY)
+  "activity.pr_review": { title: "Ревью предложений изменений", unit: "PR нет / только черновики (справочно, без веса)", format: prReview },
+  "activity.pr_first_response": { title: "Время до первого ответа на PR", unit: "медиана, часы → ч/дни (справочно, без веса)", format: hoursOrDays },
+  "activity.pr_waiting": { title: "PR без ответа дольше 3 дней", unit: "открытые PR выборки (справочно, без веса)", format: prWaiting },
+  "activity.pr_review_comments": { title: "Комментариев ревью на PR", unit: "медиана по выборке (справочно, без веса)", format: plain },
+  "activity.pr_merge_time": { title: "Время до слияния PR", unit: "медиана, часы → ч/дни (справочно, без веса)", format: hoursOrDays },
+  "code.ownership": { title: "Изменения у единственного владельца", unit: "доля изменений кода за год (справочно, без веса)", format: ownership },
 };
 
 /**
@@ -202,7 +244,21 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
  * категории не идет. Одна копия для карточки, MD и PDF.
  */
 // В5.3 (25.09): bus_factor — без веса в SUBWEIGHTS методики (подпись «справочно, без веса»), серым как прочие
-export const DISPLAY_ONLY = new Set(["activity.mirror_likeness", "activity.commits_90d", "activity.commits_365d", "activity.sync_bursts", "activity.bus_factor", "code.todo_total"]);
+export const DISPLAY_ONLY = new Set([
+  "activity.mirror_likeness",
+  "activity.commits_90d",
+  "activity.commits_365d",
+  "activity.sync_bursts",
+  "activity.bus_factor",
+  "code.todo_total",
+  // В5.5 тур 2 (W4, ЗН-2; §2 тур 2 п.3 — все новые показатели справочные)
+  "activity.pr_review",
+  "activity.pr_first_response",
+  "activity.pr_waiting",
+  "activity.pr_review_comments",
+  "activity.pr_merge_time",
+  "code.ownership",
+]);
 
 export function displayOnly(category: string, sub: string): boolean {
   return DISPLAY_ONLY.has(`${category}.${sub}`);
@@ -251,6 +307,17 @@ export function submetricNote(category: string, sub: string, note: string | null
   // Н14б: оговорка «доля от не менее 5 пометок» — в показе значения (submetricShownValue)
   if (key === "code.old_share" && note.startsWith("share of at least")) return null;
   if (key === "code.old_share") return { value: "не посчитано: прочитаны не все файлы" };
+  // В5.5 тур 2 (W4): справочные показатели ЗН-2
+  if (key === "activity.pr_review" && note.startsWith("pr review no-data")) return { value: note.endsWith(": access") ? "нет данных: нет доступа" : "нет данных: источник не ответил" };
+  if (key === "activity.pr_first_response" && note.startsWith("no reviewer response")) return { value: "ответов ревьюеров нет" };
+  if (key === "activity.pr_review_comments" && note.startsWith("comments page capped")) {
+    return { remark: "У части PR комментариев больше одной страницы ответа – число комментариев ревью не меньше показанного." };
+  }
+  if (key === "activity.pr_merge_time" && note.startsWith("no merged pulls")) return { value: "слитых PR нет" };
+  if (key === "activity.pr_merge_time" && note.startsWith("merge time approximated")) {
+    return { remark: "Время до слияния PR приблизительное: даты слияния SourceCraft не передает, использована дата последнего изменения PR." };
+  }
+  if (key === "code.ownership" && note.startsWith("ownership no-data")) return { value: "нет данных: история не прочитана" };
   return null;
 }
 
