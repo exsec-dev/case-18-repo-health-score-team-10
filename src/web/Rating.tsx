@@ -6,7 +6,7 @@
 // тулбар одной строкой (size m), таблица, методика в правой панели.
 import { coverageLine } from "./ratingParams";
 import { loadRatingScroll, rememberRatingHref, saveRatingScroll } from "./ratingReturn";
-import { BarsAscendingAlignLeft, BarsDescendingAlignLeft, Magnifier, Sparkles, SquareListUl } from "@gravity-ui/icons";
+import { ArrowDown, ArrowUp, ArrowUpRightFromSquare, BarsAscendingAlignLeft, BarsDescendingAlignLeft, Flag, Magnifier, Minus, Sparkles, SquareListUl } from "@gravity-ui/icons";
 import {
   ActionTooltip,
   Alert,
@@ -38,6 +38,8 @@ import { firstSortOrder, normalizeRatingSearch, pageBeyond } from "./ratingParam
 import {
   CATEGORY_TITLES_RU,
   DEFINITION_NAME_WIDTH,
+  FRAUD_EXPLAIN,
+  FRAUD_TITLE,
   NO_DATA_SHORT,
   NO_SCORE,
   fmtCount,
@@ -705,9 +707,9 @@ function PhoneList({ items, refreshing }: { items: Item[]; refreshing: boolean }
       {items.map((item) => (
         <li key={`${item.org}/${item.repo}`} className="rh-list__item">
           <Flex gap={3} alignItems="center">
-            <Text color="secondary" style={{ minWidth: 24, textAlign: "right" }}>
-              {item.rank === null ? "—" : fmtCount(item.rank)}
-            </Text>
+            <div style={{ minWidth: 28, textAlign: "right" }}>
+              <RankCell item={item} />
+            </div>
             {/* Круг 4 части 2: на телефоне строка репозитория сжимается (имя —
                 с многоточием), а число с полосой не сжимаются — раньше мера
                 строки в 180px выталкивала полосу поверх имени */}
@@ -721,6 +723,41 @@ function PhoneList({ items, refreshing }: { items: Item[]; refreshing: boolean }
         </li>
       ))}
     </ul>
+  );
+}
+
+/**
+ * Ячейка места (В5.5 тур 1, Р1): само место и под ним динамика к последнему
+ * снимку (▲3 / ▼2; без изменения — нейтральный маркер). rankDelta === null —
+ * НИЧЕГО: ни «0», ни «—» (снимка нет или репо в нем отсутствует — пустота
+ * честнее; «—» занято глифом «нет данных»).
+ */
+function RankCell({ item }: { item: Item }) {
+  if (item.rank === null) return <Text color="secondary">—</Text>;
+  return (
+    <Flex direction="column" alignItems="flex-end" gap={0}>
+      <Text color="secondary">{fmtCount(item.rank)}</Text>
+      <RankDelta delta={item.rankDelta} rank={item.rank} />
+    </Flex>
+  );
+}
+
+function RankDelta({ delta, rank }: { delta: number | null; rank: number }) {
+  if (delta === null) return null;
+  const prev = rank + delta; // delta = место в снимке − место сейчас
+  if (delta === 0) {
+    return (
+      <Text variant="caption-2" color="hint" className="rh-rank-delta" title={`в прошлом снимке то же место – ${fmtCount(prev)}`}>
+        <Icon data={Minus} size={10} />
+      </Text>
+    );
+  }
+  const up = delta > 0;
+  return (
+    <Text variant="caption-2" className={up ? "rh-rank-delta rh-rank-delta_up" : "rh-rank-delta rh-rank-delta_down"} title={`в прошлом снимке – ${fmtCount(prev)} место`}>
+      <Icon data={up ? ArrowUp : ArrowDown} size={10} />
+      {fmtCount(Math.abs(delta))}
+    </Text>
   );
 }
 
@@ -754,6 +791,29 @@ function RepoCell({ item, compact = false }: { item: Item; compact?: boolean }) 
               </span>
             </ActionTooltip>
           )}
+          {/* В5.5 тур 1 (Р2): флаг проверки на накрутку — подозрение для человека,
+              не приговор (на место и сортировку не влияет); формулировки — те же,
+              что у плашки на карточке (format.ts FRAUD_*) */}
+          {item.fraud && (
+            <ActionTooltip title={FRAUD_TITLE} description={FRAUD_EXPLAIN}>
+              <span className="rh-rating-fraud" role="img" aria-label={FRAUD_TITLE}>
+                <Icon data={Flag} size={14} />
+              </span>
+            </ActionTooltip>
+          )}
+          {/* В5.5 тур 1 (Р3): внешняя ссылка на страницу репо в SourceCraft;
+              имя по-прежнему ведет на нашу карточку */}
+          <ActionTooltip title="Открыть на sourcecraft.dev">
+            <Link
+              href={item.webUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="rh-rating-ext"
+              aria-label={`Открыть ${item.org}/${item.repo} на sourcecraft.dev`}
+            >
+              <Icon data={ArrowUpRightFromSquare} size={14} />
+            </Link>
+          </ActionTooltip>
         </Flex>
         <Text variant="body-short" color="secondary" ellipsis>
           <LanguageName name={item.language} color={item.languageColor} />
@@ -829,11 +889,12 @@ function buildColumns(
       id: "rank",
       name: "#",
       align: "end",
-      width: 36,
+      width: 56,
       sticky: "start",
       // Ступень 4 (В-4): настоящее место в рейтинге (поле `rank` ответа), а не номер
-      // строки выдачи — при поиске и фильтре «#» совпадает с местом на карточке
-      template: (item: Item) => <Text color="secondary">{item.rank === null ? "—" : fmtCount(item.rank)}</Text>,
+      // строки выдачи — при поиске и фильтре «#» совпадает с местом на карточке.
+      // В5.5 тур 1 (Р1): под местом — динамика к последнему снимку (стрелка и число)
+      template: (item: Item) => <RankCell item={item} />,
     },
     { id: "repo", name: sortable("Репозиторий", "name"), primary: true, sticky: "start", template: (item: Item) => <RepoCell item={item} /> },
     { id: "index", name: sortable("HealthCraft Index", "index"), align: "end", width: 136, template: (item: Item) => <ScoreCell item={item} /> },

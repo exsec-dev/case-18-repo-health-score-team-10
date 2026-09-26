@@ -3036,6 +3036,36 @@ button.rh-category:focus-visible {
   flex-shrink: 0;
 }
 
+/* В5.5 тур 1 (W2): динамика позиции под местом (Р1); плашка фрода — подозрение,
+   не приговор: предупреждающий, а не красный цвет (Р2); внешняя ссылка на
+   SourceCraft в строке (Р3) */
+.rh-rank-delta {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  line-height: 1;
+}
+.rh-rank-delta_up {
+  color: var(--g-color-text-positive);
+}
+.rh-rank-delta_down {
+  color: var(--g-color-text-danger);
+}
+.rh-rating-fraud,
+.rh-rating-ext {
+  display: inline-flex;
+  flex-shrink: 0;
+}
+.rh-rating-fraud {
+  color: var(--g-color-text-warning);
+}
+.rh-rating-ext {
+  color: var(--g-color-text-secondary);
+}
+.rh-rating-ext:hover {
+  color: var(--g-color-text-primary);
+}
+
 /* UX-проход В5.2 25.09 (замечание 3): таблица лимитов — на сером фоне и по ширине
    содержимого; растягивается только карточка */
 .rh-ai-quota-box {
