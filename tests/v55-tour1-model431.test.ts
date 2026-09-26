@@ -69,9 +69,11 @@ async function factsOf(files: Record<string, string>): Promise<Map<string, Recor
   }
 }
 
-test("версии тура: модель 4.3.1-hci, сборщик 4", () => {
-  expect(MODEL_VERSION).toBe("4.3.1-hci");
-  expect(COLLECTOR_VERSION).toBe(4);
+// В5.5 тур 2 поднял версии (4.4.0-hci, сборщик 5 — справочные показатели
+// динамики, tests/v55-tour2-dynamics.test.ts); правила тура 1 в них действуют
+test("версии после тура 1: модель 4.4.0-hci, сборщик 5 (тур 2)", () => {
+  expect(MODEL_VERSION).toBe("4.4.0-hci");
+  expect(COLLECTOR_VERSION).toBe(5);
 });
 
 describe("М1: маркеры техдолга — только в коде вне тестов", () => {

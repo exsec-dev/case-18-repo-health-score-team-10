@@ -43,8 +43,9 @@ const ctx = submetricContext(NOW.toISOString());
 const noDelta = () => ({ delta: 0, reason: null });
 const ids = (recs: Recommendation[]) => recs.map((r) => r.ruleId);
 
-test("модель — 4.3.1-hci", () => {
-  expect(MODEL_VERSION).toBe("4.3.1-hci");
+// В5.5 тур 2: пин текущей версии — 4.4.0-hci (справочные показатели динамики, смысл балла прежний)
+test("модель — 4.4.0-hci", () => {
+  expect(MODEL_VERSION).toBe("4.4.0-hci");
 });
 
 describe("Н3 → В5.5 (М2): «кода нет» — балл 0 с причиной, не «нет данных»", () => {
