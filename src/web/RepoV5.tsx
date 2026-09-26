@@ -10,7 +10,7 @@
 //   - бейдж для README — кнопка в шапке с поповером, как Clone у SourceCraft (5-A).
 // Видимость текстов модели — прежняя (решение 22.09): `card.ai` приходит только
 // зрителю с правами на полный Score; без прав этих блоков нет вовсе.
-import { ArrowsRotateRight, ChevronDown, CircleExclamation, ClockArrowRotateLeft, SealCheck, Shield, ShieldCheck, ShieldExclamation, Sparkles } from "@gravity-ui/icons";
+import { ArrowsRotateRight, ChevronDown, CircleExclamation, ClockArrowRotateLeft, HourglassEnd, SealCheck, Shield, ShieldCheck, ShieldExclamation, Sparkles } from "@gravity-ui/icons";
 import {
   ActionTooltip,
   Alert,
@@ -532,8 +532,8 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
       ? `Следующий запуск – после ${fmtDateTime(ai!.cooldownUntil)}`
       : quotaBlocked ?? runText;
   const runButton = (
-    <Button view="flat-secondary" size="s" aria-label={runText} loading={actions.sending} disabled={runDisabled} onClick={() => void actions.start()}>
-      <Icon data={ArrowsRotateRight} size={14} />
+    <Button view="flat-secondary" size="m" aria-label={runText} loading={actions.sending} disabled={runDisabled} onClick={() => void actions.start()}>
+      <Icon data={ArrowsRotateRight} size={18} />
     </Button>
   );
   const ownerActions = canRun && ai !== null && (own || newerAnalysis) && (
@@ -564,8 +564,9 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
           <Text variant="subheader-3" as="h2" id="rh-ai-title">
             {AI_SECTION_TITLE}
           </Text>
-          {model !== null && <AiModelLabel model={model} />}
+          {/* круг 3 тура 3: знак устаревания — сразу после заголовка */}
           {hasOverview && newerAnalysis && <AiStaleMark />}
+          {model !== null && <AiModelLabel model={model} />}
           {/* выбор 2A (25.09): объем публичной версии — меткой в заголовке, пояснение в подсказке */}
           {publicVersion && hasOverview && (
             // UX-проход 25.09 (замечание 5): знак вопроса — внутри плашки
@@ -662,12 +663,16 @@ export function aiNotesStale(ai: Card["ai"]): boolean {
   return ai != null && ai.check.latestScanId !== null && ai.scanId < ai.check.latestScanId;
 }
 
-/** Знак «текст устарел» у всех AI-плашек: иконка часов со стрелкой и подсказка. */
+/**
+ * Знак «текст устарел» у всех AI-плашек — сразу после заголовка. Круг 3 тура 3
+ * (26.09, Екатерина): «говорящая» иконка — песочные часы «время вышло» в тоне
+ * предупреждения (прежде — серые часы со стрелкой), подсказка зовет обновить.
+ */
 export function AiStaleMark() {
   return (
-    <ActionTooltip title="Обзор сделан по прошлому анализу" description="После него был новый анализ – цифры в тексте могут отличаться от карточки. Обзор можно обновить.">
-      <span className="rh-ai-stale" role="img" aria-label="Обзор сделан по прошлому анализу">
-        <Icon data={ClockArrowRotateLeft} size={14} />
+    <ActionTooltip title="Обзор устарел" description="Сделан по прошлому анализу – после него был новый, цифры в тексте могут не совпадать с карточкой. Обновите обзор.">
+      <span className="rh-ai-stale" role="img" aria-label="Обзор устарел: сделан по прошлому анализу">
+        <Icon data={HourglassEnd} size={18} />
       </span>
     </ActionTooltip>
   );

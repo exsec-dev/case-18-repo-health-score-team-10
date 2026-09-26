@@ -3139,7 +3139,7 @@ button.rh-category:focus-visible {
 /* тур 3 В5.5 (круг 2): знак «AI-текст по прошлому анализу» у AI-плашек */
 .rh-ai-stale {
   display: inline-flex;
-  color: var(--g-color-text-secondary);
+  color: var(--g-color-text-warning);
 }
 .rh-ai-plate__title {
   display: inline-flex;

@@ -271,7 +271,7 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   "issues.tracker_unused": { title: "Трекер не ведется", unit: "открытые и закрытые задачи", format: tracker },
   // 4.4.0 (ТП-9): справочно, без веса
   "issues.backlog_trend": { title: "Динамика бэклога за 90 дней", unit: "создано минус закрыто (справочно, без веса)", format: backlogTrend },
-  "issues.monthly_flow": { title: "Создано и закрыто задач по месяцам", unit: "6 окон по 30 дней (справочно, без веса)", format: monthlyFlow },
+  "issues.monthly_flow": { title: "Поток задач по 30-дневным окнам", unit: "6 окон по 30 дней (справочно, без веса)", format: monthlyFlow },
   // 4.3.1 (В5.5, М1): пометки считаются только в коде — файлы тестов исключены
   "code.density": { title: "Плотность TODO/FIXME в коде", unit: "на 1 тыс. строк", format: perLines("1 тыс.") },
   "code.old_share": { title: "Доля старых TODO", unit: "доля, %", format: share },

@@ -827,7 +827,10 @@ function RankCell({ item }: { item: Item }) {
           <Icon data={up ? TriangleUpFill : TriangleDownFill} size={12} />
         </span>
       )}
-      <Text className="rh-rank__n">{fmtCount(item.rank)}</Text>
+      {/* цвет — явно основной: без него текст наследует вторичный цвет ячейки таблицы */}
+      <Text color="primary" className="rh-rank__n">
+        {fmtCount(item.rank)}
+      </Text>
     </span>
   );
   // подсказка — на всей группе «треугольник + место» (слово владельца 26.09)
@@ -860,6 +863,19 @@ function RepoCell({ item, compact = false }: { item: Item; compact?: boolean }) 
             {/* В4.6 (У27): слаг — один компонент на рейтинг и карточку */}
             <RepoSlug org={item.org} repo={item.repo} variant="subheader-1" />
           </Link>
+          {/* тур 3 В5.5 (круг 3): ссылка на SourceCraft — первой из иконок строки. В5.5 тур 1 (Р3): внешняя ссылка на страницу репо в SourceCraft;
+              имя по-прежнему ведет на нашу карточку */}
+          <ActionTooltip title="Открыть на sourcecraft.dev">
+            <Link
+              href={item.webUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="rh-rating-ext"
+              aria-label={`Открыть ${item.org}/${item.repo} на sourcecraft.dev`}
+            >
+              <Icon data={ArrowUpRightFromSquare} size={14} />
+            </Link>
+          </ActionTooltip>
           {/* В5.2 (Б6, выбор 4C): у репо есть публичный AI-обзор — искра у имени */}
           {item.aiOverview && (
             <ActionTooltip title="Есть AI-обзор">
@@ -878,19 +894,6 @@ function RepoCell({ item, compact = false }: { item: Item; compact?: boolean }) 
               </span>
             </ActionTooltip>
           )}
-          {/* В5.5 тур 1 (Р3): внешняя ссылка на страницу репо в SourceCraft;
-              имя по-прежнему ведет на нашу карточку */}
-          <ActionTooltip title="Открыть на sourcecraft.dev">
-            <Link
-              href={item.webUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="rh-rating-ext"
-              aria-label={`Открыть ${item.org}/${item.repo} на sourcecraft.dev`}
-            >
-              <Icon data={ArrowUpRightFromSquare} size={14} />
-            </Link>
-          </ActionTooltip>
         </Flex>
         <Text variant="body-short" color="secondary" ellipsis>
           <LanguageName name={item.language} color={item.languageColor} />
