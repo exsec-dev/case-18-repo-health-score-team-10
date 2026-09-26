@@ -16,6 +16,7 @@ import type { DerivedMetrics } from "../score/derived";
 import { INDEX_WEIGHTS, SCORE_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, type IndexCategoryKey, MODEL_VERSION, SECRETS_CRITICAL_TOTAL_CAP } from "../score/model";
 import type { AiAudience } from "../db";
 import { NO_RHYTHM_REASON } from "../summary/pipeline";
+import { CI_VALUES, SIZE_BUCKETS, sizeBucketOf, type CiFilter, type SizeBucket } from "./rating-filters";
 
 // ---------- общие формы ----------
 
@@ -95,6 +96,18 @@ export interface LanguageFacet {
   color: string | null;
 }
 
+/** В5.5 тур 2 (W3): счетчик значения фильтра размера — по выборке с учетом поиска, без фильтров (как языки) */
+export interface SizeFacet {
+  bucket: SizeBucket;
+  count: number;
+}
+
+/** В5.5 тур 2 (W3): счетчик значения фильтра CI — по выборке с учетом поиска, без фильтров (как языки) */
+export interface CiFacet {
+  value: CiFilter;
+  count: number;
+}
+
 export interface RatingResponse {
   items: RatingItem[];
   /** HealthCraft Index = NULL: вне ранжирования и вне пагинации (закон 2) */
@@ -104,9 +117,19 @@ export interface RatingResponse {
   total: number;
   totalPages: number;
   nulls: number;
-  /** В5.2 (Б6): оцененных репо с публичным AI-обзором — с учетом поиска и языка, до фильтра `ai` */
+  /**
+   * В5.2 (Б6): оцененных репо с публичным AI-обзором — с учетом поиска, языка
+   * (и с В5.5 тура 2 — размера и CI), до фильтра `ai`: сколько даст кнопка
+   */
   aiCount: number;
-  facets: { languages: LanguageFacet[] };
+  /**
+   * Фасеты считаются по выборке с учетом ТОЛЬКО поиска (правило языка, В4.7):
+   * выбранные фильтры не схлопывают списки, из которых их выбирали. Счетчик —
+   * все репо выборки (оцененные и без оценки), как у языка. У размера — все 5
+   * корзин в порядке SIZE_BUCKETS (0 тоже число); репо без данных о размере
+   * или CI не входит ни в один счетчик своего фильтра (незнание).
+   */
+  facets: { languages: LanguageFacet[]; size: SizeFacet[]; ci: CiFacet[] };
   generatedAt: string;
 }
 
@@ -126,6 +149,14 @@ export interface ReposQuery {
   q?: string;
   /** В5.2 (Б6): только репо с публичным AI-обзором (`ai=1`) */
   ai?: boolean;
+  /**
+   * В5.5 тур 2 (W3): множество корзин размера из повторяемого `size`
+   * (`?size=small&size=none`); undefined — фильтра нет. Репо без данных о
+   * размере при фильтре не показывается ни в одной корзине.
+   */
+  size?: SizeBucket[];
+  /** В5.5 тур 2 (W3): `ci=yes` — есть `.sourcecraft/ci.yaml`, `ci=no` — подтвержденно нет */
+  ci?: CiFilter;
   page: number;
   perPage: number;
 }
@@ -192,6 +223,23 @@ export function parseReposQuery(params: URLSearchParams): ParseResult {
     query.ai = true;
   }
 
+  if (params.has("size")) {
+    const sizes: SizeBucket[] = [];
+    for (const raw of params.getAll("size")) {
+      if (!SIZE_BUCKETS.includes(raw as SizeBucket)) return { ok: false, message: "в адресе рейтинга неизвестный размер репозитория" };
+      if (!sizes.includes(raw as SizeBucket)) sizes.push(raw as SizeBucket);
+    }
+    query.size = sizes;
+  }
+
+  const ci = params.get("ci");
+  if (ci !== null) {
+    if (params.getAll("ci").length > 1 || !CI_VALUES.includes(ci as CiFilter)) {
+      return { ok: false, message: "в адресе рейтинга неизвестный фильтр CI" };
+    }
+    query.ci = ci as CiFilter;
+  }
+
   const perPage = params.get("per_page");
   if (perPage !== null) {
     const n = Number(perPage);
@@ -209,6 +257,10 @@ export function parseReposQuery(params: URLSearchParams): ParseResult {
 interface RatingRow {
   /** id репо — внутреннее: ключ стыковки со снимком мест и заметками flagger (в ответ не едет) */
   repo_id: number;
+  /** В5.5 тур 2 (W3): скан строки — ключ фактов размера и CI (в ответ не едет) */
+  scan_id: number;
+  /** scores.code_empty: 1 — модель поставила «кода нет» (Q&A №13) */
+  code_empty: number | null;
   org_slug: string;
   repo_slug: string;
   title: string | null;
@@ -271,7 +323,7 @@ WITH last AS (
   SELECT sc2.repo_id, MAX(sc2.scan_id) AS scan_id FROM scores sc2 JOIN scans s2 ON s2.id = sc2.scan_id
   WHERE sc2.model_version = ? AND s2.rating_eligible = 1 GROUP BY sc2.repo_id),
 lastscan AS (SELECT repo_id, MAX(id) AS id FROM scans GROUP BY repo_id)
-SELECT r.id AS repo_id, r.org_slug, r.repo_slug, r.title, r.language, r.likes, r.forks, r.last_activity_at, r.logo_url, r.language_color,
+SELECT r.id AS repo_id, last.scan_id AS scan_id, sc.code_empty, r.org_slug, r.repo_slug, r.title, r.language, r.likes, r.forks, r.last_activity_at, r.logo_url, r.language_color,
        sc.healthcraft_index AS total, sc.index_coverage AS coverage,
        json_extract(sc.categories, '$.documentation.score') AS c_documentation,
        json_extract(sc.categories, '$.activity.score') AS c_activity,
@@ -394,13 +446,121 @@ function matchesQ(item: RatingItem, q: string): boolean {
   );
 }
 
+// ---------- В5.5 тур 2 (W3): факты фильтров размера и CI ----------
+
+/** Что фильтрам нужно из фактов скана: строки кода (null — незнание) и наличие ci.yaml (null — факта нет). */
+export interface ScanFilterFacts {
+  loc: number | null;
+  hasCi: boolean | null;
+}
+
+/**
+ * Память фактов фильтров по scan_id — на соединение БД (у тестов свои базы с
+ * пересекающимися id). Факты скана пишутся ОДИН раз, до оценки (runner:
+ * insertFacts → score-hook), и больше не меняются — поэтому запомненное
+ * значение не устаревает; новый скан приходит с новым scan_id и дочитывается.
+ * Зачем: доставать `tree.stats` и `cicd.configs` из `facts` на каждом запросе
+ * стоило +~250 мс к ~0,43 с рейтинга на 28 тыс. строк (замер — отчет W3), а
+ * память делает это один раз на процесс. Производная колонка в `scores`
+ * потребовала бы правки конвейера оценки (зона W2) и «нет данных» у всех строк
+ * до пересчета.
+ */
+const filterFactsMemo = new WeakMap<Database, Map<number, ScanFilterFacts>>();
+
+/** Сколько scan_id в одном IN (ниже лимита переменных SQLite). */
+const FILTER_FACTS_CHUNK = 500;
+
+interface FilterFactRow {
+  scan_id: number;
+  key: string;
+  sl_type: string | null;
+  sl: number | null;
+  loc_type: string | null;
+  loc: number | null;
+  unread: number | null;
+  ci: number | null;
+  ci_type: string | null;
+}
+
+// json_valid — страж: битое значение одного факта не роняет рейтинг (факт = незнание);
+// у этих kinds сжатия нет (z:-префикс только у timeline)
+const FILTER_FACTS_SQL = (n: number) => `
+SELECT scan_id, key,
+  CASE WHEN ok THEN json_type(value, '$.source_loc') END AS sl_type,
+  CASE WHEN ok THEN json_extract(value, '$.source_loc') END AS sl,
+  CASE WHEN ok THEN json_type(value, '$.loc') END AS loc_type,
+  CASE WHEN ok THEN json_extract(value, '$.loc') END AS loc,
+  CASE WHEN ok THEN json_extract(value, '$.source_unread') END AS unread,
+  CASE WHEN ok THEN json_type(value, '$.has_ci_yaml') END AS ci_type,
+  CASE WHEN ok THEN json_extract(value, '$.has_ci_yaml') END AS ci
+FROM (SELECT scan_id, key, value, status = 'ok' AND json_valid(value) AS ok FROM facts
+      WHERE category = ? AND key = ? AND scan_id IN (${Array(n).fill("?").join(",")}))`;
+
+/**
+ * Строки кода из `tree.stats`: `source_loc` (сборщик 3+), у старых фактов без
+ * этого поля — `loc`. `source_loc = null` — чтение оборвалось (незнание, как в
+ * codeEmptyKind); 0 строк при непрочитанных файлах кода — тоже незнание. При
+ * `source_unread > 0` число — нижняя граница (названо в отчете W3).
+ */
+function locOf(r: FilterFactRow): number | null {
+  const isNum = (t: string | null) => t === "integer" || t === "real";
+  if (isNum(r.sl_type)) {
+    if (r.sl === 0 && typeof r.unread === "number" && r.unread > 0) return null;
+    return r.sl;
+  }
+  if (r.sl_type === null && isNum(r.loc_type)) return r.loc;
+  return null;
+}
+
+/** Факты фильтров для набора сканов: память + дочитывание новых scan_id пачками. */
+export function scanFilterFacts(db: Database, scanIds: number[]): Map<number, ScanFilterFacts> {
+  let memo = filterFactsMemo.get(db);
+  if (memo === undefined) {
+    memo = new Map();
+    filterFactsMemo.set(db, memo);
+  }
+  const missing = scanIds.filter((id) => !memo.has(id));
+  for (let i = 0; i < missing.length; i += FILTER_FACTS_CHUNK) {
+    const chunk = missing.slice(i, i + FILTER_FACTS_CHUNK);
+    const got = new Map<number, ScanFilterFacts>(chunk.map((id) => [id, { loc: null, hasCi: null }]));
+    for (const r of db.query(FILTER_FACTS_SQL(chunk.length)).all("code", "tree.stats", ...chunk) as FilterFactRow[]) {
+      got.get(r.scan_id)!.loc = locOf(r);
+    }
+    for (const r of db.query(FILTER_FACTS_SQL(chunk.length)).all("cicd", "cicd.configs", ...chunk) as FilterFactRow[]) {
+      // has_ci_yaml — булево; иное значение (нет поля, мусор) — незнание
+      if (r.ci_type === "true" || r.ci_type === "false") got.get(r.scan_id)!.hasCi = r.ci === 1;
+    }
+    for (const [id, v] of got) memo.set(id, v);
+  }
+  // память не растет бесконечно: сканы, ушедшие из рейтинга, выбрасываются
+  if (memo.size > scanIds.length * 2 + 1000) {
+    const keep = new Set(scanIds);
+    for (const id of memo.keys()) if (!keep.has(id)) memo.delete(id);
+  }
+  return memo;
+}
+
 export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } = {}): RatingResponse {
   const rows = db.query(RATING_SQL).all(MODEL_VERSION, MODEL_VERSION) as RatingRow[];
   // В-4: место — по всему рейтингу, до поиска и фильтров (правило карточки).
   // В5.3 (вариант 1): весь список сортируется по месту ОДИН раз — фильтры его
   // порядок сохраняют, и выдаче по умолчанию (индекс по убыванию) вторая
   // сортировка не нужна; NULL-индексы стоят в хвосте (compareItems)
-  const all = rows.map(toRatingItem).sort((a, b) => compareItems(a, b, "index", "desc"));
+  // В5.5 тур 2 (W3): размер и CI — из фактов скана строки рейтинга (память по
+  // scan_id, без per-row запросов); признак «кода нет» — из строки оценки.
+  // Во внутренних Map, в ответ не едут (экран их не рисует)
+  const factsByScan = scanFilterFacts(db, rows.map((r) => r.scan_id));
+  const sizeOf = new Map<RatingItem, SizeBucket | null>();
+  const ciOf = new Map<RatingItem, boolean | null>();
+  const all = rows
+    .map((row) => {
+      const item = toRatingItem(row);
+      const f = factsByScan.get(row.scan_id);
+      sizeOf.set(item, sizeBucketOf(row.code_empty === 1, f?.loc ?? null));
+      ciOf.set(item, f?.hasCi ?? null);
+      return item;
+    })
+    .sort((a, b) => compareItems(a, b, "index", "desc"));
   // В5.2 (Б6): публичный AI-обзор — одним запросом на выдачу (заметки overview аудитории public)
   const withAi = new Set(
     (
@@ -484,11 +644,30 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
     .map(([language, count]) => ({ language, count, color: colors.get(language) ?? null }))
     .sort((a, b) => b.count - a.count || (a.language ?? "￿").localeCompare(b.language ?? "￿"));
 
+  // В5.5 тур 2 (W3): счетчики размера и CI — по той же выборке, что языки (поиск, без фильтров)
+  const sizeCounts = new Map<SizeBucket, number>();
+  const ciCounts = new Map<CiFilter, number>();
+  for (const item of byQ) {
+    const size = sizeOf.get(item);
+    if (size) sizeCounts.set(size, (sizeCounts.get(size) ?? 0) + 1);
+    const ci = ciOf.get(item);
+    if (ci !== null && ci !== undefined) ciCounts.set(ci ? "yes" : "no", (ciCounts.get(ci ? "yes" : "no") ?? 0) + 1);
+  }
+
   // фильтр — принадлежность множеству (В4.7, П2); сортировка от него не зависит
   const langs = query.lang;
   const byLang = langs === undefined ? byQ : byQ.filter((i) => langs.includes(i.language));
-  const aiCount = byLang.filter((i) => i.healthcraftIndex !== null && i.aiOverview).length;
-  const filtered = query.ai === true ? byLang.filter((i) => i.aiOverview) : byLang;
+  // В5.5 тур 2 (W3): нет данных о размере или CI — ни в одну корзину (незнание, закон 2)
+  const sizes = query.size;
+  const inSizes = (i: RatingItem): boolean => {
+    const size = sizeOf.get(i);
+    return size !== null && size !== undefined && sizes!.includes(size);
+  };
+  const bySize = sizes === undefined ? byLang : byLang.filter(inSizes);
+  const ciWant = query.ci === undefined ? undefined : query.ci === "yes";
+  const byCi = ciWant === undefined ? bySize : bySize.filter((i) => ciOf.get(i) === ciWant);
+  const aiCount = byCi.filter((i) => i.healthcraftIndex !== null && i.aiOverview).length;
+  const filtered = query.ai === true ? byCi.filter((i) => i.aiOverview) : byCi;
   const scored = filtered.filter((i) => i.healthcraftIndex !== null);
   const nullItems = filtered
     .filter((i) => i.healthcraftIndex === null)
@@ -507,7 +686,11 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
     totalPages,
     nulls: nullItems.length,
     aiCount,
-    facets: { languages },
+    facets: {
+      languages,
+      size: SIZE_BUCKETS.map((bucket) => ({ bucket, count: sizeCounts.get(bucket) ?? 0 })),
+      ci: CI_VALUES.map((value) => ({ value, count: ciCounts.get(value) ?? 0 })),
+    },
     generatedAt: (opts.now ?? new Date()).toISOString(),
   };
 }
