@@ -10,7 +10,7 @@
 //   - бейдж для README — кнопка в шапке с поповером, как Clone у SourceCraft (5-A).
 // Видимость текстов модели — прежняя (решение 22.09): `card.ai` приходит только
 // зрителю с правами на полный Score; без прав этих блоков нет вовсе.
-import { ArrowsRotateRight, ChevronDown, CircleExclamation, ClockArrowRotateLeft, HourglassEnd, SealCheck, Shield, ShieldCheck, ShieldExclamation, Sparkles } from "@gravity-ui/icons";
+import { ArrowsRotateRight, ChevronDown, CircleExclamation, ClockArrowRotateLeft, SealCheck, Shield, ShieldCheck, ShieldExclamation, Sparkles } from "@gravity-ui/icons";
 import {
   ActionTooltip,
   Alert,
@@ -664,16 +664,17 @@ export function aiNotesStale(ai: Card["ai"]): boolean {
 }
 
 /**
- * Знак «текст устарел» у всех AI-плашек — сразу после заголовка. Круг 3 тура 3
- * (26.09, Екатерина): «говорящая» иконка — песочные часы «время вышло» в тоне
- * предупреждения (прежде — серые часы со стрелкой), подсказка зовет обновить.
+ * Знак «текст устарел» у всех AI-плашек — сразу после заголовка. Круг 4 тура 3
+ * (26.09, Екатерина, вариант 5 виджета HQ): текстовая метка «Устарел» того же
+ * вида, что метка модели (`AiModelLabel`), подробности и призыв обновить — в
+ * подсказке (вытесняет иконки кругов 2-3: часы со стрелкой, песочные часы).
  */
 export function AiStaleMark() {
   return (
     <ActionTooltip title="Обзор устарел" description="Сделан по прошлому анализу – после него был новый, цифры в тексте могут не совпадать с карточкой. Обновите обзор.">
-      <span className="rh-ai-stale" role="img" aria-label="Обзор устарел: сделан по прошлому анализу">
-        <Icon data={HourglassEnd} size={18} />
-      </span>
+      <Label theme="unknown" size="xs" className="rh-ai-stale">
+        Устарел
+      </Label>
     </ActionTooltip>
   );
 }
