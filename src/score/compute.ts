@@ -14,6 +14,7 @@ import { categoryOf, parseFactValue } from "../collectors/facts";
 import { rootHasNoSource } from "../collectors/source-path";
 import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
 import { DerivedMetrics, deriveMetrics, issuesClosedCounted } from "./derived";
+import { ciStability, issueDynamics } from "./dynamics";
 import { roundScore } from "../web/format";
 import {
   CLOSE_DAYS,
@@ -593,6 +594,7 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
     success_rate?: unknown;
     weighted_success_rate?: unknown;
     duration_p50?: unknown;
+    recent_runs?: unknown;
   } | undefined;
   if (configs && configs.has_ci_yaml === true && (typeof configs.has_steps !== "boolean" || typeof configs.steps_note === "string")) {
     // 4.2.0 (М2.1 аудита): ci.yaml не разобран — неизвестно, есть ли шаги;
@@ -616,6 +618,8 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
         config: { score: configSub, value: configs },
         pass_rate: { score: null, note: "runs no-data" },
         duration: { score: null, note: "runs no-data" },
+        // 4.4.0 (ТП-1): справочно, без веса — подчиняется тем же правам, что категория
+        stability: ciStability(undefined),
       },
     };
   }
@@ -628,6 +632,7 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
         config: { score: 0, value: configs },
         pass_rate: { score: null, note: "no declared CI" },
         duration: { score: null, note: "no declared CI" },
+        stability: { score: null, value: null, note: "no declared CI" },
       },
     };
   }
@@ -648,6 +653,7 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
         config: { score: configSub, value: configs },
         pass_rate: { score: null, note: "runs pending" },
         duration: { score: null, note: "runs pending" },
+        stability: ciStability(runs),
       },
     };
   }
@@ -666,6 +672,7 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
         // Н14б: значения доли нет — «не запускался» словами, а не «0%» («все упали»)
         pass_rate: { score: 0, value: null, note: runsCount === 0 ? "no runs" : "no runs within a year" },
         duration: { score: null, note: "no recent runs" },
+        stability: ciStability(runs),
       },
     };
   }
@@ -678,6 +685,7 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
         config: { score: configSub, value: configs },
         pass_rate: { score: null, note: "runs no-data" },
         duration: { score: null, note: "runs no-data" },
+        stability: ciStability(runs),
       },
     };
   }
@@ -700,6 +708,8 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
       config: { score: configSub, value: configs },
       pass_rate: { score: passSub, value: passInput },
       duration: { score: durSub, value: num(runs.duration_p50) },
+      // 4.4.0 (ТП-1): справочно, без веса
+      stability: ciStability(runs),
     },
   };
 }
@@ -815,17 +825,22 @@ function scoreActivity(derived: DerivedMetrics, now: Date, git: GitState): Categ
 }
 
 function scoreIssues(ok: Map<string, unknown>, derived: DerivedMetrics): CategoryScore {
-  const stats = ok.get("issues.stats") as { open?: unknown; closed?: unknown; closed_counted?: unknown; median_close_days?: unknown } | undefined;
+  const stats = ok.get("issues.stats") as { open?: unknown; closed?: unknown; closed_counted?: unknown; median_close_days?: unknown; flow?: unknown } | undefined;
   if (!stats) {
     return { score: null, no_data: "issues channel no-data", submetrics: {} };
   }
   const open = num(stats.open) ?? 0;
   const closed = num(stats.closed) ?? 0;
+  // 4.4.0 (ТП-9): справочно, без веса; трекер не ведется — тот же статус, не «0 динамики»
+  const dynamics = issueDynamics(stats);
   if (open === 0 && closed === 0) {
     // §5.3: 0/0 = данные «трекер не ведётся» — скор = вычислимый минимум
     return {
       score: ISSUES_TRACKER_UNUSED,
-      submetrics: { tracker_unused: { score: ISSUES_TRACKER_UNUSED / 100, value: { open: 0, closed: 0 }, note: "tracker not maintained — category minimum (Q14)" } },
+      submetrics: {
+        tracker_unused: { score: ISSUES_TRACKER_UNUSED / 100, value: { open: 0, closed: 0 }, note: "tracker not maintained — category minimum (Q14)" },
+        ...dynamics,
+      },
     };
   }
   // 4.3.0 (Р2): в выборку идут закрытые задачи, прожившие не меньше часа;
@@ -864,6 +879,7 @@ function scoreIssues(ok: Map<string, unknown>, derived: DerivedMetrics): Categor
       close_days: { score: closeSub, value: noneClosed ? null : closeDays, ...(noneClosed ? { note: "no issue closed" } : {}) },
       resolution: { score: resSub, value: derived.resolutionRatio },
       first_resp: { score: firstSub, value: num(comments?.median_first_comment_delay_hours) },
+      ...dynamics,
     },
     ...(sample < 1 ? { adjustment: { kind: "small-sample" as const, n: closedN, full: ISSUES_FULL_SAMPLE, raw, floor: ISSUES_TRACKER_UNUSED } } : {}),
   };
