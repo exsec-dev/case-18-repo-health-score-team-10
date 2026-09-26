@@ -122,7 +122,7 @@ import { linkProps, navigate } from "./router";
 import { COMPARE_MAX, COMPARE_LIMIT_TEXT, compareHref } from "./compareView";
 import { lastCompareSet, rememberCompareSet } from "./compareReturn";
 import { LoginButton, Page, type Crumb } from "./Shell";
-import { AiOverviewSection, BadgeButton, CategoryAiMark, CategoryAiNote, aiNotesStale, FraudCheckFooter, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
+import { AiOverviewSection, BadgeButton, CategoryAiMark, CategoryAiNote, FraudCheckFooter, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
 
 type Card = RepoCard;
@@ -1189,7 +1189,7 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
           {/* В5.5 тур 2 (W4, ЗН-2): карта владельцев — в раскрытии «Состояния кода», теми же строками */}
           {key === "code" && <OwnershipMap category={cat} />}
           {/* замечание 3 (25.09): текст модели — под таблицей метрик */}
-          {aiNote !== null && <CategoryAiNote note={aiNote} stale={aiNotesStale(card.ai)} />}
+          {aiNote !== null && <CategoryAiNote note={aiNote} card={card} />}
         </div>
       )}
     </li>

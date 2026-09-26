@@ -52,7 +52,7 @@ import {
   withCounter,
   type AiQuotaView,
 } from "./format";
-import { announceJobStarted, announceJobsChanged, useAnalysisFinished } from "./session";
+import { announceJobStarted, announceJobsChanged, useAnalysisFinished, useSession } from "./session";
 import { SLOT_EMPTY, aiNotesCaption, badgeMarkdown, historyByTime, scoreHistoryView } from "./slots";
 import type { AiNoteHistoryItem, AiNotesResponse, HistoryPoint, HistoryResponse } from "../summary/history-contract";
 import { evolutionTooEarly } from "../summary/history-contract";
@@ -565,7 +565,7 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
             {AI_SECTION_TITLE}
           </Text>
           {/* круг 3 тура 3: знак устаревания — сразу после заголовка */}
-          {hasOverview && newerAnalysis && <AiStaleMark />}
+          {hasOverview && newerAnalysis && <AiStaleMark card={card} />}
           {model !== null && <AiModelLabel model={model} />}
           {/* выбор 2A (25.09): объем публичной версии — меткой в заголовке, пояснение в подсказке */}
           {publicVersion && hasOverview && (
@@ -669,9 +669,20 @@ export function aiNotesStale(ai: Card["ai"]): boolean {
  * вида, что метка модели (`AiModelLabel`), подробности и призыв обновить — в
  * подсказке (вытесняет иконки кругов 2-3: часы со стрелкой, песочные часы).
  */
-export function AiStaleMark() {
+export function AiStaleMark({ card }: { card: Card }) {
+  // хвост подсказки — по зрителю (круг 4, слово владельца 26.09): призыв «Обновите»
+  // только тому, кто может запустить (правило запуска — как `canRun` раздела обзора)
+  const me = dataOf(useSession().me);
+  const loggedIn = me !== null && me.login !== null;
+  const own = card.viewer?.own === true;
+  const tail =
+    loggedIn && (own || card.repo.visibility === "public")
+      ? "Обновите обзор."
+      : card.repo.visibility === "public"
+        ? "Обновить может любой вошедший пользователь."
+        : "Обновить может участник репозитория.";
   return (
-    <ActionTooltip title="Обзор устарел" description="Сделан по прошлому анализу – после него был новый, цифры в тексте могут не совпадать с карточкой. Обновите обзор.">
+    <ActionTooltip title="Обзор устарел" description={`Сделан по прошлому анализу – после него был новый, цифры в тексте могут не совпадать с карточкой. ${tail}`}>
       <Label theme="unknown" size="xs" className="rh-ai-stale">
         Устарел
       </Label>
@@ -679,7 +690,7 @@ export function AiStaleMark() {
   );
 }
 
-export function AiNotePlate({ title, text, stale = false }: { title: string; text: string; stale?: boolean }) {
+export function AiNotePlate({ title, text, staleFor = null }: { title: string; text: string; staleFor?: Card | null }) {
   return (
     <Alert
       theme="info"
@@ -688,10 +699,10 @@ export function AiNotePlate({ title, text, stale = false }: { title: string; tex
       className="rh-ai-plate"
       icon={<Icon data={Sparkles} size={16} />}
       title={
-        stale ? (
+        staleFor !== null ? (
           <span className="rh-ai-plate__title">
             {title}
-            <AiStaleMark />
+            <AiStaleMark card={staleFor} />
           </span>
         ) : (
           title
@@ -706,10 +717,10 @@ export function AiNotePlate({ title, text, stale = false }: { title: string; tex
   );
 }
 
-export function CategoryAiNote({ note, stale = false }: { note: AiNote; stale?: boolean }) {
+export function CategoryAiNote({ note, card }: { note: AiNote; card: Card }) {
   return (
     <div className="rh-cat-ai">
-      <AiNotePlate title="Разбор модели" text={note.text} stale={stale} />
+      <AiNotePlate title="Разбор модели" text={note.text} staleFor={aiNotesStale(card.ai) ? card : null} />
     </div>
   );
 }
@@ -971,7 +982,7 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
               </Text>
             </Flex>
           </Flex>
-          {trajectory !== null && <AiNotePlate title="Разбор динамики" text={trajectory.text} stale={aiNotesStale(card.ai)} />}
+          {trajectory !== null && <AiNotePlate title="Разбор динамики" text={trajectory.text} staleFor={aiNotesStale(card.ai) ? card : null} />}
           {list}
         </Flex>
       </Card>
