@@ -34,7 +34,18 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import type { SortKey } from "../api/repos";
 import type { MetaResponse, RatingResponse } from "./api";
 import { useJson } from "./api";
-import { firstSortOrder, normalizeRatingSearch, pageBeyond } from "./ratingParams";
+import {
+  activeRatingFilters,
+  ciOptions,
+  firstSortOrder,
+  normalizeRatingSearch,
+  nothingFoundDescription,
+  pageBeyond,
+  sizeOptions,
+  sizeSummary,
+  type FacetOption,
+} from "./ratingParams";
+import { FILTER_LIMITS_NOTE } from "../api/rating-filters";
 import {
   CATEGORY_TITLES_RU,
   DEFINITION_NAME_WIDTH,
@@ -195,7 +206,11 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
   const langValues = params.getAll("lang").map((v) => (v === "" ? LANG_NONE : v));
   const qParam = params.get("q") ?? "";
   const aiOnly = params.get("ai") === "1";
-  const hasFilters = qParam !== "" || params.has("lang") || aiOnly;
+  // В5.5 тур 2 (W3): размер (повторяемый) и CI; пустое состояние называет все включенные фильтры
+  const sizeValues = params.getAll("size");
+  const ciValue = params.get("ci");
+  const activeFilters = activeRatingFilters(search);
+  const hasFilters = activeFilters.length > 0;
   // на телефоне таблица категорий не помещается — строки списком: место, имя, Score
   const isPhone = useMediaQuery("(max-width: 767px)");
 
@@ -245,6 +260,9 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
   // от языкового фильтра не зависят, поэтому прежние верны для нового набора.
   const lastFacets = useRef<Facets>([]);
   if (data) lastFacets.current = data.facets.languages;
+  // В5.5 тур 2 (W3): счетчики размера и CI — так же из последнего ответа (от фильтров не зависят)
+  const lastFilterFacets = useRef<RatingResponse["facets"] | null>(null);
+  if (data) lastFilterFacets.current = data.facets;
   // M-9: без /api/meta категории не сыплются ключами — имена из констант
   const categoryNames: Record<string, string> = useMemo(
     () => Object.fromEntries((meta?.categories ?? []).map((c) => [c.key, c.title])),
@@ -333,6 +351,38 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
           renderSelectedOption={(option, index) => <LangSummaryPart value={option.value} index={index} values={langValues} />}
           onUpdate={(v) => setParams({ lang: v.length === 0 ? null : v.map((x) => (x === LANG_NONE ? "" : x)) })}
         />
+        {/* В5.5 тур 2 (W3, ТЗ §7): размер по строкам кода (мультивыбор, как язык) и
+            наличие CI. Счетчики — из фасетов (по поиску, без фильтров); репо без
+            данных о размере или CI не попадает ни в одно значение. */}
+        <Select
+          label="Размер:"
+          size="m"
+          width={220}
+          multiple
+          hasClear
+          placeholder="любой"
+          popupClassName="rh-lang-popup"
+          value={sizeValues}
+          options={sizeOptions(lastFilterFacets.current).map(facetSelectOption)}
+          renderOption={(option) => <FilterOption option={option} checkbox checked={sizeValues.includes(option.value)} />}
+          renderSelectedOption={(option, index) => <>{index === 0 ? sizeSummary(sizeValues) : ""}</>}
+          onUpdate={(v) => setParams({ size: v.length === 0 ? null : v })}
+        />
+        <Select
+          label="CI:"
+          size="m"
+          width={170}
+          hasClear
+          placeholder="все"
+          value={ciValue === null ? [] : [ciValue]}
+          options={ciOptions(lastFilterFacets.current).map(facetSelectOption)}
+          renderOption={(option) => <FilterOption option={option} />}
+          onUpdate={(v) => setParams({ ci: v[0] ?? null })}
+        />
+        {/* тематика и security status из ТЗ §7 — названное ограничение, а не фильтр */}
+        <HelpMark iconSize="m" aria-label="Почему нет фильтров по тематике и безопасности">
+          {FILTER_LIMITS_NOTE}
+        </HelpMark>
         {/* Доводка 21.09: пара «Сортировка: …» + кнопка направления снята —
             сортировка живёт в заголовках колонок (`SortableHeader`), как в
             таблицах платформы. Освободившееся место занял второй ряд: выбор
@@ -434,7 +484,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
       {data &&
         view === "scored" &&
         (data.items.length === 0 ? (
-          <NothingFound hasFilters={hasFilters} />
+          <NothingFound active={activeFilters} />
         ) : isPhone ? (
           <PhoneList items={data.items} refreshing={refreshing} />
         ) : (
@@ -458,7 +508,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
           />
         ))}
 
-      {data && view === "unscored" && <UnscoredTable items={data.nullItems} meta={meta} hasFilters={hasFilters} refreshing={refreshing} />}
+      {data && view === "unscored" && <UnscoredTable items={data.nullItems} meta={meta} active={activeFilters} refreshing={refreshing} />}
     </Page>
   );
 }
@@ -511,8 +561,8 @@ function HowCountedLink() {
   );
 }
 
-function NothingFound({ hasFilters }: { hasFilters: boolean }) {
-  if (!hasFilters) {
+function NothingFound({ active }: { active: string[] }) {
+  if (active.length === 0) {
     return (
       <EmptyState
         icon={SquareListUl}
@@ -525,14 +575,14 @@ function NothingFound({ hasFilters }: { hasFilters: boolean }) {
     <EmptyState
       icon={Magnifier}
       title="Под фильтр ничего не подошло"
-      description="Ни один репозиторий выборки не совпал с поиском и языком. Данные при этом на месте – сброс фильтров вернет полный рейтинг."
+      description={nothingFoundDescription(active)}
       actions={[{ text: "Сбросить фильтры", view: "normal", onClick: () => navigate("/") }]}
     />
   );
 }
 
 /** Группа «нет данных» — витрина закона 2: счётчик виден всегда, список — по переключателю. */
-function UnscoredTable({ items, meta, hasFilters, refreshing }: { items: Item[]; meta: MetaResponse | null; hasFilters: boolean; refreshing: boolean }) {
+function UnscoredTable({ items, meta, active, refreshing }: { items: Item[]; meta: MetaResponse | null; active: string[]; refreshing: boolean }) {
   const titleOf = (key: string): string => meta?.categories.find((c) => c.key === key)?.title ?? CATEGORY_TITLES_RU[key] ?? key;
   const columns: TableColumnConfig<Item>[] = [
     { id: "repo", name: "Репозиторий", primary: true, template: (item) => <RepoCell item={item} /> },
@@ -550,8 +600,8 @@ function UnscoredTable({ items, meta, hasFilters, refreshing }: { items: Item[];
   ];
 
   if (items.length === 0) {
-    return hasFilters ? (
-      <NothingFound hasFilters />
+    return active.length > 0 ? (
+      <NothingFound active={active} />
     ) : (
       <EmptyState icon={SquareListUl} title="Все проанализированные репозитории оценены" description="Покрытия данными хватило каждому репозиторию выборки." />
     );
@@ -688,6 +738,23 @@ function LangOption({ option, checked }: { option: SelectOption<LangOptionData>;
     <Flex gap={2} alignItems="center" className="rh-lang-option">
       <Checkbox size="m" checked={checked} controlProps={{ tabIndex: -1, "aria-hidden": true }} style={{ pointerEvents: "none" }} />
       <LanguageName name={d?.title ?? option.value} color={d?.color ?? null} noLanguage={option.value === LANG_NONE} />
+      {d?.count !== null && d?.count !== undefined && <Text color="secondary">{fmtCount(d.count)}</Text>}
+    </Flex>
+  );
+}
+
+/** В5.5 тур 2 (W3): опция размера/CI для Select — подпись в `text`, счетчик в `data`. */
+function facetSelectOption(o: FacetOption): SelectOption<FacetOption> {
+  return { value: o.value, text: o.title, data: o };
+}
+
+/** Строка опции размера или CI: (чекбокс мультивыбора), подпись и счетчик — как у языка. */
+function FilterOption({ option, checkbox = false, checked = false }: { option: SelectOption<FacetOption>; checkbox?: boolean; checked?: boolean }) {
+  const d = option.data;
+  return (
+    <Flex gap={2} alignItems="center" className="rh-lang-option">
+      {checkbox && <Checkbox size="m" checked={checked} controlProps={{ tabIndex: -1, "aria-hidden": true }} style={{ pointerEvents: "none" }} />}
+      <span>{d?.title ?? option.value}</span>
       {d?.count !== null && d?.count !== undefined && <Text color="secondary">{fmtCount(d.count)}</Text>}
     </Flex>
   );

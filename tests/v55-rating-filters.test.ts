@@ -7,7 +7,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { DEFAULT_QUERY, getRepoCard, listRepos, parseReposQuery, type RatingResponse, type ReposQuery } from "../src/api/repos";
 import { SIZE_BUCKETS, SIZE_TITLES, sizeBucketOf, type SizeBucket } from "../src/api/rating-filters";
-import { activeRatingFilters, nothingFoundDescription, normalizeRatingSearch } from "../src/web/ratingParams";
+import { activeRatingFilters, ciOptions, nothingFoundDescription, normalizeRatingSearch, sizeOptions, sizeSummary } from "../src/web/ratingParams";
 import { makeApiDb, seedRepo, seedScan, seedScore, type ApiTestDb, type FactSpec } from "./api-fixtures";
 
 const treeFact = (value: unknown, status: FactSpec["status"] = "ok"): FactSpec => ({ key: "tree.stats", source: "git", value, status });
@@ -274,5 +274,37 @@ describe("адрес рейтинга: size и ci", () => {
     expect(activeRatingFilters("")).toEqual([]);
     expect(activeRatingFilters("sort=likes&page=2&view=unscored")).toEqual([]);
     expect(activeRatingFilters("q=x&lang=&size=none&ci=no&ai=1")).toEqual(["поиск", "язык", "размер", "CI", "AI-обзор"]);
+  });
+});
+
+// ---------- опции тулбара: числа экрана = числа ответа ----------
+
+describe("опции фильтров в тулбаре: счетчик = фасет ответа = число строк", () => {
+  const t = makeApiDb();
+  afterAll(() => t.close());
+  seed(t, { repo: "a", total: 90, facts: [tree(10), ciFact(true)] });
+  seed(t, { repo: "b", total: 80, facts: [tree(20_000), ciFact(false)] });
+  seed(t, { repo: "c", total: null, facts: [tree(30), ciFact(false)] });
+  seed(t, { repo: "d", total: 70, facts: [] });
+
+  test("размер: 5 опций, счетчик опции = строк при выборе этой опции", () => {
+    const r = all(t);
+    const opts = sizeOptions(r.facets);
+    expect(opts.map((o) => o.value)).toEqual([...SIZE_BUCKETS]);
+    for (const o of opts) expect(o.count).toBe(names(all(t, { size: [o.value as SizeBucket] })).length);
+    expect(Object.fromEntries(opts.map((o) => [o.value, o.count]))).toEqual({ none: 0, small: 2, medium: 0, large: 1, huge: 0 });
+  });
+
+  test("CI: счетчик опции = строк при выборе; без ответа счетчиков нет (не 0)", () => {
+    const r = all(t);
+    for (const o of ciOptions(r.facets)) expect(o.count).toBe(names(all(t, { ci: o.value as "yes" | "no" })).length);
+    expect(ciOptions(null).map((o) => o.count)).toEqual([null, null]);
+    expect(sizeOptions(null).every((o) => o.count === null)).toBe(true);
+  });
+
+  test("сводка выбранного размера", () => {
+    expect(sizeSummary([])).toBe("");
+    expect(sizeSummary(["small"])).toBe("до 1 тыс.");
+    expect(sizeSummary(["small", "huge", "none"])).toBe("до 1 тыс. +2");
   });
 });

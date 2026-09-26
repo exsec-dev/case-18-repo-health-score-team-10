@@ -8,7 +8,7 @@
 //    убыванию (С5-8).
 // Серверный контракт `parseReposQuery` (400 на неверное значение) не меняется.
 import type { SortKey } from "../api/repos";
-import { CI_VALUES, SIZE_BUCKETS } from "../api/rating-filters";
+import { CI_TITLES, CI_VALUES, SIZE_BUCKETS, SIZE_SHORT, SIZE_TITLES, type CiFilter, type SizeBucket } from "../api/rating-filters";
 import { plural } from "../report/submetrics";
 import { fmtCount } from "./format";
 
@@ -95,4 +95,38 @@ export function activeRatingFilters(search: string): string[] {
 export function nothingFoundDescription(active: string[]): string {
   const head = active.length === 1 ? "с фильтром" : "с фильтрами";
   return `Ни один репозиторий выборки не совпал ${head}: ${active.join(", ")}. Данные при этом на месте – сброс фильтров вернет полный рейтинг.`;
+}
+
+/** Опция фильтра размера или CI: значение адреса, подпись и счетчик фасета (null — фасета нет). */
+export interface FacetOption {
+  value: string;
+  title: string;
+  count: number | null;
+}
+
+type FilterFacets = { size: { bucket: SizeBucket; count: number }[]; ci: { value: CiFilter; count: number }[] };
+
+/**
+ * В5.5 тур 2 (W3): опции размера — все 5 корзин в порядке SIZE_BUCKETS, счетчик
+ * из фасета ответа (0 — тоже число). Без ответа (первая загрузка) счетчиков нет.
+ */
+export function sizeOptions(facets: FilterFacets | null): FacetOption[] {
+  return SIZE_BUCKETS.map((bucket) => ({
+    value: bucket,
+    title: SIZE_TITLES[bucket],
+    count: facets?.size.find((f) => f.bucket === bucket)?.count ?? null,
+  }));
+}
+
+/** Опции CI: «есть CI», «нет CI» со счетчиками фасета. */
+export function ciOptions(facets: FilterFacets | null): FacetOption[] {
+  return CI_VALUES.map((value) => ({ value, title: CI_TITLES[value], count: facets?.ci.find((f) => f.value === value)?.count ?? null }));
+}
+
+/** Сводка выбранных корзин в поле: одна — короткой подписью, несколько — «первая +N». */
+export function sizeSummary(values: string[]): string {
+  const first = values[0];
+  if (first === undefined) return "";
+  const title = SIZE_SHORT[first as SizeBucket] ?? first;
+  return values.length === 1 ? title : `${title} +${values.length - 1}`;
 }
