@@ -113,19 +113,38 @@ export function RepoAvatar({ repo, logoUrl, size }: { repo: string; logoUrl: str
       probe.onerror = null;
     };
   }, [logoUrl]);
-  return logoUrl && !failed ? (
-    <Avatar size={size} shape="square" imgUrl={logoUrl} alt="" loading="lazy" style={{ flexShrink: 0 }} />
-  ) : (
-    <Avatar
-      size={size}
-      shape="square"
-      text={repo}
-      backgroundColor={`var(--g-color-base-${avatarTone(repo)}-light)`}
-      color={`var(--g-color-text-${avatarTone(repo)})`}
-      style={{ flexShrink: 0 }}
-    />
+  // круг 5 тура 3 (находка 24 аудита): аватар декоративен — имя стоит рядом текстом.
+  // Avatar uikit 7.49 теряет alt="" (`props.alt || title`), и <img> оставался без alt;
+  // обертка aria-hidden убирает его из дерева доступности, `display: contents` не
+  // меняет раскладку
+  return (
+    <span aria-hidden="true" style={{ display: "contents" }}>
+      {logoUrl && !failed ? (
+        <Avatar size={size} shape="square" imgUrl={logoUrl} alt="" loading="lazy" style={{ flexShrink: 0 }} />
+      ) : (
+        <Avatar
+          size={size}
+          shape="square"
+          text={repo}
+          backgroundColor={`var(--g-color-base-${avatarTone(repo)}-light)`}
+          color={`var(--g-color-text-${avatarTone(repo)})`}
+          style={{ flexShrink: 0 }}
+        />
+      )}
+    </span>
   );
 }
+
+/**
+ * Круг 5 тура 3 (находка 13 аудита, 27.09): цель подсказки-метки (флаг накрутки,
+ * искра AI, стрелка места, «Устарел») фокусируется с клавиатуры и касанием —
+ * ActionTooltip открывается и на фокусе. Клик не уходит в строку таблицы: касание
+ * метки показывает подсказку, а не открывает карточку.
+ */
+export const TIP_TARGET = {
+  tabIndex: 0,
+  onClick: (e: { stopPropagation: () => void }) => e.stopPropagation(),
+} as const;
 
 /**
  * Язык с цветной точкой, как в списках SourceCraft; цвет — language.color платформы.

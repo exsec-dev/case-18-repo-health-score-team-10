@@ -329,7 +329,7 @@ describe("старые факты (сборщик до 5): «нет данных
     for (const key of ["cicd.stability", "issues.backlog_trend", "issues.monthly_flow"]) {
       const [cat, sub] = key.split(".") as [string, string];
       const entry = (s.categories as Record<string, { submetrics: Record<string, { score: number | null; value?: unknown; note?: string }> }>)[cat]!.submetrics[sub]!;
-      expect({ key, text: shown(key, entry) }).toEqual({ key, text: "нет данных, анализ собран до версии 5 сборщика" });
+      expect({ key, text: shown(key, entry) }).toEqual({ key, text: "появится после следующего анализа" });
     }
   });
 
@@ -462,7 +462,7 @@ describe("отрисованный MD: справочные строки в ра
     const fullNull = fixtureCard("full-null");
     try {
       expect(renderRepoReport(anon.card).includes("Стабильность CI")).toBe(false);
-      expect(renderRepoReport(fullNull.card)).toContain("Стабильность CI в динамике – нет данных, анализ собран до версии 5 сборщика.");
+      expect(renderRepoReport(fullNull.card)).toContain("Стабильность CI в динамике – появится после следующего анализа.");
     } finally {
       anon.close();
       fullNull.close();

@@ -731,9 +731,9 @@ function categoryCalc(key: CategoryKey, cat: CardCategory): Block[] {
     // строка поправки: сколько она сняла со взвешенной суммы (сумма столбца = итог)
     const title =
       adj.kind === "small-sample"
-        ? `Малая выборка: ${adj.n} из ${adj.full} закрытых задач`
+        ? `Мало закрытых задач: ${adj.n} из ${adj.full}`
         : adj.kind === "small-code"
-          ? `Мало кода: ${adj.loc} из ${adj.full} строк, сжатие к ${adj.center}`
+          ? `Мало кода: ${adj.loc} из ${adj.full} строк`
           : `Потолок: открытые находки ${adj.level === "critical" ? "critical" : "high"}`;
     rows.push([line(title), line(""), line(""), line(fmtDecimal(cat.score! - adj.raw, 1))]);
   }

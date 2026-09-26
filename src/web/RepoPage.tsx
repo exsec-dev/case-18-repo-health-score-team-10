@@ -38,6 +38,7 @@ import {
   CommentSlash,
   Comments,
   Copy,
+  Ellipsis,
   FileText,
   Flag,
   FolderTree,
@@ -53,6 +54,7 @@ import {
   Pulse,
   Rocket,
   ScalesBalanced,
+  SealCheck,
   ShieldCheck,
   SquareCheck,
   SquareListUl,
@@ -122,7 +124,8 @@ import { linkProps, navigate } from "./router";
 import { COMPARE_MAX, COMPARE_LIMIT_TEXT, compareHref } from "./compareView";
 import { lastCompareSet, rememberCompareSet } from "./compareReturn";
 import { LoginButton, Page, type Crumb } from "./Shell";
-import { AiOverviewSection, BadgeButton, CategoryAiMark, CategoryAiNote, FraudCheckFooter, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
+import { useMediaQuery } from "./prefs";
+import { AiOverviewSection, BadgeButton, BadgeDialog, useBadgeAvailable, CategoryAiMark, CategoryAiNote, FraudCheckFooter, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
 
 type Card = RepoCard;
@@ -192,7 +195,17 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
   const own = live ?? (data?.job ? { phase: data.job.status, stalled: data.job.stalled } : null);
   const jobStalled = own?.stalled === true;
   const analysisRunning = own !== null;
-  const refreshButton = canRefresh && (
+  // круг 5 тура 3 (Н1): на телефоне «Обновить анализ» — иконкой, подпись в подсказке и
+  // aria-label (со «Сравнить» и «Бейджем» в «⋮» строка вошедшего иначе снова резалась)
+  const phoneBar = useMediaQuery("(max-width: 767px)");
+  const refreshText = analysisRunning ? "Идет анализ" : "Обновить анализ";
+  const refreshButton = canRefresh && phoneBar ? (
+    <ActionTooltip title={refreshText}>
+      <Button view="action" size="m" onClick={start.start} disabled={analysisRunning || start.sending} loading={start.sending || analysisRunning} aria-label={refreshText}>
+        <Icon data={ArrowsRotateRight} size={16} />
+      </Button>
+    </ActionTooltip>
+  ) : canRefresh && (
     <Button view="action" size="m" onClick={start.start} disabled={analysisRunning || start.sending} loading={start.sending}>
       {/* Доводка 21.09: спиннер живёт в слоте `Button.Icon`, а не голым узлом
           рядом с текстом. Слот сам держит габарит в высоту кнопки и гасит
@@ -204,7 +217,7 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
           <Spin size="xs" />
         </Button.Icon>
       )}
-      {analysisRunning ? "Идет анализ" : "Обновить анализ"}
+      {refreshText}
     </Button>
   );
 
@@ -225,6 +238,12 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
     // (закрытый, ни разу не анализировался) — не ошибка «не удалось открыть», а
     // честное пустое состояние; не в избранном — прежняя ошибка
     return <FavoriteNotInCatalog org={org} repo={repo} fallback={state.message} onRetry={reload} onSection={onSection} />;
+  }
+  if (data === null && state.kind === "error" && state.status === 404) {
+    // круг 5 тура 3 (находка 18 аудита, 27.09): выбывший из каталога, закрытый или
+    // несуществующий — одно спокойное пустое состояние вместо красной ошибки. Текст
+    // один на все случаи: различимый 404 выдал бы существование закрытого (ТЗ §5)
+    return <NotInCatalog org={org} repo={repo} crumbs={crumbs} />;
   }
   if (data === null) {
     // UX-5 (круг 2 В4.4): «Обновить анализ» на странице ошибки скрыт; повтор —
@@ -250,14 +269,14 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
   const reportHref = `${cardUrl}/report.md`;
   const refreshError = state.kind === "ok" ? state.refreshError : undefined;
   const actions = (
-    <Flex gap={2} alignItems="center">
-      {/* тур 3 В5.5 (п.9): порядок — сравнить, бейдж, отчет, обновить анализ (главное действие справа) */}
-      <CompareButton org={org} repo={repo} />
-      {/* 5-A (§2 24.09): бейдж — кнопкой в шапке, как Clone у SourceCraft */}
-      {card.score !== null && <BadgeButton org={org} repo={repo} publicBaseUrl={meta?.publicBaseUrl ?? window.location.origin} />}
-      {card.score !== null && <ReportMenu mdHref={reportHref} pdfHref={`${cardUrl}/report.pdf`} pdfName={reportFileName(org, repo, "pdf")} />}
-      {refreshButton}
-    </Flex>
+    <CardActions
+      org={org}
+      repo={repo}
+      scored={card.score !== null}
+      publicBaseUrl={meta?.publicBaseUrl ?? window.location.origin}
+      report={card.score !== null && <ReportMenu mdHref={reportHref} pdfHref={`${cardUrl}/report.pdf`} pdfName={reportFileName(org, repo, "pdf")} />}
+      refresh={refreshButton}
+    />
   );
 
   return (
@@ -336,6 +355,24 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
 }
 
 /**
+ * Круг 5 тура 3 (находка 18 аудита, 27.09): выбывший из каталога, закрытый или
+ * несуществующий — одно спокойное пустое состояние вместо красной ошибки «Не удалось
+ * открыть». Текст один на все случаи: различимый 404 выдал бы существование закрытого
+ * репозитория (ТЗ §5, «Ограничение доступа»).
+ */
+function NotInCatalog({ org, repo, crumbs }: { org: string; repo: string; crumbs: Crumb[] }) {
+  return (
+    <Page crumbs={crumbs}>
+      <EmptyState
+        icon={SquareListUl}
+        title="Репозитория нет в открытом каталоге"
+        description={`${slugOf(org, repo)} не найден среди открытых репозиториев SourceCraft: он мог стать закрытым, быть удален или переименован – или в адресе опечатка.`}
+        actions={[{ text: "К рейтингу", view: "normal", size: "l", href: lastRatingHref() }]}
+      />
+    </Page>
+  );
+}
+/**
  * Карточка репозитория из избранного, которого нет в каталоге сервиса (В5.3,
  * 25.09): закрытый репозиторий попадает в каталог только своим анализом, а
  * анализ запускается только для своих (права на CI/CD или Безопасность). Текст —
@@ -359,9 +396,7 @@ function FavoriteNotInCatalog({ org, repo, fallback, onRetry, onSection }: { org
   const fav = data?.entries.find((e) => e.org.toLowerCase() === org.toLowerCase() && e.repo.toLowerCase() === repo.toLowerCase()) ?? null;
   if (fav === null) {
     return (
-      <Page crumbs={[{ text: "Рейтинг", href: lastRatingHref() }, { text: slugOf(org, repo) }]}>
-        <Alert theme="danger" view="outlined" className="rh-break-anywhere" title={`Не удалось открыть ${slugOf(org, repo)}`} message={fallback} actions={[{ text: "Повторить", handler: onRetry }]} />
-      </Page>
+      <NotInCatalog org={org} repo={repo} crumbs={[{ text: "Рейтинг", href: lastRatingHref() }, { text: slugOf(org, repo) }]} />
     );
   }
   return <FavoriteNotInCatalogState org={org} repo={repo} own={fav.access?.own === true} access={fav.access} crumbs={crumbs} onRetry={onRetry} />;
@@ -443,26 +478,86 @@ class ReportError extends Error {
 }
 
 /**
+ * Строка действий карточки. Тур 3 В5.5 (п.9): порядок — сравнить, бейдж, отчет,
+ * обновить анализ (главное действие справа). Круг 5 (Н1 аудита, вариант А, 27.09):
+ * на телефоне «Сравнить» и «Бейдж» — в меню «⋮», на виду «Отчет» и «Как
+ * считается?» (иначе строка резалась и отчет с телефона был недоступен). Круг 5
+ * (находка 19): у репо без оценки «Сравнить» нет — в сравнении у него пустой столбец.
+ */
+function CardActions({ org, repo, scored, publicBaseUrl, report, refresh }: { org: string; repo: string; scored: boolean; publicBaseUrl: string; report: ReactNode; refresh: ReactNode }) {
+  const phone = useMediaQuery("(max-width: 767px)");
+  const badgeOk = useBadgeAvailable(org, repo);
+  const [badgeOpen, setBadgeOpen] = useState(false);
+  if (!phone) {
+    return (
+      <Flex gap={2} alignItems="center">
+        {scored && <CompareButton org={org} repo={repo} />}
+        {/* 5-A (§2 24.09): бейдж — кнопкой в шапке, как Clone у SourceCraft */}
+        {scored && <BadgeButton org={org} repo={repo} publicBaseUrl={publicBaseUrl} />}
+        {report}
+        {refresh}
+      </Flex>
+    );
+  }
+  const compare = compareState(org, repo);
+  const items = [
+    ...(scored
+      ? [
+          compare.full
+            ? { text: "Сравнить – уже 3 из 3", disabled: true, iconStart: <Icon data={ScalesBalanced} size={16} />, action: () => undefined }
+            : { text: compare.inSet ? "Открыть сравнение" : "Сравнить", iconStart: <Icon data={ScalesBalanced} size={16} />, action: compare.go },
+        ]
+      : []),
+    ...(scored && badgeOk ? [{ text: "Бейдж для README", iconStart: <Icon data={SealCheck} size={16} />, action: () => setBadgeOpen(true) }] : []),
+  ];
+  return (
+    <Flex gap={2} alignItems="center">
+      {report}
+      {refresh}
+      {items.length > 0 && (
+        <DropdownMenu
+          size="m"
+          items={items}
+          popupProps={{ placement: "bottom-end" }}
+          renderSwitcher={(props) => (
+            <Button {...props} view="flat" size="m" aria-label="Еще действия">
+              <Icon data={Ellipsis} size={16} />
+            </Button>
+          )}
+        />
+      )}
+      {badgeOk && <BadgeDialog org={org} repo={repo} publicBaseUrl={publicBaseUrl} open={badgeOpen} onClose={() => setBadgeOpen(false)} />}
+    </Flex>
+  );
+}
+
+/** Набор сравнения вкладки для кнопки и пункта меню «Сравнить» (одно правило). */
+function compareState(org: string, repo: string): { inSet: boolean; full: boolean; count: number; go: () => void } {
+  const slug = slugOf(org, repo);
+  const set = lastCompareSet();
+  const inSet = set.includes(slug);
+  const go = (): void => {
+    const next = inSet ? set : [...set, slug];
+    rememberCompareSet(next);
+    navigate(compareHref(next));
+  };
+  return { inSet, full: !inSet && set.length >= COMPARE_MAX, count: set.length, go };
+}
+
+/**
  * Тур 3 В5.5 (п.9, 26.09): «Сравнить» из карточки. Набор — последний набор
  * сравнения вкладки (`lastCompareSet`, как у пункта rail): репо уже в нем —
  * «В сравнении» ведет на страницу сравнения; есть место — добавляет и ведет
  * туда же; мест нет — кнопка выключена с причиной в подсказке.
  */
 function CompareButton({ org, repo }: { org: string; repo: string }) {
-  const slug = slugOf(org, repo);
-  const set = lastCompareSet();
-  const inSet = set.includes(slug);
-  const full = !inSet && set.length >= COMPARE_MAX;
-  const go = (): void => {
-    const next = inSet ? set : [...set, slug];
-    rememberCompareSet(next);
-    navigate(compareHref(next));
-  };
+  const { inSet, full, count, go } = compareState(org, repo);
   if (full) {
     return (
       <ActionTooltip title={COMPARE_LIMIT_TEXT}>
         {/* обертка: выключенная кнопка не получает наведения, подсказка — на span */}
-        <span className="rh-disabled-tip">
+        {/* круг 5 тура 3 (находка 14): обертка фокусируется — причину слышно и с клавиатуры */}
+        <span className="rh-disabled-tip" tabIndex={0} aria-label={`Сравнить: ${COMPARE_LIMIT_TEXT}`}>
           <Button view="outlined" size="m" disabled>
             <Icon data={ScalesBalanced} size={16} />
             Сравнить
@@ -472,7 +567,7 @@ function CompareButton({ org, repo }: { org: string; repo: string }) {
     );
   }
   return (
-    <Button view="outlined" size="m" onClick={go} title={inSet ? "Открыть сравнение" : `Добавить в сравнение (${set.length + 1} из ${COMPARE_MAX})`}>
+    <Button view="outlined" size="m" onClick={go} title={inSet ? "Открыть сравнение" : `Добавить в сравнение (${count + 1} из ${COMPARE_MAX})`}>
       <Icon data={ScalesBalanced} size={16} />
       {inSet ? "В сравнении" : "Сравнить"}
     </Button>
@@ -1779,7 +1874,7 @@ function FavoriteStar({ org, repo, visibility, doneKey, loggedIn }: { org: strin
           не показывался; причина — подсказкой на обертке */}
       {starDisabled ? (
         <ActionTooltip title={starTip}>
-          <span className="rh-disabled-tip">{star}</span>
+          <span className="rh-disabled-tip" tabIndex={0} aria-label={starTip}>{star}</span>
         </ActionTooltip>
       ) : (
         star

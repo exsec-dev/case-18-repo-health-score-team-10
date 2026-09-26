@@ -2800,14 +2800,14 @@ button.rh-category:focus-visible {
   vertical-align: middle;
 }
 
-/* лидер строки: стрелка всегда; подложка — только под нейтральным числом (дизайн §6.4);
+/* лидер строки — только подложка (круг 5 тура 3, находка 15: стрелка ▲ убрана, в рейтинге
+   она значит «поднялся за сутки»); у цветного чипа — рамка-подложка вокруг чипа;
    на серой карточке — на ступень плотнее, иначе сливается с фоном */
 .rh-cmp-lead {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
   white-space: nowrap;
-  padding: 0 var(--g-spacing-2) 0 var(--g-spacing-1);
+  padding: 0 var(--g-spacing-2);
   border-radius: var(--g-border-radius-m);
   background: var(--g-color-base-generic-medium);
   color: var(--g-color-text-primary);
@@ -2817,9 +2817,8 @@ button.rh-category:focus-visible {
   background: var(--g-color-base-generic);
 }
 
-.rh-cmp-lead_bare {
-  padding: 0;
-  background: none;
+.rh-cmp-lead_chip {
+  padding: 2px;
 }
 
 /* Д1 А: балл первым (узкий подстолбец, цифры вправо), затем значение */
@@ -2995,6 +2994,46 @@ button.rh-category:focus-visible {
 @media (max-width: 480px) {
   .rh-check-foot .g-button {
     width: 100%;
+  }
+}
+
+/* Круг 5 тура 3 (находки 13, 14 аудита, 27.09): цели подсказок-меток и обертки выключенных
+   кнопок фокусируются (TIP_TARGET, tabIndex) — видимая рамка фокуса с клавиатуры */
+.rh-rank:focus-visible,
+.rh-rating-ai:focus-visible,
+.rh-rating-fraud:focus-visible,
+.rh-ai-stale:focus-visible,
+.rh-disabled-tip:focus-visible {
+  outline: 2px solid var(--g-color-line-focus);
+  outline-offset: 2px;
+  border-radius: var(--g-border-radius-s);
+}
+
+/* Круг 5 тура 3 (находка 23): на телефоне цель касания мелких иконок строки — 24px
+   (WCAG 2.5.8) за счет отступа; отрицательное поле не меняет раскладку */
+@media (max-width: 767px) {
+  .rh-rating-ext,
+  .rh-rating-ai,
+  .rh-rating-fraud {
+    padding: 5px;
+    margin: -5px;
+  }
+  .g-help-mark {
+    padding: 4px;
+    margin: -4px;
+  }
+}
+
+/* Круг 5 тура 3 (Н3 аудита, вариант А, 27.09): ячейка «Репозиторий» — потолок 264px только
+   ниже 1440; на широких экранах колонка берет свободное место (на 1920 оставалось 180+ px
+   пустоты, а имена №1 и №2 резались). Потолок в долях окна — длинный слаг не распирает таблицу. */
+.rh-rating-repo {
+  min-width: 180px;
+  max-width: 264px;
+}
+@media (min-width: 1440px) {
+  .rh-rating-repo {
+    max-width: 30vw;
   }
 }
 

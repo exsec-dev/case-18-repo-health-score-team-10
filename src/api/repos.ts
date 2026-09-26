@@ -81,6 +81,11 @@ export interface RatingItem {
   aiOverview: boolean;
   /** часть фактов взята из истории при сбое канала (§5.6) — НЕ «давность скана» */
   staleFacts: boolean;
+  /**
+   * Круг 5 тура 3 (находка 7 аудита, 27.09): модель поставила «кода нет»
+   * (`scores.code_empty`, Q&A №13) — у индекса 0 метка «нет кода», как в «Сравнении»
+   */
+  codeEmpty: boolean;
   modelVersion: string;
 }
 
@@ -399,6 +404,7 @@ function toRatingItem(row: RatingRow): RatingItem {
     scannedAt: row.finished_at ?? row.started_at,
     scanStatus: row.scan_status,
     staleFacts: Array.isArray(stale) && stale.length > 0,
+    codeEmpty: row.code_empty === 1,
     modelVersion: row.model_version,
   };
 }

@@ -13,6 +13,7 @@
 import { useToaster } from "@gravity-ui/uikit";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { MyJob } from "../api/me";
+import { navigate, repoHref } from "./router";
 import { SESSION_LOST, useJson, useLatest, useVisible, type AsyncState, type MeResponse } from "./api";
 import {
   expectJob,
@@ -201,7 +202,18 @@ function AnalysisState({
         setJobs(next);
         for (const job of out.finished) {
           const t = finishedToast(job);
-          toaster.add({ name: `analysis-finished:${job.jobId}`, theme: t.theme, title: t.title, content: t.content });
+          // круг 5 тура 3 (находка 27 аудита): из тоста итога — сразу к карточке (кроме
+          // случая, когда зритель уже на ней)
+          const [org, repo] = job.slug.split("/");
+          const href = org && repo ? repoHref(org, repo) : null;
+          const here = href !== null && window.location.pathname === href;
+          toaster.add({
+            name: `analysis-finished:${job.jobId}`,
+            theme: t.theme,
+            title: t.title,
+            content: t.content,
+            actions: href !== null && !here ? [{ label: "Открыть карточку", onClick: () => navigate(href), removeAfterClick: true }] : undefined,
+          });
         }
         if (out.finished.length > 0) window.dispatchEvent(new CustomEvent(ANALYSIS_FINISHED, { detail: out.finished }));
       }

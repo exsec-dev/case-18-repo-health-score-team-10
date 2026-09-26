@@ -344,7 +344,8 @@ export function submetricNote(category: string, sub: string, note: string | null
   if (key === "issues.tracker_unused") return { remark: "Задач в трекере нет, поэтому категория получает минимальный балл." };
   // 4.4.0 (ТП-1, ТП-9): справочные показатели динамики — причина «нет данных» словами
   if (key === "cicd.stability" || key === "issues.backlog_trend" || key === "issues.monthly_flow") {
-    if (note.startsWith("older collector")) return { value: "нет данных, анализ собран до версии 5 сборщика" };
+    // круг 5 тура 3 (находка 6 аудита): без внутренней «версии 5 сборщика» — тот же факт словами
+    if (note.startsWith("older collector")) return { value: "появится после следующего анализа" };
     if (key !== "cicd.stability" && note.startsWith("tracker not maintained")) return { value: "трекер не ведется" };
     if (key === "issues.backlog_trend" && note.startsWith("issue list truncated")) return { value: "нет данных, список задач обрезан и 90 дней не покрыты" };
     if (key === "cicd.stability" && note.startsWith("no declared CI")) return { value: "CI не настроен" };
@@ -407,7 +408,8 @@ export function submetricShownValue(
   }
   // круг 2 (В1): доля тестов ниже прочих показателей — бонус не применен, число справочно
   if (shown !== NO_VALUE && `${category}.${sub}` === "code.tests" && typeof entry.note === "string" && entry.note.startsWith("tests bonus not applied")) {
-    return `${shown} (в балл не входит: доля ниже прочих показателей)`;
+    // круг 5 тура 3 (находка 17): правило бонуса словами
+    return `${shown} (в балл не входит: доля тестов учитывается, только когда повышает балл)`;
   }
   if (shown !== NO_VALUE) return shown;
   // В5.3-М (Н14б): ветка «пометок нет» удалена — с 4.2.0 доля при 0 пометок

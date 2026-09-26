@@ -175,19 +175,29 @@ export function whyText(key: CategoryKey, cat: CardCategory, ctx: SubmetricConte
  * Сжатие малой выборки задач, потолок «Безопасности» при открытых находках и
  * (круг 2, В3) сжатие малого кода к 50.
  */
+/** Круг 5 тура 3 (находка 16): короткая метка поправки для ячейки сравнения (вместо «Балл сжат»). */
+export function adjustmentLabel(cat: Pick<CardCategory, "adjustment">): string {
+  const a = cat.adjustment;
+  if (a?.kind === "small-sample") return "Мало задач";
+  if (a?.kind === "small-code") return "Мало кода";
+  return "Есть находки";
+}
+
 export function adjustmentText(cat: Pick<CardCategory, "adjustment" | "score">): string | null {
   const a = cat.adjustment;
   if (!a) return null;
   if (a.kind === "small-sample") {
     // приемка HQ (E11): ни одной засчитанной закрытой — не «0 из 10»
     if (a.n === 0) return `Ни одна задача не закрыта – балл категории минимальный: ${fmtDecimal(cat.score ?? a.floor, 0)}.`;
-    const tasks = plural(a.n, "закрытая задача", "закрытые задачи", "закрытых задач");
-    return `Малая выборка: ${a.n} ${tasks} из ${a.full} – балл сжат к минимуму ${fmtDecimal(a.floor, 0)}: ${fmtDecimal(a.raw, 1, { trim: true })} → ${fmtDecimal(cat.score ?? a.floor, 1, { trim: true })}.`;
+    // круг 5 тура 3 (находка 16 аудита, 27.09): без жаргона «сжат к минимуму» — словами
+    // правила; числа те же (раньше: «Малая выборка: N … – балл сжат к минимуму 6: X → Y»)
+    return `Мало закрытых задач: ${a.n} из ${a.full} нужных для надежной оценки – балл снижен с ${fmtDecimal(a.raw, 1, { trim: true })} до ${fmtDecimal(cat.score ?? a.floor, 1, { trim: true })}.`;
   }
   if (a.kind === "small-code") {
-    // круг 2 (В3): сжатие малого кода к нейтрали 50 вместо порога «от 50 строк»
-    const lines = plural(a.loc, "строка", "строки", "строк");
-    return `Мало кода: ${a.loc} ${lines} из ${a.full} – балл сжат к ${fmtDecimal(a.center, 0)}: ${fmtDecimal(a.raw, 1, { trim: true })} → ${fmtDecimal(cat.score ?? a.center, 1, { trim: true })}.`;
+    // круг 2 (В3): сжатие малого кода к нейтрали 50 вместо порога «от 50 строк»;
+    // круг 5 тура 3 (находка 16): словами, без «сжат к»
+    const lines = plural(a.full, "строки", "строк", "строк");
+    return `Мало кода: ${a.loc} из ${a.full} ${lines} для надежной оценки – балл снижен с ${fmtDecimal(a.raw, 1, { trim: true })} до ${fmtDecimal(cat.score ?? a.center, 1, { trim: true })}, ближе к середине шкалы.`;
   }
   const what = a.level === "critical" ? "критичные находки AppSec" : "находки AppSec высокой важности";
   return `Есть открытые ${what} – балл категории не выше ${a.limit}.`;

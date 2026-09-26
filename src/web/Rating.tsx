@@ -65,11 +65,11 @@ import {
   scoreWord,
   sentence,
 } from "./format";
-import { useMediaQuery } from "./prefs";
+import { readRatingHidden, useMediaQuery, writeRatingHidden } from "./prefs";
 import { linkProps, navigate, repoHref } from "./router";
 import { Page, showAside, useAsideControl } from "./Shell";
 import { categoryColorClass } from "./cardView";
-import { AsideSection, EmptyState, LanguageName, PageHeader, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows } from "./ui";
+import { AsideSection, EmptyState, LanguageName, PageHeader, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, TIP_TARGET } from "./ui";
 import { LANG_NONE, LANG_NONE_TITLE, langOptions, type Facets, type LangOptionData } from "./lang-filter";
 
 type Item = RatingResponse["items"][number];
@@ -224,7 +224,12 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
     return () => clearTimeout(timer);
   }, [queryDraft, qParam]);
 
-  const [hidden, setHidden] = useState<string[]>(HIDDEN_BY_DEFAULT);
+  // круг 5 тура 3 (находка 21): выбор колонок — в localStorage, переживает перезагрузку
+  const [hidden, setHiddenState] = useState<string[]>(() => readRatingHidden(HIDDEN_BY_DEFAULT));
+  const setHidden = (next: string[]): void => {
+    setHiddenState(next);
+    writeRatingHidden(next);
+  };
 
   function setParams(patch: Record<string, string | string[] | null>, opts: { replace?: boolean; keepPage?: boolean } = {}): void {
     // В4.8.5 (К8.5.10, С5-5): база — ТЕКУЩИЙ адрес, а не снимок рендера:
@@ -821,7 +826,7 @@ function RankCell({ item }: { item: Item }) {
   const moved = d !== null && d !== 0;
   const up = moved && d! > 0;
   const cell = (
-    <span className="rh-rank">
+    <span className="rh-rank" {...(moved ? TIP_TARGET : {})}>
       {moved && (
         <span className={up ? "rh-rank__arrow rh-rank__arrow_up" : "rh-rank__arrow rh-rank__arrow_down"} role="img" aria-label={up ? "Место выросло за сутки" : "Место снизилось за сутки"}>
           <Icon data={up ? TriangleUpFill : TriangleDownFill} size={12} />
@@ -855,7 +860,9 @@ function RankCell({ item }: { item: Item }) {
  */
 function RepoCell({ item, compact = false }: { item: Item; compact?: boolean }) {
   return (
-    <Flex gap={3} alignItems="center" style={compact ? { minWidth: 0 } : { minWidth: 180, maxWidth: 264 }}>
+    // круг 5 тура 3 (Н3 аудита, вариант А): потолок ширины — в CSS (`.rh-rating-repo`),
+    // на широких экранах он снят, и колонка берет свободное место
+    <Flex gap={3} alignItems="center" className={compact ? undefined : "rh-rating-repo"} style={compact ? { minWidth: 0 } : undefined}>
       <RepoAvatar repo={item.repo} logoUrl={item.logoUrl} size="m" />
       <Flex direction="column" gap={0} style={{ minWidth: 0 }}>
         <Flex gap={1} alignItems="center" style={{ minWidth: 0 }}>
@@ -879,7 +886,7 @@ function RepoCell({ item, compact = false }: { item: Item; compact?: boolean }) 
           {/* В5.2 (Б6, выбор 4C): у репо есть публичный AI-обзор — искра у имени */}
           {item.aiOverview && (
             <ActionTooltip title="Есть AI-обзор">
-              <span className="rh-rating-ai" role="img" aria-label="Есть AI-обзор">
+              <span className="rh-rating-ai" role="img" aria-label="Есть AI-обзор" {...TIP_TARGET}>
                 <Icon data={Sparkles} size={14} />
               </span>
             </ActionTooltip>
@@ -889,7 +896,7 @@ function RepoCell({ item, compact = false }: { item: Item; compact?: boolean }) 
               что у плашки на карточке (format.ts FRAUD_*) */}
           {item.fraud && (
             <ActionTooltip title={FRAUD_TITLE} description={FRAUD_EXPLAIN}>
-              <span className="rh-rating-fraud" role="img" aria-label={FRAUD_TITLE}>
+              <span className="rh-rating-fraud" role="img" aria-label={FRAUD_TITLE} {...TIP_TARGET}>
                 <Icon data={Flag} size={14} />
               </span>
             </ActionTooltip>
@@ -1051,6 +1058,20 @@ function ScoreCell({ item, narrow = false }: { item: Item; narrow?: boolean }) {
       <Label theme="unknown" size="xs">
         {NO_SCORE}
       </Label>
+    );
+  }
+  if (item.codeEmpty) {
+    // круг 5 тура 3 (находка 7): пустой репо — число нейтральное и метка «нет кода», как в
+    // «Сравнении» (решение 25.09): 0 здесь — «оценивать нечего», а не зона риска
+    return (
+      <Flex gap={2} alignItems="center" justifyContent="flex-end">
+        <Label theme="unknown" size="xs" title="В репозитории нет кода – оценка 0 означает, что оценивать пока нечего">
+          нет кода
+        </Label>
+        <Text color="secondary" className="rh-score-cell__num">
+          {fmtScore(item.healthcraftIndex)}
+        </Text>
+      </Flex>
     );
   }
   return (

@@ -60,7 +60,7 @@ import { recommendationsHref } from "./RepoPage";
 import { type Band, BANDS, type RepoEntry, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
 import { linkProps, navigate, repoHref } from "./router";
 import { Page, UserAvatar, displayName, logoutFailedToast } from "./Shell";
-import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, RepoSlug, SkeletonRows, VisibilityPill } from "./ui";
+import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, RepoSlug, SkeletonRows, TIP_TARGET, VisibilityPill } from "./ui";
 
 const REPOS_CRUMBS = [{ text: "Избранное" }];
 const SETTINGS_CRUMBS = [{ text: "Настройки" }];
@@ -1358,7 +1358,7 @@ function RepoRow({
           </Link>
           {entry.fraudFlag?.flag === true && entry.fraudFlag.factors.length > 0 && (
             <ActionTooltip title={FRAUD_TITLE} description={FRAUD_EXPLAIN}>
-              <span className="rh-rating-fraud" role="img" aria-label={FRAUD_TITLE}>
+              <span className="rh-rating-fraud" role="img" aria-label={FRAUD_TITLE} {...TIP_TARGET}>
                 <Icon data={Flag} size={14} />
               </span>
             </ActionTooltip>
