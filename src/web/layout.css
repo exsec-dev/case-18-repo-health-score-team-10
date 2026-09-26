@@ -3014,16 +3014,26 @@ button.rh-category:focus-visible {
 /* В5.5 тур 1 (W2): динамика позиции под местом (Р1); плашка фрода — подозрение,
    не приговор: предупреждающий, а не красный цвет (Р2); внешняя ссылка на
    SourceCraft в строке (Р3) */
-.rh-rank-delta {
+/* Тур 3 В5.5: ячейка места — треугольник направления за сутки вплотную к месту,
+   группа прижата вправо (колонка «#» выровнена по правому краю) */
+.rh-rank {
   display: inline-flex;
   align-items: center;
-  gap: 1px;
-  line-height: 1;
+  justify-content: flex-end;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
-.rh-rank-delta_up {
+.rh-rank__arrow {
+  display: inline-flex;
+}
+.rh-rank__n {
+  font-weight: 600;
+}
+.rh-rank__arrow_up {
   color: var(--g-color-text-positive);
 }
-.rh-rank-delta_down {
+.rh-rank__arrow_down {
   color: var(--g-color-text-danger);
 }
 .rh-rating-fraud,
@@ -3119,4 +3129,20 @@ button.rh-category:focus-visible {
 .rh-disabled-tip > .g-button:disabled,
 .rh-disabled-tip > .g-button.g-button_disabled {
   pointer-events: none;
+}
+
+/* тур 3 В5.5 (круг 2): отступ перед «Исходные данные» в поповере основания */
+.rh-proof__raw-toggle {
+  margin-top: var(--g-spacing-2);
+}
+
+/* тур 3 В5.5 (круг 2): знак «AI-текст по прошлому анализу» у AI-плашек */
+.rh-ai-stale {
+  display: inline-flex;
+  color: var(--g-color-text-secondary);
+}
+.rh-ai-plate__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--g-spacing-2);
 }

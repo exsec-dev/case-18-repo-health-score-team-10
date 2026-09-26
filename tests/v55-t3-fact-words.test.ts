@@ -94,6 +94,6 @@ describe("factWords: fallback and non-ok facts", () => {
   test("card popover shows words and keeps raw data under a collapsible", () => {
     const card = readFileSync("src/web/RepoPage.tsx", "utf8");
     expect(card).toContain("factWords(fact.key, fact.status, fact.value)");
-    expect(card).toContain('<Disclosure size="m" summary="Исходные данные">');
+    expect(card).toContain('<Disclosure size="m" summary="Исходные данные" className="rh-proof__raw-toggle">');
   });
 });

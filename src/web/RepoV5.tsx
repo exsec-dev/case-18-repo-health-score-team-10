@@ -10,14 +10,14 @@
 //   - бейдж для README — кнопка в шапке с поповером, как Clone у SourceCraft (5-A).
 // Видимость текстов модели — прежняя (решение 22.09): `card.ai` приходит только
 // зрителю с правами на полный Score; без прав этих блоков нет вовсе.
-import { ChevronDown, CircleExclamation, ClockArrowRotateLeft, EllipsisVertical, SealCheck, Shield, ShieldCheck, ShieldExclamation, Sparkles } from "@gravity-ui/icons";
+import { ArrowsRotateRight, ChevronDown, CircleExclamation, ClockArrowRotateLeft, SealCheck, Shield, ShieldCheck, ShieldExclamation, Sparkles } from "@gravity-ui/icons";
 import {
+  ActionTooltip,
   Alert,
   Button,
   Card,
   ClipboardButton,
   Disclosure,
-  DropdownMenu,
   Flex,
   HelpMark,
   Icon,
@@ -521,23 +521,24 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
   // В5.2 (Б3): переключатель автообновления удален; запуск — в меню «три точки».
   // Аудит дизайна О1: не-владельцу пункт нужен, только если после обзора был новый
   // анализ (иначе — холостой «уже готов»); нет пункта — нет и «⋮»
-  const newerAnalysis = ai !== null && ai.check.latestScanId !== null && ai.scanId < ai.check.latestScanId;
+  const newerAnalysis = aiNotesStale(ai);
+  // тур 3 В5.5 (круг 2, 26.09): в меню «⋮» был единственный пункт — вместо меню
+  // иконка обновления с подсказкой; выключенная — причина в подсказке на обертке
+  const runText = withCounter(hasOverview ? "Обновить обзор" : "Сформировать обзор", counter);
+  const runDisabled = jobActive || cooldownActive || actions.sending || quotaBlocked !== null;
+  const runReason = jobActive
+    ? "Обзор уже формируется"
+    : cooldownActive
+      ? `Следующий запуск – после ${fmtDateTime(ai!.cooldownUntil)}`
+      : quotaBlocked ?? runText;
+  const runButton = (
+    <Button view="flat-secondary" size="s" aria-label={runText} loading={actions.sending} disabled={runDisabled} onClick={() => void actions.start()}>
+      <Icon data={ArrowsRotateRight} size={14} />
+    </Button>
+  );
   const ownerActions = canRun && ai !== null && (own || newerAnalysis) && (
     <Flex gap={2} alignItems="center">
-      <DropdownMenu
-        renderSwitcher={(props) => (
-          <Button {...props} view="flat-secondary" size="s" aria-label="Действия с обзором" loading={actions.sending}>
-            <Icon data={EllipsisVertical} size={14} />
-          </Button>
-        )}
-        items={[
-          {
-            text: withCounter(hasOverview ? "Обновить обзор" : "Сформировать обзор", counter),
-            disabled: jobActive || cooldownActive || actions.sending || quotaBlocked !== null,
-            action: () => void actions.start(),
-          },
-        ]}
-      />
+      <ActionTooltip title={runDisabled ? runReason : runText}>{runDisabled ? <span className="rh-disabled-tip">{runButton}</span> : runButton}</ActionTooltip>
     </Flex>
   );
 
@@ -564,6 +565,7 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
             {AI_SECTION_TITLE}
           </Text>
           {model !== null && <AiModelLabel model={model} />}
+          {hasOverview && newerAnalysis && <AiStaleMark />}
           {/* выбор 2A (25.09): объем публичной версии — меткой в заголовке, пояснение в подсказке */}
           {publicVersion && hasOverview && (
             // UX-проход 25.09 (замечание 5): знак вопроса — внутри плашки
@@ -651,7 +653,27 @@ export function CategoryAiMark({ card, categoryKey, hasData }: { card: Card; cat
  * Текст модели в категории и разбор динамики (замечания 3, 6 от 25.09): стиль
  * info-плашки AI-обзора, без метки модели (она уже в заголовке обзора).
  */
-export function AiNotePlate({ title, text }: { title: string; text: string }) {
+/**
+ * Тур 3 В5.5 (круг 2, 26.09, Екатерина): AI-текст сделан по НЕпоследнему
+ * анализу — после него был новый, цифры в тексте могут не совпасть с карточкой.
+ * Условие то же, что у пункта «Обновить обзор» для не-владельца (аудит О1).
+ */
+export function aiNotesStale(ai: Card["ai"]): boolean {
+  return ai != null && ai.check.latestScanId !== null && ai.scanId < ai.check.latestScanId;
+}
+
+/** Знак «текст устарел» у всех AI-плашек: иконка часов со стрелкой и подсказка. */
+export function AiStaleMark() {
+  return (
+    <ActionTooltip title="Обзор сделан по прошлому анализу" description="После него был новый анализ – цифры в тексте могут отличаться от карточки. Обзор можно обновить.">
+      <span className="rh-ai-stale" role="img" aria-label="Обзор сделан по прошлому анализу">
+        <Icon data={ClockArrowRotateLeft} size={14} />
+      </span>
+    </ActionTooltip>
+  );
+}
+
+export function AiNotePlate({ title, text, stale = false }: { title: string; text: string; stale?: boolean }) {
   return (
     <Alert
       theme="info"
@@ -659,7 +681,16 @@ export function AiNotePlate({ title, text }: { title: string; text: string }) {
       size="s"
       className="rh-ai-plate"
       icon={<Icon data={Sparkles} size={16} />}
-      title={title}
+      title={
+        stale ? (
+          <span className="rh-ai-plate__title">
+            {title}
+            <AiStaleMark />
+          </span>
+        ) : (
+          title
+        )
+      }
       message={
         <div className="rh-ai-plate__text">
           <AiText text={text} />
@@ -669,10 +700,10 @@ export function AiNotePlate({ title, text }: { title: string; text: string }) {
   );
 }
 
-export function CategoryAiNote({ note }: { note: AiNote }) {
+export function CategoryAiNote({ note, stale = false }: { note: AiNote; stale?: boolean }) {
   return (
     <div className="rh-cat-ai">
-      <AiNotePlate title="Разбор модели" text={note.text} />
+      <AiNotePlate title="Разбор модели" text={note.text} stale={stale} />
     </div>
   );
 }
@@ -934,7 +965,7 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
               </Text>
             </Flex>
           </Flex>
-          {trajectory !== null && <AiNotePlate title="Разбор динамики" text={trajectory.text} />}
+          {trajectory !== null && <AiNotePlate title="Разбор динамики" text={trajectory.text} stale={aiNotesStale(card.ai)} />}
           {list}
         </Flex>
       </Card>

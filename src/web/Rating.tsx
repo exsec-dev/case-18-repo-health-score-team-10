@@ -6,7 +6,7 @@
 // тулбар одной строкой (size m), таблица, методика в правой панели.
 import { coverageLine } from "./ratingParams";
 import { loadRatingScroll, rememberRatingHref, saveRatingScroll } from "./ratingReturn";
-import { ArrowDown, ArrowUp, ArrowUpRightFromSquare, BarsAscendingAlignLeft, BarsDescendingAlignLeft, Flag, Gear, Magnifier, Minus, Sparkles, SquareListUl } from "@gravity-ui/icons";
+import { ArrowUpRightFromSquare, BarsAscendingAlignLeft, BarsDescendingAlignLeft, Flag, Gear, Magnifier, Sparkles, SquareListUl, TriangleDownFill, TriangleUpFill } from "@gravity-ui/icons";
 import {
   ActionTooltip,
   Alert,
@@ -809,37 +809,32 @@ function PhoneList({ items, refreshing }: { items: Item[]; refreshing: boolean }
 }
 
 /**
- * Ячейка места (В5.5 тур 1, Р1): само место и под ним динамика к последнему
- * снимку (▲3 / ▼2; без изменения — нейтральный маркер). rankDelta === null —
- * НИЧЕГО: ни «0», ни «—» (снимка нет или репо в нем отсутствует — пустота
- * честнее; «—» занято глифом «нет данных»).
+ * Ячейка места. Тур 3 В5.5 (26.09, Екатерина — итог круга правок динамики):
+ * треугольник направления за сутки (▲ зеленый / ▼ красный) рядом с местом;
+ * место — основным цветом, жирным; величина сдвига и вчерашнее место — в
+ * подсказке на группе «треугольник + место». Без изменения и без снимка прошлых суток — только место.
+ * Вытесняет тур 1 (число под местом), отдельную колонку и число рядом с местом.
  */
 function RankCell({ item }: { item: Item }) {
   if (item.rank === null) return <Text color="secondary">—</Text>;
-  return (
-    <Flex direction="column" alignItems="flex-end" gap={0}>
-      <Text color="secondary">{fmtCount(item.rank)}</Text>
-      <RankDelta delta={item.rankDelta} rank={item.rank} />
-    </Flex>
+  const d = item.rankDelta;
+  const moved = d !== null && d !== 0;
+  const up = moved && d! > 0;
+  const cell = (
+    <span className="rh-rank">
+      {moved && (
+        <span className={up ? "rh-rank__arrow rh-rank__arrow_up" : "rh-rank__arrow rh-rank__arrow_down"} role="img" aria-label={up ? "Место выросло за сутки" : "Место снизилось за сутки"}>
+          <Icon data={up ? TriangleUpFill : TriangleDownFill} size={12} />
+        </span>
+      )}
+      <Text className="rh-rank__n">{fmtCount(item.rank)}</Text>
+    </span>
   );
-}
-
-function RankDelta({ delta, rank }: { delta: number | null; rank: number }) {
-  if (delta === null) return null;
-  const prev = rank + delta; // delta = место в снимке − место сейчас
-  if (delta === 0) {
-    return (
-      <Text variant="caption-2" color="hint" className="rh-rank-delta" title={`в прошлом снимке то же место – ${fmtCount(prev)}`}>
-        <Icon data={Minus} size={10} />
-      </Text>
-    );
-  }
-  const up = delta > 0;
-  return (
-    <Text variant="caption-2" className={up ? "rh-rank-delta rh-rank-delta_up" : "rh-rank-delta rh-rank-delta_down"} title={`в прошлом снимке – ${fmtCount(prev)} место`}>
-      <Icon data={up ? ArrowUp : ArrowDown} size={10} />
-      {fmtCount(Math.abs(delta))}
-    </Text>
+  // подсказка — на всей группе «треугольник + место» (слово владельца 26.09)
+  return moved ? (
+    <ActionTooltip title={`${up ? "Поднялся" : "Опустился"} на ${fmtCount(Math.abs(d!))} за сутки: вчера – ${fmtCount(item.rank + d!)} место`}>{cell}</ActionTooltip>
+  ) : (
+    cell
   );
 }
 
@@ -971,11 +966,10 @@ function buildColumns(
       id: "rank",
       name: "#",
       align: "end",
-      width: 56,
       sticky: "start",
       // Ступень 4 (В-4): настоящее место в рейтинге (поле `rank` ответа), а не номер
       // строки выдачи — при поиске и фильтре «#» совпадает с местом на карточке.
-      // В5.5 тур 1 (Р1): под местом — динамика к последнему снимку (стрелка и число)
+      // Тур 3 В5.5: место жирным, справа — динамика за сутки (▲/▼ и число)
       template: (item: Item) => <RankCell item={item} />,
     },
     { id: "repo", name: sortable("Репозиторий", "name"), primary: true, sticky: "start", template: (item: Item) => <RepoCell item={item} /> },

@@ -122,7 +122,7 @@ import { linkProps, navigate } from "./router";
 import { COMPARE_MAX, COMPARE_LIMIT_TEXT, compareHref } from "./compareView";
 import { lastCompareSet, rememberCompareSet } from "./compareReturn";
 import { LoginButton, Page, type Crumb } from "./Shell";
-import { AiOverviewSection, BadgeButton, CategoryAiMark, CategoryAiNote, FraudCheckFooter, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
+import { AiOverviewSection, BadgeButton, CategoryAiMark, CategoryAiNote, aiNotesStale, FraudCheckFooter, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
 
 type Card = RepoCard;
@@ -595,12 +595,12 @@ function Header({ card, view, starDoneKey, starLoggedIn }: { card: Card; view: C
           <Flex gap={2} alignItems="center" wrap className="rh-card-head__title">
             {/* В4.6 (У27): тот же компонент слага, что в строке рейтинга */}
             <RepoSlug org={r.org} repo={r.repo} variant="header-1" />
-            {/* тур 3 В5.5 (п.8): org/repo копируется одной иконкой */}
-            <ClipboardButton text={slugOf(r.org, r.repo)} size="s" view="flat-secondary" tooltipInitialText="Скопировать org/repo" tooltipSuccessText="Скопировано" />
             {/* В4.9 ч.2 (А7, U6-1 с поправкой владельца): видимость SourceCraft —
                 той же плашкой, что в избранном; «неизвестно» плашки не дает */}
             <VisibilityPill value={view.visibility} />
             <Flex gap={1} alignItems="center">
+              {/* тур 3 В5.5 (п.8, круг 2): копирование org/repo — после плашки видимости */}
+              <ClipboardButton text={slugOf(r.org, r.repo)} size="s" view="flat-secondary" tooltipInitialText="Скопировать org/repo" tooltipSuccessText="Скопировано" />
               <FavoriteStar org={r.org} repo={r.repo} visibility={r.visibility} doneKey={starDoneKey} loggedIn={starLoggedIn} />
               <ActionTooltip title="Открыть на sourcecraft.dev">
                 <Button
@@ -1189,7 +1189,7 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
           {/* В5.5 тур 2 (W4, ЗН-2): карта владельцев — в раскрытии «Состояния кода», теми же строками */}
           {key === "code" && <OwnershipMap category={cat} />}
           {/* замечание 3 (25.09): текст модели — под таблицей метрик */}
-          {aiNote !== null && <CategoryAiNote note={aiNote} />}
+          {aiNote !== null && <CategoryAiNote note={aiNote} stale={aiNotesStale(card.ai)} />}
         </div>
       )}
     </li>
@@ -1393,7 +1393,7 @@ function FactBlock({ factKey, fact, missing }: { factKey: string; fact: Evidence
           {l}
         </Text>
       ))}
-      <Disclosure size="m" summary="Исходные данные">
+      <Disclosure size="m" summary="Исходные данные" className="rh-proof__raw-toggle">
         <pre className="rh-code rh-proof__raw">{fmtFactValue(fact.value)}</pre>
       </Disclosure>
       <Text variant="caption-2" color="hint">
