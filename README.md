@@ -314,3 +314,7 @@ bun test --timeout 30000
 | [reports/2026-09-26-m54-vm-setup.md](reports/2026-09-26-m54-vm-setup.md) | размер ВМ стенда и шаги в консоли Yandex Cloud |
 | [docs/api-spec/](docs/api-spec/) | спецификации REST API SourceCraft и AppSec API, по которым работают сборщики |
 | [docs/lct-case.md](docs/lct-case.md), [docs/ТЗ-sourcecraft.pdf](docs/ТЗ-sourcecraft.pdf) | кейс и техническое задание организаторов |
+
+## Лицензия
+
+Проект распространяется под лицензией **AGPLv3** (полный текст — [LICENSE](LICENSE)). © 2026, команда MISIS_MSc (ЛЦТ-2026).
