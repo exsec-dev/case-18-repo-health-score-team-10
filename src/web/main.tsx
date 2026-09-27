@@ -3,9 +3,6 @@
 // Стили @gravity-ui/navigation подтягивает сам пакет (CSS-импорты в его JS).
 import "@gravity-ui/uikit/styles/fonts.css";
 import "@gravity-ui/uikit/styles/styles.css";
-// после стилей uikit: палитра SourceCraft (см. комментарий в файле)
-import "./theme.css";
-import "./layout.css";
 
 import { configure, Lang, ThemeProvider, Toaster, ToasterComponent, ToasterProvider } from "@gravity-ui/uikit";
 import { StrictMode } from "react";
@@ -13,6 +10,16 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { HEALTHCRAFT_MARK_SVG, PRODUCT_NAME } from "./logo";
 import { useAppTheme } from "./prefs";
+
+// 27.09 (стенд после выкладки В5.5: синяя иконка ссылки в рейтинге, заглушки уже 430 px):
+// наши стили — ПОСЛЕ импорта App. Компоненты uikit и navigation подключают свой CSS
+// внутри своих модулей, и production-бандл Bun кладет CSS в порядке импортов: при
+// импорте наших файлов выше App правила компонентов оказывались НИЖЕ наших и выигрывали
+// при равной специфичности (в dev порядок другой — дефект виден только на стенде).
+// Правило специфичности из docs/ui/gravity-uikit.md остается; порядок — вторая страховка.
+// палитра SourceCraft (см. комментарий в файле) — после стилей uikit
+import "./theme.css";
+import "./layout.css";
 
 configure({ lang: Lang.Ru });
 
