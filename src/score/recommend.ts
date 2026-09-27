@@ -86,6 +86,12 @@ export interface RecommendFactsContext {
    * дать не может. Не передано — правила не фильтруются (прежнее поведение).
    */
   categoryScores?: Partial<Record<CategoryKey, number | null>>;
+  /**
+   * В5.5 закрытие (Г1.21): число авторов той же оценки (показатель «Число
+   * авторов», `activity.contributors`) — только для текста `codeowners-missing`;
+   * условие правила и его эффект от него не зависят.
+   */
+  authors?: number | null;
 }
 
 // ---------- тексты правил (К9.10): одна функция для записи и чтения ----------
@@ -123,6 +129,8 @@ export interface RecommendationParams {
   percent?: number;
   /** speed-up-issue-close: медиана закрытия, дни (Д2: округляется до целых) */
   days?: number;
+  /** codeowners-missing (Г1.21): число авторов — показатель «Число авторов» той же оценки */
+  authors?: number | null;
 }
 
 /** Роли текста действия (К9.10): заголовок — глагол, пояснение — причина, эффект. */
@@ -146,6 +154,9 @@ const SECTION_WORDS: Record<ReadmeSection, { title: string; en: string; about: s
 };
 
 const joinAnd = (items: string[]): string => (items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} и ${items.at(-1)}`);
+
+/** Г1.21: до скольких авторов совет CODEOWNERS звучит как задел на будущее (текст, не условие правила). */
+export const CODEOWNERS_FEW_AUTHORS = 2;
 
 /** Родительный падеж после «из N»: из 1 пометки, из 5 пометок, из 21 пометки. */
 const fromWord = (n: number, one: string, many: string): string => (n % 10 === 1 && n % 100 !== 11 ? one : many);
@@ -226,6 +237,14 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
     case "contributing-missing":
       return presence("Добавьте файл CONTRIBUTING.md", "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.");
     case "codeowners-missing":
+      // В5.5 закрытие (Г1.21, п. 19 замечаний): у проекта 1-2 авторов ответственный
+      // и так понятен — совет звучит как задел на будущее, а не как дефект
+      if (typeof p.authors === "number" && p.authors >= 1 && p.authors <= CODEOWNERS_FEW_AUTHORS) {
+        return presence(
+          "Добавьте файл CODEOWNERS",
+          `У проекта ${p.authors} ${p.authors === 1 ? "автор" : "автора"}, и кто отвечает за код, пока понятно без файла. Когда появятся соавторы, CODEOWNERS сразу направит их предложения изменений к ответственным; для начала хватит одной строки с логином автора.`,
+        );
+      }
       return presence("Добавьте файл CODEOWNERS", "Не указано, кто отвечает за код. С CODEOWNERS предложения изменений сразу попадают к ответственным.");
     case "readme-missing":
       return presence("Добавьте файл README.md", "В репозитории нет README – описания проекта и порядка запуска. Его первым читает любой новый участник.");
@@ -241,7 +260,13 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
       );
     }
     case "ci-missing":
-      return presence("Настройте CI", "Нет файла .sourcecraft/ci.yaml: изменения не собираются и не проверяются автоматически.");
+      // В5.5 закрытие (Г1.21, п. 20 замечаний): у зеркала сборка может жить у
+      // источника — оговорка текстом; признака «зеркало» в методике нет, поэтому
+      // она стоит у правила всегда и говорит, что именно оценивается
+      return presence(
+        "Настройте CI",
+        "Нет файла .sourcecraft/ci.yaml: изменения не собираются и не проверяются автоматически. Если репозиторий – зеркало, сборка может идти у источника, но сервис оценивает только CI в SourceCraft.",
+      );
     case "ci-no-steps":
       return presence("Добавьте команды в ci.yaml", "Файл .sourcecraft/ci.yaml есть, но в нем нет ни одной задачи с командой, поэтому CI ничего не проверяет.");
     case "add-code":
@@ -478,7 +503,7 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
     return { delta, reason: null };
   };
   const categoryScores = Object.fromEntries(Object.entries(base.categories).map(([k, c]) => [k, c.score])) as Record<CategoryKey, number | null>;
-  return recommendFromFacts(ok, { delta: realDelta, issuesScore: scores.categories.issues.score, codeEmpty: base.codeEmpty, categoryScores });
+  return recommendFromFacts(ok, { delta: realDelta, issuesScore: scores.categories.issues.score, codeEmpty: base.codeEmpty, categoryScores, authors: authorsOf(scores.categories.activity) });
 }
 
 /** Чистый движок правил на эффективных фактах (без БД). */
@@ -499,7 +524,7 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
     // (тот же фильтр, что у add-tests с круга 2: `delta > 0`). Отрицательная
     // дельта (перенормировка против совета) подавляется тем же порогом.
     if (real.delta <= 0) return;
-    const texts = recommendationText(ruleId, recommendationParams(ruleId, ok, { delta: real.delta, reason: real.reason, channel }))!;
+    const texts = recommendationText(ruleId, recommendationParams(ruleId, ok, { delta: real.delta, reason: real.reason, channel, authors: ctx.authors }))!;
     presence.push({ ruleId, kind: "presence", priority: 0, ...texts, factRefs, deltaScore: real.delta, opensCategory: null, channel });
   };
   const withPresence = (field: keyof DocsPresenceValue) => (facts: Map<string, unknown>) => {
@@ -644,6 +669,12 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
 
   // ---------- порядок (§8, 4.3.0 Р3): серьезность → реальный Δ desc (затем rule_id) → активационные по весу desc → прочие score ----------
   return orderRecommendations([...presence, ...activation, ...scoreRules]);
+}
+
+/** Г1.21: показатель «Число авторов» оценки (`activity.contributors`) — для текста CODEOWNERS. */
+export function authorsOf(activity: { submetrics?: Record<string, { value?: unknown }> } | undefined): number | null {
+  const v = activity?.submetrics?.["contributors"]?.value;
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
 }
 
 function act(ruleId: string, opens: CategoryKey, factRefs: string[], params: RecommendationParams, channel: RecommendationChannel | null = null): Recommendation {

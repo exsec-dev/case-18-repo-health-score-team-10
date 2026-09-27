@@ -26,6 +26,7 @@ import {
   securityNoDataReason,
   type Contributions,
   roundScore,
+  scoreTheme,
 } from "../web/format";
 import { CATEGORY_ORDER, CATEGORY_TITLES } from "./categories";
 import { displayOnly, plural, submetricNote, submetricShownValue, submetricTitle, subweightKey, type SubmetricContext } from "./submetrics";
@@ -141,8 +142,9 @@ export function analysisDate(card: RepoCard): string | null {
 
 /**
  * «Почему» у оцененной категории: 1-2 показателя с наименьшим баллом словами
- * словаря подметрик (название – значение); примечание расчета, если оно
- * объясняет балл (трекер пуст); потолок CI — причиной. Без новой методики.
+ * словаря подметрик (название – значение); у здоровой категории перед ними —
+ * сильная сторона (Г1.21); примечание расчета, если оно объясняет балл (трекер
+ * пуст); потолок CI — причиной. Без новой методики.
  */
 export function whyText(key: CategoryKey, cat: CardCategory, ctx: SubmetricContext): string {
   if (key === "cicd" && cat.no_data) return noDataReason(key, cat.no_data);
@@ -160,13 +162,23 @@ export function whyText(key: CategoryKey, cat: CardCategory, ctx: SubmetricConte
     const remark = submetricNote(key, sub, entry.note)?.remark;
     if (remark) return remark;
   }
-  const weakest = subs
-    .map(([sub, entry], i) => ({ sub, entry, i }))
-    .filter(({ sub, entry }) => !displayOnly(key, sub) && typeof entry.score === "number" && entry.score < 0.995)
+  const scored = subs.map(([sub, entry], i) => ({ sub, entry, i })).filter(({ sub, entry }) => !displayOnly(key, sub) && typeof entry.score === "number");
+  const weakest = scored
+    .filter(({ entry }) => entry.score! < 0.995)
     .sort((a, b) => a.entry.score! - b.entry.score! || a.i - b.i)
     .slice(0, 2);
   if (weakest.length === 0) return "Все показатели категории на максимуме.";
-  return weakest.map(({ sub, entry }) => `${submetricTitle(key, sub)} – ${submetricShownValue(key, sub, entry, ctx)}.`).join(" ");
+  const shown = ({ sub, entry }: (typeof scored)[number]): string => `${submetricTitle(key, sub)} – ${submetricShownValue(key, sub, entry, ctx)}`;
+  // В5.5 закрытие (Г1.21, п. 22 замечаний): у здоровой категории основание из
+  // одних слабых показателей спорило с зеленой плашкой («Здоров» и рядом
+  // «Задачи без движения – 100%»). Первой идет сильная сторона — показатель с
+  // наибольшим баллом, строго выше слабых; нет такого — прежний текст.
+  if (scoreTheme(cat.score) === "success") {
+    const ceiling = Math.max(...weakest.map(({ entry }) => entry.score!));
+    const strongest = scored.filter((e) => !weakest.includes(e) && e.entry.score! > ceiling + 1e-9).sort((a, b) => b.entry.score! - a.entry.score! || a.i - b.i)[0];
+    if (strongest) return `Сильная сторона: ${shown(strongest)}. Слабее: ${weakest.map(shown).join("; ")}.`;
+  }
+  return weakest.map((w) => `${shown(w)}.`).join(" ");
 }
 
 /**

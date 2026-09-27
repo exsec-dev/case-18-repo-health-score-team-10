@@ -88,7 +88,13 @@ function blockLines(block: Block): string[] {
           { title: block.columns[2], align: "left" },
           { title: block.columns[3], align: "left" },
         ],
-        block.rows.map((r) => [[{ kind: "text", text: r.name }], [{ kind: "text", text: r.scoreText }], [{ kind: "text", text: r.chip.text.toLowerCase() }], [{ kind: "text", text: r.why }]]),
+        // В5.5 закрытие (С13): метка строки — первыми словами «Основания», как плашка над ним в PDF
+        block.rows.map((r) => [
+          [{ kind: "text", text: r.name }],
+          [{ kind: "text", text: r.scoreText }],
+          [{ kind: "text", text: r.chip.text.toLowerCase() }],
+          r.mark ? [{ kind: "strong", text: `${r.mark.text}.` }, { kind: "text", text: ` ${r.why}` }] : [{ kind: "text", text: r.why }],
+        ]),
       );
     case "actions":
       return block.items.map((a) => {

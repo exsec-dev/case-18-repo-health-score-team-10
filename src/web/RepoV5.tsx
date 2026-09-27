@@ -1014,25 +1014,12 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
  * репозитория рейтинга, не только у своего (вытесняет замечание 9 от 25.09 —
  * «только у своего»): маршрут SVG и так открыт всем (К5.8), бейдж чужого репо
  * годится для подборок, статей и форков. Приватному и internal кнопки нет:
- * публичный маршрут отвечает им 404 — проверка ниже.
+ * публичный маршрут отвечает им 404. В5.5 закрытие (П-2): доступность бейджа —
+ * поле карточки `repo.badge` (та же проверка, что у маршрута, `publicApiVisible`);
+ * пробный запрос `badge.svg` снят — у закрытых он ловил 404 в консоли.
  */
 function badgePath(org: string, repo: string): string {
   return `/api/v1/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`;
-}
-
-/** Бейдж выдается только публичным репозиториям из рейтинга: 404 — кнопки и пункта нет (О6). */
-export function useBadgeAvailable(org: string, repo: string): boolean {
-  const path = badgePath(org, repo);
-  const [ok, setOk] = useState(false);
-  useEffect(() => {
-    const ctrl = new AbortController();
-    setOk(false);
-    fetch(`${path}/badge.svg`, { signal: ctrl.signal })
-      .then((res) => setOk(res.ok))
-      .catch(() => undefined);
-    return () => ctrl.abort();
-  }, [path]);
-  return ok;
 }
 
 function BadgeContent({ org, repo, publicBaseUrl, title = true }: { org: string; repo: string; publicBaseUrl: string; title?: boolean }) {
@@ -1072,9 +1059,8 @@ export function BadgeDialog({ org, repo, publicBaseUrl, open, onClose }: { org: 
   );
 }
 
-export function BadgeButton({ org, repo, publicBaseUrl }: { org: string; repo: string; publicBaseUrl: string }) {
-  const ok = useBadgeAvailable(org, repo);
-  if (!ok) return null;
+export function BadgeButton({ org, repo, publicBaseUrl, available }: { org: string; repo: string; publicBaseUrl: string; available: boolean }) {
+  if (!available) return null;
   return (
     <Popover trigger="click" placement={["bottom-end", "top-end"]} content={<BadgeContent org={org} repo={repo} publicBaseUrl={publicBaseUrl} />}>
       <Button view="normal" size="m">
