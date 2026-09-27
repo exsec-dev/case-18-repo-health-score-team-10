@@ -7,7 +7,7 @@
 // лучшим или худшим результатом в зависимости от направления сортировки.
 import type { Database } from "bun:sqlite";
 import { CHANNEL_KINDS, DISPLAY_KINDS, PUBLIC_KINDS, computeFromFacts, effectiveFacts, totalsFromCategories, type CategoryScore } from "../score/compute";
-import { orderRecommendations, recommendFromFacts, recommendationParams, recommendationText, round4, type DeltaEvaluator } from "../score/recommend";
+import { authorsOf, orderRecommendations, recommendFromFacts, recommendationParams, recommendationText, round4, type DeltaEvaluator } from "../score/recommend";
 import { categoryOf, parseFactValue, scrubDetail } from "../collectors/facts";
 import { isOwnRepo, NO_PAT_ACCESS, visibilityOf, type AccessRepo, type AccessResult, type ChannelAccess } from "../auth/access";
 import { DEFAULT_SCAN, defaultLeaseMs, type ScanConfig } from "../config";
@@ -721,6 +721,12 @@ export interface CardRepo {
    * явное «неизвестно» (мусор или NULL в строке) — `visibilityOf`.
    */
   visibility: "public" | "internal" | "private" | "unknown";
+  /**
+   * В5.5 закрытие (П-2): бейдж и публичный API отвечают этому репозиторию
+   * (`publicApiVisible` — та же проверка, что у маршрута `badge.svg`); false —
+   * маршрут ответил бы 404, кнопки бейджа нет.
+   */
+  badge: boolean;
 }
 
 export interface CardMarkers {
@@ -1053,6 +1059,16 @@ function findRepoRow(db: Database, org: string, repo: string): CardRepoRow | nul
 }
 
 /**
+ * В5.5 закрытие (П-2): публичный API и бейдж отвечают только публичному
+ * репозиторию из рейтинга — ОДНА проверка для маршрутов `/api/v1/...`
+ * (`getPublicRepo`) и поля карточки `repo.badge`: кнопка бейджа знает ответ
+ * маршрута без пробного запроса (прежняя проба ловила 404 в консоли).
+ */
+export function publicApiVisible(r: { visibility: string; rating_active: number }): boolean {
+  return r.visibility === "public" && r.rating_active === 1;
+}
+
+/**
  * Видимость карточки (К2): публичный активный — всем; эвиктированный
  * публичный — 404 всем; не публичный — только при repo = granted.
  */
@@ -1154,6 +1170,7 @@ export function getRepoCard(
     // колонки в схеме нет — шаблон платформы (repoWebUrl: один литерал на карточку и рейтинг)
     webUrl: repoWebUrl(r.org_slug, r.repo_slug),
     visibility: visibilityOf(r.visibility),
+    badge: publicApiVisible(r),
   };
 
   // Правило карточки (круг 2, решение владельца 17.09; TASK.md §2 «Аудит
@@ -1353,7 +1370,7 @@ export function getRepoCard(
     const reason = rec.delta_score === 0 ? (publicRow.code_empty === 1 ? "code-empty" : publicRow.healthcraft_index === null ? "no-total" : null) : null;
     const texts = recommendationText(
       rec.rule_id,
-      recommendationParams(rec.rule_id, scanFacts, { delta: rec.delta_score ?? undefined, reason, channel: null, issuesScore: publicCats.issues?.score ?? null }),
+      recommendationParams(rec.rule_id, scanFacts, { delta: rec.delta_score ?? undefined, reason, channel: null, issuesScore: publicCats.issues?.score ?? null, authors: authorsOf(publicCats.activity) }),
     );
     return {
       ruleId: rec.rule_id,

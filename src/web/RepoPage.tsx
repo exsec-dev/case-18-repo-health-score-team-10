@@ -119,13 +119,17 @@ import {
   sentence,
   slugOf,
   notOwnReason,
+  rankText,
+  CI_CAP_TEXT,
+  CI_CAP_TITLE,
+  STALE_CATEGORY_MARK,
 } from "./format";
 import { linkProps, navigate } from "./router";
 import { COMPARE_MAX, COMPARE_LIMIT_TEXT, compareHref } from "./compareView";
 import { lastCompareSet, rememberCompareSet } from "./compareReturn";
 import { LoginButton, Page, type Crumb } from "./Shell";
 import { useMediaQuery } from "./prefs";
-import { AiOverviewSection, BadgeButton, BadgeDialog, useBadgeAvailable, CategoryAiMark, CategoryAiNote, FraudCheckFooter, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
+import { AiOverviewSection, BadgeButton, BadgeDialog, CategoryAiMark, CategoryAiNote, FraudCheckFooter, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
 
 type Card = RepoCard;
@@ -273,6 +277,7 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
       org={org}
       repo={repo}
       scored={card.score !== null}
+      badge={card.repo.badge}
       publicBaseUrl={meta?.publicBaseUrl ?? window.location.origin}
       report={card.score !== null && <ReportMenu mdHref={reportHref} pdfHref={`${cardUrl}/report.pdf`} pdfName={reportFileName(org, repo, "pdf")} />}
       refresh={refreshButton}
@@ -484,16 +489,17 @@ class ReportError extends Error {
  * считается?» (иначе строка резалась и отчет с телефона был недоступен). Круг 5
  * (находка 19): у репо без оценки «Сравнить» нет — в сравнении у него пустой столбец.
  */
-function CardActions({ org, repo, scored, publicBaseUrl, report, refresh }: { org: string; repo: string; scored: boolean; publicBaseUrl: string; report: ReactNode; refresh: ReactNode }) {
+function CardActions({ org, repo, scored, badge, publicBaseUrl, report, refresh }: { org: string; repo: string; scored: boolean; badge: boolean; publicBaseUrl: string; report: ReactNode; refresh: ReactNode }) {
   const phone = useMediaQuery("(max-width: 767px)");
-  const badgeOk = useBadgeAvailable(org, repo);
+  // В5.5 закрытие (П-2): бейдж выдается — знает сервер (поле карточки), без пробы badge.svg
+  const badgeOk = badge;
   const [badgeOpen, setBadgeOpen] = useState(false);
   if (!phone) {
     return (
       <Flex gap={2} alignItems="center">
         {scored && <CompareButton org={org} repo={repo} />}
         {/* 5-A (§2 24.09): бейдж — кнопкой в шапке, как Clone у SourceCraft */}
-        {scored && <BadgeButton org={org} repo={repo} publicBaseUrl={publicBaseUrl} />}
+        {scored && <BadgeButton org={org} repo={repo} publicBaseUrl={publicBaseUrl} available={badge} />}
         {report}
         {refresh}
       </Flex>
@@ -840,7 +846,8 @@ function ScoreAside({
           <DefinitionList nameMaxWidth={ASIDE_NAME_WIDTH}>
             {score && (
               <DefinitionList.Item name="Место в рейтинге">
-                {score.rank !== null && score.rankedTotal ? `#${fmtCount(score.rank)} из ${fmtCount(score.rankedTotal)}` : "—"}
+                {/* В5.5 закрытие (С14): одно правило с отчетом и сравнением; без места — причина, а не «—» */}
+                {rankText(card.repo.visibility, score)}
               </DefinitionList.Item>
             )}
             {score && !full && (
@@ -1158,7 +1165,7 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
           <CategoryAiMark card={card} categoryKey={key} hasData={c.score !== null} />
           {c.stale && (
             <Label theme="warning" size="xs">
-              Данные из прошлого анализа
+              {STALE_CATEGORY_MARK}
             </Label>
           )}
         </span>
@@ -1309,8 +1316,9 @@ function Markers({ view }: { view: CardView }) {
     rows.push({
       key: "ci-cap",
       // UX-проход 25.09 (замечание 8): без жаргона
-      label: "CI настроен, но запусков не видно",
-      text: "В репозитории есть настройки CI, но результаты сборок нам не видны: доступ к ним закрыт или сборки еще не запускались. Поэтому автоматизацию не оцениваем – без данных оценка не снижается.",
+      // В5.5 закрытие (С19): тот же текст печатает отчет строкой под показателями
+      label: CI_CAP_TITLE,
+      text: CI_CAP_TEXT,
       theme: "warning",
     });
   }

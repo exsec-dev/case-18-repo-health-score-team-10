@@ -104,6 +104,8 @@ const PAGE_W = 595.28;
 const PAGE_H = 841.89;
 const SIDE = 48;
 const W = Math.floor(PAGE_W - 2 * SIDE);
+/** Рабочая ширина набора (pt) — для тестов вёрстки. */
+export const CONTENT_W = W;
 const TOP = 40;
 const BOTTOM = 44;
 
@@ -338,8 +340,6 @@ function heroNode(block: Extract<Block, { kind: "hero" }>): PdfNode {
   };
 }
 
-/** Высота строки подписей сегмента (две строки 7,5 и 8 pt). */
-const SEG_LABEL_H = 19;
 /** Высота полосы и цветной полоски зон под ней. */
 const BAR_H = 12;
 const ZONE_H = 3;
@@ -351,37 +351,106 @@ const ZONE_TOP = BAR_H + 2;
  * там граница видна сменой тона; рисуется ПОВЕРХ полосы и полоски зон.
  */
 const TICK_UP = 5;
-const TICK_DOWN = 10;
 const TICK_WIDTH = 1.25;
+/** Отступ ряда подписей под полосой от полоски зон. */
+const BELOW_GAP = 6;
+/** Кегли и межстрочные подписи сегмента: название и вклад. */
+const SEG_TITLE = { size: 7.5, lineHeight: 1.05 } as const;
+const SEG_VALUE = { size: 8, lineHeight: 1.12 } as const;
+/** Высота ряда подписей — две строки (название и вклад), высота строки Inter. */
+export const SEG_LABEL_H = SEG_TITLE.size * 1.21 * SEG_TITLE.lineHeight + SEG_VALUE.size * 1.21 * SEG_VALUE.lineHeight;
+/** Зазор между подписями одного ряда. */
+export const SEG_LABEL_GAP = 6;
+/** Рядов подписей с каждой стороны полосы; не хватило — подписи уходят в легенду. */
+export const SEG_LANES = 2;
 
-/**
- * Подпись сегмента — ВСЕГДА две строки: у сегмента без подписи в этой строке
- * они пустые. Так все колонки одной высоты по построению, и куски полосы в
- * них встают на одном уровне (круг 3 гейта: отрезки скакали по высоте, когда
- * пустая ячейка схлопывалась).
- */
-function segmentLabel(s: { title: string; value: string } | null, align: "left" | "right", muted: boolean, colW = Infinity): PdfNode {
-  const color = muted ? COLORS.muted : COLORS.ink2;
-  // Ступень 4 (В5): подпись, прижатая вправо, шире своей узкой колонки (остаток
-  // «не набрано 8») — сдвигается влево, чтобы правый край совпал с краем полосы,
-  // а не уходил за поле. Ширина — оценкой по кеглю (Inter ≈ 0,55 em на знак).
-  const est = s ? Math.max(s.title.length * 7.5, s.value.length * 8) * 0.55 : 0;
-  const shift = align === "right" && est > colW ? colW - est : 0;
-  return {
-    margin: [shift, 0, 0, 0],
-    stack: [
-      { text: s ? s.title : " ", fontSize: 7.5, color, noWrap: true, alignment: align, lineHeight: 1.05 },
-      { text: s ? s.value : " ", fontSize: 8, bold: true, noWrap: true, alignment: align, color: muted ? COLORS.muted : COLORS.ink, fontFeatures: ["tnum"] },
-    ],
-  };
+/** Сегмент для раскладки подписей: начало и ширина на полосе, ширина подписи. */
+export interface SegmentSlot {
+  x0: number;
+  w: number;
+  /** ширина подписи (шире из двух строк) */
+  lw: number;
+  /** засечка у начала сегмента (у остатка «не набрано» ее нет) */
+  tick: boolean;
+  /** подпись прижата к правому краю полосы (остаток «не набрано») */
+  right: boolean;
+}
+
+/** Место подписи: сторона, ряд (0 — ближний к полосе), отрезок по горизонтали и засечка. */
+export interface LabelPlace {
+  side: "above" | "below";
+  lane: number;
+  a: number;
+  b: number;
+  tick: number | null;
 }
 
 /**
- * Полоса вкладов. п.5 круга 2: подписи сегментов идут через одну — первая над
- * шкалой, вторая под, третья над; соседние больше не наезжают друг на друга.
- * Каждый сегмент — своя колонка со своей подписью, своим куском полосы и
- * своим куском цветной полоски зон: порядок узлов в дереве описания остается
- * порядком чтения, и сверка «текст PDF = текст MD» видит те же слова подряд.
+ * В5.5 закрытие (П-3): раскладка подписей полосы вклада. Прежде подписи шли
+ * строго через одну (над, под, над), и у малых соседних сегментов подпись
+ * первого наезжала на подпись третьего. Теперь каждая подпись занимает отрезок
+ * по своей настоящей ширине (метрики Inter) и ставится в первый свободный ряд:
+ * своя сторона по очереди, другая сторона, затем второй ряд. Ряд свободен,
+ * если подпись не задевает соседей этого ряда (с зазором), засечка подписи
+ * дальнего ряда не проходит сквозь подпись ближнего и наоборот. Подпись у
+ * правого края сдвигается влево и не выходит за полосу. Не нашлось места хоть
+ * одной подписи — `null`: все подписи уходят в легенду под полосой, поверх
+ * соседей ни одна не ставится.
+ */
+export function placeSegmentLabels(slots: readonly SegmentSlot[], width: number, lanes = SEG_LANES): LabelPlace[] | null {
+  // прежний порядок «первая подпись над полосой»; не вышло — та же раскладка с первой под полосой
+  return placeFrom(slots, width, lanes, "above") ?? placeFrom(slots, width, lanes, "below");
+}
+
+function placeFrom(slots: readonly SegmentSlot[], width: number, lanes: number, first: "above" | "below"): LabelPlace[] | null {
+  const placed: LabelPlace[] = [];
+  const crosses = (x: number, p: { a: number; b: number }): boolean => x >= p.a - 1 && x <= p.b + 1;
+  for (let i = 0; i < slots.length; i++) {
+    const s = slots[i]!;
+    const lw = Math.min(s.lw, width);
+    const a = s.right ? width - lw : Math.max(0, Math.min(s.x0, width - lw));
+    const b = a + lw;
+    const tick = s.tick ? s.x0 : null;
+    const other0: "above" | "below" = first === "above" ? "below" : "above";
+    const pref: "above" | "below" = i % 2 === 0 ? first : other0;
+    const other: "above" | "below" = pref === "above" ? "below" : "above";
+    let spot: LabelPlace | null = null;
+    for (let lane = 0; lane < lanes && spot === null; lane++) {
+      for (const side of [pref, other]) {
+        const same = placed.filter((p) => p.side === side);
+        const free =
+          same.every((p) => p.lane !== lane || b + SEG_LABEL_GAP <= p.a || p.b + SEG_LABEL_GAP <= a) &&
+          // засечка этой подписи идет сквозь ближние ряды — там ее не закрывают подписи
+          (tick === null || same.every((p) => p.lane >= lane || !crosses(tick, p))) &&
+          // засечки дальних рядов идут сквозь этот ряд — подпись их не закрывает
+          same.every((p) => p.lane <= lane || p.tick === null || !crosses(p.tick, { a, b }));
+        if (free) {
+          spot = { side, lane, a, b, tick };
+          break;
+        }
+      }
+    }
+    if (spot === null) return null;
+    placed.push(spot);
+  }
+  return placed;
+}
+
+/** Подпись сегмента: название и вклад двумя строками. */
+function segmentText(s: { title: string; value: string }, muted: boolean, align: "left" | "right"): PdfNode[] {
+  return [
+    { text: s.title, fontSize: SEG_TITLE.size, lineHeight: SEG_TITLE.lineHeight, color: muted ? COLORS.muted : COLORS.ink2, noWrap: true, alignment: align },
+    { text: s.value, fontSize: SEG_VALUE.size, lineHeight: SEG_VALUE.lineHeight, bold: true, noWrap: true, alignment: align, color: muted ? COLORS.muted : COLORS.ink, fontFeatures: ["tnum"] },
+  ];
+}
+
+/**
+ * Полоса вкладов (п.5 круга 2; В5.5 закрытие, П-3). Подписи — отдельными
+ * узлами с `relativePosition` ДО рисунка полосы: в дереве описания они стоят в
+ * порядке сегментов, и сверка «текст PDF = текст MD» видит те же слова подряд,
+ * а место на странице задает раскладка `placeSegmentLabels`. Рисунок (полоса,
+ * полоска зон, засечки до своих подписей) — один canvas, его высота задает
+ * высоту блока. Раскладки нет — легенда строкой под полосой, тем же порядком.
  */
 function contributionsNode(block: Extract<Block, { kind: "contributions" }>): PdfNode {
   const title = { text: block.title, fontSize: 10, bold: true, margin: [0, BLOCK_GAP, 0, 6] };
@@ -392,37 +461,60 @@ function contributionsNode(block: Extract<Block, { kind: "contributions" }>): Pd
     };
   }
   const items = [
-    ...block.segments.map((s) => ({ s, fill: COLORS.bar, muted: false, align: "left" as const })),
-    ...(block.rest ? [{ s: block.rest, fill: COLORS.track, muted: true, align: "right" as const }] : []),
+    ...block.segments.map((s) => ({ s, fill: COLORS.bar, muted: false })),
+    ...(block.rest ? [{ s: block.rest, fill: COLORS.track, muted: true }] : []),
   ];
   let x = 0;
-  const columns = items.map((it, i) => {
-    const w = Math.max(0.5, it.s.share * W);
+  const slots: SegmentSlot[] = items.map((it, i) => {
+    const last = i === items.length - 1;
+    const w = last ? Math.max(0.5, W - x) : Math.max(0.5, it.s.share * W);
     const x0 = x;
     x += w;
-    const last = i === items.length - 1;
-    const above = i % 2 === 0;
-    return {
-      width: last ? "*" : w,
-      stack: [
-        segmentLabel(above ? it.s : null, it.align, it.muted, w),
-        {
-          canvas: [
-            // круг 3 гейта: полоса не режется на куски — соседние прямоугольники
-            // перекрываются на полпункта и читаются как одна линия; начало
-            // сегмента отмечает засечка со стороны его подписи. Порядок важен:
-            // засечка рисуется последней и потому лежит поверх полоски зон.
-            { type: "rect", x: 0, y: 0, w: w + (last ? 0 : 0.6), h: BAR_H, color: it.fill },
-            ...zoneRects(block, x0, x0 + w),
-            ...(last ? [] : [{ type: "line", x1: 0, y1: above ? -TICK_UP : 0, x2: 0, y2: above ? BAR_H : BAR_H + TICK_DOWN, lineWidth: TICK_WIDTH, lineColor: COLORS.ink }]),
-          ],
-          margin: [0, 5, 0, 0],
-        },
-        { stack: [segmentLabel(above ? null : it.s, it.align, it.muted, w)], margin: [0, ZONE_TOP - BAR_H + 4, 0, 0] },
-      ],
-    };
+    const lw = Math.max(width(it.s.title, SEG_TITLE.size), width(it.s.value, SEG_VALUE.size, true)) + 1;
+    return { x0, w, lw, tick: !last, right: it.muted };
   });
-  return { stack: [title, { columns, columnGap: 0 }], unbreakable: true };
+  const places = placeSegmentLabels(slots, W);
+  const above = places ? Math.max(1, ...places.filter((p) => p.side === "above").map((p) => p.lane + 1)) : 0;
+  const below = places ? Math.max(1, ...places.filter((p) => p.side === "below").map((p) => p.lane + 1)) : 0;
+  const barTop = above * SEG_LABEL_H + TICK_UP;
+  const belowTop = (lane: number): number => barTop + ZONE_TOP + ZONE_H + BELOW_GAP + lane * SEG_LABEL_H;
+  const height = below > 0 ? belowTop(below - 1) + SEG_LABEL_H : barTop + ZONE_TOP + ZONE_H;
+  const shapes: PdfNode[] = [
+    ...slots.map((s, i) => ({ type: "rect", x: s.x0, y: barTop, w: s.w + (i === slots.length - 1 ? 0 : 0.6), h: BAR_H, color: items[i]!.fill })),
+    ...zoneRects(block, 0, W).map((r) => ({ ...(r as Record<string, unknown>), y: barTop + ZONE_TOP })),
+    // засечки — последними: лежат поверх полосы и полоски зон; тянутся до своей подписи
+    ...slots.flatMap((s, i) => {
+      if (!s.tick) return [];
+      const p = places?.[i];
+      const [y1, y2] = !p
+        ? [barTop - TICK_UP, barTop + BAR_H]
+        : p.side === "above"
+          ? [(above - p.lane) * SEG_LABEL_H, barTop + BAR_H]
+          : [barTop, belowTop(p.lane) - 1];
+      return [{ type: "line", x1: s.x0, y1, x2: s.x0, y2, lineWidth: TICK_WIDTH, lineColor: COLORS.ink }];
+    }),
+    // высота блока — до нижнего ряда подписей (невидимая точка на белом)
+    { type: "line", x1: 0, y1: height, x2: 0, y2: height, lineWidth: 0.01, lineColor: COLORS.white },
+  ];
+  const canvas: PdfNode = { canvas: shapes };
+  if (places === null) {
+    // легенда: все подписи строкой под полосой, порядок сегментов слева направо
+    const legend: PdfText[] = items.flatMap((it, i) => [
+      ...(i > 0 ? [{ text: "  ·  ", color: COLORS.muted }] : []),
+      { text: `${it.s.title} `, color: it.muted ? COLORS.muted : COLORS.ink2 },
+      { text: it.s.value, bold: true, color: it.muted ? COLORS.muted : COLORS.ink },
+    ]);
+    return { stack: [title, canvas, { text: legend, fontSize: 7.5, lineHeight: 1.15, margin: [0, BELOW_GAP, 0, 0] }], unbreakable: true };
+  }
+  const labels: PdfNode[] = items.map((it, i) => {
+    const p = places[i]!;
+    const y = p.side === "above" ? (above - 1 - p.lane) * SEG_LABEL_H : belowTop(p.lane);
+    // остаток прижат вправо: обе строки выровнены по правому краю полосы
+    return slots[i]!.right
+      ? { relativePosition: { x: 0, y }, stack: segmentText(it.s, it.muted, "right") }
+      : { relativePosition: { x: p.a, y }, stack: segmentText(it.s, it.muted, "left") };
+  });
+  return { stack: [title, { stack: [...labels, canvas] }], unbreakable: true };
 }
 
 /** Куски цветной полоски зон, попадающие в отрезок [x0, x1] полосы. */
@@ -492,18 +584,27 @@ const textH = (size: number, lineHeight: number): number => size * 1.21 * lineHe
 const NAME_H = textH(9.5, 1.05);
 const WHY_H = textH(8, 1.12);
 
+/** В5.5 закрытие (С13): зазор между меткой строки и «почему» под ней. */
+const MARK_GAP = 3;
+
 function categoryCells(row: CategoryRow): PdfNode[] {
   const off = row.score === null;
   const whyLines = linesOf(row.why, 8, WHY_W);
-  const h = Math.max(whyLines * WHY_H, LABEL_SIZES.xs.h, NAME_H);
+  const markH = row.mark ? LABEL_SIZES.xxs.h + MARK_GAP : 0;
+  const whyH = markH + whyLines * WHY_H;
+  const h = Math.max(whyH, LABEL_SIZES.xs.h, NAME_H);
   const mid = (elem: number) => Math.max(0, (h - elem) / 2);
+  const why: PdfNode = { text: row.why, fontSize: 8, color: COLORS.ink2, lineHeight: 1.12 };
   return [
     // В10 гейта: имя категории — обычным начертанием
     { text: row.name, color: off ? COLORS.ink2 : COLORS.ink, margin: [0, mid(NAME_H), 0, 0], lineHeight: 1.05 },
     { ...scoreBar(row.score, CAT_COLS[1]), margin: [0, mid(6), 0, 0] },
     { text: row.scoreText, color: off ? COLORS.muted : COLORS.ink, alignment: "right", noWrap: true, margin: [0, mid(NAME_H), 0, 0], fontFeatures: ["tnum"], lineHeight: 1.05 },
     { columns: [labelNode(row.chip, "xs")], margin: [0, mid(LABEL_SIZES.xs.h), 0, 0] },
-    { text: row.why, fontSize: 8, color: COLORS.ink2, lineHeight: 1.12, margin: [0, mid(whyLines * WHY_H), 0, 0] },
+    // В5.5 закрытие (С13): метка строки — желтой плашкой над «почему», как у категории на карточке
+    row.mark
+      ? { stack: [{ columns: [labelNode(row.mark, "xxs")] }, { ...why, margin: [0, MARK_GAP, 0, 0] }], margin: [0, mid(whyH), 0, 0] }
+      : { ...why, margin: [0, mid(whyH), 0, 0] },
   ];
 }
 
