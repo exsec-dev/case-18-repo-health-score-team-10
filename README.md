@@ -223,8 +223,7 @@ bun test --timeout 30000
 ## Развертывание
 
 Стенд – ВМ Compute Cloud: Ubuntu 24.04, 4 vCPU, 8 ГБ памяти, SSD 64 ГБ, статический IP; группа
-безопасности пропускает входящие TCP 22, 80, 443. Почему такой размер и сколько это стоит –
-[`reports/2026-09-26-m54-vm-setup.md`](reports/2026-09-26-m54-vm-setup.md).
+безопасности пропускает входящие TCP 22, 80, 443.
 
 1. **Подготовка ВМ** (однократно): Docker, `sqlite3` и `zstd` для резервных копий, пользователь в
    группе `docker`, каталог стенда, подкачка 4 ГБ:
@@ -311,7 +310,6 @@ bun test --timeout 30000
 | [docs/methodology.md](docs/methodology.md) | методика оценки: формула, метрики, «нет данных», рекомендации, ограничения, проверка логики |
 | [.env.example](.env.example) | все переменные окружения с пояснениями |
 | [deploy/compose.yaml](deploy/compose.yaml), [deploy/Caddyfile](deploy/Caddyfile) | топология стенда и настройки прокси |
-| [reports/2026-09-26-m54-vm-setup.md](reports/2026-09-26-m54-vm-setup.md) | размер ВМ стенда и шаги в консоли Yandex Cloud |
 | [docs/api-spec/](docs/api-spec/) | спецификации REST API SourceCraft и AppSec API, по которым работают сборщики |
 | [docs/lct-case.md](docs/lct-case.md), [docs/ТЗ-sourcecraft.pdf](docs/ТЗ-sourcecraft.pdf) | кейс и техническое задание организаторов |
 
