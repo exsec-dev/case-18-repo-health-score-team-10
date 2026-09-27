@@ -28,7 +28,7 @@ import { CATEGORY_ORDER, CATEGORY_TITLES } from "../report/categories";
 export { CATEGORY_ORDER, CATEGORY_TITLES };
 
 /** Путь к методике в репозитории (строка, не URL): футер и MD ссылаются сюда. */
-export const METHODOLOGY_PATH = "reports/2026-09-15-m2-methodology-draft.md";
+export const METHODOLOGY_PATH = "docs/methodology.md";
 
 export interface ApiError {
   error: { code: "bad_query" | "not_found"; message: string };

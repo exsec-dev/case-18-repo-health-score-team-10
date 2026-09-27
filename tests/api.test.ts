@@ -602,7 +602,7 @@ describe("мета", () => {
     expect(meta.coverageNullBelow).toBe(0.4);
     expect(meta.repos.nullScore).toBe(1);
     expect(meta.repos.scored).toBeGreaterThanOrEqual(7);
-    expect(meta.methodology).toMatch(/^reports\/.+\.md$/);
+    expect(meta.methodology).toBe("docs/methodology.md");
   });
 });
 
