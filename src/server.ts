@@ -69,6 +69,10 @@ import {
   getSessionUser,
   makeOAuthState,
   oauthStateCookieHeader,
+  oauthNextCookieHeader,
+  clearOAuthNextCookieHeader,
+  oauthNextFromCookie,
+  safeNextPath,
   oauthStateFromCookie,
   loopbackOriginRedirect,
   parseCookies,
@@ -952,7 +956,13 @@ const routes = {
       try {
         const state = makeOAuthState();
         const url = buildAuthUrl(yaCreds(), state, yaEndpoints(), { forceConfirm: true });
-        return new Response(null, { status: 302, headers: { location: url, "set-cookie": oauthStateCookieHeader(ck, state) } });
+        // круг 5 тура 3 (находка 26): путь возврата после входа — только свой путь
+        // (safeNextPath); без него поведение прежнее (кабинет)
+        const next = safeNextPath(new URL(req.url).searchParams.get("next"));
+        const headers = new Headers({ location: url });
+        headers.append("set-cookie", oauthStateCookieHeader(ck, state));
+        headers.append("set-cookie", next !== null ? oauthNextCookieHeader(ck, next) : clearOAuthNextCookieHeader(ck));
+        return new Response(null, { status: 302, headers });
       } catch (e) {
         return Response.json({ error: { code: "unconfigured", message: "вход через Я ID на сервере не настроен – обратитесь к администратору" } }, { status: 503 });
       }
@@ -977,6 +987,7 @@ const routes = {
       const callbackRedirect = (location: string, extraCookies: string[] = []): Response => {
         const headers = new Headers({ location });
         for (const c of extraCookies) headers.append("set-cookie", c);
+        headers.append("set-cookie", clearOAuthNextCookieHeader(ck));
         return new Response(null, { status: 302, headers });
       };
       const errorParam = url.searchParams.get("error");
@@ -1003,7 +1014,8 @@ const routes = {
       const { yaId, login, displayName, avatarId } = exchanged.profile;
       const userId = upsertUser(db, yaId, login, new Date(), { displayName, avatarId });
       const cookie = createSession(db, config.auth.appSecret, userId);
-      return callbackRedirect("/me", [
+      const next = oauthNextFromCookie(parseCookies(req.headers.get("cookie"))[`${ck.oauthState}_next`]);
+      return callbackRedirect(next ?? "/me", [
         sessionCookieHeader(ck, cookie, SESSION_TTL_MS),
         clearOAuthStateCookieHeader(ck),
       ]);

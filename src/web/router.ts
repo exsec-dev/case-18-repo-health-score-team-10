@@ -48,6 +48,15 @@ export function navigate(url: string, opts: { replace?: boolean } = {}): void {
   window.dispatchEvent(new Event(NAV_EVENT));
 }
 
+/**
+ * Круг 5 тура 3 (находка 26 аудита): адрес входа — с карточки репозитория с возвратом
+ * на нее (`next`), с прочих экранов как раньше (в кабинет). Сервер пропускает только
+ * путь своего сайта (`safeNextPath`).
+ */
+export function loginHref(pathname: string, search: string): string {
+  return pathname.startsWith("/repo/") ? `/auth/ya?next=${encodeURIComponent(pathname + search)}` : "/auth/ya";
+}
+
 export function repoHref(org: string, repo: string): string {
   return `/repo/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`;
 }

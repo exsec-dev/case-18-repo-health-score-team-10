@@ -9,10 +9,12 @@ const all = loadAllCharters();
 
 test("charter versions bumped and load: issues 4->5, code 7->8, overview 5->6", () => {
   // V5.5 tour 2 (HQ acceptance, live repo-vitals rerun): issues 5->6, code 8->9 —
-  // pinned in tests/v55-t2-charters.test.ts; the tour-1 rules below still hold
-  expect(all.issues.version).toBe("6");
-  expect(all.code.version).toBe("9");
-  expect(all.overview.version).toBe("6");
+  // pinned in tests/v55-t2-charters.test.ts; the tour-1 rules below still hold.
+  // V5.5 tour 3 round 5 (reader language: no keys, raw shares, jargon): issues 7, code 10,
+  // overview 7 — pinned in tests/v55-t3-ai-text-leaks.test.ts
+  expect(all.issues.version).toBe("7");
+  expect(all.code.version).toBe("10");
+  expect(all.overview.version).toBe("7");
 });
 
 test("issues charter: no issue titles/texts in input; comments sample named explicitly", () => {

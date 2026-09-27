@@ -6,7 +6,7 @@
 // тулбар одной строкой (size m), таблица, методика в правой панели.
 import { coverageLine } from "./ratingParams";
 import { loadRatingScroll, rememberRatingHref, saveRatingScroll } from "./ratingReturn";
-import { ArrowDown, ArrowUp, ArrowUpRightFromSquare, BarsAscendingAlignLeft, BarsDescendingAlignLeft, Flag, Magnifier, Minus, Sparkles, SquareListUl } from "@gravity-ui/icons";
+import { ArrowUpRightFromSquare, BarsAscendingAlignLeft, BarsDescendingAlignLeft, Flag, Gear, Magnifier, Sparkles, SquareListUl, TriangleDownFill, TriangleUpFill } from "@gravity-ui/icons";
 import {
   ActionTooltip,
   Alert,
@@ -65,11 +65,11 @@ import {
   scoreWord,
   sentence,
 } from "./format";
-import { useMediaQuery } from "./prefs";
+import { readRatingHidden, useMediaQuery, writeRatingHidden } from "./prefs";
 import { linkProps, navigate, repoHref } from "./router";
 import { Page, showAside, useAsideControl } from "./Shell";
 import { categoryColorClass } from "./cardView";
-import { AsideSection, EmptyState, LanguageName, PageHeader, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows } from "./ui";
+import { AsideSection, EmptyState, LanguageName, PageHeader, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, TIP_TARGET } from "./ui";
 import { LANG_NONE, LANG_NONE_TITLE, langOptions, type Facets, type LangOptionData } from "./lang-filter";
 
 type Item = RatingResponse["items"][number];
@@ -224,7 +224,12 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
     return () => clearTimeout(timer);
   }, [queryDraft, qParam]);
 
-  const [hidden, setHidden] = useState<string[]>(HIDDEN_BY_DEFAULT);
+  // круг 5 тура 3 (находка 21): выбор колонок — в localStorage, переживает перезагрузку
+  const [hidden, setHiddenState] = useState<string[]>(() => readRatingHidden(HIDDEN_BY_DEFAULT));
+  const setHidden = (next: string[]): void => {
+    setHiddenState(next);
+    writeRatingHidden(next);
+  };
 
   function setParams(patch: Record<string, string | string[] | null>, opts: { replace?: boolean; keepPage?: boolean } = {}): void {
     // В4.8.5 (К8.5.10, С5-5): база — ТЕКУЩИЙ адрес, а не снимок рендера:
@@ -295,8 +300,10 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
   const toolbar = (
     <Flex direction="column" gap={3} style={{ marginBottom: "var(--g-spacing-3)" }}>
       <Flex gap={2} wrap alignItems="center">
-        {/* flex-обертка: блочная давала полю 27.3px против 28px у соседних Select */}
-        <div style={{ flex: "1 1 200px", minWidth: 200, display: "flex" }}>
+        {/* flex-обертка: блочная давала полю 27.3px против 28px у соседних Select.
+            Тур 3 В5.5 (п.2): основа 160px — тулбар на экранах ПК от 1366 в одну строку,
+            поле растягивается на остаток */}
+        <div style={{ flex: "1 1 160px", minWidth: 160, display: "flex" }}>
           {/* В4.6 (У29, замечание владельца 3): плейсхолдер называет ДЕЙСТВИЕ,
               а перечень полей уезжает в подсказку у правого края инпута. Текст
               подсказки сверен по коду (`repos.ts`, matchesQ), а не написан на
@@ -339,7 +346,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
         <Select
           label="Язык:"
           size="m"
-          width={220}
+          width={150}
           multiple
           hasClear
           placeholder="все"
@@ -357,7 +364,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
         <Select
           label="Размер:"
           size="m"
-          width={220}
+          width={150}
           multiple
           hasClear
           placeholder="любой"
@@ -371,7 +378,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
         <Select
           label="CI:"
           size="m"
-          width={170}
+          width={110}
           hasClear
           placeholder="все"
           value={ciValue === null ? [] : [ciValue]}
@@ -393,6 +400,19 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
             items={setupItems}
             showStatus
             onUpdate={(updated) => setHidden(updated.filter((i) => !i.selected).map((i) => i.id))}
+            /* тур 3 В5.5 (п.2): переключатель — иконкой, счетчик колонок — в подсказке
+               (место в строке тулбара отдано фильтрам) */
+            renderSwitcher={({ onClick, onKeyDown }) => {
+              const shown = setupItems.filter((i) => i.selected !== false).length;
+              const label = `Колонки: ${shown} из ${setupItems.length}`;
+              return (
+                <ActionTooltip title={label}>
+                  <Button view="outlined" size="m" onClick={onClick} onKeyDown={onKeyDown} aria-label={label}>
+                    <Icon data={Gear} size={16} />
+                  </Button>
+                </ActionTooltip>
+              );
+            }}
           />
         )}
         <SegmentedRadioGroup
@@ -794,37 +814,35 @@ function PhoneList({ items, refreshing }: { items: Item[]; refreshing: boolean }
 }
 
 /**
- * Ячейка места (В5.5 тур 1, Р1): само место и под ним динамика к последнему
- * снимку (▲3 / ▼2; без изменения — нейтральный маркер). rankDelta === null —
- * НИЧЕГО: ни «0», ни «—» (снимка нет или репо в нем отсутствует — пустота
- * честнее; «—» занято глифом «нет данных»).
+ * Ячейка места. Тур 3 В5.5 (26.09, Екатерина — итог круга правок динамики):
+ * треугольник направления за сутки (▲ зеленый / ▼ красный) рядом с местом;
+ * место — основным цветом, жирным; величина сдвига и вчерашнее место — в
+ * подсказке на группе «треугольник + место». Без изменения и без снимка прошлых суток — только место.
+ * Вытесняет тур 1 (число под местом), отдельную колонку и число рядом с местом.
  */
 function RankCell({ item }: { item: Item }) {
   if (item.rank === null) return <Text color="secondary">—</Text>;
-  return (
-    <Flex direction="column" alignItems="flex-end" gap={0}>
-      <Text color="secondary">{fmtCount(item.rank)}</Text>
-      <RankDelta delta={item.rankDelta} rank={item.rank} />
-    </Flex>
-  );
-}
-
-function RankDelta({ delta, rank }: { delta: number | null; rank: number }) {
-  if (delta === null) return null;
-  const prev = rank + delta; // delta = место в снимке − место сейчас
-  if (delta === 0) {
-    return (
-      <Text variant="caption-2" color="hint" className="rh-rank-delta" title={`в прошлом снимке то же место – ${fmtCount(prev)}`}>
-        <Icon data={Minus} size={10} />
+  const d = item.rankDelta;
+  const moved = d !== null && d !== 0;
+  const up = moved && d! > 0;
+  const cell = (
+    <span className="rh-rank" {...(moved ? TIP_TARGET : {})}>
+      {moved && (
+        <span className={up ? "rh-rank__arrow rh-rank__arrow_up" : "rh-rank__arrow rh-rank__arrow_down"} role="img" aria-label={up ? "Место выросло за сутки" : "Место снизилось за сутки"}>
+          <Icon data={up ? TriangleUpFill : TriangleDownFill} size={12} />
+        </span>
+      )}
+      {/* цвет — явно основной: без него текст наследует вторичный цвет ячейки таблицы */}
+      <Text color="primary" className="rh-rank__n">
+        {fmtCount(item.rank)}
       </Text>
-    );
-  }
-  const up = delta > 0;
-  return (
-    <Text variant="caption-2" className={up ? "rh-rank-delta rh-rank-delta_up" : "rh-rank-delta rh-rank-delta_down"} title={`в прошлом снимке – ${fmtCount(prev)} место`}>
-      <Icon data={up ? ArrowUp : ArrowDown} size={10} />
-      {fmtCount(Math.abs(delta))}
-    </Text>
+    </span>
+  );
+  // подсказка — на всей группе «треугольник + место» (слово владельца 26.09)
+  return moved ? (
+    <ActionTooltip title={`${up ? "Поднялся" : "Опустился"} на ${fmtCount(Math.abs(d!))} за сутки: вчера – ${fmtCount(item.rank + d!)} место`}>{cell}</ActionTooltip>
+  ) : (
+    cell
   );
 }
 
@@ -842,7 +860,9 @@ function RankDelta({ delta, rank }: { delta: number | null; rank: number }) {
  */
 function RepoCell({ item, compact = false }: { item: Item; compact?: boolean }) {
   return (
-    <Flex gap={3} alignItems="center" style={compact ? { minWidth: 0 } : { minWidth: 180, maxWidth: 264 }}>
+    // круг 5 тура 3 (Н3 аудита, вариант А): потолок ширины — в CSS (`.rh-rating-repo`),
+    // на широких экранах он снят, и колонка берет свободное место
+    <Flex gap={3} alignItems="center" className={compact ? undefined : "rh-rating-repo"} style={compact ? { minWidth: 0 } : undefined}>
       <RepoAvatar repo={item.repo} logoUrl={item.logoUrl} size="m" />
       <Flex direction="column" gap={0} style={{ minWidth: 0 }}>
         <Flex gap={1} alignItems="center" style={{ minWidth: 0 }}>
@@ -850,25 +870,7 @@ function RepoCell({ item, compact = false }: { item: Item; compact?: boolean }) 
             {/* В4.6 (У27): слаг — один компонент на рейтинг и карточку */}
             <RepoSlug org={item.org} repo={item.repo} variant="subheader-1" />
           </Link>
-          {/* В5.2 (Б6, выбор 4C): у репо есть публичный AI-обзор — искра у имени */}
-          {item.aiOverview && (
-            <ActionTooltip title="Есть AI-обзор">
-              <span className="rh-rating-ai" role="img" aria-label="Есть AI-обзор">
-                <Icon data={Sparkles} size={14} />
-              </span>
-            </ActionTooltip>
-          )}
-          {/* В5.5 тур 1 (Р2): флаг проверки на накрутку — подозрение для человека,
-              не приговор (на место и сортировку не влияет); формулировки — те же,
-              что у плашки на карточке (format.ts FRAUD_*) */}
-          {item.fraud && (
-            <ActionTooltip title={FRAUD_TITLE} description={FRAUD_EXPLAIN}>
-              <span className="rh-rating-fraud" role="img" aria-label={FRAUD_TITLE}>
-                <Icon data={Flag} size={14} />
-              </span>
-            </ActionTooltip>
-          )}
-          {/* В5.5 тур 1 (Р3): внешняя ссылка на страницу репо в SourceCraft;
+          {/* тур 3 В5.5 (круг 3): ссылка на SourceCraft — первой из иконок строки. В5.5 тур 1 (Р3): внешняя ссылка на страницу репо в SourceCraft;
               имя по-прежнему ведет на нашу карточку */}
           <ActionTooltip title="Открыть на sourcecraft.dev">
             <Link
@@ -881,6 +883,24 @@ function RepoCell({ item, compact = false }: { item: Item; compact?: boolean }) 
               <Icon data={ArrowUpRightFromSquare} size={14} />
             </Link>
           </ActionTooltip>
+          {/* В5.2 (Б6, выбор 4C): у репо есть публичный AI-обзор — искра у имени */}
+          {item.aiOverview && (
+            <ActionTooltip title="Есть AI-обзор">
+              <span className="rh-rating-ai" role="img" aria-label="Есть AI-обзор" {...TIP_TARGET}>
+                <Icon data={Sparkles} size={14} />
+              </span>
+            </ActionTooltip>
+          )}
+          {/* В5.5 тур 1 (Р2): флаг проверки на накрутку — подозрение для человека,
+              не приговор (на место и сортировку не влияет); формулировки — те же,
+              что у плашки на карточке (format.ts FRAUD_*) */}
+          {item.fraud && (
+            <ActionTooltip title={FRAUD_TITLE} description={FRAUD_EXPLAIN}>
+              <span className="rh-rating-fraud" role="img" aria-label={FRAUD_TITLE} {...TIP_TARGET}>
+                <Icon data={Flag} size={14} />
+              </span>
+            </ActionTooltip>
+          )}
         </Flex>
         <Text variant="body-short" color="secondary" ellipsis>
           <LanguageName name={item.language} color={item.languageColor} />
@@ -956,11 +976,10 @@ function buildColumns(
       id: "rank",
       name: "#",
       align: "end",
-      width: 56,
       sticky: "start",
       // Ступень 4 (В-4): настоящее место в рейтинге (поле `rank` ответа), а не номер
       // строки выдачи — при поиске и фильтре «#» совпадает с местом на карточке.
-      // В5.5 тур 1 (Р1): под местом — динамика к последнему снимку (стрелка и число)
+      // Тур 3 В5.5: место жирным, справа — динамика за сутки (▲/▼ и число)
       template: (item: Item) => <RankCell item={item} />,
     },
     { id: "repo", name: sortable("Репозиторий", "name"), primary: true, sticky: "start", template: (item: Item) => <RepoCell item={item} /> },
@@ -1039,6 +1058,20 @@ function ScoreCell({ item, narrow = false }: { item: Item; narrow?: boolean }) {
       <Label theme="unknown" size="xs">
         {NO_SCORE}
       </Label>
+    );
+  }
+  if (item.codeEmpty) {
+    // круг 5 тура 3 (находка 7): пустой репо — число нейтральное и метка «нет кода», как в
+    // «Сравнении» (решение 25.09): 0 здесь — «оценивать нечего», а не зона риска
+    return (
+      <Flex gap={2} alignItems="center" justifyContent="flex-end">
+        <Label theme="unknown" size="xs" title="В репозитории нет кода – оценка 0 означает, что оценивать пока нечего">
+          нет кода
+        </Label>
+        <Text color="secondary" className="rh-score-cell__num">
+          {fmtScore(item.healthcraftIndex)}
+        </Text>
+      </Flex>
     );
   }
   return (

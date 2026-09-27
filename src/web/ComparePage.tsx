@@ -17,14 +17,14 @@
 // у Gravity `Table` нет объединенных ячеек и подстрок, а на телефоне подпись
 // строки встает над ячейками — у нативной `<table>` это снимало бы роли.
 import { ArrowToggle, Alert, Button, Dialog, Flex, Icon, Label, Link, Popover, Progress, Skeleton, Text, TextInput } from "@gravity-ui/uikit";
-import { CaretUp, CircleQuestion, Magnifier, Plus, ScalesBalanced, Xmark } from "@gravity-ui/icons";
+import { CircleQuestion, Magnifier, Plus, ScalesBalanced, Xmark } from "@gravity-ui/icons";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { CompareCard, CompareItem, CompareResponse } from "../api/compare";
 import type { FavoriteEntry } from "../api/me";
 import type { RatingResponse } from "../api/repos";
 import { parseFavoriteInput } from "../api/slug-input";
 import { CATEGORY_TITLES } from "../report/categories";
-import { adjustmentText, analysisDate, FULL, INDEX, metricWeights } from "../report/sections";
+import { adjustmentLabel, adjustmentText, analysisDate, FULL, INDEX, metricWeights } from "../report/sections";
 import { displayOnly, submetricContext, submetricShownValue, submetricTitle } from "../report/submetrics";
 import type { CategoryKey } from "../score/model";
 import { dataOf, fetchJson, RequestError, type AsyncState } from "./api";
@@ -265,7 +265,6 @@ export function ComparePage({ search }: { search: string }) {
                 {items.filter((i) => scoredCard(i) !== null).length >= 2 && (
                   <span className="rh-cmp-legend">
                     <span className="rh-cmp-lead rh-cmp-lead_legend" aria-hidden="true">
-                      <Icon data={CaretUp} size={14} />
                       84
                     </span>
                     <Text color="complementary">{COMPARE_LEADER_LEGEND}</Text>
@@ -567,9 +566,9 @@ function AddCompareDialog({
                   onMouseEnter={() => !inSet && setActive(i)}
                 >
                   {s.section === "manual" ? (
-                    <span className="rh-cmp-add-plus">
-                      <Icon data={Plus} size={16} />
-                    </span>
+                    // тур 3 В5.5 (п.13): плюс только справа (кнопка); слева — пустое место
+                    // размера аватара, чтобы текст строки стоял в одну линию с остальными
+                    <span className="rh-cmp-add-plus" aria-hidden="true" />
                   ) : (
                     <RepoAvatar repo={s.repo} logoUrl={s.logoUrl} size="s" />
                   )}
@@ -896,14 +895,15 @@ function RowLabel({
 }
 
 /**
- * Число с отметкой лидера: стрелка всегда; подложка — только под нейтральным
- * числом (контраст, дизайн §6.4). На серой карточке подложка — на ступень темнее.
+ * Число с отметкой лидера — подложкой. Круг 5 тура 3 (находка 15 аудита, 27.09,
+ * Екатерина): стрелка ▲ убрана совсем — в рейтинге ▲ значит «поднялся за сутки»;
+ * отметка лидера — только фон, и у нейтрального числа, и вокруг цветного чипа.
+ * На серой карточке подложка — на ступень темнее.
  */
 function Lead({ leader, plain, children }: { leader: boolean; plain: boolean; children: ReactNode }) {
   if (!leader) return <>{children}</>;
   return (
-    <span className={plain ? "rh-cmp-lead" : "rh-cmp-lead rh-cmp-lead_bare"}>
-      <Icon data={CaretUp} size={14} />
+    <span className={plain ? "rh-cmp-lead" : "rh-cmp-lead rh-cmp-lead_chip"}>
       {children}
       <span className="rh-sr-only">, лучший балл строки</span>
     </span>
@@ -1023,9 +1023,10 @@ function CellValue({ row, card, leader, phone, year, sharedTotal }: { row: Row; 
             )}
           </Lead>
           {adj && (
-            <span className="rh-cmp-mark" title={adj} tabIndex={0} aria-label={`Балл сжат. ${adj}`}>
+            // круг 5 тура 3 (находка 16): вместо жаргона «Балл сжат» — что именно снизило балл
+            <span className="rh-cmp-mark" title={adj} tabIndex={0} aria-label={`${adjustmentLabel(cat)}. ${adj}`}>
               <Label theme="normal" size="xs">
-                Балл сжат
+                {adjustmentLabel(cat)}
               </Label>
             </span>
           )}

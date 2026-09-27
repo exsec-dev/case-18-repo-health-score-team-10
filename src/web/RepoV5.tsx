@@ -10,14 +10,15 @@
 //   - бейдж для README — кнопка в шапке с поповером, как Clone у SourceCraft (5-A).
 // Видимость текстов модели — прежняя (решение 22.09): `card.ai` приходит только
 // зрителю с правами на полный Score; без прав этих блоков нет вовсе.
-import { ChevronDown, CircleExclamation, ClockArrowRotateLeft, EllipsisVertical, SealCheck, Shield, ShieldCheck, ShieldExclamation, Sparkles } from "@gravity-ui/icons";
+import { ArrowsRotateRight, ChevronDown, CircleExclamation, ClockArrowRotateLeft, SealCheck, Shield, ShieldCheck, ShieldExclamation, Sparkles } from "@gravity-ui/icons";
 import {
+  ActionTooltip,
   Alert,
   Button,
   Card,
   ClipboardButton,
+  Dialog,
   Disclosure,
-  DropdownMenu,
   Flex,
   HelpMark,
   Icon,
@@ -33,11 +34,13 @@ import {
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RepoCard } from "./api";
 import { dataOf, useJson } from "./api";
+import { TIP_TARGET } from "./ui";
 import {
   AI_SECTION_TITLE,
   FRAUD_EXPLAIN,
   FRAUD_TITLE,
   aiModelName,
+  aiNotesStale,
   aiParagraphs,
   aiRoleTitle,
   fmtDate,
@@ -52,7 +55,7 @@ import {
   withCounter,
   type AiQuotaView,
 } from "./format";
-import { announceJobStarted, announceJobsChanged, useAnalysisFinished } from "./session";
+import { announceJobStarted, announceJobsChanged, useAnalysisFinished, useSession } from "./session";
 import { SLOT_EMPTY, aiNotesCaption, badgeMarkdown, historyByTime, scoreHistoryView } from "./slots";
 import type { AiNoteHistoryItem, AiNotesResponse, HistoryPoint, HistoryResponse } from "../summary/history-contract";
 import { evolutionTooEarly } from "../summary/history-contract";
@@ -254,6 +257,9 @@ function useSummaryActions(org: string, repo: string, onChanged: () => void) {
             ? "Сначала соберутся свежие данные, затем обзор обновится."
             : "Обзор появится здесь после проверки фактами.",
       });
+    } catch {
+      // круг 5 тура 3 (находка 28 аудита): сетевой сбой не молчит
+      toaster.add({ name: `summary-fail:${org}/${repo}`, theme: "danger", title: "Обзор не запущен", content: "Сервер не ответил – проверьте соединение и попробуйте еще раз." });
     } finally {
       setSending(false);
     }
@@ -295,6 +301,9 @@ function useCheckAction(org: string, repo: string, onChanged: () => void) {
         title: body?.cached === true ? "Этот анализ уже проверен" : "Проверка запущена",
         content: body?.cached === true ? "Результат – в карточке. Новая проверка станет доступна после нового анализа." : "Результат появится в карточке через несколько секунд.",
       });
+    } catch {
+      // круг 5 тура 3 (находка 28 аудита): сетевой сбой не молчит
+      toaster.add({ name: `check-fail:${org}/${repo}`, theme: "danger", title: "Проверка не запущена", content: "Сервер не ответил – проверьте соединение и попробуйте еще раз." });
     } finally {
       setSending(false);
     }
@@ -521,23 +530,24 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
   // В5.2 (Б3): переключатель автообновления удален; запуск — в меню «три точки».
   // Аудит дизайна О1: не-владельцу пункт нужен, только если после обзора был новый
   // анализ (иначе — холостой «уже готов»); нет пункта — нет и «⋮»
-  const newerAnalysis = ai !== null && ai.check.latestScanId !== null && ai.scanId < ai.check.latestScanId;
+  const newerAnalysis = aiNotesStale(ai);
+  // тур 3 В5.5 (круг 2, 26.09): в меню «⋮» был единственный пункт — вместо меню
+  // иконка обновления с подсказкой; выключенная — причина в подсказке на обертке
+  const runText = withCounter(hasOverview ? "Обновить обзор" : "Сформировать обзор", counter);
+  const runDisabled = jobActive || cooldownActive || actions.sending || quotaBlocked !== null;
+  const runReason = jobActive
+    ? "Обзор уже формируется"
+    : cooldownActive
+      ? `Следующий запуск – после ${fmtDateTime(ai!.cooldownUntil)}`
+      : quotaBlocked ?? runText;
+  const runButton = (
+    <Button view="flat-secondary" size="m" aria-label={runText} loading={actions.sending} disabled={runDisabled} onClick={() => void actions.start()}>
+      <Icon data={ArrowsRotateRight} size={18} />
+    </Button>
+  );
   const ownerActions = canRun && ai !== null && (own || newerAnalysis) && (
     <Flex gap={2} alignItems="center">
-      <DropdownMenu
-        renderSwitcher={(props) => (
-          <Button {...props} view="flat-secondary" size="s" aria-label="Действия с обзором" loading={actions.sending}>
-            <Icon data={EllipsisVertical} size={14} />
-          </Button>
-        )}
-        items={[
-          {
-            text: withCounter(hasOverview ? "Обновить обзор" : "Сформировать обзор", counter),
-            disabled: jobActive || cooldownActive || actions.sending || quotaBlocked !== null,
-            action: () => void actions.start(),
-          },
-        ]}
-      />
+      <ActionTooltip title={runDisabled ? runReason : runText}>{runDisabled ? <span className="rh-disabled-tip" tabIndex={0} aria-label={`${runText}: ${runReason}`}>{runButton}</span> : runButton}</ActionTooltip>
     </Flex>
   );
 
@@ -563,6 +573,8 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
           <Text variant="subheader-3" as="h2" id="rh-ai-title">
             {AI_SECTION_TITLE}
           </Text>
+          {/* круг 3 тура 3: знак устаревания — сразу после заголовка */}
+          {hasOverview && newerAnalysis && <AiStaleMark card={card} blockedReason={canRun && runDisabled ? runReason : null} />}
           {model !== null && <AiModelLabel model={model} />}
           {/* выбор 2A (25.09): объем публичной версии — меткой в заголовке, пояснение в подсказке */}
           {publicVersion && hasOverview && (
@@ -606,8 +618,8 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
           </Flex>
         )}
 
-        {stamp}
-
+        {/* тур 3 В5.5 (п.10, 26.09): строки о непрошедших проверку разборах — ДО
+            строки с датой обзора (дата закрывает блок) */}
         {failures.length > 0 && (
           <Flex direction="column" gap={1}>
             {failures.map((f) => (
@@ -618,6 +630,7 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
           </Flex>
         )}
 
+        {stamp}
       </Flex>
     </section>
   );
@@ -650,7 +663,40 @@ export function CategoryAiMark({ card, categoryKey, hasData }: { card: Card; cat
  * Текст модели в категории и разбор динамики (замечания 3, 6 от 25.09): стиль
  * info-плашки AI-обзора, без метки модели (она уже в заголовке обзора).
  */
-export function AiNotePlate({ title, text }: { title: string; text: string }) {
+/**
+ * Знак «текст устарел» у всех AI-плашек — сразу после заголовка. Круг 4 тура 3
+ * (26.09, Екатерина, вариант 5 виджета HQ): текстовая метка «Устарел» того же
+ * вида, что метка модели (`AiModelLabel`), подробности и призыв обновить — в
+ * подсказке (вытесняет иконки кругов 2-3: часы со стрелкой, песочные часы).
+ */
+export function AiStaleMark({ card, blockedReason = null }: { card: Card; blockedReason?: string | null }) {
+  // хвост подсказки — по зрителю (круг 4, слово владельца 26.09): призыв «Обновите»
+  // только тому, кто может запустить (правило запуска — как `canRun` раздела обзора)
+  const me = dataOf(useSession().me);
+  const loggedIn = me !== null && me.login !== null;
+  const own = card.viewer?.own === true;
+  // круг 5 тура 3 (находка 29 аудита): запуск сейчас недоступен — причина вместо призыва;
+  // на закрытом — «владелец», как в тексте раздела («Обзор запускает владелец репозитория»)
+  const tail =
+    blockedReason !== null
+      ? `${blockedReason.replace(/\.$/, "")}.`
+      : loggedIn && (own || card.repo.visibility === "public")
+      ? "Обновите обзор."
+      : card.repo.visibility === "public"
+        ? "Обновить может любой вошедший пользователь."
+        : "Обновить может владелец репозитория.";
+  return (
+    <ActionTooltip title="Обзор устарел" description={`Сделан по прошлому анализу – после него был новый, цифры в тексте могут не совпадать с карточкой. ${tail}`}>
+      <span className="rh-ai-stale" {...TIP_TARGET}>
+        <Label theme="unknown" size="xs">
+          Устарел
+        </Label>
+      </span>
+    </ActionTooltip>
+  );
+}
+
+export function AiNotePlate({ title, text, staleFor = null }: { title: string; text: string; staleFor?: Card | null }) {
   return (
     <Alert
       theme="info"
@@ -658,7 +704,16 @@ export function AiNotePlate({ title, text }: { title: string; text: string }) {
       size="s"
       className="rh-ai-plate"
       icon={<Icon data={Sparkles} size={16} />}
-      title={title}
+      title={
+        staleFor !== null ? (
+          <span className="rh-ai-plate__title">
+            {title}
+            <AiStaleMark card={staleFor} />
+          </span>
+        ) : (
+          title
+        )
+      }
       message={
         <div className="rh-ai-plate__text">
           <AiText text={text} />
@@ -668,10 +723,10 @@ export function AiNotePlate({ title, text }: { title: string; text: string }) {
   );
 }
 
-export function CategoryAiNote({ note }: { note: AiNote }) {
+export function CategoryAiNote({ note, card }: { note: AiNote; card: Card }) {
   return (
     <div className="rh-cat-ai">
-      <AiNotePlate title="Разбор модели" text={note.text} />
+      <AiNotePlate title="Разбор модели" text={note.text} staleFor={aiNotesStale(card.ai) ? card : null} />
     </div>
   );
 }
@@ -773,6 +828,17 @@ function HistoryChart({ points, fullOpen }: { points: HistoryPoint[]; fullOpen: 
           </circle>
         ),
       )}
+      {/* круг 5 тура 3 (находка 20 аудита): последнее значение — числом у точки, без наведения */}
+      {(() => {
+        const li = hci.reduce<number>((acc, v, i) => (v !== null ? i : acc), -1);
+        if (li < 0) return null;
+        const y = yOf(hci[li]!);
+        return (
+          <text x={xOf(li) - 6} y={y - 8 < 12 ? y + 16 : y - 8} fontSize={12} fontWeight={600} fill="var(--g-color-text-primary)" textAnchor={li === 0 && points.length > 1 ? "start" : "end"}>
+            {fmtScore(hci[li]!)}
+          </text>
+        );
+      })()}
       {labelIdx.map((i) => (
         <text key={i} x={xOf(i)} y={CHART_H - 6} fontSize={11} fill="var(--g-color-text-secondary)" textAnchor={i === 0 ? "start" : i === points.length - 1 ? "end" : "middle"}>
           {axisText(points[i]!.finishedAt)}
@@ -933,7 +999,7 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
               </Text>
             </Flex>
           </Flex>
-          {trajectory !== null && <AiNotePlate title="Разбор динамики" text={trajectory.text} />}
+          {trajectory !== null && <AiNotePlate title="Разбор динамики" text={trajectory.text} staleFor={aiNotesStale(card.ai) ? card : null} />}
           {list}
         </Flex>
       </Card>
@@ -944,51 +1010,59 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
 // ---------- бейдж для README (выбор 5-A) ----------
 
 /**
- * Замечание 9 (25.09): бейдж ставит в README тот, кто этот README ведет, — кнопка
- * только у своего репозитория (бейджи CI у GitLab/GitHub выдаются в настройках
- * проекта, не посетителю). Публичный маршрут SVG открыт всем (К5.8).
+ * Бейдж для README. Тур 3 В5.5 (п.4, 26.09, Екатерина): кнопка у ЛЮБОГО публичного
+ * репозитория рейтинга, не только у своего (вытесняет замечание 9 от 25.09 —
+ * «только у своего»): маршрут SVG и так открыт всем (К5.8), бейдж чужого репо
+ * годится для подборок, статей и форков. Приватному и internal кнопки нет:
+ * публичный маршрут отвечает им 404. В5.5 закрытие (П-2): доступность бейджа —
+ * поле карточки `repo.badge` (та же проверка, что у маршрута, `publicApiVisible`);
+ * пробный запрос `badge.svg` снят — у закрытых он ловил 404 в консоли.
  */
-export function BadgeButton({ org, repo, publicBaseUrl, own }: { org: string; repo: string; publicBaseUrl: string; own: boolean }) {
-  if (!own) return null;
-  return <BadgeButtonOwn org={org} repo={repo} publicBaseUrl={publicBaseUrl} />;
+function badgePath(org: string, repo: string): string {
+  return `/api/v1/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`;
 }
 
-function BadgeButtonOwn({ org, repo, publicBaseUrl }: { org: string; repo: string; publicBaseUrl: string }) {
-  const path = `/api/v1/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`;
-  const [ok, setOk] = useState(false);
-  useEffect(() => {
-    const ctrl = new AbortController();
-    setOk(false);
-    // бейдж выдается только публичным репозиториям из рейтинга: 404 — кнопки нет (О6)
-    fetch(`${path}/badge.svg`, { signal: ctrl.signal })
-      .then((res) => setOk(res.ok))
-      .catch(() => undefined);
-    return () => ctrl.abort();
-  }, [path]);
-  if (!ok) return null;
+function BadgeContent({ org, repo, publicBaseUrl, title = true }: { org: string; repo: string; publicBaseUrl: string; title?: boolean }) {
+  const path = badgePath(org, repo);
   const code = badgeMarkdown(publicBaseUrl, org, repo);
   return (
-    <Popover
-      trigger="click"
-      placement={["bottom-end", "top-end"]}
-      content={
-        <div className="rh-badge-pop" data-slot="badge">
-          <Text variant="subheader-1" as="div">
-            {SLOT_EMPTY.badge.title}
-          </Text>
-          <div className="rh-badge-pop__preview">
-            <img src={`${path}/badge.svg`} alt="HealthCraft Index" />
-          </div>
-          <Text variant="caption-2" color="secondary" as="div">
-            Markdown
-          </Text>
-          <TextInput size="m" readOnly value={code} aria-label="Код бейджа для README" endContent={<ClipboardButton text={code} size="s" view="flat-secondary" tooltipInitialText="Скопировать" tooltipSuccessText="Скопировано" />} />
-          <Link href={`${publicBaseUrl.replace(/\/+$/, "")}${path}`} target="_blank" rel="noreferrer">
-            Данные в JSON
-          </Link>
-        </div>
-      }
-    >
+    <div className="rh-badge-pop" data-slot="badge">
+      {title && (
+        <Text variant="subheader-1" as="div">
+          {SLOT_EMPTY.badge.title}
+        </Text>
+      )}
+      <div className="rh-badge-pop__preview">
+        <img src={`${path}/badge.svg`} alt="HealthCraft Index" />
+      </div>
+      <Text variant="caption-2" color="secondary" as="div">
+        Markdown
+      </Text>
+      <TextInput size="m" readOnly value={code} aria-label="Код бейджа для README" endContent={<ClipboardButton text={code} size="s" view="flat-secondary" tooltipInitialText="Скопировать" tooltipSuccessText="Скопировано" />} />
+      <Link href={`${publicBaseUrl.replace(/\/+$/, "")}${path}`} target="_blank" rel="noreferrer">
+        Данные в JSON
+      </Link>
+    </div>
+  );
+}
+
+/** Круг 5 тура 3 (Н1, вариант А): на телефоне бейдж открывается из меню «⋮» — диалогом. */
+export function BadgeDialog({ org, repo, publicBaseUrl, open, onClose }: { org: string; repo: string; publicBaseUrl: string; open: boolean; onClose: () => void }) {
+  return (
+    <Dialog open={open} onClose={onClose} maxWidth="s" fullWidth className="rh-dialog-fit" aria-label={SLOT_EMPTY.badge.title}>
+      <Dialog.Header caption={SLOT_EMPTY.badge.title} />
+      <Dialog.Body>
+        <BadgeContent org={org} repo={repo} publicBaseUrl={publicBaseUrl} title={false} />
+      </Dialog.Body>
+      <Dialog.Footer textButtonCancel="Готово" onClickButtonCancel={onClose} />
+    </Dialog>
+  );
+}
+
+export function BadgeButton({ org, repo, publicBaseUrl, available }: { org: string; repo: string; publicBaseUrl: string; available: boolean }) {
+  if (!available) return null;
+  return (
+    <Popover trigger="click" placement={["bottom-end", "top-end"]} content={<BadgeContent org={org} repo={repo} publicBaseUrl={publicBaseUrl} />}>
       <Button view="normal" size="m">
         <Button.Icon side="start">
           <Icon data={SealCheck} size={16} />

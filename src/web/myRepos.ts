@@ -35,9 +35,9 @@ export function countBands(entries: Pick<RepoEntry, "healthcraftIndex">[]): Reco
 
 /**
  * Поиск подстрокой без учета регистра по org, repo и названию; `band` —
- * выбранная плитка. Слаг сверяется в ОБЕИХ записях: `org/repo` (как в ссылке)
- * и `org / repo` (как его рисует `RepoSlug` на экране) — скопированное со
- * страницы имя обязано находиться.
+ * выбранная плитка. Слаг сверяется в ОБЕИХ записях: `org/repo` (как в ссылке
+ * и на экране — `RepoSlug`, тур 3 В5.5) и `org / repo` (прежняя экранная форма
+ * до тура 3 — скопированное раньше имя тоже находится).
  */
 export function filterEntries<T extends Pick<RepoEntry, "org" | "repo" | "title" | "healthcraftIndex">>(entries: T[], query: string, band: Band | null): T[] {
   const q = query.trim().toLowerCase();

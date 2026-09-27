@@ -252,7 +252,7 @@ describe("В1: «Тесты» — бонус", () => {
     const entry = one.categories.code.submetrics.tests!;
     expect(entry.score).toBeNull();
     expect(entry.note).toBe(TESTS_BONUS_IDLE_NOTE);
-    expect(submetricShownValue("code", "tests", entry, ctx)).toBe("2% (в балл не входит: доля ниже прочих показателей)");
+    expect(submetricShownValue("code", "tests", entry, ctx)).toBe("2% (в балл не входит: доля тестов учитывается, только когда повышает балл)");
   });
 });
 
@@ -288,8 +288,8 @@ describe("В3: плавное сжатие малого кода", () => {
 
   test("В3: текст «Мало кода: N строк из 200 – балл сжат к 50» — первая причина «почему»", () => {
     const cat = score(facts({ "tree.stats": tree({ source_loc: 30 }), "code.todo": { count: 0, fixme: 0, older_180d: 0, todo_files: 0, blamed_files: 0 } })).categories.code;
-    expect(adjustmentText(cat)).toBe("Мало кода: 30 строк из 200 – балл сжат к 50: 100 → 57,5.");
-    expect(whyText("code", { ...cat, weight: 31 }, ctx)).toBe("Мало кода: 30 строк из 200 – балл сжат к 50: 100 → 57,5.");
+    expect(adjustmentText(cat)).toBe("Мало кода: 30 из 200 строк для надежной оценки – балл снижен с 100 до 57,5, ближе к середине шкалы.");
+    expect(whyText("code", { ...cat, weight: 31 }, ctx)).toBe("Мало кода: 30 из 200 строк для надежной оценки – балл снижен с 100 до 57,5, ближе к середине шкалы.");
   });
 
   test("В3: приложение А — строка сжатия сводит таблицу к «Итого»", () => {
@@ -304,8 +304,8 @@ describe("В3: плавное сжатие малого кода", () => {
       scoredScan(t, repoId, { status: "ok", trigger: "user", facts: list });
       const card = getRepoCard(t.db, "v53m2", "small-code", { access: { cicd: "granted", appsec: "granted", repo: "granted" }, viewerAuth: "pat" })!;
       const md = renderRepoReport(card);
-      expect(md).toContain("Мало кода: 30 строк из 200 – балл сжат к 50: 100 → 57,5.");
-      const row = md.split("\n").find((l) => l.includes("Мало кода: 30 из 200 строк, сжатие к 50"))!;
+      expect(md).toContain("Мало кода: 30 из 200 строк для надежной оценки – балл снижен с 100 до 57,5, ближе к середине шкалы.");
+      const row = md.split("\n").find((l) => l.includes("| Мало кода: 30 из 200 строк |"))!;
       expect(row).toBeDefined();
       expect(row).toContain("−42,5");
       expect(md).toContain("тестов нет – в балл не входит");

@@ -8,11 +8,12 @@ import { loadAllCharters } from "../src/summary/charters";
 
 const all = loadAllCharters();
 
-test("tour 2 charter versions: issues 6, trajectory 5, activity 5, code 9", () => {
-  expect(all.issues.version).toBe("6");
-  expect(all.trajectory.version).toBe("5");
-  expect(all.activity.version).toBe("5");
-  expect(all.code.version).toBe("9");
+test("tour 2 charter versions (bumped again by tour 3 round 5): issues 7, trajectory 6, activity 6, code 10", () => {
+  // V5.5 tour 3 round 5: +1 each for the reader-language section (tests/v55-t3-ai-text-leaks.test.ts)
+  expect(all.issues.version).toBe("7");
+  expect(all.trajectory.version).toBe("7");
+  expect(all.activity.version).toBe("6");
+  expect(all.code.version).toBe("10");
 });
 
 test("issues charter explains flow windows order and the median close unit", () => {

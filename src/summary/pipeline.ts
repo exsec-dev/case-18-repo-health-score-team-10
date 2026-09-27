@@ -218,6 +218,13 @@ export function historyPoints(db: Database, scanId: number, audience: AiAudience
   });
 }
 
+/**
+ * Круг 5 тура 3 (живая проверка 27.09): вход роли динамики — категории русскими
+ * названиями интерфейса вместо ключей (перевод ключей моделью путал категории).
+ */
+export function namedTrajectoryPoints(points: TrajectoryPoint[]): TrajectoryPoint[] {
+  return points.map((p) => ({ ...p, categories: Object.fromEntries(Object.entries(p.categories).map(([k, v]) => [(CATEGORY_TITLES as Record<string, string>)[k] ?? k, v])) }));
+}
 /** Сегменты специалистов для овервью: предложения чистых текстов. */
 export function segmentsOf(texts: Record<string, string>): { segments: string[]; numbered: Record<string, string> } {
   const segments: string[] = [];
@@ -258,6 +265,7 @@ function factsDigest(facts: FactInput[]): string {
 // В5.2 (Б7): нормализация типографики — общий модуль (его берет и веб-бандл, О7)
 export { normalizeTypography } from "./typography";
 import { normalizeTypography } from "./typography";
+import { CATEGORY_TITLES } from "../report/categories";
 
 /**
  * Попыток генерации на роль: ретрай с причинами валидатора — «попросить
@@ -495,7 +503,10 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
       skipped.push("trajectory");
       outcomes.push({ role: "trajectory", ok: false, reason: "нет точек истории — вызова не было" });
     } else {
-      const trajectoryFacts: FactInput[] = [{ key: "scores.points", value: points }];
+      // круг 5 тура 3 (живая проверка 27.09): категории в точках — русскими названиями
+      // интерфейса, а не ключами. С ключами модель переводила сама и путала: «Безопасность
+      // (категория Issues)» в публичной версии, где Безопасности нет вовсе
+      const trajectoryFacts: FactInput[] = [{ key: "scores.points", value: namedTrajectoryPoints(points) }];
       const res = await runRole(deps, budget, "trajectory", trajectoryFacts, [], null);
       if (res.ok) {
         specialistTexts.trajectory = res.clean;

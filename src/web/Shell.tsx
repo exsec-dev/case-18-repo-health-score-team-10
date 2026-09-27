@@ -21,7 +21,7 @@ import { flushSync } from "react-dom";
 import { logout, type MeResponse } from "./api";
 import { HealthCraftMark, PRODUCT_NAME } from "./logo";
 import { useAppTheme, useMediaQuery, useRailCompact, type AppTheme } from "./prefs";
-import { linkProps, navigate } from "./router";
+import { linkProps, loginHref, navigate } from "./router";
 
 export type Section = "rating" | "me" | "compare" | "settings" | null;
 
@@ -60,6 +60,16 @@ export function Shell({
   const [compactPref, setCompact] = useRailCompact();
   const compact = isPhone || compactPref;
   const tips = useRailTips();
+  // круг 5 тура 3 (находка 24 аудита): у rail нет ориентира навигации — AsideHeader
+  // navigation 6.6 не принимает роль; ставим ее на корень панели после отрисовки
+  useEffect(() => {
+    // классы navigation — CSS-модули с хэшем («AsideHeader-module__gn-aside-header__aside___…»)
+    const aside = document.querySelector<HTMLElement>('[class*="gn-aside-header__aside___"]');
+    if (aside && !aside.hasAttribute("role")) {
+      aside.setAttribute("role", "navigation");
+      aside.setAttribute("aria-label", "Разделы");
+    }
+  });
 
   const menuItems: AsideHeaderItem[] = SECTIONS.map((s) => ({
     id: s.id,
@@ -266,7 +276,13 @@ function RailFooter({ me, compact, section }: { me: MeResponse | null; compact: 
         icon={isDark ? Sun : Moon}
         regularSize
         {...tip(themeTitle)}
-        onItemClick={() => switchTheme(setTheme, isDark ? "light" : "dark")}
+        // круг 5 тура 3 (находка 12 аудита): пункт без href рисуется не ссылкой и выпадает
+        // из Tab-обхода — «#» делает его фокусируемым, переход по нему гасится
+        href="#"
+        onItemClick={(_item, _collapsed, e) => {
+          e.preventDefault();
+          switchTheme(setTheme, isDark ? "light" : "dark");
+        }}
       />
       {/* выход — обычным пунктом под темой: виден всегда, без скрытых меню */}
       {me?.login && (
@@ -276,7 +292,11 @@ function RailFooter({ me, compact, section }: { me: MeResponse | null; compact: 
           icon={ArrowRightFromSquare}
           regularSize
           {...tip("Выйти")}
-          onItemClick={() => void logout().catch((e: unknown) => toaster.add(logoutFailedToast(e)))}
+          href="#"
+          onItemClick={(_item, _collapsed, e) => {
+            e.preventDefault();
+            void logout().catch((err: unknown) => toaster.add(logoutFailedToast(err)));
+          }}
         />
       )}
       <div className={compact ? "rh-rail-account rh-rail-account_compact" : "rh-rail-account"}>
@@ -298,6 +318,14 @@ export function LoginButton({ compact, inline = false }: { compact: boolean; inl
       size={inline ? "m" : "l"}
       width={compact || inline ? "auto" : "max"}
       href="/auth/ya"
+      // круг 5 тура 3 (находка 26 аудита): вход с карточки возвращает на нее же, а не в
+      // кабинет; адрес берется в момент нажатия (кнопка rail не перерисовывается при
+      // переходе между карточками). Сервер принимает только путь своего сайта
+      onClick={(e: MouseEvent<HTMLElement>) => {
+        if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
+        e.preventDefault();
+        window.location.assign(loginHref(window.location.pathname, window.location.search));
+      }}
       aria-label="Войти через Я ID"
       // узкий rail: квадрат 36×36 — ширина не зависит от колонки футера
       style={compact ? { width: 36, flexShrink: 0 } : undefined}

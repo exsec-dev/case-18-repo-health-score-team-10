@@ -37,7 +37,7 @@ import { materializeWorktree, removeWorktree } from "../summary/tools";
 import { cleanupClone, cloneWithDegrade } from "../collectors/git";
 import { DEFAULT_HEAVY_SCAN_MS, loopSlots, worstCaseScanMs, type Config } from "../config";
 import { listRepos } from "../api/repos";
-import { purgeOldRatingSnapshots, takeRatingSnapshot } from "./rating-snapshot";
+import { purgeOldRatingSnapshots, snapshotAtCatalogTick } from "./rating-snapshot";
 import { getMetaValue, setMetaValue } from "../db";
 import { CATALOG_SUSPICIOUS_AT, SCHED_META } from "../api/health";
 import { isBusyError, needsRescore, rescoreBatchByCursor, rescoreHistoryBatch } from "../score/rescore";
@@ -1753,10 +1753,13 @@ export async function catalogTick(
     // обхода: nightlyCatalog эвиктит исчезнувшие репо и ставит новую волну, снимок
     // фиксирует места до них. Идемпотентно по UTC-дате (повтор ночной фазы после
     // сбоя обхода в те же сутки снимок не дублирует); сбой снимка обход не валит.
-    if (nightlyDue) {
+    // Тур 3: пока идет пересчет после смены модели — снимок откладывается и
+    // дописывается следующим (часовым) обходом в те же сутки
+    {
       try {
-        const snap = takeRatingSnapshot(db, { now });
+        const snap = snapshotAtCatalogTick(db, { now, nightlyDue });
         if (snap.taken) console.log(`[rating] snapshot ${snap.day}: ${snap.rows} rows`);
+        else if ("deferred" in snap && snap.deferred === "rescore") console.log(`[rating] snapshot ${snap.day} deferred: rescore after model change in progress`);
       } catch (e) {
         console.error(`[rating] snapshot failed: ${String((e as Error).message).slice(0, 200)}`);
       }

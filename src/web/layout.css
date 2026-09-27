@@ -1808,7 +1808,8 @@ button.rh-category:focus-visible {
 .rh-repo-item__desc,
 .rh-repo-item__state,
 .rh-repo-item__actions,
-.rh-fraud-mark {
+.rh-repo-item .rh-rating-fraud {
+  /* тур 3 В5.5 (п.3): флажок фрода в строке избранного — над слоем-ссылкой (подсказка) */
   position: relative;
   z-index: 1;
 }
@@ -2201,24 +2202,6 @@ button.rh-category:focus-visible {
   padding: var(--g-spacing-3) 0 var(--g-spacing-2);
 }
 
-/* кабинет (замечание 7): флаг фрода — иконкой рядом с видимостью */
-.rh-fraud-mark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  /* замечание 25.09: warning-light полупрозрачный — кладется поверх непрозрачного фона, аватар не просвечивает */
-  background: linear-gradient(var(--g-color-base-warning-light), var(--g-color-base-warning-light)), var(--g-color-base-background);
-  color: var(--g-color-text-warning-heavy);
-  cursor: default;
-}
-
-.rh-fraud-mark__tip {
-  padding: var(--g-spacing-2) var(--g-spacing-3);
-}
-
 .rh-cat-ai__mark {
   display: inline-flex;
   color: var(--g-color-text-secondary);
@@ -2341,15 +2324,6 @@ button.rh-category:focus-visible {
   align-self: flex-start;
 }
 
-.rh-fraud-mark_avatar {
-  position: absolute;
-  right: -4px;
-  bottom: -4px;
-  width: 18px;
-  height: 18px;
-  box-shadow: 0 0 0 2px var(--g-color-base-background);
-}
-
 /* В5.3 (25.09, вариант A): окно «Добавить в избранное» — поле + список строк */
 .rh-add-list {
   margin: 0;
@@ -2445,8 +2419,9 @@ button.rh-category:focus-visible {
   margin-bottom: 0 !important;
 }
 
+/* тур 3 В5.5 (п.7, 26.09): заглушка растянута по ширине, как в избранном (была 820px) */
 .rh-cmp-empty {
-  max-width: 820px;
+  width: 100%;
 }
 
 /* Д11: заметки и ошибка — по содержимому, не шире 820 (правило 23.09 вне карточки) */
@@ -2825,14 +2800,14 @@ button.rh-category:focus-visible {
   vertical-align: middle;
 }
 
-/* лидер строки: стрелка всегда; подложка — только под нейтральным числом (дизайн §6.4);
+/* лидер строки — только подложка (круг 5 тура 3, находка 15: стрелка ▲ убрана, в рейтинге
+   она значит «поднялся за сутки»); у цветного чипа — рамка-подложка вокруг чипа;
    на серой карточке — на ступень плотнее, иначе сливается с фоном */
 .rh-cmp-lead {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
   white-space: nowrap;
-  padding: 0 var(--g-spacing-2) 0 var(--g-spacing-1);
+  padding: 0 var(--g-spacing-2);
   border-radius: var(--g-border-radius-m);
   background: var(--g-color-base-generic-medium);
   color: var(--g-color-text-primary);
@@ -2842,9 +2817,8 @@ button.rh-category:focus-visible {
   background: var(--g-color-base-generic);
 }
 
-.rh-cmp-lead_bare {
-  padding: 0;
-  background: none;
+.rh-cmp-lead_chip {
+  padding: 2px;
 }
 
 /* Д1 А: балл первым (узкий подстолбец, цифры вправо), затем значение */
@@ -3023,6 +2997,46 @@ button.rh-category:focus-visible {
   }
 }
 
+/* Круг 5 тура 3 (находки 13, 14 аудита, 27.09): цели подсказок-меток и обертки выключенных
+   кнопок фокусируются (TIP_TARGET, tabIndex) — видимая рамка фокуса с клавиатуры */
+.rh-rank:focus-visible,
+.rh-rating-ai:focus-visible,
+.rh-rating-fraud:focus-visible,
+.rh-ai-stale:focus-visible,
+.rh-disabled-tip:focus-visible {
+  outline: 2px solid var(--g-color-line-focus);
+  outline-offset: 2px;
+  border-radius: var(--g-border-radius-s);
+}
+
+/* Круг 5 тура 3 (находка 23): на телефоне цель касания мелких иконок строки — 24px
+   (WCAG 2.5.8) за счет отступа; отрицательное поле не меняет раскладку */
+@media (max-width: 767px) {
+  .rh-rating-ext,
+  .rh-rating-ai,
+  .rh-rating-fraud {
+    padding: 5px;
+    margin: -5px;
+  }
+  .g-help-mark {
+    padding: 4px;
+    margin: -4px;
+  }
+}
+
+/* Круг 5 тура 3 (Н3 аудита, вариант А, 27.09): ячейка «Репозиторий» — потолок 264px только
+   ниже 1440; на широких экранах колонка берет свободное место (на 1920 оставалось 180+ px
+   пустоты, а имена №1 и №2 резались). Потолок в долях окна — длинный слаг не распирает таблицу. */
+.rh-rating-repo {
+  min-width: 180px;
+  max-width: 264px;
+}
+@media (min-width: 1440px) {
+  .rh-rating-repo {
+    max-width: 30vw;
+  }
+}
+
 /* В5.2 (Б6, выбор 4C): искра «есть AI-обзор» у имени в рейтинге — цвет AI-отметок категорий */
 .rh-rating-name {
   min-width: 0;
@@ -3039,16 +3053,26 @@ button.rh-category:focus-visible {
 /* В5.5 тур 1 (W2): динамика позиции под местом (Р1); плашка фрода — подозрение,
    не приговор: предупреждающий, а не красный цвет (Р2); внешняя ссылка на
    SourceCraft в строке (Р3) */
-.rh-rank-delta {
+/* Тур 3 В5.5: ячейка места — треугольник направления за сутки вплотную к месту,
+   группа прижата вправо (колонка «#» выровнена по правому краю) */
+.rh-rank {
   display: inline-flex;
   align-items: center;
-  gap: 1px;
-  line-height: 1;
+  justify-content: flex-end;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
-.rh-rank-delta_up {
+.rh-rank__arrow {
+  display: inline-flex;
+}
+.rh-rank__n {
+  font-weight: 600;
+}
+.rh-rank__arrow_up {
   color: var(--g-color-text-positive);
 }
-.rh-rank-delta_down {
+.rh-rank__arrow_down {
   color: var(--g-color-text-danger);
 }
 .rh-rating-fraud,
@@ -3131,4 +3155,32 @@ button.rh-category:focus-visible {
   white-space: normal;
   overflow-wrap: anywhere;
   min-width: 0;
+}
+
+/* тур 3 В5.5 (п.12): обертка выключенной кнопки — носитель подсказки
+   (выключенная кнопка событий наведения не получает) */
+.rh-disabled-tip {
+  display: inline-flex;
+}
+
+/* Chrome не отдает события мыши выключенной кнопке и не пропускает их к обертке —
+   наведение ловит сама обертка */
+.rh-disabled-tip > .g-button:disabled,
+.rh-disabled-tip > .g-button.g-button_disabled {
+  pointer-events: none;
+}
+
+/* тур 3 В5.5 (круг 2): отступ перед «Исходные данные» в поповере основания */
+.rh-proof__raw-toggle {
+  margin-top: var(--g-spacing-2);
+}
+
+/* тур 3 В5.5 (круг 2): знак «AI-текст по прошлому анализу» у AI-плашек */
+.rh-ai-stale {
+  flex-shrink: 0;
+}
+.rh-ai-plate__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--g-spacing-2);
 }

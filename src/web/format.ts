@@ -582,6 +582,41 @@ const CODE_EMPTY_TEXT: Record<string, string> = {
 /** Потолок CI без результатов запусков — одна фраза для «почему», маркера и приложения. */
 export const CI_RUNS_CAP_TEXT = "Результаты запусков CI сервису не видны – категорию не оцениваем: честное отсутствие данных вместо догадок.";
 
+/**
+ * В5.5 закрытие (С19): предупреждение карточки «CI настроен, запусков не видно»
+ * (низ плашки Repo Health Score, UX-проход В5.2 25.09) — одна копия для
+ * карточки и отчета: отчет печатает его строкой под показателями.
+ */
+export const CI_CAP_TITLE = "CI настроен, но запусков не видно";
+export const CI_CAP_TEXT =
+  "В репозитории есть настройки CI, но результаты сборок нам не видны: доступ к ним закрыт или сборки еще не запускались. Поэтому автоматизацию не оцениваем – без данных оценка не снижается.";
+
+/**
+ * В5.5 закрытие (С13): метка категории, часть данных которой взята из прошлого
+ * анализа, — одна копия для плашки карточки и строки категории отчета.
+ */
+export const STALE_CATEGORY_MARK = "Данные из прошлого анализа";
+
+/** Место без числа: публичный без индекса — «индекс не выставлен», прочие — «не в публичном рейтинге». */
+export const NO_RANK_NO_INDEX = "без места – индекс не выставлен";
+export const NO_RANK_NOT_PUBLIC = "не в публичном рейтинге";
+
+/**
+ * В5.5 закрытие (С14): место в рейтинге словами — одно правило для паспорта
+ * карточки, сравнения и отчета. Есть место — «#N из M»; нет — причина по
+ * видимости и индексу, а не прочерк «нет данных»: у приватного репозитория
+ * место не неизвестно, его в публичной выборке нет.
+ */
+export function rankText(visibility: string, score: { healthcraftIndex: number | null; rank: number | null; rankedTotal: number | null } | null): string {
+  if (score && score.rank !== null && score.rankedTotal !== null) return `#${fmtCount(score.rank)} из ${fmtCount(score.rankedTotal)}`;
+  return rankNoneText(visibility, score?.healthcraftIndex ?? null);
+}
+
+/** Причина «места нет» (сравнение, паспорт карточки, отчет). */
+export function rankNoneText(visibility: string, healthcraftIndex: number | null): string {
+  return visibility === "public" && healthcraftIndex === null ? NO_RANK_NO_INDEX : NO_RANK_NOT_PUBLIC;
+}
+
 /** Безопасность без данных: откуда берутся данные категории. */
 export const SECURITY_NO_DATA = "Безопасность считается по данным AppSec SourceCraft, а они видны только с правом доступа.";
 
@@ -1130,6 +1165,19 @@ export function fraudFactorValue(
 export function fraudCheckStale(check: { scanId: number | null; latestScanId: number | null } | undefined): boolean {
   return check !== undefined && check.scanId !== null && check.latestScanId !== null && check.scanId < check.latestScanId;
 }
+
+/**
+ * Тур 3 В5.5 (круг 2, 26.09, Екатерина): AI-текст сделан по НЕпоследнему
+ * анализу — после него был новый, цифры в тексте могут не совпасть с карточкой.
+ * Условие то же, что у пункта «Обновить обзор» для не-владельца (аудит О1).
+ * Одно условие для карточки (метка «Устарел») и отчета (плашка, 27.09).
+ */
+export function aiNotesStale(ai: { scanId: number; check: { latestScanId: number | null } } | null | undefined): boolean {
+  return ai != null && ai.check.latestScanId !== null && ai.scanId < ai.check.latestScanId;
+}
+
+/** Плашка устаревшего AI-обзора в отчете MD/PDF (27.09, Екатерина — по оценке Алексея 27.09, дефект 2). */
+export const AI_STALE_REPORT_TEXT = "сделан по прошлому анализу – после него был новый, цифры в тексте могут не совпадать с остальным отчетом. Обновить обзор можно на карточке репозитория.";
 
 /** Доля 0..1 → «99%» (целые проценты, без пробела — как в таблице подметрик; ненулевая меньше 1% — «<1%»). */
 function sharePercent(share: number): string {

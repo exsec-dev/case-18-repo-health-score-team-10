@@ -113,19 +113,38 @@ export function RepoAvatar({ repo, logoUrl, size }: { repo: string; logoUrl: str
       probe.onerror = null;
     };
   }, [logoUrl]);
-  return logoUrl && !failed ? (
-    <Avatar size={size} shape="square" imgUrl={logoUrl} alt="" loading="lazy" style={{ flexShrink: 0 }} />
-  ) : (
-    <Avatar
-      size={size}
-      shape="square"
-      text={repo}
-      backgroundColor={`var(--g-color-base-${avatarTone(repo)}-light)`}
-      color={`var(--g-color-text-${avatarTone(repo)})`}
-      style={{ flexShrink: 0 }}
-    />
+  // круг 5 тура 3 (находка 24 аудита): аватар декоративен — имя стоит рядом текстом.
+  // Avatar uikit 7.49 теряет alt="" (`props.alt || title`), и <img> оставался без alt;
+  // обертка aria-hidden убирает его из дерева доступности, `display: contents` не
+  // меняет раскладку
+  return (
+    <span aria-hidden="true" style={{ display: "contents" }}>
+      {logoUrl && !failed ? (
+        <Avatar size={size} shape="square" imgUrl={logoUrl} alt="" loading="lazy" style={{ flexShrink: 0 }} />
+      ) : (
+        <Avatar
+          size={size}
+          shape="square"
+          text={repo}
+          backgroundColor={`var(--g-color-base-${avatarTone(repo)}-light)`}
+          color={`var(--g-color-text-${avatarTone(repo)})`}
+          style={{ flexShrink: 0 }}
+        />
+      )}
+    </span>
   );
 }
+
+/**
+ * Круг 5 тура 3 (находка 13 аудита, 27.09): цель подсказки-метки (флаг накрутки,
+ * искра AI, стрелка места, «Устарел») фокусируется с клавиатуры и касанием —
+ * ActionTooltip открывается и на фокусе. Клик не уходит в строку таблицы: касание
+ * метки показывает подсказку, а не открывает карточку.
+ */
+export const TIP_TARGET = {
+  tabIndex: 0,
+  onClick: (e: { stopPropagation: () => void }) => e.stopPropagation(),
+} as const;
 
 /**
  * Язык с цветной точкой, как в списках SourceCraft; цвет — language.color платформы.
@@ -148,14 +167,15 @@ export function LanguageName({ name, color, noLanguage = false }: { name: string
 
 /**
  * В4.6 (У27): слаг репозитория — один компонент на рейтинг и карточку.
- * Пробелы вокруг слеша и обрезка по ширине решаются здесь, а не на каждом
- * экране; `title` всегда несёт полную текстовую форму из `slugOf`, чтобы
+ * Форма и обрезка по ширине решаются здесь, а не на каждом экране; тур 3
+ * В5.5 (26.09, Екатерина, п.8): `org/repo` БЕЗ пробелов вокруг слеша — как
+ * слаг копируется и вставляется (пробелы У27 сняты); `title` всегда несёт полную текстовую форму из `slugOf`, чтобы
  * обрезанное имя можно было прочесть наведением.
  */
 export function RepoSlug({ org, repo, variant }: { org: string; repo: string; variant: "body-1" | "subheader-1" | "subheader-2" | "header-1" }) {
   return (
     <Text variant={variant} as={variant === "header-1" ? "h1" : "span"} ellipsis title={slugOf(org, repo)} style={{ display: "block" }}>
-      {org} / {repo}
+      {slugOf(org, repo)}
     </Text>
   );
 }

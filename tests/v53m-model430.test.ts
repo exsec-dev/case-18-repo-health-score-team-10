@@ -171,8 +171,8 @@ describe("Н5: сжатие объяснено и таблица сходитс�
     const cat = { ...s.categories.issues, weight: 15 };
     const why = whyText("issues", cat, ctx);
     expect(why).not.toContain("на максимуме");
-    expect(why).toContain("3 закрытые задачи из 10");
-    expect(why).toContain("сжат к минимуму 6");
+    expect(why).toContain("3 из 10 нужных");
+    expect(why).toContain("Мало закрытых задач");
     const adj = cat.adjustment!;
     expect(adj.kind).toBe("small-sample");
     // сумма строк таблицы (сырой балл) + строка поправки = итог

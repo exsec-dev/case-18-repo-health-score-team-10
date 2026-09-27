@@ -174,6 +174,48 @@ export function clearOAuthStateCookieHeader(names: CookieNames): string {
   return `${names.oauthState}=; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=0`;
 }
 
+/**
+ * Круг 5 тура 3 (находка 26 аудита, 27.09): куда вернуть после входа. Только путь
+ * своего сайта — без схемы и хоста, не `//`, без `\` и управляющих символов, не
+ * `/auth` и не `/api`; иначе null (вход ведет в кабинет, как раньше). Открытый
+ * редирект на чужой домен невозможен: результат — всегда относительный путь.
+ */
+export function safeNextPath(raw: string | null | undefined): string | null {
+  if (typeof raw !== "string" || raw.length === 0 || raw.length > 512) return null;
+  if (!raw.startsWith("/") || raw.startsWith("//") || raw.includes("\\")) return null;
+  if (/[\u0000-\u001f\u007f]/.test(raw)) return null;
+  if (/^\/(auth|api)(\/|\?|$)/.test(raw)) return null;
+  try {
+    const base = "http://next.invalid";
+    const u = new URL(raw, base);
+    if (u.origin !== base) return null;
+    return u.pathname + u.search;
+  } catch {
+    return null;
+  }
+}
+
+/** Путь возврата живет рядом со state-cookie (тот же срок, те же флаги) и гасится вместе с ней. */
+export function oauthNextCookieHeader(names: CookieNames, next: string): string {
+  const secure = names.secure ? "; Secure" : "";
+  return `${names.oauthState}_next=${encodeURIComponent(next)}; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=${Math.floor(OAUTH_STATE_TTL_MS / 1000)}`;
+}
+
+export function clearOAuthNextCookieHeader(names: CookieNames): string {
+  const secure = names.secure ? "; Secure" : "";
+  return `${names.oauthState}_next=; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=0`;
+}
+
+/** Путь возврата из cookie (повторная проверка — cookie мог подменить сам браузер). */
+export function oauthNextFromCookie(cookieValue: string | undefined): string | null {
+  if (typeof cookieValue !== "string" || cookieValue === "") return null;
+  try {
+    return safeNextPath(decodeURIComponent(cookieValue));
+  } catch {
+    return null;
+  }
+}
+
 export function oauthStateFromCookie(cookieValue: string | undefined): string | null {
   return typeof cookieValue === "string" && cookieValue.length > 8 ? cookieValue : null;
 }

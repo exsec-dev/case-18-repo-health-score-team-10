@@ -39,7 +39,9 @@ describe("К8.5.14: анализ — только своих; права — с�
   test("карточка: кнопка анализа — только на своем репозитории (элемента нет, а не disabled); на своем не из избранного — есть", () => {
     const repoPage = code("RepoPage.tsx");
     expect(repoPage).toContain('const canRefresh = data?.viewer?.own === true && data.viewer.auth === "pat";');
-    expect(repoPage).toContain("const refreshButton = canRefresh && (");
+    // круг 5 тура 3 (Н1): на телефоне кнопка — иконкой; обе ветки под тем же `canRefresh`
+    expect(repoPage).toContain("const refreshButton = canRefresh && phoneBar ? (");
+    expect(repoPage).toContain(") : canRefresh && (");
     // «свой» на карточке — из доступа показа, без избранного
     const t = makeApiDb();
     try {

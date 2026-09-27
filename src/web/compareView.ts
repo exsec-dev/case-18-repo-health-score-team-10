@@ -12,7 +12,7 @@ import { parseFavoriteInput } from "../api/slug-input";
 import { analysisDate } from "../report/sections";
 import { plural } from "../report/submetrics";
 import type { IndexCategoryKey } from "../score/model";
-import { fmtCount, fmtDate, middleEllipsis, roundScore } from "./format";
+import { fmtCount, fmtDate, middleEllipsis, rankNoneText, roundScore } from "./format";
 
 export { COMPARE_MAX };
 
@@ -107,13 +107,15 @@ export function submetricLeaderValue(score: number | null | undefined): number |
 
 /**
  * Место в рейтинге: «#N» и размер выборки (на телефоне при общем размере — в
- * подписи строки); без места — причина по видимости: публичный без индекса —
- * «индекс не выставлен», прочие (internal/private/unknown) — «не в публичном рейтинге».
+ * подписи строки); без места — причина `rankNoneText`: публичный без индекса —
+ * «индекс не выставлен», прочие (internal/private/unknown и публичный вне
+ * рейтинга) — «не в публичном рейтинге».
  */
 export function rankCell(card: CompareCard, sharedTotal: number | null): { rank: string; total: string | null } | { none: string } {
   const s = card.score;
   if (s && s.rank !== null && s.rankedTotal !== null) return { rank: `#${fmtCount(s.rank)}`, total: sharedTotal === null ? ` из ${fmtCount(s.rankedTotal)}` : null };
-  return { none: card.repo.visibility === "public" ? "без места – индекс не выставлен" : "не в публичном рейтинге" };
+  // В5.5 закрытие (С14): причина — то же правило, что в паспорте карточки и в отчете
+  return { none: rankNoneText(card.repo.visibility, s?.healthcraftIndex ?? null) };
 }
 
 /** Подпись строки реквизита (Д8 Б, Д9 на телефоне: общий год и общий размер рейтинга — в подписи). */

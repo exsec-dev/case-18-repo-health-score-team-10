@@ -38,6 +38,7 @@ import {
   CommentSlash,
   Comments,
   Copy,
+  Ellipsis,
   FileText,
   Flag,
   FolderTree,
@@ -53,6 +54,7 @@ import {
   Pulse,
   Rocket,
   ScalesBalanced,
+  SealCheck,
   ShieldCheck,
   SquareCheck,
   SquareListUl,
@@ -68,7 +70,9 @@ import {
   ArrowToggle,
   Button,
   Card,
+  ClipboardButton,
   DefinitionList,
+  Disclosure,
   DropdownMenu,
   Flex,
   HelpMark,
@@ -83,6 +87,7 @@ import {
 import { useEffect, useState, type ReactNode } from "react";
 import { COVERAGE_NULL_BELOW } from "../score/model";
 import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle } from "../report/submetrics";
+import { factWords } from "../report/factWords";
 import { FULL, INDEX, metricWeights, ownershipView, sourceWord, strengthsLine, submetricWeightText } from "../report/sections";
 import type { MetaResponse, RepoCard } from "./api";
 import { dataOf, mutateJson, useJson, useVisible } from "./api";
@@ -114,10 +119,17 @@ import {
   sentence,
   slugOf,
   notOwnReason,
+  rankText,
+  CI_CAP_TEXT,
+  CI_CAP_TITLE,
+  STALE_CATEGORY_MARK,
 } from "./format";
-import { linkProps } from "./router";
+import { linkProps, navigate } from "./router";
+import { COMPARE_MAX, COMPARE_LIMIT_TEXT, compareHref } from "./compareView";
+import { lastCompareSet, rememberCompareSet } from "./compareReturn";
 import { LoginButton, Page, type Crumb } from "./Shell";
-import { AiOverviewSection, BadgeButton, CategoryAiMark, CategoryAiNote, FraudCheckFooter, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
+import { useMediaQuery } from "./prefs";
+import { AiOverviewSection, BadgeButton, BadgeDialog, CategoryAiMark, CategoryAiNote, FraudCheckFooter, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
 
 type Card = RepoCard;
@@ -183,11 +195,21 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
   useEffect(() => {
     if (data) onSection?.(closedRepo ? "me" : "rating");
   }, [data !== null, closedRepo]); // eslint-disable-line react-hooks/exhaustive-deps
-  const crumbs: Crumb[] = [closedRepo ? { text: "Избранное", href: "/me" } : { text: "Рейтинг", href: lastRatingHref() }, { text: `${org} / ${repo}` }];
+  const crumbs: Crumb[] = [closedRepo ? { text: "Избранное", href: "/me" } : { text: "Рейтинг", href: lastRatingHref() }, { text: slugOf(org, repo) }];
   const own = live ?? (data?.job ? { phase: data.job.status, stalled: data.job.stalled } : null);
   const jobStalled = own?.stalled === true;
   const analysisRunning = own !== null;
-  const refreshButton = canRefresh && (
+  // круг 5 тура 3 (Н1): на телефоне «Обновить анализ» — иконкой, подпись в подсказке и
+  // aria-label (со «Сравнить» и «Бейджем» в «⋮» строка вошедшего иначе снова резалась)
+  const phoneBar = useMediaQuery("(max-width: 767px)");
+  const refreshText = analysisRunning ? "Идет анализ" : "Обновить анализ";
+  const refreshButton = canRefresh && phoneBar ? (
+    <ActionTooltip title={refreshText}>
+      <Button view="action" size="m" onClick={start.start} disabled={analysisRunning || start.sending} loading={start.sending || analysisRunning} aria-label={refreshText}>
+        <Icon data={ArrowsRotateRight} size={16} />
+      </Button>
+    </ActionTooltip>
+  ) : canRefresh && (
     <Button view="action" size="m" onClick={start.start} disabled={analysisRunning || start.sending} loading={start.sending}>
       {/* Доводка 21.09: спиннер живёт в слоте `Button.Icon`, а не голым узлом
           рядом с текстом. Слот сам держит габарит в высоту кнопки и гасит
@@ -199,7 +221,7 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
           <Spin size="xs" />
         </Button.Icon>
       )}
-      {analysisRunning ? "Идет анализ" : "Обновить анализ"}
+      {refreshText}
     </Button>
   );
 
@@ -220,6 +242,12 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
     // (закрытый, ни разу не анализировался) — не ошибка «не удалось открыть», а
     // честное пустое состояние; не в избранном — прежняя ошибка
     return <FavoriteNotInCatalog org={org} repo={repo} fallback={state.message} onRetry={reload} onSection={onSection} />;
+  }
+  if (data === null && state.kind === "error" && state.status === 404) {
+    // круг 5 тура 3 (находка 18 аудита, 27.09): выбывший из каталога, закрытый или
+    // несуществующий — одно спокойное пустое состояние вместо красной ошибки. Текст
+    // один на все случаи: различимый 404 выдал бы существование закрытого (ТЗ §5)
+    return <NotInCatalog org={org} repo={repo} crumbs={crumbs} />;
   }
   if (data === null) {
     // UX-5 (круг 2 В4.4): «Обновить анализ» на странице ошибки скрыт; повтор —
@@ -245,12 +273,15 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
   const reportHref = `${cardUrl}/report.md`;
   const refreshError = state.kind === "ok" ? state.refreshError : undefined;
   const actions = (
-    <Flex gap={2} alignItems="center">
-      {/* 5-A (§2 24.09): бейдж — кнопкой в шапке, как Clone у SourceCraft */}
-      {card.score !== null && <BadgeButton org={org} repo={repo} own={card.viewer?.own === true} publicBaseUrl={meta?.publicBaseUrl ?? window.location.origin} />}
-      {card.score !== null && <ReportMenu mdHref={reportHref} pdfHref={`${cardUrl}/report.pdf`} pdfName={reportFileName(org, repo, "pdf")} />}
-      {refreshButton}
-    </Flex>
+    <CardActions
+      org={org}
+      repo={repo}
+      scored={card.score !== null}
+      badge={card.repo.badge}
+      publicBaseUrl={meta?.publicBaseUrl ?? window.location.origin}
+      report={card.score !== null && <ReportMenu mdHref={reportHref} pdfHref={`${cardUrl}/report.pdf`} pdfName={reportFileName(org, repo, "pdf")} />}
+      refresh={refreshButton}
+    />
   );
 
   return (
@@ -329,6 +360,24 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
 }
 
 /**
+ * Круг 5 тура 3 (находка 18 аудита, 27.09): выбывший из каталога, закрытый или
+ * несуществующий — одно спокойное пустое состояние вместо красной ошибки «Не удалось
+ * открыть». Текст один на все случаи: различимый 404 выдал бы существование закрытого
+ * репозитория (ТЗ §5, «Ограничение доступа»).
+ */
+function NotInCatalog({ org, repo, crumbs }: { org: string; repo: string; crumbs: Crumb[] }) {
+  return (
+    <Page crumbs={crumbs}>
+      <EmptyState
+        icon={SquareListUl}
+        title="Репозитория нет в открытом каталоге"
+        description={`${slugOf(org, repo)} не найден среди открытых репозиториев SourceCraft: он мог стать закрытым, быть удален или переименован – или в адресе опечатка.`}
+        actions={[{ text: "К рейтингу", view: "normal", size: "l", href: lastRatingHref() }]}
+      />
+    </Page>
+  );
+}
+/**
  * Карточка репозитория из избранного, которого нет в каталоге сервиса (В5.3,
  * 25.09): закрытый репозиторий попадает в каталог только своим анализом, а
  * анализ запускается только для своих (права на CI/CD или Безопасность). Текст —
@@ -341,7 +390,7 @@ function FavoriteNotInCatalog({ org, repo, fallback, onRetry, onSection }: { org
   useEffect(() => {
     if (inFavs) onSection?.("me");
   }, [inFavs]); // eslint-disable-line react-hooks/exhaustive-deps
-  const crumbs: Crumb[] = [{ text: "Избранное", href: "/me" }, { text: `${org} / ${repo}` }];
+  const crumbs: Crumb[] = [{ text: "Избранное", href: "/me" }, { text: slugOf(org, repo) }];
   if (favs.state.kind === "loading") {
     return (
       <Page crumbs={crumbs}>
@@ -352,9 +401,7 @@ function FavoriteNotInCatalog({ org, repo, fallback, onRetry, onSection }: { org
   const fav = data?.entries.find((e) => e.org.toLowerCase() === org.toLowerCase() && e.repo.toLowerCase() === repo.toLowerCase()) ?? null;
   if (fav === null) {
     return (
-      <Page crumbs={[{ text: "Рейтинг", href: lastRatingHref() }, { text: `${org} / ${repo}` }]}>
-        <Alert theme="danger" view="outlined" className="rh-break-anywhere" title={`Не удалось открыть ${slugOf(org, repo)}`} message={fallback} actions={[{ text: "Повторить", handler: onRetry }]} />
-      </Page>
+      <NotInCatalog org={org} repo={repo} crumbs={[{ text: "Рейтинг", href: lastRatingHref() }, { text: slugOf(org, repo) }]} />
     );
   }
   return <FavoriteNotInCatalogState org={org} repo={repo} own={fav.access?.own === true} access={fav.access} crumbs={crumbs} onRetry={onRetry} />;
@@ -433,6 +480,104 @@ class ReportError extends Error {
   ) {
     super(`report ${status}`);
   }
+}
+
+/**
+ * Строка действий карточки. Тур 3 В5.5 (п.9): порядок — сравнить, бейдж, отчет,
+ * обновить анализ (главное действие справа). Круг 5 (Н1 аудита, вариант А, 27.09):
+ * на телефоне «Сравнить» и «Бейдж» — в меню «⋮», на виду «Отчет» и «Как
+ * считается?» (иначе строка резалась и отчет с телефона был недоступен). Круг 5
+ * (находка 19): у репо без оценки «Сравнить» нет — в сравнении у него пустой столбец.
+ */
+function CardActions({ org, repo, scored, badge, publicBaseUrl, report, refresh }: { org: string; repo: string; scored: boolean; badge: boolean; publicBaseUrl: string; report: ReactNode; refresh: ReactNode }) {
+  const phone = useMediaQuery("(max-width: 767px)");
+  // В5.5 закрытие (П-2): бейдж выдается — знает сервер (поле карточки), без пробы badge.svg
+  const badgeOk = badge;
+  const [badgeOpen, setBadgeOpen] = useState(false);
+  if (!phone) {
+    return (
+      <Flex gap={2} alignItems="center">
+        {scored && <CompareButton org={org} repo={repo} />}
+        {/* 5-A (§2 24.09): бейдж — кнопкой в шапке, как Clone у SourceCraft */}
+        {scored && <BadgeButton org={org} repo={repo} publicBaseUrl={publicBaseUrl} available={badge} />}
+        {report}
+        {refresh}
+      </Flex>
+    );
+  }
+  const compare = compareState(org, repo);
+  const items = [
+    ...(scored
+      ? [
+          compare.full
+            ? { text: "Сравнить – уже 3 из 3", disabled: true, iconStart: <Icon data={ScalesBalanced} size={16} />, action: () => undefined }
+            : { text: compare.inSet ? "Открыть сравнение" : "Сравнить", iconStart: <Icon data={ScalesBalanced} size={16} />, action: compare.go },
+        ]
+      : []),
+    ...(scored && badgeOk ? [{ text: "Бейдж для README", iconStart: <Icon data={SealCheck} size={16} />, action: () => setBadgeOpen(true) }] : []),
+  ];
+  return (
+    <Flex gap={2} alignItems="center">
+      {report}
+      {refresh}
+      {items.length > 0 && (
+        <DropdownMenu
+          size="m"
+          items={items}
+          popupProps={{ placement: "bottom-end" }}
+          renderSwitcher={(props) => (
+            <Button {...props} view="flat" size="m" aria-label="Еще действия">
+              <Icon data={Ellipsis} size={16} />
+            </Button>
+          )}
+        />
+      )}
+      {badgeOk && <BadgeDialog org={org} repo={repo} publicBaseUrl={publicBaseUrl} open={badgeOpen} onClose={() => setBadgeOpen(false)} />}
+    </Flex>
+  );
+}
+
+/** Набор сравнения вкладки для кнопки и пункта меню «Сравнить» (одно правило). */
+function compareState(org: string, repo: string): { inSet: boolean; full: boolean; count: number; go: () => void } {
+  const slug = slugOf(org, repo);
+  const set = lastCompareSet();
+  const inSet = set.includes(slug);
+  const go = (): void => {
+    const next = inSet ? set : [...set, slug];
+    rememberCompareSet(next);
+    navigate(compareHref(next));
+  };
+  return { inSet, full: !inSet && set.length >= COMPARE_MAX, count: set.length, go };
+}
+
+/**
+ * Тур 3 В5.5 (п.9, 26.09): «Сравнить» из карточки. Набор — последний набор
+ * сравнения вкладки (`lastCompareSet`, как у пункта rail): репо уже в нем —
+ * «В сравнении» ведет на страницу сравнения; есть место — добавляет и ведет
+ * туда же; мест нет — кнопка выключена с причиной в подсказке.
+ */
+function CompareButton({ org, repo }: { org: string; repo: string }) {
+  const { inSet, full, count, go } = compareState(org, repo);
+  if (full) {
+    return (
+      <ActionTooltip title={COMPARE_LIMIT_TEXT}>
+        {/* обертка: выключенная кнопка не получает наведения, подсказка — на span */}
+        {/* круг 5 тура 3 (находка 14): обертка фокусируется — причину слышно и с клавиатуры */}
+        <span className="rh-disabled-tip" tabIndex={0} aria-label={`Сравнить: ${COMPARE_LIMIT_TEXT}`}>
+          <Button view="outlined" size="m" disabled>
+            <Icon data={ScalesBalanced} size={16} />
+            Сравнить
+          </Button>
+        </span>
+      </ActionTooltip>
+    );
+  }
+  return (
+    <Button view="outlined" size="m" onClick={go} title={inSet ? "Открыть сравнение" : `Добавить в сравнение (${count + 1} из ${COMPARE_MAX})`}>
+      <Icon data={ScalesBalanced} size={16} />
+      {inSet ? "В сравнении" : "Сравнить"}
+    </Button>
+  );
 }
 
 function ReportMenu({ mdHref, pdfHref, pdfName }: { mdHref: string; pdfHref: string; pdfName: string }) {
@@ -555,6 +700,8 @@ function Header({ card, view, starDoneKey, starLoggedIn }: { card: Card; view: C
                 той же плашкой, что в избранном; «неизвестно» плашки не дает */}
             <VisibilityPill value={view.visibility} />
             <Flex gap={1} alignItems="center">
+              {/* тур 3 В5.5 (п.8, круг 2): копирование org/repo — после плашки видимости */}
+              <ClipboardButton text={slugOf(r.org, r.repo)} size="s" view="flat-secondary" tooltipInitialText="Скопировать org/repo" tooltipSuccessText="Скопировано" />
               <FavoriteStar org={r.org} repo={r.repo} visibility={r.visibility} doneKey={starDoneKey} loggedIn={starLoggedIn} />
               <ActionTooltip title="Открыть на sourcecraft.dev">
                 <Button
@@ -699,7 +846,8 @@ function ScoreAside({
           <DefinitionList nameMaxWidth={ASIDE_NAME_WIDTH}>
             {score && (
               <DefinitionList.Item name="Место в рейтинге">
-                {score.rank !== null && score.rankedTotal ? `#${fmtCount(score.rank)} из ${fmtCount(score.rankedTotal)}` : "—"}
+                {/* В5.5 закрытие (С14): одно правило с отчетом и сравнением; без места — причина, а не «—» */}
+                {rankText(card.repo.visibility, score)}
               </DefinitionList.Item>
             )}
             {score && !full && (
@@ -1017,7 +1165,7 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
           <CategoryAiMark card={card} categoryKey={key} hasData={c.score !== null} />
           {c.stale && (
             <Label theme="warning" size="xs">
-              Данные из прошлого анализа
+              {STALE_CATEGORY_MARK}
             </Label>
           )}
         </span>
@@ -1143,7 +1291,7 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
           {/* В5.5 тур 2 (W4, ЗН-2): карта владельцев — в раскрытии «Состояния кода», теми же строками */}
           {key === "code" && <OwnershipMap category={cat} />}
           {/* замечание 3 (25.09): текст модели — под таблицей метрик */}
-          {aiNote !== null && <CategoryAiNote note={aiNote} />}
+          {aiNote !== null && <CategoryAiNote note={aiNote} card={card} />}
         </div>
       )}
     </li>
@@ -1168,8 +1316,9 @@ function Markers({ view }: { view: CardView }) {
     rows.push({
       key: "ci-cap",
       // UX-проход 25.09 (замечание 8): без жаргона
-      label: "CI настроен, но запусков не видно",
-      text: "В репозитории есть настройки CI, но результаты сборок нам не видны: доступ к ним закрыт или сборки еще не запускались. Поэтому автоматизацию не оцениваем – без данных оценка не снижается.",
+      // В5.5 закрытие (С19): тот же текст печатает отчет строкой под показателями
+      label: CI_CAP_TITLE,
+      text: CI_CAP_TEXT,
       theme: "warning",
     });
   }
@@ -1297,7 +1446,7 @@ function RecommendationRow({ item }: { item: RecommendationView }) {
   );
 }
 
-/** Поповер основания: заголовок-ярлык; по каждому факту — источник словами, время сбора, сырые данные свернутыми и ключ мелко. */
+/** Поповер основания: заголовок-ярлык; по каждому факту — источник словами, время сбора, факт словами, сырые данные свернутыми и ключ мелко. */
 function FactProof({ item }: { item: RecommendationView }) {
   return (
     <Flex direction="column" gap={3} className="rh-proof">
@@ -1340,8 +1489,16 @@ function FactBlock({ factKey, fact, missing }: { factKey: string; fact: Evidence
           </Label>
         )}
       </Flex>
-      {/* круг 2 (Ф2, §2 23.09): исходные данные целиком, без сворачивания */}
-      <pre className="rh-code rh-proof__raw">{fmtFactValue(fact.value)}</pre>
+      {/* тур 3 В5.5 (п.11, вариант А): факт словами; сырое значение — под «Исходные
+          данные» (вытесняет Ф2 §2 23.09 — JSON целиком без сворачивания) */}
+      {factWords(fact.key, fact.status, fact.value).map((l) => (
+        <Text key={l} variant="body-short">
+          {l}
+        </Text>
+      ))}
+      <Disclosure size="m" summary="Исходные данные" className="rh-proof__raw-toggle">
+        <pre className="rh-code rh-proof__raw">{fmtFactValue(fact.value)}</pre>
+      </Disclosure>
       <Text variant="caption-2" color="hint">
         {fact.key}
       </Text>
@@ -1682,34 +1839,34 @@ function FavoriteStar({ org, repo, visibility, doneKey, loggedIn }: { org: strin
       });
     }
   };
-  return (
-    <Flex direction="column" gap={1}>
-      {/* В4.6 (У32, замечание владельца 9 + правило 3а docs/ui/gravity-uikit.md):
+  const starTip = checking
+    ? "Проверяем избранное…"
+    : state === "anon"
+      ? "Войдите через Я ID, чтобы добавлять в избранное"
+      : "В избранное. Раздел «Избранное» содержит выбранные вами репозитории; права на закрытые данные сервис проверит сам при добавлении.";
+  const starDisabled = state === "anon" || checking;
+  const star = (
+      /* В4.6 (У32, замечание владельца 9 + правило 3а docs/ui/gravity-uikit.md):
           звезда — ИКОНКА из @gravity-ui/icons, а не юникодный символ звезды.
           Символ рисовался шрифтом, то есть не совпадал по размеру и оптике с
           соседней иконочной кнопкой и не слушался размера иконок вообще.
           Заполненная — янтарная (`warning`, 8,18:1 в тёмной теме): это тот
-          самый «акцент на мелкой детали», который просил владелец. */}
+          самый «акцент на мелкой детали», который просил владелец. */
       <Button
         size="s"
         view="flat"
         className={["rh-favorite-star", state === "on" ? "rh-favorite-star_on" : "", glow ? "rh-star-glow" : ""]
           .filter(Boolean)
           .join(" ")}
-        disabled={state === "anon" || checking}
+        disabled={starDisabled}
         /* В4.6 (У16): объяснение границы доступа прямо там, где зритель
            нажимает звезду. Сервис НЕ перечисляет репозитории зрителя сам —
            списка «все мои репозитории» у него нет и быть не может без
            токена с правами; поэтому «Мои репозитории» в кабинете — это
            избранное, а не автоматический список (решение favorites-only
            18.09). Раздел настроек вынесен на `/settings` в В4.6, круг 3. */
-        title={
-          checking
-            ? "Проверяем избранное…"
-            : state === "anon"
-              ? "Войдите через Я ID, чтобы добавлять в избранное"
-              : "В избранное. Раздел «Избранное» содержит выбранные вами репозитории; права на закрытые данные сервис проверит сам при добавлении."
-        }
+        title={starDisabled ? undefined : starTip}
+        aria-label={starTip}
         onClick={() => void toggle()}
       >
         {/* В4.6 круг 2 (Р22, замечание владельца 20.09): 14px, как у соседней
@@ -1718,6 +1875,18 @@ function FavoriteStar({ org, repo, visibility, doneKey, loggedIn }: { org: strin
             по габариту: обе `size="s"`. */}
         <Icon data={state === "on" ? StarFill : Star} size={14} />
       </Button>
+  );
+  return (
+    <Flex direction="column" gap={1}>
+      {/* тур 3 В5.5 (п.12): выключенная кнопка не получает наведения — `title` на ней
+          не показывался; причина — подсказкой на обертке */}
+      {starDisabled ? (
+        <ActionTooltip title={starTip}>
+          <span className="rh-disabled-tip" tabIndex={0} aria-label={starTip}>{star}</span>
+        </ActionTooltip>
+      ) : (
+        star
+      )}
       {error && <Text color="danger">{error}</Text>}
     </Flex>
   );

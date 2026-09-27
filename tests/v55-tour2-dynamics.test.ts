@@ -329,7 +329,7 @@ describe("старые факты (сборщик до 5): «нет данных
     for (const key of ["cicd.stability", "issues.backlog_trend", "issues.monthly_flow"]) {
       const [cat, sub] = key.split(".") as [string, string];
       const entry = (s.categories as Record<string, { submetrics: Record<string, { score: number | null; value?: unknown; note?: string }> }>)[cat]!.submetrics[sub]!;
-      expect({ key, text: shown(key, entry) }).toEqual({ key, text: "нет данных, анализ собран до версии 5 сборщика" });
+      expect({ key, text: shown(key, entry) }).toEqual({ key, text: "появится после следующего анализа" });
     }
   });
 
@@ -442,11 +442,11 @@ describe("отрисованный MD: справочные строки в ра
         "Справочно, в балл не входит: Стабильность CI в динамике – стабильнее, 90% успешных у последних 10 запусков против 70% у 10 до них.",
       );
       expect(md).toContain("Динамика бэклога за 90 дней – бэклог растет, +4 за 90 дней (создано 6, закрыто 2)");
-      expect(md).toContain("Создано и закрыто задач по месяцам – 2/1, 1/2, 2/2, 3/1, 2/1, 1/0 (создано/закрыто за 30 дней, от старых к новым)");
+      expect(md).toContain("Поток задач по 30-дневным окнам – 2/1, 1/2, 2/2, 3/1, 2/1, 1/0 (создано/закрыто за 30 дней, от старых к новым)");
       expect(md).toContain("| Стабильность CI в динамике: стабильнее, 90% успешных у последних 10 запусков против 70% у 10 до них | справочно, в балл не входит |");
       expect(md).toContain("| Версия методики | 4.4.0-hci |");
       // новые строки: без длинного тире и без «ё»
-      const fresh = md.split("\n").filter((l) => /Стабильность CI|Динамика бэклога|Создано и закрыто задач/.test(l));
+      const fresh = md.split("\n").filter((l) => /Стабильность CI|Динамика бэклога|Поток задач по 30-дневным окнам/.test(l));
       expect(fresh.length).toBeGreaterThanOrEqual(5);
       for (const l of fresh) {
         const body = l.replace(/→ —/g, "").replace(/\| — \|/g, "");
@@ -462,7 +462,7 @@ describe("отрисованный MD: справочные строки в ра
     const fullNull = fixtureCard("full-null");
     try {
       expect(renderRepoReport(anon.card).includes("Стабильность CI")).toBe(false);
-      expect(renderRepoReport(fullNull.card)).toContain("Стабильность CI в динамике – нет данных, анализ собран до версии 5 сборщика.");
+      expect(renderRepoReport(fullNull.card)).toContain("Стабильность CI в динамике – появится после следующего анализа.");
     } finally {
       anon.close();
       fullNull.close();

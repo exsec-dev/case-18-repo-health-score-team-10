@@ -28,9 +28,11 @@ import {
   fmtSigned,
   fullScorePath,
   AI_SECTION_TITLE,
+  AI_STALE_REPORT_TEXT,
   FRAUD_EXPLAIN,
   FRAUD_TITLE,
   aiModelName,
+  aiNotesStale,
   aiParagraphs,
   aiRoleTitle,
   fraudFactorFact,
@@ -46,7 +48,11 @@ import {
   scoreWord,
   sentence,
   type Contributions,
-  roundScore, AI_DISCLAIMER, AI_OVERVIEW_REJECTED
+  roundScore, AI_DISCLAIMER, AI_OVERVIEW_REJECTED,
+  CI_CAP_TEXT,
+  CI_CAP_TITLE,
+  STALE_CATEGORY_MARK,
+  rankText,
 } from "../web/format";
 import { code, em, escaped, strong, text, type ActionItem, type Block, type CategoryRow, type Chip, type HeroNote, type HeroSecondary, type InlineLine, type ReportModel, type TableColumn } from "./model";
 import {
@@ -141,9 +147,12 @@ function categoryRow(card: RepoCard, key: CategoryKey, cat: CardCategory, ctx: S
   const name = CATEGORY_TITLES[key];
   const why = categoryWhy(card, key, ctx);
   // Ступень 4 (В-9): закрытая зрителю категория — «Недоступно», а не «нет данных»
-  if (cat.locked !== undefined) return { name, score: null, scoreText: "—", chip: { theme: "unknown", text: "Недоступно" }, why };
-  if (cat.score === null) return { name, score: null, scoreText: "—", chip: scoreChip(null), why };
-  return { name, score: cat.score, scoreText: fmtScore(cat.score), chip: scoreChip(cat.score), why };
+  if (cat.locked !== undefined) return { name, score: null, scoreText: "—", chip: { theme: "unknown", text: "Недоступно" }, why, mark: null };
+  // В5.5 закрытие (С13): то же условие и тот же текст, что у плашки категории на
+  // карточке (`cardView` → `c.stale`, `STALE_CATEGORY_MARK`)
+  const mark: Chip | null = cat.stale === true ? { theme: "warning", text: STALE_CATEGORY_MARK } : null;
+  if (cat.score === null) return { name, score: null, scoreText: "—", chip: scoreChip(null), why, mark };
+  return { name, score: cat.score, scoreText: fmtScore(cat.score), chip: scoreChip(cat.score), why, mark };
 }
 
 // ---------- действия ----------
@@ -231,6 +240,18 @@ function fullPathText(card: RepoCard): string {
   return pathText(fullScorePath(card.viewer?.auth, [card.access.cicd, card.access.appsec]));
 }
 
+/**
+ * В5.5 закрытие (С19): предупреждение «CI настроен, но запусков не видно» —
+ * на карточке оно стоит внизу плашки Repo Health Score (UX-проход В5.2 25.09),
+ * в отчете — строкой под показателями, тем же текстом (`CI_CAP_*`) и при том
+ * же признаке (`markers.ciConfigOnlyCap`). Так отчет говорит об этом столько же
+ * раз и в тех же местах, что карточка: у показателя, в основании CI/CD и в
+ * рекомендации.
+ */
+function ciCapNotes(card: RepoCard): HeroNote[] {
+  return card.markers.ciConfigOnlyCap ? [{ line: [strong(`${CI_CAP_TITLE}.`), text(` ${CI_CAP_TEXT}`)] }] : [];
+}
+
 // ---------- оценка есть, индекса нет (покрытие ниже порога) ----------
 
 function indexNullSection(card: RepoCard): Block[] {
@@ -240,6 +261,7 @@ function indexNullSection(card: RepoCard): Block[] {
   const threshold = fmtCoverage(COVERAGE_NULL_BELOW);
   const notes: HeroNote[] = [{ line: line("Отсутствие оценки означает недостаток данных, а не плохое состояние репозитория.") }];
   if (score.fullLocked) notes.push({ line: line(`Полная оценка ${FULL}, включающая CI/CD и Безопасность, видна участникам репозитория. ${fullPathText(card)}`), info: true });
+  notes.push(...ciCapNotes(card));
   const out: Block[] = [
     {
       kind: "hero",
@@ -305,6 +327,7 @@ function scoredSection(card: RepoCard, metrics: Metric[]): Block[] {
     ),
     info: true,
   });
+  notes.push(...ciCapNotes(card));
   const head = metrics[0]!;
   const second = metrics[1];
   const secondary: HeroSecondary | null = second
@@ -729,9 +752,9 @@ function categoryCalc(key: CategoryKey, cat: CardCategory): Block[] {
     // строка поправки: сколько она сняла со взвешенной суммы (сумма столбца = итог)
     const title =
       adj.kind === "small-sample"
-        ? `Малая выборка: ${adj.n} из ${adj.full} закрытых задач`
+        ? `Мало закрытых задач: ${adj.n} из ${adj.full}`
         : adj.kind === "small-code"
-          ? `Мало кода: ${adj.loc} из ${adj.full} строк, сжатие к ${adj.center}`
+          ? `Мало кода: ${adj.loc} из ${adj.full} строк`
           : `Потолок: открытые находки ${adj.level === "critical" ? "critical" : "high"}`;
     rows.push([line(title), line(""), line(""), line(fmtDecimal(cat.score! - adj.raw, 1))]);
   }
@@ -980,12 +1003,20 @@ function aiBlock(card: RepoCard): Block[] {
   const notes = [...(ai.overview ? [{ title: null as string | null, note: ai.overview }] : []), ...ai.specialists.map((n) => ({ title: aiRoleTitle(n.role), note: n }))];
   if (notes.length === 0) return [];
   const out: Block[] = [h2(AI_SECTION_TITLE)];
+  // 27.09 (Екатерина; дефект 2 оценки Алексея 27.09): обзор по прошлому анализу —
+  // плашкой сразу под заголовком, как метка «Устарел» на карточке; иначе цифры
+  // текста спорят с таблицами того же документа
+  if (aiNotesStale(ai)) out.push({ kind: "paragraph", tone: "note", lines: [[strong("Обзор устарел:"), text(` ${AI_STALE_REPORT_TEXT}`)]] });
   // ревью В5.3 (25.09): отказ проверки общего обзора печатается и в отчете, как на карточке
   if (!ai.overview && ai.specialists.length > 0) out.push(para(line(AI_OVERVIEW_REJECTED)));
   for (const { title, note } of notes) {
     if (title !== null) out.push({ kind: "paragraph", tone: "subhead", lines: [[strong(title)]] });
     out.push(para(...aiParagraphs(note.text).map((l) => [escaped(l)] as InlineLine)));
   }
+  // тур 3 В5.5 (п.10, 26.09): разборы, не прошедшие проверку фактами, — как на
+  // карточке и ДО строки с моделью и датой (без траектории и без «нет фактов»)
+  const failed = (ai.failures ?? []).filter((f) => f.role !== "trajectory" && !f.reason.startsWith("нет фактов"));
+  if (failed.length > 0) out.push({ kind: "paragraph", tone: "fine", lines: failed.map((f) => line(`Разбор «${aiRoleTitle(f.role)}» не прошел проверку фактами.`)) });
   const models = [...new Set(notes.map((n) => aiModelName(n.note.model)))].join(", ");
   const when = ai.generatedAt ? ` от ${fmtDate(ai.generatedAt)}` : "";
   out.push({
@@ -1046,6 +1077,9 @@ function appendixD(card: RepoCard): Block[] {
       [line("Режим запуска"), line(scanTriggerText(scan.trigger))],
     );
   }
+  // В5.5 закрытие (С14): место в рейтинге — то же число и то же правило, что в
+  // паспорте карточки (`rankText`): «#N из M» или причина, по которой места нет
+  if (score) rows.push([line("Место в рейтинге"), line(rankText(repo.visibility, score))]);
   rows.push(
     // А14 аудита: язык приходит из каталога SourceCraft, а не из скачанного
     // репозитория, — поэтому он есть и там, где скачать репозиторий не удалось

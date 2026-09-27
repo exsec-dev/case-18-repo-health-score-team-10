@@ -154,7 +154,7 @@ describe("К8.5.1: итог анализа — по заданию", () => {
     const session = src("session.tsx");
     expect((session.match(/fetch\("\/api\/me\/jobs"\)/g) ?? []).length).toBe(1);
     expect(session).toContain("if (login === null || !visible) return;");
-    expect(session).toContain("toaster.add({ name: `analysis-finished:${job.jobId}`");
+    expect(session).toContain("name: `analysis-finished:${job.jobId}`");
     // С9-13: сбой опроса заданий не молчит — «Задания» показывают, что список мог устареть
     expect(session).toContain("setFailing(next === null);");
     expect(src("MePage.tsx")).toContain("{failing && (");

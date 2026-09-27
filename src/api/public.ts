@@ -5,7 +5,7 @@
 // подпись и цвет.
 import type { Database } from "bun:sqlite";
 import { MODEL_VERSION, INDEX_WEIGHTS } from "../score/model";
-import { LAST_ELIGIBLE_SCAN_SQL } from "./repos";
+import { LAST_ELIGIBLE_SCAN_SQL, publicApiVisible } from "./repos";
 
 export interface PublicRepoResponse {
   org: string;
@@ -29,7 +29,8 @@ export function getPublicRepo(db: Database, org: string, repo: string): PublicRe
     .get(org, repo) as { id: number; org_slug: string; repo_slug: string; title: string | null; language: string | null; likes: number | null; rating_active: number; visibility: string } | null;
   if (!r) return null;
   // гейт публичности: не публичный ИЛИ выведенный — не существует для API
-  if (r.visibility !== "public" || r.rating_active !== 1) return null;
+  // В5.5 закрытие (П-2): та же проверка задает поле карточки `repo.badge`
+  if (!publicApiVisible(r)) return null;
   const scan = db
     .query(
       `SELECT sc.scan_id, sc.healthcraft_index, sc.index_coverage, sc.categories, s.finished_at, s.head_sha

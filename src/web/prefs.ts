@@ -58,6 +58,29 @@ export function useRailCompact(): [boolean, (next: boolean) => void] {
   return [raw === "1", (next) => railPref.set(next ? "1" : "0")];
 }
 
+const RATING_HIDDEN_KEY = "rh:rating-hidden-columns";
+
+/**
+ * Круг 5 тура 3 (находка 21 аудита, 27.09): скрытые колонки рейтинга переживают
+ * перезагрузку и возврат. Хранится JSON-массив id; битое или неизвестное значение —
+ * умолчание страницы; id колонки, которой больше нет, просто ни на что не влияет.
+ */
+export function readRatingHidden(fallback: string[]): string[] {
+  const raw = read(RATING_HIDDEN_KEY);
+  if (raw === null) return fallback;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed) || !parsed.every((v) => typeof v === "string")) return fallback;
+    return parsed as string[];
+  } catch {
+    return fallback;
+  }
+}
+
+export function writeRatingHidden(hidden: string[]): void {
+  write(RATING_HIDDEN_KEY, JSON.stringify(hidden));
+}
+
 /** Медиа-запрос как состояние: раскладка меняется при повороте/ресайзе. */
 export function useMediaQuery(query: string): boolean {
   return useSyncExternalStore(
