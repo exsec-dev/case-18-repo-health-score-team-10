@@ -17,6 +17,10 @@ import { INDEX_WEIGHTS, SCORE_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, ty
 import type { AiAudience } from "../db";
 import { NO_RHYTHM_REASON } from "../summary/pipeline";
 import { CI_VALUES, SIZE_BUCKETS, sizeBucketOf, type CiFilter, type SizeBucket } from "./rating-filters";
+import { ladderFromFacts, type Ladder } from "../score/ladder";
+import { fixTemplateOf, templateFor, type FixFile, type FixRuleId, type FixTemplateMeta, type LicenseId } from "../fix/templates";
+import { rankBadge, type RankBadge } from "./rank-badge";
+import { COHORT_CATEGORIES, buildCohort, type CohortMember, type RepoCohort } from "./cohort";
 
 // ---------- общие формы ----------
 
@@ -65,6 +69,12 @@ export interface RatingItem {
    * ранжирования).
    */
   rankDelta: number | null;
+  /**
+   * В5.9 Б: значок места «ТОП-N» — `rankBadge` от индекса в той же выборке,
+   * что `rank` (выше / не ниже / всего; фильтры его не меняют, у равных
+   * индексов одинаков); null — места нет или уровень не подходит
+   */
+  rankBadge: RankBadge | null;
   /**
    * В5.5 тур 1 (W2, Р2): у последней проверки на накрутку (заметка flagger)
    * стоит flag:true. Разбор JSON — как у карточки (fraudOf): битый JSON =
@@ -386,6 +396,7 @@ function toRatingItem(row: RatingRow): RatingItem {
   return {
     rank: null,
     rankDelta: null,
+    rankBadge: null,
     fraud: false,
     webUrl: repoWebUrl(row.org_slug, row.repo_slug),
     aiOverview: false,
@@ -519,7 +530,7 @@ function locOf(r: FilterFactRow): number | null {
 }
 
 /** Факты фильтров для набора сканов: память + дочитывание новых scan_id пачками. */
-export function scanFilterFacts(db: Database, scanIds: number[]): Map<number, ScanFilterFacts> {
+export function scanFilterFacts(db: Database, scanIds: number[], opts: { prune?: boolean } = {}): Map<number, ScanFilterFacts> {
   let memo = filterFactsMemo.get(db);
   if (memo === undefined) {
     memo = new Map();
@@ -538,8 +549,10 @@ export function scanFilterFacts(db: Database, scanIds: number[]): Map<number, Sc
     }
     for (const [id, v] of got) memo.set(id, v);
   }
-  // память не растет бесконечно: сканы, ушедшие из рейтинга, выбрасываются
-  if (memo.size > scanIds.length * 2 + 1000) {
+  // память не растет бесконечно: сканы, ушедшие из рейтинга, выбрасываются.
+  // В5.9 Б: `prune: false` — у частичного набора (когорта карточки): иначе
+  // карточка выбрасывала бы из памяти весь рейтинг, и он дочитывал бы факты заново
+  if (opts.prune !== false && memo.size > scanIds.length * 2 + 1000) {
     const keep = new Set(scanIds);
     for (const id of memo.keys()) if (!keep.has(id)) memo.delete(id);
   }
@@ -579,6 +592,16 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
   all.forEach((item, i) => {
     if (item.healthcraftIndex !== null) item.rank = i + 1;
   });
+  // В5.9 Б: значок места — от индекса в выборке (как `ratingPlace` карточки): список
+  // уже по индексу по убыванию, поэтому «выше» — начало группы равных, «не ниже» — ее конец
+  const rankedTotal = all.filter((i) => i.healthcraftIndex !== null).length;
+  for (let from = 0; from < rankedTotal; ) {
+    let to = from;
+    while (to < rankedTotal && all[to]!.healthcraftIndex === all[from]!.healthcraftIndex) to++;
+    const badge = rankBadge({ above: from, atOrAbove: to, rankedTotal });
+    for (let i = from; i < to; i++) all[i]!.rankBadge = badge;
+    from = to;
+  }
   // В5.5 тур 1 (W2): repo_id в ответ не едет — ключ стыковки строки со
   // снимком мест (Р1) и заметкой flagger (Р2)
   const idBySlug = new Map(rows.map((r) => [`${r.org_slug}/${r.repo_slug}`, r.repo_id]));
@@ -808,6 +831,14 @@ export interface CardScore {
    */
   rank: number | null;
   rankedTotal: number | null;
+  /** В5.9 Б: значок места «ТОП-N» — `rankBadge` от индекса в выборке места, равен значку строки рейтинга; null — места нет */
+  rankBadge: RankBadge | null;
+  /**
+   * В5.9 Б (№11): «индекс лучше, чем у X% похожих» (язык + корзина размера;
+   * определение и причины — `cohort.ts`). null — тогда же, когда `rank` null:
+   * процента в выборке, которой репо не принадлежит, нет (правило 21.09).
+   */
+  cohort: RepoCohort | null;
   modelVersion: string;
   computedAt: string;
   noData: string[];
@@ -834,6 +865,12 @@ export interface CardRecommendation {
   source: string;
   /** канал правила (cicd | appsec | null): у какого показателя Δ — HealthCraft Index или Repo Health Score (В4.3) */
   channel: string | null;
+  /**
+   * В5.9 (№5): у правила есть файл-заготовка — `GET /api/repos/:org/:repo/fix/:ruleId`
+   * отдает 200 (лицензия — с любым `?license=` из `licenses`); null — заготовки нет.
+   * optional — литералы карточек в тестах отчета; сборщик карточки ставит всегда.
+   */
+  fixTemplate?: FixTemplateMeta | null;
 }
 
 export interface TruncatedValue {
@@ -965,6 +1002,14 @@ export interface RepoCard {
   /** В5: AI-описание; отсутствует (undefined), когда зрителю закрыт полный Score */
   ai?: CardAi | null;
   recommendations: CardRecommendation[];
+  /**
+   * В5.9 (№2): «Лестница к зеленой зоне» — накопительный пересчет публичных
+   * presence-правил (`score/ladder.ts`) на тех же фактах, что рекомендации.
+   * Гипотетические числа: считаются при чтении, не хранятся, в /api/v1 не идут.
+   * null — лестницы нет (уже в зоне, нет кода, нет индекса, нечего предложить);
+   * optional — литералы карточек в тестах отчета, сборщик карточки ставит всегда.
+   */
+  ladder?: Ladder | null;
   evidence: CardEvidence[];
 }
 
@@ -1078,6 +1123,24 @@ function cardVisible(r: CardRepoRow, access: AccessResult): boolean {
 }
 
 /**
+ * Строка оценки публичной части карточки (скан P): последний пригодный скан
+ * текущей модели; приватный репо без такого — последний не-bad (владелец видит
+ * оценку своего репо, ТЗ §5). В5.9: одна выборка для карточки и для файла-
+ * заготовки (`fixFileFor`) — заготовка строится на тех же фактах, что правило.
+ */
+function publicScoreRow(db: Database, r: CardRepoRow): ScoreRow | null {
+  const SCORE_COLS = `sc.scan_id, sc.model_version, sc.healthcraft_index, sc.index_coverage,
+              sc.categories, sc.no_data, sc.stale, sc.computed_at, sc.derived, sc.code_empty`;
+  const row = db
+    .query(`SELECT ${SCORE_COLS} FROM scores sc WHERE sc.repo_id = ? AND sc.model_version = ? AND sc.scan_id = ${LAST_ELIGIBLE_SCAN_SQL}`)
+    .get(r.id, MODEL_VERSION, MODEL_VERSION) as ScoreRow | null;
+  if (row || r.visibility === "public") return row;
+  return db
+    .query(`SELECT ${SCORE_COLS} FROM scores sc WHERE sc.repo_id = ? AND sc.model_version = ? AND sc.scan_id = ${LAST_NOT_BAD_SCAN_SQL}`)
+    .get(r.id, MODEL_VERSION, MODEL_VERSION) as ScoreRow | null;
+}
+
+/**
  * Карточка для зрителя: проверка доступа (сеть — только у зрителя с PAT,
  * и только когда карточка вообще может быть показана) → сборка. null = 404.
  */
@@ -1184,16 +1247,7 @@ export function getRepoCard(
   //    чужой сбойный скан их не трогает;
   //  - полный Score и Δ канальных правил — на показе из показанных данных;
   //  - блок scan — последний скан (статус без каналов и время анализа).
-  const SCORE_COLS = `sc.scan_id, sc.model_version, sc.healthcraft_index, sc.index_coverage,
-              sc.categories, sc.no_data, sc.stale, sc.computed_at, sc.derived, sc.code_empty`;
-  let publicRow = db
-    .query(`SELECT ${SCORE_COLS} FROM scores sc WHERE sc.repo_id = ? AND sc.model_version = ? AND sc.scan_id = ${LAST_ELIGIBLE_SCAN_SQL}`)
-    .get(r.id, MODEL_VERSION, MODEL_VERSION) as ScoreRow | null;
-  if (!publicRow && r.visibility !== "public") {
-    publicRow = db
-      .query(`SELECT ${SCORE_COLS} FROM scores sc WHERE sc.repo_id = ? AND sc.model_version = ? AND sc.scan_id = ${LAST_NOT_BAD_SCAN_SQL}`)
-      .get(r.id, MODEL_VERSION, MODEL_VERSION) as ScoreRow | null;
-  }
+  const publicRow = publicScoreRow(db, r);
   const scanRow = db
     .query("SELECT id, started_at, finished_at, status, public_status, trigger, status_detail FROM scans WHERE repo_id = ? ORDER BY id DESC LIMIT 1")
     .get(r.id) as
@@ -1223,6 +1277,7 @@ export function getRepoCard(
       score: null,
       derived: null,
       recommendations: [],
+      ladder: null,
       evidence: [],
     };
   }
@@ -1294,42 +1349,17 @@ export function getRepoCard(
   // которой репозитория нет. Это тот же случай, что и оговорённый в CardScore
   // «места у неоценённого репозитория не существует».
   const inRating = r.visibility === "public" && r.rating_active === 1;
-  // В5.3 круг 4 (§2 25.09 «просмотр первого исполнения», п.1): место — ОДНИМ
-  // проходом. Прежде три подсчета (выше, всего, равные) шли каждый по всем
-  // оценкам с коррелированным LAST_ELIGIBLE_SCAN_SQL на строку — 1,2 с на
-  // карточку на живой базе (28 тыс. репо), ×3 в сравнении. Здесь «последний
-  // пригодный скан» считается один раз на репо (GROUP BY), выше/всего — одной
-  // агрегацией, равные — списком слагов (их единицы). Набор и порядок те же,
-  // что у RATING_SQL, поэтому место по-прежнему равно позиции строки рейтинга.
-  const ranking =
+  // В5.9 Б: подсчет места вынесен в `ratingPlace` (ниже) — его же берет
+  // вариант бейджа со значком места: один источник места у карточки и SVG
+  const place =
     opts.withRank === false || !inRating || publicRow.healthcraft_index === null
       ? null
-      : (db
-          .query(
-            `WITH last AS (
-               SELECT sc2.repo_id, MAX(sc2.scan_id) AS scan_id FROM scores sc2 JOIN scans s2 ON s2.id = sc2.scan_id
-               WHERE sc2.model_version = ? AND s2.rating_eligible = 1 GROUP BY sc2.repo_id)
-             SELECT COALESCE(SUM(sc.healthcraft_index > ?), 0) AS above,
-                    COUNT(sc.healthcraft_index) AS scored,
-                    GROUP_CONCAT(CASE WHEN sc.healthcraft_index = ? THEN r.org_slug || '/' || r.repo_slug END, char(10)) AS ties
-             FROM last
-             JOIN scores sc ON sc.scan_id = last.scan_id AND sc.model_version = ?
-             JOIN repos r ON r.id = last.repo_id
-             WHERE r.rating_active = 1 AND r.visibility = 'public'`,
-          )
-          .get(MODEL_VERSION, publicRow.healthcraft_index, publicRow.healthcraft_index, MODEL_VERSION) as {
-          above: number;
-          scored: number;
-          ties: string | null;
-        } | null);
-
-  // В4.8.5 (К8.5.10, С6-6): при РАВНЫХ индексах рейтинг упорядочивает строки
-  // по org/repo (compareItems) — место на карточке считается тем же правилом,
-  // иначе «#3» на карточке расходилось с позицией строки
-  const tiesBefore =
-    ranking === null || ranking.ties === null
-      ? 0
-      : ranking.ties.split("\n").filter((t) => t.localeCompare(`${r.org_slug}/${r.repo_slug}`) < 0).length;
+      : ratingPlace(db, r.org_slug, r.repo_slug, publicRow.healthcraft_index);
+  // В5.9 Б (№11): когорта — только у репо с местом (тот же набор, что rank)
+  const cohort =
+    place === null
+      ? null
+      : repoCohort(db, { repoId: r.id, language: r.language, scanId: publicRow.scan_id, codeEmpty, index: publicRow.healthcraft_index!, categories: publicCats });
 
   const score: CardScore = {
     healthcraftIndex: publicRow.healthcraft_index,
@@ -1338,8 +1368,10 @@ export function getRepoCard(
     repoHealthScore: fullOpen ? roundTotal(fullTotals.repoHealthScore) : null,
     repoHealthCoverage: fullOpen ? Math.round(fullTotals.repoHealthCoverage * 1000) / 1000 : null,
     fullLocked: !fullOpen,
-    rank: ranking === null ? null : ranking.above + tiesBefore + 1,
-    rankedTotal: ranking === null ? null : ranking.scored,
+    rank: place === null ? null : place.rank,
+    rankedTotal: place === null ? null : place.rankedTotal,
+    rankBadge: rankBadge(place),
+    cohort,
     modelVersion: publicRow.model_version,
     computedAt: publicRow.computed_at,
     // причины no-data закрытых категорий — тоже данные канала (напр. «config-only cap»)
@@ -1365,7 +1397,8 @@ export function getRepoCard(
   // Параметры — из эффективных фактов ТОГО ЖЕ скана (как у движка при записи)
   // и сохраненных колонок (Δ); причина Δ = 0 восстанавливается по признакам
   // скана. Ключ неизвестен или параметр не восстановился — сохраненный текст.
-  const scanFacts = effectiveFacts(db, publicRow.scan_id, r.id).ok;
+  const scanEff = effectiveFacts(db, publicRow.scan_id, r.id);
+  const scanFacts = scanEff.ok;
   const publicRecs: CardRecommendation[] = (recQuery.all(publicRow.scan_id, MODEL_VERSION) as RecRow[]).map((rec) => {
     const reason = rec.delta_score === 0 ? (publicRow.code_empty === 1 ? "code-empty" : publicRow.healthcraft_index === null ? "no-total" : null) : null;
     const texts = recommendationText(
@@ -1384,8 +1417,17 @@ export function getRepoCard(
       opensCategory: rec.opens_category,
       source: rec.source,
       channel: rec.channel,
+      // В5.9 (№5): признак заготовки — та же функция и те же факты, что у маршрута `fix`
+      fixTemplate: fixTemplateOf(rec.rule_id, scanFacts),
     };
   });
+  // В5.9 (№2): лестница — на тех же эффективных фактах и дате, что движок записал
+  // рекомендации этого скана (`recommend`: now = computedAt): первый шаг = Δ рекомендации
+  const ladder = ladderFromFacts(
+    scanFacts,
+    { scanId: publicRow.scan_id, repoId: r.id, stale: scanEff.stale, staleCats: scanEff.staleCats, emptyRepo: scanEff.emptyRepo },
+    new Date(publicRow.computed_at),
+  );
   const baseFull = fullTotals.repoHealthScore;
   const channelDelta: DeltaEvaluator = (ruleChannel, patch) => {
     if (ruleChannel === null) throw new Error("card: public rules come from the eligible scan");
@@ -1426,6 +1468,7 @@ export function getRepoCard(
         opensCategory: rec.opensCategory,
         source: "rule",
         channel: rec.channel,
+        fixTemplate: null,
       };
     });
   // LOW-3: объединённая выдача — порядком движка, номера 1..N после фильтра (Ф1.3)
@@ -1507,8 +1550,24 @@ export function getRepoCard(
     derived: publicRow.derived === null ? null : (JSON.parse(publicRow.derived) as DerivedMetrics),
     ai,
     recommendations,
+    ladder,
     evidence,
   };
+}
+
+/**
+ * В5.9 (№5): файл-заготовка правила для зрителя карточки. Вход — карточка,
+ * уже собранная для этого зрителя (видимость — ее: приватный без прав до
+ * сюда не доходит). null — правило у репозитория сейчас не срабатывает или
+ * заготовки у него нет (признак `fixTemplate` карточки пуст): шаблон «на всякий
+ * случай» не отдается. Содержимое — на эффективных фактах того же скана P.
+ */
+export function fixFileFor(db: Database, card: RepoCard, ruleId: FixRuleId, opts: { license?: LicenseId; now?: Date } = {}): FixFile | null {
+  if (!card.recommendations.some((rec) => rec.ruleId === ruleId && rec.fixTemplate != null)) return null;
+  const r = findRepoRow(db, card.repo.org, card.repo.repo);
+  const row = r ? publicScoreRow(db, r) : null;
+  if (!r || !row) return null;
+  return templateFor(ruleId, effectiveFacts(db, row.scan_id, r.id).ok, { org: r.org_slug, repo: r.repo_slug, title: r.title }, opts);
 }
 
 const AI_DEFAULT_COOLDOWN_MS = 60 * 60_000;
@@ -1581,6 +1640,153 @@ function buildCardAi(
     check,
     fraud,
   };
+}
+
+// ---------- В5.9 Б: место в рейтинге и когорта похожих ----------
+
+/**
+ * Место и положение индекса в выборке рейтинга: `rank` — позиция строки
+ * (равные — по org/repo), `above`/`atOrAbove` — репо со строго бОльшим и с не
+ * меньшим индексом (для значка места, `rank-badge.ts`).
+ */
+export interface RatingPlace {
+  rank: number;
+  rankedTotal: number;
+  above: number;
+  atOrAbove: number;
+}
+
+/**
+ * Место репо в публичном рейтинге по HealthCraft Index и размер выборки —
+ * один источник для карточки (`score.rank`) и бейджа со значком места.
+ * Вызывающий гарантирует, что репо сам стоит в наборе рейтинга (публичный,
+ * rating_active, `index` — индекс его последнего пригодного скана): место в
+ * выборке, которой репо нет, не считается (приемка 21.09).
+ *
+ * В5.3 круг 4 (§2 25.09 «просмотр первого исполнения», п.1): место — ОДНИМ
+ * проходом. Прежде три подсчета (выше, всего, равные) шли каждый по всем
+ * оценкам с коррелированным LAST_ELIGIBLE_SCAN_SQL на строку — 1,2 с на
+ * карточку на живой базе (28 тыс. репо), ×3 в сравнении. Здесь «последний
+ * пригодный скан» считается один раз на репо (GROUP BY), выше/всего — одной
+ * агрегацией, равные — списком слагов (их единицы). Набор и порядок те же,
+ * что у RATING_SQL, поэтому место по-прежнему равно позиции строки рейтинга.
+ */
+export function ratingPlace(db: Database, org: string, repo: string, index: number): RatingPlace | null {
+  const ranking = db
+    .query(
+      `WITH last AS (
+         SELECT sc2.repo_id, MAX(sc2.scan_id) AS scan_id FROM scores sc2 JOIN scans s2 ON s2.id = sc2.scan_id
+         WHERE sc2.model_version = ? AND s2.rating_eligible = 1 GROUP BY sc2.repo_id)
+       SELECT COALESCE(SUM(sc.healthcraft_index > ?), 0) AS above,
+              COUNT(sc.healthcraft_index) AS scored,
+              GROUP_CONCAT(CASE WHEN sc.healthcraft_index = ? THEN r.org_slug || '/' || r.repo_slug END, char(10)) AS ties
+       FROM last
+       JOIN scores sc ON sc.scan_id = last.scan_id AND sc.model_version = ?
+       JOIN repos r ON r.id = last.repo_id
+       WHERE r.rating_active = 1 AND r.visibility = 'public'`,
+    )
+    .get(MODEL_VERSION, index, index, MODEL_VERSION) as { above: number; scored: number; ties: string | null } | null;
+  if (ranking === null) return null;
+  // В4.8.5 (К8.5.10, С6-6): при РАВНЫХ индексах рейтинг упорядочивает строки
+  // по org/repo (compareItems) — место на карточке считается тем же правилом,
+  // иначе «#3» на карточке расходилось с позицией строки
+  const ties = ranking.ties === null ? [] : ranking.ties.split("\n");
+  const tiesBefore = ties.filter((t) => t.localeCompare(`${org}/${repo}`) < 0).length;
+  return {
+    rank: ranking.above + tiesBefore + 1,
+    rankedTotal: ranking.scored,
+    above: ranking.above,
+    // равные — включая сам репо (он в наборе по условию вызова)
+    atOrAbove: ranking.above + Math.max(ties.length, 1),
+  };
+}
+
+/**
+ * Память баллов 4 категорий по scan_id — на соединение БД, как у фактов
+ * фильтров. Строка `scores` неизменна по (scan_id, MODEL_VERSION) (compute.ts:
+ * «immutable: PK scan_id+model_version, идемпотентно»), поэтому запомненное не
+ * устаревает, а новый скан приходит с новым scan_id. Зачем: `json_extract` из
+ * категорий — больше половины цены запроса когорты (Python: ~60 из ~125 мс на
+ * копии БД 27.09), с памятью его платит только первая карточка когорты.
+ */
+const cohortCatsMemo = new WeakMap<Database, Map<number, (number | null)[]>>();
+/** Сброс памяти при разрастании (каталог ~28 тыс. сканов в рейтинге). */
+const COHORT_CATS_MEMO_CAP = 200_000;
+
+interface CohortRow {
+  scan_id: number;
+  idx: number;
+  code_empty: number | null;
+}
+
+/**
+ * Когорта похожих (идея №11, определение — `cohort.ts`): публичные репо с
+ * местом в рейтинге (тот же набор, что RATING_SQL и `ratingPlace`) того же
+ * языка и той же корзины размера, без самого репо. Считается на чтении: SQL
+ * по языку (индекс `idx_repos_language`), корзина — из фактов `tree.stats`
+ * через память `scanFilterFacts` (общая с рейтингом, без выброса его сканов);
+ * баллы категорий (`json_extract`, ~половина цены запроса) достаются вторым
+ * шагом только у отобранных по корзине.
+ * Производной таблицы нет: ее пришлось бы заполнять конвейером оценки (не зона
+ * вехи), а до заполнения у всех карточек была бы «нет когорты» — замер в
+ * отчете воркера Б.
+ */
+export function repoCohort(
+  db: Database,
+  self: { repoId: number; language: string | null; scanId: number; codeEmpty: boolean; index: number; categories: Record<string, { score: number | null } | undefined> },
+): RepoCohort {
+  const selfCats = {} as Record<IndexCategoryKey, number | null>;
+  for (const key of COHORT_CATEGORIES) selfCats[key] = self.categories[key]?.score ?? null;
+  const loc = scanFilterFacts(db, [self.scanId], { prune: false }).get(self.scanId)?.loc ?? null;
+  const sizeBucket = sizeBucketOf(self.codeEmpty, loc);
+  const cohortSelf = { language: self.language, sizeBucket, codeEmpty: self.codeEmpty, index: self.index, categories: selfCats };
+  // без кода, без языка или размера — когорта не строится (buildCohort назовет причину)
+  if (self.codeEmpty || self.language === null || sizeBucket === null) return buildCohort(cohortSelf, []);
+  const rows = db
+    .query(
+      `WITH last AS (
+         SELECT sc2.repo_id, MAX(sc2.scan_id) AS scan_id FROM scores sc2 JOIN scans s2 ON s2.id = sc2.scan_id
+         WHERE sc2.model_version = ? AND s2.rating_eligible = 1
+           AND sc2.repo_id IN (SELECT id FROM repos WHERE language = ? AND rating_active = 1 AND visibility = 'public' AND id <> ?)
+         GROUP BY sc2.repo_id)
+       SELECT last.scan_id, sc.healthcraft_index AS idx, sc.code_empty
+       FROM last JOIN scores sc ON sc.scan_id = last.scan_id AND sc.model_version = ?
+       WHERE sc.healthcraft_index IS NOT NULL`,
+    )
+    .all(MODEL_VERSION, self.language, self.repoId, MODEL_VERSION) as CohortRow[];
+  const facts = scanFilterFacts(db, rows.map((row) => row.scan_id), { prune: false });
+  const inBucket = rows.filter((row) => sizeBucketOf(row.code_empty === 1, facts.get(row.scan_id)?.loc ?? null) === sizeBucket);
+  let cats = cohortCatsMemo.get(db);
+  if (cats === undefined || cats.size > COHORT_CATS_MEMO_CAP) {
+    cats = new Map();
+    cohortCatsMemo.set(db, cats);
+  }
+  const missing = inBucket.filter((row) => !cats!.has(row.scan_id));
+  for (let i = 0; i < missing.length; i += FILTER_FACTS_CHUNK) {
+    const chunk = missing.slice(i, i + FILTER_FACTS_CHUNK).map((row) => row.scan_id);
+    for (const id of chunk) cats.set(id, [null, null, null, null]);
+    const got = db
+      .query(
+        `SELECT scan_id, CASE WHEN json_valid(categories)
+                  THEN json_extract(categories, '$.documentation.score', '$.activity.score', '$.issues.score', '$.code.score') END AS j
+         FROM scores WHERE model_version = ? AND scan_id IN (${chunk.map(() => "?").join(",")})`,
+      )
+      .all(MODEL_VERSION, ...chunk) as { scan_id: number; j: string | null }[];
+    for (const row of got) {
+      let parsed: unknown = null;
+      try {
+        parsed = row.j === null ? null : JSON.parse(row.j);
+      } catch {
+        /* битый JSON категорий — баллов нет (незнание), индекс остается */
+      }
+      if (Array.isArray(parsed)) cats.set(row.scan_id, parsed.map((v) => (typeof v === "number" ? v : null)));
+    }
+  }
+  const members: CohortMember[] = inBucket.map((row) => {
+    const c = cats.get(row.scan_id) ?? [null, null, null, null];
+    return { index: row.idx, categories: { documentation: c[0] ?? null, activity: c[1] ?? null, issues: c[2] ?? null, code: c[3] ?? null } };
+  });
+  return buildCohort(cohortSelf, members);
 }
 
 /** Состояние проверки на накрутку (В5.2, Б3): живая заявка, последняя проверка или ее отказ. */

@@ -5,7 +5,8 @@
 // подпись и цвет.
 import type { Database } from "bun:sqlite";
 import { MODEL_VERSION, INDEX_WEIGHTS } from "../score/model";
-import { LAST_ELIGIBLE_SCAN_SQL, publicApiVisible } from "./repos";
+import { LAST_ELIGIBLE_SCAN_SQL, publicApiVisible, ratingPlace } from "./repos";
+import { rankBadge, type RankBadge, type RankLeague } from "./rank-badge";
 
 export interface PublicRepoResponse {
   org: string;
@@ -89,10 +90,53 @@ export function badgeColor(index: number | null): string {
 export const BADGE_CACHE_SECONDS = 300;
 
 /**
+ * В5.9 Б: вариант бейджа — параметр `style` существующего маршрута
+ * `/api/v1/repos/:org/:repo/badge.svg` (а не отдельный адрес): тот же гейт
+ * публичности, лимит и кэш без дублирования, а README переключается одной
+ * правкой адреса. Нет параметра — обычный бейдж; `style=rank` — со значком
+ * места; иное значение — 400 (неверное значение известного параметра, как у
+ * рейтинга), до поиска репо: ответ не зависит от его видимости.
+ */
+export type BadgeStyle = "plain" | "rank";
+
+export function parseBadgeStyle(params: URLSearchParams): BadgeStyle | null {
+  const all = params.getAll("style");
+  if (all.length === 0) return "plain";
+  if (all.length > 1) return null;
+  return all[0] === "rank" ? "rank" : null;
+}
+
+/**
+ * Значок места публичного репо для бейджа: место — `ratingPlace`, тот же
+ * подсчет, что у карточки (`score.rank`); `proj` — ответ `getPublicRepo`
+ * (публичный, rating_active). Без индекса — места нет, значка нет.
+ */
+export function publicRankBadge(db: Database, proj: PublicRepoResponse): RankBadge | null {
+  if (proj.healthcraftIndex === null) return null;
+  return rankBadge(ratingPlace(db, proj.org, proj.repo, proj.healthcraftIndex));
+}
+
+/**
+ * «Металл» лиги значка места (решение владельца 27.09): фон сегмента и цвет
+ * текста. Круг 2 (27.09, «мягкий металл»): фон — яркий край градиента плашки лиги на
+ * карточке (theme.css `--rh-league-<лига>-bg`), текст — ее темный оттенок металла.
+ * Контраст WCAG проверен числом (тест v59-b). Круг 7 (§2 «В5.9 — круг 7»): фон темнее по
+ * слову владельца, контраст 4,0-4,4:1 — ниже AA осознанно; белый на этих фонах еще хуже —
+ * поэтому текст темный.
+ */
+export const RANK_BADGE_COLORS: Record<RankLeague, { bg: string; fg: string }> = {
+  gold: { bg: "#dcc26a", fg: "#6b5200" },
+  silver: { bg: "#bcc4cc", fg: "#4a535d" },
+  bronze: { bg: "#deb08b", fg: "#7a4416" },
+};
+
+/**
  * SVG badge: ТОЛЬКО число, подпись и цвет (К5.8) — никаких ссылок, шрифтов
  * с внешних хостов или метаданных. Без данных — «n/a» серым (tri-state).
+ * В5.9 Б: `rank` — третий сегмент со значком места («ТОП-10») цвета своей
+ * лиги; null — бейдж без изменений (байт в байт прежний), а не пустой.
  */
-export function renderBadgeSvg(index: number | null): string {
+export function renderBadgeSvg(index: number | null, rank: RankBadge | null = null): string {
   const value = index === null ? "n/a" : String(index);
   const color = badgeColor(index);
   // В5.3 (круг 3, §2 24.09): подпись — имя показателя «HealthCraft Index»,
@@ -101,19 +145,27 @@ export function renderBadgeSvg(index: number | null): string {
   const label = "HealthCraft Index";
   const labelWidth = 114;
   const valueWidth = 8 + value.length * 11;
-  const width = labelWidth + valueWidth;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="20" role="img" aria-label="${label}: ${value}">
-  <title>${label}: ${value}</title>
+  // ширина сегмента места — под Verdana 11 (кириллица и цифры жирным ~8 px на знак)
+  const rankWidth = rank === null ? 0 : 10 + rank.label.length * 8;
+  const width = labelWidth + valueWidth + rankWidth;
+  const title = rank === null ? `${label}: ${value}` : `${label}: ${value}, ${rank.label} рейтинга`;
+  const metal = rank === null ? null : RANK_BADGE_COLORS[rank.tier];
+  const rankRect = metal === null ? "" : `
+    <rect x="${labelWidth + valueWidth}" width="${rankWidth}" height="20" fill="${metal.bg}"/>`;
+  const rankText = metal === null ? "" : `
+    <text x="${labelWidth + valueWidth + rankWidth / 2}" y="14" font-weight="bold" fill="${metal.fg}">${rank!.label}</text>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="20" role="img" aria-label="${title}">
+  <title>${title}</title>
   <linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient>
   <clipPath id="r"><rect width="${width}" height="20" rx="3" fill="#fff"/></clipPath>
   <g clip-path="url(#r)">
     <rect width="${labelWidth}" height="20" fill="#555"/>
-    <rect x="${labelWidth}" width="${valueWidth}" height="20" fill="${color}"/>
+    <rect x="${labelWidth}" width="${valueWidth}" height="20" fill="${color}"/>${rankRect}
     <rect width="${width}" height="20" fill="url(#s)"/>
   </g>
   <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
     <text x="${labelWidth / 2}" y="14">${label}</text>
-    <text x="${labelWidth + valueWidth / 2}" y="14" font-weight="bold">${value}</text>
+    <text x="${labelWidth + valueWidth / 2}" y="14" font-weight="bold">${value}</text>${rankText}
   </g>
 </svg>`;
 }

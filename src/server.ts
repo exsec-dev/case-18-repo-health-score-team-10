@@ -7,7 +7,8 @@
 // рейтинга появляются исключительно сканом.
 import { loadConfig } from "./config";
 import { openDb, setMetaValue } from "./db";
-import { getMeta, listRepos, parseReposQuery, resolveCardForViewer, type CardOutcome, type RepoCard } from "./api/repos";
+import { fixFileFor, getMeta, listRepos, parseReposQuery, resolveCardForViewer, type CardOutcome, type RepoCard } from "./api/repos";
+import { isFixRuleId, isLicenseId, LICENSE_IDS, type LicenseId } from "./fix/templates";
 import { buildCompare, parseCompareQuery } from "./api/compare";
 import { getHealth } from "./api/health";
 import {
@@ -58,7 +59,7 @@ import { enqueueCheck, enqueueSummary, lastFinishedScan } from "./jobs/scheduler
 import { aiQuota, clearUnlock, isUnlocked, quotaRefusal, tryUnlock, type QuotaRefusal } from "./jobs/ai-quota";
 import type { AiAudience } from "./db";
 import { getAiNotesHistory, getRepoHistory } from "./api/history";
-import { BADGE_CACHE_SECONDS, getPublicRepo, renderBadgeSvg } from "./api/public";
+import { BADGE_CACHE_SECONDS, getPublicRepo, parseBadgeStyle, publicRankBadge, renderBadgeSvg } from "./api/public";
 import { NO_PAT_ACCESS } from "./auth/access";
 import { killActiveClones } from "./collectors/git";
 import {
@@ -716,6 +717,35 @@ const routes = {
       if (!card.score) return notFound(REPORT_NO_SCORE);
       return pdfResponse(card);
     },
+    // В5.9 (№5): файл-заготовка presence-правила (без LLM) — зеркало report.md:
+    // тот же гард слага, то же минутное окно карточки, та же карточка зрителя
+    // (приватный без прав — тот же 404). Неизвестное правило или лицензия — 400
+    // до резолва доступа; правило, которое у репо сейчас не срабатывает, — 404.
+    "/api/repos/:org/:repo/fix/:ruleId": async (req) => {
+      const { org, repo, ruleId } = req.params;
+      if (!validSlugSegment(org) || !validSlugSegment(repo)) {
+        return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
+      }
+      if (!isFixRuleId(ruleId!)) return badQuery(`для правила ${ruleId} файла-заготовки нет`);
+      const licenseRaw = new URL(req.url).searchParams.get("license");
+      if (licenseRaw !== null && !isLicenseId(licenseRaw)) return badQuery(`лицензия ${licenseRaw} не поддерживается: выберите одну из ${LICENSE_IDS.join(", ")}`);
+      // лицензию выбирает человек: по умолчанию ничего не выбираем
+      if (ruleId === "license-missing" && licenseRaw === null) return badQuery(`выберите лицензию: ${LICENSE_IDS.join(", ")}`);
+      const viewer = sessionOf(req);
+      if (viewer && !allowCardView(viewer.userId)) return cardRateLimited(viewer.userId);
+      const card = await cardOrRefusal(req, org!, repo!);
+      if (card instanceof Response) return card;
+      const file = fixFileFor(db, card, ruleId, { license: licenseRaw === null ? undefined : (licenseRaw as LicenseId) });
+      if (file === null) return notFound(`у ${org}/${repo} сейчас нет рекомендации ${ruleId} – файл-заготовка не нужна`);
+      return new Response(file.content, {
+        headers: {
+          "content-type": "text/plain; charset=utf-8",
+          "content-disposition": `attachment; filename="${file.filename}"`,
+          // содержимое зависит от зрителя (приватный репо) и от свежего анализа
+          "cache-control": "private, no-store",
+        },
+      });
+    },
     // ---------- В5 (К5.8): публичный API и badge ----------
     // Без авторизации, только rating_active публичные; приватный/эвицтированный/
     // несуществующий — одинаковый 404. Отдельный лимит по IP (badge дергают
@@ -732,9 +762,12 @@ const routes = {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) return notFound("not found");
       if (!badgeWindowHasRoom(req)) return rateLimited("слишком много запросов – попробуйте позже", 60);
+      // В5.9 Б: `?style=rank` — вариант со значком места (public.ts, parseBadgeStyle)
+      const style = parseBadgeStyle(new URL(req.url).searchParams);
+      if (style === null) return badQuery("неизвестный вид бейджа: допустим только style=rank");
       const proj = getPublicRepo(db, org!, repo!);
       if (proj === null) return publicNotFound();
-      return new Response(renderBadgeSvg(proj.healthcraftIndex), {
+      return new Response(renderBadgeSvg(proj.healthcraftIndex, style === "rank" ? publicRankBadge(db, proj) : null), {
         headers: {
           "content-type": "image/svg+xml; charset=utf-8",
           "cache-control": `public, max-age=${BADGE_CACHE_SECONDS}`,

@@ -65,7 +65,8 @@ export function parseCompareQuery(params: URLSearchParams): CompareQuery {
 
 /** Карточка → карточка сравнения: то, что сравнению не показывается, не едет в ответ вовсе. */
 export function compareCardOf(card: RepoCard): CompareCard {
-  const { ai: _ai, recommendations: _r, evidence: _e, derived: _d, job: _j, ...rest } = card;
+  // В5.9: лестница — гипотетический план карточки, не данные репозитория; в сравнение не едет
+  const { ai: _ai, recommendations: _r, evidence: _e, derived: _d, job: _j, ladder: _l, ...rest } = card;
   return { ...rest, recommendations: [], evidence: [], derived: null, job: null };
 }
 

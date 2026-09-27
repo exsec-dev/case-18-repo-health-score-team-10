@@ -1,0 +1,2650 @@
+{
+ "healthy": {
+  "real": [
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "Не указано, кто отвечает за код. С CODEOWNERS предложения изменений сразу попадают к ответственным.",
+    "expectedImpact": "+3,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 3.45,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 2,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   }
+  ],
+  "constant": [
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "У проекта 2 автора, и кто отвечает за код, пока понятно без файла. Когда появятся соавторы, CODEOWNERS сразу направит их предложения изменений к ответственным; для начала хватит одной строки с логином автора.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 2,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   }
+  ],
+  "channel": [
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 1,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   }
+  ]
+ },
+ "no-docs": {
+  "real": [
+   {
+    "ruleId": "license-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Добавьте файл лицензии",
+    "problem": "В репозитории нет лицензии: без нее другие не могут законно использовать код. Подойдет, например, MIT или Apache-2.0.",
+    "expectedImpact": "+5,8 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 5.75,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "readme-sections-missing",
+    "kind": "presence",
+    "priority": 2,
+    "action": "Добавьте в README разделы «Установка», «Сборка» и «Тесты»",
+    "problem": "В README нет разделов об установке, сборке и тестах. Сервис находит их по заголовкам «Установка», «Сборка» и «Тесты» или «Install», «Build» и «Test».",
+    "expectedImpact": "+3,6 к HealthCraft Index",
+    "factRefs": [
+     "docs.readme"
+    ],
+    "deltaScore": 3.6225,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 3,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "Не указано, кто отвечает за код. С CODEOWNERS предложения изменений сразу попадают к ответственным.",
+    "expectedImpact": "+3,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 3.45,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "contributing-missing",
+    "kind": "presence",
+    "priority": 4,
+    "action": "Добавьте файл CONTRIBUTING.md",
+    "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
+    "expectedImpact": "+3,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 3.45,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 5,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   }
+  ],
+  "constant": [
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "У проекта 2 автора, и кто отвечает за код, пока понятно без файла. Когда появятся соавторы, CODEOWNERS сразу направит их предложения изменений к ответственным; для начала хватит одной строки с логином автора.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "contributing-missing",
+    "kind": "presence",
+    "priority": 2,
+    "action": "Добавьте файл CONTRIBUTING.md",
+    "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "license-missing",
+    "kind": "presence",
+    "priority": 3,
+    "action": "Добавьте файл лицензии",
+    "problem": "В репозитории нет лицензии: без нее другие не могут законно использовать код. Подойдет, например, MIT или Apache-2.0.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "readme-sections-missing",
+    "kind": "presence",
+    "priority": 4,
+    "action": "Добавьте в README разделы «Установка», «Сборка» и «Тесты»",
+    "problem": "В README нет разделов об установке, сборке и тестах. Сервис находит их по заголовкам «Установка», «Сборка» и «Тесты» или «Install», «Build» и «Test».",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.readme"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 5,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   }
+  ],
+  "channel": [
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 1,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   }
+  ]
+ },
+ "reaches": {
+  "real": [
+   {
+    "ruleId": "license-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Добавьте файл лицензии",
+    "problem": "В репозитории нет лицензии: без нее другие не могут законно использовать код. Подойдет, например, MIT или Apache-2.0.",
+    "expectedImpact": "+5,8 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 5.75,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "readme-sections-missing",
+    "kind": "presence",
+    "priority": 2,
+    "action": "Добавьте в README разделы «Установка», «Сборка» и «Тесты»",
+    "problem": "В README нет разделов об установке, сборке и тестах. Сервис находит их по заголовкам «Установка», «Сборка» и «Тесты» или «Install», «Build» и «Test».",
+    "expectedImpact": "+3,6 к HealthCraft Index",
+    "factRefs": [
+     "docs.readme"
+    ],
+    "deltaScore": 3.6225,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 3,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "Не указано, кто отвечает за код. С CODEOWNERS предложения изменений сразу попадают к ответственным.",
+    "expectedImpact": "+3,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 3.45,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "contributing-missing",
+    "kind": "presence",
+    "priority": 4,
+    "action": "Добавьте файл CONTRIBUTING.md",
+    "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
+    "expectedImpact": "+3,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 3.45,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 5,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   },
+   {
+    "ruleId": "reduce-stale-issues",
+    "kind": "score",
+    "priority": 6,
+    "action": "Разберите задачи без движения",
+    "problem": "60% открытых задач без движения более 90 дней. Закройте неактуальные, по остальным дайте ответ и назначьте ответственного.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "speed-up-issue-close",
+    "kind": "score",
+    "priority": 7,
+    "action": "Ускорьте обработку новых задач",
+    "problem": "Типичный срок закрытия задачи – 60 дней. Назначьте ответственного за разбор, добавьте шаблоны и метки приоритета.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   }
+  ],
+  "constant": [
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "У проекта 2 автора, и кто отвечает за код, пока понятно без файла. Когда появятся соавторы, CODEOWNERS сразу направит их предложения изменений к ответственным; для начала хватит одной строки с логином автора.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "contributing-missing",
+    "kind": "presence",
+    "priority": 2,
+    "action": "Добавьте файл CONTRIBUTING.md",
+    "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "license-missing",
+    "kind": "presence",
+    "priority": 3,
+    "action": "Добавьте файл лицензии",
+    "problem": "В репозитории нет лицензии: без нее другие не могут законно использовать код. Подойдет, например, MIT или Apache-2.0.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "readme-sections-missing",
+    "kind": "presence",
+    "priority": 4,
+    "action": "Добавьте в README разделы «Установка», «Сборка» и «Тесты»",
+    "problem": "В README нет разделов об установке, сборке и тестах. Сервис находит их по заголовкам «Установка», «Сборка» и «Тесты» или «Install», «Build» и «Test».",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.readme"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 5,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   },
+   {
+    "ruleId": "reduce-stale-issues",
+    "kind": "score",
+    "priority": 6,
+    "action": "Разберите задачи без движения",
+    "problem": "60% открытых задач без движения более 90 дней. Закройте неактуальные, по остальным дайте ответ и назначьте ответственного.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "speed-up-issue-close",
+    "kind": "score",
+    "priority": 7,
+    "action": "Ускорьте обработку новых задач",
+    "problem": "Типичный срок закрытия задачи – 60 дней. Назначьте ответственного за разбор, добавьте шаблоны и метки приоритета.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   }
+  ],
+  "channel": [
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 1,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   }
+  ]
+ },
+ "unreached": {
+  "real": [
+   {
+    "ruleId": "license-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Добавьте файл лицензии",
+    "problem": "В репозитории нет лицензии: без нее другие не могут законно использовать код. Подойдет, например, MIT или Apache-2.0.",
+    "expectedImpact": "+5,8 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 5.75,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "readme-sections-missing",
+    "kind": "presence",
+    "priority": 2,
+    "action": "Добавьте в README разделы «Установка», «Сборка» и «Тесты»",
+    "problem": "В README нет разделов об установке, сборке и тестах. Сервис находит их по заголовкам «Установка», «Сборка» и «Тесты» или «Install», «Build» и «Test».",
+    "expectedImpact": "+3,6 к HealthCraft Index",
+    "factRefs": [
+     "docs.readme"
+    ],
+    "deltaScore": 3.6225,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 3,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "Не указано, кто отвечает за код. С CODEOWNERS предложения изменений сразу попадают к ответственным.",
+    "expectedImpact": "+3,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 3.45,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "contributing-missing",
+    "kind": "presence",
+    "priority": 4,
+    "action": "Добавьте файл CONTRIBUTING.md",
+    "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
+    "expectedImpact": "+3,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 3.45,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 5,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   },
+   {
+    "ruleId": "reduce-stale-issues",
+    "kind": "score",
+    "priority": 6,
+    "action": "Разберите задачи без движения",
+    "problem": "95% открытых задач без движения более 90 дней. Закройте неактуальные, по остальным дайте ответ и назначьте ответственного.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "speed-up-issue-close",
+    "kind": "score",
+    "priority": 7,
+    "action": "Ускорьте обработку новых задач",
+    "problem": "Типичный срок закрытия задачи – 200 дней. Назначьте ответственного за разбор, добавьте шаблоны и метки приоритета.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   }
+  ],
+  "constant": [
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "У проекта 2 автора, и кто отвечает за код, пока понятно без файла. Когда появятся соавторы, CODEOWNERS сразу направит их предложения изменений к ответственным; для начала хватит одной строки с логином автора.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "contributing-missing",
+    "kind": "presence",
+    "priority": 2,
+    "action": "Добавьте файл CONTRIBUTING.md",
+    "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "license-missing",
+    "kind": "presence",
+    "priority": 3,
+    "action": "Добавьте файл лицензии",
+    "problem": "В репозитории нет лицензии: без нее другие не могут законно использовать код. Подойдет, например, MIT или Apache-2.0.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "readme-sections-missing",
+    "kind": "presence",
+    "priority": 4,
+    "action": "Добавьте в README разделы «Установка», «Сборка» и «Тесты»",
+    "problem": "В README нет разделов об установке, сборке и тестах. Сервис находит их по заголовкам «Установка», «Сборка» и «Тесты» или «Install», «Build» и «Test».",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.readme"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 5,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   },
+   {
+    "ruleId": "reduce-stale-issues",
+    "kind": "score",
+    "priority": 6,
+    "action": "Разберите задачи без движения",
+    "problem": "95% открытых задач без движения более 90 дней. Закройте неактуальные, по остальным дайте ответ и назначьте ответственного.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "speed-up-issue-close",
+    "kind": "score",
+    "priority": 7,
+    "action": "Ускорьте обработку новых задач",
+    "problem": "Типичный срок закрытия задачи – 200 дней. Назначьте ответственного за разбор, добавьте шаблоны и метки приоритета.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   }
+  ],
+  "channel": [
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 1,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   }
+  ]
+ },
+ "only-activation": {
+  "real": [
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 1,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   },
+   {
+    "ruleId": "start-tracker",
+    "kind": "activation",
+    "priority": 2,
+    "action": "Ведите задачи в трекере",
+    "problem": "В трекере нет ни одной задачи. По задачам видно, как быстро проект отвечает пользователям.",
+    "expectedImpact": "повысит балл категории «Задачи» (сейчас 6 из 100)",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": "issues",
+    "channel": null
+   }
+  ],
+  "constant": [
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 1,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   },
+   {
+    "ruleId": "start-tracker",
+    "kind": "activation",
+    "priority": 2,
+    "action": "Ведите задачи в трекере",
+    "problem": "В трекере нет ни одной задачи. По задачам видно, как быстро проект отвечает пользователям.",
+    "expectedImpact": "повысит балл категории «Задачи» (сейчас 40 из 100)",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": "issues",
+    "channel": null
+   }
+  ],
+  "channel": [
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 1,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   }
+  ]
+ },
+ "code-empty": {
+  "real": [
+   {
+    "ruleId": "add-code",
+    "kind": "activation",
+    "priority": 0,
+    "action": "Добавьте код проекта",
+    "problem": "В репозитории нет кода. Такой репозиторий получает оценку 0: оценивать пока нечего.",
+    "expectedImpact": "оценка появится после анализа репозитория с кодом",
+    "factRefs": [
+     "tree.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": "code",
+    "channel": null
+   }
+  ],
+  "constant": [
+   {
+    "ruleId": "add-code",
+    "kind": "activation",
+    "priority": 0,
+    "action": "Добавьте код проекта",
+    "problem": "В репозитории нет кода. Такой репозиторий получает оценку 0: оценивать пока нечего.",
+    "expectedImpact": "оценка появится после анализа репозитория с кодом",
+    "factRefs": [
+     "tree.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": "code",
+    "channel": null
+   }
+  ],
+  "channel": []
+ },
+ "null-index": {
+  "real": [
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 1,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   }
+  ],
+  "constant": [
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "У проекта 2 автора, и кто отвечает за код, пока понятно без файла. Когда появятся соавторы, CODEOWNERS сразу направит их предложения изменений к ответственным; для начала хватит одной строки с логином автора.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "contributing-missing",
+    "kind": "presence",
+    "priority": 2,
+    "action": "Добавьте файл CONTRIBUTING.md",
+    "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "license-missing",
+    "kind": "presence",
+    "priority": 3,
+    "action": "Добавьте файл лицензии",
+    "problem": "В репозитории нет лицензии: без нее другие не могут законно использовать код. Подойдет, например, MIT или Apache-2.0.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "readme-missing",
+    "kind": "presence",
+    "priority": 4,
+    "action": "Добавьте файл README.md",
+    "problem": "В репозитории нет README – описания проекта и порядка запуска. Его первым читает любой новый участник.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence",
+     "docs.readme"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 5,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   }
+  ],
+  "channel": [
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 1,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   }
+  ]
+ },
+ "readme-missing": {
+  "real": [
+   {
+    "ruleId": "license-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Добавьте файл лицензии",
+    "problem": "В репозитории нет лицензии: без нее другие не могут законно использовать код. Подойдет, например, MIT или Apache-2.0.",
+    "expectedImpact": "+5,8 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 5.75,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 2,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "Не указано, кто отвечает за код. С CODEOWNERS предложения изменений сразу попадают к ответственным.",
+    "expectedImpact": "+3,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 3.45,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "contributing-missing",
+    "kind": "presence",
+    "priority": 3,
+    "action": "Добавьте файл CONTRIBUTING.md",
+    "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
+    "expectedImpact": "+3,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 3.45,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "readme-missing",
+    "kind": "presence",
+    "priority": 4,
+    "action": "Добавьте файл README.md",
+    "problem": "В репозитории нет README – описания проекта и порядка запуска. Его первым читает любой новый участник.",
+    "expectedImpact": "+3,1 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence",
+     "docs.readme"
+    ],
+    "deltaScore": 3.105,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 5,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   },
+   {
+    "ruleId": "reduce-stale-issues",
+    "kind": "score",
+    "priority": 6,
+    "action": "Разберите задачи без движения",
+    "problem": "95% открытых задач без движения более 90 дней. Закройте неактуальные, по остальным дайте ответ и назначьте ответственного.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "speed-up-issue-close",
+    "kind": "score",
+    "priority": 7,
+    "action": "Ускорьте обработку новых задач",
+    "problem": "Типичный срок закрытия задачи – 200 дней. Назначьте ответственного за разбор, добавьте шаблоны и метки приоритета.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   }
+  ],
+  "constant": [
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "У проекта 2 автора, и кто отвечает за код, пока понятно без файла. Когда появятся соавторы, CODEOWNERS сразу направит их предложения изменений к ответственным; для начала хватит одной строки с логином автора.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "contributing-missing",
+    "kind": "presence",
+    "priority": 2,
+    "action": "Добавьте файл CONTRIBUTING.md",
+    "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "license-missing",
+    "kind": "presence",
+    "priority": 3,
+    "action": "Добавьте файл лицензии",
+    "problem": "В репозитории нет лицензии: без нее другие не могут законно использовать код. Подойдет, например, MIT или Apache-2.0.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "readme-missing",
+    "kind": "presence",
+    "priority": 4,
+    "action": "Добавьте файл README.md",
+    "problem": "В репозитории нет README – описания проекта и порядка запуска. Его первым читает любой новый участник.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence",
+     "docs.readme"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 5,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   },
+   {
+    "ruleId": "reduce-stale-issues",
+    "kind": "score",
+    "priority": 6,
+    "action": "Разберите задачи без движения",
+    "problem": "95% открытых задач без движения более 90 дней. Закройте неактуальные, по остальным дайте ответ и назначьте ответственного.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "speed-up-issue-close",
+    "kind": "score",
+    "priority": 7,
+    "action": "Ускорьте обработку новых задач",
+    "problem": "Типичный срок закрытия задачи – 200 дней. Назначьте ответственного за разбор, добавьте шаблоны и метки приоритета.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   }
+  ],
+  "channel": [
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 1,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   }
+  ]
+ },
+ "add-tests": {
+  "real": [
+   {
+    "ruleId": "license-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Добавьте файл лицензии",
+    "problem": "В репозитории нет лицензии: без нее другие не могут законно использовать код. Подойдет, например, MIT или Apache-2.0.",
+    "expectedImpact": "+5,8 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 5.75,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "readme-sections-missing",
+    "kind": "presence",
+    "priority": 2,
+    "action": "Добавьте в README разделы «Установка», «Сборка» и «Тесты»",
+    "problem": "В README нет разделов об установке, сборке и тестах. Сервис находит их по заголовкам «Установка», «Сборка» и «Тесты» или «Install», «Build» и «Test».",
+    "expectedImpact": "+3,6 к HealthCraft Index",
+    "factRefs": [
+     "docs.readme"
+    ],
+    "deltaScore": 3.6225,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 3,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "Не указано, кто отвечает за код. С CODEOWNERS предложения изменений сразу попадают к ответственным.",
+    "expectedImpact": "+3,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 3.45,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "contributing-missing",
+    "kind": "presence",
+    "priority": 4,
+    "action": "Добавьте файл CONTRIBUTING.md",
+    "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
+    "expectedImpact": "+3,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 3.45,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 5,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   },
+   {
+    "ruleId": "reduce-stale-issues",
+    "kind": "score",
+    "priority": 6,
+    "action": "Разберите задачи без движения",
+    "problem": "95% открытых задач без движения более 90 дней. Закройте неактуальные, по остальным дайте ответ и назначьте ответственного.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "speed-up-issue-close",
+    "kind": "score",
+    "priority": 7,
+    "action": "Ускорьте обработку новых задач",
+    "problem": "Типичный срок закрытия задачи – 200 дней. Назначьте ответственного за разбор, добавьте шаблоны и метки приоритета.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   }
+  ],
+  "constant": [
+   {
+    "ruleId": "add-tests",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Добавьте тесты",
+    "problem": "В репозитории нет файлов тестов. Сервис находит их в каталогах test, tests и spec и по именам test_*, *_test.*, *.test.*, *.spec.*; пустые файлы не засчитываются. Эффект посчитан для тестов в 10% файлов кода.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "tree.stats"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 2,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "У проекта 2 автора, и кто отвечает за код, пока понятно без файла. Когда появятся соавторы, CODEOWNERS сразу направит их предложения изменений к ответственным; для начала хватит одной строки с логином автора.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "contributing-missing",
+    "kind": "presence",
+    "priority": 3,
+    "action": "Добавьте файл CONTRIBUTING.md",
+    "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "license-missing",
+    "kind": "presence",
+    "priority": 4,
+    "action": "Добавьте файл лицензии",
+    "problem": "В репозитории нет лицензии: без нее другие не могут законно использовать код. Подойдет, например, MIT или Apache-2.0.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "readme-sections-missing",
+    "kind": "presence",
+    "priority": 5,
+    "action": "Добавьте в README разделы «Установка», «Сборка» и «Тесты»",
+    "problem": "В README нет разделов об установке, сборке и тестах. Сервис находит их по заголовкам «Установка», «Сборка» и «Тесты» или «Install», «Build» и «Test».",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.readme"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 6,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   },
+   {
+    "ruleId": "reduce-stale-issues",
+    "kind": "score",
+    "priority": 7,
+    "action": "Разберите задачи без движения",
+    "problem": "95% открытых задач без движения более 90 дней. Закройте неактуальные, по остальным дайте ответ и назначьте ответственного.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "speed-up-issue-close",
+    "kind": "score",
+    "priority": 8,
+    "action": "Ускорьте обработку новых задач",
+    "problem": "Типичный срок закрытия задачи – 200 дней. Назначьте ответственного за разбор, добавьте шаблоны и метки приоритета.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   }
+  ],
+  "channel": [
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 1,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   }
+  ]
+ },
+ "ci-missing-runs-visible": {
+  "real": [
+   {
+    "ruleId": "ci-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Настройте CI",
+    "problem": "Нет файла .sourcecraft/ci.yaml: изменения не собираются и не проверяются автоматически. Если репозиторий – зеркало, сборка может идти у источника, но сервис оценивает только CI в SourceCraft.",
+    "expectedImpact": "+18,8 к Repo Health Score",
+    "factRefs": [
+     "cicd.configs"
+    ],
+    "deltaScore": 18.75,
+    "opensCategory": null,
+    "channel": "cicd"
+   },
+   {
+    "ruleId": "license-missing",
+    "kind": "presence",
+    "priority": 2,
+    "action": "Добавьте файл лицензии",
+    "problem": "В репозитории нет лицензии: без нее другие не могут законно использовать код. Подойдет, например, MIT или Apache-2.0.",
+    "expectedImpact": "+5,8 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 5.75,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "readme-sections-missing",
+    "kind": "presence",
+    "priority": 3,
+    "action": "Добавьте в README разделы «Установка», «Сборка» и «Тесты»",
+    "problem": "В README нет разделов об установке, сборке и тестах. Сервис находит их по заголовкам «Установка», «Сборка» и «Тесты» или «Install», «Build» и «Test».",
+    "expectedImpact": "+3,6 к HealthCraft Index",
+    "factRefs": [
+     "docs.readme"
+    ],
+    "deltaScore": 3.6225,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 4,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "Не указано, кто отвечает за код. С CODEOWNERS предложения изменений сразу попадают к ответственным.",
+    "expectedImpact": "+3,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 3.45,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "contributing-missing",
+    "kind": "presence",
+    "priority": 5,
+    "action": "Добавьте файл CONTRIBUTING.md",
+    "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
+    "expectedImpact": "+3,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 3.45,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 6,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   },
+   {
+    "ruleId": "reduce-stale-issues",
+    "kind": "score",
+    "priority": 7,
+    "action": "Разберите задачи без движения",
+    "problem": "95% открытых задач без движения более 90 дней. Закройте неактуальные, по остальным дайте ответ и назначьте ответственного.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "speed-up-issue-close",
+    "kind": "score",
+    "priority": 8,
+    "action": "Ускорьте обработку новых задач",
+    "problem": "Типичный срок закрытия задачи – 200 дней. Назначьте ответственного за разбор, добавьте шаблоны и метки приоритета.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   }
+  ],
+  "constant": [
+   {
+    "ruleId": "ci-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Настройте CI",
+    "problem": "Нет файла .sourcecraft/ci.yaml: изменения не собираются и не проверяются автоматически. Если репозиторий – зеркало, сборка может идти у источника, но сервис оценивает только CI в SourceCraft.",
+    "expectedImpact": "+1,5 к Repo Health Score",
+    "factRefs": [
+     "cicd.configs"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": "cicd"
+   },
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 2,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "У проекта 2 автора, и кто отвечает за код, пока понятно без файла. Когда появятся соавторы, CODEOWNERS сразу направит их предложения изменений к ответственным; для начала хватит одной строки с логином автора.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "contributing-missing",
+    "kind": "presence",
+    "priority": 3,
+    "action": "Добавьте файл CONTRIBUTING.md",
+    "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "license-missing",
+    "kind": "presence",
+    "priority": 4,
+    "action": "Добавьте файл лицензии",
+    "problem": "В репозитории нет лицензии: без нее другие не могут законно использовать код. Подойдет, например, MIT или Apache-2.0.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "readme-sections-missing",
+    "kind": "presence",
+    "priority": 5,
+    "action": "Добавьте в README разделы «Установка», «Сборка» и «Тесты»",
+    "problem": "В README нет разделов об установке, сборке и тестах. Сервис находит их по заголовкам «Установка», «Сборка» и «Тесты» или «Install», «Build» и «Test».",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.readme"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 6,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   },
+   {
+    "ruleId": "reduce-stale-issues",
+    "kind": "score",
+    "priority": 7,
+    "action": "Разберите задачи без движения",
+    "problem": "95% открытых задач без движения более 90 дней. Закройте неактуальные, по остальным дайте ответ и назначьте ответственного.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "speed-up-issue-close",
+    "kind": "score",
+    "priority": 8,
+    "action": "Ускорьте обработку новых задач",
+    "problem": "Типичный срок закрытия задачи – 200 дней. Назначьте ответственного за разбор, добавьте шаблоны и метки приоритета.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   }
+  ],
+  "channel": [
+   {
+    "ruleId": "ci-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Настройте CI",
+    "problem": "Нет файла .sourcecraft/ci.yaml: изменения не собираются и не проверяются автоматически. Если репозиторий – зеркало, сборка может идти у источника, но сервис оценивает только CI в SourceCraft.",
+    "expectedImpact": "+2,3 к Repo Health Score",
+    "factRefs": [
+     "cicd.configs"
+    ],
+    "deltaScore": 2.25,
+    "opensCategory": null,
+    "channel": "cicd"
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 2,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   }
+  ]
+ },
+ "ci-missing-no-runs": {
+  "real": [
+   {
+    "ruleId": "license-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Добавьте файл лицензии",
+    "problem": "В репозитории нет лицензии: без нее другие не могут законно использовать код. Подойдет, например, MIT или Apache-2.0.",
+    "expectedImpact": "+5,8 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 5.75,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "readme-sections-missing",
+    "kind": "presence",
+    "priority": 2,
+    "action": "Добавьте в README разделы «Установка», «Сборка» и «Тесты»",
+    "problem": "В README нет разделов об установке, сборке и тестах. Сервис находит их по заголовкам «Установка», «Сборка» и «Тесты» или «Install», «Build» и «Test».",
+    "expectedImpact": "+3,6 к HealthCraft Index",
+    "factRefs": [
+     "docs.readme"
+    ],
+    "deltaScore": 3.6225,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 3,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "Не указано, кто отвечает за код. С CODEOWNERS предложения изменений сразу попадают к ответственным.",
+    "expectedImpact": "+3,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 3.45,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "contributing-missing",
+    "kind": "presence",
+    "priority": 4,
+    "action": "Добавьте файл CONTRIBUTING.md",
+    "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
+    "expectedImpact": "+3,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 3.45,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "ci-missing",
+    "kind": "presence",
+    "priority": 5,
+    "action": "Настройте CI",
+    "problem": "Нет файла .sourcecraft/ci.yaml: изменения не собираются и не проверяются автоматически. Если репозиторий – зеркало, сборка может идти у источника, но сервис оценивает только CI в SourceCraft.",
+    "expectedImpact": "CI/CD: оценка появится с запусками",
+    "factRefs": [
+     "cicd.configs"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": "cicd"
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 6,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   },
+   {
+    "ruleId": "reduce-stale-issues",
+    "kind": "score",
+    "priority": 7,
+    "action": "Разберите задачи без движения",
+    "problem": "95% открытых задач без движения более 90 дней. Закройте неактуальные, по остальным дайте ответ и назначьте ответственного.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "speed-up-issue-close",
+    "kind": "score",
+    "priority": 8,
+    "action": "Ускорьте обработку новых задач",
+    "problem": "Типичный срок закрытия задачи – 200 дней. Назначьте ответственного за разбор, добавьте шаблоны и метки приоритета.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   }
+  ],
+  "constant": [
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "У проекта 2 автора, и кто отвечает за код, пока понятно без файла. Когда появятся соавторы, CODEOWNERS сразу направит их предложения изменений к ответственным; для начала хватит одной строки с логином автора.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "contributing-missing",
+    "kind": "presence",
+    "priority": 2,
+    "action": "Добавьте файл CONTRIBUTING.md",
+    "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "license-missing",
+    "kind": "presence",
+    "priority": 3,
+    "action": "Добавьте файл лицензии",
+    "problem": "В репозитории нет лицензии: без нее другие не могут законно использовать код. Подойдет, например, MIT или Apache-2.0.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "readme-sections-missing",
+    "kind": "presence",
+    "priority": 4,
+    "action": "Добавьте в README разделы «Установка», «Сборка» и «Тесты»",
+    "problem": "В README нет разделов об установке, сборке и тестах. Сервис находит их по заголовкам «Установка», «Сборка» и «Тесты» или «Install», «Build» и «Test».",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.readme"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "ci-missing",
+    "kind": "presence",
+    "priority": 5,
+    "action": "Настройте CI",
+    "problem": "Нет файла .sourcecraft/ci.yaml: изменения не собираются и не проверяются автоматически. Если репозиторий – зеркало, сборка может идти у источника, но сервис оценивает только CI в SourceCraft.",
+    "expectedImpact": "CI/CD: оценка появится с запусками",
+    "factRefs": [
+     "cicd.configs"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": "cicd"
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 6,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   },
+   {
+    "ruleId": "reduce-stale-issues",
+    "kind": "score",
+    "priority": 7,
+    "action": "Разберите задачи без движения",
+    "problem": "95% открытых задач без движения более 90 дней. Закройте неактуальные, по остальным дайте ответ и назначьте ответственного.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "speed-up-issue-close",
+    "kind": "score",
+    "priority": 8,
+    "action": "Ускорьте обработку новых задач",
+    "problem": "Типичный срок закрытия задачи – 200 дней. Назначьте ответственного за разбор, добавьте шаблоны и метки приоритета.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   }
+  ],
+  "channel": [
+   {
+    "ruleId": "ci-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Настройте CI",
+    "problem": "Нет файла .sourcecraft/ci.yaml: изменения не собираются и не проверяются автоматически. Если репозиторий – зеркало, сборка может идти у источника, но сервис оценивает только CI в SourceCraft.",
+    "expectedImpact": "CI/CD: оценка появится с запусками",
+    "factRefs": [
+     "cicd.configs"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": "cicd"
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 2,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   }
+  ]
+ },
+ "ci-no-steps-runs-pending": {
+  "real": [
+   {
+    "ruleId": "license-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Добавьте файл лицензии",
+    "problem": "В репозитории нет лицензии: без нее другие не могут законно использовать код. Подойдет, например, MIT или Apache-2.0.",
+    "expectedImpact": "+5,8 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 5.75,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "readme-sections-missing",
+    "kind": "presence",
+    "priority": 2,
+    "action": "Добавьте в README разделы «Установка», «Сборка» и «Тесты»",
+    "problem": "В README нет разделов об установке, сборке и тестах. Сервис находит их по заголовкам «Установка», «Сборка» и «Тесты» или «Install», «Build» и «Test».",
+    "expectedImpact": "+3,6 к HealthCraft Index",
+    "factRefs": [
+     "docs.readme"
+    ],
+    "deltaScore": 3.6225,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 3,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "Не указано, кто отвечает за код. С CODEOWNERS предложения изменений сразу попадают к ответственным.",
+    "expectedImpact": "+3,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 3.45,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "contributing-missing",
+    "kind": "presence",
+    "priority": 4,
+    "action": "Добавьте файл CONTRIBUTING.md",
+    "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
+    "expectedImpact": "+3,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 3.45,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "ci-no-steps",
+    "kind": "presence",
+    "priority": 5,
+    "action": "Добавьте команды в ci.yaml",
+    "problem": "Файл .sourcecraft/ci.yaml есть, но в нем нет ни одной задачи с командой, поэтому CI ничего не проверяет.",
+    "expectedImpact": "CI/CD: оценка появится с запусками",
+    "factRefs": [
+     "cicd.configs"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": "cicd"
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 6,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   },
+   {
+    "ruleId": "reduce-stale-issues",
+    "kind": "score",
+    "priority": 7,
+    "action": "Разберите задачи без движения",
+    "problem": "95% открытых задач без движения более 90 дней. Закройте неактуальные, по остальным дайте ответ и назначьте ответственного.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "speed-up-issue-close",
+    "kind": "score",
+    "priority": 8,
+    "action": "Ускорьте обработку новых задач",
+    "problem": "Типичный срок закрытия задачи – 200 дней. Назначьте ответственного за разбор, добавьте шаблоны и метки приоритета.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   }
+  ],
+  "constant": [
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "У проекта 2 автора, и кто отвечает за код, пока понятно без файла. Когда появятся соавторы, CODEOWNERS сразу направит их предложения изменений к ответственным; для начала хватит одной строки с логином автора.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "contributing-missing",
+    "kind": "presence",
+    "priority": 2,
+    "action": "Добавьте файл CONTRIBUTING.md",
+    "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "license-missing",
+    "kind": "presence",
+    "priority": 3,
+    "action": "Добавьте файл лицензии",
+    "problem": "В репозитории нет лицензии: без нее другие не могут законно использовать код. Подойдет, например, MIT или Apache-2.0.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "readme-sections-missing",
+    "kind": "presence",
+    "priority": 4,
+    "action": "Добавьте в README разделы «Установка», «Сборка» и «Тесты»",
+    "problem": "В README нет разделов об установке, сборке и тестах. Сервис находит их по заголовкам «Установка», «Сборка» и «Тесты» или «Install», «Build» и «Test».",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.readme"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "ci-no-steps",
+    "kind": "presence",
+    "priority": 5,
+    "action": "Добавьте команды в ci.yaml",
+    "problem": "Файл .sourcecraft/ci.yaml есть, но в нем нет ни одной задачи с командой, поэтому CI ничего не проверяет.",
+    "expectedImpact": "CI/CD: оценка появится с запусками",
+    "factRefs": [
+     "cicd.configs"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": "cicd"
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 6,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   },
+   {
+    "ruleId": "reduce-stale-issues",
+    "kind": "score",
+    "priority": 7,
+    "action": "Разберите задачи без движения",
+    "problem": "95% открытых задач без движения более 90 дней. Закройте неактуальные, по остальным дайте ответ и назначьте ответственного.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "speed-up-issue-close",
+    "kind": "score",
+    "priority": 8,
+    "action": "Ускорьте обработку новых задач",
+    "problem": "Типичный срок закрытия задачи – 200 дней. Назначьте ответственного за разбор, добавьте шаблоны и метки приоритета.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   }
+  ],
+  "channel": [
+   {
+    "ruleId": "ci-no-steps",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Добавьте команды в ci.yaml",
+    "problem": "Файл .sourcecraft/ci.yaml есть, но в нем нет ни одной задачи с командой, поэтому CI ничего не проверяет.",
+    "expectedImpact": "CI/CD: оценка появится с запусками",
+    "factRefs": [
+     "cicd.configs"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": "cicd"
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 2,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   }
+  ]
+ },
+ "red-ci-appsec": {
+  "real": [
+   {
+    "ruleId": "appsec-critical",
+    "kind": "score",
+    "priority": 1,
+    "action": "Устраните критичные находки AppSec",
+    "problem": "AppSec нашел в коде критичные уязвимости. Пока они открыты, балл категории «Безопасность» не выше 40.",
+    "expectedImpact": "снимет потолок 40 с категории «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": "appsec"
+   },
+   {
+    "ruleId": "fix-red-runs",
+    "kind": "score",
+    "priority": 2,
+    "action": "Почините CI",
+    "problem": "Последний запуск CI завершился ошибкой или успешны меньше 90% запусков.",
+    "expectedImpact": "повысит балл категории «CI/CD»",
+    "factRefs": [
+     "cicd.runs"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": "cicd"
+   },
+   {
+    "ruleId": "license-missing",
+    "kind": "presence",
+    "priority": 3,
+    "action": "Добавьте файл лицензии",
+    "problem": "В репозитории нет лицензии: без нее другие не могут законно использовать код. Подойдет, например, MIT или Apache-2.0.",
+    "expectedImpact": "+5,8 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 5.75,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "readme-sections-missing",
+    "kind": "presence",
+    "priority": 4,
+    "action": "Добавьте в README разделы «Установка», «Сборка» и «Тесты»",
+    "problem": "В README нет разделов об установке, сборке и тестах. Сервис находит их по заголовкам «Установка», «Сборка» и «Тесты» или «Install», «Build» и «Test».",
+    "expectedImpact": "+3,6 к HealthCraft Index",
+    "factRefs": [
+     "docs.readme"
+    ],
+    "deltaScore": 3.6225,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 5,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "Не указано, кто отвечает за код. С CODEOWNERS предложения изменений сразу попадают к ответственным.",
+    "expectedImpact": "+3,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 3.45,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "contributing-missing",
+    "kind": "presence",
+    "priority": 6,
+    "action": "Добавьте файл CONTRIBUTING.md",
+    "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
+    "expectedImpact": "+3,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 3.45,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "speed-up-pipeline",
+    "kind": "score",
+    "priority": 7,
+    "action": "Ускорьте CI",
+    "problem": "Обычно запуск CI длится 20 мин. Кеш зависимостей и параллельные задачи сократят ожидание.",
+    "expectedImpact": "повысит балл категории «CI/CD»",
+    "factRefs": [
+     "cicd.runs"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": "cicd"
+   },
+   {
+    "ruleId": "resolve-old-todos",
+    "kind": "score",
+    "priority": 8,
+    "action": "Разберите устаревшие пометки TODO и FIXME",
+    "problem": "9 из 12 пометок старше 180 дней. Выполните отложенные работы, перенесите их в задачи или удалите пометки.",
+    "expectedImpact": "повысит балл категории «Состояние кода»",
+    "factRefs": [
+     "code.todo"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "reduce-stale-issues",
+    "kind": "score",
+    "priority": 9,
+    "action": "Разберите задачи без движения",
+    "problem": "95% открытых задач без движения более 90 дней. Закройте неактуальные, по остальным дайте ответ и назначьте ответственного.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "speed-up-issue-close",
+    "kind": "score",
+    "priority": 10,
+    "action": "Ускорьте обработку новых задач",
+    "problem": "Типичный срок закрытия задачи – 200 дней. Назначьте ответственного за разбор, добавьте шаблоны и метки приоритета.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   }
+  ],
+  "constant": [
+   {
+    "ruleId": "appsec-critical",
+    "kind": "score",
+    "priority": 1,
+    "action": "Устраните критичные находки AppSec",
+    "problem": "AppSec нашел в коде критичные уязвимости. Пока они открыты, балл категории «Безопасность» не выше 40.",
+    "expectedImpact": "снимет потолок 40 с категории «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": "appsec"
+   },
+   {
+    "ruleId": "fix-red-runs",
+    "kind": "score",
+    "priority": 2,
+    "action": "Почините CI",
+    "problem": "Последний запуск CI завершился ошибкой или успешны меньше 90% запусков.",
+    "expectedImpact": "повысит балл категории «CI/CD»",
+    "factRefs": [
+     "cicd.runs"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": "cicd"
+   },
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 3,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "У проекта 2 автора, и кто отвечает за код, пока понятно без файла. Когда появятся соавторы, CODEOWNERS сразу направит их предложения изменений к ответственным; для начала хватит одной строки с логином автора.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "contributing-missing",
+    "kind": "presence",
+    "priority": 4,
+    "action": "Добавьте файл CONTRIBUTING.md",
+    "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "license-missing",
+    "kind": "presence",
+    "priority": 5,
+    "action": "Добавьте файл лицензии",
+    "problem": "В репозитории нет лицензии: без нее другие не могут законно использовать код. Подойдет, например, MIT или Apache-2.0.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "readme-sections-missing",
+    "kind": "presence",
+    "priority": 6,
+    "action": "Добавьте в README разделы «Установка», «Сборка» и «Тесты»",
+    "problem": "В README нет разделов об установке, сборке и тестах. Сервис находит их по заголовкам «Установка», «Сборка» и «Тесты» или «Install», «Build» и «Test».",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.readme"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "speed-up-pipeline",
+    "kind": "score",
+    "priority": 7,
+    "action": "Ускорьте CI",
+    "problem": "Обычно запуск CI длится 20 мин. Кеш зависимостей и параллельные задачи сократят ожидание.",
+    "expectedImpact": "повысит балл категории «CI/CD»",
+    "factRefs": [
+     "cicd.runs"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": "cicd"
+   },
+   {
+    "ruleId": "resolve-old-todos",
+    "kind": "score",
+    "priority": 8,
+    "action": "Разберите устаревшие пометки TODO и FIXME",
+    "problem": "9 из 12 пометок старше 180 дней. Выполните отложенные работы, перенесите их в задачи или удалите пометки.",
+    "expectedImpact": "повысит балл категории «Состояние кода»",
+    "factRefs": [
+     "code.todo"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "reduce-stale-issues",
+    "kind": "score",
+    "priority": 9,
+    "action": "Разберите задачи без движения",
+    "problem": "95% открытых задач без движения более 90 дней. Закройте неактуальные, по остальным дайте ответ и назначьте ответственного.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "speed-up-issue-close",
+    "kind": "score",
+    "priority": 10,
+    "action": "Ускорьте обработку новых задач",
+    "problem": "Типичный срок закрытия задачи – 200 дней. Назначьте ответственного за разбор, добавьте шаблоны и метки приоритета.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   }
+  ],
+  "channel": [
+   {
+    "ruleId": "appsec-critical",
+    "kind": "score",
+    "priority": 1,
+    "action": "Устраните критичные находки AppSec",
+    "problem": "AppSec нашел в коде критичные уязвимости. Пока они открыты, балл категории «Безопасность» не выше 40.",
+    "expectedImpact": "снимет потолок 40 с категории «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": "appsec"
+   },
+   {
+    "ruleId": "fix-red-runs",
+    "kind": "score",
+    "priority": 2,
+    "action": "Почините CI",
+    "problem": "Последний запуск CI завершился ошибкой или успешны меньше 90% запусков.",
+    "expectedImpact": "повысит балл категории «CI/CD»",
+    "factRefs": [
+     "cicd.runs"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": "cicd"
+   },
+   {
+    "ruleId": "speed-up-pipeline",
+    "kind": "score",
+    "priority": 3,
+    "action": "Ускорьте CI",
+    "problem": "Обычно запуск CI длится 20 мин. Кеш зависимостей и параллельные задачи сократят ожидание.",
+    "expectedImpact": "повысит балл категории «CI/CD»",
+    "factRefs": [
+     "cicd.runs"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": "cicd"
+   }
+  ]
+ },
+ "legacy-copying": {
+  "real": [
+   {
+    "ruleId": "readme-sections-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Добавьте в README разделы «Установка», «Сборка» и «Тесты»",
+    "problem": "В README нет разделов об установке, сборке и тестах. Сервис находит их по заголовкам «Установка», «Сборка» и «Тесты» или «Install», «Build» и «Test».",
+    "expectedImpact": "+3,6 к HealthCraft Index",
+    "factRefs": [
+     "docs.readme"
+    ],
+    "deltaScore": 3.6225,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 2,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "Не указано, кто отвечает за код. С CODEOWNERS предложения изменений сразу попадают к ответственным.",
+    "expectedImpact": "+3,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 3.45,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "contributing-missing",
+    "kind": "presence",
+    "priority": 3,
+    "action": "Добавьте файл CONTRIBUTING.md",
+    "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
+    "expectedImpact": "+3,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 3.45,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 4,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   },
+   {
+    "ruleId": "reduce-stale-issues",
+    "kind": "score",
+    "priority": 5,
+    "action": "Разберите задачи без движения",
+    "problem": "95% открытых задач без движения более 90 дней. Закройте неактуальные, по остальным дайте ответ и назначьте ответственного.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "speed-up-issue-close",
+    "kind": "score",
+    "priority": 6,
+    "action": "Ускорьте обработку новых задач",
+    "problem": "Типичный срок закрытия задачи – 200 дней. Назначьте ответственного за разбор, добавьте шаблоны и метки приоритета.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   }
+  ],
+  "constant": [
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 1,
+    "action": "Добавьте файл CODEOWNERS",
+    "problem": "У проекта 2 автора, и кто отвечает за код, пока понятно без файла. Когда появятся соавторы, CODEOWNERS сразу направит их предложения изменений к ответственным; для начала хватит одной строки с логином автора.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "contributing-missing",
+    "kind": "presence",
+    "priority": 2,
+    "action": "Добавьте файл CONTRIBUTING.md",
+    "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.presence"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "readme-sections-missing",
+    "kind": "presence",
+    "priority": 3,
+    "action": "Добавьте в README разделы «Установка», «Сборка» и «Тесты»",
+    "problem": "В README нет разделов об установке, сборке и тестах. Сервис находит их по заголовкам «Установка», «Сборка» и «Тесты» или «Install», «Build» и «Test».",
+    "expectedImpact": "+1,5 к HealthCraft Index",
+    "factRefs": [
+     "docs.readme"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 4,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   },
+   {
+    "ruleId": "reduce-stale-issues",
+    "kind": "score",
+    "priority": 5,
+    "action": "Разберите задачи без движения",
+    "problem": "95% открытых задач без движения более 90 дней. Закройте неактуальные, по остальным дайте ответ и назначьте ответственного.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   },
+   {
+    "ruleId": "speed-up-issue-close",
+    "kind": "score",
+    "priority": 6,
+    "action": "Ускорьте обработку новых задач",
+    "problem": "Типичный срок закрытия задачи – 200 дней. Назначьте ответственного за разбор, добавьте шаблоны и метки приоритета.",
+    "expectedImpact": "повысит балл категории «Задачи»",
+    "factRefs": [
+     "issues.stats"
+    ],
+    "deltaScore": null,
+    "opensCategory": null,
+    "channel": null
+   }
+  ],
+  "channel": [
+   {
+    "ruleId": "connect-appsec",
+    "kind": "activation",
+    "priority": 1,
+    "action": "Подключите проверку AppSec",
+    "problem": "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+    "expectedImpact": "добавит в Repo Health Score категорию «Безопасность»",
+    "factRefs": [
+     "appsec.findings"
+    ],
+    "deltaScore": null,
+    "opensCategory": "security",
+    "channel": "appsec"
+   }
+  ]
+ }
+}

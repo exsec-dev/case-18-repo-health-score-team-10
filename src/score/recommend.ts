@@ -25,7 +25,7 @@
 import type { Database } from "bun:sqlite";
 import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
 import { SCORE_WEIGHTS, CategoryKey, OLD_SHARE_MIN_BASE, SECRETS_CRITICAL_TOTAL_CAP } from "./model";
-import { compute, computeFromFacts, effectiveFacts, licensePresent, Scores } from "./compute";
+import { compute, computeFromFacts, effectiveFacts, licensePresent, type ComputeInput, Scores } from "./compute";
 import { issuesClosedCounted } from "./derived";
 import { fmtDecimal, fmtScore, fmtSigned } from "../web/format";
 import { runOutcome } from "../collectors/run-status";
@@ -484,12 +484,23 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
   // Δ = итог на подменённых фактах − итог на фактах скана: правила без
   // канала — к Score в рейтинге (4 категории, фактическая перенормировка),
   // канальные — к полному Score (кап 49 учитывается). Один вызов
-  // computeFromFacts на правило; подмены — таблица плана К-Ф1.2.
+  // computeFromFacts на правило; подмены — таблица `presencePatches`.
   const now = opts.now ?? new Date(scores.computedAt);
   const input = { scanId, repoId: scores.repoId, stale: eff.stale, staleCats: eff.staleCats, emptyRepo: eff.emptyRepo };
   const base = computeFromFacts(ok, input, now);
+  const realDelta = factsDeltaEvaluator(ok, input, now, base);
+  const categoryScores = Object.fromEntries(Object.entries(base.categories).map(([k, c]) => [k, c.score])) as Record<CategoryKey, number | null>;
+  return recommendFromFacts(ok, { delta: realDelta, issuesScore: scores.categories.issues.score, codeEmpty: base.codeEmpty, categoryScores, authors: authorsOf(scores.categories.activity) });
+}
+
+/**
+ * Реальный прирост правила на фактах скана (К-Ф1.2): итог на подмененных
+ * фактах − итог `base` на тех же фактах. В5.9: вынесен из `recommend`, чтобы
+ * лестница (`score/ladder.ts`) считала Δ шага той же формулой, что движок.
+ */
+export function factsDeltaEvaluator(ok: Map<string, unknown>, input: ComputeInput, now: Date, base: Scores = computeFromFacts(ok, input, now)): DeltaEvaluator {
   const secretsCritical = (ok.get("appsec.findings") as { secrets_critical?: unknown } | undefined)?.secrets_critical === true;
-  const realDelta: DeltaEvaluator = (channel, patch) => {
+  return (channel, patch) => {
     const facts = new Map(ok);
     patch(facts);
     const after = computeFromFacts(facts, input, now);
@@ -502,8 +513,126 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
     if (delta === 0 && channel !== null && secretsCritical && b >= SECRETS_CRITICAL_TOTAL_CAP) return { delta: 0, reason: "cap" };
     return { delta, reason: null };
   };
-  const categoryScores = Object.fromEntries(Object.entries(base.categories).map(([k, c]) => [k, c.score])) as Record<CategoryKey, number | null>;
-  return recommendFromFacts(ok, { delta: realDelta, issuesScore: scores.categories.issues.score, codeEmpty: base.codeEmpty, categoryScores, authors: authorsOf(scores.categories.activity) });
+}
+
+/** Подмена фактов «совет выполнен» (К-Ф1.2). */
+export type FactsPatch = (facts: Map<string, unknown>) => void;
+
+/**
+ * В5.9: presence-правило как данные — условие срабатывания уже проверено на
+ * фактах, `patch` — подмена «совет выполнен». ОДНА таблица для движка
+ * (`recommendFromFacts`) и лестницы (`score/ladder.ts`): лестница не может
+ * разойтись с рекомендациями ни условием, ни подменой.
+ */
+export interface PresencePatch {
+  ruleId: string;
+  factRefs: string[];
+  patch: FactsPatch;
+  /** null — публичное правило (Δ к HealthCraft Index) */
+  channel: RecommendationChannel | null;
+  /** CI (Н8): запуски не видны или все идут — числа нет, эффект словами */
+  noRuns?: boolean;
+}
+
+/**
+ * Presence-правила, чьи условия выполнены на фактах `ok`, в порядке движка.
+ * `pub` — публичные правила (без канала); `codeScored` — категория «Код»
+ * оценена (Н7: условие `add-tests`). CI-правила (канал cicd) — всегда.
+ */
+export function presencePatches(ok: Map<string, unknown>, opts: { pub: boolean; codeScored: boolean }): PresencePatch[] {
+  const out: PresencePatch[] = [];
+  const withPresence = (field: keyof DocsPresenceValue) => (facts: Map<string, unknown>) => {
+    facts.set("docs.presence", { ...(facts.get("docs.presence") as DocsPresenceValue), [field]: true });
+  };
+
+  const presence_ = ok.get("docs.presence") as DocsPresenceValue | undefined;
+  if (opts.pub && presence_) {
+    // Н7 (F7): тот же признак, что в расчете (`licensePresent`): лицензия
+    // под именем COPYING у фактов до Р4в уже в балле — совета с «+0» нет
+    if (!licensePresent(ok)) out.push({ ruleId: "license-missing", factRefs: ["docs.presence"], patch: withPresence("license"), channel: null });
+    if (presence_.contributing !== true) out.push({ ruleId: "contributing-missing", factRefs: ["docs.presence"], patch: withPresence("contributing"), channel: null });
+    if (presence_.codeowners !== true) out.push({ ruleId: "codeowners-missing", factRefs: ["docs.presence"], patch: withPresence("codeowners"), channel: null });
+    const readme = ok.get("docs.readme") as DocsReadmeValue | undefined;
+    if (presence_.readme !== true) {
+      // обещание: README появился (подмена К-Ф1.2 — присутствие без объёма и секций)
+      out.push({
+        ruleId: "readme-missing",
+        factRefs: ["docs.presence", "docs.readme"],
+        patch: (facts) => {
+          withPresence("readme")(facts);
+          facts.set("docs.readme", { present: true, bytes: 0, flags: {} });
+        },
+        channel: null,
+      });
+    } else if (readme && (readme as { present?: boolean }).present !== false) {
+      const flags = readme.flags ?? {};
+      const missing = ["install", "build", "test"].filter((k) => flags[k as keyof typeof flags] !== true);
+      if (missing.length > 0) {
+        out.push({
+          ruleId: "readme-sections-missing",
+          factRefs: ["docs.readme"],
+          patch: (facts) => {
+            const current = facts.get("docs.readme") as { flags?: Record<string, unknown> };
+            facts.set("docs.readme", { ...current, flags: { ...(current.flags ?? {}), ...Object.fromEntries(missing.map((k) => [k, true])) } });
+          },
+          channel: null,
+        });
+      }
+    }
+  }
+  // круг 2 (К2): «Код» оценен, сборщик 3 посчитал тесты — непустых нет. Эффект —
+  // реальный пересчет с тестами в 10% файлов кода; «Тесты» — бонус (В1), и если
+  // он при таких тестах балл не поднимает, совета с «+0» нет (фильтр `delta > 0`
+  // у всех presence-правил)
+  const treeFact = ok.get("tree.stats") as { source_files?: unknown; test_files?: unknown } | undefined;
+  if (opts.pub && opts.codeScored && treeFact && treeFact.test_files === 0 && typeof treeFact.source_files === "number" && treeFact.source_files > 0) {
+    const sourceFiles = treeFact.source_files;
+    out.push({
+      ruleId: "add-tests",
+      factRefs: ["tree.stats"],
+      patch: (facts) => {
+        facts.set("tree.stats", { ...(facts.get("tree.stats") as object), test_files: Math.max(1, Math.round(sourceFiles * ADD_TESTS_SHARE)) });
+      },
+      channel: null,
+    });
+  }
+  const cicdCfg = ok.get("cicd.configs") as { has_ci_yaml?: unknown; has_steps?: unknown; steps_note?: unknown } | undefined;
+  // CI-правила — канал cicd: Δ по CI-весу исполняется только в полном
+  // Score, поэтому правило видит лишь зритель с доступом к CI (К2)
+  if (cicdCfg && !ciUnparsedOf(cicdCfg) && !(cicdCfg.has_ci_yaml === true && cicdCfg.has_steps === true)) {
+    const hasYaml = cicdCfg.has_ci_yaml === true;
+    const runsFact = ok.get("cicd.runs");
+    // запуски видны, но все идут (ни одного завершенного) — CI после правки
+    // будет «нет данных», и число дала бы перенормировка, а не CI (P7 приемки)
+    const rp = runsFact as { runs_count?: unknown; runs_total?: unknown } | undefined;
+    const runsPending = rp !== undefined && rp.runs_count === 0 && typeof rp.runs_total === "number" && rp.runs_total > 0;
+    out.push({
+      ruleId: hasYaml ? "ci-no-steps" : "ci-missing",
+      factRefs: ["cicd.configs"],
+      patch: (facts) => {
+        facts.set("cicd.configs", hasYaml ? { ...(facts.get("cicd.configs") as object), has_steps: true } : { has_ci_yaml: true, has_steps: true });
+      },
+      channel: "cicd",
+      // 4.3.0 (Н8, F10): запуски не видны — CI «нет данных» при любом конфиге,
+      // и совет не обещает числа (раньше прирост давала перенормировка, а не CI)
+      noRuns: runsFact === undefined || runsPending,
+    });
+  }
+  return out;
+}
+
+/** М2.1 аудита В5.3: ci.yaml не разобран — неизвестно, есть ли шаги; совета «добавьте команды» нет, как нет и балла. */
+function ciUnparsedOf(cicdCfg: { has_ci_yaml?: unknown; has_steps?: unknown; steps_note?: unknown } | undefined): boolean {
+  return cicdCfg?.has_ci_yaml === true && (typeof cicdCfg.has_steps !== "boolean" || typeof cicdCfg.steps_note === "string");
+}
+
+/**
+ * В5.9: публичные активационные правила (без числа, «открывает категорию»),
+ * чьи условия выполнены на фактах, — одно условие для движка и лестницы.
+ */
+export function publicActivationRules(ok: Map<string, unknown>): { ruleId: string; opens: CategoryKey; factRefs: string[] }[] {
+  const stats = ok.get("issues.stats") as { open?: unknown; closed?: unknown } | undefined;
+  return stats && (stats.open ?? 0) === 0 && (stats.closed ?? 0) === 0 ? [{ ruleId: "start-tracker", opens: "issues", factRefs: ["issues.stats"] }] : [];
 }
 
 /** Чистый движок правил на эффективных фактах (без БД). */
@@ -516,7 +645,7 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
   const presence: Recommendation[] = [];
   const activation: Recommendation[] = [];
   const scoreRules: Recommendation[] = [];
-  const presenceRule = (ruleId: string, factRefs: string[], patch: (facts: Map<string, unknown>) => void, channel: RecommendationChannel | null = null) => {
+  const presenceRule = (ruleId: string, factRefs: string[], patch: FactsPatch, channel: RecommendationChannel | null = null) => {
     const real = realDelta(channel, patch);
     // 4.3.1 (В5.5 тур 1, П-1 парковки В4.9): рекомендация с эффектом «+0,0»
     // не выводится вовсе — ни без причины, ни с ней (cap 49, итог NULL):
@@ -527,81 +656,23 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
     const texts = recommendationText(ruleId, recommendationParams(ruleId, ok, { delta: real.delta, reason: real.reason, channel, authors: ctx.authors }))!;
     presence.push({ ruleId, kind: "presence", priority: 0, ...texts, factRefs, deltaScore: real.delta, opensCategory: null, channel });
   };
-  const withPresence = (field: keyof DocsPresenceValue) => (facts: Map<string, unknown>) => {
-    facts.set("docs.presence", { ...(facts.get("docs.presence") as DocsPresenceValue), [field]: true });
-  };
 
-  const presence_ = ok.get("docs.presence") as DocsPresenceValue | undefined;
-  if (pub && presence_) {
-    // Н7 (F7): тот же признак, что в расчете (`licensePresent`): лицензия
-    // под именем COPYING у фактов до Р4в уже в балле — совета с «+0» нет
-    if (!licensePresent(ok)) presenceRule("license-missing", ["docs.presence"], withPresence("license"));
-    if (presence_.contributing !== true) presenceRule("contributing-missing", ["docs.presence"], withPresence("contributing"));
-    if (presence_.codeowners !== true) presenceRule("codeowners-missing", ["docs.presence"], withPresence("codeowners"));
-    const readme = ok.get("docs.readme") as DocsReadmeValue | undefined;
-    if (presence_.readme !== true) {
-      // обещание: README появился (подмена К-Ф1.2 — присутствие без объёма и секций)
-      presenceRule("readme-missing", ["docs.presence", "docs.readme"], (facts) => {
-        withPresence("readme")(facts);
-        facts.set("docs.readme", { present: true, bytes: 0, flags: {} });
-      });
-    } else if (readme && (readme as { present?: boolean }).present !== false) {
-      const flags = readme.flags ?? {};
-      const missing = ["install", "build", "test"].filter((k) => flags[k as keyof typeof flags] !== true);
-      if (missing.length > 0) {
-        presenceRule("readme-sections-missing", ["docs.readme"], (facts) => {
-          const current = facts.get("docs.readme") as { flags?: Record<string, unknown> };
-          facts.set("docs.readme", { ...current, flags: { ...(current.flags ?? {}), ...Object.fromEntries(missing.map((k) => [k, true])) } });
-        });
-      }
+  // В5.9: условия и подмены presence-правил — таблица `presencePatches` (общая с лестницей)
+  for (const p of presencePatches(ok, { pub, codeScored: scored("code") })) {
+    if (p.noRuns) {
+      const texts = recommendationText(p.ruleId, recommendationParams(p.ruleId, ok, { reason: "no-runs", channel: p.channel }))!;
+      presence.push({ ruleId: p.ruleId, kind: "presence", priority: 0, ...texts, factRefs: p.factRefs, deltaScore: null, opensCategory: null, channel: p.channel });
+    } else {
+      presenceRule(p.ruleId, p.factRefs, p.patch, p.channel);
     }
-  }
-  // круг 2 (К2): «Код» оценен, сборщик 3 посчитал тесты — непустых нет. Эффект —
-  // реальный пересчет с тестами в 10% файлов кода; «Тесты» — бонус (В1), и если
-  // он при таких тестах балл не поднимает, совета с «+0» нет
-  const treeFact = ok.get("tree.stats") as { source_files?: unknown; test_files?: unknown } | undefined;
-  if (pub && scored("code") && treeFact && treeFact.test_files === 0 && typeof treeFact.source_files === "number" && treeFact.source_files > 0) {
-    const sourceFiles = treeFact.source_files;
-    const patch = (facts: Map<string, unknown>) => {
-      facts.set("tree.stats", { ...(facts.get("tree.stats") as object), test_files: Math.max(1, Math.round(sourceFiles * ADD_TESTS_SHARE)) });
-    };
-    if (realDelta(null, patch).delta > 0) presenceRule("add-tests", ["tree.stats"], patch);
   }
   const cicdCfg = ok.get("cicd.configs") as { has_ci_yaml?: unknown; has_steps?: unknown; steps_note?: unknown } | undefined;
-  // М2.1 аудита В5.3: ci.yaml не разобран — неизвестно, есть ли шаги; совета
-  // «добавьте команды» нет, как нет и балла
-  const ciUnparsed = cicdCfg?.has_ci_yaml === true && (typeof cicdCfg.has_steps !== "boolean" || typeof cicdCfg.steps_note === "string");
-  // CI-правила — канал cicd: Δ по CI-весу исполняется только в полном
-  // Score, поэтому правило видит лишь зритель с доступом к CI (К2)
+  const ciUnparsed = ciUnparsedOf(cicdCfg);
   const runsFact = ok.get("cicd.runs");
-  if (cicdCfg && !ciUnparsed && !(cicdCfg.has_ci_yaml === true && cicdCfg.has_steps === true)) {
-    const hasYaml = cicdCfg.has_ci_yaml === true;
-    const ruleId = hasYaml ? "ci-no-steps" : "ci-missing";
-    // запуски видны, но все идут (ни одного завершенного) — CI после правки
-    // будет «нет данных», и число дала бы перенормировка, а не CI (P7 приемки)
-    const rp = runsFact as { runs_count?: unknown; runs_total?: unknown } | undefined;
-    const runsPending = rp !== undefined && rp.runs_count === 0 && typeof rp.runs_total === "number" && rp.runs_total > 0;
-    if (runsFact === undefined || runsPending) {
-      // 4.3.0 (Н8, F10): запуски не видны — CI «нет данных» при любом конфиге,
-      // и совет не обещает числа (раньше прирост давала перенормировка, а не CI)
-      const texts = recommendationText(ruleId, recommendationParams(ruleId, ok, { reason: "no-runs", channel: "cicd" }))!;
-      presence.push({ ruleId, kind: "presence", priority: 0, ...texts, factRefs: ["cicd.configs"], deltaScore: null, opensCategory: null, channel: "cicd" });
-    } else {
-      presenceRule(
-        ruleId,
-        ["cicd.configs"],
-        (facts) => {
-          facts.set("cicd.configs", hasYaml ? { ...(facts.get("cicd.configs") as object), has_steps: true } : { has_ci_yaml: true, has_steps: true });
-        },
-        "cicd",
-      );
-    }
-  }
 
   // ---------- активационные (без числа; «открывает категорию») ----------
-  const stats = ok.get("issues.stats") as { open?: unknown; closed?: unknown } | undefined;
-  if (pub && stats && (stats.open ?? 0) === 0 && (stats.closed ?? 0) === 0) {
-    activation.push(act("start-tracker", "issues", ["issues.stats"], { issuesScore: ctx.issuesScore ?? 0 }));
+  if (pub) {
+    for (const a of publicActivationRules(ok)) activation.push(act(a.ruleId, a.opens, a.factRefs, { issuesScore: ctx.issuesScore ?? 0 }));
   }
   if (!ok.has("appsec.findings")) {
     // нейтральный текст (К1): рекомендация видна только зрителю с доступом
