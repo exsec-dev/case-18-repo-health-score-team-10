@@ -195,7 +195,7 @@ describe("SVG: вариант со значком места", () => {
     expect(/[—ё]/.test(ranked)).toBe(false);
   });
 
-  test("«металл» лиги: контраст текста и фона не ниже 4:1 (ниже AA 4,5 — решение владельца, §2 «В5.9 — круг 7»)", () => {
+  test("«металл» лиги: контраст текста и фона по WCAG не ниже 4,5:1", () => {
     const lin = (c: number) => {
       const v = c / 255;
       return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
@@ -209,9 +209,7 @@ describe("SVG: вариант со значком места", () => {
       return (hi + 0.05) / (lo + 0.05);
     };
     expect(Object.keys(RANK_BADGE_COLORS).sort()).toEqual(["bronze", "gold", "silver"]);
-    // В5.9 круг 7 (27.09, Екатерина): фон темнее — «только фон, контраст ниже 4,5»; нижняя граница
-    // держит решение от дальнейшего тихого затемнения
-    for (const { bg, fg } of Object.values(RANK_BADGE_COLORS)) expect(ratio(bg, fg)).toBeGreaterThanOrEqual(4);
+    for (const { bg, fg } of Object.values(RANK_BADGE_COLORS)) expect(ratio(bg, fg)).toBeGreaterThanOrEqual(4.5);
     // белый текст на этих фонах не проходит — поэтому текст темный
     for (const { bg } of Object.values(RANK_BADGE_COLORS)) expect(ratio(bg, "#ffffff")).toBeLessThan(4.5);
   });
