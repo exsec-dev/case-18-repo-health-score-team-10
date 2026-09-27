@@ -15,11 +15,16 @@ import { useAppTheme } from "./prefs";
 // наши стили — ПОСЛЕ импорта App. Компоненты uikit и navigation подключают свой CSS
 // внутри своих модулей, и production-бандл Bun кладет CSS в порядке импортов: при
 // импорте наших файлов выше App правила компонентов оказывались НИЖЕ наших и выигрывали
-// при равной специфичности (в dev порядок другой — дефект виден только на стенде).
+// при равной специфичности (в dev порядок обратный — его чинит ourStylesLast ниже).
 // Правило специфичности из docs/ui/gravity-uikit.md остается; порядок — вторая страховка.
 // палитра SourceCraft (см. комментарий в файле) — после стилей uikit
 import "./theme.css";
 import "./layout.css";
+// В5.9: в dev Bun ставит наши файлы ПЕРВЫМИ — рантайм-страховка добавляет их копии в конец
+// <head> (cssOrder.ts); в production это ничего не делает
+import { ourStylesLast } from "./cssOrder";
+
+ourStylesLast();
 
 configure({ lang: Lang.Ru });
 

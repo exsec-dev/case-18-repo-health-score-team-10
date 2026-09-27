@@ -1013,19 +1013,24 @@ button.rh-category:focus-visible {
  * встают на одну вертикаль. Без меры чип уезжал бы к краю колонки. */
 .rh-score-figure__value {
   align-items: baseline;
-  /* круг 3 (6): ряд во всю ширину плашки — место в рейтинге у правого края полосы */
+}
+
+/* В5.9 круг 2: ряд числа во всю ширину плашки — блок позиции (лига над местом) у правого
+ * края полосы вклада; не помещается рядом с числом — переносится строкой ниже, вправо */
+.rh-score-figure__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--g-spacing-1) var(--g-spacing-3);
   width: 100%;
 }
 
-/* Доводка 21.09: место в рейтинге — не плашка, а текст. Плашка равняла его
- * по весу со словом шкалы, хотя это справка, а не оценка. Серый текст на
- * полступени жирнее соседей отличает ранг от подписей, не вводя третий чип
- * в строку значения. */
-.rh-score-figure__rank {
+.rh-position {
   margin-inline-start: auto;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
+  text-align: right;
 }
+
 
 .rh-favorite-star {
   --g-button-text-color: var(--g-color-text-secondary);
@@ -3183,4 +3188,97 @@ button.rh-category:focus-visible {
   display: inline-flex;
   align-items: center;
   gap: var(--g-spacing-2);
+}
+
+/* ---------- В5.9: режим «По шагам» и заготовки файлов в рекомендациях ---------- */
+
+/* заголовок и переключатель «По отдельности | По шагам» — одной строкой; отбивка — как у
+   заголовка раздела (переносится на телефоне) */
+.rh-recs__head {
+  margin: var(--g-spacing-1) 0 var(--g-spacing-4);
+}
+
+.rh-section-card .rh-recs__head > .rh-section__title.g-text {
+  margin: 0;
+}
+
+/* итог лестницы под последним шагом: отбит линией, как строки списка */
+.rh-recs__summary {
+  padding: var(--g-spacing-3) 0;
+  border-top: 1px solid var(--g-color-line-generic);
+}
+
+.rh-recs__rest-title.g-text {
+  display: block;
+  margin-top: var(--g-spacing-4);
+  margin-bottom: var(--g-spacing-2);
+}
+
+/* кнопка заготовки — самый тихий элемент строки: под текстом рекомендации (круг 2, п.3),
+ * текст кнопки — по левому краю текста */
+.rh-rec__body .rh-rec__fix {
+  align-self: flex-start;
+  margin-inline-start: calc(-1 * var(--g-spacing-2));
+}
+
+/* ---------- В5.9: строка позиции и плашка лиги в плашке индекса ---------- */
+
+/* Доводка 21.09 в силе: место — не плашка, а серый текст; с В5.9 — своей строкой под
+ * числом (§2 «В5.9 — выбор вариантов», п.3-4), к нему через запятую — процент похожих */
+.rh-position .g-text {
+  font-variant-numeric: tabular-nums;
+}
+
+/* круг 3 (п.3): ⓘ — по средней линии текста, а не по базовой (текст стоял выше иконки) */
+.rh-position__help {
+  vertical-align: middle;
+}
+
+.rh-position__line > span {
+  vertical-align: middle;
+}
+
+/* лига — «мягкий металл» (круг 2): токены `--rh-league-<лига>-*` в theme.css — фон с
+ * градиентом, рамка, медаль и текст цветом металла; обе темы */
+.rh-league {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  /* круг 5: поля по бокам шире; форма прежняя («форму менять не надо, только фон») */
+  padding: 0 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 22px;
+  cursor: default;
+}
+
+.rh-league:focus-visible {
+  outline: 2px solid var(--g-color-line-focus);
+  outline-offset: 2px;
+}
+
+.rh-league_gold {
+  color: var(--rh-league-gold-ink);
+  background: var(--rh-league-gold-bg);
+  box-shadow: inset 0 0 0 1px var(--rh-league-gold-border);
+}
+
+.rh-league_silver {
+  color: var(--rh-league-silver-ink);
+  background: var(--rh-league-silver-bg);
+  box-shadow: inset 0 0 0 1px var(--rh-league-silver-border);
+}
+
+.rh-league_bronze {
+  color: var(--rh-league-bronze-ink);
+  background: var(--rh-league-bronze-bg);
+  box-shadow: inset 0 0 0 1px var(--rh-league-bronze-border);
+}
+
+/* В5.9 (cssOrder.ts): маркер наших файлов — по нему dev-сервер переносит их после CSS
+   компонентов uikit. Правило не должно ничего менять на странице. */
+.rh-css-order {
+  --rh-css-order: 1;
 }

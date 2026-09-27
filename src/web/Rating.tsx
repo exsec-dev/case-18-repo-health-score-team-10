@@ -6,7 +6,7 @@
 // тулбар одной строкой (size m), таблица, методика в правой панели.
 import { coverageLine } from "./ratingParams";
 import { loadRatingScroll, rememberRatingHref, saveRatingScroll } from "./ratingReturn";
-import { ArrowUpRightFromSquare, BarsAscendingAlignLeft, BarsDescendingAlignLeft, Flag, Gear, Magnifier, Sparkles, SquareListUl, TriangleDownFill, TriangleUpFill } from "@gravity-ui/icons";
+import { ArrowUpRightFromSquare, BarsAscendingAlignLeft, BarsDescendingAlignLeft, Flag, Gear, Magnifier, SparklesFill, SquareListUl, TriangleDownFill, TriangleUpFill } from "@gravity-ui/icons";
 import {
   ActionTooltip,
   Alert,
@@ -45,7 +45,6 @@ import {
   sizeSummary,
   type FacetOption,
 } from "./ratingParams";
-import { FILTER_LIMITS_NOTE } from "../api/rating-filters";
 import {
   CATEGORY_TITLES_RU,
   DEFINITION_NAME_WIDTH,
@@ -386,10 +385,8 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
           renderOption={(option) => <FilterOption option={option} />}
           onUpdate={(v) => setParams({ ci: v[0] ?? null })}
         />
-        {/* тематика и security status из ТЗ §7 — названное ограничение, а не фильтр */}
-        <HelpMark iconSize="m" aria-label="О фильтрах: тематика, безопасность, CI">
-          {FILTER_LIMITS_NOTE}
-        </HelpMark>
+        {/* В5.9 круг 3 (27.09, Екатерина): подсказка «О фильтрах» (тематика, безопасность, CI)
+            снята; ограничение названо в docs/methodology.md §10 */}
         {/* Доводка 21.09: пара «Сортировка: …» + кнопка направления снята —
             сортировка живёт в заголовках колонок (`SortableHeader`), как в
             таблицах платформы. Освободившееся место занял второй ряд: выбор
@@ -430,7 +427,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
         {view === "scored" && data && (data.aiCount > 0 || aiOnly) && (
           <Button view="outlined" size="m" selected={aiOnly} onClick={() => setParams({ ai: aiOnly ? null : "1" })}>
             <Button.Icon side="start">
-              <Icon data={Sparkles} size={16} className="rh-ai-mark-icon" />
+              <Icon data={SparklesFill} size={16} className="rh-ai-mark-icon" />
             </Button.Icon>
             {`С AI-обзором ${fmtCount(data.aiCount)}`}
           </Button>
@@ -468,6 +465,9 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
             total={data.total}
             // В4.6 (У21): дефолт стал 20 — без опции 20 к нему было бы не вернуться
             pageSizeOptions={isPhone ? undefined : [10, 20, 50, 100]}
+            // В5.9 (27.09, Екатерина — «quick jump», переход к странице): поле номера страницы
+            // uikit; Enter или уход фокуса — переход, номер больше последнего — последняя страница
+            showInput
             onUpdate={(page, pageSize) => setParams({ page: String(page), per_page: String(pageSize) }, { keepPage: true })}
           />
         ) : undefined
@@ -887,7 +887,7 @@ function RepoCell({ item, compact = false }: { item: Item; compact?: boolean }) 
           {item.aiOverview && (
             <ActionTooltip title="Есть AI-обзор">
               <span className="rh-rating-ai" role="img" aria-label="Есть AI-обзор" {...TIP_TARGET}>
-                <Icon data={Sparkles} size={14} />
+                <Icon data={SparklesFill} size={14} />
               </span>
             </ActionTooltip>
           )}

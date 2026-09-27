@@ -155,9 +155,13 @@ export function aiNotesCaption(finishedAt: readonly (string | null)[], tooEarly:
   return tooEarly(dates) ? "Описания между анализами меньше 2 дней – о динамике судить рано." : null;
 }
 
-/** Код для README (О5): абсолютные адреса, картинка ведет на карточку. */
-export function badgeMarkdown(publicBaseUrl: string, org: string, repo: string): string {
+/**
+ * Код для README (О5): абсолютные адреса, картинка ведет на карточку. В5.9: `rank` —
+ * вариант «Индекс и место» (`badge.svg?style=rank`, сегмент лиги цветом металла).
+ */
+export function badgeMarkdown(publicBaseUrl: string, org: string, repo: string, style: "index" | "rank" = "index"): string {
   const base = publicBaseUrl.replace(/\/+$/, "");
   const path = `${encodeURIComponent(org)}/${encodeURIComponent(repo)}`;
-  return `[![HealthCraft Index](${base}/api/v1/repos/${path}/badge.svg)](${base}/repo/${path})`;
+  const query = style === "rank" ? "?style=rank" : "";
+  return `[![HealthCraft Index](${base}/api/v1/repos/${path}/badge.svg${query})](${base}/repo/${path})`;
 }

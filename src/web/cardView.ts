@@ -26,9 +26,15 @@ import {
 } from "../report/sections";
 import { submetricContext, submetricShownValue, submetricTitle } from "../report/submetrics";
 import type { CategoryKey } from "../score/model";
+import { SIZE_TITLES } from "../api/rating-filters";
+import type { RankLeague } from "../api/rank-badge";
+import { COHORT_MIN } from "../api/cohort";
 import {
+  fmtCount,
   fmtScore,
+  fmtSigned,
   fullScorePath,
+  roundScore,
   noDataReason,
   scoreLabelTheme,
   scoreWord,
@@ -96,6 +102,8 @@ export interface CategoryView {
   stale: boolean;
   /** примечание частичной нехватки данных у оцененной категории — внутри раскрытия */
   partialNote: string | null;
+  /** В5.9: процент среди похожих по категории — первой строкой раскрытия; null — не показываем */
+  cohortNote: string | null;
 }
 
 export interface LockedView {
@@ -132,6 +140,10 @@ export interface CardView {
   /** под строкой пути — кнопка входа (зритель не вошел) */
   signIn: boolean;
   recommendations: RecommendationView[];
+  /** В5.9: режим «По шагам» раздела рекомендаций; null — переключателя нет */
+  ladder: LadderView | null;
+  /** В5.9: строка позиции в плашке индекса и плашка лиги; null — места нет */
+  position: PositionView | null;
   /** фраза вместо пустого раздела рекомендаций (В-1, одна копия с отчетом) и ее вид (R3) */
   noRecommendations: string;
   noRecommendationsKind: "healthy" | "weak" | "nodata";
@@ -140,6 +152,119 @@ export interface CardView {
 }
 
 export const SOURCE_DATA_LABEL = "Исходные данные";
+
+/** Шаг лестницы в режиме «По шагам»: строка рекомендации и индекс после нее (накопительно). */
+export interface LadderStepView {
+  item: RecommendationView;
+  /** «52 (+5,8)»: индекс после шага и прирост именно этого шага */
+  effect: string;
+}
+
+/**
+ * В5.9 (§2 «В5.9 — выбор вариантов», п.1, вариант Б): режим списка «По шагам».
+ * Шаги — в порядке лестницы, номера — позиция в показанном списке; остальные
+ * рекомендации (без числа, канальные) — ниже, в прежнем виде.
+ */
+export interface LadderView {
+  steps: LadderStepView[];
+  rest: RecommendationView[];
+  /** итог под последним шагом: «до 70 не хватит N» или «зона „Здоров“» */
+  summary: string;
+}
+
+/**
+ * В5.9 (§2 «В5.9 — выбор вариантов», п.3-5): строка позиции в плашке индекса — «#87 из
+ * 28 285, лучше 91% похожих ⓘ», под ней — плашка лиги (золото ТОП-10, серебро ТОП-100,
+ * бронза ТОП-1000). Числа — поля карточки как есть (правило 21.09: место, доля и размер
+ * выборки проверяются тестом на данных).
+ */
+export interface PositionView {
+  /** «#87 из 28 285» */
+  rank: string;
+  /** «лучше 91% похожих» и т.п.; null — про похожих ни слова (нет когорты, без кода) */
+  cohort: string | null;
+  /** подсказка ⓘ к фразе о похожих: кто похожие и сколько их */
+  cohortHelp: string | null;
+  league: { tier: RankLeague; label: string; hint: string } | null;
+}
+
+const LEAGUE_WORDS: Record<RankLeague, string> = { gold: "первую десятку", silver: "первую сотню", bronze: "первую тысячу" };
+
+/** «репозиторий на Go размером 1-10 тыс. строк» → кто такие похожие, словами. */
+function cohortWho(language: string, bucket: keyof typeof SIZE_TITLES): string {
+  return `открытые репозитории на ${language} размером ${SIZE_TITLES[bucket]}`;
+}
+
+const reposWord = (n: number): string => {
+  const m10 = n % 10;
+  const m100 = n % 100;
+  return m10 === 1 && m100 !== 11 ? "репозиторий" : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? "репозитория" : "репозиториев";
+};
+
+export function positionView(card: RepoCard): PositionView | null {
+  const score = card.score;
+  if (!score || score.rank === null || score.rank === undefined || !score.rankedTotal) return null;
+  const rank = `#${fmtCount(score.rank)} из ${fmtCount(score.rankedTotal)}`;
+  let cohort: string | null = null;
+  let cohortHelp: string | null = null;
+  const c = score.cohort;
+  if (c && c.language !== null && c.sizeBucket !== null && c.size !== null) {
+    const who = cohortWho(c.language, c.sizeBucket);
+    const p = c.index.percentile;
+    if (p !== null) {
+      cohort = p === 0 ? "у всех похожих индекс не ниже" : p === 100 ? `лучший среди ${fmtCount(c.size)} похожих` : `лучше ${p}% похожих`;
+      cohortHelp = `Похожие – ${who} с местом в рейтинге: ${fmtCount(c.size)}. Процент – доля похожих, у кого индекс ниже; равные не считаются.`;
+    } else if (c.index.reason === "small-cohort") {
+      cohort = "похожих мало для сравнения";
+      cohortHelp = `Похожие – ${who}: в рейтинге ${fmtCount(c.size)} ${reposWord(c.size)}, процент считаем от ${COHORT_MIN}.`;
+    }
+  }
+  const b = score.rankBadge;
+  const league = b
+    ? { tier: b.tier, label: b.label, hint: `Лига «${b.label}»: вместе со всеми равными по индексу репозиторий входит в ${LEAGUE_WORDS[b.tier]} рейтинга по HealthCraft Index.` }
+    : null;
+  return { rank, cohort, cohortHelp, league };
+}
+
+/** Процент среди похожих по категории — строкой раскрытия; null — строки нет. */
+export function categoryCohortNote(card: RepoCard, key: CategoryKey): string | null {
+  const c = card.score?.cohort;
+  const stat = c ? (c.categories as Record<string, { percentile: number | null; reason: string | null } | undefined>)[key] : undefined;
+  if (!stat) return null;
+  if (stat.percentile !== null) return stat.percentile === 0 ? "Среди похожих – у всех балл не ниже" : `Среди похожих – лучше ${stat.percentile}%`;
+  if (stat.reason === "small-cohort") return "Похожих с данными по категории мало для сравнения";
+  return null;
+}
+
+export const LADDER_HELP =
+  "Каждый шаг пересчитан моделью поверх предыдущих, поэтому прирост шага может отличаться от эффекта рекомендации по отдельности. Порядок – по наибольшему приросту на каждом шаге. Это расчет по текущим данным, а не оценка: индекс изменится после нового анализа.";
+
+
+/**
+ * Лестница карточки → вид режима «По шагам». null — переключателя нет: лестницы
+ * нет, в ней нет шагов с числом, или шаг не находит своей рекомендации на
+ * карточке (тогда номер и текст шага показать нечем — режим не выдумывает строк).
+ */
+export function ladderView(card: RepoCard, recommendations: RecommendationView[]): LadderView | null {
+  const ladder = card.ladder;
+  if (!ladder || ladder.steps.length === 0) return null;
+  const byRule = new Map(recommendations.map((r) => [r.rec.ruleId, r]));
+  const stepItems = ladder.steps.map((s) => byRule.get(s.ruleId));
+  if (stepItems.some((i) => i === undefined)) return null;
+  const inSteps = new Set(ladder.steps.map((s) => s.ruleId));
+  const steps = ladder.steps.map((s, i) => ({
+    item: { ...stepItems[i]!, n: i + 1 },
+    effect: `${fmtScore(s.indexAfter)} (${fmtSigned(s.delta)})`,
+  }));
+  const rest = recommendations.filter((r) => !inSteps.has(r.rec.ruleId)).map((r, i) => ({ ...r, n: steps.length + i + 1 }));
+  const last = roundScore(ladder.steps[ladder.steps.length - 1]!.indexAfter);
+  const k = ladder.steps.length;
+  const summary =
+    last >= ladder.target
+      ? `После шага №${k} индекс – ${last}: зона «Здоров»`
+      : `После шага №${k} индекс – ${last}, до ${ladder.target} не хватит ${ladder.target - last}`;
+  return { steps, rest, summary };
+}
 
 
 /** Хвост фразы о закрытых категориях у зрителя с токеном — по причине отказа (круг 4, 3). */
@@ -209,6 +334,8 @@ export function cardView(card: RepoCard): CardView {
     limitations,
     topMarkers,
     recommendations,
+    ladder: ladderView(card, recommendations),
+    position: positionView(card),
     noRecommendations: noRecommendationsText(card),
     noRecommendationsKind: noRecommendationsKind(card),
     analysisAt: analysisDate(card),
@@ -230,6 +357,7 @@ export function cardView(card: RepoCard): CardView {
       why,
       stale: cat.stale === true,
       partialNote: partial !== null && partial !== why ? partial : null,
+      cohortNote: categoryCohortNote(card, key),
     };
   });
   // худшая категория раскрыта по умолчанию; «нет данных» не плохо — в расчет не идет

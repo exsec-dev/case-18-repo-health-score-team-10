@@ -80,6 +80,7 @@ import {
   Label,
   Link,
   Popover,
+  SegmentedRadioGroup,
   Spin,
   Text,
   useToaster,
@@ -91,7 +92,7 @@ import { factWords } from "../report/factWords";
 import { FULL, INDEX, metricWeights, ownershipView, sourceWord, strengthsLine, submetricWeightText } from "../report/sections";
 import type { MetaResponse, RepoCard } from "./api";
 import { dataOf, mutateJson, useJson, useVisible } from "./api";
-import { cardView, type CardView, type CategoryView, type RecommendationView } from "./cardView";
+import { LADDER_HELP, cardView, type CardView, type CategoryView, type PositionView, type RecommendationView } from "./cardView";
 import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
 import {
   NO_DATA,
@@ -128,6 +129,7 @@ import { linkProps, navigate } from "./router";
 import { COMPARE_MAX, COMPARE_LIMIT_TEXT, compareHref } from "./compareView";
 import { lastCompareSet, rememberCompareSet } from "./compareReturn";
 import { LoginButton, Page, type Crumb } from "./Shell";
+import { Trophy } from "./icons";
 import { useMediaQuery } from "./prefs";
 import { AiOverviewSection, BadgeButton, BadgeDialog, CategoryAiMark, CategoryAiNote, FraudCheckFooter, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
@@ -278,6 +280,7 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
       repo={repo}
       scored={card.score !== null}
       badge={card.repo.badge}
+      league={card.score?.rankBadge != null}
       publicBaseUrl={meta?.publicBaseUrl ?? window.location.origin}
       report={card.score !== null && <ReportMenu mdHref={reportHref} pdfHref={`${cardUrl}/report.pdf`} pdfName={reportFileName(org, repo, "pdf")} />}
       refresh={refreshButton}
@@ -350,7 +353,7 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
           </Flex>
           <AiOverviewSection card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} quota={aiQuota.quota} onQuota={aiQuota.reload} />
           <Categories card={card} view={view} />
-          <Recommendations view={view} />
+          <Recommendations view={view} org={org} repo={repo} />
           <HistorySection card={card} org={org} repo={repo} />
           <Limitations items={view.limitations} />
         </Flex>
@@ -489,7 +492,7 @@ class ReportError extends Error {
  * считается?» (иначе строка резалась и отчет с телефона был недоступен). Круг 5
  * (находка 19): у репо без оценки «Сравнить» нет — в сравнении у него пустой столбец.
  */
-function CardActions({ org, repo, scored, badge, publicBaseUrl, report, refresh }: { org: string; repo: string; scored: boolean; badge: boolean; publicBaseUrl: string; report: ReactNode; refresh: ReactNode }) {
+function CardActions({ org, repo, scored, badge, league, publicBaseUrl, report, refresh }: { org: string; repo: string; scored: boolean; badge: boolean; league: boolean; publicBaseUrl: string; report: ReactNode; refresh: ReactNode }) {
   const phone = useMediaQuery("(max-width: 767px)");
   // В5.5 закрытие (П-2): бейдж выдается — знает сервер (поле карточки), без пробы badge.svg
   const badgeOk = badge;
@@ -499,7 +502,7 @@ function CardActions({ org, repo, scored, badge, publicBaseUrl, report, refresh 
       <Flex gap={2} alignItems="center">
         {scored && <CompareButton org={org} repo={repo} />}
         {/* 5-A (§2 24.09): бейдж — кнопкой в шапке, как Clone у SourceCraft */}
-        {scored && <BadgeButton org={org} repo={repo} publicBaseUrl={publicBaseUrl} available={badge} />}
+        {scored && <BadgeButton org={org} repo={repo} publicBaseUrl={publicBaseUrl} available={badge} league={league} />}
         {report}
         {refresh}
       </Flex>
@@ -532,7 +535,7 @@ function CardActions({ org, repo, scored, badge, publicBaseUrl, report, refresh 
           )}
         />
       )}
-      {badgeOk && <BadgeDialog org={org} repo={repo} publicBaseUrl={publicBaseUrl} open={badgeOpen} onClose={() => setBadgeOpen(false)} />}
+      {badgeOk && <BadgeDialog org={org} repo={repo} publicBaseUrl={publicBaseUrl} league={league} open={badgeOpen} onClose={() => setBadgeOpen(false)} />}
     </Flex>
   );
 }
@@ -941,7 +944,7 @@ function ScoreBand({ card, view, footer }: { card: Card; view: CardView; footer?
   return (
     <div className="rh-score-cards">
       <Card view="outlined" className="rh-score-band">
-        <ScoreFigure title="HealthCraft Index" help={INDEX_HELP} total={score.healthcraftIndex} rank={score.rank} rankedTotal={score.rankedTotal} />
+        <ScoreFigure title="HealthCraft Index" help={INDEX_HELP} total={score.healthcraftIndex} position={view.position} />
         <ContributionStrip bar={barOf("HealthCraft Index")} />
         {footer}
       </Card>
@@ -1054,7 +1057,7 @@ function MetricHelp({ text, name }: { text: string; name: typeof INDEX | typeof 
   );
 }
 
-function ScoreFigure({ title, help, total, rank, rankedTotal }: { title: string; help: string; total: number | null; rank?: number | null; rankedTotal?: number | null }) {
+function ScoreFigure({ title, help, total, position }: { title: string; help: string; total: number | null; position?: PositionView | null }) {
   return (
     <Flex direction="column" gap={1} style={{ minWidth: 0 }}>
       <Flex gap={1} alignItems="center">
@@ -1070,20 +1073,52 @@ function ScoreFigure({ title, help, total, rank, rankedTotal }: { title: string;
           </Label>
         </span>
       ) : (
-        <Flex gap={2} alignItems="baseline" wrap className="rh-score-figure__value">
-          <Text variant="display-2">{fmtScore(total)}</Text>
-          <Text color="secondary">из 100</Text>
-          <Label theme={scoreLabelTheme(total)} size="s">
-            {sentence(scoreWord(total))}
-          </Label>
-          {/* место в рейтинге — серый текст справа */}
-          {rank !== null && rank !== undefined && rankedTotal ? (
-            <Text color="secondary" className="rh-score-figure__rank" title="Место в публичном рейтинге по HealthCraft Index">
-              #{fmtCount(rank)} из {fmtCount(rankedTotal)}
-            </Text>
-          ) : null}
-        </Flex>
+        // В5.9 круг 2 (замечание владельца 27.09, п.2): блок позиции прижат к правому краю над
+        // полосой вклада — сверху плашка лиги, снизу место и процент похожих; не хватает места
+        // рядом с числом — блок уходит строкой ниже, по-прежнему вправо
+        <div className="rh-score-figure__row">
+          <Flex gap={2} alignItems="baseline" wrap className="rh-score-figure__value">
+            <Text variant="display-2">{fmtScore(total)}</Text>
+            <Text color="secondary">из 100</Text>
+            <Label theme={scoreLabelTheme(total)} size="s">
+              {sentence(scoreWord(total))}
+            </Label>
+          </Flex>
+          {position ? <PositionLine position={position} /> : null}
+        </div>
       )}
+    </Flex>
+  );
+}
+
+function PositionLine({ position }: { position: PositionView }) {
+  return (
+    <Flex direction="column" gap={1} alignItems="flex-end" className="rh-position">
+      {position.league ? (
+        <ActionTooltip title={position.league.hint}>
+          <span className={`rh-league rh-league_${position.league.tier}`} tabIndex={0} aria-label={`${position.league.label}. ${position.league.hint}`}>
+            <Icon data={Trophy} size={14} />
+            {position.league.label}
+          </span>
+        </ActionTooltip>
+      ) : null}
+      {/* подсказка ⓘ — в строке текста, после неразрывного пробела: на телефоне не отрывается
+          от последнего слова на свою строку */}
+      <Text color="secondary" className="rh-position__line">
+        {/* title — только на тексте: на ⓘ свой тултип, иначе всплывали оба (круг 3, п.4) */}
+        <span title="Место в публичном рейтинге по HealthCraft Index">
+          {position.rank}
+          {position.cohort ? `, ${position.cohort}` : ""}
+        </span>
+        {position.cohortHelp ? (
+          <>
+            {"\u00a0"}
+            <HelpMark iconSize="s" aria-label="Кто такие похожие" className="rh-position__help">
+              {position.cohortHelp}
+            </HelpMark>
+          </>
+        ) : null}
+      </Text>
     </Flex>
   );
 }
@@ -1204,6 +1239,12 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
       )}
       {open && expandable && (
         <div className="rh-subrows">
+          {/* В5.9: процент среди похожих по категории — первой строкой раскрытия */}
+          {c.cohortNote && (
+            <Text variant="body-1" color="complementary" className="rh-subrows__note">
+              {c.cohortNote}
+            </Text>
+          )}
           {/* примечание частичной нехватки данных — внутри раскрытия (в MD его нет в строке) */}
           {c.partialNote && (
             <Text variant="body-1" color="complementary" className="rh-subrows__note">
@@ -1364,7 +1405,12 @@ function Limitations({ items }: { items: string[] }) {
  * плашкой прироста. Основание — словами: подметрика правила и ее значение;
  * по клику — источник, время сбора и сырые данные.
  */
-function Recommendations({ view }: { view: CardView }) {
+function Recommendations({ view, org, repo }: { view: CardView; org: string; repo: string }) {
+  // В5.9 (§2 «В5.9 — выбор вариантов», п.1, вариант Б): режим «По шагам» — лестница к зоне
+  // «Здоров»; переключатель — тот же компонент и вид, что «Оценены / Без оценки» рейтинга
+  const [mode, setMode] = useState<"single" | "steps">("single");
+  const ladder = view.ladder;
+  const steps = mode === "steps" && ladder !== null;
   return (
     // круг 2 (Е13): рекомендаций нет — без заголовка раздела; быстрая правка
     // 23.09 (3): но строка «Рекомендаций нет» остается, иначе читатель не знает,
@@ -1382,21 +1428,57 @@ function Recommendations({ view }: { view: CardView }) {
     ) : (
       <section className="rh-section" id={RECOMMENDATIONS_ID} aria-labelledby="rh-recommendations-title">
         <Card view="outlined" className="rh-section-card">
-          <Text variant="subheader-3" as="h2" id="rh-recommendations-title" className="rh-section__title">
-            Рекомендации
-          </Text>
-          <ol className="rh-list rh-recs" style={{ borderTop: 0 }}>
-            {view.recommendations.map((r) => (
-              <RecommendationRow key={r.rec.ruleId} item={r} />
-            ))}
-          </ol>
+          <Flex gap={2} alignItems="center" justifyContent="space-between" wrap className="rh-recs__head">
+            <Text variant="subheader-3" as="h2" id="rh-recommendations-title" className="rh-section__title">
+              Рекомендации
+            </Text>
+            {ladder !== null && (
+              <SegmentedRadioGroup size="m" value={mode} onUpdate={(v) => setMode(v === "steps" ? "steps" : "single")} aria-label="Как показать рекомендации">
+                <SegmentedRadioGroup.Option value="single">По отдельности</SegmentedRadioGroup.Option>
+                <SegmentedRadioGroup.Option value="steps">По шагам</SegmentedRadioGroup.Option>
+              </SegmentedRadioGroup>
+            )}
+          </Flex>
+          {steps ? (
+            <>
+              <ol className="rh-list rh-recs" style={{ borderTop: 0 }} aria-label="Шаги к зоне «Здоров»">
+                {ladder.steps.map((s) => (
+                  <RecommendationRow key={s.item.rec.ruleId} item={s.item} org={org} repo={repo} stepEffect={s.effect} />
+                ))}
+              </ol>
+              <Flex gap={1} alignItems="center" className="rh-recs__summary" aria-live="polite">
+                <Text color="complementary">{ladder.summary}</Text>
+                <HelpMark iconSize="s" aria-label="Как считаются шаги">
+                  {LADDER_HELP}
+                </HelpMark>
+              </Flex>
+              {ladder.rest.length > 0 && (
+                <>
+                  <Text variant="caption-2" color="secondary" className="rh-recs__rest-title">
+                    Остальные рекомендации
+                  </Text>
+                  <ol className="rh-list rh-recs">
+                    {ladder.rest.map((r) => (
+                      <RecommendationRow key={r.rec.ruleId} item={r} org={org} repo={repo} />
+                    ))}
+                  </ol>
+                </>
+              )}
+            </>
+          ) : (
+            <ol className="rh-list rh-recs" style={{ borderTop: 0 }}>
+              {view.recommendations.map((r) => (
+                <RecommendationRow key={r.rec.ruleId} item={r} org={org} repo={repo} />
+              ))}
+            </ol>
+          )}
         </Card>
       </section>
     )
   );
 }
 
-function RecommendationRow({ item }: { item: RecommendationView }) {
+function RecommendationRow({ item, org, repo, stepEffect }: { item: RecommendationView; org: string; repo: string; stepEffect?: string }) {
   const { rec } = item;
   return (
     <li className="rh-list__item rh-rec">
@@ -1424,9 +1506,27 @@ function RecommendationRow({ item }: { item: RecommendationView }) {
             </Label>
           </Popover>
         </Flex>
+        {/* В5.9 круг 3 (27.09, Екатерина, п.6): заготовка — строкой под «Показателем», с подписью */}
+        {rec.fixTemplate ? (
+          <Flex gap={2} wrap alignItems="center" className="rh-rec__basis">
+            <Text variant="body-short" color="secondary">
+              Файл шаблона:
+            </Text>
+            <FixTemplateButton org={org} repo={repo} ruleId={rec.ruleId} meta={rec.fixTemplate} />
+          </Flex>
+        ) : null}
       </Flex>
       <div className="rh-rec__effect">
-        {item.effectNote !== null ? (
+        {stepEffect !== undefined ? (
+          <>
+            <Text variant="caption-2" color="secondary">
+              после шага
+            </Text>
+            <Label theme="unknown" size="xs" title="Индекс после этого шага, если выполнить и все шаги выше; в скобках – прирост шага">
+              {stepEffect}
+            </Label>
+          </>
+        ) : item.effectNote !== null ? (
           <>
             <Text variant="caption-2" color="secondary">
               {item.effectNote}
@@ -1443,6 +1543,87 @@ function RecommendationRow({ item }: { item: RecommendationView }) {
         )}
       </div>
     </li>
+  );
+}
+
+/** Подписи лицензий в меню выбора — выбор автора, по умолчанию ничего (В5.9, шаблоны). */
+const LICENSE_TITLES: Record<string, string> = { mit: "MIT", "apache-2.0": "Apache 2.0" };
+
+/** Текст тоста, если заготовка не скачалась (по коду ответа). */
+export function fixFailureText(status: number): string {
+  if (status === 0) return "Нет связи с сервером – проверьте подключение и попробуйте еще раз.";
+  if (status === 429) return "Слишком много запросов – попробуйте через минуту.";
+  if (status === 404) return "Заготовка для этого репозитория больше не нужна – обновите страницу.";
+  return "Не удалось подготовить файл – попробуйте позже.";
+}
+
+/**
+ * В5.9 (§2 «В5.9 — выбор вариантов», п.2, вариант А): заготовка файла — тихой кнопкой под
+ * эффектом рекомендации; у лицензии — меню выбора без значения по умолчанию. Скачивание —
+ * fetch + blob, как «Отчет»: сбой — тостом, а не сырым JSON вместо приложения (урок С7-1).
+ */
+function FixTemplateButton({ org, repo, ruleId, meta }: { org: string; repo: string; ruleId: string; meta: NonNullable<RecommendationView["rec"]["fixTemplate"]> }) {
+  const toaster = useToaster();
+  const [busy, setBusy] = useState(false);
+  const base = `/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/fix/${encodeURIComponent(ruleId)}`;
+  const download = async (license?: string): Promise<void> => {
+    setBusy(true);
+    const href = license ? `${base}?license=${encodeURIComponent(license)}` : base;
+    try {
+      let res: Response;
+      try {
+        res = await fetch(href);
+      } catch {
+        throw new ReportError(0, null);
+      }
+      if (!res.ok || !(res.headers.get("content-type") ?? "").startsWith("text/plain")) throw new ReportError(res.ok ? 500 : res.status, null);
+      const url = URL.createObjectURL(await res.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = meta.filename;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch (e) {
+      toaster.add({
+        name: `fix-failed:${href}`,
+        theme: "danger",
+        title: `${meta.filename} не скачан`,
+        content: fixFailureText(e instanceof ReportError ? e.status : 500),
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const hint =
+    ruleId === "readme-sections-missing"
+      ? "Скачать заготовку: только недостающие разделы – добавьте их в свой README"
+      : "Скачать заготовку: положите файл в корень репозитория и заполните поля в квадратных скобках";
+  if (meta.licenses && meta.licenses.length > 0) {
+    return (
+      <DropdownMenu
+        size="m"
+        popupProps={{ placement: "bottom-start" }}
+        renderSwitcher={(props) => (
+          <Button {...props} view="flat-secondary" size="s" aria-haspopup="menu" loading={busy} title="Скачать заготовку LICENSE: лицензию выбирает автор" className="rh-rec__fix">
+            <Icon data={ArrowDownToLine} size={14} />
+            {meta.filename}
+            <Icon data={ChevronDown} size={14} />
+          </Button>
+        )}
+        items={[
+          { text: "Выберите тип лицензии", disabled: true, action: () => undefined },
+          ...meta.licenses.map((id) => ({ text: LICENSE_TITLES[id] ?? id, action: () => void download(id) })),
+        ]}
+      />
+    );
+  }
+  return (
+    <Button view="flat-secondary" size="s" loading={busy} onClick={() => void download()} title={hint} className="rh-rec__fix">
+      <Icon data={ArrowDownToLine} size={14} />
+      {meta.filename}
+    </Button>
   );
 }
 

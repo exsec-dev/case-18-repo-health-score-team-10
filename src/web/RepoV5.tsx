@@ -10,7 +10,7 @@
 //   - бейдж для README — кнопка в шапке с поповером, как Clone у SourceCraft (5-A).
 // Видимость текстов модели — прежняя (решение 22.09): `card.ai` приходит только
 // зрителю с правами на полный Score; без прав этих блоков нет вовсе.
-import { ArrowsRotateRight, ChevronDown, CircleExclamation, ClockArrowRotateLeft, SealCheck, Shield, ShieldCheck, ShieldExclamation, Sparkles } from "@gravity-ui/icons";
+import { ArrowsRotateRight, ChevronDown, CircleExclamation, ClockArrowRotateLeft, SealCheck, Shield, ShieldCheck, ShieldExclamation, SparklesFill } from "@gravity-ui/icons";
 import {
   ActionTooltip,
   Alert,
@@ -25,6 +25,7 @@ import {
   Label,
   Link,
   Popover,
+  SegmentedRadioGroup,
   Skeleton,
   Spin,
   Text,
@@ -504,7 +505,7 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
             <div className="rh-score-band__signin">
               <Button view="action" size="m" loading={actions.sending} disabled={cooldown || quotaBlocked !== null} onClick={() => void actions.start()}>
                 <Button.Icon side="start">
-                  <Icon data={Sparkles} size={16} className="rh-ai-button-icon" />
+                  <Icon data={SparklesFill} size={16} className="rh-ai-button-icon" />
                 </Button.Icon>
                 {withCounter("Сформировать обзор", counter)}
               </Button>
@@ -568,7 +569,7 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
       <Flex direction="column" gap={3}>
         <Flex gap={2} alignItems="center" wrap>
           <span className="rh-ai-section__spark" aria-hidden="true">
-            <Icon data={Sparkles} size={16} />
+            <Icon data={SparklesFill} size={16} />
           </span>
           <Text variant="subheader-3" as="h2" id="rh-ai-title">
             {AI_SECTION_TITLE}
@@ -654,7 +655,7 @@ export function CategoryAiMark({ card, categoryKey, hasData }: { card: Card; cat
   const title = "Есть разбор модели – откройте категорию";
   return (
     <span className="rh-cat-ai__mark rh-cat-ai__mark_ready" title={title} aria-label={title} role="img">
-      <Icon data={Sparkles} size={14} />
+      <Icon data={SparklesFill} size={14} />
     </span>
   );
 }
@@ -703,7 +704,7 @@ export function AiNotePlate({ title, text, staleFor = null }: { title: string; t
       view="filled"
       size="s"
       className="rh-ai-plate"
-      icon={<Icon data={Sparkles} size={16} />}
+      icon={<Icon data={SparklesFill} size={16} />}
       title={
         staleFor !== null ? (
           <span className="rh-ai-plate__title">
@@ -879,7 +880,7 @@ function AnalysisRow({ point, fullOpen, overview }: { point: HistoryPoint; fullO
             }
           >
             <span className="rh-history__note-mark" role="button" tabIndex={0} aria-label="Описание на момент анализа">
-              <Icon data={Sparkles} size={16} />
+              <Icon data={SparklesFill} size={16} />
             </span>
           </Popover>
         )}
@@ -1022,9 +1023,13 @@ function badgePath(org: string, repo: string): string {
   return `/api/v1/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`;
 }
 
-function BadgeContent({ org, repo, publicBaseUrl, title = true }: { org: string; repo: string; publicBaseUrl: string; title?: boolean }) {
+function BadgeContent({ org, repo, publicBaseUrl, league = false, title = true }: { org: string; repo: string; publicBaseUrl: string; league?: boolean; title?: boolean }) {
+  // В5.9 (§2 «В5.9 — выбор вариантов», п.5): у репо с лигой — выбор «Только индекс | Индекс
+  // и место»; без лиги выбора нет (вариант без результата не предлагаем)
+  const [style, setStyle] = useState<"index" | "rank">("index");
+  const shown = league ? style : "index";
   const path = badgePath(org, repo);
-  const code = badgeMarkdown(publicBaseUrl, org, repo);
+  const code = badgeMarkdown(publicBaseUrl, org, repo, shown);
   return (
     <div className="rh-badge-pop" data-slot="badge">
       {title && (
@@ -1033,8 +1038,14 @@ function BadgeContent({ org, repo, publicBaseUrl, title = true }: { org: string;
         </Text>
       )}
       <div className="rh-badge-pop__preview">
-        <img src={`${path}/badge.svg`} alt="HealthCraft Index" />
+        <img src={`${path}/badge.svg${shown === "rank" ? "?style=rank" : ""}`} alt={shown === "rank" ? "HealthCraft Index и лига места" : "HealthCraft Index"} />
       </div>
+      {league && (
+        <SegmentedRadioGroup size="s" width="max" value={shown} onUpdate={(v) => setStyle(v === "rank" ? "rank" : "index")} aria-label="Что показать на бейдже">
+          <SegmentedRadioGroup.Option value="index">Только индекс</SegmentedRadioGroup.Option>
+          <SegmentedRadioGroup.Option value="rank">Индекс и место</SegmentedRadioGroup.Option>
+        </SegmentedRadioGroup>
+      )}
       <Text variant="caption-2" color="secondary" as="div">
         Markdown
       </Text>
@@ -1047,22 +1058,22 @@ function BadgeContent({ org, repo, publicBaseUrl, title = true }: { org: string;
 }
 
 /** Круг 5 тура 3 (Н1, вариант А): на телефоне бейдж открывается из меню «⋮» — диалогом. */
-export function BadgeDialog({ org, repo, publicBaseUrl, open, onClose }: { org: string; repo: string; publicBaseUrl: string; open: boolean; onClose: () => void }) {
+export function BadgeDialog({ org, repo, publicBaseUrl, league, open, onClose }: { org: string; repo: string; publicBaseUrl: string; league: boolean; open: boolean; onClose: () => void }) {
   return (
     <Dialog open={open} onClose={onClose} maxWidth="s" fullWidth className="rh-dialog-fit" aria-label={SLOT_EMPTY.badge.title}>
       <Dialog.Header caption={SLOT_EMPTY.badge.title} />
       <Dialog.Body>
-        <BadgeContent org={org} repo={repo} publicBaseUrl={publicBaseUrl} title={false} />
+        <BadgeContent org={org} repo={repo} publicBaseUrl={publicBaseUrl} league={league} title={false} />
       </Dialog.Body>
       <Dialog.Footer textButtonCancel="Готово" onClickButtonCancel={onClose} />
     </Dialog>
   );
 }
 
-export function BadgeButton({ org, repo, publicBaseUrl, available }: { org: string; repo: string; publicBaseUrl: string; available: boolean }) {
+export function BadgeButton({ org, repo, publicBaseUrl, available, league }: { org: string; repo: string; publicBaseUrl: string; available: boolean; league: boolean }) {
   if (!available) return null;
   return (
-    <Popover trigger="click" placement={["bottom-end", "top-end"]} content={<BadgeContent org={org} repo={repo} publicBaseUrl={publicBaseUrl} />}>
+    <Popover trigger="click" placement={["bottom-end", "top-end"]} content={<BadgeContent org={org} repo={repo} publicBaseUrl={publicBaseUrl} league={league} />}>
       <Button view="normal" size="m">
         <Button.Icon side="start">
           <Icon data={SealCheck} size={16} />

@@ -202,11 +202,15 @@ describe("В4.6 круг 3, П4: место в рейтинге", () => {
     }
   });
 
+  // В5.9 (§2 «В5.9 — выбор вариантов», п.3-4, 27.09): место переехало из строки числа в
+  // строку позиции «#N из M, лучше X% похожих» — по-прежнему серым текстом, не чипом;
+  // числа строки — поведенческим тестом `tests/v59-hq-position-view.test.ts`
   test("место печатается серым текстом «#N из M», а не чипом", () => {
     const repo = web("RepoPage.tsx");
-    const figure = repo.slice(repo.indexOf("function ScoreFigure"));
-    expect(figure).toMatch(/rank !== null && rank !== undefined && rankedTotal/);
-    expect(figure).toMatch(/#\{fmtCount\(rank\)\} из \{fmtCount\(rankedTotal\)\}/);
-    expect(figure).toContain('className="rh-score-figure__rank"');
+    const line = repo.slice(repo.indexOf("function PositionLine"), repo.indexOf("// ---------- категории ----------"));
+    expect(line).toMatch(/<Text color="secondary"[^>]*>[\s\S]*?\{position\.rank\}[\s\S]*?<\/Text>/);
+    // В5.9 круг 3 (п.4): title — только на тексте места, не на обертке с ⓘ (иначе два тултипа)
+    expect(line).not.toMatch(/<Text[^>]*title=/);
+    expect(line).not.toMatch(/<Label[^>]*>\s*\{position\.rank\}/);
   });
 });
