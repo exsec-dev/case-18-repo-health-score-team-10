@@ -1,25 +1,11 @@
-// audit-v44r2-repro.test.ts — репро круга 2 В4.4 (ре-аудит четвёркой
-// 19.09.2026). Закон круга — workers/V4.4-round2-oneshot.md; детали file:line —
-// reports/m44-acceptance-hq.md и reports/2026-09-19-v44-reaudit-{bugs,reliability,security,ux}.md.
-//
-// Б0 покрывает критичную пару с общим корнем (компрессия no-data
-// timeline-фактов, внесена фиксом Б3 круга 1) и дрейф правила пригодности:
-//   R1а (Б1) — карточка и MD репо со сканом, где git-факты no-data и timeline
-//              сжат (`z:`), отвечают 200 и честным состоянием, а не 500
-//              (сырой JSON.parse в gitLimitsHit, reason `empty`);
-//   R1б (Б1) — runStartupRescore при needsRescore()=true и сжатом no-data
-//              timeline не бросает и двигает курсор (json_extract →
-//              `malformed JSON` в migrateEligibility, крэш-луп деплой-окна);
-//   R3  (Б1) — JS-правило пригодности и SQL-правило дают ОДИНАКОВЫЙ
-//              rating_eligible на сжатом no-data timeline (дрейф Прод-3).
-//
-// На Б0-коммите находки стоят под обёрткой `repro` (в строгом режиме —
-// красные); обёртка снимается в блоке, закрывшем находку, сами утверждения
-// при этом не меняются. Строгий режим — для команды приёмки:
-//   AUDIT_STRICT=1 bun test tests/audit-v44r2-repro.test.ts
+// Репро-тесты на дефекты сжатого no-data timeline (значение `z:` при статусе
+// no-data): карточка и MD не падают 500, стартовый рескор не бросает, JS- и
+// SQL-правила пригодности дают одинаковый исход. Незакрытый дефект
+// оборачивается в `repro`: в обычном прогоне это test.failing, под
+// AUDIT_STRICT=1 — обычный test, который краснеет, пока дефект не исправлен.
 //
 // Живых запросов нет: только временные БД и настоящий сервер во временном
-// DATA_DIR (шов Ф1.13).
+// DATA_DIR.
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -32,9 +18,6 @@ import { encodeFactValue, TIMELINE_KIND } from "../src/collectors/facts";
 import type { Database } from "bun:sqlite";
 import { seedRepo, seedScan, seedScore, type ApiTestDb, type FactSpec } from "./api-fixtures";
 
-// Обёртка строгого режима (как в audit-v44-repro): в обычном прогоне —
-// `test.failing` (набор зелёный, красноты в CI нет), под AUDIT_STRICT=1 —
-// обычный `test`, то есть красный, пока находка не закрыта.
 const repro = process.env.AUDIT_STRICT ? test : test.failing;
 
 const ROOT = join(import.meta.dir, "..");
@@ -52,10 +35,10 @@ function tempDir(prefix: string): string {
 }
 
 /**
- * Фикстура находки: скан с упавшим git-каналом (все GIT_KINDS no-data с
- * reason `empty` — «пустой репо», он пригоден для рейтинга) и живым REST.
- * Timeline-строка переводится в сжатую форму `z:` — как её писал insertFacts
- * круга 1 (кодек жал по kind, не глядя на статус). Возвращает scanId.
+ * Скан с упавшим git-каналом (все GIT_KINDS no-data с reason `empty` —
+ * «пустой репо», он пригоден для рейтинга) и живым REST. Timeline-строка
+ * переводится в сжатую форму `z:`, как ее писал бы кодек, сжимающий по kind
+ * без оглядки на статус. Возвращает scanId.
  */
 function seedScanWithCompressedNoDataTimeline(t: ApiTestDb, repoId: number, spec: { startedAt?: string } = {}): number {
   const startedAt = spec.startedAt ?? "2026-09-19T00:00:00Z";
@@ -72,18 +55,17 @@ function seedScanWithCompressedNoDataTimeline(t: ApiTestDb, repoId: number, spec
     { key: "activity.rest", source: "rest:activity", value: { contributors: 0, releases: 0, pulls_open: 0, pulls_created_at: [], releases_released_at: [] } },
   ];
   const scanId = seedScan(t, repoId, { facts, status: "partial", publicStatus: "partial", startedAt });
-  // как insertFacts круга 1: значение timeline в БД — сырая z:-строка (без
-  // JSON-кавычек), статус факта no-data
+  // значение timeline в БД — сырая z:-строка (без JSON-кавычек), статус
+  // факта no-data
   const compressed = encodeFactValue(TIMELINE_KIND, { reason: "empty", detail: "no commits at HEAD" });
   t.db.query("UPDATE facts SET value = ? WHERE scan_id = ? AND key = 'activity.git.timeline'").run(compressed, scanId);
   return scanId;
 }
 
 // ---------------------------------------------------------------------------
-// R1а (Б1). Карточка/MD репо со сжатым no-data timeline: маршрут не бросает,
-// тело приходит (200), activity-канал остаётся no-data. Репро Ищейки 1а:
-// сырой JSON.parse в gitLimitsHit на reason `empty` доходил до сжатого
-// timeline и отдавал 500 обеим поверхностям.
+// Карточка/MD репо со сжатым no-data timeline: маршрут не бросает, тело
+// приходит (200), activity-канал остается no-data. Сырой JSON.parse в
+// gitLimitsHit на сжатом timeline отдавал бы 500 обеим поверхностям.
 // ---------------------------------------------------------------------------
 
 describe("R1а (Б1): карточка и MD при сжатом no-data timeline отвечают 200", () => {
@@ -130,7 +112,7 @@ describe("R1а (Б1): карточка и MD при сжатом no-data timelin
       await Bun.sleep(100);
     }
     expect(up).toBe(true);
-    // маршрут не бросает: тело карточки приходит (на Б0 — 500 SyntaxError)
+    // маршрут не бросает: тело карточки приходит, а не 500 SyntaxError
     const res = await fetch(`${base}/api/repos/r2/empty-repo`);
     expect(res.status).toBe(200);
     const card = (await res.json()) as {
@@ -152,9 +134,9 @@ describe("R1а (Б1): карточка и MD при сжатом no-data timelin
 });
 
 // ---------------------------------------------------------------------------
-// R1б (Б1). Стартовый рескор при сжатом no-data timeline не бросает и двигает
-// курсор. Репро 1б: json_extract на z:-строке бросал `malformed JSON` в
-// migrateEligibility (вне try), вызов без .catch — exit 1 и крэш-луп.
+// Стартовый рескор при сжатом no-data timeline не бросает и двигает курсор.
+// json_extract на z:-строке бросает `malformed JSON`; без обработки в
+// migrateEligibility это exit 1 и крэш-луп на старте.
 // ---------------------------------------------------------------------------
 
 describe("R1б (Б1): runStartupRescore жив на сжатом no-data timeline", () => {
@@ -182,7 +164,7 @@ describe("R1б (Б1): runStartupRescore жив на сжатом no-data timelin
     db.close();
     const db2 = openDb({ ...loadConfig(), dataDir: dir });
     const out = await runStartupRescore(db2, { limit: 1, pauseMs: 0 });
-    // не бросает (на Б0 — malformed JSON из migrateEligibility) и двигает курсор
+    // не бросает malformed JSON из migrateEligibility и двигает курсор
     expect(out).toEqual({ stopped: "done" });
     expect(getMeta(db2, RESCORE_CURSOR)).toBe(String(last));
     expect(getMeta(db2, "derived_version")).toBe(String(DERIVED_VERSION));
@@ -192,8 +174,8 @@ describe("R1б (Б1): runStartupRescore жив на сжатом no-data timelin
 });
 
 // ---------------------------------------------------------------------------
-// R3 (Б1). JS-правило пригодности и SQL-правило совпадают на сжатом no-data
-// timeline (дрейф Прод-3: JS fail-soft читал reason как null, SQL падал).
+// JS-правило пригодности и SQL-правило совпадают на сжатом no-data timeline:
+// JS fail-soft читал бы reason как null, а SQL падал.
 // ---------------------------------------------------------------------------
 
 describe("R3 (Б1): JS и SQL правила пригодности совпадают на сжатом no-data timeline", () => {
@@ -234,8 +216,7 @@ describe("R3 (Б1): JS и SQL правила пригодности совпад
     // свойство репо), совпадение не «оба упали»
     expect(jsOf(plain)).toBe(true);
     expect(sqlOf(plain)).toBe(true);
-    // находка: на сжатом no-data timeline правила обязаны дать ОДНАКОВЫЙ исход
-    // (на Б0 SQL падал malformed JSON; дрейф — JS true против SQL-краха)
+    // на сжатом no-data timeline правила обязаны дать одинаковый исход
     expect(jsOf(compressed)).toBe(sqlOf(compressed));
     db.close();
   });
@@ -246,8 +227,8 @@ function getMeta(db: Database, key: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// Самопроверка строгого режима (по образцу audit-v44-repro): на Б0-коммите
-// красная вместе с находками («parked» непуст), к Б5/Б6 зеленеет сама.
+// Самопроверка строгого режима: красная, пока хоть один тест стоит под
+// repro/test.failing.
 // ---------------------------------------------------------------------------
 
 if (process.env.AUDIT_STRICT) {

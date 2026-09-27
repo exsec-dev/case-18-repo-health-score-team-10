@@ -1,10 +1,7 @@
-// rhythm.ts — признаки ритма коммитов для проверки на накрутку (В5.2, Б1;
-// TASK.md §2 «В5.2 — публичный AI-обзор…» п.2). Закон 5 (tool-first): ровность
-// интервалов, всплеск и подмену авторов считает КОД по полной ленте событий, а
-// флаггер получает готовые числа одним фактом `activity.rhythm`. Раньше флаггер
-// видел только `activity.git.summary` со счетчиком роботов v1 (интервальный слой,
-// вырезанный из Score за ложные срабатывания) и помечал репо по этому счетчику.
-// Робот-истина — robot2 (как в Score): robot — паттерн автора, sync — всплеск.
+// Признаки ритма коммитов для проверки на накрутку. Ровность интервалов, всплеск и
+// подмену авторов считает КОД по полной ленте событий, а флаггер (LLM) получает
+// готовые числа одним фактом `activity.rhythm` — измеримое не отдается модели.
+// Кто робот — решает robot2, как и в Score: robot — паттерн автора, sync — всплеск.
 import { robotIntervalFlags } from "../collectors/git";
 import { NOREPLY_DOMAINS, ROBOT_EMAILS } from "../score/model";
 import { robot2Flags, type CommitActor } from "../score/robot2";
@@ -16,7 +13,7 @@ export const RHYTHM_KEY = "activity.rhythm";
 export const RECENT_WINDOW_DAYS = 7;
 /** Сколько недель до окна берется для обычного недельного темпа. */
 export const BASELINE_WEEKS = 12;
-/** Окно детектора ровных серий: последние N коммитов людей (аудит надежности М10). */
+/** Окно детектора ровных серий: последние N коммитов людей (детектор квадратичен, см. ниже). */
 export const REGULAR_WINDOW = 2000;
 
 const DAY_MS = 24 * 3600_000;
@@ -83,7 +80,7 @@ const round2 = (x: number): number => Math.round(x * 100) / 100;
 /**
  * Признаки ритма по полной ленте (`activity.git.timeline.events`) на дату
  * замера `asOf` (окончание скана). Порядок событий не важен — считается по
- * датам. Пустая лента — null: ритма нет, проверка не проводится (tri-state).
+ * датам. Пустая лента → null: проверка не проводится.
  */
 export function rhythmSignals(events: TimelineEvent[], asOf: Date): RhythmSignals | null {
   if (events.length === 0) return null;
@@ -118,10 +115,9 @@ export function rhythmSignals(events: TimelineEvent[], asOf: Date): RhythmSignal
   const stamps = human.map((h) => h.ts).filter((t): t is number => t !== null).sort((a, b) => a - b);
   const intervals: number[] = [];
   for (let k = 1; k < stamps.length; k++) intervals.push(stamps[k]! - stamps[k - 1]!);
-  // серии ровных интервалов — тот же детектор, что был в robot v1 (≥6 подряд, ±20%
-  // от медианы серии): для Score он вырезан, для подозрения на накрутку — признак
-  // аудит надежности М10: детектор серий квадратичен на «почти ровной» ленте (ровно на
-  // паттерне накрутки) — доля считается по последним REGULAR_WINDOW коммитам людей
+  // серии ровных интервалов (≥6 подряд, ±20% от медианы серии): из Score детектор
+  // убран за ложные срабатывания, но как признак накрутки годится. На «почти ровной»
+  // ленте (как раз паттерн накрутки) он квадратичен — поэтому считаем по окну
   const window = stamps.slice(-REGULAR_WINDOW);
   const regular = window.length >= 6 ? robotIntervalFlags(window.map((ts) => ({ ts }))).filter(Boolean).length : null;
 

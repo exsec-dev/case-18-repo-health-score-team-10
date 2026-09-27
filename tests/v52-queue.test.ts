@@ -1,7 +1,6 @@
-// v52-queue.test.ts — В5.2, очередь: «ничто не должно блокировать пользовательские запросы;
-// большие репозитории не должны блочить все» (решение Екатерины 25.09, TASK.md §2 «В5.2 —
-// очередь»). Живой случай: AI-обзор и скан пользователя полчаса ждали планового скана
-// тяжелого репо — в роли `all` один цикл вел обе полосы и все роды заявок.
+// Очередь: ничто не блокирует пользовательские запросы, большие репозитории не
+// блокируют все остальное. Иначе AI-обзор и скан пользователя ждут планового
+// скана тяжелого репо, если один цикл ведет обе полосы и все роды заявок.
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -110,7 +109,7 @@ describe("claim: у кого уже идет заявка рода — в кон
     expect(claimNext(db, new Date(), 60_000, { queue: "user", kind: "scan" })!.id).toBe(b1);
     db.query("UPDATE jobs SET status = 'queued', claimed_at = NULL, lease_until = NULL, attempts = 0 WHERE id = ?").run(b1);
     expect(claimNext(db, new Date(), 60_000, { queue: "user", kind: "scan", perUserExclusive: true })!.id).toBe(c2);
-    // ждет только человек 1 — свободный слот не простаивает (аудит О4, слово Екатерины «делай»)
+    // ждет только человек 1 – свободный слот не простаивает
     expect(claimNext(db, new Date(), 60_000, { queue: "user", kind: "scan", perUserExclusive: true })!.id).toBe(b1);
   });
   test("зависшая заявка (лиз истек) автора не отодвигает; заявка другого рода — тоже", () => {
@@ -196,10 +195,9 @@ describe("живые циклы: плановый скан тяжелого ре
     const hang = new Promise<void>((r) => (release = r));
     const started: string[] = [];
     const base = loadConfig();
-    // приёмка В5.5 тур 1 (HQ): кэш summary-заявки зависит от дефолта кулдауна —
-    // .env стенда с дебаг-кулдауном (QUEUE_SUMMARY_COOLDOWN_MS=1) снимал кэш,
-    // и «заявка закрывается без клона» уходила в настоящий git clone. Пин —
-    // тест идёт на дефолте, не на ambient-окружении (правило 22.09 наоборот).
+    // Кэш summary-заявки зависит от кулдауна: с дебаг-кулдауном из .env
+    // (QUEUE_SUMMARY_COOLDOWN_MS=1) кэш снимается и «заявка закрывается без
+    // клона» уходит в настоящий git clone. Кулдаун задан явно, не из окружения.
     const config = {
       ...base,
       auth: { ...base.auth, appSecret: base.auth.appSecret ?? "test-secret-test-secret-test-secret" },
@@ -223,8 +221,8 @@ describe("живые циклы: плановый скан тяжелого ре
       const deadline = Date.now() + 5000;
       while (Date.now() < deadline && [lightUser, summary, check, secondOfUser1].some((id) => statusOf(db, id) !== "done")) await new Promise((r) => setTimeout(r, 20));
       expect({ light: statusOf(db, lightUser), summary: statusOf(db, summary), check: statusOf(db, check) }).toEqual({ light: "done", summary: "done", check: "done" });
-      // тяжелые идут; вторая заявка человека 1 — после заявки человека 2, но свободный слот
-      // не простаивает (аудит О4: приоритет, не запрет)
+      // тяжелые идут; вторая заявка человека 1 – после заявки человека 2, но свободный слот
+      // не простаивает: это приоритет, а не запрет
       expect(statusOf(db, periodic)).toBe("running");
       expect(statusOf(db, heavyUser)).toBe("running");
       expect(statusOf(db, secondOfUser1)).toBe("done");
@@ -242,7 +240,7 @@ describe("живые циклы: плановый скан тяжелого ре
   });
 });
 
-// ---------- аудит очереди (reports/2026-09-25-m52-queue-audit.md): правки О1-О11 ----------
+// ---------- правки очереди по аудиту ----------
 
 import { getHealth } from "../src/api/health";
 import { makeLlm, ProviderGate } from "../src/llm";
@@ -443,10 +441,9 @@ describe("живые циклы: два тяжелых репо двух люд�
     let release!: () => void;
     const hang = new Promise<void>((r) => (release = r));
     const base = loadConfig();
-    // приёмка В5.5 тур 1 (HQ): кэш summary-заявки зависит от дефолта кулдауна —
-    // .env стенда с дебаг-кулдауном (QUEUE_SUMMARY_COOLDOWN_MS=1) снимал кэш,
-    // и «заявка закрывается без клона» уходила в настоящий git clone. Пин —
-    // тест идёт на дефолте, не на ambient-окружении (правило 22.09 наоборот).
+    // Кэш summary-заявки зависит от кулдауна: с дебаг-кулдауном из .env
+    // (QUEUE_SUMMARY_COOLDOWN_MS=1) кэш снимается и «заявка закрывается без
+    // клона» уходит в настоящий git clone. Кулдаун задан явно, не из окружения.
     const config = {
       ...base,
       auth: { ...base.auth, appSecret: base.auth.appSecret ?? "test-secret-test-secret-test-secret" },

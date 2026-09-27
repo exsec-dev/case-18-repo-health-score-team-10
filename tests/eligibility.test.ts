@@ -1,5 +1,4 @@
-// eligibility.test.ts — В4.1-fix Б1: пригодность скана для рейтинга
-// (К-Ф1.1), публичный статус скана (Ф1.11), индексы (Ф1.12). Правило —
+// Пригодность скана для рейтинга, публичный статус скана, индексы. Правило —
 // одно в TS и SQL (миграция); рейтинг, /api/meta, «мои репо» и публичная
 // часть карточки читают последний пригодный скан; блок scan — последний
 // скан; канальная часть — последняя строка оценки. Сети нет.
@@ -51,9 +50,9 @@ const CASES: Case[] = [
   ["no-data limits (репо больше лимита)", replace(healthy(), noDataFact("tree.stats", "limits", "git")), PERIODIC, true],
   ["no-data empty (пустой репо)", replace(healthy(), noDataFact("docs.readme", "empty", "git")), PERIODIC, true],
   ["каналы CI/Security не влияют", replace(healthy(), noDataFact("cicd.runs", "access", "rest:cicd"), noDataFact("appsec.findings", "access", "appsec:api")), PERIODIC, true],
-  // круг 2 (LOW-1): статус скана bad — непригоден при любых фактах
+  // статус скана bad — непригоден при любых фактах
   ["status bad", healthy(), { status: "bad", userId: null }, false],
-  // круг 2 (С5): юзерский скан с любым no-data git-фактом — непригоден
+  // юзерский скан с любым no-data git-фактом — непригоден
   ["юзерский скан, git no-data limits", replace(healthy(), noDataFact("tree.stats", "limits", "git")), { status: "partial", userId: 1 }, false],
   ["юзерский скан, всё ok", healthy(), { status: "ok", userId: 1 }, true],
 ];
@@ -127,7 +126,7 @@ describe("runScan: хук пишет пригодность, мета — тол
     const deps = (restFacts: Fact[], m: ReturnType<typeof meta>): ScanDeps => ({
       db,
       scClient: null,
-      // М7 (круг 2): адреса обязательны типом; каналы подменены швами
+      // адреса обязательны типом; каналы подменены швами
       restBase: "http://127.0.0.1:1",
       appsecBase: "http://127.0.0.1:1",
       collectGit: async () => ({ facts: git }),
@@ -189,10 +188,10 @@ describe("чтение: последний пригодный (P) и после�
     const running = t.db.query("INSERT INTO scans (repo_id, started_at, status, public_status, trigger) VALUES (?, '2026-09-17T10:00:00Z', 'running', 'running', 'user')").run(repoId);
 
     const item = listRepos(t.db, DEFAULT_QUERY).items.find((i) => i.repo === "repo")!;
-    // круг 2 (LOW-2): статус и время — последнего скана, как в карточке
+    // статус и время — последнего скана, как в карточке
     expect({ score: item.healthcraftIndex, status: item.scanStatus }).toEqual({ score: 60, status: "running" });
-    // В4.6 (Б9, У15): в meta появился знаменатель охвата — размер каталога.
-    // Здесь он равен 1: в фикстуре один публичный rating_active репозиторий
+    // знаменатель охвата в meta — размер каталога; здесь он равен 1: в фикстуре
+    // один публичный rating_active репозиторий
     expect(getMeta(t.db).repos).toEqual({ scored: 1, nullScore: 0, catalog: 1 });
 
     const granted = { cicd: "granted", appsec: "granted", repo: "granted" } as const;
@@ -255,12 +254,13 @@ describe("«мои репо» и заявка (К-Ф1.1)", () => {
     const userId = upsertUser(t.db, "ya-elig2", "elig2");
     const priv = seedRepo(t, { org: "me", repo: "secret" });
     t.db.query("UPDATE repos SET visibility = 'private' WHERE id = ?").run(priv);
-    // Ф2.20: кабинет favorites-only — права приватного репо здесь через own-скан зрителя
+    // кабинет показывает только избранное; права приватного репо здесь через
+    // own-скан зрителя
     seedScore(t, priv, seedScan(t, priv, { ratingEligible: false, status: "partial", startedAt: "2026-09-10T00:00:00Z", userId }), { total: 44 });
     seedScore(t, priv, seedScan(t, priv, { ratingEligible: false, status: "bad", startedAt: "2026-09-11T00:00:00Z", userId }), { total: null });
     const pub = seedRepo(t, { org: "me", repo: "open" });
     seedScore(t, pub, seedScan(t, pub, { ratingEligible: false, status: "partial", startedAt: "2026-09-12T00:00:00Z" }), { total: 33 });
-    // Ф2.20: записи кабинета — только избранное; оба репо в нём
+    // оба репо в избранном
     for (const slug of ["secret", "open"]) {
       t.db.query("INSERT INTO favorites (user_id, org_slug, repo_slug, added_at) VALUES (?, 'me', ?, '2026-09-19T00:00:00Z')").run(userId, slug);
     }

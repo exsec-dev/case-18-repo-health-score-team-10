@@ -1,11 +1,8 @@
-// App.tsx — развилка маршрутов (History API, src/web/router.ts) внутри
-// каркаса SourceCraft (Shell.tsx). Мета грузится один раз на всё
-// приложение: версия модели, имена и веса категорий, порог NULL приходят
-// с сервера, чтобы экран и методика не разъезжались при смене
-// model_version. Сессия (В4) нужна каркасу: вход в rail или логин.
-// В4.8.5: сессия и задания — одно состояние на вкладку (`AppState`,
-// session.tsx): один `/api/me`, один опрос `/api/me/jobs`, тост об итоге
-// анализа из любого экрана.
+// App.tsx — развилка маршрутов внутри каркаса SourceCraft (Shell.tsx).
+// Мета (версия модели, имена и веса категорий, порог NULL) грузится с сервера
+// один раз, чтобы экран и методика не разъезжались при смене model_version.
+// Сессия и задания — одно состояние на вкладку (`AppState` в session.tsx):
+// один `/api/me`, один опрос `/api/me/jobs`, тост об итоге анализа на любом экране.
 import { CircleQuestion } from "@gravity-ui/icons";
 import { Alert, Flex } from "@gravity-ui/uikit";
 import { useState } from "react";
@@ -34,14 +31,13 @@ function Routes() {
   const { me } = useSession();
   const metaData = meta.state.kind === "ok" ? meta.state.data : null;
   const meData = dataOf(me);
-  // В4.4 (кластер M-9): сбой /api/meta больше не молчит скелетоном —
-  // честный Alert с повтором; страницы живут на RU-именах из констант
+  // сбой /api/meta не прячется за скелетоном: Alert с повтором, а страницы
+  // работают на русских именах из констант
   const metaFailed = meta.state.kind === "error" ? meta.state.message : null;
 
-  // карточка репозитория — часть раздела «Рейтинг»: туда ведут его строки.
-  // В5.3 (25.09): закрытый репозиторий в рейтинг не входит — его карточка
-  // принадлежит «Избранному» (как и крошка); раздел сообщает сама карточка,
-  // только она знает видимость. Смена адреса сбрасывает сообщение
+  // карточка репозитория относится к «Рейтингу», но закрытый репозиторий в
+  // рейтинг не входит — его карточка принадлежит «Избранному». Раздел сообщает
+  // сама карточка: только она знает видимость. Смена адреса сбрасывает сообщение
   const [repoSection, setRepoSection] = useState<{ key: string; section: Section } | null>(null);
   const repoKey = route.kind === "repo" ? `${route.org}/${route.repo}` : null;
   const section: Section =
@@ -73,19 +69,16 @@ function Routes() {
         </Flex>
       )}
       {route.kind === "rating" && <Rating search={route.search} meta={metaData} metaFailed={metaFailed !== null} />}
-      {/* В4.8.5 (К8.5.1, С9-2): `key` по слагу — состояние карточки A (фаза
-          анализа, опросы) не переезжает на карточку B при SPA-переходе */}
+      {/* `key` по слагу: состояние одной карточки (фаза анализа, опросы) не
+          переезжает на другую при SPA-переходе */}
       {route.kind === "repo" && <RepoPage key={`${route.org}/${route.repo}`} org={route.org} repo={route.repo} meta={metaData} onSection={(s) => setRepoSection({ key: `${route.org}/${route.repo}`, section: s })} />}
       {route.kind === "me" && <MePage meta={metaData} />}
       {route.kind === "compare" && <ComparePage search={route.search} />}
       {route.kind === "settings" && <SettingsPage />}
       {route.kind === "not-found" && (
         <Page crumbs={[{ text: "Страница не найдена" }]}>
-          {/* Доводка 21.09: перечисление маршрутов убрано. «/repo/{org}/{repo}»
-              ничего не говорит человеку, перешедшему по старой ссылке, — это
-              отладочный вывод, показанный посетителю. У платформы на 404 ровно
-              две строки и действие; сам адрес зритель видит в адресной
-              строке браузера. */}
+          {/* как у платформы: две строки и действие, без перечня маршрутов –
+              шаблоны адресов ничего не скажут пришедшему по старой ссылке */}
           <EmptyState
             icon={CircleQuestion}
             title="Страница не найдена"

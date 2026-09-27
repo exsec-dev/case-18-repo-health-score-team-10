@@ -1,5 +1,4 @@
-// v52-audit-fixes.test.ts — В5.2: исправления по код-аудиту вехи
-// (reports/2026-09-25-m52-code-audit-security.md, …-reliability.md) — поведенческие тесты.
+// Поведенческие тесты на исправления по аудиту кода (безопасность и надежность).
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";

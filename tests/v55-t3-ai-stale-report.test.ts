@@ -1,6 +1,6 @@
-// V5.5 tour 3 (27.09, owner; defect 2 of the 27.09 evaluation): an AI review made
-// on a previous scan is marked stale in the MD and PDF report, like the "Устарел"
-// label on the card. Behavioral on card data: marked only when a newer scan exists.
+// An AI review made on a previous scan is marked stale in the MD and PDF report,
+// like the "Устарел" label on the card. Behavioral on card data: marked only when a
+// newer scan exists.
 import { describe, expect, test } from "bun:test";
 import type { RepoCard } from "../src/api/repos";
 import { buildReportModel, renderRepoReport } from "../src/report/markdown";

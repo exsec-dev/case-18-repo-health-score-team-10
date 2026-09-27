@@ -1,4 +1,4 @@
-// В5.9 (HQ): наши стили — после CSS компонентов в обоих режимах Bun (cssOrder.ts).
+// Наши стили – после CSS компонентов в обоих режимах Bun (cssOrder.ts).
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";

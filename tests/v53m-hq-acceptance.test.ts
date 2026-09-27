@@ -1,6 +1,5 @@
-// Приемка HQ круга 2 модели 4.3.0-hci (24.09): правки по третьему аудиту
-// (reports/2026-09-24-m53-method-reaudit3-raw/) и уточнению В3 владельца.
-// Поведенческие тесты на данных (AGENTS.md 21.09/23.09).
+// Поведенческие тесты на данных для правок модели по повторному аудиту
+// методики.
 import { describe, expect, test } from "bun:test";
 import { computeFromFacts } from "../src/score/compute";
 import { isSourcePath, isTestPath, rootHasNoSource } from "../src/collectors/source-path";

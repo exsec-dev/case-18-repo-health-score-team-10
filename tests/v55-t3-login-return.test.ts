@@ -1,5 +1,4 @@
-// V5.5 tour 3 round 5 (finding 26 of the design audit, 27.09): login from a repo card
-// returns to that card. Behavioral: the path filter (no open redirect), the client
+// Login from a repo card returns to that card. Behavioral: the path filter (no open redirect), the client
 // login href, and the real /auth/ya -> callback round trip on a spawned server
 // (mock Ya ID), including the default "/me" when no path was given.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";

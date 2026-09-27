@@ -1,12 +1,11 @@
-// ai-quota.ts — лимиты AI и пароль неограниченного доступа (В5.2, Б4; TASK.md §2
-// «В5.2 — публичный AI-обзор, „Проверить оценку“, лимиты и пароль» п.5-6).
-// Учет — по строкам jobs в БД, а не в памяти процесса (память сбрасывается
-// перезапуском и не видна другим репликам). Три слоя: на человека за скользящий
+// Лимиты AI-действий и пароль неограниченного доступа.
+// Учет — по строкам jobs в БД, а не в памяти процесса: память сбрасывается
+// перезапуском и не видна другим репликам. Три слоя: на человека за скользящий
 // час, на человека за сутки, на весь сервис за сутки; сутки — календарные МСК.
-// Пароль: пользователи с отметкой не расходуют общий лимит; для них — свой
-// аварийный потолок обзоров. Не списываются: повтор по тому же скану (заявки нет)
-// и заявки, где модель не расходовала кредиты (сбой до модели, провайдер не
-// ответил); отказ валидатора списывается — вызовы уже сделаны.
+// Пользователи с паролем не расходуют общий лимит, у них свой аварийный потолок.
+// Не списываются повтор по тому же скану (заявки нет) и заявки, где модель не
+// расходовала кредиты (сбой до модели, провайдер не ответил); отказ валидатора
+// списывается — вызовы модели уже сделаны.
 import type { Database } from "bun:sqlite";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { AiActionLimits, AiConfig } from "../config";
@@ -58,10 +57,7 @@ export interface ActionQuota {
   dayResetAt: string;
 }
 
-/**
- * Итог заявки «текст этого анализа уже был — модель не вызывалась»: заявка done, но
- * лимит не списывается (аудит М3: прежде такой done считался).
- */
+/** Итог заявки, для которой нашелся готовый текст: заявка done, но лимит не списывается. */
 export const AI_CACHED_NOTE = "текст этого анализа уже был – модель не вызывалась";
 
 const CHARGED = `(status IN ('queued', 'running') OR (status = 'done' AND (error IS NULL OR error != '${AI_CACHED_NOTE}')) OR (status = 'failed' AND error = ?))`;
@@ -85,7 +81,7 @@ export function aiQuota(db: Database, userId: number, action: AiAction, cfg: AiC
     count(db, `kind = ? AND user_id IS NOT NULL AND ai_unlocked = ? AND created_at >= ? AND ${CHARGED}`, kind, unlockedJobs, dayFrom, rejected);
 
   if (unlocked) {
-    // аварийный потолок для всех с паролем: обзоры и проверки — по 100 в сутки (п.6, 25.09)
+    // аварийный потолок, общий для всех пользователей с паролем
     const cap = action === "overview" ? cfg.unlockedOverviewPerDay : cfg.unlockedCheckPerDay;
     return {
       action,
@@ -148,8 +144,8 @@ export function quotaRefusal(q: ActionQuota): QuotaRefusal | null {
 // ---------- пароль неограниченного доступа ----------
 
 /**
- * Отпечаток пароля в users.ai_unlock: сам пароль в БД не пишется. Аудит М5: HMAC-SHA256 с
- * ключом APP_SECRET — по копии БД пароль не подбирается без секрета сервера.
+ * Отпечаток пароля в users.ai_unlock: сам пароль в БД не пишется. HMAC с ключом
+ * APP_SECRET — по копии БД пароль не подобрать без секрета сервера.
  */
 export function unlockFingerprint(password: string, key: string | null): string {
   return `hmac-sha256:${createHmac("sha256", key ?? "").update(password, "utf8").digest("hex")}`;

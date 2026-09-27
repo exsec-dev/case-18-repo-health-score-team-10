@@ -1,9 +1,8 @@
-// В5.3-М — сборщик модели 4.3.0-hci (workers/V5.3-method-oneshot.md, §2
-// «Сборщик»): версия сборщика и доочередь (Н1), blame по sha (Н2),
-// перечисления спеки (Н6), длительность CI по успешным (Н8б), YAML-маркеры
-// (Н12), файлы тестов (Р1), время жизни задач (Р2), маркеры в комментариях
-// (Р4а), содержимое документов (Р4в), answered/censored (Н14а).
-// Поведенческие тесты на данных: локальный git, фейковые REST/AppSec, временная БД.
+// Сборщик фактов: версия сборщика и доочередь, blame по sha, перечисления
+// спеки, длительность CI по успешным запускам, YAML-маркеры, файлы тестов,
+// время жизни задач, маркеры в комментариях, содержимое документов,
+// answered/censored. Поведенческие тесты на данных: локальный git, фейковые
+// REST/AppSec, временная БД.
 import { afterAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -115,7 +114,7 @@ describe("Н2: git blame — время строки по sha заголовка
 describe("Р4а: маркеры техдолга — без учета регистра и только в комментариях", () => {
   test("Р4а: маркер в комментарии любого регистра — пометка; HACK и XXX — в корзину fixme", () => {
     expect(todoMarkerKind("// todo: lower case")).toBe("TODO");
-    // круг 2 (К1): `#` — комментарий только в начале строки
+    // `#` – комментарий только в начале строки
     expect(todoMarkerKind("# Todo later")).toBe("TODO");
     expect(todoMarkerKind("/* FIXME */")).toBe("FIXME");
     expect(todoMarkerKind("  * hack around the api")).toBe("FIXME");
@@ -249,7 +248,6 @@ describe("Н6: перечисления спеки", () => {
     expect(sample.answered).toBe(1);
   });
 
-  // круг 2 (К4, E1): вытесняет «сбой in_progress — факт bad»
   test("Н6 → К4: сбой запроса in_progress — задачи по open + closed с пометкой, факт не bad", async () => {
     const out = await collectRestFacts(restClient({ open: [issue("1", "2026-09-10T00:00:00Z")], progress: { status: 503, json: null, bodyText: "" } }), "o/r", { commentsTopN: 0, now: NOW });
     const stats = out.facts.find((x) => x.key === "issues.stats")!;
@@ -379,7 +377,7 @@ describe("Н6: AppSec — только открытые группы", () => {
   });
 });
 
-// ---------- Н1: версия сборщика ----------
+// ---------- версия сборщика ----------
 
 describe("Н1: версия сборщика и доочередь ночной волны", () => {
   const dir = mkdtempSync(join(tmpdir(), "rh-v53m-db-"));
@@ -405,7 +403,7 @@ describe("Н1: версия сборщика и доочередь ночной 
   }
 
   test("Н1: схема 2.2 — колонка scans.collector_version; openDb повторно идемпотентен", () => {
-    expect(SCHEMA_VERSION).toBe("2.4"); // В5.5 тур 1 (W2): поверх 2.3 — rating_snapshots, аддитивно
+    expect(SCHEMA_VERSION).toBe("2.4"); // поверх 2.3 – rating_snapshots, аддитивно
     const cols = (db.query("PRAGMA table_info(scans)").all() as { name: string }[]).map((c) => c.name);
     expect(cols).toContain("collector_version");
     const again = openDb({ ...loadConfig(), dataDir: dir });
@@ -427,7 +425,6 @@ describe("Н1: версия сборщика и доочередь ночной 
     expect(out.enqueued.some((e) => e.slug === "rc/fresh")).toBe(false);
   });
 
-  // круг 2 (К8, решение В2): дефолт 3000 → 5000
   test("Н1 + К8: порция по умолчанию — 5000 (переменная не задана), 0 выключает, мусор — дефолт", () => {
     expect(recollectPerWave({})).toBe(RECOLLECT_PER_WAVE_DEFAULT);
     expect(RECOLLECT_PER_WAVE_DEFAULT).toBe(5000);

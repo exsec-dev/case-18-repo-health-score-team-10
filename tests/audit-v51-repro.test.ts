@@ -1,20 +1,12 @@
-// audit-v51-repro.test.ts — репро-трипваиры фикс-раунда В5.1 (блок Б0).
-// Закон вехи: reports/2026-09-20-m5-plan.md ревизия 3.1 + отчёты ночного
-// код-аудита reports/2026-09-22-code-audit-v5-{bugs,security,reliability,
-// llm-engineer}.md; одноразовый промпт — workers/V5.1-oneshot.md.
+// Репро-тесты на дефекты, найденные код-аудитом AI-обзора: валидатор LLM-вывода,
+// инструменты клона (симлинки, deny-list, бюджет), очередь summary-заявок,
+// хартии и входы ролей. Обертка `repro` – в обычном прогоне `test.failing`, под
+// AUDIT_STRICT=1 обычный `test`; в конце файла строгая самопроверка, что под
+// `repro` ничего не осталось.
 //
-// Механика — конвенция tests/audit-*-repro (прецедент audit-v5-repro):
-// находка стоит под обёрткой `repro` — в обычном прогоне это `test.failing`
-// (набор зелёный), под AUDIT_STRICT=1 — обычный `test`, то есть красный,
-// пока находка не закрыта. Закрытая находка выходит из-под обёртки в
-// закрывшем её блоке, утверждение при этом НЕ меняется. Контракты будущих
-// правок (новые параметры/варианты возврата) вызываются ТОЛЬКО через
-// importLater: репро обязано быть красным тестом, а не красной типизацией.
-// В конце файла — strict-самопроверка «ни одной находки под repro».
-//
-// Все находки — поведенческие: временные БД, временные каталоги-«клоны»
-// с трекнутым симлинком на файл хоста. Живых вызовов LLM и живых запросов
-// НЕТ; живая БД data/ не открывается.
+// Все проверки поведенческие: временные БД, временные каталоги-«клоны» с
+// трекнутым симлинком на файл хоста. Живых вызовов LLM и живых запросов нет;
+// живая БД data/ не открывается.
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
@@ -31,9 +23,8 @@ import { spawnServer, startMockApi } from "./server-harness";
 import type { CallLlm } from "../src/llm";
 
 /**
- * Импорт контракта, которого на Б0-коммите ЕЩЁ НЕТ (новые параметры
- * validateOutput/enqueueSummary и вариант "cached"): путь — переменная,
- * чтобы `tsc` не падал на отсутствующей форме (прецедент audit-v5-repro).
+ * Путь – переменная, чтобы `tsc` не падал, пока контракта еще нет: репро должно
+ * быть красным тестом, а не красной типизацией.
  */
 const importLater = async (path: string): Promise<Record<string, unknown>> => (await import(path)) as Record<string, unknown>;
 
@@ -72,9 +63,9 @@ function insertNote(db: Database, repoId: number, scanId: number, role: string):
 }
 
 /**
- * Каталог-«клон»: обычный файл + ТРЕКНУТЫЙ симлинк на файл ХОСТА вне корня
- * (git умеет трекать симлинки — repro Security-К1; здесь файловая механика
- * та же, git для read_file/grep/list_files не участвует).
+ * Каталог-«клон»: обычный файл + симлинк на файл хоста вне корня. Git умеет
+ * трекать симлинки, а read_file/grep/list_files работают с файлами напрямую,
+ * поэтому сам git здесь не нужен.
  */
 function cloneWithSymlink(prefix: string, hostBody: string): { root: string; hostFile: string } {
   const base = mkdtempSync(join(tmpdir(), prefix));
@@ -88,11 +79,6 @@ function cloneWithSymlink(prefix: string, hostBody: string): { root: string; hos
   symlinkSync(hostFile, join(root, "notes.md"));
   return { root, hostFile };
 }
-
-// ---------------------------------------------------------------------------
-// В5.1-1 … В5.1-6 — находки Б0 (отчёты аудита; каждая красная, пока В5.1
-// не доехала)
-// ---------------------------------------------------------------------------
 
 describe("В5.1 репро: валидатор (К1 bugs, С2/З2/З3 bugs, З1 security)", () => {
   const validatorOf = async (): Promise<{ validateOutput: Function }> => {
@@ -196,8 +182,7 @@ describe("В5.1 репро: валидатор (К1 bugs, С2/З2/З3 bugs, З1 
     expect(stealth.ok).toBe(false);
   });
 
-  // В5.1 (Ищейка-З1): note фактора флага — числа только из входных фактов
-  // (закрыто Б1 вместе с репро выше; конвейер передаёт коридор фактов)
+  // числа в note фактора флага допустимы – коридора для них нет
   test("В5.1-9 (переосмыслено 23.09): числа в note больше не проверяются коридором — решение владельца «цифры это нормально»", async () => {
     const mod = await importLater("../src/summary/validator");
     const validateFlagOutput = mod.validateFlagOutput as (raw: string, keys: Set<string>, allowed?: Set<string>) => { ok: boolean; reason: string | null };
@@ -236,7 +221,7 @@ describe("В5.1 репро: инструменты клона (Security-К1, с�
     expect(listed.files.filter((f) => f.includes("notes.md") && !f.endsWith("(denied)"))).toEqual([]);
   });
 
-  // В5.1 (Security-С1): deny-list дополнен классами; тест на КЛАССЫ, не на три файла
+  // тест на классы путей, а не на отдельные файлы
   test("В5.1-10: deny-list закрывает secrets*.json, key-store расширения, .aws/.ssh, .npmrc/.netrc/.htpasswd, service-account*", async () => {
     const { isDeniedPath } = await importLater("../src/summary/tools");
     const isDenied = isDeniedPath as (p: string) => boolean;
@@ -263,7 +248,7 @@ describe("В5.1 репро: инструменты клона (Security-К1, с�
     }
   });
 
-  // В5.1 (Прод-З3): кап размера ДО чтения — гигантский файл получает честный отказ
+  // кап размера проверяется до чтения – гигантский файл получает честный отказ
   test("В5.1-11: файл больше 1 МБ — read_file отказывает до чтения, grep его пропускает", async () => {
     const { root } = cloneWithSymlink("rh-v51-big-", "ignored");
     writeFileSync(join(root, "huge.log"), "x".repeat(1024 * 1024 + 10));
@@ -278,7 +263,7 @@ describe("В5.1 репро: инструменты клона (Security-К1, с�
     expect(grep.matches).toBe(0);
   });
 
-  // В5.1 (Ищейка-С3): budgetLeft принуждается, остаток виден модели в результате
+  // бюджет соблюдается, остаток виден модели в каждом результате
   test("В5.1-12: исчерпание бюджета инструментов — честный отказ вызова, остаток в каждом результате", async () => {
     const { root } = cloneWithSymlink("rh-v51-budget-", "ignored");
     const ex = makeToolExecutor({ root, gitDir: null }, 2);
@@ -353,7 +338,7 @@ describe("В5.1 репро: очередь (Прод-С1, Ищейка-С1 relia
     }
   });
 
-  // В5.1 (Security-З3): пер-юзер кап активных summary-заявок (константа 2)
+  // пер-юзер кап активных summary-заявок (константа 2)
   test("В5.1-13: активных summary-заявок юзера больше капа — too_many, на сканы кап не растягивается", () => {
     const t = freshDb("rh-v51-cap-");
     try {
@@ -377,7 +362,7 @@ describe("В5.1 репро: очередь (Прод-С1, Ищейка-С1 relia
     }
   });
 
-  // В5.1 (Ищейка-З4б): claim summary-заявки не трогает живые running-сканы
+  // claim summary-заявки не трогает живые running-сканы
   test("В5.1-14: claim summary-заявки оставляет running-скан живым; claim scan-заявки закрывает сироту", () => {
     const t = freshDb("rh-v51-stale-");
     try {
@@ -393,7 +378,7 @@ describe("В5.1 репро: очередь (Прод-С1, Ищейка-С1 relia
       const claimedSummary = claimNext(db, new Date("2026-09-23T02:01:00Z"), 60 * 60_000, { queue: "user" });
       expect(claimedSummary?.kind).toBe("summary");
       expect(scanStatus()).toBe("running");
-      // claim СКАН-заявки: прежний running-скан того же автора — сирота (В4.8.5, не тронут в В5.1)
+      // claim скан-заявки: прежний running-скан того же автора – сирота
       finishJob(db, claimedSummary!.id, claimedSummary!.claimedAt, "done");
       db.query("INSERT INTO jobs (repo_id, status, user_id, trigger_kind, kind, created_at) VALUES (?, 'queued', 7, 'user', 'scan', ?)").run(repoId, nowIso);
       const claimedScan = claimNext(db, new Date("2026-09-23T02:02:00Z"), 60 * 60_000, { queue: "user" });
@@ -405,7 +390,7 @@ describe("В5.1 репро: очередь (Прод-С1, Ищейка-С1 relia
     }
   });
 
-  // В5.1 (Прод-С1): MyJob несёт kind — панель различает анализ и описание AI
+  // MyJob несет kind – панель различает анализ и описание AI
   test("В5.1-15: myJobs возвращает kind для обеих родов заявок", () => {
     const t = freshDb("rh-v51-myjob-");
     try {
@@ -422,10 +407,8 @@ describe("В5.1 репро: очередь (Прод-С1, Ищейка-С1 relia
     }
   });
 
-  // В5.1 (Security-З2): окно POST /summary списывается и на отказах own-гейта —
-  // до живых проб PAT. Чёрный ящик: 7 POST «не своего» репо → 6×403, 7-й — 429.
-  // В5.2 (Б3): чужой публичный репо без анализа — 409 no_scan (прежде 403 not_own); окно по-прежнему
-  // списывается до гейтов карточки
+  // Окно POST /summary списывается до гейтов карточки и живых проб PAT. Черный
+  // ящик: чужой публичный репо без анализа – 6 раз 409 no_scan, 7-й – 429.
   test("В5.1-16: POST /summary списывает окно до гейтов карточки — перебор чужих slug не бесплатен", async () => {
     const dir = mkdtempSync(join(tmpdir(), "rh-v51-window-"));
     dirs.push(dir);
@@ -452,7 +435,7 @@ describe("В5.1 репро: очередь (Прод-С1, Ищейка-С1 relia
 });
 
 describe("В5.1 Б4: наблюдаемость и лимиты", () => {
-  // В5.1 (баги-мелочь): битый categories JSON — честная точка, не падение runSummary
+  // битый categories JSON – честная точка, а не падение runSummary
   test("В5.1-17: historyPoints с битым categories JSON — точка без категорий, runSummary живёт", async () => {
     const t = freshDb("rh-v51-hist-");
     try {
@@ -483,7 +466,7 @@ describe("В5.1 Б4: наблюдаемость и лимиты", () => {
     }
   });
 
-  // В5.1 (Прод-З2): /ai-notes отдаёт последние 50 строк, хронология прежняя
+  // /ai-notes отдает последние 50 строк в хронологическом порядке
   test("В5.1-18: getAiNotesHistory ограничена 50 последними строками", async () => {
     const t = freshDb("rh-v51-limit-");
     try {
@@ -507,7 +490,7 @@ describe("В5.1 Б4: наблюдаемость и лимиты", () => {
     }
   });
 
-  // В5.1 (Прод-С3): причина нулевого фейла различает провайдера и валидатор
+  // причина пустого результата различает провайдера и валидатор
   test("В5.1-19: summaryEmptyErrorOf — модель-фейлы дают providerDown, валидатор-фейлы дают empty", async () => {
     const sched = await import("../src/jobs/scheduler");
     const summaryEmptyErrorOf = sched.summaryEmptyErrorOf as (res: { outcomes: Array<{ ok: boolean; reason?: string }> }) => string;
@@ -540,13 +523,13 @@ describe("В5.1 Б5: хартии и входы ролей", () => {
   test("В5.1-20: ключи хартий реальны (scores.points, docs.readme), обещания входа честные, доклад инъекции снят", async () => {
     const { loadCharter } = await import("../src/summary/charters");
     const trajectory = loadCharter("trajectory");
-    expect(trajectory.version).toBe("7"); // В5.2 (Б7): типографика (4); В5.5 тур 2: покрытие — полнота данных, не тесты (5); тур 3 круг 5: язык читателя (6), категории во входе по-русски (7)
+    expect(trajectory.version).toBe("7");
     expect(trajectory.text).toContain("{f:scores.points}");
     expect(trajectory.text).not.toContain("{f:scores.point}");
     expect(trajectory.text).toContain("ТОЛЬКО числовые точки");
     const overview = loadCharter("overview");
-    // 23.09: v3 — «синтез, а не склейка» (дословный пересказ специалистов = брак)
-    expect(overview.version).toBe("7"); // В5.5 тур 1: опровергнутые выводы специалистов не переносятся (факт-чек repo-vitals, в) (6); тур 3 круг 5: язык читателя (7)
+    // «синтез, а не склейка»: дословный пересказ специалистов – брак
+    expect(overview.version).toBe("7");
     expect(overview.text).toContain("Синтез, а не склейка");
     expect(overview.text).not.toContain("healthcraft.index");
     expect(overview.text).not.toContain("флаги");
@@ -596,7 +579,7 @@ describe("В5.1 Б5: хартии и входы ролей", () => {
       }) as CallLlm;
       const pipe = await import("../src/summary/pipeline");
       const res = await pipe.runSummary({ db, org: "v51", repo: "roles", callLlm, clone: { root, gitDir: null }, agentBackoffMs: 0 }, { scanId });
-      // В5.2 (Б1): флаггер — отдельная проверка (runFraudCheck), обзор пишет 8 заметок
+      // флаггер – отдельная проверка (runFraudCheck), обзор пишет 8 заметок
       expect(res.notes).toBe(8);
       // security: только факты AppSec, без недоверенного контента
       const securityIn = seen.get("security") ?? "";
@@ -661,8 +644,7 @@ function dbClose(db: Database): void {
 }
 
 // ---------------------------------------------------------------------------
-// Самопроверка строгого режима: без неё «AUDIT_STRICT=1 зелёный» — тавтология.
-// На Б0-коммите этот тест красный вместе с находками.
+// Самопроверка строгого режима: без нее «AUDIT_STRICT=1 зеленый» – тавтология.
 // ---------------------------------------------------------------------------
 
 if (process.env.AUDIT_STRICT) {

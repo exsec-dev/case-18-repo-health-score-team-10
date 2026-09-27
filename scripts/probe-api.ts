@@ -1,6 +1,5 @@
-// probe-api.ts — живой зонд SourceCraft (В0): что доступно без токена,
-// где живёт каталог открытых репо (вопрос 1 канвы), реальная форма
-// ответов. Печатает находки — топливо для коллекторов В1.
+// Живой зонд SourceCraft: что доступно без токена, где живет каталог открытых
+// репо и какова реальная форма ответов. Печатает находки для коллекторов.
 // Usage: bun scripts/probe-api.ts [SOURCECRAFT_TOKEN]
 const TOKEN = process.argv[2] ?? process.env.SOURCECRAFT_TOKEN ?? "";
 const API = "https://api.sourcecraft.tech";

@@ -1,8 +1,7 @@
-// history.ts — история оценки и история LLM-взглядов (В5, К5.7/К5.16).
-// Проекция из строк scores + scans.head_sha, новых сборов нет. Публичная
-// часть (индекс и покрытие) — всем; полный Score — только зрителю с правами
-// на полный Score (как на карточке). Tri-state: точка без числа — честная
-// NULL-точка, не ноль. Тексты AI — никогда не публичны (решение 22.09).
+// История оценки и история AI-обзоров репозитория – проекция уже записанных
+// scores и scans, новых сборов нет. Индекс и покрытие видят все, полный Score –
+// только зритель с правами на него (как на карточке). Точка без числа – NULL,
+// а не ноль.
 import type { Database } from "bun:sqlite";
 import { parseFactValue } from "../collectors/facts";
 import { MODEL_VERSION } from "../score/model";
@@ -26,8 +25,8 @@ interface ScoreHistoryRow {
 }
 
 /**
- * Сканы репо с критичными секретами (флаг ok-факта appsec.findings) — ОДНИМ запросом на
- * репо. В5.2 (Б7, долг аудита В5.1, reliability «мелочь 6»): прежде — запрос на точку (N+1).
+ * Сканы репо с критичными секретами (флаг ok-факта appsec.findings) – одним
+ * запросом на репо, а не на каждую точку истории.
  */
 function secretsCriticalScans(db: Database, repoId: number): Set<number> {
   const rows = db
@@ -51,9 +50,8 @@ function totalsOf(row: ScoreHistoryRow, secretsCritical: boolean): { score: numb
 }
 
 /**
- * Публичная проекция истории: строки текущей MODEL_VERSION (честное
- * ограничение: оценка сопоставима только внутри одной версии модели),
- * по возрастанию сканов. null = репо не видно (404 неотличимо).
+ * История по возрастанию сканов, только строки текущей MODEL_VERSION: оценки
+ * сопоставимы лишь внутри одной версии модели. null – репо не видно (404).
  */
 export function getRepoHistory(db: Database, org: string, repo: string, opts: { access?: AccessResult } = {}): HistoryResponse | null {
   const r = db
@@ -74,8 +72,8 @@ export function getRepoHistory(db: Database, org: string, repo: string, opts: { 
     .all(r.id, MODEL_VERSION) as ScoreHistoryRow[];
   const secrets = fullOpen ? secretsCriticalScans(db, r.id) : new Set<number>();
   const points: HistoryPoint[] = rows.map((row) => {
-    // полный итог — из записанных категорий этой строки и её же фактов
-    // (тот же дериватив, что на карточке); не fullOpen → null
+    // полный итог – из записанных категорий этой строки и ее же фактов,
+    // тем же расчетом, что на карточке
     const { score } = fullOpen ? totalsOf(row, secrets.has(row.scan_id)) : { score: null };
     return {
       scanId: row.scan_id,
@@ -85,24 +83,22 @@ export function getRepoHistory(db: Database, org: string, repo: string, opts: { 
       repoHealthScore: score === null ? null : Math.round(score * 10) / 10,
       modelVersion: MODEL_VERSION,
       headSha: row.head_sha,
-      // В5.3 круг 3 (§2 24.09): нули первого пуша не читаются ростом — точка помечена
+      // помечаем точку «без кода», чтобы переход от нулей к первому пушу не читался ростом
       codeEmpty: row.code_empty === 1,
     };
   });
   return { points, modelVersion: MODEL_VERSION, fullOpen };
 }
 
-// ---------- история LLM-взглядов (К5.16) ----------
+// ---------- история AI-обзоров ----------
 
 /**
- * История взглядов: append-строки ai_notes по всем сканам (пользователь
- * видит эволюцию). В5.1 (Прод-З2): LIMIT последних 50 строк — append-лог
- * растёт линейно со сканами, неограниченная выдача не нужна никому.
- * ВИДИМОСТЬ: репо не видно → null (404). В5.2 (Б2, §2 «В5.2 — публичный
- * AI-обзор…»): зритель с полным Score получает полные тексты (нет их — публичные
- * у публичного репо); остальные — только публичные тексты публичного репо;
- * закрытый репо без полного Score → locked. Заметки проверки на накрутку
- * (flagger) — не взгляды обзора, в историю не входят.
+ * История AI-обзоров по сканам. Лог ai_notes растет со сканами, поэтому
+ * отдаются только последние 50 строк.
+ * Видимость: репо не видно → null (404). Зритель с полным Score получает
+ * полные тексты (если их нет – публичные у публичного репо); остальные –
+ * только публичные тексты публичного репо; закрытый репо без полного Score →
+ * locked. Заметки проверки на накрутку (flagger) – не обзор, в историю не входят.
  */
 export function getAiNotesHistory(db: Database, org: string, repo: string, opts: { access?: AccessResult } = {}): AiNotesResponse | null {
   const r = db
@@ -128,7 +124,7 @@ export function getAiNotesHistory(db: Database, org: string, repo: string, opts:
        LIMIT 50`,
     )
     .all(r.id, audience) as { scan_id: number; role: string; text: string; fact_refs: string; charter_version: string; model: string; created_at: string; head_sha: string | null; finished_at: string | null }[];
-  rows.reverse(); // хронология по возрастанию, как прежде
+  rows.reverse(); // выбирали последние, отдаем по возрастанию
   return {
     locked: false,
     audience,

@@ -1,17 +1,16 @@
-// roles.ts — карта ролей AI-summary (спека В5 §3.1/§3.2, дефолт утверждён
-// 22.09). Единственный источник: список ролей, температуры, ярус модели,
-// скоуп фактов. Ключ override-шва фейков = хартия-роль (9 значений).
-// Сущности создаются по типу входа (решение 22.09): контент-жила расширяет
-// специалиста, синтез второго порядка — отдельная роль.
+// Карта ролей AI-сводки — единственный источник: список ролей, температуры, ярус
+// модели, скоуп фактов. Ключ override-шва фейков в тестах = роль хартии (9 значений).
+// Роли делятся по типу входа: специалист читает факты и контент своей категории,
+// синтез второго порядка (overview, trajectory, flagger) — отдельные роли.
 
 export const SPECIALIST_ROLES = ["documentation", "code", "activity", "issues", "cicd", "security"] as const;
 
 export const SUMMARY_ROLES = [...SPECIALIST_ROLES, "overview", "trajectory", "flagger"] as const;
 
 /**
- * В5.2 (Б2): категории публичного AI-обзора — те, что открыты всем (4 категории
- * HealthCraft Index). CI/CD и Безопасность — каналы с правами: их специалисты в
- * публичный прогон не входят, их факты и баллы во вход не попадают.
+ * Категории публичного AI-обзора — открытые всем 4 категории HealthCraft Index.
+ * CI/CD и Безопасность видны только с правами: их специалисты в публичный прогон
+ * не входят, их факты и баллы во вход не попадают.
  */
 export const PUBLIC_CATEGORIES = ["documentation", "code", "activity", "issues"] as const;
 export const PUBLIC_SPECIALIST_ROLES = ["documentation", "code", "activity", "issues"] as const satisfies readonly (typeof SPECIALIST_ROLES)[number][];
@@ -19,12 +18,12 @@ export const PUBLIC_SPECIALIST_ROLES = ["documentation", "code", "activity", "is
 export type SpecialistRole = (typeof SPECIALIST_ROLES)[number];
 export type SummaryRole = (typeof SUMMARY_ROLES)[number];
 
-/** Ярус модели: овервью — main, остальные — side (решение 22.09). */
+/** Ярус модели: overview — main, остальные — side. */
 export function modelTierOf(role: SummaryRole): "main" | "side" {
   return role === "overview" ? "main" : "side";
 }
 
-/** Пер-ролевые температуры (спека §3.3): специалисты 0.4, overview 0.5, flagger 0.1. */
+/** Специалистам 0.4, overview чуть свободнее (0.5), flagger почти детерминирован (0.1). */
 export const ROLE_TEMPERATURE: Record<SummaryRole, number> = {
   documentation: 0.4,
   code: 0.4,
@@ -39,9 +38,9 @@ export const ROLE_TEMPERATURE: Record<SummaryRole, number> = {
 
 /**
  * Скоуп фактов роли — КАТЕГОРИИ фактов (collectors/facts.ts categoryOf).
- * Ограда «чужой зоны» ловится механически: валидатор отбрасывает ссылку
- * {f:key} на факт вне скоупа роли (adversarial-кейс спеки §3.6 п.4).
- * security — только AppSec-факты, инструментов чтения кода нет (закон 5).
+ * Выход в «чужую зону» ловится механически: валидатор отбрасывает ссылку
+ * {f:key} на факт вне скоупа роли.
+ * security — только данные AppSec, инструментов чтения кода нет: своего сканирования не делаем.
  */
 export const ROLE_FACT_CATEGORIES: Record<SpecialistRole, readonly string[]> = {
   documentation: ["documentation"],
@@ -52,7 +51,7 @@ export const ROLE_FACT_CATEGORIES: Record<SpecialistRole, readonly string[]> = {
   security: ["security"],
 };
 
-/** Инструменты агента — только у специалистов; security — исключение (закон 5). */
+/** Инструменты агента — только у специалистов, кроме security (только данные AppSec). */
 export function toolsAllowed(role: SummaryRole): boolean {
   return (SPECIALIST_ROLES as readonly string[]).includes(role) && role !== "security";
 }
@@ -60,5 +59,5 @@ export function toolsAllowed(role: SummaryRole): boolean {
 /** Категории, чьи факты говорят о ритме и накрутке (вход флаггера). */
 export const FLAGGER_CATEGORIES = ["activity"] as const;
 
-/** Порог эволюции взглядов: экран динамики — при истории ≥ 2 дней (решение 22.09). */
+/** Экран динамики взглядов показывается при истории ≥ 2 дней. */
 export const EVOLUTION_MIN_HISTORY_MS = 2 * 24 * 3600_000;

@@ -1,7 +1,5 @@
-// Ступень 4 В4.9 (финальный проход, §2 23.09): поведенческие тесты на числа и
-// утверждения о данных, которые появились или изменились в круге по сводке
-// аудитов (reports/2026-09-23-m49-stage4-synthesis.md). Правило AGENTS.md
-// 21.09: число, названное местом или долей, закрывается тестом на данных.
+// Поведенческие тесты на числа и утверждения о данных: число, названное
+// местом или долей, проверяется на данных, а не по исходнику.
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_QUERY, getRepoCard, listRepos, type ReposQuery } from "../src/api/repos";
 import { metricWeights, noRecommendationsKind, noRecommendationsText } from "../src/report/sections";
@@ -27,7 +25,7 @@ describe("В-4: колонка «#» — место в рейтинге, а не
       mk("alpha", 90);
       mk("beta", 70);
       mk("gamma", 50);
-      // поиск оставляет одну строку; раньше «#» показывал бы 1
+      // поиск оставляет одну строку, но «#» – место в рейтинге, а не номер строки
       const found = listRepos(t.db, q({ q: "gamma" })).items;
       expect(found.map((i) => i.rank)).toEqual([3]);
       expect(getRepoCard(t.db, "rank", "gamma", GRANTED)!.score!.rank).toBe(3);
@@ -74,8 +72,8 @@ describe("В-4, ревью кода R15: место при равных инде
     } finally {
       t.close();
     }
-    // Т-1 В5.3: синхронный тест на временной БД — на раннере CI 24.09 шел
-    // 5532 мс при лимите по умолчанию 5000 (флака скорости, не дефект)
+    // синхронный тест на временной БД: на раннере CI бывает дольше
+    // стандартного лимита 5 с
   }, 30_000);
 });
 
@@ -155,7 +153,7 @@ describe("Ф17: текст из адреса входа не печатаетс�
   });
 });
 
-// Завершающие правки В4.9 (пункт 2): веса в подсказках показателей = словари расчета
+// веса в подсказках показателей = словари расчета
 describe("веса в подсказках показателей", () => {
   test("HealthCraft Index — 4 категории, веса INDEX_WEIGHTS; Repo Health Score — 6, SCORE_WEIGHTS", () => {
     const index = metricWeights("HealthCraft Index");

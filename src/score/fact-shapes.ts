@@ -1,7 +1,6 @@
-// fact-shapes.ts — именованные формы значений фактов, которые читает
-// score-слой (compute/recommend). Поля — unknown: вход это JSON из
-// facts.value, валидация значений остаётся за потребителем (num/bool
-// у места использования); формы описывают структуру, не гарантируют типы.
+// Формы значений фактов, которые читает score-слой (compute/recommend).
+// Поля — unknown: вход это JSON из facts.value, и типы проверяет потребитель
+// (num/bool на месте); формы описывают структуру, но не гарантируют типы.
 
 export interface DocsPresenceValue {
   readme?: unknown;
@@ -32,7 +31,7 @@ export interface DocsReadmeAbsent {
 
 export type DocsReadmeValue = DocsReadmeContent | DocsReadmeAbsent;
 
-/** appsec.findings — схема для В4-коллектора и мутационных тестов (§2). */
+/** appsec.findings — форма значения коллектора AppSec. */
 export interface AppsecFindingsValue {
   severity_counts?: Record<string, unknown>;
   resolved_share?: unknown;

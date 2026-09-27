@@ -1,7 +1,7 @@
-// summary-b6.test.ts — публичный API и badge (Б6 В5, К5.8): только публичные
-// rating_active; приватный/эвицтированный/несуществующий — 404 неотличимо;
-// в SVG только число/подпись/цвет; отдельный лимит; кэш-заголовки.
-// Тесты утечек: в проекции нет evidence/timeline/AI-текстов.
+// Публичный API и badge: только публичные rating_active;
+// приватный/эвицтированный/несуществующий — 404 неотличимо; в SVG только
+// число/подпись/цвет; отдельный лимит; кэш-заголовки. Тесты утечек: в проекции нет
+// evidence/timeline/AI-текстов.
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -87,7 +87,7 @@ describe("badge SVG: только число, подпись, цвет", () => {
     expect(badgeColor(null)).toBe("#8b8b8b");
     const svg = renderBadgeSvg(74);
     expect(svg).toContain(">74<");
-    expect(svg).toContain("HealthCraft Index"); // В5.3 круг 3: подпись — имя показателя
+    expect(svg).toContain("HealthCraft Index"); // подпись — имя показателя
     expect(/https?:\/\/(?!www\.w3\.org)/.test(svg)).toBe(false);
     expect(renderBadgeSvg(null)).toContain("n/a");
   });

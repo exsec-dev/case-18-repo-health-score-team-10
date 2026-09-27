@@ -1,10 +1,7 @@
-// tools.ts — инструменты агента чтения репозитория (спека В5 §3.3):
-// read-only, root = рабочий каталог клона, path-гард, капы на выдачу,
-// deny-list секретов (содержимое не читается и не попадает в выдачу).
-// Результаты инструмента — НЕдоверенные данные: контрольные символы
-// срезаются, объём капится; дедуп повторных вызовов по аргументам — на
-// исполнителе (см. makeToolExecutor). git_log — по --git-dir клона
-// (последние 30 сообщений, без диффов).
+// Инструменты агента для чтения репозитория: только чтение, root = рабочий каталог
+// клона, path-гард, капы на выдачу, deny-list секретов (содержимое не читается).
+// Результат инструмента — НЕдоверенные данные: контрольные символы срезаются,
+// объем капится. Дедуп повторных вызовов — в исполнителе (makeToolExecutor).
 import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import type { ToolSpec } from "../llm";
@@ -36,12 +33,12 @@ export const GIT_LOG_CAP = 30;
 /** потолок файлов, обходимых grep (предохранитель больших деревьев) */
 export const GREP_FILE_CAP = 2000;
 /**
- * В5.1 (Прод-З3): кап размера ДО чтения — файлы больше капа получают честный
- * отказ, содержимое целиком в память не тянется (всплеск кучи до санитайза).
+ * Кап размера ДО чтения: файл больше капа получает отказ, а не читается
+ * целиком в память (иначе всплеск кучи еще до санитизации).
  */
 export const MAX_PLAIN_READ_BYTES = 1024 * 1024;
 
-/** Путь к секретам: содержимое не читается и в выдачу не попадает (спека §3.3). */
+/** Путь к секретам: содержимое не читается и в выдачу не попадает. */
 const SECRET_DENYLIST: RegExp[] = [
   /(^|\/)\.env[^/]*$/i,
   /(^|\/)\.git($|\/)/,
@@ -50,7 +47,6 @@ const SECRET_DENYLIST: RegExp[] = [
   /(^|\/)id_rsa[^/]*$/i,
   /(^|\/)\.gitconfig$/i,
   /credentials?\.(json|txt|ya?ml)$/i,
-  // В5.1 (Security-С1): распространённые классы, читавшиеся и сканировавшиеся grep
   /(^|\/)secrets[^/]*\.json$/i,
   /\.(p12|pfx|jks)$/i,
   /(^|\/)\.aws\//,
@@ -59,8 +55,7 @@ const SECRET_DENYLIST: RegExp[] = [
   /(^|\/)\.netrc$/i,
   /(^|\/)\.htpasswd$/i,
   /(^|\/)service-account[^/]*\.json$/i,
-  // В5.2 (Б7, хвосты аудита В5.1): SSH-ключи любого алгоритма вне .ssh/ (deploy/id_ed25519,
-  // id_ecdsa, id_dsa) и ключи сервисных аккаунтов Firebase
+  // SSH-ключи любого алгоритма вне .ssh/ (deploy/id_ed25519) и ключи сервисных аккаунтов Firebase
   /(^|\/)id_(rsa|dsa|ecdsa|ed25519)(_sk)?[^/]*$/i,
   /(^|\/)[^/]*firebase-adminsdk[^/]*\.json$/i,
 ];
@@ -84,11 +79,9 @@ export function guardPath(root: string, relPath: string): string | null {
 }
 
 /**
- * В5.1 (Security-К1): прежний гард на симлинки был мёртв — `statSync`
- * СЛЕДУЕТ по ссылке, и флаг isSymbolicLink для неё всегда false. Проверка
- * lstatSync по каждому компоненту пути между root и целью: трекнутый
- * симлинк (в том числе на файл хоста вне root) — отказ для read_file,
- * grep и list_files. Нечитаемый компонент — тоже отказ.
+ * lstatSync по каждому компоненту пути между root и целью (`statSync` следует
+ * по ссылке и симлинк не видит). Закоммиченный симлинк, в том числе на файл
+ * хоста вне root, — отказ для read_file, grep и list_files. Нечитаемый компонент — тоже отказ.
  */
 function hasSymlinkComponent(root: string, abs: string): boolean {
   const rel = relative(root, abs);
@@ -105,9 +98,8 @@ function hasSymlinkComponent(root: string, abs: string): boolean {
   return false;
 }
 
-/** Результат инструмента — недоверенные данные: контрольные символы вон.
- *  В5.1 (Security-З1): полоса расширена bidi/zero-width (RLO, ZWSP, BOM) —
- *  визуальный спуфинг не проезжает ни в промпт, ни в валидатор. */
+/** Результат инструмента — недоверенные данные: контрольные символы вон, включая
+ *  bidi/zero-width (RLO, ZWSP, BOM), чтобы визуальный спуфинг не попал ни в промпт, ни в валидатор. */
 export function sanitizeUntrusted(text: string): string {
   // eslint-disable-next-line no-control-regex
   return text.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, "");
@@ -167,8 +159,8 @@ export const TOOL_SPECS: ToolSpec[] = [
   },
 ];
 
-/** Спецификация калькулятора (23.09, Алексей: арифметика — инструментом,
- *  не в уме); доступен в т.ч. security, которой файловые инструменты запрещены. */
+/** Калькулятор: модель считает арифметику инструментом, а не в уме. Доступен и
+ *  security, которой файловые инструменты запрещены. */
 export const CALCULATOR_SPEC: ToolSpec = {
   type: "function",
   function: {
@@ -273,7 +265,7 @@ function listFilesRec(root: string, dir: string, out: string[], cap: number): vo
     } catch {
       continue;
     }
-    if (st.isSymbolicLink()) continue; // симлинки не читаем и не показываем как читаемые (В5.1, Security-К1)
+    if (st.isSymbolicLink()) continue; // симлинки не читаем и не показываем как читаемые
     if (st.isDirectory()) {
       if (name === ".git" || name === "node_modules") continue;
       out.push(`${rel}/`);
@@ -304,7 +296,6 @@ export async function executeTool(io: ToolExecutorIo, name: string, args: unknow
         return fail(`файл не найден: ${sanitizeUntrusted(rel)}`);
       }
       if (st.isDirectory()) return fail("это каталог, а не файл");
-      // В5.1 (Прод-З3): честный отказ ДО чтения — гигантский файл не всплёскивает кучу
       if (st.size > MAX_PLAIN_READ_BYTES) return fail(`denied: файл больше 1 МБ (${st.size} байт) — чтение отклонено`);
       const buf = readFileSync(abs);
       if (buf.subarray(0, 8192).includes(0)) return fail("бинарный файл — текст не выдаётся");
@@ -333,7 +324,6 @@ export async function executeTool(io: ToolExecutorIo, name: string, args: unknow
         if (isDeniedPath(rel)) continue;
         if (glob !== null && !rel.includes(glob)) continue;
         const abs = join(io.root, rel);
-        // В5.1 (Прод-З3): кап размера ДО чтения — гигантский файл не читается
         let st;
         try {
           st = statSync(abs);
@@ -405,11 +395,10 @@ export interface ToolExecutor {
 }
 
 /**
- * Материализовать рабочую копию HEAD из bare-клона (`git worktree add`):
- * инструменты read_file/grep/list_files работают по файлам, а клон скана —
- * bare. Worktree создаётся рядом, внутри bare-репо появляется служебная
- * запись worktrees — уходит вместе с ним при cleanupClone. Сбой — исключение:
- * без файлов агентная стадия с инструментами не начинается.
+ * Рабочая копия HEAD из bare-клона (`git worktree add`): инструментам нужны
+ * файлы, а клон скана — bare. Служебная запись worktrees внутри bare-репо
+ * удаляется вместе с ним при cleanupClone. Сбой — исключение: без файлов
+ * агентная стадия с инструментами не начинается.
  */
 export async function materializeWorktree(bareDir: string): Promise<{ root: string; gitDir: string }> {
   const root = `${bareDir}.wt`;
@@ -427,7 +416,7 @@ export async function removeWorktree(root: string, gitDir?: string): Promise<voi
   }
 }
 
-/** Дописать модели остаток бюджета в результат инструмента (В5.1, Ищейка-С3). */
+/** Остаток бюджета — в каждый результат, чтобы модель видела, сколько вызовов осталось. */
 function withBudgetLeft(result: string, left: number): string {
   try {
     const parsed = JSON.parse(result) as Record<string, unknown> | null;
@@ -439,12 +428,9 @@ function withBudgetLeft(result: string, left: number): string {
 }
 
 /**
- * Исполнитель с дедупом: повторные вызовы по тем же аргументам отдают
- * закэшированный результат, модель не крутится на одном месте за счёт
- * диска и процессов. Бюджет считает ВСЕ вызовы (и кэшированные) —
- * зациклиться на инструментах нельзя. В5.1 (Ищейка-С3): бюджет
- * ПРИНУЖДАЕТСЯ — исчерпание → честный отказ вызова (не молчаливое
- * исполнение сверх капа), остаток показывается модели в каждом результате.
+ * Исполнитель с дедупом: повтор с теми же аргументами отдает кэш, а не
+ * гоняет диск и процессы. Бюджет считает ВСЕ вызовы, включая кэшированные, —
+ * зациклиться нельзя; после исчерпания вызов получает отказ, а не исполняется сверх капа.
  */
 export function makeToolExecutor(io: ToolExecutorIo, toolBudget: number): ToolExecutor {
   const cache = new Map<string, string>();
@@ -474,11 +460,8 @@ export function makeToolExecutor(io: ToolExecutorIo, toolBudget: number): ToolEx
 }
 
 /**
- * Калькулятор-исполнитель (23.09, Алексей: «с арифметикой не проще ему
- * пользоваться инструментами?»): ТОЛЬКО calculate — никакого доступа к
- * репо. Для security, которой файловые инструменты запрещены законом 5,
- * арифметика при этом доступна: процент из доли считается инструментом,
- * а не в уме.
+ * Исполнитель ТОЛЬКО с calculate, без доступа к репозиторию: так security, которой
+ * файловые инструменты запрещены, все равно считает проценты инструментом, а не в уме.
  */
 export function makeCalculatorExecutor(toolBudget = 6): ToolExecutor {
   let calls = 0;

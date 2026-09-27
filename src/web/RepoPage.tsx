@@ -1,18 +1,13 @@
-// RepoPage.tsx — единая карточка репозитория (план §5 В3 + К2 В4.1):
-// HealthCraft Index и полный Repo Health Score (В4.3), шесть категорий с
-// раскрытием submetrics, маркеры и рекомендации с доказательствами. Состав ответа
-// собирает сервер по доступу зрителя: закрытые ему блоки CI/Security
-// приходят без чисел и показываются заглушкой по причине доступа.
-// Главное правило экрана — трекер-закон в UI: ни одной фразы без факта
-// либо без честного объяснения, почему факта нет.
+// Карточка репозитория: HealthCraft Index и полный Repo Health Score, шесть категорий
+// с раскрытием подметрик, рекомендации с доказательствами. Состав ответа собирает сервер
+// по доступу зрителя: закрытые ему CI/CD и Безопасность приходят без чисел и
+// показываются заглушкой с причиной. Правило экрана: ни одной фразы без факта либо
+// без честного объяснения, почему факта нет.
 //
-// В4.9, часть 2 гейта, круг 1 (U1-A): табов нет — страница читается одной
-// лентой по линии PDF: шапка → предупреждения → показатели и вклад категорий →
-// «Категории» с основанием → «Рекомендации» → «Ограничения данных» →
-// карточки «готовится». Все утверждения о данных собирает view-модель
-// `cardView.ts` из тех же функций, что отчет (инвариант 1). Правая панель —
-// паспорт анализа и короткая справка (U4-A); ниже 1440 она выезжает по кнопке
-// «Как считается» (U5-a).
+// Страница читается одной лентой в порядке PDF: шапка → показатели и вклад категорий →
+// «Категории» → «Рекомендации» → история → «Ограничения данных». Утверждения о данных
+// собирает view-модель `cardView.ts` из тех же функций, что отчет. Правая панель —
+// паспорт анализа и короткая справка; ниже 1440 px она выезжает по кнопке «Как считается».
 import { lastRatingHref } from "./ratingReturn";
 import {
   ArrowDownToLine,
@@ -140,17 +135,16 @@ type Evidence = Card["evidence"][number];
 export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: string; meta: MetaResponse | null; onSection?: (s: "rating" | "me") => void }) {
   const slug = `${org}/${repo}`;
   const cardUrl = `/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`;
-  // В4.8.5 (К8.5.3): перечитывание не мигает скелетоном — прежние данные на
-  // экране, пока не придёт новый ответ; сбой перечитывания — мягкая пометка
+  // перечитывание не мигает скелетоном — прежние данные на экране, пока не придет
+  // новый ответ; сбой перечитывания — мягкая пометка
   const { state, reload } = useJson<Card>(cardUrl, { keepPrevious: true });
   const { me, reloadMe } = useSession();
   const meData = dataOf(me);
   const loggedIn = meData !== null && meData.login !== null;
-  // В5.2 (Б6, решение 3): остаток лимитов AI — для текста кнопок обзора и проверки
+  // остаток лимитов AI — для текста кнопок обзора и проверки
   const aiQuota = useAiQuota(loggedIn);
-  // В4.8.5 (К8.5.1): фаза анализа — из общего опроса заданий вкладки (по
-  // заданию, а не по «появился ли скан с номером больше»); карточка сама
-  // себя ради итога не опрашивает
+  // фаза анализа — из общего опроса заданий вкладки (по заданию, а не по «появился ли
+  // скан с номером больше»); карточка сама себя ради итога не опрашивает
   const analysis = useAnalysis();
   const live = analysis.live(slug);
   const start = useStartAnalysis(org, repo);
@@ -159,29 +153,26 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
     const mine = jobs.find((j) => j.slug === slug);
     if (!mine) return;
     reload();
-    // Ф2.20: звезда светится один раз после УСПЕШНОГО своего анализа; В5.2 (аудит С2) —
-    // именно анализа: итог AI-заявки (обзор, проверка) звезду не зажигает
+    // звезда светится один раз после успешного своего анализа; итог AI-заявки
+    // (обзор, проверка) ее не зажигает
     if (mine.phase === "done" && (mine.kind === undefined || mine.kind === "scan")) setDoneKey(`${slug}:${mine.jobId}`);
   });
 
   const data = dataOf(state);
-  // А1: прокрутка к «Рекомендациям» по якорю и старому `?tab=` — после загрузки
   useRecommendationsAnchor(data !== null && data.score !== null, slug);
-  // В4.8.5 (К8.5.14 (а), (в); §2-В1, §2-Р2): анализ — только своего
-  // репозитория. «Свой» карточка считает сама по доступу, который она и так
-  // резолвит при показе (`viewer.own`), — кнопка есть на любом своём
-  // репозитории, даже не в избранном; чужой, аноним, неизвестно — кнопки нет
-  // вовсе (элемента нет, а не неактивен)
+  // Анализ запускается только для своего репозитория. «Свой» определяется по доступу,
+  // который карточка и так резолвит (`viewer.own`), — кнопка есть на любом своем репо,
+  // даже не в избранном; чужому, анониму и при неизвестном доступе кнопки нет вовсе
   const canRefresh = data?.viewer?.own === true && data.viewer.auth === "pat";
-  // К8.5.8: сервер не видит сессии, а вкладка считает зрителя вошедшим —
-  // сессия истекла или вышли в соседней вкладке: приложение перечитывает /api/me
+  // сервер не видит сессии, а вкладка считает зрителя вошедшим (сессия истекла или
+  // вышли в соседней вкладке) — перечитываем /api/me
   const sessionGone = loggedIn && data?.viewer?.auth === "no-session";
   useEffect(() => {
     if (sessionGone) reloadMe();
   }, [sessionGone, reloadMe]);
-  // С6-3: у карточки идёт чужой или периодический скан — она показывает «идёт
-  // анализ» и изредка перечитывает себя (окно открытий карточки 30/мин не
-  // съедается: раз в 30 с). Круг 2 (Н5): в скрытой вкладке — пауза
+  // Идет чужой или периодический скан — карточка показывает «идет анализ» и
+  // перечитывает себя раз в 30 с (лимит открытий карточки 30/мин так не съедается);
+  // в скрытой вкладке — пауза
   const foreignRunning = data !== null && data.scan?.status === "running" && live === null && data.job === null;
   const visible = useVisible();
   useEffect(() => {
@@ -190,9 +181,9 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
     return () => clearInterval(timer);
   }, [foreignRunning, visible, reload]);
 
-  // Ступень 4 (В-10): крошка — на последнюю выдачу рейтинга (фильтр, сортировка, страница)
-  // Замечание 25.09: закрытый (приватный/внутренний) репозиторий в рейтинг не входит —
-  // первая крошка ведет в «Избранное», откуда на него и попадают; публичным — «Рейтинг»
+  // Первая крошка публичного репо ведет на последнюю выдачу рейтинга (фильтр, сортировка,
+  // страница). Закрытый (private/internal) в рейтинг не входит — ему крошка «Избранное»,
+  // откуда на него и попадают
   const closedRepo = data?.repo?.visibility === "private" || data?.repo?.visibility === "internal";
   useEffect(() => {
     if (data) onSection?.(closedRepo ? "me" : "rating");
@@ -201,8 +192,8 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
   const own = live ?? (data?.job ? { phase: data.job.status, stalled: data.job.stalled } : null);
   const jobStalled = own?.stalled === true;
   const analysisRunning = own !== null;
-  // круг 5 тура 3 (Н1): на телефоне «Обновить анализ» — иконкой, подпись в подсказке и
-  // aria-label (со «Сравнить» и «Бейджем» в «⋮» строка вошедшего иначе снова резалась)
+  // на телефоне «Обновить анализ» — иконкой с подписью в подсказке и aria-label,
+  // иначе строка действий не помещается
   const phoneBar = useMediaQuery("(max-width: 767px)");
   const refreshText = analysisRunning ? "Идет анализ" : "Обновить анализ";
   const refreshButton = canRefresh && phoneBar ? (
@@ -213,11 +204,8 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
     </ActionTooltip>
   ) : canRefresh && (
     <Button view="action" size="m" onClick={start.start} disabled={analysisRunning || start.sending} loading={start.sending}>
-      {/* Доводка 21.09: спиннер живёт в слоте `Button.Icon`, а не голым узлом
-          рядом с текстом. Слот сам держит габарит в высоту кнопки и гасит
-          паддинг отрицательным полем (`.g-button__icon`); голый `Spin` был
-          обычным inline-block и вставал к тексту вплотную — крутящееся кольцо
-          налезало на первую букву. */}
+      {/* спиннер — в слоте `Button.Icon`: слот держит габарит и отступ, а голый `Spin`
+          встает к тексту вплотную и налезает на первую букву */}
       {analysisRunning && (
         <Button.Icon side="start">
           <Spin size="xs" />
@@ -229,8 +217,8 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
 
   if (data === null && state.kind !== "error") {
     return (
-      // В4.6 (У27): ритм скелетона = ритм содержимого — блок-полоса величины
-      // (~150px) и шесть строк категорий по 45px, панель начинается с легенды
+      // скелетон повторяет ритм содержимого: блок показателей (~150px) и шесть строк
+      // категорий по 45px
       <Page crumbs={crumbs} aside={<SkeletonRows rows={3} height={96} />} asideDrawer>
         <Flex direction="column" gap={3}>
           <SkeletonRows rows={1} height={150} />
@@ -240,20 +228,15 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
     );
   }
   if (data === null && state.kind === "error" && state.status === 404 && loggedIn) {
-    // В5.3 (25.09, находка владельца): репо из избранного, которого нет в каталоге
-    // (закрытый, ни разу не анализировался) — не ошибка «не удалось открыть», а
-    // честное пустое состояние; не в избранном — прежняя ошибка
+    // репо из избранного, которого нет в каталоге (закрытый, ни разу не анализировался), —
+    // пустое состояние, а не ошибка «не удалось открыть»
     return <FavoriteNotInCatalog org={org} repo={repo} fallback={state.message} onRetry={reload} onSection={onSection} />;
   }
   if (data === null && state.kind === "error" && state.status === 404) {
-    // круг 5 тура 3 (находка 18 аудита, 27.09): выбывший из каталога, закрытый или
-    // несуществующий — одно спокойное пустое состояние вместо красной ошибки. Текст
-    // один на все случаи: различимый 404 выдал бы существование закрытого (ТЗ §5)
     return <NotInCatalog org={org} repo={repo} crumbs={crumbs} />;
   }
   if (data === null) {
-    // UX-5 (круг 2 В4.4): «Обновить анализ» на странице ошибки скрыт; повтор —
-    // «Повторить» (reload)
+    // на странице ошибки «Обновить анализ» нет; повтор — «Повторить» (reload)
     return (
       <Page crumbs={crumbs}>
         <Alert
@@ -262,8 +245,8 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
           className="rh-break-anywhere"
           title={`Не удалось открыть ${slugOf(org, repo)}`}
           message={state.kind === "error" ? state.message : undefined}
-          // В4.8.5 (К8.5.4, С6-6): «Повторить» — только там, где повтор может помочь;
-          // на постоянном 404/400 он повторял бы тот же отказ
+          // «Повторить» — только там, где повтор может помочь; на постоянном 404/400 он
+          // повторял бы тот же отказ
           actions={state.kind === "error" && (state.status === 404 || state.status === 400) ? undefined : [{ text: "Повторить", handler: reload }]}
         />
       </Page>
@@ -289,7 +272,6 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
 
   return (
     <Page crumbs={crumbs} actions={actions} aside={<ScoreAside card={card} meta={meta} analysis={own} foreignRunning={foreignRunning} />} asideDrawer>
-      {/* К8.5.3: перечитывание не удалось — данные остаются, пометка видна */}
       {refreshError && (
         <div style={{ marginBottom: "var(--g-spacing-3)" }}>
           <Alert
@@ -304,8 +286,7 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
       <Header card={card} view={view} starDoneKey={doneKey} starLoggedIn={meData === null ? null : loggedIn} />
       {card.score === null ? (
         own !== null || foreignRunning ? (
-          // Ф2.15 + К8.5.1 (С6-3): идёт анализ — свой или чужой/периодический;
-          // без обещания времени (§2-В5)
+          // идет анализ — свой или чужой/периодический; без обещания времени
           <EmptyState
             icon={SquareListUl}
             title={own?.phase === "queued" ? "Анализ запланирован" : "Идет анализ"}
@@ -313,14 +294,13 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
               (own?.phase === "queued"
                 ? "Заявка стоит в очереди – ее возьмут в работу, и здесь появится итог."
                 : "Данные собираются – итог появится здесь.") +
-              // UX-10 (круг 2 В4.4): заметка, когда задание зависло (признак сервера)
+              // задание зависло (признак сервера)
               (jobStalled ? " Анализ затянулся – его итог появится в «Заданиях»." : "")
             }
           />
         ) : (
-          // В4.4 (кластер E): «скана не было» ≠ «скан был — сбой/мало данных»;
-          // CTA — по возможностям зрителя (запуск/токен/объяснение)
-          // Д3 (В4.9): текст пустого состояния — общий с отчетом (`noScoreText`)
+          // «анализа не было» ≠ «анализ был, но сбой или мало данных»; текст общий с отчетом
+          // (`noScoreText`), действие — по возможностям зрителя
           <EmptyState
             icon={SquareListUl}
             title={noScoreText(card.scan).title}
@@ -330,9 +310,8 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
                 ? [{ text: card.scan ? "Повторить анализ" : "Запустить анализ", view: "action", size: "l", onClick: start.start }]
                 : card.viewer?.auth === "no-pat"
                   ? [
-                      // В4.8.5 (К8.5.14 (ж)): без токена «свой» не известен — CTA
-                      // не обещает анализ (прежний CTA звал к анализу без токена): токен
-                      // открывает CI/CD и Security, анализ — только своих
+                      // без токена неизвестно, свой ли репозиторий, поэтому анализ не
+                      // обещаем: токен открывает CI/CD и Безопасность, анализ — только своих
                       { text: "Добавить токен в Настройках", view: "action", size: "l", href: "/settings" },
                     ]
                   : undefined
@@ -340,15 +319,10 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
           />
         )
       ) : (
-        // А1 (U1-A): одна лента по линии PDF, табов нет
-        // В5.3 круг 3 (§2 24.09): флаг фрода — над показателями (6-A); AI-обзор —
-        // сразу под ними (2-A); история — разделом после рекомендаций (3-B)
+        // одна лента в порядке PDF, без табов
         <Flex direction="column" gap={6} className="rh-repo-feed">
           <Flex direction="column" gap={3}>
-            {/* UX-проход В5.2 25.09, круг 2 (замечание 4): плашка CI — в карточке Repo Health
-                Score (CI/CD входит только в него), не над обоими показателями */}
-            {/* В5.2 (Б6, выбор 1A): проверка оценки — подвалом плашки HealthCraft Index; UX-проход
-                25.09 (замечание 7): признаки накрутки — там же, рядом с кнопкой */}
+            {/* проверка оценки и признаки накрутки — подвалом плашки HealthCraft Index */}
             <ScoreBand card={card} view={view} footer={<FraudCheckFooter card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} quota={aiQuota.quota} onQuota={aiQuota.reload} />} />
           </Flex>
           <AiOverviewSection card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} quota={aiQuota.quota} onQuota={aiQuota.reload} />
@@ -363,10 +337,9 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
 }
 
 /**
- * Круг 5 тура 3 (находка 18 аудита, 27.09): выбывший из каталога, закрытый или
- * несуществующий — одно спокойное пустое состояние вместо красной ошибки «Не удалось
- * открыть». Текст один на все случаи: различимый 404 выдал бы существование закрытого
- * репозитория (ТЗ §5, «Ограничение доступа»).
+ * Выбывший из каталога, закрытый или несуществующий репозиторий — одно спокойное пустое
+ * состояние вместо красной ошибки. Текст один на все случаи: различимый 404 выдал бы
+ * существование закрытого репозитория (ТЗ §5, «Ограничение доступа»).
  */
 function NotInCatalog({ org, repo, crumbs }: { org: string; repo: string; crumbs: Crumb[] }) {
   return (
@@ -381,10 +354,10 @@ function NotInCatalog({ org, repo, crumbs }: { org: string; repo: string; crumbs
   );
 }
 /**
- * Карточка репозитория из избранного, которого нет в каталоге сервиса (В5.3,
- * 25.09): закрытый репозиторий попадает в каталог только своим анализом, а
- * анализ запускается только для своих (права на CI/CD или Безопасность). Текст —
- * по сохраненным правам строки избранного (`last_access`), без обещаний.
+ * Карточка репозитория из избранного, которого нет в каталоге сервиса: закрытый
+ * репозиторий попадает в каталог только своим анализом, а анализ запускается только
+ * для своих (права на CI/CD или Безопасность). Текст — по сохраненным правам строки
+ * избранного (`last_access`), без обещаний.
  */
 function FavoriteNotInCatalog({ org, repo, fallback, onRetry, onSection }: { org: string; repo: string; fallback: string; onRetry: () => void; onSection?: (s: "rating" | "me") => void }) {
   const favs = useJson<{ entries: { org: string; repo: string; access: { visibility: string; own: boolean } | null }[] }>("/api/me/favorites");
@@ -411,9 +384,9 @@ function FavoriteNotInCatalog({ org, repo, fallback, onRetry, onSection }: { org
 }
 
 /**
- * Состояние «в избранном, но не в каталоге» (сценарий владельца 25.09): свой —
- * «Запустить анализ» прямо здесь (сервер перепроверяет права живьем), итог
- * задания перечитывает страницу; идет анализ — без кнопки; чужой — объяснение.
+ * Состояние «в избранном, но не в каталоге»: своему — «Запустить анализ» прямо здесь
+ * (сервер перепроверяет права живьем), итог задания перечитывает страницу; пока идет
+ * анализ — без кнопки; чужому — объяснение.
  */
 function FavoriteNotInCatalogState({
   org,
@@ -468,13 +441,6 @@ function FavoriteNotInCatalogState({
   );
 }
 
-/**
- * «Отчёт»: формат выбирается в меню. MD — тот же генератор, что рисует
- * страницу (§2.3); PDF (В4.7, П1) — та же модель отчёта, отрисованная
- * сервером. PDF качается через `fetch` + blob: на сбое сервер отвечает
- * JSON-ошибкой, и зритель видит её тостом, а не пустой файл; пункт MD
- * от этого не зависит.
- */
 /** Сбой выгрузки: HTTP-статус (0 — сети нет) и код сервера — для текста тоста. */
 class ReportError extends Error {
   constructor(
@@ -486,22 +452,21 @@ class ReportError extends Error {
 }
 
 /**
- * Строка действий карточки. Тур 3 В5.5 (п.9): порядок — сравнить, бейдж, отчет,
- * обновить анализ (главное действие справа). Круг 5 (Н1 аудита, вариант А, 27.09):
- * на телефоне «Сравнить» и «Бейдж» — в меню «⋮», на виду «Отчет» и «Как
- * считается?» (иначе строка резалась и отчет с телефона был недоступен). Круг 5
- * (находка 19): у репо без оценки «Сравнить» нет — в сравнении у него пустой столбец.
+ * Строка действий карточки: сравнить, бейдж, отчет, обновить анализ (главное действие
+ * справа). На телефоне «Сравнить» и «Бейдж» уходят в меню «⋮», иначе строка режется и
+ * отчет становится недоступен. У репо без оценки «Сравнить» нет — в сравнении у него
+ * был бы пустой столбец.
  */
 function CardActions({ org, repo, scored, badge, league, publicBaseUrl, report, refresh }: { org: string; repo: string; scored: boolean; badge: boolean; league: boolean; publicBaseUrl: string; report: ReactNode; refresh: ReactNode }) {
   const phone = useMediaQuery("(max-width: 767px)");
-  // В5.5 закрытие (П-2): бейдж выдается — знает сервер (поле карточки), без пробы badge.svg
+  // доступность бейджа знает сервер (поле карточки), без пробного запроса badge.svg
   const badgeOk = badge;
   const [badgeOpen, setBadgeOpen] = useState(false);
   if (!phone) {
     return (
       <Flex gap={2} alignItems="center">
         {scored && <CompareButton org={org} repo={repo} />}
-        {/* 5-A (§2 24.09): бейдж — кнопкой в шапке, как Clone у SourceCraft */}
+        {/* бейдж — кнопкой с поповером, как Clone у SourceCraft */}
         {scored && <BadgeButton org={org} repo={repo} publicBaseUrl={publicBaseUrl} available={badge} league={league} />}
         {report}
         {refresh}
@@ -554,18 +519,17 @@ function compareState(org: string, repo: string): { inSet: boolean; full: boolea
 }
 
 /**
- * Тур 3 В5.5 (п.9, 26.09): «Сравнить» из карточки. Набор — последний набор
- * сравнения вкладки (`lastCompareSet`, как у пункта rail): репо уже в нем —
- * «В сравнении» ведет на страницу сравнения; есть место — добавляет и ведет
- * туда же; мест нет — кнопка выключена с причиной в подсказке.
+ * «Сравнить» из карточки. Набор — последний набор сравнения вкладки (`lastCompareSet`,
+ * как у пункта rail): репо уже в нем — «В сравнении» ведет на страницу сравнения; есть
+ * место — добавляет и ведет туда же; мест нет — кнопка выключена с причиной в подсказке.
  */
 function CompareButton({ org, repo }: { org: string; repo: string }) {
   const { inSet, full, count, go } = compareState(org, repo);
   if (full) {
     return (
       <ActionTooltip title={COMPARE_LIMIT_TEXT}>
-        {/* обертка: выключенная кнопка не получает наведения, подсказка — на span */}
-        {/* круг 5 тура 3 (находка 14): обертка фокусируется — причину слышно и с клавиатуры */}
+        {/* выключенная кнопка не получает наведения — подсказка на обертке; обертка
+            фокусируется, чтобы причину было слышно и с клавиатуры */}
         <span className="rh-disabled-tip" tabIndex={0} aria-label={`Сравнить: ${COMPARE_LIMIT_TEXT}`}>
           <Button view="outlined" size="m" disabled>
             <Icon data={ScalesBalanced} size={16} />
@@ -587,9 +551,8 @@ function ReportMenu({ mdHref, pdfHref, pdfName }: { mdHref: string; pdfHref: str
   const toaster = useToaster();
   const [busy, setBusy] = useState<"md" | "pdf" | null>(null);
   const mdName = pdfName.replace(/\.pdf$/, ".md");
-  // В4.8.5 (К8.5.11, С7-1): обе выгрузки — fetch + blob; любой сбой — тост в
-  // приложении (раньше MD открывался ссылкой, и 429/404/500 заменяли
-  // приложение сырым JSON). Текст тоста — по коду (reportFailureText)
+  // Обе выгрузки — fetch + blob: сбой (429/404/500) показывается тостом, а не сырым
+  // JSON вместо приложения, как было бы при переходе по ссылке. Текст тоста — по коду
   const download = async (kind: "md" | "pdf"): Promise<void> => {
     setBusy(kind);
     const href = kind === "md" ? mdHref : pdfHref;
@@ -632,7 +595,6 @@ function ReportMenu({ mdHref, pdfHref, pdfName }: { mdHref: string; pdfHref: str
       size="m"
       popupProps={{ placement: "bottom-end" }}
       renderSwitcher={(props) => (
-        // В4.7 круг 2 (Р2.4): пока PDF собирается, кнопка показывает спиннер
         <Button {...props} view="normal" size="m" aria-haspopup="menu" loading={busy !== null}>
           <Icon data={ArrowDownToLine} size={16} />
           Отчет
@@ -648,11 +610,10 @@ function ReportMenu({ mdHref, pdfHref, pdfName }: { mdHref: string; pdfHref: str
 }
 
 /**
- * «Обновить анализ» — запуск (К2, К3: сервер проверяет доступ PAT до
- * постановки). В4.8.5 (К8.5.1): итог узнаётся не опросом карточки, а общим
- * опросом заданий вкладки (session.tsx) — по номеру задания; тост об итоге
- * даёт он же, из любого экрана. Здесь — только отправка и её исход; повторный
- * клик на время отправки заблокирован (С4-13).
+ * Запуск анализа (сервер проверяет доступ токена до постановки). Итог узнает общий
+ * опрос заданий вкладки (session.tsx) по номеру задания — он же дает тост об итоге
+ * на любом экране. Здесь — только отправка и ее исход; повторный клик на время
+ * отправки заблокирован.
  */
 function useStartAnalysis(org: string, repo: string): { sending: boolean; start: () => void } {
   const [sending, setSending] = useState(false);
@@ -664,7 +625,7 @@ function useStartAnalysis(org: string, repo: string): { sending: boolean; start:
     setSending(true);
     void mutateJson<{ queued?: boolean; jobId?: number; deduplicated?: boolean }>(`/api/me/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/scan`, "POST")
       .then((res) => {
-        // круг 2 (Н5): итог этого задания объявится и в ответе базовой линии опроса
+        // итог этого задания объявится, даже если оно попадет уже в базовую линию опроса
         announceJobStarted(res?.jobId);
         // задание уже стояло (повтор, потерянный ответ, другая вкладка) — не «запущен заново»
         toaster.add({
@@ -679,7 +640,7 @@ function useStartAnalysis(org: string, repo: string): { sending: boolean; start:
       })
       .finally(() => {
         setSending(false);
-        // С9-16: даже если ответ потерян, задание могло встать — узнаём у сервера
+        // даже если ответ потерян, задание могло встать — узнаем у сервера
         announceJobsChanged();
         analysis.refresh();
       });
@@ -697,13 +658,10 @@ function Header({ card, view, starDoneKey, starLoggedIn }: { card: Card; view: C
         <RepoAvatar repo={r.repo} logoUrl={r.logoUrl} size="l" />
         <Flex direction="column" justifyContent="space-between" style={{ minWidth: 0 }}>
           <Flex gap={2} alignItems="center" wrap className="rh-card-head__title">
-            {/* В4.6 (У27): тот же компонент слага, что в строке рейтинга */}
             <RepoSlug org={r.org} repo={r.repo} variant="header-1" />
-            {/* В4.9 ч.2 (А7, U6-1 с поправкой владельца): видимость SourceCraft —
-                той же плашкой, что в избранном; «неизвестно» плашки не дает */}
+            {/* видимость в SourceCraft — той же плашкой, что в избранном; «неизвестно» плашки не дает */}
             <VisibilityPill value={view.visibility} />
             <Flex gap={1} alignItems="center">
-              {/* тур 3 В5.5 (п.8, круг 2): копирование org/repo — после плашки видимости */}
               <ClipboardButton text={slugOf(r.org, r.repo)} size="s" view="flat-secondary" tooltipInitialText="Скопировать org/repo" tooltipSuccessText="Скопировано" />
               <FavoriteStar org={r.org} repo={r.repo} visibility={r.visibility} doneKey={starDoneKey} loggedIn={starLoggedIn} />
               <ActionTooltip title="Открыть на sourcecraft.dev">
@@ -720,10 +678,8 @@ function Header({ card, view, starDoneKey, starLoggedIn }: { card: Card; view: C
               </ActionTooltip>
             </Flex>
           </Flex>
-          {/* В4.9 ч.2 (А7; §2 23.09 ответ 4 — прочтение HQ): «обновлен» →
-              «активность» рядом с «анализ». Две даты различены словом: одна —
-              активность репозитория по каталогу, другая — момент анализа, та же,
-              что в шапке отчета (`analysisDate`). */}
+          {/* Две даты различены словом: «активность» — по каталогу SourceCraft, «анализ» —
+              момент анализа, та же дата, что в шапке отчета (`analysisDate`). */}
           <Meta>
             <MetaItem title="Язык">
               <LanguageName name={r.language} color={r.languageColor} />
@@ -755,11 +711,10 @@ function Header({ card, view, starDoneKey, starLoggedIn }: { card: Card; view: C
 }
 
 /**
- * В4.9 ч.2 (А1): табов нет — «Рекомендации» стоят разделом ленты с якорем
- * `#recommendations`. Роутер работает только с `pushState` и якорь сам не
- * прокручивает, а карточка грузится асинхронно, поэтому прокрутка — эффектом
- * после загрузки: по `#recommendations` и по старой ссылке `?tab=recommendations`
- * (письма, закладки, прежние ссылки кабинета продолжают вести к разделу).
+ * «Рекомендации» — раздел ленты с якорем `#recommendations`. Роутер работает только с
+ * `pushState` и якорь сам не прокручивает, а карточка грузится асинхронно, поэтому
+ * прокрутка — эффектом после загрузки: по `#recommendations` и по старой ссылке
+ * `?tab=recommendations` (письма и закладки продолжают вести к разделу).
  */
 export const RECOMMENDATIONS_ID = "recommendations";
 
@@ -782,39 +737,32 @@ function useRecommendationsAnchor(ready: boolean, key: string): void {
 // ---------- правая панель: итог ----------
 
 /**
- * ДВА показателя объясняются ПАРОЙ ПОДСКАЗОК (В4.6 круг 2, Р13 — решение
- * владельца 20.09). Абзац «Разницу с HealthCraft Index дают CI и Security»
- * стоял под числами и повторял то, что уже сказано выше; владелец его
- * удалила, а отличие показателей переехало сюда. Тексты согласованы так,
- * чтобы разница читалась при чтении ПАРЫ: одна называет 4 категории и
- * «строится рейтинг», вторая — 6 категорий и «в рейтинг не входит».
- * Подсказка полного показателя стоит на ОБЕИХ ветках — открытой и закрытой
- * (в закрытой её не было вовсе, а спрашивают про отличие как раз там).
- * MD-отчёт свою формулировку сохраняет: документ читается без наведения.
+ * Два показателя объясняются парой подсказок: тексты согласованы так, чтобы разница
+ * читалась при чтении пары (4 категории и основа рейтинга против 6 категорий и доступа
+ * участникам). Подсказка полного показателя стоит и в открытой, и в закрытой плашке —
+ * про отличие спрашивают как раз там. В MD-отчете своя формулировка: документ читается
+ * без наведения.
  */
 const INDEX_HELP =
   "Публичная оценка по 4 категориям: документация, активность, задачи и состояние кода. " +
   "Считается для всех открытых репозиториев и является основой общего рейтинга.";
 
-/** круг 2 (Е10): «Место в рейтинге» в паспорте анализа — в одну строку; мера общая (У27) */
+/** Ширина имен в паспорте анализа — общая мера, чтобы «Место в рейтинге» стояло в одну строку. */
 const ASIDE_NAME_WIDTH = DEFINITION_NAME_WIDTH;
 
 const FULL_HELP =
   "Рассчитывается по 6 категориям: 4 категориям HealthCraft Index, а также CI/CD и Безопасности. " +
   "Показатель доступен только для репозиториев, к которым у вас есть доступ.";
 
-/** «Данные собраны» паспорта анализа (А8): ok — «полностью», partial — «частично», прочее — словом статуса. */
+/** «Данные собраны» паспорта анализа: ok — «полностью», partial — «частично», bad — своей фразой, прочее — словом статуса. */
 function collectedText(status: string): string {
-  // Ступень 4 (Ф7): не «Данные собраны: сбойный» — для прочих статусов строка паспорта своя
   return status === "ok" ? "полностью" : status === "partial" ? "частично" : status === "bad" ? "не полностью – анализ завершился сбоем" : scanStatusText(status);
 }
 
 /**
- * В4.9 ч.2 (А8, U4-A): правая панель — паспорт анализа и короткая справка.
- * «Анализ» — место, покрытие, полнота сбора, запуск; «Шкала оценки» —
- * плашки без абзаца; «Что учитывается» — 2 строки; «Реквизиты» свернуты.
- * Вклад, «Сильнее всего…» и «Каких данных не хватило» ушли: вклад — под
- * числами, недостающие данные — основанием у строки категории.
+ * Правая панель — паспорт анализа и короткая справка: «Анализ» (место, покрытие,
+ * полнота сбора, запуск), «Шкала оценки», «Что учитывается», «Реквизиты». Вклад
+ * категорий стоит под числами, недостающие данные — основанием у строки категории.
  */
 function ScoreAside({
   card,
@@ -826,7 +774,7 @@ function ScoreAside({
   meta: MetaResponse | null;
   /** свой идущий анализ (фаза и признак сервера «затянулось»); null — нет */
   analysis: { phase: "queued" | "running"; stalled: boolean } | null;
-  /** идёт чужой или периодический скан (С6-3) */
+  /** идет чужой или периодический скан */
   foreignRunning: boolean;
 }) {
   const { score, scan } = card;
@@ -836,10 +784,8 @@ function ScoreAside({
   return (
     <>
       <AsideSection title="Анализ">
-        {/* К8.5.1 (С4-9): идущий анализ виден и на карточке с оценкой — свой
-            (по заданию) или чужой/периодический (по скану); без обещания времени */}
-        {/* замечание 25.09: «идет анализ» со спиннером в панели снят — ход анализа
-            показывают кнопка в шапке и «Задания»; остается только затянувшийся */}
+        {/* ход анализа показывают кнопка в шапке и «Задания»; панель говорит только
+            о затянувшемся */}
         {analysis?.stalled === true && (
           <Label theme="warning" size="xs">
             анализ затянулся – итог появится в «Заданиях»
@@ -849,7 +795,7 @@ function ScoreAside({
           <DefinitionList nameMaxWidth={ASIDE_NAME_WIDTH}>
             {score && (
               <DefinitionList.Item name="Место в рейтинге">
-                {/* В5.5 закрытие (С14): одно правило с отчетом и сравнением; без места — причина, а не «—» */}
+                {/* одно правило с отчетом и сравнением; без места — причина, а не «—» */}
                 {rankText(card.repo.visibility, score)}
               </DefinitionList.Item>
             )}
@@ -858,8 +804,8 @@ function ScoreAside({
                 {fmtCoverage(score.indexCoverage)}
               </DefinitionList.Item>
             )}
-            {/* круг 4 (П2): при двух показателях — короткие имена в одну строку,
-                аббревиатуры расшифрованы в подсказке */}
+            {/* при двух показателях — короткие имена в одну строку, аббревиатуры
+                расшифрованы в подсказке */}
             {score && full && (
               <DefinitionList.Item name="Покрытие HCI" note={`HCI – HealthCraft Index. ${coverageHelp}`}>
                 {fmtCoverage(score.indexCoverage)}
@@ -878,7 +824,7 @@ function ScoreAside({
         )}
       </AsideSection>
 
-      {/* В4.6 (У22): та же легенда, что на рейтинге; абзац под ней на карточке снят (А8) */}
+      {/* та же легенда, что на рейтинге, но без абзаца под ней */}
       {score && <ScoreLegend withNote={false} />}
 
       {score && (
@@ -895,7 +841,6 @@ function ScoreAside({
       )}
 
       {scan && (
-        // круг 2 (Е11): места в панели хватает — «Реквизиты» не свернуты
         <AsideSection title="Реквизиты">
           <DefinitionList nameMaxWidth={ASIDE_NAME_WIDTH}>
               <DefinitionList.Item name="Анализ">№ {scan.id}</DefinitionList.Item>
@@ -931,12 +876,10 @@ function PathLine({ parts }: { parts: PathPart[] }) {
 }
 
 /**
- * ВЕЛИЧИНА — первый экран главной колонки. Круг 2 части 2 (Е12, вариант A,
- * §2 23.09): у каждого показателя своя плашка — число, плашка уровня и под
- * ним его полоса вклада; подписи над полосой нет, цветной полосы балла под
- * числом нет (Н2). На широком экране плашки стоят в ряд, на узком — столбиком
- * (`.rh-score-cards`, auto-fit). Закрытый Repo Health Score — своя плашка с
- * путем к нему по типу зрителя.
+ * Показатели — первый экран главной колонки. У каждого своя плашка: число, уровень и
+ * под ними полоса вклада категорий. На широком экране плашки стоят в ряд, на узком —
+ * столбиком (`.rh-score-cards`, auto-fit). Закрытый Repo Health Score — своя плашка
+ * с путем к нему по типу зрителя.
  */
 function ScoreBand({ card, view, footer }: { card: Card; view: CardView; footer?: ReactNode }) {
   const score = card.score!;
@@ -948,10 +891,9 @@ function ScoreBand({ card, view, footer }: { card: Card; view: CardView; footer?
         <ContributionStrip bar={barOf("HealthCraft Index")} />
         {footer}
       </Card>
-      {/* круг 4 (З): закрытый показатель — на светло-сером фоне заглушек */}
       <Card view="outlined" className={view.fullPath ? "rh-score-band rh-score-band_locked" : "rh-score-band"}>
         {view.fullPath ? (
-          // быстрая правка 23.09 (2): колонка на всю высоту плашки — кнопка входа у нижнего края
+          // колонка на всю высоту плашки — кнопка входа у нижнего края
           <Flex direction="column" gap={1} style={{ minWidth: 0, flexGrow: 1 }}>
             <Flex gap={1} alignItems="center">
               <Text color="secondary">Repo Health Score</Text>
@@ -959,9 +901,8 @@ function ScoreBand({ card, view, footer }: { card: Card; view: CardView; footer?
                 <MetricHelp text={FULL_HELP} name={FULL} />
               </HelpMark>
             </Flex>
-            {/* Закрытый показатель не схлопывается в метку (прием платформы):
-                заголовок — кому он виден, строка — путь к нему по типу зрителя,
-                одной копией с отчетом (`fullScorePath`, §2 23.09 ответ 1) */}
+            {/* закрытый показатель не схлопывается в метку: заголовок — кому он виден,
+                строка — путь к нему по типу зрителя, тот же текст, что в отчете (`fullScorePath`) */}
             <Text variant="subheader-2">Виден участникам репозитория</Text>
             <Text variant="body-1" color="complementary">
               <PathLine parts={view.fullPath} />
@@ -986,13 +927,11 @@ function ScoreBand({ card, view, footer }: { card: Card; view: CardView; footer?
 }
 
 /**
- * Полоса вклада под своим числом (Ш2, круг 2 — палитра П2): тонкий стек
- * 8 px с зазором 2 px и легенда точками в строку с переносом, как «Top
- * languages» SourceCraft и панель «Вклад категорий» рейтинга. Одна категория
- * — один цвет на обоих экранах (`categoryColorClass`); «не набрано» —
- * последним, нейтральным. Заголовка нет (Е12): полоса стоит в плашке своего
- * показателя, имя — в `aria-label`. Расчет — `categoryContributions`, общий
- * с отчетом; на карточке вклад без «+» (Е3).
+ * Полоса вклада под своим числом: тонкий стек и легенда точками с переносом, как «Top
+ * languages» SourceCraft и панель «Вклад категорий» рейтинга. Одна категория — один
+ * цвет на обоих экранах (`categoryColorClass`); «не набрано» — последним, нейтральным.
+ * Заголовка нет — полоса стоит в плашке своего показателя, имя в `aria-label`. Расчет
+ * (`categoryContributions`) общий с отчетом.
  */
 function ContributionStrip({ bar }: { bar: CardView["contributions"][number] | null }) {
   if (!bar) return null;
@@ -1036,10 +975,9 @@ function ContributionStrip({ bar }: { bar: CardView["contributions"][number] | n
 }
 
 /**
- * Подсказка показателя (завершающие правки В4.9, пункт 2): определение и веса
- * категорий списком «Документация ····· 23%» — чтобы расчет можно было
- * проверить самому. Веса номинальные и одинаковы для всех репозиториев,
- * поэтому у закрытого Repo Health Score они тоже видны.
+ * Подсказка показателя: определение и веса категорий списком «Документация ····· 23%»,
+ * чтобы расчет можно было проверить самому. Веса номинальные и одинаковы для всех
+ * репозиториев, поэтому у закрытого Repo Health Score они тоже видны.
  */
 function MetricHelp({ text, name }: { text: string; name: typeof INDEX | typeof FULL }) {
   return (
@@ -1073,9 +1011,8 @@ function ScoreFigure({ title, help, total, position }: { title: string; help: st
           </Label>
         </span>
       ) : (
-        // В5.9 круг 2 (замечание владельца 27.09, п.2): блок позиции прижат к правому краю над
-        // полосой вклада — сверху плашка лиги, снизу место и процент похожих; не хватает места
-        // рядом с числом — блок уходит строкой ниже, по-прежнему вправо
+        // блок позиции прижат вправо над полосой вклада: сверху плашка лиги, снизу место и
+        // процент похожих; не хватает места рядом с числом — уходит строкой ниже, тоже вправо
         <div className="rh-score-figure__row">
           <Flex gap={2} alignItems="baseline" wrap className="rh-score-figure__value">
             <Text variant="display-2">{fmtScore(total)}</Text>
@@ -1105,7 +1042,7 @@ function PositionLine({ position }: { position: PositionView }) {
       {/* подсказка ⓘ — в строке текста, после неразрывного пробела: на телефоне не отрывается
           от последнего слова на свою строку */}
       <Text color="secondary" className="rh-position__line">
-        {/* title — только на тексте: на ⓘ свой тултип, иначе всплывали оба (круг 3, п.4) */}
+        {/* title — только на тексте: у ⓘ свой тултип, иначе всплывали бы оба */}
         <span title="Место в публичном рейтинге по HealthCraft Index">
           {position.rank}
           {position.cohort ? `, ${position.cohort}` : ""}
@@ -1126,23 +1063,19 @@ function PositionLine({ position }: { position: PositionView }) {
 // ---------- категории ----------
 
 /**
- * В4.9 ч.2 (А4, U2-a): строка категории — раскрытие · название · полоса ·
- * балл · плашка уровня, вторая строка под названием — основание (тот же
- * текст, что колонка «Основание» PDF). Полосы серые — цвет несет только
- * плашка; чипа «Вклад N%» нет. Закрытые зрителю CI/CD и Безопасность — не
- * строками: плашка с голубой рамкой под списком (решение В4.6 круг 2 п.4 в
- * силе, §2 23.09 «финальный вид подтвержден» п.2).
+ * Строка категории: раскрытие · название · полоса · балл · плашка уровня; под
+ * названием — основание (тот же текст, что колонка «Основание» PDF). Полосы серые —
+ * цвет несет только плашка. Закрытые зрителю CI/CD и Безопасность — не строками,
+ * а одной плашкой под списком.
  */
 function Categories({ card, view }: { card: Card; view: CardView }) {
   return (
     <section className="rh-section" aria-labelledby="rh-categories-title">
-      {/* круг 2 (Е4): заголовок — внутри плашки, в ритме ее строк */}
       <Card view="outlined" className="rh-section-card">
         <Text variant="subheader-3" as="h2" id="rh-categories-title" className="rh-section__title">
           Категории
         </Text>
-        {/* К-4 В5.3 (§2 25.09, вариант Б): сильные стороны / требует внимания — строкой под
-            заголовком, без фона и цвета; одна копия с MD/PDF (`strengthsLine`) */}
+        {/* сильные стороны и что требует внимания — строкой под заголовком; тот же текст, что в MD/PDF */}
         {strengthsLine(card) !== null && (
           <Text as="p" variant="body-1" color="complementary" className="rh-strengths">
             {strengthsLine(card)}
@@ -1150,7 +1083,7 @@ function Categories({ card, view }: { card: Card; view: CardView }) {
         )}
         <ul className="rh-list" style={{ borderTop: 0 }}>
           {view.categories.map((c) => (
-            // замечание 25.09: при первом заходе ни одна категория не раскрыта (раскрытие худшей путало)
+            // при первом заходе ни одна категория не раскрыта: автораскрытие худшей путало
             <CategoryRow key={c.key} category={c} card={card} />
           ))}
         </ul>
@@ -1161,23 +1094,19 @@ function Categories({ card, view }: { card: Card; view: CardView }) {
 }
 
 /**
- * Плашка закрытых категорий (А4): заголовок и пояснение одним предложением —
- * `ACCESS_LOCK_SHORT` по причине (одна копия с отчетом, К9.13); при разных
- * причинах — по предложению на категорию. Призыва внутри нет: единственный
- * призыв стоит у закрытого Repo Health Score.
+ * Плашка закрытых категорий: одно предложение без заголовка — `ACCESS_LOCK_SHORT` по
+ * причине, тот же текст, что в отчете; при разных причинах — по предложению на
+ * категорию. Призыва внутри нет: единственный призыв стоит у закрытого Repo Health Score.
  */
 function LockedCategories({ text }: { text: string }) {
-  // круг 2 (Т3): одно предложение без заголовка
-  // круг 3 (5): иконка — по центру однострочного текста; круг 5 (1): светло-синий фон
   return <Alert theme="info" view="filled" size="s" align="center" className="rh-locked-note" message={text} />;
 }
 
 function CategoryRow({ category: c, card, defaultOpen = false }: { category: CategoryView; card: Card; defaultOpen?: boolean }) {
   const key = c.key;
   const cat = card.score!.categories[key]!;
-  // ревью кода R16: раскрыть по умолчанию можно только то, что раскрывается
   const [open, setOpen] = useState(defaultOpen);
-  // В5.3 круг 3: ссылки «К категории…» (фрод, AI-обзор) раскрывают строку
+  // ссылки на категорию из других блоков (признаки накрутки, AI-обзор) раскрывают строку
   useEffect(() => {
     const onOpen = (e: Event): void => {
       if ((e as CustomEvent<string>).detail === key) setOpen(true);
@@ -1187,7 +1116,7 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
   }, [key]);
   const aiNote = categoryAiNote(card, key);
   const subs = Object.entries(cat.submetrics);
-  // Ступень 4 (Ф12): у категории без данных раскрывать нечего — одно состояние, один вид
+  // у категории без данных раскрывать нечего
   const expandable = c.score !== null && (subs.length > 0 || c.partialNote !== null);
 
   const row = (
@@ -1196,7 +1125,7 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
       <span className="rh-category__name">
         <span className="rh-category__title">
           <Text variant="subheader-1">{c.title}</Text>
-          {/* 3-B (§2 24.09): искра — разбор модели есть (фиолетовая) или появится после обзора (серая) */}
+          {/* искра — у категории есть разбор модели */}
           <CategoryAiMark card={card} categoryKey={key} hasData={c.score !== null} />
           {c.stale && (
             <Label theme="warning" size="xs">
@@ -1204,15 +1133,13 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
             </Label>
           )}
         </span>
-        {/* основание — вторая строка, тот же текст, что колонка «Основание» PDF */}
         <Text variant="body-1" color="complementary" className="rh-category__why">
           {c.why}
         </Text>
       </span>
-      {/* Tri-state: без данных — «—» вместо полосы и числа, плашка «Нет данных» */}
+      {/* Tri-state: без данных на месте полосы пусто — единственный прочерк стоит в
+          колонке балла, рядом с плашкой «Нет данных» */}
       <span className="rh-category__bar">
-        {/* круг 2 (Е13): у «нет данных» на месте полосы пусто — единственный
-            прочерк стоит в колонке балла, у правого края, рядом с плашкой */}
         {c.score === null ? null : (
           <span className="rh-cat-bar" role="img" aria-label={`${c.scoreText} из 100`}>
             <span className="rh-cat-bar__fill" style={{ width: `${Math.max(0, Math.min(100, Math.round(c.score)))}%` }} />
@@ -1239,7 +1166,6 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
       )}
       {open && expandable && (
         <div className="rh-subrows">
-          {/* В5.9: процент среди похожих по категории — первой строкой раскрытия */}
           {c.cohortNote && (
             <Text variant="body-1" color="complementary" className="rh-subrows__note">
               {c.cohortNote}
@@ -1251,15 +1177,10 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
               {c.partialNote}
             </Text>
           )}
-          {/* Доводка 21.09: шапка подписывает ТОЛЬКО числовые колонки — над
-              именем метрики подпись не нужна, там и так имя. Подписи 11px
-              приглушённые, без линии под ними (вариант B). Колонки общие со
-              строками: сетка живёт на `.rh-subrows`, строки раскрываются в
-              неё через `display: contents`, иначе у каждой строки был бы свой
-              `auto` и подпись не встала бы над значениями. */}
-          {/* круг 2 (Е6): вес показателя внутри категории — та же колонка, что в
-              разборе PDF (`submetricWeightText`, одна копия); порядок колонок — как в PDF */}
-          {/* круг 3 (7): «Вес» перед «Балл» — на карточке; разбор PDF прежний */}
+          {/* Шапка подписывает только числовые колонки — над именем метрики подпись не
+              нужна. Сетка живет на `.rh-subrows`, строки раскрываются в нее через
+              `display: contents`: иначе у каждой строки был бы свой `auto` и подпись не
+              встала бы над значениями. Вес — тот же, что в разборе PDF (`submetricWeightText`). */}
           <div className="rh-subrows__head">
             <span>Значение</span>
             <span>Вес</span>
@@ -1267,12 +1188,9 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
           </div>
           {subs.map(([subKey, sub]) => (
             <div key={subKey} className="rh-subrow">
-              {/* Доводка 21.09: имя, пунктирный лидер и значение — ОДНА ячейка.
-                  Раньше имя и значение стояли в разных колонках грида, между
-                  ними зияла растянутая пустота, и строка распадалась надвое.
-                  Лидер физически ведёт глаз от названия к числу.
-                  Цвет имени говорит о весе: справочные подметрики («показ, без
-                  веса») набраны приглушённым, взвешенные — основным. */}
+              {/* Имя, пунктирный лидер и значение — одна ячейка: в разных колонках грида
+                  между ними зияла пустота и строка распадалась надвое. Цвет имени говорит
+                  о весе: справочные подметрики приглушены, взвешенные — основным цветом. */}
               <span className="rh-subrow__head">
                 <Text color="secondary" className="rh-subrow__icon">
                   <Icon data={submetricIcon(key, subKey)} size={14} />
@@ -1281,18 +1199,10 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
                   {submetricTitle(key, subKey)}
                 </Text>
                 <span className="rh-subrow__lead" aria-hidden="true" />
-                {/* В4.7 (П4.2): значение — по словарю подметрик
-                    (`src/report/submetrics.ts`), тому же, что у MD и PDF:
-                    единица и масштаб, составное значение — короткой строкой,
-                    без многоточия (строка может перенестись). Доли по-прежнему
-                    округлены (Р20). Поповер «Основание» ниже печатает значение
-                    СЫРЫМ: это доказательная база.
-                    Доводка 21.09: слово «значение» из строки убрано — оно
-                    повторялось в каждой из девяти строк; полная форма
-                    осталась в подсказке. */}
-                {/* В4.9 (К9.9): служебная заметка расчета не печатается — вместо «—» стоят
-                    слова заметки из словаря подметрик, примечание уходит в подсказку;
-                    неизвестная заметка не показывается вовсе */}
+                {/* Значение — по словарю подметрик (`src/report/submetrics.ts`), тому же,
+                    что у MD и PDF: единица, масштаб, округление. Сырое значение печатает
+                    только поповер основания — это доказательная база. Служебная заметка
+                    расчета показывается словами из словаря, примечание — в подсказке. */}
                 <Text
                   color="secondary"
                   className="rh-subrow__value"
@@ -1301,16 +1211,10 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
                   {submetricShownValue(key, subKey, sub, submetricContext(card.score?.computedAt), cat.submetrics)}
                 </Text>
               </span>
-              {/* В колонке балла — только балл, и полос у подметрик нет вовсе:
-                  в плотных списках платформы (файловое дерево, коммиты, теги)
-                  нет ни полос, ни чипов, читаемость держится на одном кегле,
-                  колонках и двух уровнях яркости.
-                  Слова «без веса» и «нет данных» отсюда убраны: они были
-                  вдвое-втрое шире числа и сбивали правый столбик, ради
-                  которого колонка и заведена. Вместо слова прочерк — тот же
-                  знак, каким продукт показывает отсутствующее число везде
-                  (`fmtScore`), и он никогда не читается нулём (закон 2). Что
-                  именно отсутствует, говорят подсказка и цвет имени. */}
+              {/* В колонках веса и балла — только числа, без полос и слов: слова «без веса»
+                  и «нет данных» шире числа и сбивали бы правый столбик. Вместо них прочерк —
+                  тот же знак отсутствующего числа, что везде (`fmtScore`), он никогда не
+                  читается нулем. Что именно отсутствует, говорят подсказка и цвет имени. */}
               <Text className="rh-subrow__score" color="secondary">
                 {submetricWeightText(key, subKey)}
               </Text>
@@ -1327,11 +1231,8 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
               )}
             </div>
           ))}
-          {/* В4.6 (У17): разбивка по движкам — в раскрытии Security, строками таблицы */}
           {key === "security" && <AppsecEngines card={card} />}
-          {/* В5.5 тур 2 (W4, ЗН-2): карта владельцев — в раскрытии «Состояния кода», теми же строками */}
           {key === "code" && <OwnershipMap category={cat} />}
-          {/* замечание 3 (25.09): текст модели — под таблицей метрик */}
           {aiNote !== null && <CategoryAiNote note={aiNote} card={card} />}
         </div>
       )}
@@ -1342,22 +1243,18 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
 // ---------- маркеры расчёта: предупреждения наверху и «Ограничения данных» ----------
 
 /**
- * UX-проход В5.2 25.09, круг 2 (замечание 4, Екатерина): единственное предупреждение (CI
- * настроен, запусков не видно) касается только категории CI/CD, а она входит только в Repo
- * Health Score, — поэтому оно стоит внизу его плашки, как признаки накрутки у индекса.
- * Предупреждения наверху (В4.6, З4 систематика): `warning` — оговорка о самом
- * расчете, `info` — граница данных. В4.9 ч.2 (А6, §2 23.09 ответ 2): наверху
- * остаются только те, которых нет в «Ограничениях данных», — данные из
- * прошлого анализа, лимит сервиса и усеченная история стоят одним списком
- * внизу, тем же текстом, что PDF.
+ * Особенности расчета внизу плашки Repo Health Score. Единственное предупреждение (CI
+ * настроен, запусков не видно) касается только CI/CD, а она входит только в Repo Health
+ * Score. `warning` — оговорка о самом расчете, `info` — граница данных; прочие
+ * ограничения (прошлый анализ, лимит сервиса, усеченная история) стоят одним списком
+ * в «Ограничениях данных», тем же текстом, что в PDF.
  */
 function Markers({ view }: { view: CardView }) {
   const rows: { key: string; label: string; text: string; theme: "info" | "warning" }[] = [];
   if (view.topMarkers.includes("ci-cap")) {
     rows.push({
       key: "ci-cap",
-      // UX-проход 25.09 (замечание 8): без жаргона
-      // В5.5 закрытие (С19): тот же текст печатает отчет строкой под показателями
+      // тот же текст печатает отчет строкой под показателями
       label: CI_CAP_TITLE,
       text: CI_CAP_TEXT,
       theme: "warning",
@@ -1367,15 +1264,13 @@ function Markers({ view }: { view: CardView }) {
   return (
     <Flex direction="column" gap={2} role="region" aria-label="Особенности расчета" className="rh-score-band__foot">
       {[...rows].sort((a, b) => (a.theme === b.theme ? 0 : a.theme === "warning" ? -1 : 1)).map((row) => (
-        // круг 5 (1): info — заливкой; UX-проход 25.09 (замечание 8): предупреждение тоже
-        // заливкой — желтый фон, как у прочих предупреждений
         <Alert key={row.key} theme={row.theme} view="filled" size="s" align="baseline" title={row.label} message={row.text} />
       ))}
     </Flex>
   );
 }
 
-/** «Ограничения данных» (А6): `limitations` отчета тем же текстом, пункт — info-плашка; пусто — раздела нет. */
+/** «Ограничения данных»: `limitations` отчета тем же текстом, пункт — info-плашка; пусто — раздела нет. */
 function Limitations({ items }: { items: string[] }) {
   if (items.length === 0) return null;
   return (
@@ -1386,8 +1281,6 @@ function Limitations({ items }: { items: string[] }) {
         </Text>
         <Flex direction="column" gap={2}>
           {items.map((text) => (
-            // круг 5 (1): инфо-плашки — светло-синей заливкой, как «Токен показывается один раз»;
-            // мини-правка после закрытия В4.9: иконка по центру строки, как у плашки закрытых
             <Alert key={text} theme="info" view="filled" size="s" align="center" message={text} />
           ))}
         </Flex>
@@ -1399,27 +1292,24 @@ function Limitations({ items }: { items: string[] }) {
 // ---------- рекомендации ----------
 
 /**
- * В4.9 ч.2 (А5, U13 и U8): раздел виден без клика. Номер слева — порядок
- * выдачи движка (как в PDF; словом «приоритет» не подписан — это позиция, не
- * срочность), действие заголовком, причина, справа «ожидаемый эффект» над
- * плашкой прироста. Основание — словами: подметрика правила и ее значение;
- * по клику — источник, время сбора и сырые данные.
+ * Рекомендации. Номер слева — порядок выдачи движка, как в PDF (словом «приоритет» не
+ * подписан: это позиция, а не срочность); действие заголовком, ниже причина, справа
+ * ожидаемый эффект. Основание — словами (подметрика правила и ее значение), по клику —
+ * источник, время сбора и сырые данные.
  */
 function Recommendations({ view, org, repo }: { view: CardView; org: string; repo: string }) {
-  // В5.9 (§2 «В5.9 — выбор вариантов», п.1, вариант Б): режим «По шагам» — лестница к зоне
-  // «Здоров»; переключатель — тот же компонент и вид, что «Оценены / Без оценки» рейтинга
+  // режим «По шагам» — лестница к зоне «Здоров»
   const [mode, setMode] = useState<"single" | "steps">("single");
   const ladder = view.ladder;
   const steps = mode === "steps" && ladder !== null;
   return (
-    // круг 2 (Е13): рекомендаций нет — без заголовка раздела; быстрая правка
-    // 23.09 (3): но строка «Рекомендаций нет» остается, иначе читатель не знает,
-    // потерялся раздел или улучшать нечего
+    // рекомендаций нет — раздел без заголовка, но строка об этом остается: иначе
+    // читатель не поймет, потерялся раздел или улучшать нечего
     view.recommendations.length === 0 ? (
       <section className="rh-section" id={RECOMMENDATIONS_ID} aria-label="Рекомендации">
         <Card view="outlined" className="rh-section-card">
           <Flex gap={2} alignItems="center">
-            {/* ревью кода R3: галочка — только когда улучшать нечего */}
+            {/* галочка — только когда улучшать действительно нечего */}
             <Icon data={view.noRecommendationsKind === "healthy" ? CircleCheck : CircleInfo} size={16} className="rh-muted-icon" />
             <Text color="complementary">{view.noRecommendations}</Text>
           </Flex>
@@ -1486,9 +1376,8 @@ function RecommendationRow({ item, org, repo, stepEffect }: { item: Recommendati
         {item.n}
       </Text>
       <Flex direction="column" gap={1} className="rh-rec__body">
-        {/* В4.9 (К9.10): заголовок = действие (глагол), ниже — причина; как в отчете.
-            Круг 2 (Е8): кегль и ритм — как у строки категории (название subheader-1,
-            основание body-1 complementary) */}
+        {/* заголовок — действие (глагол), ниже причина, как в отчете; кегль и ритм — как
+            у строки категории */}
         <Text variant="subheader-1">{rec.action}</Text>
         <Text variant="body-1" color="complementary">
           {rec.problem}
@@ -1506,7 +1395,6 @@ function RecommendationRow({ item, org, repo, stepEffect }: { item: Recommendati
             </Label>
           </Popover>
         </Flex>
-        {/* В5.9 круг 3 (27.09, Екатерина, п.6): заготовка — строкой под «Показателем», с подписью */}
         {rec.fixTemplate ? (
           <Flex gap={2} wrap alignItems="center" className="rh-rec__basis">
             <Text variant="body-short" color="secondary">
@@ -1531,7 +1419,7 @@ function RecommendationRow({ item, org, repo, stepEffect }: { item: Recommendati
             <Text variant="caption-2" color="secondary">
               {item.effectNote}
             </Text>
-            {/* круг 4 (Э1): зеленый — только для здоровья; эффект — нейтральной серой плашкой */}
+            {/* зеленый цвет — только для здоровья, поэтому эффект — нейтральной серой плашкой */}
             <Label theme="unknown" size="xs" title="Прирост показателя, если выполнить только эту рекомендацию">
               {item.effect}
             </Label>
@@ -1546,7 +1434,7 @@ function RecommendationRow({ item, org, repo, stepEffect }: { item: Recommendati
   );
 }
 
-/** Подписи лицензий в меню выбора — выбор автора, по умолчанию ничего (В5.9, шаблоны). */
+/** Подписи лицензий в меню заготовки LICENSE; значения по умолчанию нет — лицензию выбирает автор. */
 const LICENSE_TITLES: Record<string, string> = { mit: "MIT", "apache-2.0": "Apache 2.0" };
 
 /** Текст тоста, если заготовка не скачалась (по коду ответа). */
@@ -1558,9 +1446,9 @@ export function fixFailureText(status: number): string {
 }
 
 /**
- * В5.9 (§2 «В5.9 — выбор вариантов», п.2, вариант А): заготовка файла — тихой кнопкой под
- * эффектом рекомендации; у лицензии — меню выбора без значения по умолчанию. Скачивание —
- * fetch + blob, как «Отчет»: сбой — тостом, а не сырым JSON вместо приложения (урок С7-1).
+ * Заготовка файла для рекомендации — тихой кнопкой; у лицензии — меню выбора без значения
+ * по умолчанию. Скачивание — fetch + blob, как у отчета: сбой показывается тостом, а не
+ * сырым JSON вместо приложения.
  */
 function FixTemplateButton({ org, repo, ruleId, meta }: { org: string; repo: string; ruleId: string; meta: NonNullable<RecommendationView["rec"]["fixTemplate"]> }) {
   const toaster = useToaster();
@@ -1643,8 +1531,8 @@ function FactBlock({ factKey, fact, missing }: { factKey: string; fact: Evidence
   if (!fact) {
     return (
       <Flex direction="column" gap={1}>
-        {/* Ступень 4 (Ф10): текст про AppSec — только у фактов Безопасности */}
-        {/* ревью кода R7: факта нет в анализе — так и говорим; закрыт доступом — про доступ */}
+        {/* факта нет в анализе — так и говорим; закрыт доступом — про доступ (про AppSec —
+            только у фактов Безопасности) */}
         <Text color="complementary">
           {missing
             ? "Этих данных нет в последнем анализе."
@@ -1670,8 +1558,7 @@ function FactBlock({ factKey, fact, missing }: { factKey: string; fact: Evidence
           </Label>
         )}
       </Flex>
-      {/* тур 3 В5.5 (п.11, вариант А): факт словами; сырое значение — под «Исходные
-          данные» (вытесняет Ф2 §2 23.09 — JSON целиком без сворачивания) */}
+      {/* факт словами; сырое значение — свернутым под «Исходные данные» */}
       {factWords(fact.key, fact.status, fact.value).map((l) => (
         <Text key={l} variant="body-short">
           {l}
@@ -1699,20 +1586,12 @@ function factStatusText(status: string): string {
   }
 }
 
-// В4.9 (К9.2): причины «нет данных» — `humanNoData`/`noDataReason` из format.ts
-// (одна копия на карточку, MD и PDF; до В4.9 здесь жила вторая копия).
-// Показ-без-веса — `displayOnly` словаря подметрик (src/report/submetrics.ts).
-
-// В4.7 (П4.2): названия подметрик переехали в словарь `src/report/submetrics.ts`
-// (одно правило на страницу, MD и PDF); иконки остаются здесь — это вид.
-
 /**
- * Иконка подметрики — по одной на каждую из 28 (доводка 21.09).
- * Иконка здесь не украшение: строк в раскрытой категории до девяти, все
- * набраны одним кеглем, и глиф слева даёт строке опознавательный знак,
- * по которому её находят повторно, не перечитывая название. Все взяты из
- * `@gravity-ui/icons` — своих рисунков не заводим (правило 3а
- * docs/ui/gravity-uikit.md). Незнакомый ключ получает нейтральную точку.
+ * Иконка каждой подметрики. Не украшение: строк в раскрытой категории до девяти, все
+ * одним кеглем, и глиф слева позволяет найти строку повторно, не перечитывая название.
+ * Названия подметрик живут в словаре `src/report/submetrics.ts` (общем с MD и PDF),
+ * иконки — здесь, это вид. Все из `@gravity-ui/icons`, своих рисунков не заводим;
+ * незнакомый ключ получает нейтральную точку.
  */
 const SUBMETRIC_ICONS: Record<string, IconData> = {
   "documentation.readme": FileText,
@@ -1722,7 +1601,6 @@ const SUBMETRIC_ICONS: Record<string, IconData> = {
   "cicd.config": Pipeline,
   "cicd.pass_rate": CircleCheck,
   "cicd.duration": Stopwatch,
-  // 4.4.0 (ТП-1, ТП-9): справочные показатели динамики
   "cicd.stability": ChartLine,
   "security.density": Bug,
   "security.resolved": ShieldCheck,
@@ -1746,11 +1624,10 @@ const SUBMETRIC_ICONS: Record<string, IconData> = {
   "issues.monthly_flow": ChartColumn,
   "code.density": Flag,
   "code.old_share": CalendarXmark,
-  // В5.3-М (Р1): новая подметрика к существующему компоненту, иконка из уже подключенных
   "code.tests": CircleCheck,
   "code.root": FolderTree,
   "code.todo_total": Hashtag,
-  // В5.5 тур 2 (W4, ЗН-2): справочные показатели review PR и карта владельцев
+  // справочные показатели ревью PR и карта владельцев
   "activity.pr_review": CodePullRequest,
   "activity.pr_first_response": Comment,
   "activity.pr_waiting": Hourglass,
@@ -1764,17 +1641,12 @@ function submetricIcon(category: string, sub: string): IconData {
 }
 
 /**
- * Разбивка находок AppSec ПО ДВИЖКАМ (В4.6, У17). Счётчики коллектор уже
- * собирает (`appsec.ts`, поле `backlog.engines`) — до этой вехи они лежали в
- * факте и никуда не показывались, то есть зритель видел одно число «столько-то
- * находок» без понимания, чем именно они найдены.
+ * Разбивка находок AppSec по движкам — счетчики из факта коллектора (`appsec.ts`,
+ * поле `backlog.engines`), чтобы было видно, чем найдены находки.
  *
- * SCA — отдельной строкой, потому что это другой класс находок (зависимости, а
- * не свой код), и по нему у платформы отдельный вопрос (Q&A №14). **В ОЦЕНКУ
- * SCA не вводится:** решение владельца 20.09 — Security-формула не меняется ни
- * на йоту (закон 5, воспроизводимость 13.2.2). Имя движка не угадывается: в
- * SCA-строку идёт тот счётчик, чьё имя платформа назвала сама, остальные
- * печатаются как есть.
+ * SCA — отдельной строкой: это другой класс находок (зависимости, а не свой код).
+ * В оценку SCA не входит — формула Безопасности от разбивки не зависит. Имя движка не
+ * угадывается: в SCA-строку идет счетчик, чье имя похоже на SCA, остальные печатаются как есть.
  */
 interface AppsecBreakdown {
   engines: [string, number][];
@@ -1799,11 +1671,9 @@ function appsecBreakdown(card: Card): AppsecBreakdown | null {
 }
 
 /**
- * Находки AppSec по видам проверок (В4.6, У17). В5.3 круг 3 (замечание 25.09):
- * стоял под строкой «Безопасности» всегда, крупным кеглем и списком определений
- * другой ширины — не похоже на метрики. Теперь — внутри раскрытия, под таблицей
- * подметрик, теми же строками (имя, лидер, значение; колонки веса и балла —
- * прочерк: в балл категории разбивка не входит).
+ * Находки AppSec по видам проверок — внутри раскрытия «Безопасности», под таблицей
+ * подметрик и теми же строками (имя, лидер, значение). Колонки веса и балла — прочерк:
+ * в балл категории разбивка не входит.
  */
 function AppsecEngines({ card }: { card: Card }) {
   const breakdown = appsecBreakdown(card);
@@ -1855,13 +1725,10 @@ function AppsecEngines({ card }: { card: Card }) {
 }
 
 /**
- * В5.5 тур 2 (W4, ЗН-2): карта владельцев файлов — внутри раскрытия «Состояния
- * кода», под таблицей подметрик, теми же строками, что разбивка AppSec
- * (решение 25.09: разбивка внутри категории выглядит как метрики, а не как
- * отдельный список; строки держат 375 px без перелива — значение переносится).
- * Строки и тексты — `ownershipView` (одна копия с MD/PDF); имя автора — из
- * git, email не показывается никогда. Колонки веса и балла — прочерк: в балл
- * категории карта не входит.
+ * Карта владельцев файлов — внутри раскрытия «Состояния кода», теми же строками, что
+ * разбивка AppSec (на 375 px значение переносится, без перелива). Строки и тексты —
+ * `ownershipView`, общий с MD/PDF; имя автора — из git, email не показывается никогда.
+ * Колонки веса и балла — прочерк: в балл категории карта не входит.
  */
 function OwnershipMap({ category }: { category: Parameters<typeof ownershipView>[0] }) {
   const view = ownershipView(category);
@@ -1902,13 +1769,13 @@ function OwnershipMap({ category }: { category: Parameters<typeof ownershipView>
   );
 }
 
-// ========== ПОРТ 6 (hq-parallel): избранное на карточке ==========
+// ---------- избранное на карточке ----------
 
 /**
- * Ф2.20 (решение 18.09): после успешного own-скана НЕзаполненная звезда один
- * раз получает неблокирующий зелёный glow (модалка запрещена). «Один раз» =
- * переход active→done в текущей browser-session: ключ `<org>/<repo>:<jobId>`
- * в sessionStorage, DDL нет. Заполненная звезда не светится.
+ * После успешного анализа своего репозитория незаполненная звезда один раз получает
+ * неблокирующую зеленую подсветку (без модалки).
+ * «Один раз» — на задание в пределах сессии браузера: ключ `<org>/<repo>:<jobId>`
+ * в sessionStorage. Заполненная звезда не светится.
  */
 function FavoriteStar({ org, repo, visibility, doneKey, loggedIn }: { org: string; repo: string; visibility: "public" | "internal" | "private" | "unknown"; doneKey: string | null; loggedIn: boolean | null }) {
   const toaster = useToaster();
@@ -1928,9 +1795,8 @@ function FavoriteStar({ org, repo, visibility, doneKey, loggedIn }: { org: strin
     return () => clearTimeout(timer);
   }, [doneKey, state, org, repo]);
   useEffect(() => {
-    // аноним: звезда выключена без живого запроса — 401-зонд мусорил консоль
-    // браузера (планка В4.5 «ноль ошибок консоли»), а вход уже виден в /api/me
-    // В4.8.5 (К8.5.8, С6-6): сессия ещё грузится — звезда «проверяем», а не «войдите»
+    // Анониму звезда выключена без запроса: вход и так виден в /api/me, а 401 засорял
+    // бы консоль. Пока сессия грузится — «проверяем», а не «войдите»
     if (loggedIn === null) {
       setState("loading");
       return;
@@ -1939,16 +1805,9 @@ function FavoriteStar({ org, repo, visibility, doneKey, loggedIn }: { org: strin
       setState("anon");
       return;
     }
-    // Доводка 21.09: здесь стоял ref `probed`, разрешавший запрос ОДИН раз за
-    // жизнь компонента. Он навсегда запирал звезду у вошедшего зрителя:
-    // `/api/me` перезапрашивается (и на время перезапроса `kind` снова
-    // "loading", то есть `loggedIn` на миг false). Порядок выходил такой —
-    // эффект с loggedIn=true поднимал флаг и слал запрос; следующий эффект с
-    // loggedIn=false отменял его через `stop` и ставил "anon"; третий, уже с
-    // loggedIn=true, видел поднятый флаг и выходил БЕЗ запроса. Состояние
-    // оставалось "anon", кнопка — неактивной с подсказкой «Войдите», хотя
-    // зритель вошёл. От зонда-401 у анонима защищает проверка выше, а от
-    // гонки ответов — `stop` ниже; ref не нужен ни для того, ни для другого.
+    // Запрос идет при каждом переходе в «вошел», без флага «уже спрашивали»: /api/me
+    // перезапрашивается, `loggedIn` на миг сбрасывается, и такой флаг навсегда оставил бы
+    // звезду в состоянии «войдите». От гонки ответов защищает `stop`
     let stop = false;
     fetch(`/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`)
       .then(async (res) => {
@@ -1956,7 +1815,7 @@ function FavoriteStar({ org, repo, visibility, doneKey, loggedIn }: { org: strin
           if (!stop) setState("anon");
           return;
         }
-        // M-11: сбой сервера — не «войдите»: честная ошибка проверки
+        // сбой сервера — не «войдите», а ошибка проверки
         if (!res.ok) {
           if (!stop) {
             setState("off");
@@ -1977,12 +1836,8 @@ function FavoriteStar({ org, repo, visibility, doneKey, loggedIn }: { org: strin
       stop = true;
     };
   }, [org, repo, loggedIn]);
-  // Доводка 21.09: на время проверки кнопка больше НЕ исчезает. Прежний
-  // `return null` убирал её из шапки до ответа `/api/me/favorites`, и при
-  // переходе из рейтинга у вошедшего зрителя звезда пропадала на время
-  // запроса, а соседняя иконка перехода прыгала на её место. Теперь во время
-  // проверки показывается та же кнопка, только неактивная: габарит шапки
-  // постоянен, а состояние честно названо подсказкой.
+  // На время проверки кнопка не исчезает, а становится неактивной: иначе соседняя
+  // иконка прыгала бы на ее место; состояние названо подсказкой
   const checking = state === "loading";
   const toggle = async () => {
     setError(null);
@@ -1994,24 +1849,20 @@ function FavoriteStar({ org, repo, visibility, doneKey, loggedIn }: { org: strin
         `/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`,
         next === "on" ? "PUT" : "DELETE",
       );
-      // Доводка 21.09: у действия появился отклик. Смена оттенка звезды —
-      // единственное, что происходило, и на мелкой иконке её не замечали;
-      // тост ещё и называет, КУДА репозиторий попал, — раздел «Мои
-      // репозитории» иначе приходится искать самому.
-      // В4.8.5 (К8.5.14 (д)): права проверяются сами при добавлении — тост
-      // говорит, чем кончилась проверка и поставлен ли первый анализ своего
+      // Смену оттенка мелкой звезды не замечают, поэтому нужен тост. При добавлении
+      // сервер сам проверяет права — тост говорит, чем кончилась проверка и поставлен
+      // ли первый анализ своего репозитория
       toaster.add({
         name: `favorite:${org}/${repo}`,
         theme: next === "on" ? "success" : "info",
         title: next === "on" ? "Добавлено в избранное" : "Убрано из избранного",
-        // ревью В5.3 (25.09): видимость — из ответа или с карточки, иначе тост считал публичный закрытым
+        // видимость — из ответа или с карточки, иначе тост считал бы публичный репо закрытым
         content: next === "on" ? `${slugOf(org, repo)}. ${favoriteAddedText(res?.check, res?.access?.visibility ?? visibility)}` : slugOf(org, repo),
       });
       // первый анализ своего мог встать — «Задания» и карточка узнают сразу
       if (next === "on") announceJobsChanged();
     } catch (e) {
       setState(state); // откат — звезда не врёт
-      // С3-6: ошибка — одним тостом (раньше и тост, и строка под звездой)
       toaster.add({
         name: `favorite-failed:${org}/${repo}`,
         theme: "danger",
@@ -2027,12 +1878,9 @@ function FavoriteStar({ org, repo, visibility, doneKey, loggedIn }: { org: strin
       : "В избранное. Раздел «Избранное» содержит выбранные вами репозитории; права на закрытые данные сервис проверит сам при добавлении.";
   const starDisabled = state === "anon" || checking;
   const star = (
-      /* В4.6 (У32, замечание владельца 9 + правило 3а docs/ui/gravity-uikit.md):
-          звезда — ИКОНКА из @gravity-ui/icons, а не юникодный символ звезды.
-          Символ рисовался шрифтом, то есть не совпадал по размеру и оптике с
-          соседней иконочной кнопкой и не слушался размера иконок вообще.
-          Заполненная — янтарная (`warning`, 8,18:1 в тёмной теме): это тот
-          самый «акцент на мелкой детали», который просил владелец. */
+      /* Звезда — иконка из @gravity-ui/icons, а не юникодный символ: символ рисуется
+          шрифтом и не совпадает по размеру и оптике с соседней иконочной кнопкой.
+          Заполненная — янтарная (`warning`, контраст 8,18:1 в темной теме). */
       <Button
         size="s"
         view="flat"
@@ -2040,27 +1888,22 @@ function FavoriteStar({ org, repo, visibility, doneKey, loggedIn }: { org: strin
           .filter(Boolean)
           .join(" ")}
         disabled={starDisabled}
-        /* В4.6 (У16): объяснение границы доступа прямо там, где зритель
-           нажимает звезду. Сервис НЕ перечисляет репозитории зрителя сам —
-           списка «все мои репозитории» у него нет и быть не может без
-           токена с правами; поэтому «Мои репозитории» в кабинете — это
-           избранное, а не автоматический список (решение favorites-only
-           18.09). Раздел настроек вынесен на `/settings` в В4.6, круг 3. */
+        /* Граница доступа объясняется там, где нажимают звезду: сервис не перечисляет
+           репозитории зрителя сам (без токена с правами такого списка нет), поэтому
+           «Избранное» — выбранные вручную репозитории, а не автоматический список. */
         title={starDisabled ? undefined : starTip}
         aria-label={starTip}
         onClick={() => void toggle()}
       >
-        {/* В4.6 круг 2 (Р22, замечание владельца 20.09): 14px, как у соседней
-            иконки перехода на sourcecraft.dev — 16 против 14 давали разную
-            оптику у двух кнопок, стоящих вплотную. Кнопки-обёртки совпадают
-            по габариту: обе `size="s"`. */}
+        {/* 14px, как у соседней иконки перехода на sourcecraft.dev: кнопки стоят вплотную
+            и должны совпадать по оптике (обе `size="s"`) */}
         <Icon data={state === "on" ? StarFill : Star} size={14} />
       </Button>
   );
   return (
     <Flex direction="column" gap={1}>
-      {/* тур 3 В5.5 (п.12): выключенная кнопка не получает наведения — `title` на ней
-          не показывался; причина — подсказкой на обертке */}
+      {/* выключенная кнопка не получает наведения, и `title` на ней не показывается —
+          причина подсказкой на обертке */}
       {starDisabled ? (
         <ActionTooltip title={starTip}>
           <span className="rh-disabled-tip" tabIndex={0} aria-label={starTip}>{star}</span>

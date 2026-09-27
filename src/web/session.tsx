@@ -1,15 +1,15 @@
-// session.tsx — В4.8.5: общее состояние приложения на вкладку.
-//  - Сессия (К8.5.8): одно состояние `/api/me` на всё приложение. 401 любого
+// session.tsx — общее состояние приложения на вкладку.
+//  - Сессия: одно состояние `/api/me` на всё приложение. 401 любого
 //    `/api/me/*` (событие SESSION_LOST из api.ts), возврат во вкладку
 //    (`visibilitychange`) и расхождение `login` в ответе `/api/me/jobs` с
-//    показанной личностью (смена аккаунта в соседней вкладке, С9-1)
-//    перечитывают `/api/me` — rail, «Задания» и страницы переходят в «вы
-//    вышли» или к новой личности вместе. Анонимная вкладка смену аккаунта в
-//    соседней узнаёт только на возврате во вкладку (граница — отчёт вехи).
-//  - Анализ (К8.5.1): ОДИН опрос `/api/me/jobs` на вкладку (пауза в скрытой
-//    вкладке), итог — по заданию; тост об итоге — один, из любого экрана,
-//    в том числе после ухода со страницы запуска. Страницы узнают об итоге
-//    событием и перечитывают только своё (строку, карточку).
+//    показанной личностью (смена аккаунта в соседней вкладке) перечитывают
+//    `/api/me` — rail, «Задания» и страницы переходят в «вы вышли» или к новой
+//    личности вместе. Анонимная вкладка узнаёт о смене аккаунта в соседней
+//    только при возврате во вкладку.
+//  - Анализ: ОДИН опрос `/api/me/jobs` на вкладку (пауза в скрытой вкладке),
+//    итог — по заданию; тост об итоге — один, на любом экране, в том числе
+//    после ухода со страницы запуска. Страницы узнают об итоге событием и
+//    перечитывают только своё (строку, карточку).
 import { useToaster } from "@gravity-ui/uikit";
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { MyJob } from "../api/me";
@@ -36,7 +36,7 @@ export function announceJobsChanged(): void {
   window.dispatchEvent(new Event(JOBS_CHANGED));
 }
 
-/** Круг 2 (Н5): событие «вкладка запустила задание» — detail: jobId; его итог объявится и в ответе базовой линии. */
+/** Событие «вкладка запустила задание» (detail — jobId): его итог объявится и в ответе базовой линии. */
 export const JOB_STARTED = "rh-job-started";
 
 export function announceJobStarted(jobId: number | undefined): void {
@@ -57,7 +57,7 @@ interface AnalysisValue {
   jobs: JobsResponse | null;
   refresh: () => void;
   live: (slug: string) => LiveAnalysis | null;
-  /** С9-13: последний опрос заданий не удался (сеть, 5xx) — показанное могло устареть */
+  /** последний опрос заданий не удался (сеть, 5xx) — показанное могло устареть */
   failing: boolean;
 }
 
@@ -88,7 +88,7 @@ export function AppState({ children }: { children: ReactNode }) {
   const visible = useVisible();
   const reloadMe = me.reload;
 
-  // К8.5.8: 401 на /api/me/* и возврат во вкладку — перечитать сессию
+  // 401 на /api/me/* и возврат во вкладку — перечитать сессию
   useEffect(() => {
     window.addEventListener(SESSION_LOST, reloadMe);
     return () => window.removeEventListener(SESSION_LOST, reloadMe);
@@ -99,8 +99,8 @@ export function AppState({ children }: { children: ReactNode }) {
     wasVisible.current = visible;
   }, [visible, reloadMe]);
 
-  // Круг 2 (Н5): каждый удачный ответ /api/me — подтверждение сессии; опрос
-  // заданий, остановленный 401, по нему перезапускается
+  // каждый удачный ответ /api/me подтверждает сессию; опрос заданий,
+  // остановленный 401, по нему перезапускается
   const [sessionEpoch, setSessionEpoch] = useState(0);
   useEffect(() => {
     if (me.state.kind === "ok") setSessionEpoch((n) => n + 1);
@@ -142,8 +142,8 @@ function AnalysisState({
     return () => window.removeEventListener(JOBS_CHANGED, refresh);
   }, [refresh]);
 
-  // Круг 2 (Н5): задание, запущенное из этой вкладки, — его итог объявится и
-  // тогда, когда первый удачный ответ опроса станет базовой линией
+  // итог задания, запущенного из этой вкладки, объявится даже в первом
+  // удачном ответе опроса, ставшем базовой линией
   useEffect(() => {
     const onStarted = (e: Event) => {
       const jobId = (e as CustomEvent<unknown>).detail;
@@ -153,8 +153,8 @@ function AnalysisState({
     return () => window.removeEventListener(JOB_STARTED, onStarted);
   }, []);
 
-  // Круг 2 (Н5): опрос, остановленный 401, перезапускается, когда /api/me
-  // подтвердил сессию (та же личность — эффект опроса сам не перезапустился бы)
+  // опрос, остановленный 401, перезапускается, когда /api/me подтвердил сессию
+  // (при той же личности эффект опроса сам не перезапустился бы)
   useEffect(() => {
     const r = resumeOnSession(tracker.current);
     tracker.current = r.tracker;
@@ -169,7 +169,7 @@ function AnalysisState({
   }, [login]);
 
   useEffect(() => {
-    // аноним не опрашивает вовсе (401-зонд мусорил бы консоль — планка харнесса);
+    // аноним не опрашивает вовсе (401 на каждом тике мусорил бы в консоль);
     // скрытая вкладка — пауза, возврат во вкладку — опрос сразу
     if (login === null || !visible) return;
     let stop = false;
@@ -179,8 +179,8 @@ function AnalysisState({
       try {
         const res = await fetch("/api/me/jobs");
         if (res.status === 401) {
-          // сессии нет — App перечитает /api/me и уберёт опрос; подтвердит
-          // сессию — опрос перезапустится (круг 2, Н5)
+          // сессии нет — App перечитает /api/me и уберёт опрос; если сессия
+          // подтвердится, опрос перезапустится
           tracker.current = haltOnLost(tracker.current);
           identity.current.onIdentityChanged();
           return;
@@ -190,7 +190,7 @@ function AnalysisState({
         /* сеть — следующий тик */
       }
       if (stop) return;
-      // С9-13: сбой опроса не молчит — «Задания» помечают, что список мог устареть
+      // сбой опроса не молчит — «Задания» помечают, что список мог устареть
       setFailing(next === null);
       if (next !== null) {
         if (identityChanged(identity.current.login, next)) {
@@ -202,8 +202,7 @@ function AnalysisState({
         setJobs(next);
         for (const job of out.finished) {
           const t = finishedToast(job);
-          // круг 5 тура 3 (находка 27 аудита): из тоста итога — сразу к карточке (кроме
-          // случая, когда зритель уже на ней)
+          // из тоста итога — сразу к карточке, если зритель еще не на ней
           const [org, repo] = job.slug.split("/");
           const href = org && repo ? repoHref(org, repo) : null;
           const here = href !== null && window.location.pathname === href;

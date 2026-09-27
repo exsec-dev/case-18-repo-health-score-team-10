@@ -1,7 +1,7 @@
-// report-pdf.test.ts — PDF-выгрузка отчёта (В4.7, контракт П1, блок Б4; В4.9, К9.5).
+// PDF-выгрузка отчета.
 //
-// 1. Содержание PDF = содержание MD (В4.9: обход ВСЕГО дерева описания
-//    pdfmake — стеки, колонки, таблицы, списки; canvas текста не несет).
+// 1. Содержание PDF = содержание MD (обход всего дерева описания pdfmake —
+//    стеки, колонки, таблицы, списки; canvas текста не несет).
 //    Сравниваются слова и числа по порядку: MD печатает первый экран строкой
 //    `**70 из 100 · здоров**`, PDF — числом и плашкой «Здоров»; разметка,
 //    регистр и знаки препинания в сверку не идут, слова — идут. MD фикстур
@@ -122,11 +122,6 @@ function literalChars(file: string): Set<string> {
   return chars;
 }
 
-// ---------------------------------------------------------------------------
-
-
-// ---------------------------------------------------------------------------
-
 describe("П1: содержание PDF равно содержанию MD", () => {
   for (const name of REPORT_FIXTURES) {
     test(`${name}: слова всего дерева pdfmake = слова MD (эталон) по порядку`, () => {
@@ -157,8 +152,8 @@ describe("П1: содержание PDF равно содержанию MD", () 
     try {
       const text = pdfTreeText(buildPdfDocument(buildReportModel(card)).content).join(" ");
       for (const leak of ["cicd.runs", "cicd.configs", "appsec.findings", "grant-ci-runs", "pass_rate", "has_ci_yaml", "Настройте CI", "Подключите проверку AppSec"]) expect(text).not.toContain(leak);
-      // К9.13: закрытая категория анониму — «Видна участникам репозитория.», без чисел
-      // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4, В-9): уровень закрытой — «Недоступно», не «Нет данных»
+      // закрытая категория анониму — «Недоступно» (не «Нет данных») и «Видна
+      // участникам репозитория.», без чисел
       expect(text).toMatch(/CI\/CD\s+—\s+Недоступно\s+Видна участникам репозитория\./);
     } finally {
       close();
@@ -172,7 +167,7 @@ describe("П1: содержание PDF равно содержанию MD", () 
       const json = JSON.stringify(doc.content);
       expect(json).toContain(`{"text":"docs.presence","color":"${COLORS.muted}","fontSize":7}`);
       expect(json).toContain('{"text":"CI [config] `only` | pipes","italics":true}');
-      // полужирное в отчёте — заголовок действия; имя категории с В10 гейта обычным начертанием
+      // полужирное в отчете — заголовок действия; имя категории — обычным начертанием
       expect(json).toMatch(/"text":\[[^\]]*"bold":true[^\]]*\],"fontSize":8\.5/);
       expect(json).toMatch(/\{"text":"(Документация|Задачи|Активность|Состояние кода)","color":"#262626"/);
       expect(json).toContain(`"link":"${card.repo.webUrl}"`);
@@ -186,8 +181,8 @@ describe("П1: содержание PDF равно содержанию MD", () 
 });
 
 describe("П1 (приёмка HQ): ячейки таблиц переносятся и не вылезают за поле", () => {
-  // Дефект приёмки HQ 21.09: длинное значение без пробелов не переносилось и
-  // уходило за правый край — PDF терял содержание, которое MD показывает.
+  // длинное значение без пробелов не переносится и уходит за правый край —
+  // PDF теряет содержание, которое MD показывает
   const longestUnbroken = (s: string): number => Math.max(0, ...s.split(new RegExp(`[\\s${BREAK}]+`)).map((w) => w.length));
 
   test("breakable: точки переноса после знаков структуры и внутри длинных слов, текст не меняется", () => {
@@ -258,8 +253,8 @@ describe("П1: шрифт Inter покрывает все символы ген�
     const chars = new Set<string>();
     for (const file of sources) for (const ch of literalChars(file)) chars.add(ch);
     for (const name of REPORT_FIXTURES) for (const ch of readFileSync(goldenPath(name), "utf8")) if (ch !== "\n") chars.add(ch);
-    // синтетическая строка обязательных символов: «→» и «≤» из прежних текстов
-    // (внешние данные могут их нести), «−» (U+2212) — минус русских чисел (К9.11)
+    // синтетическая строка обязательных символов: «→» и «≤» могут прийти во
+    // внешних данных, «−» (U+2212) — минус русских чисел
     for (const ch of "→≤…§«»–—−≈×· ДЮю") chars.add(ch);
     for (const must of ["→", "≤", "…", "§", "«", "»", "–", "—", "−", "≈", "×", "·", "Д", "ю"]) expect(chars.has(must)).toBe(true);
     const missing = fontCmaps.map(({ file, cps }) => ({ file, missing: [...chars].filter((ch) => !cps.has(ch.codePointAt(0)!)) }));

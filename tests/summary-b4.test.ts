@@ -1,7 +1,6 @@
-// summary-b4.test.ts — специалист динамики и эволюция взглядов (Б4 В5, К5.16):
-// без точек истории роль не запускается (прямой тест); состав входа — числа
-// точек, прошлых LLM-текстов в промпте нет; стэйл и рост — валидные тексты;
-// порог эволюции 2 дня — чистая функция. Живых вызовов нет.
+// Специалист динамики и эволюция взглядов: без точек истории роль не запускается;
+// состав входа — числа точек, прошлых LLM-текстов в промпте нет; стэйл и рост —
+// валидные тексты; порог эволюции 2 дня — чистая функция. Живых вызовов нет.
 import { describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -78,7 +77,7 @@ describe("Специалист динамики (trajectory): tri-state и со�
     expect(prompt).toContain("scores.points");
     expect(prompt).toContain("40"); // точки истории едут числами
     expect(prompt).toContain("61");
-    expect(prompt).toContain("bbb"); // head_sha-подобные значения ждём из seedScore? проверяем ниже
+    expect(prompt).toContain("bbb"); // head_sha точки истории во входе
     // самореференция исключена: никаких прошлых текстов модели во входе
     expect(prompt).not.toContain("Индекс вырос");
     const notes = (db.query("SELECT role, text FROM ai_notes WHERE scan_id = ?").all(s2) as { role: string; text: string }[]).map((n) => n.role);

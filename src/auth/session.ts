@@ -1,12 +1,7 @@
-// session.ts — сессии на подписанной httpOnly-cookie (В4/Б1, контракт
-// плана): cookie несёт СЛУЧАЙНЫЙ токен + HMAC (APP_SECRET), таблица
-// sessions хранит sha256(токен) → user_id, expires_at; отзываемо
-// (не stateless — удаление строки убивает cookie). Имя/TTL/SameSite
-// зафиксированы здесь: rh_session / 7 суток / Lax (OAuth-redirect с
-// чужого домена обязан доезжать, Lax пропускает top-level navigation).
-// Ф2.7 (В4.2b): при YA_REDIRECT_URI на https имена переезжают на
-// __Host-rh_* с атрибутом Secure (Path=/ уже есть, Domain не ставим) —
-// требование `__Host-`; на http прежние имена, читается только актуальное.
+// Сессии на подписанной httpOnly-cookie: cookie несет случайный токен + HMAC,
+// таблица sessions хранит sha256(токен) → user_id. Сессию можно отозвать –
+// удаление строки гасит cookie. SameSite=Lax, потому что OAuth-redirect с
+// домена Яндекса должен доносить cookie, а Lax пропускает top-level навигацию.
 import type { Database } from "bun:sqlite";
 import { createHmac, randomBytes, timingSafeEqual, createHash, hkdfSync } from "node:crypto";
 
@@ -16,7 +11,7 @@ export const SESSION_TTL_MS = 7 * 24 * 3600_000;
 export const OAUTH_STATE_COOKIE = "rh_oauth_state";
 export const OAUTH_STATE_TTL_MS = 10 * 60_000;
 
-/** Актуальные имена и атрибуты cookie (Ф2.7): зависят от схемы YA_REDIRECT_URI. */
+/** Имена и атрибуты cookie зависят от схемы YA_REDIRECT_URI. */
 export interface CookieNames {
   session: string;
   oauthState: string;
@@ -25,17 +20,17 @@ export interface CookieNames {
 }
 
 /**
- * Ф2.7: redirect на `https://` → `__Host-rh_session` / `__Host-rh_oauth_state`
- * (`Secure; Path=/`, без `Domain` — так требует префикс `__Host-`); иначе
- * прежние имена без Secure. Кривой redirect — прежние имена (fail-closed
- * к http-стенду разработки). Читается только актуальное имя.
+ * Redirect на `https://` → имена `__Host-rh_*` с `Secure; Path=/` и без
+ * `Domain` (этого требует префикс `__Host-`); иначе, в том числе при
+ * некорректном redirect, – обычные имена без Secure для http-стенда.
+ * Читается только имя текущей схемы.
  */
 export function cookieNames(auth: { redirect: string }): CookieNames {
   let https = false;
   try {
     https = new URL(auth.redirect).protocol === "https:";
   } catch {
-    /* не URL — прежние имена */
+    /* не URL – обычные имена */
   }
   return https
     ? { session: "__Host-rh_session", oauthState: "__Host-rh_oauth_state", secure: true }
@@ -48,10 +43,8 @@ export interface SessionUser {
 }
 
 /**
- * Ф2.8: ключ HMAC сессий — HKDF от APP_SECRET с контекстом "session"
- * (PAT живёт на своём контексте "pat" в pat.ts). Смена APP_SECRET
- * инвалидирует все подписи — старые cookie становятся анонимными
- * (разлогинивает всех), это осознанное свойство, не дефект.
+ * Ключ HMAC сессий – HKDF от APP_SECRET с контекстом "session" (у PAT свой
+ * контекст в pat.ts). Смена APP_SECRET разлогинивает всех – это намеренно.
  */
 function sessionHmacKey(appSecret: string): Buffer {
   return Buffer.from(hkdfSync("sha256", appSecret, "repo-health", "session", 32));
@@ -84,7 +77,7 @@ export function verifySigned(secret: string, cookieValue: string | undefined): s
   return token;
 }
 
-/** Новая сессия: случайный токен → строка sessions; возврат — cookie-значение. */
+/** Возвращает значение для cookie; в БД – только хэш токена. */
 export function createSession(db: Database, secret: string, userId: number, now = new Date()): string {
   const token = randomBytes(24).toString("base64url");
   db.query("INSERT INTO sessions (token_hash, user_id, created_at, expires_at) VALUES (?, ?, ?, ?)").run(
@@ -96,7 +89,7 @@ export function createSession(db: Database, secret: string, userId: number, now 
   return signToken(secret, token);
 }
 
-/** Пользователь по cookie-значению; истёкшие/отозванные = аноним. */
+/** Истекшая или отозванная сессия – аноним; истекшая строка заодно удаляется. */
 export function getSessionUser(db: Database, secret: string, cookieValue: string | undefined, now = new Date()): SessionUser | null {
   const token = verifySigned(secret, cookieValue);
   if (token === null) return null;
@@ -114,7 +107,7 @@ export function getSessionUser(db: Database, secret: string, cookieValue: string
   return { userId: row.user_id, login: row.login };
 }
 
-/** Дисплей-профиль пользователя: имя и id портрета Я ID (оба могут быть null). */
+/** Имя и id портрета Я ID для показа; оба могут быть null. */
 export function userProfile(db: Database, userId: number): { displayName: string | null; avatarId: string | null } {
   const row = db.query("SELECT display_name, avatar_id FROM users WHERE id = ?").get(userId) as
     | { display_name: string | null; avatar_id: string | null }
@@ -122,15 +115,15 @@ export function userProfile(db: Database, userId: number): { displayName: string
   return { displayName: row?.display_name ?? null, avatarId: row?.avatar_id ?? null };
 }
 
-/** Отзыв сессии (logout): строка удаляется, cookie становится пустой. */
+/** Logout: строка удаляется, cookie больше ничего не открывает. */
 export function revokeSession(db: Database, secret: string, cookieValue: string | undefined): void {
   const token = verifySigned(secret, cookieValue);
   if (token !== null) db.query("DELETE FROM sessions WHERE token_hash = ?").run(sha256(token));
 }
 
 /**
- * upsert пользователя по ya_id; возвращает id. Имя и портрет (дисплей) —
- * каждый вход перезаписывает: отозванное право Я ID обнуляет их честно.
+ * Upsert по ya_id, возвращает id. Имя и портрет перезаписываются при каждом
+ * входе: если право в Я ID отозвано, они честно становятся null.
  */
 export function upsertUser(
   db: Database,
@@ -147,7 +140,7 @@ export function upsertUser(
   return (db.query("SELECT id FROM users WHERE ya_id = ?").get(yaId) as { id: number }).id;
 }
 
-/** Cookie-заголовки в одном месте (Set-Cookie строки); имена/Secure — по Ф2.7. */
+/** Строки Set-Cookie собраны в одном месте; имена и Secure – из `cookieNames`. */
 export function sessionCookieHeader(names: CookieNames, cookieValue: string, maxAgeMs: number): string {
   const secure = names.secure ? "; Secure" : "";
   return `${names.session}=${cookieValue}; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=${Math.floor(maxAgeMs / 1000)}`;
@@ -168,17 +161,17 @@ export function oauthStateCookieHeader(names: CookieNames, state: string): strin
   return `${names.oauthState}=${state}; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=${Math.floor(OAUTH_STATE_TTL_MS / 1000)}`;
 }
 
-/** Гашение state-cookie — одинаковый исход у всех исходов callback (Ф2.7). */
+/** State-cookie гасится при любом исходе callback. */
 export function clearOAuthStateCookieHeader(names: CookieNames): string {
   const secure = names.secure ? "; Secure" : "";
   return `${names.oauthState}=; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=0`;
 }
 
 /**
- * Круг 5 тура 3 (находка 26 аудита, 27.09): куда вернуть после входа. Только путь
- * своего сайта — без схемы и хоста, не `//`, без `\` и управляющих символов, не
- * `/auth` и не `/api`; иначе null (вход ведет в кабинет, как раньше). Открытый
- * редирект на чужой домен невозможен: результат — всегда относительный путь.
+ * Куда вернуть после входа. Только путь своего сайта: без схемы и хоста, не
+ * `//`, без `\` и управляющих символов, не `/auth` и не `/api`; иначе null
+ * (вход ведет в кабинет). Результат всегда относительный – открытого
+ * редиректа на чужой домен не будет.
  */
 export function safeNextPath(raw: string | null | undefined): string | null {
   if (typeof raw !== "string" || raw.length === 0 || raw.length > 512) return null;
@@ -206,7 +199,7 @@ export function clearOAuthNextCookieHeader(names: CookieNames): string {
   return `${names.oauthState}_next=; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=0`;
 }
 
-/** Путь возврата из cookie (повторная проверка — cookie мог подменить сам браузер). */
+/** Путь из cookie проверяется повторно: cookie мог подменить сам браузер. */
 export function oauthNextFromCookie(cookieValue: string | undefined): string | null {
   if (typeof cookieValue !== "string" || cookieValue === "") return null;
   try {
@@ -224,13 +217,12 @@ export function oauthStateFromCookie(cookieValue: string | undefined): string | 
 const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "0.0.0.0", "[::1]", "::1"]);
 
 /**
- * Вход с петлевого алиаса redirect_uri (23.09, репорт Алексея): state-cookie
- * ставится на хост, откуда браузер пришёл на /auth/ya, а Яндекс возвращает
- * его на хост redirect_uri — банки кук разные, cookie не едет, первая попытка
- * входа падает с auth_error=state («вторая срабатывает»: после неудачи браузер
- * уже на нужном хосте). Переезд на канонический origin ДО старта OAuth держит
- * весь поток в одной банке. null — переезд не нужен или это не алиас (чужой
- * хост или другой порт: такое не перенаправляем).
+ * Вход с петлевого алиаса redirect_uri (127.0.0.1 вместо localhost и т.п.):
+ * state-cookie ставится на хост, с которого пришли на /auth/ya, а Яндекс
+ * возвращает на хост redirect_uri – у них разные банки кук, и первая попытка
+ * падает с auth_error=state. Переезд на канонический origin до старта OAuth
+ * держит весь поток в одной банке. null – переезд не нужен или это не алиас
+ * (чужой хост или другой порт не перенаправляем).
  */
 export function loopbackOriginRedirect(url: URL, canonicalOrigin: string): string | null {
   let canonical: URL;
@@ -245,7 +237,7 @@ export function loopbackOriginRedirect(url: URL, canonicalOrigin: string): strin
   return canonical.origin + url.pathname + url.search;
 }
 
-/** Cookie-строка запроса → словарь ( Bun Request.headers уже даёт строку). */
+/** Заголовок Cookie → словарь имя → значение. */
 export function parseCookies(header: string | null): Record<string, string> {
   const out: Record<string, string> = {};
   if (!header) return out;

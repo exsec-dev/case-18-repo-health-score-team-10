@@ -1,7 +1,5 @@
-// В5.3-М — модель 4.3.0-hci (workers/V5.3-method-oneshot.md, §2 «Расчет» и
-// «Тексты»): поведенческие тесты на данных по каждому пункту. Номер пункта —
-// в имени теста. Правило AGENTS.md 21.09/23.09: число, доля, место и
-// утверждение пустого состояния — тестом на данных, не source-assert.
+// Модель оценки: расчет и тексты. Число, доля, место и утверждение пустого
+// состояния проверяются на данных, а не по исходнику.
 import { describe, expect, test } from "bun:test";
 import { computeFromFacts, codeEmptyKind, licensePresent, type Scores } from "../src/score/compute";
 import { recommendFromFacts, orderRecommendations, type Recommendation } from "../src/score/recommend";
@@ -43,7 +41,6 @@ const ctx = submetricContext(NOW.toISOString());
 const noDelta = () => ({ delta: 0, reason: null });
 const ids = (recs: Recommendation[]) => recs.map((r) => r.ruleId);
 
-// В5.5 тур 2: пин текущей версии — 4.4.0-hci (справочные показатели динамики, смысл балла прежний)
 test("модель — 4.4.0-hci", () => {
   expect(MODEL_VERSION).toBe("4.4.0-hci");
 });
@@ -53,7 +50,7 @@ describe("Н3 → В5.5 (М2): «кода нет» — балл 0 с причи�
     const s = score(facts({ "tree.stats": { top_level: [{ name: "README.md", type: "blob" }], file_count: 1, bytes: 300, loc: 10, source_files: 0, source_loc: 0 } }));
     expect(s.codeEmpty).toBe(true);
     expect(s.healthcraftIndex).toBe(0);
-    // 4.3.1 (В5.5, П-1): ветка «кода нет» — 0 как факт о репо; 4.3.0 давала null
+    // ветка «кода нет» – 0 как факт о репо, а не null
     expect(s.categories.code.score).toBe(0);
     expect(s.categories.code.no_data).toBe("no source code — only non-code files");
     // «нет данных» — про незнание; «кода нет» — данные: категория не в списке noData
@@ -83,11 +80,11 @@ describe("Н4: причины «нет данных» по виду", () => {
     expect(noDataReason("documentation", unread.categories.documentation.no_data)).toContain("Репозиторий не удалось прочитать");
   });
 
-  // круг 2 (В3, К3): «мало кода» больше не причина «нет данных» — балл сжат к 50
+  // «мало кода» – не причина «нет данных»: балл сжимается к 50
   test("Н4 + В3: строки не прочитаны (loc = null) — нет данных; мало кода — оценка со сжатием", () => {
     const unread = score(facts({ "tree.stats": tree({ source_loc: null, loc: null, loc_note: "incomplete" }) }));
     expect(noDataReason("code", unread.categories.code.no_data)).toBe("Строки кода прочитать не удалось: файлы больше лимита сервиса, не текстовые или чтение прервалось – категорию не оцениваем.");
-    // приемка HQ (уточнение В3: сжатие только вниз): поправка есть у сырого выше 50 — без пометок
+    // сжатие только вниз: поправка есть у сырого выше 50 – без пометок
     const little = score(facts({ "tree.stats": tree({ source_loc: 12 }), "code.todo": { count: 0, fixme: 0, older_180d: 0, todo_files: 0, blamed_files: 0 } }));
     expect(little.categories.code.score).not.toBeNull();
     expect(little.categories.code.adjustment?.kind).toBe("small-code");
@@ -103,7 +100,7 @@ describe("Н4: причины «нет данных» по виду", () => {
   });
 });
 
-// круг 2 (В3): порог Р4б «от 50 строк» вытеснен плавным сжатием к 50
+// порога «от 50 строк» нет: малый код плавно сжимается к 50
 describe("Р4б → В3: малый код сжимается к 50, порога нет", () => {
   test("В3: 49 и 50 строк — оценка есть, без ступени; старые факты — по loc", () => {
     expect([CODE_FULL_LOC, CODE_NEUTRAL]).toEqual([200, 50]);
@@ -129,7 +126,7 @@ describe("Р1: подметрика «Тесты» в «Состоянии ко�
     expect(SUBWEIGHTS.code).toEqual({ density: 0.35, old_share: 0.25, tests: 0.3, root: 0.1 });
   });
 
-  // круг 2 (В1): «0 тестов — данные (0)» решения Р1 вытеснено — «Тесты» только бонус
+  // «Тесты» – только бонус: 0 тестов не снижает балл
   test("Р1 → В1: 0 тестов — вне расчета (как у старых фактов); тесты повышают балл", () => {
     const none = score(facts({ "tree.stats": tree({ test_files: 0 }) }));
     const some = score(facts({ "tree.stats": tree({ test_files: 6 }) })); // 20% файлов
@@ -305,7 +302,7 @@ describe("Н7: рекомендации — те же условия, что б�
   test("Н7 (F7): COPYING в корне у фактов до Р4в — лицензия засчитана, совета «добавьте лицензию» нет", () => {
     const ok = facts({ "docs.presence": { readme: true, license: false, contributing: true, codeowners: true }, "tree.stats": { ...tree(), top_level: [{ name: "COPYING", type: "blob" }, { name: "src", type: "tree" }] } });
     expect(licensePresent(ok)).toBe(true);
-    // 4.3.1 (В5.5, П-1): дельта-стаб 0 подавил бы presence-правило — условие
+    // дельта-стаб 0 подавил бы presence-правило – условие
     // правила проверяем на положительной дельте (дельта здесь не предмет теста)
     const posDelta = () => ({ delta: 1, reason: null });
     expect(ids(recommendFromFacts(ok, { delta: posDelta, issuesScore: 50 }))).not.toContain("license-missing");
@@ -331,7 +328,7 @@ describe("Н7: рекомендации — те же условия, что б�
     expect(ids(recommendFromFacts(withYaml, { delta: noDelta, issuesScore: 50, categoryScores: { cicd: 30 } }))).toEqual(expect.arrayContaining(["fix-red-runs", "speed-up-pipeline"]));
   });
 
-  // круг 2 (К6, E6): «разберите зависшие» — и при 0 засчитанных закрытых (закрытие поднимет балл)
+  // «разберите зависшие» – и при 0 засчитанных закрытых (закрытие поднимет балл)
   test("Н7 + Р2 → К6: при 0 закрытых задач (≥ 1 ч) — совет по зависшим есть, «ускорьте закрытие» нет", () => {
     const ok = facts({ "issues.stats": { open: 16, closed: 3, closed_instant: 3, closed_counted: 0, median_close_days: null, stale_90d: 9, fetched_count: 19 } });
     expect(score(ok).categories.issues.score).toBe(6);
@@ -374,20 +371,20 @@ describe("Н10: burst-коллапс и зеркала", () => {
     expect(s.categories.activity.score!).toBeGreaterThan(50);
   });
 
-  // круг 2 (К5): «≥ 2 авторов» и «чужой коммиттер» больше не признаки синка — по датам автора
+  // «≥ 2 авторов» и «чужой коммиттер» – не признаки синка, синк определяется по датам автора
   test("Н10 → К5: окно с двумя авторами или чужим коммиттером при разнесенных author-датах — не синк", () => {
     const two = events(12, (i) => (i % 2 ? "a" : "b"), (i) => (i % 2 ? "a" : "b"), (i) => NOW.getTime() - (60 - i) * DAY, (i) => t0 + i * 100);
     expect(robot2Flags(two).flags.every((f) => !f.sync)).toBe(true);
     const mirror = events(12, () => "dev", () => "mirror-bot-sync", (i) => NOW.getTime() - (60 - i) * DAY, (i) => t0 + i * 100);
     expect(robot2Flags(mirror).flags.every((f) => !f.sync)).toBe(true);
-    // сгенерированный всплеск одного автора (author-даты в том же окне) — синк (S6a)
+    // сгенерированный всплеск одного автора (author-даты в том же окне) – синк
     const spam = events(20, () => "dev", () => "dev", () => t0, () => t0);
     expect(robot2Flags(spam).flags.every((f) => f.sync)).toBe(true);
-    // без сведений об авторах — прежнее поведение
+    // без сведений об авторах всплеск по датам коммита – синк
     expect(burstSyncFlags(Array.from({ length: 10 }, () => t0)).flags.every(Boolean)).toBe(true);
   });
 
-  // круг 2 (К5, решение 24.09 «зеркала — по датам автора»): вытесняет Н10 «нет данных»
+  // зеркало оценивается по датам автора, а не как «нет данных»
   test("Н10 → К5 (Q&A №10): зеркало — Активность по датам автора, а не «нет данных»; только роботы — 0", () => {
     const sync = events(12, (i) => `u${i}`, () => "mirror", (i) => NOW.getTime() - (400 + i) * DAY, (i) => t0 + i * 10);
     const s = score(facts({ "activity.git.timeline": { events: sync } }));

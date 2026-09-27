@@ -1,10 +1,8 @@
-// api-fixtures.ts — сид-набор для тестов read-API (В3/Б1). Отдельный от
-// score-fixtures.ts намеренно: там ровно один репо ('t','repo') без
-// title/language/likes/forks/last_activity_at, а именно эти колонки
-// проверяют фильтры, фасеты и сортировки рейтинга. Общую фикстуру не
-// трогаем — на ней стоят score.test.ts и score-mutations.test.ts.
+// Сид-набор для тестов read-API. Отдельный от score-fixtures.ts намеренно: там
+// один репо без title/language/likes/forks/last_activity_at, а именно эти
+// колонки проверяют фильтры, фасеты и сортировки рейтинга.
 // Скоры вставляются готовыми строками: API — чистый читатель, и тест
-// обязан ломаться на чтении, а не на пересчёте модели.
+// обязан ломаться на чтении, а не на пересчете модели.
 import type { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -65,9 +63,9 @@ export interface ScanSpec {
   status?: string;
   trigger?: string;
   facts?: FactSpec[];
-  /** scans.rating_eligible (К-Ф1.1); дефолт true — сид-скан с оценкой читается рейтингом */
+  /** scans.rating_eligible; дефолт true — сид-скан с оценкой читается рейтингом */
   ratingEligible?: boolean;
-  /** scans.public_status (Ф1.11); дефолт = status */
+  /** scans.public_status; дефолт = status */
   publicStatus?: string;
   /** scans.user_id — автор скана; дефолт NULL (периодика) */
   userId?: number | null;

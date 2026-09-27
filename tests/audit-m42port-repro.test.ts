@@ -1,20 +1,12 @@
-// audit-m42port-repro.test.ts — воспроизведение регрессий портов
-// hq-parallel (слияние `fdeb923`), найденных аудит-парой круга 2 В4.1-fix
-// (reports/2026-09-17-m41fix-r2-audit-pair.md). Закон вехи В4.2-port-fix —
-// reports/2026-09-17-fix-plan.md ревизия 4, Часть 2 «В4.2-port-fix = П» и
-// Часть 3 «К-П». Круг 1 — позиции П1, П2, П4, П5, П6, П9; круг 2 (Б8, после
-// reports/2026-09-18-m42port-audit-pair.md) — П10, П11, П13. Каждый тест
-// описывает ПРАВИЛЬНОЕ поведение и ассертит конкретное значение.
-//
-// На Б0-коммите тесты стоят под обёрткой `repro` (в строгом режиме — красные);
-// она снимается в блоке, закрывшем находку, сами утверждения при этом не
-// меняются. Строгий режим — для команды приёмки:
-// AUDIT_STRICT=1 bun test tests/audit-m42port-repro.test.ts
+// Репро-тесты на найденные аудитом регрессии слияния портов: справедливость
+// полос очереди, гард дубля периодики, происхождение доказательств на
+// карточке, миграция trigger_kind и права в кабинете. Каждый тест описывает
+// правильное поведение и проверяет конкретное значение.
 //
 // Живых запросов нет: временный DATA_DIR, SOURCECRAFT_TOKEN="" (задаёт
 // харнесс), все адреса API — локальный мок. Мок repo-GET НЕ отдаёт `id`:
-// на неисправленном коде `makeAppsecClient` строится без `baseUrl`, и
-// запрос ушёл бы с PAT на боевой appsec.sourcecraft.tech (П3/Н2).
+// если `makeAppsecClient` построен без `baseUrl`, запрос ушёл бы с PAT на
+// боевой appsec.sourcecraft.tech.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -29,19 +21,14 @@ import * as scheduler from "../src/jobs/scheduler";
 import { cardFacts, seedRepo, seedScan, seedScore, type ApiTestDb, type FactSpec } from "./api-fixtures";
 import { spawnServer, startMockApi, type SpawnedServer } from "./server-harness";
 
-// Обёртка строгого режима (Т1, круг 2). Тест, стоящий под `repro`, —
-// ПРИПАРКОВАННАЯ находка: в обычном режиме `test.failing` (набор зелёный,
-// красноты в CI нет), под `AUDIT_STRICT=1` — обычный `test`, то есть
-// красный, пока находка не закрыта. Когда блок её закрывает, тест
-// переводится в обычный `test` (иначе `test.failing` упал бы на «прошёл»).
-// Круг 1 держал константу с `void repro` — обёртка была декоративной, и
-// «AUDIT_STRICT=1 зелёный» не значил ничего сверх обычного прогона; круг 2
-// исполняет её по-настоящему (Б8) и добавляет самопроверку строгого режима
-// в конце файла.
+// Обертка репро: тест под `repro` — неисправленный дефект. В обычном прогоне
+// это `test.failing` (набор зеленый), под `AUDIT_STRICT=1` — обычный `test`,
+// красный до исправления. Исправленный тест переводится в обычный `test`,
+// иначе `test.failing` упал бы на «прошел».
 const repro = process.env.AUDIT_STRICT ? test : test.failing;
 
 /**
- * Ключ канального дерева в `evidence` (П13). Литерал повторён здесь намеренно:
+ * Ключ канального дерева в `evidence`. Литерал повторён здесь намеренно:
  * репро-тест пиннит контракт, а не следует за константой реализации.
  */
 const CHANNEL_TREE_KEY = "tree.stats@channel";
@@ -63,14 +50,14 @@ function tempDb(prefix: string): ApiTestDb {
 }
 
 // ---------------------------------------------------------------------------
-// П1 (К1 CRITICAL). Справедливость между полосами очереди.
+// Справедливость между полосами очереди.
 // ---------------------------------------------------------------------------
 
 describe("П1 (К1): роль all — полоса rating не голодает при непустой полосе user", () => {
   test("6 вызовов claimAny(['user','rating']) при непустых обеих полосах дают ≥ 2 периодических", () => {
     const t = tempDb("rh-m42-p1-");
     const db = t.db;
-    // курсор round-robin модульный — тесты обязаны быть герметичны (К-П П1)
+    // курсор round-robin модульный — без сброса тесты не герметичны
     (scheduler as unknown as { __resetRoundRobin?: () => void }).__resetRoundRobin?.();
     const uid = upsertUser(db, "ya-p1", "p1");
     const repoOf = (slug: string) =>
@@ -87,7 +74,7 @@ describe("П1 (К1): роль all — полоса rating не голодает 
       taken.push(job === null ? "none" : job.triggerKind === "user" ? "user" : "periodic");
     }
     const periodic = taken.filter((x) => x === "periodic").length;
-    // ассерт «≥ 2 из 6» устойчив к чётности курсора; точный порядок ассертить запрещено (К-П П1)
+    // ассерт «≥ 2 из 6» устойчив к чётности курсора; точный порядок — деталь реализации
     expect({ periodicOf6: periodic >= 2 ? "≥2" : `${periodic} (взято: ${taken.join(" ")})` }).toEqual({ periodicOf6: "≥2" });
     expect(userJobs.size).toBe(8);
   });
@@ -112,7 +99,7 @@ describe("П1 (К1): роль all — полоса rating не голодает 
 });
 
 // ---------------------------------------------------------------------------
-// П5 (С2 r2). Гард дубля периодики в ночном обходе.
+// Гард дубля периодики в ночном обходе.
 // ---------------------------------------------------------------------------
 
 /** Фейк-клиент каталога: одна страница, повторяется на каждом обходе. */
@@ -155,17 +142,15 @@ describe("П5 (С2 r2): три обхода при неизменном ката
 });
 
 // ---------------------------------------------------------------------------
-// П9 (С1 r2). Плотность Security доказывается tree.stats СВОЕГО скана.
+// Плотность Security доказывается tree.stats СВОЕГО скана.
 // ---------------------------------------------------------------------------
 
 const GRANTED = { cicd: "granted", appsec: "granted", repo: "granted" } as const;
 
 describe("П9 (С1 r2): число плотности Security и tree.stats в доказательствах — из одного скана", () => {
-  // Форму доказательства поправил круг 2 (П13, решение владельца (1) 18.09):
-  // канальное дерево едет СВОИМ ключом, публичный `tree.stats` скана P не
-  // вытесняется. Утверждение позиции П9 то же — число плотности и факт, из
-  // которого оно посчитано, из одного скана; изменился ключ, под которым
-  // канальный факт лежит в evidence.
+  // Канальное дерево едет СВОИМ ключом, публичный `tree.stats` скана P не
+  // вытесняется; число плотности и факт, из которого оно посчитано, — из
+  // одного скана.
   test("канальный скан с ok tree.stats(loc=20000) — его дерево в evidence под канальным ключом", () => {
     const t = tempDb("rh-m42-p9-");
     const repoId = seedRepo(t, { org: "dens", repo: "repo", language: "Go" });
@@ -197,7 +182,7 @@ describe("П9 (С1 r2): число плотности Security и tree.stats в 
       treeLoc: (tree[0]?.value as { loc?: unknown } | undefined)?.loc ?? null,
       appsecPresent: appsec !== undefined,
       sameScan: appsec !== undefined && tree[0] !== undefined && appsec.collectedAt === tree[0].collectedAt,
-      // публичный факт скана P остаётся на месте и своим статусом (П13)
+      // публичный факт скана P остаётся на месте и своим статусом
       publicTreeStatus: card.evidence.find((e) => e.key === "tree.stats")?.status ?? null,
     }).toEqual({
       // SEVERITY_WEIGHTS: 0*8 + 2*4 + 4*2 + 6*1 = 22 на 20 000 LOC → 11 на 10k LOC
@@ -217,11 +202,11 @@ describe("П9 (С1 r2): число плотности Security и tree.stats в 
 });
 
 // ---------------------------------------------------------------------------
-// КРУГ 2. П11 (Н-2 MAJOR). Бэкфилл `trigger_kind` при миграции: у строк,
-// созданных ДО появления колонки, `user_id IS NOT NULL` соседствует с
-// `trigger_kind = 'periodic'` (ensureColumn поставил DEFAULT). Круг 1 поставил
-// на эквивалентность «trigger_kind != 'user' ⇔ user_id IS NULL» два предиката
-// полосы — гард П5 и retry-failed; для legacy-строк она неверна.
+// Бэкфилл `trigger_kind` при миграции: у строк, созданных ДО появления колонки,
+// `user_id IS NOT NULL` соседствует с `trigger_kind = 'periodic'` (ensureColumn
+// поставил DEFAULT). На эквивалентности «trigger_kind != 'user' ⇔ user_id IS
+// NULL» стоят два предиката полосы — гард дубля периодики и retry-failed; без
+// бэкфилла для legacy-строк она неверна.
 // ---------------------------------------------------------------------------
 
 /** Каталог из одной записи с заданной датой — вход ночного обхода. */
@@ -243,10 +228,10 @@ function legacyJobDb(prefix: string, status: string): { db: Database; repoId: nu
       .query("INSERT INTO jobs (repo_id, status, user_id, trigger_kind, created_at) VALUES (?, ?, ?, 'periodic', '2026-09-01T00:00:00Z')")
       .run(repoId, status, uid).lastInsertRowid,
   );
-  // Ф2.18 (В4.2a): бэкфилл — одноразовая миграция при переходе версии, а не
-  // работа каждого openDb. Фикстура обязана быть ДОВЕРСИОННОЙ: 1.7 —
-  // историческая версия, при которой такие строки и появлялись (это не копия
-  // текущей константы, а точка отсчёта миграции)
+  // бэкфилл — одноразовая миграция при переходе версии, а не работа каждого
+  // openDb. Фикстура обязана быть ДОВЕРСИОННОЙ: 1.7 — историческая версия,
+  // при которой такие строки и появлялись (это не копия текущей константы,
+  // а точка отсчёта миграции)
   setMetaValue(first, "schema_version", "1.7");
   first.close();
   // второй openDb = миграция на новом коде: бэкфилл обязан привести признак в порядок
@@ -280,11 +265,10 @@ describe("П11 (Н-2): миграция бэкфиллит trigger_kind — пр
 });
 
 // ---------------------------------------------------------------------------
-// КРУГ 2. П13 (Н-4 MAJOR). `tree.stats` — публичный факт (PUBLIC_KINDS): он
-// кормит и плотность Security, и публичные derived. Круг 1 (П9) вытеснил
-// публичный факт канальным — публичная половина карточки стала зависеть от
-// прав зрителя, хотя К-Ф1.1 требует одного скана для всех. Канальное дерево
-// едет своим ключом; публичный `tree.stats` не трогается.
+// `tree.stats` — публичный факт (PUBLIC_KINDS): он кормит и плотность Security,
+// и публичные derived. Если канальный факт вытесняет публичный, публичная
+// половина карточки начинает зависеть от прав зрителя, а она строится из
+// одного скана для всех. Поэтому канальное дерево едет своим ключом.
 // ---------------------------------------------------------------------------
 
 const DENIED = { cicd: "denied", appsec: "denied", repo: "denied" } as const;
@@ -356,15 +340,14 @@ describe("П13 (Н-4): публичный tree.stats не вытесняется
 });
 
 // ---------------------------------------------------------------------------
-// П2 (Н1 HIGH), П4 (MAJOR №1), П6 (С4) — через HTTP настоящего сервера.
-// Портовая поверхность (favorites / checkFavoriteAccess / merge-ветка
-// listMyRepos) не покрыта тестами вовсе — фикстура пишется с нуля.
+// Кабинет через HTTP настоящего сервера: избранное, checkFavoriteAccess и
+// listMyRepos.
 // ---------------------------------------------------------------------------
 
 const SECRET = "m42port-repro-secret-0123456789abcdef";
 const httpDir = mkdtempSync(join(tmpdir(), "rh-m42-http-"));
 
-// Мок платформы: repo-GET БЕЗ поля `id` (иначе неисправленный код ушёл бы
+// Мок платформы: repo-GET БЕЗ поля `id` (иначе клиент без `baseUrl` ушёл бы
 // в боевой AppSec с PAT зрителя), visibility private → «свой» репозиторий.
 const mock = startMockApi((req, url) => {
   const p = url.pathname;
@@ -387,7 +370,7 @@ beforeAll(async () => {
     ids[name] = upsertUser(db, `ya-${name}`, name);
     cookies[name] = createSession(db, SECRET, ids[name]!);
   }
-  // --- П4: свои репо без namespace-выдачи (PAT у «own» нет) ---
+  // --- свои репо без namespace-выдачи (PAT у «own» нет) ---
   // публичный репо со своим сканом и заявкой (источник own-scan)
   const pub = seedRepo(t, { org: "own", repo: "pub", title: "Мой публичный", language: "Go" });
   seedScore(t, pub, seedScan(t, pub, { facts: cardFacts(), userId: ids.own!, ratingEligible: true }), { total: 71 });
@@ -397,21 +380,21 @@ beforeAll(async () => {
   db.query("UPDATE repos SET visibility = 'private' WHERE id = ?").run(priv);
   seedScore(t, priv, seedScan(t, priv, { facts: cardFacts(), userId: ids.own!, ratingEligible: true }), { total: 64 });
   db.query("INSERT INTO favorites (user_id, org_slug, repo_slug, added_at) VALUES (?, 'own', 'priv', '2026-09-17T00:00:00Z')").run(ids.own!);
-  // --- П6: посторонний добавил в избранное чужой приватный слаг ---
+  // --- посторонний добавил в избранное чужой приватный слаг ---
   const secret = seedRepo(t, { org: "secret", repo: "repo", title: "Секретный проект", language: "Kotlin", lastActivityAt: "2026-09-12T00:00:00Z" });
   db.query("UPDATE repos SET visibility = 'private' WHERE id = ?").run(secret);
   seedScore(t, secret, seedScan(t, secret, { facts: cardFacts(), userId: null, ratingEligible: true }), { total: 88 });
   db.query("INSERT INTO favorites (user_id, org_slug, repo_slug, added_at) VALUES (?, 'secret', 'repo', '2026-09-17T00:00:00Z')").run(ids.peek!);
-  // --- П10 (круг 2): публичный репо, ВЫТЕСНЕННЫЙ из рейтинга. `evictRepo`
-  // ставит rating_active = 0 и не трогает visibility; карточка и MD отдают
-  // такому репо 404 всем, а признак прав круга 1 смотрел только на visibility
+  // --- публичный репо, ВЫТЕСНЕННЫЙ из рейтинга. `evictRepo` ставит
+  // rating_active = 0 и не трогает visibility; карточка и MD отдают такому
+  // репо 404 всем, поэтому признак прав не может смотреть только на visibility
   const evicted = seedRepo(t, { org: "evicted", repo: "pub", title: "Вытесненный", language: "Go", lastActivityAt: "2026-08-01T00:00:00Z" });
   db.query("UPDATE repos SET rating_active = 0, evict_reason = 'gone' WHERE id = ?").run(evicted);
   // скан авторства «own» — у владельца права доказаны own-сканом и остаются
   seedScore(t, evicted, seedScan(t, evicted, { facts: cardFacts(), userId: ids.own!, ratingEligible: true, startedAt: "2026-08-02T00:00:00Z" }), { total: 55 });
   db.query("INSERT INTO favorites (user_id, org_slug, repo_slug, added_at) VALUES (?, 'evicted', 'pub', '2026-09-17T00:00:00Z')").run(ids.peek!);
   db.query("INSERT INTO favorites (user_id, org_slug, repo_slug, added_at) VALUES (?, 'evicted', 'pub', '2026-09-17T00:00:00Z')").run(ids.own!);
-  // --- П2: восемь своих избранных у пользователя с PAT (строки repos есть:
+  // --- восемь своих избранных у пользователя с PAT (строки repos есть:
   // иначе портовый колбэк отсеет их до капов и обход капа не воспроизведётся) ---
   for (let i = 1; i <= 8; i++) {
     const r = seedRepo(t, { org: "fav", repo: `f${i}` });
@@ -425,12 +408,12 @@ beforeAll(async () => {
     appSecret: SECRET,
     env: {
       // роль rating: HTTP работает, но юзерскую полосу никто не разбирает —
-      // «активных юзерских job» замеряется без гонки с воркер-лупом
+      // «активных юзерских job» замеряется без гонки с циклом разбора очереди
       PROCESS_ROLE: "rating",
       QUEUE_USER_ACTIVE_MAX: "2",
       QUEUE_USER_SCANS_PER_HOUR: "50",
       // лимит частоты эндпоинта поднят через env: иначе вызовы 7–8 получат
-      // 429 до проверки прав (прецедент routes-me.test.ts:54)
+      // 429 до проверки прав (так же в routes-me.test.ts)
       QUEUE_FAVORITE_CHECKS_PER_MINUTE: "100",
     },
   });
@@ -453,15 +436,13 @@ interface CheckBody {
 }
 
 interface MyReposBody {
-  // Ф2.20 (решение 18.09): кабинет favorites-only — поле `sources` удалено
+  // кабинет показывает только избранное — поля `sources` нет
   entries: { org: string; repo: string; title: string | null; language: string | null; lastScanAt: string | null; healthcraftIndex: number | null }[];
 }
 
-// ПЕРЕНОС (В4.8.5, К8.5.14 (г), §2-В1): маршрута «Проверить доступ» (`/check`)
-// больше нет — тот же инвариант (постановка ЦЕЛИКОМ через requestUserScan,
-// капы, «отказ по капу не роняет права») держит автопроверка при явном
-// добавлении в избранное (звезда, `PUT /api/me/favorites/:org/:repo`);
-// утверждения прежние, меняется только путь и форма ответа (исход — в `check`)
+// Постановку ЦЕЛИКОМ через requestUserScan (капы, «отказ по капу не роняет
+// права») делает автопроверка при явном добавлении в избранное (звезда,
+// `PUT /api/me/favorites/:org/:repo`); исход проверки — в поле `check`.
 describe("П2 (Н1): проверка избранного ставит сканы через requestUserScan — со всеми капами", () => {
   test("8 своих избранных → активных юзерских job ровно userActiveMax, остальные — enqueue.refused/too_many_active", async () => {
     const put = await fetch(at("/api/me/pat"), as("fav", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ token: "pat-fav-000000000" }) }));
@@ -490,9 +471,9 @@ describe("П2 (Н1): проверка избранного ставит скан
 });
 
 describe("П4 (MAJOR №1): listMyRepos считает score правилом круга 2", () => {
-  // Ф2.20 (решение 18.09): кабинет favorites-only — union-запись own/pub
-  // (источник own-scan) из списка ушла; контракт П4 «число, а не null» для
-  // записи с правами проверяется на избранном приватном (права — own-скан)
+  // кабинет показывает только избранное — запись own/pub (свой скан без
+  // звезды) в список не попадает; «число, а не null» для записи с правами
+  // проверяется на избранном приватном (права — own-скан)
   test("без PAT: своё избранное приватное отдаёт число, а не null; union-запись больше не показывается", async () => {
     const res = await fetch(at("/api/me/repos"), as("own"));
     expect(res.status).toBe(200);
@@ -536,14 +517,11 @@ describe("П10 (Н-1, круг 2): признак прав читает пару
     }).toEqual({ title: null, language: null, lastScanAt: null, healthcraftIndex: null });
   }, 30_000);
 
-  // вторая половина контракта П10 («остальные два дизъюнкта не трогаются»)
-  // зелена и до исправления — это охрана от пере-затягивания признака, не репро.
-  // ПЕРЕВОРОТ (В4.8.5, К8.5.9, С6-2 — строже, не слабее): «права строки = права
-  // карточки». Выбывший из рейтинга публичный репозиторий карточка и MD отдают
-  // 404 ВСЕМ, включая автора своего скана, — строка кабинета его больше не
-  // раскрывает и автору (раньше строка показывала мету и оценку, а по клику
-  // открывался 404). Для НЕ выбывшего репо own-скан по-прежнему доказывает права
-  // (tests/v485-access.test.ts)
+  // права строки кабинета = права карточки. Выбывший из рейтинга публичный
+  // репозиторий карточка и MD отдают 404 ВСЕМ, включая автора своего скана, —
+  // значит, строка кабинета не раскрывает его и автору (иначе строка показала
+  // бы мету и оценку, а по клику открылся бы 404). Для НЕ выбывшего репо
+  // own-скан доказывает права (tests/v485-access.test.ts)
   test("тот же репо владельцу (own-скан): выбывший не раскрывается и ему — строка равна карточке (404)", async () => {
     const res = await fetch(at("/api/me/repos"), as("own"));
     expect(res.status).toBe(200);
@@ -562,12 +540,10 @@ describe("П10 (Н-1, круг 2): признак прав читает пару
 });
 
 // ---------------------------------------------------------------------------
-// Т1 (круг 2). Самопроверка строгого режима. Без неё «AUDIT_STRICT=1 зелёный»
-// — тавтология: набор зелён и в обычном режиме, потому что незакрытые находки
-// стоят под `test.failing`. Здесь строгий прогон утверждает то, ради чего его
-// запускают: в файле не осталось НИ ОДНОЙ находки, припаркованной под
-// обёрткой, — значит зелёный означает «закрыто», а не «помечено красным».
-// На Б0-коммите этот тест красный вместе с самими репро-тестами.
+// Самопроверка строгого режима. Без неё «AUDIT_STRICT=1 зелёный» — тавтология:
+// набор зелён и в обычном режиме, потому что неисправленные дефекты стоят под
+// `test.failing`. Строгий прогон утверждает, что в файле не осталось НИ ОДНОГО
+// теста под обёрткой, — зелёный означает «исправлено», а не «помечено».
 // ---------------------------------------------------------------------------
 
 if (process.env.AUDIT_STRICT) {

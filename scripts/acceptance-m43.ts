@@ -1,10 +1,9 @@
-// acceptance-m43.ts — приёмка В4.3 своим прогоном (19.09):
-//   bun scripts/acceptance-m43.ts migration  — миграция 1.8→1.9 на временной БД
-//                                             + восстановление строк rescoreAll
-//   bun scripts/acceptance-m43.ts matrix     — матрица доступа: полный Repo
-//                                             Health Score только при обоих
-//                                             каналах; инверсия даёт минус
-// Живых запросов нет; только временные каталоги.
+// Ручная проверка публичного индекса и полного Score:
+//   bun scripts/acceptance-m43.ts migration — миграция scores 1.8 → 1.9 на временной БД
+//                                            и восстановление строк через rescoreAll
+//   bun scripts/acceptance-m43.ts matrix    — матрица доступа: полный Repo Health Score
+//                                            только при открытых обоих каналах
+// Живых запросов нет, только временные каталоги.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -28,7 +27,7 @@ if (mode === "migration") {
   const scanId = Number(s.lastInsertRowid);
   const stmt = db.query("INSERT INTO facts (scan_id, category, key, value, status, source, collected_at) VALUES (?, ?, ?, ?, 'ok', ?, '2026-09-10T10:00:00Z')");
   for (const f of healthyFacts() as { key: string; value: unknown; source?: string }[]) stmt.run(scanId, categoryOf(f.key), f.key, JSON.stringify(f.value), f.source ?? "git");
-  const oldIndex = 12; // «память» старой строки — источник ею быть не обязан
+  const oldIndex = 12; // значение старой строки; после миграции оно не должно всплыть
   db.exec("DROP TABLE scores");
   db.exec(`CREATE TABLE scores (
     scan_id INTEGER NOT NULL REFERENCES scans(id), model_version TEXT NOT NULL, repo_id INTEGER NOT NULL,

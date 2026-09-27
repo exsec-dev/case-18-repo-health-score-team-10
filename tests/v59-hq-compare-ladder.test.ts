@@ -1,4 +1,4 @@
-// В5.9 (приемка HQ): лестница — гипотетический план карточки; ответ сравнения ее не несет.
+// Лестница – гипотетический план карточки; ответ сравнения ее не несет.
 import { expect, test } from "bun:test";
 import { compareCardOf } from "../src/api/compare";
 import type { RepoCard } from "../src/api/repos";

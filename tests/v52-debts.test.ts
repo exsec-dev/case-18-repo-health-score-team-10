@@ -1,5 +1,4 @@
-// v52-debts.test.ts — В5.2, Б7: долги аудита В5.1 (reports/2026-09-22-code-audit-v5-
-// reliability.md «мелочь» 1, 2, 3, 6) закрываются поведенческими тестами.
+// Поведенческие тесты на мелкие дефекты надежности, найденные аудитом кода.
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";

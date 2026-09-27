@@ -1,17 +1,14 @@
-// appsec.ts — официальный AppSec API SourceCraft (В4/Б2, решение 16.09
-// Екатерина + спецификация docs/SCS-API-1.0.0-draft.pdf — закон):
-// read-only GET-клиент appsec.sourcecraft.tech с Bearer PAT.
-// Порядок (детерминизм): REST /repos/{slug}.id → gitRepo →
-// /v1/scans/latest (детекторы завершённости — timeFinished/isLatest;
-// числовой status НЕ декодируем: таблицы соответствия нет) →
-// /v1/defect-groups с ЯВНЫМ scanUuid по страницам (data/nextPageToken/
-// totalSize, pageSize ≤250) + именованные severity-фильтры платформы
-// (severity=CRITICAL|HIGH|MEDIUM|LOW — классификация на стороне
-// платформы, не наша). Храним ТОЛЬКО агрегаты и стабильные id групп
-// (publicId/uuid; числовой id устарел) — без кода, путей и секретов.
-// Tri-state: 401/403/нет права → no-data access; нет/незавершён скан →
-// no-data no-scan; неполный ответ → no-data incomplete («не трактовать
-// ошибку как отсутствие уязвимостей» — докам вслед, наш закон 2).
+// Клиент официального AppSec API SourceCraft (docs/SCS-API-1.0.0-draft.pdf,
+// docs/api-spec/appsec.openapi.yaml): только GET с Bearer PAT.
+// Порядок: REST /repos/{slug}.id → gitRepo → /v1/scans/latest (завершенность
+// по timeFinished и isLatest; числовой status не декодируем – таблицы
+// соответствия нет) → /v1/defect-groups с явным scanUuid по страницам
+// (pageSize ≤ 250) и именованными фильтрами severity – серьезность
+// классифицирует платформа, а не мы. Храним только агрегаты и стабильные id
+// групп (publicId/uuid; числовой id устарел) – без кода, путей и секретов.
+// 401/403 → no-data access; скана нет или он не завершен → no-data no-scan;
+// неполный ответ → no-data incomplete: ошибка не должна читаться как
+// отсутствие уязвимостей.
 import { noDataFact, okFact, type Fact } from "./facts";
 import { isRetryableStatus, parseRetryAfter, reserveSlot, retryDelayMs, rhythmKey, type ScClient } from "./http";
 
@@ -22,15 +19,14 @@ export interface AppsecGet {
   json: unknown;
   error?: string;
   /**
-   * К-Р15 (круг 2): сколько HTTP-попыток израсходовано на этот get
-   * (2 = был ретрай временного сбоя; 0 = бюджет исчерпан до запроса).
-   * Опционально — тестовые фейки без семантики попыток не обязаны его знать;
-   * читатели трактуют отсутствие как одну попытку.
+   * Сколько HTTP-попыток ушло на этот get: 2 – был повтор после временного
+   * сбоя, 0 – бюджет кончился до запроса. Отсутствие читается как 1 попытка
+   * (тестовым фейкам поле знать не обязательно).
    */
   attempts?: number;
 }
 
-/** Параметры запроса: массив — повтор ключа (`status=OPEN&status=TRIAGED_TP`, спека AppSec). */
+/** Параметры запроса: массив – повтор ключа (`status=OPEN&status=TRIAGED_TP`), как требует спека AppSec. */
 export type AppsecParams = Record<string, string | string[]>;
 
 export interface AppsecClient {
@@ -38,7 +34,6 @@ export interface AppsecClient {
   requestCount(): number;
 }
 
-/** Строка запроса с повтором ключа для массивов. */
 export function appsecQuery(params: AppsecParams): string {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
@@ -49,19 +44,17 @@ export function appsecQuery(params: AppsecParams): string {
 }
 
 /**
- * В5.3-М (Н6, D10): статус группы дефектов по перечню спеки
- * `DefectGroupStatus`. Без параметра `status` `/v1/defect-groups` отдает группы
- * ВСЕХ статусов — в плотность, признак утекших секретов (потолок 49) и бэклог
- * попадали закрытые (исправленные, ложные, дубли). Открытые — те, что еще
- * требуют работы; каждое значение — своей веткой, неизвестное — явной.
+ * Открытые статусы групп дефектов (`DefectGroupStatus` спеки) – те, что еще
+ * требуют работы. Без параметра `status` `/v1/defect-groups` отдает группы
+ * всех статусов, и в плотность, признак утекших секретов (потолок 49) и
+ * бэклог попали бы закрытые: исправленные, ложные, дубли.
  */
 export const APPSEC_OPEN_STATUSES = ["OPEN", "TRIAGE_IN_PROGRESS", "TRIAGED_TP", "FIX_IN_PROGRESS"] as const;
 
 /**
- * Круг 2 (К7, живой зонд HQ 24.09: `status: 0`): платформа отдает статус
- * группы ЧИСЛОМ — индексом в перечне `DefectGroupStatus` спеки
- * (`docs/api-spec/appsec.openapi.yaml`), в порядке объявления. Число вне
- * диапазона или дробное — неизвестное, как прежде.
+ * Живая платформа отдает статус группы числом – индексом в перечне
+ * `DefectGroupStatus` спеки (`docs/api-spec/appsec.openapi.yaml`) в порядке
+ * объявления. Число вне диапазона или дробное – неизвестный статус.
  */
 export const DEFECT_GROUP_STATUS_ORDER = [
   "OPEN",
@@ -77,7 +70,7 @@ export const DEFECT_GROUP_STATUS_ORDER = [
   "UNRECOGNIZED",
 ] as const;
 
-/** Статус группы строкой спеки: строка — как есть, число — по порядку перечня; иначе — исходное значение. */
+/** Статус группы строкой спеки: строка – как есть, число – по порядку перечня, иное – без изменений. */
 export function defectGroupStatusName(status: unknown): unknown {
   if (typeof status === "number" && Number.isInteger(status) && status >= 0 && status < DEFECT_GROUP_STATUS_ORDER.length) {
     return DEFECT_GROUP_STATUS_ORDER[status];
@@ -109,25 +102,24 @@ export function defectGroupStatusClass(rawStatus: unknown): "open" | "resolved" 
 
 export interface AppsecClientOptions {
   token: string;
-  /** адрес AppSec-хоста (`Config.api.appsecBase`) — ОБЯЗАТЕЛЕН, как у `makeScClient` (М7 круга 2) */
+  /** адрес AppSec-хоста (`Config.api.appsecBase`); обязателен по той же причине, что у `makeScClient` */
   baseUrl: string;
-  /** ≥100мс между запросами (лимиты частоты в доке не определены — бережность наша) */
+  /** интервал между запросами (по умолчанию 100 мс): лимиты частоты в доке не описаны */
   minIntervalMs?: number;
   maxRequests?: number;
   timeoutMs?: number;
-  /** К8.5.5a: потолок ожидания `Retry-After`, мс (дефолт — общий потолок http.ts) */
+  /** потолок ожидания `Retry-After`, мс (по умолчанию – общий потолок http.ts) */
   retryMaxWaitMs?: number;
-  /** шов фейковых часов (тест паузы ретрая) */
+  /** подмена ожидания в тестах */
   sleep?: (ms: number) => Promise<void>;
 }
 
 /**
- * Живой клиент: интервал, таймаут, один ретрай на временные сбои (429/5xx/сеть).
- * В4.8.5 (К8.5.5a): интервал — общий ритм (хост AppSec, токен) реестра
- * `http.ts`: все AppSec-клиенты одного PAT в процессе делят его. Пауза
- * ретрая 429/503 — `Retry-After`, если платформа его дала и он не длиннее
- * потолка (длиннее — повтор не выполняется, ответ отдаётся как есть); без
- * заголовка — прежние 600 мс.
+ * Клиент с интервалом, таймаутом и одним повтором при временном сбое
+ * (сеть, 429, 5xx). Интервал – общий ритм реестра `http.ts` по (хост AppSec,
+ * токен): все AppSec-клиенты одного PAT в процессе делят его. Пауза перед
+ * повтором – `Retry-After`, если он есть и не длиннее потолка (длиннее –
+ * повтора нет, ответ отдается как есть), иначе 600 мс.
  */
 export function makeAppsecClient(opts: AppsecClientOptions): AppsecClient {
   const baseUrl = opts.baseUrl;
@@ -152,7 +144,7 @@ export function makeAppsecClient(opts: AppsecClientOptions): AppsecClient {
       try {
         json = JSON.parse(bodyText);
       } catch {
-        /* не json — остаётся в error-тексте ниже */
+        /* не JSON – начало тела уйдет в error */
       }
       const retryAfterMs = isRetryableStatus(res.status) ? parseRetryAfter(res.headers.get("retry-after"), Date.now()) : null;
       return { get: { status: res.status, json, error: json === null ? bodyText.slice(0, 120) : undefined }, retryAfterMs };
@@ -168,7 +160,7 @@ export function makeAppsecClient(opts: AppsecClientOptions): AppsecClient {
       }
       count++;
       const first = await once(path, params);
-      // ретрай только временные: сеть (status 0), 429, 5xx
+      // повторяем только временные сбои: сеть (status 0), 429, 5xx
       const s = first.get.status;
       if (s === 0 || s === 429 || s >= 500) {
         const delay = first.retryAfterMs !== null ? retryDelayMs(first.retryAfterMs, 0, { maxWaitMs: opts.retryMaxWaitMs }) : 600;
@@ -189,23 +181,23 @@ export function makeAppsecClient(opts: AppsecClientOptions): AppsecClient {
 export interface AppsecNoData {
   reason: "access" | "no-scan" | "incomplete";
   detail: string;
-  /** К-Р15 (круг 2): корзина/страница, чей отказ исчерпал ретраи — доезжает в status_detail скана и noData карточки */
+  /** корзина или страница, на которой запрос отказал после повтора; видна в status_detail скана и в карточке */
   bucket?: string;
-  /** К-Р15: HTTP-попыток на отказавшийся запрос (клиент ретраит 0/429/5xx один раз) */
+  /** HTTP-попыток на отказавший запрос (клиент повторяет 0/429/5xx один раз) */
   attempts?: number;
 }
 
 export interface AppsecCollectOutcome {
-  /** ok-факт appsec.findings (включая пустой завершённый скан) */
+  /** ok-факт appsec.findings (в том числе завершенный скан без находок) */
   fact: Fact | null;
   noData: AppsecNoData | null;
 }
 
 export interface AppsecCollectOptions {
   now?: Date;
-  /** кап страниц defect-groups (защита от бесконечной пагинации) */
+  /** предел страниц defect-groups – защита от бесконечной пагинации */
   pagesCap?: number;
-  /** кап стабильных id групп в provenance (факт не пухнет на сотнях групп) */
+  /** предел id групп в provenance, чтобы факт не разрастался на сотнях групп */
   groupIdsCap?: number;
 }
 
@@ -216,7 +208,7 @@ export const SECRETS_TYPE = "SECRETS";
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
-/** Значение факта: агрегаты + provenance (контракт плана Б2 + формы SCS API). */
+/** Значение факта: агрегаты и provenance скана. */
 export interface AppsecFindingsFactValue {
   severity_counts: { critical: number; high: number; medium: number; low: number };
   resolved_share: number | null;
@@ -225,11 +217,11 @@ export interface AppsecFindingsFactValue {
     open_groups: number;
     open_findings: number | null;
     engines: Record<string, number>;
-    /** ЧИСЛОВЫЕ severity как отдал платформа — показ без декодирования (таблицы нет) */
+    /** числовые severity как их отдала платформа – без декодирования, таблицы нет */
     severity_raw_counts: Record<string, number>;
     fetched_groups: number;
     truncated: boolean;
-    /** Н6: разрез статусов полученных групп по `DefectGroupStatus` */
+    /** разрез полученных групп по классам статуса */
     status_counts?: Record<string, number>;
   };
   provenance: {
@@ -243,9 +235,9 @@ export interface AppsecFindingsFactValue {
 }
 
 /**
- * Сбор Security-факта одного репо. Канал REST нужен только для gitRepo
- * (id из GET /repos/{slug} — подтверждено живьём 17.09). Любая ошибка —
- * no-data с причиной; «скан завершён без находок» = ok с нулями.
+ * Сбор Security-факта одного репо. REST нужен только ради gitRepo – это id из
+ * GET /repos/{slug}. Любая ошибка – no-data с причиной; скан, завершенный без
+ * находок, – ok с нулями.
  */
 export async function collectAppsec(
   rest: ScClient,
@@ -258,7 +250,6 @@ export async function collectAppsec(
   const groupIdsCap = opts.groupIdsCap ?? 50;
 
   // --- gitRepo: внутренний id репозитория (строкой, как требует API) ---
-  // Ф2.8: сегменты слага в URL — encodeURIComponent
   const repoRes = await rest.get(`/repos/${slug.split("/").map((s) => encodeURIComponent(s)).join("/")}`);
   if (repoRes.status === 401 || repoRes.status === 403) {
     return noData("access", `repo GET ${repoRes.status}`);
@@ -274,7 +265,7 @@ export async function collectAppsec(
     return noData("incomplete", "repo GET: no id in response");
   }
 
-  // --- scans/latest: завершён ли последний скан (числовой status НЕ трогаем) ---
+  // --- scans/latest: завершен ли последний скан (числовой status не трогаем) ---
   const latest = await appsec.get("/v1/scans/latest", { gitRepo });
   if (latest.status === 401 || latest.status === 403) {
     return noData("access", `scans/latest ${latest.status}`);
@@ -292,19 +283,17 @@ export async function collectAppsec(
     return noData("incomplete", "scans/latest: no uuid in response");
   }
   if (timeFinishedMs === null) {
-    // скан есть, но не завершён — это «данных нет», не «находок нет»
+    // скан есть, но не завершен – это «данных нет», а не «находок нет»
     return noData("no-scan", "latest scan is not finished yet (timeFinished is null)");
   }
-  // Ф2.6 (M8): завершённость = timeFinished И isLatest. Числовой `status` не
-  // декодируем (таблицы соответствия нет), но `isLatest` — булево поле спеки
-  // (ScanSummaryDto.isLatest, required). Скан, завершившийся с ошибкой или
-  // вытесненный более новым, отдавал ok-факт с нулями — то есть «уязвимостей
-  // нет» вместо «данных нет» (нарушение закона 2 и прямой риск Score)
+  // завершенность = timeFinished и isLatest (обязательное булево поле
+  // ScanSummaryDto спеки). Без isLatest скан, упавший с ошибкой или вытесненный
+  // более новым, дал бы ok-факт с нулями – «уязвимостей нет» вместо «данных нет»
   if (scan?.["isLatest"] !== true) {
     return noData("no-scan", "latest scan is not current (isLatest is not true)");
   }
 
-  // --- defect-groups по страницам с ЯВНЫМ scanUuid (детерминизм) ---
+  // --- defect-groups по страницам с явным scanUuid, чтобы все запросы видели один скан ---
   const engines: Record<string, number> = {};
   const severityRaw: Record<string, number> = {};
   const groupIds: AppsecFindingsFactValue["provenance"]["group_ids"] = [];
@@ -316,8 +305,8 @@ export async function collectAppsec(
   let totalSize: number | null = null;
   let token = "";
   let pages = 0;
-  // Ф2.6: платформа, вернувшая ТОТ ЖЕ курсор, крутила бы нас по одной
-  // странице — счётчики росли бы кратно числу оборотов (двойной счёт)
+  // если платформа вернет тот же курсор, мы бы ходили по кругу и считали
+  // одни и те же группы многократно
   const seenTokens = new Set<string>([""]);
   while (pages < pagesCap) {
     const res = await appsec.get("/v1/defect-groups", {
@@ -334,8 +323,8 @@ export async function collectAppsec(
     const body = res.json as { data?: unknown[]; nextPageToken?: unknown; totalSize?: unknown } | null;
     const data = Array.isArray(body?.data) ? body!.data! : [];
     for (const g of data as Record<string, unknown>[]) {
-      // Н6: платформа проигнорировала фильтр и отдала закрытую группу — в
-      // бэклог она не идет; разрез статусов — в факте
+      // если платформа проигнорировала фильтр и отдала закрытую группу, в
+      // бэклог она не идет, но попадает в разрез статусов
       const cls = defectGroupStatusClass(g["status"]);
       statusCounts[cls] = (statusCounts[cls] ?? 0) + 1;
       if (cls === "resolved") {
@@ -370,21 +359,22 @@ export async function collectAppsec(
     if (pages === pagesCap) truncated = true;
   }
   if (totalSize === null) totalSize = fetched + skippedResolved;
-  // получено БОЛЬШЕ, чем платформа обещала: страницы пересеклись, агрегаты
-  // не сходятся — честнее не считать вовсе, чем показать завышенный бэклог
+  // получено больше, чем платформа обещала: страницы пересеклись, и честнее не
+  // считать вовсе, чем показать завышенный бэклог
   if (fetched + skippedResolved > totalSize) {
     return noData("incomplete", `defect-groups: fetched ${fetched} groups against totalSize ${totalSize} (overlapping pages)`);
   }
   if (fetched + skippedResolved < totalSize) truncated = true;
-  // бэклог — только открытые группы (закрытые, отданные вопреки фильтру, вычтены)
+  // бэклог – только открытые группы (закрытые, отданные вопреки фильтру, вычитаем)
   totalSize -= skippedResolved;
 
-  // --- severity-классификация платформой (именованные фильтры) ---
+  // --- серьезность классифицирует платформа (именованные фильтры) ---
   const counts: AppsecFindingsFactValue["severity_counts"] = { critical: 0, high: 0, medium: 0, low: 0 };
   for (const bucket of SEVERITY_BUCKETS) {
-    // CRITICAL берём страницей побольше: заодно движки критичных групп
+    // остальным корзинам нужен только totalSize; CRITICAL берем полной
+    // страницей, чтобы заодно увидеть движки критичных групп
     const pageSize = bucket === "CRITICAL" ? String(GROUPS_PAGE_SIZE) : "1";
-    // Н6: счетчики серьезности — только открытые группы (плотность не штрафует за закрытое)
+    // только открытые группы: плотность не должна штрафовать за закрытое
     const res = await appsec.get("/v1/defect-groups", { gitRepo, scanUuid, severity: bucket, status: [...APPSEC_OPEN_STATUSES], pageSize, pageToken: "" });
     if (res.status !== 200) {
       return noData("incomplete", `defect-groups severity=${bucket} → ${res.status}${res.error ? `: ${res.error}` : ""} (after ${res.attempts ?? 1} attempts)`, { bucket: `severity=${bucket}`, attempts: res.attempts ?? 1 });
@@ -397,17 +387,15 @@ export async function collectAppsec(
     counts[bucket.toLowerCase() as keyof typeof counts] = size;
   }
 
-  // --- критичные секреты: ФИЛЬТР платформы, а не догадка по имени движка ---
-  // Ф2.6 (M8): было — регулярка /secret/i по полю `engine` первой страницы
-  // CRITICAL. Живые движки зовутся KICS/Opengrep, «Secrets Scanner» из
-  // тестовой фикстуры выдуман, и кап 49 в проде, вероятно, не срабатывал
-  // никогда. Спека AppSec документирует параметр `type` (SECRETS, SCA, SAST,
-  // SBOM_*, DAST, AI_AUDIT) — классификация остаётся на стороне платформы.
+  // --- критичные секреты: фильтр платформы `type`, а не догадка по имени движка ---
+  // Живые движки называются KICS, Opengrep и т.п., по имени секреты не узнать.
+  // Спека AppSec документирует параметр `type` (SECRETS, SCA, SAST, SBOM_*,
+  // DAST, AI_AUDIT) – классификация остается на стороне платформы.
   const secretsRes = await appsec.get("/v1/defect-groups", {
     gitRepo,
     scanUuid,
     type: SECRETS_TYPE,
-    // Н6: исправленный или ложный секрет потолок 49 больше не держит
+    // исправленный или ложный секрет не должен держать потолок 49
     status: [...APPSEC_OPEN_STATUSES],
     severity: "CRITICAL",
     pageSize: "1",
@@ -438,7 +426,7 @@ export async function collectAppsec(
       severity_raw_counts: severityRaw,
       fetched_groups: fetched,
       truncated,
-      // Н6: разрез статусов полученных групп (open | resolved | unrecognized | unknown)
+      // open | resolved | unrecognized | unknown
       status_counts: statusCounts,
     },
     provenance: {
@@ -457,7 +445,7 @@ function noData(reason: AppsecNoData["reason"], detail: string, extra: { bucket?
   return { fact: null, noData: { reason, detail, ...extra } };
 }
 
-/** Факт no-data для сканов без AppSec-канала (например, PAT не сохранён). */
+/** Факт no-data для сканов без AppSec-канала (например, PAT не сохранен). */
 export function appsecNoDataFact(reason: AppsecNoData["reason"], detail: string, now = new Date()): Fact {
   return noDataFact("appsec.findings", reason, "appsec:api", detail, now.toISOString());
 }

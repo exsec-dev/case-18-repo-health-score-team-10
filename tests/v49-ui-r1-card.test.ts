@@ -1,6 +1,5 @@
-// v49-ui-r1-card.test.ts — В4.9, часть 2 гейта, круг 1: страница репозитория
-// = отчет по данным (инвариант 1). Поведенческие тесты на данных, а не на
-// исходнике (правило AGENTS.md 21.09): view-модель карточки `cardView`
+// Страница репозитория = отчет по данным. Поведенческие тесты на данных, а не
+// на исходнике: view-модель карточки `cardView`
 // сравнивается с моделью документа `buildReportModel` на фикстурах отчета
 // (`REPORT_FIXTURES`, включая `full-null`). Плюс путь к полной оценке по трем
 // типам зрителя, цвет категории по ключу, видимость, шаги кабинета.
@@ -44,16 +43,16 @@ describe("инвариант 1: карточка = отчет по данным 
       const model = buildReportModel(c);
       const view = cardView(c);
 
-      // А3: полосы вклада — те же заголовки, сегменты, остаток и строка вместо полосы
+      // полосы вклада – те же заголовки, сегменты, остаток и строка вместо полосы
       const bars = blocksOf(model.blocks, "contributions");
       expect(view.contributions.map(({ title, segments, rest, note }) => ({ title, segments: segments.map(({ title, value, share }) => ({ title, value, share })), rest, note }))).toEqual(
-        // круг 2 (Е3): на карточке вклад без «+» — то же число, что подпись сегмента в документе
+        // на карточке вклад без «+» – то же число, что подпись сегмента в документе
         bars.map(({ title, segments, rest, note }) => ({ title, segments: segments.map((s) => ({ ...s, value: s.value.replace(/^\+/, "") })), rest, note })),
       );
       // цвет сегмента — по ключу категории (один на карточке и в панели рейтинга)
       for (const bar of view.contributions) for (const s of bar.segments) expect(s.colorClass).toBe(`rh-cat-color_${s.key}`);
 
-      // А4: строки категорий — основание, балл и плашка как в колонках PDF
+      // строки категорий – основание, балл и плашка как в колонках PDF
       const rows = blocksOf(model.blocks, "categories")[0]!.rows;
       for (const cat of view.categories) {
         const row = rows.find((r) => r.name === cat.title)!;
@@ -63,20 +62,20 @@ describe("инвариант 1: карточка = отчет по данным 
       const locked = Object.entries(c.score!.categories).filter(([, v]) => v.locked !== undefined);
       expect(view.categories.length + locked.length).toBe(rows.length);
 
-      // А6: «Ограничения данных» — тем же текстом, что PDF
+      // «Ограничения данных» – тем же текстом, что PDF
       expect(view.limitations).toEqual(reportLimitations(model.blocks));
 
-      // А2 / Е2: путь к полной оценке — та же строка, что в документе
+      // путь к полной оценке – та же строка, что в документе
       const hero = blocksOf(model.blocks, "hero")[0]!;
       const notes = hero.notes.map((n) => lineText(n.line)).join(" ");
       if (view.fullPath) expect(notes).toContain(pathText(view.fullPath));
       else expect(c.score!.fullLocked).toBe(false);
 
-      // А5: номер, эффект и подпись эффекта — как в документе
+      // номер, эффект и подпись эффекта – как в документе
       const actions = blocksOf(model.blocks, "actions").flatMap((a) => a.items);
       expect(view.recommendations.map(({ n, effect, effectNote }) => ({ n, effect, effectNote }))).toEqual(actions.map(({ n, effect, effectNote }) => ({ n, effect, effectNote })));
 
-      // А7: «анализ» в шапке — та же дата, что в шапке документа
+      // «анализ» в шапке – та же дата, что в шапке документа
       expect(view.analysisAt).toBe(c.score?.computedAt ?? c.scan?.finishedAt ?? null);
     });
   }
@@ -97,7 +96,7 @@ describe("tri-state и доступ на карточке (инварианты 
     expect(view.categories.map((c) => c.key)).not.toContain("cicd");
     expect(view.categories.map((c) => c.key)).not.toContain("security");
     for (const bar of view.contributions) for (const s of bar.segments) expect(["cicd", "security"]).not.toContain(s.key);
-    // круг 2 (Т3, §2 23.09): одно предложение без заголовка, путь по типу зрителя
+    // одно предложение без заголовка, путь по типу зрителя
     expect(view.locked).toEqual({ text: "CI/CD и Безопасность видны участникам репозитория после входа и добавления персонального токена доступа." });
   });
 
@@ -109,8 +108,7 @@ describe("tri-state и доступ на карточке (инварианты 
 
   test("одна закрытая категория у зрителя с токеном — единственное число и причина отказа", () => {
     const c = card("grant-ci");
-    // круг 4 части 2 (3): смысл — «только участникам», затем причина
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): Ф11 — согласование «к ней» у одной категории
+    // сначала «только участникам», затем причина; «к ней» согласовано с одной категорией
     expect(lockedView(c)).toEqual({ text: "Безопасность видна только участникам репозитория, а у вашего токена к ней нет доступа." });
   });
 
@@ -119,7 +117,7 @@ describe("tri-state и доступ на карточке (инварианты 
     const cats = { ...base.score!.categories, cicd: { ...base.score!.categories.cicd, locked: "pat-expired" as const }, security: { ...base.score!.categories.security, locked: "denied" as const } };
     const mixed: RepoCard = { ...base, viewer: { own: false, auth: "pat" }, score: { ...base.score!, categories: cats } };
     expect(lockedView(mixed)!.text).toBe(
-      "CI/CD видна только участникам репозитория. SourceCraft отклонил ваш токен – обновите его в Настройках. Безопасность видна только участникам репозитория, а у вашего токена к ней нет доступа.", // Ф11
+      "CI/CD видна только участникам репозитория. SourceCraft отклонил ваш токен – обновите его в Настройках. Безопасность видна только участникам репозитория, а у вашего токена к ней нет доступа.",
     );
   });
 
@@ -204,7 +202,7 @@ describe("предупреждения наверху не повторяют «
       },
     };
     const view = cardView(c);
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): Ф8 — «нет кода» сказано в плашке индекса, сверху не повторяется
+    // «нет кода» сказано в плашке индекса, сверху не повторяется
     expect(view.topMarkers).toEqual(["ci-cap"]);
     expect(view.limitations.some((l) => l.startsWith("Часть данных взята из прошлого анализа"))).toBe(true);
     expect(view.limitations.some((l) => l.startsWith("Репозиторий больше лимита сервиса"))).toBe(true);
@@ -234,6 +232,3 @@ describe("плашка видимости (А7, В2): все значения So
     expect(cardView(card("anon")).visibility).toBe("public");
   });
 });
-
-// ПЕРЕВЕРНУТО С ЗАМЕНОЙ (круг 2 части 2, Е17): шаги владельца сняты вместе с
-// `ownerSteps`; предупреждение «нет токена» проверяют v47-ui и audit-v47.

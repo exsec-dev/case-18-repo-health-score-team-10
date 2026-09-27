@@ -1,15 +1,12 @@
-// pdf.ts — PDF-выгрузка отчёта по карточке (В4.7, контракт П1; В4.9, К9.5).
+// PDF-выгрузка отчета по карточке. Рендерер той же модели блоков, из которой
+// `markdown.ts` собирает MD: содержание PDF равно содержанию MD по построению,
+// отличается только вид.
+// Вид: Inter в двух весах, цвета — hex-снимки токенов светлой темы UI, плашки как
+// `Label` (скругленный прямоугольник canvas под текстом), полосы одним серым
+// тоном, шкала 3 зон, карточки действий, приложение с новой страницы.
 //
-// Рендерер той же модели блоков, из которой `markdown.ts` сериализует MD:
-// содержание PDF равно содержанию MD построением, отличается только вид.
-// Вид — эталон вида В4.9 (круг 4, `reports/2026-09-22-m49-design/`):
-// Inter в двух весах, цвета — hex-снимки токенов светлой темы UI, плашки как
-// `Label` (скругленный прямоугольник canvas под текстом), полосы одним
-// темно-серым тоном `#6b6b6b`, шкала 3 зон, карточки действий, приложение с
-// новой страницы. Аватара в шапке нет (снят как «ИИ-маркер» в круге 3).
-//
-// Механизм — решение владельца 21.09: серверный `pdfmake@0.3.11` (MIT), без
-// Chrome. Модуль серверный: фронтенд его не импортирует.
+// Движок — серверный `pdfmake@0.3.11` (MIT), без Chrome. Модуль серверный:
+// фронтенд его не импортирует.
 //
 // Безопасность: `pdfmake` умеет тянуть ресурсы по URL и с диска по ссылке из
 // описания документа. Картинок и внешних ресурсов в модели нет, а политики
@@ -54,12 +51,12 @@ pdfmake.setFonts({
     bolditalics: join(FONT_DIR, FONT_FILES.bolditalics),
   },
 });
-// сеть — никогда: в модели отчёта нет ни картинок, ни ссылок на ресурсы
+// сеть — никогда: в модели отчета нет ни картинок, ни ссылок на ресурсы
 pdfmake.setUrlAccessPolicy(() => false);
 // диск — только файлы шрифта
 pdfmake.setLocalAccessPolicy(insideFontDir);
 
-// ---------- токены вида (светлая тема UI, hex на белом — README эталона) ----------
+// ---------- токены вида (светлая тема UI, hex на белом) ----------
 
 type PdfNode = Record<string, unknown>;
 
@@ -72,18 +69,17 @@ export const COLORS = {
   muted: "#6b6b6b",
   /** line-generic-solid */
   rule: "#e5e5e5",
-  /** дорожка Progress (theme.css, В4.6) */
+  /** дорожка Progress (theme.css) */
   track: "#f2f2f2",
   /** text-link */
   link: "#4768c2",
   /**
-   * Все шкалы (полоса вклада, полосы баллов, покрытие) — один серый тон.
-   * В8 гейта: светлее прежнего `#6b6b6b` круга 4; п.4 круга 2 — еще светлее,
-   * дорожку владелец просил не трогать. С дорожкой `#f2f2f2` контраст 2,7:1
-   * (порог WCAG 1.4.11 для нетекстовых — 3:1), решение владельца 22.09.
+   * Все шкалы (полоса вклада, полосы баллов, покрытие) — один серый тон. С
+   * дорожкой `#f2f2f2` контраст 2,7:1 — ниже порога WCAG 1.4.11 (3:1) для
+   * нетекстовых элементов; это осознанный выбор ради светлого вида.
    */
   bar: "#949494",
-  /** В14 гейта: подложка примечаний под таблицами разбора */
+  /** подложка примечаний под таблицами разбора */
   noteBg: "#f7f7f7",
   white: "#ffffff",
 } as const;
@@ -104,7 +100,7 @@ const PAGE_W = 595.28;
 const PAGE_H = 841.89;
 const SIDE = 48;
 const W = Math.floor(PAGE_W - 2 * SIDE);
-/** Рабочая ширина набора (pt) — для тестов вёрстки. */
+/** Рабочая ширина набора (pt) — для тестов верстки. */
 export const CONTENT_W = W;
 const TOP = 40;
 const BOTTOM = 44;
@@ -129,10 +125,9 @@ function linesOf(s: string, size: number, colWidth: number, bold = false): numbe
 }
 
 /**
- * В18 гейта: у длинного имени репозитория строка колонтитула переносилась и
- * теряла хвост («…от 16» вместо даты), а шапка страницы наезжала на номер.
- * Обрезаем по ширине с многоточием — это оформление, в сверку с MD не идет
- * (колонтитулы туда и не входят).
+ * Обрезка по ширине с многоточием для колонтитулов: у длинного имени репозитория
+ * строка иначе переносится, теряет дату, а шапка страницы наезжает на номер.
+ * Колонтитулы в сверку с MD не входят, так что текст здесь можно резать.
  */
 function fitOneLine(s: string, size: number, max: number): string {
   if (width(s, size) <= max) return s;
@@ -162,15 +157,14 @@ function inlineNode(fragment: Inline): PdfText {
 
 /** Невидимая точка переноса (U+200B, в Inter нулевой ширины). */
 export const BREAK = "\u200B";
-/** Длиннее этого значение без пробелов не остаётся — иначе ячейка вылезает за поле. */
+/** Длиннее этого значение без пробелов не остается — иначе ячейка вылезает за поле. */
 export const MAX_UNBROKEN = 24;
 
 /**
- * Приёмка HQ В4.7: длинное значение без пробелов переносить негде, и ячейка
- * уходила за правый край страницы. Точки переноса ставятся только в слова
- * длиннее порога — после знаков структуры и, если их не хватает, через
- * каждые MAX_UNBROKEN символов; короткие значения не трогаются. Текст не
- * меняется — U+200B нулевой ширины, сверка с MD его выбрасывает.
+ * Длинное значение без пробелов переносить негде, и ячейка ушла бы за правый край
+ * страницы. Точки переноса ставятся только в слова длиннее порога — после знаков
+ * структуры и, если их не хватает, через каждые MAX_UNBROKEN символов. Видимый
+ * текст не меняется: U+200B нулевой ширины, сверка с MD его выбрасывает.
  */
 export function breakable(text: string): string {
   return text.replace(/\S+/g, (word) => {
@@ -195,7 +189,7 @@ const lineNodes = (line: InlineLine, breakLong = false): PdfText[] => line.map((
 
 const LABEL_SIZES = { xxs: { h: 12, pad: 4.5, r: 2 }, xs: { h: 15, pad: 6, r: 2.25 }, s: { h: 18, pad: 7.5, r: 3.75 } } as const;
 const LABEL_FONT = 9.5;
-/** Кегль плашки доступа в шапке (п.1 круга 2: мельче остальных). */
+/** Кегль плашки доступа в шапке — мельче остальных. */
 const LABEL_FONT_XXS = 8;
 /** высота строки Inter 9.5 pt при lineHeight 1 (ascender − descender ≈ 1.21 em) */
 const LABEL_LINE = LABEL_FONT * 1.21;
@@ -219,7 +213,7 @@ export function labelNode(chip: Chip, size: "xxs" | "xs" | "s" = "xs"): PdfNode 
 /**
  * Иконка информации — `circle-info` из `@gravity-ui/icons` (MIT), тот же
  * рисунок, что в UI; путь скопирован в код дословно, чтобы сборка PDF не
- * читала файлы вне каталога шрифта. Своих рисунков не заводим (правило 3а).
+ * читала файлы вне каталога шрифта.
  */
 const INFO_PATH =
   "M8 13.5a5.5 5.5 0 1 0 0-11 5.5 5.5 0 0 0 0 11M8 15A7 7 0 1 0 8 1a7 7 0 0 0 0 14m1-9.5a1 1 0 1 1-2 0 1 1 0 0 1 2 0m-.25 3a.75.75 0 0 0-1.5 0V11a.75.75 0 0 0 1.5 0z";
@@ -252,12 +246,11 @@ function scoreBar(score: number | null, w: number): PdfNode {
 // ---------- блоки ----------
 
 function headerNode(block: Extract<Block, { kind: "header" }>): PdfNode {
-  // Ступень 4 (Ф3): неразрывный длинный слаг и ссылка переносятся, а не уходят за поле
-  // тур 3 В5.5 (п.8): слаг без пробелов вокруг слеша, как на экране и в MD
+  // длинный слаг и ссылка без пробелов переносятся, а не уходят за поле
   const left: PdfNode[] = [{ text: breakable(block.slug), fontSize: 16, bold: true, lineHeight: 1 }];
   if (block.title) left.push({ text: lineNodes(block.title), fontSize: 8, color: COLORS.muted, margin: [0, 2, 0, 0] });
   left.push({ text: breakable(block.link.text), link: block.link.url, color: COLORS.link, fontSize: 8, margin: [0, 2, 0, 0] });
-  // п.1 круга 2: название документа первой строкой, дата и плашка доступа — второй
+  // название документа первой строкой, дата и плашка доступа — второй
   const right: PdfNode[] = [{ text: block.doc, bold: true, fontSize: 9, alignment: "right", noWrap: true }];
   const dateNode: PdfNode | null = block.date ? { width: "auto", text: block.date, fontSize: 8, color: COLORS.muted, noWrap: true, margin: [0, 2, 0, 0] } : null;
   if (block.docChip) {
@@ -288,8 +281,7 @@ function metricColumn(label: string, value: number | null, noneText: string, chi
     return { stack: [head, { text: noneText, fontSize: 26, bold: true, color: COLORS.ink2, lineHeight: 1, alignment: align, margin: [0, 6, 0, 4] }] };
   }
   // отступ слева входит в ширину колонки: иначе у прижатого вправо показателя
-  // распорка «*» съедала его и плашка уезжала за правое поле (трипвай
-  // `report-check.py` на отрисованном PDF)
+  // распорка «*» съедает его и плашка уезжает за правое поле
   const chipNode = chip ? labelNode(chip, "s") : null;
   const cells: PdfNode[] = [
     { width: "auto", text: String(value), fontSize: 40, bold: true, characterSpacing: -0.8, lineHeight: 1, fontFeatures: ["tnum"] },
@@ -300,14 +292,14 @@ function metricColumn(label: string, value: number | null, noneText: string, chi
   return { stack: [head, { columns: align === "right" ? [{ width: "*", text: "" }, ...cells] : cells, columnGap: 0 }] };
 }
 
-/** Ширина столбца показателя в ряду из двух (В6): половина полосы набора. */
+/** Ширина столбца показателя в ряду из двух: половина полосы набора. */
 const HERO_GAP = 16;
 const HERO_COL = (W - HERO_GAP) / 2;
 
 function heroNode(block: Extract<Block, { kind: "hero" }>): PdfNode {
   const main = metricColumn(block.label, block.value, block.noneText, block.chip, "left");
-  // В6 гейта: второй показатель — справа в том же ряду, тем же стилем; его
-  // пояснение остается мелкой строкой под числом.
+  // второй показатель — справа в том же ряду, тем же стилем; его пояснение —
+  // мелкой строкой под числом
   const row: PdfNode = block.secondary
     ? {
         columns: [
@@ -327,10 +319,9 @@ function heroNode(block: Extract<Block, { kind: "hero" }>): PdfNode {
     stack: [
       { ...row, margin: [0, 12, 0, 0] },
       ...(block.verdict ? [{ text: block.verdict, fontSize: 12, lineHeight: 1.1, margin: [0, 8, 0, 0] }] : []),
-      // В4 гейта: перед строкой-пояснением — иконка информации
       ...block.notes.map((n) => {
         const body: PdfNode = { text: lineNodes(n.line), fontSize: 8.5, color: COLORS.ink2, lineHeight: 1.2 };
-        // п.10: строка с иконкой и строка без нее держат один отступ сверху;
+        // строка с иконкой и строка без нее держат один отступ сверху;
         // текст с иконкой выровнен по ее левому краю переносом строки
         return n.info
           ? { columns: [{ width: INFO_SIZE, ...infoIcon(), margin: [0, 2, 0, 0] }, { width: "*", ...body }], columnGap: 6, margin: [0, 10, 0, 0] }
@@ -345,10 +336,9 @@ const BAR_H = 12;
 const ZONE_H = 3;
 const ZONE_TOP = BAR_H + 2;
 /**
- * Засечка у начала сегмента (круг 3 гейта; п.1 круга 5 — черная, жирнее,
- * пересекает шкалу насквозь и тянется к своей подписи). Доводка: засечка
- * стоит и у первого сегмента, у последнего (остаток «не набрано») ее нет —
- * там граница видна сменой тона; рисуется ПОВЕРХ полосы и полоски зон.
+ * Засечка у начала сегмента: черная, пересекает шкалу насквозь и тянется к своей
+ * подписи. Есть и у первого сегмента; у остатка «не набрано» ее нет — там граница
+ * видна сменой тона. Рисуется поверх полосы и полоски зон.
  */
 const TICK_UP = 5;
 const TICK_WIDTH = 1.25;
@@ -386,19 +376,18 @@ export interface LabelPlace {
 }
 
 /**
- * В5.5 закрытие (П-3): раскладка подписей полосы вклада. Прежде подписи шли
- * строго через одну (над, под, над), и у малых соседних сегментов подпись
- * первого наезжала на подпись третьего. Теперь каждая подпись занимает отрезок
- * по своей настоящей ширине (метрики Inter) и ставится в первый свободный ряд:
- * своя сторона по очереди, другая сторона, затем второй ряд. Ряд свободен,
- * если подпись не задевает соседей этого ряда (с зазором), засечка подписи
- * дальнего ряда не проходит сквозь подпись ближнего и наоборот. Подпись у
- * правого края сдвигается влево и не выходит за полосу. Не нашлось места хоть
- * одной подписи — `null`: все подписи уходят в легенду под полосой, поверх
- * соседей ни одна не ставится.
+ * Раскладка подписей полосы вклада. Простое чередование «над, под, над» не
+ * годится: у малых соседних сегментов подпись первого наезжает на подпись
+ * третьего. Поэтому каждая подпись занимает отрезок по своей настоящей ширине
+ * (метрики Inter) и ставится в первый свободный ряд: своя сторона по очереди,
+ * другая сторона, затем второй ряд. Ряд свободен, если подпись не задевает
+ * соседей этого ряда (с зазором), а засечки дальнего ряда не проходят сквозь
+ * подписи ближнего и наоборот. Подпись у правого края сдвигается влево и не
+ * выходит за полосу. Не нашлось места хоть одной подписи — `null`: все подписи
+ * уходят в легенду под полосой, поверх соседей ни одна не ставится.
  */
 export function placeSegmentLabels(slots: readonly SegmentSlot[], width: number, lanes = SEG_LANES): LabelPlace[] | null {
-  // прежний порядок «первая подпись над полосой»; не вышло — та же раскладка с первой под полосой
+  // сначала первая подпись над полосой; не вышло — та же раскладка с первой под полосой
   return placeFrom(slots, width, lanes, "above") ?? placeFrom(slots, width, lanes, "below");
 }
 
@@ -445,8 +434,8 @@ function segmentText(s: { title: string; value: string }, muted: boolean, align:
 }
 
 /**
- * Полоса вкладов (п.5 круга 2; В5.5 закрытие, П-3). Подписи — отдельными
- * узлами с `relativePosition` ДО рисунка полосы: в дереве описания они стоят в
+ * Полоса вкладов. Подписи — отдельными
+ * узлами с `relativePosition` до рисунка полосы: в дереве описания они стоят в
  * порядке сегментов, и сверка «текст PDF = текст MD» видит те же слова подряд,
  * а место на странице задает раскладка `placeSegmentLabels`. Рисунок (полоса,
  * полоска зон, засечки до своих подписей) — один canvas, его высота задает
@@ -566,9 +555,9 @@ function coverageNode(block: Extract<Block, { kind: "coverage" }>): PdfNode {
 }
 
 /**
- * Колонки строки категории (эталон, круг 3): имя 84, полоса 60, балл, плашка
- * 98, «почему» — остаток; зазор 8. В10 гейта: под балл 24 pt — трехзначный
- * «100» в 18 pt уходил в перенос строки.
+ * Колонки строки категории: имя 84, полоса 60, балл 24, плашка 98, «почему» —
+ * остаток; зазор 8. Под балл нужно 24 pt, иначе трехзначное «100» уходит в
+ * перенос строки.
  */
 const CAT_COLS = [84, 60, 24, 98] as const;
 const GAP = 8;
@@ -576,15 +565,14 @@ const WHY_W = W - CAT_COLS.reduce((a, b) => a + b, 0) - GAP * 4;
 
 /**
  * Высота строки текста в Inter: кегль × 1,21 (ascender − descender) × межстрочный.
- * п.4 круга 5: строка таблицы центрировалась по выдуманной высоте (11 pt на
- * строку «основания» и пол ряда не меньше 30), а pdfmake считал настоящую —
- * содержимое вставало ниже середины. Теперь обе высоты одна и та же.
+ * Центрирование в строке таблицы считается по той же высоте, что и у pdfmake,
+ * иначе содержимое встает ниже середины.
  */
 const textH = (size: number, lineHeight: number): number => size * 1.21 * lineHeight;
 const NAME_H = textH(9.5, 1.05);
 const WHY_H = textH(8, 1.12);
 
-/** В5.5 закрытие (С13): зазор между меткой строки и «почему» под ней. */
+/** Зазор между меткой строки и «почему» под ней. */
 const MARK_GAP = 3;
 
 function categoryCells(row: CategoryRow): PdfNode[] {
@@ -596,12 +584,11 @@ function categoryCells(row: CategoryRow): PdfNode[] {
   const mid = (elem: number) => Math.max(0, (h - elem) / 2);
   const why: PdfNode = { text: row.why, fontSize: 8, color: COLORS.ink2, lineHeight: 1.12 };
   return [
-    // В10 гейта: имя категории — обычным начертанием
     { text: row.name, color: off ? COLORS.ink2 : COLORS.ink, margin: [0, mid(NAME_H), 0, 0], lineHeight: 1.05 },
     { ...scoreBar(row.score, CAT_COLS[1]), margin: [0, mid(6), 0, 0] },
     { text: row.scoreText, color: off ? COLORS.muted : COLORS.ink, alignment: "right", noWrap: true, margin: [0, mid(NAME_H), 0, 0], fontFeatures: ["tnum"], lineHeight: 1.05 },
     { columns: [labelNode(row.chip, "xs")], margin: [0, mid(LABEL_SIZES.xs.h), 0, 0] },
-    // В5.5 закрытие (С13): метка строки — желтой плашкой над «почему», как у категории на карточке
+    // метка строки — плашкой над «почему», как у категории на карточке
     row.mark
       ? { stack: [{ columns: [labelNode(row.mark, "xxs")] }, { ...why, margin: [0, MARK_GAP, 0, 0] }], margin: [0, mid(whyH), 0, 0] }
       : { ...why, margin: [0, mid(whyH), 0, 0] },
@@ -649,7 +636,7 @@ function actionRow(a: ActionItem, compact: boolean): PdfNode[] {
       ],
     },
     {
-      // В16 гейта: подпись «ожидаемый эффект» — строкой НАД числом
+      // подпись «ожидаемый эффект» — строкой над числом
       stack: [
         ...(a.effectNote && !compact ? [{ text: a.effectNote, fontSize: 8.5, color: COLORS.ink2, alignment: "right", lineHeight: 1.15 }] : []),
         ...(a.effectNote && compact ? [{ text: a.effectNote, fontSize: 7.5, color: COLORS.muted, alignment: "right" }] : []),
@@ -735,7 +722,6 @@ function detailNode(block: Extract<Block, { kind: "detail" }>): PdfNode {
   };
   const parts: PdfNode[] = [head];
   if (block.table) parts.push(tableNode(block.table.columns, block.table.rows));
-  // В14 гейта: примечание под таблицей — на светло-серой подложке
   for (const note of block.notes) parts.push(noteBox(note));
   const small = (block.table?.rows.length ?? 0) <= 6;
   return { stack: parts, margin: [0, 20, 0, 0], unbreakable: small };
@@ -743,7 +729,7 @@ function detailNode(block: Extract<Block, { kind: "detail" }>): PdfNode {
 
 function paragraphNode(block: Extract<Block, { kind: "paragraph" }>): PdfNode {
   const lines = block.lines.flatMap((l, i) => (i === 0 ? lineNodes(l, true) : [{ text: "\n" }, ...lineNodes(l, true)]));
-  // п.9 круга 2: примечания во всех разделах — на одной подложке
+  // примечания во всех разделах — на одной подложке
   if (block.tone === "note") return noteBox(block.lines.flat(), 6);
   if (block.tone === "subhead") return { text: lines, fontSize: 10, bold: true, color: COLORS.ink, margin: [0, 12, 0, 5], headlineLevel: 4 };
   if (block.tone === "caption") return { text: lines, fontSize: 8.5, color: COLORS.ink2, lineHeight: 1.15, margin: [0, 10, 0, 3], headlineLevel: 4 };
@@ -752,11 +738,7 @@ function paragraphNode(block: Extract<Block, { kind: "paragraph" }>): PdfNode {
   return { text: lines, fontSize: 8.5, color: COLORS.ink2, lineHeight: 1.15, margin: [0, 0, 0, 3] };
 }
 
-/**
- * В7 гейта: один шаг отступа между крупными смысловыми блоками. Шкала от
- * кегля основного текста (9,5): 24 — между блоками, 16 — перед подзаголовком
- * внутри блока, 6 — внутри блока.
- */
+/** Один шаг отступа между крупными смысловыми блоками. */
 const BLOCK_GAP = 30;
 
 const HEADING_STYLE: Record<1 | 2 | 3, PdfNode> = {
@@ -808,13 +790,13 @@ function smallFollower(block: Block | undefined): boolean {
 }
 
 /**
- * Описание документа pdfmake по модели отчёта. Экспортируется для сверки
+ * Описание документа pdfmake по модели отчета. Экспортируется для сверки
  * текста с MD (tests/report-pdf.test.ts): текст собирается из всего дерева
- * описания ДО рендера.
+ * описания до рендера.
  */
 export function buildPdfDocument(model: ReportModel): PdfNode {
   // колонки колонтитулов заданы шириной: у длинного имени репозитория строка
-  // иначе съедала номер страницы (В18 гейта)
+  // иначе съела бы номер страницы
   const FOOT_NUM = Math.ceil(width("000/000", 7.5)) + 4;
   const RUN_RIGHT = Math.ceil(width(model.runningHead[1], 7.5)) + 4;
   const content: PdfNode[] = [];
@@ -822,24 +804,25 @@ export function buildPdfDocument(model: ReportModel): PdfNode {
   for (let i = 0; i < blocks.length; i++) {
     const block = blocks[i]!;
     const next = blocks[i + 1];
-    // п.9 круга 2: мелкая сноска сразу под таблицей — на подложке примечания
+    // мелкая сноска сразу под таблицей — на подложке примечания
     if (block.kind === "paragraph" && block.tone === "fine" && blocks[i - 1]?.kind === "table") {
       content.push(noteBox(block.lines.flat(), 5));
       continue;
     }
-    // заголовок + первый блок — неразрывно (К9.5); длинный блок — заголовок не сирота (pageBreakBefore)
+    // заголовок + короткий первый блок — неразрывно; перед длинным блоком заголовок
+    // не остается сиротой благодаря pageBreakBefore
     if (block.kind === "heading" && next && smallFollower(next) && !(next.kind === "actions" && next.items.length > 3)) {
       // внутри неразрывного стека заголовок без headlineLevel: pageBreakBefore
       // на вложенном узле неразрывного блока pdfmake обрабатывает неверно
-      // (пустые страницы и потерянный текст — найдено по отрисованному PDF)
+      // (пустые страницы и потерянный текст)
       const head = blockNode(block);
       delete head.headlineLevel;
       content.push({ stack: [head, blockNode(next)], unbreakable: true });
       i++;
       continue;
     }
-    // 27.09: обычный абзац сразу под плашкой примечания (плашка «Обзор устарел»
-    // над AI-текстом) — с отступом, иначе текст прилипает к подложке
+    // обычный абзац сразу под плашкой примечания (например, «Обзор устарел» над
+    // AI-текстом) — с отступом, иначе текст прилипает к подложке
     const prev = blocks[i - 1];
     if (block.kind === "paragraph" && block.tone === undefined && prev?.kind === "paragraph" && prev.tone === "note") {
       content.push({ ...blockNode(block), margin: [0, 6, 0, 3] });
@@ -882,7 +865,7 @@ export function buildPdfDocument(model: ReportModel): PdfNode {
   };
 }
 
-/** PDF отчёта карточки — те же данные, что `renderRepoReport` (MD). */
+/** PDF отчета карточки — те же данные, что `renderRepoReport` (MD). */
 export async function renderRepoPdf(card: RepoCard): Promise<Buffer> {
   return pdfmake.createPdf(buildPdfDocument(buildReportModel(card))).getBuffer();
 }
@@ -902,7 +885,7 @@ export async function pdfResponse(card: RepoCard, render: (card: RepoCard) => Pr
     return new Response(new Uint8Array(pdf), {
       headers: {
         "content-type": "application/pdf",
-        // отчёт открывают как файл, а не читают в браузере
+        // отчет открывают как файл, а не читают в браузере
         "content-disposition": `attachment; filename="${reportFileName(card.repo.org, card.repo.repo, "pdf")}"`,
       },
     });

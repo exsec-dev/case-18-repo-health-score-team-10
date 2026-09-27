@@ -1,5 +1,4 @@
-// boot.test.ts — слой L0 (test-scaffold): сервер и БД поднимаются,
-// health отвечает, tri-state NULL-семантика схемы жива.
+// Смоук: сервер и БД поднимаются, health отвечает, tri-state NULL-семантика схемы жива.
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -28,7 +27,7 @@ describe("boot", () => {
     );
     const row = db.query("SELECT healthcraft_index FROM scores WHERE scan_id = 1 AND model_version = 'test'").get() as { healthcraft_index: number | null };
     expect(row.healthcraft_index).toBeNull();
-    // В4.3 (К-Ф3.2): сохранённого полного итога в актуальной схеме нет
+    // сохраненного полного итога в актуальной схеме нет
     const cols = (db.query("PRAGMA table_info(scores)").all() as { name: string }[]).map((c) => c.name);
     expect(cols).not.toContain("total_full");
     expect(cols).not.toContain("coverage_full");
@@ -77,7 +76,7 @@ describe("boot", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Ф2.11 (LOW-1). Миграция очереди со схемы v1 (UNIQUE(repo_id)): индексы
+// Миграция очереди со схемы v1 (UNIQUE(repo_id)): индексы
 // старой таблицы сносятся ДО RENAME, вся пересборка — в одной транзакции.
 // ---------------------------------------------------------------------------
 
@@ -168,7 +167,7 @@ describe("Ф2.11: пересборка jobs со старой схемы не т
 });
 
 // ---------------------------------------------------------------------------
-// Ф2.18. Бэкфилл признака полосы (П11) — ОДНОРАЗОВАЯ миграция при переходе
+// Бэкфилл признака полосы — ОДНОРАЗОВАЯ миграция при переходе
 // версии схемы, а не полный UPDATE очереди на каждом openDb.
 // ---------------------------------------------------------------------------
 

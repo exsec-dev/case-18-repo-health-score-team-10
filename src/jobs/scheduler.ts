@@ -1,23 +1,20 @@
-// scheduler.ts — периодика В4/Б3: claim-loop по jobs, обход каталога
-// (Ф2.5, круг 2: ДВЕ фазы на одном перечислении — часовая сверка состава
-// Config.scheduler.catalogIntervalMs и суточная ночная волна
-// Config.scheduler.intervalMs; таймер тикает с периодом ЧАСТОЙ фазы,
-// min(catalogIntervalMs, intervalMs) — час по умолчанию), форс-полный
-// тогл SCHEDULER_FULL_RESCAN, потолок страниц Config.scan.catalog.maxPages.
-// Источник диффа ночной волны — last_updated каталога против
-// repos.last_activity_at, эвикция исчезнувших — ТОЛЬКО по дочитанному
-// снимку и только repo-уровневым сигналам (Q&A №16). Инкрементальность: в
-// очередь ставятся только изменившиеся и новые репо — «умный рескан»
-// 17.09. NULL-lease матчится (SQLite NULL<now ложно — потому IS NULL OR).
-// Воркер-лупы живут в процессе сервера: ~~одну job за раз~~ с В5.2 (очередь, 25.09) — свой
-// цикл на каждую пару «полоса роли × род заявки» (`workerLoopPlan`), тяжелые репо — только в
-// одном слоте каждого пользовательского рода (tmp-диск стенда конечен: одновременно не больше
-// 4 тяжелых клонов в роли `all`); лиз истёк → job снова доступен (упавший воркер не блокирует
-// очередь).
-// В4.1 (К3): режима у job нет — автор (user_id) определяет токен скана;
-// эвикция только у задач без автора (периодика, серверный токен);
-// серверный REST-клиент — фабрика: новый бюджет на каждую задачу и на
-// каждый ночной обход (H2).
+// Очередь заданий и периодика: claim-loop по jobs и обход каталога.
+// Обход — две фазы на одном перечислении: часовая сверка состава
+// (Config.scheduler.catalogIntervalMs) и суточная ночная волна пересканов
+// (Config.scheduler.intervalMs); таймер тикает с периодом более частой фазы.
+// Дополнительно: принудительный полный рескан SCHEDULER_FULL_RESCAN и потолок
+// страниц Config.scan.catalog.maxPages.
+// Ночная волна сравнивает last_updated каталога с repos.last_activity_at и ставит
+// в очередь только новые и изменившиеся репо. Эвикция исчезнувших — только по
+// дочитанному до конца каталогу и только по сигналам уровня репозитория.
+// NULL в lease_until должен матчиться: в SQLite NULL < now ложно, поэтому IS NULL OR.
+// Циклы воркеров живут в процессе сервера: свой цикл на каждую пару «полоса роли ×
+// род заявки» (`workerLoopPlan`). Тяжелые репо идут только в один слот каждого
+// пользовательского рода — tmp-диск стенда конечен. Истек лиз — заявка снова
+// доступна, упавший воркер очередь не блокирует.
+// Автор заявки (user_id) определяет токен скана; эвикция — только у заданий без
+// автора. Серверный REST-клиент — фабрика: свой бюджет запросов на каждую задачу
+// и каждый обход каталога.
 import type { Database } from "bun:sqlite";
 import { rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -49,21 +46,19 @@ export interface ClaimedJob {
   /** автор заявки; null = периодика (серверный токен) */
   userId: number | null;
   triggerKind: string;
-  /** род заявки (В5, v2.0): scan | summary | check — summary исполняет AI-генерацию, check (В5.2) — проверку на накрутку */
+  /** род заявки: scan | summary (AI-обзор) | check (проверка на накрутку) */
   kind: string;
-  /** В5.2 (Б2): аудитория AI-заявки — public (публичные факты) | full */
+  /** аудитория AI-заявки: public (только публичные факты) | full */
   audience?: AiAudience;
-  /** метка заявки: продление лиза и finishJob — только своей заявки (К4) */
+  /** метка заявки: продлить лиз и завершить можно только свою заявку */
   claimedAt: string;
   /** номер попытки (после инкремента при claim) */
   attempts: number;
 }
 
 /**
- * Активная (queued/running) СКАН-заявка юзера на репо — для дедупа (К4).
- * В5.1 (Прод-С1): фильтр kind='scan' — живая summary-заявка не перехватывает
- * POST анализа (прежде клик «Сканировать» при живой генерации возвращал 202
- * с id генерации, и скан не вставал никогда).
+ * Активная (queued/running) скан-заявка пользователя на репо — для дедупа.
+ * Только kind='scan': живая AI-заявка не должна перехватывать запуск анализа.
  */
 export function findActiveUserJob(db: Database, userId: number, repoId: number): number | null {
   const row = db
@@ -73,15 +68,13 @@ export function findActiveUserJob(db: Database, userId: number, repoId: number):
 }
 
 /**
- * Отказанная предпроверка доступа (repo-GET 403/404 по PAT, Ф1.6): строка jobs
- * со status='refused' — воркером не заявляется (claimNext берёт только
- * queued/running), но учитывается лимитом частоты. repo_id = 0: строка
- * repos по отказу не создаётся (К3), а NOT NULL колонки требует значения
- * (FK в SQLite не включены); ночной обход по repo_id её не видит.
+ * Отказ предпроверки доступа (403/404 на GET репозитория по PAT): строка jobs
+ * со status='refused' воркером не заявляется, но учитывается лимитом частоты.
+ * repo_id = 0: строка repos по отказу не создается, а колонка NOT NULL
+ * (FK в SQLite не включены); ночной обход такую строку не видит.
  */
 export function recordRefusedUserJob(db: Database, userId: number, now = new Date(), slug?: string): number {
-  // В4.4 (кластер J): слаг отказанной заявки — в error-payload (repo-строки
-  // нет, LEFT JOIN панели иначе показал бы «—» вместо репозитория)
+  // строки repos нет, поэтому слаг — в error, иначе панель заданий показала бы «—»
   const error = slug === undefined ? null : JSON.stringify({ slug });
   const r = db
     .query("INSERT INTO jobs (repo_id, status, user_id, trigger_kind, created_at, error) VALUES (0, 'refused', ?, 'user', ?, ?)")
@@ -90,9 +83,8 @@ export function recordRefusedUserJob(db: Database, userId: number, now = new Dat
 }
 
 /**
- * Активных (queued/running) юзерских СКАН-заявок на юзера — предел
- * Config.queue.userActiveMax (Ф1.7). В5.1 (Прод-С1): summary-заявки не
- * занимают слоты анализов (у них свой кап — `countActiveSummaryJobs`).
+ * Активных (queued/running) скан-заявок пользователя — предел Config.queue.userActiveMax.
+ * AI-заявки слоты анализов не занимают, у них свой предел (`countActiveSummaryJobs`).
  */
 export function countActiveUserJobs(db: Database, userId: number): number {
   return (
@@ -100,7 +92,7 @@ export function countActiveUserJobs(db: Database, userId: number): number {
   ).c;
 }
 
-/** В5.1 (Security-З3): активных summary-заявок юзера — свой кап (кредиты организаторов — сжигаемый ресурс). */
+/** Активных summary-заявок пользователя: у них свой предел, кредиты LLM ограничены. */
 export function countActiveSummaryJobs(db: Database, userId: number): number {
   return (
     db.query("SELECT COUNT(*) AS c FROM jobs WHERE user_id = ? AND kind = 'summary' AND status IN ('queued', 'running')").get(userId) as { c: number }
@@ -108,9 +100,9 @@ export function countActiveSummaryJobs(db: Database, userId: number): number {
 }
 
 /**
- * Новых юзерских СКАН-заявок за скользящий час, включая отказанные
- * предпроверки (дубли строк не создают — не считаются). В5.1 (Прод-С1):
- * summary-постановки не съедают часовой лимит сканов.
+ * Новых скан-заявок пользователя за скользящий час, включая отказы
+ * предпроверки (дубли строк не создают и не считаются). AI-заявки часовой
+ * лимит сканов не расходуют.
  */
 export function countRecentUserJobs(db: Database, userId: number, now = new Date()): number {
   const since = new Date(now.getTime() - 3600_000).toISOString();
@@ -122,9 +114,8 @@ export function countRecentUserJobs(db: Database, userId: number, now = new Date
 }
 
 /**
- * Постановка скана в очередь (jobs без UNIQUE с v1.4). Заявка юзера (К4):
- * при активной queued/running заявке того же (user, repo) новая не
- * создаётся — возвращается id существующей.
+ * Постановка скана в очередь. Если у того же (пользователь, репо) уже есть
+ * активная заявка, новая не создается — возвращается id существующей.
  */
 export function enqueueScan(
   db: Database,
@@ -141,7 +132,7 @@ export function enqueueScan(
   return Number(r.lastInsertRowid);
 }
 
-/** Итог постановки summary-заявки (В5; В5.1 добавляет cached и too_many). */
+/** Итог постановки summary-заявки. */
 export type SummaryEnqueue =
   | { kind: "ok"; jobId: number }
   | { kind: "active"; jobId: number }
@@ -150,20 +141,18 @@ export type SummaryEnqueue =
   | { kind: "cooldown"; until: string }
   | { kind: "quota"; refusal: QuotaRefusal };
 
-/** В5.1 (Security-З3): дефолт пер-юзер капа активных summary-заявок (симметрично userActiveMax). */
+/** Предел активных summary-заявок одного пользователя по умолчанию. */
 export const DEFAULT_SUMMARY_ACTIVE_MAX = 2;
 
 /**
- * Постановка AI-генерации (clone-job, спека §3.4): jobs.kind='summary',
- * полоса user (кнопка — юзерское действие). Гард:
- *  - живая summary-заявка этого репо → active (дедуп по репо, не по юзеру —
- *    генерация одна на скан);
- *  - В5.1 (Ищейка-С1, кэш по скану): у последнего завершённого скана уже
- *    есть ai_notes → cached (вторая генерация того же скана не запускается —
- *    кнопка поверх авто-генерации дублировала девятку строк и сжигала кредиты);
- *  - В5.1 (Security-З3): активных summary-заявок юзера ≥ activeMax → too_many;
- *  - кулдаун per-repo Config.queue.summaryCooldownMs от последней
- *    ПОСТАВЛЕННОЙ summary-заявки (включая failed — кредиты дороже повтора).
+ * Постановка AI-обзора: jobs.kind='summary' в полосе user. Порядок проверок:
+ *  - живая summary-заявка этого репо → active (дедуп по репо, а не по
+ *    пользователю: обзор один на скан);
+ *  - у последнего завершенного скана уже есть ai_notes → cached (второй раз
+ *    тот же скан не генерируется — это лишний расход кредитов);
+ *  - активных summary-заявок пользователя ≥ activeMax → too_many;
+ *  - кулдаун на репо (Config.queue.summaryCooldownMs) от последней поставленной
+ *    summary-заявки, включая failed: кредиты дороже повтора.
  */
 export function enqueueSummary(
   db: Database,
@@ -174,11 +163,11 @@ export function enqueueSummary(
     activeMax?: number;
     now?: Date;
     skipCached?: boolean;
-    /** В5.2 (Б2): аудитория текста; дефолт full */
+    /** аудитория текста; по умолчанию full */
     audience?: AiAudience;
-    /** В5.2 (Б4): отказ по лимитам — проверяется последним, перед вставкой (кэш и дедуп бесплатны) */
+    /** отказ по лимитам — проверяется последним, перед вставкой (кэш и дедуп лимит не тратят) */
     quota?: () => QuotaRefusal | null;
-    /** В5.2 (Б4): заявка ставится с паролем — общий лимит ее не считает */
+    /** заявка ставится с паролем — общий лимит ее не считает */
     unlocked?: boolean;
   },
 ): SummaryEnqueue {
@@ -188,11 +177,11 @@ export function enqueueSummary(
     .get(repoId, audience) as { id: number } | null;
   if (active !== null) return { kind: "active", jobId: active.id };
   const scanId = lastFinishedScan(db, repoId);
-  // 23.09 (Алексей): кэш снимается ТЕМ же флагом, что и кулдаун, — дебаг
-  // (QUEUE_SUMMARY_COOLDOWN_MS=1) означает «генерацию гоняем постоянно»,
-  // кэш по скану в этом режиме только мешает итерации по хартиям
+  // кэш выключается тем же флагом, что и кулдаун: QUEUE_SUMMARY_COOLDOWN_MS=1 —
+  // отладочный режим «генерировать каждый раз», кэш по скану там только мешает
+  // итерациям над промптами
   const cooldownMs = opts.cooldownMs ?? 60 * 60_000;
-  // В5.2 (Б1-Б2): кэш — заметки обзора ЭТОЙ аудитории (проверка на накрутку — не обзор)
+  // кэш — заметки обзора этой же аудитории; заметки проверки на накрутку не в счет
   if (
     opts.skipCached !== true &&
     cooldownMs > 1 &&
@@ -220,7 +209,7 @@ export function enqueueSummary(
   return { kind: "ok", jobId: Number(r.lastInsertRowid) };
 }
 
-/** Итог постановки проверки на накрутку (В5.2, Б3). */
+/** Итог постановки проверки на накрутку. */
 export type CheckEnqueue =
   | { kind: "ok"; jobId: number }
   | { kind: "active"; jobId: number }
@@ -258,7 +247,7 @@ export function enqueueCheck(
   return { kind: "ok", jobId: Number(r.lastInsertRowid) };
 }
 
-/** Последний ЗАВЕРШЁННЫЙ скан репо, пригодный для генерации (спека §3.4). */
+/** Последний завершенный скан репо, пригодный для генерации. */
 export function lastFinishedScan(db: Database, repoId: number): number | null {
   const row = db
     .query("SELECT id FROM scans WHERE repo_id = ? AND status IN ('ok', 'partial') ORDER BY id DESC LIMIT 1")
@@ -269,20 +258,20 @@ export function lastFinishedScan(db: Database, repoId: number): number | null {
 export interface ClaimOptions {
   /** предел попыток (Config.queue.maxAttempts): достигнут → failed, не заявляется */
   maxAttempts?: number;
-  /** ПОРТ S2: какую очередь обслуживает этот claim — user | rating */
+  /** какую полосу обслуживает этот claim — user | rating */
   queue?: "user" | "rating";
-  /** В5.2: только заявки этого рода (у каждого рода в каждой полосе свой цикл) */
+  /** только заявки этого рода (у каждого рода в каждой полосе свой цикл) */
   kind?: JobKind;
   /**
-   * В5.2 (очередь, решение 25.09; аудит О4): заявка автора, у которого уже идет заявка того же
-   * рода с живым лизом, — в конец очереди: слот сначала другому человеку, но не простаивает.
-   * Смысл имеет только в полосе `user` (у плановых заявок автора нет).
+   * Заявка автора, у которого уже идет заявка того же рода с живым лизом, уходит в конец
+   * очереди: слот сначала другому человеку, но не простаивает. Имеет смысл только в полосе
+   * `user` — у плановых заявок автора нет.
    */
   perUserExclusive?: boolean;
   /**
-   * В5.2 (аудит очереди О2): слот только для легких репо — заявку на репо, у которого какой-то
-   * скан шел дольше `heavyMs`, не берет. Тяжелые идут в первом слоте рода, остальные слоты
-   * держат поток легких: два тяжелых репо двух людей не занимают все слоты.
+   * Слот только для легких репо: не берет репо, у которого какой-то скан шел дольше `heavyMs`.
+   * Тяжелые идут в первом слоте рода, остальные держат поток легких — два тяжелых репо
+   * двух людей не займут все слоты.
    */
   lightOnly?: boolean;
   /** порог «тяжелого» репо, мс (Config.queue.heavyScanMs) */
@@ -294,28 +283,21 @@ export const JOB_KINDS = ["scan", "summary", "check"] as const;
 export type JobKind = (typeof JOB_KINDS)[number];
 
 /**
- * Заявить одну job: атомарный UPDATE … WHERE (lease_until IS NULL OR
- * lease_until < now) — NULL-lease обязан матчиться (контракт плана);
- * истёкший лиз running-строки тоже матчится (упавший воркер).
- * К4: attempts +1 при claim; исчерпавшие попытки → failed с причиной в
- * `jobs.error` (П8).
- * claim обслуживает ОДНУ полосу (`opts.queue`), полоса выводится из
- * `jobs.trigger_kind` — единственного признака (П8). Чередования 1:1 больше
- * НЕТ: его убрал порт S2, изоляция интерактива от ночной волны заменила
- * честность перемеживания, а справедливость МЕЖДУ полосами живёт в
- * `claimAny` (round-robin, П1).
- * В4.1-fix (Ф1.7): внутри полосы `user` — круговой порядок между юзерами:
- * сперва юзеры без единой заявленной job, затем по давности их последней
- * заявки (MAX claimed_at ASC), затем id; в полосе `rating` этот подзапрос не
- * исполняется вовсе (П7). Ф1.12: job без строки repos → failed (попытки не
- * сжигаются по истечении лиза), берётся следующая.
+ * Заявить одну job атомарным UPDATE … WHERE (lease_until IS NULL OR lease_until < now):
+ * матчится и NULL-лиз, и истекший лиз running-строки (упавший воркер).
+ * attempts растет при каждом claim; исчерпавшие попытки → failed с причиной в `jobs.error`.
+ * claim обслуживает одну полосу (`opts.queue`), полоса определяется только по
+ * `jobs.trigger_kind`. Справедливость между полосами — в `claimAny`.
+ * Внутри полосы `user` — круговой порядок между пользователями: сначала те, у кого
+ * еще не было заявленных job, затем по давности последней заявки, затем по id.
+ * Job без строки repos → failed (чтобы не жечь попытки на истечении лиза), берется следующая.
  */
 export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000, opts: ClaimOptions = {}): ClaimedJob | null {
   const maxAttempts = opts.maxAttempts ?? 3;
   const nowIso = now.toISOString();
   const leaseIso = new Date(now.getTime() + leaseMs).toISOString();
-  // П8: предел попыток идёт через finishJob (массовый UPDATE шёл мимо и не
-  // писал причину) — строк здесь единицы, цена выборки несущественна
+  // исчерпавшие попытки закрываются через finishJob, чтобы записать причину;
+  // таких строк единицы, лишняя выборка ничего не стоит
   const exhausted = db
     .query(
       `SELECT id, claimed_at FROM jobs
@@ -323,12 +305,8 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
     )
     .all(maxAttempts, nowIso) as { id: number; claimed_at: string | null }[];
   for (const row of exhausted) finishJob(db, row.id, row.claimed_at, "failed", JOB_ERRORS.attempts);
-  // ПОРТ hq-parallel (S2): очереди РАЗДЕЛЕНЫ (решение Алексея 17.09 —
-  // «всё лучшее от нас, сверху их капы»): claim обслуживает одну очередь
-  // 'user' | 'rating'; чередование удалено — изоляция интерактива от ночной
-  // волны заменяет честность перемеживания, справедливость между полосами
-  // даёт round-robin в claimAny (П1). Внутри user-очереди сохранён их
-  // круговой порядок между юзерами (Ф1.7); attempts (K4) неприкосновенны.
+  // полосы 'user' и 'rating' разделены, чтобы ночная волна не задерживала
+  // интерактивные заявки
   const queue = opts.queue ?? "user";
   const kindOnly = opts.kind ?? null;
   const exclusive = opts.perUserExclusive === true ? 1 : 0;
@@ -391,13 +369,11 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
        )
        RETURNING id, repo_id, user_id, trigger_kind, kind, claimed_at, attempts, audience`,
   );
-  // В4.8.5 (К8.5.2b, С8-9): перехват заявки после истекшего лиза закрывает
-  // её прежний `running`-скан того же (репо, автор) В ТОЙ ЖЕ транзакции, что
-  // и claim. Живого скана под этим ключом быть не может: у живого скана есть
-  // живая заявка с непросроченным лизом, а активная заявка на (юзер, репо) и
-  // живая периодическая на репо — по одной (дедуп постановки и гард обхода).
-  // Прежде сирота жила до свипа, а новый лиз её ещё и прикрывал от свипа
-  // (уточнение приемки 6)
+  // Перехват заявки после истекшего лиза закрывает ее прежний `running`-скан
+  // того же (репо, автор) в той же транзакции, что и claim. Живого скана под
+  // этим ключом быть не может: у него была бы живая заявка с непросроченным
+  // лизом, а активная заявка на (пользователь, репо) и периодическая на репо —
+  // по одной. Иначе сирота жила бы до уборки, а новый лиз еще и прятал бы ее от уборки
   const closeStale = db.query(
     `UPDATE scans SET status = 'bad', public_status = 'bad', finished_at = ?, status_detail = 'orphaned'
      WHERE repo_id = ? AND user_id IS ? AND status = 'running'`,
@@ -413,11 +389,8 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
       attempts: number;
       audience: string;
     } | null;
-    // В5.1 (Ищейка-З4б): перехват СКАН-заявки закрывает её прежний running-скан.
-    // При claim summary-заявки живой running-скан того же (репо, автор) —
-    // чужой законный скан (например, юзерский анализ другой реплики): его
-    // нельзя помечать orphaned — у скана своя живая заявка со своим лизом.
-    // В5.2 (Б3): только СКАН-заявка — AI-заявки (summary, check) сканов не ведут
+    // только для скан-заявки: AI-заявки сканов не ведут, и running-скан того же
+    // (репо, автор) при их claim — чужой законный скан со своей живой заявкой
     if (row && row.kind === "scan") {
       const closed = closeStale.run(nowIso, row.repo_id, row.user_id);
       if (closed.changes > 0) console.log(`[claim] job ${row.id}: stale running scans closed as orphaned: ${closed.changes}`);
@@ -432,7 +405,7 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
       | { org_slug: string; repo_slug: string }
       | null;
     if (!repo) {
-      // П8: тоже через finishJob — иначе панель заданий показывает failed без причины
+      // через finishJob — иначе панель заданий покажет failed без причины
       finishJob(db, claimed.id, claimed.claimed_at, "failed", JOB_ERRORS.gone);
       continue;
     }
@@ -451,28 +424,22 @@ export function claimNext(db: Database, now = new Date(), leaseMs = 60 * 60_000,
   return null;
 }
 
-// В4.2-port-fix (П1, К1 CRITICAL): курсор круговой очереди между ПОЛОСАМИ.
-// Порты убрали чередование 1:1 и оставили строгий порядок полос, поэтому в
-// дефолтной роли `all` полоса `rating` голодала навсегда, пока в полосе
-// `user` была хоть одна заявка (периодика, эвикция и рейтинг вставали, а
-// /api/health оставался зелёным). Решение владельца (1) 17.09: round-robin
-// в claimAny — обход начинается с разной полосы на каждом вызове.
+// Курсор round-robin между полосами. При строгом порядке полос в роли `all`
+// полоса `rating` голодала бы, пока в `user` есть хоть одна заявка, — периодика
+// и эвикция вставали бы, а /api/health оставался зеленым.
 let rrCursor = 0;
 
-/** Шов тестов (К-П П1): курсор модульный, поэтому герметичность — сбросом. */
+/** Для тестов: курсор модульный, изоляция между тестами — сбросом. */
 export function __resetRoundRobin(): void {
   rrCursor = 0;
 }
 
 /**
- * ПОРТ hq-parallel (S2/ищейка-3, фантомный claim): последовательный claim
- * по порядку очередей — следующая только если предыдущая пуста (map() клеймил
- * обе разом и вторая джоба повисала running без исполнителя на весь лиз).
- * В4.2-port-fix (П1): при нескольких полосах порядок обхода — `order`,
- * повёрнутый на курсор, а курсор растёт на КАЖДОМ вызове (иначе пустая
- * первая полоса залипает и прогресс курсора теряется). Изоляция не
- * меняется: у ролей `web` (`["user"]`) и `rating` (`["rating"]`) поворот —
- * тождество.
+ * Последовательный claim по полосам: следующая — только если предыдущая пуста.
+ * Заявлять из всех сразу нельзя: вторая заявка повисла бы running без исполнителя
+ * на весь лиз. Порядок — `order`, повернутый на курсор; курсор растет на каждом
+ * вызове, иначе пустая первая полоса залипает. Для ролей с одной полосой поворот
+ * ничего не меняет.
  */
 export function claimAny(db: Database, order: Array<"user" | "rating">, now = new Date(), leaseMs = 60 * 60_000, opts: ClaimOptions = {}): ClaimedJob | null {
   if (order.length === 0) return null;
@@ -486,7 +453,7 @@ export function claimAny(db: Database, order: Array<"user" | "rating">, now = ne
 }
 
 /**
- * К8.5.2b / К8.5.12: запись с повтором SQLITE_BUSY — до `attempts` попыток с
+ * Запись с повтором при SQLITE_BUSY — до `attempts` попыток с
  * асинхронным бэкоффом (цикл событий не блокируется сверх busy_timeout
  * соединения); прочие ошибки и исчерпание попыток летят наружу.
  */
@@ -504,7 +471,7 @@ export async function withBusyRetry<T>(fn: () => T, label: string, opts: { attem
   }
 }
 
-/** Продление лиза своей заявки (К4): чужой/перезаявленный claimed_at — no-op. */
+/** Продление лиза своей заявки; если заявку уже перезаявили (другой claimed_at) — no-op. */
 export function renewLease(db: Database, jobId: number, claimedAt: string, leaseMs: number, now = new Date()): boolean {
   const r = db
     .query("UPDATE jobs SET lease_until = ? WHERE id = ? AND claimed_at = ? AND status = 'running'")
@@ -513,11 +480,8 @@ export function renewLease(db: Database, jobId: number, claimedAt: string, lease
 }
 
 /**
- * Причины падения job для `jobs.error` (В4.2-port-fix, П8, LOW-1). Колонку
- * принесли порты, `myJobs` её читает, UI рисует ДОСЛОВНО пользователю
- * (`MePage.tsx`) — отсюда закрытый список RU-текстов без секретов; коммиты
- * при этом EN. Ни одного `UPDATE`/`INSERT` в колонку до этой вехи не было,
- * то есть заявленная портом фича была мертва.
+ * Причины падения job для `jobs.error`. UI показывает их пользователю дословно
+ * (`MePage.tsx`), поэтому это закрытый список русских текстов без секретов.
  */
 export const JOB_ERROR_MAX = 500;
 export const JOB_ERRORS = {
@@ -525,9 +489,9 @@ export const JOB_ERRORS = {
   noPat: "нет действующего токена",
   attempts: "превышено число попыток",
   internal: "внутренняя ошибка",
-  /** К8.5.12 (С10-1): скан собрал факты, но оценку посчитать не удалось — скан закрыт `bad` (score_failed) */
+  /** скан собрал факты, но оценку посчитать не удалось — скан закрыт `bad` (score_failed) */
   scoreFailed: "не удалось посчитать оценку",
-  /** `bad`-скан: какие каналы не собрались (ScanResult.channels); В4.8.5 (К8.5.4, С4-12) — словами, не кодами каналов */
+  /** `bad`-скан: какие каналы не собрались — словами, а не кодами каналов */
   channels: (channels: string[]): string => `сбор данных не удался: ${channels.map((c) => CHANNEL_NAMES[c] ?? c).join(", ")}`.slice(0, JOB_ERROR_MAX),
 } as const;
 
@@ -535,25 +499,21 @@ export const JOB_ERRORS = {
 const CHANNEL_NAMES: Record<string, string> = { git: "скачивание репозитория", rest: "данные SourceCraft", appsec: "Безопасность" };
 
 /**
- * Каналы `bad`-скана, которые не собрались, — для текста причины (П8).
- *
- * М3 (круг 2): собравшимся считается любой `ok*`, а не только точное «ok».
- * `runScan` помечает деградационный клон (shallow-ярус §5.7) как
- * `ok(degraded)` — данные есть, история укорочена; строгое сравнение читало
- * его как отказ, и пользователь получал «сбор данных не удался: git» про
- * канал, который собрался.
+ * Каналы `bad`-скана, которые не собрались, — для текста причины.
+ * Собравшимся считается любой `ok*`: деградированный shallow-клон помечен
+ * `ok(degraded)` — данные есть, только история укорочена.
  */
 export function failedChannelsOf(channels: { git: string; rest: string; appsec: string }): string[] {
   return (["git", "rest", "appsec"] as const).filter((k) => !channels[k].startsWith("ok") && channels[k] !== "skipped");
 }
 
 /**
- * Завершение job (К4): только своей заявки — WHERE id AND claimed_at;
- * воркер с истёкшим лизом, чью job перезаявили, чужой прогон не закрывает.
- * `claimed_at IS ?` (а не `=`): через finishJob идёт и ветка предела попыток,
- * где у незаявленной строки `claimed_at` NULL (П8).
- * `error` — причина падения из `JOB_ERRORS`; не передана → колонка гасится,
- * чтобы успешный перезапуск не показывал старую причину.
+ * Завершение job — только своей заявки (WHERE id AND claimed_at): воркер с
+ * истекшим лизом, чью job перезаявили, чужой прогон не закроет.
+ * `claimed_at IS ?`, а не `=`: сюда же идет ветка предела попыток, где у
+ * незаявленной строки `claimed_at` NULL.
+ * `error` — причина из `JOB_ERRORS`; без нее колонка очищается, чтобы успешный
+ * перезапуск не показывал старую причину.
  */
 export function finishJob(db: Database, jobId: number, claimedAt: string | null, status: "done" | "failed", error?: string): boolean {
   const r = db
@@ -562,14 +522,14 @@ export function finishJob(db: Database, jobId: number, claimedAt: string | null,
   return r.changes > 0;
 }
 
-// ---------- эвикция (Q&A №16) ----------
+// ---------- эвикция ----------
 
-/** repo-уровневый сигнал (repo-GET 404/403, исчезновение из каталога). */
+/** Убрать репо из рейтинга по сигналу уровня репозитория (404/403 на GET, исчезновение из каталога). */
 export function evictRepo(db: Database, repoId: number, reason: string): void {
   db.query("UPDATE repos SET rating_active = 0, evict_reason = ? WHERE id = ?").run(reason, repoId);
 }
 
-/** Возврат флагом (закон 6: не удаляем) — репо снова в рейтинге. */
+/** Вернуть репо в рейтинг: эвикция — флаг, строка не удаляется. */
 export function returnRepo(db: Database, repoId: number): void {
   db.query("UPDATE repos SET rating_active = 1, evict_reason = NULL WHERE id = ?").run(repoId);
 }
@@ -579,26 +539,22 @@ export function returnRepo(db: Database, repoId: number): void {
 export interface NightlyEnqueued {
   slug: string;
   /**
-   * retry-ineligible — последний завершённый периодический скан непригоден для рейтинга (С3, круг 2);
-   * recollect — последний пригодный скан собран сборщиком старше COLLECTOR_VERSION (В5.3-М, Н1)
+   * retry-ineligible — последний завершенный периодический скан непригоден для рейтинга;
+   * recollect — последний пригодный скан собран сборщиком старше COLLECTOR_VERSION
    */
   reason: "new" | "changed" | "forced" | "retry-failed" | "retry-ineligible" | "recollect";
 }
 
 /**
- * В5.3-М (Н1): порция доочереди «собрано старым сборщиком» за одну ночную волну (дефолт).
- * Круг 2 (К8, решение В2 владельца 24.09): 5000. Нагрузка — по данным БД, а не
- * по старой оценке «~700 сканов в сутки»: 19-22.09 стенд делал 5,4-7,6 тыс.
- * сканов в сутки (6 388 / 6 685 / 7 649 / 5 363), так что 5000 за ночь —
- * в пределах наблюдаемой пропускной способности; ~28 тыс. кандидатов уходят
- * примерно за 6 ночей.
+ * Сколько репо, собранных старым сборщиком, ставить на пересбор за одну ночную волну.
+ * Стенд по данным БД делает 5-7 тыс. сканов в сутки, так что 5000 за ночь укладываются
+ * в пропускную способность, а ~28 тыс. кандидатов уходят примерно за 6 ночей.
  */
 export const RECOLLECT_PER_WAVE_DEFAULT = 5000;
 
 /**
- * `SCHEDULER_RECOLLECT_PER_WAVE` — порция пересборки фактов за волну: единственный
- * рычаг нагрузки на живой API. Читается здесь, а не в `config.ts` (зона В5.2);
- * мусор и отрицательное — дефолт, 0 — доочередь выключена.
+ * `SCHEDULER_RECOLLECT_PER_WAVE` — порция пересборки фактов за волну, рычаг нагрузки
+ * на живой API. Некорректное или отрицательное значение — дефолт, 0 — пересбор выключен.
  */
 export function recollectPerWave(env: Record<string, string | undefined> = process.env): number {
   const raw = env["SCHEDULER_RECOLLECT_PER_WAVE"];
@@ -616,9 +572,9 @@ export interface NightlyResult {
   returned: string[];
   /** каталог дочитан до конца? если нет — эвикция НЕ выполнялась (неполный каталог не доказывает исчезновение) */
   catalogComplete: boolean;
-  /** какие фазы реально исполнились на этом snapshot (Ф2.5) */
+  /** какие фазы реально исполнились на этом обходе */
   phases: CatalogPhases;
-  /** В4.4 (кластер D): обход поднял catalog_suspicious_at (эвикция приостановлена) */
+  /** обход поднял catalog_suspicious_at (эвикция приостановлена) */
   suspicious: boolean;
   error?: string;
 }
@@ -627,28 +583,27 @@ export interface NightlyOptions {
   maxPages?: number;
   fullRescan?: boolean;
   now?: Date;
-  /** какие фазы исполняются на этом snapshot (Ф2.5) */
+  /** какие фазы исполняются на этом обходе */
   phases?: CatalogPhases;
-  /** В5.3-М (Н1): порция доочереди «собрано старым сборщиком»; по умолчанию — recollectPerWave() */
+  /** порция пересбора «собрано старым сборщиком»; по умолчанию — recollectPerWave() */
   recollectPerWave?: number;
 }
 
 /**
- * Ф2.5: две фазы поверх ОДНОГО перечисления каталога.
- * `reconcile` — сверка состава (час): новые репо, возврат вернувшихся,
- * эвикция исчезнувших. `nightly` — волна пересканов (сутки): changed,
- * retry-failed, retry-ineligible, форс. Один обход обслуживает обе — второго
- * клиента и второго бюджета не существует.
+ * Две фазы поверх одного перечисления каталога.
+ * `reconcile` — сверка состава (раз в час): новые репо, возврат вернувшихся,
+ * эвикция исчезнувших. `nightly` — волна пересканов (раз в сутки): changed,
+ * retry-failed, retry-ineligible, форс. Один обход, один клиент, один бюджет.
  */
 export interface CatalogPhases {
   reconcile: boolean;
   nightly: boolean;
 }
 
-/** Причина эвикции сверкой (К-Ф2.5, дословно). */
+/** Причина эвикции при сверке каталога. */
 export const EVICT_NOT_IN_CATALOG = "not in public catalog";
 
-/** Строка repos для сверки каталога (К-Р4: чтение одним запросом в память). */
+/** Строка repos для сверки каталога (читаются одним запросом в память). */
 interface CatalogRepoRow {
   id: number;
   org_slug: string;
@@ -663,13 +618,11 @@ interface CatalogRepoRow {
 }
 
 /**
- * К-Р4 (круг 2): применить мету каталога к repos ТОЛЬКО при расхождении
- * (или новой строке); неизменившаяся строка НЕ перезаписывается. Семантика
- * сравнения — зеркально COALESCE-ветке upsertRepo: null из каталога ничего
- * не затирает, расхождение — только непустое новое значение; видимость —
- * только явным полем (Ф2.5); `last_activity_at` обход не пишет (К-Ф1.1).
- * Трогает ТОЛЬКО путь сверки каталога — остальные зовущие upsertRepo
- * (сканы, постановка юзером) сохраняют прежнее поведение.
+ * Применить мету каталога к repos только при расхождении или для новой строки:
+ * неизменившаяся строка не перезаписывается (иначе каждая часовая сверка —
+ * десятки тысяч лишних UPDATE). Сравнение зеркалит COALESCE в upsertRepo: null
+ * из каталога ничего не затирает. Видимость — только из явного поля;
+ * `last_activity_at` обход не пишет.
  */
 function reconcileCatalogRepo(db: Database, entry: CatalogEntry, existing: CatalogRepoRow | null): number {
   if (existing !== null) {
@@ -687,11 +640,10 @@ function reconcileCatalogRepo(db: Database, entry: CatalogEntry, existing: Catal
     title: entry.name,
     language: entry.language,
     likes: entry.likes,
-    // Ф2.12 (LOW-2, третья часть) + К-Ф1.1: `last_activity_at` — ВОДОРАЗДЕЛ
-    // «до какой даты репо просканирован», и двигать его вправе только
-    // пригодный успешный скан (`runScan`, после скор-хука)
+    // `last_activity_at` — отметка «до какой даты репо просканирован»; двигать ее
+    // вправе только пригодный успешный скан (`runScan`, после скор-хука)
     lastActivityAt: undefined,
-    // Ф2.5: видимость — ТОЛЬКО из явного поля платформы
+    // видимость — только из явного поля платформы
     visibility: entry.visibility ?? undefined,
     logoUrl: entry.logo_url,
     languageColor: entry.language_color,
@@ -699,21 +651,14 @@ function reconcileCatalogRepo(db: Database, entry: CatalogEntry, existing: Catal
 }
 
 /**
- * Полный обход каталога: дифф last_updated → очередь изменившихся,
- * постановка новых, эвикция исчезнувших (только public-строки нашей
- * таблицы; приватные own-репо в публичном каталоге и не ждутся).
- * Второй прогон при неизменном каталоге не ставит в очередь ничего —
- * приёмочный инвариант каталога.
- * В4.1-fix круг 2 (С3, LOW-8): retry-failed — только по последней
- * ПЕРИОДИЧЕСКОЙ job (юзерская не навязывает и не маскирует перескан);
- * последний завершённый периодический скан непригоден → перескан
- * (retry-ineligible), не чаще раза за обход.
- * В4.2-port-fix (П5, С2 r2 = Ф2.12, первая половина): у репо с ЖИВОЙ
- * периодической job (queued/running) новая не ставится вообще. Без гарда
- * ветка retry-ineligible ставила job КАЖДЫЙ обход — на масштабе каталога
- * +1044 дубля за обход (пропускная способность по БД 19-22.09 — 5,4-7,6 тыс.
- * сканов в сутки; прежняя оценка «~700» была неверной, В5.3-М круг 2), и
- * докстринг выше был неправдой.
+ * Полный обход каталога: дифф last_updated → очередь изменившихся, постановка
+ * новых, эвикция исчезнувших (только public-строки; приватных репо в публичном
+ * каталоге и не ждем). Повторный прогон по неизменному каталогу ничего не ставит.
+ * retry-failed смотрит только на последнюю периодическую job — пользовательская
+ * перескан не навязывает и не маскирует. Непригодный последний периодический
+ * скан → перескан (retry-ineligible), не чаще раза за обход.
+ * У репо с живой периодической job (queued/running) новая не ставится вообще,
+ * иначе retry-ineligible плодил бы дубли на каждом обходе.
  */
 export async function nightlyCatalog(db: Database, client: ScClient, opts: NightlyOptions = {}): Promise<NightlyResult> {
   const fullRescan = opts.fullRescan ?? false;
@@ -737,29 +682,23 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
 
   const enqueued: NightlyEnqueued[] = [];
   const enqueuedRepoIds = new Set<number>();
-  // В4.4 (кластер F): постановка волны — ПО ЛАЙКАМ (убывание): витринные
-  // репо получают оценку первыми (5,4-7,6 тыс. сканов/сутки по БД 19-22.09
-  // против ~28 тыс. каталога —
-  // порядок решает, что увидит демо). Спека GET /repos sort_by=likes НЕ
-  // поддерживает (enum created_at|rating) — сортировка клиентская по
-  // полям уже собранного перечисления; дифф last_updated не меняется.
-  // Кандидаты собираются с прежними гард'ами, ставятся после обхода батчами.
+  // Волна ставится по убыванию лайков: витринные репо получают оценку первыми
+  // (за сутки успевает лишь часть из ~28 тыс. репо каталога). GET /repos не
+  // умеет sort_by=likes (только created_at|rating), поэтому сортировка на нашей
+  // стороне. Кандидаты копятся за обход и ставятся пачками в конце.
   const waveCandidates: { repoId: number; slug: string; reason: NightlyEnqueued["reason"]; likes: number | null }[] = [];
   const recollectCandidates: typeof waveCandidates = [];
   const recollectIds = new Set<number>();
-  // П5: признак полосы сразу через trigger_kind (единый признак — П8);
-  // строки refused несут trigger_kind='user' и в полосу периодики не попадают
+  // полоса определяется по trigger_kind; строки refused несут trigger_kind='user'
+  // и в полосу периодики не попадают
   const hasLivePeriodicJob = (repoId: number): boolean =>
-    // В5.2 (Б5): только СКАН-заявки — авто-заявка AI топа (полоса рейтинга) скан не заслоняет
+    // только скан-заявки: AI-заявка топа из полосы рейтинга скан не заслоняет
     db.query("SELECT 1 FROM jobs WHERE repo_id = ? AND trigger_kind != 'user' AND kind = 'scan' AND status IN ('queued', 'running') LIMIT 1").get(repoId) !== null;
   const seenRepoIds = new Set<number>();
   const seenSlugs = new Set<string>();
-  // К-Р4 (круг 2): состояние repos читается ОДНИМ запросом в память — не
-  // запросом на каждую запись каталога; запись — только при расхождении
-  // полей или новой строке. Прежний путь делал upsertRepo на КАЖДУЮ запись:
-  // 27 446 безусловных UPDATE за проход часовой сверки (замер до правки:
-  // 27 446 UPDATE / 869 мс на этой машине; 28–40 с синхронной БД у
-  // аудит-пары) × 24 раза в сутки в одном процессе с Bun.serve.
+  // repos читается одним запросом в память, а пишется только при расхождении:
+  // безусловный upsert на каждую запись каталога — ~27 тыс. UPDATE за каждую
+  // часовую сверку, и все это синхронно в одном процессе с Bun.serve.
   const repoRows = db
     .query("SELECT id, org_slug, repo_slug, title, language, likes, visibility, logo_url, language_color, last_activity_at FROM repos")
     .all() as CatalogRepoRow[];
@@ -769,15 +708,14 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
     const slug = `${entry.org}/${entry.repo}`;
     seenSlugs.add(slug);
     const existing = reposBySlug.get(slug) ?? null;
-    // К-Р4: мета каталога — сверкой с записью только при расхождении
     const repoId = reconcileCatalogRepo(db, entry, existing);
     seenRepoIds.add(repoId);
     // не чаще раза за обход (дубли записей каталога)
     if (enqueuedRepoIds.has(repoId)) continue;
-    // П5: живая периодическая job уже отсканирует репо — второй не нужно
+    // живая периодическая job уже отсканирует репо — вторая не нужна
     if (hasLivePeriodicJob(repoId)) continue;
     if (!existing) {
-      // новые репо — фаза сверки (Ф2.5): состав каталога, не волна пересканов
+      // новые репо — фаза сверки состава, а не волна пересканов
       if (!phases.reconcile) continue;
       enqueuedRepoIds.add(repoId);
       waveCandidates.push({ repoId, slug, reason: "new", likes: entry.likes });
@@ -792,21 +730,17 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
       continue;
     }
     const changed = entry.last_updated !== existing.last_activity_at;
-    // П8 (LOW-5): признак полосы один — trigger_kind. Раньше здесь стоял
-    // второй признак (`user_id IS NULL`). Их согласованность держится НЕ на
-    // одной вставке `enqueueScan`, а на миграции: `openDb` бэкфиллит
-    // `trigger_kind = 'user'` всем строкам с `user_id` (П11, Н-2) — иначе
-    // legacy-строки, получившие колонку из DEFAULT 'periodic', читались бы
-    // как периодические. Строки refused (trigger_kind = 'user', repo_id = 0)
-    // в полосу периодики не попадают ни одним путём
+    // полоса определяется только по trigger_kind. Для старых строк это держится
+    // на миграции: `openDb` проставляет `trigger_kind = 'user'` всем строкам с
+    // `user_id`, иначе они читались бы как периодические из-за DEFAULT 'periodic'.
+    // Строки refused (trigger_kind = 'user', repo_id = 0) сюда не попадают
     const lastJob = db
-      // В5.2 (Б5): упавшая авто-заявка AI не повод пересканировать репо
+      // упавшая AI-заявка — не повод пересканировать репо
       .query("SELECT status FROM jobs WHERE repo_id = ? AND trigger_kind != 'user' AND kind = 'scan' ORDER BY id DESC LIMIT 1")
       .get(repoId) as { status: string } | null;
     const retryFailed = lastJob?.status === "failed";
-    // ВНИМАНИЕ (К-П П5): в таблице scans колонка называется `trigger` и имеет
-    // ТРИ значения (periodic|user|probe), поэтому `trigger != 'user'` здесь НЕ
-    // эквивалентно `user_id IS NULL` — предикат по scans остаётся на user_id
+    // в scans колонка `trigger` имеет три значения (periodic|user|probe), поэтому
+    // `trigger != 'user'` не равносильно `user_id IS NULL` — фильтр остается по user_id
     const lastPeriodicScan = db
       .query("SELECT rating_eligible FROM scans WHERE repo_id = ? AND user_id IS NULL AND status NOT IN ('queued', 'running') ORDER BY id DESC LIMIT 1")
       .get(repoId) as { rating_eligible: number } | null;
@@ -821,9 +755,9 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
       });
       continue;
     }
-    // В5.3-М (Н1): неизменный репо, чей последний пригодный скан собран
-    // сборщиком старше текущего (или до учета версий — NULL), — кандидат
-    // доочереди: правки сборщика иначе не дошли бы до рейтинга (D1)
+    // неизменный репо, чей последний пригодный скан собран старым сборщиком
+    // (NULL — до учета версий), ставится на пересбор: иначе правки сборщика
+    // не дошли бы до рейтинга
     const lastEligible = db
       .query("SELECT collector_version FROM scans WHERE repo_id = ? AND rating_eligible = 1 ORDER BY id DESC LIMIT 1")
       .get(repoId) as { collector_version: number | null } | null;
@@ -832,19 +766,17 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
       recollectCandidates.push({ repoId, slug, reason: "recollect", likes: entry.likes ?? existing.likes });
     }
   }
-  // Н1: порция по лайкам (убывание) — бережно к живому API
+  // пересбор ограничен порцией, по убыванию лайков — бережно к живому API
   recollectCandidates.sort((a, b) => (b.likes ?? -1) - (a.likes ?? -1));
   for (const cand of recollectCandidates.slice(0, Math.max(0, opts.recollectPerWave ?? recollectPerWave()))) {
     enqueuedRepoIds.add(cand.repoId);
     waveCandidates.push(cand);
   }
 
-  // В4.4 (кластер F): лайки по убыванию (нет лайков — в хвост), постановка —
-  // батчами по 100 в одной транзакции (синхронная фаза постановки как целое
-  // — З5 аудита — вне скоупа, В6; батч режет число автокоммитов).
-  // И-6 (круг 2): конечный сентинел вместо -Infinity — на паре null-лайков
-  // разность давала NaN; лайки неотрицательны, -1 безопасен и null-пара
-  // сравнима корректно (обе в хвост, порядок перечисления между ними)
+  // лайки по убыванию, без лайков — в хвост; постановка пачками по 100 в одной
+  // транзакции, чтобы не делать автокоммит на каждую строку.
+  // -1 вместо -Infinity: у пары null разность -Infinity дала бы NaN, а лайки
+  // неотрицательны
   waveCandidates.sort((a, b) => (b.likes ?? -1) - (a.likes ?? -1));
   const WAVE_ENQUEUE_CHUNK = 100;
   for (let i = 0; i < waveCandidates.length; i += WAVE_ENQUEUE_CHUNK) {
@@ -868,15 +800,13 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
     }
   }
 
-  // В4.4 (кластер D код-аудита): «успешно пустой» ПОЛНЫЙ обход (ok, не
-  // truncated, 0 записей) при существующих активных публичных репо — это
-  // сломавшаяся форма каталога (дрейф поля visibility и т.п.), а не «все
-  // исчезли»: один такой тик раньше гасил rating_active всему рейтингу.
-  // Эвикция не исполняется, ставится meta-флаг catalog_suspicious_at
-  // (health окрасится); снимает флаг первый обход с записями.
-  // В4.4 (кластер K/З5): гард слагов — счётчик отброшенного в health/лог.
-  // И-3/П-6/S-3 (круг 2): пишется ВСЕГДА — чистый обход сбрасывает в 0, и
-  // подпись «последний обход» в health не показывает устаревшее число
+  // «Успешно пустой» полный обход (ok, не truncated, 0 записей) при активных
+  // публичных репо — это сломавшаяся форма ответа каталога (например, дрейф поля
+  // visibility), а не «все исчезли»: иначе один такой обход выключил бы весь
+  // рейтинг. Эвикция не выполняется, ставится флаг catalog_suspicious_at (виден
+  // в health); снимает его первый обход с записями.
+  // Счетчик отброшенных записей пишется всегда: чистый обход сбрасывает его в 0,
+  // чтобы health не показывал устаревшее число
   setMetaValue(db, "catalog_skipped_bad_entries", String(catalog.skippedBadEntries));
   if (catalog.skippedBadEntries > 0) {
     console.warn(`[scheduler] catalog walk skipped ${catalog.skippedBadEntries} entries with bad slugs/form`);
@@ -911,9 +841,8 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
   }
 
   return {
-    // Ф2.5: ошибка страницы посреди обхода — это СБОЙ обхода, даже если
-    // что-то уже прочитано. Прежний код отдавал ok=true при `pages > 0`, и
-    // тик считал такой проход успешным (due-метки двигались бы зря)
+    // ошибка страницы посреди обхода — сбой всего обхода, даже если что-то уже
+    // прочитано: иначе тик сдвинул бы отметки «когда фаза выполнена» зря
     ok: catalog.ok,
     pages: catalog.pages,
     entriesSeen: catalog.entries.length,
@@ -922,7 +851,6 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
     returned,
     catalogComplete: !catalog.truncated,
     phases,
-    /** В4.4 (кластер D): этот обход поднял catalog_suspicious_at */
     suspicious,
     ...(catalog.ok ? {} : { error: catalog.error?.detail ?? "catalog failed" }),
   };
@@ -938,24 +866,19 @@ export interface WorkerDeps {
   /** швы для тестов */
   runScan?: typeof runScan;
   getPat?: typeof getPat;
-  /** шов Б0: подмена claim (тест роняет БД внутри тика) */
   claimAny?: typeof claimAny;
-  /** шов В5: подмена конвейера генерации (тесты без LLM-мока) */
   runSummary?: typeof runSummaryPipeline;
-  /** шов В5.2 (Б3): подмена проверки на накрутку */
   runFraudCheck?: typeof runFraudCheckPipeline;
 }
 
 /**
- * Исполнить заявленную job: заявка юзера → PAT автора, периодика →
- * серверный токен (новый клиент на задачу, H2). Лимиты клона — только
- * оператора (К5): scanCloneLimitsOf(Config.scan) для всех сканов.
- * repo-сигнал 'gone' (repo-GET 404/403) → эвикция ТОЛЬКО у задач без
- * автора (К3): 403 на PAT юзера говорит о правах PAT, не о репо (H1).
- * Канальные 403 cicd/runs — не эвикция (no-data access в фактах).
- * В4.1-fix (Ф1.8): заявка юзера без читаемого PAT (удалён после постановки,
- * нет APP_SECRET) → finishJob(failed) без скана; серверный токен юзерской
- * заявке не достаётся никогда.
+ * Исполнить заявленную job: заявка пользователя идет с PAT автора, периодика —
+ * с серверным токеном (новый клиент на задачу). Лимиты клона для всех сканов
+ * одни — из конфига оператора.
+ * 404/403 на GET репозитория → эвикция только у задач без автора: 403 на PAT
+ * пользователя говорит о правах PAT, а не о репо. 403 на cicd/runs — не эвикция.
+ * Заявка пользователя без читаемого PAT (удален после постановки, нет APP_SECRET)
+ * → failed без скана: серверный токен пользовательской заявке не достается никогда.
  */
 export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<ScanResult | "gone" | "no-pat"> {
   const pat =
@@ -972,8 +895,8 @@ export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<Sca
       db: deps.db,
       scClient: deps.serverClient(),
       cloneLimits: limits,
-      // Ф2.19: лимиты извлечения — из конфига процесса, а не из дефолтов
-      // модуля: иначе SCAN_EXTRACT_TIMEOUT_MS не влиял бы ни на что
+      // лимиты извлечения — из конфига процесса, а не из дефолтов модуля:
+      // иначе SCAN_EXTRACT_TIMEOUT_MS ни на что не влиял бы
       extract: deps.config.scan.extract,
       userScClient: pat
         ? makeScClient({
@@ -986,7 +909,7 @@ export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<Sca
         : undefined,
       appsecClient: (p: string) => makeAppsecClient({ token: p, baseUrl: deps.config.api.appsecBase, minIntervalMs: deps.config.scan.rest.appsecMinIntervalMs }),
       gitBase: deps.config.api.gitBase,
-      // П3: адреса REST/AppSec — во все клиенты, включая те, что runScan строит сам
+      // адреса REST/AppSec — для всех клиентов, включая те, что runScan строит сам
       restBase: deps.config.api.restBase,
       appsecBase: deps.config.api.appsecBase,
       appsecMinIntervalMs: deps.config.scan.rest.appsecMinIntervalMs,
@@ -1002,8 +925,8 @@ export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<Sca
 }
 
 /**
- * Токен клона summary-заявки (В5.2, аудит безопасности S1): публичная версия — всегда без
- * токена (только то, что открыто всем); полная — токеном автора.
+ * Токен клона summary-заявки: публичная версия — всегда без токена (только то, что
+ * открыто всем), полная — токеном автора.
  */
 export function summaryCloneToken(audience: AiAudience, pat: string | null): string | null {
   return audience === "public" ? null : pat;
@@ -1014,24 +937,21 @@ export const SUMMARY_JOB_ERRORS = {
   noPat: JOB_ERRORS.noPat,
   noScan: "нет завершённого скана для генерации",
   clone: (detail: string): string => `не удалось клонировать репозиторий: ${detail}`.slice(0, JOB_ERROR_MAX),
-  // В5.2 (Б4): тот же текст — признак «кредиты потрачены» для лимитов (ai-quota.ts)
+  // тот же текст служит признаком «кредиты потрачены» для лимитов (ai-quota.ts)
   empty: AI_REJECTED_ERRORS.overview,
-  /** В5.1 (Прод-С3): провайдер недоступен (LlmError: сеть/429/5xx/stall) — не вина валидатора */
+  /** провайдер недоступен (LlmError: сеть/429/5xx/зависание) — не вина валидатора */
   providerDown: "AI-провайдер недоступен: описание не сформировано (сеть или лимиты провайдера)",
   internal: JOB_ERRORS.internal,
 } as const;
 
 /**
- * В5.1 (Прод-С3): причина НУЛЕВОГО результата генерации — чистая функция.
- * «Провайдер недоступен» — когда все несостоявшиеся роли упали на вызове
- * модели (LlmError: сеть/429/5xx/stall, в reason — префикс «модель:»);
- * роли без фактов (честный три-state, «нет фактов...») в классификации
- * не участвуют. Иначе — «ни один блок не прошёл проверку».
+ * Причина пустого результата генерации. Решает число ответов модели: 0 ответов —
+ * провайдер недоступен (лимит не списывается); хоть один — модель отработала, но
+ * текст не прошел проверку (списывается).
  */
 export function summaryEmptyErrorOf(res: Pick<SummaryRunResult, "outcomes" | "answered">): string {
-  // В5.2 (аудит М3): решает число ответов модели — 0 ответов = провайдер недоступен (не
-  // списывается); хоть один ответ — модель отработала, текст не прошел проверку (списывается).
-  // Прежняя классификация по причинам ролей держится для швов без счетчика
+  // без счетчика ответов (тестовые швы) — по причинам ролей: «провайдер недоступен»,
+  // если все несостоявшиеся роли упали на вызове модели; роли без фактов не в счет
   if (res.answered !== undefined) return res.answered === 0 ? SUMMARY_JOB_ERRORS.providerDown : SUMMARY_JOB_ERRORS.empty;
   const failed = res.outcomes.filter((o) => !o.ok && !(o.reason ?? "").startsWith("нет фактов"));
   const modelDown = failed.length > 0 && failed.every((o) => (o.reason ?? "").startsWith("модель:"));
@@ -1039,23 +959,21 @@ export function summaryEmptyErrorOf(res: Pick<SummaryRunResult, "outcomes" | "an
 }
 
 /**
- * Исполнить summary-заявку (В5, спека §3.4): PAT автора → клон (свежий,
- * полный — история нужна git_log) → worktree → конвейер на фактах
- * ПОСЛЕДНЕГО завершённого скана → ai_notes → уборка. Возвращает null при
- * успехе или RU-причину для jobs.error. Score и очередь сканов не трогаются.
+ * Исполнить summary-заявку: клон (свежий и полный — история нужна git_log) →
+ * worktree → конвейер на фактах последнего завершенного скана → ai_notes → уборка.
+ * Возвращает null при успехе или причину для jobs.error. Оценку и очередь сканов не трогает.
  */
 export async function processSummaryJob(deps: WorkerDeps, job: ClaimedJob): Promise<string | null> {
   const pat =
     job.userId !== null && deps.config.auth.appSecret
       ? (deps.getPat ?? getPat)(deps.db, deps.config.auth.appSecret, job.userId)
       : null;
-  // В5.2 (Б3): публичный обзор публичного репо клонируется и без токена автора
+  // публичный обзор публичного репо клонируется и без токена автора
   if (job.userId !== null && !pat && job.audience !== "public") return SUMMARY_JOB_ERRORS.noPat;
   const scanId = lastFinishedScan(deps.db, job.repoId);
   if (scanId === null) return SUMMARY_JOB_ERRORS.noScan;
-  // В5.2 (Б7, разбор задержки Б1 — reports/2026-09-25-m53-ai-latency.md): заметки этой
-  // аудитории у скана уже есть — клон не нужен (прежде репозиторий скачивался, чтобы
-  // конвейер после клона ответил «кэш»); дебаг-куладаун (1 мс) кэш снимает, как в конвейере
+  // заметки этой аудитории у скана уже есть — клонировать незачем;
+  // отладочный кулдаун (1 мс) кэш выключает, как и в конвейере
   const cacheOn = (deps.config.queue.summaryCooldownMs ?? 60 * 60_000) > 1;
   if (
     cacheOn &&
@@ -1066,8 +984,8 @@ export async function processSummaryJob(deps: WorkerDeps, job: ClaimedJob): Prom
   }
   const limits = scanCloneLimitsOf(deps.config.scan);
   const [org, repo] = job.slug.split("/");
-  // В5.2 (аудит безопасности S1): публичная версия клонируется БЕЗ токена автора — репо,
-  // ставший закрытым до обхода каталога, не клонируется, и его код не попадает в публичный текст
+  // публичная версия клонируется без токена автора: репо, ставший закрытым до обхода
+  // каталога, не склонируется, и его код не попадет в публичный текст
   const cloneToken = summaryCloneToken(job.audience ?? "full", pat);
   const clone = await cloneWithDegrade(scanGitUrl(deps.config.api.gitBase, cloneToken, org!, repo!), undefined, limits);
   if (!clone.ok) return SUMMARY_JOB_ERRORS.clone(clone.detail.slice(0, 120));
@@ -1079,24 +997,21 @@ export async function processSummaryJob(deps: WorkerDeps, job: ClaimedJob): Prom
         db: deps.db,
         org: org!,
         repo: repo!,
-        // аудит очереди О1: обзор пользователя — впереди полосы рейтинга в семафоре провайдера
+        // обзор пользователя — впереди полосы рейтинга в семафоре провайдера
         callLlm: makeLlm(deps.config, undefined, { priority: job.triggerKind === "user" ? "interactive" : "background" }),
         clone: { root: worktree.root, gitDir: worktree.gitDir },
         models: { main: deps.config.llm.mainModel, side: deps.config.llm.sideModel },
-        // 23.09 (Алексей): дебаг-куладаун (1 мс) снимает и внутренний кэш
-        // пайплайна — регенерация перезаписывает заметки того же скана
+        // отладочный кулдаун (1 мс) выключает и внутренний кэш конвейера —
+        // регенерация перезаписывает заметки того же скана
         cache: (deps.config.queue.summaryCooldownMs ?? 60 * 60_000) > 1,
-        // В5.1 (Прод-С3): лог-шов подключён — итог и outcomes с причинами
-        // видны оператору в консоли процесса
+        // итог и причины по ролям видны оператору в консоли процесса
         log: (m) => console.log(m),
       },
       { scanId, audience: job.audience ?? "full" },
     );
-    // В5.1 (Ищейка-С1): кэш по скану — заметки уже были, генерации не было → задание done
+    // заметки уже были, генерации не было — задание все равно done
     if (res.cached === true) return AI_CACHED_NOTE;
     if (res.notes > 0) return null;
-    // В5.1 (Прод-С3): нулевой фейл различает «провайдер недоступен» от
-    // «ни один блок не прошёл валидацию» (классификация — ниже, чистая функция)
     return summaryEmptyErrorOf(res);
   } finally {
     if (worktree !== null) await removeWorktree(worktree.root, worktree.gitDir);
@@ -1114,7 +1029,7 @@ export const CHECK_JOB_ERRORS = {
 } as const;
 
 /**
- * Исполнить проверку на накрутку (В5.2, Б3): без клона — по фактам последнего
+ * Исполнить проверку на накрутку: без клона — по фактам последнего
  * завершенного скана (runFraudCheck). Возвращает null при успехе или причину.
  */
 export async function processCheckJob(deps: WorkerDeps, job: ClaimedJob): Promise<string | null> {
@@ -1126,7 +1041,7 @@ export async function processCheckJob(deps: WorkerDeps, job: ClaimedJob): Promis
       db: deps.db,
       org: org!,
       repo: repo!,
-      // аудит очереди О1: проверка пользователя — первой в семафоре провайдера
+      // проверка пользователя — первой в семафоре провайдера
       callLlm: makeLlm(deps.config, undefined, { priority: job.triggerKind === "user" ? "check" : "background" }),
       models: { main: deps.config.llm.mainModel, side: deps.config.llm.sideModel },
       log: (m) => console.log(m),
@@ -1136,7 +1051,7 @@ export async function processCheckJob(deps: WorkerDeps, job: ClaimedJob): Promis
   if (res.cached === true) return AI_CACHED_NOTE;
   if (res.ok) return null;
   if (res.reason === NO_RHYTHM_REASON) return CHECK_JOB_ERRORS.noRhythm;
-  // В5.2 (аудит М3): решает число ответов модели, а не текст причины последней попытки
+  // решает число ответов модели, а не текст причины последней попытки
   if (res.answered !== undefined) return res.answered === 0 ? CHECK_JOB_ERRORS.providerDown : CHECK_JOB_ERRORS.rejected;
   return (res.reason ?? "").startsWith("модель:") ? CHECK_JOB_ERRORS.providerDown : CHECK_JOB_ERRORS.rejected;
 }
@@ -1144,32 +1059,28 @@ export async function processCheckJob(deps: WorkerDeps, job: ClaimedJob): Promis
 // ---------- циклы процесса сервера ----------
 
 /**
- * В4.4 (кластер L/З1): заявки, заявленные ЭТИМ процессом (id → claimed_at).
- * SIGTERM возвращает их в queued (claimed_at NULL) и ОТКАТЫВАЕТ попытку —
- * административная остановка не считается попыткой (В4.8.5, К8.5.2a: до
- * этого комментарий обещал «attempts без изменений», а claim уже сделал +1,
- * и три рестарта во время скана давали «превышено число попыток»); registry живёт
- * в памяти процесса — чужие заявки не трогаются никогда.
- * П-5 (круг 2): реестр несёт repoId/userId — прерванный завершением скан
- * этого процесса закрывается честным квартетом (см. closeOwnRunningScans),
- * а не висит running до свипа сирот.
+ * Заявки, взятые этим процессом (id → claimed_at и ключ скана). По SIGTERM они
+ * возвращаются в queued (claimed_at NULL) с откатом попытки: остановка сервиса —
+ * не попытка, иначе три рестарта во время скана давали бы «превышено число попыток».
+ * Реестр живет в памяти процесса, поэтому чужие заявки не трогаются никогда.
+ * repoId/userId нужны, чтобы прерванный скан этого процесса закрыть сразу
+ * (closeOwnRunningScans), а не ждать уборки сирот.
  */
 const liveClaims = new Map<number, { claimedAt: string; repoId: number; userId: number | null; kind: string }>();
 
 /**
- * П-5 (круг 2 В4.4): сканы ЭТОГО процесса, прерванные штатным завершением, —
- * не сироты до свипа, а честный `bad` с причиной shutdown. Квартет как у
- * свипа сирот (`sweepOrphanScans`): status + public_status + finished_at +
- * status_detail — один status='bad' оставил бы public_status='running'
- * навсегда. ПОРЯДОК при SIGTERM: сначала закрыть сканы, ПОТОМ вернуть
- * заявки (иначе queued-заявка прикрывала бы закрываемый скан).
+ * Сканы этого процесса, прерванные штатным завершением, закрываются как `bad` с
+ * причиной shutdown. Пишутся все четыре поля, как у уборки сирот (`sweepOrphanScans`):
+ * один status='bad' оставил бы public_status='running' навсегда.
+ * Порядок при SIGTERM: сначала закрыть сканы, потом вернуть заявки — иначе
+ * queued-заявка прикрывала бы закрываемый скан.
  */
 export function closeOwnRunningScans(db: Database): number {
   const nowIso = new Date().toISOString();
   let closed = 0;
   for (const claim of liveClaims.values()) {
-    // аудит очереди О7: сканы закрываются только за СКАН-заявки — обзор или проверка
-    // скана не ведут, и живой скан того же (репо, автор) у соседней реплики не трогается
+    // только за скан-заявки: обзор и проверка сканов не ведут, а живой скан того же
+    // (репо, автор) у соседней реплики трогать нельзя
     if (claim.kind !== "scan") continue;
     try {
       const r = db
@@ -1206,27 +1117,27 @@ export function returnOwnRunningJobs(db: Database): number {
 }
 
 /**
- * Воркер-луп: одна job за раз; ошибки не останавливают цикл; лиз продлевается
- * каждые leaseMs/3 (К4). ПОРТ hq-parallel (S2): очереди user|rating с ролями
- * процесса — web = сервер + user-воркер (интерактив), rating = планировщик +
- * rating-воркер (ночная волна), all = dev-обе-в-одном (user вперёд).
- * Фоновый пересчёт истории крутит только rating-роль (web держит готовность).
+ * Итог одного тика цикла воркера. Цикл берет одну job за раз, ошибки его не
+ * останавливают, лиз продлевается каждые leaseMs/3. Роли процесса: web — сервер +
+ * воркер полосы user; rating — планировщик + воркер полосы rating (ночная волна);
+ * all — обе полосы в одном процессе. Фоновый пересчет истории крутит только роль
+ * rating, чтобы web оставался отзывчивым.
  */
 export type WorkerTickOutcome = "busy" | "idle" | "claim-failed" | "done" | "failed";
 
-/** Состояние воркер-лупа между тиками (гард «занят»): шов Б0 держит его снаружи. */
+/** Состояние цикла воркера между тиками (флаг «занят»); хранится снаружи, чтобы тесты могли его видеть. */
 export interface WorkerLoopState {
   busy: boolean;
-  /** В4.8.5 (С10-3): когда взято текущее задание (мс); нет — задания нет */
+  /** когда взято текущее задание (мс); нет — задания нет */
   currentSince?: number;
-  /** В4.4 (З2): время последнего редкого фонового батча (каденс при непустых очередях) */
+  /** время последней порции фонового пересчета при занятой очереди */
   lastBackgroundTickAt?: number;
 }
 
-/** В4.4 (З2): каденс фонового пересчёта при НЕпустых очередях — раз в 10 мин один батч. */
+/** Фоновый пересчет при непустых очередях — одна порция раз в 10 мин. */
 export const BACKGROUND_RESCORE_CADENCE_MS = 10 * 60_000;
 
-/** Один шаг фонового пересчёта: сперва недогнанный курсор прохода, затем история. */
+/** Один шаг фонового пересчета: сначала отставший курсор текущего прохода, затем история. */
 function backgroundRescoreStep(deps: WorkerDeps): void {
   try {
     const healed = needsRescore(deps.db) ? rescoreBatchByCursor(deps.db, { log: (m) => console.log(`[worker] ${m}`) }).processed : 0;
@@ -1237,13 +1148,11 @@ function backgroundRescoreStep(deps: WorkerDeps): void {
 }
 
 /**
- * Тело одного тика воркер-лупа — ОТДЕЛЬНАЯ функция (Ф2.1, остаток после
- * портов): тест вызывает её напрямую, без таймера. Броня портов сохранена
- * целиком — claim, фоновый пересчёт, `processJob`, `renewLease` в try/catch;
- * исключение наружу не выходит, цикл жив.
- * В4.4 (З2): фоновый пересчёт гоняется и при непустой очереди — редким
- * каденсом (раз в 10 мин, один батч) до busy-гарда, чтобы длинная волна
- * не морила курсоры голодом (факт аудита: cursor=0 при derived=5).
+ * Один тик цикла воркера — отдельная функция, чтобы тесты вызывали ее без таймера.
+ * claim, фоновый пересчет, исполнение и продление лиза — в try/catch: исключение
+ * наружу не выходит, цикл жив.
+ * Фоновый пересчет идет и при непустой очереди — одна порция раз в 10 мин, до
+ * проверки «занят», чтобы длинная волна сканов не оставляла курсоры пересчета стоять.
  */
 export async function workerTick(
   deps: WorkerDeps,
@@ -1259,7 +1168,7 @@ export async function workerTick(
   }
   if (state.busy) return "busy";
   const leaseMs = deps.config.scheduler.leaseMs;
-  // ПОРТ S2/ищейка-8: весь тик в броне — бросок БД не валит процесс
+  // исключение БД не должно ронять процесс
   let job: ClaimedJob | null = null;
   try {
     job = (deps.claimAny ?? claimAny)(deps.db, order, new Date(), leaseMs, {
@@ -1274,10 +1183,7 @@ export async function workerTick(
     return "claim-failed";
   }
   if (!job) {
-    // В5.5 тур 2 (Т2-А): снимка мест здесь больше нет — точка снимка одна,
-    // ночная фаза catalogTick (пустая очередь на стенде может не наступать сутками)
-    // обе наши очереди пусты — порция фонового пересчёта (LOW-7) КАЖДЫЙ тик:
-    // В4.4 — сперва недогнанный курсор актуального прохода, затем история
+    // очереди пусты — порция фонового пересчета на каждом тике
     if (opts.historyRescore) {
       backgroundRescoreStep(deps);
       state.lastBackgroundTickAt = Date.now();
@@ -1288,16 +1194,14 @@ export async function workerTick(
   state.busy = true;
   state.currentSince = Date.now();
   liveClaims.set(claimed.id, { claimedAt: claimed.claimedAt, repoId: claimed.repoId, userId: claimed.userId, kind: claimed.kind });
-  // К8.5.2b: продление каждые leaseMs/3; SQLITE_BUSY повторяется (при лизе
-  // 10 мин три пропуска подряд = перехват живого скана)
+  // продление каждые leaseMs/3 с повтором при SQLITE_BUSY: при лизе 10 мин
+  // три пропуска подряд — и живой скан перехватит другой воркер
   const heartbeat = setInterval(() => {
     void withBusyRetry(() => renewLease(deps.db, claimed.id, claimed.claimedAt, leaseMs), `job ${claimed.id} lease renew`).catch((e) =>
       console.error(`[worker] job ${claimed.id} lease renew failed: ${String((e as Error).message).slice(0, 200)}`),
     );
   }, Math.max(1, Math.floor(leaseMs / 3)));
   try {
-    // В5: род заявки определяет исполнителя — summary генерирует текст,
-    // scan собирает факты; итог в jobs.error одинаково честный
     let failure: string | null;
     if (claimed.kind === "summary") {
       failure = await processSummaryJob(deps, claimed);
@@ -1305,7 +1209,7 @@ export async function workerTick(
       failure = await processCheckJob(deps, claimed);
     } else {
       const result = await processJob(deps, claimed);
-      // П8: причина падения — в jobs.error, панель заданий показывает её дословно
+      // причина падения — в jobs.error, панель заданий показывает ее дословно
       failure =
         result === "gone"
           ? JOB_ERRORS.gone
@@ -1317,10 +1221,10 @@ export async function workerTick(
                 ? JOB_ERRORS.channels(failedChannelsOf(result.channels))
                 : null;
     }
-    // К8.5.12 (С10-2): итог задания — с повтором SQLITE_BUSY: готовый скан не
-    // оставляет задание `running` до лиза и не сжигает попытку повтором
+    // итог задания пишется с повтором при SQLITE_BUSY: иначе готовый скан оставил бы
+    // задание `running` до конца лиза, а повторный прогон сжег бы попытку
     await withBusyRetry(
-      // В5.2 (аудит М3): «текст уже был» — done с пометкой: лимит такую заявку не списывает
+      // «текст уже был» — done с пометкой: лимит такую заявку не списывает
       () => finishJob(deps.db, claimed.id, claimed.claimedAt, failure === null || failure === AI_CACHED_NOTE ? "done" : "failed", failure ?? undefined),
       `job ${claimed.id} finish`,
     );
@@ -1341,10 +1245,7 @@ export async function workerTick(
   }
 }
 
-// В5.2 (решение Екатерины 25.09): легкий цикл проверок оценки `startCheckLoop` вошел в общий
-// план циклов (`workerLoopPlan`): у проверок в каждой полосе свой цикл, как у сканов и обзоров.
-
-/** С10-3: тик считается живым, если он не `busy` или текущее задание ещё в пределах худшего бюджета скана. */
+/** Тик считается живым, если он не `busy` или текущее задание еще в пределах худшего бюджета скана. */
 export function loopTickIsAlive(outcome: WorkerTickOutcome, state: WorkerLoopState, config: Config, now = Date.now()): boolean {
   if (outcome !== "busy") return true;
   return state.currentSince !== undefined && now - state.currentSince <= worstCaseScanMs(config.scan);
@@ -1355,7 +1256,7 @@ export function startWorkerLoop(
   queues: { user?: boolean; rating?: boolean },
   pollMs = 5000,
   seams: { tick?: typeof workerTick } = {},
-  // В5.2 (очередь): цикл одного рода; метки живости пишет только цикл сканов своей полосы
+  // цикл одного рода; метки живости пишет только цикл сканов своей полосы
   only: { kind?: JobKind; perUserExclusive?: boolean; lightOnly?: boolean; historyRescore?: boolean; tickMarks?: boolean } = {},
 ): () => void {
   const order: Array<"user" | "rating"> = queues.user && queues.rating ? ["user", "rating"] : queues.user ? ["user"] : queues.rating ? ["rating"] : [];
@@ -1365,17 +1266,15 @@ export function startWorkerLoop(
   const historyRescore = only.historyRescore ?? queues.rating === true;
   const tickMarks = only.tickMarks ?? true;
   const timer = setInterval(() => {
-    // тик целиком в броне и на уровне таймера: синхронный бросок шва (или
-    // отказ самого `setInterval`-колбэка) не должен ронять процесс
+    // try/catch и на уровне таймера: синхронное исключение внутри тика не должно
+    // ронять процесс
     try {
       void tick(deps, order, state, { historyRescore, kind: only.kind, perUserExclusive: only.perUserExclusive, lightOnly: only.lightOnly })
         .then((outcome) => {
           if (!tickMarks) return;
-          // З6 (круг 2 В4.4): метка живого тика — у rating-стороны лупа своя
-          // (иначе живой web-процесс маскировал бы мёртвую rating-роль);
-          // В4.8.5 (К8.5.5c): у user-стороны — своя, для health полосы.
-          // С10-3: тик `busy` — не признак жизни сам по себе: метка пишется,
-          // только пока текущее задание не вышло за худший бюджет скана
+          // у каждой полосы своя метка живого тика — иначе живой web-процесс
+          // маскировал бы мертвую rating-роль. `busy` сам по себе не признак жизни:
+          // метка пишется, только пока задание не вышло за худший бюджет скана
           if (!loopTickIsAlive(outcome, state, deps.config)) return;
           const at = new Date().toISOString();
           if (queues.rating) setMetaValue(deps.db, SCHED_META.tickAt, at);
@@ -1390,28 +1289,26 @@ export function startWorkerLoop(
 }
 
 /**
- * В5.2 (очередь, решение Екатерины 25.09 — «ничто не должно блокировать пользовательские
- * запросы; большие репозитории не должны блочить все»): рабочие циклы процесса. Прежде в роли
- * `all` один цикл вел обе полосы и все роды — плановый скан тяжелого репо (до ~90 мин) держал
- * и анализ, и обзор пользователя. Теперь у каждой пары «полоса роли × род заявки» свой цикл
- * со своим состоянием: плановая волна не держит пользователей, скан не держит обзор, тяжелый
- * репо одного пользователя занимает один слот из `userScanSlots`. Claim атомарен (одна
- * инструкция UPDATE), поэтому параллельные циклы одной полосы не берут заявку дважды.
+ * Рабочие циклы процесса: у каждой пары «полоса роли × род заявки» свой цикл со своим
+ * состоянием. Пользовательские запросы не должны ждать ничего постороннего: плановая
+ * волна не держит пользователей, скан не держит обзор, а тяжелый репо (до ~90 мин)
+ * одного пользователя занимает только один слот из `userScanSlots`. Claim атомарен
+ * (одна инструкция UPDATE), поэтому параллельные циклы одной полосы не возьмут заявку дважды.
  */
 export interface WorkerLoopSpec {
   lane: "user" | "rating";
   kind: JobKind;
   /** параллельных циклов (у каждого свое состояние «занят») */
   slots: number;
-  /** сколько первых слотов берут и тяжелые репо (аудит очереди О2); прочие — только легкие */
+  /** сколько первых слотов берут и тяжелые репо; остальные — только легкие */
   heavySlots: number;
   pollMs: number;
-  /** приоритет автора (только полоса user; аудит очереди О4 — приоритет, не запрет): заявка автора,
-   *  у которого уже идет заявка этого рода, встает после чужих, но свободный слот не простаивает */
+  /** приоритет, а не запрет (только полоса user): заявка автора, у которого уже идет
+   *  заявка этого рода, встает после чужих, но свободный слот не простаивает */
   perUserExclusive: boolean;
-  /** фоновый пересчет истории — только цикл сканов рейтинга (как прежде rating-сторона) */
+  /** фоновый пересчет истории — только цикл сканов рейтинга */
   historyRescore: boolean;
-  /** метка живого тика полосы для health — только циклы сканов (смысл метки прежний) */
+  /** метка живого тика полосы для health — только циклы сканов */
   tickMarks: boolean;
 }
 
@@ -1420,8 +1317,8 @@ export function workerLoopPlan(role: Config["processRole"], queue: Config["queue
   const plan: WorkerLoopSpec[] = [];
   for (const lane of lanes) {
     const user = lane === "user";
-    // аудит очереди О2: тяжелый репо (клон и разбор до ~90 мин) берет только первый слот рода —
-    // два тяжелых репо двух людей не занимают все слоты; в полосе рейтинга слот один и берет все
+    // тяжелый репо (клон и разбор до ~90 мин) берет только первый слот рода — два тяжелых
+    // репо двух людей не займут все слоты; в полосе рейтинга слот один и берет все
     plan.push({ lane, kind: "scan", slots: user ? loopSlots(queue.userScanSlots) : 1, heavySlots: 1, pollMs: 5000, perUserExclusive: user, historyRescore: !user, tickMarks: true });
     plan.push({ lane, kind: "summary", slots: user ? loopSlots(queue.userAiSlots) : 1, heavySlots: 1, pollMs: 5000, perUserExclusive: user, historyRescore: false, tickMarks: false });
     // проверка — секунды без клона: одного цикла на полосу хватает
@@ -1451,37 +1348,22 @@ export function startWorkerLoops(deps: WorkerDeps, plan: WorkerLoopSpec[], seams
   };
 }
 
-/** Строка старта: какие циклы подняты (оператор видит слоты без чтения кода). */
+/** Строка для лога старта: какие циклы подняты и сколько слотов. */
 export function workerLoopSummary(plan: WorkerLoopSpec[]): string {
   return plan.map((s) => `${s.lane}/${s.kind}×${s.slots}`).join(", ");
 }
 
 /**
- * Планировщик обхода каталога: интервал из конфига (сутки по умолчанию,
- * ТЗ §6); первый обход — через startDelayMs (окно управления стендом:
- * обход с живым токеном ставит первый скан всего каталога в очередь —
- * дизайн продукта, но оператор должен успеть это увидеть/отключить).
- * Расписание объясняется конфигурацией — раздел в отчёте воркера.
- */
-// В4.8.5 (К8.5.5b, С8-12): второе хранилище меток фаз в памяти процесса
-// (`schedulerStateRef`, `schedulerHealthSnapshot`) удалено — единственный
-// источник меток для health и для рестарта — meta (SCHED_META).
-
-/**
- * Возраст, начиная с которого каталог клона считается осиротевшим (Ф2.19):
- * живой скан держит клон всё время своей работы, а портовый час был короче —
- * свип сносил каталог из-под работающего git, и скан падал «сам по себе».
- * В4.8.5 (К8.5.2b): возраст — от ХУДШЕГО СКАНА (`worstCaseScanMs`, 91 мин на
- * дефолтах), а не от лиза: при лизе 10 мин прежняя формула `max(2·лиз, 60 мин)`
- * дала бы 60 мин < 85 и вернула дефект Ф2.19, а обслуживание в любой роли
- * сносило бы клоны соседнего процесса. Мерило каталога клона — длина скана.
+ * Возраст, начиная с которого каталог клона считается осиротевшим. Живой скан держит
+ * клон все время работы, поэтому порог — худшая длительность скана (`worstCaseScanMs`,
+ * ~91 мин на дефолтах), а не лиз: меньший порог сносил бы каталог из-под работающего
+ * git, в том числе у соседнего процесса.
  */
 export function orphanCloneAgeMs(config: Config): number {
   return worstCaseScanMs(config.scan);
 }
 
-/** ПОРТ hq-parallel (S3): свип осиротевших rh-clone-* (crash/OOM-убитые
- *  клоны никто не подбирал — tmp тек до ENOSPC); возраст — Ф2.19. */
+/** Уборка осиротевших rh-clone-*: клоны процессов, убитых падением или OOM, иначе копились бы в tmp до ENOSPC. */
 export async function sweepOrphanClones(dir: string = tmpdir(), olderThanMs = 60 * 60_000): Promise<number> {
   let removed = 0;
   try {
@@ -1507,14 +1389,13 @@ export async function sweepOrphanClones(dir: string = tmpdir(), olderThanMs = 60
 }
 
 /**
- * Ф2.2: осиротевшие `running`-сканы (НЕ путать со свипом каталогов клонов —
- * `sweepOrphanClones`). Процесс, начавший скан, умер; строка `scans` осталась
- * `running` навсегда (на живой БД 17.09 — 7 штук, старейшая от 16.09). Сирота
- * = `running`, старше лиза, и нет ЖИВОЙ job того же (repo, автор) с
- * непросроченным лизом. `user_id IS s.user_id`: SQLite `IS` сравнивает и
- * NULL'ы, поэтому периодический скан не «прикрывается» юзерской job.
- * Закрывается как `bad` с `status_detail='orphaned'` — статус скана честен, а
- * причина отделена от настоящего провала сбора.
+ * Осиротевшие `running`-сканы (не путать с уборкой каталогов клонов). Процесс,
+ * начавший скан, умер, а строка `scans` осталась `running` навсегда. Сирота —
+ * `running` старше лиза без живой job того же (репо, автор) с непросроченным лизом.
+ * `user_id IS scans.user_id`: в SQLite `IS` сравнивает и NULL, поэтому
+ * периодический скан не прикрывается пользовательской job.
+ * Закрывается как `bad` с `status_detail='orphaned'` — причина отделена от
+ * настоящего провала сбора.
  */
 export function sweepOrphanScans(db: Database, opts: { leaseMs: number; now?: Date }): number[] {
   const now = opts.now ?? new Date();
@@ -1539,22 +1420,21 @@ export function sweepOrphanScans(db: Database, opts: { leaseMs: number; now?: Da
   return ids;
 }
 
-/**
- * Ф2.13: очистка завершённых строк `jobs` старше `Config.queue.retentionDays`.
- * Строки очереди транзитны (данные скана живут в `scans`/`facts`/`scores`), а
- * растут они линейно от волн: 27 446 репо в сутки — это десятки миллионов
- * строк в год в той же БД, что и чтение рейтинга. `queued`/`running` не
- * трогаем никогда; строки без `created_at` (legacy) — тоже, их возраст
- * неизвестен, а гадать по id нельзя.
- */
-/** Сколько хранятся AI-заявки при любом ретеншене — окно учета лимитов (аудит надежности М8). */
+/** Минимальный срок хранения AI-заявок при любом ретеншене — окно учета лимитов. */
 const AI_JOBS_KEEP_MS = 2 * 24 * 3600_000;
 
+/**
+ * Очистка завершенных строк `jobs` старше `Config.queue.retentionDays`. Строки очереди
+ * транзитны (данные скана живут в `scans`/`facts`/`scores`), а растут линейно от волн —
+ * десятки миллионов строк в год в той же БД, что обслуживает рейтинг.
+ * `queued`/`running` не трогаются никогда; строки без `created_at` (старые) — тоже:
+ * их возраст неизвестен, а гадать по id нельзя.
+ */
 export function purgeOldJobs(db: Database, opts: { retentionDays: number; now?: Date }): number {
   const now = opts.now ?? new Date();
   const cutoff = new Date(now.getTime() - opts.retentionDays * 24 * 60 * 60_000).toISOString();
-  // аудит надежности М8: AI-заявки — учет лимитов (сутки МСК, час); моложе 2 суток они не
-  // удаляются при любом ретеншене, иначе QUEUE_RETENTION_DAYS=0 обнулял бы лимиты
+  // AI-заявки — это учет лимитов (час и сутки МСК): моложе 2 суток они не удаляются,
+  // иначе QUEUE_RETENTION_DAYS=0 обнулял бы лимиты
   const aiKeep = new Date(now.getTime() - AI_JOBS_KEEP_MS).toISOString();
   const r = db
     .query(
@@ -1566,9 +1446,8 @@ export function purgeOldJobs(db: Database, opts: { retentionDays: number; now?: 
 }
 
 /**
- * Тик обслуживания (Ф2.1: тело тика — функция, вызываемая через шов;
- * Ф2.2 + Ф2.13): сироты-сканы, ретеншен `jobs`, свип каталогов клонов.
- * Целиком в try/catch — исключение наружу не выходит, таймер жив.
+ * Тик обслуживания: сироты-сканы, ретеншен `jobs` и снимков рейтинга, уборка
+ * каталогов клонов, авто-AI топа. Каждый шаг в try/catch — таймер остается жив.
  */
 export async function maintenanceTick(
   db: Database,
@@ -1588,7 +1467,6 @@ export async function maintenanceTick(
     console.error(`[sweep] jobs retention failed: ${String((e as Error).message).slice(0, 200)}`);
   }
   try {
-    // В5.5 тур 1 (W2, Р1): ретеншен снимков мест рейтинга — рядом с ретеншеном jobs
     out.snapshots = purgeOldRatingSnapshots(db, { now });
   } catch (e) {
     console.error(`[sweep] rating snapshots retention failed: ${String((e as Error).message).slice(0, 200)}`);
@@ -1610,22 +1488,21 @@ export async function maintenanceTick(
 const TOP_AUTO_INTERVAL_MS = 24 * 3600_000;
 
 /**
- * В5.2 (Б5, TASK.md §2 «В5.2 — публичный AI-обзор…» п.4): топ рейтинга —
- * публичный обзор и проверка на накрутку автоматически, за переключателем
- * AI_TOP_AUTO (по умолчанию выключен; на стенде включается 28.09). Каждый такт
- * обслуживания: у репо топа, чей последний завершенный скан без публичного
- * обзора (или без проверки), нет живой заявки этого рода и прошлая авто-заявка
- * старше суток, — ставится заявка полосы рейтинга (user_id NULL: пользовательские
- * лимиты ее не считают). Такт, а не хук скана: после включения топ получает
- * тексты сразу, не дожидаясь пересканирования.
+ * Автоматический публичный обзор и проверка на накрутку для топа рейтинга, за
+ * переключателем AI_TOP_AUTO (по умолчанию выключен). На каждом такте обслуживания
+ * репо топа, у которого последний завершенный скан без публичного обзора (или без
+ * проверки), нет живой заявки этого рода и прошлая авто-заявка старше суток,
+ * получает заявку в полосе рейтинга (user_id NULL — пользовательские лимиты ее не
+ * считают). Такт, а не хук скана: после включения топ получает тексты сразу, не
+ * дожидаясь пересканирования.
  */
 export function topAutoTick(db: Database, config: Pick<Config, "ai">, now: Date = new Date()): { summaries: number; checks: number } {
   const out = { summaries: 0, checks: 0 };
   if (!config.ai.topAuto) return out;
   const size = config.ai.topAutoSize;
   const top = listRepos(db, { sort: "index", order: "desc", page: 1, perPage: size }).items.filter((i) => i.rank !== null && i.rank <= size);
-  // аудит надежности М5: проверка «заявки нет» и вставка — одной транзакцией (такт идет в
-  // нескольких ролях процесса; дубль был бы дешев — ушел бы в кэш, — но не нужен)
+  // проверка «заявки нет» и вставка — одной транзакцией: такт идет в нескольких
+  // ролях процесса, и без нее возможны дубли
   return db.transaction(() => topAutoEnqueue(db, top, now, out)).immediate();
 }
 
@@ -1664,12 +1541,12 @@ function topAutoEnqueue(db: Database, top: { org: string; repo: string }[], now:
   return out;
 }
 
-/** Состояние тика каталога: единый re-entry-гард и две due-метки (Ф2.5). */
+/** Состояние тика каталога: защита от повторного входа и отметки последнего выполнения фаз. */
 export interface CatalogTickState {
   walking: boolean;
-  /** время последней УСПЕШНОЙ сверки (каталог дочитан) */
+  /** время последней успешной сверки (каталог дочитан) */
   lastReconcileAt: Date | null;
-  /** время последней УСПЕШНОЙ ночной фазы */
+  /** время последней успешной ночной фазы */
   lastNightlyAt: Date | null;
 }
 
@@ -1686,35 +1563,32 @@ function metaDate(db: Database, key: string, now: Date): Date | null {
   return new Date(t);
 }
 
-/** К8.5.5b: пустые метки состояния — из ключей УСПЕХА фаз в meta. */
+/** Заполнить пустые отметки состояния из meta — так они переживают рестарт процесса. */
 export function loadPhaseMarks(db: Database, state: CatalogTickState, now = new Date()): void {
   if (state.lastReconcileAt === null) state.lastReconcileAt = metaDate(db, SCHED_META.reconcileAt, now);
   if (state.lastNightlyAt === null) state.lastNightlyAt = metaDate(db, SCHED_META.nightlyOkAt, now);
 }
 
-/** С8-4: ошибка сверки — в meta (стирает её только дочитанная сверка). */
+/** Ошибка сверки — в meta для health; стирает ее только дочитанная сверка. */
 function recordReconcileError(db: Database, error: string, now: Date): void {
   setMetaValue(db, SCHED_META.reconcileError, error.slice(0, 200));
   setMetaValue(db, SCHED_META.reconcileErrorAt, now.toISOString());
 }
 
-/** Бюджет запросов клиента одного обхода (К-Ф2.5): потолок страниц + 10. */
+/** Бюджет запросов клиента на один обход: потолок страниц + 10 про запас. */
 export function catalogClientBudget(config: Config): number {
   return config.scan.catalog.maxPages + 10;
 }
 
 /**
- * Тик каталога (Ф2.1 — шов для прямого вызова из теста; Ф2.5 — одно
- * перечисление на обе фазы). Каталог обходится ОДИН раз, если должна хотя бы
- * одна фаза; дочитанный snapshot всегда исполняет сверку, а ночная фаза
- * добавляется к тому же snapshot, когда её срок пришёл. Недочитанный или
- * ошибочный snapshot не эвиктит и не двигает метку СВЕРКИ; К-Р3 (решение
- * Екатерины 19.09): ночная метка двигается, если ночная фаза ИСПОЛНИЛАСЬ
- * (обход прошёл), независимо от полноты каталога — иначе суточная волна
- * вырождается в часовую, пока каталог недочитывается; ритм ночной волны от
- * полноты каталога не зависит, эвикция — единственное опасное действие на
- * неполном снимке — по-прежнему только по дочитанному. Конкурирующих обходов
- * нет: гард один на обе фазы, клиент (и его бюджет) — один на snapshot.
+ * Тик каталога: одно перечисление на обе фазы. Каталог обходится один раз, если
+ * пришел срок хотя бы одной фазы; сверка выполняется всегда, ночная фаза
+ * добавляется к тому же обходу, когда пришел ее срок.
+ * Недочитанный или ошибочный обход не эвиктит и не двигает отметку сверки.
+ * Ночная отметка двигается, если обход прошел, даже при неполном каталоге:
+ * иначе суточная волна выродилась бы в часовую, пока каталог не дочитывается.
+ * Эвикция — единственное опасное действие на неполном снимке — только по дочитанному.
+ * Конкурирующих обходов нет: одна защита на обе фазы, один клиент на обход.
  */
 export async function catalogTick(
   db: Database,
@@ -1723,38 +1597,34 @@ export async function catalogTick(
   state: CatalogTickState,
   opts: { now?: Date } = {},
 ): Promise<NightlyResult | null> {
-  // гард ДО try: в портовой редакции проверка стояла внутри, и `finally`
-  // снимал чужой гард — пропущенный тик открывал дорогу параллельному обходу,
-  // ровно тому, от которого гард и ставили
+  // проверка до try: внутри нее `finally` снял бы флаг чужого обхода, и
+  // пропущенный тик открыл бы дорогу параллельному обходу
   if (state.walking) {
     console.warn("[scheduler] предыдущий обход ещё жив — запуск пропущен (ПОРТ S2)");
     return null;
   }
   const now = opts.now ?? new Date();
-  // В4.8.5 (К8.5.5b, С8-2): метки УСПЕХА фаз переживают рестарт — пустая
-  // метка в памяти (первый тик процесса) берётся из meta. Ночная — из
-  // отдельного ключа успеха (`sched_last_nightly_at` значит «попытка»)
+  // отметки успеха фаз переживают рестарт: на первом тике процесса они берутся
+  // из meta. Ночная — из отдельного ключа успеха (`sched_last_nightly_at` — это попытка)
   loadPhaseMarks(db, state, now);
   const due = (last: Date | null, everyMs: number) => last === null || now.getTime() - last.getTime() >= everyMs;
   const reconcileDue = due(state.lastReconcileAt, config.scheduler.catalogIntervalMs);
   const nightlyDue = due(state.lastNightlyAt, config.scheduler.intervalMs);
   if (!reconcileDue && !nightlyDue) return null;
-  // новый клиент (и бюджет) на каждый обход — H2
+  // новый клиент (и бюджет запросов) на каждый обход
   const client = serverClient();
   if (!client) {
-    // без серверного токена каталог не читается — С8-10: health это видит
+    // без серверного токена каталог не читается — отметка для health
     setMetaValue(db, SCHED_META.noTokenAt, now.toISOString());
     return null;
   }
   if (getMetaValue(db, SCHED_META.noTokenAt) !== null) db.query("DELETE FROM meta WHERE key = ?").run(SCHED_META.noTokenAt);
   state.walking = true;
   try {
-    // В5.5 тур 2 (Т2-А): снимок мест «итог суток» — в момент ночной фазы, ДО
-    // обхода: nightlyCatalog эвиктит исчезнувшие репо и ставит новую волну, снимок
-    // фиксирует места до них. Идемпотентно по UTC-дате (повтор ночной фазы после
-    // сбоя обхода в те же сутки снимок не дублирует); сбой снимка обход не валит.
-    // Тур 3: пока идет пересчет после смены модели — снимок откладывается и
-    // дописывается следующим (часовым) обходом в те же сутки
+    // снимок мест «итог суток» — в ночной фазе до обхода: nightlyCatalog эвиктит
+    // исчезнувшие репо и ставит новую волну, а снимок фиксирует места до них.
+    // Идемпотентно по UTC-дате; сбой снимка обход не валит. Пока идет пересчет
+    // после смены модели, снимок откладывается до следующего обхода в те же сутки
     {
       try {
         const snap = snapshotAtCatalogTick(db, { now, nightlyDue });
@@ -1764,18 +1634,15 @@ export async function catalogTick(
         console.error(`[rating] snapshot failed: ${String((e as Error).message).slice(0, 200)}`);
       }
     }
-    // сверка исполняется на КАЖДОМ обходе: каталог всё равно перечислен —
-    // не воспользоваться им значит заплатить за обход и выбросить результат
+    // сверка выполняется на каждом обходе: каталог все равно перечислен
     const result = await nightlyCatalog(db, client, {
       maxPages: config.scan.catalog.maxPages,
       fullRescan: config.scheduler.fullRescan,
       now,
       phases: { reconcile: true, nightly: nightlyDue },
     });
-    // К-Р5: ночной факт health — только обходы, в которых ночная фаза
-    // участвовала; часовая сверка его не обновляет. В4.4 (кластер B): тот же
-    // факт дублируется в meta — кросс-процессно (web-роль читает состоянием
-    // планировщика, которого в её процессе нет)
+    // ночной статус для health обновляют только обходы с ночной фазой. Пишется в
+    // meta, потому что web-роль читает его из другого процесса
     if (nightlyDue) {
       setMetaValue(db, SCHED_META.nightlyAt, now.toISOString());
       setMetaValue(db, SCHED_META.nightlyOk, result.ok ? "1" : "0");
@@ -1787,7 +1654,7 @@ export async function catalogTick(
     }
     if (!result.ok) {
       console.error(`[scheduler] catalog walk failed: ${result.error ?? "unknown"}`);
-      // С8-4: сверка не удалась — след в meta (health судит по нему и по возрасту успеха)
+      // health судит по этой ошибке и по возрасту последней успешной сверки
       recordReconcileError(db, result.error ?? "catalog walk failed", now);
       return result;
     }
@@ -1798,8 +1665,8 @@ export async function catalogTick(
     } else {
       recordReconcileError(db, "catalog incomplete: page cap reached", now);
     }
-    // К-Р3: ночная метка — по исполнению фазы (обход ok), НЕ по полноте
-    // каталога; метка сверки выше — по-прежнему только по дочитанному
+    // ночная отметка — по выполнению фазы (обход ok), а не по полноте каталога;
+    // отметка сверки выше — только по дочитанному
     if (nightlyDue && result.ok) {
       state.lastNightlyAt = now;
       setMetaValue(db, SCHED_META.nightlyOkAt, now.toISOString());
@@ -1817,11 +1684,9 @@ export async function catalogTick(
 }
 
 /**
- * К-Р2 (круг 2): броня КОЛБЭКА ТАЙМЕРА — та же, что у воркер-лупа
- * (`startWorkerLoop`): синхронный бросок шва и отказ промиса логируются,
- * цикл жив (Ф2.1 «цикл жив» распространён на ОБА таймера планировщика —
- * тик каталога и часовое обслуживание). Экспортирована для теста брони
- * без ожидания часового интервала обслуживания.
+ * Обертка колбэка таймера, как у цикла воркера: синхронное исключение и отказ
+ * промиса логируются, таймер продолжает работать. Экспортирована для теста без
+ * ожидания часового интервала.
  */
 export function armoredTimerCallback(label: string, fn: () => Promise<unknown> | void): () => void {
   return () => {
@@ -1836,23 +1701,25 @@ export function armoredTimerCallback(label: string, fn: () => Promise<unknown> |
   };
 }
 
+/**
+ * Планировщик обхода каталога. Первый обход — через startDelayMs: обход с живым
+ * токеном ставит в очередь сканы всего каталога, и у оператора должно быть время
+ * это увидеть и при необходимости отключить.
+ */
 export function startScheduler(
   db: Database,
   serverClient: () => ScClient | null,
   config: Config,
   seams: { tick?: typeof catalogTick; maintenance?: typeof maintenanceTick } = {},
 ): () => void {
-  // ПОРТ S2: re-entrancy-гард + due-метки фаз (Ф2.5). Метки пусты — первый тик
-  // после startDelayMs считает due обе фазы
+  // отметки пусты — первый тик считает, что срок пришел у обеих фаз
   const state = newCatalogTickState();
   const tick = seams.tick ?? catalogTick;
   const maintenance = seams.maintenance ?? maintenanceTick;
-  // К-Р2: оба таймера — в броне (раньше `void tick(...)` без try/catch и без
-  // .catch: отказ шва останавливал таймер молча)
   const run = armoredTimerCallback("scheduler", () => tick(db, serverClient, config, state));
   const first = setTimeout(run, config.scheduler.startDelayMs);
-  // тик зовётся с периодом частой фазы; какая из фаз исполнится — решают
-  // due-метки внутри тика, а не расписание таймера
+  // тик вызывается с периодом более частой фазы; какая фаза выполнится, решают
+  // отметки внутри тика, а не расписание таймера
   const timer = setInterval(run, Math.max(1, Math.min(config.scheduler.catalogIntervalMs, config.scheduler.intervalMs)));
   const stopMaintenance = startMaintenance(db, config, { maintenance });
   return () => {
@@ -1863,11 +1730,9 @@ export function startScheduler(
 }
 
 /**
- * Часовое обслуживание (ПОРТ S3 + Ф2.2/Ф2.13): сироты-сканы, ретеншен jobs,
- * каталоги клонов. В4.8.5 (К8.5.2b, С10-4): таймер запускается в ЛЮБОЙ роли —
- * роль web без него держала скан-сироту «Сканируется» до своего рестарта.
- * Свипы идемпотентны, конкурирующие роли друг другу не мешают (возраст свипа
- * клонов — от худшего скана).
+ * Часовое обслуживание (см. maintenanceTick). Запускается в любой роли: без него
+ * роль web показывала бы скан-сироту «Сканируется» до своего рестарта. Уборка
+ * идемпотентна, конкурирующие роли друг другу не мешают.
  */
 export function startMaintenance(db: Database, config: Config, seams: { maintenance?: typeof maintenanceTick; periodMs?: number } = {}): () => void {
   const maintenance = seams.maintenance ?? maintenanceTick;

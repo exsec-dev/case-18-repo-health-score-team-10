@@ -1,8 +1,6 @@
-// score-mutations.test.ts — Б5+В4/Б4: контрольные сценарии-инварианты §9
-// (мутации фактов на JSON-фикстурах, без сети и клонов). ε=1e-9 на
-// монотонности; шкала каждой мутации — как в таблице §9 (категория
-// для CI/CD, total для остальных) — см. комментарии. В4: CI/Security
-// — own-режим; добавлены инварианты code_empty и изоляции public.
+// Контрольные сценарии-инварианты (docs/methodology.md §9): мутации фактов на
+// JSON-фикстурах, без сети и клонов. ε=1e-9 на монотонности. CI/Security —
+// own-режим; есть инварианты code_empty и изоляции публичного показателя.
 import { afterAll, describe, expect, test } from "bun:test";
 import { compute } from "../src/score/compute";
 import { NOW, TestDb, healthyFacts, makeDb, seedScan, withFacts, FactSpec } from "./score-fixtures";
@@ -10,7 +8,7 @@ import { NOW, TestDb, healthyFacts, makeDb, seedScan, withFacts, FactSpec } from
 const t: TestDb = makeDb();
 afterAll(() => t.close());
 
-// В4.1 (К1): один скан — два итога. CI/Security входят только в полный
+// Один скан — два итога. CI/Security входят только в полный
 // итог — их мутации меряем по нему ("full"); остальные (анти-накрутка,
 // Issues, каналы) — по Score в рейтинге ("rating").
 type Total = "rating" | "full";
@@ -24,9 +22,9 @@ describe("§9 Security (полный итог, В4.1)", () => {
     const attackedFacts = withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0, secrets_critical: true } });
     const attacked = compute(t.db, seedScan(t, attackedFacts), { now: NOW });
     expect(attacked.categories.security.score!).toBeLessThan(30); // ↓ заметно
-    expect(attacked.repoHealthScore!).toBeLessThanOrEqual(49); // жёсткий кап (В2-8)
+    expect(attacked.repoHealthScore!).toBeLessThanOrEqual(49); // жесткий кап за утечку секрета
     expect(attacked.repoHealthScore!).toBeLessThan(base);
-    // изоляция (В4/Б4): тот же факт публично не влияет — 4 категории
+    // изоляция: тот же факт публично не влияет — 4 категории
     const pubBefore = totalOf(healthyFacts())!;
     const pubAfter = totalOf(attackedFacts)!;
     expect(pubAfter).toBe(pubBefore);
@@ -34,7 +32,7 @@ describe("§9 Security (полный итог, В4.1)", () => {
 
   test("SAST crit → resolved → Security ↑, Score ↑", () => {
     const dirty = totalOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 5, high: 0, medium: 0, low: 0 }, resolved_share: 0, secrets_critical: false } }), "full")!;
-    // 4.3.0 (Н6, Р3): счетчики серьезности — только открытые группы, поэтому
+    // счетчики серьезности — только открытые группы, поэтому
     // закрытые критичные уходят и из счетчика; открытые critical держат потолок 40
     const clean = totalOf(withFacts(healthyFacts(), { key: "appsec.findings", value: { severity_counts: { critical: 0, high: 0, medium: 0, low: 0 }, resolved_share: 0.95, secrets_critical: false } }), "full")!;
     expect(clean).toBeGreaterThan(dirty);
@@ -88,10 +86,8 @@ describe("§9 CI/CD (полный итог, В4.1)", () => {
   });
 
   test("Н8: ci.yaml добавлен при невидимых запусках — CI «нет данных» до и после, итог не двигается", () => {
-    // В5.3-М (Н8, J11/F10): до 4.3.0 этот тест назывался «итог НЕ двигается», а
-    // утверждал +15,59: «нет ci.yaml» давало CI 0, заглушка без видимых
-    // запусков — «нет данных», и перенормировка поднимала итог за конфиг без
-    // доказательства. Теперь запуски не видны — «нет данных» при любом конфиге.
+    // запуски не видны — CI «нет данных» при любом конфиге; иначе перенормировка
+    // поднимала бы итог за конфиг-заглушку без доказательства
     const runs403: FactSpec = { key: "cicd.runs", value: { reason: "access" }, status: "no-data" };
     const beforeFacts = withFacts(healthyFacts(), runs403, { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } });
     const before = compute(t.db, seedScan(t, beforeFacts), { now: NOW });
@@ -114,7 +110,7 @@ describe("§9 CI/CD (полный итог, В4.1)", () => {
     const pubBase = totalOf(noCi)!;
     expect(totalOf(withCi)!).toBe(pubBase); // CI не влияет публично
     expect(totalOf(withSec)!).toBe(pubBase); // Security не влияет публично
-    // при этом own-режим их видит (4.3.0, Н8: CI — при видимых запусках)
+    // при этом own-режим их видит (CI — при видимых запусках)
     const runsOk: FactSpec = { key: "cicd.runs", value: { last_status: "success", success_rate: 1, duration_p50: 120, runs_count: 20 } };
     const noCiRuns = withFacts(healthyFacts(), runsOk, { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } });
     const withCiRuns = withFacts(healthyFacts(), runsOk, { key: "cicd.configs", value: { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: true } });

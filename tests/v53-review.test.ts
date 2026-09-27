@@ -1,7 +1,6 @@
-// v53-review.test.ts — находки финального ревью вехи В5.3 (25.09, круги 1-3, internal,
-// AI-обзор): поведенческие тесты на данных и на маршрутах (AGENTS.md 21.09/23.09 —
-// «без прав не раскрывается», пустое состояние и число выборки — на данных).
-// SourceCraft — локальный мок харнесса, живых запросов нет.
+// Поведенческие тесты на данных и маршрутах (internal-репо, AI-обзор): «без
+// прав не раскрывается», пустое состояние и число выборки – на данных.
+// SourceCraft – локальный мок харнесса, живых запросов нет.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -80,9 +79,6 @@ describe("ревью В5.3: AI-обзор без прав на CI/CD и Безо
   }, 30_000);
 
 });
-
-// В5.2 (Б3): переключатель автообновления и гейт автозапуска по скану (scanChannelDenied)
-// удалены вместе с автообновлением по оп-ину (§2 «В5.2 — публичный AI-обзор…» п.3)
 
 describe("ревью В5.3: число и пустые состояния на данных", () => {
   const pt = (scanId: number, idx: number | null) => ({ scanId, finishedAt: `2026-09-2${scanId}T10:00:00Z`, healthcraftIndex: idx, indexCoverage: 1, repoHealthScore: null, modelVersion: "x", headSha: null, codeEmpty: false });

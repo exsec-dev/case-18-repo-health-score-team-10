@@ -1,6 +1,5 @@
-// v52-ui-round.test.ts — В5.2, Б6: круг правок по выбору владельца (TASK.md §2 «В5.2 (Б6) —
-// выбор по дизайн-анализу»: 1A 2A 3 4C 5A) и однозначным О1-О11 аудита дизайна.
-// Правило AGENTS.md 23.09: число в кнопке/колонке и утверждение состояния — тестом на данных.
+// Правки UI по дизайн-аудиту. Число в кнопке/колонке и утверждение состояния
+// проверяются на данных.
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -98,7 +97,7 @@ describe("выбор 1A: 7 состояний проверки оценки (т�
       button: null,
     });
     expect(fraudCheckState(ai({ scanId: 3, checkedAt: "2026-09-25T15:15:00Z" }, flag(false)), true)).toMatchObject({ kind: "stale", button: "Проверить оценку" });
-    // О5: флаг прошлого анализа не повторяется — текст подвала тот же, кнопка появляется
+    // флаг прошлого анализа не повторяется – текст подвала тот же, кнопка появляется
     expect(fraudCheckState(ai({ scanId: 3 }, flag(true)), true)).toMatchObject({ kind: "flagged", text: "Есть признаки накрутки", button: "Проверить оценку" });
   });
 });

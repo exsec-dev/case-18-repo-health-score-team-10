@@ -61,8 +61,8 @@ export function useRailCompact(): [boolean, (next: boolean) => void] {
 const RATING_HIDDEN_KEY = "rh:rating-hidden-columns";
 
 /**
- * Круг 5 тура 3 (находка 21 аудита, 27.09): скрытые колонки рейтинга переживают
- * перезагрузку и возврат. Хранится JSON-массив id; битое или неизвестное значение —
+ * Скрытые колонки рейтинга переживают перезагрузку и возврат.
+ * Хранится JSON-массив id; битое или неизвестное значение —
  * умолчание страницы; id колонки, которой больше нет, просто ни на что не влияет.
  */
 export function readRatingHidden(fallback: string[]): string[] {

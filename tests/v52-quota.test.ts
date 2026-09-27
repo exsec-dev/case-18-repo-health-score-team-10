@@ -1,9 +1,7 @@
-// v52-quota.test.ts — В5.2, Б3-Б5 (TASK.md §2 «В5.2 — публичный AI-обзор,
-// „Проверить оценку“, лимиты и пароль»): лимиты AI по заявкам в БД, пароль
-// неограниченного доступа, проверка на накрутку отдельной заявкой, автозапуск
-// топа рейтинга за переключателем. Правила AGENTS.md: число (лимит, остаток) —
-// поведенческим тестом на данных; механизм, зависящий от дефолта, — тест на
-// дефолте (переменная не задана).
+// Лимиты AI по заявкам в БД, пароль неограниченного доступа, проверка на
+// накрутку отдельной заявкой, автозапуск топа рейтинга за переключателем.
+// Числа (лимит, остаток) проверяются на данных; механизм, зависящий от
+// дефолта, – и на дефолте (переменная не задана).
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -150,7 +148,7 @@ describe("пароль неограниченного доступа", () => {
     expect(isUnlocked(db, u, c)).toBe(false);
     expect(tryUnlock(db, u, "very-long-secret", c)).toBe(true);
     const stored = (db.query("SELECT ai_unlock FROM users WHERE id = ?").get(u) as { ai_unlock: string }).ai_unlock;
-    // аудит М5: HMAC с ключом сервера — без APP_SECRET отпечаток не воспроизводится
+    // HMAC с ключом сервера: без APP_SECRET отпечаток не воспроизводится
     expect(stored).toBe(unlockFingerprint("very-long-secret", "server-secret"));
     expect(stored).not.toBe(unlockFingerprint("very-long-secret", null));
     expect(stored).not.toContain("very-long-secret");
@@ -175,7 +173,7 @@ describe("пароль неограниченного доступа", () => {
     expect(aiQuota(db, other, "overview", c, NOW).global).toEqual({ used: 0, limit: 30 });
     for (let i = 0; i < 60; i++) job(db, { user: vip, at: new Date(NOW.getTime() - (i + 41) * MIN), unlocked: 1 });
     expect(quotaRefusal(aiQuota(db, vip, "overview", c, NOW))!.code).toBe("quota_global");
-    // проверки оценки с паролем — свой потолок 100 в сутки (решение 25.09)
+    // проверки оценки с паролем – свой потолок 100 в сутки
     expect(aiQuota(db, vip, "check", c, NOW).global).toEqual({ used: 0, limit: 100 });
   });
 });
@@ -346,7 +344,7 @@ describe("Б7 (задержка Б1): заявка обзора не клони�
     const job = (audience: "public" | "full"): ClaimedJob => ({ id: 7, repoId, slug: "q/noclone", userId: null, triggerKind: "periodic", kind: "summary", audience, claimedAt: "t", attempts: 1 });
     db.query("INSERT INTO ai_notes (repo_id, scan_id, role, text, fact_refs, charter_version, model, created_at, audience) VALUES (?, ?, 'overview', 'x', '[]', '1', 'm', '2026', 'public')").run(repoId, scanId);
     const { processSummaryJob } = await import("../src/jobs/scheduler");
-    // аудит М3: итог «текст уже был» — done с пометкой, лимит его не считает
+    // итог «текст уже был» – done с пометкой, лимит его не считает
     const { AI_CACHED_NOTE } = await import("../src/jobs/ai-quota");
     expect(await processSummaryJob({ db, config, serverClient: () => null } as never, job("public"))).toBe(AI_CACHED_NOTE);
     // у полной версии заметок нет — дошло до клона и честно упало на нем

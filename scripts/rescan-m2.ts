@@ -1,9 +1,8 @@
-// rescan-m2.ts — приёмочный прогон В2 (Б5): re-scan всех 14 репо
-// выборки docs/sample-repos.md ОДНИМ клиентом — глобальный бюджет
-// ≤850 живых REST-запросов (лимит промпта), интервал ≥50мс, catalog
-// не обходится, rating не запрашивается. Клоны по Config.scan
-// (divkit/openintegrations — деградационный ярус 2000МБ/20мин).
-// Score/recommendations пишет hook раннера автоматически.
+// Пересканирование всех 14 репо выборки docs/sample-repos.md одним клиентом:
+// общий бюджет до 850 живых REST-запросов (M2_BUDGET), интервал ≥ 50 мс,
+// каталог не обходится. Лимиты клонов — из Config.scan (divkit и
+// openintegrations уходят в деградационный ярус). Оценки и рекомендации
+// пишет хук раннера.
 import { loadConfig } from "../src/config";
 import { openDb } from "../src/db";
 import { makeScClient } from "../src/collectors/http";
@@ -32,7 +31,6 @@ const config = loadConfig();
 const db = openDb(config);
 const client = makeScClient({
   token: config.sourcecraftToken,
-  // П3 (В4.2-port-fix): адрес REST — из конфига, а не дефолт модуля
   baseUrl: config.api.restBase,
   minIntervalMs: config.scan.rest.minIntervalMs,
   maxRequests: BUDGET,

@@ -1,8 +1,7 @@
-// v52-audience.test.ts — В5.2, Б2: аудитория AI-текста (TASK.md §2 «В5.2 —
-// публичный AI-обзор…» п.1). Публичный обзор строится только из 4 открытых
-// категорий и видим всем; полный — из всех фактов и только зрителю с полным
-// Score. Правило AGENTS.md 21.09: поле, которое рисует экран, — «равно
-// источнику» и «без прав не раскрывается»; значение enum — своя ветка и тест.
+// Аудитория AI-текста. Публичный обзор строится только из 4 открытых
+// категорий и видим всем; полный – из всех фактов и только зрителю с полным
+// Score. Поле, которое рисует экран, проверяется на «равно источнику» и «без
+// прав не раскрывается»; каждое значение enum – своя ветка и тест.
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -74,7 +73,7 @@ function fake(): { call: CallLlm; seen: Map<string, string> } {
 describe("схема 2.3: аудитория AI-текста", () => {
   test("колонки есть, прежние строки — 'full', значения перечисления — ровно public и full", () => {
     const db = freshDb();
-    expect(SCHEMA_VERSION).toBe("2.4"); // В5.5 тур 1 (W2): поверх 2.3 — rating_snapshots
+    expect(SCHEMA_VERSION).toBe("2.4"); // поверх 2.3 – rating_snapshots
     const cols = (t: string) => new Set((db.query(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name));
     // 2.4: таблица снимков мест рейтинга (динамика позиции)
     expect(cols("rating_snapshots").has("taken_at")).toBe(true);

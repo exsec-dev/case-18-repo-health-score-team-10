@@ -1,8 +1,8 @@
-// 27.09 (stand after the V5.5 deploy): in the production bundle our layout.css came
-// BEFORE the CSS of uikit components (they import their CSS inside their JS modules), so
-// uikit won every equal-specificity override: blue external-link icon in the rating, plain
-// rank and index numbers, 430px placeholders. Dev mode loads CSS in another order, so only
-// the stand showed it. Behavioral: build the real production bundle and check the order.
+// In the production bundle our layout.css must come AFTER the CSS of uikit components
+// (they import their CSS inside their JS modules); otherwise uikit wins every
+// equal-specificity override: blue external-link icon in the rating, plain rank and index
+// numbers, 430px placeholders. Dev mode loads CSS in another order, so only a production
+// build shows it. Behavioral: build the real production bundle and check the order.
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,7 +24,7 @@ describe("production CSS bundle: our styles after uikit component styles", () =>
       const tail = text.slice(ours);
       const foreign = [...tail.matchAll(/\}((?:\.g|\.gn)-[^{}]*)\{/g)].map((m) => m[1]!).filter((sel) => !sel.includes(".rh-") && !sel.startsWith(".g-alert.g-card_theme_info") && !sel.startsWith(".g-help-mark"));
       expect(foreign).toEqual([]);
-      // the concrete regressions seen on the stand
+      // concrete overrides that were lost this way
       expect(text.indexOf(".rh-rating-ext")).toBeGreaterThan(text.indexOf(".g-link_view_normal"));
       expect(text.indexOf(".rh-empty.g-placeholder-container")).toBeGreaterThan(text.indexOf(".g-placeholder-container_direction_row"));
     } finally {

@@ -1,10 +1,7 @@
-// access.test.ts — В4.1/К2: резолвер доступа зрителя к каналам карточки.
-// Все пять ChannelAccess из ответов 200/403/404/401/429/0; кэш (повтор без
-// запроса, TTL, check-failed не кэшируется, сброс по смене PAT); аноним и
-// зритель без PAT — ноль запросов; один REST repo-GET на показ. Сети нет:
-// REST и AppSec — фейки со счётчиками. В4.1-fix (Ф1.4, Ф1.6, Ф1.12): AppSec
-// 404 при repo-GET 200 → granted; check-failed кэшируется на failedTtlMs;
-// предел кэша; склейка одновременных проверок; поколение PAT; таймаут REST.
+// Резолвер доступа зрителя к каналам карточки: все пять ChannelAccess из ответов
+// 200/403/404/401/429/0, кэш (TTL, check-failed на failedTtlMs, предел, сброс и
+// поколение PAT), склейка одновременных проверок, таймаут REST. Аноним и зритель
+// без PAT — ноль запросов. Сети нет: REST и AppSec — фейки со счетчиками.
 import { describe, expect, test } from "bun:test";
 import { makeScClient } from "../src/collectors/http";
 import type { AppsecClient } from "../src/collectors/appsec";
@@ -87,7 +84,7 @@ describe("семантика ответа (К2)", () => {
   test("все пять состояний по каналам из ответов платформы", async () => {
     const cases: [Partial<{ runs: number; repo: number; appsec: number }>, { cicd: ChannelAccess; appsec: ChannelAccess }][] = [
       [{ runs: 403, appsec: 403 }, { cicd: "denied", appsec: "denied" }],
-      // Ф1.4 + круг 2 (LOW-5): AppSec 404 «скана нет» — доступ только при
+      // AppSec 404 «скана нет» — доступ только при
       // подтверждении прав другим чтением (CI granted); без него — отказ
       [{ runs: 404, appsec: 404 }, { cicd: "denied", appsec: "denied" }],
       [{ runs: 200, appsec: 404 }, { cicd: "granted", appsec: "granted" }],

@@ -1,27 +1,21 @@
-// recommend.ts — детерминированный движок рекомендаций (§8, ТЗ 3.3):
-// правило = (условие на фактах → шаблон), каждая фраза привязана к
-// fact_refs. Числовой ΔScore — ТОЛЬКО у presence-правил. В4.1-fix (К-Ф1.2):
-// реальный прирост итога — разность computeFromFacts на подменённых фактах
-// и на фактах скана, с фактической перенормировкой и капом 49 (решение
-// Екатерины 17.09 «Прирост в рекомендациях — реальная цифра»); прежний
-// номинальный вектор 100 отменён. Активационные — отдельная ветка без числа:
-// приоритет «открывает категорию», Δ от NULL — текстом coverage X→Y.
-// Порядок (4.3.0, Р3): правила серьезности (appsec-critical, fix-red-runs) →
-// числовые Δ desc → активационные по весу категории desc → прочие
-// скор-правила. LLM (В5) ничего не решает — только формулировки.
-// В4.1 (К1): одна выдача на скан; правило несёт channel (cicd | appsec |
-// null = публичное) — карточка отфильтровывает правила закрытых зрителю
-// каналов. Δ правил с channel относится к Repo Health Score, остальных —
-// к HealthCraft Index (В4.3).
-// В4.1-fix круг 2: движок — чистая recommendFromFacts(ok, ctx) с инъекцией
-// оценщика Δ; карточка собирает канальные правила на ПОКАЗАННЫХ фактах
-// (CI/Security из своих сканов) своим оценщиком; порядок — одна функция
-// orderRecommendations для движка и для объединённой выдачи карточки.
-// В4.9 (К9.10): тексты правил — ОДНА чистая функция `recommendationText`
-// (ключ правила + параметры из фактов). Движок зовёт её при записи, карточка
-// (`api/repos.ts`) — при чтении, подставляя параметры из фактов того же
-// скана: новые формулировки видны без пересчёта каталога. Условия
-// срабатывания, Δ и порядок не менялись — только тексты.
+// Детерминированный движок рекомендаций (ТЗ 3.3, docs/methodology.md §6):
+// правило = (условие на фактах -> шаблон), каждая фраза привязана к fact_refs.
+// Числовой прирост есть ТОЛЬКО у presence-правил: это реальная разность
+// computeFromFacts на подмененных фактах и на фактах скана, с перенормировкой
+// и капом 49, а не номинальный вес. Активационные правила идут без числа:
+// они «открывают категорию».
+// Порядок: правила серьезности (appsec-critical, fix-red-runs) -> числовые Δ по
+// убыванию -> активационные по весу категории -> прочие скор-правила.
+// LLM здесь ничего не решает.
+// Одна выдача на скан; правило несет channel (cicd | appsec | null = публичное),
+// и карточка скрывает правила закрытых зрителю каналов. Δ правил с channel
+// относится к Repo Health Score, остальных – к HealthCraft Index.
+// Движок – чистая recommendFromFacts(ok, ctx) с внешним оценщиком Δ: карточка
+// собирает канальные правила на ПОКАЗАННЫХ фактах (CI/Security из своих сканов)
+// своим оценщиком, а порядок для обеих выдач задает одна orderRecommendations.
+// Тексты правил – ОДНА чистая функция `recommendationText` (ключ правила +
+// параметры из фактов): движок зовет ее при записи, карточка (`api/repos.ts`) –
+// при чтении, поэтому новые формулировки видны без пересчета.
 import type { Database } from "bun:sqlite";
 import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
 import { SCORE_WEIGHTS, CategoryKey, OLD_SHARE_MIN_BASE, SECRETS_CRITICAL_TOTAL_CAP } from "./model";
@@ -30,7 +24,7 @@ import { issuesClosedCounted } from "./derived";
 import { fmtDecimal, fmtScore, fmtSigned } from "../web/format";
 import { runOutcome } from "../collectors/run-status";
 
-/** Канал правила: данные, видимые только зрителю с доступом (К2). */
+/** Канал правила: данные, видимые только зрителю с доступом. */
 export type RecommendationChannel = "cicd" | "appsec";
 
 export interface Recommendation {
@@ -56,13 +50,13 @@ export interface RecommendOptions {
 export const round4 = (x: number): number => Math.round(x * 10000) / 10000;
 
 /**
- * Почему прирост presence-правила равен нулю (текст — `recommendationText`).
- * 4.3.0 (Н8): `no-runs` — CI-правило при невидимых запусках: числа нет,
- * эффект — текстом «оценка появится с запусками».
+ * Почему прирост presence-правила равен нулю (текст – `recommendationText`).
+ * `no-runs` – CI-правило при невидимых запусках: числа нет, эффект текстом
+ * «оценка появится с запусками».
  */
 export type DeltaReason = "code-empty" | "no-total" | "cap" | "no-runs";
 
-/** Реальный прирост итога правила при подмене фактов (К-Ф1.2); reason — причина Δ = 0. */
+/** Реальный прирост итога правила при подмене фактов; reason – причина Δ = 0. */
 export type DeltaEvaluator = (
   channel: RecommendationChannel | null,
   patch: (facts: Map<string, unknown>) => void,
@@ -70,31 +64,30 @@ export type DeltaEvaluator = (
 
 export interface RecommendFactsContext {
   delta: DeltaEvaluator;
-  /** скор категории Issues — текст start-tracker */
+  /** балл категории Issues – для текста start-tracker */
   issuesScore: number | null;
-  /** "channel" — только правила каналов CI/Security (карточка, круг 2) */
+  /** "channel" – только правила каналов CI/Security (так их собирает карточка) */
   only?: "all" | "channel";
   /**
-   * 4.2.0 (М1.14 аудита В5.3): в репозитории нет кода (пустой или без
-   * файлов) — оценка 0 по Q&A №13, и совет один: добавить код. Трекер и
-   * россыпь presence-правил с эффектом «+0,0» такому репо ничего не дают.
+   * В репозитории нет кода (пустой или без файлов): по разъяснению организаторов
+   * оценка 0, и совет один – добавить код. Трекер и россыпь presence-правил
+   * с эффектом «+0,0» такому репо ничего не дают.
    */
   codeEmpty?: boolean;
   /**
-   * 4.3.0 (Н7, F8/F9): баллы категорий той же оценки. Скор-правило срабатывает
-   * только у оцененной категории — «повысит балл» категории без балла формула
-   * дать не может. Не передано — правила не фильтруются (прежнее поведение).
+   * Баллы категорий той же оценки. Скор-правило срабатывает только у оцененной
+   * категории: «повысит балл» категории без балла формула дать не может.
+   * Не передано – правила не фильтруются.
    */
   categoryScores?: Partial<Record<CategoryKey, number | null>>;
   /**
-   * В5.5 закрытие (Г1.21): число авторов той же оценки (показатель «Число
-   * авторов», `activity.contributors`) — только для текста `codeowners-missing`;
-   * условие правила и его эффект от него не зависят.
+   * Число авторов той же оценки (`activity.contributors`) – только для текста
+   * `codeowners-missing`; условие правила и его эффект от него не зависят.
    */
   authors?: number | null;
 }
 
-// ---------- тексты правил (К9.10): одна функция для записи и чтения ----------
+// ---------- тексты правил: одна функция для записи и чтения ----------
 
 /** README: разделы, которые ищет сервис (флаги факта `docs.readme`). */
 export type ReadmeSection = "install" | "build" | "test";
@@ -113,27 +106,27 @@ export interface RecommendationParams {
   issuesScore?: number | null;
   /** speed-up-pipeline: медиана длительности, минуты */
   minutes?: number;
-  /** appsec-critical: есть утекшие секреты (потолок 49 действует только при них, Д1) */
+  /** appsec-critical: есть утекшие секреты (потолок 49 действует только при них) */
   secrets?: boolean;
   /**
-   * appsec-critical / appsec-high (круг 2, К6): потолок категории, который держат
-   * находки этого уровня сейчас (40 / 69), или null — балл ниже потолка
+   * appsec-critical / appsec-high: потолок категории, который держат находки
+   * этого уровня сейчас (40 / 69), или null – балл ниже потолка
    */
   capLimit?: number | null;
-  /** appsec-critical / appsec-high (К6): устранение находок уровня поднимет балл категории (пересчет) */
+  /** appsec-critical / appsec-high: устранение находок уровня поднимет балл категории (по пересчету) */
   gain?: boolean;
   /** resolve-old-todos: пометок старше 180 дней и всего */
   older?: number;
   total?: number;
   /** reduce-stale-issues: доля открытых задач без движения, % */
   percent?: number;
-  /** speed-up-issue-close: медиана закрытия, дни (Д2: округляется до целых) */
+  /** speed-up-issue-close: медиана закрытия, дни */
   days?: number;
-  /** codeowners-missing (Г1.21): число авторов — показатель «Число авторов» той же оценки */
+  /** codeowners-missing: число авторов той же оценки */
   authors?: number | null;
 }
 
-/** Роли текста действия (К9.10): заголовок — глагол, пояснение — причина, эффект. */
+/** Части текста: действие – глагол, problem – причина, expectedImpact – эффект. */
 export interface RecommendationText {
   action: string;
   problem: string;
@@ -155,7 +148,7 @@ const SECTION_WORDS: Record<ReadmeSection, { title: string; en: string; about: s
 
 const joinAnd = (items: string[]): string => (items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} и ${items.at(-1)}`);
 
-/** Г1.21: до скольких авторов совет CODEOWNERS звучит как задел на будущее (текст, не условие правила). */
+/** До скольких авторов совет CODEOWNERS звучит как задел на будущее (меняет текст, не условие правила). */
 export const CODEOWNERS_FEW_AUTHORS = 2;
 
 /** Родительный падеж после «из N»: из 1 пометки, из 5 пометок, из 21 пометки. */
@@ -172,7 +165,7 @@ const daysWord = (n: number): string => {
 const categoryImpact = (title: string): string => `повысит балл категории «${title}»`;
 
 function presenceImpact(p: RecommendationParams): string | null {
-  // Н8: запуски не видны — эффект словами, без числа (CI без запусков не оценивается)
+  // запуски не видны – эффект словами, без числа (CI без запусков не оценивается)
   if (p.reason === "no-runs") return DELTA_REASON_TEXT["no-runs"];
   if (typeof p.delta !== "number") return null;
   const scope = p.channel ? "к Repo Health Score" : "к HealthCraft Index";
@@ -180,10 +173,10 @@ function presenceImpact(p: RecommendationParams): string | null {
 }
 
 /**
- * Круг 2 (К6, G8, NP9): совет по открытым находкам AppSec уровня critical или
- * high — текстом по факту. Потолок держит балл — «снимет потолок N»; балл ниже
- * потолка и устранение его поднимет — «повысит балл»; не поднимет (плотность на
- * полу от прочих находок) — роста не обещаем.
+ * Совет по открытым находкам AppSec уровня critical или high – текстом по факту.
+ * Потолок держит балл – «снимет потолок N»; балл ниже потолка и устранение его
+ * поднимет – «повысит балл»; не поднимет (плотность на полу от прочих находок) –
+ * роста не обещаем.
  */
 function appsecLevelText(p: RecommendationParams, action: string, what: string): RecommendationText | null {
   if (p.capLimit === undefined || typeof p.gain !== "boolean") return null;
@@ -199,15 +192,15 @@ function appsecLevelText(p: RecommendationParams, action: string, what: string):
   };
 }
 
-/** К2: доля файлов тестов, для которой совет `add-tests` считает эффект. */
+/** Доля файлов тестов, для которой совет `add-tests` считает эффект. */
 export const ADD_TESTS_SHARE = 0.1;
 
 /** Эпоха для пересчета «Безопасности»: категория от времени не зависит. */
 const SECURITY_EPOCH = new Date(0);
 
 /**
- * К6: что даст устранение открытых находок уровня — по пересчету категории
- * (не обещание): держат ли они сейчас потолок и вырастет ли балл.
+ * Что даст устранение открытых находок уровня – по пересчету категории:
+ * держат ли они сейчас потолок и вырастет ли балл.
  */
 export function appsecFixEffect(ok: Map<string, unknown>, level: "critical" | "high"): { capLimit: number | null; gain: boolean } {
   const before = computeFromFacts(ok, { scanId: 0, repoId: 0 }, SECURITY_EPOCH).categories.security;
@@ -222,9 +215,9 @@ export function appsecFixEffect(ok: Map<string, unknown>, level: "critical" | "h
 }
 
 /**
- * Тексты правила по ключу и параметрам. null — ключ неизвестен или параметр
- * не восстановился: тогда карточка показывает сохраненный текст (запасной
- * путь К9.10). Формальный тон эталона вида, термины SourceCraft (22.09).
+ * Тексты правила по ключу и параметрам. null – ключ неизвестен или параметр
+ * не восстановился: тогда карточка показывает сохраненный текст.
+ * Тон формальный, термины – как в интерфейсе SourceCraft.
  */
 export function recommendationText(ruleId: string, p: RecommendationParams): RecommendationText | null {
   const presence = (action: string, problem: string): RecommendationText | null => {
@@ -237,8 +230,8 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
     case "contributing-missing":
       return presence("Добавьте файл CONTRIBUTING.md", "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.");
     case "codeowners-missing":
-      // В5.5 закрытие (Г1.21, п. 19 замечаний): у проекта 1-2 авторов ответственный
-      // и так понятен — совет звучит как задел на будущее, а не как дефект
+      // у проекта из 1-2 авторов ответственный и так понятен: совет звучит как
+      // задел на будущее, а не как дефект
       if (typeof p.authors === "number" && p.authors >= 1 && p.authors <= CODEOWNERS_FEW_AUTHORS) {
         return presence(
           "Добавьте файл CODEOWNERS",
@@ -260,9 +253,8 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
       );
     }
     case "ci-missing":
-      // В5.5 закрытие (Г1.21, п. 20 замечаний): у зеркала сборка может жить у
-      // источника — оговорка текстом; признака «зеркало» в методике нет, поэтому
-      // она стоит у правила всегда и говорит, что именно оценивается
+      // у зеркала сборка может жить у источника; признака «зеркало» в методике нет,
+      // поэтому оговорка стоит у правила всегда и говорит, что именно оценивается
       return presence(
         "Настройте CI",
         "Нет файла .sourcecraft/ci.yaml: изменения не собираются и не проверяются автоматически. Если репозиторий – зеркало, сборка может идти у источника, но сервис оценивает только CI в SourceCraft.",
@@ -297,7 +289,7 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
     case "fix-red-runs":
       return { action: "Почините CI", problem: "Последний запуск CI завершился ошибкой или успешны меньше 90% запусков.", expectedImpact: categoryImpact("CI/CD") };
     case "ci-never-ran":
-      // 4.3.0 (Н7, D11): CI заявлен, запуски видны, а их 0
+      // CI заявлен, запуски видны, а их 0
       return {
         action: "Запустите CI",
         problem: "Файл .sourcecraft/ci.yaml с командами есть, но CI ни разу не запускался: изменения не проверяются автоматически.",
@@ -312,7 +304,7 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
       };
     case "appsec-critical":
       if (typeof p.secrets !== "boolean") return null;
-      // Д1: потолок 49 действует только при утекших секретах — без них его не обещаем
+      // потолок 49 действует только при утекших секретах – без них его не обещаем
       if (p.secrets) {
         return {
           action: "Устраните утечки секретов",
@@ -322,7 +314,7 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
       }
       return appsecLevelText(p, "Устраните критичные находки AppSec", "критичные уязвимости");
     case "appsec-high":
-      // круг 2 (К6, G8б): открытые находки high без critical — потолок 69 без совета
+      // открытые high без critical держат потолок 69 – без этого правила совета о них не было бы
       return appsecLevelText(p, "Устраните находки AppSec высокой важности", "уязвимости высокой важности");
     case "resolve-old-todos":
       if (typeof p.older !== "number" || typeof p.total !== "number") return null;
@@ -339,16 +331,15 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
         expectedImpact: categoryImpact("Задачи"),
       };
     case "add-tests":
-      // круг 2 (К2, NP9): «Тесты» — бонус «Кода»; эффект — пересчет для тестов в 10% файлов кода
+      // «Тесты» – бонус «Кода»; эффект – пересчет для тестов в 10% файлов кода
       return presence(
         "Добавьте тесты",
         "В репозитории нет файлов тестов. Сервис находит их в каталогах test, tests и spec и по именам test_*, *_test.*, *.test.*, *.spec.*; пустые файлы не засчитываются. Эффект посчитан для тестов в 10% файлов кода.",
       );
     case "speed-up-issue-close": {
       if (typeof p.days !== "number") return null;
-      // А13 аудита (круг 4): срок закрытия назывался двумя числами — «49 дней»
-      // в действии против «48,8 дня» в таблице и приложении. Число одно и
-      // показывается так же, как в таблице показателей (десятые, `fmtDecimal`).
+      // число то же и в том же виде, что в таблице показателей (десятые, `fmtDecimal`):
+      // иначе совет говорил бы «49 дней», а таблица «48,8 дня»
       const days = Math.round(p.days * 10) / 10;
       return {
         action: "Ускорьте обработку новых задач",
@@ -401,14 +392,14 @@ export function recommendationParams(ruleId: string, ok: Map<string, unknown>, e
   return p;
 }
 
-/** Порядок score-правил движка (§8) — общий для движка и объединённой выдачи карточки. */
+/** Порядок score-правил – общий для движка и объединенной выдачи карточки. */
 export const SCORE_RULE_ORDER = ["appsec-critical", "fix-red-runs", "appsec-high", "ci-never-ran", "speed-up-pipeline", "resolve-old-todos", "reduce-stale-issues", "speed-up-issue-close"];
 
 /**
- * 4.3.0 (Р3, J8): правила серьезности — первыми во всей выдаче, до presence:
- * утечки секретов и критичные находки AppSec (`appsec-critical`), затем
- * красный CI. Пример ТЗ 3.3: критичная уязвимость — высокий приоритет, а не
- * шестая строка после «Добавьте CODEOWNERS».
+ * Правила серьезности – первыми во всей выдаче, до presence: утечки секретов и
+ * критичные находки AppSec (`appsec-critical`), затем красный CI. Как в примере
+ * ТЗ 3.3: критичная уязвимость – высокий приоритет, а не шестая строка после
+ * «Добавьте CODEOWNERS».
  */
 export const SEVERITY_RULES = ["appsec-critical", "fix-red-runs"];
 
@@ -421,15 +412,14 @@ interface Orderable {
 }
 
 /**
- * Порядок выдачи (§8, К-Ф1.2; круг 2 LOW-3). Вход — одна или несколько
- * выдач, каждая уже в порядке движка (карточка: сохранённые правила P и
- * канальные правила на показанных фактах). presence с числовым Δ — по Δ
- * убыв., затем rule_id; presence со скрытым Δ (null) — после них по rule_id
- * (позиция не раскрывает величину); активационные — по весу категории убыв.,
- * rule_id; score-правила — слиянием выдач по порядку движка
- * (SCORE_RULE_ORDER; правило вне списка сохраняет место в своей выдаче).
- * 4.3.0 (Р3): правила серьезности (SEVERITY_RULES) выносятся в начало всей
- * выдачи, прочие score-правила — в конце. Номера 1..N.
+ * Порядок выдачи. Вход – одна или несколько выдач, каждая уже в порядке движка
+ * (у карточки: сохраненные публичные правила и канальные правила на показанных
+ * фактах). presence с числовым Δ – по убыванию Δ, затем rule_id; presence со
+ * скрытым Δ (null) – после них по rule_id (позиция не раскрывает величину);
+ * активационные – по весу категории по убыванию, затем rule_id; score-правила –
+ * слиянием выдач по SCORE_RULE_ORDER (правило вне списка сохраняет место в своей
+ * выдаче). Правила серьезности (SEVERITY_RULES) – в начало всей выдачи, прочие
+ * score-правила – в конец. Номера 1..N.
  */
 export function orderRecommendations<T extends Orderable>(...lists: T[][]): T[] {
   const all = lists.flat();
@@ -465,7 +455,6 @@ export function orderRecommendations<T extends Orderable>(...lists: T[][]): T[] 
     }
     scoreRules = merged;
   }
-  // Р3: серьезность → presence по Δ → активационные → прочие скор-правила
   const severity = SEVERITY_RULES.flatMap((id) => scoreRules.filter((r) => r.ruleId === id));
   const rest = scoreRules.filter((r) => !SEVERITY_RULES.includes(r.ruleId));
   const out = [...severity, ...presence, ...activation, ...rest];
@@ -480,11 +469,11 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
   const eff = effectiveFacts(db, scanId, scores.repoId);
   const ok = eff.ok;
 
-  // ---------- presence-правила (реальный Δ итога, К-Ф1.2) ----------
-  // Δ = итог на подменённых фактах − итог на фактах скана: правила без
-  // канала — к Score в рейтинге (4 категории, фактическая перенормировка),
-  // канальные — к полному Score (кап 49 учитывается). Один вызов
-  // computeFromFacts на правило; подмены — таблица `presencePatches`.
+  // ---------- presence-правила (реальный Δ итога) ----------
+  // Δ = итог на подмененных фактах минус итог на фактах скана: правила без канала –
+  // к HealthCraft Index (4 категории, с перенормировкой), канальные – к полному
+  // Score (с капом 49). Один вызов computeFromFacts на правило; подмены –
+  // таблица `presencePatches`.
   const now = opts.now ?? new Date(scores.computedAt);
   const input = { scanId, repoId: scores.repoId, stale: eff.stale, staleCats: eff.staleCats, emptyRepo: eff.emptyRepo };
   const base = computeFromFacts(ok, input, now);
@@ -494,9 +483,9 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
 }
 
 /**
- * Реальный прирост правила на фактах скана (К-Ф1.2): итог на подмененных
- * фактах − итог `base` на тех же фактах. В5.9: вынесен из `recommend`, чтобы
- * лестница (`score/ladder.ts`) считала Δ шага той же формулой, что движок.
+ * Реальный прирост правила: итог на подмененных фактах минус итог `base` на
+ * исходных. Отдельная функция, чтобы лестница (`score/ladder.ts`) считала Δ шага
+ * той же формулой, что движок.
  */
 export function factsDeltaEvaluator(ok: Map<string, unknown>, input: ComputeInput, now: Date, base: Scores = computeFromFacts(ok, input, now)): DeltaEvaluator {
   const secretsCritical = (ok.get("appsec.findings") as { secrets_critical?: unknown } | undefined)?.secrets_critical === true;
@@ -515,12 +504,12 @@ export function factsDeltaEvaluator(ok: Map<string, unknown>, input: ComputeInpu
   };
 }
 
-/** Подмена фактов «совет выполнен» (К-Ф1.2). */
+/** Подмена фактов «совет выполнен». */
 export type FactsPatch = (facts: Map<string, unknown>) => void;
 
 /**
- * В5.9: presence-правило как данные — условие срабатывания уже проверено на
- * фактах, `patch` — подмена «совет выполнен». ОДНА таблица для движка
+ * Presence-правило как данные: условие срабатывания уже проверено на фактах,
+ * `patch` – подмена «совет выполнен». ОДНА таблица для движка
  * (`recommendFromFacts`) и лестницы (`score/ladder.ts`): лестница не может
  * разойтись с рекомендациями ни условием, ни подменой.
  */
@@ -528,16 +517,16 @@ export interface PresencePatch {
   ruleId: string;
   factRefs: string[];
   patch: FactsPatch;
-  /** null — публичное правило (Δ к HealthCraft Index) */
+  /** null – публичное правило (Δ к HealthCraft Index) */
   channel: RecommendationChannel | null;
-  /** CI (Н8): запуски не видны или все идут — числа нет, эффект словами */
+  /** CI: запуски не видны или все идут – числа нет, эффект словами */
   noRuns?: boolean;
 }
 
 /**
  * Presence-правила, чьи условия выполнены на фактах `ok`, в порядке движка.
- * `pub` — публичные правила (без канала); `codeScored` — категория «Код»
- * оценена (Н7: условие `add-tests`). CI-правила (канал cicd) — всегда.
+ * `pub` – включать публичные правила (без канала); `codeScored` – категория «Код»
+ * оценена (условие `add-tests`). CI-правила (канал cicd) – всегда.
  */
 export function presencePatches(ok: Map<string, unknown>, opts: { pub: boolean; codeScored: boolean }): PresencePatch[] {
   const out: PresencePatch[] = [];
@@ -547,14 +536,14 @@ export function presencePatches(ok: Map<string, unknown>, opts: { pub: boolean; 
 
   const presence_ = ok.get("docs.presence") as DocsPresenceValue | undefined;
   if (opts.pub && presence_) {
-    // Н7 (F7): тот же признак, что в расчете (`licensePresent`): лицензия
-    // под именем COPYING у фактов до Р4в уже в балле — совета с «+0» нет
+    // тот же признак, что в расчете (`licensePresent`): лицензия под именем
+    // COPYING в старых фактах уже учтена в балле, и совета с «+0» нет
     if (!licensePresent(ok)) out.push({ ruleId: "license-missing", factRefs: ["docs.presence"], patch: withPresence("license"), channel: null });
     if (presence_.contributing !== true) out.push({ ruleId: "contributing-missing", factRefs: ["docs.presence"], patch: withPresence("contributing"), channel: null });
     if (presence_.codeowners !== true) out.push({ ruleId: "codeowners-missing", factRefs: ["docs.presence"], patch: withPresence("codeowners"), channel: null });
     const readme = ok.get("docs.readme") as DocsReadmeValue | undefined;
     if (presence_.readme !== true) {
-      // обещание: README появился (подмена К-Ф1.2 — присутствие без объёма и секций)
+      // обещаем только появление README: присутствие без объема и разделов
       out.push({
         ruleId: "readme-missing",
         factRefs: ["docs.presence", "docs.readme"],
@@ -580,10 +569,9 @@ export function presencePatches(ok: Map<string, unknown>, opts: { pub: boolean; 
       }
     }
   }
-  // круг 2 (К2): «Код» оценен, сборщик 3 посчитал тесты — непустых нет. Эффект —
-  // реальный пересчет с тестами в 10% файлов кода; «Тесты» — бонус (В1), и если
-  // он при таких тестах балл не поднимает, совета с «+0» нет (фильтр `delta > 0`
-  // у всех presence-правил)
+  // «Код» оценен, сборщик посчитал тесты, и непустых нет. Эффект – реальный
+  // пересчет с тестами в 10% файлов кода; «Тесты» – бонус, и если он балл не
+  // поднимает, совета с «+0» нет (фильтр `delta > 0` у всех presence-правил)
   const treeFact = ok.get("tree.stats") as { source_files?: unknown; test_files?: unknown } | undefined;
   if (opts.pub && opts.codeScored && treeFact && treeFact.test_files === 0 && typeof treeFact.source_files === "number" && treeFact.source_files > 0) {
     const sourceFiles = treeFact.source_files;
@@ -597,13 +585,13 @@ export function presencePatches(ok: Map<string, unknown>, opts: { pub: boolean; 
     });
   }
   const cicdCfg = ok.get("cicd.configs") as { has_ci_yaml?: unknown; has_steps?: unknown; steps_note?: unknown } | undefined;
-  // CI-правила — канал cicd: Δ по CI-весу исполняется только в полном
-  // Score, поэтому правило видит лишь зритель с доступом к CI (К2)
+  // CI-правила – канал cicd: вес CI есть только в полном Score, поэтому правило
+  // видит лишь зритель с доступом к CI
   if (cicdCfg && !ciUnparsedOf(cicdCfg) && !(cicdCfg.has_ci_yaml === true && cicdCfg.has_steps === true)) {
     const hasYaml = cicdCfg.has_ci_yaml === true;
     const runsFact = ok.get("cicd.runs");
-    // запуски видны, но все идут (ни одного завершенного) — CI после правки
-    // будет «нет данных», и число дала бы перенормировка, а не CI (P7 приемки)
+    // запуски видны, но все идут (ни одного завершенного): CI после правки будет
+    // «нет данных», и число дала бы перенормировка, а не CI
     const rp = runsFact as { runs_count?: unknown; runs_total?: unknown } | undefined;
     const runsPending = rp !== undefined && rp.runs_count === 0 && typeof rp.runs_total === "number" && rp.runs_total > 0;
     out.push({
@@ -613,22 +601,22 @@ export function presencePatches(ok: Map<string, unknown>, opts: { pub: boolean; 
         facts.set("cicd.configs", hasYaml ? { ...(facts.get("cicd.configs") as object), has_steps: true } : { has_ci_yaml: true, has_steps: true });
       },
       channel: "cicd",
-      // 4.3.0 (Н8, F10): запуски не видны — CI «нет данных» при любом конфиге,
-      // и совет не обещает числа (раньше прирост давала перенормировка, а не CI)
+      // запуски не видны – CI «нет данных» при любом конфиге, и совет не обещает
+      // числа: прирост дала бы перенормировка, а не CI
       noRuns: runsFact === undefined || runsPending,
     });
   }
   return out;
 }
 
-/** М2.1 аудита В5.3: ci.yaml не разобран — неизвестно, есть ли шаги; совета «добавьте команды» нет, как нет и балла. */
+/** ci.yaml не разобран – неизвестно, есть ли шаги; совета «добавьте команды» нет, как нет и балла. */
 function ciUnparsedOf(cicdCfg: { has_ci_yaml?: unknown; has_steps?: unknown; steps_note?: unknown } | undefined): boolean {
   return cicdCfg?.has_ci_yaml === true && (typeof cicdCfg.has_steps !== "boolean" || typeof cicdCfg.steps_note === "string");
 }
 
 /**
- * В5.9: публичные активационные правила (без числа, «открывает категорию»),
- * чьи условия выполнены на фактах, — одно условие для движка и лестницы.
+ * Публичные активационные правила (без числа, «открывает категорию»), чьи
+ * условия выполнены на фактах, – одно условие для движка и лестницы.
  */
 export function publicActivationRules(ok: Map<string, unknown>): { ruleId: string; opens: CategoryKey; factRefs: string[] }[] {
   const stats = ok.get("issues.stats") as { open?: unknown; closed?: unknown } | undefined;
@@ -640,24 +628,23 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
   const pub = ctx.only !== "channel";
   if (ctx.codeEmpty === true) return pub ? [act("add-code", "code", ["tree.stats"], {})] : [];
   const realDelta = ctx.delta;
-  // Н7: скор-правило — только у оцененной категории (без сведений — как раньше)
+  // скор-правило – только у оцененной категории (без сведений о баллах – без фильтра)
   const scored = (cat: CategoryKey): boolean => ctx.categoryScores === undefined || (ctx.categoryScores[cat] ?? null) !== null;
   const presence: Recommendation[] = [];
   const activation: Recommendation[] = [];
   const scoreRules: Recommendation[] = [];
   const presenceRule = (ruleId: string, factRefs: string[], patch: FactsPatch, channel: RecommendationChannel | null = null) => {
     const real = realDelta(channel, patch);
-    // 4.3.1 (В5.5 тур 1, П-1 парковки В4.9): рекомендация с эффектом «+0,0»
-    // не выводится вовсе — ни без причины, ни с ней (cap 49, итог NULL):
-    // совет, который пересчет не подтверждает числом, — не рекомендация
-    // (тот же фильтр, что у add-tests с круга 2: `delta > 0`). Отрицательная
-    // дельта (перенормировка против совета) подавляется тем же порогом.
+    // рекомендация с эффектом «+0,0» не выводится вовсе – ни без причины, ни с ней
+    // (cap 49, итог NULL): совет, который пересчет не подтверждает числом, – не
+    // рекомендация. Отрицательная дельта (перенормировка против совета) отсекается
+    // тем же порогом.
     if (real.delta <= 0) return;
     const texts = recommendationText(ruleId, recommendationParams(ruleId, ok, { delta: real.delta, reason: real.reason, channel, authors: ctx.authors }))!;
     presence.push({ ruleId, kind: "presence", priority: 0, ...texts, factRefs, deltaScore: real.delta, opensCategory: null, channel });
   };
 
-  // В5.9: условия и подмены presence-правил — таблица `presencePatches` (общая с лестницей)
+  // условия и подмены presence-правил – таблица `presencePatches` (общая с лестницей)
   for (const p of presencePatches(ok, { pub, codeScored: scored("code") })) {
     if (p.noRuns) {
       const texts = recommendationText(p.ruleId, recommendationParams(p.ruleId, ok, { reason: "no-runs", channel: p.channel }))!;
@@ -675,8 +662,8 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
     for (const a of publicActivationRules(ok)) activation.push(act(a.ruleId, a.opens, a.factRefs, { issuesScore: ctx.issuesScore ?? 0 }));
   }
   if (!ok.has("appsec.findings")) {
-    // нейтральный текст (К1): рекомендация видна только зрителю с доступом
-    // к Security, а данных AppSec у скана нет — ни подключения, ни скана
+    // нейтральный текст: рекомендацию видит только зритель с доступом к Security,
+    // а данных AppSec у скана нет – ни подключения, ни скана
     activation.push(act("connect-appsec", "security", ["appsec.findings"], {}, "appsec"));
   }
   if (!runsFact && cicdCfg?.has_ci_yaml === true && cicdCfg?.has_steps === true) {
@@ -686,23 +673,23 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
   // ---------- скор-правила (после появления данных; влияние текстом) ----------
   const score = (ruleId: string, factRefs: string[], channel: RecommendationChannel | null = null) =>
     scoreRules.push(mkScore(ruleId, factRefs, recommendationParams(ruleId, ok), channel));
-  // Н7 (F9): CI-правила — только при ci.yaml со шагами и оцененной CI (те же
-  // условия, что у балла): без конфига «почините CI» формула вырастить не может
+  // CI-правила – только при ci.yaml со шагами и оцененной CI (те же условия, что
+  // у балла): без конфига «почините CI» формула вырастить не может
   const ciDeclared = cicdCfg?.has_ci_yaml === true && cicdCfg.has_steps === true && !ciUnparsed;
   const rc = runsFact as { runs_count?: unknown; runs_total?: unknown } | undefined;
   if (ciDeclared && rc !== undefined && rc.runs_count === 0 && !(typeof rc.runs_total === "number" && rc.runs_total > 0) && scored("cicd")) {
-    // Н7 (D11): запуски видны, их 0 — «CI заявлен, но не запускался»
+    // запуски видны, их 0 – «CI заявлен, но не запускался»
     score("ci-never-ran", ["cicd.runs", "cicd.configs"], "cicd");
   }
   if (ciDeclared && scored("cicd") && runsFact && typeof (runsFact as { runs_count?: unknown }).runs_count === "number" && (runsFact as { runs_count?: number }).runs_count! > 0) {
     const rf = runsFact as { last_status?: unknown; success_rate?: unknown; weighted_success_rate?: unknown; duration_p50?: unknown };
-    // 4.2.0 (B8 аудита): условие — от той же доли, что считает балл (взвешенная
-    // свежестью, иначе простая); идущий запуск ошибкой не считается
-    // 4.3.0 (Н7): поле взвешенной доли есть и пусто — все запуски старше года:
-    // балл говорит «за год не запускался», и советов про красный или долгий CI нет
+    // условие – от той же доли, что считает балл (взвешенная свежестью, иначе
+    // простая); идущий запуск ошибкой не считается. Поле взвешенной доли есть и
+    // пусто – все запуски старше года: балл говорит «за год не запускался», и
+    // советов про красный или долгий CI нет
     const staleOnly = "weighted_success_rate" in rf && rf.weighted_success_rate === null;
     const passInput = typeof rf.weighted_success_rate === "number" ? rf.weighted_success_rate : rf.success_rate;
-    // М2.5: last_status — последний ЗАВЕРШЕННЫЙ запуск (сборщик); провал — по перечню спеки
+    // last_status – последний ЗАВЕРШЕННЫЙ запуск; провал – по перечню статусов API (runOutcome)
     const lastFailed = runOutcome(typeof rf.last_status === "string" ? rf.last_status : null) === "failure";
     if (!staleOnly && (lastFailed || (typeof passInput === "number" && passInput < 0.9))) score("fix-red-runs", ["cicd.runs"], "cicd");
     if (!staleOnly && typeof rf.duration_p50 === "number" && rf.duration_p50 > 15 * 60) score("speed-up-pipeline", ["cicd.runs"], "cicd");
@@ -710,27 +697,26 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
   const appsec = ok.get("appsec.findings") as AppsecFindingsValue | undefined;
   if (appsec) {
     const crit = (appsec.severity_counts?.critical as number | undefined) ?? 0;
-    // утечка секретов — всегда (потолок 49 действует на итог при любой
-    // категории); критичные находки — при оцененной «Безопасности» (Н7; с Р3
-    // они держат потолок категории 40)
+    // утечка секретов – всегда (потолок 49 действует на итог при любой категории);
+    // критичные находки – при оцененной «Безопасности» (они держат потолок категории 40)
     if (appsec.secrets_critical === true || (crit > 0 && scored("security"))) score("appsec-critical", ["appsec.findings"], "appsec");
-    // круг 2 (К6): открытые high без critical — свой совет (потолок 69)
+    // открытые high без critical – свой совет (потолок 69)
     const high = (appsec.severity_counts?.high as number | undefined) ?? 0;
     if (crit === 0 && high > 0 && scored("security")) score("appsec-high", ["appsec.findings"], "appsec");
   }
   const todo = ok.get("code.todo") as { older_180d?: unknown; count?: unknown; fixme?: unknown; blamed_files?: unknown; todo_note?: unknown } | undefined;
   if (pub && scored("code") && todo && todo.todo_note !== "incomplete" && typeof todo.blamed_files === "number" && todo.blamed_files > 0) {
-    // B8: та же доля, что в балле (derived.ts: знаменатель не меньше OLD_SHARE_MIN_BASE)
+    // та же доля, что в балле (derived.ts: знаменатель не меньше OLD_SHARE_MIN_BASE)
     const total = ((todo.count ?? 0) as number) + ((todo.fixme ?? 0) as number);
     const older = (todo.older_180d ?? 0) as number;
     if (total > 0 && older / Math.max(total, OLD_SHARE_MIN_BASE) >= 0.3) score("resolve-old-todos", ["code.todo"]);
   }
   const statsFull = ok.get("issues.stats") as { open?: unknown; closed?: unknown; closed_counted?: unknown; stale_90d?: unknown; median_close_days?: unknown } | undefined;
   const openCount = typeof statsFull?.open === "number" ? statsFull.open : 0;
-  // 4.3.0 (Н7 + Р2): при 0 закрытых (проживших ≥ 1 ч) медианы закрытия нет —
-  // «ускорьте закрытие» не про что. Круг 2 (К6, E6): «разберите зависшие» —
-  // при открытых зависших независимо от закрытых: совет велит закрыть
-  // неактуальные, закрытие растит засчитанную выборку и снимает сжатие
+  // при 0 закрытых (проживших ≥ 1 ч) медианы закрытия нет – «ускорьте закрытие»
+  // не про что. «Разберите зависшие» – при открытых зависших независимо от
+  // закрытых: совет велит закрыть неактуальные, а закрытие растит засчитанную
+  // выборку и снимает сжатие
   const closedCounted = issuesClosedCounted(statsFull) ?? 0;
   if (pub && scored("issues") && statsFull && openCount > 0) {
     const share = ((statsFull.stale_90d ?? 0) as number) / Math.max(1, openCount);
@@ -738,11 +724,10 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
     if (closedCounted > 0 && typeof statsFull.median_close_days === "number" && statsFull.median_close_days >= 30) score("speed-up-issue-close", ["issues.stats"]);
   }
 
-  // ---------- порядок (§8, 4.3.0 Р3): серьезность → реальный Δ desc (затем rule_id) → активационные по весу desc → прочие score ----------
   return orderRecommendations([...presence, ...activation, ...scoreRules]);
 }
 
-/** Г1.21: показатель «Число авторов» оценки (`activity.contributors`) — для текста CODEOWNERS. */
+/** Показатель «Число авторов» оценки (`activity.contributors`) – для текста CODEOWNERS. */
 export function authorsOf(activity: { submetrics?: Record<string, { value?: unknown }> } | undefined): number | null {
   const v = activity?.submetrics?.["contributors"]?.value;
   return typeof v === "number" && Number.isFinite(v) ? v : null;
@@ -758,15 +743,15 @@ function mkScore(ruleId: string, factRefs: string[], params: RecommendationParam
   return { ruleId, kind: "score", priority: 0, ...texts, factRefs, deltaScore: null, opensCategory: null, channel };
 }
 
-/** Запись: PK (scan_id, model_version, rule_id) — пересчёт не дублирует. */
+/** PK (scan_id, model_version, rule_id) – пересчет не дублирует строки. */
 export function writeRecommendations(db: Database, scanId: number, modelVersion: string, recs: Recommendation[]): void {
   const stmt = db.query(
     `INSERT OR REPLACE INTO recommendations
        (scan_id, model_version, rule_id, priority, problem, action, fact_ref, expected_impact, delta_score, opens_category, source, channel)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'rule', ?)`,
   );
-  // одна выдача на скан: пересчёт заменяет набор целиком (исчезнувшее
-  // правило не остаётся висеть от прошлого прогона)
+  // одна выдача на скан: пересчет заменяет набор целиком (исчезнувшее
+  // правило не остается висеть от прошлого прогона)
   db.query("DELETE FROM recommendations WHERE scan_id = ? AND model_version = ?").run(scanId, modelVersion);
   for (const r of recs) {
     stmt.run(scanId, modelVersion, r.ruleId, r.priority, r.problem, r.action, r.factRefs.join(","), r.expectedImpact, r.deltaScore, r.opensCategory, r.channel);

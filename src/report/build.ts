@@ -1,19 +1,16 @@
-// build.ts — построитель модели отчёта по карточке (В4.9, К9.1-К9.8, Д3-Д5).
+// Построитель модели отчета по карточке. Чистая функция от ответа
+// `/api/repos/{org}/{repo}` — ни БД, ни сети: страница и отчет показывают одно и
+// то же из одного источника. Модель общая для MD и PDF (`model.ts`), рендеры —
+// `markdown.ts` и `pdf.ts`.
 //
-// Чистая функция от ответа `/api/repos/{org}/{repo}` — ни БД, ни сети:
-// страница и отчёт показывают одно и то же, источник данных один. Модель
-// общая для MD и PDF (`model.ts`), рендеры — `markdown.ts` и `pdf.ts`.
+// Вердикт, «почему» у категории, ограничения и «Как считается» — шаблоны из
+// фактов и баллов (закрытый набор ниже), а не LLM; действия — только
+// рекомендации движка. Каждое число отчета прослеживается до факта в
+// приложении (А — расчет, Б — источники, В — исходные данные, Г — паспорт анализа).
 //
-// Трекер-закон: вердикт, «почему» у категории, ограничения и «Как
-// считается» — шаблоны из фактов и баллов (закрытый набор ниже), не LLM;
-// действия — только рекомендации движка. Каждое число отчёта
-// прослеживается до факта в приложении (А — расчет, Б — источники, В —
-// исходные данные, Г — паспорт анализа).
-//
-// Порядок разделов — по эталону вида (круг 4): шапка → показатель с плашкой
-// и вердиктом → «Вклад категорий в оценку» → категории → «Что сделать
-// первым» → «Ограничения данных» → разбор → все рекомендации → «Как
-// считается» → приложение (в PDF с новой страницы).
+// Порядок разделов: шапка → показатели → вклад категорий → категории →
+// рекомендации → ограничения данных → проверка на накрутку и AI-обзор → разбор
+// → «Как считается» → приложение (в PDF с новой страницы).
 import { CATEGORY_ORDER, CATEGORY_TITLES, CHANNEL_TREE_KEY, type CardCategory, type CardEvidence, type CardRecommendation, type RepoCard } from "../api/repos";
 import { COVERAGE_NULL_BELOW, INDEX_WEIGHTS, SCORE_WEIGHTS, SEVERITY_WEIGHTS, SUBWEIGHTS, type CategoryKey } from "../score/model";
 import {
@@ -81,19 +78,19 @@ import {
 } from "./sections";
 import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle, subweightKey, type SubmetricContext } from "./submetrics";
 
-// В4.9, часть 2 гейта: основание, ограничения, вклады и таблица правил живут в
-// `sections.ts` (их берет и карточка); `whyText` реэкспортируется для тестов.
+// основание, ограничения, вклады и таблица правил живут в `sections.ts` (их
+// берет и карточка); `whyText` реэкспортируется для тестов
 export { whyText } from "./sections";
 
-/** Отчета без оценки нет (решение владельца 22.09): текст отказа маршрутов. */
+/** Текст отказа маршрутов: отчета без оценки нет. */
 export const REPORT_NO_SCORE = "Отчет появится после первого анализа: пока у репозитория нет оценки, собирать в документ нечего.";
 
 const DOC = "Отчет HealthCraft";
 const NBSP = "\u00a0";
-/** Действий на первом экране — не больше трех (эталон вида). */
+/** Действий на первом экране — не больше трех. */
 export const FIRST_ACTIONS = 3;
 
-// ---------- шаблоны (закрытый набор, К9.1) ----------
+// ---------- шаблоны (закрытый набор) ----------
 
 /** Действие-кандидат для строки порога: номер в разделе «Рекомендации» и эффект в шкале показателя. */
 export interface ThresholdAction {
@@ -104,10 +101,9 @@ export interface ThresholdAction {
 
 /**
  * Строка «близко к порогу» — если показатель в пределах 2 баллов от границы зоны.
- * Г1.16 (§2 24.09 «Вопрос 31 §4», вариант А): ниже границы строка называет
- * первое действие, которое ОДНО переводит оценку в следующую зону. Эффекты не
- * складываются — каждый посчитан при прочих равных; `actions` — только с
- * эффектом в шкале этого показателя (отбор — `thresholdActions`).
+ * Ниже границы строка называет первое действие, которое одно переводит оценку в
+ * следующую зону. Эффекты не складываются — каждый посчитан при прочих равных;
+ * `actions` — только с эффектом в шкале этого показателя (`thresholdActions`).
  */
 export function thresholdNote(value: number, actions: readonly ThresholdAction[] = []): string | null {
   const v = roundScore(value);
@@ -128,7 +124,7 @@ export function thresholdNote(value: number, actions: readonly ThresholdAction[]
 }
 
 /**
- * Действия с эффектом в шкале показателя (В4.3): у правила без канала эффект
+ * Действия с эффектом в шкале показателя: у правила без канала эффект
  * посчитан в HealthCraft Index, у канального (CI/CD, AppSec) — в Repo Health Score.
  */
 export function thresholdActions(recs: readonly CardRecommendation[], metric: string): ThresholdAction[] {
@@ -146,10 +142,10 @@ export function scoreChip(value: number | null): Chip {
 function categoryRow(card: RepoCard, key: CategoryKey, cat: CardCategory, ctx: SubmetricContext): CategoryRow {
   const name = CATEGORY_TITLES[key];
   const why = categoryWhy(card, key, ctx);
-  // Ступень 4 (В-9): закрытая зрителю категория — «Недоступно», а не «нет данных»
+  // закрытая зрителю категория — «Недоступно», а не «нет данных»
   if (cat.locked !== undefined) return { name, score: null, scoreText: "—", chip: { theme: "unknown", text: "Недоступно" }, why, mark: null };
-  // В5.5 закрытие (С13): то же условие и тот же текст, что у плашки категории на
-  // карточке (`cardView` → `c.stale`, `STALE_CATEGORY_MARK`)
+  // то же условие и тот же текст, что у плашки категории на карточке
+  // (`cardView` → `c.stale`, `STALE_CATEGORY_MARK`)
   const mark: Chip | null = cat.stale === true ? { theme: "warning", text: STALE_CATEGORY_MARK } : null;
   if (cat.score === null) return { name, score: null, scoreText: "—", chip: scoreChip(null), why, mark };
   return { name, score: cat.score, scoreText: fmtScore(cat.score), chip: scoreChip(cat.score), why, mark };
@@ -178,15 +174,13 @@ const h2 = (value: string): Block => ({ kind: "heading", level: 2, content: [tex
 const h3 = (value: string): Block => ({ kind: "heading", level: 3, content: [text(value)] });
 const col = (title: string, align: "left" | "right" = "left", width?: number): TableColumn => ({ title, align, width });
 
-/** Модель отчёта карточки — общий источник MD и PDF. */
+/** Модель отчета карточки — общий источник MD и PDF. */
 export function buildReportModel(card: RepoCard): ReportModel {
   const slug = `${card.repo.org}/${card.repo.repo}`;
   const dateIso = analysisDate(card);
   const date = dateIso ? fmtDate(dateIso) : null;
-  // Решение владельца 22.09 (круг 3 гейта): отчет без оценки не выдается —
-  // собирать в документ нечего, а в интерфейсе кнопки выгрузки у такого
-  // репозитория и не было. Маршруты `.md` и `.pdf` отказывают до сборки
-  // (`server.ts`), здесь — страховка контракта.
+  // отчет без оценки не выдается — собирать в документ нечего. Маршруты `.md` и
+  // `.pdf` отказывают еще до сборки (`server.ts`), здесь — страховка
   const blocks: Block[] = [headerBlock(card, date)];
   if (!card.score) {
     throw new Error(REPORT_NO_SCORE);
@@ -206,14 +200,14 @@ export function buildReportModel(card: RepoCard): ReportModel {
 }
 
 /**
- * В2 гейта: плашка рядом с названием документа — «Полный», когда зрителю
- * доступен Repo Health Score (закрытые категории открыты), иначе
- * «Публичный». Без оценки доступ ещё не известен — плашки нет.
+ * Плашка рядом с названием документа: «Полная оценка», когда зрителю доступен
+ * Repo Health Score, иначе «Публичная оценка». Без оценки доступ еще не
+ * известен — плашки нет.
  */
 function docChip(card: RepoCard): Chip | null {
   if (!card.score) return null;
-  // В4.9 ч.2 (Е1): «Полный»/«Публичный» совпадали с видимостью «Публичный»
-  // на карточке — плашка называет оценку, а не репозиторий
+  // плашка называет оценку, а не репозиторий: просто «Публичный» путался бы с
+  // видимостью репозитория на карточке
   return { theme: "unknown", text: card.score.fullLocked ? "Публичная оценка" : "Полная оценка" };
 }
 
@@ -232,21 +226,19 @@ function headerBlock(card: RepoCard, date: string | null): Block {
 }
 
 /**
- * В4.9 ч.2 (Е2, §2 23.09 ответ 1): путь к полной оценке — той же строкой, что
- * под закрытым Repo Health Score на карточке (`fullScorePath`), по типу
- * зрителя; в документе без ссылки.
+ * Путь к полной оценке — той же строкой, что под закрытым Repo Health Score на
+ * карточке (`fullScorePath`), по типу зрителя; в документе без ссылки.
  */
 function fullPathText(card: RepoCard): string {
   return pathText(fullScorePath(card.viewer?.auth, [card.access.cicd, card.access.appsec]));
 }
 
 /**
- * В5.5 закрытие (С19): предупреждение «CI настроен, но запусков не видно» —
- * на карточке оно стоит внизу плашки Repo Health Score (UX-проход В5.2 25.09),
- * в отчете — строкой под показателями, тем же текстом (`CI_CAP_*`) и при том
- * же признаке (`markers.ciConfigOnlyCap`). Так отчет говорит об этом столько же
- * раз и в тех же местах, что карточка: у показателя, в основании CI/CD и в
- * рекомендации.
+ * Предупреждение «CI настроен, но запусков не видно»: на карточке оно внизу
+ * плашки Repo Health Score, в отчете — строкой под показателями, тем же текстом
+ * (`CI_CAP_*`) и при том же признаке (`markers.ciConfigOnlyCap`). Так отчет
+ * говорит об этом в тех же местах, что карточка: у показателя, в основании
+ * CI/CD и в рекомендации.
  */
 function ciCapNotes(card: RepoCard): HeroNote[] {
   return card.markers.ciConfigOnlyCap ? [{ line: [strong(`${CI_CAP_TITLE}.`), text(` ${CI_CAP_TEXT}`)] }] : [];
@@ -274,27 +266,26 @@ function indexNullSection(card: RepoCard): Block[] {
       notes,
     },
     { kind: "coverage", title: "Объем собранных данных", share: score.indexCoverage, threshold: COVERAGE_NULL_BELOW, collected: `собрано ${collected}`, thresholdText: `порог ${threshold}: с него рассчитывается оценка` },
-    // Ступень 4 (Ф21): те же имена разделов, что в обычном отчете и на карточке
+    // те же имена разделов, что в обычном отчете и на карточке
     h2("Категории"),
-    // К-4 В5.3 (§2 25.09): сильные стороны / требует внимания — одна копия с карточкой
+    // сильные и слабые стороны — одна копия с карточкой
     ...(strengthsLine(card) !== null ? [para(line(strengthsLine(card)!))] : []),
     categoriesBlock(card, ctx),
     h2("Рекомендации"),
   ];
   if (card.recommendations.length > 0) out.push({ kind: "actions", compact: false, items: card.recommendations.map((r, i) => actionItem(r, i + 1)) });
-  // ревью кода R1: без рекомендаций — та же фраза, что на карточке (инвариант «карточка = отчет»)
+  // без рекомендаций — та же фраза, что на карточке
   else out.push(para(line(noRecommendationsText(card))));
   out.push(para(line(`Оценка рассчитывается при объеме данных от ${threshold}.`)));
   const limits = limitations(card);
   if (limits.length > 0) out.push(h2("Ограничения данных"), ...limits.map((l) => ({ kind: "paragraph" as const, tone: "note" as const, lines: [line(l)] })));
-  // К-5, К-7 В5.3 (§2 24.09 «В5.3, круг 2»): подозрение фрода и AI-описание —
-  // после ограничений данных, до разбора и приложений
+  // проверка на накрутку и AI-обзор — после ограничений данных, до разбора и приложений
   out.push(...fraudBlock(card), ...aiBlock(card));
   out.push(...appendix(card, []));
   return out;
 }
 
-// ---------- полный отчёт ----------
+// ---------- полный отчет ----------
 
 function scoredSection(card: RepoCard, metrics: Metric[]): Block[] {
   const score = card.score!;
@@ -308,9 +299,8 @@ function scoredSection(card: RepoCard, metrics: Metric[]): Block[] {
     const near = thresholdNote(m.value, thresholdActions(card.recommendations, m.name));
     if (near) notes.push({ line: line(shown.length > 1 ? `${m.name}: ${near}` : near) });
   }
-  // Круг 2, п.3 (вариант 2 владельца): пояснение к числам — ОДНОЙ строкой под
-  // обоими показателями, с иконкой информации. Круг 4: и в ней публичный
-  // показатель называется первым.
+  // пояснение к числам — одной строкой под обоими показателями, с иконкой
+  // информации; публичный показатель и здесь называется первым
   const hasIndex = shown.some((m) => m.name === INDEX);
   const hasFull = shown.some((m) => m.name === FULL);
   const publicFirst = `${INDEX} считается по открытым данным – по нему строится рейтинг.`;
@@ -322,7 +312,7 @@ function scoredSection(card: RepoCard, metrics: Metric[]): Block[] {
           ? score.fullLocked
             ? `${publicFirst} Полная оценка ${FULL}, включающая CI/CD и Безопасность, видна участникам репозитория. ${fullPathText(card)}`
             : `${publicFirst} ${FULL}: данных для оценки недостаточно.`
-          : // пункт 7 блока А круга 4: полный доступ есть, индекса нет
+          : // полный доступ есть, индекса нет
             `${INDEX} считается по открытым данным – по нему строится рейтинг, но открытых данных собрано меньше ${fmtCoverage(COVERAGE_NULL_BELOW)}, поэтому он не рассчитан. ${FULL} учитывает 6 категорий, включая CI/CD и Безопасность.`,
     ),
     info: true,
@@ -341,7 +331,7 @@ function scoredSection(card: RepoCard, metrics: Metric[]): Block[] {
       noneText: "Оценки нет",
       chip: head.value === null ? null : scoreChip(head.value),
       secondary,
-      // В3 гейта: предложения общего вывода под оценкой в отчете нет
+      // общего вывода под оценкой в отчете нет
       verdict: null,
       notes,
     },
@@ -349,26 +339,23 @@ function scoredSection(card: RepoCard, metrics: Metric[]): Block[] {
     // порядке: сначала публичный
     ...shown.map((m) => contributionsBlock(contributions.get(m.name)!, m.name)),
     h2("Категории"),
-    // К-4 В5.3 (§2 25.09): сильные стороны / требует внимания — одна копия с карточкой
+    // сильные и слабые стороны — одна копия с карточкой
     ...(strengthsLine(card) !== null ? [para(line(strengthsLine(card)!))] : []),
     categoriesBlock(card, ctx),
   ];
-  // В11 и В15 гейта: блока «Что сделать первым» нет, раздел рекомендаций один
-  // и стоит сразу после категорий.
+  // раздел рекомендаций один и стоит сразу после категорий
   const recs = card.recommendations;
   out.push(h2("Рекомендации"));
   if (recs.length === 0) {
     out.push(para(line(noRecommendationsText(card))));
   } else {
-    // п.8 круга 2: вводной строки у раздела нет (вместе с ней ушло и ложное
-    // обещание порядка «по убыванию влияния» — Г1.2)
+    // без вводной строки: порядок рекомендаций не обещает «по убыванию влияния»
     out.push({ kind: "actions", compact: true, items: recs.map((r, i) => actionItem(r, i + 1)) });
   }
   const limits = limitations(card);
-  // п.9 круга 2: ограничения данных — такие же примечания, как под таблицами
+  // ограничения данных — такие же примечания на подложке, как под таблицами
   if (limits.length > 0) out.push(h2("Ограничения данных"), ...limits.map((l) => ({ kind: "paragraph" as const, tone: "note" as const, lines: [line(l)] })));
-  // К-5, К-7 В5.3 (§2 24.09 «В5.3, круг 2»): подозрение фрода и AI-описание —
-  // после ограничений данных, до разбора и приложений
+  // проверка на накрутку и AI-обзор — после ограничений данных, до разбора и приложений
   out.push(...fraudBlock(card), ...aiBlock(card));
 
   out.push(...detailSection(card, ctx));
@@ -392,7 +379,7 @@ function zones(): { theme: "danger" | "warning" | "success"; text: string; share
 }
 
 function contributionsBlock(c: Contributions | null, metricName?: string): Block {
-  // заголовок, сегменты и строка вместо полосы — общие с карточкой (`sections.ts`, А3)
+  // заголовок, сегменты и строка вместо полосы — общие с карточкой (`sections.ts`)
   const bar = contributionBar(c, metricName);
   return { kind: "contributions", title: bar.title, segments: bar.segments.map(({ title, value, share }) => ({ title, value, share })), rest: bar.rest, zones: zones(), note: bar.note };
 }
@@ -421,7 +408,7 @@ function detailSection(card: RepoCard, ctx: SubmetricContext): Block[] {
   const out: Block[] = [h2("Разбор по категориям")];
   for (const key of withData) {
     out.push(detailBlock(card, key, cats[key]!, ctx, actionOf));
-    // В5.5 тур 2 (W4, ЗН-2): карта владельцев — под разбором «Состояния кода»
+    // карта владельцев — под разбором «Состояния кода»
     if (key === "code") out.push(...ownershipBlocks(cats[key]!));
   }
   for (const key of without) {
@@ -432,8 +419,8 @@ function detailSection(card: RepoCard, ctx: SubmetricContext): Block[] {
 }
 
 /**
- * В5.5 тур 2 (W4): карта владельцев файлов — подпись, таблица (4 колонки, К9.6)
- * и сноска. Сборка строк — `ownershipView` (одна копия с карточкой); имена
+ * Карта владельцев файлов — подпись, таблица (4 колонки, как все таблицы
+ * основного текста) и сноска. Сборка строк — `ownershipView` (одна копия с карточкой); имена
  * каталогов и авторов — внешние строки, экранируются (`escaped`); длинное имя
  * в PDF переносится (`breakable` ячеек таблицы).
  */
@@ -472,9 +459,9 @@ function noDataFactReason(value: unknown): string | null {
 const numOf = (value: unknown): number | null => (typeof value === "number" && Number.isFinite(value) ? value : null);
 
 /**
- * Примечание, которое делает число категории пересчитываемым по приложению:
- * А8 (окно частоты коммитов не объявлено) и А9 (плотность находок взвешена по
- * важности, поэтому «38 на 10 тыс. строк» не сходится с числом находок).
+ * Примечание, которое делает число категории пересчитываемым вручную: окно
+ * частоты коммитов и веса важности в плотности находок (без них «38 на 10 тыс.
+ * строк» не сходится с числом находок).
  */
 function categoryRemark(card: RepoCard, key: CategoryKey, cat: CardCategory): string | null {
   if (key === "activity") {
@@ -487,8 +474,8 @@ function categoryRemark(card: RepoCard, key: CategoryKey, cat: CardCategory): st
     const per10k = numOf(cat.submetrics["density"]?.value);
     if (per10k === null) return null;
     const counts = (factValue(card, "appsec.findings")?.severity_counts ?? null) as Record<string, unknown> | null;
-    // плотность считается по дереву того скана, по которому взяты находки
-    // 4.3.0 (Н11): делитель — строки кода (`source_loc`), у фактов до правки М2.3 — весь `loc`
+    // плотность считается по дереву того скана, по которому взяты находки;
+    // делитель — строки кода (`source_loc`), у старых фактов — весь `loc`
     const codeLines = (v: Record<string, unknown> | null): number | null => (v === null ? null : "source_loc" in v ? numOf(v.source_loc) : numOf(v.loc));
     const loc = codeLines(factValue(card, CHANNEL_TREE_KEY)) ?? codeLines(factValue(card, "tree.stats"));
     if (counts === null || loc === null || loc <= 0) return null;
@@ -528,12 +515,11 @@ function detailBlock(card: RepoCard, key: CategoryKey, cat: CardCategory, ctx: S
     ]);
   }
   if (key === "cicd" && cat.no_data) remarks.push(noDataReason(key, cat.no_data));
-  // 4.3.0 (Н5, Р3): сжатие малой выборки и потолок — своей фразой
+  // сжатие малой выборки и потолок — своей фразой
   const adjusted = adjustmentText(cat);
   if (adjusted) remarks.push(adjusted);
-  // А4 аудита: нехватку данных CI документ объяснял в трех местах по-разному, а
-  // точную причину прятал сырым полем приложения В. Причина одна и берется из
-  // самого факта — здесь она названа теми же словами, что в приложении.
+  // причина нехватки данных CI одна и берется из самого факта — теми же словами,
+  // что в приложении В
   if (key === "cicd") {
     const runs = card.evidence.find((e) => e.key === "cicd.runs");
     const why = runs && runs.status !== "ok" ? noDataFactReason(runs.value) : null;
@@ -558,7 +544,7 @@ function detailBlock(card: RepoCard, key: CategoryKey, cat: CardCategory, ctx: S
   };
 }
 
-// ---------- как считается (К9.3) ----------
+// ---------- как считается ----------
 
 function weightsText(keys: CategoryKey[], weightOf: (k: CategoryKey) => number): string {
   return keys.map((k) => `${CATEGORY_TITLES[k]} ${weightOf(k)}%`).join(", ");
@@ -567,16 +553,15 @@ function weightsText(keys: CategoryKey[], weightOf: (k: CategoryKey) => number):
 function methodSection(shown: ShownMetric[], contributions: Map<string, Contributions | null>): Block[] {
   const indexWeights = weightsText(PUBLIC, (k) => INDEX_WEIGHTS[k as keyof typeof INDEX_WEIGHTS]);
   const fullWeights = weightsText(CATEGORY_ORDER, (k) => SCORE_WEIGHTS[k]);
-  /** «В этом отчете: …» — только у показателя, который в ЭТОМ документе посчитан. */
+  /** «В этом отчете: …» — только у показателя, который в этом документе посчитан. */
   const sumOf = (name: string): string => {
     const c = contributions.get(name);
     return c?.kind === "bar" ? ` В этом отчете: ${c.segments.map((s) => `${s.title} ${fmtContribution(s.tenths)}`).join(", ")} = ${c.total}.` : "";
   };
   const hasIndex = shown.some((m) => m.name === INDEX);
   const hasFull = shown.some((m) => m.name === FULL);
-  // А2 аудита: первая строка описывает ровно те показатели, которые есть в
-  // ЭТОМ документе, — «оценка складывается из 4 категорий» в полном отчете
-  // спорило и с первым экраном, и с шестью строками приложения А.
+  // первая строка описывает ровно те показатели, которые есть в этом документе:
+  // «из 4 категорий» в полном отчете спорило бы с первым экраном и приложением А
   const first = hasIndex && hasFull
     ? `В отчете 2 показателя: ${INDEX} – по 4 открытым категориям (документация, активность, задачи и состояние кода), ${FULL} – по всем 6, включая CI/CD и Безопасность.`
     : hasFull
@@ -594,7 +579,7 @@ function methodSection(shown: ShownMetric[], contributions: Map<string, Contribu
   return [h2("Как считается"), { kind: "list", items }];
 }
 
-// ---------- приложение (К9.4) ----------
+// ---------- приложение ----------
 
 const APPENDIX_TITLE = "Приложение. Расчет оценки и исходные данные";
 
@@ -612,17 +597,16 @@ const pct1 = (share: number): string => `${fmtDecimal(share * 100, 1)}%`;
 /**
  * Расчет одного показателя: строка на категорию, «Итого» числом. Ширина
  * набора PDF (499 pt) не дает удвоить столбцы одной таблицы, поэтому у
- * каждого показателя своя таблица — публичная первой (круг 4 блока А).
+ * каждого показателя своя таблица — публичная первой.
  */
 function metricCalc(card: RepoCard, metric: ShownMetric, named: boolean): Block[] {
   const cats = card.score!.categories;
   const contributions = contributionsOf(card, metric);
   const withData = metric.keys.filter((k) => cats[k]?.score !== null && cats[k]?.score !== undefined);
   const wsum = withData.reduce((s, k) => s + metric.weight(k), 0);
-  // Г1.1: десятые вкладов берутся из той же функции, что полоса первого
-  // экрана (`categoryContributions`, метод наибольшего остатка). Иначе
-  // приложение и полоса расходились на 0,1-0,2, а строки приложения не
-  // складывались в собственное «Итого» (69,8 при показателе 70).
+  // десятые вкладов берутся из той же функции, что полоса первого экрана
+  // (`categoryContributions`, метод наибольшего остатка): иначе приложение и
+  // полоса расходятся на 0,1-0,2, а строки не складываются в «Итого»
   const tenths = new Map<string, number>();
   if (contributions !== null && contributions.kind !== "empty") for (const seg of contributions.segments) tenths.set(seg.key, seg.tenths);
   const rows: InlineLine[][] = [];
@@ -651,7 +635,7 @@ function metricCalc(card: RepoCard, metric: ShownMetric, named: boolean): Block[
   if (named) out.push({ kind: "paragraph", tone: "subhead", lines: [[strong(`Расчет ${metric.name}`)]] });
   out.push({
     kind: "table",
-    // п.6 круга 5: таблиц две и каждая подписана показателем — повторять его в шапке столбца незачем
+    // если таблиц две, каждая подписана показателем — повторять его в шапке столбца незачем
     columns: [col("Категория", "left", 184), col("Балл", "right", 84), col(named ? "Вес" : `Вес в ${metric.name}`, "right", 114), col("Баллов в итог", "right")],
     rows,
     total: true,
@@ -666,8 +650,8 @@ function metricCalc(card: RepoCard, metric: ShownMetric, named: boolean): Block[
     tone: "fine",
     lines: [line(`Баллов в итог = балл × вес. ${weights} Вес категории без данных делится между остальными пропорционально: такая категория в оценке не участвует и ее не снижает.${tail}`)],
   });
-  // 4.3.1 (В5.5, М2): у без-кодового репо итог 0 по правилу «кода нет», а не
-  // по потолку секретов — строка про AppSec здесь была бы ложной
+  // у репо без кода итог 0 по правилу «кода нет», а не по потолку секретов —
+  // строка про AppSec здесь была бы ложной
   if (card.markers.codeEmpty) out.push({ kind: "paragraph", tone: "fine", lines: [line(`Итог – ${value}: в репозитории нет кода, поэтому оценка 0 (правило «кода нет», Q&A №13); баллы категорий выше – справочно.`)] });
   else if (roundScore(total) > value) out.push({ kind: "paragraph", tone: "fine", lines: [line(`Итог ограничен ${value} баллами: AppSec нашел утекшие секреты.`)] });
   return out;
@@ -688,10 +672,8 @@ function appendixA(card: RepoCard, shown: ShownMetric[]): Block[] {
 }
 
 /**
- * А7 аудита: «собрано N% данных» объяснялось «65 весовыми пунктами», а
- * такого числа в документе не было. Здесь объем данных считается строками, в
- * которых каждое число видно: вес каждой из 4 открытых категорий, есть по
- * ней данные или нет, и итог «M из 65».
+ * Расчет «собрано N% данных» строками, в которых видно каждое число: вес каждой
+ * из 4 открытых категорий, есть ли по ней данные, и итог «M из 65».
  */
 function coverageCalc(card: RepoCard): Block[] {
   const score = card.score!;
@@ -729,11 +711,10 @@ function coverageCalc(card: RepoCard): Block[] {
 
 /**
  * Балл категории из показателей: вес × балл; особое правило (трекер пуст) — строкой.
- * В5.3-М (Н15): CI с видимыми запусками, которых 0, — данные «не запускался»
- * (4.2.0, М1.8) и попадает сюда строками таблицы; CI без видимых запусков —
- * категория без данных, сюда не попадает. 4.3.0 (Н5, Р3): поправка к среднему
- * (сжатие малой выборки задач, потолок «Безопасности») — своей строкой таблицы,
- * так что строки складываются в «Итого».
+ * CI, у которого видно 0 запусков, — это данные («не запускался»), и он попадает
+ * сюда строками таблицы; CI без видимых запусков — категория без данных, сюда не
+ * попадает. Поправка к среднему (сжатие малой выборки, потолок «Безопасности») —
+ * своей строкой таблицы, чтобы строки складывались в «Итого».
  */
 function categoryCalc(key: CategoryKey, cat: CardCategory): Block[] {
   const title: Block = { kind: "paragraph", tone: "subhead", lines: [[strong(`Балл категории ${CATEGORY_TITLES[key]}`)]] };
@@ -760,9 +741,9 @@ function categoryCalc(key: CategoryKey, cat: CardCategory): Block[] {
   }
   rows.push([line("Итого"), line(""), line("100%"), line(fmtDecimal(cat.score!, 1))]);
   const out: Block[] = [title, { kind: "table", columns: [col("Показатель", "left", 184), col("Балл", "right", 84), col("Вес", "right", 114), col("Баллов в категорию", "right")], rows, total: true }];
-  // А5 аудита: в разборе по категориям стоит номинальный вес показателя, здесь
-  // — вес после перераспределения. Оба числа верны; отличаются они только
-  // тогда, когда у показателя категории нет данных, — об этом и строка.
+  // в разборе по категориям стоит номинальный вес показателя, здесь — вес после
+  // перераспределения; они различаются, только когда у какого-то показателя
+  // категории нет данных, — это и объясняет строка
   if (Math.abs(wsum - 1) > 0.0005) {
     const ex = parts[0]!;
     out.push({
@@ -799,8 +780,8 @@ function appendixB(card: RepoCard, shown: ShownMetric[]): Block[] {
   const cats = score.categories;
   const rows: InlineLine[][] = [];
   const at = `расчет оценки, ${fmtDateTime(score.computedAt)}`;
-  // Круг 4 блока А: удваивается ТОЛЬКО строка самого показателя (публичная
-  // первой) — балл категории и балл показателя у обеих шкал один.
+  // для двух шкал удваивается только итоговая строка (публичная первой): баллы
+  // категорий и их показателей у обеих шкал одни и те же
   if (shown.length > 0) {
     for (const metric of shown) {
       rows.push([
@@ -812,8 +793,7 @@ function appendixB(card: RepoCard, shown: ShownMetric[]): Block[] {
       ]);
     }
   } else {
-    // А7 аудита: «65 весовых пунктов» заменено ссылкой на расчет приложения А,
-    // где каждое слагаемое напечатано
+    // ссылка на расчет приложения А, где напечатано каждое слагаемое
     rows.push([[strong(`Собрано ${fmtCoverage(score.indexCoverage)} данных`)], line("вес открытых категорий с данными ÷ вес 4 открытых категорий, приложение А"), [code("scores.index_coverage"), text(` → ${fmtDecimal(score.indexCoverage, 3, { trim: true })}`)], line(at), line("—")]);
   }
   const since = historyTruncatedSince(card);
@@ -828,12 +808,10 @@ function appendixB(card: RepoCard, shown: ShownMetric[]): Block[] {
     for (const [sub, entry] of Object.entries(cat.submetrics)) {
       const shown = submetricShownValue(key, sub, entry, ctx, cat.submetrics);
       const subLimit = key === "issues" && sub === "close_days" && close ? "дата закрытия заменена датой изменения" : key === "activity" && truncated ? truncated : "—";
-      // Г1.11 гейта: столбец «Порядок расчета» у показателей стоял пустым —
-      // пишем, с каким весом показатель входит в балл категории
+      // «Порядок расчета» у показателя — с каким весом он входит в балл категории
       const weight = (SUBWEIGHTS[key] as Record<string, number>)[subweightKey(sub)];
-      // А10 аудита: у «Трекер не ведется» стояло «справочно, в балл не входит»
-      // и тут же «балл 6» — тот самый балл категории. Веса у показателя нет не
-      // потому, что он справочный, а потому, что балл категории равен его баллу.
+      // у «Трекер не ведется» веса нет не потому, что он справочный, а потому,
+      // что балл категории просто равен его баллу
       const order =
         key === "issues" && sub === "tracker_unused"
           ? "задач в трекере нет: балл категории равен баллу этого показателя, приложение А"
@@ -843,7 +821,7 @@ function appendixB(card: RepoCard, shown: ShownMetric[]): Block[] {
       rows.push([
         line(`${submetricTitle(key, sub)}: ${shown}`),
         line(order),
-        // приемка HQ 22.09: `activity.fresh` — метка времени (мс), читателю — дата, не 13 цифр
+        // `activity.fresh` — метка времени в мс: читателю показывается дата, а не 13 цифр
         [code(`${key}.${sub}`), text(` → ${key === "activity" && sub === "fresh" && typeof entry.value === "number" ? fmtDateTime(new Date(entry.value).toISOString()) : rawValue(entry.value)}${typeof entry.score === "number" ? `; балл ${fmtDecimal(entry.score * 100, 1, { trim: true })}` : ""}`)],
         line(sourcesOf(card, key)),
         line(subLimit),
@@ -898,33 +876,33 @@ export function flatten(value: unknown, prefix = ""): [string, string][] {
 }
 
 /**
- * Г1.20 гейта: сырые поля приложения В, которые читаются как противоречие
- * основному тексту. Значение не меняется — рядом с именем поля появляется
- * короткое пояснение, что это за число и почему оно другое.
+ * Сырые поля приложения В, которые читаются как противоречие основному тексту.
+ * Значение не меняется — рядом с именем поля появляется короткое пояснение, что
+ * это за число и почему оно другое.
  */
 const RAW_FIELD_NOTE: Record<string, string> = {
   "activity.rest.contributors": "счетчик API; в оценке – число авторов из истории git",
-  // А11 аудита: поле стоит «да» у каждого анализа — это не флаг обрезки
-  // истории, а форма ответа: коммиты в документ не выгружаются
+  // поле стоит «да» у каждого анализа — это не флаг обрезки истории, а форма
+  // ответа: сами коммиты в документ не выгружаются
   "activity.git.timeline.truncated": "поле ответа: сами коммиты в документ не выгружаются, показан итог",
-  // А12 аудита: «старых» больше, чем «всего», потому что поля считают разное
+  // «старых» бывает больше, чем «всего», потому что поля считают разное
   "code.todo.count": "пометок TODO в коде (без файлов тестов), без FIXME",
   "code.todo.fixme": "пометок FIXME в коде (без файлов тестов)",
   "code.todo.older_180d": "пометок TODO и FIXME старше 180 дней (из count + fixme)",
   "code.todo.todo_files": "файлов кода с пометками",
   "code.todo.blamed_files": "файлов, у которых удалось прочитать даты пометок",
-  // В5.5 (М1): маркеры тестов в счетчик долга не входят — числом для читателя
+  // пометки в тестах в счетчик долга не входят — показываются отдельным числом
   "code.todo.test_markers": "пометок в файлах тестов; в счетчики выше не входят",
-  // А15 аудита: выборка задач для времени первого ответа — не число задач в трекере
+  // выборка задач для времени первого ответа — не число задач в трекере
   "issues.comments_sample.issues": "задач в выборке для времени первого ответа; число задач трекера – в issues.stats",
-  // 4.4.0 (ТП-1, ТП-9, сборщик 5): поля справочных показателей динамики
+  // поля справочных показателей динамики
   "cicd.runs.recent_runs": "последние завершенные запуски, исход и время: по ним считается стабильность CI в динамике",
   "issues.stats.flow.window_days": "длина окна потока задач, дней",
   "issues.stats.flow.windows": "окна за 180 дней: создано, закрыто и закрыто быстрее часа (такие задачи не входят ни в созданные, ни в закрытые)",
   "issues.stats.flow.complete_since": "список задач обрезан: окна раньше этой даты не покрыты",
 };
 
-/** Г1.20, А6: служебная заметка коллектора по-английски — читателю по-русски. */
+/** Служебная заметка коллектора по-английски — читателю по-русски. */
 function rawFieldValue(field: string, value: string): string {
   const m = /^completed_at missing on (\d+)\/(\d+) closed/.exec(value);
   if (field === "close_date_note" && m) return `дата закрытия не передана у ${m[1]} из ${m[2]} закрытых задач, использована дата последнего изменения`;
@@ -934,7 +912,7 @@ function rawFieldValue(field: string, value: string): string {
   return value;
 }
 
-/** А6: служебная подробность отказа источника — по-русски, число ответа сохраняется. */
+/** Служебная подробность отказа источника — по-русски, код ответа сохраняется. */
 function detailWords(value: string): string {
   const status = /^status (\d+(?:\/\d+)?)$/.exec(value);
   if (status) return `ответ API ${status[1]}`;
@@ -944,7 +922,7 @@ function detailWords(value: string): string {
   return value;
 }
 
-/** Статус последнего прогона CI — словами (А6: английских значений в документе нет). */
+/** Статус последнего прогона CI — словами: английских значений в документе нет. */
 const RUN_STATUS_WORD: Record<string, string> = {
   success: "успешно",
   failure: "с ошибкой",
@@ -957,10 +935,9 @@ const RUN_STATUS_WORD: Record<string, string> = {
 };
 
 /**
- * А6 аудита: служебные ветви сырых значений, которые ничего не доказывают
- * читателю (идентификаторы запуска проверки AppSec). Сами данные не
- * вычищаются — К9.4 требует показывать сырые значения, — убираются только
- * служебные ветви.
+ * Служебные ветви сырых значений, которые ничего не доказывают читателю
+ * (идентификаторы запуска проверки AppSec). Сами данные не вычищаются —
+ * приложение показывает сырые значения, — убираются только служебные ветви.
  */
 const RAW_FIELD_SKIP = [/^provenance(\.|$)/];
 
@@ -968,8 +945,7 @@ function rawFieldShown(field: string): boolean {
   return !RAW_FIELD_SKIP.some((re) => re.test(field));
 }
 
-/** В5 (К5.10): раздел фрода — только при флаге; подозрение, не оценка.
- *  23.09: портирован в модель отчёта В4.9 при мерже v5 → main. */
+/** Раздел о подозрении на накрутку — только при флаге; это подозрение, а не оценка. */
 function fraudBlock(card: RepoCard): Block[] {
   const fraud = card.ai?.fraud;
   // флаггер может вернуть факторы при flag: false (валидатор это пропускает) —
@@ -977,10 +953,10 @@ function fraudBlock(card: RepoCard): Block[] {
   if (fraud === undefined || fraud === null || fraud.flag !== true || fraud.factors.length === 0) return [];
   const out: Block[] = [h2(FRAUD_TITLE)];
   out.push(para(line(FRAUD_EXPLAIN)));
-  // аудит надежности М2: флаг прошлого анализа не выдается за текущий
+  // флаг прошлого анализа не выдается за текущий
   if (fraudCheckStale(card.ai?.check)) out.push(para(line("Проверка выполнена по прошлому анализу – после нее репозиторий анализировался снова.")));
-  // круг 3 В5.3 (§2 24.09, способ (2)): текст фактора строит код из факта, та же
-  // функция, что на карточке; формулировка модели — если факта нет
+  // текст фактора строит код из факта (та же функция, что на карточке);
+  // формулировка модели — только если факта нет
   const factOf = (key: string): unknown => fraudFactorValue(key, fraud.signals, card.evidence, fraud.inputs);
   out.push({
     kind: "list",
@@ -991,11 +967,10 @@ function fraudBlock(card: RepoCard): Block[] {
 
 
 /**
- * К-7 (§2 24.09 «В5.3, круг 2», вариант а): AI-описание печатается тем же
- * зрителям, что видят его на карточке, — `card.ai` приходит только с правами
- * на полный Score (на приватном репозитории — владельцу), маршрут отчета
- * строит ту же карточку. Текст — тот же валидированный, что на карточке
- * (закон 1), одна копия; модель — официальным названием.
+ * AI-описание печатается тем же зрителям, что видят его на карточке: маршрут
+ * отчета строит ту же карточку, а `card.ai` приходит только с правами на полный
+ * Score (на приватном репозитории — владельцу). Текст — тот же валидированный,
+ * что на карточке; модель — официальным названием.
  */
 function aiBlock(card: RepoCard): Block[] {
   const ai = card.ai;
@@ -1003,18 +978,17 @@ function aiBlock(card: RepoCard): Block[] {
   const notes = [...(ai.overview ? [{ title: null as string | null, note: ai.overview }] : []), ...ai.specialists.map((n) => ({ title: aiRoleTitle(n.role), note: n }))];
   if (notes.length === 0) return [];
   const out: Block[] = [h2(AI_SECTION_TITLE)];
-  // 27.09 (Екатерина; дефект 2 оценки Алексея 27.09): обзор по прошлому анализу —
-  // плашкой сразу под заголовком, как метка «Устарел» на карточке; иначе цифры
-  // текста спорят с таблицами того же документа
+  // обзор по прошлому анализу — плашкой сразу под заголовком, как метка «Устарел»
+  // на карточке: иначе цифры текста спорят с таблицами того же документа
   if (aiNotesStale(ai)) out.push({ kind: "paragraph", tone: "note", lines: [[strong("Обзор устарел:"), text(` ${AI_STALE_REPORT_TEXT}`)]] });
-  // ревью В5.3 (25.09): отказ проверки общего обзора печатается и в отчете, как на карточке
+  // отказ проверки общего обзора печатается и в отчете, как на карточке
   if (!ai.overview && ai.specialists.length > 0) out.push(para(line(AI_OVERVIEW_REJECTED)));
   for (const { title, note } of notes) {
     if (title !== null) out.push({ kind: "paragraph", tone: "subhead", lines: [[strong(title)]] });
     out.push(para(...aiParagraphs(note.text).map((l) => [escaped(l)] as InlineLine)));
   }
-  // тур 3 В5.5 (п.10, 26.09): разборы, не прошедшие проверку фактами, — как на
-  // карточке и ДО строки с моделью и датой (без траектории и без «нет фактов»)
+  // разборы, не прошедшие проверку фактами, — как на карточке и до строки с
+  // моделью и датой (без траектории и без «нет фактов»)
   const failed = (ai.failures ?? []).filter((f) => f.role !== "trajectory" && !f.reason.startsWith("нет фактов"));
   if (failed.length > 0) out.push({ kind: "paragraph", tone: "fine", lines: failed.map((f) => line(`Разбор «${aiRoleTitle(f.role)}» не прошел проверку фактами.`)) });
   const models = [...new Set(notes.map((n) => aiModelName(n.note.model)))].join(", ");
@@ -1038,9 +1012,8 @@ function appendixC(card: RepoCard): Block[] {
     return out;
   }
   out.push({ kind: "paragraph", tone: "fine", lines: [line("Данные анализа в виде таблиц «поле – значение». История коммитов показана итогом, сами коммиты сервис не хранит.")] });
-  // А6 аудита: дерево канального скана едет своим ключом и на одном скане
-  // повторяет публичное `tree.stats` слово в слово — второй такой таблицы в
-  // документе быть не должно.
+  // дерево канального скана идет своим ключом и на одном скане повторяет
+  // публичное `tree.stats` слово в слово — вторая такая таблица не нужна
   const publicTree = card.evidence.find((e) => e.key === "tree.stats");
   const facts = (card.evidence as CardEvidence[]).filter(
     (f) => !(f.key === CHANNEL_TREE_KEY && publicTree !== undefined && JSON.stringify(f.value) === JSON.stringify(publicTree.value)),
@@ -1077,12 +1050,12 @@ function appendixD(card: RepoCard): Block[] {
       [line("Режим запуска"), line(scanTriggerText(scan.trigger))],
     );
   }
-  // В5.5 закрытие (С14): место в рейтинге — то же число и то же правило, что в
-  // паспорте карточки (`rankText`): «#N из M» или причина, по которой места нет
+  // место в рейтинге — то же число и то же правило, что в паспорте карточки
+  // (`rankText`): «#N из M» или причина, по которой места нет
   if (score) rows.push([line("Место в рейтинге"), line(rankText(repo.visibility, score))]);
   rows.push(
-    // А14 аудита: язык приходит из каталога SourceCraft, а не из скачанного
-    // репозитория, — поэтому он есть и там, где скачать репозиторий не удалось
+    // язык приходит из каталога SourceCraft, а не из скачанного репозитория, —
+    // поэтому он есть и там, где скачать репозиторий не удалось
     [line("Язык (по каталогу SourceCraft)"), repo.language ? [escaped(repo.language)] : line("не определен")],
     [line("Реакции"), line(repo.likes === null ? "—" : String(repo.likes))],
     [line("Ответвления"), line(repo.forks === null ? "—" : String(repo.forks))],

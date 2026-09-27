@@ -1,6 +1,6 @@
-// v59-a-fixtures.ts — В5.9 (воркер А): наборы фактов для лестницы и эталона
-// «выдача recommend до/после выноса патчей» (tests/v59-a-recommend-golden.json
-// снят кодом коммита запуска 7ba3b31, до рефакторинга). Не *.test.ts.
+// Наборы фактов для лестницы и эталона «выдача recommend до/после выноса
+// патчей» (tests/v59-a-recommend-golden.json снят кодом до рефакторинга).
+// Не *.test.ts.
 import { compute, ratingEligible, writeScores } from "../src/score/compute";
 import { recommend, writeRecommendations } from "../src/score/recommend";
 import { seedRepo, seedScan, type ApiTestDb } from "./api-fixtures";
@@ -56,7 +56,7 @@ export function nothingFacts(): FactSpec[] {
   return withFacts(onlyActivationFacts(), { key: "issues.stats", value: issuesWeak });
 }
 
-/** Кода нет (Q&A №13): индекс 0 как данные. */
+/** Кода нет: индекс 0 как данные, а не «нет данных». */
 export function codeEmptyFacts(): FactSpec[] {
   return withFacts(unreachedFacts(), { key: "tree.stats", value: { top_level: [], file_count: 0, bytes: 0, loc: 0 } });
 }

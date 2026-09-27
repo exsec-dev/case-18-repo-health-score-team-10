@@ -1,11 +1,6 @@
-// audit-m41-repro.test.ts — воспроизведение находок аудит-пары В4.1
-// (reports/2026-09-17-m41-audit-pair.md; план reports/2026-09-17-fix-plan.md,
-// веха В4.1-fix, Б0). Каждый тест описывает ПРАВИЛЬНОЕ поведение (контракты
-// Части 3 плана) и ассертит конкретное значение. На Б0-коммите тесты были
-// помечены test.failing (набор зелёный, в строгом режиме — красный); пометка
-// снималась в блоке, закрывшем находку (Б1–Б4), утверждения не ослаблялись.
-// Сейчас все тесты обычные и зелёные в обоих режимах; строгий режим оставлен
-// для команды приёмки: AUDIT_STRICT=1 bun test tests/audit-m41-repro.test.ts
+// Репро-тесты на найденные аудитом дефекты рейтинга, рекомендаций, доступа и
+// очереди. Каждый тест описывает правильное поведение и проверяет конкретное
+// значение; дефекты исправлены, тесты обычные.
 // Сети нет: каналы скана — фейки, REST/AppSec-клиенты — фейки.
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
@@ -54,7 +49,7 @@ const asFact = (f: { key: string; value: unknown }): Fact => okFact(f.key, f.val
 
 // ---------------------------------------------------------------------------
 describe("Ф1.1 (HIGH-1): из какого скана рейтинг", () => {
-  // закрыто Б1 (К-Ф1.1): рейтинг — последний пригодный скан, мета — только пригодным
+  // рейтинг берет последний пригодный скан, мету обновляют только пригодные
   test("юзерский скан с no-data(access) у публичного факта не меняет Score в рейтинге", async () => {
     const db = tempDb();
     db.query("INSERT INTO repos (org_slug, repo_slug, visibility) VALUES ('victim', 'public-repo', 'public')").run();
@@ -63,8 +58,8 @@ describe("Ф1.1 (HIGH-1): из какого скана рейтинг", () => {
     const gitFacts = facts.filter((f) => f.source === "git");
     const restFacts = facts.filter((f) => f.source !== "git");
     const meta = { org: "victim", repo: "public-repo", title: "Victim", language: "Go", likes: 5, lastActivityAt: "2026-09-10T00:00:00Z", forks: 0, reactionCounts: null, visibility: "public" };
-    // М7 (круг 2): restBase/appsecBase обязательны типом; каналы подменены
-    // швами, живого клиента не строится — адрес заведомо нерабочий локальный
+    // restBase/appsecBase обязательны типом; каналы подменены швами, живого
+    // клиента не строится — адрес заведомо нерабочий локальный
     const base: ScanDeps = { db, scClient: null, restBase: "http://127.0.0.1:1", appsecBase: "http://127.0.0.1:1", collectGit: async () => ({ facts: gitFacts }) };
 
     // периодический скан серверным токеном: все публичные факты ok
@@ -95,7 +90,7 @@ describe("Ф1.1 (HIGH-1): из какого скана рейтинг", () => {
 
 // ---------------------------------------------------------------------------
 describe("Ф1.2 (LOW-1): реальный прирост рекомендаций", () => {
-  // закрыто Б2 (К-Ф1.2): computeFromFacts на подменённых фактах
+  // прирост считается computeFromFacts на подмененных фактах
   test("Δ license-missing к Score в рейтинге = реальный прирост итога", () => {
     const t = makeDb();
     cleanups.push(t.close);
@@ -112,7 +107,6 @@ describe("Ф1.2 (LOW-1): реальный прирост рекомендаци�
 
 // ---------------------------------------------------------------------------
 describe("Ф1.3 (MED-1): номера рекомендаций после фильтра каналов", () => {
-  // закрыто Б2 (Ф1.3): перенумерация после фильтра каналов
   test("аноним видит номера 1..N без пропусков (карточка и MD)", () => {
     const t = makeApiDb();
     cleanups.push(t.close);
@@ -125,7 +119,7 @@ describe("Ф1.3 (MED-1): номера рекомендаций после фил
     seedRecommendation(t, scanId, { ruleId: "reduce-stale-issues", priority: 4, factRef: "issues.stats" });
     const card = getRepoCard(t.db, "pub", "numbers")!;
     const md = renderRepoReport(card);
-    // В4.9: действия — карточками «N. **действие.** …» в «Что сделать первым»
+    // действия в MD — карточками «N. **действие.** …» в «Что сделать первым»
     const mdNumbers = [...md.matchAll(/^(\d+)\. \*\*/gm)].map((m) => Number(m[1]));
     expect({ card: card.recommendations.map((r) => [r.ruleId, r.priority]), md: mdNumbers }).toEqual({
       card: [
@@ -139,7 +133,6 @@ describe("Ф1.3 (MED-1): номера рекомендаций после фил
 
 // ---------------------------------------------------------------------------
 describe("Ф1.4 (MED-2): AppSec scans/latest 404", () => {
-  // закрыто Б3 (Ф1.4)
   test("404 «скана нет» при repo-GET 200 → Security granted", async () => {
     const rest: ScClient = {
       async get(path: string) {
@@ -160,7 +153,6 @@ describe("Ф1.4 (MED-2): AppSec scans/latest 404", () => {
 
 // ---------------------------------------------------------------------------
 describe("Ф1.5 (MED-3): лимит частоты без гонки", () => {
-  // закрыто Б4 (Ф1.5)
   test("5 параллельных POST при лимите 2/час → ровно 2 заявки", async () => {
     const db = tempDb();
     const user = upsertUser(db, "ya-racer", "racer");
@@ -184,7 +176,6 @@ describe("Ф1.5 (MED-3): лимит частоты без гонки", () => {
 
 // ---------------------------------------------------------------------------
 describe("Ф1.8 (MED-6): юзерская job без PAT", () => {
-  // закрыто Б4 (Ф1.8)
   test("job с автором без читаемого PAT → failed без скана, серверный токен не используется", async () => {
     const db = tempDb();
     const user = upsertUser(db, "ya-gone-pat", "gonepat");

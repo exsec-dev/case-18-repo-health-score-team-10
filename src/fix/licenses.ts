@@ -1,10 +1,9 @@
-// licenses.ts — В5.9 (идея №5): канонические тексты лицензий для шаблона
-// `license-missing`. СГЕНЕРИРОВАН из копий в node_modules (Apache-2.0 —
-// `baseline-browser-mapping/LICENSE.txt`, 11357 байт, как у
-// apache.org/licenses/LICENSE-2.0.txt; MIT — `brace-expansion/LICENSE` со
-// строкой Copyright, замененной на плейсхолдеры). Не редактировать руками:
-// текст лицензии — юридический документ; целостность стережет тест по sha256.
-// Лицензию выбирает человек — сервис ничего не выбирает по умолчанию.
+// Канонические тексты лицензий для шаблона `license-missing`. Скопированы из
+// пакетов в node_modules: Apache-2.0 – из `baseline-browser-mapping/LICENSE.txt`
+// (совпадает с apache.org/licenses/LICENSE-2.0.txt), MIT – из
+// `brace-expansion/LICENSE`, где строка Copyright заменена плейсхолдерами.
+// Не редактировать руками: это юридический текст, целостность проверяет тест
+// по sha256. Лицензию выбирает человек, по умолчанию сервис ничего не выбирает.
 
 /** Лицензии, из которых выбирает человек (ключ — значение `?license=` маршрута). */
 export const LICENSE_IDS = ["mit", "apache-2.0"] as const;

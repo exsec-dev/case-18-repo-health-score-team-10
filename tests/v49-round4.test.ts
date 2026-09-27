@@ -1,11 +1,8 @@
-// v49-round4.test.ts — круг 4 гейта В4.9: полный отчет на два показателя
-// (блок А, решение владельца TASK.md §2 от 22.09) и находки аудита А3-А15
-// (§9 спеки `reports/2026-09-21-m49-plan.md`).
+// Полный отчет на два показателя и найденные дефекты отчета.
 //
-// Правило вехи: каждое изменившееся ЧИСЛО и каждое УТВЕРЖДЕНИЕ О ДАННЫХ
-// закрывается ПОВЕДЕНЧЕСКИМ тестом — на фикстурных картах, через модель и
-// MD-рендер, а не чтением исходника (AGENTS.md: source-assert не ловит
-// дефект смысла).
+// Каждое ЧИСЛО и каждое УТВЕРЖДЕНИЕ О ДАННЫХ проверяется ПОВЕДЕНЧЕСКИ – на
+// фикстурных картах, через модель и MD-рендер, а не чтением исходника:
+// проверка исходника не ловит дефект смысла.
 import { describe, expect, test } from "bun:test";
 import { buildReportModel } from "../src/report/build";
 import { renderRepoReport } from "../src/report/markdown";
@@ -30,7 +27,7 @@ const heroOf = (model: ReturnType<typeof buildReportModel>) => {
 const bars = (model: ReturnType<typeof buildReportModel>) => model.blocks.filter((b) => b.kind === "contributions").map((b) => (b.kind === "contributions" ? b.title : ""));
 
 /**
- * Таблицы приложения А по порядку. п.6 круга 5: когда таблиц две, показатель
+ * Таблицы приложения А по порядку. Когда таблиц две, показатель
  * назван подзаголовком («Расчет <показатель>»), а столбец — просто «Вес»;
  * когда таблица одна, подзаголовка нет и показатель стоит в шапке столбца.
  */
@@ -52,7 +49,7 @@ const weightColumns = (model: ReturnType<typeof buildReportModel>) =>
   model.blocks.filter((b) => b.kind === "table" && b.columns[0]?.title === "Категория").map((b) => (b.kind === "table" ? b.columns[2]!.title : ""));
 
 // ---------------------------------------------------------------------------
-// Блок А — «сначала публичный, потом полный»
+// Сначала публичный показатель, потом полный
 // ---------------------------------------------------------------------------
 
 describe("А1 (блок А): полный отчет считает ОБА показателя, публичный первым", () => {
@@ -60,7 +57,7 @@ describe("А1 (блок А): полный отчет считает ОБА по�
     const { md, model } = report("full");
     const hero = heroOf(model);
     expect({ left: hero.label, right: hero.secondary?.label }).toEqual({ left: "HealthCraft Index", right: "Repo Health Score" });
-    expect({ leftValue: hero.value, rightValue: hero.secondary?.value }).toEqual({ leftValue: 62, rightValue: 62 }); // 4.3.0 (Р3): открытая critical — Безопасность не выше 40
+    expect({ leftValue: hero.value, rightValue: hero.secondary?.value }).toEqual({ leftValue: 62, rightValue: 62 }); // открытая critical: Безопасность не выше 40
     // строка-пояснение одна и начинается с публичного показателя
     expect(hero.notes.filter((n) => n.info === true)).toHaveLength(1);
     expect(hero.notes.at(-1)!.line.map((f) => f.text).join("")).toStartWith("HealthCraft Index считается по открытым данным");
@@ -84,7 +81,7 @@ describe("А1 (блок А): полный отчет считает ОБА по�
   test("full: приложение А — две таблицы, публичная первой; приложение Б — две верхние строки", () => {
     const { md, model } = report("full");
     expect(calcTables(model)).toEqual(["Расчет HealthCraft Index", "Расчет Repo Health Score"]);
-    // п.6 круга 5: показатель назван подзаголовком, в шапке столбца его нет
+    // показатель назван подзаголовком, в шапке столбца его нет
     expect(weightColumns(model)).toEqual(["Вес", "Вес"]);
     const appendix = md.slice(md.indexOf("## Приложение"));
     expect(appendix).toContain("| **HealthCraft Index 62** | сумма по 4 открытым категориям: балл × вес, приложение А |");
@@ -109,7 +106,6 @@ describe("А2 (блок А): «Как считается» описывает п
   test("full: первая строка не говорит про 4 категории — в документе их шесть и два показателя", () => {
     const { md } = report("full");
     const method = md.slice(md.indexOf("## Как считается"), md.indexOf("## Приложение"));
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): Ф20 — цифра, где уместна
     expect(method).toContain("В отчете 2 показателя: HealthCraft Index – по 4 открытым категориям");
     expect(method).not.toContain("Оценка складывается из 4 категорий");
     // у каждого показателя своя строка «В этом отчете: …»
@@ -126,7 +122,7 @@ describe("А2 (блок А): «Как считается» описывает п
   test("full-null: показатель один — Repo Health Score, и строка говорит про 6 категорий", () => {
     const { md } = report("full-null");
     const method = md.slice(md.indexOf("## Как считается"), md.indexOf("## Приложение"));
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (ревью В5.3, 25.09): правило цифр — «1 показатель», не «один»
+    // правило цифр: «1 показатель», не «один»
     expect(method).toContain("В отчете 1 показатель – Repo Health Score");
     expect(method).not.toContain("один показатель");
     expect(method.match(/В этом отчете: /g) ?? []).toHaveLength(1);
@@ -156,7 +152,7 @@ describe("Блок А, пункт 7: полный доступ есть, HealthC
 });
 
 // ---------------------------------------------------------------------------
-// Блок Б — находки аудита А3-А15
+// Дефекты отчета, найденные аудитом
 // ---------------------------------------------------------------------------
 
 describe("А3: «0 за окно» при ненулевом счетчике — ограничение данных, а не факт", () => {
@@ -178,7 +174,7 @@ describe("А3: «0 за окно» при ненулевом счетчике �
 describe("А4: причина отсутствия результатов CI — одна, из самого факта", () => {
   test("grant-ci: причина названа теми же словами в разборе и в приложении В", () => {
     const { md } = report("grant-ci");
-    // 23.09: конфиг без прогонов — честное no-data вместо потолка 50 (решение владельца)
+    // конфиг CI без видимых прогонов – «нет данных», а не потолок 50
     expect(md).toContain("Результаты запусков CI сервису не видны – категорию не оцениваем");
     const appendix = md.slice(md.indexOf("## Приложение"));
     expect(appendix).toContain("| reason | у сервиса нет прав на эти данные |");
@@ -200,8 +196,8 @@ describe("А5: номинальный вес разбора и перенорм�
   });
 
   test("full-null: у «Состояния кода» без доли старых TODO номинальный и расчетный вес названы оба", () => {
-    // 4.2.0 (М1.4): 0 пометок — уже данные «старых нет»; доля без данных
-    // остается при неполной выборке TODO — ее и моделирует правка карточки
+    // 0 пометок – это данные («старых нет»); доля без данных бывает только при
+    // неполной выборке TODO – ее и моделирует правка карточки
     const { card, close } = fixtureCard("full-null");
     let md: string;
     try {
@@ -228,7 +224,7 @@ describe("А6: служебных ветвей и английских знач�
     const appendix = md.slice(md.indexOf("## Приложение"));
     expect(appendix).not.toContain("provenance");
     expect(appendix).not.toContain("tree.stats@channel");
-    // сырые значения на месте — К9.4 требует их показывать
+    // сырые значения на месте: путь «число → факт» требует их показывать
     expect(appendix).toContain("| severity_counts.critical | 1 |");
     expect(appendix).toContain("| backlog.open_findings | 7 |");
     expect(appendix).toContain("| last_status | успешно |");
@@ -323,7 +319,7 @@ describe("А13: срок закрытия задач назван ОДНИМ ч�
 describe("А14: язык подписан источником", () => {
   test("null: репозиторий не скачался, а язык есть — потому что он из каталога", () => {
     const { md } = report("null");
-    expect(md).toContain("Репозиторий не удалось прочитать"); // 4.3.0 (Н4)
+    expect(md).toContain("Репозиторий не удалось прочитать");
     expect(md).toContain("| Язык (по каталогу SourceCraft) | C++ |");
     expect(md).not.toContain("| Язык | C++ |");
   });
@@ -335,13 +331,13 @@ describe("А15: выборка задач для времени ответа —
     expect(md).toContain("В трекере нет ни одной задачи.");
     const appendix = md.slice(md.indexOf("## Приложение"));
     expect(appendix).toContain("| open | 0 |");
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): Ф20 — длинное тире только глифом «нет данных»
+    // длинное тире – только глиф «нет данных», в подписи среднее
     expect(appendix).toContain("| issues – задач в выборке для времени первого ответа; число задач трекера – в issues.stats | 0 |");
   });
 
   test("full: у репозитория с задачами выборка подписана тем же именем", () => {
     const { md } = report("full");
     const appendix = md.slice(md.indexOf("## Приложение"));
-    expect(appendix).toContain("| issues – задач в выборке для времени первого ответа; число задач трекера – в issues.stats | 4 |"); // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): Ф20
+    expect(appendix).toContain("| issues – задач в выборке для времени первого ответа; число задач трекера – в issues.stats | 4 |");
   });
 });

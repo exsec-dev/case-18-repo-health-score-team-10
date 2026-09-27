@@ -1,12 +1,11 @@
-// scripts/measure-r4-reconcile.ts — замер К-Р4 (круг 2 В4.2a): сколько
-// INSERT/UPDATE в repos делает ЧАСОВАЯ СВЕРКА каталога на НЕИЗМЕНЁННОМ
-// каталоге из 27 446 записей (живой масштаб публичного каталога
-// SourceCraft, замер 17.09). Счётчик — SQL-триггеры на временной БД (не
-// логи), плюс время прохода. Контракт: после исправления Р4 — 0 записей.
+// Замер: сколько INSERT/UPDATE в repos делает часовая сверка на неизмененном
+// каталоге размером с живой публичный каталог SourceCraft. Считают SQL-триггеры
+// на временной БД, плюс время прохода. Ожидание — 0 записей: неизмененный
+// каталог не должен ничего переписывать.
 //
 // Запуск: bun scripts/measure-r4-reconcile.ts
-// Живой БД/сети не касается: каталог — фейковый клиент, отдающий РОВНО
-// засеянные строки (неизменный каталог); БД — временный каталог.
+// Живой БД и сети не касается: каталог — фейковый клиент, отдающий ровно
+// засеянные строки; БД — во временном каталоге.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,8 +14,8 @@ import { openDb } from "../src/db";
 import { nightlyCatalog } from "../src/jobs/scheduler";
 import type { ScClient, ScResponse } from "../src/collectors/http";
 
-const N = 27_446; // живой размер каталога (17.09)
-const PAGE = 100; // page_size сверки (Ф2.5)
+const N = 27_446; // замеренный размер живого каталога
+const PAGE = 100; // page_size сверки
 const dir = mkdtempSync(join(tmpdir(), "rh-r4-measure-"));
 const db = openDb({ ...loadConfig(), dataDir: dir });
 

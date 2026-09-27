@@ -1,8 +1,7 @@
 import { FRAUD_EXPLAIN } from "../src/web/format";
-// В5.3, круг 1 (однозначное, §2 24.09 «Порядок исполнения В5.3»): Г1.17, Г1.16,
-// язык и условие раздела фрода (К-5), подпись истории оценки (К-2). Правило
-// AGENTS.md 21.09/23.09: утверждение о данных и пустое состояние — тестом на
-// данных, не source-assert.
+// CI с конфигурацией без запусков, действие, переводящее в следующую зону,
+// язык и условие раздела о накрутке, подпись истории оценки. Утверждение о
+// данных и пустое состояние проверяются на данных, а не по исходнику.
 import { describe, expect, test } from "bun:test";
 import type { CardAi, CardRecommendation, RepoCard } from "../src/api/repos";
 import { thresholdActions, thresholdNote } from "../src/report/build";
@@ -101,7 +100,7 @@ describe("К-5: раздел фрода в отчете", () => {
     try {
       const md = renderRepoReport(withFraud(card, { flag: true, factors }));
       expect(md).toContain("Подозрение на искусственную активность");
-      expect(md).toContain(FRAUD_EXPLAIN); // В5.3 круг 3: одна копия с карточкой
+      expect(md).toContain(FRAUD_EXPLAIN); // тот же текст, что на карточке
       expect(md).not.toMatch(/pattern|нашёл/);
     } finally {
       close();

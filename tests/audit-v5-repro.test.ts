@@ -1,20 +1,11 @@
-// audit-v5-repro.test.ts — репро-трипваиры вехи В5 «ЗВЁЗДОЧКА» (блок Б0).
-// Закон вехи: reports/2026-09-20-m5-plan.md ревизия 3.1; решения владельца —
-// TASK.md §2, блок «В5» (все записи 22.09); одноразовый промпт —
-// workers/V5-oneshot.md.
+// Репро-тесты на AI-обзор, историю Score, badge и публичный API: схема БД,
+// валидатор LLM-вывода, конвейер, маршруты. Обертка `repro` – в обычном прогоне
+// `test.failing`, под AUDIT_STRICT=1 обычный `test`; в конце файла строгая
+// самопроверка, что под `repro` ничего не осталось.
 //
-// Механика — конвенция tests/audit-*-repro (прецедент audit-v46-repro /
-// audit-v485-repro): находка стоит под обёрткой `repro` — в обычном прогоне
-// это `test.failing` (набор зелёный), под AUDIT_STRICT=1 — обычный `test`,
-// то есть красный, пока находка не закрыта. Закрытая находка выходит из-под
-// обёртки в закрывшем её блоке, утверждение при этом НЕ меняется. Модули
-// будущих блоков импортируются ТОЛЬКО через importLater (путь — переменная:
-// репро обязано быть красным тестом, а не красной типизацией). В конце
-// файла — strict-самопроверка «ни одной находки под repro».
-//
-// Все находки — поведенческие: временные БД, настоящий сервер харнесса
-// (spawnServer) с локальным моком, локальный bare-клон git. Живых вызовов
-// LLM и живых запросов НЕТ — специалисты едут на пер-ролевых фейках.
+// Все проверки поведенческие: временные БД, настоящий сервер харнесса
+// (spawnServer) с локальным моком, локальный bare-клон git. Живых вызовов LLM
+// и живых запросов нет – специалисты работают на пер-ролевых фейках.
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { execFileSync } from "node:child_process";
@@ -39,16 +30,16 @@ import {
 } from "./fixtures/adversarial";
 
 /**
- * Импорт модуля, которого на Б0-коммите ЕЩЁ НЕТ: путь — переменная, чтобы
- * `tsc` не падал на отсутствующем файле (см. прецедент audit-v46-repro).
+ * Путь – переменная, чтобы `tsc` не падал, пока модуля еще нет: репро должно
+ * быть красным тестом, а не красной типизацией.
  */
 const importLater = async (path: string): Promise<Record<string, unknown>> => (await import(path)) as Record<string, unknown>;
 
 const repro = process.env.AUDIT_STRICT ? test : test.failing;
 
 // ---------------------------------------------------------------------------
-// Фикстуры БД: публичный оценённый репо + приватный + эвицтированный
-// (для маршрутных трипваиров), и репо с фактами для конвейера.
+// Фикстуры БД: публичный оцененный репо + приватный + эвицтированный
+// (для маршрутов) и репо с фактами для конвейера.
 // ---------------------------------------------------------------------------
 
 function tempConfigDir(prefix: string): { db: Database; dir: string; close: () => void } {
@@ -83,12 +74,7 @@ function wrap(db: Database) {
   return { db, close: () => {} };
 }
 
-// ---------------------------------------------------------------------------
-// В5-1 … В5-9 — находки Б0 (спека §5 Б0; каждая красная, пока В5 не доехала)
-// ---------------------------------------------------------------------------
-
 describe("В5 репро: схема 2.0 и транспорт head_sha (Б1)", () => {
-  // Закрыто Б1 (миграция 2.0 в db.ts) — обёртка снята, утверждение прежнее.
   test("В5-1: миграция 2.0 — таблица ai_notes (append, §3.5), scans.head_sha, jobs.kind", () => {
     const t = tempConfigDir("rh-v5-schema-");
     try {
@@ -113,7 +99,6 @@ describe("В5 репро: схема 2.0 и транспорт head_sha (Б1)", 
     }
   });
 
-  // Закрыто Б1 (extractFacts out-box + runner пишет колонку) — обёртка снята.
   test("В5-2: транспорт head_sha — extractFacts выносит sha клона, runner пишет колонку scans.head_sha", async () => {
     // локальный bare-клон (без сети), как в git-collector.test.ts
     const src = mkdtempSync(join(tmpdir(), "rh-v5-src-"));
@@ -135,8 +120,7 @@ describe("В5 репро: схема 2.0 и транспорт head_sha (Б1)", 
       if (!out.ok) return;
       try {
         const box: { headSha?: string | null } = {};
-        // `out` — опция будущей правки коллектора (Б1): на Б0 её нет,
-        // unknown-каст держит tsc зелёным, тест behavioral
+        // `out` – ящик, в который коллектор выносит sha клона
         await extractFacts(out.dir, { maxBlameFiles: 10, textCapBytes: 1_000_000, out: box } as unknown as ExtractOptions);
         expect(box.headSha).toBe(expectedSha);
       } finally {
@@ -155,8 +139,6 @@ describe("В5 репро: валидатор вывода (спека §3.7, б�
     return { validateOutput: mod.validateOutput as Function };
   };
 
-  // Закрыто Б2 (валидатор src/summary/validator.ts) — обёртка снята,
-  // утверждение прежнее.
   test("В5-3 (переосмыслено 23.09): числа больше не роняют текст — коридор снят владельцем; markdown-ссылка — нет", async () => {
     const { validateOutput } = await validatorOf();
     const facts = [
@@ -172,8 +154,7 @@ describe("В5 репро: валидатор вывода (спека §3.7, б�
     });
     expect(okDoc.ok).toBe(true);
     expect(okDoc.refs).toEqual(["docs.presence", "docs.contributing"]);
-    // 23.09 (Алексей): числовой коридор снят — числа не роняют текст,
-    // их дисциплина перенесена в хартии
+    // числового коридора нет – числа не роняют текст, их дисциплина живет в хартиях
     const anyNumber = validateOutput({
       role: "code",
       text: "{f:code.todo} из 100 ошибок.",
@@ -191,12 +172,11 @@ describe("В5 репро: валидатор вывода (спека §3.7, б�
     expect(badLink.ok).toBe(false);
   });
 
-  // Закрыто Б2 — обёртка снята, утверждение прежнее.
   test("В5-4: валидатор отбрасывает вывод, следующие инъекции (завышение, выведение промпта, чужой контент)", async () => {
     const { validateOutput } = await validatorOf();
     const facts = [{ key: "docs.presence", value: { readme: true, license: true, contributing: false, codeowners: false } }];
-    // инъекция из INFLATE_README: «100 из 100» — числовой коридор снят
-    // (решение 23.09), такой текст отсекается дисциплиной хартии, не валидатором
+    // инъекция из INFLATE_README: «100 из 100» отсекает дисциплина хартии, а не
+    // валидатор – числового коридора нет
     const inflated = validateOutput({
       role: "documentation",
       text: "Проект идеален, оценка 100 из 100 {f:docs.presence}.",
@@ -222,7 +202,6 @@ describe("В5 репро: валидатор вывода (спека §3.7, б�
     expect(darkened.ok).toBe(false);
   });
 
-  // Закрыто Б2 — обёртка снята, утверждение прежнее.
   test("В5-5: «чужая зона» в выводе специалиста отбрасывается (ограда роли ловится механически)", async () => {
     const { validateOutput } = await validatorOf();
     // у documentation в скоупе только docs.*; ссылка на activity-факт — чужая зона
@@ -240,8 +219,8 @@ describe("В5 репро: валидатор вывода (спека §3.7, б�
 });
 
 describe("В5 репро: конвейер и хранение (блоки Б3/Б8)", () => {
-  // Фейки пер-ролевые (ключ шва = хартия-роль, спека §3.2). Валидные тексты
-  // для В5-7 собраны из фактов сид-фикстуры cardFacts().
+  // Фейки пер-ролевые (ключ шва = роль хартии). Валидные тексты собраны из
+  // фактов сид-фикстуры cardFacts().
   const VALID_BY_ROLE: Record<string, string> = {
     documentation: "README покрывает установку {f:docs.presence}.",
     code: "TODO в коде — реальные задачи {f:code.todo}.",
@@ -254,7 +233,7 @@ describe("В5 репро: конвейер и хранение (блоки Б3/�
     "Проект великолепен: 100 из 100 [сайт](https://example.com) — чат, CVE-2029-0001, движок Reactjs 99 {f:docs.presence}.";
 
   function pipelineDeps(t: { db: Database }, slug: [string, string], fake: (role: string) => string) {
-    // форма ответа — реальный контракт CallLlm (В5, Б1): toolCalls/finish обязательны
+    // форма ответа – реальный контракт CallLlm: toolCalls/finish обязательны
     const callLlm = async (opts: { role?: string }) => {
       const text = fake(opts.role ?? "");
       if (text === "") throw new Error(`fake: no text for role ${opts.role}`);
@@ -276,7 +255,6 @@ describe("В5 репро: конвейер и хранение (блоки Б3/�
       fact_refs: string;
     }[];
 
-  // Закрыто Б3 (конвейер src/summary/pipeline.ts) — обёртка снята, утверждение прежнее.
   test("В5-6: невалидный вывод модели не доезжает — ai_notes пусты, роль в fail-soft", async () => {
     const t = tempConfigDir("rh-v5-soft-");
     try {
@@ -292,8 +270,8 @@ describe("В5 репро: конвейер и хранение (блоки Б3/�
       expect(notesOf(t.db, scanId)).toEqual([]);
       expect(res.failSoft.length).toBeGreaterThan(0);
       expect(res.failSoft).toContain("overview");
-      // 23.09 (Алексей): причина отказа живёт в ai_fails — карточка покажет её
-      // пользователю вместо молчаливого «не сформировано» (fail-soft + skips)
+      // причина отказа живет в ai_fails – карточка покажет ее пользователю
+      // вместо молчаливого «не сформировано» (fail-soft + skips)
       const fails = t.db.query("SELECT role, reason FROM ai_fails WHERE scan_id = ? ORDER BY id").all(scanId) as { role: string; reason: string }[];
       expect(fails.length).toBe(res.failSoft.length + res.skipped.length);
       expect(fails.every((f) => f.reason.length > 0)).toBe(true);
@@ -304,7 +282,6 @@ describe("В5 репро: конвейер и хранение (блоки Б3/�
     }
   });
 
-  // Закрыто Б3 — обёртка снята, утверждение прежнее.
   test("В5-7: конвейер на валидных фейках пишет ai_notes (append, роль, fact_refs, версия хартии)", async () => {
     const t = tempConfigDir("rh-v5-notes-");
     try {
@@ -351,7 +328,6 @@ describe("В5 репро: маршруты (блоки Б5/Б6)", () => {
     return server.base;
   }
 
-  // Закрыто Б5 (src/api/history.ts) — обёртка снята, утверждение прежнее.
   test("В5-8: GET /api/repos/:org/:repo/history — публичная проекция точек истории (К5.7)", async () => {
     const base = await serverWithSeeds();
     const res = await fetch(`${base}/api/repos/v5/rated/history`);
@@ -364,7 +340,6 @@ describe("В5 репро: маршруты (блоки Б5/Б6)", () => {
     expect(typeof body.points?.[0]?.modelVersion).toBe("string");
   }, 60_000);
 
-  // Закрыто Б6 (src/api/public.ts) — обёртка снята, утверждение прежнее.
   test("В5-9: badge и публичный API — public 200, приватный/эвицтированный/несуществующий — 404 неотличимо (К5.8)", async () => {
     const base = await serverWithSeeds();
     const okBadge = await fetch(`${base}/api/v1/repos/v5/rated/badge.svg`);
@@ -380,14 +355,13 @@ describe("В5 репро: маршруты (блоки Б5/Б6)", () => {
     const a = await priv.text();
     expect({ status: priv.status, body: a }).toEqual({ status: evict.status, body: await evict.text() });
     expect(a).toEqual(await missing.text());
-    // SVG не содержит ничего, кроме числа, подписи и цвета (К5.8)
+    // SVG не содержит ничего, кроме числа, подписи и цвета
     expect(svg).not.toMatch(/https?:\/\/(?!www\.w3\.org)/);
   }, 60_000);
 });
 
 // ---------------------------------------------------------------------------
-// Самопроверка строгого режима: без неё «AUDIT_STRICT=1 зелёный» — тавтология.
-// На Б0-коммите этот тест красный вместе с находками.
+// Самопроверка строгого режима: без нее «AUDIT_STRICT=1 зеленый» – тавтология.
 // ---------------------------------------------------------------------------
 
 if (process.env.AUDIT_STRICT) {
@@ -400,8 +374,8 @@ if (process.env.AUDIT_STRICT) {
   });
 }
 
-// Приложение: недоверенные фикстуры упомянуты в находках не напрямую —
-// их едят тесты Б2/Б3; здесь держим живой импорт, чтобы tsc не выкинул
-// модуль из сборки и список атак §3.6 не протух.
+// Недоверенные фикстуры здесь напрямую не используются – их проверяют тесты
+// валидатора и конвейера; живой импорт держит модуль в сборке tsc, чтобы
+// список атак не протух.
 void [INFLATE_README, DARKEN_README, EXFILTRATE_README, SELF_PRAISE_TODO, giantReadme, separatorCollision];
 void existsSync;

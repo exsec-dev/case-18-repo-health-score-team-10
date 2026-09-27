@@ -1,6 +1,5 @@
-// V5.5 tour 3 round 5 (design audit decisions, 27.09): behavioral tests on data for
-// the rating's "нет кода" field (rule 21.09: a field the UI draws = its source) and
-// for the rewritten adjustment texts (no jargon, same numbers).
+// Behavioral tests on data for the rating's "нет кода" field (a field the UI draws
+// equals its source) and for the adjustment texts (no jargon, same numbers).
 import { describe, expect, test } from "bun:test";
 import { listRepos, parseReposQuery } from "../src/api/repos";
 import { adjustmentLabel, adjustmentText } from "../src/report/sections";

@@ -1,6 +1,6 @@
-// api.test.ts — read-API В3 (Б1): рейтинг (сортировки, фильтры, фасеты,
-// пагинация, tri-state), карточка (маркеры, доказательная база, чипы
-// без факта), мета. Сети нет: сид-набор — tests/api-fixtures.ts.
+// Read-API: рейтинг (сортировки, фильтры, фасеты, пагинация, tri-state),
+// карточка (маркеры, доказательная база, чипы без факта), мета, health.
+// Сети нет: сид-набор — tests/api-fixtures.ts.
 import { afterAll, describe, expect, test } from "bun:test";
 import {
   DEFAULT_QUERY,
@@ -41,7 +41,7 @@ afterAll(() => {
 });
 
 const q = (patch: Partial<ReposQuery> = {}): ReposQuery => ({ ...DEFAULT_QUERY, ...patch });
-/** зритель с доступом ко всем каналам (К2) */
+/** зритель с доступом ко всем каналам */
 const GRANTED: AccessResult = { cicd: "granted", appsec: "granted", repo: "granted" };
 const names = (items: { org: string; repo: string }[]): string[] => items.map((i) => `${i.org}/${i.repo}`);
 
@@ -186,7 +186,7 @@ describe("рейтинг: фильтры и фасеты", () => {
     expect(facet(withLang, "C++")).toBe(1);
     expect(facet(withLang, null)).toBe(2);
     const withQ = listRepos(t.db, q({ q: "div" }));
-    // В4.7 (П2): фасет несёт цвет языка; у сид-набора цветов нет — null
+    // фасет несет цвет языка; у сид-набора цветов нет — null
     expect(withQ.facets.languages).toEqual([{ language: "Kotlin", count: 1, color: null }]);
   });
 
@@ -202,7 +202,7 @@ describe("разбор query-параметров", () => {
   test("дефолты и известные значения", () => {
     const res = parseReposQuery(new URLSearchParams("sort=likes&order=asc&page=2&per_page=10&lang=Go&q=div"));
     expect(res.ok).toBe(true);
-    // В4.7 (П2): lang — множество; одиночный lang=Go — множество из одного элемента
+    // lang — множество; одиночный lang=Go — множество из одного элемента
     if (res.ok) expect(res.query).toEqual({ sort: "likes", order: "asc", page: 2, perPage: 10, lang: ["Go"], q: "div" });
     const empty = parseReposQuery(new URLSearchParams(""));
     if (empty.ok) expect(empty.query).toEqual(DEFAULT_QUERY);
@@ -259,7 +259,7 @@ describe("карточка репозитория", () => {
     expect(card.scan).toMatchObject({ id: scanId, status: "partial", trigger: "user" });
     expect(card.score?.healthcraftIndex).toBe(67);
     expect(card.score?.modelVersion).toBe(MODEL_VERSION);
-    // 23.09: конфиг без прогонов — честное no-data по cicd наравне с security
+    // конфиг без прогонов — честное no-data по cicd наравне с security
     expect(card.score?.noData.some((x) => x.startsWith("cicd"))).toBe(true);
     expect(card.score?.noData.some((x) => x.startsWith("security"))).toBe(true);
     expect(card.derived).toMatchObject({ commitsPerMonth: 12 });
@@ -279,7 +279,7 @@ describe("карточка репозитория", () => {
   });
 
   test("рекомендации: публичные — из таблицы P, канальные — движком на показанных фактах; source, порядок, fact_ref → factRefs", () => {
-    // круг 2: раны CI недоступны (config-only) → grant-ci-runs; AppSec нет → connect-appsec
+    // раны CI недоступны (config-only) → grant-ci-runs; AppSec нет → connect-appsec
     expect(card.recommendations.map((r) => r.ruleId)).toEqual(["contributing-missing", "connect-appsec", "grant-ci-runs"]);
     expect(card.recommendations.map((r) => r.priority)).toEqual([1, 2, 3]);
     expect(card.recommendations[0]).toMatchObject({ kind: "presence", deltaScore: 2.25, source: "rule" });
@@ -355,7 +355,7 @@ describe("изоляция own/public и эвикция (В4/Б4)", () => {
     expect(rating.items[0]!.categories.cicd).toBeNull();
     expect(rating.items[0]!.categories.security).toBeNull();
     // карточка: Score в рейтинге последнего пригодного скана; полный Score — из
-    // показанных категорий (круг 2), а не сохранённая строка (полного итога в схеме нет)
+    // показанных категорий, а не сохраненная строка (полного итога в схеме нет)
     const card = getRepoCard(iso.db, "iso", "dual", { access: GRANTED })!;
     expect(card.score!.healthcraftIndex).toBe(70);
     expect(card.score!.repoHealthScore).toBe(Math.round(totalsFromCategories(card.score!.categories, { codeEmpty: false, secretsCritical: false }).repoHealthScore!));
@@ -380,7 +380,7 @@ describe("изоляция own/public и эвикция (В4/Б4)", () => {
     iso.db.query("UPDATE repos SET rating_active = 0 WHERE repo_slug = 'evicted'").run();
     const rating = listRepos(iso.db, q());
     expect(names(rating.items)).toEqual(["iso/dual"]);
-    // эвиктированный публичный — 404 всем, даже зрителю с доступом (К2)
+    // эвиктированный публичный — 404 всем, даже зрителю с доступом
     expect(getRepoCard(iso.db, "iso", "evicted")).toBeNull();
     expect(getRepoCard(iso.db, "iso", "evicted", { access: GRANTED })).toBeNull();
     // возврат флагом
@@ -444,7 +444,7 @@ describe("единая карточка: матрица доступа зрит�
   m.db.query("UPDATE repos SET rating_active = 0 WHERE repo_slug = 'gone'").run();
 
   const view = (a: AccessResult, repo = "pub") => getRepoCard(m.db, "mx", repo, { access: a });
-  // круг 2: CI и Security считаются на показе из ok-фактов своих сканов
+  // CI и Security считаются на показе из ok-фактов своих сканов
   const channelCats = computeFromFacts(
     new Map<string, unknown>([
       ["cicd.configs", { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: true }],
@@ -498,7 +498,7 @@ describe("единая карточка: матрица доступа зрит�
     expect(card.score!.categories.security.locked).toBe("denied");
     expect(card.score!.fullLocked).toBe(true);
     expect(card.score!.repoHealthScore).toBeNull();
-    // 4.3.0 (Р3): правила серьезности — первыми
+    // правила серьезности — первыми
     expect(rules(card)).toEqual(["fix-red-runs", "license-missing", "speed-up-pipeline"]);
     expect(keys(card)).toContain("cicd.runs");
     expect(keys(card)).not.toContain("appsec.findings");
@@ -524,7 +524,7 @@ describe("единая карточка: матрица доступа зрит�
     expect(card.score!.repoHealthScore).toBe(49);
     expect(card.score!.repoHealthCoverage).toBe(1);
     expect(rules(card)).toEqual(["appsec-critical", "fix-red-runs", "license-missing", "speed-up-pipeline"]);
-    // канальные данные берутся из скана, где они собраны ok, — фолбэка «из истории» у них нет (круг 2)
+    // канальные данные берутся из скана, где они собраны ok, — фолбэка «из истории» у них нет
     expect(card.score!.stale).toEqual(["issues.stats"]);
   });
 
@@ -544,12 +544,12 @@ describe("единая карточка: матрица доступа зрит�
 
   test("MD-отчёт строится тем же сборщиком и следует тем же правилам", () => {
     const anonMd = renderRepoReport(view(ANON)!);
-    // В4.9: полный показатель — крупно («Repo Health Score: **49 из 100 · …**»), факты — таблицами приложения В
+    // полный показатель — крупно («Repo Health Score: **49 из 100 · …**»), факты — таблицами приложения В
     for (const leak of ["severity_counts", "runs_count", "fix-red-runs", "appsec-critical", "Repo Health Score: **", "Repo Health Score 49"]) {
       expect(anonMd).not.toContain(leak);
     }
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, §2 23.09 ответ 1): путь к полной оценке —
-    // по типу зрителя; здесь доступ «нет токена» — без «войдите» (Г2.2)
+    // путь к полной оценке зависит от типа зрителя; здесь доступ «нет токена» —
+    // без «войдите»
     expect(anonMd).toContain("Добавьте персональный токен доступа в Настройках.");
     expect(anonMd).not.toContain("войдите и добавьте");
     const fullMd = renderRepoReport(view({ cicd: "granted", appsec: "granted", repo: "granted" })!);
@@ -582,7 +582,7 @@ describe("пробой лимитов клона (К5)", () => {
       degradeTimeoutMs: 25 * 60_000,
     });
     const md = renderRepoReport(card);
-    // Б5 (У31): в тексте лимитов длинное тире стало средним
+    // в тексте лимитов — среднее тире, не длинное
     expect(md).toContain("Репозиторий больше лимита сервиса: полный клон больше 1,5 ГБ или дольше 20 мин, 13 месяцев истории – больше 2,5 ГБ или дольше 25 мин");
     // лимиты — оператора из переданного конфига, не пользовательские
     const custom = getRepoCard(l.db, "big", "mono", { limits: { ...DEFAULT_SCAN, clone: { ...DEFAULT_SCAN.clone, maxBytes: 512 * 1024 ** 2 } } })!;
@@ -607,8 +607,8 @@ describe("мета", () => {
 });
 
 // ---------------------------------------------------------------------------
-// В4.4 (кластер B): честный health — ok вычисляемое, красные причины
-// (pending-рескор, подозрительно пустой каталог, провал ночной фазы).
+// Честный health: ok вычисляется, красные причины — незавершенный рескор,
+// подозрительно пустой каталог, провал ночной фазы.
 // ---------------------------------------------------------------------------
 
 describe("health (В4.4): ok вычисляемое, reasons по контракту", () => {
@@ -680,7 +680,7 @@ describe("health (В4.4): ok вычисляемое, reasons по контрак
 });
 
 // ---------------------------------------------------------------------------
-// В4.4 (кластер C): чтение сжатого timeline прозрачно — карточка и compute
+// Чтение сжатого timeline прозрачно для карточки и compute
 // ---------------------------------------------------------------------------
 
 describe("В4.4: сжатый timeline читается как несжатый", () => {
@@ -700,7 +700,7 @@ describe("В4.4: сжатый timeline читается как несжатый"
     expect(encodeFactValue("activity.git.timeline", value, "no-data")).toBe(JSON.stringify(value));
     expect(encodeFactValue("activity.git.timeline", value, "bad")).toBe(JSON.stringify(value));
     expect(encodeFactValue("activity.git.timeline", value, "ok").startsWith("z:")).toBe(true);
-    // старый двухаргументный вызов (замороженные тесты круга 1) — как был
+    // двухаргументный вызов без статуса сжимает, как раньше
     expect(encodeFactValue("activity.git.timeline", value).startsWith("z:")).toBe(true);
   });
 
@@ -737,8 +737,8 @@ describe("В4.4: сжатый timeline читается как несжатый"
 });
 
 // ---------------------------------------------------------------------------
-// Круг 2 В4.4 (Б5, S-5): сырые внутренние тексты в публичном /api/health
-// капятся (200 символов + срез управляющих) — диагностика сохраняется.
+// Сырые внутренние тексты в публичном /api/health капятся (200 символов +
+// срез управляющих) — диагностика сохраняется.
 // ---------------------------------------------------------------------------
 
 describe("Б5 (круг 2 В4.4): капы текстов health", () => {

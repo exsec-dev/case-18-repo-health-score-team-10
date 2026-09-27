@@ -1,17 +1,13 @@
-// submetrics.ts — словарь подметрик (30 с моделью 4.3.0: + «Файлы тестов»; 33 с 4.4.0: + динамика CI и задач): название и форма показа значения
-// (В4.7, контракт П4.2; вопрос 28 канвы закрыт 21.09 — «оба в В4.7»).
-//
-// Одно правило на страницу карточки, MD и PDF: строка подметрики на
-// карточке и таблица подметрик отчёта берут отсюда и название (первая
-// колонка MD — русское название вместо ключа, решение В3), и значение.
-// Составное значение собирается в короткую строку и НЕ обрезается
-// многоточием. Поповер «Основание» и раздел фактов остаются сырыми — это
-// доказательство, а не показ.
+// Словарь подметрик: название и форма показа значения. Одно правило для
+// карточки, MD и PDF — строка подметрики на карточке и таблица подметрик
+// отчета берут отсюда и русское название, и значение. Составное значение
+// собирается в короткую строку и не обрезается многоточием. Поповер «Основание»
+// и раздел фактов остаются сырыми — это доказательство, а не показ.
 //
 // Модуль импортирует фронтенд, поэтому здесь нет ни серверного кода, ни
 // `pdfmake`, ни `Intl`/локали (одинаковый вывод на сервере и в браузере).
-// Формы значений сняты с кода скоринга (`src/score/compute.ts`,
-// `derived.ts`, реестр фактов `collectors/facts.ts`), сам скоринг не тронут:
+// Формы значений соответствуют коду скоринга (`src/score/compute.ts`,
+// `derived.ts`, реестр фактов `collectors/facts.ts`):
 //   documentation.readme      — факт docs.readme: {bytes, sections, flags} | {present:false};
 //   cicd.config               — факт cicd.configs: {paths, has_ci_yaml, has_steps};
 //   cicd.duration             — секунды (duration_p50);
@@ -19,18 +15,18 @@
 //   security.density          — находок (с весами severity) на 10 тыс. строк;
 //   code.density              — маркеров TODO/FIXME на 1 тыс. строк;
 //   activity.fresh            — отметка времени (мс) последнего коммита
-//                               человека → «N дней» на момент скана (решение В3);
+//                               человека → «N дней» на момент скана;
 //   activity.mirror_likeness  — {sync_share, authors, committers};
 //   issues.tracker_unused     — {open, closed};
 //   cicd.stability            — {trend, recent_share, previous_share, window} |
-//                               {trend: null, few_runs, completed, needed} (4.4.0, ТП-1);
-//   issues.backlog_trend      — {created, closed, balance, direction} (4.4.0, ТП-9);
-//   issues.monthly_flow       — [{from, created, closed}] от старых окон к новым (4.4.0, ТП-9);
+//                               {trend: null, few_runs, completed, needed};
+//   issues.backlog_trend      — {created, closed, balance, direction};
+//   issues.monthly_flow       — [{from, created, closed}] от старых окон к новым;
 //   доли — 0..1 (показ в процентах); без значения — «—».
 
 import { fmtDecimal } from "../web/format";
 
-/** Глиф «нет данных» (tri-state, закон 2): тот же, что у `fmtScore` и ячеек MD. */
+/** Глиф «нет данных» (tri-state): тот же, что у `fmtScore` и ячеек MD. */
 export const NO_VALUE = "—";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -57,8 +53,8 @@ export interface SubmetricSpec {
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
 /**
- * Число без локали: целое как есть, дробное — до `digits` знаков. В4.9
- * (К9.11): десятичная запятая и минус «−» — одна копия правила (`fmtDecimal`).
+ * Число без локали: целое как есть, дробное — до `digits` знаков. Десятичная
+ * запятая и минус «−» — по общему правилу `fmtDecimal`.
  */
 function num(value: number, digits = 2): string {
   if (Number.isInteger(value)) return String(value);
@@ -162,9 +158,9 @@ const tracker: Formatter = (v) => {
 };
 
 /**
- * 4.4.0 (ТП-1): «стабильнее, 90% успешных у последних 10 запусков против 60% у 10
- * до них». Без двоеточий и тире внутри: строка встает после «Название – » и
- * «Название: » (справочная строка раздела и приложение Б отчета).
+ * «стабильнее, 90% успешных у последних 10 запусков против 60% у 10 до них».
+ * Без двоеточий и тире внутри: строка встает после «Название – » и «Название: »
+ * (справочная строка раздела и приложение Б отчета).
  */
 const ciStability: Formatter = (v) => {
   const c = obj(v);
@@ -181,7 +177,7 @@ const ciStability: Formatter = (v) => {
 /** Знак баланса: «+5», «−4», «0» (минус — «−», как у `fmtDecimal`). */
 const signed = (n: number): string => (n > 0 ? `+${num(n)}` : n < 0 ? fmtDecimal(n, 0) : "0");
 
-/** 4.4.0 (ТП-9): «бэклог растет, +5 за 90 дней (создано 12, закрыто 7)». */
+/** «бэклог растет, +5 за 90 дней (создано 12, закрыто 7)». */
 const backlogTrend: Formatter = (v) => {
   const b = obj(v);
   if (!b || !isNum(b.created) || !isNum(b.closed) || !isNum(b.balance)) return null;
@@ -191,7 +187,7 @@ const backlogTrend: Formatter = (v) => {
   return `${word}, ${signed(b.balance)} за 90 дней (создано ${num(b.created)}, закрыто ${num(b.closed)})`;
 };
 
-/** 4.4.0 (ТП-9): «2/1, 0/0, 3/2, 4/2, 5/3, 3/2 (создано/закрыто за 30 дней, от старых к новым)»; окно без данных — «—». */
+/** «2/1, 0/0, 3/2, 4/2, 5/3, 3/2 (создано/закрыто за 30 дней, от старых к новым)»; окно без данных — «—». */
 const monthlyFlow: Formatter = (v) => {
   if (!Array.isArray(v) || v.length === 0) return null;
   const cells = v.map((w) => {
@@ -201,7 +197,7 @@ const monthlyFlow: Formatter = (v) => {
   return `${cells.join(", ")} (создано/закрыто за 30 дней, от старых к новым)`;
 };
 
-// ---------- В5.5 тур 2 (W4, ЗН-2): review PR и карта владельцев ----------
+// ---------- ревью PR и карта владельцев ----------
 
 /** Часы: до 48 ч — «N ч», дольше — «N дней» (сутки из 24 ч). */
 const hoursOrDays: Formatter = (v) => {
@@ -247,12 +243,11 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   "cicd.config": { title: "Конфигурация CI со шагами", unit: "признаки ci.yaml", format: ciConfig },
   "cicd.pass_rate": { title: "Доля успешных запусков CI", unit: "доля, %", format: share },
   "cicd.duration": { title: "Медианная длительность запуска CI", unit: "секунды → с/мин/ч", format: duration },
-  // 4.4.0 (ТП-1): справочно, без веса
   "cicd.stability": { title: "Стабильность CI в динамике", unit: "доля успешных: последние запуски против предыдущих (справочно, без веса)", format: ciStability },
-  // Г1.5 гейта: мера — в значении, в названии ее повторять незачем
+  // мера — в значении, в названии ее повторять незачем
   "security.density": { title: "Плотность находок", unit: "на 10 тыс. строк", format: perLines("10 тыс.") },
   "security.resolved": { title: "Доля закрытых находок", unit: "доля, %", format: share },
-  // Г1.4 гейта: без двойного отрицания — «Отсутствие критичных утечек – нет» читалось наоборот
+  // без двойного отрицания: «Отсутствие критичных утечек – нет» читалось бы наоборот
   "security.secrets": { title: "Критичные утечки секретов", unit: "найдены/не найдены", format: (v) => (typeof v === "boolean" ? (v ? "найдены" : "не найдены") : null) },
   "activity.fresh": { title: "Свежесть последнего коммита человека", unit: "дни на момент скана", format: daysSince },
   "activity.freq": { title: "Частота коммитов", unit: "коммитов в месяц", format: (v) => (isNum(v) ? `${num(v, 1)} в месяц` : null) },
@@ -269,17 +264,15 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   "issues.resolution": { title: "Доля решенных", unit: "доля, %", format: share },
   "issues.first_resp": { title: "Время до первого ответа", unit: "часы", format: (v) => (isNum(v) ? `${num(v, 1)} ч` : null) },
   "issues.tracker_unused": { title: "Трекер не ведется", unit: "открытые и закрытые задачи", format: tracker },
-  // 4.4.0 (ТП-9): справочно, без веса
   "issues.backlog_trend": { title: "Динамика бэклога за 90 дней", unit: "создано минус закрыто (справочно, без веса)", format: backlogTrend },
   "issues.monthly_flow": { title: "Поток задач по 30-дневным окнам", unit: "6 окон по 30 дней (справочно, без веса)", format: monthlyFlow },
-  // 4.3.1 (В5.5, М1): пометки считаются только в коде — файлы тестов исключены
+  // пометки считаются только в коде — файлы тестов исключены
   "code.density": { title: "Плотность TODO/FIXME в коде", unit: "на 1 тыс. строк", format: perLines("1 тыс.") },
   "code.old_share": { title: "Доля старых TODO", unit: "доля, %", format: share },
-  // 4.3.0 (Р1): доля файлов тестов среди файлов кода
   "code.tests": { title: "Файлы тестов", unit: "доля файлов кода, %", format: share },
   "code.root": { title: "Порядок в корне репозитория", unit: "элементы корня", format: count("элемент", "элемента", "элементов") },
   "code.todo_total": { title: "Маркеров TODO/FIXME в коде", unit: "штуки", format: plain },
-  // В5.5 тур 2 (W4, ЗН-2): справочные, без веса (DISPLAY_ONLY)
+  // справочные, без веса (DISPLAY_ONLY)
   "activity.pr_review": { title: "Ревью предложений изменений", unit: "PR нет / только черновики (справочно, без веса)", format: prReview },
   "activity.pr_first_response": { title: "Время до первого ответа на PR", unit: "медиана, часы → ч/дни (справочно, без веса)", format: hoursOrDays },
   "activity.pr_waiting": { title: "PR без ответа дольше 3 дней", unit: "открытые PR выборки (справочно, без веса)", format: prWaiting },
@@ -289,11 +282,9 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
 };
 
 /**
- * Показ-без-веса (§7.3 методики): число объясняет картину, но в балл
- * категории не идет. Одна копия для карточки, MD и PDF.
+ * Справочные подметрики без веса (см. docs/methodology.md): число объясняет
+ * картину, но в балл категории не идет. Одна копия для карточки, MD и PDF.
  */
-// В5.3 (25.09): bus_factor — без веса в SUBWEIGHTS методики (подпись «справочно, без веса»), серым как прочие
-// 4.4.0 (В5.5 тур 2, решение §2 п.3): динамика CI (ТП-1) и задач (ТП-9) — справочно, без веса
 export const DISPLAY_ONLY = new Set([
   "activity.mirror_likeness",
   "activity.commits_90d",
@@ -304,7 +295,6 @@ export const DISPLAY_ONLY = new Set([
   "cicd.stability",
   "issues.backlog_trend",
   "issues.monthly_flow",
-  // В5.5 тур 2 (W4, ЗН-2; §2 тур 2 п.3 — все новые показатели справочные)
   "activity.pr_review",
   "activity.pr_first_response",
   "activity.pr_waiting",
@@ -326,12 +316,12 @@ export function subweightKey(sub: string): string {
 }
 
 /**
- * В4.9 (К9.9): служебные заметки расчета (`submetrics[*].note`, по-английски,
- * `compute.ts` / `derived.ts`) — показ для читателя. Сопоставление — по КЛЮЧУ
- * подметрики и факту наличия заметки, не по точной строке: в БД лежат оценки
- * прошлых версий кода. `value` — что печатается вместо «—» в колонке
- * значения; `remark` — примечание под таблицей. Неизвестная заметка не
- * показывается вовсе (null): сырой `note` читателю не печатается никогда.
+ * Служебные заметки расчета (`submetrics[*].note`, по-английски, из `compute.ts` /
+ * `derived.ts`) в виде для читателя. Сопоставление — по ключу подметрики и
+ * началу заметки, а не по точной строке: в БД лежат оценки прошлых версий кода.
+ * `value` — что печатается вместо «—» в колонке значения; `remark` — примечание
+ * под таблицей. Неизвестная заметка не показывается (null): сырой `note`
+ * читателю не печатается никогда.
  */
 export interface NoteText {
   value?: string;
@@ -342,9 +332,9 @@ export function submetricNote(category: string, sub: string, note: string | null
   if (typeof note !== "string" || note === "") return null;
   const key = `${category}.${sub}`;
   if (key === "issues.tracker_unused") return { remark: "Задач в трекере нет, поэтому категория получает минимальный балл." };
-  // 4.4.0 (ТП-1, ТП-9): справочные показатели динамики — причина «нет данных» словами
+  // справочные показатели динамики — причина «нет данных» словами
   if (key === "cicd.stability" || key === "issues.backlog_trend" || key === "issues.monthly_flow") {
-    // круг 5 тура 3 (находка 6 аудита): без внутренней «версии 5 сборщика» — тот же факт словами
+    // факты собраны старым сборщиком — без упоминания внутренних версий
     if (note.startsWith("older collector")) return { value: "появится после следующего анализа" };
     if (key !== "cicd.stability" && note.startsWith("tracker not maintained")) return { value: "трекер не ведется" };
     if (key === "issues.backlog_trend" && note.startsWith("issue list truncated")) return { value: "нет данных, список задач обрезан и 90 дней не покрыты" };
@@ -355,22 +345,22 @@ export function submetricNote(category: string, sub: string, note: string | null
   if (key === "cicd.pass_rate" || key === "cicd.duration") {
     if (note.startsWith("no declared CI")) return { value: "CI не настроен" };
     if (note.startsWith("runs no-data")) return { value: "запуски недоступны" };
-    // 4.3.0 (Н14б, D11): «не запускался» — словами, а не «0%» («все запуски упали»)
+    // «не запускался» — словами: «0%» читалось бы как «все запуски упали»
     if (note.startsWith("runs pending")) return { value: "запуски идут" };
     if (note === "no runs") return { value: "CI не запускался" };
     if (note.startsWith("no runs within a year")) return { value: "за год не запускался" };
     if (note.startsWith("no recent runs")) return { value: "нет запусков за год" };
     return null;
   }
-  // Н9: открытые задачи есть, закрытых нет — худший балл, словами
+  // открытые задачи есть, закрытых нет — худший балл, словами
   if (key === "issues.close_days" && note.startsWith("no issue closed")) return { value: "ни одна задача не закрыта" };
-  // круг 2 (В1): «Тесты» — бонус; нет непустых тестов — в балл не входит
+  // «Тесты» — бонус: нет непустых тестов — в балл не входит
   if (key === "code.tests" && note.startsWith("no tests")) return { value: "тестов нет – в балл не входит" };
   if (key === "code.tests" && note.startsWith("tests bonus not applied")) return null;
-  // Н14б: оговорка «доля от не менее 5 пометок» — в показе значения (submetricShownValue)
+  // оговорка «доля от не менее 5 пометок» — в показе значения (submetricShownValue)
   if (key === "code.old_share" && note.startsWith("share of at least")) return null;
   if (key === "code.old_share") return { value: "не посчитано: прочитаны не все файлы" };
-  // В5.5 тур 2 (W4): справочные показатели ЗН-2
+  // справочные показатели ревью PR и владения кодом
   if (key === "activity.pr_review" && note.startsWith("pr review no-data")) return { value: note.endsWith(": access") ? "нет данных: нет доступа" : "нет данных: источник не ответил" };
   if (key === "activity.pr_first_response" && note.startsWith("no reviewer response")) return { value: "ответов ревьюеров нет" };
   if (key === "activity.pr_review_comments" && note.startsWith("comments page capped")) {
@@ -389,7 +379,7 @@ const PRESENCE_BY_SCORE = new Set(["documentation.license", "documentation.contr
 
 /**
  * Значение подметрики для показа с учетом заметки: «—» заменяется словами
- * заметки (К9.9); у файлов «есть/нет» без значения — слово по баллу
+ * заметки; у файлов «есть/нет» без значения — слово по баллу
  * (лицензия с баллом 100 — «есть», а не «—»).
  */
 export function submetricShownValue(
@@ -397,23 +387,20 @@ export function submetricShownValue(
   sub: string,
   entry: { score?: number | null; value?: unknown; note?: string | null },
   ctx: SubmetricContext,
-  /** соседние подметрики категории (вызовы карточки и отчета передают; с 4.3.0 показ их не читает) */
+  /** соседние подметрики категории (карточка и отчет передают, но показ их сейчас не читает) */
   _peers?: Record<string, { value?: unknown }>,
 ): string {
   const shown = formatSubmetricValue(category, sub, entry.value, ctx);
-  // 4.3.0 (Н14б, D13): при 1-4 пометках доля старых считается от 5 — «1 старая из 1»
-  // показывается 20%, и без оговорки число читалось бы ошибкой
+  // при 1-4 пометках доля старых считается от 5: «1 старая из 1» показывается
+  // как 20%, и без оговорки число читалось бы ошибкой
   if (shown !== NO_VALUE && `${category}.${sub}` === "code.old_share" && typeof entry.note === "string" && entry.note.startsWith("share of at least")) {
     return `${shown} (доля от не менее 5 пометок)`;
   }
-  // круг 2 (В1): доля тестов ниже прочих показателей — бонус не применен, число справочно
+  // доля тестов ниже прочих показателей — бонус не применен, число справочное
   if (shown !== NO_VALUE && `${category}.${sub}` === "code.tests" && typeof entry.note === "string" && entry.note.startsWith("tests bonus not applied")) {
-    // круг 5 тура 3 (находка 17): правило бонуса словами
     return `${shown} (в балл не входит: доля тестов учитывается, только когда повышает балл)`;
   }
   if (shown !== NO_VALUE) return shown;
-  // В5.3-М (Н14б): ветка «пометок нет» удалена — с 4.2.0 доля при 0 пометок
-  // равна 0 (данные) и показывается числом, прочерка здесь не бывает
   const n = submetricNote(category, sub, entry.note);
   if (n?.value) return n.value;
   if (PRESENCE_BY_SCORE.has(`${category}.${sub}`) && typeof entry.score === "number") return entry.score >= 1 ? "есть" : "нет";

@@ -1,29 +1,27 @@
-// report-fixtures.ts — фикстурные карточки отчёта (В4.7, блок Б0; В4.9, Д6).
+// Фикстурные карточки отчета.
 //
-// В4.9 (Д6): фикстуры больше не задают итог, покрытие, баллы категорий и
-// тексты рекомендаций руками — исследование показало, что ручные числа
-// противоречили показанным категориям (`full` 72 при расчетных ≈64, `null`
-// 38% при 46%). Теперь каждая фикстура — факты скана, из которых НАСТОЯЩИЙ
-// движок считает оценку (`compute` → `totalsFromCategories`) и рекомендации
-// (`recommend`), а карточка собирается тем же `getRepoCard`, что у маршрута
-// `.md`. Числа отчёта выводятся из показанных категорий и фактов построением.
+// Фикстуры не задают итог, покрытие, баллы категорий и тексты рекомендаций
+// руками: ручные числа легко противоречат показанным категориям. Каждая
+// фикстура — факты скана, из которых настоящий движок считает оценку
+// (`compute` → `totalsFromCategories`) и рекомендации (`recommend`), а
+// карточка собирается тем же `getRepoCard`, что у маршрута `.md`.
 //
-// Каждая фикстура живёт в своей временной БД — id сканов и даты не зависят
+// Каждая фикстура живет в своей временной БД — id сканов и даты не зависят
 // от порядка тестов, эталон детерминирован (время — NOW api-fixtures).
 //
-// Состав и назначение (контракт П1 В4.7, сохранены):
+// Состав:
 //   anon      — анонимный зритель (нет сессии): CI/CD и Безопасность закрыты,
-//               крупно HealthCraft Index; история усечена (Д4);
+//               крупно HealthCraft Index; история усечена;
 //   full      — полный доступ: CI с прогонами, AppSec с критичной находкой без
-//               утечки секретов (Д1), дата закрытия задач подменена (Д5),
+//               утечки секретов, дата закрытия задач подменена,
 //               крупно Repo Health Score;
-//   grant-ci  — CI открыт без прогонов (с 4.1.0 — CI/CD «нет данных»),
-//               Безопасность закрыта правами; README нет, трекер не ведётся,
-//               язык не определён, заголовок с разметкой;
+//   grant-ci  — CI открыт без прогонов (CI/CD «нет данных»), Безопасность
+//               закрыта правами; README нет, трекер не ведется, язык не
+//               определен, заголовок с разметкой;
 //   null      — оценка есть, индекса нет: данные только по задачам (23%);
 //   full-null — полный доступ, Repo Health Score есть, HealthCraft Index NULL
 //               (открытых данных 23% при пороге 40%, а с CI/CD и Безопасностью
-//               полного покрытия хватает) — пункт 7 блока А круга 4 гейта;
+//               полного покрытия хватает);
 //   never     — репозиторий в каталоге без единого скана.
 import type { AccessResult } from "../src/auth/access";
 import { getRepoCard, type CardViewer, type RepoCard } from "../src/api/repos";
@@ -33,11 +31,10 @@ import { recommend, writeRecommendations } from "../src/score/recommend";
 import { NOW, cardFacts, makeApiDb, seedRepo, seedScan, type ApiTestDb, type FactSpec, type ScanSpec } from "./api-fixtures";
 
 /**
- * Фикстуры, по которым снимается ДОКУМЕНТ отчета. Решение владельца 22.09
- * (круг 3 гейта): без оценки отчет не выдается, поэтому `never` (репозиторий
- * без единого скана) сюда больше не входит — карточка такого репо проверяется
- * отдельно (`v49-appendix.test.ts`, Д3). Сама фикстура остается: ее берут
- * тесты карточки и доступа.
+ * Фикстуры, по которым снимается документ отчета. Без оценки отчет не
+ * выдается, поэтому `never` (репозиторий без единого скана) сюда не входит —
+ * карточка такого репо проверяется в `v49-appendix.test.ts`, а сама фикстура
+ * нужна тестам карточки и доступа.
  */
 export const ALL_FIXTURES = ["anon", "full", "grant-ci", "null", "full-null", "never"] as const;
 export type ReportFixture = (typeof ALL_FIXTURES)[number];
@@ -83,7 +80,7 @@ const TIMELINE: FactSpec = {
   },
 };
 
-/** Итог истории — согласован с TIMELINE; `truncatedSince` — история усечена с этой даты (Д4). */
+/** Итог истории — согласован с TIMELINE; `truncatedSince` — история усечена с этой даты. */
 function summary(truncatedSince: string | null): FactSpec {
   return {
     key: "activity.git.summary",
@@ -101,13 +98,13 @@ function summary(truncatedSince: string | null): FactSpec {
   };
 }
 
-/** Сборщик 5 (ТП-1): 20 завершенных запусков, свежие первыми — 9 из 10 успешных против 6 из 10 до них. */
+/** 20 завершенных запусков CI, свежие первыми: 9 из 10 успешных против 6 из 10 до них. */
 const RECENT_RUNS = Array.from({ length: 20 }, (_, i) => ({
   outcome: (i < 10 ? i !== 3 : i % 5 !== 0 && i !== 13) ? "success" : "failure",
   at: new Date(Date.parse("2026-09-16T10:00:00Z") - i * 86_400_000).toISOString(),
 }));
 
-/** Сборщик 5 (ТП-9): 6 окон по 30 дней от старых к новым; за 90 дней создано 6, закрыто 2. */
+/** Поток задач: 6 окон по 30 дней от старых к новым; за 90 дней создано 6, закрыто 2. */
 const ISSUE_FLOW = {
   window_days: 30,
   windows: [
@@ -137,8 +134,8 @@ export function fixtureCard(name: ReportFixture): FixtureCard {
       const facts = factsWith(
         TIMELINE,
         summary(null),
-        // В5.5 тур 2 (сборщик 5): лента стабильности CI и поток задач по окнам —
-        // эталон показывает оба справочных показателя с числами
+        // лента стабильности CI и поток задач по окнам — эталон показывает оба
+        // справочных показателя с числами
         { key: "cicd.runs", source: "rest:cicd", value: { last_status: "success", success_rate: 0.95, duration_p50: 420, runs_count: 20, recent_runs: RECENT_RUNS } },
         {
           key: "issues.stats",
@@ -164,7 +161,7 @@ export function fixtureCard(name: ReportFixture): FixtureCard {
             provenance: { scan_uuid: "u-1", commit_hash: "deadbeef", time_finished: "2026-09-16T11:00:00Z", group_ids: [] },
           },
         },
-        // В5.5 тур 2 (W4, ЗН-2): справочные review PR и карта владельцев файлов
+        // справочные review PR и карта владельцев файлов
         {
           key: "activity.pr_review",
           source: "rest:pulls",
@@ -218,9 +215,8 @@ export function fixtureCard(name: ReportFixture): FixtureCard {
         { key: "docs.presence", source: "git", value: { readme: false, license: true, contributing: false, codeowners: false } },
         { key: "docs.readme", source: "git", value: { present: false } },
         { key: "issues.stats", source: "rest:issues", value: { open: 0, closed: 0, median_close_days: null, stale_90d: 0, fetched_count: 0 } },
-        // А15 аудита: у репозитория с пустым трекером не может быть выборки из
-        // 4 задач для времени первого ответа — данные фикстуры спорили сами с
-        // собой, и документ печатал это противоречие
+        // у репозитория с пустым трекером не может быть выборки задач для
+        // времени первого ответа — иначе документ печатал бы противоречие
         { key: "issues.comments_sample", source: "rest:comments", value: { issues: 0, with_comments: 0, median_first_comment_delay_hours: null, delays_hours: [] } },
       );
       const repoId = seedRepo(t, { org: "m47", repo: "grant-ci", title: "CI [config] `only` | pipes", language: null, likes: null, forks: 0, lastActivityAt: null });
@@ -238,10 +234,10 @@ export function fixtureCard(name: ReportFixture): FixtureCard {
       return done("m47", "null", NO_PAT, "no-session");
     }
     case "full-null": {
-      // пункт 7 блока А круга 4: зрителю открыты CI/CD и Безопасность, полного
-      // покрытия хватает (Состояние кода 20 + CI/CD 15 + Безопасность 20 из
-      // 100 = 55%), а открытых данных — нет (только Состояние кода: 20 из 65 =
-      // 31% при пороге 40%), поэтому Index NULL, а Score посчитан.
+      // зрителю открыты CI/CD и Безопасность, полного покрытия хватает
+      // (Состояние кода 20 + CI/CD 15 + Безопасность 20 из 100 = 55%), а
+      // открытых данных — нет (только Состояние кода: 20 из 65 = 31% при
+      // пороге 40%), поэтому Index NULL, а Score посчитан.
       const repoId = seedRepo(t, { org: "m47", repo: "full-null", title: "Full access, index NULL", language: "Rust", likes: 3, forks: 0, lastActivityAt: "2026-09-12T00:00:00Z" });
       scoredScan(t, repoId, {
         status: "partial",
@@ -250,7 +246,7 @@ export function fixtureCard(name: ReportFixture): FixtureCard {
           { key: "tree.stats", source: "git", value: { top_level: [{ name: "src", type: "tree" }], file_count: 10, bytes: 1000, loc: 5000 } },
           // пометок нет вовсе → «Доля старых TODO» без данных: вес показателя
           // делится между остальными, и доли расчета расходятся с номинальными
-          // (А5 аудита — так же, как у живого `bayselonarrend/openintegrations`)
+          // (как у живого `bayselonarrend/openintegrations`)
           { key: "code.todo", source: "git", value: { count: 0, fixme: 0, older_180d: 0, todo_files: 0, blamed_files: 0 } },
           { key: "cicd.configs", source: "git", value: { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: true } },
           { key: "cicd.runs", source: "rest:cicd", value: { last_status: "success", success_rate: 0.9, duration_p50: 600, runs_count: 12 } },

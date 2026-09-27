@@ -1,4 +1,4 @@
-// v485-gate.test.ts — замечания гейта В4.8.5 (Екатерина, 22.09):
+// Избранное, видимость internal и CSRF-гард:
 // (1) репозиторий, которого SourceCraft не отдает токену, в избранное не
 //     добавляется — ответ `repo_not_found`, строки нет; повторная звезда
 //     на уже существующей записи ее не удаляет;
@@ -7,8 +7,8 @@
 // (3) CSRF-гард Origin на локальном стенде пропускает страницу самого
 //     стенда на его фактическом PORT, даже если YA_REDIRECT_URI смотрит на
 //     другой локальный порт; чужой Origin по-прежнему отклоняется.
-// Живых запросов нет: SourceCraft — локальный мок харнесса. Ответ мока на
-// несуществующий репо повторяет живой зонд 22.09 (TASK.md §6).
+// Живых запросов нет: SourceCraft – локальный мок харнесса. Ответ мока на
+// несуществующий репо повторяет ответ живого SourceCraft.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -25,7 +25,7 @@ const SECRET = "v485-gate-secret-0123456789abcdef-xyz";
 const mock = startMockApi((_req, url) => {
   const p = url.pathname;
   if (p === "/user") return Response.json({ username: "gatetester" });
-  // AppSec «скана нет» — 404 без проверки прав (закрытие В4.8.5, ревью)
+  // AppSec на «скана нет» отвечает 404, не проверяя права
   if (p === "/v1/scans/latest") return Response.json({ error: "no scans" }, { status: 404 });
   if (/^\/orgs\/[^/]+\/repos$/.test(p)) return Response.json({ repositories: [] });
   if (/^\/repos\/[^/]+\/[^/]+\/cicd\/runs$/.test(p)) return Response.json({ error: "denied" }, { status: 403 });
@@ -125,8 +125,7 @@ describe("гейт В4.8.5: видимость internal", () => {
     expect(visibilityOf("weird")).toBe("unknown");
   });
 
-  // В5.3 (25.09, Екатерина): internal, код которого виден токену, — «свой» для анализа
-  // (вытесняет «по одной видимости не выводится» В4.8.5)
+  // internal, код которого виден токену, – «свой» для анализа
   test("права строки internal-репо несут visibility internal; виден токену — «свой»", async () => {
     const res = await put("/api/me/favorites", { repository: "inner/team-repo" });
     expect(res.status).toBe(200);
@@ -145,8 +144,8 @@ describe("закрытие В4.8.5 (ревью): AppSec 404 не делает ч
     expect(appsecOn404("granted", "internal", "granted")).toBe("granted");
   });
 
-  // В5.3 (25.09): Security у чужого internal по-прежнему не открывается (AppSec 404 не
-  // подтверждение), но «свой» теперь по доступу к коду — анализ ставится, AI-обзор нет
+  // Security у чужого internal не открывается (AppSec 404 не подтверждает
+  // доступ), но «свой» определяется по доступу к коду: анализ ставится, AI-обзор нет
   test("internal-репо: CI 403, AppSec 404 — Security не открыт, но «свой» по коду, анализ не отказан как чужой", async () => {
     const res = await put("/api/me/favorites", { repository: "inner/withid-team" });
     expect(res.status).toBe(200);

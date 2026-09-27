@@ -1,5 +1,4 @@
-// rescore.test.ts — В4.1-fix Б5: пересчёт при старте и защита от старого
-// процесса (Ф1.9), видимость fail-closed (Ф1.10), jobs.mode убран (Ф1.15).
+// Пересчет оценок при старте и защита от старого процесса, видимость fail-closed.
 // rescoreAll считает каждый скан на его дату, пропускает running, пишет
 // rating_eligible и meta.derived_version; openDb пишет и проверяет
 // meta.schema_version; сервер пересчитывает до Bun.serve. Сети нет.
@@ -101,7 +100,7 @@ describe("rescoreAll (Ф1.9)", () => {
     expect(needsRescore(db)).toBe(false);
     setMetaValue(db, "derived_version", String(DERIVED_VERSION - 1));
     expect(needsRescore(db)).toBe(true);
-    // круг 2 (LOW-10): версия свежая, но есть завершённые сканы без public_status (старый процесс)
+    // версия свежая, но есть завершённые сканы без public_status (старый процесс)
     rescoreAll(db);
     expect(needsRescore(db)).toBe(false);
     db.exec("UPDATE scans SET public_status = NULL WHERE status = 'ok'");
@@ -123,8 +122,8 @@ describe("schema_version: запись и защита от старого пр�
     expect(() => openDb(cfg)).toThrow(/schema v9\.0 is newer than this code/);
   });
 
-  // версия — из константы кода (дисциплина схемы В4.2a: хардкода версии в
-  // tests/ нет); проверяется не число, а что она пишется ПОСЛЕ всех объектов
+  // версия — из константы кода (хардкода версии схемы в tests/ нет); проверяется не
+  // число, а что она пишется ПОСЛЕ всех объектов
   test("версия пишется ПОСЛЕ объектов схемы: favorites, jobs.error (П8) и scans.status_detail (Ф2.2) уже есть", () => {
     const dir = tempDir();
     const db = openDb({ ...loadConfig(), dataDir: dir });
@@ -192,7 +191,7 @@ describe("schema_version: запись и защита от старого пр�
     const mock = startMockApi();
     const server = await spawnServer({ dataDir: dir, mock, seedMeta: false });
     try {
-      // порт уже отвечает: рескор асинхронен (прежде порт ждал пересчёта)
+      // порт уже отвечает: рескор асинхронен
       const health = (await (await fetch(`${server.base}/api/health`)).json()) as { rescore: { running: boolean; done: number; total: number } };
       expect(typeof health.rescore.total).toBe("number");
       expect(typeof health.rescore.done).toBe("number");
@@ -258,11 +257,9 @@ describe("В4.4 (кластер A): батчевый проход по водя�
     const b = seedScan(t, repoId, { facts: healthySpecs() });
     rescoreAll(db);
     expect(needsRescore(db)).toBe(false);
-    // И-4 (круг 2, СОЗНАТЕЛЬНАЯ семантическая правка теста круга 1 — контракт
-    // Б5 workers/V4.4-round2-oneshot.md): водяной знак считает только
-    // ЗАВЕРШЁННЫЕ сканы — running-скан не «недогон», рестарт при непустой
-    // очереди больше не мигает «rescore pending»; свой скор running получит
-    // от собственного скор-хука при завершении
+    // водяной знак считает только ЗАВЕРШЕННЫЕ сканы: running-скан не «недогон»,
+    // иначе рестарт при непустой очереди мигал бы «rescore pending»; свой скор
+    // running получит от собственного скор-хука при завершении
     const running = seedScan(t, repoId, { facts: [], status: "running", finishedAt: null });
     expect(running).toBeGreaterThan(b);
     expect(needsRescore(db)).toBe(false);
@@ -471,9 +468,8 @@ describe("круг 2 (LOW-7): стартовый пересчёт только �
 });
 
 // ---------------------------------------------------------------------------
-// Круг 2 В4.4 (З5): проход рескора поднимал busy_timeout до 15 с навсегда —
-// контракт SIGTERM «≤ 5 с» нарушался. После прохода дефолт соединения
-// (DB_BUSY_TIMEOUT_MS, db.ts) обязан вернуться.
+// Проход рескора поднимает busy_timeout до 15 с; если не вернуть дефолт
+// соединения (DB_BUSY_TIMEOUT_MS, db.ts), нарушается контракт SIGTERM «≤ 5 с».
 // ---------------------------------------------------------------------------
 
 describe("З5 (круг 2 В4.4): busy_timeout восстанавливается после прохода", () => {
@@ -499,8 +495,9 @@ describe("В5.3: смена MODEL_VERSION сбрасывает водяной з
     const repoId = seedRepo(t, { org: "mv", repo: "r" });
     const ids = [1, 2, 3].map((i) => seedScan(t, repoId, { facts: healthySpecs(), startedAt: `2026-03-0${i}T00:00:00Z` }));
     rescoreBatchByCursor(db, { limit: 10 });
-    // состояние живой БД 24.09: знак догнал max(scan_id), у двух сканов — только
-    // строки прежней версии, у свежего — уже новой; метки версии в meta нет
+    // состояние живой БД после смены версии: знак догнал max(scan_id), у двух
+    // сканов — только строки прежней версии, у свежего — уже новой; метки версии в
+    // meta нет
     db.query("UPDATE scores SET model_version = '4.1.0-hci' WHERE scan_id <> ?").run(ids[2]!);
     db.query("DELETE FROM meta WHERE key = ?").run(RESCORE_MODEL);
     setMetaValue(db, RESCORE_CURSOR, String(ids[2]));

@@ -1,12 +1,12 @@
-// cardView.ts — view-модель страницы репозитория (В4.9, часть 2 гейта, круг 1).
+// cardView.ts — view-модель страницы репозитория.
 //
 // Страница читается сверху вниз одной линией, как PDF: насколько здоров → из
 // чего сложилось → почему по каждой категории → что сделать → чему не верить.
 // Все, что страница утверждает о данных (вклады, основания категорий,
 // ограничения, фразы закрытых категорий, путь к полной оценке, номера и
 // эффекты рекомендаций), собирается здесь из тех же функций, что модель
-// документа (`src/report/sections.ts`), — поэтому поведенческий тест сравнивает
-// поля этой модели с `buildReportModel` на фикстурах отчета (инвариант 1).
+// документа (`src/report/sections.ts`), — поэтому тест сравнивает поля этой
+// модели с `buildReportModel` на фикстурах отчета.
 // Модуль чистый: без React и uikit, его импортирует `bun test`.
 import type { CardEvidence, CardRecommendation, RepoCard } from "../api/repos";
 import { CATEGORY_ORDER, CATEGORY_TITLES } from "../report/categories";
@@ -42,15 +42,13 @@ import {
   type PathPart,
 } from "./format";
 
-// ---------- цвет категории: один на карточке и в панели рейтинга (А3) ----------
+// ---------- цвет категории: один на карточке и в панели рейтинга ----------
 
 /**
- * Ключ категории → класс цвета (`layout.css`, `.rh-cat-color_*`). До круга 1
- * рейтинг красил сегмент по ИНДЕКСУ в массиве (`rh-contrib__seg_${i + 1}`), и
- * одна категория на двух экранах получила бы разные цвета. Четыре тона
- * остались за теми же категориями (порядок `meta.categories`), CI/CD и
- * Безопасность — два новых тона той же системы (только в полосе Repo Health
- * Score).
+ * Ключ категории → класс цвета (`layout.css`, `.rh-cat-color_*`). Цвет привязан
+ * к ключу, а не к позиции в массиве, чтобы одна категория на разных экранах
+ * была одного цвета. CI/CD и Безопасность встречаются только в полосе Repo
+ * Health Score.
  */
 export const CATEGORY_COLOR: Record<CategoryKey, string> = {
   documentation: "rh-cat-color_documentation",
@@ -65,15 +63,14 @@ export function categoryColorClass(key: string): string {
   return CATEGORY_COLOR[key as CategoryKey] ?? "rh-cat-color_none";
 }
 
-// ---------- видимость SourceCraft (А7, В2) ----------
+// ---------- видимость SourceCraft ----------
 
 export type Visibility = "public" | "internal" | "private" | "unknown";
 
 /**
  * Плашка видимости у имени репозитория — одна функция на карточку и
  * избранное (у каждого экрана свой источник значения). Все 3 значения
- * `Repository.Visibility` — своя ветка; `unknown` — явная ветка без плашки
- * (правило AGENTS.md 22.09).
+ * `Repository.Visibility` — своя ветка; всё прочее — явно без плашки.
  */
 export function visibilityPill(value: Visibility | string | null | undefined): { kind: "public" | "internal" | "private"; text: string; title: string } | null {
   switch (value) {
@@ -102,12 +99,12 @@ export interface CategoryView {
   stale: boolean;
   /** примечание частичной нехватки данных у оцененной категории — внутри раскрытия */
   partialNote: string | null;
-  /** В5.9: процент среди похожих по категории — первой строкой раскрытия; null — не показываем */
+  /** процент среди похожих по категории — первой строкой раскрытия; null — не показываем */
   cohortNote: string | null;
 }
 
 export interface LockedView {
-  /** одно предложение без заголовка (круг 2, Т3): кто видит и что открывает доступ */
+  /** одно предложение без заголовка: кто видит и что открывает доступ */
   text: string;
 }
 
@@ -133,18 +130,18 @@ export interface CardView {
   worstKey: CategoryKey | null;
   locked: LockedView | null;
   limitations: string[];
-  /** предупреждения наверху — только те, которых нет в «Ограничениях данных» (А6) */
+  /** предупреждения наверху — только те, которых нет в «Ограничениях данных» */
   topMarkers: "ci-cap"[];
   /** строка пути к полной оценке (закрытый Repo Health Score); null — показатель открыт */
   fullPath: PathPart[] | null;
   /** под строкой пути — кнопка входа (зритель не вошел) */
   signIn: boolean;
   recommendations: RecommendationView[];
-  /** В5.9: режим «По шагам» раздела рекомендаций; null — переключателя нет */
+  /** режим «По шагам» раздела рекомендаций; null — переключателя нет */
   ladder: LadderView | null;
-  /** В5.9: строка позиции в плашке индекса и плашка лиги; null — места нет */
+  /** строка позиции в плашке индекса и плашка лиги; null — места нет */
   position: PositionView | null;
-  /** фраза вместо пустого раздела рекомендаций (В-1, одна копия с отчетом) и ее вид (R3) */
+  /** фраза вместо пустого раздела рекомендаций (тот же текст, что в отчете) и ее вид */
   noRecommendations: string;
   noRecommendationsKind: "healthy" | "weak" | "nodata";
   analysisAt: string | null;
@@ -161,7 +158,7 @@ export interface LadderStepView {
 }
 
 /**
- * В5.9 (§2 «В5.9 — выбор вариантов», п.1, вариант Б): режим списка «По шагам».
+ * Режим списка «По шагам».
  * Шаги — в порядке лестницы, номера — позиция в показанном списке; остальные
  * рекомендации (без числа, канальные) — ниже, в прежнем виде.
  */
@@ -173,10 +170,9 @@ export interface LadderView {
 }
 
 /**
- * В5.9 (§2 «В5.9 — выбор вариантов», п.3-5): строка позиции в плашке индекса — «#87 из
- * 28 285, лучше 91% похожих ⓘ», под ней — плашка лиги (золото ТОП-10, серебро ТОП-100,
- * бронза ТОП-1000). Числа — поля карточки как есть (правило 21.09: место, доля и размер
- * выборки проверяются тестом на данных).
+ * Строка позиции в плашке индекса — «#87 из 28 285, лучше 91% похожих ⓘ», под ней —
+ * плашка лиги (золото ТОП-10, серебро ТОП-100, бронза ТОП-1000). Числа — поля карточки
+ * как есть, без пересчета на клиенте.
  */
 export interface PositionView {
   /** «#87 из 28 285» */
@@ -267,7 +263,7 @@ export function ladderView(card: RepoCard, recommendations: RecommendationView[]
 }
 
 
-/** Хвост фразы о закрытых категориях у зрителя с токеном — по причине отказа (круг 4, 3). */
+/** Хвост фразы о закрытых категориях у зрителя с токеном — по причине отказа. */
 const LOCKED_WHY: Record<"denied" | "pat-expired" | "check-failed" | "no-pat", string> = {
   denied: ", а у вашего токена к ним нет доступа.",
   "pat-expired": ". SourceCraft отклонил ваш токен – обновите его в Настройках.",
@@ -276,8 +272,8 @@ const LOCKED_WHY: Record<"denied" | "pat-expired" | "check-failed" | "no-pat", s
 };
 
 /**
- * Закрытые зрителю CI/CD и Безопасность — одно предложение без заголовка
- * (круг 2 части 2, Т3, §2 23.09): путь по типу зрителя. Не вошел — «после
+ * Закрытые зрителю CI/CD и Безопасность — одно предложение без заголовка,
+ * путь по типу зрителя. Не вошел — «после
  * входа и добавления токена», вошел без токена — «после добавления токена»,
  * токен есть — «только участникам репозитория» и причина отказа (`LOCKED_WHY`).
  */
@@ -292,8 +288,8 @@ export function lockedView(card: RepoCard): LockedView | null {
   const reasons = locked.map((k) => cats[k]!.locked as string);
   if (auth === undefined || auth === "no-session") return { text: `${names} ${verb} участникам репозитория после входа и добавления персонального токена доступа.` };
   if (auth === "no-pat" || reasons.includes("no-pat")) return { text: `${names} ${verb} участникам репозитория после добавления персонального токена доступа.` };
-  // Круг 4 части 2 (3): зрителю с токеном — не обрывок причины, а смысл:
-  // категории доступны только участникам репозитория, затем почему именно ему нет
+  // зрителю с токеном — не обрывок причины, а смысл: категории доступны только
+  // участникам репозитория, затем почему именно ему нет
   const why = (r: string): string => LOCKED_WHY[r as keyof typeof LOCKED_WHY] ?? LOCKED_WHY["check-failed"];
   const same = reasons.every((r) => r === reasons[0]);
   const agree = (t: string): string => (locked.length > 1 ? t : t.replace("к ним", "к ней"));
@@ -328,7 +324,7 @@ export function cardView(card: RepoCard): CardView {
   });
   const limitations = limitationItems(card).map((l) => l.text);
   const topMarkers: CardView["topMarkers"] = [];
-  // Ступень 4 (Ф8): «в репозитории нет кода» уже сказано в плашке индекса — сверху не повторяется
+  // «в репозитории нет кода» уже сказано в плашке индекса — сверху не повторяется
   if (card.markers.ciConfigOnlyCap) topMarkers.push("ci-cap");
   const base = {
     limitations,
@@ -365,7 +361,7 @@ export function cardView(card: RepoCard): CardView {
   const auth = card.viewer?.auth;
   return {
     ...base,
-    // круг 2 (Е3): на карточке вклад без «+» — это доля итога, а не прибавка (в PDF подпись над сегментом прежняя)
+    // на карточке вклад без «+»: это доля итога, а не прибавка (в PDF подпись с «+»)
     contributions: contributionBars(card).map((bar) => ({ ...bar, segments: bar.segments.map((s) => ({ ...s, value: s.value.replace(/^\+/, ""), colorClass: categoryColorClass(s.key) })) })),
     categories,
     worstKey: worst?.key ?? null,

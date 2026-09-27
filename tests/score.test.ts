@@ -1,7 +1,7 @@
-// score.test.ts — Б3: модель (анкеры §3, формулы, ISSUES floor) +
-// compute (категории, tri-state перенормировка, coverage/NULL, CI-cap,
-// secrets-кап, bad-channel stale-замещение, идемпотентность записи).
-// Ручная арифметика ожиданий — в комментариях против проверок.
+// Модель (анкеры, формулы, ISSUES floor) и compute (категории, tri-state
+// перенормировка, coverage/NULL, CI-cap, secrets-кап, bad-channel stale-замещение,
+// идемпотентность записи). Ручная арифметика ожиданий — в комментариях против
+// проверок.
 import { MODEL_VERSION } from "../src/score/model";
 import { afterAll, describe, expect, test } from "bun:test";
 import {
@@ -69,8 +69,8 @@ describe("compute: здоровое репо (ручная арифметика)
     expect(s.categories.activity.score!).toBeCloseTo(69.793, 2);
     // issues: 0.3·0.9 + 0.3·0.91 + 0.3·0.85 + 0.1·0.9625 = 0.89425
     expect(s.categories.issues.score!).toBeCloseTo(89.425, 2);
-    // code (4.3.0, Р1): веса 0.35/0.25/0.3(тесты)/0.1; у фактов без test_files
-    // «Тесты» — no-data, перенормировка: (0.35·0.976 + 0.25·0.75 + 0.1·1)/0.7 = 0.89871
+    // code: веса 0.35/0.25/0.3(тесты)/0.1; у фактов без test_files «Тесты» —
+    // no-data, перенормировка: (0.35·0.976 + 0.25·0.75 + 0.1·1)/0.7 = 0.89871
     expect(s.categories.code.score!).toBeCloseTo(89.871, 2);
     // CI/Security хранятся со своими данными: CI есть, AppSec-факта нет
     expect(s.categories.cicd.score!).toBeCloseTo(100, 10);
@@ -100,10 +100,10 @@ describe("compute: здоровое репо (ручная арифметика)
   test("CI конфиг без прогонов: честное no-data (23.09, кап 50 удалён); без ci.yaml → 0; рейтинг не тронут", () => {
     const capped = seedScan(t, withFacts(healthyFacts(), { key: "cicd.runs", value: { reason: "access" }, status: "no-data" }));
     const s1 = compute(t.db, capped, { now: NOW });
-    // 23.09 (Алексей): «за что так много?» — конфиг без прогонов не оцениваем
+    // конфиг без прогонов не оцениваем: без доказательства балл за CI не дается
     expect(s1.categories.cicd.score).toBeNull();
     expect(s1.categories.cicd.no_data).toContain("прогоны не видны");
-    // вес cicd перенормировался (4.3.0: Код 89.871): (15·80.734+15·69.793+15·89.425+20·89.871)/65 = 83.03
+    // вес cicd перенормировался: (15·80.734+15·69.793+15·89.425+20·89.871)/65 = 83.03
     expect(s1.repoHealthScore!).toBeCloseTo(83.03, 1);
 
     const noYaml = seedScan(t, withFacts(healthyFacts(), { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } }));
@@ -121,7 +121,7 @@ describe("compute: здоровое репо (ручная арифметика)
     expect(s.healthcraftIndex).toBe(0); // «проекта нет» — данные, не NULL
     expect(s.repoHealthScore).toBe(0);
     expect(s.noData.some((x) => x.startsWith("security"))).toBe(true);
-    // Ф2.3 (M5, В4.2a): loc = 0 при живом дереве больше НЕ code_empty —
+    // loc = 0 при живом дереве НЕ code_empty —
     // нулевой LOC даёт и обрыв cat-file, и репо из одних бинарных файлов
     const emptyLoc = seedScan(t, withFacts(healthyFacts(), { key: "tree.stats", value: { top_level: [{ name: "x", type: "tree" }], file_count: 3, bytes: 10, loc: 0 } }));
     const s2 = compute(t.db, emptyLoc, { now: NOW });
@@ -187,7 +187,7 @@ describe("compute: здоровое репо (ручная арифметика)
     expect(s2.repoHealthScore!).toBeCloseTo(base.repoHealthScore!, 9);
     expect(s2.indexCoverage).toBe(base.indexCoverage);
 
-    // без истории bad = no-data: cicd — честное no-data (23.09, кап 50 удалён)
+    // без истории bad = no-data: cicd — честное no-data
     const scan3 = seedScan(t, withFacts(healthyFacts(), { key: "cicd.runs", value: { reason: "bad-channel" }, status: "bad" }));
     const s3 = compute(t.db, scan3, { now: NOW });
     expect(s3.categories.cicd.score).toBeNull(); // прогоны не видны — не оцениваем
@@ -221,7 +221,7 @@ describe("compute: здоровое репо (ручная арифметика)
     const noRow = seedScan(t, healthyFacts().filter((f) => f.key !== "cicd.runs"), 0, repoId);
     const s2 = compute(t.db, noRow, { now: NOW });
     expect(new Set(s2.stale)).toEqual(new Set(["cicd.runs", "appsec.findings"]));
-    // прочие kinds при no-data НЕ замещаются (только bad, §5.6)
+    // прочие kinds при no-data НЕ замещаются (только bad)
     const issuesNoData = seedScan(t, withFacts(healthyFacts(), { key: "issues.stats", value: { reason: "access" }, status: "no-data" }), 0, repoId);
     const s3 = compute(t.db, issuesNoData, { now: NOW });
     expect(s3.stale).not.toContain("issues.stats");
@@ -252,7 +252,7 @@ describe("compute: здоровое репо (ручная арифметика)
     writeScores(t.db, s);
     writeScores(t.db, s);
     const rows1 = t.db.query("SELECT healthcraft_index FROM scores WHERE scan_id = ?").all(scanId) as { healthcraft_index: number }[];
-    expect(rows1).toEqual([{ healthcraft_index: Math.round(s.healthcraftIndex!) }]); // полного итога в схеме нет (К-Ф3.3)
+    expect(rows1).toEqual([{ healthcraft_index: Math.round(s.healthcraftIndex!) }]); // полного итога в схеме нет
     writeScores(t.db, { ...s, modelVersion: "9.9.9-test" });
     const rows = t.db.query("SELECT model_version FROM scores WHERE scan_id = ? ORDER BY model_version").all(scanId) as { model_version: string }[];
     expect(rows.map((r) => r.model_version)).toEqual([MODEL_VERSION, "9.9.9-test"]);

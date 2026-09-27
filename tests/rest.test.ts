@@ -1,6 +1,5 @@
-// rest.test.ts — Б3: REST-коллекторы на живых фиксстурах (зонд 15.09,
-// tests/fixtures/rest/*) + фейковый клиент для три-state каналов
-// (403 access / 429 bad-channel / сеть). Сети нет.
+// REST-коллекторы на живых фикстурах (tests/fixtures/rest/*) и фейковый клиент
+// для tri-state каналов (403 access / 429 bad-channel / сеть). Сети нет.
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { collectRestFacts, fetchResource } from "../src/collectors/rest";
@@ -50,7 +49,7 @@ function fullOkClient(overrides: Array<[string, ScResponse]> = []): ScClient & {
     [(p) => get(p) === "/repos/o/r", ok(repoFx)],
     [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Dopen"), ok(issuesOpenFx)],
     [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Dclosed"), ok(issuesClosedFx)],
-    // В5.3-М (Н6): задачи в работе — третий запрос фильтра status
+    // задачи в работе — третий запрос фильтра status
     [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Din_progress"), ok({ issues: [] })],
     [(p) => get(p) === "/repos/o/r/contributors", ok(contributorsFx)],
     [(p) => get(p) === "/repos/o/r/releases", ok(releasesFx)],
@@ -58,7 +57,7 @@ function fullOkClient(overrides: Array<[string, ScResponse]> = []): ScClient & {
     [(p) => get(p) === "/repos/o/r/cicd/runs", ok(runsOwnFx)],
     [(p) => get(p) === "/repos/o/r/rating", ok(ratingFx)],
     [(p) => get(p).includes("/comments"), ok(commentsFx)],
-    // В5.5 тур 2 (W4): ревьюеры PR — выборка review (activity.pr_review)
+    // ревьюеры PR — выборка review (activity.pr_review)
     [(p) => get(p).endsWith("/reviewers"), ok({ reviewers: [] })],
   ];
   return routerClient(table);
@@ -74,7 +73,7 @@ test("cicd.runs: green_streak — серия зелёных с конца; ид�
       error_messages: ["Step build exited 1"],
     },
     { status: "success", event_type: "push", dates: { started_at: "2026-09-15T09:00:00Z", finished_at: "2026-09-15T09:00:25Z" } },
-    // М2.5: `processing` — идущий запуск по перечню Run.Status спеки
+    // `processing` — идущий запуск по перечню Run.Status спеки
     { status: "processing", event_type: "manual", dates: { started_at: "2026-09-15T08:00:00Z", finished_at: "2026-09-15T08:00:20Z" } },
     { status: "success", event_type: "push", dates: { started_at: "2026-09-15T07:00:00Z", finished_at: "2026-09-15T07:00:22Z" } },
     { status: "success", event_type: "push", dates: { started_at: "2026-09-15T06:00:00Z", finished_at: "2026-09-15T06:00:24Z" } },
@@ -85,7 +84,7 @@ test("cicd.runs: green_streak — серия зелёных с конца; ид�
   // самый свежий failed → серия с конца нулевая, хотя 3 из 5 зелёные
   expect(v("cicd.runs").green_streak).toBe(0);
   expect(v("cicd.runs").last_status).toBe("failed");
-  // М2.5: доля — по завершенным (3 зеленых из 4), идущий запуск не провал
+  // доля — по завершенным (3 зеленых из 4), идущий запуск не провал
   expect(v("cicd.runs").success_rate).toBe(0.75);
   expect(v("cicd.runs").runs_count).toBe(4);
   expect(v("cicd.runs").runs_total).toBe(5);
@@ -156,7 +155,7 @@ describe("collectRestFacts: факты из живых форм", () => {
     const by = new Map(out.facts.map((f) => [f.key, f]));
     const v = (k: string) => by.get(k)!.value as Record<string, unknown>;
 
-    // В5.5 тур 2 (W4): + activity.pr_review (справочный факт ЗН-2)
+    // включая справочный факт activity.pr_review
     expect(by.size).toBe(5);
     expect([...by.values()].every((f) => f.status === "ok")).toBe(true);
     expect(v("issues.stats").open).toBe(3); // фиксстура issues-open: 3 записи
@@ -178,7 +177,7 @@ describe("collectRestFacts: факты из живых форм", () => {
     expect(out.repoMeta!.title).toBe("dozzle-plus");
     expect(out.repoMeta!.likes).toBe(25); // rating.value 25
     expect(out.channelErrors.length).toBe(0);
-    // comments: 3 issues × 1 запрос (комментарии PR — своя выборка W4)
+    // comments: 3 issues × 1 запрос (комментарии PR — своя выборка)
     const commentCalls = client.calls.filter((p) => p.includes("/issues/") && p.includes("/comments")).length;
     expect(commentCalls).toBe(3);
   });
@@ -231,7 +230,7 @@ describe("collectRestFacts: факты из живых форм", () => {
       [(p) => get(p) === "/repos/o/r", ok(repoFx)],
       [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Dopen"), ok(issuesOpenFx)],
       [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Dclosed"), ok(issuesClosedFx)],
-      // В5.3-М (Н6): задачи в работе — третий запрос фильтра status
+      // задачи в работе — третий запрос фильтра status
       [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Din_progress"), ok({ issues: [] })],
       [(p) => get(p) === "/repos/o/r/contributors", ok(contributorsFx)],
       [(p) => get(p) === "/repos/o/r/releases", ok(releasesFx)],
@@ -256,7 +255,7 @@ describe("круг 2 (LOW-4): частичный сбой выборки ком�
       [(p) => get(p) === "/repos/o/r", ok(repoFx)],
       [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Dopen"), ok(issuesOpenFx)],
       [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Dclosed"), ok(issuesClosedFx)],
-      // В5.3-М (Н6): задачи в работе — третий запрос фильтра status
+      // задачи в работе — третий запрос фильтра status
       [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Din_progress"), ok({ issues: [] })],
       [(p) => get(p) === "/repos/o/r/contributors", ok(contributorsFx)],
       [(p) => get(p) === "/repos/o/r/releases", ok(releasesFx)],
@@ -342,7 +341,7 @@ describe("В5.3 аудит методики: MR всех статусов (М2.4
     const client = routerClient([
       [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Dopen"), ok({ issues: open })],
       [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Dclosed"), ok({ issues: [] })],
-      // В5.3-М (Н6): задачи в работе — третий запрос фильтра status
+      // задачи в работе — третий запрос фильтра status
       [(p) => get(p) === "/repos/o/r/issues" && p.includes("status%3Din_progress"), ok({ issues: [] })],
       [(p) => get(p).includes("/comments"), ok({ comments: [] })],
       [(p) => get(p) === "/repos/o/r/contributors", ok(contributorsFx)],

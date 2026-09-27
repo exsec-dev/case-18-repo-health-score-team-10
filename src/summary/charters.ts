@@ -1,8 +1,7 @@
-// charters.ts — загрузчик хартий prompts/ (закон 4: fail-fast на старте
-// использования; спека В5 К5.1). Тон-гайд prompts/tone.md включается во все
-// хартии: итоговый системный промпт = tone + хартия роли. Версия хартии
-// живёт в первой строке файла (`<!-- charter-version: N -->`) и в записи
-// результата (ai_notes.charter_version).
+// Загрузчик хартий из prompts/ с fail-fast при первом использовании роли.
+// Тон-гайд prompts/tone.md включается во все хартии: системный промпт = tone + хартия роли.
+// Версия хартии живет в первой строке файла (`<!-- charter-version: N -->`) и пишется
+// в результат (ai_notes.charter_version).
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { SummaryRole } from "./roles";
@@ -15,7 +14,7 @@ export interface Charter {
   text: string;
 }
 
-/** Каталог хартий: лениво (env-шов тестов читается на каждый вызов). */
+/** Читается на каждый вызов: тесты подменяют каталог через CHARTERS_DIR. */
 function promptsDir(): string {
   return process.env.CHARTERS_DIR ?? join(import.meta.dir, "..", "..", "prompts");
 }
@@ -51,9 +50,8 @@ const cache = new Map<SummaryRole, Charter>();
 let tone: string | null = null;
 
 /**
- * Хартия роли. Fail-fast: отсутствующий/пустой файл или маркер версии —
- * исключение в момент первого использования роли (не молчаливый промпт
- * «что-нибудь»). Повторные вызовы берут из кэша процесса.
+ * Отсутствующий или пустой файл, нет маркера версии — исключение при первом
+ * использовании роли, а не молчаливый пустой промпт. Дальше — из кэша процесса.
  */
 export function loadCharter(role: SummaryRole): Charter {
   const hit = cache.get(role);
@@ -65,14 +63,14 @@ export function loadCharter(role: SummaryRole): Charter {
   return charter;
 }
 
-/** Все хартии на месте (самопроверка старта конвейера: 9 ролей + тон). */
+/** Самопроверка старта конвейера: все 9 хартий и тон-гайд на месте. */
 export function loadAllCharters(): Record<SummaryRole, Charter> {
   const out = {} as Record<SummaryRole, Charter>;
   for (const role of SUMMARY_ROLES) out[role] = loadCharter(role);
   return out;
 }
 
-/** Шов тестов: сброс кэша (смена CHARTERS_DIR между тестами). */
+/** Для тестов: сброс кэша при смене CHARTERS_DIR. */
 export function __resetCharterCache(): void {
   cache.clear();
   tone = null;

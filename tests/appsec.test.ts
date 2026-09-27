@@ -1,8 +1,7 @@
-// appsec.test.ts — В4/Б2: официальный AppSec API-коллектор на 7
-// фикстурных ветках плана (ok / empty-scan / paginated / 401 / 403 /
-// unfinished / unknown-enum) + живой клиент (интервал, ретрай только
-// временный). Сети нет: REST и AppSec клиенты — фейки по фикстурам;
-// ok.json — санитизированный живой снимок нашего репо (17.09).
+// AppSec API-коллектор на 7 фикстурных ветках (ok / empty-scan / paginated /
+// 401 / 403 / unfinished / unknown-enum) и живой клиент (интервал, ретрай только
+// временных ошибок). Сети нет: REST и AppSec клиенты — фейки по фикстурам;
+// ok.json — санитизированный живой снимок нашего репо.
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -39,7 +38,7 @@ interface FixtureAppsec {
   defectGroupsPages?: { data: unknown[]; nextPageToken: string; totalSize: number }[];
   severityFilterTotalSize?: Record<string, number>;
   severityFilterData?: Record<string, unknown[]>;
-  /** Ф2.6: корзина фильтра `type=SECRETS&severity=CRITICAL` платформы */
+  /** Корзина фильтра `type=SECRETS&severity=CRITICAL` платформы */
   secretsTypeTotalSize?: number;
   groupsPageStatus?: number;
 }
@@ -56,7 +55,7 @@ function fakeAppsec(f: FixtureAppsec, log?: string[]): AppsecClient {
         return { status: 200, json: f.scansLatest ?? null };
       }
       if (path === "/v1/defect-groups") {
-        // Ф2.6: отдельная корзина движка секретов (фильтр платформы)
+        // отдельная корзина движка секретов (фильтр платформы)
         if (params["type"] !== undefined && params["type"] !== "") {
           return { status: 200, json: { data: [], nextPageToken: "", totalSize: f.secretsTypeTotalSize ?? 0 } };
         }
@@ -169,9 +168,8 @@ describe("collectAppsec: 7 веток плана", () => {
     expect(out.noData?.detail).toContain("timeFinished");
   });
 
-  // Ф2.6 (M8): у фикстуры isLatest = false. Прежнее ожидание «ok-факт с
-  // нулями» было ОШИБКОЙ контракта, а не проверкой устойчивости: скан,
-  // вытесненный более новым или упавший, выдавался за «уязвимостей нет».
+  // У фикстуры isLatest = false. Выдать такой скан ok-фактом с нулями значит
+  // выдать вытесненный или упавший скан за «уязвимостей нет».
   test("unknown-enum — isLatest false → no-data no-scan (устаревший скан не выдаётся за результат)", async () => {
     const f = load("unknown-enum.json");
     const out = await collectAppsec(fakeRest(f.repoId), fakeAppsec(f), "o/weird", { now: NOW });
@@ -194,7 +192,7 @@ describe("collectAppsec: 7 веток плана", () => {
     expect(v.provenance.is_latest).toBe(true);
   });
 
-  // Ф2.6: флаг зажигает ФИЛЬТР платформы type=SECRETS&severity=CRITICAL, а не
+  // Флаг зажигает ФИЛЬТР платформы type=SECRETS&severity=CRITICAL, а не
   // регулярка /secret/i по имени движка (живые движки — KICS/Opengrep)
   test("secrets_critical — непустая корзина type=SECRETS зажигает флаг", async () => {
     const f = load("ok.json");

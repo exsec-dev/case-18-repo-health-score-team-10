@@ -1,8 +1,7 @@
-// scan-runner.test.ts — Б4+В4/Б3: конвейер scan-job на фейк-каналах
-// (git/REST инъектятся целиком — сетевых вызовов нет): статусы
-// ok/partial/bad, факты со scan_id/status/source/collected_at,
-// повторный скан = новый scan_id; очередь (jobs) с В4/Б3 отделена от
-// runScan и живёт в scheduler (enqueued отдельно, без UNIQUE(repo_id)).
+// Конвейер scan-job на фейк-каналах (git/REST инъектятся целиком — сетевых
+// вызовов нет): статусы ok/partial/bad, факты со scan_id/status/source/
+// collected_at, повторный скан = новый scan_id. Очередь (jobs) отделена от
+// runScan и живет в scheduler.
 import { MODEL_VERSION } from "../src/score/model";
 import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -65,7 +64,7 @@ const restDead = (): RestCollectResult => ({
   ],
 });
 
-// М7 (круг 2): restBase/appsecBase обязательны типом — каналы здесь подменены
+// restBase/appsecBase обязательны типом — каналы здесь подменены
 // швами, живого клиента не строится, адрес заведомо нерабочий локальный
 const LOCAL_DEAD = "http://127.0.0.1:1";
 
@@ -91,14 +90,14 @@ describe("runScan: статусы и три-state", () => {
       expect((row["collected_at"] as string)).toMatch(/^\d{4}-\d{2}-\d{2}T/);
       expect(typeof row["source"]).toBe("string");
     }
-    // В4.1-fix (К-Ф1.1): набор фактов неполный (нет всех PUBLIC_KINDS) —
+    // набор фактов неполный (нет всех PUBLIC_KINDS) —
     // скан непригоден: мета репо не применяется, видимость — применяется
     // (мета пригодного скана — tests/eligibility.test.ts)
     const repo = db.query("SELECT * FROM repos WHERE repo_slug = 'alpha'").get() as Record<string, unknown>;
     expect(r.ratingEligible).toBe(false);
     expect(repo["title"]).toBeNull();
     expect(repo["visibility"]).toBe("public");
-    // В4/Б3: очередь отделена от runScan (jobs — scheduler/enqueueScan)
+    // очередь отделена от runScan (jobs — scheduler/enqueueScan)
     const jobs = db.query("SELECT COUNT(*) c FROM jobs WHERE repo_id = ?").get(r.repoId) as { c: number };
     expect(jobs.c).toBe(0);
     // scan закрыт временем
@@ -148,7 +147,7 @@ describe("runScan: статусы и три-state", () => {
     const n2 = db.query("SELECT COUNT(*) c FROM facts WHERE scan_id = ?").get(r2.scanId) as { c: number };
     expect(n1.c).toBe(4);
     expect(n2.c).toBe(4);
-    // В4/Б3: очередь без UNIQUE — строки создаются enqueueScan'ом, не сканом
+    // очередь без UNIQUE — строки создаются enqueueScan'ом, не сканом
     const jobs = db.query("SELECT COUNT(*) c FROM jobs WHERE repo_id = ?").get(r1.repoId) as { c: number };
     expect(jobs.c).toBe(0);
   });
@@ -258,19 +257,19 @@ describe("В2/Б5: score-hook — конец скана пишет scores/recomm
     const res = await runScan(deps, "hook/repo");
     expect(res.score).not.toBeNull();
     expect(res.score!.healthcraftIndex).not.toBeNull();
-    // В4.1 (К1): одна строка оценки на скан с двумя итогами
+    // одна строка оценки на скан с двумя итогами
     const rows = db.query("SELECT healthcraft_index, model_version FROM scores WHERE scan_id = ?").all(res.scanId) as { healthcraft_index: number; model_version: string }[];
     expect(rows).toHaveLength(1);
     expect(rows[0]!.model_version).toBe(MODEL_VERSION);
     expect(rows[0]!.healthcraft_index).toBe(Math.round(res.score!.healthcraftIndex!));
-    expect(res.score!.repoHealthScore).not.toBeNull(); // полный итог — дериватив: живёт в результате хука, в актуальной схеме не хранится (К-Ф3.3)
+    expect(res.score!.repoHealthScore).not.toBeNull(); // полный итог — дериватив: живет в результате хука, в схеме не хранится
     const recs = db.query("SELECT rule_id FROM recommendations WHERE scan_id = ? ORDER BY priority").all(res.scanId) as { rule_id: string }[];
     expect(recs.map((r) => r.rule_id)).toContain("start-tracker");
     expect(recs.map((r) => r.rule_id)).toContain("license-missing");
   });
 });
 
-// ERROR_LOG 16.09: сбой уборки клона не должен разрушать успешный
+// Сбой уборки клона (EBUSY на Windows) не должен разрушать успешный
 // git-канал. Два инварианта отдельно — путь «rm бросил после
 // extractFacts» не воспроизводится портируемо, поэтому проверяем
 // механизмы, из которых он был собран.
@@ -316,7 +315,7 @@ describe("круг 2 (С5): причина сбоя клона", () => {
 });
 
 // ---------------------------------------------------------------------------
-// В4.4 (кластер C): timeline пишется в facts сжатым (z:-префикс zlib+base64)
+// timeline пишется в facts сжатым (z:-префикс zlib+base64)
 // ---------------------------------------------------------------------------
 
 describe("В4.4: компрессия timeline в insertFacts", () => {

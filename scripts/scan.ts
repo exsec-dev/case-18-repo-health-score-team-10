@@ -1,6 +1,6 @@
-// scan.ts — точка входа скана (Б4): bun scripts/scan.ts <org/repo>
-// Вызывает runScan НАПРЯМУЮ (очередь-механика — В4). Печатает
-// scan_id, статус, счётчики фактов — приёмочный прогон HQ.
+// Ручной скан одного репо: bun scripts/scan.ts <org/repo>
+// Вызывает runScan напрямую, минуя очередь. Печатает scan_id, статус и
+// счетчики фактов.
 import { loadConfig } from "../src/config";
 import { openDb } from "../src/db";
 import { makeScClient } from "../src/collectors/http";
@@ -16,7 +16,6 @@ const config = loadConfig();
 const db = openDb(config);
 const client = makeScClient({
   token: config.sourcecraftToken,
-  // П3 (В4.2-port-fix): адреса API — только из конфига, ни один клиент не полагается на дефолт модуля
   baseUrl: config.api.restBase,
   minIntervalMs: config.scan.rest.minIntervalMs,
   maxRequests: config.scan.rest.budget,

@@ -1,9 +1,7 @@
-// Rating.tsx — страница рейтинга: здоровье, а не популярность (ТЗ 4).
-// Вся выборка считается сервером (решение канвы «г»), страница только
-// переводит состояние контролов в query-строку и обратно — поэтому
-// отфильтрованным рейтингом можно поделиться ссылкой, и F5 его не теряет.
-// Раскладка — как соседние разделы SourceCraft: крошки в ActionBar,
-// тулбар одной строкой (size m), таблица, методика в правой панели.
+// Страница рейтинга: здоровье, а не популярность (ТЗ 4).
+// Выборку считает сервер, страница только переводит состояние контролов в
+// query-строку и обратно — поэтому отфильтрованным рейтингом можно
+// поделиться ссылкой, и F5 его не теряет.
 import { coverageLine } from "./ratingParams";
 import { loadRatingScroll, rememberRatingHref, saveRatingScroll } from "./ratingReturn";
 import { ArrowUpRightFromSquare, BarsAscendingAlignLeft, BarsDescendingAlignLeft, Flag, Gear, Magnifier, SparklesFill, SquareListUl, TriangleDownFill, TriangleUpFill } from "@gravity-ui/icons";
@@ -74,16 +72,10 @@ import { LANG_NONE, LANG_NONE_TITLE, langOptions, type Facets, type LangOptionDa
 type Item = RatingResponse["items"][number];
 
 /**
- * «Язык не определён» — не значение языка, а режим фильтра (`lang=` пустым).
- * В4.7 (П2): опции «все» больше нет — все языки означает «ничего не выбрано»
- * (параметра `lang` нет), решение владельца.
- */
-
-/**
  * Сводка выбранного в поле («Go, Rust +2»): имена идут, пока укладываются в
- * бюджет символов, остальное — «+N». Бюджет снят с живого поля (харнесс 21.09):
- * при ширине 220px на текст остаётся ~117px, это ~18 знаков Inter 13px, из
- * них 3-4 уходят на «+N». Первое имя показывается всегда.
+ * бюджет символов, остальное — «+N». Первое имя показывается всегда.
+ * Бюджет измерен на поле шириной 220px: на текст остается ~117px, это ~18
+ * знаков Inter 13px, из них 3-4 уходят на «+N».
  */
 const LANG_SUMMARY_CHARS = 13;
 
@@ -110,9 +102,9 @@ function langSummaryNames(values: string[]): number {
 const NOT_IN_RATING = new Set(["cicd", "security"]);
 
 /**
- * В4.8.5 (К8.5.10, С5-3): категории рейтинга без /api/meta — имена из
- * клиентских констант (порядок `CATEGORY_ORDER` сервера); веса неизвестны —
- * панель методики их не рисует, колонки рисуются.
+ * Категории на случай, когда /api/meta недоступен: имена из клиентских
+ * констант в порядке `CATEGORY_ORDER` сервера. Веса неизвестны — колонки
+ * рисуются, а панель методики весов не показывает.
  */
 const FALLBACK_CATEGORIES: MetaResponse["categories"] = ["documentation", "cicd", "security", "activity", "issues", "code"].map((key) => ({
   key: key as MetaResponse["categories"][number]["key"],
@@ -122,10 +114,10 @@ const FALLBACK_CATEGORIES: MetaResponse["categories"] = ["documentation", "cicd"
 }));
 
 /**
- * Подписи колонок — один словарь на шапку таблицы и на список «Колонки».
+ * Подписи колонок для списка «Колонки» — те же, что в шапке таблицы.
  * Категорийные колонки сюда не входят: их имена приходят из /api/meta.
- * «#» в шапке — знак, а не слово; в списке настройки он ничего не называл,
- * поэтому там колонка зовётся «Позиция» (решение владельца 21.09).
+ * В шапке место обозначено «#», но в списке знак ничего не называет —
+ * там колонка зовется «Позиция».
  */
 const COLUMN_TITLES: Record<string, string> = {
   rank: "Позиция",
@@ -140,16 +132,16 @@ const COLUMN_TITLES: Record<string, string> = {
 };
 
 /**
- * В4.9 ч.2 (U10-b): «Реакции» и «Последняя активность» видны по умолчанию —
- * узкими колонками вторичным цветом. Рейтинг не про популярность, но это
- * держит вес индекса (реакции в него не входят и порядок не меняют), а не
- * скрытие колонки: зритель видит популярность рядом и сортирует по ней сам.
+ * «Реакции» и «Последняя активность» видны по умолчанию — узкими колонками
+ * вторичным цветом. Рейтинг не про популярность (реакции в индекс не входят),
+ * но прятать ее незачем: зритель видит популярность рядом и может сам
+ * отсортировать по ней.
  */
 const HIDDEN_BY_DEFAULT = ["lang", "forks", "coverage", "scanned"];
 
 export function Rating({ search: rawSearch, meta, metaFailed = false }: { search: string; meta: MetaResponse | null; metaFailed?: boolean }) {
-  // В4.8.5 (К8.5.10, С5-2): неверные sort/order/per_page/page из старой ссылки
-  // заменяются дефолтом, адрес исправляется — сервер не получает заведомый 400
+  // неверные sort/order/per_page/page из старой ссылки заменяются дефолтом,
+  // адрес исправляется — сервер не получает заведомый 400
   const normalized = useMemo(() => normalizeRatingSearch(rawSearch), [rawSearch]);
   const search = normalized.search;
   useEffect(() => {
@@ -162,18 +154,18 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
     p.delete("view");
     return p.toString();
   }, [search]);
-  // В4.7 круг 2 (Р2.6): при смене фильтра, сортировки или страницы прежняя
-  // выдача остаётся на экране приглушённой, пока не придёт новая, — без
-  // скелетона, скачка ширины вкладок и пропадающей пагинации
+  // при смене фильтра, сортировки или страницы прежняя выдача остается на
+  // экране приглушенной, пока не придет новая, — без скелетона, скачка
+  // ширины вкладок и пропадающей пагинации
   const { state, reload } = useJson<RatingResponse>(`/api/repos${apiSearch ? `?${apiSearch}` : ""}`, { keepPrevious: true });
-  // Ступень 4 (В-10): адрес выдачи — для крошки «Рейтинг» на карточке;
-  // прокрутка таблицы (или списка телефона) — запоминается при уходе и
-  // возвращается, когда выдача с тем же адресом снова на экране
+  // адрес выдачи запоминается для крошки «Рейтинг» на карточке, прокрутка
+  // таблицы (или списка на телефоне) — при уходе; она возвращается, когда
+  // выдача с тем же адресом снова на экране
   useEffect(() => rememberRatingHref(search), [search]);
   const restoredFor = useRef<string | null>(null);
   const scroller = (): HTMLElement | null =>
     document.querySelector<HTMLElement>(".rh-table-fill .g-table__scroll-container") ?? document.querySelector<HTMLElement>(".rh-fill__content");
-  // ревью кода R4: слушатель — на адрес выдачи и появление контейнера, а не на
+  // слушатель переподключается на смену адреса и появление контейнера, а не на
   // каждую перерисовку; восстановление — только когда на экране данные НОВОЙ
   // выдачи (при «назад» внутри рейтинга `useJson` еще показывает прежние строки)
   const hasData = state.kind === "ok";
@@ -201,11 +193,11 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
   const sort = params.get("sort") ?? "index";
   const order = params.get("order") ?? "desc";
   const view = params.get("view") === "unscored" ? "unscored" : "scored";
-  // В4.7 (П2): `lang` повторяемый; одиночная старая ссылка — набор из одного
+  // `lang` повторяемый; старая ссылка с одним языком — набор из одного
   const langValues = params.getAll("lang").map((v) => (v === "" ? LANG_NONE : v));
   const qParam = params.get("q") ?? "";
   const aiOnly = params.get("ai") === "1";
-  // В5.5 тур 2 (W3): размер (повторяемый) и CI; пустое состояние называет все включенные фильтры
+  // размер повторяемый; пустое состояние называет все включенные фильтры
   const sizeValues = params.getAll("size");
   const ciValue = params.get("ci");
   const activeFilters = activeRatingFilters(search);
@@ -223,7 +215,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
     return () => clearTimeout(timer);
   }, [queryDraft, qParam]);
 
-  // круг 5 тура 3 (находка 21): выбор колонок — в localStorage, переживает перезагрузку
+  // выбор колонок хранится в localStorage и переживает перезагрузку
   const [hidden, setHiddenState] = useState<string[]>(() => readRatingHidden(HIDDEN_BY_DEFAULT));
   const setHidden = (next: string[]): void => {
     setHiddenState(next);
@@ -231,13 +223,12 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
   };
 
   function setParams(patch: Record<string, string | string[] | null>, opts: { replace?: boolean; keepPage?: boolean } = {}): void {
-    // В4.8.5 (К8.5.10, С5-5): база — ТЕКУЩИЙ адрес, а не снимок рендера:
-    // отложенный таймер поиска иначе откатывал выбранные за 300 мс язык,
-    // сортировку или страницу
+    // база — ТЕКУЩИЙ адрес, а не снимок рендера: иначе отложенный таймер
+    // поиска откатывает выбранные за 300 мс язык, сортировку или страницу
     const next = new URLSearchParams(window.location.search);
     for (const [key, value] of Object.entries(patch)) {
       next.delete(key);
-      // массив — повторяемый параметр (`lang`, В4.7): каждое значение отдельно
+      // массив — повторяемый параметр (`lang`, `size`): каждое значение отдельно
       if (Array.isArray(value)) for (const v of value) next.append(key, v);
       else if (value !== null) next.set(key, value);
     }
@@ -250,31 +241,29 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
 
   const data = state.kind === "ok" ? state.data : state.kind === "loading" ? (state.stale ?? null) : null;
   const refreshing = state.kind === "loading" && state.stale !== undefined;
-  // В4.8.5 (К8.5.10, С5-1): страница за пределами выдачи (старая ссылка
-  // `?page=5` при трёх результатах) — последняя существующая, а не «Рейтинг еще пуст»
+  // страница за пределами выдачи (старая ссылка `?page=5` при трех
+  // результатах) заменяется последней существующей, а не «Рейтинг еще пуст»
   const lastPage = state.kind === "ok" ? pageBeyond(state.data) : null;
   useEffect(() => {
     if (lastPage !== null) setParams({ page: lastPage === 1 ? null : String(lastPage) }, { replace: true, keepPage: true });
     // setParams читает текущий адрес — в зависимостях не нужен
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastPage]);
-  // В4.7 круг 2 (Р2.1): пока грузится новый набор, список языков строится из
-  // фасетов последнего успешного ответа — иначе на время загрузки из него
-  // пропадали все опции, кроме выбранных, и у тех — цвет и счётчик. Фасеты
-  // от языкового фильтра не зависят, поэтому прежние верны для нового набора.
+  // пока грузится новый набор, список языков строится из фасетов последнего
+  // успешного ответа — иначе на время загрузки пропадают все опции, кроме
+  // выбранных, а у тех — цвет и счетчик. Фасеты от языкового фильтра не
+  // зависят, поэтому прежние верны и для нового набора.
   const lastFacets = useRef<Facets>([]);
   if (data) lastFacets.current = data.facets.languages;
-  // В5.5 тур 2 (W3): счетчики размера и CI — так же из последнего ответа (от фильтров не зависят)
+  // счетчики размера и CI — так же из последнего ответа (от фильтров не зависят)
   const lastFilterFacets = useRef<RatingResponse["facets"] | null>(null);
   if (data) lastFilterFacets.current = data.facets;
-  // M-9: без /api/meta категории не сыплются ключами — имена из констант
+  // без /api/meta — имена из клиентских констант, а не ключи
   const categoryNames: Record<string, string> = useMemo(
     () => Object.fromEntries((meta?.categories ?? []).map((c) => [c.key, c.title])),
     [meta],
   );
   const titleOf = (key: string): string => categoryNames[key] ?? CATEGORY_TITLES_RU[key] ?? key;
-  // В4.8.5 (К8.5.10, С5-3): без /api/meta категорийные колонки строятся из
-  // клиентских констант — плашка «показаны запасными значениями» больше не врёт
   const categories = useMemo(() => (meta?.categories ?? FALLBACK_CATEGORIES).filter((c) => !NOT_IN_RATING.has(c.key)), [meta]);
   const onSort = (key: SortKey, next: "asc" | "desc"): void => setParams({ sort: key, order: next });
   const allColumns = useMemo(
@@ -284,10 +273,8 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
     // сортировки, а не идентичность обработчика
     [categories, sort, order],
   );
-  // Доводка 21.09: у сортируемых колонок `name` — функция-заголовок, и прежний
-  // фолбэк печатал в настройке технический id («repo», «index», «activity»).
-  // Список настройки и шапка таблицы обязаны называть колонку ОДИНАКОВО,
-  // поэтому подписи берутся из одного словаря, а не выводятся из разметки.
+  // у сортируемых колонок `name` — функция-заголовок, из нее подпись не
+  // вывести (в списке оказался бы технический id), поэтому — из словаря
   const setupItems: TableColumnSetupItem[] = allColumns.map((c) => ({
     id: c.id,
     title: COLUMN_TITLES[c.id] ?? (typeof c.name === "string" ? c.name : c.id),
@@ -299,18 +286,14 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
   const toolbar = (
     <Flex direction="column" gap={3} style={{ marginBottom: "var(--g-spacing-3)" }}>
       <Flex gap={2} wrap alignItems="center">
-        {/* flex-обертка: блочная давала полю 27.3px против 28px у соседних Select.
-            Тур 3 В5.5 (п.2): основа 160px — тулбар на экранах ПК от 1366 в одну строку,
+        {/* flex-обертка: в блочной поле получалось 27.3px против 28px у соседних
+            Select. Основа 160px держит тулбар в одну строку на экранах от 1366,
             поле растягивается на остаток */}
         <div style={{ flex: "1 1 160px", minWidth: 160, display: "flex" }}>
-          {/* В4.6 (У29, замечание владельца 3): плейсхолдер называет ДЕЙСТВИЕ,
-              а перечень полей уезжает в подсказку у правого края инпута. Текст
-              подсказки сверен по коду (`repos.ts`, matchesQ), а не написан на
-              слух: поиск идёт подстрокой по org, repo и названию, без учёта
-              регистра — обещать больше было бы неправдой.
-              Круг 2 (Р1): у иконки появился отступ СПРАВА — без него «Поиск»
-              слипался с лупой (замечание владельца 1); формулировка подсказки
-              взята дословно из пункта 2 (Р2). */}
+          {/* Плейсхолдер называет действие, перечень полей — в подсказке. Поиск
+              идет подстрокой по org, repo и названию (`repos.ts`, matchesQ) —
+              подсказка не обещает большего. Отступ справа у лупы — иначе
+              «Поиск» слипается с иконкой. */}
           <TextInput
             size="m"
             placeholder="Поиск"
@@ -336,12 +319,10 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
             controlProps={{ "aria-label": "Поиск по репозиториям" }}
           />
         </div>
-        {/* В4.7 (П2): мультивыбор языка. Чекбокс — неинтерактивный
-            `Checkbox` в `renderOption` (штатная галочка `multiple` скрыта
-            стилем попапа), у опции цветной кружок из фасета, список ограничен
-            по высоте со скроллом, выбранное — сводкой «Go, Rust +2».
+        {/* Мультивыбор языка: чекбокс — неинтерактивный `Checkbox` в
+            `renderOption` (штатная галочка `multiple` скрыта стилем попапа).
             Виртуализация выключена порогом: у виртуального списка своя
-            высота, и CSS-ограничение со скроллом на нём не работает. */}
+            высота, и CSS-ограничение высоты со скроллом на нем не работает. */}
         <Select
           label="Язык:"
           size="m"
@@ -357,9 +338,9 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
           renderSelectedOption={(option, index) => <LangSummaryPart value={option.value} index={index} values={langValues} />}
           onUpdate={(v) => setParams({ lang: v.length === 0 ? null : v.map((x) => (x === LANG_NONE ? "" : x)) })}
         />
-        {/* В5.5 тур 2 (W3, ТЗ §7): размер по строкам кода (мультивыбор, как язык) и
-            наличие CI. Счетчики — из фасетов (по поиску, без фильтров); репо без
-            данных о размере или CI не попадает ни в одно значение. */}
+        {/* Размер по строкам кода и наличие CI (ТЗ §7). Счетчики — из фасетов
+            (по поиску, без фильтров); репо без данных о размере или CI не
+            попадает ни в одно значение. */}
         <Select
           label="Размер:"
           size="m"
@@ -385,20 +366,13 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
           renderOption={(option) => <FilterOption option={option} />}
           onUpdate={(v) => setParams({ ci: v[0] ?? null })}
         />
-        {/* В5.9 круг 3 (27.09, Екатерина): подсказка «О фильтрах» (тематика, безопасность, CI)
-            снята; ограничение названо в docs/methodology.md §10 */}
-        {/* Доводка 21.09: пара «Сортировка: …» + кнопка направления снята —
-            сортировка живёт в заголовках колонок (`SortableHeader`), как в
-            таблицах платформы. Освободившееся место занял второй ряд: выбор
-            колонок и переключатель выборки поднялись сюда, и тулбар стал
-            однострочным — поиск, язык, колонки, выборка. */}
         {view === "scored" && !isPhone && (
           <TableColumnSetup
             items={setupItems}
             showStatus
             onUpdate={(updated) => setHidden(updated.filter((i) => !i.selected).map((i) => i.id))}
-            /* тур 3 В5.5 (п.2): переключатель — иконкой, счетчик колонок — в подсказке
-               (место в строке тулбара отдано фильтрам) */
+            /* переключатель — иконкой, счетчик колонок — в подсказке:
+               место в строке тулбара отдано фильтрам */
             renderSwitcher={({ onClick, onKeyDown }) => {
               const shown = setupItems.filter((i) => i.selected !== false).length;
               const label = `Колонки: ${shown} из ${setupItems.length}`;
@@ -422,8 +396,8 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
           <SegmentedRadioGroup.Option value="scored">Оценены{data ? ` ${fmtCount(data.total)}` : ""}</SegmentedRadioGroup.Option>
           <SegmentedRadioGroup.Option value="unscored">Без оценки{data ? ` ${fmtCount(data.nulls)}` : ""}</SegmentedRadioGroup.Option>
         </SegmentedRadioGroup>
-        {/* В5.2 (Б6, выбор 4C): фильтр «С AI-обзором» — путь к обзорам с первого экрана; кнопки
-            нет, пока таких репо 0 (и фильтр не включен) */}
+        {/* фильтр «С AI-обзором» — путь к обзорам с первого экрана; кнопки нет,
+            пока таких репо 0 (и фильтр не включен) */}
         {view === "scored" && data && (data.aiCount > 0 || aiOnly) && (
           <Button view="outlined" size="m" selected={aiOnly} onClick={() => setParams({ ai: aiOnly ? null : "1" })}>
             <Button.Icon side="start">
@@ -439,19 +413,13 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
   return (
     <Page
       mode="fill"
-      // круг 2 (Н1): панель колонкой — только с 1600, чтобы на 1440 таблице
-      // хватило ширины на «Реакции» и «Последнюю активность»
+      // панель колонкой — только с 1600, чтобы на 1440 таблице хватило
+      // ширины на «Реакции» и «Последнюю активность»
       asideColumnFrom={1600}
       crumbs={[{ text: "Рейтинг" }]}
       aside={<RatingAside meta={meta} metaFailed={metaFailed} generatedAt={data?.generatedAt ?? null} />}
       header={
         <>
-          {/* В4.6 круг 2 (Р5, замечание владельца 5): заголовок, подзаголовок и
-              абзац охвата были ТРЕМЯ текстами подряд. Владелец схлопнула их в
-              один — формулировка её, размер прежнего подзаголовка (он и есть
-              слот `description`). Охват по-прежнему НАЗВАН числами из БД
-              (У15), а стратегия волн — словами; охранный пункт 3 дизайн-пары
-              (прежний подзаголовок про лайки) отменён этим контрактом. */}
           <PageHeader title="Рейтинг здоровья открытых репозиториев" description={ratingLead(meta)} />
           {toolbar}
         </>
@@ -463,25 +431,23 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
             page={data.page}
             pageSize={data.perPage}
             total={data.total}
-            // В4.6 (У21): дефолт стал 20 — без опции 20 к нему было бы не вернуться
+            // 20 — размер по умолчанию, без этой опции к нему не вернуться
             pageSizeOptions={isPhone ? undefined : [10, 20, 50, 100]}
-            // В5.9 (27.09, Екатерина — «quick jump», переход к странице): поле номера страницы
-            // uikit; Enter или уход фокуса — переход, номер больше последнего — последняя страница
+            // поле номера страницы: Enter или уход фокуса — переход,
+            // номер больше последнего — последняя страница
             showInput
             onUpdate={(page, pageSize) => setParams({ page: String(page), per_page: String(pageSize) }, { keepPage: true })}
           />
         ) : undefined
       }
     >
-      {/* В4.6 (У27): скелетон держит РИТМ содержимого. Круг 2 (Р3) вернул в
-          строку название языка, и её высота снова 56px — 46px оставили бы
-          прыжок раскладки в момент загрузки, то есть ровно ту находку пары. */}
-      {/* скелетон — только при первой загрузке; при обновлении — полоса сверху */}
+      {/* скелетон — только при первой загрузке, высотой как строка таблицы
+          (56px), чтобы раскладка не прыгала; при обновлении — полоса сверху */}
       {state.kind === "loading" && !refreshing && <SkeletonRows rows={10} height={56} />}
       <div className={refreshing ? "rh-refresh-bar rh-refresh-bar_on" : "rh-refresh-bar"} role="progressbar" aria-hidden={!refreshing} aria-label="Обновляем рейтинг" />
 
-      {/* Ступень 4 (Ф16): перечитывание не удалось — строки прежние, и это видно
-          (как на карточке, К8.5.3): иначе новая сортировка подсвечена над старыми строками */}
+      {/* перечитывание не удалось — строки прежние, и это надо показать:
+          иначе новая сортировка подсвечена над старыми строками */}
       {state.kind === "ok" && state.refreshError && (
         <Alert
           theme="warning"
@@ -518,7 +484,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
             // клик по самой ссылке (и Ctrl/⌘-клик) обрабатывает ссылка
             onRowClick={(item, _index, e) => {
               if ((e.target as HTMLElement).closest("a")) return;
-              // Ступень 4 (Ф19): Ctrl/⌘-клик по строке — новая вкладка, как у ссылки
+              // Ctrl/⌘-клик по строке — новая вкладка, как у ссылки
               if (e.ctrlKey || e.metaKey) {
                 window.open(repoHref(item.org, item.repo), "_blank", "noopener");
                 return;
@@ -534,13 +500,9 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
 }
 
 /**
- * ОДИН текст под заголовком рейтинга (В4.6 круг 2, Р5 — формулировка
- * владельца). Что он обязан сказать и почему: чем считается порядок (индекс,
- * 4 публичные категории), что оценка воспроизводима из публичных данных, и —
- * честный охват каталога числами из БД (У15), потому что «Оценены N» без
- * знаменателя читалось как «оценен весь каталог». Стратегия волн названа
- * словами: обход идёт с самых заметных проектов, но на МЕСТО в рейтинге это
- * не влияет — порядок считает индекс.
+ * Один текст под заголовком: чем считается порядок (индекс по 4 публичным
+ * категориям) и охват каталога числами из БД — «Оценены N» без знаменателя
+ * читалось бы как «оценен весь каталог».
  *
  * Без `/api/meta` печатается только первая половина: соврать числом нельзя,
  * а смысл «что такое индекс» от знаменателя не зависит.
@@ -562,9 +524,9 @@ function ratingLead(meta: MetaResponse | null): ReactNode {
 }
 
 /**
- * В4.9 ч.2 (U14): «Как считается» в подзаголовке — ниже 1440 открывает
- * выезжающую панель (ту же, что кнопка ActionBar), на 1440+ прокручивает к
- * панели. Компонент, а не строка: состояние панели живет в `Page`.
+ * «Как считается» в подзаголовке: на узком экране открывает выезжающую
+ * панель, на широком прокручивает к ней. Компонент, а не строка: состояние
+ * панели живет в `Page`.
  */
 function HowCountedLink() {
   const aside = useAsideControl();
@@ -601,7 +563,10 @@ function NothingFound({ active }: { active: string[] }) {
   );
 }
 
-/** Группа «нет данных» — витрина закона 2: счётчик виден всегда, список — по переключателю. */
+/**
+ * Репозитории без оценки (не хватило данных): отсутствие данных не
+ * превращается в низкий балл, поэтому они не в рейтинге, а здесь.
+ */
 function UnscoredTable({ items, meta, active, refreshing }: { items: Item[]; meta: MetaResponse | null; active: string[]; refreshing: boolean }) {
   const titleOf = (key: string): string => meta?.categories.find((c) => c.key === key)?.title ?? CATEGORY_TITLES_RU[key] ?? key;
   const columns: TableColumnConfig<Item>[] = [
@@ -626,8 +591,8 @@ function UnscoredTable({ items, meta, active, refreshing }: { items: Item[]; met
       <EmptyState icon={SquareListUl} title="Все проанализированные репозитории оценены" description="Покрытия данными хватило каждому репозиторию выборки." />
     );
   }
-  // Ф2.16: NULL-группа может быть огромной (весь не обходивший каталог) —
-  // таблица показывает первые 5, остальное честным счётчиком «и ещё N»
+  // группа может быть огромной — таблица показывает первые 5, остальное
+  // счетчиком «и еще N»
   const shown = items.slice(0, 5);
   const rest = items.length - shown.length;
   const failedScan = items.some((i) => i.scanStatus === "bad");
@@ -646,9 +611,8 @@ function UnscoredTable({ items, meta, active, refreshing }: { items: Item[]; met
 }
 
 function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResponse | null; metaFailed?: boolean; generatedAt: string | null }) {
-  // В4.6 (У27): панель начинается с легенды шкалы (3 чипа + абзац) и двух блоков
-  // В4.8.5 (К8.5.10, С5-3): сбой /api/meta — не вечный скелетон: шкала из
-  // клиентских констант и честная строка о том, чего не хватает
+  // сбой /api/meta — не вечный скелетон: шкала из клиентских констант и
+  // строка о том, чего не хватает
   if (!meta && metaFailed) {
     return (
       <>
@@ -672,21 +636,11 @@ function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResp
     }));
   return (
     <>
-      {/* В4.6 (У22): шкала — первое, что читается в панели: без неё число не с чем сравнить */}
+      {/* шкала — первой в панели: без нее числу не с чем сравниться */}
       <ScoreLegend coverageNullBelow={meta.coverageNullBelow} />
-
-      {/* В4.6 круг 2 (Р7, замечание владельца 7): первый блок панели —
-          пересказ методики — удалён целиком. Он повторял то, что теперь стоит
-          ОДНИМ текстом над таблицей (Р5), и панель начиналась с двух абзацев
-          подряд. Сведения не потеряны: 4 публичные категории названы в тексте
-          над таблицей, граница CI/CD и Security — в подсказке блока «Вклад
-          категорий» ниже, а лайки-как-сортировка видны списком сортировок. */}
 
       <AsideSection
         title="Вклад категорий"
-        /* В4.6 круг 2 (Р8, замечание владельца 8): абзац под списком удалён,
-           его сведения переехали в иконку-подсказку рядом с заголовком —
-           объяснение списка стоит у списка, а не отдельным абзацем панели. */
         help={
           <HelpMark iconSize="s" aria-label="Что показывает вклад категорий">
             Доля в HealthCraft Index. Категории CI/CD и Безопасность учитываются только в показателе Repo Health Score для
@@ -694,17 +648,13 @@ function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResp
           </HelpMark>
         }
       >
-        {/* Доводка 21.09: доли, дающие в сумме сто, показаны полосой-стеком с
-            легендой под ней — приём панели SourceCraft («Top languages»:
-            точка, имя, доля). Пары «имя — число» в `DefinitionList` этого
-            родства не показывали: было четыре независимых факта вместо одного
-            разделённого целого.
-            Цвета сегментов — оттенки ОДНОГО акцента, не шкала здоровья:
-            зелёный и красный в этой панели уже заняты легендой оценки, и
-            категория, покрашенная в красный, читалась бы как плохая. */}
+        {/* Доли в сумме дают 100 — поэтому полоса-стек с легендой, как «Top
+            languages» у SourceCraft: одно разделенное целое, а не четыре
+            независимых числа. Цвет сегмента — по ключу категории, как на
+            карточке, а не по шкале здоровья: иначе категория в красном
+            читалась бы как плохая. */}
         <div className="rh-contrib">
           <div className="rh-contrib__bar">
-            {/* В4.9 ч.2 (А3): цвет — по ключу категории, как на карточке */}
             {ratingCategories.map((c) => (
               <i key={c.key} className={`rh-contrib__seg ${categoryColorClass(c.key)}`} style={{ width: `${c.share}%` }} />
             ))}
@@ -723,9 +673,6 @@ function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResp
 
       <AsideSection title="Расчет">
         <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
-          {/* В4.6 круг 2 (Р9, замечание владельца 9): пояснение порога —
-              формулировка владельца; само число порога из БД остаётся на
-              экране значением пункта. */}
           <DefinitionList.Item
             name="Порог оценки"
             note="Оценка рассчитывается только при достаточном покрытии. Недостающие категории исключаются из расчета"
@@ -737,11 +684,9 @@ function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResp
               {meta.modelVersion}
             </Label>
           </DefinitionList.Item>
-          {/* M-7: «Данные на сегодня» врало (generatedAt = момент запроса) — честная свежесть ниже.
-              В4.6 круг 2 (Р10, замечание владельца 10): пункт называется «Частота» —
-              «Свежесть» обещала давность данных, а речь о периодичности обхода;
-              значение и пояснение — формулировки владельца. */}
-          {/* В4.9 ч.2 (Б): колонка «Скан» скрыта по умолчанию — подсказка ведет на карточку */}
+          {/* Периодичность обхода, а не давность данных: generatedAt — момент
+              запроса, дату не показываем. Колонка «Анализ» скрыта по умолчанию,
+              поэтому подсказка ведет на карточку. */}
           <DefinitionList.Item name="Частота" note="Обход каталога выполняется ежесуточно. Дата последнего анализа – на карточке репозитория.">
             ежесуточно
           </DefinitionList.Item>
@@ -763,7 +708,7 @@ function LangOption({ option, checked }: { option: SelectOption<LangOptionData>;
   );
 }
 
-/** В5.5 тур 2 (W3): опция размера/CI для Select — подпись в `text`, счетчик в `data`. */
+/** Опция размера/CI для Select: подпись в `text`, счетчик в `data`. */
 function facetSelectOption(o: FacetOption): SelectOption<FacetOption> {
   return { value: o.value, text: o.title, data: o };
 }
@@ -797,9 +742,8 @@ function PhoneList({ items, refreshing }: { items: Item[]; refreshing: boolean }
             <div style={{ minWidth: 28, textAlign: "right" }}>
               <RankCell item={item} />
             </div>
-            {/* Круг 4 части 2: на телефоне строка репозитория сжимается (имя —
-                с многоточием), а число с полосой не сжимаются — раньше мера
-                строки в 180px выталкивала полосу поверх имени */}
+            {/* сжимается только имя (с многоточием), число с полосой — нет:
+                иначе полоса наезжает на имя */}
             <div style={{ flex: 1, minWidth: 0 }} className="rh-phone-name">
               <RepoCell item={item} compact />
             </div>
@@ -814,11 +758,9 @@ function PhoneList({ items, refreshing }: { items: Item[]; refreshing: boolean }
 }
 
 /**
- * Ячейка места. Тур 3 В5.5 (26.09, Екатерина — итог круга правок динамики):
- * треугольник направления за сутки (▲ зеленый / ▼ красный) рядом с местом;
- * место — основным цветом, жирным; величина сдвига и вчерашнее место — в
- * подсказке на группе «треугольник + место». Без изменения и без снимка прошлых суток — только место.
- * Вытесняет тур 1 (число под местом), отдельную колонку и число рядом с местом.
+ * Ячейка места: треугольник изменения за сутки (▲ зеленый / ▼ красный) и
+ * место жирным; величина сдвига и вчерашнее место — в подсказке на всей
+ * группе. Без изменения или без снимка прошлых суток — только место.
  */
 function RankCell({ item }: { item: Item }) {
   if (item.rank === null) return <Text color="secondary">—</Text>;
@@ -838,7 +780,6 @@ function RankCell({ item }: { item: Item }) {
       </Text>
     </span>
   );
-  // подсказка — на всей группе «треугольник + место» (слово владельца 26.09)
   return moved ? (
     <ActionTooltip title={`${up ? "Поднялся" : "Опустился"} на ${fmtCount(Math.abs(d!))} за сутки: вчера – ${fmtCount(item.rank + d!)} место`}>{cell}</ActionTooltip>
   ) : (
@@ -847,31 +788,24 @@ function RankCell({ item }: { item: Item }) {
 }
 
 /**
- * Строка репозитория: иконка, имя, НАЗВАНИЕ ЯЗЫКА (В4.6 круг 2, Р3 —
- * замечание владельца 3; частичная отмена З9 круга 1).
- *
- * Круг 1 уплотнил строку до 46px: название языка ушло в `title` цветной точки
- * и в колонку «Язык», выключенную по умолчанию. Владелец прошла по живому
- * рейтингу и вернула лэйаут: цветной кружок без названия ничего не сообщал —
- * язык узнавался только наведением, то есть для читающего глазами не
- * существовал. Высота строки 56px ПРИНЯТА решением владельца (18px слага +
- * 16px названия языка + аватар `m`), `perPage` 20 остаётся: видно ~15 строк
- * вместо 17, и это осознанная плата за читаемую строку.
+ * Строка репозитория: аватар, имя и название языка. Язык подписан словом:
+ * цветной кружок без названия ничего не сообщает, пока не наведешь курсор.
+ * Отсюда высота строки 56px (18px слага + 16px языка + аватар `m`) —
+ * осознанная плата за читаемость.
  */
 function RepoCell({ item, compact = false }: { item: Item; compact?: boolean }) {
   return (
-    // круг 5 тура 3 (Н3 аудита, вариант А): потолок ширины — в CSS (`.rh-rating-repo`),
-    // на широких экранах он снят, и колонка берет свободное место
+    // потолок ширины — в CSS (`.rh-rating-repo`); на широких экранах он снят,
+    // и колонка берет свободное место
     <Flex gap={3} alignItems="center" className={compact ? undefined : "rh-rating-repo"} style={compact ? { minWidth: 0 } : undefined}>
       <RepoAvatar repo={item.repo} logoUrl={item.logoUrl} size="m" />
       <Flex direction="column" gap={0} style={{ minWidth: 0 }}>
         <Flex gap={1} alignItems="center" style={{ minWidth: 0 }}>
           <Link {...linkProps(repoHref(item.org, item.repo))} view="primary" className="rh-rating-name">
-            {/* В4.6 (У27): слаг — один компонент на рейтинг и карточку */}
             <RepoSlug org={item.org} repo={item.repo} variant="subheader-1" />
           </Link>
-          {/* тур 3 В5.5 (круг 3): ссылка на SourceCraft — первой из иконок строки. В5.5 тур 1 (Р3): внешняя ссылка на страницу репо в SourceCraft;
-              имя по-прежнему ведет на нашу карточку */}
+          {/* ссылка на репо в SourceCraft — первой из иконок строки; имя ведет
+              на нашу карточку */}
           <ActionTooltip title="Открыть на sourcecraft.dev">
             <Link
               href={item.webUrl}
@@ -883,7 +817,6 @@ function RepoCell({ item, compact = false }: { item: Item; compact?: boolean }) 
               <Icon data={ArrowUpRightFromSquare} size={14} />
             </Link>
           </ActionTooltip>
-          {/* В5.2 (Б6, выбор 4C): у репо есть публичный AI-обзор — искра у имени */}
           {item.aiOverview && (
             <ActionTooltip title="Есть AI-обзор">
               <span className="rh-rating-ai" role="img" aria-label="Есть AI-обзор" {...TIP_TARGET}>
@@ -891,9 +824,8 @@ function RepoCell({ item, compact = false }: { item: Item; compact?: boolean }) 
               </span>
             </ActionTooltip>
           )}
-          {/* В5.5 тур 1 (Р2): флаг проверки на накрутку — подозрение для человека,
-              не приговор (на место и сортировку не влияет); формулировки — те же,
-              что у плашки на карточке (format.ts FRAUD_*) */}
+          {/* флаг накрутки — подозрение для человека, не приговор: на место и
+              сортировку не влияет; тексты те же, что у плашки на карточке */}
           {item.fraud && (
             <ActionTooltip title={FRAUD_TITLE} description={FRAUD_EXPLAIN}>
               <span className="rh-rating-fraud" role="img" aria-label={FRAUD_TITLE} {...TIP_TARGET}>
@@ -911,16 +843,10 @@ function RepoCell({ item, compact = false }: { item: Item; compact?: boolean }) 
 }
 
 /**
- * Заголовок колонки, по которой можно сортировать.
- *
- * Доводка 21.09: сортировка переехала из тулбара в шапку таблицы — так она
- * устроена у платформы (таблица Labels: «Name ↑↓ · Updated date ↓»), и так её
- * ищет читатель: в самой колонке. Освободились 264px тулбара, которые занимали
- * `Select` шириной по содержимому и кнопка направления.
- *
- * Сортировка остаётся СЕРВЕРНОЙ (`sort`/`order` в query, выборку считает API),
- * поэтому `withTableSorting` не подходит — он про клиентскую сортировку
- * данных страницы. Здесь заголовок это просто кнопка, меняющая query.
+ * Заголовок сортируемой колонки, как в таблицах SourceCraft. Сортировка
+ * серверная (`sort`/`order` в query), поэтому `withTableSorting` uikit не
+ * подходит — он сортирует данные страницы на клиенте. Здесь заголовок —
+ * просто кнопка, меняющая query.
  */
 function SortableHeader({
   label,
@@ -935,11 +861,11 @@ function SortableHeader({
   sort: string;
   order: string;
   onSort: (key: SortKey, next: "asc" | "desc") => void;
-  /** В4.9 ч.2 (U10-b): узкая колонка — подпись переносится в 2 строки, а не распирает колонку */
+  /** узкая колонка: подпись переносится в 2 строки, а не распирает колонку */
   wrap?: boolean;
 }) {
   const active = sort === columnKey;
-  // В4.8.5 (К8.5.10, С5-8): первый клик по «Репозиторию» — А→Я, по числам — по убыванию
+  // первый клик по «Репозиторию» — А→Я, по числам — по убыванию
   const next: "asc" | "desc" = active ? (order === "desc" ? "asc" : "desc") : firstSortOrder(columnKey);
   return (
     <Button
@@ -977,16 +903,14 @@ function buildColumns(
       name: "#",
       align: "end",
       sticky: "start",
-      // Ступень 4 (В-4): настоящее место в рейтинге (поле `rank` ответа), а не номер
-      // строки выдачи — при поиске и фильтре «#» совпадает с местом на карточке.
-      // Тур 3 В5.5: место жирным, справа — динамика за сутки (▲/▼ и число)
+      // настоящее место в рейтинге (поле `rank`), а не номер строки выдачи:
+      // при поиске и фильтре «#» совпадает с местом на карточке
       template: (item: Item) => <RankCell item={item} />,
     },
     { id: "repo", name: sortable("Репозиторий", "name"), primary: true, sticky: "start", template: (item: Item) => <RepoCell item={item} /> },
     { id: "index", name: sortable("HealthCraft Index", "index"), align: "end", width: 136, template: (item: Item) => <ScoreCell item={item} /> },
     ...categoryColumns,
-    // В4.6 круг 2 (Р3): название языка снова стоит в строке репозитория;
-    // колонка остаётся для сортируемого/копируемого вида, выключенной по умолчанию
+    // язык уже подписан в строке репозитория, поэтому колонка выключена по умолчанию
     { id: "lang", name: "Язык", template: (item: Item) => <LanguageName name={item.language} color={item.languageColor} /> },
     {
       id: "likes",
@@ -1004,8 +928,7 @@ function buildColumns(
       width: 132,
       template: (item: Item) => <Text color="secondary">{fmtDate(item.lastActivityAt)}</Text>,
     },
-    // колонка заведена вместе с переносом сортировки: «Покрытие данными» было
-    // в списке сортировок, но своей колонки не имело — сортировать стало бы не по чему
+    // сортировка идет по заголовкам, поэтому у покрытия своя колонка
     { id: "coverage", name: sortable("Покрытие", "coverage"), align: "end", template: (item: Item) => fmtCoverage(item.coverage) },
     {
       id: "scanned",
@@ -1014,7 +937,7 @@ function buildColumns(
       template: (item: Item) => (
         <Flex direction="column" gap={0} alignItems="flex-end">
           <Text>{fmtDate(item.scannedAt)}</Text>
-          {/* Ф2.16: пояснение при сбойном скане — Score держится на последнем удачном */}
+          {/* при сбойном скане оценка держится на последнем удачном — объясняем это */}
           <Text
             variant="body-short"
             color="secondary"
@@ -1033,24 +956,12 @@ function buildColumns(
 }
 
 /**
- * Колонка HealthCraft Index (В4.6, У21 — замечание владельца 2): полоса и
- * число стоят В СТРОКУ, число справа.
+ * Колонка HealthCraft Index: полоса и число в строку, число справа.
  *
- * Измерено дизайн-раундом 20.09, а не выбрано на глаз: прежняя вертикаль
- * давала полосу 64x4px — 0,64px на балл, то есть разница 83 и 80 занимала
- * 1,9px и была невидима. Круг 1 развернул пару в строку и дал полосе 80px
- * длины; читаемость она получает не длиной, а цветом (после палитрового паса
- * контраст заливки к дорожке вырос с 1,95:1 до 4,40:1). Круг 2 (Р3) снизил
- * её высоту до `size="xs"` по замечанию владельца — в СТРОКЕ рейтинга полоса
- * стоит рядом с числом и не должна с ним спорить; полосы карточки остаются
- * `size="s"`, там они главная графика блока.
- *
- * Слот числа ФИКСИРОВАН на 32px и набран `tabular-nums` — иначе при
- * двузначных и трёхзначных значениях левая кромка полосы гуляет по колонке
- * и полосы перестают сравниваться между строками.
- *
- * В4.6 круг 3 П2.6 явно заменил типографику П1: число 14px/600, высота
- * полосы ровно 8px, зазор пары 0. Длина 80px и цвет по порогам сохранены.
+ * Полоса 80px (размеры — в layout.css): при 64px разница 83 и 80 занимала
+ * меньше 2px и была невидима; различимость полосе дает прежде всего цвет.
+ * Слот числа фиксирован (32px, `tabular-nums`) — иначе левая кромка полосы
+ * гуляет по колонке и полосы перестают сравниваться между строками.
  */
 function ScoreCell({ item, narrow = false }: { item: Item; narrow?: boolean }) {
   if (item.healthcraftIndex === null) {
@@ -1061,8 +972,8 @@ function ScoreCell({ item, narrow = false }: { item: Item; narrow?: boolean }) {
     );
   }
   if (item.codeEmpty) {
-    // круг 5 тура 3 (находка 7): пустой репо — число нейтральное и метка «нет кода», как в
-    // «Сравнении» (решение 25.09): 0 здесь — «оценивать нечего», а не зона риска
+    // пустой репо: число нейтральное и метка «нет кода», как в «Сравнении» —
+    // 0 здесь значит «оценивать нечего», а не зону риска
     return (
       <Flex gap={2} alignItems="center" justifyContent="flex-end">
         <Label theme="unknown" size="xs" title="В репозитории нет кода – оценка 0 означает, что оценивать пока нечего">
@@ -1093,22 +1004,13 @@ function ScoreCell({ item, narrow = false }: { item: Item; narrow?: boolean }) {
 }
 
 /**
- * Категория в таблице рейтинга (В4.6 круг 2, Р4 — замечание владельца 4).
+ * Категория в таблице рейтинга. Цветом выделены только исключения: 40-69 и
+ * <40 получают Label, значения от 70 — нейтральный текст. Цветные числа во
+ * всех колонках читались как светофор и спорили с окраской индекса.
  *
- * Круг 1 красил число по `scoreTheme()` (корень ДП1: «26 и 98 набраны одним
- * цветом»). Владелец прошла по живому рейтингу и СНЯЛА цветовую индикацию со
- * всех категорийных колонок: четыре-шесть цветных чисел в строке читались как
- * светофор на всю таблицу и спорили с окраской самого индекса. Отмена
- * сознательная — оба дизайн-аудитора считали ДП1 критичной, поэтому вопрос
- * «как визуально передать категорию» заведён в парковку канвы, а не забыт.
- * Окраска ИНДЕКСА и его полосы остаётся; на КАРТОЧКЕ окраска категорийных
- * чисел тоже остаётся (там рядом с числом стоит полоса, она несёт цвет).
- *
- * Tri-state не двигается ни на йоту: отсутствие данных — ДРУГОЙ ТИП ячейки,
- * нейтральный `Label theme="unknown"` со словом «н/д» и причиной в `title`,
- * никогда не красный и никогда не ноль (закон 2, охранный пункт 1).
- * «Нет данных» полностью в узкую колонку (59px у Issues) не влезает — отсюда
- * короткая форма.
+ * Нет данных — другой тип ячейки: нейтральный Label с «н/д» и причиной в
+ * `title`, никогда не красный и не ноль. Полное «Нет данных» в узкую колонку
+ * не влезает — отсюда короткая форма.
  */
 function CategoryCell({ value }: { value: number | null }) {
   if (value === null) {
@@ -1118,9 +1020,6 @@ function CategoryCell({ value }: { value: number | null }) {
       </Label>
     );
   }
-  // Круг 3, пакет П3/1 отменяет Р4 круга 2: цвет возвращен только для исключений.
-  // Значения >=70 остаются нейтральным текстом, 40-69 и <40 получают Label;
-  // null сохраняет отдельное нейтральное состояние tri-state.
   if (scoreTheme(value) === "success") {
     return (
       <Text className="rh-cat-plain" style={{ fontVariantNumeric: "tabular-nums" }} title={sentence(scoreWord(value))}>

@@ -1,16 +1,13 @@
-// yamlmini.ts — мини-парсер YAML-подмножества для has_steps
-// (cicd.configs, В2/Б1): вложенные отображения, последовательности
-// скаляров и отображений, скаляры (строки/числа/булевы), flow-списки
-// [a, b], комментарии. Полный YAML НЕ поддерживается — только форма
-// .sourcecraft/ci.yaml (образец — наш конфиг). Ошибка парсинга —
-// throw; вызывающий ловит и честно пишет steps_note.
+// Мини-парсер подмножества YAML, чтобы определить has_steps в
+// .sourcecraft/ci.yaml: вложенные отображения, последовательности, скаляры,
+// блочные скаляры, flow-списки [a, b], комментарии. Полный YAML не
+// поддерживается. При ошибке бросает исключение – вызывающий пишет steps_note.
 export function parseYamlSubset(src: string): unknown {
   const lines: { indent: number; text: string }[] = [];
   for (const raw of src.split(/\r?\n/)) {
     const noComment = stripComment(raw);
     if (!noComment.trim()) continue;
-    // В5.3-М (Н12): маркеры документа `---` и `...` в первой колонке — не
-    // содержимое (валидный YAML, раньше парсер бросал «unexpected content»)
+    // маркеры документа `---` и `...` в первой колонке – не содержимое
     if (/^(---|\.\.\.)(\s|$)/.test(noComment)) {
       const rest = noComment.slice(3).trim();
       if (rest === "") continue;
@@ -28,9 +25,8 @@ export function parseYamlSubset(src: string): unknown {
 }
 
 export function stripComment(line: string): string {
-  // строка-комментарий целиком (в том числе с `#` в первой колонке — аудит
-  // В5.3, A4: 714 публичных ci.yaml начинались с комментария и читались как
-  // «CI без шагов»)
+  // строка-комментарий целиком, в том числе с `#` в первой колонке: многие
+  // ci.yaml начинаются с комментария и иначе читались бы как «CI без шагов»
   if (/^\s*#/.test(line)) return "";
   // '#' после пробела (в наших значениях '#' не встречается)
   const m = line.match(/^(\s*)(.*?)\s#.*$/);
@@ -53,8 +49,8 @@ const BLOCK_INDICATOR = /^(?:\||>)[+-]?$/;
 
 /**
  * Блочный скаляр (| / |- / > …): все следующие строки с отступом глубже
- * minIndent — тело; значение {__block: text}. Живой кейс: script-кубы
- * ci.yaml платформы (cloudapp-hugo: `- |` + многострочные команды).
+ * minIndent – тело; значение {__block: text}. Так в ci.yaml пишут
+ * многострочные script-команды (`- |`).
  */
 function parseBlockScalar(lines: Line[], start: number, minIndent: number): { value: { __block: string }; next: number } {
   if (start >= lines.length || lines[start]!.indent <= minIndent) {
@@ -154,7 +150,6 @@ function parseScalar(raw: string): unknown {
   if ((s.startsWith('"') && s.endsWith('"') && s.length >= 2) || (s.startsWith("'") && s.endsWith("'") && s.length >= 2)) {
     return s.slice(1, -1);
   }
-  // Н12: пустой flow-объект `{}` — пустое отображение
   if (/^\{\s*\}$/.test(s)) return {};
   if (s.startsWith("[") && s.endsWith("]")) {
     const inner = s.slice(1, -1).trim();

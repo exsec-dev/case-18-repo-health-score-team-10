@@ -1,16 +1,11 @@
-// acceptance-own.ts — приёмка сценария ТЗ 5 «свой репо» (В4/Б6) живьём:
-// мок-сессия (строка sessions + подписанная cookie — живой клик Я ID
-// остаётся приёмке HQ), PAT = SOURCECRAFT_TOKEN как юзерский (валидный
-// PAT с правами на наш репо — инструкция промпта). Полный цикл по HTTP:
-// PUT /api/me/pat (живая проверка GET /user) → GET /api/me/repos (живой
-// /orgs/{username}/repos) → POST scan (предпроверка доступа PAT, К3) →
-// воркер сервера исполняет скан с PAT (git + REST на PAT + AppSec
-// официальный API) → GET единой карточки зрителем с PAT (В4.1, К2: оба
-// итога, Security с фактами, CI-раны, рекомендации) и анонимом (без
-// CI/Security).
-// Проверка «PAT не утечки»: ответы всех me-эндпоинтов не содержат
-// значения токена (только маска/отсутствие).
-// Запуск ПОСЛЕ rescan-m2 и ПОДНЯТОГО сервера: bun scripts/acceptance-own.ts <port>
+// Живая проверка сценария ТЗ «свой репозиторий» по HTTP. Сессия создается
+// строкой в БД (настоящий вход через Я ID проверяется руками), PAT —
+// SOURCECRAFT_TOKEN из .env, у которого есть права на наш репо. Цикл:
+// PUT /api/me/pat (живая проверка GET /user) → GET /api/me/repos → POST scan
+// (предпроверка доступа) → воркер сервера сканирует с PAT (git, REST, AppSec) →
+// карточка зрителем с PAT (оба итога, Security, CI, рекомендации) и анонимом
+// (без CI/Security). В конце проверяется, что ответы не содержат значения PAT.
+// Запуск при поднятом сервере: bun scripts/acceptance-own.ts <port>
 import { readFileSync } from "node:fs";
 
 const PORT = Number(process.argv[2] ?? 8488);
@@ -27,7 +22,7 @@ for (const line of readFileSync(".env", "utf8").split("\n")) {
 const SLUG = "lct-hackaton-2026/case-18-repo-health-score-team-10";
 
 async function main() {
-  // 1) мок-сессия: живой логин Я ID = живой клик (HQ); здесь строка в БД
+  // 1) мок-сессия: строка в БД вместо входа через Я ID
   const { loadConfig } = await import("../src/config");
   const { openDb } = await import("../src/db");
   const { upsertUser, createSession, SESSION_COOKIE } = await import("../src/auth/session");

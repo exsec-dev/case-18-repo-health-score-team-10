@@ -1,10 +1,8 @@
-// me.ts — read-поверхность «мой аккаунт» (В4/Б1). Ф2.20 (решение владельца
-// 18.09): кабинет — ТОЛЬКО избранное (union namespace/own-сканов закрыт как
-// «три избранных с разными механизмами»); namespace остаётся источником
-// ОДНОХОДОВОГО посева избранного при сохранении PAT. Ручной ввод — слаг или
-// URL через общий parseFavoriteInput (им пользуется и path-роут звезды).
-// Функции чистые от HTTP-слоя сервера: клиент инъектится, тесты без сети.
-// Чужие/недоступные репо не запрашиваются вовсе (ТЗ 5).
+// Кабинет «мой аккаунт». Список кабинета – только избранное; namespace
+// пользователя служит лишь для разового посева избранного при сохранении PAT.
+// Функции не зависят от HTTP-слоя сервера: клиент SourceCraft передается
+// снаружи, тесты идут без сети. Чужие и недоступные репо не запрашиваются
+// вовсе (ТЗ 5).
 import type { Database } from "bun:sqlite";
 import { ScClient } from "../collectors/http";
 import { upsertRepo } from "../jobs/runner";
@@ -23,63 +21,52 @@ export interface MyRepoEntry {
   /** logo.url платформы из ответа namespace (дисплей) */
   logoUrl: string | null;
   languageColor: string | null;
-  /** HealthCraft Index последнего пригодного скана (приватный без него — последнего не-bad, круг 2); null = не оценивался (В4.3: читает healthcraft_index) */
+  /** HealthCraft Index последнего пригодного скана (у приватного без такого – последнего не-bad); null – не оценивался */
   healthcraftIndex: number | null;
-  /** время последнего анализа репо ЛЮБЫМ автором (не own-скан зрителя — см. `FavoriteCheckResponse.lastOwnScanAt`, М1) */
+  /** время последнего анализа репо ЛЮБЫМ автором (не own-скан зрителя – это `FavoriteCheckResponse.lastOwnScanAt`) */
   lastScanAt: string | null;
-  /** З4 (круг 2 В4.4): статус ПОСЛЕДНЕГО скана репо (любого автора) — строка кабинета
-   *  различает «анализ завершился ошибкой» и «данных не хватило»; running — легальный
-   *  транзитный статус. null = сканов нет или меты у зрителя нет (нет прав) */
+  /** статус ПОСЛЕДНЕГО скана репо (любого автора): кабинет отличает «анализ завершился
+   *  ошибкой» от «данных не хватило». null – сканов нет или у зрителя нет прав */
   lastScanStatus: "ok" | "partial" | "bad" | "running" | null;
-  /** UX-8 (круг 2 В4.4): ДВА явных признака вместо прокси `title === null`
-   *  (публичное репо без title тоже без title): репо есть в каталоге (таблица
-   *  repos по слагу) и подтверждены ли права зрителя. Ярлык кабинета честно
-   *  различает «нет в каталоге» / «нет прав» / «еще не анализировали» */
+  /** два явных признака вместо догадки по `title === null` (у публичного репо title тоже
+   *  бывает пустым): репо есть в каталоге и права зрителя подтверждены. По ним кабинет
+   *  различает «нет в каталоге», «нет прав» и «еще не анализировали» */
   inCatalog: boolean;
   mayRead: boolean;
   /**
-   * Ф2.17 (решение владельца 18.09): у записи есть живая job ЗРИТЕЛЯ
-   * (queued/running) и нет завершённого own-скана — «работа запланирована».
-   * Мета и Score этим признаком НЕ раскрываются (fail-closed не ослабляется);
-   * источник — `jobs`, не `scans`.
+   * «Работа запланирована»: у зрителя есть живое задание (queued/running) по
+   * репо и нет завершенного own-скана. Мету и Score этот признак не раскрывает;
+   * источник – `jobs`, а не `scans`.
    */
   planned: boolean;
   /**
-   * В4.7 (П3.4, контракт У26; решение В2 21.09 — без сети): сколько
-   * рекомендаций покажет карточка этого репозитория. Считается тем же
-   * сборщиком карточки (`getRepoCard`) с доступом из СОХРАНЁННОЙ проверки
-   * прав (`favorites.last_access`): публичные правила — по пригодному скану,
-   * канальные (CI/CD, Security) — только если последняя проверка сказала
-   * «доступ есть» по этому каналу. При актуальной проверке прав число равно
-   * карточке; после смены прав расходится до следующей «Проверки прав»
-   * (цена принята владельцем). Без прав (`mayRead === false`) — null, а не 0;
-   * права есть, скана нет — 0, как на карточке.
+   * Сколько рекомендаций покажет карточка репозитория – без сети, тем же
+   * сборщиком карточки (`getRepoCard`) с доступом из СОХРАНЕННОЙ проверки прав
+   * (`favorites.last_access`). Канальные правила (CI/CD, Security) считаются,
+   * только если последняя проверка сказала «доступ есть» по каналу. После смены
+   * прав число расходится с карточкой до следующей «Проверки прав» – это
+   * осознанная цена. Без прав – null, а не 0; права есть, скана нет – 0, как на карточке.
    */
   recommendationsCount: number | null;
   /**
-   * В5 (К5.10): флаг фрода последней генерации AI-описания этого репо —
-   * факторы на показ в кабинете. Подозрение для проверки человеком, Score
-   * не меняет; null — флага нет (не генерировали или модель не дала).
+   * Флаг накрутки последней генерации AI-описания: факторы для показа в
+   * кабинете. Это подозрение для проверки человеком, Score не меняет; null –
+   * флага нет (не генерировали или модель его не дала).
    */
   fraudFlag: { flag: boolean; factors: { key: string; note: string }[] } | null;
-  /** ПОРТ 5: поле `sources` удалено (Ф2.20, решение 18.09 — кабинет favorites-only) */
 }
 
 export interface MyReposResult {
-  /** namespace-заголовок ушёл вместе с union (Ф2.20) — всегда null, поле оставлено для формы ответа */
+  /** всегда null: поле оставлено ради формы ответа */
   username: string | null;
   entries: MyRepoEntry[];
 }
 
 /**
- * HealthCraft Index и время последнего анализа одного репо — правило круга 2
- * (решение С2 (кр.1)): последний ПРИГОДНЫЙ скан P; приватный репо без P —
- * последний не-bad; время — последний скан L.
- *
- * В4.2-port-fix (П4, MAJOR №1): один хелпер на все записи `listMyRepos`.
- * Копию правила заводить нельзя — расходились бы снова.
- * В4.3 (Б3-кабинет): сырой SQL переведён на дропаемую total_rating →
- * healthcraft_index.
+ * HealthCraft Index и время последнего анализа одного репо: индекс – из
+ * последнего ПРИГОДНОГО скана (у приватного без такого – из последнего
+ * не-bad), время и статус – из самого последнего скана.
+ * Один хелпер на все записи `listMyRepos`: копия правила быстро разошлась бы.
  */
 function ratingScoreOf(db: Database, org: string, repo: string): { healthcraftIndex: number | null; lastScanAt: string | null; lastScanStatus: MyRepoEntry["lastScanStatus"] } {
   const row = db.query("SELECT id, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as
@@ -95,7 +82,6 @@ function ratingScoreOf(db: Database, org: string, repo: string): { healthcraftIn
       )
       .get(org, repo, MODEL_VERSION, MODEL_VERSION) as { total: number | null } | null;
   const scored = scoreOf(LAST_ELIGIBLE_SCAN_SQL) ?? (row.visibility !== "public" ? scoreOf(LAST_NOT_BAD_SCAN_SQL) : null);
-  // З4 (круг 2): статус ДОБАВЛЯЕТСЯ в проекцию существующего SELECT'а последнего скана (DDL нет)
   const lastScan = db.query("SELECT status, finished_at, started_at FROM scans WHERE repo_id = ? ORDER BY id DESC LIMIT 1").get(row.id) as
     | { status: string; finished_at: string | null; started_at: string }
     | null;
@@ -107,44 +93,38 @@ function ratingScoreOf(db: Database, org: string, repo: string): { healthcraftIn
 }
 
 /**
- * Права зрителя на репо-запись (В4.2-port-fix, П6, находка С4; признак —
- * решение владельца (3) 18.09): `clone === true` из сохранённого JSON
- * `favorites.last_access` ИЛИ репо публичен и активен ИЛИ у зрителя есть
- * own-скан этого репо (`scans.user_id = зритель`).
+ * Права зрителя на запись кабинета: репо публичен и в рейтинге, ИЛИ в
+ * сохраненной проверке `favorites.last_access` стоит `clone === true`, ИЛИ у
+ * зрителя есть own-скан этого репо (own-скан – доказанные права).
  *
- * Круг 2 (П10, Н-1): публичный дизъюнкт читает ТУ ЖЕ ПАРУ признаков, что
- * `cardVisible` (`repos.ts`) и рейтинг: `visibility = 'public' AND
- * rating_active = 1`. `evictRepo` гасит `rating_active` и `visibility` не
- * трогает — по одной `visibility` посторонний с чужим слагом в избранном
- * видел название, язык, время анализа и Score репо, который карточке и
- * MD-отчёту отдаёт 404 всем.
+ * Публичность проверяется той же парой признаков, что у `cardVisible` и
+ * рейтинга: `visibility = 'public' AND rating_active = 1`. `evictRepo` гасит
+ * только `rating_active`, и по одной `visibility` посторонний со слагом в
+ * избранном увидел бы данные репо, который карточка отдает 404.
  *
- * Берётся именно `clone` из пяти полей `FavoriteAccess` (владелец публичного
- * репо без CI даёт `own: false` при `clone: true`) и `repos.visibility`, а не
- * `access.visibility` из того же JSON (они расходятся: "unknown" против
- * дефолта 'public'). Неизвестно → «нет прав» (fail-closed, как Ф1.10).
- * Третье слагаемое снимает коллизию с П4: own-скан = доказанные права.
+ * Из `FavoriteAccess` берется именно `clone` (у владельца публичного репо без
+ * CI бывает `own: false` при `clone: true`), а видимость – из `repos`, а не из
+ * того же JSON (там "unknown" против дефолта 'public'). Неизвестно → «нет прав».
  */
 export function viewerMayReadRepo(db: Database, userId: number | null, org: string, repo: string, opts: SavedRightsOptions = {}): boolean {
   const row = db.query("SELECT id, visibility, rating_active FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as
     | { id: number; visibility: string; rating_active: number }
     | null;
   if (row && row.visibility === "public" && row.rating_active === 1) return true;
-  // В4.8.5 (К8.5.9, С6-2): выбывший из рейтинга публичный репозиторий карточка
-  // не покажет никому (404) — строка его тоже не раскрывает, какие бы права ни
-  // были сохранены
+  // выбывший из рейтинга публичный репозиторий карточка не покажет никому (404),
+  // и строка кабинета его тоже не раскрывает, какие бы права ни были сохранены
   if (row && row.visibility === "public" && row.rating_active !== 1) return false;
   if (userId === null) return false;
   const fav = db.query("SELECT last_access FROM favorites WHERE user_id = ? AND org_slug = ? AND repo_slug = ?").get(userId, org, repo) as
     | { last_access: string | null }
     | null;
-  // К8.5.9: сохранённая проверка действует только для поколения PAT, которым
-  // сделана; нечитаемый PAT (ротация APP_SECRET) — проверка не в счёт
+  // сохраненная проверка действует только для того PAT, которым сделана;
+  // нечитаемый PAT (сменился APP_SECRET) – проверка не в счет
   if (fav?.last_access && opts.savedRightsValid !== false) {
     try {
       if ((JSON.parse(fav.last_access) as FavoriteAccess).clone === true) return true;
     } catch {
-      /* мусор в JSON — как «неизвестно» (fail-closed) */
+      /* мусор в JSON – как «неизвестно», то есть прав нет */
     }
   }
   if (row && db.query("SELECT 1 FROM scans WHERE repo_id = ? AND user_id = ? LIMIT 1").get(row.id, userId) !== null) return true;
@@ -152,11 +132,10 @@ export function viewerMayReadRepo(db: Database, userId: number | null, org: stri
 }
 
 /**
- * Доступ зрителя к каналам по СОХРАНЁННОЙ проверке прав (В4.7, решение В2):
- * true → granted, false → denied, неизвестно или проверки не было →
- * check-failed. Канал открыт только при явном «доступ есть» — fail-closed,
- * как у карточки. `repo` — granted: вызывается лишь для записей с
- * доказанными правами (`viewerMayReadRepo`).
+ * Доступ зрителя к каналам по СОХРАНЕННОЙ проверке прав: true → granted,
+ * false → denied, неизвестно или проверки не было → check-failed. Канал открыт
+ * только при явном «доступ есть», как у карточки. `repo` всегда granted:
+ * функцию зовут лишь для записей с доказанными правами (`viewerMayReadRepo`).
  */
 function savedAccessOf(db: Database, userId: number | null, org: string, repo: string, opts: SavedRightsOptions = {}): AccessResult {
   const channel = (v: boolean | null | undefined): ChannelAccess => (v === true ? "granted" : v === false ? "denied" : "check-failed");
@@ -168,16 +147,15 @@ function savedAccessOf(db: Database, userId: number | null, org: string, repo: s
     try {
       saved = fav?.last_access ? (JSON.parse(fav.last_access) as Partial<FavoriteAccess>) : null;
     } catch {
-      saved = null; // мусор в JSON — «неизвестно», каналы закрыты
+      saved = null; // мусор в JSON – «неизвестно», каналы закрыты
     }
   }
   return { cicd: channel(saved?.ci), appsec: channel(saved?.appsec), repo: "granted" };
 }
 
 /**
- * В4.7 (П3.4, У26): число рекомендаций карточки для записи кабинета — без
- * сети, тем же сборщиком карточки (место в рейтинге не считается). null —
- * прав нет или карточки нет (репозитория нет в каталоге).
+ * Число рекомендаций карточки для записи кабинета (место в рейтинге не
+ * считается). null – прав нет или репозитория нет в каталоге.
  */
 function recommendationsCountOf(db: Database, userId: number | null, org: string, repo: string, mayRead: boolean, opts: SavedRightsOptions = {}): number | null {
   if (!mayRead) return null;
@@ -186,9 +164,8 @@ function recommendationsCountOf(db: Database, userId: number | null, org: string
 }
 
 /**
- * В5 (К5.10): флаг фрода для записи кабинета — тем же сборщиком карточки
- * (card.ai.fraud, доступ из сохранённой проверки прав). null — прав нет,
- * карточки нет или флага нет.
+ * Флаг накрутки для записи кабинета – из карточки (`card.ai.fraud`) с доступом
+ * из сохраненной проверки прав. null – прав нет, карточки нет или флага нет.
  */
 function fraudFlagOf(db: Database, userId: number | null, org: string, repo: string, mayRead: boolean, opts: SavedRightsOptions = {}): { flag: boolean; factors: { key: string; note: string }[] } | null {
   if (!mayRead) return null;
@@ -196,11 +173,7 @@ function fraudFlagOf(db: Database, userId: number | null, org: string, repo: str
   return card?.ai?.fraud ?? null;
 }
 
-/**
- * Ф2.17: «работа запланирована» — у зрителя есть job в статусе
- * queued/running по этому репо (user_id = зритель, источник `jobs`) И нет
- * завершённого own-скана. Мета/Score не трогаются.
- */
+/** См. `MyRepoEntry.planned`. */
 function plannedWork(db: Database, userId: number | null, org: string, repo: string): boolean {
   if (userId === null) return false;
   const row = db.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number } | null;
@@ -216,24 +189,23 @@ function plannedWork(db: Database, userId: number | null, org: string, repo: str
 }
 
 /**
- * Форма ответа сохранения PAT (Ф2.20): после проверки живьём PAT сохраняется
- * ОБЯЗАТЕЛЬНО, затем fail-soft посев избранного из namespace — сбой страницы,
- * лимит или недочитанный каталог не откатывают сохранение.
+ * Итог посева избранного при сохранении PAT. Проверенный PAT сохраняется в
+ * любом случае, посев идет после: сбой страницы, лимит или недочитанный
+ * каталог сохранение не откатывают.
  */
 export interface PatSeed {
   status: "ok" | "partial";
   added: number;
-  /** UX-9 (круг 2 В4.4): `no_username` — /user не вернул имя, namespace НЕ
-   *  опрашивался (прежний дефолт source_http ложно обвинял его) */
+  /** `no_username` – /user не вернул имя, и namespace даже не опрашивался */
   error?: { code: "source_http" | "favorite_limit" | "page_limit" | "no_username" };
 }
 
-// Ф2.20: разбор ручного ввода — одна копия с вебом (В5.3 круг 4: вынесен в чистый модуль)
+// разбор ручного ввода живет в чистом модуле, общем с вебом
 export { parseFavoriteInput } from "./slug-input";
 
 /**
- * Ф2.21: добавление избранного с пределом на юзера. Повтор существующего
- * идемпотентен ("exists") и лимит не расходует; считает только НОВЫЕ строки.
+ * Добавление в избранное с пределом на пользователя. Повтор существующего
+ * дает "exists" и лимит не расходует.
  */
 export type FavoriteAddResult = "added" | "exists" | "limit";
 
@@ -253,15 +225,7 @@ export function addFavoriteCapped(
   return "added";
 }
 
-/**
- * Ф2.20: однопроходный посев избранного из namespace владельца PAT —
- * `GET /orgs/{username}/repos?page_size=100`, до 5 страниц; бюджет клиента
- * (6 запросов) держит вызывающий. Существующие строки не считаются ни в
- * added, ни в лимите; достигнутый кап останавливает посев с
- * favorite_limit; оставшийся next_page_token после пятой страницы —
- * partial/page_limit.
- */
-/** Репозиторий пользователя из /me/repos (23.09, парковка: пикер «своих»). */
+/** Репозиторий из /me/repos. */
 export interface ScRepoLite {
   org: string;
   slug: string;
@@ -271,12 +235,11 @@ export interface ScRepoLite {
 }
 
 /**
- * Репозитории, ДОСТУПНЫЕ токену зрителя (/me/repos): это не «свои» — в ответе
- * SourceCraft нет признака владения (аудит 25.09, reports/2026-09-25-m53-add-repo-audit.md).
- * В5.3 (25.09, О1 аудита): платформа не соблюдает `page_size` и отдает по 1-2
- * записи на страницу — прежний потолок в 3 страницы давал 5 строк при подписи
- * «первые 300». Теперь — по `next_page_token` до конца с потолками по записям и
- * страницам; сбой на странице N > 1 — собранное с `partial`, а не 502.
+ * Репозитории, ДОСТУПНЫЕ токену зрителя (/me/repos). Это не обязательно
+ * «свои»: признака владения в ответе SourceCraft нет. Платформа не соблюдает
+ * `page_size` и отдает по 1-2 записи на страницу, поэтому листаем по
+ * `next_page_token` до конца с потолками по записям и страницам; сбой на
+ * странице после первой – уже собранное с `partial`, а не ошибка.
  */
 export async function listSourcecraftRepos(
   client: ScClient,
@@ -317,6 +280,13 @@ export async function listSourcecraftRepos(
   return { status: "ok", partial: true, repos };
 }
 
+/**
+ * Разовый посев избранного из namespace владельца PAT:
+ * `GET /orgs/{username}/repos?page_size=100`, до 5 страниц; бюджет запросов
+ * клиента держит вызывающий. Уже существующие строки не считаются ни в added,
+ * ни в лимите; достигнутый предел останавливает посев с favorite_limit, а
+ * непрочитанный остаток после пятой страницы дает partial/page_limit.
+ */
 export async function seedFavoritesFromNamespace(
   db: Database,
   client: ScClient,
@@ -352,10 +322,8 @@ export async function seedFavoritesFromNamespace(
 }
 
 /**
- * «Мои репозитории» — ТОЛЬКО избранное (Ф2.20, решение 18.09): строка
- * `favorites` есть — запись есть; запись убрали — пропала из кабинета.
- * Namespace- и own-scan-объединение удалены. Мета и Score по-прежнему
- * только записям с правами (признак П6/П10 — viewerMayReadRepo не тронут).
+ * «Мои репозитории» – ровно строки `favorites` зрителя. Мету и Score получают
+ * только записи с правами (`viewerMayReadRepo`).
  */
 export async function listMyRepos(db: Database, userId: number | null, opts: SavedRightsOptions = {}): Promise<MyReposResult> {
   const favs = db
@@ -366,21 +334,14 @@ export async function listMyRepos(db: Database, userId: number | null, opts: Sav
 }
 
 /**
- * Одна запись «Моих репозиториев» (В4.8.5, К8.5.7: мутации избранного
- * возвращают обновлённую запись строки, список не перечитывается целиком).
- * Та же сборка, что у `listMyRepos` — число и поля строки равны списку.
+ * Одна запись «Моих репозиториев»: мутации избранного возвращают обновленную
+ * строку, чтобы не перечитывать список. Сборка та же, что у `listMyRepos`.
  */
 export function myRepoEntryOf(db: Database, userId: number | null, org: string, repo: string, opts: SavedRightsOptions = {}): MyRepoEntry {
   const f = { org_slug: org, repo_slug: repo };
   const mayRead = viewerMayReadRepo(db, userId, f.org_slug, f.repo_slug, opts);
-  // UX-8: признак «в каталоге» — один дешёвый lookup (JOIN'а в listMyRepos
-  // нет; строку repos поднимает viewerMayReadRepo и выбрасывает)
   const inCatalog = db.query("SELECT 1 FROM repos WHERE org_slug = ? AND repo_slug = ?").get(f.org_slug, f.repo_slug) !== null;
-  // В4.8 (круг 2, замечание 4 Екатерины): логотип, цвет языка и дата
-  // активности читаются из той же строки `repos`, что название и язык, —
-  // до этого поля контракта стояли литералом null, и кабинет терял аватары
-  // и цвета, которые рейтинг показывал для того же репозитория. Гейт прав
-  // прежний: без прав мета не раскрывается (П6).
+  // без прав мета (включая логотип и цвет языка) не раскрывается
   const row = mayRead
     ? (db
         .query("SELECT title, language, logo_url, language_color, last_activity_at FROM repos WHERE org_slug = ? AND repo_slug = ?")
@@ -412,24 +373,23 @@ export function myRepoEntryOf(db: Database, userId: number | null, org: string, 
   };
 }
 
-/** К8.5.9: сохранённые права действуют только для текущего поколения PAT. */
+/** Сохраненные права действуют только для того PAT, которым проверены. */
 export interface SavedRightsOptions {
-  /** false — PAT не читается текущим ключом (ротация APP_SECRET): сохранённые проверки не в счёт */
+  /** false – PAT не читается текущим ключом (сменился APP_SECRET): сохраненные проверки не в счет */
   savedRightsValid?: boolean;
 }
 
 /**
- * В4.8.5 (К8.5.9, К8.5.14; С2-3): гашение сохранённых прав при удалении,
- * замене или сохранении PAT — права принадлежат поколению токена, которым
- * проверены. Обнуляется и `last_checked_at`: правило фоновой перепроверки
- * «не проверено или старше суток» подхватит все записи при следующем чтении
- * списка (и после рестарта, когда очередь насоса в памяти потеряна).
+ * Сброс сохраненных прав при удалении, замене или сохранении PAT: права
+ * принадлежат тому токену, которым проверены. Обнуляется и `last_checked_at`,
+ * чтобы фоновая перепроверка подхватила все записи при следующем чтении
+ * списка (в том числе после рестарта, когда очередь в памяти потеряна).
  */
 export function resetFavoriteRights(db: Database, userId: number): number {
   return db.query("UPDATE favorites SET last_access = NULL, last_checked_at = NULL WHERE user_id = ?").run(userId).changes;
 }
 
-/** В4.8.5 (К8.5.14 (д)): возраст сохранённой проверки, после которого запись перепроверяется в фоне. */
+/** Возраст сохраненной проверки, после которого запись перепроверяется в фоне. */
 export const RECHECK_AFTER_MS = 24 * 60 * 60_000;
 
 /** Записи избранного без проверки прав или с проверкой старше суток — кандидаты фоновой перепроверки. */
@@ -442,25 +402,21 @@ export function staleFavoriteSlugs(db: Database, userId: number, now = new Date(
   ).map((r) => ({ org: r.org_slug, repo: r.repo_slug }));
 }
 
-// ---------- запуск анализа юзером (В4.1, К3) ----------
+// ---------- запуск анализа пользователем ----------
 
 export interface UserScanResponse {
   status: number;
   body: Record<string, unknown>;
-  /** В4.8.5 (К8.5.7): у 429 — через сколько секунд повторить (заголовок Retry-After) */
+  /** у 429 – через сколько секунд повторить (заголовок Retry-After) */
   retryAfterSec?: number;
 }
 
 /**
- * POST /api/me/repos/:org/:repo/scan без HTTP-слоя. В4.1-fix (Ф1.5): дешёвые
- * проверки до сети остаются, после repo-GET те же проверки повторяются в
- * одной синхронной транзакции со вставкой (+ too_many_active, Ф1.7);
- * deduplicated: true — только если заявка уже была. К4 (дёшево, без сети):
- * активная заявка того же (юзер, репо) → 202 deduplicated; лимит частоты
- * исчерпан → 429 rate_limited. К3: до постановки — repo-GET с PAT юзера.
- * 200 → upsert repos (visibility из ответа) → заявка → 202; 403/404 →
- * 403 no_access (строки repos нет); 401 → 401 pat_expired; 0/429/5xx →
- * 503 check_failed.
+ * POST /api/me/repos/:org/:repo/scan без HTTP-слоя. Сначала дешевые проверки
+ * без сети (`userScanCheapGate`), затем repo-GET с PAT пользователя:
+ * 200 → строка repos и заявка → 202; 403/404 → 403 no_access; 401 → 401
+ * pat_expired; 0/429/5xx → 503 check_failed. После сетевого ожидания дешевые
+ * проверки повторяются в одной транзакции со вставкой.
  */
 export async function requestUserScan(
   db: Database,
@@ -470,17 +426,15 @@ export async function requestUserScan(
   repo: string,
   queue: QueueConfig,
   now = new Date(),
-  // В4.2-port-fix (П2): готовое тело repo-GET от вызывающего (проверка прав
-  // избранного только что его получила) — второй живой запрос не делается;
-  // вторая половина Н1 ровно про усилитель запросов
+  // готовый ответ repo-GET от вызывающего (проверка прав избранного только что
+  // его получила), чтобы не делать второй живой запрос
   prefetched?: { status: number; json: unknown },
 ): Promise<UserScanResponse> {
   const cheap = userScanCheapGate(db, userId, org, repo, queue, now);
   if (cheap) return cheap;
   const res = prefetched ?? (await client.get(`/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`));
-  // Ф1.6 + круг 2 (LOW-6): отказ предпроверки (403/404, 401) учитывается
-  // лимитом частоты — POST не усилитель запросов. В4.8.5 (К8.5.6, С4-13):
-  // сбой платформы (0/429/5xx) — не вердикт о правах, лимит запусков не списывает
+  // отказ предпроверки (403/404, 401) расходует лимит частоты, чтобы POST не
+  // стал усилителем запросов; сбой платформы (0/429/5xx) – не вердикт о правах и не расходует
   if (res.status !== 200 && classifyScStatus(res.status) !== "unavailable") recordRefusedUserJob(db, userId, now, `${org}/${repo}`);
   if (res.status === 403 || res.status === 404) {
     return { status: 403, body: { error: { code: "no_access", message: `ваш токен не дает доступа к ${org}/${repo}` } } };
@@ -493,9 +447,8 @@ export async function requestUserScan(
   }
   const body = res.json as { visibility?: unknown; name?: unknown } | null;
   const visibility = typeof body?.visibility === "string" ? body.visibility : null;
-  // Ф1.5: после сетевого await — одна синхронная транзакция: параллельные
-  // запросы проходили дешёвую проверку до await все сразу; здесь проверки
-  // и вставка неделимы (дедуп → too_many_active → rate_limited → строка → job)
+  // параллельные запросы проходят дешевую проверку до await все сразу, поэтому
+  // здесь проверки и вставка неделимы: одна синхронная транзакция
   return db.transaction((): UserScanResponse => {
     const row = db.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number } | null;
     const dup = row ? findActiveUserJob(db, userId, row.id) : null;
@@ -508,9 +461,8 @@ export async function requestUserScan(
     if (countRecentUserJobs(db, userId, now) >= queue.userScansPerHour) {
       return rateLimited(db, userId, queue, now);
     }
-    // К-Ф1.1: заявка вставляет только НОВУЮ строку (видимость из тела repo-GET
-    // или 'private' до подтверждения); существующую строку не обновляет —
-    // мету репо двигает только пригодный скан
+    // заявка только вставляет НОВУЮ строку (видимость из ответа или 'private'
+    // до подтверждения); существующую не трогает – мету репо обновляет только пригодный скан
     const repoId =
       row?.id ??
       upsertRepo(db, org, repo, {
@@ -523,11 +475,11 @@ export async function requestUserScan(
 }
 
 /**
- * Дешёвые отказы запуска БЕЗ сети (К4, Ф1.7): активная заявка того же
- * (юзер, репо) → 202 deduplicated; активных сверх предела → 429
- * too_many_active; часовой лимит исчерпан → 429 rate_limited. null — можно
- * идти в сеть. В4.8.5: вынесено, чтобы маршрут запуска проверял «свой»
- * (сеть) только после них; внутри транзакции постановки проверки повторяются.
+ * Дешевые отказы запуска без сети: активная заявка того же пользователя на
+ * тот же репо → 202 deduplicated; активных сверх предела → 429
+ * too_many_active; часовой лимит исчерпан → 429 rate_limited. null – можно
+ * идти в сеть. Отдельная функция, чтобы маршрут запуска ходил в сеть только
+ * после этих проверок.
  */
 export function userScanCheapGate(db: Database, userId: number, org: string, repo: string, queue: QueueConfig, now = new Date()): UserScanResponse | null {
   const existing = db.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number } | null;
@@ -544,7 +496,7 @@ function tooManyActive(queue: QueueConfig): UserScanResponse {
   return {
     status: 429,
     body: { error: { code: "too_many_active", message: `не больше ${queue.userActiveMax} анализов в очереди одновременно – дождитесь завершения` } },
-    // место освободится, когда закончится анализ — точного времени нет, минута — честный шаг опроса
+    // место освободится, когда закончится анализ; точного времени нет, минута – разумный шаг опроса
     retryAfterSec: 60,
   };
 }
@@ -552,7 +504,7 @@ function tooManyActive(queue: QueueConfig): UserScanResponse {
 function rateLimited(db: Database, userId: number, queue: QueueConfig, now: Date): UserScanResponse {
   const since = new Date(now.getTime() - 3600_000).toISOString();
   const oldest = db
-    // В5.2: время повтора — по тем же заявкам, что считает лимит (только сканы, countRecentUserJobs)
+    // время повтора – по тем же заявкам, что считает лимит (только сканы, как countRecentUserJobs)
     .query("SELECT MIN(created_at) AS t FROM jobs WHERE user_id = ? AND trigger_kind = 'user' AND kind = 'scan' AND created_at > ?")
     .get(userId, since) as { t: string | null };
   const retryAfterSec = oldest.t ? Math.max(1, Math.ceil((Date.parse(oldest.t) + 3600_000 - now.getTime()) / 1000)) : 60;
@@ -563,68 +515,60 @@ function rateLimited(db: Database, userId: number, queue: QueueConfig, now: Date
   };
 }
 
-// ========== ПОРТ 5 (hq-parallel): панель заданий + избранное ==========
+// ========== панель заданий и избранное ==========
 
 export interface MyJob {
   jobId: number;
   slug: string;
   status: string;
   /**
-   * В5.1 (Прод-С1): род заявки — `scan` (анализ) | `summary` (описание AI).
-   * Панель различает их: прежде пользователь видел «задание» и не понимал,
-   * что живая генерация молча перехватила его запуск анализа.
-   * Optional ТОЛЬКО для старых литералов MyJob в замороженных аудит-тестах
-   * (как summaryCooldownMs в QueueConfig); myJobs задаёт всегда, absence
-   * трактуется панелью как анализ.
+   * Род заявки: `scan` (анализ) или `summary` (описание AI) – панель их
+   * различает. Необязательное только ради старых литералов MyJob в тестах:
+   * myJobs задает его всегда, а отсутствие панель читает как анализ.
    */
   kind?: string;
   phase: "queued" | "running" | "done" | "failed" | "refused";
-  /** позиция в user-очереди (только queued) — честное ожидание, не спиннер */
+  /** позиция в пользовательской очереди (только у queued) */
   queueAhead: number | null;
   claimedAt: string | null;
   error: string | null;
   /**
-   * В4.8 (панель «Заданий», решение Екатерины 21.09): логотип репозитория из
-   * `repos.logo_url` — тот же, что у строки «Моих репозиториев» и рейтинга.
-   * Ревью закрытия: под тем же признаком прав `viewerMayReadRepo` (П6), что
-   * мета `listMyRepos`, — логотип входит в закрытую мету, и «задание свое»
-   * не довод раскрывать его без прав (fail-closed); у отказанной без строки
-   * `repos` — null.
+   * Логотип репозитория (`repos.logo_url`). Входит в закрытую мету, поэтому
+   * раскрывается под тем же признаком прав `viewerMayReadRepo`, что и в
+   * `listMyRepos`: «задание свое» – не довод показывать его без прав. У
+   * отказанной заявки без строки `repos` – null.
    */
   logoUrl: string | null;
   /**
-   * В4.8.5 (К8.5.2b, §2-Р4): «затянулось» — признак сервера: задание `running`
-   * с истекшим лизом (его воркер умер или цикл событий стоит дольше лиза). Тот
-   * же признак краснит /api/health (К8.5.5c). UI не считает его от `leaseMs`.
+   * «Затянулось»: задание `running` с истекшим лизом (его процесс умер или
+   * цикл событий стоит дольше лиза). Тот же признак краснит /api/health; UI
+   * сам его от `leaseMs` не считает.
    */
   stalled: boolean;
   /**
-   * В4.8.5 (К8.5.1): скан этого задания — связь без DDL: первый скан того же
-   * (репо, автор) со `started_at ≥ claimed_at` задания и раньше взятия
-   * следующего задания того же автора на том же репо. null — скана ещё нет
-   * (в очереди, упало до скана, отказано).
+   * Скан этого задания (см. `scanOfJob`). null – скана еще нет (в очереди,
+   * упало до скана, отказано).
    */
   scanId: number | null;
   /**
-   * Исход скана задания: `ok`/`partial` — собран; `bad` — сбор не удался;
-   * `interrupted` — прерван перезапуском сервера или закрыт как сирота
-   * (не ошибка для пользователя, К8.5.2a); null — скана нет или он идёт.
+   * Исход скана задания: `ok`/`partial` – собран; `bad` – сбор не удался;
+   * `interrupted` – прерван перезапуском сервера или закрыт как сирота
+   * (для пользователя это не ошибка); null – скана нет или он идет.
    */
   outcome: "ok" | "partial" | "bad" | "interrupted" | null;
   /**
-   * К8.5.1 (С4-10): изменилась ли публичная оценка — HealthCraft Index
-   * карточки после скана не равен индексу до него (скан, ставший непригодным
-   * из-за таймаута клона, оценку не меняет). null — скан не завершён.
+   * Изменилась ли публичная оценка: HealthCraft Index карточки после скана не
+   * равен индексу до него (непригодный скан, например после таймаута клона,
+   * оценку не меняет). null – скан не завершен.
    */
   scoreChanged: boolean | null;
 }
 
 /**
- * Первый скан задания: тот же (репо, автор), начат не раньше взятия задания в
- * работу. Круг 2 (Н4): и раньше взятия СЛЕДУЮЩЕГО задания того же автора на
- * том же репо — иначе задание, упавшее до скана, получало скан следующего
- * (колонки `finished_at` у заданий нет; без DDL граница — `claimed_at`
- * следующего).
+ * Первый скан задания: тот же репо и автор, начат не раньше взятия задания в
+ * работу и раньше взятия СЛЕДУЮЩЕГО задания того же автора на том же репо –
+ * иначе задание, упавшее до скана, получило бы скан следующего. Колонки
+ * `finished_at` у заданий нет, поэтому граница – `claimed_at` следующего.
  */
 function scanOfJob(
   db: Database,
@@ -647,9 +591,9 @@ function scanOfJob(
 }
 
 /**
- * HealthCraft Index карточки по состоянию «после скана `upTo`» — правило
- * карточки (последний пригодный скан; приватный без него — последний не-bad),
- * ограниченное сканами с id ≤ `upTo`.
+ * HealthCraft Index карточки по состоянию «после скана `upTo`»: правило
+ * карточки (последний пригодный скан; у приватного без него – последний
+ * не-bad), ограниченное сканами с id ≤ `upTo`.
  */
 function indexAsOf(db: Database, repoId: number, upTo: number): number | null {
   const eligible = db
@@ -670,7 +614,7 @@ function indexAsOf(db: Database, repoId: number, upTo: number): number | null {
   return notBad?.v ?? null;
 }
 
-/** Исход задания по его скану (К8.5.1): скан, исход, изменилась ли публичная оценка. */
+/** Исход задания по его скану: скан, исход, изменилась ли публичная оценка. */
 export function jobScanOutcome(
   db: Database,
   jobId: number,
@@ -687,20 +631,18 @@ export function jobScanOutcome(
   return { scanId: scan.id, outcome, scoreChanged };
 }
 
-/** Активные (queued/running) + последние завершённые заявки юзера.
- *  Диагноз UX-аудита: «очереди не видно» — статус жил в useState компонента.
- *  В4.4 (кластер J): LEFT JOIN — refused-заявки (repo_id=0, строки repos по
- *  отказу нет) видны; слаг отказанной — из error-payload, нет и его — «—». */
+/** Активные (queued/running) и последние завершенные заявки пользователя.
+ *  Отказанные тоже видны: у них нет строки repos, слаг берется из error-payload,
+ *  а если нет и его – «—». */
 export function myJobs(db: import("bun:sqlite").Database, userId: number, doneLimit = 8): { active: MyJob[]; recent: MyJob[] } {
   const slugOf = (row: Record<string, unknown>): string => {
     if (typeof row.org_slug === "string") return `${row.org_slug}/${row.repo_slug}`;
-    // refused без репо-строки: слаг писался в error-payload при отказе
     if (typeof row.error === "string" && row.error.startsWith("{")) {
       try {
         const slug = (JSON.parse(row.error) as { slug?: unknown }).slug;
         if (typeof slug === "string" && slug !== "") return slug;
       } catch {
-        /* не JSON — прочерк */
+        /* не JSON – прочерк */
       }
     }
     return "—";
@@ -714,18 +656,18 @@ export function myJobs(db: import("bun:sqlite").Database, userId: number, doneLi
       jobId: Number(row.id),
       slug: slugOf(row),
       status,
-      // В5.1 (Прод-С1): род заявки в панели; legacy-строки без kind — сканы
+      // старые строки без kind – сканы
       kind: typeof row.kind === "string" && row.kind !== "" ? row.kind : "scan",
       phase,
       queueAhead:
         phase === "queued"
           ? (db
-              // аудит очереди В5.2 О11а: у каждого рода свой цикл — впереди только заявки того же рода
+              // у каждого рода свой цикл обработки – впереди только заявки того же рода
               .query("SELECT COUNT(*) AS n FROM jobs WHERE id < ? AND status = 'queued' AND trigger_kind = 'user' AND kind = ?")
               .get(Number(row.id), typeof row.kind === "string" && row.kind !== "" ? row.kind : "scan") as { n: number }).n
           : null,
       claimedAt: typeof row.claimed_at === "string" ? row.claimed_at : null,
-      // refused: error — машинный JSON со слагом, человеку показывается слаг в `slug`
+      // у refused в error – машинный JSON со слагом; человеку слаг показывается в `slug`
       error: phase === "refused" ? null : typeof row.error === "string" ? row.error : null,
       logoUrl:
         typeof row.logo_url === "string" && row.logo_url !== "" && viewerMayReadRepo(db, userId, String(row.org_slug), String(row.repo_slug))
@@ -737,7 +679,7 @@ export function myJobs(db: import("bun:sqlite").Database, userId: number, doneLi
         : jobScanOutcome(db, Number(row.id), Number(row.repo_id), userId, typeof row.claimed_at === "string" ? row.claimed_at : null)),
     };
   };
-    // LEFT JOIN: refused живёт без строки repos (repo_id = 0)
+    // LEFT JOIN: у refused нет строки repos (repo_id = 0)
   const base =
     "SELECT j.id, j.repo_id, j.status, j.kind, j.claimed_at, j.lease_until, j.error, r.org_slug, r.repo_slug, r.logo_url FROM jobs j LEFT JOIN repos r ON r.id = j.repo_id WHERE j.user_id = ?";
   const active = (db.query(base + " AND j.status IN ('queued','running') ORDER BY j.id").all(userId) as Record<string, unknown>[]).map(toJob);
@@ -799,16 +741,14 @@ export function listFavorites(db: import("bun:sqlite").Database, userId: number)
 }
 
 export interface AccessProbeDeps extends ProbeIo {
-  /** Config.queue.favoriteOwnCooldownMs (П2): модульной константы больше нет */
+  /** Config.queue.favoriteOwnCooldownMs */
   cooldownMs: number;
   now?: Date;
 }
 
 /**
- * Исход автопостановки анализа по избранному (В4.2-port-fix, П2, решение
- * владельца (1) 18.09). `enqueued: boolean` убран: единственное поле исхода —
- * `enqueue: {status, code}`. `code` у `refused` — код ошибки `requestUserScan`,
- * у `skipped` — почему не ставили, у `queued`/`deduplicated` — `null`.
+ * Исход автопостановки анализа по избранному. `code` у `refused` – код ошибки
+ * `requestUserScan`, у `skipped` – почему не ставили, у `queued`/`deduplicated` – `null`.
  */
 export type FavoriteEnqueueStatus = "queued" | "deduplicated" | "refused" | "skipped";
 export type FavoriteEnqueueCode =
@@ -819,7 +759,7 @@ export type FavoriteEnqueueCode =
   | "check_failed"
   | "not_own"
   | "cooldown"
-  /** В4.8.5 (К8.5.14 (е), §2-Р1): фоновая перепроверка анализ не ставит */
+  /** фоновая перепроверка анализ не ставит */
   | "background"
   | null;
 
@@ -829,33 +769,29 @@ export interface FavoriteEnqueue {
 }
 
 /**
- * В4.8.5 (К8.5.6): итог проверки прав. `checked` — вердикт записан;
- * `failed` — SourceCraft не ответил (0/429/5xx): сохранённые права НЕ
- * тронуты; `token_rejected` — SourceCraft отклонил токен (401): права
- * перезаписаны отказом (по сути верно), человеку — «замените токен».
+ * Итог проверки прав. `checked` – вердикт записан; `failed` – SourceCraft не
+ * ответил (0/429/5xx), сохраненные права не тронуты; `token_rejected` –
+ * SourceCraft отклонил токен (401): права перезаписаны отказом, человеку
+ * нужно заменить токен.
  */
 export type FavoriteCheckResult = "checked" | "failed" | "token_rejected";
 
 /**
- * Ответ проверки прав избранного.
- *
- * М1 (круг 2): поле зовётся `lastOwnScanAt`, а не `lastScanAt`. Одно имя
- * несло два смысла: у `MyRepoEntry.lastScanAt` — последний скан репо ЛЮБОГО
- * автора, здесь — последний завершённый own-скан ИМЕННО этого зрителя
- * (основание кулдауна, К-П П2). Имена разведены.
- * В4.8.5: маршрута `/check` больше нет — проверка идёт сама при добавлении
- * в избранное (К8.5.14) и фоном; форма ответа живёт в ответе добавления.
+ * Ответ проверки прав избранного (приходит в ответе добавления в избранное).
+ * Поле `lastOwnScanAt` названо не `lastScanAt` намеренно: у
+ * `MyRepoEntry.lastScanAt` это последний скан репо ЛЮБОГО автора, а здесь –
+ * последний own-скан именно этого зрителя, основание кулдауна.
  */
 export interface FavoriteCheckResponse {
-  /** при `failed` — прежние сохранённые права (или «неизвестно»), не результат этой проверки */
+  /** при `failed` – прежние сохраненные права (или «неизвестно»), не результат этой проверки */
   access: FavoriteAccess;
   enqueue: FavoriteEnqueue;
-  /** последний завершённый не-bad own-скан зрителя (`scans.user_id = зритель`); основание кулдауна */
+  /** последний завершенный не-bad own-скан зрителя; основание кулдауна */
   lastOwnScanAt: string | null;
   result: FavoriteCheckResult;
 }
 
-/** `requestUserScan` → форма исхода для ответа проверки избранного (П2). */
+/** `requestUserScan` → форма исхода для ответа проверки избранного. */
 export function favoriteEnqueueOf(out: UserScanResponse): FavoriteEnqueue {
   if (out.status === 202) {
     return { status: out.body["deduplicated"] === true ? "deduplicated" : "queued", code: null };
@@ -878,11 +814,10 @@ export function favoriteAccessOf(a: NormalizedAccess): FavoriteAccess {
 }
 
 /**
- * В5.3 (25.09, находка владельца): «свой» в сохраненных правах пересчитывается
- * при чтении по ТЕКУЩЕМУ правилу `isOwnRepo` из сохраненных каналов — иначе
- * запись, проверенная до смены правила (internal по коду стал «своим»), навсегда
- * оставалась «чужой» и кнопки анализа не было. Каналы не пересчитываются: это
- * факты проверки; правило — код.
+ * «Свой» в сохраненных правах пересчитывается при чтении по ТЕКУЩЕМУ правилу
+ * `isOwnRepo` из сохраненных каналов: иначе запись, проверенная до смены
+ * правила, навсегда осталась бы «чужой». Каналы не пересчитываются – это факты
+ * проверки, а правило – код.
  */
 export function savedAccessWithCurrentRule(a: FavoriteAccess): FavoriteAccess {
   const ch = (v: boolean | null | undefined): ChannelAccess => (v === true ? "granted" : v === false ? "denied" : "check-failed");
@@ -905,23 +840,18 @@ function savedFavoriteAccess(db: Database, userId: number, org: string, repo: st
 const UNKNOWN_ACCESS: FavoriteAccess = { clone: false, visibility: "unknown", ci: null, appsec: null, own: false };
 
 /**
- * Живая проверка прав по факту (repo-GET → cicd/runs → AppSec scans/latest —
- * общая `probeRepoAccess`, те же правила, что у карточки) и, при своих правах
- * и простывшем кулдауне, заявка на анализ (механика; LLM никогда).
+ * Живая проверка прав (repo-GET → cicd/runs → AppSec scans/latest через общую
+ * `probeRepoAccess`, те же правила, что у карточки) и, если репо свой и
+ * кулдаун прошел, заявка на анализ.
  *
- * В4.8.5: вызывается автоматически — при явном добавлении в избранное (с
- * `enqueueUserScan`: первый анализ своего ставится только здесь, §2-Р1) и
- * фоновым насосом перепроверки (без него: права пишутся, анализ не ставится).
- * К8.5.6: сбой SourceCraft (0/429/5xx) — не вердикт: сохранённые права и
- * время проверки не трогаются, заявка не ставится.
+ * Вызывается при явном добавлении в избранное (с `enqueueUserScan`: первый
+ * анализ своего ставится только здесь) и фоновым насосом перепроверки (без
+ * него: права пишутся, анализ не ставится). Сбой SourceCraft (0/429/5xx) – не
+ * вердикт: сохраненные права и время проверки не трогаются, заявка не ставится.
  *
- * В4.2-port-fix (П2, Н1 HIGH): колбэк постановки АСИНХРОННЫЙ и отдаёт исход
- * `FavoriteEnqueue` — за ним стоит `requestUserScan` целиком (дешёвая
- * предпроверка, дедуп, `too_many_active`, `rate_limited`, транзакция Ф1.5,
- * строки `refused`); вызывающий прокидывает УЖЕ полученное тело repo-GET
- * (4-го живого запроса нет). Отказ по капу не роняет проверку прав — её
- * результат зритель видит всё равно. Кулдаун — по последнему не-bad own-скану
- * ИМЕННО этого зрителя.
+ * За колбэком постановки стоит `requestUserScan` целиком; ему передается уже
+ * полученный ответ repo-GET, чтобы не делать лишний живой запрос. Отказ по
+ * лимиту не роняет проверку прав – ее результат зритель видит все равно.
  */
 export async function checkFavoriteAccess(
   db: import("bun:sqlite").Database,
@@ -934,10 +864,9 @@ export async function checkFavoriteAccess(
   const probe = await probeRepoAccess(deps, org, repo);
   const verdict = classifyScStatus(probe.repoRes.status);
   const now = deps.now ?? new Date();
-  // К-П П2: own-скан ЭТОГО зрителя (scans.user_id = userId, не IS NOT NULL —
-  // иначе скан другого юзера блокирует автопостановку на 6 часов).
-  // В4.8.5 (К8.5.2a, С8-8): `bad`-скан (shutdown, orphaned, сбой канала,
-  // score_failed) кулдаун не включает — анализа по сути не было
+  // кулдаун – по own-скану ЭТОГО зрителя (user_id = userId, а не IS NOT NULL:
+  // иначе скан другого пользователя блокировал бы автопостановку). `bad`-скан
+  // (shutdown, orphaned, сбой канала, score_failed) кулдаун не включает – анализа по сути не было
   const last = db
     .query(
       `SELECT MAX(s.finished_at) AS f FROM scans s JOIN repos r ON r.id = s.repo_id
@@ -945,11 +874,10 @@ export async function checkFavoriteAccess(
     )
     .get(org, repo, userId) as { f: string | null };
   const lastOwnScanAt = last?.f ?? null;
-  // С3-1: сбой платформы не затирает доказанные права. Круг 2 (П1): то же,
-  // когда репо видно, а CI или AppSec не ответили (0/429/5xx) и правило
-  // «свой» без них не выполнено — «свой» неизвестен, как в предпроверке
-  // `/scan`: прежние права и время проверки не трогаются (запись «не
-  // проверена» остаётся кандидатом насоса), заявка не делает вывод «не свой»
+  // сбой платформы не затирает доказанные права. То же, когда репо видно, а CI
+  // или AppSec не ответили (0/429/5xx) и без них «свой» не установить: прежние
+  // права и время проверки не трогаются (запись остается кандидатом фоновой
+  // перепроверки), и вывода «не свой» не делается
   if (verdict === "unavailable" || (verdict === "ok" && probe.channelsFailed && !isOwnRepo(probe.access))) {
     return {
       access: savedFavoriteAccess(db, userId, org, repo) ?? { ...UNKNOWN_ACCESS },

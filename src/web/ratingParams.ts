@@ -1,12 +1,11 @@
-// ratingParams.ts — В4.8.5 (К8.5.10): состояние URL рейтинга приводится к
-// допустимому. Чистый модуль без React (его проверяют тесты).
+// ratingParams.ts — приведение URL рейтинга к допустимому состоянию.
+// Чистый модуль без React (его проверяют тесты).
 //  - Неизвестные `sort`/`order`/`per_page`/`page` (старая или чужая ссылка)
-//    заменяются дефолтом, адрес исправляется — вместо экрана «sort: ожидается
-//    одно из …» и «Повторить», повторяющего тот же 400 (С5-2).
-//  - Страница за пределами выдачи — последняя существующая (С5-1).
-//  - Первый клик по колонке «Репозиторий» сортирует А→Я, по числам — по
-//    убыванию (С5-8).
-// Серверный контракт `parseReposQuery` (400 на неверное значение) не меняется.
+//    заменяются дефолтом и адрес исправляется — иначе экран ошибки и
+//    «Повторить», повторяющий тот же 400.
+//  - Страница за пределами выдачи — последняя существующая.
+//  - Первый клик по колонке «Репозиторий» сортирует А→Я, по числам — по убыванию.
+// Сервер (`parseReposQuery`) по-прежнему отвечает 400 на неверное значение.
 import type { SortKey } from "../api/repos";
 import { CI_TITLES, CI_VALUES, SIZE_BUCKETS, SIZE_SHORT, SIZE_TITLES, type CiFilter, type SizeBucket } from "../api/rating-filters";
 import { plural } from "../report/submetrics";
@@ -35,10 +34,10 @@ export function normalizeRatingSearch(search: string): { search: string; changed
   if (perPage !== null && !validInt(perPage, 1, 100)) drop("per_page");
   const page = params.get("page");
   if (page !== null && !validInt(page, 1, Number.MAX_SAFE_INTEGER)) drop("page");
-  // В5.2 (Б6): фильтр «С AI-обзором» — только `ai=1`
+  // фильтр «С AI-обзором» — только `ai=1`
   const ai = params.get("ai");
   if (ai !== null && ai !== "1") drop("ai");
-  // В5.5 тур 2 (W3): размер — повторяемый, неизвестные значения убираются, верные остаются
+  // размер — повторяемый: неизвестные значения убираются, верные остаются
   const sizes = params.getAll("size");
   const validSizes = sizes.filter((v, i) => (SIZE_BUCKETS as readonly string[]).includes(v) && sizes.indexOf(v) === i);
   if (validSizes.length !== sizes.length) {
@@ -63,10 +62,9 @@ export function firstSortOrder(key: SortKey): "asc" | "desc" {
 }
 
 /**
- * Ступень 4 (В-5, §2 23.09): охват каталога одной строкой. N неоцененных
- * называется явно — иначе «Без оценки 0» рядом читается ошибкой счета: в
- * «Без оценки» стоят проанализированные без оценки, а N еще не оценены вовсе.
- * Чистая функция — число закрыто поведенческим тестом.
+ * Охват каталога одной строкой. Число неоцененных называется явно — иначе
+ * «Без оценки 0» рядом читается ошибкой счета: в «Без оценки» стоят
+ * проанализированные без оценки, а эти еще не оценены вовсе.
  */
 export function coverageLine(repos: { scored: number; nullScore: number; catalog: number }): string {
   const rest = Math.max(0, repos.catalog - repos.scored - repos.nullScore);
@@ -75,10 +73,9 @@ export function coverageLine(repos: { scored: number; nullScore: number; catalog
 }
 
 /**
- * В5.5 тур 2 (W3): какие фильтры выдачи включены — названия для пустого
- * состояния «Под фильтр ничего не подошло». Пусто — фильтров нет, и пустая
- * выдача значит «рейтинг еще пуст». Правило 23.09: утверждение пустого
- * состояния закрывается тестом на статусе, поэтому это чистая функция адреса.
+ * Какие фильтры выдачи включены — названия для пустого состояния «Под фильтр
+ * ничего не подошло». Пусто — фильтров нет, и пустая выдача значит «рейтинг
+ * еще пуст». Чистая функция адреса, чтобы пустое состояние проверялось тестом.
  */
 export function activeRatingFilters(search: string): string[] {
   const params = new URLSearchParams(search);
@@ -91,7 +88,7 @@ export function activeRatingFilters(search: string): string[] {
   return active;
 }
 
-/** Текст пустой выдачи при фильтрах: называет включенные фильтры (прежний текст знал только поиск и язык). */
+/** Текст пустой выдачи при фильтрах: называет включенные фильтры. */
 export function nothingFoundDescription(active: string[]): string {
   const head = active.length === 1 ? "с фильтром" : "с фильтрами";
   return `Ни один репозиторий выборки не совпал ${head}: ${active.join(", ")}. Данные при этом на месте – сброс фильтров вернет полный рейтинг.`;
@@ -107,7 +104,7 @@ export interface FacetOption {
 type FilterFacets = { size: { bucket: SizeBucket; count: number }[]; ci: { value: CiFilter; count: number }[] };
 
 /**
- * В5.5 тур 2 (W3): опции размера — все 5 корзин в порядке SIZE_BUCKETS, счетчик
+ * Опции размера — все 5 корзин в порядке SIZE_BUCKETS, счетчик
  * из фасета ответа (0 — тоже число). Без ответа (первая загрузка) счетчиков нет.
  */
 export function sizeOptions(facets: FilterFacets | null): FacetOption[] {

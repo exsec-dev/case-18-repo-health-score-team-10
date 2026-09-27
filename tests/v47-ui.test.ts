@@ -1,7 +1,6 @@
-// v47-ui.test.ts — UI-контракты вехи В4.7, которые нельзя проверить на
-// данных: вёрстка и тексты (source-assert, приём tests/me.test.ts). Числа и
-// поведение — в тестах API и отчёта (правило AGENTS.md 21.09: source-assert
-// только для вёрстки и текстов). Живой вид — харнесс scripts/shot.ts (Б9).
+// UI-контракты, которые нельзя проверить на данных: верстка и тексты фильтра
+// языков, меню отчета и раздела «Избранное» (source-assert). Числа и поведение
+// проверяют тесты API и отчета; живой вид – харнесс scripts/shot.ts.
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -33,7 +32,7 @@ describe("Б2 (П2): мультивыбор языка в рейтинге", () 
 
   test("у каждой опции цветной кружок из фасета (LanguageName с facet.color)", () => {
     const src = rating();
-    // В4.7 круг 2: построение опций переехало в чистый модуль lang-filter.ts (Р2.1, Р2.2)
+    // опции строит чистый модуль lang-filter.ts
     expect(web("lang-filter.ts")).toMatch(/color: f\.color/);
     expect(src).toMatch(/function LangOption[\s\S]{0,600}<LanguageName name=\{[^}]+\} color=\{d\?\.color \?\? null\}/);
   });
@@ -53,10 +52,9 @@ describe("Б4 (П1): кнопка PDF на карточке", () => {
     return src.slice(start, src.indexOf("\n}\n", start));
   };
 
-  // ПЕРЕВОРОТ (В4.8.5, К8.5.11, С7-1/С7-2): MD качается так же, как PDF
-  // (fetch + blob), а не ссылкой `href` — любой сбой теперь тост в приложении, а
-  // не сырой JSON вместо приложения; текст тоста — по коду ответа
-  // (`reportFailureText`), а не сырым сообщением сервера с советом про MD
+  // MD качается так же, как PDF (fetch + blob), а не ссылкой `href`: любой сбой –
+  // тост в приложении, а не сырой JSON вместо страницы; текст тоста – по коду
+  // ответа (`reportFailureText`), а не сырым сообщением сервера
   test("PDF и MD качаются через fetch + blob, на сбое — тост с текстом по коду", () => {
     const m = menu();
     expect({
@@ -71,7 +69,7 @@ describe("Б4 (П1): кнопка PDF на карточке", () => {
   });
 
   test("адрес и имя файла — от слага карточки, рядом с report.md (MD-адрес прежний)", () => {
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): Ф5 — имя файла одной функцией с обрезкой длинного слага
+    // имя файла – одной функцией, с обрезкой длинного слага
     expect(web("RepoPage.tsx")).toContain('pdfHref={`${cardUrl}/report.pdf`} pdfName={reportFileName(org, repo, "pdf")}');
   });
 });
@@ -84,12 +82,9 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
     return start < 0 ? "" : src.slice(start, src.indexOf(to, start + from.length));
   };
 
-  // В4.8 (решение 21.09, вариант A): фраза-инструкция в КАЖДОЙ строке без
-  // проверки была шумом — строка без проверки молчит, путь «узнать» — пункт
-  // меню строки с прежним названием действия; без токена путь — плашка П3.3.
-  // ПЕРЕВОРОТ (В4.8.5, К8.5.14 (г), §2-В1): пункта «Проверить доступ» нет —
-  // права проверяются сами (при добавлении, после смены токена, фоном);
-  // остальное прежнее: кнопки «Проверить права» нет, строка без проверки молчит
+  // Права проверяются сами (при добавлении, после смены токена, фоном), поэтому
+  // ручного действия проверки нет. Строка без проверки молчит: фраза-инструкция
+  // в каждой такой строке была бы шумом.
   test("П3.2 → В4.8 → В4.8.5: ручного действия проверки прав нет; строка без проверки молчит", () => {
     const rights = slice("function AccessRights", "\n}\n");
     expect({
@@ -100,14 +95,13 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
     }).toEqual({ menuItem: false, oldButton: false, silentWithoutCheck: true, internalState: false });
   });
 
-  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (круг 2 части 2 В4.9, Е17 / W1): плашка шагов снята,
-  // вернулось предупреждение одной строкой — заголовок, пояснение, кнопка справа.
+  // без токена – предупреждение: заголовок, пояснение, кнопка
   test("П3.3 → Е17: без PAT — предупреждение с кнопкой-ссылкой на /settings, до списка", () => {
     const section = slice("function MyReposSection", "\nfunction RepoRow");
     const notice = slice("function TokenNotice", "\nexport function MePage");
     expect({
       banner: section.includes("<TokenNotice hasPat={hasPat} />"),
-      // круг 3 (10): кнопка под текстом (без `layout="horizontal"`), иконка синим
+      // кнопка под текстом (без `layout="horizontal"`), иконка синяя
       oneLine: !/layout="horizontal"/.test(notice) && /rh-info-icon/.test(notice) && /title="Добавьте персональный токен доступа SourceCraft"/.test(notice),
       link: /<Button view="normal" size="m" \{\.\.\.linkProps\("\/settings"\)\}>\s*Перейти в Настройки/.test(notice),
       beforeList: section.indexOf("<TokenNotice") < section.indexOf('<ul className="rh-repo-list">'),
@@ -115,13 +109,7 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
     }).toEqual({ banner: true, oneLine: true, link: true, beforeList: true, notToast: true });
   });
 
-  // В4.8 круг 3 (5a, решение Екатерины): три `Label` каналов собраны в ОДНУ
-  // плашку с тремя иконками (Code / Terminal / Shield — как у SourceCraft);
-  // состояние — цветом иконки, закрытый канал — серым, без замка. Смысл П3.4
-  // (компоненты, а не глифы; без легенды) сохранен.
-  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (круг 4 части 2 В4.9, слово владельца 23.09): плашка
-  // из 3 иконок каналов доступа снята — в строке остается только видимость;
-  // глифов и легенды по-прежнему нет
+  // в строке только плашка видимости: ни каналов доступа, ни глифов ✓/✗, ни легенды
   test("П3.4 → круг 4: плашки каналов доступа нет, только видимость; глифов и легенды нет", () => {
     const rights = slice("function AccessRights", "\n}\n");
     expect({
@@ -133,15 +121,12 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
     }).toEqual({ onePill: false, visibility: true, channels: false, glyphs: false, legend: false });
   });
 
-  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (круг 2 части 2 В4.9, Е17 / Е18): 3 Alert — обертка,
-  // предупреждение «нет токена» одной строкой (W1) и плашка про одноразовый показ токена (Н1)
+  // 3 Alert: обертка, предупреждение «нет токена» и плашка про одноразовый показ токена
   test("П3.4: Alert обертки — view и size общие, тема по смыслу", () => {
     const code = me();
     expect((code.match(/<Alert\b/g) ?? []).length).toBe(3);
     expect(code).toMatch(/<Alert theme=\{theme\} view="outlined" size="m"/);
-    // все плашки кабинета идут через обёртку
-    // В4.8: 7 — плашка исхода «Проверки доступа» стала тостом, как у остальных действий строки
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, В1): 6 — alert о токене стал плашкой из 3 шагов
+    // остальные плашки кабинета идут через обертку
     expect((code.match(/<CabinetAlert\b/g) ?? []).length).toBe(6);
   });
 
@@ -154,20 +139,18 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
       emptyState: /entries\.length === 0 && \(\s*<EmptyState/.test(code),
       inlinePadding: /padding: "var\(--g-spacing-[45]\)"/.test(code),
       cardClass: (code.match(/className="rh-me-card"/g) ?? []).length,
-      // В4.8: журнал заданий убран из тела страницы (круг 1), панель заданий
-      // стала `Popup` (круг 3) — карточек `rh-me-card` в кабинете нет, класс удален из CSS
+      // панель заданий – `Popup`, карточек `rh-me-card` в кабинете нет, класса нет и в CSS
     }).toEqual({ repoSlug: true, assembled: false, codeSlug: false, emptyState: true, inlinePadding: false, cardClass: 0 });
     expect(web("layout.css")).not.toContain(".rh-me-card");
   });
 
   test("П3.4 (У26): счётчик рекомендаций — ссылкой на карточку с открытым табом; null — строки нет", () => {
     const row = slice("function RepoRow", "\nfunction ");
-    // В4.8: адрес карточки — одна константа строки `href`; у ссылки класс слоя над слоем-ссылкой строки
+    // адрес карточки – одна константа строки `href`
     expect(row).toContain("const href = repoHref(org, repo);");
-    // В4.8 круг 2 (7a): перед текстом — иконка лампочки внутри ссылки
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А1): табов нет — ссылка ведет к разделу
-    // «Рекомендации» якорем (`recommendationsHref` → `#recommendations`)
-    // В5.3 (25.09, Екатерина): 0 рекомендаций — строки нет, как и null
+    // ссылка с иконкой лампочки ведет к разделу «Рекомендации» якорем
+    // (`recommendationsHref` → `#recommendations`); при 0 рекомендаций строки
+    // нет, как и при null
     expect(row).toMatch(/entry\.recommendationsCount !== null && entry\.recommendationsCount > 0 && \(\s*<MetaItem>[\s\S]*?<Link \{\.\.\.linkProps\(recommendationsHref\(href\)\)\}[^>]*>\s*<Icon data=\{Bulb\} size=\{14\} \/>\s*\{recommendationsText\(entry\.recommendationsCount\)\}\s*<\/Link>/);
     expect(row).not.toContain("?tab=");
   });

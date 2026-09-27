@@ -1,6 +1,5 @@
-# report-png.py — страницы PDF-отчёта в PNG (В4.9, Б8): приёмка по отрисованному
-# результату. PyMuPDF (`python -c "import fitz"`); headless Chrome дает пустой
-# снимок, `pdftoppm` на машине нет.
+# report-png.py — страницы PDF-отчета в PNG, чтобы смотреть отрисованный результат.
+# Через PyMuPDF (`python -c "import fitz"`): headless Chrome дает пустой снимок.
 #
 #   python scripts/report-png.py <file.pdf> [<file.pdf> ...]
 #

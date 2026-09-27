@@ -1,15 +1,6 @@
-// RepoV5.tsx — элементы В5 на карточке репозитория, переверстанные кругом 3
-// вехи В5.3 по дизайн-аудиту (reports/2026-09-24-m53-ui-design-audit.md) и
-// выбору владельца (TASK.md §2 24.09 «В5.3, круг 3»):
-//   - флаг фрода — текст фактора строит код (6-A, способ 2); с UX-прохода В5.2 25.09 — в подвале
-//     плашки HealthCraft Index рядом с кнопкой проверки;
-//   - AI-обзор — раздел сразу под показателями в рамке градиента Алисы (2-A);
-//     разбор модели по категориям — в раскрытии категории, отметка в строке (3-B + плашка);
-//   - история оценки — раздел ленты: ось времени, пороги, список анализов (3-B),
-//     описание на момент анализа — в строке анализа (4-A);
-//   - бейдж для README — кнопка в шапке с поповером, как Clone у SourceCraft (5-A).
-// Видимость текстов модели — прежняя (решение 22.09): `card.ai` приходит только
-// зрителю с правами на полный Score; без прав этих блоков нет вовсе.
+// AI-блоки и история на карточке репозитория: признаки накрутки в подвале плашки
+// HealthCraft Index, AI-обзор, разбор модели в категориях, история оценки и бейдж для README.
+// `card.ai` приходит только зрителю с правами на полный Score; без прав этих блоков нет вовсе.
 import { ArrowsRotateRight, ChevronDown, CircleExclamation, ClockArrowRotateLeft, SealCheck, Shield, ShieldCheck, ShieldExclamation, SparklesFill } from "@gravity-ui/icons";
 import {
   ActionTooltip,
@@ -69,7 +60,7 @@ const apiBase = (org: string, repo: string): string => `/api/repos/${encodeURICo
 
 // ---------- общая метка модели ----------
 
-/** Метка AI — одна форма на всех экранах (§2 24.09): официальное имя; §2 25.09 — чисто серая (`unknown`), без иконки. */
+/** Метка модели — одна форма на всех экранах: официальное имя на серой плашке, без иконки. */
 export function AiModelLabel({ model }: { model: string }) {
   return (
     <Label theme="unknown" size="xs">
@@ -78,7 +69,7 @@ export function AiModelLabel({ model }: { model: string }) {
   );
 }
 
-/** Абзацы текста модели (О3): те же, что в отчете. */
+/** Абзацы текста модели – та же разбивка, что в отчете. */
 function AiText({ text }: { text: string }) {
   return (
     <>
@@ -101,27 +92,25 @@ export function openCategory(key: string): void {
   requestAnimationFrame(() => document.getElementById(categoryAnchor(key))?.scrollIntoView({ block: "center", behavior: "smooth" }));
 }
 
-// ---------- флаг фрода (К-3, выбор 6-A) ----------
+// ---------- флаг накрутки ----------
 
 /**
- * Строка подозрения на накрутку: заголовок, главный признак и подсказка с остальными.
- * UX-проход 25.09 (замечание 7, Екатерина): живет в подвале плашки HealthCraft Index
- * рядом с кнопкой проверки, а не отдельной плашкой над показателями.
+ * Строка подозрения на накрутку для подвала плашки HealthCraft Index: заголовок,
+ * главный признак и подсказка с остальными.
  */
 function FraudFlagMessage({ card }: { card: Card }) {
   const fraud = card.ai?.fraud;
   // подозрение — только при флаге, как в кабинете и отчете
   if (fraud === undefined || fraud === null || fraud.flag !== true || fraud.factors.length === 0) return null;
   const factOf = (key: string): unknown => fraudFactorValue(key, fraud.signals, card.evidence, fraud.inputs);
-  // вариант B (25.09): одна строка — заголовок и главный признак; пояснение и
-  // остальные признаки — в подсказке; формулировка модели — только в отчете.
-  // Признак — строка кода из факта (способ 2), без факта — формулировка модели
+  // Текст признака строит код из факта; формулировка модели — только запасной вариант,
+  // когда факта нет (целиком она печатается в отчете)
   const lines = fraud.factors.flatMap((f) => (fraudFactorFact(f.key, factOf(f.key)) ?? f.note).split("; "));
   const [lead, ...rest] = lines;
   return (
         <span className="rh-fraud__line">
           <Text variant="subheader-1">{`${FRAUD_TITLE}: `}</Text>
-          {/* аудит надежности М2: флаг прошлого анализа не выдается за текущий */}
+          {/* флаг прошлого анализа не выдается за текущий */}
           <Text variant="body-1">{fraudCheckStale(card.ai?.check) ? `${lead} (по прошлому анализу)` : lead}</Text>
           <HelpMark iconSize="s" aria-label="Что значит подозрение на искусственную активность" className="rh-fraud__help">
             <Flex direction="column" gap={2} className="rh-fraud__pop">
@@ -147,23 +136,22 @@ function FraudFlagMessage({ card }: { card: Card }) {
   );
 }
 
-// ---------- AI-обзор (выбор 2-A) ----------
+// ---------- AI-обзор ----------
 
-/** Причина конвейера «нет фактов категории» — не ошибка: у категории нет данных, модели нечего пояснять (О8). */
+/** Причина конвейера «нет фактов категории» — не ошибка: у категории нет данных, модели нечего пояснять. */
 function isNoFacts(reason: string): boolean {
   return reason.startsWith("нет фактов");
 }
 
-/** Длинный текст: затухание ~6 строк и «Показать полностью» (выбор владельца 24.09, вариант A). */
+/** Длинный текст: затухание после ~6 строк и кнопка «Показать полностью». */
 function Collapsible({ children, resetKey }: { children: React.ReactNode; resetKey: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [overflows, setOverflows] = useState(false);
   useEffect(() => setOpen(false), [resetKey]);
-  // Замечание 25.09 (кнопка пропала на широком экране): затухание гасило последнюю
-  // строку, а переполнение было меньше порога. Теперь: полная высота (scrollHeight
-  // не зависит от max-height) сравнивается с лимитом 6 строк; хвост до полутора
-  // строк показывается целиком, длиннее — затухание и кнопка
+  // Полная высота (scrollHeight не зависит от max-height) сравнивается с лимитом
+  // 6 строк; хвост до полутора строк показывается целиком — иначе затухание гасило бы
+  // последнюю строку без кнопки «Показать полностью»
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -183,7 +171,7 @@ function Collapsible({ children, resetKey }: { children: React.ReactNode; resetK
         {children}
       </div>
       {overflows && (
-        // замечание 2 (25.09): без полей — начало строки совпадает с абзацем
+        // без полей — начало строки совпадает с абзацем
         <button type="button" className="rh-ai-more" onClick={() => setOpen(!open)} aria-expanded={open}>
           {open ? "Свернуть" : "Показать полностью"}
           <Icon data={ChevronDown} size={14} style={open ? { transform: "rotate(180deg)" } : undefined} />
@@ -194,8 +182,8 @@ function Collapsible({ children, resetKey }: { children: React.ReactNode; resetK
 }
 
 /**
- * Тост отказа (аудит дизайна О8): лимит — штатное состояние, желтым «Лимит исчерпан» с
- * текстом сервера и временем; красным — только настоящие сбои.
+ * Тост отказа: исчерпанный лимит — штатное состояние, поэтому желтый «Лимит исчерпан»
+ * с текстом сервера и временем; красным — только настоящие сбои.
  */
 function refusalToast(error: { code?: string; message?: string; until?: string } | undefined, status: number, failTitle: string): { theme: "warning" | "danger"; title: string; content: string } {
   const message = error?.message ?? `Ошибка ${status}`;
@@ -207,9 +195,9 @@ function refusalToast(error: { code?: string; message?: string; until?: string }
 }
 
 /**
- * Остаток лимитов AI зрителя (В5.2, Б6, решение 3): один запрос на карточку, только
- * вошедшему (аноним не шлет запрос — 401 в консоли не нужен). `reload` — после
- * постановки заявки и по итогу задания.
+ * Остаток лимитов AI зрителя: один запрос на карточку и только для вошедшего
+ * (аноним не шлет запрос — 401 в консоли не нужен). `reload` — после постановки
+ * заявки и по итогу задания.
  */
 export function useAiQuota(loggedIn: boolean): { quota: AiQuotaView | null; reload: () => void } {
   const [quota, setQuota] = useState<AiQuotaView | null>(null);
@@ -242,7 +230,7 @@ function useSummaryActions(org: string, repo: string, onChanged: () => void) {
         toaster.add({ name: `summary-fail:${org}/${repo}`, ...refusalToast(body?.error, res.status, "Обзор не запущен") });
         return;
       }
-      // 23.09 (smoke-круг 2): объявленное задание тостится, даже если опрос застал его завершенным
+      // объявленное задание получит тост об итоге, даже если опрос застанет его уже завершенным
       const cached = body?.cached === true;
       const scanQueued = body?.scanQueued === true;
       announceJobStarted(body?.jobId ?? undefined);
@@ -259,20 +247,17 @@ function useSummaryActions(org: string, repo: string, onChanged: () => void) {
             : "Обзор появится здесь после проверки фактами.",
       });
     } catch {
-      // круг 5 тура 3 (находка 28 аудита): сетевой сбой не молчит
       toaster.add({ name: `summary-fail:${org}/${repo}`, theme: "danger", title: "Обзор не запущен", content: "Сервер не ответил – проверьте соединение и попробуйте еще раз." });
     } finally {
       setSending(false);
     }
   };
-  // В5.2 (Б3): переключатель автообновления удален — обзор запускается только кнопкой
   return { sending, start };
 }
 
 /**
- * Подпись под скелетоном обзора по фазе (UX-1, вариант (б), решение Екатерины 25.09):
- * «Обновить обзор» у владельца — сначала анализ, потом текст; два уведомления остаются,
- * а подпись честно говорит, что происходит сейчас.
+ * Подпись под скелетоном обзора по фазе. «Обновить обзор» у владельца — сначала
+ * анализ, потом текст; подпись говорит, какой из двух шагов идет сейчас.
  */
 export function aiProgressText(analysisRunning: boolean, ownFullCycle: boolean): string {
   if (analysisRunning) return "Идет анализ – затем обзор обновится сам.";
@@ -280,7 +265,7 @@ export function aiProgressText(analysisRunning: boolean, ownFullCycle: boolean):
   return "Обзор формируется – раздел обновится сам.";
 }
 
-/** «Проверить оценку» (В5.2, Б3): постановка проверки на накрутку. */
+/** «Проверить оценку»: постановка проверки на накрутку. */
 function useCheckAction(org: string, repo: string, onChanged: () => void) {
   const toaster = useToaster();
   const [sending, setSending] = useState(false);
@@ -303,7 +288,6 @@ function useCheckAction(org: string, repo: string, onChanged: () => void) {
         content: body?.cached === true ? "Результат – в карточке. Новая проверка станет доступна после нового анализа." : "Результат появится в карточке через несколько секунд.",
       });
     } catch {
-      // круг 5 тура 3 (находка 28 аудита): сетевой сбой не молчит
       toaster.add({ name: `check-fail:${org}/${repo}`, theme: "danger", title: "Проверка не запущена", content: "Сервер не ответил – проверьте соединение и попробуйте еще раз." });
     } finally {
       setSending(false);
@@ -312,7 +296,7 @@ function useCheckAction(org: string, repo: string, onChanged: () => void) {
   return { sending, start };
 }
 
-/** Состояние проверки оценки для подвала (аудит дизайна §3.1): иконка, текст, дата, кнопка. */
+/** Состояние проверки оценки для подвала: иконка, текст, дата, кнопка. */
 export interface FraudCheckState {
   kind: "none" | "active" | "clean" | "flagged" | "failed" | "nothing" | "stale";
   text: string;
@@ -321,14 +305,13 @@ export interface FraudCheckState {
 }
 
 /**
- * Тексты 7 состояний — таблица §3.1 аудита дизайна (reports/2026-09-25-m52-ui-design-audit.md);
- * имя действия одно — «проверка оценки» (О4); «нет истории коммитов» — факт, не сбой (О3);
- * флаг прошлого анализа несет желтая плашка подвала с пометкой «по прошлому анализу» (О5).
+ * 7 состояний проверки оценки. Имя действия везде одно — «проверка оценки»;
+ * «нет истории коммитов» — факт, а не сбой; флаг прошлого анализа несет желтая
+ * плашка подвала с пометкой «по прошлому анализу».
  */
 export function fraudCheckState(ai: CardAi, loggedIn: boolean): FraudCheckState {
   const { check, fraud } = ai;
   const stale = check.scanId !== null && check.latestScanId !== null && check.scanId < check.latestScanId;
-  // UX-проход 25.09 (замечание 6): рядом со статусом — только дата, без «проверено»
   const date = check.checkedAt ? fmtDateTime(check.checkedAt) : null;
   if (check.active) return { kind: "active", text: "Проверка оценки идет – результат появится здесь", date: null, button: null };
   if (check.failure !== null && !check.retryable) return { kind: "nothing", text: "Проверять нечего: в анализе нет истории коммитов", date: null, button: null };
@@ -341,7 +324,7 @@ export function fraudCheckState(ai: CardAi, loggedIn: boolean): FraudCheckState 
       button: run ? "Повторить проверку" : null,
     };
   }
-  // UX-проход 25.09 (замечание 7): признаки — в самом подвале, «подробности выше» больше не нужно
+  // при флаге подвал показывает сами признаки (FraudFlagMessage), здесь — только статус
   if (fraud !== null && fraud.flag) return { kind: "flagged", text: "Есть признаки накрутки", date, button: run && stale ? "Проверить оценку" : null };
   if (fraud !== null && stale) return { kind: "stale", text: "Признаков накрутки нет по прошлому анализу", date, button: run ? "Проверить оценку" : null };
   if (fraud !== null) return { kind: "clean", text: "Признаков накрутки нет", date, button: null };
@@ -364,9 +347,9 @@ const CHECK_ICON: Record<FraudCheckState["kind"], { data: typeof Shield; color: 
 };
 
 /**
- * Подвал плашки HealthCraft Index (В5.2, Б6, выбор 1A): состояние проверки оценки и
- * кнопка «Проверить оценку N/M» (решение 3 — остаток в тексте кнопки). Статус меняется
- * опросом — `aria-live` (О11); причина неактивной кнопки — видимой подписью (О2).
+ * Подвал плашки HealthCraft Index: состояние проверки оценки и кнопка «Проверить
+ * оценку N/M» с остатком лимита. Статус меняется опросом, поэтому `aria-live`;
+ * причина неактивной кнопки — видимой подписью.
  */
 export function FraudCheckFooter({ card, org, repo, onChanged, loggedIn, quota, onQuota }: { card: Card; org: string; repo: string; onChanged: () => void; loggedIn: boolean; quota: AiQuotaView | null; onQuota: () => void }) {
   const ai = card.ai;
@@ -386,7 +369,6 @@ export function FraudCheckFooter({ card, org, repo, onChanged, loggedIn, quota, 
   const icon = CHECK_ICON[st.kind];
   const button =
     st.button !== null ? (
-      // UX-проход 25.09, круг 2 (замечание 2): кнопка без иконки во всех состояниях
       <Button view={st.kind === "flagged" ? "normal-contrast" : "outlined"} size="s" loading={action.sending} disabled={blocked !== null} onClick={() => void action.start()}>
         {withCounter(st.button, counter)}
       </Button>
@@ -397,8 +379,7 @@ export function FraudCheckFooter({ card, org, repo, onChanged, loggedIn, quota, 
         {blocked}
       </Text>
     ) : null;
-  // UX-проход 25.09 (замечание 7, Екатерина): признаки накрутки — желтой плашкой в самом
-  // подвале, рядом с кнопкой проверки; отдельной плашки над показателями больше нет
+  // признаки накрутки — желтой плашкой в самом подвале, рядом с кнопкой проверки
   const flagLine = st.kind === "flagged" ? <FraudFlagMessage card={card} /> : null;
   if (flagLine !== null && ai.fraud?.factors.length) {
     return (
@@ -407,7 +388,6 @@ export function FraudCheckFooter({ card, org, repo, onChanged, loggedIn, quota, 
           theme="warning"
           view="filled"
           size="s"
-          // UX-проход 25.09, круг 2 (замечание 2): иконка — по первой строке текста
           align="baseline"
           // кнопка — под текстом: в узкой плашке индекса сбоку она сжимает строку признака
           className="rh-fraud"
@@ -449,22 +429,20 @@ export function FraudCheckFooter({ card, org, repo, onChanged, loggedIn, quota, 
 export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota, onQuota }: { card: Card; org: string; repo: string; onChanged: () => void; loggedIn: boolean; quota: AiQuotaView | null; onQuota: () => void }) {
   const ai = card.ai;
   const own = card.viewer?.own === true;
-  // В5.2 (Б3): публичный обзор публичного репо запускает любой вошедший; закрытого — владелец
+  // обзор публичного репо запускает любой вошедший, закрытого — только владелец
   const canRun = loggedIn && (own || card.repo.visibility === "public");
   const publicVersion = ai?.audience === "public";
   const actions = useSummaryActions(org, repo, () => {
     onChanged();
     onQuota();
   });
-  // решение 3 (25.09): остаток — в тексте кнопки; при нуле кнопка неактивна, причина видна (О2)
+  // остаток — в тексте кнопки; при нуле кнопка неактивна, причина видна подписью
   const counter = quotaCounter(quota?.overview);
   const quotaBlocked = counter !== null && counter.left === 0 && quota !== null ? quotaBlockedText("overview", quota.overview, counter) : null;
 
-  // smoke-круг 23.09: пока задание идет — карточка перечитывается раз в 5 с.
-  // Разбор задержки 25.09 (Ф1, reports/2026-09-25-m53-ai-latency.md): setInterval
-  // обрывал идущий запрос (useJson отменяет прежний) — ответ дольше 5 с не доходил
-  // никогда. Теперь следующий запрос — через 5 с ПОСЛЕ ответа: новая карточка →
-  // новый `ai` → эффект ставит один таймер
+  // Пока задание идет, карточка перечитывается: следующий запрос — через 5 с ПОСЛЕ
+  // ответа (новая карточка → новый `ai` → один таймер). setInterval здесь не годится:
+  // useJson отменяет прежний запрос, и ответ дольше 5 с не дошел бы никогда
   useEffect(() => {
     if (ai === undefined || ai === null || !ai.jobActive) return;
     const timer = setTimeout(onChanged, 5000);
@@ -474,12 +452,11 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
     if (jobs.some((j) => j.slug === `${org}/${repo}`)) onChanged();
   });
 
-  // без прав на полный Score текста нет (решение 22.09) — раздела нет
+  // без прав на полный Score текста нет — и раздела нет
   if (ai === undefined) return null;
 
-  // замечание 7 (25.09): обзора нет и он не формируется — заглушка в духе закрытого
-  // Repo Health Score (серый фон, заголовок-состояние, одно основное действие);
-  // переключателя автообновления нет, рамка градиента остается
+  // обзора нет и он не формируется — заглушка в духе закрытого Repo Health Score
+  // (серый фон, заголовок-состояние, одно основное действие)
   const empty = ai === null || (ai.overview === null && ai.specialists.length === 0 && !ai.jobActive);
   if (empty) {
     const cooldown = ai?.cooldownUntil != null && Date.parse(ai.cooldownUntil) > Date.now();
@@ -490,7 +467,7 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
           <Text color="secondary" id="rh-ai-title" as="h2" className="rh-ai-section__label">
             {AI_SECTION_TITLE}
           </Text>
-          {/* ревью В5.3 (25.09): генерация была, но ни одна роль не прошла проверку — не «пока нет» */}
+          {/* генерация была, но ни одна роль не прошла проверку — это не «пока нет» */}
           <Text variant="subheader-2">{rejected ? "Обзор не прошел проверку фактами" : "Обзора пока нет"}</Text>
           <Text variant="body-1" color="complementary">
             {canRun
@@ -528,12 +505,10 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
   const hasOverview = ai?.overview != null;
   const failures = (ai?.failures ?? []).filter((f) => f.role !== "trajectory" && !isNoFacts(f.reason));
 
-  // В5.2 (Б3): переключатель автообновления удален; запуск — в меню «три точки».
-  // Аудит дизайна О1: не-владельцу пункт нужен, только если после обзора был новый
-  // анализ (иначе — холостой «уже готов»); нет пункта — нет и «⋮»
+  // Не-владельцу кнопка обновления нужна, только если после обзора был новый анализ,
+  // иначе запуск вхолостую ответит «уже готов»
   const newerAnalysis = aiNotesStale(ai);
-  // тур 3 В5.5 (круг 2, 26.09): в меню «⋮» был единственный пункт — вместо меню
-  // иконка обновления с подсказкой; выключенная — причина в подсказке на обертке
+  // иконка обновления с подсказкой; у выключенной причина — в подсказке на обертке
   const runText = withCounter(hasOverview ? "Обновить обзор" : "Сформировать обзор", counter);
   const runDisabled = jobActive || cooldownActive || actions.sending || quotaBlocked !== null;
   const runReason = jobActive
@@ -554,7 +529,6 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
 
   const stamp =
     ai !== null && ai.generatedAt !== null && !jobActive ? (
-      // замечание 25.09: подпись — отдельной строкой под текстом (сдвиг вправо отменен), цвет на ступень темнее
       <Text variant="caption-2" color="hint">
         {`Обзор от ${fmtDateTime(ai.generatedAt)}. ${AI_DISCLAIMER}`}
         {cooldownActive ? ` Следующий запуск – после ${fmtDateTime(ai.cooldownUntil)}.` : ""}
@@ -563,8 +537,7 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
     ) : null;
 
   return (
-    // §2 25.09: готовый обзор — дымка Алисы в углах и тонкий градиентный контур; рамка
-    // градиента движется только пока обзор формируется
+    // рамка градиента движется, только пока обзор формируется
     <section className={jobActive ? "rh-ai-section rh-ai-section_live" : "rh-ai-section"} aria-labelledby="rh-ai-title" aria-busy={jobActive} data-slot="aiSummary">
       <Flex direction="column" gap={3}>
         <Flex gap={2} alignItems="center" wrap>
@@ -574,12 +547,10 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
           <Text variant="subheader-3" as="h2" id="rh-ai-title">
             {AI_SECTION_TITLE}
           </Text>
-          {/* круг 3 тура 3: знак устаревания — сразу после заголовка */}
           {hasOverview && newerAnalysis && <AiStaleMark card={card} blockedReason={canRun && runDisabled ? runReason : null} />}
           {model !== null && <AiModelLabel model={model} />}
-          {/* выбор 2A (25.09): объем публичной версии — меткой в заголовке, пояснение в подсказке */}
+          {/* объем публичной версии — меткой в заголовке, пояснение в подсказке внутри плашки */}
           {publicVersion && hasOverview && (
-            // UX-проход 25.09 (замечание 5): знак вопроса — внутри плашки
             <Label theme="unknown" size="xs" className="rh-open-data">
               <span className="rh-open-data__text">
                 По открытым данным
@@ -594,7 +565,7 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
         </Flex>
 
         {jobActive ? (
-          // без обещания времени (§2-В5)
+          // без обещания времени: длительность генерации заранее не известна
           <Flex direction="column" gap={2}>
             <Skeleton style={{ height: 18, width: "100%" }} />
             <Skeleton style={{ height: 18, width: "92%" }} />
@@ -619,8 +590,7 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
           </Flex>
         )}
 
-        {/* тур 3 В5.5 (п.10, 26.09): строки о непрошедших проверку разборах — ДО
-            строки с датой обзора (дата закрывает блок) */}
+        {/* строки о непрошедших проверку разборах — до строки с датой: дата закрывает блок */}
         {failures.length > 0 && (
           <Flex direction="column" gap={1}>
             {failures.map((f) => (
@@ -637,7 +607,7 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
   );
 }
 
-// ---------- разбор модели в категории (выбор 3-B) ----------
+// ---------- разбор модели в категории ----------
 
 /** Заметка специалиста для категории; роли совпадают с ключами категорий. */
 export function categoryAiNote(card: Card, key: string): AiNote | null {
@@ -645,12 +615,10 @@ export function categoryAiNote(card: Card, key: string): AiNote | null {
 }
 
 /**
- * Отметка в строке категории: искра серая — разбор появится после обзора,
- * фиолетовая — разбор есть (откройте категорию). Без прав (`card.ai`
- * undefined) и у категории без данных — отметки нет: модели нечего пояснять.
+ * Отметка-искра в строке категории: разбор модели есть — откройте категорию.
+ * Нет разбора, нет прав (`card.ai` undefined) или у категории нет данных — отметки нет.
  */
 export function CategoryAiMark({ card, categoryKey, hasData }: { card: Card; categoryKey: string; hasData: boolean }) {
-  // замечание 8 (25.09): отметка — только когда разбор уже есть (серых «будет» нет)
   if (card.ai === undefined || !hasData || categoryAiNote(card, categoryKey) === null) return null;
   const title = "Есть разбор модели – откройте категорию";
   return (
@@ -661,23 +629,15 @@ export function CategoryAiMark({ card, categoryKey, hasData }: { card: Card; cat
 }
 
 /**
- * Текст модели в категории и разбор динамики (замечания 3, 6 от 25.09): стиль
- * info-плашки AI-обзора, без метки модели (она уже в заголовке обзора).
- */
-/**
- * Знак «текст устарел» у всех AI-плашек — сразу после заголовка. Круг 4 тура 3
- * (26.09, Екатерина, вариант 5 виджета HQ): текстовая метка «Устарел» того же
- * вида, что метка модели (`AiModelLabel`), подробности и призыв обновить — в
- * подсказке (вытесняет иконки кругов 2-3: часы со стрелкой, песочные часы).
+ * Знак «текст устарел» у всех AI-плашек — сразу после заголовка: метка «Устарел»
+ * того же вида, что метка модели; подробности и призыв обновить — в подсказке.
  */
 export function AiStaleMark({ card, blockedReason = null }: { card: Card; blockedReason?: string | null }) {
-  // хвост подсказки — по зрителю (круг 4, слово владельца 26.09): призыв «Обновите»
-  // только тому, кто может запустить (правило запуска — как `canRun` раздела обзора)
+  // призыв «Обновите» — только тому, кто может запустить (то же правило, что `canRun` раздела обзора)
   const me = dataOf(useSession().me);
   const loggedIn = me !== null && me.login !== null;
   const own = card.viewer?.own === true;
-  // круг 5 тура 3 (находка 29 аудита): запуск сейчас недоступен — причина вместо призыва;
-  // на закрытом — «владелец», как в тексте раздела («Обзор запускает владелец репозитория»)
+  // запуск сейчас недоступен — причина вместо призыва
   const tail =
     blockedReason !== null
       ? `${blockedReason.replace(/\.$/, "")}.`
@@ -697,6 +657,7 @@ export function AiStaleMark({ card, blockedReason = null }: { card: Card; blocke
   );
 }
 
+/** Текст модели в категории и разбор динамики: info-плашка без метки модели (она уже в заголовке обзора). */
 export function AiNotePlate({ title, text, staleFor = null }: { title: string; text: string; staleFor?: Card | null }) {
   return (
     <Alert
@@ -732,7 +693,7 @@ export function CategoryAiNote({ note, card }: { note: AiNote; card: Card }) {
   );
 }
 
-// ---------- история оценки (выбор 3-B) + описания по анализам (4-A) ----------
+// ---------- история оценки и описания по анализам ----------
 
 const CHART_H = 160;
 const PAD_L = 8;
@@ -744,7 +705,7 @@ function yOf(v: number): number {
   return PAD_T + (1 - Math.max(0, Math.min(100, v)) / 100) * (CHART_H - PAD_T - PAD_B);
 }
 
-/** Ширина контейнера графика (замечание 4, 25.09): viewBox = реальная ширина — график на всю колонку без искажения точек и подписей. */
+/** Ширина контейнера графика: viewBox равен реальной ширине — график на всю колонку без искажения точек и подписей. */
 function useWidth(): [React.RefObject<HTMLDivElement | null>, number] {
   const ref = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(640);
@@ -766,7 +727,7 @@ function HistoryChart({ points, fullOpen }: { points: HistoryPoint[]; fullOpen: 
   const known = times.filter((t) => Number.isFinite(t));
   const t0 = Math.min(...known);
   const t1 = Math.max(...known);
-  // ось X — время анализа (О12); без разброса времени — равномерно
+  // ось X — время анализа; без разброса времени — точки равномерно
   const xOf = (i: number): number => {
     const t = times[i]!;
     const span = CHART_W - PAD_L - PAD_R;
@@ -829,7 +790,7 @@ function HistoryChart({ points, fullOpen }: { points: HistoryPoint[]; fullOpen: 
           </circle>
         ),
       )}
-      {/* круг 5 тура 3 (находка 20 аудита): последнее значение — числом у точки, без наведения */}
+      {/* последнее значение — числом у точки, видно без наведения */}
       {(() => {
         const li = hci.reduce<number>((acc, v, i) => (v !== null ? i : acc), -1);
         if (li < 0) return null;
@@ -868,7 +829,7 @@ function AnalysisRow({ point, fullOpen, overview }: { point: HistoryPoint; fullO
             пустой репозиторий
           </Label>
         )}
-        {/* замечание 5 (25.09): описание на момент анализа — иконкой в правом углу строки, текст в подсказке */}
+        {/* описание на момент анализа — иконкой в правом углу строки, текст в поповере */}
         {overview !== null && (
           <Popover
             placement={["left", "bottom-end", "top-end"]}
@@ -896,7 +857,6 @@ export function HistorySection({ card, org, repo }: { card: Card; org: string; r
 
 function HistoryWithNotes({ card, org, repo }: { card: Card; org: string; repo: string }) {
   const { state, reload } = useJson<AiNotesResponse>(`${apiBase(org, repo)}/ai-notes`);
-  // Ф2 (25.09): описания по анализам перечитываются по итогу задания этого репо
   useAnalysisFinished((jobs) => {
     if (jobs.some((j) => j.slug === `${org}/${repo}`)) reload();
   });
@@ -905,14 +865,14 @@ function HistoryWithNotes({ card, org, repo }: { card: Card; org: string; repo: 
 
 function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo: string; notes: AiNotesResponse | null }) {
   const { state, reload } = useJson<HistoryResponse>(`${apiBase(org, repo)}/history`, { keepPrevious: true });
-  // Ф2 (25.09): новая точка истории появляется без F5 — по итогу задания этого репо
+  // новая точка истории появляется без перезагрузки — по итогу задания этого репо
   useAnalysisFinished((jobs) => {
     if (jobs.some((j) => j.slug === `${org}/${repo}`)) reload();
   });
   const data = dataOf(state);
   const [listOpen, setListOpen] = useState(false);
-  // ревью В5.3 (25.09): пока история не пришла или не загрузилась — не «оценок нет»
-  // (429 в общем окне карточки или перечитывание после анализа печатали ложное пустое состояние)
+  // Пока история не пришла или не загрузилась — скелетон или ошибка, а не «оценок нет»:
+  // 429 или перечитывание после анализа иначе показали бы ложное пустое состояние
   if (data === null) {
     return (
       <section className="rh-section" aria-labelledby="rh-history-title" data-slot="scoreHistory" aria-busy={state.kind === "loading"}>
@@ -961,7 +921,6 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
     </Disclosure>
   );
   if (!view.chart) {
-    // замечание 6 (25.09): графика нет — серая заглушка, как у пустого AI-обзора
     return (
       <section className="rh-section" aria-labelledby="rh-history-title" data-slot="scoreHistory">
         <Card view="outlined" className="rh-section-card rh-placeholder-card">
@@ -987,7 +946,6 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
             {SLOT_EMPTY.scoreHistory.title}
           </Text>
         </Flex>
-        {/* замечание 7 (25.09): график, разбор и список — с воздухом между собой */}
         <Flex direction="column" gap={5} className="rh-history">
           <Flex direction="column" gap={2}>
             <HistoryChart points={points} fullOpen={fullOpen} />
@@ -1008,24 +966,22 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
   );
 }
 
-// ---------- бейдж для README (выбор 5-A) ----------
+// ---------- бейдж для README ----------
 
 /**
- * Бейдж для README. Тур 3 В5.5 (п.4, 26.09, Екатерина): кнопка у ЛЮБОГО публичного
- * репозитория рейтинга, не только у своего (вытесняет замечание 9 от 25.09 —
- * «только у своего»): маршрут SVG и так открыт всем (К5.8), бейдж чужого репо
- * годится для подборок, статей и форков. Приватному и internal кнопки нет:
- * публичный маршрут отвечает им 404. В5.5 закрытие (П-2): доступность бейджа —
- * поле карточки `repo.badge` (та же проверка, что у маршрута, `publicApiVisible`);
- * пробный запрос `badge.svg` снят — у закрытых он ловил 404 в консоли.
+ * Бейдж для README — у любого публичного репозитория, не только у своего: маршрут SVG
+ * открыт всем, а бейдж чужого репо годится для подборок, статей и форков. Приватному и
+ * internal кнопки нет — публичный маршрут отвечает им 404. Доступность знает сервер
+ * (поле карточки `repo.badge`, та же проверка `publicApiVisible`, что у маршрута), без
+ * пробного запроса `badge.svg`, который ловил бы 404 в консоли.
  */
 function badgePath(org: string, repo: string): string {
   return `/api/v1/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`;
 }
 
 function BadgeContent({ org, repo, publicBaseUrl, league = false, title = true }: { org: string; repo: string; publicBaseUrl: string; league?: boolean; title?: boolean }) {
-  // В5.9 (§2 «В5.9 — выбор вариантов», п.5): у репо с лигой — выбор «Только индекс | Индекс
-  // и место»; без лиги выбора нет (вариант без результата не предлагаем)
+  // у репо с лигой — выбор «Только индекс | Индекс и место»; без лиги выбора нет
+  // (вариант, которому нечего показать, не предлагаем)
   const [style, setStyle] = useState<"index" | "rank">("index");
   const shown = league ? style : "index";
   const path = badgePath(org, repo);
@@ -1057,7 +1013,7 @@ function BadgeContent({ org, repo, publicBaseUrl, league = false, title = true }
   );
 }
 
-/** Круг 5 тура 3 (Н1, вариант А): на телефоне бейдж открывается из меню «⋮» — диалогом. */
+/** На телефоне бейдж открывается из меню «⋮» — диалогом. */
 export function BadgeDialog({ org, repo, publicBaseUrl, league, open, onClose }: { org: string; repo: string; publicBaseUrl: string; league: boolean; open: boolean; onClose: () => void }) {
   return (
     <Dialog open={open} onClose={onClose} maxWidth="s" fullWidth className="rh-dialog-fit" aria-label={SLOT_EMPTY.badge.title}>

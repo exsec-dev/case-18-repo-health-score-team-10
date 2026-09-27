@@ -1,5 +1,4 @@
-// V5.5 tour 2 (HQ acceptance): charter fixes after the live repo-vitals rerun
-// (reports/v55-tour2-acceptance-hq.md). The model misread the new `issues.stats.flow`
+// Charter fixes after a live run: the model misread `issues.stats.flow`
 // (old-to-new windows) as "no issues in the last 30 days", called a 0.45-day median
 // close "slow" and read index coverage as test coverage. LLM-free regression:
 // versions load via loadCharter (fail-fast intact) and the rules are in the texts.
@@ -9,7 +8,7 @@ import { loadAllCharters } from "../src/summary/charters";
 const all = loadAllCharters();
 
 test("tour 2 charter versions (bumped again by tour 3 round 5): issues 7, trajectory 6, activity 6, code 10", () => {
-  // V5.5 tour 3 round 5: +1 each for the reader-language section (tests/v55-t3-ai-text-leaks.test.ts)
+  // versions include the reader-language section (tests/v55-t3-ai-text-leaks.test.ts)
   expect(all.issues.version).toBe("7");
   expect(all.trajectory.version).toBe("7");
   expect(all.activity.version).toBe("6");

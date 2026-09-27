@@ -1,10 +1,9 @@
-// server.ts — фронтенд (React + Gravity UI, бандлит Bun из HTML-импорта;
-// dev — HMR, NODE_ENV=production — бандл без HMR) + read-API В3 + auth/моя
-// поверхность В4. Сервер ТОЛЬКО разбирает запрос, валидирует и
-// сериализует: логика чтения — чистые функции src/api/*, логика auth —
-// src/auth/* (тестируются без HTTP). Живые вызовы наружу — только
-// OAuth-обмен (вход) и PAT/me-repos по явному действию юзера; данные
-// рейтинга появляются исключительно сканом.
+// HTTP-сервер: фронтенд (React + Gravity UI, Bun бандлит из HTML-импорта; в dev —
+// HMR, при NODE_ENV=production — без него), API чтения, вход и кабинет.
+// Сервер только разбирает запрос, валидирует и сериализует: логика чтения —
+// чистые функции src/api/*, логика входа — src/auth/* (тестируются без HTTP).
+// Наружу сервер ходит только при входе (OAuth-обмен) и по явному действию
+// пользователя с его PAT; данные рейтинга появляются исключительно сканом.
 import { loadConfig } from "./config";
 import { openDb, setMetaValue } from "./db";
 import { fixFileFor, getMeta, listRepos, parseReposQuery, resolveCardForViewer, type CardOutcome, type RepoCard } from "./api/repos";
@@ -91,29 +90,26 @@ import { needsRescore, runStartupRescore, RESCORE_ERROR } from "./score/rescore"
 import index from "./web/index.html";
 
 const config = loadConfig();
-// ПОРТ hq-parallel (S1/security): окно живых проб PAT на юзера.
+// Скользящие окна лимитов, ключ — id пользователя.
 const patProbes = new Map<number, number[]>();
-// В4.2-port-fix (П2): окно лимита проверок прав избранного на юзера.
 const favoriteChecks = new Map<number, number[]>();
-// Ф2.8 (В4.2b): минутное окно чтений /api/me/repos на юзера.
 const myReposViews = new Map<number, number[]>();
-// В4.4 (кластер G код-аудита): карточка — единственная пробная поверхность
-// без лимита (до 3 живых запросов PAT зрителя на показ + вымывание кэша
-// доступа): минутное окно на ЗАЛОГИНЕННОГО зрителя; аноним — без лимита
-// (публичная карточка в сеть не ходит, проб нет).
+// Показ карточки залогиненному зрителю — до 3 живых запросов с его PAT плюс
+// вымывание кэша доступа, поэтому окно нужно. Аноним без лимита: публичная
+// карточка в сеть не ходит.
 const cardViews = new Map<number, number[]>();
-// В5: запросов генерации описания на юзера в минуту (кнопка; кулдаун репо — отдельно)
+// запросов генерации описания на пользователя в минуту (кулдаун репо — отдельно)
 const summaryPosts = new Map<number, number[]>();
 const SUMMARY_POSTS_PER_MINUTE = 6;
-// В5 (К5.8): badge и публичный API — свой лимит по IP (README дергает badge чаще UI)
+// бейдж и публичный API — свой лимит по IP: README дергает бейдж чаще, чем UI
 const badgeHits = new Map<string, number[]>();
 const BADGE_PER_MINUTE_PER_IP = 120;
-// В5.1 (Прод-С2/Security-М6): потолок карты — спуфабельный XFF не растит память бесконечно
+// потолок карты: подделанный X-Forwarded-For не должен растить память бесконечно
 const BADGE_KEYS_CAP = 10_000;
 function badgeWindowHasRoom(req: Request, now = Date.now()): boolean {
   const key = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
   const windowMs = 60_000;
-  // чистка ВСЕЙ карты на каждый вызов (по образцу allowInWindow) + вытеснение
+  // чистка всей карты на каждый вызов (как в allowInWindow) и вытеснение
   // старейших ключей сверх капа (Map хранит порядок вставки)
   for (const [id, stamps] of badgeHits) {
     const alive = stamps.filter((t) => now - t < windowMs);
@@ -131,22 +127,20 @@ function badgeWindowHasRoom(req: Request, now = Date.now()): boolean {
   badgeHits.set(key, hits);
   return true;
 }
-/** Одинаковый 404 для приватного, эвицтированного и несуществующего (К5.8). */
+/** Одинаковый 404 для приватного, исключенного из каталога и несуществующего — чтобы не выдавать, что репо есть. */
 function publicNotFound(): Response {
   return new Response("not found", {
     status: 404,
     headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" },
   });
 }
-// В4.4 (кластер K/З6): churn-цикл PUT/DELETE избранного деградирует БД —
-// минутное окно мутаций на юзера (добавление/снятие звезды).
+// частые PUT/DELETE звезды нагружают БД — минутное окно мутаций избранного
 const favMutations = new Map<number, number[]>();
 
 /**
- * Скользящее окно счётчика на юзера: true = пропустить, лимит не исчерпан.
- * Чистится ЦЕЛИКОМ (М8 круга 2: `Map` без очистки течёт — ровно та утечка,
- * от которой П2 предостерегал для нового счётчика, а старое окно проб PAT
- * держало запись на каждого юзера, заходившего хоть раз за жизнь процесса).
+ * Скользящее окно счетчика на пользователя: true = пропустить, лимит не исчерпан.
+ * Карта чистится целиком на каждый вызов — иначе в ней навсегда оставалась бы
+ * запись о каждом пользователе, заходившем за жизнь процесса.
  */
 function allowInWindow(windows: Map<number, number[]>, userId: number, limit: number, windowMs: number, now = Date.now()): boolean {
   const since = now - windowMs;
@@ -162,32 +156,31 @@ function allowInWindow(windows: Map<number, number[]>, userId: number, limit: nu
   return true;
 }
 
-/** В4.8.5 (К8.5.6): есть ли место в окне — БЕЗ списания (проба PAT списывает только вердикт). */
+/** Есть ли место в окне — без списания (проба PAT списывает место только при вердикте). */
 function windowHasRoom(windows: Map<number, number[]>, userId: number, limit: number, windowMs: number, now = Date.now()): boolean {
   const stamps = (windows.get(userId) ?? []).filter((ts) => ts > now - windowMs);
   return stamps.length < limit;
 }
 
-/** Списать одну отметку окна. */
 function windowPush(windows: Map<number, number[]>, userId: number, now = Date.now()): void {
   const stamps = windows.get(userId) ?? [];
   stamps.push(now);
   windows.set(userId, stamps);
 }
 
-/** В4.8.5 (К8.5.7): через сколько секунд освободится место в окне — значение `Retry-After`. */
+/** Через сколько секунд освободится место в окне — значение `Retry-After`. */
 function windowRetryAfterSec(windows: Map<number, number[]>, userId: number, windowMs: number, now = Date.now()): number {
   const alive = (windows.get(userId) ?? []).filter((ts) => ts > now - windowMs);
   if (alive.length === 0) return 1;
   return Math.max(1, Math.ceil((Math.min(...alive) + windowMs - now) / 1000));
 }
 
-/** В4.8.5 (К8.5.7, С9-14): каждый 429 несёт `Retry-After`. */
+/** Каждый 429 несет `Retry-After`. */
 function rateLimited(message: string, retryAfterSec: number): Response {
   return Response.json({ error: { code: "rate_limited", message } }, { status: 429, headers: { "retry-after": String(Math.max(1, Math.round(retryAfterSec))) } });
 }
 
-/** В5.2 (Б4): отказ по лимиту AI — код окна, текст и время, когда можно повторить. */
+/** Отказ по лимиту AI: код окна, текст и время, когда можно повторить. */
 function quotaResponse(refusal: QuotaRefusal): Response {
   const retryAfterSec = Math.max(1, Math.round((Date.parse(refusal.until) - Date.now()) / 1000));
   return Response.json(
@@ -196,22 +189,19 @@ function quotaResponse(refusal: QuotaRefusal): Response {
   );
 }
 
-/** Минутное окно проверок прав избранного: true = пропустить. */
 const allowFavoriteCheck = (userId: number, now = Date.now()): boolean =>
   allowInWindow(favoriteChecks, userId, config.queue.favoriteChecksPerMinute, 60_000, now);
 
-/** Минутное окно чтений /api/me/repos (Ф2.8): true = пропустить. */
 const allowMyReposView = (userId: number, now = Date.now()): boolean =>
   allowInWindow(myReposViews, userId, config.queue.myReposPerMinute, 60_000, now);
 
-/** Минутное окно показов карточки залогиненным зрителем (В4.4, кластер G): true = пропустить. */
 const allowCardView = (userId: number, now = Date.now()): boolean =>
   allowInWindow(cardViews, userId, config.queue.cardPerMinute ?? 30, 60_000, now);
 
 /**
- * В5.3 круг 4: сравнение N репозиториев списывает N открытий карточки — и
- * только если в окне есть место под все N (сравнение 3 репо стоит как 3
- * карточки, нагрузка на проверки прав не растет). true = пропустить.
+ * Сравнение N репозиториев списывает N открытий карточки, и только если в окне
+ * есть место под все N: сравнение 3 репо стоит как 3 карточки, нагрузка на
+ * проверки прав не растет. true = пропустить.
  */
 const allowCardViews = (userId: number, n: number, now = Date.now()): boolean => {
   const limit = config.queue.cardPerMinute ?? 30;
@@ -223,8 +213,8 @@ const allowCardViews = (userId: number, n: number, now = Date.now()): boolean =>
 };
 
 /**
- * Ревью 25.09: `Retry-After` сравнения — до освобождения N-го места, а не одного
- * (иначе повтор в срок снова получал 429).
+ * `Retry-After` сравнения — до освобождения N-го места, а не одного, иначе
+ * повтор в указанный срок снова получит 429.
  */
 function cardViewsRetryAfterSec(userId: number, n: number, now = Date.now()): number {
   const limit = config.queue.cardPerMinute ?? 30;
@@ -235,13 +225,12 @@ function cardViewsRetryAfterSec(userId: number, n: number, now = Date.now()): nu
   return stamp === undefined ? 60 : Math.max(1, Math.ceil((stamp + 60_000 - now) / 1000));
 }
 
-/** Минутное окно мутаций избранного (В4.4, кластер K/З6): true = пропустить. */
 const allowFavMutation = (userId: number, now = Date.now()): boolean =>
   allowInWindow(favMutations, userId, config.queue.favoritesMutationsPerMinute ?? 30, 60_000, now);
 
 /**
- * В4.4 (кластер K/З3): у Bun.serve нет глобальных headers — защита от
- * фрейминга и MIME-сниффинга ставится обёрткой над каждым ответом.
+ * У Bun.serve нет глобальных заголовков — защита от фрейминга и
+ * MIME-сниффинга ставится оберткой над каждым ответом.
  */
 const SECURITY_HEADERS: Record<string, string> = {
   "x-frame-options": "DENY",
@@ -281,23 +270,19 @@ function hardenRoutes<T extends Record<string, unknown>>(routes: T): T {
   return out as T;
 }
 
-/** Живая проба токена = оракул валидности PAT; сервис не переборщик (ПОРТ S1). */
+/** Живая проба токена — оракул валидности PAT; лимит не дает использовать сервис для перебора токенов. */
 const PAT_PROBES_PER_HOUR = 10;
 
 const db = openDb(config);
 
-// Ф2.7 (В4.2b): имена/атрибуты cookie по схеме YA_REDIRECT_URI — на https
-// это `__Host-rh_*` с Secure. Читается ТОЛЬКО актуальное имя.
+// Имена и атрибуты cookie зависят от схемы YA_REDIRECT_URI: на https это
+// `__Host-rh_*` с Secure. Читается только актуальное имя.
 const ck = cookieNames(config.auth);
-
-// В4.4 (кластер A код-аудита): стартовый рескор — АСИНХРОННО ПОСЛЕ поднятия
-// порта (ниже, у старта ролей): деплой с бампом производных больше не держит
-// порт десятки минут и не порождает рестарт-луп «рескор-kill-рескор».
 
 const badQuery = (message: string): Response =>
   Response.json({ error: { code: "bad_query", message } }, { status: 400 });
-// В5.2 (Б7, долг аудита В5.1, reliability «мелочь 3»): 404 API не кэшируется — как
-// publicNotFound; иначе ответ на кривой слаг мог осесть в кэше прокси или браузера
+// 404 API не кэшируется (как publicNotFound): иначе ответ на кривой слаг мог бы
+// осесть в кэше прокси или браузера
 const notFound = (message: string): Response =>
   Response.json({ error: { code: "not_found", message } }, { status: 404, headers: { "cache-control": "no-store" } });
 const unauthorized = (message = "нужно войти через Я ID"): Response =>
@@ -305,24 +290,23 @@ const unauthorized = (message = "нужно войти через Я ID"): Respo
 const forbidden = (message: string): Response =>
   Response.json({ error: { code: "forbidden", message } }, { status: 403 });
 
-/** В4.4 (кластер K/З6): окно мутаций избранного исчерпано — 429. */
 const favoriteRateLimited = (userId: number): Response =>
   rateLimited(
     `не больше ${config.queue.favoritesMutationsPerMinute ?? 30} изменений избранного в минуту – попробуйте чуть позже`,
     windowRetryAfterSec(favMutations, userId, 60_000),
   );
 
-/** В4.4 (кластер G): окно открытий карточки (карточка, MD, PDF) исчерпано — 429 с Retry-After. */
+/** Окно открытий карточки (карточка, MD, PDF) исчерпано — 429 с Retry-After. */
 const cardRateLimited = (userId: number): Response =>
   rateLimited(`не больше ${config.queue.cardPerMinute ?? 30} открытий карточки в минуту – попробуйте чуть позже`, windowRetryAfterSec(cardViews, userId, 60_000));
 
-/** Ф2.21: предел избранного — 409 без меты репо и без факта существования приватного. */
+/** Предел избранного — 409 без меты репо, чтобы не выдать факт существования приватного. */
 const favoriteLimit = (max: number): Response =>
   Response.json({ error: { code: "favorite_limit", message: `в избранном не больше ${max} репозиториев – уберите лишние, чтобы добавить новый` } }, { status: 409 });
 
-// Ф2.8 (LOW-6): CSRF-гард по Origin на мутирующих /api/me/* и /auth/logout.
-// Заголовка нет → пропустить (межсайтовой POST закрыт SameSite=Lax); есть и
-// не совпал с origin YA_REDIRECT_URI (без него — localhost/127.0.0.1:PORT) → 403.
+// CSRF-гард по Origin на мутирующих /api/me/* и /auth/logout. Заголовка нет —
+// пропустить (межсайтовый POST и так закрыт SameSite=Lax); есть и не совпал с
+// origin YA_REDIRECT_URI (без него — localhost/127.0.0.1:PORT) — 403.
 const allowedOrigins = (): Set<string> => {
   const out = new Set<string>();
   try {
@@ -330,9 +314,9 @@ const allowedOrigins = (): Set<string> => {
   } catch {
     /* кривой redirect — остаются локальные дефолты ниже */
   }
-  // гейт В4.8.5: локальный стенд на своем PORT — те же локальные адреса и на
-  // фактическом порту (без YA_REDIRECT_URI дефолт redirect смотрит на 8418,
-  // и стенд на другом порту отклонял любое изменение как «чужую страницу»)
+  // локальные адреса разрешаются и на фактическом PORT: без YA_REDIRECT_URI
+  // дефолт redirect смотрит на 8418, и стенд на другом порту отклонял бы любое
+  // изменение как «чужую страницу»
   const local = [...out].some((o) => /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(o));
   if (out.size === 0 || local) {
     out.add(`http://localhost:${config.port}`);
@@ -349,9 +333,8 @@ function guardOrigin(req: Request): Response | null {
 }
 
 /**
- * Ф2.8 (LOW-4): сегмент слага из ОДНИХ ТОЧЕК («.», «..») в charset проходит,
- * а семантически это обход пути — наружу 400. Остальной charset проверяет
- * прежняя регулярка.
+ * Сегмент слага из одних точек («.», «..») проходит по набору символов, но по
+ * смыслу это обход пути — отдается 400.
  */
 function validSlugSegment(segment: string | undefined): boolean {
   return typeof segment === "string" && /^[a-z0-9_.-]+$/i.test(segment) && !/^[.]+$/.test(segment);
@@ -365,24 +348,23 @@ function sessionOf(req: Request) {
 }
 
 /**
- * В4.8.5 (К8.5.5a): политика ретраев 429/503 клиентов, которые отвечают
- * человеку в том же HTTP-запросе (проба токена, карточка, проверка прав,
- * предпроверка запуска): один повтор и короткий потолок ожидания — запрос не
- * должен висеть десятки секунд. Фоновые клиенты (каталог, скан) — дефолт
- * `http.ts` (3 повтора, потолок 30 с).
+ * Ретраи 429/503 для клиентов, которые отвечают человеку в том же HTTP-запросе
+ * (проба токена, карточка, проверка прав, предпроверка запуска): один повтор и
+ * короткий потолок ожидания, чтобы запрос не висел десятки секунд. Фоновые
+ * клиенты (каталог, скан) используют дефолт `http.ts` (3 повтора, потолок 30 с).
  */
 const INTERACTIVE_RETRY = { maxRetries: 1, maxWaitMs: 2_000, baseBackoffMs: 500 } as const;
 
-/** REST-клиент с юзерским PAT (PAT-окно/«мои репо»); PAT нет → null. */
+/** REST-клиент с PAT пользователя; PAT нет — null. */
 function userClient(userId: number) {
   const pat = config.auth.appSecret ? getPat(db, config.auth.appSecret, userId) : null;
   if (!pat) return null;
   return makeScClient({ retry: INTERACTIVE_RETRY, token: pat, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, timeoutMs: config.scan.rest.timeoutMs });
 }
 
-// К2: доступ зрителя к каналам карточки — прямые чтения PAT зрителя с
-// кэшем в памяти процесса (TTL Config.access.cacheTtlMs; сбой — failedTtlMs;
-// предел maxEntries; склейка одновременных проверок и поколение PAT — Ф1.6/Ф1.12)
+// Доступ зрителя к каналам карточки — прямые чтения с PAT зрителя и кэш в
+// памяти процесса (TTL cacheTtlMs, для сбоя — failedTtlMs, предел maxEntries;
+// одновременные проверки склеиваются, смена PAT сбрасывает запись)
 const accessCache = makeAccessCache(config.access.cacheTtlMs, { failedTtlMs: config.access.failedTtlMs, maxEntries: config.access.maxEntries });
 
 /** Резолвер доступа зрителя запроса (аноним / без PAT → no-pat без запросов). */
@@ -406,9 +388,9 @@ function viewerAccess(req: Request): (repo: AccessRepo) => Promise<AccessResult>
 
 /**
  * Доступ зрителя к репо по строке каталога — как у карточки: ключ кэша прав —
- * настоящий repos.id, видимость — из каталога. В5.3 (О1): история и AI-заметки
- * звали резолвер с `id: 0`, и все репо делили одну запись кэша — чужой репо
- * получал права своего. Нет строки — прав нет (ответ всё равно 404).
+ * настоящий repos.id (с общим ключом все репо делили бы одну запись кэша, и
+ * чужой репо получал бы права своего), видимость — из каталога. Нет строки —
+ * прав нет (ответ все равно 404).
  */
 async function accessBySlug(req: Request, org: string, repo: string): Promise<AccessResult> {
   const row = db.query("SELECT id, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number; visibility: string } | null;
@@ -421,18 +403,18 @@ function patOf(userId: number): string | null {
   return config.auth.appSecret ? getPat(db, config.auth.appSecret, userId) : null;
 }
 
-/** Ввод-вывод живой проверки прав (К8.5.14) на PAT пользователя: интерактивный ретрай, общий ритм токена. */
+/** Ввод-вывод живой проверки прав на PAT пользователя: интерактивный ретрай, общий ритм токена. */
 function probeIoFor(pat: string): ProbeIo {
   const rest = makeScClient({ retry: INTERACTIVE_RETRY, token: pat, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 8, timeoutMs: config.scan.rest.timeoutMs });
-  // П3 (Н2 HIGH): адрес AppSec — из конфига, не боевой по умолчанию
+  // адрес AppSec — из конфига, чтобы тесты не ходили на боевой
   const appsec = makeAppsecClient({ token: pat, baseUrl: config.api.appsecBase, minIntervalMs: config.scan.rest.appsecMinIntervalMs, retryMaxWaitMs: INTERACTIVE_RETRY.maxWaitMs });
   return probeIoOf(rest, appsec);
 }
 
 /**
- * В4.8.5 (К8.5.14 (д)): фоновая перепроверка прав избранного — насос в
- * памяти процесса; окно проверок человека не расходует, анализ не ставит.
- * Клиенты — на PAT пользователя, ритм общий с остальными его запросами.
+ * Фоновая перепроверка прав избранного — насос в памяти процесса: окно
+ * проверок пользователя не расходует, анализ не ставит. Клиенты — на PAT
+ * пользователя, ритм общий с остальными его запросами.
  */
 const recheckPump = makeRecheckPump({
   db,
@@ -443,7 +425,7 @@ const recheckPump = makeRecheckPump({
   log: (m) => console.log(m),
 });
 
-/** Причина доступа зрителя карточки (К8.5.8): нет сессии / нет токена / токен есть. */
+/** Чем располагает зритель карточки: нет сессии / нет токена / токен есть. */
 function viewerAuthOf(req: Request): "no-session" | "no-pat" | "pat" {
   const user = sessionOf(req);
   if (!user) return "no-session";
@@ -452,7 +434,7 @@ function viewerAuthOf(req: Request): "no-session" | "no-pat" | "pat" {
 
 /**
  * Исход показа карточки зрителю запроса — одна сборка для карточки, MD, PDF и
- * сравнения (В5.3 круг 4: сравнение идет через тот же гейт, без своих прав).
+ * сравнения (у сравнения нет своей проверки прав, оно идет через тот же гейт).
  */
 function cardOutcome(req: Request, org: string, repo: string): Promise<CardOutcome> {
   const viewer = sessionOf(req);
@@ -467,10 +449,9 @@ function cardOutcome(req: Request, org: string, repo: string): Promise<CardOutco
 }
 
 /**
- * Карточка для зрителя запроса (карточка, MD, PDF — одна сборка, К2) или
- * готовый отказ. В4.8.5 (К8.5.6, С6-1): владелец приватного репозитория с
- * доказанными правами при сбое проверки получает «проверка не удалась» /
- * «токен отклонён», а не «не найден»; прочим — прежний нейтральный 404.
+ * Карточка для зрителя запроса или готовый отказ. Владелец приватного
+ * репозитория с доказанными правами при сбое проверки получает «проверка не
+ * удалась» / «токен отклонен», а не «не найден»; остальным — нейтральный 404.
  */
 async function cardOrRefusal(req: Request, org: string, repo: string): Promise<RepoCard | Response> {
   const out = await cardOutcome(req, org, repo);
@@ -488,15 +469,13 @@ async function cardOrRefusal(req: Request, org: string, repo: string): Promise<R
 }
 
 /**
- * В4.8.5 (К8.5.14 (д), (е)): добавление в избранное — звезда и «Добавить» —
- * с автопроверкой прав СИНХРОННО в том же PUT (до 3 запросов, как прежняя
- * «Проверить доступ»). Первый анализ своего ставится только здесь, при явном
- * добавлении (§2-Р1): кулдаун и капы — как у прежней автопостановки
- * (`requestUserScan` целиком, тело repo-GET прокинуто). Окно проверок
- * исчерпано — новый репозиторий не добавляется (429 с `Retry-After`),
- * повторная звезда существующей записи уходит в фоновый насос (без
- * анализа). Ответ — обновлённая запись строки (К8.5.7: список не
- * перечитывается целиком) и исход проверки.
+ * Добавление в избранное (звезда и «Добавить») с синхронной проверкой прав в
+ * том же PUT (до 3 запросов). Первый анализ своего репозитория ставится только
+ * здесь, при явном добавлении, через `requestUserScan` со всеми его кулдаунами
+ * и капами. Окно проверок исчерпано — новый репозиторий не добавляется (429 с
+ * `Retry-After`), а повторная звезда существующей записи уходит в фоновый
+ * насос без анализа. Ответ — обновленная запись строки (чтобы клиент не
+ * перечитывал весь список) и исход проверки.
  */
 async function addFavoriteAndCheck(userId: number, org: string, repo: string): Promise<Response> {
   const outcome = addFavoriteCapped(db, userId, org, repo, config.queue.favoritesMax);
@@ -505,10 +484,9 @@ async function addFavoriteAndCheck(userId: number, org: string, repo: string): P
   let check: { status: FavoriteCheckResult | "deferred" | "no_pat"; enqueue: FavoriteEnqueue | null } = { status: "no_pat", enqueue: null };
   if (pat !== null) {
     if (!allowFavoriteCheck(userId)) {
-      // закрытие В4.8.5 (ревью; решение Екатерины 22.09): новый репозиторий
-      // без проверки существования не добавляется — окно проверок исчерпано
-      // нашим лимитом, а не сбоем SourceCraft; повторная звезда существующей
-      // записи уходит в фон, как было
+      // новый репозиторий без проверки существования не добавляется (окно
+      // исчерпано нашим лимитом, а не сбоем SourceCraft); повторная звезда
+      // существующей записи уходит в фон
       if (outcome === "added") {
         removeFavorite(db, userId, org, repo);
         return rateLimited(
@@ -522,13 +500,13 @@ async function addFavoriteAndCheck(userId: number, org: string, repo: string): P
       const io = probeIoFor(pat);
       const rest = userClient(userId)!;
       const result = await checkFavoriteAccess(db, userId, org, repo, { ...io, cooldownMs: config.queue.favoriteOwnCooldownMs }, async (repoRes) =>
-        // Н1: постановка ЦЕЛИКОМ через requestUserScan — дедуп, too_many_active,
-        // rate_limited и транзакцию Ф1.5 не обойти; repo-GET не повторяется
+        // постановка целиком через requestUserScan, чтобы не обойти дедуп,
+        // too_many_active, rate_limited и транзакцию; repo-GET не повторяется
         favoriteEnqueueOf(await requestUserScan(db, rest, userId, org, repo, config.queue, new Date(), repoRes)),
       );
-      // гейт В4.8.5 (Екатерина): репозиторий, которого SourceCraft не отдает
-      // токену (нет такого или нет доступа), в избранное не добавляется —
-      // прежняя запись (повторная звезда) остается
+      // репозиторий, которого SourceCraft не отдает токену (нет такого или нет
+      // доступа), в избранное не добавляется; прежняя запись (повторная звезда)
+      // остается
       if (outcome === "added" && result.result === "checked" && !result.access.clone) {
         removeFavorite(db, userId, org, repo);
         return Response.json(
@@ -537,8 +515,8 @@ async function addFavoriteAndCheck(userId: number, org: string, repo: string): P
         );
       }
       check = { status: result.result, enqueue: result.enqueue };
-      // круг 2 (П1): сбой проверки (платформа или каналы) — не вердикт; запись
-      // остаётся «не проверенной» и уходит в насос (он анализ не ставит)
+      // сбой проверки (платформа или каналы) — не вердикт: запись остается
+      // «не проверенной» и уходит в насос (он анализ не ставит)
       if (result.result === "failed") recheckPump.enqueue(userId, [{ org, repo }]);
     }
   }
@@ -553,7 +531,7 @@ async function addFavoriteAndCheck(userId: number, org: string, repo: string): P
   });
 }
 
-/** Исход «свой ли репозиторий» для запуска анализа (К8.5.14 (б)). */
+/** Исход «свой ли репозиторий» для запуска анализа. */
 type Ownership =
   | { kind: "own"; repoRes: { status: number; json: unknown } }
   | { kind: "not_own" }
@@ -587,7 +565,7 @@ async function ownershipOf(req: Request, userId: number, org: string, repo: stri
   return { kind: "not_own" };
 }
 
-/** Отказ запуска по «своему» (К8.5.14 (б)); `record` — строка отказа предпроверки (лимит частоты, как у прочих отказов). */
+/** Отказ запуска для не своего репозитория; `record` — записать строку отказа (она входит в лимит частоты, как прочие отказы). */
 function scanRefusal(own: Exclude<Ownership, { kind: "own" }>, org: string, repo: string): { status: number; body: unknown; record: boolean } {
   switch (own.kind) {
     case "not_own":
@@ -601,7 +579,7 @@ function scanRefusal(own: Exclude<Ownership, { kind: "own" }>, org: string, repo
     case "token_rejected":
       return { status: 401, body: { error: { code: "pat_expired", message: "SourceCraft отклонил ваш токен – обновите его в Настройках" } }, record: true };
     default:
-      // К8.5.6: сбой проверки — не вердикт и не списание лимита запусков
+      // сбой проверки — не вердикт и не списание лимита запусков
       return {
         status: 503,
         body: { error: { code: "check_failed", message: `SourceCraft сейчас не отвечает – не удалось проверить доступ к ${org}/${repo}, попробуйте позже` } },
@@ -610,7 +588,7 @@ function scanRefusal(own: Exclude<Ownership, { kind: "own" }>, org: string, repo
   }
 }
 
-/** Ответ `requestUserScan` → HTTP; 429 — с `Retry-After` (К8.5.7). */
+/** Ответ `requestUserScan` → HTTP; 429 — с `Retry-After`. */
 function scanResponse(out: UserScanResponse): Response {
   const res = Response.json(out.body, { status: out.status });
   if (out.status === 429) res.headers.set("retry-after", String(out.retryAfterSec ?? 60));
@@ -624,17 +602,17 @@ const yaCreds = () => ({
   redirect: config.auth.redirect,
 });
 
-/** Ф2.10: адреса Я ID — из конфига (тесты направляют их на локальный мок). */
+/** Адреса Я ID — из конфига (тесты направляют их на локальный мок). */
 const yaEndpoints = (): YaEndpoints => ({ oauthBase: config.auth.yaOauthBase, loginBase: config.auth.yaLoginBase });
 
-// В4.4 (кластер K): таблица маршрутов — тип Bun.serve, чтобы обёртка
-// hardenRoutes не стирала сигнатуры обработчиков (и метод-карты вроде POST)
+// таблица маршрутов типизирована как у Bun.serve, чтобы обертка hardenRoutes
+// не стирала сигнатуры обработчиков и метод-карт вроде POST
 type RoutesTable = NonNullable<Parameters<typeof Bun.serve>[0]>["routes"];
 const routes = {
     "/api/health": () => {
-      // В4.4 (кластер B): ok — вычисляемое (pending-рескор, подозрительно
-      // пустой каталог, провал ночной фазы); тело — честный статус, HTTP-200
-      // остаётся (здоровье читают по телу, порт-гарды ждут статус)
+      // ok вычисляется (незавершенный рескор, подозрительно пустой каталог,
+      // провал ночной фазы) и отдается в теле; HTTP всегда 200 — проверки
+      // порта ждут статус, а здоровье читают по телу
       return Response.json(getHealth(db, config));
     },
     "/api/meta": () => Response.json(getMeta(db, { leaseMs: config.scheduler.leaseMs, publicBaseUrl: config.publicBaseUrl })),
@@ -643,23 +621,23 @@ const routes = {
       if (!parsed.ok) return badQuery(parsed.message);
       return Response.json(listRepos(db, parsed.query));
     },
-    // единая карточка (К2): состав ответа — по доступу зрителя из cookie.
-    // К-Р13: слаг с невалидным percent-encoding (напр. %zz) — управляемый
-    // отказ bad_query 400, не «не найдено» и не 500
+    // единая карточка: состав ответа зависит от доступа зрителя из cookie.
+    // Слаг с невалидным percent-encoding (например, %zz) — 400 bad_query,
+    // а не «не найдено» и не 500
     "/api/repos/:org/:repo": async (req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
         return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
       }
       const viewer = sessionOf(req);
-      // В4.4 (кластер G): 429 — до резолва доступа (не тратим PAT-запросы)
+      // 429 — до резолва доступа, чтобы не тратить PAT-запросы
       if (viewer && !allowCardView(viewer.userId)) return cardRateLimited(viewer.userId);
       const card = await cardOrRefusal(req, org!, repo!);
       if (card instanceof Response) return card;
       return Response.json(card);
     },
-    // В5.3 круг 4 (К-1): сравнение 1-3 репозиториев — карточки того же зрителя
-    // без AI, рекомендаций и фактов; недоступный — элемент `unavailable`, не 404
+    // сравнение 1-3 репозиториев — карточки того же зрителя без AI, рекомендаций
+    // и фактов; недоступный репо — элемент `unavailable`, а не 404 всего ответа
     "/api/compare": async (req) => {
       const parsed = parseCompareQuery(new URL(req.url).searchParams);
       if (!parsed.ok) return badQuery(parsed.message);
@@ -685,13 +663,12 @@ const routes = {
         return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
       }
       const viewer = sessionOf(req);
-      // В4.4 (кластер G): MD-выгрузка — та же карточка, тот же лимит
+      // MD-выгрузка — та же карточка того же зрителя и тот же лимит
       if (viewer && !allowCardView(viewer.userId)) return cardRateLimited(viewer.userId);
-      // тот же сборщик карточки с тем же зрителем (К2)
       const card = await cardOrRefusal(req, org!, repo!);
       if (card instanceof Response) return card;
-      // решение владельца 22.09: без оценки отчета нет (кнопки выгрузки у
-      // такого репозитория на карточке тоже нет — отказ ловит прямую ссылку)
+      // без оценки отчета нет (кнопки выгрузки на такой карточке тоже нет —
+      // отказ ловит прямую ссылку)
       if (!card.score) return notFound(REPORT_NO_SCORE);
       return new Response(renderRepoReport(card), {
         headers: {
@@ -701,10 +678,9 @@ const routes = {
         },
       });
     },
-    // В4.7 (П1): PDF того же отчёта — зеркало report.md: тот же гард слага,
-    // то же минутное окно карточки, тот же сборщик карточки с тем же зрителем
-    // (закрытые каналы — без чисел и фактов), приватный/эвиктированный — 404.
-    // Сбой генерации — честная 500 без стека (`pdfResponse`), MD не задет.
+    // PDF того же отчета — зеркало report.md: тот же гард слага, то же окно,
+    // та же карточка зрителя (закрытые каналы — без чисел и фактов). Сбой
+    // генерации — 500 без стека (`pdfResponse`).
     "/api/repos/:org/:repo/report.pdf": async (req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
@@ -717,10 +693,9 @@ const routes = {
       if (!card.score) return notFound(REPORT_NO_SCORE);
       return pdfResponse(card);
     },
-    // В5.9 (№5): файл-заготовка presence-правила (без LLM) — зеркало report.md:
-    // тот же гард слага, то же минутное окно карточки, та же карточка зрителя
-    // (приватный без прав — тот же 404). Неизвестное правило или лицензия — 400
-    // до резолва доступа; правило, которое у репо сейчас не срабатывает, — 404.
+    // Файл-заготовка presence-правила (без LLM) — зеркало report.md: тот же гард
+    // слага, то же окно, та же карточка зрителя. Неизвестное правило или лицензия —
+    // 400 до резолва доступа; правило, которое у репо сейчас не срабатывает, — 404.
     "/api/repos/:org/:repo/fix/:ruleId": async (req) => {
       const { org, repo, ruleId } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
@@ -746,10 +721,10 @@ const routes = {
         },
       });
     },
-    // ---------- В5 (К5.8): публичный API и badge ----------
-    // Без авторизации, только rating_active публичные; приватный/эвицтированный/
-    // несуществующий — одинаковый 404. Отдельный лимит по IP (badge дергают
-    // из README, он не должен мешать интерактиву); кэш-заголовки на 200.
+    // ---------- публичный API и бейдж ----------
+    // Без авторизации, только публичные репо из рейтинга; приватный, исключенный и
+    // несуществующий — одинаковый 404. Отдельный лимит по IP (бейдж дергают из
+    // README, он не должен мешать интерактиву); кэш-заголовки на 200.
     "/api/v1/repos/:org/:repo": (req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) return notFound("not found");
@@ -762,7 +737,7 @@ const routes = {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) return notFound("not found");
       if (!badgeWindowHasRoom(req)) return rateLimited("слишком много запросов – попробуйте позже", 60);
-      // В5.9 Б: `?style=rank` — вариант со значком места (public.ts, parseBadgeStyle)
+      // `?style=rank` — вариант со значком места
       const style = parseBadgeStyle(new URL(req.url).searchParams);
       if (style === null) return badQuery("неизвестный вид бейджа: допустим только style=rank");
       const proj = getPublicRepo(db, org!, repo!);
@@ -774,32 +749,31 @@ const routes = {
         },
       });
     },
-    // ---------- В5 (К5.7): история оценки и история LLM-взглядов ----------
-    // Публичная проекция строк scores + scans.head_sha; полного Score без
-    // прав нет, эвицтированный/приватный — 404 неотличимо от несуществующего
+    // ---------- история оценки и история AI-текстов ----------
+    // Публичная проекция строк scores + scans.head_sha; полного Score без прав
+    // нет, исключенный или приватный — 404, неотличимый от несуществующего
     "/api/repos/:org/:repo/history": async (req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
         return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
       }
       const viewer = sessionOf(req);
-      // В5.1 (Прод-З2/Security-З4): то же минутное окно, что у карточки —
-      // залогиненный не дергает историю без лимита по списку репо
+      // то же минутное окно, что у карточки: иначе историю по списку репо
+      // можно было бы дергать без лимита
       if (viewer && !allowCardView(viewer.userId)) return cardRateLimited(viewer.userId);
       const access = viewer === null ? NO_PAT_ACCESS : await accessBySlug(req, org!, repo!);
       const history = getRepoHistory(db, org!, repo!, { access });
       if (history === null) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
       return Response.json(history);
     },
-    // Текст — никогда не публичен (решение 22.09): не видно репо → 404,
-    // видно, но полный Score закрыт → 403 locked с честной причиной
+    // Полные AI-тексты не публичны: не видно репо — 404, видно, но полный
+    // Score закрыт — 403 locked с причиной
     "/api/repos/:org/:repo/ai-notes": async (req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
         return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
       }
       const viewer = sessionOf(req);
-      // В5.1 (Прод-З2/Security-З4): то же минутное окно, что у карточки
       if (viewer && !allowCardView(viewer.userId)) return cardRateLimited(viewer.userId);
       const access = viewer === null ? NO_PAT_ACCESS : await accessBySlug(req, org!, repo!);
       const notes = getAiNotesHistory(db, org!, repo!, { access });
@@ -807,12 +781,11 @@ const routes = {
       if (notes.locked) return Response.json({ error: { code: "locked", message: notes.reason } }, { status: 403 });
       return Response.json(notes);
     },
-    // ---------- В5 (К5.4) + В5.2 (Б3-Б4): AI-обзор и проверка на накрутку — кнопками ----------
-    // В5.2 (§2 «В5.2 — публичный AI-обзор…»): автообновление по оп-ину убрано (п.3) —
-    // пользователь запускает обзор и проверку только кнопкой. Аудиторию обзора решает
-    // сервер: свой репо с правами на CI/CD и Безопасность — полная версия; любой
-    // вошедший на публичном репо — публичная (4 открытые категории). Лимиты — в БД
-    // (jobs/ai-quota.ts), проверяются после бесплатных исходов (кэш, дедуп).
+    // ---------- AI-обзор и проверка на накрутку (только по кнопке) ----------
+    // Аудиторию обзора решает сервер: свой репо с правами на CI/CD и Безопасность —
+    // полная версия; любой вошедший на публичном репо — публичная (4 открытые
+    // категории). Лимиты — в БД (jobs/ai-quota.ts), проверяются после бесплатных
+    // исходов (кэш, дедуп).
     "/api/repos/:org/:repo/summary": {
       POST: async (req) => {
         const csrf = guardOrigin(req);
@@ -826,9 +799,8 @@ const routes = {
         if (!windowHasRoom(summaryPosts, user.userId, SUMMARY_POSTS_PER_MINUTE, 60_000)) {
           return rateLimited("слишком много запросов генерации – попробуйте позже", windowRetryAfterSec(summaryPosts, user.userId, 60_000));
         }
-        // В5.1 (Security-З2): окно списывается ДО живых проб PAT и own-гейта —
-        // перебор чужих slug'ов больше не бесплатен (каждый отказ нёс до
-        // 4 REST + 2 AppSec запросов PAT зрителя при нулевой цене окна)
+        // окно списывается до живых проб PAT и проверки «свой»: иначе перебор чужих
+        // слагов был бы бесплатным, а каждый отказ стоит до 4 REST и 2 AppSec запросов
         windowPush(summaryPosts, user.userId);
         const card = await cardOrRefusal(req, org!, repo!);
         if (card instanceof Response) return card;
@@ -838,8 +810,8 @@ const routes = {
         if (own && fullAccess) audience = "full";
         else if (card.repo.visibility === "public") audience = "public";
         else if (own) {
-          // В5.3 (25.09): «свой» по доступу к коду (internal/private без прав на CI и
-          // AppSec) — полного обзора нет, а публичного у закрытого репо не бывает
+          // «свой» по доступу к коду, но без прав на CI и AppSec: полного обзора нет,
+          // а публичного у закрытого репо не бывает
           return Response.json(
             { error: { code: "no_full_access", message: "AI-обзор доступен, когда токену открыты CI/CD и Безопасность этого репозитория" } },
             { status: 403 },
@@ -855,11 +827,9 @@ const routes = {
         }
         const quota = (): QuotaRefusal | null => quotaRefusal(aiQuota(db, user.userId, "overview", config.ai));
         const unlocked = isUnlocked(db, user.userId, config.ai);
-        // 23.09 (Алексей): «Обновить описание» без свежего анализа бессмысленна —
-        // кнопка запускает полный цикл: сначала скан, затем генерация по нему.
-        // Кулдаун и лимит проверяем ДО скана, чтобы не запускать анализ зря.
-        // В5.2: свежий анализ — только у своего репо (полная версия); публичная
-        // версия строится по последнему завершенному скану
+        // Для полной версии кнопка запускает полный цикл: сначала свежий скан, затем
+        // генерация по нему; публичная строится по последнему завершенному скану.
+        // Кулдаун и лимит проверяются до скана, чтобы не запускать анализ зря.
         const cooldownMs = config.queue.summaryCooldownMs ?? 60 * 60_000;
         const lastSummary = db
           .query("SELECT created_at FROM jobs WHERE repo_id = ? AND kind = 'summary' AND audience = ? AND created_at IS NOT NULL ORDER BY id DESC LIMIT 1")
@@ -877,8 +847,8 @@ const routes = {
         if (audience === "full") {
           const early = quota();
           if (early !== null) return quotaResponse(early);
-          // свежий скан best-effort: при лимитах (час/активные) генерация пойдёт
-          // по последнему скану, и пользователь получит честный toast
+          // свежий скан best-effort: упрется в лимиты — генерация пойдет по
+          // последнему скану, и пользователь увидит об этом уведомление
           const scanClient = userClient(user.userId);
           if (scanClient !== null) {
             const scanOut = await requestUserScan(db, scanClient, user.userId, org!, repo!, config.queue, new Date());
@@ -894,8 +864,8 @@ const routes = {
           unlocked,
           quota,
         });
-        // В5.1 (Ищейка-С1): кэш по скану — заметки последнего скана есть, честный
-        // ответ без второй генерации (лимит не списывается: заявки нет)
+        // заметки по последнему скану уже есть — ответ без второй генерации
+        // (лимит не списывается: заявки нет)
         if (out.kind === "cached") {
           console.log(`[summary] ${org}/${repo} (${audience}): POST поверх готовых заметок последнего скана — кэш, заявка не создана`);
           return Response.json({ ok: true, jobId: null, audience, cached: true, queued: false, scanQueued: false });
@@ -916,8 +886,8 @@ const routes = {
         return Response.json({ ok: true, jobId: out.jobId, audience, queued: out.kind === "active", scanQueued });
       },
     },
-    // «Проверить оценку» (В5.2, Б3): проверка на накрутку по фактам последнего
-    // анализа — любому вошедшему, кому видна карточка; результат видят все
+    // «Проверить оценку»: проверка на накрутку по фактам последнего анализа —
+    // любому вошедшему, кому видна карточка; результат видят все
     "/api/repos/:org/:repo/check": {
       POST: async (req) => {
         const csrf = guardOrigin(req);
@@ -934,9 +904,9 @@ const routes = {
         windowPush(summaryPosts, user.userId);
         const card = await cardOrRefusal(req, org!, repo!);
         if (card instanceof Response) return card;
-        // аудиты В5.2 (безопасность М6, надежность М4): результат проверки живет в AI-блоке
-        // карточки; зрителю, которому AI-блок не открыт (закрытый репо без прав на CI/CD и
-        // Безопасность), проверку не ставим — кредиты ушли бы на невидимый ему результат
+        // результат проверки живет в AI-блоке карточки; зрителю, которому AI-блок не
+        // открыт (закрытый репо без прав на CI/CD и Безопасность), проверку не ставим —
+        // кредиты ушли бы на невидимый ему результат
         if (card.ai === undefined) {
           return Response.json(
             { error: { code: "no_full_access", message: "проверка закрытого репозитория доступна, когда токену открыты CI/CD и Безопасность" } },
@@ -965,23 +935,19 @@ const routes = {
         return Response.json({ ok: true, jobId: out.jobId, cached: false, queued: out.kind === "active" });
       },
     },
-    // ---------- auth: Я ID OAuth (Б1) ----------
-    // Вход ВСЕГДА с выбором аккаунта (решение владельца 21.09). Наш «Выход»
-    // отзывает только нашу сессию — сессия Яндекса живёт в его домене и
-    // переживает её, поэтому при следующем `/authorize` он молча возвращал
-    // прежнего пользователя, и сменить аккаунт из интерфейса было нельзя.
-    // `force_confirm=yes` показывает экран выбора; цена — один лишний клик
-    // при обычном входе, и она принята ради того, чтобы вход вообще был
-    // управляемым. Отдельной кнопки «в другой аккаунт» больше нет.
+    // ---------- вход через Я ID (OAuth) ----------
+    // Вход всегда с выбором аккаунта. Наш «Выход» отзывает только нашу сессию,
+    // а сессия Яндекса живет в его домене: без `force_confirm=yes` следующий
+    // `/authorize` молча вернул бы прежнего пользователя, и сменить аккаунт из
+    // интерфейса было бы нельзя. Цена — один лишний клик при обычном входе.
     "/auth/ya": (req) => {
       if (!config.auth.appSecret) {
         return Response.json({ error: { code: "unconfigured", message: "вход на сервере не настроен – обратитесь к администратору" } }, { status: 503 });
       }
-      // 23.09 (репорт Алексея «вход со второй попытки»): петлевой алиас хоста
-      // (127.0.0.1 при redirect_uri на localhost — или наоборот) рвал первую
-      // попытку: state-cookie оставалась на хосте входа, а callback Яндекс
-      // отдает на хост redirect_uri. Вход сначала канонизируется — state и
-      // callback живут в одной банке кук.
+      // Петлевой алиас хоста (127.0.0.1 при redirect_uri на localhost или
+      // наоборот) рвал бы первую попытку входа: state-cookie осталась бы на хосте
+      // входа, а callback Яндекс отдает на хост redirect_uri. Поэтому вход сначала
+      // переводится на канонический хост — state и callback в одной банке кук.
       const hop = loopbackOriginRedirect(new URL(req.url), config.auth.redirect);
       if (hop !== null) {
         return new Response(null, { status: 302, headers: { location: hop } });
@@ -989,8 +955,8 @@ const routes = {
       try {
         const state = makeOAuthState();
         const url = buildAuthUrl(yaCreds(), state, yaEndpoints(), { forceConfirm: true });
-        // круг 5 тура 3 (находка 26): путь возврата после входа — только свой путь
-        // (safeNextPath); без него поведение прежнее (кабинет)
+        // путь возврата после входа — только свой путь (safeNextPath); без него —
+        // кабинет
         const next = safeNextPath(new URL(req.url).searchParams.get("next"));
         const headers = new Headers({ location: url });
         headers.append("set-cookie", oauthStateCookieHeader(ck, state));
@@ -1000,9 +966,9 @@ const routes = {
         return Response.json({ error: { code: "unconfigured", message: "вход через Я ID на сервере не настроен – обратитесь к администратору" } }, { status: 503 });
       }
     },
-    // выход: сессия отзывается в БД, cookie гасится; PAT пользователя остаётся
+    // выход: сессия отзывается в БД, cookie гасится; PAT пользователя остается
     // (он привязан к аккаунту, а не к сессии). Только POST: SameSite=Lax не
-    // отдаёт cookie межсайтовому POST, выход чужой страницей невозможен
+    // отдает cookie межсайтовому POST, так что чужая страница выйти не заставит
     "/auth/logout": {
       POST: (req) => {
         const csrf = guardOrigin(req);
@@ -1014,9 +980,9 @@ const routes = {
     },
     "/auth/ya/callback": async (req) => {
       const url = new URL(req.url);
-      // Ф2.7: редирект ОТНОСИТЕЛЬНЫЙ (абсолютный из Host — риск за кривым
-      // прокси), и ВСЕ исходы callback гасят state-cookie. Несколько
-      // Set-Cookie — через Headers.append.
+      // Редирект относительный (абсолютный из Host опасен за кривым прокси), и
+      // все исходы callback гасят state-cookie. Несколько Set-Cookie — через
+      // Headers.append.
       const callbackRedirect = (location: string, extraCookies: string[] = []): Response => {
         const headers = new Headers({ location });
         for (const c of extraCookies) headers.append("set-cookie", c);
@@ -1025,9 +991,8 @@ const routes = {
       };
       const errorParam = url.searchParams.get("error");
       if (errorParam) {
-        // S-4 (круг 2 В4.4): серверный кап симметричен клиентскому санитайзеру
-        // (format.ts authErrorText): управляющие символы + 200 символов —
-        // до редиректа, а не только на рендере
+        // та же чистка, что у клиента (format.ts authErrorText): без управляющих
+        // символов и не длиннее 200 — уже до редиректа, а не только при отрисовке
         const safeError = errorParam.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 200);
         return callbackRedirect(`/me?auth_error=${encodeURIComponent(safeError)}`, [clearOAuthStateCookieHeader(ck)]);
       }
@@ -1053,17 +1018,17 @@ const routes = {
         clearOAuthStateCookieHeader(ck),
       ]);
     },
-    // ---------- /api/me: аккаунт, PAT-окно, мои репо (настройки бюджетов удалены — К5) ----------
+    // ---------- /api/me: аккаунт, PAT, мои репо ----------
     "/api/me": (req) => {
-      // фоновый зонд шапки: аноним — это 200 с login:null, а не 401 —
-      // браузер логирует каждый не-2xx в консоль, а чистая консоль —
-      // критерий cdp-харнесса В3; остальные me-эндпоинты остаются 401
+      // шапка опрашивает этот маршрут на каждой странице: аноним получает 200 с
+      // login:null, а не 401 — браузер пишет каждый не-2xx в консоль. Остальные
+      // me-эндпоинты отвечают 401
       const user = sessionOf(req);
       if (!user) return Response.json({ login: null, displayName: null, avatarUrl: null, hasPat: false, patCheckedAt: null });
       const meta = config.auth.appSecret ? patMeta(db, user.userId) : null;
       const profile = userProfile(db, user.userId);
-      // Ф2.8 (LOW-5): hasPat = строка есть И она читается текущим ключом —
-      // после ротации APP_SECRET мёртвая строка не выдаётся за рабочий PAT
+      // hasPat = строка есть и читается текущим ключом: после ротации APP_SECRET
+      // мертвая строка не выдается за рабочий PAT
       const readable = config.auth.appSecret ? patReadable(db, config.auth.appSecret, user.userId) : false;
       return Response.json({
         login: user.login,
@@ -1071,8 +1036,8 @@ const routes = {
         avatarUrl: profile.avatarId ? yaAvatarUrl(profile.avatarId) : null,
         hasPat: meta?.hasPat === true && readable,
         patCheckedAt: meta && meta.hasPat && readable ? meta.checkedAt : null,
-        // В4.8.5 (К8.5.4, С2-6): токен сохранен, но текущим ключом не читается
-        // (ротация APP_SECRET) — «Не задан» получает причину
+        // токен сохранен, но текущим ключом не читается (ротация APP_SECRET) —
+        // интерфейс объясняет, почему он «не задан»
         patUnreadable: meta?.hasPat === true && !readable,
       });
     },
@@ -1085,16 +1050,15 @@ const routes = {
         return Response.json({ error: { code: "unconfigured", message: "хранение токенов на сервере не настроено – обратитесь к администратору" } }, { status: 503 });
       }
       if (req.method === "PUT") {
-        // ПОРТ hq-parallel (S1/security): живая проба токена = оракул
-        // валидности PAT — окно на юзера (10/час), сервис не переборщик.
-        // В4.8.5 (К8.5.6, С2-1): окно списывает только ВЕРДИКТ платформы
-        // (токен принят или отклонён); сбой SourceCraft пробу не сжигает
+        // живая проба токена — оракул валидности PAT, поэтому окно на пользователя
+        // (10 в час). Окно списывает только вердикт платформы (токен принят или
+        // отклонен); сбой SourceCraft пробу не сжигает
         if (!windowHasRoom(patProbes, user.userId, PAT_PROBES_PER_HOUR, 60 * 60_000)) {
           return rateLimited("слишком много проверок токена – попробуйте позже", windowRetryAfterSec(patProbes, user.userId, 60 * 60_000));
         }
         const body = (await req.json().catch(() => null)) as { token?: unknown } | null;
         if (typeof body?.token !== "string" || body.token.length < 8) return badQuery("это не похоже на персональный токен доступа SourceCraft");
-        // живая проверка GET /user: вердикт — по общему классификатору (К8.5.6)
+        // живая проверка GET /user: вердикт — по общему классификатору статусов
         const probe = makeScClient({
           token: body.token,
           retry: INTERACTIVE_RETRY,
@@ -1117,15 +1081,14 @@ const routes = {
         }
         storePat(db, config.auth.appSecret!, user.userId, body.token);
         accessCache.clearUser(user.userId); // новый PAT — новые права
-        // В4.8.5 (К8.5.9, К8.5.14): права избранного — поколения прежнего
-        // токена: гасятся, а новые проверяет фоновый насос (анализ он не ставит)
+        // права избранного проверялись прежним токеном — гасятся, новые проверит
+        // фоновый насос (анализ он не ставит)
         resetFavoriteRights(db, user.userId);
         const username = (who.json as { username?: unknown } | null)?.username ?? null;
-        // Ф2.20: PAT уже сохранён — посев избранного fail-soft, любой его
-        // исход сохранение не откатывает. Отдельный клиент с бюджетом 6
-        // запросов (до 5 страниц по 100; /user уже сделан пробой выше)
-        // UX-9 (круг 2 В4.4): без username посев НЕ начинался — отдельный код
-        // вместо source_http, который ложно обвинял namespace
+        // PAT уже сохранен, посев избранного fail-soft: любой его исход сохранение
+        // не откатывает. Отдельный клиент с бюджетом 6 запросов (до 5 страниц по
+        // 100; /user уже запрошен пробой). Без username посев не начинается —
+        // отдельный код, чтобы не обвинять пространство имен
         let seed: PatSeed = { status: "partial", added: 0, error: { code: "no_username" } };
         if (typeof username === "string" && username !== "") {
           const seeder = makeScClient({
@@ -1145,7 +1108,7 @@ const routes = {
       if (req.method === "DELETE") {
         deletePat(db, user.userId);
         accessCache.clearUser(user.userId);
-        // К8.5.9 (С2-3): удаление токена гасит права, проверенные им
+        // удаление токена гасит права, проверенные им
         resetFavoriteRights(db, user.userId);
         recheckPump.clear(user.userId);
         return Response.json({ ok: true });
@@ -1155,26 +1118,23 @@ const routes = {
     "/api/me/repos": async (req) => {
       const user = sessionOf(req);
       if (!user) return unauthorized();
-      // Ф2.8 (LOW-11): минутное окно чтений на юзера — в кабинете список
-      // перечитывается; 429 — до какой-либо работы маршрута
+      // кабинет часто перечитывает список — минутное окно; 429 до любой работы маршрута
       if (!allowMyReposView(user.userId)) {
         return rateLimited(
           `не больше ${config.queue.myReposPerMinute} обновлений списка в минуту – попробуйте позже`,
           windowRetryAfterSec(myReposViews, user.userId, 60_000),
         );
       }
-      // Ф2.20: кабинет читает ТОЛЬКО избранное — PAT здесь не нужен и в сеть
-      // маршрут не ходит. К8.5.9: сохранённые права — только поколения
-      // читаемого PAT (ротация APP_SECRET гасит их на чтении)
+      // кабинет читает только избранное — в сеть маршрут не ходит. Сохраненные
+      // права действительны, только пока PAT читается (ротация APP_SECRET их гасит)
       const pat = patOf(user.userId);
       const result = await listMyRepos(db, user.userId, { savedRightsValid: pat !== null });
-      // К8.5.14 (д): записи «не проверено» или старше суток — в фон, по
-      // нескольку за раз; ответ не ждёт (итог — при следующем чтении списка)
+      // записи «не проверено» или старше суток — в фон, по нескольку за раз;
+      // ответ не ждет (итог — при следующем чтении списка)
       if (pat !== null) recheckPump.enqueue(user.userId, staleFavoriteSlugs(db, user.userId));
       return Response.json({ username: result.username, entries: result.entries });
     },
-    // ПОРТ 5: панель заданий — колокольчик/«Мои задания» (диагноз UX «очереди не видно»)
-    // В5.2 (Б4): остаток лимитов AI зрителя — для счетчика у кнопок
+    // остаток лимитов AI зрителя — для счетчика у кнопок
     "/api/me/ai-quota": (req) => {
       const user = sessionOf(req);
       if (!user) return unauthorized();
@@ -1186,9 +1146,9 @@ const routes = {
         check: aiQuota(db, user.userId, "check", config.ai, now),
       });
     },
-    // В5.2 (Б4, §2 п.6): пароль неограниченного доступа к AI. Попытки не
-    // ограничиваются (решение владельца: пароль очень длинный); пароль не
-    // пишется ни в БД (только отпечаток), ни в лог
+    // Пароль неограниченного доступа к AI. Попытки не ограничиваются — вместо
+    // этого пароль обязан быть длинным; сам пароль не пишется ни в БД (только
+    // отпечаток), ни в лог
     "/api/me/ai-unlock": async (req) => {
       const csrf = guardOrigin(req);
       if (csrf) return csrf;
@@ -1202,15 +1162,15 @@ const routes = {
       if (config.ai.unlockPassword === null) {
         return Response.json({ error: { code: "unlock_disabled", message: "доступ по паролю на этом сервере не настроен" } }, { status: 404 });
       }
-      // аудит М5: попытки не ограничены — тело и пароль ограничены по размеру, чтобы перебор
-      // не превращался в хэширование мегабайтных тел
+      // раз попытки не ограничены, размер тела и пароля ограничен — чтобы перебор не
+      // превращался в хэширование мегабайтных тел
       if (Number(req.headers.get("content-length") ?? "0") > 4096) {
         return Response.json({ error: { code: "too_large", message: "слишком длинный запрос" } }, { status: 413 });
       }
       const body = (await req.json().catch(() => null)) as { password?: unknown } | null;
       if (typeof body?.password !== "string" || body.password.length === 0) return badQuery("введите пароль");
       if (body.password.length > 256) return badQuery("пароль длиннее 256 символов");
-      // надежность М12: пароль в .env читается без пробелов по краям — введенный тоже
+      // пароль в .env читается без пробелов по краям — введенный тоже
       if (!tryUnlock(db, user.userId, body.password.trim(), config.ai)) {
         return Response.json({ error: { code: "wrong_password", message: "пароль не подошел" } }, { status: 403 });
       }
@@ -1219,13 +1179,12 @@ const routes = {
     "/api/me/jobs": (req) => {
       const user = sessionOf(req);
       if (!user) return unauthorized();
-      // В4.8.5 (К8.5.8, С9-1): ответ несёт `login` — вкладка, показывающая
-      // другую личность (выход/вход другим аккаунтом в соседней вкладке),
-      // замечает расхождение на ближайшем опросе и перечитывает /api/me
+      // ответ несет `login`: если в соседней вкладке вошли другим аккаунтом,
+      // эта вкладка заметит расхождение на ближайшем опросе и перечитает /api/me
       return Response.json({ login: user.login, ...myJobs(db, user.userId) });
     },
-    // Парковка 23.09 (организаторы: /me/repos): пикер «своих» репозиториев —
-    // только по PAT зрителя, то же минутное окно чтений, что у кабинета
+    // пикер своих репозиториев — только по PAT зрителя, то же минутное окно
+    // чтений, что у кабинета
     "/api/me/sourcecraft-repos": async (req) => {
       const user = sessionOf(req);
       if (!user) return unauthorized();
@@ -1237,7 +1196,7 @@ const routes = {
           windowRetryAfterSec(myReposViews, user.userId, 60_000),
         );
       }
-      // В5.3 (25.09): бюджет запросов — под полный обход страниц (платформа отдает по 1-2 записи)
+      // бюджет запросов — под полный обход страниц: платформа отдает по 1-2 записи на страницу
       const client = makeScClient({ retry: INTERACTIVE_RETRY, token: pat, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 40, timeoutMs: config.scan.rest.timeoutMs });
       const result = await listSourcecraftRepos(client);
       if (result.status === "source_http") return Response.json({ error: { code: "source_http" } }, { status: 502 });
@@ -1249,13 +1208,12 @@ const routes = {
       if (req.method === "GET") {
         return Response.json({ entries: listFavorites(db, user.userId) });
       }
-      // Ф2.20: ручной ввод — JSON {repository: "org/repo" | SourceCraft-URL};
-      // тот же парсер, что у path-роут звезды
+      // ручной ввод — JSON {repository: "org/repo" | ссылка SourceCraft};
+      // тот же парсер, что у маршрута звезды
       if (req.method === "PUT") {
         const csrf = guardOrigin(req);
         if (csrf) return csrf;
-        // В4.8.5 (К8.5.7, С3-4): отказ 400 окно мутаций не списывает — разбор
-        // ввода ДО окна; S-7 (круг 2): сессия читается ОДИН раз — выше
+        // ввод разбирается до окна, чтобы отказ 400 не списывал мутацию
         const body = (await req.json().catch(() => null)) as { repository?: unknown } | null;
         if (typeof body?.repository !== "string") return badQuery("укажите репозиторий как org/repo или ссылкой на него");
         const parsed = parseFavoriteInput(body.repository);
@@ -1277,10 +1235,9 @@ const routes = {
       const user = sessionOf(req);
       if (!user) return unauthorized();
       if (req.method === "PUT") {
-        // общий парсер (Ф2.20) применён и к path-роуту звезды; разбор — до окна (К8.5.7)
+        // тот же парсер, что у ручного ввода; разбор — до окна
         const parsed = parseFavoriteInput(`${org}/${repo}`);
         if (!parsed) return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
-        // S-7 (круг 2): сессия читается ОДИН раз — выше
         if (!allowFavMutation(user.userId)) return favoriteRateLimited(user.userId);
         return addFavoriteAndCheck(user.userId, parsed.org, parsed.repo);
       }
@@ -1294,12 +1251,6 @@ const routes = {
       }
       return Response.json({ error: { code: "bad_query", message: "метод запроса не поддерживается" } }, { status: 405 });
     },
-    // В4.8.5 (К8.5.14 (г), §2-В1): маршрута «Проверить доступ»
-    // (`POST /api/me/favorites/:org/:repo/check`) больше нет — права
-    // проверяются сами при добавлении в избранное и фоном; его инварианты
-    // (порядок отказов, лимит проверок, кулдаун по own-скану зрителя, AppSec
-    // на APPSEC_API_BASE, «не свой — без постановки», капы requestUserScan)
-    // перенесены на путь добавления. Прежний адрес отвечает общим JSON-404.
     "/api/me/repos/:org/:repo/scan": async (req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
@@ -1316,20 +1267,20 @@ const routes = {
       if (!client) {
         return Response.json({ error: { code: "no_pat", message: "сначала добавьте персональный токен доступа SourceCraft в Настройках" } }, { status: 409 });
       }
-      // К4/Ф1.7: дешёвые отказы (дедуп, активные, часовой лимит) — ДО сети
+      // дешевые отказы (дедуп, активные, часовой лимит) — до сети
       const cheap = userScanCheapGate(db, user.userId, org!, repo!, config.queue);
       if (cheap) return scanResponse(cheap);
-      // В4.8.5 (К8.5.14 (б), §2-В1): анализ — только своих. «Свой» — общее
-      // правило над доступом из общего резолвера (с кэшем карточки); строки
-      // репо ещё нет — живая проверка теми же правилами. Неизвестно — не свой
+      // Анализ по запросу — только для своих репозиториев. «Свой» определяется
+      // по доступу из общего резолвера (с кэшем карточки); строки репо еще нет —
+      // живая проверка теми же правилами. Неизвестно — не свой
       const own = await ownershipOf(req, user.userId, org!, repo!);
       if (own.kind !== "own") {
         const refusal = scanRefusal(own, org!, repo!);
         if (refusal.record) recordRefusedUserJob(db, user.userId, new Date(), `${org}/${repo}`);
         return Response.json(refusal.body, { status: refusal.status });
       }
-      // H1/LOW-3 (К3): repo-GET уже сделан (или доступ подтверждён кэшем
-      // карточки) — строка repos и заявка появляются только при доказанном доступе
+      // repo-GET уже сделан (или доступ подтвержден кэшем карточки) — строка
+      // repos и заявка появляются только при доказанном доступе
       const out = await requestUserScan(db, client, user.userId, org!, repo!, config.queue, new Date(), own.repoRes);
       return scanResponse(out);
     },
@@ -1337,20 +1288,17 @@ const routes = {
     "/api/*": () => notFound("такого адреса нет"),
     // catch-all фронтенда: маршруты /repo/{org}/{repo} живут в History API,
     // прямая ссылка и F5 на карточке должны отдавать тот же бандл
-    // HTML-импорт — готовый Response: заголовки выставляются один раз (идемпотентно)
     "/*": index,
   } satisfies NonNullable<RoutesTable>;
-// В4.4 (кластер K, отклонение): заголовки защиты НЕ ставятся на HTML-бандл —
-// Bun HTML-import маршрут (routes["/*"] = index) не даёт управлять ответом
-// (проверено живьём на bun 1.4.2: HTMLBundle непрозрачен, из обработчика не
-// возвращается). JSON API закрыт целиком; фрейминг страницы закроет
-// reverse-proxy стенда (В6, add_header) — честное ограничение в отчёте.
+// Заголовки защиты на HTML-бандл не ставятся: маршрут HTML-импорта Bun не дает
+// управлять ответом (HTMLBundle непрозрачен и из обработчика не возвращается).
+// JSON API закрыт целиком, фрейминг страницы закрывает reverse-proxy стенда.
 
 const server = Bun.serve({
   port: config.port,
-  // В4.4 (кластер H, Прод-С4): Bun рвёт соединение при ~10–12 с тишины
-  // (замер аудита) — «думающие» хендлеры (PUT PAT: проба+посев, карточка
-  // с PAT, callback) легально живут дольше; 120 с — с запасом
+  // по умолчанию Bun рвет соединение примерно после 10 с тишины, а хендлеры с
+  // живыми запросами (PUT PAT: проба и посев, карточка с PAT, callback) бывают
+  // дольше; 120 с — с запасом
   idleTimeout: 120,
   routes: hardenRoutes(routes),
   fetch() {
@@ -1358,9 +1306,8 @@ const server = Bun.serve({
     for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.headers.set(k, v);
     return res;
   },
-  // S-6 (круг 2 В4.4): упавший хендлер перехватывается опцией error — 500
-  // уходит С теми же security-заголовками (раньше Bun-внутренний фолбэк шёл
-  // мимо hardenRoutes)
+  // упавший хендлер перехватывается здесь, чтобы 500 ушел с теми же
+  // заголовками защиты (встроенный фолбэк Bun идет мимо hardenRoutes)
   error(err) {
     console.error(`[http] handler failed: ${String((err as Error).message ?? err).slice(0, 200)}`);
     const res = Response.json({ error: { code: "internal", message: "внутренняя ошибка сервера" } }, { status: 500 });
@@ -1369,9 +1316,9 @@ const server = Bun.serve({
   },
 });
 
-// --- периодика (В4/Б3): воркер очереди + ночной обход каталога ---
-// H2 (К3): клиента на процесс нет — фабрика выдаёт новый клиент с полным
-// бюджетом на каждую задачу воркера и на каждый ночной обход
+// --- периодика: воркеры очереди и ночной обход каталога ---
+// общего клиента на процесс нет — фабрика выдает новый клиент с полным
+// бюджетом на каждую задачу воркера
 const serverClient = () =>
   config.sourcecraftToken
     ? makeScClient({
@@ -1382,9 +1329,9 @@ const serverClient = () =>
         timeoutMs: config.scan.rest.timeoutMs,
       })
     : null;
-// Ф2.5: обходу каталога — СВОЙ бюджет (потолок страниц + 10), а не бюджет
-// скана: полный каталог 27 446 репо = 275 страниц, и общий бюджет 1000
-// запросов кончился бы посреди обхода, превратив его в «недочитанный»
+// у обхода каталога свой бюджет (потолок страниц + 10), а не бюджет скана:
+// с ростом каталога бюджет скана мог бы кончиться посреди обхода, и тот
+// считался бы недочитанным
 const catalogClient = () =>
   config.sourcecraftToken
     ? makeScClient({
@@ -1395,22 +1342,22 @@ const catalogClient = () =>
         timeoutMs: config.scan.rest.timeoutMs,
       })
     : null;
-// ПОРТ hq-parallel (S2): роли процесса — web = сервер + user-воркер,
-// rating = планировщик + rating-воркер, all = dev-всё-в-одном (user вперёд)
+// роли процесса: web — сервер и пользовательские воркеры, rating — планировщик
+// и воркеры рейтинга, all — все вместе для разработки (пользовательские вперед)
 const role = config.processRole;
-// В4.4 (кластер L): стоп-хендлалы таймеров — SIGTERM снимает их штатно
+// стоп-функции таймеров — SIGTERM снимает их штатно
 const stopWorkerLoops: Array<() => void> = [];
-// В4.4 (кластер A): стартовый рескор асинхронен и исполняется ТОЛЬКО ролями
-// rating/all — порт уже поднят; web-роль не пишет оценки, её health читает
-// прогресс из meta. Прогресс персистентен (курсор в meta): рестарт
-// продолжает с места остановки, BUSY не фатален (бэкофф-ретраи).
+// Стартовый рескор асинхронный, уже после поднятия порта: иначе деплой со
+// сменой производных держал бы порт десятки минут. Выполняют его только роли
+// rating/all (web оценки не пишет, ее health читает прогресс из meta). Курсор
+// прогресса хранится в meta — рестарт продолжает с места остановки, BUSY не
+// фатален (ретраи с бэкоффом).
 if (needsRescore(db)) {
   if (role === "rating" || role === "all") {
     console.log("[startup] stored scores are outdated or missing: background rescore (port is already up)");
-    // Круг 2 В4.4 (глубокая эщ к крэш-лупу деплой-окна): непойманный rejection
-    // в Bun — exit 1, супервизор перезапускает, процесс не поднимается. Б1
-    // чинит корень (кодек-осознанные читатели причины), .catch — страховка:
-    // ошибка уходит в meta derived_rescore_error (health окрасится), процесс жив
+    // непойманный rejection в Bun — exit 1, и супервизор ушел бы в цикл
+    // перезапусков. .catch — страховка: ошибка пишется в meta (health это
+    // покажет), процесс остается жив
     void runStartupRescore(db, { log: (m) => console.log(`[rescore] ${m}`) }).catch((e: unknown) => {
       const msg = String((e as Error).message ?? e).slice(0, 200);
       console.error(`[rescore] startup pass crashed: ${msg}`);
@@ -1424,12 +1371,12 @@ if (needsRescore(db)) {
     console.log("[startup] stored scores are outdated or missing: rescore runs in the rating process (PROCESS_ROLE=web)");
   }
 }
-// В5.2 (очередь, решение Екатерины 25.09): у каждой пары «полоса роли × род заявки» свой
-// цикл — плановый скан тяжелого репо не держит пользователей, скан не держит AI-обзор
+// у каждой пары «полоса роли × род заявки» свой цикл: плановый скан тяжелого
+// репо не держит пользователей, скан не держит AI-обзор
 const loopPlan = workerLoopPlan(role, config.queue);
 stopWorkerLoops.push(startWorkerLoops({ db, config, serverClient }, loopPlan));
-// В4.8.5 (К8.5.2b, С10-4): часовое обслуживание (сироты-сканы, ретеншен,
-// каталоги клонов) — в ЛЮБОЙ роли; у rating/all его запускает startScheduler
+// часовое обслуживание (осиротевшие сканы, ретеншен, каталоги клонов) нужно в
+// любой роли; у rating/all его запускает startScheduler
 if (role === "web") {
   stopWorkerLoops.push(startMaintenance(db, config));
 }
@@ -1438,17 +1385,15 @@ if (role === "rating" || role === "all") {
 }
 console.log(`  role: ${role} (PROCESS_ROLE); worker loops: ${workerLoopSummary(loopPlan)}`);
 
-// ПОРТ hq-parallel (S3) + Ф2.2 (В4.2a): стартовое обслуживание — осиротевшие
-// каталоги клонов в tmp (после crash/OOM их не подбирал никто) И осиротевшие
-// `running`-строки `scans` (процесс умер, скан «идёт» вечно). Свип при старте
-// работает в любой роли процесса: роль `web` планировщика не поднимает
+// Стартовое обслуживание в любой роли: осиротевшие каталоги клонов в tmp
+// (после падения или OOM их никто не подберет) и осиротевшие `running`-строки
+// `scans` (процесс умер, а скан «идет» вечно)
 void maintenanceTick(db, config);
 
-// В4.4 (кластер L/З1 код-аудита): SIGTERM/SIGINT — ШТАТНОЕ завершение ≤ 5 с,
-// а не мгновенный выход с сиротами до лиза (91 мин) и свипа (182 мин):
-// перестаём принимать, свои running-заявки возвращаем в queued (claimed_at
-// NULL, попытка откатывается — В4.8.5, К8.5.2a: остановка не считается попыткой), живые группы
-// клонов гасим, таймеры снимаем.
+// SIGTERM/SIGINT — штатное завершение за 5 с, чтобы не оставлять сирот до
+// истечения лиза и свипа: перестаем принимать запросы, свои running-заявки
+// возвращаем в queued (попытка откатывается — остановка попыткой не считается),
+// живые группы клонов гасим, таймеры снимаем.
 let shuttingDown = false;
 function shutdown(signal: string): void {
   if (shuttingDown) return;
@@ -1466,8 +1411,8 @@ function shutdown(signal: string): void {
       /* таймер уже снят */
     }
   }
-  // П-5 (круг 2 В4.4): порядок — сначала закрыть СВОИ running-сканы честным
-  // квартетом (bad + shutdown), ПОТОМ вернуть заявки в queued
+  // порядок важен: сначала закрыть свои running-сканы (bad + shutdown), потом
+  // вернуть заявки в queued
   try {
     const closed = closeOwnRunningScans(db);
     if (closed > 0) console.log(`[signal] прерванных сканов закрыто как bad (shutdown): ${closed}`);
@@ -1491,7 +1436,7 @@ console.log(`repo-health слушает http://127.0.0.1:${server.port}`);
 console.log(`  llm: ${config.llm.provider} (main=${config.llm.mainModel}, side=${config.llm.sideModel})`);
 console.log(`  sourcecraft token: ${config.sourcecraftToken ? "есть" : "НЕТ (зонд 401)"}`);
 console.log(`  scheduler: интервал ${Math.round(config.scheduler.intervalMs / 60000)} мин, форс-полный ${config.scheduler.fullRescan ? "ВКЛ" : "выкл"}`);
-// 23.09: кулдаун генерации виден сразу — рассинхрон .env с процессом ловится по stdout
+// кулдаун генерации в строке старта: расхождение .env с процессом видно по stdout
 console.log(`  summary cooldown: ${config.queue.summaryCooldownMs ?? 3_600_000} ms, кэш по скану ${(config.queue.summaryCooldownMs ?? 3_600_000) > 1 ? "ВКЛ" : "выкл (дебаг)"}`);
-// В5.2 (аудит М5): пароль короче 20 символов выключает функцию — это видно в строке старта
+// пароль короче 20 символов выключает функцию — это видно в строке старта
 console.log(`  AI: пароль доступа — ${config.ai.unlockStatus === "on" ? "задан" : config.ai.unlockStatus === "too_short" ? "КОРОЧЕ 20 СИМВОЛОВ, доступ по паролю выключен" : "не задан"}; автозапуск топа — ${config.ai.topAuto ? `вкл (топ-${config.ai.topAutoSize})` : "выкл"}; лимиты обзора ${config.ai.overview.perHour}/${config.ai.overview.perDay}/${config.ai.overview.globalPerDay}, проверки ${config.ai.check.perHour}/${config.ai.check.perDay}/${config.ai.check.globalPerDay}`);

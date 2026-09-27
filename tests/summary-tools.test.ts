@@ -1,6 +1,6 @@
-// summary-tools.test.ts — калькулятор специалистов (23.09, Алексей):
-// арифметика долей — инструментом, а не в уме; security получает ТОЛЬКО
-// calculate (файловые инструменты ей запрещены законом 5).
+// Калькулятор специалистов: арифметика долей — инструментом, а не в уме;
+// security получает ТОЛЬКО calculate (файловые инструменты ей запрещены:
+// безопасность — только данные AppSec, своего сканирования нет).
 import { describe, expect, test } from "bun:test";
 import { evaluateArithmetic, makeCalculatorExecutor } from "../src/summary/tools";
 

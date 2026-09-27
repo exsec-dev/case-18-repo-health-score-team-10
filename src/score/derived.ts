@@ -1,8 +1,7 @@
-// derived.ts — derived-метрики §7.3 из фактов (без re-clone): вход =
-// карта kind → value только ОК-фактов (bad-channel уже замещён stale-
-// историей в compute), выход — сырые числа для score-модели и показа
-// (mirror_likeness — показ, без веса). Robot-истина — robot2
-// (v1-флаги в фактах игнорируются, Q18).
+// Производные метрики из фактов (без повторного клона): вход — карта kind → value
+// только ОК-фактов (упавший канал compute уже заменил прошлыми данными), выход —
+// сырые числа для модели и показа (mirror_likeness — только показ, без веса).
+// Роботов и синки определяет robot2; старые robot-флаги в фактах игнорируются.
 import { BUS_FACTOR_SHARE, BUS_FACTOR_WINDOW_DAYS, OLD_SHARE_MIN_BASE } from "./model";
 import { robot2Flags } from "./robot2";
 
@@ -19,23 +18,21 @@ export interface DerivedMetrics {
   humanCommits: number | null;
   commits90d: number | null;
   commits365d: number | null;
-  /** commits/мес := commits_90d/3 (human не-sync, author-даты, §3) */
+  /** commits/мес := commits_90d/3 (коммиты людей без синков, по датам автора) */
   commitsPerMonth: number | null;
   activeMonths: number | null;
   contributorsActive90d: number | null;
-  /** ts последнего НЕ-sync НЕ-robot author-коммита (freshness) */
+  /** ts последнего коммита человека (не sync, не robot) по дате автора — для свежести */
   lastHumanCommitTs: number | null;
   syncBursts: number | null;
   robotRatioV2: number | null;
-  /** показ (§7.3): доля sync + authors/committers — без веса */
+  /** только показ: доля sync + authors/committers, без веса */
   mirrorLikeness: { sync_share: number; authors: number; committers: number } | null;
-  // круг 2 (К5): признак «история только из синков» (Н10) снят вместе с правилом
-  // «Активность — нет данных»: зеркала считаются по датам автора (robot2)
-  /** авторы-люди (пол 0.2 у соло): email человеческих коммитов — 4.2.0 (М1.6) без robot/sync */
+  /** авторы-люди (у соло пол 0.2): email коммитов без robot/sync */
   contributorsTotal: number | null;
   /**
-   * В5 (К5.9): bus factor — сколько авторов покрывают половину человеческих
-   * коммитов за окно; нет коммитов в окне — null. Показ без веса.
+   * Bus factor — сколько авторов покрывают половину коммитов людей за окно;
+   * нет коммитов в окне — null. Только показ, без веса.
    */
   busFactor: number | null;
   // --- issues ---
@@ -47,25 +44,24 @@ export interface DerivedMetrics {
   todoDensityPerKloc: number | null;
   oldShare: number | null;
   /**
-   * К-Р14 (круг 2): причина no-data для old_share, когда выборка TODO
-   * неполна (todo_note = "incomplete" — обрыв `git cat-file`): доля старых
-   * маркеров опирается на полноту выборки и по частичной число не даёт.
+   * Причина no-data для old_share, когда выборка TODO неполна (todo_note =
+   * "incomplete" — обрыв `git cat-file`): доля старых маркеров требует полной выборки.
    */
   oldShareNoData: string | null;
   rootEntries: number | null;
   /**
-   * 4.3.0: строки кода, по которым считается категория — `source_loc` нового
-   * сборщика, иначе весь `loc` фактов до правки М2.3; null — не прочитаны
+   * Строки кода, по которым считается категория: `source_loc`, а у старых
+   * фактов без этого поля — весь `loc`; null — не прочитаны
    */
   codeLoc: number | null;
-  /** приемка HQ (E15): строки взяты из `loc` факта до М2.3 (поля `source_loc` нет) */
+  /** строки взяты из `loc` старого факта (поля `source_loc` нет) */
   codeLocLegacy: boolean;
   /**
-   * 4.3.0 (Р1): доля файлов тестов среди файлов кода. Круг 2 (В1): null и у
-   * фактов без `test_files`, и при `test_files = 0` — «Тесты» только бонус
+   * Доля файлов тестов среди файлов кода. null и у фактов без `test_files`, и при
+   * `test_files = 0`: «Тесты» — только бонус, их отсутствие балл не снижает
    */
   testShare: number | null;
-  /** круг 2 (В1): сборщик 3 посчитал тесты, и непустых нет — показ «тестов нет» */
+  /** сборщик посчитал тесты, и непустых нет — показ «тестов нет» */
   testsNone: boolean;
   // --- rest ---
   pulls90d: number | null;
@@ -89,11 +85,10 @@ function countRecent(dates: unknown[], now: Date, windowDays: number): number {
 }
 
 /**
- * Карта kind → value ОК-фактов. Читает activity.git.timeline/summary,
- * issues.stats, code.todo, tree.stats, activity.rest.
+ * Читает activity.git.timeline, issues.stats, code.todo, tree.stats, activity.rest.
  */
 export function deriveMetrics(ok: Map<string, unknown>, now: Date): DerivedMetrics {
-  // --- git: robot2 → human-множество ---
+  // --- git: robot2 отделяет коммиты людей ---
   const timeline = ok.get("activity.git.timeline") as { events?: TimelineEventValue[] } | undefined;
   const events = Array.isArray(timeline?.events) ? timeline!.events! : null;
   if (events) {
@@ -114,7 +109,7 @@ export function deriveMetrics(ok: Map<string, unknown>, now: Date): DerivedMetri
       if (flags[i]!.sync) syncCount++;
       if (flags[i]!.robot) robotCount++;
       const at = tsOf(e.author?.date);
-      // 4.2.0 (М1.11): дата автора из будущего не делает репо «свежим навсегда»
+      // дата автора из будущего не делает репо «свежим навсегда»
       if (excluded || at === null || at > now.getTime() + DAY_MS) return;
       humanTs.push(at);
       if (email) humanEmails.add(email);
@@ -135,8 +130,8 @@ export function deriveMetrics(ok: Map<string, unknown>, now: Date): DerivedMetri
         .filter((x) => x !== ""),
     ).size;
     const lastHuman = humanTs.length ? Math.max(...humanTs) : null;
-    // bus factor: авторы человеческих коммитов окна по убыванию вклада,
-    // накапливаем до BUS_FACTOR_SHARE суммарно (Классика T½; без веса)
+    // bus factor: авторы коммитов людей в окне по убыванию вклада,
+    // накапливаем до доли BUS_FACTOR_SHARE
     const windowCommits = events
       .map((e, i) => ({ e, f: flags[i]! }))
       .filter(({ e, f }) => {
@@ -199,8 +194,8 @@ export function deriveMetrics(ok: Map<string, unknown>, now: Date): DerivedMetri
 }
 
 /**
- * 4.3.0 (Р2): закрытые задачи, которые идут в балл, — прожившие не меньше часа
- * (`closed_counted` сборщика 3); у фактов прежнего сборщика поля нет — все закрытые.
+ * Закрытые задачи, которые идут в балл, — прожившие не меньше часа
+ * (`closed_counted`); у старых фактов без этого поля — все закрытые.
  */
 export function issuesClosedCounted(stats: { closed?: unknown; closed_counted?: unknown } | undefined | null): number | null {
   if (typeof stats?.closed_counted === "number") return stats.closed_counted;
@@ -208,30 +203,27 @@ export function issuesClosedCounted(stats: { closed?: unknown; closed_counted?: 
 }
 
 function issuesCodeRest(ok: Map<string, unknown>, now: Date): Pick<DerivedMetrics, "staleShare" | "resolutionRatio" | "todoTotal" | "todoDensityPerKloc" | "oldShare" | "oldShareNoData" | "rootEntries" | "codeLoc" | "codeLocLegacy" | "testShare" | "testsNone" | "pulls90d" | "releases12m"> {
-  // issues.stats
   const stats = ok.get("issues.stats") as { open?: unknown; closed?: unknown; closed_counted?: unknown; stale_90d?: unknown } | undefined;
   const open = typeof stats?.open === "number" ? stats.open : null;
   const closed = typeof stats?.closed === "number" ? stats.closed : null;
   const closedCounted = issuesClosedCounted(stats);
   const stale90 = typeof stats?.stale_90d === "number" ? stats.stale_90d : null;
-  // 4.2.0 (М1.3): открытых 0 при закрытых — «зависших нет» (данные, доля 0);
+  // открытых 0 при закрытых — «зависших нет» (данные, доля 0);
   // no-data только у пустого трекера (0/0 — отдельное правило категории)
   const staleShare =
     open !== null && open > 0 && stale90 !== null ? stale90 / open : open === 0 && closed !== null && closed > 0 ? 0 : null;
-  // 4.3.0 (Р2): доля решенных — без мгновенно закрытых
+  // доля решенных — без мгновенно закрытых
   const resolutionRatio = open !== null && closedCounted !== null && open + closedCounted > 0 ? closedCounted / (open + closedCounted) : null;
 
-  // code.todo + tree.stats
   const todo = ok.get("code.todo") as { count?: unknown; fixme?: unknown; older_180d?: unknown; todo_files?: unknown; blamed_files?: unknown; todo_note?: unknown } | undefined;
   const count = typeof todo?.count === "number" ? todo.count : null;
   const fixme = typeof todo?.fixme === "number" ? todo.fixme : null;
   const older = typeof todo?.older_180d === "number" ? todo.older_180d : null;
   const todoTotal = count !== null && fixme !== null ? count + fixme : null;
   const tree = ok.get("tree.stats") as { top_level?: unknown[]; loc?: unknown; source_loc?: unknown; source_files?: unknown; test_files?: unknown; source_unread?: unknown } | undefined;
-  // М2.3: плотность — по строкам кода (`source_loc`); у фактов до правки
-  // сборщика поля нет — берется весь LOC, как раньше.
-  // Круг 2 (К3, E3): 0 прочитанных строк при непрочитанных файлах кода
-  // (больше лимита текста, бинарные) — строки неизвестны (null), не «0 строк»
+  // плотность — по строкам кода (`source_loc`); у старых фактов поля нет — весь LOC.
+  // 0 прочитанных строк при непрочитанных файлах кода (больше лимита текста,
+  // бинарные) — строки неизвестны (null), а не «0 строк»
   const unread = typeof tree?.source_unread === "number" && tree.source_unread > 0;
   const loc =
     typeof tree?.source_loc === "number"
@@ -245,12 +237,11 @@ function issuesCodeRest(ok: Map<string, unknown>, now: Date): Pick<DerivedMetric
           : null;
   const todoDensityPerKloc = todoTotal !== null && loc !== null && loc > 0 ? (todoTotal / loc) * 1000 : null;
   const blamed = typeof todo?.blamed_files === "number" ? todo.blamed_files : null;
-  // К-Р14: неполная выборка TODO (обрыв cat-file) → old_share no-data с
-  // причиной, а не число по частичной выборке
+  // неполная выборка TODO (обрыв cat-file) → old_share no-data с причиной,
+  // а не число по частичной выборке
   const todoIncomplete = todo?.todo_note === "incomplete";
-  // 4.2.0 (М1.4, М1.5): 0 пометок при полной выборке — «старых нет» (доля 0);
-  // доля считается от не меньше OLD_SHARE_MIN_BASE пометок — одна старая
-  // пометка не обрушивает категорию
+  // 0 пометок при полной выборке — «старых нет» (доля 0); знаменатель не меньше
+  // OLD_SHARE_MIN_BASE, чтобы одна старая пометка не обрушивала категорию
   const oldShare = todoIncomplete || todoTotal === null
     ? null
     : todoTotal === 0
@@ -260,13 +251,12 @@ function issuesCodeRest(ok: Map<string, unknown>, now: Date): Pick<DerivedMetric
         : null;
   const oldShareNoData = todoIncomplete ? "todo sample incomplete (cat-file truncated) — old_share needs the full sample" : null;
   const rootEntries = Array.isArray(tree?.top_level) ? tree!.top_level!.length : null;
-  // Р1: доля тестов — только у фактов сборщика 3 (поле test_files) и при коде;
-  // круг 2 (В1): нет непустых тестов — подметрика вне расчета (бонус), а не 0
+  // доля тестов — только если сборщик их считал (поле test_files) и код есть;
+  // нет непустых тестов — подметрика вне расчета (она бонус), а не 0
   const testsCounted = typeof tree?.test_files === "number" && typeof tree?.source_files === "number" && tree.source_files > 0;
   const testShare = testsCounted && (tree!.test_files as number) > 0 ? (tree!.test_files as number) / (tree!.source_files as number) : null;
   const testsNone = testsCounted && tree!.test_files === 0;
 
-  // activity.rest (событийные даты §7.4)
   const rest = ok.get("activity.rest") as { pulls_created_at?: unknown; releases_released_at?: unknown } | undefined;
   const pulls90d = Array.isArray(rest?.pulls_created_at) ? countRecent(rest!.pulls_created_at!, now, 90) : null;
   const releases12m = Array.isArray(rest?.releases_released_at) ? countRecent(rest!.releases_released_at!, now, 365) : null;

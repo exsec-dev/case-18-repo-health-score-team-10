@@ -1,8 +1,6 @@
-// public.ts — публичный API и badge (В5, К5.8): только rating_active
-// публичные репозитории; приватный/эвицтированный — 404 неотличимо от
-// несуществующего. В проекции — ничего, кроме публичных чисел и меты:
-// ни доказательств, ни текстов LLM, ни таймлайна. В SVG — только число,
-// подпись и цвет.
+// Публичный API и бейдж: только публичные репозитории из рейтинга; приватный
+// или выведенный – 404, неотличимо от несуществующего. В ответе только
+// публичные числа и мета: ни доказательств, ни текстов LLM, ни таймлайна.
 import type { Database } from "bun:sqlite";
 import { MODEL_VERSION, INDEX_WEIGHTS } from "../score/model";
 import { LAST_ELIGIBLE_SCAN_SQL, publicApiVisible, ratingPlace } from "./repos";
@@ -29,8 +27,7 @@ export function getPublicRepo(db: Database, org: string, repo: string): PublicRe
     .query("SELECT id, org_slug, repo_slug, title, language, likes, rating_active, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?")
     .get(org, repo) as { id: number; org_slug: string; repo_slug: string; title: string | null; language: string | null; likes: number | null; rating_active: number; visibility: string } | null;
   if (!r) return null;
-  // гейт публичности: не публичный ИЛИ выведенный — не существует для API
-  // В5.5 закрытие (П-2): та же проверка задает поле карточки `repo.badge`
+  // та же проверка задает поле карточки `repo.badge`
   if (!publicApiVisible(r)) return null;
   const scan = db
     .query(
@@ -38,13 +35,12 @@ export function getPublicRepo(db: Database, org: string, repo: string): PublicRe
        FROM scores sc JOIN scans s ON s.id = sc.scan_id
        WHERE sc.repo_id = ? AND sc.model_version = ? AND sc.scan_id = ${LAST_ELIGIBLE_SCAN_SQL}`,
     )
-    // подзапрос LAST_ELIGIBLE_SCAN_SQL несёт свой ? на model_version —
-    // параметров три (как в getRepoCard)
+    // у подзапроса LAST_ELIGIBLE_SCAN_SQL свой ? на model_version, поэтому параметров три
     .get(r.id, MODEL_VERSION, MODEL_VERSION) as
     | { scan_id: number; healthcraft_index: number | null; index_coverage: number; categories: string; finished_at: string | null; head_sha: string | null }
     | null;
   if (scan === null) {
-    // репо в рейтинге, но ещё не оценён: честная пустая проекция
+    // репо в рейтинге, но еще не оценен
     return {
       org: r.org_slug,
       repo: r.repo_slug,
@@ -90,12 +86,10 @@ export function badgeColor(index: number | null): string {
 export const BADGE_CACHE_SECONDS = 300;
 
 /**
- * В5.9 Б: вариант бейджа — параметр `style` существующего маршрута
- * `/api/v1/repos/:org/:repo/badge.svg` (а не отдельный адрес): тот же гейт
- * публичности, лимит и кэш без дублирования, а README переключается одной
- * правкой адреса. Нет параметра — обычный бейдж; `style=rank` — со значком
- * места; иное значение — 400 (неверное значение известного параметра, как у
- * рейтинга), до поиска репо: ответ не зависит от его видимости.
+ * Вариант бейджа – параметр `style` того же маршрута `badge.svg`, а не отдельный
+ * адрес: гейт публичности, лимит и кэш общие, а README переключается правкой
+ * адреса. Нет параметра – обычный бейдж, `style=rank` – со значком места, иное
+ * значение – 400 еще до поиска репо, чтобы ответ не зависел от его видимости.
  */
 export type BadgeStyle = "plain" | "rank";
 
@@ -107,9 +101,8 @@ export function parseBadgeStyle(params: URLSearchParams): BadgeStyle | null {
 }
 
 /**
- * Значок места публичного репо для бейджа: место — `ratingPlace`, тот же
- * подсчет, что у карточки (`score.rank`); `proj` — ответ `getPublicRepo`
- * (публичный, rating_active). Без индекса — места нет, значка нет.
+ * Значок места для бейджа; место считает `ratingPlace`, как и на карточке.
+ * Без индекса нет ни места, ни значка.
  */
 export function publicRankBadge(db: Database, proj: PublicRepoResponse): RankBadge | null {
   if (proj.healthcraftIndex === null) return null;
@@ -117,11 +110,9 @@ export function publicRankBadge(db: Database, proj: PublicRepoResponse): RankBad
 }
 
 /**
- * «Металл» лиги значка места (решение владельца 27.09): фон сегмента и цвет
- * текста. Круг 2 (27.09, «мягкий металл»): фон — яркий край градиента плашки лиги на
- * карточке (theme.css `--rh-league-<лига>-bg`), текст — ее темный оттенок металла.
- * Контраст WCAG проверен числом (тест v59-b): ≥ 4,5:1 у всех трех (текст на тон темнее
- * при закрытии В5.9); белый на этих фонах не проходит — поэтому текст темный.
+ * «Металл» лиги значка места: фон – яркий край градиента плашки лиги на карточке
+ * (theme.css `--rh-league-<лига>-bg`), текст – темный оттенок того же металла.
+ * Белый текст на этих фонах не дает контраста WCAG 4,5:1, темный дает (проверено тестом).
  */
 export const RANK_BADGE_COLORS: Record<RankLeague, { bg: string; fg: string }> = {
   gold: { bg: "#dcc26a", fg: "#5c4600" },
@@ -130,21 +121,18 @@ export const RANK_BADGE_COLORS: Record<RankLeague, { bg: string; fg: string }> =
 };
 
 /**
- * SVG badge: ТОЛЬКО число, подпись и цвет (К5.8) — никаких ссылок, шрифтов
- * с внешних хостов или метаданных. Без данных — «n/a» серым (tri-state).
- * В5.9 Б: `rank` — третий сегмент со значком места («ТОП-10») цвета своей
- * лиги; null — бейдж без изменений (байт в байт прежний), а не пустой.
+ * SVG-бейдж: только число, подпись и цвет – никаких ссылок, внешних шрифтов и
+ * метаданных. Без данных – «n/a» серым. `rank` добавляет третий сегмент со
+ * значком места цвета лиги; при null бейдж байт в байт обычный.
  */
 export function renderBadgeSvg(index: number | null, rank: RankBadge | null = null): string {
   const value = index === null ? "n/a" : String(index);
   const color = badgeColor(index);
-  // В5.3 (круг 3, §2 24.09): подпись — имя показателя «HealthCraft Index»,
-  // левая половина — нейтральный серый, как у бейджей shields (прежний фон
-  // #2d2c33 — тема сервиса до 17.09). Ширина подписи — под Verdana 11
+  // левая половина – нейтральный серый, как у бейджей shields; ширина подписи – под Verdana 11
   const label = "HealthCraft Index";
   const labelWidth = 114;
   const valueWidth = 8 + value.length * 11;
-  // ширина сегмента места — под Verdana 11 (кириллица и цифры жирным ~8 px на знак)
+  // ширина сегмента места – под Verdana 11 (кириллица и цифры жирным ~8 px на знак)
   const rankWidth = rank === null ? 0 : 10 + rank.label.length * 8;
   const width = labelWidth + valueWidth + rankWidth;
   const title = rank === null ? `${label}: ${value}` : `${label}: ${value}, ${rank.label} рейтинга`;

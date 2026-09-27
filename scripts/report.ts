@@ -1,6 +1,6 @@
-// report.ts — CLI MD-отчёта (В3/Б4): bun scripts/report.ts <org/repo>
-// [> файл]. Тот же генератор и та же карточка, что у страницы и роута
-// `.md` — отчёт не может разойтись с экраном. Сети нет: читается БД.
+// CLI MD-отчета: bun scripts/report.ts <org/repo> [> файл]. Тот же генератор и
+// та же карточка, что у страницы и маршрута `.md`, — отчет не может разойтись с
+// экраном. Сети нет: читается БД.
 import { loadConfig } from "../src/config";
 import { openDb } from "../src/db";
 import { getRepoCard } from "../src/api/repos";

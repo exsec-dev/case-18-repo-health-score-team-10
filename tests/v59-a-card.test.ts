@@ -1,8 +1,7 @@
-// v59-a-card.test.ts — В5.9 (воркер А): поля карточки `ladder` и
-// `recommendations[].fixTemplate` на временной БД, собранной НАСТОЯЩИМ
-// конвейером оценки (compute → recommend → writeScores/writeRecommendations).
-// Правило AGENTS.md 21.09: поле API, которое рисует экран, — тест «равно
-// источнику» и отдельно «без прав не раскрывается».
+// Поля карточки `ladder` и `recommendations[].fixTemplate` на временной БД,
+// собранной НАСТОЯЩИМ конвейером оценки (compute → recommend →
+// writeScores/writeRecommendations). Поле API, которое рисует экран,
+// проверяется на «равно источнику» и отдельно на «без прав не раскрывается».
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { getRepoCard, fixFileFor } from "../src/api/repos";

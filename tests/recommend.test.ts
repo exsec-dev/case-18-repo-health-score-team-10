@@ -1,5 +1,5 @@
-// recommend.test.ts — Б4: движок рекомендаций (§8): presence-Δ — реальный
-// прирост итога (В4.1-fix, К-Ф1.2: разность compute на подменённых фактах),
+// Движок рекомендаций: presence-Δ — реальный прирост итога (разность compute
+// на подмененных фактах),
 // активационная ветка без числа (0/0-issues, AppSec, CI-раны),
 // порядок выдачи (Δ desc → активационные по весу категории desc),
 // идемпотентность записи.
@@ -31,7 +31,7 @@ describe("presence-правила: реальный прирост итога (�
     expect(recs[0]!.kind).toBe("presence");
     expect(recs[1]!.kind).toBe("activation");
     expect(recs[1]!.deltaScore).toBeNull();
-    // В4.1 (К1): публичные правила без канала, AppSec-активация — канал appsec
+    // публичные правила без канала, AppSec-активация — канал appsec
     expect(recs[0]!.channel).toBeNull();
     expect(recs[1]!.channel).toBe("appsec");
   });
@@ -43,7 +43,7 @@ describe("presence-правила: реальный прирост итога (�
     const gain = realGain(base, fixed, "rating");
     expect(rec.deltaScore).toBe(gain);
     expect(gain).toBeCloseTo(0.25 * 23, 3); // вес лицензии в Доках × INDEX_WEIGHTS.documentation (четвёрка с полным покрытием; словарь индекса суммируется в 100 — перенормировки нет)
-    // В4.9 (К9.11): десятичная запятая
+    // десятичная запятая
     expect(rec.expectedImpact).toBe(`+${gain.toFixed(1).replace(".", ",")} к HealthCraft Index`);
     expect(rec.factRefs).toContain("docs.presence");
   });
@@ -81,7 +81,7 @@ describe("presence-правила: реальный прирост итога (�
   });
 
   test("нет CI / ci.yaml без шагов → Δ к полному Score; CI-правила помечены каналом cicd", () => {
-    // 4.3.0 (Н8): число — только при видимых запусках (у здоровой фикстуры они видны)
+    // число — только при видимых запусках (у здоровой фикстуры они видны)
     const noCiFacts = withFacts(healthyFacts(), { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } });
     const noCi = seedScan(t, noCiFacts);
     const rec1 = recommend(t.db, noCi, { now: NOW }).find((r) => r.ruleId === "ci-missing")!;
@@ -89,7 +89,7 @@ describe("presence-правила: реальный прирост итога (�
     expect(rec1.deltaScore!).toBeGreaterThan(0);
     expect(rec1.expectedImpact).toBe(`+${rec1.deltaScore!.toFixed(1).replace(".", ",")} к Repo Health Score`);
     // CI-правила существуют в одной выдаче, но только с каналом cicd —
-    // карточка скрывает их от зрителя без доступа к CI (К2)
+    // карточка скрывает их от зрителя без доступа к CI
     const ciRules = recommend(t.db, noCi, { now: NOW }).filter((r) => ["ci-missing", "ci-no-steps", "grant-ci-runs"].includes(r.ruleId));
     expect(ciRules.length).toBeGreaterThan(0);
     expect(ciRules.every((r) => r.channel === "cicd")).toBe(true);
@@ -110,7 +110,7 @@ describe("presence-правила: реальный прирост итога (�
       { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } },
       { key: "appsec.findings", value: { severity_counts: { critical: 0, high: 0, medium: 0, low: 0 }, resolved_share: 1, secrets_critical: true } },
     );
-    // до 4.3.1: «+0,0 к Repo Health Score – … ограничен 49 …»; тура В5.5 — таких строк нет
+    // строк «+0,0 к Repo Health Score – … ограничен 49 …» в выдаче быть не должно
     const cappedRecs = recommend(t.db, seedScan(t, capped), { now: NOW });
     expect(cappedRecs.find((r) => r.ruleId === "ci-missing")).toBeUndefined();
     expect(cappedRecs.every((r) => r.deltaScore === null || r.deltaScore > 0)).toBe(true);
@@ -120,12 +120,12 @@ describe("presence-правила: реальный прирост итога (�
       { key: "tree.stats", value: { top_level: [], file_count: 0, bytes: 0, loc: 0 } },
       { key: "docs.presence", value: { readme: true, license: false, contributing: true, codeowners: true } },
     );
-    // 4.2.0 (М1.14): репо без кода получает один совет — добавить код; россыпи «+0,0» нет
+    // репо без кода получает один совет — добавить код; россыпи «+0,0» нет
     const emptyRecs = recommend(t.db, seedScan(t, empty), { now: NOW });
     expect(emptyRecs.map((r) => r.ruleId)).toEqual(["add-code"]);
 
     // только git-документация: покрытие рейтинга < 0.4 → итог NULL, и совета
-    // с эффектом «+0,0 – оценка появится позже» тоже нет (4.3.1)
+    // с эффектом «+0,0 – оценка появится позже» тоже нет
     const sparse: FactSpec[] = [{ key: "docs.presence", value: { readme: true, license: false, contributing: true, codeowners: true } }];
     const nulRecs = recommend(t.db, seedScan(t, sparse), { now: NOW });
     expect(nulRecs.find((r) => r.ruleId === "license-missing")).toBeUndefined();
@@ -156,10 +156,10 @@ describe("активационная ветка (без числа)", () => {
     const recs = recommend(t.db, scanId, { now: NOW });
     const appsec = recs.find((r) => r.ruleId === "connect-appsec")!;
     expect(appsec.channel).toBe("appsec");
-    // В4.9 (К9.10): право токена названо в пояснении (`problem`), эффект — «добавит в Repo Health Score категорию «Безопасность»»
+    // право токена названо в пояснении (`problem`), эффект — «добавит в Repo Health Score категорию «Безопасность»»
     expect(appsec.problem).toContain("src.repositories.useAppSecScan");
     expect(appsec.expectedImpact).toBe("добавит в Repo Health Score категорию «Безопасность»");
-    expect(appsec.expectedImpact).not.toMatch(/coverage 1\.00→1\.00/); // пустой текст В3 умер
+    expect(appsec.expectedImpact).not.toMatch(/coverage 1\.00→1\.00/);
     expect(`${appsec.problem} ${appsec.action} ${appsec.expectedImpact}`).not.toMatch(/публичн|своего репо/i);
     const grant = recs.find((r) => r.ruleId === "grant-ci-runs")!;
     expect(grant.channel).toBe("cicd");
@@ -222,7 +222,7 @@ describe("порядок и запись", () => {
     const all = recommend(t.db, scanId, { now: NOW });
     const ids = all.map((r) => r.ruleId);
     const presence = all.filter((r) => r.kind === "presence");
-    // К-Ф1.2: presence — по реальному Δ убыв., затем rule_id
+    // presence — по реальному Δ убыв., затем rule_id
     const expected = [...presence].sort((a, b) => b.deltaScore! - a.deltaScore! || a.ruleId.localeCompare(b.ruleId)).map((r) => r.ruleId);
     expect(presence.map((r) => r.ruleId)).toEqual(expected);
     expect(new Set(expected)).toEqual(new Set(["ci-missing", "license-missing", "readme-missing", "codeowners-missing", "contributing-missing"]));
@@ -257,7 +257,7 @@ describe("orderRecommendations (круг 2, LOW-3/С4)", () => {
     const publicRecs = [r("license-missing", "presence", 5.8), r("start-tracker", "activation", null, "issues"), r("resolve-old-todos", "score", null)];
     const channelRecs = [r("ci-missing", "presence", null), r("connect-appsec", "activation", null, "security"), r("fix-red-runs", "score", null)];
     const out = orderRecommendations(publicRecs, channelRecs);
-    // 4.3.0 (Р3): правило серьезности (красный CI) — первым во всей выдаче
+    // правило серьезности (красный CI) — первым во всей выдаче
     expect(out.map((x) => x.ruleId)).toEqual(["fix-red-runs", "license-missing", "ci-missing", "connect-appsec", "start-tracker", "resolve-old-todos"]);
     expect(out.map((x) => x.priority)).toEqual([1, 2, 3, 4, 5, 6]);
     // числовой Δ канального правила (оба канала открыты) встаёт по величине

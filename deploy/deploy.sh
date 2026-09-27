@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# HealthCraft — выкладка на стенд (В5.4).
+# HealthCraft — выкладка на стенд.
 #
 # Везет на ВМ код ЗАКОММИЧЕННОГО HEAD (git archive: без .env, data/, node_modules),
 # собирает образ на ВМ и перезапускает контейнеры. Секреты и БД живут на ВМ в HC_DIR

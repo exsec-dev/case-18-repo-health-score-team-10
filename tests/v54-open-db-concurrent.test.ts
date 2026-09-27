@@ -1,9 +1,8 @@
-// В5.4 (живой старт стенда 26.09, TASK.md §2 «В5.4 — README отдельным этапом, db.ts, снимки» п.3):
-// роли web и rating открывают одну БД одновременно. Миграция openDb шла в отложенной (deferred)
-// транзакции: чтение схемы, затем запись schema_version — если другой процесс за это время
-// записал и закоммитил, снимок устарел и SQLite отвечает SQLITE_BUSY сразу, без ожидания
-// busy_timeout. Процесс rating падал на старте (рестарт 1). Контракт: openDb ждет чужую запись
-// и не падает.
+// Роли web и rating открывают одну БД одновременно. Если миграция openDb идет в
+// отложенной (deferred) транзакции – чтение схемы, затем запись schema_version, –
+// а другой процесс за это время записал и закоммитил, снимок устаревает и SQLite
+// отвечает SQLITE_BUSY сразу, без ожидания busy_timeout. Контракт: openDb ждет
+// чужую запись и не падает.
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";

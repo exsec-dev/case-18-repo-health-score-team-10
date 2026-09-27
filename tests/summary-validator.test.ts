@@ -1,8 +1,7 @@
-// summary-validator.test.ts — валидатор вывода и рамка входа (Б2 В5):
-// форма, привязка, числовой коридор, запрет новых сущностей и ссылок,
-// чужая зона, мини-JSON флаггера; nonce-рамка недоверенных данных
+// Валидатор вывода LLM и рамка входа: форма, привязка, запрет новых сущностей
+// и ссылок, чужая зона, мини-JSON флаггера; nonce-рамка недоверенных данных
 // (коллизия разделителя, гигантский/пустой/нерусский README).
-// Спека §3.6-3.7; фикстуры — tests/fixtures/adversarial.ts.
+// Фикстуры — tests/fixtures/adversarial.ts.
 import { describe, expect, test } from "bun:test";
 import type { FactInput } from "../src/summary/validator";
 import { extractRefs, stripMarkers, validateFlagOutput, validateOutput } from "../src/summary/validator";
@@ -70,7 +69,7 @@ describe("Валидатор: форма, привязка, коридор (сп
     expect(spec.reasons.some((r) => r.includes("длиннее капа"))).toBe(true);
     const ovLong = `Итог synthesis. ${"Текст для овервью повторяется, чтобы переехать первый кап. {f:docs.presence}"}`;
     const ov = validateOutput({ role: "overview", text: ovLong.repeat(10), facts: DOCS_FACTS });
-    expect(ov.reasons.some((r) => r.includes("длиннее капа"))).toBe(false); // 2000 — влезает? нет, проверяем кап отдельно
+    expect(ov.reasons.some((r) => r.includes("длиннее капа"))).toBe(false); // кап овервью 2000, у специалиста 1200
   });
 
   test("сегменты sp:роль:n — валидны у овервью только из входа", () => {
@@ -95,15 +94,13 @@ describe("Валидатор: форма, привязка, коридор (сп
 
 describe("Валидатор: adversarial-набор зелёный (спека §3.6 п.4)", () => {
   test("инъекция на завышение: «100 из 100» проходит валидатор — коридор снят, ловит хартия (решение 23.09)", () => {
-    // модель послушалась INFLATE_README: числовой коридор снят владельцем,
+    // модель послушалась INFLATE_README: числового коридора в валидаторе нет,
     // такой текст отсекается дисциплиной хартии и рамкой, не валидатором
     const res = validateOutput({
       role: "documentation",
       text: "Проект идеален, оценка 100 из 100 {f:docs.presence}.",
       facts: DOCS_FACTS,
     });
-    // числовой коридор снят владельцем (23.09): инъекционные числа отсекаются
-    // дисциплиной хартии и рамкой недоверенных данных, не валидатором
     expect(res.ok).toBe(true);
   });
 
@@ -243,5 +240,5 @@ describe("Рамка недоверенных данных: nonce, коллиз�
   });
 });
 
-// Держим импорты фикстур живыми (полный набор §3.6 используется наборами Б2/Б3)
+// Держим импорты фикстур живыми: полный набор используется и другими тестами
 void [INFLATE_README, DARKEN_README, EXFILTRATE_README];

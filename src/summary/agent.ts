@@ -1,24 +1,21 @@
-// agent.ts — агентный цикл специалистов (спека В5 §3.3; порт концептов
-// dndy-llama engine.ts). Инструменты — только у специалистов (security —
-// без инструментов по закону 5); овервью/динамика/флаггер зовутся без
-// цикла: их вход уже собран. Бюджеты: tool_budget (стартово 12 вызовов,
-// корректируется по реальным цифрам — спека), wall-clock фуз на ВСЮ
-// генерацию, максимум 2 попытки на retryable-ошибки (429/5xx/сеть/stall/
-// пустой стрим) с бэкоффом. model_budget не предохранитель — агрегатный
-// кап генерации (48 вызовов / 6 минут) держит конвейер (pipeline.ts).
+// Агентный цикл специалистов. Инструменты — только у специалистов (security — без
+// инструментов: только данные AppSec); overview/trajectory/flagger зовутся без цикла,
+// их вход уже собран. Бюджеты: вызовы инструментов, wall-clock фуз на ВСЮ генерацию,
+// максимум 2 попытки на retryable-ошибки с бэкоффом. Агрегатный кап всей генерации
+// (48 вызовов / 6 минут) держит конвейер (pipeline.ts).
 import type { CallLlm, ChatMessage, ToolSpec } from "../llm";
 import { LlmError } from "../llm";
 import type { SummaryRole } from "./roles";
 
-/** Вызовов инструментов на одну генерацию: стартовый кап (спека §3.3). */
+/** Вызовов инструментов на одну генерацию. */
 export const TOOL_BUDGET = 12;
 /** Попыток всей генерации: одна повторная — только на retryable. */
 export const MAX_ATTEMPTS = 2;
-/** Дефолтный wall-clock фуз одной генерации (пер-рольный бюджет — не предохранитель). */
+/** Дефолтный wall-clock фуз одной генерации. */
 export const DEFAULT_ROUND_BUDGET_MS = 6 * 60_000;
 /** Бэкофф перед повторной попыткой (429/сеть), мс. */
 export const RETRY_BACKOFF_MS = 1_000;
-/** Потолок паузы по Retry-After провайдера (В5.2, Б7), мс. */
+/** Потолок паузы по Retry-After провайдера, мс. */
 export const RETRY_AFTER_CAP_MS = 30_000;
 
 /** 429/5xx и транспортные срывы — повторяем; остальное — форма/патология. */
@@ -35,7 +32,7 @@ export function retryable(e: unknown): boolean {
 const SALVAGE_SUFFIX =
   "\n\n(Бюджет инструментов исчерпан: больше вызовов не будет. Ответь финальным текстом по формату хартии на основе того, что уже известно. Инструменты и вопросы в ответе не упоминай.)";
 
-/** Суффикс довеском к ПОСЛЕДНЕМУ сообщению (роль tool — альтернация не ломается). */
+/** Суффикс дописывается к ПОСЛЕДНЕМУ сообщению, а не новым: чередование ролей не ломается. */
 function withSalvageSuffix(messages: ChatMessage[], suffix: string): ChatMessage[] {
   const patched = [...messages];
   const last = patched[patched.length - 1];
@@ -70,8 +67,8 @@ export interface AgentResult {
 
 /**
  * Одна генерация роли: цикл tool_calls до исчерпания бюджета, salvage-раунд
- * без инструментов в конце, повтор только на retryable-ошибки. Text ALWAYS
- * непустой при ok; финальная валидация формы — валидатор (следующий слой).
+ * без инструментов в конце, повтор только на retryable-ошибки. При успехе текст
+ * всегда непустой; форму ответа проверяет валидатор уже после.
  */
 export async function generateWithTools(deps: AgentDeps, messages: ChatMessage[]): Promise<AgentResult> {
   const budgetMs = deps.roundBudgetMs ?? DEFAULT_ROUND_BUDGET_MS;
@@ -80,17 +77,17 @@ export async function generateWithTools(deps: AgentDeps, messages: ChatMessage[]
   let modelCalls = 0;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
-    // wall-clock гонка на всю генерацию: обрыв сигналом рвёт и запрос
+    // фуз на всю генерацию: обрыв сигналом рвет и текущий запрос
     const ac = new AbortController();
     const fuse = setTimeout(() => ac.abort(), budgetMs);
     try {
       let toolCalls = 0;
       let loop: ChatMessage[] = messages;
-      // цикл инструментов: спецификация — один код пути (dndy-урок: без
-      // не-стримингового фолбэка и без маркеров-постпарсеров)
+      // один путь кода для инструментов: без не-стримингового фолбэка и без
+      // разбора маркеров из текста
       for (let iter = 0; ; iter++) {
         const salvage = useTools && iter >= TOOL_BUDGET - 1;
-        modelCalls++; // считаем каждую попытку (бюджетная точка зрения)
+        modelCalls++; // в бюджет идет каждая попытка, включая неудачные
         const res = await deps.callLlm({
           messages: salvage ? withSalvageSuffix(loop, SALVAGE_SUFFIX) : loop,
           tools: useTools && !salvage ? deps.executor!.specs : undefined,
@@ -106,7 +103,6 @@ export async function generateWithTools(deps: AgentDeps, messages: ChatMessage[]
           }
           return { text: res.text, modelCalls, toolCalls };
         }
-        // исполнение всех вызовов раунда, ответы — в role:"tool" сообщениях
         const answers: ChatMessage[] = [ { role: "assistant", content: res.text, toolCalls: res.toolCalls } ];
         for (const tc of res.toolCalls) {
           let args: unknown = null;
@@ -125,8 +121,8 @@ export async function generateWithTools(deps: AgentDeps, messages: ChatMessage[]
       const lastAttempt = attempt >= MAX_ATTEMPTS;
       if (!retryable(e) || lastAttempt) throw e;
       deps.log?.(`[${deps.role}] retryable error, attempt ${attempt}/${MAX_ATTEMPTS}: ${String((e as Error).message).slice(0, 120)}`);
-      // В5.2 (Б7, долг аудита В5.1): Retry-After провайдера уважается, но не дольше
-      // RETRY_AFTER_CAP_MS — ожидание не должно съесть предохранитель генерации
+      // Retry-After провайдера уважается, но не дольше RETRY_AFTER_CAP_MS:
+      // ожидание не должно съесть фуз генерации
       const asked = e instanceof LlmError ? e.retryAfterMs : null;
       await new Promise((r) => setTimeout(r, asked === null ? backoffMs : Math.max(backoffMs, Math.min(asked, RETRY_AFTER_CAP_MS))));
     } finally {

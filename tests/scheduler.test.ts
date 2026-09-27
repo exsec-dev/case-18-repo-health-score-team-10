@@ -1,10 +1,9 @@
-// scheduler.test.ts — В4/Б3: claim-loop (NULL-lease матчится, лиз,
-// приоритет юзерских заявок, истёкший лиз переклaimается), ночной
-// каталог-дифф (new/changed/unchanged → пустая очередь на втором
-// прогоне, форс-тогл, retry-failed), эвикция repo-уровневая (пропал
-// из каталога; неполный каталог НЕ эвиктит; возврат флагом; канальные
-// 403 cicd — не эвикция — отдельный процессJob-тест). Сети нет:
-// каталог и runScan — фейки.
+// Очередь и планировщик: claim-loop (NULL-lease матчится, лиз, полосы
+// очереди, истёкший лиз заявляется снова), ночной дифф каталога
+// (new/changed/unchanged → пустая очередь на втором прогоне, форс,
+// retry-failed), эвикция по каталогу (неполный каталог НЕ эвиктит, возврат
+// флагом, канальные 403 — не эвикция), обслуживание и SIGTERM.
+// Сети нет: каталог и runScan — фейки.
 import { afterAll, beforeEach, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { existsSync, mkdtempSync, rmSync, utimesSync } from "node:fs";
@@ -63,8 +62,8 @@ function seedRepo(org: string, repo: string, lastActivityAt: string | null = nul
 }
 
 /**
- * Успешный ПРИГОДНЫЙ скан репо (Ф2.12): только он двигает `last_activity_at`.
- * Ровно это делает скор-хук `runScan` — обход каталога с В4.2a дату не пишет.
+ * Успешный ПРИГОДНЫЙ скан репо: только он двигает `last_activity_at`.
+ * Ровно это делает скор-хук `runScan` — обход каталога дату не пишет.
  */
 function markScanned(org: string, repo: string, lastUpdated: string): void {
   db.query("UPDATE repos SET last_activity_at = ? WHERE org_slug = ? AND repo_slug = ?").run(lastUpdated, org, repo);
@@ -117,7 +116,7 @@ describe("claim-loop: лизы и приоритеты", () => {
     const revived = claimNext(db, new Date(now.getTime() + 120_000), 60_000, { queue: "rating" });
     expect(revived?.id).toBe(j1);
     expect(revived?.attempts).toBe(2);
-    // finishJob прежней заявки (claimed_at первой попытки) — no-op (К4)
+    // finishJob прежней заявки (claimed_at первой попытки) — no-op
     expect(finishJob(db, j1, first!.claimedAt, "failed")).toBe(false);
     expect((db.query("SELECT status FROM jobs WHERE id = ?").get(j1) as { status: string }).status).toBe("running");
     expect(finishJob(db, j1, revived!.claimedAt, "done")).toBe(true);
@@ -133,8 +132,8 @@ describe("claim-loop: лизы и приоритеты", () => {
     const claimed = claimNext(db, new Date("2026-09-19T00:00:00Z"), 60_000, { queue: "user" });
     expect(claimed?.id).toBe(userJob);
     expect(claimed?.userId).toBe(userId);
-    // ПОРТ S2: изоляция — пока юзерская жива, rating-claim берёт периодику
-    // ПАРКЛЛЕЛЬНО (не ждёт), user-очередь не видит периодику вовсе
+    // изоляция полос: пока юзерская жива, rating-claim берёт периодику
+    // ПАРАЛЛЕЛЬНО (не ждёт), user-очередь не видит периодику вовсе
     const parallel = claimNext(db, new Date("2026-09-19T00:00:30Z"), 60_000, { queue: "rating" });
     expect(parallel?.slug).toBe("cl/c");
     finishJob(db, claimed!.id, claimed!.claimedAt, "done");
@@ -159,9 +158,8 @@ describe("claim-loop: лизы и приоритеты", () => {
 });
 
 describe("очередь: анти-абьюз (К4 В4.1)", () => {
-  // своя БД: круговой порядок Ф1.7 внутри полосы user читает MAX(claimed_at)
-  // по ВСЕЙ таблице jobs (М4 круга 2: прежняя формулировка звала это
-  // «чередованием» — механизма с таким именем нет с 17.09, решение (1))
+  // своя БД: круговой порядок внутри полосы user читает MAX(claimed_at)
+  // по ВСЕЙ таблице jobs
   const qdir = mkdtempSync(join(tmpdir(), "rh-queue-"));
   const q: Database = openDb({ ...loadConfig(), dataDir: qdir });
   afterAll(() => {
@@ -221,9 +219,8 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
 
   test("ПОРТ S2 изоляция + П1 round-robin: периодика не ждёт конца юзерской полосы", () => {
     clear();
-    // В4.2-port-fix (П1, решение владельца (1) 17.09): «user-приоритет в роли
-    // all» отменён — он и был механизмом К1 (полоса rating голодала навсегда).
-    // Охраняется изоляция, а не приоритет: вторая половина теста неизменна.
+    // приоритета юзерских заявок в роли all нет: с ним полоса rating голодала
+    // бы навсегда. Охраняется изоляция полос, а не приоритет.
     __resetRoundRobin();
     const u = user("alt");
     const periodic = [repo("p1"), repo("p2")].map((r) => enqueueScan(q, r, { triggerKind: "periodic" }));
@@ -335,9 +332,9 @@ describe("очередь: анти-абьюз (К4 В4.1)", () => {
 
     test("справедливость: юзер с 2 заявками не занимает юзерскую половину — второй юзер идёт между ними", () => {
       clear();
-      // Т2 (круг 2): курсор round-robin модульный. Тест детерминирован не
-      // сам по себе, а лишь потому, что полоса rating здесь пуста — сброс
-      // курсора делает это явным и герметизирует порядок от соседей
+      // курсор round-robin модульный. Тест детерминирован не сам по себе, а
+      // лишь потому, что полоса rating здесь пуста — сброс курсора делает это
+      // явным и герметизирует порядок от соседей
       __resetRoundRobin();
       const heavy = user("heavy");
       const light = user("light");
@@ -394,7 +391,7 @@ describe("ночной каталог: дифф, форс, эвикция", () =
     expect(r1.ok).toBe(true);
     expect(r1.enqueued.map((e) => e.reason)).toEqual(["new", "new"]);
     expect(r1.evicted).toEqual([]);
-    // Ф2.12: «изменился» расходуется ПРИГОДНЫМ СКАНОМ, а не постановкой —
+    // «изменился» расходуется ПРИГОДНЫМ СКАНОМ, а не постановкой —
     // без успешного скана репо остаётся кандидатом (обход дату не пишет)
     db.query("UPDATE jobs SET status = 'done' WHERE repo_id IN (SELECT id FROM repos WHERE org_slug = 'nc')").run();
     markScanned("nc", "one", "2026-09-10T00:00:00Z");
@@ -403,8 +400,8 @@ describe("ночной каталог: дифф, форс, эвикция", () =
     const r2 = await nightlyCatalog(db, catalogClient(pages), { now: new Date() });
     expect(r2.enqueued).toEqual([]);
     expect(r2.returned).toEqual([]);
-    // В4.2-port-fix (П5): инвариант держится и на НЕПРИГОДНОМ репо — ветка
-    // retry-ineligible ставила job каждый обход, пока живая job не проверялась
+    // инвариант держится и на НЕПРИГОДНОМ репо: ветка retry-ineligible не
+    // ставит новую job каждый обход, пока жива прежняя
     const one = (db.query("SELECT id FROM repos WHERE org_slug = 'nc' AND repo_slug = 'one'").get() as { id: number }).id;
     db.query("INSERT INTO scans (repo_id, started_at, finished_at, status, trigger, rating_eligible) VALUES (?, ?, ?, 'ok', 'periodic', 0)").run(
       one,
@@ -438,9 +435,8 @@ describe("ночной каталог: дифф, форс, эвикция", () =
     const rForce = await nightlyCatalog(db, catalogClient(v2), { fullRescan: true, now: new Date() });
     expect(rForce.enqueued.map((e) => e.slug).sort()).toEqual(["df/x", "df/y"]);
     expect(rForce.enqueued.every((e) => e.reason === "forced")).toBe(true);
-    // Т3 (круг 2): следствие отклонения 7 круга 1 — гард П5 стоит на ВСЕХ
-    // причинах постановки, поэтому SCHEDULER_FULL_RESCAN при непустой очереди
-    // периодики job НЕ дублирует. Свойство закрепляется тестом, а не отчётом:
+    // гард дубля периодики стоит на ВСЕХ причинах постановки, поэтому
+    // SCHEDULER_FULL_RESCAN при непустой очереди периодики job НЕ дублирует:
     // очередь после форса не разбиралась, второй форс не добавляет ни строки
     const rForce2 = await nightlyCatalog(db, catalogClient(v2), { fullRescan: true, now: new Date() });
     const live = (db.query("SELECT COUNT(*) AS c FROM jobs j JOIN repos r ON r.id = j.repo_id WHERE r.org_slug = 'df' AND j.status = 'queued'").get() as { c: number }).c;
@@ -482,7 +478,7 @@ describe("ночной каталог: дифф, форс, эвикция", () =
     const r = seedRepo("ri", "dup", "2026-09-01T00:00:00Z");
     const ok = seedRepo("ri", "fine", "2026-09-01T00:00:00Z");
     db.query("INSERT INTO scans (repo_id, started_at, finished_at, status, trigger, rating_eligible) VALUES (?, '2026', '2026', 'partial', 'periodic', 0)").run(r);
-    // В5.3-М (Н1): пригодный скан текущим сборщиком — доочереди «recollect» нет
+    // пригодный скан текущей версией сборщика — перескан «recollect» не нужен
     db.query("INSERT INTO scans (repo_id, started_at, finished_at, status, trigger, rating_eligible, collector_version) VALUES (?, '2026', '2026', 'ok', 'periodic', 1, ?)").run(ok, COLLECTOR_VERSION);
     const pages = [{ repos: [repoOf("ri", "dup", "2026-09-01T00:00:00Z"), repoOf("ri", "dup", "2026-09-01T00:00:00Z"), repoOf("ri", "fine", "2026-09-01T00:00:00Z")], next: null }];
     const out = await nightlyCatalog(db, catalogClient(pages), { now: new Date() });
@@ -495,7 +491,7 @@ describe("ночной каталог: дифф, форс, эвикция", () =
   test("эвикция пропавших из ПОЛНОГО каталога; неполный каталог не эвиктит; возврат флагом", async () => {
     const gone = seedRepo("ev", "gone", "2026-09-01T00:00:00Z");
     seedRepo("ev", "stay", "2026-09-01T00:00:00Z");
-    // каталог без 'ev/gone' и без 'ev/stay'? нет: stay остаётся
+    // каталог без 'ev/gone'; 'ev/stay' в нём остаётся
     const withStay = [{ repos: [repoOf("ev", "stay", "2026-09-01T00:00:00Z")], next: null }];
     const r = await nightlyCatalog(db, catalogClient(withStay), { now: new Date() });
     expect(r.evicted).toEqual(["ev/gone"]);
@@ -541,7 +537,7 @@ describe("ночной каталог: дифф, форс, эвикция", () =
 });
 
 describe("processJob: repo-сигнал эвикции и заявки юзеров (К3)", () => {
-  // герметично (M10): APP_SECRET инъектируется в конфиг теста, не из .env
+  // герметично: APP_SECRET инъектируется в конфиг теста, не из .env
   const base = loadConfig();
   const config = { ...base, scan: DEFAULT_SCAN, auth: { ...base.auth, appSecret: "test-app-secret-0123456789abcdef" } };
 
@@ -640,13 +636,12 @@ describe("processJob: repo-сигнал эвикции и заявки юзер�
   });
 });
 
-// В4.2-port-fix (П7): круговой порядок Ф1.7 — свойство полосы user. Порты
-// распространили его коррелированный подзапрос и на полосу rating, где
-// user_id всегда NULL: на 28 000 job без idx_jobs_user_claimed один
-// claim(rating) занимал 335 655 мс (замер вехи; у ревьюера 576,8 с) — это не
+// Круговой порядок — свойство полосы user. Его коррелированный подзапрос в
+// полосе rating, где user_id всегда NULL, на 28 000 job без
+// idx_jobs_user_claimed занимал больше 5 минут на один claim — это не
 // «медленнее», а мёртвый синхронный claim, останавливающий и HTTP. Индекс
 // живёт в LATE_INDEXES и в норме есть — здесь он РОНЯЕТСЯ вручную, чтобы
-// проверить, что подзапрос в полосе rating больше не исполняется.
+// проверить, что подзапрос в полосе rating не исполняется.
 describe("П7: claim(rating) не платит за подзапрос кругового порядка", () => {
   test(
     "28 000 job в полосе rating без idx_jobs_user_claimed: claim ≤ 100 мс",
@@ -690,10 +685,7 @@ describe("П7: claim(rating) не платит за подзапрос круг�
   );
 });
 
-// В4.2-port-fix круг 2 (Т2): П1 был покрыт двумя формами нагрузки из шести —
-// «полоса user пустеет и наполняется» ревьюер проверял руками, охраны от
-// регрессии не было. Курсор round-robin модульный: тест герметизируется
-// явным __resetRoundRobin().
+// Курсор round-robin модульный: тест герметизируется явным __resetRoundRobin().
 describe("П1 (Т2): полоса user пустеет и наполняется — курсор не залипает ни на пустой, ни на новой", () => {
   test("после опустошения юзерской полосы периодика идёт сплошь, а новые юзерские job снова разбираются", () => {
     const rdir = mkdtempSync(join(tmpdir(), "rh-rr-"));
@@ -741,12 +733,12 @@ describe("П1 (Т2): полоса user пустеет и наполняется 
   });
 });
 
-// В4.2-port-fix круг 2 (П12, Н-3): гард П5 спрашивает про живую периодическую
-// job КАЖДОГО репо каталога. Своего индекса у jobs(repo_id, …) не было —
-// SQLite брал idx_jobs_status_claimed и просматривал все queued/running строки
-// на каждый вызов; обход не содержит await, поэтому цена гарда — один
-// синхронный блок, во время которого не тикает даже таймер. Индекс
-// idx_jobs_repo_status дополняет idx_jobs_status_claimed, а не заменяет его.
+// Гард дубля периодики спрашивает про живую периодическую job КАЖДОГО репо
+// каталога. Без своего индекса на jobs(repo_id, …) SQLite берёт
+// idx_jobs_status_claimed и просматривает все queued/running строки на каждый
+// вызов; обход не содержит await, поэтому цена гарда — один синхронный блок,
+// во время которого не тикает даже таймер. Индекс idx_jobs_repo_status
+// дополняет idx_jobs_status_claimed, а не заменяет его.
 describe("П12: гард живой периодической job стоит поиска по индексу, а не обхода очереди", () => {
   const GUARD_SQL = "SELECT 1 FROM jobs WHERE repo_id = ? AND trigger_kind != 'user' AND status IN ('queued', 'running') LIMIT 1";
   test(
@@ -785,11 +777,10 @@ describe("П12: гард живой периодической job стоит п
   );
 });
 
-// В4.2-port-fix (П8, LOW-1): колонку jobs.error принесли порты, myJobs её
-// читает, UI рисует дословно — но НИ ОДНОГО UPDATE в неё не было, то есть
-// панель заданий всегда показывала «упало» без причины. Причины — закрытый
-// список RU-текстов; обе ветки, ходившие мимо finishJob (предел попыток и
-// job без строки repos), переведены на него.
+// jobs.error читает myJobs, и панель заданий рисует её дословно — без записи
+// в неё панель показывает «упало» без причины. Причины — закрытый список
+// RU-текстов; все ветки, включая предел попыток и job без строки repos,
+// закрывают задачу через finishJob.
 describe("П8: причина падения job пишется в jobs.error", () => {
   const edir = mkdtempSync(join(tmpdir(), "rh-joberr-"));
   const e: Database = openDb({ ...loadConfig(), dataDir: edir });
@@ -839,8 +830,7 @@ describe("П8: причина падения job пишется в jobs.error", 
 
   test("bad-скан → «сбор данных не удался: <каналы>»; myJobs отдаёт причину панели заданий", () => {
     expect(failedChannelsOf({ git: "no-data(limits)", rest: "ok", appsec: "skipped" })).toEqual(["git"]);
-    // ПЕРЕВОРОТ (В4.8.5, К8.5.4, С4-12): каналы — словами, не кодами git/rest/appsec
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): Ф20 — «клон» → «скачивание репозитория»
+    // каналы — словами, не кодами git/rest/appsec
     expect(JOB_ERRORS.channels(["git", "rest"])).toBe("сбор данных не удался: скачивание репозитория, данные SourceCraft");
     e.query("INSERT OR IGNORE INTO users (ya_id, login, created_at, last_login_at) VALUES ('ya-je2', 'je2', '2026', '2026')").run();
     const uid = (e.query("SELECT id FROM users WHERE ya_id = 'ya-je2'").get() as { id: number }).id;
@@ -851,7 +841,7 @@ describe("П8: причина падения job пишется в jobs.error", 
     expect({ slug: recent?.slug, phase: recent?.phase, error: recent?.error }).toEqual({
       slug: "je/bad-scan",
       phase: "failed",
-      error: "сбор данных не удался: скачивание репозитория, данные SourceCraft" /* Ф20 */,
+      error: "сбор данных не удался: скачивание репозитория, данные SourceCraft",
     });
   });
 
@@ -862,13 +852,13 @@ describe("П8: причина падения job пишется в jobs.error", 
     expect(errorOf(id).error?.length).toBe(500);
   });
 
-  // Т4 (круг 2): длина — не гарантия безопасности. Безопасность даёт закрытый
-  // список констант: НИ ОДИН вызывающий finishJob не имеет права собрать
-  // причину из ответа платформы, пути клона или текста исключения.
+  // длина — не гарантия безопасности. Безопасность даёт закрытый список
+  // констант: НИ ОДИН вызывающий finishJob не имеет права собрать причину из
+  // ответа платформы, пути клона или текста исключения.
   test("все причины, которые пишет код, принадлежат закрытому списку JOB_ERRORS", () => {
     const fixed: string[] = [JOB_ERRORS.gone, JOB_ERRORS.noPat, JOB_ERRORS.attempts, JOB_ERRORS.internal];
-    // В4.8.5: закрытый список прежний (+ scoreFailed, К8.5.12), каналы — словами (К8.5.4)
-    const ch = "(скачивание репозитория|данные SourceCraft|Безопасность)"; // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): Ф20
+    // закрытый список плюс scoreFailed; каналы — словами
+    const ch = "(скачивание репозитория|данные SourceCraft|Безопасность)";
     const belongs = (text: string) => [...fixed, JOB_ERRORS.scoreFailed].includes(text) || new RegExp(`^сбор данных не удался: ${ch}(, ${ch})*$`).test(text);
     const written = (e.query("SELECT DISTINCT error FROM jobs WHERE error IS NOT NULL").all() as { error: string }[]).map((r) => r.error);
     // строка теста про обрезку — единственная искусственная, её исключаем явно
@@ -880,9 +870,8 @@ describe("П8: причина падения job пишется в jobs.error", 
 });
 
 // ---------------------------------------------------------------------------
-// Ф2.1 (M1, остаток после портов). Тело тика — функция, вызываемая через шов:
-// тест дёргает её НАПРЯМУЮ, без таймера. Броня портов при этом не дублируется
-// и не ослабляется — проверяем именно её через шов.
+// Тело тика — функция, вызываемая через шов: тест дёргает её НАПРЯМУЮ, без
+// таймера, и проверяет броню тика через этот шов.
 // ---------------------------------------------------------------------------
 
 describe("Ф2.1: тик воркер-лупа и планировщика вызываются напрямую и не выпускают исключение", () => {
@@ -934,7 +923,7 @@ describe("Ф2.1: тик воркер-лупа и планировщика выз
     expect(await workerTick(deps, ["user"], { busy: true })).toBe("busy");
   });
 
-  // К-Р2 (круг 2 В4.2a): обёртка колбэка таймера глотает оба вида отказа —
+  // обёртка колбэка таймера глотает оба вида отказа —
   // синхронный бросок и отклонённый промис; покрывает ОБА таймера
   // планировщика (тик каталога — поведенчески в audit-m42a-r2-repro.test.ts,
   // часовое обслуживание — здесь, без ожидания часового интервала)
@@ -983,7 +972,7 @@ describe("Ф2.1: тик воркер-лупа и планировщика выз
 });
 
 // ---------------------------------------------------------------------------
-// Ф2.2 (M2, остаток). Осиротевшие `running`-сканы. Не путать с
+// Осиротевшие `running`-сканы. Не путать с
 // `sweepOrphanClones` — там каталоги клонов в tmp, здесь строки `scans`.
 // ---------------------------------------------------------------------------
 
@@ -1056,8 +1045,8 @@ describe("Ф2.2: осиротевшие running-сканы закрываютс�
 });
 
 // ---------------------------------------------------------------------------
-// Ф2.5 (M7 + решение Екатерины 17.09). Сверка каталога и ночная волна — две
-// фазы ОДНОГО тика на ОДНОМ перечислении. Видимость — только из явного поля.
+// Сверка каталога и ночная волна — две фазы ОДНОГО тика на ОДНОМ перечислении.
+// Видимость — только из явного поля.
 // ---------------------------------------------------------------------------
 
 describe("Ф2.5: catalogTick — две фазы, один обход, единый гард", () => {
@@ -1070,10 +1059,9 @@ describe("Ф2.5: catalogTick — две фазы, один обход, един�
   };
   const T0 = new Date("2026-09-18T00:00:00.000Z");
   const at = (ms: number) => new Date(T0.getTime() + ms);
-  // В4.8.5 (К8.5.5b): метки успеха фаз переживают «рестарт» — новое состояние
-  // тика берёт их из meta. Тесты этого блока — независимые сценарии на ОДНОЙ
-  // базе; герметичность — чистка sched_* meta перед каждым (сетап, утверждения
-  // не менялись)
+  // метки успеха фаз переживают «рестарт» — новое состояние тика берёт их из
+  // meta. Тесты этого блока — независимые сценарии на ОДНОЙ базе;
+  // герметичность — чистка sched_* meta перед каждым
   beforeEach(() => {
     db.query("DELETE FROM meta WHERE key LIKE 'sched_%'").run();
   });
@@ -1164,7 +1152,7 @@ describe("Ф2.5: catalogTick — две фазы, один обход, един�
     const out = await catalogTick(db, () => catalogClient(pages), { ...cfg, scan: { ...cfg.scan, catalog: { maxPages: 1 } } }, state, { now: T0 });
     expect({ complete: out?.catalogComplete, evicted: out?.evicted }).toEqual({ complete: false, evicted: [] });
     expect((db.query("SELECT rating_active FROM repos WHERE id = ?").get(absent) as { rating_active: number }).rating_active).toBe(1);
-    // К-Р3 (круг 2): ночная фаза на этом snapshot исполнилась (обход ok) —
+    // ночная фаза на этом snapshot исполнилась (обход ok) —
     // её метка двигается и без полноты каталога; метка сверки — нет
     expect({ reconcile: state.lastReconcileAt, nightly: state.lastNightlyAt }).toEqual({ reconcile: null, nightly: T0 });
     void stay;
@@ -1232,8 +1220,8 @@ describe("Ф2.5: catalogTick — две фазы, один обход, един�
     expect(catalogClientBudget(cfg)).toBe(cfg.scan.catalog.maxPages + 10);
   });
 
-  // К-Р4 (круг 2): запись — ТОЛЬКО при реальном расхождении поля или новой
-  // строке; ноль записей на неизменном каталоге — в repro круга 2
+  // запись — ТОЛЬКО при реальном расхождении поля или новой строке; ноль
+  // записей на неизменном каталоге проверяет audit-m42a-r2-repro.test.ts
   test("сверка пишет только расхождения: смена title — один UPDATE, новый репо — один INSERT", async () => {
     // обычная (не TEMP) таблица: имена внутри триггера резолвятся в схеме
     // триггера (main), temp из него не видна; teardown обязателен — иначе
@@ -1282,7 +1270,7 @@ describe("Ф2.5: catalogTick — две фазы, один обход, един�
 });
 
 // ---------------------------------------------------------------------------
-// Ф2.13 (LOW-11). Ретеншен очереди: завершённые строки старше срока удаляются
+// Ретеншен очереди: завершённые строки старше срока удаляются
 // в тике планировщика; живые и безвозрастные — никогда.
 // ---------------------------------------------------------------------------
 
@@ -1338,8 +1326,8 @@ describe("Ф2.13: очистка jobs старше Config.queue.retentionDays", 
 });
 
 // ---------------------------------------------------------------------------
-// Ф2.12 (LOW-2, третья часть). `last_activity_at` двигает только пригодный
-// скан: «изменился» не расходуется постановкой.
+// `last_activity_at` двигает только пригодный скан: «изменился» не
+// расходуется постановкой.
 // ---------------------------------------------------------------------------
 
 describe("Ф2.12: «изменился» расходуется пригодным сканом, а не постановкой", () => {
@@ -1365,9 +1353,9 @@ describe("Ф2.12: «изменился» расходуется пригодны
 });
 
 // ---------------------------------------------------------------------------
-// Ф2.10 (M10). Тест «канальные 403 — не эвикция» на НАСТОЯЩЕМ `runScan`:
-// прежний был тавтологией — фейковый runScan сам возвращал repoAccess "ok".
-// Здесь repoAccess вычисляет живой конвейер по ответам локального мока.
+// «Канальные 403 — не эвикция» на НАСТОЯЩЕМ `runScan`: с фейковым runScan
+// тест был бы тавтологией — фейк сам возвращает repoAccess "ok". Здесь
+// repoAccess вычисляет живой конвейер по ответам локального мока.
 // ---------------------------------------------------------------------------
 
 describe("Ф2.10 (M10): канальные 403 не эвиктят — проверено настоящим runScan", () => {
@@ -1418,22 +1406,20 @@ describe("Ф2.10 (M10): канальные 403 не эвиктят — пров�
 });
 
 // ---------------------------------------------------------------------------
-// Ф2.19 (С6 аудита круга 2). Свип каталогов клонов не трогает клон моложе
-// двух лизов: живой скан держит свой клон весь лиз, а портовый «час» был
-// короче даже одного лиза.
+// Свип каталогов клонов не трогает клон, пока его может держать живой скан:
+// возраст свипа считается от худшего случая скана.
 // ---------------------------------------------------------------------------
 
 describe("Ф2.19: возраст свипа клонов — от худшего скана (В4.8.5)", () => {
   const base = loadConfig();
 
-  // ПЕРЕВОРОТ (В4.8.5, К8.5.2b, §2-Р4): было «не меньше двух лизов и не меньше
-  // часа». При лизе 10 мин это давало 60 мин < худшего скана 85 мин — свип
-  // сносил бы клон работающего git (дефект Ф2.19). Инвариант «живой клон не
-  // сносится» перенесён на худший скан и от лиза больше не зависит
+  // порог от лиза не годится: при лизе 10 мин «два лиза, но не меньше часа»
+  // дают 60 мин < худшего скана 85 мин, и свип снёс бы клон работающего git.
+  // Поэтому инвариант «живой клон не сносится» привязан к худшему скану
   test("возраст свипа = худший случай скана, от лиза не зависит", () => {
     const cfg = { ...base, scheduler: { ...base.scheduler, leaseMs: 10 * 60_000 } };
     expect(orphanCloneAgeMs(cfg)).toBe(worstCaseScanMs(cfg.scan));
-    // В5.1 (Прод-мелочь 7): формула включает фуз генерации (20+25+25+6+15)
+    // формула включает фуз генерации (20+25+25+6+15)
     expect(worstCaseScanMs(DEFAULT_SCAN)).toBe(91 * 60_000);
     const short = { ...base, scheduler: { ...base.scheduler, leaseMs: 1000 } };
     expect(orphanCloneAgeMs(short)).toBe(worstCaseScanMs(short.scan));
@@ -1464,7 +1450,7 @@ describe("Ф2.19: возраст свипа клонов — от худшего
 });
 
 // ---------------------------------------------------------------------------
-// В4.4 (кластер F): волна каталога ставится ПО ЛАЙКАМ (убывание) — витринные
+// Волна каталога ставится ПО ЛАЙКАМ (убывание) — витринные
 // репо оцениваются первыми; дифф last_updated не меняется.
 // ---------------------------------------------------------------------------
 
@@ -1510,7 +1496,7 @@ describe("В4.4: первая волна — по лайкам", () => {
 });
 
 // ---------------------------------------------------------------------------
-// В4.4 (кластер L/З1): SIGTERM — свои running-заявки возвращаются в queued
+// SIGTERM — свои running-заявки возвращаются в queued
 // (claimed_at NULL, attempts не трогаются), процесс завершается штатно.
 // ---------------------------------------------------------------------------
 
@@ -1541,7 +1527,7 @@ describe("В4.4 (кластер L): штатное завершение", () => 
 
     const returned = returnOwnRunningJobs(db);
     expect(returned).toBe(1);
-    expect(db.query("SELECT status, claimed_at, attempts FROM jobs WHERE id = ?").get(myJob)).toEqual({ status: "queued", claimed_at: null, attempts: 0 }); // ПЕРЕВОРОТ (В4.8.5, К8.5.2a): попытка откатывается — было attempts: 1
+    expect(db.query("SELECT status, claimed_at, attempts FROM jobs WHERE id = ?").get(myJob)).toEqual({ status: "queued", claimed_at: null, attempts: 0 }); // прерванная остановкой попытка откатывается, а не сжигается
     // чужая running-заявка не тронута
     expect((db.query("SELECT status FROM jobs WHERE id = ?").get(foreignJob) as { status: string }).status).toBe("running");
 
@@ -1600,8 +1586,8 @@ describe("В4.4 (кластер L): штатное завершение", () => 
 });
 
 // ---------------------------------------------------------------------------
-// Круг 2 В4.4 (З6): метка завершённого тика в meta — только у rating-стороны
-// воркер-лупа (живой web-процесс не должен маскировать мёртвую rating-роль).
+// Метка завершённого тика в meta — только у rating-стороны воркер-лупа
+// (живой web-процесс не должен маскировать мёртвую rating-роль).
 // getHealth краснеет по staleness (тест — в api.test.ts).
 // ---------------------------------------------------------------------------
 
@@ -1627,8 +1613,8 @@ describe("З6 (круг 2 В4.4): метка тика планировщика �
 });
 
 // ---------------------------------------------------------------------------
-// Круг 2 В4.4 (Б5): skipped-счётчик сбрасывается чистым обходом (И-3/П-6/S-3)
-// и волна сортируется конечным сентинелом (И-6 — NaN на паре null-лайков).
+// skipped-счётчик сбрасывается чистым обходом, а волна сортируется конечным
+// сентинелом (иначе NaN на паре null-лайков).
 // ---------------------------------------------------------------------------
 
 describe("Б5 (круг 2 В4.4): счётчик плохих слагов — метка «последнего обхода»", () => {
@@ -1672,7 +1658,7 @@ describe("Б5 (круг 2 В4.4): счётчик плохих слагов — �
 });
 
 // ---------------------------------------------------------------------------
-// Круг 2 В4.4 (Б5, П-5): SIGTERM закрывает скан ЭТОГО процесса честным
+// SIGTERM закрывает скан ЭТОГО процесса честным
 // квартетом (bad + public_status bad + finished_at + shutdown), ПОТОМ
 // возвращает заявку в queued. Один status='bad' оставил бы
 // public_status='running' навсегда — нечестность вернулась бы в карточку.
@@ -1688,12 +1674,11 @@ describe("П-5 (круг 2 В4.4): сирота-скан при штатном �
       pdb.query("INSERT INTO users (ya_id, login, created_at, last_login_at) VALUES ('p5u', 'p5u', '2026', '2026')").run();
       const u = (pdb.query("SELECT id FROM users WHERE ya_id = 'p5u'").get() as { id: number }).id;
       const jobId = enqueueScan(pdb, p5Repo, { userId: u, triggerKind: "user" });
-      // (заявку клеим сам workerTick — ручной claim поставил бы лиз и
+      // (заявку берёт сам workerTick — ручной claim поставил бы лиз и
       // заблокировал бы воркер до его истечения)
       // running-скан этого процесса создаётся ВНУТРИ зависшего runScan — как
-      // его создаёт настоящий runScan, после claim. В4.8.5 (К8.5.2b, сетап —
-      // утверждения прежние): running-скан, созданный ДО claim, claim теперь
-      // закрывает как сироту прежнего исполнителя
+      // его создаёт настоящий runScan, после claim: running-скан, созданный
+      // ДО claim, claim закрывает как сироту прежнего исполнителя
       let scanId = 0;
       // регистрация в liveClaims — через workerTick с зависшим runScan
       let release: () => void = () => {};
@@ -1726,7 +1711,7 @@ describe("П-5 (круг 2 В4.4): сирота-скан при штатном �
         finished: true,
       });
       expect(returnOwnRunningJobs(pdb)).toBe(1);
-      expect(pdb.query("SELECT status, claimed_at, attempts FROM jobs WHERE id = ?").get(jobId)).toEqual({ status: "queued", claimed_at: null, attempts: 0 }); // ПЕРЕВОРОТ (В4.8.5, К8.5.2a): было attempts: 1 — сожженная попытка С4-5
+      expect(pdb.query("SELECT status, claimed_at, attempts FROM jobs WHERE id = ?").get(jobId)).toEqual({ status: "queued", claimed_at: null, attempts: 0 }); // попытка не сжигается
       release();
       await tick;
       // finishJob по возвращённой заявке не матчится (claimed_at NULL) — queued цела

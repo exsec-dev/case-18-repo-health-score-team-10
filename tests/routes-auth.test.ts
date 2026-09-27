@@ -1,8 +1,6 @@
-// routes-auth.test.ts — Ф2.10 (M10 В4): маршруты `/auth/*` на НАСТОЯЩЕМ
-// сервере с моком Я ID (шов адресов YA_OAUTH_BASE/YA_LOGIN_BASE, как
-// Config.api в Ф1.13) и проверка «PAT не в ответах» по `/api/me*` и
-// `/auth/*`. До этой вехи `/auth/*` не покрывались ни одним тестом, а
-// «PAT не утекает» было приёмочным пунктом без теста.
+// Маршруты `/auth/*` на НАСТОЯЩЕМ сервере с моком Я ID (шов адресов
+// YA_OAUTH_BASE/YA_LOGIN_BASE, как Config.api) и проверка «PAT не в ответах»
+// по `/api/me*` и `/auth/*`.
 //
 // Сети нет: все внешние адреса сервера (REST, AppSec, git, Я ID) — один
 // локальный Bun.serve-мок во временном DATA_DIR.
@@ -137,8 +135,7 @@ describe("Ф2.10 (M10): маршруты /auth/* с моком Я ID", () => {
       });
       const location = new URL(res.headers.get("location")!, server!.base);
       expect(location.pathname).toBe("/me");
-      // ПЕРЕВОРОТ (В4.8.5, К8.5.4, С1-6): причина — фразой языка продукта, не кодом провайдера
-      // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): В-11 «Я ID»
+      // причина — фразой языка продукта, не кодом провайдера
       expect(location.searchParams.get("auth_error")).toBe("Я ID не подтвердил вход – попробуйте войти еще раз");
       expect(cookieOf(res, "rh_session")).toBeNull();
     } finally {

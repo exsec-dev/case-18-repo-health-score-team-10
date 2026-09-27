@@ -1,38 +1,35 @@
-// ownership.ts — В5.5 тур 2, W4 (ТЗ §7, ЗН-2): карта владельцев файлов.
-// Справочный показатель категории «Состояние кода» (DISPLAY_ONLY, без веса):
-// индекс, полный Score, покрытие и рекомендации от него не зависят.
+// Карта владельцев файлов (ТЗ §7) – справочный показатель категории
+// «Состояние кода» без веса: индекс, Score, покрытие и рекомендации от него не
+// зависят.
 //
-// Вход — `git log --no-merges --name-only` bare-клона за OWNERSHIP_WINDOW_DAYS
-// (клон живет только на время скана; закон 3 «код не храним» — в факт идут
-// одни агрегаты по верхнеуровневым каталогам, ни путей файлов, ни кода).
-// Единица изменения — «коммит тронул файл кода» (`isSourcePath`: без
-// документов, lock-файлов и картинок, как строки кода М2.3): большие
-// сгенерированные диффы не перевешивают, как было бы у счета строк.
-// Коммиты роботов и сгенерированных всплесков синхронизации исключаются по
-// sha — признак `robot2` (та же истина, что у bus factor и частоты коммитов;
-// флаг `robot` v1 в timeline расчет игнорирует, AGENTS.md 23.09 «флаг по имени»).
-// Окно — по дате автора (как bus factor): импорт зеркала со свежей датой
-// коммитера не делает старую историю «изменениями за год».
+// Вход – `git log --no-merges --name-only` bare-клона за OWNERSHIP_WINDOW_DAYS.
+// Код не храним: в факт идут только агрегаты по верхнеуровневым каталогам, без
+// путей файлов и кода.
+// Единица изменения – «коммит тронул файл кода» (`isSourcePath`), а не строки:
+// большие сгенерированные диффы не перевешивают.
+// Коммиты роботов и всплески синхронизации исключаются по sha через признак
+// `robot2` – тот же, что у bus factor и частоты коммитов (старый флаг `robot`
+// в timeline расчет не использует).
+// Окно считается по дате автора, как у bus factor: импорт зеркала со свежей
+// датой коммитера не превращает старую историю в «изменения за год».
 //
-// Приватность: человек — ключ по email (как bus factor и число авторов), но в
-// факт и на экран идет только отображаемое имя из git; email — никогда (имя,
-// похожее на email, маскируется).
+// Приватность: человек различается по email, но в факт и на экран идет только
+// отображаемое имя из git; email – никогда (имя, похожее на email, маскируется).
 import { isSourcePath } from "./source-path";
 
-/** Окно изменений, дней. */
 export const OWNERSHIP_WINDOW_DAYS = 365;
 /** Порог «единственного владельца»: доля изменений главного автора каталога. */
 export const OWNERSHIP_SINGLE_OWNER_SHARE = 0.8;
-/** Каталогов в карте — самых изменяемых. */
+/** Сколько самых изменяемых каталогов попадает в карту. */
 export const OWNERSHIP_TOP_DIRS = 10;
-/** Бюджет обхода: коммитов (свежие первыми; больше — обрезка с пометкой). */
+/** Бюджет обхода в коммитах (свежие первыми); сверх него – обрезка с пометкой. */
 export const OWNERSHIP_MAX_COMMITS = 5000;
-/** Бюджет обхода: изменений «коммит × файл» (больше — обрезка с пометкой). */
+/** Бюджет обхода в изменениях «коммит × файл»; сверх него – обрезка с пометкой. */
 export const OWNERSHIP_MAX_CHANGES = 100_000;
-/** Имя корзины файлов в корне репозитория. */
+/** Корзина для файлов в корне репозитория. */
 export const OWNERSHIP_ROOT = ".";
 
-/** Разделители записи `git log --format` (как у timeline). */
+/** Разделители записей и полей – как у timeline. */
 export const OWNERSHIP_LOG_FORMAT = "%x1e%H%x1f%an%x1f%ae%x1f%aI";
 
 export interface OwnershipCommit {
@@ -51,7 +48,6 @@ function unquotePath(raw: string): string {
   return raw;
 }
 
-/** Разбор `git log --format=OWNERSHIP_LOG_FORMAT --name-only`. */
 export function parseOwnershipLog(stdout: string): OwnershipCommit[] {
   const out: OwnershipCommit[] = [];
   for (const rec of stdout.split("\x1e")) {
@@ -71,13 +67,13 @@ export function parseOwnershipLog(stdout: string): OwnershipCommit[] {
 
 const EMAIL_LIKE = /<?[^\s<>@]+@[^\s<>@]+>?/g;
 
-/** Отображаемое имя автора без email: имя-адрес маскируется, пустое — «(имя не указано)». */
+/** Имя автора без email: адрес вырезается, пустое имя – «(имя не указано)». */
 export function displayAuthorName(name: string): string {
   const clean = name.replace(EMAIL_LIKE, "").replace(/\s+/g, " ").trim();
   return clean === "" ? "(имя не указано)" : clean;
 }
 
-/** Верхнеуровневый каталог пути; файл в корне — корзина OWNERSHIP_ROOT. */
+/** Верхнеуровневый каталог пути; файл в корне – OWNERSHIP_ROOT. */
 export function topDir(path: string): string {
   const i = path.indexOf("/");
   return i > 0 ? path.slice(0, i) : OWNERSHIP_ROOT;
@@ -85,17 +81,17 @@ export function topDir(path: string): string {
 
 export interface OwnershipOptions {
   now: Date;
-  /** sha, исключенные как робот или синхронизация (robot2 по timeline) */
+  /** sha коммитов роботов и синхронизации (robot2 из timeline) */
   excluded: Set<string>;
   /** коммитов в логе было больше бюджета (git log вернул OWNERSHIP_MAX_COMMITS + 1) */
   commitsTruncated?: boolean;
-  /** дата отсечения деградационного клона — окно могло не накрыть год */
+  /** дата, с которой начинается усеченный клон, – окно могло не накрыть год */
   historyTruncatedSince?: string;
 }
 
 const round3 = (x: number): number => Math.round(x * 1000) / 1000;
 
-/** Значение факта `code.ownership` (чистая функция: тестируется на данных). */
+/** Значение факта `code.ownership`. */
 export function aggregateOwnership(commits: OwnershipCommit[], opts: OwnershipOptions): Record<string, unknown> {
   const from = opts.now.getTime() - OWNERSHIP_WINDOW_DAYS * 86_400_000;
   const until = opts.now.getTime() + 86_400_000;
@@ -153,8 +149,8 @@ export function aggregateOwnership(commits: OwnershipCommit[], opts: OwnershipOp
     commits: counted,
     robot_commits_skipped: robotSkipped,
     changes,
-    // доля изменений кода за окно в каталогах с единственным владельцем;
-    // изменений нет — null при changes = 0 (данные «кода за год не меняли»)
+    // доля изменений кода в каталогах с единственным владельцем; null, если за
+    // окно код не меняли – сам этот факт виден по changes = 0
     single_owner_share: changes > 0 ? round3(singleChanges / changes) : null,
     dirs_total: dirs.length,
     dirs_single_owner: dirs.filter((d) => d.owner_share >= OWNERSHIP_SINGLE_OWNER_SHARE).length,

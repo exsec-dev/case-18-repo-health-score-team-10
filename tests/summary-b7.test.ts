@@ -1,6 +1,6 @@
-// summary-b7.test.ts — bus factor (Б7 В5, К5.9): derived ПРИ скане,
-// no-data факт даёт null (урок CRITICAL В4.4), окно и доля — константы
-// model.ts, показ без веса (подметрика score=null). Живых вызовов нет.
+// Bus factor: derived ПРИ скане, no-data факт дает null (а не число по пустым
+// данным), окно и доля — константы model.ts, показ без веса (подметрика
+// score=null). Живых вызовов нет.
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";

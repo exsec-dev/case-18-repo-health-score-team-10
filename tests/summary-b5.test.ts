@@ -1,7 +1,6 @@
-// summary-b5.test.ts — история оценки и история взглядов (Б5 В5, К5.7/К5.16):
-// публичная проекция points (индекс/покрытие всем, полный Score по правам),
-// tri-state NULL-точки, обрыв на MODEL_VERSION, привязка head_sha,
-// append-история ai_notes и её видимость (текст не публичен).
+// История оценки и история взглядов: публичная проекция points (индекс и покрытие
+// всем, полный Score по правам), tri-state NULL-точки, обрыв на MODEL_VERSION,
+// привязка head_sha, append-история ai_notes и её видимость (текст не публичен).
 import { MODEL_VERSION } from "../src/score/model";
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
@@ -115,7 +114,7 @@ describe("getAiNotesHistory: append-история взглядов и её ви
     return s2;
   }
 
-  // В5.2 (Б2): аноним публичного репо — публичная версия (здесь публичных текстов
+  // аноним публичного репо — публичная версия (здесь публичных текстов
   // нет, только полные) — пустой список, полного текста нет; закрытый — 404/locked
   test("оба скана в истории по порядку; аноним — публичная версия без полного текста", async () => {
     const { db } = freshDb("rh-v5b5-notes-");

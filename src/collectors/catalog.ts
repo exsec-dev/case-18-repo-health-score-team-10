@@ -1,13 +1,11 @@
-// catalog.ts — каталог-энумерация (Б2 В1; Ф2.5 В4.2a): документированный
-// GET /repos (DiscoverRepositories, docs/api-spec/sourcecraft.swagger.json).
-// В4.2a: `page_size=100` (максимум спеки) и `sort_by=created_at` —
-// порядок по умолчанию `-rating` НЕ стабилен при пагинации (спека: «rating
-// changes can cause repositories to be skipped or returned more than once»),
-// а 20 записей на страницу превращали 27 446 репо в 1373 запроса вместо 275
-// (живой замер 17.09). Потолок страниц — предохранитель, не бюджет приёмки.
-// Эндпоинт по построению отдаёт только публичные репо; параметра
-// `visibility` в спеке нет, клиентский фильтр по явному полю остаётся
-// (видимость — свойство репо, решение Екатерины 17.09).
+// Обход каталога публичных репозиториев через GET /repos
+// (DiscoverRepositories, docs/api-spec/sourcecraft.swagger.json).
+// `sort_by=created_at`, потому что порядок по умолчанию `-rating` нестабилен
+// при пагинации: по спеке репо могут пропускаться или повторяться.
+// `page_size=100` – максимум спеки; дефолтные 20 записей дают впятеро больше
+// запросов. Потолок страниц – только предохранитель.
+// Эндпоинт и так отдает только публичные репо (параметра `visibility` в спеке
+// нет), но клиентский фильтр по полю видимости оставлен на всякий случай.
 import { ScClient } from "./http";
 
 export interface CatalogEntry {
@@ -19,27 +17,25 @@ export interface CatalogEntry {
   description: string | null;
   is_empty: boolean;
   last_updated: string | null;
-  /** rating.value из каталога (лайки-производная, не целые «лайки» API) */
+  /** округленный rating.value каталога (производная от лайков, а не их число) */
   likes: number | null;
   rating_percentile: number | null;
   default_branch: string | null;
   clone_url_https: string | null;
   web_url: string | null;
-  /** logo.url репозитория (картинка платформы; нет — null, UI рисует инициалы) */
+  /** logo.url репозитория; null – UI рисует инициалы */
   logo_url: string | null;
-  /** language.color платформы (#rrggbb; дисплей — точка языка) */
+  /** language.color платформы (#rrggbb) для точки языка в UI */
   language_color: string | null;
 }
 
 export interface CatalogResult {
   ok: boolean;
-  /** записи public-репо (клиентский фильтр поверх серверного) */
   entries: CatalogEntry[];
-  /** сколько страниц фактически прочитано */
   pages: number;
-  /** true = упёрлись в потолок страниц, каталог не дочитан */
+  /** true – каталог не дочитан (потолок страниц или сбой) */
   truncated: boolean;
-  /** В4.4 (кластер K/З5): записей отброшено гардом слагов/формы за обход */
+  /** записей отброшено из-за некорректного слага или формы */
   skippedBadEntries: number;
   /** первая ошибка канала, если ok=false */
   error?: { status: number; detail: string };
@@ -47,7 +43,7 @@ export interface CatalogResult {
 
 export interface CatalogOptions {
   maxPages?: number;
-  /** только public (default true; серверу шлём параметр, плюс клиентский фильтр) */
+  /** оставить только public (по умолчанию true) */
   publicOnly?: boolean;
 }
 
@@ -67,13 +63,13 @@ interface RawEntry {
   logo?: { url?: unknown } | null;
 }
 
-/** Цвет из API идёт в style — только #rgb/#rrggbb, иначе null. */
+/** Цвет из API попадает в style, поэтому пропускаем только #rgb/#rrggbb. */
 export function hexColor(v: unknown): string | null {
   return typeof v === "string" && /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(v) ? v : null;
 }
 
-/** В4.4 (кластер K/З5): слаг каталога обязан пройти charset-гард — иначе
- *  сконструированная запись уводит клон-URL на чужой путь git-хоста. */
+/** Слаг каталога проверяется по набору символов: иначе подделанная запись
+ *  уводит URL клона на чужой путь git-хоста. */
 const SLUG_OK = /^[a-z0-9_.-]+$/i;
 const slugOk = (v: string): boolean => SLUG_OK.test(v) && !/^[.]+$/.test(v);
 
@@ -83,7 +79,7 @@ function parseEntry(e: RawEntry): CatalogEntry | null {
   if (!org || !repo) return null;
   if (!slugOk(org) || !slugOk(repo)) return null;
   const ratingValue = typeof e.rating?.value === "number" ? e.rating.value : null;
-  // live 15.09: language — объект {name, color}, не строка
+  // живой API отдает language объектом {name, color}, а не строкой
   const language = typeof e.language === "string" ? e.language : typeof e.language?.name === "string" ? e.language.name : null;
   return {
     org,
@@ -105,9 +101,9 @@ function parseEntry(e: RawEntry): CatalogEntry | null {
 }
 
 /**
- * Полный обход каталога. Механизм заземлён живым зондом 15.09
- * (scripts/probe-catalog.ts): список в `repositories`, курсор в
- * `next_page_token`, пустой/отсутствующий курсор = конец.
+ * Форма ответа проверена живым зондом (scripts/probe-catalog.ts): список в
+ * `repositories`, курсор в `next_page_token`, пустой или отсутствующий
+ * курсор – конец.
  */
 export const CATALOG_PAGE_SIZE = 100;
 export const CATALOG_SORT_BY = "created_at";
@@ -134,9 +130,8 @@ export async function enumerateCatalog(client: ScClient, opts: CatalogOptions = 
     }
     pages++;
     const body = res.json as { repositories?: RawEntry[]; next_page_token?: unknown } | null;
-    // M7, обратный край: 200 без массива `repositories` — это СБОЙ формы, а не
-    // дочитанный пустой каталог. Прежний код читал его как «в каталоге никого»
-    // и уносил в эвикцию весь рейтинг
+    // 200 без массива `repositories` – сбой формы, а не пустой каталог: иначе
+    // «в каталоге никого» вытеснило бы из рейтинга все репозитории
     if (!Array.isArray(body?.repositories)) {
       return {
         ok: false,

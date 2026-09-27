@@ -1,7 +1,7 @@
-// auth.test.ts — В4/Б1: Я ID OAuth (buildAuthUrl/exchangeCode на фейк
-// HTTP), сессии (подпись, TTL, отзыв, upsert users), PAT (AES-256-GCM
-// раундтрип, чужой ключ, повреждение, store/get/delete), настройки
-// (валидация, третий слой конфига). Сети нет: все шовы инъектятся.
+// Я ID OAuth (buildAuthUrl/exchangeCode на фейк HTTP), сессии (подпись, TTL, отзыв,
+// upsert users), PAT (AES-256-GCM раундтрип, чужой ключ, повреждение,
+// store/get/delete), настройки (валидация, третий слой конфига). Сети нет: все шовы
+// инъектятся.
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -91,14 +91,13 @@ describe("Я ID OAuth: URL и обмен кода", () => {
     expect(empty.ok && empty.profile).toEqual({ yaId: "1", login: "kate", displayName: "Екатерина", avatarId: null });
   });
 
-  // ПЕРЕВОРОТ (В4.8.5, К8.5.4, С1-6): английский текст провайдера наружу не идет — фраза языком продукта
   test("exchangeCode: invalid_grant → ошибка языком продукта, без текста провайдера", async () => {
     const res = await exchangeCode(creds, "bad", {
       postForm: async () => ({ status: 400, json: { error: "invalid_grant", error_description: "code expired" } }),
       getJson: async () => ({ status: 0, json: null }),
     });
     expect(res.ok).toBe(false);
-    if (!res.ok) expect({ text: res.error, provider: res.error.includes("code expired") }).toEqual({ text: "Я ID не подтвердил вход – попробуйте войти еще раз", provider: false }); // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): В-11 «Я ID»
+    if (!res.ok) expect({ text: res.error, provider: res.error.includes("code expired") }).toEqual({ text: "Я ID не подтвердил вход – попробуйте войти еще раз", provider: false });
   });
 
   test("exchangeCode: /info неожиданной формы → ошибка, не падение", async () => {
@@ -112,7 +111,7 @@ describe("Я ID OAuth: URL и обмен кода", () => {
   test("exchangeCode без секретов в конфиге — честный отказ", async () => {
     const res = await exchangeCode({ ...creds, clientSecret: null }, "c", httpOk);
     expect(res.ok).toBe(false);
-    // ПЕРЕВОРОТ (В4.8.5, К8.5.4): текст языком продукта, без имен переменных окружения — было «не сконфигурировано (YA_CLIENT_ID/SECRET)»
+    // текст видит пользователь — без имен переменных окружения
     if (!res.ok) expect(res.error).toBe("вход через Я ID на сервере не настроен");
   });
 });

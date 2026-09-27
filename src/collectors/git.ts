@@ -1,11 +1,9 @@
-// git.ts — git-коллектор (план В1 + расширения В2/Б1): cloneBare с
-// watchdog (du-поллинг + таймаут, tree-kill через setsid-группу) +
-// деградационная попытка --shallow-since (§5.7 методики), extractFacts
-// из bare-клона (флаги секций README, has_steps ci.yaml,
-// history_truncated_since), cleanup в finally на стороне вызывающего
-// (закон 3: клон в tmp → метрики → rm; в БД только факты).
-// Tri-state: клон не удался/пустой → факты no-data, не bad.
-// Лимиты — из Config.scan (src/config.ts), не константами здесь.
+// Git-сборщик: cloneBare со сторожем (опрос размера через du и таймаут,
+// убийство всей setsid-группы) и запасной попыткой --shallow-since для
+// слишком больших репо, extractFacts из bare-клона. Код не храним: клон
+// живет в tmp, из него извлекаются факты, и вызывающий удаляет его в finally.
+// Клон не удался или пустой → факты no-data, а не bad.
+// Лимиты берутся из Config.scan (src/config.ts).
 import { execFile, execFile as execFileCb } from "node:child_process";
 import { mkdtempSync, rmSync, statfsSync } from "node:fs";
 import { lstat, readdir } from "node:fs/promises";
@@ -37,8 +35,8 @@ export interface CloneFailure {
 export type CloneOutcome = CloneSuccess | CloneFailure;
 
 /**
- * Швы В4.2a (Б0). Минимальные структурные типы вместо `Bun.Subprocess`:
- * тест подставляет свой процесс, не собирая генерики Bun.
+ * Минимальные структурные типы вместо `Bun.Subprocess`: тест подставляет
+ * свой процесс, не собирая генерики Bun.
  */
 export interface SpawnedGit {
   pid: number;
@@ -47,7 +45,7 @@ export interface SpawnedGit {
   kill(signal?: number | NodeJS.Signals): void;
 }
 
-/** Шов запуска `git clone` (Ф2.4): тест видит argv и env дочернего процесса. */
+/** Запуск `git clone`, подменяемый в тестах: тест видит argv и env дочернего процесса. */
 export type SpawnGit = (opts: { cmd: string[]; env: Record<string, string> }) => SpawnedGit;
 
 export interface CatFileProc {
@@ -57,23 +55,23 @@ export interface CatFileProc {
   kill(signal?: number | NodeJS.Signals): void;
 }
 
-/** Шов `git cat-file --batch` (Ф2.3): тест обрывает поток на середине. */
+/** Запуск `git cat-file --batch`, подменяемый в тестах (например, чтобы оборвать поток). */
 export type CatFileSpawn = (cloneDir: string) => CatFileProc;
 
 export interface CloneSeams {
   /** подмена запуска git (по умолчанию `Bun.spawn`) */
   spawnGit?: SpawnGit;
-  /** подмена версии git (Ф2.4): null = не определилась */
+  /** подмена версии git: null – не определилась */
   gitVersion?: [number, number, number] | null;
-  /** вызывается с каталогом успешного клона ДО того, как его увидит вызывающий */
+  /** вызывается с каталогом успешного клона до того, как его увидит вызывающий */
   onCloneDir?: (dir: string) => void | Promise<void>;
-  /** шов В5.4: свободные байты в каталоге (по умолчанию statfs) */
+  /** свободные байты в каталоге (по умолчанию statfs) */
   freeBytes?: (dir: string) => number;
-  /** шов В5.4: ожидание места на диске — пауза опроса и предел ожидания */
+  /** ожидание места на диске: пауза опроса и предел ожидания */
   diskWait?: { pollMs: number; maxWaitMs: number };
 }
 
-/** В5.4 (О3): опрос свободного места раз в 30 с, не дольше 15 мин (лиз заявки — 85 мин). */
+/** Опрос свободного места раз в 30 с, не дольше 15 мин – с запасом внутри аренды заявки (85 мин). */
 export const DISK_WAIT = { pollMs: 30_000, maxWaitMs: 15 * 60_000 };
 
 function statfsFreeBytes(dir: string): number {
@@ -82,11 +80,11 @@ function statfsFreeBytes(dir: string): number {
 }
 
 /**
- * В5.4 (аудит очереди О3): одновременные клоны делят один диск — ENOSPC одного клона
- * ронял соседние. Перед клоном: свободного места меньше резерва — ждать, пока соседние
- * клоны закончатся и уберутся. Смысл скана не меняется: после предела ожидания клон идет
- * как раньше (исход решает git), ожидание только разводит клоны по времени.
- * Ошибка statfs — не повод стоять: проверка пропускается.
+ * Одновременные клоны делят один диск, и ENOSPC одного клона роняет соседние.
+ * Поэтому перед клоном, если свободного места меньше резерва, ждем, пока
+ * соседние клоны закончатся и уберутся. После предела ожидания клон все равно
+ * идет (исход решает git) – ожидание только разводит клоны по времени.
+ * Ошибка statfs – не повод стоять: проверка пропускается.
  */
 export async function waitForDiskRoom(
   dir: string,
@@ -149,25 +147,24 @@ function execGit(args: string[], opts: { timeoutMs?: number } = {}): Promise<Exe
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function killTree(pid: number, killSelf: () => void): void {
-  // setsid: pid == pgid → отрицательный pid валит всю группу (git + субпроцессы)
+  // после setsid pid == pgid: отрицательный pid убивает всю группу (git и его подпроцессы)
   try {
     process.kill(-pid, "SIGKILL");
   } catch {
     try {
       killSelf();
     } catch {
-      /* уже мёртв */
+      /* уже мертв */
     }
   }
 }
 
-// В4.4 (кластер L/З1): реестр живых групп клонов ЭТОГО процесса — setsid-
-// группы переживают убитого родителя до свипа (2×lease, 170 мин); SIGTERM
-// гасит их сразу (штатное завершение ≤ 5 с). Регистрация/снятие — вокруг
-// живого proc.exited в cloneBare.
+// Реестр живых групп клонов этого процесса. setsid-группы переживают убитого
+// родителя, пока их не подберет плановая зачистка (2 × аренда, 170 мин), поэтому
+// при SIGTERM гасим их сразу.
 const liveCloneGroups = new Set<number>();
 
-/** Зарегистрировать живую группу клона (pid == pgid у setsid-спавна). */
+/** Регистрирует живую группу клона (у setsid-процесса pid == pgid). */
 export function trackCloneGroup(pid: number): void {
   if (Number.isFinite(pid) && pid > 0) liveCloneGroups.add(pid);
 }
@@ -176,7 +173,7 @@ function untrackCloneGroup(pid: number): void {
   liveCloneGroups.delete(pid);
 }
 
-/** Убить все живые группы клонов процесса (SIGTERM-путь); возвращает число убитых. */
+/** Убивает все живые группы клонов процесса (при SIGTERM); возвращает число убитых. */
 export function killActiveClones(): number {
   let killed = 0;
   for (const pid of Array.from(liveCloneGroups)) {
@@ -193,7 +190,7 @@ export function killActiveClones(): number {
 
 const HAVE_DU = Boolean(Bun.which("du"));
 
-/** Размер каталога для watchdog: быстрый du, portable fallback для Windows. */
+/** Размер каталога для сторожа: быстрый du, а без него (Windows) – обход файлов. */
 async function duBytes(dir: string): Promise<number> {
   if (!HAVE_DU) return fsTreeBytes(dir);
   const measured = await new Promise<number | null>((resolve) => {
@@ -215,8 +212,8 @@ async function fsTreeBytes(path: string): Promise<number> {
     for (const entry of entries) total += await fsTreeBytes(join(path, entry.name));
     return total;
   } catch {
-    // Клон пишет дерево параллельно: исчезнувший между readdir/lstat файл
-    // будет учтён на следующем poll или в обязательном финальном замере.
+    // клон пишет дерево параллельно: файл, исчезнувший между readdir и lstat,
+    // учтется в следующем опросе или в обязательном финальном замере
     return 0;
   }
 }
@@ -224,15 +221,8 @@ async function fsTreeBytes(path: string): Promise<number> {
 const HAVE_SETSID = Boolean(Bun.which("setsid"));
 
 /**
- * Клонирует `git clone --bare <url>` в свежий tmp-подкаталог. Watchdog:
- * каждые pollMs du-поллинг размера (maxBytes) + проверка таймаута;
- * пробой → kill группы процессов + rm + {ok:false}. Успех → путь клона
- * (очистка — cleanupClone(dir) в finally вызывающего).
- * opts.shallowSince — деградационный режим (--shallow-since, §5.7).
- */
-/**
- * Креды из URL (https://user:pat@host) не едут в детали ошибок/факты:
- * git печатает URL в stderr — PAT юзера не должен попадать в БД.
+ * Креды из URL (https://user:pat@host) вырезаются из деталей ошибок и фактов:
+ * git печатает URL в stderr, а PAT пользователя не должен попасть в БД.
  */
 export function scrubCredentials(text: string): string {
   return text.replace(/(https?:\/\/)[^@\/\s]+@/g, "$1***@");
@@ -244,10 +234,9 @@ export type CredentialSplit =
   | { kind: "refused"; detail: string };
 
 /**
- * К-Р13 (круг 2): декодирование percent-последовательностей из
- * пользовательского ввода — ТОЛЬКО через этот хелпер. Битая
- * последовательность (`%zz`) бросает URIError: вход считается невалидным и
- * даёт управляемый отказ (null), а не исключение наружу (500).
+ * Декодировать percent-последовательности из пользовательского ввода только
+ * через этот хелпер: битая последовательность (`%zz`) бросает URIError, а
+ * здесь она дает управляемый отказ (null) вместо 500.
  */
 export function safeDecodeURIComponent(raw: string): string | null {
   try {
@@ -258,13 +247,11 @@ export function safeDecodeURIComponent(raw: string): string | null {
 }
 
 /**
- * Ф2.4 + LOW-9: разбор клон-URL с кредами. Креды уезжают из URL в заголовок
- * `Authorization` (в argv их видно всему хосту через /proc/<pid>/cmdline).
- * Разрешены только `https://` и — ради герметичного теста — `http://` на
- * loopback (`localhost`/`127.0.0.1`); любой другой внешний `http://` с
- * кредами ОТКАЗЫВАЕТСЯ: отправить PAT открытым текстом на чужой хост хуже,
- * чем не собрать канал. Разрешение на произвольный внешний http не
- * расширяется (план: «Не ваши, но рядом»).
+ * Разбор URL клона с кредами. Креды переезжают из URL в заголовок
+ * `Authorization`: в argv их видно всему хосту через /proc/<pid>/cmdline.
+ * Разрешены только `https://` и – для локальных тестов – `http://` на loopback
+ * (`localhost`/`127.0.0.1`). Любой другой `http://` с кредами отклоняется:
+ * отправить PAT открытым текстом на чужой хост хуже, чем не собрать канал.
  */
 export function splitCredentialUrl(raw: string): CredentialSplit {
   let u: URL;
@@ -273,18 +260,14 @@ export function splitCredentialUrl(raw: string): CredentialSplit {
   } catch {
     return { kind: "none", url: raw };
   }
-  // К-Р16 (круг 2): креды — это ПАРОЛЬ. Username без пароля (анонимный
-  // `https://git@host/...` — канон платформы для публичных репо) секрета не
-  // несёт и header-механику не включает: проверка git ≥ 2.31 относится
-  // ТОЛЬКО к клонам с кредами, анонимный клон не должен отказываться
-  // вместе с приватными.
+  // секрет – это пароль. Имя без пароля (анонимный `https://git@host/...` –
+  // так платформа отдает публичные репо) секрета не несет, заголовок не
+  // нужен, и проверка git ≥ 2.31 такой клон не блокирует
   if (u.password === "") return { kind: "none", url: raw };
   const loopback = u.hostname === "localhost" || u.hostname === "127.0.0.1";
   if (u.protocol !== "https:" && !(u.protocol === "http:" && loopback)) {
     return { kind: "refused", detail: `refusing to send credentials over ${u.protocol}//${u.hostname} (https, or http on loopback, only)` };
   }
-  // К-Р13: битая percent-последовательность в кредах — невалидный вход,
-  // управляемый отказ (не URIError наружу)
   const user = safeDecodeURIComponent(u.username);
   const pass = safeDecodeURIComponent(u.password);
   if (user === null || pass === null) {
@@ -299,7 +282,7 @@ export function splitCredentialUrl(raw: string): CredentialSplit {
   };
 }
 
-/** `git version 2.43.0.windows.1` → [2, 43, 0]; неразбираемое — null. */
+/** `git version 2.43.0.windows.1` → [2, 43, 0]; неразбираемое – null. */
 export function parseGitVersion(text: string): [number, number, number] | null {
   const m = text.match(/git version (\d+)\.(\d+)(?:\.(\d+))?/);
   if (!m) return null;
@@ -307,11 +290,9 @@ export function parseGitVersion(text: string): [number, number, number] | null {
 }
 
 /**
- * `http.extraHeader` через `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_*` появился в
- * git 2.31 (до неё переменные игнорируются, и клон приватного репо ушёл бы
- * без авторизации — либо, если бы мы вернули креды в URL, с PAT в argv).
- * К-Р1 (круг 2, HIGH): в кэше живёт ТОЛЬКО успех — отказ пробы не
- * сохраняется, следующий вызов пробует заново.
+ * `http.extraHeader` через `GIT_CONFIG_COUNT`/`GIT_CONFIG_KEY_*` работает с
+ * git 2.31: раньше переменные игнорируются, и клон приватного репо ушел бы
+ * без авторизации. В кэше хранится только успешная проба версии.
  */
 export const MIN_GIT_VERSION: [number, number] = [2, 31];
 let gitVersionCache: Promise<[number, number, number] | null> | null = null;
@@ -323,13 +304,10 @@ export function __resetGitVersionCache(): void {
 export async function gitVersion(): Promise<[number, number, number] | null> {
   if (gitVersionCache === null) {
     const probe = execGit(["--version"], { timeoutMs: 10_000 }).then((r) => parseGitVersion(r.stdout));
-    // К-Р1: прежде отказ гасился в null и кэшировался ВМЕСТЕ с промисом —
-    // один транзиторный сбой `git --version` (EAGAIN, таймаут под нагрузкой)
-    // отравлял кэш до перезапуска процесса: versionAtLeast(null) ложно, и
-    // КАЖДЫЙ клон с кредами отказывался, не запуская git. Теперь отказ и
-    // неразбираемый вывод обнуляют кэш — следующий вызов пробует заново;
-    // параллельные вызовы делят один живой промис (двух проб одновременно
-    // не бывает). Отказ логируется без секретов (в `git --version` их нет).
+    // сбой или неразбираемый вывод обнуляют кэш, и следующий вызов пробует
+    // заново: иначе один случайный сбой `git --version` (EAGAIN, таймаут под
+    // нагрузкой) до перезапуска процесса отклонял бы каждый клон с кредами.
+    // Параллельные вызовы делят один промис – двух проб одновременно нет
     gitVersionCache = probe.then(
       (v) => {
         if (v === null) gitVersionCache = null;
@@ -350,20 +328,25 @@ export function versionAtLeast(v: [number, number, number] | null, min: [number,
   return v[0] > min[0] || (v[0] === min[0] && v[1] >= min[1]);
 }
 
+/**
+ * `git clone --bare` в свежий подкаталог tmp. Сторож каждые pollMs меряет
+ * размер и проверяет таймаут; при превышении убивает группу процессов и
+ * удаляет каталог. При успехе удалить клон (cleanupClone) обязан вызывающий.
+ * opts.shallowSince – запасной режим --shallow-since для больших репо.
+ */
 export async function cloneBare(
   urlWithCreds: string,
   tmpDir: string = tmpdir(),
   limits: CloneLimits,
   opts: { shallowSince?: string } & CloneSeams = {},
 ): Promise<CloneOutcome> {
-  // В5.4 (О3): до mkdtemp и до отсчета таймаута — ожидание места не съедает бюджет клона
+  // ждем места до mkdtemp и до отсчета таймаута, чтобы ожидание не съело бюджет клона
   await waitForDiskRoom(tmpDir, limits.minFreeBytes, opts);
   const dir = mkdtempSync(join(tmpDir, "rh-clone-"));
   const started = Date.now();
-  // ПОРТ hq-parallel (S1/security): креды НЕ едут в argv (world-readable
-  // /proc/<pid>/cmdline на всё время клона) — из URL в http-заголовок через
-  // env-конфиг git (GIT_CONFIG_*): environ читается только владельцем.
-  // Живой смоук паттерна: приватный клон 2.1МБ/1.9с (hq-parallel 738841e)
+  // креды не попадают в argv (/proc/<pid>/cmdline читают все): они уходят в
+  // http-заголовок через env-конфиг git (GIT_CONFIG_*), а environ процесса
+  // читает только его владелец
   const split = splitCredentialUrl(urlWithCreds);
   if (split.kind === "refused") {
     await cleanupFailedClone(dir);
@@ -372,8 +355,7 @@ export async function cloneBare(
   let cloneUrl = split.url;
   const childEnv: Record<string, string> = { GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "/bin/true" };
   if (split.kind === "header") {
-    // Ф2.4: без проверки версии `GIT_CONFIG_*` молча ничего не значит на
-    // git < 2.31 — клон приватного репо ушёл бы неавторизованным
+    // на git < 2.31 `GIT_CONFIG_*` молча игнорируется – клон ушел бы без авторизации
     const v = opts.gitVersion !== undefined ? opts.gitVersion : await gitVersion();
     if (!versionAtLeast(v, MIN_GIT_VERSION)) {
       await cleanupFailedClone(dir);
@@ -384,9 +366,8 @@ export async function cloneBare(
         elapsedMs: Date.now() - started,
       };
     }
-    // COUNT=2: пустой `credential.helper` глушит системные хелперы (менеджер
-    // кредов Windows/osxkeychain), иначе они подхватывают и КЭШИРУЮТ PAT на
-    // диске хоста — «код не храним» относится и к чужим ключам
+    // пустой `credential.helper` глушит системные хелперы (менеджер кредов
+    // Windows, osxkeychain), иначе они подхватят и сохранят PAT на диске хоста
     childEnv.GIT_CONFIG_COUNT = "2";
     childEnv.GIT_CONFIG_KEY_0 = "http.extraHeader";
     childEnv.GIT_CONFIG_VALUE_0 = split.authorization;
@@ -400,7 +381,7 @@ export async function cloneBare(
   const spawn: SpawnGit =
     opts.spawnGit ?? ((o) => Bun.spawn({ cmd: o.cmd, stdout: "ignore", stderr: "pipe", stdin: "ignore", env: o.env }));
   const proc = spawn({ cmd, env: { ...(process.env as Record<string, string>), ...childEnv } });
-  trackCloneGroup(proc.pid); // В4.4 (З1): SIGTERM гасит группу, не дожидаясь свипа
+  trackCloneGroup(proc.pid);
   let bytes = 0;
   let breach: "timeout" | "disk" | null = null;
   while (breach === null) {
@@ -422,12 +403,12 @@ export async function cloneBare(
     return { ok: false, reason: breach, detail, elapsedMs: Date.now() - started };
   }
   const code = await proc.exited;
-  untrackCloneGroup(proc.pid); // В4.4 (З1): группа завершилась сама — из реестра
+  untrackCloneGroup(proc.pid);
   if (code !== 0) {
     let stderr = "";
     try {
-      // Ф2.4: скраб ДО обрезки. Обрезка первой могла срезать `@`, и регулярка
-      // скраба переставала матчить — креды оставались в детали факта
+      // сначала вырезаем креды, потом обрезаем: обрезка могла отрезать `@`, и
+      // креды остались бы в детали факта
       stderr = scrubCredentials((await new Response(proc.stderr).text()).trim()).slice(0, 300);
     } catch {
       /* stdout/stderr ignore */
@@ -437,8 +418,8 @@ export async function cloneBare(
   }
   bytes = await duBytes(dir);
   const elapsedMs = Date.now() - started;
-  // Быстрый локальный/сетевой клон может завершиться раньше первого poll.
-  // Финальный замер обязателен: бюджет — постусловие, а не только watchdog.
+  // быстрый клон может завершиться раньше первого опроса, поэтому финальный
+  // замер обязателен: бюджет – постусловие, а не только забота сторожа
   if (bytes > limits.maxBytes || elapsedMs > limits.timeoutMs) {
     await cleanupFailedClone(dir);
     return bytes > limits.maxBytes
@@ -455,19 +436,19 @@ export async function cloneBare(
           elapsedMs,
         };
   }
-  // шов Б0: тест читает `<dir>/config` до того, как каталог уберут
+  // тест может прочитать `<dir>/config` до того, как каталог уберут
   await opts.onCloneDir?.(dir);
   return { ok: true, dir, bytes, elapsedMs };
 }
 
-/** Дата отсечения истории (календарные месяцы назад) — значение history_truncated_since. */
+/** Дата отсечения истории (календарные месяцы назад) – значение history_truncated_since. */
 export function truncateSinceIso(sinceMonths: number, now: Date = new Date()): string {
   const d = new Date(now.getTime());
   d.setMonth(d.getMonth() - sinceMonths);
   return d.toISOString();
 }
 
-/** Успех деградационного клона: история усечена с даты (null = не усекалась). */
+/** Успешный клон; historyTruncatedSince – с какой даты усечена история (null – не усекалась). */
 export interface DegradeCloneSuccess extends CloneSuccess {
   historyTruncatedSince: string | null;
 }
@@ -475,12 +456,10 @@ export interface DegradeCloneSuccess extends CloneSuccess {
 export type DegradeCloneOutcome = DegradeCloneSuccess | CloneFailure;
 
 /**
- * Клон с деградационным ярусом (§5.7): полный клон (бюджеты ярусов —
- * только операторские, из env/`DEFAULT_SCAN` в config.ts: первый
- * 1.5ГБ/20мин, деградация 2.5ГБ/25мин, RESOLVED 17.09) → при пробое
- * timeout/disk вторая попытка --shallow-since=<N>.months на бюджете
- * деградации + флаг усечённой истории. git-ошибка деградацией не
- * лечится — отдаётся как есть.
+ * Сначала полный клон; если он превысил таймаут или размер – вторая попытка
+ * --shallow-since=<N>.months на отдельном бюджете и с пометкой об усеченной
+ * истории. Бюджеты задает оператор (env или `DEFAULT_SCAN` в config.ts).
+ * Ошибку самого git усечение не лечит – она отдается как есть.
  */
 export async function cloneWithDegrade(
   url: string,
@@ -492,8 +471,7 @@ export async function cloneWithDegrade(
   if (first.ok || first.reason === "git") {
     return first.ok ? { ...first, historyTruncatedSince: null } : first;
   }
-  // тогл конфига (В4): ярус выключен — деградационной попытки нет,
-  // пробой первой отдаётся наверх как есть
+  // усеченная попытка выключена в конфиге – отдаем провал первой как есть
   if (limits.degrade.enabled === false) {
     return { ...first, detail: `full clone failed (${first.reason}: ${first.detail}); degrade tier disabled by config` };
   }
@@ -515,11 +493,10 @@ export async function cloneWithDegrade(
 }
 
 /**
- * Закон 3: клон удаляется сразу после извлечения фактов.
- * Fail-soft (ERROR_LOG 16.09): Windows держит дескрипторы убитых
- * git-субпроцессов и отдаёт EBUSY — сбой УБОРКИ не должен рушить
- * успешный сбор. Ретраи с паузой, затем возврат ошибки вызывающему
- * (каталог остаётся ОС; следующий скан кладёт клон в новый mkdtemp).
+ * Клон удаляется сразу после извлечения фактов – код не храним. Windows
+ * держит дескрипторы убитых git-подпроцессов и отдает EBUSY, а сбой уборки не
+ * должен ронять успешный сбор: несколько попыток с паузой, затем текст ошибки
+ * вызывающему (следующий скан все равно кладет клон в новый mkdtemp).
  */
 export function cleanupClone(dir: string, attempts = 3, pauseMs = 250): string | null {
   for (let i = 0; i < attempts; i++) {
@@ -534,7 +511,7 @@ export function cleanupClone(dir: string, attempts = 3, pauseMs = 250): string |
   return null;
 }
 
-/** Git for Windows может отпустить исходник/приёмник чуть позже выхода родителя. */
+/** Git for Windows может отпустить файлы чуть позже выхода родителя. */
 async function cleanupFailedClone(dir: string): Promise<void> {
   if (process.platform === "win32") await sleep(500);
   const firstError = cleanupClone(dir, 5);
@@ -544,29 +521,29 @@ async function cleanupFailedClone(dir: string): Promise<void> {
   }
 }
 
-/** Полный набор git-фактов как no-data (клон не удался/пустой). */
+/** Полный набор git-фактов как no-data (клон не удался или пустой). */
 export function gitFactsNoData(reason: "limits" | "empty" | "other", detail: string, collectedAt = new Date().toISOString()): Fact[] {
   return GIT_KINDS.map((k) => noDataFact(k, reason, "git", scrubDetail(detail), collectedAt));
 }
 
-// ---------- robot-эвристика v1 (план В1; сменяема — сырьё хранится полностью;
-// В2/score считает по robot2, v1-флаги в фактах игнорируются) ----------
+// ---------- первая эвристика роботов ----------
+// Флаги пишутся в timeline, но расчет их не использует: он считает признак
+// robot2 по сырым событиям, которые хранятся полностью.
 
-/** Паттерн: committer name+email содержит robot|sync|bot|-github (case-insensitive). */
+/** Имя или email коммитера содержит robot|sync|bot|-github (без учета регистра). */
 export function isRobotPattern(committerName: string, committerEmail: string): boolean {
   const s = `${committerName} ${committerEmail}`.toLowerCase();
   return /robot|sync|bot|-github/.test(s);
 }
 
 /**
- * Регулярный интервал: серия ≥6 подряд коммитов (по committer-дате),
- * где каждый Δt в пределах ±20% от медианы Δt серии. Возвращает флаги
- * в порядке входного массива events (ts — ms epoch).
- * Двухфазно (иначе жадный префикс теряет серии, у которых медиана
- * «доезжает» позже): фаза 1 — максимальные отрезки с разбросом
- * max/min ≤ 1.5 (необходимое условие: ±20% от медианы ⇒ 1.2/0.8);
- * фаза 2 — внутри кандидата окна со строгим условием медианы.
- * MAX_RUN капирует патологию (гигантские ровные серии зеркал).
+ * Регулярный интервал: серия из ≥6 коммитов подряд (по дате коммитера), где
+ * каждый Δt в пределах ±20% от медианы Δt серии. Флаги возвращаются в порядке
+ * входного массива (ts – мс epoch).
+ * Две фазы, потому что жадный префикс теряет серии, у которых медиана
+ * «доезжает» позже: сначала максимальные отрезки с max/min ≤ 1.5 (необходимое
+ * условие для ±20%: 1.2/0.8), затем внутри них окна со строгим условием.
+ * MAX_RUN ограничивает патологию – гигантские ровные серии зеркал.
  */
 export function robotIntervalFlags(events: { ts: number }[]): boolean[] {
   const flags = new Array<boolean>(events.length).fill(false);
@@ -604,8 +581,8 @@ export function robotIntervalFlags(events: { ts: number }[]): boolean[] {
       j++;
     }
     if (j - i >= 5) {
-      // фаза 2: строгие окна внутри кандидата (без break: медиана окна
-      // может «доехать» до ранних элементов на поздних расширениях)
+      // фаза 2: строгие окна внутри кандидата; без break, потому что медиана
+      // окна может «доехать» до ранних элементов на поздних расширениях
       for (let s = i; s < j; s++) {
         const win: number[] = [];
         let wmin = Infinity;
@@ -630,7 +607,7 @@ export function robotIntervalFlags(events: { ts: number }[]): boolean[] {
   return flags;
 }
 
-// ---------- флаги секций README (§7.4; словарь RU+EN) ----------
+// ---------- флаги секций README (словарь на русском и английском) ----------
 
 const SECTION_DICT: Record<"install" | "build" | "test", string[]> = {
   install: ["установка", "install", "getting started", "быстрый старт", "setup", "запуск"],
@@ -644,10 +621,10 @@ function headingMatchesWord(heading: string, word: string): boolean {
 }
 
 /**
- * В5.3-М (Р4в): заголовки README с непустым телом — под заголовком до
- * следующего заголовка того же или более высокого уровня есть строка текста
- * или блок кода с содержимым (пустой заголовок «## Install» раздела не дает, J6).
- * Строки ограды блока кода (```/~~~) и HTML-комментарии содержанием не считаются.
+ * Заголовки README с непустым телом: до следующего заголовка того же или более
+ * высокого уровня есть строка текста или блок кода с содержимым – пустой
+ * «## Install» раздела не дает. Ограды блоков кода (```/~~~) и
+ * HTML-комментарии содержанием не считаются.
  */
 export function readmeHeadingsWithBody(text: string): string[] {
   const lines = text.split(/\r?\n/);
@@ -673,14 +650,14 @@ export function readmeHeadingsWithBody(text: string): string[] {
   return out;
 }
 
-/** Флаги {install, build, test} по заголовкам README (RU+EN словарь §7.4); Р4в — только заголовки с непустым телом. */
+/** Флаги {install, build, test} по заголовкам README с непустым телом. */
 export function readmeSectionFlags(text: string): { install: boolean; build: boolean; test: boolean } {
   const flags = { install: false, build: false, test: false };
   const headings = readmeHeadingsWithBody(text);
   for (const hRaw of headings) {
     const h = hRaw.replace(/^[ \t]{0,3}#{1,6}\s+/, "").trim().toLowerCase();
-    // коллизия словаря: «Запуск тестов» (test) содержит «Запуск» (install) —
-    // фраза приоритетнее одиночного слова
+    // «Запуск тестов» (test) содержит «Запуск» (install) – фраза важнее
+    // одиночного слова
     const testPhrase = SECTION_DICT.test.filter((w) => w.includes(" ")).some((w) => headingMatchesWord(h, w));
     for (const cat of ["install", "build", "test"] as const) {
       for (const word of SECTION_DICT[cat]) {
@@ -703,9 +680,9 @@ export function readmeSectionFlags(text: string): { install: boolean; build: boo
   return flags;
 }
 
-// ---------- has_steps ci.yaml (§7.4: ≥1 task с ≥1 непустой командой) ----------
+// ---------- has_steps в ci.yaml: хотя бы один task с непустой командой ----------
 
-/** Непустая команда script: строкока или блочный скаляр yamlmini ({__block}). */
+/** Непустая команда script: строка или блочный скаляр yamlmini ({__block}). */
 function nonEmptyCommand(cmd: unknown): boolean {
   if (typeof cmd === "string") return cmd.trim() !== "";
   if (cmd && typeof cmd === "object" && "__block" in (cmd as Record<string, unknown>)) {
@@ -715,12 +692,11 @@ function nonEmptyCommand(cmd: unknown): boolean {
 }
 
 /**
- * has_steps по распарсенному ci.yaml (§7.4): ≥1 task с ≥1 непустой
- * командой script (task.script[] или task.cubes[].script[]). Живые
- * формы (ERROR_LOG 15.09, В2): задачи живут и в верхнем tasks, и в
- * workflows.<name>.tasks; команды — строки И блочные скаляры «- |».
- * Кубы с action/image без script НЕ считаются (анти-пустышка: заявлен
- * именно выполняемый script; см. отчёт В2 — решение воркера).
+ * has_steps по разобранному ci.yaml: хотя бы один task с непустой командой
+ * script (task.script или task.cubes[].script). В живых конфигах задачи
+ * лежат и в верхнем tasks, и в workflows.<name>.tasks, а команды бывают и
+ * строками, и блочными скалярами «- |». Кубы с action/image без script не
+ * считаются: нужен именно выполняемый script, а не заготовка.
  */
 export function ciHasSteps(parsed: unknown): boolean {
   const root = parsed as { tasks?: unknown; workflows?: Record<string, unknown> } | null;
@@ -733,7 +709,7 @@ export function ciHasSteps(parsed: unknown): boolean {
       }
     }
   }
-  // В5.3-М (Н12): `script: echo hi` (строка, не список) и `script: |` — тоже шаг
+  // `script: echo hi` (строка, а не список) и `script: |` – тоже шаг
   const scriptNonEmpty = (s: unknown): boolean => (Array.isArray(s) ? s.some(nonEmptyCommand) : nonEmptyCommand(s));
   for (const t of tasks) {
     if (!t || typeof t !== "object") continue;
@@ -765,22 +741,18 @@ interface BlobEntry {
 }
 
 /**
- * В5.3-М (Р4а, модель 4.3.0-hci): маркеры техдолга — TODO, FIXME, HACK, XXX без
- * учета регистра и только в комментарии (`TODO` → `todo` больше не снимает
- * пометки, J4).
- *
- * Круг 2 (К1, E4): маркер — ПЕРВОЕ слово комментария. В круге 1 префиксы `#`,
- * `--`, `;`, `%` искались в любом месте строки, а маркер — где угодно после
- * них: `#todo-list {`, `i < todo.length;`, `printf("%d todo")`,
- * `// update the todo list` становились техдолгом todo-приложений. Теперь:
- * - `//`, `/*`, `<!--` — где угодно на строке (комментарий после кода);
- * - `#`, `--`, `;`, `%`, `'`, `*`, `REM` — только в начале строки после отступа
+ * Маркеры техдолга – TODO, FIXME, HACK, XXX без учета регистра и только как
+ * первое слово комментария. Иначе `#todo-list {`, `i < todo.length;`,
+ * `printf("%d todo")` и `// update the todo list` стали бы техдолгом
+ * todo-приложений. Правила:
+ * - `//`, `/*`, `<!--` – где угодно на строке (комментарий после кода);
+ * - `#`, `--`, `;`, `%`, `'`, `*`, `REM` – только в начале строки после отступа
  *   (в середине строки это операторы, селекторы и форматы);
- * - сразу после префикса — пробелы и `@` (`/* @todo *\/`), затем маркер, за ним
+ * - сразу после префикса – пробелы и `@` (`/* @todo *\/`), затем маркер, за ним
  *   `:`, `(`, `!`, пробел, конец строки или `-`, после которого не буква
- *   (`TODO - fix`, но не `todo-list`); у `#` вплотную к маркеру `:` — только
- *   без буквы следом (`#TODO: fix` — пометка, `#todo:hover {` — CSS-селектор).
- * Повтор префикса (`///`, `/**`, `##`, `;;`, `%%`) — тот же комментарий.
+ *   (`TODO - fix`, но не `todo-list`); у `#` вплотную к маркеру `:` – только
+ *   без буквы следом (`#TODO: fix` – пометка, `#todo:hover {` – CSS-селектор).
+ * Повтор префикса (`///`, `/**`, `##`, `;;`, `%%`) – тот же комментарий.
  */
 const MARKER_AFTER = /^[\s@]*(todo|fixme|hack|xxx)(?=$|[\s:(!]|-(?![\p{L}\p{N}_]))/iu;
 const MARKER_AFTER_TIGHT = /^(todo|fixme|hack|xxx)(?=$|[\s(!]|:(?![\p{L}\p{N}_])|-(?![\p{L}\p{N}_]))/iu;
@@ -798,7 +770,7 @@ export function todoMarkerKind(line: string): "TODO" | "FIXME" | null {
   const lead = COMMENT_LINE_START.exec(line);
   if (lead) {
     const rest = line.slice(lead[0].length);
-    // `#todo-list {` — селектор CSS: `#` вплотную к маркеру требует пробела после него
+    // `#todo-list {` – селектор CSS, поэтому `#` вплотную к маркеру проверяется строже
     const kind = markerAt(rest, lead[0].trimStart().startsWith("#") && !/^[\s@]/.test(rest));
     if (kind) return kind;
   }
@@ -878,24 +850,19 @@ export interface ExtractOptions {
   textCapBytes: number;
   /** общий бюджет извлечения; отсутствует = без дедлайна */
   deadlineMs?: number;
-  /** дата отсечения деградационного клона → history_truncated_since */
+  /** дата отсечения усеченного клона → history_truncated_since */
   historyTruncatedSince?: string;
   now?: Date;
-  /** шов Б0: подмена `git cat-file --batch` (обрыв потока на середине) */
+  /** подмена `git cat-file --batch` в тестах */
   catFile?: CatFileSpawn;
   /**
-   * Транспорт head_sha (В5, Б1 — спека §3.4): extractFacts и так делает
-   * `rev-parse --verify` — теперь вывод не выбрасывается, а выносится
-   * вызывающему (runner пишет scans.head_sha; строка scans уже существует).
-   * Возврат Fact[] не меняется — обратная совместимость вызовов и тестов.
+   * Сюда кладется head_sha из `rev-parse --verify`, который extractFacts и так
+   * делает; runner пишет его в scans.head_sha.
    */
   out?: { headSha?: string | null };
 }
 
-/**
- * Извлекает факты из bare-клона (контракт: extractFacts(clone) → Fact[]).
- * Все даты нормализуются в UTC ISO 8601; source="git".
- */
+/** Факты из bare-клона; все даты в UTC ISO 8601, source="git". */
 export async function extractFacts(cloneDir: string, opts: ExtractOptions): Promise<Fact[]> {
   const started = Date.now();
   const deadline = opts.deadlineMs !== undefined ? started + opts.deadlineMs : Infinity;
@@ -910,13 +877,11 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
   let branch = "HEAD";
   try {
     branch = (await git(["symbolic-ref", "--short", "HEAD"])).stdout.trim() || "HEAD";
-    // В5 (Б1): sha выносится транспортом `out.headSha` (спека §3.4), а не
-    // выбрасывается; detached HEAD (symbolic-ref пуст) читается ниже
     const sha = (await git(["rev-parse", "--verify", `${branch}^{commit}`])).stdout.trim();
     if (opts.out) opts.out.headSha = sha || null;
   } catch (e) {
-    // круг 2 (С5): empty — только однозначное «нет коммитов» (клон читается и
-    // в нём нет ни одного объекта-коммита); иное исключение — other
+    // empty – только однозначное «нет коммитов» (клон читается, а коммитов в
+    // нем нет); любое другое исключение – other
     if (opts.out) opts.out.headSha = null;
     const detail = String((e as Error).message).slice(0, 120);
     let noCommits = false;
@@ -930,7 +895,7 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
       : gitFactsNoData("other", `HEAD unreadable (${detail})`, nowIso);
   }
 
-  // --- 1. событийный git-таймлайн ---
+  // --- 1. таймлайн коммитов ---
   const fmt = "%H%x1f%an%x1f%ae%x1f%aI%x1f%cn%x1f%ce%x1f%cI%x1e";
   const logRaw = await git(["log", "-z", `--format=${fmt}`, branch], 300_000);
   const events: TimelineEvent[] = [];
@@ -982,13 +947,12 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
     nowIso,
   );
 
-  // --- 1б. В5.5 тур 2 (W4, ЗН-2): карта владельцев файлов — `code.ownership`
-  // (ownership.ts). Роботы и синхронизации — по sha из robot2 (истина расчета,
-  // не v1-флаг `robot` выше). Бюджет — OWNERSHIP_MAX_COMMITS коммитов за окно
-  // (--since по дате коммитера отсекает объем, окно по дате автора — в
-  // агрегаторе); обрезка помечается в факте. Сбой git log — факт `bad` без
-  // путей машины (не no-data: git-канал прочитан, пользовательский скан не
-  // теряет пригодность из-за справочного показателя).
+  // --- 1б. карта владельцев файлов `code.ownership` (ownership.ts) ---
+  // Роботы и синхронизации исключаются по sha из robot2, как в расчете, а не по
+  // флагу `robot` выше. --since по дате коммитера только отсекает объем, окно по
+  // дате автора применяет агрегатор; обрезка по бюджету помечается в факте.
+  // Сбой git log – факт `bad` без путей машины: скан из-за справочного
+  // показателя пригодность не теряет.
   let ownershipFact: Fact;
   try {
     const excluded = new Set<string>();
@@ -1038,11 +1002,11 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
     topLevel.push({ name: rec.slice(rec.indexOf("\t") + 1), type: parts[1] ?? "" });
   }
 
-  // --- 3. CI-конфиги (канон: полный список .sourcecraft/** + has_steps) ---
+  // --- 3. CI-конфиги: полный список .sourcecraft/** и has_steps ---
   const scPaths = blobs.map((b) => b.path).filter((p) => p.startsWith(".sourcecraft/")).sort();
   const hasCiYaml = scPaths.includes(".sourcecraft/ci.yaml");
-  // М2.1 аудита В5.3: неразобранный ci.yaml — `has_steps: null` (неизвестно),
-  // а не «шагов нет»; расчет дает CI «нет данных»
+  // неразобранный ci.yaml – `has_steps: null` (неизвестно), а не «шагов нет»;
+  // расчет тогда дает CI «нет данных»
   let hasSteps: boolean | null = false;
   let stepsNote: string | undefined;
   if (hasCiYaml) {
@@ -1062,12 +1026,12 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
     nowIso,
   );
 
-  // --- 4. документация (+ флаги секций README, §7.4) ---
+  // --- 4. документация и флаги секций README ---
   const rootNames = topLevel.map((t) => t.name);
   const hasRoot = (re: RegExp) => rootNames.some((n) => re.test(n));
-  // В5.3-М (Р4в): файл документа засчитывается, только если в нем есть текст —
-  // не меньше DOC_MIN_CHARS непробельных символов (пустой LICENSE не лицензия,
-  // J6). Каталог (`LICENSES/`) — если такой текст есть хотя бы в одном файле.
+  // документ засчитывается, только если в нем есть текст – не меньше
+  // DOC_MIN_CHARS непробельных символов (пустой LICENSE – не лицензия).
+  // Каталог (`LICENSES/`) – если такой текст есть хотя бы в одном файле
   const docWithContent = async (re: RegExp): Promise<boolean> => {
     for (const entry of topLevel.filter((t) => re.test(t.name))) {
       const files = entry.type === "tree" ? blobs.filter((b) => b.path.startsWith(`${entry.name}/`)).slice(0, 20) : blobs.filter((b) => b.path === entry.name);
@@ -1076,7 +1040,7 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
         try {
           if (docHasContent((await git(["cat-file", "blob", b.sha])).stdout)) return true;
         } catch {
-          /* блоб не прочитан — содержания не доказано */
+          /* блоб не прочитан – содержание не доказано */
         }
       }
     }
@@ -1086,12 +1050,12 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
     "docs.presence",
     {
       readme: hasRoot(/^readme(\.|$)/i),
-      // М1.13 аудита В5.3: и LICENSE-MIT, COPYING, UNLICENSE, каталог LICENSES
+      // в том числе LICENSE-MIT, COPYING, UNLICENSE и каталог LICENSES
       license: await docWithContent(/^(licen[cs]es?|copying|unlicense)([._-].*)?$/i),
       contributing: await docWithContent(/^contributing(\.|$)/i),
       codeowners: await docWithContent(/^codeowners(\.|$)/i),
-      // Р4в: признак нового сборщика — файлы проверены по содержанию
-      // (расчет не подменяет их именем файла в корне)
+      // файлы проверены по содержанию – расчет не подменяет это именем файла
+      // в корне (у старых фактов поля нет)
       content_checked: true,
     },
     "git",
@@ -1108,34 +1072,29 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
     readmeFact = okFact("docs.readme", { present: false }, "git", nowIso);
   }
 
-  // --- 5. LOC + TODO/FIXME потоково (git cat-file --batch) ---
+  // --- 5. LOC и TODO/FIXME потоком через git cat-file --batch ---
   const candidates = blobs.filter((b) => b.size > 0 && b.size <= textCap);
   let loc = 0;
-  // М2.3 аудита В5.3: строки и пометки КОДА — без документов, лицензий,
-  // lock-файлов и картинок; `source_files = 0` — «кода нет» (Q&A №13)
+  // строки и пометки считаются только по коду (isSourcePath); `source_files = 0`
+  // – «кода нет»
   let sourceLoc = 0;
   const sourceFiles = blobs.filter((b) => isSourcePath(b.path)).length;
-  // В5.3-М (Р1): файлы тестов среди файлов кода — сигнал «есть тесты»;
-  // круг 2 (К2, G4/E5): только НЕПУСТОЙ файл (хотя бы одна непробельная
-  // строка) — пустые `tests/t_*.py` и `.gitkeep` тестами не считаются
+  // непустые файлы тестов (хотя бы одна непробельная строка): пустые
+  // `tests/t_*.py` и `.gitkeep` тестами не считаются
   let testFiles = 0;
-  // круг 2 (К3, E3): файлы кода, строки которых не прочитаны — больше лимита
-  // текста или бинарные (`source_loc = 0` у них не «кода нет», а незнание)
+  // файлы кода, строки которых не прочитаны (больше лимита текста или
+  // бинарные): `source_loc = 0` у них – незнание, а не «кода нет»
   let sourceUnread = blobs.filter((b) => b.size > textCap && isSourcePath(b.path)).length;
-  // приемка HQ (H1): файлы с «кодовым» именем, оказавшиеся бинарными, — не код
+  // файлы с «кодовым» именем, оказавшиеся бинарными, – не код
   let sourceBinary = 0;
-  // Ф2.3 (M5): ЛЮБОЙ обрыв потока `cat-file` — дедлайн, оборванный заголовок,
-  // недочитанный блоб — делает LOC и TODO неполными. Раньше неполнота
-  // помечалась только у дедлайна (`loc_note: "deadline"`), а обрыв заголовка
-  // оставлял факт «ok, loc = 0» — и модель читала это как «кода нет».
+  // любой обрыв потока `cat-file` (дедлайн, оборванный заголовок, недочитанный
+  // блоб) делает LOC и TODO неполными; иначе «ok, loc = 0» читалось бы как
+  // «кода нет»
   let locIncomplete = false;
   const todoOccs: TodoOccurrence[] = [];
-  // В5.5 тур 1 (М1, модель 4.3.1-hci): маркеры в файлах тестов в основной
-  // счетчик не идут — у сканеров TODO тесты и фикстуры состоят из намеренных
-  // маркеров (факт-чек repo-vitals 25.09: 196 пометок при 37 в комментариях
-  // кода), и долг считается по коду, а не по проверочным строкам сканера.
-  // Пропущенные маркеры — числом в `test_markers`, чтобы читатель факта видел,
-  // сколько отложено в сторону.
+  // маркеры в файлах тестов в счетчик долга не идут: у сканеров TODO тесты и
+  // фикстуры состоят из намеренных маркеров. Их число пишется в
+  // `test_markers`, чтобы читатель факта видел, сколько отложено в сторону
   let testMarkers = 0;
   if (candidates.length > 0) {
     const catFile: CatFileSpawn =
@@ -1148,10 +1107,9 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
         }));
     const proc = catFile(cloneDir);
     const enc = new TextEncoder();
-    // В4.8.5 (К8.5.12, С10-8): отказ писателя (git умер раньше, поток закрыт)
-    // обработан СРАЗУ — иначе отказ промиса до `finally` ниже был бы
-    // необработанным и ронял процесс (Bun: unhandled rejection → exit 1).
-    // Неполноту чтения поток сам покажет читателю (locIncomplete)
+    // отказ писателя (git умер раньше, поток закрыт) обрабатываем сразу: иначе
+    // отказ промиса до `finally` ниже был бы необработанным и ронял процесс
+    // (в Bun unhandled rejection → exit 1). Неполноту чтения покажет читатель
     const writer = (async () => {
       for (const b of candidates) proc.stdin.write(enc.encode(`${b.sha}\n`));
       await proc.stdin.end();
@@ -1184,14 +1142,14 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
         }
         const probe = buf.subarray(0, Math.min(8192, buf.length));
         if (probe.includes(0)) {
-          // приемка HQ (H1): бинарный файл — не код (не «строки не прочитаны»):
-          // README + app.bin — по-прежнему «кода нет»
+          // бинарный файл – не код (а не «строки не прочитаны»): README +
+          // app.bin – все равно «кода нет»
           if (isSourcePath(entry.path)) sourceBinary++;
           continue;
         }
         const text = new TextDecoder("utf-8", { fatal: false }).decode(buf);
         const lines = text.split("\n");
-        // М2.2: строка без завершающего перевода строки — тоже строка
+        // строка без завершающего перевода строки – тоже строка
         const fileLoc = lines.length - (text.endsWith("\n") ? 1 : 0);
         loc += fileLoc;
         if (!isSourcePath(entry.path)) continue;
@@ -1201,7 +1159,6 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
         for (let ln = 0; ln < lines.length; ln++) {
           const kind = todoKind(lines[ln]!);
           if (!kind) continue;
-          // М1 (4.3.1): маркеры тестов — отдельным числом, не в счетчик долга
           if (testFile) testMarkers++;
           else todoOccs.push({ path: entry.path, line: ln + 1, kind });
         }
@@ -1225,7 +1182,7 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
       bytes: blobs.reduce((s, b) => s + b.size, 0),
       loc: locIncomplete ? null : loc,
       source_files: sourceFiles - sourceBinary,
-      // К2: при обрыве чтения непустоту всех файлов тестов не проверить
+      // при обрыве чтения непустоту всех файлов тестов не проверить
       test_files: locIncomplete ? null : testFiles,
       source_loc: locIncomplete ? null : sourceLoc,
       source_unread: locIncomplete ? null : sourceUnread,
@@ -1235,7 +1192,7 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
     nowIso,
   );
 
-  // --- 6. TODO/FIXME давность по blame ---
+  // --- 6. давность TODO/FIXME по blame ---
   const todoCount = todoOccs.filter((o) => o.kind === "TODO").length;
   const fixmeCount = todoOccs.filter((o) => o.kind === "FIXME").length;
   const byFile = new Map<string, number>();
@@ -1248,13 +1205,12 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
     if (Date.now() > deadline) break;
     try {
       const out = await git(["blame", "--porcelain", "-w", "-M", branch, "--", path], 60_000);
-      // Н2: время — по sha заголовка строки, а не последнее прочитанное
       for (const { text, ts } of blameLineTimes(out.stdout)) {
         if (todoKind(text) && ts !== null && now.getTime() - ts > MS_180D) older180++;
       }
       blamedFiles++;
     } catch {
-      /* blame не удался (переименования/субмодули) — файл не в older_180d */
+      /* blame не удался (переименования, субмодули) – файл не входит в older_180d */
     }
   }
   const codeTodoFact = okFact(
@@ -1265,11 +1221,10 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
       older_180d: older180,
       todo_files: todoFiles.length,
       blamed_files: blamedFiles,
-      // М1 (4.3.1): маркеры, найденные в файлах тестов и НЕ вошедшие в
-      // count/fixme/older_180d — честность для читателя факта
+      // маркеры в файлах тестов, не вошедшие в count/fixme/older_180d
       test_markers: testMarkers,
-      // Ф2.3: счётчики TODO собраны тем же потоком `cat-file` — оборвался он,
-      // неполны и они; читатель обязан видеть это по факту, а не гадать
+      // счетчики TODO собраны тем же потоком `cat-file`: оборвался он – неполны
+      // и они, и факт должен это сказать
       ...(locIncomplete ? { todo_note: "incomplete" } : {}),
     },
     "git",
@@ -1281,7 +1236,7 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
 
 const todoKind = todoMarkerKind;
 
-/** Р4в: в файле документа есть содержание — не меньше DOC_MIN_CHARS непробельных символов. */
+/** Документ с содержанием – не меньше DOC_MIN_CHARS непробельных символов. */
 export const DOC_MIN_CHARS = 16;
 
 export function docHasContent(text: string): boolean {
@@ -1289,11 +1244,11 @@ export function docHasContent(text: string): boolean {
 }
 
 /**
- * В5.3-М (Н2): время строки `git blame --porcelain` — по sha ее заголовка.
- * Porcelain печатает `author-time` только при ПЕРВОМ появлении коммита, у
- * повторных групп есть лишь заголовок `<sha> <orig> <final> [<n>]`; прежний
- * разбор брал последнее прочитанное время — старый TODO после свежей вставки
- * другим коммитом считался свежим. Возврат: время (мс) каждой строки файла.
+ * Время (мс) каждой строки `git blame --porcelain` – по sha ее заголовка.
+ * Porcelain печатает `author-time` только при первом появлении коммита, у
+ * повторных групп есть лишь заголовок `<sha> <orig> <final> [<n>]`. Если брать
+ * последнее прочитанное время, старый TODO после свежей вставки другим
+ * коммитом окажется свежим.
  */
 export function blameLineTimes(porcelain: string): { text: string; ts: number | null }[] {
   const times = new Map<string, number>();

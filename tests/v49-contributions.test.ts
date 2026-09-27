@@ -1,9 +1,7 @@
-// v49-contributions.test.ts — «Вклад категорий в оценку» (В4.9, К9.1, К9.12):
-// одна чистая функция для отчета и карточки. Поведенческий тест на данных
-// (урок 21.09: число, названное суммой, — тестом на данных): сумма
-// показанных вкладов = показанный показатель на фикстурах и на живых числах
-// исследования (баллы категорий — reports/2026-09-22-m49-prompt-audit-raw/
-// implementability.md, A1), «не набрано» = 100 − показатель.
+// «Вклад категорий в оценку»: одна чистая функция для отчета и карточки.
+// Число, названное суммой, проверяется на данных: сумма показанных вкладов =
+// показанный показатель на фикстурах и на реальных баллах категорий,
+// «не набрано» = 100 − показатель.
 import { describe, expect, test } from "bun:test";
 import { totalsFromCategories } from "../src/score/compute";
 import { INDEX_WEIGHTS, SCORE_WEIGHTS, SECRETS_CRITICAL_TOTAL_CAP, type CategoryKey } from "../src/score/model";
@@ -102,7 +100,7 @@ describe("К9.1: сумма показанных вкладов = показат
         const hero = model.blocks.find((b) => b.kind === "hero");
         const bars = model.blocks.filter((b) => b.kind === "contributions");
         if (!hero || hero.kind !== "hero") throw new Error("нет первого экрана");
-        // Круг 4 гейта: показателей в ряду бывает два, и полос столько же,
+        // Показателей в ряду бывает два, и полос столько же,
         // сколько показателей СО ЗНАЧЕНИЕМ, в том же порядке (публичный
         // первым). У зрителя с полным доступом и NULL-индексом слева стоит
         // «Оценки нет» без полосы, а полоса есть у второго показателя.
@@ -142,8 +140,8 @@ describe("К9.11: русские числа в UI и отчете — одна �
       for (const file of readdirSync(join(root, dir)).filter((f: string) => /\.tsx?$/.test(f))) {
         const src = readFileSync(join(root, dir, file), "utf8");
         const uses = (src.match(/\.toFixed\(/g) ?? []).length;
-        // RepoV5.tsx: 2 — координаты SVG-пути истории (геометрия, не русские
-        // числа; В5.3 круг 3 — график истории переехал из RepoPage.tsx)
+        // RepoV5.tsx: 2 – координаты SVG-пути графика истории (геометрия, не
+        // числа для читателя)
         const allowed = file === "format.ts" ? 1 : file === "RepoV5.tsx" ? 2 : 0;
         expect({ file, uses }).toEqual({ file, uses: allowed });
       }

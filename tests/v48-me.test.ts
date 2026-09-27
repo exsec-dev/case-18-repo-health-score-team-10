@@ -1,7 +1,7 @@
-// v48-me.test.ts — В4.8: «Мои репозитории» по образцу SourceCraft (вариант A
-// + плитки сводки C). Числа на плитках и порядок строк — поведенческие тесты
-// на данных (правило 21.09: число, названное размером выборки, не закрывается
-// чтением исходника); вёрстка и тексты — source-assert.
+// Страница избранного по образцу SourceCraft: список с плитками сводки и
+// панель «Задания». Числа на плитках и порядок строк проверяются на данных
+// (число, названное размером выборки, не проверить чтением исходника);
+// верстка и тексты — source-assert.
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -127,8 +127,8 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     expect(bell).toContain('className={busy ? "rh-jobs-btn rh-jobs-btn_busy" : "rh-jobs-btn"}');
     expect(bell).toMatch(/<Popup\s+open=\{open\}/);
     expect(bell).not.toContain("<details");
-    // П3 с поправками Екатерины: заголовка «Задания» в панели нет, сверху — «Активные N / История»;
-    // секций круга 3 («Идут сейчас» / «Недавние») больше нет; снизу — без оценки времени
+    // заголовка «Задания» в панели нет, сверху — «Активные N / История»;
+    // секций «Идут сейчас» / «Недавние» нет; снизу — без оценки времени
     expect(bell).toContain("<SegmentedRadioGroup");
     expect(bell).toContain("{`Активные ${active.length}`}");
     expect(bell).toContain(">История<");
@@ -137,55 +137,53 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     expect(bell).not.toMatch(/обычно до|минут/);
     // строка: логотип из API и та же серая плашка состояния, что в списке
     expect(row).toContain("logoUrl={job.logoUrl}");
-    // круг 5: списки панели прокручиваются внутри нее
+    // списки панели прокручиваются внутри нее
     expect((bell.match(/<div className="rh-jobs__list">/g) ?? []).length).toBe(2);
     expect(readFileSync(join(import.meta.dir, "..", "src", "web", "layout.css"), "utf8")).toMatch(/\.rh-jobs__list \{[^}]*overflow-y: auto;/);
     expect(row).toContain('<span className="rh-state rh-busy">');
-    // круг 5 (4c): история — лента по дням (`HistoryRow`: время справа, итог иконкой);
-    // (2c): пустые состояния — иконка, заголовок, описание; ссылка в раздел — SPA-навигация + закрытие панели
+    // история — лента по дням (`HistoryRow`: время справа, итог иконкой);
+    // пустые состояния — иконка, заголовок, описание; ссылка в раздел — SPA-навигация + закрытие панели
     expect(bell).toContain("groupJobsByDay(recent)");
     expect(src).toContain("function HistoryRow");
-    expect(src).toMatch(/<JobsEmpty title="Сейчас ничего не анализируется">\s*Запустить анализ можно в разделе\{" "\}\s*<Link \{\.\.\.navProps\("\/me", close\)\} view="normal" className="rh-nowrap">\s*Избранное/); // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): раздел «Избранное»
-    // круг 2 части 2 (Е16): ссылка не рвется переносом
+    expect(src).toMatch(/<JobsEmpty title="Сейчас ничего не анализируется">\s*Запустить анализ можно в разделе\{" "\}\s*<Link \{\.\.\.navProps\("\/me", close\)\} view="normal" className="rh-nowrap">\s*Избранное/);
+    // ссылка не рвется переносом
     expect(readFileSync(join(import.meta.dir, "..", "src", "web", "layout.css"), "utf8")).toMatch(/\.rh-nowrap \{[^}]*white-space: nowrap;/);
     expect(src).not.toMatch(/\{\.\.\.linkProps\([^)]*\)\}[^>]*onClick=/);
     expect(src).not.toContain("весь список – в разделе «Мои репозитории»");
     const css = readFileSync(join(import.meta.dir, "..", "src", "web", "layout.css"), "utf8");
     expect(css).toMatch(/\.rh-jobs-btn_busy::before \{[^}]*animation: g-loading-animation/);
-    // круг 4 (замечание 4): кнопка видна всегда; счетчик отделен от слова; запуск анализа будит опрос шапки
+    // кнопка видна всегда; счетчик отделен от слова; запуск анализа будит опрос шапки
     expect(bell).not.toContain("return null");
-    // ревью закрытия: тревога — только когда упало последнее завершенное; панель — role="dialog"
+    // тревога — только когда упало последнее завершенное; панель — role="dialog"
     expect(bell).toContain('const alarm = !busy && recent[0]?.phase === "failed";');
     expect(bell).toMatch(/offset=\{4\}\s*role="dialog"/);
     expect(bell).toContain('className={alarm ? "rh-jobs-btn__count rh-jobs-btn__count_danger" : "rh-jobs-btn__count"}');
-    // пустые состояния — на каждую вкладку панели (П3)
+    // пустые состояния — на каждую вкладку панели
     expect(src).toContain('<JobsEmpty title="Анализов пока не было">');
     expect((src.match(/announceJobsChanged\(\);/g) ?? []).length).toBe(2);
-    // ПЕРЕНОС (В4.8.5, К8.5.1): опрос заданий — один на вкладку (session.tsx),
-    // событие «задания изменились» будит его там, а не отдельные опросы страниц
+    // опрос заданий — один на вкладку (session.tsx), событие «задания
+    // изменились» будит его там, а не отдельные опросы страниц
     expect(readFileSync(join(import.meta.dir, "..", "src", "web", "session.tsx"), "utf8")).toMatch(/window\.addEventListener\(JOBS_CHANGED, refresh\)/);
-    // круг 4 (замечания 2-3): пилюля с полностью скругленными углами; иконки прав без зеленого
+    // пилюля с полностью скругленными углами; иконки прав без зеленого
     expect(css).toMatch(/\.rh-pill \{[^}]*border-radius: 10px;/);
     expect(css).not.toMatch(/\.rh-access__icon_yes \{[^}]*positive/);
   });
 
   test("шапка списка: заголовок, счетчик цветом hint, поиск, сортировка, одна action-кнопка", () => {
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): раздел «Избранное»
     expect(src).toMatch(/<Text variant="header-1" as="h1">\s*Избранное\s*<\/Text>/);
     expect(src).toMatch(/<Text variant="header-1" color="hint">\s*\{entries\.length\}/);
-    // круг 2 (замечание 6): плейсхолдер — «Поиск», как у рейтинга
+    // плейсхолдер — «Поиск», как у рейтинга
     expect(src).toContain('placeholder="Поиск"');
-    // круг 2 (5b): описание под заголовком вместо иконки-подсказки
+    // описание под заголовком вместо иконки-подсказки
     expect(src).not.toContain("<HelpMark");
     expect(src).not.toContain("Здесь ваше избранное: отметьте");
-    // круг 3 (2c): одна короткая фраза вместо двух предложений
-    // круг 5 (Екатерина): «что возможно в них улучшить»
+    // одна короткая фраза вместо двух предложений
     expect(src).toContain("Следите за здоровьем избранных репозиториев и тем, что возможно в них улучшить.");
     expect(src).not.toContain("Репозитории, которые вы отметили звездочкой на их странице или добавили сюда по ссылке.");
     expect(src).toContain('pin="round-brick"');
     expect(src).toContain('pin="brick-round"');
     // JSX-кнопки view="action" в файле: «Добавить» в шапке списка, форма токена и
-    // (В5.2, Б4) пароль доступа к AI — обе на другой странице, /settings; плашка про
+    // пароль доступа к AI — обе на другой странице, /settings; плашка про
     // токен на /me — view="normal"
     expect((src.match(/<Button view="action"/g) ?? []).length).toBe(3);
     expect(src).toMatch(/<Button view="normal" size="m" \{\.\.\.linkProps\("\/settings"\)\}>/);
@@ -193,7 +191,6 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
 
   test("добавление — диалогом, а не полем над списком", () => {
     expect(src).toContain("function AddRepoDialog");
-    // В5.3 (25.09, вариант A): заголовок окна — «Добавить в избранное»
     expect(src).toContain('caption="Добавить в избранное"');
     expect(src).not.toContain("Добавить в избранное</Button>");
   });
@@ -202,30 +199,27 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     const rowSrc = src.slice(src.indexOf("function RepoRow"), src.indexOf("// ========== ПОРТ 5"));
     expect(rowSrc).toContain('className="rh-repo-item__cover"');
     expect(rowSrc).toContain("scoreWord(entry.healthcraftIndex)");
-    // круг 2 (8a, 3c): оценка — кольцо; число белое, цвет полосы — на дуге
+    // оценка — кольцо; число белое, цвет полосы — на дуге
     expect(rowSrc).toContain("<ScoreRing value={entry.healthcraftIndex!} />");
     expect(rowSrc).not.toContain("scoreColor(");
-    // круг 2 (1a): «Сканируется» — штриховка загрузки кнопки Gravity, не Label со спиннером
-    // ПЕРЕВОРОТ (В4.8.5, §2-В5): подсказка «обычно до N минут» (etaNote) снята —
-    // «идет анализ» без обещания времени; форма плашки прежняя
+    // «Сканируется» — штриховка загрузки кнопки Gravity, не Label со спиннером;
+    // «идет анализ» без обещания времени
     expect(rowSrc).toContain('<span className="rh-state rh-busy" title="Идет анализ – итог придет уведомлением">');
     expect(rowSrc).not.toContain("etaNote");
-    // круг 3 (замечание 8): остальные состояния — серые `StatePill` с иконкой, цветных `Label` в состоянии строки нет
+    // остальные состояния — серые `StatePill` с иконкой, цветных `Label` в состоянии строки нет
     const stateSrc = rowSrc.slice(rowSrc.indexOf("const state ="), rowSrc.indexOf("const menuItems"));
     expect((stateSrc.match(/<StatePill icon=\{/g) ?? []).length).toBe(7);
     expect(stateSrc).not.toContain("<Label");
     expect(src).not.toContain("<Spin");
-    // круг 2 (2a): метки «ваш» нет; у приватного — серая метка видимости с замком
+    // метки «ваш» нет
     expect(src).not.toMatch(/>\s*ваш\s*</);
-    // круг 4 (замечание 3): «Приватный» — серая пилюля, не `Label theme="normal"` (в палитре — стальной misc)
-    // ПЕРЕНОС С ЗАМЕНОЙ (В4.9 ч.2, В2): плашка видимости — общим `VisibilityPill`
-    // (та же серая пилюля с замком у приватного), теперь и у публичных
+    // плашка видимости — общая `VisibilityPill` у всех строк: серая пилюля
+    // (у приватного — с замком), не `Label theme="normal"`
     expect(src).toContain("<VisibilityPill value={access.visibility} titleSuffix={checked} />");
     expect(readFileSync(join(import.meta.dir, "..", "src", "web", "ui.tsx"), "utf8")).toMatch(/pill\.kind === "internal" \? Persons : Lock[\s\S]{0,120}<span className="rh-pill"/);
     expect(rowSrc).toContain("<DropdownMenu");
     expect(rowSrc).toContain('text: "Убрать из избранного"');
-    // ревью закрытия: пункт «Открыть рекомендации» — навигация SPA, не href
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А1): пункт ведет к разделу якорем
+    // пункт «Открыть рекомендации» — SPA-навигация к разделу якорем, не href
     expect(rowSrc).toContain("action: () => navigate(recommendationsHref(href))");
     expect(rowSrc).not.toMatch(/text: "Открыть рекомендации", href:/);
     // плитки сводки — переключатели: роль кнопки и aria-pressed вместо радио
@@ -238,18 +232,18 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     expect(css).toMatch(/\.rh-repo-item \.g-avatar \{[^}]*--g-avatar-size: 40px;[^}]*--_--border-radius: 8px;/);
     expect(css).toMatch(/\.rh-repo-item \{[^}]*border-bottom: 1px solid var\(--g-color-line-generic\);/);
     expect(css).toMatch(/\.rh-summary__tile\.g-card \{[^}]*border-radius: 12px;/);
-    // круг 3 (замечание 3): полосы распределения под плитками нет
+    // полосы распределения под плитками нет
     expect(css).not.toContain(".rh-dist");
     expect(src).not.toContain("rh-dist");
-    // круг 4 (замечание 1): иконки плиток крупнее — 20px; «жирность» была от `stroke`, а не от размера
+    // иконки плиток — 20px
     expect(src).toContain("{icon && <Icon data={icon} size={20} className={`rh-band-icon rh-band-icon_${b.key}`} />}");
-    // круг 2: штриховка — keyframes загрузки кнопки Gravity; движение отключается по prefers-reduced-motion
+    // штриховка — keyframes загрузки кнопки Gravity; движение отключается по prefers-reduced-motion
     expect(css).toMatch(/\.rh-busy \{[^}]*animation: g-loading-animation/);
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.rh-busy \{\s*animation: none;/);
-    // круг 2 (3c): цвет полос — насыщенными базовыми тонами на графике, не пастельным текстом
+    // цвет полос — насыщенными базовыми тонами на графике, не пастельным текстом
     for (const [band, token] of [["success", "positive"], ["warning", "warning"], ["danger", "danger"]]) {
       expect(css).toContain(`.rh-ring_${band} .rh-ring__arc {\n  stroke: var(--g-color-base-${token}-heavy);\n}`);
-      // круг 4: у иконки полосы только `color` — общий с дугой `stroke` обводил залитый контур иконки
+      // у иконки полосы только `color`: общий с дугой `stroke` обвел бы залитый контур иконки
       expect(css).toContain(`.rh-band-icon_${band} {\n  color: var(--g-color-base-${token}-heavy);\n}`);
     }
   });

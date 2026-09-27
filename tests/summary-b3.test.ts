@@ -1,8 +1,7 @@
-// summary-b3.test.ts — сквозной AI-summary (Б3 В5): Score неизменен при
-// любом поведении модели (К5.6 — прямой тест), очередь summary-заявок
-// (дедуп и кулдаун), clone-job с настоящим клоном и локальным
-// OpenAI-совместимым моком по LLM_BASE_URL (спека §3.3), авто-генерация
-// в окне скана по оп-ину. Живых вызовов LLM нет.
+// Сквозной AI-summary: Score неизменен при любом поведении модели, очередь
+// summary-заявок (дедуп и кулдаун), clone-job с настоящим клоном и локальным
+// OpenAI-совместимым моком по LLM_BASE_URL, видимость текста и маршруты
+// кнопки. Живых вызовов LLM нет.
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { execFileSync } from "node:child_process";
@@ -144,7 +143,7 @@ describe("Очередь summary-заявок: дедуп и кулдаун per-
 
 // ---------------------------------------------------------------------------
 // clone-job e2e: настоящий клон file:// + локальный OpenAI-совместимый мок
-// (LLM_BASE_URL-путь, спека §3.3 «доставка фейка» для серверных тестов)
+// (путь LLM_BASE_URL — так фейк доставляется серверным тестам)
 // ---------------------------------------------------------------------------
 
 const ROLE_TEXTS: Record<string, string> = {
@@ -232,12 +231,12 @@ describe("processSummaryJob: клон → конвейер → ai_notes (мок 
       expect(notes.map((n) => n.role)).toContain("overview");
       expect(notes.map((n) => n.role)).toContain("documentation");
       expect(notes.every((n) => n.model === "m2" || n.model === "m1")).toBe(true);
-      // В5.1 (кэш по скану): заметки последнего скана уже записаны — повторная
+      // кэш по скану: заметки последнего скана уже записаны — повторная
       // постановка отказывает как cached, вторая генерация того же скана не запускается
       const again = enqueueSummary(db, repoId, { userId: 1, cooldownMs: 60 * 60_000 });
       expect(again.kind).toBe("cached");
       expect(mock.calls()).toBeGreaterThanOrEqual(6);
-      // 23.09 (Алексей): кэш снимается тем же флагом, что и кулдаун, — дебаг
+      // кэш снимается тем же флагом, что и кулдаун, — дебаг
       // (1 мс) гоняет генерацию на том же скане каждый раз. Заявка от юзера
       // с PAT: processSummaryJob требует PAT у юзерской заявки
       const { storePat } = await import("../src/auth/pat");
@@ -280,8 +279,8 @@ describe("processSummaryJob: клон → конвейер → ai_notes (мок 
   }, 60_000);
 });
 
-// В5.2 (Б3, §2 «В5.2 — публичный AI-обзор…» п.3): автообновление по оп-ину удалено —
-// скан AI не запускает, даже если в user_settings остался прежний оп-ин
+// Автообновления AI по оп-ину нет: скан AI не запускает, даже если в
+// user_settings остался прежний оп-ин
 describe("Автообновления по оп-ину нет (В5.2)", () => {
   test("runScan не генерирует обзор и не ставит AI-заявок при старом оп-ине в настройках", async () => {
     const srcRoot = buildFixtureRepo();
@@ -310,7 +309,7 @@ describe("Автообновления по оп-ину нет (В5.2)", () => {
 void startMockApi;
 
 // ---------------------------------------------------------------------------
-// Видимость и маршруты кнопки (К5.4 + решение 22.09: текст никогда не публичен)
+// Видимость и маршруты кнопки
 // ---------------------------------------------------------------------------
 
 import { getRepoCard } from "../src/api/repos";
@@ -351,7 +350,7 @@ describe("Видимость AI-текста: полные права откры
     for (const d of moreDirs) rmSync(d, { recursive: true, force: true });
   });
 
-  // В5.2 (Б2, §2 «В5.2 — публичный AI-обзор…»): аноним публичного репо получает
+  // аноним публичного репо получает
   // ПУБЛИЧНУЮ версию AI-блока; полный текст (все факты) до него не доходит
   test("карточка на уровне сборки: granted → полный ai с overview; аноним → только публичная версия, полного текста нет", async () => {
     const { db, dir } = freshDb("rh-v5b3-card-");
@@ -364,7 +363,7 @@ describe("Видимость AI-текста: полные права откры
     expect(open?.ai).toBeDefined();
     expect(open?.ai?.overview?.text).toContain("README и CI");
     expect(open?.ai?.specialists.length).toBe(5);
-    expect(open?.ai).not.toHaveProperty("optIn"); // В5.2 (Б3): оп-ина нет
+    expect(open?.ai).not.toHaveProperty("optIn"); // оп-ина нет
     expect(open?.ai?.audience).toBe("full");
     const anon = getRepoCard(db, "v5", "vis", { access: NO_PAT_ACCESS });
     expect(anon?.ai?.audience).toBe("public");
@@ -399,7 +398,7 @@ describe("Видимость AI-текста: полные права откры
     // аноним: POST — 401
     const anonPost = await fetch(`${server.base}/api/repos/v5/vis/summary`, { method: "POST" });
     expect(anonPost.status).toBe(401);
-    // В5.2 (Б3, §2 п.1): вошедший «не свой» на публичном репо ставит ПУБЛИЧНЫЙ обзор
+    // вошедший «не свой» на публичном репо ставит ПУБЛИЧНЫЙ обзор
     const ownPost = await fetch(`${server.base}/api/repos/v5/vis/summary`, { method: "POST", headers: { cookie } });
     const body = (await ownPost.json()) as { audience?: string; jobId?: number | null };
     expect(ownPost.status).toBe(200);
@@ -457,7 +456,6 @@ describe("В5.1-smoke: jobActive честный (null-vs-undefined регрес�
     expect(c3.ai?.jobActive).toBe(true);
   });
 
-  // В5.2 (Б3): маршрут переключателя удален вместе с автообновлением
   test("PUT /summary-auto и DELETE /summary больше не существуют — заявок и настроек не меняют", async () => {
     const dir = mkdtempSync(join(tmpdir(), "rh-v51-auto-"));
     moreDirs.push(dir);
@@ -521,8 +519,8 @@ describe("В5.1-smoke: jobActive честный (null-vs-undefined регрес�
     const c = (await (await fetch(`${server.base}/api/repos/v51/flag`, { headers: { cookie } })).json()) as {
       ai?: { cooldownUntil?: string | null };
     };
-    // 1 мс после только что созданной заявки — кулдаун уже в прошлом; до фикса
-    // карточка брала дефолт 60 мин и показывала «следующий после +1 час»
+    // 1 мс после только что созданной заявки — кулдаун уже в прошлом: карточка
+    // берет кулдаун из конфига, а не дефолт 60 мин («следующий после +1 час»)
     expect(c.ai?.cooldownUntil).toBeTruthy();
     expect(Date.parse(c.ai!.cooldownUntil!)).toBeLessThan(Date.now() + 1000);
   });

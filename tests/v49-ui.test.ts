@@ -1,7 +1,6 @@
-// v49-ui.test.ts — карточка В4.9 (блок Б7: К9.9, К9.12-К9.14). Вид — по
-// отрисованному результату (харнесс scripts/shot.ts); здесь — проводка одной
-// функции и одних фраз на карточке и в отчете (source-assert допустим для
-// текстов и верстки; числа — поведенческие тесты v49-contributions).
+// Карточка: проводка одной функции и одних фраз на карточке и в отчете (по
+// исходнику – только тексты и верстка; числа проверяет v49-contributions).
+// Внешний вид проверяется по отрисованному результату (scripts/shot.ts).
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -16,11 +15,9 @@ const between = (text: string, from: string, to: string): string => {
 };
 
 describe("К9.12: «Вклад категорий в оценку» на карточке — тот же расчет, что в отчете", () => {
-  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А3; Г2.8): полоса ушла из панели под
-  // числа; сборка полосы — ОДНА функция `contributionBar` (sections.ts), ее
-  // зовут и отчет (`contributionsBlock`), и view-модель карточки
-  // (`contributionBars`); строки «Сильнее всего…» нет нигде — `lossParts`
-  // удален. Равенство полей — поведенческий тест v49-ui-r1-card.
+  // Полосу собирает ОДНА функция `contributionBar` (sections.ts): ее зовут и
+  // отчет (`contributionsBlock`), и view-модель карточки (`contributionBars`).
+  // Равенство полей проверяет v49-ui-r1-card.
   test("карточка и отчет собирают полосу одной функцией (sections.ts)", () => {
     const view = src("web/cardView.ts");
     const sections = src("report/sections.ts");
@@ -36,16 +33,13 @@ describe("К9.12: «Вклад категорий в оценку» на кар�
     expect(sections).toContain("score.categories[k]?.weight ?? SCORE_WEIGHTS[k]");
   });
 
-  // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, §2 23.09 «финальный вид подтвержден» п.1):
-  // на карточке цвет категорий возвращен — тот же, что в панели «Вклад
-  // категорий» рейтинга, по КЛЮЧУ категории; К9.15 снят только для карточки,
-  // PDF остается серым (pdf.ts не менялся).
+  // Цвет категории на карточке тот же, что в панели «Вклад категорий»
+  // рейтинга, по КЛЮЧУ категории; PDF остается серым.
   test("сегменты карточки и рейтинга — цвет по ключу категории, CI/CD и Безопасность — два новых тона", () => {
     const css = src("web/layout.css");
     expect(css).not.toMatch(/\.rh-contrib-band__seg/);
     expect(css).not.toMatch(/\.rh-contrib__seg_\d/);
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (круг 2 части 2, Е2 — палитра П2): цвета категорий —
-    // свои токены `--rh-cat-*` в theme.css, не зеленый/желтый/красный оценки
+    // цвета категорий – свои токены `--rh-cat-*` в theme.css, не зеленый/желтый/красный оценки
     for (const k of ["documentation", "cicd", "security", "activity", "issues", "code"]) {
       expect(between(css, `.rh-cat-color_${k} {`, "}")).toContain(`var(--rh-cat-${k})`);
     }
@@ -72,8 +66,8 @@ describe("К9.13: закрытая категория — одна фраза н
     expect(noDataReason("code", "что-то новое по-английски")).toBe("Данных нет.");
   });
 
-  // ПЕРЕНОС С ЗАМЕНОЙ (В4.9 ч.2, А4, инвариант 1): основание любой категории
-  // на карточке и в отчете — одна функция `categoryWhy` (sections.ts), в
+  // Основание любой категории на карточке и в отчете – одна функция
+  // `categoryWhy` (sections.ts), в
   // которой живут `lockedCategoryText` и опорная фраза `NOT_IN_SCORE`.
   test("карточка и отчет берут основание одной функцией, склейки «недоступны» нет", () => {
     const page = src("web/RepoPage.tsx");
@@ -89,7 +83,7 @@ describe("К9.13: закрытая категория — одна фраза н
 describe("К9.14: слово шкалы у категории — плашкой", () => {
   test("в строке категории — Label темы scoreLabelTheme; слова в подсказке числа нет", () => {
     const row = between(src("web/RepoPage.tsx"), "function CategoryRow", "function Markers");
-    // ПЕРЕНОС (В4.9 ч.2): плашку собирает view-модель (`chip`), тема — scoreLabelTheme, как у отчета
+    // плашку собирает view-модель (`chip`), тема – scoreLabelTheme, как у отчета
     expect(row).toMatch(/<Label theme=\{c\.chip\.theme\} size="xs" className="rh-category__word">/);
     expect(src("web/cardView.ts")).toContain("chip: { theme: scoreLabelTheme(cat.score)");
     expect(row).not.toMatch(/rh-category__value" title=\{sentence\(scoreWord/);

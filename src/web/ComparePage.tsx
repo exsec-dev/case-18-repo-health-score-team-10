@@ -1,19 +1,14 @@
-// ComparePage.tsx — раздел «Сравнение» (В5.3 круг 4, К-1 / К5.15).
+// ComparePage.tsx — раздел «Сравнение».
 //
-// Решения — TASK.md §2 «В5.3, круг 4 — сравнение: …» (25.09, Екатерина):
-// вход только пунктом rail (вторым, после «Рейтинга»); 2-3 репозитория, чью карточку зритель
-// может открыть (А2); матрица A — столбцы-репо, строки — реквизиты, индекс с
-// полосой, 4 категории с подметриками в раскрытии (справочные — внутри
-// «Активности»), блок «Полная оценка», если он открыт у всех; лидер строки —
-// стрелка и подложка; набор — в адресе. Выбор по дизайн-аудиту (§2 «выбор по
-// дизайн-аудиту сравнения»): добавление — окном, как в «Избранном» (Д4), балл
-// подметрики первым (Д1), столбец репозитория — серая карточка, «по N из 4»
-// только у неполной основы (Д16), у пустого репо — «нет кода» вместо слова
-// шкалы. Все утверждения о наборе считает `compareView.ts`; значения
-// подметрик, причины «нет данных» и поправки — те же функции, что карточка.
+// 2-3 репозитория, чью карточку зритель может открыть; набор — в адресе.
+// Матрица: столбцы — репозитории, строки — реквизиты, индекс с полосой,
+// 4 категории с подметриками в раскрытии (справочные — внутри «Активности»),
+// блок «Полная оценка», если он открыт у всех; лидер строки отмечен подложкой.
+// Все утверждения о наборе считает `compareView.ts`; значения подметрик,
+// причины «нет данных» и поправки — те же функции, что у карточки.
 //
 // Таблица — CSS-грид с явной расстановкой ячеек и ролями ARIA (`table` →
-// `row` с `display: contents` → `columnheader`/`rowheader`/`cell`, аудит Д3):
+// `row` с `display: contents` → `columnheader`/`rowheader`/`cell`):
 // у Gravity `Table` нет объединенных ячеек и подстрок, а на телефоне подпись
 // строки встает над ячейками — у нативной `<table>` это снимало бы роли.
 import { ArrowToggle, Alert, Button, Dialog, Flex, Icon, Label, Link, Popover, Progress, Skeleton, Text, TextInput } from "@gravity-ui/uikit";
@@ -110,7 +105,7 @@ function useCompare(slugs: string[]): { state: AsyncState<CompareResponse> | nul
       .catch((e: unknown) => {
         if (ctrl.signal.aborted) return;
         const message = e instanceof Error ? e.message : String(e);
-        // ревью 25.09: прежние данные остаются только для ТОГО ЖЕ набора (повтор); у нового набора
+        // прежние данные остаются только для ТОГО ЖЕ набора (повтор); у нового набора
         // сбой — ошибка, иначе скелетон висел бы рядом с ней бесконечно
         setState((prev) => {
           const data = prev ? dataOf(prev) : null;
@@ -135,7 +130,7 @@ export function ComparePage({ search }: { search: string }) {
   const phone = useMediaQuery("(max-width: 767px)");
   const [dialogOpen, setDialogOpen] = useState(false);
 
-  // Д2 (§2 25.09): пункт rail без набора подставляет последний набор вкладки
+  // пункт rail без набора подставляет последний набор вкладки
   useEffect(() => {
     if (slugs.length > 0) {
       rememberCompareSet(slugs);
@@ -179,7 +174,7 @@ export function ComparePage({ search }: { search: string }) {
   return (
     <Page crumbs={[{ text: "Сравнение" }]} mode="document">
       <div className="rh-cmp-page">
-        {/* Д4 А + окно добавления (§2 25.09): кнопка у заголовка; при 3 из 3 — строка вместо поля */}
+        {/* кнопка добавления у заголовка; при 3 из 3 — строка вместо нее */}
         <PageHeader
           title={COMPARE_TITLE}
           description={
@@ -231,7 +226,7 @@ export function ComparePage({ search }: { search: string }) {
               <CompareSkeleton slugs={slugs} />
             )}
             {items && phone && <PhoneExceptions items={items} hasPat={hasPat} />}
-            {/* Д11: плашка по содержимому, не шире 820; §2 25.09 — под таблицей */}
+            {/* плашка по содержимому, не шире 820 */}
             {notes.length === 1 && (
               <div className="rh-cmp-alert">
                 <Alert theme="info" view="filled" size="s" message={notes[0]} />
@@ -286,7 +281,7 @@ function sameSlugs(a: string[], b: string[]): boolean {
   return a.length === b.length && a.every((s, i) => s === b[i]);
 }
 
-/** Д15: «Как считается?» в подвале — веса индекса и шкала, как подсказка индекса на карточке. */
+/** «Как считается?» в подвале — веса индекса и шкала, как подсказка индекса на карточке. */
 function HowItWorks() {
   return (
     <Popover
@@ -318,7 +313,7 @@ function HowItWorks() {
 }
 
 function CompareSkeleton({ slugs }: { slugs: string[] }) {
-  // §2 25.09: загрузка — один большой скелетон в форме таблицы, без названий и мелких полос
+  // загрузка — один большой скелетон в форме таблицы, без названий и мелких полос
   return (
     <div className="rh-cmp-wrap" aria-busy="true" aria-label={`Загрузка сравнения: ${slugs.length} из ${COMPARE_MAX}`}>
       <Skeleton className="rh-cmp-skeleton" />
@@ -326,7 +321,7 @@ function CompareSkeleton({ slugs }: { slugs: string[] }) {
   );
 }
 
-// ---------- окно добавления (Д4 + решение 25.09: как «Добавить в избранное») ----------
+// ---------- окно добавления (как «Добавить в избранное») ----------
 
 interface Suggestion {
   slug: string;
@@ -349,7 +344,7 @@ function useDebounced<T>(value: T, ms: number): T {
 /**
  * Окно добавления: поиск по рейтингу, «Из избранного» (вошедшему), вставка
  * org/repo или ссылки — сразу добавление. Список — в потоке окна, под полем:
- * ошибка поля им не перекрывается (аудит Д5). Активная строка — первая
+ * ошибка поля им не перекрывается. Активная строка — первая
  * выбираемая; ↑↓ пропускают «В сравнении»; Enter по репо из набора — «уже в
  * сравнении», а не «не похоже на адрес». При 3 из 3 окно закрывается.
  */
@@ -424,7 +419,7 @@ function AddCompareDialog({
             repo: r.repo,
             section: "rating",
             logoUrl: r.logoUrl,
-            // аудит Д6: язык и место — как в строке рейтинга
+            // язык и место — как в строке рейтинга
             meta: (
               <span className="rh-add-row__meta">
                 <Text variant="body-short" color="secondary">
@@ -447,7 +442,6 @@ function AddCompareDialog({
   const searching = q !== "" && parsed === null && (rating === null || rating.q !== q);
   const noMatches = text !== "" && parsed === null && !searching && list.length === 0;
 
-  // аудит Д5: активна первая выбираемая строка
   useEffect(() => setActive(selectable[0] ?? -1), [value, q, favorites, rating, slugs.join("|")]);
 
   const choose = (s: Suggestion) => {
@@ -459,12 +453,12 @@ function AddCompareDialog({
   };
 
   const onEnter = () => {
-    // ревью 25.09: пока поиск не догнал ввод, выдача устарела — Enter ничего не добавляет
+    // пока поиск не догнал ввод, выдача устарела — Enter ничего не добавляет
     if (parsed === null && (text !== q || searching)) return;
     const pick = active >= 0 ? list[active] : undefined;
     if (pick) return choose(pick);
     if (text === "") return;
-    // аудит Д5: адрес верный, но репо уже в наборе — не «не похоже на адрес»
+    // адрес верный, но репо уже в наборе — не «не похоже на адрес»
     if ((manualSlug && slugs.includes(manualSlug)) || list.some((s) => slugs.includes(s.slug) && s.slug.toLowerCase() === lower)) return setError(COMPARE_DUPLICATE_TEXT);
     setError(COMPARE_BAD_INPUT_TEXT);
   };
@@ -515,7 +509,7 @@ function AddCompareDialog({
               "aria-controls": listId,
               "aria-activedescendant": active >= 0 && list[active] ? optionId(active) : undefined,
               onPaste: (e) => {
-                // вставка адреса — сразу добавление (дизайн §4.2)
+                // вставка адреса — сразу добавление
                 const pasted = e.clipboardData.getData("text");
                 const p = parseFavoriteInput(pasted);
                 if (!p) return;
@@ -566,8 +560,8 @@ function AddCompareDialog({
                   onMouseEnter={() => !inSet && setActive(i)}
                 >
                   {s.section === "manual" ? (
-                    // тур 3 В5.5 (п.13): плюс только справа (кнопка); слева — пустое место
-                    // размера аватара, чтобы текст строки стоял в одну линию с остальными
+                    // плюс только справа (кнопка); слева — пустое место размера аватара,
+                    // чтобы текст строки стоял в одну линию с остальными
                     <span className="rh-cmp-add-plus" aria-hidden="true" />
                   ) : (
                     <RepoAvatar repo={s.repo} logoUrl={s.logoUrl} size="s" />
@@ -630,7 +624,7 @@ function colsOf(items: CompareItem[]): Col[] {
     if (it.status !== "ok") return { kind: "refused", slug: it.slug, status: it.status };
     return it.card.score === null ? { kind: "noscore", slug: it.slug, card: it.card } : { kind: "scored", slug: it.slug, card: it.card };
   });
-  // 1 репо — второй столбец-приглашение (продуктовый Т5)
+  // 1 репо — второй столбец-приглашение
   if (items.length === 1) cols.push({ kind: "invite" });
   return cols;
 }
@@ -651,7 +645,7 @@ function categoryOf(card: CompareCard, key: CategoryKey) {
   return card.score?.categories[key];
 }
 
-/** Дата анализа без года (Д8 Б, телефон): «23 сент.». */
+/** Дата анализа без года (телефон): «23 сент.». */
 function dateWithoutYear(iso: string | null): string {
   return fmtDate(iso).replace(/\s\d{4}$/, "");
 }
@@ -672,7 +666,7 @@ function CompareTable({
   onAdd: () => void;
 }) {
   const cols = colsOf(items);
-  // все категории свернуты при заходе (как карточка, §2 25.09)
+  // все категории свернуты при заходе, как на карточке
   const [openCats, setOpenCats] = useState<ReadonlySet<CategoryKey>>(new Set());
   const toggle = (k: CategoryKey) =>
     setOpenCats((prev) => {
@@ -686,7 +680,7 @@ function CompareTable({
     return s.weighted.length + s.reference.length > 0;
   };
 
-  // Д8 Б и Д9 на телефоне: общий год и общий размер рейтинга — в подписи строки
+  // на телефоне общий год и общий размер рейтинга — в подписи строки
   const scored = cols.filter((c): c is Extract<Col, { kind: "scored" }> => c.kind === "scored");
   const year = phone ? commonYear(scored.map((c) => analysisDate(c.card))) : null;
   const totals = new Set(scored.map((c) => c.card.score!.rankedTotal).filter((t): t is number => t !== null));
@@ -694,7 +688,7 @@ function CompareTable({
   const metaLabel = (key: "language" | "rank" | "date"): string => metaRowLabel(key, year, sharedTotal);
 
   const rows: Row[] = [{ kind: "meta", key: "language" }, { kind: "meta", key: "rank" }, { kind: "meta", key: "date" }];
-  // Д16 А: группа «Оценка» — только когда ниже есть «Полная оценка»
+  // группа «Оценка» — только когда ниже есть «Полная оценка»
   if (fullKeys.length > 0) rows.push({ kind: "group", label: "Оценка" });
   rows.push({ kind: "index" });
   const pushCategory = (key: CategoryKey) => {
@@ -703,7 +697,7 @@ function CompareTable({
     const { weighted, reference } = subKeysOf(cols, key);
     rows.push({ kind: "subhead", cat: key });
     for (const sub of weighted) rows.push({ kind: "sub", cat: key, sub });
-    // §2 25.09: подписи «Справочно…» нет — справочные идут следом, серым, с «—» вместо балла
+    // подписи «Справочно…» нет — справочные идут следом, серым, с «—» вместо балла
     for (const sub of reference) rows.push({ kind: "sub", cat: key, sub });
   };
   for (const key of INDEX_KEYS) pushCategory(key);
@@ -732,7 +726,7 @@ function CompareTable({
   const firstSubId = (key: CategoryKey) => `rh-cmp-sub-${key}`;
 
   // оформление (aria-hidden): карточки столбцов (десктоп) и линии строк — по сегментам,
-  // только по подписи и столбцам с оценкой: объединенные ячейки линии не пересекают (аудит Д2)
+  // только по подписи и столбцам с оценкой: объединенные ячейки линии не пересекают
   const decor: ReactNode[] = [];
   if (!phone) {
     cols.forEach((c, i) =>
@@ -859,7 +853,7 @@ function RowLabel({
     case "meta":
       return <Text color="secondary">{metaLabel(row.key)}</Text>;
     case "group":
-      // аудит Д3: подпись группы — текст заголовка строки, без h2 внутри rowheader
+      // подпись группы — текст заголовка строки, без h2 внутри rowheader
       return <Text variant="subheader-2">{row.label}</Text>;
     case "index":
       return <Text variant="subheader-1">{INDEX}</Text>;
@@ -895,9 +889,8 @@ function RowLabel({
 }
 
 /**
- * Число с отметкой лидера — подложкой. Круг 5 тура 3 (находка 15 аудита, 27.09,
- * Екатерина): стрелка ▲ убрана совсем — в рейтинге ▲ значит «поднялся за сутки»;
- * отметка лидера — только фон, и у нейтрального числа, и вокруг цветного чипа.
+ * Число с отметкой лидера — подложкой. Стрелки нет: в рейтинге ▲ значит «поднялся
+ * за сутки». Отметка — только фон, и у нейтрального числа, и вокруг цветного чипа.
  * На серой карточке подложка — на ступень темнее.
  */
 function Lead({ leader, plain, children }: { leader: boolean; plain: boolean; children: ReactNode }) {
@@ -932,7 +925,7 @@ function CellValue({ row, card, leader, phone, year, sharedTotal }: { row: Row; 
         const at = analysisDate(card);
         return <Text>{year !== null ? dateWithoutYear(at) : fmtDate(at)}</Text>;
       }
-      // Д9: место как на карточке — «#4» и «из 28 145» приглушенно (на телефоне размер — в подписи строки)
+      // место как на карточке — «#4» и «из 28 145» приглушенно (на телефоне размер — в подписи строки)
       {
         const rank = rankCell(card, sharedTotal);
         if ("none" in rank) return <Text color="secondary">{rank.none}</Text>;
@@ -948,7 +941,7 @@ function CellValue({ row, card, leader, phone, year, sharedTotal }: { row: Row; 
       const total = row.kind === "index" ? score.healthcraftIndex : score.repoHealthScore;
       const counted = row.kind === "index" ? indexCategoriesCounted(card) : fullCounted(card);
       const of = row.kind === "index" ? 4 : 6;
-      // Д16 А: основа названа, только если она неполная
+      // основа названа, только если она неполная
       const countLine = counted < of ? categoriesCountedText(counted, of) : null;
       if (total === null) {
         return (
@@ -964,9 +957,9 @@ function CellValue({ row, card, leader, phone, year, sharedTotal }: { row: Row; 
           </span>
         );
       }
-      // решение 25.09 (вопрос по смыслу): пустой репо — метка «нет кода» вместо слова шкалы,
-      // число — нейтральное (это данные «оценивать нечего», не зона риска); в лидерах не участвует;
-      // основы («по N из 4») нет: индекс 0 по правилу методики, он не перевзвешивается (ревью 25.09)
+      // пустой репо — метка «нет кода» вместо слова шкалы, число нейтральное (это «оценивать
+      // нечего», а не зона риска); в лидерах не участвует; основы («по N из 4») нет: индекс 0
+      // по правилу методики, он не перевзвешивается
       if (row.kind === "index" && card.markers.codeEmpty) {
         return (
           <span className="rh-cmp-total">
@@ -1023,7 +1016,7 @@ function CellValue({ row, card, leader, phone, year, sharedTotal }: { row: Row; 
             )}
           </Lead>
           {adj && (
-            // круг 5 тура 3 (находка 16): вместо жаргона «Балл сжат» — что именно снизило балл
+            // вместо жаргона «Балл сжат» — что именно снизило балл
             <span className="rh-cmp-mark" title={adj} tabIndex={0} aria-label={`${adjustmentLabel(cat)}. ${adj}`}>
               <Label theme="normal" size="xs">
                 {adjustmentLabel(cat)}
@@ -1041,7 +1034,7 @@ function CellValue({ row, card, leader, phone, year, sharedTotal }: { row: Row; 
       );
     }
     case "subhead":
-      // Д1 А: балл первым, затем значение
+      // балл первым, затем значение
       return (
         <span className="rh-cmp-subhead" aria-hidden="true">
           <span className="rh-cmp-sub__score">Балл</span>
@@ -1054,7 +1047,7 @@ function CellValue({ row, card, leader, phone, year, sharedTotal }: { row: Row; 
       const cat = score.categories[row.cat]!;
       const entry = cat.submetrics[row.sub];
       const ref = displayOnly(row.cat, row.sub);
-      // §2 25.09: пустое значение и пустой балл — «—» на своих местах (балл — у правого края подстолбца)
+      // пустое значение и пустой балл — «—» на своих местах (балл — у правого края подстолбца)
       const shown = entry ? submetricShownValue(row.cat, row.sub, entry, submetricContext(score.computedAt), cat.submetrics) : "—";
       const scoreNode =
         ref || !entry || entry.score === null || entry.score === undefined ? (
@@ -1068,7 +1061,7 @@ function CellValue({ row, card, leader, phone, year, sharedTotal }: { row: Row; 
         <span className="rh-cmp-sub">
           {/* телефон: у справочных балла нет и подстолбца тоже — прочерк отдельной строкой был бы шумом */}
           {!(phone && ref) && <span className="rh-cmp-sub__score">{scoreNode}</span>}
-          {/* §2 25.09: значение — одной строкой с многоточием, полный текст в title */}
+          {/* значение — одной строкой с многоточием, полный текст в title */}
           <Text variant="body-1" color={ref ? "secondary" : "complementary"} className="rh-cmp-sub__value" title={shown}>
             {shown}
           </Text>
@@ -1089,8 +1082,7 @@ function fullCounted(card: CompareCard): number {
 
 function ColumnHead({ col, phone, onRemove, onAdd }: { col: Col; phone: boolean; onRemove: (slug: string) => void; onAdd: () => void }) {
   if (col.kind === "invite") {
-    // Д14: шапка приглашения — кнопка
-    // §2 25.09: пояснение — сразу под кнопкой, а не посреди столбца
+    // шапка приглашения — кнопка, пояснение сразу под ней, а не посреди столбца
     return (
       <span className="rh-cmp-colhead rh-cmp-colhead_invite">
         <Button view="outlined" size="m" onClick={onAdd}>
@@ -1124,7 +1116,7 @@ function ColumnHead({ col, phone, onRemove, onAdd }: { col: Col; phone: boolean;
           </span>
         )}
       </span>
-      {/* Д3: в порядке Tab сначала имя (ссылка на карточку), затем «×» */}
+      {/* в порядке Tab сначала имя (ссылка на карточку), затем «×» */}
       {card ? (
         <Link {...linkProps(repoHref(orgName, repoName))} view="primary" className="rh-cmp-colhead__link" title={col.slug}>
           {name}
@@ -1139,7 +1131,7 @@ function ColumnHead({ col, phone, onRemove, onAdd }: { col: Col; phone: boolean;
       </Button>
       <span className="rh-cmp-colhead__pill">
         {card && (card.repo.visibility === "internal" || card.repo.visibility === "private") && (phone ? <VisibilityIcon value={card.repo.visibility} /> : <VisibilityPill value={card.repo.visibility} />)}
-        {/* Д7: на телефоне столбец-исключение — короткая метка, полный текст — под таблицей */}
+        {/* на телефоне столбец-исключение — короткая метка, полный текст — под таблицей */}
         {phone && col.kind !== "scored" && (
           <Label theme="unknown" size="xs">
             {exceptionLabel(col.kind === "noscore" ? "noscore" : col.status)}
@@ -1159,7 +1151,7 @@ function VisibilityIcon({ value }: { value: "internal" | "private" }) {
   );
 }
 
-/** Д7: тексты столбцов-исключений на телефоне — под таблицей, с полным слагом. */
+/** Тексты столбцов-исключений на телефоне — под таблицей, с полным слагом. */
 function PhoneExceptions({ items, hasPat }: { items: CompareItem[]; hasPat: boolean }) {
   const lines = colsOf(items)
     .filter((c): c is Exclude<Col, { kind: "scored" } | { kind: "invite" }> => c.kind === "noscore" || c.kind === "refused")
@@ -1183,7 +1175,7 @@ function exceptionText(col: Exclude<Col, { kind: "scored" } | { kind: "invite" }
     const t = noScoreText(col.card.scan);
     return { title: t.title, text: t.description };
   }
-  // К8.5.6: владелец с доказанными правами получает «проверка не удалась», а не «не найден» (ревью 25.09)
+  // владелец с доказанными правами получает «проверка не удалась», а не «не найден»
   if (col.status === "check_failed") return { title: "Не удалось проверить доступ", text: checkFailedText(col.slug) };
   if (col.status === "token_rejected")
     return {
@@ -1199,8 +1191,8 @@ function exceptionText(col: Exclude<Col, { kind: "scored" } | { kind: "invite" }
 }
 
 /**
- * Имя репозитория одной строкой без переноса посреди слова (находка HQ по
- * макету 25.09, аудит Д13). Не влезает — многоточие в середине, подобранное по
+ * Имя репозитория одной строкой без переноса посреди слова. Не влезает —
+ * многоточие в середине, подобранное по
  * реальной ширине ячейки и шрифту: хвост (у команд хакатона — номер команды)
  * остается виден. Полное имя — в title и тексте для скринридера.
  */

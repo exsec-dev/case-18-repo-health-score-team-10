@@ -1,13 +1,9 @@
-// sections.ts — содержательные части отчета, общие со страницей карточки
-// (В4.9, часть 2 гейта, предпосылка круга 1; инвариант 1 «карточка = отчет по
-// данным»).
-//
-// Основание категории, ограничения данных, вклады показателей, таблица
-// «правило → подметрика» и слово источника жили в `build.ts`, который
-// импортирует значения серверного `src/api/repos.ts`, — бандл web их взять не
-// мог, и карточка собирала те же тексты своей копией. Модуль чистый: из API
-// здесь только типы, значения — из `categories.ts`, `score/model.ts`,
-// `web/format.ts` и словаря подметрик.
+// Содержательные части отчета, общие со страницей карточки: карточка и отчет
+// должны показывать по одним данным одно и то же. Основание категории,
+// ограничения данных, вклады показателей, «правило → подметрика», слово источника.
+// Модуль чистый, чтобы его мог взять web-бандл: из серверного API здесь только
+// типы, значения — из `categories.ts`, `score/model.ts`, `web/format.ts` и
+// словаря подметрик.
 import type { CardCategory, CardRecommendation, RepoCard } from "../api/repos";
 import { INDEX_WEIGHTS, SCORE_WEIGHTS, SUBWEIGHTS, type CategoryKey } from "../score/model";
 import {
@@ -38,9 +34,9 @@ export const FULL = "Repo Health Score";
 export const PUBLIC: CategoryKey[] = CATEGORY_ORDER.filter((k) => k in INDEX_WEIGHTS);
 
 /**
- * Номинальные веса категорий показателя — подсказка к числу на карточке
- * (завершающие правки В4.9, пункт 2): пользователь сам проверяет расчет.
- * Та же пара словарей, что строка «Веса …» раздела «Как считается» отчета.
+ * Номинальные веса категорий показателя — подсказка к числу на карточке, чтобы
+ * пользователь мог сам проверить расчет. Те же словари, что в строке «Веса …»
+ * раздела «Как считается» отчета.
  */
 export function metricWeights(name: typeof INDEX | typeof FULL): { key: CategoryKey; title: string; weight: string }[] {
   const keys = name === INDEX ? PUBLIC : CATEGORY_ORDER;
@@ -48,7 +44,7 @@ export function metricWeights(name: typeof INDEX | typeof FULL): { key: Category
   return keys.map((key) => ({ key, title: CATEGORY_TITLES[key], weight: `${weightOf(key)}%` }));
 }
 
-// ---------- показатели и вклады (К9.1, К9.12) ----------
+// ---------- показатели и вклады ----------
 
 export interface Metric {
   name: typeof INDEX | typeof FULL;
@@ -58,16 +54,14 @@ export interface Metric {
 }
 
 /**
- * Показатели документа в порядке «сначала публичный, потом полный»
- * (решение владельца 22.09, круг 4 гейта): HealthCraft Index считается по
- * открытым данным и идет первым, Repo Health Score — вторым и только там,
- * где зрителю открыты CI/CD и Безопасность. Порядок один для ряда первого
+ * Показатели документа в порядке «сначала публичный, потом полный»: HealthCraft
+ * Index считается по открытым данным и идет первым, Repo Health Score — вторым и
+ * только там, где зрителю открыты CI/CD и Безопасность. Порядок один для первого
  * экрана, полос вклада, приложений А и Б и раздела «Как считается».
  *
- * Index в списке есть всегда — даже когда его значение NULL: у зрителя с
- * полным доступом слева печатается «Оценки нет», а справа Score со своей
- * полосой (пункт 7 блока А круга 4). Считается и печатается в приложениях
- * только показатель со значением.
+ * Index в списке есть всегда, даже со значением NULL: у зрителя с полным доступом
+ * слева печатается «Оценки нет», а справа Score со своей полосой. Полосы и
+ * столбцы приложений получает только показатель со значением.
  */
 export function metricsOf(card: RepoCard): Metric[] {
   const score = card.score!;
@@ -86,7 +80,7 @@ export function contributionsOf(card: RepoCard, metric: Metric): Contributions |
   return categoryContributions(
     metric.keys.map((key) => ({ key, title: CATEGORY_TITLES[key], score: cats[key]?.score ?? null, weight: metric.weight(key) })),
     metric.value,
-    // 4.3.0 (Н4): вид «кода нет» — из причины «Состояния кода» той же оценки
+    // вид «кода нет» — из причины «Состояния кода» той же оценки
     { codeEmpty: card.markers.codeEmpty, codeEmptyReason: cats.code?.no_data ?? null },
   );
 }
@@ -108,14 +102,13 @@ export interface ContributionBar {
 }
 
 /**
- * Полоса вклада — ОДНА сборка для отчета и карточки (А3, инвариант 1):
- * заголовок называет показатель, строка вместо полосы — у потолка 49, пустого
- * репозитория и показателя без категорий с данными.
+ * Полоса вклада — одна сборка для отчета и карточки. Заголовок называет
+ * показатель; строка вместо полосы — у потолка 49, пустого репозитория и
+ * показателя без категорий с данными.
  */
 export function contributionBar(c: Contributions | null, metricName?: string): ContributionBar {
-  // п.6 круга 2: в отчете к заголовку добавлен показатель — полоса строится то
-  // по Repo Health Score, то по HealthCraft Index, и по ней это должно быть видно
-  // п.3 круга 5: показатель прямо в заголовке, без «в оценку – …»
+  // полоса строится то по Repo Health Score, то по HealthCraft Index — заголовок
+  // называет показатель, чтобы было видно, по какому
   const title = metricName ? `Вклад категорий в ${metricName}` : CONTRIBUTIONS_TITLE;
   if (c === null) return { title, segments: [], rest: null, note: "Вклады категорий не рассчитаны: у показателя нет категорий с данными." };
   const note = contributionsNote(c);
@@ -133,7 +126,7 @@ export function contributionBars(card: RepoCard): ContributionBar[] {
   return withValue(metricsOf(card)).map((m) => contributionBar(contributionsOf(card, m), m.name));
 }
 
-/** Момент анализа — дата шапки отчета и «анализ …» в шапке карточки (А7): расчет оценки, иначе скан. */
+/** Момент анализа — дата шапки отчета и «анализ …» в шапке карточки: расчет оценки, иначе скан. */
 export function analysisDate(card: RepoCard): string | null {
   return card.score?.computedAt ?? card.scan?.finishedAt ?? card.scan?.startedAt ?? null;
 }
@@ -143,21 +136,21 @@ export function analysisDate(card: RepoCard): string | null {
 /**
  * «Почему» у оцененной категории: 1-2 показателя с наименьшим баллом словами
  * словаря подметрик (название – значение); у здоровой категории перед ними —
- * сильная сторона (Г1.21); примечание расчета, если оно объясняет балл (трекер
- * пуст); потолок CI — причиной. Без новой методики.
+ * сильная сторона; примечание расчета, если оно объясняет балл (трекер пуст);
+ * потолок CI — причиной.
  */
 export function whyText(key: CategoryKey, cat: CardCategory, ctx: SubmetricContext): string {
   if (key === "cicd" && cat.no_data) return noDataReason(key, cat.no_data);
-  // 4.3.1 (В5.5, М2): оцененная категория без подметрик — «кода нет» (балл 0
-  // как факт о репо): основание — причина пустоты, а не «все на максимуме»
+  // оцененная категория без подметрик — «кода нет» (балл 0 как факт о репо):
+  // основание — причина пустоты, а не «все на максимуме»
   if (cat.no_data && Object.keys(cat.submetrics).length === 0) return noDataReason(key, cat.no_data);
-  // 4.3.0 (Н5, Р3): поправка к среднему (сжатие малой выборки, потолок) —
-  // первая причина балла; «Все показатели на максимуме» при сжатом балле — ложь
+  // поправка к среднему (сжатие малой выборки, потолок) — первая причина балла:
+  // «Все показатели на максимуме» при сниженном балле было бы неправдой
   const adjusted = adjustmentText(cat);
   if (adjusted) return adjusted;
   const subs = Object.entries(cat.submetrics);
   for (const [sub, entry] of subs) {
-    // В5.5 тур 2 (W4): оговорка справочного показателя (время слияния PR) — не основание балла
+    // оговорка справочного показателя (время слияния PR) — не основание балла
     if (displayOnly(key, sub)) continue;
     const remark = submetricNote(key, sub, entry.note)?.remark;
     if (remark) return remark;
@@ -169,10 +162,9 @@ export function whyText(key: CategoryKey, cat: CardCategory, ctx: SubmetricConte
     .slice(0, 2);
   if (weakest.length === 0) return "Все показатели категории на максимуме.";
   const shown = ({ sub, entry }: (typeof scored)[number]): string => `${submetricTitle(key, sub)} – ${submetricShownValue(key, sub, entry, ctx)}`;
-  // В5.5 закрытие (Г1.21, п. 22 замечаний): у здоровой категории основание из
-  // одних слабых показателей спорило с зеленой плашкой («Здоров» и рядом
-  // «Задачи без движения – 100%»). Первой идет сильная сторона — показатель с
-  // наибольшим баллом, строго выше слабых; нет такого — прежний текст.
+  // у здоровой категории основание из одних слабых показателей спорило бы с
+  // зеленой плашкой, поэтому первой идет сильная сторона — показатель с
+  // наибольшим баллом, строго выше слабых; если такого нет — только слабые
   if (scoreTheme(cat.score) === "success") {
     const ceiling = Math.max(...weakest.map(({ entry }) => entry.score!));
     const strongest = scored.filter((e) => !weakest.includes(e) && e.entry.score! > ceiling + 1e-9).sort((a, b) => b.entry.score! - a.entry.score! || a.i - b.i)[0];
@@ -181,13 +173,7 @@ export function whyText(key: CategoryKey, cat: CardCategory, ctx: SubmetricConte
   return weakest.map((w) => `${shown(w)}.`).join(" ");
 }
 
-/**
- * В5.3-М (Н5, Р3, Н14б): поправка к взвешенному среднему категории словами —
- * одна копия для карточки («почему»), разбора категории и приложения А.
- * Сжатие малой выборки задач, потолок «Безопасности» при открытых находках и
- * (круг 2, В3) сжатие малого кода к 50.
- */
-/** Круг 5 тура 3 (находка 16): короткая метка поправки для ячейки сравнения (вместо «Балл сжат»). */
+/** Короткая метка поправки балла для ячейки сравнения. */
 export function adjustmentLabel(cat: Pick<CardCategory, "adjustment">): string {
   const a = cat.adjustment;
   if (a?.kind === "small-sample") return "Мало задач";
@@ -195,19 +181,20 @@ export function adjustmentLabel(cat: Pick<CardCategory, "adjustment">): string {
   return "Есть находки";
 }
 
+/**
+ * Поправка к взвешенному среднему категории словами — одна копия для карточки
+ * («почему»), разбора категории и приложения А: сжатие малой выборки задач,
+ * сжатие малого кода к середине шкалы, потолок «Безопасности» при открытых находках.
+ */
 export function adjustmentText(cat: Pick<CardCategory, "adjustment" | "score">): string | null {
   const a = cat.adjustment;
   if (!a) return null;
   if (a.kind === "small-sample") {
-    // приемка HQ (E11): ни одной засчитанной закрытой — не «0 из 10»
+    // ни одной засчитанной закрытой задачи — отдельная фраза, а не «0 из 10»
     if (a.n === 0) return `Ни одна задача не закрыта – балл категории минимальный: ${fmtDecimal(cat.score ?? a.floor, 0)}.`;
-    // круг 5 тура 3 (находка 16 аудита, 27.09): без жаргона «сжат к минимуму» — словами
-    // правила; числа те же (раньше: «Малая выборка: N … – балл сжат к минимуму 6: X → Y»)
     return `Мало закрытых задач: ${a.n} из ${a.full} нужных для надежной оценки – балл снижен с ${fmtDecimal(a.raw, 1, { trim: true })} до ${fmtDecimal(cat.score ?? a.floor, 1, { trim: true })}.`;
   }
   if (a.kind === "small-code") {
-    // круг 2 (В3): сжатие малого кода к нейтрали 50 вместо порога «от 50 строк»;
-    // круг 5 тура 3 (находка 16): словами, без «сжат к»
     const lines = plural(a.full, "строки", "строк", "строк");
     return `Мало кода: ${a.loc} из ${a.full} ${lines} для надежной оценки – балл снижен с ${fmtDecimal(a.raw, 1, { trim: true })} до ${fmtDecimal(cat.score ?? a.center, 1, { trim: true })}, ближе к середине шкалы.`;
   }
@@ -216,7 +203,7 @@ export function adjustmentText(cat: Pick<CardCategory, "adjustment" | "score">):
 }
 
 /**
- * Основание ЛЮБОЙ категории — колонка «Основание» PDF и вторая строка
+ * Основание любой категории — колонка «Основание» PDF и вторая строка
  * категории на карточке: закрытая — фраза по доступу зрителя, без данных —
  * причина и опорная фраза, оцененная — `whyText`.
  */
@@ -230,7 +217,7 @@ export function categoryWhy(card: RepoCard, key: CategoryKey, ctx: SubmetricCont
   return whyText(key, cat, ctx);
 }
 
-// ---------- ограничения данных (Д4, Д5) ----------
+// ---------- ограничения данных ----------
 
 export function closeDateNote(card: RepoCard): string | null {
   const stats = card.evidence.find((e) => e.key === "issues.stats" && e.status === "ok");
@@ -244,11 +231,10 @@ export function factValue(card: RepoCard, key: string): Record<string, unknown> 
 }
 
 /**
- * А11 аудита: оговорка про обрезанную историю печаталась и там, где обрезки
- * не было. Дата отсечения раньше первого коммита репозитория означает, что
- * окно сбора накрыло всю историю и ничего не потеряно (`fx-anon`: отсечение
- * 16 авг. 2025 при первом коммите 2 окт. 2025). Первый коммит берется из
- * итога истории в самих данных.
+ * Дата отсечения истории, если история действительно обрезана. Отсечение раньше
+ * первого коммита репозитория означает, что окно сбора накрыло всю историю и
+ * ничего не потеряно — тогда оговорка не нужна. Первый коммит берется из итога
+ * истории в самих данных.
  */
 export function historyTruncatedSince(card: RepoCard): string | null {
   const since = card.markers.historyTruncatedSince;
@@ -259,10 +245,10 @@ export function historyTruncatedSince(card: RepoCard): string | null {
 }
 
 /**
- * А3 аудита: «Релизы за 12 месяцев – 0» и «Предложения изменений за 90 дней
- * – 0» стоят рядом со счетчиками API, где релизы и предложения есть. Окна
- * считаются по ДАТАМ событий, и когда API их не передал, окно пусто. Балл от
- * этого не становится неверным — это ограничение данных, как `closeDateNote`.
+ * «Релизы за 12 месяцев – 0» рядом со счетчиком API, где релизы есть, выглядит
+ * как ошибка: окна считаются по датам событий, и если API их не передал, окно
+ * пусто. Балл от этого не становится неверным — это ограничение данных, как
+ * `closeDateNote`.
  */
 function restDatesNote(card: RepoCard): string | null {
   const rest = factValue(card, "activity.rest");
@@ -275,7 +261,7 @@ function restDatesNote(card: RepoCard): string | null {
   return `Дат событий SourceCraft не передал: ${gaps.join(", ")}, но без дат в окна «за 90 дней» и «за 12 месяцев» не попадает ничего, поэтому в разборе у них 0.`;
 }
 
-/** Вид ограничения — чтобы карточка не повторяла его наверху отдельным предупреждением (А6). */
+/** Вид ограничения — чтобы карточка не повторяла его наверху отдельным предупреждением. */
 export type LimitationKind = "close-date" | "rest-dates" | "history" | "stale" | "git-limits";
 
 /** «Ограничения данных» с видом каждого пункта (порядок и текст — как в отчете). */
@@ -287,7 +273,7 @@ export function limitationItems(card: RepoCard): { kind: LimitationKind; text: s
   if (rest) out.push({ kind: "rest-dates", text: rest });
   const since = historyTruncatedSince(card);
   if (since) {
-    // Г1.7 гейта: причина не в размере репозитория — сервис читает окно истории
+    // причина не в размере репозитория: сервис читает только окно истории
     out.push({ kind: "history", text: `История коммитов загружена частично: сервис читает только недавнюю историю – с ${fmtDate(since)}.` });
   }
   if (card.markers.staleFacts) out.push({ kind: "stale", text: "Часть данных взята из прошлого анализа: источник не ответил. Оценка от этого не выросла и не снизилась." });
@@ -315,7 +301,6 @@ export const RULE_SUBMETRIC: Record<string, string> = {
   "fix-red-runs": "cicd.pass_rate",
   "speed-up-pipeline": "cicd.duration",
   "appsec-critical": "security.density",
-  // круг 2 (К6, К2): новые советы
   "appsec-high": "security.density",
   "add-tests": "code.tests",
   "start-tracker": "issues.tracker_unused",
@@ -342,7 +327,7 @@ export function sourceWord(source: string): string {
 
 /**
  * Вес показателя внутри категории — колонка «Вес» разбора PDF и таблицы
- * подметрик карточки (круг 2 части 2, Е6): одна копия. Балл категории один
+ * подметрик карточки, одна копия. Балл категории один
  * для обоих показателей, поэтому и вес подметрики один. Справочные
  * (`displayOnly`) и неизвестные — «—».
  */
@@ -353,14 +338,14 @@ export function submetricWeightText(key: CategoryKey, sub: string): string {
 }
 
 /**
- * Ступень 4 (В-1, §2 23.09): «рекомендаций нет» — по ситуации, одна фраза для
- * карточки и отчета. «Улучшать нечего» — только когда все показанные категории
- * здоровы; есть слабые — рекомендаций для них у движка нет; закрыты CI/CD и
- * Безопасность — их рекомендации видны участникам репозитория.
+ * «Рекомендаций нет» — по ситуации, одна фраза для карточки и отчета.
+ * «Улучшать нечего» — только когда все показанные категории здоровы; есть
+ * слабые — значит, у движка для них нет правил; закрыты CI/CD и Безопасность —
+ * их рекомендации видны участникам репозитория.
  */
 export function noRecommendationsKind(card: RepoCard): "healthy" | "weak" | "nodata" {
   const shown = Object.values(card.score?.categories ?? {}).filter((c) => c && c.locked === undefined);
-  // ревью кода R2: слабость — по ОКРУГЛЕННОМУ баллу, как шкала (69,6 — это «70, здоров»)
+  // слабость — по округленному баллу, как у шкалы (69,6 — это «70, здоров»)
   if (shown.some((c) => c!.score !== null && roundScore(c!.score) < 70)) return "weak";
   // нехватка данных — не «улучшать нечего» (tri-state: нет данных ≠ хорошо)
   if (shown.length === 0 || shown.some((c) => c!.score === null)) return "nodata";
@@ -368,14 +353,12 @@ export function noRecommendationsKind(card: RepoCard): "healthy" | "weak" | "nod
 }
 
 /**
- * К-4 В5.3 (§2 25.09, вариант Б): сильные и слабые стороны —
- * одной короткой строкой под заголовком «Категории» (буква ТЗ §3.4 «сильные и
- * слабые стороны»). Одна копия для карточки и MD/PDF. Только показанные
- * категории с данными (закрытые и «нет данных» не участвуют — tri-state), по
- * округленному баллу, как шкала: сильные — до 2 лучших от 70, слабые — до 2
- * худших ниже 70 (не «требует внимания»: шкала так зовет только 40-69 — закрытие В5.3); части без категорий нет. У пустого репо
- * (`codeEmpty`) строки нет: оценивать нечего. Новых баллов нет — только выбор
- * из показанных.
+ * Сильные и слабые стороны (ТЗ §3.4) одной короткой строкой под заголовком
+ * «Категории», одна копия для карточки и MD/PDF. Участвуют только показанные
+ * категории с данными (закрытые и «нет данных» — нет), по округленному баллу, как
+ * у шкалы: сильные — до 2 лучших от 70, слабые — до 2 худших ниже 70 (не «требует
+ * внимания»: шкала так называет только 40-69). Пустая часть не печатается. У
+ * пустого репо (`codeEmpty`) строки нет — оценивать нечего.
  */
 export function strengthsLine(card: RepoCard): string | null {
   const score = card.score;
@@ -407,7 +390,7 @@ export function noRecommendationsText(card: RepoCard): string {
   return card.score?.fullLocked === true ? `${head} Рекомендации по CI/CD и Безопасности видны участникам репозитория.` : head;
 }
 
-// ---------- карта владельцев файлов (В5.5 тур 2, W4, ЗН-2) ----------
+// ---------- карта владельцев файлов ----------
 
 /** Строка карты владельцев: каталог, главный автор (имя из git, без email), доля, авторов. */
 export interface OwnershipRow {
@@ -431,10 +414,10 @@ export function ownershipDirTitle(dir: string): string {
 }
 
 /**
- * Карта владельцев — ОДНА сборка для карточки и MD/PDF (инвариант «карточка =
- * отчет»): значение справочной подметрики `code.ownership` (агрегат факта и
- * признак CODEOWNERS). Нет карты (прежний сборщик, изменений за год нет,
- * данные не собраны) — null: строка подметрики сама говорит, почему.
+ * Карта владельцев — одна сборка для карточки и MD/PDF: значение справочной
+ * подметрики `code.ownership` (агрегат факта и признак CODEOWNERS). Нет карты
+ * (старый сборщик, изменений за год нет, данные не собраны) — null: строка
+ * подметрики сама говорит почему.
  */
 export function ownershipView(cat: CardCategory | undefined): OwnershipView | null {
   const value = cat?.submetrics?.["ownership"]?.value as Record<string, unknown> | null | undefined;

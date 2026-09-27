@@ -1,4 +1,4 @@
-# HealthCraft — образ сервиса (В5.4). Один образ на обе роли процесса:
+# HealthCraft — образ сервиса. Один образ на обе роли процесса:
 # роль задает PROCESS_ROLE (web | rating | all), см. deploy/compose.yaml.
 # База — тот же oven/bun, что в CI (.sourcecraft/ci.yaml): что зелено в CI, то и едет на стенд.
 FROM oven/bun:1.4.2

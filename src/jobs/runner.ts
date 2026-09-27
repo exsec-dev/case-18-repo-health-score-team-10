@@ -1,20 +1,16 @@
-// runner.ts — конвейер scan-job (Б4 В1 + В2/Б1 + В4.1/К3):
-// постановка репо → прогон коллекторов (git + REST [+ AppSec с PAT])
-// → факты со scan_id → статус/время (ТЗ: фиксация статуса и времени
-// последнего анализа). Воркер stateless: зависимости инъектятся,
-// повторный скан = новый scan. Один конвейер (В4.1): режима нет —
-// скан отличается только токеном: userToken (PAT автора) → REST и git с
-// правами юзера + AppSec-канал; иначе серверный токен, AppSec не
-// собирается. Автор пишется в scans.user_id (NULL у периодики). Статусы скана: ok = все факты ok; partial = ядро
-// собрано, но есть no-data/bad факты; bad = фатал воркера или ВСЕ
-// каналы bad-channel. no-data живёт ТОЛЬКО в фактах. repo-сигнал
-// (repo-GET 404/403) поднимается наверх для эвикции (канальные 403
-// cicd/runs — НЕ эвикция, они штатны чужим).
-// В4.1-fix (К-Ф1.1): скор-хук пишет scans.rating_eligible; мета репо из
-// REST (title/language/likes/last_activity_at/…) применяется ПОСЛЕ хука и
-// только пригодным сканом — узкий PAT не двигает ни рейтинг, ни дату
-// активности; видимость применяет любой скан, если поле есть в ответе.
-// scans.public_status (Ф1.11) — статус по фактам публичных категорий.
+// Конвейер скана: репо → коллекторы (git + REST, с PAT автора еще AppSec) →
+// факты со scan_id → статус и время последнего анализа (требование ТЗ).
+// Воркер stateless: зависимости передаются снаружи, повторный скан — новая строка scans.
+// Скан отличается только токеном: с PAT автора REST и git идут с его правами и
+// добавляется AppSec; иначе серверный токен без AppSec. Автор пишется в
+// scans.user_id (NULL у периодических сканов).
+// Статусы: ok — все факты ok; partial — ядро собрано, но есть no-data/bad;
+// bad — фатальный сбой воркера или все каналы bad-channel. no-data живет только
+// в фактах. 404/403 на GET репозитория поднимается наверх для эвикции; 403 на
+// cicd/runs чужого репо — штатная ситуация, не эвикция.
+// Мета репо из REST (title, language, likes, last_activity_at…) применяется после
+// скор-хука и только пригодным для рейтинга сканом: узкий PAT не двигает ни рейтинг,
+// ни дату активности. Видимость применяет любой скан, если поле есть в ответе.
 import type { Database } from "bun:sqlite";
 import { COLLECTOR_VERSION, encodeFactValue, Fact, noDataFact } from "../collectors/facts";
 import { cloneWithDegrade, cleanupClone, extractFacts, gitFactsNoData } from "../collectors/git";
@@ -44,27 +40,25 @@ export interface ScanDeps {
   /** лимиты клона + деградационный ярус (Config.scan: clone + degrade) */
   cloneLimits?: ScanCloneLimits;
   /** лимиты извлечения (Config.scan.extract): файлы blame, потолок текста и
-   *  СОБСТВЕННЫЙ таймаут извлечения (Ф2.19) */
+   *  собственный таймаут извлечения */
   extract?: Pick<ScanConfig["extract"], "maxBlameFiles" | "textCapBytes" | "timeoutMs">;
   /** Config.scan.extract.commentsTopN */
   commentsTopN?: number;
   /** интервал AppSec-запросов (Config.scan.rest.appsecMinIntervalMs) */
   appsecMinIntervalMs?: number;
-  /** git-URL репо (дефолт: анонимный https git-хост, контракт плана) */
+  /** git-URL репо (по умолчанию — анонимный https git-хост) */
   gitUrl?: (org: string, repo: string) => string;
-  /** git-хост (Config.api.gitBase; шов тестовых серверов, Ф1.13) */
+  /** git-хост (Config.api.gitBase); тесты подставляют свой сервер */
   gitBase?: string;
-  /** REST-хост (Config.api.restBase) — для клиента, который runScan строит сам из userToken (П3); обязателен с М7 круга 2 */
+  /** REST-хост (Config.api.restBase) — для клиента, который runScan строит сам из userToken */
   restBase: string;
-  /** AppSec-хост (Config.api.appsecBase) — для клиента по умолчанию (П3, Н2); обязателен с М7 круга 2 */
+  /** AppSec-хост (Config.api.appsecBase) — для клиента по умолчанию */
   appsecBase: string;
   /** швы для тестов: подмена каналов целиком */
   collectGit?: (org: string, repo: string, limits: ScanCloneLimits) => Promise<GitChannelOutcome>;
   collectRest?: (slug: string) => Promise<RestCollectResult>;
-  /** шов AppSec-сбора (тесты без сети; К-Р15 — bucket/attempts для status_detail) */
+  /** шов AppSec-сбора для тестов без сети; bucket/attempts идут в status_detail */
   collectAppsec?: (rest: ScClient, appsec: AppsecClient, slug: string) => Promise<{ fact: Fact | null; noData: { reason: string; detail: string; bucket?: string; attempts?: number } | null }>;
-  // В5.2 (Б3): шов авто-генерации в окне скана (summaryAutoRun) удален вместе с
-  // автообновлением по оп-ину; топ рейтинга — такт обслуживания (topAutoTick)
 }
 
 export interface ScanOptions {
@@ -83,24 +77,23 @@ export interface ScanResult {
   finishedAt: string;
   counts: { ok: number; noData: number; bad: number };
   channels: { git: string; rest: string; appsec: string };
-  /** repo-GET 404/403 токена скана; эвикция — только у сканов без автора (К3); канальные 403 тут ни при чём */
+  /** 404/403 на GET репозитория токеном скана; эвикция — только у сканов без автора; канальные 403 тут ни при чем */
   repoAccess: "ok" | "gone" | "unknown";
-  /** score-hook итог (null = хук не смог — факты записаны, скан не роняется); полный Score — дериватив, в БД не хранится (В4.3) */
+  /** итог скор-хука (null — хук не смог, факты записаны, скан не роняется); полный Score — производное, в БД не хранится */
   score: { healthcraftIndex: number | null; indexCoverage: number; repoHealthScore: number | null; repoHealthCoverage: number } | null;
-  /** скан пригоден для рейтинга (К-Ф1.1): записан хуком в scans.rating_eligible */
+  /** скан пригоден для рейтинга (записан хуком в scans.rating_eligible) */
   ratingEligible: boolean;
   elapsedMs: number;
-  /** В4.8.5 (К8.5.12): скор-хук упал — скан закрыт `bad` (score_failed), задание — failed */
+  /** скор-хук упал — скан закрыт `bad` (score_failed), задание — failed */
   scoreFailed?: boolean;
 }
 
 const DEFAULT_GIT_BASE = "https://git.sourcecraft.dev";
 
 /**
- * Git-URL скана/генерации: с PAT — креды в URL (существуют только внутри
- * процесса, stderr скраббится), без — анонимный `git`-юзер. Общий для
- * scan-job и summary-job (В5). user-info добавляется только на http(s):
- * file:// (тесты, локальный дев) кредов не несёт.
+ * Git-URL для скана и генерации обзора: с PAT — креды в URL (живут только внутри
+ * процесса, stderr git вычищается), без PAT — анонимный пользователь `git`.
+ * Креды добавляются только для http(s): file:// (тесты, локальная разработка) их не несет.
  */
 export function scanGitUrl(gitBase: string, pat: string | null, org: string, repo: string): string {
   const u = new URL(`${gitBase.replace(/\/+$/, "")}/${org}/${repo}.git`);
@@ -118,18 +111,16 @@ export function scanGitUrl(gitBase: string, pat: string | null, org: string, rep
 const anonGitUrl = (base: string, org: string, repo: string) => scanGitUrl(base, null, org, repo);
 
 /**
- * Git-URL скана с PAT (дока PAT: `git clone https://anyname:<PAT>@…`):
- * свой репо бывает приватным — анонимный клон падает с Authentication
- * failed (найдено живой приёмкой В4: наш репо приватный). Креды в URL
- * существуют только внутри процесса; stderr git скраббится (git.ts).
+ * Git-URL скана с PAT (формат из доки SourceCraft: `git clone https://anyname:<PAT>@…`):
+ * свой репо бывает приватным, и анонимный клон падает с Authentication failed.
  */
 const patGitUrl = (base: string, pat: string, org: string, repo: string) => scanGitUrl(base, pat, org, repo);
 
 /**
- * Причина no-data git-канала при неудачном клоне (круг 2, С5): limits —
- * только свойство репо: пробой диск-бюджета или таймаут периодического
- * скана; таймаут скана по PAT юзера (медленный/троттлимый токен) и ошибка
- * git — other.
+ * Причина no-data git-канала при неудачном клоне. limits — только свойство
+ * самого репо: пробой дискового бюджета или таймаут периодического скана.
+ * Таймаут скана по PAT пользователя (токен мог быть медленным или
+ * троттлиться) и ошибка git — other.
  */
 export function gitFailureReason(cloneReason: "timeout" | "disk" | "git", userScan: boolean): "limits" | "other" {
   if (cloneReason === "disk") return "limits";
@@ -149,9 +140,9 @@ export interface RepoUpsertMeta {
   lastActivityAt?: string | null;
   forks?: number | null;
   reactionCounts?: { type: string; count: number }[] | null;
-  /** явно переданная видимость; БЕЗ ключа (или null) существующая строка не трогается
-   *  (живая приёмка В4: upsert без меты перезаписывал 'private' на 'public');
-   *  новая строка без видимости — 'private' до подтверждения (Ф1.10, fail-closed) */
+  /** явно переданная видимость; без ключа (или null) у существующей строки она не
+   *  меняется, иначе upsert без меты перезаписал бы 'private' на 'public'.
+   *  Новая строка без видимости — 'private' до подтверждения (fail-closed) */
   visibility?: string | null;
   /** logo.url платформы (дисплей); null не затирает сохранённый */
   logoUrl?: string | null;
@@ -160,9 +151,8 @@ export interface RepoUpsertMeta {
 }
 
 export function upsertRepo(db: Database, org: string, repo: string, meta: RepoUpsertMeta = {}): number {
-  // Ф1.10 (fail-closed): новая строка без видимости — 'private' до подтверждения
-  // явным полем платформы; UPDATE-ветка меняет visibility ТОЛЬКО когда мета
-  // принесла значение
+  // fail-closed: новая строка без видимости — 'private' до подтверждения явным
+  // полем платформы; UPDATE меняет visibility только когда мета принесла значение
   const hasVisibility = typeof meta.visibility === "string" && meta.visibility !== "";
   const updateVisibility = hasVisibility ? "visibility = excluded.visibility," : "";
   db.query(
@@ -197,11 +187,10 @@ export function upsertRepo(db: Database, org: string, repo: string, meta: RepoUp
 }
 
 /**
- * Аварийный fallback ДОПОЛНЯЕТ набор, но НЕ затирает уже собранные
- * факты того же kind (insertFacts пишет INSERT OR REPLACE по PK
- * scan_id+category+key). ERROR_LOG 16.09: сбой уборки клона после
- * успешного extractFacts подменял живые git-факты на no-data и
- * обнулял Score репозитория.
+ * Аварийный fallback дополняет набор, но не затирает уже собранные факты того
+ * же kind: insertFacts пишет INSERT OR REPLACE по PK scan_id+category+key, и
+ * сбой уборки клона после успешного extractFacts иначе подменил бы живые
+ * git-факты на no-data и обнулил Score.
  */
 export function fillMissingFacts(collected: Fact[], fallback: Fact[]): Fact[] {
   const have = new Set(collected.map((f) => f.key));
@@ -214,10 +203,9 @@ function insertFacts(db: Database, scanId: number, facts: Fact[]): void {
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
   );
   for (const f of facts) {
-    // В4.4 (кластер C): timeline пишется сжатым (z:-префикс); чтение
-    // прозрачно по префиксу, остальные kinds — как были. Круг 2: сжатие
-    // только у ok-значений — no-data едет plain JSON (его читают сырым
-    // парсером и json_extract: карточка и правило пригодности)
+    // timeline пишется сжатым (префикс z:), чтение распознает префикс. Сжимаются
+    // только ok-значения: no-data остается обычным JSON, его читают сырым
+    // парсером и json_extract (карточка, правило пригодности)
     stmt.run(scanId, f.category, f.key, encodeFactValue(f.key, f.value, f.status), f.status, f.source, f.collectedAt);
   }
 }
@@ -239,15 +227,15 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
 
   const limits = deps.cloneLimits ?? scanCloneLimitsOf(DEFAULT_SCAN);
   const extract = deps.extract ?? DEFAULT_SCAN.extract;
-  // скан с PAT → клон с кредами (депс-шов остаётся главнее для тестов)
+  // скан с PAT → клон с кредами (тестовый шов deps.gitUrl главнее)
   const gitBase = deps.gitBase ?? DEFAULT_GIT_BASE;
   const gitUrlOf =
     deps.gitUrl ??
     (userToken ? (org: string, repo: string) => patGitUrl(gitBase, userToken, org, repo) : (org: string, repo: string) => anonGitUrl(gitBase, org, repo));
   const repoId = upsertRepo(deps.db, org, repo);
   const scan = deps.db
-    // В5.3-М (Н1): штамп версии сборщика — по нему ночная волна доочередит
-    // репо, чьи факты собраны старым сборщиком
+    // версия сборщика: по ней ночная волна доставит в очередь репо, чьи факты
+    // собраны старым сборщиком
     .query("INSERT INTO scans (repo_id, started_at, status, public_status, trigger, user_id, collector_version) VALUES (?, ?, 'running', 'running', ?, ?, ?)")
     .run(repoId, startedAt, opts.trigger ?? "probe", opts.userId ?? null, COLLECTOR_VERSION);
   const scanId = Number(scan.lastInsertRowid);
@@ -258,25 +246,20 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
   let repoAccess: ScanResult["repoAccess"] = "unknown";
   let workerFatal: string | null = null;
   const facts: Fact[] = [];
-  // мета репо буферизуется до скор-хука (К-Ф1.1)
+  // мета репо ждет скор-хука: применяется только пригодным сканом
   let repoMeta: RestCollectResult["repoMeta"] = null;
-  // В5 (Б1, именованная правка — спека §3.4): окно клона продлено под
-  // агентную стадию. Раньше `cleanupClone` стоял в `finally` сразу после
-  // `extractFacts`; теперь клон живёт до конца скана — авто-генерация
-  // summary (оп-ин) исполнялась в том же окне, инструменты агента читали
-  // один и тот же клон (В5.2 Б3: авто-генерация и оп-ин удалены, обзор — своя
-  // заявка со своим клоном). Уборка — в `finally` ниже, сбой — по-прежнему fail-soft.
+  // клон живет до конца скана и убирается в `finally` ниже (fail-soft)
   let cloneDir: string | null = null;
 
-  // REST-клиент (К3): userToken → PAT автора (шов или новый клиент),
-  // иначе серверный; ни того ни другого → REST честно no-data(access)
+  // REST-клиент: с userToken — клиент PAT автора, иначе серверный;
+  // нет ни того ни другого — REST-факты no-data(access)
   const restClient: ScClient | null = userToken
-    ? // П3: без baseUrl клиент уходил на боевой REST-хост в обход шва Ф1.13
+    ? // baseUrl из конфига обязателен: без него клиент ушел бы на боевой хост мимо тестового сервера
       (deps.userScClient ?? makeScClient({ token: userToken, baseUrl: deps.restBase, minIntervalMs: DEFAULT_SCAN.rest.minIntervalMs }))
     : deps.scClient;
 
   try {
-    // --- git-канал (с деградационным ярусом §5.7; тогл конфига — одна попытка) ---
+    // --- git-канал (с деградационным ярусом; если он выключен в конфиге — одна попытка) ---
     try {
       if (deps.collectGit) {
         const out = await deps.collectGit(org, repo, limits);
@@ -293,25 +276,22 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
                 ...(await extractFacts(clone.dir, {
                   maxBlameFiles: extract.maxBlameFiles,
                   textCapBytes: extract.textCapBytes,
-                  // Ф2.19: свой бюджет извлечения. Раньше сюда ехал
-                  // `degrade.timeoutMs`, и выключение деградационного яруса
-                  // молча меняло дедлайн разбора клона
+                  // свой бюджет извлечения, не `degrade.timeoutMs`: иначе выключение
+                  // деградационного яруса молча меняло бы дедлайн разбора клона
                   deadlineMs: extract.timeoutMs,
                   historyTruncatedSince: clone.historyTruncatedSince ?? undefined,
                   out: headBox,
                 })),
               );
             } catch (e) {
-              // извлечение упало до открытия окна — уборка на месте (прежняя
-              // семантика `finally`), окно не открывается
+              // извлечение упало — клон убирается сразу, дальше он не нужен
               const cleanupError = cleanupClone(clone.dir);
               if (cleanupError) console.error(`[scan ${scanId}] cleanup ${clone.dir}: ${cleanupError}`);
               throw e;
             }
             cloneDir = clone.dir;
-            // В5 (Б1): транспорт head_sha — колонка пишется сразу после
-            // extractFacts (строка scans уже существует); сбой записи —
-            // fail-soft: колонка честно останется NULL, канал не роняется
+            // head_sha пишется сразу после extractFacts; сбой записи fail-soft:
+            // колонка останется NULL, канал не роняется
             if (headBox.headSha) {
               try {
                 deps.db.query("UPDATE scans SET head_sha = ? WHERE id = ?").run(headBox.headSha, scanId);
@@ -356,8 +336,8 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
     if (restRepoMeta && typeof restRepoMeta.visibility === "string") {
       upsertRepo(deps.db, org, repo, { visibility: restRepoMeta.visibility });
     }
-    // repo-сигнал эвикции: ТОЛЬКО ресурс repo (404/403 = репо пропал);
-    // канальные 403 (cicd/runs чужих) — штатны и эвикцией не являются
+    // сигнал эвикции — только ресурс repo (404/403 = репо пропал);
+    // 403 на cicd/runs чужого репо штатен и эвикцией не является
     const repoErr = restChannelErrors.find((e) => e.resource === "repo");
     repoAccess = repoErr
       ? repoErr.status === 404 || repoErr.status === 403
@@ -369,14 +349,14 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
           ? "unknown"
           : "ok";
 
-    // --- AppSec-канал (только с PAT автора: право даёт PAT, не публичность).
-    // Скан без PAT факт не пишет — compute берёт последний ok-факт из
-    // более раннего скана с PAT (фолбэк каналов, К1)
+    // --- AppSec-канал: только с PAT автора, право дает PAT, а не публичность репо.
+    // Скан без PAT факт не пишет — compute берет последний ok-факт из
+    // более раннего скана с PAT
     if (userToken && restClient) {
       const collect = deps.collectAppsec ?? collectAppsec;
       const appsec = deps.appsecClient
         ? deps.appsecClient(userToken)
-        : // П3 (Н2): тот же класс дефекта — адрес AppSec только из конфига
+        : // адрес AppSec — только из конфига, как и у REST-клиента выше
           makeAppsecClient({ token: userToken, baseUrl: deps.appsecBase, minIntervalMs: deps.appsecMinIntervalMs ?? DEFAULT_SCAN.rest.appsecMinIntervalMs });
       const out = await collect(restClient, appsec, slug);
       if (out.fact) {
@@ -385,10 +365,9 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
       } else {
         appsecChannel = `no-data(${out.noData?.reason ?? "other"})`;
         facts.push(noDataFact("appsec.findings", (out.noData?.reason as "access" | "no-scan" | "incomplete") ?? "other", "appsec:api", out.noData?.detail ?? "", startedAt));
-        // К-Р15 (круг 2): после исчерпания ретраев корзины причина «почему
-        // данных нет» фиксируется в status_detail скана и доезжает до noData
-        // карточки по каналу причин (факт); счёт скоринга не тронут — частичная
-        // Security-выборка может только льстить скору (К-Ф2.6), no-data честно
+        // ретраи корзины исчерпаны: причина пишется в status_detail скана и через
+        // факт доходит до карточки. В счет частичная выборка Security не идет —
+        // она могла бы только льстить оценке, поэтому no-data
         if (out.noData?.reason === "incomplete" && out.noData.bucket !== undefined) {
           deps.db
             .query("UPDATE scans SET status_detail = ? WHERE id = ?")
@@ -400,9 +379,9 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
     workerFatal = String((e as Error).message).slice(0, 200);
   }
 
-  // --- хвост скана: факты → статус → скор-хук. Клон (окно В5) убирается
-  // при ЛЮБОМ исходе — закон 3 «код не храним»; сбой уборки — fail-soft
-  // (ERROR_LOG 16.09: EBUSY рушил успешно собранный канал) ---
+  // --- хвост скана: факты → статус → скор-хук. Клон убирается при любом
+  // исходе — код репозиториев не храним. Сбой уборки fail-soft: EBUSY при
+  // удалении не должен ронять успешно собранный канал ---
   const cleanupWindow = (): void => {
     if (cloneDir === null) return;
     const dir = cloneDir;
@@ -422,7 +401,7 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
     // «ядро» скана = ok-факты хотя бы из одного канала; ни одного ok-факта
     // (все каналы bad-channel или всё no-data) — ядра нет, скан bad
     const status: ScanResult["status"] = scanStatusOf(facts, workerFatal !== null);
-    // тот же алгоритм на фактах публичных категорий (Ф1.11): статус без каналов
+    // тот же алгоритм на фактах публичных категорий: статус без приватных каналов
     const publicStatus = scanStatusOf(
       facts.filter((f) => PUBLIC_KINDS.includes(f.key)),
       workerFatal !== null,
@@ -430,15 +409,10 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
 
     const finishedAt = new Date().toISOString();
 
-    // --- score-hook (В2/Б5): конец скана → compute + recommend.
-    // К-Ф1.1: пригодность — по фактам скана; оценка, рекомендации, флаг
-    // пригодности и мета репо — одной транзакцией.
-    // В4.8.5 (К8.5.12, С10-1): финальный СТАТУС скана пишется в той же
-    // транзакции. Раньше статус коммитился до хука, и упавший хук (BUSY,
-    // исключение в compute) или гибель процесса между ними оставляли «скан
-    // `ok` без оценки»: задание `done`, тост «Анализ завершен», оценка прежняя.
-    // Теперь упавший хук закрывает скан `bad` с причиной `score_failed`, а
-    // задание — `failed` с причиной «не удалось посчитать оценку».
+    // --- скор-хук: compute + recommend. Статус скана, оценка, рекомендации, флаг
+    // пригодности и мета репо пишутся одной транзакцией: иначе упавший хук (BUSY,
+    // исключение в compute) или гибель процесса оставили бы «скан ok без оценки».
+    // Упавший хук закрывает скан `bad` с причиной `score_failed`, задание — failed.
     let scoreSummary: ScanResult["score"] = null;
     let eligible = false;
     let scoreFailed = false;
@@ -452,8 +426,7 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
         writeRecommendations(deps.db, scanId, scores.modelVersion, recs);
         deps.db.query("UPDATE scans SET rating_eligible = ? WHERE id = ?").run(eligible ? 1 : 0, scanId);
         if (eligible && repoMeta) upsertRepo(deps.db, org, repo, repoMetaToUpsert(repoMeta));
-        // В4.4 (кластер A): скан только что получил оценки — водяной знак
-        // батчевого прохода не должен из-за него висеть «недогнанным»
+        // скан уже получил оценки — курсор пакетного пересчета сдвигается за него
         bumpRescoreCursor(deps.db, scanId);
       })();
       scoreSummary = { healthcraftIndex: scores.healthcraftIndex, indexCoverage: scores.indexCoverage, repoHealthScore: scores.repoHealthScore, repoHealthCoverage: scores.repoHealthCoverage };
@@ -466,7 +439,7 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
           .query("UPDATE scans SET status = 'bad', public_status = 'bad', finished_at = ?, status_detail = 'score_failed', rating_eligible = 0 WHERE id = ?")
           .run(finishedAt, scanId);
       } catch (closeError) {
-        // скан остаётся `running` — его закроет свип сирот (К8.5.2b), задание — failed ниже
+        // скан остается `running` — его закроет уборка сирот, задание — failed ниже
         console.error(`[scan ${scanId}] closing after score hook failure failed: ${String((closeError as Error).message).slice(0, 200)}`);
       }
     }
@@ -490,7 +463,7 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
   }
 }
 
-/** Мета REST → upsert; видимость без значения не передаётся ключом (Ф1.10). */
+/** Мета REST → upsert; видимость без значения не передается ключом, чтобы не затереть сохраненную. */
 export function repoMetaToUpsert(meta: NonNullable<RestCollectResult["repoMeta"]>): RepoUpsertMeta {
   return {
     title: meta.title,

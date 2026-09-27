@@ -1,7 +1,7 @@
-// v53-round3.test.ts — В5.3, круг 3 (UI новых элементов В5): поведенческие
-// тесты на данных. О1 (дизайн-аудит 24.09, critical): история и AI-заметки
-// проверяли права с `id: 0`, кэш прав общий на все репо — после показа своего
-// репо чужой получал его права (Repo Health Score в истории, AI-текст).
+// UI истории оценки и AI-заметок: поведенческие тесты на данных. Права
+// проверяются по настоящему id репо: при общем на все репо кэше прав чужой
+// репо после показа своего получил бы его права (Repo Health Score в истории,
+// AI-текст).
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -71,7 +71,7 @@ describe("В5.3 О1: права истории и AI-заметок — по с�
     expect(other.fullOpen).toBe(false);
     expect(other.points.length).toBeGreaterThan(0);
     expect(other.points.every((p) => p.repoHealthScore === null)).toBe(true);
-    // В5.2 (Б2): чужой публичный — публичная версия текстов, полная не открывается кэшем прав
+    // чужой публичный – публичная версия текстов, полная не открывается кэшем прав
     const notes = await get("/api/repos/v53/other/ai-notes");
     expect(notes.status).toBe(200);
     expect(((await notes.json()) as { audience: string }).audience).toBe("public");
@@ -82,7 +82,7 @@ describe("В5.3 О1: права истории и AI-заметок — по с�
   });
 });
 
-// ---------- круг 3: поведенческие тесты на данных (AGENTS.md 21.09/23.09) ----------
+// ---------- поведенческие тесты на данных ----------
 import { publicBaseUrlFromEnv } from "../src/config";
 import { renderBadgeSvg } from "../src/api/public";
 import { getRepoHistory } from "../src/api/history";
@@ -190,7 +190,7 @@ describe("В5.3 круг 3: абзацы AI-текста — одна функц
   });
 });
 
-// ---------- В5.3: окно «Добавить в избранное» (вариант A, аудит 25.09) ----------
+// ---------- окно «Добавить в избранное» ----------
 import { listSourcecraftRepos } from "../src/api/me";
 import type { ScClient } from "../src/collectors/http";
 
@@ -229,11 +229,8 @@ describe("В5.3: список репозиториев токена — все �
   });
 });
 
-// ---------- В5.3 (25.09): автообновление обзора — явное выключение не перебивается кнопкой ----------
+// ---------- bus factor – справочная подметрика ----------
 import { displayOnly } from "../src/report/submetrics";
-
-// В5.2 (Б3): автообновление по оп-ину удалено — тест «кнопка включает автообновление» снят
-// вместе с модулем summary/optin.ts (§2 «В5.2 — публичный AI-обзор…» п.3)
 
 describe("В5.3: bus factor — без веса методики, показывается как справочная подметрика", () => {
   test("displayOnly(activity.bus_factor) — да", () => {
@@ -241,7 +238,7 @@ describe("В5.3: bus factor — без веса методики, показыв
   });
 });
 
-// ---------- В5.3 (25.09): анализ internal-репо по доступу к коду; AI-обзор — только при полном Score ----------
+// ---------- анализ internal-репо по доступу к коду; AI-обзор – только при полном Score ----------
 import { isOwnRepo } from "../src/auth/access";
 
 describe("В5.3: «свой» — и internal, видимый токену", () => {
@@ -255,7 +252,7 @@ describe("В5.3: «свой» — и internal, видимый токену", () 
   });
 });
 
-// ---------- В5.3 (25.09): права, сохраненные до смены правила, читаются по текущему правилу ----------
+// ---------- права, сохраненные до смены правила, читаются по текущему правилу ----------
 import { savedAccessWithCurrentRule } from "../src/api/me";
 
 describe("В5.3: «свой» в сохраненных правах пересчитывается при чтении", () => {

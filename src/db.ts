@@ -1,46 +1,11 @@
-// db.ts — SQLite (bun:sqlite) — единственный стор: кэш собранных
-// данных + история сканов + очередь jobs + scores/recommendations +
-// (v1.4, В4) пользователи Я ID/сессии/PAT/настройки. Tri-state в
-// NULL-семантике: score NULL = «нет данных» (не «плохо»).
-// Схема v1.2 (В2/Б1): repos += forks/reaction_counts; scores —
-// immutable строки (scan_id+model_version PK, INSERT OR REPLACE);
-// recommendations — PK (scan_id, model_version, rule_id). Старые
-// формы scores/recommendations (v1.1) пересоздаются (производные
-// данные, пересчёт восстанавливает); repos-колонки добавляются
-// ALTER'ом (каталог не теряется).
-// Схема v1.3 (В3/Б1): scores += derived (JSON DerivedMetrics) —
-// аддитивный ALTER, чтобы страница репо показывала те же производные
-// числа, из которых посчитан Score этой строки, не вызывая compute.
-// Схема v1.4 (В4): users/sessions/user_tokens/user_settings; repos +=
-// rating_active (эвикция — не удаление, закон 6) и visibility;
-// jobs += mode/user_id (own-сканы с юзерским PAT); scores +=
-// code_empty (Score 0 «проекта нет» — данные, не NULL).
-// Схема v1.5 (В4.1, К1/К3): один анализ — одна строка оценки с двумя
-// итогами (total_rating/coverage_rating — 4 категории; total_full/
-// coverage_full — 6 категорий); колонок mode/total/coverage нет.
-// scores/recommendations — производные таблицы: старая форма
-// пересоздаётся, затем пересчёт scripts/rescore-m4.ts (прецедент
-// v1.1→v1.2). recommendations += channel; scans += user_id (автор скана).
-// В4.1-fix (К-Ф1.1, Ф1.11, Ф1.12): scans += rating_eligible (пригодность
-// для рейтинга: рейтинг и публичная часть карточки — последний пригодный
-// скан) и public_status (статус по фактам публичных категорий — без
-// каналов CI/Security); обе колонки при добавлении заполняются одним
-// UPDATE по фактам; индексы scans(repo_id, id) и jobs(status, claimed_at).
-// Схема v1.6 (В4.1-fix, Ф1.9): таблица meta(key, value) — schema_version
-// (пишется и проверяется: БД новее кода → отказ открыть, защита от старого
-// процесса на мигрированной БД) и derived_version (src/score/rescore.ts);
-// jobs.mode убран из DDL и миграций (Ф1.15; в старых БД колонка остаётся,
-// не читается); jobs.status += refused.
-// Схема v1.7 (В4.2-port-fix, П8): портовые объекты — favorites и jobs.error —
-// получили свою версию схемы (порты меняли схему под версией 1.6), а
-// setMetaValue(schema_version) переехал ПОСЛЕ всех DDL и ensureColumn.
-// Схема v1.9 (В4.3): scores — производная таблица публичного индекса
-// (healthcraft_index/index_coverage); полный итог не хранится.
-// Схема v2.0 (В5, Б1): ai_notes — ЕДИНСТВЕННАЯ невосстановимая таблица
-// (тексты LLM, append на скан — исходная, не производная; входит в
-// бэкап-дисциплину наравне с facts); scans.head_sha (git-коллектор знает HEAD —
-// честная привязка «на каком коммите измерено»); jobs.kind ('scan' | 'summary',
-// дефолт 'scan' — старые строки не тронуты). Миграция аддитивная, процедура 1.3.
+// SQLite (bun:sqlite) — единственное хранилище: собранные факты, история
+// сканов, очередь заданий, оценки и рекомендации, пользователи Я ID, сессии,
+// PAT и AI-тексты. Tri-state в NULL-семантике: оценка NULL = «нет данных», а не
+// «плохо».
+// Производные таблицы (scores, recommendations) при смене формы пересоздаются,
+// строки восстанавливает пересчет из facts. Остальное мигрирует только
+// аддитивно; ai_notes — единственная невосстановимая таблица (тексты LLM),
+// ее бэкап так же важен, как бэкап facts.
 import { Database } from "bun:sqlite";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -49,40 +14,15 @@ import { PAT_V2_PREFIX, reencryptPat } from "./auth/pat";
 import { publicStatusSql, ratingEligibleSql } from "./score/compute";
 
 /**
- * Версия схемы этого кода (Ф1.9): meta.schema_version.
- * 1.7 (В4.2-port-fix, П8/LOW-2): порты изменили схему, не подняв версию —
- * `favorites` и `jobs.error` появились при версии 1.6, и страж «БД новее
- * кода» к портовой миграции был слеп.
- * 1.8 (В4.2a): `scans.status_detail` (Ф2.2 — причина закрытия осиротевшего
- * скана) и пересборка индексов `jobs` в транзакции (Ф2.11).
- * 1.9 (В4.3, Ф3.2/Ф3.3): `scores` хранит ТОЛЬКО публичный показатель —
- * `healthcraft_index`/`index_coverage` (HealthCraft Index, 4 категории);
- * сохранённого полного итога (total_full/coverage_full) и JSON markers нет —
- * полный Repo Health Score — дериватив показанных категорий, считается на
- * чтении. Таблица производная: миграция пересоздаёт её пустой, строки
- * восстанавливает rescoreAll из facts; старые totals не копируются как
- * источник.
- * 2.0 (В5, Б1): `ai_notes` (append-история LLM-текстов: строка на роль на
- * скан, не upsert — пользователь видит эволюцию взглядов; единственная
- * исходная невосстановимая таблица проекта), `scans.head_sha`,
- * `jobs.kind`. Всё аддитивно, данных не теряет.
- * 2.1 (23.09, Алексей): `ai_fails` — честный отказ роли: причина
- * несформирования показывается пользователю, а не молчит в логах.
- * 2.2 (24.09, В5.3-М, Н1): `scans.collector_version` — версия сборщика фактов
- * (`COLLECTOR_VERSION`); старые строки — NULL («до учета»). Аддитивно.
- * 2.3 (25.09, В5.2, Б2): `ai_notes.audience`, `ai_fails.audience`, `jobs.audience`
- * ('public' | 'full', прежние строки — 'full') — публичный AI-обзор из публичных
- * фактов хранится отдельно от полного; `users.ai_unlock` — отпечаток пароля
- * неограниченного доступа к AI (Б4; NULL — отметки нет); `jobs.ai_unlocked` — заявка
- * поставлена с паролем (общий лимит ее не считает). Аддитивно.
- * 2.4 (26.09, В5.5 тур 1, W2): `rating_snapshots` — снимок мест публичного
- * рейтинга на UTC-дату (динамика позиции, rankDelta в строке рейтинга).
- * Производная таблица чисел (repo_id → место), код репозиториев не участвует
- * (закон «код не храним» не задет). Аддитивно.
+ * Версия схемы этого кода, хранится в meta.schema_version. Поднимается при
+ * любом изменении схемы: по ней процесс со старым кодом отказывается открывать
+ * БД, мигрированную более новым, а одноразовые миграции понимают, что переход
+ * еще не выполнялся. ai_notes — append-история: строка на роль на скан, не
+ * upsert, чтобы было видно, как менялись выводы.
  */
 export const SCHEMA_VERSION = "2.4";
 
-/** Аудитория AI-текста (В5.2, Б2): публичная версия — из публичных фактов, для всех. */
+/** Аудитория AI-текста: public — из одних публичных фактов, видна всем; full — по всем фактам скана. */
 export type AiAudience = "public" | "full";
 export const AI_AUDIENCES: readonly AiAudience[] = ["public", "full"];
 
@@ -298,17 +238,17 @@ export function setMetaValue(db: Database, key: string, value: string): void {
   db.query("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, value);
 }
 
-/** Дефолт ожидания блокировки на соединении (был литералом здесь). З5 круга 2
- *  В4.4: поднявший 15 с проход рескора обязан восстанавливать этот дефолт —
- *  контракт SIGTERM «≤ 5 с» иначе нарушаем. */
+/** Дефолт ожидания блокировки на соединении. Проход рескора, поднимающий его
+ *  до 15 с, обязан вернуть этот дефолт — иначе процесс не уложится в 5 с на
+ *  завершение по SIGTERM. */
 export const DB_BUSY_TIMEOUT_MS = 5_000;
 
 export function openDb(config: Config): Database {
   mkdirSync(config.dataDir, { recursive: true });
   const db = new Database(join(config.dataDir, "repo-health.db"), { create: true });
   db.exec(`PRAGMA busy_timeout = ${DB_BUSY_TIMEOUT_MS};`);
-  // Ф1.9: БД мигрирована более новым кодом — этот процесс её не трогает
-  // (сценарий «старый процесс на той же БД», инцидент 16.09)
+  // БД мигрирована более новым кодом — этот процесс ее не трогает
+  // (старый процесс, оставшийся работать на той же БД)
   const stored = getMetaValue(db, "schema_version");
   if (stored !== null && compareVersions(stored, SCHEMA_VERSION) > 0) {
     db.close();
@@ -317,25 +257,19 @@ export function openDb(config: Config): Database {
     );
   }
   db.exec("PRAGMA journal_mode = WAL;");
-  // В4.4 (кластер A, Прод-С3 код-аудита): вся миграция — ОДНА транзакция
-  // (DDL в SQLite транзакционен). Параллельный старт двух ролей на переходе
-  // версии больше не может оставить базу полумигрированной: либо все DDL и
-  // schema_version, либо ничего. PRAGMA journal_mode — снаружи (в транзакции
-  // no-op); вложенные db.transaction (П11, Ф2.11) становятся сейвпоинтами.
-  // В5.4 (живой старт стенда 26.09): транзакция IMMEDIATE — блокировка записи берется на BEGIN и
-  // ждет busy_timeout. Отложенная (deferred) читала схему, а запись schema_version после чужого
-  // коммита получала SQLITE_BUSY без ожидания (устаревший снимок) — роль rating падала на старте.
+  // Вся миграция — одна транзакция (DDL в SQLite транзакционен): параллельный
+  // старт двух ролей не оставит базу полумигрированной — либо все DDL и
+  // schema_version, либо ничего. PRAGMA journal_mode — снаружи (в транзакции это
+  // no-op); вложенные db.transaction становятся сейвпоинтами.
+  // Транзакция IMMEDIATE: блокировка записи берется на BEGIN и ждет busy_timeout.
+  // С отложенной (deferred) запись schema_version после чужого коммита получала
+  // SQLITE_BUSY без ожидания (устаревший снимок), и вторая роль падала на старте.
   const migrate = db.transaction(() => {
     db.exec(SCHEMA);
-    // v1.1 → v1.2: repos-колонки В2 (forks/reaction_counts)
     ensureColumn(db, "repos", "forks", "INTEGER");
     ensureColumn(db, "repos", "reaction_counts", "TEXT");
-    // старые формы производных таблиц пересоздаются: v1.1 scores был
-    // PK(scan_id) + formula_version; v1.1 recommendations — без model_version.
-    // v1.9 (В4.3, Ф3.2): scores без healthcraft_index (включая формы с
-    // сохранённым total_rating/total_full вплоть до 1.8) пересоздаётся —
-    // производная таблица, строки восстанавливает rescoreAll из facts;
-    // старые totals источником не служат (полный итог — дериватив показа).
+    // Старые формы производных таблиц пересоздаются пустыми, строки
+    // восстанавливает rescoreAll из facts; старые итоги источником не служат.
     if (!columnsOf(db, "scores").has("healthcraft_index")) {
       db.exec("DROP TABLE IF EXISTS scores");
       db.exec(SCORES_DDL);
@@ -344,81 +278,58 @@ export function openDb(config: Config): Database {
       db.exec("DROP TABLE IF EXISTS recommendations");
       db.exec(RECOMMENDATIONS_DDL);
     }
-    // v1.2 → v1.3: derived-метрики строки скоров (NULL у строк старых
-    // прогонов — пересчёт scripts/score.ts заполняет последний скан)
+    // derived у строк старых прогонов — NULL, пересчет заполняет последний скан
     ensureColumn(db, "scores", "derived", "TEXT");
-    // v1.4 → v1.5 (В4.1): recommendations с каналом — производная таблица,
-    // пересоздаётся (данные восстанавливает rescore-m4.ts)
     if (!columnsOf(db, "recommendations").has("channel")) {
       db.exec("DROP TABLE IF EXISTS recommendations");
       db.exec(RECOMMENDATIONS_DDL);
     }
     ensureColumn(db, "scans", "user_id", "INTEGER");
-    // В4.1-fix (К-Ф1.1): пригодность — тем же правилом, что скор-хук, одним UPDATE
+    // новые колонки сразу заполняются тем же правилом, что пишет скор-хук
     if (ensureColumn(db, "scans", "rating_eligible", "INTEGER NOT NULL DEFAULT 0")) {
       db.exec(`UPDATE scans SET rating_eligible = CASE WHEN ${ratingEligibleSql("scans")} THEN 1 ELSE 0 END`);
     }
-    // В4.1-fix (Ф1.11): публичный статус по фактам
     if (ensureColumn(db, "scans", "public_status", "TEXT")) {
       db.exec(`UPDATE scans SET public_status = ${publicStatusSql("scans")}`);
     }
-    // v1.8 (В4.2a, Ф2.2): чем закрыт скан, если закрыт не собой — 'orphaned'
     ensureColumn(db, "scans", "status_detail", "TEXT");
-    // v2.0 (В5, Б1): привязка скана к коммиту; kind заявки (старые строки — 'scan')
     ensureColumn(db, "scans", "head_sha", "TEXT");
-    // v2.2 (В5.3-М, Н1): версия сборщика скана; старые строки — NULL («до учета»)
+    // у старых сканов версия сборщика неизвестна — NULL
     ensureColumn(db, "scans", "collector_version", "INTEGER");
     ensureColumn(db, "jobs", "kind", "TEXT NOT NULL DEFAULT 'scan'");
-    // v2.3 (В5.2, Б2): аудитория AI-текста — 'public' (только публичные факты, видят
-    // все) | 'full' (все факты скана, только зрителю с полным Score); прежние строки —
-    // 'full' (сгенерированы по всем фактам). Отметка пароля неограниченного доступа (Б4).
+    // старые AI-тексты сгенерированы по всем фактам — отсюда дефолт 'full'
     ensureColumn(db, "ai_notes", "audience", "TEXT NOT NULL DEFAULT 'full'");
     ensureColumn(db, "ai_fails", "audience", "TEXT NOT NULL DEFAULT 'full'");
     ensureColumn(db, "users", "ai_unlock", "TEXT");
-    // v1.3 → v1.4 (В4): изоляция own/public и эвикция
     ensureColumn(db, "repos", "rating_active", "INTEGER NOT NULL DEFAULT 1");
     ensureColumn(db, "repos", "visibility", "TEXT NOT NULL DEFAULT 'public'");
     ensureColumn(db, "repos", "evict_reason", "TEXT");
-    // В4.5 (17.09): аватары — logo.url репозитория и портрет Я ID пользователя;
-    // колонки аддитивные (старый код их не читает), версия схемы не меняется
+    // аватары и подписи: старый код эти колонки не читает, поэтому версия схемы не менялась
     ensureColumn(db, "repos", "logo_url", "TEXT");
     ensureColumn(db, "repos", "language_color", "TEXT");
     ensureColumn(db, "users", "display_name", "TEXT");
     ensureColumn(db, "users", "avatar_id", "TEXT");
     ensureColumn(db, "jobs", "user_id", "INTEGER");
     ensureColumn(db, "jobs", "trigger_kind", "TEXT NOT NULL DEFAULT 'periodic'");
-    // П11 (Н-2, круг 2 В4.2-port-fix): бэкфилл признака полосы. Колонку добавили
-    // с DEFAULT 'periodic', и у строк, созданных ДО неё, `user_id IS NOT NULL`
-    // соседствует с `trigger_kind = 'periodic'`. На «единый признак полосы»
-    // (П8) опираются гард ночного обхода и retry-failed: без бэкфилла живая
-    // legacy-юзерская job навсегда блокировала бы периодику по своему репо и
-    // читалась бы как последняя периодическая. Согласованность обеспечивает
-    // миграция, а не только вставка `enqueueScan`.
-    // Ф2.18 (хвост приёмки В4.2-port-fix): бэкфилл — ОДНОРАЗОВАЯ миграция, а не
-    // работа каждого `openDb`. Полный UPDATE по всей очереди выполнялся при
-    // каждом открытии БД (на живой базе это десятки тысяч строк на старте
-    // каждого процесса и каждого теста). Условие — переход версии схемы:
-    // legacy-БД без версии или версия МЛАДШЕ текущей (переход < 1.8).
-    // Транзакция своя, до записи версии (её пишет `setMetaValue`
-    // последней строкой функции).
+    // Бэкфилл признака полосы: колонку добавили с DEFAULT 'periodic', и у старых
+    // пользовательских заданий оказалось `trigger_kind = 'periodic'`. На этот
+    // признак опираются гард ночного обхода и retry-failed — без бэкфилла такое
+    // задание навсегда блокировало бы периодику своего репо. Выполняется один раз,
+    // при переходе версии схемы: полный UPDATE очереди на каждом openDb дорог.
     if (stored === null || compareVersions(stored, SCHEMA_VERSION) < 0) {
       db.transaction(() => {
         db.exec("UPDATE jobs SET trigger_kind = 'user' WHERE user_id IS NOT NULL AND trigger_kind <> 'user'");
       })();
     }
-    // v1.5 (В4.1, К4): попытки и время постановки
     ensureColumn(db, "jobs", "attempts", "INTEGER NOT NULL DEFAULT 0");
     ensureColumn(db, "jobs", "created_at", "TEXT");
     ensureColumn(db, "scores", "code_empty", "INTEGER");
-    // v1.4: jobs UNIQUE(repo_id) (В1) мешает очереди — свой и публичный
-    // скан одного репо стоят одновременно; очередь пересоздаём без UNIQUE
-    // (строки jobs транзитны, данные не теряются: scans/scores независимы)
-    // Ф2.11 (LOW-1): пересборка ЦЕЛИКОМ в транзакции, а индексы старой таблицы
-    // сносятся ДО `RENAME`. SQLite переносит индексы вместе с переименованной
-    // таблицей: `CREATE INDEX IF NOT EXISTS` из SCHEMA видел занятые имена и
-    // молча пропускал создание, а `DROP TABLE jobs_v1_rebuild` уносил индексы
-    // с собой — новая `jobs` оставалась без idx_jobs_unclaimed и idx_jobs_claim.
-    // Без транзакции обрыв посреди пересборки оставлял базу без очереди вовсе.
+    // Старая jobs с UNIQUE(repo_id) не дает поставить свой и публичный скан
+    // одного репо одновременно — очередь пересобирается без UNIQUE (строки jobs
+    // транзитны, scans/scores от них не зависят). Индексы старой таблицы сносятся
+    // до RENAME: SQLite переносит их вместе с таблицей, CREATE INDEX IF NOT EXISTS
+    // видит занятые имена и молча пропускает создание, а DROP старой таблицы уносит
+    // индексы с собой. Транзакция — чтобы обрыв не оставил базу без очереди.
     const jobsDdl = (db.query("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jobs'").get() as { sql: string } | null)?.sql ?? "";
     if (jobsDdl.includes("UNIQUE")) {
       db.transaction(() => {
@@ -432,15 +343,14 @@ export function openDb(config: Config): Database {
       })();
     }
     db.exec(LATE_INDEXES);
-    // ПОРТ 5 (hq-parallel): панель заданий (jobs.error — причина падения)
-    // и избранное (сейвить что угодно строкой слага; права-ряд по факту)
+    // Колонки jobs, которых нет в SCHEMA, добавляются только после пересборки
+    // очереди выше: иначе на очень старой базе пересборка из SCHEMA их бы потеряла.
+    // Избранное хранит слаг строкой, права проверяются при обращении.
     ensureColumn(db, "jobs", "error", "TEXT");
-    // v2.3 (В5.2, Б2/Б4): аудитория AI-заявки и признак «поставлена с паролем» (общий лимит
-    // ее не считает). Аудит надежности М6: ПОСЛЕ пересборки очереди v1.4 — иначе на очень
-    // старой базе пересборка из SCHEMA теряла бы эти колонки (как и jobs.error выше)
+    // заявка, поставленная с паролем, в общий лимит AI не входит
     ensureColumn(db, "jobs", "audience", "TEXT NOT NULL DEFAULT 'full'");
     ensureColumn(db, "jobs", "ai_unlocked", "INTEGER NOT NULL DEFAULT 0");
-    // аудит надежности М7: общий суточный счетчик лимита AI — по (kind, created_at)
+    // общий суточный счетчик лимита AI считает по (kind, created_at)
     db.exec("CREATE INDEX IF NOT EXISTS idx_jobs_kind_created ON jobs(kind, created_at)");
     db.exec(`CREATE TABLE IF NOT EXISTS favorites (
       user_id INTEGER NOT NULL REFERENCES users(id),
@@ -451,11 +361,10 @@ export function openDb(config: Config): Database {
       last_checked_at TEXT,
       UNIQUE(user_id, org_slug, repo_slug)
     )`);
-    // Ф2.8 (В4.2b): перешифровка PAT на ключ HKDF — ИДЕМПОТЕНТНО. Строки
-    // без префикса `v2:` расшифровываются прежним ключом sha256 и
-    // перезаписываются на `v2:` (HKDF); нерасшифровываемые (секрет сменился,
-    // данные повреждены) НЕ трогаются — их честно объявит patReadable. Без
-    // appSecret (сессии выключены) проход не выполняется вовсе.
+    // Идемпотентная перешифровка PAT на ключ HKDF: строки без префикса `v2:`
+    // расшифровываются прежним ключом sha256 и перезаписываются как `v2:`.
+    // Нерасшифровываемые (секрет сменился, данные повреждены) не трогаются —
+    // их объявит patReadable. Без appSecret проход не выполняется.
     if (config.auth.appSecret) {
       const legacyRows = db
         .query("SELECT user_id, pat_enc FROM user_tokens WHERE pat_enc IS NOT NULL")
@@ -466,11 +375,8 @@ export function openDb(config: Config): Database {
         if (next !== null) db.query("UPDATE user_tokens SET pat_enc = ? WHERE user_id = ?").run(next, row.user_id);
       }
     }
-    // П8 (LOW-2): версия схемы пишется ПОСЛЕДНЕЙ — после всех DDL, миграций и
-    // ensureColumn. Порты оставили её перед портовыми объектами, и обрыв между
-    // ними помечал БД версией без этих объектов; теперь «версия = 1.7» означает,
-    // что favorites и jobs.error в базе действительно есть. В4.4: внутри общей
-    // транзакции — атомарно с самими DDL.
+    // Версия схемы пишется последней, после всех DDL и ensureColumn, — тогда
+    // записанная версия гарантирует, что все объекты этой версии в базе есть.
     setMetaValue(db, "schema_version", SCHEMA_VERSION);
   });
   migrate.immediate();

@@ -1,10 +1,10 @@
-# HealthCraft — прокси стенда (В5.4).
+# HealthCraft — прокси стенда.
 # SITE_ADDRESS — адреса через запятую (Caddy сам выпускает и продлевает сертификаты
 # Let's Encrypt), например "health-craft.ru, www.health-craft.ru"; ":80" — только HTTP, пока
 # домена нет. CANONICAL_HOST — основной хост: остальные адреса переадресуются на него
 # (вход Я ID, cookie и Origin-гард мутаций привязаны к одному origin — YA_REDIRECT_URI).
 
-# В5.5 тур 2 (Т2-Е): запрос по IP стенда по HTTP. Без этого блока автоматическая
+# Запрос по IP стенда по HTTP. Без этого блока автоматическая
 # переадресация Caddy уводит http://IP на https://IP, а сертификата на IP у стенда нет —
 # браузер показывает ошибку TLS. Явный HTTP-сайт по IP стоит в маршрутах :80 раньше
 # автоматической переадресации и отправляет на основной хост. STAND_IP задается в .env
@@ -20,8 +20,8 @@ http://{$STAND_IP:stand-ip.invalid} {
 
 	encode zstd gzip
 
-	# Заголовки защиты на ВСЕ ответы, включая HTML-страницу: Bun не дает поставить их
-	# на HTML-бандл (src/server.ts, отклонение В4.4) — закрывает прокси.
+	# Заголовки защиты на все ответы, включая HTML-страницу: Bun не дает поставить их
+	# на HTML-бандл (см. src/server.ts), поэтому это делает прокси.
 	header {
 		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
@@ -35,7 +35,7 @@ http://{$STAND_IP:stand-ip.invalid} {
 
 	reverse_proxy web:8418 {
 		# X-Forwarded-For: Caddy по умолчанию НЕ доверяет входящему заголовку (trusted_proxies
-		# не заданы) и ставит адрес клиента сам — ключ лимита badge по IP (src/server.ts) не спуфится
+		# не заданы) и ставит адрес клиента сам — ключ лимита бейджа по IP (src/server.ts) не подделать
 		# «думающие» обработчики живут до 120 с (idleTimeout сервера)
 		transport http {
 			read_timeout 130s

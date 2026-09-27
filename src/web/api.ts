@@ -17,7 +17,7 @@ export interface MeResponse {
   avatarUrl: string | null;
   hasPat: boolean;
   patCheckedAt: string | null;
-  /** В4.8.5 (С2-6): токен сохранен, но текущим ключом сервиса не читается — его нужно сохранить заново */
+  /** токен сохранен, но текущим ключом сервиса не читается — его нужно сохранить заново */
   patUnreadable?: boolean;
 }
 
@@ -27,9 +27,9 @@ export interface MyReposResponse {
 }
 
 /**
- * В4.8.5 (К8.5.4): ошибка запроса с кодом сервера и HTTP-статусом — текст для
- * человека берётся из словаря `errorText` по коду/статусу, а не из сырого
- * `message` («HTTP 502», «Failed to fetch»).
+ * Ошибка запроса с кодом сервера и HTTP-статусом. Текст для человека берётся
+ * из словаря `errorText` по коду/статусу, а не из сырого `message`
+ * («HTTP 502», «Failed to fetch»).
  */
 export class RequestError extends Error {
   constructor(
@@ -45,7 +45,7 @@ export class RequestError extends Error {
 }
 
 /**
- * В4.8.5 (К8.5.8): сессия — одно состояние на клиенте. 401 любого
+ * Сессия — одно состояние на клиенте. 401 любого
  * `/api/me/*` означает «сессии больше нет» — событие будит App, тот
  * перечитывает `/api/me`, и приложение целиком переходит в «вы вышли»
  * (rail с «Войти», «Задания» гаснут), а не остаётся полуживым.
@@ -119,15 +119,14 @@ export async function mutateJson<T>(url: string, method: string, body?: unknown)
 
 /**
  * `stale` — данные прошлого успешного ответа, пока грузится новый (только с
- * опцией `keepPrevious`); без опции загрузка всегда «пустая», как раньше.
- * В4.8.5 (К8.5.3): `ok.refreshError` — повторная загрузка не удалась, но
- * данные на экране остаются (мягкая пометка вместо замены экрана ошибкой).
+ * опцией `keepPrevious`); без опции загрузка всегда «пустая».
+ * `ok.refreshError` — повторная загрузка не удалась, но данные на экране
+ * остаются (мягкая пометка вместо замены экрана ошибкой).
  */
 export type AsyncState<T> = { kind: "loading"; stale?: T } | { kind: "ok"; data: T; refreshError?: string } | { kind: "error"; message: string; status?: number };
 
 /**
- * Загрузка по URL с отменой устаревшего запроса и ручным повтором.
- * В4.7 круг 2 (Р2.6): `keepPrevious` — при смене URL прежние данные остаются
+ * Состояние при новой загрузке. С `keepPrevious` при смене URL прежние данные остаются
  * на экране (`loading.stale`), пока не придёт новый ответ: каркас страницы не
  * перерисовывается через скелетон и не прыгает. Первая загрузка — без `stale`.
  */
@@ -139,7 +138,7 @@ export function stateOnReload<T>(prev: AsyncState<T>, keepPrevious: boolean): As
 }
 
 /**
- * В4.8.5 (К8.5.3): сбой загрузки. С `keepPrevious` и данными на экране —
+ * Сбой загрузки. С `keepPrevious` и данными на экране —
  * «данные + ошибка» (экран не пропадает, опросы живы); без данных — ошибка.
  */
 export function stateOnError<T>(prev: AsyncState<T>, message: string, keepPrevious: boolean, status?: number): AsyncState<T> {
@@ -155,6 +154,7 @@ export function dataOf<T>(state: AsyncState<T>): T | null {
   return null;
 }
 
+/** Загрузка по URL с отменой устаревшего запроса и ручным повтором. */
 export function useJson<T>(url: string, opts: { keepPrevious?: boolean } = {}): { state: AsyncState<T>; reload: () => void; set: (data: T) => void } {
   const [state, setState] = useState<AsyncState<T>>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
@@ -174,7 +174,7 @@ export function useJson<T>(url: string, opts: { keepPrevious?: boolean } = {}): 
   }, [url, attempt, keepPrevious]);
 
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
-  // К8.5.7: точечная правка данных без перечитывания (строка после действия)
+  // точечная правка данных без перечитывания (строка после действия)
   const set = useCallback((data: T) => setState({ kind: "ok", data }), []);
   return { state, reload, set };
 }

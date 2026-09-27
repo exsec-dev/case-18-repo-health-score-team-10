@@ -1,23 +1,20 @@
-// pat.ts — хранение юзерского PAT SourceCraft (В4/Б1): AES-256-GCM.
-// Ф2.8 (В4.2b): ключ = HKDF(APP_SECRET, "repo-health", "pat", 32), а не
-// голый sha256 — у сессий и PAT разные ключи от одного секрета; шифротекст
-// с префиксом `v2:` (расшифровка старого формата без префикса — по
-// прежнему ключу sha256, чтобы перешифровка в openDb была возможна).
-// Значение НИКОГДА: не в API-ответах, не в логах, не в ошибках.
-// getPat → string | null; отсутствие PAT = own-режим недоступен, а не
-// «пустой токен» — честная семантика для routes и раннера.
+// Хранение PAT SourceCraft пользователя: AES-256-GCM, ключ – HKDF от APP_SECRET
+// с контекстом "pat" (у сессий свой контекст, ключи разные при одном секрете).
+// Старый формат без префикса `v2:` шифровался голым sha256(APP_SECRET); его
+// еще читаем, чтобы openDb мог перешифровать такие строки.
+// Значение PAT никогда не попадает в ответы API, логи и тексты ошибок.
+// Отсутствие PAT – null (own-режим недоступен), а не «пустой токен».
 import type { Database } from "bun:sqlite";
 import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } from "node:crypto";
 
-/** Префикс шифротекста на ключе HKDF (Ф2.8); без префикса — legacy sha256. */
+/** Префикс шифротекста на ключе HKDF; без префикса – старый ключ sha256. */
 export const PAT_V2_PREFIX = "v2:";
 
-/** Ключ шифрования PAT из APP_SECRET: HKDF-вывод 32 байта (контекст "pat"). */
 function deriveKey(appSecret: string): Buffer {
   return Buffer.from(hkdfSync("sha256", appSecret, "repo-health", "pat", 32));
 }
 
-/** Прежний ключ (до Ф2.8): голый sha256(APP_SECRET) — только для чтения старых строк. */
+/** Старый ключ sha256(APP_SECRET) – только для чтения строк без префикса `v2:`. */
 function legacyKey(appSecret: string): Buffer {
   return createHash("sha256").update(appSecret).digest();
 }
@@ -46,15 +43,14 @@ function decryptWith(key: Buffer, stored: string): string | null {
   }
 }
 
-/** PAT → "v2:<base64(iv|ciphertext|tag)>". Ошибка шифрования невозможна при валидном ключе. */
+/** PAT → "v2:<base64(iv|ciphertext|tag)>". */
 export function encryptPat(appSecret: string, pat: string): string {
   return PAT_V2_PREFIX + encryptWith(deriveKey(appSecret), pat);
 }
 
 /**
- * Обратная операция; null = нет записи, ключ сменился или данные повреждены.
- * Строки без `v2:` читаются прежним ключом sha256 — так openDb может
- * перешифровать их на HKDF (Ф2.8).
+ * null – ключ сменился или данные повреждены. Строки без `v2:` читаются
+ * старым ключом sha256, чтобы openDb мог перешифровать их на HKDF.
  */
 export function decryptPat(appSecret: string, patEnc: string): string | null {
   if (patEnc.startsWith(PAT_V2_PREFIX)) return decryptWith(deriveKey(appSecret), patEnc.slice(PAT_V2_PREFIX.length));
@@ -62,16 +58,15 @@ export function decryptPat(appSecret: string, patEnc: string): string | null {
 }
 
 /**
- * Ф2.8: перешифровка одного сохранённого значения на актуальный ключ.
- * null = значение не расшифровалось (например, APP_SECRET сменился) —
- * вызывающий обязан такую строку НЕ трогать.
+ * Перешифровка сохраненного значения на актуальный ключ. null – значение не
+ * расшифровалось (например, сменился APP_SECRET), такую строку трогать нельзя.
  */
 export function reencryptPat(appSecret: string, patEnc: string): string | null {
   const plain = decryptPat(appSecret, patEnc);
   return plain === null ? null : encryptPat(appSecret, plain);
 }
 
-/** Сохранить/заменить PAT (PK user_id — замена, не накопление). */
+/** Сохранить или заменить PAT: у пользователя одна строка. */
 export function storePat(db: Database, appSecret: string, userId: number, pat: string, now = new Date()): void {
   db.query(
     `INSERT INTO user_tokens (user_id, pat_enc, checked_at, created_at) VALUES (?, ?, ?, ?)
@@ -79,7 +74,7 @@ export function storePat(db: Database, appSecret: string, userId: number, pat: s
   ).run(userId, encryptPat(appSecret, pat), now.toISOString(), now.toISOString());
 }
 
-/** PAT юзера или null; расшифровка на каждом использовании — паттернов в памяти не держим. */
+/** Расшифровка на каждом использовании – открытый PAT в памяти не держим. */
 export function getPat(db: Database, appSecret: string, userId: number): string | null {
   const row = db.query("SELECT pat_enc FROM user_tokens WHERE user_id = ?").get(userId) as { pat_enc: string } | null;
   if (!row) return null;
@@ -87,15 +82,13 @@ export function getPat(db: Database, appSecret: string, userId: number): string 
 }
 
 /**
- * Ф2.8 (LOW-5): PAT на месте И реально читается текущим ключом. После
- * ротации APP_SECRET строка остаётся, но не расшифровывается — без этой
- * проверки `patMeta` отвечал `hasPat: true`, а own-сканы шли без PAT.
+ * PAT есть и читается текущим ключом. После смены APP_SECRET строка остается,
+ * но не расшифровывается – одного `patMeta().hasPat` тут недостаточно.
  */
 export function patReadable(db: Database, appSecret: string, userId: number): boolean {
   return getPat(db, appSecret, userId) !== null;
 }
 
-/** Удалить PAT (окно github-style: «удаление/замена токена»). */
 export function deletePat(db: Database, userId: number): void {
   db.query("DELETE FROM user_tokens WHERE user_id = ?").run(userId);
 }

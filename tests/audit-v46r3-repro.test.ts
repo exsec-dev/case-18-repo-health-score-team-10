@@ -1,5 +1,5 @@
-// Контракт интерактивной доводки В4.6, круг 3, пакет П1.
-// Проверяет решения владельца без живых запросов к SourceCraft.
+// Вид рейтинга, карточки и оболочки: утвержденные тексты и геометрия.
+// Без живых запросов к SourceCraft.
 import { describe, expect, test } from "bun:test";
 import { getRepoCard } from "../src/api/repos";
 import { cardFacts, makeApiDb, seedRepo, seedScan, seedScore } from "./api-fixtures";
@@ -13,7 +13,7 @@ describe("В4.6 круг 3: рейтинг", () => {
     const rating = web("Rating.tsx");
     const cell = rating.slice(rating.indexOf("function ScoreCell"), rating.indexOf("function CategoryCell"));
     const css = web("layout.css");
-    // круг 4 части 2: на телефоне полоса короче (`_narrow`), на таблице — прежняя 80px
+    // на телефоне полоса короче (`_narrow`), в таблице – 80px
     expect(cell).toContain('narrow ? "rh-score-cell__bar rh-score-cell__bar_narrow" : "rh-score-cell__bar"');
     expect(cell).toContain("scoreColor(item.healthcraftIndex)");
     expect(cell).toContain('<Flex gap={0} alignItems="center"');
@@ -33,12 +33,11 @@ describe("В4.6 круг 3: рейтинг", () => {
     expect(rating).toContain("Поиск по владельцу, репозиторию и заголовку");
     expect(api).toMatch(/function matchesQ[\s\S]{0,300}item\.org[\s\S]{0,150}item\.repo[\s\S]{0,150}item\.title/);
     expect(rating).toContain("HealthCraft Index показывает состояние открытых репозиториев SourceCraft по 4 категориям: документация, активность, задачи и состояние кода.");
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, Б2 / U14): в подзаголовке — ссылка «Как считается»
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): В-5 — строка охвата с числом неоцененных, одной функцией
+    // в подзаголовке – ссылка «Как считается» и строка охвата с числом неоцененных
     expect(rating).toMatch(/\{about\} <HowCountedLink \/>\s*<br \/>\s*\{coverageLine\(meta\.repos\)\}/);
     expect(rating).toContain("Категории CI/CD и Безопасность учитываются только в показателе Repo Health Score");
     expect(rating).toContain("репозиториев, к которым у вас есть доступ\n");
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, Б): колонка «Скан» скрыта — подсказка ведет на карточку
+    // колонки «Скан» нет – подсказка ведет на карточку
     expect(rating).toContain("Обход каталога выполняется ежесуточно. Дата последнего анализа – на карточке репозитория.");
     expect(rating).not.toContain("указана в колонке «Скан»");
   });
@@ -55,7 +54,7 @@ describe("В4.6 круг 3: карточка", () => {
     expect(format).toContain("ACCESS_LOCK_SHORT");
     expect(repo).toContain("Рассчитывается по 6 категориям");
     expect(repo).toContain('title="Что учитывается"');
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А8 / U4-A): «Параметры расчета» → паспорт «Анализ» + «Реквизиты»
+    // в панели паспорт «Анализ» и «Реквизиты» вместо «Параметров расчета»
     expect(repo).toContain('title="Анализ"');
     expect(repo).not.toContain('title="Параметры расчета"');
     // абзац легенды на карточке отключен пропом; на рейтинге он остается (ui.tsx ниже)
@@ -72,19 +71,17 @@ describe("В4.6 круг 3: карточка", () => {
     const figure = repo.slice(repo.indexOf("function ScoreFigure"), repo.indexOf("// ---------- категории"));
     const row = repo.slice(repo.indexOf("function CategoryRow"), repo.indexOf("function AppsecEngines"));
     expect(figure).toContain('alignItems="baseline"');
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А2-А4): полоса показателя есть у обоих
-    // чисел без флага; в строке категории — полоса · балл · плашка, плашки вклада
-    // нет, название и основание — одним треком, плашка не растягивается
+    // в строке категории – полоса · балл · плашка, плашки вклада нет, название и
+    // основание – одним треком, плашка не растягивается
     expect(band).toMatch(/title="Repo Health Score" help=\{FULL_HELP\}/);
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (круг 2 части 2, Е12 / Н2): цветной полосы балла под
-    // числом нет — под числом стоит полоса вклада своего показателя
+    // под числом не цветная полоса балла, а полоса вклада своего показателя
     expect(figure).not.toContain("<Progress");
     expect(band).toContain('<ContributionStrip bar={barOf("HealthCraft Index")} />');
     expect(row.indexOf('className="rh-category__bar"')).toBeLessThan(row.indexOf('className="rh-category__value"'));
     expect(row.indexOf('className="rh-category__value"')).toBeLessThan(row.indexOf('className="rh-category__word"'));
     expect(row).not.toContain("rh-category__weight");
     expect(css).toContain("grid-template-columns: 16px minmax(0, 1fr) minmax(80px, 240px) 28px 150px;");
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (круг 2, Е14): плашка уровня прижата вправо
+    // плашка уровня прижата вправо
     expect(css).toMatch(/\.rh-category__word \{[^}]*justify-self: end/);
     // селектор стал составным: тот же отступ получил блок «Вклад категорий»
     expect(css).toMatch(/\.rh-aside-section > \.g-definition-list,[\s\S]{0,80}\{[^}]*margin-block-start:\s*var\(--g-spacing-1\)/);
@@ -96,19 +93,18 @@ describe("В4.6 круг 3: карточка", () => {
     const band = repo.slice(repo.indexOf("function ScoreBand"), repo.indexOf("function ScoreFigure"));
     expect(locked).toContain('<Alert');
     expect(locked).toContain('theme="info"');
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А4): строки «категория — фраза» → заголовок и одно предложение
+    // одно предложение без заголовка, а не строки «категория – фраза»
     expect(locked).not.toContain("<DefinitionList");
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (круг 2, Т3): заголовка нет — одно предложение
     expect(locked).not.toContain("title=");
     expect(locked).toContain("message={text}");
-    // ссылка из строки убрана: переход к токену живёт у показателя (решение 21.09)
+    // переход к токену живет у показателя, а не в этой строке
     expect(locked).not.toContain('linkProps("/settings")');
     expect(web("layout.css")).toMatch(/\.rh-locked-note\s*\{[^}]*margin-top:[^}]*\}/);
     expect(web("layout.css")).not.toMatch(/\.rh-locked-note\s*\{[^}]*padding:/);
     expect(band).not.toContain("summaryLine");
     expect(band).not.toContain("Рекомендаций:");
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А5 / U8): основание — словами (ярлык
-    // подметрики), раскрывается по клику; ключ факта — мелко в поповере
+    // основание – словами (ярлык подметрики), раскрывается по клику; ключ факта –
+    // мелко в поповере
     expect(repo).toMatch(/<Label theme="info" size="xs" interactive>[\s\S]{0,120}\{item\.label\}[\s\S]{0,80}<Icon data=\{ChevronDown\}/);
     expect(repo).not.toContain("Порядок задан движком правил");
   });
@@ -116,8 +112,8 @@ describe("В4.6 круг 3: карточка", () => {
   test("переход к токену встроен в текст, иконка избранного центрирована", () => {
     const repo = web("RepoPage.tsx");
     const css = web("layout.css");
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (В4.9 ч.2, А2): переход встроен в строку пути —
-    // слово «Настройках» ссылкой (`PathLine`), отдельной строки-ссылки нет
+    // переход встроен в строку пути – слово «Настройках» ссылкой (`PathLine`),
+    // отдельной строки-ссылки нет
     expect(repo).toMatch(/p\.settings \?[\s\S]{0,80}linkProps\("\/settings"\)/);
     expect(repo).not.toContain(">Добавить персональный токен доступа<");
     const star = repo.slice(repo.indexOf("function FavoriteStar"));
@@ -136,10 +132,9 @@ describe("В4.6 круг 3: разделы пользователя и обол�
     const app = web("App.tsx");
     const reposPage = me.slice(me.indexOf("export function MePage"), me.indexOf("export function SettingsPage"));
     const settingsPage = me.slice(me.indexOf("export function SettingsPage"), me.indexOf("function AccountSection"));
-    // В4.8: заголовок раздела переехал в шапку списка (образец SourceCraft) —
-    // `PageHeader` над отдельным `h2` дублировал его; страница — это список
+    // заголовок раздела – в шапке списка, как в SourceCraft: отдельный
+    // `PageHeader` над ним дублировал бы его
     expect(reposPage).toContain("<MyReposSection");
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): раздел «Избранное»
     expect(me).toMatch(/<Text variant="header-1" as="h1">\s*Избранное\s*<\/Text>/);
     expect(reposPage).not.toContain("<PatSection");
     expect(settingsPage).not.toContain('<PageHeader title="Настройки"');
@@ -148,7 +143,6 @@ describe("В4.6 круг 3: разделы пользователя и обол�
     expect(me).toContain("Токен хранится в зашифрованном виде (AES-256-GCM)");
     expect(router).toContain('parts[0] === "settings"');
     expect(app).toContain('route.kind === "settings" && <SettingsPage />');
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): раздел «Избранное», иконка — закладка
     expect(shell).toContain('{ id: "me", title: "Избранное", href: "/me", icon: Bookmark }');
     expect([me, router, shell, app].join("\n")).not.toMatch(/Личный кабинет|личный кабинет/);
   });
@@ -159,9 +153,9 @@ describe("В4.6 круг 3: разделы пользователя и обол�
   });
 });
 
-// --- Пакет П4 (21.09): место в рейтинге на карточке -------------------------
-// Утверждение поведенческое, а не текстовое: «#N из M» — обещание про выборку
-// рейтинга, и цену ошибки платит не вёрстка, а число на экране.
+// --- Место в рейтинге на карточке -------------------------------------------
+// Утверждение поведенческое, а не текстовое: «#N из M» – обещание про выборку
+// рейтинга, и цену ошибки платит не верстка, а число на экране.
 describe("В4.6 круг 3, П4: место в рейтинге", () => {
   test("публичный оценённый получает место по тем же условиям, что рейтинг", () => {
     const t = makeApiDb();
@@ -202,14 +196,13 @@ describe("В4.6 круг 3, П4: место в рейтинге", () => {
     }
   });
 
-  // В5.9 (§2 «В5.9 — выбор вариантов», п.3-4, 27.09): место переехало из строки числа в
-  // строку позиции «#N из M, лучше X% похожих» — по-прежнему серым текстом, не чипом;
-  // числа строки — поведенческим тестом `tests/v59-hq-position-view.test.ts`
+  // Место стоит в строке позиции «#N из M, лучше X% похожих» серым текстом;
+  // числа строки проверяет поведенческий тест `tests/v59-hq-position-view.test.ts`
   test("место печатается серым текстом «#N из M», а не чипом", () => {
     const repo = web("RepoPage.tsx");
     const line = repo.slice(repo.indexOf("function PositionLine"), repo.indexOf("// ---------- категории ----------"));
     expect(line).toMatch(/<Text color="secondary"[^>]*>[\s\S]*?\{position\.rank\}[\s\S]*?<\/Text>/);
-    // В5.9 круг 3 (п.4): title — только на тексте места, не на обертке с ⓘ (иначе два тултипа)
+    // title – только на тексте места, не на обертке с ⓘ (иначе два тултипа)
     expect(line).not.toMatch(/<Text[^>]*title=/);
     expect(line).not.toMatch(/<Label[^>]*>\s*\{position\.rank\}/);
   });

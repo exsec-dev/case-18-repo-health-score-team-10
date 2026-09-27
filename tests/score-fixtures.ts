@@ -1,6 +1,6 @@
-// score-fixtures.ts — общие фикстуры фактов для score-тестов (Б3 compute
-// + Б5 мутационные инварианты §9): детерминированное «здоровое репо»
-// без сети и клонов. Не *.test.ts — bun test не подхватывает.
+// Общие фикстуры фактов для score-тестов (compute и мутационные инварианты):
+// детерминированное «здоровое репо» без сети и клонов. Не *.test.ts — bun test не
+// подхватывает.
 import type { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -77,10 +77,10 @@ export function makeDb(): TestDb {
 let isolatedRepoSeq = 0;
 
 /**
- * Скан с фактами (по умолчанию ok; status/bad — мутациями). В4.1 (К1):
- * каналы cicd.runs/appsec.findings замещаются историей репо при любом
- * не-ok, поэтому по умолчанию каждый скан живёт в СВОЁМ репо (мутации
- * независимы); историю одного репо тесты задают явно через repoId.
+ * Скан с фактами (по умолчанию ok; status/bad — мутациями). Каналы
+ * cicd.runs/appsec.findings замещаются историей репо при любом не-ok, поэтому по
+ * умолчанию каждый скан живёт в СВОЁМ репо (мутации независимы); историю одного
+ * репо тесты задают явно через repoId.
  */
 export function seedScan(t: TestDb, facts: FactSpec[], startedDaysAgo = 0, repoId?: number): number {
   const started = iso(NOW.getTime() - startedDaysAgo * DAY - 3600_000);

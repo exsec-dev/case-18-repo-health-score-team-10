@@ -1,8 +1,5 @@
-// router.ts — мини-роутер на History API. Своим, а не react-router:
-// экранов мало, а зависимость тянула бы контекст, матчер и Outlet ради
-// одного switch (решение канвы §2 «Пуск В3», пункт «в»). Маршруты (В4.1,
-// К2): «/», «/repo/:org/:repo», «/me», «/settings»; «/me/repo/...» удален
-// без перенаправления (единая карточка).
+// router.ts — мини-роутер на History API. Свой, а не react-router: экранов
+// мало, а зависимость тянула бы контекст, матчер и Outlet ради одного switch.
 // Состояние фильтров рейтинга живёт в query-строке, поэтому «маршрут» —
 // это pathname + search целиком: ссылкой можно поделиться.
 import { useSyncExternalStore, type MouseEvent } from "react";
@@ -12,10 +9,8 @@ export type Route =
   | { kind: "repo"; org: string; repo: string }
   | { kind: "me" }
   | { kind: "settings" }
-  // В5.3 круг 4 (К-1): набор сравнения — в query (`?r=org/a&r=org/b`), ссылкой можно поделиться
+  // набор сравнения — в query (`?r=org/a&r=org/b`), ссылкой можно поделиться
   | { kind: "compare"; search: string }
-  // В4.7 (П4.4, вопрос 29 закрыт 21.09): поле `path` удалено — UI 404 его
-  // не читает с тех пор, как страница перестала перечислять маршруты
   | { kind: "not-found" };
 
 /** Событие своей навигации: popstate браузер шлёт только на назад/вперёд. */
@@ -49,9 +44,8 @@ export function navigate(url: string, opts: { replace?: boolean } = {}): void {
 }
 
 /**
- * Круг 5 тура 3 (находка 26 аудита): адрес входа — с карточки репозитория с возвратом
- * на нее (`next`), с прочих экранов как раньше (в кабинет). Сервер пропускает только
- * путь своего сайта (`safeNextPath`).
+ * Адрес входа: с карточки репозитория — с возвратом на нее (`next`), с прочих
+ * экранов — в кабинет. Сервер пропускает только путь своего сайта (`safeNextPath`).
  */
 export function loginHref(pathname: string, search: string): string {
   return pathname.startsWith("/repo/") ? `/auth/ya?next=${encodeURIComponent(pathname + search)}` : "/auth/ya";
@@ -86,10 +80,8 @@ function subscribe(onChange: () => void): () => void {
 const snapshot = (): string => `${window.location.pathname}${window.location.search}`;
 
 /**
- * В4.6 (У26): один параметр query как состояние — для таба карточки
- * (`?tab=recommendations`). Форма `Route` при этом НЕ меняется: добавить
- * `search` в ветку `repo` значило бы переписать её контракт и три ассерта
- * `parseRoute` заодно, тогда как здесь нужен ровно один параметр и та же
+ * Один параметр query как состояние — для таба карточки (`?tab=recommendations`).
+ * Ветка `repo` в `Route` без `search`: нужен ровно один параметр и та же
  * подписка, что у маршрута (popstate + своё событие навигации), чтобы
  * «назад» переключал таб.
  */

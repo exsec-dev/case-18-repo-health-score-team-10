@@ -1,18 +1,13 @@
-// Shell.tsx — каркас как у SourceCraft: rail AsideHeader (разделы сверху;
-// снизу документация, настройки, тема, вход или пользователь; кнопка
-// внизу переключает широкий rail с подписями и узкий с иконками) +
-// страница = ActionBar с крошками и действиями + основная колонка +
-// правая панель (320px), если она есть.
+// Каркас как у SourceCraft: rail AsideHeader (разделы сверху, внизу
+// документация, настройки, тема, вход или пользователь) + страница из
+// ActionBar с крошками, основной колонки и правой панели (320px).
 //
-// Прокрутка (решение 17.09): окно не прокручивается никогда — только
-// контейнеры страницы. Два режима Page:
-//   document — текст/плашки: основная колонка и правая панель прокручиваются
-//     каждая своим контейнером; уже 1440px (В4.6, У23) колонки встают друг
-//     под друга и прокручиваются одним контейнером под ActionBar;
+// Окно не прокручивается никогда — только контейнеры страницы. Два режима Page:
+//   document — основная колонка и правая панель прокручиваются каждая своим
+//     контейнером; уже 1440px колонки встают друг под друга;
 //   fill — данные на высоту экрана (рейтинг): шапка и футер закреплены,
-//     прокручивается только область между ними (таблица — сама, с
-//     закреплённой строкой заголовков); уже 1440px (В4.6, У23) правая панель
-//     уходит в Drawer по кнопке в ActionBar — второй прокрутки на странице нет.
+//     прокручивается только область между ними; уже 1440px правая панель
+//     уходит в Drawer по кнопке в ActionBar, чтобы не было второй прокрутки.
 import { ArrowRightFromSquare, ArrowRightToSquare, BookOpen, Bookmark, ChartColumn, CircleInfo, Gear, Moon, ScalesBalanced, Sun, Xmark } from "@gravity-ui/icons";
 import { ActionBar, AsideHeader, FooterItem, type AsideHeaderItem } from "@gravity-ui/navigation";
 import { ActionTooltip, Avatar, Breadcrumbs, Button, Drawer, Flex, Icon, Text, useThemeValue, useToaster, type IconData } from "@gravity-ui/uikit";
@@ -34,11 +29,8 @@ interface SectionDef {
 
 const SECTIONS: SectionDef[] = [
   { id: "rating", title: "Рейтинг", href: "/", icon: ChartColumn },
-  // Ступень 4 (слово владельца 23.09): раздел — «Избранное»; иконка — закладка,
-  // звезда остается кнопкой добавления в избранное
-  // В5.3 круг 4 (§2 25.09): сравнение — только пунктом rail; ссылок «сравнить» в других разделах нет.
-  // Закрытие В5.3 (§2 25.09): вторым, рядом с рейтингом — оба раздела про каталог и открыты
-  // без входа, личное «Избранное» — последним
+  // «Сравнение» рядом с рейтингом: оба раздела про каталог и открыты без входа.
+  // У «Избранного» иконка-закладка: звезда занята кнопкой добавления в избранное.
   { id: "compare", title: "Сравнение", href: "/compare", icon: ScalesBalanced },
   { id: "me", title: "Избранное", href: "/me", icon: Bookmark },
 ];
@@ -60,8 +52,8 @@ export function Shell({
   const [compactPref, setCompact] = useRailCompact();
   const compact = isPhone || compactPref;
   const tips = useRailTips();
-  // круг 5 тура 3 (находка 24 аудита): у rail нет ориентира навигации — AsideHeader
-  // navigation 6.6 не принимает роль; ставим ее на корень панели после отрисовки
+  // AsideHeader (navigation 6.6) не принимает role, а rail нужен ориентир
+  // навигации — ставим роль на корень панели после отрисовки
   useEffect(() => {
     // классы navigation — CSS-модули с хэшем («AsideHeader-module__gn-aside-header__aside___…»)
     const aside = document.querySelector<HTMLElement>('[class*="gn-aside-header__aside___"]');
@@ -101,8 +93,8 @@ export function Shell({
       logo={{
         text: PRODUCT_NAME,
         icon: HealthCraftMark,
-        // В5.3 (25.09): знак крупнее — у SourceCraft марка заполняет 26 px целиком,
-        // наш шестиугольник вписан с полями и при 26 читался мельче
+        // крупнее, чем у SourceCraft (26): наш шестиугольник вписан с полями
+        // и при 26px читается мельче их марки
         iconSize: 32,
         textSize: 20,
         href: "/",
@@ -276,8 +268,8 @@ function RailFooter({ me, compact, section }: { me: MeResponse | null; compact: 
         icon={isDark ? Sun : Moon}
         regularSize
         {...tip(themeTitle)}
-        // круг 5 тура 3 (находка 12 аудита): пункт без href рисуется не ссылкой и выпадает
-        // из Tab-обхода — «#» делает его фокусируемым, переход по нему гасится
+        // пункт без href рисуется не ссылкой и выпадает из Tab-обхода —
+        // «#» делает его фокусируемым, переход по нему гасится
         href="#"
         onItemClick={(_item, _collapsed, e) => {
           e.preventDefault();
@@ -307,9 +299,9 @@ function RailFooter({ me, compact, section }: { me: MeResponse | null; compact: 
 }
 
 /**
- * Вход — главный акцент rail, как у платформы, но action (белая в тёмной теме).
- * В4.9 ч.2 (А2): та же кнопка стоит под закрытым Repo Health Score карточки —
- * `inline` дает ей ширину по тексту и полную подпись «Войти через Я ID».
+ * Вход — главный акцент rail (view="action", белая в темной теме).
+ * Та же кнопка стоит под закрытым Repo Health Score карточки: `inline` дает
+ * ей ширину по тексту и полную подпись.
  */
 export function LoginButton({ compact, inline = false }: { compact: boolean; inline?: boolean }) {
   const button = (
@@ -318,9 +310,9 @@ export function LoginButton({ compact, inline = false }: { compact: boolean; inl
       size={inline ? "m" : "l"}
       width={compact || inline ? "auto" : "max"}
       href="/auth/ya"
-      // круг 5 тура 3 (находка 26 аудита): вход с карточки возвращает на нее же, а не в
-      // кабинет; адрес берется в момент нажатия (кнопка rail не перерисовывается при
-      // переходе между карточками). Сервер принимает только путь своего сайта
+      // после входа возвращаемся на текущую страницу; адрес берется в момент
+      // нажатия, потому что кнопка rail не перерисовывается при переходах.
+      // Сервер принимает только путь своего сайта
       onClick={(e: MouseEvent<HTMLElement>) => {
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
         e.preventDefault();
@@ -370,9 +362,8 @@ function switchTheme(setTheme: (next: AppTheme) => void, next: AppTheme): void {
 }
 
 /**
- * Пользователь внизу rail — кто вошел. Выход — пунктом «Выйти» над блоком
- * (и в блоке аккаунта на пользовательских поверхностях). Аватар 32px стоит на оси иконок rail в обоих
- * видах, высота блока одна — при раскрытии ничего не прыгает.
+ * Пользователь внизу rail. Аватар 32px стоит на оси иконок rail в обоих
+ * видах, высота блока одна — при раскрытии rail ничего не прыгает.
  */
 function RailUser({ me }: { me: MeResponse }) {
   const login = me.login!;
@@ -414,7 +405,7 @@ export function UserAvatar({ me, size = "l" }: { me: MeResponse; size?: "m" | "l
   );
 }
 
-/** «Екатерина Прожирко» → «Екатерина П.», как в меню пользователя SourceCraft. */
+/** «Иван Петров» → «Иван П.», как в меню пользователя SourceCraft. */
 export function shortName(full: string | null): string | null {
   if (!full) return null;
   const [first, second] = full.trim().split(/\s+/);
@@ -428,9 +419,8 @@ export interface Crumb {
 }
 
 /**
- * В4.9 ч.2 (А9, Б2): состояние выезжающей панели доступно странице — ссылка
- * «Как считается» в тексте открывает ту же панель, что кнопка ActionBar; на
- * широком экране (панель стоит колонкой) — прокручивает к ней.
+ * Состояние правой панели для страницы: ссылка «Как считается» в тексте
+ * открывает ту же панель, что кнопка ActionBar.
  */
 interface AsideControl {
   /** панель сейчас в Drawer (узкий экран и страница включила `asideDrawer`) */
@@ -450,9 +440,8 @@ export function showAside(control: AsideControl): void {
     control.open();
     return;
   }
-  // Круг 2 (Е1): на широком экране панель уже видна колонкой, и одна прокрутка
-  // ничего не меняла — ссылка «никуда не вела». Панель прокручивается в вид и
-  // коротко подсвечивается рамкой: взгляд переходит к ней.
+  // панель уже видна колонкой, и одной прокрутки часто не заметно —
+  // коротко подсвечиваем ее рамкой, чтобы взгляд перешел к ней
   const panel = document.querySelector<HTMLElement>(".rh-page__aside");
   if (!panel) return;
   panel.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -467,17 +456,11 @@ interface PageProps {
   actions?: ReactNode;
   aside?: ReactNode;
   /**
-   * Явный opt-in выезжающей панели ниже 1440 для страниц в режиме `document`
-   * (А9 В4.9 ч.2): включают только карточка и рейтинг (у рейтинга — режим
-   * `fill`, как прежде). Панели /me и /settings на узких экранах ведут себя
-   * как раньше — уходят под основную колонку.
+   * Выезжающая панель на узких экранах для режима `document` (в `fill` она
+   * всегда выезжающая). Без флага панель уходит под основную колонку.
    */
   asideDrawer?: boolean;
-  /**
-   * Круг 2 части 2 (Н1): ширина, с которой панель стоит колонкой (по
-   * умолчанию 1440). Рейтингу нужно больше: на 1440 колонка панели сужала
-   * таблицу, и «Реакции» с «Последней активностью» уходили за прокрутку.
-   */
+  /** Ширина, с которой панель стоит колонкой (по умолчанию 1440). */
   asideColumnFrom?: number;
   /** document (по умолчанию) — колонки прокручиваются; fill — данные на высоту экрана */
   mode?: "document" | "fill";
@@ -490,26 +473,19 @@ interface PageProps {
 
 export function Page({ crumbs, actions, aside, asideDrawer = false, asideColumnFrom = 1440, mode = "document", header, footer, children }: PageProps) {
   const globalActions = useContext(GlobalActionsContext);
-  // Ступень 4 (Ф18): заголовок вкладки — по странице (последняя крошка), чтобы
-  // вкладки, история и закладки различались
+  // заголовок вкладки — по последней крошке, чтобы вкладки, история и закладки различались
   const pageName = crumbs.length > 0 ? crumbs[crumbs.length - 1]!.text : "";
   useEffect(() => {
     document.title = pageName ? `${pageName} – HealthCraft` : "HealthCraft";
   }, [pageName]);
-  /**
-   * В4.6 (У23, решение владельца 20.09 — вариант (iii)): порог 1440, а не
-   * 1280. На 1366x768 прежний порог оставлял панель на месте, и она держала
-   * 320px, из-за чего колонка «Code health» резалась до «Code hea» без
-   * всякого признака прокрутки. Порог ВКЛЮЧИТЕЛЬНЫЙ: ровно на 1440 панель
-   * остаётся, ниже уезжает в Drawer по кнопке «Как считается» в ActionBar.
-   * Гейт `mode === "fill"` не снимаем: карточка рендерится в `document`
-   * (RepoPage.tsx), Drawer там не работает ни на какой ширине — ей отвечает
-   * CSS-медиазапрос layout.css, который кладёт панель ПОД основную колонку.
-   */
+  // Порог включительный: ровно на asideColumnFrom панель стоит колонкой. При
+  // 1280 на 1366x768 панель отнимала 320px, и колонки таблицы обрезались без
+  // признака прокрутки. Страницы `document` без `asideDrawer` раскладывает
+  // CSS-медиазапрос в layout.css — панель уходит под основную колонку.
   const wide = useMediaQuery(`(min-width: ${asideColumnFrom}px)`);
   const [asideOpen, setAsideOpen] = useState(false);
   const phone = useMediaQuery("(max-width: 767px)");
-  // ревью кода R6: на телефоне панель во всю ширину окна — и после поворота
+  // на телефоне панель во всю ширину окна, в том числе после поворота
   const [viewportW, setViewportW] = useState(() => window.innerWidth);
   useEffect(() => {
     const onResize = () => setViewportW(window.innerWidth);
@@ -523,11 +499,10 @@ export function Page({ crumbs, actions, aside, asideDrawer = false, asideColumnF
       <Flex gap={2} alignItems="center">
         {globalActions}
         {actions}
-        {/* В4.9 ч.2 (А9): кнопка с подписью — иконка без слова не находилась */}
+        {/* кнопка с подписью: одну иконку не находили */}
         {asideInDrawer && (
-          // Круг 3 части 2 (1, 2): подпись — вопросом; на телефоне кнопка —
-          // только иконка в слоте `Button.Icon`: скрытая подпись оставляла
-          // внутри кнопки пустое место справа
+          // на телефоне — только иконка в слоте `Button.Icon`: скрытая подпись
+          // оставляла внутри кнопки пустое место справа
           <Button view="flat" size="m" className="rh-aside-btn" onClick={() => setAsideOpen(true)} aria-label="Как считается?">
             <Button.Icon side={phone ? undefined : "start"}>
               <Icon data={CircleInfo} size={16} />
@@ -581,8 +556,8 @@ export function Page({ crumbs, actions, aside, asideDrawer = false, asideColumnF
       </div>
 
       {asideInDrawer && (
-        // Ступень 4 (Ф4): на телефоне панель во всю ширину; заголовок и крестик
-        // закрывают ее без поиска «пустого места» для тапа
+        // на телефоне панель во всю ширину: свободного места для тапа мимо
+        // нет, поэтому в заголовке — крестик
         <Drawer open={asideOpen} onOpenChange={setAsideOpen} placement="right" size={phone ? viewportW : 320} aria-label="Как считается?">
           <div className="rh-drawer">
             <div className="rh-drawer__head">

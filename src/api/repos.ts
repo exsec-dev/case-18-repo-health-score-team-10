@@ -1,10 +1,9 @@
-// repos.ts — read-API В3: чистые функции чтения БД (рейтинг, карточка,
-// мета). Сети нет и быть не может — UI живёт на том, что уже посчитал
-// скан. Сортировка/фильтрация/пагинация/фасеты считаются здесь, а не на
-// клиенте (решение канвы «г»): рейтинг сразу является контрактом данных.
-// Tri-state (закон 2): Score = NULL не участвует в ранжировании вообще —
-// такие репо уезжают в отдельный массив, иначе «нет данных» оказалось бы
-// лучшим или худшим результатом в зависимости от направления сортировки.
+// Read-API: чистые функции чтения БД (рейтинг, карточка, мета). Сети здесь
+// нет – UI живет на том, что уже посчитал скан. Сортировка, фильтры, пагинация
+// и фасеты считаются на сервере, а не на клиенте: рейтинг сразу является
+// контрактом данных. Репо без оценки в ранжировании не участвуют и уходят в
+// отдельный массив, иначе «нет данных» оказалось бы лучшим или худшим
+// результатом в зависимости от направления сортировки.
 import type { Database } from "bun:sqlite";
 import { CHANNEL_KINDS, DISPLAY_KINDS, PUBLIC_KINDS, computeFromFacts, effectiveFacts, totalsFromCategories, type CategoryScore } from "../score/compute";
 import { authorsOf, orderRecommendations, recommendFromFacts, recommendationParams, recommendationText, round4, type DeltaEvaluator } from "../score/recommend";
@@ -24,8 +23,7 @@ import { COHORT_CATEGORIES, buildCohort, type CohortMember, type RepoCohort } fr
 
 // ---------- общие формы ----------
 
-// В4.9, часть 2 гейта: значения переехали в чистый модуль (их берет и бандл
-// web через `src/report/sections.ts`); здесь — реэкспорт, формы API прежние.
+// значения живут в чистом модуле (их берет и бандл web), здесь – реэкспорт
 import { CATEGORY_ORDER, CATEGORY_TITLES } from "../report/categories";
 export { CATEGORY_ORDER, CATEGORY_TITLES };
 
@@ -41,7 +39,7 @@ export interface RatingItem {
   repo: string;
   title: string | null;
   language: string | null;
-  /** HealthCraft Index (4 категории, сохранённый healthcraft_index) */
+  /** HealthCraft Index (4 категории, сохраненный healthcraft_index) */
   healthcraftIndex: number | null;
   /** index_coverage */
   coverage: number;
@@ -57,44 +55,35 @@ export interface RatingItem {
   scannedAt: string | null;
   scanStatus: string;
   /**
-   * Ступень 4 В4.9 (В-4, §2 23.09): место в публичном рейтинге по HealthCraft
-   * Index — то же правило, что на карточке (индекс по убыванию, при равенстве
-   * org/repo). Не зависит от поиска, фильтра и сортировки выдачи; null — без индекса.
+   * Место в публичном рейтинге по HealthCraft Index – то же правило, что на
+   * карточке (индекс по убыванию, при равенстве – org/repo). Не зависит от
+   * поиска, фильтров и сортировки выдачи; null – без индекса.
    */
   rank: number | null;
   /**
-   * В5.5 тур 1 (W2, Р1): динамика позиции — место в последнем снимке до
-   * текущих UTC-суток (`rating_snapshots`) минус текущее место; положительное
-   * = вырос. null — такого снимка нет или репо в нем отсутствует (новый / вне
-   * ранжирования).
+   * Динамика позиции: место в последнем снимке до текущих UTC-суток
+   * (`rating_snapshots`) минус текущее место; положительное – вырос. null –
+   * снимка нет или репо в нем отсутствует.
    */
   rankDelta: number | null;
   /**
-   * В5.9 Б: значок места «ТОП-N» — `rankBadge` от индекса в той же выборке,
-   * что `rank` (выше / не ниже / всего; фильтры его не меняют, у равных
-   * индексов одинаков); null — места нет или уровень не подходит
+   * Значок места «ТОП-N» по индексу в той же выборке, что `rank` (фильтры его
+   * не меняют, у равных индексов он одинаков); null – места нет или уровень не подходит
    */
   rankBadge: RankBadge | null;
   /**
-   * В5.5 тур 1 (W2, Р2): у последней проверки на накрутку (заметка flagger)
-   * стоит flag:true. Разбор JSON — как у карточки (fraudOf): битый JSON =
-   * флага нет. Подозрение, не приговор: на место, сортировку и фильтры флаг
-   * НЕ влияет (§2 «В5.5 — тур 1» п.2, «better safe than sorry»).
+   * Последняя проверка на накрутку (заметка flagger) поставила flag:true; битый
+   * JSON – флага нет, как на карточке. Это подозрение, а не приговор: на место,
+   * сортировку и фильтры флаг не влияет.
    */
   fraud: boolean;
-  /** В5.5 тур 1 (W2, Р3): страница репо на SourceCraft — иконка внешней ссылки в строке */
+  /** страница репо на SourceCraft – для внешней ссылки в строке */
   webUrl: string;
-  /**
-   * В5.2 (Б6, выбор 4C): у репо есть ПУБЛИЧНЫЙ AI-обзор (тот, что видят все) — искра у
-   * имени в рейтинге и фильтр «С AI-обзором»
-   */
+  /** у репо есть ПУБЛИЧНЫЙ AI-обзор (тот, что видят все) – искра у имени и фильтр «С AI-обзором» */
   aiOverview: boolean;
-  /** часть фактов взята из истории при сбое канала (§5.6) — НЕ «давность скана» */
+  /** часть фактов взята из истории при сбое канала – это НЕ «давность скана» */
   staleFacts: boolean;
-  /**
-   * Круг 5 тура 3 (находка 7 аудита, 27.09): модель поставила «кода нет»
-   * (`scores.code_empty`, Q&A №13) — у индекса 0 метка «нет кода», как в «Сравнении»
-   */
+  /** репозиторий без кода (`scores.code_empty`): у индекса 0 метка «нет кода», как в «Сравнении» */
   codeEmpty: boolean;
   modelVersion: string;
 }
@@ -103,21 +92,20 @@ export interface LanguageFacet {
   language: string | null;
   count: number;
   /**
-   * В4.7 (П2, ревизия 4): цвет языка (`repos.language_color`, #rrggbb) — у
-   * каждой опции мультивыбора свой кружок. Без поля цвет знали бы только
-   * строки текущей страницы, и язык с чужой страницы остался бы без кружка.
-   * null — у языка нет цвета платформы (или язык не определён).
+   * Цвет языка (`repos.language_color`, #rrggbb) для кружка в мультивыборе.
+   * Без поля цвет знали бы только строки текущей страницы. null – у языка нет
+   * цвета платформы (или язык не определен).
    */
   color: string | null;
 }
 
-/** В5.5 тур 2 (W3): счетчик значения фильтра размера — по выборке с учетом поиска, без фильтров (как языки) */
+/** Счетчик значения фильтра размера (см. `RatingResponse.facets`). */
 export interface SizeFacet {
   bucket: SizeBucket;
   count: number;
 }
 
-/** В5.5 тур 2 (W3): счетчик значения фильтра CI — по выборке с учетом поиска, без фильтров (как языки) */
+/** Счетчик значения фильтра CI (см. `RatingResponse.facets`). */
 export interface CiFacet {
   value: CiFilter;
   count: number;
@@ -125,7 +113,7 @@ export interface CiFacet {
 
 export interface RatingResponse {
   items: RatingItem[];
-  /** HealthCraft Index = NULL: вне ранжирования и вне пагинации (закон 2) */
+  /** HealthCraft Index = NULL: вне ранжирования и вне пагинации */
   nullItems: RatingItem[];
   page: number;
   perPage: number;
@@ -133,16 +121,16 @@ export interface RatingResponse {
   totalPages: number;
   nulls: number;
   /**
-   * В5.2 (Б6): оцененных репо с публичным AI-обзором — с учетом поиска, языка
-   * (и с В5.5 тура 2 — размера и CI), до фильтра `ai`: сколько даст кнопка
+   * Оцененных репо с публичным AI-обзором с учетом поиска, языка, размера и
+   * CI, но до фильтра `ai`: сколько даст кнопка
    */
   aiCount: number;
   /**
-   * Фасеты считаются по выборке с учетом ТОЛЬКО поиска (правило языка, В4.7):
-   * выбранные фильтры не схлопывают списки, из которых их выбирали. Счетчик —
-   * все репо выборки (оцененные и без оценки), как у языка. У размера — все 5
-   * корзин в порядке SIZE_BUCKETS (0 тоже число); репо без данных о размере
-   * или CI не входит ни в один счетчик своего фильтра (незнание).
+   * Фасеты считаются по выборке с учетом ТОЛЬКО поиска: выбранные фильтры не
+   * схлопывают списки, из которых их выбирали. Счетчик – все репо выборки
+   * (оцененные и без оценки). У размера – все 5 корзин в порядке SIZE_BUCKETS
+   * (0 тоже число); репо без данных о размере или CI не входит ни в один
+   * счетчик своего фильтра.
    */
   facets: { languages: LanguageFacet[]; size: SizeFacet[]; ci: CiFacet[] };
   generatedAt: string;
@@ -155,22 +143,21 @@ export interface ReposQuery {
   sort: SortKey;
   order: SortOrder;
   /**
-   * В4.7 (П2): множество языков из повторяемого `lang` (`?lang=Go&lang=Rust`).
-   * undefined = параметра нет, фильтра нет (все языки); элемент null =
-   * «язык не определён» (`lang=` пустым). Одиночный `lang=Go` — множество из
-   * одного элемента: старые ссылки и закладки работают как раньше.
+   * Множество языков из повторяемого `lang` (`?lang=Go&lang=Rust`).
+   * undefined – фильтра нет (все языки); элемент null – «язык не определен»
+   * (`lang=` пустым).
    */
   lang?: (string | null)[];
   q?: string;
-  /** В5.2 (Б6): только репо с публичным AI-обзором (`ai=1`) */
+  /** только репо с публичным AI-обзором (`ai=1`) */
   ai?: boolean;
   /**
-   * В5.5 тур 2 (W3): множество корзин размера из повторяемого `size`
-   * (`?size=small&size=none`); undefined — фильтра нет. Репо без данных о
-   * размере при фильтре не показывается ни в одной корзине.
+   * Множество корзин размера из повторяемого `size` (`?size=small&size=none`);
+   * undefined – фильтра нет. Репо без данных о размере при фильтре не
+   * попадает ни в одну корзину.
    */
   size?: SizeBucket[];
-  /** В5.5 тур 2 (W3): `ci=yes` — есть `.sourcecraft/ci.yaml`, `ci=no` — подтвержденно нет */
+  /** `ci=yes` – есть `.sourcecraft/ci.yaml`, `ci=no` – подтвержденно нет */
   ci?: CiFilter;
   page: number;
   perPage: number;
@@ -179,17 +166,15 @@ export interface ReposQuery {
 const SORT_KEYS: SortKey[] = ["index", "likes", "activity", "coverage", "name"];
 
 /**
- * В4.6 (У21, решение владельца 20.09): страница 20, а не 25. После
- * уплотнения строки до 46px при 1440 видно 17 строк — страница из 20
- * обозрима почти целиком, и пагинация перестаёт обещать то, чего не видно
- * (при 25 видно было 14 из 25). Список опций в UI обязан содержать 20.
+ * Страница 20: при строке 46px на экране 1440 видно 17 строк, и страница
+ * обозрима почти целиком. Список размеров страницы в UI обязан содержать 20.
  */
 export const DEFAULT_QUERY: ReposQuery = { sort: "index", order: "desc", page: 1, perPage: 20 };
 
 export type ParseResult = { ok: true; query: ReposQuery } | { ok: false; message: string };
 
 /**
- * Неизвестный параметр игнорируется, неверное ЗНАЧЕНИЕ известного — 400:
+ * Неизвестный параметр игнорируется, неверное ЗНАЧЕНИЕ известного – 400:
  * тихо показать не то, что просили, хуже явной ошибки.
  */
 export function parseReposQuery(params: URLSearchParams): ParseResult {
@@ -270,11 +255,11 @@ export function parseReposQuery(params: URLSearchParams): ParseResult {
 // ---------- рейтинг ----------
 
 interface RatingRow {
-  /** id репо — внутреннее: ключ стыковки со снимком мест и заметками flagger (в ответ не едет) */
+  /** внутренний ключ стыковки со снимком мест и заметками flagger (в ответ не едет) */
   repo_id: number;
-  /** В5.5 тур 2 (W3): скан строки — ключ фактов размера и CI (в ответ не едет) */
+  /** ключ фактов размера и CI (в ответ не едет) */
   scan_id: number;
-  /** scores.code_empty: 1 — модель поставила «кода нет» (Q&A №13) */
+  /** scores.code_empty: 1 – репозиторий без кода */
   code_empty: number | null;
   org_slug: string;
   repo_slug: string;
@@ -287,7 +272,7 @@ interface RatingRow {
   language_color: string | null;
   total: number | null;
   coverage: number;
-  /** баллы 4 категорий индекса (`json_extract`); NULL — нет данных или ключа нет */
+  /** баллы 4 категорий индекса (`json_extract`); NULL – нет данных или ключа нет */
   c_documentation: number | null;
   c_activity: number | null;
   c_issues: number | null;
@@ -300,39 +285,33 @@ interface RatingRow {
 }
 
 /**
- * «Последний пригодный» скан (К-Ф1.1): последняя по scan_id строка оценки
- * текущей модели у скана с rating_eligible = 1. Один подзапрос на все
- * поверхности — рейтинг, фасеты, счётчики /api/meta, listMyRepos, публичная
- * часть карточки и MD. «Последний» — по scan_id, а не по датам: id монотонен.
- * Параметр — model_version.
+ * «Последний пригодный» скан: последняя по scan_id строка оценки текущей
+ * модели у скана с rating_eligible = 1. Один подзапрос на все поверхности –
+ * рейтинг, фасеты, счетчики /api/meta, listMyRepos, карточку и MD.
+ * «Последний» – по scan_id, а не по датам: id монотонен. Параметр – model_version.
  */
 export const LAST_ELIGIBLE_SCAN_SQL = `(SELECT MAX(sc2.scan_id) FROM scores sc2 JOIN scans s2 ON s2.id = sc2.scan_id
    WHERE sc2.repo_id = sc.repo_id AND sc2.model_version = ? AND s2.rating_eligible = 1)`;
 
 /**
- * Приватный репо без пригодного скана (круг 2, С2): последний завершённый
- * не-bad скан с оценкой текущей модели. Параметр — model_version.
+ * Для приватного репо без пригодного скана: последний завершенный не-bad скан
+ * с оценкой текущей модели. Параметр – model_version.
  */
 export const LAST_NOT_BAD_SCAN_SQL = `(SELECT MAX(sc2.scan_id) FROM scores sc2 JOIN scans s2 ON s2.id = sc2.scan_id
    WHERE sc2.repo_id = sc.repo_id AND sc2.model_version = ? AND s2.status NOT IN ('bad', 'running', 'queued'))`;
 
-/** Последний скан репо (L): статус и время последнего анализа (ТЗ §3.4). Алиас репо — r. */
+/** Последний скан репо: статус и время последнего анализа (ТЗ §3.4). Алиас репо – r. */
 const LAST_SCAN_SQL = `(SELECT MAX(l2.id) FROM scans l2 WHERE l2.repo_id = r.id)`;
 
-// В4.1 (К1/К2) + В4.1-fix (К-Ф1.1, Ф1.11) + В4.3 (Ф3.1/Ф3.2): одна строка на
-// репозиторий — последний пригодный скан; рейтинг сортируется по сохранённому
-// HealthCraft Index (healthcraft_index, 4 категории — CI и Security в рейтинг
-// не входят); статус и время — последнего скана L (круг 2, LOW-2: как
-// карточка), статус — public_status; только rating_active=1 AND
-// visibility='public'. Проверок доступа нет.
-// В5.3 (§2 25.09 «скорость рейтинга — вариант 1»): тот же набор тем же правилом,
-// одним проходом. «Последний пригодный скан» (как LAST_ELIGIBLE_SCAN_SQL) и
-// «последний скан» L (как LAST_SCAN_SQL) считаются по одному разу на репо
-// (`GROUP BY`), а не коррелированным подзапросом на каждую строку; из JSON
-// категорий SQLite достает только 4 балла индекса (`json_extract`) — строка
-// категорий (~1,4 КБ) в JS не едет и не разбирается. Было ~1 с на запрос при
-// 28 тыс. репо (650 мс SQL + 120 мс JSON), ответ не изменился (сверка построчно
-// на копии БД — журнал плана В5.3).
+// Одна строка на репозиторий: оценка последнего пригодного скана (сохраненный
+// HealthCraft Index, 4 категории – CI и Security в рейтинг не входят), статус
+// (public_status) и время – последнего скана, как на карточке. Только
+// rating_active=1 AND visibility='public', проверок доступа нет.
+// Ради скорости «последний пригодный» (как LAST_ELIGIBLE_SCAN_SQL) и
+// «последний» (как LAST_SCAN_SQL) считаются через `GROUP BY` один раз на репо,
+// а не коррелированным подзапросом на строку, а из JSON категорий SQLite
+// достает только 4 балла индекса – строка категорий (~1,4 КБ) в JS не едет.
+// На 28 тыс. репо это экономит порядка секунды на запрос.
 const RATING_SQL = `
 WITH last AS (
   SELECT sc2.repo_id, MAX(sc2.scan_id) AS scan_id FROM scores sc2 JOIN scans s2 ON s2.id = sc2.scan_id
@@ -354,27 +333,24 @@ JOIN scans l ON l.id = ls.id
 WHERE r.rating_active = 1
   AND r.visibility = 'public'`;
 
-/** Категории каналов с правами зрителя (К2): в рейтинге и без доступа — закрыты. */
+/** Категории каналов с правами зрителя: в рейтинге и без доступа они закрыты. */
 export const CHANNEL_CATEGORIES: CategoryKey[] = ["cicd", "security"];
 
 /**
- * Ключ дерева КАНАЛЬНОГО скана в доказательствах карточки (П13, круг 2
- * В4.2-port-fix; решение владельца (1) 18.09). Это НЕ kind: факта с таким
- * ключом в таблице `facts` не существует и появиться не может (ключи фактов
- * приходят из реестра `KINDS`, где «@» не встречается), в
- * PUBLIC_KINDS/CHANNEL_KINDS/READ_KINDS он не добавляется, Score по нему не
- * считается, валидатор фактов и фильтры пригодности скана его не видят.
- * Живёт только в `evidence` карточки и в MD-отчёте: под ним едет `tree.stats`
- * того скана, по которому посчитана плотность Security, — публичный
- * `tree.stats` скана P при этом остаётся на месте (он кормит `derived`).
- * Суффикс `@channel` выбран так, чтобы ключ нельзя было спутать с kind и
- * чтобы `categoryOf` (префикс до первой точки) по-прежнему давал «code».
+ * Ключ дерева КАНАЛЬНОГО скана в доказательствах карточки. Это НЕ kind: факта
+ * с таким ключом в `facts` нет и быть не может (в реестре `KINDS` нет «@»), в
+ * списки kinds он не входит, Score по нему не считается, валидатор и фильтры
+ * пригодности его не видят. Живет только в `evidence` карточки и в MD-отчете:
+ * под ним едет `tree.stats` того скана, по которому посчитана плотность
+ * Security, а публичный `tree.stats` остается на месте (он кормит `derived`).
+ * Суффикс `@channel` не спутать с kind, а `categoryOf` (префикс до первой
+ * точки) по-прежнему дает «code».
  */
 export const CHANNEL_TREE_KEY = "tree.stats@channel";
 
 /**
- * Страница репо на SourceCraft (шаблон платформы, колонки в схеме нет).
- * ОДИН литерал на карточку (шапка RepoV5) и строку рейтинга (В5.5 тур 1, Р3).
+ * Страница репо на SourceCraft (шаблон платформы, колонки в схеме нет) –
+ * один литерал для карточки и строки рейтинга.
  */
 export function repoWebUrl(org: string, repo: string): string {
   return `https://sourcecraft.dev/${org}/${repo}`;
@@ -391,7 +367,7 @@ function toRatingItem(row: RatingRow): RatingItem {
   for (const key of CATEGORY_ORDER) {
     categories[key] = CHANNEL_CATEGORIES.includes(key) ? null : (indexScores[key] ?? null);
   }
-  // stale-маркер рейтинга — только по фактам, которые входят в рейтинг
+  // stale-маркер рейтинга – только по фактам, которые входят в рейтинг
   const stale = (JSON.parse(row.stale) as string[]).filter((k) => PUBLIC_KINDS.includes(k));
   return {
     rank: null,
@@ -441,7 +417,7 @@ function sortValue(item: RatingItem, sort: SortKey): number | string | null {
 function compareItems(a: RatingItem, b: RatingItem, sort: SortKey, order: SortOrder): number {
   const av = sortValue(a, sort);
   const bv = sortValue(b, sort);
-  // NULL не «маленькое» и не «большое» — оно вне шкалы, поэтому всегда
+  // NULL не «маленькое» и не «большое» – оно вне шкалы, поэтому всегда
   // в хвосте: иначе смена order делала бы «нет данных» лидером рейтинга
   if (av === null && bv === null) return fullName(a).localeCompare(fullName(b));
   if (av === null) return 1;
@@ -450,7 +426,7 @@ function compareItems(a: RatingItem, b: RatingItem, sort: SortKey, order: SortOr
   if (typeof av === "string" && typeof bv === "string") cmp = av.localeCompare(bv);
   else cmp = (av as number) - (bv as number);
   if (order === "desc") cmp = -cmp;
-  // равные значения — по org/repo: пагинация не «дышит» между страницами
+  // равные значения – по org/repo, чтобы пагинация не «дышала» между страницами
   return cmp !== 0 ? cmp : fullName(a).localeCompare(fullName(b));
 }
 
@@ -463,24 +439,22 @@ function matchesQ(item: RatingItem, q: string): boolean {
   );
 }
 
-// ---------- В5.5 тур 2 (W3): факты фильтров размера и CI ----------
+// ---------- факты фильтров размера и CI ----------
 
-/** Что фильтрам нужно из фактов скана: строки кода (null — незнание) и наличие ci.yaml (null — факта нет). */
+/** Что фильтрам нужно из фактов скана: строки кода (null – незнание) и наличие ci.yaml (null – факта нет). */
 export interface ScanFilterFacts {
   loc: number | null;
   hasCi: boolean | null;
 }
 
 /**
- * Память фактов фильтров по scan_id — на соединение БД (у тестов свои базы с
- * пересекающимися id). Факты скана пишутся ОДИН раз, до оценки (runner:
- * insertFacts → score-hook), и больше не меняются — поэтому запомненное
- * значение не устаревает; новый скан приходит с новым scan_id и дочитывается.
- * Зачем: доставать `tree.stats` и `cicd.configs` из `facts` на каждом запросе
- * стоило +~250 мс к ~0,43 с рейтинга на 28 тыс. строк (замер — отчет W3), а
- * память делает это один раз на процесс. Производная колонка в `scores`
- * потребовала бы правки конвейера оценки (зона W2) и «нет данных» у всех строк
- * до пересчета.
+ * Память фактов фильтров по scan_id, отдельная на каждое соединение БД (у
+ * тестов свои базы с пересекающимися id). Факты скана пишутся один раз, до
+ * оценки, и больше не меняются, поэтому запомненное не устаревает; новый скан
+ * приходит с новым scan_id и дочитывается. Чтение `tree.stats` и
+ * `cicd.configs` на каждом запросе добавляло ~250 мс к рейтингу на 28 тыс.
+ * строк. Производная колонка в `scores` потребовала бы правки конвейера оценки
+ * и дала бы «нет данных» у всех строк до пересчета.
  */
 const filterFactsMemo = new WeakMap<Database, Map<number, ScanFilterFacts>>();
 
@@ -499,7 +473,7 @@ interface FilterFactRow {
   ci_type: string | null;
 }
 
-// json_valid — страж: битое значение одного факта не роняет рейтинг (факт = незнание);
+// json_valid – страж: битое значение одного факта не роняет рейтинг (факт = незнание);
 // у этих kinds сжатия нет (z:-префикс только у timeline)
 const FILTER_FACTS_SQL = (n: number) => `
 SELECT scan_id, key,
@@ -514,10 +488,10 @@ FROM (SELECT scan_id, key, value, status = 'ok' AND json_valid(value) AS ok FROM
       WHERE category = ? AND key = ? AND scan_id IN (${Array(n).fill("?").join(",")}))`;
 
 /**
- * Строки кода из `tree.stats`: `source_loc` (сборщик 3+), у старых фактов без
- * этого поля — `loc`. `source_loc = null` — чтение оборвалось (незнание, как в
- * codeEmptyKind); 0 строк при непрочитанных файлах кода — тоже незнание. При
- * `source_unread > 0` число — нижняя граница (названо в отчете W3).
+ * Строки кода из `tree.stats`: `source_loc`, у старых фактов без этого поля –
+ * `loc`. `source_loc = null` – чтение оборвалось (незнание, как в
+ * codeEmptyKind); 0 строк при непрочитанных файлах кода – тоже незнание. При
+ * `source_unread > 0` число – лишь нижняя граница.
  */
 function locOf(r: FilterFactRow): number | null {
   const isNum = (t: string | null) => t === "integer" || t === "real";
@@ -529,7 +503,7 @@ function locOf(r: FilterFactRow): number | null {
   return null;
 }
 
-/** Факты фильтров для набора сканов: память + дочитывание новых scan_id пачками. */
+/** Факты фильтров для набора сканов: из памяти, новые scan_id дочитываются пачками. */
 export function scanFilterFacts(db: Database, scanIds: number[], opts: { prune?: boolean } = {}): Map<number, ScanFilterFacts> {
   let memo = filterFactsMemo.get(db);
   if (memo === undefined) {
@@ -544,14 +518,14 @@ export function scanFilterFacts(db: Database, scanIds: number[], opts: { prune?:
       got.get(r.scan_id)!.loc = locOf(r);
     }
     for (const r of db.query(FILTER_FACTS_SQL(chunk.length)).all("cicd", "cicd.configs", ...chunk) as FilterFactRow[]) {
-      // has_ci_yaml — булево; иное значение (нет поля, мусор) — незнание
+      // has_ci_yaml – булево; иное значение (нет поля, мусор) – незнание
       if (r.ci_type === "true" || r.ci_type === "false") got.get(r.scan_id)!.hasCi = r.ci === 1;
     }
     for (const [id, v] of got) memo.set(id, v);
   }
-  // память не растет бесконечно: сканы, ушедшие из рейтинга, выбрасываются.
-  // В5.9 Б: `prune: false` — у частичного набора (когорта карточки): иначе
-  // карточка выбрасывала бы из памяти весь рейтинг, и он дочитывал бы факты заново
+  // сканы, ушедшие из рейтинга, выбрасываются, чтобы память не росла. Для
+  // частичного набора (когорта карточки) – `prune: false`: иначе карточка
+  // выбросила бы весь рейтинг, и он дочитывал бы факты заново
   if (opts.prune !== false && memo.size > scanIds.length * 2 + 1000) {
     const keep = new Set(scanIds);
     for (const id of memo.keys()) if (!keep.has(id)) memo.delete(id);
@@ -561,13 +535,11 @@ export function scanFilterFacts(db: Database, scanIds: number[], opts: { prune?:
 
 export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } = {}): RatingResponse {
   const rows = db.query(RATING_SQL).all(MODEL_VERSION, MODEL_VERSION) as RatingRow[];
-  // В-4: место — по всему рейтингу, до поиска и фильтров (правило карточки).
-  // В5.3 (вариант 1): весь список сортируется по месту ОДИН раз — фильтры его
-  // порядок сохраняют, и выдаче по умолчанию (индекс по убыванию) вторая
-  // сортировка не нужна; NULL-индексы стоят в хвосте (compareItems)
-  // В5.5 тур 2 (W3): размер и CI — из фактов скана строки рейтинга (память по
-  // scan_id, без per-row запросов); признак «кода нет» — из строки оценки.
-  // Во внутренних Map, в ответ не едут (экран их не рисует)
+  // Место считается по всему рейтингу, до поиска и фильтров (как на карточке).
+  // Список сортируется по месту один раз: фильтры порядок сохраняют, и выдаче
+  // по умолчанию вторая сортировка не нужна; NULL-индексы – в хвосте.
+  // Размер и CI берутся из фактов скана строки, «без кода» – из строки оценки;
+  // они лежат во внутренних Map и в ответ не едут
   const factsByScan = scanFilterFacts(db, rows.map((r) => r.scan_id));
   const sizeOf = new Map<RatingItem, SizeBucket | null>();
   const ciOf = new Map<RatingItem, boolean | null>();
@@ -580,7 +552,7 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
       return item;
     })
     .sort((a, b) => compareItems(a, b, "index", "desc"));
-  // В5.2 (Б6): публичный AI-обзор — одним запросом на выдачу (заметки overview аудитории public)
+  // публичный AI-обзор – одним запросом на всю выдачу (заметки overview аудитории public)
   const withAi = new Set(
     (
       db
@@ -592,8 +564,8 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
   all.forEach((item, i) => {
     if (item.healthcraftIndex !== null) item.rank = i + 1;
   });
-  // В5.9 Б: значок места — от индекса в выборке (как `ratingPlace` карточки): список
-  // уже по индексу по убыванию, поэтому «выше» — начало группы равных, «не ниже» — ее конец
+  // значок места – от индекса (как `ratingPlace` карточки): список уже отсортирован
+  // по индексу, поэтому «выше» – начало группы равных, «не ниже» – ее конец
   const rankedTotal = all.filter((i) => i.healthcraftIndex !== null).length;
   for (let from = 0; from < rankedTotal; ) {
     let to = from;
@@ -602,17 +574,14 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
     for (let i = from; i < to; i++) all[i]!.rankBadge = badge;
     from = to;
   }
-  // В5.5 тур 1 (W2): repo_id в ответ не едет — ключ стыковки строки со
-  // снимком мест (Р1) и заметкой flagger (Р2)
+  // repo_id в ответ не едет – это ключ стыковки строки со снимком мест и заметкой flagger
   const idBySlug = new Map(rows.map((r) => [`${r.org_slug}/${r.repo_slug}`, r.repo_id]));
 
-  // В5.5 тур 1 (W2, Р1): динамика позиции — базовый снимок читается ОДИН
-  // раз в Map, без per-row запросов (рейтинг ~0,58 с на 28k строк до правки).
-  // delta = место в снимке − место сейчас (положительное = вырос); снимка нет
-  // или репо в нем отсутствует (новый, вышел из ранжирования) — null.
-  // Приёмка тура 1 (26.09): база — последний снимок ДО текущих UTC-суток.
-  // Сегодняшний снимок пишется сразу после ночной волны и совпадает с текущим
-  // порядком — сравнение с ним гасило стрелки до «–» на весь день.
+  // Динамика позиции: базовый снимок читается один раз в Map, без запроса на
+  // строку. delta = место в снимке − место сейчас (положительное = вырос).
+  // База – последний снимок ДО текущих UTC-суток: сегодняшний пишется сразу
+  // после ночной волны и совпадает с текущим порядком, сравнение с ним весь
+  // день показывало бы «без изменений».
   const today = (opts.now ?? new Date()).toISOString().slice(0, 10);
   const snapDay = (db.query("SELECT MAX(taken_at) AS d FROM rating_snapshots WHERE taken_at < ?").get(today) as { d: string | null }).d;
   if (snapDay !== null) {
@@ -629,10 +598,9 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
     }
   }
 
-  // В5.5 тур 1 (W2, Р2): плашка фрода — последняя заметка flagger по репо.
-  // «Последняя» — тем же правилом, что fraudOf карточки (scan_id DESC, id DESC;
-  // здесь — окном по всем репо одним запросом); разбор JSON общий
-  // (parseFlaggerNote): битый JSON = флага нет. На место и сортировку не влияет.
+  // Плашка накрутки – по последней заметке flagger репо, тем же правилом, что
+  // fraudOf карточки (scan_id DESC, id DESC), но окном по всем репо одним
+  // запросом. Битый JSON – флага нет. На место и сортировку флаг не влияет.
   const flagged = new Set<number>();
   for (const row of db
     .query(
@@ -649,15 +617,13 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
     }
   }
 
-  // фасеты считаются БЕЗ фильтра языка (иначе выбранный язык схлопывает
-  // список выбора и из него некуда вернуться), но С учётом поиска
+  // фасеты считаются БЕЗ фильтров (иначе выбранный язык схлопнул бы список
+  // выбора и из него некуда было бы вернуться), но С учетом поиска
   const byQ = query.q === undefined ? all : all.filter((i) => matchesQ(i, query.q!));
-  // Мультивыбор (В4.7, П2) это решение не отменяет: выбранный набор не
-  // схлопывает список, из которого его выбирали.
   const counts = new Map<string | null, number>();
   const colors = new Map<string | null, string | null>();
-  // цвет — известный цвет строки этого языка с наименьшим org/repo (платформа отдает его на
-  // язык, а не на репо); ревью 25.09: выбор не зависит от порядка списка (он теперь по месту)
+  // цвет у платформы один на язык; берем известный цвет строки с наименьшим
+  // org/repo, чтобы выбор не зависел от порядка списка
   const colorFrom = new Map<string | null, string>();
   for (const item of byQ) {
     counts.set(item.language, (counts.get(item.language) ?? 0) + 1);
@@ -673,7 +639,7 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
     .map(([language, count]) => ({ language, count, color: colors.get(language) ?? null }))
     .sort((a, b) => b.count - a.count || (a.language ?? "￿").localeCompare(b.language ?? "￿"));
 
-  // В5.5 тур 2 (W3): счетчики размера и CI — по той же выборке, что языки (поиск, без фильтров)
+  // счетчики размера и CI – по той же выборке, что языки
   const sizeCounts = new Map<SizeBucket, number>();
   const ciCounts = new Map<CiFilter, number>();
   for (const item of byQ) {
@@ -683,10 +649,9 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
     if (ci !== null && ci !== undefined) ciCounts.set(ci ? "yes" : "no", (ciCounts.get(ci ? "yes" : "no") ?? 0) + 1);
   }
 
-  // фильтр — принадлежность множеству (В4.7, П2); сортировка от него не зависит
   const langs = query.lang;
   const byLang = langs === undefined ? byQ : byQ.filter((i) => langs.includes(i.language));
-  // В5.5 тур 2 (W3): нет данных о размере или CI — ни в одну корзину (незнание, закон 2)
+  // нет данных о размере или CI – ни в одну корзину: это незнание
   const sizes = query.size;
   const inSizes = (i: RatingItem): boolean => {
     const size = sizeOf.get(i);
@@ -739,29 +704,28 @@ export interface CardRepo {
   languageColor: string | null;
   webUrl: string;
   /**
-   * В4.9 ч.2 (блок Д, разрешение владельца 23.09): видимость SourceCraft —
-   * плашка у имени на карточке. Все 3 значения `Repository.Visibility` и
-   * явное «неизвестно» (мусор или NULL в строке) — `visibilityOf`.
+   * Видимость в SourceCraft для плашки у имени: все 3 значения
+   * `Repository.Visibility` и явное «неизвестно» (мусор или NULL в строке).
    */
   visibility: "public" | "internal" | "private" | "unknown";
   /**
-   * В5.5 закрытие (П-2): бейдж и публичный API отвечают этому репозиторию
-   * (`publicApiVisible` — та же проверка, что у маршрута `badge.svg`); false —
-   * маршрут ответил бы 404, кнопки бейджа нет.
+   * Бейдж и публичный API отвечают этому репозиторию (`publicApiVisible` – та
+   * же проверка, что у маршрута `badge.svg`); false – маршрут ответил бы 404,
+   * кнопки бейджа нет.
    */
   badge: boolean;
 }
 
 export interface CardMarkers {
-  /** деградационный ярус: история видна только с этой даты (§5.7) */
+  /** деградационный ярус: история видна только с этой даты */
   historyTruncatedSince: string | null;
   /** CI заявлен конфигом, прогоны недоступны — потолок категории 50 */
   ciConfigOnlyCap: boolean;
   /** часть фактов взята из истории при сбое канала */
   staleFacts: boolean;
-  /** без-кодовое репо (Q&A №13): Score 0 как данные «проекта нет», не NULL */
+  /** репозиторий без кода: по разъяснению организаторов Score 0 – это данные («проекта нет»), а не NULL */
   codeEmpty: boolean;
-  /** git-канал упёрся в лимиты оператора (факт no-data(limits)) — лимиты для текста причины (К5); иначе null */
+  /** git-канал уперся в лимиты оператора (факт no-data(limits)) – лимиты для текста причины; иначе null */
   gitLimits: GitLimitsMarker | null;
 }
 
@@ -772,10 +736,10 @@ export interface CardScan {
   status: string;
   trigger: string;
   /**
-   * В4.8.5 (К8.5.2a): почему скан закрыт `bad` без сбоя сбора — прерван
-   * штатной остановкой (`shutdown`), закрыт свипом/перехватом как сирота
-   * (`orphaned`), не посчиталась оценка (`score_failed`); иначе null.
-   * Прерванный скан — не «ошибка» для пользователя (`analysisOutcome`).
+   * Почему скан закрыт `bad` без сбоя сбора: прерван штатной остановкой
+   * (`shutdown`), закрыт как сирота (`orphaned`), не посчиталась оценка
+   * (`score_failed`); иначе null. Прерванный скан для пользователя не
+   * «ошибка» (`analysisOutcome`).
    */
   detail?: ScanDetail | null;
 }
@@ -788,17 +752,15 @@ export function scanDetailOf(raw: string | null | undefined): ScanDetail | null 
 }
 
 /**
- * Ф2.15: статус ЖИВОЙ job зрителя по этому репо (queued/running) — единственное
- * поле: ни queueAhead (round-robin не задаёт FIFO-позицию), ни id. null = у
- * зрителя нет живой заявки (или он анонимен). Читатель — статус-блок карточки
- * «в очереди/сканируем» с опросом 3 с.
+ * Статус живой заявки зрителя по этому репо (queued/running) для статус-блока
+ * карточки. Позиции в очереди нет: round-robin не задает FIFO-порядок. null –
+ * живой заявки нет (или зритель анонимен).
  */
 export interface CardJob {
   status: "queued" | "running";
   /**
-   * В4.8.5 (К8.5.2b, §2-Р4): «затянулось» — признак СЕРВЕРА: задание
-   * `running`, а его лиз истёк (живой воркер продлевает лиз каждые leaseMs/3;
-   * истёк — процесс умер или цикл событий стоит). UI не считает это сам от
+   * «Затянулось» – признак сервера: задание `running`, а его лиз истек (живой
+   * воркер продлевает лиз каждые leaseMs/3). UI не считает это сам от
    * `leaseMs`: при лизе 10 мин штатный 20-минутный клон выглядел бы зависшим.
    */
   stalled: boolean;
@@ -807,7 +769,7 @@ export interface CardJob {
 export interface CardCategory extends CategoryScore {
   /** номинальный вес категории в Repo Health Score (SCORE_WEIGHTS): карточка объясняет перенормировку полного показателя; веса индекса — в /api/meta.categories[].indexWeight */
   weight: number;
-  /** канал закрыт зрителю (К2): чисел и подметрик нет, причина — для заглушки */
+  /** канал закрыт зрителю: чисел и подметрик нет, причина – для заглушки */
   locked?: ChannelAccess;
 }
 
@@ -824,19 +786,17 @@ export interface CardScore {
    * Место в публичном рейтинге по HealthCraft Index и размер выборки.
    * Считается по тому же набору, что сам рейтинг (rating_active, public,
    * последний пригодный скан текущей модели) и БЕЗ фильтров зрителя: это
-   * позиция среди всех оценённых, а не среди отфильтрованных. Оба поля null,
-   * когда индекса нет — места у неоценённого репозитория не существует, — и
-   * когда сам репозиторий в этот набор не входит (приватный: он виден своим
-   * участникам и имеет индекс, но в публичном рейтинге его нет).
+   * позиция среди всех оцененных, а не среди отфильтрованных. Оба поля null,
+   * когда индекса нет, и когда сам репозиторий в этот набор не входит
+   * (приватный: у него есть индекс, но в публичном рейтинге его нет).
    */
   rank: number | null;
   rankedTotal: number | null;
-  /** В5.9 Б: значок места «ТОП-N» — `rankBadge` от индекса в выборке места, равен значку строки рейтинга; null — места нет */
+  /** значок места «ТОП-N», равен значку строки рейтинга; null – места нет */
   rankBadge: RankBadge | null;
   /**
-   * В5.9 Б (№11): «индекс лучше, чем у X% похожих» (язык + корзина размера;
-   * определение и причины — `cohort.ts`). null — тогда же, когда `rank` null:
-   * процента в выборке, которой репо не принадлежит, нет (правило 21.09).
+   * «Индекс лучше, чем у X% похожих» (см. `cohort.ts`). null – тогда же, когда
+   * `rank` null: процента в выборке, которой репо не принадлежит, нет.
    */
   cohort: RepoCohort | null;
   modelVersion: string;
@@ -863,12 +823,12 @@ export interface CardRecommendation {
   deltaScore: number | null;
   opensCategory: string | null;
   source: string;
-  /** канал правила (cicd | appsec | null): у какого показателя Δ — HealthCraft Index или Repo Health Score (В4.3) */
+  /** канал правила (cicd | appsec | null): к какому показателю относится Δ – HealthCraft Index или Repo Health Score */
   channel: string | null;
   /**
-   * В5.9 (№5): у правила есть файл-заготовка — `GET /api/repos/:org/:repo/fix/:ruleId`
-   * отдает 200 (лицензия — с любым `?license=` из `licenses`); null — заготовки нет.
-   * optional — литералы карточек в тестах отчета; сборщик карточки ставит всегда.
+   * У правила есть файл-заготовка: `GET /api/repos/:org/:repo/fix/:ruleId`
+   * отдает 200 (лицензия – с любым `?license=` из `licenses`); null – заготовки
+   * нет. Необязательное ради литералов карточек в тестах; сборщик ставит всегда.
    */
   fixTemplate?: FixTemplateMeta | null;
 }
@@ -895,22 +855,22 @@ export interface CardEvidence {
   value: unknown;
 }
 
-/** Доступ зрителя к каналам — для плашек UI (К2). */
+/** Доступ зрителя к каналам – для плашек UI. */
 export interface CardAccess {
   cicd: ChannelAccess;
   appsec: ChannelAccess;
 }
 
 /**
- * В4.8.5: кто смотрит карточку — без новых запросов, из доступа, который
- * карточка и так резолвит при показе.
- * `own` (К8.5.14 (а), §2-Р2) — «свой» по общему правилу `isOwnRepo`: кнопка
- * анализа есть на любом своём репозитории, даже не в избранном; неизвестно
- * (сбой, нет токена, нет сессии) — не свой.
- * `auth` (К8.5.8) — отдельное поле, `ChannelAccess` не трогается (иначе
- * `src/report` без ключа писал бы «Не удалось проверить»): `no-session` —
- * зритель без сессии (аноним или сессия истекла), `no-pat` — сессия без
- * читаемого токена, `pat` — токен есть.
+ * Кто смотрит карточку – без новых запросов, из доступа, который карточка и
+ * так выясняет при показе.
+ * `own` – «свой» по общему правилу `isOwnRepo`: кнопка анализа есть на любом
+ * своем репозитории, даже не в избранном; неизвестно (сбой, нет токена, нет
+ * сессии) – не свой.
+ * `auth` – отдельное поле, чтобы не трогать `ChannelAccess` (иначе `src/report`
+ * без ключа писал бы «Не удалось проверить»): `no-session` – зритель без
+ * сессии (аноним или сессия истекла), `no-pat` – сессия без читаемого токена,
+ * `pat` – токен есть.
  */
 export interface CardViewer {
   own: boolean;
@@ -918,9 +878,8 @@ export interface CardViewer {
 }
 
 /**
- * В5 (К5.4): AI-описание в карточке — ТОЛЬКО зрителю с правами на полный
- * Score (решение 22.09: текст никогда не публичен). Привязан к скану
- * последней генерации (ai_notes append — «взгляды» на каждый скан).
+ * Заметка AI-описания в карточке. Привязана к скану последней генерации
+ * (ai_notes пополняется на каждый скан).
  */
 export interface CardAiNote {
   role: string;
@@ -954,36 +913,33 @@ export interface CardAiCheck {
 export interface CardAi {
   /** скан последней генерации */
   scanId: number;
-  /** В5.2 (Б2): какая версия текста отдана — публичная (4 открытые категории) или полная */
+  /** какая версия текста отдана – публичная (4 открытые категории) или полная */
   audience: AiAudience;
   generatedAt: string | null;
   overview: CardAiNote | null;
   specialists: CardAiNote[];
-  /** 23.09: роли, не прошедшие формирование, с честной причиной для карточки */
+  /** роли, не прошедшие формирование, с причиной для карточки */
   failures: CardAiFailure[];
-  /** живая summary-заявка — кнопка показывает «формируется» */
+  /** живая summary-заявка – кнопка показывает «формируется» */
   jobActive: boolean;
   /** до какого времени кулдаун кнопки (Config.queue.summaryCooldownMs) */
   cooldownUntil: string | null;
   /**
-   * В5 (К5.10): флаг фрода — подозрение для проверки человеком; на показ
-   * только зрителю с полным Score (там же, где текст). Score не меняет.
-   */
-  /**
-   * В5.2 (Б3): состояние проверки на накрутку — для кнопки «Проверить оценку» и
-   * трех состояний метки: fraud = null — «не проверялось» (или отказ, failure),
-   * flag false — «признаков нет», flag true — «есть признаки»
+   * Состояние проверки на накрутку – для кнопки «Проверить оценку» и трех
+   * состояний метки: fraud = null – «не проверялось» (или отказ, failure),
+   * flag false – «признаков нет», flag true – «есть признаки»
    */
   check: CardAiCheck;
+  /** Флаг накрутки – подозрение для проверки человеком, Score не меняет. */
   fraud: {
     flag: boolean;
     factors: { key: string; note: string }[];
     /**
-     * В5.2 (Б1): признаки ритма, по которым шла проверка (`activity.rhythm`,
-     * считает код) — из той же заметки; null у проверок до В5.2
+     * признаки ритма, по которым шла проверка (`activity.rhythm`, считает код),
+     * из той же заметки; null у старых проверок
      */
     signals?: Record<string, unknown> | null;
-    /** аудит надежности М3: прочие факты входа проверки (activity.rest) — из ее заметки */
+    /** прочие факты входа проверки (activity.rest) из ее заметки */
     inputs?: Record<string, unknown>;
   } | null;
 }
@@ -991,29 +947,29 @@ export interface CardAi {
 export interface RepoCard {
   repo: CardRepo;
   access: CardAccess;
-  /** В4.8.5: «свой» и причина доступа зрителя (optional — литералы карточек в тестах отчёта) */
+  /** «свой» и причина доступа зрителя (необязательное ради литералов карточек в тестах) */
   viewer?: CardViewer;
   markers: CardMarkers;
   scan: CardScan | null;
-  /** живая job зрителя (Ф2.15) — очередь без позиции; аноним/без заявки → null */
+  /** живая заявка зрителя; аноним или без заявки → null */
   job: CardJob | null;
   score: CardScore | null;
   derived: DerivedMetrics | null;
-  /** В5: AI-описание; отсутствует (undefined), когда зрителю закрыт полный Score */
+  /** AI-описание; нет (undefined), когда зрителю закрыт полный Score */
   ai?: CardAi | null;
   recommendations: CardRecommendation[];
   /**
-   * В5.9 (№2): «Лестница к зеленой зоне» — накопительный пересчет публичных
-   * presence-правил (`score/ladder.ts`) на тех же фактах, что рекомендации.
-   * Гипотетические числа: считаются при чтении, не хранятся, в /api/v1 не идут.
-   * null — лестницы нет (уже в зоне, нет кода, нет индекса, нечего предложить);
-   * optional — литералы карточек в тестах отчета, сборщик карточки ставит всегда.
+   * «Лестница к зеленой зоне» – накопительный пересчет публичных правил «файла
+   * нет» (`score/ladder.ts`) на тех же фактах, что рекомендации. Числа
+   * гипотетические: считаются при чтении, не хранятся, в /api/v1 не идут.
+   * null – лестницы нет (уже в зоне, нет кода, нет индекса, нечего предложить).
+   * Необязательное ради литералов карточек в тестах; сборщик ставит всегда.
    */
   ladder?: Ladder | null;
   evidence: CardEvidence[];
 }
 
-/** Факты каналов с правами (К2): не едут в ответ зрителю без доступа — производные CHANNEL_KINDS (К-Ф1.1). */
+/** Факты каналов с правами: не едут в ответ зрителю без доступа. */
 export const CICD_KINDS = CHANNEL_KINDS.filter((k) => categoryOf(k) === "cicd");
 export const APPSEC_KINDS = CHANNEL_KINDS.filter((k) => categoryOf(k) === "security");
 
@@ -1028,7 +984,7 @@ function capValue(value: unknown): unknown | TruncatedValue {
   return { truncated: true, bytes, preview: json.slice(0, PREVIEW_CHARS) };
 }
 
-/** Сырьё коммитов в ответ не едет никогда (объём + закон 3 «код не храним»). */
+/** Сырые коммиты в ответ не едут никогда: это объем, а код и его историю мы не храним. */
 function timelineAggregate(value: unknown): TimelineAggregate {
   const events = (value as { events?: { author?: { date?: string } }[] } | null)?.events;
   if (!Array.isArray(events) || events.length === 0) {
@@ -1104,18 +1060,17 @@ function findRepoRow(db: Database, org: string, repo: string): CardRepoRow | nul
 }
 
 /**
- * В5.5 закрытие (П-2): публичный API и бейдж отвечают только публичному
- * репозиторию из рейтинга — ОДНА проверка для маршрутов `/api/v1/...`
- * (`getPublicRepo`) и поля карточки `repo.badge`: кнопка бейджа знает ответ
- * маршрута без пробного запроса (прежняя проба ловила 404 в консоли).
+ * Публичный API и бейдж отвечают только публичному репозиторию из рейтинга.
+ * Одна проверка для маршрутов `/api/v1/...` и поля карточки `repo.badge`:
+ * кнопка бейджа знает ответ маршрута без пробного запроса.
  */
 export function publicApiVisible(r: { visibility: string; rating_active: number }): boolean {
   return r.visibility === "public" && r.rating_active === 1;
 }
 
 /**
- * Видимость карточки (К2): публичный активный — всем; эвиктированный
- * публичный — 404 всем; не публичный — только при repo = granted.
+ * Видимость карточки: публичный из рейтинга – всем; выведенный публичный –
+ * 404 всем; не публичный – только при repo = granted.
  */
 function cardVisible(r: CardRepoRow, access: AccessResult): boolean {
   if (r.visibility === "public") return r.rating_active === 1;
@@ -1123,10 +1078,10 @@ function cardVisible(r: CardRepoRow, access: AccessResult): boolean {
 }
 
 /**
- * Строка оценки публичной части карточки (скан P): последний пригодный скан
- * текущей модели; приватный репо без такого — последний не-bad (владелец видит
- * оценку своего репо, ТЗ §5). В5.9: одна выборка для карточки и для файла-
- * заготовки (`fixFileFor`) — заготовка строится на тех же фактах, что правило.
+ * Строка оценки публичной части карточки: последний пригодный скан текущей
+ * модели; у приватного репо без такого – последний не-bad (владелец видит
+ * оценку своего репо, ТЗ §5). Общая для карточки и файла-заготовки
+ * (`fixFileFor`), чтобы заготовка строилась на тех же фактах, что и правило.
  */
 function publicScoreRow(db: Database, r: CardRepoRow): ScoreRow | null {
   const SCORE_COLS = `sc.scan_id, sc.model_version, sc.healthcraft_index, sc.index_coverage,
@@ -1156,13 +1111,11 @@ export async function getRepoCardForViewer(
 }
 
 /**
- * В4.8.5 (К8.5.6, С6-1): исход показа карточки. Приватный репозиторий, чью
- * проверку доступа SourceCraft не подтвердил из-за СБОЯ (0/429/5xx) или
- * отклонённого токена (401), — не «не найден» для владельца с ДОКАЗАННЫМИ
- * правами (сохранённая проверка текущего поколения PAT или свой скан):
- * ему — «проверка не удалась» / «токен отклонён». Всем прочим — прежний
- * нейтральный 404, неотличимый от несуществующего (чужой приватный не
- * раскрывается).
+ * Исход показа карточки. Если доступ к приватному репозиторию не подтвержден
+ * из-за СБОЯ SourceCraft (0/429/5xx) или отклоненного токена (401), владелец
+ * с ДОКАЗАННЫМИ правами (сохраненная проверка текущего PAT или свой скан)
+ * получает «проверка не удалась» / «токен отклонен». Всем прочим –
+ * нейтральный 404, неотличимый от несуществующего репо.
  */
 export type CardOutcome = { kind: "card"; card: RepoCard } | { kind: "not_found" } | { kind: "check_failed" } | { kind: "token_rejected" };
 
@@ -1175,12 +1128,11 @@ export async function resolveCardForViewer(
 ): Promise<CardOutcome> {
   const r = findRepoRow(db, org, repo);
   if (!r) return { kind: "not_found" };
-  // эвиктированный публичный — 404 всем, проверять доступ незачем
+  // выведенный публичный – 404 всем, проверять доступ незачем
   if (r.visibility === "public" && r.rating_active !== 1) return { kind: "not_found" };
   const access = await resolve({ id: r.id, org: r.org_slug, repo: r.repo_slug, visibility: r.visibility });
-  // 23.09: summaryCooldownMs обязана доехать до buildCardAi — раньше глохла
-  // здесь, и карточка молча брала дефолт 60 мин, игнорируя .env (дебаг-куладаун
-  // 1 мс работал у enqueue, но кнопка оставалась disabled)
+  // summaryCooldownMs обязан доехать до buildCardAi, иначе карточка молча
+  // возьмет дефолт и разойдется с настройкой из .env
   const card = getRepoCard(db, org, repo, { access, limits: opts.limits, viewerUserId: opts.viewerUserId, viewerAuth: opts.viewerAuth, summaryCooldownMs: opts.summaryCooldownMs });
   if (card) return { kind: "card", card };
   if (r.visibility !== "public" && (access.repo === "check-failed" || access.repo === "pat-expired") && opts.provenRights?.() === true) {
@@ -1190,19 +1142,17 @@ export async function resolveCardForViewer(
 }
 
 /**
- * Единая карточка (К2), собранная по доступу зрителя (дефолт — аноним).
- * null = репозитория нет или он не виден зрителю (404). Есть репо без
- * скана — это 200.
+ * Карточка, собранная по доступу зрителя (по умолчанию – аноним). null –
+ * репозитория нет или он не виден зрителю (404). Репо без скана – это 200.
  */
 export function getRepoCard(
   db: Database,
   org: string,
   repo: string,
   /**
-   * `withRank: false` (В4.7, счётчик рекомендаций кабинета) — место в рейтинге
-   * не считается (rank/rankedTotal = null): это два подсчёта по всему
-   * каталогу, а кабинету из карточки нужны только рекомендации. Остальная
-   * сборка — та же, поэтому число рекомендаций равно карточке построением.
+   * `withRank: false` – место в рейтинге не считается (rank/rankedTotal = null):
+   * это два подсчета по всему каталогу, а кабинету нужны только рекомендации.
+   * Остальная сборка та же, поэтому число рекомендаций равно карточке.
    */
   opts: { access?: AccessResult; limits?: ScanConfig; viewerUserId?: number; withRank?: boolean; viewerAuth?: CardViewer["auth"]; summaryCooldownMs?: number } = {},
 ): RepoCard | null {
@@ -1213,8 +1163,8 @@ export function getRepoCard(
   const ciOpen = access.cicd === "granted";
   const secOpen = access.appsec === "granted";
   const cardAccess: CardAccess = { cicd: access.cicd, appsec: access.appsec };
-  // В4.8.5 (К8.5.14 (а), §2-Р2): «свой» — из того же доступа, что уже
-  // резолвлен для показа (без новых запросов); видимость — из БД
+  // «свой» – из того же доступа, что уже выяснен для показа (без новых
+  // запросов); видимость – из БД
   const viewer: CardViewer = {
     own: isOwnRepo({ repo: access.repo, cicd: access.cicd, appsec: access.appsec, visibility: visibilityOf(r.visibility) }),
     auth: opts.viewerAuth ?? (opts.access ? "pat" : "no-session"),
@@ -1230,17 +1180,15 @@ export function getRepoCard(
     lastActivityAt: r.last_activity_at,
     logoUrl: r.logo_url,
     languageColor: r.language_color,
-    // колонки в схеме нет — шаблон платформы (repoWebUrl: один литерал на карточку и рейтинг)
     webUrl: repoWebUrl(r.org_slug, r.repo_slug),
     visibility: visibilityOf(r.visibility),
     badge: publicApiVisible(r),
   };
 
-  // Правило карточки (круг 2, решение владельца 17.09; TASK.md §2 «Аудит
-  // В4.1-fix → правило карточки»):
-  //  - публичная часть (Score в рейтинге, 4 категории, публичные факты и
-  //    правила) — из последнего пригодного скана P; приватный репо без P —
-  //    из последнего не-bad скана (владелец видит оценку своего репо, ТЗ §5);
+  // Откуда берутся данные карточки:
+  //  - публичная часть (индекс, 4 категории, публичные факты и правила) – из
+  //    последнего пригодного скана; у приватного репо без такого – из
+  //    последнего не-bad скана (владелец видит оценку своего репо, ТЗ §5);
   //  - CI — из последнего скана, где cicd.configs и cicd.runs собраны ok
   //    (нет такого — последний с ok cicd.configs: потолок «только конфиг»);
   //    Security — из последнего скана, где ok appsec.findings и tree.stats;
@@ -1253,7 +1201,7 @@ export function getRepoCard(
     .get(r.id) as
     | { id: number; started_at: string; finished_at: string | null; status: string; public_status: string | null; trigger: string; status_detail: string | null }
     | null;
-  // статус без каналов (Ф1.11) — всем
+  // статус без учета каналов – всем
   const scan: CardScan | null = scanRow
     ? {
         id: scanRow.id,
@@ -1266,7 +1214,7 @@ export function getRepoCard(
     : null;
 
   if (!publicRow) {
-    // «в каталоге, ещё не оценивали» (нет пригодного скана) — штатное состояние, не ошибка
+    // «в каталоге, еще не оценивали» – штатное состояние, не ошибка
     return {
       repo: cardRepo,
       access: cardAccess,
@@ -1317,10 +1265,9 @@ export function getRepoCard(
   }
   const stale = (JSON.parse(publicRow.stale) as string[]).filter((k) => PUBLIC_KINDS.includes(k));
   const isChannelCategory = (key: string) => CHANNEL_CATEGORIES.includes(key as CategoryKey);
-  // К-Р15 (круг 2): «почему данных нет» для Security — деталь последнего
-  // no-data факта appsec (корзина type=X недоступна после N попыток...);
-  // существующий канал причин — факт. Только ОТКРЫТОМУ зрителю: причина
-  // закрытого канала — тоже данные канала. Счёт скоринга не тронут.
+  // «почему данных нет» для Security – деталь последнего no-data факта appsec
+  // (например, корзина type=X недоступна после N попыток). Только ОТКРЫТОМУ
+  // зрителю: причина закрытого канала – тоже данные канала.
   let securityNoDataDetail: string | null = null;
   if (secOpen && shownCats.security.score === null) {
     const lastNoData = db
@@ -1335,27 +1282,20 @@ export function getRepoCard(
         const v = JSON.parse(lastNoData.value) as { detail?: unknown };
         if (typeof v.detail === "string" && v.detail !== "") securityNoDataDetail = v.detail;
       } catch {
-        /* повреждённый JSON причины — показываем без неё */
+        /* поврежденный JSON причины – показываем без нее */
       }
     }
   }
-  // Место в рейтинге: сколько оценённых репозиториев стоит выше. Условия —
-  // те же, что в RATING_SQL, поэтому «3-е из 13 323» совпадает с позицией
-  // строки на первой странице рейтинга без фильтров.
-  // Приёмка 21.09: место считается ТОЛЬКО репозиторию, который сам стоит в
-  // этом наборе. Приватный репо виден своим участникам и имеет индекс (из
-  // последнего не-bad скана), но в публичный рейтинг не входит — без этой
-  // проверки его карточка печатала «#1 из 13 323», то есть место в выборке,
-  // которой репозитория нет. Это тот же случай, что и оговорённый в CardScore
-  // «места у неоценённого репозитория не существует».
+  // Место считается ТОЛЬКО репозиторию, который сам стоит в публичном
+  // рейтинге. Приватный репо имеет индекс, но в рейтинг не входит – без этой
+  // проверки карточка печатала бы ему место в выборке, где его нет.
+  // `ratingPlace` – общий источник места для карточки и бейджа.
   const inRating = r.visibility === "public" && r.rating_active === 1;
-  // В5.9 Б: подсчет места вынесен в `ratingPlace` (ниже) — его же берет
-  // вариант бейджа со значком места: один источник места у карточки и SVG
   const place =
     opts.withRank === false || !inRating || publicRow.healthcraft_index === null
       ? null
       : ratingPlace(db, r.org_slug, r.repo_slug, publicRow.healthcraft_index);
-  // В5.9 Б (№11): когорта — только у репо с местом (тот же набор, что rank)
+  // когорта – только у репо с местом (тот же набор, что у rank)
   const cohort =
     place === null
       ? null
@@ -1387,16 +1327,16 @@ export function getRepoCard(
     categories,
   };
 
-  // рекомендации: публичные — сохранённые правила P; канальные — движок на
-  // показанных канальных фактах с Δ к полному Score из показанных категорий
+  // рекомендации: публичные – сохраненные правила пригодного скана; канальные –
+  // движок на показанных канальных фактах с Δ к полному Score из показанных категорий
   const recQuery = db.query(
     `SELECT rule_id, priority, problem, action, fact_ref, expected_impact, delta_score, opens_category, source, channel
      FROM recommendations WHERE scan_id = ? AND model_version = ? AND channel IS NULL ORDER BY priority ASC`,
   );
-  // В4.9 (К9.10, вариант (а)): текст публичного правила — по ключу при чтении.
-  // Параметры — из эффективных фактов ТОГО ЖЕ скана (как у движка при записи)
-  // и сохраненных колонок (Δ); причина Δ = 0 восстанавливается по признакам
-  // скана. Ключ неизвестен или параметр не восстановился — сохраненный текст.
+  // Текст публичного правила строится по ключу при чтении: параметры – из
+  // эффективных фактов ТОГО ЖЕ скана (как у движка при записи) и сохраненной
+  // Δ; причина Δ = 0 восстанавливается по признакам скана. Ключ неизвестен или
+  // параметр не восстановился – берется сохраненный текст.
   const scanEff = effectiveFacts(db, publicRow.scan_id, r.id);
   const scanFacts = scanEff.ok;
   const publicRecs: CardRecommendation[] = (recQuery.all(publicRow.scan_id, MODEL_VERSION) as RecRow[]).map((rec) => {
@@ -1417,12 +1357,12 @@ export function getRepoCard(
       opensCategory: rec.opens_category,
       source: rec.source,
       channel: rec.channel,
-      // В5.9 (№5): признак заготовки — та же функция и те же факты, что у маршрута `fix`
+      // та же функция и те же факты, что у маршрута `fix`
       fixTemplate: fixTemplateOf(rec.rule_id, scanFacts),
     };
   });
-  // В5.9 (№2): лестница — на тех же эффективных фактах и дате, что движок записал
-  // рекомендации этого скана (`recommend`: now = computedAt): первый шаг = Δ рекомендации
+  // лестница – на тех же эффективных фактах и дате (computedAt), с которыми движок
+  // записал рекомендации этого скана, поэтому первый шаг равен Δ рекомендации
   const ladder = ladderFromFacts(
     scanFacts,
     { scanId: publicRow.scan_id, repoId: r.id, stale: scanEff.stale, staleCats: scanEff.staleCats, emptyRepo: scanEff.emptyRepo },
@@ -1448,13 +1388,13 @@ export function getRepoCard(
     issuesScore: shownCats.issues.score,
     only: "channel",
     codeEmpty,
-    // В5.3-М (Н7): скор-правила каналов — только у показанной оцененной категории
+    // скор-правила каналов – только у показанной оцененной категории
     categoryScores: Object.fromEntries(CATEGORY_ORDER.map((k) => [k, shownCats[k].score])),
   })
     .filter((rec) => rec.channel !== null && !closedChannels.has(rec.channel))
     .map((rec) => {
-      // С4: Δ канального правила — числом только при доступе к обоим каналам
-      // (как полный Score): иначе число и причины (кап 49) раскрывали бы Security
+      // Δ канального правила – числом только при доступе к обоим каналам (как
+      // полный Score): иначе число и причины (кап 49) раскрывали бы Security
       const hidden = rec.kind === "presence" && !fullOpen;
       return {
         ruleId: rec.ruleId,
@@ -1471,45 +1411,33 @@ export function getRepoCard(
         fixTemplate: null,
       };
     });
-  // LOW-3: объединённая выдача — порядком движка, номера 1..N после фильтра (Ф1.3)
+  // общая выдача – в порядке движка, номера 1..N после фильтра
   const recommendations = orderRecommendations(publicRecs, channelRecs);
 
-  // В4.2-port-fix (П9, С1 r2): плотность Security считается по `tree.stats`
-  // канального скана, а фильтр `f.key !== "tree.stats"` вырезал именно его —
-  // зритель видел «плотность N на 10k LOC» и рядом «tree.stats — нет данных»
-  // из другого (публичного) скана, то есть число без единого факта в
-  // отданном JSON.
-  //
-  // Круг 2 (П13, Н-4; решение владельца (1) 18.09): вытеснять публичный факт
-  // канальным нельзя. `tree.stats` лежит в PUBLIC_KINDS и кормит ДВЕ
-  // поверхности сразу — плотность Security и публичные `derived`
-  // (todoDensityPerKloc, rootEntries, маркер codeEmpty), которые считаются по
-  // скану P. Подмена делала с публичными числами ровно то, за что чинили
-  // Security (число из одного скана, доказательство из другого) и ставила
-  // публичное доказательство в зависимость от прав зрителя вопреки К-Ф1.1.
-  // Поэтому публичный `tree.stats` остаётся нетронутым, а дерево канального
-  // скана едет СВОИМ ключом `tree.stats@channel`: он живёт только в evidence
-  // карточки и в MD, в PUBLIC_KINDS / CHANNEL_KINDS / READ_KINDS не входит, в
-  // расчёт Score не идёт (его считает channelFacts выше) и зрителю без прав
-  // на Security не отдаётся вовсе, как любое канальное доказательство.
+  // Плотность Security считается по `tree.stats` канального скана, и этот факт
+  // должен быть в доказательствах. Но заменять им публичный `tree.stats`
+  // нельзя: тот кормит публичные `derived` пригодного скана, и подмена дала бы
+  // число из одного скана с доказательством из другого, да еще в зависимости
+  // от прав зрителя. Поэтому дерево канального скана едет СВОИМ ключом
+  // `tree.stats@channel` (см. CHANNEL_TREE_KEY) и зрителю без прав на Security
+  // не отдается, как любое канальное доказательство.
   const shownChannelFacts = [...(ciOpen ? channel.cicdFacts : []), ...(secOpen ? channel.securityFacts : [])].map((f) =>
     f.key === "tree.stats" ? { ...f, key: CHANNEL_TREE_KEY } : f,
   );
   const factRows = [...publicFacts, ...shownChannelFacts];
   const factByKey = new Map(factRows.map((f) => [f.key, f]));
-  // missing = факта нет по построению (публичный appsec.findings) — UI объясняет причину
+  // missing = факта нет по построению (публичный appsec.findings) – UI объясняет причину
   for (const rec of recommendations) for (const ref of rec.factRefs) ref.missing = !factByKey.has(ref.key);
 
-  // адресуемые факты: те, на которые ссылаются рекомендации, плюс те,
-  // что читает compute — сырьё остальных в ответ не едет
+  // адресуемые факты: те, на которые ссылаются рекомендации, те, что читает
+  // compute, и справочные (DISPLAY_KINDS); сырье остальных в ответ не едет
   const refKeys = recommendations.flatMap((rec) => rec.factRefs.map((ref) => ref.key));
-  // В5.5 тур 2 (сведение W4): справочные факты ЗН-2 — в доказательной базе карточки и отчета
   const addressable = new Set<string>([...refKeys, ...PUBLIC_KINDS, ...CHANNEL_KINDS, ...DISPLAY_KINDS, CHANNEL_TREE_KEY]);
   const evidence: CardEvidence[] = factRows
     .filter((f) => addressable.has(f.key))
     .map((f) => {
       const raw = parseFactValue(f.value) as unknown;
-      // М2.7: у фактов до правки сборщика путь временного клона — в `detail`
+      // у старых фактов в `detail` бывает путь временного клона
       const detail = (raw as { detail?: unknown } | null)?.detail;
       const parsed = typeof detail === "string" ? { ...(raw as object), detail: scrubDetail(detail) } : raw;
       const value = f.key === "activity.git.timeline" ? timelineAggregate(parsed) : capValue(parsed);
@@ -1529,13 +1457,12 @@ export function getRepoCard(
     gitLimits: gitLimitsHit(publicFacts) ? gitLimitsOf(opts.limits ?? DEFAULT_SCAN) : null,
   };
 
-  // В5 (К5.4): текст виден только зрителю с полным Score; сборка — не вызов,
-  // если генерации не было (ai = null при fullOpen, undefined при закрытом)
-  // В5.2 (Б2): зрителю без полного Score публичного репо — публичная версия
-  // (только открытые категории); у закрытого репо без полных прав AI нет
+  // Зритель с полным Score видит полный AI-текст; зритель без него у
+  // публичного репо – публичную версию (только открытые категории); у
+  // закрытого репо без полных прав AI нет (undefined)
   const aiAudiences: AiAudience[] = fullOpen ? (r.visibility === "public" ? ["full", "public"] : ["full"]) : r.visibility === "public" ? ["public"] : [];
-  // аудит надежности С1: кнопка «Сформировать/Обновить» показывает состояние той версии,
-  // которую поставит сервер (POST /summary): свой с полными правами — полная, иначе публичная
+  // кнопка «Сформировать/Обновить» показывает состояние той версии, которую
+  // поставит сервер (POST /summary): свой с полными правами – полная, иначе публичная
   const runAudience: AiAudience = viewer.own && fullOpen ? "full" : "public";
   const ai = aiAudiences.length > 0 ? buildCardAi(db, r.id, opts.viewerUserId, summaryCooldownMsOf(opts), aiAudiences, runAudience) : undefined;
 
@@ -1556,11 +1483,11 @@ export function getRepoCard(
 }
 
 /**
- * В5.9 (№5): файл-заготовка правила для зрителя карточки. Вход — карточка,
- * уже собранная для этого зрителя (видимость — ее: приватный без прав до
- * сюда не доходит). null — правило у репозитория сейчас не срабатывает или
- * заготовки у него нет (признак `fixTemplate` карточки пуст): шаблон «на всякий
- * случай» не отдается. Содержимое — на эффективных фактах того же скана P.
+ * Файл-заготовка правила для зрителя карточки. Вход – карточка, уже собранная
+ * для этого зрителя, так что приватный репо без прав сюда не доходит. null –
+ * правило у репозитория сейчас не срабатывает или заготовки у него нет:
+ * шаблон «на всякий случай» не отдается. Содержимое – на эффективных фактах
+ * того же скана, что и карточка.
  */
 export function fixFileFor(db: Database, card: RepoCard, ruleId: FixRuleId, opts: { license?: LicenseId; now?: Date } = {}): FixFile | null {
   if (!card.recommendations.some((rec) => rec.ruleId === ruleId && rec.fixTemplate != null)) return null;
@@ -1577,11 +1504,11 @@ function summaryCooldownMsOf(opts: { summaryCooldownMs?: number }): number {
 }
 
 /**
- * Последняя генерация репо (ai_notes append) + состояние кнопки.
- * В5.2 (Б2): `audiences` — какие версии текста зрителю открыты, в порядке
- * предпочтения: зрителю с полным Score — полная, если ее нет — публичная (у
- * публичного репо); остальным — только публичная. Обзор и проверка на накрутку
- * — разные заявки: у каждой свой последний скан (Б1).
+ * Последняя генерация AI-текста репо и состояние кнопки. `audiences` – какие
+ * версии текста зрителю открыты, в порядке предпочтения: зрителю с полным
+ * Score – полная, если ее нет – публичная (у публичного репо); остальным –
+ * только публичная. Обзор и проверка на накрутку – разные заявки, у каждой
+ * свой последний скан.
  */
 function buildCardAi(
   db: Database,
@@ -1595,8 +1522,7 @@ function buildCardAi(
     (db.query("SELECT MAX(scan_id) AS s FROM ai_notes WHERE repo_id = ? AND role != 'flagger' AND audience = ?").get(repoId, a) as { s: number | null }).s;
   const audience = audiences.find((a) => lastOf(a) !== null) ?? audiences[0]!;
   const lastScan = lastOf(audience);
-  // В5.1-smoke (23.09): bun:sqlite .get() возвращает null при пустом
-  // результате — сравнение с undefined делало jobActive константным true
+  // bun:sqlite .get() при пустом результате возвращает null, а не undefined
   const jobActive =
     (db.query("SELECT 1 AS x FROM jobs WHERE repo_id = ? AND kind = 'summary' AND audience = ? AND status IN ('queued', 'running') LIMIT 1").get(repoId, runAudience) as { x: number } | null) !== null;
   const lastJobAt = (db.query("SELECT MAX(created_at) AS t FROM jobs WHERE repo_id = ? AND kind = 'summary' AND audience = ?").get(repoId, runAudience) as { t: string | null }).t;
@@ -1606,9 +1532,9 @@ function buildCardAi(
   if (lastScan === null) {
     return { scanId: 0, audience, generatedAt: null, overview: null, specialists: [], failures: [], jobActive, cooldownUntil, check, fraud };
   }
-  // В5.2 (Б1): проверка на накрутку — отдельная заявка; ее отказ не отказ обзора
-  // В5.2 (аудит безопасности М1): наружу — причина языком продукта; технический текст
-  // (тело ответа провайдера, фрагменты валидатора) остается в ai_fails для оператора
+  // отказ проверки на накрутку (отдельная заявка) – не отказ обзора. Наружу –
+  // причина языком продукта; технический текст (тело ответа провайдера,
+  // фрагменты валидатора) остается в ai_fails для оператора
   const fails = (
     db
       .query("SELECT role, reason FROM ai_fails WHERE scan_id = ? AND role != 'flagger' AND audience = ? ORDER BY id")
@@ -1642,11 +1568,11 @@ function buildCardAi(
   };
 }
 
-// ---------- В5.9 Б: место в рейтинге и когорта похожих ----------
+// ---------- место в рейтинге и когорта похожих ----------
 
 /**
- * Место и положение индекса в выборке рейтинга: `rank` — позиция строки
- * (равные — по org/repo), `above`/`atOrAbove` — репо со строго бОльшим и с не
+ * Место и положение индекса в выборке рейтинга: `rank` – позиция строки
+ * (равные – по org/repo), `above`/`atOrAbove` – репо со строго большим и с не
  * меньшим индексом (для значка места, `rank-badge.ts`).
  */
 export interface RatingPlace {
@@ -1657,19 +1583,16 @@ export interface RatingPlace {
 }
 
 /**
- * Место репо в публичном рейтинге по HealthCraft Index и размер выборки —
+ * Место репо в публичном рейтинге по HealthCraft Index и размер выборки –
  * один источник для карточки (`score.rank`) и бейджа со значком места.
  * Вызывающий гарантирует, что репо сам стоит в наборе рейтинга (публичный,
- * rating_active, `index` — индекс его последнего пригодного скана): место в
- * выборке, которой репо нет, не считается (приемка 21.09).
+ * rating_active, `index` – индекс его последнего пригодного скана).
  *
- * В5.3 круг 4 (§2 25.09 «просмотр первого исполнения», п.1): место — ОДНИМ
- * проходом. Прежде три подсчета (выше, всего, равные) шли каждый по всем
- * оценкам с коррелированным LAST_ELIGIBLE_SCAN_SQL на строку — 1,2 с на
- * карточку на живой базе (28 тыс. репо), ×3 в сравнении. Здесь «последний
- * пригодный скан» считается один раз на репо (GROUP BY), выше/всего — одной
- * агрегацией, равные — списком слагов (их единицы). Набор и порядок те же,
- * что у RATING_SQL, поэтому место по-прежнему равно позиции строки рейтинга.
+ * Считается одним проходом: «последний пригодный скан» – один раз на репо
+ * (GROUP BY), выше/всего – одной агрегацией, равные – списком слагов (их
+ * единицы). Коррелированный подзапрос на строку стоил ~1 с на карточку при
+ * 28 тыс. репо. Набор и порядок те же, что у RATING_SQL, поэтому место равно
+ * позиции строки рейтинга.
  */
 export function ratingPlace(db: Database, org: string, repo: string, index: number): RatingPlace | null {
   const ranking = db
@@ -1687,27 +1610,25 @@ export function ratingPlace(db: Database, org: string, repo: string, index: numb
     )
     .get(MODEL_VERSION, index, index, MODEL_VERSION) as { above: number; scored: number; ties: string | null } | null;
   if (ranking === null) return null;
-  // В4.8.5 (К8.5.10, С6-6): при РАВНЫХ индексах рейтинг упорядочивает строки
-  // по org/repo (compareItems) — место на карточке считается тем же правилом,
-  // иначе «#3» на карточке расходилось с позицией строки
+  // при РАВНЫХ индексах рейтинг упорядочивает строки по org/repo (compareItems);
+  // место на карточке считается тем же правилом, иначе разошлось бы с позицией строки
   const ties = ranking.ties === null ? [] : ranking.ties.split("\n");
   const tiesBefore = ties.filter((t) => t.localeCompare(`${org}/${repo}`) < 0).length;
   return {
     rank: ranking.above + tiesBefore + 1,
     rankedTotal: ranking.scored,
     above: ranking.above,
-    // равные — включая сам репо (он в наборе по условию вызова)
+    // равные – включая сам репо (он в наборе по условию вызова)
     atOrAbove: ranking.above + Math.max(ties.length, 1),
   };
 }
 
 /**
- * Память баллов 4 категорий по scan_id — на соединение БД, как у фактов
- * фильтров. Строка `scores` неизменна по (scan_id, MODEL_VERSION) (compute.ts:
- * «immutable: PK scan_id+model_version, идемпотентно»), поэтому запомненное не
- * устаревает, а новый скан приходит с новым scan_id. Зачем: `json_extract` из
- * категорий — больше половины цены запроса когорты (Python: ~60 из ~125 мс на
- * копии БД 27.09), с памятью его платит только первая карточка когорты.
+ * Память баллов 4 категорий по scan_id, на соединение БД, как у фактов
+ * фильтров. Строка `scores` неизменна по (scan_id, MODEL_VERSION), поэтому
+ * запомненное не устаревает, а новый скан приходит с новым scan_id.
+ * `json_extract` из категорий – около половины цены запроса когорты; с
+ * памятью его платит только первая карточка когорты.
  */
 const cohortCatsMemo = new WeakMap<Database, Map<number, (number | null)[]>>();
 /** Сброс памяти при разрастании (каталог ~28 тыс. сканов в рейтинге). */
@@ -1720,16 +1641,14 @@ interface CohortRow {
 }
 
 /**
- * Когорта похожих (идея №11, определение — `cohort.ts`): публичные репо с
- * местом в рейтинге (тот же набор, что RATING_SQL и `ratingPlace`) того же
- * языка и той же корзины размера, без самого репо. Считается на чтении: SQL
- * по языку (индекс `idx_repos_language`), корзина — из фактов `tree.stats`
- * через память `scanFilterFacts` (общая с рейтингом, без выброса его сканов);
- * баллы категорий (`json_extract`, ~половина цены запроса) достаются вторым
- * шагом только у отобранных по корзине.
- * Производной таблицы нет: ее пришлось бы заполнять конвейером оценки (не зона
- * вехи), а до заполнения у всех карточек была бы «нет когорты» — замер в
- * отчете воркера Б.
+ * Когорта похожих (определение – `cohort.ts`): публичные репо с местом в
+ * рейтинге (тот же набор, что RATING_SQL и `ratingPlace`) того же языка и той
+ * же корзины размера, без самого репо. Считается на чтении: SQL по языку
+ * (индекс `idx_repos_language`), корзина – из фактов `tree.stats` через
+ * память `scanFilterFacts` (общую с рейтингом), а баллы категорий достаются
+ * вторым шагом только у отобранных по корзине.
+ * Производной таблицы нет: ее пришлось бы заполнять конвейером оценки, и до
+ * заполнения у всех карточек была бы «нет когорты».
  */
 export function repoCohort(
   db: Database,
@@ -1789,7 +1708,7 @@ export function repoCohort(
   return buildCohort(cohortSelf, members);
 }
 
-/** Состояние проверки на накрутку (В5.2, Б3): живая заявка, последняя проверка или ее отказ. */
+/** Состояние проверки на накрутку: живая заявка, последняя проверка или ее отказ. */
 function checkOf(db: Database, repoId: number): CardAiCheck {
   const active = db.query("SELECT 1 FROM jobs WHERE repo_id = ? AND kind = 'check' AND status IN ('queued', 'running') LIMIT 1").get(repoId) !== null;
   const note = db
@@ -1812,9 +1731,9 @@ function checkOf(db: Database, repoId: number): CardAiCheck {
 }
 
 /**
- * Причина несформированного блока AI-обзора языком продукта (аудит М1). Честные пропуски
- * («нет фактов…», «нет точек…») отдаются как есть — по ним карточка отличает «не было
- * данных» от отказа.
+ * Причина несформированного блока AI-обзора языком продукта. Пропуски из-за
+ * данных («нет фактов…», «нет точек…») отдаются как есть – по ним карточка
+ * отличает «не было данных» от отказа.
  */
 export function aiFailureText(reason: string): string {
   if (reason.startsWith("нет ")) return reason;
@@ -1834,9 +1753,9 @@ export function checkFailureText(reason: string): string {
 }
 
 /**
- * Разбор заметки flagger — ОДИН на карточку (fraudOf) и строку рейтинга
- * (В5.5 тур 1, Р2). Невалидная форма (битый JSON, flag не boolean, factors не
- * массив) = флага нет, а не флаг есть.
+ * Разбор заметки flagger – общий для карточки (fraudOf) и строки рейтинга.
+ * Невалидная форма (битый JSON, flag не boolean, factors не массив) – флага
+ * нет, а не флаг есть.
  */
 function parseFlaggerNote(text: string): { flag: boolean; factors: unknown[]; signals: unknown; inputs: unknown } | null {
   try {
@@ -1849,9 +1768,9 @@ function parseFlaggerNote(text: string): { flag: boolean; factors: unknown[]; si
 }
 
 /**
- * Флаг фрода — последняя проверка на накрутку по репо (заметка flagger). Вход
- * проверки — публичные данные активности, поэтому метку видят все, кому видна
- * карточка (§2 «В5.2 — публичный AI-обзор…» п.2).
+ * Флаг накрутки – последняя проверка по репо (заметка flagger). Вход
+ * проверки – публичные данные активности, поэтому метку видят все, кому видна
+ * карточка.
  */
 function fraudOf(db: Database, repoId: number): CardAi["fraud"] {
   const row = db
@@ -1873,8 +1792,8 @@ function fraudOf(db: Database, repoId: number): CardAi["fraud"] {
   };
 }
 
-/** Ф2.15: статус живой job ИМЕННО зрителя (queued/running); queueAhead наружу не едет.
- *  В5.2 (аудит надежности С2): только СКАН — AI-заявки (обзор, проверка) анализом не являются. */
+/** Живая заявка на СКАН именно этого зрителя (queued/running): AI-заявки (обзор,
+ *  проверка) анализом не являются. */
 function liveViewerJob(db: Database, org: string, repo: string, viewerUserId: number | undefined): CardJob | null {
   if (viewerUserId === undefined) return null;
   const row = db
@@ -1889,17 +1808,17 @@ function liveViewerJob(db: Database, org: string, repo: string, viewerUserId: nu
   return { status: running ? "running" : "queued", stalled: running && jobLeaseExpired(row.lease_until) };
 }
 
-/** К8.5.2b: лиз `running`-задания истёк (нет лиза у running — тоже истёк: живой воркер его держит). */
+/** Лиз `running`-задания истек. Нет лиза у running – тоже истек: живой воркер его держит. */
 export function jobLeaseExpired(leaseUntil: string | null, now = Date.now()): boolean {
   if (leaseUntil === null) return true;
   const t = Date.parse(leaseUntil);
   return !Number.isFinite(t) || t < now;
 }
 
-/** Текст канального presence-правила без числа (С4): Δ Repo Health Score виден только при доступе к CI и Security. */
+/** Текст канального presence-правила без числа: Δ Repo Health Score виден только при доступе к CI и Security. */
 export const CHANNEL_DELTA_HIDDEN_TEXT = "повысит балл категории «CI/CD»; насколько вырастет Repo Health Score, видно при доступе к CI/CD и Безопасности";
 
-// В5.3-М (Н13): одно правило округления с расчетом, отчетом и рейтингом
+// то же правило округления, что у расчета, отчета и рейтинга
 const roundTotal = (x: number | null): number | null => (x === null ? null : roundScore(x));
 const splitRefs = (raw: string): string[] =>
   raw
@@ -1908,17 +1827,16 @@ const splitRefs = (raw: string): string[] =>
     .filter((s) => s !== "");
 
 /**
- * Источники канальных данных карточки (круг 2): CI — последний скан с ok
- * cicd.configs и ok cicd.runs, иначе последний с ok cicd.configs (потолок
- * «только конфиг»); Security — последний скан с ok appsec.findings и ok
- * tree.stats. Возвращаются факты этих kinds выбранного скана (в расчёт идут
- * только ok; не-ok cicd.runs скана «только конфиг» — доказательство потолка).
+ * Источники канальных данных карточки: CI – последний скан с ok cicd.configs
+ * и ok cicd.runs, иначе последний с ok cicd.configs (потолок «только конфиг»);
+ * Security – последний скан с ok appsec.findings и ok tree.stats.
+ * Возвращаются факты этих kinds выбранного скана (в расчет идут только ok;
+ * не-ok cicd.runs скана «только конфиг» – доказательство потолка).
  */
 export function channelSources(db: Database, repoId: number): { cicdScanId: number | null; securityScanId: number | null; cicdFacts: FactRow[]; securityFacts: FactRow[] } {
   const okIn = (kind: string) => `EXISTS (SELECT 1 FROM facts f WHERE f.scan_id = s.id AND f.key = '${kind}' AND f.status = 'ok')`;
-  // В4.8.5 (К8.5.12, С10-14): источник канала — только ЗАВЕРШЁННЫЙ не-bad скан:
-  // `running` ещё пишет факты, `bad` (shutdown, orphaned, score_failed, сбой
-  // сбора) — не доказательство
+  // источник канала – только ЗАВЕРШЕННЫЙ не-bad скан: `running` еще пишет
+  // факты, а `bad` (shutdown, orphaned, score_failed, сбой сбора) – не доказательство
   const lastScan = (cond: string) =>
     (db.query(`SELECT s.id FROM scans s WHERE s.repo_id = ? AND s.status NOT IN ('running', 'queued', 'bad') AND ${cond} ORDER BY s.id DESC LIMIT 1`).get(repoId) as { id: number } | null)?.id ?? null;
   const cicdScanId = lastScan(`${okIn("cicd.configs")} AND ${okIn("cicd.runs")}`) ?? lastScan(okIn("cicd.configs"));
@@ -1937,10 +1855,9 @@ export function channelSources(db: Database, repoId: number): { cicdScanId: numb
   };
 }
 
-/** Git-канал упёрся в лимиты: git-факт со статусом no-data и reason=limits.
- *  Круг 2 В4.4: через parseFactValue, а не сырой JSON.parse — легаси-строка
- *  круга 1 (сжатый no-data timeline) переваривается, карточка и MD не отдают
- *  500 (репро Ищейки 1а). */
+/** Git-канал уперся в лимиты: git-факт со статусом no-data и reason=limits.
+ *  Через parseFactValue, а не сырой JSON.parse: старые сжатые значения
+ *  (no-data timeline) иначе роняли бы карточку и MD в 500. */
 function gitLimitsHit(facts: FactRow[]): boolean {
   return facts.some((f) => f.source === "git" && f.status === "no-data" && (parseFactValue(f.value) as { reason?: unknown }).reason === "limits");
 }
@@ -1967,7 +1884,7 @@ function ruleKind(rec: RecRow): CardRecommendation["kind"] {
 
 export interface MetaResponse {
   modelVersion: string;
-  /** В4.3 (К-Ф3.5): веса категории в двух показателях — indexWeight (HealthCraft Index; у CI/Security null — их там нет) и scoreWeight (Repo Health Score) */
+  /** веса категории в двух показателях: indexWeight (HealthCraft Index; у CI/Security null – их там нет) и scoreWeight (Repo Health Score) */
   categories: { key: CategoryKey; title: string; indexWeight: number | null; scoreWeight: number }[];
   /** имя публичного показателя (рейтинг сортирует по нему) */
   publicMetricTitle: "HealthCraft Index";
@@ -1975,26 +1892,22 @@ export interface MetaResponse {
   fullMetricTitle: "Repo Health Score";
   coverageNullBelow: number;
   /**
-   * В4.6 (У15): охват каталога честными числами. `scored` и `nullScore` —
-   * репозитории, по которым УЖЕ есть строка `scores` текущей модели;
-   * `catalog` — сколько всего публичных репозиториев в рейтинговом каталоге.
-   * Без `catalog` страница могла сказать только «оценено 4964 из 4969», то
-   * есть отрапортовать почти полный охват при фактическом обходе первой
-   * волны — ровно та неправда, которую контракт У15 закрывает. Поле
-   * ЧИТАЕМОЕ и производное: схема БД, веса и MODEL_VERSION не тронуты,
-   * новых маршрутов и коллекторов нет.
+   * Охват каталога. `scored` и `nullScore` – репозитории, по которым УЖЕ есть
+   * строка `scores` текущей модели; `catalog` – сколько всего публичных
+   * репозиториев в рейтинговом каталоге. Без `catalog` страница, пока идет
+   * первый обход, показывала бы почти полный охват («оценено 4964 из 4969»).
    */
   repos: { scored: number; nullScore: number; catalog: number };
-  /** Ф2.9/Ф2.15: лиз job из конфига планировщика — UI опрашивает анализ до этого горизонта */
+  /** лиз задания из конфига – UI опрашивает анализ до этого горизонта */
   queue: { leaseMs: number };
   methodology: string;
-  /** В5.3 (О5): публичный адрес сервиса — абсолютный код бейджа для README */
+  /** публичный адрес сервиса – для абсолютного кода бейджа в README */
   publicBaseUrl: string;
   generatedAt: string;
 }
 
 export function getMeta(db: Database, opts: { now?: Date; leaseMs?: number; publicBaseUrl?: string } = {}): MetaResponse {
-  // В5.3 (§2 25.09, вариант 1): счетчики — легким запросом по тому же набору, без строк рейтинга
+  // счетчики – легким запросом по тому же набору, что рейтинг, без его строк
   const counts = db
     .query(
       `WITH last AS (
@@ -2022,7 +1935,7 @@ export function getMeta(db: Database, opts: { now?: Date; leaseMs?: number; publ
       scored: counts.scored,
       nullScore: counts.nullScore,
       // тот же фильтр, что у RATING_SQL (rating_active + public), но без
-      // JOIN на scores: знаменатель охвата — каталог, а не оценённая часть
+      // JOIN на scores: знаменатель охвата – каталог, а не оцененная часть
       catalog: (db.query("SELECT COUNT(*) AS c FROM repos WHERE rating_active = 1 AND visibility = 'public'").get() as { c: number }).c,
     },
     queue: { leaseMs: opts.leaseMs ?? defaultLeaseMs(DEFAULT_SCAN) },

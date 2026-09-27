@@ -1,7 +1,7 @@
-// git-collector.test.ts — Б1: cloneBare (лимиты/watchdog/cleanup) +
-// В2/Б1 (деградация §5.7, флаги секций README, has_steps ci.yaml),
-// extractFacts (факты всех git-kinds, robot-эвристика v1, tri-state
-// пустого репо). Внешний канал фейкован локальным file://-репо — сети нет.
+// Git-коллектор: cloneBare (лимиты, watchdog, уборка), деградация клона,
+// флаги секций README, has_steps в ci.yaml, extractFacts (факты всех
+// git-kinds, эвристика роботов, tri-state пустого репо). Внешний канал
+// заменен локальным file://-репо — сети нет.
 import { afterAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { randomFillSync } from "node:crypto";
@@ -28,7 +28,7 @@ import { parseYamlSubset } from "../src/collectors/yamlmini";
 import { Fact } from "../src/collectors/facts";
 
 const NOW = new Date("2026-09-15T00:00:00Z");
-// лимиты инъекцией (константы ушли из модуля в Config.scan)
+// лимиты передаются инъекцией: в модуле констант нет, они живут в Config.scan
 const LIMITS = { timeoutMs: 60_000, maxBytes: 500 * 1024 * 1024, pollMs: 5_000 };
 const EXTRACT = { maxBlameFiles: 200, textCapBytes: 1_000_000 };
 
@@ -45,7 +45,7 @@ function buildFixtureRepo(): string {
   // базовый коммит 2024-01-01 (TODO из него будет older_180d)
   const d2024 = "2024-01-01T00:00:00+00:00";
   writeFileSync(join(dir, "README.md"), "# Title\n\nSome intro text.\n\n## Usage\n\nRun it.\n");
-  // В5.3-М (Р4в): лицензия засчитывается по тексту (не меньше 16 непробельных символов)
+  // лицензия засчитывается по тексту (не меньше 16 непробельных символов)
   writeFileSync(join(dir, "LICENSE"), "MIT License\n\nCopyright (c) 2024 Dev\n");
   mkdirSync(join(dir, ".sourcecraft/security"), { recursive: true });
   mkdirSync(join(dir, "src"), { recursive: true });
@@ -244,10 +244,9 @@ describe("extractFacts (локальный bare-клон, без сети)", () 
     git(big, ["init", "-q", "-b", "main"]);
     git(big, ["config", "user.name", "B"]);
     git(big, ["config", "user.email", "b@x.y"]);
-    // Детерминизм (17.09): file-клон 48МБ локально занимает ~11мс —
-    // при pollMs=10 клон успевал ФИНИШИРОВАТЬ до первого poll (race
-    // exit-vs-poll) и тест флейкал. pollMs=1: первый poll на ~1мс,
-    // breach на ~2мс — задолго до завершения любого реального клона
+    // Локальный file-клон 48МБ занимает ~11мс: при pollMs=10 он успевает
+    // завершиться до первого poll, и тест флейкает. pollMs=1 — первый poll
+    // на ~1мс, срабатывание на ~2мс, задолго до конца любого реального клона.
     const chunk = Buffer.alloc(512 * 1024, 7);
     for (let i = 0; i < 96; i++) writeFileSync(join(big, `blob${i}.bin`), chunk); // ~48МБ
     git(big, ["add", "-A"]);
@@ -261,8 +260,8 @@ describe("extractFacts (локальный bare-клон, без сети)", () 
 
   test("cloneBare: диск-бюджет → abort reason=disk (несжимаемый источник ~10МБ, бюджет 1МБ)", async () => {
     // Крошечный клон успевает завершиться до первого du-poll на быстрой
-    // машине (флейк, ERROR_LOG 16.09) — несжимаемый_payload гарантирует,
-    // что poll застаёт передачу в разгаре: 10МБ > бюджета 1МБ.
+    // машине, и тест флейкает. Несжимаемый payload гарантирует, что poll
+    // застает передачу в разгаре: 10МБ > бюджета 1МБ.
     const bigDisk = mkdtempSync(join(tmpdir(), "rh-fixture-disk-"));
     git(bigDisk, ["init", "-q", "-b", "main"]);
     git(bigDisk, ["config", "user.name", "B"]);
@@ -364,8 +363,8 @@ describe("В2/Б1: деградационная попытка cloneWithDegrade 
 });
 
 describe("В2/Б1: флаги секций README (словарь RU+EN §7.4)", () => {
-  // В5.3-М (Р4в): раздел засчитывается только с непустым телом — словарь
-  // проверяется на заголовках, под которыми есть строка текста
+  // раздел засчитывается только с непустым телом — словарь проверяется на
+  // заголовках, под которыми есть строка текста
   const b = (md: string): string => md.replace(/^(#{1,6} .*)$/gm, "$1\nтекст раздела");
   test("RU+EN заголовки → install/build/test", () => {
     expect(readmeSectionFlags(b("# Проект\n\n## Установка\n\n## Сборка\n\n## Тесты\n"))).toEqual({ install: true, build: true, test: true });
@@ -407,7 +406,7 @@ describe("В2/Б1: has_steps (ci.yaml, §7.4)", () => {
     git(dir, ["config", "user.email", "a@x.y"]);
     mkdirSync(join(dir, ".sourcecraft"), { recursive: true });
     writeFileSync(join(dir, ".sourcecraft/ci.yaml"), "on: [push]\n");
-    // В5.3-М (Р4в): раздел засчитывается с непустым телом
+    // раздел засчитывается с непустым телом
     writeFileSync(join(dir, "README.md"), "# X\n\n## Install\n\nnpm install\n");
     git(dir, ["add", "-A"]);
     git(dir, ["commit", "-q", "-m", "init"]);
@@ -431,8 +430,8 @@ describe("В2/Б1: has_steps (ci.yaml, §7.4)", () => {
 });
 
 describe("В2/Б1 доп: has_steps на ЖИВЫХ формах платформы (фиксстуры 15.09)", () => {
-  // сюрприз ERROR_LOG В2: канон ci.yaml = workflows.<name>.tasks (без
-  // верхнего tasks) + блочные скаляры «- |» в script + action-кубы
+  // живые ci.yaml платформы: workflows.<name>.tasks (без верхнего tasks),
+  // блочные скаляры «- |» в script и action-кубы
   test("cloudapp-hugo / datahint / dozzle-plus (workflows.tasks + блоки) → has_steps=true", () => {
     for (const name of ["cloudapp-hugo", "datahint", "dozzle-plus"]) {
       const parsed = parseYamlSubset(readFileSync(`tests/fixtures/ci/${name}.yaml`, "utf8"));
@@ -459,11 +458,11 @@ describe("scrubCredentials (В4/Б6: PAT не едет в детали ошиб�
 });
 
 // ---------------------------------------------------------------------------
-// Ф2.4 (M6 + LOW-9, остаток после портов). PAT не в argv и не в config клона:
-// креды из URL уезжают в http.extraHeader через GIT_CONFIG_*; системные
-// credential-хелперы глушатся пустым credential.helper; на git < 2.31
-// GIT_CONFIG_* молча не работают — клон с токеном отказывается.
-// Сети нет: локальный Bun.serve отдаёт smart-HTTP настоящего git.
+// PAT не в argv и не в config клона: креды из URL уезжают в http.extraHeader
+// через GIT_CONFIG_*; системные credential-хелперы глушатся пустым
+// credential.helper; на git < 2.31 GIT_CONFIG_* молча не работают — клон с
+// токеном отказывается. Сети нет: локальный Bun.serve отдает smart-HTTP
+// настоящего git.
 // ---------------------------------------------------------------------------
 
 describe("Ф2.4: разбор клон-URL с кредами (LOW-9)", () => {
@@ -622,15 +621,13 @@ describe("Ф2.4: клон с PAT — заголовок, argv, config клона
 
   test("скраб stderr выполняется ДО обрезки: длинный вывод не выносит креды в деталь", async () => {
     const PAT = "pat-leaked-value";
-    // К-Р6 (круг 2): различающий вход. noise=400 проходил и при порядке
-    // slice→scrub — секрет целиком уходил ЗА границу обрезки, и тест
-    // выполняла обрезка, а не скраб. Число 235 подобрано арифметически
-    // (репро-файл круга 2 проверяет его различающую силу): строка шума
-    // начинается с индекса noise+1, PAT — на 48-м символе fatal-строки,
-    // '@' — на 64-м; чтобы ПОЛНЫЙ PAT попал в первые 300 символов, а '@'
-    // был отрезан: noise+1+48+16 = 300 и noise+1+64 > 300 → noise = 235
-    // (единственное значение). При slice→scrub в detail остаётся PAT без
-    // '@' — регулярка скраба его не матчит, тест красный.
+    // Различающий вход: при большем шуме секрет целиком уходит за границу
+    // обрезки, и тест проходит благодаря обрезке, а не скрабу. Fatal-строка
+    // начинается с индекса noise+1, PAT в ней — с 48-го символа, '@' — на
+    // 64-м. Чтобы полный PAT попал в первые 300 символов, а '@' был отрезан:
+    // noise+1+48+16 = 300 и noise+1+64 > 300 → noise = 235 (единственное
+    // значение). При порядке slice→scrub в detail остается PAT без '@' —
+    // регулярка скраба его не матчит, тест красный.
     const noise = "x".repeat(235);
     const stderr = `${noise}\nfatal: could not read from 'https://repo-health:${PAT}@git.sourcecraft.dev/o/r.git'\n`;
     const out = await cloneBare("https://git.sourcecraft.dev/o/r.git", tmpdir(), LIMITS, {
@@ -649,9 +646,9 @@ describe("Ф2.4: клон с PAT — заголовок, argv, config клона
 });
 
 // ---------------------------------------------------------------------------
-// Ф2.3 (M5). Обрыв `cat-file --batch` — на уровне коллектора: loc = null,
-// loc_note/todo_note = "incomplete". На уровне модели то же закрыто
-// в tests/audit-m42a-repro.test.ts и tests/score.test.ts.
+// Обрыв `cat-file --batch` на уровне коллектора: loc = null,
+// loc_note/todo_note = "incomplete". Уровень модели — в
+// tests/audit-m42a-repro.test.ts и tests/score.test.ts.
 // ---------------------------------------------------------------------------
 
 describe("Ф2.3: обрыв cat-file → loc no-data, а не нулевой LOC", () => {
@@ -664,7 +661,7 @@ describe("Ф2.3: обрыв cat-file → loc no-data, а не нулевой LOC
       const facts = await extractFacts(clone.dir, {
         ...EXTRACT,
         now: NOW,
-        // шов Б0: процесс, у которого stdout сразу закончился (убитый cat-file)
+        // процесс, у которого stdout сразу закончился (убитый cat-file)
         catFile: () => ({
           stdin: { write: () => 0, end: () => 0 },
           stdout: new Response(new Uint8Array(0)).body!,
@@ -686,9 +683,9 @@ describe("Ф2.3: обрыв cat-file → loc no-data, а не нулевой LOC
     }
   }, 60_000);
 
-  // В4.8.5 (К8.5.12, С10-8): git умер раньше, чем писатель отдал ему sha, —
-  // отказ писателя обработан, а не всплывает необработанным rejection (в Bun
-  // это exit 1 процесса сервера посреди скана)
+  // git умер раньше, чем писатель отдал ему sha: отказ писателя обработан, а
+  // не всплывает необработанным rejection (в Bun это exit 1 процесса сервера
+  // посреди скана)
   test("писатель cat-file упал (поток закрыт): извлечение завершается, необработанных отказов нет", async () => {
     const src = buildFixtureRepo();
     const clone = await cloneBare(src, tmpdir(), LIMITS);
@@ -746,9 +743,8 @@ describe("Ф2.3: обрыв cat-file → loc no-data, а не нулевой LOC
 });
 
 // ---------------------------------------------------------------------------
-// Ф2.10 (M10): «env меняет поведение» — приёмочный пункт, не закреплённый
-// тестом. Бюджет клона едет из env через scanFromEnv в Config.scan и
-// РЕАЛЬНО меняет исход клона локального репо.
+// Бюджет клона едет из env через scanFromEnv в Config.scan и реально меняет
+// исход клона локального репо.
 // ---------------------------------------------------------------------------
 
 describe("Ф2.10: env → Config.scan → поведение клона", () => {
@@ -778,7 +774,7 @@ describe("Ф2.10: env → Config.scan → поведение клона", () => 
 });
 
 // ---------------------------------------------------------------------------
-// В4.4 (кластер L/З1): реестр групп клонов — SIGTERM гасит их сразу
+// Реестр групп клонов: SIGTERM гасит их сразу
 // ---------------------------------------------------------------------------
 
 describe("В4.4: killActiveClones", () => {

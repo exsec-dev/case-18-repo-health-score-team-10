@@ -1,19 +1,18 @@
-// pipeline.ts — конвейер AI-summary (спека В5 §3, К5.2-К5.4): факты скана +
-// скоупированный недоверенный контент → специалисты параллельно (side;
-// security — без инструментов, закон 5) → овервью (main) на их сегментах →
-// валидатор (один ретрай с припиской причин) → ai_notes (append).
-// Агрегатный кап: ≤ 48 вызовов модели и wall-clock фуз 6 минут на ВСЮ
-// генерацию (спека §3.3). Tri-state: нет фактов роли — вызова нет, честная
-// причина. Fail-soft: невалидный текст в продукт не едет, роль попадает в
-// failSoft. Score трогать запрещено: конвейер пишет ТОЛЬКО ai_notes.
+// Конвейер AI-сводки: факты скана + недоверенный контент → специалисты параллельно
+// (side-модель; security — без инструментов, только данные AppSec) → overview (main)
+// на их сегментах → валидатор с ретраями → ai_notes.
+// Агрегатный кап: ≤ 48 вызовов модели и фуз 6 минут на ВСЮ генерацию.
+// Нет фактов роли — вызова нет, причина записывается. Невалидный текст в продукт
+// не попадает, роль уходит в failSoft. Конвейер пишет ТОЛЬКО ai_notes: Score считает
+// код, LLM его не трогает.
 import type { Database } from "bun:sqlite";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { CallLlm, ChatMessage } from "../llm";
 import { LlmError } from "../llm";
 import { GENERATION_FUSE_MS, MAX_MODEL_CALLS } from "../config";
-// Капы генерации живут в config (В5.1: формула худшего скана включает фуз);
-// ре-экспорт держит прежний импорт-контракт модуля
+// капы генерации живут в config (от фуза зависит оценка худшего времени скана);
+// ре-экспорт — для тех, кто импортирует их отсюда
 export { GENERATION_FUSE_MS, MAX_MODEL_CALLS };
 import { parseFactValue } from "../collectors/facts";
 import { MODEL_VERSION } from "../score/model";
@@ -41,9 +40,9 @@ export interface SummaryDeps {
   /** бэкофф ретраев цикла (тесты ставят 0) */
   agentBackoffMs?: number;
   /**
-   * Кэш по скану (23.09): false — регенерация, заметки скана перезаписываются.
-   * Процессворкер ставит false ТОЛЬКО при дебаг-куладауне (1 мс снимает оба
-   * антидубля — решение Алексея); дефолт true — прод-поведение В5.1.
+   * Кэш по скану: false — регенерация, заметки скана перезаписываются.
+   * Воркер ставит false ТОЛЬКО при отладочном куладауне (1 мс снимает обе
+   * защиты от дублей); по умолчанию true.
    */
   cache?: boolean;
   log?: (m: string) => void;
@@ -53,7 +52,7 @@ export interface SummaryRequest {
   scanId: number;
   now?: Date;
   /**
-   * В5.2 (Б2): аудитория текста. 'public' — только 4 открытые категории и их
+   * Аудитория текста. 'public' — только 4 открытые категории и их
    * факты (без CI/CD и Безопасности), текст видят все; 'full' (дефолт) — все
    * факты скана, текст только зрителю с полным Score.
    */
@@ -67,7 +66,7 @@ export interface SummaryRoleOutcome {
   reason?: string;
   chars?: number;
   retries?: number;
-  /** 23.09: смоук-цифры роли — латентность, вызовы модели, вызовы инструментов */
+  /** цифры роли для логов: латентность, вызовы модели, вызовы инструментов */
   ms?: number;
   calls?: number;
   tools?: number;
@@ -79,18 +78,18 @@ export interface SummaryRunResult {
   notes: number;
   /** роли, чей текст не доехал (валидатор/бюджет) — «AI-описание не сформировано» */
   failSoft: string[];
-  /** роли без фактов своей категории — вызова не было (tri-state) */
+  /** роли без фактов своей категории — вызова не было */
   skipped: string[];
   outcomes: SummaryRoleOutcome[];
-  /** В5.2 (аудит М3): вызовов модели с ответом; 0 — модель не ответила ни разу (лимит не списывается) */
+  /** вызовов модели с ответом; 0 — модель не ответила ни разу (лимит не списывается) */
   answered?: number;
-  /** В5.1 (Ищейка-С1): у скана уже есть ai_notes — генерация не запускалась */
+  /** у скана уже есть ai_notes — генерация не запускалась */
   cached?: boolean;
 }
 
 interface RunBudget {
   calls: number;
-  /** В5.2 (аудит М3): вызовов, на которые модель ОТВЕТИЛА — от них зависит списание лимита */
+  /** вызовов, на которые модель ОТВЕТИЛА — от них зависит списание лимита */
   answered: number;
   max: number;
   ac: AbortController;
@@ -122,9 +121,9 @@ function budgetedCallLlm(callLlm: CallLlm, budget: RunBudget): CallLlm {
 }
 
 /**
- * Ок-факты скана, скоупированные по категории роли. В5.2 (Б2): для публичной
- * аудитории — только факты 4 открытых категорий и никаких фактов каналов с
- * правами (CHANNEL_KINDS: конфиги и запуски CI, находки AppSec).
+ * Ок-факты скана в скоупе роли. Для публичной аудитории — только факты
+ * 4 открытых категорий и никаких фактов каналов с правами
+ * (CHANNEL_KINDS: конфиги и запуски CI, находки AppSec).
  */
 export function scopedFacts(db: Database, scanId: number, role: SummaryRole, audience: AiAudience = "full"): FactInput[] {
   const rows = db.query("SELECT key, value, status FROM facts WHERE scan_id = ?").all(scanId) as {
@@ -142,7 +141,7 @@ export function scopedFacts(db: Database, scanId: number, role: SummaryRole, aud
 }
 
 /**
- * Аудит безопасности М7: публичный обзор видят анонимы и печатает PDF — адреса почты
+ * Публичный обзор видят анонимы и печатает PDF, поэтому адреса почты
  * авторов и коммиттеров из ленты во вход модели не идут (имена и даты остаются: ритм и
  * авторство видны и без адресов).
  */
@@ -168,7 +167,7 @@ export function publicFactKey(key: string): boolean {
 }
 
 function roleFactsAllowed(role: SummaryRole, key: string): boolean {
-  if (!(SPECIALIST_ROLES as readonly string[]).includes(role)) return key !== "activity.git.timeline"; // overview/trajectory: всё кроме сырого сырья
+  if (!(SPECIALIST_ROLES as readonly string[]).includes(role)) return key !== "activity.git.timeline"; // overview/trajectory: все, кроме сырой ленты коммитов
   const allowed = ROLE_FACT_CATEGORIES[role as SpecialistRole] ?? [];
   return allowed.includes(categoryOf(key));
 }
@@ -182,10 +181,10 @@ export interface TrajectoryPoint {
 }
 
 /**
- * Числовые точки истории динамики (К5.16, Б4): ВСЕ строки scores репо
- * текущей версии модели по возрастанию — дата, коммит, индекс, покрытие,
- * категории. Прошлые LLM-тексты в точках не участвуют по построению
- * (самореференция исчезает). Без точек роль динамики не запускается.
+ * Числовые точки для роли динамики: ВСЕ строки scores репо текущей версии
+ * модели по возрастанию — дата, коммит, индекс, покрытие, категории. Прошлые
+ * LLM-тексты во вход не попадают, чтобы модель не пересказывала сама себя.
+ * Без точек роль динамики не запускается.
  */
 export function historyPoints(db: Database, scanId: number, audience: AiAudience = "full"): TrajectoryPoint[] {
   const row = db.query("SELECT repo_id FROM scans WHERE id = ?").get(scanId) as { repo_id: number } | null;
@@ -199,8 +198,8 @@ export function historyPoints(db: Database, scanId: number, audience: AiAudience
     )
     .all(row.repo_id, MODEL_VERSION) as { scan_id: number; idx: number | null; coverage: number; categories: string; finished_at: string | null; head_sha: string | null }[];
   return rows.map((r) => {
-    // В5.1 (баги-мелочь): битый categories JSON — честная точка без категорий,
-    // а не падение всего runSummary мимо пер-ролевого fail-soft
+    // битый categories JSON — точка без категорий, а не падение всего runSummary
+    // мимо fail-soft отдельных ролей
     let cats: Record<string, { score: number | null }> = {};
     try {
       const parsed = JSON.parse(r.categories) as Record<string, { score: number | null }> | null;
@@ -210,7 +209,7 @@ export function historyPoints(db: Database, scanId: number, audience: AiAudience
     }
     const categories: Record<string, number | null> = {};
     for (const [key, value] of Object.entries(cats)) {
-      // В5.2 (Б2): публичной аудитории — баллы только открытых категорий
+      // публичной аудитории — баллы только открытых категорий
       if (audience === "public" && !(PUBLIC_CATEGORIES as readonly string[]).includes(key)) continue;
       categories[key] = value?.score ?? null;
     }
@@ -219,13 +218,13 @@ export function historyPoints(db: Database, scanId: number, audience: AiAudience
 }
 
 /**
- * Круг 5 тура 3 (живая проверка 27.09): вход роли динамики — категории русскими
- * названиями интерфейса вместо ключей (перевод ключей моделью путал категории).
+ * Категории в точках — русскими названиями интерфейса, а не ключами: переводя
+ * ключи сама, модель путала категории.
  */
 export function namedTrajectoryPoints(points: TrajectoryPoint[]): TrajectoryPoint[] {
   return points.map((p) => ({ ...p, categories: Object.fromEntries(Object.entries(p.categories).map(([k, v]) => [(CATEGORY_TITLES as Record<string, string>)[k] ?? k, v])) }));
 }
-/** Сегменты специалистов для овервью: предложения чистых текстов. */
+/** Сегменты для overview: тексты специалистов, разбитые на предложения. */
 export function segmentsOf(texts: Record<string, string>): { segments: string[]; numbered: Record<string, string> } {
   const segments: string[] = [];
   const numbered: Record<string, string> = {};
@@ -241,10 +240,9 @@ export function segmentsOf(texts: Record<string, string>): { segments: string[];
 }
 
 /**
- * В5.1 (LLM-инженер §5.1): сырой timeline каппируется последними N событиями
- * (robot-флаги в событиях сохраняются) — большой репо иначе гонит в промпт
- * мегабайты истории (blowup > 128K токенов) и email-ы всех авторов наружу.
- * Агрегат (activity.git.summary) остаётся полным — ритм виден целиком.
+ * Сырая лента обрезается до последних N событий: большой репо иначе отправил бы
+ * в промпт мегабайты истории (> 128K токенов). Агрегат (activity.git.summary)
+ * остается полным — ритм виден целиком.
  */
 export const TIMELINE_EVENTS_CAP = 60;
 
@@ -253,8 +251,8 @@ export function capTimelineFact(f: FactInput): FactInput {
   if (f.key !== "activity.git.timeline" || raw === null || typeof raw !== "object" || !Array.isArray(raw.events)) return f;
   const events = raw.events;
   if (events.length <= TIMELINE_EVENTS_CAP) return f;
-  // В5.2 (Б1): `git log` отдает события от новых к старым (collectors/git.ts) —
-  // последние N это ГОЛОВА массива; прежний `slice(-N)` отдавал самые старые
+  // `git log` отдает события от новых к старым (collectors/git.ts): последние N —
+  // это ГОЛОВА массива, а не хвост
   return { ...f, value: { events: events.slice(0, TIMELINE_EVENTS_CAP), capped: true, total: events.length } };
 }
 
@@ -262,19 +260,18 @@ function factsDigest(facts: FactInput[]): string {
   return facts.map((f) => `- ${f.key}: ${JSON.stringify(f.value)}`).join("\n");
 }
 
-// В5.2 (Б7): нормализация типографики — общий модуль (его берет и веб-бандл, О7)
+// нормализация типографики — отдельный модуль, его берет и веб-бандл
 export { normalizeTypography } from "./typography";
 import { normalizeTypography } from "./typography";
 import { CATEGORY_TITLES } from "../report/categories";
 
 /**
- * Попыток генерации на роль: ретрай с причинами валидатора — «попросить
- * модель поправиться» (23.09, Алексей: запросы дешёвые, отказ — только после
- * трёх попыток; прежний лимит 2 молча топил роли на одной опечатке).
+ * Попыток генерации на роль: ретрай с причинами валидатора просит модель
+ * поправиться. Запросы дешевые, а две попытки слишком часто теряли роль
+ * из-за одной опечатки.
  */
 const ROLE_ATTEMPTS = 3;
 
-/** Числа из текстов сегментов — легальный коридор овервью (В5.1, Ищейка-С2: спека §3.7 «сущности из ответов специалистов»). */
 /**
  * Одна роль: хартия → вход (факты + nonce-рамки контента) → генерация →
  * валидация → ретрай с припиской причин → итог. Возвращает clean-текст.
@@ -294,9 +291,8 @@ async function runRole(
   const nonce = makeNonce();
   const inputBlocks = [...contentBlocks];
   if (extraSegments !== null) {
-    // В5.1 (Security-М5/Ищейка-З6): рамка сегментов с nonce (мёртвый nonce
-    // задействован) — специалист не может напечатать «конец ответов» и
-    // сменить контекст овервью своими рамками
+    // рамка сегментов с nonce: специалист не может напечатать «конец ответов»
+    // и подменить контекст overview своими рамками
     inputBlocks.push(
       [
         `=== НАЧАЛО ОТВЕТОВ СПЕЦИАЛИСТОВ (nonce ${nonce}) ===`,
@@ -315,8 +311,8 @@ async function runRole(
     { role: "user", content: userText },
   ];
 
-  // 23.09 (Алексей): security живёт без файловых инструментов (закон 5), но
-  // арифметику долей считает инструментом-калькулятором, а не в уме
+  // security живет без файловых инструментов (только данные AppSec), но
+  // арифметику долей считает калькулятором, а не в уме
   const executor =
     deps.clone && toolsAllowed(role)
       ? makeToolExecutor({ root: deps.clone.root, gitDir: deps.clone.gitDir }, 12)
@@ -357,7 +353,6 @@ async function runRole(
       calls = res.modelCalls;
       tools = res.toolCalls;
     } catch (e) {
-      // 23.09: построльные строки stdout — живой прогресс и смоук-цифры
       deps.log?.(
         `[summary] ${deps.org}/${deps.repo} role=${role}: fail ${Date.now() - startedAt}ms модель: ${String((e as Error).message).slice(0, 120)}`,
       );
@@ -370,8 +365,8 @@ async function runRole(
       return { ok: true, text, clean: verdict.clean, refs: verdict.refs, retries, ms, calls, tools };
     }
     const lastTry = attempt === ROLE_ATTEMPTS - 1;
-    // 23.09 (Алексей): полные причины и ПОЛНЫЙ ответ модели в лог, без обрезки —
-    // иначе нечем сравнивать попытки и не видно, что именно модель написала
+    // полные причины и ПОЛНЫЙ ответ модели в лог, без обрезки: иначе нечем
+    // сравнивать попытки и не видно, что именно модель написала
     deps.log?.(
       `[summary] ${deps.org}/${deps.repo} role=${role}: rejected ${ms}ms — ${
         lastTry ? "попытки исчерпаны" : "ретрай"
@@ -410,24 +405,20 @@ function repoIdOf(deps: SummaryDeps): number {
 }
 
 /**
- * Полная генерация для скана. Пишет ТОЛЬКО ai_notes; Score, категории и
- * рекомендации не трогаются ни при каком исходе (К5.6 — прямой тест).
+ * Полная генерация для скана. Пишет ТОЛЬКО ai_notes (и ai_fails); Score, категории
+ * и рекомендации не трогаются ни при каком исходе.
  */
 export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promise<SummaryRunResult> {
   const now = req.now ?? new Date();
   const repoId = repoIdOf(deps);
   const audience: AiAudience = req.audience ?? "full";
   const roles: readonly SpecialistRole[] = audience === "public" ? PUBLIC_SPECIALIST_ROLES : SPECIALIST_ROLES;
-  // В5.1 (Ищейка-С1, кэш по скану): заметки этого скана уже записаны (авто-
-  // генерация, повтор claim после падения воркера) — вторая генерация того
-  // же скана не запускается: кредиты и append-лог чисты.
-  // 23.09 (Алексей): дебаг-куладаун снимает и ЭТОТ кэш — регенерация
-  // перезаписывает заметки скана (у скана всегда ≤1 набор, все читатели —
-  // карточка, ai-notes, эволюция — остаются верны без правок)
-  // В5.2 (Б1): проверка на накрутку — своя заявка со своим кэшем (runFraudCheck);
-  // ее заметка не делает обзор «уже сформированным», и регенерация обзора ее не стирает.
-  // В5.2 (Б2): кэш и регенерация — в пределах аудитории: публичный и полный обзор
-  // одного скана — два разных текста
+  // Кэш по скану: если заметки уже записаны (например, повтор заявки после падения
+  // воркера), вторая генерация не запускается — кредиты не тратятся. Регенерация
+  // (cache: false) перезаписывает заметки: у скана всегда не больше одного набора.
+  // Проверка на накрутку (flagger) — своя заявка со своим кэшем, здесь не учитывается
+  // и не стирается. Кэш и регенерация — в пределах аудитории: публичный и полный
+  // обзор одного скана — два разных текста.
   if (deps.cache !== false && deps.db.query("SELECT 1 FROM ai_notes WHERE scan_id = ? AND role != 'flagger' AND audience = ? LIMIT 1").get(req.scanId, audience) !== null) {
     deps.log?.(`[summary] ${deps.org}/${deps.repo} scan ${req.scanId} (${audience}): cached (notes already exist for this scan)`);
     return { scanId: req.scanId, notes: 0, failSoft: [], skipped: [], outcomes: [], answered: 0, cached: true };
@@ -455,8 +446,8 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
 
   try {
     // --- специалисты параллельно (side) ---
-    // недоверенный контент: README через nonce-рамку; тексты TODO и коммитов
-    // специалисты берут инструментами (grep/git_log) — их отдача санитайзится
+    // недоверенный контент: README в nonce-рамке; тексты TODO и коммитов
+    // специалисты берут инструментами (grep/git_log), их выдача тоже санитизируется
     const contents: string[] = [];
     const readme = await readReadme(deps);
     if (readme !== null) contents.push(frameUntrusted("README.md", readme, makeNonce()) ?? "");
@@ -469,9 +460,8 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
           return { role, outcome: { role, ok: false, reason: "нет фактов категории — вызова не было" } as SummaryRoleOutcome, text: null };
         }
         try {
-          // В5.1 (LLM-инженер 1.5): security НЕ получает README/контент —
-          // хартия обещает «только факты AppSec», и инъекционная поверхность
-          // роли, не предупреждённой о недоверенных данных, лишняя
+          // security НЕ получает README: ее хартия — «только факты AppSec», и
+          // лишняя поверхность для инъекций этой роли ни к чему
           const roleContent = role === "security" ? [] : sharedContent;
           const res = await runRole(deps, budget, role, facts, roleContent, null);
           if (!res.ok) return { role, outcome: { role, ok: false, reason: res.reason } as SummaryRoleOutcome, text: null };
@@ -494,18 +484,17 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
       }
     }
 
-    // флаггер в обзор не входит (В5.2, Б1): проверка на накрутку — отдельная
-    // заявка runFraudCheck, со своей кнопкой и лимитом
+    // флаггер в обзор не входит: проверка на накрутку — отдельная заявка
+    // runFraudCheck, со своей кнопкой и лимитом
 
-    // --- динамика (Б4, К5.16): числовые точки истории; без точек вызова нет ---
+    // --- динамика: числовые точки истории; без точек вызова нет ---
     const points = historyPoints(deps.db, req.scanId, audience);
     if (points.length === 0) {
       skipped.push("trajectory");
       outcomes.push({ role: "trajectory", ok: false, reason: "нет точек истории — вызова не было" });
     } else {
-      // круг 5 тура 3 (живая проверка 27.09): категории в точках — русскими названиями
-      // интерфейса, а не ключами. С ключами модель переводила сама и путала: «Безопасность
-      // (категория Issues)» в публичной версии, где Безопасности нет вовсе
+      // категории — русскими названиями (см. namedTrajectoryPoints): с ключами модель
+      // писала «Безопасность (категория Issues)» даже в публичной версии, где Безопасности нет
       const trajectoryFacts: FactInput[] = [{ key: "scores.points", value: namedTrajectoryPoints(points) }];
       const res = await runRole(deps, budget, "trajectory", trajectoryFacts, [], null);
       if (res.ok) {
@@ -519,8 +508,7 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
       }
     }
 
-    // --- овервью (main): вход = сегменты специалистов + публичные факты ---
-    // (динамика входит в его вход наравне с доменными специалистами, §3.2)
+    // --- overview (main): вход = сегменты специалистов (включая динамику) + факты ---
     const specialistOk = Object.keys(specialistTexts);
     if (specialistOk.length === 0) {
       failSoft.push("overview");
@@ -545,8 +533,8 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
   deps.log?.(
     `[summary] ${deps.org}/${deps.repo} scan ${req.scanId}: notes=${notes}, calls=${budget.calls}, failSoft=[${failSoft.join(",")}], skipped=[${skipped.join(",")}]`,
   );
-  // 23.09 (Алексей): причина несформирования — ДЛЯ ПОЛЬЗОВАТЕЛЯ, не только в
-  // лог; карточка читает ai_fails по последнему скану
+  // причина, по которой текст не сформирован, нужна пользователю, а не только
+  // в логе: карточка читает ai_fails по последнему скану
   const failInsert = deps.db.query(
     "INSERT INTO ai_fails (repo_id, scan_id, role, reason, created_at, audience) VALUES (?, ?, ?, ?, ?, ?)",
   );
@@ -554,9 +542,8 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
     if (o.ok) continue;
     failInsert.run(repoId, req.scanId, o.role, (o.reason ?? "не прошла проверку").slice(0, 200), now.toISOString(), audience);
   }
-  // В5.1 (Прод-С3): при частичном или полном фейле — строка outcomes с причинами:
-  // оператор различает «провайдер недоступен» (модель: сеть/429/stall) от
-  // «ни один блок не прошёл валидацию» (валидатор: ...)
+  // при сбое — строка outcomes с причинами: оператор отличает «провайдер недоступен»
+  // (модель: сеть/429/stall) от «не прошло валидацию» (валидатор: ...)
   if (failSoft.length > 0) {
     deps.log?.(
       `[summary] outcomes: ${outcomes
@@ -578,7 +565,7 @@ export interface FraudCheckResult {
   reason?: string;
   /** у скана уже есть проверка — вызова не было */
   cached?: boolean;
-  /** В5.2 (аудит М3): вызовов модели с ответом; 0 — модель не ответила (лимит не списывается) */
+  /** вызовов модели с ответом; 0 — модель не ответила (лимит не списывается) */
   answered?: number;
 }
 
@@ -587,12 +574,12 @@ const FRAUD_CHECK_MAX_CALLS = ROLE_ATTEMPTS * 2;
 const FRAUD_CHECK_FUSE_MS = 2 * 60_000;
 
 /**
- * Проверка на накрутку (В5.2, Б1; кнопка «Проверить оценку»): один вызов лёгкой
- * модели по фактам скана из БД — без клона и без инструментов. Вход — признаки
- * ритма `activity.rhythm`, посчитанные кодом по полной ленте (rhythm.ts), и
- * `activity.rest`. Заметка flagger = {flag, factors, signals}: карточка и отчет
- * печатают факторы по тем же признакам, что видела модель. Score не трогается.
- * Tri-state: ленты нет — вызова нет, причина в ai_fails («не проверялось»).
+ * Проверка на накрутку (кнопка «Проверить оценку»): один вызов легкой модели по
+ * фактам скана из БД — без клона и без инструментов. Вход — признаки ритма
+ * `activity.rhythm`, посчитанные кодом по полной ленте (rhythm.ts), и `activity.rest`.
+ * Заметка flagger = {flag, factors, signals}: карточка и отчет печатают факторы по тем
+ * же признакам, что видела модель. Score не трогается. Нет ленты — нет вызова,
+ * причина пишется в ai_fails («не проверялось»).
  */
 export async function runFraudCheck(deps: SummaryDeps, req: SummaryRequest): Promise<FraudCheckResult> {
   const now = req.now ?? new Date();
@@ -641,12 +628,12 @@ export async function runFraudCheck(deps: SummaryDeps, req: SummaryRequest): Pro
     req.scanId,
     repoId,
     "flagger",
-    // аудит надежности М3: вход проверки хранится с ней — фактор печатается по тем данным,
-    // что видела модель, а не по фактам более нового анализа
+    // вход проверки хранится вместе с ней: фактор печатается по тем данным, что видела
+    // модель, а не по фактам более нового анализа
     JSON.stringify({ flag: res.flag.flag, factors: res.flag.factors, signals, inputs: rest ? { "activity.rest": parseFactValue(rest.value) } : {} }),
     res.flag.factors.map((f) => f.key),
     now,
-    // вход флаггера — только публичные данные активности: метку видят все (§2 п.2)
+    // вход флаггера — только публичные данные активности, поэтому метку видят все
     "public",
   );
   deps.log?.(`${tag}: flag=${res.flag.flag}, factors=[${res.flag.factors.map((f) => f.key).join(",")}], calls=${budget.calls}`);
@@ -657,7 +644,7 @@ export async function runFraudCheck(deps: SummaryDeps, req: SummaryRequest): Pro
 export const NO_RHYTHM_REASON = "нет истории коммитов — проверка не проводилась";
 
 /**
- * Флаг фрода (К5.10): один вызов + один ретрай с припиской причин; вывод —
+ * Флаг накрутки: до ROLE_ATTEMPTS попыток с причинами отказа в ретрае; вывод —
  * мини-JSON по validateFlagOutput. Флаг — подозрение для человека, оценки
  * и веса у него нет: в Score, категории и дельту он не попадает никогда.
  */
@@ -681,8 +668,8 @@ async function runFlagger(
         : [
             ...base,
             { role: "assistant", content: lastRaw },
-            // В5.2 (Б8, живой прогон 25.09): модель брала ключом поле факта (regular_share) —
-            // ретрай называет допустимые ключи явно; автопочинки ключа нет (решение 23.09)
+            // модель брала ключом поле факта (regular_share), поэтому ретрай называет
+            // допустимые ключи явно; сами ключи код не чинит
             { role: "user", content: `Предыдущий вывод ОТКЛОНЁН: ${lastReason}. Ключ фактора — только имя факта целиком: ${[...keys].join(", ")}. Исправь и выдай ТОЛЬКО JSON формы {"flag":bool,"factors":[{"key":"...","note":"..."}]}.` },
           ];
     let text: string;
@@ -706,8 +693,8 @@ async function runFlagger(
   return { ok: false, reason: `валидатор: ${lastReason}` };
 }
 
-/** Недоверенный контент из клона: README корня (рамку вешает вызывающий).
- *  В5.1 (Прод-З3): кап размера ДО чтения — гигантский README не читается вовсе. */
+/** README корня клона (рамку вешает вызывающий). Размер проверяется ДО чтения:
+ *  гигантский README не читается вовсе. */
 async function readReadme(deps: SummaryDeps): Promise<string | null> {
   if (!deps.clone) return null;
   try {
@@ -721,6 +708,3 @@ async function readReadme(deps: SummaryDeps): Promise<string | null> {
     return null;
   }
 }
-
-// В5.2 (Б3): авто-генерация в окне скана по оп-ину (makeAutoSummary) удалена вместе с
-// автообновлением; топ рейтинга — такт обслуживания (jobs/scheduler.ts, topAutoTick).

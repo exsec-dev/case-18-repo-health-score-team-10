@@ -1,9 +1,8 @@
-// routes-me.test.ts — В4.1-fix Б5 (Ф1.13, LOW-11): HTTP-контракт /api/me/*
-// и единой карточки на настоящем сервере во временном каталоге. Все внешние
-// адреса (REST, AppSec, git) — локальный мок со счётчиком: аноним — ноль
-// запросов; PUT/DELETE /api/me/pat сбрасывают кэш доступа; POST scan —
-// 202 / 202 deduplicated / 429 too_many_active / 429 rate_limited / 409 /
-// 403 / 401 / 503. PAT сохраняется настоящим PUT (шифрование APP_SECRET).
+// HTTP-контракт /api/me/* и единой карточки на настоящем сервере во временном
+// каталоге. Все внешние адреса (REST, AppSec, git) — локальный мок со счётчиком:
+// аноним — ноль запросов; PUT/DELETE /api/me/pat сбрасывают кэш доступа; POST scan
+// — 202 / 202 deduplicated / 429 too_many_active / 429 rate_limited / 409 / 403 /
+// 401 / 503. PAT сохраняется настоящим PUT (шифрование APP_SECRET).
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -42,7 +41,7 @@ beforeAll(async () => {
   const t: ApiTestDb = { db, close: () => db.close() };
   const repoId = seedRepo(t, { org: "pub", repo: "repo" });
   seedScore(t, repoId, seedScan(t, repoId, { facts: cardFacts() }), { total: 60 });
-  // решение владельца 22.09: отчета без оценки нет — репо со сканом, но без
+  // отчета без оценки нет — репо со сканом, но без
   // оценки, и репо вовсе без скана проверяют отказ маршрутов
   seedScan(t, seedRepo(t, { org: "pub", repo: "unscored" }), { facts: cardFacts() });
   seedRepo(t, { org: "pub", repo: "never" });
@@ -89,7 +88,7 @@ describe("POST /api/me/repos/:org/:repo/scan — коды ответа (Ф1.13)"
   // первым тестом: воркер-луп сервера (опрос 5 с) ещё не успел заявить job
   test("202, 202 deduplicated, 429 too_many_active, 403, 401, 503, 409, 401 без сессии", async () => {
     expect((await putPat("active", "pat-active-000000")).status).toBe(200);
-    // отказы предпроверки (401/503/403) учитываются лимитом частоты (круг 2, LOW-6)
+    // отказы предпроверки (401/503/403) учитываются лимитом частоты
     expect(await postScan("active", "own/expired")).toEqual({ status: 401, code: "pat_expired", deduplicated: null });
     expect(await postScan("active", "own/broken")).toEqual({ status: 503, code: "check_failed", deduplicated: null });
     expect(await postScan("active", "own/forbidden")).toEqual({ status: 403, code: "no_access", deduplicated: null });
@@ -104,10 +103,9 @@ describe("POST /api/me/repos/:org/:repo/scan — коды ответа (Ф1.13)"
     expect(await postScan(null, "own/a1")).toEqual({ status: 401, code: "unauthorized", deduplicated: null });
   });
 
-  // ПЕРЕВОРОТ (В4.8.5, К8.5.6, С4-13): отказ предпроверки (403/404/401)
-  // учитывается лимитом, СБОЙ платформы (`broken`, 500) — нет. Прежний список
-  // из пяти давал лимит 6 вместе с `b1`; теперь пять отказов-вердиктов плюс
-  // сбой: будь сбой учтён, уже `b1` получил бы 429
+  // отказ предпроверки (403/404/401) учитывается лимитом, СБОЙ платформы
+  // (`broken`, 500) — нет: пять отказов-вердиктов плюс сбой; будь сбой учтен,
+  // уже `b1` получил бы 429
   test("429 rate_limited: отказанные предпроверки учитываются лимитом частоты, сбой платформы — нет", async () => {
     expect((await putPat("rate", "pat-rate-00000000")).status).toBe(200);
     for (const slug of ["forbidden", "missing", "expired", "broken", "forbidden", "missing"]) {
@@ -159,7 +157,7 @@ describe("карточка: аноним без запросов, кэш дос�
     const card = async () => (await (await fetch(url("/api/repos/pub/repo"), as("cache"))).json()) as { access: { cicd: string; appsec: string } };
     expect((await putPat("cache", "pat-cache-one-000")).status).toBe(200);
     let mark = mock.requests.length;
-    expect((await card()).access).toEqual({ cicd: "granted", appsec: "granted" }); // AppSec 404 «скана нет» → granted (Ф1.4)
+    expect((await card()).access).toEqual({ cicd: "granted", appsec: "granted" }); // AppSec 404 «скана нет» → granted
     expect(cardRequests(mark).map((r) => r.path).sort()).toEqual(["/repos/pub/repo", "/repos/pub/repo/cicd/runs?page_size=1", "/v1/scans/latest?gitRepo=gid-repo"]);
     mark = mock.requests.length;
     await card();

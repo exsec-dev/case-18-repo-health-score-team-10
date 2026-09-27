@@ -1,7 +1,6 @@
-// summary-b1.test.ts — миграция 2.0 (аддитивность, legacy-путь) и транспорт
-// head_sha до конца (Б1 В5): extractFacts выносит sha, runner пишет колонку
-// scans.head_sha при реальном git-канале. Живых запросов нет: клон — file://,
-// REST — швом collectRest.
+// Миграция схемы 2.0 (аддитивность, legacy-путь) и транспорт head_sha до конца:
+// extractFacts выносит sha, runner пишет колонку scans.head_sha при реальном
+// git-канале. Живых запросов нет: клон — file://, REST — швом collectRest.
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { execFileSync } from "node:child_process";
@@ -30,9 +29,8 @@ describe("Миграция 2.0→2.1 (Б1 В5 + 23.09 ai_fails)", () => {
   test("свежая БД: ai_notes, ai_fails, scans.head_sha, jobs.kind='scan'; версия 2.1", () => {
     const { db } = freshDb();
     expect(getMetaValue(db, "schema_version")).toBe(SCHEMA_VERSION);
-    // В5.3-М (Н1): 2.2 — scans.collector_version (аддитивно, таблицы 2.1 на месте)
-    // В5.2 (Б2): 2.3 — аудитория AI-текста и отметка пароля (аддитивно)
-    // В5.5 тур 1 (W2): 2.4 — rating_snapshots, снимок мест рейтинга (аддитивно)
+    // 2.2-2.4 аддитивны: scans.collector_version, аудитория AI-текста и отметка
+    // пароля, rating_snapshots; таблицы 2.1 на месте
     expect(SCHEMA_VERSION).toBe("2.4");
     expect(columnsOf(db, "scans").has("head_sha")).toBe(true);
     expect(columnsOf(db, "jobs").has("kind")).toBe(true);
@@ -43,7 +41,7 @@ describe("Миграция 2.0→2.1 (Б1 В5 + 23.09 ai_fails)", () => {
     for (const col of ["id", "repo_id", "scan_id", "role", "text", "fact_refs", "charter_version", "model", "created_at"]) {
       expect(aiColumns.has(col)).toBe(true);
     }
-    // 2.1 (23.09): ai_fails — честная причина несформирования роли
+    // ai_fails — честная причина несформирования роли
     const failColumns = columnsOf(db, "ai_fails");
     for (const col of ["id", "repo_id", "scan_id", "role", "reason", "created_at"]) {
       expect(failColumns.has(col)).toBe(true);
@@ -113,7 +111,7 @@ describe("Транспорт head_sha (Б1 В5): runScan с реальным git
     expect(res.channels.git).toBe("ok");
     const scan = db.query("SELECT head_sha FROM scans WHERE id = ?").get(res.scanId) as { head_sha: string | null };
     expect(scan.head_sha).toBe(expectedSha);
-    // клон убран (окно закрылось в конце скана — закон 3)
+    // клон убран в конце скана: код не храним
     const leftovers = (db.query("SELECT COUNT(*) AS c FROM jobs").get() as { c: number }).c;
     expect(leftovers).toBeGreaterThanOrEqual(0); // jobs не при чём; проверка окна — по каталогу ниже
   }, 60_000);

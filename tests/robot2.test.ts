@@ -1,7 +1,7 @@
-// robot2.test.ts — Б2: robot v2 (§7.2) — burst-коллапс (скользящее
-// окно 2с, ≥10 коммитов, committer-даты), author-паттерны ([bot], bot@,
-// -bot, dependabot/renovate/allcontributors, noreply-домены),
-// совместимость robot+sync, доминирование robot; derived §7.3.
+// Признак робота: burst-коллапс (скользящее окно 2с, ≥10 коммитов,
+// committer-даты), author-паттерны ([bot], bot@, -bot, dependabot/renovate/
+// allcontributors, noreply-домены), совместимость robot+sync, доминирование
+// robot; производные метрики.
 import { describe, expect, test } from "bun:test";
 import { burstSyncFlags, isRobotAuthor, robot2Flags, BURST_MIN_COMMITS } from "../src/score/robot2";
 import { deriveMetrics } from "../src/score/derived";
@@ -60,7 +60,7 @@ describe("author-паттерны (§7.2)", () => {
     expect(isRobotAuthor("Deploy Unit", "bot@renovate.example")).toBe(true); // bot@-паттерн локальной части
     expect(isRobotAuthor("Some Bot", "some-bot@company.example")).toBe(true); // -bot
     expect(isRobotAuthor("release-bot", "rb@company.example")).toBe(true);
-    // 4.2.0 (М1.7): приватная почта GitHub — человек; бот на ней ловится маркером
+    // приватная почта GitHub — человек; бот на ней ловится маркером
     expect(isRobotAuthor("H", "49699333+user@users.noreply.github.com")).toBe(false);
     expect(isRobotAuthor("dependabot[bot]", "49699333+dependabot[bot]@users.noreply.github.com")).toBe(true);
     expect(isRobotAuthor("GitHub", "noreply@github.com")).toBe(true); // адрес автоматизации — точным совпадением
@@ -130,7 +130,7 @@ describe("derived §7.3 (robot2-истина, без re-clone)", () => {
     expect(d.syncBursts).toBe(1);
     expect(d.robotRatioV2).toBe(round3(1 / 16));
     expect(d.mirrorLikeness).toEqual({ sync_share: round3(12 / 16), authors: 14, committers: 1 });
-    expect(d.contributorsTotal).toBe(1); // 4.2.0 (М1.6): только люди — синки и бот не авторы
+    expect(d.contributorsTotal).toBe(1); // только люди — синки и бот не авторы
   });
 
   test("issues/code/rest derived + git no-data → git-поля null", () => {

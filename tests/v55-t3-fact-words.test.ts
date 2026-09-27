@@ -1,6 +1,6 @@
-// V5.5 tour 3 (item 11, variant A): a recommendation's fact in words over the raw
-// value. Behavioral: numbers and words on known fact values (rule 21.09/23.09),
-// fallback pairs for other facts, nothing for non-ok facts, UI language rule.
+// A recommendation's fact in words over the raw value. Behavioral: numbers and words
+// on known fact values, fallback pairs for other facts, nothing for non-ok facts,
+// UI language rule.
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { factWords } from "../src/report/factWords";

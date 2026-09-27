@@ -1,17 +1,13 @@
-// V5.5 tour 1 (W3): charters issues/code/overview by the repo-vitals fact-check
-// (reports/2026-09-25-m52-ai-factcheck-repo-vitals.md, items a-c).
-// LLM-free regression: bumped versions load via loadCharter (fail-fast intact),
-// new rules are present in the charter texts (source-assert is valid for texts).
+// Charters issues/code/overview after the AI fact-check. LLM-free regression:
+// versions load via loadCharter (fail-fast intact), the rules are present in
+// the charter texts.
 import { expect, test } from "bun:test";
 import { loadAllCharters } from "../src/summary/charters";
 
 const all = loadAllCharters();
 
 test("charter versions bumped and load: issues 4->5, code 7->8, overview 5->6", () => {
-  // V5.5 tour 2 (HQ acceptance, live repo-vitals rerun): issues 5->6, code 8->9 —
-  // pinned in tests/v55-t2-charters.test.ts; the tour-1 rules below still hold.
-  // V5.5 tour 3 round 5 (reader language: no keys, raw shares, jargon): issues 7, code 10,
-  // overview 7 — pinned in tests/v55-t3-ai-text-leaks.test.ts
+  // current versions are pinned in tests/v55-t3-ai-text-leaks.test.ts
   expect(all.issues.version).toBe("7");
   expect(all.code.version).toBe("10");
   expect(all.overview.version).toBe("7");
@@ -19,7 +15,7 @@ test("charter versions bumped and load: issues 4->5, code 7->8, overview 5->6", 
 
 test("issues charter: no issue titles/texts in input; comments sample named explicitly", () => {
   const t = all.issues.text;
-  // X1: the model claimed "судя по заголовкам открытых задач" with no titles in input
+  // the model claimed "судя по заголовкам открытых задач" with no titles in input
   expect(t).toContain("Текстов и заголовков задач во входе НЕТ");
   expect(t).not.toContain("Прочитай заголовки открытых задач");
   // comments sample must be named as "N answered out of M fresh"
@@ -32,7 +28,7 @@ test("issues charter: no issue titles/texts in input; comments sample named expl
 
 test("code charter: fixtures/tests/docs markers are not tech debt; self-contradiction is rejected", () => {
   const t = all.code.text;
-  // X2: specialist wrote "долг" and one paragraph later "актуальных задач нет"
+  // specialist wrote "долг" and one paragraph later "актуальных задач нет"
   expect(t).toContain("Самопротиворечие");
   expect(t).toContain("актуальных задач нет");
   expect(t).toMatch(/фикстур/);
@@ -41,7 +37,7 @@ test("code charter: fixtures/tests/docs markers are not tech debt; self-contradi
 
 test("overview charter: specialist's self-refuted claim is not propagated; recommendations only on confirmed", () => {
   const t = all.overview.text;
-  // X3: overview recommended "уделить внимание анализу пометок TODO" on a refuted claim
+  // overview recommended "уделить внимание анализу пометок TODO" on a refuted claim
   expect(t).toContain("опровергнут");
   expect(t).toContain("не переносится");
   expect(t).toContain("только по подтвержденному");

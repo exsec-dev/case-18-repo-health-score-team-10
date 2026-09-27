@@ -1,10 +1,7 @@
-// health.ts — честный /api/health (В4.4, кластер B код-аудита): ok —
-// ВЫЧИСЛЯЕМОЕ, а не литерал. Красные причины: (а) pending/ошибка стартового
-// рескора, (б) подозрительно пустой каталог (эвикция приостановлена),
-// (в) последняя ночная фаза с ok:false. Состояние планировщика — в meta
-// (кросс-процессно: rating-роль пишет, web-роль читает); HTTP-статус всегда
-// 200 — здоровье читают по телу, а гард тестового харнесса ждёт порт.
-// Чистая функция чтения: тесты без HTTP.
+// /api/health: `ok` вычисляется из состояния, а не отдается литералом.
+// Состояние планировщика лежит в meta, потому что его пишет rating-роль, а
+// читает web-роль (разные процессы). HTTP-статус всегда 200: здоровье читают
+// по телу, а тестовый харнесс по ответу лишь ждет, что порт поднялся.
 import type { Database } from "bun:sqlite";
 import { worstCaseScanMs, type Config } from "../config";
 import { getMetaValue } from "../db";
@@ -18,29 +15,28 @@ export const SCHED_META = {
   nightlyAt: "sched_last_nightly_at",
   nightlyOk: "sched_last_nightly_ok",
   nightlyError: "sched_last_nightly_error",
-  /** В4.8.5 (К8.5.5b): время последней УСПЕШНОЙ ночной фазы — ключ успеха; nightlyAt значит «попытка» */
+  /** время последней УСПЕШНОЙ ночной фазы; nightlyAt значит лишь «попытка» */
   nightlyOkAt: "sched_nightly_ok_at",
-  /** В4.8.5 (К8.5.5c, С8-4): последняя ошибка сверки и её время; успешная сверка их стирает */
+  /** последняя ошибка сверки и ее время; успешная сверка их стирает */
   reconcileError: "sched_reconcile_error",
   reconcileErrorAt: "sched_reconcile_error_at",
-  /** В4.8.5 (К8.5.5c, С8-10): тик каталога не нашёл серверного токена — время; тик с токеном стирает */
+  /** когда тик каталога не нашел серверного токена; тик с токеном стирает */
   noTokenAt: "sched_no_token_at",
-  /** З6 (круг 2 В4.4): метка живого тика rating-воркер-лупа (пишет только rating-сторона).
-   *  В4.8.5 (С10-3): тик `busy` пишет её, только пока текущее задание в пределах худшего бюджета скана. */
+  /** метка живого тика rating-стороны воркер-лупа. Занятый тик пишет ее, только
+   *  пока текущее задание укладывается в худший бюджет скана. */
   tickAt: "sched_tick_at",
-  /** В4.8.5 (К8.5.5c, С10-5): та же метка пользовательской стороны лупа (роль web/all) */
+  /** та же метка пользовательской стороны лупа (роль web/all) */
   userTickAt: "sched_user_tick_at",
 } as const;
 
-/** В4.8.5 (С10-5): пользовательская заявка ждёт дольше этого при мёртвой (или не запущенной) user-стороне — health краснеет. */
+/** Пользовательская заявка ждет дольше этого, а user-сторона не тикает – health краснеет. */
 export const USER_LANE_STALE_MS = 30 * 60_000;
 
-/** З6 (круг 2 В4.4): метка тика планировщика старше этого порога — rating-роль
- *  вероятно мертва (таймеры стоят), health обязан краснеть, а не лгать зелёным.
- *  Порог оспариванию в приёмке не подлежит. */
+/** Метка тика старше этого порога – rating-роль, вероятно, мертва (таймеры
+ *  стоят), и health должен краснеть, а не оставаться зеленым. */
 export const SCHED_STALE_AFTER_MS = 30 * 60_000;
 
-/** meta-ключ гарда пустого каталога (кластер D). */
+/** meta-ключ гарда пустого каталога. */
 export const CATALOG_SUSPICIOUS_AT = "catalog_suspicious_at";
 
 export interface HealthStatus {
@@ -50,18 +46,17 @@ export interface HealthStatus {
   repos: number;
   llmProvider: string;
   queue: { user: number; rating: number };
-  /** В5.2 (аудит очереди О5): сколько ждет самая старая пользовательская заявка каждого рода,
-   *  мс (null — не ждет никто). Информационно: живость циклов проверяют `stuck`/`expired`,
-   *  а это число показывает оператору ожидание, которое метки живости не видят */
+  /** сколько ждет самая старая пользовательская заявка каждого рода, мс (null – никто).
+   *  Только для оператора: живость циклов проверяют `stuck`/`expired`, а ожидания они не видят */
   userQueueOldestMs: { scan: number | null; summary: number | null; check: number | null };
   failedJobs24h: number;
-  /** прогресс асинхронного рескора (кластер A) */
+  /** прогресс асинхронного рескора */
   rescore: RescoreState;
   /** обход вернул пустой каталог при живом рейтинге — эвикция стоит */
   catalogSuspiciousAt: string | null;
   /** записей каталога отброшено гардом слагов (последний обход) */
   catalogSkippedBadEntries: number;
-  /** последняя ИСПОЛНИВШАЯСЯ ночная фаза (К-Р5: сверка этот факт не трогает) */
+  /** последняя ИСПОЛНИВШАЯСЯ ночная фаза (сверка этот факт не трогает) */
   lastNightly: { ok: boolean; error?: string } | null;
   lastReconcileAt: string | null;
   lastNightlyAt: string | null;
@@ -94,9 +89,8 @@ export function getHealth(db: Database, config: Config): HealthStatus {
   const nightlyError = getMetaValue(db, SCHED_META.nightlyError);
 
   const reasons: string[] = [];
-  // S-5 (круг 2 В4.4): сырые внутренние тексты (SQLite-сообщения, фрагменты
-  // ответа платформы) в публичном /api/health капятся — диагностика читается,
-  // поверхность ограничена (секретов там нет — сверено аудитом)
+  // сырые внутренние тексты (сообщения SQLite, фрагменты ответа платформы)
+  // в публичном /api/health обрезаются: диагностика читается, а поверхность ограничена
   const safeHealthText = (raw: string): string => raw.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 200);
   if (rescore.error !== null) {
     reasons.push(`стартовый пересчёт оценок упал: ${safeHealthText(rescore.error)}`);
@@ -109,10 +103,9 @@ export function getHealth(db: Database, config: Config): HealthStatus {
   if (nightlyOkRaw === "0") {
     reasons.push(`последняя ночная фаза обхода не удалась${nightlyError ? `: ${safeHealthText(nightlyError)}` : ""}`);
   }
-  // З6 (круг 2 В4.4): метка тика есть, но стареет — rating-роль, вероятно,
-  // мертва (в разводке web/rating её смерть раньше оставалась зелёной:
-  // sched_last_nightly_ok хранил последний УСПЕХ). Нет метки — нет и
-  // утверждения «не тикал» (свежий деплой / роль web без планировщика)
+  // метка тика есть, но устарела – rating-роль, вероятно, мертва (исход ночной
+  // фазы этого не покажет: там хранится последний успех). Нет метки – нет и
+  // утверждения «не тикал»: свежий деплой или роль web без планировщика
   const schedTickAt = getMetaValue(db, SCHED_META.tickAt);
   if (schedTickAt !== null) {
     const ageMs = Date.now() - Date.parse(schedTickAt);
@@ -121,9 +114,8 @@ export function getHealth(db: Database, config: Config): HealthStatus {
     }
   }
   const nowMs = Date.now();
-  // В4.8.5 (К8.5.5c, С8-4): сбой часовой сверки больше не прячется — ошибка
-  // записана, а последняя успешная сверка старше двух интервалов (или её не
-  // было вовсе). Одиночный сбой внутри двух интервалов — не красное.
+  // сверка краснеет, если ошибка записана, а последняя успешная сверка старше
+  // двух интервалов (или ее не было). Одиночный сбой внутри двух интервалов – не красное.
   const reconcileError = getMetaValue(db, SCHED_META.reconcileError);
   if (reconcileError !== null) {
     const lastOk = getMetaValue(db, SCHED_META.reconcileAt);
@@ -134,20 +126,20 @@ export function getHealth(db: Database, config: Config): HealthStatus {
       );
     }
   }
-  // С8-10: тик каталога не нашёл серверного токена — планировщик молча стоял бы
+  // без серверного токена планировщик молча стоял бы
   if (getMetaValue(db, SCHED_META.noTokenAt) !== null) {
     reasons.push("у планировщика нет серверного токена SourceCraft — обход каталога и периодические анализы не идут");
   }
-  // С10-3 / К8.5.2b: задание «running» с истекшим лизом — его процесс умер или
-  // цикл событий стоял дольше лиза; задание дольше худшего бюджета скана — зависло
+  // «running» с истекшим лизом – процесс умер или цикл событий стоял дольше лиза;
+  // задание дольше худшего бюджета скана – зависло
   const nowIso = new Date(nowMs).toISOString();
   const expired = (db.query("SELECT COUNT(*) AS c FROM jobs WHERE status = 'running' AND lease_until < ?").get(nowIso) as { c: number }).c;
   if (expired > 0) reasons.push(`заданий в работе с истекшим лизом: ${expired} — их процесс не отвечает`);
   const stuckSince = new Date(nowMs - worstCaseScanMs(config.scan)).toISOString();
   const stuck = (db.query("SELECT COUNT(*) AS c FROM jobs WHERE status = 'running' AND claimed_at < ?").get(stuckSince) as { c: number }).c;
   if (stuck > 0) reasons.push(`заданий в работе дольше худшего бюджета скана: ${stuck} — похоже, зависли`);
-  // С10-5: пользовательская полоса стоит — есть давняя заявка, а метки
-  // user-стороны лупа нет или она устарела (роль web не запущена или мертва)
+  // пользовательская полоса стоит: есть давняя заявка, а метки user-стороны
+  // лупа нет или она устарела (роль web не запущена или мертва)
   const oldestUser = db
     .query("SELECT MIN(created_at) AS t FROM jobs WHERE status = 'queued' AND trigger_kind = 'user' AND created_at IS NOT NULL")
     .get() as { t: string | null };

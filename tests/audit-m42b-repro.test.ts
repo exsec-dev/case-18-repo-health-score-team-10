@@ -1,21 +1,8 @@
-// audit-m42b-repro.test.ts — воспроизведение находок, назначенных вехе
-// В4.2b (Ф2b). Закон вехи — reports/2026-09-17-fix-plan.md ревизия 6,
-// Часть 2 «В4.2b = Ф2b» и Часть 3 «К-Ф2b»; источники находок —
-// reports/2026-09-17-m4-audit-pair.md (M9 В4, LOW-4/5/6 В4).
-//
-// Б0 покрывает ЧЕТЫРЕ позиции остатка:
-//   Ф2.7 — `Secure`/`__Host-` при `YA_REDIRECT_URI` на https;
-//   Ф2.7 — ошибочные исходы callback отдают ОТНОСИТЕЛЬНЫЙ `Location`
-//          (успех `/me` уже относительный — красным не стал бы);
-//   Ф2.8 — `APP_SECRET` короче 32 символов → сессии выключены;
-//   Ф2.8 — чужой `Origin` на мутирующих `/api/me/*` и `/auth/logout` → 403.
-// Тест «logout отзывает сессию» из Б0 исключён планом: маршрут уже в
-// `main`, красным он не станет — покрывается обычным тестом блока Б1.
-//
-// На Б0-коммите находки стоят под обёрткой `repro` (в строгом режиме —
-// красные); обёртка снимается в блоке, закрывшем находку, сами
-// утверждения при этом не меняются. Строгий режим — для команды приёмки:
-//   AUDIT_STRICT=1 bun test tests/audit-m42b-repro.test.ts
+// Репро-тесты на найденные аудитом дефекты входа и сессий:
+//   - `Secure`/`__Host-` cookie при `YA_REDIRECT_URI` на https;
+//   - ошибочные исходы callback отдают относительный `Location`;
+//   - `APP_SECRET` короче 32 символов выключает сессии;
+//   - чужой `Origin` на мутирующих `/api/me/*` и `/auth/logout` → 403.
 //
 // Живых запросов нет: настоящий сервер по HTTP во временном DATA_DIR,
 // SOURCECRAFT_TOKEN="", REST/AppSec/git/Я ID — один локальный мок
@@ -28,9 +15,8 @@ import { join } from "node:path";
 import { loadConfig } from "../src/config";
 import { spawnServer, startMockApi, type SpawnedServer } from "./server-harness";
 
-// Обёртка строгого режима (как в audit-m42a-repro.test.ts): в обычном
-// прогоне — `test.failing` (набор зелёный, красноты в CI нет), под
-// AUDIT_STRICT=1 — обычный `test`, то есть красный, пока находка не закрыта.
+// Обертка репро: в обычном прогоне — `test.failing` (набор зеленый, пока
+// дефект жив), под AUDIT_STRICT=1 — обычный `test`, красный до исправления.
 const repro = process.env.AUDIT_STRICT ? test : test.failing;
 
 const SECRET = "audit-m42b-repro-test-secret-0123456789abcdef";
@@ -105,12 +91,11 @@ async function login(base: string, sessionCookieName: string): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
-// Ф2.8. `APP_SECRET` короче 32 символов → сессии выключены
-// (К-Ф2b Ф2.8: в loadConfig `appSecret = null` + лог).
+// `APP_SECRET` короче 32 символов → сессии выключены
+// (в loadConfig `appSecret = null` + лог).
 // ---------------------------------------------------------------------------
 
 describe("Ф2.8: APP_SECRET < 32 символов выключает сессии", () => {
-  // закрыто блоком Б2 — обёртка repro снята, утверждение не менялось
   test("loadConfig: короткий APP_SECRET → appSecret = null", () => {
     const saved = process.env.APP_SECRET;
     process.env.APP_SECRET = "short-secret";
@@ -125,12 +110,11 @@ describe("Ф2.8: APP_SECRET < 32 символов выключает сесси�
 });
 
 // ---------------------------------------------------------------------------
-// Ф2.7. Ошибочные исходы callback — относительный `Location: /me?auth_error=…`
-// (LOW-7: абсолютный редирект из Host — риск за кривым прокси).
+// Ошибочные исходы callback — относительный `Location: /me?auth_error=…`:
+// абсолютный редирект, собранный из Host, рискован за кривым прокси.
 // ---------------------------------------------------------------------------
 
 describe("Ф2.7: ошибочный исход callback отдаёт относительный Location", () => {
-  // закрыто блоком Б1 — обёртка repro снята, утверждение не менялось
   test("провайдер вернул ?error= → Location ровно /me?auth_error=…", async () => {
     const res = await fetch(at("/auth/ya/callback?error=access_denied"), { redirect: "manual" });
     expect(res.status).toBe(302);
@@ -145,12 +129,11 @@ describe("Ф2.7: ошибочный исход callback отдаёт относ�
 });
 
 // ---------------------------------------------------------------------------
-// Ф2.7. `YA_REDIRECT_URI` на https → `__Host-rh_session` / `__Host-rh_oauth_state`
-// с `Secure; Path=/` без `Domain` (К-Ф2b Ф2.7: `cookieNames(config)`).
+// `YA_REDIRECT_URI` на https → `__Host-rh_session` / `__Host-rh_oauth_state`
+// с `Secure; Path=/` без `Domain` (имена дает `cookieNames(config)`).
 // ---------------------------------------------------------------------------
 
 describe("Ф2.7: https-redirect включает __Host-/Secure cookie", () => {
-  // закрыто блоком Б1 — обёртка repro снята, утверждение не менялось
   test("state-cookie зовётся __Host-rh_oauth_state и помечена Secure", async () => {
     const start = await fetch(`${httpsServer!.base}/auth/ya`, { redirect: "manual" });
     const stateCookie = start.headers.getSetCookie().find((c) => c.startsWith("__Host-rh_oauth_state="));
@@ -173,8 +156,8 @@ describe("Ф2.7: https-redirect включает __Host-/Secure cookie", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Блок Б1 (обычные тесты блока): state-cookie гасится во всех исходах
-// callback; вход/выход под https работают по актуальному имени __Host-.
+// state-cookie гасится во всех исходах callback; вход/выход под https
+// работают по актуальному имени __Host-.
 // ---------------------------------------------------------------------------
 
 describe("Б1: state-cookie очищается во всех исходах callback", () => {
@@ -220,8 +203,8 @@ describe("Б1: под https выход работает по актуально�
 });
 
 // ---------------------------------------------------------------------------
-// Ф2.8. Чужой Origin → 403 на мутирующих `/api/me/*` и `/auth/logout`
-// (LOW-6; заголовка нет → пропустить — SameSite=Lax).
+// Чужой Origin → 403 на мутирующих `/api/me/*` и `/auth/logout`;
+// заголовка нет → пропустить (защищает SameSite=Lax).
 // ---------------------------------------------------------------------------
 
 describe("Ф2.8: чужой Origin на мутациях → 403", () => {
@@ -231,7 +214,6 @@ describe("Ф2.8: чужой Origin на мутациях → 403", () => {
     session = await login(server!.base, "rh_session");
   }, 30_000);
 
-  // закрыто блоком Б2 — обёртки repro сняты, утверждения не менялись
   test("POST /auth/logout с чужим Origin → 403, сессия не отозвана", async () => {
     const out = await fetch(at("/auth/logout"), {
       method: "POST",
@@ -265,9 +247,8 @@ describe("Ф2.8: чужой Origin на мутациях → 403", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Самопроверка строгого режима (Т1 круга 2 В4.2-port-fix — тот же приём):
-// без неё «AUDIT_STRICT=1 зелёный» — тавтология, потому что незакрытые находки
-// стоят под `test.failing`. На Б0-коммите этот тест красный вместе с ними.
+// Самопроверка строгого режима: без нее «AUDIT_STRICT=1 зеленый» — тавтология,
+// потому что неисправленные дефекты стоят под `test.failing`.
 // ---------------------------------------------------------------------------
 
 if (process.env.AUDIT_STRICT) {

@@ -1,17 +1,15 @@
-// robot2.ts — robot v2 (§7.2, Q18: интервальный слой ВЫРЕЗАН — v1
-// ловил синки, но мимо ботов и с ФП на ровных человеческих сериях):
-// 1) burst-коллапс — ≥10 коммитов внутри скользящего окна 2с по
-//    COMMITTER-датам → всем sync=true; с 4.3.0 круга 2 (К5, решение
-//    владельца 24.09 «зеркала — по датам автора») — только если и
-//    author-даты окна в пределах окна (сгенерированный всплеск). Ребейз с
-//    любым числом авторов и импорт зеркала сохраняют разнесенные
-//    author-даты — их коммиты человеческие и считаются по датам автора;
-// 2) author-паттерны — [bot], bot@, -bot, dependabot/renovate/
-//    allcontributors + noreply-домены → robot.
-// Robot-паттерн доминирует над sync в семантике, флаги совместимы:
-// коммит может быть robot=true И sync=true; оба исключаются из
-// частоты и freshness (compute игнорирует v1-флаги в фактах —
-// истина robot2). Сырьё (author+committer+обе даты) в фактах полно.
+// Отделение роботов и синхронизаций от работы людей (docs/methodology.md §5).
+// Детектора «ровных интервалов» здесь нет сознательно: он ловил синки, но
+// пропускал ботов и ложно срабатывал на ровных человеческих сериях.
+// 1) burst-коллапс — ≥10 коммитов внутри скользящего окна 2 с по COMMITTER-датам
+//    → всем sync=true, но только если и author-даты окна лежат в пределах окна
+//    (сгенерированный всплеск). Ребейз с любым числом авторов и импорт зеркала
+//    сохраняют разнесенные author-даты — это работа людей, она считается по датам автора;
+// 2) author-паттерны — [bot], bot@, -bot, dependabot/renovate/allcontributors
+//    + noreply-домены → robot.
+// Флаги совместимы: коммит может быть robot=true И sync=true; оба исключаются из
+// частоты и свежести. Старые robot-флаги в фактах compute игнорирует — источник
+// истины здесь. Сырье (author+committer+обе даты) в фактах хранится полностью.
 import { NOREPLY_DOMAINS, ROBOT_EMAILS, ROBOT_NAME_MARKERS } from "./model";
 
 /** ширина скользящего окна burst-коллапса */
@@ -36,7 +34,7 @@ function localEndsWithBot(email: string): boolean {
   return /(?:^|[.+_\d-])bot$/.test(local);
 }
 
-/** Author-паттерн робота (§7.2): имя/емейл автора, не коммиттера. */
+/** Паттерн робота по имени/емейлу автора, не коммиттера. */
 export function isRobotAuthor(authorName: string, authorEmail: string): boolean {
   const n = (authorName ?? "").toLowerCase();
   const e = (authorEmail ?? "").toLowerCase();
@@ -44,7 +42,7 @@ export function isRobotAuthor(authorName: string, authorEmail: string): boolean 
     if (n.includes(marker) || e.includes(marker)) return true;
   }
   if (localEndsWithBot(e)) return true;
-  // 4.2.0 (М1.7): точное совпадение — поддомены (`users.noreply.github.com`) не роботы
+  // точное совпадение: поддомены (`users.noreply.github.com`) — не роботы
   if (ROBOT_EMAILS.includes(e)) return true;
   const domain = e.split("@")[1] ?? "";
   if (domain && NOREPLY_DOMAINS.includes(domain)) return true;
@@ -52,18 +50,9 @@ export function isRobotAuthor(authorName: string, authorEmail: string): boolean 
 }
 
 /**
- * Burst-коллапс: скользящее окно шириной BURST_WINDOW_MS по
- * committer-датам (сортировка внутри); окно с ≥BURST_MIN_COMMITS
- * коммитами → все его коммиты sync=true. Невалидные даты в bursts
- * не участвуют (не создают искусственных скоплений на ts=0).
- * Возвращает {flags, bursts} — bursts = число максимальных burst-групп.
- */
-/**
- * В5.3-М (Н10, F12/J13) → круг 2 (К5, G2/G5): кто стоит за коммитом окна.
- * Признаки круга 1 («≥ 2 авторов», «чужой коммиттер у большинства») сняты:
- * ребейз общей ветки двух авторов и зеркало (импорт чужой истории) — тоже
- * человеческая работа, ее коммиты считаются по author-датам. Синк — только
- * генерированный всплеск: author-даты окна лежат в пределах того же окна.
+ * Кто стоит за коммитом окна. Ни число авторов, ни чужой коммиттер синк не
+ * доказывают: ребейз общей ветки и зеркало (импорт чужой истории) — тоже работа
+ * людей. Синк — только сгенерированный всплеск: author-даты окна лежат в пределах того же окна.
  */
 export interface BurstActor {
   author: string;
@@ -73,12 +62,18 @@ export interface BurstActor {
 }
 
 export function isSyncWindow(actors: BurstActor[]): boolean {
-  // К5: author-даты всех коммитов окна разобраны и лежат в пределах окна —
-  // 1000 пустых коммитов за секунду (сценарий жюри S6a) схлопываются, как раньше
+  // author-даты всех коммитов окна разобраны и лежат в пределах окна:
+  // 1000 пустых коммитов за секунду схлопываются
   const ts = actors.map((a) => a.authorTs).filter((t): t is number => typeof t === "number" && Number.isFinite(t));
   return ts.length === actors.length && ts.length > 0 && Math.max(...ts) - Math.min(...ts) <= BURST_WINDOW_MS;
 }
 
+/**
+ * Burst-коллапс: скользящее окно шириной BURST_WINDOW_MS по committer-датам;
+ * окно с ≥BURST_MIN_COMMITS коммитами → все его коммиты sync=true. Невалидные
+ * даты не участвуют (не создают искусственных скоплений на ts=0).
+ * bursts — число связных групп помеченных коммитов.
+ */
 export function burstSyncFlags(committerTs: (number | null)[], actors?: BurstActor[]): { flags: boolean[]; bursts: number } {
   const flags = new Array<boolean>(committerTs.length).fill(false);
   const valid = committerTs
@@ -108,9 +103,8 @@ export function burstSyncFlags(committerTs: (number | null)[], actors?: BurstAct
 }
 
 /**
- * Robot v2 по событиям таймлайна (activity.git.timeline.events):
- * {robot, sync} per-commit (совместимы; robot доминирует в семантике —
- * оба исключаются из частоты и freshness).
+ * Флаги {robot, sync} для каждого события ленты (activity.git.timeline.events);
+ * флаги совместимы, оба исключают коммит из частоты и свежести.
  */
 export function robot2Flags(events: CommitActor[]): { flags: Robot2Flags[]; bursts: number } {
   const ts = events.map((e) => {
@@ -119,7 +113,6 @@ export function robot2Flags(events: CommitActor[]): { flags: Robot2Flags[]; burs
     const t = Date.parse(raw);
     return Number.isNaN(t) ? null : t;
   });
-  // К5: окно синка — только когда и author-даты окна в пределах окна
   const actors = events.map((e) => {
     const at = typeof e.author.date === "string" && e.author.date !== "" ? Date.parse(e.author.date) : Number.NaN;
     return {

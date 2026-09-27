@@ -1,7 +1,7 @@
-// summary-agent.test.ts — инструменты агента и цикл (Б1 В5): path-гард,
-// deny-list секретов, капы, git_log, дедуп; materializeWorktree на настоящем
-// локальном клоне; цикл — tool_budget, salvage, wall-clock фуз, ретрай 429.
-// Живых вызовов LLM нет — CallLlm фейк на сценариях.
+// Инструменты AI-агента и цикл: path-гард, deny-list секретов, капы, git_log,
+// дедуп; materializeWorktree на настоящем локальном клоне; цикл — tool_budget,
+// salvage, wall-clock фуз, ретрай 429. Живых вызовов LLM нет — CallLlm фейк на
+// сценариях.
 import { afterAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";

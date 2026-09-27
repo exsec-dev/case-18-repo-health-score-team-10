@@ -1,24 +1,20 @@
-// rest.ts — REST-коллекторы (Б3 план В1 + расширения В2/Б1): fetchResource
-// (пагинация ≤5 стр, классификация ошибок access/bad-channel/other,
-// инвентаризационный колбэк) + collectRestFacts → факты issues/activity/
-// cicd + мета репо. В2: activity.rest несёт событийные даты (pulls
-// created_at, releases released_at — источник pulls_90d/releases_12m),
-// мета — forks + reaction_counts; rating-эндпоинт сканом НЕ запрашивается
-// (мой реактив, экономия 14 запросов на выборку).
-// Живые формы заземлены зондом 15.09 (scripts/probe-rest.ts): списки в
-// ключах issues/issue_comments/pull_requests/contributors/releases/runs,
-// закрытие issue = completed_at, статус — объект {slug}, counters — строки.
+// REST-сборщики SourceCraft: fetchResource (пагинация, классификация ошибок
+// access/bad-channel/other, колбэк для сверки формы ответа) и collectRestFacts –
+// факты issues/activity/cicd и мета репо.
+// Формы ответов проверены живым зондом (scripts/probe-rest.ts): списки лежат
+// в ключах issues/issue_comments/pull_requests/contributors/releases/runs,
+// закрытие задачи – completed_at, статус – объект {slug}, counters – строки.
 import { Fact, badChannelFact, noDataFact, okFact } from "./facts";
 import { CI_RECENCY_BANDS, CI_STABILITY_WINDOW, ISSUE_FLOW_WINDOWS, ISSUE_FLOW_WINDOW_DAYS } from "../score/model";
 import { hexColor } from "./catalog";
 import { runOutcome } from "./run-status";
 import { PR_COMMENTS_PAGE, PR_REVIEWERS_PAGE, collectPrReview } from "./pr-review";
 
-/** М2.6: худший анкер первого ответа (FIRST_COMMENT_H, 30 дней) — порог цензуры. */
+/** Порог цензуры – худший анкер первого ответа (FIRST_COMMENT_H, 30 дней). */
 const UNANSWERED_CENSOR_H = 720;
 import { ScClient } from "./http";
 
-/** кап событийных дат в activity.rest (анкеры pulls ≥30 / releases ≥6 — выше бесполезно) */
+/** Предел дат в activity.rest: анкеры pulls ≥30 и releases ≥6, больше не нужно. */
 const RECENT_DATES_TOP_N = 50;
 
 export type RestResourceName =
@@ -32,7 +28,7 @@ export type RestResourceName =
   | "cicd-runs"
   | "rating"
   | "issue-comments"
-  // В5.5 тур 2 (W4, ЗН-2): выборка review PR — 1 страница на PR
+  // выборка ревью PR – по 1 странице на PR
   | "pull-comments"
   | "pull-reviewers";
 
@@ -43,12 +39,12 @@ export interface ResourceOutcome {
   kind: ChannelKind;
   status: number;
   pages: number;
-  /** items из списочного ключа (для списочных ресурсов) */
+  /** элементы из ключа-списка (для списочных ресурсов) */
   items: Record<string, unknown>[];
-  /** первая страница целиком (инвентаризация: ключи/структура) */
+  /** первая страница целиком */
   firstPage: unknown;
   detail?: string;
-  /** сборщик 5: выборка уперлась в кап страниц, а сервер обещал еще (next_page_token) — список обрезан */
+  /** выборка уперлась в предел страниц, а сервер отдал бы еще – список обрезан */
   capped?: boolean;
 }
 
@@ -69,13 +65,13 @@ export interface FetchResourceOptions {
 
 interface PathArgs {
   pageSize: number;
-  /** slug issue для ресурса issue-comments */
+  /** slug задачи для issue-comments */
   issueSlug?: string;
-  /** slug PR для ресурсов pull-comments / pull-reviewers (В5.5 тур 2, W4) */
+  /** slug PR для pull-comments и pull-reviewers */
   pullSlug?: string;
 }
 
-/** Ф2.8: сегменты слага/issue в URL — encodeURIComponent (вход может быть извне). */
+/** Сегменты пути экранируются: слаги могут прийти извне. */
 const encSegment = (raw: string): string => encodeURIComponent(raw);
 const encSlugPath = (slug: string): string => slug.split("/").map(encSegment).join("/");
 
@@ -88,18 +84,15 @@ function resourcePath(resource: RestResourceName, slug: string, args: PathArgs):
     case "issues-open":
       return { path: `/repos/${s}/issues?filter=status%3Dopen&sort_by=-created_at&page_size=${ps}`, list: true };
     case "issues-in-progress":
-      // В5.3-М (Н6): третье значение фильтра `status` спеки (open | in_progress |
-      // closed) — задачи в работе открыты: зависшие, выборка первого ответа
+      // у фильтра `status` три значения (open | in_progress | closed); задачи в
+      // работе тоже открыты – для зависших и выборки первого ответа
       return { path: `/repos/${s}/issues?filter=status%3Din_progress&sort_by=-created_at&page_size=${ps}`, list: true };
     case "issues-closed":
       return { path: `/repos/${s}/issues?filter=status%3Dclosed&sort_by=-updated_at&page_size=${ps}`, list: true };
     case "pulls":
-      // sort_by=-created_at: недавние первыми (для pulls_90d); даты ещё
-      // раз сортируются клиентски — устойчиво к игнору сервером.
-      // М2.4 аудита В5.3: ВСЕ статусы (draft, open, discarded, merging,
-      // merged — enum спеки PullRequest.Status): поток MR за 90 дней — это
-      // созданные запросы, а не только еще открытые (смерженные раньше
-      // пропадали — у 110 из 124 активных командных репо поток был 0)
+      // недавние первыми (для pulls_90d); даты еще раз сортируются на клиенте
+      // на случай, если сервер порядок проигнорирует. Берем все статусы: поток
+      // за 90 дней – это созданные PR, а не только еще открытые
       return { path: `/repos/${s}/pulls?sort_by=-created_at&page_size=${ps}`, list: true };
     case "contributors":
       return { path: `/repos/${s}/contributors?page_size=${ps}`, list: true };
@@ -112,7 +105,7 @@ function resourcePath(resource: RestResourceName, slug: string, args: PathArgs):
     case "issue-comments":
       return { path: `/repos/${s}/issues/${encSegment(args.issueSlug ?? "")}/comments?sort_by=created_at&page_size=${ps}`, list: true };
     case "pull-comments":
-      // у `sort_by` комментариев PR в спеке нет created_at — порядок сервера, минимум страницы
+      // сортировки по created_at для комментариев PR в спеке нет – порядок сервера
       return { path: `/repos/${s}/pulls/${encSegment(args.pullSlug ?? "")}/comments?page_size=${ps}`, list: true };
     case "pull-reviewers":
       return { path: `/repos/${s}/pulls/${encSegment(args.pullSlug ?? "")}/reviewers?page_size=${ps}`, list: true };
@@ -138,9 +131,8 @@ function extractList(json: unknown): { listKey: string; items: Record<string, un
 }
 
 /**
- * Один ресурс с пагинацией (контракт плана: fetchResource(slug, resource)
- * → RawJson + классификация ошибок). Пагинация ≤maxPages (5 по умолчанию),
- * интервал/бюджет — на клиенте (http.ts), инвентаризация — колбэком.
+ * Один ресурс с пагинацией (не больше maxPages, по умолчанию 5) и
+ * классификацией ошибок. Интервал и бюджет запросов держит клиент (http.ts).
  */
 
 export async function fetchResource(
@@ -184,7 +176,7 @@ export async function fetchResource(
     }
     token = next;
   }
-  // цикл вышел по капу страниц с непустым токеном — сервер отдал бы еще
+  // цикл вышел по пределу страниц с непустым токеном – сервер отдал бы еще
   return { resource, kind: "ok", status: 200, pages, items, firstPage, capped: token !== null };
 }
 
@@ -205,13 +197,13 @@ function median(xs: number[]): number | null {
 
 const asString = (v: unknown): string | null => (typeof v === "string" ? v : null);
 
-/** Р2: закрытая задача, прожившая меньше часа, — «мгновенно закрытая» (фейковые открыл-закрыл, J2). */
+/** Закрытая задача, прожившая меньше часа, – «мгновенно закрытая»: открыли-закрыли для вида. */
 export const ISSUE_INSTANT_CLOSE_MS = 3600_000;
 
 /**
- * В5.3-М (Н6): статус релиза по перечню спеки `Release.Status` (draft,
- * published, discarded). В потоке релизов — только опубликованные; черновики и
- * отмененные — своей веткой (токен владельца их видит), неизвестное — явной.
+ * Статус релиза по перечню `Release.Status` спеки. В поток релизов идут только
+ * опубликованные; черновики и отмененные (их видит токен владельца) и
+ * незнакомые значения учитываются отдельно.
  */
 export function releaseStatusClass(status: unknown): "published" | "draft" | "discarded" | "unknown" {
   switch (status) {
@@ -227,12 +219,10 @@ export function releaseStatusClass(status: unknown): "published" | "draft" | "di
 }
 
 /**
- * 4.4.0 (ТП-1): исход запуска для ленты стабильности `recent_runs` — каждое
- * значение `Run.Status` спеки своей веткой через `runOutcome` (правило 22.09).
- * В ленту идут только завершенные с результатом кода (успех, провал/таймаут);
- * отмена, пропуск, отклонение — не результат кода (neutral), идущие — результата
- * еще нет (pending), незнакомый статус — явная ветка: в ленту не идет и назван
- * в `status_note` факта.
+ * Исход запуска для ленты стабильности `recent_runs`. В ленту идут только
+ * завершенные с результатом кода (успех, провал, таймаут). Отмена, пропуск и
+ * отклонение – не результат кода, у идущих результата еще нет, незнакомый
+ * статус в ленту не идет и называется в `status_note` факта.
  */
 export function stabilityOutcome(status: string | null): "success" | "failure" | null {
   switch (runOutcome(status)) {
@@ -249,7 +239,7 @@ export function stabilityOutcome(status: string | null): "success" | "failure" |
   }
 }
 
-/** 4.4.0 (ТП-1): момент исхода запуска — завершение, иначе начало, иначе создание. */
+/** Момент исхода запуска: завершение, иначе начало, иначе создание. */
 function runFinishedIso(r: Record<string, unknown>): string | null {
   const d = r["dates"] as Record<string, unknown> | undefined;
   for (const v of [d?.["finished_at"], d?.["started_at"], d?.["created_at"], r["created_at"]]) {
@@ -258,7 +248,7 @@ function runFinishedIso(r: Record<string, unknown>): string | null {
   return null;
 }
 
-/** Окно потока задач: начало (дата UTC), создано, закрыто, мгновенно закрыто; null — окно не покрыто выборкой. */
+/** Окно потока задач: начало (дата UTC), создано, закрыто, мгновенно закрыто; null – окно не покрыто выборкой. */
 export interface IssueFlowWindow {
   from: string;
   created: number | null;
@@ -267,19 +257,18 @@ export interface IssueFlowWindow {
 }
 
 /**
- * 4.4.0 (ТП-9): поток задач по 30-дневным окнам за 180 дней (от старых к
- * новым), из уже полученных списков — без новых запросов. Создана — по
- * `created_at` открытых, в работе и закрытых; закрыта — по `completed_at`
- * (иначе `updated_at`, как у медианы закрытия). Мгновенно закрытые (прожили
- * меньше часа, правило 4.3.0) в бэклог не входили: не считаются ни созданными,
- * ни закрытыми, их число — отдельно (`instant`, по дате создания).
- * Список, упершийся в кап страниц, теряет самые старые записи: окна раньше
- * `complete_since` (самая старая дата обрезанного списка по его сортировке)
- * не покрыты и получают null — пометка, а не тихое занижение.
+ * Поток задач по 30-дневным окнам за 180 дней (от старых к новым) из уже
+ * полученных списков, без новых запросов. Создана – по `created_at`; закрыта –
+ * по `completed_at`, иначе `updated_at` (как у медианы закрытия). Мгновенно
+ * закрытые в бэклог не входили: они не считаются ни созданными, ни закрытыми,
+ * их число – отдельно (`instant`, по дате создания).
+ * Список, упершийся в предел страниц, теряет самые старые записи: окна раньше
+ * `complete_since` не покрыты и получают null – явная пометка, а не тихое
+ * занижение.
  */
 export function issueFlow(
   lists: { open: Record<string, unknown>[]; closed: Record<string, unknown>[] },
-  /** по обрезанному списку — его самая старая дата сортировки; null — список полный */
+  /** для каждого обрезанного списка – его самая старая дата сортировки; null – список полный */
   cutoffs: (string | null)[],
   now: Date,
 ): { window_days: number; windows: IssueFlowWindow[]; complete_since?: string } {
@@ -316,7 +305,7 @@ export function issueFlow(
   return { window_days: ISSUE_FLOW_WINDOW_DAYS, windows, ...(completeSince !== null ? { complete_since: new Date(completeSince).toISOString() } : {}) };
 }
 
-/** Самая старая дата поля в списке (ISO) — граница полноты обрезанного списка. */
+/** Самая старая дата поля в списке (ISO) – граница полноты обрезанного списка. */
 function oldestIso(items: Record<string, unknown>[], field: string): string | null {
   let min: number | null = null;
   for (const i of items) {
@@ -326,7 +315,7 @@ function oldestIso(items: Record<string, unknown>[], field: string): string | nu
   return min === null ? null : new Date(min).toISOString();
 }
 
-/** Н6 (D15): момент запуска CI для клиентской сортировки — started_at, иначе created_at. */
+/** Момент запуска CI для сортировки на клиенте: started_at, иначе created_at. */
 function runStartedMs(r: Record<string, unknown>): number | null {
   const d = r["dates"] as Record<string, unknown> | undefined;
   return isoMs(d?.["started_at"]) ?? isoMs(d?.["created_at"]) ?? isoMs(r["created_at"]);
@@ -341,15 +330,13 @@ export interface RepoMeta {
   language: string | null;
   likes: number | null;
   lastActivityAt: string | null;
-  /** counters.forks — строка в API, parseInt (В2/Б1, дисплей) */
+  /** counters.forks – в API строка */
   forks: number | null;
-  /** rating.reaction_counts[{type,count}] — count строка, нормализуем (дисплей) */
+  /** rating.reaction_counts[{type,count}] – count в API строка */
   reactionCounts: { type: string; count: number }[] | null;
-  /** visibility из repo-GET (public|private) — изоляция рейтинга (В4/Б4) */
+  /** по видимости непубличные репо отделяются от рейтинга */
   visibility: string | null;
-  /** logo.url из repo-GET (дисплей: аватар репозитория) */
   logoUrl?: string | null;
-  /** language.color из repo-GET (дисплей) */
   languageColor?: string | null;
 }
 
@@ -404,17 +391,16 @@ export interface RestCollectOptions {
 export interface RestCollectResult {
   facts: Fact[];
   repoMeta: RepoMeta | null;
-  /** ошибки каналов (kind + resource) — скан-статус partial/bad решает раннер */
+  /** ошибки каналов; статус скана (partial/bad) по ним решает раннер */
   channelErrors: { resource: RestResourceName; kind: ChannelKind; status: number; detail?: string }[];
 }
 
 /**
- * REST-коллектор одного репо: repo-мета + issues.stats +
- * issues.comments_sample (топ-N свежих issues) + activity.rest
- * (событийные даты pulls/releases, §7.4) + cicd.runs.
- * 401/403 → no-data reason=access; 429/5xx/сеть → bad-channel факт
- * (риск-факт скана, скан не валится). rating-эндпоинт НЕ запрашивается
- * (мой реактив — не рейтинг репо; В2, экономия запросов).
+ * REST-сборщик одного репо: мета репо, issues.stats, issues.comments_sample
+ * (N самых свежих задач), activity.rest (даты PR и релизов),
+ * cicd.runs и activity.pr_review. 401/403 → no-data access; 429/5xx/сеть →
+ * bad-факт, скан при этом не падает. Эндпоинт /rating не запрашивается: он
+ * отдает реакцию текущего пользователя, а не рейтинг репо.
  */
 export async function collectRestFacts(
   client: ScClient,
@@ -432,7 +418,6 @@ export async function collectRestFacts(
   const facts: Fact[] = [];
   const channelErrors: RestCollectResult["channelErrors"] = [];
 
-  // мета репо
   const repoRes = await fetchResource(client, slug, "repo", { ...frOpts, pageSize: 1, maxPages: 1 });
   let repoMeta: RepoMeta | null = null;
   if (repoRes.kind === "ok" && repoRes.firstPage && typeof repoRes.firstPage === "object") {
@@ -441,21 +426,18 @@ export async function collectRestFacts(
     channelErrors.push({ resource: "repo", kind: repoRes.kind, status: repoRes.status, detail: repoRes.detail });
   }
 
-  // issues: открытые (сортировка -created_at — топ свежих для comments)
   const openRes = await fetchResource(client, slug, "issues-open", frOpts);
-  // Н6: задачи в работе (status=in_progress) — тоже открытые
   const progressRes = await fetchResource(client, slug, "issues-in-progress", frOpts);
-  // issues: закрытые (для median_close_days)
   const closedRes = await fetchResource(client, slug, "issues-closed", frOpts);
 
-  // В5.3-М круг 2 (К4, E1): сбой одного запроса `in_progress` не делает факт
-  // задач `bad` (иначе скан непригоден для рейтинга): задачи считаются по
-  // `open` + `closed`, в факте — `in_progress: null` и пометка причины
+  // сбой одного запроса `in_progress` не делает факт задач `bad` (иначе скан
+  // выпал бы из рейтинга): считаем по open + closed, в факте –
+  // `in_progress: null` и пометка причины
   const progressOk = progressRes.kind === "ok";
   if (openRes.kind === "ok" && closedRes.kind === "ok") {
     if (!progressOk) channelErrors.push({ resource: progressRes.resource, kind: progressRes.kind, status: progressRes.status, detail: progressRes.detail });
     const staleMs = 90 * 24 * 3600 * 1000;
-    // открытые = open + in_progress, свежие первыми (выборка первого ответа)
+    // открытые = open + in_progress без дублей, свежие первыми (для выборки первого ответа)
     const seenIssue = new Set<string>();
     const openIssues = [...openRes.items, ...(progressOk ? progressRes.items : [])]
       .filter((i) => {
@@ -471,13 +453,11 @@ export async function collectRestFacts(
       const u = isoMs(i["updated_at"]);
       return u !== null && now.getTime() - u > staleMs;
     }).length;
-    // completed_at есть не у всех закрытых (manytask: НЕТ ни у одного,
-    // dozzle-plus: есть) — fallback на updated_at с пометкой в факте
+    // completed_at есть не у всех закрытых (в некоторых репо – ни у одного),
+    // тогда берем updated_at и пишем пометку в факт
     let fallbackCloses = 0;
-    // В5.3-М (Р2): время жизни закрытой задачи; прожившие меньше часа —
-    // «мгновенно закрытые» (фейковые открыл-закрыл, J2): в медиану закрытия и
-    // долю решенных они не входят. Время жизни не восстановилось — задача
-    // засчитывается (мгновенность не доказана).
+    // мгновенно закрытые не входят в медиану закрытия и долю решенных; если
+    // время жизни не восстановилось, задача засчитывается – мгновенность не доказана
     let closedInstant = 0;
     const closeDays = closedIssues
       .map((i) => {
@@ -495,8 +475,8 @@ export async function collectRestFacts(
         return life !== null ? life / 86400000 : null;
       })
       .filter((x): x is number => x !== null);
-    // 4.4.0 (ТП-9): поток по окнам; список, упершийся в кап страниц, обрезан по
-    // своей сортировке (открытые и в работе — -created_at, закрытые — -updated_at)
+    // список, упершийся в предел страниц, обрезан по своей сортировке
+    // (открытые и в работе – -created_at, закрытые – -updated_at)
     const cappedAt = (r: ResourceOutcome, field: string): string | null => (r.capped === true ? oldestIso(r.items, field) : null);
     const flow = issueFlow(
       { open: openIssues, closed: closedIssues },
@@ -508,7 +488,7 @@ export async function collectRestFacts(
         "issues.stats",
         {
           open: openIssues.length,
-          // Н6: из них в работе (in_progress) — разрез, в балл идут как открытые
+          // из них в работе – только разрез, в балл они идут как открытые
           in_progress: progressOk ? progressRes.items.length : null,
           ...(progressOk ? {} : { in_progress_note: `in_progress fetch failed (status ${progressRes.status}) — open counted without in_progress` }),
           closed: closedIssues.length,
@@ -520,7 +500,6 @@ export async function collectRestFacts(
           ...(fallbackCloses > 0
             ? { close_date_note: `completed_at missing on ${fallbackCloses}/${closedIssues.length} closed — used updated_at fallback` }
             : {}),
-          // сборщик 5 (ТП-9): создано/закрыто по 30-дневным окнам за 180 дней
           flow,
         },
         "rest:issues",
@@ -528,10 +507,10 @@ export async function collectRestFacts(
       ),
     );
 
-    // comments топ-N свежих issues (issues-open уже отсортированы -created_at)
+    // комментарии N самых свежих открытых задач
     const top = openIssues.slice(0, topN);
     const delaysHours: number[] = [];
-    // Н14а: задачи с ответом и задачи без ответа дольше порога цензуры — раздельно
+    // задачи с ответом и задачи без ответа дольше порога цензуры считаются раздельно
     let answered = 0;
     let censored = 0;
     let commentsErrors = 0;
@@ -540,8 +519,8 @@ export async function collectRestFacts(
       if (!issueSlug) continue;
       const cRes = await fetchResource(client, slug, "issue-comments", { pageSize: 5, maxPages: 1, issueSlug });
       if (cRes.kind === "ok") {
-        // первая страница при sort_by=created_at (asc) — берём минимум из
-        // полученного: устойчиво и к игнору сортировки, и к desc
+        // берем минимум по странице: так не важно, соблюл ли сервер
+        // сортировку по created_at и в какую сторону
         const created = cRes.items.map((c) => isoMs(c["created_at"])).filter((x): x is number => x !== null);
         const issueCreated = isoMs(issue["created_at"]);
         if (created.length > 0) {
@@ -551,10 +530,10 @@ export async function collectRestFacts(
             answered++;
           }
         } else if (issueCreated !== null && now.getTime() - issueCreated >= UNANSWERED_CENSOR_H * 3600000) {
-          // М2.6 аудита В5.3: без ответа дольше худшего анкера — задержка не
-          // меньше анкера (цензура); раньше такая задача выпадала, и «никто не
-          // ответил» оценивалось выше, чем «ответили поздно». Свежая задача без
-          // ответа в выборку не входит — ответа еще можно ждать
+          // без ответа дольше худшего анкера – задержка не меньше анкера
+          // (цензура); иначе «никто не ответил» оценивалось бы выше, чем
+          // «ответили поздно». Свежая задача без ответа в выборку не входит –
+          // ответа еще можно ждать
           delaysHours.push(UNANSWERED_CENSOR_H);
           censored++;
         }
@@ -566,7 +545,7 @@ export async function collectRestFacts(
       }
     }
     if (commentsErrors > 0) {
-      // круг 2 (LOW-4): любой сбой выборки — урезанная выборка не выдаётся за данные
+      // при любом сбое урезанная выборка за данные не выдается
       facts.push(badChannelFact("issues.comments_sample", "rest:comments", `${commentsErrors} of ${top.length} comment fetches failed`, nowIso));
     } else {
       facts.push(
@@ -574,9 +553,8 @@ export async function collectRestFacts(
           "issues.comments_sample",
           {
             issues: top.length,
-            // Н14а (правило 23.09 об имени поля): `with_comments` считал и
-            // цензурированные задачи без ответа — имя не совпадало со смыслом.
-            // Теперь раздельно; факты прежнего сборщика несут `with_comments`
+            // старые факты вместо этих полей несут `with_comments`, куда
+            // попадали и цензурированные задачи без ответа
             answered,
             censored,
             median_first_comment_delay_hours: median(delaysHours),
@@ -603,13 +581,13 @@ export async function collectRestFacts(
     }
   }
 
-  // activity.rest: contributors / releases / pulls_open + событийные даты
+  // activity.rest: участники, релизы, открытые PR и даты событий
   const contribRes = await fetchResource(client, slug, "contributors", frOpts);
   const relRes = await fetchResource(client, slug, "releases", frOpts);
   const pullsRes = await fetchResource(client, slug, "pulls", frOpts);
   if (contribRes.kind === "ok" && relRes.kind === "ok" && pullsRes.kind === "ok") {
-    // Н6 (D16): только опубликованные релизы; черновики и отмененные — своей
-    // веткой в разрезе, неизвестный статус — явной (в поток не идет, назван)
+    // в поток – только опубликованные релизы; остальные – в разрез статусов,
+    // незнакомый статус еще и называется в факте
     const releaseStatuses: Record<string, number> = {};
     const unknownRelease = new Set<string>();
     const published = relRes.items.filter((r) => {
@@ -620,8 +598,8 @@ export async function collectRestFacts(
     });
     const latest = published.find((r) => r["is_latest"] === true) ?? published[0];
     const latestAt = latest ? asString(latest["released_at"]) : null;
-    // событийные даты (§7.4): топ-N недавних pulls created_at и релизов
-    // released_at desc — источник pulls_90d/releases_12m в score-слое
+    // даты последних PR и релизов – из них score-слой считает
+    // pulls_90d и releases_12m
     const pullsCreatedAt = pullsRes.items
       .map((p) => asString(p["created_at"]))
       .filter((x): x is string => x !== null)
@@ -664,26 +642,25 @@ export async function collectRestFacts(
     facts.push(fact);
   }
 
-  // cicd.runs: чужие → 403 (no-data access), свои → окна статусов
+  // cicd.runs: на чужой репо платформа отвечает 403 (no-data access)
   const runsRes = await fetchResource(client, slug, "cicd-runs", frOpts);
   if (runsRes.kind === "ok") {
-    // В5.3-М (Н6, D15): у `/cicd/runs` в спеке нет `sort_by` — «последний
-    // запуск», серия зеленых и ленты свежести не полагаются на порядок ответа:
-    // запуски сортируются по дате начала на клиенте, свежие первыми (без даты — в хвост)
+    // у `/cicd/runs` в спеке нет `sort_by`, поэтому на порядок ответа не
+    // полагаемся: сортируем по дате начала, свежие первыми, без даты – в хвост
     const all = runsRes.items
       .map((r, i) => ({ r, i, t: runStartedMs(r) }))
       .sort((a, b) => (b.t ?? -Infinity) - (a.t ?? -Infinity) || a.i - b.i)
       .map((x) => x.r);
-    // М2.5 аудита В5.3: доля успеха — по ЗАВЕРШЕННЫМ запускам (успех или
-    // провал); идущие и нейтральные (отмена, пропуск, отклонение) в нее не
-    // входят. «Последний запуск» — последний завершенный.
+    // доля успеха – только по завершенным запускам (успех или провал); идущие
+    // и нейтральные (отмена, пропуск, отклонение) в нее не входят. «Последний
+    // запуск» – последний завершенный.
     const runs = all.filter((r) => {
       const o = runOutcome(asString(r["status"]));
       return o === "success" || o === "failure";
     });
     const unknownStatuses = [...new Set(all.map((r) => asString(r["status"]) ?? "").filter((st) => runOutcome(st) === "unknown"))];
-    // В5.3-М (Н8б, F11): длительность — по УСПЕШНЫМ запускам: быстрый провал
-    // не лучше медленного успеха
+    // длительность – только по успешным запускам: быстрый провал не лучше
+    // медленного успеха
     const durations = runs
       .filter((r) => runOutcome(asString(r["status"])) === "success")
       .map((r) => {
@@ -694,15 +671,15 @@ export async function collectRestFacts(
       })
       .filter((x): x is number => x !== null);
     const success = runs.filter((r) => r["status"] === "success").length;
-    // 23.09 (Алексей): доля за окно не отличает «навели порядок» от «сломали» —
-    // серия зелёных с конца даёт тренд; running серию не рвёт (статус не финальный)
+    // доля за окно не отличает «навели порядок» от «сломали», а серия зеленых
+    // подряд от последнего запуска показывает тренд
     let greenStreak = 0;
     for (const r of runs) {
       if (asString(r["status"]) === "success") greenStreak += 1;
       else break;
     }
-    // 23.09 (Алексей): ВЗВЕШЕННАЯ доля успеха по лентам свежести — свежие
-    // прогоны весомее; старше года вес 0. Для скоринга pass_rate.
+    // взвешенная доля успеха для pass_rate: свежие запуски весомее, старше
+    // года – вес 0
     let weightTotal = 0;
     let greenWeight = 0;
     for (const r of runs) {
@@ -721,12 +698,11 @@ export async function collectRestFacts(
       if (asString(r["status"]) === "success") greenWeight += w;
     }
     const weightedSuccessRate = weightTotal > 0 ? Math.round((greenWeight / weightTotal) * 100) / 100 : null;
-    // 23.09 (Алексей: «собрать больше полезной информации»): разрез по событиям,
-    // повторно падающие workflow и тексты ошибок недавних красных прогонов
+    // справочно: разрез по событиям (по всем запускам страницы), падающие
+    // workflow и тексты ошибок недавних проваленных запусков
     const events: Record<string, number> = {};
     const failingWorkflows = new Set<string>();
     const errors: string[] = [];
-    // разрез по событиям — по всем запускам страницы, провалы — по завершенным
     for (const r of all) {
       const et = asString(r["event_type"]);
       if (et) events[et] = (events[et] ?? 0) + 1;
@@ -744,7 +720,7 @@ export async function collectRestFacts(
         }
       }
     }
-    // 4.4.0 (ТП-1): лента для сравнения двух окон — 2 × окно завершенных
+    // лента для сравнения двух окон стабильности – 2 окна завершенных запусков
     const recentRuns: { outcome: "success" | "failure"; at: string | null }[] = [];
     for (const r of all) {
       if (recentRuns.length >= 2 * CI_STABILITY_WINDOW) break;
@@ -755,13 +731,12 @@ export async function collectRestFacts(
       okFact(
         "cicd.runs",
         {
-          // первая страница по умолчанию — свежие прогоны (зонд 15.09: slug 9 первым)
           last_status: runs.length ? asString(runs[0]!["status"]) : null,
           success_rate: runs.length ? Math.round((success / runs.length) * 100) / 100 : null,
           duration_p50: durations.length ? Math.round((median(durations) ?? 0) * 10) / 10 : null,
           runs_count: runs.length,
-          // М2.5: все запуски страницы, включая идущие и нейтральные; 0
-          // завершенных при runs_total > 0 — «результата еще нет», не «не запускался»
+          // все запуски страницы, включая идущие и нейтральные: 0 завершенных
+          // при runs_total > 0 – «результата еще нет», а не «не запускался»
           runs_total: all.length,
           ...(unknownStatuses.length ? { status_note: `unknown run statuses: ${unknownStatuses.slice(0, 3).join(", ")}` } : {}),
           green_streak: runs.length ? greenStreak : null,
@@ -769,8 +744,8 @@ export async function collectRestFacts(
           events,
           failed_workflows: [...failingWorkflows].slice(0, 5),
           error_top: errors.slice(0, 3).map((e) => e.slice(0, 140)),
-          // сборщик 5 (ТП-1): исход и момент последних завершенных запусков,
-          // свежие первыми — лента стабильности CI; без сообщений и имен
+          // лента стабильности CI: исход и момент последних завершенных
+          // запусков, свежие первыми; без сообщений и имен
           recent_runs: recentRuns,
         },
         "rest:cicd",
@@ -785,10 +760,9 @@ export async function collectRestFacts(
     channelErrors.push({ resource: "cicd-runs", kind: runsRes.kind, status: runsRes.status, detail: runsRes.detail });
   }
 
-  // В5.5 тур 2 (W4, ЗН-2): review и bottlenecks PR — справочный факт
-  // `activity.pr_review` (pr-review.ts) по уже полученному списку PR; бюджет —
-  // PR_REQUEST_BUDGET запросов на репо (0 без PR). Список PR не получен —
-  // факт повторяет причину activity.rest (права или сбой канала).
+  // справочный факт `activity.pr_review` (pr-review.ts) по уже полученному
+  // списку PR. Если список не получен, факт повторяет причину activity.rest
+  // (права или сбой канала).
   if (pullsRes.kind === "ok") {
     const pr = await collectPrReview(
       pullsRes.items,

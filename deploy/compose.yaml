@@ -1,4 +1,4 @@
-# HealthCraft — стенд (В5.4): два процесса сервиса на одной SQLite + прокси с HTTPS.
+# HealthCraft — стенд: два процесса сервиса на одной SQLite + прокси с HTTPS.
 #
 #   web    — сайт и API, пользовательские сканы, AI-обзоры и проверки
 #   rating — обход каталога, плановые сканы рейтинга, стартовый пересчет, AI топа
@@ -16,7 +16,7 @@ x-service: &service
   image: healthcraft:latest
   restart: unless-stopped
   init: true              # tini как PID 1: реапит осиротевшие git-процессы клонов
-  stop_grace_period: 30s  # SIGTERM: заявки возвращаются в очередь, клоны гасятся (В4.4)
+  stop_grace_period: 30s  # SIGTERM: заявки возвращаются в очередь, клоны гасятся
   env_file:
     - path: ${HC_DIR:-/srv/healthcraft}/.env
       required: false
@@ -27,7 +27,7 @@ services:
     environment:
       PROCESS_ROLE: web
       PORT: "8418"
-      # резерв свободного места перед клоном (В5.4, аудит очереди О3): меньше — клон ждет соседей
+      # резерв свободного места перед клоном: места меньше — клон ждет, пока соседи освободят диск
       SCAN_MIN_FREE_MB: "4096"
     volumes:
       - ${HC_DIR:-/srv/healthcraft}/data:/data
@@ -46,7 +46,7 @@ services:
       PORT: "8419"
       SCAN_MIN_FREE_MB: "4096"
     # после web: при одновременном старте оба процесса проверяют схему БД в транзакции,
-    # и второй получает SQLITE_BUSY (живой старт стенда 26.09, рестарт 1)
+    # и второй получает SQLITE_BUSY
     depends_on:
       web:
         condition: service_healthy
@@ -70,8 +70,8 @@ services:
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
       # основной хост (без него — переадресации нет); пусто в режиме ":80"
       CANONICAL_HOST: ${CANONICAL_HOST:-}
-      # IP стенда: http://IP → https://CANONICAL_HOST (В5.5 тур 2, Т2-Е; только вместе с
-      # CANONICAL_HOST). Пусто — заглушка .invalid: такого Host не бывает, блок не мешает
+      # IP стенда: http://IP → https://CANONICAL_HOST (только вместе с CANONICAL_HOST).
+      # Пусто — заглушка .invalid (та же, что в Caddyfile): такого Host не бывает, блок не мешает
       STAND_IP: ${STAND_IP:-stand-ip.invalid}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro

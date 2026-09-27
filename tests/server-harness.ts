@@ -1,9 +1,8 @@
-// server-harness.ts — герметичный запуск настоящего сервера в тестах
-// (В4.1-fix, Ф1.13): временный DATA_DIR, SOURCECRAFT_TOKEN="", все адреса
-// внешних API (REST, AppSec, git-хост) — на локальный Bun.serve-мок со
-// счётчиком запросов, YA_REDIRECT_URI задан явно. Тестовый сервер без этих
-// env запрещён: иначе зритель с PAT или юзерская заявка ушли бы на живые
-// сервисы. Не *.test.ts — bun test не подхватывает.
+// Герметичный запуск настоящего сервера в тестах: временный DATA_DIR,
+// SOURCECRAFT_TOKEN="", все адреса внешних API (REST, AppSec, git-хост) — на
+// локальный Bun.serve-мок со счетчиком запросов, YA_REDIRECT_URI задан явно.
+// Тестовый сервер без этих env запрещён: иначе зритель с PAT или юзерская заявка
+// ушли бы на живые сервисы. Не *.test.ts — bun test не подхватывает.
 import { join } from "node:path";
 import { loadConfig } from "../src/config";
 import { openDb, setMetaValue } from "../src/db";
@@ -59,7 +58,7 @@ export interface SpawnedServer {
 }
 
 /**
- * Актуальные meta сид-БД (Ф1.9 + В4.4): без derived_version сервер при старте
+ * Актуальные meta сид-БД: без derived_version сервер при старте
  * пересчитал бы сид-оценки моделью и затёр фикстуру; без водяного знака
  * рескора (needsRescore «курсор не догнал») фоновый проход сделал бы то же
  * самое уже асинхронно.
@@ -103,7 +102,7 @@ export async function spawnServer(opts: {
       YA_CLIENT_ID: "",
       YA_CLIENT_SECRET: "",
       YA_REDIRECT_URI: `${base}/auth/ya/callback`,
-      // Ф2.10: адреса Я ID — на тот же мок; без них маршруты /auth/* ушли бы
+      // адреса Я ID — на тот же мок; без них маршруты /auth/* ушли бы
       // на боевой oauth.yandex.ru
       YA_OAUTH_BASE: opts.mock.url,
       YA_LOGIN_BASE: opts.mock.url,

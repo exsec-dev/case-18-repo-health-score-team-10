@@ -1,6 +1,6 @@
-// score.ts — CLI пересчёта (В2/Б5): bun scripts/score.ts <org/repo> —
-// последний скан слага → compute (оба итога, В4.1/К1) + recommend →
-// запись (идемпотентно при том же model_version; смена модели = новые строки).
+// Пересчет одного репо: bun scripts/score.ts <org/repo> — последний скан →
+// compute (оба итога) + recommend → запись. Идемпотентно при том же
+// model_version; смена модели дает новые строки.
 import { loadConfig } from "../src/config";
 import { openDb } from "../src/db";
 import { compute, writeScores } from "../src/score/compute";

@@ -1,7 +1,6 @@
-// me.test.ts — В4.1: поверхность «мой кабинет» без HTTP-слоя.
-// К3: запуск анализа юзером — repo-GET с PAT до постановки (200/403/404/
-// 401/0/429/5xx), строка repos не создаётся без доступа (H1, LOW-3).
-// Сети нет: REST-клиент — фейк с заданным статусом.
+// Поверхность «мой кабинет» без HTTP-слоя. Запуск анализа пользователем:
+// repo-GET с PAT до постановки (200/403/404/401/0/429/5xx), строка repos не
+// создается без доступа. Сети нет: REST-клиент — фейк с заданным статусом.
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -85,9 +84,8 @@ describe("requestUserScan: предпроверка доступа PAT (К3)", (
     expect(client.paths).toEqual([]);
   });
 
-  // ПЕРЕВОРОТ (В4.8.5, К8.5.6, С4-13): сбой платформы (0/429/5xx) — не вердикт
-  // о правах и часовой лимит запусков НЕ списывает; строкой refused учитывается
-  // только отказ (401). Было: «отказ учтён строкой refused» для всех пяти
+  // сбой платформы (0/429/5xx) — не вердикт о правах и часовой лимит запусков
+  // не списывает; строкой refused учитывается только отказ (401)
   test("401 → 401 pat_expired (учтён строкой refused); 0/429/5xx → 503 check_failed без строки refused; без постановки", async () => {
     const before = jobsOf(user);
     const refusedBefore = refusedOf(user);
@@ -121,9 +119,8 @@ describe("requestUserScan: предпроверка доступа PAT (К3)", (
 });
 
 // ---------------------------------------------------------------------------
-// Круг 2 В4.4 (Б2): статус последнего скана в /api/me/repos (З4) и честные
-// ветки UI кабинета/карточки (З1–З3, UX-6/7 — source-assert по образцу
-// tests/m42b-blocks.test.ts: компонентовых тестов в репо нет).
+// Статус последнего скана в /api/me/repos и честные ветки UI кабинета и
+// карточки (source-assert: компонентных тестов в репо нет).
 // ---------------------------------------------------------------------------
 
 describe("З4 (круг 2 В4.4): lastScanStatus в /api/me/repos", () => {
@@ -154,14 +151,12 @@ describe("UI-ветки круга 2 (source-assert, Б2)", () => {
   const srcOf = (file: string): string => readFileSync(join(import.meta.dir, "..", "src", "web", file), "utf8");
 
   test("З1: сбой /api/me/favorites показывает Alert над списком кабинета", () => {
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): Ф20 — «не получился» → «Не удалось загрузить»
     expect(srcOf("MePage.tsx").includes('title="Не удалось загрузить избранное"')).toBe(true);
   });
 
-  // ПЕРЕНОС (В4.8.5, К8.5.1, К8.5.2b): «затянулось» — признак сервера из
-  // общего опроса заданий (`live.stalled`), локальной stalled-метки строки больше
-  // нет — снимать нечего; задание ушло из active — строка не «затянулась»
-  // (поведение — tests/v485-ui.test.ts, liveFor)
+  // «затянулось» — признак сервера из общего опроса заданий (`live.stalled`),
+  // локальной stalled-метки у строки нет; задание ушло из active — строка не
+  // «затянулась» (поведение — tests/v485-ui.test.ts, liveFor)
   test("З2: stalled строки — признак сервера из опроса заданий, не локальная метка", () => {
     const src = srcOf("MePage.tsx");
     expect({ serverFlag: src.includes("live.stalled"), localState: src.includes("stillActive") || src.includes("ScanJobState") }).toEqual({
@@ -170,8 +165,7 @@ describe("UI-ветки круга 2 (source-assert, Б2)", () => {
     });
   });
 
-  // ПЕРЕНОС (В4.8.5, К8.5.1): после старта карточка не опрашивает себя —
-  // сразу будится общий опрос заданий, и тело карточки переключается в ветку
+  // после старта карточка не опрашивает себя — сразу будится общий опрос заданий, и тело карточки переключается в ветку
   // «идет анализ» по живому заданию (`own = live ?? card.job`)
   test("З3: RepoPage после успешного старта будит опрос заданий, тело — по живому заданию", () => {
     const src = srcOf("RepoPage.tsx");
@@ -181,12 +175,11 @@ describe("UI-ветки круга 2 (source-assert, Б2)", () => {
 
   test("З4: bad-статус имеет честный текст; ветка индекса срабатывает раньше статус-текста", () => {
     const src = srcOf("MePage.tsx");
-    // В4.7 (Б6, П4.3): правило языка UI в кабинете — среднее тире вместо длинного
-    // В4.8: состояние — короткой плашкой «Ошибка анализа» (как метки SourceCraft),
-    // что делать — в подсказке; смысл З4 тот же
+    // состояние — короткой плашкой «Ошибка анализа» (как метки SourceCraft),
+    // что делать — в подсказке
     expect(src.includes("Ошибка анализа")).toBe(true);
-    // ПЕРЕНОС (В4.8.5 круг 2, П2, К8.5.14 (ж)): текст с призывом живет в
-    // `failedAnalysisHint` (format.ts) и показывается только при кнопке анализа
+    // текст с призывом живет в `failedAnalysisHint` (format.ts) и показывается
+    // только при кнопке анализа
     expect(src.includes("title={failedAnalysisHint(canAnalyze)}")).toBe(true);
     expect(srcOf("format.ts").includes("Анализ завершился ошибкой – запустите его еще раз")).toBe(true);
     const indexBranch = src.indexOf("entry.healthcraftIndex !== null");
@@ -194,10 +187,8 @@ describe("UI-ветки круга 2 (source-assert, Б2)", () => {
     expect({ indexBranch, badBranch, indexFirst: indexBranch < badBranch }).toMatchObject({ indexFirst: true });
   });
 
-  // ПЕРЕВОРОТ (В4.8.5, К8.5.14 (ж), §2-В1): CTA «Добавьте токен … – и запустите
-  // анализ» противоречил правилу «анализ только своих» — без токена «свой» не
-  // известен, CTA анализ не обещает. Смысл UX-6 («не обещать того, чего не
-  // случится») сохранён строже: ни «первого», ни просто анализа в CTA нет
+  // анализ доступен только для своих репозиториев, а без токена «свой» не
+  // известен — поэтому CTA про токен анализ не обещает вовсе
   test("UX-6: подсказка про токен не обещает анализ (ни «первый», ни просто «запустите анализ»)", () => {
     const src = srcOf("RepoPage.tsx");
     expect(src.includes('{ text: "Добавить токен в Настройках", view: "action", size: "l", href: "/settings" }')).toBe(true);
@@ -212,16 +203,15 @@ describe("UI-ветки круга 2 (source-assert, Б2)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Круг 2 В4.4 (Б4): UX-хвосты ре-аудита — дискриминатор прав/каталога (UX-8),
-// скрытие кнопки анализа на error-странице (UX-5), seedNote без username
-// (UX-9), заметка «затянулось» на карточке (UX-10 — source-assert).
+// Различение прав и каталога, скрытие кнопки анализа на error-странице,
+// seedNote без username, заметка «затянулось» на карточке (source-assert).
 // ---------------------------------------------------------------------------
 
 describe("UX-8 (круг 2 В4.4): inCatalog/mayRead в /api/me/repos", () => {
   test("публичное репо каталога без title: inCatalog+mayRead честны (прокси title===null врал бы)", async () => {
     const u = upsertUser(db, "ya-ux8", "ux8");
-    // публичное витринное репо каталога без title — репро-кейс находки:
-    // права есть, репо в каталоге, сканов ещё не было
+    // публичное витринное репо каталога без title: права есть, репо в
+    // каталоге, сканов еще не было
     db.query("INSERT INTO repos (org_slug, repo_slug, title, visibility) VALUES ('showcase', 'no-title-repo', NULL, 'public')").run();
     // чужой слаг вне каталога — строка repos не создаётся никогда
     addFavorite(db, u, "showcase", "no-title-repo");
@@ -256,21 +246,19 @@ describe("UI-ветки круга 2 (source-assert, Б4)", () => {
       noRights: true,
       notYet: true,
     });
-    // старый прокси-дискриминатор ушёл
+    // title === null не годится как признак «нет в каталоге»
     expect(src.includes("entry.title === null")).toBe(false);
   });
 
   test("UX-9: seedNote при отсутствующем username не обвиняет namespace", () => {
     const meSrc = srcOf("MePage.tsx");
-    // В4.7 (Б6, П4.3): правило языка UI в кабинете — среднее тире вместо длинного
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): В-7 — без «посева»; причина по-прежнему не обвиняет пространство
+    // причина не обвиняет пространство имен
     expect(meSrc.includes('"SourceCraft не вернул имя пользователя"')).toBe(true);
     const serverSrc = readFileSync(join(import.meta.dir, "..", "src", "server.ts"), "utf8");
     expect(serverSrc.includes('code: "no_username"')).toBe(true);
   });
 
-  // ПЕРЕВОРОТ (В4.8.5, К8.5.2b): «затянулось» — признак сервера (лиз задания
-  // истёк), а не «прошло leaseMs»; текст заметки новый (правило языка UI)
+  // «затянулось» — признак сервера (лиз задания истек), а не «прошло leaseMs»
   test("UX-10: карточка при зависшем задании показывает «затянулось», а не вечный спиннер", () => {
     const src = srcOf("RepoPage.tsx");
     expect({
@@ -288,7 +276,7 @@ test("S-7 (круг 2 В4.4): двойной sessionOf в PUT-ветках из�
   expect(serverSrc.includes("user0 = sessionOf(req)")).toBe(false);
 });
 
-// Парковка 23.09: пикер «своих» — пагинация /me/repos, маппинг, честный отказ
+// Пикер «своих»: пагинация /me/repos, маппинг, честный отказ
 describe("listSourcecraftRepos: пикер своих репозиториев по PAT", () => {
   function pageClient(pages: { body: unknown; status?: number }[]): ScClient & { paths: string[] } {
     const paths: string[] = [];

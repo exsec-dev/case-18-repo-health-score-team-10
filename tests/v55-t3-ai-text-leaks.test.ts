@@ -1,10 +1,8 @@
-// V5.5 tour 3 round 5 (finding N5 of reports/v55-t3-design-audit.md; decision TASK.md §2
-// "В5.5 — тур 3, круг 5", Ekaterina 27.09): AI prose must not leak the kitchen of the score —
-// (a) Latin internal keys, (b) raw shares / 2+ decimals, (c) methodology jargon.
-// Behavioural tests on validateOutput: the two audit quotes are rejected with a reason;
-// ordinary texts (README/CONTRIBUTING in caps, whole percents, one decimal, dates,
-// versions, fact numbers) pass. The numeric corridor stays removed (decision 23.09):
-// digits are legal, only the FORM of writing them is checked.
+// AI prose must not leak the kitchen of the score: (a) Latin internal keys, (b) raw
+// shares / 2+ decimals, (c) methodology jargon. Behavioural tests on validateOutput:
+// two real leaking texts are rejected with a reason; ordinary texts (README/CONTRIBUTING
+// in caps, whole percents, one decimal, dates, versions, fact numbers) pass. There is
+// no numeric corridor: digits are legal, only the FORM of writing them is checked.
 import { describe, expect, test } from "bun:test";
 import type { FactInput } from "../src/summary/validator";
 import { internalKeyLeaks, jargonLeaks, rawNumberLeaks, stripMarkers, validateOutput } from "../src/summary/validator";

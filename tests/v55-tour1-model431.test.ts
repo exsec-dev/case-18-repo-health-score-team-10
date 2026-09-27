@@ -1,10 +1,7 @@
-// В5.5 тур 1, W1 — модель 4.3.1-hci (workers/V5.5-tour1-w1-methodology.md,
-// TASK.md §2 «В5.5 — тур 1», 26.09): М1 — маркеры техдолга только в коде вне
-// тестов (пропущенные — аддитивным test_markers в code.todo); М2 — «кода нет»
-// — явная ветка балла 0 с причиной (П-1 парковки В4.9), а не «нет данных» и
-// не 100; рекомендаций с эффектом «+0,0» нет. Поведенческие тесты на данных
-// (правило AGENTS.md 21.09/23.09); сборщик проверяется на локальном
-// bare-клоне, без сети.
+// Маркеры техдолга считаются только в коде вне тестов (пропущенные – отдельным
+// test_markers в code.todo); «кода нет» – явная ветка балла 0 с причиной, а не
+// «нет данных» и не 100; рекомендаций с эффектом «+0,0» нет. Поведенческие
+// тесты на данных; сборщик проверяется на локальном bare-клоне, без сети.
 import { afterAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -35,7 +32,7 @@ function facts(patch: Patch = {}): Map<string, unknown> {
 }
 const score = (ok: Map<string, unknown>, extra: { emptyRepo?: boolean } = {}): Scores => computeFromFacts(ok, { scanId: 0, repoId: 0, ...extra }, NOW);
 
-// --- локальный git-репозиторий → факты сборщика (приём tests/v53-collectors) ---
+// --- локальный git-репозиторий → факты сборщика (как в tests/v53-collectors) ---
 const LIMITS = { timeoutMs: 60_000, maxBytes: 500 * 1024 * 1024, pollMs: 5_000 };
 const EXTRACT = { maxBlameFiles: 200, textCapBytes: 1_000_000 };
 const tmp: string[] = [];
@@ -69,8 +66,6 @@ async function factsOf(files: Record<string, string>): Promise<Map<string, Recor
   }
 }
 
-// В5.5 тур 2 поднял версии (4.4.0-hci, сборщик 5 — справочные показатели
-// динамики, tests/v55-tour2-dynamics.test.ts); правила тура 1 в них действуют
 test("версии после тура 1: модель 4.4.0-hci, сборщик 5 (тур 2)", () => {
   expect(MODEL_VERSION).toBe("4.4.0-hci");
   expect(COLLECTOR_VERSION).toBe(5);
@@ -85,7 +80,7 @@ describe("М1: маркеры техдолга — только в коде вн
       "README.md": "# T\n\nTODO: docs marker\n",
     });
     const todo = collected.get("code.todo")!;
-    // код: 1 TODO + 1 FIXME; тесты: 3 маркера в сторону; README — не код (4.3.0)
+    // код: 1 TODO + 1 FIXME; тесты: 3 маркера в сторону; README – не код
     expect({ count: todo.count, fixme: todo.fixme }).toEqual({ count: 1, fixme: 1 });
     expect(todo.test_markers).toBe(3);
     expect(todo.todo_files).toBe(1);
@@ -160,9 +155,9 @@ describe("М2: «кода нет» — балл 0 с причиной (П-1)", (
       expect(md).toContain("| Состояние кода | 0 |");
       expect(md).toContain("В репозитории нет файлов кода");
       expect(md).toContain("правило «кода нет»");
-      // ложь 4.3.0-ветки: потолок секретов тут ни при чем
+      // потолок секретов тут ни при чем
       expect(md).not.toContain("AppSec нашел утекшие секреты");
-      // единственный совет — добавить код (М1.14), без «+0,0»
+      // единственный совет – добавить код, без «+0,0»
       expect(card.recommendations.map((r) => r.ruleId)).toEqual(["add-code"]);
       expect(md).not.toContain("+0,0");
     } finally {

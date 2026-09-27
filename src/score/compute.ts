@@ -1,14 +1,13 @@
-// compute.ts — детерминированный расчёт Score из фактов (§1, §4, §5):
-// compute(db, scan_id) → Scores с двумя итогами (В4.1/К1): «в рейтинге»
-// (4 категории, максимум 0.65) и «полный» (6 категорий, максимум 1.0).
-// Tri-state: no-data субметрика → перенормировка внутри категории;
-// категория целиком no-data → вес выбрасывается; coverage = Σ весов с
-// данными / максимум набора; coverage < 0.4 → итог NULL. Bad-channel
-// (статус bad, §5.6): берутся последние успешные факты того же kind +
-// маркер stale; для каналов с правами (cicd.runs, appsec.findings) — при
-// любом не-ok. Robot-флаги v1 игнорируются — истина robot2 (derived).
-// Критичные secrets → кап полного итога ≤ 49 (§5/В2-8). Все числа —
-// константы model.ts.
+// Детерминированный расчет оценки из фактов (docs/methodology.md): compute(db, scan_id)
+// → Scores с двумя итогами — HealthCraft Index (4 публичные категории) и полный
+// Repo Health Score (6 категорий).
+// Tri-state: no-data подметрика → перенормировка внутри категории; категория
+// целиком no-data → ее вес выбрасывается; coverage = Σ весов с данными / максимум
+// набора; coverage < 0.4 → итог NULL. «Нет данных» балл не ухудшает.
+// Канал со статусом bad: берутся последние успешные факты того же kind + маркер
+// stale; для каналов с правами (cicd.runs, appsec.findings) — при любом не-ok.
+// Роботов определяет robot2 (derived). Критичные secrets → кап полного итога ≤ 49.
+// Все числа — константы model.ts.
 import type { Database } from "bun:sqlite";
 import { categoryOf, parseFactValue } from "../collectors/facts";
 import { rootHasNoSource } from "../collectors/source-path";
@@ -65,8 +64,8 @@ export interface SubmetricScore {
 }
 
 /**
- * 4.3.0 (Н5, Р3): поправка к взвешенному среднему категории — таблица
- * «Балл категории» приложения сходится с итогом, а карточка называет причину.
+ * Поправка к взвешенному среднему категории — хранится явно, чтобы таблица
+ * «Балл категории» в отчете сходилась с итогом, а карточка называла причину.
  * `raw` — балл до поправки (0..100).
  */
 export type CategoryAdjustment =
@@ -74,7 +73,7 @@ export type CategoryAdjustment =
   | { kind: "small-sample"; n: number; full: number; raw: number; floor: number }
   /** Безопасность: открытые находки critical/high — потолок категории */
   | { kind: "open-findings-cap"; level: "critical" | "high"; limit: number; raw: number }
-  /** Состояние кода (круг 2, В3): строк кода меньше `full` — балл сжат к нейтрали `center` */
+  /** Состояние кода: строк кода меньше `full` — балл сжат к нейтрали `center` */
   | { kind: "small-code"; loc: number; full: number; raw: number; center: number };
 
 export interface CategoryScore {
@@ -83,18 +82,16 @@ export interface CategoryScore {
   no_data?: string;
   stale?: boolean;
   submetrics: Record<string, SubmetricScore>;
-  /** 4.3.0: поправка к взвешенному среднему (сжатие малой выборки, потолок) */
+  /** поправка к взвешенному среднему (сжатие малой выборки, потолок) */
   adjustment?: CategoryAdjustment;
 }
 
 /**
- * Один анализ — одна оценка с ДВУМЯ показателями (В4.1, К1 → В4.3, Ф3.1):
- * HealthCraft Index (4 публичные категории, свой словарь весов, без капа)
- * и Repo Health Score (6 категорий, кап 49 за критичные secrets). Index —
- * прерассчитанное сохраняемое число (рейтинг сортирует по нему); полный
- * Score — дериватив показанных категорий, отдельным total НЕ хранится
- * (К-Ф3.3): здесь он считается для рекомендаций и скриптов, в хранении —
- * только индекс.
+ * Один анализ — одна оценка с ДВУМЯ показателями: HealthCraft Index
+ * (4 публичные категории, свои веса, без капа) и Repo Health Score (6 категорий,
+ * кап 49 за критичные secrets). Индекс хранится (рейтинг сортирует по нему);
+ * полный Score отдельно НЕ хранится — он выводится из показанных категорий,
+ * а здесь считается для рекомендаций и скриптов.
  */
 export interface Scores {
   scanId: number;
@@ -108,19 +105,19 @@ export interface Scores {
   repoHealthCoverage: number;
   /** все 6 категорий; CI/Security — со своими данными (или no-data) */
   categories: Record<CategoryKey, CategoryScore>;
-  /** derived-показатели (§7.3) — для отображения; в БД с v1.3 (scores.derived) */
+  /** производные показатели — для отображения; хранятся в scores.derived */
   derived: DerivedMetrics;
   noData: string[];
   stale: string[];
-  /** без-кодовое репо (Q&A №13): file_count/loc = 0 при ok-фактах — Score 0 как данные («проекта нет»), не NULL */
+  /** в репо нет кода: по разъяснению организаторов это оценка 0 как данные («проекта нет»), а не NULL */
   codeEmpty: boolean;
   computedAt: string;
 }
 
 /**
- * Kinds, которые читает compute (для bad-channel замещения историей).
+ * Kinds, которые читает compute (и замещает историей при сбое канала).
  * Экспортируется: read-API строит по нему доказательную базу карточки —
- * дубль списка в API молча разошёлся бы при смене model_version.
+ * копия списка в API молча разошлась бы при смене модели.
  */
 export const READ_KINDS = [
   "activity.git.timeline",
@@ -138,21 +135,21 @@ export const READ_KINDS = [
 ];
 
 /**
- * Kinds каналов с правами зрителя (В4.1-fix, К-Ф1.1): CI (конфиг и прогоны)
- * и Security. Все фильтры карточки, рейтинга, stale, public_status и
- * пригодности скана строятся только от CHANNEL_KINDS / PUBLIC_KINDS.
+ * Kinds каналов с правами зрителя: CI (конфиг и прогоны) и Security. Все фильтры
+ * карточки, рейтинга, stale, public_status и пригодности скана строятся только
+ * от CHANNEL_KINDS / PUBLIC_KINDS.
  */
 export const CHANNEL_KINDS = ["cicd.configs", "cicd.runs", "appsec.findings"];
 
-/** Kinds публичных категорий (Score в рейтинге): READ_KINDS минус CHANNEL_KINDS. */
+/** Kinds публичных категорий (HealthCraft Index): READ_KINDS минус CHANNEL_KINDS. */
 export const PUBLIC_KINDS = READ_KINDS.filter((k) => !CHANNEL_KINDS.includes(k));
 
 /**
- * В5.5 тур 2 (W4, ЗН-2): справочные факты — review PR и карта владельцев.
- * Расчет читает их ТОЛЬКО для показа (подметрики DISPLAY_ONLY, балл null) и
- * НЕ включает в READ_KINDS: пригодность скана, public_status, замещение
- * историей и Score от них не зависят (§2 тур 2 п.3). Факт не ok — строка
- * показа «нет данных» с причиной, без подстановки из прошлого скана.
+ * Справочные факты — review PR и карта владельцев. Расчет читает их ТОЛЬКО
+ * для показа (подметрики DISPLAY_ONLY, балл null) и НЕ включает в READ_KINDS:
+ * пригодность скана, public_status, замещение историей и Score от них не
+ * зависят. Факт не ok — строка «нет данных» с причиной, без подстановки из
+ * прошлого скана.
  */
 export const DISPLAY_KINDS = ["activity.pr_review", "code.ownership"];
 
@@ -162,7 +159,7 @@ const INELIGIBLE_NO_DATA_REASONS = ["access", "other"];
 export interface EligibilityFact {
   key: string;
   status: string;
-  /** git | rest:* | appsec:api — правило юзерского скана смотрит git-факты (круг 2, С5) */
+  /** git | rest:* | appsec:api — правило для скана пользователя смотрит git-факты */
   source: string;
   /** значение факта: объект или JSON-строка из БД */
   value: unknown;
@@ -179,9 +176,8 @@ function noDataReason(value: unknown): unknown {
   let v = value;
   if (typeof v === "string") {
     try {
-      // кодек-осознанно (круг 2 В4.4): строка может быть сжатой (z:-префикс,
-      // легаси круга 1) — parseFactValue разворачивает её перед парсом;
-      // JS- и SQL-правила пригодности обязаны видеть одну причину
+      // строка может быть сжатой (z:-префикс, старые записи) — parseFactValue
+      // разворачивает ее; JS- и SQL-правила пригодности должны видеть одну причину
       v = parseFactValue(v);
     } catch {
       return null;
@@ -191,16 +187,13 @@ function noDataReason(value: unknown): unknown {
 }
 
 /**
- * Единое правило пригодности скана для рейтинга (К-Ф1.1; TASK.md §2
- * «Каталог, видимость и карточка» (4)): скан непригоден, если хоть один
- * факт PUBLIC_KINDS отсутствует, или status='bad', или no-data с причиной
- * access/other; no-data limits и причины, описывающие сам репо (пустой
- * репо), — пригоден. Одинаково для публичных и приватных.
- * Круг 2 (LOW-1, одно определение в хуке, rescoreAll и миграции): скан со
- * status bad (или незавершённый) непригоден; С5: юзерский скан (с автором)
- * с любым no-data git-фактом непригоден — медленный/узкий PAT не
- * выдаёт «репо больше лимита» за свойство репо. SQL-эквивалент —
- * ratingEligibleSql.
+ * Единое правило пригодности скана для рейтинга (одно для хука, rescoreAll и
+ * миграции; SQL-эквивалент — ratingEligibleSql). Скан непригоден, если он bad
+ * или не завершен, если хоть один факт PUBLIC_KINDS отсутствует, bad или no-data
+ * с причиной access/other. no-data limits и причины, описывающие сам репо
+ * (пустой репо), пригодности не мешают. Одинаково для публичных и приватных.
+ * Скан пользователя (с автором) с любым no-data git-фактом непригоден:
+ * медленный или узкий токен не должен выдавать «репо больше лимита» за свойство репо.
  */
 export function ratingEligible(facts: EligibilityFact[], scan: EligibilityScan): boolean {
   if (scan.status === "bad" || scan.status === "running" || scan.status === "queued") return false;
@@ -218,12 +211,10 @@ export function ratingEligible(facts: EligibilityFact[], scan: EligibilityScan):
 const sqlList = (items: string[]) => items.map((k) => `'${k}'`).join(", ");
 
 /** SQL-эквивалент ratingEligible: логическое выражение для строки scans с алиасом `scanAlias` (id, status, user_id).
- *  Круг 2 В4.4: причина no-data читается кодек-осознанно — json_extract по сжатой
- *  (z:) строке бросал `malformed JSON` и ронял migrateEligibility (крэш-луп
- *  стартового рескора). SQLite разворачивать zlib не умеет, поэтому сжатая
- *  no-data-строка читается как «причина неизвестна» (NULL — не дисквалификатор);
- *  после фикса write-side no-data значения не сжимаются вовсе, окно — только
- *  легаси-строки круга 1. Одна функция — фикс покрывает db.ts и migrateEligibility. */
+ *  json_extract по сжатой (z:) строке бросает `malformed JSON` и ронял бы migrateEligibility,
+ *  а zlib SQLite не разворачивает. Поэтому сжатая no-data-строка читается как «причина
+ *  неизвестна» (NULL — не дисквалификатор); новые no-data значения не сжимаются вовсе,
+ *  так что это касается только старых строк. */
 export function ratingEligibleSql(scanAlias: string): string {
   return `(${scanAlias}.status NOT IN ('bad', 'running', 'queued')
           AND (${scanAlias}.user_id IS NULL OR NOT EXISTS (
@@ -236,7 +227,7 @@ export function ratingEligibleSql(scanAlias: string): string {
           ) = ${PUBLIC_KINDS.length})`;
 }
 
-/** Повторная миграция пригодности всех сканов одним UPDATE (круг 2: derived_version 2) + public_status следов старого процесса. */
+/** Пересчет пригодности всех сканов одним UPDATE + public_status для следов старого процесса. */
 export function migrateEligibility(db: Database): void {
   db.exec(`UPDATE scans SET rating_eligible = CASE WHEN ${ratingEligibleSql("scans")} THEN 1 ELSE 0 END`);
   db.exec(`UPDATE scans SET public_status = ${publicStatusSql("scans")} WHERE public_status IS NULL AND status NOT IN ('running', 'queued')`);
@@ -249,9 +240,9 @@ export interface StatusFact {
 }
 
 /**
- * Статус скана по фактам (runner): bad = фатал воркера или ни одного ok-факта
- * git/REST; ok = все факты ok; иначе partial. Тот же алгоритм на фактах
- * PUBLIC_KINDS даёт scans.public_status (Ф1.11).
+ * Статус скана по фактам (runner): bad = фатальная ошибка воркера или ни одного
+ * ok-факта git/REST; ok = все факты ok; иначе partial. Тот же алгоритм на фактах
+ * PUBLIC_KINDS дает scans.public_status.
  */
 export function scanStatusOf(facts: StatusFact[], workerFatal: boolean): "ok" | "partial" | "bad" {
   const gitHasOk = facts.some((f) => f.source === "git" && f.status === "ok");
@@ -290,12 +281,11 @@ function weighted(subs: [number, number | null][]): number | null {
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
 /**
- * Каналы с правами зрителя (К1): для них факт «не ok» (no-data, bad или
- * отсутствие строки) замещается последним ok-фактом того же kind из
- * более раннего скана репо — скан без PAT (периодика) не стирает CI и
- * Security, собранные сканом с PAT участника. Показ защищён проверкой
- * доступа зрителя (К2): данные чужого PAT видит только тот, у кого есть
- * доступ к тому же каналу.
+ * Каналы с правами зрителя: для них факт «не ok» (no-data, bad или отсутствие
+ * строки) замещается последним ok-фактом того же kind из более раннего скана
+ * репо — периодический скан без токена не стирает CI и Security, собранные
+ * сканом с токеном участника. Показ защищен проверкой доступа: эти данные
+ * видит только тот, у кого есть доступ к тому же каналу.
  */
 export const CHANNEL_FALLBACK_KINDS = ["cicd.runs", "appsec.findings"];
 
@@ -304,19 +294,18 @@ export interface EffectiveFacts {
   stale: string[];
   staleCats: Set<string>;
   /**
-   * 4.2.0 (М1.1 аудита В5.3): git-канал подтвердил, что коммитов нет (no-data
-   * с причиной `empty` у сканов до правки сборщика М2). Пустота — факт
-   * «проекта нет» (Q&A №13), а не отсутствие данных.
+   * git-канал подтвердил, что коммитов нет (у старых сканов это no-data с причиной
+   * `empty`). Пустота — факт «проекта нет», а не отсутствие данных.
    */
   emptyRepo: boolean;
-  /** В5.5 тур 2 (W4): справочные факты скана не ok — kind → причина (`access`, `bad-channel`…) */
+  /** справочные факты скана не ok — kind → причина (`access`, `bad-channel`…) */
   displayMissing?: Record<string, string>;
 }
 
 /**
- * Факты скана с замещением историей: bad → последний ok того же kind
- * (§5.6, все kinds); для CHANNEL_FALLBACK_KINDS — любой не-ok. Общая
- * точка compute и recommend (рекомендации не противоречат Score).
+ * Факты скана с замещением историей: bad → последний ok того же kind (все kinds);
+ * для CHANNEL_FALLBACK_KINDS — любой не-ok. Общая точка compute и recommend,
+ * чтобы рекомендации не противоречили оценке.
  */
 export function effectiveFacts(db: Database, scanId: number, repoId: number): EffectiveFacts {
   const rows = db.query("SELECT key, value, status FROM facts WHERE scan_id = ?").all(scanId) as {
@@ -351,7 +340,7 @@ export function effectiveFacts(db: Database, scanId: number, repoId: number): Ef
     }
     // без истории → kind отсутствует в ok → no-data субметрик
   }
-  // В5.5 тур 2 (W4): справочные — без замещения историей; нет строки — нет показа
+  // справочные — без замещения историей; нет строки — нет показа
   const displayMissing: Record<string, string> = {};
   for (const kind of DISPLAY_KINDS) {
     const row = rows.find((r) => r.key === kind);
@@ -379,14 +368,14 @@ export interface ComputeInput {
   staleCats?: Set<string>;
   /** git-канал подтвердил пустой репозиторий (EffectiveFacts.emptyRepo) */
   emptyRepo?: boolean;
-  /** В5.5 тур 2 (W4): справочные факты не ok — kind → причина (EffectiveFacts.displayMissing) */
+  /** справочные факты не ok — kind → причина (EffectiveFacts.displayMissing) */
   displayMissing?: Record<string, string>;
 }
 
 /**
- * Чистый расчёт Score из эффективных фактов (В4.1-fix, К-Ф1.2): без БД.
+ * Чистый расчет оценки из эффективных фактов, без БД.
  * compute = effectiveFacts + computeFromFacts; recommend считает реальный
- * прирост правила вторым вызовом на подменённых фактах.
+ * прирост правила вторым вызовом на подмененных фактах.
  */
 export function computeFromFacts(ok: Map<string, unknown>, input: ComputeInput, now: Date): Scores {
   const { scanId, repoId } = input;
@@ -403,11 +392,10 @@ export function computeFromFacts(ok: Map<string, unknown>, input: ComputeInput, 
     security: scoreSecurity(ok),
     activity: withPrReview(scoreActivity(derived, now, git), ok, input.displayMissing),
     issues: scoreIssues(ok, derived),
-    // 4.3.1 (В5.5 тур 1, П-1 парковки В4.9): «кода нет» — явная ветка балла 0
-    // с причиной, а не «нет данных»: код в репозитории ЗАВЕДОМО отсутствует
-    // (это факт о репо, Q&A №13), tri-state «no-data не ухудшает» про незнание,
-    // а не про подтвержденную пустоту. 4.3.0 (Н3) давала здесь null. Причина
-    // остается в `no_data` — её читают карточка (partialNote) и полоса вкладов.
+    // «кода нет» — явный балл 0 с причиной, а не «нет данных»: код ЗАВЕДОМО
+    // отсутствует, это факт о репо. Правило «no-data не ухудшает» — про незнание,
+    // а не про подтвержденную пустоту. Причина остается в `no_data` — ее читают
+    // карточка (partialNote) и полоса вкладов.
     code: withOwnership(emptyKind !== null ? { score: 0, no_data: `no source code — ${emptyKind}`, submetrics: {} } : scoreCode(derived, ok.has("tree.stats")), ok, input.displayMissing),
   };
   for (const [k, cat] of Object.entries(categories)) {
@@ -441,24 +429,22 @@ export function computeFromFacts(ok: Map<string, unknown>, input: ComputeInput, 
   };
 }
 
-/** Оба показателя из готовых категорий (В4.3, К-Ф1.2/К-Ф3.1). */
 export interface Totals {
-  /** HealthCraft Index — взвешенное среднее четвёрки со словарём INDEX_WEIGHTS */
+  /** HealthCraft Index — взвешенное среднее четверки с весами INDEX_WEIGHTS */
   healthcraftIndex: number | null;
   indexCoverage: number;
-  /** Repo Health Score — взвешенное среднее шести со словарём SCORE_WEIGHTS, кап 49 */
+  /** Repo Health Score — взвешенное среднее шести с весами SCORE_WEIGHTS, кап 49 */
   repoHealthScore: number | null;
   repoHealthCoverage: number;
 }
 
 /**
- * Оба показателя из готовых категорий (круга 2 → В4.3): взвешенное среднее
- * с перенормировкой no-data. Индекс четвёрки — свой словарь INDEX_WEIGHTS
- * (23/23/23/31), полный Score — SCORE_WEIGHTS (20/15/15/15/15/20); ни один
- * не является перенормировкой другого. Coverage обоих — доля номинальной
- * массы SCORE_WEIGHTS с данными: индекс от 65 (масса четвёрки), полный от
- * 100. compute и карточка (полный Score из показанных категорий) — одна
- * формула. Кап 49 применяется только полному Score.
+ * Оба показателя из готовых категорий: взвешенное среднее с перенормировкой
+ * no-data. Индекс — веса INDEX_WEIGHTS (23/23/23/31), полный Score —
+ * SCORE_WEIGHTS (20/15/15/15/15/20). Coverage обоих — доля номинальной массы
+ * SCORE_WEIGHTS с данными: индекс от 65 (масса четверки), полный от 100.
+ * compute и карточка (полный Score из показанных категорий) используют одну
+ * формулу. Кап 49 применяется только к полному Score.
  */
 export function totalsFromCategories(
   categories: Record<CategoryKey, { score: number | null }>,
@@ -491,7 +477,7 @@ export function totalsFromCategories(
     return total;
   };
   const indexWeightOf = (key: CategoryKey): number => INDEX_WEIGHTS[key as IndexCategoryKey];
-  // порядок суммирования шести — как у compute до круга 2 (числа с плавающей точкой бит-в-бит)
+  // порядок суммирования шести категорий не менять: от него зависят биты числа с плавающей точкой
   return {
     healthcraftIndex: totalOf(indexWeightOf, PUBLIC_CATEGORIES, coverageOf(PUBLIC_CATEGORIES, INDEX_COVERAGE_BASE), false),
     indexCoverage: coverageOf(PUBLIC_CATEGORIES, INDEX_COVERAGE_BASE),
@@ -513,21 +499,20 @@ interface GitState {
 }
 
 /**
- * 4.3.0 (Н4): причина «нет данных» у git-категорий по виду — репозиторий пуст
- * (коммитов нет, данные) или не прочитан (лимит, ошибка — незнание).
+ * Причина «нет данных» у git-категорий различает случаи: репозиторий пуст
+ * (коммитов нет — это данные) или не прочитан (лимит, ошибка — незнание).
  */
 const gitNoData = (git: GitState): string => (git.empty ? "repository empty" : "git channel no-data");
 
-/** Вид «кода нет» (Q&A №13: оценка 0 как данные) или null — код есть или неизвестно. */
+/** Вид «кода нет» (оценка 0 как данные) или null — код есть или неизвестно. */
 export type CodeEmptyKind = "repository empty" | "no files" | "only non-code files" | "no lines of code";
 
 /**
- * Без-кодовое репо (Q&A №13): «проекта нет» = Score 0 как данные, не NULL.
- * 4.2.0 (М1.1): и репо без единого коммита; (М2.3) и репо без файлов кода —
- * только README, лицензия, картинки; факты до правки сборщика — по корню
- * без каталогов. 4.3.0 (Н3): и файлы кода без единой строки (`source_loc = 0`
- * у новых фактов) — пустой `a.js` признак не снимает (F16). `source_loc = null`
- * (обрыв чтения) — не «кода нет»: это незнание (Ф2.3, закон 2).
+ * Репо без кода: по разъяснению организаторов «проекта нет» = оценка 0 как данные,
+ * не NULL. Сюда относятся репо без единого коммита; репо без файлов кода (только
+ * README, лицензия, картинки; у старых фактов — по корню без каталогов); файлы кода
+ * без единой строки (`source_loc = 0`) — пустой `a.js` признак не снимает.
+ * `source_loc = null` (обрыв чтения) — не «кода нет», а незнание: оно балл не ухудшает.
  */
 export function codeEmptyKind(ok: Map<string, unknown>, git: GitState): CodeEmptyKind | null {
   if (git.empty) return "repository empty";
@@ -536,18 +521,18 @@ export function codeEmptyKind(ok: Map<string, unknown>, git: GitState): CodeEmpt
   if (typeof tree.file_count === "number" && tree.file_count === 0) return "no files";
   if (tree.source_files === 0) return "only non-code files";
   if (!("source_files" in tree) && rootHasNoSource(tree.top_level)) return "only non-code files";
-  // круг 2 (К3, E3): 0 строк при непрочитанных файлах кода (больше лимита
-  // текста, бинарные) — строки не прочитаны (незнание), а не «кода нет»
+  // 0 строк при непрочитанных файлах кода (больше лимита текста, бинарные) —
+  // строки не прочитаны (незнание), а не «кода нет»
   const unread = typeof tree.source_unread === "number" && tree.source_unread > 0;
   if (typeof tree.source_loc === "number" && tree.source_loc === 0 && !unread) return "no lines of code";
   return null;
 }
 
 /**
- * Лицензия засчитана — ОДНО выражение для расчета и рекомендации (Н7, F7):
- * признак сборщика; у фактов до Р4в (без `content_checked`) — и имя в корне
- * (М1.13: `LICENSE-MIT`, `COPYING`…). Сборщик 3 проверил содержимое — имя
- * пустого файла лицензию не дает.
+ * Лицензия засчитана — ОДНО выражение для расчета и рекомендации: признак
+ * сборщика; у старых фактов без `content_checked` — еще и имя в корне
+ * (`LICENSE-MIT`, `COPYING`…). Если сборщик проверил содержимое, имя пустого
+ * файла лицензию не дает.
  */
 export function licensePresent(ok: Map<string, unknown>): boolean {
   const presence = ok.get("docs.presence") as (DocsPresenceValue & { content_checked?: unknown }) | undefined;
@@ -593,9 +578,9 @@ function scoreDocumentation(ok: Map<string, unknown>, git: GitState): CategorySc
 }
 
 /**
- * 4.2.0 (М1.13): лицензия под иным именем — `LICENSE-MIT`, `LICENSE.APACHE`,
- * `COPYING*`, `UNLICENSE`, каталог `LICENSES/` (сборщик до М2 искал только
- * `licen[cs]e*`); корень хранится в `tree.stats.top_level`.
+ * Лицензия под иным именем — `LICENSE-MIT`, `LICENSE.APACHE`, `COPYING*`,
+ * `UNLICENSE`, каталог `LICENSES/` (старый сборщик искал только `licen[cs]e*`);
+ * корень хранится в `tree.stats.top_level`.
  */
 const LICENSE_NAME = /^(licen[cs]es?|copying|unlicense)([._-].*)?$/i;
 
@@ -618,8 +603,8 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
     recent_runs?: unknown;
   } | undefined;
   if (configs && configs.has_ci_yaml === true && (typeof configs.has_steps !== "boolean" || typeof configs.steps_note === "string")) {
-    // 4.2.0 (М2.1 аудита): ci.yaml не разобран — неизвестно, есть ли шаги;
-    // это не «CI без шагов = 0», а отсутствие данных
+    // ci.yaml не разобран — неизвестно, есть ли шаги; это не «CI без шагов = 0»,
+    // а отсутствие данных
     return { score: null, no_data: "ci.yaml not parsed — steps unknown", submetrics: {} };
   }
   if (!configs) {
@@ -627,11 +612,10 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
   }
   const configSub = configs.has_ci_yaml === true && configs.has_steps === true ? 1 : 0;
   if (runs === undefined) {
-    // 4.3.0 (Н8, J11/F10): запуски не видны — «нет данных» НЕЗАВИСИМО от
-    // ci.yaml. Раньше «нет ci.yaml» давало 0, а заглушка ci.yaml без видимых
-    // запусков — «нет данных»: перенормировка поднимала полный Score на
-    // +15,6 за конфиг без доказательства. Решение 23.09 (Алексей) о невидимых
-    // запусках распространено и на репо без конфига: без запусков CI не оцениваем.
+    // запуски не видны — «нет данных» НЕЗАВИСИМО от ci.yaml. Иначе «нет ci.yaml»
+    // давало бы 0, а заглушка ci.yaml без видимых запусков — «нет данных», и
+    // перенормировка поднимала бы полный Score на +15,6 за конфиг без доказательства.
+    // Без видимых запусков CI не оцениваем вовсе.
     return {
       score: null,
       no_data: CI_RUNS_INVISIBLE,
@@ -639,14 +623,14 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
         config: { score: configSub, value: configs },
         pass_rate: { score: null, note: "runs no-data" },
         duration: { score: null, note: "runs no-data" },
-        // 4.4.0 (ТП-1): справочно, без веса — подчиняется тем же правам, что категория
+        // справочно, без веса — видна с теми же правами, что категория
         stability: ciStability(undefined),
       },
     };
   }
   if (configSub === 0) {
-    // §5.1: нет ci.yaml / ci.yaml без шагов = CI нет = 0 (данные) —
-    // даже если раны каким-то образом видны (раны без конфига — шум)
+    // нет ci.yaml / ci.yaml без шагов = CI нет = 0 (данные) — даже если запуски
+    // каким-то образом видны (запуски без конфига — шум)
     return {
       score: 0,
       submetrics: {
@@ -657,16 +641,15 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
       },
     };
   }
-  // 4.2.0 (М1.8): запуски ВИДНЫ и их 0 — данные «CI заявлен, но не запускался»
-  // (заглушка ci.yaml не выгоднее настоящего CI); все запуски старше
-  // последней ленты свежести (поле есть, значение null) — то же «за год не
-  // запускался». Решение 23.09 о невидимых запусках (no-data) не меняется.
+  // запуски ВИДНЫ и их 0 — данные «CI заявлен, но не запускался» (заглушка
+  // ci.yaml не должна быть выгоднее настоящего CI); все запуски старше последней
+  // ленты свежести (поле есть, значение null) — то же «за год не запускался»
   const runsCount = num(runs.runs_count);
-  // М2.5: запуски есть, но ни один не завершен (идут, отменены) — результата
-  // еще нет: это не «не запускался», а отсутствие данных
+  // запуски есть, но ни один не завершен (идут, отменены) — результата еще нет:
+  // это не «не запускался», а отсутствие данных
   const pendingOnly = runsCount === 0 && (num((runs as { runs_total?: unknown }).runs_total) ?? 0) > 0;
   if (pendingOnly) {
-    // 4.3.0 (Н14б, D11): своя причина — «не видны» здесь было бы ложью
+    // своя причина — «не видны» здесь было бы ложью
     return {
       score: null,
       no_data: "ci runs pending — запуски идут, завершенных нет",
@@ -690,7 +673,7 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
       score: s * 100,
       submetrics: {
         config: { score: configSub, value: configs },
-        // Н14б: значения доли нет — «не запускался» словами, а не «0%» («все упали»)
+        // значения доли нет — «не запускался» словами, а не «0%» (читалось бы как «все упали»)
         pass_rate: { score: 0, value: null, note: runsCount === 0 ? "no runs" : "no runs within a year" },
         duration: { score: null, note: "no recent runs" },
         stability: ciStability(runs),
@@ -710,11 +693,11 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
       },
     };
   }
-  // 23.09 (Алексей): pass_rate по ВЗВЕШЕННОЙ доле успеха (ленты свежести —
-  // свежие прогоны весомее), fallback на простой агрегат старых фактов
+  // pass_rate по ВЗВЕШЕННОЙ доле успеха (свежие прогоны весомее, CI_RECENCY_BANDS),
+  // у старых фактов — простая доля
   const passInput = num(runs.weighted_success_rate) ?? num(runs.success_rate);
   const passSub = passInput !== null ? anchorScore(PASS_RATE, passInput) : null;
-  // Н8б: длительность нового сборщика — по успешным запускам
+  // длительность (у нового сборщика) — по успешным запускам
   const durSub = num(runs.duration_p50) !== null ? anchorScore(DURATION_MIN, num(runs.duration_p50)! / 60) : null;
   const w = SUBWEIGHTS.cicd;
   const subs: [number, number | null][] = [
@@ -729,15 +712,15 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
       config: { score: configSub, value: configs },
       pass_rate: { score: passSub, value: passInput },
       duration: { score: durSub, value: num(runs.duration_p50) },
-      // 4.4.0 (ТП-1): справочно, без веса
+      // справочно, без веса
       stability: ciStability(runs),
     },
   };
 }
 
 /**
- * Причина «нет данных» CI без видимых запусков (23.09, Алексей; 4.3.0 — и без
- * ci.yaml). Подстрока «прогоны не видны» — маркер карточки (`ciConfigOnlyCap`).
+ * Причина «нет данных» CI без видимых запусков (с ci.yaml и без него).
+ * Подстрока «прогоны не видны» — маркер для карточки (`ciConfigOnlyCap`).
  */
 export const CI_RUNS_INVISIBLE = "ci runs no-data — прогоны не видны, автоматизацию не оцениваем";
 
@@ -746,8 +729,8 @@ function scoreSecurity(ok: Map<string, unknown>): CategoryScore {
   if (!appsec) {
     return { score: null, no_data: "AppSec data unavailable (no AppSec access or no finished scan)", submetrics: {} };
   }
-  // 4.3.0 (Н11, F21/J20): плотность — по строкам КОДА (`source_loc`), как у
-  // TODO; факты до правки М2.3 — весь `loc`; обрыв чтения (`source_loc = null`) — неизвестно
+  // плотность — по строкам КОДА (`source_loc`), как у TODO; у старых фактов —
+  // весь `loc`; обрыв чтения (`source_loc = null`) — неизвестно
   const tree = ok.get("tree.stats") as { loc?: unknown; source_loc?: unknown } | undefined;
   const loc = tree !== undefined && "source_loc" in tree ? num(tree.source_loc) : num(tree?.loc);
   const sc = appsec.severity_counts ?? {};
@@ -758,15 +741,15 @@ function scoreSecurity(ok: Map<string, unknown>): CategoryScore {
     SEVERITY_WEIGHTS.high * high +
     SEVERITY_WEIGHTS.medium * (num(sc.medium) ?? 0) +
     SEVERITY_WEIGHTS.low * (num(sc.low) ?? 0);
-  // 4.3.0: находок нет — плотность 0 и без числа строк (подтвержденное отсутствие — данные)
+  // находок нет — плотность 0 даже без числа строк (подтвержденное отсутствие — данные)
   const per10k = weightedDensity === 0 ? 0 : loc !== null && loc > 0 ? weightedDensity / (loc / 10_000) : null;
   const densitySub = per10k !== null ? anchorScore(SEVERITY_PER_10K, per10k) : null;
   const resolvedSub = num(appsec.resolved_share) !== null ? anchorScore(RESOLVED_SHARE, num(appsec.resolved_share)!) : null;
   const secretsSub = appsec.secrets_critical === true ? 0 : 1;
   if (densitySub === null && resolvedSub === null) {
-    // 4.2.0 (М1.2): без плотности и доли закрытых категорию нес бы один
-    // признак утечки — 100 при любом числе критичных находок. С 4.3.0 сюда
-    // приходят только находки > 0 при неизвестном числе строк.
+    // без плотности и доли закрытых категорию нес бы один признак утечки —
+    // 100 при любом числе критичных находок. Сюда приходят только находки > 0
+    // при неизвестном числе строк.
     return {
       score: null,
       no_data: "too little data — no finding density (LOC unknown) and no resolved share",
@@ -785,8 +768,8 @@ function scoreSecurity(ok: Map<string, unknown>): CategoryScore {
       [w.resolved, resolvedSub],
       [w.secrets, secretsSub],
     ])! * 100;
-  // 4.3.0 (Р3, J7): открытая critical — не выше 40, открытая high — не выше 69
-  // (после взвешивания): на большом репо плотность пары критичных не видит
+  // открытая critical — не выше 40, открытая high — не выше 69 (после взвешивания):
+  // на большом репо плотность пару критичных почти не замечает
   const level: "critical" | "high" | null = critical > 0 ? "critical" : high > 0 ? "high" : null;
   const limit = level !== null ? SECURITY_OPEN_CAPS[level] : null;
   const capped = limit !== null && raw > limit;
@@ -809,7 +792,7 @@ function scoreActivity(derived: DerivedMetrics, now: Date, git: GitState): Categ
     contributors: { score: contrib, value: derived.contributorsTotal },
     pulls_90d: { score: pulls, value: derived.pulls90d },
     releases_12m: { score: rel, value: derived.releases12m },
-    // показ-без-веса (§2): mirror-likeness, динамика двух окон и bus factor (К5.9)
+    // только показ, без веса: mirror-likeness, bus factor, коммиты за два окна, всплески
     mirror_likeness: { score: null, value: derived.mirrorLikeness },
     bus_factor: { score: null, value: derived.busFactor },
     commits_90d: { score: null, value: derived.commits90d },
@@ -817,14 +800,13 @@ function scoreActivity(derived: DerivedMetrics, now: Date, git: GitState): Categ
     sync_bursts: { score: null, value: derived.syncBursts },
   });
   if (derived.humanCommits === null) {
-    // 4.3.0 (Н4, D6): без истории — по виду: пустой репо или не прочитан
+    // без истории — причина по виду: пустой репо или не прочитан
     return { score: null, no_data: gitNoData(git), submetrics: {} };
   }
-  // круг 2 (К5): правило Н10 «история из одних синков — нет данных» снято:
   // зеркало и ребейз считаются по датам автора (robot2), синк — только
-  // генерированный всплеск, и история из одних всплесков — как «только роботы»
-  // 4.2.0 (М1.2): история прочитана, а людей в ней нет — данные «человеческих
-  // коммитов нет» (худший анкер), а не отсутствие данных
+  // сгенерированный всплеск; история из одних всплесков — как «только роботы».
+  // История прочитана, а людей в ней нет — это данные «коммитов людей нет»
+  // (худший анкер), а не отсутствие данных
   const freshSub =
     derived.lastHumanCommitTs !== null ? anchorScore(FRESH_MONTHS, Math.max(0, (now.getTime() - derived.lastHumanCommitTs) / MONTH_MS)) : 0;
   const freqSub = commitsPerMonthScore(derived.commitsPerMonth ?? 0);
@@ -832,9 +814,8 @@ function scoreActivity(derived: DerivedMetrics, now: Date, git: GitState): Categ
   const pullsSub = derived.pulls90d !== null ? anchorScoreLog(PULLS_90D, derived.pulls90d) : null;
   const relSub = derived.releases12m !== null ? anchorScoreLog(RELEASES_12M, derived.releases12m) : null;
   const w = SUBWEIGHTS.activity;
-  // 4.2.0 (М1.2): якорь — прочитанная история (свежесть и частота); без нее
-  // категорию несли бы счетчики MR и релизов с полом 0,2. В5.3-М (Н15):
-  // ветка «git+rest channels no-data» была недостижима — удалена
+  // якорь — прочитанная история (свежесть и частота); без нее категорию несли бы
+  // счетчики MR и релизов с полом 0,2
   const score = weighted([
     [w.fresh, freshSub],
     [w.freq, freqSub],
@@ -852,10 +833,10 @@ function scoreIssues(ok: Map<string, unknown>, derived: DerivedMetrics): Categor
   }
   const open = num(stats.open) ?? 0;
   const closed = num(stats.closed) ?? 0;
-  // 4.4.0 (ТП-9): справочно, без веса; трекер не ведется — тот же статус, не «0 динамики»
+  // справочно, без веса; трекер не ведется — тот же статус, а не «0 динамики»
   const dynamics = issueDynamics(stats);
   if (open === 0 && closed === 0) {
-    // §5.3: 0/0 = данные «трекер не ведётся» — скор = вычислимый минимум
+    // 0/0 = данные «трекер не ведется» — балл = вычислимый минимум категории
     return {
       score: ISSUES_TRACKER_UNUSED,
       submetrics: {
@@ -864,13 +845,11 @@ function scoreIssues(ok: Map<string, unknown>, derived: DerivedMetrics): Categor
       },
     };
   }
-  // 4.3.0 (Р2): в выборку идут закрытые задачи, прожившие не меньше часа;
-  // у фактов прежнего сборщика — все закрытые
+  // в выборку идут закрытые задачи, прожившие не меньше часа; у старых фактов — все закрытые
   const closedN = issuesClosedCounted(stats) ?? 0;
   const staleSub = derived.staleShare !== null ? anchorScore(STALE_SHARE, derived.staleShare) : null;
-  // 4.3.0 (Н9, F4): открытые есть, а закрыта ни одна — «ни одна не закрыта»
-  // (данные, худший анкер), а не отсутствие медианы: первое закрытие больше
-  // не снижает балл
+  // открытые есть, а не закрыта ни одна — это данные (худший анкер), а не отсутствие
+  // медианы: иначе первое закрытие снижало бы балл
   const noneClosed = closedN === 0 && open > 0;
   const closeDays = num(stats.median_close_days);
   const closeSub = noneClosed ? 0 : closeDays !== null ? anchorScore(CLOSE_DAYS, closeDays) : null;
@@ -878,9 +857,8 @@ function scoreIssues(ok: Map<string, unknown>, derived: DerivedMetrics): Categor
   const comments = ok.get("issues.comments_sample") as { median_first_comment_delay_hours?: unknown } | undefined;
   const firstSub = num(comments?.median_first_comment_delay_hours) !== null ? anchorScore(FIRST_COMMENT_H, num(comments!.median_first_comment_delay_hours)!) : null;
   const w = SUBWEIGHTS.issues;
-  // трекер не пуст: доля зависших или доля решенных есть всегда — среднее есть
-  // (В5.3-М, Н15: защиты `raw === null` и `Math.max(0, …)` были недостижимы:
-  // минимум по анкерам — ровно ISSUES_TRACKER_UNUSED)
+  // трекер не пуст: доля зависших или доля решенных есть всегда — среднее есть,
+  // а минимум по анкерам — ровно ISSUES_TRACKER_UNUSED
   const raw =
     weighted([
       [w.stale, staleSub],
@@ -888,9 +866,9 @@ function scoreIssues(ok: Map<string, unknown>, derived: DerivedMetrics): Categor
       [w.resolution, resSub],
       [w.first_resp, firstSub],
     ])! * 100;
-  // 4.2.0 (М1.9) → 4.3.0 (Р2): на малой выборке ЗАКРЫТЫХ задач балл сжимается
-  // к минимуму «трекер не ведется»; открытые в размер выборки не входят —
-  // спам пустыми задачами и открыл-закрыл за минуту балл не поднимают (J2, F1)
+  // на малой выборке ЗАКРЫТЫХ задач балл сжимается к минимуму «трекер не ведется»;
+  // открытые в размер выборки не входят — спам пустыми задачами и «открыл-закрыл
+  // за минуту» балл не поднимают
   const sample = Math.min(1, closedN / ISSUES_FULL_SAMPLE);
   const score = ISSUES_TRACKER_UNUSED + (raw - ISSUES_TRACKER_UNUSED) * sample;
   return {
@@ -913,36 +891,32 @@ function scoreCode(derived: DerivedMetrics, hasTree: boolean): CategoryScore {
   const testsSub = derived.testShare !== null ? anchorScore(TEST_SHARE, derived.testShare) : null;
   const rootSub = derived.rootEntries !== null ? anchorScore(ROOT_ENTRIES, derived.rootEntries) : null;
   const w = SUBWEIGHTS.code;
-  // К-Р14: неполная выборка TODO — причина no-data рядом со значением;
-  // 4.3.0 (Н14б): доля старых при 1-4 пометках — от не менее 5 (оговорка показа)
+  // неполная выборка TODO — причина no-data рядом со значением; при 1-4 пометках
+  // доля старых считается от 5 — это оговаривается при показе
   const oldNote = derived.oldShareNoData ?? (derived.todoTotal !== null && derived.todoTotal > 0 && derived.todoTotal < OLD_SHARE_MIN_BASE ? "share of at least 5 markers" : null);
   const submetrics: Record<string, SubmetricScore> = {
     density: { score: densitySub, value: derived.todoDensityPerKloc },
     old_share: { score: oldSub, value: derived.oldShare, ...(oldNote ? { note: oldNote } : {}) },
-    // круг 2 (В1): тестов нет — подметрика вне расчета с пометкой показа
+    // тестов нет — подметрика вне расчета, с пометкой для показа
     tests: { score: testsSub, value: derived.testShare, ...(derived.testsNone ? { note: TESTS_NONE_NOTE } : {}) },
     root: { score: rootSub, value: derived.rootEntries },
     todo_total: { score: null, value: derived.todoTotal },
   };
-  // 4.3.0 (Н4): строки не прочитаны — незнание. Круг 2 (К3): сюда же 0
-  // прочитанных строк при непрочитанных файлах кода (derived → null) и 0 строк
-  // у фактов до М2.3 (ошибка счета М2.2: однострочные файлы без `\n`) —
-  // файлы кода есть, а строки не посчитаны. Причина «мало кода» (Р4б) снята (В3)
-  // приемка HQ (E15): у фактов до М2.3 `loc = 0` — ошибка счета прежнего
-  // сборщика (М2.2), а не «файлы не прочитаны» — своя причина и текст
+  // строки не прочитаны — незнание. Сюда же 0 прочитанных строк при непрочитанных
+  // файлах кода (derived → null). У старых фактов `loc = 0` — ошибка счета прежнего
+  // сборщика (однострочные файлы без `\n`), а не «файлы не прочитаны»: своя причина
   if (derived.codeLoc === 0 && derived.codeLocLegacy) return { score: null, no_data: "too little data — lines miscounted by an older collector", submetrics };
   if (derived.codeLoc === null || derived.codeLoc === 0) return { score: null, no_data: "too little data — lines of code not read", submetrics };
-  // якорь — плотность пометок (4.2.0, М1.2); без факта TODO категории нет
+  // якорь — плотность пометок; без факта TODO категории нет
   if (densitySub === null) return { score: null, no_data: "git channel no-data", submetrics };
   const base = weighted([
     [w.density, densitySub],
     [w.old_share, oldSub],
     [w.root, rootSub],
   ])!;
-  // круг 2 (В1): «Тесты» — бонус. Доля непустых тестов входит в балл с весом
-  // 0,3 (анкеры круга 1), только если поднимает его: первый тест при хороших
-  // прочих показателях не снижает «Код» (P1 «+ непустой тест»), а у репо без
-  // тестов «Код» на фактах сборщика 3 и старых фактах одинаков (G3, E2)
+  // «Тесты» — бонус: доля непустых тестов входит в балл с весом 0,3, только если
+  // поднимает его. Первый тест при хороших прочих показателях не снижает «Код»,
+  // а у репо без тестов «Код» одинаков на новых и старых фактах
   let raw = base;
   if (testsSub !== null) {
     const withTests = weighted([
@@ -954,10 +928,9 @@ function scoreCode(derived: DerivedMetrics, hasTree: boolean): CategoryScore {
     if (withTests >= base) raw = withTests;
     else submetrics.tests = { score: null, value: derived.testShare, note: TESTS_BONUS_IDLE_NOTE };
   }
-  // круг 2 (В3, вытесняет порог Р4б): плавное сжатие малого кода к нейтрали —
-  // Код = 50 + (сырой − 50) × min(1, строк / 200); ступени на 50-й строке нет.
-  // Приемка HQ (уточнение В3, Екатерина 24.09): только ВНИЗ — плохой малый код
-  // к 50 не подтягивается (иначе удалить строки выгодно, дописать — снижение)
+  // плавное сжатие малого кода к нейтрали: Код = 50 + (сырой − 50) × min(1, строк / 200).
+  // Только ВНИЗ: плохой малый код к 50 не подтягивается — иначе удалять строки
+  // было бы выгодно, а дописывать — невыгодно
   const rawScore = raw * 100;
   const factor = Math.min(1, derived.codeLoc / CODE_FULL_LOC);
   const compressed = CODE_NEUTRAL + (rawScore - CODE_NEUTRAL) * factor;
@@ -969,7 +942,7 @@ function scoreCode(derived: DerivedMetrics, hasTree: boolean): CategoryScore {
   };
 }
 
-// ---------- В5.5 тур 2 (W4, ЗН-2): справочные подметрики ----------
+// ---------- справочные подметрики ----------
 
 /**
  * Review и bottlenecks PR — строки показа «Активности» без веса (балл null,
@@ -1033,22 +1006,21 @@ export function withOwnership(cat: CategoryScore, ok: Map<string, unknown>, miss
   return cat;
 }
 
-/** Круг 2 (В1): сборщик 3 посчитал тесты, непустых нет — «тестов нет, в балл не входит». */
+/** Сборщик посчитал тесты, непустых нет — «тестов нет, в балл не входит». */
 export const TESTS_NONE_NOTE = "no tests — not scored (tests are a bonus)";
-/** Круг 2 (В1): тесты есть, но их доля ниже прочих показателей — бонус не применен. */
+/** Тесты есть, но их доля ниже прочих показателей — бонус не применен. */
 export const TESTS_BONUS_IDLE_NOTE = "tests bonus not applied — share would lower the category";
 
-// ---------- запись (immutable: PK scan_id+model_version, идемпотентно) ----------
+// ---------- запись (PK scan_id+model_version, идемпотентно) ----------
 
-// 4.3.0 (Н13, F20): индекс округляется устойчиво к двоичному шуму (39,4999… → 40)
+// индекс округляется устойчиво к двоичному шуму (39,4999… → 40)
 const roundTotal = (x: number | null): number | null => (x === null ? null : roundScore(x));
 const roundCoverage = (x: number): number => Math.round(x * 1000) / 1000;
 
 /**
- * В4.3 (Ф3.2/Ф3.3): строка scores хранит ТОЛЬКО публичный показатель —
- * healthcraft_index/index_coverage. Полный Repo Health Score — дериватив
- * показанных категорий (карточка считает totalsFromCategories на чтении),
- * отдельным total не хранится нигде.
+ * Строка scores хранит ТОЛЬКО публичный показатель — healthcraft_index/index_coverage.
+ * Полный Repo Health Score выводится из показанных категорий (карточка считает
+ * totalsFromCategories при чтении) и отдельно не хранится нигде.
  */
 export function writeScores(db: Database, s: Scores): void {
   db.query(

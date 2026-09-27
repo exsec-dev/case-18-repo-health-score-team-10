@@ -1,11 +1,8 @@
-// me-recommendations.test.ts — счётчик рекомендаций «Моих репозиториев»
-// (В4.7, П3.4, контракт У26; решение В2 21.09 — без сети).
-//
-// Поведенческий тест на данных (правило AGENTS.md 21.09: число — не
-// source-assert): при актуальной проверке прав `recommendationsCount` равен
+// Счетчик рекомендаций «Моих репозиториев». Число проверяется на данных, а не
+// по исходнику: при актуальной проверке прав `recommendationsCount` равен
 // `getRepoCardForViewer(...).recommendations.length` для того же зрителя —
 // на карточке с закрытыми и с открытыми каналами. Без прав — null, не 0;
-// права есть, скана нет — 0, как на карточке.
+// права есть, скана нет — 0, как на карточке. Сети нет.
 import { afterAll, describe, expect, test } from "bun:test";
 import { getRepoCardForViewer } from "../src/api/repos";
 import { addFavorite, listMyRepos, type FavoriteAccess } from "../src/api/me";

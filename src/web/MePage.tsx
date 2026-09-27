@@ -1,11 +1,7 @@
-// MePage.tsx — пользовательские поверхности «Мои репозитории» и «Настройки»:
-// Я ID (UX), PAT SourceCraft (права на данные). Основная колонна — ОДИН
-// список «Мои репозитории» = избранное (В4.4, кластер I: дубль-секция
-// «Избранное» удалена — права-ряд, проверка, звезда и анализ в одной
-// строке). Токен — отдельная настройка на /settings: вставка → живая проверка →
-// зашифрованное хранение, замена/удаление; исход посева из namespace
-// показывается тостом (кластер I). Ссылки ведут на единую карточку /repo/...
-// Токен НИКОГДА не возвращается API и не логируется.
+// Страницы пользователя: «Избранное» (/me), «Настройки» (/settings) и панель
+// «Задания» в шапке. Избранное — один список, где в строке сразу видимость,
+// статус анализа и действия. Токен SourceCraft задается в Настройках: вставка →
+// живая проверка → зашифрованное хранение. API токен никогда не возвращает и не логирует.
 import {
   ArrowRightFromSquare,
   ArrowsRotateRight,
@@ -65,13 +61,7 @@ import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, Rep
 const REPOS_CRUMBS = [{ text: "Избранное" }];
 const SETTINGS_CRUMBS = [{ text: "Настройки" }];
 
-/**
- * В4.7 (П3.4): ОДНА плашка кабинета. До вехи семь `Alert` стояли в трёх
- * сочетаниях view/size и двух темах на одно и то же событие «не загрузилось».
- * Теперь view и size общие для всех, тема — по смыслу: ошибка (`danger`) или
- * подсказка, что делать дальше (`info`, плашка про токен П3.3).
- */
-/** Название раздела SourceCraft в инструкции — серым тегом (круг 3, 12). */
+/** Название раздела SourceCraft в инструкции — серым тегом. */
 function UiTag({ children }: { children: ReactNode }) {
   return (
     <Label theme="unknown" size="xs" className="rh-ui-tag">
@@ -80,9 +70,10 @@ function UiTag({ children }: { children: ReactNode }) {
   );
 }
 
-/** Инструкция SourceCraft по персональному токену (Е18). */
+/** Инструкция SourceCraft по персональному токену. */
 const PAT_DOCS_URL = "https://sourcecraft.dev/portal/docs/ru/sourcecraft/security/pat";
 
+/** Общая плашка ошибок и подсказок страниц: вид и размер одни на всех, тема — по смыслу. */
 function CabinetAlert({
   theme = "danger",
   title,
@@ -97,17 +88,10 @@ function CabinetAlert({
   return <Alert theme={theme} view="outlined" size="m" title={title} message={message} actions={actions} />;
 }
 
-/**
- * Круг 2 части 2 (Е17, W1, §2 23.09): плашка из 3 шагов снята — ее видели
- * только без токена, то есть она дублировала одно предупреждение. Вернулось
- * предупреждение «нет токена» одной строкой: иконка ключа, заголовок и
- * пояснение, кнопка справа. Видно, пока токена нет.
- */
+/** Предупреждение «нет токена» со ссылкой в Настройки; с токеном не показывается. */
 function TokenNotice({ hasPat }: { hasPat: boolean }) {
   if (hasPat) return null;
   return (
-    // круг 3 (10): иконка ключа — синим (цвет info-темы), кнопка — под текстом
-    // круг 5 (1): светло-синей заливкой, как плашка «Токен показывается один раз»
     <Alert
       theme="info"
       view="filled"
@@ -116,7 +100,7 @@ function TokenNotice({ hasPat }: { hasPat: boolean }) {
       title="Добавьте персональный токен доступа SourceCraft"
       message="С ним откроются CI/CD, Безопасность и анализ своих репозиториев."
       actions={
-        // круг 4: кнопка по ширине текста, а не во всю плашку
+        // обертка — чтобы кнопка была по ширине текста, а не во всю плашку
         <span className="rh-token-notice__action">
           <Button view="normal" size="m" {...linkProps("/settings")}>
             Перейти в Настройки
@@ -128,9 +112,7 @@ function TokenNotice({ hasPat }: { hasPat: boolean }) {
 }
 
 export function MePage(_props: { meta: MetaResponse | null }) {
-  // В4.8.5 (К8.5.8): сессия — одно состояние приложения (session.tsx), а
-  // не своя копия `/api/me` у каждой страницы; статусы анализа — из общего
-  // опроса заданий вкладки (К8.5.1)
+  // сессия — общее состояние приложения (session.tsx), а не своя копия /api/me у страницы
   const { me, reloadMe } = useSession();
   const data = dataOf(me);
 
@@ -142,7 +124,7 @@ export function MePage(_props: { meta: MetaResponse | null }) {
     );
   }
   if (data === null) {
-    // В4.4 (кластер M-3): сбой /api/me — честная ошибка с повтором, не LoginOffer
+    // сбой /api/me — ошибка с повтором, а не предложение войти
     return (
       <Page crumbs={REPOS_CRUMBS}>
         <CabinetAlert title="Не удалось загрузить список репозиториев" message={me.kind === "error" ? me.message : undefined} actions={[{ text: "Повторить", handler: reloadMe }]} />
@@ -153,13 +135,11 @@ export function MePage(_props: { meta: MetaResponse | null }) {
     return <LoginOffer pageTitle="Избранное" />;
   }
   return (
-    // В4.8 (вариант A, решение 21.09): одна колонна — список, как у списков
-    // SourceCraft. Журнал «Мои задания» из тела страницы убран: статус анализа
-    // живет в строке, история — в «Заданиях» шапки (`JobsBell`). Правая
-    // панель «Аккаунт» здесь дублировала аватар rail — осталась в Настройках.
+    // одна колонка без боковой панели: статус анализа — в строке, история — в
+    // «Заданиях» шапки (JobsBell), аккаунт — в Настройках
     <Page crumbs={REPOS_CRUMBS}>
-      {/* В4.4 (кластер I): список favorites-only живет и без PAT;
-          токен нужен для проверки прав, автозапуска и посева из namespace */}
+      {/* список работает и без токена; токен нужен для проверки прав, автозапуска
+          анализа и добавления репозиториев из пространства SourceCraft */}
       <MyReposSection hasPat={data.hasPat} />
     </Page>
   );
@@ -189,30 +169,23 @@ export function SettingsPage() {
       aside={
         <>
           <AccountSection me={data} />
-          {/* В4.9 ч.2 (Г, U4-A): зачем токен — рядом с полем токена. «Только для
-              чтения» проверено: запросов на запись к SourceCraft в src/ нет */}
+          {/* «только для чтения» верно: запросов на запись к SourceCraft в коде нет */}
           <AsideSection title="Зачем токен">
             <Text color="complementary">Нужен, чтобы видеть CI/CD и Безопасность своих репозиториев. Используется только для чтения.</Text>
           </AsideSection>
         </>
       }
     >
-      {/* В4.8.5 (К8.5.3, С2-4): секция токена не перемонтируется по дате
-          проверки — строка «Токен принадлежит…» после сохранения остаётся */}
-      {/* UX-проход В5.2 25.09 (замечание 2): карточки настроек — с зазором, не вплотную */}
+      {/* у PatSection нет key по дате проверки: иначе она перемонтируется и
+          строка «Токен принадлежит…» пропадет сразу после сохранения */}
       <Flex direction="column" gap={4}>
         <PatSection hasPat={data.hasPat} unreadable={data.patUnreadable === true} checkedAt={data.patCheckedAt} onChanged={reloadMe} />
-        {/* В5.2 (Б6, выбор 5A): «Лимиты AI» всем вошедшим; «Доступ без лимитов» — если пароль настроен */}
         <AiLimitsSections />
       </Flex>
     </Page>
   );
 }
-/**
- * Остаток лимитов AI (В5.2, Б6, выбор 5A — отдельная карточка «Лимиты AI», всем вошедшим).
- * Форма чисел совпадает с кнопками карточки (решение 3): остаток «N/M» (UX-проход 25.09,
- * замечание 4). Аудит дизайна О10: первый заголовок пустой, числа не переносятся.
- */
+/** Остаток лимитов AI в той же форме «N/M», что на кнопках карточки репозитория. */
 function AiQuotaTable({ data }: { data: AiQuotaView }) {
   const cell = (w: QuotaWindowView | null, none: string): string => (w === null ? none : quotaCell(w));
   const rows: { title: string; q: ActionQuotaView }[] = [
@@ -227,7 +200,6 @@ function AiQuotaTable({ data }: { data: AiQuotaView }) {
     </th>
   );
   return (
-    // UX-проход 25.09 (замечание 3): таблица на сером фоне и по ширине содержимого
     <div className="rh-ai-quota-box">
     <table className="rh-ai-quota">
       <thead>
@@ -262,9 +234,8 @@ function AiQuotaTable({ data }: { data: AiQuotaView }) {
 }
 
 /**
- * «Лимиты AI» и «Доступ без лимитов» (В5.2, Б6, выбор 5A: две карточки). Лимиты видит каждый
- * вошедший; пароль — только если он настроен на сервере. Поле и кнопка пароля — одной строкой,
- * на телефоне столбиком (аудит дизайна О9).
+ * Карточки «Лимиты AI» и «Доступ без лимитов». Лимиты видит каждый вошедший;
+ * карточка пароля — только если пароль настроен на сервере.
  */
 function AiLimitsSections() {
   const quota = useJson<AiQuotaView>("/api/me/ai-quota");
@@ -296,7 +267,6 @@ function AiLimitsSections() {
       await mutateJson<{ ok: boolean }>("/api/me/ai-unlock", "DELETE");
       quota.reload();
     } catch (e) {
-      // аудит надежности: сбой отключения не молчит
       toaster.add({ name: "ai-lock-fail", theme: "danger", title: "Доступ не отключен", content: e instanceof Error ? e.message : String(e) });
     } finally {
       setBusy(false);
@@ -376,16 +346,14 @@ function AiLimitsSections() {
 
 
 /**
- * «Аккаунт» — кто вошёл и выход. Здесь выход доступен всегда, в том числе при
- * узком rail (там у аватара кнопки нет): обе пользовательские поверхности
- * сохраняют доступ к управлению аккаунтом.
+ * «Аккаунт» — кто вошел и выход. Здесь выход доступен всегда, в том числе при
+ * узком rail, где у аватара кнопки нет.
  */
 function AccountSection({ me }: { me: MeResponse }) {
   const toaster = useToaster();
   const name = displayName(me);
   return (
     <AsideSection title="Аккаунт">
-      {/* быстрая правка 23.09 (5): «Выйти» — шириной блока аккаунта над ней */}
       <div className="rh-account">
       <Flex gap={3} alignItems="center">
         <UserAvatar me={me} />
@@ -398,8 +366,8 @@ function AccountSection({ me }: { me: MeResponse }) {
           </Text>
         </Flex>
       </Flex>
-      {/* круг 4 (8), круг 5 (2): кнопка по ширине текста — обертка держит ее у
-          левого края, иначе колонка панели (align-items: stretch) растягивает ее */}
+      {/* «Выйти» — шириной блока аккаунта: без обертки rh-account колонка панели
+          (align-items: stretch) растянула бы кнопку во всю ширину */}
         <Button view="outlined" size="m" width="max" onClick={() => void logout().catch((e: unknown) => toaster.add(logoutFailedToast(e)))}>
           <Icon data={ArrowRightFromSquare} size={16} />
           Выйти
@@ -409,10 +377,9 @@ function AccountSection({ me }: { me: MeResponse }) {
   );
 }
 
-/** Не вошедшему — объяснение слоёв и кнопка входа (живой клик — приёмка HQ). */
+/** Не вошедшему — что доступно без входа и кнопка входа. */
 function LoginOffer({ pageTitle }: { pageTitle: "Избранное" | "Настройки" }) {
-  // Ф2.9: /me?auth_error=… после неудачного callback — причина показывается,
-  // а не проглатывается
+  // после неудачного callback Я ID сервер возвращает на /me?auth_error=… — причину показываем
   const authError = new URLSearchParams(window.location.search).get("auth_error");
   return (
     <Page
@@ -446,11 +413,10 @@ function LoginOffer({ pageTitle }: { pageTitle: "Избранное" | "Наст
   );
 }
 
-// ---------- токен (github-style: PUT проверяет живьём, DELETE убирает) ----------
+// ---------- токен: PUT проверяет его в SourceCraft и сохраняет, DELETE удаляет ----------
 
-/** В4.4 (кластер I): исход посева избранного из namespace — человеческой строкой. */
+/** Итог добавления репозиториев из пространства SourceCraft в избранное — строкой для тоста. */
 function seedNote(seed: import("../api/me").PatSeed | undefined): string {
-  // Ступень 4 (В-7): без «посева» и «namespace» — что сделано и сколько
   if (seed === undefined) return "Репозитории вашего пространства SourceCraft в избранное не добавлялись.";
   if (seed.status === "ok")
     return seed.added > 0
@@ -462,7 +428,7 @@ function seedNote(seed: import("../api/me").PatSeed | undefined): string {
       : seed.error?.code === "page_limit"
         ? "прочитаны не все страницы пространства"
         : seed.error?.code === "no_username"
-          ? // UX-9 (круг 2 В4.4): namespace не опрашивался — не обвинять его
+          ? // пространство даже не опрашивалось — причина не в нем
             "SourceCraft не вернул имя пользователя"
           : "SourceCraft ответил сбоем";
   return `Добавление репозиториев вашего пространства SourceCraft в избранное остановлено: ${why} (добавлено ${seed.added}).`;
@@ -475,7 +441,7 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
   const [owner, setOwner] = useState<string | null>(null);
   const [replacing, setReplacing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  // В4.4 (кластер M-6): заголовок ошибки — по операции (сохранение/удаление)
+  // заголовок ошибки зависит от операции: сохранение или удаление
   const [failedOp, setFailedOp] = useState<"save" | "remove">("save");
   const toaster = useToaster();
 
@@ -484,8 +450,7 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
     setError(null);
     setFailedOp("save");
     try {
-      // В4.4 (кластер I): исход посева показывается сразу — PAT уже сохранён,
-      // но что стало с избранного из namespace, юзер раньше не узнавал вовсе
+      // ответ несет и итог добавления репозиториев из пространства — он уходит в тост
       const res = await mutateJson<{ ok: boolean; tokenOwner: string | null; seed?: import("../api/me").PatSeed }>(
         "/api/me/pat",
         "PUT",
@@ -527,8 +492,7 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
   }
 
   const tokenForm = (label: string, submit: string) => (
-    // быстрая правка 23.09 (1): поле и кнопка — в один ряд, растягивается поле;
-    // В5.2 (аудит дизайна О9): на телефоне столбиком — поле не сжимается до «Персона…»
+    // поле и кнопка в ряд; на телефоне столбиком, иначе поле сжимается до «Персона…»
     <Flex gap={2} alignItems="center" className="rh-inline-form">
       <TextInput
         className="rh-grow"
@@ -571,7 +535,6 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
             {replacing ? (
               <Flex direction="column" gap={2}>
                 {tokenForm("Новый персональный токен доступа", "Проверить и заменить")}
-                {/* В4.4 (кластер M-8): выход из режима замены — явная «Отмена» */}
                 <Button view="normal" size="m" width="max" onClick={() => setReplacing(false)} disabled={busy}>
                   Отмена
                 </Button>
@@ -593,29 +556,21 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
               <Label theme="warning" size="xs">
                 {unreadable ? "Нужно сохранить заново" : "Не задан"}
               </Label>
-              {/* В4.8.5 (К8.5.4, С2-5, С2-6): без жаргона и с причиной */}
               <Text variant="body-short" color="secondary">
                 {unreadable
                   ? "сохраненный токен больше не читается после смены ключа сервиса"
                   : "закрытые данные и анализ своих репозиториев недоступны"}
               </Text>
             </Flex>
-            {/* UX-проход В5.2 25.09 (замечание 1): поле — сразу под статусом, инструкция под ним */}
             {tokenForm("Персональный токен доступа SourceCraft", "Проверить и сохранить")}
-            {/* Круг 2 части 2 (Е18, Н1, §2 23.09): инструкция — шагами, как в
-                документации SourceCraft (названия разделов — жирным), важное —
-                отдельной плашкой, полная инструкция — ссылкой */}
-            {/* круг 5 (4): вопрос, ссылка и шаги — в серой плашке, как заглушки */}
+            {/* инструкция шагами, как в документации SourceCraft; полная — по ссылке */}
             <Flex direction="column" gap={2} className="rh-howto-box">
-              {/* круг 3 (11): «Как получить токен? Инструкция SourceCraft» — одной строкой */}
-              {/* круг 4 (9): ссылка — обычным начертанием, рядом с вопросом */}
               <Flex gap={2} alignItems="baseline" wrap>
                 <Text variant="subheader-1">Как получить токен?</Text>
                 <Link href={PAT_DOCS_URL} target="_blank" rel="noopener noreferrer">
                   Инструкция SourceCraft
                 </Link>
               </Flex>
-              {/* круг 3 (12): названия разделов SourceCraft — серыми тегами, не жирным */}
               <ol className="rh-howto">
                 <li>
                   В SourceCraft нажмите <UiTag>Домой</UiTag> и откройте <UiTag>Доступ</UiTag> → <UiTag>Персональные токены доступа</UiTag>.
@@ -652,17 +607,17 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
   );
 }
 
-// ---------- мои репозитории: ОДИН список = избранное (В4.4, кластер I) ----------
+// ---------- избранное ----------
 
-/** Светлая клиентская проверка ручного ввода: слаг org/repo или http(s)-ссылка; точную грамматику держит сервер. */
+/** Грубая клиентская проверка ручного ввода: org/repo или http(s)-ссылка; точный разбор — на сервере. */
 const INPUT_LIKELY = /^([a-z0-9_.-]+\/[a-z0-9_.-]+|https?:\/\/\S+)$/i;
 
 
 function MyReposSection({ hasPat }: { hasPat: boolean }) {
-  // В4.8.5 (К8.5.3): перечитывание не мигает и не пропадает при сбое
+  // keepPrevious: при перечитывании и сбое список не мигает и не пропадает
   const repos = useJson<MyReposResponse>("/api/me/repos", { keepPrevious: true });
   const favs = useJson<FavoritesResponse>("/api/me/favorites", { keepPrevious: true });
-  // С4-13: запуск на время отправки блокирует повторный клик по строке
+  // слаги, чей запуск еще отправляется: повторный клик по строке блокируется
   const [starting, setStarting] = useState<ReadonlySet<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -671,13 +626,13 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
   const [sortKey, setSortKey] = useState<SortKey>("index");
   const [sortDesc, setSortDesc] = useState(true);
   const toaster = useToaster();
-  // В4.8.5 (К8.5.1): фаза анализа строки — из общего опроса заданий вкладки
-  // (по заданию); тост об итоге даёт он же, из любого экрана
+  // фаза анализа строки — из общего опроса заданий вкладки; тост об итоге
+  // показывает он же, на любом экране
   const analysis = useAnalysis();
   const reposReloadRef = useRef(repos.reload);
   reposReloadRef.current = repos.reload;
   const listed = useLatest(repos.state.kind === "ok" ? repos.state.data.entries : []);
-  // итог анализа пришёл — строка перечитывается (один раз на пачку итогов)
+  // пришел итог анализа по репозиторию из списка — список перечитывается (один раз на пачку итогов)
   useAnalysisFinished((jobs) => {
     if (jobs.some((j) => listed.current.some((e) => `${e.org}/${e.repo}` === j.slug))) reposReloadRef.current();
   });
@@ -688,7 +643,7 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
       setStarting((prev) => new Set(prev).add(slug));
       try {
         const res = await mutateJson<{ deduplicated?: boolean; jobId?: number }>(`/api/me/repos/${slug.split("/").map(encodeURIComponent).join("/")}/scan`, "POST");
-        // круг 2 (Н5): итог этого задания объявится и в ответе базовой линии опроса
+        // итог задания объявится, даже если придет в первом ответе опроса (базовой линии)
         announceJobStarted(res?.jobId);
         if (res?.deduplicated) toaster.add({ name: `scan-dedup:${slug}`, theme: "info", title: "Анализ уже идет", content: slug });
       } catch (e) {
@@ -699,8 +654,8 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
           next.delete(slug);
           return next;
         });
-        // круг 4 (замечание 4) + С9-16: «Задания» и строка узнают о запуске сразу —
-        // и тогда, когда ответ на запуск потерялся, а задание встало
+        // «Задания» и строка узнают о запуске сразу — даже если ответ на запуск
+        // потерялся, а задание в очередь встало
         announceJobsChanged();
         analysis.refresh();
       }
@@ -713,14 +668,13 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
     try {
       await mutateJson(`/api/me/favorites/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`, "DELETE");
       toaster.add({ name: `fav-removed:${org}/${repo}`, theme: "info", title: "Убрано из избранного", content: slugOf(org, repo) });
-      // В4.8.5 (К8.5.7, §2-В3): после действия обновляется только строка —
-      // список целиком не перечитывается (его окно — 30 чтений в минуту)
+      // обновляется только строка: список целиком не перечитывается, у него
+      // лимит 30 чтений в минуту
       const current = dataOf(repos.state);
       if (current) repos.set({ ...current, entries: current.entries.filter((e) => !(e.org === org && e.repo === repo)) });
       const currentFavs = dataOf(favs.state);
       if (currentFavs) favs.set({ entries: currentFavs.entries.filter((f) => !(f.org === org && f.repo === repo)) });
     } catch (e) {
-      // UX-7 (круг 2 В4.4): сбой снятия не глотается
       toaster.add({
         name: `fav-remove-failed:${org}/${repo}`,
         theme: "danger",
@@ -747,12 +701,8 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
 
   return (
     <Flex direction="column" gap={4}>
-      {/* В4.8: шапка списка по образцу SourceCraft («Active issues 39»):
-          заголовок header-1, счетчик цветом hint, справа поиск, сортировка и
-          единственное action-действие страницы. Круг 2 (5b): вместо
-          иконки-подсказки — строка описания под заголовком, как у рейтинга
-          (слот `description` у `PageHeader`); «Здесь ваше избранное» ничего не
-          объясняло (замечание 5 Екатерины). */}
+      {/* шапка списка по образцу SourceCraft («Active issues 39»): заголовок,
+          счетчик, справа поиск, сортировка и единственная action-кнопка страницы */}
       <div className="rh-me-head">
         <Flex direction="column" gap={1} className="rh-me-head__title">
           <Flex gap={2} alignItems="baseline">
@@ -765,9 +715,6 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
               </Text>
             )}
           </Flex>
-          {/* Круг 3 (2c): одна фраза-польза — прежние два предложения были
-              длинными; у списков SourceCraft описание либо отсутствует, либо
-              одно короткое («Milestones help group issues…») */}
           <Text color="complementary">Следите за здоровьем избранных репозиториев и тем, что возможно в них улучшить.</Text>
         </Flex>
         <div className="rh-me-tools">
@@ -805,14 +752,12 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
         </div>
       </div>
 
-      {/* Круг 2 (Е17, W1): без токена — одна строка-предупреждение с кнопкой */}
       <TokenNotice hasPat={hasPat} />
 
       {repos.state.kind === "loading" && <SkeletonRows rows={3} height={66} />}
       {repos.state.kind === "error" && (
         <CabinetAlert title="Не удалось загрузить список" message={repos.state.message} actions={[{ text: "Повторить", handler: repos.reload }]} />
       )}
-      {/* З1 (круг 2 В4.4): сбой /api/me/favorites больше не глотается */}
       {favs.state.kind === "error" && (
         <CabinetAlert title="Не удалось загрузить избранное" message={favs.state.message} actions={[{ text: "Повторить", handler: favs.reload }]} />
       )}
@@ -828,12 +773,8 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
 
       {repos.state.kind === "ok" && entries.length > 0 && (
         <>
-          {/* В4.8 (плитки варианта C): сводка по полосам шкалы — она же фильтр.
-              Карточка `selection` Gravity: повторный клик снимает фильтр. */}
-          {/* Круг 2 (9a, 3c): число белое, цвет полосы — в графике: иконка
-              полосы в углу плитки (у «Без оценки» иконки нет — это не полоса
-              шкалы, решение Екатерины). Круг 3: полоса распределения под
-              плитками снята (замечание 3). Круг 4: иконки 20px, «жирность» была от `stroke`, а не от размера. */}
+          {/* сводка по полосам шкалы — она же фильтр; повторный клик по плитке
+              снимает фильтр. Цвет полосы — только у иконки в углу плитки */}
           <div className="rh-summary-block">
             <div className="rh-summary" role="group" aria-label="Сводка по шкале HealthCraft Index">
               {BANDS.map((b) => {
@@ -847,9 +788,8 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
                     className="rh-summary__tile"
                     onClick={() => setBand((cur) => (cur === b.key ? null : b.key))}
                     title={b.hint}
-                    // ревью закрытия: `Card type="selection"` ставит role="radio" и
-                    // aria-checked, а плитка — переключатель (повторный клик снимает
-                    // фильтр): роль кнопки и aria-pressed
+                    // Card type="selection" ставит role="radio" и aria-checked, но плитка —
+                    // переключатель (повторный клик снимает фильтр): роль кнопки и aria-pressed
                     role="button"
                     aria-checked={undefined}
                     aria-pressed={band === b.key}
@@ -912,8 +852,8 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
         favorites={new Set((dataOf(favs.state)?.entries ?? []).map((f) => `${f.org}/${f.repo}`.toLowerCase()))}
         onClose={() => setAdding(false)}
         onAdded={(res) => {
-          // В5.3 (вариант A): окно остается открытым — можно добавить несколько
-          // К8.5.7: ответ добавления — обновлённая запись строки; список не перечитывается
+          // окно остается открытым — можно добавить несколько. Ответ несет готовую
+          // запись строки, поэтому список не перечитывается
           const current = dataOf(repos.state);
           if (current && res.entry) {
             const rest = current.entries.filter((e) => !(e.org === res.entry!.org && e.repo === res.entry!.repo));
@@ -936,7 +876,7 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
   );
 }
 
-/** Иконка полосы на плитке сводки; у «Без оценки» иконки нет (круг 2, 9a). */
+/** Иконка полосы на плитке сводки; у «Без оценки» иконки нет — это не полоса шкалы. */
 const BAND_ICON: Record<Band, IconData | null> = {
   success: CircleCheck,
   warning: TriangleExclamation,
@@ -944,12 +884,7 @@ const BAND_ICON: Record<Band, IconData | null> = {
   none: null,
 };
 
-/**
- * Круг 2 (8a, 3c): оценка — кольцо-шкала с числом внутри. Число белое, цвет
- * полосы — насыщенным базовым тоном (`--g-color-base-*-heavy`) на дуге:
- * пастельные текстовые токены В4.6 читались бледно (замечание 3), а графике
- * контраст прозы 4,5:1 не нужен (порог нетекстовой графики — 3:1).
- */
+/** Серая плашка состояния строки: смысл — иконкой и подсказкой, цвет только у иконки. */
 function StatePill({ icon, tone, title, children }: { icon: IconData; tone?: "danger" | "warning"; title: string; children: ReactNode }) {
   return (
     <span className="rh-state" title={title}>
@@ -959,6 +894,11 @@ function StatePill({ icon, tone, title, children }: { icon: IconData; tone?: "da
   );
 }
 
+/**
+ * Оценка — кольцо-шкала с числом внутри. Цвет полосы — на дуге насыщенным
+ * тоном `--g-color-base-*-heavy`: пастельные текстовые токены читаются бледно,
+ * а для графики хватает контраста 3:1 (4,5:1 нужен только тексту).
+ */
 function ScoreRing({ value }: { value: number }) {
   const r = 18;
   const circ = 2 * Math.PI * r;
@@ -976,12 +916,7 @@ function ScoreRing({ value }: { value: number }) {
   );
 }
 
-/**
- * В4.8: добавление — редкое действие, поэтому диалогом по кнопке в шапке
- * списка, а не полем над списком. Ф2.20: слаг или URL; парсер серверный,
- * клиент лишь не пускает заведомо не похожее.
- */
-/** Ответ добавления в избранное (К8.5.7, К8.5.14): обновлённая запись строки и исход автопроверки прав. */
+/** Ответ добавления в избранное: обновленная запись строки и итог автопроверки прав. */
 interface FavoriteAddResponse {
   entry?: import("../api/me").MyRepoEntry;
   access?: import("../api/me").FavoriteAccess | null;
@@ -1015,7 +950,7 @@ function useScRepos(enabled: boolean): { state: ScListState; reload: () => void 
       .then(async (res) => {
         const body = (await res.json().catch(() => null)) as { repos?: ScRepoLite[]; partial?: boolean; error?: { code?: string; message?: string } } | null;
         if (!res.ok) {
-          // О9 аудита 25.09: ошибки по кодам; лимит — с временем повтора
+          // текст ошибки — по коду; при лимите запросов — с временем повтора
           const retryAfter = Number(res.headers.get("retry-after"));
           setState({
             kind: "error",
@@ -1040,10 +975,9 @@ function useScRepos(enabled: boolean): { state: ScListState; reload: () => void 
 }
 
 /**
- * В5.3 (25.09, вариант A аудита reports/2026-09-25-m53-add-repo-audit.md):
- * одно поле — поиск по доступным токену репозиториям и ввод org/repo или ссылки;
- * строка списка — аватар, слаг, видимость; уже добавленные помечены «В
- * избранном». Окно не закрывается после добавления — можно добавить несколько.
+ * Окно добавления в избранное. Одно поле — и поиск по репозиториям, доступным
+ * токену, и ввод org/repo или ссылки (точный разбор — на сервере). Уже
+ * добавленные помечены «В избранном»; окно не закрывается после добавления.
  */
 function AddRepoDialog({
   open,
@@ -1084,7 +1018,7 @@ function AddRepoDialog({
     try {
       const res = (await mutateJson<FavoriteAddResponse>("/api/me/favorites", "PUT", { repository })) ?? {};
       const slug = res.entry ? `${res.entry.org}/${res.entry.repo}` : repository;
-      // В4.8.5 (К8.5.14 (д)): права проверены сами — тост говорит, чем кончилось
+      // права проверяются сервером при добавлении — тост говорит, чем кончилось
       toaster.add({ name: `fav-added:${slug}`, theme: "success", title: "Добавлено в избранное", content: `${slug}. ${favoriteAddedText(res.check, res.access?.visibility)}` });
       setAdded((prev) => new Set(prev).add(slug.toLowerCase()).add(repository.toLowerCase()));
       if (repository === value) setValue("");
@@ -1106,7 +1040,7 @@ function AddRepoDialog({
     if (busy) return;
     if (manual) return void add(manual);
     if (shown.length === 1) return void add(`${shown[0]!.org}/${shown[0]!.slug}`);
-    // О6: формат проверяется по Enter, не на каждом нажатии
+    // формат проверяется по Enter, а не на каждом нажатии
     if (value.trim() !== "") setError("Нужен вид org/repo или ссылка на репозиторий");
   };
 
@@ -1135,7 +1069,7 @@ function AddRepoDialog({
   };
 
   return (
-    // О4: ширина по экрану телефона (maxWidth + fullWidth вместо устаревшего size)
+    // maxWidth + fullWidth вместо устаревшего size: окно ужимается по экрану телефона
     <Dialog open={open} onClose={close} maxWidth="s" fullWidth className="rh-dialog-fit" aria-label="Добавить в избранное" initialFocus={inputRef}>
       <Dialog.Header caption="Добавить в избранное" />
       <Dialog.Body>
@@ -1213,7 +1147,6 @@ function AddRepoDialog({
             </Text>
           )}
           {list.state.kind === "ok" && list.state.partial && (
-            // О2: счетчик — по данным
             <Text variant="body-1" color="secondary">
               {addListPartialText(repos.length)}
             </Text>
@@ -1225,18 +1158,15 @@ function AddRepoDialog({
   );
 }
 
-/** О2 аудита 25.09: подпись неполного списка — число строк из данных, без литерала. */
+/** Подпись неполного списка (прочитаны не все страницы SourceCraft): остальное — ручным вводом. */
 export function addListPartialText(count: number): string {
   return `Показано ${count} – остальные найдутся по org/repo`;
 }
 
 /**
- * В4.8: строка репозитория по образцу `ListingItem` SourceCraft (замер
- * 21.09): отступ 12px, шаг 16px, квадратный аватар 40px, имя subheader-2,
- * мета-строка 13px вторичным цветом, делитель — `line-generic`. Строка
- * целиком ведет в карточку (слой-ссылка под содержимым), интерактивные
- * элементы стоят над ним. Справа — оценка словом шкалы или состояние
- * анализа; действия — одна кнопка по состоянию и меню.
+ * Строка репозитория по образцу `ListingItem` SourceCraft. Строка целиком
+ * ведет в карточку (слой-ссылка под содержимым), интерактивные элементы стоят
+ * над ним. Справа — оценка или состояние анализа, затем кнопка и меню действий.
  */
 function RepoRow({
   entry,
@@ -1253,9 +1183,9 @@ function RepoRow({
   access: import("../api/me").FavoriteAccess | null;
   lastCheckedAt: string | null;
   hasPat: boolean;
-  /** В4.8.5 (К8.5.1): живое задание зрителя по этому репозиторию — из общего опроса вкладки */
+  /** живое задание зрителя по этому репозиторию — из общего опроса вкладки */
   live: LiveAnalysis | null;
-  /** запуск отправляется (повторный клик заблокирован, С4-13) */
+  /** запуск отправляется — повторный клик заблокирован */
   starting: boolean;
   busy: boolean;
   onScan: () => void;
@@ -1266,28 +1196,25 @@ function RepoRow({
   const scored = entry.healthcraftIndex !== null;
   const inWork = live !== null || starting;
   const canAnalyze = hasPat && access?.own === true;
-  // В4.8.5 (К8.5.1, К8.5.2b): фаза — по заданию; «затянулось» — признак сервера
+  // «затянулось» решает сервер (истек срок захвата задания), а не таймер в браузере
   const phase = live === null ? null : live.stalled ? "stalled" : live.phase;
 
-  // Круг 3 (замечание 8): все состояния без оценки — ОДНА серая плашка
-  // `StatePill` (та же форма, что у «Сканируется»), смысл — иконкой и
-  // подсказкой. Цветные `Label` читались тегами; цвет остался только у иконки
-  // там, где он значит (ошибка — красный, затянулось — желтый).
+  // все состояния без оценки — одна серая StatePill: цветные Label читались
+  // тегами, поэтому цвет только у иконки и только там, где он что-то значит
   const state =
     phase === "stalled" ? (
       <StatePill icon={Hourglass} tone="warning" title="Анализ идет дольше обычного – его исход появится в «Заданиях» в шапке">
         Затянулось
       </StatePill>
     ) : phase !== null ? (
-      // Круг 2 (1a): серая плашка с бегущей штриховкой — ровно состояние
-      // загрузки кнопки Gravity (как «Отчет» на карточке), а не тег со спиннером
-      // §2-В5: «идет анализ» — без обещания времени
+      // бегущая штриховка — то же состояние загрузки, что у кнопок Gravity;
+      // время анализа сознательно не обещаем
       <span className="rh-state rh-busy" title="Идет анализ – итог придет уведомлением">
         {phase === "queued" ? "В очереди" : "Идет анализ"}
       </span>
     ) : entry.planned ? (
-      // Ф2.17 (решение 18.09): «данных нет» ≠ «данных не будет»; мета и Score
-      // по-прежнему скрыты (fail-closed)
+      // «данных пока нет» — не то же, что «данных не будет»; мета и оценка
+      // при этом скрыты (fail-closed)
       <StatePill icon={Clock} title="Анализ запланирован">
         Запланирован
       </StatePill>
@@ -1297,14 +1224,13 @@ function RepoRow({
         <ScoreRing value={entry.healthcraftIndex!} />
       </div>
     ) : entry.lastScanStatus === "running" ? (
-      // З4 (круг 2 В4.4): running — легальный транзитный статус последнего скана
+      // running — законный промежуточный статус последнего скана
       <span className="rh-state rh-busy" title="Идет анализ">
         Идет анализ
       </span>
     ) : entry.lastScanStatus === "bad" ? (
-      // З4: последний скан упал — честный статус; пригодный старый индекс
-      // сработал бы веткой выше. Круг 2 (П2, К8.5.14 (ж)): призыв запустить —
-      // только при кнопке анализа (свой и есть токен), чужому — нейтрально
+      // последний скан упал (пригодный старый индекс сработал бы веткой выше).
+      // Призыв запустить заново — только если кнопка анализа есть (свой репозиторий и токен)
       <StatePill icon={CircleExclamation} tone="danger" title={failedAnalysisHint(canAnalyze)}>
         Ошибка анализа
       </StatePill>
@@ -1313,9 +1239,8 @@ function RepoRow({
         Оценки нет
       </StatePill>
     ) : !entry.inCatalog ? (
-      // UX-8 (круг 2 В4.4): явные признаки вместо прокси `title === null`
-      // В4.8.5 (К8.5.9, С3-3): речь о каталоге СЕРВИСА — репозиторий на
-      // SourceCraft может быть, у нас его ещё не анализировали
+      // речь о каталоге сервиса: на SourceCraft репозиторий может быть, но у нас
+      // его еще не анализировали
       <StatePill icon={CircleQuestion} title="Репозитория пока нет в каталоге сервиса: его еще не анализировали, или адрес указан с ошибкой">
         Нет в каталоге
       </StatePill>
@@ -1329,12 +1254,12 @@ function RepoRow({
       </StatePill>
     );
 
-  // В4.8.5 (К8.5.14 (г), §2-В1): пункта ручной проверки прав нет — права
-  // проверяются сами при добавлении, после смены токена и фоном
+  // пункта ручной проверки прав нет: права проверяются сами — при добавлении,
+  // после смены токена и в фоне
   const menuItems = [
     ...(entry.recommendationsCount !== null && entry.recommendationsCount > 0
-      ? // ревью закрытия: не `href` — пункт меню рендерится обычной ссылкой без
-        // `linkProps` и перезагружал страницу; навигация — внутри приложения
+      ? // не href: пункт меню рендерится обычной ссылкой без linkProps и
+        // перезагружал бы страницу
         [{ text: "Открыть рекомендации", action: () => navigate(recommendationsHref(href)) }]
       : []),
     { text: "Убрать из избранного", action: onRemove, disabled: busy, theme: "danger" as const },
@@ -1345,14 +1270,11 @@ function RepoRow({
       {/* слой-ссылка: клик по пустому месту строки ведет в карточку; с клавиатуры
           и для скринридера ссылка — имя репозитория, слой из обхода убран */}
       <a className="rh-repo-item__cover" {...linkProps(href)} tabIndex={-1} aria-hidden="true" />
-      {/* тур 3 В5.5 (п.3, 26.09): флаг фрода — как в строке рейтинга (флажок у имени
-          с подсказкой); вытесняет выбор C 25.09 (кружок в углу аватара) */}
       <span className="rh-repo-item__avatar">
         <RepoAvatar repo={repo} logoUrl={entry.logoUrl} size="l" />
       </span>
       <div className="rh-repo-item__content">
         <div className="rh-repo-item__head">
-          {/* В4.7 (П3.4): слаг — общим `RepoSlug`, как на рейтинге и карточке */}
           <Link {...linkProps(href)} view="primary" className="rh-repo-item__name">
             <RepoSlug org={org} repo={repo} variant="subheader-2" />
           </Link>
@@ -1369,21 +1291,16 @@ function RepoRow({
           <MetaItem>
             <LanguageName name={entry.language} color={entry.languageColor} />
           </MetaItem>
-          {/* Круг 2 (7a): иконка вместо слова — круговая стрелка = последний
-              анализ; смысл — в подсказке. Круг 3 (замечание 4): дата последней
-              активности снята — в кабинете это лишний реквизит (она остается на
-              карточке и в рейтинге). */}
           {entry.lastScanAt && scored && (
             <MetaItem icon={ArrowsRotateRight} title="Последний анализ">
               {fmtDateTime(entry.lastScanAt)}
             </MetaItem>
           )}
-          {/* В4.7 (П3.4, У26): счётчик рекомендаций — ссылкой на карточку с
-              открытым табом. null (прав нет) — строки нет: не 0 */}
-          {/* замечание 25.09: 0 рекомендаций — строки нет (улучшать нечего — не повод для ссылки) */}
+          {/* счетчик рекомендаций — ссылкой к разделу рекомендаций на карточке.
+              null (нет прав) и 0 — строки нет */}
           {entry.recommendationsCount !== null && entry.recommendationsCount > 0 && (
             <MetaItem>
-              {/* круг 2 (7a): иконка — внутри ссылки, чтобы красилась вместе с текстом */}
+              {/* иконка внутри ссылки, чтобы красилась вместе с текстом */}
               <Link {...linkProps(recommendationsHref(href))} className="rh-repo-item__link">
                 <Icon data={Bulb} size={14} />
                 {recommendationsText(entry.recommendationsCount)}
@@ -1401,9 +1318,8 @@ function RepoRow({
       <div className="rh-repo-item__state">{state}</div>
 
       <div className="rh-repo-item__actions">
-        {/* В4.8.5 (К8.5.14 (в)): кнопка анализа — только на СВОЕМ репозитории
-            (сохранённая проверка прав: own); у чужого и непроверенного её нет
-            вовсе — элемента нет, а не неактивен */}
+        {/* кнопка анализа — только на своем репозитории (по сохраненной проверке
+            прав own); у чужого и непроверенного ее нет вовсе, а не disabled */}
         {!canAnalyze ? null : scored ? (
           <ActionTooltip title="Обновить анализ">
             <Button view="flat" size="m" onClick={onScan} disabled={inWork} aria-label="Обновить анализ">
@@ -1430,43 +1346,32 @@ function RepoRow({
 }
 
 
-// ========== ПОРТ 5 (hq-parallel): панель заданий ==========
+// ========== ПОРТ 5: панель заданий ==========
 
-// В4.8.5 (К8.5.1): свой опрос `/api/me/jobs` у страницы и у «Заданий» шапки
-// убран — один опрос на вкладку живёт в session.tsx (пауза в скрытой
-// вкладке, 401 переводит приложение в «вы вышли», К8.5.8); событие
-// «задания изменились» — там же (`announceJobsChanged`).
+// Своего опроса /api/me/jobs здесь нет: один опрос на вкладку живет в
+// session.tsx, там же событие «задания изменились» (announceJobsChanged).
 
-/**
- * Кнопка «Задания» в шапке и ее панель.
- * Кнопка (круг 3, 6a / исследование — Т1): обычная кнопка Gravity; пока хоть
- * один анализ идет, по ней бежит та же штриховка, что у «Сканируется» в строке,
- * счетчик — отдельным span цветом hint. Без активных, но с ошибкой — иконка и
- * число цветом ошибки. Видна всегда (круг 4).
- * Панель (исследование `reports/2026-09-21-m48-jobs-research.md`, выбор П3 с
- * поправками Екатерины): `Popup` с фоном и тенью, БЕЗ заголовка — сверху сразу
- * переключатель «Активные N / История»; строки — логотип (`MyJob.logoUrl`),
- * имя ссылкой на карточку и та же серая плашка состояния, что в строке
- * списка (`rh-busy` / `StatePill`); снизу у активных — куда придет итог, без
- * оценки времени.
- */
-/** С9-13: опрос заданий не удался — список мог устареть (сбой не молчит) */
+/** Опрос заданий не удался — список мог устареть. */
 export const JOBS_STALE_TEXT = "Не удалось обновить задания – список мог устареть, повторим автоматически.";
 
+/**
+ * Кнопка «Задания» в шапке и ее панель. Кнопка видна всегда; пока идет хоть
+ * один анализ, по ней бежит та же штриховка, что в строке списка, а если
+ * последний анализ упал — иконка и число цветом ошибки. Панель — Popup без
+ * заголовка: переключатель «Активные / История» и строки заданий.
+ */
 export function JobsBell() {
   const { jobs, failing } = useAnalysis();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"active" | "history" | null>(null);
   const [anchor, setAnchor] = useState<HTMLButtonElement | null>(null);
-  // Круг 4 (замечание 4): кнопка видна всегда. До первого ответа /api/me/jobs
-  // счетчика нет (M-1: не «⚠ 0»).
+  // до первого ответа /api/me/jobs счетчика нет, чтобы не показывать ложный 0
   const active = jobs?.active ?? [];
   const recent = jobs?.recent ?? [];
   const failed = recent.filter((j) => j.phase === "failed").length;
   const busy = active.length > 0;
-  // ревью закрытия В4.8: тревога — только если ПОСЛЕДНЕЕ завершенное задание
-  // упало (recent идет от новых к старым); прежнее «есть ошибка среди 8
-  // последних» держало кнопку красной после трех успешных анализов подряд
+  // тревога — только если упало последнее завершенное задание (recent идет от
+  // новых к старым): старая ошибка не должна держать кнопку красной после успешных анализов
   const alarm = !busy && recent[0]?.phase === "failed";
   // вкладка по умолчанию — где есть что смотреть: идут анализы → «Активные», иначе «История»
   const shown = tab ?? (busy ? "active" : "history");
@@ -1515,8 +1420,6 @@ export function JobsBell() {
           </div>
           {shown === "active" ? (
             active.length === 0 ? (
-              // Круг 5 (2c): пустое состояние в формате наших заглушек, компактно
-              // по центру — иконка, заголовок, описание со ссылкой в раздел
               <JobsEmpty title="Сейчас ничего не анализируется">
                 Запустить анализ можно в разделе{" "}
                 <Link {...navProps("/me", close)} view="normal" className="rh-nowrap">
@@ -1538,10 +1441,9 @@ export function JobsBell() {
           ) : recent.length === 0 ? (
             <JobsEmpty title="Анализов пока не было">Здесь появятся завершенные анализы и их итог.</JobsEmpty>
           ) : (
-            // прокрутка внутри панели (круг 5, замечание 4 Екатерины): длинная история не
-            // растягивает панель за край окна. Круг 5 (4c): лента по дням —
-            // заголовок дня, время справа, итог иконкой: повторные анализы одного
-            // репозитория различимы по времени
+            // список прокручивается внутри панели, чтобы длинная история не уходила
+            // за край окна; лента по дням со временем — повторные анализы одного
+            // репозитория различимы
             <div className="rh-jobs__list">
               {groupJobsByDay(recent).map((g) => (
                 <section key={g.label} aria-label={g.label}>
@@ -1562,9 +1464,8 @@ export function JobsBell() {
 }
 
 /**
- * Строка вкладки «Активные»: логотип, имя ссылкой на карточку, справа — та же
- * серая плашка со штриховкой, что у «Сканируется» в строке списка. Завершенные
- * задания живут на вкладке «История» (`HistoryRow`).
+ * Строка вкладки «Активные»: справа — та же серая плашка со штриховкой, что в
+ * строке списка. Завершенные задания — на вкладке «История» (`HistoryRow`).
  */
 function JobRow({ job, onNavigate }: { job: import("../api/me").MyJob; onNavigate: () => void }) {
   const [org, repo, ...rest] = job.slug.split("/");
@@ -1580,21 +1481,20 @@ function JobRow({ job, onNavigate }: { job: import("../api/me").MyJob; onNavigat
         ) : (
           <Text color="secondary">{job.slug}</Text>
         )}
-        {/* В5.1 (Прод-С1): панель различает анализ и генерацию описания —
-            прежде живая генерация выглядела «заданием» и маскировала запуск анализа */}
+        {/* генерация описания AI и проверка оценки на накрутку — свои роды заданий:
+            без подписи они выглядели бы идущим анализом и маскировали его запуск */}
         {job.kind === "summary" && (
           <Text color="secondary" variant="caption-2">
             описание AI
           </Text>
         )}
-        {/* В5.2 (Б3): проверка на накрутку — свой род заявки */}
         {job.kind === "check" && (
           <Text color="secondary" variant="caption-2">
             проверка оценки
           </Text>
         )}
       </div>
-      {/* Ф2.15 / LOW-8 (решение 18.09): очередью правит round-robin — статус без числа позиции */}
+      {/* очередь обслуживается по кругу (round-robin), а не по порядку — номер позиции не показываем */}
       <span className="rh-state rh-busy">
         {job.phase === "queued" ? "В очереди" : job.kind === "summary" ? "Генерация описания" : job.kind === "check" ? "Проверка оценки" : "Сканируется"}
       </span>
@@ -1604,9 +1504,9 @@ function JobRow({ job, onNavigate }: { job: import("../api/me").MyJob; onNavigat
 }
 
 /**
- * Ссылка внутри панели: навигация SPA (`linkProps`) И закрытие панели.
- * Круг 5: прежде `onClick={onNavigate}` перекрывал `onClick` из `linkProps`,
- * и переход по имени перезагружал страницу целиком.
+ * Ссылка внутри панели: SPA-навигация (`linkProps`) и закрытие панели. Просто
+ * передать `onClick={onNavigate}` нельзя — он перекроет `onClick` из `linkProps`,
+ * и переход перезагрузит страницу целиком.
  */
 function navProps(url: string, after: () => void): ReturnType<typeof linkProps> {
   const base = linkProps(url);
@@ -1619,7 +1519,6 @@ function navProps(url: string, after: () => void): ReturnType<typeof linkProps> 
   };
 }
 
-/** Пустое состояние панели (круг 5, 2c): иконка сверху, заголовок, описание — компактно по центру. */
 function JobsEmpty({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="rh-jobs__empty">
@@ -1630,18 +1529,17 @@ function JobsEmpty({ title, children }: { title: string; children: ReactNode }) 
   );
 }
 
-/** Итог задания в «Истории» иконкой (4c); словами — в подсказке и `aria-label`. */
+/** Итог задания в «Истории» иконкой; словами — в подсказке и `aria-label`. */
 const HISTORY_OUTCOME: Record<"done" | "failed" | "refused", { icon: IconData; cls: string; text: string }> = {
   done: { icon: CircleCheck, cls: "rh-state__icon_success", text: "Готово" },
   failed: { icon: CircleExclamation, cls: "rh-state__icon_danger", text: "Ошибка" },
-  // В4.8.5 (К8.5.6, С4-12): отказом считается только вердикт о правах (сбой SourceCraft запуск не отклоняет)
+  // отказ — только вердикт о правах; сбой SourceCraft запуск не отклоняет
   refused: { icon: CircleExclamation, cls: "rh-state__icon", text: "Не запущен: нет прав на анализ этого репозитория" },
 };
 
 /**
- * Строка «Истории» (4c): логотип, имя ссылкой на карточку, справа время
- * взятия в работу и итог иконкой. У ошибки причина — второй строкой: ее и
- * нужно прочесть, чтобы понять, что делать.
+ * Строка «Истории»: справа время взятия в работу и итог иконкой. У ошибки
+ * причина — второй строкой: ее и нужно прочесть, чтобы понять, что делать.
  */
 function HistoryRow({ job, time, onNavigate }: { job: import("../api/me").MyJob; time: string | null; onNavigate: () => void }) {
   const [org, repo, ...rest] = job.slug.split("/");
@@ -1664,7 +1562,6 @@ function HistoryRow({ job, time, onNavigate }: { job: import("../api/me").MyJob;
             описание AI
           </Text>
         )}
-        {/* В5.2 (Б3): проверка на накрутку — свой род заявки */}
         {job.kind === "check" && (
           <Text color="secondary" variant="caption-2">
             проверка оценки
@@ -1693,23 +1590,15 @@ interface FavoritesResponse {
 }
 
 /**
- * В4.7 (П3.2, П3.4): права зрителя — компонентами, а не глифами. В4.8: без
- * проверки строка молчит. В4.8.5 (К8.5.14): права проверяются сами — ручного пункта нет.
- * Круг 2 (2a): у приватного — серая метка видимости с замком.
- * Круг 3 (5a): три канала — ОДНОЙ плашкой с тремя иконками вместо трех
- * `Label`; расшифровка и дата проверки — в подсказке и `aria-label`.
+ * Видимость репозитория по последней проверке прав зрителя, дата проверки — в
+ * подсказке. Без проверки строка молчит: права проверяются сами, ручного пункта нет.
  */
 function AccessRights({ access, lastCheckedAt }: { access: import("../api/me").FavoriteEntry["access"]; lastCheckedAt: string | null }) {
   if (!access) return null;
   const checked = lastCheckedAt ? ` (проверено ${fmtDateTime(lastCheckedAt)})` : "";
-  // Круг 4 части 2 (слово владельца 23.09): плашка из 3 иконок доступа
-  // (Код, CI/CD, Безопасность) снята — в строке остается только видимость
   return (
     <Flex gap={1} alignItems="center" className="rh-repo-item__labels">
-      {/* круг 4 (замечание 3): серая «пилюля», а не `Label theme="normal"` —
-          в нашей палитре тот сопоставлен стальному misc и читался голубым */}
-      {/* В4.9 ч.2 (В2): видимость — общей плашкой с карточкой (А7), теперь и
-          у публичных; все 3 значения SourceCraft, «неизвестно» — без плашки */}
+      {/* та же плашка, что на карточке: все 3 значения SourceCraft, «неизвестно» — без плашки */}
       <VisibilityPill value={access.visibility} titleSuffix={checked} />
     </Flex>
   );

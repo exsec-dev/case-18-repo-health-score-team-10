@@ -1,13 +1,8 @@
-// rescore-m4.ts — пересчёт всей БД текущей моделью (В4.1/К1 → В4.3 —
-// 4.0.0-hci, оба показателя: HealthCraft Index и полный Repo Health
-// Score). КАЖДЫЙ скан → compute + recommend (одна выдача с метками
-// каналов). Одна строка scores на (scan_id, model_version). После
-// миграции схемы v1.9 (scores пересоздан под healthcraft_index) именно
-// этот прогон восстанавливает производные данные. Идемпотентно:
-// повторный прогон заменяет те же строки. Сети нет. В4.1-fix (Ф1.9):
-// тело — rescoreAll (src/score/rescore.ts): now = дата скана, running
-// пропускаются, пишется rating_eligible и meta.derived_version; тот же
-// пересчёт сервер делает сам при старте.
+// Пересчет всей БД текущей моделью (HealthCraft Index и полный Repo Health
+// Score): каждый скан → compute + recommend, одна строка scores на
+// (scan_id, model_version). Идемпотентно, сети нет. Тело — rescoreAll
+// (src/score/rescore.ts), тот же пересчет сервер делает сам при старте;
+// скрипт нужен для ручного прогона и печатает новый порядок рейтинга.
 // usage: bun scripts/rescore-m4.ts [--dry]
 import { loadConfig } from "../src/config";
 import { openDb } from "../src/db";
@@ -18,7 +13,7 @@ const dry = process.argv.includes("--dry");
 const config = loadConfig();
 const db = openDb(config);
 
-// последний ПРИГОДНЫЙ скан репо → строка «новый порядок рейтинга» (К-Ф1.1)
+// порядок рейтинга строится по последнему пригодному скану репо
 const latest = new Map<number, { slug: string; healthcraftIndex: number | null }>();
 const fmt = (x: number | null) => (x === null ? "NULL" : String(Math.round(x)));
 const result = rescoreAll(db, {

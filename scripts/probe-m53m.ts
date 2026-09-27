@@ -1,6 +1,5 @@
-// probe-m53m.ts — живой зонд перед выкатом модели 4.3.0-hci (В5.3-М, решение
-// владельца 24.09 «зонд API — да, 3-4 запроса»). Проверяет две формы запросов,
-// которые сборщик 3 шлет впервые и которые воркер не мог проверить без сети:
+// Живой зонд (3-4 запроса) двух форм запросов, которые сборщик фактов версии 3
+// шлет впервые и которые без сети не проверить:
 //   1) задачи с фильтром `status=in_progress` (enum спеки open | in_progress | closed);
 //   2) AppSec `/v1/defect-groups` с повтором ключа `status` (открытые статусы групп).
 // Только чтение, без записи в БД; токен из .env не печатается; ответы — сводно
@@ -48,7 +47,7 @@ const listOf = (json: unknown): unknown[] => {
   return k ? (o[k] as unknown[]) : [];
 };
 
-// 1. задачи in_progress — ровно путь сборщика 3 (`rest.ts` issues-in-progress)
+// 1. задачи in_progress — тот же запрос, что шлет `rest.ts` (issues-in-progress)
 const ip = await get("issues status=in_progress", `${API}/repos/${enc(issuesRepo)}/issues?filter=status%3Din_progress&sort_by=-created_at&page_size=5`);
 const ipItems = listOf(ip.json) as Record<string, unknown>[];
 console.log(`задач в ответе: ${ipItems.length}; статусы: ${JSON.stringify([...new Set(ipItems.map((i) => JSON.stringify(i["status"] ?? null)))])}`);

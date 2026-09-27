@@ -1,10 +1,10 @@
-// m42b-blocks.test.ts — блочные тесты В4.2b Б2 (Ф2.8): HKDF-ключи из
-// APP_SECRET (контексты "pat"/"session"), шифротекст PAT с префиксом `v2:`,
-// идемпотентная перешифровка в openDb на старом шифротексте, patReadable,
-// разлогин сменой HMAC-ключа, сегменты слага из одних точек → 400,
-// минутный лимит /api/me/repos, encodeURIComponent в исходящих путях
-// REST/AppSec клиентов. Сети нет: серверы — временный DATA_DIR, адреса
-// API на локальный мок; секреты ≥ 32 символов.
+// HKDF-ключи из APP_SECRET (контексты "pat"/"session"), шифротекст PAT с
+// префиксом `v2:`, идемпотентная перешифровка в openDb на старом
+// шифротексте, patReadable, разлогин сменой HMAC-ключа, сегменты слага из
+// одних точек → 400, минутный лимит /api/me/repos, encodeURIComponent в
+// исходящих путях REST/AppSec клиентов; маркеры карточки, статус job,
+// избранное. Сети нет: серверы — временный DATA_DIR, адреса API на
+// локальный мок; секреты ≥ 32 символов.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,11 +29,7 @@ import { readFileSync } from "node:fs";
 import { buildReportModel } from "../src/report/build";
 import { fixtureCard } from "./report-fixtures";
 
-/**
- * Круг 4 гейта: первый экран отчета несет плашку зоны. Проверка переведена с
- * поиска строки в исходнике на МОДЕЛЬ отчета — источник переименовался
- * (показателей в ряду стало два), а утверждение то же и проверяется по данным.
- */
+/** Первый экран отчета несет плашку зоны — проверяется по модели отчета, а не по строке в исходнике. */
 function reportHeroHasChip(): boolean {
   const { card, close } = fixtureCard("full");
   try {
@@ -63,7 +59,7 @@ function tempConfig(dataDirName: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Ключи Ф2.8: PAT на HKDF("…","pat"), префикс v2:, чтение старого формата.
+// Ключи: PAT на HKDF("…","pat"), префикс v2:, чтение старого формата.
 // ---------------------------------------------------------------------------
 
 describe("Ф2.8: ключи PAT (HKDF) и префикс v2:", () => {
@@ -277,8 +273,7 @@ describe("Ф2.8: encodeURIComponent в исходящих путях", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Блок Б3 (Ф2.9-остаток): маркер codeEmpty на карточке и в MD; текст
-// auth_error для /me.
+// Маркер codeEmpty на карточке и в MD; текст auth_error для /me.
 // ---------------------------------------------------------------------------
 
 describe("Б3 (Ф2.9): маркер codeEmpty виден на карточке и в MD", () => {
@@ -292,8 +287,8 @@ describe("Б3 (Ф2.9): маркер codeEmpty виден на карточке �
       const card = getRepoCard(t.db, "m42b", "empty", {});
       expect(card?.markers.codeEmpty).toBe(true);
       const md = renderRepoReport(card!);
-      // В4.9 (К9.1, texts-inventory §2.1 п. 12): строка вместо полосы вкладов — «проекта нет» словами читателя
-      // 4.3.0 (Н4, D4): причина по виду; у оценки без причины «Состояния кода» — общая фраза
+      // вместо полосы вкладов — строка «проекта нет» словами читателя; у оценки
+      // без причины «Состояния кода» — общая фраза
       expect(md).toContain("В репозитории нет кода. Поэтому оценка – 0. Это не ошибка сервиса: оценивать нечего.");
       expect(md).toContain("Это не ошибка сервиса: оценивать нечего.");
     } finally {
@@ -308,7 +303,7 @@ describe("Б3 (Ф2.9): маркер codeEmpty виден на карточке �
       const scanId = seedScan(t, repoId, { facts: cardFacts(), trigger: "periodic" });
       seedScore(t, repoId, scanId, { total: 60 });
       const md = renderRepoReport(getRepoCard(t.db, "m42b", "words", {})!);
-      // В4.9 (К9.4): статус и режим запуска — в паспорте анализа (приложение Г), словами
+      // статус и режим запуска — в паспорте анализа (приложение Г), словами
       expect(md).toContain("| Статус анализа | полный |");
       expect(md).toMatch(/\| Режим запуска \| (по расписанию|вручную|проба) \|/);
       expect(md).not.toContain("(stale)");
@@ -319,26 +314,24 @@ describe("Б3 (Ф2.9): маркер codeEmpty виден на карточке �
 });
 
 describe("Б3 (Ф2.9): текст auth_error для /me", () => {
-  // ПЕРЕВОРОТ (В4.8.5, К8.5.4, С1-6): коды наружу не идут — «(state)» и
-  // «Вход не удался: access_denied» были кодами в тексте; фразы остаются
-  // человеческими, текст провайдера (не код) — по-прежнему в «Вход не удался: …»
+  // коды ошибок наружу не идут — только человеческие фразы; текст провайдера
+  // (не код) показывается в «Вход не удался: …»
   test("известные коды — человеческие фразы без кодов, прочий текст провайдера — как был", () => {
     expect(authErrorText("state")).not.toContain("state");
     expect(authErrorText("state")).toContain("начните вход заново");
-    // Б5 В4.6 (У31): «ещё» → «еще» в текстах интерфейса
+    // в текстах интерфейса «е» вместо «ё»
     expect(authErrorText("no_code")).toContain("еще раз");
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): В-11 «Я ID»
     expect(authErrorText("access_denied")).toBe("Вход отменен на странице Я ID – чтобы войти, подтвердите доступ.");
-    // ПЕРЕВЕРНУТО С ЗАМЕНОЙ (Ступень 4 В4.9, §2 23.09): Ф17 — дословно показываются только известные сообщения
-    // сервера («Я ID», В-11); прочий текст из адреса — общей фразой, не печатается
+    // дословно показываются только известные сообщения сервера; прочий текст
+    // из адреса заменяется общей фразой и не печатается
     expect(authErrorText("Я ID не ответил – попробуйте войти еще раз")).toBe("Вход не удался: Я ID не ответил – попробуйте войти еще раз");
     expect(authErrorText("<b>x</b> позвоните по номеру")).toBe("Вход не удался – попробуйте войти еще раз.");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Блок Б4: Ф2.15 (статус живой job зрителя в карточке, без позиции) +
-// Ф2.17 (признак «работа запланирована» в кабинете) + queue.leaseMs в мете.
+// Статус живой job зрителя в карточке (без позиции в очереди), признак
+// «работа запланирована» в кабинете, queue.leaseMs в мете.
 // ---------------------------------------------------------------------------
 
 describe("Б4 (Ф2.15): карточка несёт только статус живой job зрителя", () => {
@@ -352,8 +345,8 @@ describe("Б4 (Ф2.15): карточка несёт только статус ж
       const uid = (t.db.query("SELECT id FROM users WHERE ya_id = 'ya-jobby'").get() as { id: number }).id;
       enqueueScan(t.db, repoId, { userId: uid, triggerKind: "user" });
       const withViewer = getRepoCard(t.db, "m42b", "jobby", { viewerUserId: uid });
-      // ПЕРЕВОРОТ (В4.8.5, К8.5.2b): карточка несёт серверный признак «затянулось» — `stalled`;
-      // инвариант Ф2.15 (ни позиции в очереди, ни id) прежний
+      // карточка несет серверный признак «затянулось» (`stalled`), но ни
+      // позиции в очереди, ни id
       expect(withViewer?.job).toEqual({ status: "queued", stalled: false });
       expect(Object.keys(withViewer?.job ?? {})).toEqual(["status", "stalled"]);
       const anon = getRepoCard(t.db, "m42b", "jobby", {});
@@ -372,7 +365,7 @@ describe("Б4 (Ф2.15): карточка несёт только статус ж
       const jobId = enqueueScan(t.db, repoId, { userId: uid, triggerKind: "user" });
       t.db.query("UPDATE jobs SET status = 'running', claimed_at = ? WHERE id = ?").run("2026-09-19T00:00:00Z", jobId);
       const card = getRepoCard(t.db, "m42b", "first-run", { viewerUserId: uid });
-      expect({ job: card?.job, score: card?.score, scan: card?.scan }).toEqual({ job: { status: "running", stalled: true }, score: null, scan: null }); // ПЕРЕВОРОТ (К8.5.2b): running без лиза не держит ни один живой воркер — «затянулось»
+      expect({ job: card?.job, score: card?.score, scan: card?.scan }).toEqual({ job: { status: "running", stalled: true }, score: null, scan: null }); // running без лиза не держит ни один живой воркер — «затянулось»
     } finally {
       t.close();
     }
@@ -446,9 +439,9 @@ describe("Б4 (Ф2.9): /api/meta дополняется queue.leaseMs", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Блок Б5: Ф2.20 (ручной ввод org/repo|URL, favorites-only список, посев
-// избранного при сохранении PAT) и Ф2.21 (предел избранного, идемпотентный
-// повтор).
+// Избранное: ручной ввод org/repo или URL, список только из избранного,
+// посев избранного при сохранении PAT, предел избранного, идемпотентный
+// повтор.
 // ---------------------------------------------------------------------------
 
 describe("Б5 (Ф2.20): parseFavoriteInput", () => {
@@ -588,7 +581,7 @@ describe("Б5 (Ф2.21): HTTP-предел избранного и повтор (
   });
 });
 
-// ---------- В4.6 круг 2, хвост приёмки: счётчик рекомендаций не дублируется ----------
+// ---------- Счетчик рекомендаций не дублируется ----------
 
 describe("В4.6 (приёмка круга 2): строка итога и счётчик", () => {
   const src = (name: string): string => readFileSync(join(import.meta.dir, "..", "src", "web", name), "utf8");
@@ -624,9 +617,8 @@ describe("В4.6 (приёмка круга 2): строка итога и счё
     expect({
       asksWithoutCount: /summaryLine\(\{[\s\S]{0,600}?\}, \{ withCount: false \}\)/.test(card),
       linkStillThere: card.includes("Рекомендаций: {card.recommendations.length}"),
-      // Гейт 22.09 (В3): предложения-вывода в отчете нет — вывод несут крупное
-      // число, плашка зоны и колонка «почему» у категорий. Шаблон `verdictText`
-      // вместе с ним удален, поэтому проверяется его отсутствие.
+      // предложения-вывода в отчете нет — вывод несут крупное число, плашка
+      // зоны и колонка «почему» у категорий; шаблона `verdictText` быть не должно
       reportUsesVerdict: report.includes("verdictText("),
       reportHasChip: reportHeroHasChip(),
     }).toEqual({ asksWithoutCount: false, linkStillThere: false, reportUsesVerdict: false, reportHasChip: true });

@@ -1,7 +1,6 @@
-// v485-sourcecraft.test.ts — В4.8.5, блок Б1: бережный доступ к SourceCraft
-// (К8.5.5a), метки фаз, переживающие рестарт (К8.5.5b), честный health
-// планировщика (К8.5.5c). Поведенческие тесты: локальный мок вместо
-// SourceCraft, временные БД, фейковые часы через шов `sleep`.
+// Бережный доступ к SourceCraft, метки фаз, переживающие рестарт, честный
+// health планировщика. Локальный мок вместо SourceCraft, временные БД,
+// фейковые часы через шов `sleep`.
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";

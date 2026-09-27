@@ -1,6 +1,5 @@
-// В5.3, модель 4.2.0-hci (аудит методики 24.09 — reports/2026-09-24-m53-method-audit.md):
-// поведенческие тесты на каждый контрпример аудита. Правило AGENTS.md 21.09:
-// число, названное оценкой, закрывается тестом на данных, а не source-assert.
+// Поведенческие тесты модели оценки на контрпримерах аудита методики: число,
+// названное оценкой, проверяется на данных, а не по исходнику.
 import { describe, expect, test } from "bun:test";
 import { computeFromFacts, type Scores } from "../src/score/compute";
 import { isRobotAuthor } from "../src/score/robot2";
@@ -51,7 +50,7 @@ describe("М1.2: категория получает число только п�
   test("Активность без истории коммитов — нет данных, а не 100 по одним MR и релизам", () => {
     const s = score(facts(noGit()));
     expect(s.categories.activity.score).toBeNull();
-    // 4.3.0 (Н4, D6): причина — из git-факта: не прочитан (а не «истории нет»)
+    // причина – из git-факта: не прочитан (а не «истории нет»)
     expect(noDataReason("activity", s.categories.activity.no_data)).toContain("Репозиторий не удалось прочитать");
   });
 
@@ -61,9 +60,9 @@ describe("М1.2: категория получает число только п�
 
   test("Состояние кода без строк кода — «кода нет» (балл 0), а не 100 за порядок в корне", () => {
     const s = score(facts({ "tree.stats": { top_level: [{ name: "README.md", type: "blob" }], file_count: 1, bytes: 10, loc: 0 }, "code.todo": { count: 0, fixme: 0, older_180d: 0, todo_files: 0, blamed_files: 0 } }));
-    // 4.3.1 (В5.5, М2): явная ветка «кода нет» — 0 с причиной; 4.3.0 давала null
+    // явная ветка «кода нет» – 0 с причиной, а не null
     expect(s.categories.code.score).toBe(0);
-    // 4.3.0 (Н3, Н4): в корне один README — «кода нет», причина по виду
+    // в корне один README – «кода нет», причина по виду
     expect(noDataReason("code", s.categories.code.no_data)).toContain("нет файлов кода");
   });
 
@@ -140,7 +139,7 @@ describe("анти-накрутка", () => {
   });
 
   test("М1.9 → Р2: от 10 закрытых задач сжатия нет", () => {
-    // 4.3.0 (Р2): размер выборки — закрытые задачи, открытые в него не входят
+    // размер выборки – закрытые задачи, открытые в него не входят
     const stats = { open: 2, closed: 10, median_close_days: 5, stale_90d: 0, fetched_count: 12 };
     const s = score(facts({ "issues.stats": stats }));
     expect(s.categories.issues.score!).toBeGreaterThan(80);

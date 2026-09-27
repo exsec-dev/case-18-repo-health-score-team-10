@@ -1,8 +1,8 @@
 import { fmtDateUtc, fraudFactorFact } from "../src/web/format";
-// summary-b8.test.ts — фрод-флаггер (Б8 В5, К5.10): структурный флаг + факторы
-// на показ (карточка, кабинет, MD-раздел «Подозрение на искусственную
-// активность»); БЕЗ скидки Score и бампа MODEL_VERSION — прямые тесты.
-// Нет LLM-вывода — нет флага; нет фактов активности — роль не запускается.
+// Фрод-флаггер: структурный флаг + факторы на показ (карточка, кабинет, MD-раздел
+// «Подозрение на искусственную активность»); БЕЗ скидки Score и бампа MODEL_VERSION
+// — прямые тесты. Нет LLM-вывода — нет флага; нет фактов активности — роль не
+// запускается.
 import { afterAll, describe, expect, test } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -59,7 +59,7 @@ const VALID_TEXTS: Record<string, string> = {
   overview: "Проект имеет README и CI {f:docs.presence} {f:cicd.configs}; специалист по коду отметил задачи по долгу {sp:code:1}.",
 };
 
-// В5.2 (Б1): фактор — признаки ритма, которые считает код (`activity.rhythm`)
+// фактор — признаки ритма, которые считает код (`activity.rhythm`)
 const FLAG_TRUE = '{"flag":true,"factors":[{"key":"activity.rhythm","note":"ровные интервалы между коммитами"}]}';
 
 describe("проверка на накрутку (runFraudCheck): структурный флаг, tri-state, fail-soft", () => {
@@ -99,8 +99,8 @@ describe("К5.10: флаг без скидки — Score и версия мод�
   });
 });
 
-// В5.2 (Б2, §2 «В5.2 — публичный AI-обзор…» п.2; пересматривает К-3 (а)): вход проверки —
-// публичные данные активности, метку фрода видят все, кому видна карточка
+// Вход проверки — публичные данные активности, метку фрода видят все, кому видна
+// карточка
 describe("Показ флага: карточка (всем зрителям) и MD-раздел", () => {
   test("карточка: полный Score и аноним видят один и тот же флаг", async () => {
     const { db } = freshDb("rh-v5b8-card-");
@@ -120,9 +120,9 @@ describe("Показ флага: карточка (всем зрителям) и
     const withFlag = getRepoCard(db, "v5", "md", { access: OPEN })!;
     const md = renderRepoReport(withFlag);
     expect(md).toContain("Подозрение на искусственную активность");
-    // В5.3 круг 3 (способ 2): фактор — названием факта и текстом, который код
+    // фактор — названием факта и текстом, который код
     // строит из этого факта (равно источнику); сырой ключ — только в приложении
-    // В5.2 (Б1): признаки ритма — из заметки проверки (у 2 обычных коммитов
+    // признаки ритма — из заметки проверки (у 2 обычных коммитов
     // заметного нет — печатается формулировка модели)
     const signals = withFlag.ai?.fraud?.signals;
     expect(signals).toMatchObject({ commits: 2 });
@@ -148,7 +148,8 @@ describe("Показ флага: карточка (всем зрителям) и
     ).run(JSON.stringify({ ci: true, appsec: true }));
     const { entries } = await listMyRepos(db, 7);
     expect(entries[0]?.fraudFlag).toMatchObject({ flag: true });
-    // без сохранённой проверки каналов полный Score закрыт, но метка фрода — публичная (В5.2)
+    // без сохранённой проверки каналов полный Score закрыт, но метка фрода —
+    // публичная
     db.query(
       "INSERT INTO favorites (user_id, org_slug, repo_slug, added_at, last_access) VALUES (8, 'v5', 'me', '2026-09-01T00:00:00Z', NULL)",
     ).run();

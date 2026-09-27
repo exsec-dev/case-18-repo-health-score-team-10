@@ -1,57 +1,35 @@
 /* theme.css — палитра SourceCraft поверх стоковой темы Gravity.
  *
- * Зачем: sourcecraft.dev кладёт поверх Gravity свою полную семантическую
- * палитру: нейтральный серый фон, монохромный бренд (белая action-кнопка
- * в тёмной теме, чёрная в светлой), синие ссылки, свои info/positive/
- * warning/danger. Стоковый Gravity — тёплый серый, жёлто-оранжевый бренд
- * и ссылки: рядом с платформой это читается как другой продукт.
- * Решение 17.09 (Екатерина): интерфейс практически идентичен SourceCraft,
- * поэтому переопределяются ВСЕ семантические --g-color-* обеих тем
- * (было 16.09: только фон #2d2c33 — платформа с тех пор перешла на #343434).
+ * sourcecraft.dev переопределяет всю семантическую палитру Gravity: нейтральный
+ * серый фон, монохромный бренд (белая action-кнопка в темной теме, черная в
+ * светлой), синие ссылки, свои info/positive/warning/danger. Стоковый Gravity
+ * (теплый серый, желто-оранжевый бренд) рядом с платформой выглядит другим
+ * продуктом, поэтому здесь переопределены все семантические --g-color-* обеих
+ * тем. Значения сняты с computed style .g-root на sourcecraft.dev.
+ * Не переносим: --g-color-private-*, --g-color-brand-sourcecraft-red, логотип
+ * SourceCraft и бейджи лиг.
  *
- * Границы: только семантические токены. --g-color-private-*,
- * --g-color-brand-sourcecraft-red, логотип SourceCraft и бейджи лиг
- * (лавры) не переносим — правило docs/ui/gravity-uikit.md.
+ * Специфичность должна быть выше стоковой (.g-root.g-root_theme_*, 0-2-0): в dev
+ * Bun отдает стили россыпью, и этот файл может загрузиться раньше темы uikit.
  *
- * Значения сняты с живого sourcecraft.dev 17.09.2026 (computed style
- * .g-root в темах dark и light, отсортированы). Сверка при сомнении —
- * тем же способом, отчёт reports/2026-09-17-ui-redesign-proposal.md.
- *
- * Специфичность обязана быть выше стоковой (.g-root.g-root_theme_*,
- * 0-2-0): в dev Bun отдаёт стили россыпью, и этот файл может загрузиться
- * раньше темы uikit (ERROR_LOG 16.09).
- *
- * ПАЛИТРОВЫЙ ПАС В4.6 (решение 20.09, Екатерина — «в обеих темах цвета
- * ярче»; расчёты — reports/2026-09-20-ui-card-layout-and-palette-round.md
- * часть 3). Изменённые строки помечены комментарием «В4.6». Два корня:
- *   1. `Progress` заливает полосу токеном `--g-color-base-<тон>-medium`, а в
- *      снятой с платформы палитре это ПОЛУПРОЗРАЧНЫЕ значения: зелёный
- *      смешивался с дорожкой в #527F50 (1,95:1 — «сливается с серым»),
- *      красный в #984947 (1,46:1). Заливки переведены в непрозрачные, порог
- *      WCAG 1.4.11 для нетекстовой графики — 3:1. В пине 7.49.0 эти токены
- *      использует ТОЛЬКО Progress.css (и FilePreview.css, у нас не
- *      применяется) — правка хирургическая, проверено грепом по CSS пакета.
- *   2. Цветной текст не проходил AA 4,5:1 — 10 токенов хотя бы в одной теме
- *      (text-danger 3,24:1 в тёмной, text-positive 2,57:1 и text-warning
- *      2,39:1 в светлой, text-link 3,99–4,09:1 в обеих). Без этого паса
- *      кодирование категорий цветом (У20) дало бы нечитаемое число.
- * Границы паса: альфа чипов `Label` (`base-*-light`) НЕ поднимается — это
- * отнимает 0,6 у контраста их собственного текста, яркость чипа берётся из
- * `-heavy`-токенов; `line-generic` не трогается (декоративная графика, порог
- * 3:1 не применяется, а поднятие делает таблицу полосатой); ховер строк и
- * активный пункт rail — платформенный вид, данность каркаса В4.5.
- * Ожидаемая таблица контрастов зафиксирована тестом tests/theme.test.ts:
- * светлая тема проверяется арифметикой, а не рендером — снимков светлой
- * темы владелец сознательно не заказывал (решение 20.09).
+ * Отступления от платформы (помечены комментариями у токенов):
+ *   1. Progress заливает полосу токеном --g-color-base-<тон>-medium, а у платформы
+ *      это полупрозрачные значения: на дорожке зеленый давал 1,95:1, красный
+ *      1,46:1. Заливки сделаны непрозрачными, не ниже 3:1 (WCAG 1.4.11 для
+ *      нетекстовой графики). В uikit 7.49.0 эти токены использует только Progress
+ *      (и FilePreview, которого у нас нет), так что больше ничего не задето.
+ *   2. Цветной текст поднят до AA 4,5:1 — иначе число, закодированное цветом,
+ *      не читается.
+ * Альфа чипов Label (base-*-light) не поднимается: это снизило бы контраст их
+ * текста, яркость чипа дают -heavy-токены. line-generic не трогаем: линия
+ * декоративная, порог 3:1 к ней не применяется, а ярче — таблица становится
+ * полосатой. Контрасты проверяет tests/theme.test.ts арифметикой (светлая тема
+ * скриншотами не снимается).
  */
 
 .g-root.g-root_theme_dark {
-  /* Круг 5 части 2 В4.9 (§2 23.09): палитра С1 — тона Р1 приглушены.
-   * Круг 4 (§2 23.09 «выбор круга 4»): палитра Р1, Безопасность —
-   * неоновый желто-зеленый по слову владельца. Прежде — П2 круга 2 (Е2): цвета категорий в
-   * полосах вклада карточки и панели рейтинга. Не зеленый, желтый и красный —
-   * это цвета оценки. Тона одинаковы в обеих темах (проверены на белом и
-   * #2d2d2d при выборе). */
+  /* Цвета категорий в полосах вклада (карточка, панель рейтинга). Не зеленый,
+   * желтый и красный — это цвета оценки. Тона одинаковы в обеих темах. */
   --rh-cat-documentation: #5b8def;
   --rh-cat-cicd: #d7729f;
   --rh-cat-security: #c3d65a;
@@ -68,7 +46,7 @@
   --g-color-base-danger-heavy-hover: #ef7f7d;
   --g-color-base-danger-light: rgba(232, 73, 69, .2);
   --g-color-base-danger-light-hover: rgba(232, 73, 69, .3);
-  --g-color-base-danger-medium: #ef7f7d; /* В4.6: заливка Progress — было rgba(232,73,69,.5) → #984947, 1,46:1 к дорожке; стало 3,47:1 (значение = base-danger-heavy-hover) */
+  --g-color-base-danger-medium: #ef7f7d; /* заливка Progress: 3,47:1 к дорожке */
   --g-color-base-danger-medium-hover: rgba(232, 73, 69, .7);
   --g-color-base-float: #494949;
   --g-color-base-float-accent: #4d4c52;
@@ -99,7 +77,7 @@
   --g-color-base-misc-heavy-hover: #90a6ba;
   --g-color-base-misc-light: rgba(96, 128, 156, .2);
   --g-color-base-misc-light-hover: rgba(96, 128, 156, .3);
-  --g-color-base-misc-medium: #8099b0; /* В4.6: полоса покрытия — было #546472, 1,50:1; стало 3,08:1. Остаётся стальной, не зелёной (охранный пункт 6) */
+  --g-color-base-misc-medium: #8099b0; /* полоса покрытия: 3,08:1; стальная, а не зеленая, чтобы не читаться оценкой */
   --g-color-base-misc-medium-hover: rgba(96, 128, 156, .7);
   --g-color-base-modal: #343434;
   --g-color-base-neutral-heavy: rgba(255, 255, 255, .55);
@@ -112,7 +90,7 @@
   --g-color-base-positive-heavy-hover: #8ccb89;
   --g-color-base-positive-light: rgba(91, 181, 87, .2);
   --g-color-base-positive-light-hover: rgba(91, 181, 87, .3);
-  --g-color-base-positive-medium: #74c770; /* В4.6: было #527F50, 1,95:1; стало 4,40:1. Развилка решена владельцем в пользу более яркого #74c770 (платформенный #6bbc68 дал бы 3,91:1) */
+  --g-color-base-positive-medium: #74c770; /* 4,40:1 к дорожке; ярче платформенного #6bbc68 */
   --g-color-base-positive-medium-hover: rgba(91, 181, 87, .7);
   --g-color-base-selection: rgba(255, 255, 255, .15);
   --g-color-base-selection-hover: rgba(255, 255, 255, .2);
@@ -128,13 +106,13 @@
   --g-color-base-warning-heavy-hover: #ffdb4c;
   --g-color-base-warning-light: rgba(255, 203, 0, .2);
   --g-color-base-warning-light-hover: rgba(255, 203, 0, .3);
-  --g-color-base-warning-medium: #ffd01a; /* В4.6: было оливковое #A48A24, 2,69:1; стало 6,19:1 (значение = base-warning-heavy) */
+  --g-color-base-warning-medium: #ffd01a; /* 6,19:1 к дорожке (у платформы оливковый, 2,69:1) */
   --g-color-base-warning-medium-hover: rgba(255, 203, 0, .7);
   --g-color-infographics-axis: #4d4c52;
   --g-color-infographics-tooltip-bg: rgba(76, 75, 81, .95);
   --g-color-line-brand: #fff;
   --g-color-line-danger: rgba(232, 73, 69, .8);
-  --g-color-line-focus: #8099b0; /* В4.6: фокус-ринг был #577187, 2,44:1 — ниже порога 3:1 для нетекстовой графики; стало 4,21:1 */
+  --g-color-line-focus: #8099b0; /* фокус-ринг: 4,21:1 (платформенный ниже порога 3:1) */
   --g-color-line-generic: rgba(255, 255, 255, .15);
   --g-color-line-generic-accent: rgba(255, 255, 255, .15);
   --g-color-line-generic-accent-hover: rgba(255, 255, 255, .3);
@@ -160,8 +138,8 @@
   --g-color-text-brand-contrast: rgba(0, 0, 0, .9);
   --g-color-text-brand-heavy: #fff;
   --g-color-text-complementary: rgba(255, 255, 255, .7);
-  --g-color-text-danger: #f08a88; /* В4.6: было 3,24:1 — AA не проходил; стало 5,16:1 */
-  --g-color-text-danger-heavy: #f59b99; /* В4.6: было 3,64:1 (на чипе 3,01:1); стало 5,95:1 (на чипе 4,92:1) */
+  --g-color-text-danger: #f08a88; /* AA: 5,16:1 */
+  --g-color-text-danger-heavy: #f59b99; /* 5,95:1, на чипе 4,92:1 */
   --g-color-text-dark-complementary: rgba(0, 0, 0, .7);
   --g-color-text-dark-hint: rgba(0, 0, 0, .3);
   --g-color-text-dark-primary: rgba(0, 0, 0, .9);
@@ -177,20 +155,20 @@
   --g-color-text-light-hint: rgba(255, 255, 255, .3);
   --g-color-text-light-primary: rgba(255, 255, 255, .85);
   --g-color-text-light-secondary: rgba(255, 255, 255, .5);
-  --g-color-text-link: #86a8ff; /* В4.6: было 4,09:1; стало 5,37:1 (значение = base-info-heavy-hover) */
+  --g-color-text-link: #86a8ff; /* AA: 5,37:1 */
   --g-color-text-link-hover: #97b4ff;
   --g-color-text-link-visited: #bc97e0;
   --g-color-text-link-visited-hover: #ddcbf0;
-  --g-color-text-misc: #8099b0; /* В4.6: было 3,59:1; стало 4,21:1 — порог 3:1 для иконок и меток берёт, AA нет. ПРАВИЛО: прозу токеном misc не набирать (сознательная развилка раунда) */
-  --g-color-text-misc-heavy: #9ab0c2; /* В4.6: было 4,21:1 (на чипе 3,38:1); стало 5,55:1 (на чипе 4,46:1) — это текст чипа Label theme="normal" */
-  --g-color-text-positive: #74c770; /* В4.6: было 4,86:1; стало 6,01:1 — один тон с заливкой полосы */
-  --g-color-text-positive-heavy: #8ccb89; /* В4.6: было 5,35:1, но на чипе 3,86:1; стало 6,53:1 и 4,71:1 на чипе */
+  --g-color-text-misc: #8099b0; /* 4,21:1 — хватает для иконок и меток (3:1), но не для AA: прозу этим токеном не набирать */
+  --g-color-text-misc-heavy: #9ab0c2; /* текст чипа Label theme="normal": 5,55:1 на фоне, 4,46:1 на чипе */
+  --g-color-text-positive: #74c770; /* 6,01:1; один тон с заливкой полосы */
+  --g-color-text-positive-heavy: #8ccb89; /* 6,53:1, на чипе 4,71:1 */
   --g-color-text-primary: rgba(255, 255, 255, .85);
-  --g-color-text-secondary: rgba(255, 255, 255, .58); /* В4.6: было #9a9a9a, 4,40:1 — ниже AA (корень ДП5); стало #aaaaaa, 5,34:1 */
+  --g-color-text-secondary: rgba(255, 255, 255, .58); /* AA: 5,34:1 (платформенный #9a9a9a не проходил) */
   --g-color-text-utility: #9a63d1;
   --g-color-text-utility-heavy: #a575d6;
   --g-color-text-warning: #ffcb00;
-  --g-color-text-warning-heavy: #ecd89a; /* В4.6 доводка: было #ffd01a (S=90%) — единственный неоновый тон в ряду чипов, где danger #f59b99 (S=38%) и positive #8ccb89 (S=33%) уже пастельные. S=35% встаёт между ними; контраст не упал, а вырос: 8,47→8,81 на фоне и 5,28→5,49 на чипе */
+  --g-color-text-warning-heavy: #ecd89a; /* пастельный (S=35%), как соседние danger и positive: неоновый желтый выбивался из ряда чипов. 8,81:1, на чипе 5,49:1 */
 
   /* навигация (@gravity-ui/navigation): rail светлее контента, как у платформы */
   --gn-aside-header-collapsed-background-color: #3e3e3e;
@@ -199,11 +177,7 @@
 }
 
 .g-root.g-root_theme_light {
-  /* Круг 4 части 2 В4.9 (§2 23.09 «выбор круга 4»): палитра Р1, Безопасность —
-   * неоновый желто-зеленый по слову владельца. Прежде — П2 круга 2 (Е2): цвета категорий в
-   * полосах вклада карточки и панели рейтинга. Не зеленый, желтый и красный —
-   * это цвета оценки. Тона одинаковы в обеих темах (проверены на белом и
-   * #2d2d2d при выборе). */
+  /* Цвета категорий — те же, что в темной теме. */
   --rh-cat-documentation: #5b8def;
   --rh-cat-cicd: #d7729f;
   --rh-cat-security: #c3d65a;
@@ -220,7 +194,7 @@
   --g-color-base-danger-heavy-hover: #c0100f;
   --g-color-base-danger-light: rgba(255, 4, 0, .15);
   --g-color-base-danger-light-hover: rgba(255, 4, 0, .3);
-  --g-color-base-danger-medium: #ea0805; /* В4.6: заливка Progress — было #F6ABAA, 1,66:1 к дорожке #f2f2f2; стало 4,15:1 */
+  --g-color-base-danger-medium: #ea0805; /* заливка Progress: 4,15:1 к дорожке #f2f2f2 */
   --g-color-base-danger-medium-hover: rgba(255, 4, 0, .5);
   --g-color-base-float: #fff;
   --g-color-base-float-accent: #fff;
@@ -251,7 +225,7 @@
   --g-color-base-misc-heavy-hover: #586a7a;
   --g-color-base-misc-light: rgba(107, 132, 153, .15);
   --g-color-base-misc-light-hover: rgba(107, 132, 153, .3);
-  --g-color-base-misc-medium: #657b8f; /* В4.6: было #CAD1D7, 1,38:1; стало 3,93:1 */
+  --g-color-base-misc-medium: #657b8f; /* полоса покрытия: 3,93:1 */
   --g-color-base-misc-medium-hover: rgba(107, 132, 153, .5);
   --g-color-base-modal: #fff;
   --g-color-base-neutral-heavy: rgba(0, 0, 0, .45);
@@ -264,7 +238,7 @@
   --g-color-base-positive-heavy-hover: #379a34;
   --g-color-base-positive-light: rgba(59, 201, 53, .15);
   --g-color-base-positive-light-hover: rgba(59, 201, 53, .3);
-  --g-color-base-positive-medium: #2f9f2b; /* В4.6: было #BBE6B9, 1,24:1; стало 3,07:1. В светлой теме «ярче» = насыщеннее и темнее: контраст считается против белого */
+  --g-color-base-positive-medium: #2f9f2b; /* 3,07:1; в светлой теме «ярче» значит насыщеннее и темнее — контраст против белого */
   --g-color-base-positive-medium-hover: rgba(59, 201, 53, .5);
   --g-color-base-selection: rgba(0, 0, 0, .1);
   --g-color-base-selection-hover: rgba(0, 0, 0, .15);
@@ -280,13 +254,13 @@
   --g-color-base-warning-heavy-hover: #d5b848;
   --g-color-base-warning-light: rgba(255, 219, 77, .3);
   --g-color-base-warning-light-hover: rgba(255, 219, 77, .5);
-  --g-color-base-warning-medium: #a07c00; /* В4.6: было #FBE27F, 1,15:1. СОЗНАТЕЛЬНАЯ РАЗВИЛКА (решение владельца 20.09): жёлтый против белого 3:1 не берёт ни на одном оттенке (#eac94a 1,45:1, #e0a900 1,91:1, #c0a645 2,14:1), поэтому полоса уходит в янтарь — 3,50:1. В тёмной теме жёлтый остаётся жёлтым, 6,19:1 */
+  --g-color-base-warning-medium: #a07c00; /* янтарь, 3,50:1: желтый против белого 3:1 не набирает ни на одном оттенке (#e0a900 — 1,91:1) */
   --g-color-base-warning-medium-hover: rgba(255, 219, 77, .9);
   --g-color-infographics-axis: #d9d9d9;
   --g-color-infographics-tooltip-bg: rgba(255, 255, 255, .95);
   --g-color-line-brand: #030303;
   --g-color-line-danger: rgba(255, 4, 0, .8);
-  --g-color-line-focus: #4e79eb; /* В4.6: фокус-ринг был #899dad, 2,82:1; стало 3,99:1 */
+  --g-color-line-focus: #4e79eb; /* фокус-ринг: 3,99:1 */
   --g-color-line-generic: rgba(0, 0, 0, .1);
   --g-color-line-generic-accent: rgba(0, 0, 0, .15);
   --g-color-line-generic-accent-hover: rgba(0, 0, 0, .3);
@@ -329,34 +303,32 @@
   --g-color-text-light-hint: rgba(255, 255, 255, .5);
   --g-color-text-light-primary: #fff;
   --g-color-text-light-secondary: rgba(255, 255, 255, .7);
-  --g-color-text-link: #4768c2; /* В4.6: было 3,99:1; стало 5,21:1 (значение = base-info-heavy-hover светлой темы) */
+  --g-color-text-link: #4768c2; /* AA: 5,21:1 */
   --g-color-text-link-hover: #3f5799;
   --g-color-text-link-visited: #8f52cc;
   --g-color-text-link-visited-hover: #5e3f80;
-  --g-color-text-misc: #586a7a; /* В4.6: было 4,39:1; стало 5,59:1 */
-  --g-color-text-misc-heavy: #4b5a68; /* В4.6: было 5,59:1 (на чипе 4,73:1); стало 7,09:1 (на чипе 6,00:1) */
-  --g-color-text-positive: #2e7d2b; /* В4.6: было 2,57:1 — худший текстовый токен палитры; стало 5,14:1 */
-  --g-color-text-positive-heavy: #2a7227; /* В4.6: было 3,60:1 (на чипе 3,19:1); стало 5,94:1 (на чипе 5,26:1) */
+  --g-color-text-misc: #586a7a; /* AA: 5,59:1 */
+  --g-color-text-misc-heavy: #4b5a68; /* 7,09:1, на чипе 6,00:1 */
+  --g-color-text-positive: #2e7d2b; /* AA: 5,14:1 (платформенный давал 2,57:1) */
+  --g-color-text-positive-heavy: #2a7227; /* 5,94:1, на чипе 5,26:1 */
   --g-color-text-primary: rgba(0, 0, 0, .85);
-  --g-color-text-secondary: rgba(0, 0, 0, .58); /* В4.6: было #808080, 3,98:1 — ниже AA (корень ДП5); стало #6b6b6b, 5,32:1 */
+  --g-color-text-secondary: rgba(0, 0, 0, .58); /* AA: 5,32:1 (платформенный #808080 не проходил) */
   --g-color-text-utility: #854ebd;
   --g-color-text-utility-heavy: #72479e;
-  --g-color-text-warning: #8a6c00; /* В4.6: было 2,39:1; стало 4,97:1 */
-  --g-color-text-warning-heavy: #7d6200; /* В4.6: было 4,27:1 (на чипе 3,87:1); стало 5,80:1 (на чипе 5,27:1) */
+  --g-color-text-warning: #8a6c00; /* AA: 4,97:1 */
+  --g-color-text-warning-heavy: #7d6200; /* 5,80:1, на чипе 5,27:1 */
 
   --gn-aside-header-collapsed-background-color: #f2f2f2;
   --gn-aside-header-expanded-background-color: #f2f2f2;
   --gn-aside-header-item-current-background-color: rgba(0, 0, 0, .1);
 }
 
-/* В5.3, круг 3 (§2 24.09, Екатерина): цвета AI — фирменный градиент Алисы,
-   сняты с alice.yandex.ru 24.09 (--depot-color-bro-operator-bg-gradient
-   #6b89e9 → #a88cff; акцент --depot-color-text-brand #7a55ff). Исключение из
-   «только токены» названо в docs/ui/gravity-uikit.md п.3а; прежний красный
-   бейдж модели (.rh-ai-badge, #fc3f1d) снят — метка модели теперь Label utility. */
+/* Цвета AI — фирменный градиент Алисы (alice.yandex.ru: #6b89e9 → #a88cff,
+   акцент #7a55ff). Сознательное исключение из правила «только семантические
+   токены». */
 .g-root {
   --rh-ai-from: #6b89e9;
-  --rh-ai-to: #aa86fb; /* замечания 25.09: фиолетовый к розовому — умеренно */
+  --rh-ai-to: #aa86fb; /* чуть сдвинут к розовому */
   --rh-ai-pink: #d07fe3;
   --rh-ai-accent: #7a55ff;
 }
@@ -365,23 +337,12 @@
   --rh-ai-accent: #a88cff;
 }
 
-/* В5.9 (§2 «В5.9 — выбор вариантов», п.4-5, Екатерина 27.09): лиги места — «металл».
-   Круг 2 (27.09, Екатерина — «мягкий металл, но добавь немного градиента из более яркого в
-   более светлый»). Круг 3 (27.09, Екатерина — «фон плашки посветлее, ближе к тому, что было
-   изначально, но не так ярко»): непрозрачный металл средней насыщенности в ОБЕИХ темах (в
-   темной полупрозрачный читался темным), градиент от яркого к светлому, тонкая рамка,
-   корона и текст — темный оттенок металла. Круг 4: текст того же цвета, что иконка (один
-   токен `--rh-league-<лига>-ink`), рамка цветом металла. Круг 5 (пример владельца, лиги
-   пользователей) — горизонтальный градиент металл → фон; круг 6 (27.09, Екатерина — «верни
-   границы как было, фон — среднее между моим скрином и как было у тебя, цвет текста верни»):
-   рамка и текст круга 4, фон — горизонтальный градиент от металла чуть насыщеннее круга 4
-   к почти непрозрачному светлому краю (85%), в обеих темах одинаково. Левый край = фон
-   сегмента SVG-бейджа (`api/public.ts` RANK_BADGE_COLORS). Круг 7 (27.09, Екатерина — «фон
-   (только фон) чуть-чуть потемнее»; на вопрос о контрасте — «только фон, контраст ниже 4,5»):
-   фон темнее, рамка и текст прежние. Закрытие вехи (27.09, Екатерина — «цвет текста и иконки
-   чуть поконтрастнее»): текст и кубок на тон темнее — контраст снова ≥ 4,5:1 (золото 5,1,
-   серебро 5,4, бронза 4,9 на левом крае). Исключение из «только токены» того же рода, что
-   цвета AI. */
+/* Лиги места — «металл». Фон — горизонтальный градиент от металла к почти
+   непрозрачному светлому краю (85%), одинаковый в обеих темах: полупрозрачный
+   в темной теме читался темным. Левый край = фон сегмента SVG-бейджа
+   (RANK_BADGE_COLORS в api/public.ts). Текст и кубок — один токен ink, контраст
+   на левом крае не ниже 4,5:1 (золото 5,1, серебро 5,4, бронза 4,9). Исключение
+   из «только токены» того же рода, что цвета AI. */
 .g-root {
   --rh-league-gold-bg: linear-gradient(90deg, #dcc26a 0%, rgba(240, 226, 176, 0.85) 100%);
   --rh-league-gold-border: #e0c066;
@@ -394,8 +355,9 @@
   --rh-league-bronze-ink: #673912;
 }
 
-/* В5.9 (cssOrder.ts): маркер наших файлов — по нему dev-сервер переносит их после CSS
-   компонентов uikit. Правило не должно ничего менять на странице. */
+/* Маркер наших файлов: по нему cssOrder.ts переносит их после CSS компонентов
+   uikit (в dev Bun может подключить наши стили раньше). Правило ничего не
+   меняет на странице. */
 .rh-css-order {
   --rh-css-order: 1;
 }

@@ -1,17 +1,10 @@
-// llm.ts — CallLlm-шов: провайдер выбирается конфигом, пер-role
-// переопределение — аргументом (ключ шва = хартия-роль В5, 9 значений, плюс
-// ярусы main/side для старых вызовов). Wall-clock фуз и честные ошибки;
-// fail-soft остаётся за вызывающим.
-//
-// В5 (Б1): агентный клиент с tool_calls портирован из dndy-llama (стрим,
-// накопление фрагментов по index, stall-гард 120 с, LlmError с кодами,
-// инъекция fetch для тестов); LLM_BASE_URL — конфиг, не хардкод
-// (локальный дев-цикл Ollama/LM Studio/vLLM, К5.19); семафор 3 на параллельные
-// запросы к провайдеру; 429/5xx/сеть — retryable на уровне цикла (спека §3.3).
-// YandexGPT — прежний нек-стриминговый путь (tools на нём не поддержаны —
-// честная ошибка), температуры пер-ролевые применяются к обоим провайдерам.
-// В5.5 тур 2 (Т2-Б): общий предел длительности вызова (LLM_CALL_TIMEOUT_MS, 180 с)
-// покрывает и стрим после заголовков; превышение — LlmError network (ретрай цикла).
+// Шов CallLlm: провайдер выбирается конфигом, а тесты подменяют вызов для
+// каждой роли отдельно (ключ — хартия-роль или ярус main/side).
+// Клиент OpenAI-совместимый, со стримом и tool_calls; оба провайдера (z.ai и
+// шлюз YandexGPT) идут через него. Ошибки — LlmError с кодами: 429/5xx/сеть
+// ретраит цикл генерации, fail-soft — за вызывающим. Параллельных запросов к
+// провайдеру не больше 3. Общий предел вызова (LLM_CALL_TIMEOUT_MS) покрывает
+// и стрим после заголовков.
 import type { Config } from "./config";
 import type { SummaryRole } from "./summary/roles";
 import { modelTierOf, ROLE_TEMPERATURE } from "./summary/roles";
@@ -46,13 +39,13 @@ export interface LlmResult {
   usage: { in: number; out: number } | null;
 }
 
-/** Ключ роли вызова: ярусы (legacy) или хартия-роль В5. */
+/** Ключ роли вызова: ярус (старые вызовы) или хартия-роль. */
 export type LlmRoleKey = "main" | "side" | SummaryRole;
 
 export class LlmError extends Error {
   readonly code: string;
   readonly raw: string | null;
-  /** В5.2 (Б7): пауза, которую просит провайдер (Retry-After у 429/503), мс; null — не прислал */
+  /** пауза, которую просит провайдер (Retry-After у 429/503), мс; null — не прислал */
   readonly retryAfterMs: number | null;
 
   constructor(code: string, message: string, raw: string | null = null, retryAfterMs: number | null = null) {
@@ -83,7 +76,7 @@ export type CallLlm = (opts: {
   signal?: AbortSignal;
 }) => Promise<LlmResult>;
 
-/** Температура вызова: хартия-роль → пер-ролевая, ярусы → 0.4 (прежнее поведение). */
+/** Температура вызова: у хартия-роли своя, у ярусов main/side — 0.4. */
 export function temperatureOf(role: LlmRoleKey): number {
   return role === "main" || role === "side" ? 0.4 : ROLE_TEMPERATURE[role];
 }
@@ -101,15 +94,14 @@ function requireKey(config: Config): string {
   return key;
 }
 
-// ---------- семафор параллелизма провайдера (спека §3.3: не больше 3) ----------
+// ---------- семафор параллелизма провайдера (не больше 3 запросов) ----------
 
 /**
- * Приоритет вызова модели (В5.2, аудит очереди О1, 25.09). Семафор — один на процесс, а циклы
- * заявок с В5.2 разведены: без приоритета проверка пользователя стояла в общей FIFO-очереди за
- * вызовами чужих обзоров и обзоров топа, и ожидание съедало ее предохранитель (ложное
- * «AI-провайдер недоступен»). Порядок: `check` (проверка оценки пользователя, секунды) →
- * `interactive` (обзор пользователя) → `background` (полоса рейтинга: топ-10). Внутри
- * приоритета — порядок прихода. Фоновым вызовам достается не больше `BACKGROUND_MAX` мест.
+ * Приоритет вызова модели. Семафор один на процесс, а циклы заявок разные: без приоритета
+ * быстрая проверка пользователя стояла бы в общей очереди за чужими обзорами, и ожидание
+ * съедало бы ее предохранитель (ложное «AI-провайдер недоступен»). Порядок: `check`
+ * (проверка оценки, секунды) → `interactive` (обзор пользователя) → `background` (топ
+ * рейтинга). Внутри приоритета — порядок прихода; фоновым — не больше `BACKGROUND_MAX` мест.
  */
 export type LlmPriority = "check" | "interactive" | "background";
 const PRIORITY_RANK: Record<LlmPriority, number> = { check: 0, interactive: 1, background: 2 };
@@ -150,8 +142,8 @@ export class ProviderGate {
   }
 
   private acquire(rank: number, background: boolean, signal?: AbortSignal): Promise<void> {
-    // аудит О1: ожидание места слушает отмену — предохранитель снимает ожидающего, а не
-    // оставляет его занять место после того, как задание уже закрыто
+    // ожидание места слушает отмену: предохранитель снимает ожидающего, иначе тот занял бы
+    // место уже после того, как задание закрыто
     if (signal?.aborted) return Promise.reject(new LlmError("aborted", "вызов отменён (бюджет генерации)"));
     return new Promise<void>((resolve, reject) => {
       const waiter: GateWaiter = { rank, seq: this.seq++, background, grant: resolve };
@@ -195,23 +187,19 @@ export const PROVIDER_CONCURRENCY = 3;
 export const BACKGROUND_MAX = 1;
 const providerGate = new ProviderGate(PROVIDER_CONCURRENCY, BACKGROUND_MAX);
 
-// ---------- z.ai: OpenAI-совместимый стрим с tool_calls (порт dndy-llama) ----------
+// ---------- OpenAI-совместимый стрим с tool_calls ----------
 
 export const DEFAULT_ZAI_BASE_URL = "https://api.z.ai/api/paas/v4";
 /** OpenAI-совместимый шлюз YandexGPT (tools, стрим, usage — как у z.ai). */
 export const DEFAULT_YANDEX_BASE_URL = "https://ai.api.cloud.yandex.net/v1";
 const DEFAULT_STALL_MS = 120_000;
-/** Таймаут ожидания заголовков ответа (прежний «жесткий» таймаут вызова). */
 const DEFAULT_HEADERS_TIMEOUT_MS = 120_000;
 /**
- * В5.5 тур 2 (Т2-Б): общий предел длительности ОДНОГО вызова модели — от запроса до
- * конца стрима. До правки таймаут 120 с снимался после заголовков, и медленный, но живой
- * стрим (каждый байт сбрасывает детектор тишины) держал слот провайдера до предохранителя
- * генерации (6 мин). Дефолт 180 с: не короче таймаута заголовков (120 с — предел, который
- * вызов и прежде имел до начала ответа) плюс минута на стрим; живые вызовы В5.2-В5.3 на
- * порядок короче (вся генерация 9 ролей — 12-19 с по БД, reports/2026-09-25-m53-ai-latency.md),
- * и предел вдвое короче предохранителя 6 мин — ретрай успевает в ту же генерацию.
- * Переопределение — env LLM_CALL_TIMEOUT_MS (Config.llm.callTimeoutMs).
+ * Общий предел одного вызова модели — от запроса до конца стрима. Нужен потому, что
+ * медленный, но живой стрим (каждый байт сбрасывает детектор тишины) иначе держал бы слот
+ * провайдера до предохранителя генерации (6 мин). 180 с = таймаут заголовков плюс минута на
+ * стрим; реальная генерация всех ролей укладывается в десятки секунд, а предел вдвое короче
+ * предохранителя — ретрай успевает в ту же генерацию. env LLM_CALL_TIMEOUT_MS.
  */
 export const DEFAULT_LLM_CALL_TIMEOUT_MS = 180_000;
 
@@ -224,7 +212,7 @@ interface ZaiOptions {
   authScheme?: "bearer" | "api-key";
   fetchImpl?: typeof fetch;
   stallMs?: number;
-  /** общий предел вызова (Т2-Б), мс; дефолт DEFAULT_LLM_CALL_TIMEOUT_MS */
+  /** общий предел вызова, мс; дефолт DEFAULT_LLM_CALL_TIMEOUT_MS */
   callTimeoutMs?: number;
 }
 
@@ -310,7 +298,7 @@ async function callZai(o: ZaiOptions, opts: Parameters<CallLlm>[0]): Promise<Llm
     if (timer !== null) clearTimeout(timer);
     timer = setTimeout(() => cut("stall"), stallMs);
   };
-  // Т2-Б: общий предел — с самого запроса и до конца стрима; байты его НЕ сбрасывают
+  // общий предел — с самого запроса и до конца стрима; байты его не сбрасывают
   const deadline = setTimeout(() => cut("deadline"), callTimeoutMs);
   // та же ветка, что у таймаута заголовков: код network — retryable в цикле
   // генерации (summary/agent.ts), после попыток — fail-soft с причиной в ai_fails
@@ -416,8 +404,8 @@ async function callZai(o: ZaiOptions, opts: Parameters<CallLlm>[0]): Promise<Llm
         }
       }
     } catch (e) {
-      // В5.2 (Б7, долг аудита В5.1, reliability «мелочь 1»): обрыв в фазе стрима — те же
-      // коды, что в фазе запроса; сырой DOMException в outcomes и логи не едет
+      // обрыв в фазе стрима дает те же коды, что в фазе запроса; сырой DOMException
+      // в outcomes и логи не попадает
       if (e instanceof LlmError) throw e;
       if (opts.signal?.aborted) throw new LlmError("aborted", "вызов отменён (бюджет генерации)");
       throw new LlmError("network", `сеть (стрим): ${(e as Error).message}`);
@@ -443,14 +431,14 @@ async function callZai(o: ZaiOptions, opts: Parameters<CallLlm>[0]): Promise<Llm
   }
 }
 
-// ---------- YandexGPT: прежний нек-стриминговый путь (логика не тронута) ----------
+// ---------- фабрика клиента ----------
 
 export interface MakeLlmOptions {
-  /** инъекция fetch для тестов (только zai-путь) */
+  /** инъекция fetch для тестов */
   fetchImpl?: typeof fetch;
   /** stall-гард, мс (тесты ставят маленький) */
   stallMs?: number;
-  /** В5.2 (аудит очереди О1): приоритет вызовов этого клиента в семафоре провайдера */
+  /** приоритет вызовов этого клиента в семафоре провайдера */
   priority?: LlmPriority;
 }
 

@@ -1,5 +1,5 @@
-// report-pdf.ts — CLI PDF-отчёта (В4.9, Б8): тот же генератор и та же
-// карточка, что у маршрута `.pdf`, — для приёмки по отрисованному результату.
+// CLI PDF-отчета: тот же генератор и та же карточка, что у маршрута `.pdf`, —
+// чтобы проверять отчет по отрисованному результату.
 //
 //   DATA_DIR=<копия БД> bun scripts/report-pdf.ts <org/repo> <out.pdf> [--viewer=anon|full]
 //   bun scripts/report-pdf.ts --fixture=<anon|full|grant-ci|null|never> <out.pdf>

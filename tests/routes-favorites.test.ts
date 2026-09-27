@@ -1,17 +1,14 @@
-// routes-favorites.test.ts — В4.2-port-fix Б2 (П2, Н1 HIGH): HTTP-контракт
-// проверки прав избранного на настоящем сервере во временном каталоге.
-//
-// ПЕРЕНОС (В4.8.5, К8.5.14 (г), §2-В1): маршрута «Проверить доступ»
-// (`POST /api/me/favorites/:org/:repo/check`) больше нет — права проверяются
-// сами при явном добавлении в избранное (звезда `PUT /api/me/favorites/:org/:repo`
-// и «Добавить» `PUT /api/me/favorites`). Инварианты прежних тестов не сняты,
-// а перенесены на путь добавления: окно проверок не жгут запросы без PAT;
-// сверх окна запись не проверяется синхронно, а уходит в фон; форма исхода
-// `enqueue: {status, code}`; кулдаун по own-скану ИМЕННО зрителя; repo-GET не
-// дублируется; AppSec — на APPSEC_API_BASE; не свой — права показаны, заявки нет.
+// HTTP-контракт проверки прав избранного на настоящем сервере во временном
+// каталоге. Отдельного маршрута «Проверить доступ» нет: права проверяются при
+// явном добавлении в избранное (звезда `PUT /api/me/favorites/:org/:repo` и
+// «Добавить» `PUT /api/me/favorites`). Инварианты: окно проверок не жгут
+// запросы без PAT; сверх окна запись не проверяется синхронно; форма исхода
+// `enqueue: {status, code}`; кулдаун по own-скану именно зрителя; repo-GET не
+// дублируется; AppSec — на APPSEC_API_BASE; не свой — права показаны, заявки
+// нет.
 //
 // Живых запросов нет: адреса API — локальный мок (харнесс), repo-GET мока
-// НЕ отдаёт `id` (кроме org `withid`), поэтому AppSec-канал в прочих не вызывается.
+// не отдает `id` (кроме org `withid`), поэтому AppSec-канал в прочих не вызывается.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -30,7 +27,7 @@ const dir = mkdtempSync(join(tmpdir(), "rh-fav-"));
 // остальное — приватный репо зрителя (own = true). `id` не отдаём: без него
 // AppSec-клиент не строится и PAT никуда не уходит.
 // org `withid` — repo-GET отдаёт `id`, поэтому вызывается AppSec-канал:
-// это и есть проверка П3 (адрес AppSec обязан быть из конфига, не боевой).
+// так проверяется, что адрес AppSec берется из конфига, а не боевой.
 const mock = startMockApi((req, url) => {
   const p = url.pathname;
   if (p === "/user") return Response.json({ username: "favtester" });
@@ -59,7 +56,7 @@ beforeAll(async () => {
     cookies[name] = createSession(db, SECRET, ids[name]!);
   }
   // кулдаун: own-скан ДРУГОГО юзера не блокирует автозаявку зрителя,
-  // свой свежий own-скан — блокирует (К-П П2)
+  // свой свежий own-скан — блокирует
   const other = seedRepo(t, { org: "cool", repo: "other-scan" });
   seedScan(t, other, { startedAt: new Date().toISOString(), userId: ids.other!, status: "ok" });
   const mine = seedRepo(t, { org: "cool", repo: "my-scan" });
@@ -95,7 +92,7 @@ interface AddBody {
   check: { status: string; enqueue: FavoriteEnqueue | null };
 }
 
-/** Добавить в избранное звездой — путь автопроверки прав (К8.5.14). */
+/** Добавить в избранное звездой — путь автопроверки прав. */
 async function add(name: string, slug: string): Promise<{ status: number; body: AddBody | null }> {
   const res = await fetch(at(`/api/me/favorites/${slug}`), as(name, { method: "PUT" }));
   return { status: res.status, body: res.status === 200 ? ((await res.json()) as AddBody) : null };
@@ -113,7 +110,7 @@ async function settled(name: string): Promise<void> {
 
 describe("автопроверка прав при добавлении — порядок и окно проверок (П2 → К8.5.14)", () => {
   test("без PAT добавление не проверяет права и окно проверок не жжёт: после PAT три добавления проверены и поставлены", async () => {
-    // без PAT: запись добавлена, проверки нет (было: 409 no_pat до лимита)
+    // без PAT: запись добавлена, проверки нет
     for (const slug of ["gate/g1", "gate/g2", "gate/g3", "gate/g4"]) {
       const out = await add("gate", slug);
       expect({ status: out.status, check: out.body?.check.status }).toEqual({ status: 200, check: "no_pat" });
@@ -126,11 +123,9 @@ describe("автопроверка прав при добавлении — по
     }
   }, 60_000);
 
-  // ПЕРЕВОРОТ (закрытие В4.8.5, ревью; решение Екатерины 22.09): новый
-  // репозиторий сверх окна проверок больше не добавляется без проверки
+  // новый репозиторий сверх окна проверок не добавляется без проверки
   // существования — 429 с Retry-After, записи нет; повторная звезда уже
-  // добавленного сверх окна по-прежнему уходит в фон. Инвариант «сверх окна
-  // анализ не ставится» — прежний.
+  // добавленного сверх окна уходит в фон. Анализ сверх окна не ставится.
   test("четвёртое НОВОЕ добавление в минуту — 429 с Retry-After, записи нет; повторная звезда существующего — в фон; анализ сверх окна не ставится (Config.queue.favoriteChecksPerMinute)", async () => {
     expect((await putPat("lim", "pat-lim-000000000")).status).toBe(200);
     const checks: string[] = [];
@@ -147,7 +142,7 @@ describe("автопроверка прав при добавлении — по
     const l1Probes = () => mock.requests.filter((r) => r.path.startsWith("/repos/lim/l1/cicd/runs")).length;
     for (let i = 0; i < 100 && l1Probes() < 2; i++) await Bun.sleep(50);
     expect(l1Probes()).toBe(2);
-    // фон проверяет права, но заявку не ставит (§2-Р1)
+    // фон проверяет права, но заявку не ставит
     await settled("lim");
     const jobs = (await (await fetch(at("/api/me/jobs"), as("lim"))).json()) as { active: { slug: string }[] };
     expect(jobs.active.map((j) => j.slug).sort()).toEqual(["lim/l1", "lim/l2", "lim/l3"]);
@@ -159,7 +154,7 @@ describe("исход автопостановки — единственное �
     expect((await putPat("cool", "pat-cool-00000000")).status).toBe(200);
     const mark = mock.requests.length;
     const foreign = await add("cool", "cool/other-scan");
-    // К-П П2: repo-GET не дублируется — тело прокинуто в requestUserScan,
+    // repo-GET не дублируется — тело прокинуто в requestUserScan,
     // живых запросов ровно два (repo-GET + cicd/runs), а не три
     expect(mock.requests.slice(mark).map((r) => r.path)).toEqual([
       "/repos/cool/other-scan",
@@ -169,7 +164,7 @@ describe("исход автопостановки — единственное �
     expect({
       foreign: foreign.body?.check.enqueue,
       mine: mine.body?.check.enqueue,
-      // форма ответа: `enqueued` больше нет ни в одном исходе
+      // форма ответа: поля `enqueued` нет ни в одном исходе
       legacyField: Object.prototype.hasOwnProperty.call(foreign.body?.check ?? {}, "enqueued"),
     }).toEqual({
       foreign: { status: "queued", code: null },
@@ -183,8 +178,8 @@ describe("исход автопостановки — единственное �
     const mark = mock.requests.length;
     const out = await add("appsec", "withid/repo");
     const paths = mock.requests.slice(mark).map((r) => r.path);
-    // ассерт по ПУТИ, а не по счётчику: харнесс шлёт REST и AppSec в один мок,
-    // и двух REST-запросов проверки хватило бы, чтобы счётчик был > 0 без правки
+    // ассерт по пути, а не по счетчику: харнесс шлет REST и AppSec в один мок,
+    // и двух REST-запросов проверки хватило бы, чтобы счетчик был > 0 и без AppSec
     expect({
       appsecHit: paths.filter((p) => p.startsWith("/v1/scans/latest")).length,
       access: out.body?.access,
