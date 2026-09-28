@@ -46,6 +46,7 @@ import {
   RESOLVED_SHARE,
   ROOT_ENTRIES,
   SECRETS_CRITICAL_TOTAL_CAP,
+  CRITICAL_FINDINGS_TOTAL_CAP,
   SEVERITY_PER_10K,
   SEVERITY_WEIGHTS,
   STALE_SHARE,
@@ -409,8 +410,7 @@ export function computeFromFacts(ok: Map<string, unknown>, input: ComputeInput, 
     if (cat.score === null) noData.push(`${key}: ${cat.no_data ?? "no data"}`);
   }
 
-  const appsecFact = ok.get("appsec.findings") as { secrets_critical?: unknown } | undefined | null;
-  const totals = totalsFromCategories(categories, { codeEmpty, secretsCritical: appsecFact?.secrets_critical === true });
+  const totals = totalsFromCategories(categories, { codeEmpty, ...totalCapFlags(ok.get("appsec.findings")) });
 
   return {
     scanId,
@@ -444,11 +444,27 @@ export interface Totals {
  * SCORE_WEIGHTS (20/15/15/15/15/20). Coverage обоих — доля номинальной массы
  * SCORE_WEIGHTS с данными: индекс от 65 (масса четверки), полный от 100.
  * compute и карточка (полный Score из показанных категорий) используют одну
- * формулу. Кап 49 применяется только к полному Score.
+ * формулу. Капы 49 (секреты) и 69 (критичные находки) – только к полному Score.
  */
+/**
+ * Признаки капов полного итога из факта `appsec.findings`: утекшие критичные
+ * секреты (≤ 49) и открытые критичные находки (≤ 69). Нет факта – капов нет.
+ */
+export function totalCapFlags(appsecValue: unknown): { secretsCritical: boolean; criticalOpen: boolean } {
+  const v = appsecValue as { secrets_critical?: unknown; severity_counts?: { critical?: unknown } } | null | undefined;
+  return { secretsCritical: v?.secrets_critical === true, criticalOpen: (num(v?.severity_counts?.critical) ?? 0) > 0 };
+}
+
+/** Кап полного итога по признакам: наименьший из действующих; null – капа нет. */
+export function totalCapOf(flags: { secretsCritical: boolean; criticalOpen?: boolean }): number | null {
+  if (flags.secretsCritical) return SECRETS_CRITICAL_TOTAL_CAP;
+  if (flags.criticalOpen) return CRITICAL_FINDINGS_TOTAL_CAP;
+  return null;
+}
+
 export function totalsFromCategories(
   categories: Record<CategoryKey, { score: number | null }>,
-  flags: { codeEmpty: boolean; secretsCritical: boolean },
+  flags: { codeEmpty: boolean; secretsCritical: boolean; criticalOpen?: boolean },
 ): Totals {
   const coverageOf = (keys: CategoryKey[], base: number): number => {
     let dataWeight = 0;
@@ -472,7 +488,8 @@ export function totalsFromCategories(
       total = 0;
     } else if (coverage >= COVERAGE_NULL_BELOW && dataWeight > 0) {
       total = (acc / dataWeight) * 100;
-      if (capSecrets && flags.secretsCritical) total = Math.min(total, SECRETS_CRITICAL_TOTAL_CAP);
+      const cap = capSecrets ? totalCapOf(flags) : null;
+      if (cap !== null) total = Math.min(total, cap);
     }
     return total;
   };

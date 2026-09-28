@@ -5,7 +5,7 @@
 // по живой выборке репозиториев. Модель описывает ДВА показателя: полный
 // Repo Health Score (6 категорий, SCORE_WEIGHTS) и публичный HealthCraft Index
 // (4 категории, INDEX_WEIGHTS). История версий — docs/methodology.md §8.
-export const MODEL_VERSION = "4.4.0-hci";
+export const MODEL_VERSION = "4.5.0-hci";
 
 /**
  * Стабильность CI в динамике — доля успешных у последних
@@ -258,8 +258,8 @@ export type IndexCategoryKey = "documentation" | "activity" | "issues" | "code";
 
 /**
  * Repo Health Score — номинальные веса ТЗ: Security 20, Активность 15,
- * Документация 15, CI/CD 15, Issues 15, Code 20. Кап критичных secrets 49
- * применяется только к этому показателю.
+ * Документация 15, CI/CD 15, Issues 15, Code 20. Капы – утекшие секреты 49,
+ * открытые критичные находки AppSec 69 – применяются только к этому показателю.
  */
 export const SCORE_WEIGHTS: Record<CategoryKey, number> = {
   security: 20,
@@ -325,6 +325,13 @@ export const CI_RECENCY_BANDS: ReadonlyArray<{ days: number; w: number }> = [
 
 /** критичные secrets-находки → жесткий кап total ≤ 49 (паттерн CHAOSS/OpenSSF). */
 export const SECRETS_CRITICAL_TOTAL_CAP = 49;
+
+/**
+ * Открытые критичные находки AppSec → кап total ≤ 69 (4.5.0): верх зоны «требует
+ * внимания». Потолок категории 40 при весе 20 снимает с итога не больше 12 баллов,
+ * и репозиторий с критичными уязвимостями оставался бы «здоров».
+ */
+export const CRITICAL_FINDINGS_TOTAL_CAP = 69;
 
 /** severity-веса плотности на 10К LOC. */
 export const SEVERITY_WEIGHTS = { critical: 8, high: 4, medium: 2, low: 1 } as const;

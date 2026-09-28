@@ -458,7 +458,8 @@ describe("К6: рекомендации", () => {
     expect(score(ok).categories.security.score).toBe(40);
     expect(appsecFixEffect(ok, "critical")).toEqual({ capLimit: 40, gain: true });
     const rec = recs(ok).find((r) => r.ruleId === "appsec-critical")!;
-    expect(rec.expectedImpact).toBe("снимет потолок 40 с категории «Безопасность»");
+    // 4.5.0: критичные находки держат и потолок полного итога 69
+    expect(rec.expectedImpact).toBe("снимет потолок 40 с категории «Безопасность» и снимет ограничение Repo Health Score в 69 баллов");
     expect(rec.problem).toContain("не выше 40");
   });
 
@@ -472,7 +473,7 @@ describe("К6: рекомендации", () => {
     expect(score(fixed).categories.security.score).toBe(score(ok).categories.security.score);
     expect(eff.gain).toBe(false);
     const rec = recs(ok).find((r) => r.ruleId === "appsec-critical")!;
-    expect(rec.expectedImpact).toBe("балл категории «Безопасность» от этого не вырастет: его снижают и другие находки");
+    expect(rec.expectedImpact).toBe("снимет ограничение Repo Health Score в 69 баллов; балл категории «Безопасность» от этого не вырастет: его снижают и другие находки");
     expect(rec.expectedImpact).not.toContain("повысит");
   });
 

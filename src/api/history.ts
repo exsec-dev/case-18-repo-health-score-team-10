@@ -5,7 +5,7 @@
 import type { Database } from "bun:sqlite";
 import { parseFactValue } from "../collectors/facts";
 import { MODEL_VERSION } from "../score/model";
-import { totalsFromCategories, type CategoryScore } from "../score/compute";
+import { totalCapFlags, totalsFromCategories, type CategoryScore } from "../score/compute";
 import { NO_PAT_ACCESS, type AccessResult } from "../auth/access";
 import type { AiAudience } from "../db";
 
@@ -25,27 +25,25 @@ interface ScoreHistoryRow {
 }
 
 /**
- * Сканы репо с критичными секретами (флаг ok-факта appsec.findings) – одним
- * запросом на репо, а не на каждую точку истории.
+ * Признаки капов полного итога по сканам репо (ok-факт appsec.findings: утекшие
+ * секреты, открытые критичные находки) – одним запросом на репо, а не на каждую точку истории.
  */
-function secretsCriticalScans(db: Database, repoId: number): Set<number> {
+function capFlagsByScan(db: Database, repoId: number): Map<number, { secretsCritical: boolean; criticalOpen: boolean }> {
   const rows = db
     .query(
       "SELECT f.scan_id, f.value FROM facts f JOIN scans s ON s.id = f.scan_id WHERE s.repo_id = ? AND f.key = 'appsec.findings' AND f.status = 'ok'",
     )
     .all(repoId) as { scan_id: number; value: string }[];
-  const out = new Set<number>();
-  for (const r of rows) {
-    if ((parseFactValue(r.value) as { secrets_critical?: unknown } | null)?.secrets_critical === true) out.add(r.scan_id);
-  }
+  const out = new Map<number, { secretsCritical: boolean; criticalOpen: boolean }>();
+  for (const r of rows) out.set(r.scan_id, totalCapFlags(parseFactValue(r.value)));
   return out;
 }
 
-function totalsOf(row: ScoreHistoryRow, secretsCritical: boolean): { score: number | null; coverage: number } {
+function totalsOf(row: ScoreHistoryRow, caps: { secretsCritical: boolean; criticalOpen: boolean }): { score: number | null; coverage: number } {
   const cats = JSON.parse(row.categories) as Record<string, CategoryScore>;
-  // кап критичных секретов применяется тем же правилом, что и при скане:
+  // капы полного итога применяются тем же правилом, что и при скане:
   // флаг читается из фактов ЭТОГО скана — исторический итог не переписывается
-  const totals = totalsFromCategories(cats as never, { codeEmpty: row.code_empty === 1, secretsCritical });
+  const totals = totalsFromCategories(cats as never, { codeEmpty: row.code_empty === 1, ...caps });
   return { score: totals.repoHealthScore, coverage: totals.repoHealthCoverage };
 }
 
@@ -70,11 +68,11 @@ export function getRepoHistory(db: Database, org: string, repo: string, opts: { 
        ORDER BY sc.scan_id ASC`,
     )
     .all(r.id, MODEL_VERSION) as ScoreHistoryRow[];
-  const secrets = fullOpen ? secretsCriticalScans(db, r.id) : new Set<number>();
+  const caps = fullOpen ? capFlagsByScan(db, r.id) : new Map<number, { secretsCritical: boolean; criticalOpen: boolean }>();
   const points: HistoryPoint[] = rows.map((row) => {
     // полный итог – из записанных категорий этой строки и ее же фактов,
     // тем же расчетом, что на карточке
-    const { score } = fullOpen ? totalsOf(row, secrets.has(row.scan_id)) : { score: null };
+    const { score } = fullOpen ? totalsOf(row, caps.get(row.scan_id) ?? { secretsCritical: false, criticalOpen: false }) : { score: null };
     return {
       scanId: row.scan_id,
       finishedAt: row.finished_at,

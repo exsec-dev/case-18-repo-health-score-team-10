@@ -66,8 +66,8 @@ async function factsOf(files: Record<string, string>): Promise<Map<string, Recor
   }
 }
 
-test("версии после тура 1: модель 4.4.0-hci, сборщик 5 (тур 2)", () => {
-  expect(MODEL_VERSION).toBe("4.4.0-hci");
+test("версии после тура 1: модель 4.5.0-hci, сборщик 5 (тур 2)", () => {
+  expect(MODEL_VERSION).toBe("4.5.0-hci");
   expect(COLLECTOR_VERSION).toBe(5);
 });
 

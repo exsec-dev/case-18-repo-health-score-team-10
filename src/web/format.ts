@@ -349,6 +349,8 @@ export function fmtDecimal(value: number, digits = 1, opts: { trim?: boolean } =
 
 /** Потолок Repo Health Score при утекших секретах (методика, `SECRETS_CRITICAL_TOTAL_CAP`; веб не импортирует `src/score`). */
 export const SECRETS_CAP = 49;
+/** Потолок Repo Health Score при открытых критичных находках AppSec (`CRITICAL_FINDINGS_TOTAL_CAP`). */
+export const CRITICAL_CAP = 69;
 
 /** Категория для расчета вкладов: балл (null — данных нет) и вес в показателе. */
 export interface ContributionInput {
@@ -375,7 +377,7 @@ export interface ContributionSegment {
 export type Contributions =
   /** обычный случай: сумма показанных вкладов = показатель */
   | { kind: "bar"; total: number; segments: ContributionSegment[]; missing: number; losses: ContributionSegment[] }
-  /** итог ограничен потолком за утекшие секреты: вклады дали бы больше показателя */
+  /** итог ограничен потолком (утекшие секреты 49, критичные находки 69): вклады дали бы больше показателя */
   | { kind: "capped"; total: number; uncapped: number; segments: ContributionSegment[] }
   /** в репозитории нет кода: показатель 0 по правилу методики, вкладов нет; reason — причина «Состояния кода» */
   | { kind: "empty"; total: number; reason?: string | null };
@@ -406,8 +408,8 @@ export function categoryContributions(cats: ContributionInput[], total: number |
     share: c.weight / weightSum,
   }));
   const uncapped = segments.reduce((s, c) => s + c.exact, 0);
-  if (Math.round(uncapped) > shown && shown <= SECRETS_CAP) {
-    // сумма вкладов больше показателя только у потолка за утекшие секреты
+  if (Math.round(uncapped) > shown && shown <= CRITICAL_CAP) {
+    // сумма вкладов больше показателя только у потолков полного итога
     for (const s of segments) s.tenths = Math.round(s.exact * 10);
     return { kind: "capped", total: shown, uncapped, segments };
   }
@@ -448,14 +450,19 @@ export const CONTRIBUTIONS_TITLE = "Вклад категорий в оценк�
 /** Подпись остатка полосы: «не набрано 30». */
 export const CONTRIBUTIONS_REST = "не набрано";
 
-/** Строка вместо полосы, когда вклады не складываются в показатель (потолок 49, нет кода). */
+/** Причина потолка по его значению: 49 и ниже – утекшие секреты, иначе – открытые критичные находки. */
+export function cappedReason(total: number): string {
+  return total <= SECRETS_CAP ? "AppSec нашел утекшие секреты" : "в AppSec открыты критичные находки";
+}
+
+/** Строка вместо полосы, когда вклады не складываются в показатель (потолки 49 и 69, нет кода). */
 export function contributionsNote(c: Contributions): string | null {
   if (c.kind === "empty") {
     // причина по виду: «нет ни одного файла» — только там, где файлов действительно нет
     const why = c.reason && c.reason.startsWith("no source code — ") ? noDataReason("code", c.reason) : "В репозитории нет кода.";
     return `${why.replace(/ – оценивать нечего\.$/, ".")} Поэтому оценка – 0. Это не ошибка сервиса: оценивать нечего.`;
   }
-  if (c.kind === "capped") return `Итог ограничен ${c.total} баллами: AppSec нашел утекшие секреты. Без ограничения категории дали бы ${fmtDecimal(c.uncapped, 1)}.`;
+  if (c.kind === "capped") return `Итог ограничен ${c.total} баллами: ${cappedReason(c.total)}. Без ограничения категории дали бы ${fmtDecimal(c.uncapped, 1)}.`;
   return null;
 }
 

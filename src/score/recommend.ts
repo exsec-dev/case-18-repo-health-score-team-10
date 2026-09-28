@@ -18,8 +18,8 @@
 // при чтении, поэтому новые формулировки видны без пересчета.
 import type { Database } from "bun:sqlite";
 import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
-import { SCORE_WEIGHTS, CategoryKey, OLD_SHARE_MIN_BASE, SECRETS_CRITICAL_TOTAL_CAP } from "./model";
-import { compute, computeFromFacts, effectiveFacts, licensePresent, type ComputeInput, Scores } from "./compute";
+import { SCORE_WEIGHTS, CategoryKey, OLD_SHARE_MIN_BASE, SECRETS_CRITICAL_TOTAL_CAP, CRITICAL_FINDINGS_TOTAL_CAP } from "./model";
+import { compute, computeFromFacts, effectiveFacts, licensePresent, totalCapFlags, type ComputeInput, Scores } from "./compute";
 import { issuesClosedCounted } from "./derived";
 import { fmtDecimal, fmtScore, fmtSigned } from "../web/format";
 import { runOutcome } from "../collectors/run-status";
@@ -54,7 +54,7 @@ export const round4 = (x: number): number => Math.round(x * 10000) / 10000;
  * `no-runs` – CI-правило при невидимых запусках: числа нет, эффект текстом
  * «оценка появится с запусками».
  */
-export type DeltaReason = "code-empty" | "no-total" | "cap" | "no-runs";
+export type DeltaReason = "code-empty" | "no-total" | "cap" | "cap-critical" | "no-runs";
 
 /** Реальный прирост итога правила при подмене фактов; reason – причина Δ = 0. */
 export type DeltaEvaluator = (
@@ -137,6 +137,7 @@ const DELTA_REASON_TEXT: Record<DeltaReason, string> = {
   "code-empty": "в репозитории нет кода",
   "no-total": "оценка появится, когда данных станет больше",
   cap: "Repo Health Score ограничен 49 баллами из-за утекших секретов",
+  "cap-critical": "Repo Health Score ограничен 69 баллами, пока открыты критичные находки AppSec",
   "no-runs": "CI/CD: оценка появится с запусками",
 };
 
@@ -178,17 +179,26 @@ function presenceImpact(p: RecommendationParams): string | null {
  * поднимет – «повысит балл»; не поднимет (плотность на полу от прочих находок) –
  * роста не обещаем.
  */
-function appsecLevelText(p: RecommendationParams, action: string, what: string): RecommendationText | null {
+function appsecLevelText(p: RecommendationParams, action: string, what: string, totalCap: number | null = null): RecommendationText | null {
   if (p.capLimit === undefined || typeof p.gain !== "boolean") return null;
   const capped = typeof p.capLimit === "number";
+  // критичные находки держат и потолок итога (4.5.0): о нем – всегда, он действует при любом балле категории
+  const totalNote = totalCap !== null ? ` Repo Health Score при этом не выше ${totalCap}.` : "";
+  const categoryPart = capped
+    ? `снимет потолок ${p.capLimit} с категории «Безопасность»`
+    : p.gain
+      ? categoryImpact("Безопасность")
+      : null;
+  const totalPart = totalCap !== null ? `ограничение Repo Health Score в ${totalCap} баллов` : null;
   return {
     action,
-    problem: capped ? `AppSec нашел в коде ${what}. Пока они открыты, балл категории «Безопасность» не выше ${p.capLimit}.` : `AppSec нашел в коде ${what}.`,
-    expectedImpact: capped
-      ? `снимет потолок ${p.capLimit} с категории «Безопасность»`
-      : p.gain
-        ? categoryImpact("Безопасность")
-        : "балл категории «Безопасность» от этого не вырастет: его снижают и другие находки",
+    problem: capped ? `AppSec нашел в коде ${what}. Пока они открыты, балл категории «Безопасность» не выше ${p.capLimit}.${totalNote}` : `AppSec нашел в коде ${what}.${totalNote}`,
+    expectedImpact:
+      categoryPart && totalPart
+        ? `${categoryPart} и снимет ${totalPart}`
+        : totalPart
+          ? `снимет ${totalPart}; балл категории «Безопасность» от этого не вырастет: его снижают и другие находки`
+          : (categoryPart ?? "балл категории «Безопасность» от этого не вырастет: его снижают и другие находки"),
   };
 }
 
@@ -312,7 +322,7 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
           expectedImpact: "снимет ограничение Repo Health Score в 49 баллов",
         };
       }
-      return appsecLevelText(p, "Устраните критичные находки AppSec", "критичные уязвимости");
+      return appsecLevelText(p, "Устраните критичные находки AppSec", "критичные уязвимости", CRITICAL_FINDINGS_TOTAL_CAP);
     case "appsec-high":
       // открытые high без critical держат потолок 69 – без этого правила совета о них не было бы
       return appsecLevelText(p, "Устраните находки AppSec высокой важности", "уязвимости высокой важности");
@@ -488,7 +498,7 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
  * той же формулой, что движок.
  */
 export function factsDeltaEvaluator(ok: Map<string, unknown>, input: ComputeInput, now: Date, base: Scores = computeFromFacts(ok, input, now)): DeltaEvaluator {
-  const secretsCritical = (ok.get("appsec.findings") as { secrets_critical?: unknown } | undefined)?.secrets_critical === true;
+  const caps = totalCapFlags(ok.get("appsec.findings"));
   return (channel, patch) => {
     const facts = new Map(ok);
     patch(facts);
@@ -499,7 +509,10 @@ export function factsDeltaEvaluator(ok: Map<string, unknown>, input: ComputeInpu
     const a = pick(after);
     if (b === null || a === null) return { delta: 0, reason: "no-total" };
     const delta = round4(a - b);
-    if (delta === 0 && channel !== null && secretsCritical && b >= SECRETS_CRITICAL_TOTAL_CAP) return { delta: 0, reason: "cap" };
+    if (delta === 0 && channel !== null) {
+      if (caps.secretsCritical && b >= SECRETS_CRITICAL_TOTAL_CAP) return { delta: 0, reason: "cap" };
+      if (caps.criticalOpen && b >= CRITICAL_FINDINGS_TOTAL_CAP) return { delta: 0, reason: "cap-critical" };
+    }
     return { delta, reason: null };
   };
 }

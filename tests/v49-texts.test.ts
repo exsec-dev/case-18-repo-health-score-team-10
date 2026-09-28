@@ -151,11 +151,12 @@ describe("К9.10: чтение по ключу и запасной путь", ()
 
 describe("Д1, роли текста", () => {
   // текст critical без секретов – по факту (потолок 40 / рост по пересчету)
-  test("appsec-critical: потолок 49 — только при утекших секретах", () => {
+  test("appsec-critical: потолок 49 — только при утекших секретах; у критичных находок – потолок итога 69 (4.5.0)", () => {
     const secrets = recommendationText("appsec-critical", { secrets: true })!;
     const critical = recommendationText("appsec-critical", { secrets: false, capLimit: null, gain: true })!;
     expect(`${secrets.problem} ${secrets.expectedImpact}`).toContain("49");
-    expect(`${critical.action} ${critical.problem} ${critical.expectedImpact}`).not.toMatch(/49|потол|ограничен/);
+    expect(`${critical.action} ${critical.problem} ${critical.expectedImpact}`).not.toMatch(/49/);
+    expect(critical.problem).toContain("Repo Health Score при этом не выше 69");
   });
 
   test("заголовок — глагол в повелительном наклонении без точки; эффект без «≈»", () => {

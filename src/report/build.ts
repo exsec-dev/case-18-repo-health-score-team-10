@@ -50,6 +50,7 @@ import {
   CI_CAP_TITLE,
   STALE_CATEGORY_MARK,
   rankText,
+  cappedReason,
 } from "../web/format";
 import { code, em, escaped, strong, text, type ActionItem, type Block, type CategoryRow, type Chip, type HeroNote, type HeroSecondary, type InlineLine, type ReportModel, type TableColumn } from "./model";
 import {
@@ -571,7 +572,7 @@ function methodSection(shown: ShownMetric[], contributions: Map<string, Contribu
     line(first),
     line("Каждая категория получает балл от 0 до 100 из нескольких показателей. Например, для документации: README, лицензия, CONTRIBUTING, CODEOWNERS."),
     line(`${INDEX} – взвешенное среднее баллов категорий: ${indexWeights}.${sumOf(INDEX)}`),
-    line(`${FULL} учитывает 6 категорий: ${fullWeights}. Если в коде найдены утекшие секреты, он не выше 49.${sumOf(FULL)}`),
+    line(`${FULL} учитывает 6 категорий: ${fullWeights}. Если в коде найдены утекшие секреты, он не выше 49, если в AppSec открыты критичные находки – не выше 69.${sumOf(FULL)}`),
     line(`Шкала: ${SCORE_SCALE.map((z) => `${z.word} ${z.range}`).join(", ")}.`),
     line(`Категория без данных не получает 0: она в оценке не участвует и ее не снижает. Если данных меньше ${fmtCoverage(COVERAGE_NULL_BELOW)}, оценка не рассчитывается.`),
     line("Популярность (реакции и ответвления) в оценку не входит, качество кода по существу не оценивается – только наблюдаемые признаки ухода за ним. Расчет и исходные данные – в приложении."),
@@ -653,7 +654,7 @@ function metricCalc(card: RepoCard, metric: ShownMetric, named: boolean): Block[
   // у репо без кода итог 0 по правилу «кода нет», а не по потолку секретов —
   // строка про AppSec здесь была бы ложной
   if (card.markers.codeEmpty) out.push({ kind: "paragraph", tone: "fine", lines: [line(`Итог – ${value}: в репозитории нет кода, поэтому оценка 0 (правило «кода нет», Q&A №13); баллы категорий выше – справочно.`)] });
-  else if (roundScore(total) > value) out.push({ kind: "paragraph", tone: "fine", lines: [line(`Итог ограничен ${value} баллами: AppSec нашел утекшие секреты.`)] });
+  else if (roundScore(total) > value) out.push({ kind: "paragraph", tone: "fine", lines: [line(`Итог ограничен ${value} баллами: ${cappedReason(value)}.`)] });
   return out;
 }
 

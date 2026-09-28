@@ -5,14 +5,14 @@
 // отдельный массив, иначе «нет данных» оказалось бы лучшим или худшим
 // результатом в зависимости от направления сортировки.
 import type { Database } from "bun:sqlite";
-import { CHANNEL_KINDS, DISPLAY_KINDS, PUBLIC_KINDS, computeFromFacts, effectiveFacts, totalsFromCategories, type CategoryScore } from "../score/compute";
+import { CHANNEL_KINDS, DISPLAY_KINDS, PUBLIC_KINDS, computeFromFacts, effectiveFacts, totalCapFlags, totalsFromCategories, type CategoryScore } from "../score/compute";
 import { authorsOf, orderRecommendations, recommendFromFacts, recommendationParams, recommendationText, round4, type DeltaEvaluator } from "../score/recommend";
 import { categoryOf, parseFactValue, scrubDetail } from "../collectors/facts";
 import { isOwnRepo, NO_PAT_ACCESS, visibilityOf, type AccessRepo, type AccessResult, type ChannelAccess } from "../auth/access";
 import { DEFAULT_SCAN, defaultLeaseMs, type ScanConfig } from "../config";
 import { roundScore, type GitLimitsMarker } from "../web/format";
 import type { DerivedMetrics } from "../score/derived";
-import { INDEX_WEIGHTS, SCORE_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, type IndexCategoryKey, MODEL_VERSION, SECRETS_CRITICAL_TOTAL_CAP } from "../score/model";
+import { INDEX_WEIGHTS, SCORE_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, type IndexCategoryKey, MODEL_VERSION, SECRETS_CRITICAL_TOTAL_CAP, CRITICAL_FINDINGS_TOTAL_CAP } from "../score/model";
 import type { AiAudience } from "../db";
 import { NO_RHYTHM_REASON } from "../summary/pipeline";
 import { CI_VALUES, SIZE_BUCKETS, sizeBucketOf, type CiFilter, type SizeBucket } from "./rating-filters";
@@ -1244,9 +1244,10 @@ export function getRepoCard(
   for (const key of CATEGORY_ORDER) shownCats[key] = publicCats[key] ?? { score: null, submetrics: {} };
   shownCats.cicd = categoryOfFacts(channelFacts, "cicd");
   shownCats.security = categoryOfFacts(channelFacts, "security");
-  const secretsOf = (facts: Map<string, unknown>) => (facts.get("appsec.findings") as { secrets_critical?: unknown } | undefined)?.secrets_critical === true;
+  // капы полного итога (секреты 49, критичные находки 69) – из фактов канала AppSec
+  const capsOf = (facts: Map<string, unknown>) => totalCapFlags(facts.get("appsec.findings"));
   const codeEmpty = publicRow.code_empty === 1;
-  const fullTotals = totalsFromCategories(shownCats, { codeEmpty, secretsCritical: secretsOf(channelFacts) });
+  const fullTotals = totalsFromCategories(shownCats, { codeEmpty, ...capsOf(channelFacts) });
 
   // закрытые зрителю каналы: ни чисел, ни подметрик, ни фактов, ни правил
   const lockOf: Partial<Record<CategoryKey, ChannelAccess>> = {};
@@ -1375,12 +1376,16 @@ export function getRepoCard(
     patch(facts);
     const after = totalsFromCategories(
       { ...shownCats, cicd: categoryOfFacts(facts, "cicd"), security: categoryOfFacts(facts, "security") },
-      { codeEmpty, secretsCritical: secretsOf(facts) },
+      { codeEmpty, ...capsOf(facts) },
     ).repoHealthScore;
     if (codeEmpty) return { delta: 0, reason: "code-empty" };
     if (baseFull === null || after === null) return { delta: 0, reason: "no-total" };
     const delta = round4(after - baseFull);
-    if (delta === 0 && secretsOf(channelFacts) && baseFull >= SECRETS_CRITICAL_TOTAL_CAP) return { delta: 0, reason: "cap" };
+    if (delta === 0) {
+      const caps = capsOf(channelFacts);
+      if (caps.secretsCritical && baseFull >= SECRETS_CRITICAL_TOTAL_CAP) return { delta: 0, reason: "cap" };
+      if (caps.criticalOpen && baseFull >= CRITICAL_FINDINGS_TOTAL_CAP) return { delta: 0, reason: "cap-critical" };
+    }
     return { delta, reason: null };
   };
   const channelRecs: CardRecommendation[] = recommendFromFacts(channelFacts, {
