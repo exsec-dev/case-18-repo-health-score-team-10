@@ -3354,6 +3354,26 @@ button.rh-category:focus-visible {
   -webkit-box-decoration-break: clone;
 }
 
+/* скриншот в статье: рамка, подпись, клик – полный размер */
+.rh-docs .rh-docs__article .rh-docs__figure {
+  margin: var(--g-spacing-2) 0 var(--g-spacing-5);
+}
+
+.rh-docs__figure img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  border: 1px solid var(--g-color-line-generic);
+  border-radius: var(--g-border-radius-l);
+}
+
+.rh-docs__figure figcaption {
+  margin-top: var(--g-spacing-2);
+  color: var(--g-color-text-secondary);
+  font-size: var(--g-text-body-1-font-size);
+  line-height: var(--g-text-body-1-line-height);
+}
+
 /* строка пути документации: поиск и PDF */
 .rh-docs-actions {
   display: flex;

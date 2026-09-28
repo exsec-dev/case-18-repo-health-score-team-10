@@ -306,6 +306,18 @@ function BlockView({ block, tight }: { block: DocBlock; tight: boolean }): React
       );
     case "code":
       return <CodeBlock lang={block.lang} text={block.text} />;
+    case "image": {
+      // картинки лежат в docs/guide/images, сервер отдает их по /docs/img/<файл>
+      const url = `/docs/img/${block.src.slice("images/".length)}`;
+      return (
+        <figure className="rh-docs__figure">
+          <a href={url} target="_blank" rel="noopener" aria-label={`${block.alt} – открыть в полном размере`}>
+            <img src={url} alt={block.alt} loading="lazy" />
+          </a>
+          <figcaption>{block.alt}</figcaption>
+        </figure>
+      );
+    }
     case "note":
       return (
         <div className={`rh-docs__note rh-docs__note_${block.tone}`}>

@@ -2,7 +2,7 @@
 // Сборка проверяет, что оглавление и файлы совпадают, а каждая внутренняя ссылка ведет
 // на существующую страницу и заголовок. Ошибки не роняют сервер (раздел покажет то,
 // что разобралось), но тест docs-content требует их отсутствия.
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import type { DocBlock, DocPage, DocsBundle, DocLine } from "./model";
 import { tocPages } from "./model";
@@ -11,6 +11,16 @@ import { parsePage, parseToc, slugOfFile } from "./parse";
 /** Каталог страниц – от модуля, не от cwd (как шрифты отчета). */
 export const DOCS_DIR = resolve(import.meta.dir, "../../docs/guide");
 export const DOCS_PDF_URL = "/docs/healthcraft.pdf";
+
+const IMAGE_TYPES: Record<string, string> = { png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp" };
+
+/** Картинка документации: только имя файла из docs/guide/images, без путей. */
+export function docsImageResponse(name: string, dir: string = DOCS_DIR): Response {
+  const m = /^[a-z0-9][a-z0-9._-]*\.(png|jpe?g|webp)$/i.exec(name);
+  const path = m ? join(dir, "images", name) : null;
+  if (!m || !path || !existsSync(path)) return new Response("not found", { status: 404 });
+  return new Response(Bun.file(path), { headers: { "content-type": IMAGE_TYPES[m[1]!.toLowerCase()]!, "cache-control": "public, max-age=3600" } });
+}
 
 function listMarkdown(dir: string): string[] {
   const out: string[] = [];
@@ -79,6 +89,12 @@ export function loadDocs(dir: string = DOCS_DIR): LoadedDocs {
   }
   for (const slug of bySlug.keys()) if (!seen.has(slug)) errors.push(`страница «${slug || "index"}» не указана в toc.md`);
 
+  // картинки: файл должен лежать в docs/guide/images
+  const imagesOf = (blocks: DocBlock[]): string[] =>
+    blocks.flatMap((b) => (b.kind === "image" ? [b.src] : b.kind === "list" ? b.items.flatMap(imagesOf) : b.kind === "note" ? imagesOf(b.blocks) : []));
+  for (const page of pages) {
+    for (const src of imagesOf(page.blocks)) if (!existsSync(join(dir, src))) errors.push(`${page.slug || "index"}: нет файла картинки docs/guide/${src}`);
+  }
   for (const page of pages) {
     for (const line of linksOf(page.blocks)) {
       for (const f of line) {

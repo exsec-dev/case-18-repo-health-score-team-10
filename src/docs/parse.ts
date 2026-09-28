@@ -134,6 +134,8 @@ export function parseInline(src: string, file: string, errors: string[]): DocLin
 // ---------- блоки ----------
 
 const LIST_RE = /^([-*]|\d+\.)\s+/;
+const IMAGE_RE = /^!\[([^\]]*)\]\(([^)\s]+)\)$/;
+const IMAGE_EXT = /\.(png|jpe?g|webp)$/i;
 const FENCE_RE = /^```/;
 const NOTE_RE = /^\{%\s*note\s+(info|warning|tip|alert)(?:\s+"([^"]*)")?\s*%\}\s*$/;
 const ENDNOTE_RE = /^\{%\s*endnote\s*%\}\s*$/;
@@ -142,7 +144,7 @@ const indentOf = (line: string) => line.length - line.trimStart().length;
 
 function startsBlock(line: string): boolean {
   const t = line.trimStart();
-  return FENCE_RE.test(t) || t.startsWith("#") || t.startsWith("|") || LIST_RE.test(t) || NOTE_RE.test(t) || ENDNOTE_RE.test(t) || t.startsWith("<!--");
+  return IMAGE_RE.test(t) || FENCE_RE.test(t) || t.startsWith("#") || t.startsWith("|") || LIST_RE.test(t) || NOTE_RE.test(t) || ENDNOTE_RE.test(t) || t.startsWith("<!--");
 }
 
 function splitRow(line: string): string[] {
@@ -233,6 +235,23 @@ function parseBlocks(lines: string[], ctx: Ctx, depth: number): DocBlock[] {
         ctx.headings.push({ level: level as 2 | 3, id, text: content.map((f) => f.text).join("") });
         blocks.push({ kind: "heading", level: level as 2 | 3, id, content });
       }
+      i++;
+      continue;
+    }
+    const img = IMAGE_RE.exec(t);
+    if (img) {
+      // картинка – отдельной строкой; путь относительно файла страницы, только каталог images/
+      const baseDir = ctx.file.replace(/\\/g, "/").split("/").slice(0, -1);
+      const parts = [...baseDir];
+      for (const seg of img[2]!.split("/")) {
+        if (seg === "" || seg === ".") continue;
+        if (seg === "..") parts.pop();
+        else parts.push(seg);
+      }
+      const src = parts.join("/");
+      if (!src.startsWith("images/") || !IMAGE_EXT.test(src)) ctx.errors.push(`картинка «${img[2]}»: только файлы docs/guide/images/*.png|jpg|webp`);
+      if (!img[1]!.trim()) ctx.errors.push(`картинка «${img[2]}» без подписи`);
+      blocks.push({ kind: "image", src, alt: unescape(img[1]!.trim()) });
       i++;
       continue;
     }

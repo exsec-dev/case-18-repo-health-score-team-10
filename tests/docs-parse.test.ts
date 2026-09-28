@@ -4,7 +4,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { loadDocs } from "../src/docs/load";
+import { docsImageResponse, loadDocs } from "../src/docs/load";
 import { tocPages } from "../src/docs/model";
 import { buildDocsPdf, renderDocsPdf } from "../src/docs/pdf";
 import { headingId, parsePage, parseToc, slugOfFile } from "../src/docs/parse";
@@ -171,15 +171,38 @@ describe("сборка раздела", () => {
     ]);
   });
 
+  test("картинка: разбор, проверка файла, отдача сервером, PDF", async () => {
+    // PNG 1×1
+    const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+    mkdirSync(join(dir, "images"), { recursive: true });
+    writeFileSync(join(dir, "images", "shot.png"), png);
+    const { page, errors } = parsePage("# T\n\n![Рейтинг](../images/shot.png)\n\n![](images/x.gif)", "method/t.md");
+    expect(page.blocks[0]).toEqual({ kind: "image", src: "images/shot.png", alt: "Рейтинг" });
+    expect(errors.length).toBe(2); // gif и пустая подпись
+    put("method/scores.md", "# Формула\n\n## Порог {#porog}\n\n![Шкала](../images/shot.png)\n\n![Нет файла](../images/missing.png)\n\n[назад](../index.md)\n");
+    const loaded = loadDocs(dir);
+    expect(loaded.errors).toContain("method/scores: нет файла картинки docs/guide/images/missing.png");
+    const ok = docsImageResponse("shot.png", dir);
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get("content-type")).toBe("image/png");
+    expect(docsImageResponse("../secret.png", dir).status).toBe(404);
+    expect(docsImageResponse("shot.svg", dir).status).toBe(404);
+    // PDF собирается и с картинкой (без отсутствующей)
+    put("method/scores.md", "# Формула\n\n## Порог {#porog}\n\n![Шкала](../images/shot.png)\n\n[назад](../index.md)\n");
+    const pdf = await renderDocsPdf(loadDocs(dir).bundle, { date: "28.09.2026", siteUrl: "https://health-craft.ru/docs", guideDir: dir });
+    expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
+  });
+
   test("PDF собирается: обложка, содержание; новый лист – у страницы вне группы и у начала группы", async () => {
     const { bundle } = loadDocs(dir);
-    const doc = buildDocsPdf(bundle, { date: "28.09.2026", siteUrl: "https://health-craft.ru/docs" }) as { content: Record<string, unknown>[] };
+    const doc = buildDocsPdf(bundle, { date: "28.09.2026", siteUrl: "https://health-craft.ru/docs", guideDir: dir }) as { content: Record<string, unknown>[] };
     expect(doc.content.some((n) => "toc" in n)).toBe(true);
-    const heads = doc.content.filter((n) => "stack" in n);
+    // заголовки страниц – стеки с разрывом листа или уровнем заголовка (картинка – тоже стек, но без них)
+    const heads = doc.content.filter((n) => "stack" in n && (n.pageBreak === "before" || n.headlineLevel === 1));
     expect(heads).toHaveLength(bundle.pages.length);
     // «Начало» вне группы, «Формула» открывает группу «Методика»
     expect(heads.map((n) => n.pageBreak === "before")).toEqual([true, true]);
-    const pdf = await renderDocsPdf(bundle, { date: "28.09.2026", siteUrl: "https://health-craft.ru/docs" });
+    const pdf = await renderDocsPdf(bundle, { date: "28.09.2026", siteUrl: "https://health-craft.ru/docs", guideDir: dir });
     expect(pdf.subarray(0, 5).toString()).toBe("%PDF-");
   });
 });

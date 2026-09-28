@@ -101,7 +101,9 @@ export type DocBlock =
   | { kind: "list"; ordered: boolean; items: DocBlock[][] }
   | { kind: "table"; align: ("left" | "right" | "center")[]; head: DocLine[]; rows: DocLine[][] }
   | { kind: "code"; lang: string; text: string }
-  | { kind: "note"; tone: "info" | "warning"; title: string | null; blocks: DocBlock[] };
+  | { kind: "note"; tone: "info" | "warning"; title: string | null; blocks: DocBlock[] }
+  /** скриншот: `src` – путь от docs/guide (только images/*), `alt` – подпись под картинкой */
+  | { kind: "image"; src: string; alt: string };
 
 export interface DocHeading {
   level: 2 | 3;

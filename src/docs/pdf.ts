@@ -1,6 +1,8 @@
 // PDF документации – из той же модели, что раздел /docs (src/docs/model.ts): обложка,
 // содержание, страницы в порядке оглавления, каждая с новой страницы листа. Шрифт,
 // цвета и поля – как у PDF-отчета карточки (src/report/pdf.ts).
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import pdfmake from "pdfmake";
 import { breakable, COLORS, LABEL_COLORS } from "../report/pdf";
 import type { DocBlock, DocLine, DocsBundle, TocNode, UiVariant } from "./model";
@@ -12,6 +14,19 @@ const SIDE = 56;
 const TOP = 48;
 const BOTTOM = 52;
 const PAGE_H = 841.89;
+/** рабочая ширина листа (A4 без полей) – по ней вписываются скриншоты */
+const CONTENT_W = 595.28 - 2 * SIDE;
+/** каталог страниц документации – картинки лежат в его images/ (как DOCS_DIR в load.ts) */
+const GUIDE_DIR = join(import.meta.dir, "../../docs/guide");
+
+/** Каталог страниц текущей сборки PDF (тесты собирают из временного каталога). */
+let currentGuideDir = GUIDE_DIR;
+
+/** Скриншот как data URL: pdfmake не ходит ни в сеть, ни на диск за пределами шрифтов. */
+function imageDataUrl(src: string, guideDir: string): string {
+  const ext = src.toLowerCase().endsWith(".png") ? "png" : src.toLowerCase().endsWith(".webp") ? "webp" : "jpeg";
+  return `data:image/${ext};base64,${readFileSync(join(guideDir, src)).toString("base64")}`;
+}
 
 // tag – кегль тегов интерфейса и кода в строке: один для всех, чуть меньше текста (как 13px при 15px на сайте)
 const SIZE = { body: 10, h1: 20, h2: 14, h3: 11.5, small: 8.5, code: 8.5, tag: 9 } as const;
@@ -127,6 +142,15 @@ function blockNode(block: DocBlock, slug: string): PdfNode {
         layout: { hLineWidth: () => 0, vLineWidth: () => 0, fillColor: () => CODE_BG, paddingLeft: () => 8, paddingRight: () => 8, paddingTop: () => 6, paddingBottom: () => 6 },
         margin: [0, 0, 0, 9],
       };
+    case "image":
+      return {
+        stack: [
+          { image: imageDataUrl(block.src, currentGuideDir), fit: [CONTENT_W, 380], alignment: "center" },
+          { text: block.alt, fontSize: SIZE.small, color: COLORS.muted, alignment: "center", margin: [0, 4, 0, 0] },
+        ],
+        unbreakable: true,
+        margin: [0, 4, 0, 12],
+      };
     case "note": {
       const c = NOTE_COLORS[block.tone];
       const title = block.title ?? (block.tone === "warning" ? "Важно" : "Примечание");
@@ -163,6 +187,8 @@ function groupOf(toc: TocNode[]): Map<string, string> {
 }
 
 export interface DocsPdfMeta {
+  /** каталог docs/guide, из которого берутся картинки; по умолчанию – каталог репозитория */
+  guideDir?: string;
   /** дата сборки для обложки: «28.09.2026» */
   date: string;
   /** адрес раздела на стенде для обложки */
@@ -170,6 +196,7 @@ export interface DocsPdfMeta {
 }
 
 export function buildDocsPdf(bundle: DocsBundle, meta: DocsPdfMeta): PdfNode {
+  currentGuideDir = meta.guideDir ?? GUIDE_DIR;
   const groups = groupOf(bundle.toc);
   const content: PdfNode[] = [
     // обложка

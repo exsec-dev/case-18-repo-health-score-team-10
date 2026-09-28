@@ -53,7 +53,7 @@ import { renderRepoReport } from "./report/markdown";
 import { REPORT_NO_SCORE } from "./report/build";
 import { reportFileName } from "./web/format";
 import { pdfResponse } from "./report/pdf";
-import { docsPdfResponse, docsSource } from "./docs/load";
+import { docsImageResponse, docsPdfResponse, docsSource } from "./docs/load";
 import { catalogClientBudget, closeOwnRunningScans, maintenanceTick, returnOwnRunningJobs, startMaintenance, startScheduler, startWorkerLoops, workerLoopPlan, workerLoopSummary } from "./jobs/scheduler";
 import { enqueueCheck, enqueueSummary, lastFinishedScan } from "./jobs/scheduler";
 import { aiQuota, clearUnlock, isUnlocked, quotaRefusal, tryUnlock, type QuotaRefusal } from "./jobs/ai-quota";
@@ -1343,6 +1343,7 @@ const routes = {
     // страницами без запросов) и PDF с тем же текстом
     "/api/docs": () => Response.json(docs().bundle, { headers: { "cache-control": "no-cache" } }),
     "/docs/healthcraft.pdf": () => docsPdfResponse(docs(), config.publicBaseUrl),
+    "/docs/img/:name": (req) => docsImageResponse(req.params.name),
     // неизвестный /api/* обязан остаться JSON-404, а не отдать HTML
     "/api/*": () => notFound("такого адреса нет"),
     // catch-all фронтенда: маршруты /repo/{org}/{repo} живут в History API,
