@@ -107,8 +107,36 @@ const badgeHits = new Map<string, number[]>();
 const BADGE_PER_MINUTE_PER_IP = 120;
 // потолок карты: подделанный X-Forwarded-For не должен растить память бесконечно
 const BADGE_KEYS_CAP = 10_000;
+
+/** Адрес из частной или локальной сети: так к сервису подключается прокси стенда. */
+function isPrivatePeer(address: string): boolean {
+  const a = address.toLowerCase().replace(/^::ffff:/, "");
+  if (a === "::1") return true;
+  if (/^f[cd][0-9a-f]{2}:/.test(a) || /^fe[89ab][0-9a-f]:/.test(a)) return true;
+  const m = /^(\d+)\.(\d+)\.\d+\.\d+$/.exec(a);
+  if (!m) return false;
+  const [x, y] = [Number(m[1]), Number(m[2])];
+  return x === 127 || x === 10 || (x === 172 && y >= 16 && y <= 31) || (x === 192 && y === 168);
+}
+
+/**
+ * Ключ лимита публичного API – адрес клиента. X-Forwarded-For учитывается,
+ * только если соединение пришло из частной сети, то есть от прокси: Caddy
+ * стенда не доверяет входящему заголовку (trusted_proxies не заданы) и ставит
+ * в него один адрес клиента. Если сервис открыт наружу без прокси, заголовок
+ * мог бы подставить сам клиент, поэтому ключом служит адрес соединения.
+ */
+function clientKey(req: Request): string {
+  const peer = server.requestIP(req)?.address ?? null;
+  if (peer === null || isPrivatePeer(peer)) {
+    const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
+    if (forwarded) return forwarded;
+  }
+  return peer ?? "local";
+}
+
 function badgeWindowHasRoom(req: Request, now = Date.now()): boolean {
-  const key = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";
+  const key = clientKey(req);
   const windowMs = 60_000;
   // чистка всей карты на каждый вызов (как в allowInWindow) и вытеснение
   // старейших ключей сверх капа (Map хранит порядок вставки)
@@ -128,6 +156,26 @@ function badgeWindowHasRoom(req: Request, now = Date.now()): boolean {
   badgeHits.set(key, hits);
   return true;
 }
+/**
+ * CORS публичного API: любой сайт может прочитать JSON и бейдж из браузера.
+ * Заголовок ставится на все ответы /api/v1/*, включая 404, 400 и 429, чтобы
+ * браузерный код видел ошибку; cookie и авторизация здесь не используются,
+ * поэтому Allow-Credentials не нужен. OPTIONS отвечает сразу, без лимита.
+ */
+function publicCors<R extends Request>(handler: (req: R) => Response): (req: R) => Response {
+  return (req) => {
+    const res =
+      req.method === "OPTIONS"
+        ? new Response(null, {
+            status: 204,
+            headers: { "access-control-allow-methods": "GET, HEAD, OPTIONS", "access-control-max-age": "86400" },
+          })
+        : handler(req);
+    res.headers.set("access-control-allow-origin", "*");
+    return res;
+  };
+}
+
 /** Одинаковый 404 для приватного, исключенного из каталога и несуществующего — чтобы не выдавать, что репо есть. */
 function publicNotFound(): Response {
   return new Response("not found", {
@@ -728,16 +776,17 @@ const routes = {
     // ---------- публичный API и бейдж ----------
     // Без авторизации, только публичные репо из рейтинга; приватный, исключенный и
     // несуществующий — одинаковый 404. Отдельный лимит по IP (бейдж дергают из
-    // README, он не должен мешать интерактиву); кэш-заголовки на 200.
-    "/api/v1/repos/:org/:repo": (req) => {
+    // README, он не должен мешать интерактиву); кэш-заголовки на 200; CORS на все
+    // ответы (publicCors).
+    "/api/v1/repos/:org/:repo": publicCors((req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) return notFound("not found");
       if (!badgeWindowHasRoom(req)) return rateLimited("слишком много запросов – попробуйте позже", 60);
       const proj = getPublicRepo(db, org!, repo!);
       if (proj === null) return publicNotFound();
       return Response.json(proj, { headers: { "cache-control": `public, max-age=${BADGE_CACHE_SECONDS}` } });
-    },
-    "/api/v1/repos/:org/:repo/badge.svg": (req) => {
+    }),
+    "/api/v1/repos/:org/:repo/badge.svg": publicCors((req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) return notFound("not found");
       if (!badgeWindowHasRoom(req)) return rateLimited("слишком много запросов – попробуйте позже", 60);
@@ -752,7 +801,9 @@ const routes = {
           "cache-control": `public, max-age=${BADGE_CACHE_SECONDS}`,
         },
       });
-    },
+    }),
+    // неизвестный адрес публичного API – тот же JSON-404, что у /api/*, но с CORS
+    "/api/v1/*": publicCors(() => notFound("такого адреса нет")),
     // ---------- история оценки и история AI-текстов ----------
     // Публичная проекция строк scores + scans.head_sha; полного Score без прав
     // нет, исключенный или приватный — 404, неотличимый от несуществующего

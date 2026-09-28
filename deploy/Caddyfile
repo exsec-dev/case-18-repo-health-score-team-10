@@ -1,14 +1,14 @@
-# HealthCraft — прокси стенда.
-# SITE_ADDRESS — адреса через запятую (Caddy сам выпускает и продлевает сертификаты
-# Let's Encrypt), например "health-craft.ru, www.health-craft.ru"; ":80" — только HTTP, пока
-# домена нет. CANONICAL_HOST — основной хост: остальные адреса переадресуются на него
-# (вход Я ID, cookie и Origin-гард мутаций привязаны к одному origin — YA_REDIRECT_URI).
+# HealthCraft – прокси стенда.
+# SITE_ADDRESS – адреса через запятую (Caddy сам выпускает и продлевает сертификаты
+# Let's Encrypt), например "health-craft.ru, www.health-craft.ru"; ":80" – только HTTP, пока
+# домена нет. CANONICAL_HOST – основной хост: остальные адреса переадресуются на него
+# (вход Я ID, cookie и Origin-гард мутаций привязаны к одному origin – YA_REDIRECT_URI).
 
 # Запрос по IP стенда по HTTP. Без этого блока автоматическая
-# переадресация Caddy уводит http://IP на https://IP, а сертификата на IP у стенда нет —
+# переадресация Caddy уводит http://IP на https://IP, а сертификата на IP у стенда нет –
 # браузер показывает ошибку TLS. Явный HTTP-сайт по IP стоит в маршрутах :80 раньше
 # автоматической переадресации и отправляет на основной хост. STAND_IP задается в .env
-# стенда вместе с CANONICAL_HOST; не задан — адрес-заглушка в зарезервированной зоне
+# стенда вместе с CANONICAL_HOST; не задан – адрес-заглушка в зарезервированной зоне
 # .invalid (RFC 2606): такого Host не бывает, блок ничему не мешает (и в режиме ":80").
 http://{$STAND_IP:stand-ip.invalid} {
 	redir https://{$CANONICAL_HOST}{uri} permanent
@@ -27,15 +27,20 @@ http://{$STAND_IP:stand-ip.invalid} {
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
-		# внешнее: шрифт Inter (Google Fonts, импорт uikit), картинки — аватары Я ID и логотипы
-		# репозиториев SourceCraft (https:), иконка — data:
+		# внешнее: шрифт Inter (Google Fonts, импорт uikit), картинки – аватары Я ID и логотипы
+		# репозиториев SourceCraft (https:), иконка – data:
 		Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
 		-Server
 	}
 
 	reverse_proxy web:8418 {
-		# X-Forwarded-For: Caddy по умолчанию НЕ доверяет входящему заголовку (trusted_proxies
-		# не заданы) и ставит адрес клиента сам — ключ лимита бейджа по IP (src/server.ts) не подделать
+		# X-Forwarded-For: trusted_proxies не заданы, поэтому Caddy (2.5+) отбрасывает
+		# входящий заголовок клиента и передает один адрес – адрес соединения. Сервис берет
+		# ключ лимита публичного API из X-Forwarded-For только у соединений из частной сети,
+		# то есть от этого прокси (src/server.ts, clientKey), и клиенту его не подделать.
+		# Если перед Caddy появится CDN, задайте trusted_proxies – иначе все клиенты CDN
+		# попадут в одно окно лимита.
+
 		# «думающие» обработчики живут до 120 с (idleTimeout сервера)
 		transport http {
 			read_timeout 130s
