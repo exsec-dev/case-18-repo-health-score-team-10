@@ -220,7 +220,7 @@ bun test --timeout 30000
 | `HC_DIR`, `HTTP_PORT`, `HTTPS_PORT` | контейнеры | каталог стенда и порты прокси на машине |
 
 `SITE_ADDRESS`, `CANONICAL_HOST`, `STAND_IP`, `HC_DIR`, `HTTP_PORT`, `HTTPS_PORT` читает `deploy/compose.yaml`, а не
-сервис; в `.env.example` из них есть только закомментированный `STAND_IP`.
+сервис; в `.env.example` они собраны в блоке «Стенд в контейнерах».
 
 ## Развертывание
 
