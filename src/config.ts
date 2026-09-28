@@ -75,7 +75,7 @@ export interface AuthConfig {
 }
 
 export interface SchedulerConfig {
-  /** интервал ночной фазы обхода каталога (сутки по умолчанию, ТЗ §6) */
+  /** интервал ночной фазы обхода каталога (сутки по умолчанию) */
   intervalMs: number;
   /** интервал сверки каталога: дешевый проход чаще сканов, час по умолчанию
    *  (новые и удаленные репо отражаются не позже интервала) */
@@ -449,8 +449,9 @@ export function loadConfig(): Config {
       : appSecretRaw;
   return {
     port: Number(env.PORT) > 0 ? Number(env.PORT) : 8418,
-    processRole: (["all", "web", "rating"] as const).includes(process.env.PROCESS_ROLE as "all" | "web" | "rating")
-      ? (process.env.PROCESS_ROLE as "all" | "web" | "rating")
+    // как остальные переменные – из .env и окружения процесса (окружение важнее)
+    processRole: (["all", "web", "rating"] as const).includes(env.PROCESS_ROLE as "all" | "web" | "rating")
+      ? (env.PROCESS_ROLE as "all" | "web" | "rating")
       : "all",
     dataDir: env.DATA_DIR ?? "data",
     api: {

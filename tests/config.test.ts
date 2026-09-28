@@ -165,3 +165,31 @@ describe("Ф2.19: худший случай скана и бюджет извл�
     expect(DEFAULT_LEASE_MS).toBe(10 * 60_000);
   });
 });
+
+// PROCESS_ROLE читается так же, как остальные переменные: из .env и окружения,
+// окружение процесса важнее строки в файле; незнакомое значение – all
+describe("PROCESS_ROLE из .env и окружения", () => {
+  test(".env задает роль, окружение ее перекрывает, мусор – all", () => {
+    const { mkdtempSync, rmSync, writeFileSync } = require("node:fs") as typeof import("node:fs");
+    const { tmpdir } = require("node:os") as typeof import("node:os");
+    const { join } = require("node:path") as typeof import("node:path");
+    const dir = mkdtempSync(join(tmpdir(), "rh-config-role-"));
+    const cwd = process.cwd();
+    const saved = process.env.PROCESS_ROLE;
+    try {
+      writeFileSync(join(dir, ".env"), "PROCESS_ROLE=rating\n");
+      process.chdir(dir);
+      delete process.env.PROCESS_ROLE;
+      expect(loadConfig().processRole).toBe("rating");
+      process.env.PROCESS_ROLE = "web";
+      expect(loadConfig().processRole).toBe("web");
+      process.env.PROCESS_ROLE = "bogus";
+      expect(loadConfig().processRole).toBe("all");
+    } finally {
+      process.chdir(cwd);
+      if (saved === undefined) delete process.env.PROCESS_ROLE;
+      else process.env.PROCESS_ROLE = saved;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
