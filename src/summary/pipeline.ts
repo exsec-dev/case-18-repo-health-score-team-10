@@ -6,7 +6,7 @@
 // не попадает, роль уходит в failSoft. Конвейер пишет ТОЛЬКО ai_notes: Score считает
 // код, LLM его не трогает.
 import type { Database } from "bun:sqlite";
-import { readdirSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { CallLlm, ChatMessage } from "../llm";
 import { LlmError } from "../llm";
@@ -694,16 +694,19 @@ async function runFlagger(
 }
 
 /** README корня клона (рамку вешает вызывающий). Размер проверяется ДО чтения:
- *  гигантский README не читается вовсе. */
-async function readReadme(deps: SummaryDeps): Promise<string | null> {
+ *  гигантский README не читается вовсе. Только обычный файл: закоммиченный симлинк
+ *  (например, на `/app/.env` хоста) не читается – как у инструментов модели. */
+export async function readReadme(deps: Pick<SummaryDeps, "clone">): Promise<string | null> {
   if (!deps.clone) return null;
   try {
     const names = readdirSync(deps.clone.root).filter((n) => /^readme(\.|$)/i.test(n));
     const name = names[0];
     if (!name) return null;
-    const buf = Bun.file(join(deps.clone.root, name));
-    if (buf.size > MAX_PLAIN_READ_BYTES) return null;
-    return buf.size > 0 ? await buf.text() : null;
+    const path = join(deps.clone.root, name);
+    // lstat не идет по ссылке: симлинк, каталог и прочее – не README
+    const st = lstatSync(path);
+    if (!st.isFile() || st.size > MAX_PLAIN_READ_BYTES) return null;
+    return st.size > 0 ? readFileSync(path, "utf8") : null;
   } catch {
     return null;
   }
