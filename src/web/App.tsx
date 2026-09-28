@@ -9,6 +9,7 @@ import { useState } from "react";
 import type { MetaResponse } from "./api";
 import { dataOf, useJson } from "./api";
 import { ComparePage } from "./ComparePage";
+import { DocsPage } from "./DocsPage";
 import { JobsBell, MePage, SettingsPage } from "./MePage";
 import { Rating } from "./Rating";
 import { RepoPage } from "./RepoPage";
@@ -53,7 +54,9 @@ function Routes() {
             ? "compare"
           : route.kind === "settings"
             ? "settings"
-            : null;
+            : route.kind === "docs"
+              ? "docs"
+              : null;
 
   return (
     <Shell section={section} me={meData} globalActions={meData?.login ? <JobsBell /> : null}>
@@ -75,6 +78,7 @@ function Routes() {
       {route.kind === "me" && <MePage meta={metaData} />}
       {route.kind === "compare" && <ComparePage search={route.search} />}
       {route.kind === "settings" && <SettingsPage />}
+      {route.kind === "docs" && <DocsPage slug={route.slug} />}
       {route.kind === "not-found" && (
         <Page crumbs={[{ text: "Страница не найдена" }]}>
           {/* как у платформы: две строки и действие, без перечня маршрутов –

@@ -53,6 +53,7 @@ import { renderRepoReport } from "./report/markdown";
 import { REPORT_NO_SCORE } from "./report/build";
 import { reportFileName } from "./web/format";
 import { pdfResponse } from "./report/pdf";
+import { docsPdfResponse, docsSource } from "./docs/load";
 import { catalogClientBudget, closeOwnRunningScans, maintenanceTick, returnOwnRunningJobs, startMaintenance, startScheduler, startWorkerLoops, workerLoopPlan, workerLoopSummary } from "./jobs/scheduler";
 import { enqueueCheck, enqueueSummary, lastFinishedScan } from "./jobs/scheduler";
 import { aiQuota, clearUnlock, isUnlocked, quotaRefusal, tryUnlock, type QuotaRefusal } from "./jobs/ai-quota";
@@ -604,6 +605,9 @@ const yaCreds = () => ({
 
 /** Адреса Я ID — из конфига (тесты направляют их на локальный мок). */
 const yaEndpoints = (): YaEndpoints => ({ oauthBase: config.auth.yaOauthBase, loginBase: config.auth.yaLoginBase });
+
+// документация docs/guide: в разработке перечитывается на каждом запросе
+const docs = docsSource({ reload: process.env.NODE_ENV !== "production", log: (m) => console.warn(m) });
 
 // таблица маршрутов типизирована как у Bun.serve, чтобы обертка hardenRoutes
 // не стирала сигнатуры обработчиков и метод-карт вроде POST
@@ -1284,6 +1288,10 @@ const routes = {
       const out = await requestUserScan(db, client, user.userId, org!, repo!, config.queue, new Date(), own.repoRes);
       return scanResponse(out);
     },
+    // документация: все страницы одним ответом (раздел /docs переходит между
+    // страницами без запросов) и PDF с тем же текстом
+    "/api/docs": () => Response.json(docs().bundle, { headers: { "cache-control": "no-cache" } }),
+    "/docs/healthcraft.pdf": () => docsPdfResponse(docs(), config.publicBaseUrl),
     // неизвестный /api/* обязан остаться JSON-404, а не отдать HTML
     "/api/*": () => notFound("такого адреса нет"),
     // catch-all фронтенда: маршруты /repo/{org}/{repo} живут в History API,

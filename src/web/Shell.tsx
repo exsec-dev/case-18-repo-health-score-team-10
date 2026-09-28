@@ -18,7 +18,7 @@ import { HealthCraftMark, PRODUCT_NAME } from "./logo";
 import { useAppTheme, useMediaQuery, useRailCompact, type AppTheme } from "./prefs";
 import { linkProps, loginHref, navigate } from "./router";
 
-export type Section = "rating" | "me" | "compare" | "settings" | null;
+export type Section = "rating" | "me" | "compare" | "settings" | "docs" | null;
 
 interface SectionDef {
   id: Exclude<Section, null>;
@@ -249,9 +249,17 @@ function RailFooter({ me, compact, section }: { me: MeResponse | null; compact: 
 
   return (
     <>
-      {/* Документация пока недоступна; regularSize — строка 40px,
-          как нижние пункты rail SourceCraft. */}
-      <FooterItem id="docs" title="Документация" icon={BookOpen} regularSize {...tip("Документация")} />
+      {/* regularSize — строка 40px, как нижние пункты rail SourceCraft */}
+      <FooterItem
+        id="docs"
+        title="Документация"
+        icon={BookOpen}
+        href="/docs"
+        current={section === "docs"}
+        regularSize
+        {...tip("Документация")}
+        onItemClick={(_item, _collapsed, e) => followLink(e, "/docs")}
+      />
       <FooterItem
         id="settings"
         title="Настройки"

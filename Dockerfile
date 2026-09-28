@@ -17,6 +17,8 @@ RUN bun install --frozen-lockfile --production
 COPY tsconfig.json ./
 COPY prompts ./prompts
 COPY src ./src
+# страницы раздела /docs и PDF документации
+COPY docs/guide ./docs/guide
 
 # /data — БД (том), /tmp/clones — временные клоны (том на диске ВМ, не в слое контейнера)
 RUN mkdir -p /data /tmp/clones && chown -R bun:bun /data /tmp/clones

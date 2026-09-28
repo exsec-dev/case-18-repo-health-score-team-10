@@ -3176,6 +3176,382 @@ button.rh-category:focus-visible {
   box-shadow: inset 0 0 0 1px var(--rh-league-bronze-border);
 }
 
+/* ---------- документация (/docs): как документация SourceCraft ----------
+ * Дерево разделов 280px слева, статья с мерой 800px, «На этой странице» 240px
+ * справа (с 1280px). Дерево и статья прокручиваются каждое своим контейнером. */
+
+.rh-page__main:has(> .rh-fill__content > .rh-docs) {
+  padding: 0;
+}
+
+.rh-fill__content:has(> .rh-docs) {
+  padding-bottom: 0;
+  overflow: hidden;
+}
+
+.rh-docs {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+
+.rh-docs__nav {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 280px;
+  padding: var(--g-spacing-4) var(--g-spacing-2) var(--g-spacing-6) var(--g-spacing-4);
+  overflow-y: auto;
+  border-right: 1px solid var(--g-color-line-generic);
+}
+
+.rh-docs__nav-toggle {
+  display: none;
+}
+
+.rh-docs-toc {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rh-docs-toc .rh-docs-toc {
+  padding-left: var(--g-spacing-4);
+}
+
+.rh-docs-toc__link,
+.rh-docs-toc__group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px var(--g-spacing-2);
+  border: 0;
+  border-radius: var(--g-border-radius-m);
+  color: var(--g-color-text-primary);
+  background: none;
+  font: inherit;
+  font-size: var(--g-text-body-1-font-size);
+  line-height: var(--g-text-body-1-line-height);
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.rh-docs-toc__group {
+  padding-left: 2px;
+}
+
+.rh-docs-toc__link:hover,
+.rh-docs-toc__group:hover {
+  background: var(--g-color-base-simple-hover);
+}
+
+.rh-docs-toc__link_current,
+.rh-docs-toc__link_current:hover {
+  background: var(--g-color-base-selection);
+}
+
+.rh-docs__main {
+  flex: 1;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: var(--g-spacing-6) var(--g-spacing-8) var(--g-spacing-8);
+  overflow-y: auto;
+}
+
+.rh-docs__article,
+.rh-docs__pager {
+  max-width: 800px;
+}
+
+.rh-docs__article {
+  color: var(--g-color-text-primary);
+  font-size: var(--g-text-body-2-font-size);
+  line-height: 1.6;
+}
+
+.rh-docs__article .rh-docs__h1 {
+  margin: 0 0 var(--g-spacing-5);
+  font-size: var(--g-text-display-1-font-size);
+  font-weight: var(--g-text-header-font-weight);
+  line-height: var(--g-text-display-1-line-height);
+}
+
+.rh-docs__article .rh-docs__h2 {
+  margin: var(--g-spacing-8) 0 var(--g-spacing-3);
+  font-size: var(--g-text-header-2-font-size);
+  font-weight: var(--g-text-header-font-weight);
+  line-height: var(--g-text-header-2-line-height);
+  scroll-margin-top: var(--g-spacing-4);
+}
+
+.rh-docs__article .rh-docs__h3 {
+  margin: var(--g-spacing-6) 0 var(--g-spacing-2);
+  font-size: var(--g-text-header-1-font-size);
+  font-weight: var(--g-text-header-font-weight);
+  line-height: var(--g-text-header-1-line-height);
+  scroll-margin-top: var(--g-spacing-4);
+}
+
+.rh-docs__anchor {
+  margin-left: 8px;
+  color: var(--g-color-text-hint);
+  text-decoration: none;
+  opacity: 0;
+}
+
+:is(.rh-docs__h2, .rh-docs__h3):hover .rh-docs__anchor,
+.rh-docs__anchor:focus-visible {
+  opacity: 1;
+}
+
+.rh-docs .rh-docs__article p {
+  margin: 0 0 var(--g-spacing-3);
+}
+
+.rh-docs .rh-docs__article :is(ul, ol) {
+  margin: 0 0 var(--g-spacing-3);
+  padding-left: var(--g-spacing-6);
+}
+
+.rh-docs .rh-docs__article li + li,
+.rh-docs .rh-docs__article li > :is(ul, ol) {
+  margin-top: var(--g-spacing-1);
+}
+
+.rh-docs .rh-docs__article li > p:last-child,
+.rh-docs .rh-docs__article li > :is(ul, ol):last-child {
+  margin-bottom: 0;
+}
+
+.rh-docs__article a {
+  color: var(--g-color-text-link);
+  text-decoration: none;
+}
+
+.rh-docs__article a:hover {
+  color: var(--g-color-text-link-hover);
+}
+
+.rh-docs__article :not(pre) > code {
+  padding: 1px 4px;
+  border-radius: var(--g-border-radius-xs);
+  background: var(--g-color-base-misc-light);
+  font-family: var(--g-font-family-monospace);
+  font-size: 0.9em;
+}
+
+/* элемент интерфейса в тексте: серый тег с иконкой как в UI */
+.rh-docs__ui {
+  padding: 1px 6px;
+  border-radius: var(--g-border-radius-xs);
+  background: var(--g-color-base-generic);
+  color: var(--g-color-text-primary);
+  font-size: 0.93em;
+  /* длинная подпись переносится, подложка продолжается на новой строке */
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* плашки-двойники элементов UI (Label, лига, состояние) – по средней линии строки */
+.rh-docs__uiwrap {
+  vertical-align: middle;
+  line-height: normal;
+}
+
+.rh-docs__ui .g-icon {
+  margin-right: 4px;
+  color: var(--g-color-text-secondary);
+  vertical-align: -2px;
+}
+
+.rh-docs__code {
+  position: relative;
+  margin: 0 0 var(--g-spacing-4);
+}
+
+.rh-docs__code pre {
+  margin: 0;
+  padding: var(--g-spacing-3) var(--g-spacing-10) var(--g-spacing-3) var(--g-spacing-4);
+  overflow-x: auto;
+  border-radius: var(--g-border-radius-l);
+  background: var(--g-color-base-generic);
+  font-family: var(--g-font-family-monospace);
+  font-size: var(--g-text-code-2-font-size);
+  line-height: var(--g-text-code-2-line-height);
+}
+
+.rh-docs__copy {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}
+
+.rh-docs__table {
+  margin: 0 0 var(--g-spacing-4);
+  overflow-x: auto;
+}
+
+.rh-docs__table table {
+  border-collapse: collapse;
+  font-size: var(--g-text-body-1-font-size);
+  line-height: var(--g-text-body-1-line-height);
+}
+
+.rh-docs__table :is(th, td) {
+  padding: var(--g-spacing-2) var(--g-spacing-3);
+  border: 1px solid var(--g-color-line-generic);
+  vertical-align: top;
+}
+
+.rh-docs__table th {
+  background: var(--g-color-base-generic);
+  font-weight: var(--g-text-accent-font-weight);
+}
+
+.rh-docs__note {
+  margin: 0 0 var(--g-spacing-4);
+  padding: var(--g-spacing-3) var(--g-spacing-4);
+  border-radius: var(--g-border-radius-l);
+}
+
+.rh-docs__note > :last-child,
+.rh-docs__note > :last-child > :last-child {
+  margin-bottom: 0;
+}
+
+.rh-docs__note_info {
+  background: var(--g-color-base-info-light);
+}
+
+.rh-docs__note_warning {
+  background: var(--g-color-base-warning-light);
+}
+
+.rh-docs__note-title {
+  margin-bottom: var(--g-spacing-1);
+  font-weight: var(--g-text-accent-font-weight);
+}
+
+.rh-docs__pager {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--g-spacing-4);
+  margin-top: var(--g-spacing-10);
+  padding-top: var(--g-spacing-5);
+  border-top: 1px solid var(--g-color-line-generic);
+}
+
+.rh-docs__pager-link {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--g-color-text-primary);
+  text-decoration: none;
+}
+
+.rh-docs__pager-link_next {
+  align-items: flex-end;
+  text-align: right;
+}
+
+.rh-docs__pager-dir {
+  color: var(--g-color-text-secondary);
+  font-size: var(--g-text-body-1-font-size);
+}
+
+.rh-docs__pager-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--g-text-body-2-font-size);
+}
+
+.rh-docs__pager-link:hover .rh-docs__pager-title {
+  color: var(--g-color-text-link);
+}
+
+.rh-docs__onpage {
+  flex-shrink: 0;
+  box-sizing: border-box;
+  width: 240px;
+  padding: var(--g-spacing-6) var(--g-spacing-4);
+  overflow-y: auto;
+  font-size: var(--g-text-body-1-font-size);
+  line-height: var(--g-text-body-1-line-height);
+}
+
+.rh-docs__onpage-title {
+  margin-bottom: var(--g-spacing-2);
+  color: var(--g-color-text-secondary);
+}
+
+.rh-docs__onpage ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rh-docs__onpage li + li {
+  margin-top: var(--g-spacing-2);
+}
+
+.rh-docs__onpage a {
+  color: var(--g-color-text-primary);
+  text-decoration: none;
+}
+
+.rh-docs__onpage a:hover {
+  color: var(--g-color-text-link);
+}
+
+@media (max-width: 1279px) {
+  .rh-docs__onpage {
+    display: none;
+  }
+}
+
+/* узкий экран: дерево сворачивается в кнопку над статьей */
+@media (max-width: 1023px) {
+  .rh-docs {
+    flex-direction: column;
+  }
+
+  .rh-docs__nav {
+    width: auto;
+    max-height: 50%;
+    padding: var(--g-spacing-2) var(--g-spacing-4);
+    border-right: 0;
+    border-bottom: 1px solid var(--g-color-line-generic);
+    flex-shrink: 0;
+  }
+
+  .rh-docs__nav-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 0;
+    border: 0;
+    color: var(--g-color-text-primary);
+    background: none;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .rh-docs__nav-tree {
+    display: none;
+  }
+
+  .rh-docs__nav_open .rh-docs__nav-tree {
+    display: block;
+  }
+
+  .rh-docs__main {
+    padding: var(--g-spacing-4);
+  }
+}
+
 /* Маркер наших файлов: по нему cssOrder.ts переносит их после CSS компонентов
    uikit (в dev Bun может подключить наши стили раньше, и компоненты выигрывают
    при равной специфичности). Правило ничего не меняет на странице. */

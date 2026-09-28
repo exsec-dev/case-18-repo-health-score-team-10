@@ -11,6 +11,8 @@ export type Route =
   | { kind: "settings" }
   // набор сравнения — в query (`?r=org/a&r=org/b`), ссылкой можно поделиться
   | { kind: "compare"; search: string }
+  // страница документации: `method/scores`; начало раздела – пустая строка
+  | { kind: "docs"; slug: string }
   | { kind: "not-found" };
 
 /** Событие своей навигации: popstate браузер шлёт только на назад/вперёд. */
@@ -22,6 +24,7 @@ export function parseRoute(pathname: string, search = ""): Route {
   if (parts[0] === "me" && parts.length === 1) return { kind: "me" };
   if (parts[0] === "settings" && parts.length === 1) return { kind: "settings" };
   if (parts[0] === "compare" && parts.length === 1) return { kind: "compare", search };
+  if (parts[0] === "docs") return { kind: "docs", slug: parts.slice(1).map(safeDecode).join("/") };
   if (parts[0] === "repo" && parts.length === 3) {
     return { kind: "repo", org: safeDecode(parts[1]!), repo: safeDecode(parts[2]!) };
   }
