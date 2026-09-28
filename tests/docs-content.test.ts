@@ -27,7 +27,7 @@ function pageText(blocks: DocBlock[]): string {
 describe("документация docs/guide", () => {
   test("разбор без ошибок: оглавление, файлы, ссылки, якоря", () => {
     expect(errors).toEqual([]);
-    expect(bundle.pages.length).toBeGreaterThan(20);
+    expect(bundle.pages.length).toBeGreaterThanOrEqual(15);
   });
 
   test("заголовки страниц не повторяются", () => {

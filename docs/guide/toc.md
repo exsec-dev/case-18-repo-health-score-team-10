@@ -3,35 +3,26 @@
 <!-- Порядок страниц раздела /docs и PDF. Пункт – ссылка на страницу или название
 группы с вложенным списком. Каждый .md в docs/guide должен быть здесь. -->
 
-- [HealthCraft](index.md)
-- [Быстрый старт](quickstart.md)
+- [Обзор HealthCraft](index.md)
+- [Установка и запуск](ops/run.md)
+- [Начало работы](quickstart.md)
 - Руководство пользователя
-  - [Рейтинг](guide/rating.md)
-  - [Карточка репозитория](guide/card.md)
-  - [Рекомендации](guide/recommendations.md)
-  - [Отчеты Markdown и PDF](guide/reports.md)
-  - [Сравнение репозиториев](guide/compare.md)
-  - [Свои и закрытые репозитории](guide/own-repos.md)
-  - [AI-обзор и проверка оценки](guide/ai.md)
+  - [Рейтинг и сравнение репозиториев](guide/rating.md)
+  - [Карточка репозитория и отчеты](guide/card.md)
   - [Бейдж и публичный API](guide/badge-api.md)
-- Методика
-  - [Два показателя и формула](method/scores.md)
+- Методика оценки
+  - [Показатели и формула расчета](method/scores.md)
   - [Категории и метрики](method/metrics.md)
-  - [Когда данных нет](method/no-data.md)
-  - [Как строятся рекомендации](method/recommendations.md)
+  - [Обработка отсутствующих данных](method/no-data.md)
+  - [Формирование рекомендаций](method/recommendations.md)
   - [Устойчивость оценки и защита от накрутки](method/robustness.md)
-  - [Как меняется оценка](method/scenarios.md)
-  - [Версии модели и пересчет](method/versions.md)
-- Данные
-  - [Источники данных](data/sources.md)
-  - [Доступ и приватность](data/privacy.md)
-  - [Внешние сервисы и AI](data/ai.md)
-- Развертывание и устройство
+- Устройство сервиса
   - [Архитектура](ops/architecture.md)
+  - [Источники данных и приватность](data/sources.md)
+  - [Внешние сервисы и AI](data/ai.md)
   - [Периодический анализ и масштабирование](ops/scaling.md)
-  - [Сборка и запуск](ops/run.md)
-  - [Переменные окружения](ops/env.md)
-  - [Развертывание на сервере](ops/deploy.md)
+  - [Развертывание и настройка](ops/deploy.md)
 - [Ограничения](limits.md)
+- [План развития](roadmap.md)
 - [Частые вопросы](faq.md)
-- [Соответствие ТЗ](tz-map.md)
+- [Соответствие техническому заданию](tz-map.md)
