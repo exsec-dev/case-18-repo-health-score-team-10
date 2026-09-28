@@ -66,10 +66,10 @@ HealthCraft разворачивается на 1 виртуальной маш�
 | `YA_CLIENT_ID`, `YA_CLIENT_SECRET` | – | OAuth-приложение Яндекс ID; без них вход отвечает 503 |
 | `YA_REDIRECT_URI` | `http://localhost:8418/auth/ya/callback` | адрес возврата после входа, как в OAuth-приложении |
 | `PUBLIC_BASE_URL` | адрес из `YA_REDIRECT_URI` | публичный адрес сервиса для кода бейджа |
-| `LLM_PROVIDER` | `yandex` | провайдер модели: `yandex` (YandexGPT) или `zai` (резервный) |
+| `LLM_PROVIDER` | `yandex` | провайдер модели: `yandex` (YandexGPT) или `zai` (z.ai); провайдер один, выбирается этой настройкой |
 | `MAIN_MODEL` | `yandexgpt` | модель; для `zai` по умолчанию `glm-5.3` |
 | `YAGPT_API_KEY`, `YAGPT_FOLDER_ID` | – | API-ключ сервисного аккаунта и ID каталога Yandex Cloud; без ключа модели AI-обзор недоступен |
-| `ZAI_API_KEY` | – | ключ резервного провайдера |
+| `ZAI_API_KEY` | – | ключ z.ai, если `LLM_PROVIDER=zai` |
 | `AI_OVERVIEW_PER_HOUR`, `AI_OVERVIEW_PER_DAY` | 2, 6 | AI-обзоров на человека в час и в сутки |
 | `AI_CHECK_PER_HOUR`, `AI_CHECK_PER_DAY` | 5, 20 | проверок оценки на человека в час и в сутки |
 | `AI_UNLOCK_PASSWORD` | – | пароль снятия личных лимитов AI, не короче 20 символов; нужен `APP_SECRET` |
