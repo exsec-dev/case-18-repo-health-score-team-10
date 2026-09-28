@@ -1,4 +1,4 @@
-// Контрольные сценарии-инварианты (docs/methodology.md §9): мутации фактов на
+// Контрольные сценарии-инварианты (docs/guide/method/robustness.md#scenarii): мутации фактов на
 // JSON-фикстурах, без сети и клонов. ε=1e-9 на монотонности. CI/Security —
 // own-режим; есть инварианты code_empty и изоляции публичного показателя.
 import { afterAll, describe, expect, test } from "bun:test";

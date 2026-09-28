@@ -2,7 +2,7 @@
 // пользователя служит лишь для разового посева избранного при сохранении PAT.
 // Функции не зависят от HTTP-слоя сервера: клиент SourceCraft передается
 // снаружи, тесты идут без сети. Чужие и недоступные репо не запрашиваются
-// вовсе (ТЗ 5).
+// вовсе.
 import type { Database } from "bun:sqlite";
 import { ScClient } from "../collectors/http";
 import { upsertRepo } from "../jobs/runner";

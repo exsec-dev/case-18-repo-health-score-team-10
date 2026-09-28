@@ -300,7 +300,7 @@ export const LAST_ELIGIBLE_SCAN_SQL = `(SELECT MAX(sc2.scan_id) FROM scores sc2 
 export const LAST_NOT_BAD_SCAN_SQL = `(SELECT MAX(sc2.scan_id) FROM scores sc2 JOIN scans s2 ON s2.id = sc2.scan_id
    WHERE sc2.repo_id = sc.repo_id AND sc2.model_version = ? AND s2.status NOT IN ('bad', 'running', 'queued'))`;
 
-/** Последний скан репо: статус и время последнего анализа (ТЗ §3.4). Алиас репо – r. */
+/** Последний скан репо: статус и время последнего анализа. Алиас репо – r. */
 const LAST_SCAN_SQL = `(SELECT MAX(l2.id) FROM scans l2 WHERE l2.repo_id = r.id)`;
 
 // Одна строка на репозиторий: оценка последнего пригодного скана (сохраненный
@@ -723,7 +723,7 @@ export interface CardMarkers {
   ciConfigOnlyCap: boolean;
   /** часть фактов взята из истории при сбое канала */
   staleFacts: boolean;
-  /** репозиторий без кода: по разъяснению организаторов Score 0 – это данные («проекта нет»), а не NULL */
+  /** репозиторий без кода: по правилу методики Score 0 – это данные («проекта нет»), а не NULL */
   codeEmpty: boolean;
   /** git-канал уперся в лимиты оператора (факт no-data(limits)) – лимиты для текста причины; иначе null */
   gitLimits: GitLimitsMarker | null;
@@ -1080,7 +1080,7 @@ function cardVisible(r: CardRepoRow, access: AccessResult): boolean {
 /**
  * Строка оценки публичной части карточки: последний пригодный скан текущей
  * модели; у приватного репо без такого – последний не-bad (владелец видит
- * оценку своего репо, ТЗ §5). Общая для карточки и файла-заготовки
+ * оценку своего репо). Общая для карточки и файла-заготовки
  * (`fixFileFor`), чтобы заготовка строилась на тех же фактах, что и правило.
  */
 function publicScoreRow(db: Database, r: CardRepoRow): ScoreRow | null {
@@ -1188,7 +1188,7 @@ export function getRepoCard(
   // Откуда берутся данные карточки:
   //  - публичная часть (индекс, 4 категории, публичные факты и правила) – из
   //    последнего пригодного скана; у приватного репо без такого – из
-  //    последнего не-bad скана (владелец видит оценку своего репо, ТЗ §5);
+  //    последнего не-bad скана (владелец видит оценку своего репо);
   //  - CI — из последнего скана, где cicd.configs и cicd.runs собраны ok
   //    (нет такого — последний с ok cicd.configs: потолок «только конфиг»);
   //    Security — из последнего скана, где ok appsec.findings и tree.stats;

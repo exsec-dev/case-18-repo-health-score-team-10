@@ -1,4 +1,4 @@
-// Детерминированный расчет оценки из фактов (docs/methodology.md): compute(db, scan_id)
+// Детерминированный расчет оценки из фактов (docs/guide/method/scores.md): compute(db, scan_id)
 // → Scores с двумя итогами — HealthCraft Index (4 публичные категории) и полный
 // Repo Health Score (6 категорий).
 // Tri-state: no-data подметрика → перенормировка внутри категории; категория
@@ -110,7 +110,7 @@ export interface Scores {
   derived: DerivedMetrics;
   noData: string[];
   stale: string[];
-  /** в репо нет кода: по разъяснению организаторов это оценка 0 как данные («проекта нет»), а не NULL */
+  /** в репо нет кода: по правилу методики это оценка 0 как данные («проекта нет»), а не NULL */
   codeEmpty: boolean;
   computedAt: string;
 }
@@ -525,7 +525,7 @@ const gitNoData = (git: GitState): string => (git.empty ? "repository empty" : "
 export type CodeEmptyKind = "repository empty" | "no files" | "only non-code files" | "no lines of code";
 
 /**
- * Репо без кода: по разъяснению организаторов «проекта нет» = оценка 0 как данные,
+ * Репо без кода: по правилу методики «проекта нет» = оценка 0 как данные,
  * не NULL. Сюда относятся репо без единого коммита; репо без файлов кода (только
  * README, лицензия, картинки; у старых фактов — по корню без каталогов); файлы кода
  * без единой строки (`source_loc = 0`) — пустой `a.js` признак не снимает.

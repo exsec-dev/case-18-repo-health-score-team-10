@@ -4,7 +4,7 @@
 //
 // Файл кода – все, кроме документов, лицензий, служебных файлов git,
 // lock-файлов, картинок, архивов, медиа и бинарников. Репозиторий из одного
-// README и лицензии – «кода нет» (по разъяснению организаторов такой репо
+// README и лицензии – «кода нет» (по правилу методики такой репо
 // получает 0), а плотность TODO считается по строкам кода, а не по README.
 
 const NON_SOURCE_NAME = /^(readme|licen[cs]es?|copying|unlicense|notice|authors|contributors|changelog|changes|history|contributing|codeowners|code_of_conduct|security|maintainers)([._-].*)?$/i;

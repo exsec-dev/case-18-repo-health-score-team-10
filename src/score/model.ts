@@ -1,10 +1,10 @@
 // Константы модели оценки: анкеры нормировки, веса, особые случаи
-// (docs/methodology.md, §4 и §11). Все числа фиксированы ради воспроизводимости:
+// (docs/guide/method/scores.md и metrics.md). Все числа фиксированы ради воспроизводимости:
 // любая правка, меняющая смысл балла (формула, анкер, признак робота,
 // классификация факта), — новая MODEL_VERSION с пересчетом. Анкеры откалиброваны
 // по живой выборке репозиториев. Модель описывает ДВА показателя: полный
 // Repo Health Score (6 категорий, SCORE_WEIGHTS) и публичный HealthCraft Index
-// (4 категории, INDEX_WEIGHTS). История версий — docs/methodology.md §8.
+// (4 категории, INDEX_WEIGHTS). Журнал версий — docs/methodology.md.
 export const MODEL_VERSION = "4.5.0-hci";
 
 /**
@@ -44,7 +44,7 @@ export const BUS_FACTOR_WINDOW_DAYS = 90;
 export const BUS_FACTOR_SHARE = 0.5;
 
 /**
- * Публичный рейтинг = 4 категории: по указанию организаторов CI/CD и Security
+ * Публичный рейтинг = 4 категории: по правилу методики CI/CD и Security
  * в общий рейтинг не входят и видны на карточке только зрителям с доступом
  * к этим каналам. Номинальный вес четверки = 15+15+15+20 = 65 из 100.
  */
@@ -257,7 +257,7 @@ export type CategoryKey = "security" | "activity" | "documentation" | "cicd" | "
 export type IndexCategoryKey = "documentation" | "activity" | "issues" | "code";
 
 /**
- * Repo Health Score — номинальные веса ТЗ: Security 20, Активность 15,
+ * Repo Health Score — номинальные веса методики: Security 20, Активность 15,
  * Документация 15, CI/CD 15, Issues 15, Code 20. Капы – утекшие секреты 49,
  * открытые критичные находки AppSec 69 – применяются только к этому показателю.
  */
