@@ -127,7 +127,6 @@ export interface ContributionView extends Omit<ContributionBar, "segments"> {
 export interface CardView {
   contributions: ContributionView[];
   categories: CategoryView[];
-  worstKey: CategoryKey | null;
   locked: LockedView | null;
   limitations: string[];
   /** предупреждения наверху — только те, которых нет в «Ограничениях данных» */
@@ -197,6 +196,16 @@ const reposWord = (n: number): string => {
   return m10 === 1 && m100 !== 11 ? "репозиторий" : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? "репозитория" : "репозиториев";
 };
 
+/**
+ * «У всех похожих не ниже» – только если ниже нет НИ ОДНОГО. Процент
+ * (`api/cohort.ts`) = floor(100 · ниже / n): 0 бывает и при 1-2 репозиториях
+ * ниже в большой когорте. При n ≤ 100 процент 0 означает ровно «ниже нет»
+ * (один репо ниже дает уже ≥ 1%), при n > 100 – «ниже меньше 1%».
+ */
+export function noneBelow(percentile: number, size: number | null): boolean {
+  return percentile === 0 && size !== null && size <= 100;
+}
+
 export function positionView(card: RepoCard): PositionView | null {
   const score = card.score;
   if (!score || score.rank === null || score.rank === undefined || !score.rankedTotal) return null;
@@ -208,7 +217,14 @@ export function positionView(card: RepoCard): PositionView | null {
     const who = cohortWho(c.language, c.sizeBucket);
     const p = c.index.percentile;
     if (p !== null) {
-      cohort = p === 0 ? "у всех похожих индекс не ниже" : p === 100 ? `лучший среди ${fmtCount(c.size)} похожих` : `лучше ${p}% похожих`;
+      cohort =
+        p === 0
+          ? noneBelow(p, c.size)
+            ? "у всех похожих индекс не ниже"
+            : "лучше менее 1% похожих"
+          : p === 100
+            ? `лучший среди ${fmtCount(c.size)} похожих`
+            : `лучше ${p}% похожих`;
       cohortHelp = `Похожие – ${who} с местом в рейтинге: ${fmtCount(c.size)}. Процент – доля похожих, у кого индекс ниже; равные не считаются.`;
     } else if (c.index.reason === "small-cohort") {
       cohort = "похожих мало для сравнения";
@@ -225,9 +241,10 @@ export function positionView(card: RepoCard): PositionView | null {
 /** Процент среди похожих по категории — строкой раскрытия; null — строки нет. */
 export function categoryCohortNote(card: RepoCard, key: CategoryKey): string | null {
   const c = card.score?.cohort;
-  const stat = c ? (c.categories as Record<string, { percentile: number | null; reason: string | null } | undefined>)[key] : undefined;
+  const stat = c ? (c.categories as Record<string, { percentile: number | null; size: number | null; reason: string | null } | undefined>)[key] : undefined;
   if (!stat) return null;
-  if (stat.percentile !== null) return stat.percentile === 0 ? "Среди похожих – у всех балл не ниже" : `Среди похожих – лучше ${stat.percentile}%`;
+  if (stat.percentile === 0) return noneBelow(stat.percentile, stat.size) ? "Среди похожих – у всех балл не ниже" : "Среди похожих – лучше менее 1%";
+  if (stat.percentile !== null) return `Среди похожих – лучше ${stat.percentile}%`;
   if (stat.reason === "small-cohort") return "Похожих с данными по категории мало для сравнения";
   return null;
 }
@@ -337,7 +354,7 @@ export function cardView(card: RepoCard): CardView {
     analysisAt: analysisDate(card),
     visibility: card.repo.visibility,
   };
-  if (!score) return { ...base, contributions: [], categories: [], worstKey: null, locked: null, fullPath: null, signIn: false };
+  if (!score) return { ...base, contributions: [], categories: [], locked: null, fullPath: null, signIn: false };
 
   const ctx = submetricContext(score.computedAt);
   const categories: CategoryView[] = CATEGORY_ORDER.filter((k) => score.categories[k] !== undefined && score.categories[k]!.locked === undefined).map((key) => {
@@ -356,15 +373,12 @@ export function cardView(card: RepoCard): CardView {
       cohortNote: categoryCohortNote(card, key),
     };
   });
-  // худшая категория раскрыта по умолчанию; «нет данных» не плохо — в расчет не идет
-  const worst = categories.filter((c) => c.score !== null).sort((a, b) => a.score! - b.score!)[0];
   const auth = card.viewer?.auth;
   return {
     ...base,
     // на карточке вклад без «+»: это доля итога, а не прибавка (в PDF подпись с «+»)
     contributions: contributionBars(card).map((bar) => ({ ...bar, segments: bar.segments.map((s) => ({ ...s, value: s.value.replace(/^\+/, ""), colorClass: categoryColorClass(s.key) })) })),
     categories,
-    worstKey: worst?.key ?? null,
     locked: lockedView(card),
     fullPath: score.fullLocked ? fullScorePath(auth, [card.access.cicd, card.access.appsec]) : null,
     signIn: score.fullLocked && (auth === undefined || auth === "no-session"),

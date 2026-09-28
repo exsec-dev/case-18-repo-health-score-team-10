@@ -21,8 +21,19 @@ export const AI_JOB_KIND: Record<AiAction, string> = { overview: "summary", chec
  * недоступен) до модели не дошли или модель не ответила — не списываются.
  */
 export const AI_REJECTED_ERRORS: Record<AiAction, string> = {
-  overview: "AI-описание не сформировано: ни один блок не прошёл проверку",
+  overview: "AI-описание не сформировано: ни один блок не прошел проверку фактами",
   check: "Проверка оценки не сформирована: ответ модели не прошел проверку",
+};
+
+/**
+ * Прежние тексты тех же итогов: заявки, записанные до смены формулировки,
+ * по-прежнему списываются (иначе в сутки смены лимит отдал бы лишние попытки).
+ */
+const AI_REJECTED_LEGACY: Record<AiAction, string> = {
+  // в прежнем тексте слово «прошел» писалось через U+0451; в исходнике этой
+  // буквы нет, символ собирается кодом
+  overview: `AI-описание не сформировано: ни один блок не прош${String.fromCharCode(0x451)}л проверку`,
+  check: AI_REJECTED_ERRORS.check,
 };
 
 const HOUR_MS = 3600_000;
@@ -60,7 +71,7 @@ export interface ActionQuota {
 /** Итог заявки, для которой нашелся готовый текст: заявка done, но лимит не списывается. */
 export const AI_CACHED_NOTE = "текст этого анализа уже был – модель не вызывалась";
 
-const CHARGED = `(status IN ('queued', 'running') OR (status = 'done' AND (error IS NULL OR error != '${AI_CACHED_NOTE}')) OR (status = 'failed' AND error = ?))`;
+const CHARGED = `(status IN ('queued', 'running') OR (status = 'done' AND (error IS NULL OR error != '${AI_CACHED_NOTE}')) OR (status = 'failed' AND error IN (?, ?)))`;
 
 function count(db: Database, sql: string, ...args: (string | number)[]): number {
   return (db.query(`SELECT COUNT(*) AS c FROM jobs WHERE ${sql}`).get(...args) as { c: number }).c;
@@ -70,6 +81,7 @@ function count(db: Database, sql: string, ...args: (string | number)[]): number 
 export function aiQuota(db: Database, userId: number, action: AiAction, cfg: AiConfig, now: Date = new Date()): ActionQuota {
   const kind = AI_JOB_KIND[action];
   const rejected = AI_REJECTED_ERRORS[action];
+  const legacy = AI_REJECTED_LEGACY[action];
   const limits: AiActionLimits = cfg[action];
   const unlocked = isUnlocked(db, userId, cfg);
   const hourFrom = new Date(now.getTime() - HOUR_MS).toISOString();
@@ -78,7 +90,7 @@ export function aiQuota(db: Database, userId: number, action: AiAction, cfg: AiC
   const dayResetAt = new Date(dayStart.getTime() + DAY_MS).toISOString();
 
   const globalUsed = (unlockedJobs: 0 | 1): number =>
-    count(db, `kind = ? AND user_id IS NOT NULL AND ai_unlocked = ? AND created_at >= ? AND ${CHARGED}`, kind, unlockedJobs, dayFrom, rejected);
+    count(db, `kind = ? AND user_id IS NOT NULL AND ai_unlocked = ? AND created_at >= ? AND ${CHARGED}`, kind, unlockedJobs, dayFrom, rejected, legacy);
 
   if (unlocked) {
     // аварийный потолок, общий для всех пользователей с паролем
@@ -93,18 +105,18 @@ export function aiQuota(db: Database, userId: number, action: AiAction, cfg: AiC
       dayResetAt,
     };
   }
-  const hourUsed = count(db, `user_id = ? AND kind = ? AND created_at > ? AND ${CHARGED}`, userId, kind, hourFrom, rejected);
+  const hourUsed = count(db, `user_id = ? AND kind = ? AND created_at > ? AND ${CHARGED}`, userId, kind, hourFrom, rejected, legacy);
   const oldest =
     hourUsed === 0
       ? null
       : (db
           .query(`SELECT MIN(created_at) AS t FROM jobs WHERE user_id = ? AND kind = ? AND created_at > ? AND ${CHARGED}`)
-          .get(userId, kind, hourFrom, rejected) as { t: string | null }).t;
+          .get(userId, kind, hourFrom, rejected, legacy) as { t: string | null }).t;
   return {
     action,
     unlocked,
     hour: { used: hourUsed, limit: limits.perHour },
-    day: { used: count(db, `user_id = ? AND kind = ? AND created_at >= ? AND ${CHARGED}`, userId, kind, dayFrom, rejected), limit: limits.perDay },
+    day: { used: count(db, `user_id = ? AND kind = ? AND created_at >= ? AND ${CHARGED}`, userId, kind, dayFrom, rejected, legacy), limit: limits.perDay },
     global: { used: globalUsed(0), limit: limits.globalPerDay },
     hourResetAt: oldest === null ? null : new Date(Date.parse(oldest) + HOUR_MS).toISOString(),
     dayResetAt,

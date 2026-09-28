@@ -280,7 +280,7 @@ describe("А11: оговорка про обрезанную историю ст
     const appendix = md.slice(md.indexOf("## Приложение"));
     // данные на месте: и дата отсечения, и первый коммит — читатель проверяет сам
     expect(appendix).toContain("| history_truncated_since | 16 авг. 2025 |");
-    expect(appendix).toContain("| first | 10:00 2 окт. 2025 |");
+    expect(appendix).toContain("| first | 10:00 UTC 2 окт. 2025 |");
     // поле `truncated` стоит «да» у каждого анализа — это форма ответа, и так и подписано
     expect(appendix).toContain("| truncated – поле ответа: сами коммиты в документ не выгружаются, показан итог | да |");
   });

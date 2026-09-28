@@ -653,7 +653,7 @@ function metricCalc(card: RepoCard, metric: ShownMetric, named: boolean): Block[
   });
   // у репо без кода итог 0 по правилу «кода нет», а не по потолку секретов —
   // строка про AppSec здесь была бы ложной
-  if (card.markers.codeEmpty) out.push({ kind: "paragraph", tone: "fine", lines: [line(`Итог – ${value}: в репозитории нет кода, поэтому оценка 0 (правило «кода нет», Q&A №13); баллы категорий выше – справочно.`)] });
+  if (card.markers.codeEmpty) out.push({ kind: "paragraph", tone: "fine", lines: [line(`Итог – ${value}: в репозитории нет кода, поэтому оценка 0; баллы категорий выше – справочно.`)] });
   else if (roundScore(total) > value) out.push({ kind: "paragraph", tone: "fine", lines: [line(`Итог ограничен ${value} баллами: ${cappedReason(value)}.`)] });
   return out;
 }
@@ -1012,7 +1012,7 @@ function appendixC(card: RepoCard): Block[] {
     out.push(para(line("Исходных данных по этому анализу нет.")));
     return out;
   }
-  out.push({ kind: "paragraph", tone: "fine", lines: [line("Данные анализа в виде таблиц «поле – значение». История коммитов показана итогом, сами коммиты сервис не хранит.")] });
+  out.push({ kind: "paragraph", tone: "fine", lines: [line("Данные анализа в виде таблиц «поле – значение». История коммитов показана итогом. Исходный код сервис не хранит – только факты анализа.")] });
   // дерево канального скана идет своим ключом и на одном скане повторяет
   // публичное `tree.stats` слово в слово — вторая такая таблица не нужна
   const publicTree = card.evidence.find((e) => e.key === "tree.stats");

@@ -228,12 +228,12 @@ describe("П3/1 отменяет Р4: в рейтинге подсвечены �
 // ---------------------------------------------------------------------------
 
 describe("Р10: пункт «Свежесть» в панели рейтинга стал «Частота»", () => {
-  test("Rating: name=\"Частота\" со значением «ежесуточно» и пояснением про «Скан»", () => {
+  test("Rating: name=\"Частота\" с пояснением о сверке каталога и повторных анализах", () => {
     const src = srcOf("Rating.tsx");
     expect({
       oldName: src.includes('name="Свежесть"'),
       newName: src.includes('name="Частота"'),
-      note: src.includes("Обход каталога выполняется ежесуточно"),
+      note: src.includes("Каталог сверяется ежечасно") && src.includes("анализируются повторно ежесуточно"),
       // названия подметрик живут в словаре src/report/submetrics.ts
       submetricTitleKept: readFileSync(join(import.meta.dir, "..", "src", "report", "submetrics.ts"), "utf8").includes("Свежесть последнего коммита человека"),
     }).toEqual({ oldName: false, newName: true, note: true, submetricTitleKept: true });
@@ -415,7 +415,7 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
       coverageInAside:
         /name="Покрытие" note=\{coverageHelp\}/.test(aside) &&
         /name="Покрытие HCI" note=\{`HCI – HealthCraft Index\. \$\{coverageHelp\}`\}/.test(aside) &&
-        /name="Покрытие RHS" note=\{`RHS – Repo Health Score\. \$\{coverageHelp\}`\}/.test(aside),
+        /name="Покрытие RHS" note=\{`RHS – Repo Health Score\. \$\{fullCoverageHelp\}`\}/.test(aside),
       oldCoverageWord: figure.includes("данных хватило"),
       chipLikeAside: /scoreLabelTheme\(total\)\} size="s"/.test(figure),
       // блок не схлопывается в метку: заголовок, путь по типу зрителя и
@@ -450,7 +450,7 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
       indexHelp: src.includes("Публичная оценка по 4 категориям") && src.includes("и является основой общего рейтинга"),
       fullHelp:
         src.includes("Рассчитывается по 6 категориям") &&
-        src.includes("Показатель доступен только для репозиториев, к которым у вас есть доступ"),
+        src.includes("Виден, если вашему токену доступны и CI/CD, и Безопасность репозитория"),
       helpOnLockedBranch: /view\.fullPath \?[\s\S]{0,1200}<HelpMark/.test(band),
       // MD-отчет свою формулировку сохраняет: документ читается без наведения.
       // Отличие показателей объясняет одна строка под обоими числами.

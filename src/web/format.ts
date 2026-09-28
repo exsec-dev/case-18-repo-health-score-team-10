@@ -97,7 +97,9 @@ export function fmtDateTime(iso: string | null | undefined): string {
 
 /**
  * UTC-форматтеры для отчетов: MD/PDF не должен зависеть от пояса машины,
- * на которой он собран. Интерфейс показывает локальное время (fmtDate/fmtDateTime).
+ * на которой он собран. Интерфейс показывает локальное время (fmtDate/fmtDateTime),
+ * поэтому время отчета подписано «UTC» явно – иначе оно расходилось бы с
+ * карточкой без объяснения. Дата без времени – без подписи.
  */
 export function fmtDateUtc(iso: string | null | undefined): string {
   if (!iso) return "—";
@@ -110,7 +112,7 @@ export function fmtDateTimeUtc(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = parseShown(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())} ${fmtDateUtc(iso)}`;
+  return `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())} UTC ${fmtDateUtc(iso)}`;
 }
 
 /**
@@ -261,8 +263,8 @@ export function slugOf(org: string, repo: string): string {
 }
 
 /**
- * Длинное имя — многоточие в середине с сохранением хвоста. У команд хакатона
- * общий org и общий префикс (`case-13-…-team-112`), различие — в хвосте, и
+ * Длинное имя — многоточие в середине с сохранением хвоста. У серий репозиториев
+ * бывают общий org и общий префикс (`case-13-…-team-112`), различие — в хвосте, и
  * обрезка с конца спрятала бы именно его.
  */
 export function middleEllipsis(text: string, max: number, tail = 10): string {

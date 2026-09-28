@@ -460,15 +460,17 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
   const empty = ai === null || (ai.overview === null && ai.specialists.length === 0 && !ai.jobActive);
   if (empty) {
     const cooldown = ai?.cooldownUntil != null && Date.parse(ai.cooldownUntil) > Date.now();
-    const rejected = (ai?.failures ?? []).some((f) => !isNoFacts(f.reason));
     return (
       <section className="rh-ai-section rh-ai-section_empty" aria-labelledby="rh-ai-title" data-slot="aiSummary">
         <Flex direction="column" gap={1} alignItems="flex-start">
           <Text color="secondary" id="rh-ai-title" as="h2" className="rh-ai-section__label">
             {AI_SECTION_TITLE}
           </Text>
-          {/* генерация была, но ни одна роль не прошла проверку — это не «пока нет» */}
-          <Text variant="subheader-2">{rejected ? "Обзор не прошел проверку фактами" : "Обзора пока нет"}</Text>
+          {/* отказы проверки фактами API отдает только по анализу с заметками
+              (buildCardAi в api/repos.ts), а такой анализ пустым не бывает: если
+              не прошел ни один блок, итог виден в «Заданиях» текстом заявки
+              (AI_REJECTED_ERRORS), здесь – «пока нет» */}
+          <Text variant="subheader-2">Обзора пока нет</Text>
           <Text variant="body-1" color="complementary">
             {canRun
               ? publicVersion

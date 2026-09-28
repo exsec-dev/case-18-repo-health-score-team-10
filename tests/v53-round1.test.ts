@@ -146,7 +146,7 @@ describe("К-2: слот истории оценки — по точкам и п
     const v = scoreHistoryView({ points: [pt(1, 60), pt(2, 62), pt(3, 64)], fullOpen: false });
     expect(v.chart).toBe(true);
     expect(v.count).toBe("HealthCraft Index по 3 анализам");
-    expect(v.full).toBe("Repo Health Score на графике виден участникам репозитория.");
+    expect(v.full).toBe("Repo Health Score на графике виден, если вашему токену доступны и CI/CD, и Безопасность.");
     expect(v.text).not.toContain("нечего");
   });
 

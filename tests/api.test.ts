@@ -639,7 +639,7 @@ describe("health (В4.4): ok вычисляемое, reasons по контрак
     h.db.query("DELETE FROM meta WHERE key = 'derived_rescore_cursor'").run();
     const pending = getHealth(h.db, { ...loadConfig() });
     expect(pending.ok).toBe(false);
-    expect(pending.reasons[0]).toContain("пересчёт");
+    expect(pending.reasons[0]).toContain("пересчет");
     h.db.query("INSERT INTO meta (key, value) VALUES ('derived_rescore_cursor', '999999')").run();
     h.db.query("INSERT INTO meta (key, value) VALUES ('derived_rescore_error', 'no such table: scores')").run();
     const failed = getHealth(h.db, { ...loadConfig() });

@@ -508,14 +508,14 @@ describe("В5.1 Б4: наблюдаемость и лимиты", () => {
         { ok: false, reason: "валидатор: числа вне фактов: 41" },
       ],
     });
-    expect(validator).toContain("не прошёл проверку");
+    expect(validator).toContain("не прошел проверку");
     const mixed = summaryEmptyErrorOf({
       outcomes: [
         { ok: false, reason: "модель: HTTP 500" },
         { ok: false, reason: "валидатор: текст отсутствует" },
       ],
     });
-    expect(mixed).toContain("не прошёл проверку");
+    expect(mixed).toContain("не прошел проверку");
   });
 });
 

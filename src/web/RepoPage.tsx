@@ -339,7 +339,7 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
 /**
  * Выбывший из каталога, закрытый или несуществующий репозиторий — одно спокойное пустое
  * состояние вместо красной ошибки. Текст один на все случаи: различимый 404 выдал бы
- * существование закрытого репозитория (ТЗ §5, «Ограничение доступа»).
+ * существование закрытого репозитория.
  */
 function NotInCatalog({ org, repo, crumbs }: { org: string; repo: string; crumbs: Crumb[] }) {
   return (
@@ -752,7 +752,7 @@ const ASIDE_NAME_WIDTH = DEFINITION_NAME_WIDTH;
 
 const FULL_HELP =
   "Рассчитывается по 6 категориям: 4 категориям HealthCraft Index, а также CI/CD и Безопасности. " +
-  "Показатель доступен только для репозиториев, к которым у вас есть доступ.";
+  "Виден, если вашему токену доступны и CI/CD, и Безопасность репозитория.";
 
 /** «Данные собраны» паспорта анализа: ok — «полностью», partial — «частично», bad — своей фразой, прочее — словом статуса. */
 function collectedText(status: string): string {
@@ -779,7 +779,10 @@ function ScoreAside({
 }) {
   const { score, scan } = card;
   const threshold = fmtCoverage(meta?.coverageNullBelow ?? COVERAGE_NULL_BELOW);
-  const coverageHelp = `Доля веса категорий, по которым есть данные. Ниже ${threshold} оценка не ставится.`;
+  // покрытие обоих показателей – по номинальным весам Repo Health Score
+  // (`coverageOf` в score/compute.ts): у индекса база – 65 открытых, у полного – 100
+  const coverageHelp = `Доля веса открытых категорий, по которым есть данные: веса как в Repo Health Score, всего 65. Ниже ${threshold} оценка не ставится.`;
+  const fullCoverageHelp = `Доля веса всех шести категорий, по которым есть данные, из 100. Ниже ${threshold} оценка не ставится.`;
   const full = score !== null && !score.fullLocked;
   return (
     <>
@@ -812,7 +815,7 @@ function ScoreAside({
               </DefinitionList.Item>
             )}
             {score && full && (
-              <DefinitionList.Item name="Покрытие RHS" note={`RHS – Repo Health Score. ${coverageHelp}`}>
+              <DefinitionList.Item name="Покрытие RHS" note={`RHS – Repo Health Score. ${fullCoverageHelp}`}>
                 {score.repoHealthCoverage === null ? "—" : fmtCoverage(score.repoHealthCoverage)}
               </DefinitionList.Item>
             )}
@@ -1484,10 +1487,13 @@ function FixTemplateButton({ org, repo, ruleId, meta }: { org: string; repo: str
       setBusy(false);
     }
   };
+  // поля заготовок (src/fix/templates.ts) – в угловых скобках `<…>`, у CODEOWNERS – `@login`
   const hint =
     ruleId === "readme-sections-missing"
-      ? "Скачать заготовку: только недостающие разделы – добавьте их в свой README"
-      : "Скачать заготовку: положите файл в корень репозитория и заполните поля в квадратных скобках";
+      ? "Скачать заготовку: только недостающие разделы – добавьте их в свой README и заполните поля в угловых скобках <…>"
+      : ruleId === "codeowners-missing"
+        ? "Скачать заготовку: положите файл в корень репозитория и замените @login на логины ответственных"
+        : "Скачать заготовку: положите файл в корень репозитория и заполните поля в угловых скобках <…>";
   if (meta.licenses && meta.licenses.length > 0) {
     return (
       <DropdownMenu
@@ -1645,7 +1651,8 @@ function submetricIcon(category: string, sub: string): IconData {
  * поле `backlog.engines`), чтобы было видно, чем найдены находки.
  *
  * SCA — отдельной строкой: это другой класс находок (зависимости, а не свой код).
- * В оценку SCA не входит — формула Безопасности от разбивки не зависит. Имя движка не
+ * Находки SCA входят в общий счет открытых находок и плотность наравне с остальными;
+ * отдельная строка – только для наглядности (формула от разбивки не зависит). Имя движка не
  * угадывается: в SCA-строку идет счетчик, чье имя похоже на SCA, остальные печатаются как есть.
  */
 interface AppsecBreakdown {
@@ -1681,7 +1688,7 @@ function AppsecEngines({ card }: { card: Card }) {
   const rows: { name: string; count: number; note?: string }[] = [
     ...breakdown.engines.map(([name, count]) => ({ name, count })),
     ...(breakdown.sca
-      ? [{ name: `${breakdown.sca[0]} (зависимости, SCA)`, count: breakdown.sca[1], note: "Находки в зависимостях показываются отдельно и в оценку Безопасности не входят." }]
+      ? [{ name: `${breakdown.sca[0]} (зависимости, SCA)`, count: breakdown.sca[1], note: "Находки в зависимостях входят в оценку Безопасности наравне с остальными. Здесь они показаны отдельной строкой для наглядности." }]
       : []),
   ];
   const notes = [

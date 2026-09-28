@@ -6,9 +6,9 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { RANK_BADGE_COLORS } from "../src/api/public";
-import { COHORT_MIN } from "../src/api/cohort";
+import { COHORT_MIN, percentileBelow } from "../src/api/cohort";
 import { getRepoCard, type RepoCard } from "../src/api/repos";
-import { cardView, categoryCohortNote, positionView } from "../src/web/cardView";
+import { cardView, categoryCohortNote, noneBelow, positionView } from "../src/web/cardView";
 import { fmtCount } from "../src/web/format";
 import { makeApiDb, seedRepo, seedScan, seedScore, type ApiTestDb } from "./api-fixtures";
 
@@ -42,7 +42,7 @@ describe("В5.9 HQ: строка позиции = поля карточки", ()
       expect(p.rank).toBe(`#${fmtCount(c.score!.rank!)} из ${fmtCount(c.score!.rankedTotal!)}`);
       const pct = c.score!.cohort!.index.percentile!;
       expect(pct).not.toBeNull();
-      expect(p.cohort).toBe(pct === 100 ? `лучший среди ${fmtCount(c.score!.cohort!.size!)} похожих` : pct === 0 ? "у всех похожих индекс не ниже" : `лучше ${pct}% похожих`);
+      expect(p.cohort).toBe(pct === 100 ? `лучший среди ${fmtCount(c.score!.cohort!.size!)} похожих` : pct === 0 ? (noneBelow(0, c.score!.cohort!.size) ? "у всех похожих индекс не ниже" : "лучше менее 1% похожих") : `лучше ${pct}% похожих`);
       expect(p.cohortHelp).toContain(`на Go размером 1-10 тыс. строк с местом в рейтинге: ${fmtCount(c.score!.cohort!.size!)}`);
       expect(cardView(c).position).toEqual(p);
     }
@@ -86,10 +86,48 @@ describe("В5.9 HQ: строка позиции = поля карточки", ()
     const c = card("go05");
     for (const [key, stat] of Object.entries(c.score!.cohort!.categories)) {
       const note = categoryCohortNote(c, key as never);
-      if (stat.percentile !== null) expect(note).toBe(stat.percentile === 0 ? "Среди похожих – у всех балл не ниже" : `Среди похожих – лучше ${stat.percentile}%`);
+      if (stat.percentile !== null) expect(note).toBe(stat.percentile === 0 ? (noneBelow(0, stat.size) ? "Среди похожих – у всех балл не ниже" : "Среди похожих – лучше менее 1%") : `Среди похожих – лучше ${stat.percentile}%`);
       else if (stat.reason === "small-cohort") expect(note).toBe("Похожих с данными по категории мало для сравнения");
       else expect(note).toBeNull();
     }
+  });
+});
+
+describe("процент 0: «у всех не ниже» – только если ниже нет ни одного", () => {
+  // карточка с подмененной когортой: процент и размер выборки – как их отдал бы сервер
+  function withCohort(pct: number, size: number): RepoCard {
+    const c = card("go05");
+    const cohort = c.score!.cohort!;
+    return {
+      ...c,
+      score: {
+        ...c.score!,
+        cohort: {
+          ...cohort,
+          size,
+          index: { percentile: pct, reason: null },
+          categories: { ...cohort.categories, code: { percentile: pct, size, reason: null } },
+        },
+      },
+    };
+  }
+
+  test("большая когорта: 1 репо ниже из 150 – процент 0, но текст не «у всех»", () => {
+    // сам процент действительно 0: floor(100 · 1 / 150)
+    expect(percentileBelow(50, [40, ...Array.from({ length: 149 }, () => 60)])).toBe(0);
+    expect(noneBelow(0, 150)).toBe(false);
+    const c = withCohort(0, 150);
+    expect(positionView(c)!.cohort).toBe("лучше менее 1% похожих");
+    expect(categoryCohortNote(c, "code")).toBe("Среди похожих – лучше менее 1%");
+  });
+
+  test("когорта до 100: процент 0 = ниже нет ни одного – «у всех не ниже»", () => {
+    // один репо ниже из 100 – уже 1%
+    expect(percentileBelow(50, [40, ...Array.from({ length: 99 }, () => 60)])).toBe(1);
+    expect(noneBelow(0, 100)).toBe(true);
+    const c = withCohort(0, 40);
+    expect(positionView(c)!.cohort).toBe("у всех похожих индекс не ниже");
+    expect(categoryCohortNote(c, "code")).toBe("Среди похожих – у всех балл не ниже");
   });
 });
 

@@ -128,6 +128,15 @@ describe("лимиты обзора: час, сутки МСК, общий", () 
     expect(aiQuota(db, u, "overview", cfg(), NOW).hour!.used).toBe(2);
   });
 
+  test("отказ валидатора прежним текстом (до смены формулировки) тоже списывается", () => {
+    const { db } = freshDb();
+    const u = user(db, 1);
+    expect(AI_REJECTED_ERRORS.overview).not.toMatch(/[ёЁ]/);
+    const legacy = `AI-описание не сформировано: ни один блок не прош${String.fromCharCode(0x451)}л проверку`;
+    job(db, { user: u, at: new Date(NOW.getTime() - 3 * MIN), status: "failed", error: legacy });
+    expect(aiQuota(db, u, "overview", cfg(), NOW).hour!.used).toBe(1);
+  });
+
   test("обзор и проверка считаются раздельно; автозаявки топа (user_id NULL) — ни в чей лимит", () => {
     const { db } = freshDb();
     const u = user(db, 1);

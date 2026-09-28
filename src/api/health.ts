@@ -93,9 +93,9 @@ export function getHealth(db: Database, config: Config): HealthStatus {
   // в публичном /api/health обрезаются: диагностика читается, а поверхность ограничена
   const safeHealthText = (raw: string): string => raw.replace(/[\u0000-\u001f\u007f]/g, "").slice(0, 200);
   if (rescore.error !== null) {
-    reasons.push(`стартовый пересчёт оценок упал: ${safeHealthText(rescore.error)}`);
+    reasons.push(`стартовый пересчет оценок упал: ${safeHealthText(rescore.error)}`);
   } else if (needsRescore(db)) {
-    reasons.push(rescore.running ? "идёт стартовый пересчёт оценок (rescore pending)" : "стартовый пересчёт оценок не завершён (rescore pending)");
+    reasons.push(rescore.running ? "идет стартовый пересчет оценок (rescore pending)" : "стартовый пересчет оценок не завершен (rescore pending)");
   }
   if (suspiciousAt !== null) {
     reasons.push(`обход каталога вернул пустой список при живом рейтинге (${suspiciousAt}) — эвикция приостановлена до живого снимка`);

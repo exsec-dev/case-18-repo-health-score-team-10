@@ -306,7 +306,7 @@ function AiLimitsSections() {
             <Text variant="body-short" color="secondary">
               {data.unlocked
                 ? "AI-обзоры и проверки оценки не ограничены личными лимитами."
-                : "Для организаторов и жюри: пароль выдает команда проекта. Он снимает личные лимиты AI."}
+                : "Пароль выдает администратор сервиса. Он снимает личные лимиты AI."}
             </Text>
             {data.unlocked ? (
               <Flex gap={2}>
@@ -576,7 +576,8 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
                   В SourceCraft нажмите <UiTag>Домой</UiTag> и откройте <UiTag>Доступ</UiTag> → <UiTag>Персональные токены доступа</UiTag>.
                 </li>
                 <li>
-                  Нажмите <UiTag>Сгенерировать новый токен</UiTag> и выберите репозитории.
+                  Нажмите <UiTag>+ Новый токен</UiTag>. В поле <UiTag>Доступ к репозиторию</UiTag> выберите{" "}
+                  <UiTag>Все права учетной записи</UiTag> – подойдет и <UiTag>Все репозитории</UiTag>.
                 </li>
                 <li>Скопируйте токен и вставьте его в поле выше.</li>
               </ol>

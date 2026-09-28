@@ -154,7 +154,8 @@ describe("М2: «кода нет» — балл 0 с причиной (П-1)", (
       const md = renderRepoReport(card);
       expect(md).toContain("| Состояние кода | 0 |");
       expect(md).toContain("В репозитории нет файлов кода");
-      expect(md).toContain("правило «кода нет»");
+      expect(md).toContain("в репозитории нет кода, поэтому оценка 0; баллы категорий выше – справочно");
+      expect(md).not.toContain("Q&A");
       // потолок секретов тут ни при чем
       expect(md).not.toContain("AppSec нашел утекшие секреты");
       // единственный совет – добавить код, без «+0,0»

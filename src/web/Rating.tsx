@@ -1,4 +1,4 @@
-// Страница рейтинга: здоровье, а не популярность (ТЗ 4).
+// Страница рейтинга: здоровье, а не популярность.
 // Выборку считает сервер, страница только переводит состояние контролов в
 // query-строку и обратно — поэтому отфильтрованным рейтингом можно
 // поделиться ссылкой, и F5 его не теряет.
@@ -338,7 +338,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
           renderSelectedOption={(option, index) => <LangSummaryPart value={option.value} index={index} values={langValues} />}
           onUpdate={(v) => setParams({ lang: v.length === 0 ? null : v.map((x) => (x === LANG_NONE ? "" : x)) })}
         />
-        {/* Размер по строкам кода и наличие CI (ТЗ §7). Счетчики — из фасетов
+        {/* Размер по строкам кода и наличие CI. Счетчики — из фасетов
             (по поиску, без фильтров); репо без данных о размере или CI не
             попадает ни в одно значение. */}
         <Select
@@ -643,8 +643,8 @@ function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResp
         title="Вклад категорий"
         help={
           <HelpMark iconSize="s" aria-label="Что показывает вклад категорий">
-            Доля в HealthCraft Index. Категории CI/CD и Безопасность учитываются только в показателе Repo Health Score для
-            репозиториев, к которым у вас есть доступ
+            Доля в HealthCraft Index. Категории CI/CD и Безопасность учитываются только в показателе Repo Health Score – он
+            виден, если вашему токену доступны и CI/CD, и Безопасность репозитория
           </HelpMark>
         }
       >
@@ -675,7 +675,7 @@ function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResp
         <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
           <DefinitionList.Item
             name="Порог оценки"
-            note="Оценка рассчитывается только при достаточном покрытии. Недостающие категории исключаются из расчета"
+            note="Оценка рассчитывается только при достаточном покрытии. Недостающие категории исключаются из расчета. Покрытие – доля веса открытых категорий с данными: веса как в Repo Health Score, всего 65"
           >
             покрытие от {fmtCoverage(meta.coverageNullBelow)}
           </DefinitionList.Item>
@@ -685,10 +685,13 @@ function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResp
             </Label>
           </DefinitionList.Item>
           {/* Периодичность обхода, а не давность данных: generatedAt — момент
-              запроса, дату не показываем. Колонка «Анализ» скрыта по умолчанию,
-              поэтому подсказка ведет на карточку. */}
-          <DefinitionList.Item name="Частота" note="Обход каталога выполняется ежесуточно. Дата последнего анализа – на карточке репозитория.">
-            ежесуточно
+              запроса, дату не показываем. Две фазы планировщика: сверка каталога
+              (SCHEDULER_CATALOG_INTERVAL_MS, 1 ч) и волна повторных анализов
+              (SCHEDULER_INTERVAL_MS, 24 ч); в /api/meta интервалов нет, поэтому
+              текст – по значениям по умолчанию. Колонка «Анализ» скрыта по
+              умолчанию, поэтому подсказка ведет на карточку. */}
+          <DefinitionList.Item name="Частота" note="Каталог сверяется ежечасно, новые репозитории сразу встают в очередь. Изменившиеся репозитории анализируются повторно ежесуточно. Дата последнего анализа – на карточке репозитория.">
+            каталог – ежечасно
           </DefinitionList.Item>
         </DefinitionList>
       </AsideSection>

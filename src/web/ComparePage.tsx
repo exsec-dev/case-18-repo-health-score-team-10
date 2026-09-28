@@ -1193,7 +1193,7 @@ function exceptionText(col: Exclude<Col, { kind: "scored" } | { kind: "invite" }
 /**
  * Имя репозитория одной строкой без переноса посреди слова. Не влезает —
  * многоточие в середине, подобранное по
- * реальной ширине ячейки и шрифту: хвост (у команд хакатона — номер команды)
+ * реальной ширине ячейки и шрифту: хвост (у репозиториев с общим префиксом — номер)
  * остается виден. Полное имя — в title и тексте для скринридера.
  */
 function FitName({ text, variant, secondary = false }: { text: string; variant: "subheader-1" | "subheader-2"; secondary?: boolean }) {
