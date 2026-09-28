@@ -55,6 +55,7 @@ import { Alert, Button, Icon, Label, type IconData } from "@gravity-ui/uikit";
 import { useEffect, useLayoutEffect, useState, type MouseEvent, type ReactNode } from "react";
 import type { DocBlock, DocLine, DocPage, DocsBundle, DocTarget, TocNode, UiIcon } from "../docs/model";
 import { useJson } from "./api";
+import { DocsSearch } from "./DocsSearch";
 import { Trophy } from "./icons";
 import { navigate } from "./router";
 import { Page } from "./Shell";
@@ -393,13 +394,23 @@ export function DocsPage({ slug }: { slug: string }) {
   }, [page]);
 
   const crumbsBase = { text: "Документация", href: "/docs" };
+  const openFound = (slug: string, anchor: string | null) => {
+    navigate(docHref(slug, anchor));
+    requestAnimationFrame(() => scrollToAnchor(anchor));
+  };
   const pdfButton = bundle && (
     <Button view="outlined" size="m" href={bundle.pdfUrl} target="_blank" rel="noopener" title="Весь текст документации одним файлом">
       <Button.Icon side="start">
         <Icon data={ArrowDownToLine} size={16} />
       </Button.Icon>
-      PDF
+      PDF-версия
     </Button>
+  );
+  const headerActions = bundle && (
+    <span className="rh-docs-actions">
+      <DocsSearch pages={bundle.pages} onOpen={openFound} />
+      {pdfButton}
+    </span>
   );
 
   if (docs.state.kind === "error") {
@@ -418,7 +429,7 @@ export function DocsPage({ slug }: { slug: string }) {
   }
   if (!page) {
     return (
-      <Page crumbs={[crumbsBase, { text: "Страница не найдена" }]} actions={pdfButton}>
+      <Page crumbs={[crumbsBase, { text: "Страница не найдена" }]} actions={headerActions}>
         <EmptyState
           icon={CircleQuestion}
           title="Страница не найдена"
@@ -439,7 +450,7 @@ export function DocsPage({ slug }: { slug: string }) {
   const onPage = page.headings.filter((h) => h.level === 2);
 
   return (
-    <Page crumbs={crumbs} actions={pdfButton} mode="fill">
+    <Page crumbs={crumbs} actions={headerActions} mode="fill">
       <div className="rh-docs">
         <nav className={navOpen ? "rh-docs__nav rh-docs__nav_open" : "rh-docs__nav"} aria-label="Разделы документации">
           <button type="button" className="rh-docs__nav-toggle" aria-expanded={navOpen} onClick={() => setNavOpen(!navOpen)}>

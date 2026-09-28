@@ -13,7 +13,8 @@ const TOP = 48;
 const BOTTOM = 52;
 const PAGE_H = 841.89;
 
-const SIZE = { body: 10, h1: 20, h2: 14, h3: 11.5, small: 8.5, code: 8.5 } as const;
+// tag – кегль тегов интерфейса и кода в строке: один для всех, чуть меньше текста (как 13px при 15px на сайте)
+const SIZE = { body: 10, h1: 20, h2: 14, h3: 11.5, small: 8.5, code: 8.5, tag: 9 } as const;
 const NOTE_COLORS = { info: { bg: "#eef3fd", bar: "#4768c2" }, warning: { bg: "#fff4ca", bar: "#a07c00" } } as const;
 const CODE_BG = "#f5f5f5";
 const UI_BG = "#ececec";
@@ -54,11 +55,11 @@ function inlines(line: DocLine, breakLong = false): PdfNode[] {
       case "strong":
         return { text, bold: true };
       case "code":
-        return { text, background: CODE_BG, fontSize: SIZE.code, color: COLORS.ink };
+        return { text, background: CODE_BG, fontSize: SIZE.tag, color: COLORS.ink };
       // тег элемента интерфейса – подложка цвета элемента UI; иконки есть только на сайте
       case "ui": {
         const c = uiColors(f.variant);
-        return { text: ` ${text} `, background: c.bg, color: c.fg };
+        return { text: ` ${text} `, background: c.bg, color: c.fg, fontSize: SIZE.tag };
       }
       case "link":
         return f.target ? { text, color: COLORS.link, linkToDestination: dest(f.target.slug, f.target.anchor) } : { text, color: COLORS.link, link: f.href };

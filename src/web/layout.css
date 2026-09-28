@@ -3354,10 +3354,93 @@ button.rh-category:focus-visible {
   -webkit-box-decoration-break: clone;
 }
 
+/* строка пути документации: поиск и PDF */
+.rh-docs-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--g-spacing-2);
+}
+
+.rh-docs-search {
+  width: 280px;
+}
+
+.rh-docs-search__lens {
+  margin-left: var(--g-spacing-2);
+  color: var(--g-color-text-secondary);
+}
+
+.rh-docs-search__results {
+  box-sizing: border-box;
+  width: 440px;
+  max-width: calc(100vw - 32px);
+  max-height: 60vh;
+  padding: var(--g-spacing-1);
+  overflow-y: auto;
+}
+
+.rh-docs-search__empty {
+  padding: var(--g-spacing-3);
+  color: var(--g-color-text-secondary);
+}
+
+.rh-docs-search__hit {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: var(--g-spacing-2) var(--g-spacing-3);
+  border: 0;
+  border-radius: var(--g-border-radius-m);
+  color: var(--g-color-text-primary);
+  background: none;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rh-docs-search__hit_active {
+  background: var(--g-color-base-simple-hover);
+}
+
+.rh-docs-search__title {
+  font-weight: var(--g-text-accent-font-weight);
+}
+
+.rh-docs-search__section {
+  font-weight: normal;
+  color: var(--g-color-text-secondary);
+}
+
+.rh-docs-search__snippet {
+  color: var(--g-color-text-secondary);
+  font-size: var(--g-text-body-1-font-size);
+  line-height: var(--g-text-body-1-line-height);
+}
+
+.rh-docs-search mark,
+.rh-docs-search__results mark {
+  border-radius: 2px;
+  color: inherit;
+  background: var(--g-color-base-warning-light);
+}
+
+@media (max-width: 767px) {
+  .rh-docs-search {
+    width: 160px;
+  }
+}
+
 /* плашки-двойники элементов UI (Label, лига, состояние) – по средней линии строки */
 .rh-docs__uiwrap {
   vertical-align: middle;
   line-height: normal;
+}
+
+/* один кегль у всех элементов интерфейса и кода в тексте – 13px, как текст Label xs:
+ * иначе «В очереди» (кегль состояния 15px) и лиги (12px) выбивались из строки */
+.rh-docs .rh-docs__article :is(.rh-docs__ui, .rh-docs__uiwrap, .rh-docs__uiwrap .g-label__text, :not(pre) > code) {
+  font-size: 13px;
 }
 
 .rh-docs__ui .g-icon {

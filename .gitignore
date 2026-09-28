@@ -1,6 +1,7 @@
 .env
 node_modules/
-data/
+# каталог базы в корне (DATA_DIR); не docs/guide/data – это страницы документации
+/data/
 *.db
 *.db-wal
 *.db-shm
