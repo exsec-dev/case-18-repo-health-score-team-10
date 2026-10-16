@@ -81,7 +81,7 @@ import { linkProps, navigate, repoHref } from "./router";
 import { useSession } from "./session";
 import { Page } from "./Shell";
 import { SLOT_EMPTY } from "./slots";
-import { EmptyState, LanguageName, PageHeader, RepoAvatar, VisibilityPill } from "./ui";
+import { EmptyState, LanguageName, MethodLink, PageHeader, RepoAvatar, VisibilityPill } from "./ui";
 
 // ---------- данные ----------
 
@@ -302,6 +302,7 @@ function HowItWorks() {
               </Label>
             ))}
           </Flex>
+          <MethodLink page="scores" />
         </Flex>
       }
     >
@@ -1085,7 +1086,7 @@ function ColumnHead({ col, phone, onRemove, onAdd }: { col: Col; phone: boolean;
     // шапка приглашения — кнопка, пояснение сразу под ней, а не посреди столбца
     return (
       <span className="rh-cmp-colhead rh-cmp-colhead_invite">
-        <Button view="outlined" size="m" onClick={onAdd}>
+        <Button view="normal" size="m" onClick={onAdd}>
           <Icon data={Plus} size={16} />
           {COMPARE_ADD}
         </Button>

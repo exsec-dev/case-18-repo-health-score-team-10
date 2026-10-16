@@ -120,14 +120,14 @@ import {
   CI_CAP_TITLE,
   STALE_CATEGORY_MARK,
 } from "./format";
-import { linkProps, navigate } from "./router";
+import { linkProps, loginHref, navigate } from "./router";
 import { COMPARE_MAX, COMPARE_LIMIT_TEXT, compareHref } from "./compareView";
 import { lastCompareSet, rememberCompareSet } from "./compareReturn";
 import { LoginButton, Page, type Crumb } from "./Shell";
 import { Trophy } from "./icons";
 import { useMediaQuery } from "./prefs";
 import { AiOverviewSection, BadgeButton, BadgeDialog, CategoryAiMark, CategoryAiNote, FraudCheckFooter, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
-import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
+import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, MethodLink, RepoAvatar, RepoSlug, ScoreBar, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
 
 type Card = RepoCard;
 type Evidence = Card["evidence"][number];
@@ -319,15 +319,21 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
           />
         )
       ) : (
-        // одна лента в порядке PDF, без табов
+        // одна лента без табов: показатели → категории («почему») → рекомендации
+        // («что исправить») → AI-обзор → история
         <Flex direction="column" gap={6} className="rh-repo-feed">
           <Flex direction="column" gap={3}>
             {/* проверка оценки и признаки накрутки — подвалом плашки HealthCraft Index */}
-            <ScoreBand card={card} view={view} footer={<FraudCheckFooter card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} quota={aiQuota.quota} onQuota={aiQuota.reload} />} />
+            {/* без индекса проверять на накрутку и пересказывать нечего — кнопок нет */}
+            <ScoreBand
+              card={card}
+              view={view}
+              footer={card.score.healthcraftIndex === null ? undefined : <FraudCheckFooter card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} quota={aiQuota.quota} onQuota={aiQuota.reload} />}
+            />
           </Flex>
-          <AiOverviewSection card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} quota={aiQuota.quota} onQuota={aiQuota.reload} />
           <Categories card={card} view={view} />
           <Recommendations view={view} org={org} repo={repo} />
+          {card.score.healthcraftIndex !== null && <AiOverviewSection card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} quota={aiQuota.quota} onQuota={aiQuota.reload} />}
           <HistorySection card={card} org={org} repo={repo} />
           <Limitations items={view.limitations} />
         </Flex>
@@ -344,11 +350,17 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
 function NotInCatalog({ org, repo, crumbs }: { org: string; repo: string; crumbs: Crumb[] }) {
   return (
     <Page crumbs={crumbs}>
+      {/* гость по ссылке на закрытый репозиторий (так жюри открывает наш) получает
+          выход — вход, после которого вернется на эту карточку; текст тот же для
+          любого адреса и не выдает, существует ли закрытый репозиторий */}
       <EmptyState
         icon={SquareListUl}
-        title="Репозитория нет в открытом каталоге"
-        description={`${slugOf(org, repo)} не найден среди открытых репозиториев SourceCraft: он мог стать закрытым, быть удален или переименован – или в адресе опечатка.`}
-        actions={[{ text: "К рейтингу", view: "normal", size: "l", href: lastRatingHref() }]}
+        title="Репозиторий не найден"
+        description="Возможно, он закрытый или в адресе ошибка. Закрытые репозитории открываются участникам после входа через Я ID."
+        actions={[
+          { text: "Войти через Я ID", view: "action", size: "l", href: loginHref(`/repo/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`, "") },
+          { text: "К рейтингу", view: "normal", size: "l", href: lastRatingHref() },
+        ]}
       />
     </Page>
   );
@@ -465,7 +477,9 @@ function CardActions({ org, repo, scored, badge, league, publicBaseUrl, report, 
   if (!phone) {
     return (
       <Flex gap={2} alignItems="center">
-        {scored && <CompareButton org={org} repo={repo} />}
+        {/* одна главная кнопка в шапке, как Clone у SourceCraft: у своего репо — «Обновить
+            анализ», у чужого — «Сравнить», путь члена жюри и конкурента */}
+        {scored && <CompareButton org={org} repo={repo} primary={!refresh} />}
         {/* бейдж — кнопкой с поповером, как Clone у SourceCraft */}
         {scored && <BadgeButton org={org} repo={repo} publicBaseUrl={publicBaseUrl} available={badge} league={league} />}
         {report}
@@ -523,7 +537,7 @@ function compareState(org: string, repo: string): { inSet: boolean; full: boolea
  * как у пункта rail): репо уже в нем — «В сравнении» ведет на страницу сравнения; есть
  * место — добавляет и ведет туда же; мест нет — кнопка выключена с причиной в подсказке.
  */
-function CompareButton({ org, repo }: { org: string; repo: string }) {
+function CompareButton({ org, repo, primary = false }: { org: string; repo: string; primary?: boolean }) {
   const { inSet, full, count, go } = compareState(org, repo);
   if (full) {
     return (
@@ -531,7 +545,7 @@ function CompareButton({ org, repo }: { org: string; repo: string }) {
         {/* выключенная кнопка не получает наведения — подсказка на обертке; обертка
             фокусируется, чтобы причину было слышно и с клавиатуры */}
         <span className="rh-disabled-tip" tabIndex={0} aria-label={`Сравнить: ${COMPARE_LIMIT_TEXT}`}>
-          <Button view="outlined" size="m" disabled>
+          <Button view="normal" size="m" disabled>
             <Icon data={ScalesBalanced} size={16} />
             Сравнить
           </Button>
@@ -540,7 +554,7 @@ function CompareButton({ org, repo }: { org: string; repo: string }) {
     );
   }
   return (
-    <Button view="outlined" size="m" onClick={go} title={inSet ? "Открыть сравнение" : `Добавить в сравнение (${count + 1} из ${COMPARE_MAX})`}>
+    <Button view={primary && !inSet ? "action" : "normal"} size="m" onClick={go} title={inSet ? "Открыть сравнение" : `Добавить в сравнение (${count + 1} из ${COMPARE_MAX})`}>
       <Icon data={ScalesBalanced} size={16} />
       {inSet ? "В сравнении" : "Сравнить"}
     </Button>
@@ -657,8 +671,8 @@ function Header({ card, view, starDoneKey, starLoggedIn }: { card: Card; view: C
       <div className="rh-repo-head">
         <RepoAvatar repo={r.repo} logoUrl={r.logoUrl} size="l" />
         <Flex direction="column" justifyContent="space-between" style={{ minWidth: 0 }}>
-          <Flex gap={2} alignItems="center" wrap className="rh-card-head__title">
-            <RepoSlug org={r.org} repo={r.repo} variant="header-1" />
+          <Flex gap={2} alignItems="center" className="rh-card-head__title">
+            <RepoSlug org={r.org} repo={r.repo} variant="header-2" />
             {/* видимость в SourceCraft — той же плашкой, что в избранном; «неизвестно» плашки не дает */}
             <VisibilityPill value={view.visibility} />
             <Flex gap={1} alignItems="center">
@@ -839,6 +853,7 @@ function ScoreAside({
             <Text variant="body-1" color="complementary">
               Отсутствующие данные не учитываются как нулевые.
             </Text>
+            <MethodLink page="scores" />
           </Flex>
         </AsideSection>
       )}
@@ -891,6 +906,7 @@ function ScoreBand({ card, view, footer }: { card: Card; view: CardView; footer?
     <div className="rh-score-cards">
       <Card view="outlined" className="rh-score-band">
         <ScoreFigure title="HealthCraft Index" help={INDEX_HELP} total={score.healthcraftIndex} position={view.position} />
+        {score.healthcraftIndex === null && <NoScoreReason view={view} />}
         <ContributionStrip bar={barOf("HealthCraft Index")} />
         {footer}
       </Card>
@@ -926,6 +942,22 @@ function ScoreBand({ card, view, footer }: { card: Card; view: CardView; footer?
         <Markers view={view} />
       </Card>
     </div>
+  );
+}
+
+/**
+ * Почему оценки нет — сразу под «Оценки нет», а не последним блоком ленты:
+ * первая строка «Ограничений данных» (тот же текст, что в отчете) и путь в
+ * методику обработки отсутствующих данных.
+ */
+function NoScoreReason({ view }: { view: CardView }) {
+  return (
+    <Flex direction="column" gap={1} alignItems="flex-start">
+      <Text variant="body-1" color="complementary">
+        {view.limitations[0] ?? "Данных собрано слишком мало для расчета: покрытие ниже порога."}
+      </Text>
+      <MethodLink page="no-data">Как обрабатываются отсутствующие данные</MethodLink>
+    </Flex>
   );
 }
 
@@ -1142,19 +1174,20 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
       </span>
       {/* Tri-state: без данных на месте полосы пусто — единственный прочерк стоит в
           колонке балла, рядом с плашкой «Нет данных» */}
-      <span className="rh-category__bar">
-        {c.score === null ? null : (
-          <span className="rh-cat-bar" role="img" aria-label={`${c.scoreText} из 100`}>
-            <span className="rh-cat-bar__fill" style={{ width: `${Math.max(0, Math.min(100, Math.round(c.score)))}%` }} />
-          </span>
-        )}
-      </span>
+      <span className="rh-category__bar">{c.score === null ? null : <ScoreBar value={c.score} width="100%" label={`${c.scoreText} из 100`} />}</span>
       <Text variant="subheader-2" color={c.score === null ? "secondary" : undefined} className="rh-category__value">
         {c.scoreText}
       </Text>
-      <Label theme={c.chip.theme} size="xs" className="rh-category__word">
-        {c.chip.text}
-      </Label>
+      {/* уровень несет цвет полосы — плашки «Требует внимания» и «В зоне риска»
+          повторяли его словами; плашка остается только у «Нет данных», где
+          полосы нет */}
+      {c.score === null ? (
+        <Label theme={c.chip.theme} size="xs" className="rh-category__word">
+          {c.chip.text}
+        </Label>
+      ) : (
+        <span />
+      )}
     </>
   );
 
@@ -1546,7 +1579,7 @@ function FactBlock({ factKey, fact, missing }: { factKey: string; fact: Evidence
               ? `Эти данные вам недоступны. ${SECURITY_PUBLIC_NOTE}`
               : "Эти данные видны участникам репозитория."}
         </Text>
-        <Text variant="caption-2" color="hint">
+        <Text variant="caption-2" color="secondary">
           {factKey}
         </Text>
       </Flex>
@@ -1573,7 +1606,7 @@ function FactBlock({ factKey, fact, missing }: { factKey: string; fact: Evidence
       <Disclosure size="m" summary="Исходные данные" className="rh-proof__raw-toggle">
         <pre className="rh-code rh-proof__raw">{fmtFactValue(fact.value)}</pre>
       </Disclosure>
-      <Text variant="caption-2" color="hint">
+      <Text variant="caption-2" color="secondary">
         {fact.key}
       </Text>
     </Flex>

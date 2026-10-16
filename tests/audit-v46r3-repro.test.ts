@@ -9,16 +9,17 @@ import { join } from "node:path";
 const web = (name: string): string => readFileSync(join(import.meta.dir, "..", "src", "web", name), "utf8");
 
 describe("В4.6 круг 3: рейтинг", () => {
-  test("индекс имеет полосу 80×8px, окрашенное число 14px/600 и нулевой зазор", () => {
+  // аудит 16.10: уровень несет полоса, число нейтральное 15/550
+  test("индекс имеет полосу 80×8px, нейтральное число 15/500 и нулевой зазор", () => {
     const rating = web("Rating.tsx");
     const cell = rating.slice(rating.indexOf("function ScoreCell"), rating.indexOf("function CategoryCell"));
     const css = web("layout.css");
     // на телефоне полоса короче (`_narrow`), в таблице – 80px
     expect(cell).toContain('narrow ? "rh-score-cell__bar rh-score-cell__bar_narrow" : "rh-score-cell__bar"');
-    expect(cell).toContain("scoreColor(item.healthcraftIndex)");
+    expect(cell).not.toContain("scoreColor(item.healthcraftIndex)");
     expect(cell).toContain('<Flex gap={0} alignItems="center"');
     expect(css).toMatch(/\.rh-score-cell__bar\s*\{[^}]*flex:\s*0 0 80px[^}]*width:\s*80px/);
-    expect(css).toMatch(/\.rh-score-cell__num\s*\{[^}]*font-size:\s*14px[^}]*font-weight:\s*600/);
+    expect(css).toMatch(/\.rh-score-cell__num\s*\{[^}]*font-size:\s*var\(--g-text-body-2-font-size\)[^}]*font-weight:\s*var\(--g-text-accent-font-weight\)/);
     expect(css).toMatch(/\.rh-score-cell__bar \.g-progress,[\s\S]{0,100}height:\s*8px/);
     const categoryCell = rating.slice(rating.indexOf("function CategoryCell"));
     expect(categoryCell).toMatch(/scoreTheme\(value\) === "success"[\s\S]{0,300}rh-cat-plain/);
@@ -80,7 +81,8 @@ describe("В4.6 круг 3: карточка", () => {
     expect(row.indexOf('className="rh-category__bar"')).toBeLessThan(row.indexOf('className="rh-category__value"'));
     expect(row.indexOf('className="rh-category__value"')).toBeLessThan(row.indexOf('className="rh-category__word"'));
     expect(row).not.toContain("rh-category__weight");
-    expect(css).toContain("grid-template-columns: 16px minmax(0, 1fr) minmax(80px, 240px) 28px 150px;");
+    // последний трек — только плашка «Нет данных» (уровень несет полоса), пустой схлопывается
+    expect(css).toContain("grid-template-columns: 16px minmax(0, 1fr) minmax(80px, 240px) 28px auto;");
     // плашка уровня прижата вправо
     expect(css).toMatch(/\.rh-category__word \{[^}]*justify-self: end/);
     // селектор стал составным: тот же отступ получил блок «Вклад категорий»
@@ -135,7 +137,7 @@ describe("В4.6 круг 3: разделы пользователя и обол�
     // заголовок раздела – в шапке списка, как в SourceCraft: отдельный
     // `PageHeader` над ним дублировал бы его
     expect(reposPage).toContain("<MyReposSection");
-    expect(me).toMatch(/<Text variant="header-1" as="h1">\s*Избранное\s*<\/Text>/);
+    expect(me).toMatch(/<Text variant="header-2" as="h1" className="rh-page-title">\s*Избранное\s*<\/Text>/);
     expect(reposPage).not.toContain("<PatSection");
     expect(settingsPage).not.toContain('<PageHeader title="Настройки"');
     expect(settingsPage).toContain("<PatSection");

@@ -10,7 +10,7 @@
 //     уходит в Drawer по кнопке в ActionBar, чтобы не было второй прокрутки.
 import { ArrowRightFromSquare, ArrowRightToSquare, BookOpen, Bookmark, ChartColumn, CircleInfo, Gear, Moon, ScalesBalanced, Sun, Xmark } from "@gravity-ui/icons";
 import { ActionBar, AsideHeader, FooterItem, type AsideHeaderItem } from "@gravity-ui/navigation";
-import { ActionTooltip, Avatar, Breadcrumbs, Button, Drawer, Flex, Icon, Text, useThemeValue, useToaster, type IconData } from "@gravity-ui/uikit";
+import { ActionTooltip, Avatar, Breadcrumbs, Button, Drawer, Flex, Icon, Skeleton, Text, useThemeValue, useToaster, type IconData } from "@gravity-ui/uikit";
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { logout, type MeResponse } from "./api";
@@ -40,11 +40,14 @@ const GlobalActionsContext = createContext<ReactNode>(null);
 export function Shell({
   section,
   me,
+  meLoading = false,
   globalActions,
   children,
 }: {
   section: Section;
   me: MeResponse | null;
+  /** сессия еще не известна: внизу rail — заглушка, а не «Войти» */
+  meLoading?: boolean;
   globalActions?: ReactNode;
   children: ReactNode;
 }) {
@@ -102,7 +105,7 @@ export function Shell({
         onClick: (e) => followLink(e, "/"),
       }}
       menuItems={menuItems}
-      renderFooter={({ compact: isCompact }) => <RailFooter me={me} compact={isCompact} section={section} />}
+      renderFooter={({ compact: isCompact }) => <RailFooter me={me} meLoading={meLoading} compact={isCompact} section={section} />}
       renderContent={() => (
         <GlobalActionsContext.Provider value={globalActions ?? null}>
           <div className="rh-workspace">{children}</div>
@@ -231,7 +234,7 @@ function followLink(e: MouseEvent<HTMLElement>, href: string): void {
   navigate(href);
 }
 
-function RailFooter({ me, compact, section }: { me: MeResponse | null; compact: boolean; section: Section }) {
+function RailFooter({ me, meLoading, compact, section }: { me: MeResponse | null; meLoading: boolean; compact: boolean; section: Section }) {
   const [, setTheme] = useAppTheme();
   const resolved = useThemeValue();
   const isDark = resolved === "dark" || resolved === "dark-hc";
@@ -300,7 +303,8 @@ function RailFooter({ me, compact, section }: { me: MeResponse | null; compact: 
         />
       )}
       <div className={compact ? "rh-rail-account rh-rail-account_compact" : "rh-rail-account"}>
-        {me?.login ? <RailUser me={me} /> : <LoginButton compact={compact} />}
+        {/* пока /api/me не ответил, вошедший видел «Войти», и низ rail перестраивался */}
+        {me?.login ? <RailUser me={me} /> : meLoading ? <Skeleton className="rh-rail-account__skeleton" /> : <LoginButton compact={compact} />}
       </div>
     </>
   );

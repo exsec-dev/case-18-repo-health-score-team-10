@@ -85,7 +85,7 @@ export interface ScoreHistoryView {
 }
 
 const HISTORY_ONE =
-  "Пока есть 1 оценка по текущей версии методики – для графика нужны хотя бы 2. Новая точка появляется после каждого анализа.";
+  "Пока на графике одна точка – для линии нужны хотя бы 2 анализа с оценкой по текущей версии методики. Новая точка появляется после каждого анализа.";
 const HISTORY_FOOTER = "На графике – оценки по текущей версии методики; где данных не было, линия прерывается.";
 
 export function scoreHistoryView(data: Pick<HistoryResponse, "points" | "fullOpen"> | null): ScoreHistoryView {

@@ -121,7 +121,7 @@
   --g-color-line-generic-solid: #4d4c52;
   --g-color-line-info: rgba(82, 130, 255, .8);
   --g-color-line-light: rgba(255, 255, 255, .5);
-  --g-color-line-misc: rgba(96, 128, 156, .8);
+  --g-color-line-misc: #8099b0; /* фокус rail и сегментов: тот же ринг, что line-focus (платформенный 2,44:1) */
   --g-color-line-positive: rgba(91, 181, 87, .8);
   --g-color-line-utility: rgba(143, 82, 204, .8);
   --g-color-line-warning: rgba(255, 203, 0, .8);
@@ -146,7 +146,7 @@
   --g-color-text-dark-secondary: rgba(0, 0, 0, .5);
   --g-color-text-hint: rgba(255, 255, 255, .3);
   --g-color-text-info: #5282ff;
-  --g-color-text-info-heavy: #638fff;
+  --g-color-text-info-heavy: #97b4ff; /* текст чипа Label theme="info": на чипе 4,78:1 (платформенный 3,21:1) */
   --g-color-text-inverted-complementary: rgba(0, 0, 0, .7);
   --g-color-text-inverted-hint: rgba(0, 0, 0, .3);
   --g-color-text-inverted-primary: rgba(0, 0, 0, .9);
@@ -269,7 +269,7 @@
   --g-color-line-generic-solid: #e5e5e5;
   --g-color-line-info: rgba(82, 130, 255, .8);
   --g-color-line-light: rgba(255, 255, 255, .5);
-  --g-color-line-misc: rgba(107, 132, 153, .8);
+  --g-color-line-misc: #4e79eb; /* фокус rail и сегментов: тот же ринг, что line-focus (платформенный 2,82:1) */
   --g-color-line-positive: rgba(59, 201, 53, .8);
   --g-color-line-utility: rgba(143, 82, 204, .8);
   --g-color-line-warning: #eac94a;
@@ -294,7 +294,7 @@
   --g-color-text-dark-secondary: rgba(0, 0, 0, .5);
   --g-color-text-hint: rgba(0, 0, 0, .3);
   --g-color-text-info: #4e79eb;
-  --g-color-text-info-heavy: #4768c2;
+  --g-color-text-info-heavy: #3f5799; /* текст чипа Label theme="info": на чипе 5,87:1 (платформенный 4,42:1) */
   --g-color-text-inverted-complementary: rgba(255, 255, 255, .85);
   --g-color-text-inverted-hint: rgba(255, 255, 255, .5);
   --g-color-text-inverted-primary: #fff;
@@ -323,6 +323,36 @@
   --gn-aside-header-item-current-background-color: rgba(0, 0, 0, .1);
 }
 
+/* Типографика и геометрия SourceCraft. Платформа набирает заголовки,
+   подзаголовки и акцентный текст шрифтом YS Text 500; по плотности штриха он
+   равен Inter 550 (Inter 500 светлее, 600 — тяжелее), поэтому веса 550 —
+   с переменной осью Inter из fonts.css. Обычный текст: YS Text 400 = Inter 400.
+   Радиус контейнеров у платформы 12 (g-card, виджеты дашборда, ховер строки). */
+.g-root.g-root_theme_dark,
+.g-root.g-root_theme_light {
+  --g-text-header-font-weight: 550;
+  --g-text-subheader-font-weight: 550;
+  --g-text-accent-font-weight: 550;
+  --g-card-border-radius: 12px;
+  --rh-radius-card: 12px;
+  --rh-radius-placeholder: 16px;
+}
+
+/* Лиги места — тон металла у кубка и подписи, без фона: метка остается
+   спокойной и не ярче оценки. Контраст текста к фону страницы не ниже AA
+   (темная: 6,3–7,6:1, светлая: 5,0–5,7:1) — поэтому в светлой теме тона темнее. */
+.g-root.g-root_theme_dark {
+  --rh-league-gold: #e0c066;
+  --rh-league-silver: #c3cbd3;
+  --rh-league-bronze: #deb08b;
+}
+
+.g-root.g-root_theme_light {
+  --rh-league-gold: #8a6c00;
+  --rh-league-silver: #5e6873;
+  --rh-league-bronze: #9a5a26;
+}
+
 /* Цвета AI — фирменный градиент Алисы (alice.yandex.ru: #6b89e9 → #a88cff,
    акцент #7a55ff). Сознательное исключение из правила «только семантические
    токены». */
@@ -335,24 +365,6 @@
 
 .g-root.g-root_theme_dark {
   --rh-ai-accent: #a88cff;
-}
-
-/* Лиги места — «металл». Фон — горизонтальный градиент от металла к почти
-   непрозрачному светлому краю (85%), одинаковый в обеих темах: полупрозрачный
-   в темной теме читался темным. Левый край = фон сегмента SVG-бейджа
-   (RANK_BADGE_COLORS в api/public.ts). Текст и кубок — один токен ink, контраст
-   на левом крае не ниже 4,5:1 (золото 5,1, серебро 5,4, бронза 4,9). Исключение
-   из «только токены» того же рода, что цвета AI. */
-.g-root {
-  --rh-league-gold-bg: linear-gradient(90deg, #dcc26a 0%, rgba(240, 226, 176, 0.85) 100%);
-  --rh-league-gold-border: #e0c066;
-  --rh-league-gold-ink: #5c4600;
-  --rh-league-silver-bg: linear-gradient(90deg, #bcc4cc 0%, rgba(226, 231, 236, 0.85) 100%);
-  --rh-league-silver-border: #bcc4cd;
-  --rh-league-silver-ink: #3e464f;
-  --rh-league-bronze-bg: linear-gradient(90deg, #deb08b 0%, rgba(240, 214, 192, 0.85) 100%);
-  --rh-league-bronze-border: #d8a67c;
-  --rh-league-bronze-ink: #673912;
 }
 
 /* Маркер наших файлов: по нему cssOrder.ts переносит их после CSS компонентов

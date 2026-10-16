@@ -411,7 +411,7 @@ export function DocsPage({ slug }: { slug: string }) {
     requestAnimationFrame(() => scrollToAnchor(anchor));
   };
   const pdfButton = bundle && (
-    <Button view="outlined" size="m" href={bundle.pdfUrl} target="_blank" rel="noopener" title="Весь текст документации одним файлом">
+    <Button view="normal" size="m" href={bundle.pdfUrl} target="_blank" rel="noopener" title="Весь текст документации одним файлом">
       <Button.Icon side="start">
         <Icon data={ArrowDownToLine} size={16} />
       </Button.Icon>

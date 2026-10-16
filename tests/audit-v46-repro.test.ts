@@ -79,19 +79,22 @@ describe("В4.6-1 (У20): качество категорий закодиров
     }).toEqual({ exceptionsAreLabels: true, healthyIsPlain: true, nullIsUnknownLabel: true, nullIsNotBareDash: true });
   });
 
-  // Полосы категорий серые, число не окрашено – уровень несет только плашка
-  // (`scoreLabelTheme`, как у плашки отчета). «Нет данных» – нейтральная плашка
-  // view-модели (поведенческий тест – v49-ui-r1-card).
-  test("карточка: уровень категории несет плашка по порогам, число и полоса нейтральны, «нет данных» нейтрально", () => {
+  // Аудит 16.10: одна полоса оценки на все экраны (ScoreBar, уровень — цветом
+  // заливки); число не окрашено; плашка — только у «требует внимания» и «в зоне
+  // риска» (порог `scoreLabelTheme`, как у плашки отчета). «Нет данных» –
+  // нейтральная плашка view-модели (поведенческий тест – v49-ui-r1-card).
+  test("карточка: полоса ScoreBar по уровню, плашка по порогам кроме «Здоров», число нейтрально, «нет данных» нейтрально", () => {
     const src = srcOf("RepoPage.tsx");
     const row = src.slice(src.indexOf("function CategoryRow"), src.indexOf("// ---------- маркеры расчёта"));
     const view = srcOf("cardView.ts");
     expect({
       valueColored: /rh-category__value[\s\S]{0,400}scoreColor|scoreColor[\s\S]{0,400}rh-category__value/.test(row),
       chipByThreshold: /<Label theme=\{c\.chip\.theme\}/.test(row) && view.includes("theme: scoreLabelTheme(cat.score)"),
-      barNeutral: row.includes("rh-cat-bar__fill") && !/<Progress[^>]*theme=\{scoreTheme/.test(row),
+      barByLevel: row.includes("<ScoreBar value={c.score}") && /theme=\{scoreTheme\(value\)\}/.test(srcOf("ui.tsx")),
+      // плашка уровня — только у «Нет данных»; уровень несет цвет полосы
+      healthyNoChip: row.includes("{c.score === null ? (") && !row.includes('c.chip.theme === "success"'),
       noDataNeutral: view.includes('cat.score === null ? "Нет данных"'),
-    }).toEqual({ valueColored: false, chipByThreshold: true, barNeutral: true, noDataNeutral: true });
+    }).toEqual({ valueColored: false, chipByThreshold: true, barByLevel: true, healthyNoChip: true, noDataNeutral: true });
   });
 });
 
@@ -223,7 +226,8 @@ describe("В4.6-5 (У37): заливка полос непрозрачна и б
 // ---------------------------------------------------------------------------
 
 describe("В4.6-6 (У21): колонка индекса — горизонтально, число справа", () => {
-  test("ScoreCell: полоса 80px слева, число размера остальных колонок и того же цвета", () => {
+  // Аудит 16.10: уровень несет полоса, число нейтральное — один цветной акцент
+  test("ScoreCell: полоса 80px слева, число в слоте справа, нейтральное", () => {
     const src = srcOf("Rating.tsx");
     const cell = src.slice(src.indexOf("function ScoreCell"), src.indexOf("function CategoryCell"));
     const css = srcOf("layout.css");
@@ -232,9 +236,9 @@ describe("В4.6-6 (У21): колонка индекса — горизонтал
       bar80: /\.rh-score-cell__bar\s*\{[^}]*flex:\s*0 0 80px[^}]*width:\s*80px/.test(css),
       slot: cell.includes("rh-score-cell__num"),
       sameTextSize: !cell.includes('variant="body-3"') && !cell.includes('variant="subheader-3"'),
-      sameColor: cell.includes("scoreColor(item.healthcraftIndex)"),
+      neutralNumber: !cell.includes("scoreColor(item.healthcraftIndex)") && cell.includes('<Text color="primary" className="rh-score-cell__num"'),
       noOldBar: !cell.includes("width: 64"),
-    }).toEqual({ horizontal: true, bar80: true, slot: true, sameTextSize: true, sameColor: true, noOldBar: true });
+    }).toEqual({ horizontal: true, bar80: true, slot: true, sameTextSize: true, neutralNumber: true, noOldBar: true });
   });
 
   test("дефолт страницы 20 и опция 20 в pageSizeOptions (иначе к дефолту не вернуться)", async () => {
@@ -256,7 +260,7 @@ describe("В4.6-7 (У23): границы сетки и разрешения", ()
 
   // Порог колонки панели – проп `asideColumnFrom` (по умолчанию 1440); рейтинг
   // держит панель колонкой с 1600, чтобы на 1440 таблица вмещала «Реакции» и
-  // «Последнюю активность».
+  // «Обновлен».
   test("рейтинг: JS-порог правой панели — 1600, остальные страницы — 1440", () => {
     const shell = srcOf("Shell.tsx");
     expect(shell).toContain("asideColumnFrom = 1440");
@@ -303,7 +307,7 @@ describe("В4.6-8 (У26/У13/У38): вариант А — карточка на�
   test("величина — блоком в главной колонке, правая панель чисто методическая", () => {
     const src = srcOf("RepoPage.tsx");
     const pageOpen = src.indexOf("<Page crumbs={crumbs} actions={actions}");
-    const bandMount = src.indexOf("<ScoreBand card={card}");
+    const bandMount = src.search(/<ScoreBand\s+card=\{card\}/);
     const asideBody = src.slice(src.indexOf("function ScoreAside"), src.indexOf("function ScoreBand"));
     expect({
       bandIsMainChild: pageOpen >= 0 && bandMount > pageOpen,

@@ -52,6 +52,32 @@ body {
   background: var(--g-color-scroll-handle-hover);
 }
 
+/* ---------- фокус и подсказки: поверх стока Gravity ----------
+ * Поле ввода и селект в фокусе только темнеют рамкой (2,1–2,6:1) — даём то же
+ * кольцо, что у кнопок. У монохромной action-кнопки кольцо цвета самой кнопки
+ * и сливается с ней — отодвигаем его зазором фона. Плейсхолдер и значок (?)
+ * в Gravity красятся hint (2,1–2,6:1), а значение фильтра «все/любой» —
+ * это смысл, а не декор: поднимаем до secondary. */
+.g-text-input_state_focused .g-text-input__content,
+.g-select-control__button:focus-visible::before {
+  outline: 2px solid var(--g-color-line-focus);
+  outline-offset: -1px;
+}
+
+.g-button_view_action:focus-visible::before {
+  outline-offset: 2px;
+}
+
+.g-text-input__control::placeholder,
+.g-text-area__control::placeholder {
+  color: var(--g-color-text-secondary);
+}
+
+.g-select-control__placeholder,
+.g-help-mark {
+  color: var(--g-color-text-secondary);
+}
+
 /* ---------- каркас ---------- */
 
 .rh-workspace {
@@ -101,6 +127,17 @@ body {
   flex: none;
 }
 
+/* заглушка аккаунта, пока сессия неизвестна, — размером с кнопку входа:
+ * во всю ширину в широком rail, квадрат 36 в узком */
+.rh-rail-account__skeleton.g-skeleton {
+  height: 36px;
+  border-radius: var(--g-border-radius-l);
+}
+
+.rh-rail-account_compact .rh-rail-account__skeleton.g-skeleton {
+  width: 36px;
+}
+
 /* кто вошёл: не кнопка и не ссылка — действия рядом явными кнопками */
 .rh-rail-user {
   display: flex;
@@ -130,7 +167,7 @@ body {
 
 /* название продукта в rail — 20px задаёт logo.textSize, здесь вес вордмарка */
 .rh-rail [class*="gn-logo__logo"] {
-  font-weight: 600;
+  font-weight: var(--g-text-accent-font-weight);
 }
 
 /* Разделительной линии между лого и меню в rail нет, как у платформы.
@@ -333,10 +370,20 @@ body {
   margin-bottom: var(--g-spacing-4);
 }
 
-/* document: каждая колонка — свой контейнер прокрутки */
+/* document: каждая колонка — свой контейнер прокрутки, страница целиком
+ * в одном экране. Полоса основной колонки сама отделяет её от панели, поэтому
+ * рамки у панели здесь нет (у SourceCraft колонку «About» отделяет пустое
+ * поле): рамка рядом с полосой давала две вертикальные линии подряд.
+ * `scrollbar-gutter` держит место под полосу, и колонка не прыгает, когда
+ * содержимое перерастает экран. */
 .rh-page_document .rh-page__main,
 .rh-page_document .rh-page__aside {
   overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.rh-page_document .rh-page__aside {
+  border-left: 0;
 }
 
 /* fill: шапка и футер закреплены, прокручивается только содержимое между ними */
@@ -546,6 +593,19 @@ body {
   row-gap: var(--g-spacing-1);
 }
 
+/* имя в 24px не переносится: длинный слаг сжимается по правилу RepoSlug
+ * (сначала организация), а плашка видимости и кнопки остаются в строке, а
+ * не уезжают одни на вторую. На телефоне строка переносится. */
+.rh-card-head__title > :not(:first-child) {
+  flex: none;
+}
+
+@media (max-width: 767px) {
+  .rh-card-head__title.g-flex {
+    flex-wrap: wrap;
+  }
+}
+
 .rh-card-head__title > :first-child {
   min-width: 0;
   max-width: 100%;
@@ -605,8 +665,9 @@ body {
    * а не 1fr: растянутая на всю ширину, она перестает что-либо измерять;
    * излишек забирает название.
    * 28px — три цифры 15px tabular с запасом, чтобы число стояло у своей
-   * полосы. 150px — «Требует внимания» в Label xs без обрезки. */
-  grid-template-columns: 16px minmax(0, 1fr) minmax(80px, 240px) 28px 150px;
+   * полосы. Последний трек — плашка «Нет данных», только у категорий без
+   * данных; у остальных он пустой и схлопывается. */
+  grid-template-columns: 16px minmax(0, 1fr) minmax(80px, 240px) 28px auto;
   align-items: center;
   gap: var(--g-spacing-3);
   box-sizing: border-box;
@@ -665,21 +726,18 @@ button.rh-category:focus-visible {
 }
 
 
-/* Полоса категории — нейтральный серый (как #949494 в PDF): цвет несет только
- * плашка уровня. Дорожка — `base-generic`, как у Progress. */
-.rh-cat-bar {
+/* Полоса оценки (ScoreBar) — Progress Gravity высотой 8px, как в таблице
+ * рейтинга; уровень — цветом заливки. Одна полоса на все экраны. */
+.rh-score-bar {
   display: block;
-  overflow: hidden;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--g-color-base-generic);
+  flex: none;
+  min-width: 0;
 }
 
-.rh-cat-bar__fill {
-  display: block;
-  height: 100%;
-  border-radius: 3px;
-  background: var(--g-color-base-neutral-heavy);
+.rh-score-bar .g-progress,
+.rh-score-bar .g-progress__stack {
+  height: 8px;
+  line-height: 8px;
 }
 
 /* примечание частичной нехватки данных — первой строкой раскрытия, во всю ширину */
@@ -705,7 +763,7 @@ button.rh-category:focus-visible {
 .rh-empty.g-placeholder-container {
   width: 100%;
   padding: var(--g-spacing-8);
-  border-radius: 16px;
+  border-radius: var(--rh-radius-placeholder);
   background: var(--g-color-base-generic);
 }
 
@@ -748,7 +806,7 @@ button.rh-category:focus-visible {
   align-items: center;
 }
 
-/* «Последняя активность» — узкая колонка, подпись в 2 строки */
+/* узкая колонка: подпись в 2 строки */
 .rh-th-sort_wrap .g-button__text {
   max-width: 96px;
   white-space: normal;
@@ -918,12 +976,12 @@ button.rh-category:focus-visible {
 }
 
 /* фиксированный слот числа индекса в рейтинге и tabular-nums держат числа
- * на одной вертикали */
+ * на одной вертикали; body-2 15/500 — значение строки, как у Top repositories */
 .rh-score-cell__num {
   min-width: 32px;
   text-align: right;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--g-text-body-2-font-size);
+  font-weight: var(--g-text-accent-font-weight);
   font-variant-numeric: tabular-nums;
 }
 
@@ -1450,62 +1508,23 @@ button.rh-category:focus-visible {
   gap: var(--g-spacing-2);
 }
 
-/* иконки полос и дуга кольца — насыщенные базовые тоны (`-heavy`), а не
-   пастельные текстовые: это графика, порог 3:1, а не проза 4,5:1.
-   Правила для иконки и дуги раздельные: общий селектор давал иконке `stroke`,
-   и ее залитый контур получал обводку. */
+/* иконки полос — насыщенные базовые тоны (`-heavy`), а не пастельные
+   текстовые: это графика, порог 3:1, а не проза 4,5:1. */
 .rh-band-icon_success {
   color: var(--g-color-base-positive-heavy);
-}
-
-.rh-ring_success .rh-ring__arc {
-  stroke: var(--g-color-base-positive-heavy);
 }
 
 .rh-band-icon_warning {
   color: var(--g-color-base-warning-heavy);
 }
 
-.rh-ring_warning .rh-ring__arc {
-  stroke: var(--g-color-base-warning-heavy);
-}
-
 .rh-band-icon_danger {
   color: var(--g-color-base-danger-heavy);
 }
 
-.rh-ring_danger .rh-ring__arc {
-  stroke: var(--g-color-base-danger-heavy);
-}
-
-/* кольцо-шкала оценки */
-.rh-ring {
-  position: relative;
-  display: inline-flex;
-  flex: none;
-  width: 44px;
-  height: 44px;
-}
-
-.rh-ring circle {
-  fill: none;
-  stroke-width: 4;
-}
-
-.rh-ring__track {
-  stroke: var(--g-color-line-generic);
-}
-
-.rh-ring__arc {
-  stroke-linecap: round;
-}
-
-.rh-ring__num {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.rh-repo-item__num {
+  min-width: 28px;
+  text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
@@ -1566,7 +1585,7 @@ button.rh-category:focus-visible {
   gap: 2px;
   box-sizing: border-box;
   padding: var(--g-spacing-3);
-  border-radius: 12px;
+  border-radius: var(--rh-radius-card);
   text-align: start;
 }
 
@@ -1747,6 +1766,15 @@ button.rh-category:focus-visible {
   gap: var(--g-spacing-3);
 }
 
+/* Колонки строки: слот плашки уровня («Требует внимания» в Label s — 132px)
+ * и слот действий на две кнопки (обновление бывает только у своих репо)
+ * фиксированной ширины — полоса и число каждой строки на одной вертикали. */
+.rh-repo-item__level {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 132px;
+}
+
 /* иконка рекомендаций внутри ссылки красится вместе с текстом */
 .rh-repo-item__link {
   display: inline-flex;
@@ -1758,7 +1786,9 @@ button.rh-category:focus-visible {
   display: flex;
   flex: none;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--g-spacing-1);
+  min-width: 60px;
 }
 
 @media (max-width: 720px) {
@@ -1783,6 +1813,10 @@ button.rh-category:focus-visible {
 
   .rh-repo-item__score {
     flex-direction: row-reverse;
+  }
+
+  .rh-repo-item__level {
+    min-width: 0;
   }
 
   .rh-repo-item__actions {
@@ -1895,6 +1929,74 @@ button.rh-category:focus-visible {
   padding: var(--g-spacing-2) var(--g-spacing-3);
 }
 
+/* ссылка в методику — текст и стрелка одной строкой */
+.rh-method-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--g-spacing-1);
+  align-self: flex-start;
+}
+
+/* Слаг org/repo (RepoSlug): одна строка, обрезается сначала организация —
+ * до трех знаков, — и только потом имя. Доля сжатия у организации в тысячу
+ * раз больше, поэтому пока она не дошла до min-width, имя не трогается. */
+.rh-slug.g-text {
+  display: flex;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.rh-slug__org {
+  flex: 0 1000 auto;
+  min-width: 3ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rh-slug__sep {
+  flex: none;
+}
+
+.rh-slug__repo {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* длинное имя: сжимается начало, хвост с различающей частью остается */
+.rh-slug__repo_split {
+  display: flex;
+}
+
+.rh-slug__head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rh-slug__tail {
+  flex: none;
+}
+
+/* шапка страницы: заголовок и пояснение через 6px, как у SourceCraft */
+.rh-page-head {
+  gap: 6px;
+}
+
+/* до содержимого под шапкой «Избранного» — 24px, как у PageHeader */
+.rh-me-head {
+  margin-bottom: var(--g-spacing-2);
+}
+
+/* заголовок страницы: header-2 24/28, на телефоне — header-1 20/24 */
+@media (max-width: 767px) {
+  .rh-page-title.g-text {
+    font-size: var(--g-text-header-1-font-size);
+    line-height: var(--g-text-header-1-line-height);
+  }
+}
+
 /* Серая «пилюля» у имени: высота `Label` xs 20px,
    полностью скругленные углы, фон base-generic, текст complementary. Одна
    форма на метку «Приватный» и плашку прав. */
@@ -1912,11 +2014,11 @@ button.rh-category:focus-visible {
   white-space: nowrap;
 }
 
-/* счетчик отделен от слова шагом и цветом hint, иначе
+/* счетчик отделен от слова шагом и вторичным цветом, иначе
    «Задания1» читалось одним словом */
 .rh-jobs-btn__count {
   margin-inline-start: var(--g-spacing-2);
-  color: var(--g-color-text-hint);
+  color: var(--g-color-text-secondary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2647,7 +2749,7 @@ button.rh-category:focus-visible {
 .rh-cmp-total__num.g-text {
   font-size: 24px;
   line-height: 28px;
-  font-weight: 600;
+  font-weight: var(--g-text-accent-font-weight);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2673,7 +2775,7 @@ button.rh-category:focus-visible {
 .rh-cmp-cat__chipnum {
   font-size: 15px;
   line-height: 20px;
-  font-weight: 600;
+  font-weight: var(--g-text-accent-font-weight);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2854,9 +2956,8 @@ button.rh-category:focus-visible {
 }
 
 /* телефон: плашка видимости — иконкой, слово остается в title */
-.rh-cmp-visicon .rh-pill {
-  font-size: 0;
-  gap: 0;
+.rh-cmp-visicon .g-label__text {
+  display: none;
 }
 
 /* таблица лимитов AI в «Настройках»: числа не переносятся, отступы — шкалой Gravity */
@@ -2932,16 +3033,25 @@ button.rh-category:focus-visible {
   }
 }
 
-/* ячейка «Репозиторий» — потолок 264px только ниже 1440; на широких экранах
-   колонка берет свободное место, иначе имена резались при пустоте справа.
-   Потолок в долях окна — длинный слаг не распирает таблицу. */
+/* Ячейка «Репозиторий» берет то, что осталось от окна после каркаса и
+   остальных колонок, — таблица без горизонтальной прокрутки. Остальные
+   колонки по умолчанию (#, индекс, 4 категории, реакции, дата) вместе ~760px
+   с полями ячеек; каркас — rail 236 (узкий — 56) и поля страницы 40; правая
+   панель 320 стоит колонкой с 1600 (asideColumnFrom в Rating.tsx). Длинный
+   слаг режется по правилу RepoSlug. */
 .rh-rating-repo {
   min-width: 180px;
-  max-width: 264px;
+  max-width: calc(100vw - 1036px);
 }
-@media (min-width: 1440px) {
+.rh-rail_compact .rh-rating-repo {
+  max-width: calc(100vw - 856px);
+}
+@media (min-width: 1600px) {
   .rh-rating-repo {
-    max-width: 30vw;
+    max-width: calc(100vw - 1356px);
+  }
+  .rh-rail_compact .rh-rating-repo {
+    max-width: calc(100vw - 1176px);
   }
 }
 
@@ -2973,13 +3083,13 @@ button.rh-category:focus-visible {
   display: inline-flex;
 }
 .rh-rank__n {
-  font-weight: 600;
+  font-weight: var(--g-text-accent-font-weight);
 }
-.rh-rank__arrow_up {
-  color: var(--g-color-text-positive);
-}
+/* сдвиг места — второй слой строки: направление видно формой
+   треугольника, цвет не спорит с полосой индекса; величина — в подсказке */
+.rh-rank__arrow_up,
 .rh-rank__arrow_down {
-  color: var(--g-color-text-danger);
+  color: var(--g-color-text-secondary);
 }
 .rh-rating-fraud,
 .rh-rating-ext {
@@ -3138,42 +3248,43 @@ button.rh-category:focus-visible {
   vertical-align: middle;
 }
 
-/* лига — «мягкий металл»: токены `--rh-league-<лига>-*` в theme.css (фон с
- * градиентом, рамка, текст и иконка цветом металла) */
+/* лига — нейтральная метка без фона, как отметка места в строке Top
+ * repositories SourceCraft: металл был ярче самой оценки и выходил из
+ * палитры. Цвета сегментов остались только у SVG-бейджа для README. */
 .rh-league {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  height: 22px;
-  padding: 0 12px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 22px;
+  gap: var(--g-spacing-1);
+  color: var(--g-color-text-complementary);
+  font-size: var(--g-text-body-1-font-size);
+  font-weight: var(--g-text-accent-font-weight);
+  line-height: var(--g-text-body-1-line-height);
   cursor: default;
 }
 
+.rh-league .g-icon {
+  color: var(--g-color-text-secondary);
+}
+
+.rh-league_gold,
+.rh-league_gold .g-icon {
+  color: var(--rh-league-gold);
+}
+
+.rh-league_silver,
+.rh-league_silver .g-icon {
+  color: var(--rh-league-silver);
+}
+
+.rh-league_bronze,
+.rh-league_bronze .g-icon {
+  color: var(--rh-league-bronze);
+}
+
 .rh-league:focus-visible {
+  border-radius: var(--g-border-radius-xs);
   outline: 2px solid var(--g-color-line-focus);
   outline-offset: 2px;
-}
-
-.rh-league_gold {
-  color: var(--rh-league-gold-ink);
-  background: var(--rh-league-gold-bg);
-  box-shadow: inset 0 0 0 1px var(--rh-league-gold-border);
-}
-
-.rh-league_silver {
-  color: var(--rh-league-silver-ink);
-  background: var(--rh-league-silver-bg);
-  box-shadow: inset 0 0 0 1px var(--rh-league-silver-border);
-}
-
-.rh-league_bronze {
-  color: var(--rh-league-bronze-ink);
-  background: var(--rh-league-bronze-bg);
-  box-shadow: inset 0 0 0 1px var(--rh-league-bronze-border);
 }
 
 /* ---------- документация (/docs): как документация SourceCraft ----------

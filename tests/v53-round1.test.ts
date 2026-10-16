@@ -138,7 +138,9 @@ describe("К-2: слот истории оценки — по точкам и п
   test("одна оценка — просит вторую, не «показывать нечего»", () => {
     const v = scoreHistoryView({ points: [pt(1, 60)], fullOpen: false });
     expect(v.chart).toBe(false);
-    expect(v.text).toContain("1 оценка");
+    // не «1 оценка»: у карточки без оценки рядом с «Оценки нет» это читалось противоречием
+    expect(v.text).toContain("одна точка");
+    expect(v.text).toContain("хотя бы 2 анализа с оценкой");
     expect(v.text).not.toContain("нечего");
   });
 

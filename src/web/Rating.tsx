@@ -56,7 +56,6 @@ import {
   fmtNumber,
   fmtScore,
   scanStatusText,
-  scoreColor,
   scoreLabelTheme,
   scoreTheme,
   scoreWord,
@@ -66,7 +65,7 @@ import { readRatingHidden, useMediaQuery, writeRatingHidden } from "./prefs";
 import { linkProps, navigate, repoHref } from "./router";
 import { Page, showAside, useAsideControl } from "./Shell";
 import { categoryColorClass } from "./cardView";
-import { AsideSection, EmptyState, LanguageName, PageHeader, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, TIP_TARGET } from "./ui";
+import { AsideSection, EmptyState, LanguageName, MethodLink, PageHeader, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, TIP_TARGET } from "./ui";
 import { LANG_NONE, LANG_NONE_TITLE, langOptions, type Facets, type LangOptionData } from "./lang-filter";
 
 type Item = RatingResponse["items"][number];
@@ -126,7 +125,7 @@ const COLUMN_TITLES: Record<string, string> = {
   lang: "Язык",
   likes: "Реакции",
   forks: "Ответвления",
-  activity: "Последняя активность",
+  activity: "Обновлен",
   coverage: "Покрытие",
   scanned: "Анализ",
 };
@@ -366,26 +365,6 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
           renderOption={(option) => <FilterOption option={option} />}
           onUpdate={(v) => setParams({ ci: v[0] ?? null })}
         />
-        {view === "scored" && !isPhone && (
-          <TableColumnSetup
-            items={setupItems}
-            showStatus
-            onUpdate={(updated) => setHidden(updated.filter((i) => !i.selected).map((i) => i.id))}
-            /* переключатель — иконкой, счетчик колонок — в подсказке:
-               место в строке тулбара отдано фильтрам */
-            renderSwitcher={({ onClick, onKeyDown }) => {
-              const shown = setupItems.filter((i) => i.selected !== false).length;
-              const label = `Колонки: ${shown} из ${setupItems.length}`;
-              return (
-                <ActionTooltip title={label}>
-                  <Button view="outlined" size="m" onClick={onClick} onKeyDown={onKeyDown} aria-label={label}>
-                    <Icon data={Gear} size={16} />
-                  </Button>
-                </ActionTooltip>
-              );
-            }}
-          />
-        )}
         <SegmentedRadioGroup
           size="m"
           value={view}
@@ -406,6 +385,28 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
             {`С AI-обзором ${fmtCount(data.aiCount)}`}
           </Button>
         )}
+        {/* настройка колонок — последней: в «Без оценки» ее нет, и стоявшая перед
+            сегментами кнопка сдвигала их на 157px из-под курсора */}
+        {view === "scored" && !isPhone && (
+          <TableColumnSetup
+            items={setupItems}
+            showStatus
+            onUpdate={(updated) => setHidden(updated.filter((i) => !i.selected).map((i) => i.id))}
+            /* переключатель — иконкой, счетчик колонок — в подсказке:
+               место в строке тулбара отдано фильтрам */
+            renderSwitcher={({ onClick, onKeyDown }) => {
+              const shown = setupItems.filter((i) => i.selected !== false).length;
+              const label = `Колонки: ${shown} из ${setupItems.length}`;
+              return (
+                <ActionTooltip title={label}>
+                  <Button view="outlined" size="m" onClick={onClick} onKeyDown={onKeyDown} aria-label={label}>
+                    <Icon data={Gear} size={16} />
+                  </Button>
+                </ActionTooltip>
+              );
+            }}
+          />
+        )}
       </Flex>
     </Flex>
   );
@@ -414,7 +415,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
     <Page
       mode="fill"
       // панель колонкой — только с 1600, чтобы на 1440 таблице хватило
-      // ширины на «Реакции» и «Последнюю активность»
+      // ширины на «Реакции» и «Обновлен»
       asideColumnFrom={1600}
       crumbs={[{ text: "Рейтинг" }]}
       aside={<RatingAside meta={meta} metaFailed={metaFailed} generatedAt={data?.generatedAt ?? null} />}
@@ -639,6 +640,13 @@ function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResp
       {/* шкала — первой в панели: без нее числу не с чем сравниться */}
       <ScoreLegend coverageNullBelow={meta.coverageNullBelow} />
 
+      <AsideSection title="Формула">
+        <Text color="complementary">
+          HealthCraft Index – взвешенное среднее 4 категорий. Категория без данных в индекс не входит, ее вес переходит к остальным.
+        </Text>
+        <MethodLink page="scores" />
+      </AsideSection>
+
       <AsideSection
         title="Вклад категорий"
         help={
@@ -774,7 +782,7 @@ function RankCell({ item }: { item: Item }) {
     <span className="rh-rank" {...(moved ? TIP_TARGET : {})}>
       {moved && (
         <span className={up ? "rh-rank__arrow rh-rank__arrow_up" : "rh-rank__arrow rh-rank__arrow_down"} role="img" aria-label={up ? "Место выросло за сутки" : "Место снизилось за сутки"}>
-          <Icon data={up ? TriangleUpFill : TriangleDownFill} size={12} />
+          <Icon data={up ? TriangleUpFill : TriangleDownFill} size={10} />
         </span>
       )}
       {/* цвет — явно основной: без него текст наследует вторичный цвет ячейки таблицы */}
@@ -923,12 +931,14 @@ function buildColumns(
       template: (item: Item) => <Text color="secondary">{fmtNumber(item.likes)}</Text>,
     },
     { id: "forks", name: "Ответвления", align: "end", template: (item: Item) => fmtNumber(item.forks) },
-    // не «Активность»: так называется категория Score, а это дата из каталога
+    // не «Активность»: так называется категория Score, а это дата из каталога;
+    // «Обновлен» — как «Updated» в списке Top repositories SourceCraft, и
+    // заголовок встает в одну строку
     {
       id: "activity",
-      name: sortable("Последняя активность", "activity", true),
+      name: sortable("Обновлен", "activity"),
       align: "end",
-      width: 132,
+      width: 104,
       template: (item: Item) => <Text color="secondary">{fmtDate(item.lastActivityAt)}</Text>,
     },
     // сортировка идет по заголовкам, поэтому у покрытия своя колонка
@@ -999,7 +1009,9 @@ function ScoreCell({ item, narrow = false }: { item: Item; narrow?: boolean }) {
       <div className={narrow ? "rh-score-cell__bar rh-score-cell__bar_narrow" : "rh-score-cell__bar"}>
         <Progress value={item.healthcraftIndex} size="s" theme={scoreTheme(item.healthcraftIndex)} />
       </div>
-      <Text color={scoreColor(item.healthcraftIndex)} className="rh-score-cell__num" title={sentence(scoreWord(item.healthcraftIndex))}>
+      {/* уровень несет полоса, число нейтральное — как значение в строке Top
+          repositories: в строке один цветной акцент, а не два */}
+      <Text color="primary" className="rh-score-cell__num" title={sentence(scoreWord(item.healthcraftIndex))}>
         {fmtScore(item.healthcraftIndex)}
       </Text>
     </Flex>

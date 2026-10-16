@@ -1,7 +1,7 @@
 // main.tsx — вход фронтенда: стили Gravity UI один раз, язык компонентов,
 // тема и тостер. Бандлит Bun (HTML-импорт в server.ts), отдельной сборки нет.
 // Стили @gravity-ui/navigation подтягивает сам пакет (CSS-импорты в его JS).
-import "@gravity-ui/uikit/styles/fonts.css";
+import "./fonts.css";
 import "@gravity-ui/uikit/styles/styles.css";
 
 import { configure, Lang, ThemeProvider, Toaster, ToasterComponent, ToasterProvider } from "@gravity-ui/uikit";

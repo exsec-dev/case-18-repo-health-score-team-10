@@ -51,12 +51,12 @@ import { type MeResponse, type MetaResponse, type MyReposResponse, dataOf, logou
 import type { LiveAnalysis } from "./analysis";
 import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
 import { plural } from "../report/submetrics";
-import { FRAUD_EXPLAIN, FRAUD_TITLE, authErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, quotaCell, recommendationsText, scoreTheme, scoreWord, sentence, slugOf, type ActionQuotaView, type AiQuotaView, type FavoriteAddCheck, type QuotaWindowView } from "./format";
+import { FRAUD_EXPLAIN, FRAUD_TITLE, authErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, quotaCell, recommendationsText, scoreLabelTheme, scoreTheme, scoreWord, sentence, slugOf, type ActionQuotaView, type AiQuotaView, type FavoriteAddCheck, type QuotaWindowView } from "./format";
 import { recommendationsHref } from "./RepoPage";
 import { type Band, BANDS, type RepoEntry, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
 import { linkProps, navigate, repoHref } from "./router";
 import { Page, UserAvatar, displayName, logoutFailedToast } from "./Shell";
-import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, RepoSlug, SkeletonRows, TIP_TARGET, VisibilityPill } from "./ui";
+import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, RepoSlug, ScoreBar, SkeletonRows, TIP_TARGET, VisibilityPill } from "./ui";
 
 const REPOS_CRUMBS = [{ text: "Избранное" }];
 const SETTINGS_CRUMBS = [{ text: "Настройки" }];
@@ -705,18 +705,20 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
       {/* шапка списка по образцу SourceCraft («Active issues 39»): заголовок,
           счетчик, справа поиск, сортировка и единственная action-кнопка страницы */}
       <div className="rh-me-head">
-        <Flex direction="column" gap={1} className="rh-me-head__title">
+        <Flex direction="column" className="rh-me-head__title rh-page-head">
           <Flex gap={2} alignItems="baseline">
-            <Text variant="header-1" as="h1">
+            <Text variant="header-2" as="h1" className="rh-page-title">
               Избранное
             </Text>
             {repos.state.kind === "ok" && (
-              <Text variant="header-1" color="hint">
+              <Text variant="header-2" color="secondary" className="rh-page-title">
                 {entries.length}
               </Text>
             )}
           </Flex>
-          <Text color="complementary">Следите за здоровьем избранных репозиториев и тем, что возможно в них улучшить.</Text>
+          <Text variant="body-2" color="complementary">
+            Следите за здоровьем избранных репозиториев и тем, что возможно в них улучшить.
+          </Text>
         </Flex>
         <div className="rh-me-tools">
           <TextInput
@@ -891,28 +893,6 @@ function StatePill({ icon, tone, title, children }: { icon: IconData; tone?: "da
     <span className="rh-state" title={title}>
       <Icon data={icon} size={14} className={tone ? `rh-state__icon rh-state__icon_${tone}` : "rh-state__icon"} />
       {children}
-    </span>
-  );
-}
-
-/**
- * Оценка — кольцо-шкала с числом внутри. Цвет полосы — на дуге насыщенным
- * тоном `--g-color-base-*-heavy`: пастельные текстовые токены читаются бледно,
- * а для графики хватает контраста 3:1 (4,5:1 нужен только тексту).
- */
-function ScoreRing({ value }: { value: number }) {
-  const r = 18;
-  const circ = 2 * Math.PI * r;
-  const shown = Math.max(0, Math.min(100, Math.round(value)));
-  return (
-    <span className={`rh-ring rh-ring_${scoreTheme(value)}`}>
-      <svg width="44" height="44" viewBox="0 0 44 44" aria-hidden="true">
-        <circle className="rh-ring__track" cx="22" cy="22" r={r} />
-        <circle className="rh-ring__arc" cx="22" cy="22" r={r} strokeDasharray={`${(shown / 100) * circ} ${circ}`} transform="rotate(-90 22 22)" />
-      </svg>
-      <Text variant="subheader-2" className="rh-ring__num">
-        {fmtScore(value)}
-      </Text>
     </span>
   );
 }
@@ -1221,8 +1201,18 @@ function RepoRow({
       </StatePill>
     ) : scored ? (
       <div className="rh-repo-item__score" title="HealthCraft Index – публичная оценка репозитория">
-        <Text variant="subheader-1">{sentence(scoreWord(entry.healthcraftIndex))}</Text>
-        <ScoreRing value={entry.healthcraftIndex!} />
+        {/* слот плашки фиксированной ширины прижимает ее к полосе: полосы и числа
+            всех строк стоят друг под другом, какой бы длины ни было слово уровня */}
+        <span className="rh-repo-item__level">
+          <Label theme={scoreLabelTheme(entry.healthcraftIndex)} size="s">
+            {sentence(scoreWord(entry.healthcraftIndex))}
+          </Label>
+        </span>
+        {/* та же полоса, что в рейтинге и на карточке, — вместо кольца */}
+        <ScoreBar value={entry.healthcraftIndex!} width={64} />
+        <Text variant="subheader-2" className="rh-repo-item__num">
+          {fmtScore(entry.healthcraftIndex!)}
+        </Text>
       </div>
     ) : entry.lastScanStatus === "running" ? (
       // running — законный промежуточный статус последнего скана
@@ -1575,7 +1565,7 @@ function HistoryRow({ job, time, onNavigate }: { job: import("../api/me").MyJob;
         )}
       </div>
       {time && (
-        <Text color="hint" className="rh-jobs__time">
+        <Text color="secondary" className="rh-jobs__time">
           {time}
         </Text>
       )}

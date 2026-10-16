@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { buildReportModel, renderRepoReport } from "../src/report/markdown";
 import { COLORS, buildPdfDocument } from "../src/report/pdf";
-import { avatarInitials, avatarTone } from "../src/web/format";
+import { avatarInitials } from "../src/web/format";
 import { langOptions } from "../src/web/lang-filter";
 import { REPORT_FIXTURES, fixtureCard, goldenPath } from "./report-fixtures";
 
@@ -111,13 +111,12 @@ describe("Р2.5: PDF — синяя ссылка; аватар снят (В4.9, 
     }
   });
 
-  test("буквы и тон — одно правило с карточкой (алгоритм Gravity getAvatarDisplayText)", () => {
+  test("буквы — алгоритм Gravity getAvatarDisplayText; инициалы нейтральные, как заглушка SourceCraft", () => {
     expect(avatarInitials("full")).toBe("FU");
     expect(avatarInitials("dozzle-plus")).toBe("DP");
     expect(avatarInitials("its-wednesday-my-dudes")).toBe("IW");
     expect(avatarInitials("uikit")).toBe("UI");
-    expect(avatarTone("full")).toBe(avatarTone("full"));
-    expect(srcOf("src/web/ui.tsx")).toMatch(/import \{[^}]*avatarTone[^}]*\} from "\.\/format"/);
+    expect(srcOf("src/web/ui.tsx")).toContain('backgroundColor="var(--g-color-base-generic)"');
   });
 });
 

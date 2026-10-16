@@ -11,6 +11,7 @@ import { getRepoCard, type RepoCard } from "../src/api/repos";
 import { cardView, categoryCohortNote, noneBelow, positionView } from "../src/web/cardView";
 import { fmtCount } from "../src/web/format";
 import { makeApiDb, seedRepo, seedScan, seedScore, type ApiTestDb } from "./api-fixtures";
+import { contrast } from "./theme-contrast";
 
 let t: ApiTestDb;
 
@@ -131,19 +132,23 @@ describe("процент 0: «у всех не ниже» – только ес�
   });
 });
 
-describe("В5.9 HQ: плашка лиги — цвет сегмента SVG-бейджа", () => {
-  test("у каждой лиги градиент плашки проходит через цвет сегмента SVG", () => {
+// Аудит 16.10: «металл» лиги был ярче оценки и выходил из палитры SourceCraft.
+// На экране лига — нейтральная метка; цвета сегментов остались только у SVG.
+// Аудит 16.10: «металл» лиги был ярче оценки и выходил из палитры SourceCraft.
+// На экране лига — метка без фона: тон металла у кубка и подписи, контраст
+// текста AA в обеих темах; градиенты сегментов остались только у SVG.
+describe("В5.9 HQ: лига на экране — тон без фона, металл — только у SVG-бейджа", () => {
+  test("метка лиги без фона; у каждого тира свой тон, текст AA к фону в обеих темах", () => {
     const layout = readFileSync(join(import.meta.dir, "../src/web/layout.css"), "utf8");
     const theme = readFileSync(join(import.meta.dir, "../src/web/theme.css"), "utf8");
-    for (const [tier, c] of Object.entries(RANK_BADGE_COLORS)) {
-      const rule = layout.slice(layout.indexOf(`.rh-league_${tier} {`), layout.indexOf("}", layout.indexOf(`.rh-league_${tier} {`)));
-      expect(rule).toContain(`var(--rh-league-${tier}-bg)`);
-      // светлая тема (первое вхождение токена): яркий край градиента = фон сегмента SVG, текст = текст SVG
-      const bg = theme.match(new RegExp(`--rh-league-${tier}-bg:([^;]+);`))![1]!;
-      expect(bg.toLowerCase()).toContain(c.bg.toLowerCase());
-      // текст плашки = цвет иконки = текст сегмента SVG (один токен ink)
-      expect(rule).toContain(`color: var(--rh-league-${tier}-ink)`);
-      expect(theme.match(new RegExp(`--rh-league-${tier}-ink:([^;]+);`))![1]!.trim().toLowerCase()).toBe(c.fg.toLowerCase());
+    const rule = layout.slice(layout.indexOf(".rh-league {"), layout.indexOf("}", layout.indexOf(".rh-league {")));
+    expect(rule).not.toContain("background");
+    expect(theme).not.toMatch(/--rh-league-\w+-bg/);
+    for (const tier of Object.keys(RANK_BADGE_COLORS)) {
+      expect(layout).toContain(`.rh-league_${tier},\n.rh-league_${tier} .g-icon {\n  color: var(--rh-league-${tier});\n}`);
+      const [dark, light] = [...theme.matchAll(new RegExp(`--rh-league-${tier}: (#[0-9a-f]{6});`, "g"))].map((m) => m[1]!);
+      expect(contrast(dark!, "#343434")).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(light!, "#ffffff")).toBeGreaterThanOrEqual(4.5);
     }
   });
 });

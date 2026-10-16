@@ -169,9 +169,10 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     expect(css).not.toMatch(/\.rh-access__icon_yes \{[^}]*positive/);
   });
 
-  test("шапка списка: заголовок, счетчик цветом hint, поиск, сортировка, одна action-кнопка", () => {
-    expect(src).toMatch(/<Text variant="header-1" as="h1">\s*Избранное\s*<\/Text>/);
-    expect(src).toMatch(/<Text variant="header-1" color="hint">\s*\{entries\.length\}/);
+  // аудит 16.10: заголовок header-2 как у SourceCraft, счетчик secondary (hint — 2,1–2,6:1)
+  test("шапка списка: заголовок, счетчик вторичным цветом, поиск, сортировка, одна action-кнопка", () => {
+    expect(src).toMatch(/<Text variant="header-2" as="h1" className="rh-page-title">\s*Избранное\s*<\/Text>/);
+    expect(src).toMatch(/<Text variant="header-2" color="secondary" className="rh-page-title">\s*\{entries\.length\}/);
     // плейсхолдер — «Поиск», как у рейтинга
     expect(src).toContain('placeholder="Поиск"');
     // описание под заголовком вместо иконки-подсказки
@@ -199,8 +200,11 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     const rowSrc = src.slice(src.indexOf("function RepoRow"), src.indexOf("// ========== ПОРТ 5"));
     expect(rowSrc).toContain('className="rh-repo-item__cover"');
     expect(rowSrc).toContain("scoreWord(entry.healthcraftIndex)");
-    // оценка — кольцо; число белое, цвет полосы — на дуге
-    expect(rowSrc).toContain("<ScoreRing value={entry.healthcraftIndex!} />");
+    // аудит 16.10: оценка — та же полоса, что в рейтинге и на карточке (ScoreBar),
+    // уровень — плашкой Label; число нейтральное
+    expect(rowSrc).toContain("<ScoreBar value={entry.healthcraftIndex!} width={64} />");
+    expect(rowSrc).toContain("<Label theme={scoreLabelTheme(entry.healthcraftIndex)} size=\"s\">");
+    expect(src).not.toContain("function ScoreRing");
     expect(rowSrc).not.toContain("scoreColor(");
     // «Сканируется» — штриховка загрузки кнопки Gravity, не Label со спиннером;
     // «идет анализ» без обещания времени
@@ -209,14 +213,17 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     // остальные состояния — серые `StatePill` с иконкой, цветных `Label` в состоянии строки нет
     const stateSrc = rowSrc.slice(rowSrc.indexOf("const state ="), rowSrc.indexOf("const menuItems"));
     expect((stateSrc.match(/<StatePill icon=\{/g) ?? []).length).toBe(7);
-    expect(stateSrc).not.toContain("<Label");
+    // единственный цветной Label в состоянии — уровень оценки у оцененного репо
+    // (аудит 16.10: статус одним способом на всех экранах); состояния — серые
+    expect((stateSrc.match(/<Label/g) ?? []).length).toBe(1);
+    expect(stateSrc).toContain("<Label theme={scoreLabelTheme(entry.healthcraftIndex)}");
     expect(src).not.toContain("<Spin");
     // метки «ваш» нет
     expect(src).not.toMatch(/>\s*ваш\s*</);
-    // плашка видимости — общая `VisibilityPill` у всех строк: серая пилюля
-    // (у приватного — с замком), не `Label theme="normal"`
+    // плашка видимости — общая `VisibilityPill` у всех строк: Label clear,
+    // как «Public» у SourceCraft (у приватного — с замком)
     expect(src).toContain("<VisibilityPill value={access.visibility} titleSuffix={checked} />");
-    expect(readFileSync(join(import.meta.dir, "..", "src", "web", "ui.tsx"), "utf8")).toMatch(/pill\.kind === "internal" \? Persons : Lock[\s\S]{0,120}<span className="rh-pill"/);
+    expect(readFileSync(join(import.meta.dir, "..", "src", "web", "ui.tsx"), "utf8")).toMatch(/pill\.kind === "internal" \? Persons : Lock[\s\S]{0,160}<Label theme="clear" size="s"/);
     expect(rowSrc).toContain("<DropdownMenu");
     expect(rowSrc).toContain('text: "Убрать из избранного"');
     // пункт «Открыть рекомендации» — SPA-навигация к разделу якорем, не href
@@ -231,7 +238,7 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     const css = readFileSync(join(import.meta.dir, "..", "src", "web", "layout.css"), "utf8");
     expect(css).toMatch(/\.rh-repo-item \.g-avatar \{[^}]*--g-avatar-size: 40px;[^}]*--_--border-radius: 8px;/);
     expect(css).toMatch(/\.rh-repo-item \{[^}]*border-bottom: 1px solid var\(--g-color-line-generic\);/);
-    expect(css).toMatch(/\.rh-summary__tile\.g-card \{[^}]*border-radius: 12px;/);
+    expect(css).toMatch(/\.rh-summary__tile\.g-card \{[^}]*border-radius: var\(--rh-radius-card\);/);
     // полосы распределения под плитками нет
     expect(css).not.toContain(".rh-dist");
     expect(src).not.toContain("rh-dist");
@@ -240,11 +247,11 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     // штриховка — keyframes загрузки кнопки Gravity; движение отключается по prefers-reduced-motion
     expect(css).toMatch(/\.rh-busy \{[^}]*animation: g-loading-animation/);
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.rh-busy \{\s*animation: none;/);
-    // цвет полос — насыщенными базовыми тонами на графике, не пастельным текстом
+    // иконки плиток — насыщенными базовыми тонами графики, не пастельным текстом;
+    // кольца больше нет — его заменила общая полоса
     for (const [band, token] of [["success", "positive"], ["warning", "warning"], ["danger", "danger"]]) {
-      expect(css).toContain(`.rh-ring_${band} .rh-ring__arc {\n  stroke: var(--g-color-base-${token}-heavy);\n}`);
-      // у иконки полосы только `color`: общий с дугой `stroke` обвел бы залитый контур иконки
       expect(css).toContain(`.rh-band-icon_${band} {\n  color: var(--g-color-base-${token}-heavy);\n}`);
     }
+    expect(css).not.toContain(".rh-ring");
   });
 });

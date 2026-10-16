@@ -59,7 +59,7 @@ function Routes() {
               : null;
 
   return (
-    <Shell section={section} me={meData} globalActions={meData?.login ? <JobsBell /> : null}>
+    <Shell section={section} me={meData} meLoading={meData === null && me.kind === "loading"} globalActions={meData?.login ? <JobsBell /> : null}>
       {metaFailed && (
         <Flex style={{ padding: "var(--g-spacing-4)" }}>
           <Alert

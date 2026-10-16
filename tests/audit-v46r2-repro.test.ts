@@ -492,7 +492,8 @@ describe("Б2 (Р3, Р21): строка рейтинга и контрол со�
     }).toEqual({ avatar: true, slugComponent: true, languageName: true, dotOnly: false, skeletonRhythm: true });
   });
 
-  test("Р3 + П1.1: число как в остальных колонках, окрашено; полоса снова читаемая", () => {
+  // аудит 16.10: число нейтральное 15/500 — уровень несет полоса
+  test("Р3 + П1.1: число как в остальных колонках, нейтральное; полоса снова читаемая", () => {
     const cell = between(codeOf("Rating.tsx"), "function ScoreCell", "function CategoryCell");
     const css = srcOf("layout.css");
     expect({
@@ -504,9 +505,9 @@ describe("Б2 (Р3, Р21): строка рейтинга и контрол со�
       widths:
         css.includes("flex: 0 0 80px") &&
         css.includes("min-width: 32px") &&
-        css.includes("font-size: 14px") &&
-        css.includes("font-weight: 600"),
-    }).toEqual({ normalNumber: true, boldNumberGone: false, colouredNumber: true, readableBar: true, tighterGap: true, widths: true });
+        /\.rh-score-cell__num \{[^}]*font-size: var\(--g-text-body-2-font-size\)[^}]*font-weight: var\(--g-text-accent-font-weight\)/.test(css),
+      neutralNumber: cell.includes('<Text color="primary" className="rh-score-cell__num"'),
+    }).toEqual({ normalNumber: true, boldNumberGone: false, colouredNumber: false, readableBar: true, tighterGap: true, widths: true, neutralNumber: true });
   });
 
   // Сортируют заголовки колонок (как в таблицах платформы); проверяется, что

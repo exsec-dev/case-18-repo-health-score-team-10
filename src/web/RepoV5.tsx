@@ -414,7 +414,7 @@ export function FraudCheckFooter({ card, org, repo, onChanged, loggedIn, quota, 
           {icon === null ? <Spin size="xs" /> : <Icon data={icon.data} size={16} style={{ color: icon.color, flexShrink: 0 }} />}
           <Text variant="body-short">{st.text}</Text>
           {st.date !== null && (
-            <Text variant="caption-2" color="hint">
+            <Text variant="caption-2" color="secondary">
               {st.date}
             </Text>
           )}
@@ -531,7 +531,7 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
 
   const stamp =
     ai !== null && ai.generatedAt !== null && !jobActive ? (
-      <Text variant="caption-2" color="hint">
+      <Text variant="caption-2" color="secondary">
         {`Обзор от ${fmtDateTime(ai.generatedAt)}. ${AI_DISCLAIMER}`}
         {cooldownActive ? ` Следующий запуск – после ${fmtDateTime(ai.cooldownUntil)}.` : ""}
         {canRun && quotaBlocked !== null ? ` ${quotaBlocked}.` : ""}

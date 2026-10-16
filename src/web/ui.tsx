@@ -6,7 +6,9 @@ import {
   Flex,
   Icon,
   Label,
+  Link,
   PlaceholderContainer,
+  Progress,
   Skeleton,
   Text,
   type AvatarSize,
@@ -14,19 +16,28 @@ import {
   type PlaceholderContainerActionProps,
 } from "@gravity-ui/uikit";
 import { useEffect, useState, type ReactNode } from "react";
-import { Globe, Lock, Persons } from "@gravity-ui/icons";
+import { ArrowRight, Globe, Lock, Persons } from "@gravity-ui/icons";
+import { linkProps } from "./router";
 import { visibilityPill } from "./cardView";
-import { SCORE_LEGEND_TITLE, SCORE_SCALE, avatarTone, fmtCoverage, sentence, slugOf } from "./format";
+import { SCORE_LEGEND_TITLE, SCORE_SCALE, fmtCoverage, scoreTheme, sentence, slugOf } from "./format";
 
-/** Заголовок страницы: header-1 20/24 и одна строка пояснения, как у SourceCraft. */
+/**
+ * Заголовок страницы: header-2 24/28 и пояснение body-2 15/20 через 6px, до
+ * содержимого 24px — замер «Top repositories» у SourceCraft. На телефоне —
+ * header-1 (класс в layout.css): длинное имя в 24px уходит в перенос.
+ */
 export function PageHeader({ title, description, end }: { title: ReactNode; description?: ReactNode; end?: ReactNode }) {
   return (
-    <Flex gap={3} alignItems="flex-start" justifyContent="space-between" wrap style={{ marginBottom: "var(--g-spacing-4)" }}>
-      <Flex direction="column" gap={1} style={{ minWidth: 0 }}>
-        <Text variant="header-1" as="h1">
+    <Flex gap={3} alignItems="flex-start" justifyContent="space-between" wrap style={{ marginBottom: "var(--g-spacing-6)" }}>
+      <Flex direction="column" className="rh-page-head" style={{ minWidth: 0 }}>
+        <Text variant="header-2" as="h1" className="rh-page-title">
           {title}
         </Text>
-        {description && <Text color="complementary">{description}</Text>}
+        {description && (
+          <Text variant="body-2" color="complementary">
+            {description}
+          </Text>
+        )}
       </Flex>
       {end}
     </Flex>
@@ -34,17 +45,17 @@ export function PageHeader({ title, description, end }: { title: ReactNode; desc
 }
 
 /**
- * Блок правой панели: заголовок subheader-2 и содержимое. `help` — иконка-подсказка
+ * Блок правой панели: заголовок subheader-3 17/24 (как «About» у SourceCraft) и содержимое. `help` — иконка-подсказка
  * РЯДОМ с заголовком: пояснение к блоку не читается ещё одним абзацем панели и не
  * занимает высоту.
  */
 export function AsideSection({ title, help, children }: { title: ReactNode; help?: ReactNode; children: ReactNode }) {
   return (
-    /* шаг 7 (24px): блоки идут подряд без разделителей, и на меньшем шаге
-       читались бы одним полотном */
-    <Flex as="section" className="rh-aside-section" direction="column" gap={2} style={{ marginBottom: "var(--g-spacing-7)" }}>
+    /* шаг 8 (32px), как между блоками правой колонки SourceCraft: блоки идут
+       подряд без разделителей, и на меньшем шаге читались бы одним полотном */
+    <Flex as="section" className="rh-aside-section" direction="column" gap={2} style={{ marginBottom: "var(--g-spacing-8)" }}>
       <Flex gap={1} alignItems="center">
-        <Text variant="subheader-2" as="h2">
+        <Text variant="subheader-3" as="h2">
           {title}
         </Text>
         {help}
@@ -89,9 +100,24 @@ export function ScoreLegend({ coverageNullBelow, withNote = true }: { coverageNu
 }
 
 /**
+ * Полоса оценки 0–100 — одна на все экраны: таблица рейтинга, строки категорий
+ * карточки, «Избранное». Progress Gravity, уровень — цветом заливки по шкале
+ * (`scoreTheme`); высота 8px задана в layout.css. Пять разных полос и кольцо
+ * показывали одно и то же число пятью способами.
+ */
+export function ScoreBar({ value, width, label }: { value: number; width: number | string; label?: string }) {
+  return (
+    <span className="rh-score-bar" style={{ width }} role={label ? "img" : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
+      <Progress value={Math.max(0, Math.min(100, Math.round(value)))} size="s" theme={scoreTheme(value)} />
+    </span>
+  );
+}
+
+/**
  * Аватар репозитория: logo.url платформы, а без него или при ошибке загрузки
  * (нет сети, битая ссылка) — инициалы: внешняя картинка не обязательна для UI.
- * Тон инициалов — `avatarTone` из `format.ts`, общий с PDF-отчётом.
+ * Инициалы нейтральные, как заглушка аватара у SourceCraft: цветные квадраты
+ * давали каждой второй строке рейтинга лишний цветной акцент.
  */
 export function RepoAvatar({ repo, logoUrl, size }: { repo: string; logoUrl: string | null; size: AvatarSize }) {
   const [failed, setFailed] = useState(false);
@@ -117,8 +143,8 @@ export function RepoAvatar({ repo, logoUrl, size }: { repo: string; logoUrl: str
           size={size}
           shape="square"
           text={repo}
-          backgroundColor={`var(--g-color-base-${avatarTone(repo)}-light)`}
-          color={`var(--g-color-text-${avatarTone(repo)})`}
+          backgroundColor="var(--g-color-base-generic)"
+          color="var(--g-color-text-secondary)"
           style={{ flexShrink: 0 }}
         />
       )}
@@ -157,15 +183,31 @@ export function LanguageName({ name, color, noLanguage = false }: { name: string
 }
 
 /**
- * Слаг репозитория — один компонент на рейтинг и карточку: форма и обрезка по
- * ширине решаются здесь. `org/repo` БЕЗ пробелов вокруг слеша — так слаг
- * копируется и вставляется; `title` несёт полную форму, чтобы обрезанное имя
- * можно было прочесть наведением.
+ * Слаг репозитория — один компонент на все экраны: форма и обрезка по ширине
+ * решаются здесь. `org/repo` БЕЗ пробелов вокруг слеша — так слаг копируется
+ * и вставляется; `title` несёт полную форму, чтобы обрезанное имя можно было
+ * прочесть наведением.
+ *
+ * Обрезается сначала организация, потом середина имени: у соседних строк
+ * обычно общий владелец и общее начало имени (`lct-hackaton-2026/case-18-…-team-14`
+ * и `…-team-70`), а различает их конец. Обрезка с конца всей строки прятала
+ * именно его. Хвост имени (`SLUG_TAIL` знаков) не сжимается никогда.
  */
-export function RepoSlug({ org, repo, variant }: { org: string; repo: string; variant: "body-1" | "subheader-1" | "subheader-2" | "header-1" }) {
+const SLUG_TAIL = 8;
+
+export function RepoSlug({ org, repo, variant }: { org: string; repo: string; variant: "body-1" | "subheader-1" | "subheader-2" | "header-1" | "header-2" }) {
   return (
-    <Text variant={variant} as={variant === "header-1" ? "h1" : "span"} ellipsis title={slugOf(org, repo)} style={{ display: "block" }}>
-      {slugOf(org, repo)}
+    <Text variant={variant} as={variant === "header-1" || variant === "header-2" ? "h1" : "span"} title={slugOf(org, repo)} className={variant === "header-2" ? "rh-slug rh-page-title" : "rh-slug"}>
+      <span className="rh-slug__org">{org}</span>
+      <span className="rh-slug__sep">/</span>
+      {repo.length > SLUG_TAIL * 2 ? (
+        <span className="rh-slug__repo rh-slug__repo_split">
+          <span className="rh-slug__head">{repo.slice(0, -SLUG_TAIL)}</span>
+          <span className="rh-slug__tail">{repo.slice(-SLUG_TAIL)}</span>
+        </span>
+      ) : (
+        <span className="rh-slug__repo">{repo}</span>
+      )}
     </Text>
   );
 }
@@ -179,11 +221,25 @@ export function VisibilityPill({ value, titleSuffix = "" }: { value: string | nu
   const pill = visibilityPill(value);
   if (!pill) return null;
   const icon = pill.kind === "public" ? Globe : pill.kind === "internal" ? Persons : Lock;
+  // как «Public» у имени репозитория в SourceCraft: Label clear s, 24/5
   return (
-    <span className="rh-pill" title={`${pill.title}${titleSuffix}`}>
-      <Icon data={icon} size={12} />
+    <Label theme="clear" size="s" icon={<Icon data={icon} size={14} />} title={`${pill.title}${titleSuffix}`} className="rh-visibility">
       {pill.text}
-    </span>
+    </Label>
+  );
+}
+
+/**
+ * Ссылка в раздел методики документации — из каждого места, которое объясняет
+ * расчет коротко («Как считается?», подсказки, «Что учитывается»). Как «How do
+ * we count it?» у SourceCraft: короткое объяснение на месте, полное — в доке.
+ */
+export function MethodLink({ page, children = "Подробнее о методике" }: { page: "scores" | "no-data" | "recommendations" | "metrics"; children?: ReactNode }) {
+  return (
+    <Link {...linkProps(`/docs/method/${page}`)} className="rh-method-link">
+      {children}
+      <Icon data={ArrowRight} size={14} />
+    </Link>
   );
 }
 

@@ -968,20 +968,9 @@ export function authErrorText(raw: string): string {
 }
 
 /**
- * Аватар репозитория без логотипа: тон и буквы — одно правило для карточки
- * (`RepoAvatar`) и PDF-отчета. Тон — стабильный хэш имени; буквы — как
- * `getAvatarDisplayText` из Gravity uikit 7.49.0: первые буквы двух первых
- * слов, иначе первые два символа.
+ * Буквы аватара репозитория без логотипа — как `getAvatarDisplayText` из
+ * Gravity uikit 7.49.0: первые буквы двух первых слов, иначе первые два символа.
  */
-export const AVATAR_TONES = ["info", "utility", "positive", "misc"] as const;
-export type AvatarTone = (typeof AVATAR_TONES)[number];
-
-export function avatarTone(name: string): AvatarTone {
-  let h = 0;
-  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
-  return AVATAR_TONES[h % AVATAR_TONES.length]!;
-}
-
 export function avatarInitials(name: string): string {
   const words = name.split(/[^\p{L}]+/u).filter((w) => w.length > 0);
   if (words.length <= 1) return name.slice(0, 2).toUpperCase();

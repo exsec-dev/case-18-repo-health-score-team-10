@@ -63,6 +63,7 @@ const CHIPS: Record<"dark" | "light", [label: string, token: string, tone: strin
     ["danger", "--g-color-text-danger-heavy", "danger", 4.92],
     ["normal", "--g-color-text-misc-heavy", "misc", 4.46],
     ["unknown", "--g-color-text-complementary", "neutral", 5.45],
+    ["info", "--g-color-text-info-heavy", "info", 4.78],
   ],
   light: [
     ["success", "--g-color-text-positive-heavy", "positive", 5.26],
@@ -70,6 +71,7 @@ const CHIPS: Record<"dark" | "light", [label: string, token: string, tone: strin
     ["danger", "--g-color-text-danger-heavy", "danger", 4.88],
     ["normal", "--g-color-text-misc-heavy", "misc", 6],
     ["unknown", "--g-color-text-complementary", "neutral", 8.1],
+    ["info", "--g-color-text-info-heavy", "info", 5.87],
   ],
 };
 
@@ -155,6 +157,9 @@ describe.each(["dark", "light"] as const)("палитра В4.6: тема %s", (
     const ring = contrast(flatten([bg, tokens.get("--g-color-line-focus")!]), bg);
     expect(ring).toBe(FOCUS[theme]);
     expect(ring).toBeGreaterThanOrEqual(GRAPHICS);
+    // rail (navigation) и SegmentedRadioGroup рисуют фокус токеном line-misc —
+    // он приведен к тому же кольцу, иначе в интерфейсе два разных фокуса
+    expect(contrast(flatten([bg, tokens.get("--g-color-line-misc")!]), bg)).toBe(FOCUS[theme]);
   });
 
   test("охранный пункт 6: полоса покрытия (misc) не унифицирована с оценкой (positive)", () => {

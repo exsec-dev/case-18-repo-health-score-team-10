@@ -1,0 +1,6 @@
+/* fonts.css — Inter с переменной осью жирности вместо стокового
+ * @gravity-ui/uikit/styles/fonts.css: тот грузит только 400 и 600, и вес 500
+ * браузер подменял на 400. Ось 400–700 нужна, чтобы попасть в толщину
+ * SourceCraft: YS Text 500 по плотности штриха равен Inter 550 (замер
+ * заливки текста на canvas 16.10.2026, 13–24px), YS Text 400 — Inter 400. */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400..700&display=swap");
