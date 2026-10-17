@@ -274,7 +274,7 @@ describe("ревью 25.09: реквизиты столбца — на данн�
     const res2 = await buildCompare(slugsOf("cmp/priv", "cmp/unk"), resolveWith(t, GRANTED));
     const cells = [...res.items, ...res2.items].map((i) => (i.status === "ok" ? rankCell(i.card, null) : null));
     expect(cells[0]).toEqual({ rank: "#1", total: " из 1" });
-    expect(cells[1]).toEqual({ none: "без места – индекс не выставлен" });
+    expect(cells[1]).toEqual({ none: "нет места: индекс не рассчитан" });
     for (const c of cells.slice(2)) expect(c).toEqual({ none: "не в публичном рейтинге" });
     // на телефоне при общем размере рейтинга «из M» уходит в подпись строки
     if (res.items[0]!.status === "ok") expect(rankCell(res.items[0]!.card, 1)).toEqual({ rank: "#1", total: null });

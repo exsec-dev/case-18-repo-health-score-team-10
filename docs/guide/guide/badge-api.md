@@ -48,7 +48,7 @@ curl https://health-craft.ru/api/v1/repos/<org>/<repo>
 | Поле | Что значит |
 |---|---|
 | `org`, `repo`, `title`, `language`, `likes` | имя, название, язык и оценка реакций из каталога SourceCraft |
-| `healthcraftIndex` | HealthCraft Index, целое 0-100; `null` – оценки нет |
+| `healthcraftIndex` | HealthCraft Index, целое 0–100; `null` – оценки нет |
 | `indexCoverage` | полнота данных: доля веса категорий с данными, от 0 до 1 |
 | `categories` | баллы Документации, Активности, Задач и Состояния кода без округления; `null` – нет данных |
 | `modelVersion` | версия модели оценки |
@@ -80,7 +80,7 @@ Repo Health Score, CI/CD и Безопасности в публичном API �
 [![HealthCraft Index](https://health-craft.ru/api/v1/repos/<org>/<repo>/badge.svg)](https://health-craft.ru/repo/<org>/<repo>)
 ```
 
-Цвет числа зависит от зоны: зеленый для 70-100, желтый для 40-69, красный для 0-39. Если оценки нет, бейдж показывает `n/a` серым. Вариант `style=rank` добавляет сегмент лиги: [[league-gold:ТОП-10]], [[league-silver:ТОП-100]] или [[league-bronze:ТОП-1000]]. У репозитория без лиги он совпадает с обычным бейджем.
+Цвет числа зависит от зоны: зеленый для 70–100, желтый для 40–69, красный для 0–39. Если оценки нет, бейдж показывает `n/a` серым. Вариант `style=rank` добавляет сегмент лиги: [[league-gold:TOP-10]], [[league-silver:TOP-100]] или [[league-bronze:TOP-1000]]. У репозитория без лиги он совпадает с обычным бейджем.
 
 ## Кэш и лимиты
 

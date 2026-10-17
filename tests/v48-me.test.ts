@@ -141,7 +141,7 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     // списки панели прокручиваются внутри нее
     expect((bell.match(/<div className="rh-jobs__list">/g) ?? []).length).toBe(2);
     expect(readFileSync(join(import.meta.dir, "..", "src", "web", "layout.css"), "utf8")).toMatch(/\.rh-jobs__list \{[^}]*overflow-y: auto;/);
-    expect(row).toContain('<span className="rh-state rh-busy">');
+    expect(row).toContain('<Label theme="unknown" size="s" className="rh-busy">');
     // история — лента по дням (`HistoryRow`: время справа, итог иконкой);
     // пустые состояния — иконка, заголовок, описание; ссылка в раздел — SPA-навигация + закрытие панели
     expect(bell).toContain("groupJobsByDay(recent)");
@@ -168,8 +168,8 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     // опрос заданий — один на вкладку (session.tsx), событие «задания
     // изменились» будит его там, а не отдельные опросы страниц
     expect(readFileSync(join(import.meta.dir, "..", "src", "web", "session.tsx"), "utf8")).toMatch(/window\.addEventListener\(JOBS_CHANGED, refresh\)/);
-    // пилюля с полностью скругленными углами; иконки прав без зеленого
-    expect(css).toMatch(/\.rh-pill \{[^}]*border-radius: 10px;/);
+    // SC-9: своей «пилюли» нет — видимость и состояния на Label; иконки прав без зеленого
+    expect(css).not.toContain(".rh-pill {");
     expect(css).not.toMatch(/\.rh-access__icon_yes \{[^}]*positive/);
   });
 
@@ -214,14 +214,15 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     expect(rowSrc).not.toContain("scoreColor(");
     // «Сканируется» — штриховка загрузки кнопки Gravity, не Label со спиннером;
     // «идет анализ» без обещания времени
-    expect(rowSrc).toContain('<span className="rh-state rh-busy" title="Идет анализ – итог придет уведомлением">');
+    expect(rowSrc).toContain('<Label theme="unknown" size="s" className="rh-busy" title="Идет анализ – итог придет уведомлением">');
     expect(rowSrc).not.toContain("etaNote");
     // остальные состояния — серые `StatePill` с иконкой, цветных `Label` в состоянии строки нет
     const stateSrc = rowSrc.slice(rowSrc.indexOf("const state ="), rowSrc.indexOf("const menuItems"));
     // UX 17.10: +2 для «Моих репозиториев» — «Пустой» и «Еще не анализировали» вне каталога
     expect((stateSrc.match(/<StatePill\s+icon=\{/g) ?? []).length).toBe(9);
-    // цветных Label в состоянии нет: уровень — полосой, состояния — серые StatePill
-    expect((stateSrc.match(/<Label/g) ?? []).length).toBe(0);
+    // цветных Label в состоянии нет: уровень — полосой, состояния — серые (unknown)
+    expect(stateSrc).not.toMatch(/<Label theme="(success|warning|danger|info|normal)"/);
+    expect(src).toMatch(/function StatePill[\s\S]{0,300}<Label theme="unknown" size="s"/);
     expect(src).not.toContain("<Spin");
     // метки «ваш» нет
     expect(src).not.toMatch(/>\s*ваш\s*</);
@@ -243,7 +244,9 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
 
   test("CSS строки — замер SourceCraft: аватар 40px радиусом 8px, делитель line-generic", () => {
     const css = readFileSync(join(import.meta.dir, "..", "src", "web", "layout.css"), "utf8");
-    expect(css).toMatch(/\.rh-repo-item \.g-avatar \{[^}]*--g-avatar-size: 40px;[^}]*--_--border-radius: 8px;/);
+    // радиус 8px — от shape="square" size="l", без внутренних переменных uikit
+    expect(css).toMatch(/\.rh-repo-item \.g-avatar \{\n  --g-avatar-size: 40px;\n\}/);
+    expect(css).not.toContain("--_--border-radius");
     expect(css).toMatch(/\.rh-repo-item \{[^}]*border-bottom: 1px solid var\(--g-color-line-generic\);/);
     expect(css).toMatch(/\.rh-summary__tile\.g-card \{[^}]*border-radius: var\(--rh-radius-card\);/);
     // полосы распределения под плитками нет

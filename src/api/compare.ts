@@ -49,7 +49,7 @@ export function parseCompareQuery(params: URLSearchParams): CompareQuery {
   for (const value of raw) {
     const parts = value.split("/");
     if (parts.length !== 2 || !slugSegmentOk(parts[0]) || !slugSegmentOk(parts[1])) {
-      return { ok: false, message: "адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний" };
+      return { ok: false, message: "адрес репозитория указан неверно: нужен вид организация/репозиторий из латинских букв, цифр, точек, дефисов и подчеркиваний" };
     }
     if (seen.has(value)) continue;
     seen.add(value);

@@ -1,5 +1,5 @@
-// Значок места (чистая функция): 3 лиги – золото ТОП-10, серебро ТОП-100,
-// бронза ТОП-1000, равные – strict. Значок – функция индекса в выборке рейтинга (above /
+// Значок места (чистая функция): 3 лиги – золото TOP-10, серебро TOP-100,
+// бронза TOP-1000, равные – strict. Значок – функция индекса в выборке рейтинга (above /
 // atOrAbove / всего), а не одного места: у равных индексов он одинаков при
 // обеих политиках. Каждая граница лиги проверяется с обеих сторон; лучший
 // уровень — самый узкий порог; нет места — нет значка.
@@ -32,9 +32,9 @@ describe("rankBadge: нет места — нет значка", () => {
 describe("rankBadge: лиги по умолчанию (решение владельца 27.09)", () => {
   test("3 лиги, только абсолютные пороги; политика по умолчанию — strict", () => {
     expect(RANK_TIERS.map((t) => [t.id, t.kind, t.n, t.label])).toEqual([
-      ["gold", "top", 10, "ТОП-10"],
-      ["silver", "top", 100, "ТОП-100"],
-      ["bronze", "top", 1000, "ТОП-1000"],
+      ["gold", "top", 10, "TOP-10"],
+      ["silver", "top", 100, "TOP-100"],
+      ["bronze", "top", 1000, "TOP-1000"],
     ]);
     expect(RANK_TIE_POLICY).toBe("strict");
     const tie = { above: 9, atOrAbove: 11, rankedTotal: N };
@@ -43,9 +43,9 @@ describe("rankBadge: лиги по умолчанию (решение владе
 
   test("подписи — по правилам языка UI (цифры, дефис, без «ё» и длинного тире)", () => {
     for (const t of RANK_TIERS) expect(/[—ё]/.test(t.label)).toBe(false);
-    expect(rankBadge(unique(3, N))).toEqual({ tier: "gold", label: "ТОП-10" });
-    expect(rankBadge(unique(30, N))).toEqual({ tier: "silver", label: "ТОП-100" });
-    expect(rankBadge(unique(300, N))).toEqual({ tier: "bronze", label: "ТОП-1000" });
+    expect(rankBadge(unique(3, N))).toEqual({ tier: "gold", label: "TOP-10" });
+    expect(rankBadge(unique(30, N))).toEqual({ tier: "silver", label: "TOP-100" });
+    expect(rankBadge(unique(300, N))).toEqual({ tier: "bronze", label: "TOP-1000" });
   });
 
   for (const ties of POLICIES) {
@@ -83,8 +83,8 @@ describe("rankBadge: равные индексы на границе", () => {
 });
 
 describe("rankBadge: малые рейтинги, лучший уровень, параметры", () => {
-  test("лига ТОП-N — только когда в рейтинге больше N репо", () => {
-    // «ТОП-10 из 10» — значок у всех, он ничего не значит
+  test("лига TOP-N — только когда в рейтинге больше N репо", () => {
+    // «TOP-10 из 10» — значок у всех, он ничего не значит
     expect(tierOf(unique(1, 10))).toBeNull();
     expect(tierOf(unique(10, 11))).toBe("gold");
     expect(tierOf(unique(50, 100))).toBeNull();
@@ -93,8 +93,8 @@ describe("rankBadge: малые рейтинги, лучший уровень, �
     expect(tierOf(unique(500, 1001))).toBe("bronze");
   });
 
-  test("процентный порог (в параметре) — вниз: №1 из 50 не «ТОП-1%» (это 2%)", () => {
-    const pct: RankTier = { id: "silver", kind: "percent", n: 1, label: "ТОП-1%" };
+  test("процентный порог (в параметре) — вниз: №1 из 50 не «TOP-1%» (это 2%)", () => {
+    const pct: RankTier = { id: "silver", kind: "percent", n: 1, label: "TOP-1%" };
     expect(tierCutoff(pct, 50)).toBe(0);
     expect(tierOf(unique(1, 50), undefined, [pct])).toBeNull();
     // 150 репо: 1% = 1,5 → 1 место; при ceil было бы 2
@@ -105,10 +105,10 @@ describe("rankBadge: малые рейтинги, лучший уровень, �
 
   test("лучший — самый узкий порог, а не порядок таблицы; при равном пороге — первый", () => {
     const tiers: RankTier[] = [
-      { id: "gold", kind: "top", n: 10, label: "ТОП-10" },
-      { id: "silver", kind: "percent", n: 1, label: "ТОП-1%" },
+      { id: "gold", kind: "top", n: 10, label: "TOP-10" },
+      { id: "silver", kind: "percent", n: 1, label: "TOP-1%" },
     ];
-    // 500 репо: ТОП-10 — 10 мест, ТОП-1% — 5 мест: №5 — «ТОП-1%», №6 — «ТОП-10»
+    // 500 репо: TOP-10 — 10 мест, TOP-1% — 5 мест: №5 — «TOP-1%», №6 — «TOP-10»
     expect(tierOf(unique(5, 500), undefined, tiers)).toBe("silver");
     expect(tierOf(unique(6, 500), undefined, tiers)).toBe("gold");
     // 1 000 репо: оба порога ровно 10 мест — первый в таблице
@@ -117,10 +117,10 @@ describe("rankBadge: малые рейтинги, лучший уровень, �
 
   test("таблица и политика — параметры: пустая таблица — значка нет", () => {
     const tiers: RankTier[] = [
-      { id: "gold", kind: "top", n: 3, label: "ТОП-3" },
-      { id: "bronze", kind: "percent", n: 25, label: "ТОП-25%" },
+      { id: "gold", kind: "top", n: 3, label: "TOP-3" },
+      { id: "bronze", kind: "percent", n: 25, label: "TOP-25%" },
     ];
-    expect(rankBadge(unique(3, 40), { tiers })).toEqual({ tier: "gold", label: "ТОП-3" });
+    expect(rankBadge(unique(3, 40), { tiers })).toEqual({ tier: "gold", label: "TOP-3" });
     expect(tierOf(unique(10, 40), undefined, tiers)).toBe("bronze");
     expect(tierOf(unique(11, 40), undefined, tiers)).toBeNull();
     expect(tierOf(unique(1, 40), undefined, [])).toBeNull();

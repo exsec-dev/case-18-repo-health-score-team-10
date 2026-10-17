@@ -37,11 +37,11 @@ function add(t: ApiTestDb, repo: string, total: number | null, opts: { language?
 }
 
 /**
- * 25 публичных оцененных: места 1-25 (индексы 99, 98, …), на границе ТОП-10
+ * 25 публичных оцененных: места 1-25 (индексы 99, 98, …), на границе TOP-10
  * пара РАВНЫХ индексов «tie-a»/«tie-b» (места 10 и 11 — по org/repo); плюс
  * приватный с высшим индексом (в рейтинг не входит, мест не сдвигает) и
  * репо без индекса. По лигам по умолчанию при 25 репо: №1-9 — золото
- * «ТОП-10»; равные на местах 10-11 при strict — оба без значка (не ниже их
+ * «TOP-10»; равные на местах 10-11 при strict — оба без значка (не ниже их
  * 11 > 10), при inclusive — оба золото (выше их 9 < 10); серебра и бронзы
  * нет (в рейтинге не больше 100 и 1 000 репо), дальше — null.
  */
@@ -75,7 +75,7 @@ describe("значок места: один источник у карточки
         if (place !== null) expect([place.rank, place.rankedTotal] as (number | null)[]).toEqual([score.rank, score.rankedTotal]);
       }
       const by = new Map(rows.map((r) => [r.repo, r]));
-      for (const repo of ["r01", "r02", "r09"]) expect(by.get(repo)!.rankBadge).toEqual({ tier: "gold", label: "ТОП-10" });
+      for (const repo of ["r01", "r02", "r09"]) expect(by.get(repo)!.rankBadge).toEqual({ tier: "gold", label: "TOP-10" });
       // равные индексы: место по org/repo (tie-a 10-е, tie-b 11-е), а значок — один на обоих:
       // strict (по умолчанию) — оба без значка, хотя tie-a стоит 10-м
       expect([by.get("tie-a")!.rank, by.get("tie-b")!.rank]).toEqual([10, 11]);
@@ -127,7 +127,7 @@ describe("значок места: один источник у карточки
       expect(a).toEqual({ rank: 10, rankedTotal: 25, above: 9, atOrAbove: 11 });
       expect(b).toEqual({ rank: 11, rankedTotal: 25, above: 9, atOrAbove: 11 });
       for (const place of [a, b]) {
-        expect(rankBadge(place, { ties: "inclusive" })).toEqual({ tier: "gold", label: "ТОП-10" });
+        expect(rankBadge(place, { ties: "inclusive" })).toEqual({ tier: "gold", label: "TOP-10" });
         expect(rankBadge(place, { ties: "strict" })).toBeNull();
       }
     } finally {
@@ -181,12 +181,12 @@ describe("SVG: вариант со значком места", () => {
   test("без значка — прежний бейдж байт в байт; со значком — третий сегмент с подписью", () => {
     expect(renderBadgeSvg(74, null)).toBe(renderBadgeSvg(74));
     const plain = renderBadgeSvg(74);
-    const ranked = renderBadgeSvg(74, { tier: "gold", label: "ТОП-10" });
-    expect(ranked).toContain(">ТОП-10<");
+    const ranked = renderBadgeSvg(74, { tier: "gold", label: "TOP-10" });
+    expect(ranked).toContain(">TOP-10<");
     expect(ranked).toContain(`fill="${RANK_BADGE_COLORS.gold.bg}"`);
-    expect(renderBadgeSvg(74, { tier: "silver", label: "ТОП-100" })).toContain(`fill="${RANK_BADGE_COLORS.silver.bg}"`);
-    expect(renderBadgeSvg(74, { tier: "bronze", label: "ТОП-1000" })).toContain(`fill="${RANK_BADGE_COLORS.bronze.bg}"`);
-    expect(ranked).toContain('aria-label="HealthCraft Index: 74, ТОП-10 рейтинга"');
+    expect(renderBadgeSvg(74, { tier: "silver", label: "TOP-100" })).toContain(`fill="${RANK_BADGE_COLORS.silver.bg}"`);
+    expect(renderBadgeSvg(74, { tier: "bronze", label: "TOP-1000" })).toContain(`fill="${RANK_BADGE_COLORS.bronze.bg}"`);
+    expect(ranked).toContain('aria-label="HealthCraft Index: 74, TOP-10 рейтинга"');
     const width = (svg: string) => Number(/width="(\d+)"/.exec(svg)![1]);
     expect(width(ranked)).toBeGreaterThan(width(plain));
     expect(/https?:\/\/(?!www\.w3\.org)/.test(ranked)).toBe(false);
@@ -249,7 +249,7 @@ describe("SVG: вариант со значком места", () => {
     expect(top.headers.get("content-type")).toContain("image/svg+xml");
     expect(top.headers.get("cache-control")).toContain("max-age=");
     const topSvg = await top.text();
-    expect(topSvg).toContain(">ТОП-10<");
+    expect(topSvg).toContain(">TOP-10<");
     expect(topSvg).toContain(RANK_BADGE_COLORS.gold.bg);
 
     // без значка — обычный бейдж, тот же, что без параметра (не пустой)

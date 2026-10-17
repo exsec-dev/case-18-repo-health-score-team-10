@@ -27,6 +27,7 @@ import { dataOf, fetchJson, RequestError, type AsyncState } from "./api";
 import {
   COMPARE_ADD,
   COMPARE_BAD_INPUT_TEXT,
+  COMPARE_PLACEHOLDER,
   COMPARE_DUPLICATE_TEXT,
   COMPARE_FULL_LINE,
   COMPARE_FULL_PARTIAL,
@@ -521,7 +522,7 @@ function AddCompareDialog({
           <TextInput
             size="l"
             controlRef={inputRef}
-            placeholder={phone ? "Название, org/repo или ссылка" : "Название, org/repo или ссылка на репозиторий"}
+            placeholder={phone ? "Название или ссылка" : COMPARE_PLACEHOLDER}
             value={value}
             startContent={<Icon data={Magnifier} size={16} className="rh-add-repo__lens" />}
             hasClear
@@ -543,7 +544,7 @@ function AddCompareDialog({
             }}
             controlProps={{
               role: "combobox",
-              "aria-label": "Поиск репозитория: название, org/repo или ссылка",
+              "aria-label": "Поиск репозитория: название, организация/репозиторий или ссылка",
               "aria-expanded": list.length > 0,
               "aria-controls": listId,
               "aria-activedescendant": active >= 0 && list[active] ? optionId(active) : undefined,
@@ -568,7 +569,7 @@ function AddCompareDialog({
             errorMessage={error ?? undefined}
           />
           <Text variant="body-1" color="secondary">
-            {`В сравнении ${slugs.length} из ${COMPARE_MAX}. ${loggedIn ? "Найдите репозиторий в рейтинге или избранном" : "Найдите репозиторий в рейтинге"} либо вставьте org/repo или ссылку.`}
+            {`В сравнении ${slugs.length} из ${COMPARE_MAX}. ${loggedIn ? "Найдите репозиторий в рейтинге или избранном" : "Найдите репозиторий в рейтинге"} либо вставьте ссылку на репозиторий.`}
           </Text>
           <ul className="rh-add-list" id={listId} role="listbox" aria-label="Репозитории">
             {searching && list.length === 0 && (
@@ -630,7 +631,7 @@ function AddCompareDialog({
               ];
             })}
           </ul>
-          {noMatches && <Text color="complementary">{`В рейтинге нет «${text}» – вставьте org/repo или ссылку.`}</Text>}
+          {noMatches && <Text color="complementary">{`В рейтинге нет «${text}» – вставьте ссылку на репозиторий.`}</Text>}
         </Flex>
       </Dialog.Body>
       <Dialog.Footer textButtonCancel="Готово" onClickButtonCancel={close} />

@@ -376,7 +376,7 @@ export const RULE_SUBMETRIC: Record<string, string> = {
 
 /** Эффект действия без числа — словами правила (как `actionItem` отчета). */
 export function recommendationEffect(rec: CardRecommendation): { effect: string; note: string | null } {
-  return { effect: rec.expectedImpact ?? "повысит балл категории", note: rec.deltaScore !== null ? "ожидаемый эффект" : null };
+  return { effect: rec.expectedImpact ?? "повысит балл категории", note: rec.deltaScore !== null ? "Ожидаемый эффект" : null };
 }
 
 const SOURCE_WORDS: [RegExp, string][] = [
@@ -422,7 +422,7 @@ export function noRecommendationsKind(card: RepoCard): "healthy" | "weak" | "nod
  * «Категории», одна копия для карточки и MD/PDF. Участвуют только показанные
  * категории с данными (закрытые и «нет данных» — нет), по округленному баллу, как
  * у шкалы: сильные — до 2 лучших от 70, слабые — до 2 худших ниже 70 (не «требует
- * внимания»: шкала так называет только 40-69). Пустая часть не печатается. У
+ * внимания»: шкала так называет только 40–69). Пустая часть не печатается. У
  * пустого репо (`codeEmpty`) строки нет — оценивать нечего.
  */
 export function strengthsLine(card: RepoCard): string | null {

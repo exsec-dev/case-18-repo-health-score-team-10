@@ -3,7 +3,7 @@
 // query-строку и обратно — поэтому отфильтрованным рейтингом можно
 // поделиться ссылкой, и F5 его не теряет.
 import { EmptyIllustration, SearchIllustration, SuccessIllustration } from "./illustrations";
-import { coverageLine } from "./ratingParams";
+import { coverageGap, coverageLine, resetFiltersHref } from "./ratingParams";
 import { loadRatingScroll, rememberRatingHref, saveRatingScroll } from "./ratingReturn";
 import { ArrowUpRightFromSquare, BarsAscendingAlignLeft, BarsDescendingAlignLeft, Flag, Gear, Magnifier, Sliders, SparklesFill, TriangleDownFill, TriangleUpFill } from "@gravity-ui/icons";
 import {
@@ -527,7 +527,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
       {data &&
         view === "scored" &&
         (data.items.length === 0 ? (
-          <NothingFound active={activeFilters} />
+          <NothingFound active={activeFilters} search={search} />
         ) : isPhone ? (
           <PhoneList items={data.items} refreshing={refreshing} />
         ) : (
@@ -551,7 +551,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
           />
         ))}
 
-      {data && view === "unscored" && <UnscoredTable items={data.nullItems} meta={meta} active={activeFilters} refreshing={refreshing} phone={isPhone} />}
+      {data && view === "unscored" && <UnscoredTable items={data.nullItems} meta={meta} active={activeFilters} search={search} refreshing={refreshing} phone={isPhone} />}
     </Page>
   );
 }
@@ -574,11 +574,22 @@ function ratingLead(meta: MetaResponse | null, phone = false): ReactNode {
       {about} <HowCountedLink />
     </>
   );
+  const gap = coverageGap(meta.repos);
   return (
     <>
       {about} <HowCountedLink />
       <br />
       {coverageLine(meta.repos)}
+      {gap.length > 0 && (
+        <>
+          {" "}
+          <HelpMark iconSize="s" aria-label="Почему оценено не все">
+            {gap.map((line) => (
+              <div key={line}>{line}</div>
+            ))}
+          </HelpMark>
+        </>
+      )}
     </>
   );
 }
@@ -611,7 +622,7 @@ function HowCountedLink() {
   );
 }
 
-function NothingFound({ active }: { active: string[] }) {
+function NothingFound({ active, search }: { active: string[]; search: string }) {
   if (active.length === 0) {
     return (
       <EmptyState
@@ -624,9 +635,9 @@ function NothingFound({ active }: { active: string[] }) {
   return (
     <EmptyState
       image={SearchIllustration}
-      title="Под фильтр ничего не подошло"
-      description={nothingFoundDescription(active)}
-      actions={[{ text: "Сбросить фильтры", view: "normal", onClick: () => navigate("/") }]}
+      title="Ничего не найдено"
+      description={nothingFoundDescription(active, new URLSearchParams(search).get("q") ?? "")}
+      actions={[{ text: "Сбросить фильтры", view: "normal", onClick: () => navigate(resetFiltersHref(window.location.search)) }]}
     />
   );
 }
@@ -635,7 +646,7 @@ function NothingFound({ active }: { active: string[] }) {
  * Репозитории без оценки (не хватило данных): отсутствие данных не
  * превращается в низкий балл, поэтому они не в рейтинге, а здесь.
  */
-function UnscoredTable({ items, meta, active, refreshing, phone = false }: { items: Item[]; meta: MetaResponse | null; active: string[]; refreshing: boolean; phone?: boolean }) {
+function UnscoredTable({ items, meta, active, search, refreshing, phone = false }: { items: Item[]; meta: MetaResponse | null; active: string[]; search: string; refreshing: boolean; phone?: boolean }) {
   const titleOf = (key: string): string => meta?.categories.find((c) => c.key === key)?.title ?? CATEGORY_TITLES_RU[key] ?? key;
   const missingOf = (item: Item): string[] =>
     Object.entries(item.categories)
@@ -656,9 +667,9 @@ function UnscoredTable({ items, meta, active, refreshing, phone = false }: { ite
 
   if (items.length === 0) {
     return active.length > 0 ? (
-      <NothingFound active={active} />
+      <NothingFound active={active} search={search} />
     ) : (
-      <EmptyState image={SuccessIllustration} title="Все проанализированные репозитории оценены" description="Полноты данных хватило каждому репозиторию выборки." />
+      <EmptyState image={SuccessIllustration} title="Все проанализированные репозитории оценены" description="Данных хватило каждому." />
     );
   }
   // группа может быть огромной — таблица показывает первые 5, остальное
@@ -741,11 +752,11 @@ function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResp
   return (
     <>
       {/* шкала — первой в панели: без нее числу не с чем сравниться */}
-      <ScoreLegend coverageNullBelow={meta.coverageNullBelow} />
+      <ScoreLegend />
 
       <AsideSection title="Формула">
         <Text color="complementary">
-          HealthCraft Index – взвешенное среднее 4 категорий. Категория без данных в индекс не входит, ее вес переходит к остальным.
+          HealthCraft Index – взвешенное среднее 4 категорий. Категория без данных не считается нулем: ее вес переходит к остальным.
         </Text>
         <MethodLink page="scores" />
       </AsideSection>
@@ -786,7 +797,7 @@ function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResp
         <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
           <DefinitionList.Item
             name="Порог оценки"
-            note="Оценка рассчитывается только при достаточной полноте данных. Недостающие категории исключаются из расчета. Полнота – доля веса открытых категорий с данными: веса как в Repo Health Score, всего 65"
+            note="Если данных меньше, оценки нет. Полнота – доля веса открытых категорий с данными: веса как в Repo Health Score, всего 65"
           >
             полнота от {fmtCoverage(meta.coverageNullBelow)}
           </DefinitionList.Item>
@@ -999,6 +1010,15 @@ function ratingAnnouncement(view: "scored" | "unscored", data: RatingResponse): 
   return pages > 1 ? `Найдено ${fmtCount(data.total)}, страница ${data.page} из ${pages}` : `Найдено ${fmtCount(data.total)}`;
 }
 
+/** «Сортировать по …» — колонка словом в дательном падеже. */
+const SORT_BY: Record<SortKey, string> = {
+  name: "названию",
+  index: "HealthCraft Index",
+  likes: "реакциям",
+  activity: "дате обновления",
+  coverage: "полноте данных",
+};
+
 function SortableHeader({
   label,
   columnKey,
@@ -1018,7 +1038,7 @@ function SortableHeader({
   const active = sort === columnKey;
   // первый клик по «Репозиторию» — А→Я, по числам — по убыванию
   const next: "asc" | "desc" = active ? (order === "desc" ? "asc" : "desc") : firstSortOrder(columnKey);
-  const hint = active ? (order === "desc" ? "По убыванию – переключить на возрастание" : "По возрастанию – переключить на убывание") : `Сортировать по «${label}»`;
+  const hint = active ? (order === "desc" ? "По убыванию – переключить на возрастание" : "По возрастанию – переключить на убывание") : `Сортировать по ${SORT_BY[columnKey]}`;
   return (
     <Button
       view="flat"
@@ -1169,7 +1189,7 @@ function ScoreCell({ item, narrow = false }: { item: Item; narrow?: boolean }) {
 }
 
 /**
- * Категория в таблице рейтинга. Цветом выделены только исключения: 40-69 и
+ * Категория в таблице рейтинга. Цветом выделены только исключения: 40–69 и
  * <40 получают Label, значения от 70 — нейтральный текст. Цветные числа во
  * всех колонках читались как светофор и спорили с окраской индекса.
  *

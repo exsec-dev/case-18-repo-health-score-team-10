@@ -23,8 +23,8 @@ export const SIZE_LIMITS = { medium: 1_000, large: 10_000, huge: 100_000 } as co
 export const SIZE_TITLES: Record<SizeBucket, string> = {
   none: "без кода",
   small: "до 1 тыс. строк",
-  medium: "1-10 тыс. строк",
-  large: "10-100 тыс. строк",
+  medium: "1–10 тыс. строк",
+  large: "10–100 тыс. строк",
   huge: "больше 100 тыс. строк",
 };
 
@@ -32,8 +32,8 @@ export const SIZE_TITLES: Record<SizeBucket, string> = {
 export const SIZE_SHORT: Record<SizeBucket, string> = {
   none: "без кода",
   small: "до 1 тыс.",
-  medium: "1-10 тыс.",
-  large: "10-100 тыс.",
+  medium: "1–10 тыс.",
+  large: "10–100 тыс.",
   huge: "> 100 тыс.",
 };
 

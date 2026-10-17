@@ -722,7 +722,7 @@ const routes = {
     "/api/repos/:org/:repo": async (req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
-        return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
+        return badQuery("адрес репозитория указан неверно: нужен вид организация/репозиторий из латинских букв, цифр, точек, дефисов и подчеркиваний");
       }
       const viewer = sessionOf(req);
       // 429 — до резолва доступа, чтобы не тратить PAT-запросы
@@ -755,7 +755,7 @@ const routes = {
     "/api/repos/:org/:repo/report.md": async (req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
-        return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
+        return badQuery("адрес репозитория указан неверно: нужен вид организация/репозиторий из латинских букв, цифр, точек, дефисов и подчеркиваний");
       }
       const viewer = sessionOf(req);
       // MD-выгрузка — та же карточка того же зрителя и тот же лимит
@@ -779,7 +779,7 @@ const routes = {
     "/api/repos/:org/:repo/report.pdf": async (req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
-        return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
+        return badQuery("адрес репозитория указан неверно: нужен вид организация/репозиторий из латинских букв, цифр, точек, дефисов и подчеркиваний");
       }
       const viewer = sessionOf(req);
       if (viewer && !allowCardView(viewer.userId)) return cardRateLimited(viewer.userId);
@@ -794,7 +794,7 @@ const routes = {
     "/api/repos/:org/:repo/fix/:ruleId": async (req) => {
       const { org, repo, ruleId } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
-        return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
+        return badQuery("адрес репозитория указан неверно: нужен вид организация/репозиторий из латинских букв, цифр, точек, дефисов и подчеркиваний");
       }
       if (!isFixRuleId(ruleId!)) return badQuery(`для правила ${ruleId} файла-заготовки нет`);
       const licenseRaw = new URL(req.url).searchParams.get("license");
@@ -853,7 +853,7 @@ const routes = {
     "/api/repos/:org/:repo/history": async (req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
-        return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
+        return badQuery("адрес репозитория указан неверно: нужен вид организация/репозиторий из латинских букв, цифр, точек, дефисов и подчеркиваний");
       }
       const viewer = sessionOf(req);
       // то же минутное окно, что у карточки: иначе историю по списку репо
@@ -869,7 +869,7 @@ const routes = {
     "/api/repos/:org/:repo/ai-notes": async (req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
-        return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
+        return badQuery("адрес репозитория указан неверно: нужен вид организация/репозиторий из латинских букв, цифр, точек, дефисов и подчеркиваний");
       }
       const viewer = sessionOf(req);
       if (viewer && !allowCardView(viewer.userId)) return cardRateLimited(viewer.userId);
@@ -892,7 +892,7 @@ const routes = {
         if (!user) return unauthorized();
         const { org, repo } = req.params;
         if (!validSlugSegment(org) || !validSlugSegment(repo)) {
-          return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
+          return badQuery("адрес репозитория указан неверно: нужен вид организация/репозиторий из латинских букв, цифр, точек, дефисов и подчеркиваний");
         }
         if (!windowHasRoom(summaryPosts, user.userId, SUMMARY_POSTS_PER_MINUTE, 60_000)) {
           return rateLimited("слишком много запросов генерации – попробуйте позже", windowRetryAfterSec(summaryPosts, user.userId, 60_000));
@@ -994,7 +994,7 @@ const routes = {
         if (!user) return unauthorized();
         const { org, repo } = req.params;
         if (!validSlugSegment(org) || !validSlugSegment(repo)) {
-          return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
+          return badQuery("адрес репозитория указан неверно: нужен вид организация/репозиторий из латинских букв, цифр, точек, дефисов и подчеркиваний");
         }
         if (!windowHasRoom(summaryPosts, user.userId, SUMMARY_POSTS_PER_MINUTE, 60_000)) {
           return rateLimited("слишком много запросов – попробуйте позже", windowRetryAfterSec(summaryPosts, user.userId, 60_000));
@@ -1040,7 +1040,7 @@ const routes = {
     // интерфейса было бы нельзя. Цена — один лишний клик при обычном входе.
     "/auth/ya": (req) => {
       if (!config.auth.appSecret) {
-        return Response.json({ error: { code: "unconfigured", message: "вход на сервере не настроен – обратитесь к администратору" } }, { status: 503 });
+        return Response.json({ error: { code: "unconfigured", message: "вход на сервере не настроен" } }, { status: 503 });
       }
       // Петлевой алиас хоста (127.0.0.1 при redirect_uri на localhost или
       // наоборот) рвал бы первую попытку входа: state-cookie осталась бы на хосте
@@ -1061,7 +1061,7 @@ const routes = {
         headers.append("set-cookie", next !== null ? oauthNextCookieHeader(ck, next) : clearOAuthNextCookieHeader(ck));
         return new Response(null, { status: 302, headers });
       } catch (e) {
-        return Response.json({ error: { code: "unconfigured", message: "вход через Я ID на сервере не настроен – обратитесь к администратору" } }, { status: 503 });
+        return Response.json({ error: { code: "unconfigured", message: "вход через Я ID на сервере не настроен" } }, { status: 503 });
       }
     },
     // выход: сессия отзывается в БД, cookie гасится; PAT пользователя остается
@@ -1145,7 +1145,7 @@ const routes = {
       const user = sessionOf(req);
       if (!user) return unauthorized();
       if (!config.auth.appSecret) {
-        return Response.json({ error: { code: "unconfigured", message: "хранение токенов на сервере не настроено – обратитесь к администратору" } }, { status: 503 });
+        return Response.json({ error: { code: "unconfigured", message: "хранение токенов на сервере не настроено" } }, { status: 503 });
       }
       if (req.method === "PUT") {
         // живая проба токена — оракул валидности PAT, поэтому окно на пользователя
@@ -1318,9 +1318,9 @@ const routes = {
         if (csrf) return csrf;
         // ввод разбирается до окна, чтобы отказ 400 не списывал мутацию
         const body = (await req.json().catch(() => null)) as { repository?: unknown } | null;
-        if (typeof body?.repository !== "string") return badQuery("укажите репозиторий как org/repo или ссылкой на него");
+        if (typeof body?.repository !== "string") return badQuery("укажите ссылку на репозиторий или адрес вида организация/репозиторий");
         const parsed = parseFavoriteInput(body.repository);
-        if (!parsed) return badQuery("укажите репозиторий как org/repo или ссылкой на него");
+        if (!parsed) return badQuery("укажите ссылку на репозиторий или адрес вида организация/репозиторий");
         if (!allowFavMutation(user.userId)) return favoriteRateLimited(user.userId);
         return addFavoriteAndCheck(user.userId, parsed.org, parsed.repo);
       }
@@ -1329,7 +1329,7 @@ const routes = {
     "/api/me/favorites/:org/:repo": async (req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
-        return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
+        return badQuery("адрес репозитория указан неверно: нужен вид организация/репозиторий из латинских букв, цифр, точек, дефисов и подчеркиваний");
       }
       if (req.method !== "GET") {
         const csrf = guardOrigin(req);
@@ -1340,7 +1340,7 @@ const routes = {
       if (req.method === "PUT") {
         // тот же парсер, что у ручного ввода; разбор — до окна
         const parsed = parseFavoriteInput(`${org}/${repo}`);
-        if (!parsed) return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
+        if (!parsed) return badQuery("адрес репозитория указан неверно: нужен вид организация/репозиторий из латинских букв, цифр, точек, дефисов и подчеркиваний");
         if (!allowFavMutation(user.userId)) return favoriteRateLimited(user.userId);
         return addFavoriteAndCheck(user.userId, parsed.org, parsed.repo);
       }
@@ -1357,7 +1357,7 @@ const routes = {
     "/api/me/repos/:org/:repo/scan": async (req) => {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) {
-        return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
+        return badQuery("адрес репозитория указан неверно: нужен вид организация/репозиторий из латинских букв, цифр, точек, дефисов и подчеркиваний");
       }
       if (req.method !== "POST") {
         return Response.json({ error: { code: "bad_query", message: "метод запроса не поддерживается" } }, { status: 405 });

@@ -117,13 +117,13 @@ describe("разбор страницы", () => {
   });
 
   test("тег с видом элемента: зона, лига, состояние с иконкой", () => {
-    const { page, errors } = parsePage("# T\n\n[[label-success:Здоров]] [[league-gold:ТОП-10]] [[state-warning+hourglass:Затянулось]] [[busy:Идет анализ]]", "t.md");
+    const { page, errors } = parsePage("# T\n\n[[label-success:Здоров]] [[league-gold:TOP-10]] [[state-warning+hourglass:Затянулось]] [[busy:Идет анализ]]", "t.md");
     expect(errors).toEqual([]);
     const p = page.blocks[0]!;
     if (p.kind !== "paragraph") throw new Error("paragraph");
     expect(p.content.filter((f) => f.kind === "ui")).toEqual([
       { kind: "ui", text: "Здоров", icon: null, variant: "label-success" },
-      { kind: "ui", text: "ТОП-10", icon: null, variant: "league-gold" },
+      { kind: "ui", text: "TOP-10", icon: null, variant: "league-gold" },
       { kind: "ui", text: "Затянулось", icon: "hourglass", variant: "state-warning" },
       { kind: "ui", text: "Идет анализ", icon: null, variant: "busy" },
     ]);

@@ -6,7 +6,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { DEFAULT_QUERY, getRepoCard, listRepos, parseReposQuery, type RatingResponse, type ReposQuery } from "../src/api/repos";
 import { SIZE_BUCKETS, SIZE_TITLES, sizeBucketOf, type SizeBucket } from "../src/api/rating-filters";
-import { activeRatingFilters, ciOptions, nothingFoundDescription, normalizeRatingSearch, sizeOptions, sizeSummary } from "../src/web/ratingParams";
+import { activeRatingFilters, ciOptions, nothingFoundDescription, normalizeRatingSearch, resetFiltersHref, sizeOptions, sizeSummary } from "../src/web/ratingParams";
 import { makeApiDb, seedRepo, seedScan, seedScore, type ApiTestDb, type FactSpec } from "./api-fixtures";
 
 const treeFact = (value: unknown, status: FactSpec["status"] = "ok"): FactSpec => ({ key: "tree.stats", source: "git", value, status });
@@ -233,9 +233,15 @@ describe("место не меняется фильтром; комбинаци�
     expect(r.totalPages).toBe(1);
     const active = activeRatingFilters("lang=Rust&size=small");
     expect(active).toEqual(["язык", "размер"]);
-    expect(nothingFoundDescription(active)).toBe(
-      "Ни один репозиторий выборки не совпал с фильтрами: язык, размер. Данные при этом на месте – сброс фильтров вернет полный рейтинг.",
-    );
+    expect(nothingFoundDescription(active)).toBe("Ничего не подошло под фильтры: язык, размер. Измените их или сбросьте.");
+    // EDGE-17: запрос повторяется дословно, прочие фильтры — следом; длинный обрезан в конце
+    expect(nothingFoundDescription(["поиск"], " zzqq ")).toBe("По запросу «zzqq» ничего не нашлось. Измените запрос или сбросьте фильтры.");
+    expect(nothingFoundDescription(["поиск", "язык"], "zzqq")).toBe("По запросу «zzqq» ничего не нашлось – с учетом фильтра: язык. Измените запрос или сбросьте фильтры.");
+    expect(nothingFoundDescription(["поиск"], "x".repeat(80))).toContain(`«${"x".repeat(60)}…»`);
+    // сброс убирает только фильтры: вкладка «Без оценки» и сортировка остаются
+    expect(resetFiltersHref("?view=unscored&q=zz&lang=Go&page=3&sort=likes")).toBe("/?view=unscored&sort=likes");
+    expect(resetFiltersHref("?q=zz&ai=1")).toBe("/");
+    expect(nothingFoundDescription(["поиск"], "   ")).toBe("Ничего не нашлось. Измените запрос или сбросьте фильтры.");
   });
 });
 

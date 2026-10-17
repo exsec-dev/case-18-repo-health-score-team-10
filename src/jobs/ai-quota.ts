@@ -139,13 +139,13 @@ export function quotaRefusal(q: ActionQuota): QuotaRefusal | null {
     return {
       code: "quota_global",
       message: q.unlocked
-        ? `Дневной потолок ${NOUN[q.action]} для доступа по паролю исчерпан – он откроется в 00:00 МСК`
-        : `Дневной лимит ${NOUN[q.action]} сервиса исчерпан – он откроется в 00:00 МСК`,
+        ? `Дневной потолок ${NOUN[q.action]} для доступа по паролю исчерпан – он обновится в 00:00 по Москве`
+        : `Дневной лимит ${NOUN[q.action]} сервиса исчерпан – он обновится в 00:00 по Москве`,
       until: q.dayResetAt,
     };
   }
   if (full(q.day)) {
-    return { code: "quota_day", message: `Ваш лимит ${NOUN[q.action]} на сегодня исчерпан (${q.day!.limit} в сутки) – он откроется в 00:00 МСК`, until: q.dayResetAt };
+    return { code: "quota_day", message: `Ваш лимит ${NOUN[q.action]} на сегодня исчерпан (${q.day!.limit} в сутки) – он обновится в 00:00 по Москве`, until: q.dayResetAt };
   }
   if (full(q.hour)) {
     return { code: "quota_hour", message: `Ваш лимит ${NOUN[q.action]} на час исчерпан (${q.hour!.limit} в час) – попробуйте позже`, until: q.hourResetAt ?? q.dayResetAt };

@@ -19,9 +19,9 @@ export function bandOf(entry: Pick<RepoEntry, "healthcraftIndex">): Band {
 }
 
 export const BANDS: { key: Band; title: string; hint: string }[] = [
-  { key: "success", title: "Здоровы", hint: "HealthCraft Index 70-100" },
-  { key: "warning", title: "Требуют внимания", hint: "HealthCraft Index 40-69" },
-  { key: "danger", title: "В зоне риска", hint: "HealthCraft Index 0-39" },
+  { key: "success", title: "Здоровы", hint: "HealthCraft Index 70–100" },
+  { key: "warning", title: "Требуют внимания", hint: "HealthCraft Index 40–69" },
+  { key: "danger", title: "В зоне риска", hint: "HealthCraft Index 0–39" },
   { key: "none", title: "Без оценки", hint: "Анализ еще не проводился, идет или данных для оценки не хватило" },
 ];
 

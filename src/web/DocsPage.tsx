@@ -168,7 +168,7 @@ function Inlines({ line }: { line: DocLine }) {
 
 /**
  * Элемент интерфейса в тексте – тем же компонентом и классом, что в UI: Label для зон и
- * статусов, `.rh-league` для лиг, `.rh-state` / `.rh-busy` для состояний «Избранного».
+ * статусов и состояний строк (`.rh-busy` — штриховка анализа), `.rh-league` для лиг.
  * Без вида – серый тег кнопки или раздела.
  */
 function UiTag({ tag }: { tag: Extract<DocLine[number], { kind: "ui" }> }) {
@@ -192,21 +192,32 @@ function UiTag({ tag }: { tag: Extract<DocLine[number], { kind: "ui" }> }) {
       </span>
     );
   }
+  // видимость — как VisibilityPill: Label clear s
   if (variant === "pill") {
     return (
-      <span className="rh-pill rh-docs__uiwrap">
-        {icon && <Icon data={icon} size={12} />}
-        {text}
+      <span className="rh-docs__uiwrap">
+        <Label theme="clear" size="s" icon={icon ? <Icon data={icon} size={14} /> : undefined}>
+          {text}
+        </Label>
       </span>
     );
   }
-  if (variant === "busy") return <span className="rh-state rh-busy rh-docs__uiwrap">{text}</span>;
+  if (variant === "busy") {
+    return (
+      <span className="rh-docs__uiwrap">
+        <Label theme="unknown" size="s" className="rh-busy">
+          {text}
+        </Label>
+      </span>
+    );
+  }
   if (variant?.startsWith("state")) {
     const tone = variant === "state" ? null : variant.slice("state-".length);
     return (
-      <span className="rh-state rh-docs__uiwrap">
-        {icon && <Icon data={icon} size={14} className={tone ? `rh-state__icon rh-state__icon_${tone}` : "rh-state__icon"} />}
-        {text}
+      <span className="rh-docs__uiwrap">
+        <Label theme="unknown" size="s" icon={icon ? <Icon data={icon} size={14} className={tone ? `rh-state__icon rh-state__icon_${tone}` : "rh-state__icon"} /> : undefined}>
+          {text}
+        </Label>
       </span>
     );
   }

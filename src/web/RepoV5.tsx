@@ -49,6 +49,7 @@ import {
   quotaCounter,
   counterText,
   withCounter,
+  errorText,
   type AiQuotaView,
   type QuotaCounter,
 } from "./format";
@@ -191,7 +192,7 @@ function Collapsible({ children, resetKey }: { children: React.ReactNode; resetK
  * с текстом сервера и временем; красным — только настоящие сбои.
  */
 function refusalToast(error: { code?: string; message?: string; until?: string } | undefined, status: number, failTitle: string): { theme: "warning" | "danger"; title: string; content: string } {
-  const message = error?.message ?? `Ошибка ${status}`;
+  const message = errorText({ status, code: error?.code ?? null, message: error?.message ?? null });
   if (error?.code?.startsWith("quota_")) {
     const tail = error.code === "quota_hour" && error.until ? `. Следующий запуск – после ${fmtDateTime(error.until)}` : "";
     return { theme: "warning", title: "Лимит исчерпан", content: `${message}${tail}` };

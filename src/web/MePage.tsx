@@ -398,8 +398,8 @@ function LoginOffer({ pageTitle }: { pageTitle: "Избранное" | "Мои �
       aside={
         <AsideSection title="Как это устроено">
           <Text color="complementary">
-            Публичный рейтинг работает и без входа – раздел «Рейтинг». Блоки CI/CD и Безопасность на карточке репозитория
-            видны только тем, у кого есть к ним доступ на SourceCraft; в общий рейтинг они не вкладываются.
+            Публичный рейтинг работает и без входа – раздел «Рейтинг». Категории CI/CD и Безопасность на карточке репозитория
+            видны только тем, у кого есть к ним доступ на SourceCraft; в общий рейтинг они не входят.
           </Text>
         </AsideSection>
       }
@@ -764,7 +764,7 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
         <EmptyState
           image={EmptyIllustration}
           title="В избранном пока пусто"
-          description="Отметьте репозиторий звездочкой – на его странице или в «Моих репозиториях» – или добавьте его по org/repo или ссылке."
+          description="Отметьте репозиторий звездочкой – на его странице или в «Моих репозиториях» – или добавьте его по ссылке."
           actions={[
             { text: "Добавить репозиторий", view: "action", size: "m", onClick: () => setAdding(true) },
             // с токеном свои репозитории уже собраны в описи — выбрать там быстрее
@@ -915,13 +915,12 @@ function ScoreChange({ entry }: { entry: RepoEntry }) {
   );
 }
 
-/** Серая плашка состояния строки: смысл — иконкой и подсказкой, цвет только у иконки. */
+/** Серая плашка состояния строки (Label unknown s): смысл — иконкой и подсказкой, цвет только у иконки. */
 function StatePill({ icon, tone, title, children }: { icon: IconData; tone?: "danger" | "warning"; title: string; children: ReactNode }) {
   return (
-    <span className="rh-state" title={title}>
-      <Icon data={icon} size={14} className={tone ? `rh-state__icon rh-state__icon_${tone}` : "rh-state__icon"} />
+    <Label theme="unknown" size="s" title={title} icon={<Icon data={icon} size={14} className={tone ? `rh-state__icon rh-state__icon_${tone}` : "rh-state__icon"} />}>
       {children}
-    </span>
+    </Label>
   );
 }
 
@@ -1051,7 +1050,7 @@ function AddRepoDialog({
     if (manual) return void add(manual);
     if (shown.length === 1) return void add(`${shown[0]!.org}/${shown[0]!.slug}`);
     // формат проверяется по Enter, а не на каждом нажатии
-    if (value.trim() !== "") setError("Нужен вид org/repo или ссылка на репозиторий");
+    if (value.trim() !== "") setError("Вставьте ссылку на репозиторий или адрес вида организация/репозиторий");
   };
 
   const row = (key: string, label: ReactNode, slug: string, meta: ReactNode) => {
@@ -1087,7 +1086,7 @@ function AddRepoDialog({
           <TextInput
             size="l"
             controlRef={inputRef}
-            placeholder={hasPat ? "Найдите репозиторий или вставьте ссылку" : "org/repo или ссылка на репозиторий"}
+            placeholder={hasPat ? "Найдите репозиторий или вставьте ссылку" : "Организация/репозиторий или ссылка"}
             value={value}
             startContent={<Icon data={Magnifier} size={16} className="rh-add-repo__lens" />}
             onUpdate={(v) => {
@@ -1098,14 +1097,14 @@ function AddRepoDialog({
               if (e.key === "Enter") onEnter();
             }}
             hasClear
-            controlProps={{ "aria-label": "Поиск репозитория, org/repo или ссылка" }}
+            controlProps={{ "aria-label": "Поиск репозитория: название, организация/репозиторий или ссылка" }}
             errorPlacement="outside"
             validationState={error ? "invalid" : undefined}
             errorMessage={error ?? undefined}
           />
           {hasPat ? (
             <Text variant="body-1" color="secondary">
-              {"Начните вводить имя репозитория или вставьте org/repo. Все доступные токену – в "}
+              {"Начните вводить имя репозитория или вставьте ссылку на него. Все доступные токену – в "}
               <Link {...navProps("/repos", close)}>«Моих репозиториях»</Link>
               .
             </Text>
@@ -1113,7 +1112,7 @@ function AddRepoDialog({
             <Text variant="body-1" color="complementary">
               {"Добавьте токен в "}
               <Link {...linkProps("/settings")}>Настройках</Link>
-              {" – тогда здесь появятся репозитории, доступные вашему токену. Пока можно вставить org/repo или ссылку."}
+              {" – тогда здесь появятся репозитории, доступные вашему токену. Пока можно вставить ссылку на репозиторий."}
             </Text>
           )}
           <ul className="rh-add-list" aria-label="Репозитории">
@@ -1162,12 +1161,12 @@ function AddRepoDialog({
           )}
           {list.state.kind === "ok" && repos.length === 0 && (
             <Text variant="body-1" color="complementary">
-              SourceCraft не вернул ни одного репозитория – вставьте org/repo или ссылку.
+              SourceCraft не вернул ни одного репозитория – вставьте ссылку на репозиторий.
             </Text>
           )}
           {list.state.kind === "ok" && repos.length > 0 && q !== "" && shown.length === 0 && manual === null && (
             <Text variant="body-1" color="complementary">
-              {`Среди ${repos.length} загруженных нет «${value.trim()}» – вставьте org/repo целиком.`}
+              {`Среди ${repos.length} загруженных нет «${value.trim()}» – вставьте ссылку на репозиторий.`}
             </Text>
           )}
           {list.state.kind === "ok" && list.state.partial && (
@@ -1184,7 +1183,7 @@ function AddRepoDialog({
 
 /** Подпись неполного списка (прочитаны не все страницы SourceCraft): остальное — ручным вводом. */
 export function addListPartialText(count: number): string {
-  return `Показано ${count} – остальные найдутся по org/repo`;
+  return `Показано ${count} – уточните запрос или вставьте ссылку`;
 }
 
 /**
@@ -1253,14 +1252,14 @@ function RepoRow({
   const state =
     phase === "stalled" ? (
       <StatePill icon={Hourglass} tone="warning" title="Анализ идет дольше обычного – его исход появится в «Очереди» в шапке">
-        Затянулось
+        Анализ затянулся
       </StatePill>
     ) : phase !== null ? (
       // бегущая штриховка — то же состояние загрузки, что у кнопок Gravity;
       // время анализа сознательно не обещаем
-      <span className="rh-state rh-busy" title="Идет анализ – итог придет уведомлением">
+      <Label theme="unknown" size="s" className="rh-busy" title="Идет анализ – итог придет уведомлением">
         {phase === "queued" ? "В очереди" : "Идет анализ"}
-      </span>
+      </Label>
     ) : firstRun ? (
       <ActionTooltip title={scheduled ? "Публичные репозитории оценивает и анализ по расписанию – здесь его можно запустить раньше" : "Анализ этого репозитория еще не запускали"}>
         <Button view="outlined" size="m" onClick={onScan} aria-label={`Запустить анализ ${entry.org}/${entry.repo}`}>
@@ -1291,9 +1290,9 @@ function RepoRow({
       </div>
     ) : entry.lastScanStatus === "running" ? (
       // running — законный промежуточный статус последнего скана
-      <span className="rh-state rh-busy" title="Идет анализ">
+      <Label theme="unknown" size="s" className="rh-busy" title="Идет анализ">
         Идет анализ
-      </span>
+      </Label>
     ) : entry.lastScanStatus === "bad" ? (
       // последний скан упал (пригодный старый индекс сработал бы веткой выше).
       // Призыв запустить заново — только если кнопка анализа есть (свой репозиторий и токен)
@@ -1727,7 +1726,7 @@ function TokenRepos() {
         <CabinetAlert title="Список не обновлен" message={`${list.state.refreshError} Показан прежний список.`} actions={[{ text: "Повторить", handler: list.reload }]} />
       )}
       {data?.stale && <CabinetAlert theme="info" title="Список не обновлен" message="Слишком много обновлений подряд – показан прежний список. Попробуйте через минуту." />}
-      {data && data.partial && <CabinetAlert theme="info" title={`Показаны первые ${entries.length}`} message="SourceCraft отдал не весь список – остальные репозитории найдутся по org/repo в «Избранном»." />}
+      {data && data.partial && <CabinetAlert theme="info" title={`Показаны первые ${entries.length}`} message="SourceCraft отдал не весь список – остальные репозитории можно добавить в «Избранное» по ссылке." />}
 
       {data && entries.length === 0 && (
         <EmptyState image={EmptyIllustration} title="Токену не доступен ни один репозиторий" description="Проверьте, что у токена есть право на чтение репозиториев, – или создайте первый репозиторий на SourceCraft." />
@@ -1947,9 +1946,9 @@ function JobRow({ job, onNavigate }: { job: import("../api/me").MyJob; onNavigat
         )}
       </div>
       {/* очередь обслуживается по кругу (round-robin), а не по порядку — номер позиции не показываем */}
-      <span className="rh-state rh-busy">
+      <Label theme="unknown" size="s" className="rh-busy">
         {job.phase === "queued" ? "В очереди" : job.kind === "summary" ? "Готовим AI-обзор" : job.kind === "check" ? "Проверка активности" : "Идет анализ"}
-      </span>
+      </Label>
 
     </div>
   );

@@ -20,7 +20,7 @@ import { useEffect, useRef, useState, type ComponentType, type ReactNode, type S
 import { ArrowRight, Globe, Lock, Persons } from "@gravity-ui/icons";
 import { linkProps } from "./router";
 import { visibilityPill } from "./cardView";
-import { SCORE_LEGEND_TITLE, SCORE_SCALE, fmtCoverage, scoreTheme, sentence, slugOf } from "./format";
+import { SCORE_LEGEND_TITLE, SCORE_SCALE, scoreTheme, sentence, slugOf } from "./format";
 
 /**
  * Заголовок страницы: header-2 24/28 и пояснение body-2 15/20 через 6px, до
@@ -71,9 +71,11 @@ export function AsideSection({ title, help, children }: { title: ReactNode; help
  * он даёт якорь «как выглядит плохое»: верх выдачи плотный, и без легенды 72
  * читается как провал. Слова и диапазоны — из `SCORE_SCALE`, чтобы шкала на
  * экранах и в MD-отчёте не разъехалась. «Нет данных» в легенду НЕ входит: это не
- * полоса шкалы, а отсутствие числа (tri-state) — про него отдельная строка.
+ * полоса шкалы, а отсутствие числа (tri-state). Текста под шкалой нет: порог
+ * назван в «Расчете», правило «без данных – не ноль» — в «Формуле» (рейтинг) и
+ * «Что учитывается» (карточка), каждое один раз.
  */
-export function ScoreLegend({ coverageNullBelow, withNote = true }: { coverageNullBelow?: number; withNote?: boolean }) {
+export function ScoreLegend() {
   return (
     <AsideSection title={SCORE_LEGEND_TITLE}>
       <Flex direction="column" gap={2}>
@@ -88,14 +90,6 @@ export function ScoreLegend({ coverageNullBelow, withNote = true }: { coverageNu
           </Flex>
         ))}
       </Flex>
-      {/* карточка отключает абзац пропом: у нее эта фраза стоит в «Что учитывается» */}
-      {withNote && (
-      <Text variant="body-1" color="complementary">
-        {coverageNullBelow === undefined
-          ? "При недостаточной полноте данных оценка не рассчитывается. Отсутствующие данные не учитываются как нулевые значения."
-          : `При полноте данных ниже ${fmtCoverage(coverageNullBelow)} оценка не рассчитывается. Отсутствующие данные не учитываются как нулевые значения.`}
-      </Text>
-      )}
     </AsideSection>
   );
 }

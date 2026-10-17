@@ -62,8 +62,8 @@ export type UiIcon = (typeof UI_ICONS)[number];
 /**
  * Вид тега – как у элемента в UI: плашка Label нужной темы (зоны, статусы), лига,
  * строка состояния из «Избранного», «идет анализ» со штриховкой. Без вида – серый
- * тег кнопки или раздела. В тексте: `[[label-success:Здоров]]`, `[[league-gold:ТОП-10]]`,
- * `[[state-warning+hourglass:Затянулось]]` (вид и иконка через «+»).
+ * тег кнопки или раздела. В тексте: `[[label-success:Здоров]]`, `[[league-gold:TOP-10]]`,
+ * `[[state-warning+hourglass:Анализ затянулся]]` (вид и иконка через «+»).
  */
 export const UI_VARIANTS = [
   "label-success",

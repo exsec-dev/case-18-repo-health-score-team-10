@@ -919,7 +919,7 @@ function RepoHead({
             {/* видимость в SourceCraft — той же плашкой, что в избранном */}
             <VisibilityPill value={shownVisibility} />
             <Flex gap={1} alignItems="center">
-              <ClipboardButton text={slugOf(org, repo)} size="s" view="flat-secondary" tooltipInitialText="Скопировать org/repo" tooltipSuccessText="Скопировано" />
+              <ClipboardButton text={slugOf(org, repo)} size="s" view="flat-secondary" tooltipInitialText="Скопировать адрес репозитория" tooltipSuccessText="Скопировано" />
               <FavoriteStar org={org} repo={repo} visibility={visibility} doneKey={starDoneKey} loggedIn={starLoggedIn} />
               <ActionTooltip title="Открыть на sourcecraft.dev">
                 <Button view="flat-secondary" size="s" href={webUrl} target="_blank" rel="noreferrer" aria-label="Открыть репозиторий на sourcecraft.dev">
@@ -1056,8 +1056,8 @@ function ScoreAside({
         )}
       </AsideSection>
 
-      {/* та же легенда, что на рейтинге, но без абзаца под ней */}
-      {score && <ScoreLegend withNote={false} />}
+      {/* та же легенда, что на рейтинге */}
+      {score && <ScoreLegend />}
 
       {score && (
         <AsideSection title="Что учитывается">

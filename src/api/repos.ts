@@ -68,7 +68,7 @@ export interface RatingItem {
    */
   rankDelta: number | null;
   /**
-   * Значок места «ТОП-N» по индексу в той же выборке, что `rank` (фильтры его
+   * Значок места «TOP-N» по индексу в той же выборке, что `rank` (фильтры его
    * не меняют, у равных индексов он одинаков); null – места нет или уровень не подходит
    */
   rankBadge: RankBadge | null;
@@ -788,7 +788,7 @@ export interface CardScore {
    */
   rank: number | null;
   rankedTotal: number | null;
-  /** значок места «ТОП-N», равен значку строки рейтинга; null – места нет */
+  /** значок места «TOP-N», равен значку строки рейтинга; null – места нет */
   rankBadge: RankBadge | null;
   /**
    * «Индекс лучше, чем у X% похожих» (см. `cohort.ts`). null – тогда же, когда

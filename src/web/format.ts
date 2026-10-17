@@ -253,9 +253,9 @@ export const SCORE_LEGEND_TITLE = "Шкала оценки";
 
 /** Легенда шкалы: слово, диапазон, тема чипа. Порядок — сверху вниз от здорового. */
 export const SCORE_SCALE: { theme: "success" | "warning" | "danger"; word: string; range: string }[] = [
-  { theme: "success", word: SCORE_WORDS.success, range: "70-100" },
-  { theme: "warning", word: SCORE_WORDS.warning, range: "40-69" },
-  { theme: "danger", word: SCORE_WORDS.danger, range: "0-39" },
+  { theme: "success", word: SCORE_WORDS.success, range: "70–100" },
+  { theme: "warning", word: SCORE_WORDS.warning, range: "40–69" },
+  { theme: "danger", word: SCORE_WORDS.danger, range: "0–39" },
 ];
 
 /** Короткая форма «нет данных» для узких колонок таблицы («Нет данных» не влезает в 59px). */
@@ -465,7 +465,7 @@ export function contributionsNote(c: Contributions): string | null {
         : c.reason && c.reason.startsWith("no source code — ")
           ? noDataReason("code", c.reason)
           : "В репозитории нет кода.";
-    return `${why.replace(/ – оценивать нечего\.$/, ".")} Поэтому оценка – 0. Это не ошибка сервиса: оценивать нечего.`;
+    return why.replace(/ – оценивать нечего\.$/, ".");
   }
   if (c.kind === "capped") return `Итог ограничен ${c.total} баллами: ${cappedReason(c.total)}. Без ограничения категории дали бы ${fmtDecimal(c.uncapped, 1)}.`;
   return null;
@@ -557,8 +557,8 @@ export const CI_CAP_TEXT =
 /** Метка категории, часть данных которой взята из прошлого анализа. */
 export const STALE_CATEGORY_MARK = "Данные из прошлого анализа";
 
-/** Место без числа: публичный без индекса — «индекс не выставлен», прочие — «не в публичном рейтинге». */
-export const NO_RANK_NO_INDEX = "без места – индекс не выставлен";
+/** Место без числа: публичный без индекса — «индекс не рассчитан», прочие — «не в публичном рейтинге». */
+export const NO_RANK_NO_INDEX = "нет места: индекс не рассчитан";
 export const NO_RANK_NOT_PUBLIC = "не в публичном рейтинге";
 
 /**
@@ -758,9 +758,9 @@ export interface ErrorInput {
  */
 export const ERROR_TEXTS: Record<string, string> = {
   unauthorized: "Сессия закончилась – войдите через Я ID",
-  forbidden: "Запрос отклонен",
+  forbidden: "Запрос отклонен – обновите страницу и повторите",
   internal: "Внутренняя ошибка сервера – попробуйте позже",
-  unconfigured: "Эта функция на сервере не настроена – обратитесь к администратору",
+  unconfigured: "Эта функция пока не работает на сервере",
   sourcecraft_unavailable: "SourceCraft сейчас не отвечает – попробуйте позже",
   bad_body: "Сервер вернул неожиданный ответ – попробуйте позже",
   pdf_failed: "Не удалось собрать PDF",
@@ -771,11 +771,11 @@ function statusText(status: number): string {
   if (status === 0) return "Нет связи с сервером – проверьте подключение и повторите";
   if (status === 401) return ERROR_TEXTS.unauthorized!;
   if (status === 403) return ERROR_TEXTS.forbidden!;
-  if (status === 404) return "Не найдено";
+  if (status === 404) return "Не нашли, что вы искали – обновите страницу";
   if (status === 429) return "Слишком много запросов – повторите чуть позже";
   if (status === 502 || status === 503 || status === 504) return "Сервис временно недоступен – повторите через минуту";
   if (status >= 500) return ERROR_TEXTS.internal!;
-  return "Запрос не выполнен – повторите";
+  return "Что-то пошло не так – попробуйте еще раз";
 }
 
 /** «через 45 с» / «через 3 мин» — из Retry-After (секунды). */
@@ -1041,7 +1041,7 @@ export function aiModelName(model: string): string {
 /** Названия ролей AI-заметок — одна копия для карточки и отчета. */
 export const AI_ROLE_TITLES: Record<string, string> = {
   documentation: "Документация",
-  code: "Код",
+  code: "Состояние кода",
   activity: "Активность",
   issues: "Задачи",
   cicd: "CI/CD",
@@ -1322,6 +1322,6 @@ export function quotaBlockedText(action: AiAction, q: ActionQuotaView, counter: 
   if (counter.window === "hour") {
     return `${one} – после ${q.hourResetAt ? fmtDateTime(q.hourResetAt) : "окончания часа"} (не больше ${counter.limit} в час)`;
   }
-  if (counter.window === "day") return `Лимит ${many} на сегодня исчерпан (${counter.limit} в сутки) – откроется в 00:00 МСК`;
-  return `Общий лимит ${many} сервиса на сегодня исчерпан – откроется в 00:00 МСК`;
+  if (counter.window === "day") return `Лимит ${many} на сегодня исчерпан (${counter.limit} в сутки) – обновится в 00:00 по Москве`;
+  return `Общий лимит ${many} сервиса на сегодня исчерпан – обновится в 00:00 по Москве`;
 }

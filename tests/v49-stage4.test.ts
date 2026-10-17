@@ -5,7 +5,7 @@ import { DEFAULT_QUERY, getRepoCard, listRepos, type ReposQuery } from "../src/a
 import { metricWeights, noRecommendationsKind, noRecommendationsText } from "../src/report/sections";
 import { INDEX_WEIGHTS, SCORE_WEIGHTS } from "../src/score/model";
 import { renderRepoReport } from "../src/report/markdown";
-import { coverageLine as coverageLineRaw } from "../src/web/ratingParams";
+import { coverageGap, coverageLine as coverageLineRaw } from "../src/web/ratingParams";
 import { authErrorText, noScoreText, reportFileName } from "../src/web/format";
 import { cardFacts, makeApiDb, seedRepo, seedScan, seedScore } from "./api-fixtures";
 import { fixtureCard } from "./report-fixtures";
@@ -106,10 +106,17 @@ describe("В-5: строка охвата рейтинга", () => {
   test("неоцененные называются числом; ноль — фразы нет", () => {
     // разряды — неразрывным пробелом (`toLocaleString`), в ожиданиях — обычным
     const coverageLine = (r: { scored: number; nullScore: number; catalog: number }): string => coverageLineRaw(r).replace(/ /g, " ");
-    expect(coverageLine({ scored: 27917, nullScore: 0, catalog: 27978 })).toBe("Оценено 27 917 из 27 978 репозиториев. Еще 61 пока не оценен.");
-    expect(coverageLine({ scored: 10, nullScore: 1, catalog: 11 })).toBe("Оценено 10 из 11 репозиториев.");
-    expect(coverageLine({ scored: 20, nullScore: 0, catalog: 21 })).toBe("Оценено 20 из 21 репозитория. Еще 1 пока не оценен.");
-    expect(coverageLine({ scored: 20, nullScore: 0, catalog: 25 })).toBe("Оценено 20 из 25 репозиториев. Еще 5 пока не оценены.");
+    // TXT-14: строка короткая, разница — в подсказке (?) и сходится с «Без оценки»
+    expect(coverageLine({ scored: 27917, nullScore: 0, catalog: 27978 })).toBe("Оценено 27 917 из 27 978 репозиториев.");
+    expect(coverageLine({ scored: 20, nullScore: 0, catalog: 21 })).toBe("Оценено 20 из 21 репозитория.");
+    const gap = (r: { scored: number; nullScore: number; catalog: number }): string[] => coverageGap(r).map((l) => l.replace(/ /g, " "));
+    expect(gap({ scored: 29982, nullScore: 3, catalog: 29986 })).toEqual([
+      "3 репозитория без оценки – не хватило данных, см. вкладку «Без оценки».",
+      "1 ждет первого анализа.",
+    ]);
+    expect(gap({ scored: 10, nullScore: 1, catalog: 11 })).toEqual(["1 репозиторий без оценки – не хватило данных, см. вкладку «Без оценки»."]);
+    expect(gap({ scored: 20, nullScore: 0, catalog: 25 })).toEqual(["5 ждут первого анализа."]);
+    expect(gap({ scored: 20, nullScore: 0, catalog: 20 })).toEqual([]);
   });
 });
 

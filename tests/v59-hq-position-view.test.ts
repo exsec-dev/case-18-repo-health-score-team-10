@@ -44,7 +44,7 @@ describe("В5.9 HQ: строка позиции = поля карточки", ()
       const pct = c.score!.cohort!.index.percentile!;
       expect(pct).not.toBeNull();
       expect(p.cohort).toBe(pct === 100 ? `лучший среди ${fmtCount(c.score!.cohort!.size!)} похожих` : pct === 0 ? (noneBelow(0, c.score!.cohort!.size) ? "у всех похожих индекс не ниже" : "лучше менее 1% похожих") : `лучше ${pct}% похожих`);
-      expect(p.cohortHelp).toContain(`на Go размером 1-10 тыс. строк с местом в рейтинге: ${fmtCount(c.score!.cohort!.size!)}`);
+      expect(p.cohortHelp).toContain(`на Go (1–10 тыс. строк кода) с местом в рейтинге: ${fmtCount(c.score!.cohort!.size!)}`);
       expect(cardView(c).position).toEqual(p);
     }
   });

@@ -43,9 +43,9 @@ describe("решение 3: остаток в тексте кнопки — са
     expect(quotaBlockedText("overview", hour, quotaCounter(hour)!)).toStartWith("Следующий обзор – после ");
     expect(quotaBlockedText("overview", hour, quotaCounter(hour)!)).toEndWith("(не больше 2 в час)");
     const day = q({ day: { used: 6, limit: 6 } });
-    expect(quotaBlockedText("check", day, quotaCounter(day)!)).toBe("Лимит проверок на сегодня исчерпан (6 в сутки) – откроется в 00:00 МСК");
+    expect(quotaBlockedText("check", day, quotaCounter(day)!)).toBe("Лимит проверок на сегодня исчерпан (6 в сутки) – обновится в 00:00 по Москве");
     const all = q({ global: { used: 30, limit: 30 } });
-    expect(quotaBlockedText("overview", all, quotaCounter(all)!)).toBe("Общий лимит обзоров сервиса на сегодня исчерпан – откроется в 00:00 МСК");
+    expect(quotaBlockedText("overview", all, quotaCounter(all)!)).toBe("Общий лимит обзоров сервиса на сегодня исчерпан – обновится в 00:00 по Москве");
   });
 });
 

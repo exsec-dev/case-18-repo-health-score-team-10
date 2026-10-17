@@ -1158,14 +1158,15 @@ button.rh-category:focus-visible {
 /* Плашка категории в рейтинге приглушена: фон — `base-<тон>-light` с альфой
  * 60% через color-mix от токена темы, так что обе темы следуют theme.css.
  * Текст остается в полную силу — приглушается фон, а не читаемость числа.
- * `--_--bg-color` — внутренняя переменная Label; специфичность 0-2-0 бьет
- * стоковые 0-1-0 при любом порядке загрузки стилей в dev. */
+ * Фон задан свойством корня, а не внутренней переменной Label (`--_--*` uikit
+ * может переименовать); плашка не интерактивна, hover-фона у нее нет.
+ * Специфичность 0-2-0 бьет стоковые 0-1-0 при любом порядке загрузки стилей. */
 .rh-cat-chip.g-label_theme_warning {
-  --_--bg-color: color-mix(in srgb, var(--g-color-base-warning-light) 60%, transparent);
+  background-color: color-mix(in srgb, var(--g-color-base-warning-light) 60%, transparent);
 }
 
 .rh-cat-chip.g-label_theme_danger {
-  --_--bg-color: color-mix(in srgb, var(--g-color-base-danger-light) 60%, transparent);
+  background-color: color-mix(in srgb, var(--g-color-base-danger-light) 60%, transparent);
 }
 
 /* фиксированный слот числа индекса в рейтинге и tabular-nums держат числа
@@ -1248,8 +1249,8 @@ button.rh-category:focus-visible {
 
 .rh-subrows__head > span {
   padding-block-end: var(--g-spacing-half);
-  font-size: 11px;
-  line-height: 16px;
+  font-size: var(--g-text-caption-2-font-size);
+  line-height: var(--g-text-caption-2-line-height);
   text-align: right;
 }
 
@@ -1389,11 +1390,6 @@ button.rh-category:focus-visible {
 
   .rh-subrows {
     padding-left: var(--g-spacing-3);
-  }
-
-  .rh-subrow {
-    grid-template-columns: 1fr;
-    gap: 0;
   }
 
   /* имя и значение подметрики — двумя строками; пунктир
@@ -1697,23 +1693,11 @@ button.rh-category:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
-/* Плашка состояния строки — серая, в форме кнопки `normal` (24px, радиус m,
-   фон base-generic). Цвет — только у иконки и только когда он что-то значит.
-   `.rh-busy` («Сканируется») добавляет бегущую штриховку по рецепту загрузки
+/* Плашка состояния строки — `Label theme="unknown" size="s"` (24px, фон
+   base-neutral-light, в теме равен base-generic). Цвет — только у иконки и только когда он что-то значит.
+   `.rh-busy` («Идет анализ») добавляет бегущую штриховку по рецепту загрузки
    кнопки Gravity (`.g-button_loading::before`, keyframes `g-loading-animation`
    из uikit). */
-.rh-state {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--g-spacing-1);
-  height: 24px;
-  padding: 0 var(--g-spacing-3);
-  border-radius: var(--g-border-radius-m);
-  background-color: var(--g-color-base-generic);
-  color: var(--g-color-text-complementary);
-  white-space: nowrap;
-}
-
 .rh-state__icon {
   color: var(--g-color-text-secondary);
 }
@@ -1872,9 +1856,9 @@ button.rh-category:focus-visible {
   inset: 0;
 }
 
+/* size="l" square уже скруглен --g-border-radius-l (8px); размер — публичной переменной */
 .rh-repo-item .g-avatar {
   --g-avatar-size: 40px;
-  --_--border-radius: 8px;
 }
 
 .rh-repo-item__content {
@@ -1982,14 +1966,15 @@ button.rh-category:focus-visible {
 
 /* пока анализ идет — штриховка загрузки кнопки Gravity на самой кнопке
    (фон кнопки рисует `::before`; рецепт `.g-button_loading::before`), но без
-   `loading`: тот блокирует клик, а панель должна открываться */
+   `loading`: тот блокирует клик, а панель должна открываться. Цвета — вида
+   normal (base-generic и его hover), как у самой кнопки */
 .rh-jobs-btn_busy::before {
   background-image: repeating-linear-gradient(
     -45deg,
-    var(--g-button-background-color, var(--_--background-color)),
-    var(--g-button-background-color, var(--_--background-color)) 4px,
-    var(--g-button-background-color-hover, var(--_--background-color-hover)) 4px,
-    var(--g-button-background-color-hover, var(--_--background-color-hover)) 8px
+    var(--g-button-background-color, var(--g-color-base-generic)),
+    var(--g-button-background-color, var(--g-color-base-generic)) 4px,
+    var(--g-button-background-color-hover, var(--g-color-base-generic-hover)) 4px,
+    var(--g-button-background-color-hover, var(--g-color-base-generic-hover)) 8px
   );
   background-size: 150%;
   animation: g-loading-animation 0.5s linear infinite;
@@ -2024,9 +2009,15 @@ button.rh-category:focus-visible {
   padding: 6px var(--g-spacing-3);
 }
 
+/* Label обрезает текст, а сжиматься должен слаг: состояние читается целиком */
+.rh-jobs__row > .g-label {
+  flex: none;
+}
+
+/* у size="xs" радиус xs (3px) — для 24px мелко: радиус m свойством корня */
 .rh-jobs__row .g-avatar {
   --g-avatar-size: 24px;
-  --_--border-radius: 6px;
+  border-radius: var(--g-border-radius-m);
 }
 
 .rh-jobs__body {
@@ -2115,23 +2106,6 @@ button.rh-category:focus-visible {
     font-size: var(--g-text-header-1-font-size);
     line-height: var(--g-text-header-1-line-height);
   }
-}
-
-/* Серая «пилюля» у имени: высота `Label` xs 20px,
-   полностью скругленные углы, фон base-generic, текст complementary. Одна
-   форма на метку «Приватный» и плашку прав. */
-.rh-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--g-spacing-1);
-  height: 20px;
-  padding: 0 var(--g-spacing-2);
-  border-radius: 10px;
-  background: var(--g-color-base-generic);
-  color: var(--g-color-text-complementary);
-  font-size: var(--g-text-body-short-font-size);
-  line-height: var(--g-text-body-short-line-height);
-  white-space: nowrap;
 }
 
 /* счетчик отделен от слова шагом и вторичным цветом, иначе
@@ -2562,13 +2536,15 @@ button.rh-category:focus-visible {
   --g-modal-max-width: min(480px, calc(100vw - 32px));
 }
 
-.g-root .rh-dialog-fit {
-  --_--side-padding: 16px;
-}
+/* на узком экране поля окна 16px вместо 32px — свойством частей окна, а не
+   внутренней переменной Dialog; у заголовка с крестиком справа еще 24px — его место */
+@media (max-width: 479px) {
+  .g-root .rh-dialog-fit :is(.g-dialog-header, .g-dialog-body, .g-dialog-footer) {
+    padding-inline: var(--g-spacing-4);
+  }
 
-@media (min-width: 480px) {
-  .g-root .rh-dialog-fit {
-    --_--side-padding: 32px;
+  .g-root .rh-dialog-fit.g-dialog_has-close .g-dialog-header {
+    padding-inline-end: calc(var(--g-spacing-4) + 24px);
   }
 }
 
@@ -2917,8 +2893,8 @@ button.rh-category:focus-visible {
 }
 
 .rh-cmp-total__num.g-text {
-  font-size: 24px;
-  line-height: 28px;
+  font-size: var(--g-text-header-2-font-size);
+  line-height: var(--g-text-header-2-line-height);
   font-weight: var(--g-text-accent-font-weight);
   font-variant-numeric: tabular-nums;
 }
@@ -2943,8 +2919,8 @@ button.rh-category:focus-visible {
 
 .rh-cmp-cat__num.g-text,
 .rh-cmp-cat__chipnum {
-  font-size: 15px;
-  line-height: 20px;
+  font-size: var(--g-text-body-2-font-size);
+  line-height: var(--g-text-body-2-line-height);
   font-weight: var(--g-text-accent-font-weight);
   font-variant-numeric: tabular-nums;
 }
@@ -3044,8 +3020,8 @@ button.rh-category:focus-visible {
   gap: var(--g-spacing-3);
   width: 100%;
   color: var(--g-color-text-secondary);
-  font-size: 11px;
-  line-height: 16px;
+  font-size: var(--g-text-caption-2-font-size);
+  line-height: var(--g-text-caption-2-line-height);
 }
 
 .rh-cmp-sub {
@@ -3153,8 +3129,8 @@ button.rh-category:focus-visible {
 }
 
 .rh-cmp_phone .rh-cmp-total__num.g-text {
-  font-size: 20px;
-  line-height: 24px;
+  font-size: var(--g-text-header-1-font-size);
+  line-height: var(--g-text-header-1-line-height);
 }
 
 .rh-cmp_phone .rh-cmp-remove {
@@ -3234,12 +3210,14 @@ button.rh-category:focus-visible {
 }
 
 /* у (?) свои поля Gravity — зона клика расширяется невидимым слоем, а не
-   отступами: иначе отрицательное поле съедало зазор до подписи */
+   отступами: иначе отрицательное поле съедало зазор до подписи. Слой — на
+   ::before: ::after у Gravity — невидимый пробел, он держит базовую линию
+   значка, и без него (?) вставал над строкой */
 .g-help-mark {
   position: relative;
 }
 
-.g-help-mark::after {
+.g-help-mark::before {
   position: absolute;
   inset: -4px;
   content: "";
@@ -3783,7 +3761,7 @@ button.rh-category:focus-visible {
 /* один кегль у всех элементов интерфейса и кода в тексте – 13px, как текст Label xs:
  * иначе «В очереди» (кегль состояния 15px) и лиги (12px) выбивались из строки */
 .rh-docs .rh-docs__article :is(.rh-docs__ui, .rh-docs__uiwrap, .rh-docs__uiwrap .g-label__text, :not(pre) > code) {
-  font-size: 13px;
+  font-size: var(--g-text-body-1-font-size);
 }
 
 .rh-docs__ui .g-icon {
@@ -4011,6 +3989,20 @@ button.rh-category:focus-visible {
 /* таблица подметрик — строки по-прежнему в гриде `.rh-subrows` */
 .rh-subrows__table {
   display: contents;
+}
+
+/* Safari (VoiceOver) теряет роли table/row у элементов с `display: contents`.
+ * Где есть subgrid, таблица, шапка и строки — настоящие блоки во всю ширину,
+ * а колонки (и зазор) берут у сетки `.rh-subrows`: раскладка та же, роли целы. */
+@supports (grid-template-columns: subgrid) {
+  .rh-subrows__table,
+  .rh-subrows__head,
+  .rh-subrow {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: subgrid;
+    align-items: baseline;
+  }
 }
 
 /* фокус на main после «К содержимому» — без рамки: это не элемент управления */

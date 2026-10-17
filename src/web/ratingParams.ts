@@ -61,15 +61,23 @@ export function firstSortOrder(key: SortKey): "asc" | "desc" {
   return key === "name" ? "asc" : "desc";
 }
 
-/**
- * Охват каталога одной строкой. Число неоцененных называется явно — иначе
- * «Без оценки 0» рядом читается ошибкой счета: в «Без оценки» стоят
- * проанализированные без оценки, а эти еще не оценены вовсе.
- */
+/** Охват каталога одной короткой строкой; из чего складывается разница — `coverageGap`. */
 export function coverageLine(repos: { scored: number; nullScore: number; catalog: number }): string {
+  return `Оценено ${fmtCount(repos.scored)} из ${fmtCount(repos.catalog)} ${plural(repos.catalog, "репозитория", "репозиториев", "репозиториев")}.`;
+}
+
+/**
+ * Почему оценено не все — для подсказки (?) у строки охвата: в «Без оценки»
+ * стоят проанализированные, которым не хватило данных, а еще не
+ * проанализированных там нет. Обе части называются, чтобы числа сходились
+ * с сегментом «Без оценки». Пусто — оценены все.
+ */
+export function coverageGap(repos: { scored: number; nullScore: number; catalog: number }): string[] {
   const rest = Math.max(0, repos.catalog - repos.scored - repos.nullScore);
-  const head = `Оценено ${fmtCount(repos.scored)} из ${fmtCount(repos.catalog)} ${plural(repos.catalog, "репозитория", "репозиториев", "репозиториев")}.`;
-  return rest > 0 ? `${head} Еще ${fmtCount(rest)} пока не ${plural(rest, "оценен", "оценены", "оценены")}.` : head;
+  const lines: string[] = [];
+  if (repos.nullScore > 0) lines.push(`${fmtCount(repos.nullScore)} ${plural(repos.nullScore, "репозиторий", "репозитория", "репозиториев")} без оценки – не хватило данных, см. вкладку «Без оценки».`);
+  if (rest > 0) lines.push(`${fmtCount(rest)} ${plural(rest, "ждет", "ждут", "ждут")} первого анализа.`);
+  return lines;
 }
 
 /**
@@ -88,10 +96,36 @@ export function activeRatingFilters(search: string): string[] {
   return active;
 }
 
-/** Текст пустой выдачи при фильтрах: называет включенные фильтры. */
-export function nothingFoundDescription(active: string[]): string {
-  const head = active.length === 1 ? "с фильтром" : "с фильтрами";
-  return `Ни один репозиторий выборки не совпал ${head}: ${active.join(", ")}. Данные при этом на месте – сброс фильтров вернет полный рейтинг.`;
+/** Длинный запрос в тексте пустой выдачи обрезается в конце: строка не растягивает заглушку. */
+const QUERY_SHOWN_MAX = 60;
+
+/**
+ * Текст пустой выдачи при фильтрах: повторяет запрос поиска и называет прочие
+ * включенные фильтры, чтобы было видно, что именно не нашлось.
+ */
+export function nothingFoundDescription(active: string[], query = ""): string {
+  const q = query.trim();
+  const shown = q.length > QUERY_SHOWN_MAX ? `${q.slice(0, QUERY_SHOWN_MAX).trimEnd()}…` : q;
+  const others = active.filter((a) => a !== "поиск");
+  // запрос из одних пробелов: фильтром он считается, а назвать нечего
+  if (shown === "" && others.length === 0) return "Ничего не нашлось. Измените запрос или сбросьте фильтры.";
+  if (shown !== "") {
+    const tail = others.length > 0 ? ` – с учетом ${others.length === 1 ? "фильтра" : "фильтров"}: ${others.join(", ")}` : "";
+    return `По запросу «${shown}» ничего не нашлось${tail}. Измените запрос или сбросьте фильтры.`;
+  }
+  const one = others.length === 1;
+  return `Ничего не подошло под ${one ? "фильтр" : "фильтры"}: ${others.join(", ")}. Измените ${one ? "его" : "их"} или сбросьте.`;
+}
+
+/**
+ * Адрес после «Сбросить фильтры»: убираются только фильтры (и страница), вкладка
+ * «Без оценки», сортировка и размер страницы остаются — сброс не уводит из вида.
+ */
+export function resetFiltersHref(search: string): string {
+  const params = new URLSearchParams(search);
+  for (const key of ["q", "lang", "size", "ci", "ai", "page"]) params.delete(key);
+  const qs = params.toString();
+  return qs === "" ? "/" : `/?${qs}`;
 }
 
 /** Опция фильтра размера или CI: значение адреса, подпись и счетчик фасета (null — фасета нет). */

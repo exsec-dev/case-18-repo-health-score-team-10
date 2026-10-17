@@ -179,7 +179,7 @@ export interface LadderView {
 
 /**
  * Строка позиции в плашке индекса — «#87 из 28 285, лучше 91% похожих ⓘ», под ней —
- * плашка лиги (золото ТОП-10, серебро ТОП-100, бронза ТОП-1000). Числа — поля карточки
+ * плашка лиги (золото TOP-10, серебро TOP-100, бронза TOP-1000). Числа — поля карточки
  * как есть, без пересчета на клиенте.
  */
 export interface PositionView {
@@ -194,9 +194,10 @@ export interface PositionView {
 
 const LEAGUE_WORDS: Record<RankLeague, string> = { gold: "первую десятку", silver: "первую сотню", bronze: "первую тысячу" };
 
-/** «репозиторий на Go размером 1-10 тыс. строк» → кто такие похожие, словами. */
+/** «открытые репозитории на Go (1–10 тыс. строк кода)» → кто такие похожие, словами. */
 function cohortWho(language: string, bucket: keyof typeof SIZE_TITLES): string {
-  return `открытые репозитории на ${language} размером ${SIZE_TITLES[bucket]}`;
+  if (bucket === "none") return `открытые репозитории на ${language} без кода`;
+  return `открытые репозитории на ${language} (${SIZE_TITLES[bucket]} кода)`;
 }
 
 const reposWord = (n: number): string => {

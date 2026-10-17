@@ -231,11 +231,11 @@ export function commonYear(isos: (string | null)[]): number | null {
 }
 export const COMPARE_ONE_TEXT = "Добавьте еще 1 или 2 репозитория, чтобы сравнить.";
 export const COMPARE_DUPLICATE_TEXT = "Этот репозиторий уже в сравнении.";
-export const COMPARE_BAD_INPUT_TEXT = "Не похоже на адрес репозитория: нужен вид org/repo или ссылка SourceCraft.";
+export const COMPARE_BAD_INPUT_TEXT = "Не похоже на адрес репозитория – вставьте ссылку на него в SourceCraft или адрес вида организация/репозиторий.";
 export const COMPARE_UNAVAILABLE_TITLE = "Репозиторий не найден или недоступен";
 export const COMPARE_LEADER_LEGEND = "Лучший балл строки среди репозиториев с данными.";
 export const COMPARE_FULL_PARTIAL = "Repo Health Score, CI/CD и Безопасность сравниваются, когда они видны вам у всех выбранных репозиториев.";
-export const COMPARE_PLACEHOLDER = "Название, org/repo или ссылка на репозиторий";
+export const COMPARE_PLACEHOLDER = "Название, организация/репозиторий или ссылка";
 
 /** Что делать с недоступным — по состоянию ЗРИТЕЛЯ, не репозитория (иначе текст раскрыл бы существование). */
 export function unavailableText(viewerHasPat: boolean): string {

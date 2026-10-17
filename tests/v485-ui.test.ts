@@ -81,7 +81,7 @@ describe("К8.5.1: итог анализа — по заданию", () => {
     expect(finishedToast(job({ jobId: 1, slug: "a/b", phase: "done", outcome: "partial", scoreChanged: false }))).toEqual({
       theme: "info",
       title: "Анализ завершен",
-      content: "a/b: публичная оценка не изменилась, данные собраны не полностью",
+      content: "a/b: оценка не изменилась, данные собраны не полностью",
     });
     expect(finishedToast(job({ jobId: 1, slug: "a/b", phase: "failed", error: "нет действующего токена" }))).toEqual({
       theme: "danger",

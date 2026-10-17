@@ -126,11 +126,11 @@ export function finishedToast(job: MyJob): FinishedToast {
   if (job.phase === "failed") {
     return { theme: "danger", title: "Анализ завершился ошибкой", content: `${job.slug}: ${job.error ? jobErrorText(job.error) : "причина – в «Очереди»"}` };
   }
-  // скан собрал не всё (например, клон уперся в лимит) и публичная оценка не
+  // скан собрал не всё (например, клон уперся в лимит) и оценка не
   // изменилась — не зеленый «готово» без оговорок
   if (job.scoreChanged === false) {
     const partial = job.outcome === "partial" ? ", данные собраны не полностью" : "";
-    return { theme: "info", title: "Анализ завершен", content: `${job.slug}: публичная оценка не изменилась${partial}` };
+    return { theme: "info", title: "Анализ завершен", content: `${job.slug}: оценка не изменилась${partial}` };
   }
   return { theme: "success", title: "Анализ завершен", content: `${job.slug}: оценка обновлена` };
 }
