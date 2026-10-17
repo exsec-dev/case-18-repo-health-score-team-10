@@ -357,7 +357,8 @@ export function recommendationLabel(card: RepoCard, rec: CardRecommendation): st
  */
 export function recommendationCeiling(card: RepoCard, rec: CardRecommendation): number | null {
   const cats = card.score?.categories;
-  if (rec.deltaScore !== null || !cats) return null;
+  // в пустом репозитории оценка 0 по правилу методики: прирост от кода не посчитать
+  if (rec.deltaScore !== null || !cats || card.markers.codeEmpty) return null;
   const target = rec.kind === "activation" ? rec.opensCategory : (RULE_SUBMETRIC[rec.ruleId] ?? null);
   if (!target) return null;
   const [cat, sub] = target.split(".") as [CategoryKey, string | undefined];

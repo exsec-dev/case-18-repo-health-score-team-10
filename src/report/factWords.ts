@@ -5,6 +5,8 @@
 // Тексты следуют правилам языка UI (среднее тире, без «ё», цифры);
 // «—» — только глиф «нет данных».
 
+import { fmtKb } from "./submetrics";
+
 type Obj = Record<string, unknown>;
 
 const obj = (v: unknown): Obj | null => (v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Obj) : null);
@@ -57,7 +59,7 @@ const WORDS: Record<string, Words> = {
     if (v.present === false) return ["README в репозитории нет"];
     const flags = obj(v.flags) ?? {};
     return [
-      `README – ${isNum(v.bytes) ? `${n(v.bytes / 1024, 1)} КБ` : "—"}, разделов с заголовками – ${n(v.sections)}`,
+      `README – ${isNum(v.bytes) ? fmtKb(v.bytes) : "—"}, разделов с заголовками – ${n(v.sections)}`,
       `Разделы о запуске: установка – ${yesNo(flags.install)}, сборка – ${yesNo(flags.build)}, тесты – ${yesNo(flags.test)}`,
     ];
   },

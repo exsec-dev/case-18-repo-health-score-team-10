@@ -67,7 +67,7 @@ import { readRatingHidden, useMediaQuery, writeRatingHidden } from "./prefs";
 import { linkProps, navigate, repoHref } from "./router";
 import { Page, showAside, useAsideControl } from "./Shell";
 import { categoryColorClass } from "./cardView";
-import { AsideSection, EmptyState, LanguageName, MethodLink, PageHeader, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, TIP_TARGET } from "./ui";
+import { AsideSection, EmptyState, LanguageName, MethodLink, ModelVersion, PageHeader, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, TIP_TARGET } from "./ui";
 import { LANG_NONE, LANG_NONE_TITLE, langOptions, type Facets, type LangOptionData } from "./lang-filter";
 
 type Item = RatingResponse["items"][number];
@@ -706,7 +706,7 @@ function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResp
       <>
         <ScoreLegend />
         <AsideSection title="Методика">
-          <Text color="complementary">Веса категорий и версия методики появятся, когда загрузится справочник сервиса.</Text>
+          <Text color="complementary">Веса категорий и версия методики появятся, когда загрузятся настройки оценки.</Text>
         </AsideSection>
       </>
     );
@@ -775,9 +775,7 @@ function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResp
             полнота от {fmtCoverage(meta.coverageNullBelow)}
           </DefinitionList.Item>
           <DefinitionList.Item name="Версия методики">
-            <Label theme="normal" size="xs">
-              {meta.modelVersion}
-            </Label>
+            <ModelVersion version={meta.modelVersion} />
           </DefinitionList.Item>
           {/* Периодичность обхода, а не давность данных: generatedAt — момент
               запроса, дату не показываем. Две фазы планировщика: сверка каталога

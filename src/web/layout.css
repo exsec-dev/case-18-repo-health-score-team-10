@@ -1045,6 +1045,33 @@ button.rh-category:focus-visible {
 .rh-contrib_card .rh-contrib__seg {
   flex-basis: 0;
   min-width: 2px;
+  transition: opacity 0.12s ease;
+}
+
+/* «не набрано» на карточке — штриховкой: это пустое место шкалы, а не еще одна
+ * категория. Сегмент и точка легенды — одной штриховкой. */
+.rh-contrib_card .rh-cat-color_rest {
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--g-color-base-generic-medium) 0 2px,
+    transparent 2px 4px
+  );
+  box-shadow: inset 0 0 0 1px var(--g-color-base-generic-medium);
+}
+
+/* наведение или фокус: выбранный сегмент ярким, остальные приглушены */
+.rh-contrib_focus .rh-contrib__seg:not(.rh-contrib_on) {
+  opacity: 0.3;
+}
+
+.rh-contrib_card .rh-contrib__item[tabindex] {
+  cursor: default;
+  border-radius: var(--g-border-radius-xs);
+}
+
+.rh-contrib_card .rh-contrib__item[tabindex]:focus-visible {
+  outline: 2px solid var(--g-color-line-focus);
+  outline-offset: 2px;
 }
 
 

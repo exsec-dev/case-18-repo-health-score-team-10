@@ -588,6 +588,23 @@ describe("Ф2.4: клон с PAT — заголовок, argv, config клона
     }
   }, 60_000);
 
+  test("анонимный клон: системный хелпер кредов заглушен, окно входа менеджера кредов не открывается", async () => {
+    const seen: Record<string, string>[] = [];
+    await cloneBare("https://git@git.sourcecraft.dev/o/private.git", tmpdir(), LIMITS, {
+      spawnGit: (o) => {
+        seen.push(o.env);
+        return { pid: 1, exited: Promise.resolve(128), stderr: new Response("fatal: Authentication failed").body!, kill: () => {} };
+      },
+    });
+    expect({
+      count: seen[0]!.GIT_CONFIG_COUNT,
+      key0: seen[0]!.GIT_CONFIG_KEY_0,
+      value0: seen[0]!.GIT_CONFIG_VALUE_0,
+      gcm: seen[0]!.GCM_INTERACTIVE,
+      prompt: seen[0]!.GIT_TERMINAL_PROMPT,
+    }).toEqual({ count: "1", key0: "credential.helper", value0: "", gcm: "never", prompt: "0" });
+  });
+
   test("git < 2.31: клон с токеном отказывается (GIT_CONFIG_* там молча не работают), git не запускается", async () => {
     let spawned = 0;
     const out = await cloneBare("https://repo-health:pat@git.sourcecraft.dev/o/r.git", tmpdir(), LIMITS, {

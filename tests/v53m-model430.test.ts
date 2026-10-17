@@ -72,8 +72,8 @@ describe("Н4: причины «нет данных» по виду", () => {
   test("Н4: пустой репо — «нет ни одного коммита» во всех git-категориях, не «не удалось скачать»", () => {
     const ok = facts({ "activity.git.timeline": undefined, "activity.git.summary": undefined, "docs.presence": undefined, "docs.readme": undefined, "tree.stats": undefined, "code.todo": undefined, "cicd.configs": undefined });
     const s = score(ok, { emptyRepo: true });
-    for (const k of ["documentation", "cicd", "activity"] as const) expect(noDataReason(k, s.categories[k].no_data)).toBe("В репозитории нет ни одного коммита – оценивать нечего.");
-    expect(noDataReason("code", s.categories.code.no_data)).toBe("В репозитории нет ни одного коммита – оценивать нечего.");
+    for (const k of ["documentation", "cicd", "activity"] as const) expect(noDataReason(k, s.categories[k].no_data)).toBe("Нет коммитов – оценивать нечего.");
+    expect(noDataReason("code", s.categories.code.no_data)).toBe("Нет коммитов – оценивать нечего.");
     // тот же набор без признака пустоты — «не удалось прочитать»
     const unread = score(ok);
     expect(noDataReason("activity", unread.categories.activity.no_data)).toContain("Репозиторий не удалось прочитать");

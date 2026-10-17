@@ -317,8 +317,8 @@ describe("В4.6-8 (У26/У13/У38): вариант А — карточка на�
       bandIsMainChild: pageOpen >= 0 && bandMount > pageOpen,
       bandHasOwnClass: src.includes('className="rh-score-band"'),
       asideKeepsFigure: /display-2/.test(asideBody),
-      // в панели паспорт «Анализ», свернутые «Реквизиты» и шкала
-      asideIsMethodOnly: asideBody.includes("<ScoreLegend ") && asideBody.includes('title="Анализ"') && asideBody.includes("Реквизиты"),
+      // в панели паспорт «Анализ», «Сведения» и шкала
+      asideIsMethodOnly: asideBody.includes("<ScoreLegend ") && asideBody.includes('title="Анализ"') && asideBody.includes('title="Сведения"'),
     }).toEqual({ bandIsMainChild: true, bandHasOwnClass: true, asideKeepsFigure: false, asideIsMethodOnly: true });
   });
 

@@ -65,7 +65,7 @@ function Routes() {
           <Alert
             theme="warning"
             view="outlined"
-            title="Не удалось загрузить справочник сервиса"
+            title="Не удалось загрузить настройки оценки"
             message={`${metaFailed}. Названия категорий и пороги показаны по умолчанию.`}
             actions={[{ text: "Повторить", handler: meta.reload }]}
           />

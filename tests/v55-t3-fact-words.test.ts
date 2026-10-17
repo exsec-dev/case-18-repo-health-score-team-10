@@ -17,7 +17,7 @@ describe("factWords: facts referenced by recommendation rules", () => {
 
   test("docs.readme: size, sections and launch sections; absent README said plainly", () => {
     expect(factWords("docs.readme", "ok", { bytes: 27663, sections: 15, flags: { install: false, build: true, test: false } })).toEqual([
-      "README – 27 КБ, разделов с заголовками – 15",
+      "README – 27,0 КБ, разделов с заголовками – 15",
       "Разделы о запуске: установка – нет, сборка – есть, тесты – нет",
     ]);
     expect(factWords("docs.readme", "ok", { present: false })).toEqual(["README в репозитории нет"]);

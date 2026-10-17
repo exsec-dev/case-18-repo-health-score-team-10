@@ -145,7 +145,7 @@ describe("В4.6 круг 3: разделы пользователя и обол�
     expect(settingsPage).not.toContain('<PageHeader title="Настройки"');
     expect(settingsPage).toContain("<PatSection");
     expect(settingsPage).not.toContain("Управление доступом к данным репозиториев SourceCraft");
-    expect(me).toContain("Токен хранится в зашифрованном виде (AES-256-GCM)");
+    expect(me).toContain("Токен хранится в зашифрованном виде, не возвращается");
     expect(router).toContain('parts[0] === "settings"');
     expect(app).toContain('route.kind === "settings" && <SettingsPage />');
     expect(shell).toContain('{ id: "me", title: "Избранное", href: "/me", icon: Bookmark }');

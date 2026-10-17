@@ -24,7 +24,7 @@
 //   issues.monthly_flow       — [{from, created, closed}] от старых окон к новым;
 //   доли — 0..1 (показ в процентах); без значения — «—».
 
-import { fmtDecimal } from "../web/format";
+import { MINUS } from "../web/format";
 
 /** Глиф «нет данных» (tri-state): тот же, что у `fmtScore` и ячеек MD. */
 export const NO_VALUE = "—";
@@ -53,12 +53,21 @@ export interface SubmetricSpec {
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 
 /**
- * Число без локали: целое как есть, дробное — до `digits` знаков. Десятичная
- * запятая и минус «−» — по общему правилу `fmtDecimal`.
+ * Число показателя: целое — с разрядами («12 480»), дробное — до одного знака
+ * после запятой, десятичная запятая и минус «−» (как у `fmtDecimal`).
  */
-function num(value: number, digits = 2): string {
-  if (Number.isInteger(value)) return String(value);
-  return fmtDecimal(value, digits, { trim: true });
+function num(value: number): string {
+  // ненулевое значение меньше 0,05 при одном знаке стало бы «0»
+  if (value > 0 && value < 0.05) return "меньше 0,1";
+  const body = Math.abs(value).toLocaleString("ru-RU", { maximumFractionDigits: 1 });
+  return value < 0 && body !== "0" ? `${MINUS}${body}` : body;
+}
+
+/** Размер файла в килобайтах — всегда с одним знаком и разрядами: «13,1 КБ», «1 204,0 КБ». */
+export function fmtKb(bytes: number): string {
+  // непустой файл меньше 0,05 КБ при одном знаке стал бы «0,0 КБ»
+  if (bytes > 0 && bytes < 51.2) return "меньше 0,1 КБ";
+  return `${(bytes / 1024).toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} КБ`;
 }
 
 /** Русское согласование с числом: 1 день, 2 дня, 5 дней (дробное — родительный ед.: 2.5 дня). */
@@ -75,7 +84,8 @@ export function plural(value: number, one: string, few: string, many: string): s
 const count =
   (one: string, few: string, many: string): Formatter =>
   (v) =>
-    isNum(v) ? `${num(v, 1)} ${plural(Math.round(v * 10) / 10, one, few, many)}` : null;
+    // «меньше 0,1 дня»: согласование как у дробного
+    isNum(v) ? `${num(v)} ${plural(v > 0 && v < 0.05 ? 0.1 : Math.round(v * 10) / 10, one, few, many)}` : null;
 
 const plain: Formatter = (v) => (isNum(v) ? num(v) : null);
 
@@ -102,13 +112,13 @@ const duration: Formatter = (v) => {
 
 const obj = (v: unknown): Record<string, unknown> | null => (v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : null);
 
-/** README: «8000 байт, 5 разделов, есть: установка»; нет файла — «нет файла». */
+/** README: «7,8 КБ, 5 разделов, есть: установка»; нет файла — «нет файла». */
 const readme: Formatter = (v) => {
   const r = obj(v);
   if (!r) return null;
   if (r.present === false) return "нет файла";
   const parts: string[] = [];
-  if (isNum(r.bytes)) parts.push(`${num(r.bytes)} ${plural(r.bytes, "байт", "байта", "байт")}`);
+  if (isNum(r.bytes)) parts.push(fmtKb(r.bytes));
   if (isNum(r.sections)) parts.push(`${num(r.sections)} ${plural(r.sections, "раздел", "раздела", "разделов")}`);
   const flags = obj(r.flags) ?? {};
   const described = [
@@ -175,7 +185,7 @@ const ciStability: Formatter = (v) => {
 };
 
 /** Знак баланса: «+5», «−4», «0» (минус — «−», как у `fmtDecimal`). */
-const signed = (n: number): string => (n > 0 ? `+${num(n)}` : n < 0 ? fmtDecimal(n, 0) : "0");
+const signed = (n: number): string => (n > 0 ? `+${num(n)}` : n < 0 ? num(Math.round(n)) : "0");
 
 /** «бэклог растет, +5 за 90 дней (создано 12, закрыто 7)». */
 const backlogTrend: Formatter = (v) => {
@@ -202,9 +212,9 @@ const monthlyFlow: Formatter = (v) => {
 /** Часы: до 48 ч — «N ч», дольше — «N дней» (сутки из 24 ч). */
 const hoursOrDays: Formatter = (v) => {
   if (!isNum(v)) return null;
-  if (v < 48) return `${num(v, 1)} ч`;
+  if (v < 48) return `${num(v)} ч`;
   const days = Math.round((v / 24) * 10) / 10;
-  return `${num(days, 1)} ${plural(days, "день", "дня", "дней")}`;
+  return `${num(days)} ${plural(days, "день", "дня", "дней")}`;
 };
 
 /** Ревью PR без выборки: PR нет — «PR не используются» (данные); только черновики — числом. */
@@ -236,7 +246,7 @@ const ownership: Formatter = (v) => {
 
 /** Ключ — `<категория>.<подметрика>`, как в `categories[*].submetrics` оценки. */
 export const SUBMETRICS: Record<string, SubmetricSpec> = {
-  "documentation.readme": { title: "README (наличие и качество)", unit: "байты, разделы, описанные шаги", format: readme },
+  "documentation.readme": { title: "README (наличие и качество)", unit: "КБ, разделы, описанные шаги", format: readme },
   "documentation.license": { title: "Лицензия", unit: "есть/нет", format: presence },
   "documentation.contributing": { title: "CONTRIBUTING", unit: "есть/нет", format: presence },
   "documentation.codeowners": { title: "CODEOWNERS", unit: "есть/нет", format: presence },
@@ -250,7 +260,7 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   // без двойного отрицания: «Отсутствие критичных утечек – нет» читалось бы наоборот
   "security.secrets": { title: "Критичные утечки секретов", unit: "найдены/не найдены", format: (v) => (typeof v === "boolean" ? (v ? "найдены" : "не найдены") : null) },
   "activity.fresh": { title: "Свежесть последнего коммита человека", unit: "дни на момент скана", format: daysSince },
-  "activity.freq": { title: "Частота коммитов", unit: "коммитов в месяц", format: (v) => (isNum(v) ? `${num(v, 1)} в месяц` : null) },
+  "activity.freq": { title: "Частота коммитов", unit: "коммитов в месяц", format: (v) => (isNum(v) ? `${num(v)} в месяц` : null) },
   "activity.contributors": { title: "Число авторов", unit: "авторы", format: count("автор", "автора", "авторов") },
   "activity.pulls_90d": { title: "Предложения изменений за 90 дней", unit: "штуки", format: plain },
   "activity.releases_12m": { title: "Релизы за 12 месяцев", unit: "штуки", format: plain },
@@ -262,7 +272,7 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   "issues.stale": { title: "Доля зависших задач", unit: "доля, %", format: share },
   "issues.close_days": { title: "Медиана времени закрытия", unit: "дни", format: count("день", "дня", "дней") },
   "issues.resolution": { title: "Доля решенных", unit: "доля, %", format: share },
-  "issues.first_resp": { title: "Время до первого ответа", unit: "часы", format: (v) => (isNum(v) ? `${num(v, 1)} ч` : null) },
+  "issues.first_resp": { title: "Время до первого ответа", unit: "часы", format: (v) => (isNum(v) ? `${num(v)} ч` : null) },
   "issues.tracker_unused": { title: "Задачи не ведутся", unit: "открытые и закрытые задачи", format: tracker },
   "issues.backlog_trend": { title: "Динамика бэклога за 90 дней", unit: "создано минус закрыто (справочно, без веса)", format: backlogTrend },
   "issues.monthly_flow": { title: "Поток задач по 30-дневным окнам", unit: "6 окон по 30 дней (справочно, без веса)", format: monthlyFlow },

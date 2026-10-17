@@ -9,7 +9,7 @@ import { INDEX_WEIGHTS, SCORE_WEIGHTS, SUBWEIGHTS, type CategoryKey } from "../s
 import {
   CONTRIBUTIONS_REST,
   CONTRIBUTIONS_TITLE,
-  NOT_IN_SCORE,
+  NOT_IN_SCORE_LIST,
   categoryContributions,
   contributionsNote,
   fmtContribution,
@@ -20,6 +20,7 @@ import {
   lockedCategoryText,
   noDataReason,
   securityNoDataReason,
+  type ContributionSegment,
   type Contributions,
   roundScore,
   scoreTheme,
@@ -85,20 +86,40 @@ export function contributionsOf(card: RepoCard, metric: Metric): Contributions |
   );
 }
 
-/** Сегмент полосы вклада: `key` — категория (карточка красит сегмент по ключу). */
+/**
+ * Сегмент полосы вклада: `key` — категория (карточка красит сегмент по ключу);
+ * `hint` — подсказка карточки при наведении: только то, чего на экране нет.
+ */
 export interface BarSegment {
   key: string;
   title: string;
   value: string;
   share: number;
+  hint: string;
 }
 
 /** Полоса «Вклад категорий в <показатель>»: сегменты и остаток либо строка вместо полосы. */
 export interface ContributionBar {
   title: string;
   segments: BarSegment[];
-  rest: { title: string; value: string; share: number } | null;
+  rest: { title: string; value: string; share: number; hint: string | null } | null;
   note: string | null;
+}
+
+/**
+ * Подсказка сегмента: потолок категории (вес среди категорий с данными × 100) и ее
+ * доля в набранном — «из 23,1 возможного · 23% оценки». Балл и вклад не повторяются:
+ * вклад стоит в легенде, балл — в «Категориях».
+ */
+export function segmentHint(s: ContributionSegment, total: number): string {
+  const ceiling = `из ${fmtDecimal(s.share * 100, 1)} возможного`;
+  return total > 0 ? `${ceiling} · ${Math.round((s.tenths / (total * 10)) * 100)}% оценки` : ceiling;
+}
+
+/** Подсказка «не набрано»: где недобрано больше всего — «больше всего – Задачи, 21,7». */
+export function restHint(losses: ContributionSegment[]): string | null {
+  const top = losses[0];
+  return top ? `больше всего – ${top.title}, ${fmtDecimal(top.loss, 1)}` : null;
 }
 
 /**
@@ -115,8 +136,8 @@ export function contributionBar(c: Contributions | null, metricName?: string): C
   if (c.kind !== "bar") return { title, segments: [], rest: null, note };
   return {
     title,
-    segments: c.segments.map((s) => ({ key: s.key, title: s.title, value: fmtContribution(s.tenths), share: s.tenths / 1000 })),
-    rest: { title: CONTRIBUTIONS_REST, value: String(c.missing), share: c.missing / 100 },
+    segments: c.segments.map((s) => ({ key: s.key, title: s.title, value: fmtContribution(s.tenths), share: s.tenths / 1000, hint: segmentHint(s, c.total) })),
+    rest: { title: CONTRIBUTIONS_REST, value: String(c.missing), share: c.missing / 100, hint: restHint(c.losses) },
     note: null,
   };
 }
@@ -205,16 +226,28 @@ export function adjustmentText(cat: Pick<CardCategory, "adjustment" | "score">):
 /**
  * Основание любой категории — колонка «Основание» PDF и вторая строка
  * категории на карточке: закрытая — фраза по доступу зрителя, без данных —
- * причина и опорная фраза, оцененная — `whyText`.
+ * причина, оцененная — `whyText`. Опорная фраза «не участвует и не снижает» —
+ * одна на список (`notInScoreNote`), а не у каждой строки.
  */
 export function categoryWhy(card: RepoCard, key: CategoryKey, ctx: SubmetricContext): string {
   const cat = card.score!.categories[key]!;
   if (cat.locked !== undefined) return lockedCategoryText(cat.locked, card.viewer?.auth);
   if (cat.score === null) {
     const reason = key === "security" ? securityNoDataReason(card.evidence.find((e) => e.key === "appsec.findings")) : noDataReason(key, cat.no_data);
-    return `${reason} ${NOT_IN_SCORE}`;
+    return reason;
   }
   return whyText(key, cat, ctx);
+}
+
+/**
+ * «Категории без данных в оценке не участвуют» — один раз на список, если такие
+ * категории есть. У пустого репозитория фразы нет: оценка 0 по правилу методики,
+ * «не снижает» там было бы неправдой.
+ */
+export function notInScoreNote(card: RepoCard): string | null {
+  if (card.markers.codeEmpty) return null;
+  const cats = Object.values(card.score?.categories ?? {});
+  return cats.some((c) => c.locked === undefined && c.score === null) ? NOT_IN_SCORE_LIST : null;
 }
 
 // ---------- ограничения данных ----------

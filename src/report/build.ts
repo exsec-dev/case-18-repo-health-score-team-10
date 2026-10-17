@@ -76,6 +76,7 @@ import {
   noRecommendationsText,
   strengthsLine,
   ownershipView,
+  notInScoreNote,
 } from "./sections";
 import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle, subweightKey, type SubmetricContext } from "./submetrics";
 
@@ -271,7 +272,7 @@ function indexNullSection(card: RepoCard): Block[] {
     h2("Категории"),
     // сильные и слабые стороны — одна копия с карточкой
     ...(strengthsLine(card) !== null ? [para(line(strengthsLine(card)!))] : []),
-    categoriesBlock(card, ctx),
+    ...categoriesBlocks(card, ctx),
     h2("Рекомендации"),
   ];
   if (card.recommendations.length > 0) out.push({ kind: "actions", compact: false, items: card.recommendations.map((r, i) => actionItem(r, i + 1)) });
@@ -342,7 +343,7 @@ function scoredSection(card: RepoCard, metrics: Metric[]): Block[] {
     h2("Категории"),
     // сильные и слабые стороны — одна копия с карточкой
     ...(strengthsLine(card) !== null ? [para(line(strengthsLine(card)!))] : []),
-    categoriesBlock(card, ctx),
+    ...categoriesBlocks(card, ctx),
   ];
   // раздел рекомендаций один и стоит сразу после категорий
   const recs = card.recommendations;
@@ -385,13 +386,18 @@ function contributionsBlock(c: Contributions | null, metricName?: string): Block
   return { kind: "contributions", title: bar.title, segments: bar.segments.map(({ title, value, share }) => ({ title, value, share })), rest: bar.rest, zones: zones(), note: bar.note };
 }
 
-function categoriesBlock(card: RepoCard, ctx: SubmetricContext): Block {
+/** Таблица категорий и под ней — один раз — «категории без данных в оценке не участвуют». */
+function categoriesBlocks(card: RepoCard, ctx: SubmetricContext): Block[] {
   const cats = card.score!.categories;
-  return {
-    kind: "categories",
-    columns: ["Категория", "Балл", "Уровень", "Основание"],
-    rows: CATEGORY_ORDER.filter((k) => cats[k] !== undefined).map((k) => categoryRow(card, k, cats[k]!, ctx)),
-  };
+  const note = notInScoreNote(card);
+  return [
+    {
+      kind: "categories",
+      columns: ["Категория", "Балл", "Уровень", "Основание"],
+      rows: CATEGORY_ORDER.filter((k) => cats[k] !== undefined).map((k) => categoryRow(card, k, cats[k]!, ctx)),
+    },
+    ...(note ? [{ kind: "paragraph" as const, tone: "note" as const, lines: [line(note)] }] : []),
+  ];
 }
 
 // ---------- разбор по категориям ----------

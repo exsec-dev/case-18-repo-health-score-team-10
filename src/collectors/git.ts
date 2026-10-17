@@ -353,7 +353,14 @@ export async function cloneBare(
     return { ok: false, reason: "git", detail: split.detail, elapsedMs: Date.now() - started };
   }
   let cloneUrl = split.url;
-  const childEnv: Record<string, string> = { GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "/bin/true" };
+  // GCM_INTERACTIVE=never — менеджер кредов Windows не открывает окно входа, даже
+  // если хелпер все же вызван (GIT_TERMINAL_PROMPT глушит только запрос в терминале)
+  const childEnv: Record<string, string> = { GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "/bin/true", GCM_INTERACTIVE: "never" };
+  // пустой `credential.helper` глушит системные хелперы (менеджер кредов
+  // Windows, osxkeychain) и у анонимного клона: на 401 (закрытый или удаленный
+  // репозиторий) хелпер иначе показывает окно входа на хосте сервиса, а с PAT –
+  // подхватил бы и сохранил токен на диске хоста
+  const config: [string, string][] = [["credential.helper", ""]];
   if (split.kind === "header") {
     // на git < 2.31 `GIT_CONFIG_*` молча игнорируется – клон ушел бы без авторизации
     const v = opts.gitVersion !== undefined ? opts.gitVersion : await gitVersion();
@@ -366,14 +373,13 @@ export async function cloneBare(
         elapsedMs: Date.now() - started,
       };
     }
-    // пустой `credential.helper` глушит системные хелперы (менеджер кредов
-    // Windows, osxkeychain), иначе они подхватят и сохранят PAT на диске хоста
-    childEnv.GIT_CONFIG_COUNT = "2";
-    childEnv.GIT_CONFIG_KEY_0 = "http.extraHeader";
-    childEnv.GIT_CONFIG_VALUE_0 = split.authorization;
-    childEnv.GIT_CONFIG_KEY_1 = "credential.helper";
-    childEnv.GIT_CONFIG_VALUE_1 = "";
+    config.unshift(["http.extraHeader", split.authorization]);
   }
+  childEnv.GIT_CONFIG_COUNT = String(config.length);
+  config.forEach(([key, value], i) => {
+    childEnv[`GIT_CONFIG_KEY_${i}`] = key;
+    childEnv[`GIT_CONFIG_VALUE_${i}`] = value;
+  });
   const gitArgs = ["clone", "--bare"];
   if (opts.shallowSince) gitArgs.push(`--shallow-since=${opts.shallowSince}`);
   gitArgs.push(cloneUrl, dir);

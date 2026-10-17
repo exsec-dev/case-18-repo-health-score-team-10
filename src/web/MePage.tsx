@@ -527,7 +527,7 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
             </Flex>
             {owner && <Text color="complementary">Токен принадлежит пользователю {owner}.</Text>}
             <Text variant="body-short" color="secondary">
-              Токен хранится в зашифрованном виде (AES-256-GCM), не возвращается в браузер и не записывается в журналы. Изменения
+              Токен хранится в зашифрованном виде, не возвращается в браузер и не записывается в журналы. Изменения
               применяются к последующим анализам.
             </Text>
             {replacing ? (

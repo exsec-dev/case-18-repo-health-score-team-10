@@ -81,11 +81,11 @@ import {
   Text,
   useToaster,
 } from "@gravity-ui/uikit";
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { COVERAGE_NULL_BELOW } from "../score/model";
 import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle } from "../report/submetrics";
 import { factWords } from "../report/factWords";
-import { FULL, INDEX, metricWeights, ownershipView, sourceWord, strengthsLine, submetricWeightText } from "../report/sections";
+import { FULL, INDEX, metricWeights, notInScoreNote, ownershipView, sourceWord, strengthsLine, submetricWeightText } from "../report/sections";
 import type { MetaResponse, RepoCard } from "./api";
 import { dataOf, mutateJson, useJson, useVisible } from "./api";
 import { LADDER_HELP, cardView, type CardView, type CategoryView, type PositionView, type RecommendationView } from "./cardView";
@@ -127,7 +127,7 @@ import { LoginButton, Page, type Crumb } from "./Shell";
 import { Trophy } from "./icons";
 import { useMediaQuery } from "./prefs";
 import { AiOverviewSection, BadgeButton, BadgeDialog, CategoryAiMark, CategoryAiNote, FraudCheckFooter, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
-import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, MethodLink, RepoAvatar, RepoSlug, ScoreBar, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
+import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, MethodLink, ModelVersion, RepoAvatar, RepoSlug, ScoreBar, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
 
 type Card = RepoCard;
 type Evidence = Card["evidence"][number];
@@ -328,12 +328,13 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
             <ScoreBand
               card={card}
               view={view}
-              footer={card.score.healthcraftIndex === null ? undefined : <FraudCheckFooter card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} quota={aiQuota.quota} onQuota={aiQuota.reload} />}
+              // в пустом репозитории проверять и пересказывать нечего: ни проверки активности, ни AI-обзора
+              footer={card.score.healthcraftIndex === null || card.markers.codeEmpty ? undefined : <FraudCheckFooter card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} quota={aiQuota.quota} onQuota={aiQuota.reload} />}
             />
           </Flex>
           <Categories card={card} view={view} />
           <Recommendations view={view} org={org} repo={repo} />
-          {card.score.healthcraftIndex !== null && <AiOverviewSection card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} quota={aiQuota.quota} onQuota={aiQuota.reload} />}
+          {card.score.healthcraftIndex !== null && !card.markers.codeEmpty && <AiOverviewSection card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} quota={aiQuota.quota} onQuota={aiQuota.reload} />}
           <HistorySection card={card} org={org} repo={repo} />
           <Limitations items={view.limitations} />
         </Flex>
@@ -862,7 +863,7 @@ function collectedText(status: string): string {
 
 /**
  * Правая панель — паспорт анализа и короткая справка: «Анализ» (место, покрытие,
- * полнота сбора, запуск), «Шкала оценки», «Что учитывается», «Реквизиты». Вклад
+ * полнота сбора, запуск), «Шкала оценки», «Что учитывается», «Сведения». Вклад
  * категорий стоит под числами, недостающие данные — основанием у строки категории.
  */
 function ScoreAside({
@@ -945,16 +946,14 @@ function ScoreAside({
       )}
 
       {scan && (
-        <AsideSection title="Реквизиты">
+        <AsideSection title="Сведения">
           <DefinitionList nameMaxWidth={ASIDE_NAME_WIDTH}>
-              <DefinitionList.Item name="Анализ">№ {scan.id}</DefinitionList.Item>
-              {score && (
-                <DefinitionList.Item name="Версия методики">
-                  <Label theme="normal" size="xs">
-                    {score.modelVersion}
-                  </Label>
-                </DefinitionList.Item>
-              )}
+            <DefinitionList.Item name="Номер анализа">{scan.id}</DefinitionList.Item>
+            {score && (
+              <DefinitionList.Item name="Версия методики">
+                <ModelVersion version={score.modelVersion} />
+              </DefinitionList.Item>
+            )}
           </DefinitionList>
         </AsideSection>
       )}
@@ -991,7 +990,7 @@ function ScoreBand({ card, view, footer }: { card: Card; view: CardView; footer?
   return (
     <div className="rh-score-cards">
       <Card view="outlined" className="rh-score-band">
-        <ScoreFigure title="HealthCraft Index" help={INDEX_HELP} total={score.healthcraftIndex} position={view.position} />
+        <ScoreFigure title="HealthCraft Index" help={INDEX_HELP} total={score.healthcraftIndex} position={view.position} codeEmpty={card.markers.codeEmpty} />
         {score.healthcraftIndex === null && <NoScoreReason view={view} />}
         <ContributionStrip bar={barOf("HealthCraft Index")} />
         {footer}
@@ -1020,7 +1019,7 @@ function ScoreBand({ card, view, footer }: { card: Card; view: CardView; footer?
           </Flex>
         ) : (
           <>
-            <ScoreFigure title="Repo Health Score" help={FULL_HELP} total={score.repoHealthScore} />
+            <ScoreFigure title="Repo Health Score" help={FULL_HELP} total={score.repoHealthScore} codeEmpty={card.markers.codeEmpty} />
             <ContributionStrip bar={barOf("Repo Health Score")} />
           </>
         )}
@@ -1050,44 +1049,88 @@ function NoScoreReason({ view }: { view: CardView }) {
 /**
  * Полоса вклада под своим числом: тонкий стек и легенда точками с переносом, как «Top
  * languages» SourceCraft и панель «Вклад категорий» рейтинга. Одна категория — один
- * цвет на обоих экранах (`categoryColorClass`); «не набрано» — последним, нейтральным.
+ * цвет на обоих экранах (`categoryColorClass`); «не набрано» — последним, штриховкой.
  * Заголовка нет — полоса стоит в плашке своего показателя, имя в `aria-label`. Расчет
- * (`categoryContributions`) общий с отчетом.
+ * (`categoryContributions`) общий с отчетом. Наведение или фокус на сегмент либо пункт
+ * легенды подсвечивает сегмент и показывает подсказку только с тем, чего на экране
+ * нет: потолок категории и ее долю в оценке, у «не набрано» — где недобрано больше всего.
  */
 function ContributionStrip({ bar }: { bar: CardView["contributions"][number] | null }) {
+  const [active, setActive] = useState<string | null>(null);
   if (!bar) return null;
+  const REST = "rest";
+  const parts = [
+    ...bar.segments.map((s) => ({ key: s.key, colorClass: s.colorClass, share: s.share, hint: s.hint, title: s.title, value: s.value, rest: false })),
+    ...(bar.rest ? [{ key: REST, colorClass: "rh-cat-color_rest", share: bar.rest.share, hint: bar.rest.hint, title: bar.rest.title, value: bar.rest.value, rest: true }] : []),
+  ];
+  const hover = (key: string) => ({
+    onMouseEnter: () => setActive(key),
+    onMouseLeave: () => setActive((k) => (k === key ? null : k)),
+    onFocus: () => setActive(key),
+    onBlur: () => setActive((k) => (k === key ? null : k)),
+  });
+  const withTip = (hint: string | null, node: ReactElement) =>
+    hint ? (
+      <ActionTooltip title={hint} className="rh-tip-oneline">
+        {node}
+      </ActionTooltip>
+    ) : (
+      node
+    );
   return (
-    <div className="rh-contrib rh-contrib_card" role="group" aria-label={bar.title}>
+    <div className={active ? "rh-contrib rh-contrib_card rh-contrib_focus" : "rh-contrib rh-contrib_card"} role="group" aria-label={bar.title}>
       {bar.note !== null ? (
         <Text as="p" color="complementary" className="rh-contrib__note">
           {bar.note}
         </Text>
       ) : (
         <>
+          {/* сегменты — только для мыши: с клавиатуры то же дает легенда. Категория с
+              нулевым вкладом остается полоской 2px (min-width), пустой остаток не рисуется */}
           <div className="rh-contrib__bar" aria-hidden="true">
-            {bar.segments.map((s) => (
-              <i key={s.key} className={`rh-contrib__seg ${s.colorClass}`} style={{ flexGrow: s.share * 1000 }} />
-            ))}
-            {bar.rest && bar.rest.share > 0 && <i className="rh-contrib__seg rh-cat-color_rest" style={{ flexGrow: bar.rest.share * 1000 }} />}
+            {parts
+              .filter((p) => !p.rest || p.share > 0)
+              .map((p) => (
+                <Fragment key={p.key}>
+                  {withTip(
+                    p.hint,
+                    <i
+                      className={`rh-contrib__seg ${p.colorClass}${active === p.key ? " rh-contrib_on" : ""}`}
+                      style={{ flexGrow: p.share * 1000 }}
+                      {...hover(p.key)}
+                    />,
+                  )}
+                </Fragment>
+              ))}
           </div>
           <ul className="rh-contrib__legend">
-            {bar.segments.map((s) => (
-              <li key={s.key} className="rh-contrib__item">
-                <i className={`rh-contrib__dot ${s.colorClass}`} aria-hidden="true" />
-                <Text variant="body-1">{s.title}</Text>
-                <Text variant="body-1" color="secondary" className="rh-contrib__share">
-                  – {s.value}
-                </Text>
-              </li>
+            {parts.map((p) => (
+              <Fragment key={p.key}>
+                {withTip(
+                  p.hint,
+                  <li
+                    className={`rh-contrib__item${active === p.key ? " rh-contrib_on" : ""}`}
+                    tabIndex={p.hint ? 0 : undefined}
+                    aria-label={p.hint ? `${p.title} – ${p.value}: ${p.hint}` : undefined}
+                    {...hover(p.key)}
+                  >
+                    <i className={`rh-contrib__dot ${p.colorClass}`} aria-hidden="true" />
+                    {p.rest ? (
+                      <Text variant="body-1" color="secondary">
+                        {p.title} – {p.value}
+                      </Text>
+                    ) : (
+                      <>
+                        <Text variant="body-1">{p.title}</Text>
+                        <Text variant="body-1" color="secondary" className="rh-contrib__share">
+                          – {p.value}
+                        </Text>
+                      </>
+                    )}
+                  </li>,
+                )}
+              </Fragment>
             ))}
-            {bar.rest && (
-              <li className="rh-contrib__item">
-                <i className="rh-contrib__dot rh-cat-color_rest" aria-hidden="true" />
-                <Text variant="body-1" color="secondary">
-                  {bar.rest.title} – {bar.rest.value}
-                </Text>
-              </li>
-            )}
           </ul>
         </>
       )}
@@ -1116,7 +1159,11 @@ function MetricHelp({ text, name }: { text: string; name: typeof INDEX | typeof 
   );
 }
 
-function ScoreFigure({ title, help, total, position }: { title: string; help: string; total: number | null; position?: PositionView | null }) {
+/**
+ * Число показателя и уровень. В пустом репозитории 0 — не «зона риска», а «оценивать
+ * нечего»: число серым и метка «нет кода» (причина — строкой под ним).
+ */
+function ScoreFigure({ title, help, total, position, codeEmpty = false }: { title: string; help: string; total: number | null; position?: PositionView | null; codeEmpty?: boolean }) {
   return (
     <Flex direction="column" gap={1} style={{ minWidth: 0 }}>
       <Flex gap={1} alignItems="center">
@@ -1136,11 +1183,19 @@ function ScoreFigure({ title, help, total, position }: { title: string; help: st
         // процент похожих; не хватает места рядом с числом — уходит строкой ниже, тоже вправо
         <div className="rh-score-figure__row">
           <Flex gap={2} alignItems="baseline" wrap className="rh-score-figure__value">
-            <Text variant="display-2">{fmtScore(total)}</Text>
+            <Text variant="display-2" color={codeEmpty ? "secondary" : undefined}>
+              {fmtScore(total)}
+            </Text>
             <Text color="secondary">из 100</Text>
-            <Label theme={scoreLabelTheme(total)} size="s">
-              {sentence(scoreWord(total))}
-            </Label>
+            {codeEmpty ? (
+              <Label theme="unknown" size="s">
+                нет кода
+              </Label>
+            ) : (
+              <Label theme={scoreLabelTheme(total)} size="s">
+                {sentence(scoreWord(total))}
+              </Label>
+            )}
           </Flex>
           {position ? <PositionLine position={position} /> : null}
         </div>
@@ -1190,6 +1245,8 @@ function PositionLine({ position }: { position: PositionView }) {
  * а одной плашкой под списком.
  */
 function Categories({ card, view }: { card: Card; view: CardView }) {
+  const strengths = strengthsLine(card);
+  const notInScore = notInScoreNote(card);
   return (
     <section className="rh-section" aria-labelledby="rh-categories-title">
       <Card view="outlined" className="rh-section-card">
@@ -1197,9 +1254,15 @@ function Categories({ card, view }: { card: Card; view: CardView }) {
           Категории
         </Text>
         {/* сильные стороны и что требует внимания — строкой под заголовком; тот же текст, что в MD/PDF */}
-        {strengthsLine(card) !== null && (
+        {strengths !== null && (
           <Text as="p" variant="body-1" color="complementary" className="rh-strengths">
-            {strengthsLine(card)}
+            {strengths}
+          </Text>
+        )}
+        {/* «не участвует и не снижает» — один раз на список, у строк только причина */}
+        {notInScore !== null && (
+          <Text as="p" variant="body-1" color="secondary" className="rh-strengths">
+            {notInScore}
           </Text>
         )}
         <ul className="rh-list" style={{ borderTop: 0 }}>

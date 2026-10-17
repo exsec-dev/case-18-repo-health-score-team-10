@@ -43,7 +43,7 @@ import {
   fraudFactorFact,
   fraudFactorValue,
   fraudCheckStale,
-  fraudFactorTitle, AI_DISCLAIMER, AI_OVERVIEW_REJECTED,
+  fraudFactorTitle, AI_NOTE_SHORT, AI_OVERVIEW_REJECTED,
   quotaBlockedText,
   scoreTheme,
   quotaCounter,
@@ -479,11 +479,11 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
           <Text variant="body-1" color="complementary">
             {canRun
               ? publicVersion
-                ? "Модель перескажет оценку обычным языком по открытым данным – 4 категориям без CI/CD и Безопасности. На расчет обзор не влияет."
-                : "Модель перескажет оценку обычным языком и разберет каждую категорию. На расчет обзор не влияет."
+                ? "Модель коротко перескажет оценку по 4 открытым категориям. На оценку не влияет."
+                : "Модель коротко перескажет оценку и разберет каждую категорию. На оценку не влияет."
               : card.repo.visibility === "public"
-                ? "Обзор может сформировать любой вошедший пользователь. Модель пересказывает оценку и на расчет не влияет."
-                : "Обзор запускает владелец репозитория. Модель пересказывает оценку и на расчет не влияет."}
+                ? "Обзор может сформировать любой вошедший пользователь. На оценку не влияет."
+                : "Обзор запускает владелец репозитория. На оценку не влияет."}
           </Text>
           {canRun && (
             <div className="rh-score-band__signin">
@@ -537,7 +537,7 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
   const stamp =
     ai !== null && ai.generatedAt !== null && !jobActive ? (
       <Text variant="caption-2" color="secondary">
-        {`Обзор от ${fmtDateTime(ai.generatedAt)}. ${AI_DISCLAIMER}`}
+        {`Обзор от ${fmtDateTime(ai.generatedAt)}.`}
         {cooldownActive ? ` Следующий запуск – после ${fmtDateTime(ai.cooldownUntil)}.` : ""}
         {canRun && quotaBlocked !== null ? ` ${quotaBlocked}.` : ""}
       </Text>
@@ -547,28 +547,35 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
     // рамка градиента движется, только пока обзор формируется
     <section className={jobActive ? "rh-ai-section rh-ai-section_live" : "rh-ai-section"} aria-labelledby="rh-ai-title" aria-busy={jobActive} data-slot="aiSummary">
       <Flex direction="column" gap={3}>
-        <Flex gap={2} alignItems="center" wrap>
-          <span className="rh-ai-section__spark" aria-hidden="true">
-            <Icon data={SparklesFill} size={16} />
-          </span>
-          <Text variant="subheader-3" as="h2" id="rh-ai-title">
-            {AI_SECTION_TITLE}
+        {/* заголовок и оговорка о модели — одной группой: оговорка прижата к заголовку */}
+        <Flex direction="column" gap={1}>
+          <Flex gap={2} alignItems="center" wrap>
+            <span className="rh-ai-section__spark" aria-hidden="true">
+              <Icon data={SparklesFill} size={16} />
+            </span>
+            <Text variant="subheader-3" as="h2" id="rh-ai-title">
+              {AI_SECTION_TITLE}
+            </Text>
+            {hasOverview && newerAnalysis && <AiStaleMark card={card} blockedReason={canRun && runDisabled ? runReason : null} />}
+            {model !== null && <AiModelLabel model={model} />}
+            {/* объем публичной версии — меткой в заголовке, пояснение в подсказке внутри плашки */}
+            {publicVersion && hasOverview && (
+              <Label theme="unknown" size="xs" className="rh-open-data">
+                <span className="rh-open-data__text">
+                  По открытым данным
+                  <HelpMark iconSize="s" aria-label="Что значит «по открытым данным»">
+                    4 категории: документация, состояние кода, активность, задачи. CI/CD и Безопасность не входят – их видят участники репозитория.
+                  </HelpMark>
+                </span>
+              </Label>
+            )}
+            <span style={{ flex: 1 }} />
+            {ownerActions}
+          </Flex>
+          {/* оговорка о модели — один раз, сразу под заголовком; в подписи с датой ее нет */}
+          <Text variant="body-1" color="secondary">
+            {AI_NOTE_SHORT}
           </Text>
-          {hasOverview && newerAnalysis && <AiStaleMark card={card} blockedReason={canRun && runDisabled ? runReason : null} />}
-          {model !== null && <AiModelLabel model={model} />}
-          {/* объем публичной версии — меткой в заголовке, пояснение в подсказке внутри плашки */}
-          {publicVersion && hasOverview && (
-            <Label theme="unknown" size="xs" className="rh-open-data">
-              <span className="rh-open-data__text">
-                По открытым данным
-                <HelpMark iconSize="s" aria-label="Что значит «по открытым данным»">
-                  4 категории: документация, состояние кода, активность, задачи. CI/CD и Безопасность не входят – их видят участники репозитория.
-                </HelpMark>
-              </span>
-            </Label>
-          )}
-          <span style={{ flex: 1 }} />
-          {ownerActions}
         </Flex>
 
         {jobActive ? (
@@ -583,7 +590,7 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
           </Flex>
         ) : ai === null || (!hasOverview && specialists.length === 0) ? (
           <Text variant="body-1" color="complementary">
-            {canRun ? "Обзора пока нет. Он пересказывает оценку обычным языком и на нее не влияет." : card.repo.visibility === "public" ? "Обзора пока нет – его может сформировать любой вошедший пользователь." : "Обзора пока нет – его запускает владелец репозитория."}
+            {canRun ? "Обзора пока нет." : card.repo.visibility === "public" ? "Обзора пока нет – его может сформировать любой вошедший пользователь." : "Обзора пока нет – его запускает владелец репозитория."}
           </Text>
         ) : hasOverview ? (
           <Collapsible resetKey={`${ai.scanId}`}>
@@ -616,8 +623,12 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
 
 // ---------- разбор модели в категории ----------
 
-/** Заметка специалиста для категории; роли совпадают с ключами категорий. */
+/**
+ * Заметка специалиста для категории; роли совпадают с ключами категорий. В пустом
+ * репозитории разборов нет: оценивать нечего, а прежний обзор писался по коду, которого уже нет.
+ */
 export function categoryAiNote(card: Card, key: string): AiNote | null {
+  if (card.markers.codeEmpty) return null;
   return card.ai?.specialists.find((n) => n.role === key) ?? null;
 }
 

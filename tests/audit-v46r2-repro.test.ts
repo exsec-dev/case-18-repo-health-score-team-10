@@ -171,7 +171,7 @@ describe("Р20: значения подметрик округлены, дока
     const page = srcOf("RepoPage.tsx");
     expect({
       // строка – русское название и единица из словаря подметрик, десятичная запятая
-      mdRounded: out.includes("| Плотность TODO/FIXME в коде | 0,87 на 1 тыс. строк | 80 | 35% |"),
+      mdRounded: out.includes("| Плотность TODO/FIXME в коде | 0,9 на 1 тыс. строк | 80 | 35% |"),
       mdRaw: out.includes("0.8723404255319149"),
       // страница берет значение из словаря подметрик (округление внутри него);
       // соседние подметрики нужны для прочерка доли старых TODO при нуле пометок
@@ -465,9 +465,9 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
     const star = src.slice(src.indexOf("function FavoriteStar"));
     const link = between(src, "Открыть на sourcecraft.dev", "</ActionTooltip>");
     expect({
-      // «Версия методики» (в свернутых «Реквизитах»), плашка та же, что в панели рейтинга
-      modelPlate: /name="Версия методики"[\s\S]{0,200}<Label theme="normal" size="xs">/.test(aside) && !aside.includes('name="Модель"'),
-      sameAsRating: /name="Версия методики"[\s\S]{0,200}<Label theme="normal" size="xs">/.test(codeOf("Rating.tsx")),
+      // «Версия методики» в «Сведениях» — та же плашка, что в панели рейтинга (`ModelVersion`)
+      modelPlate: /name="Версия методики">\s*<ModelVersion version=\{score\.modelVersion\} \/>/.test(aside) && !aside.includes('name="Модель"'),
+      sameAsRating: /name="Версия методики">\s*<ModelVersion version=\{meta\.modelVersion\} \/>/.test(codeOf("Rating.tsx")),
       starIcon14: /data=\{state === "on" \? StarFill : Star\} size=\{14\}/.test(star),
       linkIcon14: /data=\{ArrowUpRightFromSquare\} size=\{14\}/.test(link),
       // кнопки-обертки совпадают по габариту: обе `size="s"`

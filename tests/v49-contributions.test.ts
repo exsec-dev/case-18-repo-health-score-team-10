@@ -127,7 +127,7 @@ describe("К9.1: сумма показанных вкладов = показат
 describe("К9.11: русские числа в UI и отчете — одна копия форматтеров", () => {
   test("десятичная запятая и минус U+2212, а не точка и дефис", () => {
     expect([fmtSigned(1.25), fmtSigned(-12.14), fmtSigned(0), fmtSigned(-0.04)]).toEqual(["+1,3", "−12,1", "+0,0", "+0,0"]);
-    expect([fmtDelta(3.45), fmtNumber(0.8723), fmtNumber(-2.5), fmtNumber(47), fmtNumber(null)]).toEqual(["+3,5", "0,87", "−2,5", "47", "—"]);
+    expect([fmtDelta(3.45), fmtNumber(0.8723), fmtNumber(-2.5), fmtNumber(47), fmtNumber(null)]).toEqual(["+3,5", "0,9", "−2,5", "47", "—"]);
     expect([fmtDecimal(69.86, 1), fmtDecimal(0.5, 2, { trim: true }), fmtDecimal(-0.01, 1)]).toEqual(["69,9", "0,5", "0,0"]);
     expect(fmtBytes(1.5 * 1024 ** 3)).toBe("1,5 ГБ");
   });

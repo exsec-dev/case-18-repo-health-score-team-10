@@ -9,8 +9,9 @@ import { buildReportModel } from "../src/report/build";
 import { renderRepoReport } from "../src/report/markdown";
 import type { Block, Inline } from "../src/report/model";
 import { CATEGORY_TITLES } from "../src/report/categories";
+import { notInScoreNote } from "../src/report/sections";
 import { CATEGORY_COLOR, SOURCE_DATA_LABEL, cardView, categoryColorClass, lockedView, recommendationLabel, visibilityPill } from "../src/web/cardView";
-import { ACCESS_LOCK_SHORT, ACCESS_LOCK_TEXT, NOT_IN_SCORE, fullScorePath, pathText } from "../src/web/format";
+import { ACCESS_LOCK_SHORT, ACCESS_LOCK_TEXT, NOT_IN_SCORE, NOT_IN_SCORE_LIST, fullScorePath, pathText } from "../src/web/format";
 import { REPORT_FIXTURES, fixtureCard, type FixtureCard } from "./report-fixtures";
 
 const opened: FixtureCard[] = [];
@@ -45,9 +46,9 @@ describe("инвариант 1: карточка = отчет по данным 
 
       // полосы вклада – те же заголовки, сегменты, остаток и строка вместо полосы
       const bars = blocksOf(model.blocks, "contributions");
-      expect(view.contributions.map(({ title, segments, rest, note }) => ({ title, segments: segments.map(({ title, value, share }) => ({ title, value, share })), rest, note }))).toEqual(
+      expect(view.contributions.map(({ title, segments, rest, note }) => ({ title, segments: segments.map(({ title, value, share }) => ({ title, value, share })), rest: rest && { title: rest.title, value: rest.value, share: rest.share }, note }))).toEqual(
         // на карточке вклад без «+» – то же число, что подпись сегмента в документе
-        bars.map(({ title, segments, rest, note }) => ({ title, segments: segments.map((s) => ({ ...s, value: s.value.replace(/^\+/, "") })), rest, note })),
+        bars.map(({ title, segments, rest, note }) => ({ title, segments: segments.map((s) => ({ ...s, value: s.value.replace(/^\+/, "") })), rest: rest && { title: rest.title, value: rest.value, share: rest.share }, note })),
       );
       // цвет сегмента — по ключу категории (один на карточке и в панели рейтинга)
       for (const bar of view.contributions) for (const s of bar.segments) expect(s.colorClass).toBe(`rh-cat-color_${s.key}`);
@@ -89,12 +90,16 @@ describe("инвариант 1: карточка = отчет по данным 
 });
 
 describe("tri-state и доступ на карточке (инварианты 2, 3)", () => {
-  test("категория без данных — «—» и «Нет данных», причина с опорной фразой, не 0", () => {
+  test("категория без данных — «—» и «Нет данных», причина без опорной фразы (она одна над списком), не 0", () => {
     for (const name of REPORT_FIXTURES) {
-      for (const cat of cardView(card(name)).categories.filter((x) => x.score === null)) {
+      const c = card(name);
+      const empty = cardView(c).categories.filter((x) => x.score === null);
+      for (const cat of empty) {
         expect({ scoreText: cat.scoreText, chip: cat.chip }).toEqual({ scoreText: "—", chip: { theme: "unknown", text: "Нет данных" } });
-        expect(cat.why.endsWith(NOT_IN_SCORE)).toBe(true);
+        expect(cat.why).not.toContain(NOT_IN_SCORE);
       }
+      // UX 17.10: «не участвуют и не снижают» — один раз на список, если такие категории есть
+      expect(notInScoreNote(c)).toBe(empty.length > 0 ? NOT_IN_SCORE_LIST : null);
     }
   });
 

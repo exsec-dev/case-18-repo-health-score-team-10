@@ -2,6 +2,7 @@
 // заголовок блока правой панели, мета-строка, скелетон, пустое состояние.
 // Новых стилей не вводят: варианты Text, токены и классы layout.css.
 import {
+  ActionTooltip,
   Avatar,
   Flex,
   Icon,
@@ -223,6 +224,27 @@ export function VisibilityPill({ value, titleSuffix = "" }: { value: string | nu
  * расчет коротко («Как считается?», подсказки, «Что учитывается»). Как «How do
  * we count it?» у SourceCraft: короткое объяснение на месте, полное — в доке.
  */
+/**
+ * Версия методики плашкой: номер без суффикса сборки («4.5.0»), полный номер
+ * («4.5.0-hci») — в подсказке. Одна на карточке и в панели рейтинга.
+ */
+export function ModelVersion({ version }: { version: string }) {
+  const [base] = version.split("-");
+  const plate = (
+    <Label theme="normal" size="xs">
+      {base}
+    </Label>
+  );
+  if (base === version) return plate;
+  return (
+    <ActionTooltip title={`Полная версия – ${version}`}>
+      <span tabIndex={0} className="rh-chip-fit" aria-label={`Версия методики ${version}`}>
+        {plate}
+      </span>
+    </ActionTooltip>
+  );
+}
+
 export function MethodLink({ page, children = "Подробнее о методике" }: { page: "scores" | "no-data" | "recommendations" | "metrics"; children?: ReactNode }) {
   return (
     <Link {...linkProps(`/docs/method/${page}`)} className="rh-method-link">

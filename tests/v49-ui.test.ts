@@ -48,7 +48,7 @@ describe("К9.12: «Вклад категорий в оценку» на кар�
     expect(css).not.toMatch(/\.rh-cat-color_\w+ \{[^}]*(positive|warning|danger)/);
     expect(src("web/Rating.tsx")).toContain("categoryColorClass(c.key)");
     expect(src("web/Rating.tsx")).not.toMatch(/rh-contrib__seg_\$\{i/);
-    expect(src("web/RepoPage.tsx")).toContain("className={`rh-contrib__seg ${s.colorClass}`}");
+    expect(src("web/RepoPage.tsx")).toContain("className={`rh-contrib__seg ${p.colorClass}");
   });
 });
 
@@ -74,7 +74,8 @@ describe("К9.13: закрытая категория — одна фраза н
     const sections = src("report/sections.ts");
     expect(src("web/cardView.ts")).toContain("categoryWhy(card, key, ctx)");
     expect(src("report/build.ts")).toContain("categoryWhy(card, key, ctx)");
-    expect(sections).toContain("${NOT_IN_SCORE}");
+    // опорная фраза — одна на список (`notInScoreNote`), у строки только причина
+    expect(sections).toContain("return cats.some((c) => c.locked === undefined && c.score === null) ? NOT_IN_SCORE_LIST : null;");
     expect(sections).toContain("lockedCategoryText(cat.locked, card.viewer?.auth)");
     expect(page).not.toContain("Категория не снизила Score");
   });

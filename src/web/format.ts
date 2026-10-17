@@ -53,7 +53,7 @@ export function fmtNumber(value: number | null | undefined): string {
   if (value === null || value === undefined) return "—";
   // целые — с разрядами, как место в рейтинге («4 069»)
   if (Number.isInteger(value)) return fmtCount(value);
-  return fmtDecimal(value, 2, { trim: true });
+  return fmtDecimal(value, 1, { trim: true });
 }
 
 /**
@@ -458,7 +458,13 @@ export function cappedReason(total: number): string {
 export function contributionsNote(c: Contributions): string | null {
   if (c.kind === "empty") {
     // причина по виду: «нет ни одного файла» — только там, где файлов действительно нет
-    const why = c.reason && c.reason.startsWith("no source code — ") ? noDataReason("code", c.reason) : "В репозитории нет кода.";
+    // у категорий пустого репозитория — короткое «Нет коммитов», под показателем — полная фраза
+    const why =
+      c.reason === "no source code — repository empty"
+        ? REPOSITORY_EMPTY_TEXT
+        : c.reason && c.reason.startsWith("no source code — ")
+          ? noDataReason("code", c.reason)
+          : "В репозитории нет кода.";
     return `${why.replace(/ – оценивать нечего\.$/, ".")} Поэтому оценка – 0. Это не ошибка сервиса: оценивать нечего.`;
   }
   if (c.kind === "capped") return `Итог ограничен ${c.total} баллами: ${cappedReason(c.total)}. Без ограничения категории дали бы ${fmtDecimal(c.uncapped, 1)}.`;
@@ -477,8 +483,11 @@ export function fmtLoss(loss: number): string {
 
 // ---------- состояния категорий одними словами везде ----------
 
-/** Опорная фраза «категории нет в оценке» — одна на карточку, рейтинг, MD и PDF. */
+/** Опорная фраза «категории нет в оценке» — у одной категории (сравнение). */
 export const NOT_IN_SCORE = "Категория в оценке не участвует и ее не снижает.";
+
+/** Та же фраза один раз над списком категорий (карточка) и под таблицей (MD, PDF): у строк — только причина. */
+export const NOT_IN_SCORE_LIST = "Категории без данных в оценке не участвуют и ее не снижают.";
 
 /** Закрытая категория у зрителя без сессии (аноним, истекшая сессия). */
 export const LOCKED_FOR_ANON = "Видна участникам репозитория.";
@@ -504,7 +513,7 @@ export function noDataReason(key: string, reason: string | null | undefined): st
   if (r.startsWith("too little data — no finding density")) return "Находки AppSec есть, но размер кода неизвестен и доля закрытых не посчитана – категорию не оцениваем.";
   // «кода нет» — по виду: пустой репо, нет файлов, только не-код, пустые файлы
   if (r.startsWith("no source code — ")) return CODE_EMPTY_TEXT[r.slice("no source code — ".length)] ?? CODE_EMPTY_TEXT["only non-code files"]!;
-  if (r === "repository empty") return REPOSITORY_EMPTY_TEXT;
+  if (r === "repository empty") return NO_COMMITS_TEXT;
   if (r.startsWith("too little data — lines miscounted by an older collector")) return "Строки кода посчитаны прежней версией сборщика с ошибкой – категория оценится после повторного анализа репозитория.";
   if (r.startsWith("too little data — lines of code not read")) return "Строки кода прочитать не удалось: файлы больше лимита сервиса, не текстовые или чтение прервалось – категорию не оцениваем.";
   // причины прежних версий модели — для оценок, посчитанных ими
@@ -520,15 +529,18 @@ export function noDataReason(key: string, reason: string | null | undefined): st
   return "Данных нет.";
 }
 
-/** Репозиторий пуст — коммитов нет: это данные, а не сбой скачивания. */
+/** Репозиторий пуст — коммитов нет: это данные, а не сбой скачивания. Строка под показателем. */
 export const REPOSITORY_EMPTY_TEXT = "В репозитории нет ни одного коммита – оценивать нечего.";
+
+/** То же у категории: репозиторий уже назван строкой под показателем, здесь — коротко. */
+export const NO_COMMITS_TEXT = "Нет коммитов – оценивать нечего.";
 
 /** Репозиторий не прочитан (лимит, ошибка) — это незнание, а не факт о репозитории. */
 export const GIT_UNREAD_TEXT = "Репозиторий не удалось прочитать – произошла ошибка или он больше лимита сервиса.";
 
 /** Виды «кода нет» (`codeEmptyKind` расчета) — каждый своей фразой. */
 const CODE_EMPTY_TEXT: Record<string, string> = {
-  "repository empty": REPOSITORY_EMPTY_TEXT,
+  "repository empty": NO_COMMITS_TEXT,
   "no files": "В репозитории нет ни одного файла – оценивать нечего.",
   "only non-code files": "В репозитории нет файлов кода – только документы, лицензии или картинки.",
   "no lines of code": "Файлы кода в репозитории пустые – строк кода нет.",
@@ -933,7 +945,7 @@ export function gitLimitsText(l: GitLimitsMarker): string {
   return (
     `Репозиторий больше лимита сервиса: ${full}${degrade}. ` +
     // категории не называются: активность может быть оценена по данным SourceCraft
-    "Показатели, которые считаются по коду и истории репозитория, не собраны – они в оценке не участвуют и ее не снижают. Лимиты задает оператор сервиса."
+    "Показатели, которые считаются по коду и истории репозитория, не собраны – они в оценке не участвуют и ее не снижают."
   );
 }
 
@@ -1025,6 +1037,9 @@ export function aiRoleTitle(role: string): string {
 export const AI_SECTION_TITLE = "AI-обзор репозитория";
 /** Оговорка о модели и отказ проверки — одна копия для карточки и MD/PDF. */
 export const AI_DISCLAIMER = "Модель пересказывает оценку и на расчет не влияет.";
+
+/** Оговорка о модели на карточке — одна строка под заголовком AI-обзора. */
+export const AI_NOTE_SHORT = "Пересказ модели, на оценку не влияет.";
 export const AI_OVERVIEW_REJECTED = "Общий обзор не прошел проверку фактами – разбор по категориям ниже.";
 
 export const FRAUD_TITLE = "Признаки искусственной активности";

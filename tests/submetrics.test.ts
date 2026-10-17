@@ -60,14 +60,14 @@ describe("П4.2: полнота словаря", () => {
     expect(submetricTitle("activity", "fresh")).toBe("Свежесть последнего коммита человека");
     expect(submetricTitle("code", "brand_new")).toBe("brand_new");
     expect(fmt("code.brand_new", { a: 1 })).toBe('{"a":1}');
-    expect(fmt("code.brand_new", 0.8723404255319149)).toBe("0,87");
+    expect(fmt("code.brand_new", 0.8723404255319149)).toBe("0,9");
   });
 });
 
 describe("П4.2: форма значений — единица, масштаб, составные", () => {
   test("документация: README составным значением, отсутствие файла, флаги присутствия", () => {
-    expect(fmt("documentation.readme", { bytes: 8000, sections: 5, flags: { install: true, build: false, test: true } })).toBe("8000 байт, 5 разделов, есть: установка, тесты");
-    expect(fmt("documentation.readme", { bytes: 1, sections: 1, flags: {} })).toBe("1 байт, 1 раздел");
+    expect(fmt("documentation.readme", { bytes: 8000, sections: 5, flags: { install: true, build: false, test: true } })).toBe("7,8 КБ, 5 разделов, есть: установка, тесты");
+    expect(fmt("documentation.readme", { bytes: 1, sections: 1, flags: {} })).toBe("меньше 0,1 КБ, 1 раздел");
     expect(fmt("documentation.readme", { present: false })).toBe("нет файла");
     expect(fmt("documentation.license", true)).toBe("есть");
     expect(fmt("documentation.license", undefined)).toBe(NO_VALUE);
@@ -83,7 +83,7 @@ describe("П4.2: форма значений — единица, масштаб,
 
   test("Security: плотность на 10 тыс. строк, доля закрытых, утечки словом", () => {
     expect(fmt("security.density", 38)).toBe("38 на 10 тыс. строк");
-    expect(fmt("security.density", 3.456)).toBe("3,46 на 10 тыс. строк");
+    expect(fmt("security.density", 3.456)).toBe("3,5 на 10 тыс. строк");
     expect(fmt("security.resolved", 0.8)).toBe("80%");
     // без двойного отрицания — название «Критичные утечки секретов»
     expect([fmt("security.secrets", true), fmt("security.secrets", false)]).toEqual(["найдены", "не найдены"]);
@@ -125,7 +125,7 @@ describe("П4.2: форма значений — единица, масштаб,
   });
 
   test("код: плотность на 1 тыс. строк (доля округлена), доля старых, корень, счетчик", () => {
-    expect(fmt("code.density", 0.8723404255319149)).toBe("0,87 на 1 тыс. строк");
+    expect(fmt("code.density", 0.8723404255319149)).toBe("0,9 на 1 тыс. строк");
     expect(fmt("code.old_share", 0.5)).toBe("50%");
     expect([fmt("code.root", 1), fmt("code.root", 4), fmt("code.root", 11)]).toEqual(["1 элемент", "4 элемента", "11 элементов"]);
     expect(fmt("code.todo_total", 5)).toBe("5");
@@ -136,7 +136,7 @@ describe("П4.2: форма значений — единица, масштаб,
       expect({ key, empty: fmt(key, null), missing: fmt(key, undefined) }).toEqual({ key, empty: NO_VALUE, missing: NO_VALUE });
     }
     const long = fmt("documentation.readme", { bytes: 123456789, sections: 987654, flags: { install: true, build: true, test: true } });
-    expect(long).toBe("123456789 байт, 987654 раздела, есть: установка, сборка, тесты");
+    expect(long).toBe("120 563,3 КБ, 987 654 раздела, есть: установка, сборка, тесты");
     expect(long.includes("…")).toBe(false);
   });
 });
