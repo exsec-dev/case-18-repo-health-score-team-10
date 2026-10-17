@@ -684,7 +684,11 @@ function UnscoredTable({ items, meta, active, refreshing, phone = false }: { ite
                 </Flex>
                 <Text variant="body-short" color="complementary" className="rh-phone-row__note">
                   {`Полнота данных ${fmtCoverage(item.coverage)}`}
-                  {missing.length > 0 && ` · нет данных: ${missing.join(", ")}`}
+                  {missing.length > 0 && (
+                    <Text variant="body-short" color="secondary" className="rh-phone-row__missing">
+                      {`нет данных: ${missing.join(", ")}`}
+                    </Text>
+                  )}
                 </Text>
               </li>
             );

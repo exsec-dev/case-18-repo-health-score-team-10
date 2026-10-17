@@ -53,7 +53,7 @@ import {
   type QuotaCounter,
 } from "./format";
 import { announceJobStarted, announceJobsChanged, useAnalysisFinished, useSession } from "./session";
-import { SLOT_EMPTY, aiNotesCaption, badgeMarkdown, historyByTime, historyDomain, historyZoneNote, scoreHistoryView } from "./slots";
+import { SLOT_EMPTY, aiNotesCaption, badgeMarkdown, historyByTime, historyDomain, scoreHistoryView } from "./slots";
 import type { AiNoteHistoryItem, AiNotesResponse, HistoryPoint, HistoryResponse } from "../summary/history-contract";
 import { evolutionTooEarly } from "../summary/history-contract";
 
@@ -762,6 +762,20 @@ function useWidth(): [React.RefObject<HTMLDivElement | null>, number] {
   return [ref, width];
 }
 
+/**
+ * Цвет точки HealthCraft Index — ее зона; у пустого репо (0 — «оценивать нечего»,
+ * не зона риска) — нейтральный.
+ */
+function pointColor(p: HistoryPoint): string {
+  return p.codeEmpty ? ZONE_FILL.misc : ZONE_FILL[scoreTheme(p.healthcraftIndex)];
+}
+
+/** Образец линии в легенде — цвет последней оценки. */
+function historyLineColor(points: HistoryPoint[]): string {
+  const last = [...points].reverse().find((p) => p.healthcraftIndex !== null);
+  return last ? pointColor(last) : ZONE_FILL[scoreTheme(null)];
+}
+
 function HistoryChart({ points, fullOpen }: { points: HistoryPoint[]; fullOpen: boolean }) {
   const [wrapRef, CHART_W] = useWidth();
   const times = points.map((p) => (p.finishedAt === null ? NaN : Date.parse(p.finishedAt)));
@@ -794,9 +808,12 @@ function HistoryChart({ points, fullOpen }: { points: HistoryPoint[]; fullOpen: 
   const drawn = [...hci, ...(rhs ?? [])].filter((v): v is number => v !== null);
   const domain = historyDomain(drawn);
   const yOf = (v: number): number => PAD_T + (1 - (Math.max(domain.lo, Math.min(domain.hi, v)) - domain.lo) / (domain.hi - domain.lo)) * (CHART_H - PAD_T - PAD_B);
-  const lastIdx = hci.reduce<number>((acc, v, i) => (v !== null ? i : acc), -1);
-  // пустой репо (0 — «оценивать нечего», не зона риска) — линия нейтральная, как его точка
-  const lineColor = lastIdx >= 0 && points[lastIdx]!.codeEmpty ? ZONE_FILL.misc : ZONE_FILL[scoreTheme(lastIdx >= 0 ? hci[lastIdx] : null)];
+  // отрезок между соседними оценками — цвета зоны левой точки: 65 → 70 желтый, 70 → 80
+  // зеленый; переход зоны виден на самой линии. Пропуск данных разрывает линию
+  const segments = hci.flatMap((v, i) => {
+    const next = hci[i + 1];
+    return v !== null && next !== null && next !== undefined ? [{ i, from: v, to: next, color: pointColor(points[i]!) }] : [];
+  });
   // числа у всех точек — пока их немного; дальше только у последней
   const labelAll = hci.filter((v) => v !== null).length <= 6;
   // подписи оси: за короткий период (меньше 36 ч) — время, иначе дата; подпись,
@@ -835,15 +852,23 @@ function HistoryChart({ points, fullOpen }: { points: HistoryPoint[]; fullOpen: 
         </g>
       ))}
       {rhs !== null && <path d={path(rhs)} fill="none" stroke="var(--g-color-text-secondary)" strokeWidth={1.5} strokeDasharray="4 3" />}
-      <path d={path(hci)} fill="none" stroke={lineColor} strokeWidth={2} strokeLinejoin="round" />
+      {segments.map((s) => (
+        <line key={`s${s.i}`} x1={xOf(s.i)} y1={yOf(s.from)} x2={xOf(s.i + 1)} y2={yOf(s.to)} stroke={s.color} strokeWidth={2} strokeLinecap="round" />
+      ))}
       {points.map((p, i) =>
         p.healthcraftIndex === null ? null : (
-          <circle key={p.scanId} cx={xOf(i)} cy={yOf(p.healthcraftIndex)} r={3.5} fill={p.codeEmpty ? "var(--g-color-text-secondary)" : lineColor}>
+          <circle key={p.scanId} cx={xOf(i)} cy={yOf(p.healthcraftIndex)} r={3.5} fill={pointColor(p)}>
             <title>
-              {`${fmtDateTime(p.finishedAt)} · HealthCraft Index ${fmtScore(p.healthcraftIndex)}` +
-                (rhs !== null ? ` · Repo Health Score ${fmtScore(p.repoHealthScore)}` : "") +
-                (p.headSha ? ` · коммит ${p.headSha.slice(0, 7)}` : "") +
-                (p.codeEmpty ? " · пустой репозиторий" : "")}
+              {/* системная подсказка точки — строками, без разделителей */}
+              {[
+                fmtDateTime(p.finishedAt),
+                `HealthCraft Index ${fmtScore(p.healthcraftIndex)}`,
+                rhs !== null ? `Repo Health Score ${fmtScore(p.repoHealthScore)}` : null,
+                p.headSha ? `коммит ${p.headSha.slice(0, 7)}` : null,
+                p.codeEmpty ? "пустой репозиторий" : null,
+              ]
+                .filter((x) => x !== null)
+                .join("\n")}
             </title>
           </circle>
         ),
@@ -970,8 +995,6 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
   if (notes && !notes.locked) for (const n of notes.notes) if (n.role === "overview") overviewByScan.set(n.scanId, n);
   const points = historyByTime(data?.points ?? []);
   const view = scoreHistoryView(data);
-  const indexValues = points.map((p) => p.healthcraftIndex).filter((v): v is number => v !== null);
-  const zoneNote = historyZoneNote(indexValues, historyDomain([...indexValues, ...(data?.fullOpen ? points.map((p) => p.repoHealthScore).filter((v): v is number => v !== null) : [])]).thresholds);
   const fullOpen = data?.fullOpen === true;
   const trajectory = card.ai?.specialists.find((n) => n.role === "trajectory") ?? null;
   const caption = aiNotesCaption(
@@ -1019,19 +1042,22 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
           </Text>
         </Flex>
         <Flex direction="column" gap={5} className="rh-history">
-          <Flex direction="column" gap={2}>
+          {/* легенда справа — только нарисованные линии, без пояснений */}
+          <div className="rh-history__plot">
             <HistoryChart points={points} fullOpen={fullOpen} />
-            {/* ключ линии и оговорка о Repo Health Score — разными строками */}
-            <Flex direction="column" gap={1}>
-              <Text variant="caption-2" color="secondary">
-                <span className="rh-history__key rh-history__key_index" aria-hidden="true" /> {view.count}
-                {zoneNote && `. ${zoneNote}`}
-              </Text>
-              <Text variant="caption-2" color="secondary">
-                {fullOpen && <span className="rh-history__key rh-history__key_full" aria-hidden="true" />} {view.full}
-              </Text>
-            </Flex>
-          </Flex>
+            <ul className="rh-history__legend" aria-label="Линии графика">
+              <li>
+                <span className="rh-history__key rh-history__key_index" style={{ borderTopColor: historyLineColor(points) }} aria-hidden="true" />
+                <Text variant="body-1">HealthCraft Index</Text>
+              </li>
+              {view.fullLine && (
+                <li>
+                  <span className="rh-history__key rh-history__key_full" aria-hidden="true" />
+                  <Text variant="body-1">Repo Health Score</Text>
+                </li>
+              )}
+            </ul>
+          </div>
           {trajectory !== null && <AiNotePlate title="Разбор динамики" text={trajectory.text} staleFor={aiNotesStale(card.ai) ? card : null} />}
           {list}
         </Flex>

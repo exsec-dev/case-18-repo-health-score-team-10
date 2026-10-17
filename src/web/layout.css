@@ -260,9 +260,23 @@ body {
 
 /* короткая подсказка-заголовок (флаг накрутки) — одной строкой: при переносе
  * на 280px поле справа оставалось пустым, ширина не ужималась по тексту */
-.g-action-tooltip.rh-tip-oneline {
+.g-action-tooltip.rh-tip-oneline,
+.g-tooltip.rh-tip-oneline {
   max-width: none;
   white-space: nowrap;
+}
+
+/* заголовок подсказки полосы — строкой над значениями */
+.rh-tip-title {
+  display: block;
+  font-weight: var(--g-text-accent-font-weight);
+}
+
+/* число в подсказке тише текста — как счетчик у кнопок (`.rh-btn-count`) */
+.rh-tip-muted {
+  margin-inline-start: var(--g-spacing-2);
+  opacity: 0.6;
+  font-variant-numeric: tabular-nums;
 }
 
 .g-help-mark__popover {
@@ -577,6 +591,11 @@ body {
 
 .rh-phone-row__note {
   grid-row: 3;
+}
+
+/* «нет данных: …» — своей строкой под полнотой, тише нее */
+.rh-phone-row__missing {
+  display: block;
 }
 
 /* ---------- шапка карточки репозитория: аватар по центру блока «название + мета» ---------- */
@@ -1056,7 +1075,6 @@ button.rh-category:focus-visible {
     var(--g-color-base-generic-medium) 0 2px,
     transparent 2px 4px
   );
-  box-shadow: inset 0 0 0 1px var(--g-color-base-generic-medium);
 }
 
 /* наведение или фокус: выбранный сегмент ярким, остальные приглушены */
@@ -2365,6 +2383,49 @@ button.rh-category:focus-visible {
   border-top: 2px dashed var(--g-color-text-secondary);
 }
 
+/* график и легенда справа; на узкой колонке легенда уходит под график */
+/* легенда прижата к верху графика */
+.rh-history__plot {
+  display: flex;
+  gap: var(--g-spacing-4);
+  align-items: flex-start;
+}
+
+.rh-history__plot > .rh-history__chart-wrap {
+  flex: 1;
+  min-width: 0;
+}
+
+.rh-history__legend {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: var(--g-spacing-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rh-history__legend li {
+  display: flex;
+  gap: var(--g-spacing-2);
+  align-items: center;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .rh-history__plot {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .rh-history__legend {
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--g-spacing-1) var(--g-spacing-4);
+  }
+}
+
 .rh-history__list {
   margin: var(--g-spacing-2) 0 0;
   padding: 0;
@@ -2480,7 +2541,7 @@ button.rh-category:focus-visible {
 
 .rh-add-row__meta {
   display: flex;
-  gap: var(--g-spacing-1);
+  gap: var(--g-spacing-2);
   align-items: center;
 }
 

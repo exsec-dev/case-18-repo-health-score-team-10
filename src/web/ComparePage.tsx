@@ -464,8 +464,8 @@ function AddCompareDialog({
                 <Text variant="body-short" color="secondary">
                   <LanguageName name={r.language} color={r.languageColor} />
                 </Text>
-                <Text variant="body-short" color="secondary">
-                  {r.rank !== null ? `· место ${fmtCount(r.rank)}` : "· без оценки"}
+                <Text variant="body-short" color="hint">
+                  {r.rank !== null ? `место ${fmtCount(r.rank)}` : "без оценки"}
                 </Text>
               </span>
             ),

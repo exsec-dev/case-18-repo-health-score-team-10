@@ -83,10 +83,11 @@ describe("ревью В5.3: AI-обзор без прав на CI/CD и Безо
 describe("ревью В5.3: число и пустые состояния на данных", () => {
   const pt = (scanId: number, idx: number | null) => ({ scanId, finishedAt: `2026-09-2${scanId}T10:00:00Z`, healthcraftIndex: idx, indexCoverage: 1, repoHealthScore: null, modelVersion: "x", headSha: null, codeEmpty: false });
 
-  test("подпись истории считает анализы с числом индекса, а не все точки", () => {
+  // UX 17.10: подписи «по N анализам» под графиком больше нет — легенда называет только линии
+  test("график строится по анализам с числом индекса, а не по всем точкам", () => {
     const view = scoreHistoryView({ points: [pt(1, 70), pt(2, null), pt(3, 72), pt(4, null), pt(5, null)] as never, fullOpen: false });
     expect(view.chart).toBe(true);
-    expect(view.count).toBe("HealthCraft Index по 2 анализам");
+    expect(scoreHistoryView({ points: [pt(1, 70), pt(2, null)] as never, fullOpen: false }).chart).toBe(false);
   });
 
   test("избранное вне каталога: причина по результату проверки прав", () => {

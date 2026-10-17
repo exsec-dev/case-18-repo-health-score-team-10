@@ -62,6 +62,7 @@ import {
 import type { IconData } from "@gravity-ui/uikit";
 import {
   ActionTooltip,
+  Tooltip,
   Alert,
   ArrowToggle,
   Button,
@@ -85,7 +86,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactEleme
 import { COVERAGE_NULL_BELOW } from "../score/model";
 import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle } from "../report/submetrics";
 import { factWords } from "../report/factWords";
-import { FULL, INDEX, metricWeights, notInScoreNote, ownershipView, sourceWord, strengthsLine, submetricWeightText } from "../report/sections";
+import { FULL, INDEX, hintText, metricWeights, notInScoreNote, ownershipView, sourceWord, strengthsLine, submetricWeightText, type BarHint } from "../report/sections";
 import type { MetaResponse, RepoCard } from "./api";
 import { dataOf, mutateJson, useJson, useVisible } from "./api";
 import { LADDER_HELP, cardView, type CardView, type CategoryView, type PositionView, type RecommendationView } from "./cardView";
@@ -536,7 +537,7 @@ function CardActions({ org, repo, scored, badge, league, publicBaseUrl, report, 
     );
   }
   // главная кнопка остается снаружи: «Обновить анализ» у своего, «Сравнить» у чужого
-  // (на телефоне «Сравнить» — в меню: «В сравнении · 1 из 3» не помещается)
+  // (на телефоне «Сравнить» — в меню: «В сравнении 1 из 3» не помещается)
   const compareOutside = scored && !refresh && !phone;
   const items = [
     ...(scored && !compareOutside
@@ -603,7 +604,7 @@ function useCompareState(org: string, repo: string): { inSet: boolean; full: boo
 /**
  * «Сравнить» из карточки. Набор — последний набор сравнения вкладки (`lastCompareSet`,
  * как у пункта rail): есть место — добавляет, остается на странице и показывает
- * уведомление с переходом; репо уже в наборе — «В сравнении · N из 3» ведет на
+ * уведомление с переходом; репо уже в наборе — «В сравнении N из 3» ведет на
  * страницу сравнения; мест нет — кнопка выключена с причиной в подсказке.
  */
 function CompareButton({ org, repo, primary = false }: { org: string; repo: string; primary?: boolean }) {
@@ -625,7 +626,15 @@ function CompareButton({ org, repo, primary = false }: { org: string; repo: stri
   return (
     <Button view={primary && !inSet ? "action" : "normal"} size="m" onClick={inSet ? open : add} title={inSet ? "Открыть сравнение" : `Добавить в сравнение (${count + 1} из ${COMPARE_MAX})`}>
       <Icon data={inSet ? Check : ScalesBalanced} size={16} />
-      {inSet ? `В сравнении · ${count} из ${COMPARE_MAX}` : "Сравнить"}
+      {inSet ? (
+        <>
+          В сравнении
+          {/* счетчик тише подписи — как остаток лимита у кнопок AI */}
+          <span className="rh-btn-count">{`${count} из ${COMPARE_MAX}`}</span>
+        </>
+      ) : (
+        "Сравнить"
+      )}
     </Button>
   );
 }
@@ -1069,11 +1078,22 @@ function ContributionStrip({ bar }: { bar: CardView["contributions"][number] | n
     onFocus: () => setActive(key),
     onBlur: () => setActive((k) => (k === key ? null : k)),
   });
-  const withTip = (hint: string | null, node: ReactElement) =>
+  const withTip = (hint: BarHint | null, node: ReactElement) =>
     hint ? (
-      <ActionTooltip title={hint} className="rh-tip-oneline">
+      // Tooltip, а не ActionTooltip: у того заголовок — только строка, а число тише текста
+      <Tooltip
+        content={
+          <>
+            <span className="rh-tip-title">{hint.title}</span>
+            {hint.main}
+            {/* число тише текста — как счетчик у кнопок, без «·» */}
+            {hint.muted && <span className="rh-tip-muted">{hint.muted}</span>}
+          </>
+        }
+        className="rh-tip-oneline"
+      >
         {node}
-      </ActionTooltip>
+      </Tooltip>
     ) : (
       node
     );
@@ -1111,7 +1131,7 @@ function ContributionStrip({ bar }: { bar: CardView["contributions"][number] | n
                   <li
                     className={`rh-contrib__item${active === p.key ? " rh-contrib_on" : ""}`}
                     tabIndex={p.hint ? 0 : undefined}
-                    aria-label={p.hint ? `${p.title} – ${p.value}: ${p.hint}` : undefined}
+                    aria-label={p.hint ? `${p.title} – ${p.value}: ${hintText(p.hint)}` : undefined}
                     {...hover(p.key)}
                   >
                     <i className={`rh-contrib__dot ${p.colorClass}`} aria-hidden="true" />
@@ -1744,8 +1764,11 @@ function FactBlock({ factKey, fact, missing }: { factKey: string; fact: Evidence
   return (
     <Flex direction="column" gap={1}>
       <Flex gap={2} wrap alignItems="center">
+        <Text variant="body-short" color="complementary">
+          Источник: {sourceWord(fact.source)}
+        </Text>
         <Text variant="body-short" color="secondary">
-          Источник: {sourceWord(fact.source)} · собрано {fmtDateTime(fact.collectedAt)}
+          собрано {fmtDateTime(fact.collectedAt)}
         </Text>
         {fact.status !== "ok" && (
           <Label theme={fact.status === "bad" ? "warning" : "unknown"} size="xs">

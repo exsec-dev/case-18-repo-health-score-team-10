@@ -24,6 +24,7 @@ import {
   type Contributions,
   roundScore,
   scoreTheme,
+  sentence,
 } from "../web/format";
 import { CATEGORY_ORDER, CATEGORY_TITLES } from "./categories";
 import { displayOnly, plural, submetricNote, submetricShownValue, submetricTitle, subweightKey, type SubmetricContext } from "./submetrics";
@@ -95,31 +96,46 @@ export interface BarSegment {
   title: string;
   value: string;
   share: number;
-  hint: string;
+  hint: BarHint;
 }
+
+/**
+ * Подсказка сегмента: заголовок (что это), строка значений и число тише нее (без
+ * разделителя «·»). Читается без взгляда на легенду.
+ */
+export interface BarHint {
+  title: string;
+  main: string;
+  muted: string | null;
+}
+
+/** Строка подсказки без заголовка — для имени пункта легенды у скринридера (заголовок там уже есть). */
+export const hintText = (h: BarHint): string => (h.muted ? `${h.main}, ${h.muted}` : h.main);
 
 /** Полоса «Вклад категорий в <показатель>»: сегменты и остаток либо строка вместо полосы. */
 export interface ContributionBar {
   title: string;
   segments: BarSegment[];
-  rest: { title: string; value: string; share: number; hint: string | null } | null;
+  rest: { title: string; value: string; share: number; hint: BarHint | null } | null;
   note: string | null;
 }
 
 /**
- * Подсказка сегмента: потолок категории (вес среди категорий с данными × 100) и ее
- * доля в набранном — «из 23,1 возможного · 23% оценки». Балл и вклад не повторяются:
- * вклад стоит в легенде, балл — в «Категориях».
+ * Подсказка сегмента: категория, ее вклад из потолка (вес среди категорий с данными
+ * × 100) и тише — доля в набранном: «Документация» / «12,5 из 23,0» «15% оценки».
  */
-export function segmentHint(s: ContributionSegment, total: number): string {
-  const ceiling = `из ${fmtDecimal(s.share * 100, 1)} возможного`;
-  return total > 0 ? `${ceiling} · ${Math.round((s.tenths / (total * 10)) * 100)}% оценки` : ceiling;
+export function segmentHint(s: ContributionSegment, total: number): BarHint {
+  return {
+    title: s.title,
+    main: `${fmtDecimal(s.tenths / 10, 1)} из ${fmtDecimal(s.share * 100, 1)}`,
+    muted: total > 0 ? `${Math.round((s.tenths / (total * 10)) * 100)}% оценки` : null,
+  };
 }
 
-/** Подсказка «не набрано»: где недобрано больше всего — «больше всего – Задачи, 21,7». */
-export function restHint(losses: ContributionSegment[]): string | null {
+/** Подсказка «не набрано»: «Не набрано 16» / «больше всего – Документация» «10,5». */
+export function restHint(losses: ContributionSegment[], missing: number): BarHint | null {
   const top = losses[0];
-  return top ? `больше всего – ${top.title}, ${fmtDecimal(top.loss, 1)}` : null;
+  return top ? { title: `${sentence(CONTRIBUTIONS_REST)} ${missing}`, main: `больше всего – ${top.title}`, muted: fmtDecimal(top.loss, 1) } : null;
 }
 
 /**
@@ -137,7 +153,7 @@ export function contributionBar(c: Contributions | null, metricName?: string): C
   return {
     title,
     segments: c.segments.map((s) => ({ key: s.key, title: s.title, value: fmtContribution(s.tenths), share: s.tenths / 1000, hint: segmentHint(s, c.total) })),
-    rest: { title: CONTRIBUTIONS_REST, value: String(c.missing), share: c.missing / 100, hint: restHint(c.losses) },
+    rest: { title: CONTRIBUTIONS_REST, value: String(c.missing), share: c.missing / 100, hint: restHint(c.losses, c.missing) },
     note: null,
   };
 }

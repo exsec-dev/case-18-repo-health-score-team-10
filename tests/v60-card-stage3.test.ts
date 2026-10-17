@@ -3,7 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { contributionBar, restHint, segmentHint } from "../src/report/sections";
+import { contributionBar, hintText, restHint, segmentHint } from "../src/report/sections";
 import { fmtKb, formatSubmetricValue, submetricContext } from "../src/report/submetrics";
 import { recommendationCeiling } from "../src/web/cardView";
 import { categoryContributions } from "../src/web/format";
@@ -26,22 +26,24 @@ describe("полоса вклада: подсказка без повторов"
   ];
   const c = categoryContributions(cats, 84);
 
-  test("у категории — потолок и доля в оценке, без балла и вклада", () => {
+  test("у категории — название, вклад из потолка и доля в оценке, без балла категории", () => {
     if (c?.kind !== "bar") throw new Error("bar expected");
     const doc = c.segments.find((s) => s.key === "documentation")!;
-    expect(segmentHint(doc, c.total)).toBe("из 23,0 возможного · 15% оценки");
-    // ни балла (54), ни вклада (12,4) — они уже в «Категориях» и легенде
-    expect(segmentHint(doc, c.total)).not.toMatch(/54|12,4/);
+    // число тише текста, без разделителя «·»
+    // UX 17.10, вариант Б: заголовок, вклад из потолка и тише — доля
+    expect(segmentHint(doc, c.total)).toEqual({ title: "Документация", main: "12,5 из 23,0", muted: "15% оценки" });
+    // балла категории (54) нет — он в «Категориях»; разделителя «·» нет
+    expect(hintText(segmentHint(doc, c.total))).not.toMatch(/54|·/);
   });
 
   test("у «не набрано» — где недобрано больше всего; без недобора подсказки нет", () => {
     if (c?.kind !== "bar") throw new Error("bar expected");
-    expect(restHint(c.losses)).toBe("больше всего – Документация, 10,6");
-    expect(restHint([])).toBeNull();
+    expect(restHint(c.losses, c.missing)).toEqual({ title: "Не набрано 16", main: "больше всего – Документация", muted: "10,6" });
+    expect(restHint([], 0)).toBeNull();
     // подсказки доходят до полосы карточки
     const bar = contributionBar(c, "HealthCraft Index");
-    expect(bar.rest?.hint).toBe("больше всего – Документация, 10,6");
-    expect(bar.segments.every((s) => s.hint.startsWith("из "))).toBe(true);
+    expect(bar.rest?.hint).toEqual({ title: "Не набрано 16", main: "больше всего – Документация", muted: "10,6" });
+    expect(bar.segments.every((s) => s.hint.title === s.title && / из /.test(s.hint.main))).toBe(true);
   });
 
   test("нулевой вклад категории остается сегментом, пустой остаток — нет", () => {

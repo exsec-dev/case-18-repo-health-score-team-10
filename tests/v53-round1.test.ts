@@ -146,19 +146,17 @@ describe("К-2: слот истории оценки — по точкам и п
     expect(v.text).not.toContain("нечего");
   });
 
-  test("есть точки без прав на полный Score — график и строка, кому он виден", () => {
+  // UX 17.10: легенда справа от графика — только нарисованные линии, без пояснений
+  test("без прав на полный Score — в легенде только HealthCraft Index", () => {
     const v = scoreHistoryView({ points: [pt(1, 60), pt(2, 62), pt(3, 64)], fullOpen: false });
     expect(v.chart).toBe(true);
-    expect(v.count).toBe("HealthCraft Index по 3 анализам");
-    expect(v.full).toBe("Repo Health Score на графике виден, если вашему токену доступны и CI/CD, и Безопасность.");
+    expect(v.fullLine).toBe(false);
     expect(v.text).not.toContain("нечего");
   });
 
-  // UX 17.10: график — с трех точек
-  test("есть точки с правами — пунктир назван", () => {
-    const v = scoreHistoryView({ points: [pt(1, 60, 55), pt(2, 62, 58), pt(3, 64, 60)], fullOpen: true });
-    expect(v.chart).toBe(true);
-    expect(v.full).toContain("пунктир – Repo Health Score");
+  test("с правами и числами Score — его пунктир в легенде; права без чисел — нет", () => {
+    expect(scoreHistoryView({ points: [pt(1, 60, 55), pt(2, 62, 58), pt(3, 64, 60)], fullOpen: true }).fullLine).toBe(true);
+    expect(scoreHistoryView({ points: [pt(1, 60), pt(2, 62)], fullOpen: true }).fullLine).toBe(false);
   });
 
   test("три состояния — три разных текста; жаргона нет", () => {
@@ -168,17 +166,12 @@ describe("К-2: слот истории оценки — по точкам и п
       scoreHistoryView({ points: [pt(1, 60), pt(2, 62), pt(3, 64)], fullOpen: false }),
       scoreHistoryView({ points: [pt(1, 60, 55), pt(2, 62, 58), pt(3, 64, 60)], fullOpen: true }),
     ];
-    expect(new Set(states.map((s) => [s.text, s.full].join("|"))).size).toBe(3);
-    for (const s of states) expect([s.text, s.count, s.full].join(" ")).not.toMatch(/скан|tri-state|версии модели|ё/);
+    expect(new Set(states.map((s) => [s.text, s.fullLine].join("|"))).size).toBe(3);
+    for (const s of states) expect(s.text).not.toMatch(/скан|tri-state|версии модели|ё/);
   });
 
   test("индекс не рассчитан ни в одной точке, полного нет — графика нет", () => {
     expect(scoreHistoryView({ points: [pt(1, null), pt(2, null)], fullOpen: false }).chart).toBe(false);
   });
 
-  test("1 анализ, 21 анализ — «анализу»; 11 — «анализам»", () => {
-    const many = (n: number) => scoreHistoryView({ points: Array.from({ length: n }, (_, i) => pt(i, 50)), fullOpen: false }).count;
-    expect(many(21)).toBe("HealthCraft Index по 21 анализу");
-    expect(many(11)).toBe("HealthCraft Index по 11 анализам");
-  });
 });

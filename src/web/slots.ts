@@ -77,10 +77,8 @@ export const SLOT_EMPTY: Record<keyof typeof SLOT_CONTRACTS, { title: string; te
  */
 export interface ScoreHistoryView {
   chart: boolean;
-  /** подпись под графиком — сколько анализов на нем */
-  count: string | null;
-  /** что с Repo Health Score: пунктир (права есть) или кому он виден */
-  full: string | null;
+  /** на графике есть линия Repo Health Score — в легенде только нарисованное */
+  fullLine: boolean;
   text: string;
 }
 
@@ -93,19 +91,9 @@ export function scoreHistoryView(data: Pick<HistoryResponse, "points" | "fullOpe
   const fullOpen = data?.fullOpen === true;
   const drawn = (key: "healthcraftIndex" | "repoHealthScore"): number => points.filter((p) => p[key] !== null).length;
   const best = Math.max(drawn("healthcraftIndex"), fullOpen ? drawn("repoHealthScore") : 0);
-  if (best === 0) return { chart: false, count: null, full: null, text: SLOT_EMPTY.scoreHistory.text };
-  if (best === 1) return { chart: false, count: null, full: null, text: HISTORY_ONE };
-  // в подписи — анализы с числом индекса, то есть точки графика
-  const n = drawn("healthcraftIndex");
-  const word = n % 10 === 1 && n % 100 !== 11 ? "анализу" : "анализам";
-  return {
-    chart: true,
-    count: `HealthCraft Index по ${n} ${word}`,
-    full: fullOpen
-      ? "пунктир – Repo Health Score: 6 категорий, включая CI/CD и Безопасность"
-      : "Repo Health Score на графике виден, если вашему токену доступны и CI/CD, и Безопасность.",
-    text: HISTORY_FOOTER,
-  };
+  if (best === 0) return { chart: false, fullLine: false, text: SLOT_EMPTY.scoreHistory.text };
+  if (best === 1) return { chart: false, fullLine: false, text: HISTORY_ONE };
+  return { chart: true, fullLine: fullOpen && drawn("repoHealthScore") > 0, text: HISTORY_FOOTER };
 }
 
 /**
@@ -126,19 +114,6 @@ export function historyDomain(values: readonly number[]): { lo: number; hi: numb
   for (let v = lo; v <= hi; v += step) ticks.push(v);
   if (ticks[ticks.length - 1] !== hi) ticks.push(hi);
   return { lo, hi, ticks, thresholds: [40, 70].filter((g) => g > lo && g < hi) };
-}
-
-/**
- * Подпись под графиком, когда порогов на шкале нет: все точки в одной зоне — это
- * сказано словами, иначе цвет линии без порогов ничего не объяснял бы.
- */
-export function historyZoneNote(values: readonly number[], thresholds: readonly number[]): string | null {
-  if (values.length === 0 || thresholds.length > 0) return null;
-  const r = values.map((v) => Math.round(v));
-  if (r.every((v) => v >= 70)) return "Весь график в зоне «Здоров» (от 70).";
-  if (r.every((v) => v < 40)) return "Весь график в зоне риска (ниже 40).";
-  if (r.every((v) => v >= 40 && v < 70)) return "Весь график в зоне «Требует внимания» (40-69).";
-  return null;
 }
 
 /**
