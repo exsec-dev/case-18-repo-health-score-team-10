@@ -154,13 +154,13 @@ describe("П1: содержание PDF равно содержанию MD", () 
       for (const leak of ["cicd.runs", "cicd.configs", "appsec.findings", "grant-ci-runs", "pass_rate", "has_ci_yaml", "Настройте CI", "Подключите проверку AppSec"]) expect(text).not.toContain(leak);
       // закрытая категория анониму — «Недоступно» (не «Нет данных») и «Видна
       // участникам репозитория.», без чисел
-      expect(text).toMatch(/CI\/CD\s+—\s+Недоступно\s+Видна участникам репозитория\./);
+      expect(text).toMatch(/CI\/CD\s+–\s+Недоступно\s+Видна участникам репозитория\./);
     } finally {
       close();
     }
   });
 
-  test("разметка MD в PDF — стилем, а не символами: код, курсив, полужирный, ссылка", () => {
+  test("разметка MD в PDF – стилем, а не символами: код, курсив, полужирный, ссылка", () => {
     const { card, close } = fixtureCard("grant-ci");
     try {
       const doc = buildPdfDocument(buildReportModel(card));
@@ -223,7 +223,7 @@ describe("П1 (приёмка HQ): ячейки таблиц переносят�
     }
   });
 
-  test("в PDF нет JSON: значения фактов — таблицами «поле – значение» (К9.4)", () => {
+  test("в PDF нет JSON: значения фактов – таблицами «поле – значение» (К9.4)", () => {
     const { card, close } = fixtureCard("full");
     try {
       const text = pdfTreeText(buildPdfDocument(buildReportModel(card)).content).join(" ");
@@ -237,7 +237,7 @@ describe("П1 (приёмка HQ): ячейки таблиц переносят�
 describe("П1: шрифт Inter покрывает все символы генератора", () => {
   const fontCmaps = Object.values(FONT_FILES).map((f) => ({ file: f, cps: cmapCodepoints(join(FONT_DIR, f)) }));
 
-  test("каталог шрифта — четыре начертания Inter и лицензия OFL", () => {
+  test("каталог шрифта – четыре начертания Inter и лицензия OFL", () => {
     expect(readdirSync(FONT_DIR).sort()).toEqual(["Inter-Italic.ttf", "Inter-Regular.ttf", "Inter-SemiBold.ttf", "Inter-SemiBoldItalic.ttf", "LICENSE.txt"]);
     expect(readFileSync(join(FONT_DIR, "LICENSE.txt"), "utf8")).toContain("SIL Open Font License");
   });
@@ -255,8 +255,8 @@ describe("П1: шрифт Inter покрывает все символы ген�
     for (const name of REPORT_FIXTURES) for (const ch of readFileSync(goldenPath(name), "utf8")) if (ch !== "\n") chars.add(ch);
     // синтетическая строка обязательных символов: «→» и «≤» могут прийти во
     // внешних данных, «−» (U+2212) — минус русских чисел
-    for (const ch of "→≤…§«»–—−≈×· ДЮю") chars.add(ch);
-    for (const must of ["→", "≤", "…", "§", "«", "»", "–", "—", "−", "≈", "×", "·", "Д", "ю"]) expect(chars.has(must)).toBe(true);
+    for (const ch of "→≤…§«»––−≈×· ДЮю") chars.add(ch);
+    for (const must of ["→", "≤", "…", "§", "«", "»", "–", "–", "−", "≈", "×", "·", "Д", "ю"]) expect(chars.has(must)).toBe(true);
     const missing = fontCmaps.map(({ file, cps }) => ({ file, missing: [...chars].filter((ch) => !cps.has(ch.codePointAt(0)!)) }));
     expect(missing).toEqual(fontCmaps.map(({ file }) => ({ file, missing: [] })));
   });
@@ -264,7 +264,7 @@ describe("П1: шрифт Inter покрывает все символы ген�
 
 
 describe("П1: рендер, политики и сбойный путь", () => {
-  test("рендер фикстуры с «→» — настоящий PDF за доли секунды", async () => {
+  test("рендер фикстуры с «→» – настоящий PDF за доли секунды", async () => {
     const { card, close } = fixtureCard("grant-ci");
     try {
       const started = performance.now();
@@ -313,7 +313,7 @@ describe("П1: рендер, политики и сбойный путь", () =>
     }
   });
 
-  test("сбой генерации — честная 500 JSON без стека, а не пустой или битый файл", async () => {
+  test("сбой генерации – честная 500 JSON без стека, а не пустой или битый файл", async () => {
     const { card, close } = fixtureCard("full");
     const errors: unknown[] = [];
     const original = console.error;

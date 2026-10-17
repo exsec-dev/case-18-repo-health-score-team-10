@@ -14,7 +14,7 @@ const between = (text: string, from: string, to: string): string => {
   return start < 0 ? "" : text.slice(start, text.indexOf(to, start + from.length));
 };
 
-describe("К9.12: «Вклад категорий в оценку» на карточке — тот же расчет, что в отчете", () => {
+describe("К9.12: «Вклад категорий в оценку» на карточке – тот же расчет, что в отчете", () => {
   // Полосу собирает ОДНА функция `contributionBar` (sections.ts): ее зовут и
   // отчет (`contributionsBlock`), и view-модель карточки (`contributionBars`).
   // Равенство полей проверяет v49-ui-r1-card.
@@ -35,7 +35,7 @@ describe("К9.12: «Вклад категорий в оценку» на кар�
 
   // Цвет категории на карточке тот же, что в панели «Вклад категорий»
   // рейтинга, по КЛЮЧУ категории; PDF остается серым.
-  test("сегменты карточки и рейтинга — цвет по ключу категории, CI/CD и Безопасность — два новых тона", () => {
+  test("сегменты карточки и рейтинга – цвет по ключу категории, CI/CD и Безопасность – два новых тона", () => {
     const css = src("web/layout.css");
     expect(css).not.toMatch(/\.rh-contrib-band__seg/);
     expect(css).not.toMatch(/\.rh-contrib__seg_\d/);
@@ -52,7 +52,7 @@ describe("К9.12: «Вклад категорий в оценку» на кар�
   });
 });
 
-describe("К9.13: закрытая категория — одна фраза на карточке и в отчете", () => {
+describe("К9.13: закрытая категория – одна фраза на карточке и в отчете", () => {
   test("фраза по причине доступа зрителя", () => {
     expect(lockedCategoryText("no-pat", "no-session")).toBe(LOCKED_FOR_ANON);
     expect(lockedCategoryText("no-pat", undefined)).toBe("Видна участникам репозитория.");
@@ -61,7 +61,7 @@ describe("К9.13: закрытая категория — одна фраза н
     expect(lockedCategoryText("no-pat", "no-pat")).toBe(ACCESS_LOCK_TEXT["no-pat"]);
   });
 
-  test("пустая категория — причина и опорная фраза «не участвует и ее не снижает»", () => {
+  test("пустая категория – причина и опорная фраза «не участвует и ее не снижает»", () => {
     expect(emptyCategoryText("documentation", "git channel no-data")).toBe(`${noDataReason("documentation", "git channel no-data")} ${NOT_IN_SCORE}`);
     expect(noDataReason("code", "что-то новое по-английски")).toBe("Данных нет.");
   });
@@ -81,8 +81,8 @@ describe("К9.13: закрытая категория — одна фраза н
   });
 });
 
-describe("К9.14: слово шкалы у категории — плашкой", () => {
-  test("в строке категории — Label темы scoreLabelTheme; слова в подсказке числа нет", () => {
+describe("К9.14: слово шкалы у категории – плашкой", () => {
+  test("в строке категории – Label темы scoreLabelTheme; слова в подсказке числа нет", () => {
     const row = between(src("web/RepoPage.tsx"), "function CategoryRow", "function Markers");
     // плашку собирает view-модель (`chip`), тема – scoreLabelTheme, как у отчета
     expect(row).toMatch(/<Label theme=\{c\.chip\.theme\} size="xs" className="rh-category__word">/);
@@ -92,19 +92,19 @@ describe("К9.14: слово шкалы у категории — плашкой
 });
 
 describe("К9.9: служебные заметки расчета не видны читателю", () => {
-  test("заметки compute.ts — словами читателя; неизвестная — не печатается", () => {
+  test("заметки compute.ts – словами читателя; неизвестная – не печатается", () => {
     // UX 17.10: замечание без слова «трекер»
     expect(submetricNote("issues", "tracker_unused", "tracker not maintained — category minimum (Q14)")).toEqual({ remark: "Задач нет – категория получает минимальный балл." });
     expect(submetricShownValue("cicd", "pass_rate", { score: null, note: "no declared CI" }, { at: null })).toBe("CI не настроен");
     expect(submetricShownValue("cicd", "duration", { score: null, note: "runs no-data" }, { at: null })).toBe("запуски недоступны");
-    expect(submetricShownValue("code", "old_share", { score: null, value: null, note: "todo sample incomplete (cat-file truncated) — old_share needs the full sample" }, { at: null })).toBe(
+    expect(submetricShownValue("code", "old_share", { score: null, value: null, note: "todo sample incomplete (cat-file truncated) – old_share needs the full sample" }, { at: null })).toBe(
       "не посчитано: прочитаны не все файлы",
     );
     expect(submetricNote("activity", "freq", "some future note")).toBeNull();
-    expect(submetricShownValue("activity", "freq", { score: null, note: "some future note" }, { at: null })).toBe("—");
+    expect(submetricShownValue("activity", "freq", { score: null, note: "some future note" }, { at: null })).toBe("–");
   });
 
-  test("строка подметрики на карточке не печатает `sub.note`; иконка — на уровне первой строки названия", () => {
+  test("строка подметрики на карточке не печатает `sub.note`; иконка – на уровне первой строки названия", () => {
     const page = src("web/RepoPage.tsx");
     expect(page).not.toContain("(${sub.note})");
     const icon = between(src("web/layout.css"), ".rh-subrow__icon {", "}");

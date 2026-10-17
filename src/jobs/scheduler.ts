@@ -74,7 +74,7 @@ export function findActiveUserJob(db: Database, userId: number, repoId: number):
  * (FK в SQLite не включены); ночной обход такую строку не видит.
  */
 export function recordRefusedUserJob(db: Database, userId: number, now = new Date(), slug?: string): number {
-  // строки repos нет, поэтому слаг — в error, иначе панель заданий показала бы «—»
+  // строки repos нет, поэтому слаг — в error, иначе панель заданий показала бы «–»
   const error = slug === undefined ? null : JSON.stringify({ slug });
   const r = db
     .query("INSERT INTO jobs (repo_id, status, user_id, trigger_kind, created_at, error) VALUES (0, 'refused', ?, 'user', ?, ?)")

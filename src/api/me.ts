@@ -484,7 +484,9 @@ export async function requestUserScan(
   if (res.status !== 200) {
     return { status: 503, body: { error: { code: "check_failed", message: `не удалось проверить доступ к ${org}/${repo}: SourceCraft сейчас не отвечает` } } };
   }
-  const body = res.json as { visibility?: unknown; name?: unknown } | null;
+  const body = res.json as { visibility?: unknown; name?: unknown; is_empty?: unknown } | null;
+  // ни одного коммита — анализировать нечего: отказ без заявки и без списания лимита
+  if (body?.is_empty === true) return repoEmptyRefusal(org, repo);
   const visibility = typeof body?.visibility === "string" ? body.visibility : null;
   // параллельные запросы проходят дешевую проверку до await все сразу, поэтому
   // здесь проверки и вставка неделимы: одна синхронная транзакция
@@ -572,6 +574,11 @@ export function repoCooldownRefusal(db: Database, repoId: number, slug: string, 
     },
     retryAfterSec: Math.max(1, Math.ceil((untilMs - now.getTime()) / 1000)),
   };
+}
+
+/** Отказ запуска для репозитория без единого коммита: оценивать нечего, лимит не списывается. */
+export function repoEmptyRefusal(org: string, repo: string): UserScanResponse {
+  return { status: 409, body: { error: { code: "repo_empty", message: `в ${org}/${repo} нет ни одного коммита – анализировать нечего` } } };
 }
 
 function tooManyActive(queue: QueueConfig): UserScanResponse {
@@ -715,7 +722,7 @@ export function jobScanOutcome(
 
 /** Активные (queued/running) и последние завершенные заявки пользователя.
  *  Отказанные тоже видны: у них нет строки repos, слаг берется из error-payload,
- *  а если нет и его – «—». */
+ *  а если нет и его – «–». */
 export function myJobs(db: import("bun:sqlite").Database, userId: number, doneLimit = 8): { active: MyJob[]; recent: MyJob[] } {
   const slugOf = (row: Record<string, unknown>): string => {
     if (typeof row.org_slug === "string") return `${row.org_slug}/${row.repo_slug}`;
@@ -727,7 +734,7 @@ export function myJobs(db: import("bun:sqlite").Database, userId: number, doneLi
         /* не JSON – прочерк */
       }
     }
-    return "—";
+    return "–";
   };
   const toJob = (row: Record<string, unknown>): MyJob => {
     const status = String(row.status);
@@ -842,6 +849,8 @@ export type FavoriteEnqueueCode =
   | "not_own"
   /** не свой, но из организаций зрителя: анализ сам не ставится, запуск — кнопкой */
   | "member"
+  /** в репозитории нет ни одного коммита */
+  | "repo_empty"
   | "cooldown"
   /** фоновая перепроверка анализ не ставит */
   | "background"

@@ -394,12 +394,12 @@ export function sourceWord(source: string): string {
  * Вес показателя внутри категории — колонка «Вес» разбора PDF и таблицы
  * подметрик карточки, одна копия. Балл категории один
  * для обоих показателей, поэтому и вес подметрики один. Справочные
- * (`displayOnly`) и неизвестные — «—».
+ * (`displayOnly`) и неизвестные — «–».
  */
 export function submetricWeightText(key: CategoryKey, sub: string): string {
-  if (displayOnly(key, sub)) return "—";
+  if (displayOnly(key, sub)) return "–";
   const weight = (SUBWEIGHTS[key] as Record<string, number>)[subweightKey(sub)];
-  return weight === undefined ? "—" : `${Math.round(weight * 100)}%`;
+  return weight === undefined ? "–" : `${Math.round(weight * 100)}%`;
 }
 
 /**

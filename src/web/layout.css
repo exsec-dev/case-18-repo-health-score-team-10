@@ -936,6 +936,24 @@ button.rh-category:focus-visible {
   margin-inline: 0 var(--g-spacing-8);
 }
 
+/* Иллюстрация — только когда помещается справа от текста. Мерило — ширина самой
+ * заглушки, а не экрана: на планшете узкой бывает колонка карточки рядом с
+ * панелью. Уже 520px текст рядом с картинкой ломался бы в столбик слов — тогда
+ * иллюстрации нет вовсе, а не переезд над текстом. */
+.rh-empty.g-placeholder-container {
+  container: rh-empty / inline-size;
+}
+
+@container rh-empty (max-width: 520px) {
+  .rh-empty .g-placeholder-container__image {
+    display: none;
+  }
+
+  .rh-empty.g-placeholder-container_direction_row.g-placeholder-container_size_m .g-placeholder-container__content {
+    margin-inline: 0;
+  }
+}
+
 /* Кликабельный заголовок колонки. Кнопка не должна выглядеть кнопкой: у
  * платформы это обычный заголовок, у которого появляется стрелка. Отсюда
  * flat-вид, отрицательные поля (чтобы текст стоял ровно там же, где стоял
@@ -1340,7 +1358,7 @@ button.rh-category:focus-visible {
   }
 
   /* телефон: раскрытие · название с основанием · балл; полоса уходит,
-   * плашка уровня — строкой ниже (tri-state — «—» и «Нет данных») */
+   * плашка уровня — строкой ниже (tri-state — «–» и «Нет данных») */
   .rh-category {
     grid-template-columns: 16px minmax(0, 1fr) 28px;
   }
@@ -1423,23 +1441,9 @@ button.rh-category:focus-visible {
     row-gap: var(--g-spacing-2);
   }
 
-  /* пустые состояния — столбиком: иллюстрация меньше и над текстом */
+  /* пустые состояния на телефоне — поля меньше; иллюстрацию убирает правило по ширине заглушки */
   .rh-empty.g-placeholder-container {
     padding: var(--g-spacing-5);
-  }
-
-  .rh-empty.g-placeholder-container .g-placeholder-container__body {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .rh-empty.g-placeholder-container_direction_row.g-placeholder-container_size_m .g-placeholder-container__content {
-    margin-inline: 0;
-  }
-
-  .rh-empty .g-placeholder-container__image svg {
-    width: 80px;
-    height: 80px;
   }
 
   /* реакции и ответвления — не разъезжаются по строкам */
@@ -4163,5 +4167,20 @@ button.rh-category:focus-visible {
 
 /* значение сортировки — тише подписи «Сортировка:», как значения фильтров */
 .rh-select-value_muted {
+  color: var(--g-color-text-secondary);
+}
+
+/* действие-ссылка внутри текста («Обновить список»): цвет и наведение — от
+   g-link, у кнопки сброшены рамка, фон и поля; шрифт — как у окружающего текста */
+.rh-link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  cursor: pointer;
+}
+
+.rh-link-button:disabled {
+  cursor: default;
   color: var(--g-color-text-secondary);
 }

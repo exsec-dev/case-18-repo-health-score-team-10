@@ -41,6 +41,7 @@ import {
   Magnifier,
   Moon,
   Persons,
+  Play,
   Plus,
   ScalesBalanced,
   SealCheck,
@@ -107,6 +108,7 @@ const UI_ICON_DATA: Record<UiIcon, IconData> = {
   shield: Shield,
   "shield-check": ShieldCheck,
   "shield-warning": ShieldExclamation,
+  play: Play,
 };
 
 export function docHref(slug: string, anchor?: string | null): string {

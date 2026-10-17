@@ -118,6 +118,7 @@ import {
   sentence,
   slugOf,
   notOwnReason,
+  EMPTY_REPO_TEXT,
   rankText,
   CI_CAP_TEXT,
   CI_CAP_TITLE,
@@ -130,6 +131,7 @@ import { LoginButton, Page, type Crumb } from "./Shell";
 import { Trophy } from "./icons";
 import { useMediaQuery } from "./prefs";
 import { repoKey, useTokenRepos } from "./tokenRepos";
+import { repoWebUrl } from "../api/slug-input";
 import { AiOverviewSection, BadgeButton, BadgeDialog, CategoryAiMark, CategoryAiNote, FraudCheckFooter, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, MethodLink, ModelVersion, RepoAvatar, RepoSlug, ScoreBar, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
 
@@ -167,11 +169,14 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
   // Анализ по кнопке — своему репозиторию (`viewer.own`, из доступа, который карточка
   // и так резолвит) и публичному репозиторию организаций зрителя (он есть в списке по
   // токену); кнопка есть и не в избранном. Чужому, анониму и при неизвестном доступе
-  // кнопки нет вовсе; окончательно решает сервер при запуске
+  // кнопки нет вовсе; пустому (ни одного коммита по живому списку) — тоже: оценивать
+  // нечего. Окончательно решает сервер при запуске
   const withPat = data?.viewer?.auth === "pat";
   const ownRepo = data?.viewer?.own === true;
-  const tokenRepos = useTokenRepos(withPat && !ownRepo && data?.repo.visibility === "public");
-  const canRefresh = withPat && (ownRepo || tokenRepos?.has(repoKey(org, repo)) === true);
+  const { repos: tokenRepos, recheck: recheckTokenRepos, checking: recheckingTokenRepos } = useTokenRepos(withPat);
+  const listed = tokenRepos?.get(repoKey(org, repo)) ?? null;
+  const emptyRepo = listed?.isEmpty === true;
+  const canRefresh = withPat && !emptyRepo && (ownRepo || listed !== null);
   // сервер не видит сессии, а вкладка считает зрителя вошедшим (сессия истекла или
   // вышли в соседней вкладке) — перечитываем /api/me
   const sessionGone = loggedIn && data?.viewer?.auth === "no-session";
@@ -274,7 +279,9 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
       league={card.score?.rankBadge != null}
       publicBaseUrl={meta?.publicBaseUrl ?? window.location.origin}
       report={card.score !== null ? { mdHref: reportHref, pdfHref: `${cardUrl}/report.pdf`, pdfName: reportFileName(org, repo, "pdf") } : null}
-      refresh={refreshButton}
+      // без оценки запуск — главное действие заглушки под шапкой; вторая кнопка в шапке
+      // его бы дублировала
+      refresh={card.score !== null && refreshButton}
     />
   );
 
@@ -311,12 +318,15 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
           // (`noScoreText`), действие — по возможностям зрителя
           <EmptyState
             image={EmptyIllustration}
-            title={noScoreText(card.scan).title}
-            description={noScoreText(card.scan).description}
+            title={emptyRepo ? "Анализировать пока нечего" : noScoreText(card.scan).title}
+            description={emptyRepo ? EMPTY_REPO_TEXT : noScoreText(card.scan).description}
             actions={
               canRefresh
-                ? [{ text: card.scan ? "Повторить анализ" : "Запустить анализ", view: "action", size: "l", onClick: start.start }]
-                : card.viewer?.auth === "no-pat"
+                ? [{ text: card.scan ? "Повторить анализ" : "Запустить анализ", view: "action", size: "l", onClick: start.start, loading: start.sending }]
+                : emptyRepo
+                  ? // первые коммиты могли прийти после того, как список прочитан (он живет 10 минут)
+                    [{ text: "Проверить снова", view: "normal", size: "l", onClick: recheckTokenRepos, loading: recheckingTokenRepos }]
+                  : card.viewer?.auth === "no-pat"
                   ? [
                       // без токена неизвестно, из ваших ли организаций репозиторий, поэтому
                       // анализ не обещаем: токен открывает CI/CD, Безопасность и анализ по кнопке
@@ -386,7 +396,7 @@ function FavoriteNotInCatalog({ org, repo, fallback, onRetry, onSection }: { org
   // опись по токену (кэш сервера): репозиторий из «Моих репозиториев», который еще не
   // анализировали, тоже получает «Оценки пока нет» с запуском, а не «не найден».
   // Без токена ответ — 409, это просто «не из описи»
-  const tokenRepos = useTokenRepos(true);
+  const { repos: tokenRepos, recheck, checking } = useTokenRepos(true);
   const key = repoKey(org, repo);
   const data = dataOf(favs.state);
   const fav = data?.entries.find((e) => repoKey(e.org, e.repo) === key) ?? null;
@@ -404,23 +414,38 @@ function FavoriteNotInCatalog({ org, repo, fallback, onRetry, onSection }: { org
       </Page>
     );
   }
-  if (fav !== null) return <FavoriteNotInCatalogState org={org} repo={repo} own={fav.access?.own === true || fromToken !== null} access={fav.access} crumbs={crumbs} onRetry={onRetry} />;
+  // видимость — из живого списка по токену, иначе из сохраненной проверки прав избранного
+  const visibility = knownVisibility(fromToken?.visibility ?? fav?.access?.visibility);
+  // пустой (ни одного коммита) — по живому списку: анализировать нечего; перепроверка —
+  // перечитать список, если первые коммиты пришли после него
+  const empty = fromToken?.isEmpty === true ? { recheck, checking } : null;
+  if (fav !== null) {
+    return (
+      <FavoriteNotInCatalogState org={org} repo={repo} visibility={visibility} empty={empty} own={fav.access?.own === true || fromToken !== null} access={fav.access} crumbs={crumbs} onRetry={onRetry} />
+    );
+  }
   if (fromToken !== null) {
     // публичный из описи оценит и анализ по расписанию — запуск по кнопке только раньше
-    const closed = fromToken.visibility === "private" || fromToken.visibility === "internal";
-    return <FavoriteNotInCatalogState org={org} repo={repo} own access={null} crumbs={crumbs} onRetry={onRetry} fromToken scheduled={!closed} />;
+    const closed = visibility === "private" || visibility === "internal";
+    return <FavoriteNotInCatalogState org={org} repo={repo} visibility={visibility} empty={empty} own access={null} crumbs={crumbs} onRetry={onRetry} fromToken scheduled={!closed} />;
   }
   return <NotInCatalog org={org} repo={repo} crumbs={[{ text: "Рейтинг", href: lastRatingHref() }, { text: slugOf(org, repo) }]} />;
 }
 
+const knownVisibility = (v: string | null | undefined): "public" | "internal" | "private" | "unknown" =>
+  v === "public" || v === "internal" || v === "private" ? v : "unknown";
+
 /**
- * Состояние «в избранном, но не в каталоге»: своему — «Запустить анализ» прямо здесь
- * (сервер перепроверяет права живьем), итог задания перечитывает страницу; пока идет
- * анализ — без кнопки; чужому — объяснение.
+ * Состояние «в избранном или в описи, но не в каталоге»: шапка репозитория и под ней
+ * своему — «Запустить анализ» прямо здесь (сервер перепроверяет права живьем), итог
+ * задания перечитывает страницу; пока идет анализ — без кнопки; пустому — без
+ * запуска, анализировать нечего; чужому — объяснение.
  */
 function FavoriteNotInCatalogState({
   org,
   repo,
+  visibility,
+  empty,
   own,
   access,
   crumbs,
@@ -430,6 +455,9 @@ function FavoriteNotInCatalogState({
 }: {
   org: string;
   repo: string;
+  visibility: "public" | "internal" | "private" | "unknown";
+  /** в репозитории нет ни одного коммита (живой список по токену): перепроверить список; null — не пустой */
+  empty: { recheck: () => void; checking: boolean } | null;
   own: boolean;
   access: { visibility: string; own: boolean } | null | undefined;
   crumbs: Crumb[];
@@ -446,9 +474,12 @@ function FavoriteNotInCatalogState({
   useAnalysisFinished((jobs) => {
     if (jobs.some((j) => j.slug === slug)) onRetry();
   });
+  // каталога у репозитория нет — шапка без меты: только то, что известно без анализа
+  const head = <RepoHead org={org} repo={repo} logoUrl={null} visibility={visibility} webUrl={repoWebUrl(org, repo)} starDoneKey={null} starLoggedIn />;
   if (live !== null) {
     return (
       <Page crumbs={crumbs}>
+        {head}
         <EmptyState
           image={QueueIllustration}
           title={live.phase === "queued" ? "Анализ запланирован" : "Идет анализ"}
@@ -457,8 +488,22 @@ function FavoriteNotInCatalogState({
       </Page>
     );
   }
+  if (empty && own) {
+    return (
+      <Page crumbs={crumbs}>
+        {head}
+        <EmptyState
+          image={EmptyIllustration}
+          title="Анализировать пока нечего"
+          description={EMPTY_REPO_TEXT}
+          actions={[{ text: "Проверить снова", view: "normal", size: "l", onClick: empty.recheck, loading: empty.checking }]}
+        />
+      </Page>
+    );
+  }
   return (
     <Page crumbs={crumbs}>
+      {head}
       <EmptyState
         image={EmptyIllustration}
         title="Оценки пока нет"
@@ -794,58 +839,101 @@ function useStartAnalysis(org: string, repo: string): { sending: boolean; start:
 function Header({ card, view, starDoneKey, starLoggedIn }: { card: Card; view: CardView; starDoneKey: string | null; starLoggedIn: boolean | null }) {
   const { repo: r } = card;
   return (
+    <RepoHead
+      org={r.org}
+      repo={r.repo}
+      logoUrl={r.logoUrl}
+      visibility={r.visibility}
+      shownVisibility={view.visibility}
+      webUrl={r.webUrl}
+      starDoneKey={starDoneKey}
+      starLoggedIn={starLoggedIn}
+      title={r.title}
+      meta={
+        // Две даты различены словом: «активность» — по каталогу SourceCraft, «анализ» —
+        // момент анализа, та же дата, что в шапке отчета (`analysisDate`).
+        <Meta>
+          <MetaItem title="Язык">
+            <LanguageName name={r.language} color={r.languageColor} />
+          </MetaItem>
+          <MetaItem icon={Heart} title="Реакции">
+            {fmtNumber(r.likes)}
+          </MetaItem>
+          <MetaItem icon={CodeFork} title="Ответвления">
+            {fmtNumber(r.forks)}
+          </MetaItem>
+          <MetaItem icon={Clock} title="Последняя активность в репозитории">
+            активность {fmtDate(r.lastActivityAt)}
+          </MetaItem>
+          {view.analysisAt && (
+            <MetaItem icon={ArrowsRotateRight} title="Момент анализа – та же дата, что в шапке отчета">
+              анализ {fmtDateTime(view.analysisAt)}
+            </MetaItem>
+          )}
+        </Meta>
+      }
+    />
+  );
+}
+
+/**
+ * Шапка репозитория: аватар, имя, видимость и действия (скопировать, избранное,
+ * открыть на SourceCraft). Одна для карточки и для репозитория, которого еще нет в
+ * каталоге (закрытый до первого анализа): у второго нет меты каталога — только
+ * то, что известно без анализа.
+ */
+function RepoHead({
+  org,
+  repo,
+  logoUrl,
+  visibility,
+  shownVisibility = visibility,
+  webUrl,
+  starDoneKey,
+  starLoggedIn,
+  title = null,
+  meta = null,
+}: {
+  org: string;
+  repo: string;
+  logoUrl: string | null;
+  /** видимость для звезды (текст тоста) */
+  visibility: "public" | "internal" | "private" | "unknown";
+  /** видимость плашки у имени; «неизвестно» плашки не дает */
+  shownVisibility?: string | null;
+  webUrl: string;
+  starDoneKey: string | null;
+  starLoggedIn: boolean | null;
+  /** описание репозитория, если оно не повторяет имя */
+  title?: string | null;
+  meta?: ReactNode;
+}) {
+  return (
     <div className="rh-card-head">
       {/* аватар l (42px) — по центру блока «название + мета» (layout.css) */}
       <div className="rh-repo-head">
-        <RepoAvatar repo={r.repo} logoUrl={r.logoUrl} size="l" />
+        <RepoAvatar repo={repo} logoUrl={logoUrl} size="l" />
         <Flex direction="column" justifyContent="space-between" style={{ minWidth: 0 }}>
           <Flex gap={2} alignItems="center" className="rh-card-head__title">
-            <RepoSlug org={r.org} repo={r.repo} variant="header-2" />
-            {/* видимость в SourceCraft — той же плашкой, что в избранном; «неизвестно» плашки не дает */}
-            <VisibilityPill value={view.visibility} />
+            <RepoSlug org={org} repo={repo} variant="header-2" />
+            {/* видимость в SourceCraft — той же плашкой, что в избранном */}
+            <VisibilityPill value={shownVisibility} />
             <Flex gap={1} alignItems="center">
-              <ClipboardButton text={slugOf(r.org, r.repo)} size="s" view="flat-secondary" tooltipInitialText="Скопировать org/repo" tooltipSuccessText="Скопировано" />
-              <FavoriteStar org={r.org} repo={r.repo} visibility={r.visibility} doneKey={starDoneKey} loggedIn={starLoggedIn} />
+              <ClipboardButton text={slugOf(org, repo)} size="s" view="flat-secondary" tooltipInitialText="Скопировать org/repo" tooltipSuccessText="Скопировано" />
+              <FavoriteStar org={org} repo={repo} visibility={visibility} doneKey={starDoneKey} loggedIn={starLoggedIn} />
               <ActionTooltip title="Открыть на sourcecraft.dev">
-                <Button
-                  view="flat-secondary"
-                  size="s"
-                  href={r.webUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label="Открыть репозиторий на sourcecraft.dev"
-                >
+                <Button view="flat-secondary" size="s" href={webUrl} target="_blank" rel="noreferrer" aria-label="Открыть репозиторий на sourcecraft.dev">
                   <Icon data={ArrowUpRightFromSquare} size={14} />
                 </Button>
               </ActionTooltip>
             </Flex>
           </Flex>
-          {/* Две даты различены словом: «активность» — по каталогу SourceCraft, «анализ» —
-              момент анализа, та же дата, что в шапке отчета (`analysisDate`). */}
-          <Meta>
-            <MetaItem title="Язык">
-              <LanguageName name={r.language} color={r.languageColor} />
-            </MetaItem>
-            <MetaItem icon={Heart} title="Реакции">
-              {fmtNumber(r.likes)}
-            </MetaItem>
-            <MetaItem icon={CodeFork} title="Ответвления">
-              {fmtNumber(r.forks)}
-            </MetaItem>
-            <MetaItem icon={Clock} title="Последняя активность в репозитории">
-              активность {fmtDate(r.lastActivityAt)}
-            </MetaItem>
-            {view.analysisAt && (
-              <MetaItem icon={ArrowsRotateRight} title="Момент анализа – та же дата, что в шапке отчета">
-                анализ {fmtDateTime(view.analysisAt)}
-              </MetaItem>
-            )}
-          </Meta>
+          {meta}
         </Flex>
       </div>
-      {r.title && r.title !== r.repo && (
+      {title && title !== repo && (
         <Text as="p" className="rh-prose" color="complementary" style={{ margin: "var(--g-spacing-2) 0 0" }}>
-          {r.title}
+          {title}
         </Text>
       )}
     </div>
@@ -921,6 +1009,9 @@ function ScoreAside({
   const coverageHelp = `Какая доля открытых категорий (с учетом веса) собрана: веса как в Repo Health Score, всего 65. Ниже ${threshold} оценку не ставим.`;
   const fullCoverageHelp = `Какая доля всех шести категорий (с учетом веса) собрана, из 100. Ниже ${threshold} оценку не ставим.`;
   const full = score !== null && !score.fullLocked;
+  // идет анализ репозитория без оценки — первый или повтор после неудачного (свой,
+  // чужой или плановый): сведения появятся с итогом, до него — скелетон, а не пустая панель
+  const pending = score === null && (analysis !== null || foreignRunning);
   return (
     <>
       <AsideSection title="Анализ">
@@ -931,11 +1022,13 @@ function ScoreAside({
             анализ затянулся – итог появится в «Очереди»
           </Label>
         )}
-        {scan || score ? (
+        {pending ? (
+          <SkeletonRows rows={3} height={20} />
+        ) : scan || score ? (
           <DefinitionList nameMaxWidth={ASIDE_NAME_WIDTH}>
             {score && (
               <DefinitionList.Item name="Место в рейтинге">
-                {/* одно правило с отчетом и сравнением; без места — причина, а не «—» */}
+                {/* одно правило с отчетом и сравнением; без места — причина, а не «–» */}
                 {rankText(card.repo.visibility, score)}
               </DefinitionList.Item>
             )}
@@ -952,13 +1045,13 @@ function ScoreAside({
             )}
             {score && full && (
               <DefinitionList.Item name="Полнота: полная оценка" note={`Repo Health Score. ${fullCoverageHelp}`}>
-                {score.repoHealthCoverage === null ? "—" : fmtCoverage(score.repoHealthCoverage)}
+                {score.repoHealthCoverage === null ? "–" : fmtCoverage(score.repoHealthCoverage)}
               </DefinitionList.Item>
             )}
             {scan && scan.status !== "running" && <DefinitionList.Item name="Данные собраны">{collectedText(scan.status)}</DefinitionList.Item>}
             {scan && scan.status !== "running" && <DefinitionList.Item name="Запуск">{scanTriggerText(scan.trigger)}</DefinitionList.Item>}
           </DefinitionList>
-        ) : analysis !== null || foreignRunning ? null : (
+        ) : (
           <Text color="secondary">Анализа еще не было</Text>
         )}
       </AsideSection>
@@ -1402,7 +1495,7 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
             aria-expanded={open}
             aria-controls={`${categoryAnchor(key)}-subs`}
             // имя заголовка — название и балл; основание — описанием, а не частью имени
-            aria-label={`${c.title}, ${c.scoreText === "—" ? "нет данных" : `${c.scoreText} из 100`}`}
+            aria-label={`${c.title}, ${c.scoreText === "–" ? "нет данных" : `${c.scoreText} из 100`}`}
             aria-describedby={`${categoryAnchor(key)}-why`}
             onClick={() => setOpen(!open)}
           >
@@ -1475,7 +1568,7 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
                   color="secondary"
                   title={displayOnly(key, subKey) ? "Показывается для справки, в балл категории не входит" : NO_DATA}
                 >
-                  —
+                  –
                 </Text>
               ) : (
                 <Text className="rh-subrow__score" role="cell">
@@ -2036,10 +2129,10 @@ function AppsecEngines({ card }: { card: Card }) {
             </Text>
           </span>
           <Text className="rh-subrow__score" color="secondary">
-            —
+            –
           </Text>
           <Text className="rh-subrow__score" color="secondary" title="Разбивка показывается для справки, в балл категории не входит">
-            —
+            –
           </Text>
         </div>
       ))}
@@ -2081,10 +2174,10 @@ function OwnershipMap({ category }: { category: Parameters<typeof ownershipView>
             </Text>
           </span>
           <Text className="rh-subrow__score" color="secondary">
-            —
+            –
           </Text>
           <Text className="rh-subrow__score" color="secondary" title="Карта показывается для справки, в балл категории не входит">
-            —
+            –
           </Text>
         </div>
       ))}

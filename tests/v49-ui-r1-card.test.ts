@@ -39,7 +39,7 @@ function reportLimitations(blocks: Block[]): string[] {
 
 describe("инвариант 1: карточка = отчет по данным (REPORT_FIXTURES)", () => {
   for (const name of REPORT_FIXTURES) {
-    test(`${name}: вклады, основания, ограничения, путь к полной оценке, рекомендации — те же, что в документе`, () => {
+    test(`${name}: вклады, основания, ограничения, путь к полной оценке, рекомендации – те же, что в документе`, () => {
       const c = card(name);
       const model = buildReportModel(c);
       const view = cardView(c);
@@ -90,12 +90,12 @@ describe("инвариант 1: карточка = отчет по данным 
 });
 
 describe("tri-state и доступ на карточке (инварианты 2, 3)", () => {
-  test("категория без данных — «—» и «Нет данных», причина без опорной фразы (она одна над списком), не 0", () => {
+  test("категория без данных – «–» и «Нет данных», причина без опорной фразы (она одна над списком), не 0", () => {
     for (const name of REPORT_FIXTURES) {
       const c = card(name);
       const empty = cardView(c).categories.filter((x) => x.score === null);
       for (const cat of empty) {
-        expect({ scoreText: cat.scoreText, chip: cat.chip }).toEqual({ scoreText: "—", chip: { theme: "unknown", text: "Нет данных" } });
+        expect({ scoreText: cat.scoreText, chip: cat.chip }).toEqual({ scoreText: "–", chip: { theme: "unknown", text: "Нет данных" } });
         expect(cat.why).not.toContain(NOT_IN_SCORE);
       }
       // UX 17.10: «не участвуют и не снижают» — один раз на список, если такие категории есть
@@ -112,19 +112,19 @@ describe("tri-state и доступ на карточке (инварианты 
     expect(view.locked).toEqual({ text: "CI/CD и Безопасность видны участникам репозитория после входа и добавления персонального токена доступа." });
   });
 
-  test("Т3: вошедшему без токена — путь без «входа»", () => {
+  test("Т3: вошедшему без токена – путь без «входа»", () => {
     const base = card("anon");
     const c: RepoCard = { ...base, viewer: { own: false, auth: "no-pat" } };
     expect(lockedView(c)).toEqual({ text: "CI/CD и Безопасность видны участникам репозитория после добавления персонального токена доступа." });
   });
 
-  test("одна закрытая категория у зрителя с токеном — единственное число и причина отказа", () => {
+  test("одна закрытая категория у зрителя с токеном – единственное число и причина отказа", () => {
     const c = card("grant-ci");
     // сначала «только участникам», затем причина; «к ней» согласовано с одной категорией
     expect(lockedView(c)).toEqual({ text: "Безопасность видна только участникам репозитория, а у вашего токена к ней нет доступа." });
   });
 
-  test("разные причины двух категорий у зрителя с токеном — по предложению на категорию", () => {
+  test("разные причины двух категорий у зрителя с токеном – по предложению на категорию", () => {
     const base = card("anon");
     const cats = { ...base.score!.categories, cicd: { ...base.score!.categories.cicd, locked: "pat-expired" as const }, security: { ...base.score!.categories.security, locked: "denied" as const } };
     const mixed: RepoCard = { ...base, viewer: { own: false, auth: "pat" }, score: { ...base.score!, categories: cats } };
@@ -144,8 +144,8 @@ describe("tri-state и доступ на карточке (инварианты 
   });
 });
 
-describe("путь к полной оценке по 3 типам зрителя (А2, Е2): карточка и MD — одна строка", () => {
-  test("не вошел: «Войдите…», слово «Настройках» — ссылка, под строкой кнопка входа", () => {
+describe("путь к полной оценке по 3 типам зрителя (А2, Е2): карточка и MD – одна строка", () => {
+  test("не вошел: «Войдите…», слово «Настройках» – ссылка, под строкой кнопка входа", () => {
     const c = card("anon");
     const view = cardView(c);
     expect(view.signIn).toBe(true);
@@ -176,7 +176,7 @@ describe("путь к полной оценке по 3 типам зрителя
     expect(renderRepoReport(c)).toContain(`видна участникам репозитория. ${ACCESS_LOCK_SHORT.denied}`);
   });
 
-  test("первый закрытый канал решает: CI, затем Безопасность; истекший токен — его причина", () => {
+  test("первый закрытый канал решает: CI, затем Безопасность; истекший токен – его причина", () => {
     expect(fullScorePath("pat", ["granted", "check-failed"])).toEqual([{ text: ACCESS_LOCK_SHORT["check-failed"] }]);
     expect(fullScorePath("pat", ["pat-expired", "denied"])).toEqual([{ text: ACCESS_LOCK_SHORT["pat-expired"] }]);
     expect(pathText(fullScorePath(undefined, ["no-pat", "no-pat"]))).toMatch(/^Войдите через Я ID/);
@@ -184,7 +184,7 @@ describe("путь к полной оценке по 3 типам зрителя
 });
 
 describe("рекомендации: основание словами (А5)", () => {
-  test("правило с записью — «подметрика – значение»; без записи — «Исходные данные»", () => {
+  test("правило с записью – «подметрика – значение»; без записи – «Исходные данные»", () => {
     const c = card("grant-ci");
     const labels = new Map(c.recommendations.map((r) => [r.ruleId, recommendationLabel(c, r)]));
     const license = c.recommendations.find((r) => r.ruleId === "license-missing");
@@ -194,14 +194,14 @@ describe("рекомендации: основание словами (А5)", ()
     expect(recommendationLabel(c, unknown)).toBe(SOURCE_DATA_LABEL);
   });
 
-  test("номера — порядок выдачи движка, 1..N", () => {
+  test("номера – порядок выдачи движка, 1..N", () => {
     const view = cardView(card("full"));
     expect(view.recommendations.map((r) => r.n)).toEqual(view.recommendations.map((_, i) => i + 1));
   });
 });
 
 describe("предупреждения наверху не повторяют «Ограничения данных» (А6)", () => {
-  test("данные прошлого анализа, лимит и усеченная история — только внизу; нет кода и потолок CI — наверху", () => {
+  test("данные прошлого анализа, лимит и усеченная история – только внизу; нет кода и потолок CI – наверху", () => {
     const base = card("anon");
     const c: RepoCard = {
       ...base,
@@ -221,8 +221,8 @@ describe("предупреждения наверху не повторяют «
   });
 });
 
-describe("цвет категории — по ключу (А3)", () => {
-  test("6 категорий — 6 разных классов; неизвестный ключ — нейтральный", () => {
+describe("цвет категории – по ключу (А3)", () => {
+  test("6 категорий – 6 разных классов; неизвестный ключ – нейтральный", () => {
     const classes = Object.keys(CATEGORY_TITLES).map(categoryColorClass);
     expect(new Set(classes).size).toBe(6);
     expect(classes).toEqual(Object.values(CATEGORY_COLOR));
@@ -231,7 +231,7 @@ describe("цвет категории — по ключу (А3)", () => {
 });
 
 describe("плашка видимости (А7, В2): все значения SourceCraft и явное «неизвестно»", () => {
-  test("public / internal / private — своя плашка; unknown и мусор — без плашки", () => {
+  test("public / internal / private – своя плашка; unknown и мусор – без плашки", () => {
     expect(visibilityPill("public")?.text).toBe("Публичный");
     expect(visibilityPill("internal")?.text).toBe("Внутренний");
     expect(visibilityPill("private")?.text).toBe("Приватный");

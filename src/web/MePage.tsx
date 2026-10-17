@@ -681,9 +681,10 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
   const reposData = dataOf(repos.state);
   const entries = reposData?.entries ?? [];
   const accessBySlug = new Map((dataOf(favs.state)?.entries ?? []).map((f) => [`${f.org}/${f.repo}`, f]));
-  // строка без своих прав получает анализ по кнопке, если репозиторий из организаций
-  // зрителя — он есть в списке по токену (тот же, что у «Моих репозиториев»)
-  const tokenRepos = useTokenRepos(hasPat && entries.some((e) => accessBySlug.get(`${e.org}/${e.repo}`)?.access?.own !== true));
+  // список по токену (тот же, что у «Моих репозиториев»): строка без своих прав получает
+  // анализ по кнопке, если репозиторий из организаций зрителя, а пустая (ни одного
+  // коммита) — плашку «Нет коммитов» без запуска, как в «Моих репозиториях»
+  const { repos: tokenRepos } = useTokenRepos(hasPat && entries.length > 0);
   const counts = countBands(entries);
   const shown = sortEntries(filterEntries(entries, query, band), sortKey, sortDesc);
 
@@ -841,6 +842,7 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
                     lastCheckedAt={accessBySlug.get(slug)?.lastCheckedAt ?? null}
                     hasPat={hasPat}
                     member={tokenRepos?.has(repoKey(entry.org, entry.repo)) === true}
+                    empty={tokenRepos?.get(repoKey(entry.org, entry.repo))?.isEmpty === true}
                     live={analysis.live(slug)}
                     starting={starting.has(slug)}
                     busy={busy !== null}
@@ -892,22 +894,6 @@ const BAND_ICON: Record<Band, IconData | null> = {
   none: null,
 };
 
-/**
- * Действие анализа в описи — иконкой: оцененный — «Обновить анализ» (тихая), без
- * оценки — «Запустить анализ» primary (в теме — белая): это следующий шаг строки. Отказ по правам (чужой
- * публичный) сервер объясняет тостом. Пустой — место под иконку, колонки ровные.
- */
-function AnalysisIcon({ scored, canAnalyze, inWork, onScan, slug }: { scored: boolean; canAnalyze: boolean; inWork: boolean; onScan: () => void; slug: string }) {
-  if (!canAnalyze) return <span className="rh-repo-item__menu-gap" aria-hidden="true" />;
-  const text = inWork ? "Идет анализ" : scored ? "Обновить анализ" : "Запустить анализ";
-  return (
-    <ActionTooltip title={text}>
-      <Button view={scored ? "flat" : "action"} size="m" onClick={onScan} loading={inWork} aria-label={`${text} ${slug}`}>
-        <Icon data={scored ? ArrowsRotateRight : Play} size={16} />
-      </Button>
-    </ActionTooltip>
-  );
-}
 
 /**
  * Изменение индекса к прошлой оценке: стрелка цветом, величина тише. Без изменения —
@@ -1222,7 +1208,6 @@ function RepoRow({
   fromToken = false,
   scheduled = false,
   member = false,
-  iconActions = false,
   favorite,
 }: {
   entry: RepoEntry;
@@ -1249,9 +1234,7 @@ function RepoRow({
   fromToken?: boolean;
   /** публичный из описи: его оценивает и анализ по расписанию */
   scheduled?: boolean;
-  /** опись: действия анализа — иконками (обновить / запустить), без меню «…» */
-  iconActions?: boolean;
-  /** «Мои репозитории»: звезда «в избранное» в строке */
+  /** «Мои репозитории»: пункт меню «Добавить в избранное» / «Убрать из избранного» */
   favorite?: { on: boolean; busy: boolean; toggle: () => void };
 }) {
   const { org, repo } = entry;
@@ -1261,6 +1244,9 @@ function RepoRow({
   const canAnalyze = !empty && (canAnalyzeOverride ?? (hasPat && (access?.own === true || member)));
   // «затянулось» решает сервер (истек срок захвата задания), а не таймер в браузере
   const phase = live === null ? null : live.stalled ? "stalled" : live.phase;
+  // анализа еще не было, и его можно запустить: состояние строки — сама кнопка
+  // «Запустить анализ», а не плашка «Еще не анализировали» рядом с кнопкой
+  const firstRun = canAnalyze && phase === null && !starting && !entry.planned && !scored && entry.lastScanAt === null;
 
   // все состояния без оценки — одна серая StatePill: цветные Label читались
   // тегами, поэтому цвет только у иконки и только там, где он что-то значит
@@ -1275,6 +1261,17 @@ function RepoRow({
       <span className="rh-state rh-busy" title="Идет анализ – итог придет уведомлением">
         {phase === "queued" ? "В очереди" : "Идет анализ"}
       </span>
+    ) : firstRun ? (
+      <ActionTooltip title={scheduled ? "Публичные репозитории оценивает и анализ по расписанию – здесь его можно запустить раньше" : "Анализ этого репозитория еще не запускали"}>
+        <Button view="outlined" size="m" onClick={onScan} aria-label={`Запустить анализ ${entry.org}/${entry.repo}`}>
+          {/* слот кнопки держит отступ и цвет; глиф Play заполняет квадрат целиком,
+              поэтому 14px — тот же визуальный размер, что у иконок плашек строки */}
+          <Button.Icon side="start">
+            <Icon data={Play} size={14} />
+          </Button.Icon>
+          Запустить анализ
+        </Button>
+      </ActionTooltip>
     ) : entry.planned ? (
       // «данных пока нет» — не то же, что «данных не будет»; мета и оценка
       // при этом скрыты (fail-closed)
@@ -1309,7 +1306,7 @@ function RepoRow({
       </StatePill>
     ) : empty ? (
       <StatePill icon={CircleDashed} title="В репозитории нет ни одного коммита – анализировать нечего">
-        Пустой
+        Нет коммитов
       </StatePill>
     ) : !entry.inCatalog && fromToken ? (
       // «Мои репозитории»: репозиторий точно есть на SourceCraft, у нас его просто не анализировали
@@ -1335,9 +1332,14 @@ function RepoRow({
       </StatePill>
     );
 
-  // пункты «…»: обновить анализ (оцененный свой) и, в «Избранном», убрать из него
+  // пункты «…»: повторный анализ (первый — кнопкой в колонке состояния), избранное
   const menuItems = [
-    ...(canAnalyze && scored ? [{ text: "Обновить анализ", iconStart: <Icon data={ArrowsRotateRight} size={16} />, action: onScan, disabled: inWork }] : []),
+    ...(canAnalyze && !firstRun
+      ? [{ text: scored ? "Обновить анализ" : "Повторить анализ", iconStart: <Icon data={ArrowsRotateRight} size={16} />, action: onScan, disabled: inWork }]
+      : []),
+    ...(favorite
+      ? [{ text: favorite.on ? "Убрать из избранного" : "Добавить в избранное", iconStart: <Icon data={favorite.on ? StarFill : Star} size={16} />, action: favorite.toggle, disabled: favorite.busy }]
+      : []),
     ...(onRemove ? [{ text: "Убрать из избранного", iconStart: <Icon data={TrashBin} size={16} />, action: onRemove, disabled: busy, theme: "danger" as const }] : []),
   ];
   return (
@@ -1388,43 +1390,18 @@ function RepoRow({
       <div className="rh-repo-item__state">{state}</div>
 
       <div className="rh-repo-item__actions">
-        {/* действия строки — в меню «…»: колонка одной ширины, полосы и числа
-            оцененных строк стоят ровно. Исключение — «Запустить анализ» у своего
-            репозитория без анализа: это единственный следующий шаг строки, и
-            колонка оценки у нее все равно пустая. Анализ — у своего репозитория
-            (сохраненная проверка прав own) и у репозитория из списка по токену;
-            у остальных его нет вовсе.
-            Пункта ручной проверки прав нет: права проверяются сами — при
-            добавлении, после смены токена и в фоне */}
-        {canAnalyze && !scored && !iconActions && (
-          <Button view="outlined" size="m" onClick={onScan} disabled={inWork} aria-label={`Запустить анализ ${entry.org}/${entry.repo}`}>
-            Запустить анализ
-          </Button>
-        )}
-        {/* звезда — та же, что на карточке: добавить в избранное или убрать */}
-        {favorite && (
-          <ActionTooltip title={favorite.on ? "Убрать из избранного" : "Добавить в избранное"}>
-            <Button
-              view="flat"
-              size="m"
-              loading={favorite.busy}
-              onClick={favorite.toggle}
-              // имя постоянное, состояние — aria-pressed: «Убрать … нажата» звучало бы двойным отрицанием
-              aria-pressed={favorite.on}
-              aria-label={`В избранном ${entry.org}/${entry.repo}`}
-            >
-              <Icon data={favorite.on ? StarFill : Star} size={16} />
-            </Button>
-          </ActionTooltip>
-        )}
-        {iconActions ? (
-          <AnalysisIcon scored={scored} canAnalyze={canAnalyze} inWork={inWork} onScan={onScan} slug={`${entry.org}/${entry.repo}`} />
-        ) : menuItems.length > 0 ? (
+        {/* все действия строки — в меню «…»: колонка одной ширины, полосы и числа
+            оцененных строк стоят ровно. Первый анализ — кнопкой в колонке состояния
+            (`firstRun`): это единственный следующий шаг строки. Анализ — у своего
+            репозитория (сохраненная проверка прав own) и у репозитория из списка по
+            токену; у остальных его нет вовсе. Пункта ручной проверки прав нет: права
+            проверяются сами — при добавлении, после смены токена и в фоне */}
+        {menuItems.length > 0 ? (
           <DropdownMenu
             items={menuItems}
             popupProps={{ placement: "bottom-end" }}
             renderSwitcher={(props) => (
-              <Button {...props} view="flat" size="m" aria-label={`Действия с ${entry.org}/${entry.repo}`} loading={inWork}>
+              <Button {...props} view="flat" size="m" aria-label={`Действия с ${entry.org}/${entry.repo}`} loading={inWork || favorite?.busy === true}>
                 <Icon data={Ellipsis} size={16} />
               </Button>
             )}
@@ -1506,6 +1483,8 @@ function TokenRepos() {
   const analysis = useAnalysis();
   const data = dataOf(list.state);
   const entries = data?.entries ?? [];
+  // перечитывание поверх показанного списка
+  const refreshing = list.state.kind === "loading" && data !== null;
   const listed = useLatest(entries);
   const reloadRef = useLatest(() => (nonce > 0 ? setNonce(0) : list.reload()));
   // итог анализа по репозиторию из списка — данные каталога перечитываются (список SourceCraft — из кэша)
@@ -1678,7 +1657,18 @@ function TokenRepos() {
             )}
           </Flex>
           <Text variant="body-2" color="complementary">
-            Репозитории SourceCraft, доступные вашему токену, и запуск их анализа.
+            {/* перечитать список из SourceCraft — действием в конце описания, а не иконкой:
+                круговые стрелки остаются за обновлением анализа */}
+            Репозитории SourceCraft, доступные вашему токену, и запуск их анализа.{" "}
+            <button
+              type="button"
+              className="g-link g-link_view_normal rh-link-button"
+              disabled={refreshing}
+              onClick={() => setNonce((n) => n + 1)}
+              aria-label="Обновить список из SourceCraft"
+            >
+              {refreshing ? "Обновляем список…" : "Обновить список"}
+            </button>
           </Text>
         </Flex>
         <div className="rh-me-tools">
@@ -1692,11 +1682,6 @@ function TokenRepos() {
             startContent={<Icon data={Magnifier} size={14} className="rh-me-search__icon" />}
             controlProps={{ "aria-label": "Найти репозиторий или организацию" }}
           />
-          <ActionTooltip title="Обновить список">
-            <Button view="normal" size="m" loading={list.state.kind === "loading" && data !== null} onClick={() => setNonce((n) => n + 1)} aria-label="Обновить список из SourceCraft">
-              <Icon data={ArrowsRotateRight} size={16} />
-            </Button>
-          </ActionTooltip>
         </div>
       </div>
 
@@ -1783,7 +1768,6 @@ function TokenRepos() {
                   onScan={() => void startScan(slug)}
                   canAnalyze
                   scheduled={!closed}
-                  iconActions
                   fromToken
                   empty={e.isEmpty}
                   badge={<VisibilityPill value={e.visibility} />}

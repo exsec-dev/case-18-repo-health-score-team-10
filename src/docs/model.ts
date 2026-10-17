@@ -55,6 +55,7 @@ export const UI_ICONS = [
   "shield",
   "shield-check",
   "shield-warning",
+  "play",
 ] as const;
 export type UiIcon = (typeof UI_ICONS)[number];
 

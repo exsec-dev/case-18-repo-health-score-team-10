@@ -1,6 +1,6 @@
 // Показ чисел, дат и пользовательских текстов для экранов и отчета MD/PDF.
 // Правило tri-state живет здесь: отсутствие данных везде выглядит одинаково
-// нейтрально — «нет данных» или «—», никогда не 0 и никогда не красным.
+// нейтрально — «нет данных» или «–», никогда не 0 и никогда не красным.
 
 import { normalizeTypography } from "../summary/typography";
 
@@ -40,17 +40,17 @@ export function roundScore(value: number): number {
 }
 
 export function fmtScore(value: number | null | undefined): string {
-  return value === null || value === undefined ? "—" : String(roundScore(value));
+  return value === null || value === undefined ? "–" : String(roundScore(value));
 }
 
 /** Балл подметрики приходит долей 0..1 — на экране это проценты. */
 export function fmtSubmetric(value: number | null | undefined): string {
-  return value === null || value === undefined ? "—" : `${Math.round(value * 100)}`;
+  return value === null || value === undefined ? "–" : `${Math.round(value * 100)}`;
 }
 
 /** Число для показа: целое как есть, дробное — до 2 знаков, запятая и минус «−». */
 export function fmtNumber(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "—";
+  if (value === null || value === undefined) return "–";
   // целые — с разрядами, как место в рейтинге («4 069»)
   if (Number.isInteger(value)) return fmtCount(value);
   return fmtDecimal(value, 1, { trim: true });
@@ -78,18 +78,18 @@ function parseShown(iso: string): Date {
 
 const pad2 = (n: number): string => String(n).padStart(2, "0");
 
-/** Дата без времени — поле, у которого времени по смыслу нет: «15 сент. 2026». Пусто — «—», мусор — как пришел. */
+/** Дата без времени — поле, у которого времени по смыслу нет: «15 сент. 2026». Пусто — «–», мусор — как пришел. */
 export function fmtDate(iso: string | null | undefined): string {
-  if (!iso) return "—";
+  if (!iso) return "–";
   const d = parseShown(iso);
   if (Number.isNaN(d.getTime())) return iso;
   // день без ведущего нуля, полный год, без запятой и «г.»; пояс — локальный браузера
   return `${d.getDate()} ${MONTHS_SHORT_RU[d.getMonth()]} ${d.getFullYear()}`;
 }
 
-/** Дата и время: время `HH:mm` (24 часа) первым — «12:00 18 янв. 2023». Пусто — «—», мусор — как пришел. */
+/** Дата и время: время `HH:mm` (24 часа) первым — «12:00 18 янв. 2023». Пусто — «–», мусор — как пришел. */
 export function fmtDateTime(iso: string | null | undefined): string {
-  if (!iso) return "—";
+  if (!iso) return "–";
   const d = parseShown(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return `${fmtDate(iso)}, ${fmtTime(iso)}`;
@@ -97,7 +97,7 @@ export function fmtDateTime(iso: string | null | undefined): string {
 
 /** Только время «16:52» (локальное) — подписи оси за короткий период. */
 export function fmtTime(iso: string | null | undefined): string {
-  if (!iso) return "—";
+  if (!iso) return "–";
   const d = parseShown(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
@@ -110,14 +110,14 @@ export function fmtTime(iso: string | null | undefined): string {
  * карточкой без объяснения. Дата без времени – без подписи.
  */
 export function fmtDateUtc(iso: string | null | undefined): string {
-  if (!iso) return "—";
+  if (!iso) return "–";
   const d = parseShown(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return `${d.getUTCDate()} ${MONTHS_SHORT_RU[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
 export function fmtDateTimeUtc(iso: string | null | undefined): string {
-  if (!iso) return "—";
+  if (!iso) return "–";
   const d = parseShown(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return `${fmtDateUtc(iso)}, ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())} UTC`;
@@ -164,7 +164,7 @@ export function roundFacts(value: unknown): unknown {
 
 /** Значение факта — читаемой строкой; объекты как JSON (доказательство, не проза). */
 export function fmtFactValue(value: unknown): string {
-  if (value === null || value === undefined) return "—";
+  if (value === null || value === undefined) return "–";
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   return JSON.stringify(value, null, 1);
@@ -612,6 +612,9 @@ export function securityNoDataReason(fact: { status: string; value: unknown } | 
   return SECURITY_NO_SCAN;
 }
 
+/** Пустой репозиторий (ни одного коммита): почему нет запуска анализа — карточка и строка списка. */
+export const EMPTY_REPO_TEXT = "В репозитории нет ни одного коммита – анализ станет доступен, когда появится код.";
+
 /** Причина прочерка Безопасности зрителю с доступом — та же, что в рекомендации. */
 export const SECURITY_NO_SCAN = "Данных AppSec по репозиторию нет: проверка не подключена или не завершена.";
 
@@ -633,7 +636,7 @@ export function noScoreText(scan: { status: string } | null): { title: string; d
       description: "Анализ прошел, но данных для оценки не хватило. Это не плохая оценка: при следующем анализе данные соберутся заново.",
     };
   }
-  return { title: "Репозиторий есть в каталоге, но еще не анализировался", description: "Оценка появится после первого анализа репозитория." };
+  return { title: "Репозиторий есть в каталоге, но еще не анализировался", description: "Оценка появится после первого анализа." };
 }
 
 /**
@@ -711,6 +714,8 @@ export function favoriteAddedText(check: FavoriteAddCheck | undefined, visibilit
     return "Права проверены.";
   }
   switch (e.code) {
+    case "repo_empty":
+      return "Права проверены. В репозитории пока нет коммитов – анализировать нечего.";
     case "too_many_active":
       return "Права проверены. Анализ не запущен: слишком много ваших анализов в очереди – дождитесь завершения.";
     case "rate_limited":

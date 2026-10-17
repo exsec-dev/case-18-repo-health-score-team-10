@@ -736,7 +736,7 @@ function CompareTable({
     const { weighted, reference } = subKeysOf(cols, key);
     rows.push({ kind: "subhead", cat: key });
     for (const sub of weighted) rows.push({ kind: "sub", cat: key, sub });
-    // подписи «Справочно…» нет — справочные идут следом, серым, с «—» вместо балла
+    // подписи «Справочно…» нет — справочные идут следом, серым, с «–» вместо балла
     for (const sub of reference) rows.push({ kind: "sub", cat: key, sub });
   };
   for (const key of INDEX_KEYS) pushCategory(key);
@@ -973,7 +973,7 @@ function Lead({ leader, children }: { leader: boolean; children: ReactNode }) {
 function NoDataGlyph({ reason }: { reason: string }) {
   return (
     <Text color="secondary" className="rh-cmp-nodata" title={reason} tabIndex={0} aria-label={`${sentence(NO_DATA)}. ${reason}`}>
-      —
+      –
     </Text>
   );
 }
@@ -1106,8 +1106,8 @@ function CellValue({ row, card, leader, phone, year, sharedTotal }: { row: Row; 
       const cat = score.categories[row.cat]!;
       const entry = cat.submetrics[row.sub];
       const ref = displayOnly(row.cat, row.sub);
-      // пустое значение и пустой балл — «—» на своих местах (балл — у правого края подстолбца)
-      const shown = entry ? submetricShownValue(row.cat, row.sub, entry, submetricContext(score.computedAt), cat.submetrics) : "—";
+      // пустое значение и пустой балл — «–» на своих местах (балл — у правого края подстолбца)
+      const shown = entry ? submetricShownValue(row.cat, row.sub, entry, submetricContext(score.computedAt), cat.submetrics) : "–";
       const scoreNode =
         ref || !entry || entry.score === null || entry.score === undefined ? (
           <NoDataGlyph reason={ref ? "Показывается для справки, в балл категории не входит" : NO_DATA} />

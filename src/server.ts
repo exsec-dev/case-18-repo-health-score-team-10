@@ -619,9 +619,11 @@ async function addFavoriteAndCheck(userId: number, org: string, repo: string): P
 /**
  * Право запуска анализа по кнопке и ответ repo-GET для постановки
  * (`requestUserScan`), либо `limited` — список по токену не перечитать: окно
- * чтений исчерпано (это наш лимит, а не сбой SourceCraft).
+ * чтений исчерпано (это наш лимит, а не сбой SourceCraft). `repoRes` null —
+ * repo-GET не делался (доступ из кэша карточки): постановка сделает его сама и
+ * узнает из него видимость и пустоту репозитория.
  */
-type LaunchCheck = { right: LaunchRight; repoRes: { status: number; json: unknown } } | { right: "limited" };
+type LaunchCheck = { right: LaunchRight; repoRes: { status: number; json: unknown } | null } | { right: "limited" };
 
 /**
  * Право зрителя запустить анализ (`launchRightOf`). Доступ — из общего
@@ -632,14 +634,15 @@ type LaunchCheck = { right: LaunchRight; repoRes: { status: number; json: unknow
 async function launchCheckOf(req: Request, userId: number, org: string, repo: string): Promise<LaunchCheck> {
   const row = db.query("SELECT id, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number; visibility: string } | null;
   let access: NormalizedAccess;
-  let repoRes: { status: number; json: unknown };
+  let repoRes: { status: number; json: unknown } | null;
   if (row) {
     const res = await viewerAccess(req)({ id: row.id, org, repo, visibility: row.visibility });
     access = { repo: res.repo, cicd: res.cicd, appsec: res.appsec, visibility: visibilityOf(row.visibility) };
-    repoRes = { status: res.repo === "granted" ? 200 : 0, json: { visibility: row.visibility } };
+    // живого ответа нет: пустоту репозитория (ни одного коммита) знает только SourceCraft
+    repoRes = null;
   } else {
     const pat = patOf(userId);
-    if (!pat) return { right: "unknown", repoRes: { status: 0, json: null } };
+    if (!pat) return { right: "unknown", repoRes: null };
     const probe = await probeRepoAccess(probeIoFor(pat), org, repo);
     access = probe.access;
     repoRes = probe.repoRes;
@@ -1384,10 +1387,11 @@ const routes = {
         if (refusal.record) recordRefusedUserJob(db, user.userId, new Date(), `${org}/${repo}`);
         return Response.json(refusal.body, { status: refusal.status });
       }
-      // repo-GET уже сделан (или доступ подтвержден кэшем карточки) — строка
-      // repos и заявка появляются только при доказанном доступе; участник
-      // организации без прав на CI/CD и Безопасность — с ограничением частоты на репозиторий
-      const out = await requestUserScan(db, client, user.userId, org!, repo!, config.queue, new Date(), check.repoRes, { repoCooldown: check.right === "member" });
+      // строка repos и заявка появляются только при доказанном доступе; живой repo-GET
+      // (сделанный проверкой или постановкой) отказывает пустому репозиторию — без
+      // коммитов анализировать нечего; участник организации без прав на CI/CD и
+      // Безопасность — с ограничением частоты на репозиторий
+      const out = await requestUserScan(db, client, user.userId, org!, repo!, config.queue, new Date(), check.repoRes ?? undefined, { repoCooldown: check.right === "member" });
       return scanResponse(out);
     },
     // документация: все страницы одним ответом (раздел /docs переходит между

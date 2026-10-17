@@ -26,7 +26,7 @@ seedScore(t, scoredRepo, scoredScan, { total: 67 });
 seedRecommendation(t, scoredScan, {
   ruleId: "contributing-missing",
   priority: 1,
-  problem: "Нет CONTRIBUTING — как вносить правки не описано",
+  problem: "Нет CONTRIBUTING – как вносить правки не описано",
   factRef: "docs.presence",
   deltaScore: 2.25,
   expectedImpact: "+2.3 к HealthCraft Index (по одному)",
@@ -38,7 +38,7 @@ seedRecommendation(t, scoredScan, {
   problem: "Security без данных: AppSec SourceCraft не подключён (публичный режим)",
   factRef: "appsec.findings",
   opensCategory: "security",
-  expectedImpact: "coverage 1.00→1.00 — категория Security 20%",
+  expectedImpact: "coverage 1.00→1.00 – категория Security 20%",
 });
 // отчёт зрителя с доступом к каналам: полный разбор (матрица доступа — api.test.ts)
 const GRANTED = { cicd: "granted", appsec: "granted", repo: "granted" } as const;
@@ -47,7 +47,7 @@ const main = md.slice(0, md.indexOf("## Приложение"));
 const appendix = md.slice(md.indexOf("## Приложение"));
 
 describe("MD-отчёт: структура", () => {
-  test("разделы эталона вида — по порядку, приложение последним", () => {
+  test("разделы эталона вида – по порядку, приложение последним", () => {
     expect(md.startsWith("# report/sample")).toBe(true);
     const order = [
       "Repo Health Score: **",
@@ -69,7 +69,7 @@ describe("MD-отчёт: структура", () => {
     expect([...order].sort((a, b) => a - b)).toEqual(order);
   });
 
-  test("шапка: ссылка на репозиторий и дата анализа; номер анализа и версия методики — в приложении (К9.4)", () => {
+  test("шапка: ссылка на репозиторий и дата анализа; номер анализа и версия методики – в приложении (К9.4)", () => {
     expect(main).toContain("[sourcecraft.dev/report/sample](https://sourcecraft.dev/report/sample)");
     // имя документа, дата без слова «Анализ» и плашка доступа зрителя после
     // нее (в PDF — второй строкой шапки); плашка называет оценку — «полная
@@ -88,7 +88,7 @@ describe("MD-отчёт: структура", () => {
 describe("MD-отчёт: числа и tri-state", () => {
   // порядок везде «сначала публичный, потом полный»: крупно слева —
   // HealthCraft Index, справа — Repo Health Score
-  test("зрителю с обоими показателями первым — HealthCraft Index, вторым Repo Health Score (TASK.md §2, круг 4)", () => {
+  test("зрителю с обоими показателями первым – HealthCraft Index, вторым Repo Health Score (TASK.md §2, круг 4)", () => {
     const at = (s: string) => main.indexOf(s);
     expect(main).toContain("HealthCraft Index: **67 из 100 · требует внимания**");
     // CI без прогонов — no-data, вес перенормирован: (60+70+40+80)/65·... = 64
@@ -101,19 +101,19 @@ describe("MD-отчёт: числа и tri-state", () => {
     expect(at("## Вклад категорий в HealthCraft Index")).toBeLessThan(at("## Вклад категорий в Repo Health Score"));
   });
 
-  test("все шесть категорий: балл и слово шкалы; у Безопасности без данных — «—», а не 0 (tri-state)", () => {
+  test("все шесть категорий: балл и слово шкалы; у Безопасности без данных – «–», а не 0 (tri-state)", () => {
     for (const title of ["Документация", "CI/CD", "Безопасность", "Активность", "Задачи", "Состояние кода"]) expect(main).toContain(`| ${title} |`);
     expect(main).toContain("| Документация | 60 | требует внимания |");
-    expect(main).toContain("| Безопасность | — | нет данных |");
+    expect(main).toContain("| Безопасность | – | нет данных |");
     // вес — в приложении А: 15 из 65 весовых пунктов с данными = 23,1%; у категории без данных веса нет.
     // «баллов в итог» — те же десятые, что в полосе вкладов (наибольший остаток), поэтому 13,9, а не 13,8
     expect(appendix).toContain("| Документация | 60,0 | 23,1% | 13,9 |");
     expect(main).toContain("Документация +13,9");
-    expect(appendix).toContain("| Безопасность | — | не входит | — |");
+    expect(appendix).toContain("| Безопасность | – | не входит | – |");
     expect(md).not.toMatch(/Безопасность \| [^|]* \| 0%/);
   });
 
-  test("Безопасность без данных — причина в строке, опорная фраза «не участвует и не снижает» — один раз под таблицей (К9.2)", () => {
+  test("Безопасность без данных – причина в строке, опорная фраза «не участвует и не снижает» – один раз под таблицей (К9.2)", () => {
     // зрителю с доступом причина прочерка — та же, что в действии движка
     expect(main).toContain("| Данных AppSec по репозиторию нет: проверка не подключена или не завершена. |");
     // UX 17.10: фраза — один раз на список, а не у каждой строки
@@ -127,14 +127,14 @@ describe("MD-отчёт: числа и tri-state", () => {
     expect(main).toContain("категорию не оцениваем");
   });
 
-  test("подметрики показаны баллом 0–100, а не долей; название — из словаря", () => {
+  test("подметрики показаны баллом 0–100, а не долей; название – из словаря", () => {
     // readme в фикстуре — 0.72 доли → 72 в разборе
     expect(main).toContain("| README (наличие и качество) | 7,8 КБ | 72 | 45% |");
   });
 });
 
 describe("MD-отчёт: действия и приложение", () => {
-  test("действия — рекомендации движка с эффектом; ключей правил и фактов в основном тексте нет", () => {
+  test("действия – рекомендации движка с эффектом; ключей правил и фактов в основном тексте нет", () => {
     // подпись эффекта — перед числом
     expect(main).toMatch(/^1\. \*\*.+\*\* .+ Ожидаемый эффект: \+\d+,\d+ к .+\.$/m);
     expect(main).not.toContain("`docs.presence`");
@@ -149,7 +149,7 @@ describe("MD-отчёт: действия и приложение", () => {
     expect(appendix).toContain("| contributing | нет |");
   });
 
-  test("история коммитов — итогом, сырьё в отчёт не едет", () => {
+  test("история коммитов – итогом, сырьё в отчёт не едет", () => {
     expect(appendix).toContain("`activity.git.timeline`");
     expect(appendix).toContain("| events | 2 |");
     expect(md).not.toContain('"sha"');
@@ -180,7 +180,7 @@ describe("MD-отчёт: действия и приложение", () => {
 });
 
 describe("MD-отчёт: репозитории без оценки", () => {
-  test("индекс NULL — «Оценки нет», покрытие и порог; не 0 и без «Как считается» (К9.1)", () => {
+  test("индекс NULL – «Оценки нет», покрытие и порог; не 0 и без «Как считается» (К9.1)", () => {
     const repoId = seedRepo(t, { org: "report", repo: "dark", language: "C++" });
     const scanId = seedScan(t, repoId, { status: "partial", facts: [] });
     seedScore(t, repoId, scanId, {
@@ -209,7 +209,7 @@ describe("MD-отчёт: репозитории без оценки", () => {
 
   // без оценки отчет не выдается: пустое состояние остается на карточке,
   // документ не собирается
-  test("репо в каталоге без скана — отчета нет", () => {
+  test("репо в каталоге без скана – отчета нет", () => {
     seedRepo(t, { org: "report", repo: "never-scanned" });
     expect(() => renderRepoReport(getRepoCard(t.db, "report", "never-scanned")!)).toThrow(REPORT_NO_SCORE);
   });

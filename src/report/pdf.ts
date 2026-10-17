@@ -714,7 +714,7 @@ function detailNode(block: Extract<Block, { kind: "detail" }>): PdfNode {
   const head: PdfNode = {
     columns: [
       { width: "auto", text: block.title, fontSize: 10.5, bold: true, lineHeight: 1 },
-      { width: "auto", text: block.scoreText, fontSize: 10.5, bold: true, lineHeight: 1, margin: [7, 0, 0, 0], color: block.scoreText === "—" ? COLORS.muted : COLORS.ink },
+      { width: "auto", text: block.scoreText, fontSize: 10.5, bold: true, lineHeight: 1, margin: [7, 0, 0, 0], color: block.scoreText === "–" ? COLORS.muted : COLORS.ink },
       { ...labelNode(block.chip, "xs"), margin: [7, -2, 0, 0] },
     ],
     columnGap: 0,

@@ -20,6 +20,7 @@ import { ladderFromFacts, type Ladder } from "../score/ladder";
 import { fixTemplateOf, templateFor, type FixFile, type FixRuleId, type FixTemplateMeta, type LicenseId } from "../fix/templates";
 import { rankBadge, type RankBadge } from "./rank-badge";
 import { COHORT_CATEGORIES, buildCohort, type CohortMember, type RepoCohort } from "./cohort";
+import { repoWebUrl } from "./slug-input";
 
 // ---------- общие формы ----------
 
@@ -348,13 +349,8 @@ export const CHANNEL_CATEGORIES: CategoryKey[] = ["cicd", "security"];
  */
 export const CHANNEL_TREE_KEY = "tree.stats@channel";
 
-/**
- * Страница репо на SourceCraft (шаблон платформы, колонки в схеме нет) –
- * один литерал для карточки и строки рейтинга.
- */
-export function repoWebUrl(org: string, repo: string): string {
-  return `https://sourcecraft.dev/${org}/${repo}`;
-}
+// страница репо на SourceCraft – общий литерал с вебом (slug-input.ts)
+export { repoWebUrl };
 
 function toRatingItem(row: RatingRow): RatingItem {
   const indexScores: Partial<Record<CategoryKey, number | null>> = {

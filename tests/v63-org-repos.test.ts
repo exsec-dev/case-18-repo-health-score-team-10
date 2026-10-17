@@ -234,6 +234,11 @@ describe("ограничение частоты на репозиторий", ()
       expect(own.status).toBe(202);
       const again = await requestUserScan(t.db, okClient(), user, "team", "fresh", QUEUE, NOW, undefined, { repoCooldown: true });
       expect(again.body.deduplicated).toBe(true);
+      // SourceCraft говорит «ни одного коммита» – анализировать нечего, заявки нет
+      const emptyClient = { get: async () => ({ status: 200, json: { name: "e", visibility: "public", is_empty: true }, bodyText: "" }), requestCount: () => 0 } as unknown as ScClient;
+      const hollow = await requestUserScan(t.db, emptyClient, user, "team", "hollow", QUEUE, NOW);
+      expect({ status: hollow.status, code: (hollow.body.error as { code: string }).code }).toEqual({ status: 409, code: "repo_empty" });
+      expect(t.db.query("SELECT 1 FROM repos WHERE org_slug = 'team' AND repo_slug = 'hollow'").get()).toBeNull();
       // нового репозитория в каталоге нет – ограничивать нечего
       const fresh = await requestUserScan(t.db, okClient(), user, "team", "brand-new", QUEUE, NOW, undefined, { repoCooldown: true });
       expect(fresh.status).toBe(202);
@@ -278,7 +283,7 @@ describe("текст отказа по частоте", () => {
 const SECRET = "v63-org-repos-secret-0123456789abcdef";
 const dir = mkdtempSync(join(tmpdir(), "rh-v63-"));
 let meReposMode: "ok" | "503" = "ok";
-const TEAM_REPOS = ["pub", "fresh", "dev", "newpub", "flaky"].map((slug) => ({ organization: { slug: "team" }, slug, visibility: "public" }));
+const TEAM_REPOS = ["pub", "fresh", "dev", "newpub", "flaky", "hollow", "hollowcat"].map((slug) => ({ organization: { slug: "team" }, slug, visibility: "public", is_empty: slug.startsWith("hollow") }));
 const mock = startMockApi((_req, url) => {
   const p = url.pathname;
   if (p === "/user") return Response.json({ username: "member" });
@@ -291,7 +296,8 @@ const mock = startMockApi((_req, url) => {
     return runs[1] === "team" && runs[2] === "dev" ? Response.json({ runs: [] }) : Response.json({ error: "denied" }, { status: 403 });
   }
   const repo = p.match(/^\/repos\/([^/]+)\/([^/]+)$/);
-  if (repo) return Response.json({ id: `gid-${repo[2]}`, name: repo[2], visibility: "public" });
+  // hollow* – ни одного коммита: так отвечает и repo-GET, и список по токену
+  if (repo) return Response.json({ id: `gid-${repo[2]}`, name: repo[2], visibility: "public", is_empty: repo[2]!.startsWith("hollow") });
   return null;
 });
 let server: SpawnedServer | null = null;
@@ -307,7 +313,9 @@ beforeAll(async () => {
   seedScan(t, seedRepo(t, { org: "team", repo: "fresh" }), { startedAt: freshScanAt });
   seedScan(t, seedRepo(t, { org: "team", repo: "dev" }), { startedAt: freshScanAt });
   seedRepo(t, { org: "foreign", repo: "pub" });
-  for (const name of ["alice", "bob", "carol", "erin"]) {
+  // пустой, но уже в каталоге (плановый обход): у запуска нет живого repo-GET проверки прав
+  seedRepo(t, { org: "team", repo: "hollowcat" });
+  for (const name of ["alice", "bob", "carol", "erin", "dan"]) {
     users[name] = upsertUser(db, `ya-${name}`, name);
     cookies[name] = createSession(db, SECRET, users[name]!);
     storePat(db, SECRET, users[name]!, `pat-${name}-0000000`);
@@ -359,6 +367,16 @@ describe("HTTP: анализ по кнопке для репозиториев �
 
   test("репозиторий из списка, которого нет в каталоге, – ставится и попадает в каталог", async () => {
     expect(await scan("bob", "team/newpub")).toMatchObject({ status: 202, code: null });
+  }, 60_000);
+
+  test("пустой (ни одного коммита по ответу SourceCraft) – 409 repo_empty без заявки и без строки отказа", async () => {
+    const before = refusedRows("alice");
+    expect(await scan("alice", "team/hollow")).toMatchObject({ status: 409, code: "repo_empty" });
+    expect(refusedRows("alice")).toBe(before);
+  }, 60_000);
+
+  test("пустой из каталога у зрителя без прочитанного списка – тоже 409: пустоту проверяет живой repo-GET постановки", async () => {
+    expect(await scan("dan", "team/hollowcat")).toMatchObject({ status: 409, code: "repo_empty" });
   }, 60_000);
 
   test("публичный не из организаций – 403 not_own без строки отказа", async () => {

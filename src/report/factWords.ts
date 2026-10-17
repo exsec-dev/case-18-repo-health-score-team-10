@@ -3,7 +3,7 @@
 // Словами описаны факты, на которые ссылаются правила рекомендаций (`recommend.ts`),
 // прочие — парами «поле – значение», как в приложении В отчета.
 // Тексты следуют правилам языка UI (среднее тире, без «ё», цифры);
-// «—» — только глиф «нет данных».
+// «–» — только глиф «нет данных».
 
 import { fmtKb } from "./submetrics";
 
@@ -12,9 +12,9 @@ type Obj = Record<string, unknown>;
 const obj = (v: unknown): Obj | null => (v !== null && typeof v === "object" && !Array.isArray(v) ? (v as Obj) : null);
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
 const n = (v: unknown, digits = 0): string =>
-  isNum(v) ? v.toLocaleString("ru-RU", { maximumFractionDigits: digits, minimumFractionDigits: 0 }).replace(/ /g, " ") : "—";
-const yesNo = (v: unknown): string => (v === true ? "есть" : v === false ? "нет" : "—");
-const pct = (share: unknown): string => (isNum(share) ? `${Math.round(share * 100)}%` : "—");
+  isNum(v) ? v.toLocaleString("ru-RU", { maximumFractionDigits: digits, minimumFractionDigits: 0 }).replace(/ /g, " ") : "–";
+const yesNo = (v: unknown): string => (v === true ? "есть" : v === false ? "нет" : "–");
+const pct = (share: unknown): string => (isNum(share) ? `${Math.round(share * 100)}%` : "–");
 
 function plural(value: number, one: string, few: string, many: string): string {
   const m10 = Math.abs(value) % 10;
@@ -32,7 +32,7 @@ function dayWord(value: number): string {
 
 /** Длительность в секундах → «N с» / «N мин». */
 function duration(sec: unknown): string {
-  if (!isNum(sec)) return "—";
+  if (!isNum(sec)) return "–";
   return sec < 120 ? `${n(sec)} с` : `${n(sec / 60, 1)} мин`;
 }
 
@@ -59,7 +59,7 @@ const WORDS: Record<string, Words> = {
     if (v.present === false) return ["README в репозитории нет"];
     const flags = obj(v.flags) ?? {};
     return [
-      `README – ${isNum(v.bytes) ? fmtKb(v.bytes) : "—"}, разделов с заголовками – ${n(v.sections)}`,
+      `README – ${isNum(v.bytes) ? fmtKb(v.bytes) : "–"}, разделов с заголовками – ${n(v.sections)}`,
       `Разделы о запуске: установка – ${yesNo(flags.install)}, сборка – ${yesNo(flags.build)}, тесты – ${yesNo(flags.test)}`,
     ];
   },
@@ -72,7 +72,7 @@ const WORDS: Record<string, Words> = {
     const count = isNum(v.runs_count) ? v.runs_count : null;
     if (count === 0) return ["Запусков CI нет"];
     return [
-      `Последний запуск – ${typeof v.last_status === "string" ? (RUN_WORD[v.last_status] ?? v.last_status) : "—"}`,
+      `Последний запуск – ${typeof v.last_status === "string" ? (RUN_WORD[v.last_status] ?? v.last_status) : "–"}`,
       `Успешных – ${pct(v.success_rate)}${count !== null ? ` из ${n(count)} ${plural(count, "запуска", "запусков", "запусков")}` : ""}`,
       `Типичная длительность – ${duration(v.duration_p50)}, успешных подряд – ${n(v.green_streak)}`,
     ];
@@ -83,7 +83,7 @@ const WORDS: Record<string, Words> = {
     if (open === 0 && closed === 0) return ["Задач нет"];
     return [
       `Открыто – ${n(open)}${isNum(v.in_progress) && v.in_progress > 0 ? ` (в работе ${n(v.in_progress)})` : ""}, закрыто – ${n(closed)}${isNum(v.closed_instant) && v.closed_instant > 0 ? ` (быстрее часа – ${n(v.closed_instant)}, в расчет не входят)` : ""}`,
-      `Типичное время закрытия – ${isNum(v.median_close_days) ? `${n(v.median_close_days, 1)} ${dayWord(v.median_close_days)}` : "—"}`,
+      `Типичное время закрытия – ${isNum(v.median_close_days) ? `${n(v.median_close_days, 1)} ${dayWord(v.median_close_days)}` : "–"}`,
       `Открытых без обновлений дольше 90 дней – ${n(v.stale_90d)}`,
     ];
   },
@@ -118,7 +118,7 @@ function pairs(value: unknown, prefix = ""): string[] {
   }
   const o = obj(value);
   if (o) return Object.entries(o).flatMap(([k, x]) => pairs(x, prefix ? `${prefix}.${k}` : k));
-  const s = value === true ? "да" : value === false ? "нет" : value === null || value === undefined ? "—" : String(value);
+  const s = value === true ? "да" : value === false ? "нет" : value === null || value === undefined ? "–" : String(value);
   return [`${prefix || "значение"} – ${s}`];
 }
 

@@ -105,7 +105,7 @@ describe("Р15 + П1.13: затухание полностью снято по �
 // «не учитывается» – вклад показан полосой под числами.
 // ---------------------------------------------------------------------------
 
-describe("Р14: вклад категории — одна плашка, а не строка «вес → вклад»", () => {
+describe("Р14: вклад категории – одна плашка, а не строка «вес → вклад»", () => {
   test("CategoryRow: плашки «Вклад» нет, старой строки нет, «не учитывается» нет", () => {
     const row = between(codeOf("RepoPage.tsx"), "function CategoryRow", "function Markers");
     expect({
@@ -143,7 +143,7 @@ describe("Р12 (MD): «закрыто»/«закрыто доступом» → 
     const out = mdLocked();
     expect({
       // закрытая категория в отчете – «недоступно» и фраза по причине доступа, а не «нет данных»
-      statusCell: out.includes("| CI/CD | — | недоступно | У вашего токена нет прав на эти данные репозитория. |"),
+      statusCell: out.includes("| CI/CD | – | недоступно | У вашего токена нет прав на эти данные репозитория. |"),
       detailHeader: out.includes("### Безопасность – недоступно"),
       oldStatusCell: out.includes("закрыто доступом"),
       oldDetailHeader: /### [^\n]* – закрыто$/m.test(out),
@@ -166,7 +166,7 @@ describe("Р20: значения подметрик округлены, дока
     expect(mod.roundFacts!({ ratio: 0.8723404255319149, count: 47 })).toEqual({ ratio: 0.87, count: 47 });
   });
 
-  test("MD: в таблице подметрик доля округлена, поповер доказательства — нет", () => {
+  test("MD: в таблице подметрик доля округлена, поповер доказательства – нет", () => {
     const out = mdOpen();
     const page = srcOf("RepoPage.tsx");
     expect({
@@ -284,7 +284,7 @@ describe("Б5 (Р18, Р19): правило языка в текстах движ
     expect({ emDash: src.includes("—"), yo: /[ёЁ]/.test(src) }).toEqual({ emDash: false, yo: false });
   });
 
-  test("Р18: две названные пользовательские строки API — по правилу языка", async () => {
+  test("Р18: две названные пользовательские строки API – по правилу языка", async () => {
     const { CHANNEL_DELTA_HIDDEN_TEXT } = (await import("../src/api/repos")) as { CHANNEL_DELTA_HIDDEN_TEXT: string };
     expect(CHANNEL_DELTA_HIDDEN_TEXT).toBe("повысит балл категории «CI/CD»; насколько вырастет Repo Health Score, видно при доступе к CI/CD и Безопасности");
     expect(CHANNEL_DELTA_HIDDEN_TEXT).not.toMatch(/[—ё\d]/);
@@ -293,7 +293,7 @@ describe("Б5 (Р18, Р19): правило языка в текстах движ
   });
 
   // подпись фактов рекомендации – «Показатель:»
-  test("Р19: подпись фактов рекомендации — «Причина»", () => {
+  test("Р19: подпись фактов рекомендации – «Причина»", () => {
     const src = codeOf("RepoPage.tsx");
     expect({ newWord: src.includes("Показатель:"), oldWord: src.includes("Основано на фактах") || src.includes("Основание:") || src.includes("Причина:") }).toEqual({ newWord: true, oldWord: false });
   });
@@ -359,7 +359,7 @@ describe("Б4 (Р14, Р16): список категорий и контейне�
 
   // Табов нет – разделы «Категории» и «Рекомендации» живут в том же контейнере,
   // что блок величины.
-  test("Р16 → А1: разделы ленты — в контейнере с границами, как блок величины; табов нет", () => {
+  test("Р16 → А1: разделы ленты – в контейнере с границами, как блок величины; табов нет", () => {
     const src = codeOf("RepoPage.tsx");
     const categories = between(src, "function Categories", "function LockedCategories");
     const recs = between(src, "function Recommendations", "function RecommendationRow");
@@ -516,7 +516,7 @@ describe("Б2 (Р3, Р21): строка рейтинга и контрол со�
 
   // Сортируют заголовки колонок (как в таблицах платформы); проверяется, что
   // селект сортировки не вернулся.
-  test("Р21: селекта сортировки в тулбаре нет — сортируют заголовки колонок", () => {
+  test("Р21: селекта сортировки в тулбаре нет – сортируют заголовки колонок", () => {
     const src = codeOf("Rating.tsx");
     expect({
       selectGone: src.includes('label="Сортировка:"'),
@@ -532,7 +532,7 @@ describe("Б2 (Р3, Р21): строка рейтинга и контрол со�
 // ---------------------------------------------------------------------------
 
 describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечаниям владельца 1-2, 5-6, 8-9", () => {
-  test("Р1/Р2: у иконки поиска отступ справа, текст подсказки — формулировка владельца", () => {
+  test("Р1/Р2: у иконки поиска отступ справа, текст подсказки – формулировка владельца", () => {
     const src = codeOf("Rating.tsx");
     const input = between(src, "<TextInput", "controlProps=");
     expect({
@@ -543,7 +543,7 @@ describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечан
     }).toEqual({ iconGap: true, hint: true, oldHint: false, placeholderKept: true });
   });
 
-  test("Р5: заголовок и ОДИН текст под ним; охват — числами из БД, не константой", () => {
+  test("Р5: заголовок и ОДИН текст под ним; охват – числами из БД, не константой", () => {
     const src = codeOf("Rating.tsx");
     expect({
       title: src.includes('title="Рейтинг здоровья открытых репозиториев"'),
@@ -557,7 +557,7 @@ describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечан
     }).toEqual({ title: true, oneLead: true, oldSubheader: false, secondParagraph: false, fromDb: true, wave: false, concise: true });
   });
 
-  test("Р6: в числовых диапазонах дефис — шкала, MD-таблица подметрик, слот сравнения", async () => {
+  test("Р6: в числовых диапазонах дефис – шкала, MD-таблица подметрик, слот сравнения", async () => {
     const { SCORE_SCALE } = (await import("../src/web/format")) as { SCORE_SCALE: { range: string }[] };
     expect(SCORE_SCALE.map((s) => s.range)).toEqual(["70-100", "40-69", "0-39"]);
     // словесная шкала в MD – в разделе «Как считается»
@@ -565,10 +565,10 @@ describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечан
     const { SLOT_EMPTY } = (await import("../src/web/slots")) as { SLOT_EMPTY: { compare: { title: string } } };
     expect(SLOT_EMPTY.compare.title).toBe("Добавьте 2-3 репозитория");
     // глиф «нет данных» (длинное тире) правилом не затронут
-    expect(mdLocked()).toContain("| CI/CD | — | недоступно |");
+    expect(mdLocked()).toContain("| CI/CD | – | недоступно |");
   });
 
-  test("Р8: абзац под «Вклад категорий» снят, сведения — в подсказке у заголовка", () => {
+  test("Р8: абзац под «Вклад категорий» снят, сведения – в подсказке у заголовка", () => {
     const src = srcOf("Rating.tsx");
     const section = between(src, 'title="Вклад категорий"', "</AsideSection>");
     expect({
@@ -579,7 +579,7 @@ describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечан
     }).toEqual({ helpAtTitle: true, keepsMeaning: true, paragraphGone: true, asideSupportsHelp: true });
   });
 
-  test("Р9: пояснение порога — формулировка владельца, число порога из БД на экране", () => {
+  test("Р9: пояснение порога – формулировка владельца, число порога из БД на экране", () => {
     const src = codeOf("Rating.tsx");
     const item = between(src, 'name="Порог оценки"', "</DefinitionList.Item>");
     expect({
@@ -597,7 +597,7 @@ describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечан
 // ---------------------------------------------------------------------------
 
 if (process.env.AUDIT_STRICT) {
-  test("строгий режим: ни одной находки под repro/test.failing — зелёный значит «закрыто»", () => {
+  test("строгий режим: ни одной находки под repro/test.failing – зелёный значит «закрыто»", () => {
     const src = readFileSync(import.meta.path, "utf8");
     const parked = src.match(/^[ \t]*(repro|test\.failing)\(/gm) ?? [];
     expect({ parked, wrapperIsPlainTest: repro === test }).toEqual({ parked: [], wrapperIsPlainTest: true });

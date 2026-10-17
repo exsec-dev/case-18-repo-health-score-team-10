@@ -23,7 +23,7 @@ const num = (s: string): number => Number(s.replace("−", "-").replace(",", "."
 
 describe("К9.4: каждое число отчета прослеживается до поля в приложении", () => {
   for (const name of REPORT_FIXTURES.filter((n) => n !== "never")) {
-    test(`${name}: итог, категории и показатели разбора — строками приложения Б; сумма приложения А = показатель`, () => {
+    test(`${name}: итог, категории и показатели разбора – строками приложения Б; сумма приложения А = показатель`, () => {
       const { card, close } = fixtureCard(name);
       try {
         const model = buildReportModel(card);
@@ -68,11 +68,11 @@ describe("К9.4: каждое число отчета прослеживаетс
             const parts = calc.rows
               .slice(0, -1)
               .map((r) => r.at(-1)!.map((f) => f.text).join(""))
-              .filter((v) => v !== "—");
+              .filter((v) => v !== "–");
             const sum = parts.reduce((acc, v) => acc + Number(v.replace(",", ".")), 0);
             expect(Math.round(sum * 10) / 10).toBe(hero.value);
           }
-          const sum = calc.rows.slice(0, -1).reduce((s, r) => s + (r[3]![0]!.text === "—" ? 0 : num(r[3]![0]!.text)), 0);
+          const sum = calc.rows.slice(0, -1).reduce((s, r) => s + (r[3]![0]!.text === "–" ? 0 : num(r[3]![0]!.text)), 0);
           expect(Math.abs(sum - num(total.split(" ≈ ")[0]!))).toBeLessThan(0.35);
         }
       } finally {
@@ -81,7 +81,7 @@ describe("К9.4: каждое число отчета прослеживаетс
     });
   }
 
-  test("в приложении нет JSON: значения фактов — «поле – значение», длинные списки — счетчиком", () => {
+  test("в приложении нет JSON: значения фактов – «поле – значение», длинные списки – счетчиком", () => {
     const { card, close } = fixtureCard("full");
     try {
       const appendix = renderRepoReport(card).split("## Приложение")[1]!;
@@ -113,7 +113,7 @@ describe("Д3: без оценки отчета нет, пустое состо�
     expect(`${title} ${description}`).not.toMatch(/скан|факт/i);
   });
 
-  test("скана не было — отчета тоже нет, карточка говорит «еще не сканировался»", () => {
+  test("скана не было – отчета тоже нет, карточка говорит «еще не сканировался»", () => {
     seedRepo(t, { org: "d3", repo: "never" });
     const card = getRepoCard(t.db, "d3", "never")!;
     expect(card.scan).toBeNull();
@@ -124,15 +124,16 @@ describe("Д3: без оценки отчета нет, пустое состо�
 
   test("карточка берет те же тексты (одна функция `noScoreText`)", () => {
     const page = readFileSync(join(import.meta.dir, "..", "src", "web", "RepoPage.tsx"), "utf8");
-    expect(page).toContain("title={noScoreText(card.scan).title}");
-    expect(page).toContain("description={noScoreText(card.scan).description}");
+    // пустой репозиторий (живой список по токену) — свой текст, иначе общий с отчетом
+    expect(page).toContain('title={emptyRepo ? "Анализировать пока нечего" : noScoreText(card.scan).title}');
+    expect(page).toContain("description={emptyRepo ? EMPTY_REPO_TEXT : noScoreText(card.scan).description}");
     expect(page).not.toContain('"Скан был – данных для оценки не хватило"');
   });
 });
 
 // UX 17.10: статус анализа «полный» → «полностью»
-describe("Д4: усеченная история — ограничение данных, статус «полностью» ей не противоречит", () => {
-  test("полный скан с усеченной историей: в «Ограничениях данных» — дата начала истории", () => {
+describe("Д4: усеченная история – ограничение данных, статус «полностью» ей не противоречит", () => {
+  test("полный скан с усеченной историей: в «Ограничениях данных» – дата начала истории", () => {
     const t = makeApiDb();
     try {
       const repoId = seedRepo(t, { org: "d4", repo: "big" });

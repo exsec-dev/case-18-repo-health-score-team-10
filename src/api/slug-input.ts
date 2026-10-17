@@ -32,3 +32,11 @@ export function parseFavoriteInput(raw: string): { org: string; repo: string } |
   if (!slugSegmentOk(parts[0]) || !slugSegmentOk(parts[1])) return null;
   return { org: parts[0]!, repo: parts[1]! };
 }
+
+/**
+ * Страница репо на SourceCraft (шаблон платформы, колонки в схеме нет) – один
+ * литерал для карточки, строки рейтинга и шапки репозитория вне каталога.
+ */
+export function repoWebUrl(org: string, repo: string): string {
+  return `https://sourcecraft.dev/${org}/${repo}`;
+}

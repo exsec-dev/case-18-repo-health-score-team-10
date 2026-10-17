@@ -22,12 +22,12 @@
 //                               {trend: null, few_runs, completed, needed};
 //   issues.backlog_trend      — {created, closed, balance, direction};
 //   issues.monthly_flow       — [{from, created, closed}] от старых окон к новым;
-//   доли — 0..1 (показ в процентах); без значения — «—».
+//   доли — 0..1 (показ в процентах); без значения — «–».
 
 import { MINUS } from "../web/format";
 
 /** Глиф «нет данных» (tri-state): тот же, что у `fmtScore` и ячеек MD. */
-export const NO_VALUE = "—";
+export const NO_VALUE = "–";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -44,7 +44,7 @@ export interface SubmetricSpec {
   title: string;
   /** единица/форма словами — для документации словаря и тестов */
   unit: string;
-  /** значение → короткая строка; null — значения нет (показывается «—») */
+  /** значение → короткая строка; null — значения нет (показывается «–») */
   format: Formatter;
 }
 
@@ -197,7 +197,7 @@ const backlogTrend: Formatter = (v) => {
   return `${word}, ${signed(b.balance)} за 90 дней (создано ${num(b.created)}, закрыто ${num(b.closed)})`;
 };
 
-/** «2/1, 0/0, 3/2, 4/2, 5/3, 3/2 (создано/закрыто за 30 дней, от старых к новым)»; окно без данных — «—». */
+/** «2/1, 0/0, 3/2, 4/2, 5/3, 3/2 (создано/закрыто за 30 дней, от старых к новым)»; окно без данных — «–». */
 const monthlyFlow: Formatter = (v) => {
   if (!Array.isArray(v) || v.length === 0) return null;
   const cells = v.map((w) => {
@@ -329,7 +329,7 @@ export function subweightKey(sub: string): string {
  * Служебные заметки расчета (`submetrics[*].note`, по-английски, из `compute.ts` /
  * `derived.ts`) в виде для читателя. Сопоставление — по ключу подметрики и
  * началу заметки, а не по точной строке: в БД лежат оценки прошлых версий кода.
- * `value` — что печатается вместо «—» в колонке значения; `remark` — примечание
+ * `value` — что печатается вместо «–» в колонке значения; `remark` — примечание
  * под таблицей. Неизвестная заметка не показывается (null): сырой `note`
  * читателю не печатается никогда.
  */
@@ -388,9 +388,9 @@ export function submetricNote(category: string, sub: string, note: string | null
 const PRESENCE_BY_SCORE = new Set(["documentation.license", "documentation.contributing", "documentation.codeowners"]);
 
 /**
- * Значение подметрики для показа с учетом заметки: «—» заменяется словами
+ * Значение подметрики для показа с учетом заметки: «–» заменяется словами
  * заметки; у файлов «есть/нет» без значения — слово по баллу
- * (лицензия с баллом 100 — «есть», а не «—»).
+ * (лицензия с баллом 100 — «есть», а не «–»).
  */
 export function submetricShownValue(
   category: string,
@@ -423,7 +423,7 @@ export function submetricTitle(category: string, sub: string): string {
 }
 
 /**
- * Значение подметрики короткой строкой по словарю; нет значения — «—».
+ * Значение подметрики короткой строкой по словарю; нет значения — «–».
  * Незнакомый ключ или форма, которую словарь не узнал, — честный запасной
  * вид (число без хвоста, объект — компактным JSON), не пустота и не ошибка.
  */

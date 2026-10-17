@@ -33,9 +33,9 @@ describe("К8.5.14: анализ — своих и репозиториев ва
 
   test("карточка: кнопка анализа — на своем репозитории и репозитории из списка по токену (у остальных элемента нет, а не disabled)", () => {
     const repoPage = code("RepoPage.tsx");
-    // публичный не свой — по списку по токену; список спрашивается только у такого
-    expect(repoPage).toContain('const tokenRepos = useTokenRepos(withPat && !ownRepo && data?.repo.visibility === "public");');
-    expect(repoPage).toContain("const canRefresh = withPat && (ownRepo || tokenRepos?.has(repoKey(org, repo)) === true);");
+    // не свой — по списку по токену; пустой (ни одного коммита) — без кнопки вовсе
+    expect(repoPage).toContain("const emptyRepo = listed?.isEmpty === true;");
+    expect(repoPage).toContain("const canRefresh = withPat && !emptyRepo && (ownRepo || listed !== null);");
     // на телефоне кнопка – иконкой; обе ветки под тем же `canRefresh`
     expect(repoPage).toContain("const refreshButton = canRefresh && phoneBar ? (");
     expect(repoPage).toContain(") : canRefresh && (");
@@ -63,14 +63,12 @@ describe("К8.5.14: анализ — своих и репозиториев ва
     // передают canAnalyze (каждая строка из списка по токену), у пустого репозитория анализа нет
     expect(me).toContain("const canAnalyze = !empty && (canAnalyzeOverride ?? (hasPat && (access?.own === true || member)));");
     expect(me).toContain("member={tokenRepos?.has(repoKey(entry.org, entry.repo)) === true}");
-    // UX 17.10: у своего без анализа — видимая кнопка «Запустить анализ», у оцененного
-    // своего — пункт «Обновить анализ» в меню «…»; у чужого нет ни того, ни другого
-    // «Мои репозитории»: действие анализа — иконкой (обновить / запустить), без меню «…»;
-    // отказ по правам (чужой публичный) сервер объясняет тостом; «Запустить» — primary
-    expect(me).toContain("{canAnalyze && !scored && !iconActions && (");
-    expect(me).toContain("<Icon data={scored ? ArrowsRotateRight : Play} size={16} />");
-    expect(me).toContain('view={scored ? "flat" : "action"}');
-    expect(me).toMatch(/\.\.\.\(canAnalyze && scored\s*\? \[\{ text: "Обновить анализ"/);
+    // UX 18.10: анализа еще не было — вместо плашки «Еще не анализировали» сама кнопка
+    // «Запустить анализ»; повторный анализ и избранное — пункты меню «…» в обоих списках
+    expect(me).toContain("const firstRun = canAnalyze && phase === null && !starting && !entry.planned && !scored && entry.lastScanAt === null;");
+    expect(me).toContain("Запустить анализ");
+    expect(me).toContain('...(canAnalyze && !firstRun\n      ? [{ text: scored ? "Обновить анализ" : "Повторить анализ"');
+    expect(me).toContain('text: favorite.on ? "Убрать из избранного" : "Добавить в избранное"');
   });
 
   test("исход автопроверки при добавлении — человеческим текстом, анализ чужого не обещается", () => {

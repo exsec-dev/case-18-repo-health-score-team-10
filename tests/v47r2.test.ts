@@ -36,8 +36,8 @@ describe("Р2.1: список языков на время загрузки", ()
   });
 });
 
-describe("Р2.2: «не определен» — последней опцией", () => {
-  test("при самом большом счётчике — всё равно в конце; остальные — в порядке фасетов", () => {
+describe("Р2.2: «не определен» – последней опцией", () => {
+  test("при самом большом счётчике – всё равно в конце; остальные – в порядке фасетов", () => {
     const values = langOptions(facets, []).map((o) => o.value);
     expect(values.at(-1)).toBe(" none");
     expect(values.slice(0, -1)).toEqual(["Python", "Go", "Rich Text Format"]);
@@ -50,8 +50,8 @@ describe("Р2.2: «не определен» — последней опцией
   });
 });
 
-describe("Р2.3: язык без цвета платформы — нейтральная точка", () => {
-  test("LanguageName: известный язык без цвета получает нейтральную точку, «не определен» — никакой", () => {
+describe("Р2.3: язык без цвета платформы – нейтральная точка", () => {
+  test("LanguageName: известный язык без цвета получает нейтральную точку, «не определен» – никакой", () => {
     const src = srcOf("src/web/ui.tsx");
     expect(src).toContain('const known = name !== null && !noLanguage;');
     expect(src).toContain('color ? "rh-lang__dot" : "rh-lang__dot rh-lang__dot_neutral"');
@@ -69,9 +69,9 @@ describe("Р2.4: спиннер на кнопке «Отчет»", () => {
   });
 });
 
-describe("Р2.5: PDF — синяя ссылка; аватар снят (В4.9, К9.5); MD — эталоны", () => {
+describe("Р2.5: PDF – синяя ссылка; аватар снят (В4.9, К9.5); MD – эталоны", () => {
   // ссылка в MD – `[адрес](url)`, а не голый URL
-  test("MD всех фикстур байт-в-байт равен эталонам; ссылка в MD — markdown-ссылкой", () => {
+  test("MD всех фикстур байт-в-байт равен эталонам; ссылка в MD – markdown-ссылкой", () => {
     // без оценки отчета нет – фикстура `never` документом не снимается
     for (const name of REPORT_FIXTURES) {
       const { card, close } = fixtureCard(name);
@@ -85,7 +85,7 @@ describe("Р2.5: PDF — синяя ссылка; аватар снят (В4.9, 
     }
   });
 
-  test("ссылка на репозиторий в PDF — кликабельная и синяя (токен text-link UI)", () => {
+  test("ссылка на репозиторий в PDF – кликабельная и синяя (токен text-link UI)", () => {
     const { card, close } = fixtureCard("full");
     try {
       const doc = buildPdfDocument(buildReportModel(card)) as { content: Record<string, unknown>[] };
@@ -113,7 +113,7 @@ describe("Р2.5: PDF — синяя ссылка; аватар снят (В4.9, 
     }
   });
 
-  test("буквы — алгоритм Gravity getAvatarDisplayText; инициалы нейтральные, как заглушка SourceCraft", () => {
+  test("буквы – алгоритм Gravity getAvatarDisplayText; инициалы нейтральные, как заглушка SourceCraft", () => {
     expect(avatarInitials("full")).toBe("FU");
     expect(avatarInitials("dozzle-plus")).toBe("DP");
     expect(avatarInitials("its-wednesday-my-dudes")).toBe("IW");
@@ -123,7 +123,7 @@ describe("Р2.5: PDF — синяя ссылка; аватар снят (В4.9, 
 });
 
 describe("Р2.6: обновление рейтинга без моргания (stale-while-revalidate)", () => {
-  test("stateOnReload: с keepPrevious прежние данные остаются как stale; без — пустая загрузка, как раньше", async () => {
+  test("stateOnReload: с keepPrevious прежние данные остаются как stale; без – пустая загрузка, как раньше", async () => {
     const { stateOnReload } = await import("../src/web/api");
     const ok = { kind: "ok" as const, data: { n: 1 } };
     expect(stateOnReload(ok, true)).toEqual({ kind: "loading", stale: { n: 1 } });

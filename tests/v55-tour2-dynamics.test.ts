@@ -89,7 +89,7 @@ test("версии тура 2: модель 4.5.0-hci, сборщик 5", () => 
 // ---------- стабильность CI в динамике ----------
 
 describe("Д1 сборщик: лента recent_runs по перечню Run.Status спеки", () => {
-  test("каждое значение enum спеки — своя ветка; незнакомый статус — явная ветка вне ленты", () => {
+  test("каждое значение enum спеки – своя ветка; незнакомый статус – явная ветка вне ленты", () => {
     const spec = JSON.parse(readFileSync(join(import.meta.dir, "..", "docs", "api-spec", "sourcecraft.swagger.json"), "utf8")) as { definitions: Record<string, { enum?: string[] }> };
     const values = spec.definitions["Run.Status"]!.enum!;
     expect(values.length).toBe(10);
@@ -128,7 +128,7 @@ describe("Д1 сборщик: лента recent_runs по перечню Run.Sta
     for (const leak of ["boom", "alice", "build", "/home"]) expect(text.includes(leak)).toBe(false);
   });
 
-  test("лента — не больше 20 завершенных; момент — завершение, иначе начало, иначе создание", async () => {
+  test("лента – не больше 20 завершенных; момент – завершение, иначе начало, иначе создание", async () => {
     const many = Array.from({ length: 30 }, (_, i) => run(i % 3 === 0 ? "failed" : "success", i + 1));
     const noFinish = { id: "x", status: "success", dates: { created_at: ago(0.5, -1000), started_at: ago(0.5) } };
     const onlyCreated = { id: "y", status: "failed", dates: { created_at: ago(0.25) } };
@@ -140,7 +140,7 @@ describe("Д1 сборщик: лента recent_runs по перечню Run.Sta
     expect(trail[2]).toEqual({ outcome: "failure", at: ago(1, 120_000) });
   });
 
-  test("CI не виден (403) — факта ленты нет, no-data access, как у категории", async () => {
+  test("CI не виден (403) – факта ленты нет, no-data access, как у категории", async () => {
     const f = await restFacts(restClient({ runsStatus: 403 }));
     expect(f.get("cicd.runs")).toEqual({ status: "no-data", value: { reason: "access", detail: "status 403" } });
   });
@@ -158,14 +158,14 @@ describe("Д1 показатель: доля успешных последних
     expect(ciStabilityValue(trail("ssssssssff" + "ssssssffff"))!.trend).toBe("better");
   });
 
-  test("меньше 20 завершенных — окно пополам; 10 — минимум (окно 5, одна смена — 20 п.п.)", () => {
+  test("меньше 20 завершенных – окно пополам; 10 – минимум (окно 5, одна смена – 20 п.п.)", () => {
     expect(ciStabilityValue(trail("ssssss" + "sssss" + "f"))).toEqual({ trend: "better", recent_share: 1, previous_share: 5 / 6, window: 6 });
     expect(ciStabilityValue(trail("sssss" + "ssssf"))).toEqual({ trend: "better", recent_share: 1, previous_share: 0.8, window: 5 });
     // нечетное число: лишний самый старый запуск в сравнение не идет
     expect(ciStabilityValue(trail("sssss" + "sssss" + "f"))).toEqual({ trend: "same", recent_share: 1, previous_share: 1, window: 5 });
   });
 
-  test("малая выборка — «нет данных» с причиной «мало запусков» (незнание), не «без изменений»", () => {
+  test("малая выборка – «нет данных» с причиной «мало запусков» (незнание), не «без изменений»", () => {
     expect(ciStabilityValue(trail("sssssssss"))).toEqual({ trend: null, few_runs: true, completed: 9, needed: 10 });
     expect(ciStabilityValue([])).toEqual({ trend: null, few_runs: true, completed: 0, needed: 10 });
     expect(shown("cicd.stability", { score: null, value: ciStabilityValue(trail("sssssss")) })).toBe("нет данных, мало запусков (7 завершенных, нужно от 10)");
@@ -221,7 +221,7 @@ describe("Д2 сборщик: поток задач по 30-дневным ок�
     ],
   };
 
-  test("числа окон на фикстуре с известным ответом; мгновенно закрытые — отдельно", async () => {
+  test("числа окон на фикстуре с известным ответом; мгновенно закрытые – отдельно", async () => {
     const f = await restFacts(restClient(lists));
     const flow = f.get("issues.stats")!.value.flow as { window_days: number; windows: { from: string; created: number; closed: number; instant: number }[]; complete_since?: string };
     expect(flow.window_days).toBe(30);
@@ -240,7 +240,7 @@ describe("Д2 сборщик: поток задач по 30-дневным ок�
     expect(backlogValue(flow.windows)).toEqual({ created: 4, closed: 2, balance: 2, direction: "stable" });
   });
 
-  test("список уперся в кап страниц — окна раньше границы null, баланс «нет данных» (пометка, не занижение)", async () => {
+  test("список уперся в кап страниц – окна раньше границы null, баланс «нет данных» (пометка, не занижение)", async () => {
     const closedPages = [
       [issue("n1", ago(20), { completed_at: ago(10), updated_at: ago(10) })],
       [issue("n2", ago(80), { completed_at: ago(60), updated_at: ago(60) })],
@@ -254,10 +254,10 @@ describe("Д2 сборщик: поток задач по 30-дневным ок�
     const d = issueDynamics(f.get("issues.stats")!.value);
     expect(d.backlog_trend).toEqual({ score: null, value: null, note: DYNAMICS_TRUNCATED });
     expect(shown("issues.backlog_trend", d.backlog_trend)).toBe("нет данных, список задач обрезан и 90 дней не покрыты");
-    expect(shown("issues.monthly_flow", d.monthly_flow)).toBe("—, —, —, —, 0/1, 2/1 (создано/закрыто за 30 дней, от старых к новым)");
+    expect(shown("issues.monthly_flow", d.monthly_flow)).toBe("–, –, –, –, 0/1, 2/1 (создано/закрыто за 30 дней, от старых к новым)");
   });
 
-  test("сервер не обещал продолжения — список не обрезан, даже если страниц ровно кап", async () => {
+  test("сервер не обещал продолжения – список не обрезан, даже если страниц ровно кап", async () => {
     const f = await restFacts(restClient({ open: [issue("o", ago(5))], closed: [[issue("n1", ago(20), { completed_at: ago(10) })], [issue("n2", ago(80), { completed_at: ago(60) })]] }), 2);
     expect((f.get("issues.stats")!.value.flow as { complete_since?: string }).complete_since).toBeUndefined();
   });
@@ -302,7 +302,7 @@ describe("Д2 показатель: баланс за 90 дней и напра�
   });
 
   // UX 17.10: «трекер не ведется» → «задачи не ведутся»
-  test("задачи не ведутся — тот же статус, что у категории, а не «0 динамики»", () => {
+  test("задачи не ведутся – тот же статус, что у категории, а не «0 динамики»", () => {
     const d = issueDynamics({ open: 0, closed: 0, flow: { window_days: 30, windows: flow([0, 0], [0, 0], [0, 0]) } });
     expect(d.backlog_trend).toEqual({ score: null, value: null, note: DYNAMICS_TRACKER_UNUSED });
     expect(shown("issues.backlog_trend", d.backlog_trend)).toBe("задачи не ведутся");
@@ -312,7 +312,7 @@ describe("Д2 показатель: баланс за 90 дней и напра�
     expect(Object.keys(cat.submetrics).sort()).toEqual(["backlog_trend", "monthly_flow", "tracker_unused"]);
   });
 
-  test("канал задач недоступен — показателя нет вовсе (категория «нет данных»)", () => {
+  test("канал задач недоступен – показателя нет вовсе (категория «нет данных»)", () => {
     const cat = computeFromFacts(new Map(), { scanId: 0, repoId: 0 }, NOW).categories.issues;
     expect(cat).toEqual({ score: null, no_data: "issues channel no-data", submetrics: {} });
   });
@@ -321,7 +321,7 @@ describe("Д2 показатель: баланс за 90 дней и напра�
 // ---------- старые факты, пересчет ----------
 
 describe("старые факты (сборщик до 5): «нет данных», пересчет не падает", () => {
-  test("без новых полей — оба показателя «нет данных» (незнание), не «без изменений» и не 0", () => {
+  test("без новых полей – оба показателя «нет данных» (незнание), не «без изменений» и не 0", () => {
     const s = computeFromFacts(new Map(healthyFacts().map((f) => [f.key, f.value])), { scanId: 0, repoId: 0 }, NOW);
     expect(s.categories.cicd.submetrics.stability).toEqual({ score: null, value: null, note: DYNAMICS_OLD_COLLECTOR });
     expect(s.categories.issues.submetrics.backlog_trend).toEqual({ score: null, value: null, note: DYNAMICS_OLD_COLLECTOR });
@@ -332,7 +332,7 @@ describe("старые факты (сборщик до 5): «нет данных
     }
   });
 
-  test("пересчет из БД со старыми фактами пишет строку 4.4.0 и не падает; мусорные новые поля — тоже", () => {
+  test("пересчет из БД со старыми фактами пишет строку 4.4.0 и не падает; мусорные новые поля – тоже", () => {
     const t = makeApiDb();
     try {
       const garbage: FactSpec[] = cardFacts().map((f) =>
@@ -378,7 +378,7 @@ describe("права: стабильность CI подчиняется пра�
     expect(card.score!.categories.cicd.submetrics.stability).toEqual({ score: null, value: { trend: "same", recent_share: 0.7, previous_share: 0.8, window: 10 } });
   });
 
-  test("без прав — ни показателя, ни ленты запусков в карточке", () => {
+  test("без прав – ни показателя, ни ленты запусков в карточке", () => {
     const card = cardFor(NO_PAT, "no-session");
     expect(card.score!.categories.cicd.locked).toBeDefined();
     expect(card.score!.categories.cicd.submetrics).toEqual({});
@@ -420,7 +420,7 @@ describe("инвариант: новые поля фактов не меняют
     }
   }
 
-  test("все варианты новых полей — те же числа и тот же набор рекомендаций, что без них", () => {
+  test("все варианты новых полей – те же числа и тот же набор рекомендаций, что без них", () => {
     const base = scored({}, {});
     expect(base.index).not.toBeNull();
     expect(base.full).not.toBeNull();
@@ -448,15 +448,14 @@ describe("отрисованный MD: справочные строки в ра
       const fresh = md.split("\n").filter((l) => /Стабильность CI|Динамика бэклога|Поток задач по 30-дневным окнам/.test(l));
       expect(fresh.length).toBeGreaterThanOrEqual(5);
       for (const l of fresh) {
-        const body = l.replace(/→ —/g, "").replace(/\| — \|/g, "");
-        expect({ l, long: body.includes("—"), yo: /ё/i.test(body) }).toEqual({ l, long: false, yo: false });
+        expect({ l, long: l.includes("—"), yo: /ё/i.test(l) }).toEqual({ l, long: false, yo: false });
       }
     } finally {
       close();
     }
   });
 
-  test("без прав на CI — строки стабильности в MD нет; старый сборщик — «нет данных» словами", () => {
+  test("без прав на CI – строки стабильности в MD нет; старый сборщик – «нет данных» словами", () => {
     const anon = fixtureCard("anon");
     const fullNull = fixtureCard("full-null");
     try {
@@ -468,10 +467,10 @@ describe("отрисованный MD: справочные строки в ра
     }
   });
 
-  test("форматтер: пустое значение — «—» (tri-state)", () => {
+  test("форматтер: пустое значение – «–» (tri-state)", () => {
     for (const key of ["cicd.stability", "issues.backlog_trend", "issues.monthly_flow"]) {
       const [cat, sub] = key.split(".") as [string, string];
-      expect(formatSubmetricValue(cat, sub, null, AT)).toBe("—");
+      expect(formatSubmetricValue(cat, sub, null, AT)).toBe("–");
     }
   });
 });

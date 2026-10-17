@@ -105,7 +105,7 @@ function blockLines(block: Block): string[] {
       });
     case "detail": {
       // без балла — словом плашки («нет данных» или «недоступно»), как в PDF
-      const out = [`### ${block.title} – ${block.scoreText === "—" ? block.chip.text.toLowerCase() : `${block.scoreText}, ${block.chip.text.toLowerCase()}`}`];
+      const out = [`### ${block.title} – ${block.scoreText === "–" ? block.chip.text.toLowerCase() : `${block.scoreText}, ${block.chip.text.toLowerCase()}`}`];
       if (block.table) out.push("", ...tableLines(block.table.columns, block.table.rows));
       for (const note of block.notes) out.push("", lineMd(note));
       return out;

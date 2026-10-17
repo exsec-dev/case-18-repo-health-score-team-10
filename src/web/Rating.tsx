@@ -649,7 +649,7 @@ function UnscoredTable({ items, meta, active, refreshing, phone = false }: { ite
       name: "Не хватило данных",
       template: (item) => {
         const missing = missingOf(item);
-        return <Text color="complementary">{missing.length > 0 ? missing.join(", ") : "—"}</Text>;
+        return <Text color="complementary">{missing.length > 0 ? missing.join(", ") : "–"}</Text>;
       },
     },
   ];
@@ -891,7 +891,7 @@ function PhoneList({ items, refreshing }: { items: Item[]; refreshing: boolean }
  * группе. Без изменения или без снимка прошлых суток — только место.
  */
 function RankCell({ item }: { item: Item }) {
-  if (item.rank === null) return <Text color="secondary">—</Text>;
+  if (item.rank === null) return <Text color="secondary">–</Text>;
   const d = item.rankDelta;
   const moved = d !== null && d !== 0;
   const up = moved && d! > 0;

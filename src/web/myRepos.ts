@@ -178,7 +178,7 @@ export const TOKEN_STATES: { key: TokenState; title: string }[] = [
   { key: "unscored", title: "Оценки нет" },
   { key: "never", title: "Не анализировали" },
   { key: "failed", title: "Ошибка анализа" },
-  { key: "empty", title: "Пустые" },
+  { key: "empty", title: "Без коммитов" },
 ];
 
 export interface TokenRow {

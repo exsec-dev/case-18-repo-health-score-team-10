@@ -145,11 +145,11 @@ function categoryRow(card: RepoCard, key: CategoryKey, cat: CardCategory, ctx: S
   const name = CATEGORY_TITLES[key];
   const why = categoryWhy(card, key, ctx);
   // закрытая зрителю категория — «Недоступно», а не «нет данных»
-  if (cat.locked !== undefined) return { name, score: null, scoreText: "—", chip: { theme: "unknown", text: "Недоступно" }, why, mark: null };
+  if (cat.locked !== undefined) return { name, score: null, scoreText: "–", chip: { theme: "unknown", text: "Недоступно" }, why, mark: null };
   // то же условие и тот же текст, что у плашки категории на карточке
   // (`cardView` → `c.stale`, `STALE_CATEGORY_MARK`)
   const mark: Chip | null = cat.stale === true ? { theme: "warning", text: STALE_CATEGORY_MARK } : null;
-  if (cat.score === null) return { name, score: null, scoreText: "—", chip: scoreChip(null), why, mark };
+  if (cat.score === null) return { name, score: null, scoreText: "–", chip: scoreChip(null), why, mark };
   return { name, score: cat.score, scoreText: fmtScore(cat.score), chip: scoreChip(cat.score), why, mark };
 }
 
@@ -420,7 +420,7 @@ function detailSection(card: RepoCard, ctx: SubmetricContext): Block[] {
   }
   for (const key of without) {
     const row = categoryRow(card, key, cats[key]!, ctx);
-    out.push({ kind: "detail", title: row.name, scoreText: "—", chip: row.chip, table: null, notes: [line(row.why)] });
+    out.push({ kind: "detail", title: row.name, scoreText: "–", chip: row.chip, table: null, notes: [line(row.why)] });
   }
   return out;
 }
@@ -510,14 +510,14 @@ function detailBlock(card: RepoCard, key: CategoryKey, cat: CardCategory, ctx: S
     const remark = submetricNote(key, sub, entry.note)?.remark;
     if (remark) remarks.push(remark);
     if (displayOnly(key, sub)) {
-      if (value !== "—") reference.push(`${submetricTitle(key, sub)} – ${value}`);
+      if (value !== "–") reference.push(`${submetricTitle(key, sub)} – ${value}`);
       continue;
     }
     const action = actionOf.get(`${key}.${sub}`);
     rows.push([
       line(submetricTitle(key, sub)),
       action ? [text(value), text(` (действие ${action})`)] : line(value),
-      line(entry.score === null || entry.score === undefined ? "—" : String(Math.round(entry.score * 100))),
+      line(entry.score === null || entry.score === undefined ? "–" : String(Math.round(entry.score * 100))),
       line(submetricWeightText(key, sub)),
     ]);
   }
@@ -626,7 +626,7 @@ function metricCalc(card: RepoCard, metric: ShownMetric, named: boolean): Block[
       // «не входит» — про состав показателя, «нет данных» — про данные: у
       // категории показателя без данных первое читалось как исключение из
       // методики, хотя вес просто перешел к остальным
-      rows.push([line(CATEGORY_TITLES[key]), line(cat.score === null ? "—" : fmtDecimal(cat.score, 1)), line(inMetric ? "нет данных" : "не входит"), line("—")]);
+      rows.push([line(CATEGORY_TITLES[key]), line(cat.score === null ? "–" : fmtDecimal(cat.score, 1)), line(inMetric ? "нет данных" : "не входит"), line("–")]);
       continue;
     }
     const share = metric.weight(key) / wsum;
@@ -693,7 +693,7 @@ function coverageCalc(card: RepoCard): Block[] {
     base += weight;
     const has = cats[key]?.score !== null && cats[key]?.score !== undefined;
     if (has) collected += weight;
-    rows.push([line(CATEGORY_TITLES[key]), line(String(weight)), line(has ? "есть" : "нет"), line(has ? String(weight) : "—")]);
+    rows.push([line(CATEGORY_TITLES[key]), line(String(weight)), line(has ? "есть" : "нет"), line(has ? String(weight) : "–")]);
   }
   rows.push([line("Итого"), line(String(base)), line(""), line(String(collected))]);
   return [
@@ -776,7 +776,7 @@ function sourcesOf(card: RepoCard, key: CategoryKey): string {
 
 /** Сырое значение подметрики — «поле → значение» (приложение Б, без нового словаря). */
 function rawValue(value: unknown): string {
-  if (value === undefined || value === null) return "—";
+  if (value === undefined || value === null) return "–";
   return flatten(value)
     .map(([k, v]) => (k === "" ? v : `${k} ${v}`))
     .join(", ");
@@ -796,12 +796,12 @@ function appendixB(card: RepoCard, shown: ShownMetric[]): Block[] {
         line(`сумма по ${metric.keys.length === PUBLIC.length ? "4 открытым категориям" : "6 категориям"}: балл × вес, приложение А`),
         line("баллы категорий"),
         line(at),
-        line("—"),
+        line("–"),
       ]);
     }
   } else {
     // ссылка на расчет приложения А, где напечатано каждое слагаемое
-    rows.push([[strong(`Собрано ${fmtCoverage(score.indexCoverage)} данных`)], line("вес открытых категорий с данными ÷ вес 4 открытых категорий, приложение А"), [code("scores.index_coverage"), text(` → ${fmtDecimal(score.indexCoverage, 3, { trim: true })}`)], line(at), line("—")]);
+    rows.push([[strong(`Собрано ${fmtCoverage(score.indexCoverage)} данных`)], line("вес открытых категорий с данными ÷ вес 4 открытых категорий, приложение А"), [code("scores.index_coverage"), text(` → ${fmtDecimal(score.indexCoverage, 3, { trim: true })}`)], line(at), line("–")]);
   }
   const since = historyTruncatedSince(card);
   const truncated = since ? `история загружена с ${fmtDate(since)}` : null;
@@ -810,11 +810,11 @@ function appendixB(card: RepoCard, shown: ShownMetric[]): Block[] {
   for (const key of CATEGORY_ORDER) {
     const cat = cats[key];
     if (!cat || cat.locked !== undefined || cat.score === null) continue;
-    const limit = cat.stale ? "данные прошлого анализа" : key === "cicd" && cat.no_data ? "результаты запусков недоступны" : "—";
+    const limit = cat.stale ? "данные прошлого анализа" : key === "cicd" && cat.no_data ? "результаты запусков недоступны" : "–";
     rows.push([[strong(`${CATEGORY_TITLES[key]} ${fmtScore(cat.score)}`)], line("сумма по показателям: балл × вес, приложение А"), [code(`${key}.score`), text(` → ${fmtDecimal(cat.score, 4, { trim: true })}`)], line(at), line(limit)]);
     for (const [sub, entry] of Object.entries(cat.submetrics)) {
       const shown = submetricShownValue(key, sub, entry, ctx, cat.submetrics);
-      const subLimit = key === "issues" && sub === "close_days" && close ? "дата закрытия заменена датой изменения" : key === "activity" && truncated ? truncated : "—";
+      const subLimit = key === "issues" && sub === "close_days" && close ? "дата закрытия заменена датой изменения" : key === "activity" && truncated ? truncated : "–";
       // «Порядок расчета» у показателя — с каким весом он входит в балл категории
       const weight = (SUBWEIGHTS[key] as Record<string, number>)[subweightKey(sub)];
       // у «Трекер не ведется» веса нет не потому, что он справочный, а потому,
@@ -851,7 +851,7 @@ function appendixB(card: RepoCard, shown: ShownMetric[]): Block[] {
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}(T[\d:.]+(Z|[+-]\d{2}:?\d{2})?)?$/;
 
 function scalarText(v: unknown): string {
-  if (v === null || v === undefined || v === "") return "—";
+  if (v === null || v === undefined || v === "") return "–";
   if (typeof v === "number") return Number.isInteger(v) ? String(v) : fmtDecimal(v, 4, { trim: true });
   if (typeof v === "boolean") return v ? "да" : "нет";
   if (typeof v === "string") return ISO_DATE.test(v) ? (v.length === 10 ? fmtDate(v) : fmtDateTime(v)) : v;
@@ -876,7 +876,7 @@ export function flatten(value: unknown, prefix = ""): [string, string][] {
     const obj = value as Record<string, unknown>;
     if (obj.truncated === true && typeof obj.preview === "string") return [[prefix, `значение больше 4 КБ (${obj.bytes} байт) – в отчет не выгружается`]];
     const entries = Object.entries(obj);
-    if (entries.length === 0) return [[prefix, "—"]];
+    if (entries.length === 0) return [[prefix, "–"]];
     return entries.flatMap(([k, v]) => flatten(v, prefix ? `${prefix}.${k}` : k));
   }
   return [[prefix, scalarText(value)]];
@@ -1047,8 +1047,8 @@ function appendixC(card: RepoCard): Block[] {
 function appendixD(card: RepoCard): Block[] {
   const { repo, scan, score } = card;
   const rows: InlineLine[][] = [
-    [line("Версия методики"), line(score?.modelVersion ?? "—")],
-    [line("Оценка рассчитана"), line(score ? fmtDateTime(score.computedAt) : "—")],
+    [line("Версия методики"), line(score?.modelVersion ?? "–")],
+    [line("Оценка рассчитана"), line(score ? fmtDateTime(score.computedAt) : "–")],
   ];
   if (scan) {
     rows.push(
@@ -1064,8 +1064,8 @@ function appendixD(card: RepoCard): Block[] {
     // язык приходит из каталога SourceCraft, а не из скачанного репозитория, —
     // поэтому он есть и там, где скачать репозиторий не удалось
     [line("Язык (по каталогу SourceCraft)"), repo.language ? [escaped(repo.language)] : line("не определен")],
-    [line("Реакции"), line(repo.likes === null ? "—" : String(repo.likes))],
-    [line("Ответвления"), line(repo.forks === null ? "—" : String(repo.forks))],
+    [line("Реакции"), line(repo.likes === null ? "–" : String(repo.likes))],
+    [line("Ответвления"), line(repo.forks === null ? "–" : String(repo.forks))],
     [line("Последняя активность"), line(fmtDate(repo.lastActivityAt))],
   );
   return [

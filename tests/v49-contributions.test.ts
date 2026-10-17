@@ -39,7 +39,7 @@ describe("К9.1: сумма показанных вкладов = показат
     });
   }
 
-  test("uikit: простое округление до десятых дало бы 69,8 — наибольший остаток дает 70,0", () => {
+  test("uikit: простое округление до десятых дало бы 69,8 – наибольший остаток дает 70,0", () => {
     const scores = LIVE[0]![1];
     const naive = PUB.reduce((s, k) => s + Math.round(((scores[k]! * INDEX_WEIGHTS[k as keyof typeof INDEX_WEIGHTS]) / 100) * 10), 0);
     expect(naive).toBe(698);
@@ -47,7 +47,7 @@ describe("К9.1: сумма показанных вкладов = показат
     expect(c.kind === "bar" && c.segments.map((s) => fmtContribution(s.tenths))).toEqual(["+21,0", "+18,4", "+11,8", "+18,8"]);
   });
 
-  test("«сильнее всего снижают» — по потере с учетом веса, не по баллу", () => {
+  test("«сильнее всего снижают» – по потере с учетом веса, не по баллу", () => {
     const c = categoryContributions(indexInputs(LIVE[0]![1]), 70)!;
     expect(c.kind === "bar" && c.losses.map((l) => [l.key, fmtLoss(l.loss)])).toEqual([
       ["code", "−12,2"],
@@ -79,7 +79,7 @@ describe("К9.1: сумма показанных вкладов = показат
     expect(c.kind === "bar" && c.segments.reduce((s, x) => s + x.tenths, 0)).toBe(Math.round(total) * 10);
   });
 
-  test("потолок 49 (утекшие секреты) — не полоса, а строка: вклады дали бы больше показателя", () => {
+  test("потолок 49 (утекшие секреты) – не полоса, а строка: вклады дали бы больше показателя", () => {
     expect(SECRETS_CAP).toBe(SECRETS_CRITICAL_TOTAL_CAP);
     const cats: ContributionInput[] = (Object.keys(SCORE_WEIGHTS) as CategoryKey[]).map((key) => ({ key, title: key, score: 80, weight: SCORE_WEIGHTS[key] }));
     const c = categoryContributions(cats, 49)!;
@@ -87,7 +87,7 @@ describe("К9.1: сумма показанных вкладов = показат
     expect(c.kind === "capped" && Math.round(c.uncapped)).toBe(80);
   });
 
-  test("пустой репозиторий — показатель 0 без полосы; нет показателя — нет вкладов", () => {
+  test("пустой репозиторий – показатель 0 без полосы; нет показателя – нет вкладов", () => {
     expect(categoryContributions(indexInputs({ documentation: 50 }), 0, { codeEmpty: true })).toEqual({ kind: "empty", total: 0, reason: null });
     expect(categoryContributions(indexInputs({ documentation: 50 }), null)).toBeNull();
   });
@@ -124,10 +124,10 @@ describe("К9.1: сумма показанных вкладов = показат
   }
 });
 
-describe("К9.11: русские числа в UI и отчете — одна копия форматтеров", () => {
+describe("К9.11: русские числа в UI и отчете – одна копия форматтеров", () => {
   test("десятичная запятая и минус U+2212, а не точка и дефис", () => {
     expect([fmtSigned(1.25), fmtSigned(-12.14), fmtSigned(0), fmtSigned(-0.04)]).toEqual(["+1,3", "−12,1", "+0,0", "+0,0"]);
-    expect([fmtDelta(3.45), fmtNumber(0.8723), fmtNumber(-2.5), fmtNumber(47), fmtNumber(null)]).toEqual(["+3,5", "0,9", "−2,5", "47", "—"]);
+    expect([fmtDelta(3.45), fmtNumber(0.8723), fmtNumber(-2.5), fmtNumber(47), fmtNumber(null)]).toEqual(["+3,5", "0,9", "−2,5", "47", "–"]);
     expect([fmtDecimal(69.86, 1), fmtDecimal(0.5, 2, { trim: true }), fmtDecimal(-0.01, 1)]).toEqual(["69,9", "0,5", "0,0"]);
     expect(fmtBytes(1.5 * 1024 ** 3)).toBe("1,5 ГБ");
   });

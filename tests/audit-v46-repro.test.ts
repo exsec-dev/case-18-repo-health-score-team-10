@@ -53,7 +53,7 @@ seedScore(t, repoId, scanId, { total: 67 });
 seedRecommendation(t, scanId, {
   ruleId: "contributing-missing",
   priority: 1,
-  problem: "Нет CONTRIBUTING — как вносить правки не описано",
+  problem: "Нет CONTRIBUTING – как вносить правки не описано",
   factRef: "docs.presence",
   deltaScore: 2.25,
   expectedImpact: "+2.3 к HealthCraft Index (по одному)",
@@ -67,7 +67,7 @@ const md = (): string => renderRepoReport(getRepoCard(t.db, "v46", "repro", { ac
 // ---------------------------------------------------------------------------
 
 describe("В4.6-1 (У20): качество категорий закодировано в рейтинге и на карточке", () => {
-  test("рейтинг: исключения выделены Label, >=70 нейтрально, null — Label theme=\"unknown\"", () => {
+  test("рейтинг: исключения выделены Label, >=70 нейтрально, null – Label theme=\"unknown\"", () => {
     const src = srcOf("Rating.tsx");
     const cell = src.slice(src.indexOf("function CategoryCell"));
     expect({
@@ -75,7 +75,7 @@ describe("В4.6-1 (У20): качество категорий закодиров
       exceptionsAreLabels: /scoreLabelTheme\(value\)/.test(cell) && /className="rh-cat-chip"/.test(cell),
       healthyIsPlain: /scoreTheme\(value\) === "success"/.test(cell) && /className="rh-cat-plain"/.test(cell),
       nullIsUnknownLabel: /theme="unknown"/.test(cell),
-      nullIsNotBareDash: !/>\s*—\s*</.test(cell),
+      nullIsNotBareDash: !/>\s*–\s*</.test(cell),
     }).toEqual({ exceptionsAreLabels: true, healthyIsPlain: true, nullIsUnknownLabel: true, nullIsNotBareDash: true });
   });
 
@@ -120,7 +120,7 @@ describe("В4.6-2 (У25): «вклад 0%» заменён на «не учит�
   test("MD: в таблице категорий у Security стоит «не учитывается», а не «0%»", () => {
     const out = md();
     // таблица категорий – «—» и «нет данных», вес в приложении А – «не входит»
-    expect({ honest: out.includes("| Безопасность | — | нет данных |") && out.includes("| Безопасность | — | не входит | — |"), zero: out.includes("| 0% |") }).toEqual({
+    expect({ honest: out.includes("| Безопасность | – | нет данных |") && out.includes("| Безопасность | – | не входит | – |"), zero: out.includes("| 0% |") }).toEqual({
       honest: true,
       zero: false,
     });
@@ -141,7 +141,7 @@ describe("В4.6-3 (У22): словесная шкала здоровья вид�
 
   // Заголовок легенды живет в одном месте (SCORE_LEGEND_TITLE в format.ts) и
   // рисуется общим ScoreLegend – литерал в каждой странице дал бы две копии.
-  test("легенда шкалы — один компонент с одним заголовком «Шкала оценки»", () => {
+  test("легенда шкалы – один компонент с одним заголовком «Шкала оценки»", () => {
     const ui = srcOf("ui.tsx");
     expect({
       component: ui.includes("export function ScoreLegend"),
@@ -156,7 +156,7 @@ describe("В4.6-3 (У22): словесная шкала здоровья вид�
   });
 
   // Якорь «что идет после легенды» – следующий блок панели, «Вклад категорий».
-  test("рейтинг: легенда — первым блоком правой панели", () => {
+  test("рейтинг: легенда – первым блоком правой панели", () => {
     const src = srcOf("Rating.tsx");
     const legend = src.indexOf("<ScoreLegend ");
     const nextSection = src.indexOf('title="Вклад категорий"');
@@ -225,7 +225,7 @@ describe("В4.6-5 (У37): заливка полос непрозрачна и б
 // в pageSizeOptions.
 // ---------------------------------------------------------------------------
 
-describe("В4.6-6 (У21): колонка индекса — горизонтально, число справа", () => {
+describe("В4.6-6 (У21): колонка индекса – горизонтально, число справа", () => {
   // Аудит 16.10: уровень несет полоса, число нейтральное — один цветной акцент
   test("ScoreCell: полоса 80px слева, число в слоте справа, нейтральное", () => {
     const src = srcOf("Rating.tsx");
@@ -265,14 +265,14 @@ describe("В4.6-7 (У23): границы сетки и разрешения", ()
   // Порог колонки панели – проп `asideColumnFrom` (по умолчанию 1440); рейтинг
   // держит панель колонкой с 1600, чтобы на 1440 таблица вмещала «Реакции» и
   // «Обновлен».
-  test("рейтинг: JS-порог правой панели — 1600, остальные страницы — 1440", () => {
+  test("рейтинг: JS-порог правой панели – 1600, остальные страницы – 1440", () => {
     const shell = srcOf("Shell.tsx");
     expect(shell).toContain("asideColumnFrom = 1440");
     expect(shell).toContain("useMediaQuery(`(min-width: ${asideColumnFrom}px)`)");
     expect(srcOf("Rating.tsx")).toContain("asideColumnFrom={1600}");
   });
 
-  test("карточка: CSS-порог укладки колонок — 1439, панель на 1366 уходит под основную", () => {
+  test("карточка: CSS-порог укладки колонок – 1439, панель на 1366 уходит под основную", () => {
     expect(layout()).toContain("@media (max-width: 1439px)");
   });
 
@@ -296,8 +296,8 @@ describe("В4.6-7 (У23): границы сетки и разрешения", ()
 // вызывает (импорт src/report в клиент валит Bun.build – tests/web.test.ts).
 // ---------------------------------------------------------------------------
 
-describe("В4.6-8 (У26/У13/У38): вариант А — карточка начинается с вывода", () => {
-  test("генератор строки итога — чистая функция src/web/format.ts, MD её вызывает", async () => {
+describe("В4.6-8 (У26/У13/У38): вариант А – карточка начинается с вывода", () => {
+  test("генератор строки итога – чистая функция src/web/format.ts, MD её вызывает", async () => {
     const mod = (await import("../src/web/format")) as { summaryLine?: unknown };
     expect(typeof mod.summaryLine).toBe("function");
     // в отчете итог несет крупное число с плашкой зоны, а не предложение-вывод
@@ -308,7 +308,7 @@ describe("В4.6-8 (У26/У13/У38): вариант А — карточка на�
   // `Page` берет панель пропом `aside` и рендерит `main`, потом `aside`, поэтому
   // «полоса раньше панели» = «полоса лежит среди детей Page». Заодно проверяется,
   // что панель методическая по составу, а не просто лишилась числа.
-  test("величина — блоком в главной колонке, правая панель чисто методическая", () => {
+  test("величина – блоком в главной колонке, правая панель чисто методическая", () => {
     const src = srcOf("RepoPage.tsx");
     const pageOpen = src.indexOf("<Page crumbs={crumbs} actions={actions}");
     const bandMount = src.search(/<ScoreBand\s+card=\{card\}/);
@@ -341,7 +341,7 @@ describe("В4.6-8 (У26/У13/У38): вариант А — карточка на�
 // ---------------------------------------------------------------------------
 
 describe("В4.6-9 (У27–У32): консистентность вне кабинета", () => {
-  test("У32: звезда избранного — иконка @gravity-ui/icons, не глиф ★/☆", () => {
+  test("У32: звезда избранного – иконка @gravity-ui/icons, не глиф ★/☆", () => {
     const src = srcOf("RepoPage.tsx");
     expect({ glyph: src.includes("★") || src.includes("☆"), icon: /Star/.test(src) }).toEqual({ glyph: false, icon: true });
   });
@@ -401,7 +401,7 @@ describe("В4.6-10 (У18): слоты под В5 заложены честным
 
   // Раздел сравнения появляется вместе с работающим сценарием: маршрут и третий
   // пункт rail есть; поведение раздела – tests/v53-compare.test.ts.
-  test("сравнение: контракт и пустое состояние есть, маршрут и третий пункт rail — с работающим сценарием", async () => {
+  test("сравнение: контракт и пустое состояние есть, маршрут и третий пункт rail – с работающим сценарием", async () => {
     const mod = await importLater("../src/web/slots");
     const contracts = mod.SLOT_CONTRACTS as Record<string, readonly string[]> | undefined;
     const router = await importLater("../src/web/router");
@@ -451,7 +451,7 @@ describe("В4.6-11 (У15/У16/У17): охват, границы доступа, 
 // ---------------------------------------------------------------------------
 
 if (process.env.AUDIT_STRICT) {
-  test("строгий режим: ни одной находки под repro/test.failing — зелёный значит «закрыто»", () => {
+  test("строгий режим: ни одной находки под repro/test.failing – зелёный значит «закрыто»", () => {
     const src = readFileSync(import.meta.path, "utf8");
     const parked = src.match(/^[ \t]*(repro|test\.failing)\(/gm) ?? [];
     expect({ parked, wrapperIsPlainTest: repro === test }).toEqual({ parked: [], wrapperIsPlainTest: true });

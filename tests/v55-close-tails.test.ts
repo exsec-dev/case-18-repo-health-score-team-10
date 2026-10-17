@@ -263,7 +263,7 @@ describe("С14: место в рейтинге в отчете", () => {
     const page = readFileSync(join(ROOT, "src", "web", "RepoPage.tsx"), "utf8");
     const aside = page.slice(page.indexOf('name="Место в рейтинге"'), page.indexOf('name="Место в рейтинге"') + 400);
     expect(aside).toContain("rankText(card.repo.visibility, score)");
-    expect(aside).not.toContain(': "—"');
+    expect(aside).not.toContain(': "–"');
   });
 });
 
