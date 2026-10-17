@@ -124,12 +124,27 @@ export interface ContributionBar {
  * Подсказка сегмента: категория, ее вклад из потолка (вес среди категорий с данными
  * × 100) и тише — доля в набранном: «Документация» / «12,5 из 23,0» «15% оценки».
  */
-export function segmentHint(s: ContributionSegment, total: number): BarHint {
+export function segmentHint(s: ContributionSegment, total: number, percent: number | null = total > 0 ? Math.round((s.tenths / (total * 10)) * 100) : null): BarHint {
   return {
     title: s.title,
     main: `${fmtDecimal(s.tenths / 10, 1)} из ${fmtDecimal(s.share * 100, 1)}`,
-    muted: total > 0 ? `${Math.round((s.tenths / (total * 10)) * 100)}% оценки` : null,
+    muted: percent !== null ? `${percent}% оценки` : null,
   };
+}
+
+/**
+ * Доли вкладов в оценке целыми процентами с суммой ровно 100 — методом наибольшего
+ * остатка, как сами вклады: округление каждой доли отдельно давало 99% или 101%.
+ */
+export function sharePercents(segments: ContributionSegment[]): number[] {
+  const sum = segments.reduce((acc, s) => acc + s.tenths, 0);
+  if (sum === 0) return segments.map(() => 0);
+  const raw = segments.map((s) => (s.tenths / sum) * 100);
+  const out = raw.map(Math.floor);
+  let left = 100 - out.reduce((a, b) => a + b, 0);
+  const order = raw.map((v, i) => ({ i, rest: v - Math.floor(v) })).sort((a, b) => b.rest - a.rest || a.i - b.i);
+  for (let k = 0; left > 0 && k < order.length; k++, left--) out[order[k]!.i]! += 1;
+  return out;
 }
 
 /** Подсказка «не набрано»: «Не набрано 16» / «больше всего – Документация» «10,5». */
@@ -150,9 +165,10 @@ export function contributionBar(c: Contributions | null, metricName?: string): C
   if (c === null) return { title, segments: [], rest: null, note: "Вклады категорий не рассчитаны: у показателя нет категорий с данными." };
   const note = contributionsNote(c);
   if (c.kind !== "bar") return { title, segments: [], rest: null, note };
+  const percents = c.total > 0 ? sharePercents(c.segments) : null;
   return {
     title,
-    segments: c.segments.map((s) => ({ key: s.key, title: s.title, value: fmtContribution(s.tenths), share: s.tenths / 1000, hint: segmentHint(s, c.total) })),
+    segments: c.segments.map((s, i) => ({ key: s.key, title: s.title, value: fmtContribution(s.tenths), share: s.tenths / 1000, hint: segmentHint(s, c.total, percents ? percents[i]! : null) })),
     rest: { title: CONTRIBUTIONS_REST, value: String(c.missing), share: c.missing / 100, hint: restHint(c.losses, c.missing) },
     note: null,
   };

@@ -3,7 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { contributionBar, hintText, restHint, segmentHint } from "../src/report/sections";
+import { contributionBar, hintText, notInScoreNote, restHint, segmentHint, sharePercents } from "../src/report/sections";
 import { fmtKb, formatSubmetricValue, submetricContext } from "../src/report/submetrics";
 import { recommendationCeiling } from "../src/web/cardView";
 import { categoryContributions } from "../src/web/format";
@@ -83,5 +83,27 @@ describe("числа показателей: один знак, разряды, 
   test("большие числа — с разрядами, размер — в КБ с одним знаком", () => {
     expect(fmt("activity.commits_365d", 12480)).toBe("12 480");
     expect([fmtKb(13414), fmtKb(27648), fmtKb(1)]).toEqual(["13,1 КБ", "27,0 КБ", "меньше 0,1 КБ"]);
+  });
+});
+
+describe("ревью 17.10: доли и пустой репозиторий", () => {
+  test("доли «% оценки» в сумме ровно 100 (наибольший остаток), даже когда округление по отдельности дает 99 или 101", () => {
+    const seg = (tenths: number) => ({ key: "k", title: "t", exact: tenths / 10, tenths, loss: 0, share: 0.25 });
+    // 3 равные трети: по отдельности 33+33+33 = 99
+    const thirds = sharePercents([seg(100), seg(100), seg(100)]);
+    expect(thirds.reduce((a, b) => a + b, 0)).toBe(100);
+    const mixed = sharePercents([seg(125), seg(190), seg(220), seg(305)]);
+    expect(mixed.reduce((a, b) => a + b, 0)).toBe(100);
+    expect(sharePercents([seg(0), seg(0)])).toEqual([0, 0]);
+  });
+
+  test("у пустого репозитория фразы «Категории без данных…» нет", () => {
+    const { card, close } = fixtureCard("full");
+    try {
+      const empty = { ...card, markers: { ...card.markers, codeEmpty: true } };
+      expect(notInScoreNote(empty)).toBeNull();
+    } finally {
+      close();
+    }
   });
 });

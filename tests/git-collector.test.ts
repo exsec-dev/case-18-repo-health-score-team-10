@@ -605,6 +605,28 @@ describe("Ф2.4: клон с PAT — заголовок, argv, config клона
     }).toEqual({ count: "1", key0: "credential.helper", value0: "", gcm: "never", prompt: "0" });
   });
 
+  test("ключи GIT_CONFIG_* оператора сохраняются: свои — после них", async () => {
+    const seen: Record<string, string>[] = [];
+    const prev = { count: process.env.GIT_CONFIG_COUNT, k0: process.env.GIT_CONFIG_KEY_0, v0: process.env.GIT_CONFIG_VALUE_0 };
+    process.env.GIT_CONFIG_COUNT = "1";
+    process.env.GIT_CONFIG_KEY_0 = "http.proxy";
+    process.env.GIT_CONFIG_VALUE_0 = "http://proxy.local:3128";
+    try {
+      await cloneBare("https://git@git.sourcecraft.dev/o/r.git", tmpdir(), LIMITS, {
+        spawnGit: (o) => {
+          seen.push(o.env);
+          return { pid: 1, exited: Promise.resolve(128), stderr: new Response("x").body!, kill: () => {} };
+        },
+      });
+    } finally {
+      for (const [k, v] of [["GIT_CONFIG_COUNT", prev.count], ["GIT_CONFIG_KEY_0", prev.k0], ["GIT_CONFIG_VALUE_0", prev.v0]] as const) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+    expect({ count: seen[0]!.GIT_CONFIG_COUNT, k0: seen[0]!.GIT_CONFIG_KEY_0, k1: seen[0]!.GIT_CONFIG_KEY_1, v1: seen[0]!.GIT_CONFIG_VALUE_1 }).toEqual({ count: "2", k0: "http.proxy", k1: "credential.helper", v1: "" });
+  });
+
   test("git < 2.31: клон с токеном отказывается (GIT_CONFIG_* там молча не работают), git не запускается", async () => {
     let spawned = 0;
     const out = await cloneBare("https://repo-health:pat@git.sourcecraft.dev/o/r.git", tmpdir(), LIMITS, {

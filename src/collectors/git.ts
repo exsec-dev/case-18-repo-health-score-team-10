@@ -375,10 +375,12 @@ export async function cloneBare(
     }
     config.unshift(["http.extraHeader", split.authorization]);
   }
-  childEnv.GIT_CONFIG_COUNT = String(config.length);
+  // настройки оператора через GIT_CONFIG_* (прокси, свой CA) сохраняются: свои ключи — после них
+  const base = Math.max(0, Number.parseInt(process.env.GIT_CONFIG_COUNT ?? "0", 10) || 0);
+  childEnv.GIT_CONFIG_COUNT = String(base + config.length);
   config.forEach(([key, value], i) => {
-    childEnv[`GIT_CONFIG_KEY_${i}`] = key;
-    childEnv[`GIT_CONFIG_VALUE_${i}`] = value;
+    childEnv[`GIT_CONFIG_KEY_${base + i}`] = key;
+    childEnv[`GIT_CONFIG_VALUE_${base + i}`] = value;
   });
   const gitArgs = ["clone", "--bare"];
   if (opts.shallowSince) gitArgs.push(`--shallow-since=${opts.shallowSince}`);

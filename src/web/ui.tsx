@@ -238,8 +238,9 @@ export function ModelVersion({ version }: { version: string }) {
   if (base === version) return plate;
   return (
     <ActionTooltip title={`Полная версия – ${version}`}>
-      <span tabIndex={0} className="rh-chip-fit" aria-label={`Версия методики ${version}`}>
-        {plate}
+      <span tabIndex={0} className="rh-chip-fit">
+        <span aria-hidden="true">{plate}</span>
+        <span className="rh-sr-only">{`Версия методики ${version}`}</span>
       </span>
     </ActionTooltip>
   );
