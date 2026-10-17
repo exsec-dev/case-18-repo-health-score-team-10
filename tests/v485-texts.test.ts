@@ -89,8 +89,8 @@ describe("К8.5.4: серверные сообщения — языком про
     const me = strip(read("src/web/MePage.tsx"));
     expect(me.includes("GET /user")).toBe(false);
     expect(me).toContain("сохраненный токен больше не читается после смены ключа сервиса");
-    // тост о посеве избранного – человеческим языком, без «посева» и «namespace»
-    expect(me).toContain("Из вашего пространства SourceCraft в избранное");
+    // UX 17.10: посева избранного нет — тост ведет в «Мои репозитории»
+    expect(me).toContain("Репозитории, доступные токену, – в разделе «Мои репозитории».");
     expect(me).not.toContain("Посев избранного");
   });
 });

@@ -250,12 +250,12 @@ describe("UI-ветки круга 2 (source-assert, Б4)", () => {
     expect(src.includes("entry.title === null")).toBe(false);
   });
 
-  test("UX-9: seedNote при отсутствующем username не обвиняет namespace", () => {
-    const meSrc = srcOf("MePage.tsx");
-    // причина не обвиняет пространство имен
-    expect(meSrc.includes('"SourceCraft не вернул имя пользователя"')).toBe(true);
+  // UX 17.10: «Избранное» без пользователя не пополняется — посева при сохранении
+  // токена нет, репозитории по токену живут в «Моих репозиториях»
+  test("сохранение токена не добавляет репозитории в избранное; тост ведет в «Мои репозитории»", () => {
     const serverSrc = readFileSync(join(import.meta.dir, "..", "src", "server.ts"), "utf8");
-    expect(serverSrc.includes('code: "no_username"')).toBe(true);
+    expect(serverSrc).not.toContain("seedFavoritesFromNamespace");
+    expect(srcOf("MePage.tsx")).toContain("Репозитории, доступные токену, – в разделе «Мои репозитории».");
   });
 
   // «затянулось» — признак сервера (лиз задания истек), а не «прошло leaseMs»

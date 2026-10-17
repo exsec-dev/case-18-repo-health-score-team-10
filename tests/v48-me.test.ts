@@ -146,7 +146,8 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     // пустые состояния — иконка, заголовок, описание; ссылка в раздел — SPA-навигация + закрытие панели
     expect(bell).toContain("groupJobsByDay(recent)");
     expect(src).toContain("function HistoryRow");
-    expect(src).toMatch(/<JobsEmpty title="Сейчас ничего не анализируется">\s*Запустить анализ можно в разделе\{" "\}\s*<Link \{\.\.\.navProps\("\/me", close\)\} view="normal" className="rh-nowrap">\s*Избранное/);
+    // UX 17.10: анализ запускают в «Моих репозиториях»
+    expect(src).toMatch(/<JobsEmpty title="Сейчас ничего не анализируется">\s*Запустить анализ можно в разделе\{" "\}\s*<Link \{\.\.\.navProps\("\/repos", close\)\} view="normal" className="rh-nowrap">\s*Мои репозитории/);
     // ссылка не рвется переносом
     expect(readFileSync(join(import.meta.dir, "..", "src", "web", "layout.css"), "utf8")).toMatch(/\.rh-nowrap \{[^}]*white-space: nowrap;/);
     expect(src).not.toMatch(/\{\.\.\.linkProps\([^)]*\)\}[^>]*onClick=/);
@@ -162,7 +163,8 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     // пустые состояния — на каждую вкладку панели
     // UX 17.10: пустая история — «Вы еще ничего не запускали»
     expect(src).toContain('<JobsEmpty title="Вы еще ничего не запускали">Здесь появятся завершенные анализы, AI-обзоры и проверки и их итог.</JobsEmpty>');
-    expect((src.match(/announceJobsChanged\(\);/g) ?? []).length).toBe(2);
+    // UX 17.10: +2 у «Моих репозиториев» (запуск анализа, добавление в избранное)
+    expect((src.match(/announceJobsChanged\(\);/g) ?? []).length).toBe(4);
     // опрос заданий — один на вкладку (session.tsx), событие «задания
     // изменились» будит его там, а не отдельные опросы страниц
     expect(readFileSync(join(import.meta.dir, "..", "src", "web", "session.tsx"), "utf8")).toMatch(/window\.addEventListener\(JOBS_CHANGED, refresh\)/);
@@ -181,14 +183,16 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     expect(src).not.toContain("<HelpMark");
     expect(src).not.toContain("Здесь ваше избранное: отметьте");
     // одна короткая фраза вместо двух предложений
-    expect(src).toContain("Следите за здоровьем избранных репозиториев и тем, что возможно в них улучшить.");
+    // UX 17.10: «Избранное» — наблюдение: что изменилось и что улучшить
+    expect(src).toContain("Репозитории, за которыми вы следите: изменения оценки и рекомендации.");
     expect(src).not.toContain("Репозитории, которые вы отметили звездочкой на их странице или добавили сюда по ссылке.");
     expect(src).toContain('pin="round-brick"');
     expect(src).toContain('pin="brick-round"');
     // JSX-кнопки view="action" в файле: «Добавить» в шапке списка, форма токена и
     // пароль доступа к AI — обе на другой странице, /settings; плашка про
     // токен на /me — view="normal"
-    expect((src.match(/<Button view="action"/g) ?? []).length).toBe(3);
+    // +1: «Готово» в панели фильтров «Моих репозиториев» на телефоне (как в рейтинге)
+    expect((src.match(/<Button view="action"/g) ?? []).length).toBe(4);
     expect(src).toMatch(/<Button view="normal" size="m" \{\.\.\.linkProps\("\/settings"\)\}>/);
   });
 
@@ -214,7 +218,8 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     expect(rowSrc).not.toContain("etaNote");
     // остальные состояния — серые `StatePill` с иконкой, цветных `Label` в состоянии строки нет
     const stateSrc = rowSrc.slice(rowSrc.indexOf("const state ="), rowSrc.indexOf("const menuItems"));
-    expect((stateSrc.match(/<StatePill icon=\{/g) ?? []).length).toBe(7);
+    // UX 17.10: +2 для «Моих репозиториев» — «Пустой» и «Еще не анализировали» вне каталога
+    expect((stateSrc.match(/<StatePill\s+icon=\{/g) ?? []).length).toBe(9);
     // цветных Label в состоянии нет: уровень — полосой, состояния — серые StatePill
     expect((stateSrc.match(/<Label/g) ?? []).length).toBe(0);
     expect(src).not.toContain("<Spin");

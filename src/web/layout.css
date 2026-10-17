@@ -1197,9 +1197,10 @@ button.rh-category:focus-visible {
   --g-button-text-color-hover: var(--g-color-text-primary);
 }
 
+/* заполненная звезда — цветом текста, как в строках списков, без желтого */
 .rh-favorite-star_on {
-  --g-button-text-color: var(--g-color-text-warning);
-  --g-button-text-color-hover: var(--g-color-text-warning-heavy);
+  --g-button-text-color: var(--g-color-text-primary);
+  --g-button-text-color-hover: var(--g-color-text-primary);
 }
 
 /* Сетка списка подметрик живет здесь, а строки раскрываются в нее
@@ -2495,12 +2496,12 @@ button.rh-category:focus-visible {
   margin-top: var(--g-spacing-3);
 }
 
-/* флаг фрода — кружок с иконкой в углу аватара */
+/* флаг фрода — кружок с иконкой в углу аватара; аватар — по центру высоты строки */
 .rh-repo-item__avatar {
   position: relative;
   display: inline-flex;
   flex: none;
-  align-self: flex-start;
+  align-self: center;
 }
 
 /* окно «Добавить в избранное» — поле + список строк */
@@ -3228,9 +3229,16 @@ button.rh-category:focus-visible {
   margin: -5px;
 }
 
+/* у (?) свои поля Gravity — зона клика расширяется невидимым слоем, а не
+   отступами: иначе отрицательное поле съедало зазор до подписи */
 .g-help-mark {
-  padding: 4px;
-  margin: -4px;
+  position: relative;
+}
+
+.g-help-mark::after {
+  position: absolute;
+  inset: -4px;
+  content: "";
 }
 
 /* Ячейка «Репозиторий» берет то, что осталось от окна после каркаса и
@@ -4023,4 +4031,137 @@ button.rh-category:focus-visible {
 
 .rh-skip:focus {
   transform: none;
+}
+
+/* «Мои репозитории»: группа — организация, заголовок с числом тише него */
+.rh-org-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-2);
+}
+
+/* заголовок организации прилипает при прокрутке — видно, чья группа на экране */
+.rh-org-group__title {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  margin: 0;
+  padding: var(--g-spacing-1) 0;
+  background: var(--g-color-base-background);
+}
+
+/* место под «…», когда меню строке не нужно: колонки строк стоят ровно */
+.rh-repo-item__menu-gap {
+  display: inline-block;
+  width: 28px;
+}
+
+/* диалог «Добавить»: группа организации — подпись и свой список без маркеров */
+.rh-add-group {
+  list-style: none;
+}
+
+.rh-add-group__title {
+  padding: var(--g-spacing-2) 0 var(--g-spacing-1);
+}
+
+.rh-add-list__group {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* окно заготовки: имя и «куда», выбор лицензии, текст моноширинно с прокруткой,
+ * действия. Ширина — под строку кода, на телефоне — по экрану */
+.rh-tpl {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-3);
+  box-sizing: border-box;
+  width: min(480px, calc(100vw - 32px));
+  padding: var(--g-spacing-4);
+}
+
+.rh-tpl__name {
+  font-family: var(--g-font-family-monospace);
+}
+
+.rh-tpl__code {
+  max-height: 240px;
+  margin: 0;
+  padding: var(--g-spacing-3);
+  overflow: auto;
+  border-radius: var(--g-border-radius-m);
+  background: var(--g-color-base-generic);
+  font-family: var(--g-font-family-monospace);
+  font-size: var(--g-text-code-1-font-size);
+  line-height: var(--g-text-code-1-line-height);
+  white-space: pre;
+}
+
+.rh-tpl__code:focus-visible {
+  outline: 2px solid var(--g-color-line-focus);
+  outline-offset: 2px;
+}
+
+.rh-tpl__skeleton {
+  height: 120px;
+  border-radius: var(--g-border-radius-m);
+}
+
+.rh-tpl__empty {
+  padding: var(--g-spacing-3) 0;
+}
+
+/* «Лимиты AI» на телефоне: подписи колонок переносятся («Сервис / за сутки»),
+ * отступы меньше — таблица помещается без прокрутки вбок */
+@media (max-width: 480px) {
+  .rh-ai-quota thead th {
+    max-width: 72px;
+    white-space: normal;
+  }
+
+  .rh-ai-quota th,
+  .rh-ai-quota td {
+    padding-right: var(--g-spacing-2);
+  }
+}
+
+/* опись: ряд фильтров — видимость, организация, состояние, язык, сортировка */
+.rh-inventory__filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--g-spacing-2);
+}
+
+/* изменение оценки к прошлой — рядом с числом, стрелка цветом, величина тише */
+.rh-change {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+  /* место есть у каждой строки, даже без изменения: полосы стоят друг под другом */
+  width: 32px;
+}
+
+/* «Избранное» на телефоне: сводка — одна полоса из четырех плиток, а не 2×2 */
+@media (max-width: 720px) {
+  .rh-summary {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--g-spacing-2);
+  }
+
+  .rh-summary__tile.g-card {
+    padding: var(--g-spacing-2);
+  }
+
+  .rh-summary__tile .rh-summary__label {
+    font-size: var(--g-text-caption-2-font-size);
+    line-height: var(--g-text-caption-2-line-height);
+  }
+}
+
+/* значение сортировки — тише подписи «Сортировка:», как значения фильтров */
+.rh-select-value_muted {
+  color: var(--g-color-text-secondary);
 }

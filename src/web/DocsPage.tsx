@@ -13,6 +13,7 @@ import {
   Bars,
   BookOpen,
   Bookmark,
+  Archive,
   Bulb,
   ChartColumn,
   Check,
@@ -66,6 +67,7 @@ import { EmptyState, SkeletonRows } from "./ui";
 const UI_ICON_DATA: Record<UiIcon, IconData> = {
   rating: ChartColumn,
   compare: ScalesBalanced,
+  repos: Archive,
   favorites: Bookmark,
   docs: BookOpen,
   settings: Gear,

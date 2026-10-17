@@ -67,11 +67,16 @@ export function reencryptPat(appSecret: string, patEnc: string): string | null {
 }
 
 /** Сохранить или заменить PAT: у пользователя одна строка. */
-export function storePat(db: Database, appSecret: string, userId: number, pat: string, now = new Date()): void {
+export function storePat(db: Database, appSecret: string, userId: number, pat: string, now = new Date(), ownerLogin: string | null = null): void {
   db.query(
-    `INSERT INTO user_tokens (user_id, pat_enc, checked_at, created_at) VALUES (?, ?, ?, ?)
-     ON CONFLICT(user_id) DO UPDATE SET pat_enc = excluded.pat_enc, checked_at = excluded.checked_at`,
-  ).run(userId, encryptPat(appSecret, pat), now.toISOString(), now.toISOString());
+    `INSERT INTO user_tokens (user_id, pat_enc, checked_at, created_at, owner_login) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(user_id) DO UPDATE SET pat_enc = excluded.pat_enc, checked_at = excluded.checked_at, owner_login = excluded.owner_login`,
+  ).run(userId, encryptPat(appSecret, pat), now.toISOString(), now.toISOString(), ownerLogin);
+}
+
+/** Логин SourceCraft владельца сохраненного токена (из проверки GET /user); null — неизвестен. */
+export function patOwnerLogin(db: Database, userId: number): string | null {
+  return (db.query("SELECT owner_login FROM user_tokens WHERE user_id = ?").get(userId) as { owner_login: string | null } | null)?.owner_login ?? null;
 }
 
 /** Расшифровка на каждом использовании – открытый PAT в памяти не держим. */

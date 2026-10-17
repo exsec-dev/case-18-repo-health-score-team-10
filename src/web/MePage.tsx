@@ -20,9 +20,15 @@ import {
   Lock,
   Magnifier,
   OctagonXmark,
+  Play,
   Plus,
+  Star,
+  StarFill,
+  Sliders,
   TrashBin,
+  TriangleDownFill,
   TriangleExclamation,
+  TriangleUpFill,
 } from "@gravity-ui/icons";
 import {
   ActionTooltip,
@@ -30,6 +36,7 @@ import {
   type AlertProps,
   Button,
   Card,
+  Checkbox,
   Dialog,
   DropdownMenu,
   Flex,
@@ -40,23 +47,26 @@ import {
   Popup,
   SegmentedRadioGroup,
   Select,
+  Sheet,
   Text,
   TextInput,
   useToaster,
 } from "@gravity-ui/uikit";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { EmptyIllustration, IdentityIllustration, SearchIllustration } from "./illustrations";
-import { type MeResponse, type MetaResponse, type MyReposResponse, dataOf, logout, mutateJson, useJson, useLatest } from "./api";
+import { type MeResponse, type MetaResponse, type MyReposResponse, type TokenRepoEntry, type TokenReposResponse, dataOf, logout, mutateJson, useJson, useLatest } from "./api";
 import type { LiveAnalysis } from "./analysis";
 import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
 import { plural } from "../report/submetrics";
 import { FRAUD_TITLE, authErrorText, jobErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, quotaCell, scoreTheme, scoreWord, slugOf, type ActionQuotaView, type AiQuotaView, type FavoriteAddCheck, type QuotaWindowView } from "./format";
-import { type Band, BANDS, type RepoEntry, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
-import { linkProps, repoHref } from "./router";
+import { type Band, BANDS, groupByOrg, isClosed, multiSummary, orderOrgs, type RepoEntry, scoreChange, filterTokenRows, tokenParamsOf, tokenRowOrder, tokenSearchOf, tokenStateOf, TOKEN_FILTER_DEFAULT, TOKEN_SORTS, TOKEN_STATES, type TokenFilter, type TokenSort, type TokenState, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
+import { linkProps, navigate, repoHref } from "./router";
+import { useMediaQuery } from "./prefs";
 import { Page, UserAvatar, displayName, logoutFailedToast } from "./Shell";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, RepoSlug, ScoreBar, SkeletonRows, TIP_TARGET, VisibilityPill } from "./ui";
 
 const REPOS_CRUMBS = [{ text: "Избранное" }];
+const TOKEN_REPOS_CRUMBS = [{ text: "Мои репозитории" }];
 const SETTINGS_CRUMBS = [{ text: "Настройки" }];
 
 /** Название раздела SourceCraft в инструкции — серым тегом. */
@@ -378,7 +388,7 @@ function AccountSection({ me }: { me: MeResponse }) {
 }
 
 /** Не вошедшему — что доступно без входа и кнопка входа. */
-function LoginOffer({ pageTitle }: { pageTitle: "Избранное" | "Настройки" }) {
+function LoginOffer({ pageTitle }: { pageTitle: "Избранное" | "Мои репозитории" | "Настройки" }) {
   // после неудачного callback Я ID сервер возвращает на /me?auth_error=… — причину показываем
   const authError = new URLSearchParams(window.location.search).get("auth_error");
   return (
@@ -401,11 +411,13 @@ function LoginOffer({ pageTitle }: { pageTitle: "Избранное" | "Наст
       )}
       <EmptyState
         image={IdentityIllustration}
-        title={pageTitle === "Настройки" ? "Настройки доступны после входа" : "Избранное доступно после входа"}
+        title={pageTitle === "Настройки" ? "Настройки доступны после входа" : pageTitle === "Мои репозитории" ? "Мои репозитории доступны после входа" : "Избранное доступно после входа"}
         description={
           pageTitle === "Настройки"
             ? "Войдите через Я ID, чтобы настроить персональный токен доступа SourceCraft."
-            : "Войдите через Я ID, чтобы следить за избранными репозиториями и запускать анализ собственных."
+            : pageTitle === "Мои репозитории"
+              ? "Войдите через Я ID и добавьте токен SourceCraft – здесь появятся ваши репозитории и анализ закрытых."
+              : "Войдите через Я ID, чтобы следить за избранными репозиториями."
         }
         actions={[{ text: "Войти", view: "action", size: "l", href: "/auth/ya" }]}
       />
@@ -414,25 +426,6 @@ function LoginOffer({ pageTitle }: { pageTitle: "Избранное" | "Наст
 }
 
 // ---------- токен: PUT проверяет его в SourceCraft и сохраняет, DELETE удаляет ----------
-
-/** Итог добавления репозиториев из пространства SourceCraft в избранное — строкой для тоста. */
-function seedNote(seed: import("../api/me").PatSeed | undefined): string {
-  if (seed === undefined) return "Репозитории вашего пространства SourceCraft в избранное не добавлялись.";
-  if (seed.status === "ok")
-    return seed.added > 0
-      ? `Из вашего пространства SourceCraft в избранное ${plural(seed.added, "добавлен", "добавлено", "добавлено")} ${seed.added} ${plural(seed.added, "репозиторий", "репозитория", "репозиториев")}.`
-      : "Новых репозиториев из вашего пространства SourceCraft для избранного нет.";
-  const why =
-    seed.error?.code === "favorite_limit"
-      ? "достигнут предел избранного"
-      : seed.error?.code === "page_limit"
-        ? "прочитаны не все страницы пространства"
-        : seed.error?.code === "no_username"
-          ? // пространство даже не опрашивалось — причина не в нем
-            "SourceCraft не вернул имя пользователя"
-          : "SourceCraft ответил сбоем";
-  return `Добавление репозиториев вашего пространства SourceCraft в избранное остановлено: ${why} (добавлено ${seed.added}).`;
-}
 
 function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasPat: boolean; unreadable?: boolean; checkedAt: string | null; onChanged: () => void }) {
   const [token, setToken] = useState("");
@@ -450,12 +443,7 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
     setError(null);
     setFailedOp("save");
     try {
-      // ответ несет и итог добавления репозиториев из пространства — он уходит в тост
-      const res = await mutateJson<{ ok: boolean; tokenOwner: string | null; seed?: import("../api/me").PatSeed }>(
-        "/api/me/pat",
-        "PUT",
-        { token },
-      );
+      const res = await mutateJson<{ ok: boolean; tokenOwner: string | null }>("/api/me/pat", "PUT", { token });
       setOwner(res.tokenOwner);
       setToken("");
       setReplacing(false);
@@ -463,7 +451,9 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
         name: "pat-saved",
         theme: "success",
         title: hasPat ? "Токен заменен" : "Токен сохранен",
-        content: `${res.tokenOwner ? `Владелец токена: ${res.tokenOwner}. ` : ""}${seedNote(res.seed)}`,
+        // репозитории по токену — в «Моих репозиториях»; в «Избранное» сами не попадают
+        content: `${res.tokenOwner ? `Владелец токена: ${res.tokenOwner}. ` : ""}Репозитории, доступные токену, – в разделе «Мои репозитории».`,
+        actions: [{ label: "Открыть", onClick: () => navigate("/repos") }],
       });
       onChanged();
     } catch (e) {
@@ -624,7 +614,7 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
   const [adding, setAdding] = useState(false);
   const [query, setQuery] = useState("");
   const [band, setBand] = useState<Band | null>(null);
-  const [sortKey, setSortKey] = useState<SortKey>("index");
+  const [sortKey, setSortKey] = useState<SortKey>("change");
   const [sortDesc, setSortDesc] = useState(true);
   const toaster = useToaster();
   // фаза анализа строки — из общего опроса заданий вкладки; тост об итоге
@@ -717,7 +707,7 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
             )}
           </Flex>
           <Text variant="body-2" color="complementary">
-            Следите за здоровьем избранных репозиториев и тем, что возможно в них улучшить.
+            Репозитории, за которыми вы следите: изменения оценки и рекомендации.
           </Text>
         </Flex>
         <div className="rh-me-tools">
@@ -769,8 +759,12 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
         <EmptyState
           image={EmptyIllustration}
           title="В избранном пока пусто"
-          description="Отметьте репозиторий звездочкой на его странице или добавьте его по идентификатору org/repo или ссылке."
-          actions={[{ text: "Добавить репозиторий", view: "action", size: "m", onClick: () => setAdding(true) }]}
+          description="Отметьте репозиторий звездочкой – на его странице или в «Моих репозиториях» – или добавьте его по org/repo или ссылке."
+          actions={[
+            { text: "Добавить репозиторий", view: "action", size: "m", onClick: () => setAdding(true) },
+            // с токеном свои репозитории уже собраны в описи — выбрать там быстрее
+            ...(hasPat ? [{ text: "Выбрать в «Моих репозиториях»", view: "normal" as const, size: "m" as const, onClick: () => navigate("/repos") }] : []),
+          ]}
         />
       )}
 
@@ -801,7 +795,9 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
                       <Text variant="header-1">{counts[b.key]}</Text>
                       {icon && <Icon data={icon} size={20} className={`rh-band-icon rh-band-icon_${b.key}`} />}
                     </div>
-                    <Text color="secondary">{b.title}</Text>
+                    <Text color="secondary" className="rh-summary__label">
+                      {b.title}
+                    </Text>
                   </Card>
                 );
               })}
@@ -891,6 +887,43 @@ const BAND_ICON: Record<Band, IconData | null> = {
   none: null,
 };
 
+/**
+ * Действие анализа в описи — иконкой: оцененный — «Обновить анализ» (тихая), без
+ * оценки — «Запустить анализ» primary (в теме — белая): это следующий шаг строки. Отказ по правам (чужой
+ * публичный) сервер объясняет тостом. Пустой — место под иконку, колонки ровные.
+ */
+function AnalysisIcon({ scored, canAnalyze, inWork, onScan, slug }: { scored: boolean; canAnalyze: boolean; inWork: boolean; onScan: () => void; slug: string }) {
+  if (!canAnalyze) return <span className="rh-repo-item__menu-gap" aria-hidden="true" />;
+  const text = inWork ? "Идет анализ" : scored ? "Обновить анализ" : "Запустить анализ";
+  return (
+    <ActionTooltip title={text}>
+      <Button view={scored ? "flat" : "action"} size="m" onClick={onScan} loading={inWork} aria-label={`${text} ${slug}`}>
+        <Icon data={scored ? ArrowsRotateRight : Play} size={16} />
+      </Button>
+    </ActionTooltip>
+  );
+}
+
+/**
+ * Изменение индекса к прошлой оценке: стрелка цветом, величина тише. Без изменения —
+ * пустое место той же ширины: полосы и числа всех строк стоят друг под другом.
+ */
+function ScoreChange({ entry }: { entry: RepoEntry }) {
+  const d = scoreChange(entry);
+  if (d === null || d === 0) return <span className="rh-change" aria-hidden="true" />;
+  const up = d > 0;
+  return (
+    <span className="rh-change" title={`С прошлой оценки: ${up ? "+" : "−"}${Math.abs(d)} – было ${fmtScore(entry.previousIndex!)}`}>
+      <span className={up ? "rh-rank__arrow rh-rank__arrow_up" : "rh-rank__arrow rh-rank__arrow_down"} role="img" aria-label={up ? "Выросла" : "Снизилась"}>
+        <Icon data={up ? TriangleUpFill : TriangleDownFill} size={10} />
+      </span>
+      <Text variant="body-short" color="secondary">
+        {Math.abs(d)}
+      </Text>
+    </span>
+  );
+}
+
 /** Серая плашка состояния строки: смысл — иконкой и подсказкой, цвет только у иконки. */
 function StatePill({ icon, tone, title, children }: { icon: IconData; tone?: "danger" | "warning"; title: string; children: ReactNode }) {
   return (
@@ -931,7 +964,7 @@ function useScRepos(enabled: boolean): { state: ScListState; reload: () => void 
     if (!enabled) return;
     const ctrl = new AbortController();
     setState({ kind: "loading" });
-    fetch("/api/me/sourcecraft-repos", { signal: ctrl.signal })
+    fetch("/api/me/sourcecraft-repos?entries=0", { signal: ctrl.signal })
       .then(async (res) => {
         const body = (await res.json().catch(() => null)) as { repos?: ScRepoLite[]; partial?: boolean; error?: { code?: string; message?: string } } | null;
         if (!res.ok) {
@@ -1017,7 +1050,8 @@ function AddRepoDialog({
 
   const q = value.trim().toLowerCase();
   const repos = list.state.kind === "ok" ? list.state.repos : [];
-  const shown = q === "" ? repos : repos.filter((r) => `${r.org}/${r.slug}`.toLowerCase().includes(q) || (r.name ?? "").toLowerCase().includes(q));
+  // сначала поиск: полный список токена — в «Моих репозиториях», здесь он не дублируется
+  const shown = q === "" ? [] : repos.filter((r) => `${r.org}/${r.slug}`.toLowerCase().includes(q) || (r.name ?? "").toLowerCase().includes(q));
   // ручной ввод: похоже на org/repo или ссылку и не совпало со строкой списка — строка «Добавить …»
   const manual = INPUT_LIKELY.test(value.trim()) && !repos.some((r) => `${r.org}/${r.slug}`.toLowerCase() === q) ? value.trim() : null;
 
@@ -1080,7 +1114,9 @@ function AddRepoDialog({
           />
           {hasPat ? (
             <Text variant="body-1" color="secondary">
-              Доступны вашему токену в SourceCraft
+              {"Начните вводить имя репозитория или вставьте org/repo. Все доступные токену – в "}
+              <Link {...navProps("/repos", close)}>«Моих репозиториях»</Link>
+              .
             </Text>
           ) : (
             <Text variant="body-1" color="complementary">
@@ -1092,22 +1128,34 @@ function AddRepoDialog({
           <ul className="rh-add-list" aria-label="Репозитории">
             {manual !== null && row(`manual:${manual}`, <>Добавить <b>{manual}</b></>, manual, null)}
             {list.state.kind === "loading" && <SkeletonRows rows={4} height={40} />}
-            {shown.map((r) => {
-              const slug = `${r.org}/${r.slug}`;
-              return row(
-                slug,
-                <RepoSlug org={r.org} repo={r.slug} variant="body-1" />,
-                slug,
-                <span className="rh-add-row__meta">
-                  <VisibilityPill value={r.visibility} />
-                  {r.isEmpty && (
-                    <Label theme="normal" size="xs">
-                      пустой
-                    </Label>
-                  )}
-                </span>,
-              );
-            })}
+            {/* по организациям, внутри — закрытые первыми: свои приватные не теряются
+                среди публичных репозиториев организации */}
+            {groupByOrg(shown, (r) => r.slug).map((g) => (
+              <li key={`org:${g.org}`} className="rh-add-group">
+                <Text variant="caption-2" color="secondary" as="div" className="rh-add-group__title" id={`add-org-${g.org}`}>
+                  {g.org}
+                  <span className="rh-btn-count">{g.items.length}</span>
+                </Text>
+                <ul className="rh-add-list__group" aria-labelledby={`add-org-${g.org}`}>
+                  {g.items.map((r) => {
+                    const slug = `${r.org}/${r.slug}`;
+                    return row(
+                      slug,
+                      <RepoSlug org={r.org} repo={r.slug} variant="body-1" />,
+                      slug,
+                      <span className="rh-add-row__meta">
+                        <VisibilityPill value={r.visibility} />
+                        {r.isEmpty && (
+                          <Label theme="normal" size="xs">
+                            пустой
+                          </Label>
+                        )}
+                      </span>,
+                    );
+                  })}
+                </ul>
+              </li>
+            ))}
           </ul>
           {list.state.kind === "error" && (
             <Flex gap={2} alignItems="center" wrap>
@@ -1163,6 +1211,13 @@ function RepoRow({
   busy,
   onScan,
   onRemove,
+  canAnalyze: canAnalyzeOverride,
+  badge,
+  empty = false,
+  fromToken = false,
+  ownUnknown = false,
+  iconActions = false,
+  favorite,
 }: {
   entry: RepoEntry;
   access: import("../api/me").FavoriteAccess | null;
@@ -1174,13 +1229,28 @@ function RepoRow({
   starting: boolean;
   busy: boolean;
   onScan: () => void;
-  onRemove: () => void;
+  /** «Убрать из избранного» — только у строки «Избранного» */
+  onRemove?: () => void;
+  /** «Мои репозитории»: анализ доступен без сохраненной проверки — права проверит сервер при запуске */
+  canAnalyze?: boolean;
+  /** «Мои репозитории»: видимость из списка SourceCraft вместо сохраненной проверки прав */
+  badge?: ReactNode;
+  /** в репозитории нет коммитов — анализировать нечего */
+  empty?: boolean;
+  /** строка «Моих репозиториев»: репозиторий точно есть на SourceCraft (список по токену) */
+  fromToken?: boolean;
+  /** публичный из описи: свой ли он, сервер проверит при запуске анализа */
+  ownUnknown?: boolean;
+  /** опись: действия анализа — иконками (обновить / запустить), без меню «…» */
+  iconActions?: boolean;
+  /** «Мои репозитории»: звезда «в избранное» в строке */
+  favorite?: { on: boolean; busy: boolean; toggle: () => void };
 }) {
   const { org, repo } = entry;
   const href = repoHref(org, repo);
   const scored = entry.healthcraftIndex !== null;
   const inWork = live !== null || starting;
-  const canAnalyze = hasPat && access?.own === true;
+  const canAnalyze = !empty && (canAnalyzeOverride ?? (hasPat && access?.own === true));
   // «затянулось» решает сервер (истек срок захвата задания), а не таймер в браузере
   const phase = live === null ? null : live.stalled ? "stalled" : live.phase;
 
@@ -1211,6 +1281,8 @@ function RepoRow({
         <Text variant="subheader-2" className="rh-repo-item__num">
           {fmtScore(entry.healthcraftIndex!)}
         </Text>
+        {/* «что изменилось» — в «Избранном»: стрелка цветом, величина тише */}
+        {!fromToken && <ScoreChange entry={entry} />}
       </div>
     ) : entry.lastScanStatus === "running" ? (
       // running — законный промежуточный статус последнего скана
@@ -1226,6 +1298,18 @@ function RepoRow({
     ) : entry.lastScanAt !== null ? (
       <StatePill icon={CircleDashed} title="Проанализировали – данных для оценки не хватило">
         Оценки нет
+      </StatePill>
+    ) : empty ? (
+      <StatePill icon={CircleDashed} title="В репозитории нет ни одного коммита – анализировать нечего">
+        Пустой
+      </StatePill>
+    ) : !entry.inCatalog && fromToken ? (
+      // «Мои репозитории»: репозиторий точно есть на SourceCraft, у нас его просто не анализировали
+      <StatePill
+        icon={CircleDashed}
+        title={ownUnknown ? "Публичные репозитории оценивает анализ по расписанию – запустить раньше можно кнопкой в строке" : "Анализ этого репозитория еще не запускали"}
+      >
+        Еще не анализировали
       </StatePill>
     ) : !entry.inCatalog ? (
       // речь о каталоге сервиса: на SourceCraft репозиторий может быть, но у нас
@@ -1243,6 +1327,11 @@ function RepoRow({
       </StatePill>
     );
 
+  // пункты «…»: обновить анализ (оцененный свой) и, в «Избранном», убрать из него
+  const menuItems = [
+    ...(canAnalyze && scored ? [{ text: "Обновить анализ", iconStart: <Icon data={ArrowsRotateRight} size={16} />, action: onScan, disabled: inWork }] : []),
+    ...(onRemove ? [{ text: "Убрать из избранного", iconStart: <Icon data={TrashBin} size={16} />, action: onRemove, disabled: busy, theme: "danger" as const }] : []),
+  ];
   return (
     <li className="rh-repo-item">
       {/* слой-ссылка: клик по пустому месту строки ведет в карточку; с клавиатуры
@@ -1263,7 +1352,7 @@ function RepoRow({
               </span>
             </ActionTooltip>
           )}
-          <AccessRights access={access} lastCheckedAt={lastCheckedAt} />
+          {badge ?? <AccessRights access={access} lastCheckedAt={lastCheckedAt} />}
         </div>
         <Meta>
           <MetaItem>
@@ -1272,6 +1361,12 @@ function RepoRow({
           {entry.lastScanAt && scored && (
             <MetaItem icon={ArrowsRotateRight} title="Последний анализ">
               {fmtDateTime(entry.lastScanAt)}
+            </MetaItem>
+          )}
+          {/* сколько можно улучшить — тем же числом, что на карточке */}
+          {scored && entry.recommendationsCount !== null && entry.recommendationsCount > 0 && (
+            <MetaItem icon={ListCheck} title="Рекомендации на карточке">
+              {`${entry.recommendationsCount} ${plural(entry.recommendationsCount, "рекомендация", "рекомендации", "рекомендаций")}`}
             </MetaItem>
           )}
         </Meta>
@@ -1292,30 +1387,421 @@ function RepoRow({
             репозитории (по сохраненной проверке прав own); у чужого его нет вовсе.
             Пункта ручной проверки прав нет: права проверяются сами — при
             добавлении, после смены токена и в фоне */}
-        {canAnalyze && !scored && (
+        {canAnalyze && !scored && !iconActions && (
           <Button view="outlined" size="m" onClick={onScan} disabled={inWork} aria-label={`Запустить анализ ${entry.org}/${entry.repo}`}>
             Запустить анализ
           </Button>
         )}
-        <DropdownMenu
-          items={[
-            ...(canAnalyze && scored
-              ? [{ text: "Обновить анализ", iconStart: <Icon data={ArrowsRotateRight} size={16} />, action: onScan, disabled: inWork }]
-              : []),
-            { text: "Убрать из избранного", iconStart: <Icon data={TrashBin} size={16} />, action: onRemove, disabled: busy, theme: "danger" as const },
-          ]}
-          popupProps={{ placement: "bottom-end" }}
-          renderSwitcher={(props) => (
-            <Button {...props} view="flat" size="m" aria-label={`Действия с ${entry.org}/${entry.repo}`} loading={inWork}>
-              <Icon data={Ellipsis} size={16} />
+        {/* звезда — та же, что на карточке: добавить в избранное или убрать */}
+        {favorite && (
+          <ActionTooltip title={favorite.on ? "Убрать из избранного" : "Добавить в избранное"}>
+            <Button
+              view="flat"
+              size="m"
+              loading={favorite.busy}
+              onClick={favorite.toggle}
+              // имя постоянное, состояние — aria-pressed: «Убрать … нажата» звучало бы двойным отрицанием
+              aria-pressed={favorite.on}
+              aria-label={`В избранном ${entry.org}/${entry.repo}`}
+            >
+              <Icon data={favorite.on ? StarFill : Star} size={16} />
             </Button>
-          )}
-        />
+          </ActionTooltip>
+        )}
+        {iconActions ? (
+          <AnalysisIcon scored={scored} canAnalyze={canAnalyze} inWork={inWork} onScan={onScan} slug={`${entry.org}/${entry.repo}`} />
+        ) : menuItems.length > 0 ? (
+          <DropdownMenu
+            items={menuItems}
+            popupProps={{ placement: "bottom-end" }}
+            renderSwitcher={(props) => (
+              <Button {...props} view="flat" size="m" aria-label={`Действия с ${entry.org}/${entry.repo}`} loading={inWork}>
+                <Icon data={Ellipsis} size={16} />
+              </Button>
+            )}
+          />
+        ) : (
+          // пустое место под «…»: числа и звезды всех строк стоят на одной вертикали
+          <span className="rh-repo-item__menu-gap" aria-hidden="true" />
+        )}
       </div>
     </li>
   );
 }
 
+
+// ========== «Мои репозитории»: список SourceCraft по токену ==========
+
+export function MyReposPage() {
+  const { me, reloadMe } = useSession();
+  const data = dataOf(me);
+  if (data === null && me.kind !== "error") {
+    return (
+      <Page crumbs={TOKEN_REPOS_CRUMBS}>
+        <SkeletonRows rows={4} height={56} />
+      </Page>
+    );
+  }
+  if (data === null) {
+    return (
+      <Page crumbs={TOKEN_REPOS_CRUMBS}>
+        <CabinetAlert title="Не удалось загрузить список репозиториев" message={me.kind === "error" ? me.message : undefined} actions={[{ text: "Повторить", handler: reloadMe }]} />
+      </Page>
+    );
+  }
+  if (data.login === null) return <LoginOffer pageTitle="Мои репозитории" />;
+  const usable = data.hasPat && data.patUnreadable !== true;
+  return <Page crumbs={TOKEN_REPOS_CRUMBS}>{usable ? <TokenRepos /> : <TokenRequired unreadable={data.patUnreadable === true} />}</Page>;
+}
+
+/** Без токена списка нет: SourceCraft отдает его только по персональному токену; нечитаемый — сохранить заново. */
+function TokenRequired({ unreadable }: { unreadable: boolean }) {
+  return (
+    <>
+      <PageHeader title="Мои репозитории" />
+      <EmptyState
+        image={IdentityIllustration}
+        title={unreadable ? "Сохраните токен заново" : "Нужен токен SourceCraft"}
+        description={
+          unreadable
+            ? "Сохраненный токен больше не читается после смены ключа сервиса – вставьте его в Настройках еще раз."
+            : "Добавьте персональный токен доступа в Настройках – здесь появятся репозитории, доступные ему, и анализ закрытых."
+        }
+        actions={[{ text: "Перейти в Настройки", view: "action", size: "m", onClick: () => navigate("/settings") }]}
+      />
+    </>
+  );
+}
+
+/**
+ * «Мои репозитории» — опись: все, что видит токен, и запуск анализа. Список
+ * SourceCraft сервер держит 10 минут (обход /me/repos дорогой), «Обновить список»
+ * перечитывает сразу. Длинный список сужают поиск, организация (Select с поиском,
+ * своя — первой), видимость, состояние и язык; выбор живет в адресе и переживает
+ * переход в карточку. Строки компактные, по организациям, заголовки групп
+ * прилипают. «Запустить анализ» видна у закрытых (свои по правилу \`isOwnRepo\`),
+ * у публичных — пункт «…»: свой ли репозиторий, сервер проверит при запуске.
+ */
+function TokenRepos() {
+  // nonce > 0 — принудительное перечитывание из SourceCraft (`refresh=1`)
+  const [nonce, setNonce] = useState(0);
+  const list = useJson<TokenReposResponse>(`/api/me/sourcecraft-repos${nonce > 0 ? `?refresh=1&n=${nonce}` : ""}`, { keepPrevious: true });
+  const initial = useState(() => tokenParamsOf(window.location.search))[0];
+  const [filter, setFilter] = useState<TokenFilter>(initial.filter);
+  const [sort, setSort] = useState<TokenSort>(initial.sort);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [starting, setStarting] = useState<ReadonlySet<string>>(new Set());
+  const [favBusy, setFavBusy] = useState<ReadonlySet<string>>(new Set());
+  const isPhone = useMediaQuery("(max-width: 767px)");
+  const toaster = useToaster();
+  const analysis = useAnalysis();
+  const data = dataOf(list.state);
+  const entries = data?.entries ?? [];
+  const listed = useLatest(entries);
+  const reloadRef = useLatest(() => (nonce > 0 ? setNonce(0) : list.reload()));
+  // итог анализа по репозиторию из списка — данные каталога перечитываются (список SourceCraft — из кэша)
+  useAnalysisFinished((jobs) => {
+    if (jobs.some((j) => listed.current.some((e) => `${e.org}/${e.repo}`.toLowerCase() === j.slug.toLowerCase()))) reloadRef.current();
+  });
+  // выбор — в адресе: возврат из карточки «назад» приводит к тому же списку
+  useEffect(() => {
+    const next = `${window.location.pathname}${tokenSearchOf(filter, sort)}`;
+    if (next !== `${window.location.pathname}${window.location.search}`) window.history.replaceState(null, "", next);
+  }, [filter, sort]);
+  const patch = (p: Partial<TokenFilter>) => setFilter((f) => ({ ...f, ...p }));
+  const editing = (slug: string, on: boolean) => (prev: ReadonlySet<string>) => {
+    const next = new Set(prev);
+    if (on) next.add(slug);
+    else next.delete(slug);
+    return next;
+  };
+
+  const startScan = async (slug: string) => {
+    if (starting.has(slug)) return;
+    setStarting(editing(slug, true));
+    try {
+      const res = await mutateJson<{ deduplicated?: boolean; jobId?: number }>(`/api/me/repos/${slug.split("/").map(encodeURIComponent).join("/")}/scan`, "POST");
+      announceJobStarted(res?.jobId);
+      if (res?.deduplicated) toaster.add({ name: `scan-dedup:${slug}`, theme: "info", title: "Анализ уже идет", content: slug });
+    } catch (e) {
+      toaster.add({ name: `scan-failed:${slug}`, theme: "danger", title: "Анализ не запущен", content: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setStarting(editing(slug, false));
+      announceJobsChanged();
+      analysis.refresh();
+    }
+  };
+
+  const toggleFavorite = async (e: TokenRepoEntry) => {
+    const slug = `${e.org}/${e.repo}`;
+    if (favBusy.has(slug)) return;
+    const was = e.favorite;
+    setFavBusy(editing(slug, true));
+    try {
+      const path = `/api/me/favorites/${encodeURIComponent(e.org)}/${encodeURIComponent(e.repo)}`;
+      if (was) {
+        await mutateJson(path, "DELETE");
+        toaster.add({ name: `fav-removed:${slug}`, theme: "info", title: "Убрано из избранного", content: slug });
+      } else {
+        const res = (await mutateJson<FavoriteAddResponse>(path, "PUT")) ?? {};
+        toaster.add({ name: `fav-added:${slug}`, theme: "success", title: "Добавлено в избранное", content: `${slug}. ${favoriteAddedText(res.check, res.access?.visibility)}` });
+        announceJobsChanged();
+      }
+      // правка — от актуального списка: параллельные клики по разным звездам не затирают друг друга
+      list.set((prev) => (prev ? { ...prev, entries: prev.entries.map((x) => (x.org === e.org && x.repo === e.repo ? { ...x, favorite: !was } : x)) } : prev!));
+    } catch (err) {
+      toaster.add({ name: `fav-failed:${slug}`, theme: "danger", title: was ? "Не удалось убрать из избранного" : "Не удалось добавить в избранное", content: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setFavBusy(editing(slug, false));
+    }
+  };
+
+  // организации и языки — по всему списку, без учета фильтров: выбор не пропадает из меню
+  const orgs = orderOrgs(
+    entries.map((e) => e.org),
+    data?.owner ?? null,
+  );
+  const languages = [...new Set(entries.map((e) => e.language ?? ""))].sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)));
+  const shown = filterTokenRows(entries, filter);
+  const groups = groupByOrg(shown, (e) => e.repo, { owner: data?.owner ?? null, within: tokenRowOrder(sort) });
+  const countBy = (pick: (e: TokenRepoEntry) => boolean) => entries.filter(pick).length;
+  const filtersOn = [filter.orgs.length > 0, filter.states.length > 0, filter.langs.length > 0].filter(Boolean).length;
+  const anyFilter = filtersOn > 0 || filter.vis !== "all" || filter.q.trim() !== "";
+  const reset = () => setFilter(TOKEN_FILTER_DEFAULT);
+  // попап мультивыбора — как у языка в рейтинге: свой чекбокс в строке, штатная галочка скрыта
+  const popupClass = isPhone ? "rh-lang-popup rh-in-sheet" : "rh-lang-popup";
+  const langColor = new Map(entries.map((e) => [e.language ?? "", e.languageColor]));
+  const stateTitle = new Map(TOKEN_STATES.map((st) => [st.key as string, st.title]));
+  const langTitle = (l: string) => (l === LANG_UNKNOWN ? "не определен" : l);
+
+  const selects = (
+    <>
+      {orgs.length > 1 && (
+        <Select
+          label="Организация:"
+          size="m"
+          width={isPhone ? "max" : 230}
+          multiple
+          filterable
+          filterPlaceholder="Поиск"
+          hasClear
+          placeholder="все"
+          popupClassName={popupClass}
+          value={filter.orgs}
+          options={orgs.map((o) => ({ value: o, content: o, data: countBy((e) => e.org === o) }))}
+          renderOption={(option) => <MultiOption checked={filter.orgs.includes(option.value)} count={option.data as number}>{option.value}</MultiOption>}
+          renderSelectedOption={(_o, index) => <>{index === 0 ? multiSummary(filter.orgs) : ""}</>}
+          onUpdate={(v) => patch({ orgs: v })}
+        />
+      )}
+      <Select
+        label="Состояние:"
+        size="m"
+        width={isPhone ? "max" : 230}
+        multiple
+        hasClear
+        placeholder="все"
+        popupClassName={popupClass}
+        value={filter.states}
+        options={TOKEN_STATES.map((st) => ({ value: st.key, content: st.title, data: countBy((e) => tokenStateOf(e) === st.key) }))}
+        renderOption={(option) => (
+          <MultiOption checked={filter.states.includes(option.value as TokenState)} count={option.data as number}>
+            {stateTitle.get(option.value)}
+          </MultiOption>
+        )}
+        renderSelectedOption={(_o, index) => <>{index === 0 ? multiSummary(filter.states.map((x) => stateTitle.get(x) ?? x)) : ""}</>}
+        onUpdate={(v) => patch({ states: v as TokenState[] })}
+      />
+      {languages.length > 1 && (
+        <Select
+          label="Язык:"
+          size="m"
+          width={isPhone ? "max" : 190}
+          multiple
+          hasClear
+          placeholder="все"
+          popupClassName={popupClass}
+          value={filter.langs.map((l) => (l === "" ? LANG_UNKNOWN : l))}
+          options={languages.map((l) => ({ value: l === "" ? LANG_UNKNOWN : l, content: l === "" ? "не определен" : l, data: countBy((e) => (e.language ?? "") === l) }))}
+          // язык — с цветной точкой, как в рейтинге
+          renderOption={(option) => (
+            <MultiOption checked={filter.langs.includes(option.value === LANG_UNKNOWN ? "" : option.value)} count={option.data as number}>
+              <LanguageName name={langTitle(option.value)} color={langColor.get(option.value === LANG_UNKNOWN ? "" : option.value) ?? null} noLanguage={option.value === LANG_UNKNOWN} />
+            </MultiOption>
+          )}
+          renderSelectedOption={(_o, index) => <>{index === 0 ? multiSummary(filter.langs.map((l) => (l === "" ? "не определен" : l))) : ""}</>}
+          onUpdate={(v) => patch({ langs: v.map((x) => (x === LANG_UNKNOWN ? "" : x)) })}
+        />
+      )}
+      {/* сортировка — подписью «Сортировка:», значение тише, как значения фильтров */}
+      <Select
+        label="Сортировка:"
+        size="m"
+        width={isPhone ? "max" : "auto"}
+        popupClassName={isPhone ? "rh-in-sheet" : undefined}
+        value={[sort]}
+        options={TOKEN_SORTS}
+        renderSelectedOption={(option) => <span className="rh-select-value_muted">{option.content}</span>}
+        onUpdate={([v]) => setSort((v as TokenSort) ?? "name")}
+      />
+    </>
+  );
+  const visibility = (
+    <SegmentedRadioGroup size="m" value={filter.vis} onUpdate={(v) => patch({ vis: v === "closed" || v === "public" ? v : "all" })} aria-label="Видимость">
+      <SegmentedRadioGroup.Option value="all">Все</SegmentedRadioGroup.Option>
+      <SegmentedRadioGroup.Option value="closed">Закрытые</SegmentedRadioGroup.Option>
+      <SegmentedRadioGroup.Option value="public">Публичные</SegmentedRadioGroup.Option>
+    </SegmentedRadioGroup>
+  );
+
+  return (
+    <Flex direction="column" gap={4} className="rh-inventory">
+      <div className="rh-me-head">
+        <Flex direction="column" className="rh-me-head__title rh-page-head">
+          <Flex gap={2} alignItems="baseline">
+            <Text variant="header-2" as="h1" className="rh-page-title">
+              Мои репозитории
+            </Text>
+            {data && (
+              <Text variant="header-2" color="secondary" className="rh-page-title">
+                {entries.length}
+              </Text>
+            )}
+          </Flex>
+          <Text variant="body-2" color="complementary">
+            Репозитории SourceCraft, доступные вашему токену, и запуск их анализа.
+          </Text>
+        </Flex>
+        <div className="rh-me-tools">
+          <TextInput
+            size="m"
+            className="rh-me-search"
+            placeholder="Поиск"
+            value={filter.q}
+            onUpdate={(q) => patch({ q })}
+            hasClear
+            startContent={<Icon data={Magnifier} size={14} className="rh-me-search__icon" />}
+            controlProps={{ "aria-label": "Найти репозиторий или организацию" }}
+          />
+          <ActionTooltip title="Обновить список">
+            <Button view="normal" size="m" loading={list.state.kind === "loading" && data !== null} onClick={() => setNonce((n) => n + 1)} aria-label="Обновить список из SourceCraft">
+              <Icon data={ArrowsRotateRight} size={16} />
+            </Button>
+          </ActionTooltip>
+        </div>
+      </div>
+
+      {data && entries.length > 0 && (
+        <div className="rh-inventory__filters">
+          {visibility}
+          {isPhone ? (
+            <Button view="outlined" size="m" selected={filtersOn > 0} onClick={() => setFiltersOpen(true)}>
+              <Button.Icon side="start">
+                <Icon data={Sliders} size={16} />
+              </Button.Icon>
+              {filtersOn > 0 ? `Фильтры ${filtersOn}` : "Фильтры"}
+            </Button>
+          ) : (
+            selects
+          )}
+        </div>
+      )}
+      {isPhone && (
+        <Sheet visible={filtersOpen} onClose={() => setFiltersOpen(false)} title="Фильтры">
+          <Flex direction="column" gap={3} className="rh-filter-sheet">
+            {selects}
+            <Flex gap={2} className="rh-filter-sheet__actions">
+              {filtersOn > 0 && (
+                <Button view="normal" size="l" width="max" onClick={() => patch({ orgs: [], states: [], langs: [] })}>
+                  Сбросить
+                </Button>
+              )}
+              <Button view="action" size="l" width="max" onClick={() => setFiltersOpen(false)}>
+                Готово
+              </Button>
+            </Flex>
+          </Flex>
+        </Sheet>
+      )}
+
+      {list.state.kind === "loading" && data === null && <SkeletonRows rows={6} height={48} />}
+      {list.state.kind === "error" && (
+        <CabinetAlert title="Не удалось загрузить список из SourceCraft" message={list.state.message} actions={[{ text: "Повторить", handler: list.reload }]} />
+      )}
+      {/* перечитывание не удалось — на экране прежний список, и это надо сказать */}
+      {list.state.kind === "ok" && list.state.refreshError && (
+        <CabinetAlert title="Список не обновлен" message={`${list.state.refreshError} Показан прежний список.`} actions={[{ text: "Повторить", handler: list.reload }]} />
+      )}
+      {data?.stale && <CabinetAlert theme="info" title="Список не обновлен" message="Слишком много обновлений подряд – показан прежний список. Попробуйте через минуту." />}
+      {data && data.partial && <CabinetAlert theme="info" title={`Показаны первые ${entries.length}`} message="SourceCraft отдал не весь список – остальные репозитории найдутся по org/repo в «Избранном»." />}
+
+      {data && entries.length === 0 && (
+        <EmptyState image={EmptyIllustration} title="Токену не доступен ни один репозиторий" description="Проверьте, что у токена есть право на чтение репозиториев, – или создайте первый репозиторий на SourceCraft." />
+      )}
+      {data && entries.length > 0 && shown.length === 0 && (
+        <EmptyState
+          image={SearchIllustration}
+          title="Ничего не нашлось"
+          description={filter.q.trim() !== "" ? `По запросу «${filter.q.trim()}» с выбранными фильтрами репозиториев нет.` : "Под выбранные фильтры не подходит ни один репозиторий."}
+          actions={[{ text: "Сбросить", view: "normal", size: "m", onClick: reset }]}
+        />
+      )}
+      <span className="rh-sr-only" aria-live="polite">
+        {anyFilter && data ? `Показано ${shown.length} из ${entries.length}` : ""}
+      </span>
+
+      {groups.map((g) => (
+        <section key={g.org} className="rh-org-group" aria-labelledby={`org-${g.org}`}>
+          {/* организация — заголовком группы, прилипает при прокрутке; число — тише */}
+          <Text variant="subheader-2" as="h2" id={`org-${g.org}`} className="rh-org-group__title">
+            {g.org}
+            <span className="rh-btn-count">{g.items.length}</span>
+          </Text>
+          <ul className="rh-repo-list">
+            {g.items.map((e) => {
+              const slug = `${e.org}/${e.repo}`;
+              const closed = isClosed(e.visibility);
+              return (
+                <RepoRow
+                  key={slug}
+                  entry={e}
+                  access={null}
+                  lastCheckedAt={null}
+                  hasPat
+                  live={analysis.live(slug)}
+                  starting={starting.has(slug)}
+                  busy={false}
+                  onScan={() => void startScan(slug)}
+                  canAnalyze
+                  ownUnknown={!closed}
+                  iconActions
+                  fromToken
+                  empty={e.isEmpty}
+                  badge={<VisibilityPill value={e.visibility} />}
+                  favorite={{ on: e.favorite, busy: favBusy.has(slug), toggle: () => void toggleFavorite(e) }}
+                />
+              );
+            })}
+          </ul>
+        </section>
+      ))}
+    </Flex>
+  );
+}
+
+/** Значение «язык не определен» в Select: пустая строка там не годится как value. */
+const LANG_UNKNOWN = "__none";
+
+/** Строка мультивыбора: чекбокс, подпись и число тише — как фильтр языка в рейтинге. */
+function MultiOption({ checked, count, children }: { checked: boolean; count: number; children: ReactNode }) {
+  return (
+    <Flex gap={2} alignItems="center" className="rh-lang-option">
+      <Checkbox size="m" checked={checked} controlProps={{ tabIndex: -1, "aria-hidden": true }} style={{ pointerEvents: "none" }} />
+      {children}
+      <Text color="secondary">{count}</Text>
+    </Flex>
+  );
+}
 
 // ========== ПОРТ 5: панель заданий ==========
 
@@ -1361,7 +1847,7 @@ export function JobsBell() {
         aria-expanded={open}
         aria-haspopup="dialog"
         // счетчик — словами: иначе «Очередь0»
-        aria-label={jobs === null ? "Очередь" : alarm ? `Очередь: с ошибкой – ${failed}` : `Очередь: идет – ${active.length}`}
+        aria-label={jobs === null ? "Очередь" : alarm ? `Очередь: с ошибкой – ${failed}` : active.length === 0 ? "Очередь, активных нет" : `Очередь: идет – ${active.length}`}
         title={failing ? JOBS_STALE_TEXT : busy ? "Ваши запуски идут" : alarm ? "Последний анализ завершился ошибкой" : "Анализы, AI-обзоры и проверки, которые вы запускали"}
       >
         <Icon data={alarm ? CircleExclamation : ListCheck} size={16} className={alarm ? "rh-state__icon_danger" : undefined} />
@@ -1395,8 +1881,8 @@ export function JobsBell() {
             active.length === 0 ? (
               <JobsEmpty title="Сейчас ничего не анализируется">
                 Запустить анализ можно в разделе{" "}
-                <Link {...navProps("/me", close)} view="normal" className="rh-nowrap">
-                  Избранное
+                <Link {...navProps("/repos", close)} view="normal" className="rh-nowrap">
+                  Мои репозитории
                 </Link>
               </JobsEmpty>
             ) : (

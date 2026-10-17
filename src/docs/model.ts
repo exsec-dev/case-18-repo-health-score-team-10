@@ -15,6 +15,7 @@ export interface DocTarget {
 export const UI_ICONS = [
   "rating",
   "compare",
+  "repos",
   "favorites",
   "docs",
   "settings",

@@ -57,22 +57,28 @@ describe("К8.5.14: анализ — только своих; права — с�
 
   test("строка «Моих репозиториев»: кнопка анализа — только у своего (сохраненная проверка own), у чужого и непроверенного ее нет", () => {
     const me = code("MePage.tsx");
-    expect(me).toContain("const canAnalyze = hasPat && access?.own === true;");
+    // в «Избранном» — по сохраненной проверке own; «Мои репозитории» передают canAnalyze
+    // (права проверит сервер при запуске), у пустого репозитория анализа нет
+    expect(me).toContain("const canAnalyze = !empty && (canAnalyzeOverride ?? (hasPat && access?.own === true));");
     // UX 17.10: у своего без анализа — видимая кнопка «Запустить анализ», у оцененного
     // своего — пункт «Обновить анализ» в меню «…»; у чужого нет ни того, ни другого
-    expect(me).toContain("{canAnalyze && !scored && (");
+    // «Мои репозитории»: действие анализа — иконкой (обновить / запустить), без меню «…»;
+    // отказ по правам (чужой публичный) сервер объясняет тостом; «Запустить» — primary
+    expect(me).toContain("{canAnalyze && !scored && !iconActions && (");
+    expect(me).toContain("<Icon data={scored ? ArrowsRotateRight : Play} size={16} />");
+    expect(me).toContain('view={scored ? "flat" : "action"}');
     expect(me).toMatch(/\.\.\.\(canAnalyze && scored\s*\? \[\{ text: "Обновить анализ"/);
   });
 
   test("исход автопроверки при добавлении — человеческим текстом, анализ чужого не обещается", () => {
     expect(favoriteAddedText({ status: "checked", enqueue: { status: "queued", code: null } })).toBe("Права проверены – запущен анализ, итог придет уведомлением.");
-    // ночной анализ каталога обещается только публичному; закрытому – честно «оценки не будет»
-    // UX 17.10: «ночной обход» → «ночной анализ каталога»
+    // плановый анализ обещается только публичному; закрытому – честно «оценки не будет»
+    // UX 17.10: «ночной обход» → «плановый анализ»
     expect(favoriteAddedText({ status: "checked", enqueue: { status: "skipped", code: "not_own" } }, "public")).toBe(
-      "Права проверены. Анализ запускается только для своих репозиториев – этот обновит ночной анализ каталога.",
+      "Права проверены. Анализ запускается только для своих репозиториев – этот обновит плановый анализ.",
     );
     for (const v of ["internal", "private", "unknown", undefined] as const) {
-      expect(favoriteAddedText({ status: "checked", enqueue: { status: "skipped", code: "not_own" } }, v)).not.toContain("ночной анализ каталога");
+      expect(favoriteAddedText({ status: "checked", enqueue: { status: "skipped", code: "not_own" } }, v)).not.toContain("плановый анализ");
     }
     expect(favoriteAddedText({ status: "failed", enqueue: null })).toBe("Проверить права не удалось: SourceCraft сейчас не отвечает – проверим позже.");
     expect(favoriteAddedText({ status: "deferred", enqueue: null })).toBe("Права проверим в фоне – итог появится в строке списка.");

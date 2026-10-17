@@ -8,7 +8,7 @@
 //   fill — данные на высоту экрана (рейтинг): шапка и футер закреплены,
 //     прокручивается только область между ними; уже 1440px правая панель
 //     уходит в Drawer по кнопке в ActionBar, чтобы не было второй прокрутки.
-import { ArrowRightFromSquare, ArrowRightToSquare, BookOpen, Bookmark, ChartColumn, CircleInfo, Gear, Moon, ScalesBalanced, Sun, Xmark } from "@gravity-ui/icons";
+import { Archive, ArrowRightFromSquare, ArrowRightToSquare, BookOpen, Bookmark, ChartColumn, CircleInfo, Gear, Moon, ScalesBalanced, Sun, Xmark } from "@gravity-ui/icons";
 import { ActionBar, AsideHeader, FooterItem, type AsideHeaderItem } from "@gravity-ui/navigation";
 import { ActionTooltip, Avatar, Breadcrumbs, Button, Drawer, Flex, Icon, Skeleton, Text, useThemeValue, useToaster, type IconData } from "@gravity-ui/uikit";
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
@@ -18,7 +18,7 @@ import { HealthCraftMark, PRODUCT_NAME } from "./logo";
 import { useAppTheme, useMediaQuery, useRailCompact, type AppTheme } from "./prefs";
 import { linkProps, loginHref, navigate } from "./router";
 
-export type Section = "rating" | "me" | "compare" | "settings" | "docs" | null;
+export type Section = "rating" | "repos" | "me" | "compare" | "settings" | "docs" | null;
 
 interface SectionDef {
   id: Exclude<Section, null>;
@@ -32,6 +32,9 @@ const SECTIONS: SectionDef[] = [
   // «Сравнение» рядом с рейтингом: оба раздела про каталог и открыты без входа.
   // У «Избранного» иконка-закладка: звезда занята кнопкой добавления в избранное.
   { id: "compare", title: "Сравнение", href: "/compare", icon: ScalesBalanced },
+  // личные разделы — после каталога: сначала свои репозитории (список по токену),
+  // затем избранное — то, что пользователь отметил сам
+  { id: "repos", title: "Мои репозитории", href: "/repos", icon: Archive },
   { id: "me", title: "Избранное", href: "/me", icon: Bookmark },
 ];
 

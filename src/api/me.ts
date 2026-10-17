@@ -1,5 +1,5 @@
-// Кабинет «мой аккаунт». Список кабинета – только избранное; namespace
-// пользователя служит лишь для разового посева избранного при сохранении PAT.
+// Кабинет «мой аккаунт»: «Избранное» – только то, что пользователь добавил сам;
+// «Мои репозитории» – живой список SourceCraft по токену (`/me/repos`).
 // Функции не зависят от HTTP-слоя сервера: клиент SourceCraft передается
 // снаружи, тесты идут без сети. Чужие и недоступные репо не запрашиваются
 // вовсе.
@@ -23,6 +23,8 @@ export interface MyRepoEntry {
   languageColor: string | null;
   /** HealthCraft Index последнего пригодного скана (у приватного без такого – последнего не-bad); null – не оценивался */
   healthcraftIndex: number | null;
+  /** индекс предыдущей оценки того же ряда (пригодные или не-bad) — для «что изменилось»; null – сравнивать не с чем */
+  previousIndex: number | null;
   /** время последнего анализа репо ЛЮБЫМ автором (не own-скан зрителя – это `FavoriteCheckResponse.lastOwnScanAt`) */
   lastScanAt: string | null;
   /** статус ПОСЛЕДНЕГО скана репо (любого автора): кабинет отличает «анализ завершился
@@ -68,11 +70,11 @@ export interface MyReposResult {
  * не-bad), время и статус – из самого последнего скана.
  * Один хелпер на все записи `listMyRepos`: копия правила быстро разошлась бы.
  */
-function ratingScoreOf(db: Database, org: string, repo: string): { healthcraftIndex: number | null; lastScanAt: string | null; lastScanStatus: MyRepoEntry["lastScanStatus"] } {
+function ratingScoreOf(db: Database, org: string, repo: string): { healthcraftIndex: number | null; previousIndex: number | null; lastScanAt: string | null; lastScanStatus: MyRepoEntry["lastScanStatus"] } {
   const row = db.query("SELECT id, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as
     | { id: number; visibility: string }
     | null;
-  if (!row) return { healthcraftIndex: null, lastScanAt: null, lastScanStatus: null };
+  if (!row) return { healthcraftIndex: null, previousIndex: null, lastScanAt: null, lastScanStatus: null };
   const scoreOf = (pick: string) =>
     db
       .query(
@@ -85,8 +87,21 @@ function ratingScoreOf(db: Database, org: string, repo: string): { healthcraftIn
   const lastScan = db.query("SELECT status, finished_at, started_at FROM scans WHERE repo_id = ? ORDER BY id DESC LIMIT 1").get(row.id) as
     | { status: string; finished_at: string | null; started_at: string }
     | null;
+  // предыдущая оценка — из того же ряда, что текущая: пригодные сканы, а у
+  // приватного без них — не-bad; обе с числом индекса текущей модели
+  const series = (eligible: boolean) =>
+    db
+      .query(
+        `SELECT sc.healthcraft_index AS total FROM scores sc JOIN scans s ON s.id = sc.scan_id
+         WHERE sc.repo_id = ? AND sc.model_version = ? AND sc.healthcraft_index IS NOT NULL AND ${eligible ? "s.rating_eligible = 1" : "s.status NOT IN ('bad', 'running', 'queued')"}
+         ORDER BY sc.scan_id DESC LIMIT 2`,
+      )
+      .all(row.id, MODEL_VERSION) as { total: number }[];
+  const fromEligible = series(true);
+  const pair = fromEligible.length > 0 || row.visibility === "public" ? fromEligible : series(false);
   return {
     healthcraftIndex: scored?.total ?? null,
+    previousIndex: scored && pair.length === 2 ? pair[1]!.total : null,
     lastScanAt: lastScan ? (lastScan.finished_at ?? lastScan.started_at) : null,
     lastScanStatus: lastScan ? (lastScan.status as MyRepoEntry["lastScanStatus"]) : null,
   };
@@ -115,6 +130,8 @@ export function viewerMayReadRepo(db: Database, userId: number | null, org: stri
   // и строка кабинета его тоже не раскрывает, какие бы права ни были сохранены
   if (row && row.visibility === "public" && row.rating_active !== 1) return false;
   if (userId === null) return false;
+  // репозиторий вернул живой список SourceCraft по токену зрителя – чтение доказано
+  if (opts.readProven === true) return true;
   const fav = db.query("SELECT last_access FROM favorites WHERE user_id = ? AND org_slug = ? AND repo_slug = ?").get(userId, org, repo) as
     | { last_access: string | null }
     | null;
@@ -188,18 +205,6 @@ function plannedWork(db: Database, userId: number | null, org: string, repo: str
   return finishedOwn === null;
 }
 
-/**
- * Итог посева избранного при сохранении PAT. Проверенный PAT сохраняется в
- * любом случае, посев идет после: сбой страницы, лимит или недочитанный
- * каталог сохранение не откатывают.
- */
-export interface PatSeed {
-  status: "ok" | "partial";
-  added: number;
-  /** `no_username` – /user не вернул имя, и namespace даже не опрашивался */
-  error?: { code: "source_http" | "favorite_limit" | "page_limit" | "no_username" };
-}
-
 // разбор ручного ввода живет в чистом модуле, общем с вебом
 export { parseFavoriteInput } from "./slug-input";
 
@@ -244,7 +249,7 @@ export interface ScRepoLite {
 export async function listSourcecraftRepos(
   client: ScClient,
   opts: { maxPages?: number; maxItems?: number } = {},
-): Promise<{ status: "ok" | "source_http"; partial: boolean; repos: ScRepoLite[] }> {
+): Promise<{ status: "ok" | "source_http"; partial: boolean; repos: ScRepoLite[]; interrupted?: boolean }> {
   const maxPages = opts.maxPages ?? 40;
   const maxItems = opts.maxItems ?? 200;
   let token: string | null = null;
@@ -253,7 +258,8 @@ export async function listSourcecraftRepos(
   while (pages < maxPages) {
     const path = `/me/repos?page_size=100${token ? `&page_token=${encodeURIComponent(token)}` : ""}`;
     const res = await client.get(path);
-    if (res.status !== 200) return repos.length > 0 ? { status: "ok", partial: true, repos } : { status: "source_http", partial: true, repos };
+    // сбой на странице после первой — собранное с `interrupted`: такой список не кэшируется
+    if (res.status !== 200) return repos.length > 0 ? { status: "ok", partial: true, repos, interrupted: true } : { status: "source_http", partial: true, repos };
     pages++;
     const body = res.json as {
       repositories?: { organization?: { slug?: unknown }; slug?: unknown; name?: unknown; visibility?: unknown; is_empty?: unknown }[];
@@ -280,45 +286,64 @@ export async function listSourcecraftRepos(
   return { status: "ok", partial: true, repos };
 }
 
+/** Строка «Моих репозиториев»: репо из списка SourceCraft по токену и то, что о нем знает каталог. */
+export interface TokenRepoEntry extends MyRepoEntry {
+  /** видимость из ответа SourceCraft – она же решает «свой» для закрытых (`isOwnRepo`) */
+  visibility: string | null;
+  /** в репозитории нет ни одного коммита – анализировать нечего */
+  isEmpty: boolean;
+  /** уже в «Избранном» зрителя */
+  favorite: boolean;
+}
+
 /**
- * Разовый посев избранного из namespace владельца PAT:
- * `GET /orgs/{username}/repos?page_size=100`, до 5 страниц; бюджет запросов
- * клиента держит вызывающий. Уже существующие строки не считаются ни в added,
- * ни в лимите; достигнутый предел останавливает посев с favorite_limit, а
- * непрочитанный остаток после пятой страницы дает partial/page_limit.
+ * «Мои репозитории»: каждый репо живого списка `/me/repos` с данными каталога.
+ * Право чтения доказано самим списком (`readProven`), поэтому у закрытых видны
+ * оценка и мета; публичный, выбывший из рейтинга, по-прежнему не раскрывается.
+ * Без тяжелых полей кабинета (рекомендации, флаг накрутки собирают карточку
+ * целиком) – список бывает в сотни строк.
  */
-export async function seedFavoritesFromNamespace(
-  db: Database,
-  client: ScClient,
-  username: string,
-  userId: number,
-  favoritesMax: number,
-  opts: { maxPages?: number } = {},
-): Promise<PatSeed> {
-  const maxPages = opts.maxPages ?? 5;
-  let added = 0;
-  let token: string | null = null;
-  let pages = 0;
-  while (pages < maxPages) {
-    const path = `/orgs/${encodeURIComponent(username)}/repos?page_size=100${token ? `&page_token=${encodeURIComponent(token)}` : ""}`;
-    const res = await client.get(path);
-    if (res.status !== 200) return { status: "partial", added, error: { code: "source_http" } };
-    pages++;
-    const body = res.json as { repositories?: { organization?: { slug?: unknown }; slug?: unknown }[]; next_page_token?: unknown } | null;
-    const list = Array.isArray(body?.repositories) ? body!.repositories! : [];
-    for (const raw of list) {
-      const org = typeof raw.organization?.slug === "string" ? raw.organization.slug : username;
-      const repo = typeof raw.slug === "string" ? raw.slug : null;
-      if (!repo) continue;
-      const outcome = addFavoriteCapped(db, userId, org, repo, favoritesMax);
-      if (outcome === "added") added++;
-      if (outcome === "limit") return { status: "partial", added, error: { code: "favorite_limit" } };
-    }
-    const next = body?.next_page_token;
-    if (typeof next !== "string" || next.length === 0) return { status: "ok", added };
-    token = next;
-  }
-  return { status: "partial", added, error: { code: "page_limit" } };
+export function tokenRepoEntries(db: Database, userId: number, repos: ScRepoLite[]): TokenRepoEntry[] {
+  const favorites = new Set(
+    (db.query("SELECT org_slug, repo_slug FROM favorites WHERE user_id = ?").all(userId) as { org_slug: string; repo_slug: string }[]).map((f) =>
+      `${f.org_slug}/${f.repo_slug}`.toLowerCase(),
+    ),
+  );
+  return repos.map((r) => {
+    const mayRead = viewerMayReadRepo(db, userId, r.org, r.slug, { readProven: true });
+    const inCatalog = db.query("SELECT 1 FROM repos WHERE org_slug = ? AND repo_slug = ?").get(r.org, r.slug) !== null;
+    const row = mayRead
+      ? (db.query("SELECT title, language, logo_url, language_color, last_activity_at FROM repos WHERE org_slug = ? AND repo_slug = ?").get(r.org, r.slug) as {
+          title: string | null;
+          language: string | null;
+          logo_url: string | null;
+          language_color: string | null;
+          last_activity_at: string | null;
+        } | null)
+      : null;
+    const known = mayRead ? ratingScoreOf(db, r.org, r.slug) : { healthcraftIndex: null, previousIndex: null, lastScanAt: null, lastScanStatus: null };
+    return {
+      org: r.org,
+      repo: r.slug,
+      title: row?.title ?? r.name,
+      language: row?.language ?? null,
+      lastActivityAt: row?.last_activity_at ?? null,
+      logoUrl: row?.logo_url ?? null,
+      languageColor: row?.language_color ?? null,
+      healthcraftIndex: known.healthcraftIndex,
+      previousIndex: known.previousIndex,
+      lastScanAt: known.lastScanAt,
+      lastScanStatus: known.lastScanStatus,
+      inCatalog,
+      mayRead,
+      planned: plannedWork(db, userId, r.org, r.slug),
+      recommendationsCount: null,
+      fraudFlag: null,
+      visibility: r.visibility,
+      isEmpty: r.isEmpty,
+      favorite: favorites.has(`${r.org}/${r.slug}`.toLowerCase()),
+    };
+  });
 }
 
 /**
@@ -353,7 +378,7 @@ export function myRepoEntryOf(db: Database, userId: number | null, org: string, 
         last_activity_at: string | null;
       } | null)
     : null;
-  const known = mayRead ? ratingScoreOf(db, f.org_slug, f.repo_slug) : { healthcraftIndex: null, lastScanAt: null, lastScanStatus: null };
+  const known = mayRead ? ratingScoreOf(db, f.org_slug, f.repo_slug) : { healthcraftIndex: null, previousIndex: null, lastScanAt: null, lastScanStatus: null };
   return {
     org: f.org_slug,
     repo: f.repo_slug,
@@ -363,6 +388,7 @@ export function myRepoEntryOf(db: Database, userId: number | null, org: string, 
     logoUrl: row?.logo_url ?? null,
     languageColor: row?.language_color ?? null,
     healthcraftIndex: known.healthcraftIndex,
+    previousIndex: known.previousIndex,
     lastScanAt: known.lastScanAt,
     lastScanStatus: known.lastScanStatus,
     inCatalog,
@@ -377,6 +403,8 @@ export function myRepoEntryOf(db: Database, userId: number | null, org: string, 
 export interface SavedRightsOptions {
   /** false – PAT не читается текущим ключом (сменился APP_SECRET): сохраненные проверки не в счет */
   savedRightsValid?: boolean;
+  /** true – репо пришел в живом списке `/me/repos` по токену зрителя: право чтения доказано */
+  readProven?: boolean;
 }
 
 /**

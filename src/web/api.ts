@@ -3,10 +3,10 @@
 // бандл фронтенда не утекает ни строчки серверного кода (типы стираются).
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ApiError, MetaResponse, RatingResponse, RepoCard } from "../api/repos";
-import type { MyRepoEntry } from "../api/me";
+import type { MyRepoEntry, ScRepoLite, TokenRepoEntry } from "../api/me";
 import { errorText } from "./format";
 
-export type { MetaResponse, RatingResponse, RepoCard, MyRepoEntry };
+export type { MetaResponse, RatingResponse, RepoCard, MyRepoEntry, TokenRepoEntry };
 
 export interface MeResponse {
   /** null = аноним (зонд шапки отдаёт 200 и без сессии) */
@@ -24,6 +24,19 @@ export interface MeResponse {
 export interface MyReposResponse {
   username: string | null;
   entries: MyRepoEntry[];
+}
+
+/** «Мои репозитории»: живой список SourceCraft по токену (кэш сервера) и данные каталога. */
+export interface TokenReposResponse {
+  repos: ScRepoLite[];
+  partial: boolean;
+  /** когда список прочитан из SourceCraft */
+  fetchedAt: string;
+  /** перечитать не дало окно чтений — показан прежний список */
+  stale?: boolean;
+  /** логин SourceCraft владельца токена — его пространство показывается первым */
+  owner: string | null;
+  entries: TokenRepoEntry[];
 }
 
 /**
@@ -155,7 +168,7 @@ export function dataOf<T>(state: AsyncState<T>): T | null {
 }
 
 /** Загрузка по URL с отменой устаревшего запроса и ручным повтором. */
-export function useJson<T>(url: string, opts: { keepPrevious?: boolean } = {}): { state: AsyncState<T>; reload: () => void; set: (data: T) => void } {
+export function useJson<T>(url: string, opts: { keepPrevious?: boolean } = {}): { state: AsyncState<T>; reload: () => void; set: (data: T | ((prev: T | null) => T)) => void } {
   const [state, setState] = useState<AsyncState<T>>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
   const keepPrevious = opts.keepPrevious === true;
@@ -174,8 +187,13 @@ export function useJson<T>(url: string, opts: { keepPrevious?: boolean } = {}): 
   }, [url, attempt, keepPrevious]);
 
   const reload = useCallback(() => setAttempt((n) => n + 1), []);
-  // точечная правка данных без перечитывания (строка после действия)
-  const set = useCallback((data: T) => setState({ kind: "ok", data }), []);
+  // точечная правка данных без перечитывания (строка после действия); функция —
+  // правка от актуального состояния, а не от снимка на момент клика
+  const set = useCallback(
+    (data: T | ((prev: T | null) => T)) =>
+      setState((prev) => ({ kind: "ok", data: typeof data === "function" ? (data as (p: T | null) => T)(dataOf(prev)) : data })),
+    [],
+  );
   return { state, reload, set };
 }
 

@@ -8,6 +8,8 @@ export type Route =
   | { kind: "rating"; search: string }
   | { kind: "repo"; org: string; repo: string }
   | { kind: "me" }
+  // «Мои репозитории» — живой список SourceCraft по токену
+  | { kind: "repos" }
   | { kind: "settings" }
   // набор сравнения — в query (`?r=org/a&r=org/b`), ссылкой можно поделиться
   | { kind: "compare"; search: string }
@@ -22,6 +24,7 @@ export function parseRoute(pathname: string, search = ""): Route {
   const parts = pathname.split("/").filter((p) => p !== "");
   if (parts.length === 0) return { kind: "rating", search };
   if (parts[0] === "me" && parts.length === 1) return { kind: "me" };
+  if (parts[0] === "repos" && parts.length === 1) return { kind: "repos" };
   if (parts[0] === "settings" && parts.length === 1) return { kind: "settings" };
   if (parts[0] === "compare" && parts.length === 1) return { kind: "compare", search };
   if (parts[0] === "docs") return { kind: "docs", slug: parts.slice(1).map(safeDecode).join("/") };

@@ -309,6 +309,9 @@ export function openDb(config: Config): Database {
     ensureColumn(db, "repos", "language_color", "TEXT");
     ensureColumn(db, "users", "display_name", "TEXT");
     ensureColumn(db, "users", "avatar_id", "TEXT");
+    // логин SourceCraft владельца токена (из GET /user при сохранении): «Мои
+    // репозитории» ставят его пространство первым. Старый код колонку не читает
+    ensureColumn(db, "user_tokens", "owner_login", "TEXT");
     ensureColumn(db, "jobs", "user_id", "INTEGER");
     ensureColumn(db, "jobs", "trigger_kind", "TEXT NOT NULL DEFAULT 'periodic'");
     // Бэкфилл признака полосы: колонку добавили с DEFAULT 'periodic', и у старых

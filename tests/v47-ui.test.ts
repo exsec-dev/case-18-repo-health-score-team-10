@@ -128,7 +128,9 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
     expect((code.match(/<Alert\b/g) ?? []).length).toBe(3);
     expect(code).toMatch(/<Alert theme=\{theme\} view="outlined" size="m"/);
     // остальные плашки кабинета идут через обертку
-    expect((code.match(/<CabinetAlert\b/g) ?? []).length).toBe(6);
+    // UX 17.10: +5 у «Моих репозиториев» (сбой сессии, сбой списка, сбой обновления,
+    // список не обновлен по окну, неполный список)
+    expect((code.match(/<CabinetAlert\b/g) ?? []).length).toBe(11);
   });
 
   test("П3.4: слаг — общим RepoSlug; пустое состояние — EmptyState; карточек `rh-me-card` в кабинете нет (В4.8)", () => {

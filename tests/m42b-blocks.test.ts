@@ -19,7 +19,7 @@ import { collectAppsec } from "../src/collectors/appsec";
 import type { ScClient, ScResponse } from "../src/collectors/http";
 import { renderRepoReport } from "../src/report/markdown";
 import { getMeta, getRepoCard } from "../src/api/repos";
-import { addFavoriteCapped, listMyRepos, parseFavoriteInput, seedFavoritesFromNamespace } from "../src/api/me";
+import { addFavoriteCapped, listMyRepos, parseFavoriteInput } from "../src/api/me";
 import { enqueueScan } from "../src/jobs/scheduler";
 import { DEFAULT_SCAN, defaultLeaseMs } from "../src/config";
 import { authErrorText } from "../src/web/format";
@@ -483,70 +483,6 @@ describe("Б5 (Ф2.21): addFavoriteCapped — предел, идемпотент
       expect(addFavoriteCapped(t.db, userId, "o", "r1", 3)).toBe("exists");
       const count = (t.db.query("SELECT COUNT(*) AS c FROM favorites WHERE user_id = ?").get(userId) as { c: number }).c;
       expect(count).toBe(3);
-    } finally {
-      t.close();
-    }
-  });
-});
-
-/** Фейковый клиент посева: отдаёт заготовленные страницы, считает запросы. */
-function seedClient(pages: { status: number; json: unknown }[], paths: string[]): ScClient {
-  let i = 0;
-  return {
-    async get(path: string): Promise<ScResponse> {
-      paths.push(path);
-      const p = pages[Math.min(i, pages.length - 1)]!;
-      i++;
-      return { status: p.status, json: p.json, bodyText: JSON.stringify(p.json) };
-    },
-    requestCount: () => i,
-  };
-}
-
-const seedPage = (slugs: string[], next?: string): { status: number; json: unknown } => ({
-  status: 200,
-  json: {
-    repositories: slugs.map((s) => ({ organization: { slug: "seeder" }, slug: s })),
-    ...(next ? { next_page_token: next } : {}),
-  },
-});
-
-describe("Б5 (Ф2.20): seedFavoritesFromNamespace", () => {
-  test("две страницы → ok/3; существующие не считаются ни в added, ни в лимите", async () => {
-    const t: ApiTestDb = makeApiDb();
-    try {
-      const userId = upsertUser(t.db, "ya-seed", "seed");
-      addFavoriteCapped(t.db, userId, "seeder", "already", 500);
-      const paths: string[] = [];
-      const out = await seedFavoritesFromNamespace(
-        t.db,
-        seedClient([seedPage(["already", "b"], "p2"), seedPage(["c"])], paths),
-        "seeder",
-        userId,
-        500,
-      );
-      expect(out).toEqual({ status: "ok", added: 2 });
-      expect(new URL(`http://x${paths[0]}`).searchParams.get("page_size")).toBe("100");
-      expect(new URL(`http://x${paths[1]}`).searchParams.get("page_token")).toBe("p2");
-    } finally {
-      t.close();
-    }
-  });
-
-  test("не-200 страницы → partial/source_http; хвост после 5-й страницы → partial/page_limit; кап → partial/favorite_limit", async () => {
-    const t: ApiTestDb = makeApiDb();
-    try {
-      const userId = upsertUser(t.db, "ya-seed2", "seed2");
-      const paths: string[] = [];
-      const http = await seedFavoritesFromNamespace(t.db, seedClient([{ status: 503, json: {} }], paths), "seeder", userId, 500);
-      expect(http).toEqual({ status: "partial", added: 0, error: { code: "source_http" } });
-      const pages = Array.from({ length: 5 }, (_, i) => seedPage([`r${i}`], "more"));
-      const tail = await seedFavoritesFromNamespace(t.db, seedClient(pages, paths), "seeder", userId, 500);
-      expect(tail.status).toBe("partial");
-      expect(tail.error?.code).toBe("page_limit");
-      expect(tail.added).toBe(5);
-      const capped = await seedFavoritesFromNamespace(t.db, seedClient([seedPage(["x1", "x2", "x3"])], paths), "seeder", userId, 6);
-      expect(capped).toEqual({ status: "partial", added: 1, error: { code: "favorite_limit" } });
     } finally {
       t.close();
     }

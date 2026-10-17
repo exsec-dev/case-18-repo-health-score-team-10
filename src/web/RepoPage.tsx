@@ -68,6 +68,8 @@ import {
   Button,
   Card,
   ClipboardButton,
+  CopyToClipboard,
+  Skeleton,
   DefinitionList,
   Disclosure,
   DropdownMenu,
@@ -86,7 +88,7 @@ import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactEleme
 import { COVERAGE_NULL_BELOW } from "../score/model";
 import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle } from "../report/submetrics";
 import { factWords } from "../report/factWords";
-import { FULL, INDEX, hintText, metricWeights, notInScoreNote, ownershipView, sourceWord, strengthsLine, submetricWeightText, type BarHint } from "../report/sections";
+import { FULL, INDEX, metricWeights, notInScoreNote, ownershipView, sourceWord, strengthsLine, submetricWeightText, type BarHint } from "../report/sections";
 import type { MetaResponse, RepoCard } from "./api";
 import { dataOf, mutateJson, useJson, useVisible } from "./api";
 import { LADDER_HELP, cardView, type CardView, type CategoryView, type PositionView, type RecommendationView } from "./cardView";
@@ -133,7 +135,7 @@ import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, MethodLink, Mod
 type Card = RepoCard;
 type Evidence = Card["evidence"][number];
 
-export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: string; meta: MetaResponse | null; onSection?: (s: "rating" | "me") => void }) {
+export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: string; meta: MetaResponse | null; onSection?: (s: "rating" | "repos" | "me") => void }) {
   const slug = `${org}/${repo}`;
   const cardUrl = `/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`;
   // перечитывание не мигает скелетоном — прежние данные на экране, пока не придет
@@ -183,13 +185,13 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
   }, [foreignRunning, visible, reload]);
 
   // Первая крошка публичного репо ведет на последнюю выдачу рейтинга (фильтр, сортировка,
-  // страница). Закрытый (private/internal) в рейтинг не входит — ему крошка «Избранное»,
-  // откуда на него и попадают
+  // страница). Закрытый (private/internal) в рейтинг не входит — его видят только
+  // участники, и он стоит в их «Моих репозиториях»
   const closedRepo = data?.repo?.visibility === "private" || data?.repo?.visibility === "internal";
   useEffect(() => {
-    if (data) onSection?.(closedRepo ? "me" : "rating");
+    if (data) onSection?.(closedRepo ? "repos" : "rating");
   }, [data !== null, closedRepo]); // eslint-disable-line react-hooks/exhaustive-deps
-  const crumbs: Crumb[] = [closedRepo ? { text: "Избранное", href: "/me" } : { text: "Рейтинг", href: lastRatingHref() }, { text: slugOf(org, repo) }];
+  const crumbs: Crumb[] = [closedRepo ? { text: "Мои репозитории", href: "/repos" } : { text: "Рейтинг", href: lastRatingHref() }, { text: slugOf(org, repo) }];
   const own = live ?? (data?.job ? { phase: data.job.status, stalled: data.job.stalled } : null);
   const jobStalled = own?.stalled === true;
   const analysisRunning = own !== null;
@@ -374,28 +376,36 @@ function NotInCatalog({ org, repo, crumbs }: { org: string; repo: string; crumbs
  * для своих (права на CI/CD или Безопасность). Текст — по сохраненным правам строки
  * избранного (`last_access`), без обещаний.
  */
-function FavoriteNotInCatalog({ org, repo, fallback, onRetry, onSection }: { org: string; repo: string; fallback: string; onRetry: () => void; onSection?: (s: "rating" | "me") => void }) {
+function FavoriteNotInCatalog({ org, repo, fallback, onRetry, onSection }: { org: string; repo: string; fallback: string; onRetry: () => void; onSection?: (s: "rating" | "repos" | "me") => void }) {
   const favs = useJson<{ entries: { org: string; repo: string; access: { visibility: string; own: boolean } | null }[] }>("/api/me/favorites");
+  // опись по токену (кэш сервера): репозиторий из «Моих репозиториев», который еще не
+  // анализировали, тоже получает «Оценки пока нет» с запуском, а не «не найден».
+  // Без токена ответ — 409, это просто «не из описи»
+  const tokenList = useJson<{ repos: { org: string; slug: string; visibility: string | null }[] }>("/api/me/sourcecraft-repos?entries=0");
+  const same = (o: string, r: string) => o.toLowerCase() === org.toLowerCase() && r.toLowerCase() === repo.toLowerCase();
   const data = dataOf(favs.state);
-  const inFavs = data?.entries.some((e) => e.org.toLowerCase() === org.toLowerCase() && e.repo.toLowerCase() === repo.toLowerCase()) === true;
+  const fav = data?.entries.find((e) => same(e.org, e.repo)) ?? null;
+  const fromToken = dataOf(tokenList.state)?.repos.find((r) => same(r.org, r.slug)) ?? null;
+  const section = fav !== null ? "me" : fromToken !== null ? "repos" : null;
   useEffect(() => {
-    if (inFavs) onSection?.("me");
-  }, [inFavs]); // eslint-disable-line react-hooks/exhaustive-deps
-  const crumbs: Crumb[] = [{ text: "Избранное", href: "/me" }, { text: slugOf(org, repo) }];
-  if (favs.state.kind === "loading") {
+    if (section) onSection?.(section);
+  }, [section]); // eslint-disable-line react-hooks/exhaustive-deps
+  const crumbs: Crumb[] =
+    fav === null && fromToken !== null ? [{ text: "Мои репозитории", href: "/repos" }, { text: slugOf(org, repo) }] : [{ text: "Избранное", href: "/me" }, { text: slugOf(org, repo) }];
+  if (favs.state.kind === "loading" || tokenList.state.kind === "loading") {
     return (
       <Page crumbs={crumbs}>
         <SkeletonRows rows={1} height={150} />
       </Page>
     );
   }
-  const fav = data?.entries.find((e) => e.org.toLowerCase() === org.toLowerCase() && e.repo.toLowerCase() === repo.toLowerCase()) ?? null;
-  if (fav === null) {
-    return (
-      <NotInCatalog org={org} repo={repo} crumbs={[{ text: "Рейтинг", href: lastRatingHref() }, { text: slugOf(org, repo) }]} />
-    );
+  if (fav !== null) return <FavoriteNotInCatalogState org={org} repo={repo} own={fav.access?.own === true} access={fav.access} crumbs={crumbs} onRetry={onRetry} />;
+  if (fromToken !== null) {
+    // закрытый, видимый токену, — свой по правилу; у публичного свой ли, проверит сервер при запуске
+    const closed = fromToken.visibility === "private" || fromToken.visibility === "internal";
+    return <FavoriteNotInCatalogState org={org} repo={repo} own access={null} crumbs={crumbs} onRetry={onRetry} fromToken ownChecked={closed} />;
   }
-  return <FavoriteNotInCatalogState org={org} repo={repo} own={fav.access?.own === true} access={fav.access} crumbs={crumbs} onRetry={onRetry} />;
+  return <NotInCatalog org={org} repo={repo} crumbs={[{ text: "Рейтинг", href: lastRatingHref() }, { text: slugOf(org, repo) }]} />;
 }
 
 /**
@@ -410,6 +420,8 @@ function FavoriteNotInCatalogState({
   access,
   crumbs,
   onRetry,
+  fromToken = false,
+  ownChecked = true,
 }: {
   org: string;
   repo: string;
@@ -417,6 +429,10 @@ function FavoriteNotInCatalogState({
   access: { visibility: string; own: boolean } | null | undefined;
   crumbs: Crumb[];
   onRetry: () => void;
+  /** репозиторий из «Моих репозиториев» (список по токену), а не из избранного */
+  fromToken?: boolean;
+  /** false — публичный из описи: свой ли он, сервер проверит при запуске */
+  ownChecked?: boolean;
 }) {
   const slug = `${org}/${repo}`;
   const start = useStartAnalysis(org, repo);
@@ -442,9 +458,13 @@ function FavoriteNotInCatalogState({
         image={EmptyIllustration}
         title="Оценки пока нет"
         description={
-          own
-            ? "Репозиторий в вашем избранном, но анализа еще не было. Запустите его – итог появится здесь."
-            : notOwnReason(access)
+          fromToken
+            ? ownChecked
+              ? "Репозиторий доступен вашему токену, но анализа еще не было. Запустите его – итог появится здесь."
+              : "Анализа этого публичного репозитория еще не было – его оценит анализ по расписанию. Запустить раньше можно здесь: свой ли это репозиторий, проверим при запуске."
+            : own
+              ? "Репозиторий в вашем избранном, но анализа еще не было. Запустите его – итог появится здесь."
+              : notOwnReason(access)
         }
         actions={
           own
@@ -1132,7 +1152,8 @@ function ContributionStrip({ bar }: { bar: CardView["contributions"][number] | n
                   <li
                     className={`rh-contrib__item${active === p.key ? " rh-contrib_on" : ""}`}
                     tabIndex={p.hint ? 0 : undefined}
-                    aria-label={p.hint ? `${p.title} – ${p.value}: ${hintText(p.hint)}` : undefined}
+                    // имя — название и значение; подробности озвучит подсказка (aria-describedby Tooltip)
+                    aria-label={p.hint ? `${p.title} – ${p.value}` : undefined}
                     {...hover(p.key)}
                   >
                     <i className={`rh-contrib__dot ${p.colorClass}`} aria-hidden="true" />
@@ -1338,7 +1359,7 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
             </Label>
           )}
         </span>
-        <Text variant="body-1" color="complementary" className="rh-category__why">
+        <Text variant="body-1" color="complementary" className="rh-category__why" id={`${categoryAnchor(key)}-why`}>
           {c.why}
         </Text>
       </span>
@@ -1370,7 +1391,16 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
           можно ходить по заголовкам */}
       <h3 className="rh-category__h">
         {expandable ? (
-          <button type="button" className="rh-category" aria-expanded={open} aria-controls={`${categoryAnchor(key)}-subs`} onClick={() => setOpen(!open)}>
+          <button
+            type="button"
+            className="rh-category"
+            aria-expanded={open}
+            aria-controls={`${categoryAnchor(key)}-subs`}
+            // имя заголовка — название и балл; основание — описанием, а не частью имени
+            aria-label={`${c.title}, ${c.scoreText === "—" ? "нет данных" : `${c.scoreText} из 100`}`}
+            aria-describedby={`${categoryAnchor(key)}-why`}
+            onClick={() => setOpen(!open)}
+          >
             {row}
           </button>
         ) : (
@@ -1671,76 +1701,136 @@ export function fixFailureText(status: number): string {
   return "Не удалось подготовить файл – попробуйте позже.";
 }
 
+/** Куда положить заготовку — одна фраза под именем файла. */
+function templateWhere(ruleId: string): string {
+  if (ruleId === "readme-sections-missing") return "Только недостающие разделы – перенесите их в свой README.md и заполните поля в угловых скобках <…>.";
+  if (ruleId === "codeowners-missing") return "Положите файл в корень репозитория и замените @login на логины ответственных.";
+  if (ruleId === "license-missing") return "Положите файл в корень репозитория. Лицензию выбирает автор – выберите ее выше.";
+  return "Положите файл в корень репозитория и заполните поля в угловых скобках <…>.";
+}
+
 /**
- * Заготовка файла для рекомендации — тихой кнопкой; у лицензии — меню выбора без значения
- * по умолчанию. Скачивание — fetch + blob, как у отчета: сбой показывается тостом, а не
- * сырым JSON вместо приложения.
+ * Заготовка файла для рекомендации: тихая кнопка с именем файла открывает окно —
+ * куда положить, текст заготовки, «Скопировать» и «Скачать». Текст читается при
+ * первом открытии (fetch, как у отчета: сбой — строкой в окне, а не сырым JSON) и
+ * им же скачивается — второго запроса нет. У лицензии значения по умолчанию нет:
+ * текст появляется после выбора.
  */
 function FixTemplateButton({ org, repo, ruleId, meta }: { org: string; repo: string; ruleId: string; meta: NonNullable<RecommendationView["rec"]["fixTemplate"]> }) {
-  const toaster = useToaster();
-  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [license, setLicense] = useState<string | null>(null);
+  const [texts, setTexts] = useState<Record<string, { text: string } | { error: string }>>({});
   const base = `/api/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}/fix/${encodeURIComponent(ruleId)}`;
-  const download = async (license?: string): Promise<void> => {
-    setBusy(true);
-    const href = license ? `${base}?license=${encodeURIComponent(license)}` : base;
-    try {
-      let res: Response;
-      try {
-        res = await fetch(href);
-      } catch {
-        throw new ReportError(0, null);
-      }
-      if (!res.ok || !(res.headers.get("content-type") ?? "").startsWith("text/plain")) throw new ReportError(res.ok ? 500 : res.status, null);
-      const url = URL.createObjectURL(await res.blob());
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = meta.filename;
-      document.body.append(link);
-      link.click();
-      link.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 10_000);
-    } catch (e) {
-      toaster.add({
-        name: `fix-failed:${href}`,
-        theme: "danger",
-        title: `${meta.filename} не скачан`,
-        content: fixFailureText(e instanceof ReportError ? e.status : 500),
+  const needsLicense = (meta.licenses?.length ?? 0) > 0;
+  const key = needsLicense ? license : "";
+  const loaded = key === null ? undefined : texts[key];
+
+  useEffect(() => {
+    if (!open || key === null || texts[key] !== undefined) return;
+    const ctrl = new AbortController();
+    const href = key ? `${base}?license=${encodeURIComponent(key)}` : base;
+    fetch(href, { signal: ctrl.signal })
+      .then(async (res) => {
+        if (!res.ok || !(res.headers.get("content-type") ?? "").startsWith("text/plain")) throw new ReportError(res.ok ? 500 : res.status, null);
+        const text = await res.text();
+        setTexts((prev) => ({ ...prev, [key]: { text } }));
+      })
+      .catch((e: unknown) => {
+        if (ctrl.signal.aborted) return;
+        setTexts((prev) => ({ ...prev, [key]: { error: fixFailureText(e instanceof ReportError ? e.status : 0) } }));
       });
-    } finally {
-      setBusy(false);
-    }
+    return () => ctrl.abort();
+  }, [open, key, base, texts]);
+
+  const text = loaded && "text" in loaded ? loaded.text : null;
+  const download = (): void => {
+    if (text === null) return;
+    const url = URL.createObjectURL(new Blob([text], { type: "text/plain;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = meta.filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
   };
-  // поля заготовок (src/fix/templates.ts) – в угловых скобках `<…>`, у CODEOWNERS – `@login`
-  const hint =
-    ruleId === "readme-sections-missing"
-      ? "Скачать заготовку: только недостающие разделы – добавьте их в свой README и заполните поля в угловых скобках <…>"
-      : ruleId === "codeowners-missing"
-        ? "Скачать заготовку: положите файл в корень репозитория и замените @login на логины ответственных"
-        : "Скачать заготовку: положите файл в корень репозитория и заполните поля в угловых скобках <…>";
-  if (meta.licenses && meta.licenses.length > 0) {
-    return (
-      <DropdownMenu
-        size="m"
-        popupProps={{ placement: "bottom-start" }}
-        renderSwitcher={(props) => (
-          <Button {...props} view="flat-secondary" size="s" aria-haspopup="menu" loading={busy} title="Скачать заготовку LICENSE: лицензию выбирает автор" className="rh-rec__fix">
-            <Icon data={ArrowDownToLine} size={14} />
-            {meta.filename}
-            <Icon data={ChevronDown} size={14} />
+
+  const content = (
+    <div className="rh-tpl">
+      <Flex direction="column" gap={1}>
+        <Text variant="subheader-1" className="rh-tpl__name">
+          {meta.filename}
+        </Text>
+        <Text variant="body-1" color="complementary">
+          {templateWhere(ruleId)}
+        </Text>
+      </Flex>
+      {needsLicense && (
+        <SegmentedRadioGroup size="m" value={license ?? ""} onUpdate={(v) => setLicense(v)} aria-label="Лицензия">
+          {meta.licenses!.map((id) => (
+            <SegmentedRadioGroup.Option key={id} value={id}>
+              {LICENSE_TITLES[id] ?? id}
+            </SegmentedRadioGroup.Option>
+          ))}
+        </SegmentedRadioGroup>
+      )}
+      {/* текст заготовки — моноширинно, с прокруткой; без выбора лицензии — подсказка */}
+      {key === null ? (
+        <Text variant="body-1" color="secondary" className="rh-tpl__empty">
+          Выберите лицензию – текст появится здесь.
+        </Text>
+      ) : loaded === undefined ? (
+        <Skeleton className="rh-tpl__skeleton" aria-busy="true" aria-label="Загружаем заготовку" />
+      ) : "error" in loaded ? (
+        <Flex gap={2} alignItems="center" wrap className="rh-tpl__empty">
+          <Text variant="body-1" color="danger" role="status">
+            {loaded.error}
+          </Text>
+          <Button view="outlined" size="s" onClick={() => setTexts((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => k !== key)))}>
+            Повторить
           </Button>
-        )}
-        items={[
-          { text: "Выберите тип лицензии", disabled: true, action: () => undefined },
-          ...meta.licenses.map((id) => ({ text: LICENSE_TITLES[id] ?? id, action: () => void download(id) })),
-        ]}
-      />
-    );
-  }
+        </Flex>
+      ) : (
+        <pre className="rh-tpl__code" tabIndex={0} aria-label={`Текст ${meta.filename}`}>
+          {loaded.text}
+        </pre>
+      )}
+      <Flex gap={2}>
+        <CopyToClipboard text={text ?? ""} timeout={1500}>
+          {(status) => (
+            <Button view="normal" size="m" disabled={text === null}>
+              <Icon data={status === "success" ? Check : Copy} size={16} />
+              {status === "success" ? "Скопировано" : "Скопировать"}
+            </Button>
+          )}
+        </CopyToClipboard>
+        <Button view="flat" size="m" disabled={text === null} onClick={download}>
+          <Icon data={ArrowDownToLine} size={16} />
+          Скачать
+        </Button>
+      </Flex>
+    </div>
+  );
+
   return (
-    <Button view="flat-secondary" size="s" loading={busy} onClick={() => void download()} title={hint} className="rh-rec__fix">
-      <Icon data={ArrowDownToLine} size={14} />
-      {meta.filename}
-    </Button>
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        // сбой не запоминается: следующее открытие окна попробует снова
+        if (!next) setTexts((prev) => Object.fromEntries(Object.entries(prev).filter(([, v]) => "text" in v)));
+      }}
+      trigger="click"
+      placement={["bottom-start", "top-start"]}
+      content={content}
+      aria-label={`Заготовка ${meta.filename}`}
+    >
+      <Button view="flat-secondary" size="s" aria-haspopup="dialog" aria-expanded={open} className="rh-rec__fix">
+        <Icon data={FileText} size={14} />
+        {meta.filename}
+        <Icon data={ChevronDown} size={14} />
+      </Button>
+    </Popover>
   );
 }
 

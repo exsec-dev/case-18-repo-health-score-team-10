@@ -1102,12 +1102,18 @@ function BadgeContent({ org, repo, publicBaseUrl, league = false, title = true }
           <SegmentedRadioGroup.Option value="rank">Индекс и место</SegmentedRadioGroup.Option>
         </SegmentedRadioGroup>
       )}
-      <Text variant="caption-2" color="secondary" as="div">
-        Markdown
-      </Text>
+      {/* куда вставить — в подсказке у подписи: лишняя строка мелкого текста шумела бы */}
+      <Flex gap={1} alignItems="center">
+        <Text variant="caption-2" color="secondary">
+          Markdown
+        </Text>
+        <HelpMark iconSize="s" aria-label="Куда вставить бейдж">
+          Вставьте в начало README.md – бейдж обновляется после каждого анализа.
+        </HelpMark>
+      </Flex>
       <TextInput size="m" readOnly value={code} aria-label="Код бейджа для README" endContent={<ClipboardButton text={code} size="s" view="flat-secondary" tooltipInitialText="Скопировать" tooltipSuccessText="Скопировано" />} />
       <Link href={`${publicBaseUrl.replace(/\/+$/, "")}${path}`} target="_blank" rel="noreferrer">
-        Данные в JSON
+        JSON для API
       </Link>
     </div>
   );

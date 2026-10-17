@@ -50,16 +50,23 @@ export function filterEntries<T extends Pick<RepoEntry, "org" | "repo" | "title"
   );
 }
 
-export type SortKey = "index" | "name" | "scan";
+export type SortKey = "change" | "index" | "name" | "scan";
 
 export const SORT_OPTIONS: { value: SortKey; content: string }[] = [
+  { value: "change", content: "По изменению" },
   { value: "index", content: "По индексу" },
   { value: "name", content: "По названию" },
   { value: "scan", content: "По дате анализа" },
 ];
 
-/** Направление по умолчанию — «естественное» для ключа: индекс и дата от больших, название по алфавиту. */
-export const SORT_DEFAULT_DESC: Record<SortKey, boolean> = { index: true, name: false, scan: true };
+/** Направление по умолчанию — «естественное» для ключа: изменение, индекс и дата от больших, название по алфавиту. */
+export const SORT_DEFAULT_DESC: Record<SortKey, boolean> = { change: true, index: true, name: false, scan: true };
+
+/** Изменение индекса к предыдущей оценке — по показанным (округленным) числам; null — сравнивать не с чем. */
+export function scoreChange(e: Pick<RepoEntry, "healthcraftIndex"> & { previousIndex?: number | null }): number | null {
+  if (e.healthcraftIndex === null || e.previousIndex == null) return null;
+  return Math.round(e.healthcraftIndex) - Math.round(e.previousIndex);
+}
 
 /**
  * Порядок строк. Пустое значение (нет оценки, не было анализа) ВСЕГДА в конце,
@@ -67,9 +74,14 @@ export const SORT_DEFAULT_DESC: Record<SortKey, boolean> = { index: true, name: 
  * направления не должен поднимать его наверх. Сортировка устойчивая: равные
  * остаются в порядке ответа сервера.
  */
-export function sortEntries<T extends Pick<RepoEntry, "org" | "repo" | "healthcraftIndex" | "lastScanAt">>(entries: T[], key: SortKey, desc: boolean): T[] {
+export function sortEntries<T extends Pick<RepoEntry, "org" | "repo" | "healthcraftIndex" | "lastScanAt"> & { previousIndex?: number | null }>(entries: T[], key: SortKey, desc: boolean): T[] {
   const valueOf = (e: T): number | string | null => {
     if (key === "name") return slugOf(e.org, e.repo).toLowerCase();
+    // «что изменилось» — по величине сдвига в любую сторону; без сравнения — в конце
+    if (key === "change") {
+      const d = scoreChange(e);
+      return d === null ? null : Math.abs(d);
+    }
     // нечитаемая дата — тоже «нет значения», а не NaN, ломающий сравнение
     const v = key === "index" ? e.healthcraftIndex : e.lastScanAt ? Date.parse(e.lastScanAt) : null;
     return v === null || Number.isNaN(v) ? null : v;
@@ -127,4 +139,145 @@ export function groupJobsByDay<T extends { claimedAt: string | null }>(jobs: T[]
   }
   if (untimed.rows.length > 0) groups.push(untimed);
   return groups;
+}
+
+/** Закрытые (private, internal) — свои по правилу `isOwnRepo`, если токен их видит. */
+export const isClosed = (visibility: string | null): boolean => visibility === "private" || visibility === "internal";
+
+/** Организации: пространство владельца токена первым, остальные по алфавиту. */
+export function orderOrgs(orgs: Iterable<string>, owner: string | null = null): string[] {
+  const own = owner?.toLowerCase() ?? null;
+  return [...new Set(orgs)].sort((a, b) => Number(b.toLowerCase() === own) - Number(a.toLowerCase() === own) || a.localeCompare(b));
+}
+
+/**
+ * Список SourceCraft по организациям (своя первой, остальные по алфавиту). Внутри
+ * — закрытые первыми, затем по имени; `within` задает свой порядок строк группы.
+ */
+export function groupByOrg<T extends { org: string; visibility: string | null }>(
+  repos: readonly T[],
+  nameOf: (r: T) => string,
+  opts: { owner?: string | null; within?: (a: T, b: T) => number } = {},
+): { org: string; items: T[] }[] {
+  const byName = (a: T, b: T) => Number(isClosed(b.visibility)) - Number(isClosed(a.visibility)) || nameOf(a).localeCompare(nameOf(b));
+  return orderOrgs(
+    repos.map((r) => r.org),
+    opts.owner,
+  ).map((org) => ({ org, items: repos.filter((r) => r.org === org).sort(opts.within ?? byName) }));
+}
+
+// ---------- «Мои репозитории»: фильтры и сортировка ----------
+
+/** Состояние строки описи: зона оценки или что с анализом. */
+export type TokenState = "success" | "warning" | "danger" | "unscored" | "never" | "failed" | "empty";
+
+export const TOKEN_STATES: { key: TokenState; title: string }[] = [
+  { key: "success", title: "Здоровы" },
+  { key: "warning", title: "Требуют внимания" },
+  { key: "danger", title: "В зоне риска" },
+  { key: "unscored", title: "Оценки нет" },
+  { key: "never", title: "Не анализировали" },
+  { key: "failed", title: "Ошибка анализа" },
+  { key: "empty", title: "Пустые" },
+];
+
+export interface TokenRow {
+  org: string;
+  repo: string;
+  title: string | null;
+  language: string | null;
+  visibility: string | null;
+  isEmpty: boolean;
+  healthcraftIndex: number | null;
+  lastScanAt: string | null;
+  lastScanStatus: string | null;
+}
+
+export function tokenStateOf(e: TokenRow): TokenState {
+  if (e.healthcraftIndex !== null) return bandOf(e) as TokenState;
+  if (e.isEmpty) return "empty";
+  if (e.lastScanStatus === "bad") return "failed";
+  return e.lastScanAt !== null ? "unscored" : "never";
+}
+
+export type TokenSort = "name" | "never" | "index" | "scan";
+
+export const TOKEN_SORTS: { value: TokenSort; content: string }[] = [
+  { value: "name", content: "По названию" },
+  { value: "never", content: "Сначала без анализа" },
+  { value: "index", content: "По индексу" },
+  { value: "scan", content: "По дате анализа" },
+];
+
+/** Фильтры описи: мультивыбор организаций, состояний и языков (пустой список — все); видимость — одна из трех. */
+export interface TokenFilter {
+  q: string;
+  orgs: string[];
+  vis: "all" | "closed" | "public";
+  states: TokenState[];
+  /** языки; пустая строка — «не определен» */
+  langs: string[];
+}
+
+export const TOKEN_FILTER_DEFAULT: TokenFilter = { q: "", orgs: [], vis: "all", states: [], langs: [] };
+
+/** Поиск — по организации, имени и названию; остальные фильтры — точным совпадением с любым из выбранных. */
+export function filterTokenRows<T extends TokenRow>(rows: readonly T[], f: TokenFilter): T[] {
+  const q = f.q.trim().toLowerCase();
+  return rows.filter(
+    (e) =>
+      (q === "" || `${e.org}/${e.repo}`.toLowerCase().includes(q) || (e.title ?? "").toLowerCase().includes(q)) &&
+      (f.orgs.length === 0 || f.orgs.includes(e.org)) &&
+      (f.vis === "all" || (f.vis === "closed") === isClosed(e.visibility)) &&
+      (f.states.length === 0 || f.states.includes(tokenStateOf(e))) &&
+      (f.langs.length === 0 || f.langs.includes(e.language ?? "")),
+  );
+}
+
+/** Порядок строк внутри организации: пустые значения — всегда в конце. */
+export function tokenRowOrder<T extends TokenRow>(sort: TokenSort): (a: T, b: T) => number {
+  const name = (a: T, b: T) => a.repo.localeCompare(b.repo);
+  if (sort === "never") return (a, b) => Number(tokenStateOf(b) === "never") - Number(tokenStateOf(a) === "never") || name(a, b);
+  if (sort === "index") return (a, b) => (b.healthcraftIndex ?? -1) - (a.healthcraftIndex ?? -1) || name(a, b);
+  if (sort === "scan") {
+    const t = (e: T) => (e.lastScanAt ? Date.parse(e.lastScanAt) || 0 : 0);
+    return (a, b) => t(b) - t(a) || name(a, b);
+  }
+  return (a, b) => Number(isClosed(b.visibility)) - Number(isClosed(a.visibility)) || name(a, b);
+}
+
+/** Фильтры описи в адресе (`?org=a&org=b&vis=&state=&lang=&sort=&q=`) — переживают переход в карточку и назад. */
+export function tokenParamsOf(search: string): { filter: TokenFilter; sort: TokenSort } {
+  const p = new URLSearchParams(search);
+  const vis = p.get("vis");
+  const sort = p.get("sort");
+  const known = new Set<string>(TOKEN_STATES.map((s) => s.key));
+  return {
+    filter: {
+      q: p.get("q") ?? "",
+      orgs: p.getAll("org").filter((o) => o !== ""),
+      vis: vis === "closed" || vis === "public" ? vis : "all",
+      states: p.getAll("state").filter((s): s is TokenState => known.has(s)),
+      langs: p.getAll("lang"),
+    },
+    sort: TOKEN_SORTS.some((s) => s.value === sort) ? (sort as TokenSort) : "name",
+  };
+}
+
+export function tokenSearchOf(f: TokenFilter, sort: TokenSort): string {
+  const p = new URLSearchParams();
+  if (f.q.trim() !== "") p.set("q", f.q);
+  for (const o of f.orgs) p.append("org", o);
+  if (f.vis !== "all") p.set("vis", f.vis);
+  for (const s of f.states) p.append("state", s);
+  for (const l of f.langs) p.append("lang", l);
+  if (sort !== "name") p.set("sort", sort);
+  const s = p.toString();
+  return s ? `?${s}` : "";
+}
+
+/** Подпись мультивыбора в поле: до двух значений по имени, остальные — «+N». */
+export function multiSummary(titles: string[]): string {
+  if (titles.length <= 2) return titles.join(", ");
+  return `${titles.slice(0, 2).join(", ")} +${titles.length - 2}`;
 }

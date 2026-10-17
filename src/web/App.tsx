@@ -10,7 +10,7 @@ import type { MetaResponse } from "./api";
 import { dataOf, useJson } from "./api";
 import { ComparePage } from "./ComparePage";
 import { DocsPage } from "./DocsPage";
-import { JobsBell, MePage, SettingsPage } from "./MePage";
+import { JobsBell, MePage, MyReposPage, SettingsPage } from "./MePage";
 import { Rating } from "./Rating";
 import { RepoPage } from "./RepoPage";
 import { navigate, useRoute } from "./router";
@@ -50,6 +50,8 @@ function Routes() {
         ? "rating"
         : route.kind === "me"
           ? "me"
+          : route.kind === "repos"
+            ? "repos"
           : route.kind === "compare"
             ? "compare"
           : route.kind === "settings"
@@ -76,6 +78,7 @@ function Routes() {
           переезжает на другую при SPA-переходе */}
       {route.kind === "repo" && <RepoPage key={`${route.org}/${route.repo}`} org={route.org} repo={route.repo} meta={metaData} onSection={(s) => setRepoSection({ key: `${route.org}/${route.repo}`, section: s })} />}
       {route.kind === "me" && <MePage meta={metaData} />}
+      {route.kind === "repos" && <MyReposPage />}
       {route.kind === "compare" && <ComparePage search={route.search} />}
       {route.kind === "settings" && <SettingsPage />}
       {route.kind === "docs" && <DocsPage slug={route.slug} />}
