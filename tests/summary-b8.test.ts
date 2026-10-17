@@ -1,6 +1,6 @@
 import { fmtDateUtc, fraudFactorFact } from "../src/web/format";
 // Фрод-флаггер: структурный флаг + факторы на показ (карточка, кабинет, MD-раздел
-// «Подозрение на искусственную активность»); БЕЗ скидки Score и бампа MODEL_VERSION
+// «Признаки искусственной активности»); БЕЗ скидки Score и бампа MODEL_VERSION
 // — прямые тесты. Нет LLM-вывода — нет флага; нет фактов активности — роль не
 // запускается.
 import { afterAll, describe, expect, test } from "bun:test";
@@ -119,7 +119,8 @@ describe("Показ флага: карточка (всем зрителям) и
     await runFraudCheck({ db, org: "v5", repo: "md", callLlm: fakeWithFlagger(FLAG_TRUE, VALID_TEXTS), agentBackoffMs: 0 }, { scanId });
     const withFlag = getRepoCard(db, "v5", "md", { access: OPEN })!;
     const md = renderRepoReport(withFlag);
-    expect(md).toContain("Подозрение на искусственную активность");
+    // UX 17.10: заголовок раздела «Подозрение на искусственную активность» → «Признаки искусственной активности»
+    expect(md).toContain("## Признаки искусственной активности");
     // фактор — названием факта и текстом, который код
     // строит из этого факта (равно источнику); сырой ключ — только в приложении
     // признаки ритма — из заметки проверки (у 2 обычных коммитов
@@ -132,7 +133,7 @@ describe("Показ флага: карточка (всем зрителям) и
     // без генерации — раздела нет вовсе
     const noFlag = seedFull2(db, "md2");
     const card2 = getRepoCard(db, "v5", "md2", { access: OPEN })!;
-    expect(renderRepoReport(card2)).not.toContain("Подозрение на искусственную активность");
+    expect(renderRepoReport(card2)).not.toContain("## Признаки искусственной активности");
     void noFlag;
   });
 

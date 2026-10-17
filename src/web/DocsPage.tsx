@@ -54,6 +54,7 @@ import {
 import { Alert, Button, Icon, Label, type IconData } from "@gravity-ui/uikit";
 import { useEffect, useLayoutEffect, useState, type MouseEvent, type ReactNode } from "react";
 import type { DocBlock, DocLine, DocPage, DocsBundle, DocTarget, TocNode, UiIcon } from "../docs/model";
+import { NotFoundIllustration } from "./illustrations";
 import { useJson } from "./api";
 import { DocsSearch } from "./DocsSearch";
 import { Trophy } from "./icons";
@@ -443,7 +444,7 @@ export function DocsPage({ slug }: { slug: string }) {
     return (
       <Page crumbs={[crumbsBase, { text: "Страница не найдена" }]} actions={headerActions}>
         <EmptyState
-          icon={CircleQuestion}
+          image={NotFoundIllustration}
           title="Страница не найдена"
           description="Такой страницы в документации нет или она переехала."
           actions={[{ text: "К началу документации", view: "action", size: "l", onClick: () => navigate("/docs") }]}

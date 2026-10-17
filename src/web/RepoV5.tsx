@@ -37,18 +37,23 @@ import {
   aiRoleTitle,
   fmtDate,
   fmtDateTime,
+  fmtTime,
+  jobErrorText,
   fmtScore,
   fraudFactorFact,
   fraudFactorValue,
   fraudCheckStale,
   fraudFactorTitle, AI_DISCLAIMER, AI_OVERVIEW_REJECTED,
   quotaBlockedText,
+  scoreTheme,
   quotaCounter,
+  counterText,
   withCounter,
   type AiQuotaView,
+  type QuotaCounter,
 } from "./format";
 import { announceJobStarted, announceJobsChanged, useAnalysisFinished, useSession } from "./session";
-import { SLOT_EMPTY, aiNotesCaption, badgeMarkdown, historyByTime, scoreHistoryView } from "./slots";
+import { SLOT_EMPTY, aiNotesCaption, badgeMarkdown, historyByTime, historyDomain, historyZoneNote, scoreHistoryView } from "./slots";
 import type { AiNoteHistoryItem, AiNotesResponse, HistoryPoint, HistoryResponse } from "../summary/history-contract";
 import { evolutionTooEarly } from "../summary/history-contract";
 
@@ -112,7 +117,7 @@ function FraudFlagMessage({ card }: { card: Card }) {
           <Text variant="subheader-1">{`${FRAUD_TITLE}: `}</Text>
           {/* флаг прошлого анализа не выдается за текущий */}
           <Text variant="body-1">{fraudCheckStale(card.ai?.check) ? `${lead} (по прошлому анализу)` : lead}</Text>
-          <HelpMark iconSize="s" aria-label="Что значит подозрение на искусственную активность" className="rh-fraud__help">
+          <HelpMark iconSize="s" aria-label="Что значат признаки искусственной активности" className="rh-fraud__help">
             <Flex direction="column" gap={2} className="rh-fraud__pop">
               <Text variant="body-1">{FRAUD_EXPLAIN}</Text>
               {rest.length > 0 && (
@@ -265,7 +270,7 @@ export function aiProgressText(analysisRunning: boolean, ownFullCycle: boolean):
   return "Обзор формируется – раздел обновится сам.";
 }
 
-/** «Проверить оценку»: постановка проверки на накрутку. */
+/** «Проверить активность»: постановка проверки на искусственную активность. */
 function useCheckAction(org: string, repo: string, onChanged: () => void) {
   const toaster = useToaster();
   const [sending, setSending] = useState(false);
@@ -301,7 +306,7 @@ export interface FraudCheckState {
   kind: "none" | "active" | "clean" | "flagged" | "failed" | "nothing" | "stale";
   text: string;
   date: string | null;
-  button: "Проверить оценку" | "Повторить проверку" | null;
+  button: "Проверить активность" | "Повторить проверку" | null;
 }
 
 /**
@@ -313,26 +318,26 @@ export function fraudCheckState(ai: CardAi, loggedIn: boolean): FraudCheckState 
   const { check, fraud } = ai;
   const stale = check.scanId !== null && check.latestScanId !== null && check.scanId < check.latestScanId;
   const date = check.checkedAt ? fmtDateTime(check.checkedAt) : null;
-  if (check.active) return { kind: "active", text: "Проверка оценки идет – результат появится здесь", date: null, button: null };
+  if (check.active) return { kind: "active", text: "Проверка активности идет – результат появится здесь", date: null, button: null };
   if (check.failure !== null && !check.retryable) return { kind: "nothing", text: "Проверять нечего: в анализе нет истории коммитов", date: null, button: null };
   const run = loggedIn && check.latestScanId !== null;
   if (check.failure !== null) {
     return {
       kind: "failed",
-      text: loggedIn ? `Проверка оценки не сформировалась: ${check.failure}` : "Проверка оценки не сформировалась",
+      text: loggedIn ? `Проверка активности не сформировалась: ${jobErrorText(check.failure)}` : "Проверка активности не сформировалась",
       date: null,
       button: run ? "Повторить проверку" : null,
     };
   }
   // при флаге подвал показывает сами признаки (FraudFlagMessage), здесь — только статус
-  if (fraud !== null && fraud.flag) return { kind: "flagged", text: "Есть признаки накрутки", date, button: run && stale ? "Проверить оценку" : null };
-  if (fraud !== null && stale) return { kind: "stale", text: "Признаков накрутки нет по прошлому анализу", date, button: run ? "Проверить оценку" : null };
-  if (fraud !== null) return { kind: "clean", text: "Признаков накрутки нет", date, button: null };
+  if (fraud !== null && fraud.flag) return { kind: "flagged", text: "Есть признаки искусственной активности", date, button: run && stale ? "Проверить активность" : null };
+  if (fraud !== null && stale) return { kind: "stale", text: "Признаков искусственной активности нет по прошлому анализу", date, button: run ? "Проверить активность" : null };
+  if (fraud !== null) return { kind: "clean", text: "Признаков искусственной активности нет", date, button: null };
   return {
     kind: "none",
-    text: loggedIn ? "Оценка не проверялась на накрутку" : "Проверку может запустить любой вошедший пользователь",
+    text: loggedIn ? "Активность не проверялась" : "Проверку может запустить любой вошедший пользователь",
     date: null,
-    button: run ? "Проверить оценку" : null,
+    button: run ? "Проверить активность" : null,
   };
 }
 
@@ -369,8 +374,8 @@ export function FraudCheckFooter({ card, org, repo, onChanged, loggedIn, quota, 
   const icon = CHECK_ICON[st.kind];
   const button =
     st.button !== null ? (
-      <Button view={st.kind === "flagged" ? "normal-contrast" : "outlined"} size="s" loading={action.sending} disabled={blocked !== null} onClick={() => void action.start()}>
-        {withCounter(st.button, counter)}
+      <Button view={st.kind === "flagged" ? "normal-contrast" : "outlined"} size="s" loading={action.sending} disabled={blocked !== null} onClick={() => void action.start()} aria-label={withCounter(st.button, counter)}>
+        <CountedLabel label={st.button} counter={counter} />
       </Button>
     ) : null;
   const why =
@@ -468,7 +473,7 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
           </Text>
           {/* отказы проверки фактами API отдает только по анализу с заметками
               (buildCardAi в api/repos.ts), а такой анализ пустым не бывает: если
-              не прошел ни один блок, итог виден в «Заданиях» текстом заявки
+              не прошел ни один блок, итог виден в «Очереди» текстом заявки
               (AI_REJECTED_ERRORS), здесь – «пока нет» */}
           <Text variant="subheader-2">Обзора пока нет</Text>
           <Text variant="body-1" color="complementary">
@@ -482,11 +487,11 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
           </Text>
           {canRun && (
             <div className="rh-score-band__signin">
-              <Button view="action" size="m" loading={actions.sending} disabled={cooldown || quotaBlocked !== null} onClick={() => void actions.start()}>
+              <Button view="action" size="m" loading={actions.sending} disabled={cooldown || quotaBlocked !== null} onClick={() => void actions.start()} aria-label={withCounter("Сформировать обзор", counter)}>
                 <Button.Icon side="start">
                   <Icon data={SparklesFill} size={16} className="rh-ai-button-icon" />
                 </Button.Icon>
-                {withCounter("Сформировать обзор", counter)}
+                <CountedLabel label="Сформировать обзор" counter={counter} />
               </Button>
             </div>
           )}
@@ -695,17 +700,40 @@ export function CategoryAiNote({ note, card }: { note: AiNote; card: Card }) {
   );
 }
 
+/**
+ * Подпись кнопки с остатком лимита — как счетчик у кнопок SourceCraft: число
+ * вторичным цветом отдельным элементом («Сформировать обзор 2»), расшифровка — в
+ * подсказке. Дробь «2/2» читалась как прогресс, «· осталось 2» удлиняла кнопку.
+ */
+function CountedLabel({ label, counter }: { label: string; counter: QuotaCounter | null }) {
+  if (counter === null) return <>{label}</>;
+  return (
+    <>
+      {label}
+      {/* имя для скринридера — aria-label кнопки (withCounter): у span без роли он не озвучивается */}
+      <span className="rh-btn-count" title={counterText(counter)}>
+        {counter.left}
+      </span>
+    </>
+  );
+}
+
 // ---------- история оценки и описания по анализам ----------
 
-const CHART_H = 160;
-const PAD_L = 8;
-const PAD_R = 28;
-const PAD_T = 8;
+const CHART_H = 180;
+// слева — подписи шкалы, справа — место под число последней точки
+const PAD_L = 32;
+const PAD_R = 16;
+const PAD_T = 20;
 const PAD_B = 22;
 
-function yOf(v: number): number {
-  return PAD_T + (1 - Math.max(0, Math.min(100, v)) / 100) * (CHART_H - PAD_T - PAD_B);
-}
+/** Цвет линии и точек — зона последней оценки, те же заливки, что у полос. */
+const ZONE_FILL: Record<ReturnType<typeof scoreTheme>, string> = {
+  success: "var(--g-color-base-positive-medium)",
+  warning: "var(--g-color-base-warning-medium)",
+  danger: "var(--g-color-base-danger-medium)",
+  misc: "var(--g-color-text-secondary)",
+};
 
 /** Ширина контейнера графика: viewBox равен реальной ширине — график на всю колонку без искажения точек и подписей. */
 function useWidth(): [React.RefObject<HTMLDivElement | null>, number] {
@@ -751,10 +779,19 @@ function HistoryChart({ points, fullOpen }: { points: HistoryPoint[]; fullOpen: 
   };
   const hci = points.map((p) => p.healthcraftIndex);
   const rhs = fullOpen ? points.map((p) => p.repoHealthScore) : null;
+  // шкала — по данным (historyDomain), цвет линии — зона последней оценки
+  const drawn = [...hci, ...(rhs ?? [])].filter((v): v is number => v !== null);
+  const domain = historyDomain(drawn);
+  const yOf = (v: number): number => PAD_T + (1 - (Math.max(domain.lo, Math.min(domain.hi, v)) - domain.lo) / (domain.hi - domain.lo)) * (CHART_H - PAD_T - PAD_B);
+  const lastIdx = hci.reduce<number>((acc, v, i) => (v !== null ? i : acc), -1);
+  // пустой репо (0 — «оценивать нечего», не зона риска) — линия нейтральная, как его точка
+  const lineColor = lastIdx >= 0 && points[lastIdx]!.codeEmpty ? ZONE_FILL.misc : ZONE_FILL[scoreTheme(lastIdx >= 0 ? hci[lastIdx] : null)];
+  // числа у всех точек — пока их немного; дальше только у последней
+  const labelAll = hci.filter((v) => v !== null).length <= 6;
   // подписи оси: за короткий период (меньше 36 ч) — время, иначе дата; подпись,
   // наезжающая на соседнюю (ближе 90 px), не ставится — первая и последняя остаются
   const short = Number.isFinite(t1 - t0) && t1 - t0 < 36 * 3600_000;
-  const axisText = (iso: string | null): string => (short ? fmtDateTime(iso).split(" ")[0]! : fmtDate(iso));
+  const axisText = (iso: string | null): string => (short ? fmtTime(iso) : fmtDate(iso));
   const candidates = points.length <= 2 ? points.map((_, i) => i) : [0, Math.floor((points.length - 1) / 2), points.length - 1];
   const labelIdx: number[] = [];
   for (const i of candidates) {
@@ -768,21 +805,29 @@ function HistoryChart({ points, fullOpen }: { points: HistoryPoint[]; fullOpen: 
   if (labelIdx.length === 1 && points.length > 1 && Math.abs(xOf(0) - xOf(points.length - 1)) >= 90) labelIdx.unshift(0);
   return (
     <div ref={wrapRef} className="rh-history__chart-wrap">
-    <svg viewBox={`0 0 ${CHART_W} ${CHART_H}`} width={CHART_W} height={CHART_H} role="img" aria-label="HealthCraft Index по датам анализов, пороги 40 и 70" className="rh-history__chart">
-      {[40, 70].map((g) => (
-        <g key={g}>
-          <line x1={PAD_L} x2={CHART_W - PAD_R} y1={yOf(g)} y2={yOf(g)} stroke="var(--g-color-line-generic)" strokeDasharray="4 4" />
-          <text x={CHART_W - PAD_R + 6} y={yOf(g) + 4} fontSize={11} fill="var(--g-color-text-secondary)">
+    <svg viewBox={`0 0 ${CHART_W} ${CHART_H}`} width={CHART_W} height={CHART_H} role="img" aria-label={`HealthCraft Index по датам анализов, шкала ${domain.lo}-${domain.hi}`} className="rh-history__chart">
+      {/* шкала слева: сплошные линии делений, пунктир — пороги зон внутри шкалы */}
+      {domain.ticks.map((g) => (
+        <g key={`t${g}`}>
+          <line x1={PAD_L} x2={CHART_W - PAD_R} y1={yOf(g)} y2={yOf(g)} stroke="var(--g-color-line-generic)" />
+          <text x={PAD_L - 8} y={yOf(g) + 4} fontSize={11} fill="var(--g-color-text-secondary)" textAnchor="end">
             {g}
           </text>
         </g>
       ))}
-      <line x1={PAD_L} x2={CHART_W - PAD_R} y1={yOf(0)} y2={yOf(0)} stroke="var(--g-color-line-generic)" />
+      {domain.thresholds.map((g) => (
+        <g key={`z${g}`}>
+          <line x1={PAD_L} x2={CHART_W - PAD_R} y1={yOf(g)} y2={yOf(g)} stroke="var(--g-color-line-generic-active)" strokeDasharray="4 4" />
+          <text x={PAD_L - 8} y={yOf(g) + 4} fontSize={11} fill="var(--g-color-text-secondary)" textAnchor="end">
+            {g}
+          </text>
+        </g>
+      ))}
       {rhs !== null && <path d={path(rhs)} fill="none" stroke="var(--g-color-text-secondary)" strokeWidth={1.5} strokeDasharray="4 3" />}
-      <path d={path(hci)} fill="none" stroke="var(--g-color-text-primary)" strokeWidth={2} strokeLinejoin="round" />
+      <path d={path(hci)} fill="none" stroke={lineColor} strokeWidth={2} strokeLinejoin="round" />
       {points.map((p, i) =>
         p.healthcraftIndex === null ? null : (
-          <circle key={p.scanId} cx={xOf(i)} cy={yOf(p.healthcraftIndex)} r={3} fill={p.codeEmpty ? "var(--g-color-text-secondary)" : "var(--g-color-text-primary)"}>
+          <circle key={p.scanId} cx={xOf(i)} cy={yOf(p.healthcraftIndex)} r={3.5} fill={p.codeEmpty ? "var(--g-color-text-secondary)" : lineColor}>
             <title>
               {`${fmtDateTime(p.finishedAt)} · HealthCraft Index ${fmtScore(p.healthcraftIndex)}` +
                 (rhs !== null ? ` · Repo Health Score ${fmtScore(p.repoHealthScore)}` : "") +
@@ -792,16 +837,28 @@ function HistoryChart({ points, fullOpen }: { points: HistoryPoint[]; fullOpen: 
           </circle>
         ),
       )}
-      {/* последнее значение — числом у точки, видно без наведения */}
+      {/* значения у точек — над точкой (у верхней кромки — под ней); последнее крупнее */}
       {(() => {
         const li = hci.reduce<number>((acc, v, i) => (v !== null ? i : acc), -1);
-        if (li < 0) return null;
-        const y = yOf(hci[li]!);
-        return (
-          <text x={xOf(li) - 6} y={y - 8 < 12 ? y + 16 : y - 8} fontSize={12} fontWeight={600} fill="var(--g-color-text-primary)" textAnchor={li === 0 && points.length > 1 ? "start" : "end"}>
-            {fmtScore(hci[li]!)}
-          </text>
-        );
+        return hci.map((v, i) => {
+          if (v === null || (!labelAll && i !== li)) return null;
+          const y = yOf(v);
+          const last = i === li;
+          const anchor = i === 0 && points.length > 1 ? "start" : last && points.length > 1 ? "end" : "middle";
+          return (
+            <text
+              key={`v${i}`}
+              x={xOf(i)}
+              y={y - 9 < 12 ? y + 18 : y - 9}
+              fontSize={last ? 13 : 11}
+              fontWeight={last ? 600 : 400}
+              fill={last ? "var(--g-color-text-primary)" : "var(--g-color-text-complementary)"}
+              textAnchor={anchor}
+            >
+              {fmtScore(v)}
+            </text>
+          );
+        });
       })()}
       {labelIdx.map((i) => (
         <text key={i} x={xOf(i)} y={CHART_H - 6} fontSize={11} fill="var(--g-color-text-secondary)" textAnchor={i === 0 ? "start" : i === points.length - 1 ? "end" : "middle"}>
@@ -842,7 +899,7 @@ function AnalysisRow({ point, fullOpen, overview }: { point: HistoryPoint; fullO
               </div>
             }
           >
-            <span className="rh-history__note-mark" role="button" tabIndex={0} aria-label="Описание на момент анализа">
+            <span className="rh-history__note-mark" role="button" tabIndex={0} aria-label="AI-обзор на момент анализа">
               <Icon data={SparklesFill} size={16} />
             </span>
           </Popover>
@@ -902,6 +959,8 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
   if (notes && !notes.locked) for (const n of notes.notes) if (n.role === "overview") overviewByScan.set(n.scanId, n);
   const points = historyByTime(data?.points ?? []);
   const view = scoreHistoryView(data);
+  const indexValues = points.map((p) => p.healthcraftIndex).filter((v): v is number => v !== null);
+  const zoneNote = historyZoneNote(indexValues, historyDomain([...indexValues, ...(data?.fullOpen ? points.map((p) => p.repoHealthScore).filter((v): v is number => v !== null) : [])]).thresholds);
   const fullOpen = data?.fullOpen === true;
   const trajectory = card.ai?.specialists.find((n) => n.role === "trajectory") ?? null;
   const caption = aiNotesCaption(
@@ -951,9 +1010,11 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
         <Flex direction="column" gap={5} className="rh-history">
           <Flex direction="column" gap={2}>
             <HistoryChart points={points} fullOpen={fullOpen} />
-            <Flex gap={4} wrap>
+            {/* ключ линии и оговорка о Repo Health Score — разными строками */}
+            <Flex direction="column" gap={1}>
               <Text variant="caption-2" color="secondary">
                 <span className="rh-history__key rh-history__key_index" aria-hidden="true" /> {view.count}
+                {zoneNote && `. ${zoneNote}`}
               </Text>
               <Text variant="caption-2" color="secondary">
                 {fullOpen && <span className="rh-history__key rh-history__key_full" aria-hidden="true" />} {view.full}

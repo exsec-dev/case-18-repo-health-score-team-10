@@ -720,7 +720,7 @@ function coverageCalc(card: RepoCard): Block[] {
 function categoryCalc(key: CategoryKey, cat: CardCategory): Block[] {
   const title: Block = { kind: "paragraph", tone: "subhead", lines: [[strong(`Балл категории ${CATEGORY_TITLES[key]}`)]] };
   if (key === "issues" && "tracker_unused" in cat.submetrics) {
-    return [title, { kind: "paragraph", tone: "fine", lines: [line(`Задач в трекере нет, поэтому категория получает минимальный балл: ${fmtDecimal(cat.score!, 1)}.`)] }];
+    return [title, { kind: "paragraph", tone: "fine", lines: [line(`Задач нет – категория получает минимальный балл: ${fmtDecimal(cat.score!, 1)}.`)] }];
   }
   const weights = SUBWEIGHTS[key] as Record<string, number>;
   const parts = Object.entries(cat.submetrics)
@@ -815,7 +815,7 @@ function appendixB(card: RepoCard, shown: ShownMetric[]): Block[] {
       // что балл категории просто равен его баллу
       const order =
         key === "issues" && sub === "tracker_unused"
-          ? "задач в трекере нет: балл категории равен баллу этого показателя, приложение А"
+          ? "задач нет: балл категории равен баллу этого показателя, приложение А"
           : displayOnly(key, sub) || weight === undefined
             ? "справочно, в балл не входит"
             : `балл показателя × вес ${fmtDecimal(weight * 100, 0)}% в балле категории`;

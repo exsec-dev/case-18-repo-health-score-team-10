@@ -90,15 +90,16 @@ describe("К8.5.1: итог анализа — по заданию", () => {
     });
   });
 
-  test("тост генерации описания — не «анализ»: текст оценку не меняет (трекер-закон, 23.09)", () => {
+  // UX 17.10: «Описание готово / не сформировалось» → «AI-обзор готов / не сформировался»
+  test("тост генерации AI-обзора — не «анализ»: текст оценку не меняет (трекер-закон, 23.09)", () => {
     expect(finishedToast(job({ jobId: 9, slug: "a/b", phase: "done", status: "done", kind: "summary" }))).toEqual({
       theme: "success",
-      title: "Описание готово",
+      title: "AI-обзор готов",
       content: "a/b: текст появился в карточке репозитория",
     });
     expect(finishedToast(job({ jobId: 9, slug: "a/b", phase: "failed", status: "failed", kind: "summary", error: "модель не ответила" }))).toEqual({
       theme: "danger",
-      title: "Описание не сформировалось",
+      title: "AI-обзор не сформировался",
       content: "a/b: модель не ответила",
     });
   });

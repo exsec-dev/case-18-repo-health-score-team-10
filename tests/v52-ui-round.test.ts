@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { loadConfig } from "../src/config";
 import { openDb } from "../src/db";
 import { listRepos, parseReposQuery, DEFAULT_QUERY } from "../src/api/repos";
-import { aiParagraphs, quotaBlockedText, quotaCell, quotaCounter, withCounter, type ActionQuotaView } from "../src/web/format";
+import { aiParagraphs, quotaBlockedText, quotaCell, quotaCounter, counterText, withCounter, type ActionQuotaView } from "../src/web/format";
 import { normalizeRatingSearch } from "../src/web/ratingParams";
 import { fraudCheckState } from "../src/web/RepoV5";
 import { seedRepo, seedScan, seedScore, cardFacts } from "./api-fixtures";
@@ -26,13 +26,17 @@ const q = (over: Partial<ActionQuotaView>): ActionQuotaView => ({
 describe("решение 3: остаток в тексте кнопки — самое тесное окно", () => {
   test("час держит: 1/2; сутки держат: 1/6; общий держит: 2/30; с паролем — без числа", () => {
     expect(quotaCounter(q({ hour: { used: 1, limit: 2 } }))).toEqual({ left: 1, limit: 2, window: "hour" });
-    expect(withCounter("Сформировать обзор", quotaCounter(q({ hour: { used: 1, limit: 2 } })))).toBe("Сформировать обзор 1/2");
+    // UX 17.10: на кнопке остаток — числом отдельным элементом (CountedLabel), словами —
+    // в подсказке и aria-label
+    expect(withCounter("Сформировать обзор", quotaCounter(q({ hour: { used: 1, limit: 2 } })))).toBe("Сформировать обзор, осталось 1 из 2 в этот час");
+    expect(counterText({ left: 1, limit: 6, window: "day" })).toBe("Осталось 1 из 6 сегодня");
+    expect(counterText({ left: 2, limit: 30, window: "global" })).toBe("Осталось 2 из 30 на сервисе сегодня");
     expect(quotaCounter(q({ day: { used: 5, limit: 6 } }))).toEqual({ left: 1, limit: 6, window: "day" });
     expect(quotaCounter(q({ global: { used: 29, limit: 30 } }))).toEqual({ left: 1, limit: 30, window: "global" });
     // равный остаток — окно меньшего масштаба (час раньше суток и общего)
     expect(quotaCounter(q({ global: { used: 28, limit: 30 } }))).toEqual({ left: 2, limit: 2, window: "hour" });
     expect(quotaCounter(q({ unlocked: true, hour: null, day: null, global: { used: 5, limit: 100 } }))).toBeNull();
-    expect(withCounter("Проверить оценку", null)).toBe("Проверить оценку");
+    expect(withCounter("Проверить активность", null)).toBe("Проверить активность");
   });
   test("при нуле — видимая причина по окну (О2)", () => {
     const hour = q({ hour: { used: 2, limit: 2 } });
@@ -75,20 +79,21 @@ describe("UX-проход 25.09: таблица лимитов «N/M», дата
   });
 });
 
-describe("выбор 1A: 7 состояний проверки оценки (таблица §3.1, О3-О5)", () => {
+// UX 17.10: «проверка оценки / накрутка» → «проверка активности / искусственная активность»
+describe("выбор 1A: 7 состояний проверки активности (таблица §3.1, О3-О5)", () => {
   test("не проверялось — вошедшему кнопка, анониму — кто может запустить", () => {
-    expect(fraudCheckState(ai({}), true)).toMatchObject({ kind: "none", text: "Оценка не проверялась на накрутку", button: "Проверить оценку" });
+    expect(fraudCheckState(ai({}), true)).toMatchObject({ kind: "none", text: "Активность не проверялась", button: "Проверить активность" });
     expect(fraudCheckState(ai({}), false)).toMatchObject({ kind: "none", text: "Проверку может запустить любой вошедший пользователь", button: null });
   });
   test("идет, признаков нет, есть признаки", () => {
     expect(fraudCheckState(ai({ active: true }), true)).toMatchObject({ kind: "active", button: null });
-    expect(fraudCheckState(ai({ scanId: 5, checkedAt: "2026-09-25T15:15:00Z" }, flag(false)), true)).toMatchObject({ kind: "clean", text: "Признаков накрутки нет", button: null });
-    expect(fraudCheckState(ai({ scanId: 5, checkedAt: "2026-09-25T15:15:00Z" }, flag(true)), true)).toMatchObject({ kind: "flagged", text: "Есть признаки накрутки", button: null });
+    expect(fraudCheckState(ai({ scanId: 5, checkedAt: "2026-09-25T15:15:00Z" }, flag(false)), true)).toMatchObject({ kind: "clean", text: "Признаков искусственной активности нет", button: null });
+    expect(fraudCheckState(ai({ scanId: 5, checkedAt: "2026-09-25T15:15:00Z" }, flag(true)), true)).toMatchObject({ kind: "flagged", text: "Есть признаки искусственной активности", button: null });
   });
   test("не сформировалась — повтор; нечего проверять — факт без кнопки (О3); устарела — снова проверить", () => {
     expect(fraudCheckState(ai({ scanId: 5, failure: "AI-провайдер не ответил – попробуйте позже", retryable: true }), true)).toMatchObject({
       kind: "failed",
-      text: "Проверка оценки не сформировалась: AI-провайдер не ответил – попробуйте позже",
+      text: "Проверка активности не сформировалась: AI-провайдер не ответил – попробуйте позже",
       button: "Повторить проверку",
     });
     expect(fraudCheckState(ai({ scanId: 5, failure: "в анализе нет истории коммитов – проверять нечего", retryable: false }), true)).toMatchObject({
@@ -96,9 +101,9 @@ describe("выбор 1A: 7 состояний проверки оценки (т�
       text: "Проверять нечего: в анализе нет истории коммитов",
       button: null,
     });
-    expect(fraudCheckState(ai({ scanId: 3, checkedAt: "2026-09-25T15:15:00Z" }, flag(false)), true)).toMatchObject({ kind: "stale", button: "Проверить оценку" });
+    expect(fraudCheckState(ai({ scanId: 3, checkedAt: "2026-09-25T15:15:00Z" }, flag(false)), true)).toMatchObject({ kind: "stale", button: "Проверить активность" });
     // флаг прошлого анализа не повторяется – текст подвала тот же, кнопка появляется
-    expect(fraudCheckState(ai({ scanId: 3 }, flag(true)), true)).toMatchObject({ kind: "flagged", text: "Есть признаки накрутки", button: "Проверить оценку" });
+    expect(fraudCheckState(ai({ scanId: 3 }, flag(true)), true)).toMatchObject({ kind: "flagged", text: "Есть признаки искусственной активности", button: "Проверить активность" });
   });
 });
 

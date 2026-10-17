@@ -130,7 +130,7 @@ export interface QuotaRefusal {
   until: string;
 }
 
-const NOUN: Record<AiAction, string> = { overview: "AI-обзоров", check: "проверок оценки" };
+const NOUN: Record<AiAction, string> = { overview: "AI-обзоров", check: "проверок активности" };
 
 /** Отказ по лимиту или null. Порядок: общий (его не обойти ожиданием часа), сутки, час. */
 export function quotaRefusal(q: ActionQuota): QuotaRefusal | null {

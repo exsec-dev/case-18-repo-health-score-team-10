@@ -39,7 +39,8 @@ describe("factWords: facts referenced by recommendation rules", () => {
       "Типичное время закрытия – 0,5 дня",
       "Открытых без обновлений дольше 90 дней – 0",
     ]);
-    expect(factWords("issues.stats", "ok", { open: 0, closed: 0 })).toEqual(["Задач в трекере нет"]);
+    // UX 17.10: «Задач в трекере нет» → «Задач нет»
+    expect(factWords("issues.stats", "ok", { open: 0, closed: 0 })).toEqual(["Задач нет"]);
   });
 
   test("tree.stats, code.todo (test markers named), appsec.findings", () => {

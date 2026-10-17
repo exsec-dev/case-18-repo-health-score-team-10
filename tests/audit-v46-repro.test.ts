@@ -229,7 +229,11 @@ describe("В4.6-6 (У21): колонка индекса — горизонтал
   // Аудит 16.10: уровень несет полоса, число нейтральное — один цветной акцент
   test("ScoreCell: полоса 80px слева, число в слоте справа, нейтральное", () => {
     const src = srcOf("Rating.tsx");
-    const cell = src.slice(src.indexOf("function ScoreCell"), src.indexOf("function CategoryCell"));
+    const whole = src.slice(src.indexOf("function ScoreCell"), src.indexOf("function CategoryCell"));
+    // UX 17.10: на телефоне (`narrow`) полосы нет, число цвета зоны — проверяется
+    // отдельно; здесь — ячейка таблицы
+    expect(whole).toMatch(/if \(narrow && [^)]*\) \{[\s\S]{0,200}scoreColor\(item\.healthcraftIndex\)/);
+    const cell = whole.slice(whole.indexOf("if (item.healthcraftIndex === null)"));
     const css = srcOf("layout.css");
     expect({
       horizontal: !/direction="column"/.test(cell),

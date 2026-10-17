@@ -51,7 +51,7 @@ export const SLOT_EMPTY: Record<keyof typeof SLOT_CONTRACTS, { title: string; te
     title: AI_SECTION_TITLE,
     text:
       "Пока не сформировано. Это будет короткий пересказ оценки обычным языком: " +
-      "числа по-прежнему считает сервис, описание их только объясняет и на оценку не влияет.",
+      "числа по-прежнему считает сервис, AI-обзор их только объясняет и на оценку не влияет.",
   },
   scoreHistory: {
     title: "История оценки",
@@ -85,7 +85,7 @@ export interface ScoreHistoryView {
 }
 
 const HISTORY_ONE =
-  "Пока на графике одна точка – для линии нужны хотя бы 2 анализа с оценкой по текущей версии методики. Новая точка появляется после каждого анализа.";
+  "Пока есть одна оценка по текущей версии методики – график появится со вторым анализом. Новая оценка появляется после каждого анализа.";
 const HISTORY_FOOTER = "На графике – оценки по текущей версии методики; где данных не было, линия прерывается.";
 
 export function scoreHistoryView(data: Pick<HistoryResponse, "points" | "fullOpen"> | null): ScoreHistoryView {
@@ -109,6 +109,39 @@ export function scoreHistoryView(data: Pick<HistoryResponse, "points" | "fullOpe
 }
 
 /**
+ * Шкала графика по данным, а не 0–100: на 0–100 падение 95 → 87 занимало 10px, и
+ * линия выглядела прямой. Края — с запасом 5 баллов, округлены до 10; размах не
+ * меньше 20 баллов. Пороги зон 40 и 70 рисуются, только если попадают внутрь.
+ */
+export function historyDomain(values: readonly number[]): { lo: number; hi: number; ticks: number[]; thresholds: number[] } {
+  if (values.length === 0) return { lo: 0, hi: 100, ticks: [0, 50, 100], thresholds: [40, 70] };
+  let lo = Math.max(0, Math.floor((Math.min(...values) - 5) / 10) * 10);
+  let hi = Math.min(100, Math.ceil((Math.max(...values) + 5) / 10) * 10);
+  while (hi - lo < 20) {
+    if (lo > 0) lo -= 10;
+    else hi += 10;
+  }
+  const step = hi - lo > 40 ? 20 : 10;
+  const ticks: number[] = [];
+  for (let v = lo; v <= hi; v += step) ticks.push(v);
+  if (ticks[ticks.length - 1] !== hi) ticks.push(hi);
+  return { lo, hi, ticks, thresholds: [40, 70].filter((g) => g > lo && g < hi) };
+}
+
+/**
+ * Подпись под графиком, когда порогов на шкале нет: все точки в одной зоне — это
+ * сказано словами, иначе цвет линии без порогов ничего не объяснял бы.
+ */
+export function historyZoneNote(values: readonly number[], thresholds: readonly number[]): string | null {
+  if (values.length === 0 || thresholds.length > 0) return null;
+  const r = values.map((v) => Math.round(v));
+  if (r.every((v) => v >= 70)) return "Весь график в зоне «Здоров» (от 70).";
+  if (r.every((v) => v < 40)) return "Весь график в зоне риска (ниже 40).";
+  if (r.every((v) => v >= 40 && v < 70)) return "Весь график в зоне «Требует внимания» (40-69).";
+  return null;
+}
+
+/**
  * Точки истории — по времени анализа, а не по номеру скана: номер растет с
  * каждой заявкой, а завершаются они не по порядку. Точки без времени — в конец,
  * в порядке номера.
@@ -126,7 +159,7 @@ export function historyByTime(points: readonly HistoryPoint[]): HistoryPoint[] {
 export function aiNotesCaption(finishedAt: readonly (string | null)[], tooEarly: (dates: string[]) => boolean): string | null {
   const dates = finishedAt.filter((d): d is string => d !== null);
   if (dates.length < 2) return null;
-  return tooEarly(dates) ? "Описания между анализами меньше 2 дней – о динамике судить рано." : null;
+  return tooEarly(dates) ? "Между AI-обзорами меньше 2 дней – о динамике судить рано." : null;
 }
 
 /**

@@ -335,7 +335,7 @@ export function LoginButton({ compact, inline = false }: { compact: boolean; inl
       style={compact ? { width: 36, flexShrink: 0 } : undefined}
     >
       <Icon data={ArrowRightToSquare} size={16} />
-      {inline ? "Войти через Я ID" : !compact && "Войти"}
+      {(inline || !compact) && "Войти"}
     </Button>
   );
   return compact ? (

@@ -71,9 +71,16 @@ describe("инвариант 1: карточка = отчет по данным 
       if (view.fullPath) expect(notes).toContain(pathText(view.fullPath));
       else expect(c.score!.fullLocked).toBe(false);
 
-      // номер, эффект и подпись эффекта – как в документе
+      // набор и эффект – как в документе; порядок карточки – по приросту (cardView),
+      // номера подряд; у правила без числа с потолком эффект – «до +N»
       const actions = blocksOf(model.blocks, "actions").flatMap((a) => a.items);
-      expect(view.recommendations.map(({ n, effect, effectNote }) => ({ n, effect, effectNote }))).toEqual(actions.map(({ n, effect, effectNote }) => ({ n, effect, effectNote })));
+      expect(view.recommendations.length).toBe(actions.length);
+      expect(view.recommendations.map((r) => r.n)).toEqual(view.recommendations.map((_, i) => i + 1));
+      for (const r of view.recommendations) {
+        const doc = actions.find((a) => a.n === c.recommendations.indexOf(r.rec) + 1)!;
+        if (r.ceiling === null) expect(r.effect).toBe(doc.effect);
+        else expect(r.effect).toMatch(/^до \+\d+(,\d)? к HealthCraft Index$/);
+      }
 
       // «анализ» в шапке – та же дата, что в шапке документа
       expect(view.analysisAt).toBe(c.score?.computedAt ?? c.scan?.finishedAt ?? null);

@@ -71,7 +71,7 @@ HealthCraft разворачивается на 1 виртуальной маш�
 | `YAGPT_API_KEY`, `YAGPT_FOLDER_ID` | – | API-ключ сервисного аккаунта и ID каталога Yandex Cloud; без ключа модели AI-обзор недоступен |
 | `ZAI_API_KEY` | – | ключ z.ai, если `LLM_PROVIDER=zai` |
 | `AI_OVERVIEW_PER_HOUR`, `AI_OVERVIEW_PER_DAY` | 2, 6 | AI-обзоров на человека в час и в сутки |
-| `AI_CHECK_PER_HOUR`, `AI_CHECK_PER_DAY` | 5, 20 | проверок оценки на человека в час и в сутки |
+| `AI_CHECK_PER_HOUR`, `AI_CHECK_PER_DAY` | 5, 20 | проверок активности на человека в час и в сутки |
 | `AI_UNLOCK_PASSWORD` | – | пароль снятия личных лимитов AI, не короче 20 символов; нужен `APP_SECRET` |
 | `AI_TOP_AUTO` | `0` | `1` – готовить обзор и проверку для топа рейтинга после нового анализа |
 | `AI_TOP_AUTO_SIZE` | 10 | сколько первых мест рейтинга входит в этот топ |

@@ -99,7 +99,8 @@ describe("К-5: раздел фрода в отчете", () => {
     const { card, close } = fixtureCard("full");
     try {
       const md = renderRepoReport(withFraud(card, { flag: true, factors }));
-      expect(md).toContain("Подозрение на искусственную активность");
+      // UX 17.10: заголовок раздела — «Признаки искусственной активности»
+      expect(md).toContain("## Признаки искусственной активности");
       expect(md).toContain(FRAUD_EXPLAIN); // тот же текст, что на карточке
       expect(md).not.toMatch(/pattern|нашёл/);
     } finally {
@@ -110,7 +111,7 @@ describe("К-5: раздел фрода в отчете", () => {
   test("флаг не поднят, но факторы есть — раздела нет (подозрения нет)", () => {
     const { card, close } = fixtureCard("full");
     try {
-      expect(renderRepoReport(withFraud(card, { flag: false, factors }))).not.toContain("Подозрение на искусственную активность");
+      expect(renderRepoReport(withFraud(card, { flag: false, factors }))).not.toContain("## Признаки искусственной активности");
     } finally {
       close();
     }
@@ -135,12 +136,13 @@ describe("К-2: слот истории оценки — по точкам и п
     expect(v.text).toContain("Пока показывать нечего");
   });
 
-  test("одна оценка — просит вторую, не «показывать нечего»", () => {
+  // UX 17.10: одна оценка говорит, когда появится график (со второго анализа)
+  test("одна оценка — говорит, когда появится график, не «показывать нечего»", () => {
     const v = scoreHistoryView({ points: [pt(1, 60)], fullOpen: false });
     expect(v.chart).toBe(false);
     // не «1 оценка»: у карточки без оценки рядом с «Оценки нет» это читалось противоречием
-    expect(v.text).toContain("одна точка");
-    expect(v.text).toContain("хотя бы 2 анализа с оценкой");
+    expect(v.text).toContain("одна оценка");
+    expect(v.text).toContain("график появится со вторым анализом");
     expect(v.text).not.toContain("нечего");
   });
 
@@ -152,8 +154,9 @@ describe("К-2: слот истории оценки — по точкам и п
     expect(v.text).not.toContain("нечего");
   });
 
+  // UX 17.10: график — с трех точек
   test("есть точки с правами — пунктир назван", () => {
-    const v = scoreHistoryView({ points: [pt(1, 60, 55), pt(2, 62, 58)], fullOpen: true });
+    const v = scoreHistoryView({ points: [pt(1, 60, 55), pt(2, 62, 58), pt(3, 64, 60)], fullOpen: true });
     expect(v.chart).toBe(true);
     expect(v.full).toContain("пунктир – Repo Health Score");
   });
@@ -161,8 +164,9 @@ describe("К-2: слот истории оценки — по точкам и п
   test("три состояния — три разных текста; жаргона нет", () => {
     const states = [
       scoreHistoryView({ points: [], fullOpen: false }),
-      scoreHistoryView({ points: [pt(1, 60), pt(2, 62)], fullOpen: false }),
-      scoreHistoryView({ points: [pt(1, 60, 55), pt(2, 62, 58)], fullOpen: true }),
+      // UX 17.10: график — с трех точек
+      scoreHistoryView({ points: [pt(1, 60), pt(2, 62), pt(3, 64)], fullOpen: false }),
+      scoreHistoryView({ points: [pt(1, 60, 55), pt(2, 62, 58), pt(3, 64, 60)], fullOpen: true }),
     ];
     expect(new Set(states.map((s) => [s.text, s.full].join("|"))).size).toBe(3);
     for (const s of states) expect([s.text, s.count, s.full].join(" ")).not.toMatch(/скан|tri-state|версии модели|ё/);

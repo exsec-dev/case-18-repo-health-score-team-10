@@ -15,7 +15,7 @@ import {
   type IconData,
   type PlaceholderContainerActionProps,
 } from "@gravity-ui/uikit";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
 import { ArrowRight, Globe, Lock, Persons } from "@gravity-ui/icons";
 import { linkProps } from "./router";
 import { visibilityPill } from "./cardView";
@@ -91,8 +91,8 @@ export function ScoreLegend({ coverageNullBelow, withNote = true }: { coverageNu
       {withNote && (
       <Text variant="body-1" color="complementary">
         {coverageNullBelow === undefined
-          ? "При недостаточном покрытии данных оценка не рассчитывается. Отсутствующие данные не учитываются как нулевые значения."
-          : `При покрытии данных ниже ${fmtCoverage(coverageNullBelow)} оценка не рассчитывается. Отсутствующие данные не учитываются как нулевые значения.`}
+          ? "При недостаточной полноте данных оценка не рассчитывается. Отсутствующие данные не учитываются как нулевые значения."
+          : `При полноте данных ниже ${fmtCoverage(coverageNullBelow)} оценка не рассчитывается. Отсутствующие данные не учитываются как нулевые значения.`}
       </Text>
       )}
     </AsideSection>
@@ -105,9 +105,11 @@ export function ScoreLegend({ coverageNullBelow, withNote = true }: { coverageNu
  * (`scoreTheme`); высота 8px задана в layout.css. Пять разных полос и кольцо
  * показывали одно и то же число пятью способами.
  */
-export function ScoreBar({ value, width, label }: { value: number; width: number | string; label?: string }) {
+export function ScoreBar({ value, width, label, neutral = false }: { value: number; width: number | string; label?: string; neutral?: boolean }) {
+  // neutral — серая заливка (категории в «Сравнении»): уровень там несет индекс,
+  // а цветные полосы в каждой строке спорили с ним
   return (
-    <span className="rh-score-bar" style={{ width }} role={label ? "img" : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
+    <span className={neutral ? "rh-score-bar rh-score-bar_neutral" : "rh-score-bar"} style={{ width }} role={label ? "img" : undefined} aria-label={label} aria-hidden={label ? undefined : true}>
       <Progress value={Math.max(0, Math.min(100, Math.round(value)))} size="s" theme={scoreTheme(value)} />
     </span>
   );
@@ -188,26 +190,13 @@ export function LanguageName({ name, color, noLanguage = false }: { name: string
  * и вставляется; `title` несёт полную форму, чтобы обрезанное имя можно было
  * прочесть наведением.
  *
- * Обрезается сначала организация, потом середина имени: у соседних строк
- * обычно общий владелец и общее начало имени (`lct-hackaton-2026/case-18-…-team-14`
- * и `…-team-70`), а различает их конец. Обрезка с конца всей строки прятала
- * именно его. Хвост имени (`SLUG_TAIL` знаков) не сжимается никогда.
+ * Не влезает — многоточие в конце всей строки, как у SourceCraft: сокращение в
+ * середине и обрезка организации отдельно от имени читались хуже.
  */
-const SLUG_TAIL = 8;
-
 export function RepoSlug({ org, repo, variant }: { org: string; repo: string; variant: "body-1" | "subheader-1" | "subheader-2" | "header-1" | "header-2" }) {
   return (
     <Text variant={variant} as={variant === "header-1" || variant === "header-2" ? "h1" : "span"} title={slugOf(org, repo)} className={variant === "header-2" ? "rh-slug rh-page-title" : "rh-slug"}>
-      <span className="rh-slug__org">{org}</span>
-      <span className="rh-slug__sep">/</span>
-      {repo.length > SLUG_TAIL * 2 ? (
-        <span className="rh-slug__repo rh-slug__repo_split">
-          <span className="rh-slug__head">{repo.slice(0, -SLUG_TAIL)}</span>
-          <span className="rh-slug__tail">{repo.slice(-SLUG_TAIL)}</span>
-        </span>
-      ) : (
-        <span className="rh-slug__repo">{repo}</span>
-      )}
+      {slugOf(org, repo)}
     </Text>
   );
 }
@@ -277,22 +266,20 @@ export function SkeletonRows({ rows, height = 44 }: { rows: number; height?: num
 
 /**
  * Пустое/служебное состояние в манере платформы: текст слева, иллюстрация
- * СПРАВА, действие под текстом.
- *
- * У SourceCraft пустые состояния всегда `direction="row"` с иллюстрацией
- * 120×120 (Pull requests, Milestones, Releases). Бренд-ассеты платформы не
- * переносим, поэтому иллюстрация — своя иконка 120px, а не картинка.
+ * СПРАВА, действие под текстом. У SourceCraft это `PlaceholderContainer` с плоской
+ * монохромной иллюстрацией 120×120 — здесь свои в том же языке (`illustrations.tsx`).
  */
 export function EmptyState({
-  icon,
+  image: Illustration,
   title,
   description,
   actions,
 }: {
-  icon: IconData;
+  image: ComponentType<SVGProps<SVGSVGElement>>;
   title: string;
   description?: ReactNode;
-  actions?: PlaceholderContainerActionProps[];
+  /** кнопки — массивом; свой блок действий (готовые наборы «Сравнения») — узлом */
+  actions?: PlaceholderContainerActionProps[] | ReactNode;
 }) {
   return (
     <PlaceholderContainer
@@ -303,11 +290,7 @@ export function EmptyState({
       title={title}
       description={description}
       actions={actions}
-      image={
-        <Text color="secondary" style={{ display: "flex" }}>
-          <Icon data={icon} size={120} />
-        </Text>
-      }
+      image={<Illustration width={120} height={120} aria-hidden="true" />}
     />
   );
 }

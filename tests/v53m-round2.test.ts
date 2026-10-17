@@ -473,7 +473,7 @@ describe("К6: рекомендации", () => {
     expect(score(fixed).categories.security.score).toBe(score(ok).categories.security.score);
     expect(eff.gain).toBe(false);
     const rec = recs(ok).find((r) => r.ruleId === "appsec-critical")!;
-    expect(rec.expectedImpact).toBe("снимет ограничение Repo Health Score в 69 баллов; балл категории «Безопасность» от этого не вырастет: его снижают и другие находки");
+    expect(rec.expectedImpact).toBe("снимет ограничение Repo Health Score в 69 баллов; сам по себе балл категории «Безопасность» не поднимет: его держат и другие находки");
     expect(rec.expectedImpact).not.toContain("повысит");
   });
 

@@ -364,9 +364,9 @@ describe("Г1.21: только текст — условие, эффект и п
       // условие и эффект правил от числа авторов не зависят
       expect(recs.map((r) => [r.ruleId, r.priority, r.deltaScore, r.expectedImpact, r.action])).toEqual(base.map((r) => [r.ruleId, r.priority, r.deltaScore, r.expectedImpact, r.action]));
       const problem = recs.find((r) => r.ruleId === "codeowners-missing")!.problem;
-      if (n === 1) expect(problem).toContain("У проекта 1 автор,");
-      if (n === 2) expect(problem).toContain("У проекта 2 автора,");
-      if (n === 1 || n === 2) expect(problem).toContain("Когда появятся соавторы");
+      if (n === 1) expect(problem).toContain("Пока автор один,");
+      if (n === 2) expect(problem).toContain("Пока авторов двое,");
+      if (n === 1 || n === 2) expect(problem).toContain("хватит одной строки с вашим логином");
       else expect(problem).toBe("Не указано, кто отвечает за код. С CODEOWNERS предложения изменений сразу попадают к ответственным.");
     }
   });
@@ -386,9 +386,9 @@ describe("Г1.21: только текст — условие, эффект и п
       seedRecommendation(t, scan, { ruleId: "codeowners-missing", priority: 1, factRef: "docs.presence", deltaScore: 3.5, expectedImpact: "+3,5 к HealthCraft Index" });
       const card = getRepoCard(t.db, "g121", "solo", { access: GRANTED })!;
       const rec = card.recommendations.find((r) => r.ruleId === "codeowners-missing")!;
-      expect(rec.problem).toContain("У проекта 1 автор,");
+      expect(rec.problem).toContain("Пока автор один,");
       expect(rec.deltaScore).toBe(3.5);
-      expect(serializeMarkdown(buildReportModel(card))).toContain("У проекта 1 автор,");
+      expect(serializeMarkdown(buildReportModel(card))).toContain("Пока автор один,");
     } finally {
       t.close();
     }

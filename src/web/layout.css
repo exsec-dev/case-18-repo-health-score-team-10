@@ -258,6 +258,13 @@ body {
   max-width: 280px;
 }
 
+/* короткая подсказка-заголовок (флаг накрутки) — одной строкой: при переносе
+ * на 280px поле справа оставалось пустым, ширина не ужималась по тексту */
+.g-action-tooltip.rh-tip-oneline {
+  max-width: none;
+  white-space: nowrap;
+}
+
 .g-help-mark__popover {
   box-sizing: border-box;
 }
@@ -452,6 +459,43 @@ body {
   z-index: 3;
 }
 
+/* fill на телефоне и в низком окне: закрепленные шапка и пагинация оставляли
+ * списку щель в 2-4 строки (боком — ни одной). Здесь прокручивается вся
+ * колонка, как страница SourceCraft на телефоне: шапка уезжает вместе со
+ * списком, пагинация — в его конце. */
+@media (max-width: 767px), (max-height: 600px) {
+  .rh-page_fill .rh-page__main {
+    display: block;
+    padding-bottom: 0;
+    overflow-y: auto;
+  }
+
+  .rh-page_fill .rh-fill__content,
+  .rh-fill__content:has(> .rh-table-fill) {
+    overflow: visible;
+  }
+
+  .rh-page_fill .rh-table-fill,
+  .rh-page_fill .rh-table-fill .g-table__scroll-container {
+    height: auto;
+  }
+}
+
+/* выпадающие списки фильтров на телефоне открываются над нижней панелью: у Sheet
+ * z-index 100000, у попапа Select — 1000 инлайном на обертке */
+[data-floating-ui-placement]:has(> .rh-in-sheet) {
+  z-index: 100001 !important;
+}
+
+/* фильтры рейтинга в нижней панели: поля во всю ширину, кнопки внизу */
+.rh-filter-sheet {
+  padding-bottom: var(--g-spacing-2);
+}
+
+.rh-filter-sheet__actions {
+  margin-top: var(--g-spacing-2);
+}
+
 /* ---------- разделённый список (Listing у SourceCraft) ---------- */
 
 .rh-list {
@@ -472,11 +516,75 @@ body {
   border-bottom: 0;
 }
 
-/* ---------- шапка карточки репозитория: аватар на высоту «название + мета» ---------- */
+/* строка рейтинга на телефоне (Rating.tsx, PhoneList): место, аватар и оценка —
+ * по центру высоты строки; между ними имя, под ним язык со значками. Колонка
+ * места — по самому длинному месту страницы (--rh-rank-w), чтобы разряды стояли
+ * друг под другом */
+.rh-phone-row {
+  display: grid;
+  grid-template-columns: var(--rh-rank-w, 28px) 32px minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: var(--g-spacing-3);
+  row-gap: 2px;
+}
 
+/* аватар — внутри обертки с `display: contents` (RepoAvatar), поэтому не `>` */
+.rh-phone-row__rank,
+.rh-phone-row .g-avatar {
+  grid-row: 1 / span 2;
+}
+
+.rh-phone-row__rank,
+.rh-phone-row .g-avatar,
+.rh-phone-row__score {
+  align-self: center;
+}
+
+.rh-phone-row__rank {
+  text-align: right;
+}
+
+.rh-phone-row__name {
+  grid-column: 3;
+  align-self: end;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.rh-phone-row__meta {
+  grid-column: 3;
+  grid-row: 2;
+  align-self: start;
+  min-width: 0;
+}
+
+.rh-phone-row__score {
+  grid-column: 4;
+  grid-row: 1 / span 2;
+}
+
+/* «Без оценки»: места нет — аватар · имя, ниже язык и причина */
+.rh-phone-row_unscored {
+  grid-template-columns: 32px minmax(0, 1fr);
+  grid-template-rows: auto auto auto;
+}
+
+.rh-phone-row_unscored .rh-phone-row__name,
+.rh-phone-row_unscored .rh-phone-row__meta,
+.rh-phone-row__note {
+  grid-column: 2;
+}
+
+.rh-phone-row__note {
+  grid-row: 3;
+}
+
+/* ---------- шапка карточки репозитория: аватар по центру блока «название + мета» ---------- */
+
+/* аватар 42px, блок «название 28 + мета 17» выше — по центру, а не у верхнего края */
 .rh-repo-head {
   display: flex;
-  align-items: stretch;
+  align-items: center;
   gap: var(--g-spacing-3);
   min-width: 0;
 }
@@ -593,8 +701,7 @@ body {
   row-gap: var(--g-spacing-1);
 }
 
-/* имя в 24px не переносится: длинный слаг сжимается по правилу RepoSlug
- * (сначала организация), а плашка видимости и кнопки остаются в строке, а
+/* имя в 24px не переносится: длинный слаг обрезается многоточием в конце, а плашка видимости и кнопки остаются в строке, а
  * не уезжают одни на вторую. На телефоне строка переносится. */
 .rh-card-head__title > :not(:first-child) {
   flex: none;
@@ -740,6 +847,11 @@ button.rh-category:focus-visible {
   line-height: 8px;
 }
 
+/* серая полоса: значение без окраски уровнем (категории в «Сравнении») */
+.rh-score-bar_neutral .g-progress__item {
+  background-color: var(--g-color-base-neutral-heavy);
+}
+
 /* примечание частичной нехватки данных — первой строкой раскрытия, во всю ширину */
 .rh-subrows__note {
   grid-column: 1 / -1;
@@ -771,6 +883,24 @@ button.rh-category:focus-visible {
   width: 100%;
   max-width: none;
   align-items: center;
+}
+
+/* иллюстрация заглушки: сюжет — основной цвет текста темы (белый 85% / черный 85%):
+   чистый белый на сером фоне заглушки слишком ярок */
+.rh-illustration {
+  display: block;
+  color: var(--g-color-text-primary);
+}
+
+/* типографика заглушки SourceCraft: заголовок subheader-3 17/24, текст body-2 15/20 */
+.rh-empty.g-placeholder-container .g-placeholder-container__title {
+  font-size: var(--g-text-subheader-3-font-size);
+  line-height: var(--g-text-subheader-3-line-height);
+}
+
+.rh-empty.g-placeholder-container .g-placeholder-container__description {
+  font-size: var(--g-text-body-2-font-size);
+  line-height: var(--g-text-body-2-line-height);
 }
 
 /* иллюстрация справа: стоковый `direction="row"` ставит её первой. Порядок
@@ -988,13 +1118,6 @@ button.rh-category:focus-visible {
 .rh-score-cell__bar {
   flex: 0 0 80px;
   width: 80px;
-}
-
-/* на телефоне полоса короче — строке репозитория нужно место */
-.rh-score-cell__bar_narrow {
-  flex-basis: 48px;
-  width: 48px;
-  margin-inline-end: var(--g-spacing-2);
 }
 
 .rh-score-cell__bar .g-progress,
@@ -1234,21 +1357,17 @@ button.rh-category:focus-visible {
     overflow-wrap: normal;
   }
 
+  /* на телефоне шапка переносится в несколько строк — аватар у верхнего края, а не посередине */
+  .rh-repo-head {
+    align-items: flex-start;
+  }
+
   /* имя репозитория в шапке карточки переносится, а не срезается */
-  .rh-card-head__title .g-text_ellipsis {
+  .rh-card-head__title .g-text_ellipsis,
+  .rh-card-head__title .rh-slug.g-text {
     overflow: visible;
     white-space: normal;
     overflow-wrap: anywhere;
-  }
-
-  /* строка рейтинга: имя — до 2 строк */
-  .rh-phone-name .g-text_ellipsis {
-    display: -webkit-box !important;
-    overflow: hidden;
-    white-space: normal;
-    overflow-wrap: anywhere;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
   }
 
   /* пагинация на узком телефоне переносится, а не режется */
@@ -1273,8 +1392,8 @@ button.rh-category:focus-visible {
   }
 
   .rh-empty .g-placeholder-container__image svg {
-    width: 56px;
-    height: 56px;
+    width: 80px;
+    height: 80px;
   }
 
   /* реакции и ответвления — не разъезжаются по строкам */
@@ -1766,29 +1885,14 @@ button.rh-category:focus-visible {
   gap: var(--g-spacing-3);
 }
 
-/* Колонки строки: слот плашки уровня («Требует внимания» в Label s — 132px)
- * и слот действий на две кнопки (обновление бывает только у своих репо)
- * фиксированной ширины — полоса и число каждой строки на одной вертикали. */
-.rh-repo-item__level {
-  display: flex;
-  justify-content: flex-end;
-  min-width: 132px;
-}
-
-/* иконка рекомендаций внутри ссылки красится вместе с текстом */
-.rh-repo-item__link {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--g-spacing-1);
-}
-
+/* действия строки — кнопка «…» у всех строк: полоса и число каждой строки на одной
+ * вертикали; «Запустить анализ» бывает только у строк без оценки */
 .rh-repo-item__actions {
   display: flex;
   flex: none;
   align-items: center;
   justify-content: flex-end;
   gap: var(--g-spacing-1);
-  min-width: 60px;
 }
 
 @media (max-width: 720px) {
@@ -1813,10 +1917,6 @@ button.rh-category:focus-visible {
 
   .rh-repo-item__score {
     flex-direction: row-reverse;
-  }
-
-  .rh-repo-item__level {
-    min-width: 0;
   }
 
   .rh-repo-item__actions {
@@ -1940,43 +2040,13 @@ button.rh-category:focus-visible {
 /* Слаг org/repo (RepoSlug): одна строка, обрезается сначала организация —
  * до трех знаков, — и только потом имя. Доля сжатия у организации в тысячу
  * раз больше, поэтому пока она не дошла до min-width, имя не трогается. */
+/* слаг одной строкой, не влезает — многоточие в конце */
 .rh-slug.g-text {
-  display: flex;
+  display: block;
   min-width: 0;
+  overflow: hidden;
   white-space: nowrap;
-}
-
-.rh-slug__org {
-  flex: 0 1000 auto;
-  min-width: 3ch;
-  overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.rh-slug__sep {
-  flex: none;
-}
-
-.rh-slug__repo {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* длинное имя: сжимается начало, хвост с различающей частью остается */
-.rh-slug__repo_split {
-  display: flex;
-}
-
-.rh-slug__head {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.rh-slug__tail {
-  flex: none;
 }
 
 /* шапка страницы: заголовок и пояснение через 6px, как у SourceCraft */
@@ -2019,6 +2089,13 @@ button.rh-category:focus-visible {
 .rh-jobs-btn__count {
   margin-inline-start: var(--g-spacing-2);
   color: var(--g-color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* остаток лимита на кнопке AI — как счетчик «Очереди»: число вторичным цветом */
+.rh-btn-count {
+  margin-inline-start: var(--g-spacing-2);
+  opacity: 0.6;
   font-variant-numeric: tabular-nums;
 }
 
@@ -2254,7 +2331,7 @@ button.rh-category:focus-visible {
   display: inline-block;
   width: 16px;
   vertical-align: middle;
-  border-top: 2px solid var(--g-color-text-primary);
+  border-top: 2px solid var(--g-color-text-secondary);
 }
 
 .rh-history__key_full {
@@ -2811,25 +2888,61 @@ button.rh-category:focus-visible {
   vertical-align: middle;
 }
 
-/* лидер строки — только подложка, без стрелки ▲: в рейтинге она значит «поднялся
-   за сутки». У цветного чипа — рамка-подложка вокруг чипа; на серой карточке —
-   на ступень плотнее, иначе сливается с фоном */
+/* значение строки: у лидера число основным цветом и галочка, у прочих число
+   приглушено. Стрелки ▲ нет: в рейтинге она значит «поднялся за сутки» */
 .rh-cmp-lead {
   display: inline-flex;
   align-items: center;
+  gap: var(--g-spacing-2);
   white-space: nowrap;
-  padding: 0 var(--g-spacing-2);
-  border-radius: var(--g-border-radius-m);
-  background: var(--g-color-base-generic-medium);
+  color: var(--g-color-text-complementary);
+}
+
+.rh-cmp-lead .g-text {
+  color: inherit;
+}
+
+.rh-cmp-lead_on {
   color: var(--g-color-text-primary);
 }
 
-.rh-cmp-lead_legend {
-  background: var(--g-color-base-generic);
+.rh-cmp-lead__icon {
+  flex: none;
+  color: var(--g-color-text-positive);
 }
 
-.rh-cmp-lead_chip {
-  padding: 2px;
+/* готовые наборы пустого сравнения — плитки-действия над кнопкой добавления */
+/* отступ — как у блока действий PlaceholderContainer: узел действий он не оборачивает */
+.rh-cmp-starters {
+  width: 100%;
+  margin-top: var(--g-spacing-5);
+}
+
+.rh-cmp-starter-skeleton.g-skeleton {
+  width: 240px;
+  height: 58px;
+  border-radius: var(--g-card-border-radius);
+}
+
+.rh-cmp-starters__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 320px));
+  gap: var(--g-spacing-3);
+  width: 100%;
+}
+
+.rh-cmp-starter.g-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  padding: var(--g-spacing-3) var(--g-spacing-4);
+}
+
+/* полосы таблицы не анимируются: значения не меняются, а раскрытие категории
+   перерисовывает строки — заливка «доезжала» до значения при каждом клике */
+.rh-cmp .g-progress__item {
+  transition: none;
 }
 
 /* балл первым (узкий подстолбец, цифры вправо), затем значение */

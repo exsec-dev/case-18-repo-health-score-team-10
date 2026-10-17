@@ -92,7 +92,8 @@ describe("К9.14: слово шкалы у категории — плашкой
 
 describe("К9.9: служебные заметки расчета не видны читателю", () => {
   test("заметки compute.ts — словами читателя; неизвестная — не печатается", () => {
-    expect(submetricNote("issues", "tracker_unused", "tracker not maintained — category minimum (Q14)")).toEqual({ remark: "Задач в трекере нет, поэтому категория получает минимальный балл." });
+    // UX 17.10: замечание без слова «трекер»
+    expect(submetricNote("issues", "tracker_unused", "tracker not maintained — category minimum (Q14)")).toEqual({ remark: "Задач нет – категория получает минимальный балл." });
     expect(submetricShownValue("cicd", "pass_rate", { score: null, note: "no declared CI" }, { at: null })).toBe("CI не настроен");
     expect(submetricShownValue("cicd", "duration", { score: null, note: "runs no-data" }, { at: null })).toBe("запуски недоступны");
     expect(submetricShownValue("code", "old_share", { score: null, value: null, note: "todo sample incomplete (cat-file truncated) — old_share needs the full sample" }, { at: null })).toBe(

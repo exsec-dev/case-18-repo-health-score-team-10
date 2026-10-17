@@ -12,7 +12,7 @@ import { parseFavoriteInput } from "../api/slug-input";
 import { analysisDate } from "../report/sections";
 import { plural } from "../report/submetrics";
 import type { IndexCategoryKey } from "../score/model";
-import { fmtCount, fmtDate, middleEllipsis, rankNoneText, roundScore } from "./format";
+import { fmtCount, fmtDate, rankNoneText, roundScore } from "./format";
 
 export { COMPARE_MAX };
 
@@ -122,14 +122,14 @@ export function rankCell(card: CompareCard, sharedTotal: number | null): { rank:
 export function metaRowLabel(key: "language" | "rank" | "date", year: number | null, sharedTotal: number | null): string {
   if (key === "language") return "Язык";
   if (key === "rank") return sharedTotal !== null ? `Место из ${fmtCount(sharedTotal)}` : "Место в рейтинге";
-  return year !== null ? `Анализ, ${year}` : "Анализ";
+  return year !== null ? `Дата анализа, ${year}` : "Дата анализа";
 }
 
 // ---------- заметки сопоставимости ----------
 
-/** Слаг в заметке: длинное имя — многоточием в середине, хвост виден; полный — в шапке столбца. */
+/** Слаг в заметке — полностью: заметка переносится по строкам, сокращать незачем. */
 function noteSlug(c: CompareCard): string {
-  return `${c.repo.org}/${middleEllipsis(c.repo.repo, 40, 12)}`;
+  return `${c.repo.org}/${c.repo.repo}`;
 }
 
 /**
@@ -233,9 +233,8 @@ export const COMPARE_ONE_TEXT = "Добавьте еще 1 или 2 репози
 export const COMPARE_DUPLICATE_TEXT = "Этот репозиторий уже в сравнении.";
 export const COMPARE_BAD_INPUT_TEXT = "Не похоже на адрес репозитория: нужен вид org/repo или ссылка SourceCraft.";
 export const COMPARE_UNAVAILABLE_TITLE = "Репозиторий не найден или недоступен";
-export const COMPARE_LEADER_LEGEND = "Отмечен лучший балл строки среди репозиториев с данными.";
+export const COMPARE_LEADER_LEGEND = "Лучший балл строки среди репозиториев с данными.";
 export const COMPARE_FULL_PARTIAL = "Repo Health Score, CI/CD и Безопасность сравниваются, когда они видны вам у всех выбранных репозиториев.";
-export const COMPARE_FOOTER = "Оценки посчитаны по текущей методике; CI/CD и Безопасность в HealthCraft Index не входят.";
 export const COMPARE_PLACEHOLDER = "Название, org/repo или ссылка на репозиторий";
 
 /** Что делать с недоступным — по состоянию ЗРИТЕЛЯ, не репозитория (иначе текст раскрыл бы существование). */

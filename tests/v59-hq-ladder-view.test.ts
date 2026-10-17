@@ -33,15 +33,23 @@ describe("В5.9 HQ: вид лестницы = поля карточки", () => 
       const v = cardView(c);
       expect(v.ladder).not.toBeNull();
       const steps = c.ladder!.steps;
-      expect(v.ladder!.steps.map((s) => s.item.rec.ruleId)).toEqual(steps.map((s) => s.ruleId));
-      v.ladder!.steps.forEach((s, i) => {
-        expect(s.item.n).toBe(i + 1);
-        expect(s.effect).toBe(`${fmtScore(steps[i]!.indexAfter)} (${fmtSigned(steps[i]!.delta)})`);
-      });
-      // остальные — все прочие рекомендации карточки, номера продолжают шаги
-      const inSteps = new Set(steps.map((s) => s.ruleId));
-      expect(v.ladder!.rest.map((r) => r.rec.ruleId)).toEqual(c.recommendations.filter((r) => !inSteps.has(r.ruleId)).map((r) => r.ruleId));
-      v.ladder!.rest.forEach((r, i) => expect(r.n).toBe(steps.length + i + 1));
+      // шаги лестницы — первыми; не дошла до цели — следом правило без числа с
+      // наибольшим потолком (`до N`), если такое есть
+      const shown = v.ladder!.steps;
+      expect(shown.slice(0, steps.length).map((s) => s.item.rec.ruleId)).toEqual(steps.map((s) => s.ruleId));
+      shown.forEach((s, i) => expect(s.item.n).toBe(i + 1));
+      steps.forEach((st, i) => expect(shown[i]!.effect).toBe(`${fmtScore(st.indexAfter)} (${fmtSigned(st.delta)})`));
+      const extra = shown.slice(steps.length);
+      expect(extra.length).toBeLessThanOrEqual(1);
+      if (extra[0]) {
+        expect(c.ladder!.reached).toBe(false);
+        expect(extra[0].item.ceiling).not.toBeNull();
+        expect(extra[0].effect).toMatch(/^до \d+$/);
+      }
+      // остальные — все прочие рекомендации карточки (в порядке карточки), номера продолжают шаги
+      const inSteps = new Set(shown.map((s) => s.item.rec.ruleId));
+      expect(v.ladder!.rest.map((r) => r.rec.ruleId)).toEqual(v.recommendations.filter((r) => !inSteps.has(r.rec.ruleId)).map((r) => r.rec.ruleId));
+      v.ladder!.rest.forEach((r, i) => expect(r.n).toBe(shown.length + i + 1));
     }
   });
 
@@ -56,9 +64,14 @@ describe("В5.9 HQ: вид лестницы = поля карточки", () => 
     expect(un.ladder!.reached).toBe(false);
     const lastU = roundScore(un.ladder!.steps.at(-1)!.indexAfter);
     expect(lastU).toBeLessThan(70);
-    const summary = cardView(un).ladder!.summary;
-    expect(summary).toBe(`После шага №${un.ladder!.steps.length} индекс – ${lastU}, до 70 не хватит ${70 - lastU}`);
-    expect(summary).not.toContain("Здоров");
+    const unView = cardView(un).ladder!;
+    const k = un.ladder!.steps.length;
+    const head = `После шага №${k} индекс – ${lastU}, до 70 не хватит ${70 - lastU}`;
+    // следующий шаг без числа есть — итог называет его потолок, нет — обрывается на разрыве
+    const extra = unView.steps[k];
+    if (extra) expect(unView.summary).toBe(`${head}. Шаг №${k + 1} ${extra.item.ceiling! >= 70 - lastU ? "может закрыть разрыв" : "сократит разрыв"}: до ${fmtSigned(extra.item.ceiling!)}, в зависимости от объема работы`);
+    else expect(unView.summary).toBe(head);
+    expect(unView.summary).not.toContain("Здоров");
   });
 
   test("переключателя нет: репо в зоне, без кода, без лестницы", () => {

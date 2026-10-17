@@ -121,16 +121,17 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     expect(src).toContain("export function JobsBell");
   });
 
-  test("«Задания»: кнопка со штриховкой (Т1), панель — Popup с переключателем без заголовка (П3), ссылка в раздел — SPA", () => {
+  // UX 17.10: «Задания» → «Очередь», вкладка «Активные N» → «Сейчас N»
+  test("«Очередь»: кнопка со штриховкой (Т1), панель — Popup с переключателем без заголовка (П3), ссылка в раздел — SPA", () => {
     const bell = src.slice(src.indexOf("export function JobsBell"), src.indexOf("function JobRow"));
     const row = src.slice(src.indexOf("function JobRow"), src.indexOf("interface FavoritesResponse"));
     expect(bell).toContain('className={busy ? "rh-jobs-btn rh-jobs-btn_busy" : "rh-jobs-btn"}');
     expect(bell).toMatch(/<Popup\s+open=\{open\}/);
     expect(bell).not.toContain("<details");
-    // заголовка «Задания» в панели нет, сверху — «Активные N / История»;
+    // заголовка «Очередь» в панели нет, сверху — «Текущие N / История»;
     // секций «Идут сейчас» / «Недавние» нет; снизу — без оценки времени
     expect(bell).toContain("<SegmentedRadioGroup");
-    expect(bell).toContain("{`Активные ${active.length}`}");
+    expect(bell).toContain("{`Текущие ${active.length}`}");
     expect(bell).toContain(">История<");
     expect(bell).not.toMatch(/Идут сейчас|Недавние|>\s*Ваши задания\s*</);
     expect(bell).toContain("Итог появится в строке репозитория.");
@@ -159,7 +160,8 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     expect(bell).toMatch(/offset=\{4\}\s*role="dialog"/);
     expect(bell).toContain('className={alarm ? "rh-jobs-btn__count rh-jobs-btn__count_danger" : "rh-jobs-btn__count"}');
     // пустые состояния — на каждую вкладку панели
-    expect(src).toContain('<JobsEmpty title="Анализов пока не было">');
+    // UX 17.10: пустая история — «Вы еще ничего не запускали»
+    expect(src).toContain('<JobsEmpty title="Вы еще ничего не запускали">Здесь появятся завершенные анализы, AI-обзоры и проверки и их итог.</JobsEmpty>');
     expect((src.match(/announceJobsChanged\(\);/g) ?? []).length).toBe(2);
     // опрос заданий — один на вкладку (session.tsx), событие «задания
     // изменились» будит его там, а не отдельные опросы страниц
@@ -200,10 +202,10 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     const rowSrc = src.slice(src.indexOf("function RepoRow"), src.indexOf("// ========== ПОРТ 5"));
     expect(rowSrc).toContain('className="rh-repo-item__cover"');
     expect(rowSrc).toContain("scoreWord(entry.healthcraftIndex)");
-    // аудит 16.10: оценка — та же полоса, что в рейтинге и на карточке (ScoreBar),
-    // уровень — плашкой Label; число нейтральное
+    // аудит 16.10: оценка — та же полоса, что в рейтинге и на карточке (ScoreBar);
+    // UX 17.10: плашки уровня нет — уровень несет цвет полосы, слово — в подсказке
     expect(rowSrc).toContain("<ScoreBar value={entry.healthcraftIndex!} width={64} />");
-    expect(rowSrc).toContain("<Label theme={scoreLabelTheme(entry.healthcraftIndex)} size=\"s\">");
+    expect(rowSrc).not.toContain("scoreLabelTheme(entry.healthcraftIndex)");
     expect(src).not.toContain("function ScoreRing");
     expect(rowSrc).not.toContain("scoreColor(");
     // «Сканируется» — штриховка загрузки кнопки Gravity, не Label со спиннером;
@@ -213,10 +215,8 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     // остальные состояния — серые `StatePill` с иконкой, цветных `Label` в состоянии строки нет
     const stateSrc = rowSrc.slice(rowSrc.indexOf("const state ="), rowSrc.indexOf("const menuItems"));
     expect((stateSrc.match(/<StatePill icon=\{/g) ?? []).length).toBe(7);
-    // единственный цветной Label в состоянии — уровень оценки у оцененного репо
-    // (аудит 16.10: статус одним способом на всех экранах); состояния — серые
-    expect((stateSrc.match(/<Label/g) ?? []).length).toBe(1);
-    expect(stateSrc).toContain("<Label theme={scoreLabelTheme(entry.healthcraftIndex)}");
+    // цветных Label в состоянии нет: уровень — полосой, состояния — серые StatePill
+    expect((stateSrc.match(/<Label/g) ?? []).length).toBe(0);
     expect(src).not.toContain("<Spin");
     // метки «ваш» нет
     expect(src).not.toMatch(/>\s*ваш\s*</);
@@ -224,11 +224,12 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     // как «Public» у SourceCraft (у приватного — с замком)
     expect(src).toContain("<VisibilityPill value={access.visibility} titleSuffix={checked} />");
     expect(readFileSync(join(import.meta.dir, "..", "src", "web", "ui.tsx"), "utf8")).toMatch(/pill\.kind === "internal" \? Persons : Lock[\s\S]{0,160}<Label theme="clear" size="s"/);
+    // UX 17.10: все действия строки — в меню «…» (анализ у своих и «Убрать из избранного»):
+    // одна кнопка у всех строк, колонка ровная
     expect(rowSrc).toContain("<DropdownMenu");
-    expect(rowSrc).toContain('text: "Убрать из избранного"');
-    // пункт «Открыть рекомендации» — SPA-навигация к разделу якорем, не href
-    expect(rowSrc).toContain("action: () => navigate(recommendationsHref(href))");
-    expect(rowSrc).not.toMatch(/text: "Открыть рекомендации", href:/);
+    expect(rowSrc).toContain('{ text: "Убрать из избранного", iconStart: <Icon data={TrashBin} size={16} />, action: onRemove, disabled: busy, theme: "danger" as const }');
+    expect(rowSrc).toContain('aria-label="Действия с репозиторием"');
+    expect(rowSrc).not.toContain("Открыть рекомендации");
     // плитки сводки — переключатели: роль кнопки и aria-pressed вместо радио
     expect(src).toMatch(/role="button"\s*aria-checked=\{undefined\}\s*aria-pressed=\{band === b\.key\}/);
     expect(rowSrc).not.toContain("Убрать ★");

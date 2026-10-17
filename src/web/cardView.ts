@@ -24,8 +24,9 @@ import {
   sourceWord,
   type ContributionBar,
 } from "../report/sections";
-import { submetricContext, submetricShownValue, submetricTitle } from "../report/submetrics";
-import type { CategoryKey } from "../score/model";
+import { submetricContext, submetricShownValue, submetricTitle, subweightKey } from "../report/submetrics";
+import { INDEX_WEIGHTS, SUBWEIGHTS, type CategoryKey, type IndexCategoryKey } from "../score/model";
+import { SEVERITY_RULES } from "../score/severity";
 import { SIZE_TITLES } from "../api/rating-filters";
 import type { RankLeague } from "../api/rank-badge";
 import { COHORT_MIN } from "../api/cohort";
@@ -111,9 +112,17 @@ export interface LockedView {
 export interface RecommendationView {
   n: number;
   rec: CardRecommendation;
-  /** эффект — текст отчета; `effectNote` («ожидаемый эффект») только у числового */
+  /**
+   * эффект: у числового — текст отчета («+3,6 к HealthCraft Index»), у правила
+   * без числа с потолком — «до +21,6 к HealthCraft Index», иначе — слова правила
+   */
   effect: string;
+  /** эффект плашкой (число или потолок); false — словами правила */
+  effectPill: boolean;
+  /** подпись под плашкой потолка; null — подписи нет */
   effectNote: string | null;
+  /** потолок прироста индекса у правила без числа; null — правило с числом или вне индекса */
+  ceiling: number | null;
   /** ярлык основания словами: подметрика и ее значение либо «Исходные данные» */
   label: string;
   facts: { key: string; missing: boolean; fact: CardEvidence | null }[];
@@ -269,13 +278,25 @@ export function ladderView(card: RepoCard, recommendations: RecommendationView[]
     item: { ...stepItems[i]!, n: i + 1 },
     effect: `${fmtScore(s.indexAfter)} (${fmtSigned(s.delta)})`,
   }));
-  const rest = recommendations.filter((r) => !inSteps.has(r.rec.ruleId)).map((r, i) => ({ ...r, n: steps.length + i + 1 }));
-  const last = roundScore(ladder.steps[ladder.steps.length - 1]!.indexAfter);
+  const lastAfter = ladder.steps[ladder.steps.length - 1]!.indexAfter;
+  const last = roundScore(lastAfter);
   const k = ladder.steps.length;
+  // лесенка не дошла до цели — следующим шагом правило без числа с наибольшим
+  // потолком: «до 70 не хватит 6» не обрывается, а говорит, что может закрыть разрыв
+  const candidates = recommendations.filter((r) => !inSteps.has(r.rec.ruleId) && r.ceiling !== null);
+  const extra = last < ladder.target && candidates.length > 0 ? candidates.reduce((a, b) => (b.ceiling! > a.ceiling! ? b : a)) : null;
+  if (extra) {
+    steps.push({ item: { ...extra, n: k + 1 }, effect: `до ${fmtScore(Math.min(100, lastAfter + extra.ceiling!))}` });
+    inSteps.add(extra.rec.ruleId);
+  }
+  const rest = recommendations.filter((r) => !inSteps.has(r.rec.ruleId)).map((r, i) => ({ ...r, n: steps.length + i + 1 }));
+  const gap = ladder.target - last;
   const summary =
     last >= ladder.target
       ? `После шага №${k} индекс – ${last}: зона «Здоров»`
-      : `После шага №${k} индекс – ${last}, до ${ladder.target} не хватит ${ladder.target - last}`;
+      : extra
+        ? `После шага №${k} индекс – ${last}, до ${ladder.target} не хватит ${gap}. Шаг №${k + 1} ${extra.ceiling! >= gap ? "может закрыть разрыв" : "сократит разрыв"}: до ${fmtSigned(extra.ceiling!)}, в зависимости от объема работы`
+        : `После шага №${k} индекс – ${last}, до ${ladder.target} не хватит ${gap}`;
   return { steps, rest, summary };
 }
 
@@ -325,20 +346,84 @@ export function recommendationLabel(card: RepoCard, rec: CardRecommendation): st
   return `${submetricTitle(cat, sub)} – ${submetricShownValue(cat, sub, entry, submetricContext(card.score.computedAt), category!.submetrics)}`;
 }
 
+/**
+ * Потолок прироста HealthCraft Index у правила без числа: сколько индекс получит,
+ * если показатель правила дойдет до максимума. Активация (`start-tracker`) —
+ * вся категория до 100; правило подметрики — ее доля в категории. Веса
+ * перенормированы по категориям и подметрикам с данными, как в расчете. Это
+ * верхняя граница («до»), а не обещание: сколько получится, зависит от объема
+ * работы. null — у правила есть число, его категория не входит в индекс (CI/CD,
+ * Безопасность) или без балла.
+ */
+export function recommendationCeiling(card: RepoCard, rec: CardRecommendation): number | null {
+  const cats = card.score?.categories;
+  if (rec.deltaScore !== null || !cats) return null;
+  const target = rec.kind === "activation" ? rec.opensCategory : (RULE_SUBMETRIC[rec.ruleId] ?? null);
+  if (!target) return null;
+  const [cat, sub] = target.split(".") as [CategoryKey, string | undefined];
+  if (!(cat in INDEX_WEIGHTS)) return null;
+  const scoreOf = (k: CategoryKey): number | null => {
+    const c = cats[k];
+    return c && c.locked === undefined && typeof c.score === "number" ? c.score : null;
+  };
+  const catScore = scoreOf(cat);
+  if (catScore === null) return null;
+  const present = (Object.keys(INDEX_WEIGHTS) as IndexCategoryKey[]).filter((k) => scoreOf(k) !== null);
+  const share = INDEX_WEIGHTS[cat as IndexCategoryKey] / present.reduce((sum, k) => sum + INDEX_WEIGHTS[k], 0);
+  let room = 100 - catScore;
+  const weights = SUBWEIGHTS[cat] as Record<string, number>;
+  const entry = sub !== undefined ? cats[cat]!.submetrics[sub] : undefined;
+  const w = sub !== undefined ? weights[subweightKey(sub)] : undefined;
+  if (rec.kind !== "activation" && entry && typeof entry.score === "number" && w !== undefined) {
+    const withData = Object.entries(cats[cat]!.submetrics)
+      .filter(([, e]) => typeof e.score === "number")
+      .reduce((sum, [k]) => sum + (weights[subweightKey(k)] ?? 0), 0);
+    if (withData > 0) room = Math.min(room, (1 - entry.score) * (w / withData) * 100);
+  }
+  const ceiling = room * share;
+  return ceiling >= 0.05 ? ceiling : null;
+}
+
+
+/**
+ * Порядок карточки — ответ на «что исправить первым»: правила серьезности, затем
+ * по приросту индекса (число или потолок) по убыванию; без числа и потолка —
+ * в конце, в порядке движка. Отчет PDF хранит порядок движка.
+ */
+function byGain(items: { rec: CardRecommendation; ceiling: number | null }[]): number[] {
+  const gain = (i: number): number | null => items[i]!.rec.deltaScore ?? items[i]!.ceiling;
+  const severity = (i: number): number => {
+    const k = SEVERITY_RULES.indexOf(items[i]!.rec.ruleId);
+    return k === -1 ? SEVERITY_RULES.length : k;
+  };
+  return items
+    .map((_, i) => i)
+    .sort((a, b) => {
+      if (severity(a) !== severity(b)) return severity(a) - severity(b);
+      const ga = gain(a);
+      const gb = gain(b);
+      if (ga === null || gb === null) return ga === gb ? a - b : ga === null ? 1 : -1;
+      return gb - ga || a - b;
+    });
+}
+
 export function cardView(card: RepoCard): CardView {
   const score = card.score;
   const evidence = new Map(card.evidence.map((e) => [e.key, e]));
-  const recommendations: RecommendationView[] = card.recommendations.map((rec, i) => {
-    const { effect, note } = recommendationEffect(rec);
+  const raw = card.recommendations.map((rec) => {
+    const ceiling = recommendationCeiling(card, rec);
+    const { effect } = recommendationEffect(rec);
     return {
-      n: i + 1,
       rec,
-      effect,
-      effectNote: note,
+      ceiling,
+      effect: ceiling !== null ? `до ${fmtSigned(ceiling)} к HealthCraft Index` : effect,
+      effectPill: rec.deltaScore !== null || ceiling !== null,
+      effectNote: ceiling !== null ? "зависит от объема работы" : null,
       label: recommendationLabel(card, rec),
       facts: rec.factRefs.map((ref) => ({ key: ref.key, missing: ref.missing === true, fact: evidence.get(ref.key) ?? null })),
     };
   });
+  const recommendations: RecommendationView[] = byGain(raw).map((i, k) => ({ n: k + 1, ...raw[i]! }));
   const limitations = limitationItems(card).map((l) => l.text);
   const topMarkers: CardView["topMarkers"] = [];
   // «в репозитории нет кода» уже сказано в плашке индекса — сверху не повторяется

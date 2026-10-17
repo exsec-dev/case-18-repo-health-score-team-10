@@ -301,11 +301,12 @@ describe("Д2 показатель: баланс за 90 дней и напра�
     expect(shown("issues.backlog_trend", stable.backlog_trend)).toBe("бэклог стабилен, +3 за 90 дней (создано 30, закрыто 27)");
   });
 
-  test("трекер не ведется — тот же статус, что у категории, а не «0 динамики»", () => {
+  // UX 17.10: «трекер не ведется» → «задачи не ведутся»
+  test("задачи не ведутся — тот же статус, что у категории, а не «0 динамики»", () => {
     const d = issueDynamics({ open: 0, closed: 0, flow: { window_days: 30, windows: flow([0, 0], [0, 0], [0, 0]) } });
     expect(d.backlog_trend).toEqual({ score: null, value: null, note: DYNAMICS_TRACKER_UNUSED });
-    expect(shown("issues.backlog_trend", d.backlog_trend)).toBe("трекер не ведется");
-    expect(shown("issues.monthly_flow", d.monthly_flow)).toBe("трекер не ведется");
+    expect(shown("issues.backlog_trend", d.backlog_trend)).toBe("задачи не ведутся");
+    expect(shown("issues.monthly_flow", d.monthly_flow)).toBe("задачи не ведутся");
     const cat = computeFromFacts(new Map([["issues.stats", { open: 0, closed: 0 }]]), { scanId: 0, repoId: 0 }, NOW).categories.issues;
     expect(cat.score).toBe(6);
     expect(Object.keys(cat.submetrics).sort()).toEqual(["backlog_trend", "monthly_flow", "tracker_unused"]);

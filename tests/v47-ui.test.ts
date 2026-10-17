@@ -22,7 +22,8 @@ describe("Б2 (П2): мультивыбор языка в рейтинге", () 
       multiple: /\bmultiple\b/.test(s),
       renderOption: s.includes("renderOption="),
       checkbox: /function LangOption[\s\S]{0,400}<Checkbox/.test(rating()),
-      popupClass: s.includes('popupClassName="rh-lang-popup"'),
+      // на телефоне к классу добавляется rh-in-sheet: список открывается над нижней панелью
+      popupClass: s.includes('popupClassName={isPhone ? "rh-lang-popup rh-in-sheet" : "rh-lang-popup"}'),
       summary: s.includes("renderSelectedOption="),
     }).toEqual({ multiple: true, renderOption: true, checkbox: true, popupClass: true, summary: true });
     const css = web("layout.css");
@@ -48,7 +49,7 @@ describe("Б2 (П2): мультивыбор языка в рейтинге", () 
 describe("Б4 (П1): кнопка PDF на карточке", () => {
   const menu = () => {
     const src = stripComments(web("RepoPage.tsx"));
-    const start = src.indexOf("function ReportMenu");
+    const start = src.indexOf("function useReportDownload");
     return src.slice(start, src.indexOf("\n}\n", start));
   };
 
@@ -70,7 +71,7 @@ describe("Б4 (П1): кнопка PDF на карточке", () => {
 
   test("адрес и имя файла — от слага карточки, рядом с report.md (MD-адрес прежний)", () => {
     // имя файла – одной функцией, с обрезкой длинного слага
-    expect(web("RepoPage.tsx")).toContain('pdfHref={`${cardUrl}/report.pdf`} pdfName={reportFileName(org, repo, "pdf")}');
+    expect(web("RepoPage.tsx")).toContain('pdfHref: `${cardUrl}/report.pdf`, pdfName: reportFileName(org, repo, "pdf")');
   });
 });
 
@@ -144,14 +145,14 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
     expect(web("layout.css")).not.toContain(".rh-me-card");
   });
 
-  test("П3.4 (У26): счётчик рекомендаций — ссылкой на карточку с открытым табом; null — строки нет", () => {
+  test("П3.4 (У26), UX 17.10: в строке избранного нет счетчика рекомендаций — они на карточке", () => {
     const row = slice("function RepoRow", "\nfunction ");
     // адрес карточки – одна константа строки `href`
     expect(row).toContain("const href = repoHref(org, repo);");
-    // ссылка с иконкой лампочки ведет к разделу «Рекомендации» якорем
-    // (`recommendationsHref` → `#recommendations`); при 0 рекомендаций строки
-    // нет, как и при null
-    expect(row).toMatch(/entry\.recommendationsCount !== null && entry\.recommendationsCount > 0 && \(\s*<MetaItem>[\s\S]*?<Link \{\.\.\.linkProps\(recommendationsHref\(href\)\)\}[^>]*>\s*<Icon data=\{Bulb\} size=\{14\} \/>\s*\{recommendationsText\(entry\.recommendationsCount\)\}\s*<\/Link>/);
+    // счетчик-ссылку «N рекомендаций» убрали по решению владельца: вся строка и
+    // так ведет в карточку
+    expect(row).not.toContain("recommendationsText(");
+    expect(row).not.toContain("Bulb");
     expect(row).not.toContain("?tab=");
   });
 });

@@ -63,7 +63,9 @@ describe("Р2.3: язык без цвета платформы — нейтра�
 describe("Р2.4: спиннер на кнопке «Отчет»", () => {
   // оба формата качаются через fetch – спиннер стоит, пока собирается любой из них
   test("кнопка показывает loading, пока отчет собирается", () => {
-    expect(srcOf("src/web/RepoPage.tsx")).toContain('aria-haspopup="menu" loading={busy !== null}');
+    expect(srcOf("src/web/RepoPage.tsx")).toContain('aria-haspopup="menu" loading={report.busy !== null}');
+    // в компактной шапке отчет — в меню «…»: спиннер на его кнопке
+    expect(srcOf("src/web/RepoPage.tsx")).toContain('aria-label="Еще действия" loading={reportDl?.busy != null}');
   });
 });
 
@@ -140,7 +142,7 @@ describe("Р2.6: обновление рейтинга без моргания (
     expect(src).toContain('{state.kind === "loading" && !refreshing && <SkeletonRows');
     expect(src).toContain('className={refreshing ? "rh-table-fill rh-refreshing" : "rh-table-fill"}');
     // все три вида выдачи: таблица, список на телефоне, «Без оценки»
-    expect(src).toContain('<ul className={refreshing ? "rh-list rh-refreshing" : "rh-list"}>');
+    expect(src).toContain('<ul className={refreshing ? "rh-list rh-refreshing" : "rh-list"}');
     expect(src).toContain('className={refreshing ? "rh-refreshing" : undefined}');
     const css = srcOf("src/web/layout.css");
     expect(css).toMatch(/\.rh-refreshing \{[^}]*pointer-events: none;/);

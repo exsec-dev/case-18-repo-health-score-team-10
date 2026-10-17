@@ -410,12 +410,13 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
     // отчетом), «Настройках» в ней – ссылка.
     expect({
       coverageWord: figure.includes("Покрытие: {fmtCoverage(coverage)}"),
-      // у одного показателя – строка «Покрытие»; у двух – «Покрытие HCI» и
-      // «Покрытие RHS», в подсказке каждой аббревиатура расшифрована
+      // у одного показателя – строка «Полнота данных»; у двух – «Полнота: индекс» и
+      // «Полнота: полная оценка», в подсказке каждой показатель назван полностью
+      // UX 17.10: «Покрытие» → «Полнота данных», аббревиатуры HCI/RHS в имени строки сняты
       coverageInAside:
-        /name="Покрытие" note=\{coverageHelp\}/.test(aside) &&
-        /name="Покрытие HCI" note=\{`HCI – HealthCraft Index\. \$\{coverageHelp\}`\}/.test(aside) &&
-        /name="Покрытие RHS" note=\{`RHS – Repo Health Score\. \$\{fullCoverageHelp\}`\}/.test(aside),
+        /name="Полнота данных" note=\{coverageHelp\}/.test(aside) &&
+        /name="Полнота: индекс" note=\{`HealthCraft Index\. \$\{coverageHelp\}`\}/.test(aside) &&
+        /name="Полнота: полная оценка" note=\{`Repo Health Score\. \$\{fullCoverageHelp\}`\}/.test(aside),
       oldCoverageWord: figure.includes("данных хватило"),
       chipLikeAside: /scoreLabelTheme\(total\)\} size="s"/.test(figure),
       // блок не схлопывается в метку: заголовок, путь по типу зрителя и
@@ -488,13 +489,15 @@ describe("Б2 (Р3, Р21): строка рейтинга и контрол со�
       slugComponent: cell.includes("<RepoSlug"),
       languageName: cell.includes("<LanguageName"),
       dotOnly: cell.includes("<LanguageDot") || srcOf("ui.tsx").includes("LanguageDot"),
-      skeletonRhythm: src.includes("<SkeletonRows rows={10} height={56} />"),
+      skeletonRhythm: src.includes("<SkeletonRows rows={10} height={isPhone ? 84 : 56} />"),
     }).toEqual({ avatar: true, slugComponent: true, languageName: true, dotOnly: false, skeletonRhythm: true });
   });
 
   // аудит 16.10: число нейтральное 15/500 — уровень несет полоса
   test("Р3 + П1.1: число как в остальных колонках, нейтральное; полоса снова читаемая", () => {
-    const cell = between(codeOf("Rating.tsx"), "function ScoreCell", "function CategoryCell");
+    // ячейка таблицы; ветка телефона (`narrow`, цветное число без полосы) — выше нее
+    const whole = between(codeOf("Rating.tsx"), "function ScoreCell", "function CategoryCell");
+    const cell = whole.slice(whole.indexOf("if (item.healthcraftIndex === null)"));
     const css = srcOf("layout.css");
     expect({
       normalNumber: !cell.includes('variant="body-3"') && !cell.includes('variant="subheader-3"'),
@@ -543,7 +546,7 @@ describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечан
     const src = codeOf("Rating.tsx");
     expect({
       title: src.includes('title="Рейтинг здоровья открытых репозиториев"'),
-      oneLead: src.includes("description={ratingLead(meta)}"),
+      oneLead: src.includes("description={ratingLead(meta, isPhone)}"),
       oldSubheader: src.includes("а не число лайков"),
       secondParagraph: src.includes("<CoverageNote"),
       fromDb: /ratingLead[\s\S]{0,900}meta\.repos/.test(src),
@@ -579,7 +582,8 @@ describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечан
     const src = codeOf("Rating.tsx");
     const item = between(src, 'name="Порог оценки"', "</DefinitionList.Item>");
     expect({
-      note: item.includes("Оценка рассчитывается только при достаточном покрытии. Недостающие категории исключаются из расчета"),
+      // UX 17.10: «покрытие» → «полнота данных»
+      note: item.includes("Оценка рассчитывается только при достаточной полноте данных. Недостающие категории исключаются из расчета"),
       oldNote: src.includes("Score не выставляется, а не занижается"),
       numberFromDb: item.includes("fmtCoverage(meta.coverageNullBelow)"),
     }).toEqual({ note: true, oldNote: false, numberFromDb: true });

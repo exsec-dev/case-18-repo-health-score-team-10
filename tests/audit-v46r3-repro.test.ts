@@ -12,10 +12,12 @@ describe("В4.6 круг 3: рейтинг", () => {
   // аудит 16.10: уровень несет полоса, число нейтральное 15/550
   test("индекс имеет полосу 80×8px, нейтральное число 15/500 и нулевой зазор", () => {
     const rating = web("Rating.tsx");
-    const cell = rating.slice(rating.indexOf("function ScoreCell"), rating.indexOf("function CategoryCell"));
+    const whole = rating.slice(rating.indexOf("function ScoreCell"), rating.indexOf("function CategoryCell"));
     const css = web("layout.css");
-    // на телефоне полоса короче (`_narrow`), в таблице – 80px
-    expect(cell).toContain('narrow ? "rh-score-cell__bar rh-score-cell__bar_narrow" : "rh-score-cell__bar"');
+    // UX 17.10: на телефоне полосы нет — число цвета зоны; в таблице – полоса 80px и нейтральное число
+    expect(whole).toMatch(/if \(narrow && [^)]*\) \{[\s\S]{0,200}scoreColor\(item\.healthcraftIndex\)/);
+    const cell = whole.slice(whole.indexOf("if (item.healthcraftIndex === null)"));
+    expect(cell).toContain('<div className="rh-score-cell__bar">');
     expect(cell).not.toContain("scoreColor(item.healthcraftIndex)");
     expect(cell).toContain('<Flex gap={0} alignItems="center"');
     expect(css).toMatch(/\.rh-score-cell__bar\s*\{[^}]*flex:\s*0 0 80px[^}]*width:\s*80px/);
@@ -61,7 +63,8 @@ describe("В4.6 круг 3: карточка", () => {
     // абзац легенды на карточке отключен пропом; на рейтинге он остается (ui.tsx ниже)
     expect(repo).toContain("<ScoreLegend withNote={false} />");
     expect(ui).toContain('variant="body-1"');
-    expect(ui).toContain("При покрытии данных ниже");
+    // UX 17.10: «покрытие данных» → «полнота данных»
+    expect(ui).toContain("При полноте данных ниже");
     expect(ui).toContain("Отсутствующие данные не учитываются как нулевые значения");
   });
 

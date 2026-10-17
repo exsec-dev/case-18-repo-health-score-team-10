@@ -92,7 +92,15 @@ export function fmtDateTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = parseShown(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return `${pad2(d.getHours())}:${pad2(d.getMinutes())} ${fmtDate(iso)}`;
+  return `${fmtDate(iso)}, ${fmtTime(iso)}`;
+}
+
+/** Только время «16:52» (локальное) — подписи оси за короткий период. */
+export function fmtTime(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = parseShown(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
 /**
@@ -112,7 +120,7 @@ export function fmtDateTimeUtc(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = parseShown(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return `${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())} UTC ${fmtDateUtc(iso)}`;
+  return `${fmtDateUtc(iso)}, ${pad2(d.getUTCHours())}:${pad2(d.getUTCMinutes())} UTC`;
 }
 
 /**
@@ -166,11 +174,11 @@ export function fmtFactValue(value: unknown): string {
 export function scanStatusText(status: string): string {
   switch (status) {
     case "ok":
-      return "полный";
+      return "полностью";
     case "partial":
-      return "частичный";
+      return "частично";
     case "bad":
-      return "сбойный";
+      return "со сбоем";
     case "queued":
       return "в очереди";
     case "running":
@@ -260,17 +268,6 @@ export const NO_DATA_SHORT = "н/д";
  */
 export function slugOf(org: string, repo: string): string {
   return `${org}/${repo}`;
-}
-
-/**
- * Длинное имя — многоточие в середине с сохранением хвоста. У серий репозиториев
- * бывают общий org и общий префикс (`case-13-…-team-112`), различие — в хвосте, и
- * обрезка с конца спрятала бы именно его.
- */
-export function middleEllipsis(text: string, max: number, tail = 10): string {
-  if (text.length <= max) return text;
-  const keepTail = Math.min(tail, max - 2);
-  return `${text.slice(0, max - keepTail - 1)}…${text.slice(text.length - keepTail)}`;
 }
 
 /** Ширина имени в `DefinitionList` — одна на все панели; при 150 «Версия методики» влезает в одну строку. */
@@ -692,7 +689,7 @@ export function favoriteAddedText(check: FavoriteAddCheck | undefined, visibilit
     // чужому он не поможет, и обещать его нельзя
     if (e.code === "not_own") {
       // видимость неизвестна — не утверждаем, что репозиторий закрытый
-      if (visibility === "public") return "Права проверены. Анализ запускается только для своих репозиториев – этот обновит ночной обход.";
+      if (visibility === "public") return "Права проверены. Анализ запускается только для своих репозиториев – этот обновит ночной анализ каталога.";
       if (visibility === "internal" || visibility === "private")
         return "Права проверены. У вашего токена нет прав на CI/CD и Безопасность этого репозитория, а в рейтинг закрытые репозитории не входят – оценки у него не будет.";
       return "Права проверены. Анализ запускается только для своих репозиториев.";
@@ -1030,9 +1027,24 @@ export const AI_SECTION_TITLE = "AI-обзор репозитория";
 export const AI_DISCLAIMER = "Модель пересказывает оценку и на расчет не влияет.";
 export const AI_OVERVIEW_REJECTED = "Общий обзор не прошел проверку фактами – разбор по категориям ниже.";
 
-export const FRAUD_TITLE = "Подозрение на искусственную активность";
+export const FRAUD_TITLE = "Признаки искусственной активности";
+
+/**
+ * Текст ошибки задания для показа: сервер хранит прежние формулировки («AI-описание»,
+ * «Проверка оценки») — по ним считаются лимиты (`AI_REJECTED_ERRORS`), менять их в
+ * базе нельзя. На экране — словарь интерфейса: «AI-обзор», «проверка активности».
+ */
+/** Окончания «AI-описани-» → «AI-обзор-» по падежам: описание → обзор, описания → обзора… */
+const AI_REVIEW_ENDINGS: Record<string, string> = { е: "", я: "а", ю: "у", ем: "ом", и: "е", й: "ов", ям: "ам", ями: "ами", ях: "ах" };
+
+export function jobErrorText(error: string): string {
+  return error
+    .replace(/^AI-описание не сформировано/, "AI-обзор не сформирован")
+    .replace(/^Проверка оценки не сформирована/, "Проверка активности не сформирована")
+    .replace(/AI-описани(ями|ях|ям|ем|е|я|ю|и|й)(?![а-яё])/g, (_m, end: string) => `AI-обзор${AI_REVIEW_ENDINGS[end] ?? ""}`);
+}
 export const FRAUD_EXPLAIN =
-  "Автоматическая проверка нашла признаки накрутки. Это повод проверить вручную, а не вывод: оценка от него не меняется.";
+  "Автоматическая проверка нашла признаки искусственной активности. Это повод проверить вручную, а не вывод: оценка от него не меняется.";
 
 /**
  * Название факта-фактора фрода вместо сырого ключа. Флаггер видит только факты
@@ -1193,7 +1205,7 @@ export function aiParagraphs(text: string): string[] {
 export function notOwnReason(access: { visibility: string; own: boolean } | null | undefined): string {
   const lead = "Репозиторий в вашем избранном, но сервис его не анализировал: анализ запускается только для своих репозиториев";
   if (!access) return `${lead}. Права вашего токена к нему еще не проверены – проверка идет в «Избранном».`;
-  if (access.visibility === "public") return `${lead}. Публичный репозиторий появится в рейтинге после ночного обхода каталога.`;
+  if (access.visibility === "public") return `${lead}. Публичный репозиторий появится в рейтинге после ночного анализа каталога.`;
   // закрытый или внутренний с доступом к коду считается «своим»; не свой — значит кода токен не видит
   return `${lead} – у вашего токена нет доступа к коду этого репозитория.`;
 }
@@ -1251,9 +1263,18 @@ export function quotaCounter(q: ActionQuotaView | null | undefined): QuotaCounte
   return best;
 }
 
-/** Текст кнопки со счетчиком: «Сформировать обзор 2/3»; без счетчика — как есть. */
+/** Остаток словами для подсказки и `aria-label`: «Осталось 2 из 2 в этот час». */
+export function counterText(counter: QuotaCounter): string {
+  const when = counter.window === "hour" ? "в этот час" : counter.window === "day" ? "сегодня" : "на сервисе сегодня";
+  return `Осталось ${counter.left} из ${counter.limit} ${when}`;
+}
+
+/**
+ * Текст кнопки со счетчиком для подсказки и `aria-label`: «Сформировать обзор,
+ * осталось 2 из 2 в этот час». На самой кнопке остаток — числом (`CountedLabel`).
+ */
 export function withCounter(label: string, counter: QuotaCounter | null): string {
-  return counter === null ? label : `${label} ${counter.left}/${counter.limit}`;
+  return counter === null ? label : `${label}, ${counterText(counter).toLowerCase()}`;
 }
 
 /** Видимая причина, почему кнопка неактивна: окно, которое держит, и время. */

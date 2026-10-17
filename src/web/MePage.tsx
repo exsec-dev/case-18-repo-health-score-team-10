@@ -7,13 +7,12 @@ import {
   ArrowsRotateRight,
   BarsAscendingAlignLeft,
   BarsDescendingAlignLeft,
-  Bulb,
   CircleCheck,
   CircleDashed,
   CircleExclamation,
   CircleQuestion,
-  Clock,
   Ellipsis,
+  Clock,
   Flag,
   Hourglass,
   Key,
@@ -21,9 +20,8 @@ import {
   Lock,
   Magnifier,
   OctagonXmark,
-  Person,
   Plus,
-  Star,
+  TrashBin,
   TriangleExclamation,
 } from "@gravity-ui/icons";
 import {
@@ -47,14 +45,14 @@ import {
   useToaster,
 } from "@gravity-ui/uikit";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { EmptyIllustration, IdentityIllustration, SearchIllustration } from "./illustrations";
 import { type MeResponse, type MetaResponse, type MyReposResponse, dataOf, logout, mutateJson, useJson, useLatest } from "./api";
 import type { LiveAnalysis } from "./analysis";
 import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
 import { plural } from "../report/submetrics";
-import { FRAUD_EXPLAIN, FRAUD_TITLE, authErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, quotaCell, recommendationsText, scoreLabelTheme, scoreTheme, scoreWord, sentence, slugOf, type ActionQuotaView, type AiQuotaView, type FavoriteAddCheck, type QuotaWindowView } from "./format";
-import { recommendationsHref } from "./RepoPage";
+import { FRAUD_TITLE, authErrorText, jobErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, quotaCell, scoreTheme, scoreWord, slugOf, type ActionQuotaView, type AiQuotaView, type FavoriteAddCheck, type QuotaWindowView } from "./format";
 import { type Band, BANDS, type RepoEntry, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
-import { linkProps, navigate, repoHref } from "./router";
+import { linkProps, repoHref } from "./router";
 import { Page, UserAvatar, displayName, logoutFailedToast } from "./Shell";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, RepoSlug, ScoreBar, SkeletonRows, TIP_TARGET, VisibilityPill } from "./ui";
 
@@ -136,7 +134,7 @@ export function MePage(_props: { meta: MetaResponse | null }) {
   }
   return (
     // одна колонка без боковой панели: статус анализа — в строке, история — в
-    // «Заданиях» шапки (JobsBell), аккаунт — в Настройках
+    // «Очереди» шапки (JobsBell), аккаунт — в Настройках
     <Page crumbs={REPOS_CRUMBS}>
       {/* список работает и без токена; токен нужен для проверки прав, автозапуска
           анализа и добавления репозиториев из пространства SourceCraft */}
@@ -252,7 +250,7 @@ function AiLimitsSections() {
     try {
       await mutateJson<{ ok: boolean }>("/api/me/ai-unlock", "POST", { password });
       setPassword("");
-      toaster.add({ name: "ai-unlocked", theme: "success", title: "Доступ без лимитов включен", content: "AI-обзоры и проверки оценки больше не ограничены личными лимитами." });
+      toaster.add({ name: "ai-unlocked", theme: "success", title: "Доступ без лимитов включен", content: "AI-обзоры и проверки активности больше не ограничены личными лимитами." });
       quota.reload();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -281,7 +279,7 @@ function AiLimitsSections() {
             Лимиты AI
           </Text>
           <Text variant="body-short" color="secondary">
-            Сколько AI-обзоров и проверок оценки еще можно запустить. Сутки считаются с 00:00 по московскому времени.
+            Сколько AI-обзоров и проверок активности еще можно запустить. Сутки считаются с 00:00 по московскому времени.
           </Text>
           <AiQuotaTable data={data} />
         </Flex>
@@ -305,7 +303,7 @@ function AiLimitsSections() {
             </Flex>
             <Text variant="body-short" color="secondary">
               {data.unlocked
-                ? "AI-обзоры и проверки оценки не ограничены личными лимитами."
+                ? "AI-обзоры и проверки активности не ограничены личными лимитами."
                 : "Пароль выдает администратор сервиса. Он снимает личные лимиты AI."}
             </Text>
             {data.unlocked ? (
@@ -400,14 +398,14 @@ function LoginOffer({ pageTitle }: { pageTitle: "Избранное" | "Наст
         </Flex>
       )}
       <EmptyState
-        icon={pageTitle === "Настройки" ? Key : Person}
+        image={IdentityIllustration}
         title={pageTitle === "Настройки" ? "Настройки доступны после входа" : "Избранное доступно после входа"}
         description={
           pageTitle === "Настройки"
             ? "Войдите через Я ID, чтобы настроить персональный токен доступа SourceCraft."
             : "Войдите через Я ID, чтобы следить за избранными репозиториями и запускать анализ собственных."
         }
-        actions={[{ text: "Войти через Я ID", view: "action", size: "l", href: "/auth/ya" }]}
+        actions={[{ text: "Войти", view: "action", size: "l", href: "/auth/ya" }]}
       />
     </Page>
   );
@@ -767,7 +765,7 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
 
       {repos.state.kind === "ok" && entries.length === 0 && (
         <EmptyState
-          icon={Star}
+          image={EmptyIllustration}
           title="В избранном пока пусто"
           description="Отметьте репозиторий звездочкой на его странице или добавьте его по идентификатору org/repo или ссылке."
           actions={[{ text: "Добавить репозиторий", view: "action", size: "m", onClick: () => setAdding(true) }]}
@@ -810,7 +808,7 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
 
           {shown.length === 0 ? (
             <EmptyState
-              icon={Magnifier}
+              image={SearchIllustration}
               title="Ничего не нашлось"
               description="Под поиск и выбранную плитку сводки не подходит ни один репозиторий."
               actions={[
@@ -1184,7 +1182,7 @@ function RepoRow({
   // тегами, поэтому цвет только у иконки и только там, где он что-то значит
   const state =
     phase === "stalled" ? (
-      <StatePill icon={Hourglass} tone="warning" title="Анализ идет дольше обычного – его исход появится в «Заданиях» в шапке">
+      <StatePill icon={Hourglass} tone="warning" title="Анализ идет дольше обычного – его исход появится в «Очереди» в шапке">
         Затянулось
       </StatePill>
     ) : phase !== null ? (
@@ -1200,15 +1198,9 @@ function RepoRow({
         Запланирован
       </StatePill>
     ) : scored ? (
-      <div className="rh-repo-item__score" title="HealthCraft Index – публичная оценка репозитория">
-        {/* слот плашки фиксированной ширины прижимает ее к полосе: полосы и числа
-            всех строк стоят друг под другом, какой бы длины ни было слово уровня */}
-        <span className="rh-repo-item__level">
-          <Label theme={scoreLabelTheme(entry.healthcraftIndex)} size="s">
-            {sentence(scoreWord(entry.healthcraftIndex))}
-          </Label>
-        </span>
-        {/* та же полоса, что в рейтинге и на карточке, — вместо кольца */}
+      <div className="rh-repo-item__score" title={`HealthCraft Index – ${scoreWord(entry.healthcraftIndex)}`}>
+        {/* уровень несет цвет полосы, как в рейтинге: плашка-слово рядом повторяла его.
+            Та же полоса, что в рейтинге и на карточке, — вместо кольца */}
         <ScoreBar value={entry.healthcraftIndex!} width={64} />
         <Text variant="subheader-2" className="rh-repo-item__num">
           {fmtScore(entry.healthcraftIndex!)}
@@ -1245,17 +1237,6 @@ function RepoRow({
       </StatePill>
     );
 
-  // пункта ручной проверки прав нет: права проверяются сами — при добавлении,
-  // после смены токена и в фоне
-  const menuItems = [
-    ...(entry.recommendationsCount !== null && entry.recommendationsCount > 0
-      ? // не href: пункт меню рендерится обычной ссылкой без linkProps и
-        // перезагружал бы страницу
-        [{ text: "Открыть рекомендации", action: () => navigate(recommendationsHref(href)) }]
-      : []),
-    { text: "Убрать из избранного", action: onRemove, disabled: busy, theme: "danger" as const },
-  ];
-
   return (
     <li className="rh-repo-item">
       {/* слой-ссылка: клик по пустому месту строки ведет в карточку; с клавиатуры
@@ -1270,7 +1251,7 @@ function RepoRow({
             <RepoSlug org={org} repo={repo} variant="subheader-2" />
           </Link>
           {entry.fraudFlag?.flag === true && entry.fraudFlag.factors.length > 0 && (
-            <ActionTooltip title={FRAUD_TITLE} description={FRAUD_EXPLAIN}>
+            <ActionTooltip title={FRAUD_TITLE} className="rh-tip-oneline">
               <span className="rh-rating-fraud" role="img" aria-label={FRAUD_TITLE} {...TIP_TARGET}>
                 <Icon data={Flag} size={14} />
               </span>
@@ -1287,17 +1268,6 @@ function RepoRow({
               {fmtDateTime(entry.lastScanAt)}
             </MetaItem>
           )}
-          {/* счетчик рекомендаций — ссылкой к разделу рекомендаций на карточке.
-              null (нет прав) и 0 — строки нет */}
-          {entry.recommendationsCount !== null && entry.recommendationsCount > 0 && (
-            <MetaItem>
-              {/* иконка внутри ссылки, чтобы красилась вместе с текстом */}
-              <Link {...linkProps(recommendationsHref(href))} className="rh-repo-item__link">
-                <Icon data={Bulb} size={14} />
-                {recommendationsText(entry.recommendationsCount)}
-              </Link>
-            </MetaItem>
-          )}
         </Meta>
         {entry.title && entry.title !== repo && (
           <Text color="complementary" ellipsis className="rh-repo-item__desc">
@@ -1309,24 +1279,28 @@ function RepoRow({
       <div className="rh-repo-item__state">{state}</div>
 
       <div className="rh-repo-item__actions">
-        {/* кнопка анализа — только на своем репозитории (по сохраненной проверке
-            прав own); у чужого и непроверенного ее нет вовсе, а не disabled */}
-        {!canAnalyze ? null : scored ? (
-          <ActionTooltip title="Обновить анализ">
-            <Button view="flat" size="m" onClick={onScan} disabled={inWork} aria-label="Обновить анализ">
-              <Icon data={ArrowsRotateRight} size={16} />
-            </Button>
-          </ActionTooltip>
-        ) : (
+        {/* действия строки — в меню «…»: колонка одной ширины, полосы и числа
+            оцененных строк стоят ровно. Исключение — «Запустить анализ» у своего
+            репозитория без анализа: это единственный следующий шаг строки, и
+            колонка оценки у нее все равно пустая. Анализ — только на своем
+            репозитории (по сохраненной проверке прав own); у чужого его нет вовсе.
+            Пункта ручной проверки прав нет: права проверяются сами — при
+            добавлении, после смены токена и в фоне */}
+        {canAnalyze && !scored && (
           <Button view="outlined" size="m" onClick={onScan} disabled={inWork}>
             Запустить анализ
           </Button>
         )}
         <DropdownMenu
-          items={menuItems}
+          items={[
+            ...(canAnalyze && scored
+              ? [{ text: "Обновить анализ", iconStart: <Icon data={ArrowsRotateRight} size={16} />, action: onScan, disabled: inWork }]
+              : []),
+            { text: "Убрать из избранного", iconStart: <Icon data={TrashBin} size={16} />, action: onRemove, disabled: busy, theme: "danger" as const },
+          ]}
           popupProps={{ placement: "bottom-end" }}
           renderSwitcher={(props) => (
-            <Button {...props} view="flat" size="m" aria-label="Действия с репозиторием">
+            <Button {...props} view="flat" size="m" aria-label="Действия с репозиторием" loading={inWork}>
               <Icon data={Ellipsis} size={16} />
             </Button>
           )}
@@ -1343,7 +1317,7 @@ function RepoRow({
 // session.tsx, там же событие «задания изменились» (announceJobsChanged).
 
 /** Опрос заданий не удался — список мог устареть. */
-export const JOBS_STALE_TEXT = "Не удалось обновить задания – список мог устареть, повторим автоматически.";
+export const JOBS_STALE_TEXT = "Не удалось обновить очередь – список мог устареть, повторим автоматически.";
 
 /**
  * Кнопка «Задания» в шапке и ее панель. Кнопка видна всегда; пока идет хоть
@@ -1364,7 +1338,7 @@ export function JobsBell() {
   // тревога — только если упало последнее завершенное задание (recent идет от
   // новых к старым): старая ошибка не должна держать кнопку красной после успешных анализов
   const alarm = !busy && recent[0]?.phase === "failed";
-  // вкладка по умолчанию — где есть что смотреть: идут анализы → «Активные», иначе «История»
+  // вкладка по умолчанию — где есть что смотреть: идут анализы → «Текущие», иначе «История»
   const shown = tab ?? (busy ? "active" : "history");
   const close = () => {
     setOpen(false);
@@ -1380,10 +1354,10 @@ export function JobsBell() {
         onClick={() => (open ? close() : setOpen(true))}
         aria-expanded={open}
         aria-haspopup="dialog"
-        title={failing ? JOBS_STALE_TEXT : busy ? "Ваши анализы идут" : alarm ? "Последний анализ завершился ошибкой" : "Ваши анализы"}
+        title={failing ? JOBS_STALE_TEXT : busy ? "Ваши запуски идут" : alarm ? "Последний анализ завершился ошибкой" : "Анализы, AI-обзоры и проверки, которые вы запускали"}
       >
         <Icon data={alarm ? CircleExclamation : ListCheck} size={16} className={alarm ? "rh-state__icon_danger" : undefined} />
-        Задания
+        Очередь
         {jobs !== null && (
           <span className={alarm ? "rh-jobs-btn__count rh-jobs-btn__count_danger" : "rh-jobs-btn__count"}>{alarm ? failed : active.length}</span>
         )}
@@ -1395,7 +1369,7 @@ export function JobsBell() {
         placement="bottom-end"
         offset={4}
         role="dialog"
-        aria-label="Ваши задания"
+        aria-label="Очередь"
       >
         <div className="rh-jobs">
           {failing && (
@@ -1404,8 +1378,8 @@ export function JobsBell() {
             </Text>
           )}
           <div className="rh-jobs__tabs">
-            <SegmentedRadioGroup size="s" width="max" value={shown} onUpdate={(v) => setTab(v === "active" ? "active" : "history")} aria-label="Какие задания показать">
-              <SegmentedRadioGroup.Option value="active">{`Активные ${active.length}`}</SegmentedRadioGroup.Option>
+            <SegmentedRadioGroup size="s" width="max" value={shown} onUpdate={(v) => setTab(v === "active" ? "active" : "history")} aria-label="Что показать">
+              <SegmentedRadioGroup.Option value="active">{`Текущие ${active.length}`}</SegmentedRadioGroup.Option>
               <SegmentedRadioGroup.Option value="history">История</SegmentedRadioGroup.Option>
             </SegmentedRadioGroup>
           </div>
@@ -1430,7 +1404,7 @@ export function JobsBell() {
               </>
             )
           ) : recent.length === 0 ? (
-            <JobsEmpty title="Анализов пока не было">Здесь появятся завершенные анализы и их итог.</JobsEmpty>
+            <JobsEmpty title="Вы еще ничего не запускали">Здесь появятся завершенные анализы, AI-обзоры и проверки и их итог.</JobsEmpty>
           ) : (
             // список прокручивается внутри панели, чтобы длинная история не уходила
             // за край окна; лента по дням со временем — повторные анализы одного
@@ -1476,18 +1450,18 @@ function JobRow({ job, onNavigate }: { job: import("../api/me").MyJob; onNavigat
             без подписи они выглядели бы идущим анализом и маскировали его запуск */}
         {job.kind === "summary" && (
           <Text color="secondary" variant="caption-2">
-            описание AI
+            AI-обзор
           </Text>
         )}
         {job.kind === "check" && (
           <Text color="secondary" variant="caption-2">
-            проверка оценки
+            проверка активности
           </Text>
         )}
       </div>
       {/* очередь обслуживается по кругу (round-robin), а не по порядку — номер позиции не показываем */}
       <span className="rh-state rh-busy">
-        {job.phase === "queued" ? "В очереди" : job.kind === "summary" ? "Генерация описания" : job.kind === "check" ? "Проверка оценки" : "Сканируется"}
+        {job.phase === "queued" ? "В очереди" : job.kind === "summary" ? "Готовим AI-обзор" : job.kind === "check" ? "Проверка активности" : "Идет анализ"}
       </span>
 
     </div>
@@ -1536,7 +1510,7 @@ function HistoryRow({ job, time, onNavigate }: { job: import("../api/me").MyJob;
   const [org, repo, ...rest] = job.slug.split("/");
   const valid = Boolean(org && repo && rest.length === 0);
   const outcome = HISTORY_OUTCOME[job.phase === "failed" ? "failed" : job.phase === "refused" ? "refused" : "done"];
-  const hint = job.phase === "failed" && job.error ? `${outcome.text}: ${job.error}` : outcome.text;
+  const hint = job.phase === "failed" && job.error ? `${outcome.text}: ${jobErrorText(job.error)}` : outcome.text;
   return (
     <div className="rh-jobs__row">
       <RepoAvatar repo={valid ? repo! : job.slug} logoUrl={job.logoUrl} size="xs" />
@@ -1550,17 +1524,17 @@ function HistoryRow({ job, time, onNavigate }: { job: import("../api/me").MyJob;
         )}
         {job.kind === "summary" && (
           <Text color="secondary" variant="caption-2">
-            описание AI
+            AI-обзор
           </Text>
         )}
         {job.kind === "check" && (
           <Text color="secondary" variant="caption-2">
-            проверка оценки
+            проверка активности
           </Text>
         )}
         {job.phase === "failed" && job.error && (
-          <Text color="secondary" variant="caption-2" ellipsis title={job.error}>
-            {job.error}
+          <Text color="secondary" variant="caption-2" ellipsis title={jobErrorText(job.error)}>
+            {jobErrorText(job.error)}
           </Text>
         )}
       </div>

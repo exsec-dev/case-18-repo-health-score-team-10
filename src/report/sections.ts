@@ -340,8 +340,8 @@ export function submetricWeightText(key: CategoryKey, sub: string): string {
 /**
  * «Рекомендаций нет» — по ситуации, одна фраза для карточки и отчета.
  * «Улучшать нечего» — только когда все показанные категории здоровы; есть
- * слабые — значит, у движка для них нет правил; закрыты CI/CD и Безопасность —
- * их рекомендации видны участникам репозитория.
+ * слабые — значит, у движка для них нет правил. О закрытых CI/CD и Безопасности
+ * фраза не говорит: это сказано один раз под категориями.
  */
 export function noRecommendationsKind(card: RepoCard): "healthy" | "weak" | "nodata" {
   const shown = Object.values(card.score?.categories ?? {}).filter((c) => c && c.locked === undefined);
@@ -381,13 +381,13 @@ export function strengthsLine(card: RepoCard): string | null {
 
 export function noRecommendationsText(card: RepoCard): string {
   const kind = noRecommendationsKind(card);
-  const head =
-    kind === "healthy"
-      ? "Рекомендаций нет – по собранным данным улучшать нечего."
-      : kind === "weak"
-        ? "Автоматических рекомендаций для этих данных нет."
-        : "Автоматических рекомендаций для собранных данных нет: часть данных не собрана.";
-  return card.score?.fullLocked === true ? `${head} Рекомендации по CI/CD и Безопасности видны участникам репозитория.` : head;
+  // закрытые зрителю CI/CD и Безопасность в «здоров» не входят — о них не утверждаем
+  const which = card.score?.fullLocked === true ? "все открытые категории" : "все категории";
+  return kind === "healthy"
+    ? `Рекомендаций нет: ${which} в зоне «Здоров». Оставшиеся баллы не добрать разовым действием – они растут вместе с активностью проекта.`
+    : kind === "weak"
+      ? "Автоматических рекомендаций для этих данных нет."
+      : "Автоматических рекомендаций для собранных данных нет: часть данных не собрана.";
 }
 
 // ---------- карта владельцев файлов ----------

@@ -78,7 +78,8 @@ describe("MD-отчёт: структура", () => {
     expect(main).not.toContain("(полный).");
     expect(main).not.toContain(`#${scoredScan}`);
     expect(main).not.toContain("4.0.0-hci");
-    expect(appendix).toContain(`| Последний анализ | #${scoredScan}, завершен 12:00 UTC 16 сент. 2026 |`);
+    // UX 17.10: дата и время — «16 сент. 2026, 12:00 UTC»
+    expect(appendix).toContain(`| Последний анализ | #${scoredScan}, завершен 16 сент. 2026, 12:00 UTC |`);
     expect(appendix).toContain(`| Версия методики | ${MODEL_VERSION} |`);
     expect(md).not.toContain("режим:");
   });
@@ -139,8 +140,9 @@ describe("MD-отчёт: действия и приложение", () => {
   });
 
   test("приложение В: факты таблицами «поле – значение» с источником и временем сбора", () => {
-    expect(appendix).toContain("`docs.presence` – Документация, данные есть, история git, 12:00 UTC 16 сент. 2026");
-    expect(appendix).toContain("`cicd.runs` – CI/CD, данных нет, API SourceCraft, 12:00 UTC 16 сент. 2026");
+    // UX 17.10: дата и время — «16 сент. 2026, 12:00 UTC»
+    expect(appendix).toContain("`docs.presence` – Документация, данные есть, история git, 16 сент. 2026, 12:00 UTC");
+    expect(appendix).toContain("`cicd.runs` – CI/CD, данных нет, API SourceCraft, 16 сент. 2026, 12:00 UTC");
     expect(appendix).toContain("| contributing | нет |");
   });
 

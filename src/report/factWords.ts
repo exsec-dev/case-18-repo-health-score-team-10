@@ -78,7 +78,7 @@ const WORDS: Record<string, Words> = {
   "issues.stats": (v) => {
     const open = isNum(v.open) ? v.open : null;
     const closed = isNum(v.closed) ? v.closed : null;
-    if (open === 0 && closed === 0) return ["Задач в трекере нет"];
+    if (open === 0 && closed === 0) return ["Задач нет"];
     return [
       `Открыто – ${n(open)}${isNum(v.in_progress) && v.in_progress > 0 ? ` (в работе ${n(v.in_progress)})` : ""}, закрыто – ${n(closed)}${isNum(v.closed_instant) && v.closed_instant > 0 ? ` (быстрее часа – ${n(v.closed_instant)}, в расчет не входят)` : ""}`,
       `Типичное время закрытия – ${isNum(v.median_close_days) ? `${n(v.median_close_days, 1)} ${dayWord(v.median_close_days)}` : "—"}`,

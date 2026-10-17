@@ -45,7 +45,7 @@ afterAll(() => rating.close());
 
 describe("П1: PDF-выгрузка", () => {
   test("кнопка PDF качает файл, а не молчит (ReportMenu без пустого обработчика)", () => {
-    const menu = between(src("web/RepoPage.tsx"), "function ReportMenu", "\n}\n");
+    const menu = between(src("web/RepoPage.tsx"), "function useReportDownload", "\n}\n");
     expect({
       emptyHandler: /action:\s*\(\)\s*=>\s*\{\s*\}/.test(menu),
       fetchesPdf: menu.includes("report.pdf") || src("web/RepoPage.tsx").includes("/report.pdf"),
@@ -178,11 +178,12 @@ describe("П4: подметрики, язык кабинета, 404", () => {
 // ---------------------------------------------------------------------------
 
 describe("П5: формат дат UI", () => {
-  test("fmtDate — «15 сент. 2026» (без времени), fmtDateTime — «12:00 18 янв. 2023»", () => {
+  // UX 17.10: fmtDateTime — дата, запятая, время
+  test("fmtDate — «15 сент. 2026» (без времени), fmtDateTime — «18 янв. 2023, 12:00»", () => {
     expect({
       date: fmtDate(new Date(2026, 8, 15, 12, 0).toISOString()),
       dateTime: fmtDateTime(new Date(2023, 0, 18, 12, 0).toISOString()),
-    }).toEqual({ date: "15 сент. 2026", dateTime: "12:00 18 янв. 2023" });
+    }).toEqual({ date: "15 сент. 2026", dateTime: "18 янв. 2023, 12:00" });
   });
 });
 

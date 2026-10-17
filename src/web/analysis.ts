@@ -16,6 +16,7 @@
 //    очередь и повторится;
 //  - «идёт анализ» — без обещания времени.
 import type { MyJob } from "../api/me";
+import { jobErrorText } from "./format";
 
 export interface JobsResponse {
   /** чей это ответ — расхождение с показанной личностью перечитывает /api/me */
@@ -114,16 +115,16 @@ export function finishedToast(job: MyJob): FinishedToast {
   // обещать «оценка обновлена», результат только в карточке
   if (job.kind === "check") {
     return job.phase === "failed"
-      ? { theme: "danger", title: "Проверка не сформировалась", content: `${job.slug}: ${job.error ?? "причина – в «Заданиях»"}` }
-      : { theme: "success", title: "Проверка готова", content: `${job.slug}: результат – в карточке репозитория` };
+      ? { theme: "danger", title: "Проверка активности не сформировалась", content: `${job.slug}: ${job.error ? jobErrorText(job.error) : "причина – в «Очереди»"}` }
+      : { theme: "success", title: "Проверка активности готова", content: `${job.slug}: результат – в карточке репозитория` };
   }
   if (job.kind === "summary") {
     return job.phase === "failed"
-      ? { theme: "danger", title: "Описание не сформировалось", content: `${job.slug}: ${job.error ?? "причина – в «Заданиях»"}` }
-      : { theme: "success", title: "Описание готово", content: `${job.slug}: текст появился в карточке репозитория` };
+      ? { theme: "danger", title: "AI-обзор не сформировался", content: `${job.slug}: ${job.error ? jobErrorText(job.error) : "причина – в «Очереди»"}` }
+      : { theme: "success", title: "AI-обзор готов", content: `${job.slug}: текст появился в карточке репозитория` };
   }
   if (job.phase === "failed") {
-    return { theme: "danger", title: "Анализ завершился ошибкой", content: `${job.slug}: ${job.error ?? "причина – в «Заданиях»"}` };
+    return { theme: "danger", title: "Анализ завершился ошибкой", content: `${job.slug}: ${job.error ? jobErrorText(job.error) : "причина – в «Очереди»"}` };
   }
   // скан собрал не всё (например, клон уперся в лимит) и публичная оценка не
   // изменилась — не зеленый «готово» без оговорок

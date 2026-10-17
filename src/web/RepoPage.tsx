@@ -8,6 +8,7 @@
 // «Категории» → «Рекомендации» → история → «Ограничения данных». Утверждения о данных
 // собирает view-модель `cardView.ts` из тех же функций, что отчет. Правая панель —
 // паспорт анализа и короткая справка; ниже 1440 px она выезжает по кнопке «Как считается».
+import { EmptyIllustration, NotFoundIllustration, QueueIllustration } from "./illustrations";
 import { lastRatingHref } from "./ratingReturn";
 import {
   ArrowDownToLine,
@@ -19,6 +20,7 @@ import {
   CalendarXmark,
   ChartColumn,
   ChartLine,
+  Check,
   ChevronDown,
   Circle,
   CircleCheck,
@@ -52,7 +54,6 @@ import {
   SealCheck,
   ShieldCheck,
   SquareCheck,
-  SquareListUl,
   Star,
   StarFill,
   Stopwatch,
@@ -80,7 +81,7 @@ import {
   Text,
   useToaster,
 } from "@gravity-ui/uikit";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { COVERAGE_NULL_BELOW } from "../score/model";
 import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle } from "../report/submetrics";
 import { factWords } from "../report/factWords";
@@ -109,7 +110,6 @@ import {
   reportFileName,
   scanStatusText,
   scanTriggerText,
-  DEFINITION_NAME_WIDTH,
   scoreLabelTheme,
   scoreWord,
   sentence,
@@ -265,7 +265,7 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
       badge={card.repo.badge}
       league={card.score?.rankBadge != null}
       publicBaseUrl={meta?.publicBaseUrl ?? window.location.origin}
-      report={card.score !== null && <ReportMenu mdHref={reportHref} pdfHref={`${cardUrl}/report.pdf`} pdfName={reportFileName(org, repo, "pdf")} />}
+      report={card.score !== null ? { mdHref: reportHref, pdfHref: `${cardUrl}/report.pdf`, pdfName: reportFileName(org, repo, "pdf") } : null}
       refresh={refreshButton}
     />
   );
@@ -288,21 +288,21 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
         own !== null || foreignRunning ? (
           // идет анализ — свой или чужой/периодический; без обещания времени
           <EmptyState
-            icon={SquareListUl}
+            image={QueueIllustration}
             title={own?.phase === "queued" ? "Анализ запланирован" : "Идет анализ"}
             description={
               (own?.phase === "queued"
                 ? "Заявка стоит в очереди – ее возьмут в работу, и здесь появится итог."
                 : "Данные собираются – итог появится здесь.") +
               // задание зависло (признак сервера)
-              (jobStalled ? " Анализ затянулся – его итог появится в «Заданиях»." : "")
+              (jobStalled ? " Анализ затянулся – его итог появится в «Очереди»." : "")
             }
           />
         ) : (
           // «анализа не было» ≠ «анализ был, но сбой или мало данных»; текст общий с отчетом
           // (`noScoreText`), действие — по возможностям зрителя
           <EmptyState
-            icon={SquareListUl}
+            image={EmptyIllustration}
             title={noScoreText(card.scan).title}
             description={noScoreText(card.scan).description}
             actions={
@@ -354,11 +354,11 @@ function NotInCatalog({ org, repo, crumbs }: { org: string; repo: string; crumbs
           выход — вход, после которого вернется на эту карточку; текст тот же для
           любого адреса и не выдает, существует ли закрытый репозиторий */}
       <EmptyState
-        icon={SquareListUl}
+        image={NotFoundIllustration}
         title="Репозиторий не найден"
         description="Возможно, он закрытый или в адресе ошибка. Закрытые репозитории открываются участникам после входа через Я ID."
         actions={[
-          { text: "Войти через Я ID", view: "action", size: "l", href: loginHref(`/repo/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`, "") },
+          { text: "Войти", view: "action", size: "l", href: loginHref(`/repo/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`, "") },
           { text: "К рейтингу", view: "normal", size: "l", href: lastRatingHref() },
         ]}
       />
@@ -426,7 +426,7 @@ function FavoriteNotInCatalogState({
     return (
       <Page crumbs={crumbs}>
         <EmptyState
-          icon={SquareListUl}
+          image={QueueIllustration}
           title={live.phase === "queued" ? "Анализ запланирован" : "Идет анализ"}
           description={live.phase === "queued" ? "Заявка стоит в очереди – ее возьмут в работу, и здесь появится итог." : "Данные собираются – итог появится здесь."}
         />
@@ -436,7 +436,7 @@ function FavoriteNotInCatalogState({
   return (
     <Page crumbs={crumbs}>
       <EmptyState
-        icon={SquareListUl}
+        image={EmptyIllustration}
         title="Оценки пока нет"
         description={
           own
@@ -463,44 +463,95 @@ class ReportError extends Error {
   }
 }
 
+/** Сколько ширины строки действий оставлять крошкам: меньше — имя репо уходило в «…». */
+const CRUMBS_MIN = 280;
+
+/**
+ * Компактная строка действий: не хватает места крошкам (меньше `CRUMBS_MIN`) —
+ * true. Порог считается от самой строки, а не от окна: ширину съедают rail,
+ * «Задания» и «Как считается?», и брейкпоинт по окну то прятал кнопки зря, то
+ * оставлял их, когда имя репо уже целиком уходило в многоточие. Обратно в полную
+ * строку — только когда ширины хватит с запасом, без дребезга на границе.
+ */
+function useCompactBar(anchor: { current: HTMLElement | null }, phone: boolean): boolean {
+  const [compact, setCompact] = useState(phone);
+  const need = useRef(0);
+  useLayoutEffect(() => {
+    if (phone) {
+      setCompact(true);
+      return;
+    }
+    const bar = anchor.current?.closest<HTMLElement>(".rh-actionbar");
+    const crumbs = bar?.querySelector<HTMLElement>(".rh-actionbar__crumbs");
+    if (!bar || !crumbs) return;
+    const check = () => {
+      setCompact((was) => {
+        if (!was) {
+          const room = crumbs.clientWidth;
+          if (room >= CRUMBS_MIN) return false;
+          need.current = bar.clientWidth + (CRUMBS_MIN - room);
+          return true;
+        }
+        return bar.clientWidth < need.current;
+      });
+    };
+    check();
+    const ro = new ResizeObserver(check);
+    ro.observe(bar);
+    ro.observe(crumbs);
+    return () => ro.disconnect();
+  }, [anchor, phone]);
+  return compact;
+}
+
 /**
  * Строка действий карточки: сравнить, бейдж, отчет, обновить анализ (главное действие
- * справа). На телефоне «Сравнить» и «Бейдж» уходят в меню «⋮», иначе строка режется и
- * отчет становится недоступен. У репо без оценки «Сравнить» нет — в сравнении у него
- * был бы пустой столбец.
+ * справа). Не хватает места (`useCompactBar`, на телефоне всегда) — остается главная
+ * кнопка, а остальное, отчет тоже, уходит в меню «…». У репо без оценки «Сравнить»
+ * нет — в сравнении у него был бы пустой столбец.
  */
-function CardActions({ org, repo, scored, badge, league, publicBaseUrl, report, refresh }: { org: string; repo: string; scored: boolean; badge: boolean; league: boolean; publicBaseUrl: string; report: ReactNode; refresh: ReactNode }) {
+function CardActions({ org, repo, scored, badge, league, publicBaseUrl, report, refresh }: { org: string; repo: string; scored: boolean; badge: boolean; league: boolean; publicBaseUrl: string; report: ReportFiles | null; refresh: ReactNode }) {
   const phone = useMediaQuery("(max-width: 767px)");
+  const anchor = useRef<HTMLSpanElement>(null);
+  const compact = useCompactBar(anchor, phone);
+  // хуки — до любого ветвления: ширина меняет раскладку на лету
+  const compare = useCompareState(org, repo);
+  const reportDl = useReportDownload(report);
   // доступность бейджа знает сервер (поле карточки), без пробного запроса badge.svg
   const badgeOk = badge;
   const [badgeOpen, setBadgeOpen] = useState(false);
-  if (!phone) {
+  if (!compact) {
     return (
       <Flex gap={2} alignItems="center">
+        <span ref={anchor} hidden />
         {/* одна главная кнопка в шапке, как Clone у SourceCraft: у своего репо — «Обновить
             анализ», у чужого — «Сравнить», путь члена жюри и конкурента */}
         {scored && <CompareButton org={org} repo={repo} primary={!refresh} />}
         {/* бейдж — кнопкой с поповером, как Clone у SourceCraft */}
         {scored && <BadgeButton org={org} repo={repo} publicBaseUrl={publicBaseUrl} available={badge} league={league} />}
-        {report}
+        {reportDl && <ReportMenu report={reportDl} />}
         {refresh}
       </Flex>
     );
   }
-  const compare = compareState(org, repo);
+  // главная кнопка остается снаружи: «Обновить анализ» у своего, «Сравнить» у чужого
+  // (на телефоне «Сравнить» — в меню: «В сравнении · 1 из 3» не помещается)
+  const compareOutside = scored && !refresh && !phone;
   const items = [
-    ...(scored
+    ...(scored && !compareOutside
       ? [
           compare.full
             ? { text: "Сравнить – уже 3 из 3", disabled: true, iconStart: <Icon data={ScalesBalanced} size={16} />, action: () => undefined }
-            : { text: compare.inSet ? "Открыть сравнение" : "Сравнить", iconStart: <Icon data={ScalesBalanced} size={16} />, action: compare.go },
+            : { text: compare.inSet ? "Открыть сравнение" : "Сравнить", iconStart: <Icon data={ScalesBalanced} size={16} />, action: compare.inSet ? compare.open : compare.add },
         ]
       : []),
     ...(scored && badgeOk ? [{ text: "Бейдж для README", iconStart: <Icon data={SealCheck} size={16} />, action: () => setBadgeOpen(true) }] : []),
+    ...(reportDl ? reportDl.items.map((i) => ({ ...i, text: `Отчет: ${i.text}` })) : []),
   ];
   return (
     <Flex gap={2} alignItems="center">
-      {report}
+      <span ref={anchor} hidden />
+      {compareOutside && <CompareButton org={org} repo={repo} primary />}
       {refresh}
       {items.length > 0 && (
         <DropdownMenu
@@ -508,7 +559,7 @@ function CardActions({ org, repo, scored, badge, league, publicBaseUrl, report, 
           items={items}
           popupProps={{ placement: "bottom-end" }}
           renderSwitcher={(props) => (
-            <Button {...props} view="flat" size="m" aria-label="Еще действия">
+            <Button {...props} view="flat" size="m" aria-label="Еще действия" loading={reportDl?.busy != null}>
               <Icon data={Ellipsis} size={16} />
             </Button>
           )}
@@ -519,26 +570,43 @@ function CardActions({ org, repo, scored, badge, league, publicBaseUrl, report, 
   );
 }
 
-/** Набор сравнения вкладки для кнопки и пункта меню «Сравнить» (одно правило). */
-function compareState(org: string, repo: string): { inSet: boolean; full: boolean; count: number; go: () => void } {
+/**
+ * Набор сравнения вкладки для кнопки и пункта меню «Сравнить» (одно правило).
+ * `add` добавляет репозиторий и остается на карточке: уведомление с «Открыть»
+ * ведет в сравнение. Раньше кнопка сразу уводила на /compare, и за вторым
+ * репозиторием приходилось идти назад через рейтинг.
+ */
+function useCompareState(org: string, repo: string): { inSet: boolean; full: boolean; count: number; add: () => void; open: () => void } {
+  const toaster = useToaster();
+  // набор живет в sessionStorage — после добавления кнопку надо перерисовать
+  const [, setVersion] = useState(0);
   const slug = slugOf(org, repo);
   const set = lastCompareSet();
   const inSet = set.includes(slug);
-  const go = (): void => {
-    const next = inSet ? set : [...set, slug];
+  const open = (): void => navigate(compareHref(lastCompareSet()));
+  const add = (): void => {
+    const next = [...lastCompareSet().filter((s) => s !== slug), slug];
     rememberCompareSet(next);
-    navigate(compareHref(next));
+    setVersion((v) => v + 1);
+    toaster.add({
+      name: "compare-added",
+      theme: "success",
+      title: "Добавлено в сравнение",
+      content: next.length < 2 ? `В наборе 1 из ${COMPARE_MAX} – добавьте еще один репозиторий` : `В наборе ${next.length} из ${COMPARE_MAX}`,
+      actions: [{ label: "Открыть", onClick: () => navigate(compareHref(next)), removeAfterClick: true }],
+    });
   };
-  return { inSet, full: !inSet && set.length >= COMPARE_MAX, count: set.length, go };
+  return { inSet, full: !inSet && set.length >= COMPARE_MAX, count: set.length, add, open };
 }
 
 /**
  * «Сравнить» из карточки. Набор — последний набор сравнения вкладки (`lastCompareSet`,
- * как у пункта rail): репо уже в нем — «В сравнении» ведет на страницу сравнения; есть
- * место — добавляет и ведет туда же; мест нет — кнопка выключена с причиной в подсказке.
+ * как у пункта rail): есть место — добавляет, остается на странице и показывает
+ * уведомление с переходом; репо уже в наборе — «В сравнении · N из 3» ведет на
+ * страницу сравнения; мест нет — кнопка выключена с причиной в подсказке.
  */
 function CompareButton({ org, repo, primary = false }: { org: string; repo: string; primary?: boolean }) {
-  const { inSet, full, count, go } = compareState(org, repo);
+  const { inSet, full, count, add, open } = useCompareState(org, repo);
   if (full) {
     return (
       <ActionTooltip title={COMPARE_LIMIT_TEXT}>
@@ -554,16 +622,32 @@ function CompareButton({ org, repo, primary = false }: { org: string; repo: stri
     );
   }
   return (
-    <Button view={primary && !inSet ? "action" : "normal"} size="m" onClick={go} title={inSet ? "Открыть сравнение" : `Добавить в сравнение (${count + 1} из ${COMPARE_MAX})`}>
-      <Icon data={ScalesBalanced} size={16} />
-      {inSet ? "В сравнении" : "Сравнить"}
+    <Button view={primary && !inSet ? "action" : "normal"} size="m" onClick={inSet ? open : add} title={inSet ? "Открыть сравнение" : `Добавить в сравнение (${count + 1} из ${COMPARE_MAX})`}>
+      <Icon data={inSet ? Check : ScalesBalanced} size={16} />
+      {inSet ? `В сравнении · ${count} из ${COMPARE_MAX}` : "Сравнить"}
     </Button>
   );
 }
 
-function ReportMenu({ mdHref, pdfHref, pdfName }: { mdHref: string; pdfHref: string; pdfName: string }) {
+/** Файлы отчета карточки: адреса Markdown и PDF и имя PDF (имя MD — от него). */
+interface ReportFiles {
+  mdHref: string;
+  pdfHref: string;
+  pdfName: string;
+}
+
+/** Выгрузка отчета и пункты меню «Markdown / PDF» — одни для кнопки «Отчет» и меню «…». */
+interface ReportDownload {
+  busy: "md" | "pdf" | null;
+  items: { text: string; iconStart: ReactNode; disabled: boolean; action: () => void }[];
+}
+
+function useReportDownload(files: ReportFiles | null): ReportDownload | null {
   const toaster = useToaster();
   const [busy, setBusy] = useState<"md" | "pdf" | null>(null);
+  const mdHref = files?.mdHref ?? "";
+  const pdfHref = files?.pdfHref ?? "";
+  const pdfName = files?.pdfName ?? "";
   const mdName = pdfName.replace(/\.pdf$/, ".md");
   // Обе выгрузки — fetch + blob: сбой (429/404/500) показывается тостом, а не сырым
   // JSON вместо приложения, как было бы при переходе по ссылке. Текст тоста — по коду
@@ -603,22 +687,30 @@ function ReportMenu({ mdHref, pdfHref, pdfName }: { mdHref: string; pdfHref: str
       setBusy(null);
     }
   };
+  if (!files) return null;
   const pdfBusy = busy === "pdf";
+  return {
+    busy,
+    items: [
+      { text: "Markdown (.md)", iconStart: <Icon data={LogoMarkdown} size={16} />, disabled: busy !== null, action: () => void download("md") },
+      { text: pdfBusy ? "PDF (.pdf) – готовим…" : "PDF (.pdf)", iconStart: <Icon data={FileText} size={16} />, disabled: busy !== null, action: () => void download("pdf") },
+    ],
+  };
+}
+
+function ReportMenu({ report }: { report: ReportDownload }) {
   return (
     <DropdownMenu
       size="m"
       popupProps={{ placement: "bottom-end" }}
       renderSwitcher={(props) => (
-        <Button {...props} view="normal" size="m" aria-haspopup="menu" loading={busy !== null}>
+        <Button {...props} view="normal" size="m" aria-haspopup="menu" loading={report.busy !== null}>
           <Icon data={ArrowDownToLine} size={16} />
           Отчет
           <Icon data={ChevronDown} size={16} />
         </Button>
       )}
-      items={[
-        { text: "Markdown (.md)", iconStart: <Icon data={LogoMarkdown} size={16} />, disabled: busy !== null, action: () => void download("md") },
-        { text: pdfBusy ? "PDF (.pdf) – готовим…" : "PDF (.pdf)", iconStart: <Icon data={FileText} size={16} />, disabled: busy !== null, action: () => void download("pdf") },
-      ]}
+      items={report.items}
     />
   );
 }
@@ -667,7 +759,7 @@ function Header({ card, view, starDoneKey, starLoggedIn }: { card: Card; view: C
   const { repo: r } = card;
   return (
     <div className="rh-card-head">
-      {/* аватар l (42px) ровно на высоту блока «название 24 + мета 16» */}
+      {/* аватар l (42px) — по центру блока «название + мета» (layout.css) */}
       <div className="rh-repo-head">
         <RepoAvatar repo={r.repo} logoUrl={r.logoUrl} size="l" />
         <Flex direction="column" justifyContent="space-between" style={{ minWidth: 0 }}>
@@ -732,11 +824,6 @@ function Header({ card, view, starDoneKey, starLoggedIn }: { card: Card; view: C
  */
 export const RECOMMENDATIONS_ID = "recommendations";
 
-/** Ссылка на раздел «Рекомендации» карточки — кабинет ведет сюда. */
-export function recommendationsHref(cardHref: string): string {
-  return `${cardHref}#${RECOMMENDATIONS_ID}`;
-}
-
 function useRecommendationsAnchor(ready: boolean, key: string): void {
   useEffect(() => {
     if (!ready) return;
@@ -761,8 +848,8 @@ const INDEX_HELP =
   "Публичная оценка по 4 категориям: документация, активность, задачи и состояние кода. " +
   "Считается для всех открытых репозиториев и является основой общего рейтинга.";
 
-/** Ширина имен в паспорте анализа — общая мера, чтобы «Место в рейтинге» стояло в одну строку. */
-const ASIDE_NAME_WIDTH = DEFINITION_NAME_WIDTH;
+/** Ширина имен в паспорте анализа: «Полнота данных» с подсказкой и «Место в рейтинге» — в одну строку. */
+const ASIDE_NAME_WIDTH = 160;
 
 const FULL_HELP =
   "Рассчитывается по 6 категориям: 4 категориям HealthCraft Index, а также CI/CD и Безопасности. " +
@@ -795,8 +882,8 @@ function ScoreAside({
   const threshold = fmtCoverage(meta?.coverageNullBelow ?? COVERAGE_NULL_BELOW);
   // покрытие обоих показателей – по номинальным весам Repo Health Score
   // (`coverageOf` в score/compute.ts): у индекса база – 65 открытых, у полного – 100
-  const coverageHelp = `Доля веса открытых категорий, по которым есть данные: веса как в Repo Health Score, всего 65. Ниже ${threshold} оценка не ставится.`;
-  const fullCoverageHelp = `Доля веса всех шести категорий, по которым есть данные, из 100. Ниже ${threshold} оценка не ставится.`;
+  const coverageHelp = `Какая доля открытых категорий (с учетом веса) собрана: веса как в Repo Health Score, всего 65. Ниже ${threshold} оценку не ставим.`;
+  const fullCoverageHelp = `Какая доля всех шести категорий (с учетом веса) собрана, из 100. Ниже ${threshold} оценку не ставим.`;
   const full = score !== null && !score.fullLocked;
   return (
     <>
@@ -805,7 +892,7 @@ function ScoreAside({
             о затянувшемся */}
         {analysis?.stalled === true && (
           <Label theme="warning" size="xs">
-            анализ затянулся – итог появится в «Заданиях»
+            анализ затянулся – итог появится в «Очереди»
           </Label>
         )}
         {scan || score ? (
@@ -817,19 +904,18 @@ function ScoreAside({
               </DefinitionList.Item>
             )}
             {score && !full && (
-              <DefinitionList.Item name="Покрытие" note={coverageHelp}>
+              <DefinitionList.Item name="Полнота данных" note={coverageHelp}>
                 {fmtCoverage(score.indexCoverage)}
               </DefinitionList.Item>
             )}
-            {/* при двух показателях — короткие имена в одну строку, аббревиатуры
-                расшифрованы в подсказке */}
+            {/* при двух показателях — полнота каждого: индекса и полной оценки */}
             {score && full && (
-              <DefinitionList.Item name="Покрытие HCI" note={`HCI – HealthCraft Index. ${coverageHelp}`}>
+              <DefinitionList.Item name="Полнота: индекс" note={`HealthCraft Index. ${coverageHelp}`}>
                 {fmtCoverage(score.indexCoverage)}
               </DefinitionList.Item>
             )}
             {score && full && (
-              <DefinitionList.Item name="Покрытие RHS" note={`RHS – Repo Health Score. ${fullCoverageHelp}`}>
+              <DefinitionList.Item name="Полнота: полная оценка" note={`Repo Health Score. ${fullCoverageHelp}`}>
                 {score.repoHealthCoverage === null ? "—" : fmtCoverage(score.repoHealthCoverage)}
               </DefinitionList.Item>
             )}
@@ -954,7 +1040,7 @@ function NoScoreReason({ view }: { view: CardView }) {
   return (
     <Flex direction="column" gap={1} alignItems="flex-start">
       <Text variant="body-1" color="complementary">
-        {view.limitations[0] ?? "Данных собрано слишком мало для расчета: покрытие ниже порога."}
+        {view.limitations[0] ?? "Данных собрано слишком мало для расчета: полнота данных ниже порога."}
       </Text>
       <MethodLink page="no-data">Как обрабатываются отсутствующие данные</MethodLink>
     </Flex>
@@ -1328,9 +1414,9 @@ function Limitations({ items }: { items: string[] }) {
 // ---------- рекомендации ----------
 
 /**
- * Рекомендации. Номер слева — порядок выдачи движка, как в PDF (словом «приоритет» не
- * подписан: это позиция, а не срочность); действие заголовком, ниже причина, справа
- * ожидаемый эффект. Основание — словами (подметрика правила и ее значение), по клику —
+ * Рекомендации. Номер слева — порядок «что исправить первым» (`cardView`): правила
+ * серьезности, затем по приросту индекса — числу или потолку у правил без числа;
+ * действие заголовком, ниже причина, справа ожидаемый эффект. Основание — словами (подметрика правила и ее значение), по клику —
  * источник, время сбора и сырые данные.
  */
 function Recommendations({ view, org, repo }: { view: CardView; org: string; repo: string }) {
@@ -1441,24 +1527,31 @@ function RecommendationRow({ item, org, repo, stepEffect }: { item: Recommendati
         ) : null}
       </Flex>
       <div className="rh-rec__effect">
+        {/* подписи над плашкой нет: плашка называет показатель сама («к HealthCraft
+            Index», «Индекс 61») — подпись в каждой строке повторяла одно и то же */}
         {stepEffect !== undefined ? (
+          <Label theme="unknown" size="xs" title="Индекс после этого шага, если выполнить и все шаги выше; в скобках – прирост шага">
+            {`Индекс ${stepEffect}`}
+          </Label>
+        ) : item.effectPill ? (
           <>
-            <Text variant="caption-2" color="secondary">
-              после шага
-            </Text>
-            <Label theme="unknown" size="xs" title="Индекс после этого шага, если выполнить и все шаги выше; в скобках – прирост шага">
-              {stepEffect}
-            </Label>
-          </>
-        ) : item.effectNote !== null ? (
-          <>
-            <Text variant="caption-2" color="secondary">
-              {item.effectNote}
-            </Text>
             {/* зеленый цвет — только для здоровья, поэтому эффект — нейтральной серой плашкой */}
-            <Label theme="unknown" size="xs" title="Прирост показателя, если выполнить только эту рекомендацию">
+            <Label
+              theme="unknown"
+              size="xs"
+              title={
+                item.ceiling !== null
+                  ? "Верхняя граница: столько индекс получит, если показатель этой рекомендации дойдет до максимума"
+                  : "Прирост показателя, если выполнить только эту рекомендацию"
+              }
+            >
               {item.effect}
             </Label>
+            {item.effectNote !== null && (
+              <Text variant="caption-2" color="secondary">
+                {item.effectNote}
+              </Text>
+            )}
           </>
         ) : (
           <Text variant="body-short" color="complementary">

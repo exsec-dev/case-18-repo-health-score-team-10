@@ -156,8 +156,9 @@ describe("активационная ветка (без числа)", () => {
     const recs = recommend(t.db, scanId, { now: NOW });
     const appsec = recs.find((r) => r.ruleId === "connect-appsec")!;
     expect(appsec.channel).toBe("appsec");
-    // право токена названо в пояснении (`problem`), эффект — «добавит в Repo Health Score категорию «Безопасность»»
-    expect(appsec.problem).toContain("src.repositories.useAppSecScan");
+    // право токена названо в пояснении (`problem`) словами, без внутреннего имени права;
+    // эффект — «добавит в Repo Health Score категорию «Безопасность»»
+    expect(appsec.problem).toContain("у токена есть право читать результаты AppSec");
     expect(appsec.expectedImpact).toBe("добавит в Repo Health Score категорию «Безопасность»");
     expect(appsec.expectedImpact).not.toMatch(/coverage 1\.00→1\.00/);
     expect(`${appsec.problem} ${appsec.action} ${appsec.expectedImpact}`).not.toMatch(/публичн|своего репо/i);

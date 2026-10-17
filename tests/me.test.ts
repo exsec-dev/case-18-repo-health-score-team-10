@@ -263,7 +263,8 @@ describe("UI-ветки круга 2 (source-assert, Б4)", () => {
     const src = srcOf("RepoPage.tsx");
     expect({
       stalled: src.includes("jobStalled"),
-      note: src.includes("Анализ затянулся – его итог появится в «Заданиях».") && src.includes("анализ затянулся – итог появится в «Заданиях»"),
+      // UX 17.10: раздел «Задания» переименован в «Очередь»
+      note: src.includes("Анализ затянулся – его итог появится в «Очереди».") && src.includes("анализ затянулся – итог появится в «Очереди»"),
     }).toEqual({
       stalled: true,
       note: true,

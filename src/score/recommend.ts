@@ -20,6 +20,8 @@ import type { Database } from "bun:sqlite";
 import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
 import { SCORE_WEIGHTS, CategoryKey, OLD_SHARE_MIN_BASE, SECRETS_CRITICAL_TOTAL_CAP, CRITICAL_FINDINGS_TOTAL_CAP } from "./model";
 import { compute, computeFromFacts, effectiveFacts, licensePresent, totalCapFlags, type ComputeInput, Scores } from "./compute";
+import { SEVERITY_RULES } from "./severity";
+export { SEVERITY_RULES };
 import { issuesClosedCounted } from "./derived";
 import { fmtDecimal, fmtScore, fmtSigned } from "../web/format";
 import { runOutcome } from "../collectors/run-status";
@@ -120,6 +122,9 @@ export interface RecommendationParams {
   total?: number;
   /** reduce-stale-issues: доля открытых задач без движения, % */
   percent?: number;
+  /** fix-red-runs: доля успешных запусков CI, % (та же, что в балле), и провален ли последний */
+  passPercent?: number;
+  lastFailed?: boolean;
   /** speed-up-issue-close: медиана закрытия, дни */
   days?: number;
   /** codeowners-missing: число авторов той же оценки */
@@ -197,9 +202,21 @@ function appsecLevelText(p: RecommendationParams, action: string, what: string, 
       categoryPart && totalPart
         ? `${categoryPart} и снимет ${totalPart}`
         : totalPart
-          ? `снимет ${totalPart}; балл категории «Безопасность» от этого не вырастет: его снижают и другие находки`
-          : (categoryPart ?? "балл категории «Безопасность» от этого не вырастет: его снижают и другие находки"),
+          ? `снимет ${totalPart}; сам по себе балл категории «Безопасность» не поднимет: его держат и другие находки`
+          : (categoryPart ?? "сам по себе балл категории «Безопасность» не поднимет: его держат и другие находки"),
   };
+}
+
+/**
+ * Причина «Почините CI» – конкретно: доля успешных запусков и/или провал
+ * последнего. Без параметров (старый скан) – общая формулировка.
+ */
+function redRunsProblem(p: RecommendationParams): string {
+  const low = typeof p.passPercent === "number" && p.passPercent < 90;
+  if (low && p.lastFailed) return `Успешны ${p.passPercent}% запусков CI – нужно не меньше 90%, и последний запуск тоже завершился ошибкой.`;
+  if (low) return `Успешны ${p.passPercent}% запусков CI – нужно не меньше 90%. Свежие запуски весят больше старых.`;
+  if (p.lastFailed) return "Последний запуск CI завершился ошибкой.";
+  return "Последний запуск CI завершился ошибкой или успешны меньше 90% запусков.";
 }
 
 /** Доля файлов тестов, для которой совет `add-tests` считает эффект. */
@@ -245,7 +262,7 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
       if (typeof p.authors === "number" && p.authors >= 1 && p.authors <= CODEOWNERS_FEW_AUTHORS) {
         return presence(
           "Добавьте файл CODEOWNERS",
-          `У проекта ${p.authors} ${p.authors === 1 ? "автор" : "автора"}, и кто отвечает за код, пока понятно без файла. Когда появятся соавторы, CODEOWNERS сразу направит их предложения изменений к ответственным; для начала хватит одной строки с логином автора.`,
+          `Укажите, кто отвечает за код. Пока ${p.authors === 1 ? "автор один" : "авторов двое"}, хватит одной строки с вашим логином – новые предложения изменений сразу придут к вам.`,
         );
       }
       return presence("Добавьте файл CODEOWNERS", "Не указано, кто отвечает за код. С CODEOWNERS предложения изменений сразу попадают к ответственным.");
@@ -280,14 +297,14 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
     case "start-tracker":
       if (typeof p.issuesScore !== "number") return null;
       return {
-        action: "Ведите задачи в трекере",
-        problem: "В трекере нет ни одной задачи. По задачам видно, как быстро проект отвечает пользователям.",
+        action: "Заведите задачи в репозитории",
+        problem: "В разделе «Задачи» нет ни одной задачи. По ним видно, как быстро проект отвечает пользователям.",
         expectedImpact: `${categoryImpact("Задачи")} (сейчас ${fmtScore(p.issuesScore)} из 100)`,
       };
     case "connect-appsec":
       return {
         action: "Подключите проверку AppSec",
-        problem: "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте у токена право src.repositories.useAppSecScan.",
+        problem: "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте, что у токена есть право читать результаты AppSec.",
         expectedImpact: "добавит в Repo Health Score категорию «Безопасность»",
       };
     case "grant-ci-runs":
@@ -297,7 +314,7 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
         expectedImpact: "CI/CD: сейчас не оцениваем – с результатами запусков категория откроется",
       };
     case "fix-red-runs":
-      return { action: "Почините CI", problem: "Последний запуск CI завершился ошибкой или успешны меньше 90% запусков.", expectedImpact: categoryImpact("CI/CD") };
+      return { action: "Почините CI", problem: redRunsProblem(p), expectedImpact: categoryImpact("CI/CD") };
     case "ci-never-ran":
       // CI заявлен, запуски видны, а их 0
       return {
@@ -380,6 +397,13 @@ export function recommendationParams(ruleId: string, ok: Map<string, unknown>, e
     const runs = ok.get("cicd.runs") as { duration_p50?: unknown } | undefined;
     if (typeof runs?.duration_p50 === "number") p.minutes = runs.duration_p50 / 60;
   }
+  if (ruleId === "fix-red-runs") {
+    // та же доля, что в условии правила: взвешенная свежестью, иначе простая
+    const runs = ok.get("cicd.runs") as { last_status?: unknown; success_rate?: unknown; weighted_success_rate?: unknown } | undefined;
+    const pass = typeof runs?.weighted_success_rate === "number" ? runs.weighted_success_rate : runs?.success_rate;
+    if (typeof pass === "number") p.passPercent = Math.floor(pass * 100);
+    if (runs) p.lastFailed = runOutcome(typeof runs.last_status === "string" ? runs.last_status : null) === "failure";
+  }
   if (ruleId === "appsec-critical") {
     const appsec = ok.get("appsec.findings") as { secrets_critical?: unknown } | undefined;
     if (appsec) p.secrets = appsec.secrets_critical === true;
@@ -405,12 +429,6 @@ export function recommendationParams(ruleId: string, ok: Map<string, unknown>, e
 /** Порядок score-правил – общий для движка и объединенной выдачи карточки. */
 export const SCORE_RULE_ORDER = ["appsec-critical", "fix-red-runs", "appsec-high", "ci-never-ran", "speed-up-pipeline", "resolve-old-todos", "reduce-stale-issues", "speed-up-issue-close"];
 
-/**
- * Правила серьезности – первыми во всей выдаче, до presence: утечки секретов и
- * критичные находки AppSec (`appsec-critical`), затем красный CI. Критичная уязвимость – высокий приоритет, а не шестая строка после
- * «Добавьте CODEOWNERS».
- */
-export const SEVERITY_RULES = ["appsec-critical", "fix-red-runs"];
 
 interface Orderable {
   ruleId: string;

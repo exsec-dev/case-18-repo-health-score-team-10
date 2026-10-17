@@ -211,7 +211,8 @@ describe("А1: review и bottlenecks PR — числа на фикстуре с 
 });
 
 describe("А1: «нет PR» — данные, сбой выборки — не данные", () => {
-  test("PR нет: факт ok с pulls = 0, ни одного лишнего запроса; показ «PR не используются»", async () => {
+  // UX 17.10: на экране «PR» → «предложения изменений»
+  test("PR нет: факт ok с pulls = 0, ни одного лишнего запроса; показ «предложения изменений не используются»", async () => {
     const client = prClient([]);
     const fact = await prFact(client);
     expect(fact.status).toBe("ok");
@@ -220,7 +221,7 @@ describe("А1: «нет PR» — данные, сбой выборки — не 
     const s = score(withKinds({ "activity.pr_review": fact.value }));
     const row = s.categories.activity.submetrics.pr_review!;
     expect(row.score).toBeNull();
-    expect(submetricShownValue("activity", "pr_review", row, CTX)).toBe("PR не используются");
+    expect(submetricShownValue("activity", "pr_review", row, CTX)).toBe("предложения изменений не используются");
     expect(s.categories.activity.submetrics.pr_first_response).toBeUndefined();
   });
 
@@ -507,7 +508,8 @@ describe("мутационный инвариант (§2 тур 2 п.3, прав
     // ни одного ответа — словами, а не «—»
     const none = score(withKinds({ "activity.pr_review": { ...PR_VALUE, answered: 0, median_first_response_hours: null, merged: 0, median_merge_hours: null } })).categories.activity.submetrics;
     expect(submetricShownValue("activity", "pr_first_response", none.pr_first_response!, CTX)).toBe("ответов ревьюеров нет");
-    expect(submetricShownValue("activity", "pr_merge_time", none.pr_merge_time!, CTX)).toBe("слитых PR нет");
+    // UX 17.10: «слитых PR нет» → «слитых предложений изменений нет»
+    expect(submetricShownValue("activity", "pr_merge_time", none.pr_merge_time!, CTX)).toBe("слитых предложений изменений нет");
   });
 
   test("рекомендации те же: новые факты правил не порождают и эффекты не меняют", () => {
@@ -601,13 +603,14 @@ describe("права и отрисованный MD", () => {
       expect(card.score!.categories.activity.submetrics.pr_first_response).toBeDefined();
       const md = renderRepoReport(card);
       // строки справочного показателя — в «Справочно»; карта — таблицей под «Состоянием кода»
-      expect(md).toContain("Время до первого ответа на PR – 3 ч");
-      expect(md).toContain("PR без ответа дольше 3 дней – 1 из 2 открытых");
+      // UX 17.10: названия показателей — «предложение изменений» вместо «PR»
+      expect(md).toContain("Время до первого ответа на предложение изменений – 3 ч");
+      expect(md).toContain("Предложения изменений без ответа дольше 3 дней – 1 из 2 открытых");
       expect(md).toContain("Изменения у единственного владельца – 33% изменений за год");
       expect(md).toContain("Карта владельцев файлов (справочно, в балл не входит)");
       expect(md).toContain("| Каталог | Главный автор | Доля главного автора | Авторов |");
       expect(md).toContain("| src | Alice | 75% | 2 |");
-      expect(md).toContain("Время до слияния PR приблизительное");
+      expect(md).toContain("Время до слияния предложения изменений приблизительное");
       // CODEOWNERS рядом с картой (cardFacts: codeowners false)
       expect(md).toMatch(/CODEOWNERS в репозитории нет\.|В репозитории есть CODEOWNERS\./);
       expect(JSON.stringify(card.score)).not.toContain("@");

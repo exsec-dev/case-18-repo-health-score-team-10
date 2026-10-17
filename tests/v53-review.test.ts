@@ -91,14 +91,15 @@ describe("ревью В5.3: число и пустые состояния на �
 
   test("избранное вне каталога: причина по результату проверки прав", () => {
     expect(notOwnReason(null)).toContain("еще не проверены");
-    expect(notOwnReason({ visibility: "public", own: false })).toContain("после ночного обхода");
+    // UX 17.10: «ночной обход» → «ночной анализ каталога»
+    expect(notOwnReason({ visibility: "public", own: false })).toContain("после ночного анализа каталога");
     expect(notOwnReason({ visibility: "internal", own: false })).toContain("нет доступа к коду");
   });
 
   test("тост звезды: без видимости репозиторий не называется закрытым", () => {
     const check = { status: "ok", enqueue: { status: "skipped", code: "not_own" } } as never;
     expect(favoriteAddedText(check, undefined)).not.toContain("закрытые");
-    expect(favoriteAddedText(check, "public")).toContain("ночной обход");
+    expect(favoriteAddedText(check, "public")).toContain("ночной анализ каталога");
     expect(favoriteAddedText(check, "private")).toContain("закрытые");
   });
 });

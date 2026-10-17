@@ -161,9 +161,10 @@ describe("Д1, роли текста", () => {
 
   test("заголовок — глагол в повелительном наклонении без точки; эффект без «≈»", () => {
     const params = { delta: 1.25, reason: null, channel: null, missing: ["build" as const], issuesScore: 6, minutes: 20.5, secrets: false, capLimit: null, gain: true, older: 9, total: 20, percent: 80, days: 48.85 };
+    // UX 17.10: start-tracker — «Заведите задачи в репозитории» (было «Ведите задачи в трекере»)
     for (const rule of ALL_RULES) {
       const text = recommendationText(rule, params)!;
-      expect({ rule, verb: /^(Добавьте|Настройте|Ведите|Подключите|Откройте|Почините|Ускорьте|Устраните|Разберите)\s/.test(text.action), dot: text.action.endsWith("."), approx: text.expectedImpact.includes("≈") }).toEqual({
+      expect({ rule, verb: /^(Добавьте|Настройте|Заведите|Подключите|Откройте|Почините|Ускорьте|Устраните|Разберите)\s/.test(text.action), dot: text.action.endsWith("."), approx: text.expectedImpact.includes("≈") }).toEqual({
         rule,
         verb: true,
         dot: false,

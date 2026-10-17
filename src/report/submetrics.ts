@@ -211,7 +211,7 @@ const hoursOrDays: Formatter = (v) => {
 const prReview: Formatter = (v) => {
   const r = obj(v);
   if (!r || !isNum(r.pulls)) return null;
-  if (r.pulls === 0) return "PR не используются";
+  if (r.pulls === 0) return "предложения изменений не используются";
   return `только черновики: ${num(r.pulls)}`;
 };
 
@@ -219,7 +219,7 @@ const prReview: Formatter = (v) => {
 const prWaiting: Formatter = (v) => {
   const w = obj(v);
   if (!w || !isNum(w.waiting) || !isNum(w.open)) return null;
-  if (w.open === 0) return "открытых PR нет";
+  if (w.open === 0) return "открытых предложений нет";
   return `${num(w.waiting)} из ${num(w.open)} ${plural(w.open, "открытого", "открытых", "открытых")}`;
 };
 
@@ -263,7 +263,7 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   "issues.close_days": { title: "Медиана времени закрытия", unit: "дни", format: count("день", "дня", "дней") },
   "issues.resolution": { title: "Доля решенных", unit: "доля, %", format: share },
   "issues.first_resp": { title: "Время до первого ответа", unit: "часы", format: (v) => (isNum(v) ? `${num(v, 1)} ч` : null) },
-  "issues.tracker_unused": { title: "Трекер не ведется", unit: "открытые и закрытые задачи", format: tracker },
+  "issues.tracker_unused": { title: "Задачи не ведутся", unit: "открытые и закрытые задачи", format: tracker },
   "issues.backlog_trend": { title: "Динамика бэклога за 90 дней", unit: "создано минус закрыто (справочно, без веса)", format: backlogTrend },
   "issues.monthly_flow": { title: "Поток задач по 30-дневным окнам", unit: "6 окон по 30 дней (справочно, без веса)", format: monthlyFlow },
   // пометки считаются только в коде — файлы тестов исключены
@@ -273,11 +273,11 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   "code.root": { title: "Порядок в корне репозитория", unit: "элементы корня", format: count("элемент", "элемента", "элементов") },
   "code.todo_total": { title: "Маркеров TODO/FIXME в коде", unit: "штуки", format: plain },
   // справочные, без веса (DISPLAY_ONLY)
-  "activity.pr_review": { title: "Ревью предложений изменений", unit: "PR нет / только черновики (справочно, без веса)", format: prReview },
-  "activity.pr_first_response": { title: "Время до первого ответа на PR", unit: "медиана, часы → ч/дни (справочно, без веса)", format: hoursOrDays },
-  "activity.pr_waiting": { title: "PR без ответа дольше 3 дней", unit: "открытые PR выборки (справочно, без веса)", format: prWaiting },
-  "activity.pr_review_comments": { title: "Комментариев ревью на PR", unit: "медиана по выборке (справочно, без веса)", format: plain },
-  "activity.pr_merge_time": { title: "Время до слияния PR", unit: "медиана, часы → ч/дни (справочно, без веса)", format: hoursOrDays },
+  "activity.pr_review": { title: "Ревью предложений изменений", unit: "предложений нет / только черновики (справочно, без веса)", format: prReview },
+  "activity.pr_first_response": { title: "Время до первого ответа на предложение изменений", unit: "медиана, часы → ч/дни (справочно, без веса)", format: hoursOrDays },
+  "activity.pr_waiting": { title: "Предложения изменений без ответа дольше 3 дней", unit: "открытые предложения выборки (справочно, без веса)", format: prWaiting },
+  "activity.pr_review_comments": { title: "Комментариев ревью на предложение изменений", unit: "медиана по выборке (справочно, без веса)", format: plain },
+  "activity.pr_merge_time": { title: "Время до слияния предложения изменений", unit: "медиана, часы → ч/дни (справочно, без веса)", format: hoursOrDays },
   "code.ownership": { title: "Изменения у единственного владельца", unit: "доля изменений кода за год (справочно, без веса)", format: ownership },
 };
 
@@ -331,12 +331,12 @@ export interface NoteText {
 export function submetricNote(category: string, sub: string, note: string | null | undefined): NoteText | null {
   if (typeof note !== "string" || note === "") return null;
   const key = `${category}.${sub}`;
-  if (key === "issues.tracker_unused") return { remark: "Задач в трекере нет, поэтому категория получает минимальный балл." };
+  if (key === "issues.tracker_unused") return { remark: "Задач нет – категория получает минимальный балл." };
   // справочные показатели динамики — причина «нет данных» словами
   if (key === "cicd.stability" || key === "issues.backlog_trend" || key === "issues.monthly_flow") {
     // факты собраны старым сборщиком — без упоминания внутренних версий
     if (note.startsWith("older collector")) return { value: "появится после следующего анализа" };
-    if (key !== "cicd.stability" && note.startsWith("tracker not maintained")) return { value: "трекер не ведется" };
+    if (key !== "cicd.stability" && note.startsWith("tracker not maintained")) return { value: "задачи не ведутся" };
     if (key === "issues.backlog_trend" && note.startsWith("issue list truncated")) return { value: "нет данных, список задач обрезан и 90 дней не покрыты" };
     if (key === "cicd.stability" && note.startsWith("no declared CI")) return { value: "CI не настроен" };
     if (key === "cicd.stability" && note.startsWith("runs no-data")) return { value: "запуски недоступны" };
@@ -364,11 +364,11 @@ export function submetricNote(category: string, sub: string, note: string | null
   if (key === "activity.pr_review" && note.startsWith("pr review no-data")) return { value: note.endsWith(": access") ? "нет данных: нет доступа" : "нет данных: источник не ответил" };
   if (key === "activity.pr_first_response" && note.startsWith("no reviewer response")) return { value: "ответов ревьюеров нет" };
   if (key === "activity.pr_review_comments" && note.startsWith("comments page capped")) {
-    return { remark: "У части PR комментариев больше одной страницы ответа – число комментариев ревью не меньше показанного." };
+    return { remark: "У части предложений изменений комментариев больше одной страницы ответа – число комментариев ревью не меньше показанного." };
   }
-  if (key === "activity.pr_merge_time" && note.startsWith("no merged pulls")) return { value: "слитых PR нет" };
+  if (key === "activity.pr_merge_time" && note.startsWith("no merged pulls")) return { value: "слитых предложений изменений нет" };
   if (key === "activity.pr_merge_time" && note.startsWith("merge time approximated")) {
-    return { remark: "Время до слияния PR приблизительное: даты слияния SourceCraft не передает, использована дата последнего изменения PR." };
+    return { remark: "Время до слияния предложения изменений приблизительное: даты слияния SourceCraft не передает, использована дата последнего изменения предложения." };
   }
   if (key === "code.ownership" && note.startsWith("ownership no-data")) return { value: "нет данных: история не прочитана" };
   return null;

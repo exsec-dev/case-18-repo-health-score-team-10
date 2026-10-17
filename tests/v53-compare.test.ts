@@ -33,7 +33,6 @@ import {
   rowLeaders,
   unavailableText,
 } from "../src/web/compareView";
-import { middleEllipsis } from "../src/web/format";
 import { parseRoute } from "../src/web/router";
 import { SLOT_EMPTY } from "../src/web/slots";
 import { cardFacts, makeApiDb, seedRepo, seedScan, seedScore, type ApiTestDb } from "./api-fixtures";
@@ -282,8 +281,8 @@ describe("ревью 25.09: реквизиты столбца — на данн�
   });
 
   test("подписи реквизитов: общий год и общий размер — в подписи; иначе прежние", () => {
-    expect(metaRowLabel("date", 2026, null)).toBe("Анализ, 2026");
-    expect(metaRowLabel("date", null, null)).toBe("Анализ");
+    expect(metaRowLabel("date", 2026, null)).toBe("Дата анализа, 2026");
+    expect(metaRowLabel("date", null, null)).toBe("Дата анализа");
     expect(metaRowLabel("rank", null, 28145)).toBe(`Место из ${(28145).toLocaleString("ru-RU")}`);
     expect(metaRowLabel("rank", null, null)).toBe("Место в рейтинге");
     expect(metaRowLabel("language", 2026, 1)).toBe("Язык");
@@ -319,7 +318,7 @@ describe("К-1: заметки сопоставимости и «по N кате
     expect(notes[0]).toContain("cmp/r1 – по 3 категориям");
   });
 
-  test("3 столбца, у одного другая основа — «остальных», длинное имя сокращено в середине с хвостом", async () => {
+  test("3 столбца, у одного другая основа — «остальных», длинное имя — полностью (заметка переносится)", async () => {
     const noIssues = { issues: { score: null, no_data: "issues channel no-data", submetrics: {} } };
     const { t, seed } = fixture();
     seed("cmp", "a");
@@ -328,8 +327,8 @@ describe("К-1: заметки сопоставимости и «по N кате
     const res = await buildCompare(slugsOf("cmp/a", "cmp/b", "cmp/case-13-field-engineer-routing-and-dispatch-platform-team-112"), resolveWith(t, NO_PAT_ACCESS));
     const [note] = comparabilityNotes(res.items);
     expect(note).toStartWith("Индекс cmp/");
-    expect(note).toContain("…");
-    expect(note).toContain("…orm-team-112 посчитан по 3 категориям из 4, остальных – по 4. Вес категории без данных переходит к остальным");
+    expect(note).not.toContain("…");
+    expect(note).toContain("cmp/case-13-field-engineer-routing-and-dispatch-platform-team-112 посчитан по 3 категориям из 4, остальных – по 4. Вес категории без данных переходит к остальным");
   });
 
   test(`разрыв дат ≥ ${DATE_GAP_DAYS} дней — заметка с числом дней; ${DATE_GAP_DAYS - 1} — нет`, async () => {
@@ -371,14 +370,6 @@ describe("К-1: адрес набора, маршрут, тексты", () => {
     expect(compareHref([])).toBe("/compare");
     expect(parseRoute("/compare", "r=a/b")).toEqual({ kind: "compare", search: "r=a/b" });
     expect(parseRoute("/compare/x")).toEqual({ kind: "not-found" });
-  });
-
-  test("длинное имя — многоточие в середине, различающий хвост виден", () => {
-    const long = "case-13-field-engineer-routing-and-dispatch-platform-for-regions-team-112";
-    const shown = middleEllipsis(long, 20, 10);
-    expect(shown.length).toBe(20);
-    expect(shown.endsWith("s-team-112")).toBe(true);
-    expect(middleEllipsis("short", 20)).toBe("short");
   });
 
   test("Д8 Б: общий год дат — только если он один; мусор и пустые даты не мешают", () => {

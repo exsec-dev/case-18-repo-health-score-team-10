@@ -304,7 +304,8 @@ describe("Б3 (Ф2.9): маркер codeEmpty виден на карточке �
       seedScore(t, repoId, scanId, { total: 60 });
       const md = renderRepoReport(getRepoCard(t.db, "m42b", "words", {})!);
       // статус и режим запуска — в паспорте анализа (приложение Г), словами
-      expect(md).toContain("| Статус анализа | полный |");
+      // UX 17.10: «полный» → «полностью»
+      expect(md).toContain("| Статус анализа | полностью |");
       expect(md).toMatch(/\| Режим запуска \| (по расписанию|вручную|проба) \|/);
       expect(md).not.toContain("(stale)");
     } finally {

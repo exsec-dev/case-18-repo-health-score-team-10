@@ -2,9 +2,10 @@
 // Выборку считает сервер, страница только переводит состояние контролов в
 // query-строку и обратно — поэтому отфильтрованным рейтингом можно
 // поделиться ссылкой, и F5 его не теряет.
+import { EmptyIllustration, SearchIllustration, SuccessIllustration } from "./illustrations";
 import { coverageLine } from "./ratingParams";
 import { loadRatingScroll, rememberRatingHref, saveRatingScroll } from "./ratingReturn";
-import { ArrowUpRightFromSquare, BarsAscendingAlignLeft, BarsDescendingAlignLeft, Flag, Gear, Magnifier, SparklesFill, SquareListUl, TriangleDownFill, TriangleUpFill } from "@gravity-ui/icons";
+import { ArrowUpRightFromSquare, BarsAscendingAlignLeft, BarsDescendingAlignLeft, Flag, Gear, Magnifier, Sliders, SparklesFill, TriangleDownFill, TriangleUpFill } from "@gravity-ui/icons";
 import {
   ActionTooltip,
   Alert,
@@ -20,6 +21,7 @@ import {
   Progress,
   SegmentedRadioGroup,
   Select,
+  Sheet,
   type SelectOption,
   Table,
   TableColumnSetup,
@@ -28,7 +30,7 @@ import {
   Text,
   TextInput,
 } from "@gravity-ui/uikit";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { SortKey } from "../api/repos";
 import type { MetaResponse, RatingResponse } from "./api";
 import { useJson } from "./api";
@@ -46,7 +48,6 @@ import {
 import {
   CATEGORY_TITLES_RU,
   DEFINITION_NAME_WIDTH,
-  FRAUD_EXPLAIN,
   FRAUD_TITLE,
   NO_DATA_SHORT,
   NO_SCORE,
@@ -56,6 +57,7 @@ import {
   fmtNumber,
   fmtScore,
   scanStatusText,
+  scoreColor,
   scoreLabelTheme,
   scoreTheme,
   scoreWord,
@@ -122,11 +124,10 @@ const COLUMN_TITLES: Record<string, string> = {
   rank: "Позиция",
   repo: "Репозиторий",
   index: "HealthCraft Index",
-  lang: "Язык",
   likes: "Реакции",
   forks: "Ответвления",
   activity: "Обновлен",
-  coverage: "Покрытие",
+  coverage: "Полнота данных",
   scanned: "Анализ",
 };
 
@@ -136,7 +137,7 @@ const COLUMN_TITLES: Record<string, string> = {
  * но прятать ее незачем: зритель видит популярность рядом и может сам
  * отсортировать по ней.
  */
-const HIDDEN_BY_DEFAULT = ["lang", "forks", "coverage", "scanned"];
+const HIDDEN_BY_DEFAULT = ["forks", "coverage", "scanned"];
 
 export function Rating({ search: rawSearch, meta, metaFailed = false }: { search: string; meta: MetaResponse | null; metaFailed?: boolean }) {
   // неверные sort/order/per_page/page из старой ссылки заменяются дефолтом,
@@ -162,19 +163,27 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
   // выдача с тем же адресом снова на экране
   useEffect(() => rememberRatingHref(search), [search]);
   const restoredFor = useRef<string | null>(null);
-  const scroller = (): HTMLElement | null =>
-    document.querySelector<HTMLElement>(".rh-table-fill .g-table__scroll-container") ?? document.querySelector<HTMLElement>(".rh-fill__content");
+  // на телефоне и в низком окне прокручивается вся колонка, а не середина (layout.css)
+  const scroller = (): HTMLElement | null => {
+    const table = document.querySelector<HTMLElement>(".rh-table-fill .g-table__scroll-container");
+    const content = document.querySelector<HTMLElement>(".rh-fill__content");
+    const own = (el: HTMLElement | null): HTMLElement | null => (el && getComputedStyle(el).overflowY !== "visible" && el.scrollHeight > el.clientHeight ? el : null);
+    return own(table) ?? own(content) ?? document.querySelector<HTMLElement>(".rh-page_fill .rh-page__main");
+  };
   // слушатель переподключается на смену адреса и появление контейнера, а не на
   // каждую перерисовку; восстановление — только когда на экране данные НОВОЙ
   // выдачи (при «назад» внутри рейтинга `useJson` еще показывает прежние строки)
   const hasData = state.kind === "ok";
+  // контейнер прокрутки меняется вместе с раскладкой (телефон или низкое окно —
+  // вся колонка, иначе таблица): при пересечении порога слушатель переподключается
+  const pageScrolls = useMediaQuery("(max-width: 767px), (max-height: 600px)");
   useEffect(() => {
     const el = scroller();
     if (!el) return;
     const save = () => saveRatingScroll(search, el.scrollTop);
     el.addEventListener("scroll", save, { passive: true });
     return () => el.removeEventListener("scroll", save);
-  }, [search, hasData]);
+  }, [search, hasData, pageScrolls]);
   const seenSearch = useRef<string | null>(null);
   const dataAtSearch = useRef<unknown>(null);
   useLayoutEffect(() => {
@@ -205,6 +214,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
   const isPhone = useMediaQuery("(max-width: 767px)");
 
   const [queryDraft, setQueryDraft] = useState(qParam);
+  const [filtersOpen, setFiltersOpen] = useState(false);
   // внешняя смена URL (назад/вперёд, сброс) обязана вернуться в поле ввода
   useEffect(() => setQueryDraft(qParam), [qParam]);
   useEffect(() => {
@@ -282,6 +292,72 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
   }));
   const columns = allColumns.filter((c) => !hidden.includes(c.id));
 
+  // язык, размер и CI: на широком экране — в строке тулбара, на телефоне — в
+  // нижней панели за кнопкой «Фильтры»: в строку 287px они вставали в 3 ряда
+  // и съедали половину экрана над списком
+  const filterControls = (
+    <>
+        {/* Мультивыбор языка: чекбокс — неинтерактивный `Checkbox` в
+            `renderOption` (штатная галочка `multiple` скрыта стилем попапа).
+            Виртуализация выключена порогом: у виртуального списка своя
+            высота, и CSS-ограничение высоты со скроллом на нем не работает. */}
+        <Select
+          label="Язык:"
+          size="m"
+          width={isPhone ? "max" : 150}
+          multiple
+          hasClear
+          placeholder="все"
+          popupClassName={isPhone ? "rh-lang-popup rh-in-sheet" : "rh-lang-popup"}
+          virtualizationThreshold={1000}
+          value={langValues}
+          options={langOptions(lastFacets.current, langValues)}
+          renderOption={(option) => <LangOption option={option} checked={langValues.includes(option.value)} />}
+          renderSelectedOption={(option, index) => <LangSummaryPart value={option.value} index={index} values={langValues} />}
+          onUpdate={(v) => setParams({ lang: v.length === 0 ? null : v.map((x) => (x === LANG_NONE ? "" : x)) })}
+        />
+        {/* Размер по строкам кода и наличие CI. Счетчики — из фасетов
+            (по поиску, без фильтров); репо без данных о размере или CI не
+            попадает ни в одно значение. */}
+        <Select
+          label="Размер:"
+          size="m"
+          width={isPhone ? "max" : 150}
+          multiple
+          hasClear
+          placeholder="любой"
+          popupClassName={isPhone ? "rh-lang-popup rh-in-sheet" : "rh-lang-popup"}
+          value={sizeValues}
+          options={sizeOptions(lastFilterFacets.current).map(facetSelectOption)}
+          renderOption={(option) => <FilterOption option={option} checkbox checked={sizeValues.includes(option.value)} />}
+          renderSelectedOption={(option, index) => <>{index === 0 ? sizeSummary(sizeValues) : ""}</>}
+          onUpdate={(v) => setParams({ size: v.length === 0 ? null : v })}
+        />
+        <Select
+          label="CI:"
+          size="m"
+          width={isPhone ? "max" : 110}
+          popupClassName={isPhone ? "rh-in-sheet" : undefined}
+          hasClear
+          placeholder="все"
+          value={ciValue === null ? [] : [ciValue]}
+          options={ciOptions(lastFilterFacets.current).map(facetSelectOption)}
+          renderOption={(option) => <FilterOption option={option} />}
+          onUpdate={(v) => setParams({ ci: v[0] ?? null })}
+        />
+    </>
+  );
+  const filterCount = [langValues.length > 0, sizeValues.length > 0, ciValue !== null, aiOnly].filter(Boolean).length;
+  const aiFilter =
+    view === "scored" && data && (data.aiCount > 0 || aiOnly) ? (
+      <Button view="outlined" size="m" selected={aiOnly} onClick={() => setParams({ ai: aiOnly ? null : "1" })}>
+        <Button.Icon side="start">
+          <Icon data={SparklesFill} size={16} className="rh-ai-mark-icon" />
+        </Button.Icon>
+        {`С AI-обзором ${fmtCount(data.aiCount)}`}
+      </Button>
+    ) : null;
+
   const toolbar = (
     <Flex direction="column" gap={3} style={{ marginBottom: "var(--g-spacing-3)" }}>
       <Flex gap={2} wrap alignItems="center">
@@ -318,53 +394,16 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
             controlProps={{ "aria-label": "Поиск по репозиториям" }}
           />
         </div>
-        {/* Мультивыбор языка: чекбокс — неинтерактивный `Checkbox` в
-            `renderOption` (штатная галочка `multiple` скрыта стилем попапа).
-            Виртуализация выключена порогом: у виртуального списка своя
-            высота, и CSS-ограничение высоты со скроллом на нем не работает. */}
-        <Select
-          label="Язык:"
-          size="m"
-          width={150}
-          multiple
-          hasClear
-          placeholder="все"
-          popupClassName="rh-lang-popup"
-          virtualizationThreshold={1000}
-          value={langValues}
-          options={langOptions(lastFacets.current, langValues)}
-          renderOption={(option) => <LangOption option={option} checked={langValues.includes(option.value)} />}
-          renderSelectedOption={(option, index) => <LangSummaryPart value={option.value} index={index} values={langValues} />}
-          onUpdate={(v) => setParams({ lang: v.length === 0 ? null : v.map((x) => (x === LANG_NONE ? "" : x)) })}
-        />
-        {/* Размер по строкам кода и наличие CI. Счетчики — из фасетов
-            (по поиску, без фильтров); репо без данных о размере или CI не
-            попадает ни в одно значение. */}
-        <Select
-          label="Размер:"
-          size="m"
-          width={150}
-          multiple
-          hasClear
-          placeholder="любой"
-          popupClassName="rh-lang-popup"
-          value={sizeValues}
-          options={sizeOptions(lastFilterFacets.current).map(facetSelectOption)}
-          renderOption={(option) => <FilterOption option={option} checkbox checked={sizeValues.includes(option.value)} />}
-          renderSelectedOption={(option, index) => <>{index === 0 ? sizeSummary(sizeValues) : ""}</>}
-          onUpdate={(v) => setParams({ size: v.length === 0 ? null : v })}
-        />
-        <Select
-          label="CI:"
-          size="m"
-          width={110}
-          hasClear
-          placeholder="все"
-          value={ciValue === null ? [] : [ciValue]}
-          options={ciOptions(lastFilterFacets.current).map(facetSelectOption)}
-          renderOption={(option) => <FilterOption option={option} />}
-          onUpdate={(v) => setParams({ ci: v[0] ?? null })}
-        />
+        {isPhone ? (
+          <Button view="outlined" size="m" selected={filterCount > 0} onClick={() => setFiltersOpen(true)}>
+            <Button.Icon side="start">
+              <Icon data={Sliders} size={16} />
+            </Button.Icon>
+            {filterCount > 0 ? `Фильтры ${filterCount}` : "Фильтры"}
+          </Button>
+        ) : (
+          filterControls
+        )}
         <SegmentedRadioGroup
           size="m"
           value={view}
@@ -376,15 +415,8 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
           <SegmentedRadioGroup.Option value="unscored">Без оценки{data ? ` ${fmtCount(data.nulls)}` : ""}</SegmentedRadioGroup.Option>
         </SegmentedRadioGroup>
         {/* фильтр «С AI-обзором» — путь к обзорам с первого экрана; кнопки нет,
-            пока таких репо 0 (и фильтр не включен) */}
-        {view === "scored" && data && (data.aiCount > 0 || aiOnly) && (
-          <Button view="outlined" size="m" selected={aiOnly} onClick={() => setParams({ ai: aiOnly ? null : "1" })}>
-            <Button.Icon side="start">
-              <Icon data={SparklesFill} size={16} className="rh-ai-mark-icon" />
-            </Button.Icon>
-            {`С AI-обзором ${fmtCount(data.aiCount)}`}
-          </Button>
-        )}
+            пока таких репо 0 (и фильтр не включен); на телефоне — в панели фильтров */}
+        {!isPhone && aiFilter}
         {/* настройка колонок — последней: в «Без оценки» ее нет, и стоявшая перед
             сегментами кнопка сдвигала их на 157px из-под курсора */}
         {view === "scored" && !isPhone && (
@@ -408,6 +440,26 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
           />
         )}
       </Flex>
+      {/* фильтры на телефоне: нижняя панель, как меню действий SourceCraft на
+          телефоне; выбор применяется сразу, кнопка только закрывает панель */}
+      {isPhone && (
+        <Sheet visible={filtersOpen} onClose={() => setFiltersOpen(false)} title="Фильтры">
+          <Flex direction="column" gap={3} className="rh-filter-sheet">
+            {filterControls}
+            {aiFilter}
+            <Flex gap={2} className="rh-filter-sheet__actions">
+              {filterCount > 0 && (
+                <Button view="normal" size="l" width="max" onClick={() => setParams({ lang: null, size: null, ci: null, ai: null })}>
+                  Сбросить
+                </Button>
+              )}
+              <Button view="action" size="l" width="max" onClick={() => setFiltersOpen(false)}>
+                Готово
+              </Button>
+            </Flex>
+          </Flex>
+        </Sheet>
+      )}
     </Flex>
   );
 
@@ -421,7 +473,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
       aside={<RatingAside meta={meta} metaFailed={metaFailed} generatedAt={data?.generatedAt ?? null} />}
       header={
         <>
-          <PageHeader title="Рейтинг здоровья открытых репозиториев" description={ratingLead(meta)} />
+          <PageHeader title="Рейтинг здоровья открытых репозиториев" description={ratingLead(meta, isPhone)} />
           {toolbar}
         </>
       }
@@ -444,7 +496,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
     >
       {/* скелетон — только при первой загрузке, высотой как строка таблицы
           (56px), чтобы раскладка не прыгала; при обновлении — полоса сверху */}
-      {state.kind === "loading" && !refreshing && <SkeletonRows rows={10} height={56} />}
+      {state.kind === "loading" && !refreshing && <SkeletonRows rows={10} height={isPhone ? 84 : 56} />}
       <div className={refreshing ? "rh-refresh-bar rh-refresh-bar_on" : "rh-refresh-bar"} role="progressbar" aria-hidden={!refreshing} aria-label="Обновляем рейтинг" />
 
       {/* перечитывание не удалось — строки прежние, и это надо показать:
@@ -495,7 +547,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
           />
         ))}
 
-      {data && view === "unscored" && <UnscoredTable items={data.nullItems} meta={meta} active={activeFilters} refreshing={refreshing} />}
+      {data && view === "unscored" && <UnscoredTable items={data.nullItems} meta={meta} active={activeFilters} refreshing={refreshing} phone={isPhone} />}
     </Page>
   );
 }
@@ -508,8 +560,11 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
  * Без `/api/meta` печатается только первая половина: соврать числом нельзя,
  * а смысл «что такое индекс» от знаменателя не зависит.
  */
-function ratingLead(meta: MetaResponse | null): ReactNode {
-  const about = "HealthCraft Index показывает состояние открытых репозиториев SourceCraft по 4 категориям: документация, активность, задачи и состояние кода.";
+function ratingLead(meta: MetaResponse | null, phone = false): ReactNode {
+  // на телефоне перечень категорий не повторяется: он есть в «Как считается?»
+  const about = phone
+    ? "HealthCraft Index – здоровье открытых репозиториев SourceCraft по 4 категориям."
+    : "HealthCraft Index показывает состояние открытых репозиториев SourceCraft по 4 категориям: документация, активность, задачи и состояние кода.";
   if (!meta) return (
     <>
       {about} <HowCountedLink />
@@ -548,15 +603,15 @@ function NothingFound({ active }: { active: string[] }) {
   if (active.length === 0) {
     return (
       <EmptyState
-        icon={SquareListUl}
+        image={EmptyIllustration}
         title="Рейтинг еще пуст"
-        description="Репозитории появятся здесь после первого обхода каталога и скана."
+        description="Репозитории появятся здесь после первого анализа каталога."
       />
     );
   }
   return (
     <EmptyState
-      icon={Magnifier}
+      image={SearchIllustration}
       title="Под фильтр ничего не подошло"
       description={nothingFoundDescription(active)}
       actions={[{ text: "Сбросить фильтры", view: "normal", onClick: () => navigate("/") }]}
@@ -568,18 +623,20 @@ function NothingFound({ active }: { active: string[] }) {
  * Репозитории без оценки (не хватило данных): отсутствие данных не
  * превращается в низкий балл, поэтому они не в рейтинге, а здесь.
  */
-function UnscoredTable({ items, meta, active, refreshing }: { items: Item[]; meta: MetaResponse | null; active: string[]; refreshing: boolean }) {
+function UnscoredTable({ items, meta, active, refreshing, phone = false }: { items: Item[]; meta: MetaResponse | null; active: string[]; refreshing: boolean; phone?: boolean }) {
   const titleOf = (key: string): string => meta?.categories.find((c) => c.key === key)?.title ?? CATEGORY_TITLES_RU[key] ?? key;
+  const missingOf = (item: Item): string[] =>
+    Object.entries(item.categories)
+      .filter(([key, value]) => value === null && !NOT_IN_RATING.has(key))
+      .map(([key]) => titleOf(key));
   const columns: TableColumnConfig<Item>[] = [
     { id: "repo", name: "Репозиторий", primary: true, template: (item) => <RepoCell item={item} /> },
-    { id: "coverage", name: "Покрытие данными", align: "end", width: 160, template: (item) => fmtCoverage(item.coverage) },
+    { id: "coverage", name: "Полнота данных", align: "end", width: 160, template: (item) => fmtCoverage(item.coverage) },
     {
       id: "missing",
       name: "Не хватило данных",
       template: (item) => {
-        const missing = Object.entries(item.categories)
-          .filter(([key, value]) => value === null && !NOT_IN_RATING.has(key))
-          .map(([key]) => titleOf(key));
+        const missing = missingOf(item);
         return <Text color="complementary">{missing.length > 0 ? missing.join(", ") : "—"}</Text>;
       },
     },
@@ -589,7 +646,7 @@ function UnscoredTable({ items, meta, active, refreshing }: { items: Item[]; met
     return active.length > 0 ? (
       <NothingFound active={active} />
     ) : (
-      <EmptyState icon={SquareListUl} title="Все проанализированные репозитории оценены" description="Покрытия данными хватило каждому репозиторию выборки." />
+      <EmptyState image={SuccessIllustration} title="Все проанализированные репозитории оценены" description="Полноты данных хватило каждому репозиторию выборки." />
     );
   }
   // группа может быть огромной — таблица показывает первые 5, остальное
@@ -600,12 +657,42 @@ function UnscoredTable({ items, meta, active, refreshing }: { items: Item[]; met
   return (
     <Flex direction="column" gap={3} className={refreshing ? "rh-refreshing" : undefined}>
       <Text variant="body-1" color="complementary">
-        Эти репозитории не получили HealthCraft Index. При покрытии данных ниже
+        Эти репозитории не получили HealthCraft Index. При полноте данных ниже
         {meta ? ` ${fmtCoverage(meta.coverageNullBelow)}` : " установленного порога"} оценка не рассчитывается. Отсутствующие
         данные не учитываются как нулевые значения.
-        {failedScan && " У части репозиториев последний анализ завершился сбоем – для оценки он непригоден; повторный обход попробует снова."}
+        {failedScan && " У части репозиториев последний анализ завершился сбоем – для оценки он непригоден; следующий анализ попробует снова."}
       </Text>
-      <Table data={shown} columns={columns} width="max" verticalAlign="middle" />
+      {phone ? (
+        // на телефоне таблица в 720px уводила за край именно причину — то, ради
+        // чего вид существует; здесь она второй строкой под языком
+        <ul className="rh-list">
+          {shown.map((item) => {
+            const missing = missingOf(item);
+            return (
+              <li key={`${item.org}/${item.repo}`} className="rh-list__item rh-phone-row rh-phone-row_unscored">
+                <RepoAvatar repo={item.repo} logoUrl={item.logoUrl} size="m" />
+                <Link {...linkProps(repoHref(item.org, item.repo))} view="primary" className="rh-phone-row__name">
+                  <Text variant="subheader-1">
+                    {item.org}/{item.repo}
+                  </Text>
+                </Link>
+                <Flex gap={1} alignItems="center" className="rh-phone-row__meta">
+                  <Text variant="body-short" color="secondary" ellipsis>
+                    <LanguageName name={item.language} color={item.languageColor} />
+                  </Text>
+                  <RepoMarks item={item} ext={false} />
+                </Flex>
+                <Text variant="body-short" color="complementary" className="rh-phone-row__note">
+                  {`Полнота данных ${fmtCoverage(item.coverage)}`}
+                  {missing.length > 0 && ` · нет данных: ${missing.join(", ")}`}
+                </Text>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <Table data={shown} columns={columns} width="max" verticalAlign="middle" />
+      )}
       {rest > 0 && <Text color="complementary">…и еще {fmtNumber(rest)} – уточните поиск или фильтры, чтобы сузить список.</Text>}
     </Flex>
   );
@@ -683,9 +770,9 @@ function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResp
         <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
           <DefinitionList.Item
             name="Порог оценки"
-            note="Оценка рассчитывается только при достаточном покрытии. Недостающие категории исключаются из расчета. Покрытие – доля веса открытых категорий с данными: веса как в Repo Health Score, всего 65"
+            note="Оценка рассчитывается только при достаточной полноте данных. Недостающие категории исключаются из расчета. Полнота – доля веса открытых категорий с данными: веса как в Repo Health Score, всего 65"
           >
-            покрытие от {fmtCoverage(meta.coverageNullBelow)}
+            полнота от {fmtCoverage(meta.coverageNullBelow)}
           </DefinitionList.Item>
           <DefinitionList.Item name="Версия методики">
             <Label theme="normal" size="xs">
@@ -744,24 +831,40 @@ function LangSummaryPart({ value, index, values }: { value: string; index: numbe
   return <></>;
 }
 
+/**
+ * Строка рейтинга на телефоне, как карточка списка SourceCraft: место, аватар и
+ * оценка (числом цвета зоны, без полосы) — по центру высоты строки; между ними
+ * полное имя (переносится, а не режется: в одной строке с полосой имени
+ * оставалось 4-60px), под ним язык со значками AI-обзора и накрутки.
+ * Ширина колонки места — по самому длинному месту страницы со стрелкой, чтобы
+ * разряды стояли друг под другом во всех строках.
+ */
 function PhoneList({ items, refreshing }: { items: Item[]; refreshing: boolean }) {
+  const digits = Math.max(1, ...items.map((i) => (i.rank === null ? 1 : fmtCount(i.rank).length)));
+  const arrows = items.some((i) => i.rankDelta !== null && i.rankDelta !== 0);
+  const rankWidth = `calc(${digits}ch + ${arrows ? 15 : 0}px + 2px)`;
   return (
-    <ul className={refreshing ? "rh-list rh-refreshing" : "rh-list"}>
+    <ul className={refreshing ? "rh-list rh-refreshing" : "rh-list"} style={{ "--rh-rank-w": rankWidth } as CSSProperties}>
       {items.map((item) => (
-        <li key={`${item.org}/${item.repo}`} className="rh-list__item">
-          <Flex gap={3} alignItems="center">
-            <div style={{ minWidth: 28, textAlign: "right" }}>
-              <RankCell item={item} />
-            </div>
-            {/* сжимается только имя (с многоточием), число с полосой — нет:
-                иначе полоса наезжает на имя */}
-            <div style={{ flex: 1, minWidth: 0 }} className="rh-phone-name">
-              <RepoCell item={item} compact />
-            </div>
-            <div style={{ flexShrink: 0 }}>
-              <ScoreCell item={item} narrow />
-            </div>
+        <li key={`${item.org}/${item.repo}`} className="rh-list__item rh-phone-row">
+          <div className="rh-phone-row__rank">
+            <RankCell item={item} />
+          </div>
+          <RepoAvatar repo={item.repo} logoUrl={item.logoUrl} size="m" />
+          <Link {...linkProps(repoHref(item.org, item.repo))} view="primary" className="rh-phone-row__name">
+            <Text variant="subheader-1">
+              {item.org}/{item.repo}
+            </Text>
+          </Link>
+          <Flex gap={1} alignItems="center" className="rh-phone-row__meta">
+            <Text variant="body-short" color="secondary" ellipsis>
+              <LanguageName name={item.language} color={item.languageColor} />
+            </Text>
+            <RepoMarks item={item} ext={false} />
           </Flex>
+          <div className="rh-phone-row__score">
+            <ScoreCell item={item} narrow />
+          </div>
         </li>
       ))}
     </ul>
@@ -804,52 +907,67 @@ function RankCell({ item }: { item: Item }) {
  * Отсюда высота строки 56px (18px слага + 16px языка + аватар `m`) —
  * осознанная плата за читаемость.
  */
-function RepoCell({ item, compact = false }: { item: Item; compact?: boolean }) {
+function RepoCell({ item }: { item: Item }) {
   return (
     // потолок ширины — в CSS (`.rh-rating-repo`); на широких экранах он снят,
     // и колонка берет свободное место
-    <Flex gap={3} alignItems="center" className={compact ? undefined : "rh-rating-repo"} style={compact ? { minWidth: 0 } : undefined}>
+    <Flex gap={3} alignItems="center" className="rh-rating-repo">
       <RepoAvatar repo={item.repo} logoUrl={item.logoUrl} size="m" />
       <Flex direction="column" gap={0} style={{ minWidth: 0 }}>
         <Flex gap={1} alignItems="center" style={{ minWidth: 0 }}>
           <Link {...linkProps(repoHref(item.org, item.repo))} view="primary" className="rh-rating-name">
             <RepoSlug org={item.org} repo={item.repo} variant="subheader-1" />
           </Link>
-          {/* ссылка на репо в SourceCraft — первой из иконок строки; имя ведет
-              на нашу карточку */}
-          <ActionTooltip title="Открыть на sourcecraft.dev">
-            <Link
-              href={item.webUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="rh-rating-ext"
-              aria-label={`Открыть ${item.org}/${item.repo} на sourcecraft.dev`}
-            >
-              <Icon data={ArrowUpRightFromSquare} size={14} />
-            </Link>
-          </ActionTooltip>
-          {item.aiOverview && (
-            <ActionTooltip title="Есть AI-обзор">
-              <span className="rh-rating-ai" role="img" aria-label="Есть AI-обзор" {...TIP_TARGET}>
-                <Icon data={SparklesFill} size={14} />
-              </span>
-            </ActionTooltip>
-          )}
-          {/* флаг накрутки — подозрение для человека, не приговор: на место и
-              сортировку не влияет; тексты те же, что у плашки на карточке */}
-          {item.fraud && (
-            <ActionTooltip title={FRAUD_TITLE} description={FRAUD_EXPLAIN}>
-              <span className="rh-rating-fraud" role="img" aria-label={FRAUD_TITLE} {...TIP_TARGET}>
-                <Icon data={Flag} size={14} />
-              </span>
-            </ActionTooltip>
-          )}
+          <RepoMarks item={item} />
         </Flex>
         <Text variant="body-short" color="secondary" ellipsis>
           <LanguageName name={item.language} color={item.languageColor} />
         </Text>
       </Flex>
     </Flex>
+  );
+}
+
+/**
+ * Значки строки: ссылка на SourceCraft, AI-обзор, флаг накрутки. На телефоне
+ * ссылки нет (`ext={false}`): она есть в карточке, а в строке отнимала место у языка.
+ */
+function RepoMarks({ item, ext = true }: { item: Item; ext?: boolean }) {
+  return (
+    <>
+      {/* ссылка на репо в SourceCraft — первой из иконок строки; имя ведет
+          на нашу карточку */}
+      {ext && (
+        <ActionTooltip title="Открыть на sourcecraft.dev">
+          <Link
+            href={item.webUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="rh-rating-ext"
+            aria-label={`Открыть ${item.org}/${item.repo} на sourcecraft.dev`}
+          >
+            <Icon data={ArrowUpRightFromSquare} size={14} />
+          </Link>
+        </ActionTooltip>
+      )}
+      {item.aiOverview && (
+        <ActionTooltip title="Есть AI-обзор">
+          <span className="rh-rating-ai" role="img" aria-label="Есть AI-обзор" {...TIP_TARGET}>
+            <Icon data={SparklesFill} size={14} />
+          </span>
+        </ActionTooltip>
+      )}
+      {/* флаг накрутки — подозрение для человека, не приговор: на место и
+          сортировку не влияет; в подсказке только заголовок плашки карточки,
+          пояснение — в самой карточке */}
+      {item.fraud && (
+        <ActionTooltip title={FRAUD_TITLE} className="rh-tip-oneline">
+          <span className="rh-rating-fraud" role="img" aria-label={FRAUD_TITLE} {...TIP_TARGET}>
+            <Icon data={Flag} size={14} />
+          </span>
+        </ActionTooltip>
+      )}
+    </>
   );
 }
 
@@ -922,7 +1040,6 @@ function buildColumns(
     { id: "index", name: sortable("HealthCraft Index", "index"), align: "end", width: 136, template: (item: Item) => <ScoreCell item={item} /> },
     ...categoryColumns,
     // язык уже подписан в строке репозитория, поэтому колонка выключена по умолчанию
-    { id: "lang", name: "Язык", template: (item: Item) => <LanguageName name={item.language} color={item.languageColor} /> },
     {
       id: "likes",
       name: sortable("Реакции", "likes"),
@@ -942,7 +1059,7 @@ function buildColumns(
       template: (item: Item) => <Text color="secondary">{fmtDate(item.lastActivityAt)}</Text>,
     },
     // сортировка идет по заголовкам, поэтому у покрытия своя колонка
-    { id: "coverage", name: sortable("Покрытие", "coverage"), align: "end", template: (item: Item) => fmtCoverage(item.coverage) },
+    { id: "coverage", name: sortable("Полнота", "coverage"), align: "end", template: (item: Item) => fmtCoverage(item.coverage) },
     {
       id: "scanned",
       name: "Анализ",
@@ -977,6 +1094,14 @@ function buildColumns(
  * гуляет по колонке и полосы перестают сравниваться между строками.
  */
 function ScoreCell({ item, narrow = false }: { item: Item; narrow?: boolean }) {
+  // телефон: полосы нет, уровень — цветом самого числа (место отдано имени и языку)
+  if (narrow && item.healthcraftIndex !== null && !item.codeEmpty) {
+    return (
+      <Text color={scoreColor(item.healthcraftIndex)} className="rh-score-cell__num" title={sentence(scoreWord(item.healthcraftIndex))}>
+        {fmtScore(item.healthcraftIndex)}
+      </Text>
+    );
+  }
   if (item.healthcraftIndex === null) {
     return (
       <Label theme="unknown" size="xs">
@@ -1006,7 +1131,7 @@ function ScoreCell({ item, narrow = false }: { item: Item; narrow?: boolean }) {
           Из истории
         </Label>
       )}
-      <div className={narrow ? "rh-score-cell__bar rh-score-cell__bar_narrow" : "rh-score-cell__bar"}>
+      <div className="rh-score-cell__bar">
         <Progress value={item.healthcraftIndex} size="s" theme={scoreTheme(item.healthcraftIndex)} />
       </div>
       {/* уровень несет полоса, число нейтральное — как значение в строке Top

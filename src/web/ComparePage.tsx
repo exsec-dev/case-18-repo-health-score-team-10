@@ -3,7 +3,7 @@
 // 2-3 репозитория, чью карточку зритель может открыть; набор — в адресе.
 // Матрица: столбцы — репозитории, строки — реквизиты, индекс с полосой,
 // 4 категории с подметриками в раскрытии (справочные — внутри «Активности»),
-// блок «Полная оценка», если он открыт у всех; лидер строки отмечен подложкой.
+// блок «Полная оценка», если он открыт у всех; лидер строки отмечен галочкой.
 // Все утверждения о наборе считает `compareView.ts`; значения подметрик,
 // причины «нет данных» и поправки — те же функции, что у карточки.
 //
@@ -11,23 +11,23 @@
 // `row` с `display: contents` → `columnheader`/`rowheader`/`cell`):
 // у Gravity `Table` нет объединенных ячеек и подстрок, а на телефоне подпись
 // строки встает над ячейками — у нативной `<table>` это снимало бы роли.
-import { ArrowToggle, Alert, Button, Dialog, Flex, Icon, Label, Link, Popover, Progress, Skeleton, Text, TextInput } from "@gravity-ui/uikit";
-import { CircleQuestion, Magnifier, Plus, ScalesBalanced, Xmark } from "@gravity-ui/icons";
+import { ArrowToggle, Alert, Button, Card, Dialog, Flex, Icon, Label, Link, Progress, Skeleton, Text, TextInput } from "@gravity-ui/uikit";
+import { CircleCheck, CircleQuestion, Magnifier, Plus, Xmark } from "@gravity-ui/icons";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { CompareCard, CompareItem, CompareResponse } from "../api/compare";
 import type { FavoriteEntry } from "../api/me";
 import type { RatingResponse } from "../api/repos";
 import { parseFavoriteInput } from "../api/slug-input";
 import { CATEGORY_TITLES } from "../report/categories";
-import { adjustmentLabel, adjustmentText, analysisDate, FULL, INDEX, metricWeights } from "../report/sections";
+import { adjustmentLabel, adjustmentText, analysisDate, FULL, INDEX } from "../report/sections";
 import { displayOnly, submetricContext, submetricShownValue, submetricTitle } from "../report/submetrics";
 import type { CategoryKey } from "../score/model";
+import { CompareIllustration } from "./illustrations";
 import { dataOf, fetchJson, RequestError, type AsyncState } from "./api";
 import {
   COMPARE_ADD,
   COMPARE_BAD_INPUT_TEXT,
   COMPARE_DUPLICATE_TEXT,
-  COMPARE_FOOTER,
   COMPARE_FULL_LINE,
   COMPARE_FULL_PARTIAL,
   COMPARE_LEAD,
@@ -61,17 +61,13 @@ import { forgetCompareSet, lastCompareSet, rememberCompareSet } from "./compareR
 import {
   NO_DATA,
   NO_SCORE,
-  SCORE_SCALE,
   emptyCategoryText,
   fmtCount,
   fmtDate,
   fmtScore,
   fmtSubmetric,
-  middleEllipsis,
   noScoreText,
   roundScore,
-  scoreColor,
-  scoreLabelTheme,
   scoreTheme,
   scoreWord,
   sentence,
@@ -81,7 +77,7 @@ import { linkProps, navigate, repoHref } from "./router";
 import { useSession } from "./session";
 import { Page } from "./Shell";
 import { SLOT_EMPTY } from "./slots";
-import { EmptyState, LanguageName, MethodLink, PageHeader, RepoAvatar, VisibilityPill } from "./ui";
+import { EmptyState, LanguageName, PageHeader, RepoAvatar, ScoreBar, VisibilityPill } from "./ui";
 
 // ---------- данные ----------
 
@@ -128,6 +124,10 @@ export function ComparePage({ search }: { search: string }) {
   const loggedIn = meData?.login != null;
   const hasPat = meData?.hasPat === true;
   const phone = useMediaQuery("(max-width: 767px)");
+  // раскладка таблицы — по ширине области контента, а не окна: на 768-1023 с
+  // развернутым rail столбцам оставалось по 69px, и плашки наезжали на соседей
+  const pageRef = useRef<HTMLDivElement>(null);
+  const narrow = useNarrow(pageRef, COMPARE_NARROW_BELOW);
   const [dialogOpen, setDialogOpen] = useState(false);
 
   // пункт rail без набора подставляет последний набор вкладки
@@ -173,7 +173,7 @@ export function ComparePage({ search }: { search: string }) {
 
   return (
     <Page crumbs={[{ text: "Сравнение" }]} mode="document">
-      <div className="rh-cmp-page">
+      <div className="rh-cmp-page" ref={pageRef}>
         {/* кнопка добавления у заголовка; при 3 из 3 — строка вместо нее */}
         <PageHeader
           title={COMPARE_TITLE}
@@ -205,10 +205,17 @@ export function ComparePage({ search }: { search: string }) {
         {slugs.length === 0 ? (
           <div className="rh-cmp-empty">
             <EmptyState
-              icon={ScalesBalanced}
+              image={CompareIllustration}
               title={SLOT_EMPTY.compare.title}
               description={SLOT_EMPTY.compare.text}
-              actions={[{ text: COMPARE_ADD, view: "action", size: "l", onClick: openDialog }]}
+              actions={
+                <Flex direction="column" alignItems="flex-start" gap={4} className="rh-cmp-starters">
+                  <CompareStarters loggedIn={loggedIn} />
+                  <Button view="action" size="l" onClick={openDialog}>
+                    {COMPARE_ADD}
+                  </Button>
+                </Flex>
+              }
             />
           </div>
         ) : (
@@ -220,12 +227,12 @@ export function ComparePage({ search }: { search: string }) {
             )}
             {items ? (
               <div className={loading ? "rh-cmp-wrap rh-cmp-wrap_busy" : "rh-cmp-wrap"} aria-busy={loading}>
-                <CompareTable items={items} fullKeys={full.rows} hasPat={hasPat} phone={phone} onRemove={remove} onAdd={openDialog} />
+                <CompareTable items={items} fullKeys={full.rows} hasPat={hasPat} phone={narrow} onRemove={remove} onAdd={openDialog} />
               </div>
             ) : state?.kind === "error" ? null : (
               <CompareSkeleton slugs={slugs} />
             )}
-            {items && phone && <PhoneExceptions items={items} hasPat={hasPat} />}
+            {items && narrow && <PhoneExceptions items={items} hasPat={hasPat} />}
             {/* плашка по содержимому, не шире 820 */}
             {notes.length === 1 && (
               <div className="rh-cmp-alert">
@@ -259,15 +266,10 @@ export function ComparePage({ search }: { search: string }) {
                 {/* легенда — только когда лидер вообще возможен: 2 и больше столбца с оценкой */}
                 {items.filter((i) => scoredCard(i) !== null).length >= 2 && (
                   <span className="rh-cmp-legend">
-                    <span className="rh-cmp-lead rh-cmp-lead_legend" aria-hidden="true">
-                      84
-                    </span>
+                    <Icon data={CircleCheck} size={14} className="rh-cmp-lead__icon" />
                     <Text color="complementary">{COMPARE_LEADER_LEGEND}</Text>
                   </span>
                 )}
-                <Text as="p" color="secondary">
-                  {COMPARE_FOOTER} <HowItWorks />
-                </Text>
               </div>
             )}
           </>
@@ -277,40 +279,76 @@ export function ComparePage({ search }: { search: string }) {
   );
 }
 
-function sameSlugs(a: string[], b: string[]): boolean {
-  return a.length === b.length && a.every((s, i) => s === b[i]);
+/** Ширина области контента, ниже которой таблица — в телефонной раскладке. */
+const COMPARE_NARROW_BELOW = 640;
+
+/** Уже ли элемент порога: ResizeObserver, чтобы раскладка шла от ширины контента, а не окна. */
+function useNarrow(ref: { current: HTMLElement | null }, below: number): boolean {
+  const [narrow, setNarrow] = useState(() => window.innerWidth < below);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const update = () => setNarrow(el.clientWidth < below);
+    update();
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref, below]);
+  return narrow;
 }
 
-/** «Как считается?» в подвале — веса индекса и шкала, как подсказка индекса на карточке. */
-function HowItWorks() {
+/** Готовый набор пустого сравнения: название и до 3 слагов. */
+interface StarterSet {
+  title: string;
+  slugs: string[];
+}
+
+/**
+ * Готовые наборы пустого сравнения — в пару кликов, без поиска: топ-3 рейтинга
+ * всем, первые 3 из избранного вошедшему (если там хотя бы 2). Карточки-действия
+ * Gravity (`Card type="action"`), как плитки выбора у SourceCraft. Пока наборы
+ * грузятся или не пришли — блока нет, кнопка добавления остается.
+ */
+function CompareStarters({ loggedIn }: { loggedIn: boolean }) {
+  const [top, setTop] = useState<string[] | null>(null);
+  const [favs, setFavs] = useState<string[] | null>(null);
+  useEffect(() => {
+    const ctrl = new AbortController();
+    fetchJson<RatingResponse>("/api/repos?per_page=3", ctrl.signal)
+      .then((r) => setTop(r.items.slice(0, 3).map((i) => `${i.org}/${i.repo}`)))
+      .catch(() => setTop([]));
+    return () => ctrl.abort();
+  }, []);
+  useEffect(() => {
+    if (!loggedIn) return;
+    fetchJson<{ entries: FavoriteEntry[] }>("/api/me/favorites")
+      // только с оценкой: без нее столбец сравнения пустой
+      .then((r) => setFavs(r.entries.filter((e) => e.score !== null).slice(0, COMPARE_MAX).map((e) => `${e.org}/${e.repo}`)))
+      .catch(() => setFavs([]));
+  }, [loggedIn]);
+  const sets: StarterSet[] = [
+    ...(favs && favs.length >= 2 ? [{ title: "Из избранного", slugs: favs }] : []),
+    ...(top && top.length >= 2 ? [{ title: `Топ-${top.length} рейтинга`, slugs: top }] : []),
+  ];
+  // пока топ рейтинга не пришел — место под плитку держит скелетон: кнопка ниже не прыгает
+  if (top === null) return <Skeleton className="rh-cmp-starter-skeleton" />;
+  if (sets.length === 0) return null;
   return (
-    <Popover
-      placement={["top", "bottom"]}
-      content={
-        <Flex direction="column" gap={2} className="rh-cmp-how">
-          <Text>HealthCraft Index – взвешенное среднее 4 категорий. Категория без данных в индекс не входит, ее вес переходит к остальным.</Text>
-          {metricWeights(INDEX).map((w) => (
-            <Flex key={w.key} justifyContent="space-between" gap={4}>
-              <Text color="complementary">{w.title}</Text>
-              <Text>{w.weight}</Text>
-            </Flex>
-          ))}
-          <Flex gap={2} wrap>
-            {SCORE_SCALE.map((s) => (
-              <Label key={s.theme} theme={s.theme} size="xs">
-                {`${sentence(s.word)} ${s.range}`}
-              </Label>
-            ))}
-          </Flex>
-          <MethodLink page="scores" />
-        </Flex>
-      }
-    >
-      <Link view="normal" href="#" onClick={(e) => e.preventDefault()}>
-        Как считается?
-      </Link>
-    </Popover>
+    <div className="rh-cmp-starters__grid">
+      {sets.map((set) => (
+        <Card key={set.title} type="action" view="outlined" className="rh-cmp-starter" onClick={() => navigate(compareHref(set.slugs))}>
+          <Text variant="subheader-1">{set.title}</Text>
+          <Text variant="body-short" color="secondary" ellipsis title={set.slugs.join(", ")}>
+            {set.slugs.map((slug) => slug.split("/")[1] ?? slug).join(", ")}
+          </Text>
+        </Card>
+      ))}
+    </div>
   );
+}
+
+function sameSlugs(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((s, i) => s === b[i]);
 }
 
 function CompareSkeleton({ slugs }: { slugs: string[] }) {
@@ -571,10 +609,10 @@ function AddCompareDialog({
                     <span className="rh-add-row__slug" title={s.slug}>
                       {s.section === "manual" && !inSet ? (
                         <>
-                          Добавить <b>{middleEllipsis(s.slug, phone ? 28 : 48, 12)}</b>
+                          Добавить <b>{s.slug}</b>
                         </>
                       ) : (
-                        middleEllipsis(s.slug, phone ? 30 : 52, 12)
+                        s.slug
                       )}
                     </span>
                     {s.meta}
@@ -791,7 +829,7 @@ function CompareTable({
       });
     }
     return (
-      <div key={`r${r}`} role="row" className="rh-cmp-row">
+      <div key={rowKey(row)} role="row" className="rh-cmp-row">
         <div role="rowheader" id={firstSub ? firstSubId((row as { cat: CategoryKey }).cat) : undefined} className={`rh-cmp-label rh-cmp-label_${row.kind}`} style={at(labelRow(r), labelCol)}>
           <RowLabel row={row} metaLabel={metaLabel} open={row.kind === "category" && openCats.has(row.key)} expandable={row.kind === "category" && expandable(row.key)} controls={row.kind === "category" ? firstSubId(row.key) : undefined} onToggle={toggle} />
         </div>
@@ -815,6 +853,29 @@ function CompareTable({
       {bodyRows}
     </div>
   );
+}
+
+/**
+ * Ключ строки по ее смыслу, а не по позиции: раскрытие категории вставляет строки
+ * выше следующих, и с ключом-индексом React пересоздавал их ячейки — полосы
+ * проигрывали анимацию заново.
+ */
+function rowKey(row: Row): string {
+  switch (row.kind) {
+    case "meta":
+      return `meta:${row.key}`;
+    case "group":
+      return `group:${row.label}`;
+    case "category":
+      return `cat:${row.key}`;
+    case "subhead":
+    case "refhead":
+      return `${row.kind}:${row.cat}`;
+    case "sub":
+      return `sub:${row.cat}:${row.sub}`;
+    default:
+      return row.kind;
+  }
 }
 
 /** Значение строки для лидерства: справочные и реквизиты — без лидера. */
@@ -890,16 +951,21 @@ function RowLabel({
 }
 
 /**
- * Число с отметкой лидера — подложкой. Стрелки нет: в рейтинге ▲ значит «поднялся
- * за сутки». Отметка — только фон, и у нейтрального числа, и вокруг цветного чипа.
- * На серой карточке подложка — на ступень темнее.
+ * Значение с отметкой лидера: число основным цветом и галочка справа; у прочих
+ * число приглушено. Стрелки нет: в рейтинге ▲ значит «поднялся за сутки». Цвет
+ * уровня — у полосы, а не у отметки: прежняя серая подложка лидера рядом с
+ * цветными плашками отстающих выделяла худших, а не лучшего.
  */
-function Lead({ leader, plain, children }: { leader: boolean; plain: boolean; children: ReactNode }) {
-  if (!leader) return <>{children}</>;
+function Lead({ leader, children }: { leader: boolean; children: ReactNode }) {
   return (
-    <span className={plain ? "rh-cmp-lead" : "rh-cmp-lead rh-cmp-lead_chip"}>
+    <span className={leader ? "rh-cmp-lead rh-cmp-lead_on" : "rh-cmp-lead"}>
       {children}
-      <span className="rh-sr-only">, лучший балл строки</span>
+      {leader && (
+        <>
+          <Icon data={CircleCheck} size={14} className="rh-cmp-lead__icon" />
+          <span className="rh-sr-only">, лучший балл строки</span>
+        </>
+      )}
     </span>
   );
 }
@@ -977,24 +1043,18 @@ function CellValue({ row, card, leader, phone, year, sharedTotal }: { row: Row; 
       }
       return (
         <span className="rh-cmp-total">
+          {/* число нейтральное, уровень — цветом полосы и словом в ее подписи, как в рейтинге */}
           <span className="rh-cmp-total__line">
-            <Lead leader={leader} plain>
-              <Text color={scoreColor(total)} className="rh-cmp-total__num">
-                {fmtScore(total)}
-              </Text>
+            <Lead leader={leader}>
+              <Text className="rh-cmp-total__num">{fmtScore(total)}</Text>
             </Lead>
-            {!phone && (
-              <Label theme={scoreLabelTheme(total)} size="xs">
-                {sentence(scoreWord(total))}
-              </Label>
-            )}
           </span>
-          <span className="rh-cmp-total__bar" role="img" aria-label={`${fmtScore(total)} из 100`}>
+          <span className="rh-cmp-total__bar" role="img" aria-label={`${fmtScore(total)} из 100, ${scoreWord(total)}`} title={sentence(scoreWord(total))}>
             <Progress value={roundScore(total)} size="s" theme={scoreTheme(total)} />
           </span>
-          {(phone || countLine) && (
+          {countLine && (
             <Text variant="caption-2" color="secondary">
-              {[phone ? sentence(scoreWord(total)) : null, countLine].filter(Boolean).join(", ")}
+              {countLine}
             </Text>
           )}
         </span>
@@ -1003,18 +1063,16 @@ function CellValue({ row, card, leader, phone, year, sharedTotal }: { row: Row; 
     case "category": {
       const cat = score.categories[row.key];
       if (!cat || cat.score === null) return <NoDataGlyph reason={emptyCategoryText(row.key, cat?.no_data)} />;
-      const plain = scoreTheme(cat.score) === "success";
       const adj = adjustmentText(cat);
+      // категория — число и серая полоса: уровень цветом несет только строка индекса,
+      // цветные полосы в каждой строке спорили с ним
       return (
         <span className="rh-cmp-catcell">
-          <Lead leader={leader} plain={plain}>
-            {plain ? (
-              <Text className="rh-cmp-cat__num">{fmtScore(cat.score)}</Text>
-            ) : (
-              <Label theme={scoreLabelTheme(cat.score)} size="xs" className="rh-cat-chip">
-                <span className="rh-cmp-cat__chipnum">{fmtScore(cat.score)}</span>
-              </Label>
-            )}
+          <Lead leader={leader}>
+            <Text className="rh-cmp-cat__num" title={sentence(scoreWord(cat.score))}>
+              {fmtScore(cat.score)}
+            </Text>
+            <ScoreBar value={cat.score} width={phone ? 40 : 64} neutral />
           </Lead>
           {adj && (
             // вместо жаргона «Балл сжат» — что именно снизило балл
@@ -1054,7 +1112,7 @@ function CellValue({ row, card, leader, phone, year, sharedTotal }: { row: Row; 
         ref || !entry || entry.score === null || entry.score === undefined ? (
           <NoDataGlyph reason={ref ? "Показывается для справки, в балл категории не входит" : NO_DATA} />
         ) : (
-          <Lead leader={leader} plain>
+          <Lead leader={leader}>
             <Text variant="body-1">{phone ? `балл ${fmtSubmetric(entry.score)}` : fmtSubmetric(entry.score)}</Text>
           </Lead>
         );
@@ -1191,39 +1249,11 @@ function exceptionText(col: Exclude<Col, { kind: "scored" } | { kind: "invite" }
   return { title: COMPARE_UNAVAILABLE_TITLE, text: unavailableText(hasPat) };
 }
 
-/**
- * Имя репозитория одной строкой без переноса посреди слова. Не влезает —
- * многоточие в середине, подобранное по
- * реальной ширине ячейки и шрифту: хвост (у репозиториев с общим префиксом — номер)
- * остается виден. Полное имя — в title и тексте для скринридера.
- */
+/** Имя репозитория одной строкой; не влезает — многоточие в конце, полное имя — в title. */
 function FitName({ text, variant, secondary = false }: { text: string; variant: "subheader-1" | "subheader-2"; secondary?: boolean }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const [shown, setShown] = useState(text);
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const fit = () => {
-      const width = el.clientWidth;
-      const ctx = document.createElement("canvas").getContext("2d");
-      if (!ctx || width === 0) return setShown(text);
-      ctx.font = getComputedStyle(el).font;
-      if (ctx.measureText(text).width <= width) return setShown(text);
-      for (let max = text.length - 1; max >= 5; max--) {
-        const candidate = middleEllipsis(text, max, Math.min(10, Math.floor(max / 2)));
-        if (ctx.measureText(candidate).width <= width) return setShown(candidate);
-      }
-      setShown(middleEllipsis(text, 5, 2));
-    };
-    fit();
-    const ro = new ResizeObserver(fit);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, [text]);
   return (
-    <Text ref={ref} variant={variant} color={secondary ? "secondary" : undefined} className="rh-cmp-colhead__repo" title={text}>
-      <span aria-hidden="true">{shown}</span>
-      <span className="rh-sr-only">{text}</span>
+    <Text variant={variant} color={secondary ? "secondary" : undefined} ellipsis className="rh-cmp-colhead__repo" title={text}>
+      {text}
     </Text>
   );
 }

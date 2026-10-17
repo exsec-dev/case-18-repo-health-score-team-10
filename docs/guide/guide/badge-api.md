@@ -49,7 +49,7 @@ curl https://health-craft.ru/api/v1/repos/<org>/<repo>
 |---|---|
 | `org`, `repo`, `title`, `language`, `likes` | имя, название, язык и оценка реакций из каталога SourceCraft |
 | `healthcraftIndex` | HealthCraft Index, целое 0-100; `null` – оценки нет |
-| `indexCoverage` | покрытие: доля веса категорий с данными, от 0 до 1 |
+| `indexCoverage` | полнота данных: доля веса категорий с данными, от 0 до 1 |
 | `categories` | баллы Документации, Активности, Задач и Состояния кода без округления; `null` – нет данных |
 | `modelVersion` | версия модели оценки |
 | `scannedAt` | время завершения анализа, по которому посчитана оценка |

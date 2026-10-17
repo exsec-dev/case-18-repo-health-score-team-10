@@ -1,13 +1,13 @@
 // Единый формат дат UI и отчета. `fmtDate` — поле без времени по смыслу:
-// «15 сент. 2026»; `fmtDateTime` — «12:00 18 янв. 2023» (время HH:mm первым,
-// 24 часа). День без ведущего
-// нуля, полный год, без запятой и «г.», месяцы — закрытой таблицей, пояс —
+// «15 сент. 2026»; `fmtDateTime` — «18 янв. 2023, 12:00» (дата, запятая, время
+// HH:mm, 24 часа; UX 17.10 — было «12:00 18 янв. 2023»); `fmtTime` — «12:00».
+// День без ведущего нуля, полный год, без «г.», месяцы — закрытой таблицей, пояс —
 // локальный. Входы строятся из ЛОКАЛЬНЫХ дат, поэтому тест не зависит от
 // часового пояса машины.
 import { describe, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { MONTHS_SHORT_RU, fmtDate, fmtDateTime } from "../src/web/format";
+import { MONTHS_SHORT_RU, fmtDate, fmtDateTime, fmtDateTimeUtc, fmtTime } from "../src/web/format";
 
 const local = (y: number, m: number, d: number, h = 0, min = 0): string => new Date(y, m, d, h, min).toISOString();
 
@@ -37,7 +37,7 @@ describe("П5: fmtDate — дата без времени", () => {
 
   test("чистая дата YYYY-MM-DD — локальная полночь, а не UTC (не съезжает на день назад)", () => {
     expect(fmtDate("2025-08-16")).toBe("16 авг. 2025");
-    expect(fmtDateTime("2025-08-16")).toBe("00:00 16 авг. 2025");
+    expect(fmtDateTime("2025-08-16")).toBe("16 авг. 2025, 00:00");
   });
 
   test("пусто — «—» (tri-state), невалидная строка — как пришла", () => {
@@ -47,25 +47,47 @@ describe("П5: fmtDate — дата без времени", () => {
   });
 });
 
-describe("П5: fmtDateTime — время первым", () => {
-  test("«12:00 18 янв. 2023»: HH:mm, 24 часа, без запятой и «г.»", () => {
-    expect(fmtDateTime(local(2023, 0, 18, 12, 0))).toBe("12:00 18 янв. 2023");
-    expect(fmtDateTime(local(2026, 8, 15, 23, 7))).toBe("23:07 15 сент. 2026");
-    expect(fmtDateTime(local(2026, 4, 3, 9, 5))).toBe("09:05 3 мая 2026");
+// UX 17.10: дата первой, время после запятой (было «время первым, без запятой»)
+describe("П5: fmtDateTime — дата, затем время", () => {
+  test("«18 янв. 2023, 12:00»: HH:mm, 24 часа, время после запятой, без «г.»", () => {
+    expect(fmtDateTime(local(2023, 0, 18, 12, 0))).toBe("18 янв. 2023, 12:00");
+    expect(fmtDateTime(local(2026, 8, 15, 23, 7))).toBe("15 сент. 2026, 23:07");
+    expect(fmtDateTime(local(2026, 4, 3, 9, 5))).toBe("3 мая 2026, 09:05");
   });
 
   test("полночь — 00:00; все 12 месяцев", () => {
-    expect(fmtDateTime(local(2026, 0, 1, 0, 0))).toBe("00:00 1 янв. 2026");
-    expect(Array.from({ length: 12 }, (_, m) => fmtDateTime(local(2025, m, 28, 18, 45)).split(" ")[2])).toEqual([...MONTHS_SHORT_RU]);
+    expect(fmtDateTime(local(2026, 0, 1, 0, 0))).toBe("1 янв. 2026, 00:00");
+    expect(Array.from({ length: 12 }, (_, m) => fmtDateTime(local(2025, m, 28, 18, 45)).split(" ")[1])).toEqual([...MONTHS_SHORT_RU]);
   });
 
-  test("пусто — «—», невалидная строка — как пришла; ни запятых, ни «г.» ни в одном выводе", () => {
+  test("пусто — «—», невалидная строка — как пришла; запятая — только перед временем, «г.» нет ни в одном выводе", () => {
     expect([fmtDateTime(null), fmtDateTime(undefined), fmtDateTime("")]).toEqual(["—", "—", "—"]);
     expect(fmtDateTime("garbage")).toBe("garbage");
     for (let m = 0; m < 12; m++) {
-      const out = [fmtDate(local(2024, m, 9, 7, 3)), fmtDateTime(local(2024, m, 9, 7, 3))].join(" ");
-      expect({ m, comma: out.includes(","), year: / г\./.test(out) }).toEqual({ m, comma: false, year: false });
+      const date = fmtDate(local(2024, m, 9, 7, 3));
+      const dateTime = fmtDateTime(local(2024, m, 9, 7, 3));
+      expect({ m, dateComma: date.includes(","), dateTime, year: / г\./.test(`${date} ${dateTime}`) }).toEqual({
+        m,
+        dateComma: false,
+        dateTime: `${date}, 07:03`,
+        year: false,
+      });
     }
+  });
+});
+
+// UX 17.10: новый fmtTime — только время; fmtDateTimeUtc — дата, запятая, время и «UTC»
+describe("П5: fmtTime и fmtDateTimeUtc", () => {
+  test("fmtTime — «12:00» (локальное, HH:mm); пусто — «—», невалидная — как пришла", () => {
+    expect(fmtTime(local(2023, 0, 18, 12, 0))).toBe("12:00");
+    expect(fmtTime(local(2026, 4, 3, 9, 5))).toBe("09:05");
+    expect([fmtTime(null), fmtTime(undefined), fmtTime("")]).toEqual(["—", "—", "—"]);
+    expect(fmtTime("garbage")).toBe("garbage");
+  });
+
+  test("fmtDateTimeUtc — «16 сент. 2026, 12:00 UTC» независимо от пояса машины", () => {
+    expect(fmtDateTimeUtc("2026-09-16T12:00:00Z")).toBe("16 сент. 2026, 12:00 UTC");
+    expect(fmtDateTimeUtc("2026-05-03T09:05:00Z")).toBe("3 мая 2026, 09:05 UTC");
   });
 });
 

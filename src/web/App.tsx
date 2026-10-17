@@ -3,9 +3,9 @@
 // один раз, чтобы экран и методика не разъезжались при смене model_version.
 // Сессия и задания — одно состояние на вкладку (`AppState` в session.tsx):
 // один `/api/me`, один опрос `/api/me/jobs`, тост об итоге анализа на любом экране.
-import { CircleQuestion } from "@gravity-ui/icons";
 import { Alert, Flex } from "@gravity-ui/uikit";
 import { useState } from "react";
+import { NotFoundIllustration } from "./illustrations";
 import type { MetaResponse } from "./api";
 import { dataOf, useJson } from "./api";
 import { ComparePage } from "./ComparePage";
@@ -84,7 +84,7 @@ function Routes() {
           {/* как у платформы: две строки и действие, без перечня маршрутов –
               шаблоны адресов ничего не скажут пришедшему по старой ссылке */}
           <EmptyState
-            icon={CircleQuestion}
+            image={NotFoundIllustration}
             title="Страница не найдена"
             description="Такого адреса нет или он изменился."
             actions={[{ text: "К рейтингу", view: "action", size: "l", onClick: () => navigate("/") }]}
