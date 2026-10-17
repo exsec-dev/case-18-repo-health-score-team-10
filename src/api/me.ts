@@ -10,7 +10,7 @@ import { LAST_ELIGIBLE_SCAN_SQL, LAST_NOT_BAD_SCAN_SQL, getRepoCard, jobLeaseExp
 import { classifyScStatus, isOwnRepo, probeRepoAccess, type AccessResult, type ChannelAccess, type NormalizedAccess, type ProbeIo } from "../auth/access";
 import { MODEL_VERSION } from "../score/model";
 import { countActiveUserJobs, countRecentUserJobs, enqueueScan, findActiveUserJob, recordRefusedUserJob } from "../jobs/scheduler";
-import type { QueueConfig } from "../config";
+import { DEFAULT_REPO_COOLDOWN_MS, type QueueConfig } from "../config";
 
 export interface MyRepoEntry {
   org: string;
@@ -439,12 +439,22 @@ export interface UserScanResponse {
   retryAfterSec?: number;
 }
 
+export interface UserScanOptions {
+  /**
+   * Запуск по членству в организации (`LaunchRight` member): репозиторий
+   * анализируется не чаще `QueueConfig.repoCooldownMs` от последнего анализа
+   * кем угодно, и не ставится, пока идет чужой анализ того же репозитория.
+   */
+  repoCooldown?: boolean;
+}
+
 /**
  * POST /api/me/repos/:org/:repo/scan без HTTP-слоя. Сначала дешевые проверки
  * без сети (`userScanCheapGate`), затем repo-GET с PAT пользователя:
  * 200 → строка repos и заявка → 202; 403/404 → 403 no_access; 401 → 401
  * pat_expired; 0/429/5xx → 503 check_failed. После сетевого ожидания дешевые
- * проверки повторяются в одной транзакции со вставкой.
+ * проверки повторяются в одной транзакции со вставкой – там же ограничение
+ * частоты на репозиторий (`UserScanOptions.repoCooldown`).
  */
 export async function requestUserScan(
   db: Database,
@@ -457,6 +467,7 @@ export async function requestUserScan(
   // готовый ответ repo-GET от вызывающего (проверка прав избранного только что
   // его получила), чтобы не делать второй живой запрос
   prefetched?: { status: number; json: unknown },
+  opts: UserScanOptions = {},
 ): Promise<UserScanResponse> {
   const cheap = userScanCheapGate(db, userId, org, repo, queue, now);
   if (cheap) return cheap;
@@ -482,6 +493,10 @@ export async function requestUserScan(
     const dup = row ? findActiveUserJob(db, userId, row.id) : null;
     if (dup !== null) {
       return { status: 202, body: { queued: true, jobId: dup, slug: `${org}/${repo}`, deduplicated: true } };
+    }
+    if (opts.repoCooldown && row) {
+      const refusal = repoCooldownRefusal(db, row.id, `${org}/${repo}`, queue.repoCooldownMs ?? DEFAULT_REPO_COOLDOWN_MS, now);
+      if (refusal) return refusal;
     }
     if (countActiveUserJobs(db, userId) >= queue.userActiveMax) {
       return tooManyActive(queue);
@@ -518,6 +533,45 @@ export function userScanCheapGate(db: Database, userId: number, org: string, rep
   if (countActiveUserJobs(db, userId) >= queue.userActiveMax) return tooManyActive(queue);
   if (countRecentUserJobs(db, userId, now) >= queue.userScansPerHour) return rateLimited(db, userId, queue, now);
   return null;
+}
+
+/**
+ * Ограничение частоты на репозиторий для запуска по членству в организации:
+ * участников у организации бывают десятки, а один анализ – до ~1000 запросов к
+ * SourceCraft и клон репозитория. Пока идет пользовательский анализ того же
+ * репозитория или его скан – 409 repo_busy (итог появится в карточке). Если
+ * последний удачный анализ (ok или partial, кем угодно, включая плановый) был
+ * меньше `cooldownMs` назад – 429 repo_cooldown со временем анализа и временем,
+ * когда запуск снова доступен. Плановая заявка в очереди запуск не блокирует:
+ * очередь планового анализа бывает долгой.
+ */
+export function repoCooldownRefusal(db: Database, repoId: number, slug: string, cooldownMs: number, now = new Date()): UserScanResponse | null {
+  if (cooldownMs <= 0) return null;
+  const busy =
+    db.query("SELECT 1 FROM jobs WHERE repo_id = ? AND kind = 'scan' AND trigger_kind = 'user' AND status IN ('queued', 'running') LIMIT 1").get(repoId) !== null ||
+    db.query("SELECT 1 FROM scans WHERE repo_id = ? AND status = 'running' LIMIT 1").get(repoId) !== null;
+  if (busy) {
+    return { status: 409, body: { error: { code: "repo_busy", message: `анализ ${slug} уже идет – итог появится в карточке` } } };
+  }
+  const last = db
+    .query("SELECT MAX(COALESCE(finished_at, started_at)) AS t FROM scans WHERE repo_id = ? AND status IN ('ok', 'partial')")
+    .get(repoId) as { t: string | null };
+  const lastAt = last.t === null ? Number.NaN : Date.parse(last.t);
+  if (!Number.isFinite(lastAt)) return null;
+  const untilMs = lastAt + cooldownMs;
+  if (untilMs <= now.getTime()) return null;
+  return {
+    status: 429,
+    body: {
+      error: {
+        code: "repo_cooldown",
+        message: `${slug} недавно анализировали – следующий запуск будет доступен позже`,
+        lastScanAt: new Date(lastAt).toISOString(),
+        until: new Date(untilMs).toISOString(),
+      },
+    },
+    retryAfterSec: Math.max(1, Math.ceil((untilMs - now.getTime()) / 1000)),
+  };
 }
 
 function tooManyActive(queue: QueueConfig): UserScanResponse {
@@ -786,6 +840,8 @@ export type FavoriteEnqueueCode =
   | "pat_expired"
   | "check_failed"
   | "not_own"
+  /** не свой, но из организаций зрителя: анализ сам не ставится, запуск — кнопкой */
+  | "member"
   | "cooldown"
   /** фоновая перепроверка анализ не ставит */
   | "background"

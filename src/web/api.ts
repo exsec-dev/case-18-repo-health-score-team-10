@@ -78,9 +78,16 @@ function noteStatus(url: string, status: number): void {
 /** Ответ сервера → ошибка со словарным текстом. */
 async function errorOf(url: string, res: Response): Promise<RequestError> {
   noteStatus(url, res.status);
-  const body = (await res.json().catch(() => null)) as ApiError | { error?: { code?: string; message?: string } } | null;
-  const code = typeof body?.error?.code === "string" ? body.error.code : null;
-  return new RequestError(errorText({ status: res.status, code, message: body?.error?.message ?? null, retryAfter: res.headers.get("retry-after") }), res.status, code);
+  const body = (await res.json().catch(() => null)) as ApiError | { error?: { code?: string; message?: string; lastScanAt?: unknown; until?: unknown } } | null;
+  const error = body?.error as { code?: unknown; message?: string; lastScanAt?: unknown; until?: unknown } | undefined;
+  const code = typeof error?.code === "string" ? error.code : null;
+  // отказ по частоте на репозиторий несет время — текст с ним собирается в поясе браузера
+  const iso = (v: unknown): string | null => (typeof v === "string" ? v : null);
+  return new RequestError(
+    errorText({ status: res.status, code, message: error?.message ?? null, retryAfter: res.headers.get("retry-after"), lastScanAt: iso(error?.lastScanAt), until: iso(error?.until) }),
+    res.status,
+    code,
+  );
 }
 
 /** Сетевой сбой (нет ответа) → ошибка со словарным текстом. */

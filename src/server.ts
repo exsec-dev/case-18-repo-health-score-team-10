@@ -12,17 +12,19 @@ import { buildCompare, parseCompareQuery } from "./api/compare";
 import { getHealth } from "./api/health";
 import {
   classifyScStatus,
-  isOwnRepo,
+  launchRightOf,
   makeAccessCache,
+  needsMembership,
   probeIoOf,
-  ownUndecided,
   probeRepoAccess,
   resolveAccess,
   visibilityOf,
   type AccessRepo,
   type AccessResult,
+  type LaunchRight,
   type NormalizedAccess,
   type ProbeIo,
+  type TokenMembership,
 } from "./auth/access";
 import { makeAppsecClient } from "./collectors/appsec";
 import {
@@ -84,7 +86,8 @@ import {
 import { deletePat, getPat, patMeta, patReadable, patOwnerLogin, storePat } from "./auth/pat";
 import { buildAuthUrl, exchangeCode, yaAvatarUrl, type YaEndpoints } from "./auth/ya";
 import { makeScClient } from "./collectors/http";
-import { listSourcecraftRepos, tokenRepoEntries, type ScRepoLite } from "./api/me";
+import { listSourcecraftRepos, tokenRepoEntries } from "./api/me";
+import { makeTokenRepoCache, membershipIn } from "./api/token-repos";
 import { needsRescore, runStartupRescore, RESCORE_ERROR } from "./score/rescore";
 import index from "./web/index.html";
 
@@ -93,17 +96,6 @@ const config = loadConfig();
 const patProbes = new Map<number, number[]>();
 const favoriteChecks = new Map<number, number[]>();
 const myReposViews = new Map<number, number[]>();
-/**
- * Живой список SourceCraft по токену зрителя (`/me/repos`) — общий для «Моих
- * репозиториев» и пикера избранного. Сбрасывается при смене и удалении токена.
- */
-const tokenRepos = new Map<number, { at: number; repos: ScRepoLite[]; partial: boolean }>();
-const TOKEN_REPOS_TTL_MS = 10 * 60_000;
-const tokenReposInFlight = new Map<number, { pat: string; promise: ReturnType<typeof listSourcecraftRepos> }>();
-/** Просроченные списки уходят из памяти при записи нового — карта не растет с числом пользователей. */
-const evictExpiredTokenRepos = (now = Date.now()): void => {
-  for (const [id, entry] of tokenRepos) if (now - entry.at > TOKEN_REPOS_TTL_MS) tokenRepos.delete(id);
-};
 // Показ карточки залогиненному зрителю — до 3 живых запросов с его PAT плюс
 // вымывание кэша доступа, поэтому окно нужно. Аноним без лимита: публичная
 // карточка в сеть не ходит.
@@ -470,6 +462,35 @@ function probeIoFor(pat: string): ProbeIo {
 }
 
 /**
+ * Живой список SourceCraft по токену зрителя (`/me/repos`) — общий для «Моих
+ * репозиториев», пикера избранного и права запуска анализа по кнопке.
+ * Сбрасывается при смене и удалении токена.
+ */
+const tokenRepoCache = makeTokenRepoCache({
+  ttlMs: 10 * 60_000,
+  // бюджет запросов — под полный обход страниц: платформа отдает по 1-2 записи на страницу
+  walk: (pat) =>
+    listSourcecraftRepos(
+      makeScClient({ retry: INTERACTIVE_RETRY, token: pat, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 40, timeoutMs: config.scan.rest.timeoutMs }),
+    ),
+  currentPat: patOf,
+});
+
+/**
+ * Есть ли репозиторий в списке по токену пользователя. Свежий список — без
+ * сети, иначе общий обход (до 40 запросов) под окном чтений «Моих
+ * репозиториев»: перебор слагов не превращается в поток обходов. Окно
+ * исчерпано — `limited`: прежний (истекший) список право запуска не дает.
+ */
+async function tokenMembershipOf(userId: number, org: string, repo: string): Promise<TokenMembership | "limited"> {
+  const pat = patOf(userId);
+  if (pat === null) return "unknown";
+  const loaded = await tokenRepoCache.load(userId, pat, { mayWalk: () => allowMyReposView(userId) });
+  if (loaded.kind === "limited" || (loaded.kind === "list" && loaded.stale)) return "limited";
+  return loaded.kind === "list" ? membershipIn(loaded.list, org, repo) : "unknown";
+}
+
+/**
  * Фоновая перепроверка прав избранного — насос в памяти процесса: окно
  * проверок пользователя не расходует, анализ не ставит. Клиенты — на PAT
  * пользователя, ритм общий с остальными его запросами.
@@ -573,6 +594,12 @@ async function addFavoriteAndCheck(userId: number, org: string, repo: string): P
         );
       }
       check = { status: result.result, enqueue: result.enqueue };
+      // публичный репозиторий организации зрителя сам анализ не ставит, но кнопка
+      // анализа у него есть — тост говорит об этом (свежий список, без сети)
+      const listed = tokenRepoCache.peek(userId);
+      if (result.enqueue.code === "not_own" && listed !== null && membershipIn(listed, org, repo) === "yes") {
+        check = { status: result.result, enqueue: { status: "skipped", code: "member" } };
+      }
       // сбой проверки (платформа или каналы) — не вердикт: запись остается
       // «не проверенной» и уходит в насос (он анализ не ставит)
       if (result.result === "failed") recheckPump.enqueue(userId, [{ org, repo }]);
@@ -589,57 +616,56 @@ async function addFavoriteAndCheck(userId: number, org: string, repo: string): P
   });
 }
 
-/** Исход «свой ли репозиторий» для запуска анализа. */
-type Ownership =
-  | { kind: "own"; repoRes: { status: number; json: unknown } }
-  | { kind: "not_own" }
-  | { kind: "denied" }
-  | { kind: "token_rejected" }
-  | { kind: "unknown" };
+/**
+ * Право запуска анализа по кнопке и ответ repo-GET для постановки
+ * (`requestUserScan`), либо `limited` — список по токену не перечитать: окно
+ * чтений исчерпано (это наш лимит, а не сбой SourceCraft).
+ */
+type LaunchCheck = { right: LaunchRight; repoRes: { status: number; json: unknown } } | { right: "limited" };
 
-async function ownershipOf(req: Request, userId: number, org: string, repo: string): Promise<Ownership> {
+/**
+ * Право зрителя запустить анализ (`launchRightOf`). Доступ — из общего
+ * резолвера карточки, с её кэшем: повторный запуск с карточки не делает новых
+ * запросов. Строки репо еще нет — живая проверка теми же правилами. Список по
+ * токену спрашивается, только если репозиторий виден, а свой не доказан.
+ */
+async function launchCheckOf(req: Request, userId: number, org: string, repo: string): Promise<LaunchCheck> {
   const row = db.query("SELECT id, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number; visibility: string } | null;
   let access: NormalizedAccess;
   let repoRes: { status: number; json: unknown };
   if (row) {
-    // общий резолвер доступа карточки — с её кэшем (повторный запуск с
-    // карточки не делает новых запросов)
     const res = await viewerAccess(req)({ id: row.id, org, repo, visibility: row.visibility });
     access = { repo: res.repo, cicd: res.cicd, appsec: res.appsec, visibility: visibilityOf(row.visibility) };
     repoRes = { status: res.repo === "granted" ? 200 : 0, json: { visibility: row.visibility } };
   } else {
     const pat = patOf(userId);
-    if (!pat) return { kind: "unknown" };
+    if (!pat) return { right: "unknown", repoRes: { status: 0, json: null } };
     const probe = await probeRepoAccess(probeIoFor(pat), org, repo);
     access = probe.access;
     repoRes = probe.repoRes;
   }
-  if (isOwnRepo(access)) return { kind: "own", repoRes };
-  if (access.repo === "pat-expired") return { kind: "token_rejected" };
-  if (access.repo === "denied") return { kind: "denied" };
-  if (access.repo !== "granted") return { kind: "unknown" };
-  // репо видно, но каналы не проверились — «свой» не определён: не вердикт
-  if (ownUndecided(access)) return { kind: "unknown" };
-  return { kind: "not_own" };
+  const member = needsMembership(access) ? await tokenMembershipOf(userId, org, repo) : null;
+  if (member === "limited") return { right: "limited" };
+  return { right: launchRightOf(access, member), repoRes };
 }
 
 /**
- * Отказ запуска для не своего репозитория; `record` — записать строку отказа (она входит
- * в лимит частоты). «Не свой» лимит не расходует: репозиторий токену виден, перебирать
- * нечего, а запуск по кнопке в «Моих репозиториях» не должен съедать запуски часа.
- * Отказы «нет доступа» и «токен отклонен» по-прежнему записываются — защита от перебора.
+ * Отказ запуска; `record` — записать строку отказа (она входит в лимит частоты).
+ * Репозиторий не из организаций пользователя лимит не расходует: токену он виден,
+ * перебирать нечего. Отказы «нет доступа» и «токен отклонен» по-прежнему
+ * записываются — защита от перебора.
  */
-function scanRefusal(own: Exclude<Ownership, { kind: "own" }>, org: string, repo: string): { status: number; body: unknown; record: boolean } {
-  switch (own.kind) {
-    case "not_own":
+function scanRefusal(right: Exclude<LaunchRight, "own" | "member">, org: string, repo: string): { status: number; body: unknown; record: boolean } {
+  switch (right) {
+    case "none":
       return {
         status: 403,
-        body: { error: { code: "not_own", message: `анализ запускается только для своих репозиториев – ${org}/${repo} обновит плановый анализ` } },
+        body: { error: { code: "not_own", message: `анализ по кнопке запускается для репозиториев ваших организаций – ${org}/${repo} обновит плановый анализ` } },
         record: false,
       };
     case "denied":
       return { status: 403, body: { error: { code: "no_access", message: `ваш токен не дает доступа к ${org}/${repo}` } }, record: true };
-    case "token_rejected":
+    case "token-rejected":
       return { status: 401, body: { error: { code: "pat_expired", message: "SourceCraft отклонил ваш токен – обновите его в Настройках" } }, record: true };
     default:
       // сбой проверки — не вердикт и не списание лимита запусков
@@ -1158,7 +1184,7 @@ const routes = {
         const username = (who.json as { username?: unknown } | null)?.username ?? null;
         // «Избранное» без пользователя не пополняется: репозитории по токену живут
         // в «Моих репозиториях» (живой список /me/repos), список прежнего токена сброшен
-        tokenRepos.delete(user.userId);
+        tokenRepoCache.forget(user.userId);
         // перепроверка — все записи избранного: их права «не проверены»
         recheckPump.enqueue(user.userId, staleFavoriteSlugs(db, user.userId));
         return Response.json({ ok: true, tokenOwner: typeof username === "string" ? username : null });
@@ -1166,7 +1192,7 @@ const routes = {
       if (req.method === "DELETE") {
         deletePat(db, user.userId);
         accessCache.clearUser(user.userId);
-        tokenRepos.delete(user.userId);
+        tokenRepoCache.forget(user.userId);
         // удаление токена гасит права, проверенные им
         resetFavoriteRights(db, user.userId);
         recheckPump.clear(user.userId);
@@ -1243,58 +1269,27 @@ const routes = {
       return Response.json({ login: user.login, ...myJobs(db, user.userId) });
     },
     // «Мои репозитории» и пикер «Добавить в избранное» — один живой список
-    // SourceCraft по PAT зрителя (`GET /me/repos`). Обход страниц дорогой, поэтому
-    // список держится в памяти TOKEN_REPOS_TTL_MS; `?refresh=1` — перечитать
-    // сразу. Окно чтений кабинета списывает только поход в SourceCraft. Данные
-    // каталога и отметка «в избранном» собираются на каждый ответ — без сети
+    // SourceCraft по PAT зрителя (`GET /me/repos`, `tokenRepoCache`): обход страниц
+    // дорогой, поэтому список держится в памяти 10 минут; `?refresh=1` — перечитать
+    // сразу. Окно чтений кабинета списывает только новый обход, а не присоединение
+    // к идущему (страница и диалог, две вкладки). Данные каталога и отметка
+    // «в избранном» собираются на каждый ответ — без сети
     "/api/me/sourcecraft-repos": async (req) => {
       const user = sessionOf(req);
       if (!user) return unauthorized();
       const pat = patOf(user.userId);
       if (pat === null) return Response.json({ error: { code: "no_pat" } }, { status: 409 });
       const params = new URL(req.url).searchParams;
-      const refresh = params.get("refresh") === "1";
-      let cached = tokenRepos.get(user.userId);
-      let stale = false;
-      if (refresh || !cached || Date.now() - cached.at > TOKEN_REPOS_TTL_MS) {
-        // одновременные промахи (страница и диалог, две вкладки) делят один обход;
-        // окно чтений списывает только новый обход, а не присоединение к идущему
-        let flight = tokenReposInFlight.get(user.userId);
-        if (!flight || flight.pat !== pat) {
-          if (!allowMyReposView(user.userId)) {
-            // окно исчерпано, но список в памяти есть — отдаем его с пометкой, а не 429
-            if (cached) stale = true;
-            else {
-              return rateLimited(
-                `не больше ${config.queue.myReposPerMinute} обновлений списка в минуту – попробуйте позже`,
-                windowRetryAfterSec(myReposViews, user.userId, 60_000),
-              );
-            }
-          } else {
-            // бюджет запросов — под полный обход страниц: платформа отдает по 1-2 записи на страницу
-            const client = makeScClient({ retry: INTERACTIVE_RETRY, token: pat, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 40, timeoutMs: config.scan.rest.timeoutMs });
-            const started: { pat: string; promise: ReturnType<typeof listSourcecraftRepos> } = { pat, promise: listSourcecraftRepos(client) };
-            // завершение обхода снимает только свою запись: обход прежним токеном не стирает новый
-            started.promise = started.promise.finally(() => {
-              if (tokenReposInFlight.get(user.userId) === started) tokenReposInFlight.delete(user.userId);
-            });
-            tokenReposInFlight.set(user.userId, started);
-            flight = started;
-          }
-        }
-        if (flight && !stale) {
-          const result = await flight.promise;
-          if (result.status === "source_http") return Response.json({ error: { code: "source_http" } }, { status: 502 });
-          cached = { at: Date.now(), repos: result.repos, partial: result.partial };
-          // в кэш — только полный обход тем же токеном: прерванный сбоем список не живет
-          // 10 минут, а обход прежним токеном, закончившийся после его смены, не возвращается
-          if (!result.interrupted && patOf(user.userId) === pat) {
-            tokenRepos.set(user.userId, cached);
-            evictExpiredTokenRepos();
-          }
-        }
+      const loaded = await tokenRepoCache.load(user.userId, pat, { refresh: params.get("refresh") === "1", mayWalk: () => allowMyReposView(user.userId) });
+      if (loaded.kind === "limited") {
+        return rateLimited(
+          `не больше ${config.queue.myReposPerMinute} обновлений списка в минуту – попробуйте позже`,
+          windowRetryAfterSec(myReposViews, user.userId, 60_000),
+        );
       }
-      const list = cached!;
+      if (loaded.kind === "failed") return Response.json({ error: { code: "source_http" } }, { status: 502 });
+      const stale = loaded.stale;
+      const list = loaded.list;
       return Response.json({
         repos: list.repos,
         partial: list.partial,
@@ -1375,18 +1370,24 @@ const routes = {
       // дешевые отказы (дедуп, активные, часовой лимит) — до сети
       const cheap = userScanCheapGate(db, user.userId, org!, repo!, config.queue);
       if (cheap) return scanResponse(cheap);
-      // Анализ по запросу — только для своих репозиториев. «Свой» определяется
-      // по доступу из общего резолвера (с кэшем карточки); строки репо еще нет —
-      // живая проверка теми же правилами. Неизвестно — не свой
-      const own = await ownershipOf(req, user.userId, org!, repo!);
-      if (own.kind !== "own") {
-        const refusal = scanRefusal(own, org!, repo!);
+      // Анализ по кнопке — своим репозиториям и репозиториям организаций
+      // пользователя (`launchRightOf`); неизвестно — не вердикт и не запуск
+      const check = await launchCheckOf(req, user.userId, org!, repo!);
+      if (check.right === "limited") {
+        return rateLimited(
+          `не больше ${config.queue.myReposPerMinute} обновлений списка ваших репозиториев в минуту – попробуйте позже`,
+          windowRetryAfterSec(myReposViews, user.userId, 60_000),
+        );
+      }
+      if (check.right !== "own" && check.right !== "member") {
+        const refusal = scanRefusal(check.right, org!, repo!);
         if (refusal.record) recordRefusedUserJob(db, user.userId, new Date(), `${org}/${repo}`);
         return Response.json(refusal.body, { status: refusal.status });
       }
       // repo-GET уже сделан (или доступ подтвержден кэшем карточки) — строка
-      // repos и заявка появляются только при доказанном доступе
-      const out = await requestUserScan(db, client, user.userId, org!, repo!, config.queue, new Date(), own.repoRes);
+      // repos и заявка появляются только при доказанном доступе; участник
+      // организации без прав на CI/CD и Безопасность — с ограничением частоты на репозиторий
+      const out = await requestUserScan(db, client, user.userId, org!, repo!, config.queue, new Date(), check.repoRes, { repoCooldown: check.right === "member" });
       return scanResponse(out);
     },
     // документация: все страницы одним ответом (раздел /docs переходит между

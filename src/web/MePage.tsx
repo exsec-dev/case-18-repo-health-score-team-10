@@ -62,6 +62,7 @@ import { FRAUD_TITLE, authErrorText, jobErrorText, failedAnalysisHint, favoriteA
 import { type Band, BANDS, groupByOrg, isClosed, multiSummary, orderOrgs, type RepoEntry, scoreChange, filterTokenRows, tokenParamsOf, tokenRowOrder, tokenSearchOf, tokenStateOf, TOKEN_FILTER_DEFAULT, TOKEN_SORTS, TOKEN_STATES, type TokenFilter, type TokenSort, type TokenState, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
 import { linkProps, navigate, repoHref } from "./router";
 import { useMediaQuery } from "./prefs";
+import { repoKey, useTokenRepos } from "./tokenRepos";
 import { Page, UserAvatar, displayName, logoutFailedToast } from "./Shell";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, RepoSlug, ScoreBar, SkeletonRows, TIP_TARGET, VisibilityPill } from "./ui";
 
@@ -680,6 +681,9 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
   const reposData = dataOf(repos.state);
   const entries = reposData?.entries ?? [];
   const accessBySlug = new Map((dataOf(favs.state)?.entries ?? []).map((f) => [`${f.org}/${f.repo}`, f]));
+  // строка без своих прав получает анализ по кнопке, если репозиторий из организаций
+  // зрителя — он есть в списке по токену (тот же, что у «Моих репозиториев»)
+  const tokenRepos = useTokenRepos(hasPat && entries.some((e) => accessBySlug.get(`${e.org}/${e.repo}`)?.access?.own !== true));
   const counts = countBands(entries);
   const shown = sortEntries(filterEntries(entries, query, band), sortKey, sortDesc);
 
@@ -836,6 +840,7 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
                     access={accessBySlug.get(slug)?.access ?? null}
                     lastCheckedAt={accessBySlug.get(slug)?.lastCheckedAt ?? null}
                     hasPat={hasPat}
+                    member={tokenRepos?.has(repoKey(entry.org, entry.repo)) === true}
                     live={analysis.live(slug)}
                     starting={starting.has(slug)}
                     busy={busy !== null}
@@ -1215,7 +1220,8 @@ function RepoRow({
   badge,
   empty = false,
   fromToken = false,
-  ownUnknown = false,
+  scheduled = false,
+  member = false,
   iconActions = false,
   favorite,
 }: {
@@ -1231,16 +1237,18 @@ function RepoRow({
   onScan: () => void;
   /** «Убрать из избранного» — только у строки «Избранного» */
   onRemove?: () => void;
-  /** «Мои репозитории»: анализ доступен без сохраненной проверки — права проверит сервер при запуске */
+  /** «Мои репозитории»: анализ доступен без сохраненной проверки — каждая строка из списка по токену */
   canAnalyze?: boolean;
+  /** «Избранное»: репозиторий есть в списке по токену — анализ по кнопке и без своих прав */
+  member?: boolean;
   /** «Мои репозитории»: видимость из списка SourceCraft вместо сохраненной проверки прав */
   badge?: ReactNode;
   /** в репозитории нет коммитов — анализировать нечего */
   empty?: boolean;
   /** строка «Моих репозиториев»: репозиторий точно есть на SourceCraft (список по токену) */
   fromToken?: boolean;
-  /** публичный из описи: свой ли он, сервер проверит при запуске анализа */
-  ownUnknown?: boolean;
+  /** публичный из описи: его оценивает и анализ по расписанию */
+  scheduled?: boolean;
   /** опись: действия анализа — иконками (обновить / запустить), без меню «…» */
   iconActions?: boolean;
   /** «Мои репозитории»: звезда «в избранное» в строке */
@@ -1250,7 +1258,7 @@ function RepoRow({
   const href = repoHref(org, repo);
   const scored = entry.healthcraftIndex !== null;
   const inWork = live !== null || starting;
-  const canAnalyze = !empty && (canAnalyzeOverride ?? (hasPat && access?.own === true));
+  const canAnalyze = !empty && (canAnalyzeOverride ?? (hasPat && (access?.own === true || member)));
   // «затянулось» решает сервер (истек срок захвата задания), а не таймер в браузере
   const phase = live === null ? null : live.stalled ? "stalled" : live.phase;
 
@@ -1307,7 +1315,7 @@ function RepoRow({
       // «Мои репозитории»: репозиторий точно есть на SourceCraft, у нас его просто не анализировали
       <StatePill
         icon={CircleDashed}
-        title={ownUnknown ? "Публичные репозитории оценивает анализ по расписанию – запустить раньше можно кнопкой в строке" : "Анализ этого репозитория еще не запускали"}
+        title={scheduled ? "Публичные репозитории оценивает анализ по расписанию – запустить раньше можно кнопкой в строке" : "Анализ этого репозитория еще не запускали"}
       >
         Еще не анализировали
       </StatePill>
@@ -1383,8 +1391,9 @@ function RepoRow({
         {/* действия строки — в меню «…»: колонка одной ширины, полосы и числа
             оцененных строк стоят ровно. Исключение — «Запустить анализ» у своего
             репозитория без анализа: это единственный следующий шаг строки, и
-            колонка оценки у нее все равно пустая. Анализ — только на своем
-            репозитории (по сохраненной проверке прав own); у чужого его нет вовсе.
+            колонка оценки у нее все равно пустая. Анализ — у своего репозитория
+            (сохраненная проверка прав own) и у репозитория из списка по токену;
+            у остальных его нет вовсе.
             Пункта ручной проверки прав нет: права проверяются сами — при
             добавлении, после смены токена и в фоне */}
         {canAnalyze && !scored && !iconActions && (
@@ -1479,8 +1488,8 @@ function TokenRequired({ unreadable }: { unreadable: boolean }) {
  * перечитывает сразу. Длинный список сужают поиск, организация (Select с поиском,
  * своя — первой), видимость, состояние и язык; выбор живет в адресе и переживает
  * переход в карточку. Строки компактные, по организациям, заголовки групп
- * прилипают. «Запустить анализ» видна у закрытых (свои по правилу \`isOwnRepo\`),
- * у публичных — пункт «…»: свой ли репозиторий, сервер проверит при запуске.
+ * прилипают. Анализ — иконкой в каждой строке: все строки из списка по токену, а он
+ * и есть правило запуска по кнопке (публичным сервер ограничивает частоту).
  */
 function TokenRepos() {
   // nonce > 0 — принудительное перечитывание из SourceCraft (`refresh=1`)
@@ -1773,7 +1782,7 @@ function TokenRepos() {
                   busy={false}
                   onScan={() => void startScan(slug)}
                   canAnalyze
-                  ownUnknown={!closed}
+                  scheduled={!closed}
                   iconActions
                   fromToken
                   empty={e.isEmpty}

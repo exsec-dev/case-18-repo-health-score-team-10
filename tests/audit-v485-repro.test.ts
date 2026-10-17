@@ -278,6 +278,8 @@ const mock = startMockApi((_req, url) => {
   const p = url.pathname;
   if (p === "/user") return userMode === "503" ? Response.json({ error: "x" }, { status: 503 }) : Response.json({ username: "probe" });
   if (/^\/orgs\/[^/]+\/repos$/.test(p)) return Response.json({ repositories: [] });
+  // список по токену: foreign/pub в нем нет — репозиторий не из организаций зрителя
+  if (p === "/me/repos") return Response.json({ repositories: [{ organization: { slug: "own" }, slug: "owner-priv", visibility: "private" }] });
   if (p === "/v1/scans/latest") return Response.json({ error: "no scan" }, { status: 404 });
   // own/*: приватные репозитории зрителя; foreign/pub — чужой публичный (CI 403, AppSec 404)
   const runs = p.match(/^\/repos\/([^/]+)\/([^/]+)\/cicd\/runs$/);
@@ -373,7 +375,7 @@ describe("HTTP: права, токен и запуск анализа", () => {
     expect({ del: del.status, mayRead: row?.mayRead, title: row?.title }).toEqual({ del: 200, mayRead: false, title: null });
   }, 60_000);
 
-  test("С4-11: POST /scan чужого публичного репозитория — отказ с кодом, задание не ставится", async () => {
+  test("С4-11: POST /scan публичного репозитория не из организаций зрителя — отказ с кодом, задание не ставится", async () => {
     repoMode = "ok";
     const res = await fetch(at("/api/me/repos/foreign/pub/scan"), as("stranger", { method: "POST" }));
     const body = (await res.json()) as { error?: { code?: string } };

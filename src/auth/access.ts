@@ -169,8 +169,9 @@ export interface NormalizedAccess {
 /**
  * «Свой» репозиторий: токену доступны CI или Security, либо репозиторий
  * приватный или internal и виден токену. Неизвестность (сбой проверки, нет
- * токена или сессии) – не свой. Известная граница: публичный репозиторий, где
- * токен не видит ни CI, ни Security, своим не считается.
+ * токена или сессии) – не свой. Публичный репозиторий, где токен не видит ни
+ * CI, ни Security, своим не считается: анализ по кнопке ему открывает членство
+ * в организации (`launchRightOf`), а AI-обзор и закрытые категории – нет.
  */
 export function isOwnRepo(a: NormalizedAccess): boolean {
   // internal с видимым кодом – «свой» для анализа, как приватный; AI-обзор ему
@@ -193,6 +194,49 @@ export function ownUndecided(a: NormalizedAccess): boolean {
   if (isOwnRepo(a) || a.repo !== "granted") return false;
   const undecided = (c: ChannelAccess) => c === "check-failed" || c === "pat-expired";
   return undecided(a.cicd) || undecided(a.appsec);
+}
+
+// ---------- право запустить анализ по кнопке ----------
+
+/**
+ * Есть ли репозиторий в списке SourceCraft по токену пользователя (`/me/repos`):
+ * закрытые, которые видит токен, и публичные репозитории его организаций.
+ * `unknown` – списка нет (сбой SourceCraft, окно обходов исчерпано) или обход
+ * прервался раньше, чем дошел до репозитория.
+ */
+export type TokenMembership = "yes" | "no" | "unknown";
+
+/**
+ * Право запустить анализ по кнопке:
+ *   own            – свой (`isOwnRepo`): без ограничения частоты на репозиторий;
+ *   member         – публичный репозиторий из списка по токену, а свой не доказан:
+ *                    запуск с ограничением частоты на репозиторий (`repoCooldownMs`);
+ *   none           – репозиторий виден токену, но не из его организаций;
+ *   denied         – токен репозиторий не видит;
+ *   token-rejected – SourceCraft отклонил токен;
+ *   unknown        – проверить не удалось: не вердикт, запуск не ставится.
+ */
+export type LaunchRight = "own" | "member" | "none" | "denied" | "token-rejected" | "unknown";
+
+/** Нужен ли список по токену: только виденному токену репозиторию, который не свой. */
+export function needsMembership(a: NormalizedAccess): boolean {
+  return a.repo === "granted" && !isOwnRepo(a);
+}
+
+/**
+ * Право запуска из доступа и членства (`null` – список не спрашивали). Членство
+ * проверяется раньше неопределенного «своего»: если CI или AppSec не ответили,
+ * а репозиторий есть в списке, запуск идет с ограничением частоты, как у
+ * участника без прав на CI/CD и Безопасность.
+ */
+export function launchRightOf(a: NormalizedAccess, member: TokenMembership | null): LaunchRight {
+  if (isOwnRepo(a)) return "own";
+  if (a.repo === "pat-expired") return "token-rejected";
+  if (a.repo === "denied") return "denied";
+  if (a.repo !== "granted") return "unknown";
+  if (member === "yes") return "member";
+  if (member !== "no" || ownUndecided(a)) return "unknown";
+  return "none";
 }
 
 export function visibilityOf(raw: unknown): NormalizedAccess["visibility"] {

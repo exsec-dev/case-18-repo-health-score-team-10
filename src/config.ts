@@ -102,6 +102,10 @@ export interface QueueConfig {
   favoriteChecksPerMinute: number;
   /** кулдаун автозаявки по избранному от последнего OWN-скана зрителя: 6 ч, env QUEUE_FAVORITE_OWN_COOLDOWN_MS */
   favoriteOwnCooldownMs: number;
+  /** как часто можно запускать анализ публичного репозитория своей организации, когда токену не видны
+   *  CI/CD и Безопасность: раз в 6 ч от последнего анализа репозитория кем угодно, включая плановый,
+   *  env QUEUE_REPO_COOLDOWN_MS. Optional — как cardPerMinute. */
+  repoCooldownMs?: number;
   /** сколько хранить завершенные строки `jobs`: 30 дней, env QUEUE_RETENTION_DAYS */
   retentionDays: number;
   /** чтений /api/me/repos на пользователя в минуту: 30 (кабинет перечитывает список после каждого действия), env QUEUE_MY_REPOS_PER_MINUTE */
@@ -135,6 +139,9 @@ export interface QueueConfig {
 }
 
 export const DEFAULT_HEAVY_SCAN_MS = 5 * 60_000;
+
+/** Ограничение частоты анализа публичного репозитория по членству в организации (QueueConfig.repoCooldownMs). */
+export const DEFAULT_REPO_COOLDOWN_MS = 6 * 60 * 60_000;
 
 /** Предел слотов цикла — защита от опечатки в env (каждый слот — свой клон). */
 export const MAX_LOOP_SLOTS = 8;
@@ -487,6 +494,7 @@ export function loadConfig(): Config {
       userActiveMax: envInt(env, "QUEUE_USER_ACTIVE_MAX") ?? 2,
       favoriteChecksPerMinute: envInt(env, "QUEUE_FAVORITE_CHECKS_PER_MINUTE") ?? 6,
       favoriteOwnCooldownMs: envInt(env, "QUEUE_FAVORITE_OWN_COOLDOWN_MS") ?? 6 * 60 * 60_000,
+      repoCooldownMs: envInt(env, "QUEUE_REPO_COOLDOWN_MS") ?? DEFAULT_REPO_COOLDOWN_MS,
       retentionDays: envInt(env, "QUEUE_RETENTION_DAYS") ?? 30,
       myReposPerMinute: envInt(env, "QUEUE_MY_REPOS_PER_MINUTE") ?? 30,
       favoritesMax: envInt(env, "QUEUE_FAVORITES_MAX") ?? 500,

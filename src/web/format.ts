@@ -701,11 +701,12 @@ export function favoriteAddedText(check: FavoriteAddCheck | undefined, visibilit
     // чужому он не поможет, и обещать его нельзя
     if (e.code === "not_own") {
       // видимость неизвестна — не утверждаем, что репозиторий закрытый
-      if (visibility === "public") return "Права проверены. Анализ запускается только для своих репозиториев – этот обновит плановый анализ.";
+      if (visibility === "public") return "Права проверены – оценку этого публичного репозитория обновит плановый анализ.";
       if (visibility === "internal" || visibility === "private")
         return "Права проверены. У вашего токена нет прав на CI/CD и Безопасность этого репозитория, а в рейтинг закрытые репозитории не входят – оценки у него не будет.";
-      return "Права проверены. Анализ запускается только для своих репозиториев.";
+      return "Права проверены. Анализ по кнопке запускается для репозиториев ваших организаций.";
     }
+    if (e.code === "member") return "Права проверены – анализ можно запустить кнопкой в строке или на карточке.";
     if (e.code === "cooldown") return "Права проверены – анализ запускали недавно.";
     return "Права проверены.";
   }
@@ -740,6 +741,9 @@ export interface ErrorInput {
   message: string | null;
   /** заголовок Retry-After ответа (секунды), если был */
   retryAfter?: string | null;
+  /** отказ repo_cooldown: когда был последний анализ и когда запуск снова доступен (ISO) */
+  lastScanAt?: string | null;
+  until?: string | null;
 }
 
 /**
@@ -781,8 +785,22 @@ function capitalize(text: string): string {
   return text.length === 0 ? text : text[0]!.toUpperCase() + text.slice(1);
 }
 
+/**
+ * Отказ «репозиторий недавно анализировали» — ограничение частоты запуска по
+ * членству в организации: когда был анализ и после какого времени можно снова.
+ * Время сегодняшнего дня — без даты.
+ */
+export function repoCooldownText(lastScanAt: string, until: string, now = new Date()): string {
+  const ago = Math.max(0, now.getTime() - Date.parse(lastScanAt));
+  const agoText = ago < 60_000 ? "только что" : ago < 3600_000 ? `${Math.floor(ago / 60_000)} мин назад` : `${Math.floor(ago / 3600_000)} ч назад`;
+  const today = parseShown(until).toDateString() === now.toDateString();
+  return `Репозиторий анализировали ${agoText} – следующий запуск после ${today ? fmtTime(until) : fmtDateTime(until)}`;
+}
+
 /** Текст ошибки запроса для человека. */
 export function errorText(e: ErrorInput): string {
+  // время — в поясе браузера, поэтому текст собирается здесь, а не на сервере
+  if (e.code === "repo_cooldown" && e.lastScanAt && e.until) return repoCooldownText(e.lastScanAt, e.until);
   const fixed = e.code !== null ? ERROR_TEXTS[e.code] : undefined;
   const base = fixed ?? (e.message ? capitalize(e.message) : statusText(e.status));
   return e.status === 429 ? `${base}${retryHint(e.retryAfter)}` : base;
@@ -1218,7 +1236,7 @@ export function aiParagraphs(text: string): string[] {
  * закрытый — кода токен не видит.
  */
 export function notOwnReason(access: { visibility: string; own: boolean } | null | undefined): string {
-  const lead = "Репозиторий в вашем избранном, но сервис его не анализировал: анализ запускается только для своих репозиториев";
+  const lead = "Репозиторий в вашем избранном, но сервис его не анализировал: анализ по кнопке запускается для репозиториев ваших организаций";
   if (!access) return `${lead}. Права вашего токена к нему еще не проверены – проверка идет в «Избранном».`;
   if (access.visibility === "public") return `${lead}. Публичный репозиторий появится в рейтинге после планового анализа.`;
   // закрытый или внутренний с доступом к коду считается «своим»; не свой — значит кода токен не видит

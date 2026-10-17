@@ -67,17 +67,14 @@ describe("«Мои репозитории»: данные строки", () => {
 });
 
 describe("«Мои репозитории»: сервер и навигация", () => {
-  test("список по токену кэшируется, сбрасывается сменой и удалением токена; окно чтений — только на поход в SourceCraft", () => {
+  test("список по токену — общий кэш (`tokenRepoCache`): сбрасывается сменой и удалением токена; окно чтений — только на новый обход", () => {
+    // поведение кэша (общий обход, прежний список при исчерпанном окне, обход прежним
+    // токеном) проверяет v63-org-repos.test.ts; здесь — что маршрут и токен им пользуются
     const server = src("server.ts");
-    expect(server).toContain("const TOKEN_REPOS_TTL_MS = 10 * 60_000;");
-    expect(server.match(/tokenRepos\.delete\(user\.userId\);/g)?.length).toBe(2);
+    expect(server).toContain("ttlMs: 10 * 60_000,");
+    expect(server.match(/tokenRepoCache\.forget\(user\.userId\);/g)?.length).toBe(2);
     const route = server.slice(server.indexOf('"/api/me/sourcecraft-repos"'), server.indexOf('"/api/me/favorites"'));
-    // окно — только на новый обход: присоединение к идущему его не списывает
-    expect(route.indexOf("allowMyReposView")).toBeGreaterThan(route.indexOf("if (!flight || flight.pat !== pat)"));
-    // окно исчерпано, а список в памяти есть — прежний список с пометкой, а не 429
-    expect(route).toContain("if (cached) stale = true;");
-    // завершение обхода снимает только свою запись
-    expect(route).toContain("if (tokenReposInFlight.get(user.userId) === started) tokenReposInFlight.delete(user.userId);");
+    expect(route).toContain("mayWalk: () => allowMyReposView(user.userId)");
     // пикеру избранного данные каталога не собираются
     expect(route).toContain('params.get("entries") === "0" ? {} : { entries: tokenRepoEntries(db, user.userId, list.repos) }');
     expect(src("web/MePage.tsx")).toContain('fetch("/api/me/sourcecraft-repos?entries=0"');

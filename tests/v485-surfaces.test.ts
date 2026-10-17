@@ -1,5 +1,5 @@
 // Поверхности UI: кнопки анализа нет на чужих и у анонима (элемента нет), на
-// своей карточке не из избранного – есть; пункта «Проверить доступ» нет нигде;
+// своей карточке и карточке репозитория ваших организаций не из избранного – есть; пункта «Проверить доступ» нет нигде;
 // строка обновляется точечно; «нет в каталоге» – про каталог сервиса; URL
 // рейтинга приводится к допустимому, место на карточке = позиция строки;
 // MD скачивается через fetch + blob, тост по коду. Чистые функции и данные
@@ -18,7 +18,7 @@ const web = (file: string): string => readFileSync(join(WEB, file), "utf8");
 const code = (file: string): string => web(file).replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`])\/\/.*$/gm, "$1");
 const webFiles = readdirSync(WEB).filter((f) => /\.(tsx?|html)$/.test(f));
 
-describe("К8.5.14: анализ — только своих; права — сами", () => {
+describe("К8.5.14: анализ — своих и репозиториев ваших организаций; права — сами", () => {
   test("«Проверить доступ» нет ни в одном файле src/web — ни в строках, ни в комментариях", () => {
     expect(webFiles.filter((f) => web(f).includes("Проверить доступ"))).toEqual([]);
   });
@@ -31,9 +31,11 @@ describe("К8.5.14: анализ — только своих; права — с�
     expect(offenders).toEqual([]);
   });
 
-  test("карточка: кнопка анализа — только на своем репозитории (элемента нет, а не disabled); на своем не из избранного — есть", () => {
+  test("карточка: кнопка анализа — на своем репозитории и репозитории из списка по токену (у остальных элемента нет, а не disabled)", () => {
     const repoPage = code("RepoPage.tsx");
-    expect(repoPage).toContain('const canRefresh = data?.viewer?.own === true && data.viewer.auth === "pat";');
+    // публичный не свой — по списку по токену; список спрашивается только у такого
+    expect(repoPage).toContain('const tokenRepos = useTokenRepos(withPat && !ownRepo && data?.repo.visibility === "public");');
+    expect(repoPage).toContain("const canRefresh = withPat && (ownRepo || tokenRepos?.has(repoKey(org, repo)) === true);");
     // на телефоне кнопка – иконкой; обе ветки под тем же `canRefresh`
     expect(repoPage).toContain("const refreshButton = canRefresh && phoneBar ? (");
     expect(repoPage).toContain(") : canRefresh && (");
@@ -55,11 +57,12 @@ describe("К8.5.14: анализ — только своих; права — с�
     }
   });
 
-  test("строка «Моих репозиториев»: кнопка анализа — только у своего (сохраненная проверка own), у чужого и непроверенного ее нет", () => {
+  test("строка списка: кнопка анализа — у своего (сохраненная проверка own) и у репозитория из списка по токену, у остальных ее нет", () => {
     const me = code("MePage.tsx");
-    // в «Избранном» — по сохраненной проверке own; «Мои репозитории» передают canAnalyze
-    // (права проверит сервер при запуске), у пустого репозитория анализа нет
-    expect(me).toContain("const canAnalyze = !empty && (canAnalyzeOverride ?? (hasPat && access?.own === true));");
+    // в «Избранном» — по сохраненной проверке own или по списку по токену; «Мои репозитории»
+    // передают canAnalyze (каждая строка из списка по токену), у пустого репозитория анализа нет
+    expect(me).toContain("const canAnalyze = !empty && (canAnalyzeOverride ?? (hasPat && (access?.own === true || member)));");
+    expect(me).toContain("member={tokenRepos?.has(repoKey(entry.org, entry.repo)) === true}");
     // UX 17.10: у своего без анализа — видимая кнопка «Запустить анализ», у оцененного
     // своего — пункт «Обновить анализ» в меню «…»; у чужого нет ни того, ни другого
     // «Мои репозитории»: действие анализа — иконкой (обновить / запустить), без меню «…»;
@@ -75,7 +78,7 @@ describe("К8.5.14: анализ — только своих; права — с�
     // плановый анализ обещается только публичному; закрытому – честно «оценки не будет»
     // UX 17.10: «ночной обход» → «плановый анализ»
     expect(favoriteAddedText({ status: "checked", enqueue: { status: "skipped", code: "not_own" } }, "public")).toBe(
-      "Права проверены. Анализ запускается только для своих репозиториев – этот обновит плановый анализ.",
+      "Права проверены – оценку этого публичного репозитория обновит плановый анализ.",
     );
     for (const v of ["internal", "private", "unknown", undefined] as const) {
       expect(favoriteAddedText({ status: "checked", enqueue: { status: "skipped", code: "not_own" } }, v)).not.toContain("плановый анализ");

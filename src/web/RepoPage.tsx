@@ -129,6 +129,7 @@ import { lastCompareSet, rememberCompareSet } from "./compareReturn";
 import { LoginButton, Page, type Crumb } from "./Shell";
 import { Trophy } from "./icons";
 import { useMediaQuery } from "./prefs";
+import { repoKey, useTokenRepos } from "./tokenRepos";
 import { AiOverviewSection, BadgeButton, BadgeDialog, CategoryAiMark, CategoryAiNote, FraudCheckFooter, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, MethodLink, ModelVersion, RepoAvatar, RepoSlug, ScoreBar, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
 
@@ -163,10 +164,14 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
 
   const data = dataOf(state);
   useRecommendationsAnchor(data !== null && data.score !== null, slug);
-  // Анализ запускается только для своего репозитория. «Свой» определяется по доступу,
-  // который карточка и так резолвит (`viewer.own`), — кнопка есть на любом своем репо,
-  // даже не в избранном; чужому, анониму и при неизвестном доступе кнопки нет вовсе
-  const canRefresh = data?.viewer?.own === true && data.viewer.auth === "pat";
+  // Анализ по кнопке — своему репозиторию (`viewer.own`, из доступа, который карточка
+  // и так резолвит) и публичному репозиторию организаций зрителя (он есть в списке по
+  // токену); кнопка есть и не в избранном. Чужому, анониму и при неизвестном доступе
+  // кнопки нет вовсе; окончательно решает сервер при запуске
+  const withPat = data?.viewer?.auth === "pat";
+  const ownRepo = data?.viewer?.own === true;
+  const tokenRepos = useTokenRepos(withPat && !ownRepo && data?.repo.visibility === "public");
+  const canRefresh = withPat && (ownRepo || tokenRepos?.has(repoKey(org, repo)) === true);
   // сервер не видит сессии, а вкладка считает зрителя вошедшим (сессия истекла или
   // вышли в соседней вкладке) — перечитываем /api/me
   const sessionGone = loggedIn && data?.viewer?.auth === "no-session";
@@ -313,8 +318,8 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
                 ? [{ text: card.scan ? "Повторить анализ" : "Запустить анализ", view: "action", size: "l", onClick: start.start }]
                 : card.viewer?.auth === "no-pat"
                   ? [
-                      // без токена неизвестно, свой ли репозиторий, поэтому анализ не
-                      // обещаем: токен открывает CI/CD и Безопасность, анализ — только своих
+                      // без токена неизвестно, из ваших ли организаций репозиторий, поэтому
+                      // анализ не обещаем: токен открывает CI/CD, Безопасность и анализ по кнопке
                       { text: "Добавить токен в Настройках", view: "action", size: "l", href: "/settings" },
                     ]
                   : undefined
@@ -371,39 +376,39 @@ function NotInCatalog({ org, repo, crumbs }: { org: string; repo: string; crumbs
   );
 }
 /**
- * Карточка репозитория из избранного, которого нет в каталоге сервиса: закрытый
- * репозиторий попадает в каталог только своим анализом, а анализ запускается только
- * для своих (права на CI/CD или Безопасность). Текст — по сохраненным правам строки
- * избранного (`last_access`), без обещаний.
+ * Карточка репозитория из избранного или «Моих репозиториев», которого нет в каталоге
+ * сервиса: закрытый репозиторий попадает в каталог только анализом по кнопке, а она
+ * есть у своего репозитория (сохраненные права строки избранного, `last_access`) и у
+ * любого репозитория из списка по токену. Остальным — объяснение, без обещаний.
  */
 function FavoriteNotInCatalog({ org, repo, fallback, onRetry, onSection }: { org: string; repo: string; fallback: string; onRetry: () => void; onSection?: (s: "rating" | "repos" | "me") => void }) {
   const favs = useJson<{ entries: { org: string; repo: string; access: { visibility: string; own: boolean } | null }[] }>("/api/me/favorites");
   // опись по токену (кэш сервера): репозиторий из «Моих репозиториев», который еще не
   // анализировали, тоже получает «Оценки пока нет» с запуском, а не «не найден».
   // Без токена ответ — 409, это просто «не из описи»
-  const tokenList = useJson<{ repos: { org: string; slug: string; visibility: string | null }[] }>("/api/me/sourcecraft-repos?entries=0");
-  const same = (o: string, r: string) => o.toLowerCase() === org.toLowerCase() && r.toLowerCase() === repo.toLowerCase();
+  const tokenRepos = useTokenRepos(true);
+  const key = repoKey(org, repo);
   const data = dataOf(favs.state);
-  const fav = data?.entries.find((e) => same(e.org, e.repo)) ?? null;
-  const fromToken = dataOf(tokenList.state)?.repos.find((r) => same(r.org, r.slug)) ?? null;
+  const fav = data?.entries.find((e) => repoKey(e.org, e.repo) === key) ?? null;
+  const fromToken = tokenRepos?.get(key) ?? null;
   const section = fav !== null ? "me" : fromToken !== null ? "repos" : null;
   useEffect(() => {
     if (section) onSection?.(section);
   }, [section]); // eslint-disable-line react-hooks/exhaustive-deps
   const crumbs: Crumb[] =
     fav === null && fromToken !== null ? [{ text: "Мои репозитории", href: "/repos" }, { text: slugOf(org, repo) }] : [{ text: "Избранное", href: "/me" }, { text: slugOf(org, repo) }];
-  if (favs.state.kind === "loading" || tokenList.state.kind === "loading") {
+  if (favs.state.kind === "loading" || tokenRepos === null) {
     return (
       <Page crumbs={crumbs}>
         <SkeletonRows rows={1} height={150} />
       </Page>
     );
   }
-  if (fav !== null) return <FavoriteNotInCatalogState org={org} repo={repo} own={fav.access?.own === true} access={fav.access} crumbs={crumbs} onRetry={onRetry} />;
+  if (fav !== null) return <FavoriteNotInCatalogState org={org} repo={repo} own={fav.access?.own === true || fromToken !== null} access={fav.access} crumbs={crumbs} onRetry={onRetry} />;
   if (fromToken !== null) {
-    // закрытый, видимый токену, — свой по правилу; у публичного свой ли, проверит сервер при запуске
+    // публичный из описи оценит и анализ по расписанию — запуск по кнопке только раньше
     const closed = fromToken.visibility === "private" || fromToken.visibility === "internal";
-    return <FavoriteNotInCatalogState org={org} repo={repo} own access={null} crumbs={crumbs} onRetry={onRetry} fromToken ownChecked={closed} />;
+    return <FavoriteNotInCatalogState org={org} repo={repo} own access={null} crumbs={crumbs} onRetry={onRetry} fromToken scheduled={!closed} />;
   }
   return <NotInCatalog org={org} repo={repo} crumbs={[{ text: "Рейтинг", href: lastRatingHref() }, { text: slugOf(org, repo) }]} />;
 }
@@ -421,7 +426,7 @@ function FavoriteNotInCatalogState({
   crumbs,
   onRetry,
   fromToken = false,
-  ownChecked = true,
+  scheduled = false,
 }: {
   org: string;
   repo: string;
@@ -431,8 +436,8 @@ function FavoriteNotInCatalogState({
   onRetry: () => void;
   /** репозиторий из «Моих репозиториев» (список по токену), а не из избранного */
   fromToken?: boolean;
-  /** false — публичный из описи: свой ли он, сервер проверит при запуске */
-  ownChecked?: boolean;
+  /** публичный из описи: его оценит и анализ по расписанию */
+  scheduled?: boolean;
 }) {
   const slug = `${org}/${repo}`;
   const start = useStartAnalysis(org, repo);
@@ -459,9 +464,9 @@ function FavoriteNotInCatalogState({
         title="Оценки пока нет"
         description={
           fromToken
-            ? ownChecked
-              ? "Репозиторий доступен вашему токену, но анализа еще не было. Запустите его – итог появится здесь."
-              : "Анализа этого публичного репозитория еще не было – его оценит анализ по расписанию. Запустить раньше можно здесь: свой ли это репозиторий, проверим при запуске."
+            ? scheduled
+              ? "Анализа этого публичного репозитория еще не было – его оценит анализ по расписанию. Запустить раньше можно здесь."
+              : "Репозиторий доступен вашему токену, но анализа еще не было. Запустите его – итог появится здесь."
             : own
               ? "Репозиторий в вашем избранном, но анализа еще не было. Запустите его – итог появится здесь."
               : notOwnReason(access)
