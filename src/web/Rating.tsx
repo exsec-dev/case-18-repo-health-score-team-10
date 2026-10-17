@@ -498,6 +498,10 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
           (56px), чтобы раскладка не прыгала; при обновлении — полоса сверху */}
       {state.kind === "loading" && !refreshing && <SkeletonRows rows={10} height={isPhone ? 84 : 56} />}
       <div className={refreshing ? "rh-refresh-bar rh-refresh-bar_on" : "rh-refresh-bar"} role="progressbar" aria-hidden={!refreshing} aria-label="Обновляем рейтинг" />
+      {/* итог поиска, фильтров и страницы — для скринридера: таблица перестраивается молча */}
+      <span className="rh-sr-only" aria-live="polite">
+        {state.kind === "ok" && !refreshing ? ratingAnnouncement(view, state.data) : ""}
+      </span>
 
       {/* перечитывание не удалось — строки прежние, и это надо показать:
           иначе новая сортировка подсвечена над старыми строками */}
@@ -587,11 +591,19 @@ function ratingLead(meta: MetaResponse | null, phone = false): ReactNode {
 function HowCountedLink() {
   const aside = useAsideControl();
   return (
+    // действие, а не переход: роль кнопки и пробел, как у кнопки
     <Link
       href="#"
+      role="button"
       onClick={(e) => {
         e.preventDefault();
         showAside(aside);
+      }}
+      onKeyDown={(e) => {
+        if (e.key === " ") {
+          e.preventDefault();
+          showAside(aside);
+        }
       }}
     >
       Как считается?
@@ -979,6 +991,14 @@ function RepoMarks({ item, ext = true }: { item: Item; ext?: boolean }) {
  * подходит — он сортирует данные страницы на клиенте. Здесь заголовок —
  * просто кнопка, меняющая query.
  */
+/** Что сказать скринридеру после загрузки: сколько найдено и какая страница. */
+function ratingAnnouncement(view: "scored" | "unscored", data: RatingResponse): string {
+  if (view === "unscored") return data.nullItems.length === 0 ? "Ничего не найдено" : `Без оценки: ${fmtCount(data.nulls)}`;
+  if (data.total === 0) return "Ничего не найдено";
+  const pages = Math.max(1, Math.ceil(data.total / data.perPage));
+  return pages > 1 ? `Найдено ${fmtCount(data.total)}, страница ${data.page} из ${pages}` : `Найдено ${fmtCount(data.total)}`;
+}
+
 function SortableHeader({
   label,
   columnKey,
@@ -998,13 +1018,16 @@ function SortableHeader({
   const active = sort === columnKey;
   // первый клик по «Репозиторию» — А→Я, по числам — по убыванию
   const next: "asc" | "desc" = active ? (order === "desc" ? "asc" : "desc") : firstSortOrder(columnKey);
+  const hint = active ? (order === "desc" ? "По убыванию – переключить на возрастание" : "По возрастанию – переключить на убывание") : `Сортировать по «${label}»`;
   return (
     <Button
       view="flat"
       size="xs"
       className={wrap ? "rh-th-sort rh-th-sort_wrap" : "rh-th-sort"}
       onClick={() => onSort(columnKey, next)}
-      title={active ? (order === "desc" ? "По убыванию – переключить на возрастание" : "По возрастанию – переключить на убывание") : `Сортировать по «${label}»`}
+      // направление — в имени кнопки: title скринридер может не прочитать, с клавиатуры он не всплывает
+      aria-label={active ? `${label}, ${order === "desc" ? "по убыванию" : "по возрастанию"}. Переключить на ${order === "desc" ? "возрастание" : "убывание"}` : `${label}. Сортировать`}
+      title={hint}
     >
       {label}
       <Icon

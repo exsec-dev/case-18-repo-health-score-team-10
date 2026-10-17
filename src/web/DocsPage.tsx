@@ -258,7 +258,8 @@ function BlockView({ block, tight }: { block: DocBlock; tight: boolean }): React
       return (
         <H id={block.id} className={`rh-docs__h${block.level}`}>
           <Inlines line={block.content} />
-          <a className="rh-docs__anchor" href={`#${block.id}`} aria-label="Ссылка на раздел" onClick={(e) => { e.preventDefault(); history.replaceState(null, "", `#${block.id}`); scrollToAnchor(block.id); }}>
+          {/* якорь — для мыши: заголовок иначе звучал бы «… Ссылка на раздел»; с клавиатуры раздел открывается из «На этой странице» */}
+          <a className="rh-docs__anchor" href={`#${block.id}`} aria-hidden="true" tabIndex={-1} onClick={(e) => { e.preventDefault(); history.replaceState(null, "", `#${block.id}`); scrollToAnchor(block.id); }}>
             #
           </a>
         </H>
@@ -446,6 +447,7 @@ export function DocsPage({ slug }: { slug: string }) {
         <EmptyState
           image={NotFoundIllustration}
           title="Страница не найдена"
+            headingLevel={1}
           description="Такой страницы в документации нет или она переехала."
           actions={[{ text: "К началу документации", view: "action", size: "l", onClick: () => navigate("/docs") }]}
         />

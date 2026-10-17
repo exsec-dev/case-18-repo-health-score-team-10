@@ -3219,19 +3219,18 @@ button.rh-category:focus-visible {
   border-radius: var(--g-border-radius-s);
 }
 
-/* на телефоне цель касания мелких иконок строки — 24px (WCAG 2.5.8) за счет
-   отступа; отрицательное поле не меняет раскладку */
-@media (max-width: 767px) {
-  .rh-rating-ext,
-  .rh-rating-ai,
-  .rh-rating-fraud {
-    padding: 5px;
-    margin: -5px;
-  }
-  .g-help-mark {
-    padding: 4px;
-    margin: -4px;
-  }
+/* цель клика мелких иконок строки и (?) — 24px (WCAG 2.5.8) на любом экране за
+   счет отступа; отрицательное поле не меняет раскладку */
+.rh-rating-ext,
+.rh-rating-ai,
+.rh-rating-fraud {
+  padding: 5px;
+  margin: -5px;
+}
+
+.g-help-mark {
+  padding: 4px;
+  margin: -4px;
 }
 
 /* Ячейка «Репозиторий» берет то, что осталось от окна после каркаса и
@@ -3972,4 +3971,56 @@ button.rh-category:focus-visible {
    при равной специфичности). Правило ничего не меняет на странице. */
 .rh-css-order {
   --rh-css-order: 1;
+}
+
+/* обертка пункта-действия rail (тема, выход) не участвует в раскладке */
+.rh-rail-action {
+  display: contents;
+}
+
+/* темная тема: вторичный текст на залитых плашках (заглушки, закрытый Repo Health
+ * Score, плитки «Избранного») — complementary: secondary на base-generic дает 4,3:1,
+ * ниже 4,5:1. На чистом фоне и в светлой теме вторичный текст прежний. */
+.g-root_theme_dark :is(.rh-score-band_locked, .rh-empty, .rh-ai-section_empty, .rh-placeholder-card, .rh-summary__tile) .g-color-text_color_secondary {
+  color: var(--g-color-text-complementary);
+}
+
+/* обертка заглушки — только для поиска узла заголовка, раскладку не меняет */
+.rh-empty-wrap {
+  display: contents;
+}
+
+/* строка категории — заголовок H3 без своих полей и шрифта */
+.rh-category__h {
+  margin: 0;
+  font: inherit;
+}
+
+/* таблица подметрик — строки по-прежнему в гриде `.rh-subrows` */
+.rh-subrows__table {
+  display: contents;
+}
+
+/* фокус на main после «К содержимому» — без рамки: это не элемент управления */
+.rh-page__main:focus {
+  outline: none;
+}
+
+/* «К содержимому» — за краем экрана, пока не в фокусе */
+.rh-skip {
+  position: fixed;
+  z-index: 1000;
+  top: var(--g-spacing-2);
+  left: var(--g-spacing-2);
+  padding: var(--g-spacing-2) var(--g-spacing-3);
+  border-radius: var(--g-border-radius-m);
+  color: var(--g-color-text-primary);
+  background: var(--g-color-base-float);
+  box-shadow: 0 0 0 2px var(--g-color-line-focus);
+  text-decoration: none;
+  transform: translateY(-200%);
+}
+
+.rh-skip:focus {
+  transform: none;
 }

@@ -142,7 +142,8 @@ describe("В4.6 круг 3: разделы пользователя и обол�
     expect(reposPage).toContain("<MyReposSection");
     expect(me).toMatch(/<Text variant="header-2" as="h1" className="rh-page-title">\s*Избранное\s*<\/Text>/);
     expect(reposPage).not.toContain("<PatSection");
-    expect(settingsPage).not.toContain('<PageHeader title="Настройки"');
+    // UX 17.10 (A11Y-10): у «Настроек» свой H1, как у остальных разделов
+    expect(settingsPage).toContain('<PageHeader title="Настройки" description="Токен доступа и лимиты AI" />');
     expect(settingsPage).toContain("<PatSection");
     expect(settingsPage).not.toContain("Управление доступом к данным репозиториев SourceCraft");
     expect(me).toContain("Токен хранится в зашифрованном виде, не возвращается");

@@ -4,7 +4,7 @@
 // основой слова, чтобы «оценки» находило «оценка».
 import { Magnifier } from "@gravity-ui/icons";
 import { Icon, Popup, TextInput } from "@gravity-ui/uikit";
-import { useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { DocPage } from "../docs/model";
 import { buildSearchIndex, queryTerms, searchDocs, type SearchHit } from "../docs/search";
 
@@ -21,8 +21,11 @@ export function DocsSearch({ pages, onOpen }: { pages: DocPage[]; onOpen: (slug:
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const anchor = useRef<HTMLDivElement>(null);
+  const listId = useId();
+  const hitId = (i: number): string => `${listId}-hit-${i}`;
   const hits = useMemo(() => searchDocs(index, query), [index, query]);
   const terms = useMemo(() => queryTerms(query), [query]);
+  const shown = open && query.trim().length >= 2;
 
   const go = (hit: SearchHit) => {
     setOpen(false);
@@ -50,7 +53,15 @@ export function DocsSearch({ pages, onOpen }: { pages: DocPage[]; onOpen: (slug:
         placeholder="Поиск по документации"
         hasClear
         startContent={<Icon data={Magnifier} size={16} className="rh-docs-search__lens" />}
-        controlProps={{ "aria-label": "Поиск по документации", "aria-expanded": open && query !== "", role: "combobox" }}
+        // стандартный combobox: фокус остается в поле, подсвеченный пункт — через aria-activedescendant
+        controlProps={{
+          "aria-label": "Поиск по документации",
+          "aria-expanded": shown,
+          role: "combobox",
+          "aria-controls": listId,
+          "aria-autocomplete": "list",
+          "aria-activedescendant": shown && hits[active] ? hitId(active) : undefined,
+        }}
         onUpdate={(v) => {
           setQuery(v);
           setActive(0);
@@ -59,16 +70,22 @@ export function DocsSearch({ pages, onOpen }: { pages: DocPage[]; onOpen: (slug:
         onFocus={() => setOpen(true)}
         onKeyDown={onKeyDown}
       />
-      <Popup open={open && query.trim().length >= 2} anchorElement={anchor.current} placement="bottom-end" onOpenChange={(next) => !next && setOpen(false)}>
-        <div className="rh-docs-search__results" role="listbox" aria-label="Результаты поиска">
+      {/* число результатов — для скринридера */}
+      <span className="rh-sr-only" aria-live="polite">
+        {shown ? (hits.length === 0 ? "Ничего не найдено" : `Найдено: ${hits.length}`) : ""}
+      </span>
+      <Popup open={shown} anchorElement={anchor.current} placement="bottom-end" onOpenChange={(next) => !next && setOpen(false)}>
+        <div className="rh-docs-search__results" role="listbox" id={listId} aria-label="Результаты поиска">
           {hits.length === 0 ? (
             <div className="rh-docs-search__empty">Ничего не найдено</div>
           ) : (
             hits.map((h, i) => (
-              <button
-                type="button"
+              // пункт — option, а не кнопка: кнопка внутри listbox — лишняя фокусируемая роль
+              <div
                 key={`${h.entry.slug}#${h.entry.anchor ?? ""}`}
+                id={hitId(i)}
                 role="option"
+                tabIndex={-1}
                 aria-selected={i === active}
                 className={i === active ? "rh-docs-search__hit rh-docs-search__hit_active" : "rh-docs-search__hit"}
                 onMouseEnter={() => setActive(i)}
@@ -80,7 +97,7 @@ export function DocsSearch({ pages, onOpen }: { pages: DocPage[]; onOpen: (slug:
                   {h.entry.section && <span className="rh-docs-search__section"> › {highlight(h.entry.section, terms)}</span>}
                 </span>
                 {h.snippet && <span className="rh-docs-search__snippet">{highlight(h.snippet, terms)}</span>}
-              </button>
+              </div>
             ))
           )}
         </div>

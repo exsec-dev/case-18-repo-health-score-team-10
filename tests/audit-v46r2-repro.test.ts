@@ -352,7 +352,8 @@ describe("Б4 (Р14, Р16): список категорий и контейне�
     const subrows = between(css, ".rh-subrows {", "}");
     expect({
       topPaddingGone: /padding: var\(--g-spacing-2\)/.test(subrows),
-      headerSeparates: src.includes('<div className="rh-subrows__head">'),
+      // UX 17.10 (A11Y-15): шапка — строка таблицы подметрик
+      headerSeparates: src.includes('<div className="rh-subrows__head" role="row">'),
     }).toEqual({ topPaddingGone: false, headerSeparates: true });
   });
 

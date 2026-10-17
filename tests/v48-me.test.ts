@@ -228,7 +228,8 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     // одна кнопка у всех строк, колонка ровная
     expect(rowSrc).toContain("<DropdownMenu");
     expect(rowSrc).toContain('{ text: "Убрать из избранного", iconStart: <Icon data={TrashBin} size={16} />, action: onRemove, disabled: busy, theme: "danger" as const }');
-    expect(rowSrc).toContain('aria-label="Действия с репозиторием"');
+    // UX 17.10 (A11Y-16): имя кнопки меню называет репозиторий — строки различимы
+    expect(rowSrc).toContain("aria-label={`Действия с ${entry.org}/${entry.repo}`}");
     expect(rowSrc).not.toContain("Открыть рекомендации");
     // плитки сводки — переключатели: роль кнопки и aria-pressed вместо радио
     expect(src).toMatch(/role="button"\s*aria-checked=\{undefined\}\s*aria-pressed=\{band === b\.key\}/);

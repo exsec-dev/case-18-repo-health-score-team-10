@@ -174,6 +174,8 @@ export function SettingsPage() {
         </>
       }
     >
+      {/* заголовок страницы — как у остальных разделов: H1 для навигации по заголовкам */}
+      <PageHeader title="Настройки" description="Токен доступа и лимиты AI" />
       {/* у PatSection нет key по дате проверки: иначе она перемонтируется и
           строка «Токен принадлежит…» пропадет сразу после сохранения */}
       <Flex direction="column" gap={4}>
@@ -806,6 +808,10 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
             </div>
           </div>
 
+          {/* итог поиска и плитки — для скринридера: список перестраивается молча */}
+          <span className="rh-sr-only" aria-live="polite">
+            {query !== "" || band !== null ? `Показано ${shown.length} из ${entries.length}` : ""}
+          </span>
           {shown.length === 0 ? (
             <EmptyState
               image={SearchIllustration}
@@ -1287,7 +1293,7 @@ function RepoRow({
             Пункта ручной проверки прав нет: права проверяются сами — при
             добавлении, после смены токена и в фоне */}
         {canAnalyze && !scored && (
-          <Button view="outlined" size="m" onClick={onScan} disabled={inWork}>
+          <Button view="outlined" size="m" onClick={onScan} disabled={inWork} aria-label={`Запустить анализ ${entry.org}/${entry.repo}`}>
             Запустить анализ
           </Button>
         )}
@@ -1300,7 +1306,7 @@ function RepoRow({
           ]}
           popupProps={{ placement: "bottom-end" }}
           renderSwitcher={(props) => (
-            <Button {...props} view="flat" size="m" aria-label="Действия с репозиторием" loading={inWork}>
+            <Button {...props} view="flat" size="m" aria-label={`Действия с ${entry.org}/${entry.repo}`} loading={inWork}>
               <Icon data={Ellipsis} size={16} />
             </Button>
           )}
@@ -1354,6 +1360,8 @@ export function JobsBell() {
         onClick={() => (open ? close() : setOpen(true))}
         aria-expanded={open}
         aria-haspopup="dialog"
+        // счетчик — словами: иначе «Очередь0»
+        aria-label={jobs === null ? "Очередь" : alarm ? `Очередь: с ошибкой – ${failed}` : `Очередь: идет – ${active.length}`}
         title={failing ? JOBS_STALE_TEXT : busy ? "Ваши запуски идут" : alarm ? "Последний анализ завершился ошибкой" : "Анализы, AI-обзоры и проверки, которые вы запускали"}
       >
         <Icon data={alarm ? CircleExclamation : ListCheck} size={16} className={alarm ? "rh-state__icon_danger" : undefined} />

@@ -358,6 +358,7 @@ function NotInCatalog({ org, repo, crumbs }: { org: string; repo: string; crumbs
       <EmptyState
         image={NotFoundIllustration}
         title="Репозиторий не найден"
+            headingLevel={1}
         description="Возможно, он закрытый или в адресе ошибка. Закрытые репозитории открываются участникам после входа через Я ID."
         actions={[
           { text: "Войти", view: "action", size: "l", href: loginHref(`/repo/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`, "") },
@@ -1343,7 +1344,10 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
       </span>
       {/* Tri-state: без данных на месте полосы пусто — единственный прочерк стоит в
           колонке балла, рядом с плашкой «Нет данных» */}
-      <span className="rh-category__bar">{c.score === null ? null : <ScoreBar value={c.score} width="100%" label={`${c.scoreText} из 100`} />}</span>
+      {/* полоса — только для глаза: балл уже звучит числом рядом, иначе он читался дважды */}
+      <span className="rh-category__bar" aria-hidden="true">
+        {c.score === null ? null : <ScoreBar value={c.score} width="100%" label={`${c.scoreText} из 100`} />}
+      </span>
       <Text variant="subheader-2" color={c.score === null ? "secondary" : undefined} className="rh-category__value">
         {c.scoreText}
       </Text>
@@ -1362,15 +1366,19 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
 
   return (
     <li className="rh-list__item" style={{ padding: 0 }} id={categoryAnchor(key)}>
-      {expandable ? (
-        <button type="button" className="rh-category" aria-expanded={open} onClick={() => setOpen(!open)}>
-          {row}
-        </button>
-      ) : (
-        <div className="rh-category">{row}</div>
-      )}
+      {/* строка — заголовок H3 (аккордеон: кнопка внутри заголовка), между категориями
+          можно ходить по заголовкам */}
+      <h3 className="rh-category__h">
+        {expandable ? (
+          <button type="button" className="rh-category" aria-expanded={open} aria-controls={`${categoryAnchor(key)}-subs`} onClick={() => setOpen(!open)}>
+            {row}
+          </button>
+        ) : (
+          <span className="rh-category">{row}</span>
+        )}
+      </h3>
       {open && expandable && (
-        <div className="rh-subrows">
+        <div className="rh-subrows" id={`${categoryAnchor(key)}-subs`}>
           {c.cohortNote && (
             <Text variant="body-1" color="complementary" className="rh-subrows__note">
               {c.cohortNote}
@@ -1386,17 +1394,19 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
               нужна. Сетка живет на `.rh-subrows`, строки раскрываются в нее через
               `display: contents`: иначе у каждой строки был бы свой `auto` и подпись не
               встала бы над значениями. Вес — тот же, что в разборе PDF (`submetricWeightText`). */}
-          <div className="rh-subrows__head">
-            <span>Значение</span>
-            <span>Вес</span>
-            <span>Балл</span>
+          {/* табличная семантика поверх грида: строки — `display: contents` */}
+          <div className="rh-subrows__table" role="table" aria-label={`Показатели категории «${c.title}»`}>
+          <div className="rh-subrows__head" role="row">
+            <span role="columnheader">Значение</span>
+            <span role="columnheader">Вес</span>
+            <span role="columnheader">Балл</span>
           </div>
           {subs.map(([subKey, sub]) => (
-            <div key={subKey} className="rh-subrow">
+            <div key={subKey} className="rh-subrow" role="row">
               {/* Имя, пунктирный лидер и значение — одна ячейка: в разных колонках грида
                   между ними зияла пустота и строка распадалась надвое. Цвет имени говорит
                   о весе: справочные подметрики приглушены, взвешенные — основным цветом. */}
-              <span className="rh-subrow__head">
+              <span className="rh-subrow__head" role="cell">
                 <Text color="secondary" className="rh-subrow__icon">
                   <Icon data={submetricIcon(key, subKey)} size={14} />
                 </Text>
@@ -1420,22 +1430,26 @@ function CategoryRow({ category: c, card, defaultOpen = false }: { category: Cat
                   и «нет данных» шире числа и сбивали бы правый столбик. Вместо них прочерк —
                   тот же знак отсутствующего числа, что везде (`fmtScore`), он никогда не
                   читается нулем. Что именно отсутствует, говорят подсказка и цвет имени. */}
-              <Text className="rh-subrow__score" color="secondary">
+              <Text className="rh-subrow__score" color="secondary" role="cell">
                 {submetricWeightText(key, subKey)}
               </Text>
               {displayOnly(key, subKey) || sub.score === null ? (
                 <Text
                   className="rh-subrow__score"
+                  role="cell"
                   color="secondary"
                   title={displayOnly(key, subKey) ? "Показывается для справки, в балл категории не входит" : NO_DATA}
                 >
                   —
                 </Text>
               ) : (
-                <Text className="rh-subrow__score">{fmtSubmetric(sub.score)}</Text>
+                <Text className="rh-subrow__score" role="cell">
+                  {fmtSubmetric(sub.score)}
+                </Text>
               )}
             </div>
           ))}
+          </div>
           {key === "security" && <AppsecEngines card={card} />}
           {key === "code" && <OwnershipMap category={cat} />}
           {aiNote !== null && <CategoryAiNote note={aiNote} card={card} />}
@@ -1591,7 +1605,7 @@ function RecommendationRow({ item, org, repo, stepEffect }: { item: Recommendati
           <Text variant="body-short" color="secondary">
             Показатель:
           </Text>
-          <Popover trigger="click" placement={["bottom-start", "top-start"]} content={<FactProof item={item} />}>
+          <Popover trigger="click" placement={["bottom-start", "top-start"]} content={<FactProof item={item} />} aria-label={`Исходные данные: ${item.label}`}>
             <Label theme="info" size="xs" interactive>
               <Flex gap={1} alignItems="center">
                 {item.label}

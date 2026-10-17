@@ -16,7 +16,7 @@ import {
   type IconData,
   type PlaceholderContainerActionProps,
 } from "@gravity-ui/uikit";
-import { useEffect, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
+import { useEffect, useRef, useState, type ComponentType, type ReactNode, type SVGProps } from "react";
 import { ArrowRight, Globe, Lock, Persons } from "@gravity-ui/icons";
 import { linkProps } from "./router";
 import { visibilityPill } from "./cardView";
@@ -296,14 +296,27 @@ export function EmptyState({
   title,
   description,
   actions,
+  headingLevel = 2,
 }: {
   image: ComponentType<SVGProps<SVGSVGElement>>;
   title: string;
   description?: ReactNode;
   /** кнопки — массивом; свой блок действий (готовые наборы «Сравнения») — узлом */
   actions?: PlaceholderContainerActionProps[] | ReactNode;
+  /** уровень заголовка: 1 — заглушка вместо страницы (404), 2 — внутри страницы с заголовком */
+  headingLevel?: 1 | 2;
 }) {
+  // PlaceholderContainer рисует заголовок `div` и принимает только строку — роль
+  // заголовка ставится на готовый узел: по заголовкам навигация работает и здесь
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const el = ref.current?.querySelector(".g-placeholder-container__title");
+    if (!el) return;
+    el.setAttribute("role", "heading");
+    el.setAttribute("aria-level", String(headingLevel));
+  });
   return (
+    <div ref={ref} className="rh-empty-wrap">
     <PlaceholderContainer
       className="rh-empty"
       size="m"
@@ -314,5 +327,6 @@ export function EmptyState({
       actions={actions}
       image={<Illustration width={120} height={120} aria-hidden="true" />}
     />
+    </div>
   );
 }

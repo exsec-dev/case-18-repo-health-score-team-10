@@ -87,6 +87,19 @@ export function Shell({
   }));
 
   return (
+    <>
+    {/* «К содержимому» — первым в Tab-обходе, виден только в фокусе: до первой строки
+        рейтинга иначе 25 нажатий Tab */}
+    <a
+      className="rh-skip"
+      href="#rh-main"
+      onClick={(e) => {
+        e.preventDefault();
+        document.getElementById("rh-main")?.focus();
+      }}
+    >
+      К содержимому
+    </a>
     <AsideHeader
       compact={compact}
       onChangeCompact={setCompact}
@@ -113,6 +126,7 @@ export function Shell({
       )}
       className={compact ? "rh-rail rh-rail_compact" : "rh-rail"}
     />
+    </>
   );
 }
 
@@ -132,6 +146,33 @@ function RailTipsBackdrop() {
     setBox({ left: rail.right, top, height: bottom - top });
   }, []);
   return box ? <div className="rh-rail-backdrop" style={{ left: box.left, top: box.top, height: box.height }} aria-hidden="true" /> : null;
+}
+
+/**
+ * Пункт rail-действие (тема, выход): navigation рисует его ссылкой `href="#"` —
+ * без href пункт выпадает из Tab-обхода. Ссылке ставится роль кнопки и пробел, как
+ * у кнопки: скринридер объявляет «кнопка», пробел срабатывает.
+ */
+function RailAction({ children }: { children: ReactNode }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const a = ref.current?.querySelector("a");
+    if (!a) return;
+    a.setAttribute("role", "button");
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === " ") {
+        e.preventDefault();
+        a.click();
+      }
+    };
+    a.addEventListener("keydown", onKey);
+    return () => a.removeEventListener("keydown", onKey);
+  });
+  return (
+    <span ref={ref} className="rh-rail-action">
+      {children}
+    </span>
+  );
 }
 
 /**
@@ -249,6 +290,17 @@ function RailFooter({ me, meLoading, compact, section }: { me: MeResponse | null
     ),
   });
   const themeTitle = isDark ? "Светлая тема" : "Темная тема";
+  // пункт-действие: та же подпись, плюс роль кнопки (RailAction)
+  const actionTip = (title: string) => ({
+    enableTooltip: false,
+    itemWrapper: (params: Parameters<NonNullable<AsideHeaderItem["itemWrapper"]>>[0], makeItem: (p: typeof params) => ReactNode) => (
+      <RailAction>
+        <RailIconTip title={title} compact={compact}>
+          {makeItem(params)}
+        </RailIconTip>
+      </RailAction>
+    ),
+  });
 
   return (
     <>
@@ -278,7 +330,7 @@ function RailFooter({ me, meLoading, compact, section }: { me: MeResponse | null
         title={themeTitle}
         icon={isDark ? Sun : Moon}
         regularSize
-        {...tip(themeTitle)}
+        {...actionTip(themeTitle)}
         // пункт без href рисуется не ссылкой и выпадает из Tab-обхода —
         // «#» делает его фокусируемым, переход по нему гасится
         href="#"
@@ -294,7 +346,7 @@ function RailFooter({ me, meLoading, compact, section }: { me: MeResponse | null
           title="Выйти"
           icon={ArrowRightFromSquare}
           regularSize
-          {...tip("Выйти")}
+          {...actionTip("Выйти")}
           href="#"
           onItemClick={(_item, _collapsed, e) => {
             e.preventDefault();
@@ -556,13 +608,15 @@ export function Page({ crumbs, actions, aside, asideDrawer = false, asideColumnF
 
       <div className="rh-page__body">
         {mode === "fill" ? (
-          <main className="rh-page__main">
+          <main className="rh-page__main" id="rh-main" tabIndex={-1}>
             {header && <div className="rh-fill__header">{header}</div>}
             <div className="rh-fill__content">{children}</div>
             {footer && <div className="rh-fill__footer">{footer}</div>}
           </main>
         ) : (
-          <main className="rh-page__main">{children}</main>
+          <main className="rh-page__main" id="rh-main" tabIndex={-1}>
+            {children}
+          </main>
         )}
         {aside !== undefined && !asideInDrawer && <aside className="rh-page__aside">{aside}</aside>}
       </div>

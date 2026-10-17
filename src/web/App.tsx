@@ -86,6 +86,7 @@ function Routes() {
           <EmptyState
             image={NotFoundIllustration}
             title="Страница не найдена"
+            headingLevel={1}
             description="Такого адреса нет или он изменился."
             actions={[{ text: "К рейтингу", view: "action", size: "l", onClick: () => navigate("/") }]}
           />
