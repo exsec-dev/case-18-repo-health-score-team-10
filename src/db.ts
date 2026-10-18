@@ -307,6 +307,10 @@ export function openDb(config: Config): Database {
     // аватары и подписи: старый код эти колонки не читает, поэтому версия схемы не менялась
     ensureColumn(db, "repos", "logo_url", "TEXT");
     ensureColumn(db, "repos", "language_color", "TEXT");
+    // описание из каталога и тематики рейтинга (api/topics.ts, «,bot,web,»):
+    // старый код колонки не читает, версия схемы не менялась
+    ensureColumn(db, "repos", "description", "TEXT");
+    ensureColumn(db, "repos", "topics", "TEXT");
     ensureColumn(db, "users", "display_name", "TEXT");
     ensureColumn(db, "users", "avatar_id", "TEXT");
     // логин SourceCraft владельца токена (из GET /user при сохранении): «Мои

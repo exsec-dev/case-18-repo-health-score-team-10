@@ -10,6 +10,7 @@ import { lstat, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Fact, GIT_KINDS, badChannelFact, noDataFact, okFact, scrubDetail } from "./facts";
+import { collectDeps } from "./deps";
 import { isSourcePath, isTestPath } from "./source-path";
 import { OWNERSHIP_LOG_FORMAT, OWNERSHIP_MAX_COMMITS, OWNERSHIP_WINDOW_DAYS, aggregateOwnership, parseOwnershipLog } from "./ownership";
 import { robot2Flags } from "../score/robot2";
@@ -1239,7 +1240,19 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
     nowIso,
   );
 
-  return [timelineFact, summaryFact, docsPresenceFact, readmeFact, treeStatsFact, cicdConfigsFact, codeTodoFact, ownershipFact];
+  // --- зависимости из манифестов: факт тематики рейтинга (api/topics.ts) ---
+  // В оценку не входит (нет в READ_KINDS). Ни одного манифеста – факта нет:
+  // «зависимостей не нашли» тематику не меняет, а no-data здесь лишний шум
+  const facts: Fact[] = [timelineFact, summaryFact, docsPresenceFact, readmeFact, treeStatsFact, cicdConfigsFact, codeTodoFact, ownershipFact];
+  if (Date.now() <= deadline) {
+    try {
+      const deps = await collectDeps(blobs, async (sha) => (await git(["cat-file", "blob", sha])).stdout);
+      if (deps !== null) facts.push(okFact("tree.deps", deps, "git", nowIso));
+    } catch {
+      /* манифесты не прочитаны – факта нет, остальные факты целы */
+    }
+  }
+  return facts;
 }
 
 const todoKind = todoMarkerKind;

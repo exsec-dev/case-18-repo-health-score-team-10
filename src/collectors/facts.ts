@@ -98,6 +98,10 @@ export const KINDS = {
   // каталогам за 365 дней без мерджей и роботов; только имя автора, без email
   "code.ownership":
     "{window_days,threshold,commits,robot_commits_skipped,changes,single_owner_share,dirs_total,dirs_single_owner,dirs:[{dir,changes,authors,owner,owner_share}],truncated?,truncated_note?,history_since?} | bad",
+  // зависимости из манифестов (deps.ts) – только для тематики рейтинга
+  // (api/topics.ts); в Score не идет, в READ_KINDS/GIT_KINDS не входит,
+  // без манифестов факта нет вовсе
+  "tree.deps": "{manifests:[...],deps:[...],truncated?}",
 } as const;
 
 export type Kind = keyof typeof KINDS;
