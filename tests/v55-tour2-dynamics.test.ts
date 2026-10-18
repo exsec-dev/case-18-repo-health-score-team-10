@@ -81,9 +81,9 @@ const run = (status: string, startedDaysAgo: number, extra: Record<string, unkno
 });
 const issue = (slug: string, created: string, extra: Record<string, unknown> = {}) => ({ id: slug, slug, created_at: created, updated_at: created, ...extra });
 
-test("версии тура 2: модель 4.5.0-hci, сборщик 5", () => {
+test("версии тура 2: модель 4.5.0-hci, сборщик 6", () => {
   expect(MODEL_VERSION).toBe("4.5.0-hci");
-  expect(COLLECTOR_VERSION).toBe(5);
+  expect(COLLECTOR_VERSION).toBe(6);
 });
 
 // ---------- стабильность CI в динамике ----------

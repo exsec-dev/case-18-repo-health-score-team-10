@@ -10,7 +10,7 @@ export type FactStatus = "ok" | "no-data" | "bad";
  * пригодный скан собран старым сборщиком (`scheduler.ts`). NULL в старых
  * строках читается как версия старше текущей.
  */
-export const COLLECTOR_VERSION = 5;
+export const COLLECTOR_VERSION = 6;
 
 /** Причина no-data хранится ключом `reason` внутри value (отдельной колонки нет).
  *  no-scan и incomplete – ветки AppSec: скана нет или не завершен; неполный
