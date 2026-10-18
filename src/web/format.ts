@@ -808,7 +808,10 @@ export function errorText(e: ErrorInput): string {
   if (e.code === "repo_cooldown" && e.lastScanAt && e.until) return repoCooldownText(e.lastScanAt, e.until);
   const fixed = e.code !== null ? ERROR_TEXTS[e.code] : undefined;
   const base = fixed ?? (e.message ? capitalize(e.message) : statusText(e.status));
-  return e.status === 429 ? `${base}${retryHint(e.retryAfter)}` : base;
+  if (e.status !== 429) return base;
+  const hint = retryHint(e.retryAfter);
+  // подсказка — отдельной фразой: серверные сообщения приходят без точки в конце
+  return hint && !/[.!?]$/.test(base) ? `${base}.${hint}` : `${base}${hint}`;
 }
 
 /**
@@ -1194,7 +1197,9 @@ export function fraudFactorFact(key: string, value: unknown, date: (iso: string)
       return parts.length > 0 ? parts.join(", ") : null;
     }
     case "activity.rhythm": {
-      // признаки ритма (rhythm.ts) — только ненулевые, без оценки их силы
+      // признаки ритма (rhythm.ts) — только ненулевые; порядок — от явных к косвенным:
+      // плашка карточки показывает первый признак, и им не должны быть «8% ровных
+      // интервалов» при всплеске в 221 коммит за неделю
       const commits = num("commits");
       const robots = num("robot_commits");
       const bursts = num("sync_bursts");
@@ -1212,15 +1217,14 @@ export function fraudFactorFact(key: string, value: unknown, date: (iso: string)
         const tail = sync !== null && sync > 0 ? ` (${sync} ${plural(sync, "коммит", "коммита", "коммитов")})` : "";
         parts.push(`${bursts} ${plural(bursts, "всплеск", "всплеска", "всплесков")} синхронизации${tail}`);
       }
+      if (recent !== null && baseline !== null && recent > baseline) {
+        const usual = baseline === 0 ? "хотя обычно в неделю – ни одного" : `при обычных ${fmtDecimal(baseline, 1, { trim: true })} в неделю`;
+        parts.push(`${recent} ${plural(recent, "коммит", "коммита", "коммитов")} за последнюю неделю, ${usual}`);
+      }
+      if (viaOne !== null && viaOne >= 2) parts.push(`${viaOne} ${plural(viaOne, "автор", "автора", "авторов")} при одном коммиттере`);
       if (regular !== null && regular > 0) {
         const every = interval !== null && interval > 0 ? `, обычно раз в ${fmtMinutes(interval * 60_000)}` : "";
         parts.push(`${sharePercent(regular)} коммитов людей идут с ровными интервалами${every}`);
-      }
-      if (viaOne !== null && viaOne >= 2) parts.push(`${viaOne} ${plural(viaOne, "автор", "автора", "авторов")} при одном коммиттере`);
-      if (recent !== null && baseline !== null && recent > baseline) {
-        parts.push(
-          `${recent} ${plural(recent, "коммит", "коммита", "коммитов")} за последнюю неделю при обычных ${fmtDecimal(baseline, 1, { trim: true })} в неделю`,
-        );
       }
       return parts.length > 0 ? parts.join("; ") : null;
     }

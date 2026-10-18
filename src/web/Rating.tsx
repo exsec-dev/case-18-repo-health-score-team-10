@@ -988,8 +988,8 @@ function RepoMarks({ item, ext = true }: { item: Item; ext?: boolean }) {
           сортировку не влияет; в подсказке только заголовок плашки карточки,
           пояснение — в самой карточке */}
       {item.fraud && (
-        <ActionTooltip title={FRAUD_TITLE} className="rh-tip-oneline">
-          <span className="rh-rating-fraud" role="img" aria-label={FRAUD_TITLE} {...TIP_TARGET}>
+        <ActionTooltip title={item.fraudStale ? `${FRAUD_TITLE} – по прошлому анализу` : FRAUD_TITLE} className="rh-tip-oneline">
+          <span className="rh-rating-fraud" role="img" aria-label={item.fraudStale ? `${FRAUD_TITLE} – по прошлому анализу` : FRAUD_TITLE} {...TIP_TARGET}>
             <Icon data={Flag} size={14} />
           </span>
         </ActionTooltip>

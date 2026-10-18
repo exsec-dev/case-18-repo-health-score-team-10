@@ -759,7 +759,7 @@ const routes = {
         if (parsed.slugs.length > limit) return badQuery(`сравнить можно не больше ${limit} репозиториев в минуту`);
         if (!allowCardViews(viewer.userId, parsed.slugs.length)) {
           return rateLimited(
-            `не больше ${limit} открытий карточки в минуту – сравнение ${parsed.slugs.length} репозиториев откроется чуть позже`,
+            `не больше ${limit} открытий карточки в минуту – сравнение ${parsed.slugs.length} ${parsed.slugs.length === 1 ? "репозитория" : "репозиториев"} откроется чуть позже`,
             cardViewsRetryAfterSec(viewer.userId, parsed.slugs.length),
           );
         }

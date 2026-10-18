@@ -2742,7 +2742,9 @@ button.rh-category:focus-visible {
 /* закрепленная шапка: фон карточки и нижняя линия */
 .rh-cmp-head {
   position: sticky;
-  top: calc(-1 * var(--g-spacing-5));
+  /* прилипает, срезав верхнее поле до 4px: у прокрутки (.rh-page__body) своего
+   * поля нет, и при −20px аватары уходили под край */
+  top: calc(var(--g-spacing-1) - var(--g-spacing-4));
   z-index: 3;
   box-sizing: border-box;
   padding: var(--g-spacing-4) var(--g-spacing-4) var(--g-spacing-3);
@@ -3172,11 +3174,31 @@ button.rh-category:focus-visible {
 }
 
 .rh-cmp_phone .rh-cmp-head {
-  top: calc(-1 * var(--g-spacing-4));
+  top: calc(var(--g-spacing-1) - var(--g-spacing-3));
   padding: var(--g-spacing-3) 0 var(--g-spacing-2);
   border-radius: 0;
   background: var(--g-color-base-background);
   border-bottom: 1px solid var(--g-color-line-generic);
+  /* фон закрывает и зазоры между ячейками: иначе в них видно строки под шапкой */
+  box-shadow: calc(-1 * var(--g-spacing-2)) 0 0 var(--g-color-base-background);
+}
+
+/* телефон: число с галочкой — строкой, полоса под ним у всех ячеек одинаково
+ * (иначе у лидера полоса переносилась, а у соседей стояла в строке) */
+.rh-cmp_phone .rh-cmp-catcell {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--g-spacing-1);
+}
+
+.rh-cmp_phone .rh-cmp-row > .rh-cmp-head:first-child {
+  box-shadow: calc(-1 * var(--g-spacing-3)) 0 0 var(--g-color-base-background);
+}
+
+.rh-cmp_phone .rh-cmp-row > .rh-cmp-head:last-child {
+  box-shadow:
+    calc(-1 * var(--g-spacing-2)) 0 0 var(--g-color-base-background),
+    var(--g-spacing-3) 0 0 var(--g-color-base-background);
 }
 
 .rh-cmp_phone .rh-cmp-label {
@@ -4093,6 +4115,13 @@ button.rh-category:focus-visible {
     grid-column: 1 / -1;
     grid-template-columns: subgrid;
     align-items: baseline;
+  }
+
+  /* строки — по верху: Chrome 152 считает базовую линию вложенного subgrid
+   * неверно и уносит таблицу на миллионы пикселей вверх (раскрытие пустое);
+   * ячейки внутри строки выравниваются по базовой линии, как и раньше */
+  .rh-subrows__table {
+    align-items: start;
   }
 }
 

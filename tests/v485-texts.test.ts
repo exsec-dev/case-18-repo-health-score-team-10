@@ -34,7 +34,7 @@ describe("К8.5.4: клиентский словарь ошибок", () => {
     const texts = [0, 401, 403, 404, 429, 500, 502, 503, 504].map((status) => errorText({ status, code: null, message: null }));
     expect(texts.filter((t) => FORBIDDEN.test(t) || /[A-Za-z]/.test(latinLeft(t)))).toEqual([]);
     expect(errorText({ status: 429, code: "rate_limited", message: "не больше 30 открытий карточки в минуту – попробуйте чуть позже", retryAfter: "42" })).toBe(
-      "Не больше 30 открытий карточки в минуту – попробуйте чуть позже Повторить можно через 42 с.",
+      "Не больше 30 открытий карточки в минуту – попробуйте чуть позже. Повторить можно через 42 с.",
     );
   });
 

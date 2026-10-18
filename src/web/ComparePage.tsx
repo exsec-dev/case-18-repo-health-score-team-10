@@ -867,7 +867,9 @@ function CompareTable({
     );
   });
 
-  const template = phone ? `repeat(${n}, minmax(0, 1fr))` : `minmax(180px, 248px) repeat(${n}, minmax(0, 1fr))`;
+  // столбец подписей гибкий: при minmax(180px, 248px) он забирал максимум раньше
+  // столбцов репозиториев (на 768px – 38% ширины)
+  const template = phone ? `repeat(${n}, minmax(0, 1fr))` : `minmax(140px, 0.8fr) repeat(${n}, minmax(0, 1fr))`;
   return (
     <div role="table" aria-label={`${COMPARE_TITLE}: ${items.length} из ${COMPARE_MAX}`} className={phone ? "rh-cmp rh-cmp_phone" : "rh-cmp"} style={{ gridTemplateColumns: template }}>
       {decor}
@@ -1097,12 +1099,14 @@ function CellValue({ row, card, leader, phone, year, sharedTotal }: { row: Row; 
       // цветные полосы в каждой строке спорили с ним
       return (
         <span className="rh-cmp-catcell">
+          {/* галочка — у числа, полоса — отдельно: в узком столбце неразрывные
+              «число, полоса, галочка» не влезали, и галочка залезала на соседа */}
           <Lead leader={leader}>
             <Text className="rh-cmp-cat__num" title={sentence(scoreWord(cat.score))}>
               {fmtScore(cat.score)}
             </Text>
-            <ScoreBar value={cat.score} width={phone ? 40 : 64} neutral />
           </Lead>
+          <ScoreBar value={cat.score} width={phone ? 40 : 64} neutral />
           {adj && (
             // вместо жаргона «Балл сжат» — что именно снизило балл
             <span className="rh-cmp-mark" title={adj} tabIndex={0} aria-label={`${adjustmentLabel(cat)}. ${adj}`}>

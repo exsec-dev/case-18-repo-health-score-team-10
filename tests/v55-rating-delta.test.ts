@@ -182,6 +182,27 @@ describe("Р2: флаг фрода в строке рейтинга", () => {
     expect(res.items.map((i) => i.repo)).toEqual(["flagged", "clean", "broken", "recleaned", "no-note"]);
     expect(res.total).toBe(5);
   });
+
+  test("флаг по правилу карточки: отказ новее заметки снимает флаг, заметка старше скана – «по прошлому анализу»", () => {
+    const failed = seedRated(t, "g", "failed-after", 90);
+    const s1 = seedScan(t, failed);
+    seedFlaggerNote(t, failed, s1, FLAG_TRUE);
+    const s2 = seedScan(t, failed);
+    t.db
+      .query("INSERT INTO ai_fails (repo_id, scan_id, role, reason, created_at) VALUES (?, ?, 'flagger', 'модель: сеть', ?)")
+      .run(failed, s2, DAY.toISOString());
+
+    const stale = seedRated(t, "g", "stale-flag", 80);
+    seedFlaggerNote(t, stale, seedScan(t, stale), FLAG_TRUE);
+    rescan(t, stale, 81);
+
+    const fresh = seedRated(t, "g", "fresh-flag", 70);
+    seedFlaggerNote(t, fresh, seedScan(t, fresh), FLAG_TRUE);
+
+    expect(itemOf(t, "failed-after")?.fraud).toBe(false);
+    expect(itemOf(t, "stale-flag")).toMatchObject({ fraud: true, fraudStale: true });
+    expect(itemOf(t, "fresh-flag")).toMatchObject({ fraud: true, fraudStale: false });
+  });
 });
 
 // ---------- внешняя ссылка ----------

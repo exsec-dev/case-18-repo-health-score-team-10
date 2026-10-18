@@ -78,6 +78,8 @@ export interface RatingItem {
    * сортировку и фильтры флаг не влияет.
    */
   fraud: boolean;
+  /** флаг поставлен по прошлому анализу: после проверки был новый скан (карточка пишет «по прошлому анализу») */
+  fraudStale: boolean;
   /** страница репо на SourceCraft – для внешней ссылки в строке */
   webUrl: string;
   /** у репо есть ПУБЛИЧНЫЙ AI-обзор (тот, что видят все) – искра у имени и фильтр «С AI-обзором» */
@@ -370,6 +372,7 @@ function toRatingItem(row: RatingRow): RatingItem {
     rankDelta: null,
     rankBadge: null,
     fraud: false,
+    fraudStale: false,
     webUrl: repoWebUrl(row.org_slug, row.repo_slug),
     aiOverview: false,
     org: row.org_slug,
@@ -595,21 +598,34 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
   }
 
   // Плашка накрутки – по последней заметке flagger репо, тем же правилом, что
-  // fraudOf карточки (scan_id DESC, id DESC), но окном по всем репо одним
-  // запросом. Битый JSON – флага нет. На место и сортировку флаг не влияет.
-  const flagged = new Set<number>();
+  // карточка (fraudOf + checkOf): заметка – scan_id DESC, id DESC; отказ проверки
+  // новее заметки снимает флаг (карточка показывает сбой, а не признаки); заметка
+  // старше последнего скана – флаг «по прошлому анализу». Битый JSON – флага нет.
+  // На место и сортировку флаг не влияет.
+  const flagged = new Map<number, boolean>();
   for (const row of db
     .query(
-      `SELECT repo_id, text FROM (
-         SELECT repo_id, text, ROW_NUMBER() OVER (PARTITION BY repo_id ORDER BY scan_id DESC, id DESC) AS rn
-         FROM ai_notes WHERE role = 'flagger') WHERE rn = 1`,
+      `SELECT n.repo_id, n.text, n.scan_id, n.created_at,
+         (SELECT f.scan_id FROM ai_fails f WHERE f.repo_id = n.repo_id AND f.role = 'flagger' ORDER BY f.scan_id DESC, f.id DESC LIMIT 1) AS fail_scan,
+         (SELECT f.created_at FROM ai_fails f WHERE f.repo_id = n.repo_id AND f.role = 'flagger' ORDER BY f.scan_id DESC, f.id DESC LIMIT 1) AS fail_at,
+         (SELECT MAX(s.id) FROM scans s WHERE s.repo_id = n.repo_id AND s.status IN ('ok', 'partial')) AS latest
+       FROM (
+         SELECT repo_id, text, scan_id, created_at, ROW_NUMBER() OVER (PARTITION BY repo_id ORDER BY scan_id DESC, id DESC) AS rn
+         FROM ai_notes WHERE role = 'flagger') n
+       WHERE n.rn = 1`,
     )
-    .all() as { repo_id: number; text: string }[]) {
-    if (parseFlaggerNote(row.text)?.flag === true) flagged.add(row.repo_id);
+    .all() as { repo_id: number; text: string; scan_id: number; created_at: string; fail_scan: number | null; fail_at: string | null; latest: number | null }[]) {
+    if (parseFlaggerNote(row.text)?.flag !== true) continue;
+    const failNewer = row.fail_scan !== null && (row.fail_scan > row.scan_id || (row.fail_scan === row.scan_id && (row.fail_at ?? "") > row.created_at));
+    if (failNewer) continue;
+    flagged.set(row.repo_id, row.latest !== null && row.scan_id < row.latest);
   }
   if (flagged.size > 0) {
     for (const item of all) {
-      if (flagged.has(idBySlug.get(`${item.org}/${item.repo}`)!)) item.fraud = true;
+      const stale = flagged.get(idBySlug.get(`${item.org}/${item.repo}`)!);
+      if (stale === undefined) continue;
+      item.fraud = true;
+      item.fraudStale = stale;
     }
   }
 
