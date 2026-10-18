@@ -617,15 +617,66 @@ export function robotIntervalFlags(events: { ts: number }[]): boolean[] {
 
 // ---------- флаги секций README (словарь на русском и английском) ----------
 
-const SECTION_DICT: Record<"install" | "build" | "test", string[]> = {
-  install: ["установка", "install", "getting started", "быстрый старт", "setup", "запуск"],
-  build: ["сборка", "build"],
-  test: ["тесты", "testing", "tests", "запуск тестов"],
+/**
+ * Основы слов заголовков: совпадение с начала слова (перед ним нет буквы,
+ * цифры или «_»), окончание любое – «Install» и «Installation», «Установка» и
+ * «Как установить», «Test» и «Тестирование»; уровень заголовка и эмодзи перед
+ * словом не мешают. Прилагательное «тестовый» («Тестовый стенд») – не раздел
+ * тестов.
+ */
+const SECTION_RE: Record<"install" | "build" | "test", RegExp> = {
+  install: /(?<![\p{L}\p{N}_])(установ|инсталл|install|set\s*up|getting\s+started|quick\s*start|быстр\p{L}*\s+старт)/iu,
+  build: /(?<![\p{L}\p{N}_])(сборк|собра|собер|build|compil|компил)/iu,
+  test: /(?<![\p{L}\p{N}_])(тест(?!ов(ый|ая|ое|ые|ого|ой|ом|ых|ым|ыми|ую)(?![\p{L}]))|test)/iu,
 };
 
-function headingMatchesWord(heading: string, word: string): boolean {
-  const re = new RegExp(`(?<![\\p{L}\\p{N}_])${word.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/\s+/g, "\\s+")}(?![\\p{L}\\p{N}_])`, "iu");
-  return re.test(heading);
+/**
+ * Запуск («Запуск», «Как запустить», «How to run») – раздел установки, если
+ * заголовок не о тестах: «Запуск тестов» и «Running tests» – раздел тестов.
+ * «Run» – целым словом, иначе «Runtime» и «Runbook» стали бы установкой.
+ */
+const LAUNCH_RE = /(?<![\p{L}\p{N}_])(запуск|запуст|run(s|ning)?(?![\p{L}\p{N}_]))/iu;
+
+type ReadmeHeading = { start: number; i: number; level: number; line: string };
+
+/** Строка-заголовок setext («Install» над «-------»): обычный текст, не элемент списка, цитата, таблица или HTML. */
+function setextTitle(l: string | undefined): boolean {
+  if (l === undefined || l.trim() === "" || /^[ \t]{4}/.test(l)) return false;
+  return !/^[ \t]{0,3}([-*+][ \t]|\d+[.)][ \t]|[>|<#]|```|~~~|=+[ \t]*$|-+[ \t]*$)/.test(l);
+}
+
+/**
+ * Заголовки README: ATX («## Install») и setext (строка над «===» или «---»).
+ * Для setext `start` – строка с текстом, `i` – подчеркивание, а `line`
+ * приведена к виду ATX. Внутри блоков кода заголовков нет.
+ */
+function readmeHeadings(lines: string[]): ReadmeHeading[] {
+  const heads: ReadmeHeading[] = [];
+  let fence = false;
+  lines.forEach((l, i) => {
+    if (/^[ \t]{0,3}(```|~~~)/.test(l)) {
+      fence = !fence;
+      return;
+    }
+    if (fence) return;
+    const m = l.match(/^[ \t]{0,3}(#{1,6}) \S.*$/);
+    if (m) {
+      heads.push({ start: i, i, level: m[1]!.length, line: l });
+      return;
+    }
+    const u = l.match(/^[ \t]{0,3}(=+|-{2,})[ \t]*$/);
+    const prev = lines[i - 1];
+    if (u && setextTitle(prev)) {
+      const level = u[1]![0] === "=" ? 1 : 2;
+      heads.push({ start: i - 1, i, level, line: `${"#".repeat(level)} ${prev!.trim()}` });
+    }
+  });
+  return heads;
+}
+
+/** Число заголовков README (ATX и setext). */
+export function readmeHeadingCount(text: string): number {
+  return readmeHeadings(text.split(/\r?\n/)).length;
 }
 
 /**
@@ -636,18 +687,11 @@ function headingMatchesWord(heading: string, word: string): boolean {
  */
 export function readmeHeadingsWithBody(text: string): string[] {
   const lines = text.split(/\r?\n/);
-  const heads: { i: number; level: number; line: string }[] = [];
-  let fence = false;
-  lines.forEach((l, i) => {
-    if (/^[ \t]{0,3}(```|~~~)/.test(l)) fence = !fence;
-    if (fence) return;
-    const m = l.match(/^[ \t]{0,3}(#{1,6}) \S.*$/);
-    if (m) heads.push({ i, level: m[1]!.length, line: l });
-  });
+  const heads = readmeHeadings(lines);
   const out: string[] = [];
   heads.forEach((h, k) => {
     const next = heads.slice(k + 1).find((n) => n.level <= h.level);
-    const body = lines.slice(h.i + 1, next ? next.i : lines.length);
+    const body = lines.slice(h.i + 1, next ? next.start : lines.length);
     const meaningful = body.some((l) => {
       const t = l.trim();
       if (t === "" || /^(```|~~~)\S*$/.test(t) || /^#{1,6}( |$)/.test(t)) return false;
@@ -661,29 +705,12 @@ export function readmeHeadingsWithBody(text: string): string[] {
 /** Флаги {install, build, test} по заголовкам README с непустым телом. */
 export function readmeSectionFlags(text: string): { install: boolean; build: boolean; test: boolean } {
   const flags = { install: false, build: false, test: false };
-  const headings = readmeHeadingsWithBody(text);
-  for (const hRaw of headings) {
-    const h = hRaw.replace(/^[ \t]{0,3}#{1,6}\s+/, "").trim().toLowerCase();
-    // «Запуск тестов» (test) содержит «Запуск» (install) – фраза важнее
-    // одиночного слова
-    const testPhrase = SECTION_DICT.test.filter((w) => w.includes(" ")).some((w) => headingMatchesWord(h, w));
-    for (const cat of ["install", "build", "test"] as const) {
-      for (const word of SECTION_DICT[cat]) {
-        if (word.includes(" ")) continue; // фразы ниже отдельно
-        if (cat === "install" && testPhrase) continue;
-        if (headingMatchesWord(h, word)) {
-          flags[cat] = true;
-          break;
-        }
-      }
-      if (!testPhrase) {
-        for (const word of SECTION_DICT[cat].filter((w) => w.includes(" "))) {
-          if (headingMatchesWord(h, word)) flags[cat] = true;
-        }
-      } else if (cat === "test") {
-        flags.test = true;
-      }
-    }
+  for (const hRaw of readmeHeadingsWithBody(text)) {
+    const h = hRaw.replace(/^[ \t]{0,3}#{1,6}\s+/, "").trim();
+    const test = SECTION_RE.test.test(h);
+    if (SECTION_RE.install.test(h) || (!test && LAUNCH_RE.test(h))) flags.install = true;
+    if (SECTION_RE.build.test(h)) flags.build = true;
+    if (test) flags.test = true;
   }
   return flags;
 }
@@ -1074,7 +1101,7 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
   if (readmeBlob) {
     const content = await git(["cat-file", "blob", readmeBlob.sha]);
     const text = content.stdout;
-    const sections = (text.match(/^[ \t]{0,3}#{1,6} \S.*$/gm) ?? []).length;
+    const sections = readmeHeadingCount(text);
     readmeFact = okFact("docs.readme", { bytes: readmeBlob.size, sections, flags: readmeSectionFlags(text) }, "git", nowIso);
   } else {
     readmeFact = okFact("docs.readme", { present: false }, "git", nowIso);
