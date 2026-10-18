@@ -101,7 +101,7 @@ describe("getAiNotesHistory: append-история взглядов и её ви
     seedScore(wrap(db), repoId, s2, { total: 58 });
     const texts: Record<string, string> = {
       documentation: "README покрывает установку {f:docs.presence}.",
-      overview: "Проект имеет README {f:docs.presence}; специалист по коду отметил задачи по долгу {sp:code:1}.",
+      overview: "Проект имеет README {f:scores.summary}; специалист по коду отметил задачи по долгу {sp:code:1}.",
     };
     const callLlm = (async (opts: { role?: string }) => ({
       text: texts[opts.role ?? ""] ?? "",

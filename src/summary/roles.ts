@@ -51,9 +51,10 @@ export const ROLE_FACT_CATEGORIES: Record<SpecialistRole, readonly string[]> = {
   security: ["security"],
 };
 
-/** Инструменты агента — только у специалистов, кроме security (только данные AppSec). */
+/** Инструменты агента — только у специалистов, кроме security (только данные AppSec)
+ *  и issues (трекер в клоне не лежит: роль живет на фактах). */
 export function toolsAllowed(role: SummaryRole): boolean {
-  return (SPECIALIST_ROLES as readonly string[]).includes(role) && role !== "security";
+  return (SPECIALIST_ROLES as readonly string[]).includes(role) && role !== "security" && role !== "issues";
 }
 
 /** Категории, чьи факты говорят о ритме и накрутке (вход флаггера). */

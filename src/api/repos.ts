@@ -1739,6 +1739,7 @@ function checkOf(db: Database, repoId: number): CardAiCheck {
 export function aiFailureText(reason: string): string {
   if (reason.startsWith("нет ")) return reason;
   if (reason.startsWith("модель:")) return "AI-провайдер не ответил";
+  if (reason.startsWith("отказ модели")) return "AI-провайдер отказался писать об этом репозитории (фильтр безопасности модели)";
   if (reason.startsWith("валидатор:")) return "текст не прошел проверку фактами";
   return "блок не сформирован";
 }
@@ -1944,4 +1945,34 @@ export function getMeta(db: Database, opts: { now?: Date; leaseMs?: number; publ
     publicBaseUrl: opts.publicBaseUrl ?? "http://localhost:8418",
     generatedAt: (opts.now ?? new Date()).toISOString(),
   };
+}
+
+// ---------- статус AI-заявок для опроса страницы ----------
+
+/** Ответ `GET /api/repos/:org/:repo/ai-status` – живые AI-заявки репозитория. */
+export interface AiJobStatus {
+  /** идет формирование обзора (любая аудитория) */
+  summaryActive: boolean;
+  /** идет проверка на накрутку */
+  checkActive: boolean;
+}
+
+/**
+ * Легкий статус без проверки прав и без списания «открытий карточки»: страница
+ * опрашивает его, пока заявка идет, и перечитывает карточку один раз, когда
+ * заявка закончилась. Два индексных запроса к `jobs`, ни одного обращения к
+ * SourceCraft. Чтобы не выдавать чужие приватные репозитории, для непубличного
+ * репо видны только заявки самого зрителя; неизвестный репо неотличим от тихого.
+ */
+export function getAiJobStatus(db: Database, org: string, repo: string, viewerUserId: number | null): AiJobStatus {
+  const quiet: AiJobStatus = { summaryActive: false, checkActive: false };
+  const row = db.query("SELECT id, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number; visibility: string } | null;
+  if (row === null) return quiet;
+  const own = row.visibility !== "public";
+  if (own && viewerUserId === null) return quiet;
+  const active = (kind: "summary" | "check"): boolean =>
+    (own
+      ? db.query("SELECT 1 FROM jobs WHERE repo_id = ? AND kind = ? AND user_id = ? AND status IN ('queued', 'running') LIMIT 1").get(row.id, kind, viewerUserId)
+      : db.query("SELECT 1 FROM jobs WHERE repo_id = ? AND kind = ? AND status IN ('queued', 'running') LIMIT 1").get(row.id, kind)) !== null;
+  return { summaryActive: active("summary"), checkActive: active("check") };
 }

@@ -18,7 +18,7 @@ import { parseFactValue } from "../collectors/facts";
 import { MODEL_VERSION } from "../score/model";
 import { loadCharter } from "./charters";
 import { generateWithTools } from "./agent";
-import { makeCalculatorExecutor, makeToolExecutor, sanitizeUntrusted, MAX_PLAIN_READ_BYTES } from "./tools";
+import { executeTool, makeCalculatorExecutor, makeToolExecutor, sanitizeUntrusted, MAX_PLAIN_READ_BYTES } from "./tools";
 import { frameUntrusted, makeNonce } from "./input";
 import { validateFlagOutput, validateOutput, type FraudFlag, type FactInput } from "./validator";
 import type { SummaryRole } from "./roles";
@@ -27,6 +27,10 @@ import { categoryOf } from "../collectors/facts";
 import { rhythmSignals, RHYTHM_KEY, type RhythmSignals } from "./rhythm";
 import { CHANNEL_KINDS } from "../score/compute";
 import type { AiAudience } from "../db";
+// repos.ts берет отсюда только константу NO_RHYTHM_REASON внутри функций,
+// поэтому встречный импорт безопасен
+import { ratingPlace } from "../api/repos";
+import { rankBadge } from "../api/rank-badge";
 
 export interface SummaryDeps {
   db: Database;
@@ -137,7 +141,44 @@ export function scopedFacts(db: Database, scanId: number, role: SummaryRole, aud
     .map((r) => ({ key: r.key, value: parseFactValue(r.value) }))
     .filter((f) => roleFactsAllowed(role, f.key))
     .map(capTimelineFact)
+    .map(compactTimelineFact)
+    .map(withoutCensoredDelays)
+    .map(withoutScanInternals)
     .map((f) => (audience === "public" ? withoutEmails(f) : f));
+}
+
+/**
+ * Служебные поля сканера во вход модели не идут: `source_unread` и `loc_note`
+ * (сколько файлов кода не прочитано) и `test_markers` (пометки в тестах,
+ * отложенные в сторону). Модель пересказывала их читателю («кодовая база
+ * полностью прочитана», «тесты не содержат отложенных задач») – это о нашем
+ * сканере, а не о проекте, и только путает. В оценке и карточке поля остаются.
+ */
+export function withoutScanInternals(f: FactInput): FactInput {
+  if (f.value === null || typeof f.value !== "object") return f;
+  if (f.key === "tree.stats") {
+    const { source_unread: _u, loc_note: _n, ...rest } = f.value as Record<string, unknown>;
+    return { ...f, value: rest };
+  }
+  if (f.key === "code.todo") {
+    const { test_markers: _t, ...rest } = f.value as Record<string, unknown>;
+    return { ...f, value: rest };
+  }
+  return f;
+}
+
+/**
+ * Выборка комментариев без единого ответа: медиана и задержки равны порогу
+ * цензуры (720 ч = «ждет дольше 30 дней»), а не измеренному времени. Модель
+ * три прогона подряд называла «720 часов» временем ответа вопреки хартии,
+ * поэтому поля во вход не идут – остаются answered/censored/issues.
+ */
+export function withoutCensoredDelays(f: FactInput): FactInput {
+  if (f.key !== "issues.comments_sample" || f.value === null || typeof f.value !== "object") return f;
+  const v = f.value as { answered?: unknown; median_first_comment_delay_hours?: unknown; delays_hours?: unknown };
+  if (v.answered !== 0) return f;
+  const { median_first_comment_delay_hours: _m, delays_hours: _d, ...rest } = v;
+  return { ...f, value: { ...rest, delays_note: "ответов нет – задержки не измерены" } };
 }
 
 /**
@@ -224,6 +265,57 @@ export function historyPoints(db: Database, scanId: number, audience: AiAudience
 export function namedTrajectoryPoints(points: TrajectoryPoint[]): TrajectoryPoint[] {
   return points.map((p) => ({ ...p, categories: Object.fromEntries(Object.entries(p.categories).map(([k, v]) => [(CATEGORY_TITLES as Record<string, string>)[k] ?? k, v])) }));
 }
+/** Ключ сводки оценки во входе overview. */
+export const SCORE_SUMMARY_KEY = "scores.summary";
+
+/**
+ * Вход overview вместо сырых фактов: специалисты их уже прочитали, а овервью
+ * синтезирует чужие выводы. Ему нужны только числа карточки, которые читатель
+ * видит рядом с текстом: индекс, баллы категорий (русскими названиями), покрытие
+ * и место в рейтинге. Место есть только у публичного репо в рейтинге; иначе null.
+ */
+export function overviewScoreSummary(db: Database, scanId: number, org: string, repo: string, audience: AiAudience = "full"): FactInput[] {
+  const row = db
+    .query(
+      `SELECT sc.healthcraft_index AS idx, sc.index_coverage AS coverage, sc.categories, s.rating_eligible, r.visibility, r.rating_active
+       FROM scores sc JOIN scans s ON s.id = sc.scan_id JOIN repos r ON r.id = s.repo_id
+       WHERE sc.scan_id = ? AND sc.model_version = ?`,
+    )
+    .get(scanId, MODEL_VERSION) as
+    | { idx: number | null; coverage: number; categories: string; rating_eligible: number; visibility: string; rating_active: number }
+    | null;
+  // без строки scores сводка все равно есть (нули и null): маркер {f:scores.summary}
+  // у овервью единственный, без него валидатору не на что ссылаться
+  if (row === null) return [{ key: SCORE_SUMMARY_KEY, value: { index: null, coverage: null, categories: {}, rank: null } }];
+  let cats: Record<string, { score: number | null }> = {};
+  try {
+    const parsed = JSON.parse(row.categories) as Record<string, { score: number | null }> | null;
+    if (parsed !== null && typeof parsed === "object") cats = parsed;
+  } catch {
+    cats = {};
+  }
+  const categories: Record<string, number | null> = {};
+  for (const [key, value] of Object.entries(cats)) {
+    if (audience === "public" && !(PUBLIC_CATEGORIES as readonly string[]).includes(key)) continue;
+    const score = value?.score;
+    categories[(CATEGORY_TITLES as Record<string, string>)[key] ?? key] = typeof score === "number" ? Math.round(score) : null;
+  }
+  const inRating = row.idx !== null && row.rating_eligible === 1 && row.visibility === "public" && row.rating_active === 1;
+  const place = inRating ? ratingPlace(db, org, repo, row.idx!) : null;
+  const badge = place === null ? null : rankBadge(place);
+  return [
+    {
+      key: SCORE_SUMMARY_KEY,
+      value: {
+        index: row.idx === null ? null : Math.round(row.idx),
+        coverage: row.coverage,
+        categories,
+        rank: place === null ? null : { place: place.rank, total: place.rankedTotal, league: badge?.label ?? null },
+      },
+    },
+  ];
+}
+
 /** Сегменты для overview: тексты специалистов, разбитые на предложения. */
 export function segmentsOf(texts: Record<string, string>): { segments: string[]; numbered: Record<string, string> } {
   const segments: string[] = [];
@@ -256,6 +348,40 @@ export function capTimelineFact(f: FactInput): FactInput {
   return { ...f, value: { events: events.slice(0, TIMELINE_EVENTS_CAP), capped: true, total: events.length } };
 }
 
+/**
+ * Лента для модели – компактная: sha до 7 знаков, дата до минут без секунд и
+ * зоны, коммиттер только если отличается от автора, поля робота только у роботов.
+ * Причина не косметическая: 60 полных событий (13 КБ JSON с ISO-датами) заставляли
+ * YandexGPT отвечать отказом «не могу обсуждать эту тему» – бисекция показала, что
+ * триггер именно объем однотипных временных меток, а не имена и не темы.
+ * Компактный вид тех же 60 событий (4 КБ) проходит. Код (ритм, флаггер) ленту
+ * берет из БД напрямую и этой формы не видит.
+ */
+export function compactTimelineFact(f: FactInput): FactInput {
+  const raw = f.value as { events?: unknown } | null;
+  if (f.key !== "activity.git.timeline" || raw === null || typeof raw !== "object" || !Array.isArray(raw.events)) return f;
+  type Actor = { name?: unknown; email?: unknown; date?: unknown };
+  const date = (d: unknown): string | undefined => (typeof d === "string" ? d.slice(0, 16).replace("T", " ") : undefined);
+  const actor = (a: Actor | null | undefined): Record<string, unknown> | undefined => {
+    if (a === null || typeof a !== "object") return undefined;
+    return { name: a.name, ...(typeof a.email === "string" ? { email: a.email } : {}), date: date(a.date) };
+  };
+  const events = raw.events.map((e) => {
+    if (e === null || typeof e !== "object") return e;
+    const ev = e as { sha?: unknown; author?: Actor; committer?: Actor; robot?: unknown; robot_reasons?: unknown };
+    const author = actor(ev.author);
+    const committer = actor(ev.committer);
+    const sameActor = committer === undefined || (author !== undefined && committer.name === author.name && committer.email === author.email);
+    return {
+      ...(typeof ev.sha === "string" ? { sha: ev.sha.slice(0, 7) } : {}),
+      ...(author !== undefined ? { author } : {}),
+      ...(sameActor ? {} : { committer }),
+      ...(ev.robot === true ? { robot: true, robot_reasons: ev.robot_reasons } : {}),
+    };
+  });
+  return { ...f, value: { ...(raw as Record<string, unknown>), events } };
+}
+
 function factsDigest(facts: FactInput[]): string {
   return facts.map((f) => `- ${f.key}: ${JSON.stringify(f.value)}`).join("\n");
 }
@@ -271,6 +397,22 @@ import { CATEGORY_TITLES } from "../report/categories";
  * из-за одной опечатки.
  */
 const ROLE_ATTEMPTS = 3;
+/** Кап отклоненного ответа в сообщении ретрая, знаков: проза и так ограничена 1200/2000. */
+const REJECTED_TEXT_CAP = 4000;
+
+/** Причина в ai_fails, когда провайдер отказался отвечать (фильтр безопасности модели). */
+export const REFUSAL_REASON = "отказ модели: фильтр безопасности провайдера";
+
+/**
+ * Отказ фильтра провайдера вместо ответа: YandexGPT – «Я не могу обсуждать эту тему.
+ * Давайте поговорим о чем-нибудь еще», у других провайдеров близкие формулы. Узко:
+ * короткий текст без маркеров, целиком из формулы отказа.
+ */
+export function isProviderRefusal(text: string): boolean {
+  const t = text.trim();
+  if (t.length > 300 || t.includes("{f:") || t.includes("{sp:")) return false;
+  return /не могу (обсуждать|помочь|говорить|отвечать|продолж)|давайте поговорим о|я не буду|i can(?:'|’)?t (help|discuss|assist)|i cannot (help|discuss|assist)|as an ai/i.test(t);
+}
 
 /**
  * Одна роль: хартия → вход (факты + nonce-рамки контента) → генерация →
@@ -301,15 +443,15 @@ async function runRole(
       ].join("\n"),
     );
   }
-  const userText = [
-    "ФАКТЫ СКАНА (числа только из этого списка):",
-    factsDigest(facts),
-    ...(inputBlocks.length > 0 ? ["", ...inputBlocks] : []),
-  ].join("\n");
-  const messages: ChatMessage[] = [
+  const buildMessages = (blocks: string[]): ChatMessage[] => [
     { role: "system", content: charter.text },
-    { role: "user", content: userText },
+    {
+      role: "user",
+      content: ["ФАКТЫ СКАНА (числа – отсюда и из выдачи инструментов, других источников нет):", factsDigest(facts), ...(blocks.length > 0 ? ["", ...blocks] : [])].join("\n"),
+    },
   ];
+  let messages = buildMessages(inputBlocks);
+  let blocksDropped = false;
 
   // security живет без файловых инструментов (только данные AppSec), но
   // арифметику долей считает калькулятором, а не в уме
@@ -322,16 +464,22 @@ async function runRole(
 
   let retries = 0;
   let lastReasons: string[] = [];
+  let lastText = "";
   for (let attempt = 0; attempt < ROLE_ATTEMPTS; attempt++) {
+    // ретрай видит свой отклоненный ответ (кап REJECTED_TEXT_CAP): без него
+    // модель не знает, какое предложение исправлять, и пишет с нуля.
+    // Бюджет инструментов – на попытку, кэш выдачи общий: перепроверить
+    // строки повторным grep можно, и он не ходит в файлы второй раз
+    if (attempt > 0) executor?.resetBudget();
     const callMessages: ChatMessage[] =
-      attempt === 0
+      attempt === 0 || lastReasons.length === 0
         ? messages
         : [
             ...messages,
-            { role: "assistant", content: "Понял, готовлю исправленный ответ." },
+            { role: "assistant", content: lastText.slice(0, REJECTED_TEXT_CAP) || "(пустой ответ)" },
             {
               role: "user",
-              content: `Предыдущий ответ ОТКЛОНЁН валидатором по причинам:\n${lastReasons.map((r) => `- ${r}`).join("\n")}\nИсправь их и выдай новый ответ строго по формату хартии.`,
+              content: `Этот ответ ОТКЛОНЕН валидатором по причинам:\n${lastReasons.map((r) => `- ${r}`).join("\n")}\nИсправь именно их, остальное сохрани и выдай новый ответ строго по формату хартии.`,
             },
           ];
     const startedAt = Date.now();
@@ -359,6 +507,23 @@ async function runRole(
       return { ok: false, reason: `модель: ${String((e as Error).message).slice(0, 160)}` };
     }
     const ms = Date.now() - startedAt;
+    // Отказ провайдера («не могу обсуждать эту тему») – не ошибка формы, ретрай с
+    // причинами валидатора его не лечит. Срабатывает на объеме security-тематики во
+    // входе: вторая попытка идет без недоверенных блоков (README/git log), только
+    // факты; если отказ и так – честная причина вместо «не прошел проверку фактами»
+    if (isProviderRefusal(text)) {
+      if (inputBlocks.length > 0 && !blocksDropped && attempt < ROLE_ATTEMPTS - 1) {
+        deps.log?.(`[summary] ${deps.org}/${deps.repo} role=${role}: отказ модели ${ms}ms – повтор без недоверенных блоков`);
+        messages = buildMessages([]);
+        blocksDropped = true;
+        lastText = "";
+        lastReasons = [];
+        retries = attempt + 1;
+        continue;
+      }
+      deps.log?.(`[summary] ${deps.org}/${deps.repo} role=${role}: отказ модели ${ms}ms – ${JSON.stringify(text.slice(0, 120))}`);
+      return { ok: false, reason: REFUSAL_REASON };
+    }
     const verdict = validateOutput({ role, text, facts, segments: extraSegments?.segments ?? [] });
     if (verdict.ok) {
       deps.log?.(`[summary] ${deps.org}/${deps.repo} role=${role}: ok ${ms}ms calls=${calls} tools=${tools} chars=${verdict.clean.length}`);
@@ -373,6 +538,7 @@ async function runRole(
       }\n[summary] причины: ${verdict.reasons.join("; ")}\n[summary] полный ответ модели: ${JSON.stringify(sanitizeUntrusted(text))}`,
     );
     lastReasons = verdict.reasons;
+    lastText = text;
     retries = attempt + 1;
   }
   return { ok: false, reason: `валидатор: ${lastReasons.join("; ")}` };
@@ -451,7 +617,16 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
     const contents: string[] = [];
     const readme = await readReadme(deps);
     if (readme !== null) contents.push(frameUntrusted("README.md", readme, makeNonce()) ?? "");
-    const sharedContent = contents.filter((c) => c.length > 0);
+    const readmeContent = contents.filter((c) => c.length > 0);
+    // activity получает темы последних коммитов готовым блоком: модели инструмент
+    // git_log вызывают неохотно, а без тем первый пункт хартии пуст
+    const gitLogBlock = await readGitLog(deps);
+    const activityContent = gitLogBlock === null ? [] : [gitLogBlock];
+    // Недоверенный контент – только той роли, чья это зона: README – документации,
+    // git log – активности. Остальным он не нужен по хартии, а лишние 16 КБ входа
+    // стоят денег, расширяют поверхность инъекций и на security-тематике (README
+    // про защиту ядра + лента) вызывали у YandexGPT отказ «не могу обсуждать эту тему»
+    const contentFor = (role: SpecialistRole): string[] => (role === "documentation" ? readmeContent : role === "activity" ? activityContent : []);
 
     const settled = await Promise.all(
       roles.map(async (role) => {
@@ -460,9 +635,7 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
           return { role, outcome: { role, ok: false, reason: "нет фактов категории — вызова не было" } as SummaryRoleOutcome, text: null };
         }
         try {
-          // security НЕ получает README: ее хартия — «только факты AppSec», и
-          // лишняя поверхность для инъекций этой роли ни к чему
-          const roleContent = role === "security" ? [] : sharedContent;
+          const roleContent = contentFor(role);
           const res = await runRole(deps, budget, role, facts, roleContent, null);
           if (!res.ok) return { role, outcome: { role, ok: false, reason: res.reason } as SummaryRoleOutcome, text: null };
           return { role, outcome: { role, ok: true, chars: res.clean.length, retries: res.retries, ms: res.ms, calls: res.calls, tools: res.tools } as SummaryRoleOutcome, text: res };
@@ -508,14 +681,16 @@ export async function runSummary(deps: SummaryDeps, req: SummaryRequest): Promis
       }
     }
 
-    // --- overview (main): вход = сегменты специалистов (включая динамику) + факты ---
+    // --- overview (main): вход = сегменты специалистов (включая динамику) + сводка оценки ---
+    // сырые факты овервью не идут: их уже прочитали специалисты, а дубль толкал
+    // модель к повторному анализу вместо синтеза
     const specialistOk = Object.keys(specialistTexts);
     if (specialistOk.length === 0) {
       failSoft.push("overview");
       outcomes.push({ role: "overview", ok: false, reason: "нет ни одного ответа специалистов" });
     } else {
       const segs = segmentsOf(specialistTexts);
-      const facts = scopedFacts(deps.db, req.scanId, "overview", audience);
+      const facts = overviewScoreSummary(deps.db, req.scanId, deps.org, deps.repo, audience);
       const res = await runRole(deps, budget, "overview", facts, [], segs);
       if (res.ok) {
         writeNote(deps, req.scanId, repoId, "overview", res.clean, res.refs, now, audience);
@@ -707,6 +882,24 @@ export async function readReadme(deps: Pick<SummaryDeps, "clone">): Promise<stri
     const st = lstatSync(path);
     if (!st.isFile() || st.size > MAX_PLAIN_READ_BYTES) return null;
     return st.size > 0 ? readFileSync(path, "utf8") : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Последние коммиты клона (тот же вызов и формат, что у инструмента git_log:
+ * «хэш автор<TAB>тема», до GIT_LOG_CAP строк) в nonce-рамке недоверенных данных –
+ * готовый блок входа для роли активности. Нет клона или git-каталога → null.
+ */
+export async function readGitLog(deps: Pick<SummaryDeps, "clone">): Promise<string | null> {
+  if (!deps.clone || deps.clone.gitDir === null) return null;
+  try {
+    const raw = await executeTool({ root: deps.clone.root, gitDir: deps.clone.gitDir }, "git_log", {});
+    const parsed = JSON.parse(raw) as { ok?: boolean; lines?: unknown };
+    if (!parsed.ok || !Array.isArray(parsed.lines) || parsed.lines.length === 0) return null;
+    const text = parsed.lines.filter((l): l is string => typeof l === "string").join("\n");
+    return frameUntrusted(`git log: последние ${parsed.lines.length} коммитов (хэш автор<TAB>тема)`, text, makeNonce());
   } catch {
     return null;
   }

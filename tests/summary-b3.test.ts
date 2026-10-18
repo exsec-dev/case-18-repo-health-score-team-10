@@ -92,7 +92,7 @@ describe("К5.6: Score неизменен при любом поведении �
       activity: "Проект коммитили 2 автора {f:activity.git.summary}.",
       issues: "Из 14 задач открыто 4 {f:issues.stats}.",
       cicd: "Конфиг CI объявляет шаги {f:cicd.configs}.",
-      overview: "Проект имеет README и CI {f:docs.presence} {f:cicd.configs}; специалист по коду отметил задачи по долгу {sp:code:1}.",
+      overview: "Проект имеет README и CI {f:scores.summary}; специалист по коду отметил задачи по долгу {sp:code:1}.",
     };
     const callLlm = (async (opts: { role?: string }) => ({
       text: texts[opts.role ?? ""] ?? "",
@@ -153,7 +153,7 @@ const ROLE_TEXTS: Record<string, string> = {
   "Хартия: задачи": "Из 14 задач открыто 4 {f:issues.stats}.",
   "Хартия: автоматизация": "Конфиг CI объявляет шаги {f:cicd.configs}.",
   "Хартия: овервью":
-    "Проект имеет README и CI {f:docs.presence} {f:cicd.configs}; специалист по коду отметил задачи по долгу {sp:code:1}.",
+    "Проект имеет README и CI {f:scores.summary}; специалист по коду отметил задачи по долгу {sp:code:1}.",
 };
 
 /** OpenAI-совместимый SSE-мок: роль читает из системного промпта. */
@@ -327,7 +327,7 @@ async function seedNotesWithPipeline(db: Database, repoId: number, scanId: numbe
     activity: "Проект коммитили 2 автора {f:activity.git.summary}.",
     issues: "Из 14 задач открыто 4 {f:issues.stats}.",
     cicd: "Конфиг CI объявляет шаги {f:cicd.configs}.",
-    overview: "Проект имеет README и CI {f:docs.presence} {f:cicd.configs}; специалист по коду отметил задачи по долгу {sp:code:1}.",
+    overview: "Проект имеет README и CI {f:scores.summary}; специалист по коду отметил задачи по долгу {sp:code:1}.",
   };
   const callLlm = (async (opts: { role?: string }) => ({
     text: texts[opts.role ?? ""] ?? "",

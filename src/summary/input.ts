@@ -3,7 +3,7 @@
 // до первого вхождения) и санитизация (контрольные символы вон, кап объема).
 // Числа во входе — только из фактов.
 import { randomBytes } from "node:crypto";
-import { sanitizeUntrusted } from "./tools";
+import { INSTRUCTION_PLACEHOLDER, sanitizeUntrusted, stripInstructionLines } from "./tools";
 
 /** Кап одного недоверенного блока (README/выдача grep/коммиты), байт. */
 export const CONTENT_CAP_BYTES = 16 * 1024;
@@ -45,7 +45,10 @@ export function frameUntrusted(label: string, content: string, nonce: string, ca
   const poisonAt = [trimmed.indexOf(nonce), trimmed.indexOf("=== КОНЕЦ НЕДОВЕРЕННЫХ"), trimmed.indexOf("=== НАЧАЛО НЕДОВЕРЕННЫХ")]
     .filter((i) => i >= 0)
     .sort((a, b) => a - b)[0];
-  const safe = poisonAt === undefined ? trimmed : trimmed.slice(0, poisonAt).trim();
-  if (safe.length === 0) return null;
+  const cut = poisonAt === undefined ? trimmed : trimmed.slice(0, poisonAt).trim();
+  // третий слой: строки-обращения к модели заменяются пометкой (tools.ts)
+  const safe = stripInstructionLines(cut).text.trim();
+  // блок из одних пометок – это пустой блок: данных в нем нет
+  if (safe.split("\n").every((l) => l.trim().length === 0 || l === INSTRUCTION_PLACEHOLDER)) return null;
   return `${frameStart(label, nonce)}\n${safe}\n${frameEnd(nonce)}`;
 }

@@ -8,9 +8,9 @@ const all = loadAllCharters();
 
 test("charter versions bumped and load: issues 4->5, code 7->8, overview 5->6", () => {
   // current versions are pinned in tests/v55-t3-ai-text-leaks.test.ts
-  expect(all.issues.version).toBe("7");
-  expect(all.code.version).toBe("10");
-  expect(all.overview.version).toBe("7");
+  expect(all.issues.version).toBe("14");
+  expect(all.code.version).toBe("17");
+  expect(all.overview.version).toBe("18");
 });
 
 test("issues charter: no issue titles/texts in input; comments sample named explicitly", () => {
