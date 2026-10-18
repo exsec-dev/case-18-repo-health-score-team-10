@@ -1327,7 +1327,7 @@ export function workerLoopPlan(role: Config["processRole"], queue: Config["queue
     const user = lane === "user";
     // тяжелый репо (клон и разбор до ~90 мин) берет только первый слот рода — два тяжелых
     // репо двух людей не займут все слоты; в полосе рейтинга слот один и берет все
-    plan.push({ lane, kind: "scan", slots: user ? loopSlots(queue.userScanSlots) : 1, heavySlots: 1, pollMs: 5000, perUserExclusive: user, historyRescore: !user, tickMarks: true });
+    plan.push({ lane, kind: "scan", slots: user ? loopSlots(queue.userScanSlots) : (queue.ratingScanSlots === undefined ? 1 : loopSlots(queue.ratingScanSlots)), heavySlots: 1, pollMs: 5000, perUserExclusive: user, historyRescore: !user, tickMarks: true });
     plan.push({ lane, kind: "summary", slots: user ? loopSlots(queue.userAiSlots) : 1, heavySlots: 1, pollMs: 5000, perUserExclusive: user, historyRescore: false, tickMarks: false });
     // проверка — секунды без клона: одного цикла на полосу хватает
     plan.push({ lane, kind: "check", slots: 1, heavySlots: 1, pollMs: 2000, perUserExclusive: false, historyRescore: false, tickMarks: false });
