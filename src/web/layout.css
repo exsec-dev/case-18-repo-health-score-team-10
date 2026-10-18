@@ -107,9 +107,9 @@ body {
   animation-duration: 0.25s;
 }
 
-/* блок аккаунта: hover-фон шириной как у FooterItem (38px в узком rail,
- * вся доступная ширина в широком). Внутренний отступ оставляет аватар 32px
- * и кнопку 36px на оси иконок (x=28): при раскрытии ничего не сдвигается */
+/* блок аккаунта: внутренний отступ оставляет кнопку входа 36px на оси иконок
+ * (x=28); строка пользователя снимает его и идет во всю ширину rail. При
+ * раскрытии ничего не сдвигается */
 .rh-rail-account {
   box-sizing: border-box;
   display: flex;
@@ -138,25 +138,28 @@ body {
   width: 36px;
 }
 
-/* кто вошёл: не кнопка и не ссылка — действия рядом явными кнопками */
+/* кто вошёл: не кнопка и не ссылка — действия рядом явными кнопками.
+ * Строка во всю ширину rail, как кнопка пользователя у платформы (замер
+ * 18.10.2026: 236 × 48 в широком, 56 × 48 в узком, без скругления, отступы
+ * 8 × 12, аватар 32 на оси иконок x=28, текст 13/16). Отрицательные поля
+ * снимают отступы футера и блока (8 + 2 в широком rail, 8 + 2 в узком),
+ * по вертикали строка выходит за 40px блока на 4px с каждой стороны —
+ * высота блока прежняя. */
 .rh-rail-user {
   display: flex;
   align-items: center;
-  gap: var(--g-spacing-3);
+  gap: var(--g-spacing-2);
   box-sizing: border-box;
-  width: calc(100% + 4px);
+  width: calc(100% + 20px);
   min-width: 0;
-  height: 40px;
-  margin-inline: -2px;
-  padding-inline: var(--g-spacing-1);
-  border-radius: var(--gn-aside-header-item-expanded-radius, 8px);
+  height: 48px;
+  margin: -4px -10px;
+  padding-inline: 12px;
   color: var(--g-color-text-primary);
 }
 
-.rh-rail-account_compact .rh-rail-user {
-  width: calc(100% + 2px);
-  margin-inline: -1px;
-  padding-inline: 3px;
+.rh-rail-user__text > * {
+  line-height: 16px;
 }
 
 /* тултип иконки узкого rail: якорь равен доступной ширине между полями
@@ -180,6 +183,46 @@ body {
 .rh-rail [class*="gn-aside-header__header"]::after,
 .rh-rail [class*="gn-aside-header__header"]::before {
   display: none;
+}
+
+/* Шапка rail высотой 54, как у платформы: первый пункт меню начинается на
+ * y=54. Стоковый нижний отступ 22px оставлял место под ту самую линию. */
+.rh-rail [class*="gn-aside-header__header"] {
+  padding-bottom: 6px;
+}
+
+/* Иконки пунктов — цветом подписи (0,85), как у платформы; стоковые 0,7 —
+ * бледнее текста рядом. */
+.rh-rail {
+  --gn-aside-header-item-icon-color: var(--g-color-text-primary);
+}
+
+/* В широком rail пункт — строка во всю ширину без скругления, как у
+ * платформы (замер 18.10.2026: 236 × 40 от x=0, hover 10%, текущий 15%).
+ * Стоковые 8px полей у пунктов меню и подвала и радиус 8 — плитки. Блок
+ * аккаунта сохраняет поля для кнопки входа; строка пользователя их снимает. */
+.rh-rail:not(.rh-rail_compact),
+.rh-rail:not(.rh-rail_compact) [class*="gn-composite-bar-item"] {
+  --gn-aside-header-item-expanded-radius: 0;
+}
+
+.rh-rail:not(.rh-rail_compact) [class*="gn-composite-bar__root-menu-item"] {
+  margin-inline: 0;
+}
+
+.rh-rail:not(.rh-rail_compact) [class*="gn-aside-header__footer"] {
+  margin-inline: 0;
+}
+
+/* снятые поля возвращаются внутренним отступом: иконка остается на x=19,
+ * подпись — на x=56, как у платформы (место под иконку у нее 56, у нас 40) */
+.rh-rail:not(.rh-rail_compact) [class*="composite-bar-item_type_regular"] {
+  box-sizing: border-box;
+  padding-inline-start: var(--g-spacing-2);
+}
+
+.rh-rail:not(.rh-rail_compact) .rh-rail-account {
+  margin-inline: var(--g-spacing-2);
 }
 
 /* затемнение под подписями (MultipleTooltip::before у SourceCraft). Сам
