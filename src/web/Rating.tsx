@@ -794,10 +794,12 @@ function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResp
       </AsideSection>
 
       <AsideSection title="Расчет">
+        {/* «2 из 4» — следствие весов и порога: две любые категории индекса дают
+            от 30 / 65, одна – не больше 20 / 65 (docs/guide/method/scores.md). */}
         <DefinitionList nameMaxWidth={DEFINITION_NAME_WIDTH}>
           <DefinitionList.Item
             name="Порог оценки"
-            note="Если данных меньше, оценки нет. Полнота – доля веса открытых категорий с данными: веса как в Repo Health Score, всего 65"
+            note={`Полнота данных – по какой доле категорий собраны данные, с учетом веса категорий. Ниже ${fmtCoverage(meta.coverageNullBelow)} оценки нет: нужны данные хотя бы по 2 категориям из 4.`}
           >
             полнота от {fmtCoverage(meta.coverageNullBelow)}
           </DefinitionList.Item>

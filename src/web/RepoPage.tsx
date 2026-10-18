@@ -1006,8 +1006,8 @@ function ScoreAside({
   const threshold = fmtCoverage(meta?.coverageNullBelow ?? COVERAGE_NULL_BELOW);
   // покрытие обоих показателей – по номинальным весам Repo Health Score
   // (`coverageOf` в score/compute.ts): у индекса база – 65 открытых, у полного – 100
-  const coverageHelp = `Какая доля открытых категорий (с учетом веса) собрана: веса как в Repo Health Score, всего 65. Ниже ${threshold} оценку не ставим.`;
-  const fullCoverageHelp = `Какая доля всех шести категорий (с учетом веса) собрана, из 100. Ниже ${threshold} оценку не ставим.`;
+  const coverageHelp = `По какой доле категорий индекса собраны данные, с учетом веса категорий. Ниже ${threshold} оценку не ставим.`;
+  const fullCoverageHelp = `По какой доле всех 6 категорий собраны данные, с учетом веса категорий. Ниже ${threshold} оценку не ставим.`;
   const full = score !== null && !score.fullLocked;
   // идет анализ репозитория без оценки — первый или повтор после неудачного (свой,
   // чужой или плановый): сведения появятся с итогом, до него — скелетон, а не пустая панель

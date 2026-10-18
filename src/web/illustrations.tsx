@@ -42,14 +42,13 @@ export function SearchIllustration(props: IllustrationProps) {
   );
 }
 
-/** Сравнение: три наклонных столбца разной высоты на общем основании. */
+/** Сравнение: три наклонных столбца по возрастанию, низ — по одной наклонной линии. */
 export function CompareIllustration(props: IllustrationProps) {
   return (
     <Frame back={BACK_A} {...props}>
-      <polygon points="30,64 42,62 44,88 32,89" />
-      <polygon points="52,30 65,27 67,86 54,87" />
-      <polygon points="76,46 89,43 90,84 78,85" />
-      <polygon points="24,93 96,89 94,99 22,103" />
+      <polygon points="27,64 44,61 46,94 29,96" />
+      <polygon points="51,46 68,42 70,91 53,93" />
+      <polygon points="75,28 92,24 93,88 77,90" />
     </Frame>
   );
 }

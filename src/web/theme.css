@@ -345,12 +345,18 @@
   --rh-league-gold: #e0c066;
   --rh-league-silver: #c3cbd3;
   --rh-league-bronze: #deb08b;
+  /* плитка готового набора в заглушке: светлее ее фона (полупрозрачный слой) */
+  --rh-starter-bg: rgba(255, 255, 255, 0.07);
+  --rh-starter-bg-hover: rgba(255, 255, 255, 0.12);
 }
 
 .g-root.g-root_theme_light {
   --rh-league-gold: #8a6c00;
   --rh-league-silver: #5e6873;
   --rh-league-bronze: #9a5a26;
+  /* светлая: плитка белая, при наведении чуть темнеет, но светлее заглушки */
+  --rh-starter-bg: #fff;
+  --rh-starter-bg-hover: #f8f8f8;
 }
 
 /* Цвета AI — фирменный градиент Алисы (alice.yandex.ru: #6b89e9 → #a88cff,

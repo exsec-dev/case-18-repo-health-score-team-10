@@ -61,9 +61,9 @@ const bar = (segments: ReturnType<typeof seg>[], rest: number): Contrib => ({
   segments,
   rest: { title: "не набрано", value: String(rest), share: rest / 100 },
   zones: [
-    { theme: "danger", text: "в зоне риска 0–39", share: 0.4 },
-    { theme: "warning", text: "требует внимания 40–69", share: 0.3 },
-    { theme: "success", text: "здоров 70–100", share: 0.3 },
+    { theme: "danger", text: "в зоне риска 0-39", share: 0.4 },
+    { theme: "warning", text: "требует внимания 40-69", share: 0.3 },
+    { theme: "success", text: "здоров 70-100", share: 0.3 },
   ],
   note: null,
 });

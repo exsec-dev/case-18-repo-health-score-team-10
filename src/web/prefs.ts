@@ -93,3 +93,21 @@ export function useMediaQuery(query: string): boolean {
     () => false,
   );
 }
+
+const COLLAPSED_ORGS_KEY = "rh:my-repos-collapsed-orgs";
+
+/** Свернутые организации «Моих репозиториев» — JSON-массив имен; битое значение — все развернуты. */
+export function readCollapsedOrgs(): string[] {
+  const raw = read(COLLAPSED_ORGS_KEY);
+  if (raw === null) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.every((v) => typeof v === "string") ? (parsed as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function writeCollapsedOrgs(orgs: string[]): void {
+  write(COLLAPSED_ORGS_KEY, JSON.stringify(orgs));
+}

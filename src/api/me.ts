@@ -286,6 +286,55 @@ export async function listSourcecraftRepos(
   return { status: "ok", partial: true, repos };
 }
 
+/** Потолок запросов организаций за один обход списка. */
+export const ORG_INFO_MAX = 20;
+
+/** Организация из `GET /orgs/{slug}`: логотип и название (каждое – если есть). */
+export interface OrgInfo {
+  logoUrl?: string;
+  displayName?: string;
+}
+
+/**
+ * Логотипы и названия организаций из списка по токену: в `/me/repos` у
+ * организации только слаг, остальное отдает `GET /orgs/{slug}`. Читаются первые
+ * `ORG_INFO_MAX` в порядке экрана (своя первой, остальные по алфавиту – как
+ * `orderOrgs` в UI), по `concurrency` разом и не дольше `deadlineMs`: это только
+ * оформление, список не ждет зависшую платформу. Сбой или не успевшая к сроку
+ * организация – без сведений (UI рисует инициалы и слаг).
+ */
+export async function orgInfoOf(
+  client: ScClient,
+  orgs: string[],
+  opts: { owner?: string | null; concurrency?: number; deadlineMs?: number } = {},
+): Promise<Record<string, OrgInfo>> {
+  const own = opts.owner?.toLowerCase() ?? null;
+  const queue = [...new Set(orgs)]
+    .sort((a, b) => Number(b.toLowerCase() === own) - Number(a.toLowerCase() === own) || a.localeCompare(b))
+    .slice(0, ORG_INFO_MAX);
+  const out: Record<string, OrgInfo> = {};
+  const readOne = async (org: string) => {
+    const res = await client.get(`/orgs/${encodeURIComponent(org)}`).catch(() => null);
+    if (res?.status !== 200) return;
+    const body = res.json as { logo?: { url?: unknown } | null; display_name?: unknown } | null;
+    const info: OrgInfo = {};
+    if (typeof body?.logo?.url === "string" && body.logo.url !== "") info.logoUrl = body.logo.url;
+    if (typeof body?.display_name === "string" && body.display_name.trim() !== "") info.displayName = body.display_name.trim();
+    if (info.logoUrl || info.displayName) out[org] = info;
+  };
+  let next = 0;
+  const worker = async () => {
+    while (next < queue.length) await readOne(queue[next++]!);
+  };
+  const workers = Promise.all(Array.from({ length: Math.min(opts.concurrency ?? 4, queue.length) }, worker));
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<void>((resolve) => (timer = setTimeout(resolve, opts.deadlineMs ?? 3000)));
+  await Promise.race([workers, deadline]);
+  clearTimeout(timer);
+  // к сроку — то, что успели; опоздавшие ответы в отданный объект уже не попадают
+  return { ...out };
+}
+
 /** Строка «Моих репозиториев»: репо из списка SourceCraft по токену и то, что о нем знает каталог. */
 export interface TokenRepoEntry extends MyRepoEntry {
   /** видимость из ответа SourceCraft – она же решает «свой» для закрытых (`isOwnRepo`) */
@@ -362,6 +411,15 @@ export async function listMyRepos(db: Database, userId: number | null, opts: Sav
  * Одна запись «Моих репозиториев»: мутации избранного возвращают обновленную
  * строку, чтобы не перечитывать список. Сборка та же, что у `listMyRepos`.
  */
+/**
+ * Только HealthCraft Index записи избранного – по тем же правам, что
+ * `myRepoEntryOf`, но без сборки строки кабинета (рекомендации и флаг накрутки
+ * собирают карточку целиком, а избранное читают все страницы).
+ */
+export function favoriteScoreOf(db: Database, userId: number, org: string, repo: string, opts: SavedRightsOptions = {}): number | null {
+  return viewerMayReadRepo(db, userId, org, repo, opts) ? ratingScoreOf(db, org, repo).healthcraftIndex : null;
+}
+
 export function myRepoEntryOf(db: Database, userId: number | null, org: string, repo: string, opts: SavedRightsOptions = {}): MyRepoEntry {
   const f = { org_slug: org, repo_slug: repo };
   const mayRead = viewerMayReadRepo(db, userId, f.org_slug, f.repo_slug, opts);
@@ -790,6 +848,7 @@ export interface FavoriteEntry {
   addedAt: string;
   access: FavoriteAccess | null;
   lastCheckedAt: string | null;
+  /** HealthCraft Index по правам зрителя (заполняет маршрут GET /api/me/favorites); null – оценки нет или прав нет */
   score: number | null;
 }
 

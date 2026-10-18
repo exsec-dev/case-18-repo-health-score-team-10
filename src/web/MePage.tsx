@@ -32,6 +32,7 @@ import {
 } from "@gravity-ui/icons";
 import {
   ActionTooltip,
+  ArrowToggle,
   Alert,
   type AlertProps,
   Button,
@@ -59,9 +60,9 @@ import type { LiveAnalysis } from "./analysis";
 import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
 import { plural } from "../report/submetrics";
 import { FRAUD_TITLE, authErrorText, jobErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, quotaCell, scoreTheme, scoreWord, slugOf, type ActionQuotaView, type AiQuotaView, type FavoriteAddCheck, type QuotaWindowView } from "./format";
-import { type Band, BANDS, groupByOrg, isClosed, multiSummary, orderOrgs, type RepoEntry, scoreChange, filterTokenRows, tokenParamsOf, tokenRowOrder, tokenSearchOf, tokenStateOf, TOKEN_FILTER_DEFAULT, TOKEN_SORTS, TOKEN_STATES, type TokenFilter, type TokenSort, type TokenState, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
+import { type Band, BANDS, groupByOrg, orgMetaText, orgSummaryOf, isClosed, multiSummary, orderOrgs, type RepoEntry, scoreChange, filterTokenRows, tokenParamsOf, tokenRowOrder, tokenSearchOf, tokenStateOf, TOKEN_FILTER_DEFAULT, TOKEN_SORTS, TOKEN_STATES, type TokenFilter, type TokenSort, type TokenState, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
 import { linkProps, navigate, repoHref } from "./router";
-import { useMediaQuery } from "./prefs";
+import { readCollapsedOrgs, useMediaQuery, writeCollapsedOrgs } from "./prefs";
 import { repoKey, useTokenRepos } from "./tokenRepos";
 import { Page, UserAvatar, displayName, logoutFailedToast } from "./Shell";
 import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, RepoSlug, ScoreBar, SkeletonRows, TIP_TARGET, VisibilityPill } from "./ui";
@@ -1543,6 +1544,19 @@ function TokenRepos() {
     }
   };
 
+  // свернутые организации переживают перезагрузку; при поиске по имени все группы
+  // раскрыты — иначе совпадение в свернутой группе было бы не видно
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set(readCollapsedOrgs()));
+  const toggleOrg = (org: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(org)) next.add(org);
+      writeCollapsedOrgs([...next]);
+      return next;
+    });
+  const searching = filter.q.trim() !== "";
+  const isCollapsed = (org: string) => collapsed.has(org) && !searching;
+
   // организации и языки — по всему списку, без учета фильтров: выбор не пропадает из меню
   const orgs = orderOrgs(
     entries.map((e) => e.org),
@@ -1550,7 +1564,7 @@ function TokenRepos() {
   );
   const languages = [...new Set(entries.map((e) => e.language ?? ""))].sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)));
   const shown = filterTokenRows(entries, filter);
-  const groups = groupByOrg(shown, (e) => e.repo, { owner: data?.owner ?? null, within: tokenRowOrder(sort) });
+  const groups = groupByOrg(shown, (e) => e.repo, { owner: data?.owner ?? null, within: tokenRowOrder(sort) }).map((g) => ({ ...g, summary: orgSummaryOf(g.items) }));
   const countBy = (pick: (e: TokenRepoEntry) => boolean) => entries.filter(pick).length;
   const filtersOn = [filter.orgs.length > 0, filter.states.length > 0, filter.langs.length > 0].filter(Boolean).length;
   const anyFilter = filtersOn > 0 || filter.vis !== "all" || filter.q.trim() !== "";
@@ -1744,42 +1758,88 @@ function TokenRepos() {
       </span>
 
       {groups.map((g) => (
-        <section key={g.org} className="rh-org-group" aria-labelledby={`org-${g.org}`}>
-          {/* организация — заголовком группы, прилипает при прокрутке; число — тише */}
+        <section key={g.org} className="rh-org-group" aria-labelledby={`org-name-${g.org}`}>
+          {/* организация — плашкой-заголовком группы, прилипает при прокрутке и
+              сворачивает группу. Сетка как у строки: аватар 40px по оси аватаров,
+              название и сводка — по линии имен, высотой ровно в аватар; справа —
+              сколько репозиториев в каждой зоне, стрелка — по колонке меню «…» */}
           <Text variant="subheader-2" as="h2" id={`org-${g.org}`} className="rh-org-group__title">
-            {g.org}
-            <span className="rh-btn-count">{g.items.length}</span>
+            <button
+              type="button"
+              className="rh-org-group__toggle"
+              aria-expanded={!isCollapsed(g.org)}
+              aria-controls={`org-body-${g.org}`}
+              disabled={searching}
+              onClick={() => toggleOrg(g.org)}
+            >
+              <RepoAvatar repo={g.org} logoUrl={data?.orgs?.[g.org]?.logoUrl ?? null} size="l" />
+              <span className="rh-org-group__text">
+                <span className="rh-org-group__name">
+                  <Text variant="subheader-2" ellipsis id={`org-name-${g.org}`}>
+                    {data?.orgs?.[g.org]?.displayName ?? g.org}
+                  </Text>
+                  <span className="rh-btn-count">{g.items.length}</span>
+                </span>
+                <Text variant="body-short" color="secondary" ellipsis>
+                  {orgMetaText(g.org, data?.orgs?.[g.org]?.displayName, g.summary)}
+                </Text>
+              </span>
+              <span className="rh-org-group__zones">
+                {ZONE_BANDS.filter((z) => g.summary.zones[z] > 0).map((z) => (
+                  // подсказка — мыши, чтению — скрытый текст: точка с числом от чтения скрыты
+                  <span key={z} className="rh-org-zone" title={`${stateTitle.get(z)}: ${g.summary.zones[z]}`}>
+                    <span className="rh-org-zone__mark" aria-hidden="true">
+                      <i className={`rh-org-zone__dot rh-org-zone__dot_${z}`} />
+                      {g.summary.zones[z]}
+                    </span>
+                    <span className="rh-sr-only">{`${stateTitle.get(z)}: ${g.summary.zones[z]}`}</span>
+                  </span>
+                ))}
+              </span>
+              <span className="rh-org-group__arrow">
+                <ArrowToggle direction={isCollapsed(g.org) ? "right" : "bottom"} size={16} />
+              </span>
+            </button>
           </Text>
-          <ul className="rh-repo-list">
-            {g.items.map((e) => {
-              const slug = `${e.org}/${e.repo}`;
-              const closed = isClosed(e.visibility);
-              return (
-                <RepoRow
-                  key={slug}
-                  entry={e}
-                  access={null}
-                  lastCheckedAt={null}
-                  hasPat
-                  live={analysis.live(slug)}
-                  starting={starting.has(slug)}
-                  busy={false}
-                  onScan={() => void startScan(slug)}
-                  canAnalyze
-                  scheduled={!closed}
-                  fromToken
-                  empty={e.isEmpty}
-                  badge={<VisibilityPill value={e.visibility} />}
-                  favorite={{ on: e.favorite, busy: favBusy.has(slug), toggle: () => void toggleFavorite(e) }}
-                />
-              );
-            })}
-          </ul>
+          {/* сворачивание — анимацией высоты (сетка 1fr → 0fr), а не `hidden`: у
+              Gravity сворачиваемого списка нет. Свернутое — `inert`, вне фокуса */}
+          <div className="rh-org-group__body" id={`org-body-${g.org}`} data-collapsed={isCollapsed(g.org) || undefined} inert={isCollapsed(g.org) || undefined}>
+            <div className="rh-org-group__inner">
+              <ul className="rh-repo-list">
+                {g.items.map((e) => {
+                  const slug = `${e.org}/${e.repo}`;
+                  const closed = isClosed(e.visibility);
+                  return (
+                    <RepoRow
+                      key={slug}
+                      entry={e}
+                      access={null}
+                      lastCheckedAt={null}
+                      hasPat
+                      live={analysis.live(slug)}
+                      starting={starting.has(slug)}
+                      busy={false}
+                      onScan={() => void startScan(slug)}
+                      canAnalyze
+                      scheduled={!closed}
+                      fromToken
+                      empty={e.isEmpty}
+                      badge={<VisibilityPill value={e.visibility} />}
+                      favorite={{ on: e.favorite, busy: favBusy.has(slug), toggle: () => void toggleFavorite(e) }}
+                    />
+                  );
+                })}
+              </ul>
+            </div>
+          </div>
         </section>
       ))}
     </Flex>
   );
 }
+
+/** Зоны в шапке организации — от здоровых к рискованным. */
+const ZONE_BANDS = ["success", "warning", "danger"] as const;
 
 /** Значение «язык не определен» в Select: пустая строка там не годится как value. */
 const LANG_UNKNOWN = "__none";

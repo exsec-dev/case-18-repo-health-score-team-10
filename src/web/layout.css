@@ -2980,32 +2980,77 @@ button.rh-category:focus-visible {
   color: var(--g-color-text-positive);
 }
 
-/* готовые наборы пустого сравнения — плитки-действия над кнопкой добавления */
-/* отступ — как у блока действий PlaceholderContainer: узел действий он не оборачивает */
-.rh-cmp-starters {
+/* готовые наборы — плитками в заглушке над кнопкой, без своего заголовка: плитка
+ * сама говорит, что откроет. Фон плитки светлее фона заглушки. От описания —
+ * тот же отступ, что был у одной кнопки. */
+.rh-cmp-empty__actions {
   width: 100%;
-  margin-top: var(--g-spacing-5);
+  margin-top: var(--g-spacing-4);
 }
 
-.rh-cmp-starter-skeleton.g-skeleton {
-  width: 240px;
-  height: 58px;
-  border-radius: var(--g-card-border-radius);
-}
-
-.rh-cmp-starters__grid {
+.rh-cmp-starters {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 320px));
+  grid-template-columns: repeat(auto-fill, minmax(240px, 320px));
   gap: var(--g-spacing-3);
   width: 100%;
 }
 
+/* каркас — по высоте готовой плитки, блок не прыгает */
+.rh-cmp-starter-skeleton.g-skeleton {
+  height: 62px;
+  border-radius: var(--g-card-border-radius);
+}
+
 .rh-cmp-starter.g-card {
   display: flex;
+  align-items: center;
+  gap: var(--g-spacing-3);
+  min-width: 0;
+  padding: var(--g-spacing-3) var(--g-spacing-4);
+  background: var(--rh-starter-bg);
+}
+
+/* без тени Gravity у карточки-действия: плитка плоская, отклик на наведение — фоном */
+.rh-cmp-starter.g-card,
+.rh-cmp-starter.g-card:hover,
+.rh-cmp-starter.g-card:active {
+  box-shadow: none;
+}
+
+.rh-cmp-starter.g-card:hover {
+  background: var(--rh-starter-bg-hover);
+}
+
+.rh-cmp-starter__text {
+  display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 2px;
   min-width: 0;
-  padding: var(--g-spacing-3) var(--g-spacing-4);
+}
+
+/* стрелка — подсказка, что плитка открывает сравнение; ярче при наведении */
+.rh-cmp-starter__go {
+  flex-shrink: 0;
+  color: var(--g-color-text-secondary);
+  transition: color 0.15s, transform 0.15s;
+}
+
+.rh-cmp-starter.g-card:hover .rh-cmp-starter__go,
+.rh-cmp-starter.g-card:focus-visible .rh-cmp-starter__go {
+  color: var(--g-color-text-primary);
+  transform: translateX(2px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rh-cmp-starter__go {
+    transition: none;
+  }
+
+  .rh-cmp-starter.g-card:hover .rh-cmp-starter__go,
+  .rh-cmp-starter.g-card:focus-visible .rh-cmp-starter__go {
+    transform: none;
+  }
 }
 
 /* полосы таблицы не анимируются: значения не меняются, а раскрытие категории
@@ -4033,17 +4078,189 @@ button.rh-category:focus-visible {
 .rh-org-group {
   display: flex;
   flex-direction: column;
-  gap: var(--g-spacing-2);
 }
 
-/* заголовок организации прилипает при прокрутке — видно, чья группа на экране */
+/* между организациями 8px, а не 16px общего ритма страницы: свернутые плашки
+ * читаются одним списком, а не россыпью */
+.rh-org-group + .rh-org-group {
+  margin-top: calc(var(--g-spacing-2) - var(--g-spacing-4));
+}
+
+/* сворачивание группы: высота анимируется сеткой 1fr → 0fr (у Gravity
+ * сворачиваемого списка нет). Видимость гаснет после анимации — свернутое
+ * не читается и не ловит фокус; раскрытие показывает сразу. */
+.rh-org-group__body {
+  display: grid;
+  grid-template-rows: 1fr;
+  transition: grid-template-rows 220ms cubic-bezier(0.2, 0, 0, 1), visibility 0s;
+}
+
+.rh-org-group__body[data-collapsed] {
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  transition: grid-template-rows 220ms cubic-bezier(0.2, 0, 0, 1), visibility 0s 220ms;
+}
+
+/* `clip` с полем 4px у раскрытой: кольцо фокуса крайних строк не обрезается,
+ * а свернутая обрезана ровно по краю */
+.rh-org-group__inner {
+  min-height: 0;
+  overflow: clip;
+}
+
+.rh-org-group__body:not([data-collapsed]) .rh-org-group__inner {
+  overflow-clip-margin: 4px;
+}
+
+/* отступ под последней строкой группы — внутри сворачиваемой части: раскрытые
+ * группы не сливаются со следующей плашкой, а свернутые стоят плотно (8px) */
+.rh-org-group__inner > .rh-repo-list {
+  padding-bottom: var(--g-spacing-3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rh-org-group__body,
+  .rh-org-group__body[data-collapsed] {
+    transition: none;
+  }
+}
+
+/* заголовок организации — плашка со скруглением, прилипает сама (без поля фона
+ * вокруг) и вплотную к списку. Фон чуть светлее страницы, слоем поверх нее —
+ * непрозрачный, строки под плашкой не просвечивают. */
 .rh-org-group__title {
   position: sticky;
   z-index: 2;
   top: 0;
   margin: 0;
-  padding: var(--g-spacing-1) 0;
-  background: var(--g-color-base-background);
+  border-radius: var(--g-border-radius-l);
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--g-color-text-primary) 6%, transparent),
+      color-mix(in srgb, var(--g-color-text-primary) 6%, transparent)
+    ),
+    var(--g-color-base-background);
+}
+
+/* Кнопка сворачивания на всю плашку. Сетка повторяет строку: отступ 12px,
+ * аватар 40px и зазор 16px — аватар организации на оси аватаров репозиториев,
+ * название — по линии их имен, стрелка — по колонке меню «…» (28px). */
+.rh-org-group__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--g-spacing-4);
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: var(--g-spacing-3);
+  border: 0;
+  border-radius: inherit;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.rh-org-group__toggle:not(:disabled):hover {
+  background: var(--g-color-base-simple-hover);
+}
+
+/* при поиске все группы раскрыты — сворачивать нечего */
+.rh-org-group__toggle:disabled {
+  cursor: default;
+}
+
+.rh-org-group__toggle:disabled .rh-org-group__arrow {
+  visibility: hidden;
+}
+
+.rh-org-group__toggle:focus-visible {
+  outline: 2px solid var(--g-color-line-focus);
+  outline-offset: -2px;
+}
+
+/* аватар — как у строк (size="l" квадратный, 40px) */
+.rh-org-group__toggle .g-avatar {
+  --g-avatar-size: 40px;
+}
+
+/* две строки ровно в высоту аватара: название 20px — тем же кеглем, что имя
+ * строки (subheader-2), сводка 16px (body-short) и зазор 4px между ними */
+.rh-org-group__text {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--g-spacing-1);
+  min-width: 0;
+  height: 40px;
+}
+
+.rh-org-group__name {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+}
+
+/* сколько репозиториев группы в каждой зоне: точка цвета зоны и число */
+.rh-org-group__zones {
+  display: flex;
+  flex-shrink: 0;
+  gap: var(--g-spacing-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.rh-org-zone,
+.rh-org-zone__mark {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--g-text-body-1-font-size);
+  line-height: var(--g-text-body-1-line-height);
+  font-weight: var(--g-text-body-font-weight);
+}
+
+.rh-org-zone__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.rh-org-zone__dot_success {
+  background: var(--g-color-base-positive-heavy);
+}
+
+.rh-org-zone__dot_warning {
+  background: var(--g-color-base-warning-heavy);
+}
+
+.rh-org-zone__dot_danger {
+  background: var(--g-color-base-danger-heavy);
+}
+
+.rh-org-group__arrow {
+  display: flex;
+  flex: 0 0 28px;
+  justify-content: center;
+  color: var(--g-color-text-secondary);
+}
+
+/* на узком экране зоны не помещаются рядом с названием — их несут строки */
+@media (max-width: 599px) {
+  .rh-org-group__zones {
+    display: none;
+  }
+}
+
+/* от 1440px прокручивается сама колонка, а липкий край у нее — внутри отступа
+ * 20px: заголовок висел ниже шапки, и над ним просвечивали строки. Поднимаем
+ * его на отступ — он прилегает к шапке. Уже 1440px прокручивается тело
+ * страницы без отступа, там хватает top: 0. */
+@media (min-width: 1440px) {
+  .rh-page_document .rh-org-group__title {
+    top: calc(-1 * var(--g-spacing-5));
+  }
 }
 
 /* место под «…», когда меню строке не нужно: колонки строк стоят ровно */

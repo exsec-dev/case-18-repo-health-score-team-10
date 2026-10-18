@@ -253,9 +253,9 @@ export const SCORE_LEGEND_TITLE = "Шкала оценки";
 
 /** Легенда шкалы: слово, диапазон, тема чипа. Порядок — сверху вниз от здорового. */
 export const SCORE_SCALE: { theme: "success" | "warning" | "danger"; word: string; range: string }[] = [
-  { theme: "success", word: SCORE_WORDS.success, range: "70–100" },
-  { theme: "warning", word: SCORE_WORDS.warning, range: "40–69" },
-  { theme: "danger", word: SCORE_WORDS.danger, range: "0–39" },
+  { theme: "success", word: SCORE_WORDS.success, range: "70-100" },
+  { theme: "warning", word: SCORE_WORDS.warning, range: "40-69" },
+  { theme: "danger", word: SCORE_WORDS.danger, range: "0-39" },
 ];
 
 /** Короткая форма «нет данных» для узких колонок таблицы («Нет данных» не влезает в 59px). */

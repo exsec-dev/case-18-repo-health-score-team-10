@@ -4,13 +4,15 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { listSourcecraftRepos, myRepoEntryOf, tokenRepoEntries } from "../src/api/me";
+import { favoriteScoreOf, listSourcecraftRepos, myRepoEntryOf, tokenRepoEntries } from "../src/api/me";
 import { patOwnerLogin, storePat } from "../src/auth/pat";
 import type { ScClient } from "../src/collectors/http";
 import {
   filterTokenRows,
   groupByOrg,
   orderOrgs,
+  orgMetaText,
+  orgSummaryOf,
   scoreChange,
   sortEntries,
   tokenParamsOf,
@@ -245,5 +247,50 @@ describe("отказ «не свой» не расходует лимит зап
     expect(recordOf("not_own")).toContain("record: false");
     expect(recordOf("no_access")).toContain("record: true");
     expect(recordOf("pat_expired")).toContain("record: true");
+  });
+});
+
+describe("шапка организации в «Моих репозиториях»", () => {
+  const row = (visibility: string, healthcraftIndex: number | null) => ({
+    org: "o",
+    repo: "r",
+    title: null,
+    language: null,
+    visibility,
+    isEmpty: false,
+    healthcraftIndex,
+    lastScanAt: null,
+    lastScanStatus: null,
+  });
+  test("сводка: оценено, закрытые, зоны; строка — слаг только при своем названии, без «·»", () => {
+    const s = orgSummaryOf([row("private", 80), row("internal", 50), row("public", 20), row("public", null)]);
+    expect(s).toEqual({ scored: 3, closed: 2, zones: { success: 1, warning: 1, danger: 1 } });
+    expect(orgMetaText("lct", "ЛЦТ", s)).toBe("lct, 3 оценено, 2 закрытых");
+    expect(orgMetaText("lct", "lct", s)).toBe("3 оценено, 2 закрытых");
+    expect(orgMetaText("lct", undefined, orgSummaryOf([row("public", null)]))).toBe("Еще не оценивались");
+    expect(orgMetaText("lct", undefined, orgSummaryOf([row("private", null)]))).toBe("Еще не оценивались, 1 закрытый");
+  });
+});
+
+describe("оценка в GET /api/me/favorites", () => {
+  test("публичный в рейтинге – оценка всем; закрытый – только с сохраненной проверкой действующего токена", () => {
+    const t = makeApiDb();
+    try {
+      const user = Number(t.db.query("INSERT INTO users (ya_id, login, created_at, last_login_at) VALUES ('ya-f', 'f', '2026', '2026')").run().lastInsertRowid);
+      const pub = seedRepo(t, { org: "o", repo: "pub" });
+      seedScore(t, pub, seedScan(t, pub, { facts: cardFacts() }), { total: 70 });
+      const priv = seedRepo(t, { org: "o", repo: "priv" });
+      seedScore(t, priv, seedScan(t, priv, { facts: cardFacts() }), { total: 55 });
+      t.db.query("UPDATE repos SET visibility = 'private' WHERE id = ?").run(priv);
+      expect(favoriteScoreOf(t.db, user, "o", "pub")).toBe(70);
+      expect(favoriteScoreOf(t.db, user, "o", "priv", { savedRightsValid: true })).toBeNull();
+      t.db
+        .query("INSERT INTO favorites (user_id, org_slug, repo_slug, added_at, last_access) VALUES (?, 'o', 'priv', '2026', ?)")
+        .run(user, JSON.stringify({ clone: true, visibility: "private", ci: false, appsec: false, own: true }));
+      expect(favoriteScoreOf(t.db, user, "o", "priv", { savedRightsValid: true })).toBe(55);
+      expect(favoriteScoreOf(t.db, user, "o", "priv", { savedRightsValid: false })).toBeNull();
+    } finally {
+      t.close();
+    }
   });
 });

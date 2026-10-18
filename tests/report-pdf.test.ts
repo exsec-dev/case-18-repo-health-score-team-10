@@ -141,7 +141,7 @@ describe("П1: содержание PDF равно содержанию MD", () 
     const { card, close } = fixtureCard("anon");
     try {
       const text = pdfTreeText(buildPdfDocument(buildReportModel(card)).content).join(" ");
-      for (const s of ["Вклад категорий в", "не набрано", "здоров 70–100", "Требует внимания", "Видна участникам репозитория.", "Ожидаемый эффект"]) expect(text).toContain(s);
+      for (const s of ["Вклад категорий в", "не набрано", "здоров 70-100", "Требует внимания", "Видна участникам репозитория.", "Ожидаемый эффект"]) expect(text).toContain(s);
     } finally {
       close();
     }

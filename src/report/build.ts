@@ -111,8 +111,8 @@ export function thresholdNote(value: number, actions: readonly ThresholdAction[]
   const v = roundScore(value);
   const [success, warning] = [SCORE_SCALE[0]!, SCORE_SCALE[1]!];
   const bounds: [number, string, string][] = [
-    [Number(success.range.split("–")[0]), success.word, warning.word],
-    [Number(warning.range.split("–")[0]), warning.word, SCORE_SCALE[2]!.word],
+    [Number(success.range.split("-")[0]), success.word, warning.word],
+    [Number(warning.range.split("-")[0]), warning.word, SCORE_SCALE[2]!.word],
   ];
   for (const [t, upperZone, lowerZone] of bounds) {
     if (v >= t && v - t <= 2) return `${t} – нижняя граница зоны «${upperZone}»: при ${t - 1} баллах оценка относилась бы к зоне «${lowerZone}».`;
@@ -375,7 +375,7 @@ function recWord(n: number): string {
 /** Шкала 3 зон под полосой: слева направо — от риска к здоровью (легенда `SCORE_SCALE`). */
 function zones(): { theme: "danger" | "warning" | "success"; text: string; share: number }[] {
   return [...SCORE_SCALE].reverse().map((z) => {
-    const [from, to] = z.range.split("–").map(Number) as [number, number];
+    const [from, to] = z.range.split("-").map(Number) as [number, number];
     return { theme: z.theme, text: `${z.word} ${z.range}`, share: (to === 100 ? to - from : to - from + 1) / 100 };
   });
 }

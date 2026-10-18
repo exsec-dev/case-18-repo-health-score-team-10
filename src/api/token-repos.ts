@@ -7,7 +7,7 @@
 // список не живет `ttlMs`, а обход прежним токеном, закончившийся после его
 // смены, не возвращается. Значение PAT не хранится дольше обхода.
 import type { TokenMembership } from "../auth/access";
-import type { ScRepoLite } from "./me";
+import type { OrgInfo, ScRepoLite } from "./me";
 
 export interface TokenRepoList {
   /** когда список прочитан из SourceCraft (мс) */
@@ -17,10 +17,15 @@ export interface TokenRepoList {
   partial: boolean;
   /** обход прерван сбоем SourceCraft – такой список в память не попадает */
   interrupted: boolean;
+  /** логотипы и названия организаций списка (`orgInfoOf`); нет ключа – инициалы и слаг */
+  orgs: Record<string, OrgInfo>;
 }
 
-/** Обход `/me/repos` одним токеном (`listSourcecraftRepos` с клиентом на этом токене). */
-export type TokenRepoWalk = (pat: string) => Promise<{ status: "ok" | "source_http"; partial: boolean; repos: ScRepoLite[]; interrupted?: boolean }>;
+/** Обход `/me/repos` одним токеном (`listSourcecraftRepos` с клиентом на этом токене); `userId` – чей список (порядок организаций). */
+export type TokenRepoWalk = (
+  pat: string,
+  userId: number,
+) => Promise<{ status: "ok" | "source_http"; partial: boolean; repos: ScRepoLite[]; interrupted?: boolean; orgs?: Record<string, OrgInfo> }>;
 
 export type TokenRepoLoad =
   /** `stale` – новый обход не дало окно, отдан прежний список (возможно, истекший) */
@@ -62,7 +67,7 @@ export function makeTokenRepoCache(deps: TokenRepoCacheDeps): TokenRepoCache {
   };
 
   const startWalk = (userId: number, pat: string) => {
-    const started: { pat: string; promise: ReturnType<TokenRepoWalk> } = { pat, promise: deps.walk(pat) };
+    const started: { pat: string; promise: ReturnType<TokenRepoWalk> } = { pat, promise: deps.walk(pat, userId) };
     // завершение обхода снимает только свою запись: обход прежним токеном не стирает новый
     started.promise = started.promise.finally(() => {
       if (flights.get(userId) === started) flights.delete(userId);
@@ -86,7 +91,7 @@ export function makeTokenRepoCache(deps: TokenRepoCacheDeps): TokenRepoCache {
       }
       const result = await flight.promise;
       if (result.status === "source_http") return { kind: "failed" };
-      const list: TokenRepoList = { at: now(), repos: result.repos, partial: result.partial, interrupted: result.interrupted === true };
+      const list: TokenRepoList = { at: now(), repos: result.repos, partial: result.partial, interrupted: result.interrupted === true, orgs: result.orgs ?? {} };
       if (!list.interrupted && deps.currentPat(userId) === pat) {
         lists.set(userId, list);
         evictExpired(list.at);

@@ -3,7 +3,7 @@
 // бандл фронтенда не утекает ни строчки серверного кода (типы стираются).
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ApiError, MetaResponse, RatingResponse, RepoCard } from "../api/repos";
-import type { MyRepoEntry, ScRepoLite, TokenRepoEntry } from "../api/me";
+import type { MyRepoEntry, OrgInfo, ScRepoLite, TokenRepoEntry } from "../api/me";
 import { errorText } from "./format";
 
 export type { MetaResponse, RatingResponse, RepoCard, MyRepoEntry, TokenRepoEntry };
@@ -36,6 +36,8 @@ export interface TokenReposResponse {
   stale?: boolean;
   /** логин SourceCraft владельца токена — его пространство показывается первым */
   owner: string | null;
+  /** логотипы и названия организаций списка; нет ключа – инициалы и слаг */
+  orgs?: Record<string, OrgInfo>;
   entries: TokenRepoEntry[];
 }
 

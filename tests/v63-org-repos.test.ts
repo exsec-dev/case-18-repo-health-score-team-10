@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { launchRightOf, needsMembership, type NormalizedAccess } from "../src/auth/access";
 import { makeTokenRepoCache, membershipIn, type TokenRepoList, type TokenRepoWalk } from "../src/api/token-repos";
-import { repoCooldownRefusal, requestUserScan, type ScRepoLite } from "../src/api/me";
+import { ORG_INFO_MAX, orgInfoOf, repoCooldownRefusal, requestUserScan, type ScRepoLite } from "../src/api/me";
 import { enqueueScan } from "../src/jobs/scheduler";
 import { loadConfig, type QueueConfig } from "../src/config";
 import { openDb } from "../src/db";
@@ -56,7 +56,7 @@ describe("право запуска анализа по кнопке", () => {
 });
 
 const lite = (org: string, slug: string, visibility = "public"): ScRepoLite => ({ org, slug, name: slug, visibility, isEmpty: false });
-const listOf = (repos: ScRepoLite[], over: Partial<TokenRepoList> = {}): TokenRepoList => ({ at: 0, repos, partial: false, interrupted: false, ...over });
+const listOf = (repos: ScRepoLite[], over: Partial<TokenRepoList> = {}): TokenRepoList => ({ at: 0, repos, partial: false, interrupted: false, orgs: {}, ...over });
 
 describe("членство в списке по токену", () => {
   test("слаг – точно как в SourceCraft (другой регистр – другая строка каталога); нет в полном списке или упершемся в потолок – no; в прерванном – unknown", () => {
@@ -413,4 +413,44 @@ describe("HTTP: анализ по кнопке для репозиториев �
       meReposMode = "ok";
     }
   }, 60_000);
+});
+
+describe("сведения об организациях списка по токену", () => {
+  test("логотип и название – только из ответа 200; 404 и сбой сети – без сведений; каждая организация читается один раз", async () => {
+    const calls: string[] = [];
+    const client = {
+      get: async (path: string) => {
+        calls.push(path);
+        if (path === "/orgs/a") return { status: 200, json: { logo: { url: "https://img/a.png" }, display_name: " Альфа " } };
+        if (path === "/orgs/d") return { status: 200, json: { logo: null, display_name: "" } };
+        if (path === "/orgs/b") return { status: 404, json: null };
+        throw new Error("network");
+      },
+      requestCount: () => calls.length,
+    } as unknown as ScClient;
+    expect(await orgInfoOf(client, ["a", "b", "a", "c", "d"])).toEqual({ a: { logoUrl: "https://img/a.png", displayName: "Альфа" } });
+    expect(calls).toEqual(["/orgs/a", "/orgs/b", "/orgs/c", "/orgs/d"]);
+  });
+
+  test("порядок – как на экране (своя первой, затем по алфавиту), не больше ORG_INFO_MAX; зависшая организация не держит список", async () => {
+    const asked: string[] = [];
+    const client = {
+      get: (path: string) => {
+        asked.push(path);
+        // зависает навсегда
+        if (path === "/orgs/a00") return new Promise(() => {});
+        return Promise.resolve({ status: 200, json: { display_name: path } });
+      },
+      requestCount: () => asked.length,
+    } as unknown as ScClient;
+    const orgs = Array.from({ length: ORG_INFO_MAX + 5 }, (_, i) => `a${String(i).padStart(2, "0")}`).reverse();
+    const started = Date.now();
+    const info = await orgInfoOf(client, [...orgs, "Me"], { owner: "me", concurrency: 2, deadlineMs: 200 });
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(asked[0]).toBe("/orgs/Me");
+    expect(asked.length).toBe(ORG_INFO_MAX);
+    expect(asked).not.toContain(`/orgs/a${ORG_INFO_MAX + 4}`);
+    expect(info["a00"]).toBeUndefined();
+    expect(info["a01"]).toEqual({ displayName: "/orgs/a01" });
+  });
 });

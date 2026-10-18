@@ -3,6 +3,7 @@
 // плитках и порядок строк проверялись тестом на данных.
 import type { MyReposResponse } from "./api";
 import { fmtDate, scoreTheme, slugOf } from "./format";
+import { plural } from "../report/submetrics";
 
 export type RepoEntry = MyReposResponse["entries"][number];
 
@@ -19,9 +20,9 @@ export function bandOf(entry: Pick<RepoEntry, "healthcraftIndex">): Band {
 }
 
 export const BANDS: { key: Band; title: string; hint: string }[] = [
-  { key: "success", title: "Здоровы", hint: "HealthCraft Index 70–100" },
-  { key: "warning", title: "Требуют внимания", hint: "HealthCraft Index 40–69" },
-  { key: "danger", title: "В зоне риска", hint: "HealthCraft Index 0–39" },
+  { key: "success", title: "Здоровы", hint: "HealthCraft Index 70-100" },
+  { key: "warning", title: "Требуют внимания", hint: "HealthCraft Index 40-69" },
+  { key: "danger", title: "В зоне риска", hint: "HealthCraft Index 0-39" },
   { key: "none", title: "Без оценки", hint: "Анализ еще не проводился, идет или данных для оценки не хватило" },
 ];
 
@@ -198,6 +199,39 @@ export function tokenStateOf(e: TokenRow): TokenState {
   if (e.isEmpty) return "empty";
   if (e.lastScanStatus === "bad") return "failed";
   return e.lastScanAt !== null ? "unscored" : "never";
+}
+
+/** Сводка группы организации для ее шапки: сколько оценено, закрыто и в каждой зоне. */
+export interface OrgSummary {
+  scored: number;
+  closed: number;
+  zones: Record<ZoneBand, number>;
+}
+
+type ZoneBand = Exclude<Band, "none">;
+
+export function orgSummaryOf(items: readonly TokenRow[]): OrgSummary {
+  const zones: Record<ZoneBand, number> = { success: 0, warning: 0, danger: 0 };
+  let closed = 0;
+  for (const e of items) {
+    if (isClosed(e.visibility)) closed++;
+    const band = bandOf(e);
+    if (band !== "none") zones[band]++;
+  }
+  return { scored: zones.success + zones.warning + zones.danger, closed, zones };
+}
+
+/**
+ * Строка под названием организации: слаг (если название с ним не совпадает),
+ * сколько оценено и сколько закрытых. Разделитель — запятая: «·» в UI запрещен.
+ */
+export function orgMetaText(org: string, displayName: string | undefined, s: OrgSummary): string {
+  const counts = [
+    s.scored > 0 ? `${s.scored} оценено` : "еще не оценивались",
+    ...(s.closed > 0 ? [`${s.closed} ${plural(s.closed, "закрытый", "закрытых", "закрытых")}`] : []),
+  ].join(", ");
+  // слаг пишется как есть; с прописной — только строка, начатая словами
+  return displayName && displayName !== org ? `${org}, ${counts}` : counts.charAt(0).toUpperCase() + counts.slice(1);
 }
 
 export type TokenSort = "name" | "never" | "index" | "scan";

@@ -12,7 +12,7 @@
 // у Gravity `Table` нет объединенных ячеек и подстрок, а на телефоне подпись
 // строки встает над ячейками — у нативной `<table>` это снимало бы роли.
 import { ArrowToggle, Alert, Button, Card, Dialog, Flex, Icon, Label, Link, Progress, Skeleton, Text, TextInput } from "@gravity-ui/uikit";
-import { CircleCheck, CircleQuestion, Magnifier, Plus, Xmark } from "@gravity-ui/icons";
+import { ArrowRight, CircleCheck, CircleQuestion, Magnifier, Plus, Xmark } from "@gravity-ui/icons";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import type { CompareCard, CompareItem, CompareResponse } from "../api/compare";
 import type { FavoriteEntry } from "../api/me";
@@ -210,8 +210,8 @@ export function ComparePage({ search }: { search: string }) {
               title={SLOT_EMPTY.compare.title}
               description={SLOT_EMPTY.compare.text}
               actions={
-                <Flex direction="column" alignItems="flex-start" gap={4} className="rh-cmp-starters">
-                  <CompareStarters loggedIn={loggedIn} />
+                <Flex direction="column" alignItems="flex-start" gap={4} className="rh-cmp-empty__actions">
+                  <CompareStarters loggedIn={loggedIn} sessionKnown={meData !== null || me.kind === "error"} />
                   <Button view="action" size="l" onClick={openDialog}>
                     {COMPARE_ADD}
                   </Button>
@@ -306,44 +306,72 @@ interface StarterSet {
 
 /**
  * Готовые наборы пустого сравнения — в пару кликов, без поиска: топ-3 рейтинга
- * всем, первые 3 из избранного вошедшему (если там хотя бы 2). Карточки-действия
- * Gravity (`Card type="action"`), как плитки выбора у SourceCraft. Пока наборы
- * грузятся или не пришли — блока нет, кнопка добавления остается.
+ * всем, первые 3 из избранного вошедшему (если там хотя бы 2 с оценкой). Плитки
+ * в заглушке над кнопкой; пока ответы не пришли — каркас одной плитки, затем
+ * плитки все разом: раньше они проявлялись по одному, и заглушка
+ * успевала выглядеть законченной. Плитка — карточка-действие Gravity
+ * (`Card type="action"`), как плитки выбора у SourceCraft: название, состав
+ * строкой и стрелка – что откроется по клику.
  */
-function CompareStarters({ loggedIn }: { loggedIn: boolean }) {
+function CompareStarters({ loggedIn, sessionKnown }: { loggedIn: boolean; sessionKnown: boolean }) {
   const [top, setTop] = useState<string[] | null>(null);
   const [favs, setFavs] = useState<string[] | null>(null);
   useEffect(() => {
     const ctrl = new AbortController();
     fetchJson<RatingResponse>("/api/repos?per_page=3", ctrl.signal)
       .then((r) => setTop(r.items.slice(0, 3).map((i) => `${i.org}/${i.repo}`)))
-      .catch(() => setTop([]));
+      .catch(() => {
+        if (!ctrl.signal.aborted) setTop([]);
+      });
     return () => ctrl.abort();
   }, []);
   useEffect(() => {
-    if (!loggedIn) return;
-    fetchJson<{ entries: FavoriteEntry[] }>("/api/me/favorites")
+    // вышел — набор избранного прежнего входа не показывается
+    if (!loggedIn) {
+      setFavs(null);
+      return;
+    }
+    const ctrl = new AbortController();
+    fetchJson<{ entries: FavoriteEntry[] }>("/api/me/favorites", ctrl.signal)
       // только с оценкой: без нее столбец сравнения пустой
       .then((r) => setFavs(r.entries.filter((e) => e.score !== null).slice(0, COMPARE_MAX).map((e) => `${e.org}/${e.repo}`)))
-      .catch(() => setFavs([]));
+      .catch(() => {
+        if (!ctrl.signal.aborted) setFavs([]);
+      });
+    return () => ctrl.abort();
   }, [loggedIn]);
   const sets: StarterSet[] = [
     ...(favs && favs.length >= 2 ? [{ title: "Из избранного", slugs: favs }] : []),
     ...(top && top.length >= 2 ? [{ title: `Топ-${top.length} рейтинга`, slugs: top }] : []),
   ];
-  // пока топ рейтинга не пришел — место под плитку держит скелетон: кнопка ниже не прыгает
-  if (top === null) return <Skeleton className="rh-cmp-starter-skeleton" />;
-  if (sets.length === 0) return null;
+  // пока сессия не известна, ждем и ее: иначе топ-3 успевал показаться один,
+  // а с входом плитки снова сменялись каркасом
+  const pending = top === null || !sessionKnown || (loggedIn && favs === null);
+  // оба запроса ответили, а наборов нет – блок не нужен
+  if (!pending && sets.length === 0) return null;
   return (
-    <div className="rh-cmp-starters__grid">
-      {sets.map((set) => (
-        <Card key={set.title} type="action" view="outlined" className="rh-cmp-starter" onClick={() => navigate(compareHref(set.slugs))}>
-          <Text variant="subheader-1">{set.title}</Text>
-          <Text variant="body-short" color="secondary" ellipsis title={set.slugs.join(", ")}>
-            {set.slugs.map((slug) => slug.split("/")[1] ?? slug).join(", ")}
-          </Text>
-        </Card>
-      ))}
+    <div className="rh-cmp-starters" role="group" aria-label="Готовые наборы" aria-busy={pending}>
+      {pending
+        ? // один каркас: плиток может прийти и одна, и две
+          <Skeleton className="rh-cmp-starter-skeleton" />
+        : sets.map((set) => (
+            <Card
+              key={set.title}
+              type="action"
+              view="outlined"
+              className="rh-cmp-starter"
+              onClick={() => navigate(compareHref(set.slugs))}
+              aria-label={`Сравнить: ${set.title.toLowerCase()} – ${set.slugs.join(", ")}`}
+            >
+              <div className="rh-cmp-starter__text">
+                <Text variant="subheader-1">{set.title}</Text>
+                <Text variant="body-short" color="secondary" ellipsis title={set.slugs.join(", ")}>
+                  {set.slugs.map((slug) => slug.split("/")[1] ?? slug).join(", ")}
+                </Text>
+              </div>
+              <Icon data={ArrowRight} size={16} className="rh-cmp-starter__go" />
+            </Card>
+          ))}
     </div>
   );
 }

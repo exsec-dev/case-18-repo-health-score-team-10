@@ -31,6 +31,7 @@ import {
   addFavoriteCapped,
   checkFavoriteAccess,
   favoriteEnqueueOf,
+  favoriteScoreOf,
   isFavorite,
   listFavorites,
   listMyRepos,
@@ -86,7 +87,7 @@ import {
 import { deletePat, getPat, patMeta, patReadable, patOwnerLogin, storePat } from "./auth/pat";
 import { buildAuthUrl, exchangeCode, yaAvatarUrl, type YaEndpoints } from "./auth/ya";
 import { makeScClient } from "./collectors/http";
-import { listSourcecraftRepos, tokenRepoEntries } from "./api/me";
+import { listSourcecraftRepos, ORG_INFO_MAX, orgInfoOf, tokenRepoEntries } from "./api/me";
 import { makeTokenRepoCache, membershipIn } from "./api/token-repos";
 import { needsRescore, runStartupRescore, RESCORE_ERROR } from "./score/rescore";
 import index from "./web/index.html";
@@ -468,11 +469,21 @@ function probeIoFor(pat: string): ProbeIo {
  */
 const tokenRepoCache = makeTokenRepoCache({
   ttlMs: 10 * 60_000,
-  // бюджет запросов — под полный обход страниц: платформа отдает по 1-2 записи на страницу
-  walk: (pat) =>
-    listSourcecraftRepos(
-      makeScClient({ retry: INTERACTIVE_RETRY, token: pat, baseUrl: config.api.restBase, minIntervalMs: config.scan.rest.minIntervalMs, maxRequests: 40, timeoutMs: config.scan.rest.timeoutMs }),
-    ),
+  // бюджет запросов — под полный обход страниц (платформа отдает по 1-2 записи на
+  // страницу) и сведения об организациях списка: в `/me/repos` их нет
+  walk: async (pat, userId) => {
+    const client = makeScClient({
+      retry: INTERACTIVE_RETRY,
+      token: pat,
+      baseUrl: config.api.restBase,
+      minIntervalMs: config.scan.rest.minIntervalMs,
+      maxRequests: 40 + ORG_INFO_MAX,
+      timeoutMs: config.scan.rest.timeoutMs,
+    });
+    const walked = await listSourcecraftRepos(client);
+    if (walked.status !== "ok") return walked;
+    return { ...walked, orgs: await orgInfoOf(client, walked.repos.map((r) => r.org), { owner: patOwnerLogin(db, userId) }) };
+  },
   currentPat: patOf,
 });
 
@@ -1299,6 +1310,7 @@ const routes = {
         fetchedAt: new Date(list.at).toISOString(),
         // пространство владельца токена — его «Мои репозитории» показывают первым
         owner: patOwnerLogin(db, user.userId),
+        orgs: list.orgs,
         // перечитать не дало окно чтений — показан прежний список
         ...(stale ? { stale: true } : {}),
         // пикеру избранного данные каталога не нужны — `entries=0` их не собирает
@@ -1309,7 +1321,11 @@ const routes = {
       const user = sessionOf(req);
       if (!user) return unauthorized();
       if (req.method === "GET") {
-        return Response.json({ entries: listFavorites(db, user.userId) });
+        // оценка — по тем же правам, что в «Избранном» (`favoriteScoreOf`): без нее
+        // готовый набор «Из избранного» в «Сравнении» не собирался никогда
+        const opts = { savedRightsValid: patOf(user.userId) !== null };
+        const entries = listFavorites(db, user.userId).map((f) => ({ ...f, score: favoriteScoreOf(db, user.userId, f.org, f.repo, opts) }));
+        return Response.json({ entries });
       }
       // ручной ввод — JSON {repository: "org/repo" | ссылка SourceCraft};
       // тот же парсер, что у маршрута звезды

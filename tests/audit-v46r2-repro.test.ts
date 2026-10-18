@@ -559,9 +559,9 @@ describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечан
 
   test("Р6: в числовых диапазонах дефис – шкала, MD-таблица подметрик, слот сравнения", async () => {
     const { SCORE_SCALE } = (await import("../src/web/format")) as { SCORE_SCALE: { range: string }[] };
-    expect(SCORE_SCALE.map((s) => s.range)).toEqual(["70–100", "40–69", "0–39"]);
+    expect(SCORE_SCALE.map((s) => s.range)).toEqual(["70-100", "40-69", "0-39"]);
     // словесная шкала в MD – в разделе «Как считается»
-    expect(mdLocked()).toContain("Шкала: здоров 70–100, требует внимания 40–69, в зоне риска 0–39.");
+    expect(mdLocked()).toContain("Шкала: здоров 70-100, требует внимания 40-69, в зоне риска 0-39.");
     const { SLOT_EMPTY } = (await import("../src/web/slots")) as { SLOT_EMPTY: { compare: { title: string } } };
     expect(SLOT_EMPTY.compare.title).toBe("Добавьте 2-3 репозитория");
     // глиф «нет данных» (длинное тире) правилом не затронут
@@ -585,7 +585,8 @@ describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечан
     expect({
       // UX 17.10: «покрытие» → «полнота данных»
       // 18.10: «без данных – не ноль» — в «Формуле», здесь только порог
-      note: item.includes('note="Если данных меньше, оценки нет. Полнота – доля веса'),
+      // 18.10: без «доли веса открытых категорий» и «всего 65» — словами и через «2 из 4»
+      note: item.includes("Полнота данных – по какой доле категорий собраны данные") && item.includes("хотя бы по 2 категориям из 4"),
       oldNote: src.includes("Score не выставляется, а не занижается"),
       numberFromDb: item.includes("fmtCoverage(meta.coverageNullBelow)"),
     }).toEqual({ note: true, oldNote: false, numberFromDb: true });
