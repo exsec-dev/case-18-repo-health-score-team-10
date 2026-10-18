@@ -56,6 +56,7 @@ import { reportFileName } from "./web/format";
 import { pdfResponse } from "./report/pdf";
 import { docsImageResponse, docsPdfResponse, docsSource } from "./docs/load";
 import { catalogClientBudget, closeOwnRunningScans, maintenanceTick, returnOwnRunningJobs, startMaintenance, startScheduler, startWorkerLoops, workerLoopPlan, workerLoopSummary } from "./jobs/scheduler";
+import { backfillTopics } from "./jobs/topics";
 import { enqueueCheck, enqueueSummary, lastFinishedScan } from "./jobs/scheduler";
 import { aiQuota, clearUnlock, isUnlocked, quotaRefusal, tryUnlock, type QuotaRefusal } from "./jobs/ai-quota";
 import type { AiAudience } from "./db";
@@ -329,6 +330,8 @@ function hardenRoutes<T extends Record<string, unknown>>(routes: T): T {
 const PAT_PROBES_PER_HOUR = 10;
 
 const db = openDb(config);
+// тематики рейтинга: после миграции или правки правил – пересчет всей базы один раз
+backfillTopics(db, (m) => console.log(m));
 
 // Имена и атрибуты cookie зависят от схемы YA_REDIRECT_URI: на https это
 // `__Host-rh_*` с Secure. Читается только актуальное имя.

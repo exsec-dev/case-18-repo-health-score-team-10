@@ -29,6 +29,7 @@ import { makeAppsecClient } from "../collectors/appsec";
 import { makeLlm } from "../llm";
 import { runSummary as runSummaryPipeline, runFraudCheck as runFraudCheckPipeline, NO_RHYTHM_REASON, type SummaryRunResult } from "../summary/pipeline";
 import { AI_CACHED_NOTE, AI_REJECTED_ERRORS, type QuotaRefusal } from "./ai-quota";
+import { refreshRepoTopics } from "./topics";
 import type { AiAudience } from "../db";
 import { materializeWorktree, removeWorktree } from "../summary/tools";
 import { cleanupClone, cloneWithDegrade } from "../collectors/git";
@@ -615,6 +616,8 @@ interface CatalogRepoRow {
   logo_url: string | null;
   language_color: string | null;
   last_activity_at: string | null;
+  description: string | null;
+  topics: string | null;
 }
 
 /**
@@ -622,7 +625,8 @@ interface CatalogRepoRow {
  * неизменившаяся строка не перезаписывается (иначе каждая часовая сверка —
  * десятки тысяч лишних UPDATE). Сравнение зеркалит COALESCE в upsertRepo: null
  * из каталога ничего не затирает. Видимость — только из явного поля;
- * `last_activity_at` обход не пишет.
+ * `last_activity_at` обход не пишет. Темы (api/topics.ts) пересчитываются
+ * после записи: они зависят от адреса, заголовка, описания и языка.
  */
 function reconcileCatalogRepo(db: Database, entry: CatalogEntry, existing: CatalogRepoRow | null): number {
   if (existing !== null) {
@@ -633,10 +637,11 @@ function reconcileCatalogRepo(db: Database, entry: CatalogEntry, existing: Catal
       (entry.likes !== null && entry.likes !== existing.likes) ||
       (hasVisibility && entry.visibility !== existing.visibility) ||
       (entry.logo_url !== null && entry.logo_url !== existing.logo_url) ||
-      (entry.language_color !== null && entry.language_color !== existing.language_color);
+      (entry.language_color !== null && entry.language_color !== existing.language_color) ||
+      (entry.description !== null && entry.description !== existing.description);
     if (!changed) return existing.id; // неизменившаяся строка — ноль записей
   }
-  return upsertRepo(db, entry.org, entry.repo, {
+  const id = upsertRepo(db, entry.org, entry.repo, {
     title: entry.name,
     language: entry.language,
     likes: entry.likes,
@@ -647,7 +652,10 @@ function reconcileCatalogRepo(db: Database, entry: CatalogEntry, existing: Catal
     visibility: entry.visibility ?? undefined,
     logoUrl: entry.logo_url,
     languageColor: entry.language_color,
+    description: entry.description,
   });
+  refreshRepoTopics(db, id);
+  return id;
 }
 
 /**
@@ -700,7 +708,7 @@ export async function nightlyCatalog(db: Database, client: ScClient, opts: Night
   // безусловный upsert на каждую запись каталога — ~27 тыс. UPDATE за каждую
   // часовую сверку, и все это синхронно в одном процессе с Bun.serve.
   const repoRows = db
-    .query("SELECT id, org_slug, repo_slug, title, language, likes, visibility, logo_url, language_color, last_activity_at FROM repos")
+    .query("SELECT id, org_slug, repo_slug, title, language, likes, visibility, logo_url, language_color, last_activity_at, description, topics FROM repos")
     .all() as CatalogRepoRow[];
   const reposBySlug = new Map(repoRows.map((r) => [`${r.org_slug}/${r.repo_slug}`, r]));
 
