@@ -6,7 +6,7 @@
 // пользователя с его PAT; данные рейтинга появляются исключительно сканом.
 import { loadConfig } from "./config";
 import { openDb, setMetaValue } from "./db";
-import { fixFileFor, getMeta, listRepos, parseReposQuery, resolveCardForViewer, type CardOutcome, type RepoCard } from "./api/repos";
+import { fixFileFor, getAiJobStatus, getMeta, listRepos, parseReposQuery, resolveCardForViewer, type CardOutcome, type RepoCard } from "./api/repos";
 import { isFixRuleId, isLicenseId, LICENSE_IDS, type LicenseId } from "./fix/templates";
 import { buildCompare, parseCompareQuery } from "./api/compare";
 import { getHealth } from "./api/health";
@@ -99,6 +99,10 @@ const myReposViews = new Map<number, number[]>();
 // вымывание кэша доступа, поэтому окно нужно. Аноним без лимита: публичная
 // карточка в сеть не ходит.
 const cardViews = new Map<number, number[]>();
+// опросов статуса AI-заявок на пользователя в минуту: вкладка делает 4,
+// предел щадящий и нужен только против скриптов
+const aiStatusPolls = new Map<number, number[]>();
+const AI_STATUS_POLLS_PER_MINUTE = 120;
 // запросов генерации описания на пользователя в минуту (кулдаун репо — отдельно)
 const summaryPosts = new Map<number, number[]>();
 const SUMMARY_POSTS_PER_MINUTE = 6;
@@ -804,6 +808,22 @@ const routes = {
     }),
     // неизвестный адрес публичного API – тот же JSON-404, что у /api/*, но с CORS
     "/api/v1/*": publicCors(() => notFound("такого адреса нет")),
+    // ---------- статус AI-заявок: легкий опрос без прав и без лимита карточки ----------
+    // Страница опрашивает его раз в 15 с, пока идет обзор или проверка, и
+    // перечитывает карточку один раз по завершении: опрос не съедает окно
+    // «30 открытий карточки в минуту» и не делает проб доступа через PAT.
+    // Свой щадящий предел — от скриптов, а не от вкладок.
+    "/api/repos/:org/:repo/ai-status": (req) => {
+      const { org, repo } = req.params;
+      if (!validSlugSegment(org) || !validSlugSegment(repo)) {
+        return badQuery("адрес репозитория указан неверно: нужен вид org/repo из латинских букв, цифр, точек, дефисов и подчеркиваний");
+      }
+      const viewer = sessionOf(req);
+      if (viewer && !allowInWindow(aiStatusPolls, viewer.userId, AI_STATUS_POLLS_PER_MINUTE, 60_000)) {
+        return rateLimited(`не больше ${AI_STATUS_POLLS_PER_MINUTE} опросов статуса в минуту`, windowRetryAfterSec(aiStatusPolls, viewer.userId, 60_000));
+      }
+      return Response.json(getAiJobStatus(db, org!, repo!, viewer?.userId ?? null), { headers: { "cache-control": "no-store" } });
+    },
     // ---------- история оценки и история AI-текстов ----------
     // Публичная проекция строк scores + scans.head_sha; полного Score без прав
     // нет, исключенный или приватный — 404, неотличимый от несуществующего

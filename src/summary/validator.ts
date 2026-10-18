@@ -112,7 +112,10 @@ function scopeCheckOk(role: SummaryRole, keys: string[]): boolean {
 const FOREIGN_TOPIC_WORDS: Partial<Record<string, string[]>> = {
   documentation: ["активност", "коммит", "commits", "уязвимост", "cve", "пайплайн", "pipeline", "тикет", "todo", "fixme"],
   code: ["активност", "коммит", "commits", "уязвимост", "cve", "пайплайн", "тикет"],
-  activity: ["уязвимост", "cve", "пайплайн", "todo", "fixme", "readme", "документац", "лиценз"],
+  // activity пересказывает темы коммитов, а коммиты законно бывают «про README»,
+  // «про пайплайн» и «про уязвимость»: слова чужих зон ей не запрещены, выдуманные
+  // CVE и файлы ловят отдельные проверки
+  activity: ["cve"],
   issues: ["уязвимост", "cve", "коммит", "readme", "todo", "fixme"],
   cicd: ["активност", "коммит", "уязвимост", "cve", "readme", "документац"],
   security: ["коммит", "активност", "readme", "документац", "todo", "fixme", "пайплайн"],

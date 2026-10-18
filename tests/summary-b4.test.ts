@@ -92,7 +92,7 @@ describe("Специалист динамики (trajectory): tri-state и со�
     const s2 = seedScan(wrap(db), repoId, { facts: cardFacts() });
     seedScore(wrap(db), repoId, s2, { total: 61 });
     const callLlm = (async (opts: { role?: string }) => ({
-      text: opts.role === "trajectory" ? TRAJECTORY_TEXTS.stale : "README покрывает установку {f:docs.presence}.",
+      text: opts.role === "trajectory" ? TRAJECTORY_TEXTS.stale : opts.role === "overview" ? "Проект задокументирован {f:scores.summary}." : "README покрывает установку {f:docs.presence}.",
       toolCalls: [],
       finish: "stop",
       usage: null,
@@ -120,7 +120,7 @@ describe("Порог эволюции 2 дней (решение 22.09)", () => 
     const s2 = seedScan(wrap(db), repoId, { facts: cardFacts(), finishedAt: "2026-09-22T00:00:00Z" });
     seedScore(wrap(db), repoId, s2, { total: 61 });
     const callLlm = (async (opts: { role?: string }) => ({
-      text: opts.role === "trajectory" ? TRAJECTORY_TEXTS.growth : "README покрывает установку {f:docs.presence}.",
+      text: opts.role === "trajectory" ? TRAJECTORY_TEXTS.growth : opts.role === "overview" ? "Проект задокументирован {f:scores.summary}." : "README покрывает установку {f:docs.presence}.",
       toolCalls: [],
       finish: "stop",
       usage: null,

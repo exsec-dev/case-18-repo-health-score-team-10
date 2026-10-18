@@ -227,7 +227,7 @@ describe("В5 репро: конвейер и хранение (блоки Б3/�
     activity: "Проект коммитили 2 автора {f:activity.git.summary}.",
     issues: "Из 14 задач открыто 4 {f:issues.stats}.",
     cicd: "Конфиг CI объявляет шаги {f:cicd.configs}.",
-    overview: "У проекта есть README {f:docs.presence}; специалист по документации отметил пробел вклада {sp:documentation:1}.",
+    overview: "У проекта есть README {f:scores.summary}; специалист по документации отметил пробел вклада {sp:documentation:1}.",
   };
   const GARBAGE =
     "Проект великолепен: 100 из 100 [сайт](https://example.com) — чат, CVE-2029-0001, движок Reactjs 99 {f:docs.presence}.";

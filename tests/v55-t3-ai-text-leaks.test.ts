@@ -191,15 +191,15 @@ describe("real formulations from tests and fixtures pass unchanged", () => {
 describe("charters carry the rule with a bad -> good example (versions +1)", () => {
   const all = loadAllCharters();
   test("versions bumped for all prose roles; flagger (JSON) unchanged", () => {
-    expect(all.activity.version).toBe("6");
-    expect(all.cicd.version).toBe("8");
-    expect(all.code.version).toBe("10");
-    expect(all.documentation.version).toBe("5");
-    expect(all.issues.version).toBe("7");
-    expect(all.security.version).toBe("6");
-    expect(all.overview.version).toBe("7");
-    expect(all.trajectory.version).toBe("7");
-    expect(all.flagger.version).toBe("4");
+    expect(all.activity.version).toBe("13");
+    expect(all.cicd.version).toBe("14");
+    expect(all.code.version).toBe("17");
+    expect(all.documentation.version).toBe("8");
+    expect(all.issues.version).toBe("14");
+    expect(all.security.version).toBe("10");
+    expect(all.overview.version).toBe("18");
+    expect(all.trajectory.version).toBe("10");
+    expect(all.flagger.version).toBe("6");
   });
 
   test("every prose charter names the three leak classes and the example", () => {

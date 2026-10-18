@@ -74,6 +74,8 @@ export type CallLlm = (opts: {
   timeoutMs?: number;
   /** обрыв снаружи (wall-clock фуз цикла): рвёт запрос вместе с раундом */
   signal?: AbortSignal;
+  /** переопределение температуры роли (эксперименты scripts/prompt-try.ts); дефолт — temperatureOf(role) */
+  temperature?: number;
 }) => Promise<LlmResult>;
 
 /** Температура вызова: у хартия-роли своя, у ярусов main/side — 0.4. */
@@ -210,6 +212,9 @@ interface ZaiOptions {
   temperature: number;
   /** bearer (z.ai, дефолт) | api-key (YandexGPT: `Authorization: Api-Key …`) */
   authScheme?: "bearer" | "api-key";
+  /** слать `thinking: {type: "disabled"}` – расширение z.ai (GLM думает по умолчанию);
+   *  шлюз Yandex часть моделей (aliceai-llm) с этим параметром отклоняет 400 «Unsupported parameter» */
+  thinkingParam?: boolean;
   fetchImpl?: typeof fetch;
   stallMs?: number;
   /** общий предел вызова, мс; дефолт DEFAULT_LLM_CALL_TIMEOUT_MS */
@@ -325,7 +330,7 @@ async function callZai(o: ZaiOptions, opts: Parameters<CallLlm>[0]): Promise<Llm
             ...(opts.tools !== undefined && opts.tools.length > 0 ? { tools: opts.tools } : {}),
             stream: true,
             stream_options: { include_usage: true },
-            thinking: { type: "disabled" },
+            ...(o.thinkingParam === false ? {} : { thinking: { type: "disabled" } }),
             temperature: o.temperature,
           }),
           signal: ac.signal,
@@ -455,7 +460,7 @@ export function makeLlm(config: Config, override?: (role: LlmRoleKey) => CallLlm
           : modelTierOf(role) === "main"
             ? config.llm.mainModel
             : config.llm.sideModel;
-    const temperature = temperatureOf(role);
+    const temperature = callOpts.temperature ?? temperatureOf(role);
     if (config.llm.provider === "yandex") {
       // YandexGPT через OpenAI-совместимый шлюз ai.api.cloud.yandex.net:
       // tools, стрим и usage — как у z.ai; модель — полный URI с версией.
@@ -466,6 +471,9 @@ export function makeLlm(config: Config, override?: (role: LlmRoleKey) => CallLlm
         model: `gpt://${folder}/${model}${model.includes("/") ? "" : "/latest"}`,
         baseUrl: DEFAULT_YANDEX_BASE_URL,
         authScheme: "api-key",
+        // Qwen в шлюзе Яндекса рассуждает по умолчанию – выключаем, как у GLM;
+        // aliceai-llm и yandexgpt параметр не знают и отвечают 400
+        thinkingParam: /^qwen/i.test(model),
         temperature,
         fetchImpl: opts.fetchImpl,
         stallMs: opts.stallMs,

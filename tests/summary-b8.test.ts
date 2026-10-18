@@ -56,7 +56,7 @@ const VALID_TEXTS: Record<string, string> = {
   activity: "Проект коммитили 2 автора {f:activity.git.summary}.",
   issues: "Из 14 задач открыто 4 {f:issues.stats}.",
   cicd: "Конфиг CI объявляет шаги {f:cicd.configs}.",
-  overview: "Проект имеет README и CI {f:docs.presence} {f:cicd.configs}; специалист по коду отметил задачи по долгу {sp:code:1}.",
+  overview: "Проект имеет README и CI {f:scores.summary}; специалист по коду отметил задачи по долгу {sp:code:1}.",
 };
 
 // фактор — признаки ритма, которые считает код (`activity.rhythm`)

@@ -60,7 +60,7 @@ function fake(): { call: CallLlm; seen: Map<string, string> } {
     issues: "Из 14 задач открыто 4 {f:issues.stats}.",
     cicd: "ПОЛНЫЙ-CICD конфиг CI объявляет шаги {f:cicd.configs}.",
     security: "ПОЛНЫЙ-SEC сканер нашел 3 находки {f:appsec.findings}.",
-    overview: "Проект задокументирован {f:docs.presence}; специалист по коду отметил задачи {sp:code:1}.",
+    overview: "Проект задокументирован {f:scores.summary}; специалист по коду отметил задачи {sp:code:1}.",
   };
   const call = (async (opts: { role?: string; messages: ChatMessage[] }) => {
     const role = opts.role ?? "";

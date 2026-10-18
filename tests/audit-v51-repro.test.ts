@@ -523,13 +523,13 @@ describe("В5.1 Б5: хартии и входы ролей", () => {
   test("В5.1-20: ключи хартий реальны (scores.points, docs.readme), обещания входа честные, доклад инъекции снят", async () => {
     const { loadCharter } = await import("../src/summary/charters");
     const trajectory = loadCharter("trajectory");
-    expect(trajectory.version).toBe("7");
+    expect(trajectory.version).toBe("10");
     expect(trajectory.text).toContain("{f:scores.points}");
     expect(trajectory.text).not.toContain("{f:scores.point}");
     expect(trajectory.text).toContain("ТОЛЬКО числовые точки");
     const overview = loadCharter("overview");
     // «синтез, а не склейка»: дословный пересказ специалистов – брак
-    expect(overview.version).toBe("7");
+    expect(overview.version).toBe("18");
     expect(overview.text).toContain("Синтез, а не склейка");
     expect(overview.text).not.toContain("healthcraft.index");
     expect(overview.text).not.toContain("флаги");
@@ -569,7 +569,7 @@ describe("В5.1 Б5: хартии и входы ролей", () => {
         cicd: "Конфиг CI объявляет шаги {f:cicd.configs}.",
         security: "Сканер сообщил о находках без критичных {f:appsec.findings}.",
         trajectory: "Индекс стабилен между замерами {f:scores.points}.",
-        overview: "Проект задокументирован и собран {f:docs.presence}; специалисты отметили задачи долга {sp:code:1}.",
+        overview: "Проект задокументирован и собран {f:scores.summary}; специалисты отметили задачи долга {sp:code:1}.",
         flagger: '{"flag":false,"factors":[]}',
       };
       const callLlm = (async (opts: { role?: string; messages?: Array<{ content: string }> }) => {

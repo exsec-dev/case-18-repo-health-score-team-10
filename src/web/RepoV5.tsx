@@ -25,7 +25,7 @@ import {
 } from "@gravity-ui/uikit";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { RepoCard } from "./api";
-import { dataOf, useJson } from "./api";
+import { dataOf, fetchJson, useJson, useLatest, useVisible } from "./api";
 import { TIP_TARGET } from "./ui";
 import {
   AI_SECTION_TITLE,
@@ -141,6 +141,44 @@ function FraudFlagMessage({ card }: { card: Card }) {
 /** Причина конвейера «нет фактов категории» — не ошибка: у категории нет данных, модели нечего пояснять. */
 function isNoFacts(reason: string): boolean {
   return reason.startsWith("нет фактов");
+}
+
+/** Период опроса статуса AI-заявок, мс. */
+const AI_STATUS_POLL_MS = 15_000;
+
+/**
+ * Один опрос на обе AI-заявки (обзор и проверка): пока `active`, раз в 15 с
+ * читается легкий `/ai-status` (без прав и без лимита карточки); как только
+ * обе заявки неактивны – один вызов onDone, и карточка перечитывается.
+ * Следующий запрос – после ответа, в скрытой вкладке опрос стоит; сетевая
+ * ошибка не останавливает опрос.
+ */
+function useAiJobPolling(org: string, repo: string, active: boolean, onDone: () => void): void {
+  const visible = useVisible();
+  const done = useLatest(onDone);
+  useEffect(() => {
+    if (!active || !visible) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tick = async () => {
+      try {
+        const st = await fetchJson<{ summaryActive: boolean; checkActive: boolean }>(`${apiBase(org, repo)}/ai-status`);
+        if (stopped) return;
+        if (!st.summaryActive && !st.checkActive) {
+          done.current();
+          return;
+        }
+      } catch {
+        // сеть или 429 – просто следующий тик
+      }
+      if (!stopped) timer = setTimeout(() => void tick(), AI_STATUS_POLL_MS);
+    };
+    timer = setTimeout(() => void tick(), AI_STATUS_POLL_MS);
+    return () => {
+      stopped = true;
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [org, repo, active, visible, done]);
 }
 
 /** Длинный текст: затухание после ~6 строк и кнопка «Показать полностью». */
@@ -357,11 +395,7 @@ export function FraudCheckFooter({ card, org, repo, onChanged, loggedIn, quota, 
     onChanged();
     onQuota();
   });
-  useEffect(() => {
-    if (ai === undefined || ai === null || !ai.check.active) return;
-    const timer = setTimeout(onChanged, 5000);
-    return () => clearTimeout(timer);
-  }, [ai, onChanged]);
+  // опрос живой проверки – общий с обзором (useAiJobPolling в AiOverviewSection)
   if (ai === undefined || ai === null) return null;
   const st = fraudCheckState(ai, loggedIn);
   const counter = quotaCounter(quota?.check);
@@ -440,14 +474,9 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
   const counter = quotaCounter(quota?.overview);
   const quotaBlocked = counter !== null && counter.left === 0 && quota !== null ? quotaBlockedText("overview", quota.overview, counter) : null;
 
-  // Пока задание идет, карточка перечитывается: следующий запрос — через 5 с ПОСЛЕ
-  // ответа (новая карточка → новый `ai` → один таймер). setInterval здесь не годится:
-  // useJson отменяет прежний запрос, и ответ дольше 5 с не дошел бы никогда
-  useEffect(() => {
-    if (ai === undefined || ai === null || !ai.jobActive) return;
-    const timer = setTimeout(onChanged, 5000);
-    return () => clearTimeout(timer);
-  }, [ai, onChanged]);
+  // Пока идет обзор или проверка, опрашивается легкий статус заявок (не карточка):
+  // карточка перечитывается один раз, когда заявка закончилась
+  useAiJobPolling(org, repo, ai !== undefined && ai !== null && (ai.jobActive || ai.check.active), onChanged);
   useAnalysisFinished((jobs) => {
     if (jobs.some((j) => j.slug === `${org}/${repo}`)) onChanged();
   });
@@ -597,7 +626,7 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
           <Flex direction="column" gap={1}>
             {failures.map((f) => (
               <Text key={f.role} variant="caption-2" color="secondary">
-                {`Разбор «${aiRoleTitle(f.role)}» не прошел проверку фактами.`}
+                {`Разбор «${aiRoleTitle(f.role)}»: ${f.reason}.`}
               </Text>
             ))}
           </Flex>
