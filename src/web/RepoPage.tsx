@@ -10,7 +10,7 @@
 // паспорт анализа и короткая справка; ниже 1440 px она выезжает по кнопке «Как считается».
 import { EmptyIllustration, NotFoundIllustration, QueueIllustration } from "./illustrations";
 import { lastRatingHref } from "./ratingReturn";
-import { ArrowDownToLine, ArrowsRotateRight, ArrowUpRightFromSquare, Bug, Check, ChevronDown, CircleCheck, CircleInfo, Clock, CodeFork, Copy, Ellipsis, FaceRobot, FileText, Heart, LogoMarkdown, ScalesBalanced, SealCheck, Star, StarFill } from "@gravity-ui/icons";
+import { ArrowDownToLine, ArrowsRotateRight, ArrowUpRightFromSquare, Bug, Check, ChevronDown, CircleCheck, CircleInfo, Clock, CodeFork, Copy, Ellipsis, FaceRobot, FileText, Heart, Lock, LogoMarkdown, ScalesBalanced, SealCheck, Star, StarFill } from "@gravity-ui/icons";
 import type { IconData } from "@gravity-ui/uikit";
 import {
   ActionTooltip,
@@ -38,7 +38,7 @@ import {
   useToaster,
 } from "@gravity-ui/uikit";
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
-import { COVERAGE_NULL_BELOW } from "../score/model";
+import { COVERAGE_NULL_BELOW, INDEX_WEIGHTS } from "../score/model";
 import { factWords } from "../report/factWords";
 import { FULL, INDEX, adjustmentLabel, adjustmentText, metricWeights, notInScoreNote, ownershipView, sourceWord, type BarHint, type OwnershipView } from "../report/sections";
 import type { MetaResponse, RepoCard } from "./api";
@@ -70,6 +70,9 @@ import {
   sentence,
   slugOf,
   notOwnReason,
+  favoriteNoTokenText,
+  viewerKindOf,
+  type ViewerKind,
   EMPTY_REPO_TEXT,
   rankText,
   roundScore,
@@ -181,7 +184,10 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
     </Button>
   );
 
-  if (data === null && state.kind !== "error") {
+  // 404 пришел раньше ответа /api/me: кто смотрит, еще неизвестно — скелетон, а не
+  // гостевая заглушка «Войти», которая мигнула бы у вошедшего
+  const sessionUnknown = me.kind === "loading" && me.stale === undefined;
+  if (data === null && (state.kind !== "error" || (state.status === 404 && sessionUnknown))) {
     return (
       // скелетон повторяет ритм содержимого: блок показателей (~150px) и шесть строк
       // категорий по 45px
@@ -199,7 +205,7 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
     return <FavoriteNotInCatalog org={org} repo={repo} fallback={state.message} onRetry={reload} onSection={onSection} />;
   }
   if (data === null && state.kind === "error" && state.status === 404) {
-    return <NotInCatalog org={org} repo={repo} crumbs={crumbs} />;
+    return <NotInCatalog org={org} repo={repo} crumbs={crumbs} viewer="guest" />;
   }
   if (data === null) {
     // на странице ошибки «Обновить анализ» нет; повтор — «Повторить» (reload)
@@ -220,7 +226,7 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
   }
 
   const card = data;
-  const view = cardView(card);
+  const view = cardView(card, { patUnreadable: meData?.patUnreadable === true });
   const reportHref = `${cardUrl}/report.md`;
   const refreshError = state.kind === "ok" ? state.refreshError : undefined;
   // «Обновить анализ» и «Бейдж» зависят от списка «Мои репозитории» по токену: пока он
@@ -290,7 +296,10 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
                   ? [
                       // без токена неизвестно, из ваших ли организаций репозиторий, поэтому
                       // анализ не обещаем: токен открывает CI/CD, Безопасность и анализ по кнопке
-                      { text: "Добавить токен в Настройках", view: "action", size: "l", href: "/settings" },
+                      // токен сохранен, но не читается — «добавить» было бы неправдой
+                      meData?.patUnreadable === true
+                        ? { text: "Сохранить токен заново", view: "action", size: "l", href: "/settings" }
+                        : { text: "Добавить токен в Настройках", view: "action", size: "l", href: "/settings" },
                     ]
                   : undefined
             }
@@ -340,24 +349,44 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
 
 /**
  * Выбывший из каталога, закрытый или несуществующий репозиторий — одно спокойное пустое
- * состояние вместо красной ошибки. Текст один на все случаи: различимый 404 выдал бы
- * существование закрытого репозитория.
+ * состояние вместо красной ошибки. Текст зависит только от посетителя, не от адреса:
+ * различимый 404 выдал бы существование закрытого репозитория. Доступ к закрытому
+ * сервис проверяет по токену SourceCraft, поэтому шаг у каждого свой (вариант A,
+ * 19.10.2026): гостю — войти, вошедшему без токена — добавить токен, с токеном —
+ * его доступ не покрывает этот репозиторий.
  */
-function NotInCatalog({ org, repo, crumbs }: { org: string; repo: string; crumbs: Crumb[] }) {
+function NotInCatalog({ org, repo, crumbs, viewer }: { org: string; repo: string; crumbs: Crumb[]; viewer: ViewerKind }) {
+  const toRating = { text: "К рейтингу", view: "normal" as const, size: "l" as const, href: lastRatingHref() };
+  const variants: Record<ViewerKind, { description: string; action: { text: string; href: string } }> = {
+    // гость по ссылке на закрытый репозиторий (так жюри открывает наш) — вход, после
+    // которого вернется на эту карточку
+    guest: {
+      description: "Возможно, он закрытый или в адресе ошибка. Закрытые репозитории открываются участникам после входа через Я ID.",
+      action: { text: "Войти", href: loginHref(`/repo/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`, "") },
+    },
+    "no-token": {
+      description: "Возможно, он закрытый или в адресе ошибка. Закрытые репозитории сервис открывает по токену SourceCraft – добавьте его, и карточка откроется, если у токена есть доступ.",
+      action: { text: "Добавить токен", href: "/settings" },
+    },
+    // токен сохранен, но после смены ключа сервиса не читается — «добавить» было бы неправдой
+    "token-unreadable": {
+      description: "Возможно, он закрытый или в адресе ошибка. Ваш токен SourceCraft больше не читается – сохраните его заново, и карточка откроется, если у токена есть доступ.",
+      action: { text: "Сохранить токен заново", href: "/settings" },
+    },
+    token: {
+      description: "Возможно, в адресе ошибка или у вашего токена нет доступа к этому репозиторию.",
+      action: { text: "Мои репозитории", href: "/repos" },
+    },
+  };
+  const v = variants[viewer];
   return (
     <Page crumbs={crumbs}>
-      {/* гость по ссылке на закрытый репозиторий (так жюри открывает наш) получает
-          выход — вход, после которого вернется на эту карточку; текст тот же для
-          любого адреса и не выдает, существует ли закрытый репозиторий */}
       <EmptyState
         image={NotFoundIllustration}
         title="Репозиторий не найден"
-            headingLevel={1}
-        description="Возможно, он закрытый или в адресе ошибка. Закрытые репозитории открываются участникам после входа через Я ID."
-        actions={[
-          { text: "Войти", view: "action", size: "l", href: loginHref(`/repo/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`, "") },
-          { text: "К рейтингу", view: "normal", size: "l", href: lastRatingHref() },
-        ]}
+        headingLevel={1}
+        description={v.description}
+        actions={[{ text: v.action.text, view: "action", size: "l", href: v.action.href }, toRating]}
       />
     </Page>
   );
@@ -370,6 +399,7 @@ function NotInCatalog({ org, repo, crumbs }: { org: string; repo: string; crumbs
  */
 function FavoriteNotInCatalog({ org, repo, fallback, onRetry, onSection }: { org: string; repo: string; fallback: string; onRetry: () => void; onSection?: (s: "rating" | "repos" | "me") => void }) {
   const favs = useJson<{ entries: { org: string; repo: string; access: { visibility: string; own: boolean } | null }[] }>("/api/me/favorites");
+  const viewer = viewerKindOf(dataOf(useSession().me));
   // опись по токену (кэш сервера): репозиторий из «Моих репозиториев», который еще не
   // анализировали, тоже получает «Оценки пока нет» с запуском, а не «не найден».
   // Без токена ответ — 409, это просто «не из описи»
@@ -398,15 +428,15 @@ function FavoriteNotInCatalog({ org, repo, fallback, onRetry, onSection }: { org
   const empty = fromToken?.isEmpty === true ? { recheck, checking } : null;
   if (fav !== null) {
     return (
-      <FavoriteNotInCatalogState org={org} repo={repo} visibility={visibility} empty={empty} own={fav.access?.own === true || fromToken !== null} access={fav.access} crumbs={crumbs} onRetry={onRetry} />
+      <FavoriteNotInCatalogState org={org} repo={repo} visibility={visibility} empty={empty} own={fav.access?.own === true || fromToken !== null} access={fav.access} crumbs={crumbs} onRetry={onRetry} viewer={viewer} />
     );
   }
   if (fromToken !== null) {
     // публичный из описи оценит и анализ по расписанию — запуск по кнопке только раньше
     const closed = visibility === "private" || visibility === "internal";
-    return <FavoriteNotInCatalogState org={org} repo={repo} visibility={visibility} empty={empty} own access={null} crumbs={crumbs} onRetry={onRetry} fromToken scheduled={!closed} />;
+    return <FavoriteNotInCatalogState org={org} repo={repo} visibility={visibility} empty={empty} own access={null} crumbs={crumbs} onRetry={onRetry} viewer={viewer} fromToken scheduled={!closed} />;
   }
-  return <NotInCatalog org={org} repo={repo} crumbs={[{ text: "Рейтинг", href: lastRatingHref() }, { text: slugOf(org, repo) }]} />;
+  return <NotInCatalog org={org} repo={repo} crumbs={[{ text: "Рейтинг", href: lastRatingHref() }, { text: slugOf(org, repo) }]} viewer={viewer} />;
 }
 
 const knownVisibility = (v: string | null | undefined): "public" | "internal" | "private" | "unknown" =>
@@ -429,6 +459,7 @@ function FavoriteNotInCatalogState({
   onRetry,
   fromToken = false,
   scheduled = false,
+  viewer,
 }: {
   org: string;
   repo: string;
@@ -443,6 +474,8 @@ function FavoriteNotInCatalogState({
   fromToken?: boolean;
   /** публичный из описи: его оценит и анализ по расписанию */
   scheduled?: boolean;
+  /** без рабочего токена права не проверяются и анализ не запускается — путь к токену */
+  viewer: ViewerKind;
 }) {
   const slug = `${org}/${repo}`;
   const start = useStartAnalysis(org, repo);
@@ -474,6 +507,27 @@ function FavoriteNotInCatalogState({
           title="Анализировать пока нечего"
           description={EMPTY_REPO_TEXT}
           actions={[{ text: "Проверить снова", view: "normal", size: "l", onClick: empty.recheck, loading: empty.checking }]}
+        />
+      </Page>
+    );
+  }
+  // без рабочего токена (не добавлен или не читается) сервер не запустит анализ и не
+  // проверит права — вместо «Запустить анализ» и «проверка идет» путь к токену
+  const noToken = !fromToken && viewer !== "token";
+  if (noToken) {
+    const closedRepo = visibility !== "public";
+    return (
+      <Page crumbs={crumbs}>
+        {head}
+        <EmptyState
+          image={EmptyIllustration}
+          title="Оценки пока нет"
+          description={favoriteNoTokenText(visibility, viewer === "token-unreadable")}
+          actions={
+            closedRepo
+              ? [{ text: viewer === "token-unreadable" ? "Сохранить токен заново" : "Добавить токен", view: "action", size: "l", href: "/settings" }]
+              : [{ text: "К избранному", view: "normal", size: "l", href: "/me" }]
+          }
         />
       </Page>
     );
@@ -1255,7 +1309,7 @@ function ContributionStrip({ bar }: { bar: CardView["contributions"][number] | n
                     className={`rh-contrib__item${active === p.key ? " rh-contrib_on" : ""}`}
                     tabIndex={p.hint ? 0 : undefined}
                     // имя — название и значение; подробности озвучит подсказка (aria-describedby Tooltip)
-                    aria-label={p.hint ? `${p.title} – ${p.value}` : undefined}
+                    aria-label={p.hint ? `${p.title}${closedCategory(p.key) ? `, ${CLOSED_SHORT}` : ""} – ${p.value}` : undefined}
                     {...hover(p.key)}
                   >
                     <i className={`rh-contrib__dot ${p.colorClass}`} aria-hidden="true" />
@@ -1266,6 +1320,8 @@ function ContributionStrip({ bar }: { bar: CardView["contributions"][number] | n
                     ) : (
                       <>
                         <Text variant="body-1">{p.title}</Text>
+                        {/* у легенды своя подсказка — замок без второй */}
+                        {closedCategory(p.key) && <Icon data={Lock} size={12} className="rh-closed-mark rh-closed-mark_legend" aria-hidden="true" />}
                         <Text variant="body-1" color="secondary" className="rh-contrib__share">
                           – {p.value}
                         </Text>
@@ -1428,6 +1484,29 @@ function Categories({ card, view }: { card: Card; view: CardView }) {
   );
 }
 
+/**
+ * CI/CD и Безопасность — закрытые категории: их видят участники репозитория с токеном,
+ * в HealthCraft Index они не входят. Замок у названия (вариант 1, 19.10.2026) — тот же
+ * знак, что у закрытого репозитория (SourceCraft «Private»); пояснение — подсказкой.
+ */
+const CLOSED_SHORT = "только для участников";
+const CLOSED_HINT = "Видна участникам репозитория с токеном SourceCraft. В HealthCraft Index не входит.";
+
+function closedCategory(key: string): boolean {
+  return key !== "rest" && !(key in INDEX_WEIGHTS);
+}
+
+/** Замок у названия закрытой категории: подсказка — мышью, для скринридера — имя строки. */
+function ClosedMark() {
+  return (
+    <Tooltip content={CLOSED_HINT} placement={["top", "bottom"]} openDelay={150} closeDelay={0}>
+      <span className="rh-closed-mark" aria-hidden="true">
+        <Icon data={Lock} size={14} />
+      </span>
+    </Tooltip>
+  );
+}
+
 function CategoryRow({ category: c, card, aiEverywhere, defaultOpen = false }: { category: CategoryView; card: Card; aiEverywhere: boolean; defaultOpen?: boolean }) {
   const key = c.key;
   const cat = card.score!.categories[key]!;
@@ -1457,6 +1536,7 @@ function CategoryRow({ category: c, card, aiEverywhere, defaultOpen = false }: {
   // владельцев — под ними во всю ширину; каждый — когда есть что показать
   const appsec = key === "security" ? appsecView(card) : null;
   const owners = key === "code" ? ownershipView(cat) : null;
+  const ciRuns = key === "cicd" ? ciRunsOf(card) : null;
   const hasRows = bd !== null && bd.rows.length > 0;
   const hasRefs = bd !== null && bd.refs.length > 0;
   const subsId = `${categoryAnchor(key)}-subs`;
@@ -1467,6 +1547,7 @@ function CategoryRow({ category: c, card, aiEverywhere, defaultOpen = false }: {
       <span className="rh-category__name">
         <span className="rh-category__title">
           <Text variant="subheader-1">{c.title}</Text>
+          {closedCategory(key) && <ClosedMark />}
           {/* искра — у категории есть AI-разбор; у всех сразу — одна отметка над списком */}
           {!aiEverywhere && <CategoryAiMark card={card} categoryKey={key} hasData={c.score !== null} />}
           {c.stale && (
@@ -1514,7 +1595,7 @@ function CategoryRow({ category: c, card, aiEverywhere, defaultOpen = false }: {
             aria-expanded={open}
             aria-controls={`${categoryAnchor(key)}-subs`}
             // имя заголовка — название и балл; основание — описанием, а не частью имени
-            aria-label={`${c.title}, ${c.scoreText === "–" ? "нет данных" : `${c.scoreText} из 100`}`}
+            aria-label={`${c.title}${closedCategory(key) ? `, ${CLOSED_SHORT}` : ""}, ${c.scoreText === "–" ? "нет данных" : `${c.scoreText} из 100`}`}
             aria-describedby={`${categoryAnchor(key)}-why`}
             onClick={() => setOpen(!open)}
           >
@@ -1575,6 +1656,12 @@ function CategoryRow({ category: c, card, aiEverywhere, defaultOpen = false }: {
                   </div>
                 )}
               </div>
+            )}
+            {ciRuns !== null && (
+              <section className="rh-cbd__block rh-cbd__block_below rh-cbd__tile" aria-labelledby={`${subsId}-runs`}>
+                <TileHead id={`${subsId}-runs`} title="Последние запуски CI" aside={`${ciRuns.filter((r) => r.ok).length} из ${ciRuns.length} успешны`} />
+                <CiRunsStrip runs={ciRuns} />
+              </section>
             )}
             {appsec !== null && (
               <section className="rh-cbd__block rh-cbd__block_below rh-cbd__tile" aria-labelledby={`${subsId}-appsec`}>
@@ -2397,6 +2484,78 @@ function AppsecTable({ data }: { data: NonNullable<ReturnType<typeof appsecView>
         ))}
       </div>
     </>
+  );
+}
+
+/** Завершенный запуск CI для ленты: исход и момент окончания. */
+interface CiRun {
+  ok: boolean;
+  at: string | null;
+}
+
+/**
+ * Последние завершенные запуски CI из факта `cicd.runs` (`recent_runs`, свежие
+ * первыми) — от старых к новым; меньше двух — ленты нет: сравнивать нечего.
+ */
+function ciRunsOf(card: Card): CiRun[] | null {
+  const value = card.evidence.find((e) => e.key === "cicd.runs" && e.status === "ok")?.value as { recent_runs?: unknown } | undefined;
+  if (!Array.isArray(value?.recent_runs)) return null;
+  const runs = value.recent_runs
+    .map((r): CiRun | null => {
+      const o = r as { outcome?: unknown; at?: unknown } | null;
+      if (o?.outcome !== "success" && o?.outcome !== "failure") return null;
+      return { ok: o.outcome === "success", at: typeof o.at === "string" ? o.at : null };
+    })
+    .filter((r): r is CiRun => r !== null)
+    .reverse();
+  return runs.length >= 2 ? runs : null;
+}
+
+/**
+ * Лента последних запусков CI (вариант A, 19.10.2026) — плитками исхода, как статусы
+ * запусков SourceCraft (успешно — зеленым, с ошибкой — красным), от старых к новым;
+ * под лентой — даты крайних запусков и легенда, как под картой владельцев. Подсказка
+ * плитки — исход и время; для скринридера — сводка одной фразой.
+ */
+function CiRunsStrip({ runs }: { runs: CiRun[] }) {
+  const ok = runs.filter((r) => r.ok).length;
+  const first = runs[0]!.at;
+  const last = runs[runs.length - 1]!.at;
+  const span = first !== null && last !== null ? `, с ${fmtDate(first)} по ${fmtDate(last)}` : "";
+  return (
+    <div className="rh-ciruns">
+      <div className="rh-ciruns__strip" role="img" aria-label={`Последние ${runs.length} запусков CI: ${ok} успешных, ${runs.length - ok} с ошибкой${span}`}>
+        {runs.map((r, i) => (
+          <Tooltip key={i} content={<BreakdownTip lines={[r.ok ? "Успешно" : "С ошибкой", ...(r.at !== null ? [fmtDateTime(r.at)] : [])]} />} placement={["top", "bottom"]} openDelay={150} closeDelay={0}>
+            <i className={r.ok ? "rh-ciruns__run rh-ciruns__run_ok" : "rh-ciruns__run rh-ciruns__run_fail"} />
+          </Tooltip>
+        ))}
+      </div>
+      {first !== null && last !== null && (
+        <div className="rh-ciruns__axis" aria-hidden="true">
+          <Text variant="caption-2" color="secondary">
+            {fmtDate(first)}
+          </Text>
+          <Text variant="caption-2" color="secondary">
+            {fmtDate(last)}
+          </Text>
+        </div>
+      )}
+      <Flex gap={3} alignItems="center" wrap className="rh-owners__legend" aria-hidden="true">
+        <Flex gap={2} alignItems="center">
+          <span className="rh-owners__swatch rh-ciruns__run_ok" />
+          <Text variant="caption-2" color="secondary">
+            Успешно
+          </Text>
+        </Flex>
+        <Flex gap={2} alignItems="center">
+          <span className="rh-owners__swatch rh-ciruns__run_fail" />
+          <Text variant="caption-2" color="secondary">
+            С ошибкой
+          </Text>
+        </Flex>
+      </Flex>
+    </div>
   );
 }
 

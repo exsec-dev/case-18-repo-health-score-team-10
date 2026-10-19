@@ -109,7 +109,7 @@ const NOT_IN_RATING = new Set(["cicd", "security"]);
  * констант в порядке `CATEGORY_ORDER` сервера. Веса неизвестны — колонки
  * рисуются, а панель методики весов не показывает.
  */
-const FALLBACK_CATEGORIES: MetaResponse["categories"] = ["documentation", "cicd", "security", "activity", "issues", "code"].map((key) => ({
+const FALLBACK_CATEGORIES: MetaResponse["categories"] = ["documentation", "activity", "issues", "code", "cicd", "security"].map((key) => ({
   key: key as MetaResponse["categories"][number]["key"],
   title: CATEGORY_TITLES_RU[key] ?? key,
   indexWeight: null,

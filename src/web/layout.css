@@ -834,6 +834,26 @@ body {
   min-height: 28px;
 }
 
+/* значок со статусом — одним блоком: на узкой плашке статус переносится сам, а не
+ * уезжает от значка на следующую строку; значок — по центру первой строки
+ * (subheader-2: строка 20px, под оценками subheader-1: 18px) */
+.rh-check-card__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--g-spacing-2);
+  min-width: 0;
+}
+
+.rh-check-card__icon {
+  display: flex;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.rh-check-card_wide .rh-check-card__icon {
+  margin-top: 1px;
+}
+
 .rh-check-card_wide .rh-check-card__list {
   margin-top: 0;
 }
@@ -1047,6 +1067,19 @@ button.rh-category:focus-visible {
   flex-wrap: wrap;
   gap: var(--g-spacing-2);
   align-items: center;
+}
+
+/* замок закрытой категории (CI/CD, Безопасность) — вплотную к названию, тоном
+ * подписи, как замок «Private» у SourceCraft; в легенде вклада — меньше */
+.rh-closed-mark {
+  display: inline-flex;
+  flex-shrink: 0;
+  margin-inline-start: calc(-1 * var(--g-spacing-1));
+  color: var(--g-color-text-secondary);
+}
+
+.rh-closed-mark_legend {
+  margin-inline-start: 0;
 }
 
 /* основание — проза под названием, переносится; мера держит строку читаемой */
@@ -5387,6 +5420,45 @@ button.rh-category:focus-visible {
   width: 10px;
   height: 10px;
   border-radius: 2px;
+}
+
+/* лента запусков CI: плитки исхода во всю ширину плашки, радиус 3px и мягкий тон —
+ * как у меток статуса запусков SourceCraft (выбор 19.10.2026: сплошные заливки полос
+ * спорили с цветами зон оценки); тона — `--rh-ci-run-*` в theme.css */
+.rh-ciruns {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-1);
+}
+
+.rh-ciruns__strip {
+  display: flex;
+  gap: 3px;
+}
+
+.rh-ciruns__run {
+  flex: 1 1 0;
+  min-width: 4px;
+  height: 20px;
+  border-radius: 3px;
+}
+
+.rh-ciruns__run_ok {
+  background: var(--rh-ci-run-ok);
+}
+
+.rh-ciruns__run_fail {
+  background: var(--rh-ci-run-fail);
+}
+
+.rh-ciruns__axis {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--g-spacing-3);
+}
+
+.rh-ciruns .rh-owners__legend {
+  margin-block-start: var(--g-spacing-1);
 }
 
 .rh-owners__swatch_single {

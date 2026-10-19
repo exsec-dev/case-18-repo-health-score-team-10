@@ -453,7 +453,7 @@ export function categoriesSummary(card: RepoCard): string | null {
  * входа и добавления токена», вошел без токена — «после добавления токена»,
  * токен есть — «только участникам репозитория» и причина отказа (`LOCKED_WHY`).
  */
-export function lockedView(card: RepoCard): LockedView | null {
+export function lockedView(card: RepoCard, patUnreadable = false): LockedView | null {
   const cats = card.score?.categories;
   if (!cats) return null;
   const locked = CATEGORY_ORDER.filter((k) => cats[k]?.locked !== undefined);
@@ -463,6 +463,8 @@ export function lockedView(card: RepoCard): LockedView | null {
   const auth = card.viewer?.auth;
   const reasons = locked.map((k) => cats[k]!.locked as string);
   if (auth === undefined || auth === "no-session") return { text: `${names} ${verb} участникам репозитория после входа и добавления персонального токена доступа.` };
+  // токен сохранен, но не читается (сменился ключ сервиса) — сохранить заново, а не добавить
+  if ((auth === "no-pat" || reasons.includes("no-pat")) && patUnreadable) return { text: `${names} ${verb} участникам репозитория. Ваш токен больше не читается – сохраните его заново в Настройках.` };
   if (auth === "no-pat" || reasons.includes("no-pat")) return { text: `${names} ${verb} участникам репозитория после добавления персонального токена доступа.` };
   // зрителю с токеном — не обрывок причины, а смысл: категории доступны только
   // участникам репозитория, затем почему именно ему нет
@@ -546,7 +548,8 @@ function byGain(items: { rec: CardRecommendation; ceiling: number | null }[]): n
     });
 }
 
-export function cardView(card: RepoCard): CardView {
+export function cardView(card: RepoCard, opts: { patUnreadable?: boolean } = {}): CardView {
+  const patUnreadable = opts.patUnreadable === true;
   const score = card.score;
   const evidence = new Map(card.evidence.map((e) => [e.key, e]));
   const raw = card.recommendations.map((rec) => {
@@ -606,8 +609,8 @@ export function cardView(card: RepoCard): CardView {
     // на карточке вклад без «+»: это доля итога, а не прибавка (в PDF подпись с «+»)
     contributions: contributionBars(card).map((bar) => ({ ...bar, segments: bar.segments.map((s) => ({ ...s, value: s.value.replace(/^\+/, ""), colorClass: categoryColorClass(s.key) })) })),
     categories,
-    locked: lockedView(card),
-    fullPath: score.fullLocked ? fullScorePath(auth, [card.access.cicd, card.access.appsec]) : null,
+    locked: lockedView(card, patUnreadable),
+    fullPath: score.fullLocked ? fullScorePath(auth, [card.access.cicd, card.access.appsec], patUnreadable) : null,
     signIn: score.fullLocked && (auth === undefined || auth === "no-session"),
   };
 }

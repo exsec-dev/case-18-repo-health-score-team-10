@@ -198,19 +198,34 @@ const backlogTrend: Formatter = (v) => {
 };
 
 /** Пояснения в скобках после значения: сайт показывает их один раз подсказкой (`submetricShownParts`). */
-const ASIDE_MONTHLY_FLOW = "создано/закрыто за 30 дней, от старых к новым";
 const ASIDE_OLD_SHARE = "доля от не менее 5 пометок";
 const ASIDE_TESTS = "в балл не входит: доля тестов учитывается, только когда повышает балл";
-const SHOWN_ASIDES = [ASIDE_MONTHLY_FLOW, ASIDE_OLD_SHARE, ASIDE_TESTS];
+const SHOWN_ASIDES = [ASIDE_OLD_SHARE, ASIDE_TESTS];
 
-/** «2/1, 0/0, 3/2, 4/2, 5/3, 3/2 (создано/закрыто за 30 дней, от старых к новым)»; окно без данных — «–». */
+/**
+ * Поток задач сводкой словами (выбор 19.10.2026 вместо «0/0, …, 16/16»): всего за
+ * покрытые окна и отдельно за последние 30 дней. Окна — по 30 дней, от старых к
+ * новым; окна без данных (список задач обрезан) в счет не входят и сокращают период.
+ */
 const monthlyFlow: Formatter = (v) => {
   if (!Array.isArray(v) || v.length === 0) return null;
-  const cells = v.map((w) => {
+  const windows = v.map((w) => {
     const o = obj(w);
-    return o && isNum(o.created) && isNum(o.closed) ? `${num(o.created)}/${num(o.closed)}` : NO_VALUE;
+    return o && isNum(o.created) && isNum(o.closed) ? { created: o.created, closed: o.closed } : null;
   });
-  return `${cells.join(", ")} (${ASIDE_MONTHLY_FLOW})`;
+  const covered = windows.filter((w): w is { created: number; closed: number } => w !== null);
+  const last = windows[windows.length - 1] ?? null;
+  if (covered.length === 0 || last === null) return null;
+  const pair = (c: number, z: number) => `создано ${num(c)}, закрыто ${num(z)}`;
+  const moved = (w: { created: number; closed: number }) => w.created > 0 || w.closed > 0;
+  const months = (n: number) => `${n} ${plural(n, "месяц", "месяца", "месяцев")}`;
+  const earlier = covered.slice(0, -1);
+  if (earlier.length === 0) return moved(last) ? `за последние 30 дней ${pair(last.created, last.closed)}` : "за последние 30 дней движения не было";
+  const sum = (k: "created" | "closed") => covered.reduce((a, w) => a + w[k], 0);
+  if (!covered.some(moved)) return `за ${months(covered.length)} движения не было: задачи не создавались и не закрывались`;
+  if (!earlier.some(moved)) return `за последние 30 дней ${pair(last.created, last.closed)}; в предыдущие ${months(earlier.length)} движения не было`;
+  const tail = moved(last) ? `за последние 30 дней – ${pair(last.created, last.closed)}` : "за последние 30 дней движения не было";
+  return `за ${months(covered.length)} ${pair(sum("created"), sum("closed"))}; ${tail}`;
 };
 
 // ---------- ревью PR и карта владельцев ----------
@@ -281,7 +296,7 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   "issues.first_resp": { title: "Время до первого ответа", unit: "часы", format: (v) => (isNum(v) ? `${num(v)} ч` : null) },
   "issues.tracker_unused": { title: "Задачи не ведутся", unit: "открытые и закрытые задачи", format: tracker },
   "issues.backlog_trend": { title: "Динамика бэклога за 90 дней", unit: "создано минус закрыто (справочно, без веса)", format: backlogTrend },
-  "issues.monthly_flow": { title: "Поток задач по 30-дневным окнам", unit: "6 окон по 30 дней (справочно, без веса)", format: monthlyFlow },
+  "issues.monthly_flow": { title: "Поток задач", unit: "создано и закрыто за 6 окон по 30 дней (справочно, без веса)", format: monthlyFlow },
   // пометки считаются только в коде — файлы тестов исключены
   "code.density": { title: "Плотность TODO/FIXME в коде", unit: "на 1 тыс. строк", format: perLines("1 тыс.") },
   "code.old_share": { title: "Доля старых TODO", unit: "доля, %", format: share },

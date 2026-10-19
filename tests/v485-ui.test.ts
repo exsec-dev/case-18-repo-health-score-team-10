@@ -209,7 +209,7 @@ describe("поверхности без отдельной растяжки (sou
     expect(page).toContain("<LoginButton compact={false} inline />");
     expect(page).not.toContain('<Link href="/auth/ya">Войти через Я ID</Link>');
     expect(view).toContain('signIn: score.fullLocked && (auth === undefined || auth === "no-session")');
-    expect(view).toContain("fullScorePath(auth, [card.access.cicd, card.access.appsec])");
+    expect(view).toContain("fullScorePath(auth, [card.access.cicd, card.access.appsec], patUnreadable)");
     expect(src("Shell.tsx")).toMatch(/export function LoginButton[\s\S]{0,400}view="action"/);
     expect(src("format.ts")).toContain('SIGN_IN_LOCK_SHORT = "Нужно войти через Я ID и добавить персональный токен доступа SourceCraft."');
   });

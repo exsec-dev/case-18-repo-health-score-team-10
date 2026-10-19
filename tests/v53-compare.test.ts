@@ -390,9 +390,14 @@ describe("К-1: адрес набора, маршрут, тексты", () => {
   });
 
   test("текст недоступного — по зрителю, не по репозиторию; тексты по правилу языка", () => {
-    expect(unavailableText(false)).toContain("после входа");
-    expect(unavailableText(true)).toContain("ваш токен");
-    for (const text of [unavailableText(false), unavailableText(true), SLOT_EMPTY.compare.title, SLOT_EMPTY.compare.text, COMPARE_FULL_PARTIAL]) {
+    expect(unavailableText("guest")).toContain("после входа");
+    expect(unavailableText("token")).toContain("ваш токен");
+    // вошедшему без токена — без «войдите»: он уже вошел
+    expect(unavailableText("no-token")).not.toContain("вход");
+    expect(unavailableText("no-token")).toContain("Настройках");
+    expect(unavailableText("token-unreadable")).toContain("заново");
+    const viewers = ["guest", "no-token", "token-unreadable", "token"] as const;
+    for (const text of [...viewers.map(unavailableText), SLOT_EMPTY.compare.title, SLOT_EMPTY.compare.text, COMPARE_FULL_PARTIAL]) {
       expect(text).not.toContain("ё");
       expect(text).not.toContain("—");
     }

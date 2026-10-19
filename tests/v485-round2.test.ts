@@ -241,7 +241,7 @@ describe("П3: причина замка — одно правило для по
   test("карточка зовет общий хелпер в обоих местах (проводка)", () => {
     const view = webSrc("cardView.ts");
     const format = webSrc("format.ts");
-    expect(view).toContain("fullScorePath(auth, [card.access.cicd, card.access.appsec])");
+    expect(view).toContain("fullScorePath(auth, [card.access.cicd, card.access.appsec], patUnreadable)");
     expect(format).toMatch(/export function fullScorePath[\s\S]{0,700}lockReasonShort\(accesses, auth\)/);
     // у зрителя с токеном – «только участникам репозитория» и причина (`LOCKED_WHY`)
     expect(view).toContain("LOCKED_WHY[r as keyof typeof LOCKED_WHY]");

@@ -865,6 +865,9 @@ const SETTINGS_WORD = "Настройках";
 /** Вошедшему без токена: без «войдите» — он уже вошел. */
 const PATH_NO_PAT: PathPart[] = [{ text: "Добавьте персональный токен доступа в " }, { text: SETTINGS_WORD, settings: true }, { text: "." }];
 
+/** Вошедшему, чей сохраненный токен текущим ключом сервиса не читается. */
+const PATH_RESAVE: PathPart[] = [{ text: "Ваш токен больше не читается – сохраните его заново в " }, { text: SETTINGS_WORD, settings: true }, { text: "." }];
+
 /** Не вошедшему (аноним, истекшая сессия). */
 const PATH_SIGN_IN: PathPart[] = [{ text: "Войдите через Я ID и добавьте персональный токен доступа в " }, { text: SETTINGS_WORD, settings: true }, { text: "." }];
 
@@ -876,11 +879,12 @@ export const pathText = (parts: PathPart[]): string => parts.map((p) => p.text).
  * нет — причина без призыва (короткая форма по первому закрытому каналу: CI,
  * затем Безопасность).
  */
-export function fullScorePath(auth: string | undefined, accesses: (string | undefined)[]): PathPart[] {
+export function fullScorePath(auth: string | undefined, accesses: (string | undefined)[], patUnreadable = false): PathPart[] {
   if (auth === undefined || auth === "no-session") return PATH_SIGN_IN;
-  // канал закрыт «нет токена» — зрителю нужен токен, как бы ни пришел признак входа
+  // канал закрыт «нет токена» — зрителю нужен токен, как бы ни пришел признак входа;
+  // токен сохранен, но не читается — сохранить заново, а не «добавить»
   const closed = accesses.find((a) => a !== undefined && a !== "granted");
-  if (auth === "no-pat" || closed === "no-pat") return PATH_NO_PAT;
+  if (auth === "no-pat" || closed === "no-pat") return patUnreadable ? PATH_RESAVE : PATH_NO_PAT;
   return [{ text: lockReasonShort(accesses, auth) ?? ACCESS_LOCK_SHORT["check-failed"] }];
 }
 
@@ -1316,6 +1320,31 @@ export function fraudNoteText(note: string): string {
 export function aiParagraphs(text: string): string[] {
   // типографика применяется и при выводе — для текстов, сохраненных до ее появления
   return normalizeTypography(text).split(/\n+/).map((l) => l.trim()).filter((l) => l !== "");
+}
+
+/**
+ * Кто смотрит — для текстов о доступе к закрытому: гость, вошел без токена, токен
+ * сохранен, но не читается (сменился ключ сервиса), токен есть. Текст зависит только
+ * от зрителя, не от репозитория: иначе он выдал бы существование закрытого.
+ */
+export type ViewerKind = "guest" | "no-token" | "token-unreadable" | "token";
+
+export function viewerKindOf(me: { login: string | null; hasPat: boolean; patUnreadable?: boolean } | null): ViewerKind {
+  if (me === null || me.login === null) return "guest";
+  if (me.hasPat) return "token";
+  return me.patUnreadable === true ? "token-unreadable" : "no-token";
+}
+
+/**
+ * Репозиторий из избранного без анализа у вошедшего без рабочего токена: права на
+ * анализ и доступ к закрытому сервис проверяет только по токену — проверка не идет.
+ */
+export function favoriteNoTokenText(visibility: string, unreadable: boolean): string {
+  const lead = "Репозиторий в вашем избранном, но анализа еще не было.";
+  if (visibility === "public") return `${lead} Публичный репозиторий появится в рейтинге после планового анализа.`;
+  return unreadable
+    ? `${lead} Ваш токен SourceCraft больше не читается – сохраните его заново, и сервис проверит права на анализ.`
+    : `${lead} Права на анализ сервис проверяет по токену SourceCraft – добавьте его в Настройках.`;
 }
 
 /**

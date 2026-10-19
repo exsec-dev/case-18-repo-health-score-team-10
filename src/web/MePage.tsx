@@ -99,25 +99,30 @@ function CabinetAlert({
   return <Alert theme={theme} view="outlined" size="m" title={title} message={message} actions={actions} />;
 }
 
-/** Предупреждение «нет токена» со ссылкой в Настройки; с токеном не показывается. */
+/**
+ * Предупреждение «нет токена» со ссылкой в Настройки; с токеном не показывается.
+ * Токен сохранен, но не читается (сменился ключ сервиса) — «сохраните заново», а не «добавьте».
+ */
 function TokenNotice({ hasPat }: { hasPat: boolean }) {
+  const unreadable = dataOf(useSession().me)?.patUnreadable === true;
   if (hasPat) return null;
+  // обертка — чтобы кнопка была по ширине текста, а не во всю плашку
+  const action = (
+    <span className="rh-token-notice__action">
+      <Button view="normal" size="m" {...linkProps("/settings")}>
+        Перейти в Настройки
+      </Button>
+    </span>
+  );
   return (
     <Alert
       theme="info"
       view="filled"
       className="rh-token-notice"
       icon={<Icon data={Key} size={18} className="rh-info-icon" />}
-      title="Добавьте персональный токен доступа SourceCraft"
-      message="С ним откроются CI/CD, Безопасность и анализ своих репозиториев."
-      actions={
-        // обертка — чтобы кнопка была по ширине текста, а не во всю плашку
-        <span className="rh-token-notice__action">
-          <Button view="normal" size="m" {...linkProps("/settings")}>
-            Перейти в Настройки
-          </Button>
-        </span>
-      }
+      title={unreadable ? "Сохраните токен доступа SourceCraft заново" : "Добавьте персональный токен доступа SourceCraft"}
+      message={unreadable ? "Сохраненный токен больше не читается сервисом. Без него закрыты CI/CD, Безопасность и анализ своих репозиториев." : "С ним откроются CI/CD, Безопасность и анализ своих репозиториев."}
+      actions={action}
     />
   );
 }
@@ -1324,8 +1329,9 @@ function RepoRow({
         Нет в каталоге
       </StatePill>
     ) : !entry.mayRead ? (
-      <StatePill icon={Lock} title="Ваш токен не дает доступа к данным этого репозитория">
-        Нет прав
+      // без токена права не проверялись: «нет прав» было бы неправдой
+      <StatePill icon={Lock} title={hasPat ? "Ваш токен не дает доступа к данным этого репозитория" : "Данные закрытого репозитория открываются по персональному токену доступа SourceCraft – он задается в Настройках"}>
+        {hasPat ? "Нет прав" : "Нужен токен"}
       </StatePill>
     ) : (
       <StatePill icon={CircleDashed} title="Анализ этого репозитория еще не запускали">

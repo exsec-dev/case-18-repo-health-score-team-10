@@ -254,7 +254,7 @@ describe("Д2 сборщик: поток задач по 30-дневным ок�
     const d = issueDynamics(f.get("issues.stats")!.value);
     expect(d.backlog_trend).toEqual({ score: null, value: null, note: DYNAMICS_TRUNCATED });
     expect(shown("issues.backlog_trend", d.backlog_trend)).toBe("нет данных, список задач обрезан и 90 дней не покрыты");
-    expect(shown("issues.monthly_flow", d.monthly_flow)).toBe("–, –, –, –, 0/1, 2/1 (создано/закрыто за 30 дней, от старых к новым)");
+    expect(shown("issues.monthly_flow", d.monthly_flow)).toBe("за 2 месяца создано 2, закрыто 2; за последние 30 дней – создано 2, закрыто 1");
   });
 
   test("сервер не обещал продолжения – список не обрезан, даже если страниц ровно кап", async () => {
@@ -291,7 +291,7 @@ describe("Д2 показатель: баланс за 90 дней и напра�
   test("показ: знак баланса, слова направления, помесячные числа", () => {
     const d = issueDynamics({ open: 3, closed: 5, flow: { window_days: 30, windows: flow([4, 1], [3, 1], [3, 1]) } });
     expect(shown("issues.backlog_trend", d.backlog_trend)).toBe("бэклог растет, +7 за 90 дней (создано 10, закрыто 3)");
-    expect(shown("issues.monthly_flow", d.monthly_flow)).toBe("9/9, 9/9, 9/9, 4/1, 3/1, 3/1 (создано/закрыто за 30 дней, от старых к новым)");
+    expect(shown("issues.monthly_flow", d.monthly_flow)).toBe("за 6 месяцев создано 37, закрыто 30; за последние 30 дней – создано 3, закрыто 1");
     const s = issueDynamics({ open: 3, closed: 5, flow: { window_days: 30, windows: flow([1, 4], [1, 3], [0, 3]) } });
     expect(shown("issues.backlog_trend", s.backlog_trend)).toBe("бэклог разбирается, −8 за 90 дней (создано 2, закрыто 10)");
     const idle = issueDynamics({ open: 3, closed: 5, flow: { window_days: 30, windows: flow([0, 0], [0, 0], [0, 0]) } });
@@ -441,11 +441,11 @@ describe("отрисованный MD: справочные строки в ра
         "Справочно, в балл не входит: Стабильность CI в динамике – стабильнее, 90% успешных у последних 10 запусков против 70% у 10 до них.",
       );
       expect(md).toContain("Динамика бэклога за 90 дней – бэклог растет, +4 за 90 дней (создано 6, закрыто 2)");
-      expect(md).toContain("Поток задач по 30-дневным окнам – 2/1, 1/2, 2/2, 3/1, 2/1, 1/0 (создано/закрыто за 30 дней, от старых к новым)");
+      expect(md).toContain("Поток задач – за 6 месяцев создано 11, закрыто 7; за последние 30 дней – создано 1, закрыто 0");
       expect(md).toContain("| Стабильность CI в динамике: стабильнее, 90% успешных у последних 10 запусков против 70% у 10 до них | справочно, в балл не входит |");
       expect(md).toContain("| Версия методики | 4.5.0-hci |");
       // новые строки: без длинного тире и без «ё»
-      const fresh = md.split("\n").filter((l) => /Стабильность CI|Динамика бэклога|Поток задач по 30-дневным окнам/.test(l));
+      const fresh = md.split("\n").filter((l) => /Стабильность CI|Динамика бэклога|Поток задач/.test(l));
       expect(fresh.length).toBeGreaterThanOrEqual(5);
       for (const l of fresh) {
         expect({ l, long: l.includes("—"), yo: /ё/i.test(l) }).toEqual({ l, long: false, yo: false });
@@ -472,5 +472,24 @@ describe("отрисованный MD: справочные строки в ра
       const [cat, sub] = key.split(".") as [string, string];
       expect(formatSubmetricValue(cat, sub, null, AT)).toBe("–");
     }
+  });
+});
+
+describe("Поток задач — сводка словами", () => {
+  const flow = (pairs: ([number, number] | null)[]) => ({
+    score: null,
+    value: pairs.map((p, i) => (p === null ? { from: `2026-0${i + 4}-01`, created: null, closed: null } : { from: `2026-0${i + 4}-01`, created: p[0], closed: p[1] })),
+  });
+  test("движение только в последние 30 дней", () => {
+    expect(shown("issues.monthly_flow", flow([[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [16, 16]]))).toBe("за последние 30 дней создано 16, закрыто 16; в предыдущие 5 месяцев движения не было");
+  });
+  test("движения не было совсем", () => {
+    expect(shown("issues.monthly_flow", flow([[0, 0], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]]))).toBe("за 6 месяцев движения не было: задачи не создавались и не закрывались");
+  });
+  test("последние 30 дней без движения", () => {
+    expect(shown("issues.monthly_flow", flow([[2, 1], [0, 0], [0, 0], [0, 0], [0, 0], [0, 0]]))).toBe("за 6 месяцев создано 2, закрыто 1; за последние 30 дней движения не было");
+  });
+  test("покрыто одно окно", () => {
+    expect(shown("issues.monthly_flow", flow([null, null, null, null, null, [3, 1]]))).toBe("за последние 30 дней создано 3, закрыто 1");
   });
 });

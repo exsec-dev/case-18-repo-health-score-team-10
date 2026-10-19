@@ -12,7 +12,7 @@ import { parseFavoriteInput } from "../api/slug-input";
 import { analysisDate } from "../report/sections";
 import { plural } from "../report/submetrics";
 import type { IndexCategoryKey } from "../score/model";
-import { fmtCount, fmtDate, rankNoneText, roundScore } from "./format";
+import { fmtCount, fmtDate, rankNoneText, roundScore, type ViewerKind } from "./format";
 
 export { COMPARE_MAX };
 
@@ -237,10 +237,17 @@ export const COMPARE_FULL_PARTIAL = "Repo Health Score, CI/CD и Безопас�
 export const COMPARE_PLACEHOLDER = "Название, организация/репозиторий или ссылка";
 
 /** Что делать с недоступным — по состоянию ЗРИТЕЛЯ, не репозитория (иначе текст раскрыл бы существование). */
-export function unavailableText(viewerHasPat: boolean): string {
-  return viewerHasPat
-    ? "Проверьте адрес: репозитория нет в каталоге сервиса или ваш токен не дает к нему доступа."
-    : "Проверьте адрес. Закрытые и внутренние репозитории видны после входа через Я ID и добавления персонального токена доступа SourceCraft.";
+export function unavailableText(viewer: ViewerKind): string {
+  switch (viewer) {
+    case "token":
+      return "Проверьте адрес: репозитория нет в каталоге сервиса или ваш токен не дает к нему доступа.";
+    case "token-unreadable":
+      return "Проверьте адрес. Закрытые и внутренние репозитории снова станут видны, когда вы сохраните токен заново в Настройках.";
+    case "no-token":
+      return "Проверьте адрес. Закрытые и внутренние репозитории видны после добавления персонального токена доступа SourceCraft в Настройках.";
+    case "guest":
+      return "Проверьте адрес. Закрытые и внутренние репозитории видны после входа через Я ID и добавления персонального токена доступа SourceCraft.";
+  }
 }
 
 /** Сбой проверки прав у зрителя с доказанными правами — текст сервера карточки (`cardOrRefusal`) с именем репозитория. */

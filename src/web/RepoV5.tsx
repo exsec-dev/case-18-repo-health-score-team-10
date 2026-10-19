@@ -495,7 +495,7 @@ export function ActivityCheckCard({
     <ActionTooltip title="Проверка устарела" description={fraudStaleText(ai.check, st.date)}>
       <span className="rh-ai-stale" {...TIP_TARGET}>
         <Label theme="unknown" size="xs">
-          Устарела
+          Устарело
         </Label>
       </span>
     </ActionTooltip>
@@ -522,9 +522,12 @@ export function ActivityCheckCard({
           </Flex>
         )}
         <Flex gap={2} alignItems="center" wrap className="rh-check-card__status">
-          {icon === null ? <Spin size="xs" /> : <Icon data={icon.data} size={16} style={{ color: icon.color, flexShrink: 0 }} />}
-          {/* под оценками статус тише: 13px, средняя жирность — главные там цифры оценок */}
-          <Text variant={wide ? "subheader-1" : "subheader-2"}>{wide ? CHECK_WIDE_TITLE[st.kind] ?? title : title}</Text>
+          {/* значок и статус не разрываются: длинный статус переносится внутри, значок — по первой строке */}
+          <span className="rh-check-card__head">
+            <span className="rh-check-card__icon">{icon === null ? <Spin size="xs" /> : <Icon data={icon.data} size={16} style={{ color: icon.color }} />}</span>
+            {/* под оценками статус тише: 13px, средняя жирность — главные там цифры оценок */}
+            <Text variant={wide ? "subheader-1" : "subheader-2"}>{wide ? CHECK_WIDE_TITLE[st.kind] ?? title : title}</Text>
+          </span>
           {wide && help}
           {foldSigns && (
             <button type="button" className="rh-check-card__toggle" aria-expanded={signsOpen} aria-controls={signsId} onClick={() => setSignsOpen((o) => !o)}>

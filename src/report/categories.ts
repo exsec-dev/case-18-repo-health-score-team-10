@@ -12,5 +12,8 @@ export const CATEGORY_TITLES: Record<CategoryKey, string> = {
   code: "Состояние кода",
 };
 
-/** Порядок категорий на всех поверхностях — вес модели, затем ключ. */
-export const CATEGORY_ORDER: CategoryKey[] = ["documentation", "cicd", "security", "activity", "issues", "code"];
+/**
+ * Порядок категорий на всех поверхностях (19.10.2026): сначала четыре публичные в
+ * порядке HealthCraft Index, затем закрытые CI/CD и Безопасность — как в ТЗ (п. 3.1).
+ */
+export const CATEGORY_ORDER: CategoryKey[] = ["documentation", "activity", "issues", "code", "cicd", "security"];

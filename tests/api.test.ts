@@ -597,8 +597,8 @@ describe("мета", () => {
   test("версия модели, шесть категорий с русскими именами и весами, порог NULL", () => {
     const meta = getMeta(t.db);
     expect(meta.modelVersion).toBe(MODEL_VERSION);
-    expect(meta.categories.map((c) => c.key)).toEqual(["documentation", "cicd", "security", "activity", "issues", "code"]);
-    expect(meta.categories.map((c) => c.title)).toEqual(["Документация", "CI/CD", "Безопасность", "Активность", "Задачи", "Состояние кода"]);
+    expect(meta.categories.map((c) => c.key)).toEqual(["documentation", "activity", "issues", "code", "cicd", "security"]);
+    expect(meta.categories.map((c) => c.title)).toEqual(["Документация", "Активность", "Задачи", "Состояние кода", "CI/CD", "Безопасность"]);
     expect(meta.categories.reduce((s, c) => s + c.scoreWeight, 0)).toBe(100);
     expect(meta.coverageNullBelow).toBe(0.4);
     expect(meta.repos.nullScore).toBe(1);

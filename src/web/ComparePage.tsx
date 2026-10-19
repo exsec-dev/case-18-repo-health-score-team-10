@@ -74,6 +74,8 @@ import {
   scoreTheme,
   scoreWord,
   sentence,
+  viewerKindOf,
+  type ViewerKind,
 } from "./format";
 import { useMediaQuery } from "./prefs";
 import { linkProps, navigate, repoHref } from "./router";
@@ -125,7 +127,8 @@ export function ComparePage({ search }: { search: string }) {
   const { me } = useSession();
   const meData = dataOf(me);
   const loggedIn = meData?.login != null;
-  const hasPat = meData?.hasPat === true;
+  // что делать с недоступным — по состоянию зрителя: гость, без токена, токен не читается, с токеном
+  const viewer = viewerKindOf(meData);
   const phone = useMediaQuery("(max-width: 767px)");
   // раскладка таблицы — по ширине области контента, а не окна: на 768-1023 с
   // развернутым rail столбцам оставалось по 69px, и плашки наезжали на соседей
@@ -236,12 +239,12 @@ export function ComparePage({ search }: { search: string }) {
                     <LeaderLegend />
                   </div>
                 )}
-                <CompareTable items={items} fullKeys={full.rows} hasPat={hasPat} phone={narrow} legend={items.filter((i) => scoredCard(i) !== null).length >= 2} onRemove={remove} onAdd={openDialog} />
+                <CompareTable items={items} fullKeys={full.rows} viewer={viewer} phone={narrow} legend={items.filter((i) => scoredCard(i) !== null).length >= 2} onRemove={remove} onAdd={openDialog} />
               </div>
             ) : state?.kind === "error" ? null : (
               <CompareSkeleton slugs={slugs} />
             )}
-            {items && narrow && <PhoneExceptions items={items} hasPat={hasPat} />}
+            {items && narrow && <PhoneExceptions items={items} viewer={viewer} />}
             {/* плашка по содержимому, не шире 820 */}
             {notes.length === 1 && (
               <div className="rh-cmp-alert">
@@ -736,7 +739,7 @@ function dateWithoutYear(iso: string | null): string {
 function CompareTable({
   items,
   fullKeys,
-  hasPat,
+  viewer,
   phone,
   legend,
   onRemove,
@@ -744,7 +747,7 @@ function CompareTable({
 }: {
   items: CompareItem[];
   fullKeys: ("repoHealthScore" | "cicd" | "security")[];
-  hasPat: boolean;
+  viewer: ViewerKind;
   phone: boolean;
   /** легенда отметки лидера — только когда лидер возможен: 2 и больше столбца с оценкой */
   legend: boolean;
@@ -799,7 +802,7 @@ function CompareTable({
   const cellCol = (i: number) => (phone ? i + 1 : i + 2);
   const merged = new Set(cols.map((c, i) => (c.kind === "scored" ? -1 : i)).filter((i) => i >= 0));
   const firstSubId = (key: CategoryKey) => `rh-cmp-sub-${key}`;
-  // пояснение к показателю (скобка «создано/закрыто за 30 дней…») — одно на строку, у подписи
+  // пояснение к показателю (скобка вроде «доля от не менее 5 пометок») — одно на строку, у подписи
   const asideOf = (row: Row): string | null => {
     if (row.kind !== "sub") return null;
     const asides = new Set<string>();
@@ -856,7 +859,7 @@ function CompareTable({
         if (!merged.has(i)) return;
         cells.push(
           <div key={`m${i}`} role="cell" className="rh-cmp-merged-wrap" style={{ gridRow: `2 / ${lastRow + 1}`, gridColumn: cellCol(i) }}>
-            <MergedCell col={c} hasPat={hasPat} />
+            <MergedCell col={c} viewer={viewer} />
           </div>,
         );
       });
@@ -1359,10 +1362,10 @@ function VisibilityIcon({ value }: { value: "internal" | "private" }) {
 }
 
 /** Тексты столбцов-исключений на телефоне — под таблицей, с полным слагом. */
-function PhoneExceptions({ items, hasPat }: { items: CompareItem[]; hasPat: boolean }) {
+function PhoneExceptions({ items, viewer }: { items: CompareItem[]; viewer: ViewerKind }) {
   const lines = colsOf(items)
     .filter((c): c is Exclude<Col, { kind: "scored" } | { kind: "invite" }> => c.kind === "noscore" || c.kind === "refused")
-    .map((c) => ({ slug: c.slug, ...exceptionText(c, hasPat) }));
+    .map((c) => ({ slug: c.slug, ...exceptionText(c, viewer) }));
   if (lines.length === 0) return null;
   return (
     <div className="rh-cmp-foot">
@@ -1377,7 +1380,7 @@ function PhoneExceptions({ items, hasPat }: { items: CompareItem[]; hasPat: bool
   );
 }
 
-function exceptionText(col: Exclude<Col, { kind: "scored" } | { kind: "invite" }>, hasPat: boolean): { title: string; text: ReactNode } {
+function exceptionText(col: Exclude<Col, { kind: "scored" } | { kind: "invite" }>, viewer: ViewerKind): { title: string; text: ReactNode } {
   if (col.kind === "noscore") {
     const t = noScoreText(col.card.scan);
     return { title: t.title, text: t.description };
@@ -1394,7 +1397,7 @@ function exceptionText(col: Exclude<Col, { kind: "scored" } | { kind: "invite" }
         </>
       ),
     };
-  return { title: COMPARE_UNAVAILABLE_TITLE, text: unavailableText(hasPat) };
+  return { title: COMPARE_UNAVAILABLE_TITLE, text: unavailableText(viewer) };
 }
 
 let fitCanvas: HTMLCanvasElement | null = null;
@@ -1446,9 +1449,9 @@ function FitName({ text, variant, secondary = false }: { text: string; variant: 
   );
 }
 
-function MergedCell({ col, hasPat }: { col: Col; hasPat: boolean }) {
+function MergedCell({ col, viewer }: { col: Col; viewer: ViewerKind }) {
   if (col.kind === "invite" || col.kind === "scored") return null;
-  const t = exceptionText(col, hasPat);
+  const t = exceptionText(col, viewer);
   return (
     <div className="rh-cmp-merged">
       <Text variant="subheader-1">{t.title}</Text>
