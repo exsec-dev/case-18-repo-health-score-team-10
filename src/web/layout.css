@@ -469,19 +469,14 @@ body {
 }
 
 /* document: каждая колонка — свой контейнер прокрутки, страница целиком
- * в одном экране. Полоса основной колонки сама отделяет её от панели, поэтому
- * рамки у панели здесь нет (у SourceCraft колонку «About» отделяет пустое
- * поле): рамка рядом с полосой давала две вертикальные линии подряд.
- * `scrollbar-gutter` держит место под полосу, и колонка не прыгает, когда
- * содержимое перерастает экран. */
+ * в одном экране. Панель отделена той же серой линией, что и на других
+ * страницах: без нее колонки сливались (полоса прокрутки тонкая и видна не
+ * всегда). `scrollbar-gutter` держит место под полосу, и колонка не прыгает,
+ * когда содержимое перерастает экран. */
 .rh-page_document .rh-page__main,
 .rh-page_document .rh-page__aside {
   overflow-y: auto;
   scrollbar-gutter: stable;
-}
-
-.rh-page_document .rh-page__aside {
-  border-left: 0;
 }
 
 /* fill: шапка и футер закреплены, прокручивается только содержимое между ними */
@@ -2338,6 +2333,28 @@ button.rh-category:focus-visible {
   gap: var(--g-spacing-2);
 }
 
+/* «Показать полностью» и «Свернуть» — анимацией высоты: от 6 строк до полной
+ * высоты текста (--rh-ai-full, замер в Collapsible) и обратно */
+.rh-ai-text_fold {
+  overflow: hidden;
+  transition: max-height 220ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.rh-ai-text_fold:not(.rh-ai-text_clamped) {
+  max-height: var(--rh-ai-full);
+}
+
+.rh-ai-more svg {
+  transition: transform 220ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rh-ai-text_fold,
+  .rh-ai-more svg {
+    transition: none;
+  }
+}
+
 .rh-ai-text_clamped {
   max-height: calc(var(--g-text-body-1-line-height) * 6);
   overflow: hidden;
@@ -2881,6 +2898,32 @@ button.rh-category:focus-visible {
 .rh-cmp-label_sub,
 .rh-cmp-cell_sub {
   align-items: flex-start;
+}
+
+/* раскрытие категории в сравнении: подстроки — ячейки общей сетки таблицы, их
+ * высоту не анимировать (как у .rh-collapse), поэтому они проявляются с тем же
+ * темпом и сдвигом сверху; сворачивание — сразу */
+.rh-cmp-label_sub,
+.rh-cmp-cell_sub,
+.rh-cmp-label_subhead,
+.rh-cmp-cell_subhead {
+  animation: rh-cmp-sub-in 220ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes rh-cmp-sub-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rh-cmp-label_sub,
+  .rh-cmp-cell_sub,
+  .rh-cmp-label_subhead,
+  .rh-cmp-cell_subhead {
+    animation: none;
+  }
 }
 
 /* значок пояснения — в строке текста, по базовой линии: так его центр совпадает с
@@ -4254,12 +4297,19 @@ button.rh-category:focus-visible {
     cursor: pointer;
   }
 
+  /* дерево разделов сворачивается тем же приемом, что .rh-collapse: сетка
+   * 1fr → 0fr, видимость гаснет после анимации */
   .rh-docs__nav-tree {
-    display: none;
+    display: grid;
+    grid-template-rows: 0fr;
+    visibility: hidden;
+    transition: grid-template-rows 220ms cubic-bezier(0.2, 0, 0, 1), visibility 0s 220ms;
   }
 
   .rh-docs__nav_open .rh-docs__nav-tree {
-    display: block;
+    grid-template-rows: 1fr;
+    visibility: visible;
+    transition: grid-template-rows 220ms cubic-bezier(0.2, 0, 0, 1), visibility 0s;
   }
 
   .rh-docs__main {
@@ -4333,16 +4383,17 @@ button.rh-category:focus-visible {
   margin-top: calc(var(--g-spacing-2) - var(--g-spacing-4));
 }
 
-/* сворачивание группы: высота анимируется сеткой 1fr → 0fr (у Gravity
- * сворачиваемого списка нет). Видимость гаснет после анимации — свернутое
- * не читается и не ловит фокус; раскрытие показывает сразу. */
-.rh-org-group__body {
+/* сворачивание с анимацией высоты — общий прием всех сворачиваний (компонент
+ * Collapse в ui.tsx, группы «Моих репозиториев»): высота анимируется сеткой
+ * 1fr → 0fr. Видимость гаснет после анимации — свернутое не читается и не
+ * ловит фокус; раскрытие показывает сразу. */
+.rh-collapse {
   display: grid;
   grid-template-rows: 1fr;
   transition: grid-template-rows 220ms cubic-bezier(0.2, 0, 0, 1), visibility 0s;
 }
 
-.rh-org-group__body[data-collapsed] {
+.rh-collapse[data-collapsed] {
   grid-template-rows: 0fr;
   visibility: hidden;
   transition: grid-template-rows 220ms cubic-bezier(0.2, 0, 0, 1), visibility 0s 220ms;
@@ -4350,26 +4401,63 @@ button.rh-category:focus-visible {
 
 /* `clip` с полем 4px у раскрытой: кольцо фокуса крайних строк не обрезается,
  * а свернутая обрезана ровно по краю */
-.rh-org-group__inner {
+.rh-collapse__inner {
   min-height: 0;
   overflow: clip;
 }
 
-.rh-org-group__body:not([data-collapsed]) .rh-org-group__inner {
+.rh-collapse:not([data-collapsed]) > .rh-collapse__inner,
+.rh-collapse__inner:is(.g-disclosure__content_visible > *) {
   overflow-clip-margin: 4px;
+}
+
+/* Disclosure Gravity («Все анализы», «Исходные данные») — та же анимация высоты
+ * вместо display: none и мигания прозрачности: содержимое — сеткой 0fr/1fr,
+ * слой .rh-collapse__inner внутри. Gravity ждет конца CSS-анимации, чтобы
+ * завершить переход, — поэтому вместо его прозрачности пустая анимация той же
+ * длины, что и высота. Новый Disclosure — добавить его класс в список */
+:is(.rh-history__all, .rh-proof__raw-toggle) .g-disclosure__content,
+:is(.rh-history__all, .rh-proof__raw-toggle) .g-disclosure__content.g-disclosure_exit_active {
+  display: grid;
+  grid-template-rows: 0fr;
+  visibility: hidden;
+  opacity: 1;
+  transition: grid-template-rows 220ms cubic-bezier(0.2, 0, 0, 1), visibility 0s 220ms;
+}
+
+:is(.rh-history__all, .rh-proof__raw-toggle) .g-disclosure__content.g-disclosure__content_visible {
+  grid-template-rows: 1fr;
+  visibility: visible;
+  transition: grid-template-rows 220ms cubic-bezier(0.2, 0, 0, 1), visibility 0s;
+}
+
+:is(.rh-history__all, .rh-proof__raw-toggle) .g-disclosure__content.g-disclosure_enter_active,
+:is(.rh-history__all, .rh-proof__raw-toggle) .g-disclosure__content.g-disclosure_exit_active {
+  animation: rh-disclosure-hold 220ms;
+}
+
+@keyframes rh-disclosure-hold {
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :is(.rh-history__all, .rh-proof__raw-toggle) .g-disclosure__content,
+  :is(.rh-history__all, .rh-proof__raw-toggle) .g-disclosure__content.g-disclosure__content_visible,
+  :is(.rh-history__all, .rh-proof__raw-toggle) .g-disclosure__content.g-disclosure_exit_active,
+  .rh-collapse,
+  .rh-collapse[data-collapsed],
+  .rh-docs__nav-tree,
+  .rh-docs__nav_open .rh-docs__nav-tree {
+    transition: none !important;
+  }
 }
 
 /* отступ под последней строкой группы — внутри сворачиваемой части: раскрытые
  * группы не сливаются со следующей плашкой, а свернутые стоят плотно (8px) */
-.rh-org-group__inner > .rh-repo-list {
+.rh-org-group__body > .rh-collapse__inner > .rh-repo-list {
   padding-bottom: var(--g-spacing-3);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .rh-org-group__body,
-  .rh-org-group__body[data-collapsed] {
-    transition: none;
-  }
 }
 
 /* заголовок организации — плашка со скруглением, прилипает сама (без поля фона
@@ -4759,7 +4847,7 @@ button.rh-category:focus-visible {
 
 /* наведение — строка подсвечена (подложка шире строки только по бокам, без
  * сдвига сетки), рядом подсказка с расчетом */
-.rh-cbd__table:not(.rh-cbd__table_refs) .rh-cbd__row:not(.rh-cbd__row_total):hover {
+.rh-cbd__table:not(.rh-cbd__table_refs) .rh-cbd__row:hover {
   background: var(--g-color-base-simple-hover);
   box-shadow:
     -4px 0 0 var(--g-color-base-simple-hover),
@@ -4862,12 +4950,20 @@ button.rh-category:focus-visible {
   border-left: 1px solid var(--g-color-line-generic);
 }
 
-/* итог под показателями — за чертой: левая колонка и есть то, что входит в балл */
+/* итог под показателями — за чертой: левая колонка и есть то, что входит в балл.
+ * Черта — отдельным слоем над строкой: у самой строки те же поля и скругление,
+ * что у остальных, и подсветка при наведении такая же */
 .rh-cbd__row_total {
-  margin-block-start: var(--g-spacing-1);
-  padding-block-start: var(--g-spacing-2);
-  border-block-start: 1px solid var(--g-color-line-generic);
-  border-radius: 0;
+  position: relative;
+  margin-block-start: calc(var(--g-spacing-2) + 1px);
+}
+
+.rh-cbd__row_total::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  top: calc(-1 * var(--g-spacing-1) - 1px);
+  border-top: 1px solid var(--g-color-line-generic);
 }
 
 /* шапка плашки — вместо шапки таблицы: название слева, пометка «в балл не
@@ -4925,6 +5021,18 @@ button.rh-category:focus-visible {
   display: grid;
   grid-column: 1 / -1;
   grid-template-columns: subgrid;
+}
+
+/* сворачивание подкаталогов: обертка Collapse и ее внутренний слой — тоже
+ * subgrid, иначе колонки ветви разошлись бы с колонками дерева */
+.rh-otree__fold,
+.rh-otree__fold > .rh-collapse__inner {
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+
+.rh-otree__fold > .rh-collapse__inner {
+  display: grid;
 }
 
 .rh-otree__row {

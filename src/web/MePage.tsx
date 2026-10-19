@@ -65,7 +65,7 @@ import { linkProps, navigate, repoHref } from "./router";
 import { readCollapsedOrgs, useMediaQuery, writeCollapsedOrgs } from "./prefs";
 import { repoKey, useTokenRepos } from "./tokenRepos";
 import { Page, UserAvatar, displayName, logoutFailedToast } from "./Shell";
-import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, RepoSlug, ScoreBar, SkeletonRows, TIP_TARGET, VisibilityPill } from "./ui";
+import { AsideSection, Collapse, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, RepoSlug, ScoreBar, SkeletonRows, TIP_TARGET, VisibilityPill } from "./ui";
 
 const REPOS_CRUMBS = [{ text: "Избранное" }];
 const TOKEN_REPOS_CRUMBS = [{ text: "Мои репозитории" }];
@@ -1801,37 +1801,34 @@ function TokenRepos() {
               </span>
             </button>
           </Text>
-          {/* сворачивание — анимацией высоты (сетка 1fr → 0fr), а не `hidden`: у
-              Gravity сворачиваемого списка нет. Свернутое — `inert`, вне фокуса */}
-          <div className="rh-org-group__body" id={`org-body-${g.org}`} data-collapsed={isCollapsed(g.org) || undefined} inert={isCollapsed(g.org) || undefined}>
-            <div className="rh-org-group__inner">
-              <ul className="rh-repo-list">
-                {g.items.map((e) => {
-                  const slug = `${e.org}/${e.repo}`;
-                  const closed = isClosed(e.visibility);
-                  return (
-                    <RepoRow
-                      key={slug}
-                      entry={e}
-                      access={null}
-                      lastCheckedAt={null}
-                      hasPat
-                      live={analysis.live(slug)}
-                      starting={starting.has(slug)}
-                      busy={false}
-                      onScan={() => void startScan(slug)}
-                      canAnalyze
-                      scheduled={!closed}
-                      fromToken
-                      empty={e.isEmpty}
-                      badge={<VisibilityPill value={e.visibility} />}
-                      favorite={{ on: e.favorite, busy: favBusy.has(slug), toggle: () => void toggleFavorite(e) }}
-                    />
-                  );
-                })}
-              </ul>
-            </div>
-          </div>
+          {/* сворачивание — анимацией высоты (общий Collapse), а не `hidden` */}
+          <Collapse open={!isCollapsed(g.org)} id={`org-body-${g.org}`} className="rh-org-group__body">
+            <ul className="rh-repo-list">
+              {g.items.map((e) => {
+                const slug = `${e.org}/${e.repo}`;
+                const closed = isClosed(e.visibility);
+                return (
+                  <RepoRow
+                    key={slug}
+                    entry={e}
+                    access={null}
+                    lastCheckedAt={null}
+                    hasPat
+                    live={analysis.live(slug)}
+                    starting={starting.has(slug)}
+                    busy={false}
+                    onScan={() => void startScan(slug)}
+                    canAnalyze
+                    scheduled={!closed}
+                    fromToken
+                    empty={e.isEmpty}
+                    badge={<VisibilityPill value={e.visibility} />}
+                    favorite={{ on: e.favorite, busy: favBusy.has(slug), toggle: () => void toggleFavorite(e) }}
+                  />
+                );
+              })}
+            </ul>
+          </Collapse>
         </section>
       ))}
     </Flex>

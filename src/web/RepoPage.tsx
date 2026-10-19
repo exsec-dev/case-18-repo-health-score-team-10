@@ -86,7 +86,7 @@ import { useMediaQuery } from "./prefs";
 import { repoKey, useTokenRepos } from "./tokenRepos";
 import { repoWebUrl } from "../api/slug-input";
 import { AiOverviewSection, BadgeButton, BadgeDialog, CategoryAiGlyph, CategoryAiMark, CategoryAiNote, ActivityCheckCard, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
-import { AsideSection, EmptyState, LanguageName, Meta, MetaItem, MethodLink, ModelVersion, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
+import { AsideSection, Collapse, EmptyState, LanguageName, Meta, MetaItem, MethodLink, ModelVersion, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
 
 type Card = RepoCard;
 type Evidence = Card["evidence"][number];
@@ -1376,12 +1376,13 @@ function Categories({ card, view }: { card: Card; view: CardView }) {
   return (
     <section className="rh-section" aria-labelledby="rh-categories-title">
       <Card view="outlined" className="rh-section-card">
-        {/* разбор модели у каждой категории — одна искра у заголовка, а не в каждой строке */}
+        {/* AI-разбор у каждой категории — одна искра у заголовка, а не в каждой
+            строке; слева от названия, как искра у заголовка AI-обзора */}
         <Flex gap={2} alignItems="center" className="rh-section__title rh-categories__head">
+          {aiEverywhere && <CategoryAiGlyph />}
           <Text variant="subheader-3" as="h2" id="rh-categories-title">
             Категории
           </Text>
-          {aiEverywhere && <CategoryAiGlyph />}
         </Flex>
         {/* итог: сильнейшие категории и чего не хватает слабейшей — простыми словами (в MD/PDF — прежняя строка) */}
         {strengths !== null && (
@@ -1446,7 +1447,7 @@ function CategoryRow({ category: c, card, aiEverywhere, defaultOpen = false }: {
       <span className="rh-category__name">
         <span className="rh-category__title">
           <Text variant="subheader-1">{c.title}</Text>
-          {/* искра — у категории есть разбор модели; у всех сразу — одна отметка над списком */}
+          {/* искра — у категории есть AI-разбор; у всех сразу — одна отметка над списком */}
           {!aiEverywhere && <CategoryAiMark card={card} categoryKey={key} hasData={c.score !== null} />}
           {c.stale && (
             <Label theme="warning" size="xs">
@@ -1503,71 +1504,74 @@ function CategoryRow({ category: c, card, aiEverywhere, defaultOpen = false }: {
           <span className="rh-category">{row}</span>
         )}
       </h3>
-      {open && expandable && (
-        <div className="rh-cbd" id={subsId}>
-          {/* примечание частичной нехватки данных — внутри раскрытия (в MD его нет в строке) */}
-          {c.partialNote && (
-            <Text as="p" variant="body-1" color="complementary" className="rh-cbd__note">
-              {c.partialNote}
-            </Text>
-          )}
-          {/* без вкладок: показатели слева заканчиваются итогом, справочные справа —
-              с пометкой в углу, что в балл они не входят; на узком экране колонки
-              встают друг под другом */}
-          {(hasRows || hasRefs) && (
-            <div className={hasRows && hasRefs ? "rh-cbd__cols rh-cbd__cols_two" : "rh-cbd__cols"}>
-              {hasRows && (
-                <div className="rh-cbd__block rh-cbd__tile rh-cbd__tile_main">
-                  <TileHead title="Показатели" />
-                  <div className="rh-cbd__table" role="table" aria-label={`Показатели категории «${c.title}»`}>
-                    {bd.rows.map((r) => (
-                      <Fragment key={r.sub}>
-                        <BreakdownLine glyph={r.state === "counted" ? r.score : null} icon={submetricIcon(key, r.sub)} title={r.title} value={r.value} earned={r.earned} weight={r.weight} hint={breakdownHint(r)} />
-                        {r.parts?.map((p) => <BreakdownLine key={p.title} part glyph={null} title={p.title} value={p.value} earned={p.earned} weight={p.weight} hint={null} />)}
-                      </Fragment>
-                    ))}
-                    {bd.adjustment !== null && (
-                      <BreakdownLine
-                        glyph="adjust"
-                        title={`Поправка: ${cat.adjustment ? adjustmentLabel(cat).toLowerCase() : "балл скорректирован"}`}
-                        value=""
-                        earned={bd.adjustment}
-                        weight={null}
-                        hint={[adjustmentText(cat) ?? "Балл категории скорректирован после суммы показателей."]}
-                      />
-                    )}
-                    {c.score !== null && <TotalLine score={c.score} />}
+      {/* раскрытие — анимацией высоты; содержимое в DOM и у свернутой (inert) */}
+      {expandable && (
+        <Collapse open={open}>
+          <div className="rh-cbd" id={subsId}>
+            {/* примечание частичной нехватки данных — внутри раскрытия (в MD его нет в строке) */}
+            {c.partialNote && (
+              <Text as="p" variant="body-1" color="complementary" className="rh-cbd__note">
+                {c.partialNote}
+              </Text>
+            )}
+            {/* без вкладок: показатели слева заканчиваются итогом, справочные справа —
+                с пометкой в углу, что в балл они не входят; на узком экране колонки
+                встают друг под другом */}
+            {(hasRows || hasRefs) && (
+              <div className={hasRows && hasRefs ? "rh-cbd__cols rh-cbd__cols_two" : "rh-cbd__cols"}>
+                {hasRows && (
+                  <div className="rh-cbd__block rh-cbd__tile rh-cbd__tile_main">
+                    <TileHead title="Показатели" />
+                    <div className="rh-cbd__table" role="table" aria-label={`Показатели категории «${c.title}»`}>
+                      {bd.rows.map((r) => (
+                        <Fragment key={r.sub}>
+                          <BreakdownLine glyph={r.state === "counted" ? r.score : null} icon={submetricIcon(key, r.sub)} title={r.title} value={r.value} earned={r.earned} weight={r.weight} hint={breakdownHint(r)} />
+                          {r.parts?.map((p) => <BreakdownLine key={p.title} part glyph={null} title={p.title} value={p.value} earned={p.earned} weight={p.weight} hint={null} />)}
+                        </Fragment>
+                      ))}
+                      {bd.adjustment !== null && (
+                        <BreakdownLine
+                          glyph="adjust"
+                          title={`Поправка: ${cat.adjustment ? adjustmentLabel(cat).toLowerCase() : "балл скорректирован"}`}
+                          value=""
+                          earned={bd.adjustment}
+                          weight={null}
+                          hint={[adjustmentText(cat) ?? "Балл категории скорректирован после суммы показателей."]}
+                        />
+                      )}
+                      {c.score !== null && <TotalLine score={c.score} />}
+                    </div>
                   </div>
-                </div>
-              )}
-              {hasRefs && (
-                <div className="rh-cbd__block rh-cbd__block_refs rh-cbd__tile">
-                  {/* у справочных нет колонок балла — пометка в углу объясняет почему */}
-                  <TileHead title="Справочные показатели" aside="в балл не входят" />
-                  <div className="rh-cbd__table rh-cbd__table_refs" role="table" aria-label={`Справочные показатели категории «${c.title}», в балл не входят`}>
-                    {bd.refs.map((r) => (
-                      <RefLine key={r.sub} icon={submetricIcon(key, r.sub)} title={r.title} value={r.value} hint={r.aside !== null ? [`${sentence(r.aside)}.`] : null} />
-                    ))}
+                )}
+                {hasRefs && (
+                  <div className="rh-cbd__block rh-cbd__block_refs rh-cbd__tile">
+                    {/* у справочных нет колонок балла — пометка в углу объясняет почему */}
+                    <TileHead title="Справочные показатели" aside="в балл не входят" />
+                    <div className="rh-cbd__table rh-cbd__table_refs" role="table" aria-label={`Справочные показатели категории «${c.title}», в балл не входят`}>
+                      {bd.refs.map((r) => (
+                        <RefLine key={r.sub} icon={submetricIcon(key, r.sub)} title={r.title} value={r.value} hint={r.aside !== null ? [`${sentence(r.aside)}.`] : null} />
+                      ))}
+                    </div>
                   </div>
-                </div>
-              )}
-            </div>
-          )}
-          {appsec !== null && (
-            <section className="rh-cbd__block rh-cbd__block_below rh-cbd__tile" aria-labelledby={`${subsId}-appsec`}>
-              <TileHead id={`${subsId}-appsec`} title="Находки AppSec" aside="в балл не входят" />
-              <AppsecTable data={appsec} />
-            </section>
-          )}
-          {owners !== null && (
-            <section className="rh-cbd__block rh-cbd__block_below rh-cbd__tile" aria-labelledby={`${subsId}-owners`}>
-              <TileHead id={`${subsId}-owners`} title="Карта владельцев" aside="в балл не входит" />
-              {/* под картой — только легенда: оговорки о полноте обхода остаются в отчете */}
-              <OwnershipTree rows={owners.rows} thresholdPct={owners.thresholdPct} />
-            </section>
-          )}
-          {aiNote !== null && <CategoryAiNote note={aiNote} card={card} />}
-        </div>
+                )}
+              </div>
+            )}
+            {appsec !== null && (
+              <section className="rh-cbd__block rh-cbd__block_below rh-cbd__tile" aria-labelledby={`${subsId}-appsec`}>
+                <TileHead id={`${subsId}-appsec`} title="Находки AppSec" aside="в балл не входят" />
+                <AppsecTable data={appsec} />
+              </section>
+            )}
+            {owners !== null && (
+              <section className="rh-cbd__block rh-cbd__block_below rh-cbd__tile" aria-labelledby={`${subsId}-owners`}>
+                <TileHead id={`${subsId}-owners`} title="Карта владельцев" aside="в балл не входит" />
+                {/* под картой — только легенда: оговорки о полноте обхода остаются в отчете */}
+                <OwnershipTree rows={owners.rows} thresholdPct={owners.thresholdPct} />
+              </section>
+            )}
+            {aiNote !== null && <CategoryAiNote note={aiNote} card={card} />}
+          </div>
+        </Collapse>
       )}
     </li>
   );
@@ -2292,10 +2296,13 @@ function FactBlock({ factKey, fact, missing }: { factKey: string; fact: Evidence
       ))}
       {/* служебный ключ факта — внутри «Исходных данных», под самим значением */}
       <Disclosure size="m" summary="Исходные данные" className="rh-proof__raw-toggle">
-        <pre className="rh-code rh-proof__raw">{fmtFactValue(fact.value)}</pre>
-        <Text variant="caption-2" color="secondary" className="rh-proof__key">
-          {fact.key}
-        </Text>
+        {/* один слой внутри — для анимации высоты (стили .g-disclosure__content) */}
+        <div className="rh-collapse__inner">
+          <pre className="rh-code rh-proof__raw">{fmtFactValue(fact.value)}</pre>
+          <Text variant="caption-2" color="secondary" className="rh-proof__key">
+            {fact.key}
+          </Text>
+        </div>
       </Disclosure>
     </Flex>
   );
@@ -2462,12 +2469,15 @@ function OwnerNode({ row: r, thresholdPct, child }: { row: OwnershipView["rows"]
           </Text>
         </span>
       </div>
-      {open && kids.length > 0 && (
-        <ul className="rh-otree__kids" aria-label={`Подкаталоги ${r.dir}`}>
-          {kids.map((k) => (
-            <OwnerNode key={k.dir} row={k} thresholdPct={thresholdPct} child />
-          ))}
-        </ul>
+      {/* подкаталоги — анимацией высоты; обертка продолжает общую сетку дерева */}
+      {kids.length > 0 && (
+        <Collapse open={open} className="rh-otree__fold">
+          <ul className="rh-otree__kids" aria-label={`Подкаталоги ${r.dir}`}>
+            {kids.map((k) => (
+              <OwnerNode key={k.dir} row={k} thresholdPct={thresholdPct} child />
+            ))}
+          </ul>
+        </Collapse>
       )}
     </li>
   );

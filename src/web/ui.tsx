@@ -23,6 +23,20 @@ import { visibilityPill } from "./cardView";
 import { SCORE_LEGEND_TITLE, SCORE_SCALE, scoreTheme, sentence, slugOf } from "./format";
 
 /**
+ * Сворачиваемая часть с анимацией высоты (сетка 1fr → 0fr, стили `.rh-collapse`):
+ * общий прием всех сворачиваний — у Gravity сворачиваемого блока нет, Disclosure
+ * только гасит прозрачность. Содержимое остается в DOM; свернутое — `inert` и
+ * скрыто после анимации: не читается и не ловит фокус.
+ */
+export function Collapse({ open, id, className, children }: { open: boolean; id?: string; className?: string; children: ReactNode }) {
+  return (
+    <div className={className ? `rh-collapse ${className}` : "rh-collapse"} id={id} data-collapsed={open ? undefined : ""} inert={open ? undefined : true}>
+      <div className="rh-collapse__inner">{children}</div>
+    </div>
+  );
+}
+
+/**
  * Заголовок страницы: header-2 24/28 и пояснение body-2 15/20 через 6px, до
  * содержимого 24px — замер «Top repositories» у SourceCraft. На телефоне —
  * header-1 (класс в layout.css): длинное имя в 24px уходит в перенос.

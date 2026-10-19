@@ -1,5 +1,5 @@
 // AI-блоки и история на карточке репозитория: признаки накрутки в подвале плашки
-// HealthCraft Index, AI-обзор, разбор модели в категориях, история оценки и бейдж для README.
+// HealthCraft Index, AI-обзор, AI-разбор в категориях, история оценки и бейдж для README.
 // `card.ai` приходит только зрителю с правами на полный Score; без прав этих блоков нет вовсе.
 import { ArrowsRotateRight, ChevronDown, CircleExclamation, ClockArrowRotateLeft, Flag, SealCheck, Shield, ShieldCheck, SparklesFill } from "@gravity-ui/icons";
 import {
@@ -150,6 +150,8 @@ function Collapsible({ children, resetKey }: { children: React.ReactNode; resetK
   const ref = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const [overflows, setOverflows] = useState(false);
+  // полная высота текста — цель анимации раскрытия (max-height до нее)
+  const [full, setFull] = useState(0);
   useEffect(() => setOpen(false), [resetKey]);
   // Полная высота (scrollHeight не зависит от max-height) сравнивается с лимитом
   // 6 строк; хвост до полутора строк показывается целиком — иначе затухание гасило бы
@@ -160,16 +162,24 @@ function Collapsible({ children, resetKey }: { children: React.ReactNode; resetK
     const check = (): void => {
       const line = parseFloat(getComputedStyle(el).getPropertyValue("--g-text-body-1-line-height")) || 18;
       setOverflows(el.scrollHeight > line * 7.5);
+      setFull(el.scrollHeight);
     };
     check();
     const ro = new ResizeObserver(check);
     ro.observe(el);
+    // абзацы — тоже: у раскрытого высота ограничена max-height, и рост текста
+    // при сужении окна сам блок не меняет
+    for (const child of Array.from(el.children)) ro.observe(child);
     return () => ro.disconnect();
   }, [resetKey]);
   const clamped = overflows && !open;
   return (
     <Flex direction="column" gap={1} alignItems="flex-start">
-      <div ref={ref} className={`rh-ai-text${clamped ? " rh-ai-text_clamped" : ""}`}>
+      <div
+        ref={ref}
+        className={`rh-ai-text${overflows ? " rh-ai-text_fold" : ""}${clamped ? " rh-ai-text_clamped" : ""}`}
+        style={overflows ? ({ "--rh-ai-full": `${full}px` } as React.CSSProperties) : undefined}
+      >
         {children}
       </div>
       {overflows && (
@@ -653,7 +663,7 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
   );
 }
 
-// ---------- разбор модели в категории ----------
+// ---------- AI-разбор в категории ----------
 
 /**
  * Заметка специалиста для категории; роли совпадают с ключами категорий. В пустом
@@ -665,12 +675,12 @@ export function categoryAiNote(card: Card, key: string): AiNote | null {
 }
 
 /**
- * Отметка-искра в строке категории: разбор модели есть — откройте категорию.
+ * Отметка-искра в строке категории: AI-разбор есть — откройте категорию.
  * Нет разбора, нет прав (`card.ai` undefined) или у категории нет данных — отметки нет.
  */
 export function CategoryAiMark({ card, categoryKey, hasData }: { card: Card; categoryKey: string; hasData: boolean }) {
   if (card.ai === undefined || !hasData || categoryAiNote(card, categoryKey) === null) return null;
-  const title = "Есть разбор модели – откройте категорию";
+  const title = "Есть AI-разбор – откройте категорию";
   // подсказка Gravity вместо title: нативная появлялась через секунду; знак стоит
   // внутри кнопки строки, поэтому сам не фокусируется — имя есть у скринридера
   return (
@@ -682,9 +692,9 @@ export function CategoryAiMark({ card, categoryKey, hasData }: { card: Card; cat
   );
 }
 
-/** Знак разбора модели у заголовка «Категории» — разбор есть у каждой категории. */
+/** Знак AI-разбора у заголовка «Категории» — разбор есть у каждой категории. */
 export function CategoryAiGlyph() {
-  const title = "Разбор модели есть у каждой категории – откройте любую";
+  const title = "AI-разбор есть у каждой категории – откройте любую";
   return (
     <ActionTooltip title={title}>
       <span className="rh-cat-ai__mark rh-cat-ai__mark_ready" role="img" aria-label={title} tabIndex={0}>
@@ -754,7 +764,7 @@ export function AiNotePlate({ title, text, staleFor = null }: { title: string; t
 export function CategoryAiNote({ note, card }: { note: AiNote; card: Card }) {
   return (
     <div className="rh-cat-ai">
-      <AiNotePlate title="Разбор модели" text={note.text} staleFor={aiNotesStale(card.ai) ? card : null} />
+      <AiNotePlate title="AI-разбор категории" text={note.text} staleFor={aiNotesStale(card.ai) ? card : null} />
     </div>
   );
 }
@@ -1149,16 +1159,19 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
         </>
       }
     >
-      {caption && (
-        <Text variant="caption-2" color="secondary">
-          {caption}
-        </Text>
-      )}
-      <ul className="rh-history__list" style={{ gridTemplateColumns: `minmax(0, 1fr) auto${fullOpen ? " auto" : ""}${aiColumn ? " 16px" : ""}` }}>
-        {[...points].reverse().map((p) => (
-          <AnalysisRow key={p.scanId} point={p} fullOpen={fullOpen} overview={overviewByScan.get(p.scanId) ?? null} aiColumn={aiColumn} />
-        ))}
-      </ul>
+      {/* один слой внутри — для анимации высоты (стили .g-disclosure__content) */}
+      <div className="rh-collapse__inner">
+        {caption && (
+          <Text variant="caption-2" color="secondary">
+            {caption}
+          </Text>
+        )}
+        <ul className="rh-history__list" style={{ gridTemplateColumns: `minmax(0, 1fr) auto${fullOpen ? " auto" : ""}${aiColumn ? " 16px" : ""}` }}>
+          {[...points].reverse().map((p) => (
+            <AnalysisRow key={p.scanId} point={p} fullOpen={fullOpen} overview={overviewByScan.get(p.scanId) ?? null} aiColumn={aiColumn} />
+          ))}
+        </ul>
+      </div>
     </Disclosure>
   );
   if (!view.chart) {
@@ -1190,7 +1203,7 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
         <Flex direction="column" gap={5} className="rh-history">
           {/* легенды нет: линии подписаны названиями у концов, значения — над точками */}
           <HistoryChart points={points} fullOpen={fullOpen} />
-          {trajectory !== null && <AiNotePlate title="Разбор динамики" text={trajectory.text} staleFor={aiNotesStale(card.ai) ? card : null} />}
+          {trajectory !== null && <AiNotePlate title="AI-разбор динамики" text={trajectory.text} staleFor={aiNotesStale(card.ai) ? card : null} />}
           {list}
         </Flex>
       </Card>

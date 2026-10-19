@@ -62,7 +62,7 @@ import { DocsSearch } from "./DocsSearch";
 import { Trophy } from "./icons";
 import { navigate } from "./router";
 import { Page } from "./Shell";
-import { EmptyState, SkeletonRows } from "./ui";
+import { Collapse, EmptyState, SkeletonRows } from "./ui";
 
 /** Иконки тегов интерфейса – те же, что у элементов UI (Shell, RepoPage, MePage, Rating). */
 const UI_ICON_DATA: Record<UiIcon, IconData> = {
@@ -390,7 +390,10 @@ function TocItem({ node, current, onGo }: { node: TocNode; current: string; onGo
         <Icon data={open ? ChevronDown : ChevronRight} size={14} />
         {node.title}
       </button>
-      {open && <TocTree nodes={node.children} current={current} onGo={onGo} />}
+      {/* группа сворачивается анимацией высоты */}
+      <Collapse open={open}>
+        <TocTree nodes={node.children} current={current} onGo={onGo} />
+      </Collapse>
     </li>
   );
 }
@@ -487,8 +490,12 @@ export function DocsPage({ slug }: { slug: string }) {
             <Icon data={Bars} size={16} />
             Разделы документации
           </button>
+          {/* на телефоне дерево сворачивается анимацией высоты (стили), на
+              десктопе открыто всегда — поэтому без inert у свернутого */}
           <div className="rh-docs__nav-tree">
-            <TocTree nodes={toc} current={page.slug} onGo={() => setNavOpen(false)} />
+            <div className="rh-collapse__inner">
+              <TocTree nodes={toc} current={page.slug} onGo={() => setNavOpen(false)} />
+            </div>
           </div>
         </nav>
         <div className="rh-docs__main">
