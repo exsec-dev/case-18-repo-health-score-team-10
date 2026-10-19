@@ -13,7 +13,7 @@ import { getRepoCard } from "../src/api/repos";
 import type { CallLlm, ChatMessage } from "../src/llm";
 import { capTimelineFact, NO_RHYTHM_REASON, runFraudCheck, runSummary, TIMELINE_EVENTS_CAP } from "../src/summary/pipeline";
 import { hardFlagFactors, rhythmSignals, ruleFlagFactors, RHYTHM_KEY } from "../src/summary/rhythm";
-import { fraudCheckStale, fraudFactorFact, fraudFactorTitle, fraudFactorValue, fraudStaleText } from "../src/web/format";
+import { fraudCheckStale, fraudFactorFact, fraudFactorTitle, fraudFactorValue, fraudNoteText, fraudStaleText } from "../src/web/format";
 import type { AccessResult } from "../src/auth/access";
 import { cardFacts, seedRepo, seedScan, seedScore } from "./api-fixtures";
 
@@ -440,5 +440,27 @@ describe("фактор «Ритм коммитов»: текст строит к
     expect(fraudFactorValue(RHYTHM_KEY, { commits: 1 }, evidence)).toEqual({ commits: 1 });
     expect(fraudFactorValue(RHYTHM_KEY, null, evidence)).toBeUndefined();
     expect(fraudFactorValue("activity.rest", { commits: 1 }, evidence)).toEqual({ contributors: 3 });
+  });
+});
+
+describe("fraudNoteText: формулировка модели без машинных ключей", () => {
+  test("старая заметка флаггера с «ключ=число» — словами, нулевые признаки накрутки из перечня опущены", () => {
+    const note =
+      "recent_week_commits=32 при baseline_week_median=0 и истории всего ~5 недель; regular_share=0, interval_median_minutes=10 мин, sync_bursts=0, robot_commits=0, authors=4, releases=0, pulls_open=0";
+    expect(fraudNoteText(note)).toBe(
+      "32 коммита за последнюю неделю при обычном темпе 0 в неделю и истории всего ~5 недель; обычный интервал 10 мин, 4 автора, 0 релизов, 0 открытых запросов на слияние",
+    );
+  });
+
+  test("ненулевой признак накрутки остается; неизвестный ключ и обычный текст — как есть; маркеры фактов убраны", () => {
+    expect(fraudNoteText("robot_commits=5, sync_bursts=1")).toBe("5 коммитов от роботов, 1 всплеск синхронизации");
+    expect(fraudNoteText("odd_key=3 и что-то еще")).toBe("odd_key=3 и что-то еще");
+    expect(fraudNoteText("355 коммитов людей за 15 дней {f:activity.rhythm}")).toBe("355 коммитов людей за 15 дней");
+  });
+
+  test("заметка из одних нулей не пустеет; «минут» не дублируется", () => {
+    expect(fraudNoteText("sync_bursts=0, robot_commits=0")).toBe("0 всплесков синхронизации, 0 коммитов от роботов");
+    expect(fraudNoteText("regular_share=0 {f:activity.rhythm}")).toBe("0% коммитов с ровными интервалами");
+    expect(fraudNoteText("interval_median_minutes=10 минут")).toBe("обычный интервал 10 мин");
   });
 });

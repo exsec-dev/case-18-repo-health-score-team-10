@@ -1249,6 +1249,69 @@ export function fraudFactorFact(key: string, value: unknown, date: (iso: string)
   }
 }
 
+/**
+ * Признак в записи «ключ=число» из заметки модели — словами. Ноль у признаков
+ * накрутки (роботы, всплески, ровный ритм) — отсутствие улики: в перечне он
+ * опускается (`dropZero`).
+ */
+const NOTE_SIGNALS: Record<string, { text: (n: number) => string; dropZero?: boolean }> = {
+  recent_week_commits: { text: (n) => `${n} ${plural(n, "коммит", "коммита", "коммитов")} за последнюю неделю` },
+  baseline_week_median: { text: (n) => `обычный темп ${fmtDecimal(n, 1, { trim: true })} в неделю` },
+  regular_share: { text: (n) => `${sharePercent(n)} коммитов с ровными интервалами`, dropZero: true },
+  interval_median_minutes: { text: (n) => `обычный интервал ${fmtMinutes(n * 60_000)}` },
+  sync_bursts: { text: (n) => `${n} ${plural(n, "всплеск", "всплеска", "всплесков")} синхронизации`, dropZero: true },
+  sync_commits: { text: (n) => `${n} ${plural(n, "коммит", "коммита", "коммитов")} во всплесках`, dropZero: true },
+  robot_commits: { text: (n) => `${n} ${plural(n, "коммит", "коммита", "коммитов")} от роботов`, dropZero: true },
+  commits: { text: (n) => `${n} ${plural(n, "коммит", "коммита", "коммитов")}` },
+  human_commits: { text: (n) => `${n} ${plural(n, "коммит", "коммита", "коммитов")} людей` },
+  authors: { text: (n) => `${n} ${plural(n, "автор", "автора", "авторов")}` },
+  committers: { text: (n) => `${n} ${plural(n, "коммиттер", "коммиттера", "коммиттеров")}` },
+  contributors: { text: (n) => `${n} ${plural(n, "участник", "участника", "участников")}` },
+  releases: { text: (n) => `${n} ${plural(n, "релиз", "релиза", "релизов")}` },
+  pulls_open: { text: (n) => `${n} ${plural(n, "открытый запрос", "открытых запроса", "открытых запросов")} на слияние` },
+};
+
+const NOTE_TOKEN = /([a-z][a-z0-9]*(?:_[a-z0-9]+)*)=(-?\d+(?:[.,]\d+)?)(?:\s*мин(?:ут[аы]?)?(?![а-яё]))?/g;
+
+/**
+ * Формулировка фактора от модели — для читателя: без маркеров фактов ({f:ключ})
+ * и без машинных записей «recent_week_commits=32» (старые заметки флаггера).
+ * Известный ключ — словами, неизвестный остается как есть: его можно найти в
+ * приложении. Пункт перечня из одного нулевого признака накрутки опускается; если
+ * опущено все — нули остаются: фактор без текста хуже фактора с нулями.
+ */
+export function fraudNoteText(note: string): string {
+  const signal = (key: string, raw: string): string | null => {
+    const s = NOTE_SIGNALS[key];
+    return s === undefined ? null : s.text(Number(raw.replace(",", ".")));
+  };
+  const words = (part: string): string =>
+    part
+      // «при baseline_week_median=0» — в предложном падеже
+      .replace(/при baseline_week_median=(-?\d+(?:[.,]\d+)?)/g, (_, n: string) => `при обычном темпе ${fmtDecimal(Number(n.replace(",", ".")), 1, { trim: true })} в неделю`)
+      .replace(NOTE_TOKEN, (m, key: string, raw: string) => signal(key, raw) ?? m);
+  const zeroSignal = (item: string): boolean => {
+    const m = /^([a-z][a-z0-9_]*)=(-?\d+(?:[.,]\d+)?)$/.exec(item.trim());
+    return m !== null && NOTE_SIGNALS[m[1]!]?.dropZero === true && Number(m[2]!.replace(",", ".")) === 0;
+  };
+  const text = (dropZeros: boolean): string =>
+    note
+      .replace(/\s*\{(?:f|sp):[^}]*\}/g, "")
+      .split("; ")
+      .map((clause) =>
+        clause
+          .split(", ")
+          .filter((item) => !(dropZeros && zeroSignal(item)))
+          .map(words)
+          .join(", ")
+          .trim(),
+      )
+      .filter((clause) => clause !== "")
+      .join("; ");
+  const quiet = text(true);
+  return quiet !== "" ? quiet : text(false);
+}
+
 /** Абзацы AI-текста по переводам строк — одна функция для карточки и отчета. */
 export function aiParagraphs(text: string): string[] {
   // типографика применяется и при выводе — для текстов, сохраненных до ее появления

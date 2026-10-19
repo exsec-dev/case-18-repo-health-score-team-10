@@ -43,6 +43,7 @@ import {
   fmtScore,
   fraudFactorFact,
   fraudFactorValue,
+  fraudNoteText,
   fraudCheckStale,
   fraudStaleText,
   AI_NOTE_SHORT, AI_OVERVIEW_REJECTED,
@@ -359,10 +360,10 @@ const CHECK_ICON: Record<FraudCheckState["kind"], { data: typeof Shield; color: 
 };
 
 /**
- * Тексты плашки проверки (вариант 1, 19.10.2026): статус крупно и одна строка внизу –
- * дата проверки. Что проверка устарела, говорит метка «Устарела» у статуса, почему –
- * ее подсказка; что такое проверка и что на оценку она не влияет – подсказка у знака
- * вопроса. `reason` – причина сбоя отдельной строкой: она длинная и бывает редко.
+ * Тексты плашки проверки (вариант A1, 19.10.2026): статус крупно, внизу – только
+ * кнопка, «устарела» или пояснение. Дата проверки – в подсказке у знака вопроса
+ * вместе с тем, что такое проверка; почему устарела – в подсказке у «устарела».
+ * `reason` – причина сбоя отдельной строкой: она длинная и бывает редко.
  */
 export function checkCardText(st: FraudCheckState, ai: CardAi, loggedIn: boolean): { title: string; meta: string | null; reason: string | null } {
   switch (st.kind) {
@@ -371,11 +372,11 @@ export function checkCardText(st: FraudCheckState, ai: CardAi, loggedIn: boolean
     case "active":
       return { title: "Идет проверка", meta: null, reason: null };
     case "clean":
-      return { title: "Признаков нет", meta: st.date, reason: null };
+      return { title: "Признаков нет", meta: null, reason: null };
     case "stale":
-      return { title: "Признаков не было", meta: st.date, reason: null };
+      return { title: "Признаков не было", meta: null, reason: null };
     case "flagged":
-      return { title: FRAUD_TITLE, meta: st.date, reason: null };
+      return { title: FRAUD_TITLE, meta: null, reason: null };
     case "failed":
       return { title: "Не сформировалась", meta: null, reason: loggedIn && ai.check.failure !== null ? sentenceOf(jobErrorText(ai.check.failure)) : null };
     case "nothing":
@@ -409,24 +410,28 @@ function sentenceOf(text: string): string {
 
 /**
  * Признаки накрутки строками: текст строит код из факта, формулировка модели — запасной
- * вариант. В формулировке модели бывают маркеры фактов ({f:ключ}) — читателю они не нужны.
+ * вариант, без маркеров фактов и машинных ключей (`fraudNoteText`).
  */
 function fraudLines(card: Card): string[] {
   const fraud = card.ai?.fraud;
   if (fraud === undefined || fraud === null || fraud.flag !== true) return [];
   const factOf = (key: string): unknown => fraudFactorValue(key, fraud.signals, card.evidence, fraud.inputs);
-  const plain = (note: string): string => note.replace(/\s*\{(?:f|sp):[^}]*\}/g, "").trim();
-  return fraud.factors.flatMap((f) => (fraudFactorFact(f.key, factOf(f.key)) ?? plain(f.note)).split("; "));
+  return fraud.factors
+    .flatMap((f) => (fraudFactorFact(f.key, factOf(f.key)) ?? fraudNoteText(f.note)).split("; "))
+    .filter((l) => l !== "")
+    // с заглавной — только русская фраза: неизвестный ключ остается как есть
+    .map((l) => (/^[а-яё]/.test(l) ? l[0]!.toUpperCase() + l.slice(1) : l));
 }
 
 /**
  * Плашка «Проверка активности» (вариант 1, 19.10.2026) – как плашка оценки: подпись
- * со знаком вопроса сверху, статус значком и словами крупно, внизу кнопка или дата.
+ * со знаком вопроса сверху, статус значком и словами крупно, внизу кнопка.
  * У чужого репозитория стоит на месте закрытого Repo Health Score и тянется на высоту
  * HealthCraft Index (низ – на уровне полосы вклада). У своего – полосой на всю ширину
  * под плашками оценок: без подписи, статус полной фразой и тише, знак вопроса после
- * него, признаки свернуты; кнопка или дата справа у нижнего края. Найденные признаки –
- * легкой желтой подложкой, желтым флажком и списком. Статус меняется опросом, поэтому
+ * него, признаки свернуты; кнопка или «устарела» справа у нижнего края. Без подложки
+ * (вариант A1, 19.10.2026): найденные признаки несут желтый флажок и список вторичным
+ * цветом, дата проверки – в подсказке у знака вопроса. Статус меняется опросом, поэтому
  * `aria-live`; причина неактивной кнопки и причина сбоя – подписью внизу.
  */
 export function ActivityCheckCard({
@@ -478,22 +483,34 @@ export function ActivityCheckCard({
     ) : null;
   const why = [reason, st.button !== null ? blocked : null].filter((t): t is string => t !== null);
   const foldSigns = wide && lines.length > 0;
+  const stale = st.kind === "stale" || (flagged && fraudCheckStale(ai.check));
   const help = (
     <HelpMark iconSize="s" aria-label="Что такое проверка активности">
       {flagged ? FRAUD_EXPLAIN : CHECK_EXPLAIN}
+      {st.date !== null && <span className="rh-check-help__date">{`Проверка от ${st.date}.`}</span>}
     </HelpMark>
   );
+  // метка того же вида, что «Устарел» у AI-обзора; почему устарела – в подсказке
+  const staleMark = stale ? (
+    <ActionTooltip title="Проверка устарела" description={fraudStaleText(ai.check, st.date)}>
+      <span className="rh-ai-stale" {...TIP_TARGET}>
+        <Label theme="unknown" size="xs">
+          Устарела
+        </Label>
+      </span>
+    </ActionTooltip>
+  ) : null;
   const signsId = `rh-check-signs-${org}-${repo}`;
   const list = lines.length > 0 && (
     <ul className="rh-check-card__list" id={foldSigns ? undefined : signsId}>
       {lines.map((l) => (
         <li key={l}>
-          <Text>{l}</Text>
+          <Text color="secondary">{l}</Text>
         </li>
       ))}
     </ul>
   );
-  const cls = ["rh-score-band", "rh-check-card", flagged ? "rh-check-card_flagged" : "", wide ? "rh-check-card_wide" : ""].filter(Boolean).join(" ");
+  const cls = ["rh-score-band", "rh-check-card", wide ? "rh-check-card_wide" : ""].filter(Boolean).join(" ");
   return (
     <Card view="outlined" className={cls}>
       <div className="rh-check-card__main" aria-live="polite">
@@ -509,7 +526,6 @@ export function ActivityCheckCard({
           {/* под оценками статус тише: 13px, средняя жирность — главные там цифры оценок */}
           <Text variant={wide ? "subheader-1" : "subheader-2"}>{wide ? CHECK_WIDE_TITLE[st.kind] ?? title : title}</Text>
           {wide && help}
-          {(st.kind === "stale" || (flagged && fraudCheckStale(ai.check))) && <CheckStaleMark why={fraudStaleText(ai.check, st.date)} />}
           {foldSigns && (
             <button type="button" className="rh-check-card__toggle" aria-expanded={signsOpen} aria-controls={signsId} onClick={() => setSignsOpen((o) => !o)}>
               {`${lines.length} ${plural(lines.length, "признак", "признака", "признаков")}`}
@@ -525,9 +541,10 @@ export function ActivityCheckCard({
           list
         )}
       </div>
-      {(action_ !== null || meta !== null || why.length > 0) && (
+      {(action_ !== null || staleMark !== null || meta !== null || why.length > 0) && (
         <div className="rh-check-card__foot">
           {action_}
+          {staleMark}
           {meta !== null && <Text color="secondary">{meta}</Text>}
           {why.map((t) => (
             <Text key={t} variant="caption-2" color="secondary" as="p" className="rh-check-foot__why">
@@ -762,23 +779,6 @@ export function CategoryAiGlyph() {
     <ActionTooltip title={title}>
       <span className="rh-cat-ai__mark rh-cat-ai__mark_ready" role="img" aria-label={title} tabIndex={0}>
         <Icon data={SparklesFill} size={16} />
-      </span>
-    </ActionTooltip>
-  );
-}
-
-/**
- * Метка «Устарела» у статуса проверки активности – того же вида, что «Устарел» у
- * AI-обзора; почему устарела и что делать – в подсказке.
- */
-function CheckStaleMark({ why }: { why: string }) {
-  // почему устарела – `fraudStaleText`: прежние правила или новый анализ после проверки
-  return (
-    <ActionTooltip title="Проверка устарела" description={why}>
-      <span className="rh-ai-stale" {...TIP_TARGET}>
-        <Label theme="unknown" size="xs">
-          Устарела
-        </Label>
       </span>
     </ActionTooltip>
   );

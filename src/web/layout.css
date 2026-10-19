@@ -776,10 +776,13 @@ body {
   container: rh-feed / inline-size;
 }
 
-/* проверка справа от индекса — уже половины: статусу хватает 43%, индексу нужнее место */
-@container rh-feed (min-width: 732px) {
+/* проверка справа от индекса — постоянной ширины 400px (выбор 19.10.2026): самый
+ * длинный статус «Признаки искусственной активности» (303px со значком + поля 32px)
+ * встает в одну строку, признаки переносятся реже; остальное — индексу. С ленты
+ * 820px: индексу остается не меньше 408px; уже — две равные колонки общей сетки */
+@container rh-feed (min-width: 820px) {
   .rh-score-cards_check {
-    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) 400px;
   }
 }
 
@@ -813,7 +816,7 @@ body {
   align-items: center;
   column-gap: var(--g-spacing-4);
   row-gap: var(--g-spacing-2);
-  padding-bottom: var(--g-spacing-3);
+  padding-block: var(--g-spacing-2);
 }
 
 .rh-check-card_wide .rh-check-card__main {
@@ -840,10 +843,14 @@ body {
   order: 1;
 }
 
-/* признаки найдены — рамка серая, как у плашек оценок рядом (желтая с ними спорила),
- * акцент — едва заметная желтая подложка и желтый флажок; признаки списком */
-.g-card.rh-check-card_flagged {
-  background: color-mix(in srgb, var(--g-color-text-warning) 6%, transparent);
+/* признаки найдены — без подложки (вариант A1, 19.10.2026): желтый на сером давал
+ * оливковое пятно и спорил с ярлыком «Требует внимания»; акцент — только флажок */
+
+/* дата проверки — отдельной строкой в подсказке у знака вопроса */
+.rh-check-help__date {
+  display: block;
+  margin-top: var(--g-spacing-2);
+  color: var(--g-color-text-secondary);
 }
 
 /* под оценками признаки свернуты: переключатель — серым текстом, как подпись */

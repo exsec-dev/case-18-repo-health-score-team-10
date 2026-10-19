@@ -33,6 +33,7 @@ import {
   aiParagraphs,
   aiRoleTitle,
   fraudFactorFact,
+  fraudNoteText,
   fraudFactorValue,
   fraudCheckStale,
   fraudFactorTitle,
@@ -977,7 +978,7 @@ function fraudBlock(card: RepoCard): Block[] {
   const factOf = (key: string): unknown => fraudFactorValue(key, fraud.signals, card.evidence, fraud.inputs);
   out.push({
     kind: "list",
-    items: fraud.factors.map((f) => [strong(fraudFactorTitle(f.key)), text(` – ${fraudFactorFact(f.key, factOf(f.key), (iso) => fmtDate(iso)) ?? f.note}`)] as InlineLine),
+    items: fraud.factors.map((f) => [strong(fraudFactorTitle(f.key)), text(` – ${fraudFactorFact(f.key, factOf(f.key), (iso) => fmtDate(iso)) ?? fraudNoteText(f.note)}`)] as InlineLine),
   });
   return out;
 }

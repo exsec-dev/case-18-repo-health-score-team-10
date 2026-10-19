@@ -1922,12 +1922,13 @@ function Recommendations({ view, org, repo }: { view: CardView; org: string; rep
     view.recommendations.length === 0 ? (
       <section className="rh-section" id={RECOMMENDATIONS_ID} aria-label="Рекомендации">
         <Card view="outlined" className="rh-section-card">
-          <Flex gap={2} alignItems="center">
+          {/* значок — по первой строке текста (16px в строке 18px): фраза бывает в две строки */}
+          <Flex gap={2} alignItems="flex-start">
             {/* зеленая галочка — только когда улучшать действительно нечего */}
             {view.noRecommendationsKind === "healthy" ? (
-              <Icon data={CircleCheck} size={16} className="rh-positive-icon" />
+              <Icon data={CircleCheck} size={16} className="rh-positive-icon" style={{ marginTop: 1, flexShrink: 0 }} />
             ) : (
-              <Icon data={CircleInfo} size={16} className="rh-muted-icon" />
+              <Icon data={CircleInfo} size={16} className="rh-muted-icon" style={{ marginTop: 1, flexShrink: 0 }} />
             )}
             <Text color="complementary">{view.noRecommendations}</Text>
           </Flex>
