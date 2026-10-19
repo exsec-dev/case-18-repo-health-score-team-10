@@ -94,7 +94,7 @@ describe("выбор 1A: 7 состояний проверки активнос�
   test("идет, признаков нет, есть признаки", () => {
     expect(fraudCheckState(ai({ active: true }), true)).toMatchObject({ kind: "active", button: null });
     expect(fraudCheckState(ai({ scanId: 5, checkedAt: "2026-09-25T15:15:00Z" }, flag(false)), true)).toMatchObject({ kind: "clean", button: null });
-    expect(title(ai({ scanId: 5, checkedAt: "2026-09-25T15:15:00Z" }, flag(false)), true)).toBe("Признаков нет");
+    expect(title(ai({ scanId: 5, checkedAt: "2026-09-25T15:15:00Z" }, flag(false)), true)).toBe("Признаков искусственной активности нет");
     expect(fraudCheckState(ai({ scanId: 5, checkedAt: "2026-09-25T15:15:00Z" }, flag(true)), true)).toMatchObject({ kind: "flagged", button: null });
   });
   test("не сформировалась — повтор; нечего проверять — факт без кнопки (О3); устарела — снова проверить", () => {

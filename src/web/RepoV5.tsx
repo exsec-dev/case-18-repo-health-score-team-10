@@ -372,9 +372,9 @@ export function checkCardText(st: FraudCheckState, ai: CardAi, loggedIn: boolean
     case "active":
       return { title: "Идет проверка", meta: null, reason: null };
     case "clean":
-      return { title: "Признаков нет", meta: null, reason: null };
+      return { title: "Признаков искусственной активности нет", meta: null, reason: null };
     case "stale":
-      return { title: "Признаков не было", meta: null, reason: null };
+      return { title: "Признаки не были обнаружены", meta: null, reason: null };
     case "flagged":
       return { title: FRAUD_TITLE, meta: null, reason: null };
     case "failed":
