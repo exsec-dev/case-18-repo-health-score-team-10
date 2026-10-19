@@ -9,12 +9,23 @@ import { compareSlugsOf } from "./compareView";
 
 const KEY = "rh:lastCompare";
 
+/**
+ * Набор изменился в этой вкладке – счетчик у пункта rail перечитывает его.
+ * Событие `storage` в той же вкладке не приходит, поэтому свое.
+ */
+export const COMPARE_SET_EVENT = "rh:compare-set";
+
+function announce(): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(COMPARE_SET_EVENT));
+}
+
 export function rememberCompareSet(slugs: string[]): void {
   try {
     sessionStorage.setItem(KEY, slugs.join("\n"));
   } catch {
     /* без хранилища набор не восстанавливается */
   }
+  announce();
 }
 
 export function forgetCompareSet(): void {
@@ -23,6 +34,7 @@ export function forgetCompareSet(): void {
   } catch {
     /* нечего забывать */
   }
+  announce();
 }
 
 /** Последний набор вкладки; мусор в хранилище отбрасывается тем же разбором, что адрес. */

@@ -5360,3 +5360,25 @@ button.rh-category:focus-visible {
     width: 28px;
   }
 }
+
+/* число репозиториев в сравнении у пункта rail — тихой цифрой у правого края */
+.rh-rail-count {
+  color: var(--g-color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.rh-rail-tip__count {
+  margin-inline-start: var(--g-spacing-2);
+  color: var(--g-color-text-light-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* заголовок пункта растягивается, и цифра встает у правого края rail */
+.rh-rail [class*="gn-composite-bar-item__title___"]:has(.rh-rail-count) {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.rh-rail [class*="gn-composite-bar-item__title-adornment___"]:has(> .rh-rail-count) {
+  margin-inline-start: auto;
+}

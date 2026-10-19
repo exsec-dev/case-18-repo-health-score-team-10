@@ -114,7 +114,8 @@ export const RANK_BADGE_COLORS: Record<RankLeague, { bg: string; fg: string }> =
 /**
  * SVG-бейдж: только число, подпись и цвет – никаких ссылок, внешних шрифтов и
  * метаданных. Без данных – «n/a» серым. `rank` добавляет третий сегмент со
- * значком места цвета лиги; при null бейдж байт в байт обычный.
+ * значком места цвета лиги; при null бейдж байт в байт обычный. Подпись
+ * «HealthCraft Index» всегда у левого края, что бы ни стояло справа.
  */
 export function renderBadgeSvg(index: number | null, rank: RankBadge | null = null, extras: BadgeExtras = {}): string {
   // слово зоны – в сегменте числа через пробел; без него бейдж байт в байт прежний
@@ -162,7 +163,7 @@ export function renderBadgeSvg(index: number | null, rank: RankBadge | null = nu
     <rect width="${width}" height="${height}" fill="url(#s)"/>
   </g>
   <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
-    <text x="${labelWidth / 2}" y="14">${label}</text>
+    <text x="7" y="14" text-anchor="start">${label}</text>
     <text x="${valueX + valueWidth / 2}" y="14" font-weight="bold">${value}</text>${deltaMark}${rankText}${card === null ? "" : card.texts(width)}
   </g>
 </svg>`;

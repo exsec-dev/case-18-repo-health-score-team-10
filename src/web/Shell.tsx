@@ -17,6 +17,7 @@ import { logout, type MeResponse } from "./api";
 import { HealthCraftMark, PRODUCT_NAME } from "./logo";
 import { useAppTheme, useMediaQuery, useRailCompact, type AppTheme } from "./prefs";
 import { linkProps, loginHref, navigate } from "./router";
+import { COMPARE_SET_EVENT, lastCompareSet } from "./compareReturn";
 
 export type Section = "rating" | "repos" | "me" | "compare" | "settings" | "docs" | null;
 
@@ -108,6 +109,7 @@ export function Shell({
     };
   }, [menuOpen]);
   const tips = useRailTips();
+  const compareCount = useCompareCount();
   // AsideHeader (navigation 6.6) не принимает role, а rail нужен ориентир
   // навигации — ставим роль на корень панели после отрисовки
   useEffect(() => {
@@ -119,11 +121,15 @@ export function Shell({
     }
   });
 
-  const menuItems: AsideHeaderItem[] = SECTIONS.map((s) => ({
+  const menuItems: AsideHeaderItem[] = SECTIONS.map((s) => {
+    // у «Сравнения» — сколько репозиториев в наборе: тихой цифрой справа и в подписи узкого rail
+    const count = s.id === "compare" && compareCount > 0 ? compareCount : null;
+    return {
     id: s.id,
     title: s.title,
     icon: s.icon,
     href: s.href,
+    rightAdornment: count === null ? undefined : <span className="rh-rail-count" aria-label={`в наборе ${count}`}>{count}</span>,
     current: s.id === section,
     onItemClick: (_item, _collapsed, e) => followLink(e, s.href),
     // узкий rail: вместо одиночного тултипа — подписи всех разделов разом,
@@ -131,13 +137,14 @@ export function Shell({
     enableTooltip: false,
     itemWrapper: (params, makeItem, opts) =>
       opts.compact ? (
-        <RailItem id={s.id} title={s.title} tips={tips} withBackdrop={s.id === SECTIONS[0]!.id}>
+        <RailItem id={s.id} title={s.title} count={count} tips={tips} withBackdrop={s.id === SECTIONS[0]!.id}>
           {makeItem(params)}
         </RailItem>
       ) : (
         makeItem(params)
       ),
-  }));
+    };
+  });
 
   return (
     <>
@@ -285,12 +292,15 @@ function useRailTips(): RailTips {
 function RailItem({
   id,
   title,
+  count,
   tips,
   withBackdrop,
   children,
 }: {
   id: string;
   title: string;
+  /** число у подписи (репозитории в сравнении); null – без числа */
+  count: number | null;
   tips: RailTips;
   /** затемнение рисует первый пункт: внутри rail оно в том же слое, что подписи, и ниже их */
   withBackdrop: boolean;
@@ -317,10 +327,22 @@ function RailItem({
           aria-hidden="true"
         >
           {title}
+          {count !== null && <span className="rh-rail-tip__count">{count}</span>}
         </span>
       )}
     </div>
   );
+}
+
+/** Сколько репозиториев в последнем наборе сравнения вкладки; обновляется при каждом изменении набора. */
+function useCompareCount(): number {
+  const [count, setCount] = useState(() => lastCompareSet().length);
+  useEffect(() => {
+    const update = (): void => setCount(lastCompareSet().length);
+    window.addEventListener(COMPARE_SET_EVENT, update);
+    return () => window.removeEventListener(COMPARE_SET_EVENT, update);
+  }, []);
+  return count;
 }
 
 /** Клик по пункту навигации — клиентский переход; Ctrl/⌘-клик остаётся браузеру. */
