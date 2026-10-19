@@ -3,8 +3,9 @@
 // зависят.
 //
 // Вход – `git log --no-merges --name-only` bare-клона за OWNERSHIP_WINDOW_DAYS.
-// Код не храним: в факт идут только агрегаты по верхнеуровневым каталогам, без
-// путей файлов и кода.
+// Код не храним: в факт идут только агрегаты по каталогам верхнего уровня и
+// их подкаталогам (второй уровень – для дерева на карточке), без путей файлов
+// и кода.
 // Единица изменения – «коммит тронул файл кода» (`isSourcePath`), а не строки:
 // большие сгенерированные диффы не перевешивают.
 // Коммиты роботов и всплески синхронизации исключаются по sha через признак
@@ -22,6 +23,10 @@ export const OWNERSHIP_WINDOW_DAYS = 365;
 export const OWNERSHIP_SINGLE_OWNER_SHARE = 0.8;
 /** Сколько самых изменяемых каталогов попадает в карту. */
 export const OWNERSHIP_TOP_DIRS = 10;
+/** Сколько самых изменяемых подкаталогов у каталога карты (ветви дерева). */
+export const OWNERSHIP_TOP_SUBDIRS = 5;
+/** Сколько главных авторов каталога с долями попадает в факт (полоса долей на карточке). */
+export const OWNERSHIP_TOP_AUTHORS = 3;
 /** Бюджет обхода в коммитах (свежие первыми); сверх него – обрезка с пометкой. */
 export const OWNERSHIP_MAX_COMMITS = 5000;
 /** Бюджет обхода в изменениях «коммит × файл»; сверх него – обрезка с пометкой. */
@@ -79,6 +84,12 @@ export function topDir(path: string): string {
   return i > 0 ? path.slice(0, i) : OWNERSHIP_ROOT;
 }
 
+/** Подкаталог второго уровня («apps/web»); файл прямо в каталоге верхнего уровня или в корне – null. */
+export function subDir(path: string): string | null {
+  const parts = path.split("/");
+  return parts.length >= 3 && parts[0] !== "" && parts[1] !== "" ? `${parts[0]}/${parts[1]}` : null;
+}
+
 export interface OwnershipOptions {
   now: Date;
   /** sha коммитов роботов и синхронизации (robot2 из timeline) */
@@ -97,6 +108,7 @@ export function aggregateOwnership(commits: OwnershipCommit[], opts: OwnershipOp
   const until = opts.now.getTime() + 86_400_000;
   // каталог → ключ автора → изменений; ключ автора → имя (самое частое)
   const byDir = new Map<string, Map<string, number>>();
+  const bySub = new Map<string, Map<string, number>>();
   const names = new Map<string, Map<string, number>>();
   let changes = 0;
   let counted = 0;
@@ -126,6 +138,12 @@ export function aggregateOwnership(commits: OwnershipCommit[], opts: OwnershipOp
       const m = byDir.get(dir) ?? new Map<string, number>();
       m.set(key, (m.get(key) ?? 0) + 1);
       byDir.set(dir, m);
+      const sub = subDir(p);
+      if (sub !== null) {
+        const sm = bySub.get(sub) ?? new Map<string, number>();
+        sm.set(key, (sm.get(key) ?? 0) + 1);
+        bySub.set(sub, sm);
+      }
       changes++;
     }
     if (changesTruncated) break;
@@ -135,12 +153,24 @@ export function aggregateOwnership(commits: OwnershipCommit[], opts: OwnershipOp
     const best = nm ? [...nm.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]?.[0] ?? "" : "";
     return displayAuthorName(best);
   };
-  const dirs = [...byDir.entries()].map(([dir, authors]) => {
+  const entry = (dir: string, authors: Map<string, number>) => {
     const total = [...authors.values()].reduce((s, n) => s + n, 0);
-    const [ownerKey, ownerN] = [...authors.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]!;
-    return { dir, changes: total, authors: authors.size, owner: nameOf(ownerKey), owner_share: round3(ownerN / total) };
-  });
-  dirs.sort((a, b) => b.changes - a.changes || a.dir.localeCompare(b.dir));
+    const ranked = [...authors.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+    const [ownerKey, ownerN] = ranked[0]!;
+    // доли главных авторов — для полосы долей; остальные — остатком «другие»
+    const top_authors = ranked.slice(0, OWNERSHIP_TOP_AUTHORS).map(([k, n]) => ({ name: nameOf(k), share: round3(n / total) }));
+    return { dir, changes: total, authors: authors.size, owner: nameOf(ownerKey), owner_share: round3(ownerN / total), top_authors };
+  };
+  const byChanges = (a: { changes: number; dir: string }, b: { changes: number; dir: string }): number => b.changes - a.changes || a.dir.localeCompare(b.dir);
+  const dirs = [...byDir.entries()].map(([dir, authors]) => entry(dir, authors));
+  dirs.sort(byChanges);
+  // ветви дерева: самые изменяемые подкаталоги каталога карты (имя – последняя часть пути)
+  const childrenOf = (dir: string) =>
+    [...bySub.entries()]
+      .filter(([sub]) => sub.startsWith(`${dir}/`))
+      .map(([sub, authors]) => entry(sub.slice(dir.length + 1), authors))
+      .sort(byChanges)
+      .slice(0, OWNERSHIP_TOP_SUBDIRS);
   const singleChanges = dirs.filter((d) => d.owner_share >= OWNERSHIP_SINGLE_OWNER_SHARE).reduce((s, d) => s + d.changes, 0);
   const truncated = opts.commitsTruncated ? "commits" : changesTruncated ? "changes" : null;
   return {
@@ -154,7 +184,10 @@ export function aggregateOwnership(commits: OwnershipCommit[], opts: OwnershipOp
     single_owner_share: changes > 0 ? round3(singleChanges / changes) : null,
     dirs_total: dirs.length,
     dirs_single_owner: dirs.filter((d) => d.owner_share >= OWNERSHIP_SINGLE_OWNER_SHARE).length,
-    dirs: dirs.slice(0, OWNERSHIP_TOP_DIRS),
+    dirs: dirs.slice(0, OWNERSHIP_TOP_DIRS).map((d) => {
+      const children = d.dir === OWNERSHIP_ROOT ? [] : childrenOf(d.dir);
+      return children.length > 0 ? { ...d, children } : d;
+    }),
     ...(truncated ? { truncated, truncated_note: truncated === "commits" ? `only the latest ${OWNERSHIP_MAX_COMMITS} commits analysed` : `only the first ${OWNERSHIP_MAX_CHANGES} file changes analysed` } : {}),
     ...(opts.historyTruncatedSince && Date.parse(opts.historyTruncatedSince) > from ? { history_since: opts.historyTruncatedSince } : {}),
   };

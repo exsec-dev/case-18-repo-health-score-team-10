@@ -97,7 +97,7 @@ export const KINDS = {
   // карта владельцев файлов (ownership.ts): агрегаты по верхнеуровневым
   // каталогам за 365 дней без мерджей и роботов; только имя автора, без email
   "code.ownership":
-    "{window_days,threshold,commits,robot_commits_skipped,changes,single_owner_share,dirs_total,dirs_single_owner,dirs:[{dir,changes,authors,owner,owner_share}],truncated?,truncated_note?,history_since?} | bad",
+    "{window_days,threshold,commits,robot_commits_skipped,changes,single_owner_share,dirs_total,dirs_single_owner,dirs:[{dir,changes,authors,owner,owner_share,top_authors:[{name,share}],children?:[{dir,changes,authors,owner,owner_share,top_authors}]}],truncated?,truncated_note?,history_since?} | bad",
 } as const;
 
 export type Kind = keyof typeof KINDS;

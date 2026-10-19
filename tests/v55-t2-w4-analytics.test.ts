@@ -320,15 +320,28 @@ describe("А2: карта владельцев файлов — локальны
     ]);
     expect(fact.status).toBe("ok");
     expect(fact.source).toBe("git");
-    const v = fact.value as Record<string, unknown> & { dirs: { dir: string; changes: number; authors: number; owner: string; owner_share: number }[] };
+    const v = fact.value as Record<string, unknown> & {
+      dirs: { dir: string; changes: number; authors: number; owner: string; owner_share: number; top_authors?: { name: string; share: number }[] }[];
+    };
     expect(v.window_days).toBe(365);
     expect(v.robot_commits_skipped).toBe(1);
     // src: Alice 3 изменения (a, a, b), Bob 1 (b) → 75%, 2 автора
-    expect(v.dirs.find((d) => d.dir === "src")).toEqual({ dir: "src", changes: 4, authors: 2, owner: "Alice", owner_share: 0.75 });
+    // 19.10.2026: доли главных авторов — для полосы долей в дереве владельцев
+    expect(v.dirs.find((d) => d.dir === "src")).toEqual({
+      dir: "src",
+      changes: 4,
+      authors: 2,
+      owner: "Alice",
+      owner_share: 0.75,
+      top_authors: [
+        { name: "Alice", share: 0.75 },
+        { name: "Bob", share: 0.25 },
+      ],
+    });
     // lib: только Carol (робот исключен) → 100%
-    expect(v.dirs.find((d) => d.dir === "lib")).toEqual({ dir: "lib", changes: 1, authors: 1, owner: "Carol", owner_share: 1 });
-    // файл в корне — корзина «.»; имя-адрес замаскировано
-    expect(v.dirs.find((d) => d.dir === ".")).toEqual({ dir: ".", changes: 1, authors: 1, owner: "(имя не указано)", owner_share: 1 });
+    expect(v.dirs.find((d) => d.dir === "lib")).toEqual({ dir: "lib", changes: 1, authors: 1, owner: "Carol", owner_share: 1, top_authors: [{ name: "Carol", share: 1 }] });
+    // файл в корне — корзина «.»; имя-адрес замаскировано и в долях авторов
+    expect(v.dirs.find((d) => d.dir === ".")).toEqual({ dir: ".", changes: 1, authors: 1, owner: "(имя не указано)", owner_share: 1, top_authors: [{ name: "(имя не указано)", share: 1 }] });
     expect(v.dirs.some((d) => d.dir === "deps" || d.dir === "docs")).toBe(false);
     // единственный владелец (≥ 80%): lib (1) + корень (1) из 6 изменений
     expect(v.changes).toBe(6);
@@ -402,7 +415,7 @@ describe("А2: бюджет обхода и обрезка на крупных �
     expect(commits.map((c) => c.paths)).toEqual([["src/a.ts", 'src/with "q".ts'], ["src/a.ts"]]);
     const v = aggregateOwnership(commits, { now: NOW, excluded: new Set(["s2"]) }) as { dirs: { owner: string; changes: number }[]; robot_commits_skipped: number };
     expect(v.robot_commits_skipped).toBe(1);
-    expect(v.dirs).toEqual([{ dir: "src", changes: 2, authors: 1, owner: "A", owner_share: 1 } as never]);
+    expect(v.dirs).toEqual([{ dir: "src", changes: 2, authors: 1, owner: "A", owner_share: 1, top_authors: [{ name: "A", share: 1 }] } as never]);
   });
 
   test("имя автора без email: адрес в имени маскируется, пустое — словами", () => {
