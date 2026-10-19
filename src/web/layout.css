@@ -4677,31 +4677,58 @@ button.rh-category:focus-visible {
 }
 
 /* раскрытие: строки — значок, имя и значение, набранное, «из веса»; одна сетка
- * на таблицу, строки берут ее колонки через subgrid (`.rh-cbd__table`). Значок
- * стоит под шевроном, текст — ровно под названием категории (поле 12px + 16px +
- * зазор 12px, как у строки категории); прочие блоки раскрытия — с того же края. */
+ * на таблицу, строки берут ее колонки через subgrid (`.rh-cbd__table`). Блоки
+ * раскрытия — плашки от края шеврона категории. */
 .rh-cbd {
-  --rh-cbd-text: calc(16px + var(--g-spacing-3));
-  padding: var(--g-spacing-1) var(--g-spacing-3) var(--g-spacing-3);
+  container: rh-cbd / inline-size;
+  padding: var(--g-spacing-1) var(--g-spacing-3) var(--g-spacing-4);
 }
 
-.rh-cbd > :not(.rh-cbd__table) {
-  margin-inline-start: var(--rh-cbd-text);
+/* показатели и справочные: в узком раскрытии — друг под другом, в широком —
+ * колонками поровну: при 7:5 у показателей место оставалось, а длинные значения
+ * справочных («синхронизаций 0%, авторов 16, коммитеров 13») шли в три строки.
+ * Зазор между колонками — тот же, что от колонок до разбора модели (12px);
+ * колонки одной высоты. Все блоки раскрытия — от края раскрытия, под шевроном */
+.rh-cbd > .rh-cbd__cols {
+  display: grid;
+  gap: var(--g-spacing-3);
+  margin-block-start: var(--g-spacing-1);
 }
 
-/* вкладки раскрытия — по краю текста; панели — во всю ширину (значки под шевроном) */
-/* вкладки ближе к строке категории (вкладка 36px, текст по центру — сверху и так
- * воздух), снизу — отбивка от таблицы */
-.rh-cbd > .rh-cbd__tabs {
-  margin-block: calc(-1 * var(--g-spacing-2)) var(--g-spacing-3);
+/* каждый блок раскрытия — плашка с одним полем: в столбик значок под значком и
+ * текст под текстом. Главное и второстепенное — разными приемами, а не цветами:
+ * показатели (в балл) — в контуре линии карточки без заливки, всё, что в балл
+ * не входит (справочные, карта владельцев, находки AppSec), — на тихом сером.
+ * Контур — тенью внутрь: рамка сдвинула бы содержимое на пиксель */
+.rh-cbd__tile {
+  padding: var(--g-spacing-2) var(--g-spacing-3);
+  border-radius: var(--g-border-radius-xl);
+  background: color-mix(in srgb, var(--g-color-base-generic) 45%, transparent);
 }
 
-.rh-cbd > .rh-cbd__panel {
-  margin-inline-start: 0;
+.rh-cbd__tile_main {
+  background: none;
+  box-shadow: inset 0 0 0 1px var(--g-color-line-generic);
 }
 
-.rh-cbd__panel > .rh-cbd__note {
-  margin-inline-start: var(--rh-cbd-text);
+@container rh-cbd (min-width: 820px) {
+  .rh-cbd__cols_two {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  }
+
+  /* у справочных нет колонок балла: значению — больше половины строки */
+  .rh-cbd__cols_two .rh-cbd__table_refs .rh-cbd__value.g-text {
+    max-width: 55%;
+  }
+}
+
+/* находки AppSec и карта владельцев — под колонками, с отбивкой */
+.rh-cbd__block_below {
+  margin-block-start: var(--g-spacing-3);
+}
+
+.rh-cbd__tile > .rh-owners {
+  margin-block-end: 0;
 }
 
 /* разряд под разрядом: дробь — в слоте постоянной ширины (запятая и цифра) */
@@ -4732,7 +4759,7 @@ button.rh-category:focus-visible {
 
 /* наведение — строка подсвечена (подложка шире строки только по бокам, без
  * сдвига сетки), рядом подсказка с расчетом */
-.rh-cbd__table:not(.rh-cbd__table_refs) .rh-cbd__row:hover {
+.rh-cbd__table:not(.rh-cbd__table_refs) .rh-cbd__row:not(.rh-cbd__row_total):hover {
   background: var(--g-color-base-simple-hover);
   box-shadow:
     -4px 0 0 var(--g-color-base-simple-hover),
@@ -4783,7 +4810,7 @@ button.rh-category:focus-visible {
 }
 
 /* пунктир — до значения, редкими точками: сплошной линией он сливался с
- * границей вкладок */
+ * границами блоков */
 .rh-cbd__lead {
   flex: 1 1 auto;
   align-self: baseline;
@@ -4795,9 +4822,11 @@ button.rh-category:focus-visible {
   transform: translateY(-3px);
 }
 
-/* значение — по правому краю, рядом с числами; длинное переносится */
+/* значение — по правому краю, рядом с числами; длинное переносится в пределах
+ * своей доли. Не сжимается: в узкой колонке переносится название, а короткое
+ * значение «8 дней» не рвется на «8 / дней» */
 .rh-cbd__value.g-text {
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   max-width: 45%;
   min-width: 0;
   overflow-wrap: break-word;
@@ -4823,6 +4852,7 @@ button.rh-category:focus-visible {
 .rh-cbd__of {
   grid-column: 4;
   font-variant-numeric: tabular-nums;
+  text-align: right;
   white-space: nowrap;
 }
 
@@ -4830,6 +4860,31 @@ button.rh-category:focus-visible {
 .rh-cbd__row_part .rh-cbd__name {
   padding-left: var(--g-spacing-3);
   border-left: 1px solid var(--g-color-line-generic);
+}
+
+/* итог под показателями — за чертой: левая колонка и есть то, что входит в балл */
+.rh-cbd__row_total {
+  margin-block-start: var(--g-spacing-1);
+  padding-block-start: var(--g-spacing-2);
+  border-block-start: 1px solid var(--g-color-line-generic);
+  border-radius: 0;
+}
+
+/* шапка плашки — вместо шапки таблицы: название слева, пометка «в балл не
+ * входит» — в правом углу; на узкой плашке пометка уходит под название */
+.rh-cbd__tilehead {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: baseline;
+  column-gap: var(--g-spacing-3);
+  margin: 0 0 calc(var(--g-spacing-1) + 2px);
+}
+
+/* слот дроби у итога — обычным начертанием: 1.5ch жирного шире, и целое
+ * съезжало с разряда строк выше */
+.rh-cbd__row_total .rh-num__frac {
+  font-weight: 400;
 }
 
 /* только поля по вертикали: короткая запись margin сбрасывала отступ до края имен */
@@ -4848,15 +4903,6 @@ button.rh-category:focus-visible {
   margin-block: 0 var(--g-spacing-2);
 }
 
-/* шевроны дерева — в колонке значков, имена каталогов — по краю имен показателей */
-.rh-cbd > .rh-owners {
-  margin-inline-start: 0;
-}
-
-.rh-owners__legend {
-  margin-inline-start: var(--rh-cbd-text);
-}
-
 /* одна сетка на дерево (уровни — subgrid): колонка имен — по самому длинному
  * имени, полоса — на все свободное место, справа доля и автор */
 .rh-otree,
@@ -4868,7 +4914,8 @@ button.rh-category:focus-visible {
 
 .rh-otree {
   display: grid;
-  grid-template-columns: 16px fit-content(40%) minmax(120px, 1fr) auto fit-content(35%);
+  /* имена каталогов — от левого края плашки: шеврон стоит справа от имени */
+  grid-template-columns: fit-content(40%) minmax(120px, 1fr) auto fit-content(35%);
   column-gap: var(--g-spacing-3);
 }
 
@@ -4895,7 +4942,7 @@ button.rh-category:focus-visible {
 .rh-otree__item_child:not(:last-child)::after {
   content: "";
   position: absolute;
-  left: calc(16px + var(--g-spacing-3) + 6px);
+  left: 6px;
   border-left: 1px solid var(--g-color-line-generic-active);
 }
 
@@ -5020,7 +5067,7 @@ button.rh-category:focus-visible {
 /* телефон: имя и полоса строкой, доля и имя автора — под ними */
 @media (max-width: 767px) {
   .rh-otree {
-    grid-template-columns: 16px minmax(0, 1fr) 72px;
+    grid-template-columns: minmax(0, 1fr) 72px;
   }
 
   .rh-otree__row {
@@ -5029,7 +5076,7 @@ button.rh-category:focus-visible {
 
   .rh-otree__who {
     display: flex;
-    grid-column: 2 / -1;
+    grid-column: 1 / -1;
     gap: var(--g-spacing-2);
     align-items: baseline;
     min-width: 0;
@@ -5048,28 +5095,8 @@ button.rh-category:focus-visible {
   background: color-mix(in srgb, var(--g-color-base-misc-medium) 55%, var(--g-color-base-neutral-heavy));
 }
 
-/* разбор модели: текст «Разбор модели» — по краю имен показателей (у плашки поле
- * 12px и значок 16px с зазором 8px), текст плашки — во всю ширину */
-.rh-cbd > .rh-cat-ai {
-  margin-inline-start: calc(var(--rh-cbd-text) - 36px);
-}
-
 /* телефон: имя над значением, «N» над «из веса» справа; блок — после базовых правил */
 @media (max-width: 767px) {
-  /* вкладки — от края раскрытия: в одну строку без переноса */
-  .rh-cbd > .rh-cbd__tabs {
-    margin-inline-start: 0;
-  }
-
-  /* счетчики вкладок на телефоне не помещаются: три вкладки «Состояния кода» уходили за край */
-  .rh-cbd__tabs .g-tab__counter {
-    display: none;
-  }
-
-  .rh-cbd__tabs.g-tab-list {
-    column-gap: var(--g-spacing-4);
-  }
-
   .rh-cbd__lead {
     display: none;
   }

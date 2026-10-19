@@ -33,10 +33,6 @@ import {
   Popover,
   SegmentedRadioGroup,
   Sheet,
-  Tab,
-  TabList,
-  TabPanel,
-  TabProvider,
   Spin,
   Text,
   useToaster,
@@ -76,6 +72,7 @@ import {
   notOwnReason,
   EMPTY_REPO_TEXT,
   rankText,
+  roundScore,
   CI_CAP_TEXT,
   CI_CAP_TITLE,
   STALE_CATEGORY_MARK,
@@ -1435,17 +1432,13 @@ function CategoryRow({ category: c, card, aiEverywhere, defaultOpen = false }: {
   // полоса — цветом зоны; значки показателей — серые: цвет беды у полного круга
   // («не найдены 20 из 20» в красной категории) читался как тревога
   const color = c.score === null ? ZONE_COLOR.misc : ZONE_COLOR[scoreTheme(c.score)];
-  // вкладки раскрытия: «Показатели» есть всегда, остальные — когда есть что показать
+  // блоки раскрытия: показатели и справочные — колонками, находки AppSec и карта
+  // владельцев — под ними во всю ширину; каждый — когда есть что показать
   const appsec = key === "security" ? appsecView(card) : null;
   const owners = key === "code" ? ownershipView(cat) : null;
-  const tabs = [
-    { value: "calc", title: "Показатели", count: bd?.rows.length ?? 0 },
-    ...(bd !== null && bd.refs.length > 0 ? [{ value: "refs", title: "Дополнительно", count: bd.refs.length }] : []),
-    ...(appsec !== null ? [{ value: "appsec", title: "Находки AppSec", count: appsec.total }] : []),
-    ...(owners !== null ? [{ value: "owners", title: "Владельцы", count: owners.rows.length }] : []),
-  ];
-  const [tab, setTab] = useState("calc");
-  const activeTab = tabs.some((t) => t.value === tab) ? tab : "calc";
+  const hasRows = bd !== null && bd.rows.length > 0;
+  const hasRefs = bd !== null && bd.refs.length > 0;
+  const subsId = `${categoryAnchor(key)}-subs`;
 
   const row = (
     <>
@@ -1511,67 +1504,68 @@ function CategoryRow({ category: c, card, aiEverywhere, defaultOpen = false }: {
         )}
       </h3>
       {open && expandable && (
-        <div className="rh-cbd" id={`${categoryAnchor(key)}-subs`}>
+        <div className="rh-cbd" id={subsId}>
           {/* примечание частичной нехватки данных — внутри раскрытия (в MD его нет в строке) */}
           {c.partialNote && (
             <Text as="p" variant="body-1" color="complementary" className="rh-cbd__note">
               {c.partialNote}
             </Text>
           )}
-          {/* вкладки — у каждой категории: показатели, справочные, а у «Безопасности» и
-              «Состояния кода» — находки AppSec и владельцы; второй уровень сверток не нужен */}
-          <TabProvider value={activeTab} onUpdate={setTab}>
-            <TabList size="m" contentOverflow="scroll" className="rh-cbd__tabs">
-              {tabs.map((t) => (
-                <Tab key={t.value} value={t.value} counter={t.count}>
-                  {t.title}
-                </Tab>
-              ))}
-            </TabList>
-            <TabPanel value="calc" className="rh-cbd__panel">
-              {bd !== null && bd.rows.length > 0 && (
-                <div className="rh-cbd__table" role="table" aria-label={`Показатели категории «${c.title}»`}>
-                  {bd.rows.map((r) => (
-                    <Fragment key={r.sub}>
-                      <BreakdownLine glyph={r.state === "counted" ? r.score : null} icon={submetricIcon(key, r.sub)} title={r.title} value={r.value} earned={r.earned} weight={r.weight} hint={breakdownHint(r)} />
-                      {r.parts?.map((p) => <BreakdownLine key={p.title} part glyph={null} title={p.title} value={p.value} earned={p.earned} weight={p.weight} hint={null} />)}
-                    </Fragment>
-                  ))}
-                  {bd.adjustment !== null && (
-                    <BreakdownLine
-                      glyph="adjust"
-                      title={`Поправка: ${cat.adjustment ? adjustmentLabel(cat).toLowerCase() : "балл скорректирован"}`}
-                      value=""
-                      earned={bd.adjustment}
-                      weight={null}
-                      hint={[adjustmentText(cat) ?? "Балл категории скорректирован после суммы показателей."]}
-                    />
-                  )}
+          {/* без вкладок: показатели слева заканчиваются итогом, справочные справа —
+              с пометкой в углу, что в балл они не входят; на узком экране колонки
+              встают друг под другом */}
+          {(hasRows || hasRefs) && (
+            <div className={hasRows && hasRefs ? "rh-cbd__cols rh-cbd__cols_two" : "rh-cbd__cols"}>
+              {hasRows && (
+                <div className="rh-cbd__block rh-cbd__tile rh-cbd__tile_main">
+                  <TileHead title="Показатели" />
+                  <div className="rh-cbd__table" role="table" aria-label={`Показатели категории «${c.title}»`}>
+                    {bd.rows.map((r) => (
+                      <Fragment key={r.sub}>
+                        <BreakdownLine glyph={r.state === "counted" ? r.score : null} icon={submetricIcon(key, r.sub)} title={r.title} value={r.value} earned={r.earned} weight={r.weight} hint={breakdownHint(r)} />
+                        {r.parts?.map((p) => <BreakdownLine key={p.title} part glyph={null} title={p.title} value={p.value} earned={p.earned} weight={p.weight} hint={null} />)}
+                      </Fragment>
+                    ))}
+                    {bd.adjustment !== null && (
+                      <BreakdownLine
+                        glyph="adjust"
+                        title={`Поправка: ${cat.adjustment ? adjustmentLabel(cat).toLowerCase() : "балл скорректирован"}`}
+                        value=""
+                        earned={bd.adjustment}
+                        weight={null}
+                        hint={[adjustmentText(cat) ?? "Балл категории скорректирован после суммы показателей."]}
+                      />
+                    )}
+                    {c.score !== null && <TotalLine score={c.score} />}
+                  </div>
                 </div>
               )}
-              {/* тихо внизу: место среди похожих и куда ушел вес показателей без балла */}
-            </TabPanel>
-            {bd !== null && bd.refs.length > 0 && (
-              <TabPanel value="refs" className="rh-cbd__panel">
-                <div className="rh-cbd__table rh-cbd__table_refs" role="table" aria-label={`Справочные показатели категории «${c.title}», в балл не входят`}>
-                  {bd.refs.map((r) => (
-                    <RefLine key={r.sub} icon={submetricIcon(key, r.sub)} title={r.title} value={r.value} hint={r.aside !== null ? [`${sentence(r.aside)}.`] : null} />
-                  ))}
+              {hasRefs && (
+                <div className="rh-cbd__block rh-cbd__block_refs rh-cbd__tile">
+                  {/* у справочных нет колонок балла — пометка в углу объясняет почему */}
+                  <TileHead title="Справочные показатели" aside="в балл не входят" />
+                  <div className="rh-cbd__table rh-cbd__table_refs" role="table" aria-label={`Справочные показатели категории «${c.title}», в балл не входят`}>
+                    {bd.refs.map((r) => (
+                      <RefLine key={r.sub} icon={submetricIcon(key, r.sub)} title={r.title} value={r.value} hint={r.aside !== null ? [`${sentence(r.aside)}.`] : null} />
+                    ))}
+                  </div>
                 </div>
-              </TabPanel>
-            )}
-            {appsec !== null && (
-              <TabPanel value="appsec" className="rh-cbd__panel">
-                <AppsecTable data={appsec} />
-              </TabPanel>
-            )}
-            {owners !== null && (
-              <TabPanel value="owners" className="rh-cbd__panel">
-                {/* под картой — только легенда: оговорки о полноте обхода остаются в отчете */}
-                <OwnershipTree rows={owners.rows} thresholdPct={owners.thresholdPct} />
-              </TabPanel>
-            )}
-          </TabProvider>
+              )}
+            </div>
+          )}
+          {appsec !== null && (
+            <section className="rh-cbd__block rh-cbd__block_below rh-cbd__tile" aria-labelledby={`${subsId}-appsec`}>
+              <TileHead id={`${subsId}-appsec`} title="Находки AppSec" aside="в балл не входят" />
+              <AppsecTable data={appsec} />
+            </section>
+          )}
+          {owners !== null && (
+            <section className="rh-cbd__block rh-cbd__block_below rh-cbd__tile" aria-labelledby={`${subsId}-owners`}>
+              <TileHead id={`${subsId}-owners`} title="Карта владельцев" aside="в балл не входит" />
+              {/* под картой — только легенда: оговорки о полноте обхода остаются в отчете */}
+              <OwnershipTree rows={owners.rows} thresholdPct={owners.thresholdPct} />
+            </section>
+          )}
           {aiNote !== null && <CategoryAiNote note={aiNote} card={card} />}
         </div>
       )}
@@ -1602,6 +1596,50 @@ function breakdownHint(r: BreakdownRow): string[] {
   }
   // процент с одним знаком: «8% от 25 = 2,1» при пересчете не сходилось
   return [`Набрано ${fmtPoints(r.score * 100)}% от ${fmtPoints(r.weight)} = ${fmtPoints(r.earned)}`, ...aside];
+}
+
+/**
+ * Шапка плашки раскрытия: название слева, пометка «в балл не входит» — в правом
+ * углу, тише названия: она поясняет плашку, а не называет ее.
+ */
+function TileHead({ id, title, aside }: { id?: string; title: string; aside?: string }) {
+  return (
+    <div className="rh-cbd__tilehead">
+      <Text variant="caption-2" color="secondary" id={id}>
+        {title}
+      </Text>
+      {aside !== undefined && (
+        <Text variant="caption-2" color="hint">
+          {aside}
+        </Text>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Итог под показателями: балл категории «из 100» — левая колонка и есть то, что
+ * входит в балл. Тот же округленный балл, что в строке категории, но с одним
+ * знаком после запятой, как у строк выше: «85,0 из 100,0».
+ */
+function TotalLine({ score }: { score: number }) {
+  return (
+    <div className="rh-cbd__row rh-cbd__row_total" role="row">
+      <span role="cell" className="rh-cbd__glyph" />
+      <span role="cell" className="rh-cbd__name">
+        <Text variant="subheader-1" className="rh-cbd__title">
+          Итого
+        </Text>
+        <span className="rh-cbd__lead" aria-hidden="true" />
+      </span>
+      <Text role="cell" variant="subheader-1" className="rh-cbd__earned">
+        <AlignedNumber text={fmtPoints(roundScore(score))} />
+      </Text>
+      <Text role="cell" color="secondary" className="rh-cbd__of">
+        из <AlignedNumber text={fmtPoints(100)} />
+      </Text>
+    </div>
+  );
 }
 
 /** Содержимое подсказки — строками. */
@@ -1691,7 +1729,8 @@ function BreakdownLine({
         {earned === null ? "–" : <AlignedNumber text={glyph === "adjust" ? fmtSignedPoints(earned) : fmtPoints(earned)} />}
       </Text>
       <Text role="cell" color="secondary" className="rh-cbd__of">
-        {weight === null ? "" : `из ${fmtPoints(weight)}`}
+        {/* «из» — по правому краю со слотом дроби: «из 100» итога встает разряд под разрядом с «из 35,0» */}
+        {weight === null ? "" : <>из <AlignedNumber text={fmtPoints(weight)} /></>}
       </Text>
     </div>
   );
@@ -2400,7 +2439,6 @@ function OwnerNode({ row: r, thresholdPct, child }: { row: OwnershipView["rows"]
   return (
     <li className={child ? "rh-otree__item rh-otree__item_child" : "rh-otree__item"}>
       <div className="rh-otree__row">
-        <span className="rh-otree__spacer" aria-hidden="true" />
         {/* шеврон — справа от имени, как у групп меню SourceCraft; ветки — уголками */}
         {kids.length > 0 ? (
           <button type="button" className="rh-otree__toggle" aria-expanded={open} onClick={() => setOpen(!open)}>
