@@ -132,6 +132,9 @@ export interface QueueConfig {
   /** параллельных пользовательских AI-обзоров в процессе (обзор тоже клонирует репо для
    *  инструментов модели): 2, env QUEUE_USER_AI_SLOTS (1-8). Optional — как выше. */
   userAiSlots?: number;
+  /** параллельных сканов полосы рейтинга (пересбор каталога): 1, env QUEUE_RATING_SCAN_SLOTS (1-8);
+   *  тяжелые репо берет только первый слот. Optional — как выше. */
+  ratingScanSlots?: number;
   /** репо «тяжелый», если какой-то его скан (кроме сирот, закрытых свипом) шел дольше порога;
    *  тяжелые берет только первый слот пользовательских сканов и обзоров. 5 мин: p99 скана на
    *  стенде меньше минуты, тяжелых — десятки из ~28 тыс. env QUEUE_HEAVY_SCAN_MS. Optional — как выше. */
@@ -504,6 +507,7 @@ export function loadConfig(): Config {
       summaryActiveMax: envInt(env, "QUEUE_SUMMARY_ACTIVE_MAX") ?? 2,
       userScanSlots: slotsFromEnv(env, "QUEUE_USER_SCAN_SLOTS"),
       userAiSlots: slotsFromEnv(env, "QUEUE_USER_AI_SLOTS"),
+      ratingScanSlots: env["QUEUE_RATING_SCAN_SLOTS"] ? slotsFromEnv(env, "QUEUE_RATING_SCAN_SLOTS") : undefined,
       heavyScanMs: envInt(env, "QUEUE_HEAVY_SCAN_MS") ?? DEFAULT_HEAVY_SCAN_MS,
     },
     llm: {

@@ -137,6 +137,8 @@ export function scopedFacts(db: Database, scanId: number, role: SummaryRole, aud
   }[];
   return rows
     .filter((r) => r.status === "ok")
+    // tree.deps – список зависимостей для тематики рейтинга, модели не нужен
+    .filter((r) => r.key !== "tree.deps")
     .filter((r) => audience === "full" || publicFactKey(r.key))
     .map((r) => ({ key: r.key, value: parseFactValue(r.value) }))
     .filter((f) => roleFactsAllowed(role, f.key))

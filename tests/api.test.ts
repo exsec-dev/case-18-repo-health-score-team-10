@@ -19,6 +19,7 @@ import { compute } from "../src/score/compute";
 import { loadConfig } from "../src/config";
 import type { AccessResult } from "../src/auth/access";
 import { DEFAULT_SCAN } from "../src/config";
+import { DERIVED_VERSION } from "../src/score/rescore";
 import {
   cardFacts,
   makeApiDb,
@@ -616,7 +617,7 @@ describe("health (В4.4): ok вычисляемое, reasons по контрак
     const h = makeApiDb();
     seedRating(h);
     // актуальные производные: версии и водяной знак догнаны
-    h.db.query("INSERT INTO meta (key, value) VALUES ('derived_version', '6')").run();
+    h.db.query("INSERT INTO meta (key, value) VALUES ('derived_version', ?)").run(String(DERIVED_VERSION));
     const maxId = (h.db.query("SELECT COALESCE(MAX(id), 0) AS m FROM scans").get() as { m: number }).m;
     h.db.query("INSERT INTO meta (key, value) VALUES ('derived_rescore_cursor', ?)").run(String(maxId));
     return h;
@@ -744,7 +745,7 @@ describe("В4.4: сжатый timeline читается как несжатый"
 describe("Б5 (круг 2 В4.4): капы текстов health", () => {
   test("S-5: derived_rescore_error в reason обрезан и без управляющих символов", () => {
     const h = makeApiDb();
-    h.db.query("INSERT INTO meta (key, value) VALUES ('derived_version', '6')").run();
+    h.db.query("INSERT INTO meta (key, value) VALUES ('derived_version', ?)").run(String(DERIVED_VERSION));
     const maxId = (h.db.query("SELECT COALESCE(MAX(id), 0) AS m FROM scans").get() as { m: number }).m;
     h.db.query("INSERT INTO meta (key, value) VALUES ('derived_rescore_cursor', ?)").run(String(maxId));
     h.db.query("INSERT INTO meta (key, value) VALUES ('derived_rescore_error', ?)").run(`\u0007boom${"e".repeat(300)}`);

@@ -43,6 +43,8 @@ import {
   pageBeyond,
   sizeOptions,
   sizeSummary,
+  topicOptions,
+  topicSummary,
   type FacetOption,
 } from "./ratingParams";
 import {
@@ -208,6 +210,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
   // размер повторяемый; пустое состояние называет все включенные фильтры
   const sizeValues = params.getAll("size");
   const ciValue = params.get("ci");
+  const topicValues = params.getAll("topic");
   const activeFilters = activeRatingFilters(search);
   const hasFilters = activeFilters.length > 0;
   // на телефоне таблица категорий не помещается — строки списком: место, имя, Score
@@ -316,6 +319,23 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
           renderSelectedOption={(option, index) => <LangSummaryPart value={option.value} index={index} values={langValues} />}
           onUpdate={(v) => setParams({ lang: v.length === 0 ? null : v.map((x) => (x === LANG_NONE ? "" : x)) })}
         />
+        {/* Тематика (api/topics.ts): мультивыбор, несколько тем — ИЛИ. Счетчики —
+            из фасета (по поиску, без фильтров); тема без репо в списке не
+            показывается, кроме выбранной */}
+        <Select
+          label="Тематика:"
+          size="m"
+          width={isPhone ? "max" : 170}
+          multiple
+          hasClear
+          placeholder="любая"
+          popupClassName={isPhone ? "rh-lang-popup rh-in-sheet" : "rh-lang-popup"}
+          value={topicValues}
+          options={topicOptions(lastFilterFacets.current, topicValues).map(facetSelectOption)}
+          renderOption={(option) => <FilterOption option={option} checkbox checked={topicValues.includes(option.value)} />}
+          renderSelectedOption={(option, index) => <>{index === 0 ? topicSummary(topicValues) : ""}</>}
+          onUpdate={(v) => setParams({ topic: v.length === 0 ? null : v })}
+        />
         {/* Размер по строкам кода и наличие CI. Счетчики — из фасетов
             (по поиску, без фильтров); репо без данных о размере или CI не
             попадает ни в одно значение. */}
@@ -347,7 +367,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
         />
     </>
   );
-  const filterCount = [langValues.length > 0, sizeValues.length > 0, ciValue !== null, aiOnly].filter(Boolean).length;
+  const filterCount = [langValues.length > 0, sizeValues.length > 0, ciValue !== null, topicValues.length > 0, aiOnly].filter(Boolean).length;
   const aiFilter =
     view === "scored" && data && (data.aiCount > 0 || aiOnly) ? (
       <Button view="outlined" size="m" selected={aiOnly} onClick={() => setParams({ ai: aiOnly ? null : "1" })}>
@@ -449,7 +469,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
             {aiFilter}
             <Flex gap={2} className="rh-filter-sheet__actions">
               {filterCount > 0 && (
-                <Button view="normal" size="l" width="max" onClick={() => setParams({ lang: null, size: null, ci: null, ai: null })}>
+                <Button view="normal" size="l" width="max" onClick={() => setParams({ lang: null, size: null, ci: null, topic: null, ai: null })}>
                   Сбросить
                 </Button>
               )}

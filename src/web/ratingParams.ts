@@ -8,6 +8,7 @@
 // Сервер (`parseReposQuery`) по-прежнему отвечает 400 на неверное значение.
 import type { SortKey } from "../api/repos";
 import { CI_TITLES, CI_VALUES, SIZE_BUCKETS, SIZE_SHORT, SIZE_TITLES, type CiFilter, type SizeBucket } from "../api/rating-filters";
+import { TOPIC_IDS, TOPIC_TITLES, isTopicId, type TopicId } from "../api/topics";
 import { plural } from "../report/submetrics";
 import { fmtCount } from "./format";
 
@@ -47,6 +48,13 @@ export function normalizeRatingSearch(search: string): { search: string; changed
   // CI — одно значение `yes`/`no`; иное (и повтор) — сброс фильтра
   const cis = params.getAll("ci");
   if (cis.length > 1 || (cis.length === 1 && !(CI_VALUES as readonly string[]).includes(cis[0]!))) drop("ci");
+  // тематика — повторяемый, как размер: неизвестные значения убираются
+  const topics = params.getAll("topic");
+  const validTopics = topics.filter((v, i) => isTopicId(v) && topics.indexOf(v) === i);
+  if (validTopics.length !== topics.length) {
+    drop("topic");
+    for (const v of validTopics) params.append("topic", v);
+  }
   return { search: changed ? params.toString() : search.replace(/^\?/, ""), changed };
 }
 
@@ -92,6 +100,7 @@ export function activeRatingFilters(search: string): string[] {
   if (params.has("lang")) active.push("язык");
   if (params.has("size")) active.push("размер");
   if (params.has("ci")) active.push("CI");
+  if (params.has("topic")) active.push("тематика");
   if (params.get("ai") === "1") active.push("AI-обзор");
   return active;
 }
@@ -123,9 +132,28 @@ export function nothingFoundDescription(active: string[], query = ""): string {
  */
 export function resetFiltersHref(search: string): string {
   const params = new URLSearchParams(search);
-  for (const key of ["q", "lang", "size", "ci", "ai", "page"]) params.delete(key);
+  for (const key of ["q", "lang", "size", "ci", "topic", "ai", "page"]) params.delete(key);
   const qs = params.toString();
   return qs === "" ? "/" : `/?${qs}`;
+}
+
+/**
+ * Опции тематики — темы в порядке TOPIC_IDS со счетчиком фасета (по поиску, без
+ * фильтров). Тема с нулем репо в списке не показывается, кроме выбранной: иначе
+ * ее нельзя было бы снять. До ответа сервера (null) показываются все.
+ */
+export function topicOptions(facets: { topics: { id: TopicId; count: number }[] } | null, selected: readonly string[]): FacetOption[] {
+  return TOPIC_IDS.map((id) => ({ value: id, title: TOPIC_TITLES[id], count: facets === null ? null : (facets.topics.find((f) => f.id === id)?.count ?? 0) })).filter(
+    (o) => o.count === null || o.count > 0 || selected.includes(o.value),
+  );
+}
+
+/** Сводка выбранных тем в поле: одна — названием, несколько — «первая +N». */
+export function topicSummary(values: string[]): string {
+  const first = values[0];
+  if (first === undefined) return "";
+  const title = isTopicId(first) ? TOPIC_TITLES[first] : first;
+  return values.length === 1 ? title : `${title} +${values.length - 1}`;
 }
 
 /** Опция фильтра размера или CI: значение адреса, подпись и счетчик фасета (null — фасета нет). */

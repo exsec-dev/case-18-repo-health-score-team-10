@@ -27,8 +27,9 @@ import { DB_BUSY_TIMEOUT_MS, getMetaValue, setMetaValue } from "../db";
  * Версия производных данных (scores/recommendations/rating_eligible). Повышается,
  * когда меняется форма хранимых оценок при неизменной MODEL_VERSION: хранимое
  * значение в meta станет старее кода, и первый старт пересчитает все сканы.
+ * 7 — тексты рекомендаций AppSec (потолок итога назван один раз).
  */
-export const DERIVED_VERSION = 6;
+export const DERIVED_VERSION = 7;
 
 /** Порция фонового пересчета истории за тик воркера (≈25 мс на скан). */
 export const HISTORY_RESCORE_BATCH = 20;

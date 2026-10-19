@@ -16,6 +16,7 @@ import { killActiveClones, trackCloneGroup,
   isRobotPattern,
   robotIntervalFlags,
   readmeSectionFlags,
+  readmeHeadingCount,
   ciHasSteps,
   scrubCredentials,
   splitCredentialUrl,
@@ -378,9 +379,57 @@ describe("В2/Б1: флаги секций README (словарь RU+EN §7.4)",
     expect(readmeSectionFlags(b("# X\n\n## Установка и запуск\n"))).toEqual({ install: true, build: false, test: false });
   });
 
-  test("слова-подстроки не матчатся (тестирование ≠ тесты), нет заголовков → все false", () => {
-    expect(readmeSectionFlags(b("# X\n\n## Тестирование\n"))).toEqual({ install: false, build: false, test: false });
+  test("слово внутри другого слова не матчится, нет заголовков → все false", () => {
+    for (const h of ["Latest", "Contest", "Prebuilt", "Runtime", "Runbook", "Usage", "Тестовый стенд", "Тестовые данные"]) {
+      expect(readmeSectionFlags(b(`# X\n\n## ${h}\n`))).toEqual({ install: false, build: false, test: false });
+    }
     expect(readmeSectionFlags(b("просто текст без заголовков\n## \n"))).toEqual({ install: false, build: false, test: false });
+  });
+
+  test("любая форма слова: Installation, Как запустить, Test, Тестирование", () => {
+    const one = (h: string) => readmeSectionFlags(b(`# X\n\n## ${h}\n`));
+    for (const h of ["Installation", "Installing", "Как установить", "Как запустить", "How to run", "Running", "Quick start", "Quickstart", "Set up"]) {
+      expect(one(h)).toEqual({ install: true, build: false, test: false });
+    }
+    for (const h of ["Building", "Как собрать", "Соберите проект", "Compiling"]) {
+      expect(one(h)).toEqual({ install: false, build: true, test: false });
+    }
+    // «Test» – тот самый заголовок, который называет рекомендация readme-sections-missing
+    for (const h of ["Test", "Тест", "Тестирование", "Unit tests", "Как запустить тесты", "Running tests"]) {
+      expect(one(h)).toEqual({ install: false, build: false, test: true });
+    }
+    expect(one("Сборка и запуск")).toEqual({ install: true, build: true, test: false });
+  });
+
+  test("эмодзи, уровни 3–4 и setext-заголовки", () => {
+    expect(readmeSectionFlags(b("# X\n\n## 🚀 Установка\n\n### 🛠 Build\n\n#### ✅ Tests\n"))).toEqual({ install: true, build: true, test: true });
+    expect(readmeSectionFlags("Проект\n======\n\nУстановка\n---------\nnpm i\n\nTests\n-----\nbun test\n")).toEqual({ install: true, build: false, test: true });
+    // setext без тела не засчитывается, а строка над следующим подчеркиванием телом не считается
+    expect(readmeSectionFlags("X\n===\n\nInstall\n-------\n\nBuild\n-----\nmake\n")).toEqual({ install: false, build: true, test: false });
+    // элемент списка над «---» и разделитель после пустой строки – не заголовки
+    expect(readmeSectionFlags("# X\n\n- Install\n---\ntext\n\nBuild\n\n---\ntext\n")).toEqual({ install: false, build: false, test: false });
+    // внутри блока кода setext нет
+    expect(readmeSectionFlags("# X\n\n```\nInstall\n-------\n```\ntext\n")).toEqual({ install: false, build: false, test: false });
+  });
+
+  test("README pelmenya/repo-vitals: «Как запустить» с командами – раздел установки", () => {
+    const readme = [
+      "# repo-vitals",
+      "",
+      "## Как запустить",
+      "",
+      "Нужно: Docker с плагином Compose v2.",
+      "",
+      "```bash",
+      "docker compose -f deploy/compose.reviewer.yaml up -d --build --wait",
+      "```",
+      "",
+      "## Разработка",
+      "",
+      "Требуется Node 24+.",
+    ].join("\n");
+    expect(readmeSectionFlags(readme)).toEqual({ install: true, build: false, test: false });
+    expect(readmeHeadingCount(readme)).toBe(3);
   });
 });
 

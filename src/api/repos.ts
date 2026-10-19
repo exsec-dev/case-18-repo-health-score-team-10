@@ -16,6 +16,7 @@ import { INDEX_WEIGHTS, SCORE_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, ty
 import type { AiAudience } from "../db";
 import { NO_RHYTHM_REASON } from "../summary/pipeline";
 import { CI_VALUES, SIZE_BUCKETS, sizeBucketOf, type CiFilter, type SizeBucket } from "./rating-filters";
+import { TOPIC_IDS, decodeTopics, isTopicId, type TopicId } from "./topics";
 import { ladderFromFacts, type Ladder } from "../score/ladder";
 import { fixTemplateOf, templateFor, type FixFile, type FixRuleId, type FixTemplateMeta, type LicenseId } from "../fix/templates";
 import { rankBadge, type RankBadge } from "./rank-badge";
@@ -114,6 +115,12 @@ export interface CiFacet {
   count: number;
 }
 
+/** Счетчик тематики (api/topics.ts): все темы в порядке TOPIC_IDS, 0 тоже число. */
+export interface TopicFacet {
+  id: TopicId;
+  count: number;
+}
+
 export interface RatingResponse {
   items: RatingItem[];
   /** HealthCraft Index = NULL: вне ранжирования и вне пагинации */
@@ -135,7 +142,7 @@ export interface RatingResponse {
    * (0 тоже число); репо без данных о размере или CI не входит ни в один
    * счетчик своего фильтра.
    */
-  facets: { languages: LanguageFacet[]; size: SizeFacet[]; ci: CiFacet[] };
+  facets: { languages: LanguageFacet[]; size: SizeFacet[]; ci: CiFacet[]; topics: TopicFacet[] };
   generatedAt: string;
 }
 
@@ -162,6 +169,11 @@ export interface ReposQuery {
   size?: SizeBucket[];
   /** `ci=yes` – есть `.sourcecraft/ci.yaml`, `ci=no` – подтвержденно нет */
   ci?: CiFilter;
+  /**
+   * Множество тематик из повторяемого `topic` (`?topic=bot&topic=web`), любая
+   * из них (ИЛИ); undefined – фильтра нет. Репо без тем ни под одну не попадает.
+   */
+  topic?: TopicId[];
   page: number;
   perPage: number;
 }
@@ -243,6 +255,15 @@ export function parseReposQuery(params: URLSearchParams): ParseResult {
     query.ci = ci as CiFilter;
   }
 
+  if (params.has("topic")) {
+    const topics: TopicId[] = [];
+    for (const raw of params.getAll("topic")) {
+      if (!isTopicId(raw)) return { ok: false, message: "в адресе рейтинга неизвестная тематика" };
+      if (!topics.includes(raw)) topics.push(raw);
+    }
+    query.topic = topics;
+  }
+
   const perPage = params.get("per_page");
   if (perPage !== null) {
     const n = Number(perPage);
@@ -273,6 +294,8 @@ interface RatingRow {
   last_activity_at: string | null;
   logo_url: string | null;
   language_color: string | null;
+  /** repos.topics «,bot,web,» (api/topics.ts); в ответ не едет – ключ фильтра и фасета */
+  topics: string | null;
   total: number | null;
   coverage: number;
   /** баллы 4 категорий индекса (`json_extract`); NULL – нет данных или ключа нет */
@@ -320,7 +343,7 @@ WITH last AS (
   SELECT sc2.repo_id, MAX(sc2.scan_id) AS scan_id FROM scores sc2 JOIN scans s2 ON s2.id = sc2.scan_id
   WHERE sc2.model_version = ? AND s2.rating_eligible = 1 GROUP BY sc2.repo_id),
 lastscan AS (SELECT repo_id, MAX(id) AS id FROM scans GROUP BY repo_id)
-SELECT r.id AS repo_id, last.scan_id AS scan_id, sc.code_empty, r.org_slug, r.repo_slug, r.title, r.language, r.likes, r.forks, r.last_activity_at, r.logo_url, r.language_color,
+SELECT r.id AS repo_id, last.scan_id AS scan_id, sc.code_empty, r.org_slug, r.repo_slug, r.title, r.language, r.likes, r.forks, r.last_activity_at, r.logo_url, r.language_color, r.topics,
        sc.healthcraft_index AS total, sc.index_coverage AS coverage,
        json_extract(sc.categories, '$.documentation.score') AS c_documentation,
        json_extract(sc.categories, '$.activity.score') AS c_activity,
@@ -542,12 +565,14 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
   const factsByScan = scanFilterFacts(db, rows.map((r) => r.scan_id));
   const sizeOf = new Map<RatingItem, SizeBucket | null>();
   const ciOf = new Map<RatingItem, boolean | null>();
+  const topicsOf = new Map<RatingItem, TopicId[]>();
   const all = rows
     .map((row) => {
       const item = toRatingItem(row);
       const f = factsByScan.get(row.scan_id);
       sizeOf.set(item, sizeBucketOf(row.code_empty === 1, f?.loc ?? null));
       ciOf.set(item, f?.hasCi ?? null);
+      topicsOf.set(item, decodeTopics(row.topics));
       return item;
     })
     .sort((a, b) => compareItems(a, b, "index", "desc"));
@@ -651,14 +676,16 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
     .map(([language, count]) => ({ language, count, color: colors.get(language) ?? null }))
     .sort((a, b) => b.count - a.count || (a.language ?? "￿").localeCompare(b.language ?? "￿"));
 
-  // счетчики размера и CI – по той же выборке, что языки
+  // счетчики размера, CI и тематик – по той же выборке, что языки
   const sizeCounts = new Map<SizeBucket, number>();
   const ciCounts = new Map<CiFilter, number>();
+  const topicCounts = new Map<TopicId, number>();
   for (const item of byQ) {
     const size = sizeOf.get(item);
     if (size) sizeCounts.set(size, (sizeCounts.get(size) ?? 0) + 1);
     const ci = ciOf.get(item);
     if (ci !== null && ci !== undefined) ciCounts.set(ci ? "yes" : "no", (ciCounts.get(ci ? "yes" : "no") ?? 0) + 1);
+    for (const t of topicsOf.get(item) ?? []) topicCounts.set(t, (topicCounts.get(t) ?? 0) + 1);
   }
 
   const langs = query.lang;
@@ -672,8 +699,11 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
   const bySize = sizes === undefined ? byLang : byLang.filter(inSizes);
   const ciWant = query.ci === undefined ? undefined : query.ci === "yes";
   const byCi = ciWant === undefined ? bySize : bySize.filter((i) => ciOf.get(i) === ciWant);
-  const aiCount = byCi.filter((i) => i.healthcraftIndex !== null && i.aiOverview).length;
-  const filtered = query.ai === true ? byCi.filter((i) => i.aiOverview) : byCi;
+  // тематики – ИЛИ: репо с любой из выбранных тем; без тем – ни под одну
+  const topics = query.topic;
+  const byTopic = topics === undefined ? byCi : byCi.filter((i) => (topicsOf.get(i) ?? []).some((t) => topics.includes(t)));
+  const aiCount = byTopic.filter((i) => i.healthcraftIndex !== null && i.aiOverview).length;
+  const filtered = query.ai === true ? byTopic.filter((i) => i.aiOverview) : byTopic;
   const scored = filtered.filter((i) => i.healthcraftIndex !== null);
   const nullItems = filtered
     .filter((i) => i.healthcraftIndex === null)
@@ -696,6 +726,7 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
       languages,
       size: SIZE_BUCKETS.map((bucket) => ({ bucket, count: sizeCounts.get(bucket) ?? 0 })),
       ci: CI_VALUES.map((value) => ({ value, count: ciCounts.get(value) ?? 0 })),
+      topics: TOPIC_IDS.map((id) => ({ id, count: topicCounts.get(id) ?? 0 })),
     },
     generatedAt: (opts.now ?? new Date()).toISOString(),
   };

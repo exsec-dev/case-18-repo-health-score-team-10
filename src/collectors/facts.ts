@@ -10,7 +10,7 @@ export type FactStatus = "ok" | "no-data" | "bad";
  * пригодный скан собран старым сборщиком (`scheduler.ts`). NULL в старых
  * строках читается как версия старше текущей.
  */
-export const COLLECTOR_VERSION = 5;
+export const COLLECTOR_VERSION = 6;
 
 /** Причина no-data хранится ключом `reason` внутри value (отдельной колонки нет).
  *  no-scan и incomplete – ветки AppSec: скана нет или не завершен; неполный
@@ -98,6 +98,10 @@ export const KINDS = {
   // каталогам за 365 дней без мерджей и роботов; только имя автора, без email
   "code.ownership":
     "{window_days,threshold,commits,robot_commits_skipped,changes,single_owner_share,dirs_total,dirs_single_owner,dirs:[{dir,changes,authors,owner,owner_share,top_authors:[{name,share}],children?:[{dir,changes,authors,owner,owner_share,top_authors}]}],truncated?,truncated_note?,history_since?} | bad",
+  // зависимости из манифестов (deps.ts) – только для тематики рейтинга
+  // (api/topics.ts); в Score не идет, в READ_KINDS/GIT_KINDS не входит,
+  // без манифестов факта нет вовсе
+  "tree.deps": "{manifests:[...],deps:[...],truncated?}",
 } as const;
 
 export type Kind = keyof typeof KINDS;

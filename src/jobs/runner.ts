@@ -20,6 +20,7 @@ import { AppsecClient, collectAppsec, makeAppsecClient } from "../collectors/app
 import { DEFAULT_SCAN, ScanCloneLimits, ScanConfig } from "../config";
 import { compute, PUBLIC_KINDS, ratingEligible, scanStatusOf, writeScores } from "../score/compute";
 import { bumpRescoreCursor } from "../score/rescore";
+import { refreshRepoTopics } from "./topics";
 import { recommend, writeRecommendations } from "../score/recommend";
 
 export interface GitChannelOutcome {
@@ -148,6 +149,8 @@ export interface RepoUpsertMeta {
   logoUrl?: string | null;
   /** language.color платформы (дисплей); null не затирает сохранённый */
   languageColor?: string | null;
+  /** описание из каталога – для тематики рейтинга (api/topics.ts); null не затирает сохранённое */
+  description?: string | null;
 }
 
 export function upsertRepo(db: Database, org: string, repo: string, meta: RepoUpsertMeta = {}): number {
@@ -156,8 +159,8 @@ export function upsertRepo(db: Database, org: string, repo: string, meta: RepoUp
   const hasVisibility = typeof meta.visibility === "string" && meta.visibility !== "";
   const updateVisibility = hasVisibility ? "visibility = excluded.visibility," : "";
   db.query(
-    `INSERT INTO repos (org_slug, repo_slug, title, language, likes, last_activity_at, forks, reaction_counts, visibility, logo_url, language_color)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO repos (org_slug, repo_slug, title, language, likes, last_activity_at, forks, reaction_counts, visibility, logo_url, language_color, description)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(org_slug, repo_slug) DO UPDATE SET
        title = COALESCE(excluded.title, title),
        language = COALESCE(excluded.language, language),
@@ -167,6 +170,7 @@ export function upsertRepo(db: Database, org: string, repo: string, meta: RepoUp
        reaction_counts = COALESCE(excluded.reaction_counts, reaction_counts),
        logo_url = COALESCE(excluded.logo_url, logo_url),
        language_color = COALESCE(excluded.language_color, language_color),
+       description = COALESCE(excluded.description, description),
        ${updateVisibility}
        id = id`,
   ).run(
@@ -181,6 +185,7 @@ export function upsertRepo(db: Database, org: string, repo: string, meta: RepoUp
     hasVisibility ? (meta.visibility as string) : "private",
     meta.logoUrl ?? null,
     meta.languageColor ?? null,
+    meta.description ?? null,
   );
   const row = db.query("SELECT id FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number };
   return row.id;
@@ -391,6 +396,8 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
   };
   try {
     insertFacts(deps.db, scanId, facts);
+    // тематика рейтинга: зависимости из манифестов (tree.deps) только что записаны
+    refreshRepoTopics(deps.db, repoId);
 
     const counts = { ok: 0, noData: 0, bad: 0 };
     for (const f of facts) {
