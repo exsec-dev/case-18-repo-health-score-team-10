@@ -73,8 +73,8 @@ describe("П4.2: форма значений — единица, масштаб,
   });
 
   test("CI: конфиг булевыми признаками, доля — процентом, длительность — из секунд", () => {
-    expect(fmt("cicd.config", { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: true })).toBe("ci.yaml со шагами");
-    expect(fmt("cicd.config", { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: false })).toBe("ci.yaml без шагов");
+    expect(fmt("cicd.config", { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: true })).toBe("ci.yaml с командами");
+    expect(fmt("cicd.config", { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: false })).toBe("ci.yaml без команд");
     expect(fmt("cicd.config", { paths: [], has_ci_yaml: false, has_steps: false })).toBe("нет ci.yaml");
     expect(fmt("cicd.pass_rate", 0.95)).toBe("95%");
     expect([45, 420, 3600, 3900].map((s) => fmt("cicd.duration", s))).toEqual(["45 с", "7 мин", "1 ч", "1 ч 5 мин"]);

@@ -132,12 +132,12 @@ const readme: Formatter = (v) => {
   return parts.length > 0 ? parts.join(", ") : null;
 };
 
-/** Конфигурация CI (булевы признаки ci.yaml): «ci.yaml со шагами» / «ci.yaml без шагов» / «нет ci.yaml». */
+/** Конфигурация CI (булевы признаки ci.yaml): «ci.yaml с командами» / «ci.yaml без команд» / «нет ci.yaml». */
 const ciConfig: Formatter = (v) => {
   const c = obj(v);
   if (!c) return null;
   if (c.has_ci_yaml !== true) return "нет ci.yaml";
-  return c.has_steps === true ? "ci.yaml со шагами" : "ci.yaml без шагов";
+  return c.has_steps === true ? "ci.yaml с командами" : "ci.yaml без команд";
 };
 
 /** «N дней» на момент скана: сколько полных дней прошло от коммита до расчета оценки. */
