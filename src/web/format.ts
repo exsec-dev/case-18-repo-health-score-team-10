@@ -168,6 +168,13 @@ export function fmtFactValue(value: unknown): string {
   if (value === null || value === undefined) return "–";
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
+  // усеченное сервером значение (`capValue`): начало JSON — как есть, а не строкой
+  // внутри JSON, где каждая кавычка шла бы с обратной косой чертой
+  const cut = value as { truncated?: unknown; bytes?: unknown; preview?: unknown };
+  if (cut.truncated === true && typeof cut.preview === "string" && typeof cut.bytes === "number") {
+    const kb = (cut.bytes / 1024).toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    return `${cut.preview}…\n\nПоказано начало: значение занимает ${kb} КБ.`;
+  }
   return JSON.stringify(value, null, 1);
 }
 

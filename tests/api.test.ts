@@ -309,13 +309,25 @@ describe("карточка репозитория", () => {
     expect(JSON.stringify(timeline.value)).not.toContain("sha");
   });
 
-  test("тяжёлое значение усекается единой формой", () => {
+  test("тяжёлое значение-объект — длинные массивы укорачиваются, остальное целое", () => {
     const heavyRepo = seedRepo(c, { org: "card", repo: "heavy", language: "Go" });
     const heavyScan = seedScan(c, heavyRepo, {
       facts: [{ key: "tree.stats", source: "git", value: { top_level: Array.from({ length: 400 }, (_, i) => ({ name: `directory-with-long-name-${i}`, type: "tree" })), loc: 1 } }],
     });
     seedScore(c, heavyRepo, heavyScan, { total: 50 });
-    const value = getRepoCard(c.db, "card", "heavy")!.evidence[0]!.value as { truncated: boolean; bytes: number; preview: string };
+    const value = getRepoCard(c.db, "card", "heavy")!.evidence[0]!.value as { top_level: unknown[]; loc: number; _trimmed: Record<string, { shown: number; total: number }> };
+    expect(Buffer.byteLength(JSON.stringify(value), "utf8")).toBeLessThanOrEqual(4096);
+    expect(value.loc).toBe(1);
+    expect(value._trimmed.top_level!.total).toBe(400);
+    expect(value.top_level.length).toBe(value._trimmed.top_level!.shown);
+    expect(value.top_level[0]).toEqual({ name: "directory-with-long-name-0", type: "tree" });
+  });
+
+  test("тяжёлое значение без массивов — единая форма усечения", () => {
+    const longRepo = seedRepo(c, { org: "card", repo: "long", language: "Go" });
+    const longScan = seedScan(c, longRepo, { facts: [{ key: "tree.stats", source: "git", value: { note: "x".repeat(6000), loc: 1 } }] });
+    seedScore(c, longRepo, longScan, { total: 50 });
+    const value = getRepoCard(c.db, "card", "long")!.evidence[0]!.value as { truncated: boolean; bytes: number; preview: string };
     expect(value.truncated).toBe(true);
     expect(value.bytes).toBeGreaterThan(4096);
     expect(value.preview).toHaveLength(512);

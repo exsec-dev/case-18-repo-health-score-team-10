@@ -1010,7 +1010,47 @@ function capValue(value: unknown): unknown | TruncatedValue {
   const json = JSON.stringify(value) ?? "null";
   const bytes = Buffer.byteLength(json, "utf8");
   if (bytes <= VALUE_CAP_BYTES) return value;
-  return { truncated: true, bytes, preview: json.slice(0, PREVIEW_CHARS) };
+  // сначала — укоротить длинные массивы (служебные списки вроде provenance.group_ids
+  // AppSec): объект остается целым, и плитки, слова факта и отчет его читают; кусок
+  // строки — только когда укорачивать нечего
+  return trimArrays(value) ?? { truncated: true, bytes, preview: json.slice(0, PREVIEW_CHARS) };
+}
+
+/** Пометка укороченных массивов: путь в значении → сколько элементов оставлено из скольких. */
+export type TrimmedNote = Record<string, { shown: number; total: number }>;
+
+/**
+ * Значение-объект в лимит ответа: самый длинный массив (по объему JSON) режется
+ * вдвое, пока значение с пометкой `_trimmed` не уложится в VALUE_CAP_BYTES. null —
+ * не объект или массивов, которые можно сократить, не осталось.
+ */
+function trimArrays(value: unknown): unknown | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const copy = structuredClone(value) as Record<string, unknown>;
+  const notes: TrimmedNote = {};
+  const size = () => Buffer.byteLength(JSON.stringify({ ...copy, _trimmed: notes }), "utf8");
+  for (let guard = 0; guard < 64; guard++) {
+    if (size() <= VALUE_CAP_BYTES) return { ...copy, _trimmed: notes };
+    let best: { parent: Record<string, unknown> | unknown[]; key: string | number; path: string; arr: unknown[]; len: number } | null = null;
+    const walk = (node: unknown, parent: Record<string, unknown> | unknown[] | null, key: string | number, path: string): void => {
+      if (Array.isArray(node)) {
+        if (parent !== null && node.length > 1) {
+          const len = JSON.stringify(node).length;
+          if (best === null || len > best.len) best = { parent, key, path, arr: node, len };
+        }
+        node.forEach((x, i) => walk(x, node, i, `${path}[${i}]`));
+      } else if (node !== null && typeof node === "object") {
+        for (const [k, x] of Object.entries(node)) walk(x, node as Record<string, unknown>, k, path === "" ? k : `${path}.${k}`);
+      }
+    };
+    walk(copy, null, "", "");
+    if (best === null) return null;
+    const b = best as { parent: Record<string, unknown> | unknown[]; key: string | number; path: string; arr: unknown[] };
+    const keep = Math.ceil(b.arr.length / 2);
+    (b.parent as Record<string | number, unknown>)[b.key] = b.arr.slice(0, keep);
+    notes[b.path] = { shown: keep, total: notes[b.path]?.total ?? b.arr.length };
+  }
+  return null;
 }
 
 /** Сырые коммиты в ответ не едут никогда: это объем, а код и его историю мы не храним. */
