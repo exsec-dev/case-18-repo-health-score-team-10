@@ -17,7 +17,9 @@ tasks:
   - name: check
     cubes:
       - name: bun-install-typecheck-test
-        image: oven/bun:1.4.2
+        # oven/bun с Docker Hub через зеркало Google: раннер упирался в лимит
+        # анонимных скачиваний Docker Hub (toomanyrequests), digest тот же
+        image: mirror.gcr.io/oven/bun:1.4.2
         script:
           - apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends git ca-certificates
           - bun install --frozen-lockfile
