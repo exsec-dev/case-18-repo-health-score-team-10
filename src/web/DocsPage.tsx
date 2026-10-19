@@ -154,8 +154,10 @@ function Inlines({ line }: { line: DocLine }) {
                 {f.text}
               </a>
             ) : (
-              <a key={i} href={f.href} target="_blank" rel="noopener noreferrer">
+              // ссылка на другой сайт — со стрелкой, как во всем сервисе (20.10.2026)
+              <a key={i} href={f.href} target="_blank" rel="noopener noreferrer" className="rh-ext-link">
                 {f.text}
+                <Icon data={ArrowUpRightFromSquare} size={12} />
               </a>
             );
           default:

@@ -730,7 +730,7 @@ body {
   gap: var(--g-spacing-4);
   box-sizing: border-box;
   min-width: 0;
-  padding: var(--g-spacing-3) var(--g-spacing-4) var(--g-spacing-4);
+  padding: var(--g-spacing-4);
 }
 
 /* длинный неразрывный адрес в сообщении не распирает плашку */
@@ -920,20 +920,22 @@ body {
 
 /* разделы ленты («Категории», «Рекомендации») — в том же `Card view="outlined"`
  * и с тем же паддингом, что блок показателей: на карточке один вид контейнера */
+/* поля 16px со всех сторон — одна мера карточек-разделов по всему сервису, как
+ * карточка организации SourceCraft и карточки «Настроек» (20.10.2026) */
 .rh-section-card {
   box-sizing: border-box;
-  padding: var(--g-spacing-3) var(--g-spacing-4);
+  padding: var(--g-spacing-4);
 }
 
-/* заголовок раздела ленты не прижат к содержимому */
+/* заголовок раздела ленты не прижат к содержимому; сверху поле дает карточка */
 .rh-section__title {
   display: block;
-  margin: var(--g-spacing-1) 0 var(--g-spacing-4);
+  margin: 0 0 var(--g-spacing-4);
 }
 
 /* селектор специфичнее стилей `Text`, которые обнуляют поле у h2 */
 .rh-section-card > .rh-section__title.g-text {
-  margin-block: var(--g-spacing-1) var(--g-spacing-4);
+  margin-block: 0 var(--g-spacing-4);
 }
 
 /* строка сильных сторон под заголовком «Категории»: отбивка до списка как у заголовка */
@@ -983,9 +985,294 @@ body {
   padding: var(--g-spacing-3) var(--g-spacing-4);
 }
 
+/* ---------- «Настройки»: карточки статуса, как «AI usage» SourceCraft (19.10.2026) ---------- */
+
+/* Раскладка по ширине содержимого (20.10.2026), страница — контейнер rh-settings:
+ * - узко: все одной лентой;
+ * - средне: учетная запись и токен парой, ниже квоты парой и пароль;
+ * - от 1200px: две колонки — «Доступ» (5 частей) и «AI» (7 частей), высоты близки;
+ * - очень широко: рамка 1600px по центру (`frame="settings"`, блок «рамка страницы»). */
+.rh-settings {
+  container: rh-settings / inline-size;
+}
+
+.rh-settings__grid,
+.rh-settings__ai {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-4);
+}
+
+.rh-settings__grid {
+  gap: var(--g-spacing-6);
+}
+
+/* учетная запись и токен: рядом, пока каждой хватает 400px, иначе столбиком; одной высоты */
+.rh-settings__access {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 400px), 1fr));
+  gap: var(--g-spacing-4);
+}
+
+/* квоты уже карточек доступа: парой с 300px на каждую */
+.rh-settings__quotas {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: var(--g-spacing-4);
+}
+
+@container rh-settings (min-width: 1200px) {
+  /* колонки одной высоты и с общим верхом: справа одна карточка «Лимиты AI»,
+   * слева учетная запись по своей высоте, токен тянется до низа (вариант A, 20.10.2026) */
+  .rh-settings__grid {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    align-items: stretch;
+  }
+
+  .rh-settings__access {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+  }
+
+  .rh-settings__ai > .rh-ai-limits {
+    flex: 1;
+  }
+}
+
+.rh-settings__sk.g-skeleton {
+  width: 100%;
+  border-radius: 12px;
+}
+
+/* поле 16px и радиус 12px — как карточка организации у SourceCraft */
 .rh-settings-card {
   box-sizing: border-box;
+  min-width: 0;
   padding: var(--g-spacing-4);
+}
+
+.rh-settings-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-4);
+  height: 100%;
+}
+
+.rh-settings-card__head {
+  display: flex;
+  gap: var(--g-spacing-3);
+  align-items: flex-start;
+}
+
+/* плитка с иконкой блока; тон — статус: зеленый «в порядке», желтый «нужно действие» */
+.rh-settings-tile {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--g-color-base-generic);
+  color: var(--g-color-text-secondary);
+}
+
+.rh-settings-tile_ok {
+  background: var(--g-color-base-positive-light);
+  color: var(--g-color-text-positive);
+}
+
+.rh-settings-tile_info {
+  background: var(--g-color-base-info-light);
+  color: var(--g-color-text-info);
+}
+
+.rh-settings-tile_warn {
+  background: var(--g-color-base-warning-light);
+  color: var(--g-color-text-warning);
+}
+
+.rh-settings-account {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--g-spacing-3);
+  align-items: center;
+}
+
+/* сноска — у нижнего края карточки, под чертой: карточки пары одной высоты */
+.rh-settings-account__note.g-text {
+  margin-top: auto;
+  padding-top: var(--g-spacing-3);
+  border-top: 1px solid var(--g-color-line-generic);
+}
+
+/* форма, как у SourceCraft: подпись над полем, подсказка под ним, кнопки ниже */
+.rh-settings-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-4);
+  /* поле пароля в карточке во всю ширину страницы не тянется */
+  max-width: 560px;
+}
+
+.rh-settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-2);
+}
+
+.rh-settings-field__req {
+  color: var(--g-color-text-danger);
+}
+
+/* вложенная серая плашка: форма замены и инструкция — как у заглушек */
+.rh-settings-inset {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-3);
+  padding: var(--g-spacing-4);
+  border-radius: var(--g-border-radius-xl);
+  background: var(--g-color-base-generic);
+}
+
+/* статус токена — полем только для чтения с метками, как адреса в «Emails» SourceCraft */
+.rh-token-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--g-spacing-2) var(--g-spacing-3);
+  align-items: center;
+  justify-content: space-between;
+  min-height: 36px;
+  box-sizing: border-box;
+  padding: 6px var(--g-spacing-2) 6px var(--g-spacing-3);
+  border: 1px solid var(--g-color-line-generic);
+  border-radius: var(--g-border-radius-l);
+  background: var(--g-color-base-generic);
+}
+
+.rh-token-status__name.g-text {
+  min-width: 0;
+}
+
+/* шаги получения токена: номер в круге, как в документации SourceCraft */
+.rh-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: rh-step;
+}
+
+.rh-steps > li {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  counter-increment: rh-step;
+}
+
+.rh-steps > li::before {
+  content: counter(rh-step);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--g-color-base-generic-hover);
+  color: var(--g-color-text-secondary);
+  font-size: var(--g-text-caption-2-font-size);
+  font-weight: 500;
+}
+
+/* квота — серой панелью внутри карточки «Лимиты AI»: крупно остаток на сутки с
+ * полосой, под чертой — час и сервис */
+.rh-quota {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-3);
+  box-sizing: border-box;
+  min-width: 0;
+  padding: var(--g-spacing-3);
+  border-radius: var(--g-border-radius-xl);
+  background: var(--g-color-base-generic);
+}
+
+/* «Доступ без лимитов» — строкой под чертой у низа карточки: текст слева, поле с
+ * кнопкой справа; на узкой карточке поле уходит под текст */
+.rh-unlock {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--g-spacing-3) var(--g-spacing-6);
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-top: auto;
+  padding-top: var(--g-spacing-4);
+  border-top: 1px solid var(--g-color-line-generic);
+}
+
+.rh-unlock__text {
+  display: flex;
+  flex: 1 1 260px;
+  flex-direction: column;
+  gap: var(--g-spacing-1);
+  min-width: 0;
+}
+
+.rh-unlock__form {
+  display: flex;
+  flex: 1 1 360px;
+  gap: var(--g-spacing-2);
+  align-items: flex-start;
+  max-width: 480px;
+}
+
+.rh-unlock__form > .g-text-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.rh-quota__head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.rh-quota__num {
+  display: flex;
+  gap: var(--g-spacing-1);
+  align-items: baseline;
+  font-variant-numeric: tabular-nums;
+}
+
+/* полоса остатка — во всю ширину карточки (в колонке Flex Progress схлопывался) */
+.rh-quota__bar.g-progress {
+  width: 100%;
+}
+
+.rh-quota__foot {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-1);
+  margin-top: auto;
+  padding-top: 10px;
+  border-top: 1px solid var(--g-color-line-generic);
+}
+
+.rh-quota__line {
+  display: flex;
+  gap: var(--g-spacing-2);
+  justify-content: space-between;
+  font-variant-numeric: tabular-nums;
+}
+
+/* «30 из 30» не рвется: переносится подпись слева */
+.rh-quota__line > :last-child {
+  flex: none;
+  white-space: nowrap;
 }
 
 /* ---------- строка категории на карточке ---------- */
@@ -1505,6 +1792,7 @@ button.rh-category:focus-visible {
  * - карточка («A→B по ширине»): лента одной колонкой до 1440px и панель 320px;
  * - сравнение: таблица до 1600px;
  * - документация: разделы, статья и оглавление — 1440px;
+ * - настройки: две колонки карточек — 1600px;
  * - рейтинг: таблица с панелью — 2000px (колонка «Репозиторий» ~600px), с 2000px.
  * Поля — внутри тела страницы. В `document` тело на это время становится единым
  * контейнером прокрутки: колесо работает и над полями, полоса — у края окна; панель
@@ -1521,6 +1809,10 @@ button.rh-category:focus-visible {
 
   .rh-page_frame-docs > :is(.rh-actionbar, .rh-page__body) {
     --rh-frame-pad: calc((100cqi - 1440px) / 2);
+  }
+
+  .rh-page_frame-settings > :is(.rh-actionbar, .rh-page__body) {
+    --rh-frame-pad: calc((100cqi - 1640px) / 2);
   }
 
   .rh-page_frame > .rh-page__body {
@@ -2039,35 +2331,6 @@ button.rh-category:focus-visible {
   background: var(--g-color-base-generic-hover);
 }
 
-/* шаги получения токена — нумерованный список в ритме текста */
-.rh-howto {
-  margin: 0;
-  padding-inline-start: var(--g-spacing-5);
-  line-height: 26px;
-}
-
-/* инструкция по токену — серая плашка, как у заглушек */
-.rh-howto-box {
-  padding: var(--g-spacing-3) var(--g-spacing-4);
-  border-radius: var(--g-border-radius-l);
-  background: var(--g-color-base-generic);
-}
-
-/* поле токена растягивается, кнопка — по тексту */
-.rh-grow {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-/* блок аккаунта по ширине содержимого, кнопка «Выйти» — его ширины */
-.rh-account {
-  display: inline-flex;
-  flex-direction: column;
-  gap: var(--g-spacing-3);
-  align-self: flex-start;
-  min-width: 200px;
-}
-
 /* кнопка входа в закрытой плашке — у нижнего края */
 .rh-score-band__signin {
   margin-top: auto;
@@ -2084,14 +2347,9 @@ button.rh-category:focus-visible {
 }
 
 
-/* серый тег посреди строки — по базовой линии текста */
-.rh-ui-tag {
-  vertical-align: baseline;
-}
-
 /* кнопка предупреждения о токене — по ширине текста, зазор над ней 8px */
 /* во всю ширину страницы: Alert Gravity по умолчанию — по содержимому */
-.g-alert.g-card_theme_info.rh-token-notice {
+.g-card.g-alert.rh-token-notice {
   --g-alert-actions-margin: var(--g-spacing-2);
   box-sizing: border-box;
   width: 100%;
@@ -2444,6 +2702,18 @@ button.rh-category:focus-visible {
   box-sizing: border-box;
 }
 
+/* синие плашки — с обводкой, как у SourceCraft, иконка синим (20.10.2026); AI-разборы
+ * карточки — своя залитая плашка, их правило ниже */
+.g-alert.g-card_theme_info.g-card_view_outlined .g-alert__icon-wrapper {
+  color: var(--g-color-text-info);
+}
+
+/* ссылка на другой сайт — стрелка после текста, по высоте строчных */
+.rh-ext-link .g-icon {
+  margin-inline-start: 3px;
+  vertical-align: -1px;
+}
+
 /* плашка чуть длиннее текста: запас справа у содержимого, отступы Alert штатные */
 .g-alert.g-card_theme_info .g-alert__main {
   margin-inline-end: var(--g-spacing-4);
@@ -2463,9 +2733,9 @@ button.rh-category:focus-visible {
   overflow: hidden;
   box-sizing: border-box;
   border: 1px solid var(--g-color-line-generic);
-  /* 12px — как у Card разделов */
+  /* 12px — как у Card разделов; поля 16px — та же мера */
   border-radius: 12px;
-  padding: var(--g-spacing-3) var(--g-spacing-4);
+  padding: var(--g-spacing-4);
   background: linear-gradient(90deg, var(--rh-ai-sc-blue) 0%, var(--rh-ai-sc-magenta) 73.08%, var(--rh-ai-sc-pink) 100%);
 }
 
@@ -2473,7 +2743,7 @@ button.rh-category:focus-visible {
  * как у .rh-section__title); кнопка обновления 28px не раздвигает строку
  * заголовка 24px, иначе заголовок с кнопкой и без нее стоял бы по-разному */
 .rh-ai-section__head {
-  margin-block-start: var(--g-spacing-1);
+  margin-block-start: 0;
 }
 
 .rh-ai-section__actions {
@@ -3891,37 +4161,6 @@ button.rh-category:focus-visible {
   min-width: 0;
 }
 
-/* таблица лимитов AI в «Настройках»: числа не переносятся, отступы — шкалой Gravity */
-.rh-ai-quota {
-  border-collapse: collapse;
-  width: 100%;
-}
-.rh-ai-quota th,
-.rh-ai-quota td {
-  padding: var(--g-spacing-1) var(--g-spacing-3) var(--g-spacing-1) 0;
-  text-align: left;
-  font-weight: normal;
-  vertical-align: baseline;
-}
-.rh-ai-quota td {
-  white-space: nowrap;
-}
-.rh-ai-quota th:last-child,
-.rh-ai-quota td:last-child {
-  padding-right: 0;
-}
-
-/* поле и кнопка форм «Настроек» — строкой, на телефоне столбиком */
-@media (max-width: 480px) {
-  .rh-inline-form {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .rh-inline-form .g-button {
-    width: 100%;
-  }
-}
-
 /* пояснение под состоянием проверки активности */
 .rh-check-foot__why {
   margin: var(--g-spacing-1) 0 0;
@@ -4033,27 +4272,6 @@ button.rh-category:focus-visible {
 }
 .rh-rating-ext:hover {
   color: var(--g-color-text-primary);
-}
-
-/* таблица лимитов — на сером фоне и по ширине содержимого; растягивается только
-   карточка */
-.rh-ai-quota-box {
-  box-sizing: border-box;
-  width: fit-content;
-  /* чуть шире содержимого — колонки не жмутся к числам */
-  min-width: min(100%, 480px);
-  max-width: 100%;
-  overflow-x: auto;
-  padding: var(--g-spacing-2) var(--g-spacing-4);
-  border-radius: var(--g-border-radius-l);
-  background: var(--g-color-base-generic);
-}
-.rh-ai-quota-box .rh-ai-quota {
-  width: 100%;
-}
-.rh-ai-quota-box .rh-ai-quota th,
-.rh-ai-quota-box .rh-ai-quota td {
-  padding-right: var(--g-spacing-6);
 }
 
 /* знак вопроса — внутри плашки «По открытым данным» */
@@ -4343,8 +4561,10 @@ button.rh-category:focus-visible {
   font-size: 0.9em;
 }
 
-/* элемент интерфейса в тексте: серый тег с иконкой как в UI */
-.rh-docs__ui {
+/* элемент интерфейса в тексте: серая подложка прямо в строке (документация и
+ * инструкция по токену в «Настройках» — одним видом, 20.10.2026) */
+.rh-docs__ui,
+.rh-ui-name {
   padding: 1px 6px;
   border-radius: var(--g-border-radius-xs);
   background: var(--g-color-base-generic);
@@ -5013,20 +5233,6 @@ button.rh-category:focus-visible {
 
 .rh-tpl__empty {
   padding: var(--g-spacing-3) 0;
-}
-
-/* «Лимиты AI» на телефоне: подписи колонок переносятся («Сервис / за сутки»),
- * отступы меньше — таблица помещается без прокрутки вбок */
-@media (max-width: 480px) {
-  .rh-ai-quota thead th {
-    max-width: 72px;
-    white-space: normal;
-  }
-
-  .rh-ai-quota th,
-  .rh-ai-quota td {
-    padding-right: var(--g-spacing-2);
-  }
 }
 
 /* опись: ряд фильтров — видимость, организация, состояние, язык, сортировка */

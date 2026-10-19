@@ -619,7 +619,7 @@ interface PageProps {
    * группой по центру, шапка страницы — по той же рамке. Мера у каждого вида своя
    * (layout.css, «рамка страницы»); без рамки страница во всю ширину, как прежде.
    */
-  frame?: "card" | "table" | "docs" | "compare";
+  frame?: "card" | "table" | "docs" | "compare" | "settings";
   children: ReactNode;
 }
 

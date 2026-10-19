@@ -179,8 +179,8 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     expect(src).toMatch(/<Text variant="header-2" color="secondary" className="rh-page-title">\s*\{entries\.length\}/);
     // плейсхолдер — «Поиск», как у рейтинга
     expect(src).toContain('placeholder="Поиск"');
-    // описание под заголовком вместо иконки-подсказки
-    expect(src).not.toContain("<HelpMark");
+    // описание под заголовком вместо иконки-подсказки (знаки вопроса у квот — на /settings)
+    expect(reposPage).not.toContain("<HelpMark");
     expect(src).not.toContain("Здесь ваше избранное: отметьте");
     // одна короткая фраза вместо двух предложений
     // UX 17.10: «Избранное» — наблюдение: что изменилось и что улучшить

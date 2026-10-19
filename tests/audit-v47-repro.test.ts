@@ -111,16 +111,16 @@ describe("П3: кабинет «Мои репозитории»", () => {
     expect({ check: me().includes("✓"), cross: me().includes("✗") }).toEqual({ check: false, cross: false });
   });
 
-  // Кроме обертки `CabinetAlert` Alert стоит в 2 местах с особым видом:
-  // предупреждение «нет токена» и плашка «Токен показывается один раз»
-  // (`view="filled"`).
-  test("П3.4 → Е17/Е18: Alert — обертка и 2 места с особым видом", () => {
+  // Кроме обертки `CabinetAlert` Alert стоит в 1 месте с особым видом:
+  // предупреждение «нет токена». Плашки «Токен показывается один раз» нет с
+  // редизайна «Настроек» 19.10.2026 — это последний шаг инструкции.
+  test("П3.4 → Е17/Е18: Alert — обертка и 1 место с особым видом", () => {
     const alerts = me().match(/<Alert\b[^>]*/g) ?? [];
-    expect(alerts.length).toBe(3);
+    expect(alerts.length).toBe(2);
     // кнопка под текстом – горизонтальной раскладки нет, иконка синяя
     expect(me()).not.toContain('layout="horizontal"');
     expect(me()).toContain('className="rh-info-icon"');
-    expect(me()).toMatch(/<Alert theme="warning" view="filled" size="s" message="Токен показывается один раз/);
+    expect(me()).toContain("SourceCraft показывает его только один раз");
   });
 
   test("П3.4 (У26): /api/me/repos несет recommendationsCount (null без прав, не 0)", async () => {

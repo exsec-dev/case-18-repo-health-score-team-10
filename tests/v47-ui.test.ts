@@ -122,15 +122,17 @@ describe("Б5 (П3.2–П3.4): кабинет «Мои репозитории»"
     }).toEqual({ onePill: false, visibility: true, channels: false, glyphs: false, legend: false });
   });
 
-  // 3 Alert: обертка, предупреждение «нет токена» и плашка про одноразовый показ токена
+  // 2 Alert: обертка и предупреждение «нет токена» (плашки про одноразовый показ
+  // токена нет с редизайна «Настроек» 19.10.2026 — это шаг инструкции)
   test("П3.4: Alert обертки — view и size общие, тема по смыслу", () => {
     const code = me();
-    expect((code.match(/<Alert\b/g) ?? []).length).toBe(3);
+    expect((code.match(/<Alert\b/g) ?? []).length).toBe(2);
     expect(code).toMatch(/<Alert theme=\{theme\} view="outlined" size="m"/);
     // остальные плашки кабинета идут через обертку
     // UX 17.10: +5 у «Моих репозиториев» (сбой сессии, сбой списка, сбой обновления,
-    // список не обновлен по окну, неполный список)
-    expect((code.match(/<CabinetAlert\b/g) ?? []).length).toBe(11);
+    // список не обновлен по окну, неполный список); 19.10: +2 у «Настроек» (лимиты
+    // не загрузились, токен не читается)
+    expect((code.match(/<CabinetAlert\b/g) ?? []).length).toBe(13);
   });
 
   test("П3.4: слаг — общим RepoSlug; пустое состояние — EmptyState; карточек `rh-me-card` в кабинете нет (В4.8)", () => {

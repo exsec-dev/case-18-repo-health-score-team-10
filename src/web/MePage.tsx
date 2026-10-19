@@ -4,9 +4,11 @@
 // живая проверка → зашифрованное хранение. API токен никогда не возвращает и не логирует.
 import {
   ArrowRightFromSquare,
+  ArrowUpRightFromSquare,
   ArrowsRotateRight,
   BarsAscendingAlignLeft,
   BarsDescendingAlignLeft,
+  Check,
   CircleCheck,
   CircleDashed,
   CircleExclamation,
@@ -20,6 +22,7 @@ import {
   Lock,
   Magnifier,
   OctagonXmark,
+  Person,
   Play,
   Plus,
   Star,
@@ -42,25 +45,28 @@ import {
   Dialog,
   DropdownMenu,
   Flex,
+  HelpMark,
   Icon,
   type IconData,
   Label,
   Link,
   Popup,
+  Progress,
   SegmentedRadioGroup,
   Select,
   Sheet,
+  Skeleton,
   Text,
   TextInput,
   useToaster,
 } from "@gravity-ui/uikit";
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { EmptyIllustration, IdentityIllustration, SearchIllustration } from "./illustrations";
-import { type MeResponse, type MetaResponse, type MyReposResponse, type TokenRepoEntry, type TokenReposResponse, dataOf, logout, mutateJson, useJson, useLatest } from "./api";
+import { type MeResponse, type MetaResponse, type MyReposResponse, RequestError, type TokenRepoEntry, type TokenReposResponse, dataOf, logout, mutateJson, useJson, useLatest } from "./api";
 import type { LiveAnalysis } from "./analysis";
 import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
 import { plural } from "../report/submetrics";
-import { FRAUD_TITLE, authErrorText, jobErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, quotaCell, scoreTheme, scoreWord, slugOf, type ActionQuotaView, type AiQuotaView, type FavoriteAddCheck, type QuotaWindowView } from "./format";
+import { FRAUD_TITLE, authErrorText, jobErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, quotaBlockedText, quotaCounter, scoreTheme, scoreWord, slugOf, type ActionQuotaView, type AiAction, type AiQuotaView, type FavoriteAddCheck, type QuotaWindowView } from "./format";
 import { type Band, BANDS, groupByOrg, orgMetaText, orgSummaryOf, isClosed, multiSummary, orderOrgs, type RepoEntry, scoreChange, filterTokenRows, tokenParamsOf, tokenRowOrder, tokenSearchOf, tokenStateOf, TOKEN_FILTER_DEFAULT, TOKEN_SORTS, TOKEN_STATES, type TokenFilter, type TokenSort, type TokenState, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
 import { linkProps, navigate, repoHref } from "./router";
 import { readCollapsedOrgs, useMediaQuery, writeCollapsedOrgs } from "./prefs";
@@ -74,11 +80,7 @@ const SETTINGS_CRUMBS = [{ text: "Настройки" }];
 
 /** Название раздела SourceCraft в инструкции — серым тегом. */
 function UiTag({ children }: { children: ReactNode }) {
-  return (
-    <Label theme="unknown" size="xs" className="rh-ui-tag">
-      {children}
-    </Label>
-  );
+  return <span className="rh-ui-name">{children}</span>;
 }
 
 /** Инструкция SourceCraft по персональному токену. */
@@ -91,7 +93,7 @@ function CabinetAlert({
   message,
   actions,
 }: {
-  theme?: "danger" | "info";
+  theme?: "danger" | "info" | "warning";
   title: string;
   message?: ReactNode;
   actions?: AlertProps["actions"];
@@ -114,12 +116,14 @@ function TokenNotice({ hasPat }: { hasPat: boolean }) {
       </Button>
     </span>
   );
+  // нет токена — приглашение (синим), не читается — проблема (желтым); плашки
+  // с обводкой, как у SourceCraft (выбор 20.10.2026)
   return (
     <Alert
-      theme="info"
-      view="filled"
+      theme={unreadable ? "warning" : "info"}
+      view="outlined"
       className="rh-token-notice"
-      icon={<Icon data={Key} size={18} className="rh-info-icon" />}
+      icon={unreadable ? undefined : <Icon data={Key} size={18} className="rh-info-icon" />}
       title={unreadable ? "Сохраните токен доступа SourceCraft заново" : "Добавьте персональный токен доступа SourceCraft"}
       message={unreadable ? "Сохраненный токен больше не читается сервисом. Без него закрыты CI/CD, Безопасность и анализ своих репозиториев." : "С ним откроются CI/CD, Безопасность и анализ своих репозиториев."}
       actions={action}
@@ -166,94 +170,260 @@ export function SettingsPage() {
   const data = dataOf(me);
   if (data === null && me.kind !== "error") {
     return (
-      <Page crumbs={SETTINGS_CRUMBS}>
-        <SkeletonRows rows={4} height={56} />
+      <Page crumbs={SETTINGS_CRUMBS} frame="settings">
+        <SettingsSkeleton />
       </Page>
     );
   }
   if (data === null) {
     return (
-      <Page crumbs={SETTINGS_CRUMBS}>
-        <CabinetAlert title="Не удалось загрузить настройки" message={me.kind === "error" ? me.message : undefined} actions={[{ text: "Повторить", handler: reloadMe }]} />
+      <Page crumbs={SETTINGS_CRUMBS} frame="settings">
+        <div className="rh-settings">
+          <PageHeader title="Настройки" />
+          <CabinetAlert title="Не удалось загрузить настройки" message={me.kind === "error" ? me.message : undefined} actions={[{ text: "Повторить", handler: reloadMe }]} />
+        </div>
       </Page>
     );
   }
   if (data.login === null) return <LoginOffer pageTitle="Настройки" />;
+  return <SettingsBody me={data} reloadMe={reloadMe} />;
+}
+
+/**
+ * Строку «Доступ без лимитов» без токена — вровень с плашкой «Как получить токен»
+ * (20.10.2026): плашка в другой колонке, внутри карточки токена, поэтому CSS их не
+ * выровняет. Пока колонки стоят рядом, отступ над строкой подгоняется по замеру; в
+ * одну колонку и с токеном (плашки нет) — штатное место у низа карточки.
+ */
+function useUnlockAlign(grid: RefObject<HTMLDivElement | null>) {
+  useLayoutEffect(() => {
+    const root = grid.current;
+    if (!root) return;
+    let frame = 0;
+    const align = () => {
+      const howto = root.querySelector<HTMLElement>(".rh-token-howto");
+      const unlock = root.querySelector<HTMLElement>(".rh-unlock");
+      const access = root.querySelector<HTMLElement>(".rh-settings__access");
+      const ai = root.querySelector<HTMLElement>(".rh-settings__ai");
+      if (!unlock) return;
+      unlock.style.removeProperty("margin-top");
+      if (!howto || !access || !ai || ai.getBoundingClientRect().left < access.getBoundingClientRect().right) return;
+      unlock.style.marginTop = "0px";
+      const delta = howto.getBoundingClientRect().top - unlock.getBoundingClientRect().top;
+      if (delta > 0) unlock.style.marginTop = `${Math.round(delta)}px`;
+      else unlock.style.removeProperty("margin-top");
+    };
+    const schedule = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(align);
+    };
+    // ширина окна, загрузка лимитов и смена состояния токена меняют размер колонок —
+    // этого наблюдателю достаточно, без слежки за всем деревом
+    const ro = new ResizeObserver(schedule);
+    ro.observe(root);
+    root.querySelectorAll(".rh-settings__access, .rh-settings__ai").forEach((el) => ro.observe(el));
+    // первый раз — до отрисовки: строка не прыгает после первого кадра
+    align();
+    return () => {
+      cancelAnimationFrame(frame);
+      ro.disconnect();
+    };
+  }, [grid]);
+}
+
+function SettingsBody({ me: data, reloadMe }: { me: MeResponse; reloadMe: () => void }) {
+  const grid = useRef<HTMLDivElement>(null);
+  useUnlockAlign(grid);
   return (
-    <Page
-      crumbs={SETTINGS_CRUMBS}
-      aside={
-        <>
-          <AccountSection me={data} />
-          {/* «только для чтения» верно: запросов на запись к SourceCraft в коде нет */}
-          <AsideSection title="Зачем токен">
-            <Text color="complementary">Нужен, чтобы видеть CI/CD и Безопасность своих репозиториев. Используется только для чтения.</Text>
-          </AsideSection>
-        </>
-      }
-    >
-      {/* заголовок страницы — как у остальных разделов: H1 для навигации по заголовкам */}
-      <PageHeader title="Настройки" description="Токен доступа и лимиты AI" />
-      {/* у PatSection нет key по дате проверки: иначе она перемонтируется и
-          строка «Токен принадлежит…» пропадет сразу после сохранения */}
-      <Flex direction="column" gap={4}>
-        <PatSection hasPat={data.hasPat} unreadable={data.patUnreadable === true} checkedAt={data.patCheckedAt} onChanged={reloadMe} />
-        <AiLimitsSections />
-      </Flex>
+    // карточки статуса, как «AI usage» SourceCraft (выбор 19.10.2026). Две группы:
+    // «Доступ» (учетная запись, токен) и «AI» (квоты, пароль). На широкой странице —
+    // двумя колонками, уже — одна под другой; порядок чтения один (layout.css)
+    <Page crumbs={SETTINGS_CRUMBS} frame="settings">
+      <div className="rh-settings">
+        {/* заголовок страницы — как у остальных разделов: H1 для навигации по заголовкам */}
+        <PageHeader title="Настройки" description="Учетная запись, токен SourceCraft и лимиты AI" />
+        <div className="rh-settings__grid" ref={grid}>
+          <div className="rh-settings__access">
+            <AccountCard me={data} />
+            {/* у PatSection нет key по дате проверки: иначе она перемонтируется и
+                строка владельца пропадет сразу после сохранения */}
+            <PatSection hasPat={data.hasPat} unreadable={data.patUnreadable === true} checkedAt={data.patCheckedAt} onChanged={reloadMe} />
+          </div>
+          <div className="rh-settings__ai">
+            <AiLimitsSections />
+          </div>
+        </div>
+      </div>
     </Page>
   );
 }
-/** Остаток лимитов AI в той же форме «N/M», что на кнопках карточки репозитория. */
-function AiQuotaTable({ data }: { data: AiQuotaView }) {
-  const cell = (w: QuotaWindowView | null, none: string): string => (w === null ? none : quotaCell(w));
-  const rows: { title: string; q: ActionQuotaView }[] = [
-    { title: "AI-обзоры", q: data.overview },
-    { title: "Проверки оценки", q: data.check },
-  ];
-  const head = (text: string) => (
-    <th scope="col">
-      <Text variant="caption-2" color="secondary">
-        {text}
-      </Text>
-    </th>
-  );
+
+/** Загрузка в форме страницы: шапка, две карточки рядом и квоты. */
+function SettingsSkeleton() {
   return (
-    <div className="rh-ai-quota-box">
-    <table className="rh-ai-quota">
-      <thead>
-        <tr>
-          <th scope="col" aria-label="Действие" />
-          {head("За час")}
-          {head("За сутки")}
-          {head(data.unlocked ? "Потолок по паролю за сутки" : "Сервис за сутки")}
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((r) => (
-          <tr key={r.title}>
-            <th scope="row">
-              <Text variant="body-short">{r.title}</Text>
-            </th>
-            <td>
-              <Text variant="body-short">{cell(r.q.hour, "без лимита")}</Text>
-            </td>
-            <td>
-              <Text variant="body-short">{cell(r.q.day, "без лимита")}</Text>
-            </td>
-            <td>
-              <Text variant="body-short">{cell(r.q.global, "без потолка")}</Text>
-            </td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="rh-settings" aria-busy="true" aria-label="Загрузка">
+      <Flex direction="column" gap={2} style={{ marginBottom: "var(--g-spacing-6)" }}>
+        <Skeleton style={{ width: 180, height: 28 }} />
+        <Skeleton style={{ width: 320, height: 20 }} />
+      </Flex>
+      <div className="rh-settings__grid">
+        {/* высоты — как у страницы с сохраненным токеном: учетная запись 124 + токен 273
+            слева и «Лимиты AI» 413 справа, колонки одной высоты (124 + 16 + 273) */}
+        <div className="rh-settings__access">
+          <Skeleton className="rh-settings__sk" style={{ height: 124 }} />
+          <Skeleton className="rh-settings__sk" style={{ height: 273 }} />
+        </div>
+        <div className="rh-settings__ai">
+          {/* в две колонки тянется до высоты левой (сетка растягивает колонки), в одну — своей высоты */}
+          <Skeleton className="rh-settings__sk" style={{ minHeight: 413, flex: 1 }} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** Карточка с плиткой-иконкой и заголовком: токен и пароль. Тон плитки — статус блока. */
+function SettingsCard({
+  icon,
+  tone,
+  title,
+  status,
+  description,
+  children,
+}: {
+  icon: IconData;
+  tone?: "ok" | "warn" | "info";
+  title: string;
+  status?: ReactNode;
+  description?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <Card view="outlined" className="rh-settings-card">
+      <section className="rh-settings-card__body">
+        <div className="rh-settings-card__head">
+          <span className={`rh-settings-tile${tone ? ` rh-settings-tile_${tone}` : ""}`} aria-hidden="true">
+            <Icon data={icon} size={20} />
+          </span>
+          <Flex direction="column" gap={1} style={{ minWidth: 0 }}>
+            <Flex gap={2} alignItems="center" wrap>
+              <Text variant="subheader-3" as="h2">
+                {title}
+              </Text>
+              {status}
+            </Flex>
+            {description && <Text color="secondary">{description}</Text>}
+          </Flex>
+        </div>
+        {children}
+      </section>
+    </Card>
+  );
+}
+
+// ---------- лимиты AI: одна карточка с квотами и паролем, как «AI usage» SourceCraft ----------
+
+const QUOTA_TITLES = {
+  overview: { title: "AI-обзоры", caption: "Обзор репозитория и разборы категорий", help: "Обзор репозитория моделью и разборы категорий на карточке репозитория." },
+  check: { title: "Проверки активности", caption: "Проверка оценки на накрутку", help: "Проверка истории коммитов и задач на признаки искусственной активности." },
+} as const;
+
+const leftOf = (w: QuotaWindowView): number => Math.max(0, w.limit - w.used);
+
+/**
+ * Квота одного действия — серой панелью в карточке «Лимиты AI»: крупно — остаток
+ * личного лимита на сутки и полоса остатка,
+ * под чертой — час и общий потолок сервиса. Остаток, а не расход: так же считают
+ * счетчики на кнопках карточки (`quotaCounter`). Причина блокировки — тем же текстом,
+ * что под кнопкой (`quotaBlockedText`).
+ */
+function QuotaPanel({ action, q }: { action: AiAction; q: ActionQuotaView }) {
+  const t = QUOTA_TITLES[action];
+  const head = (
+    <div className="rh-quota__head">
+      <Flex gap={1} alignItems="center">
+        <Text variant="subheader-3" as="h3">
+          {t.title}
+        </Text>
+        <HelpMark iconSize="s" aria-label={`Что такое «${t.title}»`}>
+          {t.help}
+        </HelpMark>
+      </Flex>
+      <Text color="secondary">{t.caption}</Text>
+    </div>
+  );
+  if (q.unlocked) {
+    return (
+      <div className="rh-quota">
+        {head}
+        <Flex direction="column" gap={1}>
+          <Text variant="header-1">Без личных лимитов</Text>
+          <Text color="secondary">Включен доступ по паролю</Text>
+        </Flex>
+        {q.global && (
+          <div className="rh-quota__foot">
+            <QuotaLine name="Потолок по паролю сегодня, осталось" w={q.global} />
+          </div>
+        )}
+      </div>
+    );
+  }
+  const main = q.day ?? q.global;
+  const counter = quotaCounter(q);
+  const blocked = counter !== null && counter.left === 0 ? quotaBlockedText(action, q, counter) : null;
+  const left = main ? leftOf(main) : null;
+  const share = main && main.limit > 0 ? leftOf(main) / main.limit : 1;
+  const theme = left === 0 ? "danger" : share <= 1 / 3 ? "warning" : "success";
+  return (
+    <div className="rh-quota">
+      {head}
+      <Flex direction="column" gap={2}>
+        <Text color="secondary">{q.day ? "Осталось сегодня" : "Осталось у сервиса сегодня"}</Text>
+        {main ? (
+          <>
+            <div className="rh-quota__num" aria-label={`Осталось ${leftOf(main)} из ${main.limit}`}>
+              <Text variant="header-1" color={left === 0 ? "danger" : undefined}>
+                {leftOf(main)}
+              </Text>
+              <Text variant="header-1" color="hint">
+                / {main.limit}
+              </Text>
+            </div>
+            <Progress value={share * 100} theme={theme} size="xs" className="rh-quota__bar" />
+          </>
+        ) : (
+          <Text variant="header-1">без лимита</Text>
+        )}
+        {blocked && (
+          <Text color={counter?.window === "hour" ? "warning" : "danger"} className="rh-quota__blocked">
+            {blocked}
+          </Text>
+        )}
+      </Flex>
+      {(q.hour || (q.day && q.global)) && (
+        <div className="rh-quota__foot">
+          {q.hour && <QuotaLine name="В этот час осталось" w={q.hour} />}
+          {q.day && q.global && <QuotaLine name="У всего сервиса сегодня осталось" w={q.global} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function QuotaLine({ name, w }: { name: string; w: QuotaWindowView }) {
+  return (
+    <div className="rh-quota__line">
+      <Text color="secondary">{name}</Text>
+      <Text color={leftOf(w) === 0 ? "danger" : undefined}>{`${leftOf(w)} из ${w.limit}`}</Text>
     </div>
   );
 }
 
 /**
- * Карточки «Лимиты AI» и «Доступ без лимитов». Лимиты видит каждый вошедший;
- * карточка пароля — только если пароль настроен на сервере.
+ * Карточка «Лимиты AI» (вариант A, 20.10.2026): заголовок в карточке, квоты рядом, под
+ * чертой — «Доступ без лимитов» одной строкой. Лимиты видит каждый вошедший; строка
+ * пароля — только если пароль настроен на сервере. Пока лимиты грузятся — скелетон
+ * панелей, при сбое — плашка с повтором (раньше блок молча пропадал).
  */
 function AiLimitsSections() {
   const quota = useJson<AiQuotaView>("/api/me/ai-quota");
@@ -262,7 +432,6 @@ function AiLimitsSections() {
   const [error, setError] = useState<string | null>(null);
   const toaster = useToaster();
   const data = dataOf(quota.state);
-  if (data === null) return null;
 
   async function unlock() {
     setBusy(true);
@@ -292,106 +461,160 @@ function AiLimitsSections() {
   }
 
   return (
-    <>
-      <Card view="outlined" className="rh-settings-card">
-        <Flex as="section" direction="column" gap={3}>
-          <Text variant="subheader-2" as="h2">
+    <Card view="outlined" className="rh-settings-card rh-ai-limits">
+      <section className="rh-settings-card__body" aria-labelledby="rh-ai-limits-title">
+        <Flex direction="column" gap={1}>
+          <Text variant="subheader-3" as="h2" id="rh-ai-limits-title">
             Лимиты AI
           </Text>
-          <Text variant="body-short" color="secondary">
-            Сколько AI-обзоров и проверок активности еще можно запустить. Сутки считаются с 00:00 по московскому времени.
-          </Text>
-          <AiQuotaTable data={data} />
+          <Text color="secondary">Сколько AI-обзоров и проверок активности еще можно запустить. Сутки считаются с 00:00 по московскому времени.</Text>
         </Flex>
-      </Card>
-      {data.unlockAvailable && (
-        <Card view="outlined" className="rh-settings-card">
-          <Flex as="section" direction="column" gap={3}>
-            <Flex gap={2} alignItems="center" wrap>
-              <Text variant="subheader-2" as="h2">
-                Доступ без лимитов
-              </Text>
-              {data.unlocked ? (
-                <Label theme="success" size="xs">
-                  Включен
-                </Label>
-              ) : (
-                <Label theme="unknown" size="xs">
-                  Не включен
-                </Label>
-              )}
-            </Flex>
-            <Text variant="body-short" color="secondary">
-              {data.unlocked
-                ? "AI-обзоры и проверки активности не ограничены личными лимитами."
-                : "Пароль выдает администратор сервиса. Он снимает личные лимиты AI."}
-            </Text>
-            {data.unlocked ? (
-              <Flex gap={2}>
-                <Button view="normal" size="m" onClick={() => void lock()} loading={busy}>
-                  Отключить
-                </Button>
+        {data ? (
+          <div className="rh-settings__quotas">
+            <QuotaPanel action="overview" q={data.overview} />
+            <QuotaPanel action="check" q={data.check} />
+          </div>
+        ) : quota.state.kind === "error" ? (
+          <CabinetAlert
+            title="Лимиты не загрузились"
+            message="Запуск AI-обзоров при этом работает – остаток видно на кнопках карточки репозитория."
+            actions={[{ text: "Повторить", handler: quota.reload }]}
+          />
+        ) : (
+          <div className="rh-settings__quotas" aria-busy="true" aria-label="Загрузка лимитов">
+            <Skeleton className="rh-settings__sk" style={{ height: 196 }} />
+            <Skeleton className="rh-settings__sk" style={{ height: 196 }} />
+          </div>
+        )}
+        {data?.unlockAvailable && (
+          // пароль — строкой: название, статус и пояснение слева, поле с кнопкой справа
+          <div className="rh-unlock">
+            <div className="rh-unlock__text">
+              <Flex gap={2} alignItems="center" wrap>
+                <Text variant="subheader-2" as="h3">
+                  Доступ без лимитов
+                </Text>
+                {data.unlocked ? (
+                  <Label theme="success" size="s" icon={<Icon data={Check} size={14} />}>
+                    Включен
+                  </Label>
+                ) : (
+                  <Label theme="unknown" size="s">
+                    Не включен
+                  </Label>
+                )}
               </Flex>
+              <Text color="secondary">
+                {data.unlocked
+                  ? "AI-обзоры и проверки активности не ограничены личными лимитами – действует только потолок по паролю."
+                  : "Пароль выдает администратор сервиса. Он снимает личные лимиты AI."}
+              </Text>
+            </div>
+            {data.unlocked ? (
+              <Button view="outlined" size="l" onClick={() => void lock()} loading={busy}>
+                Отключить
+              </Button>
             ) : (
-              <Flex gap={2} alignItems="center" className="rh-inline-form">
+              <form
+                className="rh-unlock__form"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (password.length > 0 && !busy) void unlock();
+                }}
+              >
                 <TextInput
-                  className="rh-grow"
                   type="password"
-                  size="m"
-                  placeholder="Пароль доступа"
+                  size="l"
+                  placeholder="Пароль от администратора"
                   value={password}
-                  onUpdate={setPassword}
+                  onUpdate={(v) => {
+                    setPassword(v);
+                    setError(null);
+                  }}
                   hasClear
                   autoComplete="off"
+                  validationState={error ? "invalid" : undefined}
+                  errorMessage={error ?? undefined}
                   controlProps={{ "aria-label": "Пароль доступа к AI без лимитов" }}
                 />
-                <Button view="action" size="m" onClick={() => void unlock()} loading={busy} disabled={busy || password.length === 0}>
+                <Button view="action" type="submit" size="l" loading={busy} disabled={busy || password.length === 0}>
                   Включить
                 </Button>
-              </Flex>
+              </form>
             )}
-            {error && (
-              <Text color="danger" variant="body-short">
-                {error}
-              </Text>
-            )}
-          </Flex>
-        </Card>
-      )}
-    </>
+          </div>
+        )}
+      </section>
+    </Card>
   );
 }
 
+/** Строка формы, как у SourceCraft: подпись над полем, подсказка под ним (ошибку рисует само поле). */
+function SettingsField({ label, hint, required = false, children }: { label: string; hint?: ReactNode; required?: boolean; children: ReactNode }) {
+  return (
+    <div className="rh-settings-field">
+      <Text variant="subheader-1" as="div">
+        {label}
+        {required && (
+          <span className="rh-settings-field__req" aria-hidden="true">
+            {" "}
+            *
+          </span>
+        )}
+      </Text>
+      {children}
+      {hint && <Text color="secondary">{hint}</Text>}
+    </div>
+  );
+}
 
 /**
- * «Аккаунт» — кто вошел и выход. Здесь выход доступен всегда, в том числе при
- * узком rail, где у аватара кнопки нет.
+ * Учетная запись — кто вошел и выход, карточкой рядом с токеном (как «Active
+ * organization» у SourceCraft). Выход здесь доступен всегда, в том числе при узком
+ * rail, где у аватара кнопки нет.
  */
-function AccountSection({ me }: { me: MeResponse }) {
+function AccountCard({ me }: { me: MeResponse }) {
   const toaster = useToaster();
+  const [leaving, setLeaving] = useState(false);
   const name = displayName(me);
   return (
-    <AsideSection title="Аккаунт">
-      <div className="rh-account">
-      <Flex gap={3} alignItems="center">
-        <UserAvatar me={me} />
-        <Flex direction="column" style={{ minWidth: 0 }}>
-          <Text variant="subheader-2" ellipsis>
-            {name}
-          </Text>
-          <Text color="secondary" ellipsis>
-            {name !== me.login ? me.login : "вход через Я ID"}
-          </Text>
-        </Flex>
-      </Flex>
-      {/* «Выйти» — шириной блока аккаунта: без обертки rh-account колонка панели
-          (align-items: stretch) растянула бы кнопку во всю ширину */}
-        <Button view="outlined" size="m" width="max" onClick={() => void logout().catch((e: unknown) => toaster.add(logoutFailedToast(e)))}>
-          <Icon data={ArrowRightFromSquare} size={16} />
-          Выйти
-        </Button>
-      </div>
-    </AsideSection>
+    <Card view="outlined" className="rh-settings-card">
+      <section className="rh-settings-card__body" aria-labelledby="rh-account-title">
+        <h2 className="rh-sr-only" id="rh-account-title">
+          Учетная запись
+        </h2>
+        <div className="rh-settings-account">
+          <UserAvatar me={me} />
+          <Flex direction="column" gap={1} style={{ minWidth: 0, flex: 1 }}>
+            <Text variant="subheader-2" ellipsis>
+              {name}
+            </Text>
+            <Meta>
+              {name !== me.login && me.login && <MetaItem icon={Person}>{me.login}</MetaItem>}
+              <MetaItem>вход через Я ID</MetaItem>
+            </Meta>
+          </Flex>
+          <Button
+            view="outlined"
+            size="l"
+            loading={leaving}
+            onClick={() => {
+              setLeaving(true);
+              void logout().catch((e: unknown) => {
+                setLeaving(false);
+                toaster.add(logoutFailedToast(e));
+              });
+            }}
+          >
+            <Icon data={ArrowRightFromSquare} size={16} />
+            Выйти
+          </Button>
+        </div>
+        <Text color="secondary" className="rh-settings-account__note">
+          Сервис берет из Я ID только имя, логин и портрет.
+        </Text>
+      </section>
+    </Card>
   );
 }
 
@@ -435,16 +658,27 @@ function LoginOffer({ pageTitle }: { pageTitle: "Избранное" | "Мои �
 
 // ---------- токен: PUT проверяет его в SourceCraft и сохраняет, DELETE удаляет ----------
 
+/** Создание токена в SourceCraft — прямой адрес формы «Create a personal access token». */
+const PAT_CREATE_URL = "https://sourcecraft.dev/me/create-token";
+
+/** Ошибки самого токена — у поля, как в формах SourceCraft; сбои сервиса — плашкой. */
+const PAT_FIELD_ERRORS = new Set(["bad_token"]);
+
 function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasPat: boolean; unreadable?: boolean; checkedAt: string | null; onChanged: () => void }) {
   const [token, setToken] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ text: string; field: boolean } | null>(null);
   const [owner, setOwner] = useState<string | null>(null);
   const [replacing, setReplacing] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   // заголовок ошибки зависит от операции: сохранение или удаление
   const [failedOp, setFailedOp] = useState<"save" | "remove">("save");
   const toaster = useToaster();
+
+  const failure = (e: unknown) => ({
+    text: e instanceof Error ? e.message : String(e),
+    field: e instanceof RequestError && e.code !== null && PAT_FIELD_ERRORS.has(e.code),
+  });
 
   async function save() {
     setBusy(true);
@@ -465,7 +699,7 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
       });
       onChanged();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(failure(e));
     } finally {
       setBusy(false);
     }
@@ -483,126 +717,195 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
       onChanged();
     } catch (e) {
       setConfirmDelete(false);
-      setError(e instanceof Error ? e.message : String(e));
+      setError(failure(e));
     } finally {
       setBusy(false);
     }
   }
 
-  const tokenForm = (label: string, submit: string) => (
-    // поле и кнопка в ряд; на телефоне столбиком, иначе поле сжимается до «Персона…»
-    <Flex gap={2} alignItems="center" className="rh-inline-form">
-      <TextInput
-        className="rh-grow"
-        type="password"
-        size="m"
-        placeholder={label}
-        value={token}
-        onUpdate={setToken}
-        hasClear
-        autoComplete="off"
-        controlProps={{ "aria-label": label }}
-      />
-      <Button view="action" size="m" onClick={save} loading={busy} disabled={busy || token.length < 8}>
-        {submit}
-      </Button>
-    </Flex>
+  const fieldError = error?.field ? error.text : null;
+  const alertError = error && !error.field ? error : null;
+
+  const tokenForm = (replace: boolean) => (
+    <form
+      className="rh-settings-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (token.length >= 8 && !busy) void save();
+      }}
+    >
+      <SettingsField
+        label={replace ? "Новый токен" : "Персональный токен доступа"}
+        required={!replace}
+        // при ошибке у поля подсказка не нужна: под полем одна строка, как у SourceCraft
+        hint={fieldError ? undefined : busy ? "Проверяем токен в SourceCraft." : replace ? "Пока новый токен не проверен, работает прежний." : "Перед сохранением проверим его в SourceCraft."}
+      >
+        <TextInput
+          type="password"
+          size="l"
+          placeholder="Вставьте токен из SourceCraft"
+          value={token}
+          onUpdate={(v) => {
+            setToken(v);
+            if (error?.field) setError(null);
+          }}
+          hasClear
+          autoComplete="off"
+          disabled={busy}
+          validationState={fieldError ? "invalid" : undefined}
+          errorMessage={fieldError ?? undefined}
+          controlProps={{ "aria-label": replace ? "Новый персональный токен доступа" : "Персональный токен доступа SourceCraft" }}
+        />
+      </SettingsField>
+      <Flex gap={2} wrap>
+        <Button view="action" type="submit" size="l" loading={busy} disabled={busy || token.length < 8}>
+          {replace ? "Проверить и заменить" : "Проверить и сохранить"}
+        </Button>
+        {replace && (
+          <Button
+            view="outlined"
+            size="l"
+            disabled={busy}
+            onClick={() => {
+              setReplacing(false);
+              setToken("");
+              setError(null);
+            }}
+          >
+            Отмена
+          </Button>
+        )}
+      </Flex>
+    </form>
   );
 
-  return (
-    <Card view="outlined" className="rh-settings-card">
-      <Flex as="section" direction="column" gap={3}>
-        <Text variant="subheader-2" as="h2">
-          Персональный токен доступа SourceCraft
-        </Text>
-        {hasPat ? (
-          <Flex direction="column" gap={3}>
-            <Flex gap={2} alignItems="center" wrap>
-              <Label theme="success" size="xs">
-                Сохранен
-              </Label>
-              <Text variant="body-short" color="secondary">
-                проверен при сохранении {fmtDateTime(checkedAt)}
-              </Text>
-            </Flex>
-            {owner && <Text color="complementary">Токен принадлежит пользователю {owner}.</Text>}
-            <Text variant="body-short" color="secondary">
-              Токен хранится в зашифрованном виде, не возвращается в браузер и не записывается в журналы. Изменения
-              применяются к последующим анализам.
-            </Text>
-            {replacing ? (
-              <Flex direction="column" gap={2}>
-                {tokenForm("Новый персональный токен доступа", "Проверить и заменить")}
-                <Button view="normal" size="m" width="max" onClick={() => setReplacing(false)} disabled={busy}>
-                  Отмена
-                </Button>
-              </Flex>
-            ) : (
-              <Flex gap={2}>
-                <Button view="normal" size="m" onClick={() => setReplacing(true)}>
-                  Заменить
-                </Button>
-                <Button view="outlined-danger" size="m" onClick={() => setConfirmDelete(true)} disabled={busy}>
-                  Удалить
-                </Button>
-              </Flex>
-            )}
-          </Flex>
-        ) : (
-          <Flex direction="column" gap={3}>
-            <Flex gap={2} alignItems="center" wrap>
-              <Label theme="warning" size="xs">
-                {unreadable ? "Нужно сохранить заново" : "Не задан"}
-              </Label>
-              <Text variant="body-short" color="secondary">
-                {unreadable
-                  ? "сохраненный токен больше не читается после смены ключа сервиса"
-                  : "закрытые данные и анализ своих репозиториев недоступны"}
-              </Text>
-            </Flex>
-            {tokenForm("Персональный токен доступа SourceCraft", "Проверить и сохранить")}
-            {/* инструкция шагами, как в документации SourceCraft; полная — по ссылке */}
-            <Flex direction="column" gap={2} className="rh-howto-box">
-              <Flex gap={2} alignItems="baseline" wrap>
-                <Text variant="subheader-1">Как получить токен?</Text>
-                <Link href={PAT_DOCS_URL} target="_blank" rel="noopener noreferrer">
-                  Инструкция SourceCraft
-                </Link>
-              </Flex>
-              <ol className="rh-howto">
-                <li>
-                  В SourceCraft нажмите <UiTag>Домой</UiTag> и откройте <UiTag>Доступ</UiTag> → <UiTag>Персональные токены доступа</UiTag>.
-                </li>
-                <li>
-                  Нажмите <UiTag>+ Новый токен</UiTag>. В поле <UiTag>Доступ к репозиторию</UiTag> выберите{" "}
-                  <UiTag>Все права учетной записи</UiTag> – подойдет и <UiTag>Все репозитории</UiTag>.
-                </li>
-                <li>Скопируйте токен и вставьте его в поле выше.</li>
-              </ol>
-              <Alert theme="warning" view="filled" size="s" message="Токен показывается один раз. Перед сохранением мы проверим его в SourceCraft." />
-            </Flex>
-          </Flex>
-        )}
-        {error && (
-          <CabinetAlert title={failedOp === "save" ? "Токен не сохранен" : "Токен не удален"} message={error} />
-        )}
+  const errorAlert = alertError && <CabinetAlert title={failedOp === "save" ? "Токен не сохранен" : "Токен не удален"} message={alertError.text} />;
 
-        <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)} maxWidth="s" fullWidth className="rh-dialog-fit" aria-label="Удаление токена">
-          <Dialog.Header caption="Удалить токен?" />
-          <Dialog.Body>
-            <Text>CI/CD, Безопасность и запуск анализа своих репозиториев станут недоступны, пока вы не добавите новый токен.</Text>
-          </Dialog.Body>
-          <Dialog.Footer
-            preset="danger"
-            textButtonApply="Удалить"
-            textButtonCancel="Отмена"
-            onClickButtonApply={() => void remove()}
-            onClickButtonCancel={() => setConfirmDelete(false)}
-            loading={busy}
-          />
-        </Dialog>
-      </Flex>
-    </Card>
+  const deleteDialog = (
+    <Dialog open={confirmDelete} onClose={() => setConfirmDelete(false)} maxWidth="s" fullWidth className="rh-dialog-fit" aria-label="Удаление токена">
+      <Dialog.Header caption="Удалить токен?" />
+      <Dialog.Body>
+        <Text>
+          CI/CD, Безопасность и запуск анализа своих репозиториев станут недоступны, пока вы не добавите новый токен. Сам токен в SourceCraft останется – отозвать его можно там.
+        </Text>
+      </Dialog.Body>
+      <Dialog.Footer
+        preset="danger"
+        textButtonApply="Удалить"
+        textButtonCancel="Отмена"
+        onClickButtonApply={() => void remove()}
+        onClickButtonCancel={() => setConfirmDelete(false)}
+        loading={busy}
+      />
+    </Dialog>
+  );
+
+  if (hasPat) {
+    return (
+      <SettingsCard icon={Key} tone="ok" title="Токен SourceCraft" description="Нужен, чтобы видеть CI/CD и Безопасность своих репозиториев и запускать их анализ.">
+        {/* статус — полем только для чтения с метками, как адреса в «Emails» SourceCraft */}
+        <div className="rh-token-status">
+          <Text className="rh-token-status__name">Персональный токен доступа</Text>
+          <Flex gap={1} wrap>
+            <Label theme="success" size="s" icon={<Icon data={Check} size={14} />}>
+              Проверен
+            </Label>
+            <Label theme="utility" size="s">
+              Только чтение
+            </Label>
+          </Flex>
+        </div>
+        <Meta>
+          <MetaItem icon={Clock}>Проверен в SourceCraft {fmtDateTime(checkedAt)}</MetaItem>
+          {owner && <MetaItem icon={Person}>Владелец – {owner}</MetaItem>}
+        </Meta>
+        <Text color="secondary">
+          Токен хранится в зашифрованном виде, не возвращается в браузер и не записывается в журналы. Изменения применяются к последующим анализам.
+        </Text>
+        {errorAlert}
+        {replacing ? (
+          <div className="rh-settings-inset">{tokenForm(true)}</div>
+        ) : (
+          <Flex gap={2} wrap>
+            <Button view="normal" size="l" onClick={() => setReplacing(true)} disabled={busy}>
+              Заменить
+            </Button>
+            <Button view="outlined-danger" size="l" onClick={() => setConfirmDelete(true)} loading={busy && failedOp === "remove"} disabled={busy}>
+              <Icon data={TrashBin} size={16} />
+              Удалить
+            </Button>
+          </Flex>
+        )}
+        {deleteDialog}
+      </SettingsCard>
+    );
+  }
+
+  return (
+    <SettingsCard
+      icon={Key}
+      tone={unreadable ? "warn" : "info"}
+      title="Токен SourceCraft"
+      status={
+        unreadable ? (
+          <Label theme="warning" size="s" icon={<Icon data={TriangleExclamation} size={14} />}>
+            Сохраните заново
+          </Label>
+        ) : (
+          <Label theme="info" size="s">
+            Не задан
+          </Label>
+        )
+      }
+      description={
+        <>
+          С токеном откроются CI/CD, Безопасность и анализ своих репозиториев.
+          <br />
+          Доступ только для чтения.
+        </>
+      }
+    >
+      {unreadable && (
+        <CabinetAlert
+          theme="warning"
+          title="Сохраненный токен больше не читается"
+          message="После смены ключа сервиса токен нужно сохранить заново. До этого закрыты CI/CD, Безопасность и анализ своих репозиториев."
+        />
+      )}
+      {errorAlert}
+      {tokenForm(false)}
+      {/* инструкция шагами, как в документации SourceCraft; первый шаг — прямо в форму создания */}
+      <div className="rh-settings-inset rh-token-howto">
+        <Flex gap={2} alignItems="baseline" justifyContent="space-between" wrap>
+          <Text variant="subheader-2" as="h3">
+            Как получить токен
+          </Text>
+          <Link href={PAT_DOCS_URL} target="_blank" rel="noopener noreferrer" className="rh-ext-link">
+            Инструкция SourceCraft
+            <Icon data={ArrowUpRightFromSquare} size={12} />
+          </Link>
+        </Flex>
+        <ol className="rh-steps">
+          <li>
+            <Flex direction="column" gap={2} alignItems="flex-start">
+              <Text>Откройте в SourceCraft создание токена</Text>
+              <Button view="outlined" size="m" href={PAT_CREATE_URL} target="_blank" rel="noopener noreferrer">
+                Создать токен в SourceCraft
+                <Icon data={ArrowUpRightFromSquare} size={14} />
+              </Button>
+            </Flex>
+          </li>
+          <li>
+            <Text>
+              В поле <UiTag>Доступ к репозиторию</UiTag> выберите <UiTag>Все права учетной записи</UiTag> или <UiTag>Все репозитории</UiTag>.
+            </Text>
+          </li>
+          <li>
+            <Text>Скопируйте токен и вставьте его в поле выше – SourceCraft показывает его только один раз.</Text>
+          </li>
+        </ol>
+      </div>
+    </SettingsCard>
   );
 }
 

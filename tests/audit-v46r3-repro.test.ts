@@ -128,14 +128,14 @@ describe("В4.6 круг 3: разделы пользователя и обол�
     const shell = web("Shell.tsx");
     const app = web("App.tsx");
     const reposPage = me.slice(me.indexOf("export function MePage"), me.indexOf("export function SettingsPage"));
-    const settingsPage = me.slice(me.indexOf("export function SettingsPage"), me.indexOf("function AccountSection"));
+    const settingsPage = me.slice(me.indexOf("export function SettingsPage"), me.indexOf("function SettingsSkeleton"));
     // заголовок раздела – в шапке списка, как в SourceCraft: отдельный
     // `PageHeader` над ним дублировал бы его
     expect(reposPage).toContain("<MyReposSection");
     expect(me).toMatch(/<Text variant="header-2" as="h1" className="rh-page-title">\s*Избранное\s*<\/Text>/);
     expect(reposPage).not.toContain("<PatSection");
     // UX 17.10 (A11Y-10): у «Настроек» свой H1, как у остальных разделов
-    expect(settingsPage).toContain('<PageHeader title="Настройки" description="Токен доступа и лимиты AI" />');
+    expect(settingsPage).toContain('<PageHeader title="Настройки" description="Учетная запись, токен SourceCraft и лимиты AI" />');
     expect(settingsPage).toContain("<PatSection");
     expect(settingsPage).not.toContain("Управление доступом к данным репозиториев SourceCraft");
     expect(me).toContain("Токен хранится в зашифрованном виде, не возвращается");

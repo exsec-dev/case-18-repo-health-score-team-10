@@ -368,8 +368,9 @@ describe("Б4 (Р14, Р16): список категорий и контейне�
       container: /<Card view="outlined" className="rh-section-card">/.test(categories) && /<Card view="outlined" className="rh-section-card">/.test(recs),
       tabsGone: /CardTabs|rh-tabs-card/.test(src),
       sameAsBand:
-        between(css, ".rh-section-card {", "}").includes("padding: var(--g-spacing-3) var(--g-spacing-4)") &&
-        between(css, ".rh-score-band {", "}").includes("padding: var(--g-spacing-3) var(--g-spacing-4)"),
+        // 20.10.2026: одна мера карточек — 16px со всех сторон
+        between(css, ".rh-section-card {", "}").includes("padding: var(--g-spacing-4);") &&
+        between(css, ".rh-score-band {", "}").includes("padding: var(--g-spacing-4);"),
     }).toEqual({ container: true, tabsGone: false, sameAsBand: true });
   });
 });

@@ -248,14 +248,14 @@ export function ComparePage({ search }: { search: string }) {
             {/* плашка по содержимому, не шире 820 */}
             {notes.length === 1 && (
               <div className="rh-cmp-alert">
-                <Alert theme="info" view="filled" size="s" message={notes[0]} />
+                <Alert theme="info" view="outlined" size="s" message={notes[0]} />
               </div>
             )}
             {notes.length > 1 && (
               <div className="rh-cmp-alert">
                 <Alert
                   theme="info"
-                  view="filled"
+                  view="outlined"
                   size="s"
                   title="Что учесть при сравнении"
                   message={

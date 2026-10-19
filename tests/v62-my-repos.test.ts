@@ -162,8 +162,11 @@ describe("заготовки, бейдж, лимиты", () => {
     expect(v5).not.toContain("Данные в JSON");
   });
 
-  test("«Лимиты AI» на телефоне: подписи колонок переносятся", () => {
-    expect(src("web/layout.css")).toMatch(/@media \(max-width: 480px\) \{\n  \.rh-ai-quota thead th \{\n    max-width: 72px;\n    white-space: normal;/);
+  // 19.10.2026: таблица лимитов заменена квотами карточками — на телефоне они
+  // встают столбиком сами, без прокрутки вбок
+  test("«Лимиты AI» на телефоне: квоты столбиком", () => {
+    expect(src("web/layout.css")).toMatch(/\.rh-settings__quotas \{\s+display: grid;\s+grid-template-columns: repeat\(auto-fit, minmax\(min\(100%, 300px\), 1fr\)\);/);
+    expect(src("web/layout.css")).not.toContain(".rh-ai-quota");
   });
 });
 

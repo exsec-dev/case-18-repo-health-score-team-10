@@ -1990,7 +1990,7 @@ function Limitations({ items }: { items: string[] }) {
         </Text>
         <Flex direction="column" gap={2}>
           {items.map((text) => (
-            <Alert key={text} theme="info" view="filled" size="s" align="center" message={text} />
+            <Alert key={text} theme="info" view="outlined" size="s" align="center" message={text} />
           ))}
         </Flex>
       </Card>
