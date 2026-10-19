@@ -44,10 +44,10 @@ import {
 import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { COVERAGE_NULL_BELOW } from "../score/model";
 import { factWords } from "../report/factWords";
-import { FULL, INDEX, adjustmentLabel, adjustmentText, metricWeights, notInScoreNote, ownershipView, sourceWord, strengthsLine, type BarHint, type OwnershipView } from "../report/sections";
+import { FULL, INDEX, adjustmentLabel, adjustmentText, metricWeights, notInScoreNote, ownershipView, sourceWord, type BarHint, type OwnershipView } from "../report/sections";
 import type { MetaResponse, RepoCard } from "./api";
 import { dataOf, mutateJson, useJson, useVisible } from "./api";
-import { CATEGORY_COLOR, LADDER_HELP, cardView, type CardView, type CategoryView, type PositionView, type RecommendationView } from "./cardView";
+import { CATEGORY_COLOR, LADDER_HELP, cardView, categoriesSummary, type CardView, type CategoryView, type PositionView, type RecommendationView } from "./cardView";
 import { categoryBreakdown, fmtPoints, fmtSignedPoints, type BreakdownRow } from "./categoryBreakdown";
 import { submetricIcon } from "./submetricIcons";
 import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
@@ -1374,7 +1374,7 @@ function PositionLine({ position }: { position: PositionView }) {
  * а одной плашкой под списком.
  */
 function Categories({ card, view }: { card: Card; view: CardView }) {
-  const strengths = strengthsLine(card);
+  const strengths = categoriesSummary(card);
   const notInScore = notInScoreNote(card);
   const withData = view.categories.filter((c) => c.score !== null);
   const aiEverywhere = card.ai !== undefined && withData.length > 1 && withData.every((c) => categoryAiNote(card, c.key) !== null);
@@ -1388,7 +1388,7 @@ function Categories({ card, view }: { card: Card; view: CardView }) {
           </Text>
           {aiEverywhere && <CategoryAiGlyph />}
         </Flex>
-        {/* сильные стороны и что требует внимания — строкой под заголовком; тот же текст, что в MD/PDF */}
+        {/* итог: сильнейшие категории и чего не хватает слабейшей — простыми словами (в MD/PDF — прежняя строка) */}
         {strengths !== null && (
           <Text as="p" variant="body-1" color="complementary" className="rh-strengths">
             {strengths}

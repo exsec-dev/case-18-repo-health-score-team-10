@@ -27,6 +27,7 @@ import {
 import { submetricContext, submetricShownValue, submetricTitle, subweightKey } from "../report/submetrics";
 import { INDEX_WEIGHTS, SUBWEIGHTS, type CategoryKey, type IndexCategoryKey } from "../score/model";
 import { SEVERITY_RULES } from "../score/severity";
+import { categoryBreakdown } from "./categoryBreakdown";
 import { SIZE_TITLES } from "../api/rating-filters";
 import type { RankLeague } from "../api/rank-badge";
 import { COHORT_MIN } from "../api/cohort";
@@ -427,6 +428,82 @@ const LOCKED_WHY: Record<"denied" | "pat-expired" | "check-failed" | "no-pat", s
   "check-failed": ". Проверить ваш доступ сейчас не удалось – откройте карточку позже.",
   "no-pat": " после добавления персонального токена доступа.",
 };
+
+/**
+ * Чего не хватает показателю — простыми словами, без имен файлов и терминов:
+ * строка-итог под заголовком «Категории» читается без знания методики.
+ */
+const WEAK_PHRASE: Record<string, (score: number) => string> = {
+  "documentation.readme": (s) => (s === 0 ? "нет описания проекта" : "описание проекта неполное"),
+  "documentation.license": () => "нет лицензии",
+  "documentation.contributing": () => "нет правил для участников",
+  "documentation.codeowners": () => "не назначены ответственные за код",
+  "cicd.config": () => "не настроена автоматическая сборка",
+  "cicd.pass_rate": () => "сборки часто завершаются ошибкой",
+  "cicd.duration": () => "сборка идет долго",
+  "security.density": () => "много найденных уязвимостей",
+  "security.resolved": () => "найденные уязвимости не закрываются",
+  "security.secrets": () => "в коде найдены пароли или ключи",
+  "activity.fresh": () => "давно не было изменений",
+  "activity.freq": () => "изменения вносятся редко",
+  "activity.contributors": () => "над проектом работает мало людей",
+  "activity.pulls_90d": () => "мало предложений изменений",
+  "activity.releases_12m": () => "мало выпусков за год",
+  "issues.stale": () => "много задач без движения",
+  "issues.close_days": () => "задачи закрываются медленно",
+  "issues.resolution": () => "мало решенных задач",
+  "issues.first_resp": () => "на задачи долго отвечают",
+  // категория и так названа «задачи» — без повтора слова
+  "issues.tracker_unused": () => "в репозитории их не заводят",
+  "code.density": () => "много пометок «доделать» в коде",
+  "code.old_share": () => "старые пометки «доделать» не разбираются",
+  "code.tests": () => "мало тестов",
+  "code.root": () => "в корне репозитория много лишнего",
+};
+
+/**
+ * Итог под заголовком «Категории» (карточка; в отчете — прежняя строка
+ * `strengthsLine`): две сильнейшие категории и самая слабая — с тем, чего ей не
+ * хватает, например «Слабее всего – документация: нет правил для участников и не
+ * назначены ответственные за код». Баллов в строке нет — они на полосах прямо
+ * под ней; строка называет причину, которой на полосах нет.
+ */
+export function categoriesSummary(card: RepoCard): string | null {
+  const score = card.score;
+  if (!score || card.markers.codeEmpty) return null;
+  const shown = CATEGORY_ORDER.flatMap((key) => {
+    const cat = score.categories[key];
+    return cat !== undefined && cat.locked === undefined && cat.score !== null ? [{ key, value: roundScore(cat.score) }] : [];
+  });
+  // «CI/CD» — аббревиатура, регистр не меняется
+  const name = (key: CategoryKey): string => {
+    const t = CATEGORY_TITLES[key];
+    return t.length > 1 && t[1] === t[1]!.toUpperCase() && t[1] !== t[1]!.toLowerCase() ? t : t.charAt(0).toLowerCase() + t.slice(1);
+  };
+  const named = (e: { key: CategoryKey }) => name(e.key);
+  const strong = shown.filter((e) => e.value >= 70).sort((a, b) => b.value - a.value).slice(0, 2);
+  const weakest = shown.filter((e) => e.value < 70).sort((a, b) => a.value - b.value)[0];
+  const parts: string[] = [];
+  if (strong.length > 0) parts.push(`Сильнее всего – ${strong.map(named).join(" и ")}.`);
+  // все ниже 70 — опора на лучшую, если она не та же, что слабейшая
+  else if (shown.length > 1) {
+    const best = [...shown].sort((a, b) => b.value - a.value)[0]!;
+    parts.push(`Лучше всего – ${named(best)}.`);
+  }
+  if (weakest !== undefined) {
+    // причина — до двух показателей, недобравших больше половины, по потерянным баллам
+    const reasons = (categoryBreakdown(card, weakest.key)?.rows ?? [])
+      .filter((r) => r.score !== null && r.weight !== null && r.earned !== null && r.weight > 0 && r.score < 0.5)
+      .sort((a, b) => b.weight! - b.earned! - (a.weight! - a.earned!))
+      .flatMap((r) => {
+        const phrase = WEAK_PHRASE[`${weakest.key}.${r.sub}`];
+        return phrase ? [phrase(r.score!)] : [];
+      })
+      .slice(0, 2);
+    parts.push(`Слабее всего – ${named(weakest)}${reasons.length > 0 ? `: ${reasons.join(" и ")}` : ""}.`);
+  }
+  return parts.length > 0 ? parts.join(" ") : null;
+}
 
 /**
  * Закрытые зрителю CI/CD и Безопасность — одно предложение без заголовка,
