@@ -223,21 +223,25 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
   const view = cardView(card);
   const reportHref = `${cardUrl}/report.md`;
   const refreshError = state.kind === "ok" ? state.refreshError : undefined;
-  // кнопки шапки зависят от списка «Мои репозитории» по токену («Обновить анализ»,
-  // «Бейдж»): пока он грузится — скелетон, а не строка, что перестраивается на глазах
-  const actions = withPat && tokenRepos === null ? <ActionsSkeleton /> : (
+  // «Обновить анализ» и «Бейдж» зависят от списка «Мои репозитории» по токену: пока он
+  // грузится, на месте главной кнопки — скелетон; «Сравнить» и «Отчет» от списка не
+  // зависят и доступны сразу
+  const tokenPending = withPat && tokenRepos === null;
+  const actions = (
     <CardActions
       org={org}
       repo={repo}
       scored={card.score !== null}
-      // бейдж — только своему репо (он есть в «Моих репозиториях»); открытому из рейтинга
-      // хватает публичного маршрута, закрытому — ключ из карточки
-      badge={listed !== null && (card.repo.badge || card.repo.badgeKey !== undefined)}
+      // бейдж — только своему репо: он есть в «Моих репозиториях» или сервер признал его
+      // своим по правам (`viewer.own`, как у «Обновить анализ») — неполный или несобранный
+      // список по токену бейдж не прячет. Открытому из рейтинга хватает публичного
+      // маршрута, закрытому — ключ из карточки
+      badge={(ownRepo || listed !== null) && (card.repo.badge || card.repo.badgeKey !== undefined)}
       badgeTarget={{ org, repo, publicBaseUrl: meta?.publicBaseUrl ?? window.location.origin, league: card.score?.rankBadge != null, badgeKey: card.repo.badgeKey ?? null }}
       report={card.score !== null ? { mdHref: reportHref, pdfHref: `${cardUrl}/report.pdf`, pdfName: reportFileName(org, repo, "pdf") } : null}
       // без оценки запуск — главное действие заглушки под шапкой; вторая кнопка в шапке
       // его бы дублировала
-      refresh={card.score !== null && refreshButton}
+      refresh={card.score !== null && (tokenPending ? <ActionsSkeleton main /> : refreshButton)}
     />
   );
 
@@ -616,11 +620,14 @@ function CardActions({ org, repo, scored, badge, badgeTarget, report, refresh }:
   );
 }
 
-/** Скелетон строки действий шапки — пока не известно, какие кнопки показать. */
-function ActionsSkeleton() {
+/**
+ * Скелетон действий шапки: пока карточка грузится — вся строка; пока грузится список
+ * по токену (`main`) — только место главной кнопки «Обновить анализ».
+ */
+function ActionsSkeleton({ main = false }: { main?: boolean }) {
   return (
     <span className="rh-actions-skeleton" aria-busy="true" aria-label="Загрузка действий">
-      <Skeleton className="rh-actions-skeleton__item" />
+      {!main && <Skeleton className="rh-actions-skeleton__item" />}
       <Skeleton className="rh-actions-skeleton__item rh-actions-skeleton__item_main" />
     </span>
   );

@@ -51,36 +51,72 @@ export interface MyRepoEntry {
    */
   recommendationsCount: number | null;
   /**
-   * Флаг накрутки последней генерации AI-описания: факторы для показа в
-   * кабинете. Это подозрение для проверки человеком, Score не меняет; null –
-   * флага нет (не генерировали или модель его не дала).
+   * Флаг накрутки последней проверки активности (то же правило, что рейтинг и
+   * карточка, `flaggedRepos`) и его факторы. Подозрение для проверки человеком,
+   * Score не меняет; null – флага нет или зрителю он не виден (закрытый репо без
+   * полного Score – карточка AI-блоков ему не показывает).
    */
   fraudFlag: { flag: boolean; factors: { key: string; note: string }[] } | null;
   /**
-   * Есть AI-обзор – отметка строки, как у рейтинга. У открытого репо – только
-   * публичный обзор (его видит любой посетитель); у закрытого с правами зрителя –
-   * обзор любой аудитории.
+   * Есть AI-обзор – отметка строки, как у рейтинга, по правилам карточки: у
+   * открытого репо – публичный обзор (полный – зрителю с полным Score), у закрытого –
+   * только зрителю с полным Score (CI/CD и Безопасность по сохраненной проверке).
    */
   aiOverview: boolean;
 }
 
-/** Отметки строк кабинета – одним запросом на весь список, а не карточкой на строку. */
+/**
+ * Отметки строк кабинета (флаг накрутки, AI-обзор) – одним запросом на репо списка,
+ * а не карточкой на строку. Видимость – как у AI-блоков карточки (`aiAudiences`):
+ * открытый репо – флаг и публичный обзор всем; закрытый – только зрителю с полным
+ * Score, иначе карточка AI не показывает вовсе.
+ */
 interface RowMarks {
   overview: { pub: Set<number>; any: Set<number> };
   flags: ReturnType<typeof flaggedRepos>;
 }
 
-function rowMarks(db: Database): RowMarks {
-  return { overview: overviewRepoIds(db), flags: flaggedRepos(db) };
+function rowMarks(db: Database, repoIds: readonly number[]): RowMarks {
+  return { overview: overviewRepoIds(db, repoIds), flags: flaggedRepos(db, repoIds) };
 }
 
-function repoRowOf(db: Database, org: string, repo: string): { id: number; visibility: string } | null {
-  return db.query("SELECT id, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number; visibility: string } | null;
+/** Строка каталога для записи кабинета: id и видимость – для отметок, остальное – мета. */
+interface CatalogRow {
+  id: number;
+  visibility: string;
+  title: string | null;
+  language: string | null;
+  logo_url: string | null;
+  language_color: string | null;
+  last_activity_at: string | null;
 }
 
-function aiOverviewOf(marks: RowMarks, repo: { id: number; visibility: string } | null, mayRead: boolean): boolean {
-  if (repo === null) return false;
-  return marks.overview.pub.has(repo.id) || (mayRead && repo.visibility !== "public" && marks.overview.any.has(repo.id));
+function catalogRowOf(db: Database, org: string, repo: string): CatalogRow | null {
+  return db
+    .query("SELECT id, visibility, title, language, logo_url, language_color, last_activity_at FROM repos WHERE org_slug = ? AND repo_slug = ?")
+    .get(org, repo) as CatalogRow | null;
+}
+
+/** Флаг и AI-обзор строки по правилам карточки; без прав чтения – ничего. */
+function rowMarksOf(
+  db: Database,
+  userId: number | null,
+  marks: RowMarks,
+  org: string,
+  repo: string,
+  row: CatalogRow | null,
+  mayRead: boolean,
+  opts: SavedRightsOptions,
+): { fraudFlag: MyRepoEntry["fraudFlag"]; aiOverview: boolean } {
+  if (row === null || !mayRead) return { fraudFlag: null, aiOverview: false };
+  const access = savedAccessOf(db, userId, org, repo, opts);
+  const full = access.cicd === "granted" && access.appsec === "granted";
+  if (row.visibility !== "public" && !full) return { fraudFlag: null, aiOverview: false };
+  const flag = marks.flags.get(row.id);
+  return {
+    fraudFlag: flag === undefined ? null : { flag: true, factors: flag.factors },
+    aiOverview: marks.overview.pub.has(row.id) || (full && marks.overview.any.has(row.id)),
+  };
 }
 
 export interface MyReposResult {
@@ -203,16 +239,6 @@ function recommendationsCountOf(db: Database, userId: number | null, org: string
   if (!mayRead) return null;
   const card = getRepoCard(db, org, repo, { access: savedAccessOf(db, userId, org, repo, opts), withRank: false });
   return card ? card.recommendations.length : null;
-}
-
-/**
- * Флаг накрутки для записи кабинета – из карточки (`card.ai.fraud`) с доступом
- * из сохраненной проверки прав. null – прав нет, карточки нет или флага нет.
- */
-function fraudFlagOf(db: Database, userId: number | null, org: string, repo: string, mayRead: boolean, opts: SavedRightsOptions = {}): { flag: boolean; factors: { key: string; note: string }[] } | null {
-  if (!mayRead) return null;
-  const card = getRepoCard(db, org, repo, { access: savedAccessOf(db, userId, org, repo, opts), withRank: false });
-  return card?.ai?.fraud ?? null;
 }
 
 /** См. `MyRepoEntry.planned`. */
@@ -375,30 +401,24 @@ export interface TokenRepoEntry extends MyRepoEntry {
  * Право чтения доказано самим списком (`readProven`), поэтому у закрытых видны
  * оценка и мета; публичный, выбывший из рейтинга, по-прежнему не раскрывается.
  * Без рекомендаций (их число собирает карточка целиком) – список бывает в сотни
- * строк; флаг накрутки и AI-обзор – одним запросом на весь список.
+ * строк; флаг накрутки и AI-обзор – одним запросом на репо списка.
  */
 export function tokenRepoEntries(db: Database, userId: number, repos: ScRepoLite[]): TokenRepoEntry[] {
-  const marks = rowMarks(db);
   const favorites = new Set(
     (db.query("SELECT org_slug, repo_slug FROM favorites WHERE user_id = ?").all(userId) as { org_slug: string; repo_slug: string }[]).map((f) =>
       `${f.org_slug}/${f.repo_slug}`.toLowerCase(),
     ),
   );
-  return repos.map((r) => {
+  // строка каталога – один запрос на репо: и «есть в каталоге», и мета, и id для отметок
+  const catalog = repos.map((r) => catalogRowOf(db, r.org, r.slug));
+  const marks = rowMarks(db, catalog.filter((c): c is CatalogRow => c !== null).map((c) => c.id));
+  return repos.map((r, i) => {
     const mayRead = viewerMayReadRepo(db, userId, r.org, r.slug, { readProven: true });
-    const inCatalog = db.query("SELECT 1 FROM repos WHERE org_slug = ? AND repo_slug = ?").get(r.org, r.slug) !== null;
-    const row = mayRead
-      ? (db.query("SELECT title, language, logo_url, language_color, last_activity_at FROM repos WHERE org_slug = ? AND repo_slug = ?").get(r.org, r.slug) as {
-          title: string | null;
-          language: string | null;
-          logo_url: string | null;
-          language_color: string | null;
-          last_activity_at: string | null;
-        } | null)
-      : null;
+    const inCatalog = catalog[i] !== null;
+    // без прав мета (включая логотип и цвет языка) не раскрывается
+    const row = mayRead ? (catalog[i] ?? null) : null;
     const known = mayRead ? ratingScoreOf(db, r.org, r.slug) : { healthcraftIndex: null, previousIndex: null, lastScanAt: null, lastScanStatus: null };
-    const repoRow = inCatalog ? repoRowOf(db, r.org, r.slug) : null;
-    const flag = mayRead && repoRow !== null ? marks.flags.get(repoRow.id) : undefined;
+    const rowMark = rowMarksOf(db, userId, marks, r.org, r.slug, catalog[i] ?? null, mayRead, {});
     return {
       org: r.org,
       repo: r.slug,
@@ -415,8 +435,8 @@ export function tokenRepoEntries(db: Database, userId: number, repos: ScRepoLite
       mayRead,
       planned: plannedWork(db, userId, r.org, r.slug),
       recommendationsCount: null,
-      fraudFlag: flag === undefined ? null : { flag: true, factors: flag.factors },
-      aiOverview: aiOverviewOf(marks, repoRow, mayRead),
+      fraudFlag: rowMark.fraudFlag,
+      aiOverview: rowMark.aiOverview,
       visibility: r.visibility,
       isEmpty: r.isEmpty,
       favorite: favorites.has(`${r.org}/${r.slug}`.toLowerCase()),
@@ -432,7 +452,8 @@ export async function listMyRepos(db: Database, userId: number | null, opts: Sav
   const favs = db
     .query("SELECT org_slug, repo_slug FROM favorites WHERE user_id = ? ORDER BY added_at DESC")
     .all(userId ?? -1) as { org_slug: string; repo_slug: string }[];
-  const marks = rowMarks(db);
+  const ids = favs.map((f) => catalogRowOf(db, f.org_slug, f.repo_slug)?.id).filter((id): id is number => id !== undefined);
+  const marks = rowMarks(db, ids);
   const entries: MyRepoEntry[] = favs.map((f) => myRepoEntryOf(db, userId, f.org_slug, f.repo_slug, opts, marks));
   return { username: null, entries };
 }
@@ -450,22 +471,15 @@ export function favoriteScoreOf(db: Database, userId: number, org: string, repo:
   return viewerMayReadRepo(db, userId, org, repo, opts) ? ratingScoreOf(db, org, repo).healthcraftIndex : null;
 }
 
-export function myRepoEntryOf(db: Database, userId: number | null, org: string, repo: string, opts: SavedRightsOptions = {}, marks: RowMarks = rowMarks(db)): MyRepoEntry {
+export function myRepoEntryOf(db: Database, userId: number | null, org: string, repo: string, opts: SavedRightsOptions = {}, marks?: RowMarks): MyRepoEntry {
   const f = { org_slug: org, repo_slug: repo };
   const mayRead = viewerMayReadRepo(db, userId, f.org_slug, f.repo_slug, opts);
-  const inCatalog = db.query("SELECT 1 FROM repos WHERE org_slug = ? AND repo_slug = ?").get(f.org_slug, f.repo_slug) !== null;
+  const catalogRow = catalogRowOf(db, f.org_slug, f.repo_slug);
+  const inCatalog = catalogRow !== null;
   // без прав мета (включая логотип и цвет языка) не раскрывается
-  const row = mayRead
-    ? (db
-        .query("SELECT title, language, logo_url, language_color, last_activity_at FROM repos WHERE org_slug = ? AND repo_slug = ?")
-        .get(f.org_slug, f.repo_slug) as {
-        title: string | null;
-        language: string | null;
-        logo_url: string | null;
-        language_color: string | null;
-        last_activity_at: string | null;
-      } | null)
-    : null;
+  const row = mayRead ? catalogRow : null;
+  // одна запись (мутация избранного) – отметки только этого репо
+  const rowMark = rowMarksOf(db, userId, marks ?? rowMarks(db, catalogRow === null ? [] : [catalogRow.id]), f.org_slug, f.repo_slug, catalogRow, mayRead, opts);
   const known = mayRead ? ratingScoreOf(db, f.org_slug, f.repo_slug) : { healthcraftIndex: null, previousIndex: null, lastScanAt: null, lastScanStatus: null };
   return {
     org: f.org_slug,
@@ -483,8 +497,8 @@ export function myRepoEntryOf(db: Database, userId: number | null, org: string, 
     mayRead,
     planned: plannedWork(db, userId, f.org_slug, f.repo_slug),
     recommendationsCount: recommendationsCountOf(db, userId, f.org_slug, f.repo_slug, mayRead, opts),
-    fraudFlag: fraudFlagOf(db, userId, f.org_slug, f.repo_slug, mayRead, opts),
-    aiOverview: aiOverviewOf(marks, inCatalog ? repoRowOf(db, f.org_slug, f.repo_slug) : null, mayRead),
+    fraudFlag: rowMark.fraudFlag,
+    aiOverview: rowMark.aiOverview,
   };
 }
 

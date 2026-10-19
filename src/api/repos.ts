@@ -1088,13 +1088,19 @@ function findRepoRow(db: Database, org: string, repo: string): CardRepoRow | nul
     .get(org, repo) as CardRepoRow | null;
 }
 
+/** Фильтр «только эти репо» для запросов отметок: id списком в одном параметре JSON. */
+function repoIdFilter(repoIds: readonly number[] | undefined, column: string): { sql: string; params: string[] } {
+  return repoIds === undefined ? { sql: "", params: [] } : { sql: ` AND ${column} IN (SELECT value FROM json_each(?))`, params: [JSON.stringify(repoIds)] };
+}
+
 /**
  * Репозитории с AI-обзором одним запросом: `pub` – с обзором аудитории public (его
  * видит любой посетитель, отметка рейтинга), `any` – с обзором любой аудитории
- * (отметка строк кабинета у репозиториев, права на которые у зрителя есть).
+ * (видит зритель с полным Score). `repoIds` – только эти репо (строки кабинета).
  */
-export function overviewRepoIds(db: Database): { pub: Set<number>; any: Set<number> } {
-  const rows = db.query("SELECT DISTINCT repo_id, audience FROM ai_notes WHERE role = 'overview'").all() as { repo_id: number; audience: string }[];
+export function overviewRepoIds(db: Database, repoIds?: readonly number[]): { pub: Set<number>; any: Set<number> } {
+  const only = repoIdFilter(repoIds, "repo_id");
+  const rows = db.query(`SELECT DISTINCT repo_id, audience FROM ai_notes WHERE role = 'overview'${only.sql}`).all(...only.params) as { repo_id: number; audience: string }[];
   return {
     pub: new Set(rows.filter((r) => r.audience === "public").map((r) => r.repo_id)),
     any: new Set(rows.map((r) => r.repo_id)),
@@ -1106,10 +1112,11 @@ export function overviewRepoIds(db: Database): { pub: Set<number>; any: Set<numb
  * карточка (fraudOf + checkOf): заметка – scan_id DESC, id DESC; отказ проверки
  * новее заметки снимает флаг; заметка старше последнего скана или по прежним
  * правилам – «устарел». Битый JSON – флага нет. Одним запросом на все репо: им
- * пользуются рейтинг и строки кабинета.
+ * пользуются рейтинг и строки кабинета (`repoIds` – только эти репо).
  */
-export function flaggedRepos(db: Database): Map<number, { stale: boolean; factors: { key: string; note: string }[] }> {
+export function flaggedRepos(db: Database, repoIds?: readonly number[]): Map<number, { stale: boolean; factors: { key: string; note: string }[] }> {
   const flagged = new Map<number, { stale: boolean; factors: { key: string; note: string }[] }>();
+  const only = repoIdFilter(repoIds, "repo_id");
   for (const row of db
     .query(
       `SELECT n.repo_id, n.text, n.scan_id, n.created_at, n.charter_version,
@@ -1118,10 +1125,10 @@ export function flaggedRepos(db: Database): Map<number, { stale: boolean; factor
          (SELECT MAX(s.id) FROM scans s WHERE s.repo_id = n.repo_id AND s.status IN ('ok', 'partial')) AS latest
        FROM (
          SELECT repo_id, text, scan_id, created_at, charter_version, ROW_NUMBER() OVER (PARTITION BY repo_id ORDER BY scan_id DESC, id DESC) AS rn
-         FROM ai_notes WHERE role = 'flagger') n
+         FROM ai_notes WHERE role = 'flagger'${only.sql}) n
        WHERE n.rn = 1`,
     )
-    .all() as { repo_id: number; text: string; scan_id: number; created_at: string; charter_version: string; fail_scan: number | null; fail_at: string | null; latest: number | null }[]) {
+    .all(...only.params) as { repo_id: number; text: string; scan_id: number; created_at: string; charter_version: string; fail_scan: number | null; fail_at: string | null; latest: number | null }[]) {
     const note = parseFlaggerNote(row.text);
     if (note?.flag !== true) continue;
     const failNewer = row.fail_scan !== null && (row.fail_scan > row.scan_id || (row.fail_scan === row.scan_id && (row.fail_at ?? "") > row.created_at));

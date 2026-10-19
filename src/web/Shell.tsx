@@ -129,7 +129,14 @@ export function Shell({
     title: s.title,
     icon: s.icon,
     href: s.href,
-    rightAdornment: count === null ? undefined : <span className="rh-rail-count" aria-label={`в наборе ${count}`}>{count}</span>,
+    // aria-label у span без роли скринридеры не читают — пояснение скрытым текстом
+    rightAdornment:
+      count === null ? undefined : (
+        <span className="rh-rail-count">
+          <span aria-hidden="true">{count}</span>
+          <span className="rh-sr-only">{`, в наборе ${count}`}</span>
+        </span>
+      ),
     current: s.id === section,
     onItemClick: (_item, _collapsed, e) => followLink(e, s.href),
     // узкий rail: вместо одиночного тултипа — подписи всех разделов разом,

@@ -185,8 +185,11 @@ describe("бейдж закрытого репо по ключу", () => {
     expect((await get("open/badge.svg?show=cats")).body).toContain(">Состояние кода<");
 
     const key = badgeKey(SECRET, "bb", "priv");
-    const priv = await get(`priv/badge.svg?key=${key}&show=delta`);
+    const privRes = await fetch(`${server.base}/api/v1/repos/bb/priv/badge.svg?key=${key}&show=delta`);
+    expect(privRes.headers.get("cache-control")).toBe("private, max-age=300");
+    const priv = { status: privRes.status, body: await privRes.text() };
     expect(priv.status).toBe(200);
+    expect((await fetch(`${server.base}/api/v1/repos/bb/open/badge.svg`)).headers.get("cache-control")).toBe("public, max-age=300");
     expect(priv.body).toContain("HealthCraft Index: 45, −5 с прошлого анализа");
     expect((await get(`priv/badge.svg?key=${key}&category=issues`)).status).toBe(200);
     // без ключа, с чужим ключом, выбывший и несуществующий – одинаковый 404
@@ -219,7 +222,7 @@ describe("код для README", () => {
 
   test("кнопка – только у своего репо: из списка по токену и с бейджем или ключом", () => {
     const page = readFileSync(join(ROOT, "src", "web", "RepoPage.tsx"), "utf8");
-    expect(page).toContain("badge={listed !== null && (card.repo.badge || card.repo.badgeKey !== undefined)}");
+    expect(page).toContain("badge={(ownRepo || listed !== null) && (card.repo.badge || card.repo.badgeKey !== undefined)}");
     const server = readFileSync(join(ROOT, "src", "server.ts"), "utf8");
     // ключ кладет только маршрут карточки и только закрытому репо
     expect(server.match(/badgeKey\(config\.auth\.appSecret/g)).toHaveLength(1);

@@ -27,6 +27,51 @@ import { makeApiDb, seedRepo, seedScan, seedScore, cardFacts } from "./api-fixtu
 
 const src = (path: string): string => readFileSync(join(import.meta.dir, "..", "src", path), "utf8");
 
+describe("отметки строк кабинета (флаг, AI-обзор) — по правилам карточки", () => {
+  test("закрытый без полного Score — без отметок; с полным — флаг и любой обзор; открытый — флаг и только публичный обзор", () => {
+    const t = makeApiDb();
+    try {
+      const user = Number(t.db.query("INSERT INTO users (ya_id, login, created_at, last_login_at) VALUES ('ya-1', 'me', '2026', '2026')").run().lastInsertRowid);
+      const note = (repoId: number, scanId: number, role: string, text: string, audience: string) =>
+        t.db
+          .query("INSERT INTO ai_notes (repo_id, scan_id, role, text, fact_refs, charter_version, model, created_at, audience) VALUES (?, ?, ?, ?, '[]', '7', 'm', '2026', ?)")
+          .run(repoId, scanId, role, text, audience);
+      const flag = JSON.stringify({ flag: true, factors: [{ key: "activity.rhythm", note: "ровный ритм" }], signals: {}, inputs: {} });
+      const repos: Record<string, number> = {};
+      for (const [repo, visibility] of [["closed", "private"], ["full", "private"], ["open", "public"]] as const) {
+        const id = seedRepo(t, { org: "team", repo });
+        t.db.query("UPDATE repos SET visibility = ? WHERE id = ?").run(visibility, id);
+        const scan = seedScan(t, id, { facts: cardFacts() });
+        seedScore(t, id, scan, { total: 60 });
+        note(id, scan, "flagger", flag, "full");
+        note(id, scan, "overview", "x", "full");
+        repos[repo] = id;
+      }
+      // полный Score по сохраненной проверке прав – только у «full»
+      t.db
+        .query("INSERT INTO favorites (user_id, org_slug, repo_slug, added_at, last_access) VALUES (?, 'team', 'full', '2026', ?)")
+        .run(user, JSON.stringify({ clone: true, visibility: "private", ci: true, appsec: true, own: true }));
+      const rows = tokenRepoEntries(t.db, user, [
+        { org: "team", slug: "closed", name: null, visibility: "private", isEmpty: false },
+        { org: "team", slug: "full", name: null, visibility: "private", isEmpty: false },
+        { org: "team", slug: "open", name: null, visibility: "public", isEmpty: false },
+      ]);
+      expect(rows.map((r) => ({ repo: r.repo, flag: r.fraudFlag?.flag ?? false, ai: r.aiOverview }))).toEqual([
+        { repo: "closed", flag: false, ai: false },
+        { repo: "full", flag: true, ai: true },
+        // у открытого полный обзор посторонним не виден – отметки AI нет, флаг виден всем
+        { repo: "open", flag: true, ai: false },
+      ]);
+      note(repos.open!, Number((t.db.query("SELECT MAX(id) AS id FROM scans WHERE repo_id = ?").get(repos.open!) as { id: number }).id), "overview", "y", "public");
+      expect(myRepoEntryOf(t.db, user, "team", "open").aiOverview).toBe(true);
+      expect(myRepoEntryOf(t.db, user, "team", "full").fraudFlag?.factors).toEqual([{ key: "activity.rhythm", note: "ровный ритм" }]);
+      expect(myRepoEntryOf(t.db, user, "team", "closed").fraudFlag).toBeNull();
+    } finally {
+      t.close();
+    }
+  });
+});
+
 describe("«Мои репозитории»: данные строки", () => {
   test("репо из списка по токену: закрытый раскрывает оценку (чтение доказано списком), выбывший публичный — нет; отметка «в избранном»", () => {
     const t = makeApiDb();

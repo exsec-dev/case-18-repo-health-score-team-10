@@ -44,6 +44,7 @@ import {
   fraudFactorFact,
   fraudFactorValue,
   fraudCheckStale,
+  fraudStaleText,
   AI_NOTE_SHORT, AI_OVERVIEW_REJECTED,
   quotaBlockedText,
   scoreTheme,
@@ -508,7 +509,7 @@ export function ActivityCheckCard({
           {/* под оценками статус тише: 13px, средняя жирность — главные там цифры оценок */}
           <Text variant={wide ? "subheader-1" : "subheader-2"}>{wide ? CHECK_WIDE_TITLE[st.kind] ?? title : title}</Text>
           {wide && help}
-          {(st.kind === "stale" || (flagged && fraudCheckStale(ai.check))) && <CheckStaleMark oldRules={ai.check.oldRules === true} />}
+          {(st.kind === "stale" || (flagged && fraudCheckStale(ai.check))) && <CheckStaleMark why={fraudStaleText(ai.check, st.date)} />}
           {foldSigns && (
             <button type="button" className="rh-check-card__toggle" aria-expanded={signsOpen} aria-controls={signsId} onClick={() => setSignsOpen((o) => !o)}>
               {`${lines.length} ${plural(lines.length, "признак", "признака", "признаков")}`}
@@ -770,12 +771,10 @@ export function CategoryAiGlyph() {
  * Метка «Устарела» у статуса проверки активности – того же вида, что «Устарел» у
  * AI-обзора; почему устарела и что делать – в подсказке.
  */
-function CheckStaleMark({ oldRules }: { oldRules: boolean }) {
+function CheckStaleMark({ why }: { why: string }) {
+  // почему устарела – `fraudStaleText`: прежние правила или новый анализ после проверки
   return (
-    <ActionTooltip
-      title="Проверка устарела"
-      description={oldRules ? "Сделана по прежним правилам поиска признаков – запустите проверку заново." : "После проверки был новый анализ – запустите проверку заново."}
-    >
+    <ActionTooltip title="Проверка устарела" description={why}>
       <span className="rh-ai-stale" {...TIP_TARGET}>
         <Label theme="unknown" size="xs">
           Устарела
@@ -1343,8 +1342,12 @@ function BadgeContent({ target, title = true }: { target: BadgeTarget; title?: b
   // пока сервер рисует новый бейдж, на его месте скелетон по размеру бейджа (с категориями
   // это карточка); картинка грузится невидимой и показывается, когда готова
   const [loaded, setLoaded] = useState<ReadonlySet<string>>(() => new Set());
+  // не загрузилось (лимит запросов, сбой сети) – подпись вместо битой картинки; код выше верен
+  const [failed, setFailed] = useState<ReadonlySet<string>>(() => new Set());
   const ready = loaded.has(preview);
+  const broken = failed.has(preview);
   const markLoaded = () => setLoaded((prev) => (prev.has(preview) ? prev : new Set(prev).add(preview)));
+  const markFailed = () => setFailed((prev) => (prev.has(preview) ? prev : new Set(prev).add(preview)));
   return (
     <div className="rh-badge-pop" data-slot="badge">
       {title && (
@@ -1352,9 +1355,12 @@ function BadgeContent({ target, title = true }: { target: BadgeTarget; title?: b
           {SLOT_EMPTY.badge.title}
         </Text>
       )}
-      <div className="rh-badge-pop__preview" aria-busy={!ready}>
-        {!ready && <Skeleton className="rh-badge-pop__skeleton" style={chips.has("cats") ? { width: 232, height: 92 } : { width: 180 }} />}
-        <img key={preview} src={preview} alt="HealthCraft Index" hidden={!ready} onLoad={markLoaded} onError={markLoaded} />
+      <div className="rh-badge-pop__preview" aria-busy={!ready && !broken}>
+        {!ready && !broken && <Skeleton className="rh-badge-pop__skeleton" style={chips.has("cats") ? { width: 232, height: 92 } : { width: 180 }} />}
+        {broken && (
+          <Text color="secondary">Превью не загрузилось – попробуйте чуть позже. Код ниже рабочий.</Text>
+        )}
+        {!broken && <img key={preview} src={preview} alt="HealthCraft Index" hidden={!ready} onLoad={markLoaded} onError={markFailed} />}
       </div>
       <div className="rh-badge-pop__chips" role="group" aria-label="Что показать на бейдже">
         {shown.map((c) => (

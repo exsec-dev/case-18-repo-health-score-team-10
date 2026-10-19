@@ -868,7 +868,9 @@ const routes = {
       return new Response(renderBadgeFor(subject, options), {
         headers: {
           "content-type": "image/svg+xml; charset=utf-8",
-          "cache-control": `public, max-age=${BADGE_CACHE_SECONDS}`,
+          // бейдж закрытого репо по ключу – только кэшу браузера: общие прокси не хранят
+          // оценки закрытого репозитория по адресу с ключом
+          "cache-control": `${subject.viaKey ? "private" : "public"}, max-age=${BADGE_CACHE_SECONDS}`,
         },
       });
     }),

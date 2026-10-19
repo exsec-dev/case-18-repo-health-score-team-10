@@ -350,6 +350,8 @@ export interface BadgeSubject {
   previousIndex: number | null;
   categories: Partial<Record<IndexCategoryKey, number | null>>;
   rank: RankBadge | null;
+  /** закрытый репо, открытый ключом: ответ – только браузеру, не общим кэшам */
+  viaKey: boolean;
 }
 
 /**
@@ -395,6 +397,7 @@ export function badgeSubject(db: Database, org: string, repo: string, opts: { ke
     categories,
     // место есть только у открытого репозитория из рейтинга
     rank: open && opts.withRank === true && index !== null ? rankBadge(ratingPlace(db, r.org_slug, r.repo_slug, index)) : null,
+    viaKey: !open,
   };
 }
 
