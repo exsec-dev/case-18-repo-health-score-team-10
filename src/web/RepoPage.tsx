@@ -1904,8 +1904,12 @@ function Recommendations({ view, org, repo }: { view: CardView; org: string; rep
       <section className="rh-section" id={RECOMMENDATIONS_ID} aria-label="Рекомендации">
         <Card view="outlined" className="rh-section-card">
           <Flex gap={2} alignItems="center">
-            {/* галочка — только когда улучшать действительно нечего */}
-            <Icon data={view.noRecommendationsKind === "healthy" ? CircleCheck : CircleInfo} size={16} className="rh-muted-icon" />
+            {/* зеленая галочка — только когда улучшать действительно нечего */}
+            {view.noRecommendationsKind === "healthy" ? (
+              <Icon data={CircleCheck} size={16} className="rh-positive-icon" />
+            ) : (
+              <Icon data={CircleInfo} size={16} className="rh-muted-icon" />
+            )}
             <Text color="complementary">{view.noRecommendations}</Text>
           </Flex>
         </Card>

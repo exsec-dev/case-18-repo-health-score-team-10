@@ -856,12 +856,12 @@ const routes = {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) return notFound("not found");
       if (!badgeWindowHasRoom(req)) return rateLimited("слишком много запросов – попробуйте позже", 60);
-      // `show=rank,word,delta`, прежний `style=rank`, `category=<ключ>`; `key` – бейдж закрытого репо
+      // `show=rank,word,delta,cats`, прежний `style=rank`, `category=<ключ>`; `key` – бейдж закрытого репо
       const params = new URL(req.url).searchParams;
       const options = parseBadgeOptions(params);
       const keys = params.getAll("key");
       if (options === null || keys.length > 1) {
-        return badQuery("неизвестный вид бейджа: допустимы show=rank,word,delta (или style=rank) либо category=documentation|activity|issues|code");
+        return badQuery("неизвестный вид бейджа: допустимы show=rank,word,delta,cats (или style=rank) либо category=documentation|activity|issues|code");
       }
       const subject = badgeSubject(db, org!, repo!, { key: keys[0] ?? null, appSecret: config.auth.appSecret, withRank: options.parts.has("rank") });
       if (subject === null) return publicNotFound();

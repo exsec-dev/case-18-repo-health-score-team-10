@@ -1835,6 +1835,11 @@ button.rh-category:focus-visible {
   color: var(--g-color-text-secondary);
 }
 
+.rh-positive-icon {
+  flex: none;
+  color: var(--g-color-text-positive);
+}
+
 
 /* серый тег посреди строки — по базовой линии текста */
 .rh-ui-tag {
@@ -2523,6 +2528,7 @@ button.rh-category:focus-visible {
 
 /* поповер бейджа, как Clone у SourceCraft */
 .rh-badge-pop {
+  container: rh-badge / inline-size;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -2552,15 +2558,37 @@ button.rh-category:focus-visible {
   max-width: 100%;
 }
 
-/* чипы — одной строкой по ширине подписи; на узком экране сжимаются, а не переносятся */
+/* чипы — одной строкой на всю ширину; на узком экране сжимаются, а не переносятся */
 .rh-badge-pop__chips {
   display: flex;
   gap: var(--g-spacing-1);
 }
 
 .rh-badge-pop__chips > .rh-badge-pop__chip {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-width: 0;
+}
+
+/* галочка выбранного чипа — по ширине самой иконки, а не квадратного слота кнопки */
+.rh-badge-pop__chip .g-button__icon,
+.rh-badge-pop__chip .g-button__icon-inner {
+  width: 14px;
+}
+
+.rh-badge-pop__chip .g-button__icon {
+  margin-inline: -2px 4px;
+}
+
+@container rh-badge (max-width: 360px) {
+  .rh-badge-pop__chips > .rh-badge-pop__chip {
+    --g-button-padding: 6px;
+  }
+}
+
+.rh-badge-pop__skeleton {
+  height: 20px;
+  max-width: 100%;
+  border-radius: 3px;
 }
 
 /* формат, код и копирование — одно поле, как адрес в Clone у SourceCraft */

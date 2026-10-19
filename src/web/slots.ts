@@ -7,7 +7,6 @@
 
 import type { HistoryPoint, HistoryResponse } from "../summary/history-contract";
 import { AI_SECTION_TITLE } from "./format";
-import { CATEGORY_TITLES } from "../report/categories";
 
 /**
  * Контракты полей слотов. Ключ — слот, значение — имена полей, которые отдает
@@ -138,18 +137,16 @@ export function aiNotesCaption(finishedAt: readonly (string | null)[], tooEarly:
   return tooEarly(dates) ? "Между AI-обзорами меньше 2 дней – о динамике судить рано." : null;
 }
 
-/** Чипы окна бейджа: части основного бейджа и бейджи категорий рядом. */
+/** Чипы окна бейджа – части одного бейджа; значения те же, что у `show=`. */
 export type BadgeChip = "rank" | "word" | "delta" | "cats";
 export const BADGE_CHIPS: readonly BadgeChip[] = ["rank", "word", "delta", "cats"];
-/** Что копирует поле: код для README, адреса картинок или адрес JSON публичного API. */
+/** Что копирует поле: код для README, адрес картинки или адрес JSON публичного API. */
 export type BadgeFormat = "md" | "html" | "url" | "json";
 
-const BADGE_CATEGORY_KEYS = ["documentation", "activity", "issues", "code"] as const;
-
 /**
- * Код из окна бейджа. Основной бейдж – `badge.svg?show=…` с выбранными частями,
- * категории – еще 4 бейджа `?category=…` в той же строке; `key` – ключ бейджа
- * закрытого репо (`repo.badgeKey`). Картинки ведут на карточку репозитория.
+ * Код из окна бейджа: один бейдж `badge.svg?show=…` с выбранными частями
+ * (`cats` – шкалы категорий под шапкой); `key` – ключ бейджа закрытого репо
+ * (`repo.badgeKey`). Картинка ведет на карточку репозитория.
  */
 export function badgeCode(o: { publicBaseUrl: string; org: string; repo: string; chips: ReadonlySet<BadgeChip>; key?: string | null }, format: BadgeFormat): string {
   const base = o.publicBaseUrl.replace(/\/+$/, "");
@@ -161,13 +158,10 @@ export function badgeCode(o: { publicBaseUrl: string; org: string; repo: string;
     const list = params.filter((p): p is string => p !== null);
     return list.length > 0 ? `?${list.join("&")}` : "";
   };
-  const parts = (["rank", "word", "delta"] as const).filter((c) => o.chips.has(c));
-  const images = [{ alt: "HealthCraft Index", src: `${api}/badge.svg${query(parts.length > 0 ? `show=${parts.join(",")}` : null, key)}` }];
-  if (o.chips.has("cats")) {
-    for (const c of BADGE_CATEGORY_KEYS) images.push({ alt: `HealthCraft: ${CATEGORY_TITLES[c]}`, src: `${api}/badge.svg${query(`category=${c}`, key)}` });
-  }
+  const parts = BADGE_CHIPS.filter((c) => o.chips.has(c));
+  const src = `${api}/badge.svg${query(parts.length > 0 ? `show=${parts.join(",")}` : null, key)}`;
   const card = `${base}/repo/${path}`;
-  if (format === "url") return images.map((i) => i.src).join(" ");
-  if (format === "html") return images.map((i) => `<a href="${card}"><img src="${i.src}" alt="${i.alt}"></a>`).join(" ");
-  return images.map((i) => `[![${i.alt}](${i.src})](${card})`).join(" ");
+  if (format === "url") return src;
+  if (format === "html") return `<a href="${card}"><img src="${src}" alt="HealthCraft Index"></a>`;
+  return `[![HealthCraft Index](${src})](${card})`;
 }

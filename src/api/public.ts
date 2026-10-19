@@ -125,31 +125,79 @@ export function renderBadgeSvg(index: number | null, rank: RankBadge | null = nu
   const color = badgeColor(index);
   // левая половина – нейтральный серый, как у бейджей shields; ширина подписи – под Verdana 11
   const label = "HealthCraft Index";
-  const labelWidth = 114;
   const valueWidth = parts.length === 1 ? 8 + value.length * 11 : 10 + textWidth(value, true);
   // ширина сегмента места – под Verdana 11 (кириллица и цифры жирным ~8 px на знак)
   const rankWidth = rank === null ? 0 : 10 + rank.label.length * 8;
-  const width = labelWidth + valueWidth + rankWidth;
-  const title = rank === null ? `${label}: ${value}` : `${label}: ${value}, ${rank.label} рейтинга`;
+  // с категориями бейдж – карточка: шапка на всю ширину, число и место прижаты вправо
+  const card = extras.categories === undefined ? null : categoryRows(extras.categories);
+  const width = Math.max(114 + valueWidth + rankWidth, card?.minWidth ?? 0);
+  const labelWidth = width - valueWidth - rankWidth;
+  const height = card === null ? 20 : 20 + card.height;
+  const scores = card === null ? "" : `, ${card.rows.map((r) => `${r.name} ${r.value}`).join(", ")}`;
+  const title = rank === null ? `${label}: ${value}${scores}` : `${label}: ${value}, ${rank.label} рейтинга${scores}`;
   const metal = rank === null ? null : RANK_BADGE_COLORS[rank.tier];
   const rankRect = metal === null ? "" : `
     <rect x="${labelWidth + valueWidth}" width="${rankWidth}" height="20" fill="${metal.bg}"/>`;
   const rankText = metal === null ? "" : `
     <text x="${labelWidth + valueWidth + rankWidth / 2}" y="14" font-weight="bold" fill="${metal.fg}">${rank!.label}</text>`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="20" role="img" aria-label="${title}">
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" role="img" aria-label="${title}">
   <title>${title}</title>
   <linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient>
-  <clipPath id="r"><rect width="${width}" height="20" rx="3" fill="#fff"/></clipPath>
-  <g clip-path="url(#r)">
+  <clipPath id="r"><rect width="${width}" height="${height}" rx="3" fill="#fff"/></clipPath>
+  <g clip-path="url(#r)">${card === null ? "" : `
+    <rect width="${width}" height="${height}" fill="${CARD_BODY}"/>${card.bars(width)}`}
     <rect width="${labelWidth}" height="20" fill="#555"/>
     <rect x="${labelWidth}" width="${valueWidth}" height="20" fill="${color}"/>${rankRect}
-    <rect width="${width}" height="20" fill="url(#s)"/>
+    <rect width="${width}" height="${height}" fill="url(#s)"/>
   </g>
   <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
     <text x="${labelWidth / 2}" y="14">${label}</text>
-    <text x="${labelWidth + valueWidth / 2}" y="14" font-weight="bold">${value}</text>${rankText}
+    <text x="${labelWidth + valueWidth / 2}" y="14" font-weight="bold">${value}</text>${rankText}${card === null ? "" : card.texts(width)}
   </g>
 </svg>`;
+}
+
+// карточка категорий под шапкой бейджа: строка – название, шкала цвета зоны, балл справа
+const CARD_BODY = "#3d3d3d";
+const CARD_TRACK = "#555";
+const CARD_ROW = 16;
+const CARD_PAD = 6;
+const CARD_MIN_WIDTH = 232;
+
+function categoryRows(categories: Partial<Record<IndexCategoryKey, number | null>>) {
+  const rows = BADGE_CATEGORIES.map((key) => {
+    const raw = categories[key] ?? null;
+    const shown = raw === null ? null : roundScore(raw);
+    return { name: CATEGORY_TITLES[key], shown, value: shown === null ? "n/a" : String(shown) };
+  });
+  // шрифт строк 10 px – ширины Verdana 11 пропорционально
+  const nameWidth = Math.ceil((Math.max(...rows.map((r) => textWidth(r.name))) * 10) / 11);
+  const barX = 8 + nameWidth + 8;
+  const numWidth = 26;
+  const barWidth = (width: number) => width - barX - numWidth - 8;
+  const y = (i: number) => 20 + CARD_PAD + i * CARD_ROW;
+  return {
+    rows,
+    height: CARD_PAD * 2 + rows.length * CARD_ROW - 4,
+    minWidth: Math.max(CARD_MIN_WIDTH, barX + 60 + numWidth + 8),
+    bars: (width: number) =>
+      rows
+        .map((r, i) => {
+          const w = barWidth(width);
+          const fill = r.shown === null ? "" : `<rect x="${barX}" y="${y(i) + 4}" width="${Math.round((w * r.shown) / 100)}" height="5" rx="2.5" fill="${badgeColor(r.shown)}"/>`;
+          return `
+    <rect x="${barX}" y="${y(i) + 4}" width="${w}" height="5" rx="2.5" fill="${CARD_TRACK}"/>${fill}`;
+        })
+        .join(""),
+    texts: (width: number) =>
+      rows
+        .map(
+          (r, i) => `
+    <text x="8" y="${y(i) + 9}" font-size="10" text-anchor="start" fill-opacity=".85">${r.name}</text>
+    <text x="${width - 8}" y="${y(i) + 9}" font-size="10" text-anchor="end" font-weight="bold">${r.value}</text>`,
+        )
+        .join(""),
+  };
 }
 
 /** Что добавить в сегмент числа: изменение с прошлого анализа и слово шкалы. */
@@ -157,6 +205,8 @@ export interface BadgeExtras {
   /** разница с прошлым анализом; null – сравнивать не с чем (части нет) */
   delta?: number | null;
   word?: boolean;
+  /** баллы 4 категорий – бейдж становится карточкой со шкалами; нет поля – обычный бейдж */
+  categories?: Partial<Record<IndexCategoryKey, number | null>>;
 }
 
 function deltaText(delta: number): string {
@@ -207,9 +257,9 @@ export function renderCategoryBadgeSvg(category: IndexCategoryKey, score: number
 
 // ---------- параметры бейджа ----------
 
-/** Части основного бейджа, которые выбирают в окне «Бейдж для README». */
-export type BadgePart = "rank" | "word" | "delta";
-export const BADGE_PARTS: readonly BadgePart[] = ["rank", "word", "delta"];
+/** Части основного бейджа, которые выбирают в окне «Бейдж для README»; `cats` – шкалы категорий под шапкой. */
+export type BadgePart = "rank" | "word" | "delta" | "cats";
+export const BADGE_PARTS: readonly BadgePart[] = ["rank", "word", "delta", "cats"];
 export const BADGE_CATEGORIES = Object.keys(INDEX_WEIGHTS) as IndexCategoryKey[];
 
 export interface BadgeOptions {
@@ -223,7 +273,7 @@ export interface BadgeOptions {
  * гейт публичности, лимит и кэш общие, а README переключается правкой адреса.
  * Неверное значение – 400 еще до поиска репо, чтобы ответ не зависел от его
  * видимости. Параметры маршрута `badge.svg`:
- * - `show=rank,word,delta` – части основного бейджа в любом наборе без повторов;
+ * - `show=rank,word,delta,cats` – части основного бейджа в любом наборе без повторов;
  * - `style=rank` – прежний вид, то же, что `show=rank` (ссылки в README не ломаются);
  * - `category=<ключ>` – бейдж балла категории, без других частей.
  * Каждый параметр не больше одного раза; иное – null (400 еще до поиска репо).
@@ -328,5 +378,9 @@ export function badgeSubject(db: Database, org: string, repo: string, opts: { ke
 export function renderBadgeFor(subject: BadgeSubject, options: BadgeOptions): string {
   if (options.category !== null) return renderCategoryBadgeSvg(options.category, subject.categories[options.category] ?? null);
   const delta = options.parts.has("delta") && subject.index !== null && subject.previousIndex !== null ? subject.index - subject.previousIndex : null;
-  return renderBadgeSvg(subject.index, options.parts.has("rank") ? subject.rank : null, { delta, word: options.parts.has("word") });
+  return renderBadgeSvg(subject.index, options.parts.has("rank") ? subject.rank : null, {
+    delta,
+    word: options.parts.has("word"),
+    ...(options.parts.has("cats") ? { categories: subject.categories } : {}),
+  });
 }

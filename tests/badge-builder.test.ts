@@ -1,5 +1,6 @@
-// Окно бейджа с чипами: части основного бейджа (`show=`), бейджи категорий
-// (`category=`), бейдж закрытого репо по ключу (`key=`) и код для README.
+// Окно бейджа с чипами: части бейджа (`show=`, `cats` – шкалы категорий под
+// шапкой), бейдж одной категории (`category=`), бейдж закрытого репо по ключу
+// (`key=`) и код для README.
 //   - прежние адреса (`badge.svg`, `?style=rank`) отвечают как раньше;
 //   - закрытый репо – только с верным ключом, неверный ключ = тот же 404;
 //   - кнопка бейджа – только у своих репо (в списке «Мои репозитории»).
@@ -52,6 +53,7 @@ describe("параметры badge.svg", () => {
     expect(parse("")).toEqual({ parts: [], category: null });
     expect(parse("style=rank")).toEqual({ parts: ["rank"], category: null });
     expect(parse("show=delta,rank,word")).toEqual({ parts: ["delta", "rank", "word"], category: null });
+    expect(parse("show=cats,word")).toEqual({ parts: ["cats", "word"], category: null });
     expect(parse("show=rank&style=rank")).toEqual({ parts: ["rank"], category: null });
     expect(parse("category=issues")).toEqual({ parts: [], category: "issues" });
     // посторонние параметры (key разбирает маршрут) не мешают
@@ -59,7 +61,7 @@ describe("параметры badge.svg", () => {
   });
 
   test("ошибки: чужое значение, повтор, пустая часть, категория с частями", () => {
-    for (const q of ["style=flat", "style=rank&style=rank", "show=rank,rank", "show=rank,", "show=", "show=place", "show=a&show=b", "category=cicd", "category=code&show=rank", "category=code&style=rank", "category=code&category=issues"]) {
+    for (const q of ["show=cats,cats", "category=code&show=cats", "style=flat", "style=rank&style=rank", "show=rank,rank", "show=rank,", "show=", "show=place", "show=a&show=b", "category=cicd", "category=code&show=rank", "category=code&style=rank", "category=code&category=issues"]) {
       expect({ q, parsed: parse(q) }).toEqual({ q, parsed: null });
     }
   });
@@ -78,6 +80,27 @@ describe("SVG", () => {
     const width = (s: string) => Number(/width="(\d+)"/.exec(s)![1]);
     expect(width(svg)).toBeGreaterThan(width(renderBadgeSvg(74)));
     expect(/[—ё]/.test(svg)).toBe(false);
+  });
+
+  test("с категориями – карточка: число вправо, под шапкой 4 шкалы зоны с баллами", () => {
+    const cats = { documentation: 35.4, activity: 82, issues: null, code: 99.6 };
+    const svg = renderBadgeSvg(79, null, { categories: cats });
+    const width = Number(/width="(\d+)"/.exec(svg)![1]);
+    expect(width).toBeGreaterThanOrEqual(232);
+    expect(/height="(\d+)"/.exec(svg)![1]).toBe("92");
+    // число – у правого края шапки
+    const valueX = Number(/<rect x="(\d+)" width="(\d+)" height="20" fill="#2da44e"\/>/.exec(svg)![1]);
+    const valueW = Number(/<rect x="\d+" width="(\d+)" height="20" fill="#2da44e"\/>/.exec(svg)![1]);
+    expect(valueX + valueW).toBe(width);
+    for (const t of [">Документация<", ">Активность<", ">Задачи<", ">Состояние кода<", ">35<", ">82<", ">n/a<", ">100<"]) expect(svg).toContain(t);
+    expect(svg).toContain('aria-label="HealthCraft Index: 79, Документация 35, Активность 82, Задачи n/a, Состояние кода 100"');
+    // шкала зоны: красная у 35, без заливки у «нет данных»
+    expect(svg).toContain('fill="#cf222e"');
+    expect(svg.match(/rx="2\.5"/g)).toHaveLength(4 + 3);
+    // с местом – место тоже у правого края, после числа
+    const ranked = renderBadgeSvg(79, { tier: "silver", label: "TOP-100" }, { categories: cats });
+    expect(ranked).toContain(">TOP-100<");
+    expect(/[—ё]/.test(ranked)).toBe(false);
   });
 
   test("бейдж категории: название, округленный балл, цвет зоны", () => {
@@ -124,6 +147,7 @@ describe("бейдж закрытого репо по ключу", () => {
       const int = badgeSubject(t.db, "bb", "int", { key: badgeKey(SECRET, "bb", "int"), appSecret: SECRET })!;
       expect(renderBadgeFor(int, { parts: new Set(["delta"]), category: null })).toBe(renderBadgeSvg(30));
       expect(renderBadgeFor(priv, { parts: new Set(), category: "code" })).toContain(">Состояние кода<");
+      expect(renderBadgeFor(priv, { parts: new Set(["cats"]), category: null })).toContain(">Состояние кода<");
     } finally {
       t.close();
     }
@@ -148,6 +172,7 @@ describe("бейдж закрытого репо по ключу", () => {
     expect((await get("open/badge.svg?style=rank")).status).toBe(200);
     expect((await get("open/badge.svg?show=word,delta")).body).toContain(">72 · +12 · здоров<");
     expect((await get("open/badge.svg?category=documentation")).body).toContain(">Документация<");
+    expect((await get("open/badge.svg?show=cats")).body).toContain(">Состояние кода<");
 
     const key = badgeKey(SECRET, "bb", "priv");
     const priv = await get(`priv/badge.svg?key=${key}&show=delta`);
@@ -170,20 +195,16 @@ describe("бейдж закрытого репо по ключу", () => {
 describe("код для README", () => {
   const base = { publicBaseUrl: "https://hc.example.ru/", org: "org", repo: "my.repo" };
 
-  test("без частей – прежний код; части и категории – в адресах", () => {
+  test("без частей – прежний код; части и категории – в адресе одного бейджа", () => {
     expect(badgeCode({ ...base, chips: new Set() }, "md")).toBe("[![HealthCraft Index](https://hc.example.ru/api/v1/repos/org/my.repo/badge.svg)](https://hc.example.ru/repo/org/my.repo)");
     expect(badgeCode({ ...base, chips: new Set(["delta", "rank"]) }, "url")).toBe("https://hc.example.ru/api/v1/repos/org/my.repo/badge.svg?show=rank,delta");
-    const cats = badgeCode({ ...base, chips: new Set(["cats"]) }, "url").split(" ");
-    expect(cats).toHaveLength(5);
-    expect(cats[4]).toBe("https://hc.example.ru/api/v1/repos/org/my.repo/badge.svg?category=code");
+    expect(badgeCode({ ...base, chips: new Set(["cats", "word"]) }, "url")).toBe("https://hc.example.ru/api/v1/repos/org/my.repo/badge.svg?show=word,cats");
     expect(badgeCode({ ...base, chips: new Set() }, "html")).toBe('<a href="https://hc.example.ru/repo/org/my.repo"><img src="https://hc.example.ru/api/v1/repos/org/my.repo/badge.svg" alt="HealthCraft Index"></a>');
     expect(badgeCode({ ...base, chips: new Set(["word"]) }, "json")).toBe("https://hc.example.ru/api/v1/repos/org/my.repo");
   });
 
-  test("ключ закрытого репо – в каждом адресе картинки", () => {
-    const urls = badgeCode({ ...base, chips: new Set(["word", "cats"]), key: "k-1_x" }, "url").split(" ");
-    expect(urls[0]).toBe("https://hc.example.ru/api/v1/repos/org/my.repo/badge.svg?show=word&key=k-1_x");
-    for (const u of urls) expect(u).toContain("key=k-1_x");
+  test("ключ закрытого репо – в адресе картинки", () => {
+    expect(badgeCode({ ...base, chips: new Set(["word", "cats"]), key: "k-1_x" }, "url")).toBe("https://hc.example.ru/api/v1/repos/org/my.repo/badge.svg?show=word,cats&key=k-1_x");
   });
 
   test("кнопка – только у своего репо: из списка по токену и с бейджем или ключом", () => {

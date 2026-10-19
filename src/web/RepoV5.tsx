@@ -1,7 +1,7 @@
 // AI-блоки и история на карточке репозитория: признаки накрутки в подвале плашки
 // HealthCraft Index, AI-обзор, AI-разбор в категориях, история оценки и бейдж для README.
 // `card.ai` приходит только зрителю с правами на полный Score; без прав этих блоков нет вовсе.
-import { ArrowsRotateRight, ChevronDown, CircleExclamation, ClockArrowRotateLeft, Flag, SealCheck, Shield, ShieldCheck, SparklesFill } from "@gravity-ui/icons";
+import { ArrowsRotateRight, Check, ChevronDown, CircleExclamation, ClockArrowRotateLeft, Flag, SealCheck, Shield, ShieldCheck, SparklesFill } from "@gravity-ui/icons";
 import {
   ActionTooltip,
   Alert,
@@ -1219,8 +1219,12 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
 // Доступность знает сервер (поля карточки `repo.badge` и `repo.badgeKey`), без
 // пробного запроса `badge.svg`, который ловил бы 404 в консоли.
 
-/** Подписи чипов окна бейджа – короткие, чтобы 4 чипа шли в одну строку и на телефоне. */
-const BADGE_CHIP_TEXT: Record<BadgeChip, string> = { rank: "Лига", word: "Слово шкалы", delta: "Изменение", cats: "Категории" };
+/**
+ * Подписи чипов окна бейджа – короткие: 4 чипа с галочками идут в одну строку и на
+ * телефоне (311px). «Зона» – слово зоны шкалы («здоров»), «Тренд» – разница с прошлым
+ * анализом, «Категории» – шкалы 4 категорий под шапкой бейджа.
+ */
+const BADGE_CHIP_TEXT: Record<BadgeChip, string> = { rank: "Лига", word: "Зона", delta: "Тренд", cats: "Категории" };
 const BADGE_FORMAT_TEXT: Record<BadgeFormat, string> = { md: "Markdown", html: "HTML", url: "Ссылка", json: "JSON API" };
 
 /** Что передать окну бейджа: репо, адрес сервиса, есть ли лига и ключ закрытого репо. */
@@ -1252,8 +1256,13 @@ function BadgeContent({ target, title = true }: { target: BadgeTarget; title?: b
       return next;
     });
   const code = badgeCode({ publicBaseUrl, org, repo, chips, key: badgeKey }, format);
-  // превью – с адреса этого же сервиса (относительный путь), тот же набор, что в коде
-  const previews = badgeCode({ publicBaseUrl: "", org, repo, chips, key: badgeKey }, "url").split(" ");
+  // превью – с адреса этого же сервиса (относительный путь), тот же бейдж, что в коде
+  const preview = badgeCode({ publicBaseUrl: "", org, repo, chips, key: badgeKey }, "url");
+  // пока сервер рисует новый бейдж, на его месте скелетон по размеру бейджа (с категориями
+  // это карточка); картинка грузится невидимой и показывается, когда готова
+  const [loaded, setLoaded] = useState<ReadonlySet<string>>(() => new Set());
+  const ready = loaded.has(preview);
+  const markLoaded = () => setLoaded((prev) => (prev.has(preview) ? prev : new Set(prev).add(preview)));
   return (
     <div className="rh-badge-pop" data-slot="badge">
       {title && (
@@ -1261,14 +1270,18 @@ function BadgeContent({ target, title = true }: { target: BadgeTarget; title?: b
           {SLOT_EMPTY.badge.title}
         </Text>
       )}
-      <div className="rh-badge-pop__preview">
-        {previews.map((src, i) => (
-          <img key={src} src={src} alt={i === 0 ? "HealthCraft Index" : ""} />
-        ))}
+      <div className="rh-badge-pop__preview" aria-busy={!ready}>
+        {!ready && <Skeleton className="rh-badge-pop__skeleton" style={chips.has("cats") ? { width: 232, height: 92 } : { width: 180 }} />}
+        <img key={preview} src={preview} alt="HealthCraft Index" hidden={!ready} onLoad={markLoaded} onError={markLoaded} />
       </div>
       <div className="rh-badge-pop__chips" role="group" aria-label="Что показать на бейдже">
         {shown.map((c) => (
           <Button key={c} className="rh-badge-pop__chip" size="s" view="outlined" selected={chips.has(c)} aria-pressed={chips.has(c)} onClick={() => toggle(c)}>
+            {chips.has(c) && (
+              <Button.Icon side="start">
+                <Icon data={Check} size={14} />
+              </Button.Icon>
+            )}
             {BADGE_CHIP_TEXT[c]}
           </Button>
         ))}
