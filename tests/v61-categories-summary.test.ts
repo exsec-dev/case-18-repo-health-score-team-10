@@ -48,6 +48,8 @@ describe("categoriesSummary: итог раздела «Категории»", ()
     expect(categoriesSummary(cardWith({ documentation: cat(19), activity: cat(30), issues: cat(6), code: cat(65) }))).toBe(
       "Лучше всего – состояние кода. Слабее всего – задачи.",
     );
+    // равные баллы — одна категория не бывает и лучшей, и слабейшей
+    expect(categoriesSummary(cardWith({ documentation: cat(50), activity: cat(50), issues: cat(null), code: cat(null) }))).toBe("Слабее всего – документация.");
   });
 
   test("все от 70 — только сильнейшие; без данных и пустой репо — строки нет", () => {

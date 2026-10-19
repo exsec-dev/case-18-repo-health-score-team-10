@@ -485,10 +485,11 @@ export function categoriesSummary(card: RepoCard): string | null {
   const weakest = shown.filter((e) => e.value < 70).sort((a, b) => a.value - b.value)[0];
   const parts: string[] = [];
   if (strong.length > 0) parts.push(`Сильнее всего – ${strong.map(named).join(" и ")}.`);
-  // все ниже 70 — опора на лучшую, если она не та же, что слабейшая
-  else if (shown.length > 1) {
+  // все ниже 70 — опора на лучшую, если она выше слабейшей (при равных баллах
+  // «лучше» и «слабее» назвали бы одну и ту же категорию)
+  else if (weakest !== undefined) {
     const best = [...shown].sort((a, b) => b.value - a.value)[0]!;
-    parts.push(`Лучше всего – ${named(best)}.`);
+    if (best.value > weakest.value) parts.push(`Лучше всего – ${named(best)}.`);
   }
   if (weakest !== undefined) {
     // причина — до двух показателей, недобравших больше половины, по потерянным баллам
