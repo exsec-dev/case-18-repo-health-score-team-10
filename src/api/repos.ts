@@ -5,7 +5,7 @@
 // отдельный массив, иначе «нет данных» оказалось бы лучшим или худшим
 // результатом в зависимости от направления сортировки.
 import type { Database } from "bun:sqlite";
-import { CHANNEL_KINDS, DISPLAY_KINDS, PUBLIC_KINDS, computeFromFacts, effectiveFacts, totalCapFlags, totalsFromCategories, type CategoryScore } from "../score/compute";
+import { CHANNEL_KINDS, DISPLAY_KINDS, OPTIONAL_KINDS, PUBLIC_KINDS, computeFromFacts, effectiveFacts, totalCapFlags, totalsFromCategories, type CategoryScore } from "../score/compute";
 import { authorsOf, orderRecommendations, recommendFromFacts, recommendationParams, recommendationText, round4, type DeltaEvaluator } from "../score/recommend";
 import { categoryOf, parseFactValue, scrubDetail } from "../collectors/facts";
 import { isOwnRepo, NO_PAT_ACCESS, visibilityOf, type AccessRepo, type AccessResult, type ChannelAccess } from "../auth/access";
@@ -497,7 +497,7 @@ interface FilterFactRow {
 }
 
 // json_valid – страж: битое значение одного факта не роняет рейтинг (факт = незнание);
-// у этих kinds сжатия нет (z:-префикс только у timeline)
+// у этих kinds сжатия нет (z:-префикс только у timeline и tree.lockgraph, COMPRESSED_KINDS)
 const FILTER_FACTS_SQL = (n: number) => `
 SELECT scan_id, key,
   CASE WHEN ok THEN json_type(value, '$.source_loc') END AS sl_type,
@@ -1354,12 +1354,15 @@ export function getRepoCard(
   }
 
   const factQuery = db.query("SELECT key, category, value, status, source, collected_at FROM facts WHERE scan_id = ?");
-  const publicFacts = (factQuery.all(publicRow.scan_id) as FactRow[]).filter((f) => !CHANNEL_KINDS.includes(f.key));
+  // граф lock-файлов (OPTIONAL_KINDS) — доказательство «Безопасности»: едет только
+  // из канального скана и только зрителю с правами на AppSec (ниже), иначе он
+  // дублировался бы и показывал граф другого скана, чем тот, по которому балл
+  const publicFacts = (factQuery.all(publicRow.scan_id) as FactRow[]).filter((f) => !CHANNEL_KINDS.includes(f.key) && !OPTIONAL_KINDS.includes(f.key));
 
   // канальные данные: каждый канал — из своего скана (см. правило выше)
   const channel = channelSources(db, r.id);
   const channelFacts = new Map<string, unknown>();
-  for (const f of [...channel.cicdFacts, ...channel.securityFacts]) if (f.status === "ok") channelFacts.set(f.key, JSON.parse(f.value));
+  for (const f of [...channel.cicdFacts, ...channel.securityFacts]) if (f.status === "ok") channelFacts.set(f.key, parseFactValue(f.value));
   const categoryOfFacts = (facts: Map<string, unknown>, key: "cicd" | "security"): CategoryScore =>
     computeFromFacts(facts, { scanId: 0, repoId: r.id }, new Date(publicRow.computed_at)).categories[key];
   const publicCats = JSON.parse(publicRow.categories) as Record<string, CategoryScore>;
@@ -1560,7 +1563,7 @@ export function getRepoCard(
   // адресуемые факты: те, на которые ссылаются рекомендации, те, что читает
   // compute, и справочные (DISPLAY_KINDS); сырье остальных в ответ не едет
   const refKeys = recommendations.flatMap((rec) => rec.factRefs.map((ref) => ref.key));
-  const addressable = new Set<string>([...refKeys, ...PUBLIC_KINDS, ...CHANNEL_KINDS, ...DISPLAY_KINDS, CHANNEL_TREE_KEY]);
+  const addressable = new Set<string>([...refKeys, ...PUBLIC_KINDS, ...CHANNEL_KINDS, ...DISPLAY_KINDS, ...OPTIONAL_KINDS, CHANNEL_TREE_KEY]);
   const evidence: CardEvidence[] = factRows
     .filter((f) => addressable.has(f.key))
     .map((f) => {
@@ -1987,7 +1990,8 @@ export function channelSources(db: Database, repoId: number): { cicdScanId: numb
     cicdScanId,
     securityScanId,
     cicdFacts: okFacts(cicdScanId, CICD_KINDS),
-    securityFacts: okFacts(securityScanId, [...APPSEC_KINDS, "tree.stats"]),
+    // граф lock-файлов — того же скана, что и находки: подметрика уязвимых зависимостей
+    securityFacts: okFacts(securityScanId, [...APPSEC_KINDS, "tree.stats", "tree.lockgraph"]),
   };
 }
 

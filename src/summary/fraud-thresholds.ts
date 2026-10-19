@@ -3,7 +3,7 @@
 // зависимостей: его берет и веб-бандл.
 
 /** Версия хартии флаггера, с которой действуют правила кода; заметки старше — «по прежним правилам». */
-export const FLAGGER_RULES_VERSION = 7;
+export const FLAGGER_RULES_VERSION = 9;
 
 /** Доля коммитов роботов от всех коммитов, с которой код ставит флаг сам: людей почти нет… */
 export const ROBOT_SHARE_FLAG = 0.8;
@@ -26,6 +26,20 @@ export const RECENT_SPIKE_MIN = 20;
 export const RECENT_SPIKE_RATIO = 5;
 /** …при обычном темпе не ниже этого (дробная медиана 0,5 — не темп). */
 export const RECENT_BASELINE_MIN = 1;
+
+// Слабые сигналы: ниже порогов правил, но повод позвать модель. Модель зовется
+// только при WEAK_SIGNALS_FOR_MODEL сигналах и больше, иначе «подозрений нет»
+// пишет код: на выборке честных репо модель флаговала половину по признакам,
+// которые хартия уликами не считает (baseline 0, ровность 0.2, роботы 60%, нет
+// релизов), а на синтетике с одним слабым сигналом флаговала 5 из 9 ответов.
+/** Сколько слабых сигналов нужно, чтобы позвать модель. */
+export const WEAK_SIGNALS_FOR_MODEL = 2;
+/** Ровность от этой доли (при интервале до REGULAR_INTERVAL_MAX_MINUTES) — слабый сигнал. */
+export const REGULAR_SHARE_WEAK = 0.3;
+/** Роботы от этой доли (при истории от ROBOT_RULE_MIN_COMMITS и без жизни в REST) — слабый сигнал. */
+export const ROBOT_SHARE_WEAK = 0.5;
+/** Всплеск недели от RECENT_SPIKE_MIN коммитов и от этого кратного темпа (при темпе от RECENT_BASELINE_MIN) — слабый сигнал. */
+export const RECENT_SPIKE_RATIO_WEAK = 3;
 
 /** Доля роботов — улика (печатается и флагуется) от порога. */
 export const robotShareHigh = (robots: number, commits: number): boolean => commits > 0 && robots / commits >= ROBOT_SHARE_FLAG;

@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Fact, GIT_KINDS, badChannelFact, noDataFact, okFact, scrubDetail } from "./facts";
 import { collectDeps } from "./deps";
+import { collectLockGraph } from "./lockgraph";
 import { isSourcePath, isTestPath } from "./source-path";
 import { OWNERSHIP_LOG_FORMAT, OWNERSHIP_MAX_COMMITS, OWNERSHIP_WINDOW_DAYS, aggregateOwnership, parseOwnershipLog } from "./ownership";
 import { robot2Flags } from "../score/robot2";
@@ -1277,6 +1278,17 @@ export async function extractFacts(cloneDir: string, opts: ExtractOptions): Prom
       if (deps !== null) facts.push(okFact("tree.deps", deps, "git", nowIso));
     } catch {
       /* манифесты не прочитаны – факта нет, остальные факты целы */
+    }
+  }
+  // --- граф зависимостей из lock-файлов: для «Безопасности» (lockgraph.ts) ---
+  // Без lock-файла факта нет: подметрика уязвимых зависимостей тогда «нет данных»,
+  // находки SCA считаются в плотности как раньше
+  if (Date.now() <= deadline) {
+    try {
+      const graph = await collectLockGraph(blobs, async (sha) => (await git(["cat-file", "blob", sha])).stdout);
+      if (graph !== null) facts.push(okFact("tree.lockgraph", graph, "git", nowIso));
+    } catch {
+      /* lock-файлы не прочитаны – факта нет, остальные факты целы */
     }
   }
   return facts;

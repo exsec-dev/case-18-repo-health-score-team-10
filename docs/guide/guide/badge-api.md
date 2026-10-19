@@ -40,7 +40,7 @@ curl https://health-craft.ru/api/v1/repos/<org>/<repo>
     "issues": 41.5,
     "code": 79.72
   },
-  "modelVersion": "4.5.0-hci",
+  "modelVersion": "4.6.0-hci",
   "scannedAt": "2026-09-20T03:14:08.512Z",
   "headSha": "4f2a9c1e7b03d58a6e91f0c2b7d4a3e8f5c6019b"
 }

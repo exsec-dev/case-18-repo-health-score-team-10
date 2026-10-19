@@ -18,6 +18,8 @@
 // при чтении, поэтому новые формулировки видны без пересчета.
 import type { Database } from "bun:sqlite";
 import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
+import type { LockGraphFactValue } from "../collectors/lockgraph";
+import { matchVulnerableDependencies, type DepsReport } from "./deps-graph";
 import { SCORE_WEIGHTS, CategoryKey, OLD_SHARE_MIN_BASE, SECRETS_CRITICAL_TOTAL_CAP, CRITICAL_FINDINGS_TOTAL_CAP } from "./model";
 import { compute, computeFromFacts, effectiveFacts, licensePresent, totalCapFlags, type ComputeInput, Scores } from "./compute";
 import { SEVERITY_RULES } from "./severity";
@@ -129,6 +131,62 @@ export interface RecommendationParams {
   days?: number;
   /** codeowners-missing: число авторов той же оценки */
   authors?: number | null;
+  /** update-vulnerable-deps: уязвимые прямые зависимости («lodash 4.17.15»), худшие первыми */
+  depsDirect?: string[];
+  /** update-vulnerable-deps: транзитивные по прямой зависимости, через которую они пришли */
+  depsVia?: { through: string; packages: string[] }[];
+  /** update-vulnerable-deps: пакеты, не найденные в графе (считаются прямыми) */
+  depsUnmatched?: string[];
+  /** update-vulnerable-deps: есть ли критичные среди уязвимых пакетов */
+  depsCritical?: boolean;
+  /** update-vulnerable-deps: число пакетов других экосистем вне графа (без веса) */
+  depsOutside?: number;
+}
+
+/** Параметры совета по уязвимым зависимостям — из того же сопоставления, что балл. */
+export function depsParams(report: DepsReport): Pick<RecommendationParams, "depsDirect" | "depsVia" | "depsUnmatched" | "depsCritical" | "depsOutside"> {
+  const label = (p: { name: string; version: string | null }): string => (p.version ? `${p.name} ${p.version}` : p.name);
+  const via = new Map<string, string[]>();
+  for (const p of report.packages) {
+    if (p.direct !== false) continue;
+    const through = p.via[0] ?? "";
+    const list = via.get(through) ?? [];
+    list.push(label(p));
+    via.set(through, list);
+  }
+  return {
+    depsDirect: report.packages.filter((p) => p.direct === true).map(label),
+    depsVia: [...via.entries()].map(([through, packages]) => ({ through, packages })),
+    depsUnmatched: report.packages.filter((p) => p.direct === null && !p.outside).map(label),
+    depsCritical: report.packages.some((p) => p.severity === "critical" && !p.outside),
+    depsOutside: report.outside,
+  };
+}
+
+/** Перечисление до `max` элементов с хвостом «и еще N». */
+function listSome(items: string[], max: number): string {
+  if (items.length <= max) return items.join(", ");
+  const rest = items.length - max;
+  return `${items.slice(0, max).join(", ")} и еще ${rest}`;
+}
+
+/** Текст совета по уязвимым зависимостям: прямые, транзитивные через прямую, несопоставленные. */
+function vulnerableDepsProblem(p: RecommendationParams): string | null {
+  const direct = p.depsDirect ?? [];
+  const via = p.depsVia ?? [];
+  const unmatched = p.depsUnmatched ?? [];
+  const outside = p.depsOutside ?? 0;
+  if (direct.length === 0 && via.length === 0 && unmatched.length === 0) return null;
+  const parts: string[] = [];
+  if (direct.length > 0) parts.push(`${direct.length === 1 ? "прямая зависимость" : "прямые зависимости"} ${listSome(direct, 3)}`);
+  for (const v of via.slice(0, 2)) {
+    parts.push(`через ${v.through} в проект ${v.packages.length === 1 ? "попадает" : "попадают"} ${listSome(v.packages, 3)}`);
+  }
+  if (via.length > 2) parts.push(`еще ${via.length - 2} ${via.length - 2 === 1 ? "прямая зависимость тянет" : "прямые зависимости тянут"} уязвимые пакеты`);
+  if (unmatched.length > 0) parts.push(`${listSome(unmatched, 2)} в lock-файле не ${unmatched.length === 1 ? "найден" : "найдены"} и ${unmatched.length === 1 ? "считается прямой" : "считаются прямыми"}`);
+  const severity = p.depsCritical ? "среди них есть критичные" : "критичных среди них нет";
+  const tail = outside > 0 ? ` Еще ${outside} ${outside === 1 ? "уязвимый пакет другой экосистемы граф не покрывает, он учтен" : "уязвимых пакетов других экосистем граф не покрывает, они учтены"} в плотности находок.` : "";
+  return `AppSec нашел известные уязвимости в зависимостях: ${parts.join("; ")}. ${severity[0]!.toUpperCase()}${severity.slice(1)}. Обновите прямые зависимости до версий без известных уязвимостей – транзитивные обновятся вместе с ними.${tail}`;
 }
 
 /** Части текста: действие – глагол, problem – причина, expectedImpact – эффект. */
@@ -344,6 +402,11 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
     case "appsec-high":
       // открытые high без critical держат потолок 69 – без этого правила совета о них не было бы
       return appsecLevelText(p, "Устраните находки AppSec высокой важности", "уязвимости высокой важности");
+    case "update-vulnerable-deps": {
+      const problem = vulnerableDepsProblem(p);
+      if (problem === null) return null;
+      return { action: "Обновите уязвимые зависимости", problem, expectedImpact: categoryImpact("Безопасность") };
+    }
     case "resolve-old-todos":
       if (typeof p.older !== "number" || typeof p.total !== "number") return null;
       return {
@@ -412,6 +475,10 @@ export function recommendationParams(ruleId: string, ok: Map<string, unknown>, e
   if ((ruleId === "appsec-critical" || ruleId === "appsec-high") && ok.has("appsec.findings")) {
     Object.assign(p, appsecFixEffect(ok, ruleId === "appsec-critical" ? "critical" : "high"));
   }
+  if (ruleId === "update-vulnerable-deps") {
+    const report = vulnerableDepsReport(ok);
+    if (report !== null) Object.assign(p, depsParams(report));
+  }
   if (ruleId === "resolve-old-todos") {
     const todo = ok.get("code.todo") as { older_180d?: unknown; count?: unknown; fixme?: unknown } | undefined;
     if (todo) {
@@ -428,7 +495,20 @@ export function recommendationParams(ruleId: string, ok: Map<string, unknown>, e
 }
 
 /** Порядок score-правил – общий для движка и объединенной выдачи карточки. */
-export const SCORE_RULE_ORDER = ["appsec-critical", "fix-red-runs", "appsec-high", "ci-never-ran", "speed-up-pipeline", "resolve-old-todos", "reduce-stale-issues", "speed-up-issue-close"];
+export const SCORE_RULE_ORDER = ["appsec-critical", "fix-red-runs", "appsec-high", "update-vulnerable-deps", "ci-never-ran", "speed-up-pipeline", "resolve-old-todos", "reduce-stale-issues", "speed-up-issue-close"];
+
+/**
+ * Сопоставление уязвимых пакетов SCA с графом lock-файлов по фактам скана — то
+ * же, что у подметрики «Уязвимые зависимости» (compute.ts); null — нет списка
+ * пакетов или графа (подметрика вне расчета, совета нет).
+ */
+export function vulnerableDepsReport(ok: Map<string, unknown>): DepsReport | null {
+  const appsec = ok.get("appsec.findings") as AppsecFindingsValue | undefined;
+  const lockgraph = ok.get("tree.lockgraph") as LockGraphFactValue | undefined;
+  const sca = appsec?.sca;
+  if (!sca || !Array.isArray(sca.packages) || !lockgraph || !Array.isArray(lockgraph.graphs) || lockgraph.graphs.length === 0) return null;
+  return matchVulnerableDependencies(sca, lockgraph);
+}
 
 
 interface Orderable {
@@ -734,6 +814,11 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
     // открытые high без critical – свой совет (потолок 69)
     const high = (appsec.severity_counts?.high as number | undefined) ?? 0;
     if (crit === 0 && high > 0 && scored("security")) score("appsec-high", ["appsec.findings"], "appsec");
+    // уязвимые зависимости – при графе lock-файлов и хотя бы одном уязвимом пакете:
+    // совет называет прямую зависимость, через которую пришла транзитивная
+    const report = scored("security") ? vulnerableDepsReport(ok) : null;
+    // хотя бы один пакет в экосистеме графа: пакеты «вне графа» совет не порождают
+    if (report !== null && report.packages.length > report.outside) score("update-vulnerable-deps", ["appsec.findings", "tree.lockgraph"], "appsec");
   }
   const todo = ok.get("code.todo") as { older_180d?: unknown; count?: unknown; fixme?: unknown; blamed_files?: unknown; todo_note?: unknown } | undefined;
   if (pub && scored("code") && todo && todo.todo_note !== "incomplete" && typeof todo.blamed_files === "number" && todo.blamed_files > 0) {

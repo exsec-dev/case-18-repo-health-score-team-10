@@ -205,6 +205,46 @@ const SEVERITY_BUCKETS = ["CRITICAL", "HIGH", "MEDIUM", "LOW"] as const;
 const GROUPS_PAGE_SIZE = 250;
 /** Тип движка секретов в спеке AppSec (`type` у /v1/defect-groups). */
 export const SECRETS_TYPE = "SECRETS";
+/** Тип движка анализа зависимостей в спеке AppSec. */
+export const SCA_TYPE = "SCA";
+/** Страниц групп SCA на корзину критичности: 2 × 250 пакетов-групп – с запасом для живых репо. */
+export const SCA_PAGES_CAP = 2;
+
+export type AppsecScaSeverity = "critical" | "high" | "medium" | "low";
+
+/** Уязвимый пакет по группам SCA: имя и версия – из `codeBlock` вида `name@version`. */
+export interface AppsecScaPackage {
+  name: string;
+  version: string | null;
+  /** худшая корзина критичности платформы среди групп пакета */
+  severity: AppsecScaSeverity;
+  /** число открытых групп (advisories) по пакету, по всем движкам */
+  advisories: number;
+  /** движки, нашедшие пакет (Trivy, grype) */
+  engines: string[];
+}
+
+export interface AppsecScaValue {
+  packages: AppsecScaPackage[];
+  /** открытых групп SCA всего (до дедупликации по пакетам) */
+  groups: number;
+  /** групп, у которых codeBlock не разобрался как name@version */
+  unparsed: number;
+  /** страниц больше капа – список пакетов неполный */
+  truncated?: true;
+}
+
+/** `name@1.2.3`, `@scope/name@1.2.3`, `group:artifact@1.0` → имя и версия; без `@` – только имя. */
+export function parseScaPackage(codeBlock: unknown): { name: string; version: string | null } | null {
+  if (typeof codeBlock !== "string") return null;
+  const s = codeBlock.trim();
+  if (s === "" || s.length > 300 || /\s/.test(s)) return null;
+  const at = s.lastIndexOf("@");
+  if (at <= 0) return { name: s, version: null };
+  const name = s.slice(0, at);
+  const version = s.slice(at + 1);
+  return name === "" ? null : { name, version: version === "" ? null : version };
+}
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 
@@ -232,6 +272,9 @@ export interface AppsecFindingsFactValue {
     group_ids: { publicId: number | null; uuid: string | null; engine: string | null }[];
     group_ids_note?: string;
   };
+  /** уязвимые пакеты SCA; null – корзины SCA не ответили (причина в sca_note), подметрика без данных */
+  sca?: AppsecScaValue | null;
+  sca_note?: string;
 }
 
 /**
@@ -410,6 +453,87 @@ export async function collectAppsec(
   }
   const secretsCritical = secretsTotal > 0;
 
+  // --- уязвимые пакеты SCA: по корзинам критичности платформы (от худшей к лучшей),
+  // пакет = codeBlock `name@version`; Trivy и grype находят одни пакеты под разными
+  // CVE, поэтому считаем пакеты, а не группы. Сбой корзины SCA – не incomplete
+  // всего факта: без списка пакетов подметрика «нет данных», остальная
+  // категория считается как раньше
+  let sca: AppsecScaValue | null = null;
+  let scaNote: string | undefined;
+  {
+    const byPackage = new Map<string, AppsecScaPackage>();
+    let groups = 0;
+    let unparsed = 0;
+    let scaTruncated = false;
+    let failed: string | null = null;
+    // открытых групп нет — корзины SCA пусты по построению, 4 запроса не нужны
+    for (const bucket of totalSize === 0 ? [] : SEVERITY_BUCKETS) {
+      let token = "";
+      let pages = 0;
+      let fetchedInBucket = 0;
+      let bucketTotal: number | null = null;
+      const seen = new Set<string>([""]);
+      while (pages < SCA_PAGES_CAP) {
+        const res = await appsec.get("/v1/defect-groups", {
+          gitRepo,
+          scanUuid,
+          type: SCA_TYPE,
+          severity: bucket,
+          status: [...APPSEC_OPEN_STATUSES],
+          pageSize: String(GROUPS_PAGE_SIZE),
+          pageToken: token,
+        });
+        if (res.status !== 200) {
+          failed = `defect-groups type=${SCA_TYPE} severity=${bucket} → ${res.status}${res.error ? `: ${res.error}` : ""}`;
+          break;
+        }
+        pages++;
+        const body = res.json as { data?: unknown[]; nextPageToken?: unknown; totalSize?: unknown } | null;
+        if (bucketTotal === null) bucketTotal = num(body?.totalSize);
+        for (const g of (Array.isArray(body?.data) ? body!.data! : []) as Record<string, unknown>[]) {
+          fetchedInBucket++;
+          if (defectGroupStatusClass(g["status"]) === "resolved") continue;
+          groups++;
+          const pkg = parseScaPackage(g["codeBlock"]);
+          if (pkg === null) {
+            unparsed++;
+            continue;
+          }
+          const key = `${pkg.name}@${pkg.version ?? ""}`;
+          const engine = typeof g["engine"] === "string" ? g.engine : null;
+          const known = byPackage.get(key);
+          if (known) {
+            known.advisories++;
+            if (engine && !known.engines.includes(engine)) known.engines.push(engine);
+          } else {
+            byPackage.set(key, { name: pkg.name, version: pkg.version, severity: bucket.toLowerCase() as AppsecScaSeverity, advisories: 1, engines: engine ? [engine] : [] });
+          }
+        }
+        const next = body?.nextPageToken;
+        if (typeof next !== "string" || next === "") break;
+        if (seen.has(next)) {
+          failed = `defect-groups type=${SCA_TYPE} severity=${bucket}: repeated nextPageToken (pagination loop)`;
+          break;
+        }
+        seen.add(next);
+        token = next;
+        if (pages === SCA_PAGES_CAP) scaTruncated = true;
+      }
+      if (failed !== null) break;
+      // платформа обещала больше групп, чем отдала (пустой курсор раньше totalSize) — список неполный
+      if (bucketTotal !== null && fetchedInBucket < bucketTotal) scaTruncated = true;
+    }
+    if (failed !== null) scaNote = failed;
+    else {
+      sca = {
+        packages: [...byPackage.values()].sort((a, b) => a.name.localeCompare(b.name) || (a.version ?? "").localeCompare(b.version ?? "")),
+        groups,
+        unparsed,
+        ...(scaTruncated ? { truncated: true as const } : {}),
+      };
+    }
+  }
+
   // --- resolved_share из именованных полей scans/latest ---
   const open = num(scan?.["openDefectGroups"]);
   const total = num(scan?.["totalDefectGroups"]);
@@ -437,6 +561,8 @@ export async function collectAppsec(
       group_ids: groupIds,
       ...(fetched > groupIds.length ? { group_ids_note: `first ${groupIdsCap} of ${fetched} groups` } : {}),
     },
+    sca,
+    ...(scaNote !== undefined ? { sca_note: scaNote } : {}),
   };
   return { fact: okFact("appsec.findings", value, "appsec:api", now.toISOString()), noData: null };
 }

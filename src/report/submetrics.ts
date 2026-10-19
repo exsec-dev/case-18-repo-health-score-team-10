@@ -26,7 +26,19 @@
 
 import { MINUS } from "../web/format";
 
-/** Глиф «нет данных» (tri-state): тот же, что у `fmtScore` и ячеек MD. */
+/** «Уязвимые зависимости»: «нет» или «N: прямых A, транзитивных B[, не найдено в lock C]». */
+function vulnerableDeps(value: unknown): string | null {
+  if (value === null || typeof value !== "object") return null;
+  const v = value as { vulnerable?: unknown; direct?: unknown; transitive?: unknown; unmatched?: unknown; outside?: unknown };
+  if (!isNum(v.vulnerable)) return null;
+  if (v.vulnerable === 0) return "нет";
+  const parts = [`${num(isNum(v.direct) ? v.direct : 0)} прямых`, `${num(isNum(v.transitive) ? v.transitive : 0)} транзитивных`];
+  if (isNum(v.unmatched) && v.unmatched > 0) parts.push(`${num(v.unmatched)} не найдено в lock-файле`);
+  if (isNum(v.outside) && v.outside > 0) parts.push(`${num(v.outside)} вне графа (другая экосистема, без веса)`);
+  return `${num(v.vulnerable)}: ${parts.join(", ")}`;
+}
+
+/** Глиф «нет данных» (tri-state): той же, что у `fmtScore` и ячеек MD. */
 export const NO_VALUE = "–";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -280,6 +292,8 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   "security.resolved": { title: "Доля закрытых находок", unit: "доля, %", format: share },
   // без двойного отрицания: «Отсутствие критичных утечек – нет» читалось бы наоборот
   "security.secrets": { title: "Критичные утечки секретов", unit: "найдены/не найдены", format: (v) => (typeof v === "boolean" ? (v ? "найдены" : "не найдены") : null) },
+  // значение — DepsSubmetricValue (compute.ts): уязвимые пакеты SCA против графа lock-файлов
+  "security.deps": { title: "Уязвимые зависимости", unit: "пакеты: прямые и транзитивные", format: vulnerableDeps },
   "activity.fresh": { title: "Свежесть последнего коммита человека", unit: "дни на момент скана", format: daysSince },
   "activity.freq": { title: "Частота коммитов", unit: "коммитов в месяц", format: (v) => (isNum(v) ? `${num(v)} в месяц` : null) },
   "activity.contributors": { title: "Число авторов", unit: "авторы", format: count("автор", "автора", "авторов") },

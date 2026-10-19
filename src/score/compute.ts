@@ -12,6 +12,8 @@ import type { Database } from "bun:sqlite";
 import { categoryOf, parseFactValue } from "../collectors/facts";
 import { rootHasNoSource } from "../collectors/source-path";
 import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
+import type { LockGraphFactValue } from "../collectors/lockgraph";
+import { matchVulnerableDependencies } from "./deps-graph";
 import { DerivedMetrics, deriveMetrics, issuesClosedCounted } from "./derived";
 import { ciStability, issueDynamics } from "./dynamics";
 import { roundScore } from "../web/format";
@@ -53,6 +55,7 @@ import {
   SUBWEIGHTS,
   TODO_PER_KLOC,
   anchorScore,
+  DEPS_WEIGHTED,
   anchorScoreLog,
   commitsPerMonthScore,
   contributorsScore,
@@ -153,6 +156,14 @@ export const PUBLIC_KINDS = READ_KINDS.filter((k) => !CHANNEL_KINDS.includes(k))
  * прошлого скана.
  */
 export const DISPLAY_KINDS = ["activity.pr_review", "code.ownership"];
+
+/**
+ * Необязательные факты расчета — граф зависимостей из lock-файлов. Расчет
+ * читает их для балла (подметрика «Уязвимые зависимости»), но в READ_KINDS /
+ * PUBLIC_KINDS они не входят: без lock-файла факта нет по построению, и это не
+ * делает скан неполным, непригодным или устаревшим. Не ok — как отсутствие.
+ */
+export const OPTIONAL_KINDS = ["tree.lockgraph"];
 
 /** Причины no-data, описывающие не репо, а права/сбой чтения — скан непригоден. */
 const INELIGIBLE_NO_DATA_REASONS = ["access", "other"];
@@ -340,6 +351,16 @@ export function effectiveFacts(db: Database, scanId: number, repoId: number): Ef
       staleCats.add(categoryOf(kind));
     }
     // без истории → kind отсутствует в ok → no-data субметрик
+  }
+  // необязательные — только ok, без замещения историей. Граф lock-файлов
+  // сопоставляется с находками AppSec ТОГО ЖЕ скана: если находки взяты из
+  // истории (периодический скан без токена), граф текущего скана им не пара —
+  // обновленный lock сделал бы исправленный пакет «не найденным», и балл упал бы
+  // после исправления. Тогда граф не читается, подметрика вне расчета.
+  for (const kind of OPTIONAL_KINDS) {
+    if (kind === "tree.lockgraph" && stale.includes("appsec.findings")) continue;
+    const row = rows.find((r) => r.key === kind);
+    if (row && row.status === "ok") ok.set(kind, parseFactValue(row.value));
   }
   // справочные — без замещения историей; нет строки — нет показа
   const displayMissing: Record<string, string> = {};
@@ -763,10 +784,14 @@ function scoreSecurity(ok: Map<string, unknown>): CategoryScore {
   const densitySub = per10k !== null ? anchorScore(SEVERITY_PER_10K, per10k) : null;
   const resolvedSub = num(appsec.resolved_share) !== null ? anchorScore(RESOLVED_SHARE, num(appsec.resolved_share)!) : null;
   const secretsSub = appsec.secrets_critical === true ? 0 : 1;
+  // уязвимые зависимости (4.6.0): пакеты SCA против графа lock-файлов. Без графа
+  // или без списка пакетов (корзины SCA не ответили, старый факт) — вне расчета
+  const deps = scoreDeps(appsec, ok.get("tree.lockgraph") as LockGraphFactValue | undefined);
   if (densitySub === null && resolvedSub === null) {
-    // без плотности и доли закрытых категорию нес бы один признак утечки —
-    // 100 при любом числе критичных находок. Сюда приходят только находки > 0
-    // при неизвестном числе строк.
+    // без плотности и доли закрытых категорию несли бы признак утечки и
+    // зависимости — 100 при любом числе критичных находок в коде. Сюда приходят
+    // только находки > 0 при неизвестном числе строк; балл зависимостей при этом
+    // показывается, но категория остается «нет данных» (консервативно).
     return {
       score: null,
       no_data: "too little data — no finding density (LOC unknown) and no resolved share",
@@ -774,6 +799,7 @@ function scoreSecurity(ok: Map<string, unknown>): CategoryScore {
         density: { score: null, value: per10k },
         resolved: { score: null, value: num(appsec.resolved_share) },
         secrets: { score: secretsSub, value: appsec.secrets_critical === true },
+        deps,
       },
     };
   }
@@ -784,6 +810,7 @@ function scoreSecurity(ok: Map<string, unknown>): CategoryScore {
       [w.density, densitySub],
       [w.resolved, resolvedSub],
       [w.secrets, secretsSub],
+      [w.deps, deps.score],
     ])! * 100;
   // открытая critical — не выше 40, открытая high — не выше 69 (после взвешивания):
   // на большом репо плотность пару критичных почти не замечает
@@ -797,8 +824,60 @@ function scoreSecurity(ok: Map<string, unknown>): CategoryScore {
       density: { score: densitySub, value: per10k, ...(capped ? { note: capNote } : {}) },
       resolved: { score: resolvedSub, value: num(appsec.resolved_share) },
       secrets: { score: secretsSub, value: appsec.secrets_critical === true },
+      deps,
     },
     ...(capped ? { adjustment: { kind: "open-findings-cap" as const, level: level!, limit: limit!, raw } } : {}),
+  };
+}
+
+/** Значение подметрики «Уязвимые зависимости» — для карточки и отчета (submetrics.ts). */
+export interface DepsSubmetricValue {
+  vulnerable: number;
+  direct: number;
+  transitive: number;
+  unmatched: number;
+  /** пакеты экосистем вне прочитанных lock-файлов — показываются, не взвешиваются */
+  outside: number;
+  weighted: number;
+  managers: string[];
+  graph_truncated: boolean;
+  /** пакеты для показа: худшие первыми, до DEPS_SHOWN */
+  packages: { name: string; version: string | null; severity: string; direct: boolean | null; outside: boolean; via: string[] }[];
+}
+
+/** Сколько уязвимых пакетов несет значение подметрики (остальные — в счетчиках). */
+export const DEPS_SHOWN = 12;
+
+/**
+ * Подметрика «Уязвимые зависимости»: null без графа lock-файлов (нечего
+ * сопоставлять — находки SCA считаются в плотности как раньше) и без списка
+ * пакетов SCA (старый факт или корзины не ответили). Пустой список при графе —
+ * подтвержденное отсутствие уязвимых зависимостей, 1.
+ */
+function scoreDeps(appsec: AppsecFindingsValue, lockgraph: LockGraphFactValue | undefined): SubmetricScore {
+  const sca = appsec.sca;
+  if (sca === null || sca === undefined || !Array.isArray(sca.packages)) {
+    return { score: null, value: null, note: appsec.sca_note ? `sca buckets failed — no package list (${String(appsec.sca_note).slice(0, 120)})` : "no SCA package list" };
+  }
+  if (lockgraph === undefined || !Array.isArray(lockgraph.graphs) || lockgraph.graphs.length === 0) {
+    return { score: null, value: null, note: "no lockfile graph — direct/transitive unknown" };
+  }
+  const report = matchVulnerableDependencies(sca, lockgraph);
+  const value: DepsSubmetricValue = {
+    vulnerable: report.packages.length,
+    direct: report.direct,
+    transitive: report.transitive,
+    unmatched: report.unmatched,
+    outside: report.outside,
+    weighted: report.weighted,
+    managers: report.managers,
+    graph_truncated: report.graph_truncated,
+    packages: report.packages.slice(0, DEPS_SHOWN).map((p) => ({ name: p.name, version: p.version, severity: p.severity, direct: p.direct, outside: p.outside, via: p.via })),
+  };
+  return {
+    score: anchorScore(DEPS_WEIGHTED, report.weighted),
+    value,
+    ...(sca.truncated || report.graph_truncated ? { note: "package list or graph truncated — matching incomplete" } : {}),
   };
 }
 

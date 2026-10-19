@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config";
 import { openDb } from "../src/db";
-import { categoryOf } from "../src/collectors/facts";
+import { categoryOf, encodeFactValue } from "../src/collectors/facts";
 import { MODEL_VERSION, type CategoryKey } from "../src/score/model";
 
 export const NOW = new Date("2026-09-16T12:00:00Z");
@@ -91,7 +91,8 @@ export function seedScan(t: ApiTestDb, repoId: number, spec: ScanSpec = {}): num
     "INSERT OR REPLACE INTO facts (scan_id, category, key, value, status, source, collected_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
   );
   for (const f of spec.facts ?? []) {
-    stmt.run(scanId, categoryOf(f.key), f.key, JSON.stringify(f.value), f.status ?? "ok", f.source ?? "test", started);
+    // как runner: сжатые kinds (лента, граф lock-файлов) лежат в БД с префиксом z:
+    stmt.run(scanId, categoryOf(f.key), f.key, encodeFactValue(f.key, f.value, f.status ?? "ok"), f.status ?? "ok", f.source ?? "test", started);
   }
   return scanId;
 }
@@ -173,6 +174,42 @@ export function seedRecommendation(t: ApiTestDb, scanId: number, spec: RecSpec):
       spec.opensCategory ?? null,
       spec.channel ?? null,
     );
+}
+
+/**
+ * Лента с ДВУМЯ слабыми сигналами проверки на накрутку (ровный ритм ~40% при
+ * интервале 20 минут и один всплеск синхронизации на долгой истории): ни
+ * сильных правил, ни порогов — код зовет модель. Для тестов, где нужен ответ модели.
+ */
+export function weakRhythmTimelineEvents(): object[] {
+  const MIN = 60_000;
+  const DAY = 24 * 60 * MIN;
+  const end = Date.parse("2026-09-24T12:00:00Z");
+  const ev = (i: number, at: number) => ({
+    sha: `w${i}`,
+    author: { name: "ann", email: "ann@p.org", date: new Date(at).toISOString() },
+    committer: { name: "ann", email: "ann@p.org", date: new Date(at).toISOString() },
+  });
+  const out: object[] = [];
+  // 200 коммитов с неровными интервалами 30–230 минут (медиана интервала короче 4 часов),
+  // все старше 13 недель — всплеска недели нет
+  let at = end - 120 * DAY;
+  for (let i = 0; i < 200; i++) {
+    at += ((i * 131) % 200 + 30) * MIN;
+    out.push(ev(i, at));
+  }
+  // 120 коммитов ровно каждые 20 минут — ровная серия, ~36% коммитов людей (ниже порога 50%)
+  at += 3 * DAY;
+  for (let k = 0; k < 120; k++) out.push(ev(300 + k, at + k * 20 * MIN));
+  // один всплеск из 12 коммитов за 1,2 секунды
+  at += 5 * DAY;
+  for (let k = 0; k < 12; k++) out.push(ev(500 + k, at + k * 100));
+  return out.reverse();
+}
+
+/** cardFacts с лентой weakRhythmTimelineEvents вместо двух коммитов. */
+export function cardFactsWeakRhythm(): FactSpec[] {
+  return cardFacts().map((f) => (f.key === "activity.git.timeline" ? { ...f, value: { events: weakRhythmTimelineEvents() } } : f));
 }
 
 /** Полный ok-набор фактов для карточки (формы — collectors/facts.ts KINDS). */

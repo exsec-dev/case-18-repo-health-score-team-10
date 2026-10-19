@@ -12,10 +12,10 @@ import { openDb } from "../src/db";
 import { getRepoCard } from "../src/api/repos";
 import type { CallLlm, ChatMessage } from "../src/llm";
 import { capTimelineFact, NO_RHYTHM_REASON, runFraudCheck, runSummary, TIMELINE_EVENTS_CAP } from "../src/summary/pipeline";
-import { hardFlagFactors, rhythmSignals, ruleFlagFactors, RHYTHM_KEY } from "../src/summary/rhythm";
+import { hardFlagFactors, rhythmSignals, ruleFlagFactors, weakSignals, RHYTHM_KEY } from "../src/summary/rhythm";
 import { fraudCheckStale, fraudFactorFact, fraudFactorTitle, fraudFactorValue, fraudNoteText, fraudStaleText } from "../src/web/format";
 import type { AccessResult } from "../src/auth/access";
-import { cardFacts, seedRepo, seedScan, seedScore } from "./api-fixtures";
+import { cardFacts, seedRepo, seedScan, seedScore, weakRhythmTimelineEvents } from "./api-fixtures";
 
 const OPEN: AccessResult = { cicd: "granted", appsec: "granted", repo: "granted" };
 const AS_OF = new Date("2026-09-24T12:00:00Z");
@@ -115,6 +115,22 @@ describe("rhythmSignals: признаки ритма считает код по 
   });
 });
 
+/** Долгая история людей (150 коммитов за ~2 года, неровно) плюс один всплеск из 12 сгенерированных коммитов (ребейз с переписанными датами): слабый сигнал, не правило. */
+function oneBurst(): Ev[] {
+  const out: Ev[] = [];
+  let at = AS_OF.getTime() - 800 * DAY;
+  for (let i = 0; i < 150; i++) {
+    at += ((i * 37) % 11 + 1) * DAY + ((i * 131) % 700) * MIN;
+    out.push(ev(i, ["ann@p.org", "ben@p.org"][i % 2]!, ["ann@p.org", "ben@p.org"][i % 2]!, at));
+  }
+  const t0 = AS_OF.getTime() - 40 * DAY;
+  for (let k = 0; k < 12; k++) out.push(ev(200 + k, "ann@p.org", "ann@p.org", t0 + k * 100));
+  return newestFirst(out);
+}
+
+/** Ровный ритм ~36% при коротком интервале плюс один всплеск: два слабых сигнала — код зовет модель. */
+const twoWeak = (): Ev[] => weakRhythmTimelineEvents() as Ev[];
+
 /** Дневник: 30 коммитов по одному в день в случайное время 9–11 утра — ритм человека. */
 function daily(): Ev[] {
   const out: Ev[] = [];
@@ -155,6 +171,27 @@ describe("правила кода: сильные признаки — флаг 
   test("обычный проект и скрытая накрутка: сильных признаков нет — решает модель", () => {
     expect(hardFlagFactors(rhythmSignals(honest(), AS_OF)!)).toEqual([]);
     expect(hardFlagFactors(rhythmSignals(subtle(), AS_OF)!)).toEqual([]);
+  });
+
+  test("слабые сигналы: повод позвать модель; у честного проекта, дневника и команды без релизов их нет", () => {
+    const honestS = rhythmSignals(honest(), AS_OF)!;
+    expect(weakSignals(honestS)).toEqual([]);
+    expect(weakSignals(rhythmSignals(daily(), AS_OF)!)).toEqual([]);
+    // команда: 429 коммитов людей за 5 недель, 4 автора, baseline 0, без релизов и PR — не сигнал
+    expect(weakSignals({ ...honestS, commits: 429, human_commits: 429, authors: 4, recent_week_commits: 50, baseline_week_median: 0, interval_median_minutes: 10 }, { contributors: 4, releases: 0, pulls_open: 0, pulls_created_at: [] })).toEqual([]);
+    expect(weakSignals(rhythmSignals(oneBurst(), AS_OF)!)).toEqual(["sync_bursts>=1"]);
+    const two = rhythmSignals(twoWeak(), AS_OF)!;
+    expect(weakSignals(two)).toEqual(["regular_share>=0.3", "sync_bursts>=1"]);
+    expect(ruleFlagFactors(two)).toEqual([]);
+    expect(hardFlagFactors(two)).toEqual([]);
+    expect(weakSignals({ ...honestS, regular_share: 0.3, interval_median_minutes: 240 })).toEqual(["regular_share>=0.3"]);
+    expect(weakSignals({ ...honestS, regular_share: 0.29, interval_median_minutes: 4 })).toEqual([]);
+    expect(weakSignals({ ...honestS, regular_share: 0.4, interval_median_minutes: 1440 })).toEqual([]);
+    expect(weakSignals({ ...honestS, commits: 100, robot_commits: 60 })).toEqual(["robot_share>=0.5"]);
+    expect(weakSignals({ ...honestS, commits: 100, robot_commits: 60 }, { releases: 1 })).toEqual([]);
+    expect(weakSignals({ ...honestS, commits: 10, robot_commits: 6 })).toEqual([]);
+    expect(weakSignals({ ...honestS, recent_week_commits: 20, baseline_week_median: 6 })).toEqual(["recent_week>=3x_baseline"]);
+    expect(weakSignals({ ...honestS, recent_week_commits: 20, baseline_week_median: 7 })).toEqual([]);
   });
 
   test("порог ровного ритма: от 50% при интервале не длиннее 4 часов; коммит раз в день — ритм человека", () => {
@@ -312,9 +349,9 @@ describe("runFraudCheck: отдельная заявка по фактам ск�
     expect(card.ai?.check.failure).toBeNull();
   });
 
-  test("порогов нет, провайдер упал — отказ, как раньше", async () => {
+  test("порогов нет, два слабых сигнала, провайдер упал — отказ, как раньше", async () => {
     const db = freshDb();
-    const scanId = seed(db, "down2", honest());
+    const scanId = seed(db, "down2", twoWeak());
     const call = (async () => {
       throw new Error("ECONNREFUSED");
     }) as unknown as CallLlm;
@@ -341,17 +378,41 @@ describe("runFraudCheck: отдельная заявка по фактам ск�
     const fake = recorder(NO_FLAG);
     const res = await runFraudCheck({ db, org: "v52", repo: "old", callLlm: fake.call, agentBackoffMs: 0 }, { scanId });
     expect(res.cached).toBeUndefined();
-    expect(fake.roles).toEqual(["flagger"]);
+    // у честного проекта слабых сигналов нет — ответ пишет код, модель не зовется
+    expect(fake.roles).toEqual([]);
     const after = getRepoCard(db, "v52", "old", { access: OPEN, viewerUserId: 1, viewerAuth: "pat" })!;
     expect(after.ai?.fraud?.flag).toBe(false);
     expect(after.ai?.check.oldRules).toBe(false);
   });
 
-  test("порогов нет — ответ модели «нет» принимается как есть", async () => {
+  test("ни порогов, ни слабых сигналов — «подозрений нет» пишет код, модель не зовется", async () => {
     const db = freshDb();
     const scanId = seed(db, "honest", honest());
-    const fake = recorder(NO_FLAG);
+    const fake = recorder(SUBTLE_FLAG);
     const res = await runFraudCheck({ db, org: "v52", repo: "honest", callLlm: fake.call, agentBackoffMs: 0 }, { scanId });
+    expect(fake.roles).toEqual([]);
+    expect(res.answered).toBe(0);
+    expect(res.flag).toEqual({ flag: false, factors: [] });
+    const note = JSON.parse((db.query("SELECT text FROM ai_notes WHERE scan_id = ? AND role = 'flagger'").get(scanId) as { text: string }).text);
+    expect(note.by).toBe("rules");
+    const card = getRepoCard(db, "v52", "honest", { access: OPEN, viewerUserId: 1, viewerAuth: "pat" })!;
+    expect(card.ai?.fraud?.flag).toBe(false);
+  });
+
+  test("один слабый сигнал (один всплеск) — «подозрений нет» пишет код, модель не зовется", async () => {
+    const db = freshDb();
+    const scanId = seed(db, "weak1", oneBurst());
+    const fake = recorder(SUBTLE_FLAG);
+    const res = await runFraudCheck({ db, org: "v52", repo: "weak1", callLlm: fake.call, agentBackoffMs: 0 }, { scanId });
+    expect(fake.roles).toEqual([]);
+    expect(res.flag).toEqual({ flag: false, factors: [] });
+  });
+
+  test("два слабых сигнала (всплеск и ровный ритм) — модель зовется, ее «нет» принимается как есть", async () => {
+    const db = freshDb();
+    const scanId = seed(db, "weak", twoWeak());
+    const fake = recorder(NO_FLAG);
+    const res = await runFraudCheck({ db, org: "v52", repo: "weak", callLlm: fake.call, agentBackoffMs: 0 }, { scanId });
     expect(fake.roles).toEqual(["flagger"]);
     expect(res.flag).toEqual({ flag: false, factors: [] });
     const note = JSON.parse((db.query("SELECT text FROM ai_notes WHERE scan_id = ? AND role = 'flagger'").get(scanId) as { text: string }).text);

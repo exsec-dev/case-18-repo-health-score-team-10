@@ -10,7 +10,7 @@ export type FactStatus = "ok" | "no-data" | "bad";
  * пригодный скан собран старым сборщиком (`scheduler.ts`). NULL в старых
  * строках читается как версия старше текущей.
  */
-export const COLLECTOR_VERSION = 6;
+export const COLLECTOR_VERSION = 7;
 
 /** Причина no-data хранится ключом `reason` внутри value (отдельной колонки нет).
  *  no-scan и incomplete – ветки AppSec: скана нет или не завершен; неполный
@@ -86,8 +86,10 @@ export const KINDS = {
   // официальный AppSec API: только агрегаты и стабильные id; severity_counts
   // классифицирует платформа именованными фильтрами, числовые severity
   // хранятся как есть
+  // sca – уязвимые пакеты по группам type=SCA (имя@версия из codeBlock, корзина
+  // критичности платформы, движки); null с sca_note – корзины SCA не ответили
   "appsec.findings":
-    "{severity_counts,resolved_share,secrets_critical,backlog:{open_groups,open_findings,engines,severity_raw_counts},provenance:{scan_uuid,commit_hash,time_finished,group_ids}} | no-data{reason}",
+    "{severity_counts,resolved_share,secrets_critical,backlog:{open_groups,open_findings,engines,severity_raw_counts},provenance:{scan_uuid,commit_hash,time_finished,group_ids},sca?:{packages:[{name,version,severity,advisories,engines}],groups,unparsed,truncated?}|null,sca_note?} | no-data{reason}",
   // два справочных факта ниже в Score не идут и в READ_KINDS/PUBLIC_KINDS не
   // входят – пригодность скана от них не зависит.
   // Ревью PR (pr-review.ts): выборка до 10 последних PR, не черновиков;
@@ -102,6 +104,11 @@ export const KINDS = {
   // (api/topics.ts); в Score не идет, в READ_KINDS/GIT_KINDS не входит,
   // без манифестов факта нет вовсе
   "tree.deps": "{manifests:[...],deps:[...],truncated?}",
+  // граф зависимостей из lock-файлов (lockgraph.ts): узлы name@version, корни и
+  // ребра индексами. Читает только «Безопасность» (подметрика уязвимых
+  // зависимостей, OPTIONAL_KINDS в compute); в READ_KINDS/PUBLIC_KINDS не входит:
+  // без lock-файла факта нет, и это не делает скан неполным
+  "tree.lockgraph": "{graphs:[{path,manager,lock_version,nodes:[...],roots:[...],edges:[[from,to]],truncated?}],truncated?}",
 } as const;
 
 export type Kind = keyof typeof KINDS;
@@ -153,8 +160,10 @@ export const GIT_KINDS: string[] = [
 // карточка (repos); форма значения для них не меняется.
 // ---------------------------------------------------------------------------
 
-/** Единственный факт, который хранится сжатым. */
+/** Факт ленты коммитов – хранится сжатым. */
 export const TIMELINE_KIND = "activity.git.timeline";
+/** Сжатые факты: лента коммитов и граф lock-файлов (тысячи узлов и ребер). */
+export const COMPRESSED_KINDS: ReadonlySet<string> = new Set([TIMELINE_KIND, "tree.lockgraph"]);
 
 export const FACT_Z_PREFIX = "z:";
 
@@ -163,7 +172,7 @@ export const FACT_Z_PREFIX = "z:";
  *  json_extract в ratingEligibleSql), и `z:` их сломал бы. Без статуса – жмет. */
 export function encodeFactValue(kind: string, value: unknown, status?: FactStatus): string {
   const json = JSON.stringify(value);
-  if (kind !== TIMELINE_KIND) return json;
+  if (!COMPRESSED_KINDS.has(kind)) return json;
   if (status === "no-data" || status === "bad") return json;
   return FACT_Z_PREFIX + Buffer.from(deflateSync(json, { level: 6 })).toString("base64");
 }

@@ -136,12 +136,37 @@ function isInlineMappingStart(rest: string): boolean {
   return splitKey(rest).key !== null;
 }
 
-/** «key: value» | «key:» → {key, inline}; null если не ключ. */
+/**
+ * «key: value» | «key:» → {key, inline}; null если не ключ. Без регулярного
+ * выражения: прежнее `[^:]*?\s*:` на строке из мегабайта пробелов без
+ * двоеточия откатывалось квадратично (lock-файл – чужое содержимое, 4 МБ).
+ * Ключ в кавычках – до парной кавычки; без кавычек – до первого `:`, за
+ * которым пробел или конец строки (`foo@https://x:` – ключ целиком).
+ */
 function splitKey(text: string): { key: string | null; inline: string } {
-  const m = text.match(/^("([^"]*)"|'([^']*)'|[^:\s][^:]*?)\s*:(\s+(.*))?$/);
-  if (!m) return { key: null, inline: "" };
-  const key = m[2] ?? m[3] ?? m[1]!;
-  return { key, inline: (m[4] ?? "").trim() };
+  const none = { key: null, inline: "" };
+  if (text === "") return none;
+  const first = text[0]!;
+  let key: string;
+  let rest: string;
+  if (first === '"' || first === "'") {
+    const end = text.indexOf(first, 1);
+    if (end < 0) return none;
+    key = text.slice(1, end);
+    const after = text.slice(end + 1).trimStart();
+    if (!after.startsWith(":")) return none;
+    rest = after.slice(1);
+  } else {
+    if (first === ":" || first === " " || first === "\t") return none;
+    let i = text.indexOf(":");
+    while (i >= 0 && !(i === text.length - 1 || text[i + 1] === " " || text[i + 1] === "\t")) i = text.indexOf(":", i + 1);
+    if (i < 0) return none;
+    key = text.slice(0, i).trimEnd();
+    rest = text.slice(i + 1);
+  }
+  // «key:value» без пробела после двоеточия – не отображение (как и раньше)
+  if (rest !== "" && rest[0] !== " " && rest[0] !== "\t") return none;
+  return { key, inline: rest.trim() };
 }
 
 function parseScalar(raw: string): unknown {

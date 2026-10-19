@@ -1,3 +1,4 @@
+import type { AppsecScaValue } from "../collectors/appsec";
 // Формы значений фактов, которые читает score-слой (compute/recommend).
 // Поля — unknown: вход это JSON из facts.value, и типы проверяет потребитель
 // (num/bool на месте); формы описывают структуру, но не гарантируют типы.
@@ -36,4 +37,7 @@ export interface AppsecFindingsValue {
   severity_counts?: Record<string, unknown>;
   resolved_share?: unknown;
   secrets_critical?: unknown;
+  /** уязвимые пакеты SCA (collectors/appsec.ts AppsecScaValue); null — корзины не ответили; нет — старый факт */
+  sca?: AppsecScaValue | null;
+  sca_note?: string;
 }
