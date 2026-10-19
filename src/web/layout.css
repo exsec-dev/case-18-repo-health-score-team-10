@@ -2210,6 +2210,17 @@ button.rh-category:focus-visible {
   background: linear-gradient(90deg, var(--rh-ai-sc-blue) 0%, var(--rh-ai-sc-magenta) 73.08%, var(--rh-ai-sc-pink) 100%);
 }
 
+/* заголовок — на той же высоте, что у Card «Категорий» и «Истории» (отступ 4px,
+ * как у .rh-section__title); кнопка обновления 28px не раздвигает строку
+ * заголовка 24px, иначе заголовок с кнопкой и без нее стоял бы по-разному */
+.rh-ai-section__head {
+  margin-block-start: var(--g-spacing-1);
+}
+
+.rh-ai-section__actions {
+  margin-block: -2px;
+}
+
 .rh-ai-section__spark {
   display: inline-flex;
   color: var(--rh-ai-accent);
@@ -2353,8 +2364,8 @@ button.rh-category:focus-visible {
   color: var(--rh-ai-accent);
 }
 
-/* история оценки — график, легенда, список анализов. График на всю ширину
-   колонки: viewBox строится по измеренной ширине */
+/* история оценки — график и список анализов. График на всю ширину колонки:
+   viewBox строится по измеренной ширине; линии подписаны у концов, легенды нет */
 .rh-history__chart-wrap {
   width: 100%;
 }
@@ -2363,82 +2374,101 @@ button.rh-category:focus-visible {
   display: block;
 }
 
-.rh-history__key {
-  display: inline-block;
-  width: 16px;
-  vertical-align: middle;
-  border-top: 2px solid var(--g-color-text-secondary);
-}
-
-.rh-history__key_full {
-  border-top: 2px dashed var(--g-color-text-secondary);
-}
-
-/* график и легенда справа; на узкой колонке легенда уходит под график */
-/* легенда прижата к верху графика */
-.rh-history__plot {
-  display: flex;
-  gap: var(--g-spacing-4);
-  align-items: flex-start;
-}
-
-.rh-history__plot > .rh-history__chart-wrap {
-  flex: 1;
-  min-width: 0;
-}
-
-.rh-history__legend {
-  display: flex;
-  flex: none;
-  flex-direction: column;
-  gap: var(--g-spacing-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.rh-history__legend li {
-  display: flex;
-  gap: var(--g-spacing-2);
-  align-items: center;
-  white-space: nowrap;
-}
-
-@media (max-width: 640px) {
-  .rh-history__plot {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .rh-history__legend {
-    flex-direction: row;
-    flex-wrap: wrap;
-    gap: var(--g-spacing-1) var(--g-spacing-4);
-  }
-}
-
+/* список анализов — одна сетка (строки — subgrid): дата с коммитом, баллы
+ * колонками разряд под разрядом, иконка описания — в своей колонке справа.
+ * Набор колонок задает разметка (Score и иконка — не у всех) */
 .rh-history__list {
+  display: grid;
+  column-gap: var(--g-spacing-6);
   margin: var(--g-spacing-2) 0 0;
   padding: 0;
   list-style: none;
 }
 
 .rh-history__row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
   padding: var(--g-spacing-2) 0;
   border-top: 1px solid var(--g-color-line-generic);
 }
 
-.rh-history__line {
+.rh-history__when {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--g-spacing-1) var(--g-spacing-4);
+  flex-direction: column;
+  min-width: 0;
 }
 
-/* описание анализа — иконкой у правого края строки */
+/* коммит и кнопка копирования — по центру строки: кнопка не поднимает текст */
+.rh-history__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--g-spacing-1) var(--g-spacing-2);
+  align-items: center;
+  min-height: 20px;
+}
+
+.rh-history__meta .g-clipboard-button {
+  margin-inline-start: calc(-1 * var(--g-spacing-1));
+}
+
+.rh-history__sha {
+  font-family: var(--g-font-family-monospace);
+}
+
+.rh-history__val.g-text {
+  white-space: nowrap;
+}
+
+.rh-history__num {
+  color: var(--g-color-text-primary);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* телефон: колонкам с полными названиями баллов не хватает ширины — дата и
+ * коммит строкой сверху, баллы второй строкой, иконка описания справа */
+@media (max-width: 767px) {
+  .rh-history__list {
+    display: block;
+  }
+
+  .rh-history__row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px var(--g-spacing-4);
+    align-items: baseline;
+  }
+
+  .rh-history__when {
+    flex: 1 0 100%;
+  }
+
+  .rh-history__ai {
+    margin-inline-start: auto;
+  }
+}
+
+/* «Все анализы» — с небольшим отступом снизу: свернутая строка не жмется к
+ * нижней кромке карточки */
+.rh-history__all {
+  margin-block-end: var(--g-spacing-2);
+}
+
+.rh-history__count {
+  color: var(--g-color-text-secondary);
+  font-weight: 400;
+}
+
+.rh-history__ai {
+  display: flex;
+  justify-content: center;
+}
+
+/* описание анализа — иконкой в своей колонке */
 .rh-history__note-mark {
   display: inline-flex;
-  margin-inline-start: auto;
   color: var(--rh-ai-accent);
   cursor: pointer;
 }

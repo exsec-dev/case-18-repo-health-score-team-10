@@ -560,7 +560,7 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
     </Button>
   );
   const ownerActions = canRun && ai !== null && (own || newerAnalysis) && (
-    <Flex gap={2} alignItems="center">
+    <Flex gap={2} alignItems="center" className="rh-ai-section__actions">
       {/* «Следующий запуск – после …» чуть длиннее 280px: перенос оставлял справа пустое поле — одной строкой */}
       <ActionTooltip title={runDisabled ? runReason : runText} className={runDisabled && cooldownActive && !jobActive ? "rh-tip-oneline" : undefined}>{runDisabled ? <span className="rh-disabled-tip" tabIndex={0} aria-label={`${runText}: ${runReason}`}>{runButton}</span> : runButton}</ActionTooltip>
     </Flex>
@@ -581,7 +581,7 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
       <Flex direction="column" gap={3}>
         {/* заголовок и оговорка о модели — одной группой: оговорка прижата к заголовку */}
         <Flex direction="column" gap={1}>
-          <Flex gap={2} alignItems="center" wrap>
+          <Flex gap={2} alignItems="center" wrap className="rh-ai-section__head">
             <span className="rh-ai-section__spark" aria-hidden="true">
               <Icon data={SparklesFill} size={16} />
             </span>
@@ -780,11 +780,17 @@ function CountedLabel({ label, counter }: { label: string; counter: QuotaCounter
 // ---------- история оценки и описания по анализам ----------
 
 const CHART_H = 180;
-// слева — подписи шкалы, справа — место под число последней точки
+// слева — подписи шкалы, справа — названия линий у их концов
 const PAD_L = 32;
-const PAD_R = 16;
 const PAD_T = 20;
 const PAD_B = 22;
+// ширина символа подписи 11px (латиница, даты) — для места справа и проверки
+// столкновений подписей; с запасом, чтобы рамки не касались
+const LABEL_CH = 6.6;
+// ширина цифры чисел у точек: 12px и последней точки 13px жирным
+const NUM_CH = 7.2;
+const NUM_CH_LAST = 8.2;
+const END_GAP = 8;
 
 /** Цвет линии и точек — зона последней оценки, те же заливки, что у полос. */
 const ZONE_FILL: Record<ReturnType<typeof scoreTheme>, string> = {
@@ -818,14 +824,24 @@ function pointColor(p: HistoryPoint): string {
   return p.codeEmpty ? ZONE_FILL.misc : ZONE_FILL[scoreTheme(p.healthcraftIndex)];
 }
 
-/** Образец линии в легенде — цвет последней оценки. */
-function historyLineColor(points: HistoryPoint[]): string {
-  const last = [...points].reverse().find((p) => p.healthcraftIndex !== null);
-  return last ? pointColor(last) : ZONE_FILL[scoreTheme(null)];
+/** Индекс последнего непустого значения ряда (−1 — пусто). */
+function lastIndex(values: (number | null)[]): number {
+  return values.reduce<number>((acc, v, i) => (v !== null ? i : acc), -1);
 }
 
 function HistoryChart({ points, fullOpen }: { points: HistoryPoint[]; fullOpen: boolean }) {
   const [wrapRef, CHART_W] = useWidth();
+  const hci = points.map((p) => p.healthcraftIndex);
+  const rhs = fullOpen ? points.map((p) => p.repoHealthScore) : null;
+  const hLast = lastIndex(hci);
+  const rLast = rhs === null ? -1 : lastIndex(rhs);
+  // названия у концов линий вместо легенды; текущие значения — числами над
+  // последними точками
+  const ends = [
+    ...(hLast >= 0 ? [{ name: "HealthCraft Index", i: hLast, v: hci[hLast]!, color: "var(--g-color-text-complementary)" }] : []),
+    ...(rhs !== null && rLast >= 0 ? [{ name: "Repo Health Score", i: rLast, v: rhs[rLast]!, color: "var(--g-color-text-secondary)" }] : []),
+  ];
+  const PAD_R = END_GAP + Math.ceil(Math.max(0, ...ends.map((e) => e.name.length)) * LABEL_CH) + 4;
   const times = points.map((p) => (p.finishedAt === null ? NaN : Date.parse(p.finishedAt)));
   const known = times.filter((t) => Number.isFinite(t));
   const t0 = Math.min(...known);
@@ -850,8 +866,6 @@ function HistoryChart({ points, fullOpen }: { points: HistoryPoint[]; fullOpen: 
     });
     return d.trim();
   };
-  const hci = points.map((p) => p.healthcraftIndex);
-  const rhs = fullOpen ? points.map((p) => p.repoHealthScore) : null;
   // шкала — по данным (historyDomain), цвет линии — зона последней оценки
   const drawn = [...hci, ...(rhs ?? [])].filter((v): v is number => v !== null);
   const domain = historyDomain(drawn);
@@ -862,23 +876,75 @@ function HistoryChart({ points, fullOpen }: { points: HistoryPoint[]; fullOpen: 
     const next = hci[i + 1];
     return v !== null && next !== null && next !== undefined ? [{ i, from: v, to: next, color: pointColor(points[i]!) }] : [];
   });
-  // числа у всех точек — пока их немного; дальше только у последней
-  const labelAll = hci.filter((v) => v !== null).length <= 6;
-  // подписи оси: за короткий период (меньше 36 ч) — время, иначе дата; подпись,
-  // наезжающая на соседнюю (ближе 90 px), не ставится — первая и последняя остаются
+  // подписи у концов линий: по высоте своей точки; близкие — разводятся на
+  // строку, большее значение выше (при равных Index выше Score)
+  const LINE = 14;
+  const endY = ends.map((e) => yOf(e.v) + 4);
+  if (ends.length === 2 && Math.abs(endY[0]! - endY[1]!) < LINE) {
+    const mid = (endY[0]! + endY[1]!) / 2;
+    const indexUp = ends[0]!.v >= ends[1]!.v;
+    endY[0] = mid + (indexUp ? -LINE / 2 : LINE / 2);
+    endY[1] = mid + (indexUp ? LINE / 2 : -LINE / 2);
+  }
+  const endLabels = ends.map((e, k) => ({ ...e, x: xOf(e.i) + END_GAP, y: Math.min(CHART_H - PAD_B, Math.max(12, endY[k]!)) }));
+  // числа у точек: сначала последние значения обеих линий (крупнее), затем —
+  // пока оценок немного — остальные точки Index от последней к первой. Число
+  // встает над точкой, а если там занято (или у верхней кромки) — под ней;
+  // задевшее уже поставленную подпись в обоих местах пропускается — значение
+  // остается в подсказке точки
+  type Box = [number, number, number, number];
+  const hit = (a: Box, b: Box): boolean => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+  const placed: Box[] = endLabels.map((e) => [e.x - 3, e.y - 11, e.x + e.name.length * LABEL_CH + 3, e.y + 3]);
+  type PointLabel = { key: string; x: number; y: number; text: string; anchor: "start" | "middle" | "end"; last: boolean; color: string };
+  const pointLabels: PointLabel[] = [];
+  const place = (key: string, i: number, v: number, last: boolean, color: string): void => {
+    const text = fmtScore(v);
+    const size = last ? 13 : 12;
+    const w = text.length * (last ? NUM_CH_LAST : NUM_CH);
+    const x = xOf(i);
+    const anchor = points.length > 1 && i === 0 ? "start" : points.length > 1 && i === points.length - 1 ? "end" : "middle";
+    const x0 = anchor === "start" ? x : anchor === "end" ? x - w : x - w / 2;
+    const above = yOf(v) - 9;
+    const below = yOf(v) + size + 6;
+    for (const y of above - size < 2 ? [below, above] : [above, below]) {
+      const box: Box = [x0 - 3, y - size, x0 + w + 3, y + 3];
+      if (placed.some((b) => hit(box, b))) continue;
+      placed.push(box);
+      pointLabels.push({ key, x, y, text, anchor, last, color });
+      return;
+    }
+  };
+  if (hLast >= 0) place(`h${hLast}`, hLast, hci[hLast]!, true, "var(--g-color-text-primary)");
+  if (rhs !== null && rLast >= 0) place(`r${rLast}`, rLast, rhs[rLast]!, true, "var(--g-color-text-secondary)");
+  if (hci.filter((v) => v !== null).length <= 6) {
+    for (let i = hLast - 1; i >= 0; i--) {
+      const v = hci[i];
+      if (v !== null && v !== undefined) place(`h${i}`, i, v, false, "var(--g-color-text-complementary)");
+    }
+  }
+  // подписи оси: за короткий период (меньше 36 ч) — время, иначе дата. Кандидаты —
+  // последняя, первая, средняя; подпись, которая ближе 12px к уже поставленной
+  // (по ее ширине и привязке: первая — вправо от точки, средняя — по центру),
+  // пропускается. Прежний порог «90 px между точками» склеивал «16 сент. 202621 сент.»
   const short = Number.isFinite(t1 - t0) && t1 - t0 < 36 * 3600_000;
   const axisText = (iso: string | null): string => (short ? fmtTime(iso) : fmtDate(iso));
-  const candidates = points.length <= 2 ? points.map((_, i) => i) : [0, Math.floor((points.length - 1) / 2), points.length - 1];
+  const axisAnchor = (i: number): "start" | "middle" | "end" => (i === 0 ? "start" : i === points.length - 1 ? "end" : "middle");
+  const axisSpan = (i: number): [number, number] => {
+    const w = axisText(points[i]!.finishedAt).length * LABEL_CH;
+    const x = xOf(i);
+    const a = axisAnchor(i);
+    return a === "start" ? [x, x + w] : a === "end" ? [x - w, x] : [x - w / 2, x + w / 2];
+  };
+  const candidates = [...new Set(points.length <= 2 ? points.map((_, i) => points.length - 1 - i) : [points.length - 1, 0, Math.floor((points.length - 1) / 2)])];
   const labelIdx: number[] = [];
   for (const i of candidates) {
-    const last = labelIdx[labelIdx.length - 1];
-    if (last !== undefined && Math.abs(xOf(i) - xOf(last)) < 90) {
-      if (i === points.length - 1) labelIdx[labelIdx.length - 1] = i;
-      continue;
-    }
-    labelIdx.push(i);
+    const [a0, a1] = axisSpan(i);
+    const free = labelIdx.every((j) => {
+      const [b0, b1] = axisSpan(j);
+      return a1 + 12 <= b0 || b1 + 12 <= a0;
+    });
+    if (free) labelIdx.push(i);
   }
-  if (labelIdx.length === 1 && points.length > 1 && Math.abs(xOf(0) - xOf(points.length - 1)) >= 90) labelIdx.unshift(0);
   return (
     <div ref={wrapRef} className="rh-history__chart-wrap">
     <svg viewBox={`0 0 ${CHART_W} ${CHART_H}`} width={CHART_W} height={CHART_H} role="img" aria-label={`HealthCraft Index по датам анализов, шкала ${domain.lo}-${domain.hi}`} className="rh-history__chart">
@@ -899,7 +965,11 @@ function HistoryChart({ points, fullOpen }: { points: HistoryPoint[]; fullOpen: 
           </text>
         </g>
       ))}
-      {rhs !== null && <path d={path(rhs)} fill="none" stroke="var(--g-color-text-secondary)" strokeWidth={1.5} strokeDasharray="4 3" />}
+      {/* Repo Health Score — сплошной серой линией с полыми точками: пунктир не
+          читался как вторая оценка */}
+      {rhs !== null && <path d={path(rhs)} fill="none" stroke="var(--g-color-text-secondary)" strokeWidth={1.5} />}
+      {rhs !== null &&
+        rhs.map((v, i) => (v === null ? null : <circle key={`r${i}`} cx={xOf(i)} cy={yOf(v)} r={3} fill="var(--g-color-base-background)" stroke="var(--g-color-text-secondary)" strokeWidth={1.5} />))}
       {segments.map((s) => (
         <line key={`s${s.i}`} x1={xOf(s.i)} y1={yOf(s.from)} x2={xOf(s.i + 1)} y2={yOf(s.to)} stroke={s.color} strokeWidth={2} strokeLinecap="round" />
       ))}
@@ -921,31 +991,20 @@ function HistoryChart({ points, fullOpen }: { points: HistoryPoint[]; fullOpen: 
           </circle>
         ),
       )}
-      {/* значения у точек — над точкой (у верхней кромки — под ней); последнее крупнее */}
-      {(() => {
-        const li = hci.reduce<number>((acc, v, i) => (v !== null ? i : acc), -1);
-        return hci.map((v, i) => {
-          if (v === null || (!labelAll && i !== li)) return null;
-          const y = yOf(v);
-          const last = i === li;
-          const anchor = i === 0 && points.length > 1 ? "start" : last && points.length > 1 ? "end" : "middle";
-          return (
-            <text
-              key={`v${i}`}
-              x={xOf(i)}
-              y={y - 9 < 12 ? y + 18 : y - 9}
-              fontSize={last ? 13 : 11}
-              fontWeight={last ? 600 : 400}
-              fill={last ? "var(--g-color-text-primary)" : "var(--g-color-text-complementary)"}
-              textAnchor={anchor}
-            >
-              {fmtScore(v)}
-            </text>
-          );
-        });
-      })()}
+      {/* значения у точек — над точкой (если занято — под ней); последние крупнее */}
+      {pointLabels.map((l) => (
+        <text key={l.key} x={l.x} y={l.y} fontSize={l.last ? 13 : 12} fontWeight={l.last ? 600 : 400} fill={l.color} textAnchor={l.anchor}>
+          {l.text}
+        </text>
+      ))}
+      {/* название у конца каждой линии — вместо легенды */}
+      {endLabels.map((e) => (
+        <text key={e.name} x={e.x} y={e.y} fontSize={11} fill={e.color}>
+          {e.name}
+        </text>
+      ))}
       {labelIdx.map((i) => (
-        <text key={i} x={xOf(i)} y={CHART_H - 6} fontSize={11} fill="var(--g-color-text-secondary)" textAnchor={i === 0 ? "start" : i === points.length - 1 ? "end" : "middle"}>
+        <text key={i} x={xOf(i)} y={CHART_H - 6} fontSize={11} fill="var(--g-color-text-secondary)" textAnchor={axisAnchor(i)}>
           {axisText(points[i]!.finishedAt)}
         </text>
       ))}
@@ -954,41 +1013,66 @@ function HistoryChart({ points, fullOpen }: { points: HistoryPoint[]; fullOpen: 
   );
 }
 
-function AnalysisRow({ point, fullOpen, overview }: { point: HistoryPoint; fullOpen: boolean; overview: AiNoteHistoryItem | null }) {
+/**
+ * Строка анализа — как строка списка коммитов SourceCraft: дата главной строкой,
+ * коммит (и пометка пустого репо) — второй строкой мелко; баллы — колонками общей
+ * сетки списка (subgrid), иконка описания модели — в своей колонке справа.
+ */
+function AnalysisRow({ point, fullOpen, overview, aiColumn }: { point: HistoryPoint; fullOpen: boolean; overview: AiNoteHistoryItem | null; aiColumn: boolean }) {
   return (
     <li className="rh-history__row">
-      <div className="rh-history__line">
+      <div className="rh-history__when">
         <Text variant="body-1">{fmtDateTime(point.finishedAt)}</Text>
-        <Text variant="body-1" color="secondary">{`HealthCraft Index ${fmtScore(point.healthcraftIndex)}`}</Text>
-        {fullOpen && <Text variant="body-1" color="secondary">{`Repo Health Score ${fmtScore(point.repoHealthScore)}`}</Text>}
-        {point.headSha && (
-          <Flex gap={0} alignItems="center">
-            <Text variant="body-1" color="secondary">{`коммит ${point.headSha.slice(0, 7)}`}</Text>
-            <ClipboardButton text={point.headSha} size="xs" view="flat-secondary" tooltipInitialText="Скопировать хеш коммита" tooltipSuccessText="Скопировано" />
-          </Flex>
-        )}
-        {point.codeEmpty && (
-          <Label theme="normal" size="xs">
-            пустой репозиторий
-          </Label>
-        )}
-        {/* описание на момент анализа — иконкой в правом углу строки, текст в поповере */}
-        {overview !== null && (
-          <Popover
-            placement={["left", "bottom-end", "top-end"]}
-            content={
-              <div className="rh-history__note">
-                <AiModelLabel model={overview.model} />
-                <AiText text={overview.text} />
-              </div>
-            }
-          >
-            <span className="rh-history__note-mark" role="button" tabIndex={0} aria-label="AI-обзор на момент анализа">
-              <Icon data={SparklesFill} size={16} />
-            </span>
-          </Popover>
+        {(point.headSha || point.codeEmpty) && (
+          <span className="rh-history__meta">
+            {point.headSha && (
+              <>
+                <Text variant="caption-2" color="secondary">
+                  {"коммит "}
+                  <span className="rh-history__sha">{point.headSha.slice(0, 7)}</span>
+                </Text>
+                <ClipboardButton text={point.headSha} size="xs" view="flat-secondary" tooltipInitialText="Скопировать хеш коммита" tooltipSuccessText="Скопировано" />
+              </>
+            )}
+            {point.codeEmpty && (
+              <Label theme="normal" size="xs">
+                пустой репозиторий
+              </Label>
+            )}
+          </span>
         )}
       </div>
+      <Text variant="body-1" color="complementary" className="rh-history__val">
+        {"HealthCraft Index "}
+        <span className="rh-history__num">{fmtScore(point.healthcraftIndex)}</span>
+      </Text>
+      {fullOpen && (
+        <Text variant="body-1" color="complementary" className="rh-history__val">
+          {"Repo Health Score "}
+          <span className="rh-history__num">{fmtScore(point.repoHealthScore)}</span>
+        </Text>
+      )}
+      {/* описание на момент анализа — иконкой в своей колонке, текст в поповере;
+          колонки нет, если описаний нет ни у одного анализа */}
+      {aiColumn && (
+        <span className="rh-history__ai">
+          {overview !== null && (
+            <Popover
+              placement={["left", "bottom-end", "top-end"]}
+              content={
+                <div className="rh-history__note">
+                  <AiModelLabel model={overview.model} />
+                  <AiText text={overview.text} />
+                </div>
+              }
+            >
+              <span className="rh-history__note-mark" role="button" tabIndex={0} aria-label="AI-обзор на момент анализа">
+                <Icon data={SparklesFill} size={16} />
+              </span>
+            </Popover>
+          )}
+        </span>
+      )}
     </li>
   );
 }
@@ -1049,16 +1133,30 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
     points.filter((p) => overviewByScan.has(p.scanId)).map((p) => p.finishedAt),
     evolutionTooEarly,
   );
+  // колонки списка: дата, Index, Score (если открыт), иконка описания (если есть)
+  const aiColumn = points.some((p) => overviewByScan.has(p.scanId));
   const list = points.length > 0 && (
-    <Disclosure size="m" expanded={listOpen} onUpdate={setListOpen} summary={`Все анализы (${points.length})`}>
+    // счетчик — вторичным цветом отдельным словом, как «Contributors 1» у SourceCraft
+    <Disclosure
+      size="m"
+      className="rh-history__all"
+      expanded={listOpen}
+      onUpdate={setListOpen}
+      summary={
+        <>
+          {"Все анализы "}
+          <span className="rh-history__count">{points.length}</span>
+        </>
+      }
+    >
       {caption && (
         <Text variant="caption-2" color="secondary">
           {caption}
         </Text>
       )}
-      <ul className="rh-history__list">
+      <ul className="rh-history__list" style={{ gridTemplateColumns: `minmax(0, 1fr) auto${fullOpen ? " auto" : ""}${aiColumn ? " 16px" : ""}` }}>
         {[...points].reverse().map((p) => (
-          <AnalysisRow key={p.scanId} point={p} fullOpen={fullOpen} overview={overviewByScan.get(p.scanId) ?? null} />
+          <AnalysisRow key={p.scanId} point={p} fullOpen={fullOpen} overview={overviewByScan.get(p.scanId) ?? null} aiColumn={aiColumn} />
         ))}
       </ul>
     </Disclosure>
@@ -1090,22 +1188,8 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
           </Text>
         </Flex>
         <Flex direction="column" gap={5} className="rh-history">
-          {/* легенда справа — только нарисованные линии, без пояснений */}
-          <div className="rh-history__plot">
-            <HistoryChart points={points} fullOpen={fullOpen} />
-            <ul className="rh-history__legend" aria-label="Линии графика">
-              <li>
-                <span className="rh-history__key rh-history__key_index" style={{ borderTopColor: historyLineColor(points) }} aria-hidden="true" />
-                <Text variant="body-1">HealthCraft Index</Text>
-              </li>
-              {view.fullLine && (
-                <li>
-                  <span className="rh-history__key rh-history__key_full" aria-hidden="true" />
-                  <Text variant="body-1">Repo Health Score</Text>
-                </li>
-              )}
-            </ul>
-          </div>
+          {/* легенды нет: линии подписаны названиями у концов, значения — над точками */}
+          <HistoryChart points={points} fullOpen={fullOpen} />
           {trajectory !== null && <AiNotePlate title="Разбор динамики" text={trajectory.text} staleFor={aiNotesStale(card.ai) ? card : null} />}
           {list}
         </Flex>
