@@ -2190,47 +2190,24 @@ button.rh-category:focus-visible {
   margin-inline-end: var(--g-spacing-4);
 }
 
-/* AI-обзор — раздел ленты под показателями в цветах Алисы (токены --rh-ai-*
-   в theme.css). Готовый обзор: мягкая дымка в углах фона и тонкий статичный
-   градиентный контур 1px, приглушенный до 55%. Контур — фон border-box под
-   заливкой padding-box, поэтому радиус сохраняется.
-   Пока обзор формируется (`_live`) — вращающаяся рамка: градиент на отдельном
-   слое ::before, который только поворачивается (transform — работа
-   композитора, без перерисовки; анимация угла conic-gradient через @property
-   перерисовывала весь раздел на каждом кадре); ::after — заливка с той же
-   дымкой. */
+/* AI-обзор — раздел ленты в общем ряду карточек: контур и поля как у Card
+   «Категорий» и «Рекомендаций», а ИИ узнается по фону — градиенту промо-блоков
+   ИИ SourceCraft 1 в 1 (синий → пурпурный → розовый, по 5%, токены --rh-ai-sc-*
+   в theme.css). Прежние дымка в углах и градиентный контур спорили с соседними
+   карточками.
+   Пока обзор формируется (`_live`), контур неподвижен, а по фону медленно
+   проходит чуть более яркая волна того же градиента: слой ::before только
+   сдвигается (transform — работа композитора, без перерисовки раздела). */
 .rh-ai-section {
-  --rh-ai-haze-from: color-mix(in srgb, var(--rh-ai-from) 16%, transparent);
-  --rh-ai-haze-pink: color-mix(in srgb, var(--rh-ai-pink) 12%, transparent);
-  --rh-ai-haze:
-    radial-gradient(120% 90% at 0% 0%, var(--rh-ai-haze-from), transparent 55%),
-    radial-gradient(90% 80% at 100% 0%, var(--rh-ai-haze-pink), transparent 55%),
-    var(--g-color-base-background);
   position: relative;
   isolation: isolate;
   overflow: hidden;
   box-sizing: border-box;
-  border: 1px solid transparent;
-  border-radius: var(--g-border-radius-xl);
-  padding: calc(var(--g-spacing-4) + 1px) calc(var(--g-spacing-5) + 1px);
-  background:
-    radial-gradient(120% 90% at 0% 0%, var(--rh-ai-haze-from), transparent 55%) padding-box,
-    radial-gradient(90% 80% at 100% 0%, var(--rh-ai-haze-pink), transparent 55%) padding-box,
-    linear-gradient(var(--g-color-base-background), var(--g-color-base-background)) padding-box,
-    linear-gradient(
-        120deg,
-        color-mix(in srgb, var(--rh-ai-from) 55%, transparent),
-        color-mix(in srgb, var(--rh-ai-to) 55%, transparent),
-        color-mix(in srgb, var(--rh-ai-pink) 55%, transparent)
-      )
-      border-box;
-}
-
-/* светлая тема: на белом дымка той же силы почти не видна — чуть плотнее */
-.g-root_theme_light .rh-ai-section,
-.g-root_theme_light-hc .rh-ai-section {
-  --rh-ai-haze-from: color-mix(in srgb, var(--rh-ai-from) 20%, transparent);
-  --rh-ai-haze-pink: color-mix(in srgb, var(--rh-ai-pink) 16%, transparent);
+  border: 1px solid var(--g-color-line-generic);
+  /* 12px — как у Card разделов */
+  border-radius: 12px;
+  padding: var(--g-spacing-3) var(--g-spacing-4);
+  background: linear-gradient(90deg, var(--rh-ai-sc-blue) 0%, var(--rh-ai-sc-magenta) 73.08%, var(--rh-ai-sc-pink) 100%);
 }
 
 .rh-ai-section__spark {
@@ -2238,38 +2215,26 @@ button.rh-category:focus-visible {
   color: var(--rh-ai-accent);
 }
 
-.rh-ai-section_live {
-  border-color: transparent;
-  background: none;
-}
-
 .rh-ai-section_live::before {
   content: "";
   position: absolute;
-  z-index: -2;
-  left: 50%;
-  top: 50%;
-  width: 1600px;
-  height: 1600px;
-  margin: -800px 0 0 -800px;
-  background: conic-gradient(var(--rh-ai-from), var(--rh-ai-to), var(--rh-ai-pink), var(--rh-ai-to), var(--rh-ai-from));
-  animation: rh-ai-spin 6s linear infinite;
+  z-index: -1;
+  inset: 0 auto 0 0;
+  width: 200%;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--rh-ai-sc-wave) 25%,
+    transparent 50%,
+    var(--rh-ai-sc-wave) 75%,
+    transparent 100%
+  );
+  animation: rh-ai-wave 3s linear infinite;
   will-change: transform;
 }
 
-.rh-ai-section_live::after {
-  content: "";
-  position: absolute;
-  z-index: -1;
-  inset: 2px;
-  border-radius: calc(var(--g-border-radius-xl) - 2px);
-  background: var(--rh-ai-haze);
-}
-
-/* пустой обзор — серая заглушка, как закрытый Repo Health Score, без градиента
-   и дымки */
+/* пустой обзор — серая заглушка, как закрытый Repo Health Score, без градиента */
 .rh-ai-section_empty {
-  border-color: var(--g-color-line-generic);
   /* generic полупрозрачный — поверх непрозрачного фона */
   background: linear-gradient(var(--g-color-base-generic), var(--g-color-base-generic)), var(--g-color-base-background);
 }
@@ -2288,9 +2253,14 @@ button.rh-category:focus-visible {
   font: inherit;
 }
 
-@keyframes rh-ai-spin {
+/* волна сдвигается на половину слоя: вторая половина повторяет первую, шов не виден */
+@keyframes rh-ai-wave {
+  from {
+    transform: translateX(-50%);
+  }
+
   to {
-    transform: rotate(360deg);
+    transform: translateX(0);
   }
 }
 
@@ -2328,10 +2298,10 @@ button.rh-category:focus-visible {
    (перебивает fit-content синих плашек), с воздухом между заголовком и текстом */
 .g-alert.g-card_theme_info.rh-ai-plate {
   width: 100%;
-  /* текст модели — сине-фиолетовым тоном (середина между info и utility Gravity),
-   * ближе к искре AI: чистый синий info оставлен плашкам о данных и доступе.
-   * Сам AI-обзор — своей плашкой, не этой */
-  background-color: color-mix(in srgb, color-mix(in srgb, var(--g-color-base-info-light), var(--g-color-base-utility-light)) 88%, transparent);
+  /* текст модели — сине-фиолетовым тоном (info и utility Gravity 40:60), ближе
+   * к искре AI и к пурпурной середине градиента AI-обзора: чистый синий info
+   * оставлен плашкам о данных и доступе. Сам AI-обзор — своей плашкой, не этой */
+  background-color: color-mix(in srgb, color-mix(in srgb, var(--g-color-base-info-light) 40%, var(--g-color-base-utility-light)) 88%, transparent);
 }
 
 /* искра — тем же акцентом AI, что у отметки в названии категории */
