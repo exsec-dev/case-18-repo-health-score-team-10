@@ -760,11 +760,9 @@ body {
   gap: var(--g-spacing-3);
 }
 
-/* проверка активности (19.10.2026) — строкой на всю ширину под плашками оценок;
- * у чужого репо HealthCraft Index тогда тоже на всю ширину */
-.rh-check-card,
-.rh-check-alert,
-.rh-score-cards_single > .rh-score-band,
+/* проверка активности (вариант 1, 19.10.2026) — плашкой как у оценок: у чужого репо
+ * на месте закрытого Repo Health Score, у своего — на всю ширину под оценками */
+.rh-check-card_wide,
 .rh-score-cards__wide {
   grid-column: 1 / -1;
 }
@@ -773,63 +771,124 @@ body {
   display: none;
 }
 
-/* строка статуса, как «CI/CD – Configured» у SourceCraft: значок, текст, знак вопроса,
- * кнопка справа; на узком экране кнопка переносится, а не сжимает текст */
-.rh-check-card {
-  box-sizing: border-box;
-  padding: var(--g-spacing-2) var(--g-spacing-4);
+/* лента карточки — контейнер: по ее ширине решается, стоят ли плашки оценок в ряд */
+.rh-repo-feed {
+  container: rh-feed / inline-size;
 }
 
-.rh-check-row {
+/* проверка справа от индекса — уже половины: статусу хватает 43%, индексу нужнее место */
+@container rh-feed (min-width: 732px) {
+  .rh-score-cards_check {
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
+  }
+}
+
+.rh-check-card__main {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  column-gap: var(--g-spacing-2);
-  row-gap: var(--g-spacing-1);
-  min-height: 28px;
-}
-
-.rh-check-row__icon {
-  flex: none;
-}
-
-/* текст делит строку со значком и кнопкой и переносится внутри себя */
-.rh-check-row__text {
-  flex: 1 1 0;
+  flex-direction: column;
+  gap: var(--g-spacing-1);
   min-width: 0;
 }
 
-.rh-check-row__text .g-help-mark {
-  vertical-align: middle;
+/* кнопка или дата — внизу, на уровне полосы вклада соседней плашки */
+.rh-check-card__foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--g-spacing-1) var(--g-spacing-3);
+  margin-top: auto;
 }
 
-.rh-check-row__end {
+.rh-check-card__foot .rh-check-foot__why {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+/* под оценками — одной полосой: статус слева по центру высоты, кнопка или дата
+ * справа у нижнего края. Строка статуса высотой с кнопку: при раскрытии признаков
+ * заголовок не сдвигается, а без них стоит ровно по центру плашки */
+.rh-check-card_wide {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--g-spacing-4);
+  row-gap: var(--g-spacing-2);
+  padding-bottom: var(--g-spacing-3);
+}
+
+.rh-check-card_wide .rh-check-card__main {
+  flex: 1 1 280px;
+  gap: 0;
+}
+
+.rh-check-card_wide .rh-check-card__foot {
+  align-self: flex-end;
+  justify-content: flex-end;
+  margin: 0 0 0 auto;
+}
+
+.rh-check-card_wide .rh-check-card__status {
+  min-height: 28px;
+}
+
+.rh-check-card_wide .rh-check-card__list {
+  margin-top: 0;
+}
+
+/* справа — сначала подпись, потом кнопка у самого края */
+.rh-check-card_wide .rh-check-card__foot > .g-button {
+  order: 1;
+}
+
+/* признаки найдены — рамка серая, как у плашек оценок рядом (желтая с ними спорила),
+ * акцент — едва заметная желтая подложка и желтый флажок; признаки списком */
+.g-card.rh-check-card_flagged {
+  background: color-mix(in srgb, var(--g-color-text-warning) 6%, transparent);
+}
+
+/* под оценками признаки свернуты: переключатель — серым текстом, как подпись */
+.rh-check-card__toggle {
   display: inline-flex;
   align-items: center;
-  gap: var(--g-spacing-3);
-  margin-inline-start: auto;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--g-color-text-secondary);
+  font: inherit;
+  cursor: pointer;
 }
 
-/* найденные признаки — желтым предупреждением со списком (вариант D) */
-.rh-check-alert {
-  box-sizing: border-box;
-  padding: var(--g-spacing-2) var(--g-spacing-4) var(--g-spacing-3);
-  border-radius: var(--g-border-radius-xl);
-  background: var(--g-color-base-warning-light);
+.rh-check-card__toggle:hover {
+  color: var(--g-color-text-primary);
 }
 
-.rh-check-alert__list {
+.rh-check-card__toggle:focus-visible {
+  outline: 2px solid var(--g-color-line-focus);
+  border-radius: var(--g-border-radius-s);
+}
+
+.rh-check-card__chev {
+  transition: transform 220ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+.rh-check-card__chev_open {
+  transform: rotate(180deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rh-check-card__chev {
+    transition: none;
+  }
+}
+
+.rh-check-card__list {
   margin: 2px 0 0;
-  padding-inline-start: calc(16px + var(--g-spacing-2));
+  padding-inline-start: 18px;
 }
 
-.rh-check-alert__list li {
+.rh-check-card__list li {
   margin: 2px 0;
-}
-
-.rh-check-card .rh-check-foot__why,
-.rh-check-alert .rh-check-foot__why {
-  margin: var(--g-spacing-1) 0 0;
 }
 
 /* разделы ленты («Категории», «Рекомендации») — в том же `Card view="outlined"`
@@ -2288,19 +2347,13 @@ button.rh-category:focus-visible {
   will-change: transform;
 }
 
-/* пустой обзор — серая заглушка, как закрытый Repo Health Score, без градиента */
+/* пустой обзор — без градиента и без заливки: только рамка, как у разделов ленты */
 .rh-ai-section_empty {
-  /* generic полупрозрачный — поверх непрозрачного фона */
-  background: linear-gradient(var(--g-color-base-generic), var(--g-color-base-generic)), var(--g-color-base-background);
+  background: none;
 }
 
 .rh-ai-button-icon {
   color: var(--rh-ai-accent);
-}
-
-/* история без графика — такая же серая заглушка */
-.rh-placeholder-card {
-  --g-card-background-color: var(--g-color-base-generic);
 }
 
 .rh-ai-section__label {
@@ -4464,7 +4517,7 @@ button.rh-category:focus-visible {
 /* темная тема: вторичный текст на залитых плашках (заглушки, закрытый Repo Health
  * Score, плитки «Избранного») — complementary: secondary на base-generic дает 4,3:1,
  * ниже 4,5:1. На чистом фоне и в светлой теме вторичный текст прежний. */
-.g-root_theme_dark :is(.rh-score-band_locked, .rh-empty, .rh-ai-section_empty, .rh-placeholder-card, .rh-summary__tile) .g-color-text_color_secondary {
+.g-root_theme_dark :is(.rh-score-band_locked, .rh-empty, .rh-summary__tile) .g-color-text_color_secondary {
   color: var(--g-color-text-complementary);
 }
 

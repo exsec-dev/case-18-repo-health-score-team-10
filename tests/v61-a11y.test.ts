@@ -64,7 +64,8 @@ describe("доступность: структура и имена", () => {
 
   test("A11Y-11, A11Y-14: complementary на залитых плашках в темной теме; цели иконок 24px на любом экране", () => {
     const css = web("layout.css");
-    expect(css).toContain(".g-root_theme_dark :is(.rh-score-band_locked, .rh-empty, .rh-ai-section_empty, .rh-placeholder-card, .rh-summary__tile) .g-color-text_color_secondary");
+    // 19.10.2026: пустые AI-обзор и история — без заливки, вторичный текст на чистом фоне
+    expect(css).toContain(".g-root_theme_dark :is(.rh-score-band_locked, .rh-empty, .rh-summary__tile) .g-color-text_color_secondary");
     expect(css).toMatch(/\n\.rh-rating-ext,\n\.rh-rating-ai,\n\.rh-rating-fraud \{\n  padding: 5px;\n  margin: -5px;/);
   });
 });

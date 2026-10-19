@@ -577,15 +577,11 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
       return item;
     })
     .sort((a, b) => compareItems(a, b, "index", "desc"));
+  // repo_id в ответ не едет – это ключ стыковки строки со снимком мест и заметками AI
+  const idBySlug = new Map(rows.map((r) => [`${r.org_slug}/${r.repo_slug}`, r.repo_id]));
   // публичный AI-обзор – одним запросом на всю выдачу (заметки overview аудитории public)
-  const withAi = new Set(
-    (
-      db
-        .query("SELECT DISTINCT r.org_slug || '/' || r.repo_slug AS slug FROM ai_notes n JOIN repos r ON r.id = n.repo_id WHERE n.role = 'overview' AND n.audience = 'public'")
-        .all() as { slug: string }[]
-    ).map((r) => r.slug),
-  );
-  for (const item of all) item.aiOverview = withAi.has(`${item.org}/${item.repo}`);
+  const withAi = overviewRepoIds(db).pub;
+  for (const item of all) item.aiOverview = withAi.has(idBySlug.get(`${item.org}/${item.repo}`)!);
   all.forEach((item, i) => {
     if (item.healthcraftIndex !== null) item.rank = i + 1;
   });
@@ -599,8 +595,6 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
     for (let i = from; i < to; i++) all[i]!.rankBadge = badge;
     from = to;
   }
-  // repo_id в ответ не едет – это ключ стыковки строки со снимком мест и заметкой flagger
-  const idBySlug = new Map(rows.map((r) => [`${r.org_slug}/${r.repo_slug}`, r.repo_id]));
 
   // Динамика позиции: базовый снимок читается один раз в Map, без запроса на
   // строку. delta = место в снимке − место сейчас (положительное = вырос).
@@ -628,31 +622,13 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
   // новее заметки снимает флаг (карточка показывает сбой, а не признаки); заметка
   // старше последнего скана – флаг «по прошлому анализу». Битый JSON – флага нет.
   // На место и сортировку флаг не влияет.
-  const flagged = new Map<number, boolean>();
-  for (const row of db
-    .query(
-      `SELECT n.repo_id, n.text, n.scan_id, n.created_at, n.charter_version,
-         (SELECT f.scan_id FROM ai_fails f WHERE f.repo_id = n.repo_id AND f.role = 'flagger' ORDER BY f.scan_id DESC, f.id DESC LIMIT 1) AS fail_scan,
-         (SELECT f.created_at FROM ai_fails f WHERE f.repo_id = n.repo_id AND f.role = 'flagger' ORDER BY f.scan_id DESC, f.id DESC LIMIT 1) AS fail_at,
-         (SELECT MAX(s.id) FROM scans s WHERE s.repo_id = n.repo_id AND s.status IN ('ok', 'partial')) AS latest
-       FROM (
-         SELECT repo_id, text, scan_id, created_at, charter_version, ROW_NUMBER() OVER (PARTITION BY repo_id ORDER BY scan_id DESC, id DESC) AS rn
-         FROM ai_notes WHERE role = 'flagger') n
-       WHERE n.rn = 1`,
-    )
-    .all() as { repo_id: number; text: string; scan_id: number; created_at: string; charter_version: string; fail_scan: number | null; fail_at: string | null; latest: number | null }[]) {
-    if (parseFlaggerNote(row.text)?.flag !== true) continue;
-    const failNewer = row.fail_scan !== null && (row.fail_scan > row.scan_id || (row.fail_scan === row.scan_id && (row.fail_at ?? "") > row.created_at));
-    if (failNewer) continue;
-    // флаг по прежним правилам — «устарел», как и флаг по прошлому анализу
-    flagged.set(row.repo_id, (row.latest !== null && row.scan_id < row.latest) || flaggerNoteOldRules(row.charter_version));
-  }
+  const flagged = flaggedRepos(db);
   if (flagged.size > 0) {
     for (const item of all) {
-      const stale = flagged.get(idBySlug.get(`${item.org}/${item.repo}`)!);
-      if (stale === undefined) continue;
+      const flag = flagged.get(idBySlug.get(`${item.org}/${item.repo}`)!);
+      if (flag === undefined) continue;
       item.fraud = true;
-      item.fraudStale = stale;
+      item.fraudStale = flag.stale;
     }
   }
 
@@ -1110,6 +1086,53 @@ function findRepoRow(db: Database, org: string, repo: string): CardRepoRow | nul
       "SELECT id, org_slug, repo_slug, title, language, likes, forks, last_activity_at, logo_url, language_color, rating_active, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?",
     )
     .get(org, repo) as CardRepoRow | null;
+}
+
+/**
+ * Репозитории с AI-обзором одним запросом: `pub` – с обзором аудитории public (его
+ * видит любой посетитель, отметка рейтинга), `any` – с обзором любой аудитории
+ * (отметка строк кабинета у репозиториев, права на которые у зрителя есть).
+ */
+export function overviewRepoIds(db: Database): { pub: Set<number>; any: Set<number> } {
+  const rows = db.query("SELECT DISTINCT repo_id, audience FROM ai_notes WHERE role = 'overview'").all() as { repo_id: number; audience: string }[];
+  return {
+    pub: new Set(rows.filter((r) => r.audience === "public").map((r) => r.repo_id)),
+    any: new Set(rows.map((r) => r.repo_id)),
+  };
+}
+
+/**
+ * Флаг накрутки по последней заметке flagger каждого репо, тем же правилом, что
+ * карточка (fraudOf + checkOf): заметка – scan_id DESC, id DESC; отказ проверки
+ * новее заметки снимает флаг; заметка старше последнего скана или по прежним
+ * правилам – «устарел». Битый JSON – флага нет. Одним запросом на все репо: им
+ * пользуются рейтинг и строки кабинета.
+ */
+export function flaggedRepos(db: Database): Map<number, { stale: boolean; factors: { key: string; note: string }[] }> {
+  const flagged = new Map<number, { stale: boolean; factors: { key: string; note: string }[] }>();
+  for (const row of db
+    .query(
+      `SELECT n.repo_id, n.text, n.scan_id, n.created_at, n.charter_version,
+         (SELECT f.scan_id FROM ai_fails f WHERE f.repo_id = n.repo_id AND f.role = 'flagger' ORDER BY f.scan_id DESC, f.id DESC LIMIT 1) AS fail_scan,
+         (SELECT f.created_at FROM ai_fails f WHERE f.repo_id = n.repo_id AND f.role = 'flagger' ORDER BY f.scan_id DESC, f.id DESC LIMIT 1) AS fail_at,
+         (SELECT MAX(s.id) FROM scans s WHERE s.repo_id = n.repo_id AND s.status IN ('ok', 'partial')) AS latest
+       FROM (
+         SELECT repo_id, text, scan_id, created_at, charter_version, ROW_NUMBER() OVER (PARTITION BY repo_id ORDER BY scan_id DESC, id DESC) AS rn
+         FROM ai_notes WHERE role = 'flagger') n
+       WHERE n.rn = 1`,
+    )
+    .all() as { repo_id: number; text: string; scan_id: number; created_at: string; charter_version: string; fail_scan: number | null; fail_at: string | null; latest: number | null }[]) {
+    const note = parseFlaggerNote(row.text);
+    if (note?.flag !== true) continue;
+    const failNewer = row.fail_scan !== null && (row.fail_scan > row.scan_id || (row.fail_scan === row.scan_id && (row.fail_at ?? "") > row.created_at));
+    if (failNewer) continue;
+    // флаг по прежним правилам — «устарел», как и флаг по прошлому анализу
+    flagged.set(row.repo_id, {
+      stale: (row.latest !== null && row.scan_id < row.latest) || flaggerNoteOldRules(row.charter_version),
+      factors: note.factors.filter((f): f is { key: string; note: string } => typeof (f as { key?: unknown }).key === "string").map((f) => ({ key: f.key, note: String(f.note ?? "") })),
+    });
+  }
+  return flagged;
 }
 
 /**

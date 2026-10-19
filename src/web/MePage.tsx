@@ -25,6 +25,7 @@ import {
   Star,
   StarFill,
   Sliders,
+  SparklesFill,
   TrashBin,
   TriangleDownFill,
   TriangleExclamation,
@@ -1355,6 +1356,14 @@ function RepoRow({
           <Link {...linkProps(href)} view="primary" className="rh-repo-item__name">
             <RepoSlug org={org} repo={repo} variant="subheader-2" />
           </Link>
+          {/* отметки строки — как в рейтинге: AI-обзор, затем флаг проверки активности */}
+          {entry.aiOverview && (
+            <ActionTooltip title="Есть AI-обзор">
+              <span className="rh-rating-ai" role="img" aria-label="Есть AI-обзор" {...TIP_TARGET}>
+                <Icon data={SparklesFill} size={14} />
+              </span>
+            </ActionTooltip>
+          )}
           {entry.fraudFlag?.flag === true && entry.fraudFlag.factors.length > 0 && (
             <ActionTooltip title={FRAUD_TITLE} className="rh-tip-oneline">
               <span className="rh-rating-fraud" role="img" aria-label={FRAUD_TITLE} {...TIP_TARGET}>

@@ -297,16 +297,16 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
         // («что исправить») → AI-обзор → история
         <Flex direction="column" gap={6} className="rh-repo-feed">
           <Flex direction="column" gap={3}>
-            {/* проверка активности — строкой под плашками оценок (у чужого — вместо закрытого
-                Repo Health Score); без индекса и в пустом репозитории проверять на накрутку
-                и пересказывать нечего */}
+            {/* проверка активности — своей плашкой: у чужого на месте закрытого Repo Health
+                Score, у своего — на всю ширину под плашками оценок; без индекса и в пустом
+                репозитории проверять на накрутку и пересказывать нечего */}
             <ScoreBand
               card={card}
               view={view}
               check={
                 card.score.healthcraftIndex === null || card.markers.codeEmpty
                   ? undefined
-                  : () => (
+                  : (wide: boolean) => (
                       <ActivityCheckCard
                         card={card}
                         org={org}
@@ -316,6 +316,7 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
                         quota={aiQuota.quota}
                         onQuota={aiQuota.reload}
                         signIn={<LoginButton compact={false} inline />}
+                        wide={wide}
                       />
                     )
               }
@@ -1094,21 +1095,22 @@ function PathLine({ parts }: { parts: PathPart[] }) {
  * столбиком (`.rh-score-cards`, auto-fit). Закрытый Repo Health Score — своя плашка
  * с путем к нему по типу зрителя.
  */
-function ScoreBand({ card, view, check }: { card: Card; view: CardView; check?: () => ReactNode }) {
+function ScoreBand({ card, view, check }: { card: Card; view: CardView; check?: (wide: boolean) => ReactNode }) {
   const score = card.score!;
   const barOf = (name: string) => view.contributions.find((b) => b.title.endsWith(name)) ?? null;
   // закрытый Repo Health Score у чужого репозитория уступает место проверке активности:
-  // почему он закрыт, уже сказано плашкой под «Категориями». Проверка – строкой под
-  // оценками, поэтому HealthCraft Index тогда на всю ширину
+  // почему он закрыт, уже сказано плашкой под «Категориями»
   const checkInSlot = check !== undefined && view.fullPath !== null;
   return (
-    <div className={checkInSlot ? "rh-score-cards rh-score-cards_single" : "rh-score-cards"}>
+    <div className={checkInSlot ? "rh-score-cards rh-score-cards_check" : "rh-score-cards"}>
       <Card view="outlined" className="rh-score-band">
         <ScoreFigure title="HealthCraft Index" help={INDEX_HELP} total={score.healthcraftIndex} position={view.position} codeEmpty={card.markers.codeEmpty} />
         {score.healthcraftIndex === null && <NoScoreReason view={view} />}
         <ContributionStrip bar={barOf("HealthCraft Index")} />
       </Card>
-      {checkInSlot ? null : (
+      {checkInSlot ? (
+        check(false)
+      ) : (
       <Card view="outlined" className={view.fullPath ? "rh-score-band rh-score-band_locked" : "rh-score-band"}>
         {view.fullPath ? (
           // колонка на всю высоту плашки — кнопка входа у нижнего края
@@ -1141,8 +1143,8 @@ function ScoreBand({ card, view, check }: { card: Card; view: CardView; check?: 
         <Markers view={view} />
       </Card>
       )}
-      {/* проверка — строкой на всю ширину под оценками */}
-      {check !== undefined && check()}
+      {/* свой репозиторий: проверка — на всю ширину под оценками */}
+      {check !== undefined && !checkInSlot && check(true)}
       {/* предупреждение CI при закрытом Repo Health Score — под плашками */}
       {checkInSlot && (
         <div className="rh-score-cards__wide">

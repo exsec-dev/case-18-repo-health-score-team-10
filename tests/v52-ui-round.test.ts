@@ -89,7 +89,7 @@ describe("выбор 1A: 7 состояний проверки активнос�
     expect(fraudCheckState(ai({}), false)).toMatchObject({ kind: "none", button: null });
     expect(title(ai({}), true)).toBe("Не проверялась");
     // 19.10.2026: строка статуса – гостю коротко, кто запускает (рядом кнопка входа)
-    expect(checkCardText(fraudCheckState(ai({}), false), ai({}), false).meta).toBe("запускает вошедший пользователь");
+    expect(checkCardText(fraudCheckState(ai({}), false), ai({}), false).meta).toBe("Запускает вошедший пользователь");
   });
   test("идет, признаков нет, есть признаки", () => {
     expect(fraudCheckState(ai({ active: true }), true)).toMatchObject({ kind: "active", button: null });

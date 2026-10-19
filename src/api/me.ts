@@ -6,7 +6,7 @@
 import type { Database } from "bun:sqlite";
 import { ScClient } from "../collectors/http";
 import { upsertRepo } from "../jobs/runner";
-import { LAST_ELIGIBLE_SCAN_SQL, LAST_NOT_BAD_SCAN_SQL, getRepoCard, jobLeaseExpired } from "./repos";
+import { LAST_ELIGIBLE_SCAN_SQL, LAST_NOT_BAD_SCAN_SQL, flaggedRepos, getRepoCard, jobLeaseExpired, overviewRepoIds } from "./repos";
 import { classifyScStatus, isOwnRepo, probeRepoAccess, type AccessResult, type ChannelAccess, type NormalizedAccess, type ProbeIo } from "../auth/access";
 import { MODEL_VERSION } from "../score/model";
 import { countActiveUserJobs, countRecentUserJobs, enqueueScan, findActiveUserJob, recordRefusedUserJob } from "../jobs/scheduler";
@@ -56,6 +56,31 @@ export interface MyRepoEntry {
    * флага нет (не генерировали или модель его не дала).
    */
   fraudFlag: { flag: boolean; factors: { key: string; note: string }[] } | null;
+  /**
+   * Есть AI-обзор – отметка строки, как у рейтинга. У открытого репо – только
+   * публичный обзор (его видит любой посетитель); у закрытого с правами зрителя –
+   * обзор любой аудитории.
+   */
+  aiOverview: boolean;
+}
+
+/** Отметки строк кабинета – одним запросом на весь список, а не карточкой на строку. */
+interface RowMarks {
+  overview: { pub: Set<number>; any: Set<number> };
+  flags: ReturnType<typeof flaggedRepos>;
+}
+
+function rowMarks(db: Database): RowMarks {
+  return { overview: overviewRepoIds(db), flags: flaggedRepos(db) };
+}
+
+function repoRowOf(db: Database, org: string, repo: string): { id: number; visibility: string } | null {
+  return db.query("SELECT id, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as { id: number; visibility: string } | null;
+}
+
+function aiOverviewOf(marks: RowMarks, repo: { id: number; visibility: string } | null, mayRead: boolean): boolean {
+  if (repo === null) return false;
+  return marks.overview.pub.has(repo.id) || (mayRead && repo.visibility !== "public" && marks.overview.any.has(repo.id));
 }
 
 export interface MyReposResult {
@@ -349,10 +374,11 @@ export interface TokenRepoEntry extends MyRepoEntry {
  * «Мои репозитории»: каждый репо живого списка `/me/repos` с данными каталога.
  * Право чтения доказано самим списком (`readProven`), поэтому у закрытых видны
  * оценка и мета; публичный, выбывший из рейтинга, по-прежнему не раскрывается.
- * Без тяжелых полей кабинета (рекомендации, флаг накрутки собирают карточку
- * целиком) – список бывает в сотни строк.
+ * Без рекомендаций (их число собирает карточка целиком) – список бывает в сотни
+ * строк; флаг накрутки и AI-обзор – одним запросом на весь список.
  */
 export function tokenRepoEntries(db: Database, userId: number, repos: ScRepoLite[]): TokenRepoEntry[] {
+  const marks = rowMarks(db);
   const favorites = new Set(
     (db.query("SELECT org_slug, repo_slug FROM favorites WHERE user_id = ?").all(userId) as { org_slug: string; repo_slug: string }[]).map((f) =>
       `${f.org_slug}/${f.repo_slug}`.toLowerCase(),
@@ -371,6 +397,8 @@ export function tokenRepoEntries(db: Database, userId: number, repos: ScRepoLite
         } | null)
       : null;
     const known = mayRead ? ratingScoreOf(db, r.org, r.slug) : { healthcraftIndex: null, previousIndex: null, lastScanAt: null, lastScanStatus: null };
+    const repoRow = inCatalog ? repoRowOf(db, r.org, r.slug) : null;
+    const flag = mayRead && repoRow !== null ? marks.flags.get(repoRow.id) : undefined;
     return {
       org: r.org,
       repo: r.slug,
@@ -387,7 +415,8 @@ export function tokenRepoEntries(db: Database, userId: number, repos: ScRepoLite
       mayRead,
       planned: plannedWork(db, userId, r.org, r.slug),
       recommendationsCount: null,
-      fraudFlag: null,
+      fraudFlag: flag === undefined ? null : { flag: true, factors: flag.factors },
+      aiOverview: aiOverviewOf(marks, repoRow, mayRead),
       visibility: r.visibility,
       isEmpty: r.isEmpty,
       favorite: favorites.has(`${r.org}/${r.slug}`.toLowerCase()),
@@ -403,7 +432,8 @@ export async function listMyRepos(db: Database, userId: number | null, opts: Sav
   const favs = db
     .query("SELECT org_slug, repo_slug FROM favorites WHERE user_id = ? ORDER BY added_at DESC")
     .all(userId ?? -1) as { org_slug: string; repo_slug: string }[];
-  const entries: MyRepoEntry[] = favs.map((f) => myRepoEntryOf(db, userId, f.org_slug, f.repo_slug, opts));
+  const marks = rowMarks(db);
+  const entries: MyRepoEntry[] = favs.map((f) => myRepoEntryOf(db, userId, f.org_slug, f.repo_slug, opts, marks));
   return { username: null, entries };
 }
 
@@ -420,7 +450,7 @@ export function favoriteScoreOf(db: Database, userId: number, org: string, repo:
   return viewerMayReadRepo(db, userId, org, repo, opts) ? ratingScoreOf(db, org, repo).healthcraftIndex : null;
 }
 
-export function myRepoEntryOf(db: Database, userId: number | null, org: string, repo: string, opts: SavedRightsOptions = {}): MyRepoEntry {
+export function myRepoEntryOf(db: Database, userId: number | null, org: string, repo: string, opts: SavedRightsOptions = {}, marks: RowMarks = rowMarks(db)): MyRepoEntry {
   const f = { org_slug: org, repo_slug: repo };
   const mayRead = viewerMayReadRepo(db, userId, f.org_slug, f.repo_slug, opts);
   const inCatalog = db.query("SELECT 1 FROM repos WHERE org_slug = ? AND repo_slug = ?").get(f.org_slug, f.repo_slug) !== null;
@@ -454,6 +484,7 @@ export function myRepoEntryOf(db: Database, userId: number | null, org: string, 
     planned: plannedWork(db, userId, f.org_slug, f.repo_slug),
     recommendationsCount: recommendationsCountOf(db, userId, f.org_slug, f.repo_slug, mayRead, opts),
     fraudFlag: fraudFlagOf(db, userId, f.org_slug, f.repo_slug, mayRead, opts),
+    aiOverview: aiOverviewOf(marks, inCatalog ? repoRowOf(db, f.org_slug, f.repo_slug) : null, mayRead),
   };
 }
 
