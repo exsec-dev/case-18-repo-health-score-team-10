@@ -961,7 +961,17 @@ function fraudBlock(card: RepoCard): Block[] {
   const out: Block[] = [h2(FRAUD_TITLE)];
   out.push(para(line(FRAUD_EXPLAIN)));
   // флаг прошлого анализа не выдается за текущий
-  if (fraudCheckStale(card.ai?.check)) out.push(para(line("Проверка выполнена по прошлому анализу – после нее репозиторий анализировался снова.")));
+  if (fraudCheckStale(card.ai?.check)) {
+    out.push(
+      para(
+        line(
+          card.ai?.check.oldRules === true
+            ? "Проверка выполнена по прежним правилам – ее нужно запустить заново."
+            : "Проверка выполнена по прошлому анализу – после нее репозиторий анализировался снова.",
+        ),
+      ),
+    );
+  }
   // текст фактора строит код из факта (та же функция, что на карточке);
   // формулировка модели — только если факта нет
   const factOf = (key: string): unknown => fraudFactorValue(key, fraud.signals, card.evidence, fraud.inputs);

@@ -20,7 +20,7 @@ const withAi = (card: RepoCard, scanId: number, latestScanId: number | null): Re
       failures: [],
       jobActive: false,
       cooldownUntil: null,
-      check: { active: false, scanId: null, checkedAt: null, failure: null, retryable: false, latestScanId },
+      check: { active: false, scanId: null, checkedAt: null, failure: null, retryable: false, latestScanId, oldRules: false },
       fraud: null,
     },
   }) as unknown as RepoCard;

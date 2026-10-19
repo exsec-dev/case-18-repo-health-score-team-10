@@ -24,7 +24,8 @@ import { validateFlagOutput, validateOutput, type FraudFlag, type FactInput } fr
 import type { SummaryRole } from "./roles";
 import { modelTierOf, PUBLIC_CATEGORIES, PUBLIC_SPECIALIST_ROLES, ROLE_FACT_CATEGORIES, SPECIALIST_ROLES, toolsAllowed, type SpecialistRole } from "./roles";
 import { categoryOf } from "../collectors/facts";
-import { rhythmSignals, RHYTHM_KEY, type RhythmSignals } from "./rhythm";
+import { hardFlagFactors, rhythmSignals, ruleFlagFactors, RHYTHM_KEY, type RestEvidence, type RhythmSignals } from "./rhythm";
+import { FLAGGER_RULES_VERSION } from "./fraud-thresholds";
 import { CHANNEL_KINDS } from "../score/compute";
 import type { AiAudience } from "../db";
 // repos.ts берет отсюда только константу NO_RHYTHM_REASON внутри функций,
@@ -751,18 +752,20 @@ const FRAUD_CHECK_MAX_CALLS = ROLE_ATTEMPTS * 2;
 const FRAUD_CHECK_FUSE_MS = 2 * 60_000;
 
 /**
- * Проверка на накрутку (кнопка «Проверить оценку»): один вызов легкой модели по
- * фактам скана из БД — без клона и без инструментов. Вход — признаки ритма
- * `activity.rhythm`, посчитанные кодом по полной ленте (rhythm.ts), и `activity.rest`.
- * Заметка flagger = {flag, factors, signals}: карточка и отчет печатают факторы по тем
- * же признакам, что видела модель. Score не трогается. Нет ленты — нет вызова,
+ * Проверка на накрутку (кнопка «Проверить оценку»): признаки ритма
+ * `activity.rhythm` считает код по полной ленте (rhythm.ts); сильные признаки и
+ * пороги ставят флаг кодом, остальное — один вызов легкой модели по фактам скана
+ * из БД (без клона и инструментов) с `activity.rest`. Заметка flagger =
+ * {flag, factors, by, signals, inputs}: карточка и отчет печатают улики по тем же
+ * признакам, что видела проверка. Score не трогается. Нет ленты — нет вызова,
  * причина пишется в ai_fails («не проверялось»).
  */
 export async function runFraudCheck(deps: SummaryDeps, req: SummaryRequest): Promise<FraudCheckResult> {
   const now = req.now ?? new Date();
   const repoId = repoIdOf(deps);
   const tag = `[fraud-check] ${deps.org}/${deps.repo} scan ${req.scanId}`;
-  if (deps.cache !== false && deps.db.query("SELECT 1 FROM ai_notes WHERE scan_id = ? AND role = 'flagger' LIMIT 1").get(req.scanId) !== null) {
+  // заметка по прежним правилам (хартия до FLAGGER_RULES_VERSION) кэшем не считается: проверка идет заново
+  if (deps.cache !== false && deps.db.query(`SELECT 1 FROM ai_notes WHERE scan_id = ? AND role = 'flagger' AND ${FLAGGER_NOTE_CURRENT} LIMIT 1`).get(req.scanId) !== null) {
     deps.log?.(`${tag}: cached (check already exists for this scan)`);
     return { scanId: req.scanId, ok: true, flag: null, signals: null, cached: true, answered: 0 };
   }
@@ -789,8 +792,35 @@ export async function runFraudCheck(deps: SummaryDeps, req: SummaryRequest): Pro
   const signals = Array.isArray(events) ? rhythmSignals(events as Parameters<typeof rhythmSignals>[0], asOf) : null;
   if (signals === null) return fail(NO_RHYTHM_REASON, null);
 
+  const inputs = rest ? { "activity.rest": parseFactValue(rest.value) } : {};
+  const save = (flag: FraudFlag, by: "rules" | "model"): void =>
+    writeNote(
+      deps,
+      req.scanId,
+      repoId,
+      "flagger",
+      // вход проверки хранится вместе с ней: фактор печатается по тем данным, что видела
+      // проверка, а не по фактам более нового анализа; by — кто решил, код или модель
+      JSON.stringify({ flag: flag.flag, factors: flag.factors, by, signals, inputs }),
+      flag.factors.map((f) => f.key),
+      now,
+      // вход флаггера — только публичные данные активности, поэтому метку видят все
+      "public",
+    );
+
+  // сильные признаки (роботы, всплески) — флаг ставит код, модель не зовется:
+  // результат одинаков от запуска к запуску
+  const rules = ruleFlagFactors(signals);
+  const hard = hardFlagFactors(signals, inputs["activity.rest"] as RestEvidence | null | undefined);
+  if (hard.length > 0) {
+    const flag: FraudFlag = { flag: true, factors: [...hard, ...rules] };
+    save(flag, "rules");
+    deps.log?.(`${tag}: flag=true by rules, factors=[${flag.factors.map((f) => f.note).join("; ")}], calls=0`);
+    return { scanId: req.scanId, ok: true, flag, signals, answered: 0 };
+  }
+
   const facts: FactInput[] = [{ key: RHYTHM_KEY, value: signals }];
-  if (rest) facts.push({ key: "activity.rest", value: parseFactValue(rest.value) });
+  if (rest) facts.push({ key: "activity.rest", value: inputs["activity.rest"] });
   const budget: RunBudget = { calls: 0, answered: 0, max: deps.budgets?.maxModelCalls ?? FRAUD_CHECK_MAX_CALLS, ac: new AbortController() };
   const fuse = setTimeout(() => budget.ac.abort(), deps.budgets?.fuseMs ?? FRAUD_CHECK_FUSE_MS);
   let res: Awaited<ReturnType<typeof runFlagger>>;
@@ -799,31 +829,33 @@ export async function runFraudCheck(deps: SummaryDeps, req: SummaryRequest): Pro
   } finally {
     clearTimeout(fuse);
   }
+  // пороги сработали — флаг стоит до ответа модели: ее «нет», отказ валидатора и
+  // падение провайдера флаг не снимают, а ее факторы (например, по activity.rest)
+  // добавляются к факторам правил
+  if (rules.length > 0) {
+    const extra = res.ok && res.flag.flag ? res.flag.factors.filter((f) => f.key !== RHYTHM_KEY) : [];
+    const flag: FraudFlag = { flag: true, factors: [...rules, ...extra] };
+    save(flag, "rules");
+    deps.log?.(`${tag}: flag=true by rules (${rules.map((f) => f.note).join("; ")}), model=${res.ok ? `flag=${res.flag.flag}` : `fail: ${res.reason.slice(0, 80)}`}, calls=${budget.calls}`);
+    return { scanId: req.scanId, ok: true, flag, signals, answered: budget.answered };
+  }
   if (!res.ok) return fail(res.reason, signals, budget.answered);
-  writeNote(
-    deps,
-    req.scanId,
-    repoId,
-    "flagger",
-    // вход проверки хранится вместе с ней: фактор печатается по тем данным, что видела
-    // модель, а не по фактам более нового анализа
-    JSON.stringify({ flag: res.flag.flag, factors: res.flag.factors, signals, inputs: rest ? { "activity.rest": parseFactValue(rest.value) } : {} }),
-    res.flag.factors.map((f) => f.key),
-    now,
-    // вход флаггера — только публичные данные активности, поэтому метку видят все
-    "public",
-  );
-  deps.log?.(`${tag}: flag=${res.flag.flag}, factors=[${res.flag.factors.map((f) => f.key).join(",")}], calls=${budget.calls}`);
+  save(res.flag, "model");
+  deps.log?.(`${tag}: flag=${res.flag.flag} by model, factors=[${res.flag.factors.map((f) => f.key).join(",")}], calls=${budget.calls}`);
   return { scanId: req.scanId, ok: true, flag: res.flag, signals, answered: budget.answered };
 }
 
 /** Причина «не проверялось»: в скане нет ленты коммитов — вызова модели не было. */
 export const NO_RHYTHM_REASON = "нет истории коммитов — проверка не проводилась";
 
+/** SQL-условие «заметка flagger по действующим правилам» (charter_version — строка с номером). */
+export const FLAGGER_NOTE_CURRENT = `CAST(charter_version AS INTEGER) >= ${FLAGGER_RULES_VERSION}`;
+
 /**
  * Флаг накрутки: до ROLE_ATTEMPTS попыток с причинами отказа в ретрае; вывод —
  * мини-JSON по validateFlagOutput. Флаг — подозрение для человека, оценки
  * и веса у него нет: в Score, категории и дельту он не попадает никогда.
+ * Пороги кода к модели не относятся: их применяет runFraudCheck до и после вызова.
  */
 async function runFlagger(
   deps: SummaryDeps,

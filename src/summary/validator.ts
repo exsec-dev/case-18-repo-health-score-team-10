@@ -412,5 +412,8 @@ export function validateFlagOutput(raw: string, factKeys: Set<string>): FlagVali
     if (/[\u0000-\u0008\u000b-\u001f\u007f\u202a-\u202e\u2066-\u2069]/.test(item.note)) return fail("note содержит управляющие символы");
     factors.push({ key: item.key, note: item.note });
   }
+  // флаг без улик и улики без флага — не вердикт: карточка показала бы флаг с пустым списком
+  if (obj.flag && factors.length === 0) return fail("flag true без factors");
+  if (!obj.flag && factors.length > 0) return fail("factors при flag false");
   return { ok: true, reason: null, flag: { flag: obj.flag, factors } };
 }

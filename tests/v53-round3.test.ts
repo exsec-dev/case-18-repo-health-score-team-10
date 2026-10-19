@@ -92,14 +92,17 @@ import { evolutionTooEarly, type HistoryPoint } from "../src/summary/history-con
 import { makeApiDb } from "./api-fixtures";
 
 describe("В5.3 круг 3: флаг фрода — текст фактора строит код из факта (выбор 6-A, способ 2)", () => {
-  test("сводка git: доля роботов процентом от чисел факта, авторы при коммиттерах", () => {
+  test("сводка git: доля роботов процентом от чисел факта; авторы при коммиттерах не печатаются (не признак)", () => {
     const fact = { commits: 606, robot_commits: 600, robot_ratio: 0.99, authors: 3, committers: 2 };
-    expect(fraudFactorFact("activity.git.summary", fact)).toBe("600 из 606 коммитов – от роботов (99%); 3 автора при 2 коммиттерах");
+    expect(fraudFactorFact("activity.git.summary", fact)).toBe("600 из 606 коммитов – от роботов (99%)");
   });
   test("процент — из чисел факта, а не из округленной доли; нет коммитов — без доли", () => {
     expect(fraudFactorFact("activity.git.summary", { commits: 107, robot_commits: 98, authors: 5, committers: 1 })).toBe(
-      "98 из 107 коммитов – от роботов (92%); 5 авторов при 1 коммиттере",
+      "98 из 107 коммитов – от роботов (92%)",
     );
+    // ритм: доля роботов печатается только от порога правил (80%)
+    expect(fraudFactorFact("activity.rhythm", { commits: 107, robot_commits: 98, sync_bursts: 0 })).toBe("98 из 107 коммитов – от роботов (92%)");
+    expect(fraudFactorFact("activity.rhythm", { commits: 107, robot_commits: 50, sync_bursts: 0 })).toBeNull();
     expect(fraudFactorFact("activity.git.summary", { commits: 0, robot_commits: 0 })).toBeNull();
   });
   test("нет факта или неизвестный ключ — null (показывается формулировка модели)", () => {

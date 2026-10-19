@@ -90,7 +90,7 @@ describe("CallLlm: z.ai стрим с tool_calls (порт dndy)", () => {
     for (const [role, temperature, model] of [
       ["documentation", 0.4, "glm-side-test"],
       ["overview", 0.5, "glm-main-test"],
-      ["flagger", 0.1, "glm-side-test"],
+      ["flagger", 0, "glm-side-test"],
       ["trajectory", 0.4, "glm-side-test"],
     ] as const) {
       const captured: CapturedRequest[] = [];

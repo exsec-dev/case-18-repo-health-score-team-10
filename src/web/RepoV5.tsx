@@ -43,6 +43,7 @@ import {
   fraudFactorFact,
   fraudFactorValue,
   fraudCheckStale,
+  fraudStaleText,
   AI_NOTE_SHORT, AI_OVERVIEW_REJECTED,
   quotaBlockedText,
   scoreTheme,
@@ -312,7 +313,7 @@ export interface FraudCheckState {
  */
 export function fraudCheckState(ai: CardAi, loggedIn: boolean): FraudCheckState {
   const { check, fraud } = ai;
-  const stale = check.scanId !== null && check.latestScanId !== null && check.scanId < check.latestScanId;
+  const stale = fraudCheckStale(check);
   const date = check.checkedAt ? fmtDateTime(check.checkedAt) : null;
   if (check.active) return { kind: "active", date: null, button: null };
   if (check.failure !== null && !check.retryable) return { kind: "nothing", date: null, button: null };
@@ -348,7 +349,7 @@ const CHECK_ICON: Record<FraudCheckState["kind"], { data: typeof Shield; color: 
 
 /** Заголовок и пояснение плашки проверки по состоянию; «на оценку не влияет» — в самой плашке. */
 export function checkCardText(st: FraudCheckState, ai: CardAi, loggedIn: boolean): { title: string; desc: string } {
-  const after = st.date !== null ? `Проверка ${st.date} – после нее был новый анализ.` : "После проверки был новый анализ.";
+  const after = fraudStaleText(ai.check, st.date);
   const done = st.date !== null ? `Проверено ${st.date}.` : "";
   switch (st.kind) {
     case "none":

@@ -205,7 +205,7 @@ describe("постановка: кэш и дедуп бесплатны, лим�
     expect(first.kind).toBe("ok");
     expect(enqueueCheck(db, repoId, { userId: u, quota: () => null }).kind).toBe("active");
     db.query("UPDATE jobs SET status = 'done'").run();
-    db.query("INSERT INTO ai_notes (repo_id, scan_id, role, text, fact_refs, charter_version, model, created_at, audience) VALUES (?, ?, 'flagger', '{}', '[]', '2', 'm', '2026', 'public')").run(repoId, scanId);
+    db.query("INSERT INTO ai_notes (repo_id, scan_id, role, text, fact_refs, charter_version, model, created_at, audience) VALUES (?, ?, 'flagger', '{}', '[]', '7', 'm', '2026', 'public')").run(repoId, scanId);
     expect(enqueueCheck(db, repoId, { userId: u, quota: () => ({ code: "quota_hour", message: "x", until: "t" }) }).kind).toBe("cached");
     const { repoId: r2 } = seedScanned(db, "d");
     expect(enqueueCheck(db, r2, { userId: u, quota: () => ({ code: "quota_hour", message: "x", until: "t" }) }).kind).toBe("quota");
@@ -247,8 +247,8 @@ describe("исполнение проверки и состояние на ка�
     const { db } = freshDb();
     const { repoId, scanId } = seedScanned(db, "st");
     const card = () => getRepoCard(db, "q", "st", { access: NO_PAT_ACCESS })!.ai!.check;
-    expect(card()).toEqual({ active: false, scanId: null, checkedAt: null, failure: null, retryable: false, latestScanId: scanId });
-    db.query("INSERT INTO ai_notes (repo_id, scan_id, role, text, fact_refs, charter_version, model, created_at, audience) VALUES (?, ?, 'flagger', ?, '[]', '2', 'm', '2026-09-28T10:00:00Z', 'public')").run(
+    expect(card()).toEqual({ active: false, scanId: null, checkedAt: null, failure: null, retryable: false, latestScanId: scanId, oldRules: false });
+    db.query("INSERT INTO ai_notes (repo_id, scan_id, role, text, fact_refs, charter_version, model, created_at, audience) VALUES (?, ?, 'flagger', ?, '[]', '7', 'm', '2026-09-28T10:00:00Z', 'public')").run(
       repoId,
       scanId,
       JSON.stringify({ flag: false, factors: [], signals: {} }),
