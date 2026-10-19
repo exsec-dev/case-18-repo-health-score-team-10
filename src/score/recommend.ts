@@ -194,16 +194,19 @@ function appsecLevelText(p: RecommendationParams, action: string, what: string, 
     : p.gain
       ? categoryImpact("Безопасность")
       : null;
-  const totalPart = totalCap !== null ? `ограничение Repo Health Score в ${totalCap} баллов` : null;
+  const totalPart = totalCap !== null ? `потолок ${totalCap} у Repo Health Score` : null;
+  // потолок итога назван один раз — в эффекте; в причине он повторял бы его слово в слово
+  const note = totalPart !== null ? "" : totalNote;
+  const rest = "балл категории «Безопасность» вырастет, когда будут закрыты и остальные находки";
   return {
     action,
-    problem: capped ? `AppSec нашел в коде ${what}. Пока они открыты, балл категории «Безопасность» не выше ${p.capLimit}.${totalNote}` : `AppSec нашел в коде ${what}.${totalNote}`,
+    problem: capped ? `AppSec нашел в коде ${what}. Пока они открыты, балл категории «Безопасность» не выше ${p.capLimit}.${note}` : `AppSec нашел в коде ${what}.${note}`,
     expectedImpact:
       categoryPart && totalPart
         ? `${categoryPart} и снимет ${totalPart}`
         : totalPart
-          ? `снимет ${totalPart}; сам по себе балл категории «Безопасность» не поднимет: его держат и другие находки`
-          : (categoryPart ?? "сам по себе балл категории «Безопасность» не поднимет: его держат и другие находки"),
+          ? `снимет ${totalPart}. ${rest[0]!.toUpperCase()}${rest.slice(1)}`
+          : (categoryPart ?? rest),
   };
 }
 

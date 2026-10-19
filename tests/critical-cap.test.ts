@@ -87,8 +87,9 @@ describe("кап Repo Health Score за открытые критичные на
   test("текст рекомендации называет оба потолка", () => {
     const t = recommendationText("appsec-critical", { secrets: false, capLimit: 40, gain: true })!;
     expect(t.problem).toContain("не выше 40");
-    expect(t.problem).toContain("Repo Health Score при этом не выше 69");
-    expect(t.expectedImpact).toBe("снимет потолок 40 с категории «Безопасность» и снимет ограничение Repo Health Score в 69 баллов");
+    // 19.10.2026: потолок итога 69 — в эффекте («снимет потолок 69 у Repo Health Score»), а не повтором в причине
+    expect(t.expectedImpact).toContain("снимет потолок 69 у Repo Health Score");
+    expect(t.expectedImpact).toBe("снимет потолок 40 с категории «Безопасность» и снимет потолок 69 у Repo Health Score");
   });
 
   test("полоса вкладов: причина потолка по значению", () => {

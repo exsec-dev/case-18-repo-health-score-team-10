@@ -156,7 +156,7 @@ describe("Д1, роли текста", () => {
     const critical = recommendationText("appsec-critical", { secrets: false, capLimit: null, gain: true })!;
     expect(`${secrets.problem} ${secrets.expectedImpact}`).toContain("49");
     expect(`${critical.action} ${critical.problem} ${critical.expectedImpact}`).not.toMatch(/49/);
-    expect(critical.problem).toContain("Repo Health Score при этом не выше 69");
+    expect(critical.expectedImpact).toContain("потолок 69 у Repo Health Score");
   });
 
   test("заголовок — глагол в повелительном наклонении без точки; эффект без «≈»", () => {
