@@ -975,22 +975,6 @@ button.rh-category:focus-visible {
   background-color: var(--g-color-base-neutral-heavy);
 }
 
-/* примечание частичной нехватки данных — первой строкой раскрытия, во всю ширину */
-.rh-subrows__note {
-  grid-column: 1 / -1;
-  padding-block: var(--g-spacing-1) var(--g-spacing-2);
-}
-
-/* подзаголовок группы строк в раскрытии (находки AppSec по видам) */
-.rh-subrows__group {
-  grid-column: 1 / -1;
-  padding-top: var(--g-spacing-3);
-}
-
-.rh-subrows__note_after {
-  padding-block: var(--g-spacing-1) 0;
-}
-
 /* Пустое состояние 1:1 с платформой (замерено на их Milestones и Pull
  * requests): подложка `base-generic` без рамки, радиус 16, поля 32, иллюстрация
  * 120px справа, колонка текста прижата влево и центрирована с иллюстрацией по
@@ -1326,100 +1310,6 @@ button.rh-category:focus-visible {
   --g-button-text-color-hover: var(--g-color-text-primary);
 }
 
-/* Сетка списка подметрик живет здесь, а строки раскрываются в нее
- * (`display: contents`): колонки общие на шапку и на все строки.
- *
- * Имя, лидер и значение — в одной ячейке: с отдельной колонкой значения
- * лидер обрывался на ее границе, и между пунктиром и коротким значением
- * зияла дыра шириной с самое длинное значение списка.
- *
- * Список повторяет сетку строки категории (отступ 12px, слот 16px под значок,
- * зазор 12px): значок встает под шевроном раскрытия, имя — под именем
- * категории. Верхнего поля нет: от строки категории отбивает шапка
- * «Значение / Балл». */
-.rh-subrows {
-  display: grid;
-  /* значение · балл · вес */
-  grid-template-columns: minmax(0, 1fr) 40px 40px;
-  column-gap: var(--g-spacing-2);
-  align-items: baseline;
-  padding: 0 var(--g-spacing-3) var(--g-spacing-3) var(--g-spacing-3);
-}
-
-.rh-subrows__head {
-  display: contents;
-  color: var(--g-color-text-secondary);
-}
-
-.rh-subrows__head > span {
-  padding-block-end: var(--g-spacing-half);
-  font-size: var(--g-text-caption-2-font-size);
-  line-height: var(--g-text-caption-2-line-height);
-  text-align: right;
-}
-
-/* строка раскрывается в сетку списка: собственного грида у неё нет, иначе
- * колонки строк и шапки разъехались бы */
-.rh-subrow {
-  display: contents;
-}
-
-/* высоту строки держат сами ячейки: `display: contents` не переносит
- * ни min-height, ни padding с самой строки */
-.rh-subrow > * {
-  padding-block: 4px;
-}
-
-.rh-subrow__head {
-  display: flex;
-  gap: var(--g-spacing-2);
-  align-items: baseline;
-  min-width: 0;
-}
-
-/* Иконка на уровне первой строки названия при любом переносе значения (по
- * центру она уезжала бы вниз). Отступ 2px — (строка body-1 18px − иконка 14px) / 2. */
-.rh-subrow__icon {
-  display: flex;
-  flex: 0 0 16px;
-  justify-content: center;
-  align-self: flex-start;
-  margin-top: 2px;
-  /* +4px к общему зазору строки (8px) = 12px, как gap грида категории */
-  margin-inline-end: var(--g-spacing-1);
-}
-
-.rh-subrow__name {
-  flex: 0 1 auto;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-/* пунктир занимает весь остаток строки: он и есть «мост» от имени к
- * значению, и он же прижимает значение к правому краю */
-.rh-subrow__lead {
-  flex: 1 1 auto;
-  min-width: var(--g-spacing-4);
-  border-bottom: 1px dotted var(--g-color-line-generic);
-  transform: translateY(-3px);
-}
-
-/* значение подметрики не обрезается многоточием: длиннее меры — переносится,
- * прижатое вправо к колонке балла */
-.rh-subrow__value {
-  flex: 0 1 auto;
-  max-width: 320px;
-  text-align: right;
-  overflow-wrap: anywhere;
-}
-
-.rh-subrow__score {
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
 .rh-code {
   margin: 0;
   font-family: var(--g-text-code-font-family);
@@ -1488,21 +1378,11 @@ button.rh-category:focus-visible {
 
 
 
-  /* рекомендация и шаг лесенки: прирост — под действием, колонки справа нет,
-   * ось лесенки уже — тексту остается около 230px вместо 158 */
+  /* рекомендация: прирост — под действием, колонки справа нет */
   /* селекторы специфичнее базовых правил ниже по файлу */
-  .rh-recs .rh-rec,
-  .rh-ladder .rh-ladder__step {
-    column-gap: var(--g-spacing-2);
-  }
-
   .rh-recs .rh-rec {
+    column-gap: var(--g-spacing-2);
     grid-template-columns: 16px minmax(0, 1fr);
-  }
-
-  .rh-ladder .rh-ladder__step,
-  .rh-recs.rh-recs_ladder .rh-rec {
-    grid-template-columns: var(--rh-ladder-gutter) minmax(0, 1fr);
   }
 
   .rh-section .rh-rec__effect {
@@ -1511,46 +1391,6 @@ button.rh-category:focus-visible {
 
   .rh-section .rh-rec__gain-inline {
     display: flex;
-  }
-
-
-  .rh-section .rh-ladder,
-  .rh-section .rh-recs_ladder {
-    --rh-ladder-gutter: 24px;
-  }
-
-  .rh-section .rh-ladder__mark {
-    width: 20px;
-    height: 20px;
-  }
-
-  .rh-subrows {
-    padding-left: var(--g-spacing-3);
-  }
-
-  /* имя и значение подметрики — двумя строками; пунктир
-   * уходит, значение не рвется по букве */
-  .rh-subrow__head {
-    flex-wrap: wrap;
-    row-gap: 0;
-  }
-
-  .rh-subrow__name {
-    flex: 1 1 0;
-    min-width: 0;
-    white-space: normal;
-  }
-
-  .rh-subrow__lead {
-    display: none;
-  }
-
-  .rh-subrow__value {
-    flex: 1 1 100%;
-    max-width: none;
-    padding-inline-start: 22px;
-    text-align: left;
-    overflow-wrap: normal;
   }
 
   /* на телефоне шапка переносится в несколько строк — аватар у верхнего края, а не посередине */
@@ -1619,10 +1459,6 @@ button.rh-category:focus-visible {
   padding-inline: 0 var(--g-spacing-3);
 }
 
-.rh-ladder__step {
-  padding-inline-end: var(--g-spacing-3);
-}
-
 /* список сразу под заголовком (без итога) — без верхнего поля первой строки */
 .rh-section__title + .rh-recs > .rh-rec:first-child {
   padding-top: var(--g-spacing-1);
@@ -1649,26 +1485,6 @@ button.rh-category:focus-visible {
 
 .rh-rec__gain-tip:focus-visible {
   outline: 2px solid var(--g-color-line-focus);
-}
-
-/* критичные над лесенкой и «Остальные» под ней — на сетке лесенки: номер под
- * кружками, текст на одной кромке со ступенями */
-.rh-recs_ladder .rh-rec {
-  grid-template-columns: var(--rh-ladder-gutter) minmax(0, 1fr) var(--rh-rec-gain);
-  column-gap: var(--g-spacing-3);
-}
-
-.rh-recs_ladder {
-  --rh-ladder-gutter: 44px;
-}
-
-.rh-recs_ladder .rh-rec__n {
-  justify-self: center;
-  text-align: center;
-}
-
-.rh-recs_first {
-  margin-bottom: var(--g-spacing-4);
 }
 
 /* тихая строка под причиной: файл-заготовка, «Откуда данные», категория */
@@ -1730,96 +1546,6 @@ button.rh-category:focus-visible {
 .rh-rec__gain-inline {
   gap: var(--g-spacing-2);
   align-items: baseline;
-}
-
-/* ---------- лесенка к зоне «Здоров» ----------
- * Слева — ось: индекс сейчас, номер шага кружком, индекс после шага; справа у
- * шага — его прирост. Ось — линия под кружками и числами (фон их закрывает). */
-.rh-ladder {
-  --rh-ladder-gutter: 44px;
-  position: relative;
-}
-
-.rh-ladder::before {
-  content: "";
-  position: absolute;
-  top: var(--g-spacing-5);
-  bottom: var(--g-spacing-5);
-  left: calc(var(--rh-ladder-gutter) / 2 - 1px);
-  width: 2px;
-  border-radius: 1px;
-  background: var(--g-color-line-generic);
-}
-
-.rh-ladder__start,
-.rh-ladder__node {
-  display: grid;
-  grid-template-columns: var(--rh-ladder-gutter) minmax(0, 1fr);
-  column-gap: var(--g-spacing-3);
-  align-items: baseline;
-}
-
-.rh-ladder__node {
-  grid-column: 1 / -1;
-  padding-top: var(--g-spacing-3);
-}
-
-.rh-ladder__val.g-text {
-  position: relative;
-  justify-self: center;
-  padding-block: 2px;
-  background: var(--g-color-base-background);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
-/* шаг без точного числа — отрезок оси пунктиром: «до 78» — граница, а не расчет */
-.rh-ladder__step_ceiling {
-  position: relative;
-}
-
-.rh-ladder__step_ceiling::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: calc(var(--rh-ladder-gutter) / 2 - 1px);
-  width: 2px;
-  background: repeating-linear-gradient(to bottom, transparent 0 4px, var(--g-color-base-background) 4px 8px);
-}
-
-.rh-ladder__steps {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.rh-ladder__step {
-  --rh-rec-gain: 96px;
-  display: grid;
-  grid-template-columns: var(--rh-ladder-gutter) minmax(0, 1fr) var(--rh-rec-gain);
-  column-gap: var(--g-spacing-3);
-  align-items: start;
-  padding-top: var(--g-spacing-3);
-}
-
-.rh-ladder__mark {
-  position: relative;
-  justify-self: center;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  width: 24px;
-  height: 24px;
-  /* кружок — по первой строке действия (15px, строка 20px) */
-  margin-top: -2px;
-  border: 1px solid var(--g-color-line-generic-accent);
-  border-radius: 50%;
-  background: var(--g-color-base-background);
-  color: var(--g-color-text-secondary);
-  font-size: var(--g-text-caption-2-font-size);
-  font-variant-numeric: tabular-nums;
 }
 
 /* поповер основания: мера и воздух; кнопка «Исходные данные» — без вида кнопки */
@@ -2655,21 +2381,6 @@ button.rh-category:focus-visible {
 
 .rh-cat-ai__mark_ready {
   color: var(--rh-ai-accent);
-}
-
-/* флаг фрода — одна строка + подсказка */
-.rh-fraud__line {
-  display: inline;
-}
-
-.rh-fraud__help {
-  margin-inline-start: var(--g-spacing-1);
-  vertical-align: middle;
-}
-
-.rh-fraud__pop {
-  max-width: 320px;
-  padding: var(--g-spacing-1) 0;
 }
 
 /* история оценки — график, легенда, список анализов. График на всю ширину
@@ -3822,19 +3533,9 @@ button.rh-category:focus-visible {
   }
 }
 
-/* подвал плашки HealthCraft Index — состояние проверки оценки */
-.rh-check-foot {
-  margin-top: var(--g-spacing-3);
-  padding-top: var(--g-spacing-3);
-  border-top: 1px solid var(--g-color-line-generic);
-}
+/* пояснение под состоянием проверки активности */
 .rh-check-foot__why {
   margin: var(--g-spacing-1) 0 0;
-}
-@media (max-width: 480px) {
-  .rh-check-foot .g-button {
-    width: 100%;
-  }
 }
 
 /* цели подсказок-меток и обертки выключенных кнопок фокусируются (TIP_TARGET,
@@ -3980,35 +3681,9 @@ button.rh-category:focus-visible {
   color: var(--g-color-text-secondary);
 }
 
-/* признаки накрутки — желтой плашкой в подвале HealthCraft Index; разделитель не
-   нужен — плашка сама граница */
-.rh-check-foot_flagged {
-  padding-top: 0;
-  border-top: 0;
-}
-
 /* плашка CI — внизу карточки Repo Health Score */
 .rh-score-band__foot {
   margin-top: auto;
-}
-/* кнопка под текстом признака — по ширине текста, у левого края (колонка Alert растягивает ее) */
-.rh-check-foot_flagged .g-alert__main > .g-button {
-  align-self: flex-start;
-}
-@media (max-width: 480px) {
-  .rh-check-foot_flagged .g-alert__main > .g-button {
-    align-self: stretch;
-  }
-}
-
-/* карта владельцев: имена каталога и автора приходят извне и бывают длинными
- * без пробелов — переносятся в любом месте, а не срезаются многоточием и не
- * уходят за край окна на 375px */
-.rh-subrow__name_path,
-.rh-subrow__value_wrap {
-  white-space: normal;
-  overflow-wrap: anywhere;
-  min-width: 0;
 }
 
 /* обертка выключенной кнопки — носитель подсказки
@@ -4050,16 +3725,6 @@ button.rh-category:focus-visible {
 .rh-recs__headline .g-help-mark,
 .rh-recs__headline > button {
   flex-shrink: 0;
-}
-
-.rh-recs_first + .rh-recs__headline {
-  margin-top: 0;
-}
-
-.rh-recs__rest-title.g-text {
-  display: block;
-  margin-top: var(--g-spacing-4);
-  margin-bottom: var(--g-spacing-2);
 }
 
 /* «Источник данных» — самая тихая кнопка строки; первой в строке — по краю текста */
@@ -4632,32 +4297,6 @@ button.rh-category:focus-visible {
   font: inherit;
 }
 
-/* таблица подметрик — строки по-прежнему в гриде `.rh-subrows` */
-.rh-subrows__table {
-  display: contents;
-}
-
-/* Safari (VoiceOver) теряет роли table/row у элементов с `display: contents`.
- * Где есть subgrid, таблица, шапка и строки — настоящие блоки во всю ширину,
- * а колонки (и зазор) берут у сетки `.rh-subrows`: раскладка та же, роли целы. */
-@supports (grid-template-columns: subgrid) {
-  .rh-subrows__table,
-  .rh-subrows__head,
-  .rh-subrow {
-    display: grid;
-    grid-column: 1 / -1;
-    grid-template-columns: subgrid;
-    align-items: baseline;
-  }
-
-  /* строки — по верху: Chrome 152 считает базовую линию вложенного subgrid
-   * неверно и уносит таблицу на миллионы пикселей вверх (раскрытие пустое);
-   * ячейки внутри строки выравниваются по базовой линии, как и раньше */
-  .rh-subrows__table {
-    align-items: start;
-  }
-}
-
 /* фокус на main после «К содержимому» — без рамки: это не элемент управления */
 .rh-page__main:focus {
   outline: none;
@@ -5038,9 +4677,9 @@ button.rh-category:focus-visible {
 }
 
 /* раскрытие: строки — значок, имя и значение, набранное, «из веса»; одна сетка
- * у всех строк (колонки фиксированной ширины), без subgrid. Значок стоит под
- * шевроном, текст — ровно под названием категории (поле 12px + 16px + зазор 12px,
- * как у строки категории); прочие блоки раскрытия — с того же края. */
+ * на таблицу, строки берут ее колонки через subgrid (`.rh-cbd__table`). Значок
+ * стоит под шевроном, текст — ровно под названием категории (поле 12px + 16px +
+ * зазор 12px, как у строки категории); прочие блоки раскрытия — с того же края. */
 .rh-cbd {
   --rh-cbd-text: calc(16px + var(--g-spacing-3));
   padding: var(--g-spacing-1) var(--g-spacing-3) var(--g-spacing-3);
@@ -5048,11 +4687,6 @@ button.rh-category:focus-visible {
 
 .rh-cbd > :not(.rh-cbd__table) {
   margin-inline-start: var(--rh-cbd-text);
-}
-
-/* переключатели справочных — шеврон в колонке значков, подпись по краю имен */
-.rh-cbd > .rh-cbd__refs {
-  margin-inline-start: 0;
 }
 
 /* вкладки раскрытия — по краю текста; панели — во всю ширину (значки под шевроном) */
@@ -5066,8 +4700,7 @@ button.rh-category:focus-visible {
   margin-inline-start: 0;
 }
 
-.rh-cbd__panel > .rh-cbd__note,
-.rh-cbd__panel > .rh-cbd__foot {
+.rh-cbd__panel > .rh-cbd__note {
   margin-inline-start: var(--rh-cbd-text);
 }
 
@@ -5204,38 +4837,6 @@ button.rh-category:focus-visible {
 .rh-cbd__note {
   max-width: 72ch;
   margin-block: var(--g-spacing-2) 0;
-}
-
-/* место среди похожих и перенос веса — тихо внизу раскрытия */
-.rh-cbd__foot {
-  margin-top: var(--g-spacing-2);
-}
-
-/* справочные — сразу под таблицей, без отбивки */
-.rh-cbd__refs {
-  display: flex;
-  gap: var(--g-spacing-3);
-  align-items: center;
-  text-align: start;
-  margin-top: var(--g-spacing-1);
-  padding: var(--g-spacing-1) 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-
-.rh-cbd__refs-chevron {
-  display: flex;
-  flex: none;
-  justify-content: center;
-  width: 16px;
-}
-
-.rh-cbd__refs:focus-visible {
-  outline: 2px solid var(--g-color-line-focus);
-  border-radius: var(--g-border-radius-s);
 }
 
 /* карта владельцев деревом: каталог, полоса доли главного автора с чертой

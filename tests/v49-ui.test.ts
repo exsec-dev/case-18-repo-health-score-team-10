@@ -107,8 +107,9 @@ describe("К9.9: служебные заметки расчета не видн�
   test("строка подметрики на карточке не печатает `sub.note`; иконка – на уровне первой строки названия", () => {
     const page = src("web/RepoPage.tsx");
     expect(page).not.toContain("(${sub.note})");
-    const icon = between(src("web/layout.css"), ".rh-subrow__icon {", "}");
-    expect(icon).toContain("align-self: flex-start");
+    // 19.10.2026: значок — в таблице разбивки (.rh-cbd__glyph), старого .rh-subrow__icon нет
+    const icon = between(src("web/layout.css"), ".rh-cbd__glyph {", "}");
+    expect(icon).toContain("align-self: start");
     expect(icon).not.toContain("align-self: center");
   });
 });

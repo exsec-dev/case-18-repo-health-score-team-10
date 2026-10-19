@@ -10,7 +10,7 @@ import { openDb } from "../src/db";
 import { listRepos, parseReposQuery, DEFAULT_QUERY } from "../src/api/repos";
 import { aiParagraphs, quotaBlockedText, quotaCell, quotaCounter, counterText, withCounter, type ActionQuotaView } from "../src/web/format";
 import { normalizeRatingSearch } from "../src/web/ratingParams";
-import { fraudCheckState } from "../src/web/RepoV5";
+import { checkCardText, fraudCheckState } from "../src/web/RepoV5";
 import { seedRepo, seedScan, seedScore, cardFacts } from "./api-fixtures";
 
 const q = (over: Partial<ActionQuotaView>): ActionQuotaView => ({
@@ -80,30 +80,36 @@ describe("UX-проход 25.09: таблица лимитов «N/M», дата
 });
 
 // UX 17.10: «проверка оценки / накрутка» → «проверка активности / искусственная активность»
+// 19.10.2026: строка состояния (поле text) на экран не выводилась — плашка берет заголовок
+// и пояснение из checkCardText; тексты проверяются там, у состояния — вид и кнопка
+const title = (a: Ai, loggedIn: boolean): string => checkCardText(fraudCheckState(a, loggedIn), a, loggedIn).title;
 describe("выбор 1A: 7 состояний проверки активности (таблица §3.1, О3-О5)", () => {
   test("не проверялось — вошедшему кнопка, анониму — кто может запустить", () => {
-    expect(fraudCheckState(ai({}), true)).toMatchObject({ kind: "none", text: "Активность не проверялась", button: "Проверить активность" });
-    expect(fraudCheckState(ai({}), false)).toMatchObject({ kind: "none", text: "Проверку может запустить любой вошедший пользователь", button: null });
+    expect(fraudCheckState(ai({}), true)).toMatchObject({ kind: "none", button: "Проверить активность" });
+    expect(fraudCheckState(ai({}), false)).toMatchObject({ kind: "none", button: null });
+    expect(title(ai({}), true)).toBe("Не проверялась");
+    expect(checkCardText(fraudCheckState(ai({}), false), ai({}), false).desc).toContain("Проверку может запустить любой вошедший пользователь");
   });
   test("идет, признаков нет, есть признаки", () => {
     expect(fraudCheckState(ai({ active: true }), true)).toMatchObject({ kind: "active", button: null });
-    expect(fraudCheckState(ai({ scanId: 5, checkedAt: "2026-09-25T15:15:00Z" }, flag(false)), true)).toMatchObject({ kind: "clean", text: "Признаков искусственной активности нет", button: null });
-    expect(fraudCheckState(ai({ scanId: 5, checkedAt: "2026-09-25T15:15:00Z" }, flag(true)), true)).toMatchObject({ kind: "flagged", text: "Есть признаки искусственной активности", button: null });
+    expect(fraudCheckState(ai({ scanId: 5, checkedAt: "2026-09-25T15:15:00Z" }, flag(false)), true)).toMatchObject({ kind: "clean", button: null });
+    expect(title(ai({ scanId: 5, checkedAt: "2026-09-25T15:15:00Z" }, flag(false)), true)).toBe("Признаков нет");
+    expect(fraudCheckState(ai({ scanId: 5, checkedAt: "2026-09-25T15:15:00Z" }, flag(true)), true)).toMatchObject({ kind: "flagged", button: null });
   });
   test("не сформировалась — повтор; нечего проверять — факт без кнопки (О3); устарела — снова проверить", () => {
     expect(fraudCheckState(ai({ scanId: 5, failure: "AI-провайдер не ответил – попробуйте позже", retryable: true }), true)).toMatchObject({
       kind: "failed",
-      text: "Проверка активности не сформировалась: AI-провайдер не ответил – попробуйте позже",
       button: "Повторить проверку",
     });
+    expect(title(ai({ scanId: 5, failure: "AI-провайдер не ответил – попробуйте позже", retryable: true }), true)).toBe("Проверка не сформировалась");
     expect(fraudCheckState(ai({ scanId: 5, failure: "в анализе нет истории коммитов – проверять нечего", retryable: false }), true)).toMatchObject({
       kind: "nothing",
-      text: "Проверять нечего: в анализе нет истории коммитов",
       button: null,
     });
+    expect(title(ai({ scanId: 5, failure: "в анализе нет истории коммитов – проверять нечего", retryable: false }), true)).toBe("Проверять нечего");
     expect(fraudCheckState(ai({ scanId: 3, checkedAt: "2026-09-25T15:15:00Z" }, flag(false)), true)).toMatchObject({ kind: "stale", button: "Проверить активность" });
     // флаг прошлого анализа не повторяется – текст подвала тот же, кнопка появляется
-    expect(fraudCheckState(ai({ scanId: 3 }, flag(true)), true)).toMatchObject({ kind: "flagged", text: "Есть признаки искусственной активности", button: "Проверить активность" });
+    expect(fraudCheckState(ai({ scanId: 3 }, flag(true)), true)).toMatchObject({ kind: "flagged", button: "Проверить активность" });
   });
 });
 

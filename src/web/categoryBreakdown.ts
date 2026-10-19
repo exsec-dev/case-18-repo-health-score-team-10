@@ -49,10 +49,6 @@ export interface CategoryBreakdown {
   sum: number;
   /** поправка к сумме (балл − сумма), если она заметна (от 0,5); иначе null */
   adjustment: number | null;
-  /** вес показателей без балла перераспределен между остальными */
-  redistributed: boolean;
-  /** названия показателей без балла, чей вес перераспределен */
-  excluded: string[];
 }
 
 const README_STEPS: [key: "install" | "build" | "test", word: string][] = [
@@ -61,21 +57,28 @@ const README_STEPS: [key: "install" | "build" | "test", word: string][] = [
   ["test", "тесты"],
 ];
 
-/** Части README в баллах категории: файл, объем, описанные шаги; объем — остатком, чтобы части сходились с баллом показателя. */
-function readmeParts(value: unknown, weight: number, earned: number): BreakdownPart[] {
+/**
+ * Части README в баллах категории: файл, объем, описанные шаги; объем — остатком,
+ * чтобы части сходились с баллом показателя. Наличие файла — по самому баллу, как
+ * в расчете (`compute`: без файла балл 0, с файлом — не ниже доли наличия): факт
+ * README мог не собраться, а файл засчитан по наличию в корне.
+ */
+function readmeParts(value: unknown, weight: number, earned: number, score: number): BreakdownPart[] {
   const v = (value ?? {}) as { bytes?: unknown; flags?: Record<string, unknown>; present?: unknown };
-  const present = v.present !== false && typeof v.bytes === "number";
+  const present = score >= README_SPLIT.presence - 1e-9;
+  // объем и шаги известны, только если факт README собран
+  const known = present && v.present !== false && typeof v.bytes === "number";
   const fileW = weight * README_SPLIT.presence;
   const sizeW = weight * README_SPLIT.quality * README_QUALITY_SPLIT.bytes;
   const stepsW = weight * README_SPLIT.quality * README_QUALITY_SPLIT.sections;
   const described = README_STEPS.filter(([k]) => v.flags?.[k] === true).map(([, w]) => w);
   const file = present ? fileW : 0;
-  const steps = present ? (stepsW * described.length) / README_STEPS.length : 0;
+  const steps = known ? (stepsW * described.length) / README_STEPS.length : 0;
   const size = Math.max(0, Math.min(sizeW, earned - file - steps));
-  const stepsValue = !present ? "–" : described.length === 0 ? "не описаны" : described.length === README_STEPS.length ? "описаны" : `описаны: ${described.join(", ")}`;
+  const stepsValue = !known ? "–" : described.length === 0 ? "не описаны" : described.length === README_STEPS.length ? "описаны" : `описаны: ${described.join(", ")}`;
   return [
     { title: "Файл", value: present ? "есть" : "нет", earned: file, weight: fileW },
-    { title: "Объем", value: present ? fmtKb(v.bytes as number) : "–", earned: size, weight: sizeW },
+    { title: "Объем", value: known ? fmtKb(v.bytes as number) : "–", earned: size, weight: sizeW },
     { title: "Шаги: установка, сборка, тесты", value: stepsValue, earned: steps, weight: stepsW },
   ];
 }
@@ -106,7 +109,7 @@ export function categoryBreakdown(card: RepoCard, key: CategoryKey): CategoryBre
     }
     const weight = (weightOf(sub) / total) * 100;
     const earned = weight * e.score;
-    const parts = key === "documentation" && sub === "readme" ? readmeParts(e.value, weight, earned) : null;
+    const parts = key === "documentation" && sub === "readme" ? readmeParts(e.value, weight, earned, e.score) : null;
     const { value, aside } = shown(sub, e);
     return { sub, title: parts ? "README" : title, value: parts ? "" : value, aside: parts ? null : aside, state: "counted", score: e.score, weight, earned, parts };
   });
@@ -118,8 +121,6 @@ export function categoryBreakdown(card: RepoCard, key: CategoryKey): CategoryBre
     refs,
     sum,
     adjustment: Math.abs(diff) >= 0.5 ? diff : null,
-    redistributed: counted.length < scored.length && counted.length > 0,
-    excluded: counted.length > 0 ? rows.filter((r) => r.state === "excluded").map((r) => r.title) : [],
   };
 }
 

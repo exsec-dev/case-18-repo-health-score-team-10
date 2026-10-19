@@ -52,14 +52,12 @@ import { categoryBreakdown, fmtPoints, fmtSignedPoints, type BreakdownRow } from
 import { submetricIcon } from "./submetricIcons";
 import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
 import {
-  NO_DATA,
   NO_SCORE,
   reportFailureText,
   favoriteAddedText,
   type FavoriteAddCheck,
   type PathPart,
   SECURITY_PUBLIC_NOTE,
-  fmtCount,
   fmtCoverage,
   fmtDate,
   fmtDateTime,
@@ -1610,8 +1608,9 @@ function breakdownHint(r: BreakdownRow): string[] {
 function BreakdownTip({ lines }: { lines: string[] }) {
   return (
     <div className="rh-cbd-tip">
+      {/* ключ — позиция: строки могут совпадать (два автора с замаскированным именем и равной долей) */}
       {lines.map((l, i) => (
-        <Text key={l} variant="caption-2" color={i === 0 ? undefined : "secondary"}>
+        <Text key={i} variant="caption-2" color={i === 0 ? undefined : "secondary"}>
           {l}
         </Text>
       ))}
@@ -2247,8 +2246,8 @@ function FactBlock({ factKey, fact, missing }: { factKey: string; fact: Evidence
         )}
       </Flex>
       {/* факт словами; сырое значение — свернутым под «Исходные данные» */}
-      {factWords(fact.key, fact.status, fact.value).map((l) => (
-        <Text key={l} variant="body-short">
+      {factWords(fact.key, fact.status, fact.value).map((l, i) => (
+        <Text key={i} variant="body-short">
           {l}
         </Text>
       ))}
@@ -2288,13 +2287,12 @@ interface AppsecBreakdown {
   engines: [string, number][];
   sca: [string, number] | null;
   openFindings: number | null;
-  truncated: boolean;
 }
 
 function appsecBreakdown(card: Card): AppsecBreakdown | null {
   const fact = card.evidence.find((e) => e.key === "appsec.findings");
   if (!fact || fact.status !== "ok") return null;
-  const backlog = (fact.value as { backlog?: { engines?: Record<string, number>; open_findings?: number | null; truncated?: boolean } } | null)?.backlog;
+  const backlog = (fact.value as { backlog?: { engines?: Record<string, number>; open_findings?: number | null } } | null)?.backlog;
   if (!backlog || typeof backlog.engines !== "object" || backlog.engines === null) return null;
   const all = Object.entries(backlog.engines).sort((a, b) => b[1] - a[1]);
   const sca = all.find(([name]) => /sca|composition|depend/i.test(name)) ?? null;
@@ -2302,12 +2300,11 @@ function appsecBreakdown(card: Card): AppsecBreakdown | null {
     engines: all.filter((pair) => pair !== sca),
     sca,
     openFindings: typeof backlog.open_findings === "number" ? backlog.open_findings : null,
-    truncated: backlog.truncated === true,
   };
 }
 
-/** Находки AppSec по видам проверок — строки и оговорки для вкладки «Находки AppSec». */
-function appsecView(card: Card): { rows: { name: string; count: number; note?: string }[]; notes: string[]; total: number } | null {
+/** Находки AppSec по видам проверок — строки для вкладки «Находки AppSec». */
+function appsecView(card: Card): { rows: { name: string; count: number; note?: string }[]; total: number } | null {
   const breakdown = appsecBreakdown(card);
   if (!breakdown || (breakdown.engines.length === 0 && breakdown.sca === null)) return null;
   const rows: { name: string; count: number; note?: string }[] = [
@@ -2316,11 +2313,7 @@ function appsecView(card: Card): { rows: { name: string; count: number; note?: s
       ? [{ name: `${breakdown.sca[0]} (зависимости, SCA)`, count: breakdown.sca[1], note: "Находки в зависимостях входят в оценку Безопасности наравне с остальными. Здесь они показаны отдельной строкой для наглядности." }]
       : []),
   ];
-  const notes = [
-    breakdown.sca === null ? "SourceCraft не вернул отдельное число находок в зависимостях (SCA)." : null,
-    breakdown.truncated ? "Список групп находок усечен предохранителем пагинации: счетчики показывают собранную часть." : null,
-  ].filter((n): n is string => n !== null);
-  return { rows, notes, total: breakdown.openFindings ?? rows.reduce((a, r) => a + r.count, 0) };
+  return { rows, total: breakdown.openFindings ?? rows.reduce((a, r) => a + r.count, 0) };
 }
 
 /** Вкладка «Находки AppSec»: справочные строки (в балл категории разбивка не входит). */

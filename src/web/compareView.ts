@@ -94,13 +94,13 @@ export function rowLeaders(values: LeaderInput[]): boolean[] {
 }
 
 /**
- * Балл подметрики для лидерства — ТО ЖЕ целое, что на экране (`fmtSubmetric`:
- * `Math.round(score * 100)`). `roundScore` здесь не подходит: на половинках он
- * расходится с показанным (0,285 → на экране 28, в лидерстве 29), и стрелка
- * встала бы у одного из двух одинаковых «28».
+ * Баллы показателя для лидерства — ТЕ ЖЕ десятые, что в ячейке (`fmtPoints`:
+ * `Math.round(v * 10 + 1e-6) / 10`), в целых десятых. Лидер — по показанным баллам
+ * категории, а не по баллу показателя: веса перераспределяются у каждого
+ * репозитория по-своему, и больший балл мог дать меньше баллов на экране.
  */
-export function submetricLeaderValue(score: number | null | undefined): number | null {
-  return score === null || score === undefined ? null : Math.round(score * 100);
+export function pointsLeaderValue(earned: number | null | undefined): number | null {
+  return earned === null || earned === undefined ? null : Math.round(earned * 10 + 1e-6);
 }
 
 // ---------- реквизиты столбца ----------
@@ -207,8 +207,6 @@ export const COMPARE_LIMIT_TEXT = "Сравнить можно до 3 репоз
 /** При 3 из 3 вместо выключенного поля — строка под заголовком. */
 export const COMPARE_FULL_LINE = "В сравнении 3 из 3 – уберите репозиторий, чтобы добавить другой.";
 export const COMPARE_ADD = "Добавить репозиторий";
-/** Одна формулировка с MD/PDF (`src/report/build.ts`). */
-// коротко: строка повторяется в каждой раскрытой категории; «в балл не входит» — у прочерков и для скринридера
 
 /** Столбец-исключение на телефоне — короткая метка в шапке, полный текст под таблицей. */
 export function exceptionLabel(kind: "noscore" | "unavailable" | "check_failed" | "token_rejected"): string {

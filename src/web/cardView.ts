@@ -21,7 +21,6 @@ import {
   noRecommendationsText,
   limitationItems,
   recommendationEffect,
-  sourceWord,
   type ContributionBar,
 } from "../report/sections";
 import { submetricContext, submetricShownValue, submetricTitle, subweightKey } from "../report/submetrics";
@@ -101,10 +100,6 @@ export interface CategoryView {
   stale: boolean;
   /** примечание частичной нехватки данных у оцененной категории — внутри раскрытия */
   partialNote: string | null;
-  /** процент среди похожих по категории — первой строкой раскрытия; null — не показываем */
-  cohortNote: string | null;
-  /** то же коротко для строки суммы раскрытия: «лучше 32% похожих» и подсказка */
-  cohortShort: { text: string; help: string | null } | null;
 }
 
 export interface LockedView {
@@ -120,10 +115,6 @@ export interface RecommendationView {
    * без числа с потолком — «до +21,6 к HealthCraft Index», иначе — слова правила
    */
   effect: string;
-  /** эффект плашкой (число или потолок); false — словами правила */
-  effectPill: boolean;
-  /** подпись под плашкой потолка; null — подписи нет */
-  effectNote: string | null;
   /** потолок прироста индекса у правила без числа; null — правило с числом или вне индекса */
   ceiling: number | null;
   /** прирост коротко — «+3,5», «до +6,2»; null — эффект словами (`effect`) */
@@ -176,8 +167,6 @@ export const SOURCE_DATA_LABEL = "Исходные данные";
 /** Шаг лесенки к зоне «Здоров»: строка рекомендации и индекс после нее (накопительно). */
 export interface LadderStepView {
   item: RecommendationView;
-  /** «52 (+5,8)»: индекс после шага и прирост именно этого шага */
-  effect: string;
   /** прирост шага коротко: «+5,8» или «до +21,6» у шага без числа */
   gain: string;
   /** индекс после шага для ступени лесенки: «52» или «до 78» */
@@ -198,12 +187,8 @@ export interface LadderView {
   first: RecommendationView[];
   steps: LadderStepView[];
   rest: RecommendationView[];
-  /** итог под последним шагом: «до 70 не хватит N» или «зона „Здоров“» */
-  summary: string;
   /** строка над лесенкой: «2 шага выведут индекс в зону «Здоров»» */
   headline: string;
-  /** индекс сейчас — верхняя ступень лесенки */
-  start: string;
 }
 
 /**
@@ -277,35 +262,6 @@ export function positionView(card: RepoCard): PositionView | null {
   return { rank, cohort, cohortHelp, league };
 }
 
-/** Процент среди похожих по категории — строкой раскрытия; null — строки нет. */
-export function categoryCohortNote(card: RepoCard, key: CategoryKey): string | null {
-  const c = card.score?.cohort;
-  const stat = c ? (c.categories as Record<string, { percentile: number | null; size: number | null; reason: string | null } | undefined>)[key] : undefined;
-  if (!stat) return null;
-  if (stat.percentile === 0) return noneBelow(stat.percentile, stat.size) ? "Среди похожих – у всех балл не ниже" : "Среди похожих – лучше менее 1%";
-  if (stat.percentile !== null) return `Среди похожих – лучше ${stat.percentile}%`;
-  if (stat.reason === "small-cohort") return "Похожих с данными по категории мало для сравнения";
-  return null;
-}
-
-/**
- * Процент среди похожих по категории — коротко, для строки суммы раскрытия
- * («лучше 32% похожих»), с подсказкой «кто похожие», как у индекса. «Похожих
- * мало» в категориях не показывается: это уже сказано у индекса.
- */
-export function categoryCohortShort(card: RepoCard, key: CategoryKey): { text: string; help: string | null } | null {
-  const c = card.score?.cohort;
-  const stat = c ? (c.categories as Record<string, { percentile: number | null; size: number | null; reason: string | null } | undefined>)[key] : undefined;
-  if (!c || !stat || stat.percentile === null) return null;
-  const p = stat.percentile;
-  const text = p === 0 ? (noneBelow(p, stat.size) ? "у всех похожих балл не ниже" : "лучше менее 1% похожих") : p === 100 ? "лучше всех похожих" : `лучше ${p}% похожих`;
-  const help =
-    c.language !== null && c.sizeBucket !== null && stat.size !== null
-      ? `Похожие – ${cohortWho(c.language, c.sizeBucket)} с данными по категории: ${fmtCount(stat.size)}. Процент – доля похожих, у кого балл категории ниже; равные не считаются.`
-      : null;
-  return { text, help };
-}
-
 export const LADDER_HELP =
   "Шаги пересчитаны по очереди, каждый поверх предыдущих, и идут по наибольшему приросту – поэтому прирост шага может отличаться от эффекта рекомендации отдельно. Расчет по текущим данным: после нового анализа индекс изменится.";
 
@@ -329,7 +285,6 @@ export function ladderView(card: RepoCard, recommendations: RecommendationView[]
   const f = first.length;
   const steps: LadderStepView[] = ladder.steps.map((s, i) => ({
     item: { ...stepItems[i]!, n: f + i + 1 },
-    effect: `${fmtScore(s.indexAfter)} (${fmtSigned(s.delta)})`,
     gain: fmtSigned(s.delta),
     after: fmtScore(s.indexAfter),
     healthy: roundScore(s.indexAfter) >= ladder.target,
@@ -339,24 +294,18 @@ export function ladderView(card: RepoCard, recommendations: RecommendationView[]
   const last = roundScore(lastAfter);
   const k = ladder.steps.length;
   // лесенка не дошла до цели — следующим шагом правило без числа с наибольшим
-  // потолком: «до 70 не хватит 6» не обрывается, а говорит, что может закрыть разрыв
+  // потолком: итог не обрывается на разрыве, а говорит, что может его закрыть
   const candidates = recommendations.filter((r) => !inSteps.has(r.rec.ruleId) && !inFirst.has(r.rec.ruleId) && r.ceiling !== null);
   const extra = last < ladder.target && candidates.length > 0 ? candidates.reduce((a, b) => (b.ceiling! > a.ceiling! ? b : a)) : null;
   if (extra) {
     const upTo = Math.min(100, lastAfter + extra.ceiling!);
-    steps.push({ item: { ...extra, n: f + k + 1 }, effect: `до ${fmtScore(upTo)}`, gain: `до ${fmtSigned(extra.ceiling!)}`, after: `до ${fmtScore(upTo)}`, healthy: false, reach: roundScore(upTo) >= ladder.target });
+    steps.push({ item: { ...extra, n: f + k + 1 }, gain: `до ${fmtSigned(extra.ceiling!)}`, after: `до ${fmtScore(upTo)}`, healthy: false, reach: roundScore(upTo) >= ladder.target });
     inSteps.add(extra.rec.ruleId);
   }
   const rest = recommendations.filter((r) => !inSteps.has(r.rec.ruleId) && !inFirst.has(r.rec.ruleId)).map((r, i) => ({ ...r, n: f + steps.length + i + 1 }));
   // номера шагов в тексте — те же, что у кружков (после критичных)
   const nLast = f + k;
   const gap = ladder.target - last;
-  const summary =
-    last >= ladder.target
-      ? `После шага №${nLast} индекс – ${last}: зона «Здоров»`
-      : extra
-        ? `После шага №${nLast} индекс – ${last}, до ${ladder.target} не хватит ${gap}. Шаг №${nLast + 1} ${extra.ceiling! >= gap ? "может закрыть разрыв" : "сократит разрыв"}: до ${fmtSigned(extra.ceiling!)}, в зависимости от объема работы`
-        : `После шага №${nLast} индекс – ${last}, до ${ladder.target} не хватит ${gap}`;
   // итог — одним предложением со ссылкой на номера строк: индекс сейчас уже виден в плашке
   const span = k === 1 ? `Шаг №${f + 1}` : `Шаги №${f + 1}-${nLast}`;
   const headline =
@@ -365,15 +314,7 @@ export function ladderView(card: RepoCard, recommendations: RecommendationView[]
       : extra
         ? `${span} ${k === 1 ? "поднимет" : "поднимут"} индекс до ${last}, а №${nLast + 1} ${extra.ceiling! >= gap ? "может вывести его в зону «Здоров»" : "приблизит его к зоне «Здоров»"}`
         : `${span} ${k === 1 ? "поднимет" : "поднимут"} индекс до ${last} – до зоны «Здоров» не хватит ${gap}`;
-  return { first, steps, rest, summary, headline, start: fmtScore(ladder.start) };
-}
-
-function plural(n: number, one: string, few: string, many: string): string {
-  const m10 = n % 10;
-  const m100 = n % 100;
-  if (m10 === 1 && m100 !== 11) return one;
-  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
-  return many;
+  return { first, steps, rest, headline };
 }
 
 /** Категория правила по ключу его первого факта (префикс kind, как `categoryOf` сборщика). */
@@ -615,8 +556,6 @@ export function cardView(card: RepoCard): CardView {
       rec,
       ceiling,
       effect: ceiling !== null ? `до ${fmtSigned(ceiling)} к HealthCraft Index` : effect,
-      effectPill: rec.deltaScore !== null || ceiling !== null,
-      effectNote: ceiling !== null ? "зависит от объема работы" : null,
       gain: rec.deltaScore !== null ? fmtSigned(rec.deltaScore) : ceiling !== null ? `до ${fmtSigned(ceiling)}` : null,
       scale: rec.channel !== null && (rec.deltaScore !== null || ceiling !== null) ? "к Repo Health Score" : null,
       category: recommendationCategory(rec),
@@ -659,8 +598,6 @@ export function cardView(card: RepoCard): CardView {
       why,
       stale: cat.stale === true,
       partialNote: partial !== null && partial !== why ? partial : null,
-      cohortNote: categoryCohortNote(card, key),
-      cohortShort: categoryCohortShort(card, key),
     };
   });
   const auth = card.viewer?.auth;

@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { RANK_BADGE_COLORS } from "../src/api/public";
 import { COHORT_MIN, percentileBelow } from "../src/api/cohort";
 import { getRepoCard, type RepoCard } from "../src/api/repos";
-import { cardView, categoryCohortNote, noneBelow, positionView } from "../src/web/cardView";
+import { cardView, noneBelow, positionView } from "../src/web/cardView";
 import { fmtCount } from "../src/web/format";
 import { makeApiDb, seedRepo, seedScan, seedScore, type ApiTestDb } from "./api-fixtures";
 import { contrast } from "./theme-contrast";
@@ -83,15 +83,8 @@ describe("В5.9 HQ: строка позиции = поля карточки", ()
     expect(positionView(c)).toBeNull();
   });
 
-  test("процент по категории — поле когорты категории; без процента и не «мало» — строки нет", () => {
-    const c = card("go05");
-    for (const [key, stat] of Object.entries(c.score!.cohort!.categories)) {
-      const note = categoryCohortNote(c, key as never);
-      if (stat.percentile !== null) expect(note).toBe(stat.percentile === 0 ? (noneBelow(0, stat.size) ? "Среди похожих – у всех балл не ниже" : "Среди похожих – лучше менее 1%") : `Среди похожих – лучше ${stat.percentile}%`);
-      else if (stat.reason === "small-cohort") expect(note).toBe("Похожих с данными по категории мало для сравнения");
-      else expect(note).toBeNull();
-    }
-  });
+  // 19.10.2026: место среди похожих по категории убрано с карточки намеренно —
+  // проверки строки категории (categoryCohortNote) сняты вместе с функцией
 });
 
 describe("процент 0: «у всех не ниже» – только если ниже нет ни одного", () => {
@@ -119,7 +112,6 @@ describe("процент 0: «у всех не ниже» – только ес�
     expect(noneBelow(0, 150)).toBe(false);
     const c = withCohort(0, 150);
     expect(positionView(c)!.cohort).toBe("лучше менее 1% похожих");
-    expect(categoryCohortNote(c, "code")).toBe("Среди похожих – лучше менее 1%");
   });
 
   test("когорта до 100: процент 0 = ниже нет ни одного – «у всех не ниже»", () => {
@@ -128,7 +120,6 @@ describe("процент 0: «у всех не ниже» – только ес�
     expect(noneBelow(0, 100)).toBe(true);
     const c = withCohort(0, 40);
     expect(positionView(c)!.cohort).toBe("у всех похожих индекс не ниже");
-    expect(categoryCohortNote(c, "code")).toBe("Среди похожих – у всех балл не ниже");
   });
 });
 

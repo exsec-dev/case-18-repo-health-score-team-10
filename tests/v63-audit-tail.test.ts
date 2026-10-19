@@ -25,10 +25,12 @@ describe("стили: только публичный API Gravity", () => {
     expect(web("layout.css")).not.toMatch(/^\.rh-(state|pill) \{/m);
   });
 
+  // 19.10.2026: старой таблицы подметрик (.rh-subrows) больше нет — раскрытие категории
+  // строит таблица разбивки, ее строки .rh-cbd__row — блоки на subgrid сетки таблицы
   test("Safari: строки таблицы подметрик — блоки на subgrid, а не display: contents", () => {
-    expect(web("layout.css")).toMatch(
-      /@supports \(grid-template-columns: subgrid\) \{\s*\.rh-subrows__table,\s*\.rh-subrows__head,\s*\.rh-subrow \{\s*display: grid;\s*grid-column: 1 \/ -1;\s*grid-template-columns: subgrid;/,
-    );
+    const css = web("layout.css");
+    expect(css).toMatch(/\.rh-cbd__row \{\s*display: grid;\s*grid-column: 1 \/ -1;\s*grid-template-columns: subgrid;/);
+    expect(css).not.toContain(".rh-subrow");
   });
 });
 

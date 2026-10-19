@@ -344,16 +344,16 @@ describe("Б4 (Р14, Р16): список категорий и контейне�
 
   // Верхнего поля у списка нет: раскрытое содержимое отбивает от строки
   // категории шапка «Значение / Балл», поэтому список не начинается вплотную.
+  // 19.10.2026: стиль старого списка (.rh-subrows) удален вместе с ним — проверка
+  // его поля снята, остается отступ таблицы разбивки
   test("Р14: раскрытое содержимое отбито от шапки коллапс-блока", () => {
     const css = srcOf("layout.css");
     const src = codeOf("RepoPage.tsx");
-    const subrows = between(css, ".rh-subrows {", "}");
     expect({
-      topPaddingGone: /padding: var\(--g-spacing-2\)/.test(subrows),
       // 18.10.2026 (C1): шапки «Значение / Вес / Балл» нет — у строки одно число
       // «N из веса»; раскрытие — таблица разбивки с отступом сверху
       headerSeparates: src.includes('className="rh-cbd__table" role="table"') && /\.rh-cbd \{[^}]*padding: var\(--g-spacing-1\)/.test(css),
-    }).toEqual({ topPaddingGone: false, headerSeparates: true });
+    }).toEqual({ headerSeparates: true });
   });
 
   // Табов между разделами нет – «Категории» и «Рекомендации» живут в том же

@@ -22,7 +22,7 @@ import { CATEGORY_TITLES } from "../report/categories";
 import { adjustmentLabel, adjustmentText, analysisDate, FULL, INDEX } from "../report/sections";
 import { displayOnly, submetricContext, submetricShownParts, submetricTitle } from "../report/submetrics";
 import type { RepoCard } from "../api/repos";
-import { categoryBreakdown, fmtPoints, type BreakdownRow } from "./categoryBreakdown";
+import { categoryBreakdown, fmtPoints, type BreakdownRow, type CategoryBreakdown } from "./categoryBreakdown";
 import { submetricIcon } from "./submetricIcons";
 import type { CategoryKey } from "../score/model";
 import { CompareIllustration } from "./illustrations";
@@ -57,7 +57,7 @@ import {
   rankCell,
   rowLeaders,
   scoredCard,
-  submetricLeaderValue,
+  pointsLeaderValue,
   unavailableText,
   type LeaderInput,
 } from "./compareView";
@@ -69,7 +69,6 @@ import {
   fmtCount,
   fmtDate,
   fmtScore,
-  fmtSubmetric,
   noScoreText,
   roundScore,
   scoreTheme,
@@ -872,7 +871,13 @@ function CompareTable({
       // строкой, причина — в подсказке; объединенная ячейка с текстом лежала на нескольких
       // строках, и подсветка строки резала ее пополам
       if (isSubRow(row) && categoryOf(c.card, (row as { cat: CategoryKey }).cat)?.score == null) {
-        if (row.kind !== "sub" || rows[r - 1]?.kind !== "subhead") return;
+        if (row.kind !== "sub") return;
+        // остальные строки — пустой ячейкой: у каждой строки таблицы столько же ячеек,
+        // иначе скринридер сбивается при переходе по столбцу
+        if (rows[r - 1]?.kind !== "subhead") {
+          cells.push(<div key={`c${i}`} role="cell" className={`rh-cmp-cell rh-cmp-cell_card rh-cmp-cell_sub${last}`} style={at(cellRow(r), cellCol(i))} />);
+          return;
+        }
         const cat = row.cat;
         const reason = emptyCategoryText(cat, categoryOf(c.card, cat)?.no_data);
         cells.push(
@@ -927,6 +932,9 @@ function CompareTable({
         {/* легенда — в угловой ячейке закрепленной шапки: рядом с отметками при любой прокрутке */}
         {!phone && (
           <div role="columnheader" className="rh-cmp-head rh-cmp-head_corner" style={at(headRow, 1)}>
+            {/* заголовок столбца подписей — для скринридера; легенда ему не имя: у отметок
+                лидера и так есть скрытое «лучший балл строки» */}
+            <span className="rh-sr-only">Показатель</span>
             {legend && <LeaderLegend />}
           </div>
         )}
@@ -971,10 +979,7 @@ function leaderInput(row: Row, card: CompareCard): LeaderInput {
     if (!cat) return null;
     return cat.locked !== undefined ? "closed" : cat.score;
   }
-  if (row.kind === "sub") {
-    const entry = score.categories[row.cat]?.submetrics[row.sub];
-    return submetricLeaderValue(entry?.score);
-  }
+  if (row.kind === "sub") return pointsLeaderValue(breakdownRowOf(card, row.cat, row.sub)?.earned);
   return undefined;
 }
 
@@ -1078,7 +1083,7 @@ function RowHighlight({
 /** Легенда отметки лидера: «Жирным» само набрано жирным; полный смысл — в title. */
 function LeaderLegend() {
   return (
-    <span className="rh-cmp-legend" title={COMPARE_LEADER_LEGEND}>
+    <span className="rh-cmp-legend" title={COMPARE_LEADER_LEGEND} aria-hidden="true">
       <Text variant="caption-2" color="secondary" className="rh-cmp-legend__text">
         <Icon data={CircleCheck} size={14} className="rh-cmp-crown" />
         {COMPARE_LEADER_SHORT}
@@ -1257,11 +1262,22 @@ function CellValue({ row, card, leader, phone, year, sharedTotal }: { row: Row; 
   }
 }
 
-/** Строка разбивки категории для показателя — «N из веса», как на карточке; нет — null. */
+/**
+ * Разбивки категорий по карточке — один расчет на карточку и категорию: ячейки и
+ * лидерство строки читают одну и ту же. Карточка — объект ответа сравнения, при
+ * новом ответе кэш уходит вместе с ним.
+ */
+const BREAKDOWNS = new WeakMap<CompareCard, Map<CategoryKey, CategoryBreakdown | null>>();
+
+/** Строка разбивки категории для показателя — баллы категории, как на карточке; нет — null. */
 function breakdownRowOf(card: CompareCard, cat: CategoryKey, sub: string): BreakdownRow | null {
-  // сравнение получает карточку без рекомендаций и фактов — для разбивки нужны только оценки
-  const bd = categoryBreakdown(card as unknown as RepoCard, cat);
-  return bd?.rows.find((r) => r.sub === sub) ?? null;
+  let byCat = BREAKDOWNS.get(card);
+  if (!byCat) BREAKDOWNS.set(card, (byCat = new Map()));
+  if (!byCat.has(cat)) {
+    // сравнение получает карточку без рекомендаций и фактов — для разбивки нужны только оценки
+    byCat.set(cat, categoryBreakdown(card as unknown as RepoCard, cat));
+  }
+  return byCat.get(cat)?.rows.find((r) => r.sub === sub) ?? null;
 }
 
 /** «по N категориям из 6» у Repo Health Score. */

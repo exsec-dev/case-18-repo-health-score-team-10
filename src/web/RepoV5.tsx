@@ -43,7 +43,7 @@ import {
   fraudFactorFact,
   fraudFactorValue,
   fraudCheckStale,
-  fraudFactorTitle, AI_NOTE_SHORT, AI_OVERVIEW_REJECTED,
+  AI_NOTE_SHORT, AI_OVERVIEW_REJECTED,
   quotaBlockedText,
   scoreTheme,
   quotaCounter,
@@ -298,10 +298,9 @@ function useCheckAction(org: string, repo: string, onChanged: () => void) {
   return { sending, start };
 }
 
-/** Состояние проверки оценки для подвала: иконка, текст, дата, кнопка. */
+/** Состояние проверки оценки для плашки: вид (иконка и тексты — `checkCardText`), дата, кнопка. */
 export interface FraudCheckState {
   kind: "none" | "active" | "clean" | "flagged" | "failed" | "nothing" | "stale";
-  text: string;
   date: string | null;
   button: "Проверить активность" | "Повторить проверку" | null;
 }
@@ -315,24 +314,22 @@ export function fraudCheckState(ai: CardAi, loggedIn: boolean): FraudCheckState 
   const { check, fraud } = ai;
   const stale = check.scanId !== null && check.latestScanId !== null && check.scanId < check.latestScanId;
   const date = check.checkedAt ? fmtDateTime(check.checkedAt) : null;
-  if (check.active) return { kind: "active", text: "Проверка активности идет – результат появится здесь", date: null, button: null };
-  if (check.failure !== null && !check.retryable) return { kind: "nothing", text: "Проверять нечего: в анализе нет истории коммитов", date: null, button: null };
+  if (check.active) return { kind: "active", date: null, button: null };
+  if (check.failure !== null && !check.retryable) return { kind: "nothing", date: null, button: null };
   const run = loggedIn && check.latestScanId !== null;
   if (check.failure !== null) {
     return {
       kind: "failed",
-      text: loggedIn ? `Проверка активности не сформировалась: ${jobErrorText(check.failure)}` : "Проверка активности не сформировалась",
       date: null,
       button: run ? "Повторить проверку" : null,
     };
   }
   // при флаге подвал показывает сами признаки (FraudFlagMessage), здесь — только статус
-  if (fraud !== null && fraud.flag) return { kind: "flagged", text: "Есть признаки искусственной активности", date, button: run && stale ? "Проверить активность" : null };
-  if (fraud !== null && stale) return { kind: "stale", text: "Признаков искусственной активности нет по прошлому анализу", date, button: run ? "Проверить активность" : null };
-  if (fraud !== null) return { kind: "clean", text: "Признаков искусственной активности нет", date, button: null };
+  if (fraud !== null && fraud.flag) return { kind: "flagged", date, button: run && stale ? "Проверить активность" : null };
+  if (fraud !== null && stale) return { kind: "stale", date, button: run ? "Проверить активность" : null };
+  if (fraud !== null) return { kind: "clean", date, button: null };
   return {
     kind: "none",
-    text: loggedIn ? "Активность не проверялась" : "Проверку может запустить любой вошедший пользователь",
     date: null,
     button: run ? "Проверить активность" : null,
   };

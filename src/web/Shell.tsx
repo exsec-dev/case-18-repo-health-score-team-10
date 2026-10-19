@@ -68,21 +68,43 @@ export function Shell({
   useEffect(() => setMenuOpen(false), [section]);
   useEffect(() => {
     if (!menuOpen) return;
+    const ASIDE = '[class*="gn-aside-header__aside___"]';
+    // кто открыл меню (кнопка «Меню разделов») — туда вернуть фокус при закрытии
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusables = (): HTMLElement[] =>
+      [...document.querySelectorAll<HTMLElement>(`${ASIDE} a[href], ${ASIDE} button:not([disabled]), ${ASIDE} [tabindex]:not([tabindex="-1"])`)].filter((el) => el.offsetParent !== null);
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === "Escape") setMenuOpen(false);
+      // Tab ходит по кругу внутри меню: страница под затемнением недоступна
+      if (e.key !== "Tab") return;
+      const items = focusables();
+      if (items.length === 0) return;
+      const first = items[0]!;
+      const last = items[items.length - 1]!;
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || !items.includes(active as HTMLElement))) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (active === last || !items.includes(active as HTMLElement))) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     // переход по пункту меню закрывает меню
     const onClick = (e: globalThis.MouseEvent): void => {
       const a = (e.target as Element | null)?.closest("a");
-      if (a && a.closest('[class*="gn-aside-header__aside___"]')) setMenuOpen(false);
+      if (a && a.closest(ASIDE)) setMenuOpen(false);
     };
     document.addEventListener("keydown", onKey);
     document.addEventListener("click", onClick);
     // фокус — в меню: иначе с клавиатуры его не пройти
-    document.querySelector<HTMLElement>('[class*="gn-aside-header__aside___"] a')?.focus();
+    document.querySelector<HTMLElement>(`${ASIDE} a`)?.focus();
     return () => {
       document.removeEventListener("keydown", onKey);
       document.removeEventListener("click", onClick);
+      // фокус остался в меню или потерялся — вернуть на кнопку, которая его открыла
+      const active = document.activeElement;
+      if (opener?.isConnected && (active === null || active === document.body || active.closest(ASIDE) !== null)) opener.focus();
     };
   }, [menuOpen]);
   const tips = useRailTips();

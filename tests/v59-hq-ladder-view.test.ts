@@ -38,13 +38,17 @@ describe("В5.9 HQ: вид лестницы = поля карточки", () => 
       const shown = v.ladder!.steps;
       expect(shown.slice(0, steps.length).map((s) => s.item.rec.ruleId)).toEqual(steps.map((s) => s.ruleId));
       shown.forEach((s, i) => expect(s.item.n).toBe(i + 1));
-      steps.forEach((st, i) => expect(shown[i]!.effect).toBe(`${fmtScore(st.indexAfter)} (${fmtSigned(st.delta)})`));
+      // 19.10.2026: строка «52 (+5,8)» (поле effect) снята — на экране прирост и индекс после шага отдельно
+      steps.forEach((st, i) => {
+        expect(shown[i]!.gain).toBe(fmtSigned(st.delta));
+        expect(shown[i]!.after).toBe(fmtScore(st.indexAfter));
+      });
       const extra = shown.slice(steps.length);
       expect(extra.length).toBeLessThanOrEqual(1);
       if (extra[0]) {
         expect(c.ladder!.reached).toBe(false);
         expect(extra[0].item.ceiling).not.toBeNull();
-        expect(extra[0].effect).toMatch(/^до \d+$/);
+        expect(extra[0].after).toMatch(/^до \d+$/);
       }
       // остальные — все прочие рекомендации карточки (в порядке карточки), номера продолжают шаги
       const inSteps = new Set(shown.map((s) => s.item.rec.ruleId));
@@ -53,12 +57,15 @@ describe("В5.9 HQ: вид лестницы = поля карточки", () => 
     }
   });
 
-  test("итог: дошли — «зона „Здоров“»; не дошли — «до 70 не хватит N», N = 70 − индекс после последнего шага", () => {
+  // 19.10.2026: итог под последним шагом (поле summary) снят — на экране только строка над
+  // списком (headline); проверка та же по смыслу: дошли — «в зону „Здоров“», не дошли — разрыв
+  test("итог: дошли — «в зону „Здоров“»; не дошли — индекс после последнего шага и разрыв до 70", () => {
     const reached = card("reaches");
     expect(reached.ladder!.reached).toBe(true);
     const lastR = roundScore(reached.ladder!.steps.at(-1)!.indexAfter);
     expect(lastR).toBeGreaterThanOrEqual(70);
-    expect(cardView(reached).ladder!.summary).toBe(`После шага №${reached.ladder!.steps.length} индекс – ${lastR}: зона «Здоров»`);
+    const kR = reached.ladder!.steps.length;
+    expect(cardView(reached).ladder!.headline).toBe(`${kR === 1 ? "Шаг №1 выведет" : `Шаги №1-${kR} выведут`} индекс в зону «Здоров»`);
 
     const un = card("unreached");
     expect(un.ladder!.reached).toBe(false);
@@ -66,12 +73,11 @@ describe("В5.9 HQ: вид лестницы = поля карточки", () => 
     expect(lastU).toBeLessThan(70);
     const unView = cardView(un).ladder!;
     const k = un.ladder!.steps.length;
-    const head = `После шага №${k} индекс – ${lastU}, до 70 не хватит ${70 - lastU}`;
-    // следующий шаг без числа есть — итог называет его потолок, нет — обрывается на разрыве
+    const head = `${k === 1 ? "Шаг №1 поднимет" : `Шаги №1-${k} поднимут`} индекс до ${lastU}`;
+    // следующий шаг без числа есть — итог говорит, может ли он закрыть разрыв, нет — называет разрыв
     const extra = unView.steps[k];
-    if (extra) expect(unView.summary).toBe(`${head}. Шаг №${k + 1} ${extra.item.ceiling! >= 70 - lastU ? "может закрыть разрыв" : "сократит разрыв"}: до ${fmtSigned(extra.item.ceiling!)}, в зависимости от объема работы`);
-    else expect(unView.summary).toBe(head);
-    expect(unView.summary).not.toContain("Здоров");
+    if (extra) expect(unView.headline).toBe(`${head}, а №${k + 1} ${extra.item.ceiling! >= 70 - lastU ? "может вывести его в зону «Здоров»" : "приблизит его к зоне «Здоров»"}`);
+    else expect(unView.headline).toBe(`${head} – до зоны «Здоров» не хватит ${70 - lastU}`);
   });
 
   test("переключателя нет: репо в зоне, без кода, без лестницы", () => {

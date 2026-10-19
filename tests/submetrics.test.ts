@@ -159,8 +159,11 @@ describe("П4.2: одно правило на страницу, MD и PDF", () =
       proofRaw: page.includes("{fmtFactValue(fact.value)}"),
     }).toEqual({ pageImports: true, pageValue: true, pageTitle: true, mdRow: true, mdContext: true, proofRaw: true });
     // строка значения больше не режется многоточием
+    // 19.10.2026: значение — в таблице разбивки (.rh-cbd__value), старого .rh-subrow__value нет
     const css = readFileSync(join(root, "web", "layout.css"), "utf8");
-    const rule = css.slice(css.indexOf(".rh-subrow__value {"), css.indexOf("}", css.indexOf(".rh-subrow__value {")));
+    const at = css.indexOf(".rh-cbd__value.g-text {");
+    expect(at).toBeGreaterThanOrEqual(0);
+    const rule = css.slice(at, css.indexOf("}", at));
     expect({ ellipsis: rule.includes("text-overflow: ellipsis"), nowrap: rule.includes("white-space: nowrap") }).toEqual({ ellipsis: false, nowrap: false });
   });
 });

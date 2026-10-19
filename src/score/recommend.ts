@@ -187,20 +187,18 @@ function presenceImpact(p: RecommendationParams): string | null {
 function appsecLevelText(p: RecommendationParams, action: string, what: string, totalCap: number | null = null): RecommendationText | null {
   if (p.capLimit === undefined || typeof p.gain !== "boolean") return null;
   const capped = typeof p.capLimit === "number";
-  // критичные находки держат и потолок итога (4.5.0): о нем – всегда, он действует при любом балле категории
-  const totalNote = totalCap !== null ? ` Repo Health Score при этом не выше ${totalCap}.` : "";
   const categoryPart = capped
     ? `снимет потолок ${p.capLimit} с категории «Безопасность»`
     : p.gain
       ? categoryImpact("Безопасность")
       : null;
+  // критичные находки держат и потолок итога (4.5.0): он действует при любом балле категории
+  // и назван один раз — в эффекте; в причине он повторял бы его слово в слово
   const totalPart = totalCap !== null ? `потолок ${totalCap} у Repo Health Score` : null;
-  // потолок итога назван один раз — в эффекте; в причине он повторял бы его слово в слово
-  const note = totalPart !== null ? "" : totalNote;
   const rest = "балл категории «Безопасность» вырастет, когда будут закрыты и остальные находки";
   return {
     action,
-    problem: capped ? `AppSec нашел в коде ${what}. Пока они открыты, балл категории «Безопасность» не выше ${p.capLimit}.${note}` : `AppSec нашел в коде ${what}.${note}`,
+    problem: capped ? `AppSec нашел в коде ${what}. Пока они открыты, балл категории «Безопасность» не выше ${p.capLimit}.` : `AppSec нашел в коде ${what}.`,
     expectedImpact:
       categoryPart && totalPart
         ? `${categoryPart} и снимет ${totalPart}`

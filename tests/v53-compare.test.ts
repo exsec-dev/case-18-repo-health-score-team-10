@@ -25,7 +25,7 @@ import {
   exceptionLabel,
   metaRowLabel,
   rankCell,
-  submetricLeaderValue,
+  pointsLeaderValue,
   COMPARE_FULL_LINE,
   fullRows,
   indexCategoriesCounted,
@@ -242,11 +242,14 @@ describe("К-1: лидер строки (П9)", () => {
 });
 
 describe("ревью 25.09: лидер подметрики и пустой репо", () => {
-  test("лидер подметрики — по показанному целому: 0,285 и 0,28 — оба «28», лидера нет; 0,285 и 0,29 — лидер «29»", () => {
-    expect(submetricLeaderValue(0.285)).toBe(Math.round(0.285 * 100));
-    expect(rowLeaders([submetricLeaderValue(0.285), submetricLeaderValue(0.28)])).toEqual([false, false]);
-    expect(rowLeaders([submetricLeaderValue(0.285), submetricLeaderValue(0.29)])).toEqual([false, true]);
-    expect(submetricLeaderValue(null)).toBeNull();
+  test("лидер показателя — по показанным баллам: 17,5 против 20,0 — лидер 20,0; 17,54 и 17,46 — оба «17,5», лидера нет", () => {
+    // 19.10.2026: лидер показателя — по показанным баллам категории (десятые, как fmtPoints)
+    // те же десятые, что fmtPoints: 29,2499… показывается «29,3» — и лидерство считает 293
+    expect(pointsLeaderValue(29.2499999)).toBe(293);
+    expect(pointsLeaderValue(29.24)).toBe(292);
+    expect(rowLeaders([pointsLeaderValue(17.5), pointsLeaderValue(20)])).toEqual([false, true]);
+    expect(rowLeaders([pointsLeaderValue(17.54), pointsLeaderValue(17.46)])).toEqual([false, false]);
+    expect(pointsLeaderValue(null)).toBeNull();
   });
 
   test("пустой репо (code_empty) не дает заметки о разной основе индекса: его 0 не перевзвешен", async () => {
