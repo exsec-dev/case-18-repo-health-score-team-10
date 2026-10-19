@@ -257,6 +257,10 @@ export function openDb(config: Config): Database {
     );
   }
   db.exec("PRAGMA journal_mode = WAL;");
+  // Только тесты в CI (scripts/ci-test.sh): без fsync на коммит. На медленном
+  // диске раннера SourceCraft fsync делал тесты в 20-500 раз дольше, и набор не
+  // укладывался в лимит куба. Сервер этот флаг не ставит.
+  if (process.env.RH_SQLITE_SYNC_OFF === "1") db.exec("PRAGMA synchronous = OFF;");
   // Вся миграция — одна транзакция (DDL в SQLite транзакционен): параллельный
   // старт двух ролей не оставит базу полумигрированной — либо все DDL и
   // schema_version, либо ничего. PRAGMA journal_mode — снаружи (в транзакции это

@@ -7,7 +7,8 @@ on:
 workflows:
   check:
     settings:
-      max_cube_duration: 10m
+      # запас на медленный диск раннера: в норме весь куб идет 4-5 мин
+      max_cube_duration: 20m
     checkout:
       enabled: true
     tasks:
@@ -21,8 +22,8 @@ tasks:
         # анонимных скачиваний Docker Hub (toomanyrequests), digest тот же
         image: mirror.gcr.io/oven/bun:1.4.2
         script:
-          - apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends git ca-certificates
+          - apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends -o Dpkg::Options::=--force-unsafe-io git ca-certificates
           - bun install --frozen-lockfile
           - bun run tsc
-          # временные БД тестов в /dev/shm, лимит теста 30 с – см. скрипт
+          # SQLite тестов без fsync, временные БД в /dev/shm, лимит теста 30 с – см. скрипт
           - sh scripts/ci-test.sh
