@@ -483,7 +483,7 @@ export function DocsPage({ slug }: { slug: string }) {
   const onPage = page.headings.filter((h) => h.level === 2);
 
   return (
-    <Page crumbs={crumbs} actions={headerActions} mode="fill">
+    <Page crumbs={crumbs} actions={headerActions} mode="fill" frame="docs">
       <div className="rh-docs">
         <nav className={navOpen ? "rh-docs__nav rh-docs__nav_open" : "rh-docs__nav"} aria-label="Разделы документации">
           <button type="button" className="rh-docs__nav-toggle" aria-expanded={navOpen} onClick={() => setNavOpen(!navOpen)}>

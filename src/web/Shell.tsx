@@ -11,7 +11,7 @@
 import { Archive, ArrowRightFromSquare, ArrowRightToSquare, Bars, BookOpen, Bookmark, ChartColumn, CircleInfo, Gear, Moon, ScalesBalanced, Sun, Xmark } from "@gravity-ui/icons";
 import { ActionBar, AsideHeader, FooterItem, type AsideHeaderItem } from "@gravity-ui/navigation";
 import { ActionTooltip, Avatar, Breadcrumbs, Button, Drawer, Flex, Icon, Skeleton, Text, useThemeValue, useToaster, type IconData } from "@gravity-ui/uikit";
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode, type WheelEvent } from "react";
 import { flushSync } from "react-dom";
 import { logout, type MeResponse } from "./api";
 import { HealthCraftMark, PRODUCT_NAME } from "./logo";
@@ -614,10 +614,39 @@ interface PageProps {
   header?: ReactNode;
   /** fill: закреплено под прокручиваемой областью */
   footer?: ReactNode;
+  /**
+   * Рамка на очень широком экране: содержимое и панель не тянутся за меру, а стоят
+   * группой по центру, шапка страницы — по той же рамке. Мера у каждого вида своя
+   * (layout.css, «рамка страницы»); без рамки страница во всю ширину, как прежде.
+   */
+  frame?: "card" | "table" | "docs" | "compare";
   children: ReactNode;
 }
 
-export function Page({ crumbs, actions, aside, asideDrawer = false, asideColumnFrom = 1440, mode = "document", header, footer, children }: PageProps) {
+/** Главная прокручиваемая область `fill`-страницы — по убыванию точности. */
+const FRAME_SCROLL_TARGETS = [".rh-table-fill", ".rh-docs__main", ".rh-fill__content"];
+
+/**
+ * Колесо над полями рамки: в `fill` прокручивается не тело страницы, а таблица или
+ * статья внутри, и над пустыми полями по бокам колесо ничего не делало. Если под
+ * курсором нет своей прокручиваемой области, прокрутка уходит главной.
+ */
+function onFrameWheel(e: WheelEvent<HTMLDivElement>) {
+  if (e.ctrlKey || e.deltaY === 0) return;
+  const body = e.currentTarget;
+  for (let el = e.target as HTMLElement | null; el !== null && el !== body; el = el.parentElement) {
+    if (el.scrollHeight > el.clientHeight && /auto|scroll/.test(getComputedStyle(el).overflowY)) return;
+  }
+  for (const selector of FRAME_SCROLL_TARGETS) {
+    const target = body.querySelector<HTMLElement>(selector);
+    if (target !== null && target.scrollHeight > target.clientHeight) {
+      target.scrollBy({ top: e.deltaY });
+      return;
+    }
+  }
+}
+
+export function Page({ crumbs, actions, aside, asideDrawer = false, asideColumnFrom = 1440, mode = "document", header, footer, frame, children }: PageProps) {
   const globalActions = useContext(GlobalActionsContext);
   const openMenu = useContext(MenuContext);
   // заголовок вкладки — по последней крошке, чтобы вкладки, история и закладки различались
@@ -662,7 +691,7 @@ export function Page({ crumbs, actions, aside, asideDrawer = false, asideColumnF
 
   return (
     <AsideControlContext.Provider value={{ inDrawer: asideInDrawer, open: () => setAsideOpen(true) }}>
-    <div className={`rh-page rh-page_${mode}${asideDrawer ? " rh-page_aside-drawer" : ""}`}>
+    <div className={`rh-page rh-page_${mode}${asideDrawer ? " rh-page_aside-drawer" : ""}${frame ? ` rh-page_frame rh-page_frame-${frame}` : ""}`}>
       <ActionBar className="rh-actionbar" aria-label="Путь и действия страницы">
         <ActionBar.Section>
           <ActionBar.Group pull="left-grow">
@@ -698,7 +727,7 @@ export function Page({ crumbs, actions, aside, asideDrawer = false, asideColumnF
         </ActionBar.Section>
       </ActionBar>
 
-      <div className="rh-page__body">
+      <div className="rh-page__body" onWheel={frame !== undefined && mode === "fill" ? onFrameWheel : undefined}>
         {mode === "fill" ? (
           <main className="rh-page__main" id="rh-main" tabIndex={-1}>
             {header && <div className="rh-fill__header">{header}</div>}

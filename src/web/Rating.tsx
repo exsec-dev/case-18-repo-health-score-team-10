@@ -489,6 +489,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
       // панель колонкой — только с 1600, чтобы на 1440 таблице хватило
       // ширины на «Реакции» и «Обновлен»
       asideColumnFrom={1600}
+      frame="table"
       crumbs={[{ text: "Рейтинг" }]}
       aside={<RatingAside meta={meta} metaFailed={metaFailed} generatedAt={data?.generatedAt ?? null} />}
       header={

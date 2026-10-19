@@ -178,7 +178,7 @@ export function ComparePage({ search }: { search: string }) {
   const openDialog = () => setDialogOpen(true);
 
   return (
-    <Page crumbs={[{ text: "Сравнение" }]} mode="document">
+    <Page crumbs={[{ text: "Сравнение" }]} mode="document" frame="compare">
       <div className="rh-cmp-page" ref={pageRef}>
         {/* кнопка добавления у заголовка; при 3 из 3 — строка вместо нее */}
         <PageHeader

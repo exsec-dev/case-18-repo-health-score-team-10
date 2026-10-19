@@ -191,7 +191,7 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
     return (
       // скелетон повторяет ритм содержимого: блок показателей (~150px) и шесть строк
       // категорий по 45px
-      <Page crumbs={crumbs} actions={<ActionsSkeleton />} aside={<SkeletonRows rows={3} height={96} />} asideDrawer>
+      <Page crumbs={crumbs} actions={<ActionsSkeleton />} aside={<SkeletonRows rows={3} height={96} />} asideDrawer frame="card">
         <Flex direction="column" gap={3}>
           <SkeletonRows rows={1} height={150} />
           <SkeletonRows rows={6} height={45} />
@@ -252,7 +252,7 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
   );
 
   return (
-    <Page crumbs={crumbs} actions={actions} aside={<ScoreAside card={card} meta={meta} analysis={own} foreignRunning={foreignRunning} />} asideDrawer>
+    <Page crumbs={crumbs} actions={actions} aside={<ScoreAside card={card} meta={meta} analysis={own} foreignRunning={foreignRunning} />} asideDrawer frame="card">
       {refreshError && (
         <div style={{ marginBottom: "var(--g-spacing-3)" }}>
           <Alert
@@ -306,41 +306,49 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
           />
         )
       ) : (
-        // одна лента без табов: показатели → категории («почему») → рекомендации
-        // («что исправить») → AI-обзор → история
+        // одна лента без табов: показатели → AI-обзор → категории («почему») →
+        // рекомендации («что исправить») → история. На очень широком экране лента
+        // встает в две колонки (`.rh-feed-cols`): слева оценка, обзор и категории,
+        // справа рекомендации и история — порядок чтения и фокуса тот же
         <Flex direction="column" gap={6} className="rh-repo-feed">
-          <Flex direction="column" gap={3}>
-            {/* проверка активности — своей плашкой: у чужого на месте закрытого Repo Health
-                Score, у своего — на всю ширину под плашками оценок; без индекса и в пустом
-                репозитории проверять на накрутку и пересказывать нечего */}
-            <ScoreBand
-              card={card}
-              view={view}
-              check={
-                card.score.healthcraftIndex === null || card.markers.codeEmpty
-                  ? undefined
-                  : (wide: boolean) => (
-                      <ActivityCheckCard
-                        card={card}
-                        org={org}
-                        repo={repo}
-                        onChanged={reload}
-                        loggedIn={loggedIn}
-                        quota={aiQuota.quota}
-                        onQuota={aiQuota.reload}
-                        signIn={<LoginButton compact={false} inline />}
-                        wide={wide}
-                      />
-                    )
-              }
-            />
-          </Flex>
-          {/* AI-обзор — над категориями: общий взгляд модели перед разбором по категориям */}
-          {card.score.healthcraftIndex !== null && !card.markers.codeEmpty && <AiOverviewSection card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} quota={aiQuota.quota} onQuota={aiQuota.reload} />}
-          <Categories card={card} view={view} />
-          <Recommendations view={view} org={org} repo={repo} />
-          <HistorySection card={card} org={org} repo={repo} />
-          <Limitations items={view.limitations} />
+          <div className="rh-feed-cols">
+            <div className="rh-feed-col">
+              <Flex direction="column" gap={3}>
+                {/* проверка активности — своей плашкой: у чужого на месте закрытого Repo Health
+                    Score, у своего — на всю ширину под плашками оценок; без индекса и в пустом
+                    репозитории проверять на накрутку и пересказывать нечего */}
+                <ScoreBand
+                  card={card}
+                  view={view}
+                  check={
+                    card.score.healthcraftIndex === null || card.markers.codeEmpty
+                      ? undefined
+                      : (wide: boolean) => (
+                          <ActivityCheckCard
+                            card={card}
+                            org={org}
+                            repo={repo}
+                            onChanged={reload}
+                            loggedIn={loggedIn}
+                            quota={aiQuota.quota}
+                            onQuota={aiQuota.reload}
+                            signIn={<LoginButton compact={false} inline />}
+                            wide={wide}
+                          />
+                        )
+                  }
+                />
+              </Flex>
+              {/* AI-обзор — над категориями: общий взгляд модели перед разбором по категориям */}
+              {card.score.healthcraftIndex !== null && !card.markers.codeEmpty && <AiOverviewSection card={card} org={org} repo={repo} onChanged={reload} loggedIn={loggedIn} quota={aiQuota.quota} onQuota={aiQuota.reload} />}
+              <Categories card={card} view={view} />
+            </div>
+            <div className="rh-feed-col">
+              <Recommendations view={view} org={org} repo={repo} />
+              <HistorySection card={card} org={org} repo={repo} />
+              <Limitations items={view.limitations} />
+            </div>
+          </div>
         </Flex>
       )}
     </Page>

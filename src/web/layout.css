@@ -1484,6 +1484,106 @@ button.rh-category:focus-visible {
 
 }
 
+/* ---------- рамка страницы на очень широком экране ----------
+ * Страница — контейнер: рамка и колонки решаются по ее ширине, а не по окну
+ * (раскрытое меню слева отнимает у страницы ~200px). Попапы и Drawer uikit уходят
+ * в портал, поэтому layout-containment контейнера их не задевает. */
+.rh-page {
+  container: rh-page / inline-size;
+}
+
+/* колонки ленты карточки до двух колонок не участвуют в раскладке: блоки идут одной
+ * лентой в порядке разметки */
+.rh-feed-cols,
+.rh-feed-col {
+  display: contents;
+}
+
+/* Рамка (19.10.2026): на странице шире своей меры содержимое не тянется, а стоит
+ * группой по центру; шапка с крошками и действиями — по той же рамке. Мера у вида
+ * своя (`--rh-frame-pad` — поле с каждой стороны):
+ * - карточка («A→B по ширине»): лента одной колонкой до 1440px и панель 320px;
+ * - сравнение: таблица до 1600px;
+ * - документация: разделы, статья и оглавление — 1440px;
+ * - рейтинг: таблица с панелью — 2000px (колонка «Репозиторий» ~600px), с 2000px.
+ * Поля — внутри тела страницы. В `document` тело на это время становится единым
+ * контейнером прокрутки: колесо работает и над полями, полоса — у края окна; панель
+ * липнет к верху и прокручивается сама, если не помещается. В `fill` прокручивается
+ * таблица или статья, колесо над полями до нее доводит `onFrameWheel` (Shell). */
+@container rh-page (min-width: 1800px) {
+  .rh-page_frame-card > :is(.rh-actionbar, .rh-page__body) {
+    --rh-frame-pad: calc((100cqi - 1800px) / 2);
+  }
+
+  .rh-page_frame-compare > :is(.rh-actionbar, .rh-page__body) {
+    --rh-frame-pad: calc((100cqi - 1640px) / 2);
+  }
+
+  .rh-page_frame-docs > :is(.rh-actionbar, .rh-page__body) {
+    --rh-frame-pad: calc((100cqi - 1440px) / 2);
+  }
+
+  .rh-page_frame > .rh-page__body {
+    padding-inline: var(--rh-frame-pad, 0px);
+  }
+
+  /* у секции ActionBar свое поле 20px — рамка добавляется к нему */
+  .rh-page_frame > .rh-actionbar > * {
+    padding-inline: calc(var(--g-spacing-5) + var(--rh-frame-pad, 0px));
+  }
+
+  .rh-page_document.rh-page_frame > .rh-page__body {
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+  }
+
+  /* колонка по высоте содержимого, а не тела: иначе лента вылезает за нее, и нижнее
+   * поле колонки не входит в прокрутку */
+  .rh-page_document.rh-page_frame .rh-page__main {
+    align-self: flex-start;
+    overflow: visible;
+  }
+
+  .rh-page_document.rh-page_frame .rh-page__aside {
+    position: sticky;
+    top: 0;
+    align-self: flex-start;
+    height: 100%;
+    overflow-y: auto;
+  }
+}
+
+@container rh-page (min-width: 2000px) {
+  .rh-page_frame-table > :is(.rh-actionbar, .rh-page__body) {
+    --rh-frame-pad: calc((100cqi - 2000px) / 2);
+  }
+}
+
+/* B: странице хватает на две колонки ленты не уже 888px — лента встает в две
+ * колонки до 1040px: слева оценка, AI-обзор и категории, справа рекомендации и
+ * история. Колонки идут в порядке разметки, поэтому чтение и фокус не скачут.
+ * Каждая колонка — свой контейнер rh-feed: плашки оценок решают раскладку по ней */
+@container rh-page (min-width: 2160px) {
+  .rh-page_frame-card > :is(.rh-actionbar, .rh-page__body) {
+    --rh-frame-pad: max(0px, (100cqi - 2464px) / 2);
+  }
+
+  .rh-page_frame-card .rh-feed-cols {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--g-spacing-6);
+    align-items: start;
+  }
+
+  .rh-page_frame-card .rh-feed-col {
+    display: flex;
+    flex-direction: column;
+    gap: var(--g-spacing-6);
+    min-width: 0;
+    container: rh-feed / inline-size;
+  }
+}
+
 @media (max-width: 767px) {
   .rh-page__main,
   .rh-page__aside {
@@ -2120,6 +2220,22 @@ button.rh-category:focus-visible {
   gap: var(--g-spacing-1);
 }
 
+/* очень широкая страница: строка списка во всю ширину уводила оценку на 3000px от
+ * имени — список встает сеткой плашек от 720px, оценка остается рядом с именем */
+@container rh-page (min-width: 2000px) {
+  .rh-repo-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(720px, 1fr));
+    gap: var(--g-spacing-3);
+  }
+
+  .rh-repo-item,
+  .rh-repo-item:last-child {
+    border: 1px solid var(--g-color-line-generic);
+    border-radius: var(--g-border-radius-l);
+  }
+}
+
 @media (max-width: 720px) {
   .rh-me-search {
     width: 100%;
@@ -2466,6 +2582,13 @@ button.rh-category:focus-visible {
 
 .rh-ai-plate__text p {
   margin: 0;
+}
+
+/* мера текста модели — как у причин рекомендаций и заметок категорий: на широкой
+ * ленте абзац обзора шел строкой в 240-300 знаков */
+.rh-ai-text p,
+.rh-ai-plate__text p {
+  max-width: 72ch;
 }
 
 /* длинный текст: затухание по высоте ~6 строк body-1 и «Показать полностью» */
