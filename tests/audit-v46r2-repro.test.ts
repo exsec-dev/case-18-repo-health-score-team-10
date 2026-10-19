@@ -175,7 +175,9 @@ describe("Р20: значения подметрик округлены, дока
       mdRaw: out.includes("0.8723404255319149"),
       // страница берет значение из словаря подметрик (округление внутри него);
       // соседние подметрики нужны для прочерка доли старых TODO при нуле пометок
-      pageUsesRounding: /\{submetricShownValue\(key, subKey, sub, submetricContext\(card\.score\?\.computedAt\), cat\.submetrics\)\}/.test(page),
+      // 18.10.2026 (C1): значения строк разбивки — в categoryBreakdown.ts, тем же словарем
+      // 19.10.2026: через submetricShownParts — пояснение в скобке уходит в подсказку
+      pageUsesRounding: srcOf("categoryBreakdown.ts").includes("submetricShownParts(key, sub, entry, ctx)") && page.includes("categoryBreakdown(card, key)"),
       proofStaysRaw: between(page, "function FactProof", "function factStatusText").includes("fmtFactValue(fact.value)"),
     }).toEqual({ mdRounded: true, mdRaw: false, pageUsesRounding: true, proofStaysRaw: true });
   });
@@ -292,10 +294,11 @@ describe("Б5 (Р18, Р19): правило языка в текстах движ
     expect(textOf("src/api/me.ts")).toContain("SourceCraft отклонил ваш токен – обновите его в Настройках");
   });
 
-  // подпись фактов рекомендации – «Показатель:»
-  test("Р19: подпись фактов рекомендации – «Причина»", () => {
+  // кнопка фактов рекомендации – «Откуда данные» (до 18.10.2026 – подпись «Показатель:»)
+  test("Р19: кнопка фактов рекомендации – «Откуда данные»", () => {
     const src = codeOf("RepoPage.tsx");
-    expect({ newWord: src.includes("Показатель:"), oldWord: src.includes("Основано на фактах") || src.includes("Основание:") || src.includes("Причина:") }).toEqual({ newWord: true, oldWord: false });
+    // 19.10.2026: «Откуда данные» → формальнее, «Источник данных»
+    expect({ newWord: src.includes("Источник данных"), oldWord: src.includes("Основано на фактах") || src.includes("Основание:") || src.includes("Причина:") || src.includes("Показатель:") }).toEqual({ newWord: true, oldWord: false });
   });
 });
 
@@ -304,17 +307,16 @@ describe("Б5 (Р18, Р19): правило языка в текстах движ
 // ---------------------------------------------------------------------------
 
 describe("Б4 (Р14, Р16): список категорий и контейнер табов", () => {
-  // Закрытые категории – не строки, а одна плашка под списком: имена именно
-  // закрытых категорий и пояснение одним предложением по причине (собирает
-  // `lockedView`, поведенческий тест – v49-ui-r1-card).
-  test("Р14: закрытые категории не строки, а ОДНА плашка под списком, с их конкретной причиной", () => {
+  // Закрытые категории – не строки списка: имена именно закрытых категорий и
+  // причина собирает `lockedView` (поведенческий тест – v49-ui-r1-card).
+  // 19.10.2026: плашка под списком снята целиком – путь к полной оценке у Repo Health Score.
+  test("Р14: закрытые категории не строки; плашки под списком нет, причина – в lockedView", () => {
     const src = codeOf("RepoPage.tsx");
     const view = codeOf("cardView.ts");
-    const categories = between(src, "function Categories", "function LockedCategories");
     const row = between(src, "function CategoryRow", "function Markers");
     expect({
       rowsFiltered: /score\.categories\[k\]!\.locked === undefined/.test(view),
-      noteAfterList: categories.indexOf("</ul>") < categories.indexOf("<LockedCategories"),
+      noteAfterList: !src.includes("<LockedCategories"),
       namesActualCategories: /const names = locked\.map\(\(k\) => CATEGORY_TITLES\[k\]\)\.join\(" и "\)/.test(view),
       // причина для зрителя с токеном – словарь `LOCKED_WHY` по причине отказа
       reasonFromAccessLock: /LOCKED_WHY\[r as keyof typeof LOCKED_WHY\]/.test(view),
@@ -331,17 +333,13 @@ describe("Б4 (Р14, Р16): список категорий и контейне�
     });
   });
 
-  // Одно предложение без заголовка и без склейки «недоступна/недоступны» –
-  // согласовывать число нечего.
-  test("Р14 → Т3: одно предложение без заголовка, панель под списком", () => {
+  // 19.10.2026: панели закрытых категорий под списком больше нет – ни компонента, ни стиля.
+  test("Р14 → Т3: панели закрытых категорий под списком нет", () => {
     const src = codeOf("RepoPage.tsx");
-    const note = between(src, "function LockedCategories", "function CategoryRow");
     expect({
-      titleAndSentence: !note.includes("title=") && note.includes("message={text}"),
-      perCategoryRows: note.includes("items.map((item)"),
-      noAgreementGlue: note.includes('"недоступна"') || note.includes('"недоступны"'),
-      lastInList: /\.rh-locked-note \{[^}]*margin-top:\s*var\(--g-spacing-3\)/.test(srcOf("layout.css")),
-    }).toEqual({ titleAndSentence: true, perCategoryRows: false, noAgreementGlue: false, lastInList: true });
+      component: src.includes("function LockedCategories"),
+      style: /\.rh-locked-note \{/.test(srcOf("layout.css")),
+    }).toEqual({ component: false, style: false });
   });
 
   // Верхнего поля у списка нет: раскрытое содержимое отбивает от строки
@@ -352,21 +350,23 @@ describe("Б4 (Р14, Р16): список категорий и контейне�
     const subrows = between(css, ".rh-subrows {", "}");
     expect({
       topPaddingGone: /padding: var\(--g-spacing-2\)/.test(subrows),
-      // UX 17.10 (A11Y-15): шапка — строка таблицы подметрик
-      headerSeparates: src.includes('<div className="rh-subrows__head" role="row">'),
+      // 18.10.2026 (C1): шапки «Значение / Вес / Балл» нет — у строки одно число
+      // «N из веса»; раскрытие — таблица разбивки с отступом сверху
+      headerSeparates: src.includes('className="rh-cbd__table" role="table"') && /\.rh-cbd \{[^}]*padding: var\(--g-spacing-1\)/.test(css),
     }).toEqual({ topPaddingGone: false, headerSeparates: true });
   });
 
-  // Табов нет – разделы «Категории» и «Рекомендации» живут в том же контейнере,
-  // что блок величины.
+  // Табов между разделами нет – «Категории» и «Рекомендации» живут в том же
+  // контейнере, что блок величины. Вкладки внутри раскрытой категории (19.10.2026:
+  // «Показатели» / «Дополнительно» / …) – не табы ленты.
   test("Р16 → А1: разделы ленты – в контейнере с границами, как блок величины; табов нет", () => {
     const src = codeOf("RepoPage.tsx");
-    const categories = between(src, "function Categories", "function LockedCategories");
+    const categories = between(src, "function Categories", "function CategoryRow");
     const recs = between(src, "function Recommendations", "function RecommendationRow");
     const css = srcOf("layout.css");
     expect({
       container: /<Card view="outlined" className="rh-section-card">/.test(categories) && /<Card view="outlined" className="rh-section-card">/.test(recs),
-      tabsGone: /<TabList|CardTabs|rh-tabs-card/.test(src),
+      tabsGone: /CardTabs|rh-tabs-card/.test(src),
       sameAsBand:
         between(css, ".rh-section-card {", "}").includes("padding: var(--g-spacing-3) var(--g-spacing-4)") &&
         between(css, ".rh-score-band {", "}").includes("padding: var(--g-spacing-3) var(--g-spacing-4)"),

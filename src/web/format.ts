@@ -1037,8 +1037,21 @@ export function aiModelName(model: string): string {
     case "yandexgpt-5-lite/latest":
       return "YandexGPT Lite 5";
     default:
-      return id;
+      return openModelName(id);
   }
+}
+
+/**
+ * Открытые модели — как их пишут авторы: «qwen3.6-35b-a3b» → «Qwen3.6-35B-A3B»
+ * (размер и число активных параметров — заглавными); прочие — как есть.
+ */
+function openModelName(id: string): string {
+  const name = id.replace(/\/latest$/, "");
+  if (!/^qwen/i.test(name)) return name;
+  return name
+    .replace(/^qwen/i, "Qwen")
+    .replace(/-a(\d+(?:\.\d+)?)b(?=-|$)/gi, "-A$1B")
+    .replace(/-(\d+(?:\.\d+)?)b(?=-|$)/gi, "-$1B");
 }
 
 /** Названия ролей AI-заметок — одна копия для карточки и отчета. */

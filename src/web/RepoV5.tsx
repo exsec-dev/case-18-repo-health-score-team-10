@@ -1,7 +1,7 @@
 // AI-блоки и история на карточке репозитория: признаки накрутки в подвале плашки
 // HealthCraft Index, AI-обзор, разбор модели в категориях, история оценки и бейдж для README.
 // `card.ai` приходит только зрителю с правами на полный Score; без прав этих блоков нет вовсе.
-import { ArrowsRotateRight, ChevronDown, CircleExclamation, ClockArrowRotateLeft, SealCheck, Shield, ShieldCheck, ShieldExclamation, SparklesFill } from "@gravity-ui/icons";
+import { ArrowsRotateRight, ChevronDown, CircleExclamation, ClockArrowRotateLeft, Flag, SealCheck, Shield, ShieldCheck, SparklesFill } from "@gravity-ui/icons";
 import {
   ActionTooltip,
   Alert,
@@ -23,7 +23,7 @@ import {
   TextInput,
   useToaster,
 } from "@gravity-ui/uikit";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import type { RepoCard } from "./api";
 import { dataOf, fetchJson, useJson, useLatest, useVisible } from "./api";
 import { TIP_TARGET } from "./ui";
@@ -99,48 +99,6 @@ export function openCategory(key: string): void {
 }
 
 // ---------- флаг накрутки ----------
-
-/**
- * Строка подозрения на накрутку для подвала плашки HealthCraft Index: заголовок,
- * главный признак и подсказка с остальными.
- */
-function FraudFlagMessage({ card }: { card: Card }) {
-  const fraud = card.ai?.fraud;
-  // подозрение — только при флаге, как в кабинете и отчете
-  if (fraud === undefined || fraud === null || fraud.flag !== true || fraud.factors.length === 0) return null;
-  const factOf = (key: string): unknown => fraudFactorValue(key, fraud.signals, card.evidence, fraud.inputs);
-  // Текст признака строит код из факта; формулировка модели — только запасной вариант,
-  // когда факта нет (целиком она печатается в отчете)
-  const lines = fraud.factors.flatMap((f) => (fraudFactorFact(f.key, factOf(f.key)) ?? f.note).split("; "));
-  const [lead, ...rest] = lines;
-  return (
-        <span className="rh-fraud__line">
-          <Text variant="subheader-1">{`${FRAUD_TITLE}: `}</Text>
-          {/* флаг прошлого анализа не выдается за текущий */}
-          <Text variant="body-1">{fraudCheckStale(card.ai?.check) ? `${lead} (по прошлому анализу)` : lead}</Text>
-          <HelpMark iconSize="s" aria-label="Что значат признаки искусственной активности" className="rh-fraud__help">
-            <Flex direction="column" gap={2} className="rh-fraud__pop">
-              <Text variant="body-1">{FRAUD_EXPLAIN}</Text>
-              {rest.length > 0 && (
-                <Flex direction="column" gap={1}>
-                  <Text variant="body-1" color="secondary">
-                    Другие признаки:
-                  </Text>
-                  {rest.map((l) => (
-                    <Text key={l} variant="body-1">
-                      {l}
-                    </Text>
-                  ))}
-                </Flex>
-              )}
-              <Text variant="caption-2" color="secondary">
-                {`Признаки: ${fraud.factors.map((f) => fraudFactorTitle(f.key)).join(", ")}. Подробности – в разделе отчета.`}
-              </Text>
-            </Flex>
-          </HelpMark>
-        </span>
-  );
-}
 
 // ---------- AI-обзор ----------
 
@@ -384,18 +342,78 @@ const CHECK_ICON: Record<FraudCheckState["kind"], { data: typeof Shield; color: 
   none: { data: Shield, color: "var(--g-color-text-secondary)" },
   active: null,
   clean: { data: ShieldCheck, color: "var(--g-color-text-positive)" },
-  flagged: { data: ShieldExclamation, color: "var(--g-color-text-warning)" },
+  // флажок — тот же знак, что у строки рейтинга
+  flagged: { data: Flag, color: "var(--g-color-text-warning)" },
   failed: { data: CircleExclamation, color: "var(--g-color-text-secondary)" },
   nothing: { data: Shield, color: "var(--g-color-text-secondary)" },
   stale: { data: ClockArrowRotateLeft, color: "var(--g-color-text-secondary)" },
 };
 
+/** Заголовок и пояснение плашки проверки по состоянию; «на оценку не влияет» — в самой плашке. */
+export function checkCardText(st: FraudCheckState, ai: CardAi, loggedIn: boolean): { title: string; desc: string } {
+  const after = st.date !== null ? `Проверка ${st.date} – после нее был новый анализ.` : "После проверки был новый анализ.";
+  const done = st.date !== null ? `Проверено ${st.date}.` : "";
+  switch (st.kind) {
+    case "none":
+      return { title: "Не проверялась", desc: loggedIn ? "Проверка ищет в истории коммитов признаки накрутки. На оценку не влияет." : "Проверку может запустить любой вошедший пользователь. На оценку не влияет." };
+    case "active":
+      return { title: "Проверка идет", desc: "Результат появится здесь через несколько секунд." };
+    case "clean":
+      return { title: "Признаков нет", desc: `${done} На оценку не влияет.`.trim() };
+    case "stale":
+      return { title: "Признаков не было", desc: `${after} На оценку не влияет.` };
+    case "flagged":
+      return { title: FRAUD_TITLE, desc: `${fraudCheckStale(ai.check) ? after : done} На оценку и место в рейтинге не влияет.`.trim() };
+    case "failed":
+      return { title: "Проверка не сформировалась", desc: loggedIn && ai.check.failure !== null ? sentenceOf(jobErrorText(ai.check.failure)) : "Попробуйте позже." };
+    case "nothing":
+      return { title: "Проверять нечего", desc: "В анализе нет истории коммитов." };
+  }
+}
+
+function sentenceOf(text: string): string {
+  const t = text.length > 0 ? text[0]!.toUpperCase() + text.slice(1) : text;
+  return /[.!?]$/.test(t) ? t : `${t}.`;
+}
+
+/** Признаки накрутки строками: текст строит код из факта, формулировка модели — запасной вариант. */
+function fraudLines(card: Card): string[] {
+  const fraud = card.ai?.fraud;
+  if (fraud === undefined || fraud === null || fraud.flag !== true) return [];
+  const factOf = (key: string): unknown => fraudFactorValue(key, fraud.signals, card.evidence, fraud.inputs);
+  return fraud.factors.flatMap((f) => (fraudFactorFact(f.key, factOf(f.key)) ?? f.note).split("; "));
+}
+
 /**
- * Подвал плашки HealthCraft Index: состояние проверки оценки и кнопка «Проверить
- * оценку N/M» с остатком лимита. Статус меняется опросом, поэтому `aria-live`;
- * причина неактивной кнопки — видимой подписью.
+ * Плашка «Проверка активности» (вариант A2, 18.10.2026): подпись сверху, как у
+ * плашек оценок, статус значком и словами, при флаге — все признаки списком,
+ * пояснение «на оценку не влияет», кнопка снизу. У чужого репозитория стоит на
+ * месте закрытого Repo Health Score, у своего — под плашками оценок. Статус
+ * меняется опросом, поэтому `aria-live`; причина неактивной кнопки — подписью.
  */
-export function FraudCheckFooter({ card, org, repo, onChanged, loggedIn, quota, onQuota }: { card: Card; org: string; repo: string; onChanged: () => void; loggedIn: boolean; quota: AiQuotaView | null; onQuota: () => void }) {
+export function ActivityCheckCard({
+  card,
+  org,
+  repo,
+  onChanged,
+  loggedIn,
+  quota,
+  onQuota,
+  signIn,
+  wide = false,
+}: {
+  card: Card;
+  org: string;
+  repo: string;
+  onChanged: () => void;
+  loggedIn: boolean;
+  quota: AiQuotaView | null;
+  onQuota: () => void;
+  /** кнопка входа для гостя */
+  signIn?: ReactNode;
+  /** на всю ширину под плашками оценок */
+  wide?: boolean;
+}) {
   const ai = card.ai;
   const action = useCheckAction(org, repo, () => {
     onChanged();
@@ -404,65 +422,51 @@ export function FraudCheckFooter({ card, org, repo, onChanged, loggedIn, quota, 
   // опрос живой проверки – общий с обзором (useAiJobPolling в AiOverviewSection)
   if (ai === undefined || ai === null) return null;
   const st = fraudCheckState(ai, loggedIn);
+  const { title, desc } = checkCardText(st, ai, loggedIn);
   const counter = quotaCounter(quota?.check);
   const blocked = counter !== null && counter.left === 0 && quota !== null ? quotaBlockedText("check", quota.check, counter) : null;
   const icon = CHECK_ICON[st.kind];
-  const button =
+  const lines = st.kind === "flagged" ? fraudLines(card) : [];
+  const action_ =
     st.button !== null ? (
-      <Button view={st.kind === "flagged" ? "normal-contrast" : "outlined"} size="s" loading={action.sending} disabled={blocked !== null} onClick={() => void action.start()} aria-label={withCounter(st.button, counter)}>
+      <Button view="outlined" size="m" loading={action.sending} disabled={blocked !== null} onClick={() => void action.start()} aria-label={withCounter(st.button, counter)}>
         <CountedLabel label={st.button} counter={counter} />
       </Button>
+    ) : !loggedIn && st.kind === "none" && signIn !== undefined ? (
+      signIn
     ) : null;
-  const why =
-    st.button !== null && blocked !== null ? (
-      <Text variant="caption-2" color="secondary" as="p" className="rh-check-foot__why">
-        {blocked}
-      </Text>
-    ) : null;
-  // признаки накрутки — желтой плашкой в самом подвале, рядом с кнопкой проверки
-  const flagLine = st.kind === "flagged" ? <FraudFlagMessage card={card} /> : null;
-  if (flagLine !== null && ai.fraud?.factors.length) {
-    return (
-      <div className="rh-check-foot rh-check-foot_flagged" aria-live="polite">
-        <Alert
-          theme="warning"
-          view="filled"
-          size="s"
-          align="baseline"
-          // кнопка — под текстом: в узкой плашке индекса сбоку она сжимает строку признака
-          className="rh-fraud"
-          message={
-            <Flex direction="column" gap={1}>
-              {flagLine}
-              {st.date !== null && (
-                <Text variant="caption-2" color="secondary">
-                  {st.date}
-                </Text>
-              )}
-            </Flex>
-          }
-          actions={button ?? undefined}
-        />
-        {why}
-      </div>
-    );
-  }
+  const cls = ["rh-score-band", "rh-check-card", st.kind === "flagged" ? "rh-check-card_flagged" : "", wide ? "rh-check-card_wide" : ""].filter(Boolean).join(" ");
   return (
-    <div className="rh-check-foot" aria-live="polite">
-      <Flex gap={2} alignItems="center" justifyContent="space-between" wrap>
-        <Flex gap={2} alignItems="center" style={{ minWidth: 0 }}>
-          {icon === null ? <Spin size="xs" /> : <Icon data={icon.data} size={16} style={{ color: icon.color, flexShrink: 0 }} />}
-          <Text variant="body-short">{st.text}</Text>
-          {st.date !== null && (
-            <Text variant="caption-2" color="secondary">
-              {st.date}
-            </Text>
-          )}
+    <Card view="outlined" className={cls}>
+      <Flex direction="column" gap={1} style={{ minWidth: 0, flexGrow: 1 }} aria-live="polite">
+        <Flex gap={1} alignItems="center">
+          <Text color="secondary">Проверка активности</Text>
+          <HelpMark iconSize="s" aria-label="Что такое проверка активности">
+            {FRAUD_EXPLAIN}
+          </HelpMark>
         </Flex>
-        {button}
+        <Flex gap={2} alignItems="center">
+          {icon === null ? <Spin size="xs" /> : <Icon data={icon.data} size={16} style={{ color: icon.color, flexShrink: 0 }} />}
+          <Text variant="subheader-2">{title}</Text>
+        </Flex>
+        {lines.length > 0 && (
+          <ul className="rh-check-card__list">
+            {lines.map((l) => (
+              <li key={l}>
+                <Text>{l}</Text>
+              </li>
+            ))}
+          </ul>
+        )}
+        <Text color="complementary">{desc}</Text>
+        {action_ !== null && <div className="rh-check-card__act">{action_}</div>}
+        {st.button !== null && blocked !== null && (
+          <Text variant="caption-2" color="secondary" as="p" className="rh-check-foot__why">
+            {blocked}
+          </Text>
+        )}
       </Flex>
-      {why}
-    </div>
+    </Card>
   );
 }
 
@@ -560,7 +564,8 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
   );
   const ownerActions = canRun && ai !== null && (own || newerAnalysis) && (
     <Flex gap={2} alignItems="center">
-      <ActionTooltip title={runDisabled ? runReason : runText}>{runDisabled ? <span className="rh-disabled-tip" tabIndex={0} aria-label={`${runText}: ${runReason}`}>{runButton}</span> : runButton}</ActionTooltip>
+      {/* «Следующий запуск – после …» чуть длиннее 280px: перенос оставлял справа пустое поле — одной строкой */}
+      <ActionTooltip title={runDisabled ? runReason : runText} className={runDisabled && cooldownActive && !jobActive ? "rh-tip-oneline" : undefined}>{runDisabled ? <span className="rh-disabled-tip" tabIndex={0} aria-label={`${runText}: ${runReason}`}>{runButton}</span> : runButton}</ActionTooltip>
     </Flex>
   );
 
@@ -586,6 +591,10 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
             <Text variant="subheader-3" as="h2" id="rh-ai-title">
               {AI_SECTION_TITLE}
             </Text>
+            {/* оговорка о модели — подсказкой у заголовка, а не строкой под ним */}
+            <HelpMark iconSize="s" aria-label="Что это за обзор">
+              {AI_NOTE_SHORT}
+            </HelpMark>
             {hasOverview && newerAnalysis && <AiStaleMark card={card} blockedReason={canRun && runDisabled ? runReason : null} />}
             {model !== null && <AiModelLabel model={model} />}
             {/* объем публичной версии — меткой в заголовке, пояснение в подсказке внутри плашки */}
@@ -602,10 +611,6 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
             <span style={{ flex: 1 }} />
             {ownerActions}
           </Flex>
-          {/* оговорка о модели — один раз, сразу под заголовком; в подписи с датой ее нет */}
-          <Text variant="body-1" color="secondary">
-            {AI_NOTE_SHORT}
-          </Text>
         </Flex>
 
         {jobActive ? (
@@ -669,10 +674,26 @@ export function categoryAiNote(card: Card, key: string): AiNote | null {
 export function CategoryAiMark({ card, categoryKey, hasData }: { card: Card; categoryKey: string; hasData: boolean }) {
   if (card.ai === undefined || !hasData || categoryAiNote(card, categoryKey) === null) return null;
   const title = "Есть разбор модели – откройте категорию";
+  // подсказка Gravity вместо title: нативная появлялась через секунду; знак стоит
+  // внутри кнопки строки, поэтому сам не фокусируется — имя есть у скринридера
   return (
-    <span className="rh-cat-ai__mark rh-cat-ai__mark_ready" title={title} aria-label={title} role="img">
-      <Icon data={SparklesFill} size={14} />
-    </span>
+    <ActionTooltip title={title}>
+      <span className="rh-cat-ai__mark rh-cat-ai__mark_ready" aria-label={title} role="img">
+        <Icon data={SparklesFill} size={14} />
+      </span>
+    </ActionTooltip>
+  );
+}
+
+/** Знак разбора модели у заголовка «Категории» — разбор есть у каждой категории. */
+export function CategoryAiGlyph() {
+  const title = "Разбор модели есть у каждой категории – откройте любую";
+  return (
+    <ActionTooltip title={title}>
+      <span className="rh-cat-ai__mark rh-cat-ai__mark_ready" role="img" aria-label={title} tabIndex={0}>
+        <Icon data={SparklesFill} size={16} />
+      </span>
+    </ActionTooltip>
   );
 }
 

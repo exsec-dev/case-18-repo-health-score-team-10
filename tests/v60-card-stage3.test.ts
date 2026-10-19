@@ -66,7 +66,8 @@ describe("пустой репозиторий — вариант A", () => {
     const page = src("RepoPage.tsx");
     expect(page).toContain('<Text variant="display-2" color={codeEmpty ? "secondary" : undefined}>');
     expect(page).toMatch(/codeEmpty \? \(\s*<Label theme="unknown" size="s">\s*нет кода/);
-    expect(page).toContain("footer={card.score.healthcraftIndex === null || card.markers.codeEmpty ? undefined : <FraudCheckFooter");
+    // 18.10.2026: проверка активности — своей плашкой (ActivityCheckCard), без индекса и кода ее нет
+    expect(page).toMatch(/check=\{\s*card\.score\.healthcraftIndex === null \|\| card\.markers\.codeEmpty\s*\? undefined/);
     expect(page).toContain("{card.score.healthcraftIndex !== null && !card.markers.codeEmpty && <AiOverviewSection");
     expect(src("RepoV5.tsx")).toContain("if (card.markers.codeEmpty) return null;");
   });

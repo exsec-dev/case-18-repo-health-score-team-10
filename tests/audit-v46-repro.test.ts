@@ -90,9 +90,10 @@ describe("В4.6-1 (У20): качество категорий закодиров
     expect({
       valueColored: /rh-category__value[\s\S]{0,400}scoreColor|scoreColor[\s\S]{0,400}rh-category__value/.test(row),
       chipByThreshold: /<Label theme=\{c\.chip\.theme\}/.test(row) && view.includes("theme: scoreLabelTheme(cat.score)"),
-      barByLevel: row.includes("<ScoreBar value={c.score}") && /theme=\{scoreTheme\(value\)\}/.test(srcOf("ui.tsx")),
+      // 18.10.2026 (C1): полоса категории слитная, цветом зоны; значки показателей — тем же цветом
+      barByLevel: row.includes("<CategoryBar color={color} score={c.score} />") && row.includes("ZONE_COLOR[scoreTheme(c.score)]"),
       // плашка уровня — только у «Нет данных»; уровень несет цвет полосы
-      healthyNoChip: row.includes("{c.score === null ? (") && !row.includes('c.chip.theme === "success"'),
+      healthyNoChip: row.includes("{c.score === null && (") && !row.includes('c.chip.theme === "success"'),
       noDataNeutral: view.includes('cat.score === null ? "Нет данных"'),
     }).toEqual({ valueColored: false, chipByThreshold: true, barByLevel: true, healthyNoChip: true, noDataNeutral: true });
   });

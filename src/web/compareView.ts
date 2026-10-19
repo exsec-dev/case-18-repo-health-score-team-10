@@ -208,7 +208,7 @@ export const COMPARE_LIMIT_TEXT = "Сравнить можно до 3 репоз
 export const COMPARE_FULL_LINE = "В сравнении 3 из 3 – уберите репозиторий, чтобы добавить другой.";
 export const COMPARE_ADD = "Добавить репозиторий";
 /** Одна формулировка с MD/PDF (`src/report/build.ts`). */
-export const COMPARE_REFERENCE = "Справочно, в балл не входит";
+// коротко: строка повторяется в каждой раскрытой категории; «в балл не входит» — у прочерков и для скринридера
 
 /** Столбец-исключение на телефоне — короткая метка в шапке, полный текст под таблицей. */
 export function exceptionLabel(kind: "noscore" | "unavailable" | "check_failed" | "token_rejected"): string {
@@ -234,6 +234,7 @@ export const COMPARE_DUPLICATE_TEXT = "Этот репозиторий уже в
 export const COMPARE_BAD_INPUT_TEXT = "Не похоже на адрес репозитория – вставьте ссылку на него в SourceCraft или адрес вида организация/репозиторий.";
 export const COMPARE_UNAVAILABLE_TITLE = "Репозиторий не найден или недоступен";
 export const COMPARE_LEADER_LEGEND = "Лучший балл строки среди репозиториев с данными.";
+export const COMPARE_LEADER_SHORT = "– лучший балл строки";
 export const COMPARE_FULL_PARTIAL = "Repo Health Score, CI/CD и Безопасность сравниваются, когда они видны вам у всех выбранных репозиториев.";
 export const COMPARE_PLACEHOLDER = "Название, организация/репозиторий или ссылка";
 

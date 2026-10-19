@@ -197,6 +197,12 @@ const backlogTrend: Formatter = (v) => {
   return `${word}, ${signed(b.balance)} за 90 дней (создано ${num(b.created)}, закрыто ${num(b.closed)})`;
 };
 
+/** Пояснения в скобках после значения: сайт показывает их один раз подсказкой (`submetricShownParts`). */
+const ASIDE_MONTHLY_FLOW = "создано/закрыто за 30 дней, от старых к новым";
+const ASIDE_OLD_SHARE = "доля от не менее 5 пометок";
+const ASIDE_TESTS = "в балл не входит: доля тестов учитывается, только когда повышает балл";
+const SHOWN_ASIDES = [ASIDE_MONTHLY_FLOW, ASIDE_OLD_SHARE, ASIDE_TESTS];
+
 /** «2/1, 0/0, 3/2, 4/2, 5/3, 3/2 (создано/закрыто за 30 дней, от старых к новым)»; окно без данных — «–». */
 const monthlyFlow: Formatter = (v) => {
   if (!Array.isArray(v) || v.length === 0) return null;
@@ -204,7 +210,7 @@ const monthlyFlow: Formatter = (v) => {
     const o = obj(w);
     return o && isNum(o.created) && isNum(o.closed) ? `${num(o.created)}/${num(o.closed)}` : NO_VALUE;
   });
-  return `${cells.join(", ")} (создано/закрыто за 30 дней, от старых к новым)`;
+  return `${cells.join(", ")} (${ASIDE_MONTHLY_FLOW})`;
 };
 
 // ---------- ревью PR и карта владельцев ----------
@@ -404,17 +410,33 @@ export function submetricShownValue(
   // при 1-4 пометках доля старых считается от 5: «1 старая из 1» показывается
   // как 20%, и без оговорки число читалось бы ошибкой
   if (shown !== NO_VALUE && `${category}.${sub}` === "code.old_share" && typeof entry.note === "string" && entry.note.startsWith("share of at least")) {
-    return `${shown} (доля от не менее 5 пометок)`;
+    return `${shown} (${ASIDE_OLD_SHARE})`;
   }
   // доля тестов ниже прочих показателей — бонус не применен, число справочное
   if (shown !== NO_VALUE && `${category}.${sub}` === "code.tests" && typeof entry.note === "string" && entry.note.startsWith("tests bonus not applied")) {
-    return `${shown} (в балл не входит: доля тестов учитывается, только когда повышает балл)`;
+    return `${shown} (${ASIDE_TESTS})`;
   }
   if (shown !== NO_VALUE) return shown;
   const n = submetricNote(category, sub, entry.note);
   if (n?.value) return n.value;
   if (PRESENCE_BY_SCORE.has(`${category}.${sub}`) && typeof entry.score === "number") return entry.score >= 1 ? "есть" : "нет";
   return shown;
+}
+
+/**
+ * Значение и пояснение порознь: в таблицах сайта скобка, общая для строки,
+ * повторялась в каждой ячейке и в каждом столбце сравнения — сайт дает ее
+ * один раз подсказкой. Отчет показывает значение целиком (`submetricShownValue`).
+ */
+export function submetricShownParts(
+  category: string,
+  sub: string,
+  entry: { score?: number | null; value?: unknown; note?: string | null },
+  ctx: SubmetricContext,
+): { value: string; aside: string | null } {
+  const full = submetricShownValue(category, sub, entry, ctx);
+  for (const aside of SHOWN_ASIDES) if (full.endsWith(` (${aside})`)) return { value: full.slice(0, -(aside.length + 3)), aside };
+  return { value: full, aside: null };
 }
 
 /** Название подметрики; незнакомый ключ — как есть (показ не падает). */

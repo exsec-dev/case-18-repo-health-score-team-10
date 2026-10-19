@@ -27,7 +27,6 @@ import {
   rankCell,
   submetricLeaderValue,
   COMPARE_FULL_LINE,
-  COMPARE_REFERENCE,
   fullRows,
   indexCategoriesCounted,
   rowLeaders,
@@ -381,11 +380,10 @@ describe("К-1: адрес набора, маршрут, тексты", () => {
   test("Д7: метка столбца-исключения — своя на каждый статус (enum элемента целиком)", () => {
     const labels = (["noscore", "unavailable", "check_failed", "token_rejected"] as const).map(exceptionLabel);
     expect(new Set(labels).size).toBe(4);
-    for (const l of [...labels, COMPARE_FULL_LINE, COMPARE_REFERENCE]) {
+    for (const l of [...labels, COMPARE_FULL_LINE]) {
       expect(l).not.toContain("ё");
       expect(l).not.toContain("—");
     }
-    expect(COMPARE_REFERENCE).toBe("Справочно, в балл не входит");
   });
 
   test("текст недоступного — по зрителю, не по репозиторию; тексты по правилу языка", () => {

@@ -235,6 +235,18 @@ export function adjustmentLabel(cat: Pick<CardCategory, "adjustment">): string {
 }
 
 /**
+ * Причина поправки без чисел балла — вторая строка категории на карточке: балл
+ * стоит рядом, а величина поправки — строкой в раскрытии.
+ */
+export function adjustmentReason(cat: Pick<CardCategory, "adjustment">): string | null {
+  const a = cat.adjustment;
+  if (!a) return null;
+  if (a.kind === "small-sample") return a.n === 0 ? "Ни одна задача не закрыта" : `Мало закрытых задач: ${a.n} из ${a.full} нужных для надежной оценки`;
+  if (a.kind === "small-code") return `Мало кода: ${a.loc} из ${a.full} ${plural(a.full, "строки", "строк", "строк")} для надежной оценки`;
+  return `Есть открытые ${a.level === "critical" ? "критичные находки AppSec" : "находки AppSec высокой важности"} – балл категории не выше ${a.limit}`;
+}
+
+/**
  * Поправка к взвешенному среднему категории словами — одна копия для карточки
  * («почему»), разбора категории и приложения А: сжатие малой выборки задач,
  * сжатие малого кода к середине шкалы, потолок «Безопасности» при открытых находках.
@@ -465,12 +477,22 @@ export interface OwnershipRow {
   authors: string;
   /** главный автор сделал не меньше порога изменений каталога */
   single: boolean;
+  /** изменений каталога за окно */
+  changes: number;
+  /** подкаталоги (ветви дерева на карточке); пусто — анализ старым сборщиком или подкаталогов нет */
+  children: OwnershipRow[];
+  /** доли главных авторов (до 3) по убыванию; у старого сборщика — только владелец */
+  shares: { name: string; share: number }[];
 }
 
 export interface OwnershipView {
   caption: string;
   rows: OwnershipRow[];
   notes: string[];
+  /** оговорки для карточки: полнота обхода, без определения порога и CODEOWNERS */
+  cardNotes: string[];
+  /** порог «единственного владельца», % */
+  thresholdPct: number;
 }
 
 /** Подпись каталога: корзина файлов корня (`.`) — словами. */
@@ -490,7 +512,7 @@ export function ownershipView(cat: CardCategory | undefined): OwnershipView | nu
   const dirs = Array.isArray(value.dirs) ? (value.dirs as Record<string, unknown>[]) : [];
   if (dirs.length === 0) return null;
   const threshold = typeof value.threshold === "number" ? value.threshold : 0.8;
-  const rows: OwnershipRow[] = dirs.map((d) => {
+  const rowOf = (d: Record<string, unknown>): OwnershipRow => {
     const share = typeof d.owner_share === "number" ? d.owner_share : 0;
     const authors = typeof d.authors === "number" ? d.authors : 0;
     return {
@@ -499,19 +521,31 @@ export function ownershipView(cat: CardCategory | undefined): OwnershipView | nu
       share: `${Math.round(share * 100)}%`,
       authors: String(authors),
       single: share >= threshold,
+      changes: typeof d.changes === "number" ? d.changes : 0,
+      children: Array.isArray(d.children) ? (d.children as Record<string, unknown>[]).map(rowOf) : [],
+      shares: Array.isArray(d.top_authors)
+        ? (d.top_authors as Record<string, unknown>[]).filter((a) => typeof a.share === "number").map((a) => ({ name: String(a.name ?? ""), share: a.share as number }))
+        : [{ name: String(d.owner ?? ""), share }],
     };
-  });
+  };
+  const rows: OwnershipRow[] = dirs.map(rowOf);
   const total = typeof value.dirs_total === "number" ? value.dirs_total : rows.length;
   const singles = typeof value.dirs_single_owner === "number" ? value.dirs_single_owner : rows.filter((r) => r.single).length;
   const windowDays = typeof value.window_days === "number" ? value.window_days : 365;
   const notes: string[] = [
     `Единственный владелец – у ${singles} из ${total} ${plural(total, "каталога", "каталогов", "каталогов")}: главный автор сделал не меньше ${Math.round(threshold * 100)}% изменений каталога. Изменение – коммит человека за ${windowDays} ${plural(windowDays, "день", "дня", "дней")} без слияний, тронувший файл кода; коммиты роботов не учитываются.`,
   ];
+  // карточке — только оговорки о полноте; определение порога и CODEOWNERS она не повторяет
+  const cardNotes: string[] = [];
+  if (total > rows.length) cardNotes.push(`Показаны ${rows.length} самых изменяемых каталогов из ${total}.`);
+  if (value.truncated === "commits") cardNotes.push("Коммитов за год больше бюджета обхода – учтены только самые свежие.");
+  if (value.truncated === "changes") cardNotes.push("Изменений за год больше бюджета обхода – учтена только часть.");
+  if (typeof value.history_since === "string") cardNotes.push(`История загружена с ${fmtDate(value.history_since)} – окно короче года.`);
   if (total > rows.length) notes.push(`Показаны ${rows.length} самых изменяемых каталогов из ${total}.`);
   if (value.truncated === "commits") notes.push("Коммитов за год больше бюджета обхода – учтены только самые свежие.");
   if (value.truncated === "changes") notes.push("Изменений за год больше бюджета обхода – учтена только часть.");
   if (typeof value.history_since === "string") notes.push(`История загружена с ${fmtDate(value.history_since)} – окно короче года.`);
   if (value.codeowners === true) notes.push("В репозитории есть CODEOWNERS.");
   if (value.codeowners === false) notes.push("CODEOWNERS в репозитории нет.");
-  return { caption: "Карта владельцев файлов (справочно, в балл не входит)", rows, notes };
+  return { caption: "Карта владельцев файлов (справочно, в балл не входит)", rows, notes, cardNotes, thresholdPct: Math.round(threshold * 100) };
 }

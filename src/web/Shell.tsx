@@ -8,7 +8,7 @@
 //   fill — данные на высоту экрана (рейтинг): шапка и футер закреплены,
 //     прокручивается только область между ними; уже 1440px правая панель
 //     уходит в Drawer по кнопке в ActionBar, чтобы не было второй прокрутки.
-import { Archive, ArrowRightFromSquare, ArrowRightToSquare, BookOpen, Bookmark, ChartColumn, CircleInfo, Gear, Moon, ScalesBalanced, Sun, Xmark } from "@gravity-ui/icons";
+import { Archive, ArrowRightFromSquare, ArrowRightToSquare, Bars, BookOpen, Bookmark, ChartColumn, CircleInfo, Gear, Moon, ScalesBalanced, Sun, Xmark } from "@gravity-ui/icons";
 import { ActionBar, AsideHeader, FooterItem, type AsideHeaderItem } from "@gravity-ui/navigation";
 import { ActionTooltip, Avatar, Breadcrumbs, Button, Drawer, Flex, Icon, Skeleton, Text, useThemeValue, useToaster, type IconData } from "@gravity-ui/uikit";
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
@@ -39,6 +39,8 @@ const SECTIONS: SectionDef[] = [
 ];
 
 const GlobalActionsContext = createContext<ReactNode>(null);
+/** телефон: открыть меню разделов (кнопка в ActionBar страницы); null — меню всегда видно */
+const MenuContext = createContext<(() => void) | null>(null);
 
 export function Shell({
   section,
@@ -56,7 +58,33 @@ export function Shell({
 }) {
   const isPhone = useMediaQuery("(max-width: 767px)");
   const [compactPref, setCompact] = useRailCompact();
-  const compact = isPhone || compactPref;
+  // телефон: rail скрыт и открывается кнопкой меню поверх страницы, как у
+  // SourceCraft — полоса иконок отнимала 56px из 375 у каждой страницы
+  const [menuOpen, setMenuOpen] = useState(false);
+  const compact = isPhone ? !menuOpen : compactPref;
+  useEffect(() => {
+    if (!isPhone) setMenuOpen(false);
+  }, [isPhone]);
+  useEffect(() => setMenuOpen(false), [section]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") setMenuOpen(false);
+    };
+    // переход по пункту меню закрывает меню
+    const onClick = (e: globalThis.MouseEvent): void => {
+      const a = (e.target as Element | null)?.closest("a");
+      if (a && a.closest('[class*="gn-aside-header__aside___"]')) setMenuOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("click", onClick);
+    // фокус — в меню: иначе с клавиатуры его не пройти
+    document.querySelector<HTMLElement>('[class*="gn-aside-header__aside___"] a')?.focus();
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("click", onClick);
+    };
+  }, [menuOpen]);
   const tips = useRailTips();
   // AsideHeader (navigation 6.6) не принимает role, а rail нужен ориентир
   // навигации — ставим роль на корень панели после отрисовки
@@ -123,11 +151,14 @@ export function Shell({
       renderFooter={({ compact: isCompact }) => <RailFooter me={me} meLoading={meLoading} compact={isCompact} section={section} />}
       renderContent={() => (
         <GlobalActionsContext.Provider value={globalActions ?? null}>
-          <div className="rh-workspace">{children}</div>
+          <MenuContext.Provider value={isPhone ? () => setMenuOpen(true) : null}>
+            <div className="rh-workspace">{children}</div>
+          </MenuContext.Provider>
         </GlobalActionsContext.Provider>
       )}
-      className={compact ? "rh-rail rh-rail_compact" : "rh-rail"}
+      className={["rh-rail", compact ? "rh-rail_compact" : "", isPhone ? "rh-rail_phone" : "", menuOpen ? "rh-rail_open" : ""].filter(Boolean).join(" ")}
     />
+    {isPhone && menuOpen && <div className="rh-rail-scrim" aria-hidden="true" onClick={() => setMenuOpen(false)} />}
     </>
   );
 }
@@ -537,6 +568,7 @@ interface PageProps {
 
 export function Page({ crumbs, actions, aside, asideDrawer = false, asideColumnFrom = 1440, mode = "document", header, footer, children }: PageProps) {
   const globalActions = useContext(GlobalActionsContext);
+  const openMenu = useContext(MenuContext);
   // заголовок вкладки — по последней крошке, чтобы вкладки, история и закладки различались
   const pageName = crumbs.length > 0 ? crumbs[crumbs.length - 1]!.text : "";
   useEffect(() => {
@@ -583,6 +615,15 @@ export function Page({ crumbs, actions, aside, asideDrawer = false, asideColumnF
       <ActionBar className="rh-actionbar" aria-label="Путь и действия страницы">
         <ActionBar.Section>
           <ActionBar.Group pull="left-grow">
+            {openMenu !== null && (
+              <ActionBar.Item>
+                <Button view="flat" size="m" onClick={openMenu} aria-label="Меню разделов" className="rh-menu-btn">
+                  <Button.Icon>
+                    <Icon data={Bars} size={16} />
+                  </Button.Icon>
+                </Button>
+              </ActionBar.Item>
+            )}
             {/* крошки сворачиваются по ширине контейнера — пункт растянут на всю группу */}
             <ActionBar.Item className="rh-actionbar__crumbs">
               <Breadcrumbs aria-label="Путь" showRoot style={{ width: "100%" }}>

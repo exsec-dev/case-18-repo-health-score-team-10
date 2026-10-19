@@ -88,6 +88,38 @@ body {
   background: var(--g-color-base-background);
 }
 
+/* телефон: rail скрыт, меню разделов открывается кнопкой в ActionBar поверх
+ * страницы (развернутым, с подписями) — как бургер SourceCraft на узком экране */
+@media (max-width: 767px) {
+  .rh-rail_phone:not(.rh-rail_open) [class*="gn-aside-header__aside___"] {
+    display: none;
+  }
+
+  .rh-rail_phone.rh-rail_open [class*="gn-aside-header__aside___"] {
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: 1001;
+    height: 100dvh;
+    box-shadow: 0 0 24px var(--g-color-sfx-shadow);
+  }
+
+  /* страница — во всю ширину: navigation вычитает ширину rail из контента */
+  .rh-rail_phone [class*="gn-aside-header__content___"] {
+    width: 100%;
+  }
+
+  .rh-rail-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: var(--g-color-sfx-veil);
+  }
+
+  .rh-menu-btn {
+    margin-inline-start: calc(-1 * var(--g-spacing-2));
+  }
+}
+
 /* заголовки и абзацы страниц — без браузерных отступов: ритм задают Flex-gap
  * и токены отступов (Text as="h1" отступы uikit не сбрасывает) */
 .rh-workspace :is(h1, h2, h3, p) {
@@ -390,8 +422,7 @@ body {
  * держит. Мера на колонке оставляла мертвое поле справа от панели (main
  * упирался в 1120, aside фиксирован на 320, остаток копился за ним). Полосу
  * категории от растягивания защищает свой трек `minmax` в гриде `.rh-category`. */
-.rh-page_document .rh-prose,
-.rh-page_document .rh-locked-note {
+.rh-page_document .rh-prose {
   max-width: 1120px;
 }
 
@@ -728,8 +759,38 @@ body {
 /* две плашки показателей — в ряд, пока каждой хватает 360px, иначе столбиком */
 .rh-score-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
+  /* не больше двух колонок: при трех (индекс, Score, проверка своего репо на всю
+   * ширину) auto-fit заводил третью колонку, и две плашки занимали 2/3 ширины */
+  grid-template-columns: repeat(auto-fit, minmax(max(min(360px, 100%), calc((100% - var(--g-spacing-3)) / 2)), 1fr));
   gap: var(--g-spacing-3);
+}
+
+/* проверка активности (A2): у своего репо — на всю ширину под плашками оценок;
+ * при флаге рамка цветом предупреждения, признаки — списком */
+.rh-check-card_wide,
+.rh-score-cards__wide {
+  grid-column: 1 / -1;
+}
+
+.rh-score-cards__wide:empty {
+  display: none;
+}
+
+.g-card.rh-check-card_flagged {
+  border-color: var(--g-color-line-warning);
+}
+
+.rh-check-card__list {
+  margin: var(--g-spacing-1) 0 2px;
+  padding-inline-start: 18px;
+}
+
+.rh-check-card__list li {
+  margin: 2px 0;
+}
+
+.rh-check-card__act {
+  margin-top: var(--g-spacing-2);
 }
 
 /* разделы ленты («Категории», «Рекомендации») — в том же `Card view="outlined"`
@@ -783,35 +844,9 @@ body {
   max-width: 100%;
 }
 
-/* основание рекомендации — ярлык переносится по словам (длинное значение подметрики) */
-.rh-rec__basis .g-label {
-  height: auto;
-  max-width: 100%;
-}
-
-.rh-rec__basis .g-label__main-button {
-  height: auto;
-  text-align: start;
-}
-
-.rh-rec__basis .g-label__text,
-.rh-rec__basis .g-label__content {
-  overflow: visible;
-  padding-block: 2px;
-  line-height: 16px;
-  white-space: normal;
-  text-overflow: clip;
-}
-
 /* подпись «Войти через Я ID» под строкой пути: кнопка по ширине текста */
 .rh-score-band__signin {
   margin-top: var(--g-spacing-2);
-}
-
-/* Alert сохраняет штатные внутренние отступы Gravity UI; класс дает только
- * воздух над панелью, чтобы она не сливалась с категорией. */
-.rh-locked-note {
-  margin-top: var(--g-spacing-3);
 }
 
 /* Слот — карточка с паддингом блока-полосы. Минимальная ширина держит три
@@ -836,11 +871,14 @@ body {
    * плашка уровня. Полоса ограничена мерой (в пределах minmax(80px, 360px)),
    * а не 1fr: растянутая на всю ширину, она перестает что-либо измерять;
    * излишек забирает название.
-   * 28px — три цифры 15px tabular с запасом, чтобы число стояло у своей
-   * полосы. Последний трек — плашка «Нет данных», только у категорий без
-   * данных; у остальных он пустой и схлопывается. */
-  grid-template-columns: 16px minmax(0, 1fr) minmax(80px, 240px) 28px auto;
-  align-items: center;
+   * 28px — три цифры 15px tabular, чтобы число стояло у своей полосы; последний
+   * трек — плашка «Нет данных» у категорий без данных, у остальных пустой и
+   * схлопывается: полоса и балл — у правого края.
+   * По верху, а сама строка — по центру высоты: при второй строке под названием
+   * балл и шеврон остаются на линии названия, а не плывут к ее середине. */
+  grid-template-columns: 16px minmax(0, 1fr) minmax(80px, 240px) 28px;
+  align-items: start;
+  align-content: center;
   gap: var(--g-spacing-3);
   box-sizing: border-box;
   width: 100%;
@@ -853,6 +891,12 @@ body {
   color: inherit;
   font: inherit;
   text-align: left;
+}
+
+/* плашка «Нет данных» — пятой колонкой, только у категорий без данных: у
+ * остальных балл стоит у самого края, над концом таблицы раскрытия */
+.rh-category:has(> .rh-category__word) {
+  grid-template-columns: 16px minmax(0, 1fr) minmax(80px, 240px) 28px auto;
 }
 
 button.rh-category {
@@ -868,8 +912,22 @@ button.rh-category:focus-visible {
 }
 
 .rh-category__value {
+  margin-top: -1px;
   text-align: right;
   font-variant-numeric: tabular-nums;
+}
+
+/* шеврон, полоса и плашка — на линии названия (subheader-1, строка 18px) */
+.rh-category > .g-arrow-toggle {
+  margin-top: 2px;
+}
+
+.rh-category__bar {
+  margin-top: 5px;
+}
+
+.rh-category__word {
+  margin-top: -1px;
 }
 
 .rh-category__name {
@@ -1410,9 +1468,16 @@ button.rh-category:focus-visible {
     grid-template-columns: 16px minmax(0, 1fr) 28px;
   }
 
+  /* полоса из показателей — второй строкой под названием, во всю ширину */
   .rh-category__bar {
+    grid-column: 2 / -1;
+    grid-row: 2;
+  }
+
+  .rh-category__bar:empty {
     display: none;
   }
+
 
   /* число на карточке не окрашено — уровень несет только плашка, поэтому
    * на телефоне она остается: второй строкой под названием и основанием */
@@ -1423,15 +1488,40 @@ button.rh-category:focus-visible {
 
 
 
-  /* рекомендация: номер · текст, эффект — строкой под текстом */
-  .rh-recs .rh-rec {
-    grid-template-columns: 20px minmax(0, 1fr);
+  /* рекомендация и шаг лесенки: прирост — под действием, колонки справа нет,
+   * ось лесенки уже — тексту остается около 230px вместо 158 */
+  /* селекторы специфичнее базовых правил ниже по файлу */
+  .rh-recs .rh-rec,
+  .rh-ladder .rh-ladder__step {
+    column-gap: var(--g-spacing-2);
   }
 
-  .rh-recs .rh-rec__effect {
-    grid-column: 2;
-    align-items: flex-start;
-    text-align: left;
+  .rh-recs .rh-rec {
+    grid-template-columns: 16px minmax(0, 1fr);
+  }
+
+  .rh-ladder .rh-ladder__step,
+  .rh-recs.rh-recs_ladder .rh-rec {
+    grid-template-columns: var(--rh-ladder-gutter) minmax(0, 1fr);
+  }
+
+  .rh-section .rh-rec__effect {
+    display: none;
+  }
+
+  .rh-section .rh-rec__gain-inline {
+    display: flex;
+  }
+
+
+  .rh-section .rh-ladder,
+  .rh-section .rh-recs_ladder {
+    --rh-ladder-gutter: 24px;
+  }
+
+  .rh-section .rh-ladder__mark {
+    width: 20px;
+    height: 20px;
   }
 
   .rh-subrows {
@@ -1495,12 +1585,15 @@ button.rh-category:focus-visible {
 }
 
 /* ---------- строка рекомендации ----------
- * Номер слева (порядок выдачи, как в PDF), действие и причина, справа —
- * «ожидаемый эффект» строкой над плашкой прироста. */
+ * Номер слева (порядок выдачи, как в PDF), действие и причина, справа — прирост.
+ * Колонка прироста одной ширины у всех строк: переносы причин не «пляшут». */
 .rh-rec {
+  /* колонка прироста — по содержимому: «HealthCraft Index до 73» под приростом
+   * в 96px налезал на текст */
+  --rh-rec-gain: minmax(64px, max-content);
   display: grid;
   /* текст ближе к номеру — колонка номера 16px, зазор 8px */
-  grid-template-columns: 16px minmax(0, 1fr) auto;
+  grid-template-columns: 16px minmax(0, 1fr) var(--rh-rec-gain);
   gap: var(--g-spacing-2);
   align-items: start;
 }
@@ -1513,19 +1606,73 @@ button.rh-category:focus-visible {
 
 .rh-rec__n {
   font-variant-numeric: tabular-nums;
-  /* номер — ровно под заголовком «Рекомендации» */
   text-align: left;
 }
 
+/* после последнего шага — линия ярче: дальше рекомендации вне лесенки */
+.rh-recs .rh-rec_last-step.rh-list__item {
+  border-bottom-color: var(--g-color-line-generic-active);
+}
+
+/* прирост — правым краем под баллом категории (у строки категории поле 12px) */
 .rh-recs .rh-rec.rh-list__item {
-  padding-inline: 0;
+  padding-inline: 0 var(--g-spacing-3);
+}
+
+.rh-ladder__step {
+  padding-inline-end: var(--g-spacing-3);
+}
+
+/* список сразу под заголовком (без итога) — без верхнего поля первой строки */
+.rh-section__title + .rh-recs > .rh-rec:first-child {
+  padding-top: var(--g-spacing-1);
 }
 
 .rh-rec__body {
   min-width: 0;
 }
 
-.rh-rec__basis {
+/* мера причины: строка через всю карточку (~130 знаков) терялась */
+.rh-rec__body > .g-text {
+  max-width: 72ch;
+}
+
+/* прирост под действием — только на телефоне */
+.rh-rec__gain-inline {
+  display: none;
+}
+
+.rh-rec__gain-tip {
+  display: inline-flex;
+  border-radius: var(--g-border-radius-s);
+}
+
+.rh-rec__gain-tip:focus-visible {
+  outline: 2px solid var(--g-color-line-focus);
+}
+
+/* критичные над лесенкой и «Остальные» под ней — на сетке лесенки: номер под
+ * кружками, текст на одной кромке со ступенями */
+.rh-recs_ladder .rh-rec {
+  grid-template-columns: var(--rh-ladder-gutter) minmax(0, 1fr) var(--rh-rec-gain);
+  column-gap: var(--g-spacing-3);
+}
+
+.rh-recs_ladder {
+  --rh-ladder-gutter: 44px;
+}
+
+.rh-recs_ladder .rh-rec__n {
+  justify-self: center;
+  text-align: center;
+}
+
+.rh-recs_first {
+  margin-bottom: var(--g-spacing-4);
+}
+
+/* тихая строка под причиной: файл-заготовка, «Откуда данные», категория */
+.rh-rec__meta {
   margin-top: var(--g-spacing-1);
 }
 
@@ -1534,33 +1681,159 @@ button.rh-category:focus-visible {
   flex-direction: column;
   gap: 2px;
   align-items: flex-end;
-  max-width: 260px;
   min-width: 0;
   text-align: right;
 }
 
-/* длинный эффект («+0,0 … – в репозитории нет кода»)
- * переносится внутри колонки, а не наезжает на причину и не уходит за край */
-.rh-rec__effect .g-label {
-  height: auto;
-  max-width: 100%;
+.rh-rec__gain {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
-.rh-rec__effect .g-label__text,
-.rh-rec__effect .g-label__content {
-  overflow: visible;
+/* точка цвета категории перед действием и метка «Критично» после него */
+.rh-rec__dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-inline-end: var(--g-spacing-2);
+  border-radius: 50%;
+  vertical-align: 1px;
+}
+
+.rh-rec__crit.g-label {
+  margin-inline-start: var(--g-spacing-2);
+  vertical-align: 1px;
+}
+
+/* эффект словами в колонке прироста — серым, пунктиром: полный текст в подсказке */
+.rh-rec__effect-word {
+  color: var(--g-color-text-secondary);
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.rh-rec__effect-word:focus-visible {
+  outline: 2px solid var(--g-color-line-focus);
+  border-radius: var(--g-border-radius-s);
+}
+
+/* индекс после шага — под приростом */
+.rh-rec__after.g-text {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+
+/* телефон: прирост и индекс — одной строкой под действием */
+.rh-rec__gain-inline {
+  gap: var(--g-spacing-2);
+  align-items: baseline;
+}
+
+/* ---------- лесенка к зоне «Здоров» ----------
+ * Слева — ось: индекс сейчас, номер шага кружком, индекс после шага; справа у
+ * шага — его прирост. Ось — линия под кружками и числами (фон их закрывает). */
+.rh-ladder {
+  --rh-ladder-gutter: 44px;
+  position: relative;
+}
+
+.rh-ladder::before {
+  content: "";
+  position: absolute;
+  top: var(--g-spacing-5);
+  bottom: var(--g-spacing-5);
+  left: calc(var(--rh-ladder-gutter) / 2 - 1px);
+  width: 2px;
+  border-radius: 1px;
+  background: var(--g-color-line-generic);
+}
+
+.rh-ladder__start,
+.rh-ladder__node {
+  display: grid;
+  grid-template-columns: var(--rh-ladder-gutter) minmax(0, 1fr);
+  column-gap: var(--g-spacing-3);
+  align-items: baseline;
+}
+
+.rh-ladder__node {
+  grid-column: 1 / -1;
+  padding-top: var(--g-spacing-3);
+}
+
+.rh-ladder__val.g-text {
+  position: relative;
+  justify-self: center;
   padding-block: 2px;
-  line-height: 16px;
-  white-space: normal;
-  text-overflow: clip;
-  text-align: right;
+  background: var(--g-color-base-background);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* шаг без точного числа — отрезок оси пунктиром: «до 78» — граница, а не расчет */
+.rh-ladder__step_ceiling {
+  position: relative;
+}
+
+.rh-ladder__step_ceiling::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--rh-ladder-gutter) / 2 - 1px);
+  width: 2px;
+  background: repeating-linear-gradient(to bottom, transparent 0 4px, var(--g-color-base-background) 4px 8px);
+}
+
+.rh-ladder__steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rh-ladder__step {
+  --rh-rec-gain: 96px;
+  display: grid;
+  grid-template-columns: var(--rh-ladder-gutter) minmax(0, 1fr) var(--rh-rec-gain);
+  column-gap: var(--g-spacing-3);
+  align-items: start;
+  padding-top: var(--g-spacing-3);
+}
+
+.rh-ladder__mark {
+  position: relative;
+  justify-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: 24px;
+  height: 24px;
+  /* кружок — по первой строке действия (15px, строка 20px) */
+  margin-top: -2px;
+  border: 1px solid var(--g-color-line-generic-accent);
+  border-radius: 50%;
+  background: var(--g-color-base-background);
+  color: var(--g-color-text-secondary);
+  font-size: var(--g-text-caption-2-font-size);
+  font-variant-numeric: tabular-nums;
 }
 
 /* поповер основания: мера и воздух; кнопка «Исходные данные» — без вида кнопки */
+/* по экрану, как окно заготовки: на 375 поповер был 418px и уводил страницу вбок */
 .rh-proof {
   box-sizing: border-box;
-  max-width: 480px;
+  width: min(480px, calc(100vw - 32px));
   padding: var(--g-spacing-3);
+  overflow-wrap: anywhere;
+}
+
+.rh-proof__key {
+  display: block;
+  margin-top: var(--g-spacing-1);
 }
 
 /* исходные данные видны сразу; длинный факт прокручивается внутри */
@@ -1848,8 +2121,11 @@ button.rh-category:focus-visible {
 }
 
 /* кнопка предупреждения о токене — по ширине текста, зазор над ней 8px */
-.rh-token-notice {
+/* во всю ширину страницы: Alert Gravity по умолчанию — по содержимому */
+.g-alert.g-card_theme_info.rh-token-notice {
   --g-alert-actions-margin: var(--g-spacing-2);
+  box-sizing: border-box;
+  width: 100%;
 }
 
 .rh-token-notice__action {
@@ -2326,6 +2602,15 @@ button.rh-category:focus-visible {
    (перебивает fit-content синих плашек), с воздухом между заголовком и текстом */
 .g-alert.g-card_theme_info.rh-ai-plate {
   width: 100%;
+  /* текст модели — сине-фиолетовым тоном (середина между info и utility Gravity),
+   * ближе к искре AI: чистый синий info оставлен плашкам о данных и доступе.
+   * Сам AI-обзор — своей плашкой, не этой */
+  background-color: color-mix(in srgb, color-mix(in srgb, var(--g-color-base-info-light), var(--g-color-base-utility-light)) 88%, transparent);
+}
+
+/* искра — тем же акцентом AI, что у отметки в названии категории */
+.g-alert.g-card_theme_info.rh-ai-plate .g-alert__icon-wrapper {
+  color: var(--rh-ai-accent);
 }
 
 .rh-ai-plate__text {
@@ -2494,6 +2779,20 @@ button.rh-category:focus-visible {
   margin: 0;
 }
 
+/* заголовок «Категории» с искрой разбора: поля — у обертки */
+.rh-categories__head.rh-section__title {
+  display: flex;
+}
+
+.rh-categories__head > .g-text {
+  margin: 0;
+}
+
+.rh-cat-ai__mark[tabindex]:focus-visible {
+  outline: 2px solid var(--g-color-line-focus);
+  border-radius: var(--g-border-radius-s);
+}
+
 /* поповер бейджа, как Clone у SourceCraft */
 .rh-badge-pop {
   box-sizing: border-box;
@@ -2611,11 +2910,15 @@ button.rh-category:focus-visible {
   white-space: nowrap;
 }
 
+/* на сверхшироких экранах — не шире 1600px: подписи («Свежесть последнего коммита
+ * человека») встают в строку и при трех репозиториях, столбцы вмещают значение, пунктир
+ * и балл с запасом, а растянутые на 2500px строки глазу не пройти */
 .rh-cmp-page {
   display: flex;
   flex-direction: column;
   gap: var(--g-spacing-4);
   min-width: 0;
+  max-width: 1600px;
 }
 
 /* от описания до таблицы — один шаг раздела, без поля заголовка */
@@ -2657,6 +2960,22 @@ button.rh-category:focus-visible {
   background: var(--g-color-base-simple-hover);
 }
 
+.rh-cmp-add-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* имя репо — до двух строк: у репозиториев хакатона различие в хвосте */
+.rh-cmp-add-repo {
+  display: -webkit-box;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.rh-cmp-add-row[aria-disabled="true"] .rh-cmp-add-repo,
 .rh-cmp-add-row[aria-disabled="true"] .rh-add-row__slug {
   color: var(--g-color-text-secondary);
 }
@@ -2709,9 +3028,13 @@ button.rh-category:focus-visible {
   display: contents;
 }
 
+/* колонка репозитория — обводкой линии, без заливки: так она легче и не спорит с
+ * подсветкой строки; шапка — с той же обводкой сверху и по бокам и фоном страницы,
+ * чтобы закрывать строки при прокрутке */
 .rh-cmp-colcard {
+  box-sizing: border-box;
+  border: 1px solid var(--g-color-line-generic);
   border-radius: var(--g-border-radius-xl);
-  background: var(--rh-cmp-card);
 }
 
 .rh-cmp-colcard_invite {
@@ -2742,18 +3065,68 @@ button.rh-category:focus-visible {
 /* закрепленная шапка: фон карточки и нижняя линия */
 .rh-cmp-head {
   position: sticky;
-  /* прилипает, срезав верхнее поле до 4px: у прокрутки (.rh-page__body) своего
-   * поля нет, и при −20px аватары уходили под край */
-  top: calc(var(--g-spacing-1) - var(--g-spacing-4));
+  /* прилипает к самому верху целиком, со своей обводкой: колонки обведены линией, и
+   * срезанный верх (прежние −12px) оставлял шапку без верхнего края, с пустой полосой */
+  top: 0;
   z-index: 3;
   box-sizing: border-box;
-  padding: var(--g-spacing-4) var(--g-spacing-4) var(--g-spacing-3);
+  padding: var(--g-spacing-3) var(--g-spacing-4);
   border-radius: var(--g-border-radius-xl) var(--g-border-radius-xl) 0 0;
-  background: var(--rh-cmp-card);
+  background: var(--g-color-base-background);
+}
+
+.rh-cmp:not(.rh-cmp_phone) .rh-cmp-head:not(.rh-cmp-head_corner):not(.rh-cmp-head_invite) {
+  border: 1px solid var(--g-color-line-generic);
+  border-bottom: 0;
+}
+
+/* от 1440px прокручивается основная колонка, у нее поле 20px сверху: sticky
+ * отсчитывает от края поля, и над шапкой оставалась полоса с прокрученными строками */
+@media (min-width: 1440px) {
+  .rh-page_document .rh-cmp-head {
+    top: calc(-1 * var(--g-spacing-5));
+  }
+}
+
+/* нижний край шапки столбца — с теми же полями, что линии строк по карточке:
+ * при прокрутке строки уходят под линию, а не режутся о невидимый край */
+.rh-cmp-head:not(.rh-cmp-head_corner):not(.rh-cmp-head_invite)::after {
+  content: "";
+  position: absolute;
+  inset-inline: var(--g-spacing-4);
+  bottom: 0;
+  border-bottom: 1px solid var(--g-color-line-generic);
 }
 
 .rh-cmp-head_corner {
   background: var(--g-color-base-background);
+}
+
+/* подсветка строки под курсором — как у строк списков SourceCraft */
+.rh-cmp-hl {
+  position: relative;
+  z-index: 0;
+  margin-inline: calc(-1 * var(--g-spacing-2));
+  border-radius: var(--g-border-radius-m);
+  background: var(--g-color-base-simple-hover);
+  pointer-events: none;
+}
+
+/* последний показатель категории: его отступ снизу (spacing-4 вместо spacing-1) — не подсвечивается */
+.rh-cmp-hl_last {
+  margin-bottom: var(--g-spacing-3);
+}
+
+/* справа — не дальше обводки последней карточки (слева выступает, как у строк списков) */
+.rh-cmp:not(.rh-cmp_phone) .rh-cmp-hl {
+  margin-inline-end: 1px;
+}
+
+/* на касании подсветка залипала бы после нажатия */
+@media (hover: none) {
+  .rh-cmp-hl {
+    display: none;
+  }
 }
 
 .rh-cmp-head_invite {
@@ -2775,10 +3148,6 @@ button.rh-category:focus-visible {
   padding-inline: var(--g-spacing-4);
 }
 
-.rh-cmp-label_group {
-  padding-top: var(--g-spacing-4);
-}
-
 .rh-cmp-label_index,
 .rh-cmp-label_rhs,
 .rh-cmp-cell_index,
@@ -2791,19 +3160,56 @@ button.rh-category:focus-visible {
 .rh-cmp-label_sub,
 .rh-cmp-cell_sub,
 .rh-cmp-label_subhead,
-.rh-cmp-cell_subhead,
-.rh-cmp-label_refhead,
-.rh-cmp-cell_refhead {
+.rh-cmp-cell_subhead {
   min-height: 0;
   padding-block: var(--g-spacing-1);
 }
 
-.rh-cmp-label_refhead {
-  padding-top: var(--g-spacing-3);
+/* показатели — по верху: при переносе значения в одном столбце баллы соседних
+ * стояли на разной высоте */
+.rh-cmp-label_sub,
+.rh-cmp-cell_sub {
+  align-items: flex-start;
 }
 
-.rh-cmp-sublabel {
-  padding-inline-start: 22px;
+/* значок пояснения — в строке текста, по базовой линии: так его центр совпадает с
+ * центром строки (−2px опускал его ниже текста) */
+.rh-cmp-aside {
+  margin-inline-start: var(--g-spacing-1);
+  vertical-align: baseline;
+}
+
+/* иконка показателя — под шевроном категории (14px + зазор 8px), имя — ровно под
+ * ее названием; длинное имя переносится по своему краю */
+.rh-cmp-sublabel.g-text {
+  display: flex;
+  align-items: baseline;
+  width: 100%;
+}
+
+.rh-cmp-sublabel__text {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* пунктир — по середине первой строки (а не у базовой линии), и в подписи, и в
+ * ячейке: длинное название переносится, а пунктир остается на строке баллов */
+.rh-cmp-sublabel .rh-cmp-lead-dots {
+  align-self: flex-start;
+  margin: calc(var(--g-text-body-1-line-height) / 2 - 1px) 0 0 var(--g-spacing-2);
+  transform: none;
+}
+
+.rh-cmp-sub > .rh-cmp-lead-dots {
+  align-self: start;
+  margin-top: calc(var(--g-text-body-1-line-height) / 2 - 1px);
+  transform: none;
+}
+
+/* последний показатель категории — с отступом снизу */
+.rh-cmp-label.rh-cmp-row_last,
+.rh-cmp-cell.rh-cmp-row_last {
+  padding-bottom: var(--g-spacing-4);
 }
 
 .rh-cmp-toggle {
@@ -2894,11 +3300,18 @@ button.rh-category:focus-visible {
   max-width: 100%;
 }
 
-.rh-cmp-colhead__repo {
-  display: block;
+/* имя репозитория — до двух строк, многоточие только в конце второй: на
+ * телефоне одна строка оставляла от «case-18-repo-health-score-team-14» 8 букв */
+.rh-cmp-colhead__repo.g-text {
+  display: -webkit-box;
   width: 100%;
   overflow: hidden;
-  white-space: nowrap;
+  white-space: normal;
+  /* перенос с дефисом по словарю (lang="en" у имени); посреди слова без дефиса — только если слово длиннее столбца */
+  hyphens: auto;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .rh-cmp-colhead_invite {
@@ -2940,11 +3353,25 @@ button.rh-category:focus-visible {
   flex-wrap: wrap;
 }
 
+/* числа строк — обычным начертанием, лидер — жирным (.rh-cmp-lead_on): при 550
+ * у всех лидер отличался на одну ступень и его приходилось искать */
 .rh-cmp-total__num.g-text {
   font-size: var(--g-text-header-2-font-size);
   line-height: var(--g-text-header-2-line-height);
-  font-weight: var(--g-text-accent-font-weight);
+  font-weight: var(--g-text-body-font-weight);
   font-variant-numeric: tabular-nums;
+}
+
+/* шкала и корона лидера после нее — одной строкой */
+.rh-cmp-total__barline {
+  display: flex;
+  align-items: center;
+  gap: var(--g-spacing-2);
+  width: 100%;
+}
+
+.rh-cmp-catcell__bar {
+  width: auto;
 }
 
 .rh-cmp-total__bar {
@@ -2969,7 +3396,7 @@ button.rh-category:focus-visible {
 .rh-cmp-cat__chipnum {
   font-size: var(--g-text-body-2-font-size);
   line-height: var(--g-text-body-2-line-height);
-  font-weight: var(--g-text-accent-font-weight);
+  font-weight: var(--g-text-body-font-weight);
   font-variant-numeric: tabular-nums;
 }
 
@@ -2986,12 +3413,11 @@ button.rh-category:focus-visible {
   cursor: help;
 }
 
+/* язык переносится, а не прячется за многоточием («1C Enterprise» в узком столбце) */
 .rh-cmp-oneline {
   display: block;
   max-width: 100%;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+  overflow-wrap: break-word;
 }
 
 /* многоточие работает только у строчного содержимого */
@@ -3019,13 +3445,22 @@ button.rh-category:focus-visible {
   color: inherit;
 }
 
+/* лидер строки — корона после числа (жирное начертание терялось); число — основным цветом */
 .rh-cmp-lead_on {
   color: var(--g-color-text-primary);
 }
 
-.rh-cmp-lead__icon {
+/* отметка лучшего в строке — зеленый круг с галочкой */
+.rh-cmp-crown {
   flex: none;
   color: var(--g-color-text-positive);
+}
+
+/* значок легенды — по центру строки текста: инлайном он вставал на базовую линию и уезжал вверх */
+.rh-cmp-legend__text.g-text {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--g-spacing-1);
 }
 
 /* готовые наборы — плитками в заглушке над кнопкой, без своего заголовка: плитка
@@ -3038,7 +3473,7 @@ button.rh-category:focus-visible {
 
 .rh-cmp-starters {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 320px));
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: var(--g-spacing-3);
   width: 100%;
 }
@@ -3077,6 +3512,14 @@ button.rh-category:focus-visible {
   min-width: 0;
 }
 
+/* состав набора — до двух строк, многоточие в конце второй */
+.rh-cmp-starter__slugs.g-text {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
 /* стрелка — подсказка, что плитка открывает сравнение; ярче при наведении */
 .rh-cmp-starter__go {
   flex-shrink: 0;
@@ -3107,36 +3550,77 @@ button.rh-category:focus-visible {
   transition: none;
 }
 
-/* балл первым (узкий подстолбец, цифры вправо), затем значение */
-.rh-cmp-subhead {
-  display: flex;
-  gap: var(--g-spacing-3);
-  width: 100%;
-  color: var(--g-color-text-secondary);
-  font-size: var(--g-text-caption-2-font-size);
-  line-height: var(--g-text-caption-2-line-height);
-}
-
+/* ячейка показателя: текст слева, числа справа — значение от левого края ячейки
+ * (под числом категории), пунктир, затем слоты балла и галочки у правого края */
 .rh-cmp-sub {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(var(--g-spacing-4), 1fr) auto;
+  column-gap: var(--g-spacing-2);
   align-items: baseline;
-  gap: var(--g-spacing-3);
   width: 100%;
 }
 
-.rh-cmp-sub__score {
-  display: flex;
-  flex: 0 0 52px;
-  justify-content: flex-end;
+.rh-cmp-sub__value.g-text {
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+
+/* «N» по правому краю в ширину «25,0», галочка — в своем слоте 14px: числа стоят
+ * разряд под разрядом и в строке лидера */
+.rh-cmp-sub__pts {
+  display: grid;
+  grid-template-columns: minmax(4.5ch, max-content) 14px;
+  column-gap: var(--g-spacing-1);
+  align-items: baseline;
+  white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
 
-.rh-cmp-sub__value {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
+.rh-cmp-sub__earned {
+  display: inline-flex;
+  justify-content: flex-end;
+}
+
+.rh-cmp-sub__crown {
+  display: inline-flex;
+  align-self: center;
+}
+
+/* узкий столбец (768, четыре репозитория): значение и баллы — двумя строками по левому
+ * краю, без пунктира, иначе значение сжималось до буквы в строке («0 / дн / ей») */
+.rh-cmp-cell_sub {
+  container-type: inline-size;
+}
+
+@container (max-width: 160px) {
+  .rh-cmp-sub {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+
+  .rh-cmp-sub > .rh-cmp-lead-dots {
+    display: none;
+  }
+}
+
+/* по верху, а не по базовой линии: иначе низ иконки вставал на базовую линию и
+ * опускал подпись с пунктиром на 2px ниже значений в ячейках */
+.rh-cmp-subicon {
+  display: inline-flex;
+  align-self: flex-start;
+  flex: none;
+  width: 14px;
+  margin: 2px var(--g-spacing-2) 0 0;
+  color: var(--g-color-text-secondary);
+}
+
+/* строка-якорь показателей — без своей высоты: заголовка «Балл / Значение» больше нет */
+.rh-cmp-label_subhead,
+.rh-cmp-cell_subhead {
+  padding: 0;
+  min-height: 0;
 }
 
 .rh-cmp-cell_empty-cat {
@@ -3154,7 +3638,18 @@ button.rh-category:focus-visible {
 .rh-cmp-legend {
   display: flex;
   align-items: center;
-  gap: var(--g-spacing-2);
+  gap: var(--g-spacing-1);
+}
+
+/* в угловой ячейке шапки — по низу, на линии имен столбцов; слева — по краю подписей строк («Язык») */
+.rh-cmp-head_corner {
+  display: flex;
+  align-items: flex-end;
+  padding-inline-start: 0;
+}
+
+.rh-cmp-legend-top {
+  margin-bottom: var(--g-spacing-2);
 }
 
 .rh-cmp-skeleton.g-skeleton {
@@ -3171,6 +3666,11 @@ button.rh-category:focus-visible {
   border: 1px solid var(--g-color-line-generic);
   border-radius: var(--g-border-radius-xl);
   padding: 0 var(--g-spacing-3) var(--g-spacing-2);
+}
+
+/* у шапки телефона своя линия на всю ширину */
+.rh-cmp_phone .rh-cmp-head:not(.rh-cmp-head_corner):not(.rh-cmp-head_invite)::after {
+  display: none;
 }
 
 .rh-cmp_phone .rh-cmp-head {
@@ -3191,8 +3691,22 @@ button.rh-category:focus-visible {
   gap: var(--g-spacing-1);
 }
 
+/* у первой шапки слева только поле таблицы — закрывать нечего, а тень фона съедала
+ * обводку и скругление верхнего левого угла */
+/* линия под шапкой — и через зазор между столбцами: тень фона его закрывает, а линию не продолжает */
+.rh-cmp_phone .rh-cmp-row > .rh-cmp-head:not(:first-child)::before {
+  content: "";
+  position: absolute;
+  inset-inline-start: calc(-1 * var(--g-spacing-2));
+  bottom: 0;
+  width: var(--g-spacing-2);
+  /* ровно на месте нижней обводки шапки, какой бы толщины ее ни отрисовал экран */
+  transform: translateY(100%);
+  border-bottom: 1px solid var(--g-color-line-generic);
+}
+
 .rh-cmp_phone .rh-cmp-row > .rh-cmp-head:first-child {
-  box-shadow: calc(-1 * var(--g-spacing-3)) 0 0 var(--g-color-base-background);
+  box-shadow: none;
 }
 
 .rh-cmp_phone .rh-cmp-row > .rh-cmp-head:last-child {
@@ -3206,8 +3720,7 @@ button.rh-category:focus-visible {
   padding: var(--g-spacing-3) 0 var(--g-spacing-1);
 }
 
-.rh-cmp_phone .rh-cmp-label_sub,
-.rh-cmp_phone .rh-cmp-label_refhead {
+.rh-cmp_phone .rh-cmp-label_sub {
   padding-top: var(--g-spacing-2);
 }
 
@@ -3222,23 +3735,32 @@ button.rh-category:focus-visible {
   align-items: flex-start;
 }
 
-.rh-cmp_phone .rh-cmp-sublabel {
-  padding-inline-start: 0;
+/* телефон: подпись строкой над ячейками — пунктиру вести некуда; значение сверху,
+ * баллы прижаты к низу ячейки: при переносе значения в одном столбце баллы всех
+ * столбцов стоят на одной линии */
+.rh-cmp_phone .rh-cmp-cell_sub {
+  align-items: stretch;
+}
+
+.rh-cmp_phone .rh-cmp-lead-dots {
+  display: none;
 }
 
 .rh-cmp_phone .rh-cmp-sub {
+  display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 2px;
 }
 
-.rh-cmp_phone .rh-cmp-sub__score {
-  flex: none;
-  justify-content: flex-start;
+/* столбец ~100px — балл под значением, по левому краю; галочка 14px */
+.rh-cmp_phone .rh-cmp-sub__pts {
+  margin-top: auto;
+  grid-template-columns: max-content 14px;
 }
 
-.rh-cmp_phone .rh-cmp-sub__value {
-  flex: none;
-  width: 100%;
+.rh-cmp_phone .rh-cmp-cell.rh-cmp-row_last {
+  padding-bottom: var(--g-spacing-4);
 }
 
 .rh-cmp_phone .rh-cmp-total__num.g-text {
@@ -3253,6 +3775,20 @@ button.rh-category:focus-visible {
 /* телефон: плашка видимости — иконкой, слово остается в title */
 .rh-cmp-visicon .g-label__text {
   display: none;
+}
+
+/* телефон: значок видимости и метка исключения — в строке аватара, справа от него,
+ * а не отдельной строкой под именем */
+.rh-cmp_phone .rh-cmp-colhead {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-areas:
+    "avatar pill remove"
+    "name name name";
+  column-gap: var(--g-spacing-2);
+}
+
+.rh-cmp_phone .rh-cmp-colhead__pill {
+  min-width: 0;
 }
 
 /* таблица лимитов AI в «Настройках»: числа не переносятся, отступы — шкалой Gravity */
@@ -3503,22 +4039,21 @@ button.rh-category:focus-visible {
   gap: var(--g-spacing-2);
 }
 
-/* ---------- режим «По шагам» и заготовки файлов в рекомендациях ---------- */
+/* ---------- остальные рекомендации и заготовки файлов ---------- */
 
-/* заголовок и переключатель «По отдельности | По шагам» — одной строкой; отбивка — как у
-   заголовка раздела (переносится на телефоне) */
-.rh-recs__head {
-  margin: var(--g-spacing-1) 0 var(--g-spacing-4);
+/* итог лесенки — строкой под заголовком раздела, до ступеней */
+.rh-recs__headline {
+  margin: calc(-1 * var(--g-spacing-2)) 0 var(--g-spacing-3);
 }
 
-.rh-section-card .rh-recs__head > .rh-section__title.g-text {
-  margin: 0;
+/* «?» не сжимается флексом длинного итога (на телефоне было 6px) */
+.rh-recs__headline .g-help-mark,
+.rh-recs__headline > button {
+  flex-shrink: 0;
 }
 
-/* итог лестницы под последним шагом: отбит линией, как строки списка */
-.rh-recs__summary {
-  padding: var(--g-spacing-3) 0;
-  border-top: 1px solid var(--g-color-line-generic);
+.rh-recs_first + .rh-recs__headline {
+  margin-top: 0;
 }
 
 .rh-recs__rest-title.g-text {
@@ -3527,10 +4062,8 @@ button.rh-category:focus-visible {
   margin-bottom: var(--g-spacing-2);
 }
 
-/* кнопка заготовки — самый тихий элемент строки: под текстом рекомендации,
- * текст кнопки — по левому краю текста */
-.rh-rec__body .rh-rec__fix {
-  align-self: flex-start;
+/* «Источник данных» — самая тихая кнопка строки; первой в строке — по краю текста */
+.rh-rec__meta > .rh-rec__proof:first-child {
   margin-inline-start: calc(-1 * var(--g-spacing-2));
 }
 
@@ -4384,7 +4917,15 @@ button.rh-category:focus-visible {
   font-family: var(--g-font-family-monospace);
   font-size: var(--g-text-code-1-font-size);
   line-height: var(--g-text-code-1-line-height);
-  white-space: pre;
+  /* у Markdown-заготовок перенос строк смысла не меняет; прокрутка вбок пряталась */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* лист снизу на телефоне: окно заготовки во всю ширину */
+.rh-tpl-sheet .rh-tpl {
+  width: 100%;
+  padding: 0 0 var(--g-spacing-4);
 }
 
 .rh-tpl__code:focus-visible {
@@ -4467,4 +5008,508 @@ button.rh-category:focus-visible {
 .rh-link-button:disabled {
   cursor: default;
   color: var(--g-color-text-secondary);
+}
+
+/* ---------- разбивка категории: «N из веса» (вариант C1, 18.10.2026) ----------
+ * Полоса категории — слитная: заливка — балл категории цветом категории,
+ * недобранное — штриховкой, как «не набрано» у полосы вклада под индексом. */
+.rh-catbar {
+  display: flex;
+  width: 100%;
+  height: 8px;
+}
+
+.rh-catbar__seg {
+  position: relative;
+  flex: 1 1 auto;
+  overflow: hidden;
+  border-radius: 2px;
+  background: repeating-linear-gradient(
+    -45deg,
+    var(--g-color-base-generic-medium) 0 2px,
+    transparent 2px 4px
+  );
+}
+
+.rh-catbar__seg > i {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: currentColor;
+}
+
+/* раскрытие: строки — значок, имя и значение, набранное, «из веса»; одна сетка
+ * у всех строк (колонки фиксированной ширины), без subgrid. Значок стоит под
+ * шевроном, текст — ровно под названием категории (поле 12px + 16px + зазор 12px,
+ * как у строки категории); прочие блоки раскрытия — с того же края. */
+.rh-cbd {
+  --rh-cbd-text: calc(16px + var(--g-spacing-3));
+  padding: var(--g-spacing-1) var(--g-spacing-3) var(--g-spacing-3);
+}
+
+.rh-cbd > :not(.rh-cbd__table) {
+  margin-inline-start: var(--rh-cbd-text);
+}
+
+/* переключатели справочных — шеврон в колонке значков, подпись по краю имен */
+.rh-cbd > .rh-cbd__refs {
+  margin-inline-start: 0;
+}
+
+/* вкладки раскрытия — по краю текста; панели — во всю ширину (значки под шевроном) */
+/* вкладки ближе к строке категории (вкладка 36px, текст по центру — сверху и так
+ * воздух), снизу — отбивка от таблицы */
+.rh-cbd > .rh-cbd__tabs {
+  margin-block: calc(-1 * var(--g-spacing-2)) var(--g-spacing-3);
+}
+
+.rh-cbd > .rh-cbd__panel {
+  margin-inline-start: 0;
+}
+
+.rh-cbd__panel > .rh-cbd__note,
+.rh-cbd__panel > .rh-cbd__foot {
+  margin-inline-start: var(--rh-cbd-text);
+}
+
+/* разряд под разрядом: дробь — в слоте постоянной ширины (запятая и цифра) */
+.rh-num__frac {
+  display: inline-block;
+  min-width: 1.5ch;
+  text-align: start;
+}
+
+/* одна сетка на таблицу (строки — subgrid): имя — пунктир — значение одной
+ * ячейкой, значение у ее правого края, сразу перед числами */
+.rh-cbd__table {
+  display: grid;
+  /* числа — по содержимому: самое длинное «из N» кончается у правого края, и
+   * значения справочных (ячейка до края) встают концом ровно под ним */
+  grid-template-columns: 16px minmax(0, 1fr) auto auto;
+  column-gap: var(--g-spacing-3);
+}
+
+.rh-cbd__row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: baseline;
+  padding-block: 4px;
+  border-radius: var(--g-border-radius-s);
+}
+
+/* наведение — строка подсвечена (подложка шире строки только по бокам, без
+ * сдвига сетки), рядом подсказка с расчетом */
+.rh-cbd__table:not(.rh-cbd__table_refs) .rh-cbd__row:hover {
+  background: var(--g-color-base-simple-hover);
+  box-shadow:
+    -4px 0 0 var(--g-color-base-simple-hover),
+    4px 0 0 var(--g-color-base-simple-hover);
+}
+
+.rh-cbd-tip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 280px;
+}
+
+/* значки серые: цвет зоны у полного круга в красной категории читался тревогой;
+ * кольцо — тем же серым, а не цветом линии (1,6:1 на темной теме). Значок — на
+ * первой строке имени (строка 18px, значок 14px), а не по центру высокой строки */
+.rh-cbd__glyph {
+  display: flex;
+  align-self: start;
+  justify-content: center;
+  margin-top: 2px;
+  color: var(--g-color-text-secondary);
+}
+
+/* значок с подсказкой — в порядке Tab: фокус открывает ту же подсказку */
+.rh-cbd__tipglyph {
+  display: flex;
+  border-radius: 50%;
+}
+
+.rh-cbd__tipglyph:focus-visible {
+  outline: 2px solid var(--g-color-line-focus);
+  outline-offset: 1px;
+}
+
+/* имя — пунктир — значение: пунктир ведет глаз от показателя к его числам */
+.rh-cbd__name {
+  display: flex;
+  grid-column: 2;
+  gap: var(--g-spacing-2);
+  align-items: baseline;
+  min-width: 0;
+}
+
+.rh-cbd__title {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* пунктир — до значения, редкими точками: сплошной линией он сливался с
+ * границей вкладок */
+.rh-cbd__lead {
+  flex: 1 1 auto;
+  align-self: baseline;
+  min-width: var(--g-spacing-4);
+  height: 1px;
+  background-image: linear-gradient(to right, color-mix(in srgb, var(--g-color-text-secondary) 80%, transparent) 1px, transparent 1px);
+  background-size: 3px 1px;
+  background-repeat: repeat-x;
+  transform: translateY(-3px);
+}
+
+/* значение — по правому краю, рядом с числами; длинное переносится */
+.rh-cbd__value.g-text {
+  flex: 0 1 auto;
+  max-width: 45%;
+  min-width: 0;
+  overflow-wrap: break-word;
+  text-align: end;
+}
+
+/* у справочных баллов нет — ячейка до правого края: значение встает под «из веса» */
+.rh-cbd__name_wide {
+  grid-column: 2 / -1;
+}
+
+.rh-cbd__icon {
+  display: flex;
+}
+
+.rh-cbd__earned {
+  grid-column: 3;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.rh-cbd__of {
+  grid-column: 4;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* части README — под своей строкой, с линией отступа */
+.rh-cbd__row_part .rh-cbd__name {
+  padding-left: var(--g-spacing-3);
+  border-left: 1px solid var(--g-color-line-generic);
+}
+
+/* только поля по вертикали: короткая запись margin сбрасывала отступ до края имен */
+.rh-cbd__note.g-text,
+.rh-cbd__note {
+  max-width: 72ch;
+  margin-block: var(--g-spacing-2) 0;
+}
+
+/* место среди похожих и перенос веса — тихо внизу раскрытия */
+.rh-cbd__foot {
+  margin-top: var(--g-spacing-2);
+}
+
+/* справочные — сразу под таблицей, без отбивки */
+.rh-cbd__refs {
+  display: flex;
+  gap: var(--g-spacing-3);
+  align-items: center;
+  text-align: start;
+  margin-top: var(--g-spacing-1);
+  padding: var(--g-spacing-1) 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.rh-cbd__refs-chevron {
+  display: flex;
+  flex: none;
+  justify-content: center;
+  width: 16px;
+}
+
+.rh-cbd__refs:focus-visible {
+  outline: 2px solid var(--g-color-line-focus);
+  border-radius: var(--g-border-radius-s);
+}
+
+/* карта владельцев деревом: каталог, полоса доли главного автора с чертой
+ * порога, доля и имя; подкаталоги — ветвью под шевроном */
+.rh-owners {
+  display: flex;
+  flex-direction: column;
+  gap: var(--g-spacing-2);
+  margin-block: 0 var(--g-spacing-2);
+}
+
+/* шевроны дерева — в колонке значков, имена каталогов — по краю имен показателей */
+.rh-cbd > .rh-owners {
+  margin-inline-start: 0;
+}
+
+.rh-owners__legend {
+  margin-inline-start: var(--rh-cbd-text);
+}
+
+/* одна сетка на дерево (уровни — subgrid): колонка имен — по самому длинному
+ * имени, полоса — на все свободное место, справа доля и автор */
+.rh-otree,
+.rh-otree__kids {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rh-otree {
+  display: grid;
+  grid-template-columns: 16px fit-content(40%) minmax(120px, 1fr) auto fit-content(35%);
+  column-gap: var(--g-spacing-3);
+}
+
+.rh-otree__item,
+.rh-otree__kids,
+.rh-otree__row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+}
+
+.rh-otree__row {
+  align-items: center;
+  padding-block: 3px;
+}
+
+/* ветви — уголками, как вложенные пункты меню SourceCraft: от имени родителя
+ * вниз и вправо к имени подкаталога */
+.rh-otree__item_child {
+  position: relative;
+}
+
+.rh-otree__item_child::before,
+.rh-otree__item_child:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: calc(16px + var(--g-spacing-3) + 6px);
+  border-left: 1px solid var(--g-color-line-generic-active);
+}
+
+.rh-otree__item_child::before {
+  top: 0;
+  width: 8px;
+  height: 12px;
+  border-bottom: 1px solid var(--g-color-line-generic-active);
+  border-bottom-left-radius: 6px;
+}
+
+.rh-otree__item_child:not(:last-child)::after {
+  top: 12px;
+  bottom: 0;
+}
+
+.rh-otree__item_child .rh-otree__name {
+  padding-inline-start: 20px;
+}
+
+/* каталог с подкаталогами: имя и шеврон справа от него — одна кнопка */
+.rh-otree__toggle {
+  display: inline-flex;
+  justify-self: start;
+  gap: var(--g-spacing-1);
+  align-items: center;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--g-border-radius-s);
+  background: none;
+  color: var(--g-color-text-secondary);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.rh-otree__toggle:focus-visible {
+  outline: 2px solid var(--g-color-line-focus);
+}
+
+.rh-otree__name.g-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* полоса долей авторов: главный — ярче (стальной, если единственный владелец:
+ * желтый занят зоной «Требует внимания»), второй и третий — светлее, остаток —
+ * «другие» (фон полосы) */
+.rh-otree__bar {
+  position: relative;
+  display: flex;
+  gap: 1px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--g-color-base-generic);
+  overflow: visible;
+}
+
+.rh-otree__bar:focus-visible {
+  outline: 2px solid var(--g-color-line-focus);
+  outline-offset: 3px;
+}
+
+.rh-otree__seg {
+  flex: none;
+  height: 100%;
+}
+
+.rh-otree__seg:first-child {
+  border-radius: 3px 0 0 3px;
+}
+
+.rh-otree__seg_1 {
+  background: var(--g-color-base-neutral-heavy);
+}
+
+/* стальной приглушен к серому: чистый misc спорил с полосами зон */
+.rh-otree__seg_1.rh-otree__seg_single {
+  background: color-mix(in srgb, var(--g-color-base-misc-medium) 55%, var(--g-color-base-neutral-heavy));
+}
+
+.rh-otree__seg_2 {
+  background: var(--g-color-base-neutral-medium);
+}
+
+.rh-otree__seg_3 {
+  background: color-mix(in srgb, var(--g-color-base-neutral-medium) 55%, transparent);
+}
+
+.rh-otree__tick {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 1px;
+  background: var(--g-color-text-secondary);
+}
+
+/* доля и автор — ячейками общей сетки (обертка не дает своего блока) */
+.rh-otree__who {
+  display: contents;
+}
+
+.rh-otree__share.g-text {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.rh-otree__owner.g-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.rh-otree__bot {
+  display: inline-flex;
+  margin-inline-start: var(--g-spacing-1);
+  vertical-align: -2px;
+}
+
+/* телефон: имя и полоса строкой, доля и имя автора — под ними */
+@media (max-width: 767px) {
+  .rh-otree {
+    grid-template-columns: 16px minmax(0, 1fr) 72px;
+  }
+
+  .rh-otree__row {
+    row-gap: 2px;
+  }
+
+  .rh-otree__who {
+    display: flex;
+    grid-column: 2 / -1;
+    gap: var(--g-spacing-2);
+    align-items: baseline;
+    min-width: 0;
+  }
+}
+
+.rh-owners__swatch {
+  display: inline-block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.rh-owners__swatch_single {
+  background: color-mix(in srgb, var(--g-color-base-misc-medium) 55%, var(--g-color-base-neutral-heavy));
+}
+
+/* разбор модели: текст «Разбор модели» — по краю имен показателей (у плашки поле
+ * 12px и значок 16px с зазором 8px), текст плашки — во всю ширину */
+.rh-cbd > .rh-cat-ai {
+  margin-inline-start: calc(var(--rh-cbd-text) - 36px);
+}
+
+/* телефон: имя над значением, «N» над «из веса» справа; блок — после базовых правил */
+@media (max-width: 767px) {
+  /* вкладки — от края раскрытия: в одну строку без переноса */
+  .rh-cbd > .rh-cbd__tabs {
+    margin-inline-start: 0;
+  }
+
+  /* счетчики вкладок на телефоне не помещаются: три вкладки «Состояния кода» уходили за край */
+  .rh-cbd__tabs .g-tab__counter {
+    display: none;
+  }
+
+  .rh-cbd__tabs.g-tab-list {
+    column-gap: var(--g-spacing-4);
+  }
+
+  .rh-cbd__lead {
+    display: none;
+  }
+
+  .rh-cbd__table {
+    grid-template-columns: 16px minmax(0, 1fr) auto;
+  }
+
+  .rh-cbd__table_refs {
+    grid-template-columns: 16px minmax(0, 1fr);
+  }
+
+  .rh-cbd__row {
+    grid-template-rows: auto auto;
+  }
+
+  .rh-cbd__glyph {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .rh-cbd__name {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .rh-cbd__value.g-text {
+    max-width: none;
+    text-align: start;
+  }
+
+  .rh-cbd__earned {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .rh-cbd__of {
+    grid-column: 3;
+    grid-row: 2;
+    text-align: right;
+  }
 }

@@ -91,25 +91,18 @@ describe("В4.6 круг 3: карточка", () => {
     expect(css).toMatch(/\.rh-aside-section > \.g-definition-list,[\s\S]{0,80}\{[^}]*margin-block-start:\s*var\(--g-spacing-1\)/);
   });
 
-  test("недоступные каналы — Alert, нижний CTA снят, основания раскрываемы", () => {
+  test("недоступные каналы — плашки под списком нет, нижний CTA снят, основания раскрываемы", () => {
     const repo = web("RepoPage.tsx");
-    const locked = repo.slice(repo.indexOf("function LockedCategories"), repo.indexOf("function CategoryRow"));
     const band = repo.slice(repo.indexOf("function ScoreBand"), repo.indexOf("function ScoreFigure"));
-    expect(locked).toContain('<Alert');
-    expect(locked).toContain('theme="info"');
-    // одно предложение без заголовка, а не строки «категория – фраза»
-    expect(locked).not.toContain("<DefinitionList");
-    expect(locked).not.toContain("title=");
-    expect(locked).toContain("message={text}");
-    // переход к токену живет у показателя, а не в этой строке
-    expect(locked).not.toContain('linkProps("/settings")');
-    expect(web("layout.css")).toMatch(/\.rh-locked-note\s*\{[^}]*margin-top:[^}]*\}/);
-    expect(web("layout.css")).not.toMatch(/\.rh-locked-note\s*\{[^}]*padding:/);
+    // 19.10.2026: плашка закрытых категорий под списком снята – путь к полной оценке у Repo Health Score
+    expect(repo).not.toContain("function LockedCategories");
+    expect(web("layout.css")).not.toMatch(/\.rh-locked-note\s*\{/);
     expect(band).not.toContain("summaryLine");
     expect(band).not.toContain("Рекомендаций:");
-    // основание – словами (ярлык подметрики), раскрывается по клику; ключ факта –
-    // мелко в поповере
-    expect(repo).toMatch(/<Label theme="info" size="xs" interactive>[\s\S]{0,120}\{item\.label\}[\s\S]{0,80}<Icon data=\{ChevronDown\}/);
+    // основание – по кнопке «Источник данных» (18.10.2026: синий ярлык подметрики
+    // спорил с заголовком; 19.10.2026: «Откуда данные» → «Источник данных»),
+    // раскрывается по клику; ключ факта – мелко в поповере
+    expect(repo).toMatch(/content=\{<FactProof item=\{item\} \/>\}[\s\S]{0,200}Источник данных[\s\S]{0,60}<Icon data=\{ChevronDown\}/);
     expect(repo).not.toContain("Порядок задан движком правил");
   });
 

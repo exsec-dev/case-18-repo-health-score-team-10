@@ -47,11 +47,10 @@ describe("П4.2: полнота словаря", () => {
     }
   });
 
-  test("у каждой подметрики словаря есть иконка на карточке (иконки остаются в компоненте)", () => {
+  test("названия на карточке — только из словаря (иконки подметрик сняты 18.10.2026: вместо них сектор балла)", () => {
     const page = readFileSync(join(import.meta.dir, "..", "src", "web", "RepoPage.tsx"), "utf8");
-    const icons = page.slice(page.indexOf("const SUBMETRIC_ICONS"), page.indexOf("};", page.indexOf("const SUBMETRIC_ICONS")));
-    const keys = [...icons.matchAll(/"([a-z_]+\.[a-z_0-9]+)":/g)].map((m) => m[1]).sort();
-    expect(keys).toEqual(Object.keys(SUBMETRICS).sort());
+    const breakdown = readFileSync(join(import.meta.dir, "..", "src", "web", "categoryBreakdown.ts"), "utf8");
+    expect(breakdown).toContain("submetricTitle(key, sub)");
     // названий в компоненте больше нет — один источник
     expect(page.includes("const SUBMETRIC_TITLES")).toBe(false);
   });
@@ -145,14 +144,16 @@ describe("П4.2: одно правило на страницу, MD и PDF", () =
   test("страница и MD берут название и значение из словаря; сырые значения — только в доказательствах", () => {
     const root = join(import.meta.dir, "..", "src");
     const page = readFileSync(join(root, "web", "RepoPage.tsx"), "utf8");
+    const breakdown = readFileSync(join(root, "web", "categoryBreakdown.ts"), "utf8");
     // модель отчета строит build.ts; значение — `submetricShownValue` (словарь + заметка)
     const md = readFileSync(join(root, "report", "build.ts"), "utf8");
     expect({
       // страница берет значение через `submetricShownValue` — тот же словарь, что отчет
-      pageImports: page.includes('import { displayOnly, submetricContext, submetricNote, submetricShownValue, submetricTitle } from "../report/submetrics";'),
-      // соседние подметрики — пятым доводом и на странице, и в отчете
-      pageValue: page.includes("{submetricShownValue(key, subKey, sub, submetricContext(card.score?.computedAt), cat.submetrics)}"),
-      pageTitle: page.includes("{submetricTitle(key, subKey)}"),
+      // 18.10.2026: строки раскрытия строит categoryBreakdown.ts тем же словарем
+      // 19.10.2026: через submetricShownParts — тот же словарь, пояснение в скобке отдельно (в подсказку)
+      pageImports: breakdown.includes('import { displayOnly, fmtKb, submetricContext, submetricShownParts, submetricTitle, subweightKey } from "../report/submetrics";'),
+      pageValue: breakdown.includes("submetricShownParts(key, sub, entry, ctx)"),
+      pageTitle: breakdown.includes("submetricTitle(key, sub)"),
       mdRow: md.includes("const value = submetricShownValue(key, sub, entry, ctx, cat.submetrics);") && md.includes("line(submetricTitle(key, sub)),"),
       mdContext: md.includes("const ctx = submetricContext(score.computedAt);"),
       proofRaw: page.includes("{fmtFactValue(fact.value)}"),
