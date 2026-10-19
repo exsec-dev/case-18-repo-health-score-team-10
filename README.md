@@ -1,5 +1,7 @@
 # HealthCraft – здоровье открытых репозиториев SourceCraft
 
+[![HealthCraft Index](https://health-craft.ru/api/v1/repos/lct-hackaton-2026/case-18-repo-health-score-team-10/badge.svg?show=word,delta,cats&key=Nx3fzg2q9kRvu9-t3t399V)](https://health-craft.ru/repo/lct-hackaton-2026/case-18-repo-health-score-team-10)
+
 HealthCraft оценивает состояние репозиториев SourceCraft по фактам из git, REST API и AppSec:
 ставит оценку 0-100, объясняет, из чего она сложилась, и дает конкретные рекомендации с
 ожидаемым эффектом. Все открытые репозитории платформы собраны в публичный рейтинг.
