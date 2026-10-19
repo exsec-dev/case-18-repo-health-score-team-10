@@ -1221,10 +1221,10 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
 
 /**
  * Подписи чипов окна бейджа – короткие: 4 чипа с галочками идут в одну строку и на
- * телефоне (311px). «Зона» – слово зоны шкалы («здоров»), «Тренд» – разница с прошлым
- * анализом, «Категории» – шкалы 4 категорий под шапкой бейджа.
+ * телефоне (311px). «Зона» – слово зоны шкалы («здоров»), «Динамика» – разница с
+ * прошлым анализом, «Категории» – шкалы 4 категорий под шапкой бейджа.
  */
-const BADGE_CHIP_TEXT: Record<BadgeChip, string> = { rank: "Лига", word: "Зона", delta: "Тренд", cats: "Категории" };
+const BADGE_CHIP_TEXT: Record<BadgeChip, string> = { rank: "Лига", word: "Зона", delta: "Динамика", cats: "Категории" };
 const BADGE_FORMAT_TEXT: Record<BadgeFormat, string> = { md: "Markdown", html: "HTML", url: "Ссылка", json: "JSON API" };
 
 /** Что передать окну бейджа: репо, адрес сервиса, есть ли лига и ключ закрытого репо. */
@@ -1277,12 +1277,12 @@ function BadgeContent({ target, title = true }: { target: BadgeTarget; title?: b
       <div className="rh-badge-pop__chips" role="group" aria-label="Что показать на бейдже">
         {shown.map((c) => (
           <Button key={c} className="rh-badge-pop__chip" size="s" view="outlined" selected={chips.has(c)} aria-pressed={chips.has(c)} onClick={() => toggle(c)}>
+            {BADGE_CHIP_TEXT[c]}
             {chips.has(c) && (
-              <Button.Icon side="start">
+              <Button.Icon side="end">
                 <Icon data={Check} size={14} />
               </Button.Icon>
             )}
-            {BADGE_CHIP_TEXT[c]}
           </Button>
         ))}
       </div>

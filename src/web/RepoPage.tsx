@@ -185,7 +185,7 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
     return (
       // скелетон повторяет ритм содержимого: блок показателей (~150px) и шесть строк
       // категорий по 45px
-      <Page crumbs={crumbs} aside={<SkeletonRows rows={3} height={96} />} asideDrawer>
+      <Page crumbs={crumbs} actions={<ActionsSkeleton />} aside={<SkeletonRows rows={3} height={96} />} asideDrawer>
         <Flex direction="column" gap={3}>
           <SkeletonRows rows={1} height={150} />
           <SkeletonRows rows={6} height={45} />
@@ -223,7 +223,9 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
   const view = cardView(card);
   const reportHref = `${cardUrl}/report.md`;
   const refreshError = state.kind === "ok" ? state.refreshError : undefined;
-  const actions = (
+  // кнопки шапки зависят от списка «Мои репозитории» по токену («Обновить анализ»,
+  // «Бейдж»): пока он грузится — скелетон, а не строка, что перестраивается на глазах
+  const actions = withPat && tokenRepos === null ? <ActionsSkeleton /> : (
     <CardActions
       org={org}
       repo={repo}
@@ -611,6 +613,16 @@ function CardActions({ org, repo, scored, badge, badgeTarget, report, refresh }:
       )}
       {badgeOk && <BadgeDialog target={badgeTarget} open={badgeOpen} onClose={() => setBadgeOpen(false)} />}
     </Flex>
+  );
+}
+
+/** Скелетон строки действий шапки — пока не известно, какие кнопки показать. */
+function ActionsSkeleton() {
+  return (
+    <span className="rh-actions-skeleton" aria-busy="true" aria-label="Загрузка действий">
+      <Skeleton className="rh-actions-skeleton__item" />
+      <Skeleton className="rh-actions-skeleton__item rh-actions-skeleton__item_main" />
+    </span>
   );
 }
 

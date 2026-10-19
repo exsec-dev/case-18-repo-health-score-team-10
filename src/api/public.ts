@@ -117,49 +117,72 @@ export const RANK_BADGE_COLORS: Record<RankLeague, { bg: string; fg: string }> =
  * значком места цвета лиги; при null бейдж байт в байт обычный.
  */
 export function renderBadgeSvg(index: number | null, rank: RankBadge | null = null, extras: BadgeExtras = {}): string {
-  // изменение и слово шкалы – в сегменте числа через «·»; без них бейдж байт в байт прежний
-  const parts = [index === null ? "n/a" : String(index)];
-  if (index !== null && extras.delta !== undefined && extras.delta !== null) parts.push(deltaText(extras.delta));
-  if (index !== null && extras.word === true) parts.push(SCORE_WORDS[scoreTheme(index) as keyof typeof SCORE_WORDS]);
-  const value = parts.join(" · ");
+  // слово зоны – в сегменте числа через пробел; без него бейдж байт в байт прежний
+  const word = index !== null && extras.word === true ? SCORE_WORDS[scoreTheme(index) as keyof typeof SCORE_WORDS] : null;
+  const value = index === null ? "n/a" : word === null ? String(index) : `${index} ${word}`;
   const color = badgeColor(index);
   // левая половина – нейтральный серый, как у бейджей shields; ширина подписи – под Verdana 11
   const label = "HealthCraft Index";
-  const valueWidth = parts.length === 1 ? 8 + value.length * 11 : 10 + textWidth(value, true);
+  const valueWidth = word === null ? 8 + value.length * 11 : 10 + textWidth(value, true);
+  // динамика – серый треугольник и сдвиг на сером поле подписи перед числом, как у
+  // места в рейтинге (одна подложка с подписью – без шва); без сдвига (0 или
+  // сравнивать не с чем) ее нет
+  const delta = index !== null && extras.delta !== undefined && extras.delta !== null && extras.delta !== 0 ? extras.delta : null;
+  const deltaWidth = delta === null ? 0 : 6 + 7 + 3 + textWidth(String(Math.abs(delta))) + 6;
   // ширина сегмента места – под Verdana 11 (кириллица и цифры жирным ~8 px на знак)
   const rankWidth = rank === null ? 0 : 10 + rank.label.length * 8;
   // с категориями бейдж – карточка: шапка на всю ширину, число и место прижаты вправо
   const card = extras.categories === undefined ? null : categoryRows(extras.categories);
-  const width = Math.max(114 + valueWidth + rankWidth, card?.minWidth ?? 0);
-  const labelWidth = width - valueWidth - rankWidth;
+  const width = Math.max(114 + deltaWidth + valueWidth + rankWidth, card?.minWidth ?? 0);
+  const labelWidth = width - deltaWidth - valueWidth - rankWidth;
+  const valueX = labelWidth + deltaWidth;
   const height = card === null ? 20 : 20 + card.height;
+  const moved = delta === null ? "" : `, ${deltaText(delta)} с прошлого анализа`;
   const scores = card === null ? "" : `, ${card.rows.map((r) => `${r.name} ${r.value}`).join(", ")}`;
-  const title = rank === null ? `${label}: ${value}${scores}` : `${label}: ${value}, ${rank.label} рейтинга${scores}`;
+  const title = rank === null ? `${label}: ${value}${moved}${scores}` : `${label}: ${value}${moved}, ${rank.label} рейтинга${scores}`;
+  const deltaMark =
+    delta === null
+      ? ""
+      : `
+    <path d="${triangle(labelWidth + 6, delta > 0)}" fill="${DELTA_GREY}"/>
+    <text x="${labelWidth + 6 + 7 + 3}" y="14" text-anchor="start" fill="${DELTA_GREY}">${Math.abs(delta)}</text>`;
   const metal = rank === null ? null : RANK_BADGE_COLORS[rank.tier];
   const rankRect = metal === null ? "" : `
-    <rect x="${labelWidth + valueWidth}" width="${rankWidth}" height="20" fill="${metal.bg}"/>`;
+    <rect x="${valueX + valueWidth}" width="${rankWidth}" height="20" fill="${metal.bg}"/>`;
   const rankText = metal === null ? "" : `
-    <text x="${labelWidth + valueWidth + rankWidth / 2}" y="14" font-weight="bold" fill="${metal.fg}">${rank!.label}</text>`;
+    <text x="${valueX + valueWidth + rankWidth / 2}" y="14" font-weight="bold" fill="${metal.fg}">${rank!.label}</text>`;
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" role="img" aria-label="${title}">
   <title>${title}</title>
   <linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient>
   <clipPath id="r"><rect width="${width}" height="${height}" rx="3" fill="#fff"/></clipPath>
   <g clip-path="url(#r)">${card === null ? "" : `
     <rect width="${width}" height="${height}" fill="${CARD_BODY}"/>${card.bars(width)}`}
-    <rect width="${labelWidth}" height="20" fill="#555"/>
-    <rect x="${labelWidth}" width="${valueWidth}" height="20" fill="${color}"/>${rankRect}
+    <rect width="${valueX}" height="20" fill="${LABEL_GREY}"/>
+    <rect x="${valueX}" width="${valueWidth}" height="20" fill="${color}"/>${rankRect}
     <rect width="${width}" height="${height}" fill="url(#s)"/>
   </g>
   <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" font-size="11">
     <text x="${labelWidth / 2}" y="14">${label}</text>
-    <text x="${labelWidth + valueWidth / 2}" y="14" font-weight="bold">${value}</text>${rankText}${card === null ? "" : card.texts(width)}
+    <text x="${valueX + valueWidth / 2}" y="14" font-weight="bold">${value}</text>${deltaMark}${rankText}${card === null ? "" : card.texts(width)}
   </g>
 </svg>`;
 }
 
-// карточка категорий под шапкой бейджа: строка – название, шкала цвета зоны, балл справа
-const CARD_BODY = "#3d3d3d";
-const CARD_TRACK = "#555";
+/** Серый подписи (и поля карточки категорий) – как у бейджей shields. */
+const LABEL_GREY = "#555";
+
+/** Серый динамики: светлее поля подписи, но тише белого текста, как стрелка места в рейтинге. */
+const DELTA_GREY = "#c2c2c2";
+
+/** Треугольник 7×6 px по центру строки шапки: вершиной вверх – рост, вниз – снижение. */
+function triangle(x: number, up: boolean): string {
+  return up ? `M${x} 13h7l-3.5-6z` : `M${x} 7h7l-3.5 6z`;
+}
+
+// карточка категорий под шапкой бейджа – на том же сером, что подпись шапки:
+// строка – название, шкала цвета зоны, балл справа
+const CARD_BODY = LABEL_GREY;
+const CARD_TRACK = "#707070";
 const CARD_ROW = 16;
 const CARD_PAD = 6;
 const CARD_MIN_WIDTH = 232;
@@ -244,7 +267,7 @@ export function renderCategoryBadgeSvg(category: IndexCategoryKey, score: number
   <linearGradient id="s" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient>
   <clipPath id="r"><rect width="${width}" height="20" rx="3" fill="#fff"/></clipPath>
   <g clip-path="url(#r)">
-    <rect width="${labelWidth}" height="20" fill="#555"/>
+    <rect width="${labelWidth}" height="20" fill="${LABEL_GREY}"/>
     <rect x="${labelWidth}" width="${valueWidth}" height="20" fill="${badgeColor(shown)}"/>
     <rect width="${width}" height="20" fill="url(#s)"/>
   </g>

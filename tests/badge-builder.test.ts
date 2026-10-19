@@ -68,13 +68,23 @@ describe("параметры badge.svg", () => {
 });
 
 describe("SVG", () => {
-  test("без частей – прежний бейдж байт в байт; изменение и слово – в сегменте числа", () => {
+  test("без частей – прежний бейдж байт в байт; зона – в сегменте числа, динамика – серым треугольником", () => {
     expect(renderBadgeSvg(74, null, {})).toBe(renderBadgeSvg(74));
     expect(renderBadgeSvg(74, null, { delta: null, word: false })).toBe(renderBadgeSvg(74));
     const svg = renderBadgeSvg(74, null, { delta: 3, word: true });
-    expect(svg).toContain(">74 · +3 · здоров<");
-    expect(renderBadgeSvg(55, null, { delta: -2 })).toContain(">55 · −2<");
-    expect(renderBadgeSvg(20, null, { delta: 0, word: true })).toContain(">20 · ±0 · в зоне риска<");
+    // зона через пробел, без разделителя-точки
+    expect(svg).toContain(">74 здоров<");
+    expect(svg).not.toContain("·");
+    // рост: треугольник вершиной вверх и сдвиг серым, как место в рейтинге
+    expect(svg).toMatch(/<path d="M\d+ 13h7l-3\.5-6z" fill="#c2c2c2"\/>/);
+    expect(svg).toMatch(/fill="#c2c2c2">3<\/text>/);
+    expect(svg).toContain('aria-label="HealthCraft Index: 74 здоров, +3 с прошлого анализа"');
+    const down = renderBadgeSvg(55, null, { delta: -2 });
+    expect(down).toMatch(/<path d="M\d+ 7h7l-3\.5 6z"/);
+    expect(down).toMatch(/fill="#c2c2c2">2<\/text>/);
+    // без сдвига динамики нет, как в рейтинге
+    expect(renderBadgeSvg(20, null, { delta: 0, word: true })).toBe(renderBadgeSvg(20, null, { word: true }));
+    expect(renderBadgeSvg(20, null, { word: true })).toContain(">20 в зоне риска<");
     // без оценки частей нет: «n/a» серым, как раньше
     expect(renderBadgeSvg(null, null, { delta: 3, word: true })).toBe(renderBadgeSvg(null));
     const width = (s: string) => Number(/width="(\d+)"/.exec(s)![1]);
@@ -139,10 +149,10 @@ describe("бейдж закрытого репо по ключу", () => {
       seed(t);
       const open = badgeSubject(t.db, "bb", "open", { withRank: true })!;
       expect(open.previousIndex).toBe(60);
-      expect(renderBadgeFor(open, { parts: new Set(["delta"]), category: null })).toContain(">72 · +12<");
+      expect(renderBadgeFor(open, { parts: new Set(["delta"]), category: null })).toContain(", +12 с прошлого анализа");
       const priv = badgeSubject(t.db, "bb", "priv", { key: badgeKey(SECRET, "bb", "priv"), appSecret: SECRET, withRank: true })!;
       expect(priv.rank).toBeNull();
-      expect(renderBadgeFor(priv, { parts: new Set(["delta", "rank"]), category: null })).toContain(">45 · −5<");
+      expect(renderBadgeFor(priv, { parts: new Set(["delta", "rank"]), category: null })).toContain(": 45, −5 с прошлого анализа");
       // первая оценка – сравнивать не с чем, части «изменение» нет
       const int = badgeSubject(t.db, "bb", "int", { key: badgeKey(SECRET, "bb", "int"), appSecret: SECRET })!;
       expect(renderBadgeFor(int, { parts: new Set(["delta"]), category: null })).toBe(renderBadgeSvg(30));
@@ -170,14 +180,14 @@ describe("бейдж закрытого репо по ключу", () => {
     const plain = await get("open/badge.svg");
     expect(plain.body).toBe(renderBadgeSvg(72));
     expect((await get("open/badge.svg?style=rank")).status).toBe(200);
-    expect((await get("open/badge.svg?show=word,delta")).body).toContain(">72 · +12 · здоров<");
+    expect((await get("open/badge.svg?show=word,delta")).body).toContain("HealthCraft Index: 72 здоров, +12 с прошлого анализа");
     expect((await get("open/badge.svg?category=documentation")).body).toContain(">Документация<");
     expect((await get("open/badge.svg?show=cats")).body).toContain(">Состояние кода<");
 
     const key = badgeKey(SECRET, "bb", "priv");
     const priv = await get(`priv/badge.svg?key=${key}&show=delta`);
     expect(priv.status).toBe(200);
-    expect(priv.body).toContain(">45 · −5<");
+    expect(priv.body).toContain("HealthCraft Index: 45, −5 с прошлого анализа");
     expect((await get(`priv/badge.svg?key=${key}&category=issues`)).status).toBe(200);
     // без ключа, с чужим ключом, выбывший и несуществующий – одинаковый 404
     const missing = await get("nope/badge.svg");

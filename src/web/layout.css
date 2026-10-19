@@ -2553,6 +2553,11 @@ button.rh-category:focus-visible {
   background: var(--g-color-base-generic);
 }
 
+/* темная тема: подложка темнее окна — серый бейджа (#555) иначе сливался с ней */
+.g-root_theme_dark .rh-badge-pop__preview {
+  background: rgba(0, 0, 0, 0.24);
+}
+
 .rh-badge-pop__preview img {
   display: block;
   max-width: 100%;
@@ -2564,24 +2569,43 @@ button.rh-category:focus-visible {
   gap: var(--g-spacing-1);
 }
 
+/* название — у левого края чипа, галочка выбранного — у правого */
 .rh-badge-pop__chips > .rh-badge-pop__chip {
   flex: 1 1 auto;
+  justify-content: space-between;
   min-width: 0;
 }
 
-/* галочка выбранного чипа — по ширине самой иконки, а не квадратного слота кнопки */
+.rh-badge-pop__chip .g-button__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: start;
+}
+
+/* галочка — по ширине самой иконки, а не квадратного слота кнопки */
 .rh-badge-pop__chip .g-button__icon,
 .rh-badge-pop__chip .g-button__icon-inner {
   width: 14px;
 }
 
+/* отступ до текста дает gap кнопки (4px) */
 .rh-badge-pop__chip .g-button__icon {
-  margin-inline: -2px 4px;
+  margin-inline: 0 -2px;
 }
 
+/* телефон: 4 чипа с галочками в одну строку (311px) — поля и галочка мельче */
 @container rh-badge (max-width: 360px) {
   .rh-badge-pop__chips > .rh-badge-pop__chip {
-    --g-button-padding: 6px;
+    --g-button-padding: 4px;
+  }
+
+  .rh-badge-pop__chip .g-button__icon,
+  .rh-badge-pop__chip .g-button__icon-inner {
+    width: 12px;
+  }
+
+  .rh-badge-pop__chip .g-button__icon {
+    margin-inline: 0;
   }
 }
 
@@ -5311,5 +5335,28 @@ button.rh-category:focus-visible {
     grid-column: 3;
     grid-row: 2;
     text-align: right;
+  }
+}
+
+/* скелетон строки действий шапки карточки: кнопка и главная кнопка высотой m (28px) */
+.rh-actions-skeleton {
+  display: inline-flex;
+  gap: var(--g-spacing-2);
+  align-items: center;
+}
+
+.rh-actions-skeleton__item {
+  width: 96px;
+  height: 28px;
+  border-radius: var(--g-border-radius-m);
+}
+
+.rh-actions-skeleton__item_main {
+  width: 132px;
+}
+
+@media (max-width: 767px) {
+  .rh-actions-skeleton__item {
+    width: 28px;
   }
 }
