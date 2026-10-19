@@ -297,7 +297,7 @@ bun test --timeout 30000
 | Маршрут | Ответ |
 |---|---|
 | `GET /api/v1/repos/{org}/{repo}` | JSON: `healthcraftIndex`, `indexCoverage`, баллы 4 публичных категорий (`categories`), `modelVersion`, `scannedAt`, `headSha`, а также `org`, `repo`, `title`, `language`, `likes` |
-| `GET /api/v1/repos/{org}/{repo}/badge.svg` | SVG-бейдж «HealthCraft Index»: число и цвет зоны, без оценки – `n/a` серым; `?style=rank` – с лигой места (ТОП-10, ТОП-100, ТОП-1000), у репозитория без лиги – обычный бейдж |
+| `GET /api/v1/repos/{org}/{repo}/badge.svg` | SVG-бейдж «HealthCraft Index»: число и цвет зоны, без оценки – `n/a` серым; `?show=rank,word,delta` – с лигой места, словом шкалы и изменением с прошлого анализа, `?category=<категория>` – балл 1 категории, `?key=` – бейдж закрытого репозитория по ключу с карточки; прежний `?style=rank` работает как `?show=rank` |
 
 Бейдж в README репозитория (готовый код для своего репозитория дает кнопка на карточке):
 

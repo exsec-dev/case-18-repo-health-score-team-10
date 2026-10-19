@@ -87,7 +87,7 @@ import { publicBaseUrlFromEnv } from "../src/config";
 import { renderBadgeSvg } from "../src/api/public";
 import { getRepoHistory } from "../src/api/history";
 import { aiParagraphs, fraudFactorFact } from "../src/web/format";
-import { SLOT_EMPTY, aiNotesCaption, badgeMarkdown, historyByTime } from "../src/web/slots";
+import { SLOT_EMPTY, aiNotesCaption, badgeCode, historyByTime } from "../src/web/slots";
 import { evolutionTooEarly, type HistoryPoint } from "../src/summary/history-contract";
 import { makeApiDb } from "./api-fixtures";
 
@@ -116,7 +116,7 @@ describe("В5.3 круг 3: флаг фрода — текст фактора с
 
 describe("В5.3 круг 3: бейдж для README (выбор 5-A, О5)", () => {
   test("код — абсолютные адреса, картинка ведет на карточку", () => {
-    const md = badgeMarkdown("https://hc.example.ru/", "org", "my.repo");
+    const md = badgeCode({ publicBaseUrl: "https://hc.example.ru/", org: "org", repo: "my.repo", chips: new Set() }, "md");
     expect(md).toBe("[![HealthCraft Index](https://hc.example.ru/api/v1/repos/org/my.repo/badge.svg)](https://hc.example.ru/repo/org/my.repo)");
     expect(md.match(/\]\(https?:\/\//g)?.length).toBe(2);
   });

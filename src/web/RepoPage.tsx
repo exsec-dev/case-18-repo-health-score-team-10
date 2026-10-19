@@ -85,7 +85,7 @@ import { Trophy } from "./icons";
 import { useMediaQuery } from "./prefs";
 import { repoKey, useTokenRepos } from "./tokenRepos";
 import { repoWebUrl } from "../api/slug-input";
-import { AiOverviewSection, BadgeButton, BadgeDialog, CategoryAiGlyph, CategoryAiMark, CategoryAiNote, ActivityCheckCard, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
+import { AiOverviewSection, BadgeButton, BadgeDialog, type BadgeTarget, CategoryAiGlyph, CategoryAiMark, CategoryAiNote, ActivityCheckCard, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
 import { AsideSection, Collapse, EmptyState, LanguageName, Meta, MetaItem, MethodLink, ModelVersion, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
 
 type Card = RepoCard;
@@ -228,9 +228,10 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
       org={org}
       repo={repo}
       scored={card.score !== null}
-      badge={card.repo.badge}
-      league={card.score?.rankBadge != null}
-      publicBaseUrl={meta?.publicBaseUrl ?? window.location.origin}
+      // бейдж — только своему репо (он есть в «Моих репозиториях»); открытому из рейтинга
+      // хватает публичного маршрута, закрытому — ключ из карточки
+      badge={listed !== null && (card.repo.badge || card.repo.badgeKey !== undefined)}
+      badgeTarget={{ org, repo, publicBaseUrl: meta?.publicBaseUrl ?? window.location.origin, league: card.score?.rankBadge != null, badgeKey: card.repo.badgeKey ?? null }}
       report={card.score !== null ? { mdHref: reportHref, pdfHref: `${cardUrl}/report.pdf`, pdfName: reportFileName(org, repo, "pdf") } : null}
       // без оценки запуск — главное действие заглушки под шапкой; вторая кнопка в шапке
       // его бы дублировала
@@ -553,14 +554,14 @@ function useCompactBar(anchor: { current: HTMLElement | null }, phone: boolean):
  * кнопка, а остальное, отчет тоже, уходит в меню «…». У репо без оценки «Сравнить»
  * нет — в сравнении у него был бы пустой столбец.
  */
-function CardActions({ org, repo, scored, badge, league, publicBaseUrl, report, refresh }: { org: string; repo: string; scored: boolean; badge: boolean; league: boolean; publicBaseUrl: string; report: ReportFiles | null; refresh: ReactNode }) {
+function CardActions({ org, repo, scored, badge, badgeTarget, report, refresh }: { org: string; repo: string; scored: boolean; badge: boolean; badgeTarget: BadgeTarget; report: ReportFiles | null; refresh: ReactNode }) {
   const phone = useMediaQuery("(max-width: 767px)");
   const anchor = useRef<HTMLSpanElement>(null);
   const compact = useCompactBar(anchor, phone);
   // хуки — до любого ветвления: ширина меняет раскладку на лету
   const compare = useCompareState(org, repo);
   const reportDl = useReportDownload(report);
-  // доступность бейджа знает сервер (поле карточки), без пробного запроса badge.svg
+  // доступность бейджа знает сервер (поля карточки) и список по токену, без пробного запроса badge.svg
   const badgeOk = badge;
   const [badgeOpen, setBadgeOpen] = useState(false);
   if (!compact) {
@@ -571,7 +572,7 @@ function CardActions({ org, repo, scored, badge, league, publicBaseUrl, report, 
             анализ», у чужого — «Сравнить», путь члена жюри и конкурента */}
         {scored && <CompareButton org={org} repo={repo} primary={!refresh} />}
         {/* бейдж — кнопкой с поповером, как Clone у SourceCraft */}
-        {scored && <BadgeButton org={org} repo={repo} publicBaseUrl={publicBaseUrl} available={badge} league={league} />}
+        {scored && badgeOk && <BadgeButton target={badgeTarget} />}
         {reportDl && <ReportMenu report={reportDl} />}
         {refresh}
       </Flex>
@@ -588,7 +589,7 @@ function CardActions({ org, repo, scored, badge, league, publicBaseUrl, report, 
             : { text: compare.inSet ? "Открыть сравнение" : "Сравнить", iconStart: <Icon data={ScalesBalanced} size={16} />, action: compare.inSet ? compare.open : compare.add },
         ]
       : []),
-    ...(scored && badgeOk ? [{ text: "Бейдж для README", iconStart: <Icon data={SealCheck} size={16} />, action: () => setBadgeOpen(true) }] : []),
+    ...(scored && badgeOk ? [{ text: "Бейдж", iconStart: <Icon data={SealCheck} size={16} />, action: () => setBadgeOpen(true) }] : []),
     ...(reportDl ? reportDl.items.map((i) => ({ ...i, text: `Отчет: ${i.text}` })) : []),
   ];
   return (
@@ -608,7 +609,7 @@ function CardActions({ org, repo, scored, badge, league, publicBaseUrl, report, 
           )}
         />
       )}
-      {badgeOk && <BadgeDialog org={org} repo={repo} publicBaseUrl={publicBaseUrl} league={league} open={badgeOpen} onClose={() => setBadgeOpen(false)} />}
+      {badgeOk && <BadgeDialog target={badgeTarget} open={badgeOpen} onClose={() => setBadgeOpen(false)} />}
     </Flex>
   );
 }

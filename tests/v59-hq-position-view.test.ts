@@ -144,10 +144,11 @@ describe("В5.9 HQ: лига на экране — тон без фона, ме�
   });
 });
 
-describe("В5.9 HQ: код бейджа «Индекс и место»", () => {
-  test("rank — тот же адрес с ?style=rank; по умолчанию — прежний код", async () => {
-    const { badgeMarkdown } = await import("../src/web/slots");
-    expect(badgeMarkdown("https://hc.example.ru/", "org", "repo")).toBe("[![HealthCraft Index](https://hc.example.ru/api/v1/repos/org/repo/badge.svg)](https://hc.example.ru/repo/org/repo)");
-    expect(badgeMarkdown("https://hc.example.ru/", "org", "repo", "rank")).toBe("[![HealthCraft Index](https://hc.example.ru/api/v1/repos/org/repo/badge.svg?style=rank)](https://hc.example.ru/repo/org/repo)");
+describe("В5.9 HQ: код бейджа с лигой", () => {
+  test("лига — тот же адрес с ?show=rank; без чипов — прежний код", async () => {
+    const { badgeCode } = await import("../src/web/slots");
+    const base = { publicBaseUrl: "https://hc.example.ru/", org: "org", repo: "repo" };
+    expect(badgeCode({ ...base, chips: new Set() }, "md")).toBe("[![HealthCraft Index](https://hc.example.ru/api/v1/repos/org/repo/badge.svg)](https://hc.example.ru/repo/org/repo)");
+    expect(badgeCode({ ...base, chips: new Set(["rank"]) }, "md")).toBe("[![HealthCraft Index](https://hc.example.ru/api/v1/repos/org/repo/badge.svg?show=rank)](https://hc.example.ru/repo/org/repo)");
   });
 });

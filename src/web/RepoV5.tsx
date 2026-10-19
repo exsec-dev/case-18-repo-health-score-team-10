@@ -14,9 +14,8 @@ import {
   HelpMark,
   Icon,
   Label,
-  Link,
   Popover,
-  SegmentedRadioGroup,
+  Select,
   Skeleton,
   Spin,
   Text,
@@ -54,7 +53,7 @@ import {
   type QuotaCounter,
 } from "./format";
 import { announceJobStarted, announceJobsChanged, useAnalysisFinished, useSession } from "./session";
-import { SLOT_EMPTY, aiNotesCaption, badgeMarkdown, historyByTime, historyDomain, scoreHistoryView } from "./slots";
+import { BADGE_CHIPS, SLOT_EMPTY, aiNotesCaption, badgeCode, historyByTime, historyDomain, scoreHistoryView, type BadgeChip, type BadgeFormat } from "./slots";
 import type { AiNoteHistoryItem, AiNotesResponse, HistoryPoint, HistoryResponse } from "../summary/history-contract";
 import { evolutionTooEarly } from "../summary/history-contract";
 
@@ -1213,24 +1212,48 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
 
 // ---------- бейдж для README ----------
 
-/**
- * Бейдж для README — у любого публичного репозитория, не только у своего: маршрут SVG
- * открыт всем, а бейдж чужого репо годится для подборок, статей и форков. Приватному и
- * internal кнопки нет — публичный маршрут отвечает им 404. Доступность знает сервер
- * (поле карточки `repo.badge`, та же проверка `publicApiVisible`, что у маршрута), без
- * пробного запроса `badge.svg`, который ловил бы 404 в консоли.
- */
-function badgePath(org: string, repo: string): string {
-  return `/api/v1/repos/${encodeURIComponent(org)}/${encodeURIComponent(repo)}`;
+// Бейдж для README — только у своих репозиториев (они есть в списке «Мои
+// репозитории» по токену зрителя); у чужих кнопки нет. Открытому из рейтинга
+// хватает публичного маршрута `badge.svg`; закрытому (private/internal) – с ключом
+// `repo.badgeKey`, который маршрут карточки отдает только зрителю с правами.
+// Доступность знает сервер (поля карточки `repo.badge` и `repo.badgeKey`), без
+// пробного запроса `badge.svg`, который ловил бы 404 в консоли.
+
+/** Подписи чипов окна бейджа – короткие, чтобы 4 чипа шли в одну строку и на телефоне. */
+const BADGE_CHIP_TEXT: Record<BadgeChip, string> = { rank: "Лига", word: "Слово шкалы", delta: "Изменение", cats: "Категории" };
+const BADGE_FORMAT_TEXT: Record<BadgeFormat, string> = { md: "Markdown", html: "HTML", url: "Ссылка", json: "JSON API" };
+
+/** Что передать окну бейджа: репо, адрес сервиса, есть ли лига и ключ закрытого репо. */
+export interface BadgeTarget {
+  org: string;
+  repo: string;
+  publicBaseUrl: string;
+  league: boolean;
+  /** `repo.badgeKey` закрытого репо; у открытого – null */
+  badgeKey: string | null;
 }
 
-function BadgeContent({ org, repo, publicBaseUrl, league = false, title = true }: { org: string; repo: string; publicBaseUrl: string; league?: boolean; title?: boolean }) {
-  // у репо с лигой — выбор «Только индекс | Индекс и место»; без лиги выбора нет
-  // (вариант, которому нечего показать, не предлагаем)
-  const [style, setStyle] = useState<"index" | "rank">("index");
-  const shown = league ? style : "index";
-  const path = badgePath(org, repo);
-  const code = badgeMarkdown(publicBaseUrl, org, repo, shown);
+/**
+ * Окно бейджа, как Clone у SourceCraft: превью, чипы частей в одну строку и поле
+ * с кодом – формат слева, кнопка копирования справа. Чип лиги – только у репо с
+ * лигой; JSON API – только у открытого (ключ закрытого открывает лишь бейдж).
+ */
+function BadgeContent({ target, title = true }: { target: BadgeTarget; title?: boolean }) {
+  const { org, repo, publicBaseUrl, league, badgeKey } = target;
+  const [chips, setChips] = useState<ReadonlySet<BadgeChip>>(() => new Set(league ? ["rank"] : []));
+  const [format, setFormat] = useState<BadgeFormat>("md");
+  const shown = BADGE_CHIPS.filter((c) => c !== "rank" || league);
+  const formats = (Object.keys(BADGE_FORMAT_TEXT) as BadgeFormat[]).filter((f) => f !== "json" || badgeKey === null);
+  const toggle = (c: BadgeChip) =>
+    setChips((prev) => {
+      const next = new Set(prev);
+      if (next.has(c)) next.delete(c);
+      else next.add(c);
+      return next;
+    });
+  const code = badgeCode({ publicBaseUrl, org, repo, chips, key: badgeKey }, format);
+  // превью – с адреса этого же сервиса (относительный путь), тот же набор, что в коде
+  const previews = badgeCode({ publicBaseUrl: "", org, repo, chips, key: badgeKey }, "url").split(" ");
   return (
     <div className="rh-badge-pop" data-slot="badge">
       {title && (
@@ -1239,53 +1262,56 @@ function BadgeContent({ org, repo, publicBaseUrl, league = false, title = true }
         </Text>
       )}
       <div className="rh-badge-pop__preview">
-        <img src={`${path}/badge.svg${shown === "rank" ? "?style=rank" : ""}`} alt={shown === "rank" ? "HealthCraft Index и лига места" : "HealthCraft Index"} />
+        {previews.map((src, i) => (
+          <img key={src} src={src} alt={i === 0 ? "HealthCraft Index" : ""} />
+        ))}
       </div>
-      {league && (
-        <SegmentedRadioGroup size="s" width="max" value={shown} onUpdate={(v) => setStyle(v === "rank" ? "rank" : "index")} aria-label="Что показать на бейдже">
-          <SegmentedRadioGroup.Option value="index">Только индекс</SegmentedRadioGroup.Option>
-          <SegmentedRadioGroup.Option value="rank">Индекс и место</SegmentedRadioGroup.Option>
-        </SegmentedRadioGroup>
-      )}
-      {/* куда вставить — в подсказке у подписи: лишняя строка мелкого текста шумела бы */}
-      <Flex gap={1} alignItems="center">
-        <Text variant="caption-2" color="secondary">
-          Markdown
-        </Text>
-        <HelpMark iconSize="s" aria-label="Куда вставить бейдж">
-          Вставьте в начало README.md – бейдж обновляется после каждого анализа.
-        </HelpMark>
-      </Flex>
-      <TextInput size="m" readOnly value={code} aria-label="Код бейджа для README" endContent={<ClipboardButton text={code} size="s" view="flat-secondary" tooltipInitialText="Скопировать" tooltipSuccessText="Скопировано" />} />
-      <Link href={`${publicBaseUrl.replace(/\/+$/, "")}${path}`} target="_blank" rel="noreferrer">
-        JSON для API
-      </Link>
+      <div className="rh-badge-pop__chips" role="group" aria-label="Что показать на бейдже">
+        {shown.map((c) => (
+          <Button key={c} className="rh-badge-pop__chip" size="s" view="outlined" selected={chips.has(c)} aria-pressed={chips.has(c)} onClick={() => toggle(c)}>
+            {BADGE_CHIP_TEXT[c]}
+          </Button>
+        ))}
+      </div>
+      <div className="rh-badge-pop__code">
+        <Select
+          className="rh-badge-pop__format"
+          size="m"
+          pin="round-brick"
+          value={[format]}
+          onUpdate={(v) => setFormat((v[0] as BadgeFormat | undefined) ?? "md")}
+          options={formats.map((f) => ({ value: f, content: BADGE_FORMAT_TEXT[f] }))}
+          aria-label="Формат кода"
+          popupPlacement="bottom-start"
+        />
+        <TextInput className="rh-badge-pop__input" size="m" pin="brick-brick" readOnly value={code} aria-label="Код бейджа" />
+        <ClipboardButton text={code} size="m" view="outlined" pin="brick-round" tooltipInitialText="Скопировать" tooltipSuccessText="Скопировано" />
+      </div>
     </div>
   );
 }
 
 /** На телефоне бейдж открывается из меню «⋮» — диалогом. */
-export function BadgeDialog({ org, repo, publicBaseUrl, league, open, onClose }: { org: string; repo: string; publicBaseUrl: string; league: boolean; open: boolean; onClose: () => void }) {
+export function BadgeDialog({ target, open, onClose }: { target: BadgeTarget; open: boolean; onClose: () => void }) {
   return (
     <Dialog open={open} onClose={onClose} maxWidth="s" fullWidth className="rh-dialog-fit" aria-label={SLOT_EMPTY.badge.title}>
       <Dialog.Header caption={SLOT_EMPTY.badge.title} />
       <Dialog.Body>
-        <BadgeContent org={org} repo={repo} publicBaseUrl={publicBaseUrl} league={league} title={false} />
+        <BadgeContent target={target} title={false} />
       </Dialog.Body>
       <Dialog.Footer textButtonCancel="Готово" onClickButtonCancel={onClose} />
     </Dialog>
   );
 }
 
-export function BadgeButton({ org, repo, publicBaseUrl, available, league }: { org: string; repo: string; publicBaseUrl: string; available: boolean; league: boolean }) {
-  if (!available) return null;
+export function BadgeButton({ target }: { target: BadgeTarget }) {
   return (
-    <Popover trigger="click" placement={["bottom-end", "top-end"]} content={<BadgeContent org={org} repo={repo} publicBaseUrl={publicBaseUrl} league={league} />}>
+    <Popover trigger="click" placement={["bottom-end", "top-end"]} content={<BadgeContent target={target} />}>
       <Button view="normal" size="m">
         <Button.Icon side="start">
           <Icon data={SealCheck} size={16} />
         </Button.Icon>
-        Бейдж для README
+        Бейдж
       </Button>
     </Popover>
   );

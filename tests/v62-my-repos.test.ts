@@ -109,10 +109,11 @@ describe("заготовки, бейдж, лимиты", () => {
     expect(page).toContain("Положите файл в корень репозитория и замените @login на логины ответственных.");
   });
 
-  test("бейдж: «куда вставить» — в подсказке (?), ссылка «JSON для API»", () => {
+  test("бейдж: окно без пояснений, JSON — пунктом формата у поля кода", () => {
     const v5 = src("web/RepoV5.tsx");
-    expect(v5).toContain("Вставьте в начало README.md – бейдж обновляется после каждого анализа.");
-    expect(v5).toContain("JSON для API");
+    // компактное окно: подсказка «куда вставить» — в документации, не в окне
+    expect(v5).not.toContain("Вставьте в начало README.md");
+    expect(v5).toContain('json: "JSON API"');
     expect(v5).not.toContain("Данные в JSON");
   });
 

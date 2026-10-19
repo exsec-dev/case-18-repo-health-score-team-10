@@ -454,6 +454,7 @@ describe("П-2: repo.badge = ответ маршрута badge.svg", () => {
     const page = readFileSync(join(ROOT, "src", "web", "RepoPage.tsx"), "utf8");
     expect(v5).not.toMatch(/fetch\([^)]*badge\.svg/);
     expect(v5).not.toContain("useBadgeAvailable");
-    expect(page).toContain("badge={card.repo.badge}");
+    // кнопка — от полей карточки (и списка своих репо), не от пробного запроса
+    expect(page).toContain("card.repo.badge || card.repo.badgeKey !== undefined");
   });
 });

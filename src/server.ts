@@ -61,7 +61,7 @@ import { enqueueCheck, enqueueSummary, lastFinishedScan } from "./jobs/scheduler
 import { aiQuota, clearUnlock, isUnlocked, quotaRefusal, tryUnlock, type QuotaRefusal } from "./jobs/ai-quota";
 import type { AiAudience } from "./db";
 import { getAiNotesHistory, getRepoHistory } from "./api/history";
-import { BADGE_CACHE_SECONDS, getPublicRepo, parseBadgeStyle, publicRankBadge, renderBadgeSvg } from "./api/public";
+import { BADGE_CACHE_SECONDS, badgeKey, badgeSubject, getPublicRepo, parseBadgeOptions, renderBadgeFor } from "./api/public";
 import { NO_PAT_ACCESS } from "./auth/access";
 import { killActiveClones } from "./collectors/git";
 import {
@@ -747,6 +747,11 @@ const routes = {
       if (viewer && !allowCardView(viewer.userId)) return cardRateLimited(viewer.userId);
       const card = await cardOrRefusal(req, org!, repo!);
       if (card instanceof Response) return card;
+      // ключ бейджа закрытого репо: закрытую карточку видит только зритель с правами на репо
+      const closed = card.repo.visibility === "private" || card.repo.visibility === "internal";
+      if (closed && config.auth.appSecret) {
+        return Response.json({ ...card, repo: { ...card.repo, badgeKey: badgeKey(config.auth.appSecret, card.repo.org, card.repo.repo) } });
+      }
       return Response.json(card);
     },
     // сравнение 1-3 репозиториев — карточки того же зрителя без AI, рекомендаций
@@ -851,12 +856,16 @@ const routes = {
       const { org, repo } = req.params;
       if (!validSlugSegment(org) || !validSlugSegment(repo)) return notFound("not found");
       if (!badgeWindowHasRoom(req)) return rateLimited("слишком много запросов – попробуйте позже", 60);
-      // `?style=rank` — вариант со значком места
-      const style = parseBadgeStyle(new URL(req.url).searchParams);
-      if (style === null) return badQuery("неизвестный вид бейджа: допустим только style=rank");
-      const proj = getPublicRepo(db, org!, repo!);
-      if (proj === null) return publicNotFound();
-      return new Response(renderBadgeSvg(proj.healthcraftIndex, style === "rank" ? publicRankBadge(db, proj) : null), {
+      // `show=rank,word,delta`, прежний `style=rank`, `category=<ключ>`; `key` – бейдж закрытого репо
+      const params = new URL(req.url).searchParams;
+      const options = parseBadgeOptions(params);
+      const keys = params.getAll("key");
+      if (options === null || keys.length > 1) {
+        return badQuery("неизвестный вид бейджа: допустимы show=rank,word,delta (или style=rank) либо category=documentation|activity|issues|code");
+      }
+      const subject = badgeSubject(db, org!, repo!, { key: keys[0] ?? null, appSecret: config.auth.appSecret, withRank: options.parts.has("rank") });
+      if (subject === null) return publicNotFound();
+      return new Response(renderBadgeFor(subject, options), {
         headers: {
           "content-type": "image/svg+xml; charset=utf-8",
           "cache-control": `public, max-age=${BADGE_CACHE_SECONDS}`,

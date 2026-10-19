@@ -757,6 +757,12 @@ export interface CardRepo {
    * кнопки бейджа нет.
    */
   badge: boolean;
+  /**
+   * Ключ бейджа закрытого (private/internal) репо – параметр `key` маршрута
+   * `badge.svg`. Добавляет только маршрут карточки: закрытую карточку видит
+   * лишь зритель с правами на репо. Нет у открытого и без APP_SECRET.
+   */
+  badgeKey?: string;
 }
 
 export interface CardMarkers {

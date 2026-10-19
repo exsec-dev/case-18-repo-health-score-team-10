@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config";
 import { openDb } from "../src/db";
-import { RANK_BADGE_COLORS, getPublicRepo, parseBadgeStyle, publicRankBadge, renderBadgeSvg } from "../src/api/public";
+import { RANK_BADGE_COLORS, getPublicRepo, parseBadgeOptions, publicRankBadge, renderBadgeSvg } from "../src/api/public";
 import { DEFAULT_QUERY, getRepoCard, listRepos, ratingPlace, type RatingItem } from "../src/api/repos";
 import { rankBadge, type RankLeague } from "../src/api/rank-badge";
 import type { AccessResult } from "../src/auth/access";
@@ -213,10 +213,11 @@ describe("SVG: вариант со значком места", () => {
   });
 
   test("параметр style: нет — обычный, rank — со значком, иное — ошибка", () => {
-    expect(parseBadgeStyle(new URLSearchParams(""))).toBe("plain");
-    expect(parseBadgeStyle(new URLSearchParams("style=rank"))).toBe("rank");
-    expect(parseBadgeStyle(new URLSearchParams("style=flat"))).toBeNull();
-    expect(parseBadgeStyle(new URLSearchParams("style=rank&style=rank"))).toBeNull();
+    const rank = (q: string) => parseBadgeOptions(new URLSearchParams(q))?.parts.has("rank") ?? null;
+    expect(rank("")).toBe(false);
+    expect(rank("style=rank")).toBe(true);
+    expect(rank("style=flat")).toBeNull();
+    expect(rank("style=rank&style=rank")).toBeNull();
   });
 
   test("значок бейджа = значок карточки (тот же подсчет места)", () => {

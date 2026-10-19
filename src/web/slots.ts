@@ -7,6 +7,7 @@
 
 import type { HistoryPoint, HistoryResponse } from "../summary/history-contract";
 import { AI_SECTION_TITLE } from "./format";
+import { CATEGORY_TITLES } from "../report/categories";
 
 /**
  * Контракты полей слотов. Ключ — слот, значение — имена полей, которые отдает
@@ -61,7 +62,7 @@ export const SLOT_EMPTY: Record<keyof typeof SLOT_CONTRACTS, { title: string; te
   },
   badge: {
     title: "Бейдж для README",
-    text: "Бейдж выдается только публичным репозиториям из рейтинга.",
+    text: "Бейдж выдается только своим репозиториям с оценкой – тем, что есть в «Моих репозиториях».",
   },
   compare: {
     title: "Добавьте 2-3 репозитория",
@@ -137,13 +138,36 @@ export function aiNotesCaption(finishedAt: readonly (string | null)[], tooEarly:
   return tooEarly(dates) ? "Между AI-обзорами меньше 2 дней – о динамике судить рано." : null;
 }
 
+/** Чипы окна бейджа: части основного бейджа и бейджи категорий рядом. */
+export type BadgeChip = "rank" | "word" | "delta" | "cats";
+export const BADGE_CHIPS: readonly BadgeChip[] = ["rank", "word", "delta", "cats"];
+/** Что копирует поле: код для README, адреса картинок или адрес JSON публичного API. */
+export type BadgeFormat = "md" | "html" | "url" | "json";
+
+const BADGE_CATEGORY_KEYS = ["documentation", "activity", "issues", "code"] as const;
+
 /**
- * Код для README: абсолютные адреса, картинка ведет на карточку. `rank` — вариант
- * «Индекс и место» (`badge.svg?style=rank`, сегмент лиги цветом металла).
+ * Код из окна бейджа. Основной бейдж – `badge.svg?show=…` с выбранными частями,
+ * категории – еще 4 бейджа `?category=…` в той же строке; `key` – ключ бейджа
+ * закрытого репо (`repo.badgeKey`). Картинки ведут на карточку репозитория.
  */
-export function badgeMarkdown(publicBaseUrl: string, org: string, repo: string, style: "index" | "rank" = "index"): string {
-  const base = publicBaseUrl.replace(/\/+$/, "");
-  const path = `${encodeURIComponent(org)}/${encodeURIComponent(repo)}`;
-  const query = style === "rank" ? "?style=rank" : "";
-  return `[![HealthCraft Index](${base}/api/v1/repos/${path}/badge.svg${query})](${base}/repo/${path})`;
+export function badgeCode(o: { publicBaseUrl: string; org: string; repo: string; chips: ReadonlySet<BadgeChip>; key?: string | null }, format: BadgeFormat): string {
+  const base = o.publicBaseUrl.replace(/\/+$/, "");
+  const path = `${encodeURIComponent(o.org)}/${encodeURIComponent(o.repo)}`;
+  const api = `${base}/api/v1/repos/${path}`;
+  if (format === "json") return api;
+  const key = o.key ? `key=${encodeURIComponent(o.key)}` : null;
+  const query = (...params: (string | null)[]) => {
+    const list = params.filter((p): p is string => p !== null);
+    return list.length > 0 ? `?${list.join("&")}` : "";
+  };
+  const parts = (["rank", "word", "delta"] as const).filter((c) => o.chips.has(c));
+  const images = [{ alt: "HealthCraft Index", src: `${api}/badge.svg${query(parts.length > 0 ? `show=${parts.join(",")}` : null, key)}` }];
+  if (o.chips.has("cats")) {
+    for (const c of BADGE_CATEGORY_KEYS) images.push({ alt: `HealthCraft: ${CATEGORY_TITLES[c]}`, src: `${api}/badge.svg${query(`category=${c}`, key)}` });
+  }
+  const card = `${base}/repo/${path}`;
+  if (format === "url") return images.map((i) => i.src).join(" ");
+  if (format === "html") return images.map((i) => `<a href="${card}"><img src="${i.src}" alt="${i.alt}"></a>`).join(" ");
+  return images.map((i) => `[![${i.alt}](${i.src})](${card})`).join(" ");
 }
