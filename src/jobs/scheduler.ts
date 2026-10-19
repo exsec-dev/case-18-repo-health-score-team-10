@@ -27,7 +27,7 @@ import { getPat } from "../auth/pat";
 import { makeScClient } from "../collectors/http";
 import { makeAppsecClient } from "../collectors/appsec";
 import { makeLlm } from "../llm";
-import { runSummary as runSummaryPipeline, runFraudCheck as runFraudCheckPipeline, NO_RHYTHM_REASON, type SummaryRunResult } from "../summary/pipeline";
+import { runSummary as runSummaryPipeline, runFraudCheck as runFraudCheckPipeline, NO_RHYTHM_REASON, type SummaryRunResult, FLAGGER_NOTE_CURRENT } from "../summary/pipeline";
 import { AI_CACHED_NOTE, AI_REJECTED_ERRORS, type QuotaRefusal } from "./ai-quota";
 import { refreshRepoTopics } from "./topics";
 import type { AiAudience } from "../db";
@@ -236,7 +236,8 @@ export function enqueueCheck(
   if (active !== null) return { kind: "active", jobId: active.id };
   const scanId = lastFinishedScan(db, repoId);
   if (scanId === null) return { kind: "no_scan" };
-  if (db.query("SELECT 1 FROM ai_notes WHERE scan_id = ? AND role = 'flagger' LIMIT 1").get(scanId) !== null) return { kind: "cached" };
+  // заметка по прежним правилам кэшем не считается — проверку можно запустить заново
+  if (db.query(`SELECT 1 FROM ai_notes WHERE scan_id = ? AND role = 'flagger' AND ${FLAGGER_NOTE_CURRENT} LIMIT 1`).get(scanId) !== null) return { kind: "cached" };
   const activeMax = opts.activeMax ?? DEFAULT_SUMMARY_ACTIVE_MAX;
   const live = (db.query("SELECT COUNT(*) AS c FROM jobs WHERE user_id = ? AND kind = 'check' AND status IN ('queued', 'running')").get(opts.userId) as { c: number }).c;
   if (live >= activeMax) return { kind: "too_many", activeMax };

@@ -12,8 +12,8 @@ import { openDb } from "../src/db";
 import { getRepoCard } from "../src/api/repos";
 import type { CallLlm, ChatMessage } from "../src/llm";
 import { capTimelineFact, NO_RHYTHM_REASON, runFraudCheck, runSummary, TIMELINE_EVENTS_CAP } from "../src/summary/pipeline";
-import { rhythmSignals, RHYTHM_KEY } from "../src/summary/rhythm";
-import { fraudFactorFact, fraudFactorTitle, fraudFactorValue } from "../src/web/format";
+import { hardFlagFactors, rhythmSignals, ruleFlagFactors, RHYTHM_KEY } from "../src/summary/rhythm";
+import { fraudCheckStale, fraudFactorFact, fraudFactorTitle, fraudFactorValue, fraudStaleText } from "../src/web/format";
 import type { AccessResult } from "../src/auth/access";
 import { cardFacts, seedRepo, seedScan, seedScore } from "./api-fixtures";
 
@@ -67,15 +67,16 @@ function honest(): Ev[] {
 }
 
 describe("rhythmSignals: признаки ритма считает код по полной ленте", () => {
-  test("скрытая накрутка: ровный ритм и подставные авторы видны числами, хотя robot2 роботов не видит", () => {
+  test("скрытая накрутка: ровный ритм виден числами, хотя robot2 роботов не видит; авторы и коммиттеры не сравниваются", () => {
     const s = rhythmSignals(subtle(), AS_OF)!;
     expect(s.robot_commits).toBe(0);
     expect(s.sync_bursts).toBe(0);
     expect(s.human_commits).toBe(60);
     expect(s.authors).toBe(5);
-    expect(s.committers).toBe(1);
-    expect(s.authors_via_one_committer).toBe(5);
-    expect(s.foreign_committer_share).toBe(1);
+    expect(s).not.toHaveProperty("committers");
+    expect(s).not.toHaveProperty("authors_via_one_committer");
+    expect(s).not.toHaveProperty("foreign_committer_share");
+    expect(s).not.toHaveProperty("platform_commits");
     expect(s.regular_share).toBe(1);
     expect(s.interval_median_minutes).toBe(30);
     expect(s.recent_week_commits).toBe(60);
@@ -91,14 +92,11 @@ describe("rhythmSignals: признаки ритма считает код по 
     expect(s.human_commits).toBe(4);
   });
 
-  test("обычный проект: неровный ритм, слияния платформы не считаются чужим коммиттером", () => {
+  test("обычный проект: неровный ритм, роботов и всплесков нет", () => {
     const s = rhythmSignals(honest(), AS_OF)!;
     expect(s.robot_commits).toBe(0);
     expect(s.sync_bursts).toBe(0);
-    expect(s.platform_commits).toBe(5);
-    expect(s.committers).toBe(3);
-    expect(s.foreign_committer_share).toBe(0);
-    expect(s.authors_via_one_committer).toBe(0);
+    expect(s.authors).toBe(3);
     expect(s.regular_share).toBe(0);
   });
 
@@ -114,6 +112,72 @@ describe("rhythmSignals: признаки ритма считает код по 
 
   test("пустая лента — null (ритма нет, проверка не проводится)", () => {
     expect(rhythmSignals([], AS_OF)).toBeNull();
+  });
+});
+
+/** Дневник: 30 коммитов по одному в день в случайное время 9–11 утра — ритм человека. */
+function daily(): Ev[] {
+  const out: Ev[] = [];
+  for (let i = 0; i < 30; i++) out.push(ev(i, "me@diary.io", "me@diary.io", AS_OF.getTime() - (i + 1) * DAY + 9 * 60 * MIN + ((i * 37) % 120) * MIN));
+  return newestFirst(out);
+}
+
+describe("правила кода: сильные признаки — флаг без модели, пороги — флаг до ответа модели", () => {
+  test("роботы от 80% истории (как hc-fraud-explicit: 600 из 606) — флаг кодом, если REST не показывает жизни", () => {
+    const s = { ...rhythmSignals(honest(), AS_OF)!, commits: 606, human_commits: 6, robot_commits: 600 };
+    expect(hardFlagFactors(s).map((f) => f.note)).toEqual(["robot_share>=0.8"]);
+    expect(hardFlagFactors(s, { contributors: 1, releases: 0, pulls_open: 0, pulls_created_at: [] }).map((f) => f.note)).toEqual(["robot_share>=0.8"]);
+    // живой проект на ботах зависимостей: релизы или PR в REST — не флаг кодом, взвешивает модель
+    expect(hardFlagFactors(s, { releases: 2, pulls_open: 0, pulls_created_at: [] })).toEqual([]);
+    expect(hardFlagFactors(s, { releases: 0, pulls_open: 0, pulls_created_at: ["2026-09-01T00:00:00Z"] })).toEqual([]);
+    expect(hardFlagFactors(s, { releases: 0, pulls_open: 1 })).toEqual([]);
+  });
+
+  test("роботы: история короче 20 коммитов — не флаг кодом (1 dependabot из 1, 4 из 5)", () => {
+    const base = rhythmSignals(honest(), AS_OF)!;
+    expect(hardFlagFactors({ ...base, commits: 1, human_commits: 0, robot_commits: 1 })).toEqual([]);
+    expect(hardFlagFactors({ ...base, commits: 5, human_commits: 1, robot_commits: 4 })).toEqual([]);
+    expect(hardFlagFactors({ ...base, commits: 20, human_commits: 4, robot_commits: 16 }).map((f) => f.note)).toEqual(["robot_share>=0.8"]);
+    expect(hardFlagFactors({ ...base, commits: 20, human_commits: 5, robot_commits: 15 })).toEqual([]);
+  });
+
+  test("всплески синхронизации: от 2 всплесков или от 10% истории — флаг кодом; один маленький — модели", () => {
+    const s = rhythmSignals(explicit(), AS_OF)!;
+    expect(s.robot_commits / s.commits).toBeLessThan(0.8);
+    expect(hardFlagFactors(s).map((f) => f.note)).toEqual(["sync_bursts>=2|sync_share>=0.1"]);
+    expect(hardFlagFactors({ ...s, sync_bursts: 0, sync_commits: 0 })).toEqual([]);
+    // один всплеск в 12 коммитов на историю в 500 (2%) — ребейз или принятый чужой PR, не флаг кодом
+    expect(hardFlagFactors({ ...s, commits: 500, sync_bursts: 1, sync_commits: 12 })).toEqual([]);
+    // один всплеск, но это 20% истории — флаг
+    expect(hardFlagFactors({ ...s, commits: 60, sync_bursts: 1, sync_commits: 12 }).map((f) => f.note)).toEqual(["sync_bursts>=2|sync_share>=0.1"]);
+  });
+
+  test("обычный проект и скрытая накрутка: сильных признаков нет — решает модель", () => {
+    expect(hardFlagFactors(rhythmSignals(honest(), AS_OF)!)).toEqual([]);
+    expect(hardFlagFactors(rhythmSignals(subtle(), AS_OF)!)).toEqual([]);
+  });
+
+  test("порог ровного ритма: от 50% при интервале не длиннее 4 часов; коммит раз в день — ритм человека", () => {
+    const honestS = rhythmSignals(honest(), AS_OF)!;
+    expect(ruleFlagFactors(honestS)).toEqual([]);
+    expect(ruleFlagFactors(rhythmSignals(subtle(), AS_OF)!).map((f) => f.note)).toEqual(["regular_share>=0.5"]);
+    expect(ruleFlagFactors({ ...honestS, regular_share: 0.49, interval_median_minutes: 30 })).toEqual([]);
+    expect(ruleFlagFactors({ ...honestS, regular_share: 0.5, interval_median_minutes: 240 }).map((f) => f.note)).toEqual(["regular_share>=0.5"]);
+    expect(ruleFlagFactors({ ...honestS, regular_share: 1, interval_median_minutes: 241 })).toEqual([]);
+    const d = rhythmSignals(daily(), AS_OF)!;
+    expect(d.regular_share).toBeGreaterThanOrEqual(0.5);
+    expect(d.interval_median_minutes).toBeGreaterThan(240);
+    expect(ruleFlagFactors(d)).toEqual([]);
+  });
+
+  test("порог всплеска недели: от 20 коммитов и в 5 раз выше темпа при темпе от 1", () => {
+    const honestS = rhythmSignals(honest(), AS_OF)!;
+    expect(ruleFlagFactors({ ...honestS, recent_week_commits: 25, baseline_week_median: 2 }).map((f) => f.note)).toEqual(["recent_week>=5x_baseline"]);
+    // новый репозиторий без прошлой истории, дробная медиана, слабый всплеск — не порог
+    expect(ruleFlagFactors({ ...honestS, recent_week_commits: 60, baseline_week_median: 0 })).toEqual([]);
+    expect(ruleFlagFactors({ ...honestS, recent_week_commits: 20, baseline_week_median: 0.5 })).toEqual([]);
+    expect(ruleFlagFactors({ ...honestS, recent_week_commits: 19, baseline_week_median: 1 })).toEqual([]);
+    expect(ruleFlagFactors({ ...honestS, recent_week_commits: 25, baseline_week_median: 6 })).toEqual([]);
   });
 });
 
@@ -166,7 +230,9 @@ function recorder(flagJson: string): { call: CallLlm; roles: string[]; flaggerIn
   return { call, roles, flaggerInput };
 }
 
-const SUBTLE_FLAG = '{"flag":true,"factors":[{"key":"activity.rhythm","note":"5 авторов при одном коммиттере, коммиты с ровными интервалами"}]}';
+const SUBTLE_FLAG = '{"flag":true,"factors":[{"key":"activity.rhythm","note":"коммиты с ровными интервалами, всплеск за неделю"}]}';
+const NO_FLAG = '{"flag":false,"factors":[]}';
+const REST_FLAG = '{"flag":true,"factors":[{"key":"activity.rest","note":"1 участник и ни одного релиза"}]}';
 
 describe("runFraudCheck: отдельная заявка по фактам скана", () => {
   test("вход флаггера — признаки ритма и activity.rest; сводки v1 и сырой ленты во входе нет", async () => {
@@ -175,15 +241,121 @@ describe("runFraudCheck: отдельная заявка по фактам ск�
     const fake = recorder(SUBTLE_FLAG);
     const res = await runFraudCheck({ db, org: "v52", repo: "subtle", callLlm: fake.call, agentBackoffMs: 0 }, { scanId });
     expect(res.ok).toBe(true);
-    expect(res.flag).toMatchObject({ flag: true });
+    // порог ровного ритма сработал: флаг по правилам, фактор модели по тому же ключу не дублируется
+    expect(res.flag).toEqual({ flag: true, factors: [{ key: RHYTHM_KEY, note: "regular_share>=0.5" }] });
     expect(fake.roles).toEqual(["flagger"]);
     const input = fake.flaggerInput[0]!;
     expect(input).toContain(`- ${RHYTHM_KEY}: `);
-    expect(input).toContain('"authors_via_one_committer":5');
+    expect(input).toContain('"regular_share":1');
+    expect(input).not.toContain("authors_via_one_committer");
+    expect(input).not.toContain("committers");
     expect(input).toContain("- activity.rest: ");
     expect(input).not.toContain("activity.git.summary");
     expect(input).not.toContain("activity.git.timeline");
     expect(input).not.toContain("dev0@team.io");
+  });
+
+  test("явная накрутка: всплески и роботы — флаг ставит код, модель не зовется, лимит не тратится", async () => {
+    const db = freshDb();
+    const scanId = seed(db, "explicit", explicit());
+    const fake = recorder(NO_FLAG);
+    const res = await runFraudCheck({ db, org: "v52", repo: "explicit", callLlm: fake.call, agentBackoffMs: 0 }, { scanId });
+    expect(res.ok).toBe(true);
+    expect(res.answered).toBe(0);
+    expect(fake.roles).toEqual([]);
+    expect(res.flag).toEqual({ flag: true, factors: [{ key: RHYTHM_KEY, note: "sync_bursts>=2|sync_share>=0.1" }] });
+    const note = JSON.parse((db.query("SELECT text FROM ai_notes WHERE scan_id = ? AND role = 'flagger'").get(scanId) as { text: string }).text);
+    expect(note.by).toBe("rules");
+    expect(note.flag).toBe(true);
+    const card = getRepoCard(db, "v52", "explicit", { access: OPEN, viewerUserId: 1, viewerAuth: "pat" })!;
+    expect(card.ai?.fraud?.flag).toBe(true);
+  });
+
+  test("порог кода сработал, модель отвечает «нет» — один вызов, ее ответ не снимает флаг", async () => {
+    const db = freshDb();
+    const scanId = seed(db, "stubborn", subtle());
+    const fake = recorder(NO_FLAG);
+    const res = await runFraudCheck({ db, org: "v52", repo: "stubborn", callLlm: fake.call, agentBackoffMs: 0 }, { scanId });
+    expect(fake.roles).toEqual(["flagger"]);
+    expect(res.ok).toBe(true);
+    expect(res.answered).toBe(1);
+    expect(res.flag).toEqual({ flag: true, factors: [{ key: RHYTHM_KEY, note: "regular_share>=0.5" }] });
+    const note = JSON.parse((db.query("SELECT text FROM ai_notes WHERE scan_id = ? AND role = 'flagger'").get(scanId) as { text: string }).text);
+    expect(note.by).toBe("rules");
+  });
+
+  test("порог сработал, модель добавила улику по activity.rest — она идет после факторов правил", async () => {
+    const db = freshDb();
+    const scanId = seed(db, "enrich", subtle());
+    const res = await runFraudCheck({ db, org: "v52", repo: "enrich", callLlm: recorder(REST_FLAG).call, agentBackoffMs: 0 }, { scanId });
+    expect(res.flag).toEqual({
+      flag: true,
+      factors: [
+        { key: RHYTHM_KEY, note: "regular_share>=0.5" },
+        { key: "activity.rest", note: "1 участник и ни одного релиза" },
+      ],
+    });
+  });
+
+  test("порог сработал, провайдер упал — флаг по правилам все равно записан", async () => {
+    const db = freshDb();
+    const scanId = seed(db, "down", subtle());
+    const call = (async () => {
+      throw new Error("ECONNREFUSED");
+    }) as unknown as CallLlm;
+    const res = await runFraudCheck({ db, org: "v52", repo: "down", callLlm: call, agentBackoffMs: 0 }, { scanId });
+    expect(res.ok).toBe(true);
+    expect(res.flag).toEqual({ flag: true, factors: [{ key: RHYTHM_KEY, note: "regular_share>=0.5" }] });
+    expect(db.query("SELECT 1 FROM ai_fails WHERE scan_id = ? AND role = 'flagger'").get(scanId)).toBeNull();
+    const card = getRepoCard(db, "v52", "down", { access: OPEN, viewerUserId: 1, viewerAuth: "pat" })!;
+    expect(card.ai?.fraud?.flag).toBe(true);
+    expect(card.ai?.check.failure).toBeNull();
+  });
+
+  test("порогов нет, провайдер упал — отказ, как раньше", async () => {
+    const db = freshDb();
+    const scanId = seed(db, "down2", honest());
+    const call = (async () => {
+      throw new Error("ECONNREFUSED");
+    }) as unknown as CallLlm;
+    const res = await runFraudCheck({ db, org: "v52", repo: "down2", callLlm: call, agentBackoffMs: 0 }, { scanId });
+    expect(res.ok).toBe(false);
+    expect(res.reason).toStartWith("модель:");
+  });
+
+  test("заметка по прежним правилам (хартия 6) — не кэш: проверка идет заново, карточка и рейтинг зовут ее устаревшей", async () => {
+    const db = freshDb();
+    const scanId = seed(db, "old", honest());
+    const repoId = (db.query("SELECT id FROM repos WHERE repo_slug = 'old'").get() as { id: number }).id;
+    db.query("INSERT INTO ai_notes (repo_id, scan_id, role, text, fact_refs, charter_version, model, created_at, audience) VALUES (?, ?, 'flagger', ?, '[]', '6', 'm', ?, 'public')").run(
+      repoId,
+      scanId,
+      '{"flag":true,"factors":[{"key":"activity.rhythm","note":"5 авторов при одном коммиттере"}],"signals":{"commits":20,"authors_via_one_committer":5}}',
+      AS_OF.toISOString(),
+    );
+    const before = getRepoCard(db, "v52", "old", { access: OPEN, viewerUserId: 1, viewerAuth: "pat" })!;
+    expect(before.ai?.fraud?.flag).toBe(true);
+    expect(before.ai?.check.oldRules).toBe(true);
+    expect(fraudCheckStale(before.ai?.check)).toBe(true);
+    expect(fraudStaleText(before.ai?.check, null)).toBe("Проверка по прежним правилам, нужна новая.");
+    const fake = recorder(NO_FLAG);
+    const res = await runFraudCheck({ db, org: "v52", repo: "old", callLlm: fake.call, agentBackoffMs: 0 }, { scanId });
+    expect(res.cached).toBeUndefined();
+    expect(fake.roles).toEqual(["flagger"]);
+    const after = getRepoCard(db, "v52", "old", { access: OPEN, viewerUserId: 1, viewerAuth: "pat" })!;
+    expect(after.ai?.fraud?.flag).toBe(false);
+    expect(after.ai?.check.oldRules).toBe(false);
+  });
+
+  test("порогов нет — ответ модели «нет» принимается как есть", async () => {
+    const db = freshDb();
+    const scanId = seed(db, "honest", honest());
+    const fake = recorder(NO_FLAG);
+    const res = await runFraudCheck({ db, org: "v52", repo: "honest", callLlm: fake.call, agentBackoffMs: 0 }, { scanId });
+    expect(fake.roles).toEqual(["flagger"]);
+    expect(res.flag).toEqual({ flag: false, factors: [] });
+    const note = JSON.parse((db.query("SELECT text FROM ai_notes WHERE scan_id = ? AND role = 'flagger'").get(scanId) as { text: string }).text);
+    expect(note.by).toBe("model");
   });
 
   test("повтор по тому же скану — из кэша, модель не зовется", async () => {
@@ -237,22 +409,30 @@ describe("runFraudCheck: отдельная заявка по фактам ск�
 });
 
 describe("фактор «Ритм коммитов»: текст строит код из признаков", () => {
-  test("скрытая накрутка — ровный ритм, подставные авторы, всплеск недели", () => {
+  test("скрытая накрутка — ровный ритм; всплеск недели без прошлой истории не улика; авторов при коммиттере в тексте нет", () => {
     const s = rhythmSignals(subtle(), AS_OF)! as unknown as Record<string, unknown>;
     expect(fraudFactorTitle(RHYTHM_KEY)).toBe("Ритм коммитов");
-    expect(fraudFactorFact(RHYTHM_KEY, s)).toBe(
-      "60 коммитов за последнюю неделю, хотя обычно в неделю – ни одного; 5 авторов при одном коммиттере; 100% коммитов людей идут с ровными интервалами, обычно раз в 30 мин",
+    expect(fraudFactorFact(RHYTHM_KEY, s)).toBe("100% коммитов людей идут с ровными интервалами, обычно раз в 30 мин");
+    expect(fraudFactorFact(RHYTHM_KEY, { ...s, recent_week_commits: 25, baseline_week_median: 2 })).toBe(
+      "25 коммитов за последнюю неделю при обычных 2 в неделю; 100% коммитов людей идут с ровными интервалами, обычно раз в 30 мин",
     );
+    // старая заметка с этим полем — поле игнорируется
+    expect(fraudFactorFact(RHYTHM_KEY, { ...s, authors_via_one_committer: 5 })).not.toContain("коммиттере");
+    expect(fraudFactorFact("activity.git.summary", { commits: 10, robot_commits: 2, authors: 3, committers: 1 })).toBe("2 из 10 коммитов – от роботов (20%)");
   });
 
-  test("явная накрутка — роботы и всплески синхронизации", () => {
+  test("явная накрутка — всплески синхронизации; роботы ниже 80% уликой не печатаются", () => {
     const s = rhythmSignals(explicit(), AS_OF)! as unknown as Record<string, unknown>;
-    expect(fraudFactorFact(RHYTHM_KEY, s)).toStartWith("20 из 60 коммитов – от роботов (33%); 3 всплеска синхронизации (36 коммитов)");
+    expect(fraudFactorFact(RHYTHM_KEY, s)).toBe("3 всплеска синхронизации (36 коммитов)");
+    expect(fraudFactorFact(RHYTHM_KEY, { ...s, commits: 606, robot_commits: 600 })).toStartWith("600 из 606 коммитов – от роботов (99%); ");
   });
 
-  test("ничего заметного — null (печатается формулировка модели)", () => {
+  test("ниже порогов — null (печатается формулировка модели): «2 коммита за неделю при обычных 1» — не улика", () => {
     const s = rhythmSignals(honest(), AS_OF)! as unknown as Record<string, unknown>;
-    expect(fraudFactorFact(RHYTHM_KEY, { ...s, recent_week_commits: 0 })).toBeNull();
+    expect(fraudFactorFact(RHYTHM_KEY, s)).toBeNull();
+    expect(fraudFactorFact(RHYTHM_KEY, { ...s, recent_week_commits: 2, baseline_week_median: 1, regular_share: 0.08, interval_median_minutes: 30 })).toBeNull();
+    // ровно раз в день — ритм человека, не улика
+    expect(fraudFactorFact(RHYTHM_KEY, { ...s, regular_share: 1, interval_median_minutes: 1440 })).toBeNull();
   });
 
   test("значение фактора: ритм — из заметки проверки, прочее — из фактов карточки", () => {

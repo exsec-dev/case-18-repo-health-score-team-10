@@ -23,7 +23,7 @@ export function modelTierOf(role: SummaryRole): "main" | "side" {
   return role === "overview" ? "main" : "side";
 }
 
-/** Специалистам 0.4, overview чуть свободнее (0.5), flagger почти детерминирован (0.1). */
+/** Специалистам 0.4, overview чуть свободнее (0.5), flagger детерминирован (0). */
 export const ROLE_TEMPERATURE: Record<SummaryRole, number> = {
   documentation: 0.4,
   code: 0.4,
@@ -33,7 +33,7 @@ export const ROLE_TEMPERATURE: Record<SummaryRole, number> = {
   security: 0.4,
   overview: 0.5,
   trajectory: 0.4,
-  flagger: 0.1,
+  flagger: 0,
 };
 
 /**

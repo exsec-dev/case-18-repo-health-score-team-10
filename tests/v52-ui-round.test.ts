@@ -60,7 +60,7 @@ const ai = (check: Partial<Ai["check"]>, fraud: Ai["fraud"] = null): Ai =>
     failures: [],
     jobActive: false,
     cooldownUntil: null,
-    check: { active: false, scanId: null, checkedAt: null, failure: null, retryable: false, latestScanId: 5, ...check },
+    check: { active: false, scanId: null, checkedAt: null, failure: null, retryable: false, latestScanId: 5, oldRules: false, ...check },
     fraud,
   }) as Ai;
 const flag = (on: boolean) => ({ flag: on, factors: on ? [{ key: "activity.rhythm", note: "x" }] : [], signals: {} });

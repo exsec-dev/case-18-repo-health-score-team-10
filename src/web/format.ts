@@ -3,6 +3,7 @@
 // нейтрально — «нет данных» или «–», никогда не 0 и никогда не красным.
 
 import { normalizeTypography } from "../summary/typography";
+import { recentSpikeHigh, regularHigh, robotShareHigh, syncHigh } from "../summary/fraud-thresholds";
 
 export const NO_DATA = "нет данных";
 // одно название итога без оценки на всех экранах и в отчете
@@ -1137,9 +1138,17 @@ export function fraudFactorValue(
   return evidence.find((e) => e.key === key)?.value;
 }
 
-/** Проверка на накрутку сделана по прошлому анализу — после нее был новый. */
-export function fraudCheckStale(check: { scanId: number | null; latestScanId: number | null } | undefined): boolean {
-  return check !== undefined && check.scanId !== null && check.latestScanId !== null && check.scanId < check.latestScanId;
+/** Проверка на накрутку устарела: сделана по прошлому анализу (после нее был новый) или по прежним правилам. */
+export function fraudCheckStale(check: { scanId: number | null; latestScanId: number | null; oldRules?: boolean } | undefined): boolean {
+  if (check === undefined) return false;
+  if (check.oldRules === true) return true;
+  return check.scanId !== null && check.latestScanId !== null && check.scanId < check.latestScanId;
+}
+
+/** Пояснение устаревшей проверки: по прошлому анализу или по прежним правилам. */
+export function fraudStaleText(check: { oldRules?: boolean } | undefined, date: string | null): string {
+  if (check?.oldRules === true) return date !== null ? `Проверка ${date} – по прежним правилам, нужна новая.` : "Проверка по прежним правилам, нужна новая.";
+  return date !== null ? `Проверка ${date} – после нее был новый анализ.` : "После проверки был новый анализ.";
 }
 
 /**
@@ -1178,18 +1187,13 @@ export function fraudFactorFact(key: string, value: unknown, date: (iso: string)
   const num = (k: string): number | null => (typeof v[k] === "number" && Number.isFinite(v[k]) ? (v[k] as number) : null);
   switch (key) {
     case "activity.git.summary": {
+      // старые заметки: соотношение авторов и коммиттеров признаком не является и не печатается
       const commits = num("commits");
       const robots = num("robot_commits");
-      const authors = num("authors");
-      const committers = num("committers");
-      const parts: string[] = [];
       if (commits !== null && commits > 0 && robots !== null) {
-        parts.push(`${robots} из ${commits} ${plural(commits, "коммита", "коммитов", "коммитов")} – от роботов (${sharePercent(robots / commits)})`);
+        return `${robots} из ${commits} ${plural(commits, "коммита", "коммитов", "коммитов")} – от роботов (${sharePercent(robots / commits)})`;
       }
-      if (authors !== null && committers !== null) {
-        parts.push(`${authors} ${plural(authors, "автор", "автора", "авторов")} при ${committers} ${plural(committers, "коммиттере", "коммиттерах", "коммиттерах")}`);
-      }
-      return parts.length > 0 ? parts.join("; ") : null;
+      return null;
     }
     case "activity.git.timeline": {
       const events = num("events");
@@ -1210,34 +1214,30 @@ export function fraudFactorFact(key: string, value: unknown, date: (iso: string)
       return parts.length > 0 ? parts.join(", ") : null;
     }
     case "activity.rhythm": {
-      // признаки ритма (rhythm.ts) — только ненулевые; порядок — от явных к косвенным:
-      // плашка карточки показывает первый признак, и им не должны быть «8% ровных
-      // интервалов» при всплеске в 221 коммит за неделю
+      // признаки ритма (rhythm.ts) — только выше порогов правил (fraud-thresholds.ts):
+      // «2 коммита за неделю при обычных 1» уликой не является и не печатается;
+      // порядок — от явных к косвенным: плашка карточки показывает первый признак
       const commits = num("commits");
       const robots = num("robot_commits");
       const bursts = num("sync_bursts");
       const sync = num("sync_commits");
       const regular = num("regular_share");
       const interval = num("interval_median_minutes");
-      const viaOne = num("authors_via_one_committer");
       const recent = num("recent_week_commits");
       const baseline = num("baseline_week_median");
       const parts: string[] = [];
-      if (commits !== null && commits > 0 && robots !== null && robots > 0) {
+      if (commits !== null && robots !== null && robotShareHigh(robots, commits)) {
         parts.push(`${robots} из ${commits} ${plural(commits, "коммита", "коммитов", "коммитов")} – от роботов (${sharePercent(robots / commits)})`);
       }
-      if (bursts !== null && bursts > 0) {
+      if (bursts !== null && commits !== null && syncHigh(bursts, sync ?? 0, commits)) {
         const tail = sync !== null && sync > 0 ? ` (${sync} ${plural(sync, "коммит", "коммита", "коммитов")})` : "";
         parts.push(`${bursts} ${plural(bursts, "всплеск", "всплеска", "всплесков")} синхронизации${tail}`);
       }
-      if (recent !== null && baseline !== null && recent > baseline) {
-        const usual = baseline === 0 ? "хотя обычно в неделю – ни одного" : `при обычных ${fmtDecimal(baseline, 1, { trim: true })} в неделю`;
-        parts.push(`${recent} ${plural(recent, "коммит", "коммита", "коммитов")} за последнюю неделю, ${usual}`);
+      if (recent !== null && baseline !== null && recentSpikeHigh(recent, baseline)) {
+        parts.push(`${recent} ${plural(recent, "коммит", "коммита", "коммитов")} за последнюю неделю при обычных ${fmtDecimal(baseline, 1, { trim: true })} в неделю`);
       }
-      if (viaOne !== null && viaOne >= 2) parts.push(`${viaOne} ${plural(viaOne, "автор", "автора", "авторов")} при одном коммиттере`);
-      if (regular !== null && regular > 0) {
-        const every = interval !== null && interval > 0 ? `, обычно раз в ${fmtMinutes(interval * 60_000)}` : "";
-        parts.push(`${sharePercent(regular)} коммитов людей идут с ровными интервалами${every}`);
+      if (regular !== null && regularHigh(regular, interval)) {
+        parts.push(`${sharePercent(regular)} коммитов людей идут с ровными интервалами, обычно раз в ${fmtMinutes(interval! * 60_000)}`);
       }
       return parts.length > 0 ? parts.join("; ") : null;
     }

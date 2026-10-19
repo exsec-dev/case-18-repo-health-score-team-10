@@ -15,6 +15,7 @@ import type { DerivedMetrics } from "../score/derived";
 import { INDEX_WEIGHTS, SCORE_WEIGHTS, COVERAGE_NULL_BELOW, type CategoryKey, type IndexCategoryKey, MODEL_VERSION, SECRETS_CRITICAL_TOTAL_CAP, CRITICAL_FINDINGS_TOTAL_CAP } from "../score/model";
 import type { AiAudience } from "../db";
 import { NO_RHYTHM_REASON } from "../summary/pipeline";
+import { FLAGGER_RULES_VERSION } from "../summary/fraud-thresholds";
 import { CI_VALUES, SIZE_BUCKETS, sizeBucketOf, type CiFilter, type SizeBucket } from "./rating-filters";
 import { TOPIC_IDS, decodeTopics, isTopicId, type TopicId } from "./topics";
 import { ladderFromFacts, type Ladder } from "../score/ladder";
@@ -630,20 +631,21 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
   const flagged = new Map<number, boolean>();
   for (const row of db
     .query(
-      `SELECT n.repo_id, n.text, n.scan_id, n.created_at,
+      `SELECT n.repo_id, n.text, n.scan_id, n.created_at, n.charter_version,
          (SELECT f.scan_id FROM ai_fails f WHERE f.repo_id = n.repo_id AND f.role = 'flagger' ORDER BY f.scan_id DESC, f.id DESC LIMIT 1) AS fail_scan,
          (SELECT f.created_at FROM ai_fails f WHERE f.repo_id = n.repo_id AND f.role = 'flagger' ORDER BY f.scan_id DESC, f.id DESC LIMIT 1) AS fail_at,
          (SELECT MAX(s.id) FROM scans s WHERE s.repo_id = n.repo_id AND s.status IN ('ok', 'partial')) AS latest
        FROM (
-         SELECT repo_id, text, scan_id, created_at, ROW_NUMBER() OVER (PARTITION BY repo_id ORDER BY scan_id DESC, id DESC) AS rn
+         SELECT repo_id, text, scan_id, created_at, charter_version, ROW_NUMBER() OVER (PARTITION BY repo_id ORDER BY scan_id DESC, id DESC) AS rn
          FROM ai_notes WHERE role = 'flagger') n
        WHERE n.rn = 1`,
     )
-    .all() as { repo_id: number; text: string; scan_id: number; created_at: string; fail_scan: number | null; fail_at: string | null; latest: number | null }[]) {
+    .all() as { repo_id: number; text: string; scan_id: number; created_at: string; charter_version: string; fail_scan: number | null; fail_at: string | null; latest: number | null }[]) {
     if (parseFlaggerNote(row.text)?.flag !== true) continue;
     const failNewer = row.fail_scan !== null && (row.fail_scan > row.scan_id || (row.fail_scan === row.scan_id && (row.fail_at ?? "") > row.created_at));
     if (failNewer) continue;
-    flagged.set(row.repo_id, row.latest !== null && row.scan_id < row.latest);
+    // флаг по прежним правилам — «устарел», как и флаг по прошлому анализу
+    flagged.set(row.repo_id, (row.latest !== null && row.scan_id < row.latest) || flaggerNoteOldRules(row.charter_version));
   }
   if (flagged.size > 0) {
     for (const item of all) {
@@ -957,6 +959,8 @@ export interface CardAiCheck {
   retryable: boolean;
   /** последний завершенный скан репо — проверка устарела, если он новее */
   latestScanId: number | null;
+  /** проверка сделана по прежним правилам (хартия до FLAGGER_RULES_VERSION) — устарела, нужна новая */
+  oldRules: boolean;
 }
 
 export interface CardAi {
@@ -1766,8 +1770,8 @@ export function repoCohort(
 function checkOf(db: Database, repoId: number): CardAiCheck {
   const active = db.query("SELECT 1 FROM jobs WHERE repo_id = ? AND kind = 'check' AND status IN ('queued', 'running') LIMIT 1").get(repoId) !== null;
   const note = db
-    .query("SELECT scan_id, created_at FROM ai_notes WHERE repo_id = ? AND role = 'flagger' ORDER BY scan_id DESC, id DESC LIMIT 1")
-    .get(repoId) as { scan_id: number; created_at: string } | null;
+    .query("SELECT scan_id, created_at, charter_version FROM ai_notes WHERE repo_id = ? AND role = 'flagger' ORDER BY scan_id DESC, id DESC LIMIT 1")
+    .get(repoId) as { scan_id: number; created_at: string; charter_version: string } | null;
   const fail = db
     .query("SELECT scan_id, reason, created_at FROM ai_fails WHERE repo_id = ? AND role = 'flagger' ORDER BY scan_id DESC, id DESC LIMIT 1")
     .get(repoId) as { scan_id: number; reason: string; created_at: string } | null;
@@ -1781,7 +1785,14 @@ function checkOf(db: Database, repoId: number): CardAiCheck {
     failure: failNewer ? checkFailureText(fail!.reason) : null,
     retryable: failNewer && fail!.reason !== NO_RHYTHM_REASON,
     latestScanId: latest?.id ?? null,
+    oldRules: !failNewer && note !== null && flaggerNoteOldRules(note.charter_version),
   };
+}
+
+/** Заметка flagger по прежним правилам: версия хартии ниже FLAGGER_RULES_VERSION (нечисловая — тоже прежняя). */
+function flaggerNoteOldRules(charterVersion: string): boolean {
+  const v = Number.parseInt(charterVersion, 10);
+  return !Number.isFinite(v) || v < FLAGGER_RULES_VERSION;
 }
 
 /**
