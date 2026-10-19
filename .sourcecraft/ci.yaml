@@ -22,5 +22,5 @@ tasks:
           - apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends git ca-certificates
           - bun install --frozen-lockfile
           - bun run tsc
-          # лимит теста 30 с: на раннере тесты с временной БД идут 4-7 с, дефолтные 5 с дают флаки; зависание все равно ловит max_cube_duration
-          - bun test --timeout 30000
+          # временные БД тестов в /dev/shm, лимит теста 30 с – см. скрипт
+          - sh scripts/ci-test.sh
