@@ -88,7 +88,8 @@ describe("выбор 1A: 7 состояний проверки активнос�
     expect(fraudCheckState(ai({}), true)).toMatchObject({ kind: "none", button: "Проверить активность" });
     expect(fraudCheckState(ai({}), false)).toMatchObject({ kind: "none", button: null });
     expect(title(ai({}), true)).toBe("Не проверялась");
-    expect(checkCardText(fraudCheckState(ai({}), false), ai({}), false).desc).toContain("Проверку может запустить любой вошедший пользователь");
+    // 19.10.2026: строка статуса – гостю коротко, кто запускает (рядом кнопка входа)
+    expect(checkCardText(fraudCheckState(ai({}), false), ai({}), false).meta).toBe("запускает вошедший пользователь");
   });
   test("идет, признаков нет, есть признаки", () => {
     expect(fraudCheckState(ai({ active: true }), true)).toMatchObject({ kind: "active", button: null });
@@ -101,7 +102,7 @@ describe("выбор 1A: 7 состояний проверки активнос�
       kind: "failed",
       button: "Повторить проверку",
     });
-    expect(title(ai({ scanId: 5, failure: "AI-провайдер не ответил – попробуйте позже", retryable: true }), true)).toBe("Проверка не сформировалась");
+    expect(title(ai({ scanId: 5, failure: "AI-провайдер не ответил – попробуйте позже", retryable: true }), true)).toBe("Не сформировалась");
     expect(fraudCheckState(ai({ scanId: 5, failure: "в анализе нет истории коммитов – проверять нечего", retryable: false }), true)).toMatchObject({
       kind: "nothing",
       button: null,

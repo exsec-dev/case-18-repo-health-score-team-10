@@ -760,9 +760,11 @@ body {
   gap: var(--g-spacing-3);
 }
 
-/* проверка активности (A2): у своего репо — на всю ширину под плашками оценок;
- * при флаге рамка цветом предупреждения, признаки — списком */
-.rh-check-card_wide,
+/* проверка активности (19.10.2026) — строкой на всю ширину под плашками оценок;
+ * у чужого репо HealthCraft Index тогда тоже на всю ширину */
+.rh-check-card,
+.rh-check-alert,
+.rh-score-cards_single > .rh-score-band,
 .rh-score-cards__wide {
   grid-column: 1 / -1;
 }
@@ -771,21 +773,63 @@ body {
   display: none;
 }
 
-.g-card.rh-check-card_flagged {
-  border-color: var(--g-color-line-warning);
+/* строка статуса, как «CI/CD – Configured» у SourceCraft: значок, текст, знак вопроса,
+ * кнопка справа; на узком экране кнопка переносится, а не сжимает текст */
+.rh-check-card {
+  box-sizing: border-box;
+  padding: var(--g-spacing-2) var(--g-spacing-4);
 }
 
-.rh-check-card__list {
-  margin: var(--g-spacing-1) 0 2px;
-  padding-inline-start: 18px;
+.rh-check-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--g-spacing-2);
+  row-gap: var(--g-spacing-1);
+  min-height: 28px;
 }
 
-.rh-check-card__list li {
+.rh-check-row__icon {
+  flex: none;
+}
+
+/* текст делит строку со значком и кнопкой и переносится внутри себя */
+.rh-check-row__text {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.rh-check-row__text .g-help-mark {
+  vertical-align: middle;
+}
+
+.rh-check-row__end {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--g-spacing-3);
+  margin-inline-start: auto;
+}
+
+/* найденные признаки — желтым предупреждением со списком (вариант D) */
+.rh-check-alert {
+  box-sizing: border-box;
+  padding: var(--g-spacing-2) var(--g-spacing-4) var(--g-spacing-3);
+  border-radius: var(--g-border-radius-xl);
+  background: var(--g-color-base-warning-light);
+}
+
+.rh-check-alert__list {
+  margin: 2px 0 0;
+  padding-inline-start: calc(16px + var(--g-spacing-2));
+}
+
+.rh-check-alert__list li {
   margin: 2px 0;
 }
 
-.rh-check-card__act {
-  margin-top: var(--g-spacing-2);
+.rh-check-card .rh-check-foot__why,
+.rh-check-alert .rh-check-foot__why {
+  margin: var(--g-spacing-1) 0 0;
 }
 
 /* разделы ленты («Категории», «Рекомендации») — в том же `Card view="outlined"`
