@@ -60,7 +60,7 @@ import { backfillTopics } from "./jobs/topics";
 import { enqueueCheck, enqueueSummary, lastFinishedScan } from "./jobs/scheduler";
 import { aiQuota, clearUnlock, isUnlocked, quotaRefusal, tryUnlock, type QuotaRefusal } from "./jobs/ai-quota";
 import type { AiAudience } from "./db";
-import { getAiNotesHistory, getRepoHistory } from "./api/history";
+import { getAiNotesHistory, getHistoryDiff, getRepoHistory } from "./api/history";
 import { BADGE_CACHE_SECONDS, badgeKey, badgeSubject, getPublicRepo, parseBadgeOptions, renderBadgeFor } from "./api/public";
 import { NO_PAT_ACCESS } from "./auth/access";
 import { killActiveClones } from "./collectors/git";
@@ -920,6 +920,25 @@ const routes = {
       const history = getRepoHistory(db, org!, repo!, { access });
       if (history === null) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
       return Response.json(history);
+    },
+    // Почему оценка изменилась между двумя анализами истории (мостик под
+    // графиком): те же права, что у истории; полный Score — только с правами
+    "/api/repos/:org/:repo/history/diff": async (req) => {
+      const { org, repo } = req.params;
+      if (!validSlugSegment(org) || !validSlugSegment(repo)) {
+        return badQuery("адрес репозитория указан неверно: нужен вид организация/репозиторий из латинских букв, цифр, точек, дефисов и подчеркиваний");
+      }
+      const q = new URL(req.url).searchParams;
+      const from = Number(q.get("from"));
+      const to = Number(q.get("to"));
+      if (!Number.isSafeInteger(from) || !Number.isSafeInteger(to) || from <= 0 || to <= 0) return badQuery("нужны номера двух анализов: from и to");
+      const viewer = sessionOf(req);
+      if (viewer && !allowHistoryView(viewer.userId)) return historyRateLimited(viewer.userId);
+      const access = viewer === null ? NO_PAT_ACCESS : await accessBySlug(req, org!, repo!);
+      const diff = getHistoryDiff(db, org!, repo!, from, to, { access });
+      if (diff === null) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
+      if (diff === "unknown") return notFound("такого анализа нет в истории оценки");
+      return Response.json(diff);
     },
     // Полные AI-тексты не публичны: не видно репо — 404, видно, но полный
     // Score закрыт — 403 locked с причиной

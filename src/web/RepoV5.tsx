@@ -1,7 +1,7 @@
 // AI-блоки и история на карточке репозитория: признаки накрутки в подвале плашки
 // HealthCraft Index, AI-обзор, AI-разбор в категориях, история оценки и бейдж для README.
 // `card.ai` приходит только зрителю с правами на полный Score; без прав этих блоков нет вовсе.
-import { ArrowsRotateRight, Check, ChevronDown, CircleExclamation, ClockArrowRotateLeft, Flag, SealCheck, Shield, ShieldCheck, SparklesFill } from "@gravity-ui/icons";
+import { ArrowRight, ArrowUpArrowDown, ArrowsRotateRight, Check, ChevronDown, CircleExclamation, ClockArrowRotateLeft, Flag, SealCheck, Shield, ShieldCheck, SparklesFill, TriangleDownFill, TriangleUpFill } from "@gravity-ui/icons";
 import {
   ActionTooltip,
   Alert,
@@ -15,6 +15,7 @@ import {
   Icon,
   Label,
   Popover,
+  SegmentedRadioGroup,
   Select,
   Skeleton,
   Spin,
@@ -58,8 +59,9 @@ import {
   type QuotaCounter,
 } from "./format";
 import { announceJobStarted, announceJobsChanged, useAnalysisFinished, useSession } from "./session";
+import { bridgeOf, categoryDetails, categoryPhrase, categoryTitle, changeLine, dayOptions, defaultPair, fmtDelta, pointDeltas, specialText, type Bridge, type BridgeMetric } from "./scoreChangeView";
 import { BADGE_CHIPS, SLOT_EMPTY, aiNotesCaption, badgeCode, historyByTime, historyDomain, scoreHistoryView, type BadgeChip, type BadgeFormat } from "./slots";
-import type { AiNoteHistoryItem, AiNotesResponse, HistoryPoint, HistoryResponse } from "../summary/history-contract";
+import type { AiNoteHistoryItem, AiNotesResponse, HistoryPoint, HistoryResponse, ScoreChange } from "../summary/history-contract";
 import { evolutionTooEarly } from "../summary/history-contract";
 
 type Card = RepoCard;
@@ -883,7 +885,9 @@ function CountedLabel({ label, counter }: { label: string; counter: QuotaCounter
 
 const CHART_H = 180;
 // слева — подписи шкалы, справа — названия линий у их концов
-const PAD_L = 32;
+// подписи шкалы стоят от левого края карточки — под текстом заголовка; поле
+// слева — по ширине самой длинной подписи и зазор до сетки
+const TICK_GAP = 8;
 const PAD_T = 20;
 const PAD_B = 22;
 // ширина символа подписи 11px (латиница, даты) — для места справа и проверки
@@ -952,17 +956,25 @@ function HistoryChart({ points: all, fullOpen }: { points: HistoryPoint[]; fullO
   const rhs = fullOpen ? points.map((p) => p.repoHealthScore) : null;
   const hLast = lastIndex(hci);
   const rLast = rhs === null ? -1 : lastIndex(rhs);
-  // названия у концов линий вместо легенды; текущие значения — числами над
-  // последними точками
+  // у конца каждой линии — текущее значение и название линии вместо легенды
+  // («69 HealthCraft Index»): справа от последней точки пусто, а над ней число
+  // перекрывали скачок линии и сгусток точек последних дней
   const ends = [
-    ...(hLast >= 0 ? [{ name: "HealthCraft Index", i: hLast, v: hci[hLast]!, color: "var(--g-color-text-complementary)" }] : []),
-    ...(rhs !== null && rLast >= 0 ? [{ name: "Repo Health Score", i: rLast, v: rhs[rLast]!, color: "var(--g-color-text-secondary)" }] : []),
+    ...(hLast >= 0 ? [{ name: "HealthCraft Index", i: hLast, v: hci[hLast]!, color: "var(--g-color-text-complementary)", valueColor: "var(--g-color-text-primary)" }] : []),
+    ...(rhs !== null && rLast >= 0 ? [{ name: "Repo Health Score", i: rLast, v: rhs[rLast]!, color: "var(--g-color-text-secondary)", valueColor: "var(--g-color-text-secondary)" }] : []),
   ];
-  const PAD_R = END_GAP + Math.ceil(Math.max(0, ...ends.map((e) => e.name.length)) * LABEL_CH) + 4;
+  // ширина подписи конца: число жирным, пробел, название
+  const endW = (e: (typeof ends)[number]): number => fmtScore(e.v).length * NUM_CH_LAST + 4 + e.name.length * LABEL_CH;
+  const PAD_R = END_GAP + Math.ceil(Math.max(0, ...ends.map(endW))) + 4;
   const times = points.map((p) => (p.finishedAt === null ? NaN : Date.parse(p.finishedAt)));
   const known = times.filter((t) => Number.isFinite(t));
   const t0 = Math.min(...known);
   const t1 = Math.max(...known);
+  // шкала — по данным (historyDomain), цвет линии — зона последней оценки
+  const drawn = [...hci, ...(rhs ?? [])].filter((v): v is number => v !== null);
+  const domain = historyDomain(drawn);
+  // поле слева — по самой длинной подписи шкалы: «100» шире «40»
+  const PAD_L = Math.ceil(Math.max(...domain.ticks.map((g) => String(g).length)) * LABEL_CH) + TICK_GAP;
   // ось X — время анализа; без разброса времени — точки равномерно
   const xOf = (i: number): number => {
     const t = times[i]!;
@@ -983,9 +995,6 @@ function HistoryChart({ points: all, fullOpen }: { points: HistoryPoint[]; fullO
     });
     return d.trim();
   };
-  // шкала — по данным (historyDomain), цвет линии — зона последней оценки
-  const drawn = [...hci, ...(rhs ?? [])].filter((v): v is number => v !== null);
-  const domain = historyDomain(drawn);
   const yOf = (v: number): number => PAD_T + (1 - (Math.max(domain.lo, Math.min(domain.hi, v)) - domain.lo) / (domain.hi - domain.lo)) * (CHART_H - PAD_T - PAD_B);
   // отрезок между соседними оценками — цвета зоны левой точки: 65 → 70 желтый, 70 → 80
   // зеленый; переход зоны виден на самой линии. Пропуск данных разрывает линию
@@ -995,7 +1004,7 @@ function HistoryChart({ points: all, fullOpen }: { points: HistoryPoint[]; fullO
   });
   // подписи у концов линий: по высоте своей точки; близкие — разводятся на
   // строку, большее значение выше (при равных Index выше Score)
-  const LINE = 14;
+  const LINE = 15;
   const endY = ends.map((e) => yOf(e.v) + 4);
   if (ends.length === 2 && Math.abs(endY[0]! - endY[1]!) < LINE) {
     const mid = (endY[0]! + endY[1]!) / 2;
@@ -1003,21 +1012,25 @@ function HistoryChart({ points: all, fullOpen }: { points: HistoryPoint[]; fullO
     endY[0] = mid + (indexUp ? -LINE / 2 : LINE / 2);
     endY[1] = mid + (indexUp ? LINE / 2 : -LINE / 2);
   }
-  const endLabels = ends.map((e, k) => ({ ...e, x: xOf(e.i) + END_GAP, y: Math.min(CHART_H - PAD_B, Math.max(12, endY[k]!)) }));
-  // числа у точек: сначала последние значения обеих линий (крупнее), затем —
-  // пока оценок немного — остальные точки Index от последней к первой. Число
-  // встает над точкой, а если там занято (или у верхней кромки) — под ней;
+  // у кромки графика (оба значения 0 или 100) пара сдвигается целиком: прижатые
+  // по одной, подписи снова легли бы друг на друга
+  const yMin = 12;
+  const yMax = CHART_H - PAD_B;
+  const shift = Math.max(0, yMin - Math.min(...endY)) - Math.max(0, Math.max(...endY) - yMax);
+  const endLabels = ends.map((e, k) => ({ ...e, x: xOf(e.i) + END_GAP, y: Math.min(yMax, Math.max(yMin, endY[k]! + shift)) }));
+  // числа у прошлых точек Index — пока оценок немного, от последней к первой.
+  // Число встает над точкой, а если там занято (или у верхней кромки) — под ней;
   // задевшее уже поставленную подпись в обоих местах пропускается — значение
   // остается в подсказке точки
   type Box = [number, number, number, number];
   const hit = (a: Box, b: Box): boolean => a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
-  const placed: Box[] = endLabels.map((e) => [e.x - 3, e.y - 11, e.x + e.name.length * LABEL_CH + 3, e.y + 3]);
-  type PointLabel = { key: string; x: number; y: number; text: string; anchor: "start" | "middle" | "end"; last: boolean; color: string };
+  const placed: Box[] = endLabels.map((e) => [e.x - 3, e.y - 12, e.x + endW(e) + 3, e.y + 3]);
+  type PointLabel = { key: string; x: number; y: number; text: string; anchor: "start" | "middle" | "end"; color: string };
   const pointLabels: PointLabel[] = [];
-  const place = (key: string, i: number, v: number, last: boolean, color: string): void => {
+  const place = (key: string, i: number, v: number, color: string): void => {
     const text = fmtScore(v);
-    const size = last ? 13 : 12;
-    const w = text.length * (last ? NUM_CH_LAST : NUM_CH);
+    const size = 12;
+    const w = text.length * NUM_CH;
     const x = xOf(i);
     const anchor = points.length > 1 && i === 0 ? "start" : points.length > 1 && i === points.length - 1 ? "end" : "middle";
     const x0 = anchor === "start" ? x : anchor === "end" ? x - w : x - w / 2;
@@ -1027,16 +1040,14 @@ function HistoryChart({ points: all, fullOpen }: { points: HistoryPoint[]; fullO
       const box: Box = [x0 - 3, y - size, x0 + w + 3, y + 3];
       if (placed.some((b) => hit(box, b))) continue;
       placed.push(box);
-      pointLabels.push({ key, x, y, text, anchor, last, color });
+      pointLabels.push({ key, x, y, text, anchor, color });
       return;
     }
   };
-  if (hLast >= 0) place(`h${hLast}`, hLast, hci[hLast]!, true, "var(--g-color-text-primary)");
-  if (rhs !== null && rLast >= 0) place(`r${rLast}`, rLast, rhs[rLast]!, true, "var(--g-color-text-secondary)");
   if (hci.filter((v) => v !== null).length <= 6) {
     for (let i = hLast - 1; i >= 0; i--) {
       const v = hci[i];
-      if (v !== null && v !== undefined) place(`h${i}`, i, v, false, "var(--g-color-text-complementary)");
+      if (v !== null && v !== undefined) place(`h${i}`, i, v, "var(--g-color-text-complementary)");
     }
   }
   // подписи оси: за короткий период (меньше 36 ч) — время, иначе дата. Кандидаты —
@@ -1069,17 +1080,20 @@ function HistoryChart({ points: all, fullOpen }: { points: HistoryPoint[]; fullO
       {domain.ticks.map((g) => (
         <g key={`t${g}`}>
           <line x1={PAD_L} x2={CHART_W - PAD_R} y1={yOf(g)} y2={yOf(g)} stroke="var(--g-color-line-generic)" />
-          <text x={PAD_L - 8} y={yOf(g) + 4} fontSize={11} fill="var(--g-color-text-secondary)" textAnchor="end">
+          <text x={0} y={yOf(g) + 4} fontSize={11} fill="var(--g-color-text-secondary)">
             {g}
           </text>
         </g>
       ))}
+      {/* порог, совпавший с делением, подписан делением — второй раз число не печатается */}
       {domain.thresholds.map((g) => (
         <g key={`z${g}`}>
           <line x1={PAD_L} x2={CHART_W - PAD_R} y1={yOf(g)} y2={yOf(g)} stroke="var(--g-color-line-generic-active)" strokeDasharray="4 4" />
-          <text x={PAD_L - 8} y={yOf(g) + 4} fontSize={11} fill="var(--g-color-text-secondary)" textAnchor="end">
-            {g}
-          </text>
+          {!domain.ticks.includes(g) && (
+            <text x={0} y={yOf(g) + 4} fontSize={11} fill="var(--g-color-text-secondary)">
+              {g}
+            </text>
+          )}
         </g>
       ))}
       {/* Repo Health Score — сплошной серой линией с полыми точками: пунктир не
@@ -1108,16 +1122,20 @@ function HistoryChart({ points: all, fullOpen }: { points: HistoryPoint[]; fullO
           </circle>
         ),
       )}
-      {/* значения у точек — над точкой (если занято — под ней); последние крупнее */}
+      {/* значения у точек — над точкой (если занято — под ней); обводка цветом
+          фона отделяет цифры от линий, проходящих рядом */}
       {pointLabels.map((l) => (
-        <text key={l.key} x={l.x} y={l.y} fontSize={l.last ? 13 : 12} fontWeight={l.last ? 600 : 400} fill={l.color} textAnchor={l.anchor}>
+        <text key={l.key} x={l.x} y={l.y} fontSize={12} fill={l.color} textAnchor={l.anchor} stroke="var(--g-color-base-background)" strokeWidth={3} paintOrder="stroke" strokeLinejoin="round">
           {l.text}
         </text>
       ))}
-      {/* название у конца каждой линии — вместо легенды */}
+      {/* у конца каждой линии — текущее значение жирным и название вместо легенды */}
       {endLabels.map((e) => (
         <text key={e.name} x={e.x} y={e.y} fontSize={11} fill={e.color}>
-          {e.name}
+          <tspan fontSize={13} fontWeight={600} fill={e.valueColor}>
+            {fmtScore(e.v)}
+          </tspan>
+          {` ${e.name}`}
         </text>
       ))}
       {labelIdx.map((i) => (
@@ -1135,7 +1153,27 @@ function HistoryChart({ points: all, fullOpen }: { points: HistoryPoint[]; fullO
  * коммит (и пометка пустого репо) — второй строкой мелко; баллы — колонками общей
  * сетки списка (subgrid), иконка описания модели — в своей колонке справа.
  */
+/**
+ * Разница к прошлому анализу у числа — как изменение индекса в «Моих
+ * репозиториях»: направление треугольником, величина тише; 0 не печатается.
+ */
+function DeltaMark({ value }: { value: number | null }) {
+  if (value === null || value === 0) return null;
+  const up = value > 0;
+  return (
+    <span className="rh-delta" role="img" aria-label={`${up ? "выросла" : "снизилась"} на ${Math.abs(value)}`}>
+      <span className={up ? "rh-rank__arrow rh-rank__arrow_up" : "rh-rank__arrow rh-rank__arrow_down"} aria-hidden="true">
+        <Icon data={up ? TriangleUpFill : TriangleDownFill} size={10} />
+      </span>
+      <span aria-hidden="true">{Math.abs(value)}</span>
+    </span>
+  );
+}
+
 function AnalysisRow({ point, fullOpen, overview, aiColumn }: { point: HistoryPoint; fullOpen: boolean; overview: AiNoteHistoryItem | null; aiColumn: boolean }) {
+  const delta = pointDeltas(point, fullOpen);
+  // почему изменилась оценка — строкой под анализом на всю ширину
+  const why = changeLine(point, fullOpen);
   return (
     <li className="rh-history__row">
       <div className="rh-history__when">
@@ -1162,11 +1200,13 @@ function AnalysisRow({ point, fullOpen, overview, aiColumn }: { point: HistoryPo
       <Text variant="body-1" color="complementary" className="rh-history__val">
         {"HealthCraft Index "}
         <span className="rh-history__num">{fmtScore(point.healthcraftIndex)}</span>
+        <DeltaMark value={delta.index} />
       </Text>
       {fullOpen && (
         <Text variant="body-1" color="complementary" className="rh-history__val">
           {"Repo Health Score "}
           <span className="rh-history__num">{fmtScore(point.repoHealthScore)}</span>
+          <DeltaMark value={delta.full} />
         </Text>
       )}
       {/* описание на момент анализа — иконкой в своей колонке, текст в поповере;
@@ -1190,7 +1230,211 @@ function AnalysisRow({ point, fullOpen, overview, aiColumn }: { point: HistoryPo
           )}
         </span>
       )}
+      {why !== null && (
+        <Text variant="caption-2" color="secondary" className="rh-history__why">
+          {why}
+        </Text>
+      )}
     </li>
+  );
+}
+
+/**
+ * «Что изменилось» — блок истории под AI-разбором динамики: почему оценка между
+ * двумя днями стала такой. По умолчанию — от дня перед последним изменением
+ * оценки до последнего анализа; дни и показатель выбирают сами. Вклады целые,
+ * их сумма равна разнице оценок. Без изменений оценки блока нет.
+ */
+function ScoreBridge({ points, fullOpen, org, repo }: { points: HistoryPoint[]; fullOpen: boolean; org: string; repo: string }) {
+  const fallback = defaultPair(points, fullOpen);
+  const [picked, setPicked] = useState<{ from: number; to: number } | null>(null);
+  // выбранный анализ мог пропасть из истории (смена модели) — тогда пара по умолчанию
+  const known = (id: number): boolean => points.some((p) => p.scanId === id);
+  const pair = picked !== null && known(picked.from) && known(picked.to) ? picked : fallback;
+  const [metric, setMetric] = useState<BridgeMetric>("index");
+  if (pair === null) return null;
+  return (
+    <div className="rh-scorediff" role="group" aria-labelledby="rh-scorediff-title" data-slot="scoreChange">
+      <ScoreBridgeBody points={points} fullOpen={fullOpen} org={org} repo={repo} pair={pair} onPair={setPicked} metric={fullOpen ? metric : "index"} onMetric={setMetric} />
+    </div>
+  );
+}
+
+/** Разница двух несоседних анализов с сервера; url null — запрос не нужен (разница уже в истории). */
+function useDiff(url: string | null): { kind: "idle" | "loading" } | { kind: "ok"; data: ScoreChange } | { kind: "error"; message: string } {
+  const [state, setState] = useState<{ kind: "idle" | "loading" } | { kind: "ok"; data: ScoreChange } | { kind: "error"; message: string }>({ kind: "idle" });
+  useEffect(() => {
+    if (url === null) return;
+    const ctrl = new AbortController();
+    setState({ kind: "loading" });
+    fetchJson<ScoreChange>(url, ctrl.signal)
+      .then((data) => setState({ kind: "ok", data }))
+      .catch((e: unknown) => {
+        if (!ctrl.signal.aborted) setState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+      });
+    return () => ctrl.abort();
+  }, [url]);
+  return url === null ? { kind: "idle" } : state;
+}
+
+function ScoreBridgeBody({
+  points,
+  fullOpen,
+  org,
+  repo,
+  pair,
+  onPair,
+  metric,
+  onMetric,
+}: {
+  points: HistoryPoint[];
+  fullOpen: boolean;
+  org: string;
+  repo: string;
+  pair: { from: number; to: number };
+  onPair: (pair: { from: number; to: number }) => void;
+  metric: BridgeMetric;
+  onMetric: (metric: BridgeMetric) => void;
+}) {
+  const toIdx = points.findIndex((p) => p.scanId === pair.to);
+  // соседние анализы — разница уже пришла с историей, запрос не нужен
+  const adjacent = points[toIdx]?.change?.fromScanId === pair.from ? points[toIdx]!.change : null;
+  const state = useDiff(adjacent !== null ? null : `${apiBase(org, repo)}/history/diff?from=${pair.from}&to=${pair.to}`);
+  const change = adjacent ?? (state.kind === "ok" ? state.data : null);
+  // в полях — только дни: один пункт на день, его последний анализ; новые сверху
+  const days = dayOptions(points);
+  const dayAt = (scanId: number): number => days.findIndex((d) => d.scanId === scanId);
+  const options = (lo: number, hi: number) =>
+    days
+      .flatMap((d, i) => (i >= lo && i <= hi ? [{ value: String(d.scanId), content: d.day }] : []))
+      .reverse();
+  const bridge = change === null ? null : bridgeOf(change, metric);
+  const special = change === null ? null : specialText(change);
+  return (
+    <Flex direction="column" gap={3}>
+      <div className="rh-scorediff__head">
+        <Flex gap={2} alignItems="center" className="rh-scorediff__title">
+          {/* нейтральный значок — пара к искре AI-разбора выше: здесь факты, а не текст модели */}
+          <Icon data={ArrowUpArrowDown} size={16} className="rh-scorediff__icon" />
+          <Text variant="subheader-2" as="h3" id="rh-scorediff-title">
+            Что изменилось
+          </Text>
+          <HelpMark iconSize="s" aria-label="Как читать">
+            На сколько баллов каждая категория сдвинула оценку между выбранными днями. Вклады целые и в сумме дают разницу оценок.
+          </HelpMark>
+        </Flex>
+        <Select
+          size="m"
+          value={[String(pair.from)]}
+          options={options(0, dayAt(pair.to) - 1)}
+          onUpdate={(v) => onPair({ from: Number(v[0]), to: pair.to })}
+          aria-label="С какого дня"
+          popupClassName="rh-scorediff__popup"
+          popupPlacement="bottom-start"
+        />
+        <Icon data={ArrowRight} size={16} className="rh-scorediff__arrow" />
+        <Select
+          size="m"
+          value={[String(pair.to)]}
+          options={options(dayAt(pair.from) + 1, days.length - 1)}
+          onUpdate={(v) => onPair({ from: pair.from, to: Number(v[0]) })}
+          aria-label="По какой день"
+          popupClassName="rh-scorediff__popup"
+          popupPlacement="bottom-start"
+        />
+        {/* показатель — зрителю с правами на Repo Health Score: у полного свои вклады и CI/CD с Безопасностью */}
+        {fullOpen && (
+          <SegmentedRadioGroup size="m" value={metric} onUpdate={(v) => onMetric(v === "full" ? "full" : "index")} aria-label="Показатель">
+            <SegmentedRadioGroup.Option value="index">HealthCraft Index</SegmentedRadioGroup.Option>
+            <SegmentedRadioGroup.Option value="full">Repo Health Score</SegmentedRadioGroup.Option>
+          </SegmentedRadioGroup>
+        )}
+      </div>
+      {change === null ? (
+        state.kind === "error" ? (
+          <Text variant="body-1" color="secondary">
+            Разницу не удалось загрузить: {state.message}
+          </Text>
+        ) : (
+          <Skeleton style={{ height: 96, width: "100%" }} />
+        )
+      ) : special !== null ? (
+        <Text variant="body-1">{special}</Text>
+      ) : bridge === null ? (
+        <Text variant="body-1" color="secondary">
+          {metric === "full" && change.fullCapped
+            ? "Repo Health Score ограничен потолком за находки AppSec, поэтому его изменение по категориям не раскладывается."
+            : "У одного из анализов нет оценки – сравнивать нечего."}
+        </Text>
+      ) : (
+        <ChangeRows bridge={bridge} />
+      )}
+    </Flex>
+  );
+}
+
+/**
+ * Итог и категории: оценки «с → по» крупно, под ними строки категорий —
+ * название, полоса вклада (длина — доля самого большого вклада, цвет —
+ * прибавила или убавила), вклад и одна фраза «почему»; числа «было → стало» —
+ * в подсказке фразы.
+ */
+function ChangeRows({ bridge }: { bridge: Bridge }) {
+  const max = Math.max(1, ...bridge.steps.map((s) => Math.abs(s.value)));
+  return (
+    <>
+      <div className="rh-scorediff__totals">
+        <Text variant="header-1" color="secondary">
+          {bridge.from}
+        </Text>
+        <Icon data={ArrowRight} size={20} className="rh-scorediff__arrow" />
+        <Text variant="header-1">{bridge.to}</Text>
+        <Text variant="body-2">
+          <DeltaMark value={bridge.to - bridge.from} />
+        </Text>
+      </div>
+      <ul className="rh-scorediff__list">
+        {bridge.steps.map((s) => {
+          const phrase = categoryPhrase(s.change);
+          const details = categoryDetails(s.change);
+          return (
+            <li key={s.change.key} className="rh-scorediff__row">
+              <Text variant="subheader-1" className="rh-scorediff__name">
+                {categoryTitle(s.change.key)}
+              </Text>
+              <span className="rh-scorediff__track" aria-hidden="true">
+                <i className={s.value > 0 ? "rh-scorediff__fill_up" : "rh-scorediff__fill_down"} style={{ width: `${(Math.abs(s.value) / max) * 100}%` }} />
+              </span>
+              <Text variant="subheader-2" className="rh-scorediff__val">
+                {fmtDelta(s.value)}
+              </Text>
+              {phrase !== null && (
+                <Text variant="body-1" color="secondary" className="rh-scorediff__why">
+                  {details.length > 0 ? (
+                    <ActionTooltip
+                      title="Было → стало"
+                      description={
+                        <span className="rh-scorediff__details">
+                          {details.map((d) => (
+                            <span key={d}>{d}</span>
+                          ))}
+                        </span>
+                      }
+                    >
+                      <span className="rh-scorediff__phrase" {...TIP_TARGET}>
+                        {phrase.charAt(0).toUpperCase() + phrase.slice(1)}
+                      </span>
+                    </ActionTooltip>
+                  ) : (
+                    phrase.charAt(0).toUpperCase() + phrase.slice(1)
+                  )}
+                </Text>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </>
   );
 }
 
@@ -1312,6 +1556,8 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
           {/* легенды нет: линии подписаны названиями у концов, значения — над точками */}
           <HistoryChart points={points} fullOpen={fullOpen} />
           {trajectory !== null && <AiNotePlate title="AI-разбор динамики" text={trajectory.text} staleFor={aiNotesStale(card.ai) ? card : null} />}
+          {/* почему оценка стала такой — под AI-разбором динамики, перед списком анализов */}
+          <ScoreBridge points={points} fullOpen={fullOpen} org={org} repo={repo} />
           {list}
         </Flex>
       </Card>

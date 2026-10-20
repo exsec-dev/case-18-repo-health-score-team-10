@@ -416,10 +416,11 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
       // «Полнота: полная оценка», в подсказке каждой показатель назван полностью
       // UX 17.10: «Покрытие» → «Полнота данных», аббревиатуры HCI/RHS в имени строки сняты
       // аудит 20.10: показатель назван полностью в имени строки, подсказка — без префикса
+      // 20.10: имя показателя — своей строкой после «Полнота:»
       coverageInAside:
         /name="Полнота данных" note=\{coverageHelp\}/.test(aside) &&
-        /name="Полнота: HealthCraft Index" note=\{coverageHelp\}/.test(aside) &&
-        /name="Полнота: Repo Health Score" note=\{fullCoverageHelp\}/.test(aside),
+        /name=\{<>Полнота:<br \/>HealthCraft Index<\/>\} note=\{coverageHelp\}/.test(aside) &&
+        /name=\{<>Полнота:<br \/>Repo Health Score<\/>\} note=\{fullCoverageHelp\}/.test(aside),
       oldCoverageWord: figure.includes("данных хватило"),
       chipLikeAside: /scoreLabelTheme\(total\)\} size="s"/.test(figure),
       // блок не схлопывается в метку: заголовок, путь по типу зрителя и

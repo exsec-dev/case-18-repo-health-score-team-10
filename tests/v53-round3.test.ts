@@ -151,6 +151,7 @@ describe("В5.3 круг 3: история — по времени, пустой
     modelVersion: "m",
     headSha: null,
     codeEmpty: false,
+    change: null,
   });
   test("точки — по времени анализа, не по номеру; без времени — в конец", () => {
     const sorted = historyByTime([pt(3, "2026-09-18T10:00:00Z"), pt(2, "2026-09-19T10:00:00Z"), pt(4, null), pt(1, "2026-09-17T10:00:00Z")]);

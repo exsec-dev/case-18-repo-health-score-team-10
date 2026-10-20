@@ -128,6 +128,7 @@ describe("К-2: слот истории оценки — по точкам и п
     modelVersion: "m",
     headSha: null,
     codeEmpty: false,
+    change: null,
   });
 
   test("нет точек — пустое состояние, графика нет", () => {

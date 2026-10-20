@@ -610,6 +610,16 @@ export function rankNoneText(visibility: string, healthcraftIndex: number | null
   return visibility === "public" && healthcraftIndex === null ? NO_RANK_NO_INDEX : NO_RANK_NOT_PUBLIC;
 }
 
+/**
+ * Паспорт карточки (узкая правая панель): без места — коротко «нет», причина — в
+ * подсказке у имени строки. Фраза «не в публичном рейтинге» переносилась на 3 строки.
+ */
+export function rankNoteText(visibility: string, score: { healthcraftIndex: number | null; rank: number | null; rankedTotal: number | null }): string | null {
+  if (score.rank !== null && score.rankedTotal !== null) return null;
+  if (visibility === "public" && score.healthcraftIndex === null) return "Индекс не рассчитан – без него места в рейтинге нет.";
+  return visibility === "public" ? "Репозиторий не участвует в публичном рейтинге." : "Закрытые репозитории в публичный рейтинг не входят.";
+}
+
 /** Безопасность без данных: откуда берутся данные категории. */
 export const SECURITY_NO_DATA = "Безопасность считается по данным AppSec SourceCraft, а они видны только с правом доступа.";
 

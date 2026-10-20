@@ -1664,6 +1664,13 @@ button.rh-category:focus-visible {
   margin-block-start: var(--g-spacing-1);
 }
 
+/* Имя строки паспорта в 2 строки («Полнота:» / «Repo Health Score»): флекс
+ * сжимал его на пиксель ради точек-заполнителя, и знак подсказки уходил на
+ * третью строку. Ширина такого имени — его самая длинная строка, не шире колонки. */
+.rh-aside-section .g-definition-list__term-wrapper:has(> br) {
+  flex-shrink: 0;
+}
+
 /* Разряд под разрядом в колонке категории: у соседей число внутри
  * `Label size="xs"` с отступом `--_--margin-inline: 8px`. Голое число (>=70
  * плашки не получает) без того же отступа встало бы на 8px правее. */
@@ -3012,6 +3019,150 @@ button.rh-category:focus-visible {
   .rh-history__ai {
     margin-inline-start: auto;
   }
+}
+
+/* почему изменилась оценка — строкой под анализом на всю ширину строки списка */
+.rh-history__why.g-text {
+  grid-column: 1 / -1;
+  margin-block-start: 2px;
+}
+
+@media (max-width: 767px) {
+  .rh-history__why.g-text {
+    flex: 1 0 100%;
+  }
+}
+
+/* разница к прошлому анализу у числа — треугольник и величина тише, как в
+ * «Моих репозиториях» (`.rh-change`) */
+.rh-delta {
+  display: inline-flex;
+  gap: 2px;
+  align-items: center;
+  margin-inline-start: var(--g-spacing-2);
+  color: var(--g-color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* «Что изменилось» — блок истории под AI-разбором динамики: выбор дней, затем итог
+ * «с → по» и строки категорий; строки берут колонки общей сетки через subgrid.
+ * Шапка: заголовок слева, дни и показатель справа; на узком — под заголовком */
+/* отделение по смыслу — линией на всю ширину карточки истории (поля карточки —
+ * spacing-4) и воздухом сверху, без заливки: выше — график и пересказ модели,
+ * ниже — факты по категориям */
+.rh-scorediff {
+  display: flex;
+  box-sizing: border-box;
+  flex-direction: column;
+  gap: var(--g-spacing-2);
+  width: calc(100% + 2 * var(--g-spacing-4));
+  margin-inline: calc(-1 * var(--g-spacing-4));
+  padding: var(--g-spacing-5) var(--g-spacing-4) 0;
+  border-top: 1px solid var(--g-color-line-generic);
+}
+
+/* стрелка «с → по» — иконкой: между полями дней и между оценками */
+.rh-scorediff__arrow {
+  flex-shrink: 0;
+  align-self: center;
+  color: var(--g-color-text-secondary);
+}
+
+.rh-scorediff__icon {
+  flex-shrink: 0;
+  color: var(--g-color-text-secondary);
+}
+
+.rh-scorediff__head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--g-spacing-2);
+  align-items: center;
+}
+
+.rh-scorediff__title {
+  margin-inline-end: auto;
+}
+
+/* списки дней — не выше 8 строк, дальше прокрутка */
+.rh-scorediff__popup .g-select-list {
+  max-height: 256px;
+}
+
+/* итог «с → по» — крупно под шапкой, ступенью ниже главной оценки карточки */
+.rh-scorediff__totals {
+  display: flex;
+  gap: var(--g-spacing-2);
+  align-items: center;
+  font-variant-numeric: tabular-nums;
+}
+
+.rh-scorediff__totals .rh-delta {
+  margin-inline-start: var(--g-spacing-1);
+}
+
+/* сетка — как у строк «Категорий»: название забирает излишек, полоса — мера
+ * в пределах 80–240px, число — у правого края */
+.rh-scorediff__list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(80px, 240px) 28px;
+  column-gap: var(--g-spacing-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rh-scorediff__row {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  row-gap: 2px;
+  align-items: center;
+  padding: var(--g-spacing-2) 0;
+  border-top: 1px solid var(--g-color-line-generic);
+}
+
+/* полоса вклада без подложки: длина — доля самого большого вклада */
+.rh-scorediff__track {
+  height: 8px;
+}
+
+.rh-scorediff__track > i {
+  display: block;
+  height: 100%;
+  min-width: 4px;
+  border-radius: var(--g-border-radius-xs);
+}
+
+.rh-scorediff__fill_up {
+  background: var(--g-color-base-positive-medium);
+}
+
+.rh-scorediff__fill_down {
+  background: var(--g-color-base-danger-medium);
+}
+
+.rh-scorediff__val.g-text {
+  min-width: 3ch;
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+/* «почему» — одной фразой под строкой; числа — в подсказке */
+.rh-scorediff__why.g-text {
+  grid-column: 1 / -1;
+}
+
+.rh-scorediff__phrase {
+  text-decoration: underline dotted var(--g-color-line-generic-active);
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
+.rh-scorediff__details {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 /* «Все анализы» — с небольшим отступом снизу: свернутая строка не жмется к

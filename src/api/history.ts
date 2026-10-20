@@ -5,7 +5,9 @@
 import type { Database } from "bun:sqlite";
 import { parseFactValue } from "../collectors/facts";
 import { MODEL_VERSION } from "../score/model";
-import { totalCapFlags, totalsFromCategories, type CategoryScore } from "../score/compute";
+import { totalCapFlags, totalCapOf, totalsFromCategories, type CategoryScore } from "../score/compute";
+import { scoreChange, type ScoreChange, type ScoreSnapshot } from "../summary/score-change";
+import { historyByTime } from "../web/slots";
 import { NO_PAT_ACCESS, type AccessResult } from "../auth/access";
 import type { AiAudience } from "../db";
 
@@ -54,12 +56,54 @@ function totalsOf(row: ScoreHistoryRow, caps: { secretsCritical: boolean; critic
  * null – репо не видно (404).
  */
 export function getRepoHistory(db: Database, org: string, repo: string, opts: { access?: AccessResult } = {}): HistoryResponse | null {
+  const loaded = loadHistory(db, org, repo, opts.access ?? NO_PAT_ACCESS);
+  if (loaded === null) return null;
+  const { rows, snaps, fullOpen } = loaded;
+  // почему оценка изменилась к предыдущей точке — соседи по времени анализа, как
+  // на графике (`historyByTime`): номер скана растет с заявкой, а завершаются
+  // анализы не по порядку
+  const change = new Map<number, ScoreChange | null>();
+  let prev: ScoreSnapshot | null = null;
+  for (const snap of historyByTime(snaps)) {
+    change.set(snap.scanId, prev === null ? null : scoreChange(prev, snap, fullOpen));
+    prev = snap;
+  }
+  const points: HistoryPoint[] = rows.map((row, i) => ({
+    scanId: row.scan_id,
+    finishedAt: row.finished_at,
+    healthcraftIndex: row.healthcraft_index,
+    indexCoverage: row.index_coverage,
+    repoHealthScore: snaps[i]!.repoHealthScore,
+    modelVersion: MODEL_VERSION,
+    headSha: row.head_sha,
+    // помечаем точку «без кода», чтобы переход от нулей к первому пушу не читался ростом
+    codeEmpty: row.code_empty === 1,
+    change: change.get(row.scan_id) ?? null,
+  }));
+  return { points, modelVersion: MODEL_VERSION, fullOpen };
+}
+
+/**
+ * Почему оценка изменилась между двумя любыми анализами истории (мостик под
+ * графиком) — тем же расчетом, что разница соседних точек. null — репо не
+ * видно (404); "unknown" — одного из анализов нет в истории текущей модели.
+ */
+export function getHistoryDiff(db: Database, org: string, repo: string, from: number, to: number, opts: { access?: AccessResult } = {}): ScoreChange | "unknown" | null {
+  const loaded = loadHistory(db, org, repo, opts.access ?? NO_PAT_ACCESS);
+  if (loaded === null) return null;
+  const a = loaded.snaps.find((s) => s.scanId === from);
+  const b = loaded.snaps.find((s) => s.scanId === to);
+  if (a === undefined || b === undefined) return "unknown";
+  return scoreChange(a, b, loaded.fullOpen);
+}
+
+/** Строки истории текущей модели и их снимки для сравнения; null — репо не видно. */
+function loadHistory(db: Database, org: string, repo: string, access: AccessResult): { rows: ScoreHistoryRow[]; snaps: ScoreSnapshot[]; fullOpen: boolean } | null {
   const r = db
     .query("SELECT id, rating_active, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?")
     .get(org, repo) as { id: number; rating_active: number; visibility: string } | null;
   if (!r) return null;
-  if (r.visibility === "public" ? r.rating_active !== 1 : (opts.access ?? NO_PAT_ACCESS).repo !== "granted") return null;
-  const access = opts.access ?? NO_PAT_ACCESS;
+  if (r.visibility === "public" ? r.rating_active !== 1 : access.repo !== "granted") return null;
   const fullOpen = access.cicd === "granted" && access.appsec === "granted";
   const rows = db
     .query(
@@ -71,23 +115,22 @@ export function getRepoHistory(db: Database, org: string, repo: string, opts: { 
     )
     .all(r.id, MODEL_VERSION) as ScoreHistoryRow[];
   const caps = fullOpen ? capFlagsByScan(db, r.id) : new Map<number, { secretsCritical: boolean; criticalOpen: boolean }>();
-  const points: HistoryPoint[] = rows.map((row) => {
+  const snaps = rows.map((row): ScoreSnapshot => {
     // полный итог – из записанных категорий этой строки и ее же фактов,
     // тем же расчетом, что на карточке
-    const { score } = fullOpen ? totalsOf(row, caps.get(row.scan_id) ?? { secretsCritical: false, criticalOpen: false }) : { score: null };
+    const flags = caps.get(row.scan_id) ?? { secretsCritical: false, criticalOpen: false };
+    const { score } = fullOpen ? totalsOf(row, flags) : { score: null };
     return {
       scanId: row.scan_id,
       finishedAt: row.finished_at,
-      healthcraftIndex: row.healthcraft_index,
-      indexCoverage: row.index_coverage,
-      repoHealthScore: score === null ? null : Math.round(score * 10) / 10,
-      modelVersion: MODEL_VERSION,
-      headSha: row.head_sha,
-      // помечаем точку «без кода», чтобы переход от нулей к первому пушу не читался ростом
+      categories: JSON.parse(row.categories) as ScoreSnapshot["categories"],
       codeEmpty: row.code_empty === 1,
+      healthcraftIndex: row.healthcraft_index,
+      repoHealthScore: score === null ? null : Math.round(score * 10) / 10,
+      fullCap: fullOpen ? totalCapOf(flags) : null,
     };
   });
-  return { points, modelVersion: MODEL_VERSION, fullOpen };
+  return { rows, snaps, fullOpen };
 }
 
 // ---------- история AI-обзоров ----------

@@ -2,6 +2,10 @@
 // Модуль БЕЗ серверных зависимостей: импортируется и сервером (api/history),
 // и бандлом веба (RepoPage) — нельзя тянуть сюда bun:sqlite/node-модули.
 
+import type { ScoreChange } from "./score-change";
+
+export type { ScoreCategoryChange, ScoreChange, ScoreSubChange } from "./score-change";
+
 export interface HistoryPoint {
   scanId: number;
   finishedAt: string | null;
@@ -14,6 +18,8 @@ export interface HistoryPoint {
   headSha: string | null;
   /** на момент анализа в репозитории не было кода (правило codeEmpty) */
   codeEmpty: boolean;
+  /** почему оценка изменилась к предыдущей точке истории; у первой точки null */
+  change: ScoreChange | null;
 }
 
 export interface HistoryResponse {

@@ -74,6 +74,7 @@ import {
   viewerKindOf,
   type ViewerKind,
   EMPTY_REPO_TEXT,
+  rankNoteText,
   rankText,
   roundScore,
   CI_CAP_TEXT,
@@ -1100,9 +1101,9 @@ function ScoreAside({
         ) : scan || score ? (
           <DefinitionList nameMaxWidth={ASIDE_NAME_WIDTH}>
             {score && (
-              <DefinitionList.Item name="Место в рейтинге">
-                {/* одно правило с отчетом и сравнением; без места — причина, а не «–» */}
-                {rankText(card.repo.visibility, score)}
+              <DefinitionList.Item name="Место в рейтинге" note={rankNoteText(card.repo.visibility, score) ?? undefined}>
+                {/* место — по правилу отчета и сравнения; без места — «нет», причина в подсказке */}
+                {rankNoteText(card.repo.visibility, score) === null ? rankText(card.repo.visibility, score) : "нет"}
               </DefinitionList.Item>
             )}
             {score && !full && (
@@ -1110,14 +1111,15 @@ function ScoreAside({
                 {fmtCoverage(score.indexCoverage)}
               </DefinitionList.Item>
             )}
-            {/* при двух показателях — полнота каждого: индекса и полной оценки */}
+            {/* при двух показателях — полнота каждого: индекса и полной оценки; имя
+                показателя — своей строкой, а не переносом посередине */}
             {score && full && (
-              <DefinitionList.Item name="Полнота: HealthCraft Index" note={coverageHelp}>
+              <DefinitionList.Item name={<>Полнота:<br />HealthCraft Index</>} note={coverageHelp}>
                 {fmtCoverage(score.indexCoverage)}
               </DefinitionList.Item>
             )}
             {score && full && (
-              <DefinitionList.Item name="Полнота: Repo Health Score" note={fullCoverageHelp}>
+              <DefinitionList.Item name={<>Полнота:<br />Repo Health Score</>} note={fullCoverageHelp}>
                 {score.repoHealthCoverage === null ? "–" : fmtCoverage(score.repoHealthCoverage)}
               </DefinitionList.Item>
             )}

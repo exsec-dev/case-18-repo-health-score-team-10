@@ -127,8 +127,8 @@ export function historyDomain(values: readonly number[]): { lo: number; hi: numb
  * каждой заявкой, а завершаются они не по порядку. Точки без времени — в конец,
  * в порядке номера.
  */
-export function historyByTime(points: readonly HistoryPoint[]): HistoryPoint[] {
-  const t = (p: HistoryPoint): number => (p.finishedAt === null ? Number.POSITIVE_INFINITY : Date.parse(p.finishedAt));
+export function historyByTime<T extends Pick<HistoryPoint, "finishedAt" | "scanId">>(points: readonly T[]): T[] {
+  const t = (p: T): number => (p.finishedAt === null ? Number.POSITIVE_INFINITY : Date.parse(p.finishedAt));
   return [...points].sort((a, b) => t(a) - t(b) || a.scanId - b.scanId);
 }
 
