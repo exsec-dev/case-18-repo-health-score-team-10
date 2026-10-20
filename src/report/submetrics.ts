@@ -32,7 +32,10 @@ function vulnerableDeps(value: unknown): string | null {
   const v = value as { vulnerable?: unknown; direct?: unknown; transitive?: unknown; unmatched?: unknown; outside?: unknown };
   if (!isNum(v.vulnerable)) return null;
   if (v.vulnerable === 0) return "нет";
-  const parts = [`${num(isNum(v.direct) ? v.direct : 0)} прямых`, `${num(isNum(v.transitive) ? v.transitive : 0)} транзитивных`];
+  const direct = isNum(v.direct) ? v.direct : 0;
+  const transitive = isNum(v.transitive) ? v.transitive : 0;
+  // с согласованием по числу: «1 прямая», а не «1 прямых»
+  const parts = [`${num(direct)} ${plural(direct, "прямая", "прямые", "прямых")}`, `${num(transitive)} ${plural(transitive, "транзитивная", "транзитивные", "транзитивных")}`];
   if (isNum(v.unmatched) && v.unmatched > 0) parts.push(`${num(v.unmatched)} не найдено в lock-файле`);
   if (isNum(v.outside) && v.outside > 0) parts.push(`${num(v.outside)} вне графа (другая экосистема, без веса)`);
   return `${num(v.vulnerable)}: ${parts.join(", ")}`;
