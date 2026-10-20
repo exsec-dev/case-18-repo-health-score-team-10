@@ -41,6 +41,10 @@ interface FixtureAppsec {
   /** Корзина фильтра `type=SECRETS&severity=CRITICAL` платформы */
   secretsTypeTotalSize?: number;
   groupsPageStatus?: number;
+  /** Страницы групп `type=SCA` по корзинам критичности (CRITICAL/HIGH/MEDIUM/LOW) */
+  scaBuckets?: Record<string, { data: unknown[]; nextPageToken: string; totalSize: number }[]>;
+  /** статус ответа корзин SCA (сбой канала) */
+  scaStatus?: number;
 }
 
 /** AppSec-фейк по фикстуре: scans/latest, страницы групп, severity-фильтры. */
@@ -55,6 +59,14 @@ function fakeAppsec(f: FixtureAppsec, log?: string[]): AppsecClient {
         return { status: 200, json: f.scansLatest ?? null };
       }
       if (path === "/v1/defect-groups") {
+        // корзины SCA по критичности: пакеты для подметрики уязвимых зависимостей
+        if (params["type"] === "SCA") {
+          if (f.scaStatus !== undefined && f.scaStatus !== 200) return { status: f.scaStatus, json: null, error: "sca channel" };
+          const pages = f.scaBuckets?.[params["severity"] ?? ""] ?? [];
+          const token = params["pageToken"] ?? "";
+          const page = pages.find((_, i) => (i === 0 ? token === "" : pages[i - 1]!.nextPageToken === token));
+          return { status: 200, json: page ?? { data: [], nextPageToken: "", totalSize: 0 } };
+        }
         // отдельная корзина движка секретов (фильтр платформы)
         if (params["type"] !== undefined && params["type"] !== "") {
           return { status: 200, json: { data: [], nextPageToken: "", totalSize: f.secretsTypeTotalSize ?? 0 } };
@@ -290,6 +302,98 @@ describe("collectAppsec: 7 веток плана", () => {
     expect(v.backlog.truncated).toBe(true);
     expect(v.backlog.open_findings).toBeNull();
     expect(v.backlog.open_groups).toBe(300); // totalSize первой страницы точен
+  });
+});
+
+describe("collectAppsec: уязвимые пакеты SCA (подметрика «Уязвимые зависимости»)", () => {
+  /** Живые группы SCA тестового репо, разложенные по корзинам платформы (severity 4=CRITICAL … 1=LOW). */
+  function scaBuckets(): Record<string, { data: unknown[]; nextPageToken: string; totalSize: number }[]> {
+    const groups = load("sca-groups.json").data as { severity: number }[];
+    const name: Record<number, string> = { 4: "CRITICAL", 3: "HIGH", 2: "MEDIUM", 1: "LOW" };
+    const out: Record<string, { data: unknown[]; nextPageToken: string; totalSize: number }[]> = {};
+    for (const bucket of ["CRITICAL", "HIGH", "MEDIUM", "LOW"]) {
+      const data = groups.filter((g) => name[g.severity] === bucket);
+      out[bucket] = [{ data, nextPageToken: "", totalSize: data.length }];
+    }
+    return out;
+  }
+
+  test("пакеты дедуплицируются по name@version между Trivy и grype; худшая корзина побеждает; code/paths не хранятся", async () => {
+    const f = { ...load("ok.json"), scaBuckets: scaBuckets() };
+    const out = await collectAppsec(fakeRest(f.repoId), fakeAppsec(f), "kibitkina-p/hc-sca-probe", { now: NOW });
+    const v = out.fact!.value as any;
+    expect(v.sca).not.toBeNull();
+    expect(v.sca.groups).toBe(45);
+    expect(v.sca.unparsed).toBe(0);
+    expect(v.sca.truncated).toBeUndefined();
+    const names = v.sca.packages.map((p: any) => `${p.name}@${p.version}`);
+    expect(names).toEqual(["body-parser@1.19.0", "cookie@0.4.0", "express@4.17.1", "lodash@4.17.15", "minimist@1.2.0", "path-to-regexp@0.1.7", "qs@6.7.0", "send@0.17.1", "serve-static@1.14.1"]);
+    const minimist = v.sca.packages.find((p: any) => p.name === "minimist");
+    expect(minimist.severity).toBe("critical");
+    expect(minimist.advisories).toBe(4);
+    expect(minimist.engines.sort()).toEqual(["Trivy", "grype"]);
+    const lodash = v.sca.packages.find((p: any) => p.name === "lodash");
+    expect(lodash.advisories).toBe(13);
+    expect(lodash.severity).toBe("high");
+    const json = JSON.stringify(v);
+    expect(json).not.toContain("codeBlock");
+    expect(json).not.toContain("fileName");
+    expect(json).not.toContain("CVE-");
+  });
+
+  test("нет групп SCA – пустой список пакетов (данные), не null", async () => {
+    const f = load("ok.json");
+    const out = await collectAppsec(fakeRest(f.repoId), fakeAppsec(f), "lct-hackaton-2026/case-18", { now: NOW });
+    const v = out.fact!.value as any;
+    expect(v.sca).toEqual({ packages: [], groups: 0, unparsed: 0 });
+    expect(v.sca_note).toBeUndefined();
+  });
+
+  test("открытых групп нет вовсе – корзины SCA не запрашиваются, список пуст", async () => {
+    const f = load("empty-scan.json");
+    const log: string[] = [];
+    const out = await collectAppsec(fakeRest(f.repoId), fakeAppsec(f, log), "lct-hackaton-2026/case-18", { now: NOW });
+    const v = out.fact!.value as any;
+    expect(v.sca).toEqual({ packages: [], groups: 0, unparsed: 0 });
+    expect(log.some((l) => l.includes("type=SCA"))).toBe(false);
+  });
+
+  test("платформа обещала больше групп SCA, чем отдала (totalSize > полученных при пустом курсоре) – truncated", async () => {
+    const f = { ...load("ok.json"), scaBuckets: { HIGH: [{ data: [{ codeBlock: "a@1.0.0", status: 0, engine: "Trivy" }], nextPageToken: "", totalSize: 3 }] } };
+    const out = await collectAppsec(fakeRest(f.repoId), fakeAppsec(f), "t/t", { now: NOW });
+    expect((out.fact!.value as any).sca.truncated).toBe(true);
+  });
+
+  test("корзина SCA не ответила – sca null с причиной, остальной факт целый (не incomplete)", async () => {
+    const f = { ...load("ok.json"), scaStatus: 503 };
+    const out = await collectAppsec(fakeRest(f.repoId), fakeAppsec(f), "lct-hackaton-2026/case-18", { now: NOW });
+    expect(out.noData).toBeNull();
+    const v = out.fact!.value as any;
+    expect(v.sca).toBeNull();
+    expect(v.sca_note).toContain("type=SCA");
+    expect(v.severity_counts).toEqual({ critical: 0, high: 1, medium: 6, low: 33 });
+  });
+
+  test("codeBlock не вида name@version – unparsed, закрытая группа вопреки фильтру – пропуск; страницы сверх капа – truncated", async () => {
+    const page = (data: unknown[], next: string, total: number) => ({ data, nextPageToken: next, totalSize: total });
+    const g = (codeBlock: unknown, status = 0, engine = "Trivy") => ({ codeBlock, status, engine, publicId: 1, uuid: "u" });
+    const f = {
+      ...load("ok.json"),
+      scaBuckets: {
+        CRITICAL: [page([g("a@1.0.0"), g("bad code block"), g(null), g("resolved@1", 1)], "t2", 300), page([g("b@2.0.0")], "t3", 300), page([g("c@3.0.0")], "", 300)],
+        HIGH: [page([g("a@1.0.0", 0, "grype"), g("@scope/x@0.1.0")], "", 2)],
+      },
+    };
+    const out = await collectAppsec(fakeRest(f.repoId), fakeAppsec(f), "t/t", { now: NOW });
+    const v = out.fact!.value as any;
+    expect(v.sca.truncated).toBe(true);
+    expect(v.sca.unparsed).toBe(2);
+    expect(v.sca.groups).toBe(6);
+    const a = v.sca.packages.find((p: any) => p.name === "a");
+    expect(a).toMatchObject({ severity: "critical", advisories: 2, engines: ["Trivy", "grype"] });
+    expect(v.sca.packages.find((p: any) => p.name === "@scope/x")).toMatchObject({ version: "0.1.0", severity: "high" });
+    expect(v.sca.packages.map((p: any) => p.name)).not.toContain("c");
+    expect(v.sca.packages.map((p: any) => p.name)).not.toContain("resolved");
   });
 });
 

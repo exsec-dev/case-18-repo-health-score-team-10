@@ -81,9 +81,9 @@ const run = (status: string, startedDaysAgo: number, extra: Record<string, unkno
 });
 const issue = (slug: string, created: string, extra: Record<string, unknown> = {}) => ({ id: slug, slug, created_at: created, updated_at: created, ...extra });
 
-test("версии тура 2: модель 4.5.0-hci, сборщик 6", () => {
-  expect(MODEL_VERSION).toBe("4.5.0-hci");
-  expect(COLLECTOR_VERSION).toBe(6);
+test("версии тура 2: модель 4.6.0-hci, сборщик 7", () => {
+  expect(MODEL_VERSION).toBe("4.6.0-hci");
+  expect(COLLECTOR_VERSION).toBe(7);
 });
 
 // ---------- стабильность CI в динамике ----------
@@ -346,7 +346,7 @@ describe("старые факты (сборщик до 5): «нет данных
         const scores = compute(t.db, scanId, { now: NOW });
         writeScores(t.db, scores);
         const row = t.db.query("SELECT model_version, categories FROM scores WHERE scan_id = ?").get(scanId) as { model_version: string; categories: string };
-        expect(row.model_version).toBe("4.5.0-hci");
+        expect(row.model_version).toBe("4.6.0-hci");
         expect(Object.keys(JSON.parse(row.categories).issues.submetrics)).toContain("backlog_trend");
       }
     } finally {
@@ -445,7 +445,7 @@ describe("отрисованный MD: справочные строки в ра
       expect(md).toContain("Динамика открытых задач за 90 дней – открытых задач становится больше, +4 за 90 дней (создано 6, закрыто 2)");
       expect(md).toContain("Поток задач – за 6 месяцев создано 11, закрыто 7; за последние 30 дней – создано 1, закрыто 0");
       expect(md).toContain("| Стабильность CI в динамике: стабильнее, 90% успешных у последних 10 запусков против 70% у 10 до них | справочно, в балл не входит |");
-      expect(md).toContain("| Версия методики | 4.5.0-hci |");
+      expect(md).toContain("| Версия методики | 4.6.0-hci |");
       // новые строки: без длинного тире и без «ё»
       const fresh = md.split("\n").filter((l) => /Стабильность CI|Динамика открытых задач|Поток задач/.test(l));
       expect(fresh.length).toBeGreaterThanOrEqual(5);

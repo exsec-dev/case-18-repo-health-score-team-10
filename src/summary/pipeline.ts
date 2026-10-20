@@ -24,8 +24,8 @@ import { validateFlagOutput, validateOutput, type FraudFlag, type FactInput } fr
 import type { SummaryRole } from "./roles";
 import { modelTierOf, PUBLIC_CATEGORIES, PUBLIC_SPECIALIST_ROLES, ROLE_FACT_CATEGORIES, SPECIALIST_ROLES, toolsAllowed, type SpecialistRole } from "./roles";
 import { categoryOf } from "../collectors/facts";
-import { hardFlagFactors, rhythmSignals, ruleFlagFactors, RHYTHM_KEY, type RestEvidence, type RhythmSignals } from "./rhythm";
-import { FLAGGER_RULES_VERSION } from "./fraud-thresholds";
+import { hardFlagFactors, rhythmSignals, ruleFlagFactors, weakSignals, RHYTHM_KEY, type RestEvidence, type RhythmSignals } from "./rhythm";
+import { FLAGGER_RULES_VERSION, WEAK_SIGNALS_FOR_MODEL } from "./fraud-thresholds";
 import { CHANNEL_KINDS } from "../score/compute";
 import type { AiAudience } from "../db";
 // repos.ts берет отсюда только константу NO_RHYTHM_REASON внутри функций,
@@ -138,8 +138,9 @@ export function scopedFacts(db: Database, scanId: number, role: SummaryRole, aud
   }[];
   return rows
     .filter((r) => r.status === "ok")
-    // tree.deps – список зависимостей для тематики рейтинга, модели не нужен
-    .filter((r) => r.key !== "tree.deps")
+    // tree.deps – список зависимостей для тематики рейтинга, модели не нужен;
+    // tree.lockgraph – граф в тысячи узлов для «Безопасности», в промпт не лезет
+    .filter((r) => r.key !== "tree.deps" && r.key !== "tree.lockgraph")
     .filter((r) => audience === "full" || publicFactKey(r.key))
     .map((r) => ({ key: r.key, value: parseFactValue(r.value) }))
     .filter((f) => roleFactsAllowed(role, f.key))
@@ -816,6 +817,17 @@ export async function runFraudCheck(deps: SummaryDeps, req: SummaryRequest): Pro
     const flag: FraudFlag = { flag: true, factors: [...hard, ...rules] };
     save(flag, "rules");
     deps.log?.(`${tag}: flag=true by rules, factors=[${flag.factors.map((f) => f.note).join("; ")}], calls=0`);
+    return { scanId: req.scanId, ok: true, flag, signals, answered: 0 };
+  }
+
+  // ни порогов, ни двух слабых сигналов — модели нечего взвешивать: «подозрений нет»
+  // пишет код (на честных репо и на одиночных слабых сигналах модель флаговала то,
+  // что хартия уликой не считает)
+  const weak = weakSignals(signals, inputs["activity.rest"] as RestEvidence | null | undefined);
+  if (rules.length === 0 && weak.length < WEAK_SIGNALS_FOR_MODEL) {
+    const flag: FraudFlag = { flag: false, factors: [] };
+    save(flag, "rules");
+    deps.log?.(`${tag}: flag=false by rules (weak signals: ${weak.length}), calls=0`);
     return { scanId: req.scanId, ok: true, flag, signals, answered: 0 };
   }
 

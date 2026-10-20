@@ -115,6 +115,11 @@ export interface QueueConfig {
   /** открытий карточки залогиненным зрителем в минуту: 30, env QUEUE_CARD_PER_MINUTE; аноним без лимита (для него нет проб доступа).
    *  Optional только ради старых литералов QueueConfig в тестах; loadConfig задает всегда. */
   cardPerMinute?: number;
+  /** чтений истории оценки и истории AI-текстов (/history, /ai-notes) залогиненным зрителем в минуту: 60,
+   *  env QUEUE_HISTORY_PER_MINUTE. Свое окно, не окно карточки: страница репозитория читает их вместе с
+   *  карточкой и перечитывает после каждого задания, иначе 5 открытий подряд съедали бы окно карточки.
+   *  Optional — как cardPerMinute. */
+  historyPerMinute?: number;
   /** мутаций избранного (PUT/DELETE звезды) на пользователя в минуту: 30, env QUEUE_FAVORITES_MUTATIONS_PER_MINUTE.
    *  Optional — как cardPerMinute. */
   favoritesMutationsPerMinute?: number;
@@ -502,6 +507,7 @@ export function loadConfig(): Config {
       myReposPerMinute: envInt(env, "QUEUE_MY_REPOS_PER_MINUTE") ?? 30,
       favoritesMax: envInt(env, "QUEUE_FAVORITES_MAX") ?? 500,
       cardPerMinute: envInt(env, "QUEUE_CARD_PER_MINUTE") ?? 30,
+      historyPerMinute: envInt(env, "QUEUE_HISTORY_PER_MINUTE") ?? 60,
       favoritesMutationsPerMinute: envInt(env, "QUEUE_FAVORITES_MUTATIONS_PER_MINUTE") ?? 30,
       summaryCooldownMs: envInt(env, "QUEUE_SUMMARY_COOLDOWN_MS") ?? 60 * 60_000,
       summaryActiveMax: envInt(env, "QUEUE_SUMMARY_ACTIVE_MAX") ?? 2,

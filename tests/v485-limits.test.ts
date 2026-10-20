@@ -58,6 +58,7 @@ beforeAll(async () => {
     env: {
       PROCESS_ROLE: "rating",
       QUEUE_CARD_PER_MINUTE: "1",
+      QUEUE_HISTORY_PER_MINUTE: "2",
       QUEUE_MY_REPOS_PER_MINUTE: "1",
       QUEUE_FAVORITES_MUTATIONS_PER_MINUTE: "1",
       QUEUE_USER_SCANS_PER_HOUR: "1",
@@ -137,5 +138,21 @@ describe("К8.5.7 (С9-14): каждый 429 несет Retry-After", () => {
     }
     expect(card.retryAfter).toBeLessThanOrEqual(60);
     expect(scan.retryAfter).toBeLessThanOrEqual(3600);
+  }, 60_000);
+
+  test("история и ai-notes — свое окно: карточка исчерпана, история читается; свое окно дает 429 с Retry-After", async () => {
+    const at = (p: string) => `${tight!.base}${p}`;
+    // окно карточки (1 в минуту) уже исчерпано предыдущим тестом — история и ai-notes этого не замечают
+    expect((await fetch(at("/api/repos/pub/repo"), as("t"))).status).toBe(429);
+    expect((await fetch(at("/api/repos/pub/repo/history"), as("t"))).status).toBe(200);
+    // второе чтение — ai-notes (окно истории 2 в минуту): не 429 по окну
+    expect((await fetch(at("/api/repos/pub/repo/ai-notes"), as("t"))).status).not.toBe(429);
+    const third = await retryAfter(await fetch(at("/api/repos/pub/repo/history"), as("t")));
+    expect(third.status).toBe(429);
+    expect(third.retryAfter).toBeGreaterThan(0);
+    expect(third.retryAfter).toBeLessThanOrEqual(60);
+    // и наоборот: исчерпанное окно истории не трогает окно карточки (оно отдельное, но уже занято — проверяем текст ошибки)
+    const body = (await (await fetch(at("/api/repos/pub/repo/history"), as("t"))).json()) as { error: { message: string } };
+    expect(body.error.message).toContain("чтений истории");
   }, 60_000);
 });

@@ -9,7 +9,19 @@
 // Соотношение авторов и коммиттеров признаком не является: ребейз и зеркало — работа людей.
 import { robotIntervalFlags } from "../collectors/git";
 import { robot2Flags, type CommitActor } from "../score/robot2";
-import { recentSpikeHigh, regularHigh, robotShareHigh, ROBOT_RULE_MIN_COMMITS, syncHigh } from "./fraud-thresholds";
+import {
+  recentSpikeHigh,
+  regularHigh,
+  robotShareHigh,
+  ROBOT_RULE_MIN_COMMITS,
+  syncHigh,
+  RECENT_BASELINE_MIN,
+  RECENT_SPIKE_MIN,
+  RECENT_SPIKE_RATIO_WEAK,
+  REGULAR_INTERVAL_MAX_MINUTES,
+  REGULAR_SHARE_WEAK,
+  ROBOT_SHARE_WEAK,
+} from "./fraud-thresholds";
 
 /** Ключ синтетического факта: во входе флаггера и в факторах флага. */
 export const RHYTHM_KEY = "activity.rhythm";
@@ -174,6 +186,25 @@ export function hardFlagFactors(s: RhythmSignals, rest?: RestEvidence | null): R
  * раз в день — ритм человека); всплеск недели — RECENT_SPIKE_MIN коммитов и больше
  * при обычном темпе от RECENT_BASELINE_MIN и в RECENT_SPIKE_RATIO раз ниже.
  */
+/**
+ * Слабые сигналы — ниже порогов, но повод позвать модель: ровность от
+ * REGULAR_SHARE_WEAK при коротком интервале, один всплеск синхронизации, роботы от
+ * ROBOT_SHARE_WEAK без жизни в REST, всплеск недели от RECENT_SPIKE_RATIO_WEAK×
+ * темпа. Пусто — модель не зовется, ответ «подозрений нет» пишет код.
+ */
+export function weakSignals(s: RhythmSignals, rest?: RestEvidence | null): string[] {
+  const out: string[] = [];
+  if (s.regular_share !== null && s.regular_share >= REGULAR_SHARE_WEAK && s.interval_median_minutes !== null && s.interval_median_minutes <= REGULAR_INTERVAL_MAX_MINUTES) {
+    out.push("regular_share>=0.3");
+  }
+  if (s.sync_bursts > 0) out.push("sync_bursts>=1");
+  if (s.commits >= ROBOT_RULE_MIN_COMMITS && s.robot_commits / s.commits >= ROBOT_SHARE_WEAK && !restAlive(rest)) out.push("robot_share>=0.5");
+  if (s.baseline_week_median >= RECENT_BASELINE_MIN && s.recent_week_commits >= RECENT_SPIKE_MIN && s.recent_week_commits >= RECENT_SPIKE_RATIO_WEAK * s.baseline_week_median) {
+    out.push("recent_week>=3x_baseline");
+  }
+  return out;
+}
+
 export function ruleFlagFactors(s: RhythmSignals): RuleFactor[] {
   const out: RuleFactor[] = [];
   if (regularHigh(s.regular_share, s.interval_median_minutes)) out.push({ key: RHYTHM_KEY, note: "regular_share>=0.5" });

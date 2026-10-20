@@ -5,7 +5,7 @@
 // по живой выборке репозиториев. Модель описывает ДВА показателя: полный
 // Repo Health Score (6 категорий, SCORE_WEIGHTS) и публичный HealthCraft Index
 // (4 категории, INDEX_WEIGHTS). Журнал версий — docs/methodology.md.
-export const MODEL_VERSION = "4.5.0-hci";
+export const MODEL_VERSION = "4.6.0-hci";
 
 /**
  * Стабильность CI в динамике — доля успешных у последних
@@ -228,6 +228,26 @@ export const CODE_NEUTRAL = 50;
  */
 export const SECURITY_OPEN_CAPS = { critical: 40, high: 69 } as const;
 
+/**
+ * Уязвимые зависимости (4.6.0): взвешенная сумма по пакетам SCA – вес
+ * критичности (SEVERITY_WEIGHTS) × 1 для прямой зависимости и
+ * × DEPS_TRANSITIVE_WEIGHT для транзитивной; несопоставленный с графом пакет –
+ * как прямой. Сумма на репозиторий, не на строки кода: уязвимый пакет исполняется
+ * в процессе целиком, сколько бы кода вокруг ни было. 0 → 100, одна критичная
+ * прямая (8) → 70, четыре прямых критичных (32) → 20, от 60 → 0.
+ */
+export const DEPS_WEIGHTED: Anchor[] = [
+  { x: 0, y: 1.0 },
+  { x: 2, y: 0.9 },
+  { x: 8, y: 0.7 },
+  { x: 16, y: 0.45 },
+  { x: 32, y: 0.2 },
+  { x: 60, y: 0 },
+];
+
+/** Вес транзитивной уязвимости относительно прямой (решение 20.10.2026: половина). */
+export const DEPS_TRANSITIVE_WEIGHT = 0.5;
+
 /** записей в корне репозитория (top_level), за крайними анкерами плоско. */
 export const ROOT_ENTRIES: Anchor[] = [
   { x: 15, y: 1.0 },
@@ -295,7 +315,10 @@ export const FULL_COVERAGE_BASE = 100;
 export const SUBWEIGHTS = {
   documentation: { readme: 0.45, license: 0.25, contributing: 0.15, codeowners: 0.15 },
   cicd: { config: 0.3, pass_rate: 0.45, duration: 0.25 },
-  security: { density: 0.5, resolved: 0.3, secrets: 0.2 },
+  // 4.6.0: подметрика уязвимых зависимостей 0,2 за счет остальных пропорционально
+  // (0,5/0,3/0,2 × 0,8): без lock-файла она вне расчета, и прежние веса
+  // восстанавливаются перенормировкой – репозитории без графа не меняют балл
+  security: { density: 0.4, resolved: 0.24, secrets: 0.16, deps: 0.2 },
   activity: { fresh: 0.35, freq: 0.25, contributors: 0.2, pulls: 0.1, releases: 0.1 },
   issues: { stale: 0.3, close_days: 0.3, resolution: 0.3, first_resp: 0.1 },
   // корень — второстепенный признак, поэтому вес всего 0,1

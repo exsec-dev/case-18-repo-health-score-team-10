@@ -16,7 +16,7 @@ import { renderRepoReport } from "../src/report/markdown";
 import { MODEL_VERSION } from "../src/score/model";
 import { runFraudCheck, runSummary } from "../src/summary/pipeline";
 import type { CallLlm } from "../src/llm";
-import { cardFacts, seedRepo, seedScan, seedScore } from "./api-fixtures";
+import { cardFacts, cardFactsWeakRhythm, seedRepo, seedScan, seedScore } from "./api-fixtures";
 import { NO_PAT_ACCESS, type AccessResult } from "../src/auth/access";
 
 const OPEN: AccessResult = { cicd: "granted", appsec: "granted", repo: "granted" };
@@ -35,7 +35,8 @@ const wrap = (db: Database) => ({ db, close: () => {} });
 
 function seedFull(db: Database, repo = "flag"): number {
   const repoId = seedRepo(wrap(db), { org: "v5", repo });
-  const scanId = seedScan(wrap(db), repoId, { facts: cardFacts() });
+  // лента с двумя слабыми сигналами: проверку решает модель, а не код
+  const scanId = seedScan(wrap(db), repoId, { facts: cardFactsWeakRhythm() });
   seedScore(wrap(db), repoId, scanId, { total: 55 });
   return scanId;
 }
@@ -71,7 +72,7 @@ describe("проверка на накрутку (runFraudCheck): структу
     expect(res.flag?.flag).toBe(true);
     expect(res.flag?.factors[0]?.key).toBe("activity.rhythm");
     const row = db.query("SELECT text FROM ai_notes WHERE scan_id = ? AND role = 'flagger'").get(scanId) as { text: string };
-    expect(JSON.parse(row.text)).toMatchObject({ flag: true, signals: { commits: 2, human_commits: 2 } });
+    expect(JSON.parse(row.text)).toMatchObject({ flag: true, by: "model", signals: { commits: 332, human_commits: 320, sync_bursts: 1 } });
     void dirs;
   });
 
@@ -107,7 +108,7 @@ describe("Показ флага: карточка (всем зрителям) и
     const scanId = seedFull(db, "card");
     await runFraudCheck({ db, org: "v5", repo: "card", callLlm: fakeWithFlagger(FLAG_TRUE, VALID_TEXTS), agentBackoffMs: 0 }, { scanId });
     const open = getRepoCard(db, "v5", "card", { access: OPEN, viewerUserId: 1, viewerAuth: "pat" })!;
-    expect(open.ai?.fraud).toMatchObject({ flag: true, factors: [{ key: "activity.rhythm" }], signals: { commits: 2 } });
+    expect(open.ai?.fraud).toMatchObject({ flag: true, factors: [{ key: "activity.rhythm" }], signals: { commits: 332 } });
     const anon = getRepoCard(db, "v5", "card", { access: NO_PAT_ACCESS })!;
     expect(anon.ai?.audience).toBe("public");
     expect(anon.ai?.fraud).toEqual(open.ai!.fraud);
@@ -123,10 +124,11 @@ describe("Показ флага: карточка (всем зрителям) и
     expect(md).toContain("## Признаки искусственной активности");
     // фактор — названием факта и текстом, который код
     // строит из этого факта (равно источнику); сырой ключ — только в приложении
-    // признаки ритма — из заметки проверки (у 2 обычных коммитов
-    // заметного нет — печатается формулировка модели)
+    // признаки ритма — из заметки проверки (слабые сигналы ниже порогов
+    // код не печатает — выводится формулировка модели)
     const signals = withFlag.ai?.fraud?.signals;
-    expect(signals).toMatchObject({ commits: 2 });
+    expect(signals).toMatchObject({ commits: 332 });
+    expect(fraudFactorFact("activity.rhythm", signals, fmtDateUtc)).toBeNull();
     expect(md).toContain(`**Ритм коммитов** – ${fraudFactorFact("activity.rhythm", signals, fmtDateUtc) ?? "ровные интервалы между коммитами"}`);
     // Score-таблица отчёта не изменилась флагом: раздел не трогает итог
     expect(md).toContain("55");
@@ -140,7 +142,7 @@ describe("Показ флага: карточка (всем зрителям) и
   test("кабинет: запись списка несёт fraudFlag и без сохраненной проверки каналов", async () => {
     const { db } = freshDb("rh-v5b8-me-");
     const repoId = seedRepo(wrap(db), { org: "v5", repo: "me" });
-    const scanId = seedScan(wrap(db), repoId, { facts: cardFacts() });
+    const scanId = seedScan(wrap(db), repoId, { facts: cardFactsWeakRhythm() });
     seedScore(wrap(db), repoId, scanId, { total: 55 });
     await runFraudCheck({ db, org: "v5", repo: "me", callLlm: fakeWithFlagger(FLAG_TRUE, VALID_TEXTS), agentBackoffMs: 0 }, { scanId });
     // избранное с сохранённой проверкой обоих каналов

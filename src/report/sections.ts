@@ -369,6 +369,7 @@ export const RULE_SUBMETRIC: Record<string, string> = {
   "speed-up-pipeline": "cicd.duration",
   "appsec-critical": "security.density",
   "appsec-high": "security.density",
+  "update-vulnerable-deps": "security.deps",
   "add-tests": "code.tests",
   "start-tracker": "issues.tracker_unused",
   "reduce-stale-issues": "issues.stale",

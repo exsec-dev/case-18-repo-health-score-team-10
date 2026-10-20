@@ -199,7 +199,7 @@ describe("charters carry the rule with a bad -> good example (versions +1)", () 
     expect(all.security.version).toBe("10");
     expect(all.overview.version).toBe("18");
     expect(all.trajectory.version).toBe("10");
-    expect(all.flagger.version).toBe("7");
+    expect(all.flagger.version).toBe("9");
   });
 
   test("every prose charter names the three leak classes and the example", () => {

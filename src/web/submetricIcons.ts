@@ -22,6 +22,7 @@ export const SUBMETRIC_ICONS: Record<string, IconData> = {
   "security.density": Bug,
   "security.resolved": ShieldCheck,
   "security.secrets": Key,
+  "security.deps": FolderTree,
   "activity.fresh": Clock,
   "activity.freq": Pulse,
   "activity.bus_factor": Persons,

@@ -30,7 +30,7 @@ function rescan(t: ApiTestDb, repoId: number, total: number): void {
 
 function seedFlaggerNote(t: ApiTestDb, repoId: number, scanId: number, text: string): void {
   t.db
-    .query("INSERT INTO ai_notes (repo_id, scan_id, role, text, fact_refs, charter_version, model, created_at) VALUES (?, ?, 'flagger', ?, '[]', '7', 'test', ?)")
+    .query("INSERT INTO ai_notes (repo_id, scan_id, role, text, fact_refs, charter_version, model, created_at) VALUES (?, ?, 'flagger', ?, '[]', '9', 'test', ?)")
     .run(repoId, scanId, text, DAY.toISOString());
 }
 

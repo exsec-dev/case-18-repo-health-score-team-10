@@ -41,8 +41,8 @@ const ctx = submetricContext(NOW.toISOString());
 const noDelta = () => ({ delta: 0, reason: null });
 const ids = (recs: Recommendation[]) => recs.map((r) => r.ruleId);
 
-test("модель — 4.5.0-hci", () => {
-  expect(MODEL_VERSION).toBe("4.5.0-hci");
+test("модель — 4.6.0-hci", () => {
+  expect(MODEL_VERSION).toBe("4.6.0-hci");
 });
 
 describe("Н3 → В5.5 (М2): «кода нет» — балл 0 с причиной, не «нет данных»", () => {

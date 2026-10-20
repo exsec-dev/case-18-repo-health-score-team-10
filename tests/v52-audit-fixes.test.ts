@@ -18,7 +18,7 @@ import { DEFAULT_AI } from "../src/config";
 import type { CallLlm } from "../src/llm";
 import type { AccessResult } from "../src/auth/access";
 import { NO_PAT_ACCESS } from "../src/auth/access";
-import { cardFacts, seedRepo, seedScan, seedScore } from "./api-fixtures";
+import { cardFacts, cardFactsWeakRhythm, seedRepo, seedScan, seedScore } from "./api-fixtures";
 
 const OPEN: AccessResult = { cicd: "granted", appsec: "granted", repo: "granted" };
 const dirs: string[] = [];
@@ -76,7 +76,10 @@ describe("безопасность М3 / надежность М1: списан�
 
   test("runSummary и runFraudCheck считают ответы; кэш — 0", async () => {
     const db = freshDb();
-    const { scanId } = seeded(db, "count");
+    // лента с двумя слабыми сигналами: проверку на накрутку решает модель, а не код
+    const repoId = seedRepo(wrap(db), { org: "f", repo: "count" });
+    const scanId = seedScan(wrap(db), repoId, { facts: cardFactsWeakRhythm() });
+    seedScore(wrap(db), repoId, scanId, { total: 60 });
     const answering = (async () => ({ text: "мусор", toolCalls: [], finish: "stop", usage: null })) as unknown as CallLlm;
     const failing = (async () => {
       throw new Error("down");

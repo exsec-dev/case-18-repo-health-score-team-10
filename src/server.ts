@@ -102,6 +102,11 @@ const myReposViews = new Map<number, number[]>();
 // вымывание кэша доступа, поэтому окно нужно. Аноним без лимита: публичная
 // карточка в сеть не ходит.
 const cardViews = new Map<number, number[]>();
+// История оценки и история AI-текстов — свое окно: это не действие зрителя, а
+// довесок страницы (читаются вместе с карточкой и перечитываются после каждого
+// задания), в окне карточки они съедали 2 из 3 открытий. Лимит все же нужен:
+// иначе историю по списку репо можно дергать без предела.
+const historyViews = new Map<number, number[]>();
 // опросов статуса AI-заявок на пользователя в минуту: вкладка делает 4,
 // предел щадящий и нужен только против скриптов
 const aiStatusPolls = new Map<number, number[]>();
@@ -254,6 +259,9 @@ const allowMyReposView = (userId: number, now = Date.now()): boolean =>
 const allowCardView = (userId: number, now = Date.now()): boolean =>
   allowInWindow(cardViews, userId, config.queue.cardPerMinute ?? 30, 60_000, now);
 
+const allowHistoryView = (userId: number, now = Date.now()): boolean =>
+  allowInWindow(historyViews, userId, config.queue.historyPerMinute ?? 60, 60_000, now);
+
 /**
  * Сравнение N репозиториев списывает N открытий карточки, и только если в окне
  * есть место под все N: сравнение 3 репо стоит как 3 карточки, нагрузка на
@@ -353,6 +361,10 @@ const favoriteRateLimited = (userId: number): Response =>
     `не больше ${config.queue.favoritesMutationsPerMinute ?? 30} изменений избранного в минуту – попробуйте чуть позже`,
     windowRetryAfterSec(favMutations, userId, 60_000),
   );
+
+/** Окно чтений истории (/history, /ai-notes) исчерпано — 429 с Retry-After. */
+const historyRateLimited = (userId: number): Response =>
+  rateLimited(`не больше ${config.queue.historyPerMinute ?? 60} чтений истории в минуту – попробуйте чуть позже`, windowRetryAfterSec(historyViews, userId, 60_000));
 
 /** Окно открытий карточки (карточка, MD, PDF) исчерпано — 429 с Retry-After. */
 const cardRateLimited = (userId: number): Response =>
@@ -901,9 +913,9 @@ const routes = {
         return badQuery("адрес репозитория указан неверно: нужен вид организация/репозиторий из латинских букв, цифр, точек, дефисов и подчеркиваний");
       }
       const viewer = sessionOf(req);
-      // то же минутное окно, что у карточки: иначе историю по списку репо
-      // можно было бы дергать без лимита
-      if (viewer && !allowCardView(viewer.userId)) return cardRateLimited(viewer.userId);
+      // свое минутное окно (не карточки): лимит нужен, иначе историю по списку
+      // репо можно было бы дергать без предела
+      if (viewer && !allowHistoryView(viewer.userId)) return historyRateLimited(viewer.userId);
       const access = viewer === null ? NO_PAT_ACCESS : await accessBySlug(req, org!, repo!);
       const history = getRepoHistory(db, org!, repo!, { access });
       if (history === null) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);
@@ -917,7 +929,7 @@ const routes = {
         return badQuery("адрес репозитория указан неверно: нужен вид организация/репозиторий из латинских букв, цифр, точек, дефисов и подчеркиваний");
       }
       const viewer = sessionOf(req);
-      if (viewer && !allowCardView(viewer.userId)) return cardRateLimited(viewer.userId);
+      if (viewer && !allowHistoryView(viewer.userId)) return historyRateLimited(viewer.userId);
       const access = viewer === null ? NO_PAT_ACCESS : await accessBySlug(req, org!, repo!);
       const notes = getAiNotesHistory(db, org!, repo!, { access });
       if (notes === null) return notFound(`репозиторий ${org}/${repo} не найден в каталоге`);

@@ -396,6 +396,7 @@ const WEAK_PHRASE: Record<string, (score: number) => string> = {
   "security.density": () => "много найденных уязвимостей",
   "security.resolved": () => "найденные уязвимости не закрываются",
   "security.secrets": () => "в коде найдены пароли или ключи",
+  "security.deps": () => "в зависимостях есть известные уязвимости",
   "activity.fresh": () => "давно не было изменений",
   "activity.freq": () => "изменения вносятся редко",
   "activity.contributors": () => "над проектом работает мало людей",

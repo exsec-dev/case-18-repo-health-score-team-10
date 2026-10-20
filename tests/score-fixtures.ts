@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "../src/config";
 import { openDb } from "../src/db";
-import { categoryOf } from "../src/collectors/facts";
+import { categoryOf, encodeFactValue } from "../src/collectors/facts";
 
 export const NOW = new Date("2026-09-15T12:00:00Z");
 
@@ -95,7 +95,8 @@ export function seedScan(t: TestDb, facts: FactSpec[], startedDaysAgo = 0, repoI
     "INSERT OR REPLACE INTO facts (scan_id, category, key, value, status, source, collected_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
   );
   for (const f of facts) {
-    stmt.run(scanId, categoryOf(f.key), f.key, JSON.stringify(f.value), f.status ?? "ok", "test", started);
+    // как runner: сжатые kinds (лента, граф lock-файлов) лежат в БД с префиксом z:
+    stmt.run(scanId, categoryOf(f.key), f.key, encodeFactValue(f.key, f.value, f.status ?? "ok"), f.status ?? "ok", "test", started);
   }
   return scanId;
 }

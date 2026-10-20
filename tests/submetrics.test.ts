@@ -23,7 +23,7 @@ function computedKeys(facts: { key: string; value: unknown }[]): string[] {
 }
 
 describe("П4.2: полнота словаря", () => {
-  test("у всех 33 подметрик скоринга есть название и форма показа", () => {
+  test("у всех 34 подметрик скоринга есть название и форма показа", () => {
     const full = cardFacts()
       .filter((f) => f.status !== "no-data")
       .concat([
@@ -39,7 +39,7 @@ describe("П4.2: полнота словаря", () => {
     const produced = [...new Set([...computedKeys(full), ...computedKeys(tracker), ...computedKeys(noPulls)])].sort();
     // среди них справочные (без веса): bus factor, стабильность CI, динамика
     // бэклога, поток задач, 5 строк review PR и карта владельцев
-    expect(produced.length).toBe(39);
+    expect(produced.length).toBe(40);
     expect(Object.keys(SUBMETRICS).sort()).toEqual(produced);
     for (const key of produced) {
       const spec = SUBMETRICS[key]!;
