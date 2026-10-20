@@ -222,6 +222,13 @@ export interface AppsecScaPackage {
   advisories: number;
   /** движки, нашедшие пакет (Trivy, grype) */
   engines: string[];
+  /**
+   * экосистема пакета (`npm`, `pypi`, `cargo`…) по метке движка – поле
+   * `fileName` группы SCA (у Trivy «Node.js», «Python»; у grype пусто). Нет
+   * поля – движок экосистему не назвал или факт старый: сопоставление с
+   * графом идет по форме имени, как раньше.
+   */
+  ecosystem?: string;
 }
 
 export interface AppsecScaValue {
@@ -244,6 +251,38 @@ export function parseScaPackage(codeBlock: unknown): { name: string; version: st
   const name = s.slice(0, at);
   const version = s.slice(at + 1);
   return name === "" ? null : { name, version: version === "" ? null : version };
+}
+
+/**
+ * Метка экосистемы SCA → имя экосистемы. Trivy пишет в `fileName` группы тип
+ * пакетов («Node.js», «Python», «Java», «Rust»…), для lock-файлов – иногда имя
+ * файла; хранится только нормализованное имя, путь в факт не попадает.
+ * Незнакомая или пустая метка – null (экосистема неизвестна).
+ */
+const ECOSYSTEM_LABELS: Record<string, string> = {
+  "node.js": "npm", nodejs: "npm", node: "npm", npm: "npm", yarn: "npm", pnpm: "npm", bun: "npm", javascript: "npm",
+  "package-lock.json": "npm", "npm-shrinkwrap.json": "npm", "yarn.lock": "npm", "pnpm-lock.yaml": "npm", "bun.lock": "npm", "package.json": "npm",
+  python: "pypi", pypi: "pypi", pip: "pypi", pipenv: "pypi", poetry: "pypi", uv: "pypi", conda: "pypi",
+  "requirements.txt": "pypi", "pipfile.lock": "pypi", "poetry.lock": "pypi", "uv.lock": "pypi", "pyproject.toml": "pypi",
+  rust: "cargo", cargo: "cargo", "cargo.lock": "cargo",
+  ".net": "nuget", dotnet: "nuget", nuget: "nuget", "packages.lock.json": "nuget", "packages.config": "nuget",
+  ruby: "rubygems", gem: "rubygems", gemspec: "rubygems", bundler: "rubygems", rubygems: "rubygems", "gemfile.lock": "rubygems",
+  go: "go", golang: "go", gomod: "go", gobinary: "go", "go.mod": "go", "go.sum": "go",
+  java: "maven", jar: "maven", maven: "maven", gradle: "maven", "pom.xml": "maven", "gradle.lockfile": "maven",
+  php: "composer", composer: "composer", "composer.lock": "composer",
+  dart: "pub", pub: "pub", "pubspec.lock": "pub",
+  swift: "swift", cocoapods: "cocoapods", "podfile.lock": "cocoapods", "package.resolved": "swift",
+  elixir: "hex", hex: "hex", "mix.lock": "hex",
+  conan: "conan", "conan.lock": "conan",
+};
+
+/** Экосистема пакета по метке `fileName` группы SCA; путь сводится к имени файла. */
+export function scaEcosystem(fileName: unknown): string | null {
+  if (typeof fileName !== "string") return null;
+  const label = fileName.trim().toLowerCase();
+  if (label === "" || label.length > 300) return null;
+  const base = label.slice(label.lastIndexOf("/") + 1);
+  return ECOSYSTEM_LABELS[label] ?? ECOSYSTEM_LABELS[base] ?? null;
 }
 
 const num = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -501,12 +540,23 @@ export async function collectAppsec(
           }
           const key = `${pkg.name}@${pkg.version ?? ""}`;
           const engine = typeof g["engine"] === "string" ? g.engine : null;
+          const ecosystem = scaEcosystem(g["fileName"]);
           const known = byPackage.get(key);
           if (known) {
             known.advisories++;
             if (engine && !known.engines.includes(engine)) known.engines.push(engine);
+            // движки разошлись в экосистеме – npm побеждает: вне графа пакет
+            // остался бы без веса, а граф его может найти
+            if (ecosystem !== null && (known.ecosystem === undefined || ecosystem === "npm")) known.ecosystem = ecosystem;
           } else {
-            byPackage.set(key, { name: pkg.name, version: pkg.version, severity: bucket.toLowerCase() as AppsecScaSeverity, advisories: 1, engines: engine ? [engine] : [] });
+            byPackage.set(key, {
+              name: pkg.name,
+              version: pkg.version,
+              severity: bucket.toLowerCase() as AppsecScaSeverity,
+              advisories: 1,
+              engines: engine ? [engine] : [],
+              ...(ecosystem !== null ? { ecosystem } : {}),
+            });
           }
         }
         const next = body?.nextPageToken;

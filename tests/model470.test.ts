@@ -3,7 +3,7 @@
 // успешных запусков и ее подписи.
 import { describe, expect, test } from "bun:test";
 import * as model from "../src/score/model";
-import { compute, computeFromFacts, type Scores } from "../src/score/compute";
+import { appsecNeverScannedAt, compute, computeFromFacts, type Scores } from "../src/score/compute";
 import { recommend } from "../src/score/recommend";
 import { APPSEC_NEVER_SCANNED } from "../src/collectors/appsec";
 import { submetricContext, submetricNote, submetricShownValue } from "../src/report/submetrics";
@@ -210,6 +210,39 @@ describe("4.7.0: ревью 2 — AppSec не запускался на карт
       expect(card.recommendations.some((r) => r.action === "Запустите проверку AppSec")).toBe(true);
     } finally {
       t.close();
+    }
+  });
+
+  test("«не запускалась» отменяется более поздними ok-находками, даже если скан без tree.stats или bad", () => {
+    const OPEN = { access: { cicd: "granted", appsec: "granted", repo: "granted" } } as const;
+    const neverFact = { key: "appsec.findings", value: { reason: "no-scan", detail: APPSEC_NEVER_SCANNED }, status: "no-data" as const };
+    const withoutAppsec = cardFacts().filter((f) => f.key !== "appsec.findings");
+    for (const variant of ["no-tree", "bad"] as const) {
+      const t = makeApiDb();
+      try {
+        const id = seedRepo(t, { org: "ns", repo: `ran-${variant}` });
+        const first = apiSeedScan(t, id, { facts: [...withoutAppsec, neverFact] });
+        // скан 2: AppSec отработал, но карточка не берет его источником Безопасности
+        const okAppsec = { key: "appsec.findings", value: { severity_counts: { critical: 0, high: 0, medium: 1, low: 2 }, resolved_share: 0.8, secrets_critical: false } };
+        const facts2 = [...(variant === "no-tree" ? withoutAppsec.filter((f) => f.key !== "tree.stats") : withoutAppsec), okAppsec];
+        const second = apiSeedScan(t, id, { facts: facts2, ...(variant === "bad" ? { status: "bad" } : {}) });
+        seedScore(t, id, variant === "bad" ? first : second, { total: 60 });
+        expect(appsecNeverScannedAt(t.db, id, first)).toBe(true);
+        expect(appsecNeverScannedAt(t.db, id, second)).toBe(false);
+        expect(appsecNeverScannedAt(t.db, id, Number.MAX_SAFE_INTEGER)).toBe(false);
+        // сохраненная оценка скана 2 – по находкам, не 0
+        const saved = compute(t.db, second, { now: NOW }).categories.security;
+        expect(saved.submetrics.scan_missing).toBeUndefined();
+        expect(saved.score).toBeGreaterThan(0);
+        // карточка не противоречит ей: ни 0 «не запускалась», ни совета запустить проверку
+        const card = getRepoCard(t.db, "ns", `ran-${variant}`, OPEN)!;
+        const sec = card.score!.categories.security;
+        expect(sec.submetrics.scan_missing).toBeUndefined();
+        expect(sec.score).not.toBe(0);
+        expect(card.recommendations.some((r) => r.action === "Запустите проверку AppSec")).toBe(false);
+      } finally {
+        t.close();
+      }
     }
   });
 

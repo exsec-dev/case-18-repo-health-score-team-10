@@ -9,6 +9,7 @@ import type { ScClient, ScResponse } from "../src/collectors/http";
 import {
   collectAppsec,
   makeAppsecClient,
+  scaEcosystem,
   type AppsecClient,
   type AppsecGet,
 } from "../src/collectors/appsec";
@@ -335,10 +336,33 @@ describe("collectAppsec: уязвимые пакеты SCA (подметрика
     const lodash = v.sca.packages.find((p: any) => p.name === "lodash");
     expect(lodash.advisories).toBe(13);
     expect(lodash.severity).toBe("high");
+    // экосистема – из метки Trivy «Node.js» (у grype она пустая), без пути
+    expect(v.sca.packages.every((p: any) => p.ecosystem === "npm")).toBe(true);
     const json = JSON.stringify(v);
     expect(json).not.toContain("codeBlock");
     expect(json).not.toContain("fileName");
     expect(json).not.toContain("CVE-");
+  });
+
+  test("экосистема SCA: метки Trivy и имена lock-файлов сводятся к имени экосистемы, незнакомое – неизвестно", async () => {
+    expect(scaEcosystem("Node.js")).toBe("npm");
+    expect(scaEcosystem("Python")).toBe("pypi");
+    expect(scaEcosystem("Rust")).toBe("cargo");
+    expect(scaEcosystem(".NET")).toBe("nuget");
+    expect(scaEcosystem("Ruby")).toBe("rubygems");
+    expect(scaEcosystem("backend/poetry.lock")).toBe("pypi");
+    expect(scaEcosystem("")).toBeNull();
+    expect(scaEcosystem("usr/bin/app")).toBeNull();
+    expect(scaEcosystem(undefined)).toBeNull();
+    // Python-пакет группы с меткой «Python» сохраняется с экосистемой pypi
+    const groups = [{ id: 1, publicId: 1, uuid: "u1", codeBlock: "Django@3.2.0", fileName: "Python", status: 0, severity: 4, engine: "Trivy", engineType: 2 }];
+    const buckets: Record<string, { data: unknown[]; nextPageToken: string; totalSize: number }[]> = {};
+    for (const b of ["CRITICAL", "HIGH", "MEDIUM", "LOW"]) buckets[b] = [{ data: b === "CRITICAL" ? groups : [], nextPageToken: "", totalSize: b === "CRITICAL" ? 1 : 0 }];
+    const f = { ...load("ok.json"), scaBuckets: buckets };
+    const out = await collectAppsec(fakeRest(f.repoId), fakeAppsec(f), "o/py", { now: NOW });
+    const v = out.fact!.value as any;
+    expect(v.sca.packages).toEqual([{ name: "Django", version: "3.2.0", severity: "critical", advisories: 1, engines: ["Trivy"], ecosystem: "pypi" }]);
+    expect(JSON.stringify(v)).not.toContain("fileName");
   });
 
   test("нет групп SCA – пустой список пакетов (данные), не null", async () => {

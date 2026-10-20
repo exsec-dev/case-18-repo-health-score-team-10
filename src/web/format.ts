@@ -136,6 +136,22 @@ export function fmtDateTimeMsk(iso: string | null | undefined): string {
   return `${fmtDateMsk(iso)}, ${pad2(m.getUTCHours())}:${pad2(m.getUTCMinutes())} МСК`;
 }
 
+/**
+ * Дата для MD/PDF — по Москве, как обещает руководство («Даты в отчете указаны
+ * по Москве»), и не зависит от пояса сервера (в Docker он не задан — UTC).
+ * Момент времени (`…T22:30:00Z`) — московская дата; чистая дата `YYYY-MM-DD`
+ * — календарный день как есть: сдвигать ее некуда, а `fmtDateMsk` читает ее
+ * как полночь пояса процесса и восточнее Москвы показал бы предыдущий день.
+ */
+export function fmtDateReport(iso: string | null | undefined): string {
+  const day = iso ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso) : null;
+  if (!day) return fmtDateMsk(iso);
+  const d = new Date(Date.UTC(Number(day[1]), Number(day[2]) - 1, Number(day[3])));
+  // «2026-13-45» не перекатывается в другой месяц: невалидная строка остается как пришла
+  if (d.getUTCMonth() !== Number(day[2]) - 1 || d.getUTCDate() !== Number(day[3])) return iso!;
+  return fmtDateUtc(d.toISOString());
+}
+
 export function fmtDateTimeUtc(iso: string | null | undefined): string {
   if (!iso) return "–";
   const d = parseShown(iso);

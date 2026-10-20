@@ -1217,13 +1217,15 @@ const BAND_ICON: Record<Band, IconData | null> = {
  * Изменение индекса к прошлой оценке: стрелка цветом, величина тише. Без изменения —
  * пустое место той же ширины: полосы и числа всех строк стоят друг под другом.
  */
+// в строке списка (здесь и в StatePill) — без TIP_TARGET: без своей остановки Tab и
+// перехвата клика, клик открывает строку; подсказка — по наведению
 function ScoreChange({ entry }: { entry: RepoEntry }) {
   const d = scoreChange(entry);
   if (d === null || d === 0) return <span className="rh-change" aria-hidden="true" />;
   const up = d > 0;
   return (
     <ActionTooltip title={`С прошлой оценки: ${up ? "+" : "−"}${Math.abs(d)} – было ${fmtScore(entry.previousIndex!)}`}>
-      <span className="rh-change" {...TIP_TARGET}>
+      <span className="rh-change">
         <span className={up ? "rh-rank__arrow rh-rank__arrow_up" : "rh-rank__arrow rh-rank__arrow_down"} role="img" aria-label={up ? "Выросла" : "Снизилась"}>
           <Icon data={up ? TriangleUpFill : TriangleDownFill} size={10} />
         </span>
@@ -1240,7 +1242,7 @@ function StatePill({ icon, tone, title, children }: { icon: IconData; tone?: "da
   return (
     // пояснение — подсказкой Gravity: системный title не виден с клавиатуры и на касании
     <ActionTooltip title={title}>
-      <span {...TIP_TARGET}>
+      <span>
         <Label theme="unknown" size="s" icon={<Icon data={icon} size={14} className={tone ? `rh-state__icon rh-state__icon_${tone}` : "rh-state__icon"} />}>
           {children}
         </Label>

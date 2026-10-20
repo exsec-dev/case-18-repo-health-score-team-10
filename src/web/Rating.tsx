@@ -1204,7 +1204,7 @@ function ScoreCell({ item, narrow = false }: { item: Item; narrow?: boolean }) {
     return (
       <Flex gap={2} alignItems="center" justifyContent="flex-end">
         <ActionTooltip title="В репозитории нет кода – оценка 0 означает, что оценивать пока нечего">
-          <span {...TIP_TARGET}>
+          <span>
             <Label theme="unknown" size="xs">
               нет кода
             </Label>
@@ -1221,7 +1221,7 @@ function ScoreCell({ item, narrow = false }: { item: Item; narrow?: boolean }) {
       {/* «Из истории» — левее полосы: ярлык редкий и не должен раздвигать числовой ряд */}
       {item.staleFacts && (
         <ActionTooltip title="Часть данных взята из прошлого анализа: источник не ответил">
-          <span {...TIP_TARGET}>
+          <span>
             <Label theme="warning" size="xs">
               Из истории
             </Label>
@@ -1248,11 +1248,14 @@ function ScoreCell({ item, narrow = false }: { item: Item; narrow?: boolean }) {
  * `title`, никогда не красный и не ноль. Полное «Нет данных» в узкую колонку
  * не влезает — отсюда короткая форма.
  */
+// метки в ячейках строк («нет кода», «Из истории», «н/д») — без TIP_TARGET: подсказка
+// по наведению, без своей остановки Tab (на странице их десятки) и без перехвата
+// клика — клик открывает строку
 function CategoryCell({ value }: { value: number | null }) {
   if (value === null) {
     return (
       <ActionTooltip title="Нет данных: категория в оценке не участвует и ее не снижает">
-        <span {...TIP_TARGET}>
+        <span>
           <Label theme="unknown" size="xs">
             {NO_DATA_SHORT}
           </Label>

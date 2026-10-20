@@ -1388,8 +1388,9 @@ export function getRepoCard(
   const channel = channelSources(db, r.id);
   const channelFacts = new Map<string, unknown>();
   for (const f of [...channel.cicdFacts, ...channel.securityFacts]) if (f.status === "ok") channelFacts.set(f.key, parseFactValue(f.value));
-  // ok-находок нет ни в одном скане — AppSec мог ответить «проверка не запускалась»:
-  // то же правило, что у сохраненной оценки (effectiveFacts)
+  // скана-источника Безопасности нет — AppSec мог ответить «проверка не запускалась»:
+  // то же правило, что у сохраненной оценки (effectiveFacts); ok-находки любого
+  // более позднего скана (bad, без tree.stats) этот ответ отменяют
   const appsecNeverScanned = channel.securityScanId === null && appsecNeverScannedAt(db, r.id, Number.MAX_SAFE_INTEGER);
   const categoryOfFacts = (facts: Map<string, unknown>, key: "cicd" | "security"): CategoryScore =>
     computeFromFacts(facts, { scanId: 0, repoId: r.id, appsecNeverScanned }, new Date(publicRow.computed_at)).categories[key];

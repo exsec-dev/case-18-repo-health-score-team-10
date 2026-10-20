@@ -15,6 +15,8 @@ import {
   fmtContribution,
   closeDateText,
   fmtDate,
+  fmtDateMsk,
+  fmtDateUtc,
   fmtDecimal,
   gitLimitsText,
   lockedCategoryText,
@@ -179,6 +181,9 @@ export function contributionBars(card: RepoCard): ContributionBar[] {
   return withValue(metricsOf(card)).map((m) => contributionBar(contributionsOf(card, m), m.name));
 }
 
+/** Как печатать дату: карточка — пояс браузера (`fmtDate`), отчет — по Москве (`fmtDateReport` из web/format). */
+export type DateText = (iso: string) => string;
+
 /** Момент анализа — дата шапки отчета и «анализ …» в шапке карточки: расчет оценки, иначе скан. */
 export function analysisDate(card: RepoCard): string | null {
   return card.score?.computedAt ?? card.scan?.finishedAt ?? card.scan?.startedAt ?? null;
@@ -335,8 +340,11 @@ function restDatesNote(card: RepoCard): string | null {
 /** Вид ограничения — чтобы карточка не повторяла его наверху отдельным предупреждением. */
 export type LimitationKind = "close-date" | "rest-dates" | "history" | "stale" | "git-limits";
 
-/** «Ограничения данных» с видом каждого пункта (порядок и текст — как в отчете). */
-export function limitationItems(card: RepoCard): { kind: LimitationKind; text: string }[] {
+/**
+ * «Ограничения данных» с видом каждого пункта (порядок и текст — как в отчете).
+ * `date` — как печатать дату: карточке — пояс браузера, отчету — `fmtDateReport`.
+ */
+export function limitationItems(card: RepoCard, date: DateText = fmtDate): { kind: LimitationKind; text: string }[] {
   const out: { kind: LimitationKind; text: string }[] = [];
   const close = closeDateNote(card);
   if (close) out.push({ kind: "close-date", text: close });
@@ -345,7 +353,7 @@ export function limitationItems(card: RepoCard): { kind: LimitationKind; text: s
   const since = historyTruncatedSince(card);
   if (since) {
     // причина не в размере репозитория: сервис читает только окно истории
-    out.push({ kind: "history", text: `История коммитов загружена частично: сервис читает только недавнюю историю – с ${fmtDate(since)}.` });
+    out.push({ kind: "history", text: `История коммитов загружена частично: сервис читает только недавнюю историю – с ${date(since)}.` });
   }
   if (card.markers.staleFacts) out.push({ kind: "stale", text: "Часть данных взята из прошлого анализа: источник не ответил. Оценка от этого не выросла и не снизилась." });
   if (card.markers.gitLimits) out.push({ kind: "git-limits", text: gitLimitsText(card.markers.gitLimits) });
@@ -353,8 +361,8 @@ export function limitationItems(card: RepoCard): { kind: LimitationKind; text: s
 }
 
 /** «Ограничения данных» — только ограничения данных (закрытые категории сюда не входят). */
-export function limitations(card: RepoCard): string[] {
-  return limitationItems(card).map((l) => l.text);
+export function limitations(card: RepoCard, date: DateText = fmtDate): string[] {
+  return limitationItems(card, date).map((l) => l.text);
 }
 
 // ---------- рекомендации ----------
@@ -498,9 +506,9 @@ export function ownershipDirTitle(dir: string): string {
  * Карта владельцев — одна сборка для карточки и MD/PDF: значение справочной
  * подметрики `code.ownership` (агрегат факта и признак CODEOWNERS). Нет карты
  * (старый сборщик, изменений за год нет, данные не собраны) — null: строка
- * подметрики сама говорит почему.
+ * подметрики сама говорит почему. `date` — как в `limitationItems`.
  */
-export function ownershipView(cat: CardCategory | undefined): OwnershipView | null {
+export function ownershipView(cat: CardCategory | undefined, date: DateText = fmtDate): OwnershipView | null {
   const value = cat?.submetrics?.["ownership"]?.value as Record<string, unknown> | null | undefined;
   if (!value || typeof value !== "object") return null;
   const dirs = Array.isArray(value.dirs) ? (value.dirs as Record<string, unknown>[]) : [];
@@ -532,7 +540,7 @@ export function ownershipView(cat: CardCategory | undefined): OwnershipView | nu
   if (total > rows.length) notes.push(`Показаны ${rows.length} самых изменяемых каталогов из ${total}.`);
   if (value.truncated === "commits") notes.push("Коммитов за год больше бюджета обхода – учтены только самые свежие.");
   if (value.truncated === "changes") notes.push("Изменений за год больше бюджета обхода – учтена только часть.");
-  if (typeof value.history_since === "string") notes.push(`История загружена с ${fmtDate(value.history_since)} – окно короче года.`);
+  if (typeof value.history_since === "string") notes.push(`История загружена с ${date(value.history_since)} – окно короче года.`);
   if (value.codeowners === true) notes.push("В репозитории есть CODEOWNERS.");
   if (value.codeowners === false) notes.push("CODEOWNERS в репозитории нет.");
   return { caption: "Карта владельцев файлов (справочно, в балл не входит)", rows, notes, thresholdPct: Math.round(threshold * 100) };

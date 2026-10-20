@@ -120,6 +120,24 @@ describe("подметрика security.deps", () => {
     expect(mixed.problem).toContain("Еще 1 уязвимый пакет другой экосистемы граф не покрывает, он учтен в плотности находок.");
   });
 
+  test("Python-репо с package-lock: Django и requests из SCA (экосистема PyPI) вне суммы и без совета", () => {
+    const py = (name: string, version: string, severity: Sev) => ({ ...pkg(name, version, severity), ecosystem: "pypi" });
+    const facts = withFacts(healthyFacts(), appsec([py("Django", "3.2.0", "critical"), py("requests", "2.19.0", "high")]), graphFact);
+    const cat = security(facts);
+    expect(cat.submetrics.deps!.value).toMatchObject({ vulnerable: 2, outside: 2, unmatched: 0, direct: 0, weighted: 0 });
+    expect(cat.submetrics.deps!.score).toBe(1);
+    const recs = recommend(t.db, seedScan(t, facts), { now: NOW });
+    expect(recs.map((r) => r.ruleId)).not.toContain("update-vulnerable-deps");
+  });
+
+  test("версию уже подняли после проверки AppSec – пакет не в сумме, балл как без него", () => {
+    const bumpedGraph: FactSpec = { key: "tree.lockgraph", value: { graphs: [{ ...lockgraph.graphs[0]!, nodes: lockgraph.graphs[0]!.nodes.map((n) => (n === "qs@6.7.0" ? "qs@6.7.3" : n)) }] } };
+    const bumped = security(withFacts(healthyFacts(), appsec([pkg("qs", "6.7.0", "critical")]), bumpedGraph));
+    const clean = security(withFacts(healthyFacts(), appsec([]), bumpedGraph));
+    expect(bumped.submetrics.deps!.value).toMatchObject({ vulnerable: 0, updated: 1, weighted: 0 });
+    expect(bumped.score).toBeCloseTo(clean.score!, 9);
+  });
+
   test("HealthCraft Index не зависит от графа и пакетов SCA (публичный показатель без Безопасности)", () => {
     const base = compute(t.db, seedScan(t, healthyFacts()), { now: NOW }).healthcraftIndex;
     const withDeps = compute(t.db, seedScan(t, withFacts(healthyFacts(), appsec([pkg("lodash", "4.17.15", "critical")]), graphFact)), { now: NOW }).healthcraftIndex;

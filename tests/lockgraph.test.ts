@@ -361,10 +361,27 @@ describe("matchVulnerableDependencies: пакеты SCA против графа"
     expect(r.graph_truncated).toBe(false);
   });
 
-  test("пакет не в графе или другая версия – несопоставлен и весит как прямой", () => {
-    const r = matchVulnerableDependencies({ packages: [pkg("left-pad", "1.0.0", "high"), pkg("qs", "9.9.9", "high")] }, graph);
-    expect(r.unmatched).toBe(2);
+  test("пакета нет в графе – несопоставлен и весит как прямой", () => {
+    const r = matchVulnerableDependencies({ packages: [pkg("left-pad", "1.0.0", "high")] }, graph);
+    expect(r.unmatched).toBe(1);
     expect(r.packages.every((p) => p.direct === null && p.weight === SEVERITY_WEIGHTS.high)).toBe(true);
+  });
+
+  test("версию уже подняли (qs 6.7.0 в SCA, в lock-файле 6.7.3) – не прямой и не в сумме, пока AppSec не перепроверит", () => {
+    const bumped = { graphs: [{ ...graph.graphs[0]!, nodes: graph.graphs[0]!.nodes.map((n) => (n === "qs@6.7.0" ? "qs@6.7.3" : n)) }] };
+    const r = matchVulnerableDependencies({ packages: [pkg("qs", "6.7.0", "critical"), pkg("lodash", "4.17.15", "low")] }, bumped);
+    expect(r).toMatchObject({ updated: 1, unmatched: 0, direct: 1, transitive: 0 });
+    expect(r.packages.map((p) => p.name)).toEqual(["lodash"]);
+    expect(r.weighted).toBe(SEVERITY_WEIGHTS.low);
+    // в исходном графе тот же qs – транзитивный через express, половина веса
+    const before = matchVulnerableDependencies({ packages: [pkg("qs", "6.7.0", "critical")] }, graph);
+    expect(before).toMatchObject({ updated: 0, transitive: 1, weighted: SEVERITY_WEIGHTS.critical * DEPS_TRANSITIVE_WEIGHT });
+    // старая версия осталась только осиротевшей записью, новая живая – тоже «обновлен»
+    const g = { graphs: [{ path: "package-lock.json", manager: "npm" as const, lock_version: "3", nodes: ["a@1", "qs@6.7.0", "qs@6.7.3"], roots: [0], edges: [[0, 2]] as [number, number][] }] };
+    expect(matchVulnerableDependencies({ packages: [pkg("qs", "6.7.0", "high")] }, g)).toMatchObject({ updated: 1, unmatched: 0, weighted: 0 });
+    // имя есть только в осиротевшей записи другой версии – как не найден
+    const dead = { graphs: [{ path: "package-lock.json", manager: "npm" as const, lock_version: "3", nodes: ["a@1", "qs@6.7.3"], roots: [0], edges: [] as [number, number][] }] };
+    expect(matchVulnerableDependencies({ packages: [pkg("qs", "6.7.0", "high")] }, dead)).toMatchObject({ updated: 0, unmatched: 1, weighted: SEVERITY_WEIGHTS.high });
   });
 
   test("пакет без версии в SCA сопоставляется по имени; узел без версии в графе – тоже", () => {
@@ -400,6 +417,16 @@ describe("matchVulnerableDependencies: пакеты SCA против графа"
     expect(r.unmatched).toBe(1);
     expect(r.weighted).toBe(SEVERITY_WEIGHTS.low);
     expect(r.packages.find((p) => p.name.startsWith("github.com"))).toMatchObject({ outside: true, direct: null, weight: 0 });
+  });
+
+  test("экосистема из факта: пакеты PyPI рядом с package-lock – вне графа, даже если имя совпало с пакетом npm", () => {
+    const py = (name: string, version: string, severity: AppsecScaPackage["severity"]) => ({ ...pkg(name, version, severity), ecosystem: "pypi" });
+    const r = matchVulnerableDependencies({ packages: [py("Django", "3.2.0", "critical"), py("requests", "2.19.0", "high"), py("qs", "6.7.0", "high"), { ...pkg("cookie", "0.4.0", "low"), ecosystem: "npm" }] }, graph);
+    expect(r).toMatchObject({ outside: 3, unmatched: 0, transitive: 1, weighted: SEVERITY_WEIGHTS.low * DEPS_TRANSITIVE_WEIGHT });
+    expect(r.packages.filter((p) => p.outside).map((p) => p.name).sort()).toEqual(["Django", "qs", "requests"]);
+    // без поля ecosystem (старый факт) – прежнее правило формы имени: requests – кандидат графа
+    const legacy = matchVulnerableDependencies({ packages: [pkg("requests", "2.19.0", "high")] }, graph);
+    expect(legacy).toMatchObject({ outside: 0, unmatched: 1 });
   });
 
   test("цепочка в показе не длиннее VIA_CAP", () => {

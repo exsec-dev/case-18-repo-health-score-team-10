@@ -3,7 +3,7 @@
 import { describe, expect, test } from "bun:test";
 import { apportion, decompose, scoreChange, type ScoreCategoryChange, type ScoreSnapshot, type ScoreSubChange, type ScoreSubFacts } from "../src/summary/score-change";
 import { INDEX_WEIGHTS } from "../src/score/model";
-import { bridgeOf, categoryPhrase, changeLine, dayOptions, defaultPair, subInline } from "../src/web/scoreChangeView";
+import { bridgeOf, categoryPhrase, changeLine, dayOptions, defaultMetric, defaultPair, pinDays, subInline } from "../src/web/scoreChangeView";
 import type { HistoryPoint } from "../src/summary/history-contract";
 import type { CategoryKey } from "../src/score/model";
 
@@ -332,5 +332,32 @@ describe("слова на карточке", () => {
     const full: HistoryPoint["change"] = { fromScanId: 2, fromFinishedAt: null, index: { from: 69, to: 69 }, full: { from: 61, to: 60 }, special: null, fullCapped: false, categories: [] };
     const points = [at(1, "17", null, 60, 61), at(2, "18", idx, 69, 61), at(3, "19", full, 69, 60)];
     expect(defaultPair(points, true)).toEqual({ from: 1, to: 3 });
+  });
+
+  test("изменение индекса в первый день истории: пара начинается с анализа перед ним, поле дня его показывает", () => {
+    const at = (scanId: number, iso: string, change: HistoryPoint["change"], hci: number): HistoryPoint => ({ ...point(scanId, change, hci), finishedAt: iso });
+    const a = snap(1, { documentation: 40, activity: 60, issues: 60, code: 60 });
+    const b = snap(2, { documentation: 80, activity: 60, issues: 60, code: 60 });
+    const points = [
+      at(1, "2026-10-17T08:00:00Z", null, a.healthcraftIndex!),
+      at(2, "2026-10-17T12:00:00Z", scoreChange(a, b, false), b.healthcraftIndex!),
+      at(3, "2026-10-18T12:00:00Z", scoreChange(b, { ...b, scanId: 3 }, false), b.healthcraftIndex!),
+    ];
+    const pair = defaultPair(points, false)!;
+    expect(pair).toEqual({ from: 1, to: 3 });
+    // конец первого дня — анализ 2, но в поле стоит выбранный анализ 1
+    expect(pinDays(points, [pair.from, pair.to]).map((d) => d.scanId)).toEqual([1, 3]);
+  });
+
+  test("менялся только Repo Health Score: панель открывается на нем, строка объясняет его вклады", () => {
+    const cats: Cats = { documentation: 50, activity: 50, issues: 50, code: 50, cicd: 50, security: 50 };
+    const a = snap(1, cats, { repoHealthScore: 50.4 });
+    const b = snap(2, { ...cats, documentation: 52 }, { repoHealthScore: 50.7 });
+    const change = scoreChange(a, b, true);
+    const p2: HistoryPoint = { ...point(2, change, 50), repoHealthScore: 50.7 };
+    const points = [{ ...point(1, null, 50), repoHealthScore: 50.4 }, p2];
+    expect(defaultMetric(points, true)).toBe("full");
+    expect(defaultMetric(points, false)).toBe("index");
+    expect(changeLine(p2, true)).toStartWith("Документация +1 к Repo Health Score");
   });
 });

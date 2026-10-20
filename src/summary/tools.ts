@@ -2,8 +2,9 @@
 // клона, path-гард, капы на выдачу, deny-list секретов (содержимое не читается).
 // Результат инструмента — НЕдоверенные данные: контрольные символы срезаются,
 // объем капится. Дедуп повторных вызовов — в исполнителе (makeToolExecutor).
-import { lstatSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, realpathSync, statSync, writeSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { ToolSpec } from "../llm";
 
 /** Локальный git без блокировки event loop (воркер живёт в процессе сервера). */
@@ -30,8 +31,21 @@ export const GREP_LINE_CAP = 50;
 export const GREP_LINE_CHARS = 200;
 /** Предел длины паттерна grep: паттерн пишет модель, длинный регэксп – повод отказать, а не выполнять. */
 export const GREP_PATTERN_MAX = 200;
-/** Сколько символов строки проверяется регэкспом: ограничивает время «взрывного» паттерна. */
+/** Сколько символов строки проверяется регэкспом: ограничивает работу на строку, но НЕ время –
+ *  «взрывной» паттерн тратит секунды и на 4000 символах, время держат бюджет и отдельный процесс ниже. */
 export const GREP_MATCH_CHARS = 4000;
+/**
+ * Общий бюджет времени одного вызова grep (обход и регэкспы). Проверяется между
+ * файлами и строками; по исчерпании – честный частичный результат с пометкой.
+ */
+export const GREP_TIME_BUDGET_MS = 800;
+/**
+ * Запас сверх бюджета до принудительного завершения процесса grep. Одну строку
+ * регэксп не прерывает: `.*a.*b` на строке из 4000 «a» идет ~30 с, `\w+.*\w+;` –
+ * минуты (предел перебора JSC ловит только экспоненту, полином – нет). Поэтому
+ * grep идет в отдельном процессе: сервер не стоит, а зависшую строку снимает kill.
+ */
+export const GREP_KILL_GRACE_MS = 300;
 export const LIST_FILES_CAP = 500;
 export const GIT_LOG_CAP = 30;
 /** потолок файлов, обходимых grep (предохранитель больших деревьев) */
@@ -45,7 +59,7 @@ export const MAX_PLAIN_READ_BYTES = 1024 * 1024;
 /** Путь к секретам: содержимое не читается и в выдачу не попадает. */
 const SECRET_DENYLIST: RegExp[] = [
   /(^|\/)\.env[^/]*$/i,
-  /(^|\/)\.git($|\/)/,
+  /(^|\/)\.git($|\/)/i,
   /\.pem$/i,
   /\.key$/i,
   /(^|\/)id_rsa[^/]*$/i,
@@ -53,8 +67,8 @@ const SECRET_DENYLIST: RegExp[] = [
   /credentials?\.(json|txt|ya?ml)$/i,
   /(^|\/)secrets[^/]*\.json$/i,
   /\.(p12|pfx|jks)$/i,
-  /(^|\/)\.aws\//,
-  /(^|\/)\.ssh\//,
+  /(^|\/)\.aws\//i,
+  /(^|\/)\.ssh\//i,
   /(^|\/)\.npmrc$/i,
   /(^|\/)\.netrc$/i,
   /(^|\/)\.htpasswd$/i,
@@ -64,9 +78,48 @@ const SECRET_DENYLIST: RegExp[] = [
   /(^|\/)[^/]*firebase-adminsdk[^/]*\.json$/i,
 ];
 
+/**
+ * Канонический относительный путь для deny-list: разделители `/`, без `.`, `..`
+ * и пустых сегментов. Сырая строка обходила запрет: `.env/.`, `x/../.env/.`,
+ * `deploy/id_ed25519/x/..` после resolve открывают тот же секрет.
+ */
+export function normalizeRelPath(relPath: string): string {
+  const parts: string[] = [];
+  for (const seg of relPath.replaceAll("\\", "/").split("/")) {
+    if (seg === "" || seg === ".") continue;
+    if (seg === "..") parts.pop();
+    else parts.push(seg);
+  }
+  return parts.join("/");
+}
+
+/** Имя так, как его откроет Windows: хвостовые точки и пробелы отбрасываются,
+ *  `имя:поток` читает сам файл (`server.pem.`, `.env `, `server.pem::$DATA`). */
+function windowsName(seg: string): string {
+  const bare = seg.replace(/:.*$/, "").replace(/[. ]+$/, "");
+  return bare.length > 0 ? bare : seg;
+}
+
 export function isDeniedPath(relPath: string): boolean {
-  const norm = relPath.replaceAll("\\", "/");
-  return SECRET_DENYLIST.some((re) => re.test(norm));
+  const norm = normalizeRelPath(relPath);
+  const win = norm.split("/").map(windowsName).join("/");
+  return SECRET_DENYLIST.some((re) => re.test(norm) || re.test(win));
+}
+
+/**
+ * Запрет по пути, который реально откроется, – после guardPath: относительный от
+ * корня после resolve и, если цель есть, после realpath (регистр, короткие имена
+ * 8.3 и прочие псевдонимы файловой системы сводятся к настоящему имени).
+ */
+function isDeniedResolved(root: string, abs: string): boolean {
+  if (isDeniedPath(relative(resolve(root), abs))) return true;
+  let real: string;
+  try {
+    real = relative(realpathSync.native(root), realpathSync.native(abs));
+  } catch {
+    return false; // цели нет – дальше отказ «не найден»
+  }
+  return isDeniedPath(real);
 }
 
 /**
@@ -347,6 +400,210 @@ function listFilesRec(root: string, dir: string, out: string[], cap: number): vo
   }
 }
 
+/**
+ * Заведомо опасный паттерн grep: повтор группы, внутри которой тоже повтор –
+ * `(a+)+`, `(\w+\s?)+`, `(.*,)*`, `(?:x*){2,}`. Такой регэксп перебирает
+ * экспоненту способов разбить строку и на 4000 символах стоит секунды. Отказ
+ * сразу, с подсказкой для модели; остальное держит бюджет времени. Возвращает
+ * причину отказа или null.
+ */
+export function dangerousGrepPattern(pattern: string): string | null {
+  // кадр группы: был ли внутри квантификатор (на любой глубине)
+  const stack: boolean[] = [false];
+  let i = 0;
+  // квантификатор в позиции j: длина и «без верхней границы» (*, +, {n,})
+  const quantAt = (j: number): { len: number; unbounded: boolean } | null => {
+    const c = pattern[j];
+    if (c === "*" || c === "+") return { len: 1, unbounded: true };
+    if (c === "?") return { len: 1, unbounded: false };
+    if (c === "{") {
+      const m = /^\{(\d+)(,(\d*))?\}/.exec(pattern.slice(j));
+      if (m === null) return null; // `{` без числа – литерал
+      return { len: m[0].length, unbounded: m[2] !== undefined && m[3] === "" };
+    }
+    return null;
+  };
+  // после атома: квантификатор (и ленивый `?` за ним) отмечает кадр
+  const afterAtom = (): { unbounded: boolean } | null => {
+    const q = quantAt(i);
+    if (q === null) return null;
+    i += q.len;
+    if (pattern[i] === "?") i++;
+    stack[stack.length - 1] = true;
+    return q;
+  };
+  while (i < pattern.length) {
+    const c = pattern[i]!;
+    if (c === "\\") {
+      // \p{L}, \u{1F600}, \k<name> – скобки часть атома, не квантификатор
+      const n = pattern[i + 1];
+      i += 2;
+      if ((n === "p" || n === "P" || n === "u") && pattern[i] === "{") {
+        const end = pattern.indexOf("}", i);
+        i = end < 0 ? pattern.length : end + 1;
+      } else if (n === "k" && pattern[i] === "<") {
+        const end = pattern.indexOf(">", i);
+        i = end < 0 ? pattern.length : end + 1;
+      }
+      afterAtom();
+      continue;
+    }
+    if (c === "[") {
+      i++;
+      if (pattern[i] === "]") i++; // `[]...]` – литерал `]` в начале класса
+      while (i < pattern.length && pattern[i] !== "]") i += pattern[i] === "\\" ? 2 : 1;
+      i++;
+      afterAtom();
+      continue;
+    }
+    if (c === "(") {
+      i++;
+      // (?: (?= (?! (?<= (?<! (?<name> – префикс группы, не квантификатор
+      if (pattern[i] === "?") {
+        i++;
+        if (pattern[i] === "<" && pattern[i + 1] !== "=" && pattern[i + 1] !== "!") {
+          const end = pattern.indexOf(">", i);
+          i = end < 0 ? pattern.length : end + 1;
+        } else {
+          i += pattern[i] === "<" ? 2 : 1;
+        }
+      }
+      stack.push(false);
+      continue;
+    }
+    if (c === ")") {
+      i++;
+      const inner = stack.length > 1 ? stack.pop()! : false;
+      const q = afterAtom();
+      if (q?.unbounded && inner) {
+        return "вложенный повтор вида (…+)+ или (…*)* – перебор растет экспоненциально и подвешивает поиск";
+      }
+      if (inner) stack[stack.length - 1] = true;
+      continue;
+    }
+    i++;
+    afterAtom();
+  }
+  return null;
+}
+
+export interface GrepScanResult {
+  lines: string[];
+  /** сколько файлов прочитано */
+  scanned: number;
+  /** бюджет времени исчерпан – результат частичный */
+  timedOut: boolean;
+}
+
+/**
+ * Обход и сопоставление grep – синхронно; на сервере вызывается только в
+ * отдельном процессе (runGrepChild). Время проверяется между файлами и строками:
+ * по исчерпании `deadline` (performance.now()) обход останавливается с частичным
+ * результатом. `onLine` отдает совпадение сразу: строки, найденные до зависшей,
+ * переживают kill процесса.
+ */
+export function grepScan(root: string, re: RegExp, glob: string | null, deadline: number, onLine?: (line: string) => void): GrepScanResult {
+  const files: string[] = [];
+  listFilesRec(root, root, files, GREP_FILE_CAP);
+  const lines: string[] = [];
+  let scanned = 0;
+  const over = (): boolean => performance.now() > deadline;
+  for (const rel of files) {
+    if (lines.length >= GREP_LINE_CAP) break;
+    if (scanned >= GREP_FILE_CAP) break;
+    if (over()) return { lines, scanned, timedOut: true };
+    if (rel.endsWith("/") || rel.endsWith("(denied)")) continue;
+    if (isDeniedPath(rel)) continue;
+    if (glob !== null && !rel.includes(glob)) continue;
+    const abs = join(root, rel);
+    let st;
+    try {
+      st = statSync(abs);
+    } catch {
+      continue;
+    }
+    if (st.size > MAX_PLAIN_READ_BYTES) continue;
+    scanned++;
+    let buf: Buffer;
+    try {
+      buf = readFileSync(abs);
+    } catch {
+      continue;
+    }
+    if (buf.subarray(0, 8192).includes(0)) continue;
+    const text = sanitizeUntrusted(buf.toString("utf8"));
+    const split = text.split("\n");
+    for (let i = 0; i < split.length && lines.length < GREP_LINE_CAP; i++) {
+      if (over()) return { lines, scanned, timedOut: true };
+      if (re.test(split[i]!.slice(0, GREP_MATCH_CHARS))) {
+        // строка-инструкция заменяется пометкой, номер строки сохраняется
+        const line = `${rel}:${i + 1}: ${stripInstructionLines(split[i]!).text.trim().slice(0, GREP_LINE_CHARS)}`;
+        lines.push(line);
+        onLine?.(line);
+      }
+    }
+  }
+  return { lines, scanned, timedOut: false };
+}
+
+/**
+ * Вход процесса grep: запрос JSON со stdin, совпадения и итог – строками JSON
+ * в stdout. Запись синхронная (writeSync): найденное уже в канале, даже если
+ * следующая строка подвесит регэксп и родитель снимет процесс.
+ */
+export async function runGrepChild(): Promise<void> {
+  const req = JSON.parse(await Bun.stdin.text()) as { root: string; pattern: string; glob: string | null; budgetMs: number };
+  const emit = (rec: unknown): void => {
+    writeSync(1, `${JSON.stringify(rec)}\n`);
+  };
+  const deadline = performance.now() + req.budgetMs;
+  // паттерн проверен родителем; nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
+  const res = grepScan(req.root, new RegExp(req.pattern), req.glob, deadline, (line) => emit({ line }));
+  emit({ end: true, scanned: res.scanned, timedOut: res.timedOut });
+}
+
+/**
+ * grep в отдельном процессе bun с жестким сроком GREP_TIME_BUDGET_MS +
+ * GREP_KILL_GRACE_MS: регэксп синхронный, и в процессе сервера зависшая строка
+ * остановила бы сайт и API. По сроку процесс снимается, найденное до этого
+ * остается в выдаче.
+ */
+async function grepInChild(root: string, pattern: string, glob: string | null): Promise<GrepScanResult & { killed: boolean }> {
+  const script = `import { runGrepChild } from ${JSON.stringify(pathToFileURL(import.meta.path).href)}; await runGrepChild();`;
+  const proc = Bun.spawn([process.execPath, "-e", script], { stdin: "pipe", stdout: "pipe", stderr: "pipe" });
+  let killed = false;
+  const timer = setTimeout(() => {
+    killed = true;
+    try {
+      proc.kill("SIGKILL");
+    } catch {
+      /* already dead */
+    }
+  }, GREP_TIME_BUDGET_MS + GREP_KILL_GRACE_MS);
+  try {
+    proc.stdin.write(JSON.stringify({ root, pattern, glob, budgetMs: GREP_TIME_BUDGET_MS }));
+    proc.stdin.end();
+    const [out, err, exitCode] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+    const lines: string[] = [];
+    let end: { scanned: number; timedOut: boolean } | null = null;
+    for (const raw of out.split("\n")) {
+      if (raw.length === 0) continue;
+      let rec: { line?: unknown; end?: unknown; scanned?: unknown; timedOut?: unknown };
+      try {
+        rec = JSON.parse(raw) as typeof rec;
+      } catch {
+        continue; // оборванная kill-ом последняя запись
+      }
+      if (typeof rec.line === "string" && lines.length < GREP_LINE_CAP) lines.push(rec.line);
+      else if (rec.end === true) end = { scanned: Number(rec.scanned) || 0, timedOut: rec.timedOut === true };
+    }
+    if (end === null && !killed) throw new Error(`grep: процесс завершился с кодом ${exitCode}: ${err.trim().slice(0, 120)}`);
+    return { lines, scanned: end?.scanned ?? 0, timedOut: end === null || end.timedOut, killed: end === null };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Исполнение одного инструмента; возвращает СТРОКУ (едет в role:"tool"). */
 export async function executeTool(io: ToolExecutorIo, name: string, args: unknown): Promise<string> {
   const fail = (error: string): string => JSON.stringify({ ok: false, error });
@@ -367,6 +624,8 @@ export async function executeTool(io: ToolExecutorIo, name: string, args: unknow
       }
       const abs = guardPath(root, rel);
       if (abs === null) return fail("denied: путь вне корня репозитория");
+      // запрет – по пути, который откроется, а не по сырой строке (`.env/.`, `x/../.env`)
+      if (isDeniedResolved(root, abs)) return fail("denied: путь к секретам — содержимое не выдаётся");
       if (hasSymlinkComponent(root, abs)) return fail("denied: путь содержит симлинк — содержимое не выдаётся");
       let st;
       try {
@@ -386,13 +645,15 @@ export async function executeTool(io: ToolExecutorIo, name: string, args: unknow
       const a = args as { pattern?: unknown; glob?: unknown } | null;
       if (typeof a?.pattern !== "string" || a.pattern.length === 0) return fail("ожидался аргумент pattern: строка");
       if (a.pattern.length > GREP_PATTERN_MAX) return fail(`паттерн длиннее ${GREP_PATTERN_MAX} символов`);
-      let re: RegExp;
       try {
-        // паттерн задает модель: длина паттерна и проверяемой строки ограничены,
-        // поэтому «взрывной» регэксп упирается в GREP_MATCH_CHARS, а не висит
-        re = new RegExp(a.pattern); // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
+        // паттерн задает модель: здесь только проверка синтаксиса, исполнение – в отдельном процессе
+        new RegExp(a.pattern); // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
       } catch (e) {
         return fail(`неверный паттерн: ${String((e as Error).message).slice(0, 100)}`);
+      }
+      const danger = dangerousGrepPattern(a.pattern);
+      if (danger !== null) {
+        return fail(`опасный паттерн: ${danger}. Перепиши без повтора внутри повтора: (\\w+\\s?)+ → [\\w\\s]+, (.*,)*TODO → TODO`);
       }
       const glob = typeof a.glob === "string" && a.glob.length > 0 ? a.glob : null;
       let root: string;
@@ -401,46 +662,20 @@ export async function executeTool(io: ToolExecutorIo, name: string, args: unknow
       } catch (e) {
         return unavailable(e);
       }
-      const files: string[] = [];
-      listFilesRec(root, root, files, GREP_FILE_CAP);
-      const lines: string[] = [];
-      let scanned = 0;
-      for (const rel of files) {
-        if (lines.length >= GREP_LINE_CAP) break;
-        if (scanned >= GREP_FILE_CAP) break;
-        if (rel.endsWith("/") || rel.endsWith("(denied)")) continue;
-        if (isDeniedPath(rel)) continue;
-        if (glob !== null && !rel.includes(glob)) continue;
-        const abs = join(root, rel);
-        let st;
-        try {
-          st = statSync(abs);
-        } catch {
-          continue;
-        }
-        if (st.size > MAX_PLAIN_READ_BYTES) continue;
-        scanned++;
-        let buf: Buffer;
-        try {
-          buf = readFileSync(abs);
-        } catch {
-          continue;
-        }
-        if (buf.subarray(0, 8192).includes(0)) continue;
-        const text = sanitizeUntrusted(buf.toString("utf8"));
-        const split = text.split("\n");
-        for (let i = 0; i < split.length && lines.length < GREP_LINE_CAP; i++) {
-          if (re.test(split[i]!.slice(0, GREP_MATCH_CHARS))) {
-            // строка-инструкция заменяется пометкой, номер строки сохраняется
-            lines.push(`${rel}:${i + 1}: ${stripInstructionLines(split[i]!).text.trim().slice(0, GREP_LINE_CHARS)}`);
-          }
-        }
-      }
+      const res = await grepInChild(root, a.pattern, glob);
       return JSON.stringify({
         ok: true,
-        matches: lines.length,
-        truncated: lines.length >= GREP_LINE_CAP || scanned >= GREP_FILE_CAP,
-        lines,
+        matches: res.lines.length,
+        truncated: res.lines.length >= GREP_LINE_CAP || res.scanned >= GREP_FILE_CAP || res.timedOut,
+        ...(res.timedOut
+          ? {
+              timedOut: true,
+              note: res.killed
+                ? `поиск остановлен: время ${GREP_TIME_BUDGET_MS} мс вышло на строке, где паттерн перебирает слишком долго; результат частичный – упрости паттерн или сузь glob`
+                : `поиск остановлен: время ${GREP_TIME_BUDGET_MS} мс вышло, просмотрено файлов: ${res.scanned}; результат частичный – сузь glob`,
+            }
+          : {}),
+        lines: res.lines,
       });
     }
     if (name === "list_files") {
@@ -456,6 +691,7 @@ export async function executeTool(io: ToolExecutorIo, name: string, args: unknow
       if (typeof sub === "string" && sub.length > 0) {
         const abs = guardPath(root, sub);
         if (abs === null) return fail("denied: путь вне корня репозитория");
+        if (isDeniedResolved(root, abs)) return fail("denied: путь к секретам — содержимое не выдаётся");
         if (hasSymlinkComponent(root, abs)) return fail("denied: путь содержит симлинк — содержимое не выдаётся");
         base = abs;
       }

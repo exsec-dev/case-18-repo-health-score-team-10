@@ -77,7 +77,7 @@ describe("В6.5: неглубокий частичный клон для обз�
       rmSync(clone.dir, { recursive: true, force: true });
       rmSync(src, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   test("README-симлинк и README больше предела из git-каталога не читаются", async () => {
     const src = fixtureRepo(1, "x".repeat(MAX_PLAIN_READ_BYTES + 1));

@@ -18,7 +18,9 @@ import {
   SCORE_SCALE,
   fmtContribution,
   fmtCoverage,
-  fmtDateMsk as fmtDate,
+  // все даты и время отчета — по Москве, не по поясу сервера (руководство
+  // обещает «Даты в отчете указаны по Москве»)
+  fmtDateReport as fmtDate,
   fmtDateTimeMsk as fmtDateTime,
   fmtDecimal,
   fmtLoss,
@@ -283,7 +285,7 @@ function indexNullSection(card: RepoCard): Block[] {
   // без рекомендаций — та же фраза, что на карточке
   else out.push(para(line(noRecommendationsText(card))));
   out.push(para(line(`Оценка рассчитывается при объеме данных от ${threshold}.`)));
-  const limits = limitations(card);
+  const limits = limitations(card, fmtDate);
   if (limits.length > 0) out.push(h2("Ограничения данных"), ...limits.map((l) => ({ kind: "paragraph" as const, tone: "note" as const, lines: [line(l)] })));
   // проверка на накрутку и AI-обзор — после ограничений данных, до разбора и приложений
   out.push(...fraudBlock(card), ...aiBlock(card));
@@ -358,7 +360,7 @@ function scoredSection(card: RepoCard, metrics: Metric[]): Block[] {
     // без вводной строки: порядок рекомендаций не обещает «по убыванию влияния»
     out.push({ kind: "actions", compact: true, items: recs.map((r, i) => actionItem(r, i + 1)) });
   }
-  const limits = limitations(card);
+  const limits = limitations(card, fmtDate);
   // ограничения данных — такие же примечания на подложке, как под таблицами
   if (limits.length > 0) out.push(h2("Ограничения данных"), ...limits.map((l) => ({ kind: "paragraph" as const, tone: "note" as const, lines: [line(l)] })));
   // проверка на накрутку и AI-обзор — после ограничений данных, до разбора и приложений
@@ -436,7 +438,7 @@ function detailSection(card: RepoCard, ctx: SubmetricContext): Block[] {
  * в PDF переносится (`breakable` ячеек таблицы).
  */
 function ownershipBlocks(cat: CardCategory): Block[] {
-  const view = ownershipView(cat);
+  const view = ownershipView(cat, fmtDate);
   if (!view) return [];
   return [
     { kind: "paragraph", tone: "caption", lines: [line(view.caption)] },

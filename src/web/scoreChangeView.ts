@@ -40,12 +40,6 @@ export function categoryTitle(key: string): string {
   return CATEGORY_TITLES_RU[key] ?? key;
 }
 
-/** Вклад строки категории: в индексе — к индексу, CI/CD и Безопасность — к Repo Health Score. */
-export function categoryContribution(c: ScoreCategoryChange): { value: number; full: boolean } | null {
-  if (c.index !== null) return { value: c.index, full: false };
-  if (c.full !== null) return { value: c.full, full: true };
-  return null;
-}
 
 /**
  * Название подметрики внутри фразы: без уточнения в скобках («README (наличие
@@ -351,10 +345,16 @@ export function changeLine(point: HistoryPoint, fullOpen: boolean): string | nul
   if (c === null || !pointChanged(point, fullOpen)) return null;
   const special = specialText(c);
   if (special !== null) return special;
+  // индекс не сдвинулся, а Repo Health Score — да: объясняем вклады полного показателя
+  // (иначе у треугольника ▼1 рядом с Repo Health Score не было бы причины)
+  const d = pointDeltas(point, fullOpen);
+  const byFull = d.index === 0 && d.full !== null && d.full !== 0;
   const parts = c.categories.flatMap((cat) => {
-    const contrib = categoryContribution(cat);
-    if (contrib === null || contrib.value === 0) return [];
-    const head = `${categoryTitle(cat.key)} ${fmtDelta(contrib.value)}${contrib.full ? " к Repo Health Score" : ""}`;
+    // категория индекса — вклад в индекс; CI/CD и Безопасность — в Repo Health Score
+    const toFull = byFull || cat.index === null;
+    const value = toFull ? cat.full : cat.index;
+    if (value === null || value === 0) return [];
+    const head = `${categoryTitle(cat.key)} ${fmtDelta(value)}${toFull ? " к Repo Health Score" : ""}`;
     const why = categoryPhrase(cat);
     return [why === null ? head : `${head}: ${why}`];
   });
@@ -384,18 +384,54 @@ export function dayOptions(points: HistoryPoint[]): DayOption[] {
 }
 
 /**
- * Пара по умолчанию: от конца дня перед последним изменением оценки до
- * последнего анализа — панель сразу отвечает «почему оценка сейчас такая».
- * null — оценка не менялась ни разу или день всего один.
+ * Пара по умолчанию — «почему оценка сейчас такая»: до последнего анализа от конца
+ * последнего дня, когда оценка была другой. Конец просто предыдущего дня не годится:
+ * оценка могла уйти и вернуться (67 → 64 → 67), и пара показала бы «67 → 67». Если
+ * такого дня нет (оценка менялась только внутри первого дня) — от анализа прямо
+ * перед последним изменением; поле дня покажет его (`pinDays`). null — оценка не
+ * менялась ни разу или день всего один.
  */
 export function defaultPair(points: HistoryPoint[], fullOpen: boolean): { from: number; to: number } | null {
-  // панель открывается на индексе — берем последнее изменение индекса; полный
-  // показатель — только если индекс не менялся ни разу
   const changed = lastChange(points, false) ?? lastChange(points, fullOpen);
   const days = dayOptions(points);
-  if (changed === null || changed.finishedAt === null || days.length < 2) return null;
-  const changeDay = days.findIndex((d) => d.day === fmtDate(changed.finishedAt));
-  return { from: days[Math.max(0, changeDay - 1)]!.scanId, to: days[days.length - 1]!.scanId };
+  if (changed === null || changed.change === null || days.length < 2) return null;
+  const metric = defaultMetric(points, fullOpen);
+  const shownOf = (scanId: number): number | null => {
+    const p = points.find((x) => x.scanId === scanId);
+    const v = metric === "full" ? p?.repoHealthScore : p?.healthcraftIndex;
+    return v === null || v === undefined ? null : roundScore(v);
+  };
+  const to = days[days.length - 1]!.scanId;
+  const now = shownOf(to);
+  for (let i = days.length - 2; i >= 0; i--) {
+    const v = shownOf(days[i]!.scanId);
+    if (v !== null && v !== now) return { from: days[i]!.scanId, to };
+  }
+  return changed.change.fromScanId === to ? null : { from: changed.change.fromScanId, to };
+}
+
+/**
+ * Показатель, на котором панель открывается: индекс, а зрителю с правами —
+ * Repo Health Score, если индекс не менялся ни разу (иначе панель открылась бы
+ * пустой «46 → 46»).
+ */
+export function defaultMetric(points: HistoryPoint[], fullOpen: boolean): BridgeMetric {
+  return fullOpen && lastChange(points, false) === null ? "full" : "index";
+}
+
+/**
+ * Дни для полей выбора с выбранными анализами на месте своего дня: пара по
+ * умолчанию может начинаться не с конца дня, а новый анализ сегодня сдвигает
+ * «конец дня» — без подмены выбранного значения не было бы в списке, и поле
+ * опустело бы.
+ */
+export function pinDays(points: HistoryPoint[], pinned: number[]): DayOption[] {
+  const dayOf = (scanId: number): string | null => {
+    const p = points.find((x) => x.scanId === scanId);
+    return p?.finishedAt ? fmtDate(p.finishedAt) : null;
+  };
+  const pins = new Map(pinned.flatMap((id) => (dayOf(id) === null ? [] : [[dayOf(id)!, id] as const])));
+  return dayOptions(points).map((d) => (pins.has(d.day) ? { ...d, scanId: pins.get(d.day)! } : d));
 }
 
 export interface BridgeStep {

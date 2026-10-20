@@ -59,7 +59,7 @@ import {
   type QuotaCounter,
 } from "./format";
 import { announceJobStarted, announceJobsChanged, useAnalysisFinished, useSession } from "./session";
-import { bridgeOf, categoryDetails, categoryPhrase, categoryTitle, changeLine, dayOptions, defaultPair, fmtDelta, pointDeltas, specialText, type Bridge, type BridgeMetric } from "./scoreChangeView";
+import { bridgeOf, categoryDetails, categoryPhrase, categoryTitle, changeLine, defaultMetric, defaultPair, pinDays, fmtDelta, pointDeltas, specialText, type Bridge, type BridgeMetric } from "./scoreChangeView";
 import { BADGE_CHIPS, SLOT_EMPTY, aiNotesCaption, badgeCode, historyByTime, historyDomain, scoreHistoryView, type BadgeChip, type BadgeFormat } from "./slots";
 import type { AiNoteHistoryItem, AiNotesResponse, HistoryPoint, HistoryResponse, ScoreChange } from "../summary/history-contract";
 import { evolutionTooEarly } from "../summary/history-contract";
@@ -1251,7 +1251,8 @@ function ScoreBridge({ points, fullOpen, org, repo }: { points: HistoryPoint[]; 
   // выбранный анализ мог пропасть из истории (смена модели) — тогда пара по умолчанию
   const known = (id: number): boolean => points.some((p) => p.scanId === id);
   const pair = picked !== null && known(picked.from) && known(picked.to) ? picked : fallback;
-  const [metric, setMetric] = useState<BridgeMetric>("index");
+  // индекс ни разу не менялся — зритель с правами сразу видит Repo Health Score
+  const [metric, setMetric] = useState<BridgeMetric>(() => defaultMetric(points, fullOpen));
   if (pair === null) return null;
   return (
     <div className="rh-scorediff" role="group" aria-labelledby="rh-scorediff-title" data-slot="scoreChange">
@@ -1260,21 +1261,27 @@ function ScoreBridge({ points, fullOpen, org, repo }: { points: HistoryPoint[]; 
   );
 }
 
-/** Разница двух несоседних анализов с сервера; url null — запрос не нужен (разница уже в истории). */
-function useDiff(url: string | null): { kind: "idle" | "loading" } | { kind: "ok"; data: ScoreChange } | { kind: "error"; message: string } {
-  const [state, setState] = useState<{ kind: "idle" | "loading" } | { kind: "ok"; data: ScoreChange } | { kind: "error"; message: string }>({ kind: "idle" });
+type DiffState = { kind: "idle" | "loading" } | { kind: "ok"; data: ScoreChange } | { kind: "error"; message: string };
+
+/**
+ * Разница двух несоседних анализов с сервера; url null — запрос не нужен (разница
+ * уже в истории). Результат помнит свой адрес: при смене пары числа прошлой не
+ * мелькают до эффекта — пока ответа на новый адрес нет, это «загрузка».
+ */
+function useDiff(url: string | null): DiffState {
+  const [state, setState] = useState<{ url: string; value: DiffState } | null>(null);
   useEffect(() => {
     if (url === null) return;
     const ctrl = new AbortController();
-    setState({ kind: "loading" });
     fetchJson<ScoreChange>(url, ctrl.signal)
-      .then((data) => setState({ kind: "ok", data }))
+      .then((data) => setState({ url, value: { kind: "ok", data } }))
       .catch((e: unknown) => {
-        if (!ctrl.signal.aborted) setState({ kind: "error", message: e instanceof Error ? e.message : String(e) });
+        if (!ctrl.signal.aborted) setState({ url, value: { kind: "error", message: e instanceof Error ? e.message : String(e) } });
       });
     return () => ctrl.abort();
   }, [url]);
-  return url === null ? { kind: "idle" } : state;
+  if (url === null) return { kind: "idle" };
+  return state !== null && state.url === url ? state.value : { kind: "loading" };
 }
 
 function ScoreBridgeBody({
@@ -1302,7 +1309,7 @@ function ScoreBridgeBody({
   const state = useDiff(adjacent !== null ? null : `${apiBase(org, repo)}/history/diff?from=${pair.from}&to=${pair.to}`);
   const change = adjacent ?? (state.kind === "ok" ? state.data : null);
   // в полях — только дни: один пункт на день, его последний анализ; новые сверху
-  const days = dayOptions(points);
+  const days = pinDays(points, [pair.from, pair.to]);
   const dayAt = (scanId: number): number => days.findIndex((d) => d.scanId === scanId);
   const options = (lo: number, hi: number) =>
     days

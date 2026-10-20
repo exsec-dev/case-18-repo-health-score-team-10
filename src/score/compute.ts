@@ -323,19 +323,22 @@ export interface EffectiveFacts {
 
 /**
  * AppSec ни разу не проверял репозиторий: последний ответ AppSec до скана
- * `uptoScanId` включительно, дошедший до AppSec (не «нет прав»), — «проверка не
- * запускалась». Одно правило для расчета (effectiveFacts) и карточки; вызывать,
- * только когда ok-находок у репозитория нет.
+ * `uptoScanId` включительно, дошедший до AppSec (не «нет прав»), – «проверка не
+ * запускалась». Ok-находки после такого ответа (любого скана, в том числе
+ * `bad` или без `tree.stats`) его отменяют: проверка уже была. Одно правило для
+ * расчета (effectiveFacts) и карточки – карточка зовет его с потолком
+ * `Number.MAX_SAFE_INTEGER`, когда не нашла скан-источник Безопасности.
  */
 export function appsecNeverScannedAt(db: Database, repoId: number, uptoScanId: number): boolean {
   const rows = db
     .query(
-      `SELECT f.value FROM facts f JOIN scans s ON s.id = f.scan_id
-       WHERE f.key = 'appsec.findings' AND f.status = 'no-data' AND s.repo_id = ? AND f.scan_id <= ?
+      `SELECT f.value, f.status FROM facts f JOIN scans s ON s.id = f.scan_id
+       WHERE f.key = 'appsec.findings' AND f.status IN ('ok', 'no-data') AND s.repo_id = ? AND f.scan_id <= ?
        ORDER BY f.scan_id DESC LIMIT 20`,
     )
-    .all(repoId, uptoScanId) as { value: string }[];
+    .all(repoId, uptoScanId) as { value: string; status: string }[];
   for (const r of rows) {
+    if (r.status === "ok") return false;
     const v = parseFactValue(r.value) as { reason?: unknown; detail?: unknown } | null;
     if (v?.reason === "access") continue;
     return v?.reason === "no-scan" && v.detail === APPSEC_NEVER_SCANNED;
@@ -894,6 +897,8 @@ export interface DepsSubmetricValue {
   unmatched: number;
   /** пакеты экосистем вне прочитанных lock-файлов — показываются, не взвешиваются */
   outside: number;
+  /** пакеты, чьей версии из SCA в lock-файле уже нет (обновлены), — вне списка и суммы; нет поля — 0 */
+  updated?: number;
   weighted: number;
   managers: string[];
   graph_truncated: boolean;
@@ -925,6 +930,7 @@ function scoreDeps(appsec: AppsecFindingsValue, lockgraph: LockGraphFactValue | 
     transitive: report.transitive,
     unmatched: report.unmatched,
     outside: report.outside,
+    ...(report.updated > 0 ? { updated: report.updated } : {}),
     weighted: report.weighted,
     managers: report.managers,
     graph_truncated: report.graph_truncated,
