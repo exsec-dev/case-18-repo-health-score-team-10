@@ -20,6 +20,10 @@ x-service: &service
   env_file:
     - path: ${HC_DIR:-/srv/healthcraft}/.env
       required: false
+  # процесс работает от bun (uid 1000) без root и без capabilities: git, bun и SQLite
+  # их не требуют; повышение привилегий внутри контейнера запрещено
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
 
 services:
   web:
@@ -62,12 +66,31 @@ services:
       - ${HC_DIR:-/srv/healthcraft}/tmp/rating:/tmp/clones
     # фон уступает процессор сайту и пользовательским заявкам (дефолт – 1024)
     cpu_shares: 256
+    # та же проверка живости, что у web, на порту роли
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://127.0.0.1:8419/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
 
   caddy:
     image: caddy:2.10
     restart: unless-stopped
     depends_on:
       - web
+    # единственная нужная capability – привязка к портам 80/443
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    # живость процесса Caddy: его admin API на localhost:2019 внутри контейнера
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+    # порты опубликованы на всех интерфейсах намеренно: это единственный контейнер наружу
     ports:
       # на стенде 80/443; локально, если 80 занят, – HTTP_PORT=8080
       - "${HTTP_PORT:-80}:80"

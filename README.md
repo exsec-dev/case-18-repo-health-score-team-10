@@ -180,6 +180,10 @@ bun scripts/scan.ts <org>/<repo>
 
 Оба процесса работают с одной SQLite на общем томе. Каталог данных задает `HC_DIR`
 (по умолчанию `/srv/healthcraft`): там `.env`, `data/` (БД) и `tmp/` (временные клоны).
+Контейнеры сервиса работают от пользователя `bun` (uid 1000) без root и без capabilities,
+поэтому `data/` и `tmp/` на хосте должны принадлежать uid 1000: `deploy/deploy.sh` делает это
+сам, в Linux локально выполните `sudo chown -R 1000:1000 .stand/data .stand/tmp` после
+первого запуска (Docker Desktop в macOS и Windows права хоста не проверяет).
 
 ```bash
 mkdir -p .stand && cp .env.example .stand/.env    # вписать токен; без SITE_ADDRESS прокси работает по HTTP
@@ -194,19 +198,58 @@ curl http://localhost:8080/api/health             # через нескольк�
 docker compose --env-file .stand/.env -f deploy/compose.yaml down
 ```
 
-### Проверки
+### Сборка
 
-Те же команды выполняет CI SourceCraft на каждый push и pull request –
-[`.sourcecraft/ci.yaml`](.sourcecraft/ci.yaml):
+Отдельного шага сборки нет: Bun собирает интерфейс (React и Gravity UI) из импорта
+`src/web/index.html` при старте сервера, поэтому `bun start` поднимает сразу и API, и интерфейс.
+Режим сборки задает `NODE_ENV`:
+
+| Команда | Что собирается |
+|---|---|
+| `bun start` | dev-сборка с HMR; страницы `/docs` перечитываются с диска при каждом запросе |
+| `NODE_ENV=production bun start` | минифицированная сборка без HMR; документация читается один раз на старте. Так работает образ контейнера |
+
+Проверка типов – `tsc --noEmit` по `src/`, `scripts/` и `tests/` (см. [`tsconfig.json`](tsconfig.json)),
+ошибок быть не должно:
 
 ```bash
 bun run tsc
-bun test --timeout 30000
+```
+
+Образ контейнера собирается из корня репозитория по [`Dockerfile`](Dockerfile): база `oven/bun:1.4.2`
+плюс git, зависимости по lock-файлу без dev-пакетов, в образ попадают `src/`, `prompts/` и `docs/guide/`.
+Раздел «В контейнерах» собирает его через `docker compose … --build`; вручную:
+
+```bash
+docker build -t healthcraft .
+```
+
+### Тесты
+
+Тесты лежат в `tests/*.test.ts` и запускаются `bun test`. Те же команды выполняет CI SourceCraft на
+каждый push и pull request – [`.sourcecraft/ci.yaml`](.sourcecraft/ci.yaml):
+
+```bash
+bun run tsc
+bun test --timeout 30000                 # все тесты
+bun test tests/score.test.ts             # один файл
+bun test -t "killActiveClones"           # тесты по имени
+sh scripts/ci-test.sh                    # как в CI: SQLite без fsync, временные БД в /dev/shm
 ```
 
 Тесты работают на временных БД и не обращаются к внешним сервисам: SourceCraft, Яндекс ID и
-языковая модель подменяются локальными моками. Тестам нужны git, символьные ссылки и `setsid`,
-поэтому запускайте их в Linux или WSL.
+языковая модель подменяются локальными моками, токен в `.env` не нужен. Лимит 30 с на тест
+задан потому, что на медленном диске тесты с временной БД идут 4–7 с и дефолтных 5 с не хватает.
+
+Тестам нужны git, символьные ссылки и `setsid`, поэтому запускайте их в Linux или WSL. В Windows
+около десятка тестов падает: группы `setsid` у клонов, символьные ссылки, остановка сервера по SIGTERM
+(остальные 2000 проходят). В macOS команды `setsid` нет.
+Золотые отчеты в `tests/fixtures/report/` сравниваются побайтно; после осознанного изменения
+отчета перегенерируйте их и просмотрите глазами:
+
+```bash
+bun scripts/report-goldens.ts
+```
 
 ## Переменные окружения
 
@@ -342,6 +385,7 @@ bun test --timeout 30000
 | [docs/guide/](docs/guide/) | те же страницы в Markdown, порядок – [toc.md](docs/guide/toc.md): начало работы, руководство пользователя, методика оценки, устройство сервиса, развертывание, ограничения |
 | [docs/guide/method/](docs/guide/method/) | методика оценки: формула и веса, метрики, «нет данных», рекомендации, устойчивость к накрутке; журнал версий модели – [docs/methodology.md](docs/methodology.md) |
 | [.env.example](.env.example) | все переменные окружения с пояснениями |
+| [CONTRIBUTING.md](CONTRIBUTING.md), [CODEOWNERS](CODEOWNERS) | как сообщить об ошибке и предложить изменение, проверки и стиль кода; кто отвечает за каталоги и проверяет изменения |
 | [deploy/compose.yaml](deploy/compose.yaml), [deploy/Caddyfile](deploy/Caddyfile) | топология стенда и настройки прокси |
 | [docs/api-spec/](docs/api-spec/) | спецификации REST API SourceCraft и AppSec API, по которым работают сборщики |
 | [docs/lct-case.md](docs/lct-case.md), [docs/ТЗ-sourcecraft.pdf](docs/ТЗ-sourcecraft.pdf) | описание кейса и техническое задание |
