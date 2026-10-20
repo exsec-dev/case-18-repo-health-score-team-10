@@ -10,6 +10,10 @@ import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } f
 /** Префикс шифротекста на ключе HKDF; без префикса – старый ключ sha256. */
 export const PAT_V2_PREFIX = "v2:";
 
+const IV_BYTES = 12;
+/** Длина тега GCM задана явно: укороченный тег ослабляет проверку подлинности. */
+const GCM_TAG_BYTES = 16;
+
 function deriveKey(appSecret: string): Buffer {
   return Buffer.from(hkdfSync("sha256", appSecret, "repo-health", "pat", 32));
 }
@@ -20,8 +24,8 @@ function legacyKey(appSecret: string): Buffer {
 }
 
 function encryptWith(key: Buffer, pat: string): string {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  const iv = randomBytes(IV_BYTES);
+  const cipher = createCipheriv("aes-256-gcm", key, iv, { authTagLength: GCM_TAG_BYTES });
   const enc = Buffer.concat([cipher.update(pat, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return Buffer.concat([iv, enc, tag]).toString("base64");
@@ -30,11 +34,11 @@ function encryptWith(key: Buffer, pat: string): string {
 function decryptWith(key: Buffer, stored: string): string | null {
   try {
     const raw = Buffer.from(stored, "base64");
-    if (raw.length <= 12 + 16) return null;
-    const iv = raw.subarray(0, 12);
-    const tag = raw.subarray(raw.length - 16);
-    const enc = raw.subarray(12, raw.length - 16);
-    const decipher = createDecipheriv("aes-256-gcm", key, iv);
+    if (raw.length <= IV_BYTES + GCM_TAG_BYTES) return null;
+    const iv = raw.subarray(0, IV_BYTES);
+    const tag = raw.subarray(raw.length - GCM_TAG_BYTES);
+    const enc = raw.subarray(IV_BYTES, raw.length - GCM_TAG_BYTES);
+    const decipher = createDecipheriv("aes-256-gcm", key, iv, { authTagLength: GCM_TAG_BYTES });
     decipher.setAuthTag(tag);
     const dec = Buffer.concat([decipher.update(enc), decipher.final()]);
     return dec.toString("utf8");

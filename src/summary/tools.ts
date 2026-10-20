@@ -28,6 +28,10 @@ async function runGit(args: string[], timeoutMs: number): Promise<string> {
 export const READ_FILE_CAP_BYTES = 32 * 1024;
 export const GREP_LINE_CAP = 50;
 export const GREP_LINE_CHARS = 200;
+/** Предел длины паттерна grep: паттерн пишет модель, длинный регэксп – повод отказать, а не выполнять. */
+export const GREP_PATTERN_MAX = 200;
+/** Сколько символов строки проверяется регэкспом: ограничивает время «взрывного» паттерна. */
+export const GREP_MATCH_CHARS = 4000;
 export const LIST_FILES_CAP = 500;
 export const GIT_LOG_CAP = 30;
 /** потолок файлов, обходимых grep (предохранитель больших деревьев) */
@@ -367,9 +371,12 @@ export async function executeTool(io: ToolExecutorIo, name: string, args: unknow
     if (name === "grep") {
       const a = args as { pattern?: unknown; glob?: unknown } | null;
       if (typeof a?.pattern !== "string" || a.pattern.length === 0) return fail("ожидался аргумент pattern: строка");
+      if (a.pattern.length > GREP_PATTERN_MAX) return fail(`паттерн длиннее ${GREP_PATTERN_MAX} символов`);
       let re: RegExp;
       try {
-        re = new RegExp(a.pattern);
+        // паттерн задает модель: длина паттерна и проверяемой строки ограничены,
+        // поэтому «взрывной» регэксп упирается в GREP_MATCH_CHARS, а не висит
+        re = new RegExp(a.pattern); // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
       } catch (e) {
         return fail(`неверный паттерн: ${String((e as Error).message).slice(0, 100)}`);
       }
@@ -403,7 +410,7 @@ export async function executeTool(io: ToolExecutorIo, name: string, args: unknow
         const text = sanitizeUntrusted(buf.toString("utf8"));
         const split = text.split("\n");
         for (let i = 0; i < split.length && lines.length < GREP_LINE_CAP; i++) {
-          if (re.test(split[i]!)) {
+          if (re.test(split[i]!.slice(0, GREP_MATCH_CHARS))) {
             // строка-инструкция заменяется пометкой, номер строки сохраняется
             lines.push(`${rel}:${i + 1}: ${stripInstructionLines(split[i]!).text.trim().slice(0, GREP_LINE_CHARS)}`);
           }

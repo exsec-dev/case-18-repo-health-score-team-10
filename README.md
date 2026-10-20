@@ -180,6 +180,10 @@ bun scripts/scan.ts <org>/<repo>
 
 Оба процесса работают с одной SQLite на общем томе. Каталог данных задает `HC_DIR`
 (по умолчанию `/srv/healthcraft`): там `.env`, `data/` (БД) и `tmp/` (временные клоны).
+Контейнеры сервиса работают от пользователя `bun` (uid 1000) без root и без capabilities,
+поэтому `data/` и `tmp/` на хосте должны принадлежать uid 1000: `deploy/deploy.sh` делает это
+сам, в Linux локально выполните `sudo chown -R 1000:1000 .stand/data .stand/tmp` после
+первого запуска (Docker Desktop в macOS и Windows права хоста не проверяет).
 
 ```bash
 mkdir -p .stand && cp .env.example .stand/.env    # вписать токен; без SITE_ADDRESS прокси работает по HTTP

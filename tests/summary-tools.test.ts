@@ -2,7 +2,10 @@
 // security получает ТОЛЬКО calculate (файловые инструменты ей запрещены:
 // безопасность — только данные AppSec, своего сканирования нет).
 import { describe, expect, test } from "bun:test";
-import { evaluateArithmetic, makeCalculatorExecutor } from "../src/summary/tools";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { evaluateArithmetic, GREP_MATCH_CHARS, GREP_PATTERN_MAX, makeCalculatorExecutor, makeToolExecutor } from "../src/summary/tools";
 
 describe("evaluateArithmetic: безопасная арифметика", () => {
   test("четыре действия, скобки, унарный минус, запятая-разделитель", () => {
@@ -39,5 +42,23 @@ describe("makeCalculatorExecutor: только calculate, без доступа 
     expect(bad.ok).toBe(false);
     expect(ex.specs.map((s) => s.function.name)).toEqual(["calculate"]);
     expect(ex.budgetLeft()).toBeLessThan(6);
+  });
+});
+
+// Паттерн grep задает модель: длина паттерна и проверяемой строки ограничены (ReDoS)
+describe("grep: границы паттерна", () => {
+  test("паттерн длиннее предела отклоняется до компиляции; длинная строка проверяется только по началу", async () => {
+    const root = mkdtempSync(join(tmpdir(), "rh-grep-bounds-"));
+    try {
+      writeFileSync(join(root, "a.txt"), `${"a".repeat(GREP_MATCH_CHARS)}NEEDLE\nNEEDLE early\n`);
+      const ex = makeToolExecutor({ root, gitDir: null }, 6);
+      const long = JSON.parse(await ex.execute("grep", { pattern: "a".repeat(GREP_PATTERN_MAX + 1) })) as { ok: boolean; error?: string };
+      expect(long.ok).toBe(false);
+      const hits = JSON.parse(await ex.execute("grep", { pattern: "NEEDLE" })) as { matches: number; lines: string[] };
+      expect(hits.matches).toBe(1);
+      expect(hits.lines[0]).toContain("a.txt:2:");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

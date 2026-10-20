@@ -12,7 +12,8 @@ import { buildSearchIndex, queryTerms, searchDocs, type SearchHit } from "../doc
 /** Подсветка основ запроса во фрагменте. */
 function highlight(text: string, terms: string[]): ReactNode[] {
   if (terms.length === 0) return [text];
-  const re = new RegExp(`(${terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "gi");
+  // основы запроса экранированы: в регэксп попадают только литералы
+  const re = new RegExp(`(${terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "gi"); // nosemgrep: javascript.lang.security.audit.detect-non-literal-regexp.detect-non-literal-regexp
   return text.split(re).map((part, i) => (i % 2 === 1 ? <mark key={i}>{part}</mark> : part));
 }
 

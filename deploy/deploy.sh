@@ -26,6 +26,13 @@ ssh_stand() { ssh -i "$KEY" -o BatchMode=yes "$HOST" "$@"; }
 echo "==> код $REV -> $HOST:$DIR/app"
 git archive --format=tar HEAD | ssh_stand "set -e
   mkdir -p '$DIR/data' '$DIR/tmp/web' '$DIR/tmp/rating'
+  # контейнеры работают от uid 1000 (bun) без root: тома должны принадлежать ему.
+  # Без sudo без пароля каталоги остаются как есть – вход контейнера скажет, если они недоступны
+  for d in '$DIR/data' '$DIR/tmp/web' '$DIR/tmp/rating'; do
+    if [ \"\$(stat -c %u \"\$d\")\" != 1000 ]; then
+      if [ \"\$(id -u)\" = 0 ]; then chown -R 1000:1000 \"\$d\"; else sudo -n chown -R 1000:1000 \"\$d\" || echo \"внимание: \$d не принадлежит uid 1000\" >&2; fi
+    fi
+  done
   rm -rf '$DIR/app.new' && mkdir -p '$DIR/app.new'
   tar -x -C '$DIR/app.new'
   echo '$REV' > '$DIR/app.new/REVISION'
