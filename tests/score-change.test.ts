@@ -1,7 +1,7 @@
 // «Почему изменилась оценка»: разбивка разницы двух анализов по категориям
 // (summary/score-change) и ее слова на карточке (web/scoreChangeView).
 import { describe, expect, test } from "bun:test";
-import { apportion, decompose, scoreChange, type ScoreSnapshot } from "../src/summary/score-change";
+import { apportion, decompose, scoreChange, type ScoreCategoryChange, type ScoreSnapshot, type ScoreSubChange, type ScoreSubFacts } from "../src/summary/score-change";
 import { INDEX_WEIGHTS } from "../src/score/model";
 import { bridgeOf, categoryPhrase, changeLine, dayOptions, defaultPair, subInline } from "../src/web/scoreChangeView";
 import type { HistoryPoint } from "../src/summary/history-contract";
@@ -160,48 +160,65 @@ describe("слова на карточке", () => {
   });
 
   // заготовка категории для фраз: ключ, баллы и показатели
-  const cat = (key: "documentation" | "activity" | "issues" | "code" | "security", subs: { key: string; title?: string; from: string; to: string; better: boolean }[], from: number | null = 40, to: number | null = 30) => ({
+  type SubIn = { key: string; title?: string; from: string; to: string; better: boolean } & Partial<Pick<ScoreSubChange, "counted" | "was" | "now">>;
+  const cat = (key: CategoryKey, subs: SubIn[], from: number | null = 40, to: number | null = 30, tracker?: ScoreCategoryChange["tracker"]): ScoreCategoryChange => ({
     key,
     from,
     to,
-    kind: (from === null ? "appeared" : to === null ? "gone" : "changed") as "changed" | "appeared" | "gone",
+    kind: from === null ? "appeared" : to === null ? "gone" : "changed",
     index: -3,
     full: null,
     subs: subs.map((s) => ({ title: s.key, ...s })),
+    ...(tracker !== undefined ? { tracker } : {}),
   });
+  // поправка сырыми полями: выборка задач, дни, объем кода
+  type Adj = NonNullable<ScoreSubFacts["adjustment"]>;
+  const adj = (key: string, was: Adj | null, now: Adj | null, better = false): SubIn => ({ key: `adjustment.${key}`, from: "", to: "", better, was: { adjustment: was }, now: { adjustment: now } });
 
-  test("задачи с баллом 0 — словами, а не «вошла с баллом 0»", () => {
-    expect(categoryPhrase(cat("issues", [], null, 0))).toBe("появились данные – задачи не ведутся или ни одна не закрыта");
+  test("задачи с баллом 0 — словами: не ведутся или ни одна не закрыта", () => {
+    expect(categoryPhrase(cat("issues", [], null, 0, "unused"))).toBe("появились данные – задачи не ведутся");
+    expect(categoryPhrase(cat("issues", [], null, 0, "none-closed"))).toBe("появились данные – ни одна задача не закрыта");
     expect(categoryPhrase(cat("documentation", [], null, 0))).toBe("появились данные – категория учтена в оценке с баллом 0");
+    expect(categoryPhrase(cat("issues", [], 12, 0, "none-closed"))).toBe("ни одна задача не закрыта");
+    // признака нет — оба случая одной фразой
     expect(categoryPhrase(cat("issues", [], 12, 0))).toBe("задачи не ведутся или ни одна не закрыта");
     expect(categoryPhrase(cat("code", [], 60, null))).toBe("данных больше нет – категория не учитывается в оценке");
   });
 
-  test("малая выборка задач: смысл поправки, без повтора рядом", () => {
+  test("признак задач считается по снимку: трекер пуст или не закрыта ни одна", () => {
+    const unused = snap(2, { documentation: 50, activity: 50, issues: 0, code: 50 });
+    unused.categories.issues!.submetrics = { tracker_unused: { score: 0, value: { open: 0, closed: 0 }, note: "tracker not maintained — category minimum (Q14)" } };
+    expect(scoreChange(snap(1, { documentation: 50, activity: 50, issues: null, code: 50 }), unused, false).categories.find((c) => c.key === "issues")?.tracker).toBe("unused");
+    const none = snap(2, { documentation: 50, activity: 50, issues: 6, code: 50 });
+    Object.assign(none.categories.issues!, { adjustment: { kind: "small-sample", n: 0, full: 10, raw: 6.7, floor: 0 } });
+    expect(scoreChange(snap(1, { documentation: 50, activity: 50, issues: null, code: 50 }), none, false).categories.find((c) => c.key === "issues")?.tracker).toBe("none-closed");
+  });
+
+  test("малая выборка задач: смысл поправки по сырым полям, без повтора рядом", () => {
     const worse = cat("issues", [
       { key: "close_days", from: "1,2 дня", to: "4 дня", better: false },
       { key: "resolution", from: "80%", to: "60%", better: false },
-      { key: "adjustment.small-sample", from: "достаточно", to: "3 из 10", better: false },
+      adj("small-sample", null, { n: 3, full: 10 }),
     ]);
     expect(categoryPhrase(worse)).toBe("задачи закрывают медленнее, доля решенных задач ниже, закрытых задач мало для надежной оценки");
     // ни одна задача не закрыта — время закрытия и доля решенных этим уже сказаны
     const none = cat("issues", [
-      { key: "adjustment.small-sample", from: "2 из 10", to: "0 из 10", better: false },
+      adj("small-sample", { n: 2, full: 10 }, { n: 0, full: 10 }),
       { key: "close_days", from: "0 дней", to: "ни одна задача не закрыта", better: false },
       { key: "resolution", from: "67%", to: "0%", better: false },
     ]);
     expect(categoryPhrase(none)).toBe("ни одна задача не закрыта");
-    expect(categoryPhrase(cat("issues", [{ key: "adjustment.small-sample", from: "2 из 10", to: "5 из 10", better: false }]))).toBe("закрытых задач стало больше");
-    expect(categoryPhrase(cat("issues", [{ key: "adjustment.small-sample", from: "5 из 10", to: "достаточно", better: true }]))).toBe("закрытых задач достаточно для надежной оценки");
-    expect(categoryPhrase(cat("issues", [{ key: "adjustment.small-sample", from: "8 из 10", to: "2 из 3 дней", better: false }]))).toBe("задачи закрывали только в два разных дня");
+    expect(categoryPhrase(cat("issues", [adj("small-sample", { n: 2, full: 10 }, { n: 5, full: 10 })]))).toBe("закрытых задач стало больше");
+    expect(categoryPhrase(cat("issues", [adj("small-sample", { n: 5, full: 10 }, null, true)]))).toBe("закрытых задач достаточно для надежной оценки");
+    expect(categoryPhrase(cat("issues", [adj("small-sample", { n: 8, full: 10 }, { n: 8, full: 10, days: 2 })]))).toBe("задачи закрывали только в два разных дня");
   });
 
   test("малый код: поправка появилась без смены объема — «кода мало», а не «кода стало меньше»", () => {
-    const sc = (from: string, to: string, better: boolean) => categoryPhrase(cat("code", [{ key: "adjustment.small-code", from, to, better }]));
-    expect(sc("достаточно", "160 из 200 строк", false)).toBe("кода мало для надежной оценки");
-    expect(sc("161 из 200 строк", "93 из 200 строк", false)).toBe("кода стало меньше");
-    expect(sc("43 из 200 строк", "46 из 200 строк", true)).toBe("кода стало больше");
-    expect(sc("150 из 200 строк", "достаточно", true)).toBe("кода достаточно для надежной оценки");
+    const sc = (was: Adj | null, now: Adj | null, better: boolean) => categoryPhrase(cat("code", [adj("small-code", was, now, better)]));
+    expect(sc(null, { loc: 160, full: 200 }, false)).toBe("кода мало для надежной оценки");
+    expect(sc({ loc: 161, full: 200 }, { loc: 93, full: 200 }, false)).toBe("кода стало меньше");
+    expect(sc({ loc: 43, full: 200 }, { loc: 46, full: 200 }, true)).toBe("кода стало больше");
+    expect(sc({ loc: 150, full: 200 }, null, true)).toBe("кода достаточно для надежной оценки");
   });
 
   test("показатели без названных изменений: мелкий сдвиг и смена набора показателей", () => {
@@ -209,25 +226,94 @@ describe("слова на карточке", () => {
     expect(categoryPhrase(cat("activity", [], 22.1, 17.6))).toBe("изменился набор учтенных показателей");
   });
 
+  test("показатель вошел в расчет или выпал из него — по названию, без общей фразы", () => {
+    const prev = snap(1, { documentation: 50, activity: 91.4, issues: 40, code: 50 });
+    const next = snap(2, { documentation: 50, activity: 76.6, issues: 50, code: 50 });
+    prev.categories.activity!.submetrics = { fresh: { score: 1, value: 1 }, pulls_90d: { score: null, value: null }, releases_12m: { score: null, value: null } };
+    next.categories.activity!.submetrics = { fresh: { score: 1, value: 1 }, pulls_90d: { score: 0.2, value: 0 }, releases_12m: { score: 0.2, value: 0 } };
+    prev.categories.issues!.submetrics = { stale: { score: 0.4, value: 0.5 }, first_resp: { score: 0.1, value: 600 } };
+    next.categories.issues!.submetrics = { stale: { score: 0.4, value: 0.5 }, first_resp: { score: null, value: null } };
+    const c = scoreChange(prev, next, false);
+    const activity = c.categories.find((x) => x.key === "activity")!;
+    expect(activity.subs.map((s) => [s.key, s.counted, s.from, s.to])).toEqual([
+      ["pulls_90d", "entered", "вне расчета", "0"],
+      ["releases_12m", "entered", "вне расчета", "0"],
+    ]);
+    expect(categoryPhrase(activity)).toBe("в расчет вошли предложения изменений и релизы");
+    expect(categoryPhrase(c.categories.find((x) => x.key === "issues")!)).toBe("время первого ответа больше не учитывается");
+    // один показатель — род глагола по имени
+    expect(categoryPhrase(cat("code", [{ key: "old_share", from: "вне расчета", to: "10%", better: true, counted: "entered" }]))).toBe("в расчет вошла доля старых TODO");
+    expect(categoryPhrase(cat("issues", [{ key: "first_resp", from: "вне расчета", to: "720 ч", better: false, counted: "entered" }]))).toBe("в расчет вошло время первого ответа");
+  });
+
+  test("задачи начали вести: фраза трекера первой, вошедшие показатели ею сказаны", () => {
+    const prev = snap(1, { documentation: 50, activity: 50, issues: 0, code: 50 });
+    const next = snap(2, { documentation: 50, activity: 50, issues: 8.65, code: 50 });
+    prev.categories.issues!.submetrics = { tracker_unused: { score: 0, value: { open: 0, closed: 0 }, note: "tracker not maintained — category minimum (Q14)" } };
+    next.categories.issues!.submetrics = { stale: { score: 1, value: 0 }, close_days: { score: 1, value: 0.5 }, resolution: { score: 1, value: 1 } };
+    Object.assign(next.categories.issues!, { adjustment: { kind: "small-sample", n: 1, full: 10, raw: 86.5, floor: 0 } });
+    const issues = scoreChange(prev, next, false).categories.find((x) => x.key === "issues")!;
+    expect(issues.subs[0]!.key).toBe("tracker_unused");
+    expect(issues.subs.find((s) => s.key.startsWith("adjustment."))?.from).toBe("задачи не ведутся");
+    expect(categoryPhrase(issues)).toBe("в трекере появились задачи, закрытых задач мало для надежной оценки");
+    // перестали вести — выпавшие показатели и поправка сказаны этим
+    expect(categoryPhrase(cat("issues", [{ key: "tracker_unused", from: "вне расчета", to: "открытых 0, закрытых 0", better: false, counted: "entered" }, { key: "stale", from: "50%", to: "вне расчета", better: false, counted: "left" }, adj("small-sample", { n: 3, full: 10 }, null, true)]))).toBe("задачи больше не ведутся");
+  });
+
+  test("тесты, релизы и проверка AppSec: свои слова для входа и выхода из расчета", () => {
+    const tests = (counted: "entered" | "left", was: ScoreSubFacts | undefined, now: ScoreSubFacts | undefined) =>
+      categoryPhrase(cat("code", [{ key: "tests", from: "", to: "", better: counted === "entered", counted, ...(was ? { was } : {}), ...(now ? { now } : {}) }]));
+    expect(tests("entered", { tests: "none" }, undefined)).toBe("появились тесты");
+    expect(tests("entered", { tests: "idle" }, undefined)).toBe("доля тестов теперь повышает балл");
+    expect(tests("entered", undefined, undefined)).toBe("в расчет вошла доля тестов");
+    expect(tests("left", undefined, { tests: "idle" })).toBe("доля тестов больше не повышает балл");
+    const prev = snap(1, { documentation: 50, activity: 60, issues: 50, code: 50 });
+    const next = snap(2, { documentation: 50, activity: 40, issues: 50, code: 50 });
+    prev.categories.activity!.submetrics = { releases_12m: { score: 0.38, value: 1 } };
+    next.categories.activity!.submetrics = { releases_12m: { score: 0, value: 1, note: "releases not counted — no human commits within a year" } };
+    const activity = scoreChange(prev, next, false).categories.find((x) => x.key === "activity")!;
+    expect(activity.subs.map((s) => [s.from, s.to])).toEqual([["1", "1, не засчитаны"]]);
+    expect(categoryPhrase(activity)).toBe("релизы не засчитаны – за год нет коммитов людей");
+    const appsec = (counted: "entered" | "left") => categoryPhrase(cat("security", [{ key: "scan_missing", from: "", to: "", better: counted === "left", counted }, { key: "density", from: "", to: "", better: true, counted: counted === "entered" ? "left" : "entered" }]));
+    expect(appsec("left")).toBe("появилась проверка AppSec");
+    expect(appsec("entered")).toBe("проверка AppSec не запускалась");
+  });
+
   test("файлы: род и число, пропавшие — «больше нет», README наравне с файлами", () => {
-    const doc = (subs: { key: string; from: string; to: string; better: boolean }[]) => categoryPhrase(cat("documentation", subs));
+    const doc = (subs: SubIn[]) => categoryPhrase(cat("documentation", subs));
     const yes = { from: "нет", to: "есть", better: true };
     const no = { from: "есть", to: "нет", better: false };
     expect(doc([{ key: "license", ...yes }])).toBe("появилась лицензия");
     expect(doc([{ key: "codeowners", ...yes }])).toBe("появился CODEOWNERS");
     expect(doc([{ key: "license", ...no }, { key: "contributing", ...no }])).toBe("больше нет лицензии и CONTRIBUTING");
-    expect(doc([{ key: "license", ...yes }, { key: "readme", from: "нет файла", to: "0,1 КБ, 2 раздела", better: true }])).toBe("появились лицензия и README");
-    expect(doc([{ key: "readme", from: "0,9 КБ, 0 разделов", to: "нет файла", better: false }])).toBe("больше нет README");
-    expect(doc([{ key: "readme", from: "4,7 КБ", to: "2,1 КБ", better: false }])).toBe("README менее подробный");
+    expect(doc([{ key: "license", ...yes }, { key: "readme", from: "нет файла", to: "0,1 КБ, 2 раздела", better: true, was: { present: false }, now: { present: true } }])).toBe("появились лицензия и README");
+    expect(doc([{ key: "readme", from: "0,9 КБ, 0 разделов", to: "нет файла", better: false, was: { present: true }, now: { present: false } }])).toBe("больше нет README");
+    expect(doc([{ key: "readme", from: "4,7 КБ", to: "2,1 КБ", better: false, was: { present: true }, now: { present: true } }])).toBe("README менее подробный");
+    // признак наличия — из сырого значения README, а не из строки показа
+    const prev = snap(1, { documentation: 30, activity: 50, issues: 50, code: 50 });
+    const next = snap(2, { documentation: 60, activity: 50, issues: 50, code: 50 });
+    prev.categories.documentation!.submetrics = { readme: { score: 0, value: { present: false } } };
+    next.categories.documentation!.submetrics = { readme: { score: 0.6, value: { bytes: 2048, sections: 3, flags: {} } } };
+    expect(categoryPhrase(scoreChange(prev, next, false).categories[0]!)).toBe("появился README");
   });
 
   test("активность, CI и AppSec: точные слова направления", () => {
     expect(categoryPhrase(cat("activity", [{ key: "fresh", from: "3 дня", to: "40 дней", better: false }, { key: "freq", from: "6 в месяц", to: "2 в месяц", better: false }]))).toBe("с последнего коммита прошло больше времени, меньше коммитов в месяц");
     expect(categoryPhrase(cat("code", [{ key: "root", from: "12 элементов", to: "30 элементов", better: false }, { key: "old_share", from: "10%", to: "40%", better: false }]))).toBe("в корне репозитория больше файлов и папок, доля старых TODO выше");
-    expect(categoryPhrase({ ...cat("security", [{ key: "adjustment.open-findings-cap", from: "нет", to: "не выше 40", better: false }]), key: "security" })).toBe("открытые критичные находки AppSec ограничивают балл");
-    expect(categoryPhrase({ ...cat("security", [{ key: "adjustment.open-findings-cap", from: "не выше 69", to: "нет", better: true }]), key: "security" })).toBe("открытые находки AppSec больше не ограничивают балл");
-    expect(categoryPhrase({ ...cat("security", [{ key: "secrets", from: "найдены", to: "не найдены", better: true }]), key: "security" })).toBe("критичные утечки секретов больше не найдены");
-    expect(categoryPhrase({ ...cat("security", [{ key: "config", from: "ci.yaml без команд", to: "ci.yaml с командами", better: true }]), key: "cicd" })).toBe("в ci.yaml появились команды");
+    expect(categoryPhrase(cat("security", [adj("open-findings-cap", null, { level: "critical" })]))).toBe("открытые критичные находки AppSec ограничивают балл");
+    expect(categoryPhrase(cat("security", [adj("open-findings-cap", { level: "high" }, null, true)]))).toBe("открытые находки AppSec больше не ограничивают балл");
+    expect(categoryPhrase(cat("security", [{ key: "secrets", from: "найдены", to: "не найдены", better: true }]))).toBe("критичные утечки секретов больше не найдены");
+    const ci = (was: ScoreSubFacts["ci"], now: ScoreSubFacts["ci"], counted?: "entered" | "left") => categoryPhrase(cat("cicd", [{ key: "config", from: "", to: "", better: true, was: { ci: was }, now: { ci: now }, ...(counted ? { counted } : {}) }]));
+    expect(ci({ hasCiYaml: true, hasSteps: false }, { hasCiYaml: true, hasSteps: true })).toBe("в ci.yaml появились команды");
+    expect(ci({ hasCiYaml: false, hasSteps: false }, { hasCiYaml: true, hasSteps: true })).toBe("появился ci.yaml с командами");
+    expect(ci({ hasCiYaml: true, hasSteps: true }, { hasCiYaml: false, hasSteps: false })).toBe("больше нет ci.yaml");
+    expect(ci({ hasCiYaml: true, hasSteps: true }, { hasCiYaml: true, hasSteps: null }, "left")).toBe("ci.yaml не удалось разобрать");
+    // признаки — из сырого значения конфигурации
+    const prev = snap(1, { documentation: 50, activity: 50, issues: 50, code: 50, cicd: 40 }, { repoHealthScore: 49 });
+    const next = snap(2, { documentation: 50, activity: 50, issues: 50, code: 50, cicd: 70 }, { repoHealthScore: 52 });
+    prev.categories.cicd!.submetrics = { config: { score: 0, value: { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: false } } };
+    next.categories.cicd!.submetrics = { config: { score: 1, value: { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: true } } };
+    expect(categoryPhrase(scoreChange(prev, next, true).categories.find((x) => x.key === "cicd")!)).toBe("в ci.yaml появились команды");
   });
 
   test("дни в полях выбора: один пункт на день — его последний анализ", () => {

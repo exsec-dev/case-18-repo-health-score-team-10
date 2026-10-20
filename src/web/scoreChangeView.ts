@@ -59,10 +59,14 @@ export function subInline(title: string): string {
 
 /**
  * «Задачи» с баллом 0: в трекере нет ни одной засчитанной закрытой задачи —
- * задачи не ведутся (так почти всегда) или открытые есть, но не закрыта ни одна.
- * Подметрик в изменении нет, поэтому фраза называет оба случая.
+ * задачи не ведутся или открытые есть, но не закрыта ни одна (`tracker`
+ * изменения). Общая фраза — только если признака нет.
  */
-const ISSUES_ZERO = "задачи не ведутся или ни одна не закрыта";
+function issuesZero(c: ScoreCategoryChange): string {
+  if (c.tracker === "unused") return "задачи не ведутся";
+  if (c.tracker === "none-closed") return "ни одна задача не закрыта";
+  return "задачи не ведутся или ни одна не закрыта";
+}
 
 /**
  * Сдвиг категории без названных показателей. До 2 баллов — сумма мелких
@@ -74,10 +78,10 @@ const SUBS_SET_STEP = 2;
 /** Пояснение к категории без разбивки по подметрикам: данные появились, пропали или показатели не названы. */
 export function categoryNote(c: ScoreCategoryChange): string | null {
   const zeroIssues = c.key === "issues" && c.to !== null && roundScore(c.to) === 0;
-  if (c.kind === "appeared") return `появились данные – ${zeroIssues ? ISSUES_ZERO : `категория учтена в оценке с баллом ${roundScore(c.to ?? 0)}`}`;
+  if (c.kind === "appeared") return `появились данные – ${zeroIssues ? issuesZero(c) : `категория учтена в оценке с баллом ${roundScore(c.to ?? 0)}`}`;
   if (c.kind === "gone") return "данных больше нет – категория не учитывается в оценке";
   if (c.subs.length > 0) return null;
-  if (zeroIssues) return ISSUES_ZERO;
+  if (zeroIssues) return issuesZero(c);
   return Math.abs((c.to ?? 0) - (c.from ?? 0)) < SUBS_SET_STEP ? "небольшие изменения показателей" : "изменился набор учтенных показателей";
 }
 
@@ -127,53 +131,49 @@ const SUB_WORDS: Record<string, [better: string, worse: string]> = {
   "code.root": ["в корне репозитория меньше файлов и папок", "в корне репозитория больше файлов и папок"],
 };
 
-/** Ведущее целое значения поправки: «43 из 200 строк» → 43, «достаточно» → null. */
-function leadNumber(value: string): number | null {
-  const m = /^(\d+)\s/.exec(value);
-  return m === null ? null : Number(m[1]);
-}
+type Sub = ScoreCategoryChange["subs"][number];
 
 /** «1 из 3 дней» → «в один день»: поправка по дням бывает только при 1 или 2 днях. */
 const DAYS_WORDS: Record<number, string> = { 1: "в один день", 2: "в два разных дня" };
 
 /**
- * Поправка балла словами. Значения — как в подсказке: «43 из 200 строк»,
- * «5 из 10», «1 из 3 дней», «не выше 40», «достаточно»/«нет». Фраза говорит,
- * что сейчас с выборкой или потолком, а не только «лучше/хуже»: поправка
+ * Поправка балла словами — по сырым полям поправки (`was`/`now`): выборка
+ * задач, объем кода, уровень потолка; null — поправки нет. Фраза говорит, что
+ * сейчас с выборкой или потолком, а не только «лучше/хуже»: поправка
  * появляется и без смены объема кода (когда балл поднялся выше середины шкалы).
  */
-function adjustmentPhrase(kind: string, s: ScoreCategoryChange["subs"][number]): string | null {
-  const a = leadNumber(s.from);
-  const b = leadNumber(s.to);
+function adjustmentPhrase(kind: string, s: Sub): string | null {
+  const a = s.was?.adjustment ?? null;
+  const b = s.now?.adjustment ?? null;
   if (kind === "small-code") {
-    if (s.to === "достаточно") return "кода достаточно для надежной оценки";
-    if (a !== null && b !== null && a !== b) return b > a ? "кода стало больше" : "кода стало меньше";
+    if (b === null) return "кода достаточно для надежной оценки";
+    if (a !== null && a.loc !== undefined && b.loc !== undefined && a.loc !== b.loc) return b.loc > a.loc ? "кода стало больше" : "кода стало меньше";
     return "кода мало для надежной оценки";
   }
   if (kind === "small-sample") {
-    if (s.to === "достаточно") return "закрытых задач достаточно для надежной оценки";
-    if (s.to.endsWith("дней")) return `задачи закрывали только ${DAYS_WORDS[b ?? 0] ?? "в немногие дни"}`;
-    if (b === 0) return "ни одна задача не закрыта";
-    if (a !== null && b !== null && a !== b && !s.from.endsWith("дней")) return b > a ? "закрытых задач стало больше" : "закрытых задач стало меньше";
+    if (b === null) return "закрытых задач достаточно для надежной оценки";
+    if (b.days !== undefined) return `задачи закрывали только ${DAYS_WORDS[b.days] ?? "в немногие дни"}`;
+    if (b.n === 0) return "ни одна задача не закрыта";
+    if (a !== null && a.days === undefined && a.n !== undefined && b.n !== undefined && a.n !== b.n) return b.n > a.n ? "закрытых задач стало больше" : "закрытых задач стало меньше";
     return "закрытых задач мало для надежной оценки";
   }
   if (kind === "open-findings-cap") {
-    if (s.to === "нет") return "открытые находки AppSec больше не ограничивают балл";
-    const limit = /(\d+)/.exec(s.to);
-    const what = limit !== null && Number(limit[1]) <= 40 ? "критичные находки AppSec" : "находки AppSec высокой важности";
-    return `открытые ${what} ограничивают балл`;
+    if (b === null) return "открытые находки AppSec больше не ограничивают балл";
+    return `открытые ${b.level === "critical" ? "критичные находки AppSec" : "находки AppSec высокой важности"} ограничивают балл`;
   }
   return null;
 }
 
-/** Конфигурация CI по значениям подсказки: «нет ci.yaml» / «ci.yaml без команд» / «ci.yaml с командами». */
-function ciConfigPhrase(s: ScoreCategoryChange["subs"][number]): string | null {
-  const had = s.from !== "нет ci.yaml" && s.from !== "–";
-  if (s.to === "нет ci.yaml") return "больше нет ci.yaml";
-  if (s.to === "ci.yaml не удалось разобрать") return "ci.yaml не удалось разобрать";
-  if (s.to === "ci.yaml с командами") return had ? "в ci.yaml появились команды" : "появился ci.yaml с командами";
-  if (s.to === "ci.yaml без команд") return s.from === "ci.yaml с командами" ? "в ci.yaml больше нет команд" : "появился ci.yaml, но без команд";
-  return null;
+/** Конфигурация CI по признакам ci.yaml (`was`/`now`): нет файла, не разобран, без команд, с командами. */
+function ciConfigPhrase(s: Sub): string | null {
+  const a = s.was?.ci ?? null;
+  const b = s.now?.ci ?? null;
+  if (b === null) return null;
+  const had = a !== null && a.hasCiYaml;
+  if (!b.hasCiYaml) return had ? "больше нет ci.yaml" : null;
+  if (b.hasSteps === null) return "ci.yaml не удалось разобрать";
+  if (b.hasSteps) return had ? "в ci.yaml появились команды" : "появился ci.yaml с командами";
+  return had && a.hasSteps === true ? "в ci.yaml больше нет команд" : had ? null : "появился ci.yaml, но без команд";
 }
 
 /** Файлы «есть/нет»: имя во фразе и род глагола («появилась лицензия», «появился CONTRIBUTING»). */
@@ -187,9 +187,11 @@ const PRESENCE: Record<string, [name: string, feminine: boolean]> = {
  * README появился или пропал — тоже файл «есть/нет» («появились лицензия и
  * README»), а не «подробнее/менее подробный»; null — файл был и остался.
  */
-function readmePresence(s: ScoreCategoryChange["subs"][number]): boolean | null {
-  if (s.to === "нет файла") return false;
-  if (s.from === "нет файла") return true;
+function readmePresence(s: Sub): boolean | null {
+  const a = s.was?.present;
+  const b = s.now?.present;
+  if (b === false && a !== false) return false;
+  if (a === false && b === true) return true;
   return null;
 }
 
@@ -207,11 +209,80 @@ function presencePhrase(names: [string, boolean][], appeared: boolean): string {
   return `${verb} ${listWords(names.map((n) => n[0]))}`;
 }
 
+/** Род и число имени во фразе: «вошел», «вошла», «вошло», «вошли». */
+type Form = "m" | "f" | "n" | "pl";
+
+/**
+ * Показатель, вошедший в расчет или выпавший из него, — имя во фразе «в расчет
+ * вошли релизы», «время первого ответа больше не учитывается». Все подметрики
+ * с весом из `SUBMETRICS`; справочные (без веса) в изменение не попадают.
+ */
+const COUNTED_NAMES: Record<string, [name: string, form: Form]> = {
+  "documentation.readme": ["README", "m"],
+  "documentation.license": ["лицензия", "f"],
+  "documentation.contributing": ["CONTRIBUTING", "m"],
+  "documentation.codeowners": ["CODEOWNERS", "m"],
+  "cicd.config": ["настройка CI", "f"],
+  "cicd.pass_rate": ["доля успешных запусков CI", "f"],
+  "cicd.duration": ["длительность запусков CI", "f"],
+  "security.density": ["плотность находок AppSec", "f"],
+  "security.resolved": ["доля закрытых находок AppSec", "f"],
+  "security.secrets": ["проверка утечек секретов", "f"],
+  "security.deps": ["уязвимые зависимости", "pl"],
+  "activity.fresh": ["свежесть последнего коммита", "f"],
+  "activity.freq": ["частота коммитов", "f"],
+  "activity.contributors": ["число авторов", "n"],
+  "activity.pulls_90d": ["предложения изменений", "pl"],
+  "activity.releases_12m": ["релизы", "pl"],
+  "issues.stale": ["доля зависших задач", "f"],
+  "issues.close_days": ["время закрытия задач", "n"],
+  "issues.resolution": ["доля решенных задач", "f"],
+  "issues.first_resp": ["время первого ответа", "n"],
+  "code.density": ["плотность TODO/FIXME", "f"],
+  "code.old_share": ["доля старых TODO", "f"],
+  "code.tests": ["доля тестов", "f"],
+  "code.root": ["порядок в корне репозитория", "m"],
+};
+
+const ENTERED_VERB: Record<Form, string> = { m: "вошел", f: "вошла", n: "вошло", pl: "вошли" };
+
+/** «в расчет вошли предложения изменений и релизы»; выпавшие — «время первого ответа больше не учитывается». */
+function countedPhrase(names: [string, Form][], entered: boolean): string {
+  const many = names.length > 1 || names[0]![1] === "pl";
+  const list = listWords(names.map((n) => n[0]));
+  if (entered) return `в расчет ${many ? "вошли" : ENTERED_VERB[names[0]![1]]} ${list}`;
+  return `${list} больше не ${many ? "учитываются" : "учитывается"}`;
+}
+
+/**
+ * Вошедший или выпавший показатель со своими словами: задачи начали или
+ * перестали вести, проверка AppSec, тесты, ci.yaml. null — общие слова
+ * («в расчет вошла доля тестов»).
+ */
+function countedSpecial(c: ScoreCategoryChange, s: Sub): string | null {
+  const entered = s.counted === "entered";
+  const key = `${c.key}.${s.key}`;
+  if (key === "issues.tracker_unused") return entered ? "задачи больше не ведутся" : "в трекере появились задачи";
+  if (key === "security.scan_missing") return entered ? "проверка AppSec не запускалась" : "появилась проверка AppSec";
+  if (key === "code.tests") {
+    const outside = entered ? s.was?.tests : s.now?.tests;
+    if (outside === "none") return entered ? "появились тесты" : "тестов больше нет";
+    if (outside === "idle") return entered ? "доля тестов теперь повышает балл" : "доля тестов больше не повышает балл";
+    return null;
+  }
+  if (key === "cicd.config") return ciConfigPhrase(s);
+  return null;
+}
+
 /** Фраза одного показателя; null — показатель не называем (поправка неизвестного вида). */
-function subPhrase(c: ScoreCategoryChange, s: ScoreCategoryChange["subs"][number]): string | null {
+function subPhrase(c: ScoreCategoryChange, s: Sub): string | null {
   if (s.key.startsWith("adjustment.")) return adjustmentPhrase(s.key.slice("adjustment.".length), s);
   const special = c.key === "cicd" && s.key === "config" ? ciConfigPhrase(s) : null;
   if (special !== null) return special;
+  // релизы засчитываются у живого проекта: число то же, балл от засчета
+  if (c.key === "activity" && s.key === "releases_12m" && s.now?.releasesIdle !== s.was?.releasesIdle) {
+    return s.now?.releasesIdle === true ? "релизы не засчитаны – за год нет коммитов людей" : "релизы снова засчитаны – появились коммиты людей";
+  }
   const words = SUB_WORDS[`${c.key}.${s.key}`];
   if (words !== undefined) return words[s.better ? 0 : 1];
   return `показатель «${s.title.replace(/\s*\(.*\)$/, "")}» ${s.better ? "вырос" : "снизился"}`;
@@ -219,28 +290,49 @@ function subPhrase(c: ScoreCategoryChange, s: ScoreCategoryChange["subs"][number
 
 /**
  * Почему сдвинулась категория — одна фраза без чисел: «появились лицензия и
- * CONTRIBUTING, README подробнее». null — сказать нечего.
+ * CONTRIBUTING, README подробнее», «в расчет вошли релизы». null — сказать нечего.
  */
 export function categoryPhrase(c: ScoreCategoryChange): string | null {
   const note = categoryNote(c);
   if (c.subs.length === 0) return note;
   const appeared: [string, boolean][] = [];
   const gone: [string, boolean][] = [];
-  const rest: string[] = [];
+  const entered: [string, Form][] = [];
+  const left: [string, Form][] = [];
+  // фразы по порядку заметности; группы вошедших и выпавших — на месте первого из них
+  const rest: (string | "entered" | "left")[] = [];
   // ни одна задача не закрыта — время закрытия и доля решенных уже сказаны этим
-  const noneClosed = c.key === "issues" && c.subs.some((s) => s.key === "adjustment.small-sample" && leadNumber(s.to) === 0);
+  const noneClosed = c.key === "issues" && (c.tracker === "none-closed" || c.subs.some((s) => s.key === "adjustment.small-sample" && s.now?.adjustment?.n === 0 && s.now.adjustment.days === undefined));
+  // задачи начали или перестали вести, проверка AppSec появилась или пропала —
+  // остальные вошедшие и выпавшие показатели сказаны этим
+  const anchor = c.subs.find((s) => s.counted !== undefined && (s.key === "tracker_unused" || s.key === "scan_missing"));
   for (const s of c.subs) {
     const presence = PRESENCE[s.key];
     const readme = c.key === "documentation" && s.key === "readme" ? readmePresence(s) : null;
     if (presence !== undefined && c.key === "documentation") (s.better ? appeared : gone).push(presence);
     else if (readme !== null) (readme ? appeared : gone).push(["README", false]);
     else if (noneClosed && !s.better && (s.key === "close_days" || s.key === "resolution")) continue;
-    else {
+    else if (anchor !== undefined && s !== anchor && (s.counted !== undefined || (anchor.counted === "entered" && s.key.startsWith("adjustment.")))) continue;
+    else if (s.counted !== undefined) {
+      const special = countedSpecial(c, s);
+      const name = COUNTED_NAMES[`${c.key}.${s.key}`] ?? [subInline(s.title), "m"];
+      if (special !== null) rest.push(special);
+      else if (c.key === "cicd" && s.key === "config") continue;
+      else {
+        const group = s.counted === "entered" ? entered : left;
+        if (group.length === 0) rest.push(s.counted);
+        group.push(name);
+      }
+    } else {
       const phrase = subPhrase(c, s);
       if (phrase !== null) rest.push(phrase);
     }
   }
-  const parts = [...(appeared.length > 0 ? [presencePhrase(appeared, true)] : []), ...(gone.length > 0 ? [presencePhrase(gone, false)] : []), ...rest];
+  const parts = [
+    ...(appeared.length > 0 ? [presencePhrase(appeared, true)] : []),
+    ...(gone.length > 0 ? [presencePhrase(gone, false)] : []),
+    ...rest.map((p) => (p === "entered" ? countedPhrase(entered, true) : p === "left" ? countedPhrase(left, false) : p)),
+  ];
   return parts.length > 0 ? parts.join(", ") : note;
 }
 
