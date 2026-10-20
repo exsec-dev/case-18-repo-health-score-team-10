@@ -61,8 +61,8 @@ HealthCraft оценивает состояние репозиториев Sourc
 
 - Если данных меньше порога (доля веса категорий с данными ниже 0,4), оценка не выставляется.
 - Репозиторий без кода получает 0.
-- Критичные находки AppSec ограничивают Repo Health Score: утекший секрет – значением 49, любая
-  другая открытая находка `CRITICAL` – значением 69. На HealthCraft Index потолки не влияют.
+- Критичные находки AppSec ограничивают Repo Health Score: открытый утекший секрет уровня
+  `CRITICAL` – значением 49, любая другая открытая находка `CRITICAL` – значением 69. На HealthCraft Index потолки не влияют.
 - Зоны: 70-100 «здоров», 40-69 «требует внимания», 0-39 «в зоне риска».
 - Рейтинг сортируется по HealthCraft Index: результаты CI и находки AppSec платформа отдает только
   участникам репозитория, поэтому в публичный рейтинг они не входят.
@@ -106,7 +106,7 @@ HealthCraft оценивает состояние репозиториев Sourc
                           оценки, очередь заявок
 
   внешние сервисы: SourceCraft REST API, AppSec API, git-клоны (временный каталог),
-                   Яндекс ID (OAuth), YandexGPT
+                   Яндекс ID (OAuth), Yandex AI Studio (Qwen3.6-35B-A3B)
 ```
 
 **Путь данных:** заявка на скан → клон git и запросы к REST и AppSec → факты в БД → оценка и
@@ -126,7 +126,7 @@ HealthCraft оценивает состояние репозиториев Sourc
 [docs/guide/ops/architecture.md](docs/guide/ops/architecture.md).
 
 **Стек:** Bun 1.4.2 и TypeScript (strict), SQLite (`bun:sqlite`), React 19 и Gravity UI
-(`@gravity-ui/uikit` 7.49.0), pdfmake 0.3.11 для PDF, YandexGPT или z.ai – по настройке `LLM_PROVIDER`,
+(`@gravity-ui/uikit` 7.49.0), pdfmake 0.3.11 для PDF, языковая модель Qwen3.6-35B-A3B в Yandex AI Studio или z.ai – по настройке `LLM_PROVIDER`,
 Docker Compose и Caddy 2.10, ВМ Yandex Cloud, CI SourceCraft.
 
 ## Быстрый старт
@@ -138,7 +138,7 @@ Docker Compose и Caddy 2.10, ВМ Yandex Cloud, CI SourceCraft.
 | Запуск из исходников | [Bun](https://bun.sh) 1.4.2, git 2.31 или новее |
 | Запуск в контейнерах | Docker с Compose v2 |
 | Данные | персональный токен SourceCraft (`SOURCECRAFT_TOKEN`) – без него API SourceCraft отвечает 401; [как выпустить токен](https://sourcecraft.dev/portal/docs/ru/sourcecraft/security/pat) |
-| Вход и AI (необязательно) | для входа – OAuth-приложение Яндекс ID и `APP_SECRET`, для AI – ключ YandexGPT и каталог Yandex Cloud |
+| Вход и AI (необязательно) | для входа – OAuth-приложение Яндекс ID и `APP_SECRET`, для AI – API-ключ Yandex AI Studio и каталог Yandex Cloud |
 
 ### Из исходников
 
@@ -182,12 +182,14 @@ bun scripts/scan.ts <org>/<repo>
 (по умолчанию `/srv/healthcraft`): там `.env`, `data/` (БД) и `tmp/` (временные клоны).
 Контейнеры сервиса работают от пользователя `bun` (uid 1000) без root и без capabilities,
 поэтому `data/` и `tmp/` на хосте должны принадлежать uid 1000: `deploy/deploy.sh` делает это
-сам, в Linux локально выполните `sudo chown -R 1000:1000 .stand/data .stand/tmp` после
-первого запуска (Docker Desktop в macOS и Windows права хоста не проверяет).
+сам, если на ВМ есть root или `sudo` без пароля; локально – строка с `chown` ниже, до первого
+запуска (одноразовый контейнер, `sudo` не нужен). Команды – для bash в Linux, macOS или WSL;
+Git Bash в Windows подменяет пути в аргументах `docker` и не подходит.
 
 ```bash
 mkdir -p .stand && cp .env.example .stand/.env    # вписать токен; без SITE_ADDRESS прокси работает по HTTP
 echo "HC_DIR=$PWD/.stand" >> .stand/.env
+docker run --rm -v "$PWD/.stand:/stand" busybox:1.37 sh -c "mkdir -p /stand/data /stand/tmp/web /stand/tmp/rating && chown -R 1000:1000 /stand/data /stand/tmp"
 HTTP_PORT=8080 docker compose --env-file .stand/.env -f deploy/compose.yaml up -d --build
 curl http://localhost:8080/api/health             # через несколько секунд – "ok": true
 ```
@@ -264,8 +266,8 @@ bun scripts/report-goldens.ts
 | `APP_SECRET` | вход | ключ подписи сессий и шифрования токенов пользователей, не короче 32 символов; без него вход выключен |
 | `YA_CLIENT_ID`, `YA_CLIENT_SECRET` | вход | OAuth-приложение Яндекс ID; без них `/auth/ya` отвечает 503 |
 | `YA_REDIRECT_URI` | вход | адрес возврата после входа, по умолчанию `http://localhost:8418/auth/ya/callback` |
-| `LLM_PROVIDER`, `MAIN_MODEL` | AI | провайдер `yandex` (по умолчанию) или `zai` (ключ – `ZAI_API_KEY`) и модель; провайдер один, автоматического переключения нет |
-| `YAGPT_API_KEY`, `YAGPT_FOLDER_ID` | AI | ключ YandexGPT и каталог Yandex Cloud; без них AI-обзоров нет |
+| `LLM_PROVIDER`, `MAIN_MODEL` | AI | провайдер `yandex` – Yandex AI Studio (по умолчанию) или `zai` (ключ – `ZAI_API_KEY`) и модель: по умолчанию `qwen3.6-35b-a3b`, как на стенде; провайдер один, автоматического переключения нет |
+| `YAGPT_API_KEY`, `YAGPT_FOLDER_ID` | AI | API-ключ Yandex AI Studio и каталог Yandex Cloud; без них AI-обзоров нет |
 | `AI_UNLOCK_PASSWORD` | по желанию | пароль снятия лимитов AI, выдает администратор сервиса; не короче 20 символов, требует `APP_SECRET`; пусто – функции нет |
 | `AI_TOP_AUTO` | по желанию | `1` – автоматически готовить AI-обзор и проверку для топа рейтинга после нового скана (выключено по умолчанию) |
 | `AI_TOP_AUTO_SIZE` | по желанию | сколько первых мест рейтинга входит в этот топ (10) |
@@ -342,7 +344,7 @@ bun scripts/report-goldens.ts
 
 | Маршрут | Ответ |
 |---|---|
-| `GET /api/v1/repos/{org}/{repo}` | JSON: `healthcraftIndex`, `indexCoverage`, баллы 4 публичных категорий (`categories`), `modelVersion`, `scannedAt`, `headSha`, а также `org`, `repo`, `title`, `language`, `likes` |
+| `GET /api/v1/repos/{org}/{repo}` | JSON: `healthcraftIndex`, `indexCoverage`, баллы 4 публичных категорий (`categories`), `modelVersion`, `scannedAt`, `headSha`, `codeEmpty` (в репозитории нет кода), а также `org`, `repo`, `title`, `language`, `likes` |
 | `GET /api/v1/repos/{org}/{repo}/badge.svg` | SVG-бейдж «HealthCraft Index»: число и цвет зоны, без оценки – `n/a` серым; `?show=rank,word,delta,cats` – с лигой места, словом зоны, изменением с прошлого анализа и шкалами 4 категорий под индексом, `?category=<категория>` – балл 1 категории, `?key=` – бейдж закрытого репозитория по ключу с карточки; прежний `?style=rank` работает как `?show=rank` |
 
 Бейдж в README репозитория (готовый код для своего репозитория дает кнопка на карточке):
@@ -384,7 +386,7 @@ bun scripts/report-goldens.ts
 | Документ | О чем |
 |---|---|
 | https://health-craft.ru/docs | документация на сайте: поиск по страницам и PDF-версия |
-| [docs/guide/](docs/guide/) | те же страницы в Markdown, порядок – [toc.md](docs/guide/toc.md): начало работы, руководство пользователя, методика оценки, устройство сервиса, развертывание, ограничения |
+| [docs/guide/](docs/guide/) | те же страницы в Markdown, порядок – [toc.md](docs/guide/toc.md): обзор, начало работы и установка, руководство пользователя, методика оценки, устройство сервиса (включая развертывание), ограничения, план развития, частые вопросы, соответствие ТЗ |
 | [docs/guide/method/](docs/guide/method/) | методика оценки: формула и веса, метрики, «нет данных», рекомендации, устойчивость к накрутке; журнал версий модели – [docs/methodology.md](docs/methodology.md) |
 | [.env.example](.env.example) | все переменные окружения с пояснениями |
 | [CONTRIBUTING.md](CONTRIBUTING.md), [CODEOWNERS](CODEOWNERS) | как сообщить об ошибке и предложить изменение, проверки и стиль кода; кто отвечает за каталоги и проверяет изменения |

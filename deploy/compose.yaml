@@ -10,9 +10,8 @@
 name: healthcraft
 
 x-service: &service
-  build:
-    context: ..
-    dockerfile: Dockerfile
+  # образ один на обе роли; собирает его только web – rating берет готовый: две
+  # параллельные сборки одного имени новый Compose (v5) роняет «image already exists»
   image: healthcraft:latest
   restart: unless-stopped
   init: true              # tini как PID 1: реапит осиротевшие git-процессы клонов
@@ -28,6 +27,9 @@ x-service: &service
 services:
   web:
     <<: *service
+    build:
+      context: ..
+      dockerfile: Dockerfile
     environment:
       PROCESS_ROLE: web
       PORT: "8418"

@@ -20,7 +20,7 @@ HealthCraft – один сервис на Bun и TypeScript, который р�
                           оценки, очередь заявок
 
   внешние сервисы: SourceCraft REST API, AppSec API, git-клоны
-                   (временный каталог), Яндекс ID, YandexGPT
+                   (временный каталог), Яндекс ID, Yandex AI Studio
 ```
 
 ## Компоненты и роли процессов {#roli}
@@ -73,7 +73,7 @@ AI-обзор идет отдельной заявкой: он работает 
 - SQLite через `bun:sqlite`;
 - React 19 и Gravity UI (`@gravity-ui/uikit` 7.49.0); фронтенд в `src/web` собирает сам Bun при импорте `index.html`, отдельного шага сборки нет;
 - pdfmake 0.3.11 для отчетов PDF;
-- YandexGPT или z.ai – провайдера модели выбирает администратор;
+- языковая модель Qwen3.6-35B-A3B в Yandex AI Studio или z.ai – провайдера и модель выбирает администратор;
 - git 2.31 или новее;
 - Docker Compose и Caddy 2.10.
 
