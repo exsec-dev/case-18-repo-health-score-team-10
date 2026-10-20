@@ -49,6 +49,13 @@ function fixtureRepo(): string {
   return root;
 }
 
+// Токен пользователя читается только при заданном APP_SECRET (processJob,
+// processSummaryJob); в CI его нет, локально он приходит из .env
+const withSecret = () => {
+  const base = loadConfig();
+  return { ...base, auth: { ...base.auth, appSecret: "v66-test-secret-0123456789abcdef" } };
+};
+
 const fakeClone = (dir: string, scanId: number) => ({ dir, gitEnv: {}, scanId, headSha: null, bytes: 1 });
 
 function tmpClone(): string {
@@ -102,7 +109,7 @@ describe("В6.6: цепочка «анализ + обзор» одного по�
   const scanDeps = (db: Database, srcRoot: string) => ({
     db,
     config: {
-      ...loadConfig(),
+      ...withSecret(),
       api: { ...loadConfig().api, gitBase: `file://${srcRoot}`, restBase: "http://127.0.0.1:1", appsecBase: "http://127.0.0.1:1" },
     },
     serverClient: () => null,
@@ -171,7 +178,7 @@ describe("В6.6: цепочка «анализ + обзор» одного по�
     const now = new Date().toISOString();
     db.query("INSERT INTO jobs (repo_id, status, user_id, trigger_kind, kind, created_at, audience) VALUES (?, 'queued', 11, 'user', 'summary', ?, 'full')").run(repoId, now);
     const job = claimNext(db, new Date(), 60 * 60_000, { queue: "user" }) as ClaimedJob;
-    const err = await processSummaryJob({ db, config: loadConfig(), serverClient: () => null, getPat: () => "pat" }, job);
+    const err = await processSummaryJob({ db, config: withSecret(), serverClient: () => null, getPat: () => "pat" }, job);
     expect(err).toContain("нет завершённого скана");
     expect(pendingHandoffs()).toBe(0);
     expect(existsSync(a)).toBe(false);
