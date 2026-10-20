@@ -130,7 +130,8 @@ export function guardPath(root: string, relPath: string): string | null {
   if (typeof relPath !== "string" || relPath.length === 0) return null;
   if (relPath.includes("\0")) return null;
   const absRoot = resolve(root);
-  const abs = resolve(absRoot, relPath);
+  // `\` – разделитель и на Linux: модель пишет пути как на Windows, deny-list читает их так же
+  const abs = resolve(absRoot, relPath.replaceAll("\\", "/"));
   if (abs !== absRoot && !abs.startsWith(absRoot + sep)) return null;
   return abs;
 }
