@@ -194,19 +194,58 @@ curl http://localhost:8080/api/health             # через нескольк�
 docker compose --env-file .stand/.env -f deploy/compose.yaml down
 ```
 
-### Проверки
+### Сборка
 
-Те же команды выполняет CI SourceCraft на каждый push и pull request –
-[`.sourcecraft/ci.yaml`](.sourcecraft/ci.yaml):
+Отдельного шага сборки нет: Bun собирает интерфейс (React и Gravity UI) из импорта
+`src/web/index.html` при старте сервера, поэтому `bun start` поднимает сразу и API, и интерфейс.
+Режим сборки задает `NODE_ENV`:
+
+| Команда | Что собирается |
+|---|---|
+| `bun start` | dev-сборка с HMR; страницы `/docs` перечитываются с диска при каждом запросе |
+| `NODE_ENV=production bun start` | минифицированная сборка без HMR; документация читается один раз на старте. Так работает образ контейнера |
+
+Проверка типов – `tsc --noEmit` по `src/`, `scripts/` и `tests/` (см. [`tsconfig.json`](tsconfig.json)),
+ошибок быть не должно:
 
 ```bash
 bun run tsc
-bun test --timeout 30000
+```
+
+Образ контейнера собирается из корня репозитория по [`Dockerfile`](Dockerfile): база `oven/bun:1.4.2`
+плюс git, зависимости по lock-файлу без dev-пакетов, в образ попадают `src/`, `prompts/` и `docs/guide/`.
+Раздел «В контейнерах» собирает его через `docker compose … --build`; вручную:
+
+```bash
+docker build -t healthcraft .
+```
+
+### Тесты
+
+Тесты лежат в `tests/*.test.ts` и запускаются `bun test`. Те же команды выполняет CI SourceCraft на
+каждый push и pull request – [`.sourcecraft/ci.yaml`](.sourcecraft/ci.yaml):
+
+```bash
+bun run tsc
+bun test --timeout 30000                 # все тесты
+bun test tests/score.test.ts             # один файл
+bun test -t "killActiveClones"           # тесты по имени
+sh scripts/ci-test.sh                    # как в CI: SQLite без fsync, временные БД в /dev/shm
 ```
 
 Тесты работают на временных БД и не обращаются к внешним сервисам: SourceCraft, Яндекс ID и
-языковая модель подменяются локальными моками. Тестам нужны git, символьные ссылки и `setsid`,
-поэтому запускайте их в Linux или WSL.
+языковая модель подменяются локальными моками, токен в `.env` не нужен. Лимит 30 с на тест
+задан потому, что на медленном диске тесты с временной БД идут 4–7 с и дефолтных 5 с не хватает.
+
+Тестам нужны git, символьные ссылки и `setsid`, поэтому запускайте их в Linux или WSL. В Windows
+около десятка тестов падает: группы `setsid` у клонов, символьные ссылки, остановка сервера по SIGTERM
+(остальные 2000 проходят). В macOS команды `setsid` нет.
+Золотые отчеты в `tests/fixtures/report/` сравниваются побайтно; после осознанного изменения
+отчета перегенерируйте их и просмотрите глазами:
+
+```bash
+bun scripts/report-goldens.ts
+```
 
 ## Переменные окружения
 
