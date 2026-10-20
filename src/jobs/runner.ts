@@ -68,6 +68,12 @@ export interface ScanOptions {
   userId?: number | null;
   /** PAT автора: REST/git с его правами + AppSec-канал; нет → серверный токен, без AppSec */
   userToken?: string | null;
+  /**
+   * Передача клона следом идущему AI-обзору (clone-handoff.ts): вызывается в конце
+   * успешного скана; true – клон остается на диске, его убирает получатель;
+   * false или не задан – скан убирает клон сам, как всегда.
+   */
+  claimClone?: (clone: { dir: string; gitEnv: Record<string, string>; scanId: number; headSha: string | null; bytes: number }) => boolean;
 }
 
 export interface ScanResult {
@@ -255,6 +261,9 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
   let repoMeta: RestCollectResult["repoMeta"] = null;
   // клон живет до конца скана и убирается в `finally` ниже (fail-soft)
   let cloneDir: string | null = null;
+  let cloneInfo: { gitEnv: Record<string, string>; headSha: string | null; bytes: number } | null = null;
+  // скан закрылся ok/partial с оценкой – клон можно передать обзору (opts.claimClone)
+  let handoffEligible = false;
 
   // REST-клиент: с userToken — клиент PAT автора, иначе серверный;
   // нет ни того ни другого — REST-факты no-data(access)
@@ -295,6 +304,7 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
               throw e;
             }
             cloneDir = clone.dir;
+            cloneInfo = { gitEnv: clone.gitEnv, headSha: headBox.headSha ?? null, bytes: clone.bytes };
             // head_sha пишется сразу после extractFacts; сбой записи fail-soft:
             // колонка останется NULL, канал не роняется
             if (headBox.headSha) {
@@ -391,6 +401,20 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
     if (cloneDir === null) return;
     const dir = cloneDir;
     cloneDir = null;
+    if (handoffEligible && cloneInfo !== null && opts.claimClone !== undefined) {
+      // передача – необязательная оптимизация: ее сбой (SQLITE_BUSY в проверке
+      // очереди) не роняет уже оцененный скан и не оставляет клон на диске
+      let claimed = false;
+      try {
+        claimed = opts.claimClone({ dir, scanId, ...cloneInfo }) === true;
+      } catch (e) {
+        console.error(`[scan ${scanId}] clone handoff failed, cleaning up: ${String((e as Error).message).slice(0, 120)}`);
+      }
+      if (claimed) {
+        console.log(`[scan ${scanId}] clone handed off to the queued AI overview`);
+        return;
+      }
+    }
     const cleanupError = cleanupClone(dir);
     if (cleanupError) console.error(`[scan ${scanId}] cleanup ${dir}: ${cleanupError}`);
   };
@@ -451,6 +475,7 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
       }
     }
 
+    handoffEligible = !scoreFailed && status !== "bad";
     return {
       scanId,
       repoId,

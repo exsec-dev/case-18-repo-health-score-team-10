@@ -64,6 +64,7 @@ import { getAiNotesHistory, getRepoHistory } from "./api/history";
 import { BADGE_CACHE_SECONDS, badgeKey, badgeSubject, getPublicRepo, parseBadgeOptions, renderBadgeFor } from "./api/public";
 import { NO_PAT_ACCESS } from "./auth/access";
 import { killActiveClones } from "./collectors/git";
+import { releaseAllHandoffs } from "./jobs/clone-handoff";
 import {
   clearOAuthStateCookieHeader,
   clearSessionCookieHeader,
@@ -1604,6 +1605,8 @@ function shutdown(signal: string): void {
   }
   const killed = killActiveClones();
   if (killed > 0) console.log(`[signal] групп клонов погашено: ${killed}`);
+  const released = releaseAllHandoffs();
+  if (released > 0) console.log(`[signal] клонов, ждавших обзор, убрано: ${released}`);
   process.exit(0);
 }
 process.on("SIGTERM", () => shutdown("SIGTERM"));

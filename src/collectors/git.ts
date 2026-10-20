@@ -25,6 +25,19 @@ export interface CloneSuccess {
   dir: string;
   bytes: number;
   elapsedMs: number;
+  /**
+   * Окружение git для последующих обращений клона к origin (GIT_CONFIG_* с
+   * заголовком авторизации, заглушенный хелпер кредов): частичный клон дотягивает
+   * недостающие блобы при `git show` и `git worktree add`, и без этого окружения
+   * закрытый репозиторий ответил бы 401. Токен в argv не попадает, как и при клоне.
+   */
+  gitEnv: Record<string, string>;
+}
+
+/** Неглубокий клон: `--depth=<depth>`; blobless – еще и `--filter=blob:none` (блобы дотягиваются по требованию). */
+export interface ShallowClone {
+  depth: number;
+  blobless?: boolean;
 }
 
 export interface CloneFailure {
@@ -340,7 +353,7 @@ export async function cloneBare(
   urlWithCreds: string,
   tmpDir: string = tmpdir(),
   limits: CloneLimits,
-  opts: { shallowSince?: string } & CloneSeams = {},
+  opts: { shallowSince?: string; shallow?: ShallowClone } & CloneSeams = {},
 ): Promise<CloneOutcome> {
   // ждем места до mkdtemp и до отсчета таймаута, чтобы ожидание не съело бюджет клона
   await waitForDiskRoom(tmpDir, limits.minFreeBytes, opts);
@@ -386,6 +399,10 @@ export async function cloneBare(
   });
   const gitArgs = ["clone", "--bare"];
   if (opts.shallowSince) gitArgs.push(`--shallow-since=${opts.shallowSince}`);
+  if (opts.shallow) {
+    gitArgs.push(`--depth=${Math.max(1, Math.floor(opts.shallow.depth))}`);
+    if (opts.shallow.blobless) gitArgs.push("--filter=blob:none");
+  }
   gitArgs.push(cloneUrl, dir);
   const cmd = HAVE_SETSID ? ["setsid", "git", ...gitArgs] : ["git", ...gitArgs];
   const spawn: SpawnGit =
@@ -448,7 +465,7 @@ export async function cloneBare(
   }
   // тест может прочитать `<dir>/config` до того, как каталог уберут
   await opts.onCloneDir?.(dir);
-  return { ok: true, dir, bytes, elapsedMs };
+  return { ok: true, dir, bytes, elapsedMs, gitEnv: childEnv };
 }
 
 /** Дата отсечения истории (календарные месяцы назад) – значение history_truncated_since. */

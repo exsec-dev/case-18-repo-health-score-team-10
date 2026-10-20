@@ -18,7 +18,7 @@ import { parseFactValue } from "../collectors/facts";
 import { MODEL_VERSION } from "../score/model";
 import { loadCharter } from "./charters";
 import { generateWithTools } from "./agent";
-import { executeTool, makeCalculatorExecutor, makeToolExecutor, sanitizeUntrusted, MAX_PLAIN_READ_BYTES } from "./tools";
+import { executeTool, makeCalculatorExecutor, makeToolExecutor, readHeadFile, sanitizeUntrusted, MAX_PLAIN_READ_BYTES } from "./tools";
 import { frameUntrusted, makeNonce } from "./input";
 import { validateFlagOutput, validateOutput, type FraudFlag, type FactInput } from "./validator";
 import type { SummaryRole } from "./roles";
@@ -38,8 +38,13 @@ export interface SummaryDeps {
   org: string;
   repo: string;
   callLlm: CallLlm;
-  /** рабочий каталог клона + git-каталог: инструменты и недоверенный контент; null → специалисты без инструментов */
-  clone?: { root: string; gitDir: string | null } | null;
+  /**
+   * Рабочий каталог клона + git-каталог: инструменты и недоверенный контент;
+   * null → специалисты без инструментов. root-функция – ленивая рабочая копия
+   * (разворачивается при первом файловом инструменте; README и git log тогда
+   * читаются из git-каталога); вызывающий мемоизирует ее сам.
+   */
+  clone?: { root: string | (() => Promise<string>); gitDir: string | null; gitEnv?: Record<string, string> } | null;
   models?: { main: string; side: string };
   budgets?: { maxModelCalls?: number; fuseMs?: number };
   /** бэкофф ретраев цикла (тесты ставят 0) */
@@ -919,6 +924,10 @@ async function runFlagger(
  *  (например, на `/app/.env` хоста) не читается – как у инструментов модели. */
 export async function readReadme(deps: Pick<SummaryDeps, "clone">): Promise<string | null> {
   if (!deps.clone) return null;
+  // есть git-каталог – README читается из него (рабочая копия не нужна и не
+  // разворачивается); чтение с диска остается для копии без git-каталога
+  if (typeof deps.clone.gitDir === "string") return readHeadFile(deps.clone.gitDir, /^readme(\.|$)/i, deps.clone.gitEnv);
+  if (typeof deps.clone.root !== "string") return null;
   try {
     const names = readdirSync(deps.clone.root).filter((n) => /^readme(\.|$)/i.test(n));
     const name = names[0];

@@ -16,7 +16,7 @@
 // автора. Серверный REST-клиент — фабрика: свой бюджет запросов на каждую задачу
 // и каждый обход каталога.
 import type { Database } from "bun:sqlite";
-import { rmSync, statSync } from "node:fs";
+import { existsSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { enumerateCatalog, type CatalogEntry, type CatalogResult } from "../collectors/catalog";
@@ -31,8 +31,18 @@ import { runSummary as runSummaryPipeline, runFraudCheck as runFraudCheckPipelin
 import { AI_CACHED_NOTE, AI_REJECTED_ERRORS, type QuotaRefusal } from "./ai-quota";
 import { refreshRepoTopics } from "./topics";
 import type { AiAudience } from "../db";
-import { materializeWorktree, removeWorktree } from "../summary/tools";
-import { cleanupClone, cloneWithDegrade } from "../collectors/git";
+import { GIT_LOG_CAP, materializeWorktree, removeWorktree } from "../summary/tools";
+import { cleanupClone, cloneBare, type CloneSuccess, type ShallowClone } from "../collectors/git";
+import { handoffKey, offerClone, releaseHandoff, takeClone } from "./clone-handoff";
+
+/**
+ * Клон для AI-обзора: глубина – ровно столько коммитов, сколько показывает
+ * git_log. `--filter=blob:none` сервер SourceCraft сегодня не поддерживает
+ * («filtering not recognized by server, ignoring», замер 20.10.2026 на
+ * bayselonarrend/openintegrations) – git молча берет блобы HEAD; флаг оставлен,
+ * чтобы экономия включилась сама, когда сервер его примет.
+ */
+export const SUMMARY_SHALLOW_CLONE: ShallowClone = { depth: GIT_LOG_CAP, blobless: true };
 import { DEFAULT_HEAVY_SCAN_MS, loopSlots, worstCaseScanMs, type Config } from "../config";
 import { listRepos } from "../api/repos";
 import { purgeOldRatingSnapshots, snapshotAtCatalogTick } from "./rating-snapshot";
@@ -924,13 +934,44 @@ export async function processJob(deps: WorkerDeps, job: ClaimedJob): Promise<Sca
       appsecMinIntervalMs: deps.config.scan.rest.appsecMinIntervalMs,
     },
     job.slug,
-    { userId: job.userId, userToken: pat, trigger: job.triggerKind },
+    {
+      userId: job.userId,
+      userToken: pat,
+      trigger: job.triggerKind,
+      // «анализ + обзор подряд»: за этим сканом пользователя в очереди уже стоит его
+      // обзор того же репо – клон переходит обзору, второго клона не будет
+      claimClone: (clone) => {
+        if (job.userId === null || !chainedSummaryQueued(deps.db, job)) return false;
+        offerClone(handoffKey(job.repoId, job.userId), clone);
+        return true;
+      },
+    },
   );
   if (result.repoAccess === "gone" && job.userId === null) {
     evictRepo(deps.db, job.repoId, `repo GET 404/403 at scan ${result.scanId}`);
     return "gone";
   }
   return result;
+}
+
+/**
+ * Стоит ли за сканом пользователя его же обзор того же репозитория (заявка
+ * `summary` в очереди, поставленная позже скана) – цепочка «анализ + обзор»
+ * кнопки полного обзора при устаревшем анализе. Публичному обзору клон с токеном
+ * отдается только у открытого репозитория: публичный текст строится по тому, что
+ * видно всем.
+ */
+export function chainedSummaryQueued(db: Database, job: Pick<ClaimedJob, "id" | "repoId" | "userId" | "triggerKind">): boolean {
+  if (job.triggerKind !== "user" || job.userId === null) return false;
+  const next = db
+    .query("SELECT audience FROM jobs WHERE repo_id = ? AND user_id = ? AND kind = 'summary' AND status = 'queued' AND id > ? ORDER BY id LIMIT 1")
+    .get(job.repoId, job.userId, job.id) as { audience: string | null } | null;
+  if (next === null) return false;
+  if (next.audience === "public") {
+    const repo = db.query("SELECT visibility FROM repos WHERE id = ?").get(job.repoId) as { visibility: string | null } | null;
+    return repo?.visibility === "public";
+  }
+  return true;
 }
 
 /**
@@ -968,8 +1009,11 @@ export function summaryEmptyErrorOf(res: Pick<SummaryRunResult, "outcomes" | "an
 }
 
 /**
- * Исполнить summary-заявку: клон (свежий и полный — история нужна git_log) →
- * worktree → конвейер на фактах последнего завершенного скана → ai_notes → уборка.
+ * Исполнить summary-заявку: неглубокий клон (`--depth=GIT_LOG_CAP`: git_log нужны
+ * только последние коммиты, README читается из git-каталога) → конвейер на фактах
+ * последнего завершенного скана → ai_notes → уборка. Рабочая копия разворачивается
+ * лениво – при первом файловом инструменте модели (read_file/grep/list_files);
+ * обзор без таких вызовов ее не платит.
  * Возвращает null при успехе или причину для jobs.error. Оценку и очередь сканов не трогает.
  */
 export async function processSummaryJob(deps: WorkerDeps, job: ClaimedJob): Promise<string | null> {
@@ -977,10 +1021,17 @@ export async function processSummaryJob(deps: WorkerDeps, job: ClaimedJob): Prom
     job.userId !== null && deps.config.auth.appSecret
       ? (deps.getPat ?? getPat)(deps.db, deps.config.auth.appSecret, job.userId)
       : null;
+  // клон скана, за которым этот обзор стоял в очереди (clone-handoff.ts): ранний
+  // выход без генерации отпускает его сразу, а не по TTL
+  const handoff = job.userId === null ? null : handoffKey(job.repoId, job.userId);
+  const bail = (reason: string): string => {
+    if (handoff !== null) releaseHandoff(handoff);
+    return reason;
+  };
   // публичный обзор публичного репо клонируется и без токена автора
-  if (job.userId !== null && !pat && job.audience !== "public") return SUMMARY_JOB_ERRORS.noPat;
+  if (job.userId !== null && !pat && job.audience !== "public") return bail(SUMMARY_JOB_ERRORS.noPat);
   const scanId = lastFinishedScan(deps.db, job.repoId);
-  if (scanId === null) return SUMMARY_JOB_ERRORS.noScan;
+  if (scanId === null) return bail(SUMMARY_JOB_ERRORS.noScan);
   // заметки этой аудитории у скана уже есть — клонировать незачем;
   // отладочный кулдаун (1 мс) кэш выключает, как и в конвейере
   const cacheOn = (deps.config.queue.summaryCooldownMs ?? 60 * 60_000) > 1;
@@ -989,18 +1040,43 @@ export async function processSummaryJob(deps: WorkerDeps, job: ClaimedJob): Prom
     deps.db.query("SELECT 1 FROM ai_notes WHERE scan_id = ? AND role != 'flagger' AND audience = ? LIMIT 1").get(scanId, job.audience ?? "full") !== null
   ) {
     console.log(`[summary job ${job.id}] ${job.slug}: notes already exist for scan ${scanId} — no clone, no generation`);
-    return AI_CACHED_NOTE;
+    return bail(AI_CACHED_NOTE);
   }
   const limits = scanCloneLimitsOf(deps.config.scan);
   const [org, repo] = job.slug.split("/");
   // публичная версия клонируется без токена автора: репо, ставший закрытым до обхода
   // каталога, не склонируется, и его код не попадет в публичный текст
   const cloneToken = summaryCloneToken(job.audience ?? "full", pat);
-  const clone = await cloneWithDegrade(scanGitUrl(deps.config.api.gitBase, cloneToken, org!, repo!), undefined, limits);
-  if (!clone.ok) return SUMMARY_JOB_ERRORS.clone(clone.detail.slice(0, 120));
+  // клон берется только для того же скана и только если он еще на диске (свип сирот
+  // реестра не знает); иначе – свой неглубокий клон, как всегда
+  const taken = handoff === null ? null : takeClone(handoff, scanId);
+  const handed = taken !== null && existsSync(taken.dir) ? taken : null;
+  if (taken !== null && handed === null) console.warn(`[summary job ${job.id}] ${job.slug}: handed-off clone ${taken.dir} is gone, cloning anew`);
+  let clone: CloneSuccess;
+  if (handed !== null) {
+    clone = { ok: true, dir: handed.dir, bytes: handed.bytes, elapsedMs: 0, gitEnv: handed.gitEnv };
+    console.log(`[summary job ${job.id}] ${job.slug}: reusing the clone of scan ${scanId} (${handed.bytes} B), no second clone`);
+  } else {
+    const fresh = await cloneBare(scanGitUrl(deps.config.api.gitBase, cloneToken, org!, repo!), undefined, limits, { shallow: SUMMARY_SHALLOW_CLONE });
+    if (!fresh.ok) return SUMMARY_JOB_ERRORS.clone(fresh.detail.slice(0, 120));
+    clone = fresh;
+    console.log(`[summary job ${job.id}] ${job.slug}: shallow clone ${clone.bytes} B in ${clone.elapsedMs} ms`);
+  }
   let worktree: { root: string; gitDir: string } | null = null;
+  // одна рабочая копия на все роли: первый файловый инструмент ждет `git worktree add`, остальные – готовую
+  let pending: Promise<string> | null = null;
+  const lazyRoot = (): Promise<string> => {
+    if (pending === null) {
+      const started = Date.now();
+      pending = materializeWorktree(clone.dir, clone.gitEnv).then((w) => {
+        worktree = w;
+        console.log(`[summary job ${job.id}] ${job.slug}: worktree materialized in ${Date.now() - started} ms`);
+        return w.root;
+      });
+    }
+    return pending;
+  };
   try {
-    worktree = await materializeWorktree(clone.dir);
     const res: SummaryRunResult = await (deps.runSummary ?? runSummaryPipeline)(
       {
         db: deps.db,
@@ -1008,7 +1084,7 @@ export async function processSummaryJob(deps: WorkerDeps, job: ClaimedJob): Prom
         repo: repo!,
         // обзор пользователя — впереди полосы рейтинга в семафоре провайдера
         callLlm: makeLlm(deps.config, undefined, { priority: job.triggerKind === "user" ? "interactive" : "background" }),
-        clone: { root: worktree.root, gitDir: worktree.gitDir },
+        clone: { root: lazyRoot, gitDir: clone.dir, gitEnv: clone.gitEnv },
         models: { main: deps.config.llm.mainModel, side: deps.config.llm.sideModel },
         // отладочный кулдаун (1 мс) выключает и внутренний кэш конвейера —
         // регенерация перезаписывает заметки того же скана
@@ -1023,7 +1099,11 @@ export async function processSummaryJob(deps: WorkerDeps, job: ClaimedJob): Prom
     if (res.notes > 0) return null;
     return summaryEmptyErrorOf(res);
   } finally {
-    if (worktree !== null) await removeWorktree(worktree.root, worktree.gitDir);
+    // незавершенное развертывание дожидаемся: иначе уборка снесет каталог под живым git
+    const inFlight = pending as Promise<string> | null;
+    if (inFlight !== null) await inFlight.catch(() => undefined);
+    const wt = worktree as { root: string; gitDir: string } | null;
+    if (wt !== null) await removeWorktree(wt.root, wt.gitDir);
     const cleanupError = cleanupClone(clone.dir);
     if (cleanupError) console.error(`[summary job ${job.id}] cleanup ${clone.dir}: ${cleanupError}`);
   }
