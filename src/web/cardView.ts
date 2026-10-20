@@ -385,23 +385,30 @@ const LOCKED_WHY: Record<"denied" | "pat-expired" | "check-failed" | "no-pat", s
  * Чего не хватает показателю — простыми словами, без имен файлов и терминов:
  * строка-итог под заголовком «Категории» читается без знания методики.
  */
-const WEAK_PHRASE: Record<string, (score: number) => string> = {
+const WEAK_PHRASE: Record<string, (score: number, entry: { value?: unknown; note?: string | null }) => string | null> = {
   "documentation.readme": (s) => (s === 0 ? "нет описания проекта" : "описание проекта неполное"),
   "documentation.license": () => "нет лицензии",
   "documentation.contributing": () => "нет правил для участников",
   "documentation.codeowners": () => "не назначены ответственные за код",
   "cicd.config": () => "не настроена автоматическая сборка",
-  "cicd.pass_rate": () => "сборки часто завершаются ошибкой",
+  // без значения доли – запусков нет или ни один не завершился
+  "cicd.pass_rate": (_s, e) =>
+    e.value != null ? "сборки часто завершаются ошибкой" : e.note?.startsWith("no completed runs") ? "запуски CI не завершаются" : "CI не запускается",
   "cicd.duration": () => "сборка идет долго",
   "security.density": () => "много найденных уязвимостей",
   "security.resolved": () => "найденные уязвимости не закрываются",
   "security.secrets": () => "в коде найдены пароли или ключи",
   "security.deps": () => "в зависимостях есть известные уязвимости",
+  "security.scan_missing": () => "проверка безопасности не запускалась",
   "activity.fresh": () => "давно не было изменений",
   "activity.freq": () => "изменения вносятся редко",
-  "activity.contributors": () => "над проектом работает мало людей",
-  "activity.pulls_90d": () => "мало предложений изменений",
-  "activity.releases_12m": () => "мало выпусков за год",
+  // число авторов, предложения изменений и релизы — риски для того, кто опирается
+  // на проект, а не недостаток работы автора: фраза называет риск
+  "activity.contributors": (s, e) => (e.value === 0 ? "в истории нет коммитов людей" : s === 0 ? "проект держится на одном человеке" : "проект держится на нескольких людях"),
+  "activity.pulls_90d": (s) => (s === 0 ? "изменения вносятся без предложений изменений и ревью" : "через ревью проходит мало изменений"),
+  // релизы есть, но не засчитаны (нет коммитов людей за год) – об этом уже
+  // говорит свежесть, «нет выпусков» было бы неправдой
+  "activity.releases_12m": (s, e) => (e.note ? null : s === 0 ? "нет выпусков, на которые можно опереться" : "выпуски выходят редко"),
   "issues.stale": () => "много задач без движения",
   "issues.close_days": () => "задачи закрываются медленно",
   "issues.resolution": () => "мало решенных задач",
@@ -452,8 +459,12 @@ export function categoriesSummary(card: RepoCard): string | null {
       .filter((r) => r.score !== null && r.weight !== null && r.earned !== null && r.weight > 0 && r.score < 0.5)
       .sort((a, b) => b.weight! - b.earned! - (a.weight! - a.earned!))
       .flatMap((r) => {
-        const phrase = WEAK_PHRASE[`${weakest.key}.${r.sub}`];
-        return phrase ? [phrase(r.score!)] : [];
+        const entry: { value?: unknown; note?: string | null } = card.score?.categories[weakest.key]?.submetrics[r.sub] ?? {};
+        // длительность 0 без значения — успешных сборок нет: это уже сказано
+        // долей успешных, «сборка идет долго» было бы неправдой
+        if (weakest.key === "cicd" && r.sub === "duration" && entry.value == null) return [];
+        const phrase = WEAK_PHRASE[`${weakest.key}.${r.sub}`]?.(r.score!, entry);
+        return phrase ? [phrase] : [];
       })
       .slice(0, 2);
     parts.push(`Слабее всего – ${named(weakest)}${reasons.length > 0 ? `: ${reasons.join(" и ")}` : ""}.`);

@@ -697,7 +697,7 @@
     "priority": 2,
     "action": "Заведите задачи в репозитории",
     "problem": "В разделе «Задачи» нет ни одной задачи. По ним видно, как быстро проект отвечает пользователям.",
-    "expectedImpact": "повысит балл категории «Задачи» (сейчас 6 из 100)",
+    "expectedImpact": "повысит балл категории «Задачи» (сейчас 0 из 100)",
     "factRefs": [
      "issues.stats"
     ],
@@ -1884,9 +1884,23 @@
     "channel": null
    },
    {
-    "ruleId": "readme-sections-missing",
+    "ruleId": "ci-no-steps",
     "kind": "presence",
     "priority": 2,
+    "action": "Добавьте команды в ci.yaml",
+    "problem": "Файл .sourcecraft/ci.yaml есть, но в нем нет ни одной задачи с командой, поэтому CI ничего не проверяет.",
+    "expectedImpact": "+5,6 к Repo Health Score",
+    "factRefs": [
+     "cicd.configs"
+    ],
+    "deltaScore": 5.625,
+    "opensCategory": null,
+    "channel": "cicd"
+   },
+   {
+    "ruleId": "readme-sections-missing",
+    "kind": "presence",
+    "priority": 3,
     "action": "Добавьте в README разделы «Установка», «Сборка» и «Тесты»",
     "problem": "В README нет разделов об установке, сборке и тестах. Сервис находит их по заголовкам «Установка», «Сборка» и «Тесты» или «Install», «Build» и «Test».",
     "expectedImpact": "+3,6 к HealthCraft Index",
@@ -1900,7 +1914,7 @@
    {
     "ruleId": "codeowners-missing",
     "kind": "presence",
-    "priority": 3,
+    "priority": 4,
     "action": "Добавьте файл CODEOWNERS",
     "problem": "Не указано, кто отвечает за код. С CODEOWNERS предложения изменений сразу попадают к ответственным.",
     "expectedImpact": "+3,5 к HealthCraft Index",
@@ -1914,7 +1928,7 @@
    {
     "ruleId": "contributing-missing",
     "kind": "presence",
-    "priority": 4,
+    "priority": 5,
     "action": "Добавьте файл CONTRIBUTING.md",
     "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
     "expectedImpact": "+3,5 к HealthCraft Index",
@@ -1924,20 +1938,6 @@
     "deltaScore": 3.45,
     "opensCategory": null,
     "channel": null
-   },
-   {
-    "ruleId": "ci-no-steps",
-    "kind": "presence",
-    "priority": 5,
-    "action": "Добавьте команды в ci.yaml",
-    "problem": "Файл .sourcecraft/ci.yaml есть, но в нем нет ни одной задачи с командой, поэтому CI ничего не проверяет.",
-    "expectedImpact": "CI/CD: оценка появится с запусками",
-    "factRefs": [
-     "cicd.configs"
-    ],
-    "deltaScore": null,
-    "opensCategory": null,
-    "channel": "cicd"
    },
    {
     "ruleId": "connect-appsec",
@@ -1984,9 +1984,23 @@
   ],
   "constant": [
    {
-    "ruleId": "codeowners-missing",
+    "ruleId": "ci-no-steps",
     "kind": "presence",
     "priority": 1,
+    "action": "Добавьте команды в ci.yaml",
+    "problem": "Файл .sourcecraft/ci.yaml есть, но в нем нет ни одной задачи с командой, поэтому CI ничего не проверяет.",
+    "expectedImpact": "+1,5 к Repo Health Score",
+    "factRefs": [
+     "cicd.configs"
+    ],
+    "deltaScore": 1.5,
+    "opensCategory": null,
+    "channel": "cicd"
+   },
+   {
+    "ruleId": "codeowners-missing",
+    "kind": "presence",
+    "priority": 2,
     "action": "Добавьте файл CODEOWNERS",
     "problem": "Укажите, кто отвечает за код. Пока авторов двое, хватит одной строки с вашим логином – новые предложения изменений сразу придут к вам.",
     "expectedImpact": "+1,5 к HealthCraft Index",
@@ -2000,7 +2014,7 @@
    {
     "ruleId": "contributing-missing",
     "kind": "presence",
-    "priority": 2,
+    "priority": 3,
     "action": "Добавьте файл CONTRIBUTING.md",
     "problem": "Не описано, как предложить изменения. Файл с порядком работы упростит начало новым участникам.",
     "expectedImpact": "+1,5 к HealthCraft Index",
@@ -2014,7 +2028,7 @@
    {
     "ruleId": "license-missing",
     "kind": "presence",
-    "priority": 3,
+    "priority": 4,
     "action": "Добавьте файл лицензии",
     "problem": "В репозитории нет лицензии: без нее другие не могут законно использовать код. Подойдет, например, MIT или Apache-2.0.",
     "expectedImpact": "+1,5 к HealthCraft Index",
@@ -2028,7 +2042,7 @@
    {
     "ruleId": "readme-sections-missing",
     "kind": "presence",
-    "priority": 4,
+    "priority": 5,
     "action": "Добавьте в README разделы «Установка», «Сборка» и «Тесты»",
     "problem": "В README нет разделов об установке, сборке и тестах. Сервис находит их по заголовкам «Установка», «Сборка» и «Тесты» или «Install», «Build» и «Test».",
     "expectedImpact": "+1,5 к HealthCraft Index",
@@ -2038,20 +2052,6 @@
     "deltaScore": 1.5,
     "opensCategory": null,
     "channel": null
-   },
-   {
-    "ruleId": "ci-no-steps",
-    "kind": "presence",
-    "priority": 5,
-    "action": "Добавьте команды в ci.yaml",
-    "problem": "Файл .sourcecraft/ci.yaml есть, но в нем нет ни одной задачи с командой, поэтому CI ничего не проверяет.",
-    "expectedImpact": "CI/CD: оценка появится с запусками",
-    "factRefs": [
-     "cicd.configs"
-    ],
-    "deltaScore": null,
-    "opensCategory": null,
-    "channel": "cicd"
    },
    {
     "ruleId": "connect-appsec",
@@ -2103,11 +2103,11 @@
     "priority": 1,
     "action": "Добавьте команды в ci.yaml",
     "problem": "Файл .sourcecraft/ci.yaml есть, но в нем нет ни одной задачи с командой, поэтому CI ничего не проверяет.",
-    "expectedImpact": "CI/CD: оценка появится с запусками",
+    "expectedImpact": "+2,3 к Repo Health Score",
     "factRefs": [
      "cicd.configs"
     ],
-    "deltaScore": null,
+    "deltaScore": 2.25,
     "opensCategory": null,
     "channel": "cicd"
    },

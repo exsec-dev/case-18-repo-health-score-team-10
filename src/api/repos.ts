@@ -5,7 +5,7 @@
 // отдельный массив, иначе «нет данных» оказалось бы лучшим или худшим
 // результатом в зависимости от направления сортировки.
 import type { Database } from "bun:sqlite";
-import { CHANNEL_KINDS, DISPLAY_KINDS, OPTIONAL_KINDS, PUBLIC_KINDS, computeFromFacts, effectiveFacts, totalCapFlags, totalsFromCategories, type CategoryScore } from "../score/compute";
+import { CHANNEL_KINDS, DISPLAY_KINDS, OPTIONAL_KINDS, PUBLIC_KINDS, appsecNeverScannedAt, computeFromFacts, effectiveFacts, totalCapFlags, totalsFromCategories, type CategoryScore } from "../score/compute";
 import { authorsOf, orderRecommendations, recommendFromFacts, recommendationParams, recommendationText, round4, type DeltaEvaluator } from "../score/recommend";
 import { categoryOf, parseFactValue, scrubDetail } from "../collectors/facts";
 import { isOwnRepo, NO_PAT_ACCESS, visibilityOf, type AccessRepo, type AccessResult, type ChannelAccess } from "../auth/access";
@@ -1388,8 +1388,11 @@ export function getRepoCard(
   const channel = channelSources(db, r.id);
   const channelFacts = new Map<string, unknown>();
   for (const f of [...channel.cicdFacts, ...channel.securityFacts]) if (f.status === "ok") channelFacts.set(f.key, parseFactValue(f.value));
+  // ok-находок нет ни в одном скане — AppSec мог ответить «проверка не запускалась»:
+  // то же правило, что у сохраненной оценки (effectiveFacts)
+  const appsecNeverScanned = channel.securityScanId === null && appsecNeverScannedAt(db, r.id, Number.MAX_SAFE_INTEGER);
   const categoryOfFacts = (facts: Map<string, unknown>, key: "cicd" | "security"): CategoryScore =>
-    computeFromFacts(facts, { scanId: 0, repoId: r.id }, new Date(publicRow.computed_at)).categories[key];
+    computeFromFacts(facts, { scanId: 0, repoId: r.id, appsecNeverScanned }, new Date(publicRow.computed_at)).categories[key];
   const publicCats = JSON.parse(publicRow.categories) as Record<string, CategoryScore>;
   const shownCats = {} as Record<CategoryKey, CategoryScore>;
   for (const key of CATEGORY_ORDER) shownCats[key] = publicCats[key] ?? { score: null, submetrics: {} };

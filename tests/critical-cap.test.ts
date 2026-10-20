@@ -49,7 +49,7 @@ const input = { scanId: 1, repoId: 1 };
 
 describe("кап Repo Health Score за открытые критичные находки (4.5.0)", () => {
   test("версия модели поднята", () => {
-    expect(MODEL_VERSION).toBe("4.6.0-hci");
+    expect(MODEL_VERSION).toBe("4.7.0-hci");
     expect(CRITICAL_FINDINGS_TOTAL_CAP).toBe(69);
   });
 

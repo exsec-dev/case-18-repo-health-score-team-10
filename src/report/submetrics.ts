@@ -152,6 +152,7 @@ const ciConfig: Formatter = (v) => {
   const c = obj(v);
   if (!c) return null;
   if (c.has_ci_yaml !== true) return "нет ci.yaml";
+  if (typeof c.has_steps !== "boolean" || typeof c.steps_note === "string") return "ci.yaml не удалось разобрать";
   return c.has_steps === true ? "ci.yaml с командами" : "ci.yaml без команд";
 };
 
@@ -298,6 +299,7 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   // без двойного отрицания: «Отсутствие критичных утечек – нет» читалось бы наоборот
   "security.secrets": { title: "Критичные утечки секретов", unit: "найдены/не найдены", format: (v) => (typeof v === "boolean" ? (v ? "найдены" : "не найдены") : null) },
   // значение — DepsSubmetricValue (compute.ts): уязвимые пакеты SCA против графа lock-файлов
+  "security.scan_missing": { title: "Проверка AppSec не запускалась", unit: "проверки AppSec", format: () => "проверок нет" },
   "security.deps": { title: "Уязвимые зависимости", unit: "пакеты: прямые и транзитивные", format: vulnerableDeps },
   "activity.fresh": { title: "Свежесть последнего коммита человека", unit: "дни на момент скана", format: daysSince },
   "activity.freq": { title: "Частота коммитов", unit: "коммитов в месяц", format: (v) => (isNum(v) ? `${num(v)} в месяц` : null) },
@@ -381,7 +383,9 @@ export interface NoteText {
 export function submetricNote(category: string, sub: string, note: string | null | undefined): NoteText | null {
   if (typeof note !== "string" || note === "") return null;
   const key = `${category}.${sub}`;
-  if (key === "issues.tracker_unused") return { remark: "Задач нет – категория получает минимальный балл." };
+  if (key === "issues.tracker_unused") return { remark: "Задач нет – категория получает 0." };
+  if (key === "security.scan_missing") return { remark: "Проверки AppSec не было – категория получает 0." };
+  if (key === "activity.releases_12m" && note.startsWith("releases not counted")) return { remark: "Релизы не засчитаны: за год нет коммитов людей." };
   // справочные показатели динамики — причина «нет данных» словами
   if (key === "cicd.stability" || key === "issues.backlog_trend" || key === "issues.monthly_flow") {
     // факты собраны старым сборщиком — без упоминания внутренних версий
@@ -392,7 +396,9 @@ export function submetricNote(category: string, sub: string, note: string | null
     if (key === "cicd.stability" && note.startsWith("runs no-data")) return { value: "запуски недоступны" };
     return null;
   }
+  if (key === "cicd.config" && note.startsWith("ci.yaml not parsed")) return { remark: "Файл ci.yaml не удалось разобрать – CI оценен по запускам." };
   if (key === "cicd.pass_rate" || key === "cicd.duration") {
+    if (note.startsWith("no completed runs")) return { value: "завершенных запусков нет" };
     if (note.startsWith("no declared CI")) return { value: "CI не настроен" };
     if (note.startsWith("runs no-data")) return { value: "запуски недоступны" };
     // «не запускался» — словами: «0%» читалось бы как «все запуски упали»
@@ -400,6 +406,7 @@ export function submetricNote(category: string, sub: string, note: string | null
     if (note === "no runs") return { value: "CI не запускался" };
     if (note.startsWith("no runs within a year")) return { value: "за год не запускался" };
     if (note.startsWith("no recent runs")) return { value: "нет запусков за год" };
+    if (note.startsWith("no successful runs")) return { value: "успешных запусков нет" };
     return null;
   }
   // открытые задачи есть, закрытых нет — худший балл, словами

@@ -57,7 +57,7 @@ describe("А1 (блок А): полный отчет считает ОБА по�
     const { md, model } = report("full");
     const hero = heroOf(model);
     expect({ left: hero.label, right: hero.secondary?.label }).toEqual({ left: "HealthCraft Index", right: "Repo Health Score" });
-    expect({ leftValue: hero.value, rightValue: hero.secondary?.value }).toEqual({ leftValue: 62, rightValue: 62 }); // открытая critical: Безопасность не выше 40
+    expect({ leftValue: hero.value, rightValue: hero.secondary?.value }).toEqual({ leftValue: 60, rightValue: 61 }); // открытая critical: Безопасность не выше 40
     // строка-пояснение одна и начинается с публичного показателя
     expect(hero.notes.filter((n) => n.info === true)).toHaveLength(1);
     expect(hero.notes.at(-1)!.line.map((f) => f.text).join("")).toStartWith("HealthCraft Index считается по открытым данным");
@@ -84,9 +84,9 @@ describe("А1 (блок А): полный отчет считает ОБА по�
     // показатель назван подзаголовком, в шапке столбца его нет
     expect(weightColumns(model)).toEqual(["Вес", "Вес"]);
     const appendix = md.slice(md.indexOf("## Приложение"));
-    expect(appendix).toContain("| **HealthCraft Index 62** | сумма по 4 открытым категориям: балл × вес, приложение А |");
-    expect(appendix).toContain("| **Repo Health Score 62** | сумма по 6 категориям: балл × вес, приложение А |");
-    expect(appendix.indexOf("**HealthCraft Index 62**")).toBeLessThan(appendix.indexOf("**Repo Health Score 62**"));
+    expect(appendix).toContain("| **HealthCraft Index 60** | сумма по 4 открытым категориям: балл × вес, приложение А |");
+    expect(appendix).toContain("| **Repo Health Score 61** | сумма по 6 категориям: балл × вес, приложение А |");
+    expect(appendix.indexOf("**HealthCraft Index 60**")).toBeLessThan(appendix.indexOf("**Repo Health Score 61**"));
     // строки категорий и подметрик — одинарные: балл категории у обеих шкал один
     expect(appendix.match(/\| \*\*Документация 55\*\* \|/g) ?? []).toHaveLength(1);
     expect(appendix.match(/\| Лицензия: есть \|/g) ?? []).toHaveLength(1);
@@ -259,7 +259,7 @@ describe("А9: плотность находок пересчитывается 
   test("full: «38 на 10 тыс. строк» разложено на веса важности и строки кода", () => {
     const { md } = report("full");
     const security = md.slice(md.indexOf("### Безопасность"), md.indexOf("### Активность"));
-    expect(security).toContain("| Плотность находок | 38 на 10 тыс. строк (действие 1) | 10 | 40% |");
+    expect(security).toContain("| Плотность находок | 38 на 10 тыс. строк (действие 1) | 1 | 40% |");
     expect(security).toContain("Находки считаются с весом важности: критичная 1 × 8, высокая 1 × 4, средняя 2 × 2, низкая 3 × 1 = 19 на 5000 строк кода, то есть 38 на 10 тыс. строк.");
   });
 });

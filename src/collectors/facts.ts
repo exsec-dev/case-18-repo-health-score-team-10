@@ -75,7 +75,7 @@ export const KINDS = {
   // flow – 6 окон по 30 дней от старых к новым; окна раньше complete_since
   // (список обрезан лимитом страниц) получают null-счетчики
   "issues.stats":
-    "{open,in_progress?,in_progress_note?,closed,closed_instant?,closed_counted?,median_close_days,stale_90d,fetched_count,flow?:{window_days,windows:[{from,created,closed,instant}],complete_since?}}",
+    "{open,in_progress?,in_progress_note?,closed,closed_instant?,closed_counted?,median_close_days,stale_90d,fetched_count,closed_days?,closed_linked_pr?,closed_by_other?,flow?:{window_days,windows:[{from,created,closed,instant}],complete_since?}}",
   // старые сканы вместо answered/censored пишут with_comments
   "issues.comments_sample":
     "{issues,answered?,censored?,with_comments?,median_first_comment_delay_hours,delays_hours:[...]}",

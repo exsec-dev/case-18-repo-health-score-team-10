@@ -41,8 +41,8 @@ const ctx = submetricContext(NOW.toISOString());
 const noDelta = () => ({ delta: 0, reason: null });
 const ids = (recs: Recommendation[]) => recs.map((r) => r.ruleId);
 
-test("модель — 4.6.0-hci", () => {
-  expect(MODEL_VERSION).toBe("4.6.0-hci");
+test("модель — 4.7.0-hci", () => {
+  expect(MODEL_VERSION).toBe("4.7.0-hci");
 });
 
 describe("Н3 → В5.5 (М2): «кода нет» — балл 0 с причиной, не «нет данных»", () => {
@@ -151,7 +151,7 @@ describe("Р2: сжатие малой выборки — по закрытым,
     const one = score(facts({ "issues.stats": { open: 0, closed: 1, closed_counted: 1, median_close_days: 1, stale_90d: 0, fetched_count: 1 } }));
     const spam = score(facts({ "issues.stats": { open: 9, closed: 1, closed_counted: 1, median_close_days: 1, stale_90d: 0, fetched_count: 10 } }));
     expect(spam.categories.issues.score!).toBeLessThanOrEqual(one.categories.issues.score! + 1e-9);
-    expect(spam.categories.issues.adjustment).toEqual({ kind: "small-sample", n: 1, full: 10, raw: expect.any(Number), floor: 6 });
+    expect(spam.categories.issues.adjustment).toEqual({ kind: "small-sample", n: 1, full: 10, raw: expect.any(Number), floor: 0 });
   });
 
   test("Р2: мгновенно закрытые не входят в долю решенных; у старых фактов — все закрытые", () => {
@@ -174,7 +174,7 @@ describe("Н5: сжатие объяснено и таблица сходитс�
     expect(adj.kind).toBe("small-sample");
     // сумма строк таблицы (сырой балл) + строка поправки = итог
     expect(adj.raw + (cat.score! - adj.raw)).toBeCloseTo(cat.score!, 9);
-    expect(cat.score!).toBeCloseTo(6 + (adj.raw - 6) * 0.3, 9);
+    expect(cat.score!).toBeCloseTo(adj.raw * 0.3, 9);
   });
 });
 
@@ -222,10 +222,11 @@ describe("Н14б: тексты CI и AppSec", () => {
     expect(CI_RUNS_CAP_TEXT).not.toContain("запусков не было");
   });
 
-  test("Н14б: запуски идут, завершенных нет — своя причина, не «не видны»", () => {
+  test("Н14б (4.7.0): ни один запуск не завершен — как «не запускался» (30), а не «нет данных»", () => {
     const s = score(facts({ "cicd.runs": { runs_count: 0, runs_total: 2, last_status: null, success_rate: null, duration_p50: null } }));
-    expect(s.categories.cicd.score).toBeNull();
-    expect(noDataReason("cicd", s.categories.cicd.no_data)).toBe("Запуски CI идут, завершенных пока нет – категорию не оцениваем.");
+    expect(s.categories.cicd.score).toBeCloseTo(30, 9);
+    expect(submetricShownValue("cicd", "pass_rate", s.categories.cicd.submetrics.pass_rate!, ctx)).toBe("завершенных запусков нет");
+    expect(submetricShownValue("cicd", "duration", s.categories.cicd.submetrics.duration!, ctx)).toBe("завершенных запусков нет");
   });
 
   test("Н14б (D12): «Находки AppSec есть…» — только при находках; без находок категория оценена", () => {
@@ -331,15 +332,18 @@ describe("Н7: рекомендации — те же условия, что б�
   // «разберите зависшие» – и при 0 засчитанных закрытых (закрытие поднимет балл)
   test("Н7 + Р2 → К6: при 0 закрытых задач (≥ 1 ч) — совет по зависшим есть, «ускорьте закрытие» нет", () => {
     const ok = facts({ "issues.stats": { open: 16, closed: 3, closed_instant: 3, closed_counted: 0, median_close_days: null, stale_90d: 9, fetched_count: 19 } });
-    expect(score(ok).categories.issues.score).toBe(6);
-    expect(ids(recommendFromFacts(ok, { delta: noDelta, issuesScore: 6, categoryScores: { issues: 6 } })).filter((x) => x === "reduce-stale-issues" || x === "speed-up-issue-close")).toEqual(["reduce-stale-issues"]);
+    expect(score(ok).categories.issues.score).toBe(0);
+    expect(ids(recommendFromFacts(ok, { delta: noDelta, issuesScore: 0, categoryScores: { issues: 0 } })).filter((x) => x === "reduce-stale-issues" || x === "speed-up-issue-close")).toEqual(["reduce-stale-issues"]);
   });
 
-  test("Н8: запуски видны, но все идут — CI-правило без числа (иначе Δ дала бы перенормировка)", () => {
+  test("Н8 (4.7.0): запуски видны, но ни один не завершен — у CI-правила настоящий прирост: CI после правки 30", () => {
     const ok = facts({ "cicd.configs": { paths: [], has_ci_yaml: false, has_steps: false }, "cicd.runs": { runs_count: 0, runs_total: 4 } });
     const rec = recommendFromFacts(ok, { delta: () => ({ delta: 9.6, reason: null }), issuesScore: 50 }).find((r) => r.ruleId === "ci-missing")!;
-    expect(rec.deltaScore).toBeNull();
-    expect(rec.expectedImpact).toBe("CI/CD: оценка появится с запусками");
+    expect(rec.deltaScore).toBe(9.6);
+    // со шагами и без завершенных запусков – совет добиться завершения
+    const declared = facts({ "cicd.runs": { runs_count: 0, runs_total: 4 } });
+    const pending = recommendFromFacts(declared, { delta: noDelta, issuesScore: 50 }).find((r) => r.ruleId === "ci-never-ran")!;
+    expect(pending.action).toBe("Добейтесь завершения запусков CI");
   });
 
   test("Н7 (D11): CI заявлен, запуски видны, их 0 — совет «Запустите CI»", () => {
@@ -411,16 +415,16 @@ describe("Н13: зона — от устойчиво округленного б
 });
 
 describe("Н15: мертвые ветки и точные константы", () => {
-  test("Н15: ISSUES_TRACKER_UNUSED — точное 6, равное вычислимому минимуму анкеров", () => {
-    expect(ISSUES_TRACKER_UNUSED).toBe(6);
-    expect(ISSUES_ANCHOR_MIN).toBeCloseTo(6, 12);
+  test("Н15: ISSUES_TRACKER_UNUSED — точное 0, равное вычислимому минимуму анкеров (4.7.0)", () => {
+    expect(ISSUES_TRACKER_UNUSED).toBe(0);
+    expect(ISSUES_ANCHOR_MIN).toBe(0);
   });
 
   test("Н15: anchorScore и contributorsScore без недостижимых веток — значения прежние", () => {
     const a = [{ x: 0, y: 1 }, { x: 10, y: 0.5 }, { x: 20, y: 0 }];
     expect([-1, 0, 5, 10, 15, 20, 25].map((x) => anchorScore(a, x))).toEqual([1, 1, 0.75, 0.5, 0.25, 0, 0]);
-    expect(contributorsScore(1)).toBeCloseTo(0.2, 12);
-    expect(contributorsScore(0)).toBeCloseTo(0.2, 12);
+    expect(contributorsScore(1)).toBe(0);
+    expect(contributorsScore(0)).toBe(0);
   });
 
   test("Н15: заметка «0 пометок» — число 0%, отдельной ветки «пометок нет» нет", () => {

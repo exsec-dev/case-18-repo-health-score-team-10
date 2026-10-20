@@ -28,7 +28,7 @@ export interface DerivedMetrics {
   robotRatioV2: number | null;
   /** только показ: доля sync + authors/committers, без веса */
   mirrorLikeness: { sync_share: number; authors: number; committers: number } | null;
-  /** авторы-люди (у соло пол 0.2): email коммитов без robot/sync */
+  /** авторы-люди: email коммитов (без адреса — имя) без robot/sync */
   contributorsTotal: number | null;
   /**
    * Bus factor — сколько авторов покрывают половину коммитов людей за окно;
@@ -112,7 +112,9 @@ export function deriveMetrics(ok: Map<string, unknown>, now: Date): DerivedMetri
       // дата автора из будущего не делает репо «свежим навсегда»
       if (excluded || at === null || at > now.getTime() + DAY_MS) return;
       humanTs.push(at);
-      if (email) humanEmails.add(email);
+      // автор без адреса (импорт, зеркало) — по имени, как в bus factor
+      const who = email || (e.author?.name ?? "").toLowerCase();
+      if (who) humanEmails.add(who);
       activeMonth.add(new Date(at).toISOString().slice(0, 7));
     });
     const from90 = now.getTime() - 90 * DAY_MS;

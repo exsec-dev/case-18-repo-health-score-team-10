@@ -16,9 +16,9 @@ const fmt = (key: string, value: unknown, ctx = AT): string => {
 };
 
 /** Ключи подметрик, которые выдаёт скоринг на фактах (все категории). */
-function computedKeys(facts: { key: string; value: unknown }[]): string[] {
+function computedKeys(facts: { key: string; value: unknown }[], extra: { appsecNeverScanned?: boolean } = {}): string[] {
   const map = new Map(facts.map((f) => [f.key, f.value]));
-  const cats = computeFromFacts(map, { scanId: 0, repoId: 0 }, NOW).categories as Record<string, { submetrics: Record<string, unknown> }>;
+  const cats = computeFromFacts(map, { scanId: 0, repoId: 0, ...extra }, NOW).categories as Record<string, { submetrics: Record<string, unknown> }>;
   return Object.entries(cats).flatMap(([cat, c]) => Object.keys(c.submetrics).map((sub) => `${cat}.${sub}`));
 }
 
@@ -36,10 +36,12 @@ describe("П4.2: полнота словаря", () => {
     const tracker = cardFacts().map((f) => (f.key === "issues.stats" ? { key: "issues.stats", value: { open: 0, closed: 0 } } : f));
     // PR нет — одна строка «PR не используются» (своя ветка ключа)
     const noPulls = [...cardFacts(), { key: "activity.pr_review", value: { pulls: 0, sampled: 0 } }];
-    const produced = [...new Set([...computedKeys(full), ...computedKeys(tracker), ...computedKeys(noPulls)])].sort();
+    // проверка AppSec не запускалась — Безопасность 0 одной строкой (4.7.0)
+    const noScan = computedKeys(cardFacts().filter((f) => f.key !== "appsec.findings"), { appsecNeverScanned: true });
+    const produced = [...new Set([...computedKeys(full), ...computedKeys(tracker), ...computedKeys(noPulls), ...noScan])].sort();
     // среди них справочные (без веса): bus factor, стабильность CI, динамика
     // бэклога, поток задач, 5 строк review PR и карта владельцев
-    expect(produced.length).toBe(40);
+    expect(produced.length).toBe(41);
     expect(Object.keys(SUBMETRICS).sort()).toEqual(produced);
     for (const key of produced) {
       const spec = SUBMETRICS[key]!;

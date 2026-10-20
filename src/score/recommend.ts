@@ -98,6 +98,10 @@ export type ReadmeSection = "install" | "build" | "test";
 
 /** Параметры шаблона — все восстанавливаются из фактов и баллов того же скана. */
 export interface RecommendationParams {
+  /** ci-never-ran: запуски есть, но ни один не завершился */
+  pending?: boolean;
+  /** connect-appsec: балл Безопасности (0 — проверка не запускалась) */
+  securityScore?: number | null;
   /** presence: прирост показателя (знаковый) */
   delta?: number;
   /** presence: почему прирост 0 */
@@ -361,6 +365,14 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
         expectedImpact: `${categoryImpact("Задачи")} (сейчас ${fmtScore(p.issuesScore)} из 100)`,
       };
     case "connect-appsec":
+      // проверка не запускалась — Безопасность 0 (подтвержденное отсутствие)
+      if (p.securityScore === 0) {
+        return {
+          action: "Запустите проверку AppSec",
+          problem: "Проверка AppSec по репозиторию ни разу не запускалась, поэтому Безопасность получает 0. Запустите ее в разделе AppSec репозитория в SourceCraft.",
+          expectedImpact: `${categoryImpact("Безопасность")} (сейчас 0 из 100)`,
+        };
+      }
       return {
         action: "Подключите проверку AppSec",
         problem: "Данных AppSec по репозиторию нет: проверка не подключена или не завершена. Если она уже идет, проверьте, что у токена есть право читать результаты AppSec.",
@@ -375,7 +387,14 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
     case "fix-red-runs":
       return { action: "Почините CI", problem: redRunsProblem(p), expectedImpact: categoryImpact("CI/CD") };
     case "ci-never-ran":
-      // CI заявлен, запуски видны, а их 0
+      // CI заявлен, запуски видны, а завершенных 0
+      if (p.pending === true) {
+        return {
+          action: "Добейтесь завершения запусков CI",
+          problem: "Файл .sourcecraft/ci.yaml есть, но ни один запуск CI не завершился: все отменены, пропущены или еще идут. Изменения не проверяются автоматически.",
+          expectedImpact: categoryImpact("CI/CD"),
+        };
+      }
       return {
         action: "Запустите CI",
         problem: "Файл .sourcecraft/ci.yaml с командами есть, но CI ни разу не запускался: изменения не проверяются автоматически.",
@@ -583,7 +602,7 @@ export function recommend(db: Database, scanId: number, opts: RecommendOptions =
   // Score (с капом 49). Один вызов computeFromFacts на правило; подмены –
   // таблица `presencePatches`.
   const now = opts.now ?? new Date(scores.computedAt);
-  const input = { scanId, repoId: scores.repoId, stale: eff.stale, staleCats: eff.staleCats, emptyRepo: eff.emptyRepo };
+  const input = { scanId, repoId: scores.repoId, stale: eff.stale, staleCats: eff.staleCats, emptyRepo: eff.emptyRepo, appsecNeverScanned: eff.appsecNeverScanned };
   const base = computeFromFacts(ok, input, now);
   const realDelta = factsDeltaEvaluator(ok, input, now, base);
   const categoryScores = Object.fromEntries(Object.entries(base.categories).map(([k, c]) => [k, c.score])) as Record<CategoryKey, number | null>;
@@ -701,10 +720,6 @@ export function presencePatches(ok: Map<string, unknown>, opts: { pub: boolean; 
   if (cicdCfg && !ciUnparsedOf(cicdCfg) && !(cicdCfg.has_ci_yaml === true && cicdCfg.has_steps === true)) {
     const hasYaml = cicdCfg.has_ci_yaml === true;
     const runsFact = ok.get("cicd.runs");
-    // запуски видны, но все идут (ни одного завершенного): CI после правки будет
-    // «нет данных», и число дала бы перенормировка, а не CI
-    const rp = runsFact as { runs_count?: unknown; runs_total?: unknown } | undefined;
-    const runsPending = rp !== undefined && rp.runs_count === 0 && typeof rp.runs_total === "number" && rp.runs_total > 0;
     out.push({
       ruleId: hasYaml ? "ci-no-steps" : "ci-missing",
       factRefs: ["cicd.configs"],
@@ -714,7 +729,7 @@ export function presencePatches(ok: Map<string, unknown>, opts: { pub: boolean; 
       channel: "cicd",
       // запуски не видны – CI «нет данных» при любом конфиге, и совет не обещает
       // числа: прирост дала бы перенормировка, а не CI
-      noRuns: runsFact === undefined || runsPending,
+      noRuns: runsFact === undefined,
     });
   }
   return out;
@@ -775,9 +790,10 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
   if (!ok.has("appsec.findings")) {
     // нейтральный текст: рекомендацию видит только зритель с доступом к Security,
     // а данных AppSec у скана нет – ни подключения, ни скана
-    activation.push(act("connect-appsec", "security", ["appsec.findings"], {}, "appsec"));
+    activation.push(act("connect-appsec", "security", ["appsec.findings"], { securityScore: ctx.categoryScores?.security ?? null }, "appsec"));
   }
-  if (!runsFact && cicdCfg?.has_ci_yaml === true && cicdCfg?.has_steps === true) {
+  // запуски не видны: с ними CI оценится и при неразобранном ci.yaml
+  if (!runsFact && cicdCfg?.has_ci_yaml === true && (cicdCfg?.has_steps === true || ciUnparsed)) {
     activation.push(act("grant-ci-runs", "cicd", ["cicd.runs", "cicd.configs"], {}, "cicd"));
   }
 
@@ -786,11 +802,14 @@ export function recommendFromFacts(ok: Map<string, unknown>, ctx: RecommendFacts
     scoreRules.push(mkScore(ruleId, factRefs, recommendationParams(ruleId, ok), channel));
   // CI-правила – только при ci.yaml со шагами и оцененной CI (те же условия, что
   // у балла): без конфига «почините CI» формула вырастить не может
-  const ciDeclared = cicdCfg?.has_ci_yaml === true && cicdCfg.has_steps === true && !ciUnparsed;
+  // ci.yaml не разобран, но CI оценен по запускам – советы по запускам те же
+  const ciDeclared = cicdCfg?.has_ci_yaml === true && (cicdCfg.has_steps === true || ciUnparsed);
   const rc = runsFact as { runs_count?: unknown; runs_total?: unknown } | undefined;
-  if (ciDeclared && rc !== undefined && rc.runs_count === 0 && !(typeof rc.runs_total === "number" && rc.runs_total > 0) && scored("cicd")) {
-    // запуски видны, их 0 – «CI заявлен, но не запускался»
-    score("ci-never-ran", ["cicd.runs", "cicd.configs"], "cicd");
+  if (ciDeclared && rc !== undefined && rc.runs_count === 0 && scored("cicd")) {
+    // запуски видны, завершенных 0 – «CI заявлен, но не запускался» (или ни один
+    // запуск не завершился: все отменены, пропущены или идут)
+    const pending = typeof rc.runs_total === "number" && rc.runs_total > 0;
+    scoreRules.push(mkScore("ci-never-ran", ["cicd.runs", "cicd.configs"], { ...recommendationParams("ci-never-ran", ok), pending }, "cicd"));
   }
   if (ciDeclared && scored("cicd") && runsFact && typeof (runsFact as { runs_count?: unknown }).runs_count === "number" && (runsFact as { runs_count?: number }).runs_count! > 0) {
     const rf = runsFact as { last_status?: unknown; success_rate?: unknown; weighted_success_rate?: unknown; duration_p50?: unknown };

@@ -314,7 +314,7 @@ export async function collectAppsec(
     return noData("access", `scans/latest ${latest.status}`);
   }
   if (latest.status === 404) {
-    return noData("no-scan", "no scan has been run for this repository");
+    return noData("no-scan", APPSEC_NEVER_SCANNED);
   }
   if (latest.status !== 200) {
     return noData("incomplete", `scans/latest ${latest.status}${latest.error ? `: ${latest.error}` : ""}`);
@@ -566,6 +566,12 @@ export async function collectAppsec(
   };
   return { fact: okFact("appsec.findings", value, "appsec:api", now.toISOString()), noData: null };
 }
+
+/**
+ * Причина no-scan «проверка ни разу не запускалась» — в отличие от «скан не
+ * завершен» это подтвержденное отсутствие: расчет ставит Безопасности 0.
+ */
+export const APPSEC_NEVER_SCANNED = "no scan has been run for this repository";
 
 function noData(reason: AppsecNoData["reason"], detail: string, extra: { bucket?: string; attempts?: number } = {}): AppsecCollectOutcome {
   return { fact: null, noData: { reason, detail, ...extra } };

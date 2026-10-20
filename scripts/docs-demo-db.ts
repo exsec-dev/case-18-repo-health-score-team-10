@@ -459,7 +459,9 @@ interface RepoSpec {
 function tasktracker(): Params {
   const p: Params = {
     git: "ok",
-    authors: 3,
+    // 5, а не 3: с 4.7.0 у «Числа авторов» нет соло-пола, и с 3 авторами
+    // подбор свежести не дотягивает «Активность» до 69,41
+    authors: 5,
     commits90: 20,
     lastDays: 30,
     older: 140,
@@ -488,6 +490,10 @@ function tasktracker(): Params {
   };
   // свежесть подбирается так, чтобы «Активность» была ровно 69,408…
   p.lastDays = tune(30.44, 60, 69.40816326530612, (x) => categoryScore({ ...p, lastDays: x }, "activity"));
+  // медиана закрытия подбирается так, чтобы «Задачи» были 41,5 (с 4.7.0 доля
+  // зависших 60% дает 40, а не 42)
+  const closeDays = tune(30, 120, 41.5, (x) => categoryScore({ ...p, issues: { ...(p.issues as Exclude<Params["issues"], "empty">), closeDays: x } }, "issues"));
+  p.issues = { ...(p.issues as Exclude<Params["issues"], "empty">), closeDays: Math.round(closeDays * 10) / 10 };
   return p;
 }
 
@@ -495,7 +501,8 @@ function tasktracker(): Params {
 function weatherBot(): Params {
   const p: Params = {
     git: "ok",
-    authors: 5,
+    // 7, а не 5: без соло-пола (4.7.0) иначе «Активность» не дотягивается до 81,2
+    authors: 7,
     commits90: 49,
     lastDays: 2,
     older: 260,

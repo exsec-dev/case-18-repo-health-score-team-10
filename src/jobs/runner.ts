@@ -16,7 +16,7 @@ import { COLLECTOR_VERSION, encodeFactValue, Fact, noDataFact } from "../collect
 import { cloneWithDegrade, cleanupClone, extractFacts, gitFactsNoData } from "../collectors/git";
 import { ScClient, makeScClient } from "../collectors/http";
 import { RestCollectResult, collectRestFacts } from "../collectors/rest";
-import { AppsecClient, collectAppsec, makeAppsecClient } from "../collectors/appsec";
+import { APPSEC_NEVER_SCANNED, AppsecClient, collectAppsec, makeAppsecClient } from "../collectors/appsec";
 import { DEFAULT_SCAN, ScanCloneLimits, ScanConfig } from "../config";
 import { compute, PUBLIC_KINDS, ratingEligible, scanStatusOf, writeScores } from "../score/compute";
 import { bumpRescoreCursor } from "../score/rescore";
@@ -220,6 +220,25 @@ function insertFacts(db: Database, scanId: number, facts: Fact[]): void {
  * git-фатал → факты no-data (limits/other), REST-фатал → bad-channel
  * риск-факты; статус скана пересчитывается по фактам.
  */
+/**
+ * Факт «нет данных AppSec» скана. `scans/latest` 404 бывает и без прав, поэтому
+ * «проверка не запускалась» (Безопасность 0) пишется, только если права
+ * подтверждает другой канал того же токена, как в appsecOn404 (auth/access.ts):
+ * видны запуски CI или виден приватный репо. Иначе причина — access.
+ */
+export function appsecNoDataFact(
+  noData: { reason?: string; detail?: string } | null | undefined,
+  scanFacts: Fact[],
+  visibility: string | null,
+  at: string,
+): Fact {
+  const corroborated = scanFacts.some((f) => f.key === "cicd.runs" && f.status === "ok") || visibility === "private";
+  if (noData?.reason === "no-scan" && noData.detail === APPSEC_NEVER_SCANNED && !corroborated) {
+    return noDataFact("appsec.findings", "access", "appsec:api", "scans/latest 404 and rights not corroborated by CI or private repo access", at);
+  }
+  return noDataFact("appsec.findings", (noData?.reason as "access" | "no-scan" | "incomplete") ?? "other", "appsec:api", noData?.detail ?? "", at);
+}
+
 export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = {}): Promise<ScanResult> {
   const userToken = opts.userToken ? opts.userToken : null;
   const started = new Date();
@@ -368,8 +387,9 @@ export async function runScan(deps: ScanDeps, slug: string, opts: ScanOptions = 
         facts.push(out.fact);
         appsecChannel = "ok";
       } else {
-        appsecChannel = `no-data(${out.noData?.reason ?? "other"})`;
-        facts.push(noDataFact("appsec.findings", (out.noData?.reason as "access" | "no-scan" | "incomplete") ?? "other", "appsec:api", out.noData?.detail ?? "", startedAt));
+        const nd = appsecNoDataFact(out.noData, facts, restRepoMeta?.visibility ?? null, startedAt);
+        appsecChannel = `no-data(${(nd.value as { reason: string }).reason})`;
+        facts.push(nd);
         // ретраи корзины исчерпаны: причина пишется в status_detail скана и через
         // факт доходит до карточки. В счет частичная выборка Security не идет —
         // она могла бы только льстить оценке, поэтому no-data

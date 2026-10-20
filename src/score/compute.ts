@@ -13,6 +13,7 @@ import { categoryOf, parseFactValue } from "../collectors/facts";
 import { rootHasNoSource } from "../collectors/source-path";
 import { AppsecFindingsValue, DocsPresenceValue, DocsReadmeValue } from "./fact-shapes";
 import type { LockGraphFactValue } from "../collectors/lockgraph";
+import { APPSEC_NEVER_SCANNED } from "../collectors/appsec";
 import { matchVulnerableDependencies } from "./deps-graph";
 import { DerivedMetrics, deriveMetrics, issuesClosedCounted } from "./derived";
 import { ciStability, issueDynamics } from "./dynamics";
@@ -35,6 +36,7 @@ import {
   FIRST_COMMENT_H,
   FRESH_MONTHS,
   ISSUES_FULL_SAMPLE,
+  ISSUES_SPREAD_DAYS,
   ISSUES_TRACKER_UNUSED,
   MODEL_VERSION,
   OLD_SHARE,
@@ -74,7 +76,7 @@ export interface SubmetricScore {
  */
 export type CategoryAdjustment =
   /** Задачи: закрытых (проживших ≥ 1 ч) меньше полной выборки — балл сжат к минимуму */
-  | { kind: "small-sample"; n: number; full: number; raw: number; floor: number }
+  | { kind: "small-sample"; n: number; full: number; raw: number; floor: number; days?: number; daysFull?: number }
   /** Безопасность: открытые находки critical/high — потолок категории */
   | { kind: "open-findings-cap"; level: "critical" | "high"; limit: number; raw: number }
   /** Состояние кода: строк кода меньше `full` — балл сжат к нейтрали `center` */
@@ -312,6 +314,33 @@ export interface EffectiveFacts {
   emptyRepo: boolean;
   /** справочные факты скана не ok — kind → причина (`access`, `bad-channel`…) */
   displayMissing?: Record<string, string>;
+  /**
+   * AppSec ответил, что проверка по репозиторию ни разу не запускалась, и
+   * находок нет ни в одном анализе — подтвержденное отсутствие (Безопасность 0)
+   */
+  appsecNeverScanned?: boolean;
+}
+
+/**
+ * AppSec ни разу не проверял репозиторий: последний ответ AppSec до скана
+ * `uptoScanId` включительно, дошедший до AppSec (не «нет прав»), — «проверка не
+ * запускалась». Одно правило для расчета (effectiveFacts) и карточки; вызывать,
+ * только когда ok-находок у репозитория нет.
+ */
+export function appsecNeverScannedAt(db: Database, repoId: number, uptoScanId: number): boolean {
+  const rows = db
+    .query(
+      `SELECT f.value FROM facts f JOIN scans s ON s.id = f.scan_id
+       WHERE f.key = 'appsec.findings' AND f.status = 'no-data' AND s.repo_id = ? AND f.scan_id <= ?
+       ORDER BY f.scan_id DESC LIMIT 20`,
+    )
+    .all(repoId, uptoScanId) as { value: string }[];
+  for (const r of rows) {
+    const v = parseFactValue(r.value) as { reason?: unknown; detail?: unknown } | null;
+    if (v?.reason === "access") continue;
+    return v?.reason === "no-scan" && v.detail === APPSEC_NEVER_SCANNED;
+  }
+  return false;
 }
 
 /**
@@ -370,7 +399,8 @@ export function effectiveFacts(db: Database, scanId: number, repoId: number): Ef
     if (row.status === "ok") ok.set(kind, parseFactValue(row.value));
     else displayMissing[kind] = String((parseFactValue(row.value) as { reason?: unknown } | null)?.reason ?? row.status);
   }
-  return { ok, stale, staleCats, emptyRepo, displayMissing };
+  const appsecNeverScanned = !ok.has("appsec.findings") && appsecNeverScannedAt(db, repoId, scanId);
+  return { ok, stale, staleCats, emptyRepo, displayMissing, ...(appsecNeverScanned ? { appsecNeverScanned } : {}) };
 }
 
 export function compute(db: Database, scanId: number, opts: { now?: Date } = {}): Scores {
@@ -378,7 +408,11 @@ export function compute(db: Database, scanId: number, opts: { now?: Date } = {})
   const scan = db.query("SELECT repo_id FROM scans WHERE id = ?").get(scanId) as { repo_id: number } | null;
   if (!scan) throw new Error(`scan ${scanId} not found`);
   const eff = effectiveFacts(db, scanId, scan.repo_id);
-  return computeFromFacts(eff.ok, { scanId, repoId: scan.repo_id, stale: eff.stale, staleCats: eff.staleCats, emptyRepo: eff.emptyRepo, displayMissing: eff.displayMissing }, now);
+  return computeFromFacts(
+    eff.ok,
+    { scanId, repoId: scan.repo_id, stale: eff.stale, staleCats: eff.staleCats, emptyRepo: eff.emptyRepo, displayMissing: eff.displayMissing, appsecNeverScanned: eff.appsecNeverScanned },
+    now,
+  );
 }
 
 /** Происхождение фактов для computeFromFacts: идентификаторы скана и маркеры замещения историей. */
@@ -392,6 +426,8 @@ export interface ComputeInput {
   emptyRepo?: boolean;
   /** справочные факты не ok — kind → причина (EffectiveFacts.displayMissing) */
   displayMissing?: Record<string, string>;
+  /** AppSec: проверка ни разу не запускалась (EffectiveFacts.appsecNeverScanned) */
+  appsecNeverScanned?: boolean;
 }
 
 /**
@@ -411,7 +447,7 @@ export function computeFromFacts(ok: Map<string, unknown>, input: ComputeInput, 
   const categories: Record<CategoryKey, CategoryScore> = {
     documentation: scoreDocumentation(ok, git),
     cicd: scoreCicd(ok, git),
-    security: scoreSecurity(ok),
+    security: scoreSecurity(ok, input.appsecNeverScanned === true),
     activity: withPrReview(scoreActivity(derived, now, git), ok, input.displayMissing),
     issues: scoreIssues(ok, derived),
     // «кода нет» — явный балл 0 с причиной, а не «нет данных»: код ЗАВЕДОМО
@@ -640,15 +676,18 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
     duration_p50?: unknown;
     recent_runs?: unknown;
   } | undefined;
-  if (configs && configs.has_ci_yaml === true && (typeof configs.has_steps !== "boolean" || typeof configs.steps_note === "string")) {
-    // ci.yaml не разобран — неизвестно, есть ли шаги; это не «CI без шагов = 0»,
-    // а отсутствие данных
+  // ci.yaml не разобран — неизвестно, есть ли шаги: подметрика конфигурации вне
+  // расчета, а CI оценивается по запускам, если они видны. Без запусков — «нет
+  // данных», как у любого CI без видимых запусков
+  const unparsed = configs !== undefined && configs.has_ci_yaml === true && (typeof configs.has_steps !== "boolean" || typeof configs.steps_note === "string");
+  if (unparsed && runs === undefined) {
     return { score: null, no_data: "ci.yaml not parsed — steps unknown", submetrics: {} };
   }
   if (!configs) {
     return { score: null, no_data: gitNoData(git), submetrics: {} };
   }
-  const configSub = configs.has_ci_yaml === true && configs.has_steps === true ? 1 : 0;
+  const configSub = unparsed ? null : configs.has_ci_yaml === true && configs.has_steps === true ? 1 : 0;
+  const configEntry: SubmetricScore = { score: configSub, value: configs, ...(unparsed ? { note: CI_YAML_UNPARSED_NOTE } : {}) };
   if (runs === undefined) {
     // запуски не видны — «нет данных» НЕЗАВИСИМО от ci.yaml. Иначе «нет ci.yaml»
     // давало бы 0, а заглушка ci.yaml без видимых запусков — «нет данных», и
@@ -658,7 +697,7 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
       score: null,
       no_data: CI_RUNS_INVISIBLE,
       submetrics: {
-        config: { score: configSub, value: configs },
+        config: configEntry,
         pass_rate: { score: null, note: "runs no-data" },
         duration: { score: null, note: "runs no-data" },
         // справочно, без веса — видна с теми же правами, что категория
@@ -683,16 +722,19 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
   // ci.yaml не должна быть выгоднее настоящего CI); все запуски старше последней
   // ленты свежести (поле есть, значение null) — то же «за год не запускался»
   const runsCount = num(runs.runs_count);
-  // запуски есть, но ни один не завершен (идут, отменены) — результата еще нет:
-  // это не «не запускался», а отсутствие данных
+  // запуски есть, но ни один не завершен (отменены, пропущены, отклонены или
+  // идут) — результата кода нет, как у CI, который не запускался: 4.7.0 оценивает
+  // это так же, а не «нет данных», иначе отмена всех запусков была бы выгоднее
+  // упавших
   const pendingOnly = runsCount === 0 && (num((runs as { runs_total?: unknown }).runs_total) ?? 0) > 0;
-  if (pendingOnly) {
-    // своя причина — «не видны» здесь было бы ложью
+  // незнакомые статусы API (status_note) — исход неизвестен, а не «не завершен»;
+  // неразобранный ci.yaml без завершенных запусков оценить нечем
+  if (pendingOnly && (typeof (runs as { status_note?: unknown }).status_note === "string" || unparsed)) {
     return {
       score: null,
-      no_data: "ci runs pending — запуски идут, завершенных нет",
+      no_data: unparsed ? "ci.yaml not parsed — steps unknown" : "ci runs pending — запуски идут, завершенных нет",
       submetrics: {
-        config: { score: configSub, value: configs },
+        config: configEntry,
         pass_rate: { score: null, note: "runs pending" },
         duration: { score: null, note: "runs pending" },
         stability: ciStability(runs),
@@ -700,20 +742,27 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
     };
   }
   const staleOnly = runsCount !== null && runsCount > 0 && "weighted_success_rate" in runs && runs.weighted_success_rate === null;
+  if ((runsCount === 0 || staleOnly) && unparsed) {
+    // ci.yaml не разобран и за год не запускался – шаги неизвестны, оценки нет
+    return { score: null, no_data: "ci.yaml not parsed — steps unknown", submetrics: {} };
+  }
   if (runsCount === 0 || staleOnly) {
+    // успешного запуска за год нет — длительность тоже худший анкер (0), а не
+    // «нет данных»: иначе ее вес уходил бы конфигу, и CI, который ни разу не
+    // запускался, получал бы 40 — больше, чем медленный CI, который работает
     const wn = SUBWEIGHTS.cicd;
     const s = weighted([
       [wn.config, configSub],
       [wn.pass_rate, 0],
-      [wn.duration, null],
+      [wn.duration, 0],
     ])!;
     return {
       score: s * 100,
       submetrics: {
-        config: { score: configSub, value: configs },
+        config: configEntry,
         // значения доли нет — «не запускался» словами, а не «0%» (читалось бы как «все упали»)
-        pass_rate: { score: 0, value: null, note: runsCount === 0 ? "no runs" : "no runs within a year" },
-        duration: { score: null, note: "no recent runs" },
+        pass_rate: { score: 0, value: null, note: pendingOnly ? "no completed runs" : runsCount === 0 ? "no runs" : "no runs within a year" },
+        duration: { score: 0, value: null, note: pendingOnly ? "no completed runs" : runsCount === 0 ? "no runs" : "no recent runs" },
         stability: ciStability(runs),
       },
     };
@@ -724,7 +773,7 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
       score: null,
       no_data: CI_RUNS_INVISIBLE,
       submetrics: {
-        config: { score: configSub, value: configs },
+        config: configEntry,
         pass_rate: { score: null, note: "runs no-data" },
         duration: { score: null, note: "runs no-data" },
         stability: ciStability(runs),
@@ -735,8 +784,10 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
   // у старых фактов — простая доля
   const passInput = num(runs.weighted_success_rate) ?? num(runs.success_rate);
   const passSub = passInput !== null ? anchorScore(PASS_RATE, passInput) : null;
-  // длительность (у нового сборщика) — по успешным запускам
-  const durSub = num(runs.duration_p50) !== null ? anchorScore(DURATION_MIN, num(runs.duration_p50)! / 60) : null;
+  // длительность (у нового сборщика) — по успешным запускам; завершенные есть,
+  // а успешных нет — данные (худший анкер), как у свежести и закрытия задач
+  const noneSucceeded = num(runs.duration_p50) === null && num(runs.success_rate) === 0;
+  const durSub = num(runs.duration_p50) !== null ? anchorScore(DURATION_MIN, num(runs.duration_p50)! / 60) : noneSucceeded ? 0 : null;
   const w = SUBWEIGHTS.cicd;
   const subs: [number, number | null][] = [
     [w.config, configSub],
@@ -747,9 +798,9 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
   return {
     score: score * 100,
     submetrics: {
-      config: { score: configSub, value: configs },
+      config: configEntry,
       pass_rate: { score: passSub, value: passInput },
-      duration: { score: durSub, value: num(runs.duration_p50) },
+      duration: { score: durSub, value: num(runs.duration_p50), ...(noneSucceeded ? { note: "no successful runs" } : {}) },
       // справочно, без веса
       stability: ciStability(runs),
     },
@@ -762,8 +813,13 @@ function scoreCicd(ok: Map<string, unknown>, git: GitState): CategoryScore {
  */
 export const CI_RUNS_INVISIBLE = "ci runs no-data — прогоны не видны, автоматизацию не оцениваем";
 
-function scoreSecurity(ok: Map<string, unknown>): CategoryScore {
+function scoreSecurity(ok: Map<string, unknown>, neverScanned: boolean): CategoryScore {
   const appsec = ok.get("appsec.findings") as AppsecFindingsValue | undefined;
+  if (!appsec && neverScanned) {
+    // проверка не запускалась — подтвержденное отсутствие, а не «нет данных»:
+    // иначе не запускать AppSec было бы выгоднее, чем запустить и получить находки
+    return { score: 0, submetrics: { scan_missing: { score: 0, value: null, note: "AppSec scan never run" } } };
+  }
   if (!appsec) {
     return { score: null, no_data: "AppSec data unavailable (no AppSec access or no finished scan)", submetrics: {} };
   }
@@ -882,12 +938,16 @@ function scoreDeps(appsec: AppsecFindingsValue, lockgraph: LockGraphFactValue | 
 }
 
 function scoreActivity(derived: DerivedMetrics, now: Date, git: GitState): CategoryScore {
+  // релизы засчитываются у живого проекта: за 12 месяцев был коммит человека.
+  // Автоматические релизы заброшенного проекта Активность не поднимают
+  const humanWithinYear = derived.lastHumanCommitTs !== null && now.getTime() - derived.lastHumanCommitTs <= 365 * 86_400_000;
+  const releasesIdle = derived.humanCommits !== null && !humanWithinYear && (derived.releases12m ?? 0) > 0;
   const submetricsOf = (fresh: number | null, freq: number | null, contrib: number | null, pulls: number | null, rel: number | null): Record<string, SubmetricScore> => ({
     fresh: { score: fresh, value: derived.lastHumanCommitTs },
     freq: { score: freq, value: derived.commitsPerMonth },
     contributors: { score: contrib, value: derived.contributorsTotal },
     pulls_90d: { score: pulls, value: derived.pulls90d },
-    releases_12m: { score: rel, value: derived.releases12m },
+    releases_12m: { score: rel, value: derived.releases12m, ...(releasesIdle ? { note: RELEASES_NO_HUMANS_NOTE } : {}) },
     // только показ, без веса: mirror-likeness, bus factor, коммиты за два окна, всплески
     mirror_likeness: { score: null, value: derived.mirrorLikeness },
     bus_factor: { score: null, value: derived.busFactor },
@@ -906,12 +966,13 @@ function scoreActivity(derived: DerivedMetrics, now: Date, git: GitState): Categ
   const freshSub =
     derived.lastHumanCommitTs !== null ? anchorScore(FRESH_MONTHS, Math.max(0, (now.getTime() - derived.lastHumanCommitTs) / MONTH_MS)) : 0;
   const freqSub = commitsPerMonthScore(derived.commitsPerMonth ?? 0);
-  const contribSub = derived.contributorsTotal !== null && derived.contributorsTotal > 0 ? contributorsScore(derived.contributorsTotal) : null;
+  // история прочитана, а авторов-людей нет — данные (худший анкер), как у свежести
+  const contribSub = derived.contributorsTotal === null ? null : derived.contributorsTotal > 0 ? contributorsScore(derived.contributorsTotal) : 0;
   const pullsSub = derived.pulls90d !== null ? anchorScoreLog(PULLS_90D, derived.pulls90d) : null;
-  const relSub = derived.releases12m !== null ? anchorScoreLog(RELEASES_12M, derived.releases12m) : null;
+  const relSub = derived.releases12m === null ? null : releasesIdle ? 0 : anchorScoreLog(RELEASES_12M, derived.releases12m);
   const w = SUBWEIGHTS.activity;
   // якорь — прочитанная история (свежесть и частота); без нее категорию несли бы
-  // счетчики MR и релизов с полом 0,2
+  // одни счетчики MR и релизов
   const score = weighted([
     [w.fresh, freshSub],
     [w.freq, freqSub],
@@ -932,7 +993,7 @@ function scoreIssues(ok: Map<string, unknown>, derived: DerivedMetrics): Categor
   // справочно, без веса; трекер не ведется — тот же статус, а не «0 динамики»
   const dynamics = issueDynamics(stats);
   if (open === 0 && closed === 0) {
-    // 0/0 = данные «трекер не ведется» — балл = вычислимый минимум категории
+    // 0/0 = данные «трекер не ведется» — балл = вычислимый минимум категории, 0
     return {
       score: ISSUES_TRACKER_UNUSED,
       submetrics: {
@@ -962,10 +1023,16 @@ function scoreIssues(ok: Map<string, unknown>, derived: DerivedMetrics): Categor
       [w.resolution, resSub],
       [w.first_resp, firstSub],
     ])! * 100;
-  // на малой выборке ЗАКРЫТЫХ задач балл сжимается к минимуму «трекер не ведется»;
+  // на малой выборке ЗАКРЫТЫХ задач балл сжимается к минимуму «трекер не ведется» (0);
   // открытые в размер выборки не входят — спам пустыми задачами и «открыл-закрыл
   // за минуту» балл не поднимают
-  const sample = Math.min(1, closedN / ISSUES_FULL_SAMPLE);
+  // и во времени: закрытия в 1-2 дня (пачка задач-пустышек) не дают полного балла
+  // 0 дней при засчитанных закрытиях – даты неизвестны, поправки нет
+  const daysRaw = num((stats as { closed_days?: unknown }).closed_days);
+  const days = daysRaw === null || (daysRaw === 0 && closedN > 0) ? null : daysRaw;
+  const bySize = Math.min(1, closedN / ISSUES_FULL_SAMPLE);
+  const byDays = days === null ? 1 : Math.min(1, days / ISSUES_SPREAD_DAYS);
+  const sample = Math.min(bySize, byDays);
   const score = ISSUES_TRACKER_UNUSED + (raw - ISSUES_TRACKER_UNUSED) * sample;
   return {
     score,
@@ -976,7 +1043,19 @@ function scoreIssues(ok: Map<string, unknown>, derived: DerivedMetrics): Categor
       first_resp: { score: firstSub, value: num(comments?.median_first_comment_delay_hours) },
       ...dynamics,
     },
-    ...(sample < 1 ? { adjustment: { kind: "small-sample" as const, n: closedN, full: ISSUES_FULL_SAMPLE, raw, floor: ISSUES_TRACKER_UNUSED } } : {}),
+    ...(sample < 1
+      ? {
+          adjustment: {
+            kind: "small-sample" as const,
+            n: closedN,
+            full: ISSUES_FULL_SAMPLE,
+            raw,
+            floor: ISSUES_TRACKER_UNUSED,
+            // поправку задает распределение во времени, а не число задач
+            ...(byDays < bySize ? { days: days!, daysFull: ISSUES_SPREAD_DAYS } : {}),
+          },
+        }
+      : {}),
   };
 }
 
@@ -1103,6 +1182,10 @@ export function withOwnership(cat: CategoryScore, ok: Map<string, unknown>, miss
 }
 
 /** Сборщик посчитал тесты, непустых нет — «тестов нет, в балл не входит». */
+export const CI_YAML_UNPARSED_NOTE = "ci.yaml not parsed — steps unknown, CI scored by runs";
+
+export const RELEASES_NO_HUMANS_NOTE = "releases not counted — no human commits within a year";
+
 export const TESTS_NONE_NOTE = "no tests — not scored (tests are a bonus)";
 /** Тесты есть, но их доля ниже прочих показателей — бонус не применен. */
 export const TESTS_BONUS_IDLE_NOTE = "tests bonus not applied — share would lower the category";

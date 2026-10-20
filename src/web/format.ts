@@ -637,7 +637,7 @@ export function humanNoData(raw: string): string {
 export function securityNoDataReason(fact: { status: string; value: unknown } | undefined): string {
   const reason = fact && fact.status === "no-data" ? (fact.value as { reason?: unknown } | null)?.reason : undefined;
   if (reason === "access") return "У токена, с которым шел анализ, нет права на данные AppSec (src.repositories.useAppSecScan).";
-  if (reason === "no-scan") return "AppSec еще не проверял этот репозиторий или проверка не закончилась.";
+  if (reason === "no-scan") return "Проверка AppSec еще не закончилась или ее результаты недоступны.";
   if (reason === "incomplete") return "AppSec ответил не полностью, поэтому данных о безопасности нет. Это не значит, что уязвимостей нет.";
   // сюда приходит только зритель, которому категория видна (закрытую забирает
   // `lockedCategoryText`), поэтому «видны с правом доступа» противоречило бы

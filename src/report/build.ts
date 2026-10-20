@@ -454,7 +454,7 @@ const NO_DATA_FACT_REASON: Record<string, string> = {
   access: "у сервиса нет прав на эти данные",
   limits: "данные больше лимита сервиса",
   empty: "источник вернул пустой ответ",
-  "no-scan": "проверка не запускалась",
+  "no-scan": "проверка не закончилась",
   incomplete: "источник отдал данные не полностью",
   "bad-channel": "источник не ответил",
   other: "источник данных не дал",
@@ -730,7 +730,10 @@ function coverageCalc(card: RepoCard): Block[] {
 function categoryCalc(key: CategoryKey, cat: CardCategory): Block[] {
   const title: Block = { kind: "paragraph", tone: "subhead", lines: [[strong(`Балл категории ${CATEGORY_TITLES[key]}`)]] };
   if (key === "issues" && "tracker_unused" in cat.submetrics) {
-    return [title, { kind: "paragraph", tone: "fine", lines: [line(`Задач нет – категория получает минимальный балл: ${fmtDecimal(cat.score!, 1)}.`)] }];
+    return [title, { kind: "paragraph", tone: "fine", lines: [line(`Задач нет – категория получает ${fmtDecimal(cat.score!, 1, { trim: true })}.`)] }];
+  }
+  if (key === "security" && "scan_missing" in cat.submetrics) {
+    return [title, { kind: "paragraph", tone: "fine", lines: [line(`Проверки AppSec не было – категория получает ${fmtDecimal(cat.score!, 1, { trim: true })}.`)] }];
   }
   const weights = SUBWEIGHTS[key] as Record<string, number>;
   const parts = Object.entries(cat.submetrics)
@@ -744,7 +747,9 @@ function categoryCalc(key: CategoryKey, cat: CardCategory): Block[] {
     // строка поправки: сколько она сняла со взвешенной суммы (сумма столбца = итог)
     const title =
       adj.kind === "small-sample"
-        ? `Мало закрытых задач: ${adj.n} из ${adj.full}`
+        ? adj.days !== undefined
+          ? `Дни закрытия задач: ${adj.days} из ${adj.daysFull}`
+          : `Мало закрытых задач: ${adj.n} из ${adj.full}`
         : adj.kind === "small-code"
           ? `Мало кода: ${adj.loc} из ${adj.full} строк`
           : `Потолок: открытые находки ${adj.level === "critical" ? "critical" : "high"}`;
@@ -826,6 +831,8 @@ function appendixB(card: RepoCard, shown: ShownMetric[]): Block[] {
       const order =
         key === "issues" && sub === "tracker_unused"
           ? "задач нет: балл категории равен баллу этого показателя, приложение А"
+          : key === "security" && sub === "scan_missing"
+            ? "проверки AppSec не было: балл категории равен баллу этого показателя, приложение А"
           : displayOnly(key, sub) || weight === undefined
             ? "справочно, в балл не входит"
             : `балл показателя × вес ${fmtDecimal(weight * 100, 0)}% в балле категории`;

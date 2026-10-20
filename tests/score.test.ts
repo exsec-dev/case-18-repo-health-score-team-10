@@ -22,7 +22,9 @@ describe("модель: анкерные таблицы и формулы (§3)"
     expect(anchorScore(FRESH_MONTHS, 1)).toBe(1.0);
     expect(anchorScore(FRESH_MONTHS, 0.2)).toBe(1.0); // плоско ниже первого
     expect(anchorScore(FRESH_MONTHS, 3.5)).toBeCloseTo(0.85, 10); // середина 1..6
-    expect(anchorScore(FRESH_MONTHS, 36)).toBe(0.1); // плоско выше последнего
+    expect(anchorScore(FRESH_MONTHS, 30)).toBeCloseTo(0.05, 10); // середина 24..36
+    expect(anchorScore(FRESH_MONTHS, 36)).toBe(0); // 3 года без людей — 0 (4.7.0)
+    expect(anchorScore(FRESH_MONTHS, 60)).toBe(0); // плоско выше последнего
     expect(anchorScore(CLOSE_DAYS, 2)).toBe(1.0);
     expect(anchorScore(CLOSE_DAYS, 180)).toBe(0);
     expect(anchorScore(CLOSE_DAYS, 1000)).toBe(0);
@@ -36,23 +38,25 @@ describe("модель: анкерные таблицы и формулы (§3)"
     expect(commitsPerMonthScore(500)).toBe(1.0);
   });
 
-  test("contributors: 1→0.2 (соло-пол), 10→0.6, 100→1.0, выше плоско", () => {
-    expect(contributorsScore(1)).toBeCloseTo(0.2, 10);
+  test("contributors: 1→0 (без соло-пола, 4.7.0), 10→0.6, 100→1.0, выше плоско", () => {
+    expect(contributorsScore(1)).toBe(0);
+    expect(contributorsScore(3)).toBeCloseTo(0.6 * Math.log10(3), 10);
+    expect(contributorsScore(20)).toBeCloseTo(0.6 + 0.4 * Math.log10(2), 10);
     expect(contributorsScore(10)).toBeCloseTo(0.6, 10);
     expect(contributorsScore(100)).toBe(1.0);
     expect(contributorsScore(5000)).toBe(1.0);
   });
 
-  test("лог-анкеры: x=0 → первый y (pulls 0→0.2)", () => {
-    expect(anchorScoreLog(PULLS_90D, 0)).toBe(0.2);
+  test("лог-анкеры: x=0 → первый y (pulls 0→0, 4.7.0)", () => {
+    expect(anchorScoreLog(PULLS_90D, 0)).toBe(0);
     expect(anchorScoreLog(PULLS_90D, 5)).toBe(0.6);
     expect(anchorScoreLog(PULLS_90D, 30)).toBe(1.0);
     expect(anchorScoreLog(PULLS_90D, 100)).toBe(1.0);
   });
 
-  test("ISSUES_TRACKER_UNUSED выводится из анкеров (≈6, §5.3)", () => {
-    // 0.3·0.1(stale) + 0.3·0(close) + 0.3·0.1(resolution) + 0.1·0(first) = 0.06
-    expect(ISSUES_TRACKER_UNUSED).toBeCloseTo(6.0, 10);
+  test("ISSUES_TRACKER_UNUSED выводится из анкеров (0, 4.7.0)", () => {
+    // 0.3·0(stale) + 0.3·0(close) + 0.3·0(resolution) + 0.1·0(first) = 0
+    expect(ISSUES_TRACKER_UNUSED).toBe(0);
   });
 });
 
@@ -65,8 +69,8 @@ describe("compute: здоровое репо (ручная арифметика)
     const s = compute(t.db, scanId, { now: NOW });
     // документация: readme 0.3+0.7·(0.5·0.72917+0.5·1)=0.90521; (0.45·0.90521+0.25+0.15)/0.85→0.80734
     expect(s.categories.documentation.score!).toBeCloseTo(80.734, 2);
-    // активность: 0.35·1 + 0.25·0.48756 + 0.2·0.39085 + 0.1·0.63755 + 0.1·0.84115 = 0.69793
-    expect(s.categories.activity.score!).toBeCloseTo(69.793, 2);
+    // активность: 0.35·1 + 0.25·0.48756 + 0.2·0.28627 (3 автора: 0.6·lg 3) + 0.1·0.63755 + 0.1·0.84115 = 0.67701
+    expect(s.categories.activity.score!).toBeCloseTo(67.701, 2);
     // issues: 0.3·0.9 + 0.3·0.91 + 0.3·0.85 + 0.1·0.9625 = 0.89425
     expect(s.categories.issues.score!).toBeCloseTo(89.425, 2);
     // code: веса 0.35/0.25/0.3(тесты)/0.1; у фактов без test_files «Тесты» —
@@ -78,18 +82,18 @@ describe("compute: здоровое репо (ручная арифметика)
     expect(s.categories.security.no_data).toContain("AppSec data unavailable");
     // индекс: coverage = (15+15+15+20)/65 = 1.0 (масса SCORE_WEIGHTS с данными)
     expect(s.indexCoverage).toBe(1.0);
-    // (23·80.734 + 23·69.793 + 23·89.425 + 31·89.871)/100 = 83.049 (INDEX_WEIGHTS)
-    expect(s.healthcraftIndex!).toBeCloseTo(83.05, 1);
+    // (23·80.734 + 23·67.701 + 23·89.425 + 31·89.871)/100 = 82.567 (INDEX_WEIGHTS)
+    expect(s.healthcraftIndex!).toBeCloseTo(82.57, 1);
     // полный: coverage = 80/100 — Security no-data
     expect(s.repoHealthCoverage).toBeCloseTo(0.8, 10);
-    // (15·80.734 + 15·100 + 15·69.793 + 15·89.425 + 20·89.871)/80 = 86.21
-    expect(s.repoHealthScore!).toBeCloseTo(86.21, 1);
+    // (15·80.734 + 15·100 + 15·67.701 + 15·89.425 + 20·89.871)/80 = 85.82
+    expect(s.repoHealthScore!).toBeCloseTo(85.82, 1);
     expect(s.modelVersion).toBe(MODEL_VERSION);
     expect(s.codeEmpty).toBe(false);
     expect(s.stale).toEqual([]);
   });
 
-  test("Issues 0/0 = данные: скор = вычислимый минимум (≈6), coverage не страдает", () => {
+  test("Issues 0/0 = данные: скор = вычислимый минимум (0), coverage не страдает", () => {
     const scanId = seedScan(t, withFacts(healthyFacts(), { key: "issues.stats", value: { open: 0, closed: 0, median_close_days: null, stale_90d: 0, fetched_count: 0 } }));
     const s = compute(t.db, scanId, { now: NOW });
     expect(s.categories.issues.score!).toBeCloseTo(ISSUES_TRACKER_UNUSED, 10);
@@ -103,15 +107,15 @@ describe("compute: здоровое репо (ручная арифметика)
     // конфиг без прогонов не оцениваем: без доказательства балл за CI не дается
     expect(s1.categories.cicd.score).toBeNull();
     expect(s1.categories.cicd.no_data).toContain("прогоны не видны");
-    // вес cicd перенормировался: (15·80.734+15·69.793+15·89.425+20·89.871)/65 = 83.03
-    expect(s1.repoHealthScore!).toBeCloseTo(83.03, 1);
+    // вес cicd перенормировался: (15·80.734+15·67.701+15·89.425+20·89.871)/65 = 82.54
+    expect(s1.repoHealthScore!).toBeCloseTo(82.54, 1);
 
     const noYaml = seedScan(t, withFacts(healthyFacts(), { key: "cicd.configs", value: { paths: [], has_ci_yaml: false, has_steps: false } }));
     const s2 = compute(t.db, noYaml, { now: NOW });
     expect(s2.categories.cicd.score!).toBe(0);
     // рейтинг: CI не входит — потолки на него не влияют
-    expect(s1.healthcraftIndex!).toBeCloseTo(83.05, 1);
-    expect(s2.healthcraftIndex!).toBeCloseTo(83.05, 1);
+    expect(s1.healthcraftIndex!).toBeCloseTo(82.57, 1);
+    expect(s2.healthcraftIndex!).toBeCloseTo(82.57, 1);
   });
 
   test("code_empty (Q&A №13): file_count=0 при ok-фактах → оба итога 0 как данные", () => {
@@ -145,7 +149,7 @@ describe("compute: здоровое репо (ручная арифметика)
       }),
     );
     const s1 = compute(t.db, crit, { now: NOW });
-    expect(s1.categories.security.score!).toBeCloseTo(39, 1); // 0.5·0.72 + 0.3·0.1 + 0.2·0
+    expect(s1.categories.security.score!).toBeCloseTo(36, 1); // 0.5·0.72 + 0.3·0 + 0.2·0
     expect(s1.repoHealthScore!).toBeLessThanOrEqual(49);
     expect(s1.repoHealthCoverage).toBe(1.0); // 100/100 → clamp
 
@@ -160,7 +164,7 @@ describe("compute: здоровое репо (ручная арифметика)
     expect(s2.categories.security.score!).toBeCloseTo(98.5, 1); // 0.5 + 0.3·0.95 + 0.2
     expect(s2.repoHealthScore!).toBeGreaterThan(s1.repoHealthScore!);
     // рейтинг: Security не входит, кап 49 не применяется
-    expect(s1.healthcraftIndex!).toBeCloseTo(83.05, 1);
+    expect(s1.healthcraftIndex!).toBeCloseTo(82.57, 1);
   });
 
   test("bad-channel: stale-факты последнего успешного kind, итоги не двигаются (§5.6)", () => {

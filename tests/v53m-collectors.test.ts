@@ -311,6 +311,21 @@ describe("Р2: время жизни закрытых задач", () => {
     // медиана по 2 дням и 1 часу (0,04 дня), мгновенные не входят
     expect(stats.median_close_days).toBe(1);
   });
+
+  test("4.7.0: дни закрытия, связь с предложением изменений и закрытие не автором — по засчитанным", async () => {
+    const who = (id: string) => ({ id, slug: id });
+    const closed = [
+      // мгновенная — ни в один признак не входит
+      issue("1", "2026-09-01T00:00:00Z", "2026-09-01T00:10:00Z", { completed_at: "2026-09-01T00:10:00Z", linked_prs: [{ id: "p" }], author: who("a"), updated_by: who("b") }),
+      issue("2", "2026-09-01T00:00:00Z", "2026-09-02T10:00:00Z", { completed_at: "2026-09-02T10:00:00Z", linked_prs: [{ id: "p" }], author: who("a"), updated_by: who("b") }),
+      issue("3", "2026-09-01T00:00:00Z", "2026-09-02T20:00:00Z", { completed_at: "2026-09-02T20:00:00Z", linked_prs: [], author: who("a"), updated_by: who("a") }),
+      issue("4", "2026-09-01T00:00:00Z", "2026-09-05T00:00:00Z", { completed_at: "2026-09-05T00:00:00Z" }),
+    ];
+    const stats = (await restFacts(restClient({ closed }))).get("issues.stats")!;
+    expect(stats.closed_days).toBe(2);
+    expect(stats.closed_linked_pr).toBe(1);
+    expect(stats.closed_by_other).toBe(1);
+  });
 });
 
 describe("Н14а: answered и censored вместо with_comments", () => {

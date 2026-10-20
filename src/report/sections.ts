@@ -231,7 +231,7 @@ export function whyText(key: CategoryKey, cat: CardCategory, ctx: SubmetricConte
 /** Короткая метка поправки балла для ячейки сравнения. */
 export function adjustmentLabel(cat: Pick<CardCategory, "adjustment">): string {
   const a = cat.adjustment;
-  if (a?.kind === "small-sample") return "Мало задач";
+  if (a?.kind === "small-sample") return a.days !== undefined ? "Мало дней закрытия" : "Мало задач";
   if (a?.kind === "small-code") return "Мало кода";
   return "Есть находки";
 }
@@ -246,7 +246,11 @@ export function adjustmentText(cat: Pick<CardCategory, "adjustment" | "score">):
   if (!a) return null;
   if (a.kind === "small-sample") {
     // ни одной засчитанной закрытой задачи — отдельная фраза, а не «0 из 10»
-    if (a.n === 0) return `Ни одна задача не закрыта – балл категории минимальный: ${fmtDecimal(cat.score ?? a.floor, 0)}.`;
+    if (a.n === 0) return `Ни одна задача не закрыта – балл категории ${fmtDecimal(cat.score ?? a.floor, 0)}.`;
+    if (a.days !== undefined && a.daysFull !== undefined) {
+      const d = plural(a.days, "день", "дня", "дней");
+      return `Задачи закрывали только за ${a.days} ${d}, а для надежной оценки нужно ${a.daysFull} разных дня – балл снижен с ${fmtDecimal(a.raw, 1, { trim: true })} до ${fmtDecimal(cat.score ?? a.floor, 1, { trim: true })}.`;
+    }
     return `Мало закрытых задач: ${a.n} из ${a.full} нужных для надежной оценки – балл снижен с ${fmtDecimal(a.raw, 1, { trim: true })} до ${fmtDecimal(cat.score ?? a.floor, 1, { trim: true })}.`;
   }
   if (a.kind === "small-code") {
@@ -372,6 +376,7 @@ export const RULE_SUBMETRIC: Record<string, string> = {
   "update-vulnerable-deps": "security.deps",
   "add-tests": "code.tests",
   "start-tracker": "issues.tracker_unused",
+  "connect-appsec": "security.scan_missing",
   "reduce-stale-issues": "issues.stale",
   "speed-up-issue-close": "issues.close_days",
   "resolve-old-todos": "code.old_share",

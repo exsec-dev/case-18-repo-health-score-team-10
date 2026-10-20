@@ -459,6 +459,12 @@ export async function collectRestFacts(
     // мгновенно закрытые не входят в медиану закрытия и долю решенных; если
     // время жизни не восстановилось, задача засчитывается – мгновенность не доказана
     let closedInstant = 0;
+    // признаки засчитанных закрытий: в сколько разных дней (UTC) закрывали,
+    // сколько связаны с предложением изменений и сколько закрыл не автор.
+    // Пачка задач-пустышек закрывается в один день; настоящий трекер – в разные
+    const closeDates = new Set<string>();
+    let closedLinkedPr = 0;
+    let closedByOther = 0;
     const closeDays = closedIssues
       .map((i) => {
         let c = isoMs(i["completed_at"]);
@@ -472,6 +478,11 @@ export async function collectRestFacts(
           closedInstant++;
           return null;
         }
+        if (c !== null) closeDates.add(new Date(c).toISOString().slice(0, 10));
+        if (Array.isArray(i["linked_prs"]) && (i["linked_prs"] as unknown[]).length > 0) closedLinkedPr++;
+        const authorId = asString((i["author"] as Record<string, unknown> | undefined)?.["id"]);
+        const closerId = asString((i["updated_by"] as Record<string, unknown> | undefined)?.["id"]);
+        if (authorId !== null && closerId !== null && authorId !== closerId) closedByOther++;
         return life !== null ? life / 86400000 : null;
       })
       .filter((x): x is number => x !== null);
@@ -500,6 +511,11 @@ export async function collectRestFacts(
           ...(fallbackCloses > 0
             ? { close_date_note: `completed_at missing on ${fallbackCloses}/${closedIssues.length} closed — used updated_at fallback` }
             : {}),
+          // дни – только по настоящей дате завершения: подстановка updated_at
+          // (массовая правка меток) склеила бы закрытия в один день
+          ...(fallbackCloses === 0 ? { closed_days: closeDates.size } : {}),
+          closed_linked_pr: closedLinkedPr,
+          closed_by_other: closedByOther,
           flow,
         },
         "rest:issues",

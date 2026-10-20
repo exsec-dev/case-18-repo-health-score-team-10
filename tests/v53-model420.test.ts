@@ -167,7 +167,9 @@ describe("М1.8: CI с видимыми запусками", () => {
     const stub = ci({ last_status: null, success_rate: null, duration_p50: null, runs_count: 0, weighted_success_rate: null });
     const half = ci({ last_status: "failed", success_rate: 0.5, duration_p50: 300, runs_count: 10, weighted_success_rate: 0.5 });
     const none = ci({ last_status: null, success_rate: null, duration_p50: null, runs_count: 0, weighted_success_rate: null }, { paths: [], has_ci_yaml: false, has_steps: false });
-    expect(stub.categories.cicd.score).toBeCloseTo(40, 6);
+    // 4.7.0: успешных запусков нет — длительность 0, а не вне расчета: 0.3·100 = 30
+    expect(stub.categories.cicd.score).toBeCloseTo(30, 6);
+    expect(stub.categories.cicd.submetrics.duration!.score).toBe(0);
     expect(stub.repoHealthScore!).toBeLessThan(half.repoHealthScore!);
     expect(stub.repoHealthScore!).toBeGreaterThanOrEqual(none.repoHealthScore!);
   });
@@ -179,6 +181,17 @@ describe("М1.8: CI с видимыми запусками", () => {
   test("все запуски старше года — pass_rate 0 («за год не запускался»), не 100 по старым зеленым", () => {
     const s = ci({ last_status: "success", success_rate: 1, duration_p50: 60, runs_count: 5, weighted_success_rate: null });
     expect(s.categories.cicd.submetrics.pass_rate!.score).toBe(0);
+    expect(s.categories.cicd.submetrics.duration!.score).toBe(0);
+    expect(s.categories.cicd.score).toBeCloseTo(30, 6);
+  });
+
+  test("4.7.0: запуски есть, успешных нет — длительность 0 (худший анкер), CI не выше заглушки без запусков", () => {
+    const failing = ci({ last_status: "failed", success_rate: 0, duration_p50: null, runs_count: 6, weighted_success_rate: 0 });
+    expect(failing.categories.cicd.submetrics.duration).toEqual({ score: 0, value: null, note: "no successful runs" });
+    expect(failing.categories.cicd.score).toBeCloseTo(30, 6);
+    // медленный, но работающий CI не ниже CI, который ни разу не прошел
+    const slow = ci({ last_status: "failed", success_rate: 0.1, duration_p50: 3600, runs_count: 10, weighted_success_rate: 0.1 });
+    expect(slow.categories.cicd.score!).toBeGreaterThanOrEqual(failing.categories.cicd.score!);
   });
 
   test("легаси-факт без поля взвешенной доли — простая доля, как раньше", () => {
