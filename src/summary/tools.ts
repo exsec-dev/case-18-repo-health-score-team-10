@@ -7,8 +7,8 @@ import { join, relative, resolve, sep } from "node:path";
 import type { ToolSpec } from "../llm";
 
 /** Локальный git без блокировки event loop (воркер живёт в процессе сервера). */
-async function runGit(args: string[], timeoutMs: number): Promise<string> {
-  const proc = Bun.spawn(["git", ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+async function runGit(args: string[], timeoutMs: number, env?: Record<string, string>): Promise<string> {
+  const proc = Bun.spawn(["git", ...args], { stdin: "ignore", stdout: "pipe", stderr: "pipe", env: env === undefined ? undefined : { ...(process.env as Record<string, string>), ...env } });
   const timer = setTimeout(() => {
     try {
       proc.kill("SIGKILL");
@@ -306,8 +306,12 @@ export function evaluateArithmetic(input: string): number | null {
 }
 
 export interface ToolExecutorIo {
-  /** корень рабочей копии клона (файлы для read_file/grep/list_files) */
-  root: string;
+  /**
+   * Корень рабочей копии клона (файлы для read_file/grep/list_files). Функция –
+   * ленивая рабочая копия: разворачивается при первом файловом инструменте, а
+   * обзор без вызовов инструментов обходится без нее (вызывающий мемоизирует).
+   */
+  root: string | (() => Promise<string>);
   /** git-каталог (bare-клон или .git) для git_log; null → git_log отказом */
   gitDir: string | null;
 }
@@ -346,14 +350,24 @@ function listFilesRec(root: string, dir: string, out: string[], cap: number): vo
 /** Исполнение одного инструмента; возвращает СТРОКУ (едет в role:"tool"). */
 export async function executeTool(io: ToolExecutorIo, name: string, args: unknown): Promise<string> {
   const fail = (error: string): string => JSON.stringify({ ok: false, error });
+  // рабочая копия разворачивается после проверки аргументов: отказ по пути к
+  // секретам или битому паттерну не должен стоить `git worktree add`
+  const rootOf = async (): Promise<string> => (typeof io.root === "string" ? io.root : io.root());
+  const unavailable = (e: unknown): string => fail(`рабочая копия недоступна: ${String((e as Error).message).slice(0, 120)}`);
   try {
     if (name === "read_file") {
       const rel = (args as { path?: unknown } | null)?.path;
       if (typeof rel !== "string") return fail("ожидался аргумент path: строка");
       if (isDeniedPath(rel)) return fail("denied: путь к секретам — содержимое не выдаётся");
-      const abs = guardPath(io.root, rel);
+      let root: string;
+      try {
+        root = await rootOf();
+      } catch (e) {
+        return unavailable(e);
+      }
+      const abs = guardPath(root, rel);
       if (abs === null) return fail("denied: путь вне корня репозитория");
-      if (hasSymlinkComponent(io.root, abs)) return fail("denied: путь содержит симлинк — содержимое не выдаётся");
+      if (hasSymlinkComponent(root, abs)) return fail("denied: путь содержит симлинк — содержимое не выдаётся");
       let st;
       try {
         st = statSync(abs);
@@ -381,8 +395,14 @@ export async function executeTool(io: ToolExecutorIo, name: string, args: unknow
         return fail(`неверный паттерн: ${String((e as Error).message).slice(0, 100)}`);
       }
       const glob = typeof a.glob === "string" && a.glob.length > 0 ? a.glob : null;
+      let root: string;
+      try {
+        root = await rootOf();
+      } catch (e) {
+        return unavailable(e);
+      }
       const files: string[] = [];
-      listFilesRec(io.root, io.root, files, GREP_FILE_CAP);
+      listFilesRec(root, root, files, GREP_FILE_CAP);
       const lines: string[] = [];
       let scanned = 0;
       for (const rel of files) {
@@ -391,7 +411,7 @@ export async function executeTool(io: ToolExecutorIo, name: string, args: unknow
         if (rel.endsWith("/") || rel.endsWith("(denied)")) continue;
         if (isDeniedPath(rel)) continue;
         if (glob !== null && !rel.includes(glob)) continue;
-        const abs = join(io.root, rel);
+        const abs = join(root, rel);
         let st;
         try {
           st = statSync(abs);
@@ -425,16 +445,22 @@ export async function executeTool(io: ToolExecutorIo, name: string, args: unknow
     }
     if (name === "list_files") {
       const sub = (args as { subdir?: unknown } | null)?.subdir;
-      let base = io.root;
+      if (typeof sub === "string" && sub.length > 0 && isDeniedPath(sub)) return fail("denied: путь к секретам — содержимое не выдаётся");
+      let root: string;
+      try {
+        root = await rootOf();
+      } catch (e) {
+        return unavailable(e);
+      }
+      let base = root;
       if (typeof sub === "string" && sub.length > 0) {
-        if (isDeniedPath(sub)) return fail("denied: путь к секретам — содержимое не выдаётся");
-        const abs = guardPath(io.root, sub);
+        const abs = guardPath(root, sub);
         if (abs === null) return fail("denied: путь вне корня репозитория");
-        if (hasSymlinkComponent(io.root, abs)) return fail("denied: путь содержит симлинк — содержимое не выдаётся");
+        if (hasSymlinkComponent(root, abs)) return fail("denied: путь содержит симлинк — содержимое не выдаётся");
         base = abs;
       }
       const out: string[] = [];
-      listFilesRec(io.root, base, out, LIST_FILES_CAP);
+      listFilesRec(root, base, out, LIST_FILES_CAP);
       return JSON.stringify({ ok: true, truncated: out.length >= LIST_FILES_CAP, files: out });
     }
     if (name === "git_log") {
@@ -471,10 +497,37 @@ export interface ToolExecutor {
  * удаляется вместе с ним при cleanupClone. Сбой — исключение: без файлов
  * агентная стадия с инструментами не начинается.
  */
-export async function materializeWorktree(bareDir: string): Promise<{ root: string; gitDir: string }> {
+export async function materializeWorktree(bareDir: string, env?: Record<string, string>): Promise<{ root: string; gitDir: string }> {
   const root = `${bareDir}.wt`;
-  await runGit(["--git-dir", bareDir, "worktree", "add", "--detach", root, "HEAD"], 120_000);
+  await runGit(["--git-dir", bareDir, "worktree", "add", "--detach", root, "HEAD"], 120_000, env);
   return { root, gitDir: bareDir };
+}
+
+/**
+ * Файл корня HEAD прямо из git-каталога, без рабочей копии: первый обычный файл
+ * (не симлинк, не каталог), чье имя проходит `nameRe`, размером до
+ * MAX_PLAIN_READ_BYTES. У частичного клона блоб дотягивается с origin – для
+ * этого `env` клона. null – файла нет, он не обычный, слишком большой или git упал.
+ */
+export async function readHeadFile(gitDir: string, nameRe: RegExp, env?: Record<string, string>): Promise<string | null> {
+  try {
+    // -z: имена без C-экранирования (иначе README с не-ASCII именем пришел бы в кавычках);
+    // -l: размер блоба здесь же, без отдельного cat-file -s
+    const tree = await runGit(["--git-dir", gitDir, "ls-tree", "-z", "-l", "HEAD"], 30_000, env);
+    // запись: <mode> <type> <sha> <size|->\t<name>\0
+    let picked: { name: string; size: number } | null = null;
+    for (const rec of tree.split("\0")) {
+      const m = /^(\d{6}) (\w+) [0-9a-f]+ +(\d+|-)\t([^]+)$/.exec(rec);
+      if (m === null || !nameRe.test(m[4]!)) continue;
+      if (m[2] !== "blob" || m[1] === "120000") return null; // каталог или симлинк с таким именем – не README
+      picked = { name: m[4]!, size: Number.parseInt(m[3]!, 10) };
+      break;
+    }
+    if (picked === null || !Number.isFinite(picked.size) || picked.size <= 0 || picked.size > MAX_PLAIN_READ_BYTES) return null;
+    return await runGit(["--git-dir", gitDir, "cat-file", "blob", `HEAD:${picked.name}`], 60_000, env);
+  } catch {
+    return null;
+  }
 }
 
 /** Снять worktree (явный git-dir: вызов может идти из чужого репозитория). */
