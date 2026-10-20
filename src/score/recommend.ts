@@ -23,7 +23,7 @@ import { compute, computeFromFacts, effectiveFacts, licensePresent, totalCapFlag
 import { SEVERITY_RULES } from "./severity";
 export { SEVERITY_RULES };
 import { issuesClosedCounted } from "./derived";
-import { fmtDecimal, fmtScore, fmtSigned } from "../web/format";
+import { fmtCount, fmtDecimal, fmtScore, fmtSigned } from "../web/format";
 import { runOutcome } from "../collectors/run-status";
 
 /** Канал правила: данные, видимые только зрителю с доступом. */
@@ -214,8 +214,8 @@ function appsecLevelText(p: RecommendationParams, action: string, what: string, 
  */
 function redRunsProblem(p: RecommendationParams): string {
   const low = typeof p.passPercent === "number" && p.passPercent < 90;
-  if (low && p.lastFailed) return `Успешны ${p.passPercent}% запусков CI – нужно не меньше 90%, и последний запуск тоже завершился ошибкой.`;
-  if (low) return `Успешны ${p.passPercent}% запусков CI – нужно не меньше 90%. Свежие запуски весят больше старых.`;
+  if (low && p.lastFailed) return `С учетом свежести успешны ${p.passPercent}% запусков CI – нужно не меньше 90%, и последний запуск тоже завершился ошибкой.`;
+  if (low) return `С учетом свежести успешны ${p.passPercent}% запусков CI – нужно не меньше 90%: свежие запуски весят больше старых.`;
   if (p.lastFailed) return "Последний запуск CI завершился ошибкой.";
   return "Последний запуск CI завершился ошибкой или успешны меньше 90% запусков.";
 }
@@ -293,7 +293,7 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
       return {
         action: "Добавьте код проекта",
         problem: "В репозитории нет кода. Такой репозиторий получает оценку 0: оценивать пока нечего.",
-        expectedImpact: "оценка появится после анализа репозитория с кодом",
+        expectedImpact: "оценка будет считаться по коду после анализа репозитория с кодом",
       };
     case "start-tracker":
       if (typeof p.issuesScore !== "number") return null;
@@ -348,7 +348,7 @@ export function recommendationText(ruleId: string, p: RecommendationParams): Rec
       if (typeof p.older !== "number" || typeof p.total !== "number") return null;
       return {
         action: "Разберите устаревшие пометки TODO и FIXME",
-        problem: `${p.older} из ${p.total} ${fromWord(p.total, "пометки", "пометок")} старше 180 дней. Выполните отложенные работы, перенесите их в задачи или удалите пометки.`,
+        problem: `${fmtCount(p.older)} из ${fmtCount(p.total)} ${fromWord(p.total, "пометки", "пометок")} старше 180 дней. Выполните отложенные работы, перенесите их в задачи или удалите пометки.`,
         expectedImpact: categoryImpact("Состояние кода"),
       };
     case "reduce-stale-issues":

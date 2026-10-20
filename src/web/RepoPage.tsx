@@ -42,7 +42,7 @@ import { COVERAGE_NULL_BELOW, INDEX_WEIGHTS } from "../score/model";
 import { factWords } from "../report/factWords";
 import { FULL, INDEX, adjustmentLabel, adjustmentText, metricWeights, notInScoreNote, ownershipView, sourceWord, type BarHint, type OwnershipView } from "../report/sections";
 import type { MetaResponse, RepoCard } from "./api";
-import { dataOf, mutateJson, useJson, useVisible } from "./api";
+import { RequestError, dataOf, mutateJson, useJson, useVisible } from "./api";
 import { CATEGORY_COLOR, LADDER_HELP, cardView, categoriesSummary, type CardView, type CategoryView, type PositionView, type RecommendationView } from "./cardView";
 import { categoryBreakdown, fmtPoints, fmtSignedPoints, type BreakdownRow } from "./categoryBreakdown";
 import { submetricIcon } from "./submetricIcons";
@@ -88,8 +88,9 @@ import { Trophy } from "./icons";
 import { useMediaQuery } from "./prefs";
 import { repoKey, useTokenRepos } from "./tokenRepos";
 import { repoWebUrl } from "../api/slug-input";
+import { plural } from "../report/submetrics";
 import { AiOverviewSection, BadgeButton, BadgeDialog, type BadgeTarget, CategoryAiGlyph, CategoryAiMark, CategoryAiNote, ActivityCheckCard, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
-import { AsideSection, Collapse, EmptyState, LanguageName, Meta, MetaItem, MethodLink, ModelVersion, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
+import { AsideSection, Collapse, DialogName, EmptyState, SheetFocus, LanguageName, Meta, MetaItem, MethodLink, ModelVersion, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
 
 type Card = RepoCard;
 type Evidence = Card["evidence"][number];
@@ -189,12 +190,17 @@ export function RepoPage({ org, repo, meta, onSection }: { org: string; repo: st
   const sessionUnknown = me.kind === "loading" && me.stale === undefined;
   if (data === null && (state.kind !== "error" || (state.status === 404 && sessionUnknown))) {
     return (
-      // скелетон повторяет ритм содержимого: блок показателей (~150px) и шесть строк
-      // категорий по 45px
+      // скелетон повторяет раскладку карточки: шапка, две плашки оценок (189px),
+      // строка проверки активности (45px) и три раздела — иначе экран прыгал при загрузке
       <Page crumbs={crumbs} actions={<ActionsSkeleton />} aside={<SkeletonRows rows={3} height={96} />} asideDrawer frame="card">
-        <Flex direction="column" gap={3}>
-          <SkeletonRows rows={1} height={150} />
-          <SkeletonRows rows={6} height={45} />
+        <Flex direction="column" gap={3} aria-busy="true" aria-label="Загрузка">
+          <Skeleton style={{ height: 28, width: "50%" }} />
+          <div className="rh-score-cards">
+            <Skeleton style={{ height: 189, borderRadius: "var(--rh-radius-card)" }} />
+            <Skeleton style={{ height: 189, borderRadius: "var(--rh-radius-card)" }} />
+          </div>
+          <Skeleton style={{ height: 45, borderRadius: "var(--rh-radius-card)" }} />
+          <SkeletonRows rows={3} height={180} />
         </Flex>
       </Page>
     );
@@ -708,9 +714,16 @@ function useCompareState(org: string, repo: string): { inSet: boolean; full: boo
   const slug = slugOf(org, repo);
   const set = lastCompareSet();
   const inSet = set.includes(slug);
-  const open = (): void => navigate(compareHref(lastCompareSet()));
+  // двойной клик: второй щелчок по только что ставшей «В сравнении» кнопке уводил
+  // на сравнение из одного репозитория — полсекунды после добавления переход не срабатывает
+  const addedAt = useRef(0);
+  const open = (): void => {
+    if (Date.now() - addedAt.current < 500) return;
+    navigate(compareHref(lastCompareSet()));
+  };
   const add = (): void => {
     const next = [...lastCompareSet().filter((s) => s !== slug), slug];
+    addedAt.current = Date.now();
     rememberCompareSet(next);
     setVersion((v) => v + 1);
     toaster.add({
@@ -747,7 +760,8 @@ function CompareButton({ org, repo, primary = false }: { org: string; repo: stri
     );
   }
   return (
-    <Button view={primary && !inSet ? "action" : "normal"} size="m" onClick={inSet ? open : add} title={inSet ? "Открыть сравнение" : `Добавить в сравнение (${count + 1} из ${COMPARE_MAX})`}>
+    <ActionTooltip title={inSet ? "Открыть сравнение" : `Добавить в сравнение (${count + 1} из ${COMPARE_MAX})`}>
+    <Button view={primary && !inSet ? "action" : "normal"} size="m" onClick={inSet ? open : add}>
       <Icon data={inSet ? Check : ScalesBalanced} size={16} />
       {inSet ? (
         <>
@@ -759,6 +773,7 @@ function CompareButton({ org, repo, primary = false }: { org: string; repo: stri
         "Сравнить"
       )}
     </Button>
+    </ActionTooltip>
   );
 }
 
@@ -875,7 +890,10 @@ function useStartAnalysis(org: string, repo: string): { sending: boolean; start:
         });
       })
       .catch((e: unknown) => {
-        toaster.add({ name: `scan-failed:${org}/${repo}`, theme: "danger", title: "Анализ не запущен", content: e instanceof Error ? e.message : String(e) });
+        // анализ уже идет (чужой или плановый) — не ошибка: итог появится в карточке сам
+        if (e instanceof RequestError && e.code === "repo_busy") {
+          toaster.add({ name: `scan-queued:${org}/${repo}`, theme: "info", title: "Анализ уже идет", content: "Итог появится в карточке – можно уйти со страницы." });
+        } else toaster.add({ name: `scan-failed:${org}/${repo}`, theme: "danger", title: "Анализ не запущен", content: e instanceof Error ? e.message : String(e) });
       })
       .finally(() => {
         setSending(false);
@@ -1055,6 +1073,9 @@ function ScoreAside({
   foreignRunning: boolean;
 }) {
   const { score, scan } = card;
+  // сведения оценки — из ее анализа; последний анализ бывает новее (идет или упал)
+  const shownScan = card.scoredScan ?? scan;
+  const newer = score !== null && card.scoredScan != null && scan !== null ? scan : null;
   const threshold = fmtCoverage(meta?.coverageNullBelow ?? COVERAGE_NULL_BELOW);
   // покрытие обоих показателей – по номинальным весам Repo Health Score
   // (`coverageOf` в score/compute.ts): у индекса база – 65 открытых, у полного – 100
@@ -1091,17 +1112,24 @@ function ScoreAside({
             )}
             {/* при двух показателях — полнота каждого: индекса и полной оценки */}
             {score && full && (
-              <DefinitionList.Item name="Полнота: индекс" note={`HealthCraft Index. ${coverageHelp}`}>
+              <DefinitionList.Item name="Полнота: HealthCraft Index" note={coverageHelp}>
                 {fmtCoverage(score.indexCoverage)}
               </DefinitionList.Item>
             )}
             {score && full && (
-              <DefinitionList.Item name="Полнота: полная оценка" note={`Repo Health Score. ${fullCoverageHelp}`}>
+              <DefinitionList.Item name="Полнота: Repo Health Score" note={fullCoverageHelp}>
                 {score.repoHealthCoverage === null ? "–" : fmtCoverage(score.repoHealthCoverage)}
               </DefinitionList.Item>
             )}
-            {scan && scan.status !== "running" && <DefinitionList.Item name="Данные собраны">{collectedText(scan.status)}</DefinitionList.Item>}
-            {scan && scan.status !== "running" && <DefinitionList.Item name="Запуск">{scanTriggerText(scan.trigger)}</DefinitionList.Item>}
+            {shownScan && shownScan.status !== "running" && <DefinitionList.Item name="Данные собраны">{collectedText(shownScan.status)}</DefinitionList.Item>}
+            {shownScan && shownScan.status !== "running" && <DefinitionList.Item name="Запуск">{scanTriggerText(shownScan.trigger)}</DefinitionList.Item>}
+            {/* новый анализ после показанной оценки: идет — оценка обновится сама; упал — показан прошлый */}
+            {newer && (newer.status === "running" || newer.status === "queued") && <DefinitionList.Item name="Новый анализ">идет – оценка обновится по итогу</DefinitionList.Item>}
+            {newer && newer.status === "bad" && (
+              <DefinitionList.Item name="Новый анализ">
+                {newer.detail === "shutdown" || newer.detail === "orphaned" ? "прерван" : "не удался"} {fmtDateTime(newer.finishedAt ?? newer.startedAt)} – показан прошлый
+              </DefinitionList.Item>
+            )}
           </DefinitionList>
         ) : (
           <Text color="secondary">Анализа еще не было</Text>
@@ -1128,7 +1156,7 @@ function ScoreAside({
       {scan && (
         <AsideSection title="Сведения">
           <DefinitionList nameMaxWidth={ASIDE_NAME_WIDTH}>
-            <DefinitionList.Item name="Номер анализа">{scan.id}</DefinitionList.Item>
+            <DefinitionList.Item name="Номер анализа">{score ? score.scanId : scan.id}</DefinitionList.Item>
             {score && (
               <DefinitionList.Item name="Версия методики">
                 <ModelVersion version={score.modelVersion} />
@@ -1233,7 +1261,7 @@ function NoScoreReason({ view }: { view: CardView }) {
   return (
     <Flex direction="column" gap={1} alignItems="flex-start">
       <Text variant="body-1" color="complementary">
-        {view.limitations[0] ?? "Данных собрано слишком мало для расчета: полнота данных ниже порога."}
+        {view.noScoreReason ?? "Данных собрано слишком мало для расчета: полнота данных ниже порога."}
       </Text>
       <MethodLink page="no-data">Как обрабатываются отсутствующие данные</MethodLink>
     </Flex>
@@ -1276,6 +1304,10 @@ function ContributionStrip({ bar }: { bar: CardView["contributions"][number] | n
           </>
         }
         className="rh-tip-oneline"
+        // как у остальных подсказок полос карточки: подсветка сегмента — сразу,
+        // подсказка — через 150 мс, а не через 1 с по умолчанию uikit
+        openDelay={150}
+        closeDelay={0}
       >
         {node}
       </Tooltip>
@@ -2130,7 +2162,12 @@ function RecommendationBody({ item, org, repo, gain }: { item: RecommendationVie
       </Text>
       {/* «Источник данных» — первым: он есть у каждой строки, файл — только у части */}
       <Flex gap={2} wrap alignItems="center" className="rh-rec__meta">
-        <Popover trigger="click" placement={["bottom-start", "top-start"]} content={<FactProof item={item} />} aria-label={`Исходные данные: ${item.label}`}>
+        <Popover trigger="click" placement={["bottom-start", "top-start"]} content={
+            <>
+              <DialogName label={`Источник данных: ${item.label}`} />
+              <FactProof item={item} />
+            </>
+          }>
           <Button view="flat-secondary" size="s" className="rh-rec__proof">
             Источник данных
             <Icon data={ChevronDown} size={14} />
@@ -2352,14 +2389,25 @@ function FixTemplateButton({ org, repo, ruleId, meta }: { org: string; repo: str
     return (
       <>
         {button}
-        <Sheet visible={open} onClose={() => onOpenChange(false)} id={`rh-tpl-${ruleId}`} contentClassName="rh-tpl-sheet">
-          {content}
+        {/* имя окна — файл заготовки; «Готово» — закрыть без касания затемнения */}
+        <Sheet visible={open} onClose={() => onOpenChange(false)} id={`rh-tpl-${ruleId}`} contentClassName="rh-tpl-sheet" title={meta.filename}>
+          <SheetFocus open={open} onClose={() => onOpenChange(false)}>
+            {content}
+            <Button view="normal" size="l" width="max" className="rh-tpl-sheet__done" onClick={() => onOpenChange(false)}>
+              Готово
+            </Button>
+          </SheetFocus>
         </Sheet>
       </>
     );
   }
   return (
-    <Popover open={open} onOpenChange={onOpenChange} trigger="click" placement={["bottom-start", "top-start"]} content={content} aria-label={`Заготовка ${meta.filename}`}>
+    <Popover open={open} onOpenChange={onOpenChange} trigger="click" placement={["bottom-start", "top-start"]} content={
+        <>
+          <DialogName label={`Заготовка ${meta.filename}`} />
+          {content}
+        </>
+      }>
       {button}
     </Popover>
   );
@@ -2532,7 +2580,7 @@ function CiRunsStrip({ runs }: { runs: CiRun[] }) {
   const span = first !== null && last !== null ? `, с ${fmtDate(first)} по ${fmtDate(last)}` : "";
   return (
     <div className="rh-ciruns">
-      <div className="rh-ciruns__strip" role="img" aria-label={`Последние ${runs.length} запусков CI: ${ok} успешных, ${runs.length - ok} с ошибкой${span}`}>
+      <div className="rh-ciruns__strip" role="img" aria-label={`${plural(runs.length, "Последний", "Последние", "Последние")} ${runs.length} ${plural(runs.length, "запуск", "запуска", "запусков")} CI: ${ok} ${plural(ok, "успешный", "успешных", "успешных")}, ${runs.length - ok} с ошибкой${span}`}>
         {runs.map((r, i) => (
           <Tooltip key={i} content={<BreakdownTip lines={[r.ok ? "Успешно" : "С ошибкой", ...(r.at !== null ? [fmtDateTime(r.at)] : [])]} />} placement={["top", "bottom"]} openDelay={150} closeDelay={0}>
             <i className={r.ok ? "rh-ciruns__run rh-ciruns__run_ok" : "rh-ciruns__run rh-ciruns__run_fail"} />
@@ -2781,7 +2829,9 @@ function FavoriteStar({ org, repo, visibility, doneKey, loggedIn }: { org: strin
     ? "Проверяем избранное…"
     : state === "anon"
       ? "Войдите через Я ID, чтобы добавлять в избранное"
-      : "В избранное. Раздел «Избранное» содержит выбранные вами репозитории; права на закрытые данные сервис проверит сам при добавлении.";
+      : state === "on"
+        ? "Убрать из избранного"
+        : "Добавить в избранное";
   const starDisabled = state === "anon" || checking;
   const star = (
       /* Звезда — иконка из @gravity-ui/icons, а не юникодный символ: символ рисуется

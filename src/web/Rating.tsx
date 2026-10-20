@@ -2,6 +2,7 @@
 // Выборку считает сервер, страница только переводит состояние контролов в
 // query-строку и обратно — поэтому отфильтрованным рейтингом можно
 // поделиться ссылкой, и F5 его не теряет.
+import { parseFavoriteInput } from "../api/slug-input";
 import { EmptyIllustration, SearchIllustration, SuccessIllustration } from "./illustrations";
 import { coverageGap, coverageLine, resetFiltersHref } from "./ratingParams";
 import { loadRatingScroll, rememberRatingHref, saveRatingScroll } from "./ratingReturn";
@@ -18,7 +19,6 @@ import {
   Label,
   Link,
   Pagination,
-  Progress,
   SegmentedRadioGroup,
   Select,
   Sheet,
@@ -50,7 +50,7 @@ import {
 import {
   CATEGORY_TITLES_RU,
   DEFINITION_NAME_WIDTH,
-  FRAUD_TITLE,
+  fraudFlagTip,
   NO_DATA_SHORT,
   NO_SCORE,
   fmtCount,
@@ -69,7 +69,7 @@ import { readRatingHidden, useMediaQuery, writeRatingHidden } from "./prefs";
 import { linkProps, navigate, repoHref } from "./router";
 import { Page, showAside, useAsideControl } from "./Shell";
 import { categoryColorClass } from "./cardView";
-import { AsideSection, EmptyState, LanguageName, MethodLink, ModelVersion, PageHeader, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, TIP_TARGET } from "./ui";
+import { AsideSection, EmptyState, LanguageName, MethodLink, ModelVersion, PageHeader, RepoAvatar, RepoSlug, ScoreBar, ScoreLegend, SheetFocus, SkeletonRows, TIP_TARGET } from "./ui";
 import { LANG_NONE, LANG_NONE_TITLE, langOptions, type Facets, type LangOptionData } from "./lang-filter";
 
 type Item = RatingResponse["items"][number];
@@ -128,7 +128,7 @@ const COLUMN_TITLES: Record<string, string> = {
   index: "HealthCraft Index",
   likes: "Реакции",
   forks: "Ответвления",
-  activity: "Обновлен",
+  activity: "Последняя активность",
   coverage: "Полнота данных",
   scanned: "Анализ",
 };
@@ -215,6 +215,12 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
   const hasFilters = activeFilters.length > 0;
   // на телефоне таблица категорий не помещается — строки списком: место, имя, Score
   const isPhone = useMediaQuery("(max-width: 767px)");
+  // имена для скринридера, которых не передать через свойства uikit: у Table нет
+  // подписи, у поля номера страницы Pagination — только плейсхолдер «Стр.»
+  useEffect(() => {
+    document.querySelector(".rh-table-fill table")?.setAttribute("aria-label", "Рейтинг репозиториев");
+    document.querySelector(".rh-pager input")?.setAttribute("aria-label", "Номер страницы");
+  });
 
   const [queryDraft, setQueryDraft] = useState(qParam);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -408,14 +414,14 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
             }
             endContent={
               <HelpMark iconSize="s" aria-label="По каким полям идет поиск" style={{ marginInlineEnd: "var(--g-spacing-2)" }}>
-                Поиск по владельцу, репозиторию и заголовку
+                Поиск по организации и названию репозитория
               </HelpMark>
             }
             controlProps={{ "aria-label": "Поиск по репозиториям" }}
           />
         </div>
         {isPhone ? (
-          <Button view="outlined" size="m" selected={filterCount > 0} onClick={() => setFiltersOpen(true)}>
+          <Button view="outlined" size="m" selected={filterCount > 0} aria-haspopup="dialog" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(true)}>
             <Button.Icon side="start">
               <Icon data={Sliders} size={16} />
             </Button.Icon>
@@ -464,6 +470,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
           телефоне; выбор применяется сразу, кнопка только закрывает панель */}
       {isPhone && (
         <Sheet visible={filtersOpen} onClose={() => setFiltersOpen(false)} title="Фильтры">
+          <SheetFocus open={filtersOpen} onClose={() => setFiltersOpen(false)}>
           <Flex direction="column" gap={3} className="rh-filter-sheet">
             {filterControls}
             {aiFilter}
@@ -478,6 +485,7 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
               </Button>
             </Flex>
           </Flex>
+          </SheetFocus>
         </Sheet>
       )}
     </Flex>
@@ -653,12 +661,19 @@ function NothingFound({ active, search }: { active: string[]; search: string }) 
       />
     );
   }
+  const q = new URLSearchParams(search).get("q") ?? "";
+  // запрос — точное «org/repo» или ссылка: в рейтинге нет еще не анализированных,
+  // но их карточка открывается — путь к ней, а не тупик
+  const slug = parseFavoriteInput(q);
   return (
     <EmptyState
       image={SearchIllustration}
       title="Ничего не найдено"
-      description={nothingFoundDescription(active, new URLSearchParams(search).get("q") ?? "")}
-      actions={[{ text: "Сбросить фильтры", view: "normal", onClick: () => navigate(resetFiltersHref(window.location.search)) }]}
+      description={nothingFoundDescription(active, q)}
+      actions={[
+        ...(slug ? [{ text: `Открыть ${slug.org}/${slug.repo}`, view: "action" as const, onClick: () => navigate(`/repo/${encodeURIComponent(slug.org)}/${encodeURIComponent(slug.repo)}`) }] : []),
+        { text: "Сбросить фильтры", view: "normal", onClick: () => navigate(resetFiltersHref(window.location.search)) },
+      ]}
     />
   );
 }
@@ -803,7 +818,7 @@ function RatingAside({ meta, metaFailed = false, generatedAt }: { meta: MetaResp
             ))}
           </div>
           {ratingCategories.map((c) => (
-            <div key={c.key} className="rh-contrib__row" title={`вес в HealthCraft Index – ${c.weight}`}>
+            <div key={c.key} className="rh-contrib__row">
               <i className={`rh-contrib__dot ${categoryColorClass(c.key)}`} />
               <Text variant="body-1">{c.title}</Text>
               <Text variant="body-1" color="secondary" className="rh-contrib__share">
@@ -963,7 +978,13 @@ function RepoCell({ item }: { item: Item }) {
       <RepoAvatar repo={item.repo} logoUrl={item.logoUrl} size="m" />
       <Flex direction="column" gap={0} style={{ minWidth: 0 }}>
         <Flex gap={1} alignItems="center" style={{ minWidth: 0 }}>
-          <Link {...linkProps(repoHref(item.org, item.repo))} view="primary" className="rh-rating-name">
+          {/* отметки строки — в имени ссылки: значки не останавливают Tab (до 4 остановок на строку) */}
+          <Link
+            {...linkProps(repoHref(item.org, item.repo))}
+            view="primary"
+            className="rh-rating-name"
+            aria-label={[`${item.org}/${item.repo}`, item.aiOverview ? "есть AI-обзор" : null, item.fraud ? fraudFlagTip({ stale: item.fraudStale, oldRules: item.fraudOldRules }).toLowerCase() : null].filter(Boolean).join(", ")}
+          >
             <RepoSlug org={item.org} repo={item.repo} variant="subheader-1" />
           </Link>
           <RepoMarks item={item} />
@@ -1000,7 +1021,7 @@ function RepoMarks({ item, ext = true }: { item: Item; ext?: boolean }) {
       )}
       {item.aiOverview && (
         <ActionTooltip title="Есть AI-обзор">
-          <span className="rh-rating-ai" role="img" aria-label="Есть AI-обзор" {...TIP_TARGET}>
+          <span className="rh-rating-ai" role="img" aria-label="Есть AI-обзор" {...TIP_TARGET} tabIndex={-1}>
             <Icon data={SparklesFill} size={14} />
           </span>
         </ActionTooltip>
@@ -1009,8 +1030,8 @@ function RepoMarks({ item, ext = true }: { item: Item; ext?: boolean }) {
           сортировку не влияет; в подсказке только заголовок плашки карточки,
           пояснение — в самой карточке */}
       {item.fraud && (
-        <ActionTooltip title={item.fraudStale ? `${FRAUD_TITLE} – по прошлому анализу` : FRAUD_TITLE} className="rh-tip-oneline">
-          <span className="rh-rating-fraud" role="img" aria-label={item.fraudStale ? `${FRAUD_TITLE} – по прошлому анализу` : FRAUD_TITLE} {...TIP_TARGET}>
+        <ActionTooltip title={fraudFlagTip({ stale: item.fraudStale, oldRules: item.fraudOldRules })} className="rh-tip-oneline">
+          <span className="rh-rating-fraud" role="img" aria-label={fraudFlagTip({ stale: item.fraudStale, oldRules: item.fraudOldRules })} {...TIP_TARGET} tabIndex={-1}>
             <Icon data={Flag} size={14} />
           </span>
         </ActionTooltip>
@@ -1030,7 +1051,7 @@ function ratingAnnouncement(view: "scored" | "unscored", data: RatingResponse): 
   if (view === "unscored") return data.nullItems.length === 0 ? "Ничего не найдено" : `Без оценки: ${fmtCount(data.nulls)}`;
   if (data.total === 0) return "Ничего не найдено";
   const pages = Math.max(1, Math.ceil(data.total / data.perPage));
-  return pages > 1 ? `Найдено ${fmtCount(data.total)}, страница ${data.page} из ${pages}` : `Найдено ${fmtCount(data.total)}`;
+  return pages > 1 ? `Найдено ${fmtCount(data.total)}, страница ${fmtCount(data.page)} из ${fmtCount(pages)}` : `Найдено ${fmtCount(data.total)}`;
 }
 
 /** «Сортировать по …» — колонка словом в дательном падеже. */
@@ -1038,7 +1059,7 @@ const SORT_BY: Record<SortKey, string> = {
   name: "названию",
   index: "HealthCraft Index",
   likes: "реакциям",
-  activity: "дате обновления",
+  activity: "дате последней активности",
   coverage: "полноте данных",
 };
 
@@ -1117,11 +1138,11 @@ function buildColumns(
     },
     { id: "forks", name: "Ответвления", align: "end", template: (item: Item) => fmtNumber(item.forks) },
     // не «Активность»: так называется категория Score, а это дата из каталога;
-    // «Обновлен» — как «Updated» в списке Top repositories SourceCraft, и
-    // заголовок встает в одну строку
+    // «Последняя активность» — как «активность …» на карточке (было «Обновлен»).
+    // Заголовок переносится в две строки: одной строкой колонка была шире дат на 70px
     {
       id: "activity",
-      name: sortable("Обновлен", "activity"),
+      name: sortable("Последняя активность", "activity", true),
       align: "end",
       width: 104,
       template: (item: Item) => <Text color="secondary">{fmtDate(item.lastActivityAt)}</Text>,
@@ -1182,9 +1203,13 @@ function ScoreCell({ item, narrow = false }: { item: Item; narrow?: boolean }) {
     // 0 здесь значит «оценивать нечего», а не зону риска
     return (
       <Flex gap={2} alignItems="center" justifyContent="flex-end">
-        <Label theme="unknown" size="xs" title="В репозитории нет кода – оценка 0 означает, что оценивать пока нечего">
-          нет кода
-        </Label>
+        <ActionTooltip title="В репозитории нет кода – оценка 0 означает, что оценивать пока нечего">
+          <span {...TIP_TARGET}>
+            <Label theme="unknown" size="xs">
+              нет кода
+            </Label>
+          </span>
+        </ActionTooltip>
         <Text color="secondary" className="rh-score-cell__num">
           {fmtScore(item.healthcraftIndex)}
         </Text>
@@ -1195,16 +1220,19 @@ function ScoreCell({ item, narrow = false }: { item: Item; narrow?: boolean }) {
     <Flex gap={0} alignItems="center" justifyContent="flex-end">
       {/* «Из истории» — левее полосы: ярлык редкий и не должен раздвигать числовой ряд */}
       {item.staleFacts && (
-        <Label theme="warning" size="xs" title="Часть данных взята из прошлого анализа: источник не ответил">
-          Из истории
-        </Label>
+        <ActionTooltip title="Часть данных взята из прошлого анализа: источник не ответил">
+          <span {...TIP_TARGET}>
+            <Label theme="warning" size="xs">
+              Из истории
+            </Label>
+          </span>
+        </ActionTooltip>
       )}
-      <div className="rh-score-cell__bar">
-        <Progress value={item.healthcraftIndex} size="s" theme={scoreTheme(item.healthcraftIndex)} />
-      </div>
+      {/* та же полоса, что в списках (ScoreBar), длиннее: в таблице 83 и 80 должны различаться */}
+      <ScoreBar value={item.healthcraftIndex} width={80} />
       {/* уровень несет полоса, число нейтральное — как значение в строке Top
           repositories: в строке один цветной акцент, а не два */}
-      <Text color="primary" className="rh-score-cell__num" title={sentence(scoreWord(item.healthcraftIndex))}>
+      <Text color="primary" className="rh-score-cell__num">
         {fmtScore(item.healthcraftIndex)}
       </Text>
     </Flex>
@@ -1223,20 +1251,24 @@ function ScoreCell({ item, narrow = false }: { item: Item; narrow?: boolean }) {
 function CategoryCell({ value }: { value: number | null }) {
   if (value === null) {
     return (
-      <Label theme="unknown" size="xs" title="Нет данных: категория в оценке не участвует и ее не снижает">
-        {NO_DATA_SHORT}
-      </Label>
+      <ActionTooltip title="Нет данных: категория в оценке не участвует и ее не снижает">
+        <span {...TIP_TARGET}>
+          <Label theme="unknown" size="xs">
+            {NO_DATA_SHORT}
+          </Label>
+        </span>
+      </ActionTooltip>
     );
   }
   if (scoreTheme(value) === "success") {
     return (
-      <Text className="rh-cat-plain" style={{ fontVariantNumeric: "tabular-nums" }} title={sentence(scoreWord(value))}>
+      <Text className="rh-cat-plain" style={{ fontVariantNumeric: "tabular-nums" }}>
         {fmtScore(value)}
       </Text>
     );
   }
   return (
-    <Label theme={scoreLabelTheme(value)} size="xs" className="rh-cat-chip" title={sentence(scoreWord(value))}>
+    <Label theme={scoreLabelTheme(value)} size="xs" className="rh-cat-chip">
       <span style={{ fontVariantNumeric: "tabular-nums" }}>{fmtScore(value)}</span>
     </Label>
   );

@@ -15,7 +15,7 @@ import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState
 import { flushSync } from "react-dom";
 import { logout, type MeResponse } from "./api";
 import { HealthCraftMark, PRODUCT_NAME } from "./logo";
-import { useAppTheme, useMediaQuery, useRailCompact, type AppTheme } from "./prefs";
+import { scrollBehavior, useAppTheme, useMediaQuery, useRailCompact, type AppTheme } from "./prefs";
 import { linkProps, loginHref, navigate } from "./router";
 import { COMPARE_SET_EVENT, lastCompareSet } from "./compareReturn";
 
@@ -544,10 +544,16 @@ export function displayName(me: MeResponse): string {
 /** Аватар пользователя: портрет Я ID или инициалы. */
 export function UserAvatar({ me, size = "l" }: { me: MeResponse; size?: "m" | "l" }) {
   const text = me.displayName ?? me.login ?? "?";
-  return me.avatarUrl ? (
-    <Avatar size={size} shape="square" imgUrl={me.avatarUrl} alt="" style={{ flexShrink: 0 }} />
-  ) : (
-    <Avatar size={size} shape="square" text={text} theme="normal" style={{ flexShrink: 0 }} />
+  // декоративен — имя стоит рядом текстом; Avatar uikit теряет alt="" — обертка
+  // aria-hidden, как у RepoAvatar (ui.tsx)
+  return (
+    <span aria-hidden="true" style={{ display: "contents" }}>
+      {me.avatarUrl ? (
+        <Avatar size={size} shape="square" imgUrl={me.avatarUrl} alt="" style={{ flexShrink: 0 }} />
+      ) : (
+        <Avatar size={size} shape="square" text={text} theme="normal" style={{ flexShrink: 0 }} />
+      )}
+    </span>
   );
 }
 
@@ -590,7 +596,7 @@ export function showAside(control: AsideControl): void {
   // коротко подсвечиваем ее рамкой, чтобы взгляд перешел к ней
   const panel = document.querySelector<HTMLElement>(".rh-page__aside");
   if (!panel) return;
-  panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  panel.scrollIntoView({ behavior: scrollBehavior(), block: "start" });
   panel.classList.remove("rh-page__aside_flash");
   void panel.offsetWidth;
   panel.classList.add("rh-page__aside_flash");

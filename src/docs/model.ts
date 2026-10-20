@@ -105,7 +105,7 @@ export type DocBlock =
   | { kind: "code"; lang: string; text: string }
   | { kind: "note"; tone: "info" | "warning"; title: string | null; blocks: DocBlock[] }
   /** скриншот: `src` – путь от docs/guide (только images/*), `alt` – подпись под картинкой */
-  | { kind: "image"; src: string; alt: string };
+  | { kind: "image"; src: string; alt: string; /** размер файла (PNG) — место под картинку до загрузки */ width?: number; height?: number };
 
 export interface DocHeading {
   level: 2 | 3;

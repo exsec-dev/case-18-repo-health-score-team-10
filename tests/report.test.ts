@@ -78,8 +78,8 @@ describe("MD-отчёт: структура", () => {
     expect(main).not.toContain("(полный).");
     expect(main).not.toContain(`#${scoredScan}`);
     expect(main).not.toContain("4.0.0-hci");
-    // UX 17.10: дата и время — «16 сент. 2026, 12:00 UTC»
-    expect(appendix).toContain(`| Последний анализ | #${scoredScan}, завершен 16 сент. 2026, 12:00 UTC |`);
+    // UX 17.10: дата и время; аудит 20.10 — по Москве: 12:00 UTC → «16 сент. 2026, 15:00 МСК»
+    expect(appendix).toContain(`| Последний анализ | #${scoredScan}, завершен 16 сент. 2026, 15:00 МСК |`);
     expect(appendix).toContain(`| Версия методики | ${MODEL_VERSION} |`);
     expect(md).not.toContain("режим:");
   });
@@ -143,9 +143,9 @@ describe("MD-отчёт: действия и приложение", () => {
   });
 
   test("приложение В: факты таблицами «поле – значение» с источником и временем сбора", () => {
-    // UX 17.10: дата и время — «16 сент. 2026, 12:00 UTC»
-    expect(appendix).toContain("`docs.presence` – Документация, данные есть, история git, 16 сент. 2026, 12:00 UTC");
-    expect(appendix).toContain("`cicd.runs` – CI/CD, данных нет, API SourceCraft, 16 сент. 2026, 12:00 UTC");
+    // UX 17.10: дата и время; аудит 20.10 — по Москве (12:00 UTC = 15:00 МСК)
+    expect(appendix).toContain("`docs.presence` – Документация, данные есть, история git, 16 сент. 2026, 15:00 МСК");
+    expect(appendix).toContain("`cicd.runs` – CI/CD, данных нет, API SourceCraft, 16 сент. 2026, 15:00 МСК");
     expect(appendix).toContain("| contributing | нет |");
   });
 
@@ -199,8 +199,8 @@ describe("MD-отчёт: репозитории без оценки", () => {
     const dark = renderRepoReport(getRepoCard(t.db, "report", "dark", { access: GRANTED })!);
     expect(dark).toContain("HealthCraft Index: **Оценки нет**");
     expect(dark).toContain("Собрано 38% данных, а оценка рассчитывается начиная с 40%.");
-    // не прочитан — своей фразой (у пустого репо — другая)
-    expect(dark).toContain("Репозиторий не удалось прочитать");
+    // не скачан — своей фразой (у пустого репо — другая)
+    expect(dark).toContain("Репозиторий не удалось скачать");
     expect(dark).toContain("Оценка рассчитывается при объеме данных от 40%.");
     expect(dark).not.toContain("Score: 0");
     expect(dark).not.toContain("## Как считается");

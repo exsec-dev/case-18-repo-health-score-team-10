@@ -415,10 +415,11 @@ describe("Б3 (Р11, Р12, Р13, Р17, Р22): верх карточки по з�
       // у одного показателя – строка «Полнота данных»; у двух – «Полнота: индекс» и
       // «Полнота: полная оценка», в подсказке каждой показатель назван полностью
       // UX 17.10: «Покрытие» → «Полнота данных», аббревиатуры HCI/RHS в имени строки сняты
+      // аудит 20.10: показатель назван полностью в имени строки, подсказка — без префикса
       coverageInAside:
         /name="Полнота данных" note=\{coverageHelp\}/.test(aside) &&
-        /name="Полнота: индекс" note=\{`HealthCraft Index\. \$\{coverageHelp\}`\}/.test(aside) &&
-        /name="Полнота: полная оценка" note=\{`Repo Health Score\. \$\{fullCoverageHelp\}`\}/.test(aside),
+        /name="Полнота: HealthCraft Index" note=\{coverageHelp\}/.test(aside) &&
+        /name="Полнота: Repo Health Score" note=\{fullCoverageHelp\}/.test(aside),
       oldCoverageWord: figure.includes("данных хватило"),
       chipLikeAside: /scoreLabelTheme\(total\)\} size="s"/.test(figure),
       // блок не схлопывается в метку: заголовок, путь по типу зрителя и
@@ -505,10 +506,11 @@ describe("Б2 (Р3, Р21): строка рейтинга и контрол со�
       normalNumber: !cell.includes('variant="body-3"') && !cell.includes('variant="subheader-3"'),
       boldNumberGone: cell.includes('variant="subheader-3"'),
       colouredNumber: cell.includes("scoreColor(item.healthcraftIndex)"),
-      readableBar: /\.rh-score-cell__bar \.g-progress,[\s\S]{0,100}height:\s*8px/.test(css),
+      // аудит 20.10: полоса — общий ScoreBar (высота 8px), а не своя обертка ячейки
+      readableBar: /\.rh-score-bar \.g-progress,[\s\S]{0,100}height:\s*8px/.test(css),
       tighterGap: /<Flex gap=\{0\} alignItems="center" justifyContent="flex-end">/.test(cell),
       widths:
-        css.includes("flex: 0 0 80px") &&
+        cell.includes("<ScoreBar value={item.healthcraftIndex} width={80} />") &&
         css.includes("min-width: 32px") &&
         /\.rh-score-cell__num \{[^}]*font-size: var\(--g-text-body-2-font-size\)[^}]*font-weight: var\(--g-text-accent-font-weight\)/.test(css),
       neutralNumber: cell.includes('<Text color="primary" className="rh-score-cell__num"'),
@@ -538,7 +540,7 @@ describe("Б1 (Р1, Р2, Р5, Р6, Р8, Р9): рейтинг по замечан
     const input = between(src, "<TextInput", "controlProps=");
     expect({
       iconGap: /data=\{Magnifier\}[\s\S]{0,260}marginInlineEnd/.test(input),
-      hint: input.includes("Поиск по владельцу, репозиторию и заголовку"),
+      hint: input.includes("Поиск по организации и названию репозитория"),
       oldHint: src.includes("регистр не важен"),
       placeholderKept: src.includes('placeholder="Поиск"'),
     }).toEqual({ iconGap: true, hint: true, oldHint: false, placeholderKept: true });

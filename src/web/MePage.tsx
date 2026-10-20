@@ -27,6 +27,7 @@ import {
   Plus,
   Star,
   StarFill,
+  Eye,
   Sliders,
   SparklesFill,
   TrashBin,
@@ -66,13 +67,13 @@ import { type MeResponse, type MetaResponse, type MyReposResponse, RequestError,
 import type { LiveAnalysis } from "./analysis";
 import { announceJobStarted, announceJobsChanged, useAnalysis, useAnalysisFinished, useSession } from "./session";
 import { plural } from "../report/submetrics";
-import { FRAUD_TITLE, authErrorText, jobErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, quotaBlockedText, quotaCounter, scoreTheme, scoreWord, slugOf, type ActionQuotaView, type AiAction, type AiQuotaView, type FavoriteAddCheck, type QuotaWindowView } from "./format";
+import { fraudFlagTip, authErrorText, jobErrorText, failedAnalysisHint, favoriteAddedText, fmtDateTime, fmtScore, quotaBlockedText, quotaCounter, scoreTheme, scoreWord, slugOf, type ActionQuotaView, type AiAction, type AiQuotaView, type FavoriteAddCheck, type QuotaWindowView } from "./format";
 import { type Band, BANDS, groupByOrg, orgMetaText, orgSummaryOf, isClosed, multiSummary, orderOrgs, type RepoEntry, scoreChange, filterTokenRows, tokenParamsOf, tokenRowOrder, tokenSearchOf, tokenStateOf, TOKEN_FILTER_DEFAULT, TOKEN_SORTS, TOKEN_STATES, type TokenFilter, type TokenSort, type TokenState, type SortKey, SORT_DEFAULT_DESC, SORT_OPTIONS, countBands, filterEntries, groupJobsByDay, sortEntries } from "./myRepos";
 import { linkProps, navigate, repoHref } from "./router";
 import { readCollapsedOrgs, useMediaQuery, writeCollapsedOrgs } from "./prefs";
 import { repoKey, useTokenRepos } from "./tokenRepos";
 import { Page, UserAvatar, displayName, logoutFailedToast } from "./Shell";
-import { AsideSection, Collapse, EmptyState, LanguageName, Meta, MetaItem, PageHeader, RepoAvatar, RepoSlug, ScoreBar, SkeletonRows, TIP_TARGET, VisibilityPill } from "./ui";
+import { AsideSection, Collapse, EmptyState, LanguageName, Meta, MetaItem, PageHeader, REPO_ROW_HEIGHT, RepoAvatar, RepoSlug, ScoreBar, SheetFocus, SkeletonRows, TIP_TARGET, VisibilityPill } from "./ui";
 
 const REPOS_CRUMBS = [{ text: "Избранное" }];
 const TOKEN_REPOS_CRUMBS = [{ text: "Мои репозитории" }];
@@ -139,7 +140,7 @@ export function MePage(_props: { meta: MetaResponse | null }) {
   if (data === null && me.kind !== "error") {
     return (
       <Page crumbs={REPOS_CRUMBS}>
-        <SkeletonRows rows={4} height={56} />
+        <SkeletonRows rows={4} height={REPO_ROW_HEIGHT} />
       </Page>
     );
   }
@@ -325,7 +326,7 @@ function SettingsCard({
 
 const QUOTA_TITLES = {
   overview: { title: "AI-обзоры", caption: "Обзор репозитория и разборы категорий", help: "Обзор репозитория моделью и разборы категорий на карточке репозитория." },
-  check: { title: "Проверки активности", caption: "Проверка оценки на накрутку", help: "Проверка истории коммитов и задач на признаки искусственной активности." },
+  check: { title: "Проверки активности", caption: "Поиск признаков искусственной активности", help: "Проверка истории коммитов на признаки искусственной активности: коммиты роботов, пачки, ровный ритм по таймеру." },
 } as const;
 
 const leftOf = (w: QuotaWindowView): number => Math.max(0, w.limit - w.used);
@@ -342,7 +343,8 @@ function QuotaPanel({ action, q }: { action: AiAction; q: ActionQuotaView }) {
   const head = (
     <div className="rh-quota__head">
       <Flex gap={1} alignItems="center">
-        <Text variant="subheader-3" as="h3">
+        {/* заголовок блока тише заголовка карточки (17px), как «Доступ без лимитов» */}
+        <Text variant="subheader-2" as="h3">
           {t.title}
         </Text>
         <HelpMark iconSize="s" aria-label={`Что такое «${t.title}»`}>
@@ -477,7 +479,7 @@ function AiLimitsSections() {
         ) : quota.state.kind === "error" ? (
           <CabinetAlert
             title="Лимиты не загрузились"
-            message="Запуск AI-обзоров при этом работает – остаток видно на кнопках карточки репозитория."
+            message="Запуск AI-обзоров при этом работает."
             actions={[{ text: "Повторить", handler: quota.reload }]}
           />
         ) : (
@@ -810,7 +812,8 @@ function PatSection({ hasPat, unreadable = false, checkedAt, onChanged }: { hasP
             <Label theme="success" size="s" icon={<Icon data={Check} size={14} />}>
               Проверен
             </Label>
-            <Label theme="utility" size="s">
+            {/* нейтральная метка, как «Приватный/Публичный»: фиолетовый в приложении — цвет AI */}
+            <Label theme="clear" size="s" icon={<Icon data={Eye} size={14} />}>
               Только чтение
             </Label>
           </Flex>
@@ -949,7 +952,9 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
         announceJobStarted(res?.jobId);
         if (res?.deduplicated) toaster.add({ name: `scan-dedup:${slug}`, theme: "info", title: "Анализ уже идет", content: slug });
       } catch (e) {
-        toaster.add({ name: `scan-failed:${slug}`, theme: "danger", title: "Анализ не запущен", content: e instanceof Error ? e.message : String(e) });
+        // анализ уже идет (чужой или плановый) — не ошибка: тот же синий тост, что у своего дубля
+        if (e instanceof RequestError && e.code === "repo_busy") toaster.add({ name: `scan-dedup:${slug}`, theme: "info", title: "Анализ уже идет", content: slug });
+        else toaster.add({ name: `scan-failed:${slug}`, theme: "danger", title: "Анализ не запущен", content: e instanceof Error ? e.message : String(e) });
       } finally {
         setStarting((prev) => {
           const next = new Set(prev);
@@ -1037,12 +1042,15 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
             controlProps={{ "aria-label": "Найти репозиторий в избранном" }}
           />
           <Flex>
+            {/* подпись и тихое значение — как сортировка «Моих репозиториев» */}
             <Select
+              label="Сортировка:"
               size="m"
               pin="round-brick"
               width="auto"
               value={[sortKey]}
               options={SORT_OPTIONS}
+              renderSelectedOption={(option) => <span className="rh-select-value_muted">{option.content}</span>}
               onUpdate={([v]) => {
                 const key = (v as SortKey) ?? "index";
                 setSortKey(key);
@@ -1062,7 +1070,7 @@ function MyReposSection({ hasPat }: { hasPat: boolean }) {
 
       <TokenNotice hasPat={hasPat} />
 
-      {repos.state.kind === "loading" && <SkeletonRows rows={3} height={66} />}
+      {repos.state.kind === "loading" && <SkeletonRows rows={3} height={REPO_ROW_HEIGHT} />}
       {repos.state.kind === "error" && (
         <CabinetAlert title="Не удалось загрузить список" message={repos.state.message} actions={[{ text: "Повторить", handler: repos.reload }]} />
       )}
@@ -1214,23 +1222,30 @@ function ScoreChange({ entry }: { entry: RepoEntry }) {
   if (d === null || d === 0) return <span className="rh-change" aria-hidden="true" />;
   const up = d > 0;
   return (
-    <span className="rh-change" title={`С прошлой оценки: ${up ? "+" : "−"}${Math.abs(d)} – было ${fmtScore(entry.previousIndex!)}`}>
-      <span className={up ? "rh-rank__arrow rh-rank__arrow_up" : "rh-rank__arrow rh-rank__arrow_down"} role="img" aria-label={up ? "Выросла" : "Снизилась"}>
-        <Icon data={up ? TriangleUpFill : TriangleDownFill} size={10} />
+    <ActionTooltip title={`С прошлой оценки: ${up ? "+" : "−"}${Math.abs(d)} – было ${fmtScore(entry.previousIndex!)}`}>
+      <span className="rh-change" {...TIP_TARGET}>
+        <span className={up ? "rh-rank__arrow rh-rank__arrow_up" : "rh-rank__arrow rh-rank__arrow_down"} role="img" aria-label={up ? "Выросла" : "Снизилась"}>
+          <Icon data={up ? TriangleUpFill : TriangleDownFill} size={10} />
+        </span>
+        <Text variant="body-short" color="secondary">
+          {Math.abs(d)}
+        </Text>
       </span>
-      <Text variant="body-short" color="secondary">
-        {Math.abs(d)}
-      </Text>
-    </span>
+    </ActionTooltip>
   );
 }
 
 /** Серая плашка состояния строки (Label unknown s): смысл — иконкой и подсказкой, цвет только у иконки. */
 function StatePill({ icon, tone, title, children }: { icon: IconData; tone?: "danger" | "warning"; title: string; children: ReactNode }) {
   return (
-    <Label theme="unknown" size="s" title={title} icon={<Icon data={icon} size={14} className={tone ? `rh-state__icon rh-state__icon_${tone}` : "rh-state__icon"} />}>
-      {children}
-    </Label>
+    // пояснение — подсказкой Gravity: системный title не виден с клавиатуры и на касании
+    <ActionTooltip title={title}>
+      <span {...TIP_TARGET}>
+        <Label theme="unknown" size="s" icon={<Icon data={icon} size={14} className={tone ? `rh-state__icon rh-state__icon_${tone}` : "rh-state__icon"} />}>
+          {children}
+        </Label>
+      </span>
+    </ActionTooltip>
   );
 }
 
@@ -1375,7 +1390,7 @@ function AddRepoDialog({
           {meta}
         </span>
         {has ? (
-          <Label theme="success" size="xs" icon={<Icon data={CircleCheck} size={12} />}>
+          <Label theme="success" size="s" icon={<Icon data={CircleCheck} size={14} />}>
             В избранном
           </Label>
         ) : (
@@ -1427,7 +1442,7 @@ function AddRepoDialog({
           )}
           <ul className="rh-add-list" aria-label="Репозитории">
             {manual !== null && row(`manual:${manual}`, <>Добавить <b>{manual}</b></>, manual, null)}
-            {list.state.kind === "loading" && <SkeletonRows rows={4} height={40} />}
+            {list.state.kind === "loading" && <SkeletonRows rows={4} height={52} />}
             {/* по организациям, внутри — закрытые первыми: свои приватные не теряются
                 среди публичных репозиториев организации */}
             {groupByOrg(shown, (r) => r.slug).map((g) => (
@@ -1441,13 +1456,13 @@ function AddRepoDialog({
                     const slug = `${r.org}/${r.slug}`;
                     return row(
                       slug,
-                      <RepoSlug org={r.org} repo={r.slug} variant="body-1" />,
+                      <RepoSlug org={r.org} repo={r.slug} variant="subheader-1" />,
                       slug,
                       <span className="rh-add-row__meta">
                         <VisibilityPill value={r.visibility} />
                         {r.isEmpty && (
                           <Label theme="normal" size="xs">
-                            пустой
+                            нет коммитов
                           </Label>
                         )}
                       </span>,
@@ -1587,6 +1602,17 @@ function RepoRow({
       <StatePill icon={Clock} title="Анализ запланирован">
         Запланирован
       </StatePill>
+    ) : scored && entry.codeEmpty ? (
+      // нет кода: число нейтральное и метка, как в рейтинге и «Сравнении» —
+      // 0 здесь значит «оценивать нечего», а не зону риска
+      <div className="rh-repo-item__score">
+        <Label theme="unknown" size="xs">
+          нет кода
+        </Label>
+        <Text variant="subheader-2" color="secondary" className="rh-repo-item__num">
+          {fmtScore(entry.healthcraftIndex!)}
+        </Text>
+      </div>
     ) : scored ? (
       <div className="rh-repo-item__score" title={`HealthCraft Index – ${scoreWord(entry.healthcraftIndex)}`}>
         {/* уровень несет цвет полосы, как в рейтинге: плашка-слово рядом повторяла его.
@@ -1674,8 +1700,8 @@ function RepoRow({
             </ActionTooltip>
           )}
           {entry.fraudFlag?.flag === true && entry.fraudFlag.factors.length > 0 && (
-            <ActionTooltip title={FRAUD_TITLE} className="rh-tip-oneline">
-              <span className="rh-rating-fraud" role="img" aria-label={FRAUD_TITLE} {...TIP_TARGET}>
+            <ActionTooltip title={fraudFlagTip(entry.fraudFlag)} className="rh-tip-oneline">
+              <span className="rh-rating-fraud" role="img" aria-label={fraudFlagTip(entry.fraudFlag)} {...TIP_TARGET}>
                 <Icon data={Flag} size={14} />
               </span>
             </ActionTooltip>
@@ -1687,7 +1713,7 @@ function RepoRow({
             <LanguageName name={entry.language} color={entry.languageColor} />
           </MetaItem>
           {entry.lastScanAt && scored && (
-            <MetaItem icon={ArrowsRotateRight} title="Последний анализ">
+            <MetaItem icon={ArrowsRotateRight} title="Анализ, по которому посчитана оценка">
               {fmtDateTime(entry.lastScanAt)}
             </MetaItem>
           )}
@@ -1742,7 +1768,7 @@ export function MyReposPage() {
   if (data === null && me.kind !== "error") {
     return (
       <Page crumbs={TOKEN_REPOS_CRUMBS}>
-        <SkeletonRows rows={4} height={56} />
+        <SkeletonRows rows={4} height={REPO_ROW_HEIGHT} />
       </Page>
     );
   }
@@ -1830,7 +1856,9 @@ function TokenRepos() {
       announceJobStarted(res?.jobId);
       if (res?.deduplicated) toaster.add({ name: `scan-dedup:${slug}`, theme: "info", title: "Анализ уже идет", content: slug });
     } catch (e) {
-      toaster.add({ name: `scan-failed:${slug}`, theme: "danger", title: "Анализ не запущен", content: e instanceof Error ? e.message : String(e) });
+      // анализ уже идет (чужой или плановый) — не ошибка: тот же синий тост, что у своего дубля
+      if (e instanceof RequestError && e.code === "repo_busy") toaster.add({ name: `scan-dedup:${slug}`, theme: "info", title: "Анализ уже идет", content: slug });
+      else toaster.add({ name: `scan-failed:${slug}`, theme: "danger", title: "Анализ не запущен", content: e instanceof Error ? e.message : String(e) });
     } finally {
       setStarting(editing(slug, false));
       announceJobsChanged();
@@ -2020,7 +2048,7 @@ function TokenRepos() {
         <div className="rh-inventory__filters">
           {visibility}
           {isPhone ? (
-            <Button view="outlined" size="m" selected={filtersOn > 0} onClick={() => setFiltersOpen(true)}>
+            <Button view="outlined" size="m" selected={filtersOn > 0} aria-haspopup="dialog" aria-expanded={filtersOpen} onClick={() => setFiltersOpen(true)}>
               <Button.Icon side="start">
                 <Icon data={Sliders} size={16} />
               </Button.Icon>
@@ -2033,6 +2061,7 @@ function TokenRepos() {
       )}
       {isPhone && (
         <Sheet visible={filtersOpen} onClose={() => setFiltersOpen(false)} title="Фильтры">
+          <SheetFocus open={filtersOpen} onClose={() => setFiltersOpen(false)}>
           <Flex direction="column" gap={3} className="rh-filter-sheet">
             {selects}
             <Flex gap={2} className="rh-filter-sheet__actions">
@@ -2046,10 +2075,11 @@ function TokenRepos() {
               </Button>
             </Flex>
           </Flex>
+          </SheetFocus>
         </Sheet>
       )}
 
-      {list.state.kind === "loading" && data === null && <SkeletonRows rows={6} height={48} />}
+      {list.state.kind === "loading" && data === null && <SkeletonRows rows={6} height={REPO_ROW_HEIGHT} />}
       {list.state.kind === "error" && (
         <CabinetAlert title="Не удалось загрузить список из SourceCraft" message={list.state.message} actions={[{ text: "Повторить", handler: list.reload }]} />
       )}
@@ -2088,12 +2118,19 @@ function TokenRepos() {
               aria-expanded={!isCollapsed(g.org)}
               aria-controls={`org-body-${g.org}`}
               disabled={searching}
-              onClick={() => toggleOrg(g.org)}
+              onClick={(e) => {
+                // шапка прилипла (группа ушла выше края) — сначала к началу группы: после
+                // сворачивания на тысячи пикселей прокрутка оставалась прежней, и нажатая
+                // шапка пропадала из виду
+                const group = e.currentTarget.closest(".rh-org-group");
+                if (group && group.getBoundingClientRect().top < 0) group.scrollIntoView({ block: "start" });
+                toggleOrg(g.org);
+              }}
             >
               <RepoAvatar repo={g.org} logoUrl={data?.orgs?.[g.org]?.logoUrl ?? null} size="l" />
               <span className="rh-org-group__text">
                 <span className="rh-org-group__name">
-                  <Text variant="subheader-2" ellipsis id={`org-name-${g.org}`}>
+                  <Text variant="subheader-2" ellipsis id={`org-name-${g.org}`} title={data?.orgs?.[g.org]?.displayName ?? g.org}>
                     {data?.orgs?.[g.org]?.displayName ?? g.org}
                   </Text>
                   <span className="rh-btn-count">{g.items.length}</span>
@@ -2316,13 +2353,13 @@ function JobRow({ job, onNavigate }: { job: import("../api/me").MyJob; onNavigat
         )}
         {job.kind === "check" && (
           <Text color="secondary" variant="caption-2">
-            проверка активности
+            Проверка активности
           </Text>
         )}
       </div>
       {/* очередь обслуживается по кругу (round-robin), а не по порядку — номер позиции не показываем */}
       <Label theme="unknown" size="s" className="rh-busy">
-        {job.phase === "queued" ? "В очереди" : job.kind === "summary" ? "Готовим AI-обзор" : job.kind === "check" ? "Проверка активности" : "Идет анализ"}
+        {job.phase === "queued" ? "В очереди" : job.kind === "summary" ? "Готовим AI-обзор" : job.kind === "check" ? "Идет проверка активности" : "Идет анализ"}
       </Label>
 
     </div>
@@ -2390,7 +2427,7 @@ function HistoryRow({ job, time, onNavigate }: { job: import("../api/me").MyJob;
         )}
         {job.kind === "check" && (
           <Text color="secondary" variant="caption-2">
-            проверка активности
+            Проверка активности
           </Text>
         )}
         {job.phase === "failed" && job.error && (

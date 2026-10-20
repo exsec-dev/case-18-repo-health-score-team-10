@@ -18,6 +18,8 @@ export interface PublicRepoResponse {
   language: string | null;
   likes: number | null;
   healthcraftIndex: number | null;
+  /** в репозитории нет кода: индекс 0 по правилу методики значит «оценивать нечего», а не зону риска */
+  codeEmpty: boolean;
   indexCoverage: number;
   /** публичные 4 категории (основы индекса); NULL = нет данных (tri-state) */
   categories: Partial<Record<"documentation" | "activity" | "issues" | "code", number | null>>;
@@ -36,13 +38,13 @@ export function getPublicRepo(db: Database, org: string, repo: string): PublicRe
   if (!publicApiVisible(r)) return null;
   const scan = db
     .query(
-      `SELECT sc.scan_id, sc.healthcraft_index, sc.index_coverage, sc.categories, s.finished_at, s.head_sha
+      `SELECT sc.scan_id, sc.healthcraft_index, sc.code_empty, sc.index_coverage, sc.categories, s.finished_at, s.head_sha
        FROM scores sc JOIN scans s ON s.id = sc.scan_id
        WHERE sc.repo_id = ? AND sc.model_version = ? AND sc.scan_id = ${LAST_ELIGIBLE_SCAN_SQL}`,
     )
     // у подзапроса LAST_ELIGIBLE_SCAN_SQL свой ? на model_version, поэтому параметров три
     .get(r.id, MODEL_VERSION, MODEL_VERSION) as
-    | { scan_id: number; healthcraft_index: number | null; index_coverage: number; categories: string; finished_at: string | null; head_sha: string | null }
+    | { scan_id: number; healthcraft_index: number | null; code_empty: number; index_coverage: number; categories: string; finished_at: string | null; head_sha: string | null }
     | null;
   if (scan === null) {
     // репо в рейтинге, но еще не оценен
@@ -53,6 +55,7 @@ export function getPublicRepo(db: Database, org: string, repo: string): PublicRe
       language: r.language,
       likes: r.likes,
       healthcraftIndex: null,
+      codeEmpty: false,
       indexCoverage: 0,
       categories: {},
       modelVersion: MODEL_VERSION,
@@ -72,6 +75,7 @@ export function getPublicRepo(db: Database, org: string, repo: string): PublicRe
     language: r.language,
     likes: r.likes,
     healthcraftIndex: scan.healthcraft_index,
+    codeEmpty: scan.code_empty === 1,
     indexCoverage: scan.index_coverage,
     categories,
     modelVersion: MODEL_VERSION,
@@ -119,9 +123,10 @@ export const RANK_BADGE_COLORS: Record<RankLeague, { bg: string; fg: string }> =
  */
 export function renderBadgeSvg(index: number | null, rank: RankBadge | null = null, extras: BadgeExtras = {}): string {
   // слово зоны – в сегменте числа через пробел; без него бейдж байт в байт прежний
-  const word = index !== null && extras.word === true ? SCORE_WORDS[scoreTheme(index) as keyof typeof SCORE_WORDS] : null;
+  const codeEmpty = index !== null && extras.codeEmpty === true;
+  const word = index !== null && extras.word === true ? (codeEmpty ? "нет кода" : SCORE_WORDS[scoreTheme(index) as keyof typeof SCORE_WORDS]) : null;
   const value = index === null ? "n/a" : word === null ? String(index) : `${index} ${word}`;
-  const color = badgeColor(index);
+  const color = codeEmpty ? badgeColor(null) : badgeColor(index);
   // левая половина – нейтральный серый, как у бейджей shields; ширина подписи – под Verdana 11
   const label = "HealthCraft Index";
   const valueWidth = word === null ? 8 + value.length * 11 : 10 + textWidth(value, true);
@@ -229,6 +234,8 @@ export interface BadgeExtras {
   /** разница с прошлым анализом; null – сравнивать не с чем (части нет) */
   delta?: number | null;
   word?: boolean;
+  /** нет кода: 0 серым и «нет кода» вместо слова зоны, как на карточке */
+  codeEmpty?: boolean;
   /** баллы 4 категорий – бейдж становится карточкой со шкалами; нет поля – обычный бейдж */
   categories?: Partial<Record<IndexCategoryKey, number | null>>;
 }
@@ -347,6 +354,8 @@ function badgeKeyValid(appSecret: string, org: string, repo: string, key: string
 /** Числа бейджа: индекс, прошлый индекс того же ряда, баллы категорий, значок места. */
 export interface BadgeSubject {
   index: number | null;
+  /** в репозитории нет кода (оценка 0 по правилу) — бейдж серый, без слова зоны */
+  codeEmpty: boolean;
   previousIndex: number | null;
   categories: Partial<Record<IndexCategoryKey, number | null>>;
   rank: RankBadge | null;
@@ -372,8 +381,8 @@ export function badgeSubject(db: Database, org: string, repo: string, opts: { ke
   }
   const pick = (sql: string) =>
     db
-      .query(`SELECT sc.scan_id, sc.healthcraft_index, sc.categories FROM scores sc WHERE sc.repo_id = ? AND sc.model_version = ? AND sc.scan_id = ${sql}`)
-      .get(r.id, MODEL_VERSION, MODEL_VERSION) as { scan_id: number; healthcraft_index: number | null; categories: string } | null;
+      .query(`SELECT sc.scan_id, sc.healthcraft_index, sc.code_empty, sc.categories FROM scores sc WHERE sc.repo_id = ? AND sc.model_version = ? AND sc.scan_id = ${sql}`)
+      .get(r.id, MODEL_VERSION, MODEL_VERSION) as { scan_id: number; healthcraft_index: number | null; code_empty: number; categories: string } | null;
   const row = pick(LAST_ELIGIBLE_SCAN_SQL) ?? (closed ? pick(LAST_NOT_BAD_SCAN_SQL) : null);
   // прошлый индекс – из того же ряда, что текущий (то же правило, что у списка
   // «Мои репозитории»): пригодные сканы, у закрытого без них – не-bad
@@ -393,6 +402,7 @@ export function badgeSubject(db: Database, org: string, repo: string, opts: { ke
   for (const key of BADGE_CATEGORIES) categories[key] = cats[key]?.score ?? null;
   return {
     index,
+    codeEmpty: row?.code_empty === 1,
     previousIndex: index !== null && pair.length === 2 ? pair[1]!.total : null,
     categories,
     // место есть только у открытого репозитория из рейтинга
@@ -408,6 +418,7 @@ export function renderBadgeFor(subject: BadgeSubject, options: BadgeOptions): st
   return renderBadgeSvg(subject.index, options.parts.has("rank") ? subject.rank : null, {
     delta,
     word: options.parts.has("word"),
+    codeEmpty: subject.codeEmpty,
     ...(options.parts.has("cats") ? { categories: subject.categories } : {}),
   });
 }

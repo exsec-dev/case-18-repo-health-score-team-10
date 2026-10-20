@@ -11,14 +11,15 @@
 // Порядок разделов: шапка → показатели → вклад категорий → категории →
 // рекомендации → ограничения данных → проверка на накрутку и AI-обзор → разбор
 // → «Как считается» → приложение (в PDF с новой страницы).
+import { shownRecommendationOrder } from "../web/cardView";
 import { CATEGORY_ORDER, CATEGORY_TITLES, CHANNEL_TREE_KEY, type CardCategory, type CardEvidence, type CardRecommendation, type RepoCard } from "../api/repos";
 import { COVERAGE_NULL_BELOW, INDEX_WEIGHTS, SCORE_WEIGHTS, SEVERITY_WEIGHTS, SUBWEIGHTS, type CategoryKey } from "../score/model";
 import {
   SCORE_SCALE,
   fmtContribution,
   fmtCoverage,
-  fmtDateUtc as fmtDate,
-  fmtDateTimeUtc as fmtDateTime,
+  fmtDateMsk as fmtDate,
+  fmtDateTimeMsk as fmtDateTime,
   fmtDecimal,
   fmtLoss,
   fmtScore,
@@ -178,7 +179,9 @@ const h3 = (value: string): Block => ({ kind: "heading", level: 3, content: [tex
 const col = (title: string, align: "left" | "right" = "left", width?: number): TableColumn => ({ title, align, width });
 
 /** Модель отчета карточки — общий источник MD и PDF. */
-export function buildReportModel(card: RepoCard): ReportModel {
+export function buildReportModel(source: RepoCard): ReportModel {
+  // номера рекомендаций — как на карточке (критичные и шаги лесенки первыми, затем по приросту)
+  const card: RepoCard = source.score ? { ...source, recommendations: shownRecommendationOrder(source) } : source;
   const slug = `${card.repo.org}/${card.repo.repo}`;
   const dateIso = analysisDate(card);
   const date = dateIso ? fmtDate(dateIso) : null;
@@ -656,7 +659,7 @@ function metricCalc(card: RepoCard, metric: ShownMetric, named: boolean): Block[
   out.push({
     kind: "paragraph",
     tone: "fine",
-    lines: [line(`Баллов в итог = балл × вес. ${weights} Вес категории без данных делится между остальными пропорционально: такая категория в оценке не участвует и ее не снижает.${tail}`)],
+    lines: [line(`Баллов в итог = балл × вес, до десятых – так, чтобы строки сложились в итог. ${weights} Вес категории без данных делится между остальными пропорционально: такая категория в оценке не участвует и ее не снижает.${tail}`)],
   });
   // у репо без кода итог 0 по правилу «кода нет», а не по потолку секретов —
   // строка про AppSec здесь была бы ложной

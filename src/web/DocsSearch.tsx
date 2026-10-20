@@ -6,6 +6,7 @@ import { Magnifier } from "@gravity-ui/icons";
 import { Icon, Popup, TextInput } from "@gravity-ui/uikit";
 import { useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import type { DocPage } from "../docs/model";
+import { useMediaQuery } from "./prefs";
 import { buildSearchIndex, queryTerms, searchDocs, type SearchHit } from "../docs/search";
 
 /** Подсветка основ запроса во фрагменте. */
@@ -16,6 +17,7 @@ function highlight(text: string, terms: string[]): ReactNode[] {
 }
 
 export function DocsSearch({ pages, onOpen }: { pages: DocPage[]; onOpen: (slug: string, anchor: string | null) => void }) {
+  const phone = useMediaQuery("(max-width: 767px)");
   const index = useMemo(() => buildSearchIndex(pages), [pages]);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -50,7 +52,8 @@ export function DocsSearch({ pages, onOpen }: { pages: DocPage[]; onOpen: (slug:
       <TextInput
         size="m"
         value={query}
-        placeholder="Поиск по документации"
+        // на телефоне поле узкое — «Поиск по документ» обрезался; имя поля — в aria-label
+        placeholder={phone ? "Поиск" : "Поиск по документации"}
         hasClear
         startContent={<Icon data={Magnifier} size={16} className="rh-docs-search__lens" />}
         // стандартный combobox: фокус остается в поле, подсвеченный пункт — через aria-activedescendant

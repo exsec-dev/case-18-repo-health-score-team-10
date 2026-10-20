@@ -238,7 +238,8 @@ describe("В4.6-6 (У21): колонка индекса – горизонтал
     const css = srcOf("layout.css");
     expect({
       horizontal: !/direction="column"/.test(cell),
-      bar80: /\.rh-score-cell__bar\s*\{[^}]*flex:\s*0 0 80px[^}]*width:\s*80px/.test(css),
+      // полоса — общий ScoreBar (не сжимается, высота 8px) шириной 80px
+      bar80: cell.includes("<ScoreBar value={item.healthcraftIndex} width={80} />") && /\.rh-score-bar\s*\{[^}]*flex:\s*none/.test(css),
       slot: cell.includes("rh-score-cell__num"),
       sameTextSize: !cell.includes('variant="body-3"') && !cell.includes('variant="subheader-3"'),
       neutralNumber: !cell.includes("scoreColor(item.healthcraftIndex)") && cell.includes('<Text color="primary" className="rh-score-cell__num"'),
@@ -353,7 +354,7 @@ describe("В4.6-9 (У27–У32): консистентность вне каби�
       placeholder: src.includes('placeholder="Поиск"'),
       oldPlaceholder: src.includes('placeholder="org, repo или название"'),
       // «имя» и «название» разведены по фактическим полям поиска
-      hint: src.includes("Поиск по владельцу, репозиторию и заголовку"),
+      hint: src.includes("Поиск по организации и названию репозитория"),
     }).toEqual({ placeholder: true, oldPlaceholder: false, hint: true });
   });
 
@@ -436,8 +437,14 @@ describe("В4.6-11 (У15/У16/У17): охват, границы доступа, 
     expect(typeof meta.repos.catalog).toBe("number");
   });
 
-  test("У16: карточка формально объясняет, что раздел содержит выбранные репозитории", () => {
-    expect(srcOf("RepoPage.tsx")).toContain("Раздел «Избранное» содержит выбранные вами репозитории");
+  // Аудит 20.10: длинное пояснение в подсказке звезды заменено действием —
+  // подсказка называет, что сделает кнопка; смысл «звезда = добавить в раздел» сохранен
+  test("У16: подсказка звезды называет действие — добавить в избранное", () => {
+    const src = srcOf("RepoPage.tsx");
+    expect({
+      action: src.includes('"Добавить в избранное"'),
+      longTip: src.includes("Раздел «Избранное» содержит выбранные вами репозитории"),
+    }).toEqual({ action: true, longTip: false });
   });
 
   test("У17: находки AppSec показаны с разбивкой по движкам, SCA отдельной строкой", () => {

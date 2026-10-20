@@ -26,6 +26,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
 import type { RepoCard } from "./api";
 import { dataOf, fetchJson, useJson, useLatest, useVisible } from "./api";
 import { Collapse, TIP_TARGET } from "./ui";
+import { scrollBehavior } from "./prefs";
 import { plural } from "../report/submetrics";
 import {
   AI_SECTION_TITLE,
@@ -98,7 +99,7 @@ export const categoryAnchor = (key: string): string => `rh-category-${key}`;
 
 export function openCategory(key: string): void {
   window.dispatchEvent(new CustomEvent(OPEN_CATEGORY_EVENT, { detail: key }));
-  requestAnimationFrame(() => document.getElementById(categoryAnchor(key))?.scrollIntoView({ block: "center", behavior: "smooth" }));
+  requestAnimationFrame(() => document.getElementById(categoryAnchor(key))?.scrollIntoView({ block: "center", behavior: scrollBehavior() }));
 }
 
 // ---------- флаг накрутки ----------
@@ -205,6 +206,11 @@ function refusalToast(error: { code?: string; message?: string; until?: string }
   if (error?.code?.startsWith("quota_")) {
     const tail = error.code === "quota_hour" && error.until ? `. Следующий запуск – после ${fmtDateTime(error.until)}` : "";
     return { theme: "warning", title: "Лимит исчерпан", content: `${message}${tail}` };
+  }
+  // «недавно формировался» — пауза, а не сбой: желтым и со временем следующего запуска
+  if (error?.code === "cooldown") {
+    const when = error.until ? `Следующий запуск – после ${fmtDateTime(error.until)}.` : "Следующий запуск будет доступен позже.";
+    return { theme: "warning", title: "AI-обзор недавно формировался", content: when };
   }
   return { theme: "danger", title: failTitle, content: message };
 }
@@ -409,15 +415,17 @@ function sentenceOf(text: string): string {
 }
 
 /**
- * Признаки накрутки строками: текст строит код из факта, формулировка модели — запасной
- * вариант, без маркеров фактов и машинных ключей (`fraudNoteText`).
+ * Признаки накрутки строками — один фактор проверки, одна строка (как пункт MD-отчета):
+ * перечень чисел после «; » — пояснение того же фактора, а не второй признак. Текст строит
+ * код из факта, формулировка модели — запасной вариант, без маркеров фактов и машинных
+ * ключей (`fraudNoteText`).
  */
 function fraudLines(card: Card): string[] {
   const fraud = card.ai?.fraud;
   if (fraud === undefined || fraud === null || fraud.flag !== true) return [];
   const factOf = (key: string): unknown => fraudFactorValue(key, fraud.signals, card.evidence, fraud.inputs);
   return fraud.factors
-    .flatMap((f) => (fraudFactorFact(f.key, factOf(f.key)) ?? fraudNoteText(f.note)).split("; "))
+    .map((f) => fraudFactorFact(f.key, factOf(f.key)) ?? fraudNoteText(f.note))
     .filter((l) => l !== "")
     // с заглавной — только русская фраза: неизвестный ключ остается как есть
     .map((l) => (/^[а-яё]/.test(l) ? l[0]!.toUpperCase() + l.slice(1) : l));
@@ -592,7 +600,8 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
     return (
       <section className="rh-ai-section rh-ai-section_empty" aria-labelledby="rh-ai-title" data-slot="aiSummary">
         <Flex direction="column" gap={1} alignItems="flex-start">
-          <Text color="secondary" id="rh-ai-title" as="h2" className="rh-ai-section__label">
+          {/* заголовок раздела — тот же, что у заполненного (17px); состояние — строкой ниже */}
+          <Text variant="subheader-3" id="rh-ai-title" as="h2">
             {AI_SECTION_TITLE}
           </Text>
           {/* отказы проверки фактами API отдает только по анализу с заметками
@@ -922,8 +931,23 @@ function lastIndex(values: (number | null)[]): number {
   return values.reduce<number>((acc, v, i) => (v !== null ? i : acc), -1);
 }
 
-function HistoryChart({ points, fullOpen }: { points: HistoryPoint[]; fullOpen: boolean }) {
+/**
+ * Точки графика — от первой до последней оценки с числом: анализы без индекса по
+ * краям тянули ось за собой (линия занимала треть ширины, у последнего значения
+ * не было места для числа). Пропуски внутри ряда остаются разрывом линии.
+ */
+function chartSpan(points: HistoryPoint[], fullOpen: boolean): HistoryPoint[] {
+  const has = (p: HistoryPoint): boolean => p.healthcraftIndex !== null || (fullOpen && p.repoHealthScore !== null);
+  const first = points.findIndex(has);
+  if (first < 0) return points;
+  let last = points.length - 1;
+  while (last > first && !has(points[last]!)) last--;
+  return points.slice(first, last + 1);
+}
+
+function HistoryChart({ points: all, fullOpen }: { points: HistoryPoint[]; fullOpen: boolean }) {
   const [wrapRef, CHART_W] = useWidth();
+  const points = chartSpan(all, fullOpen);
   const hci = points.map((p) => p.healthcraftIndex);
   const rhs = fullOpen ? points.map((p) => p.repoHealthScore) : null;
   const hLast = lastIndex(hci);
@@ -1076,7 +1100,7 @@ function HistoryChart({ points, fullOpen }: { points: HistoryPoint[]; fullOpen: 
                 `HealthCraft Index ${fmtScore(p.healthcraftIndex)}`,
                 rhs !== null ? `Repo Health Score ${fmtScore(p.repoHealthScore)}` : null,
                 p.headSha ? `коммит ${p.headSha.slice(0, 7)}` : null,
-                p.codeEmpty ? "пустой репозиторий" : null,
+                p.codeEmpty ? "нет кода" : null,
               ]
                 .filter((x) => x !== null)
                 .join("\n")}
@@ -1129,7 +1153,7 @@ function AnalysisRow({ point, fullOpen, overview, aiColumn }: { point: HistoryPo
             )}
             {point.codeEmpty && (
               <Label theme="normal" size="xs">
-                пустой репозиторий
+                нет кода
               </Label>
             )}
           </span>
@@ -1197,13 +1221,14 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
     return (
       <section className="rh-section" aria-labelledby="rh-history-title" data-slot="scoreHistory" aria-busy={state.kind === "loading"}>
         <Card view="outlined" className="rh-section-card rh-placeholder-card">
-          <Flex direction="column" gap={2} alignItems="flex-start">
-            <Text color="secondary" as="h2" id="rh-history-title" className="rh-ai-section__label">
+          <Flex direction="column" gap={1} alignItems="flex-start">
+            <Text variant="subheader-3" as="h2" id="rh-history-title">
               {SLOT_EMPTY.scoreHistory.title}
             </Text>
             {state.kind === "error" ? (
               <>
-                <Text variant="body-1" color="complementary">{`История не загрузилась: ${state.message}`}</Text>
+                <Text variant="subheader-2">История не загрузилась</Text>
+                <Text variant="body-1" color="complementary">{state.message}</Text>
                 <Button view="outlined" size="s" onClick={reload}>
                   Повторить
                 </Button>
@@ -1262,7 +1287,7 @@ function HistoryBody({ card, org, repo, notes }: { card: Card; org: string; repo
       <section className="rh-section" aria-labelledby="rh-history-title" data-slot="scoreHistory">
         <Card view="outlined" className="rh-section-card rh-placeholder-card">
           <Flex direction="column" gap={1} alignItems="flex-start">
-            <Text color="secondary" as="h2" id="rh-history-title" className="rh-ai-section__label">
+            <Text variant="subheader-3" as="h2" id="rh-history-title">
               {SLOT_EMPTY.scoreHistory.title}
             </Text>
             <Text variant="subheader-2">Графика пока нет</Text>
@@ -1388,7 +1413,7 @@ function BadgeContent({ target, title = true }: { target: BadgeTarget; title?: b
           aria-label="Формат кода"
           popupPlacement="bottom-start"
         />
-        <TextInput className="rh-badge-pop__input" size="m" pin="brick-brick" readOnly value={code} aria-label="Код бейджа" />
+        <TextInput className="rh-badge-pop__input" size="m" pin="brick-brick" readOnly value={code} controlProps={{ "aria-label": "Код бейджа" }} />
         <ClipboardButton text={code} size="m" view="outlined" pin="brick-round" tooltipInitialText="Скопировать" tooltipSuccessText="Скопировано" />
       </div>
     </div>

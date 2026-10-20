@@ -7,6 +7,9 @@ import { plural } from "../report/submetrics";
 
 export type RepoEntry = MyReposResponse["entries"][number];
 
+/** Имена — с числами по значению: repo-2 раньше repo-10. */
+const NAME_ORDER: Intl.CollatorOptions = { numeric: true };
+
 /**
  * Полоса шкалы строки — те же пороги, что у рейтинга и карточки
  * (`scoreTheme`, по показанному округленному числу). `none` — оценки нет:
@@ -14,7 +17,9 @@ export type RepoEntry = MyReposResponse["entries"][number];
  */
 export type Band = "success" | "warning" | "danger" | "none";
 
-export function bandOf(entry: Pick<RepoEntry, "healthcraftIndex">): Band {
+export function bandOf(entry: Pick<RepoEntry, "healthcraftIndex"> & { codeEmpty?: boolean }): Band {
+  // нет кода: 0 по правилу методики — «оценивать нечего», а не зона риска (как «нет кода» в рейтинге)
+  if (entry.codeEmpty === true) return "none";
   const theme = scoreTheme(entry.healthcraftIndex);
   return theme === "misc" ? "none" : theme;
 }
@@ -23,11 +28,11 @@ export const BANDS: { key: Band; title: string; hint: string }[] = [
   { key: "success", title: "Здоровы", hint: "HealthCraft Index 70-100" },
   { key: "warning", title: "Требуют внимания", hint: "HealthCraft Index 40-69" },
   { key: "danger", title: "В зоне риска", hint: "HealthCraft Index 0-39" },
-  { key: "none", title: "Без оценки", hint: "Анализ еще не проводился, идет или данных для оценки не хватило" },
+  { key: "none", title: "Без оценки", hint: "Анализ еще не проводился, идет, данных для оценки не хватило или в репозитории нет кода" },
 ];
 
 /** Число строк в каждой полосе; сумма всегда равна длине списка. */
-export function countBands(entries: Pick<RepoEntry, "healthcraftIndex">[]): Record<Band, number> {
+export function countBands(entries: (Pick<RepoEntry, "healthcraftIndex"> & { codeEmpty?: boolean })[]): Record<Band, number> {
   const counts: Record<Band, number> = { success: 0, warning: 0, danger: 0, none: 0 };
   for (const e of entries) counts[bandOf(e)] += 1;
   return counts;
@@ -39,7 +44,7 @@ export function countBands(entries: Pick<RepoEntry, "healthcraftIndex">[]): Reco
  * и на экране) и `org / repo` (прежняя экранная форма — скопированное раньше
  * имя тоже находится).
  */
-export function filterEntries<T extends Pick<RepoEntry, "org" | "repo" | "title" | "healthcraftIndex">>(entries: T[], query: string, band: Band | null): T[] {
+export function filterEntries<T extends Pick<RepoEntry, "org" | "repo" | "title" | "healthcraftIndex"> & { codeEmpty?: boolean }>(entries: T[], query: string, band: Band | null): T[] {
   const q = query.trim().toLowerCase();
   return entries.filter(
     (e) =>
@@ -93,7 +98,7 @@ export function sortEntries<T extends Pick<RepoEntry, "org" | "repo" | "healthcr
     if (va === null && vb === null) return 0;
     if (va === null) return 1;
     if (vb === null) return -1;
-    const cmp = typeof va === "string" ? va.localeCompare(vb as string, "ru") : va - (vb as number);
+    const cmp = typeof va === "string" ? va.localeCompare(vb as string, "ru", NAME_ORDER) : va - (vb as number);
     return desc ? -cmp : cmp;
   });
 }
@@ -148,7 +153,7 @@ export const isClosed = (visibility: string | null): boolean => visibility === "
 /** Организации: пространство владельца токена первым, остальные по алфавиту. */
 export function orderOrgs(orgs: Iterable<string>, owner: string | null = null): string[] {
   const own = owner?.toLowerCase() ?? null;
-  return [...new Set(orgs)].sort((a, b) => Number(b.toLowerCase() === own) - Number(a.toLowerCase() === own) || a.localeCompare(b));
+  return [...new Set(orgs)].sort((a, b) => Number(b.toLowerCase() === own) - Number(a.toLowerCase() === own) || a.localeCompare(b, "ru", NAME_ORDER));
 }
 
 /**
@@ -160,7 +165,7 @@ export function groupByOrg<T extends { org: string; visibility: string | null }>
   nameOf: (r: T) => string,
   opts: { owner?: string | null; within?: (a: T, b: T) => number } = {},
 ): { org: string; items: T[] }[] {
-  const byName = (a: T, b: T) => Number(isClosed(b.visibility)) - Number(isClosed(a.visibility)) || nameOf(a).localeCompare(nameOf(b));
+  const byName = (a: T, b: T) => Number(isClosed(b.visibility)) - Number(isClosed(a.visibility)) || nameOf(a).localeCompare(nameOf(b), "ru", NAME_ORDER);
   return orderOrgs(
     repos.map((r) => r.org),
     opts.owner,
@@ -170,16 +175,17 @@ export function groupByOrg<T extends { org: string; visibility: string | null }>
 // ---------- «Мои репозитории»: фильтры и сортировка ----------
 
 /** Состояние строки описи: зона оценки или что с анализом. */
-export type TokenState = "success" | "warning" | "danger" | "unscored" | "never" | "failed" | "empty";
+export type TokenState = "success" | "warning" | "danger" | "nocode" | "unscored" | "never" | "failed" | "empty";
 
 export const TOKEN_STATES: { key: TokenState; title: string }[] = [
   { key: "success", title: "Здоровы" },
   { key: "warning", title: "Требуют внимания" },
   { key: "danger", title: "В зоне риска" },
+  { key: "nocode", title: "Нет кода" },
   { key: "unscored", title: "Оценки нет" },
-  { key: "never", title: "Не анализировали" },
+  { key: "never", title: "Еще не анализировали" },
   { key: "failed", title: "Ошибка анализа" },
-  { key: "empty", title: "Без коммитов" },
+  { key: "empty", title: "Нет коммитов" },
 ];
 
 export interface TokenRow {
@@ -190,13 +196,16 @@ export interface TokenRow {
   visibility: string | null;
   isEmpty: boolean;
   healthcraftIndex: number | null;
+  /** оценка 0 у репо без кода — не зона риска */
+  codeEmpty?: boolean;
   lastScanAt: string | null;
   lastScanStatus: string | null;
 }
 
 export function tokenStateOf(e: TokenRow): TokenState {
-  if (e.healthcraftIndex !== null) return bandOf(e) as TokenState;
+  if (e.healthcraftIndex !== null && e.codeEmpty !== true) return bandOf(e) as TokenState;
   if (e.isEmpty) return "empty";
+  if (e.healthcraftIndex !== null) return "nocode";
   if (e.lastScanStatus === "bad") return "failed";
   return e.lastScanAt !== null ? "unscored" : "never";
 }
@@ -213,12 +222,15 @@ type ZoneBand = Exclude<Band, "none">;
 export function orgSummaryOf(items: readonly TokenRow[]): OrgSummary {
   const zones: Record<ZoneBand, number> = { success: 0, warning: 0, danger: 0 };
   let closed = 0;
+  let scored = 0;
   for (const e of items) {
     if (isClosed(e.visibility)) closed++;
+    // репо без кода оценен (0 по правилу), но ни в одну зону не входит
+    if (e.healthcraftIndex !== null) scored++;
     const band = bandOf(e);
     if (band !== "none") zones[band]++;
   }
-  return { scored: zones.success + zones.warning + zones.danger, closed, zones };
+  return { scored, closed, zones };
 }
 
 /**
@@ -227,7 +239,7 @@ export function orgSummaryOf(items: readonly TokenRow[]): OrgSummary {
  */
 export function orgMetaText(org: string, displayName: string | undefined, s: OrgSummary): string {
   const counts = [
-    s.scored > 0 ? `${s.scored} оценено` : "еще не оценивались",
+    s.scored > 0 ? `оценено: ${s.scored}` : "еще не оценивались",
     ...(s.closed > 0 ? [`${s.closed} ${plural(s.closed, "закрытый", "закрытых", "закрытых")}`] : []),
   ].join(", ");
   // слаг пишется как есть; с прописной — только строка, начатая словами
@@ -270,7 +282,7 @@ export function filterTokenRows<T extends TokenRow>(rows: readonly T[], f: Token
 
 /** Порядок строк внутри организации: пустые значения — всегда в конце. */
 export function tokenRowOrder<T extends TokenRow>(sort: TokenSort): (a: T, b: T) => number {
-  const name = (a: T, b: T) => a.repo.localeCompare(b.repo);
+  const name = (a: T, b: T) => a.repo.localeCompare(b.repo, "ru", NAME_ORDER);
   if (sort === "never") return (a, b) => Number(tokenStateOf(b) === "never") - Number(tokenStateOf(a) === "never") || name(a, b);
   if (sort === "index") return (a, b) => (b.healthcraftIndex ?? -1) - (a.healthcraftIndex ?? -1) || name(a, b);
   if (sort === "scan") {

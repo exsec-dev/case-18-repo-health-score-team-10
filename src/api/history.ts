@@ -49,7 +49,9 @@ function totalsOf(row: ScoreHistoryRow, caps: { secretsCritical: boolean; critic
 
 /**
  * История по возрастанию сканов, только строки текущей MODEL_VERSION: оценки
- * сопоставимы лишь внутри одной версии модели. null – репо не видно (404).
+ * сопоставимы лишь внутри одной версии модели. Сбойные анализы (bad) в историю
+ * не входят: оценки они не дают, а в списке анализов читались как «индекс –».
+ * null – репо не видно (404).
  */
 export function getRepoHistory(db: Database, org: string, repo: string, opts: { access?: AccessResult } = {}): HistoryResponse | null {
   const r = db
@@ -64,7 +66,7 @@ export function getRepoHistory(db: Database, org: string, repo: string, opts: { 
       `SELECT sc.scan_id, sc.healthcraft_index, sc.index_coverage, sc.categories, sc.code_empty, sc.derived,
               s.finished_at, s.head_sha
        FROM scores sc JOIN scans s ON s.id = sc.scan_id
-       WHERE sc.repo_id = ? AND sc.model_version = ?
+       WHERE sc.repo_id = ? AND sc.model_version = ? AND s.status <> 'bad'
        ORDER BY sc.scan_id ASC`,
     )
     .all(r.id, MODEL_VERSION) as ScoreHistoryRow[];

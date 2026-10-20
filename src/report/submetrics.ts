@@ -24,7 +24,7 @@
 //   issues.monthly_flow       — [{from, created, closed}] от старых окон к новым;
 //   доли — 0..1 (показ в процентах); без значения — «–».
 
-import { MINUS } from "../web/format";
+import { GROUP_ALWAYS, MINUS } from "../web/format";
 
 /** Глиф «нет данных» (tri-state): тот же, что у `fmtScore` и ячеек MD. */
 export const NO_VALUE = "–";
@@ -59,7 +59,7 @@ const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFin
 function num(value: number): string {
   // ненулевое значение меньше 0,05 при одном знаке стало бы «0»
   if (value > 0 && value < 0.05) return "меньше 0,1";
-  const body = Math.abs(value).toLocaleString("ru-RU", { maximumFractionDigits: 1 });
+  const body = Math.abs(value).toLocaleString("ru-RU", { maximumFractionDigits: 1, ...GROUP_ALWAYS });
   return value < 0 && body !== "0" ? `${MINUS}${body}` : body;
 }
 
@@ -67,7 +67,7 @@ function num(value: number): string {
 export function fmtKb(bytes: number): string {
   // непустой файл меньше 0,05 КБ при одном знаке стал бы «0,0 КБ»
   if (bytes > 0 && bytes < 51.2) return "меньше 0,1 КБ";
-  return `${(bytes / 1024).toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 })} КБ`;
+  return `${(bytes / 1024).toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1, ...GROUP_ALWAYS })} КБ`;
 }
 
 /** Русское согласование с числом: 1 день, 2 дня, 5 дней (дробное — родительный ед.: 2.5 дня). */
@@ -178,7 +178,7 @@ const ciStability: Formatter = (v) => {
   if (c.few_runs === true && isNum(c.completed) && isNum(c.needed)) {
     return `нет данных, мало запусков (${num(c.completed)} ${plural(c.completed, "завершенный", "завершенных", "завершенных")}, нужно от ${num(c.needed)})`;
   }
-  const word = c.trend === "better" ? "стабильнее" : c.trend === "worse" ? "хуже" : c.trend === "same" ? "без изменений" : null;
+  const word = c.trend === "better" ? "стабильнее" : c.trend === "worse" ? "хуже" : c.trend === "same" ? "в пределах обычного разброса" : null;
   if (word === null || !isNum(c.recent_share) || !isNum(c.previous_share) || !isNum(c.window)) return null;
   const n = num(c.window);
   return `${word}, ${Math.round(c.recent_share * 100)}% успешных у последних ${n} ${plural(c.window, "запуска", "запусков", "запусков")} против ${Math.round(c.previous_share * 100)}% у ${n} до них`;
@@ -187,12 +187,12 @@ const ciStability: Formatter = (v) => {
 /** Знак баланса: «+5», «−4», «0» (минус — «−», как у `fmtDecimal`). */
 const signed = (n: number): string => (n > 0 ? `+${num(n)}` : n < 0 ? num(Math.round(n)) : "0");
 
-/** «бэклог растет, +5 за 90 дней (создано 12, закрыто 7)». */
+/** «открытых задач становится больше, +5 за 90 дней (создано 12, закрыто 7)». */
 const backlogTrend: Formatter = (v) => {
   const b = obj(v);
   if (!b || !isNum(b.created) || !isNum(b.closed) || !isNum(b.balance)) return null;
   if (b.created === 0 && b.closed === 0) return "без движения, за 90 дней задачи не создавались и не закрывались";
-  const word = b.direction === "growing" ? "бэклог растет" : b.direction === "shrinking" ? "бэклог разбирается" : b.direction === "stable" ? "бэклог стабилен" : null;
+  const word = b.direction === "growing" ? "открытых задач становится больше" : b.direction === "shrinking" ? "открытых задач становится меньше" : b.direction === "stable" ? "открытых задач столько же" : null;
   if (word === null) return null;
   return `${word}, ${signed(b.balance)} за 90 дней (создано ${num(b.created)}, закрыто ${num(b.closed)})`;
 };
@@ -272,7 +272,9 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   "documentation.contributing": { title: "CONTRIBUTING", unit: "есть/нет", format: presence },
   "documentation.codeowners": { title: "CODEOWNERS", unit: "есть/нет", format: presence },
   "cicd.config": { title: "Конфигурация CI со шагами", unit: "признаки ci.yaml", format: ciConfig },
-  "cicd.pass_rate": { title: "Доля успешных запусков CI", unit: "доля, %", format: share },
+  // доля взвешена по свежести (последние запуски весят больше): без пометки «73%» спорило
+  // с «19 из 20 успешны» и «69% из 251 запуска» рядом
+  "cicd.pass_rate": { title: "Доля успешных запусков CI", unit: "доля, %, с учетом свежести", format: (v) => (isNum(v) ? `${Math.round(v * 100)}% с учетом свежести` : null) },
   "cicd.duration": { title: "Медианная длительность запуска CI", unit: "секунды → с/мин/ч", format: duration },
   "cicd.stability": { title: "Стабильность CI в динамике", unit: "доля успешных: последние запуски против предыдущих (справочно, без веса)", format: ciStability },
   // мера — в значении, в названии ее повторять незачем
@@ -282,7 +284,7 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   "security.secrets": { title: "Критичные утечки секретов", unit: "найдены/не найдены", format: (v) => (typeof v === "boolean" ? (v ? "найдены" : "не найдены") : null) },
   "activity.fresh": { title: "Свежесть последнего коммита человека", unit: "дни на момент скана", format: daysSince },
   "activity.freq": { title: "Частота коммитов", unit: "коммитов в месяц", format: (v) => (isNum(v) ? `${num(v)} в месяц` : null) },
-  "activity.contributors": { title: "Число авторов", unit: "авторы", format: count("автор", "автора", "авторов") },
+  "activity.contributors": { title: "Число авторов", unit: "авторы", format: plain },
   "activity.pulls_90d": { title: "Предложения изменений за 90 дней", unit: "штуки", format: plain },
   "activity.releases_12m": { title: "Релизы за 12 месяцев", unit: "штуки", format: plain },
   "activity.mirror_likeness": { title: "Похожесть на зеркало", unit: "доля синхронизаций, авторы, коммитеры", format: mirror },
@@ -295,14 +297,14 @@ export const SUBMETRICS: Record<string, SubmetricSpec> = {
   "issues.resolution": { title: "Доля решенных", unit: "доля, %", format: share },
   "issues.first_resp": { title: "Время до первого ответа", unit: "часы", format: (v) => (isNum(v) ? `${num(v)} ч` : null) },
   "issues.tracker_unused": { title: "Задачи не ведутся", unit: "открытые и закрытые задачи", format: tracker },
-  "issues.backlog_trend": { title: "Динамика бэклога за 90 дней", unit: "создано минус закрыто (справочно, без веса)", format: backlogTrend },
+  "issues.backlog_trend": { title: "Динамика открытых задач за 90 дней", unit: "создано минус закрыто (справочно, без веса)", format: backlogTrend },
   "issues.monthly_flow": { title: "Поток задач", unit: "создано и закрыто за 6 окон по 30 дней (справочно, без веса)", format: monthlyFlow },
   // пометки считаются только в коде — файлы тестов исключены
   "code.density": { title: "Плотность TODO/FIXME в коде", unit: "на 1 тыс. строк", format: perLines("1 тыс.") },
   "code.old_share": { title: "Доля старых TODO", unit: "доля, %", format: share },
   "code.tests": { title: "Файлы тестов", unit: "доля файлов кода, %", format: share },
   "code.root": { title: "Порядок в корне репозитория", unit: "элементы корня", format: count("элемент", "элемента", "элементов") },
-  "code.todo_total": { title: "Маркеров TODO/FIXME в коде", unit: "штуки", format: plain },
+  "code.todo_total": { title: "Пометок TODO/FIXME в коде", unit: "штуки", format: plain },
   // справочные, без веса (DISPLAY_ONLY)
   "activity.pr_review": { title: "Ревью предложений изменений", unit: "предложений нет / только черновики (справочно, без веса)", format: prReview },
   "activity.pr_first_response": { title: "Время до первого ответа на предложение изменений", unit: "медиана, часы → ч/дни (справочно, без веса)", format: hoursOrDays },

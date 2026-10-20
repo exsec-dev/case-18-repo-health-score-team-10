@@ -113,7 +113,7 @@ describe("В5.3 круг 3: флаг фрода — текст фактора с
     expect(fraudFactorFact("activity.git.timeline", { events: 606, first: "2026-03-02T09:14:00Z", last: "2026-09-24T01:29:54Z" }, (iso) => iso.slice(0, 10))).toBe(
       "606 коммитов с 2026-03-02 по 2026-09-24",
     );
-    expect(fraudFactorFact("activity.rest", { contributors: 1, releases: 0, pulls_created_at: [] })).toBe("1 участник, 0 релизов, 0 запросов на слияние");
+    expect(fraudFactorFact("activity.rest", { contributors: 1, releases: 0, pulls_created_at: [] })).toBe("1 участник, 0 релизов, 0 предложений изменений");
   });
 });
 

@@ -177,7 +177,8 @@ describe("Д1 показатель: доля успешных последних
       "стабильнее, 90% успешных у последних 10 запусков против 60% у 10 до них",
     );
     expect(shown("cicd.stability", { score: null, value: { trend: "same", recent_share: 1, previous_share: 1, window: 5 } })).toBe(
-      "без изменений, 100% успешных у последних 5 запусков против 100% у 5 до них",
+      // аудит 20.10: «без изменений» → «в пределах обычного разброса» — равные доли не значат, что запуски не менялись
+      "в пределах обычного разброса, 100% успешных у последних 5 запусков против 100% у 5 до них",
     );
     expect(shown("cicd.stability", { score: null, value: { trend: "worse", recent_share: 0.5, previous_share: 0.8, window: 10 } })).toBe(
       "хуже, 50% успешных у последних 10 запусков против 80% у 10 до них",
@@ -288,17 +289,18 @@ describe("Д2 показатель: баланс за 90 дней и напра�
     expect(backlogValue(flow([0, 0], [0, 0], [0, 0]))).toEqual({ created: 0, closed: 0, balance: 0, direction: "stable" });
   });
 
+  // аудит 20.10: «бэклог» → «открытые задачи» — слово UI без жаргона
   test("показ: знак баланса, слова направления, помесячные числа", () => {
     const d = issueDynamics({ open: 3, closed: 5, flow: { window_days: 30, windows: flow([4, 1], [3, 1], [3, 1]) } });
-    expect(shown("issues.backlog_trend", d.backlog_trend)).toBe("бэклог растет, +7 за 90 дней (создано 10, закрыто 3)");
+    expect(shown("issues.backlog_trend", d.backlog_trend)).toBe("открытых задач становится больше, +7 за 90 дней (создано 10, закрыто 3)");
     expect(shown("issues.monthly_flow", d.monthly_flow)).toBe("за 6 месяцев создано 37, закрыто 30; за последние 30 дней – создано 3, закрыто 1");
     const s = issueDynamics({ open: 3, closed: 5, flow: { window_days: 30, windows: flow([1, 4], [1, 3], [0, 3]) } });
-    expect(shown("issues.backlog_trend", s.backlog_trend)).toBe("бэклог разбирается, −8 за 90 дней (создано 2, закрыто 10)");
+    expect(shown("issues.backlog_trend", s.backlog_trend)).toBe("открытых задач становится меньше, −8 за 90 дней (создано 2, закрыто 10)");
     const idle = issueDynamics({ open: 3, closed: 5, flow: { window_days: 30, windows: flow([0, 0], [0, 0], [0, 0]) } });
     // подтвержденное «ничего не происходило» — данные, а не «нет данных»
     expect(shown("issues.backlog_trend", idle.backlog_trend)).toBe("без движения, за 90 дней задачи не создавались и не закрывались");
     const stable = issueDynamics({ open: 3, closed: 5, flow: { window_days: 30, windows: flow([10, 9], [10, 9], [10, 9]) } });
-    expect(shown("issues.backlog_trend", stable.backlog_trend)).toBe("бэклог стабилен, +3 за 90 дней (создано 30, закрыто 27)");
+    expect(shown("issues.backlog_trend", stable.backlog_trend)).toBe("открытых задач столько же, +3 за 90 дней (создано 30, закрыто 27)");
   });
 
   // UX 17.10: «трекер не ведется» → «задачи не ведутся»
@@ -440,12 +442,12 @@ describe("отрисованный MD: справочные строки в ра
       expect(md).toContain(
         "Справочно, в балл не входит: Стабильность CI в динамике – стабильнее, 90% успешных у последних 10 запусков против 70% у 10 до них.",
       );
-      expect(md).toContain("Динамика бэклога за 90 дней – бэклог растет, +4 за 90 дней (создано 6, закрыто 2)");
+      expect(md).toContain("Динамика открытых задач за 90 дней – открытых задач становится больше, +4 за 90 дней (создано 6, закрыто 2)");
       expect(md).toContain("Поток задач – за 6 месяцев создано 11, закрыто 7; за последние 30 дней – создано 1, закрыто 0");
       expect(md).toContain("| Стабильность CI в динамике: стабильнее, 90% успешных у последних 10 запусков против 70% у 10 до них | справочно, в балл не входит |");
       expect(md).toContain("| Версия методики | 4.5.0-hci |");
       // новые строки: без длинного тире и без «ё»
-      const fresh = md.split("\n").filter((l) => /Стабильность CI|Динамика бэклога|Поток задач/.test(l));
+      const fresh = md.split("\n").filter((l) => /Стабильность CI|Динамика открытых задач|Поток задач/.test(l));
       expect(fresh.length).toBeGreaterThanOrEqual(5);
       for (const l of fresh) {
         expect({ l, long: l.includes("—"), yo: /ё/i.test(l) }).toEqual({ l, long: false, yo: false });

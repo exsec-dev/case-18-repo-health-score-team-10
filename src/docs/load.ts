@@ -8,6 +8,17 @@ import type { DocBlock, DocPage, DocsBundle, DocLine } from "./model";
 import { tocPages } from "./model";
 import { parsePage, parseToc, slugOfFile } from "./parse";
 
+/** Ширина и высота PNG из заголовка IHDR; не PNG или файла нет — null. */
+function pngSize(path: string): { width: number; height: number } | null {
+  try {
+    const head = readFileSync(path).subarray(0, 24);
+    if (head.length < 24 || head.readUInt32BE(0) !== 0x89504e47) return null;
+    return { width: head.readUInt32BE(16), height: head.readUInt32BE(20) };
+  } catch {
+    return null;
+  }
+}
+
 /** Каталог страниц – от модуля, не от cwd (как шрифты отчета). */
 export const DOCS_DIR = resolve(import.meta.dir, "../../docs/guide");
 export const DOCS_PDF_URL = "/docs/healthcraft.pdf";
@@ -95,6 +106,16 @@ export function loadDocs(dir: string = DOCS_DIR): LoadedDocs {
   for (const page of pages) {
     for (const src of imagesOf(page.blocks)) if (!existsSync(join(dir, src))) errors.push(`${page.slug || "index"}: нет файла картинки docs/guide/${src}`);
   }
+  // размер картинки — в блок: страница держит место под скриншот до его загрузки,
+  // и текст ниже не прыгает (переход к якорю под картинкой попадает куда нужно)
+  const sizeImages = (blocks: DocBlock[]): void => {
+    for (const b of blocks) {
+      if (b.kind === "image") Object.assign(b, pngSize(join(dir, b.src)) ?? {});
+      else if (b.kind === "list") b.items.forEach(sizeImages);
+      else if (b.kind === "note") sizeImages(b.blocks);
+    }
+  };
+  for (const page of pages) sizeImages(page.blocks);
   for (const page of pages) {
     for (const line of linksOf(page.blocks)) {
       for (const f of line) {

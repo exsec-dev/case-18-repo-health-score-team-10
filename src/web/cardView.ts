@@ -35,6 +35,7 @@ import {
   fmtScore,
   fmtSigned,
   fullScorePath,
+  gitLimitsShort,
   roundScore,
   noDataReason,
   scoreLabelTheme,
@@ -144,6 +145,8 @@ export interface CardView {
   categories: CategoryView[];
   locked: LockedView | null;
   limitations: string[];
+  /** почему оценки нет — одна строка под «Оценки нет» (подробно — в «Ограничениях данных»); null — первой строкой ограничений */
+  noScoreReason: string | null;
   /** предупреждения наверху — только те, которых нет в «Ограничениях данных» */
   topMarkers: "ci-cap"[];
   /** строка пути к полной оценке (закрытый Repo Health Score); null — показатель открыт */
@@ -263,7 +266,7 @@ export function positionView(card: RepoCard): PositionView | null {
 }
 
 export const LADDER_HELP =
-  "Шаги пересчитаны по очереди, каждый поверх предыдущих, и идут по наибольшему приросту – поэтому прирост шага может отличаться от эффекта рекомендации отдельно. Расчет по текущим данным: после нового анализа индекс изменится.";
+  "Шаги пересчитаны по очереди, каждый поверх предыдущих, и идут по наибольшему приросту – поэтому прирост шага может отличаться от эффекта рекомендации отдельно. Расчет по текущим данным – после нового анализа числа могут измениться.";
 
 
 /**
@@ -283,9 +286,16 @@ export function ladderView(card: RepoCard, recommendations: RecommendationView[]
   const first = recommendations.filter((r) => SEVERITY_RULES.includes(r.rec.ruleId) && !inSteps.has(r.rec.ruleId)).map((r, i) => ({ ...r, n: i + 1 }));
   const inFirst = new Set(first.map((r) => r.rec.ruleId));
   const f = first.length;
+  // прирост шага — разница показанных индексов (63 → 66 → 70: «+3», «+4»): читатель
+  // складывает видимые числа, и сырой «+3,5» к 63 давал «66» вместо ожидаемых 67
+  const shownGain = (i: number): string => {
+    const before = roundScore(i === 0 ? ladder.start : ladder.steps[i - 1]!.indexAfter);
+    const d = roundScore(ladder.steps[i]!.indexAfter) - before;
+    return d > 0 ? `+${d}` : fmtSigned(ladder.steps[i]!.delta);
+  };
   const steps: LadderStepView[] = ladder.steps.map((s, i) => ({
     item: { ...stepItems[i]!, n: f + i + 1 },
-    gain: fmtSigned(s.delta),
+    gain: shownGain(i),
     after: fmtScore(s.indexAfter),
     healthy: roundScore(s.indexAfter) >= ladder.target,
     reach: false,
@@ -297,9 +307,10 @@ export function ladderView(card: RepoCard, recommendations: RecommendationView[]
   // потолком: итог не обрывается на разрыве, а говорит, что может его закрыть
   const candidates = recommendations.filter((r) => !inSteps.has(r.rec.ruleId) && !inFirst.has(r.rec.ruleId) && r.ceiling !== null);
   const extra = last < ladder.target && candidates.length > 0 ? candidates.reduce((a, b) => (b.ceiling! > a.ceiling! ? b : a)) : null;
+  const extraReach = extra !== null && roundScore(Math.min(100, lastAfter + extra.ceiling!)) >= ladder.target;
   if (extra) {
     const upTo = Math.min(100, lastAfter + extra.ceiling!);
-    steps.push({ item: { ...extra, n: f + k + 1 }, gain: `до ${fmtSigned(extra.ceiling!)}`, after: `до ${fmtScore(upTo)}`, healthy: false, reach: roundScore(upTo) >= ladder.target });
+    steps.push({ item: { ...extra, n: f + k + 1 }, gain: `до ${fmtSigned(extra.ceiling!)}`, after: `до ${fmtScore(upTo)}`, healthy: false, reach: extraReach });
     inSteps.add(extra.rec.ruleId);
   }
   const rest = recommendations.filter((r) => !inSteps.has(r.rec.ruleId) && !inFirst.has(r.rec.ruleId)).map((r, i) => ({ ...r, n: f + steps.length + i + 1 }));
@@ -312,7 +323,7 @@ export function ladderView(card: RepoCard, recommendations: RecommendationView[]
     last >= ladder.target
       ? `${span} ${k === 1 ? "выведет" : "выведут"} индекс в зону «Здоров»`
       : extra
-        ? `${span} ${k === 1 ? "поднимет" : "поднимут"} индекс до ${last}, а №${nLast + 1} ${extra.ceiling! >= gap ? "может вывести его в зону «Здоров»" : "приблизит его к зоне «Здоров»"}`
+        ? `${span} ${k === 1 ? "поднимет" : "поднимут"} индекс до ${last}, а №${nLast + 1} ${extraReach ? "может вывести его в зону «Здоров»" : "приблизит его к зоне «Здоров»"}`
         : `${span} ${k === 1 ? "поднимет" : "поднимут"} индекс до ${last} – до зоны «Здоров» не хватит ${gap}`;
   return { first, steps, rest, headline };
 }
@@ -351,7 +362,7 @@ export function effectShort(effect: string): string {
   const add = e.match(/добавит в Repo Health Score категорию «([^»]+)»/);
   if (add) return `добавит «${add[1]}» в оценку`;
   if (/^CI\/CD:/.test(e)) return "откроет оценку CI/CD";
-  if (/оценка появится/.test(e)) return "появится оценка";
+  if (/оценка появится|оценка будет считаться по коду/.test(e)) return "оценка будет считаться по коду";
   if (/вырастет, когда будут закрыты и остальные/.test(e)) return "нужны и другие исправления";
   return e.split(/;| – |\. /)[0]!.replace(/\.$/, "");
 }
@@ -416,6 +427,8 @@ export function categoriesSummary(card: RepoCard): string | null {
     const cat = score.categories[key];
     return cat !== undefined && cat.locked === undefined && cat.score !== null ? [{ key, value: roundScore(cat.score) }] : [];
   });
+  // «сильнее/слабее всего» — сравнение; с одной оцененной категорией сравнивать не с чем
+  if (shown.length < 2) return null;
   // «CI/CD» — аббревиатура, регистр не меняется
   const name = (key: CategoryKey): string => {
     const t = CATEGORY_TITLES[key];
@@ -497,8 +510,9 @@ export function recommendationLabel(card: RepoCard, rec: CardRecommendation): st
  */
 export function recommendationCeiling(card: RepoCard, rec: CardRecommendation): number | null {
   const cats = card.score?.categories;
-  // в пустом репозитории оценка 0 по правилу методики: прирост от кода не посчитать
-  if (rec.deltaScore !== null || !cats || card.markers.codeEmpty) return null;
+  // в пустом репозитории оценка 0 по правилу методики: прирост от кода не посчитать;
+  // без индекса прибавлять не к чему — одна категория с данными индекс не откроет
+  if (rec.deltaScore !== null || !cats || card.markers.codeEmpty || card.score?.healthcraftIndex === null) return null;
   const target = rec.kind === "activation" ? rec.opensCategory : (RULE_SUBMETRIC[rec.ruleId] ?? null);
   if (!target) return null;
   const [cat, sub] = target.split(".") as [CategoryKey, string | undefined];
@@ -576,6 +590,7 @@ export function cardView(card: RepoCard, opts: { patUnreadable?: boolean } = {})
   if (card.markers.ciConfigOnlyCap) topMarkers.push("ci-cap");
   const base = {
     limitations,
+    noScoreReason: card.markers.gitLimits ? gitLimitsShort(card.markers.gitLimits) : (limitations[0] ?? null),
     topMarkers,
     recommendations,
     ladder: ladderView(card, recommendations),
@@ -613,6 +628,17 @@ export function cardView(card: RepoCard, opts: { patUnreadable?: boolean } = {})
     fullPath: score.fullLocked ? fullScorePath(auth, [card.access.cicd, card.access.appsec], patUnreadable) : null,
     signIn: score.fullLocked && (auth === undefined || auth === "no-session"),
   };
+}
+
+/**
+ * Порядок рекомендаций, как их нумерует карточка: с лесенкой — критичные, шаги,
+ * остальные; без нее — по приросту (`byGain`). Отчет MD/PDF берет тот же порядок,
+ * чтобы «действие 4» значило одно и то же на странице и в документе.
+ */
+export function shownRecommendationOrder(card: RepoCard): CardRecommendation[] {
+  const view = cardView(card);
+  const items = view.ladder ? [...view.ladder.first, ...view.ladder.steps.map((s) => s.item), ...view.ladder.rest] : view.recommendations;
+  return items.map((i) => i.rec);
 }
 
 export { FULL, INDEX };

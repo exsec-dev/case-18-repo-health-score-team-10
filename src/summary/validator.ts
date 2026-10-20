@@ -272,6 +272,29 @@ export function jargonLeaks(clean: string): string[] {
   return out;
 }
 
+/** Порог «Почините CI» (`recommend.ts`): ниже — рядом с текстом стоит критичная рекомендация. */
+const CI_PASS_MIN = 0.9;
+
+/**
+ * Оценочное слово о CI против числа: «CI стабилен» при доле успешных запусков ниже
+ * порога спорит с «Почините CI · Критично» на той же карточке. Доля — с учетом
+ * свежести, как в показателе. null — противоречия нет.
+ */
+export function ciStabilityClaim(text: string, facts: FactInput[]): string | null {
+  const runs = facts.find((f) => f.key === "cicd.runs")?.value as { weighted_success_rate?: unknown; success_rate?: unknown } | undefined;
+  const rate = typeof runs?.weighted_success_rate === "number" ? runs.weighted_success_rate : typeof runs?.success_rate === "number" ? runs.success_rate : null;
+  if (rate === null || rate >= CI_PASS_MIN) return null;
+  const sentences = text.split(/(?<=[.!?])\s+/);
+  // утверждение «стабилен» — без отрицаний («нестабильно», «не всегда проходит») и без
+  // названия показателя «Стабильность CI…»: честный текст о плохом CI отклонять нельзя
+  const praise = /(?<![а-я\u0451])(стабильн(?:о|ый|ая|ое|ы|ен|на)|надежн(?:о|ый|ая|ое|ы|ен|на)|без сбоев|успешно проход\S*)(?![а-я\u0451])/i;
+  const negation = /(?<![а-я\u0451])не(?![а-я\u0451])|нестабил|ненадеж|сбо[ий]|пада|ошиб|красн/i;
+  const claim = sentences.find((t) => /(CI|сборк|пайплайн|автоматизац)/i.test(t) && praise.test(t) && !negation.test(t));
+  return claim === undefined
+    ? null
+    : `CI назван стабильным, а успешны ${Math.round(rate * 100)}% запусков с учетом свежести (нужно не меньше 90%) – опиши долю как есть`;
+}
+
 /**
  * Валидация прозы одного вызова. Все проверки механические; причина отказа
  * едет в ретрай-промпт (конвейер) и в лог — не в интерфейс пользователя.
@@ -362,6 +385,9 @@ export function validateOutput(input: ValidateInput): ValidateResult {
   if (jargon.length > 0) {
     reasons.push(`жаргон методики: ${jargon.join(", ")} – скажи словами читателя (например, «обязательные файлы», «показатели»)`);
   }
+
+  const ci = ciStabilityClaim(readerText, input.facts);
+  if (ci !== null) reasons.push(ci);
 
   return {
     ok: reasons.length === 0,

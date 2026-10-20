@@ -84,6 +84,9 @@ export interface ScoreHistoryView {
 
 const HISTORY_ONE =
   "Пока есть одна оценка по текущей версии методики – график появится со вторым анализом. Новая оценка появляется после каждого анализа.";
+/** одна оценка в прошлом, а последний анализ оценки не дал — «есть одна оценка» рядом с «Оценки нет» читалось как неправда */
+const HISTORY_ONE_PAST =
+  "Оценка была только у одного анализа, последний ее не дал – график появится, когда оценка будет хотя бы у двух анализов.";
 const HISTORY_FOOTER = "На графике – оценки по текущей версии методики; где данных не было, линия прерывается.";
 
 export function scoreHistoryView(data: Pick<HistoryResponse, "points" | "fullOpen"> | null): ScoreHistoryView {
@@ -92,7 +95,10 @@ export function scoreHistoryView(data: Pick<HistoryResponse, "points" | "fullOpe
   const drawn = (key: "healthcraftIndex" | "repoHealthScore"): number => points.filter((p) => p[key] !== null).length;
   const best = Math.max(drawn("healthcraftIndex"), fullOpen ? drawn("repoHealthScore") : 0);
   if (best === 0) return { chart: false, fullLine: false, text: SLOT_EMPTY.scoreHistory.text };
-  if (best === 1) return { chart: false, fullLine: false, text: HISTORY_ONE };
+  if (best === 1) {
+    const lastNull = points.length > 1 && points[points.length - 1]!.healthcraftIndex === null;
+    return { chart: false, fullLine: false, text: lastNull ? HISTORY_ONE_PAST : HISTORY_ONE };
+  }
   return { chart: true, fullLine: fullOpen && drawn("repoHealthScore") > 0, text: HISTORY_FOOTER };
 }
 

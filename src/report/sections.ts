@@ -221,7 +221,9 @@ export function whyText(key: CategoryKey, cat: CardCategory, ctx: SubmetricConte
   if (scoreTheme(cat.score) === "success") {
     const ceiling = Math.max(...weakest.map(({ entry }) => entry.score!));
     const strongest = scored.filter((e) => !weakest.includes(e) && e.entry.score! > ceiling + 1e-9).sort((a, b) => b.entry.score! - a.entry.score! || a.i - b.i)[0];
-    if (strongest) return `Сильная сторона: ${shown(strongest)}. Слабее: ${weakest.map(shown).join("; ")}.`;
+    // после двоеточия — со строчной (кроме аббревиатур вроде README и CI)
+    const low = (t: string): string => (t.length > 1 && t[1] === t[1]!.toLowerCase() ? t[0]!.toLowerCase() + t.slice(1) : t);
+    if (strongest) return `Сильная сторона: ${low(shown(strongest))}. Слабее: ${weakest.map((w) => low(shown(w))).join("; ")}.`;
   }
   return weakest.map((w) => `${shown(w)}.`).join(" ");
 }

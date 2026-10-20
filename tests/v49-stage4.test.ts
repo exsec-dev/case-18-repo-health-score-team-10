@@ -112,10 +112,11 @@ describe("В-5: строка охвата рейтинга", () => {
     const gap = (r: { scored: number; nullScore: number; catalog: number }): string[] => coverageGap(r).map((l) => l.replace(/ /g, " "));
     expect(gap({ scored: 29982, nullScore: 3, catalog: 29986 })).toEqual([
       "3 репозитория без оценки – не хватило данных, см. вкладку «Без оценки».",
-      "1 ждет первого анализа.",
+      // аудит 20.10: у числа — существительное, строка читается сама по себе
+      "1 репозиторий ждет первого анализа.",
     ]);
     expect(gap({ scored: 10, nullScore: 1, catalog: 11 })).toEqual(["1 репозиторий без оценки – не хватило данных, см. вкладку «Без оценки»."]);
-    expect(gap({ scored: 20, nullScore: 0, catalog: 25 })).toEqual(["5 ждут первого анализа."]);
+    expect(gap({ scored: 20, nullScore: 0, catalog: 25 })).toEqual(["5 репозиториев ждут первого анализа."]);
     expect(gap({ scored: 20, nullScore: 0, catalog: 20 })).toEqual([]);
   });
 });

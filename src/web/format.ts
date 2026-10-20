@@ -117,6 +117,25 @@ export function fmtDateUtc(iso: string | null | undefined): string {
   return `${d.getUTCDate()} ${MONTHS_SHORT_RU[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
 }
 
+/**
+ * Дата по Москве (UTC+3, без перехода на летнее время) — для отчета: сервис российский,
+ * а по UTC ночной анализ 01:37 по Москве датировался вчерашним днем.
+ */
+export function fmtDateMsk(iso: string | null | undefined): string {
+  if (!iso) return "–";
+  const d = parseShown(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return fmtDateUtc(new Date(d.getTime() + 3 * 3600_000).toISOString());
+}
+
+export function fmtDateTimeMsk(iso: string | null | undefined): string {
+  if (!iso) return "–";
+  const d = parseShown(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const m = new Date(d.getTime() + 3 * 3600_000);
+  return `${fmtDateMsk(iso)}, ${pad2(m.getUTCHours())}:${pad2(m.getUTCMinutes())} МСК`;
+}
+
 export function fmtDateTimeUtc(iso: string | null | undefined): string {
   if (!iso) return "–";
   const d = parseShown(iso);
@@ -137,8 +156,14 @@ export function recommendationsText(count: number): string {
 }
 
 /** Крупные счётчики — с разделителем разрядов: «27 621» читается, «27621» нет. */
+/**
+ * Разряды — у всех чисел от 1 000: правило ru в Chrome не делит четырехзначные
+ * («1519», но «30 144»), а Bun на сервере делит — одно число выглядело по-разному.
+ */
+export const GROUP_ALWAYS = { useGrouping: "always" } as unknown as Intl.NumberFormatOptions;
+
 export function fmtCount(value: number): string {
-  return value.toLocaleString("ru-RU");
+  return value.toLocaleString("ru-RU", GROUP_ALWAYS);
 }
 
 export function fmtCoverage(coverage: number): string {
@@ -172,7 +197,7 @@ export function fmtFactValue(value: unknown): string {
   // внутри JSON, где каждая кавычка шла бы с обратной косой чертой
   const cut = value as { truncated?: unknown; bytes?: unknown; preview?: unknown };
   if (cut.truncated === true && typeof cut.preview === "string" && typeof cut.bytes === "number") {
-    const kb = (cut.bytes / 1024).toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    const kb = (cut.bytes / 1024).toLocaleString("ru-RU", { minimumFractionDigits: 1, maximumFractionDigits: 1, ...GROUP_ALWAYS });
     return `${cut.preview}…\n\nПоказано начало: значение занимает ${kb} КБ.`;
   }
   return JSON.stringify(value, null, 1);
@@ -525,7 +550,7 @@ export function noDataReason(key: string, reason: string | null | undefined): st
   if (r.startsWith("too little data — lines miscounted by an older collector")) return "Строки кода посчитаны прежней версией сборщика с ошибкой – категория оценится после повторного анализа репозитория.";
   if (r.startsWith("too little data — lines of code not read")) return "Строки кода прочитать не удалось: файлы больше лимита сервиса, не текстовые или чтение прервалось – категорию не оцениваем.";
   // причины прежних версий модели — для оценок, посчитанных ими
-  if (r.startsWith("too little data — no commit history")) return "Истории коммитов нет – без нее активность не оцениваем: одни счетчики запросов на слияние и релизов категорию не определяют.";
+  if (r.startsWith("too little data — no commit history")) return "Истории коммитов нет – без нее активность не оцениваем: одни счетчики предложений изменений и релизов категорию не определяют.";
   if (r.startsWith("too little data — no lines of code")) return "В репозитории нет строк кода, по которым считается плотность TODO, – категорию не оцениваем.";
   if (r.startsWith("ci.yaml not parsed")) return "Файл .sourcecraft/ci.yaml не удалось разобрать – есть ли в нем шаги, неизвестно, поэтому категорию не оцениваем.";
   if (key === "security" || r.startsWith("AppSec data unavailable")) return SECURITY_NO_DATA;
@@ -544,7 +569,7 @@ export const REPOSITORY_EMPTY_TEXT = "В репозитории нет ни од
 export const NO_COMMITS_TEXT = "Нет коммитов – оценивать нечего.";
 
 /** Репозиторий не прочитан (лимит, ошибка) — это незнание, а не факт о репозитории. */
-export const GIT_UNREAD_TEXT = "Репозиторий не удалось прочитать – произошла ошибка или он больше лимита сервиса.";
+export const GIT_UNREAD_TEXT = "Репозиторий не удалось скачать – показатели по коду и истории не собраны.";
 
 /** Виды «кода нет» (`codeEmptyKind` расчета) — каждый своей фразой. */
 const CODE_EMPTY_TEXT: Record<string, string> = {
@@ -673,7 +698,7 @@ export function scanTriggerText(trigger: string): string {
     case "user":
       return "вручную";
     case "probe":
-      return "проба";
+      return "служебный";
     default:
       return trigger;
   }
@@ -972,19 +997,33 @@ export interface GitLimitsMarker {
   degradeSinceMonths: number;
   degradeMaxBytes: number;
   degradeTimeoutMs: number;
+  /**
+   * скачивание уперлось только во время, не в размер: маленький репозиторий при
+   * медленном ответе — это не «больше лимита». Необязательное ради прежних литералов
+   */
+  timeoutOnly?: boolean;
 }
 
 /** Причина пробоя лимитов клона человеческими словами (одна строка — страница и MD). */
 export function gitLimitsText(l: GitLimitsMarker): string {
-  const full = `полный клон больше ${fmtBytes(l.cloneMaxBytes)} или дольше ${fmtMinutes(l.cloneTimeoutMs)}`;
-  const degrade = l.degradeEnabled
-    ? `, ${l.degradeSinceMonths} месяцев истории – больше ${fmtBytes(l.degradeMaxBytes)} или дольше ${fmtMinutes(l.degradeTimeoutMs)}`
-    : "";
-  return (
-    `Репозиторий больше лимита сервиса: ${full}${degrade}. ` +
-    // категории не называются: активность может быть оценена по данным SourceCraft
-    "Показатели, которые считаются по коду и истории репозитория, не собраны – они в оценке не участвуют и ее не снижают."
-  );
+  // категории не называются: активность может быть оценена по данным SourceCraft
+  const tail = "Показатели по коду и истории репозитория не собраны – в оценке они не участвуют и ее не снижают.";
+  if (l.timeoutOnly === true) {
+    const times = l.degradeEnabled
+      ? `полная копия – до ${fmtMinutes(l.cloneTimeoutMs)}, копия за последние ${l.degradeSinceMonths} месяцев – до ${fmtMinutes(l.degradeTimeoutMs)}`
+      : `до ${fmtMinutes(l.cloneTimeoutMs)}`;
+    return `Репозиторий не удалось скачать за отведенное время (${times}) – повторим при следующем анализе. ${tail}`;
+  }
+  const full = `полная копия – до ${fmtBytes(l.cloneMaxBytes)} и ${fmtMinutes(l.cloneTimeoutMs)}`;
+  const degrade = l.degradeEnabled ? `, копия за последние ${l.degradeSinceMonths} месяцев – до ${fmtBytes(l.degradeMaxBytes)} и ${fmtMinutes(l.degradeTimeoutMs)}` : "";
+  return `Репозиторий не удалось скачать в пределах лимитов сервиса: ${full}${degrade}. ${tail}`;
+}
+
+/** Та же причина одной строкой — под «Оценки нет»; подробно — в «Ограничениях данных». */
+export function gitLimitsShort(l: GitLimitsMarker): string {
+  return l.timeoutOnly === true
+    ? "Репозиторий не удалось скачать за отведенное время – повторим при следующем анализе."
+    : "Репозиторий не удалось скачать в пределах лимитов сервиса.";
 }
 
 /** Текст заглушки по доступу; granted → null (заглушки нет). */
@@ -1095,6 +1134,12 @@ export const AI_OVERVIEW_REJECTED = "Общий обзор не прошел п�
 
 export const FRAUD_TITLE = "Признаки искусственной активности";
 
+/** Подсказка флажка в строках рейтинга и «Избранного» — та же причина устаревания, что на карточке. */
+export function fraudFlagTip(flag: { stale?: boolean; oldRules?: boolean }): string {
+  if (flag.oldRules === true) return `${FRAUD_TITLE} – по прежним правилам проверки`;
+  return flag.stale === true ? `${FRAUD_TITLE} – по прошлому анализу` : FRAUD_TITLE;
+}
+
 /**
  * Текст ошибки задания для показа: сервер хранит прежние формулировки («AI-описание»,
  * «Проверка оценки») — по ним считаются лимиты (`AI_REJECTED_ERRORS`), менять их в
@@ -1107,6 +1152,10 @@ export function jobErrorText(error: string): string {
   return error
     .replace(/^AI-описание не сформировано/, "AI-обзор не сформирован")
     .replace(/^Проверка оценки не сформирована/, "Проверка активности не сформирована")
+    .replace("ни один блок не прошел проверку фактами", "текст модели не прошел проверку фактами")
+    // коды очереди (JOB_ERRORS) хранятся в базе как есть — на экране со следующим шагом
+    .replace(/^превышено число попыток$/, "не удалось за несколько попыток – запустите позже")
+    .replace(/^внутренняя ошибка$/, "сбой на стороне сервиса – попробуйте позже")
     .replace(/AI-описани(ями|ях|ям|ем|е|я|ю|и|й)(?![а-яё])/g, (_m, end: string) => `AI-обзор${AI_REVIEW_ENDINGS[end] ?? ""}`);
 }
 /** Подсказка строки проверки, пока признаков нет: что ищет проверка и что она не меняет. */
@@ -1127,7 +1176,7 @@ export function fraudFactorTitle(key: string): string {
     case "activity.git.summary":
       return "Сводка истории git";
     case "activity.rest":
-      return "Участники, релизы и запросы на слияние";
+      return "Участники, релизы и предложения изменений";
     case "activity.rhythm":
       return "Ритм коммитов";
     default:
@@ -1224,7 +1273,7 @@ export function fraudFactorFact(key: string, value: unknown, date: (iso: string)
       const parts: string[] = [];
       if (contributors !== null) parts.push(`${contributors} ${plural(contributors, "участник", "участника", "участников")}`);
       if (releases !== null) parts.push(`${releases} ${plural(releases, "релиз", "релиза", "релизов")}`);
-      if (pulls !== null) parts.push(`${pulls} ${plural(pulls, "запрос", "запроса", "запросов")} на слияние`);
+      if (pulls !== null) parts.push(`${pulls} ${plural(pulls, "предложение", "предложения", "предложений")} изменений`);
       return parts.length > 0 ? parts.join(", ") : null;
     }
     case "activity.rhythm": {
@@ -1276,10 +1325,10 @@ const NOTE_SIGNALS: Record<string, { text: (n: number) => string; dropZero?: boo
   commits: { text: (n) => `${n} ${plural(n, "коммит", "коммита", "коммитов")}` },
   human_commits: { text: (n) => `${n} ${plural(n, "коммит", "коммита", "коммитов")} людей` },
   authors: { text: (n) => `${n} ${plural(n, "автор", "автора", "авторов")}` },
-  committers: { text: (n) => `${n} ${plural(n, "коммиттер", "коммиттера", "коммиттеров")}` },
+  committers: { text: (n) => `${n} ${plural(n, "коммитер", "коммитера", "коммитеров")}` },
   contributors: { text: (n) => `${n} ${plural(n, "участник", "участника", "участников")}` },
   releases: { text: (n) => `${n} ${plural(n, "релиз", "релиза", "релизов")}` },
-  pulls_open: { text: (n) => `${n} ${plural(n, "открытый запрос", "открытых запроса", "открытых запросов")} на слияние` },
+  pulls_open: { text: (n) => `${n} ${plural(n, "открытое предложение", "открытых предложения", "открытых предложений")} изменений` },
 };
 
 const NOTE_TOKEN = /([a-z][a-z0-9]*(?:_[a-z0-9]+)*)=(-?\d+(?:[.,]\d+)?)(?:\s*мин(?:ут[аы]?)?(?![а-яё]))?/g;
@@ -1319,14 +1368,24 @@ export function fraudNoteText(note: string): string {
       )
       .filter((clause) => clause !== "")
       .join("; ");
+  // словарь сервиса поверх слов модели: «~5» — машинная запись, «базовый темп» — то же,
+  // что «обычный темп» в тексте кода
+  const plain = (t: string): string => t.replace(/~\s?(?=\d)/g, "около ").replace(/базов(\S*) темп/g, "обычн$1 темп");
   const quiet = text(true);
-  return quiet !== "" ? quiet : text(false);
+  return plain(quiet !== "" ? quiet : text(false));
 }
 
 /** Абзацы AI-текста по переводам строк — одна функция для карточки и отчета. */
 export function aiParagraphs(text: string): string[] {
   // типографика применяется и при выводе — для текстов, сохраненных до ее появления
-  return normalizeTypography(text).split(/\n+/).map((l) => l.trim()).filter((l) => l !== "");
+  // плюс вид сервиса: без обратных кавычек разметки и с датами «16 сент. 2026», а не «16.09.2026»
+  const shown = normalizeTypography(text)
+    .replace(/`([^`\n]+)`/g, "$1")
+    .replace(/\b(\d{2})\.(\d{2})\.(\d{4})\b/g, (m, d: string, mo: string, y: string) => {
+      const month = MONTHS_SHORT_RU[Number(mo) - 1];
+      return month === undefined || Number(d) < 1 || Number(d) > 31 ? m : `${Number(d)} ${month} ${y}`;
+    });
+  return shown.split(/\n+/).map((l) => l.trim()).filter((l) => l !== "");
 }
 
 /**

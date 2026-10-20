@@ -82,6 +82,11 @@ export function writeRatingHidden(hidden: string[]): void {
 }
 
 /** Медиа-запрос как состояние: раскладка меняется при повороте/ресайзе. */
+/** Прокрутка по ссылкам и кнопкам — без плавности при «уменьшить движение» в системе. */
+export function scrollBehavior(): ScrollBehavior {
+  return typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth";
+}
+
 export function useMediaQuery(query: string): boolean {
   return useSyncExternalStore(
     (onChange) => {

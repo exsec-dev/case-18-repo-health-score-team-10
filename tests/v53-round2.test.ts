@@ -110,7 +110,7 @@ describe("К-5: раздел фрода — после ограничений д
   test("каждый ключ, который видит флаггер, — своим названием; неизвестный — как есть", () => {
     expect(fraudFactorTitle("activity.git.timeline")).toBe("История коммитов");
     expect(fraudFactorTitle("activity.git.summary")).toBe("Сводка истории git");
-    expect(fraudFactorTitle("activity.rest")).toBe("Участники, релизы и запросы на слияние");
+    expect(fraudFactorTitle("activity.rest")).toBe("Участники, релизы и предложения изменений");
     expect(fraudFactorTitle("activity.new_kind")).toBe("activity.new_kind");
   });
 });

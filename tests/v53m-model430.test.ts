@@ -74,10 +74,10 @@ describe("Н4: причины «нет данных» по виду", () => {
     const s = score(ok, { emptyRepo: true });
     for (const k of ["documentation", "cicd", "activity"] as const) expect(noDataReason(k, s.categories[k].no_data)).toBe("Нет коммитов – оценивать нечего.");
     expect(noDataReason("code", s.categories.code.no_data)).toBe("Нет коммитов – оценивать нечего.");
-    // тот же набор без признака пустоты — «не удалось прочитать»
+    // тот же набор без признака пустоты — «не удалось скачать»
     const unread = score(ok);
-    expect(noDataReason("activity", unread.categories.activity.no_data)).toContain("Репозиторий не удалось прочитать");
-    expect(noDataReason("documentation", unread.categories.documentation.no_data)).toContain("Репозиторий не удалось прочитать");
+    expect(noDataReason("activity", unread.categories.activity.no_data)).toContain("Репозиторий не удалось скачать");
+    expect(noDataReason("documentation", unread.categories.documentation.no_data)).toContain("Репозиторий не удалось скачать");
   });
 
   // «мало кода» – не причина «нет данных»: балл сжимается к 50

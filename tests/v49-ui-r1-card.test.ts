@@ -10,7 +10,7 @@ import { renderRepoReport } from "../src/report/markdown";
 import type { Block, Inline } from "../src/report/model";
 import { CATEGORY_TITLES } from "../src/report/categories";
 import { notInScoreNote } from "../src/report/sections";
-import { CATEGORY_COLOR, SOURCE_DATA_LABEL, cardView, categoryColorClass, lockedView, recommendationLabel, visibilityPill } from "../src/web/cardView";
+import { CATEGORY_COLOR, SOURCE_DATA_LABEL, cardView, categoryColorClass, lockedView, recommendationLabel, shownRecommendationOrder, visibilityPill } from "../src/web/cardView";
 import { ACCESS_LOCK_SHORT, ACCESS_LOCK_TEXT, NOT_IN_SCORE, NOT_IN_SCORE_LIST, fullScorePath, pathText } from "../src/web/format";
 import { REPORT_FIXTURES, fixtureCard, type FixtureCard } from "./report-fixtures";
 
@@ -73,12 +73,19 @@ describe("инвариант 1: карточка = отчет по данным 
       else expect(c.score!.fullLocked).toBe(false);
 
       // набор и эффект – как в документе; порядок карточки – по приросту (cardView),
-      // номера подряд; у правила без числа с потолком эффект – «до +N»
+      // номера подряд; у правила без числа с потолком эффект – «до +N». Аудит 20.10:
+      // документ нумерует рекомендации в порядке показа карточки
+      // (`shownRecommendationOrder`: с лесенкой — критичные, шаги, остальные), поэтому
+      // действие документа ищется по позиции рекомендации в этом порядке
       const actions = blocksOf(model.blocks, "actions").flatMap((a) => a.items);
       expect(view.recommendations.length).toBe(actions.length);
       expect(view.recommendations.map((r) => r.n)).toEqual(view.recommendations.map((_, i) => i + 1));
+      const shown = shownRecommendationOrder(c);
+      expect(shown.length).toBe(c.recommendations.length);
+      expect(actions.map((a) => a.n)).toEqual(actions.map((_, i) => i + 1));
       for (const r of view.recommendations) {
-        const doc = actions.find((a) => a.n === c.recommendations.indexOf(r.rec) + 1)!;
+        expect(shown).toContain(r.rec);
+        const doc = actions.find((a) => a.n === shown.indexOf(r.rec) + 1)!;
         if (r.ceiling === null) expect(r.effect).toBe(doc.effect);
         else expect(r.effect).toMatch(/^до \+\d+(,\d)? к HealthCraft Index$/);
       }
@@ -217,7 +224,8 @@ describe("предупреждения наверху не повторяют «
     // «нет кода» сказано в плашке индекса, сверху не повторяется
     expect(view.topMarkers).toEqual(["ci-cap"]);
     expect(view.limitations.some((l) => l.startsWith("Часть данных взята из прошлого анализа"))).toBe(true);
-    expect(view.limitations.some((l) => l.startsWith("Репозиторий больше лимита сервиса"))).toBe(true);
+    // аудит 20.10: причина лимита — «не удалось скачать в пределах лимитов сервиса» (gitLimitsText)
+    expect(view.limitations.some((l) => l.startsWith("Репозиторий не удалось скачать в пределах лимитов сервиса"))).toBe(true);
   });
 });
 

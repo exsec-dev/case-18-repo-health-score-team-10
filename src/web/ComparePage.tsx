@@ -11,7 +11,7 @@
 // `row` с `display: contents` → `columnheader`/`rowheader`/`cell`):
 // у Gravity `Table` нет объединенных ячеек и подстрок, а на телефоне подпись
 // строки встает над ячейками — у нативной `<table>` это снимало бы роли.
-import { ArrowToggle, Alert, Button, Card, Dialog, Flex, HelpMark, Icon, Label, Link, Progress, Skeleton, Text, TextInput } from "@gravity-ui/uikit";
+import { ActionTooltip, ArrowToggle, Alert, Button, Card, Dialog, Flex, HelpMark, Icon, Label, Link, Progress, Skeleton, Text, TextInput } from "@gravity-ui/uikit";
 import { ArrowRight, CircleCheck, CircleQuestion, Magnifier, Plus, Xmark } from "@gravity-ui/icons";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type ReactNode } from "react";
 import type { CompareCard, CompareItem, CompareResponse } from "../api/compare";
@@ -49,6 +49,7 @@ import {
   comparabilityNotes,
   compareApiUrl,
   compareHref,
+  compareSkippedText,
   compareSlugsOf,
   exceptionLabel,
   fullRows,
@@ -124,6 +125,21 @@ function useCompare(slugs: string[]): { state: AsyncState<CompareResponse> | nul
 
 export function ComparePage({ search }: { search: string }) {
   const slugs = useMemo(() => compareSlugsOf(search), [search]);
+  // ссылка с дублями, лишними или неверными адресами — к виду набора (replace), а
+  // что не вошло — строкой над таблицей; дубли схлопываются молча (смысл тот же)
+  const [skipped, setSkipped] = useState<{ text: string; at: string } | null>(null);
+  // адрес маршрута — без «?»: сверяем с ним в одной форме
+  const here = `/compare${search === "" || search.startsWith("?") ? search : `?${search}`}`;
+  useEffect(() => {
+    if (new URLSearchParams(search).getAll("r").length === 0) return;
+    const canonical = compareHref(slugs);
+    if (here === canonical) return;
+    const text = compareSkippedText(search);
+    setSkipped(text === null ? null : { text, at: canonical });
+    navigate(canonical, { replace: true });
+  }, [search, slugs, here]);
+  // строка — только пока набор тот, что пришел по ссылке
+  const skippedText = skipped !== null && here === skipped.at ? skipped.text : null;
   const { me } = useSession();
   const meData = dataOf(me);
   const loggedIn = meData?.login != null;
@@ -190,6 +206,12 @@ export function ComparePage({ search }: { search: string }) {
                 <>
                   <br />
                   {COMPARE_FULL_LINE}
+                </>
+              )}
+              {skippedText && (
+                <>
+                  <br />
+                  {skippedText}
                 </>
               )}
             </>
@@ -1097,9 +1119,11 @@ function LeaderLegend() {
 
 function NoDataGlyph({ reason }: { reason: string }) {
   return (
-    <Text color="secondary" className="rh-cmp-nodata" title={reason} tabIndex={0} aria-label={`${sentence(NO_DATA)}. ${reason}`}>
-      –
-    </Text>
+    <ActionTooltip title={reason}>
+      <Text color="secondary" className="rh-cmp-nodata" tabIndex={0} aria-label={`${sentence(NO_DATA)}. ${reason}`}>
+        –
+      </Text>
+    </ActionTooltip>
   );
 }
 
@@ -1207,18 +1231,22 @@ function CellValue({ row, card, leader, phone, year, sharedTotal }: { row: Row; 
           </span>
           {adj && (
             // вместо жаргона «Балл сжат» — что именно снизило балл
-            <span className="rh-cmp-mark" title={adj} tabIndex={0} aria-label={`${adjustmentLabel(cat)}. ${adj}`}>
-              <Label theme="normal" size="xs">
-                {adjustmentLabel(cat)}
-              </Label>
-            </span>
+            <ActionTooltip title={adj}>
+              <span className="rh-cmp-mark" tabIndex={0} aria-label={`${adjustmentLabel(cat)}. ${adj}`}>
+                <Label theme="normal" size="xs">
+                  {adjustmentLabel(cat)}
+                </Label>
+              </span>
+            </ActionTooltip>
           )}
           {cat.stale === true && (
-            <span className="rh-cmp-mark" title="Данные из прошлого анализа: источник не ответил" tabIndex={0}>
-              <Label theme="warning" size="xs">
-                Из истории
-              </Label>
-            </span>
+            <ActionTooltip title="Данные из прошлого анализа: источник не ответил">
+              <span className="rh-cmp-mark" tabIndex={0} aria-label="Из истории: данные из прошлого анализа, источник не ответил">
+                <Label theme="warning" size="xs">
+                  Из истории
+                </Label>
+              </span>
+            </ActionTooltip>
           )}
         </span>
       );

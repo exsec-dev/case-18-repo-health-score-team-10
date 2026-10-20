@@ -593,10 +593,12 @@ describe("пробой лимитов клона (К5)", () => {
       degradeSinceMonths: 13,
       degradeMaxBytes: 2.5 * 1024 ** 3,
       degradeTimeoutMs: 25 * 60_000,
+      // причина «disk» — размер, а не только время
+      timeoutOnly: false,
     });
     const md = renderRepoReport(card);
     // в тексте лимитов — среднее тире, не длинное
-    expect(md).toContain("Репозиторий больше лимита сервиса: полный клон больше 1,5 ГБ или дольше 20 мин, 13 месяцев истории – больше 2,5 ГБ или дольше 25 мин");
+    expect(md).toContain("Репозиторий не удалось скачать в пределах лимитов сервиса: полная копия – до 1,5 ГБ и 20 мин, копия за последние 13 месяцев – до 2,5 ГБ и 25 мин");
     // лимиты — оператора из переданного конфига, не пользовательские
     const custom = getRepoCard(l.db, "big", "mono", { limits: { ...DEFAULT_SCAN, clone: { ...DEFAULT_SCAN.clone, maxBytes: 512 * 1024 ** 2 } } })!;
     expect(custom.markers.gitLimits!.cloneMaxBytes).toBe(512 * 1024 ** 2);

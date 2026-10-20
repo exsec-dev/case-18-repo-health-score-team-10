@@ -60,6 +60,7 @@ import { NotFoundIllustration } from "./illustrations";
 import { useJson } from "./api";
 import { DocsSearch } from "./DocsSearch";
 import { Trophy } from "./icons";
+import { useMediaQuery } from "./prefs";
 import { navigate } from "./router";
 import { Page } from "./Shell";
 import { Collapse, EmptyState, SkeletonRows } from "./ui";
@@ -114,6 +115,27 @@ const UI_ICON_DATA: Record<UiIcon, IconData> = {
 export function docHref(slug: string, anchor?: string | null): string {
   const path = slug === "" ? "/docs" : `/docs/${slug.split("/").map(encodeURIComponent).join("/")}`;
   return anchor ? `${path}#${anchor}` : path;
+}
+
+/**
+ * Место чтения — в записи истории (`history.state.docsScroll`): «Назад» возвращает
+ * к тому же месту статьи, а не в ее начало. Статья прокручивается в
+ * `.rh-docs__main`, на телефоне — окно; запоминаются оба.
+ */
+type DocsScroll = { main: number; win: number };
+
+function docsScrollNow(): DocsScroll {
+  return { main: document.querySelector(".rh-docs__main")?.scrollTop ?? 0, win: window.scrollY };
+}
+
+function savedDocsScroll(): DocsScroll | null {
+  const s = (window.history.state as { docsScroll?: DocsScroll } | null)?.docsScroll;
+  return s && typeof s.main === "number" && typeof s.win === "number" ? s : null;
+}
+
+function restoreDocsScroll(s: DocsScroll): void {
+  document.querySelector(".rh-docs__main")?.scrollTo({ top: s.main });
+  window.scrollTo({ top: s.win });
 }
 
 /** Прокрутить статью к заголовку или в начало. */
@@ -331,7 +353,7 @@ function BlockView({ block, tight }: { block: DocBlock; tight: boolean }): React
       return (
         <figure className="rh-docs__figure">
           <a href={url} target="_blank" rel="noopener" aria-label={`${block.alt} – открыть в полном размере`}>
-            <img src={url} alt={block.alt} loading="lazy" />
+            <img src={url} alt={block.alt} loading="lazy" width={block.width} height={block.height} />
           </a>
           <figcaption>{block.alt}</figcaption>
         </figure>
@@ -418,13 +440,45 @@ export function DocsPage({ slug }: { slug: string }) {
   const docs = useJson<DocsBundle>("/api/docs");
   const bundle = docs.state.kind === "ok" ? docs.state.data : null;
   const [navOpen, setNavOpen] = useState(false);
+  const phone = useMediaQuery("(max-width: 767px)");
 
   const page: DocPage | null = bundle?.pages.find((p) => p.slug === slug) ?? null;
-  // смена страницы: к якорю из адреса или в начало
+  // смена страницы: «Назад/Вперед» — к запомненному месту, переход — к якорю из адреса или в начало
   useLayoutEffect(() => {
     if (!page) return;
-    const hash = decodeURIComponent(window.location.hash.slice(1));
-    scrollToAnchor(hash || null);
+    const saved = savedDocsScroll();
+    if (saved) restoreDocsScroll(saved);
+    else scrollToAnchor(decodeURIComponent(window.location.hash.slice(1)) || null);
+  }, [page]);
+  // место чтения пишется в текущую запись истории (с паузой, без новых записей);
+  // «Назад» между якорями одной страницы — тоже к месту, а не на месте
+  useEffect(() => {
+    if (!page) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const save = (): void => {
+      clearTimeout(timer);
+      // запись — той же страницы: после перехода место старой статьи в новую запись не попадет
+      const at = window.location.href;
+      timer = setTimeout(() => {
+        if (window.location.href !== at) return;
+        const state = (window.history.state as Record<string, unknown> | null) ?? {};
+        window.history.replaceState({ ...state, docsScroll: docsScrollNow() }, "");
+      }, 150);
+    };
+    const onPop = (): void => {
+      const saved = savedDocsScroll();
+      requestAnimationFrame(() => (saved ? restoreDocsScroll(saved) : scrollToAnchor(decodeURIComponent(window.location.hash.slice(1)) || null)));
+    };
+    const main = document.querySelector(".rh-docs__main");
+    main?.addEventListener("scroll", save, { passive: true });
+    window.addEventListener("scroll", save, { passive: true });
+    window.addEventListener("popstate", onPop);
+    return () => {
+      clearTimeout(timer);
+      main?.removeEventListener("scroll", save);
+      window.removeEventListener("scroll", save);
+      window.removeEventListener("popstate", onPop);
+    };
   }, [page]);
 
   const crumbsBase = { text: "Документация", href: "/docs" };
@@ -432,12 +486,14 @@ export function DocsPage({ slug }: { slug: string }) {
     navigate(docHref(slug, anchor));
     requestAnimationFrame(() => scrollToAnchor(anchor));
   };
+  // на телефоне строка пути узкая: PDF — значком (подпись в aria-label и title),
+  // иначе кнопка уходила за край экрана
   const pdfButton = bundle && (
-    <Button view="normal" size="m" href={bundle.pdfUrl} target="_blank" rel="noopener" title="Весь текст документации одним файлом">
-      <Button.Icon side="start">
+    <Button view="normal" size="m" href={bundle.pdfUrl} target="_blank" rel="noopener" title="Весь текст документации одним файлом" aria-label={phone ? "PDF-версия" : undefined}>
+      <Button.Icon side={phone ? undefined : "start"}>
         <Icon data={ArrowDownToLine} size={16} />
       </Button.Icon>
-      PDF-версия
+      {phone ? null : "PDF-версия"}
     </Button>
   );
   const headerActions = bundle && (
@@ -450,7 +506,7 @@ export function DocsPage({ slug }: { slug: string }) {
   if (docs.state.kind === "error") {
     return (
       <Page crumbs={[crumbsBase]}>
-        <Alert theme="danger" title="Не удалось загрузить документацию" message={docs.state.message} actions={[{ text: "Повторить", handler: docs.reload }]} />
+        <Alert theme="danger" view="outlined" title="Не удалось загрузить документацию" message={docs.state.message} actions={[{ text: "Повторить", handler: docs.reload }]} />
       </Page>
     );
   }

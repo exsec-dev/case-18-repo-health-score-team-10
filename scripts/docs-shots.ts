@@ -166,10 +166,8 @@ async function run(): Promise<void> {
     return { x: li.left, y: li.top, width: li.width, height: li.height };
   })()`, { t: 8, b: 4 });
 
-  // 6. Рекомендации в режиме «По шагам»
-  await goto(card, "document.getElementById('recommendations') && document.body.innerText.includes('По шагам')");
-  await evaluate(`(() => { const o = [...document.querySelectorAll('.g-segmented-radio-group__option')].find((n) => n.textContent.trim() === 'По шагам'); o.querySelector('input')?.click(); o.click(); return 1; })()`);
-  await waitFor(async () => (await evaluate<number>("document.body.innerText.includes('После шага') ? 1 : 0")) === 1, "режим «По шагам» не включился");
+  // 6. Рекомендации: шаги к зоне «Здоров» — одним списком, итог строкой над ним
+  await goto(card, "document.getElementById('recommendations') && document.getElementById('recommendations').innerText.includes('Шаг')");
   await delay(400);
   await shot("recommendations-steps", `(() => {
     const r = document.getElementById('recommendations').getBoundingClientRect();
@@ -207,7 +205,7 @@ async function run(): Promise<void> {
 async function clickCategory(name: string): Promise<void> {
   await evaluate(`(() => { const b = [...document.querySelectorAll('.rh-category')].find((n) => n.textContent.includes(${JSON.stringify(name)})); b.click(); return 1; })()`);
   await waitFor(
-    async () => (await evaluate<number>(`(() => { const b = [...document.querySelectorAll('.rh-category')].find((n) => n.textContent.includes(${JSON.stringify(name)})); return b.closest('li').innerText.includes('Вес') ? 1 : 0; })()`)) === 1,
+    async () => (await evaluate<number>(`(() => { const b = [...document.querySelectorAll('.rh-category')].find((n) => n.textContent.includes(${JSON.stringify(name)})); return b.closest('li').innerText.includes('Итого') ? 1 : 0; })()`)) === 1,
     `категория ${name} не раскрылась`,
   );
   await delay(500);

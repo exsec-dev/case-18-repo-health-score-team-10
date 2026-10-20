@@ -29,7 +29,7 @@
 
 .g-root.g-root_theme_dark {
   /* Цвета категорий в полосах вклада (карточка, панель рейтинга). Не зеленый,
-   * желтый и красный — это цвета оценки. Тона одинаковы в обеих темах. */
+   * желтый и красный — это цвета оценки. В светлой теме три тона темнее (см. ниже). */
   --rh-cat-documentation: #5b8def;
   --rh-cat-cicd: #d7729f;
   --rh-cat-security: #c3d65a;
@@ -177,13 +177,15 @@
 }
 
 .g-root.g-root_theme_light {
-  /* Цвета категорий — те же, что в темной теме. */
+  /* Цвета категорий — как в темной теме, кроме трех, что на белом не набирали 3:1
+   * (выбор 20.10.2026, вариант В): Безопасность — серо-оливковая (3,4:1; салатовый
+   * 1,6:1 еще и стоял между зелеными и желтыми зонами), Активность 3,8:1, Состояние кода 3,8:1. */
   --rh-cat-documentation: #5b8def;
   --rh-cat-cicd: #d7729f;
-  --rh-cat-security: #c3d65a;
-  --rh-cat-activity: #e58a4e;
+  --rh-cat-security: #8a8f6a;
+  --rh-cat-activity: #c96a2c;
   --rh-cat-issues: #9b7fd9;
-  --rh-cat-code: #3fb0c2;
+  --rh-cat-code: #2a8f9f;
   --rh-code-bg: #111111;
   --rh-code-text: #e8e8e8;
 
@@ -333,6 +335,8 @@
   --g-text-header-font-weight: 550;
   --g-text-subheader-font-weight: 550;
   --g-text-accent-font-weight: 550;
+  /* крупные числа оценки (display) — тем же весом, что заголовки, а не 600 uikit */
+  --g-text-display-font-weight: 550;
   --g-card-border-radius: 12px;
   --rh-radius-card: 12px;
   --rh-radius-placeholder: 16px;

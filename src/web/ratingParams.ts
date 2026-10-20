@@ -84,7 +84,7 @@ export function coverageGap(repos: { scored: number; nullScore: number; catalog:
   const rest = Math.max(0, repos.catalog - repos.scored - repos.nullScore);
   const lines: string[] = [];
   if (repos.nullScore > 0) lines.push(`${fmtCount(repos.nullScore)} ${plural(repos.nullScore, "репозиторий", "репозитория", "репозиториев")} без оценки – не хватило данных, см. вкладку «Без оценки».`);
-  if (rest > 0) lines.push(`${fmtCount(rest)} ${plural(rest, "ждет", "ждут", "ждут")} первого анализа.`);
+  if (rest > 0) lines.push(`${fmtCount(rest)} ${plural(rest, "репозиторий ждет", "репозитория ждут", "репозиториев ждут")} первого анализа.`);
   return lines;
 }
 

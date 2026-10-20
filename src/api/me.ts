@@ -23,9 +23,11 @@ export interface MyRepoEntry {
   languageColor: string | null;
   /** HealthCraft Index последнего пригодного скана (у приватного без такого – последнего не-bad); null – не оценивался */
   healthcraftIndex: number | null;
+  /** репо без кода: 0 по правилу методики значит «оценивать нечего», а не зону риска (как «нет кода» в рейтинге) */
+  codeEmpty: boolean;
   /** индекс предыдущей оценки того же ряда (пригодные или не-bad) — для «что изменилось»; null – сравнивать не с чем */
   previousIndex: number | null;
-  /** время последнего анализа репо ЛЮБЫМ автором (не own-скан зрителя – это `FavoriteCheckResponse.lastOwnScanAt`) */
+  /** время анализа, давшего показанную оценку (без оценки — последнего анализа), ЛЮБЫМ автором (не own-скан зрителя – это `FavoriteCheckResponse.lastOwnScanAt`) */
   lastScanAt: string | null;
   /** статус ПОСЛЕДНЕГО скана репо (любого автора): кабинет отличает «анализ завершился
    *  ошибкой» от «данных не хватило». null – сканов нет или у зрителя нет прав */
@@ -56,7 +58,7 @@ export interface MyRepoEntry {
    * Score не меняет; null – флага нет или зрителю он не виден (закрытый репо без
    * полного Score – карточка AI-блоков ему не показывает).
    */
-  fraudFlag: { flag: boolean; factors: { key: string; note: string }[] } | null;
+  fraudFlag: { flag: boolean; factors: { key: string; note: string }[]; stale: boolean; oldRules: boolean } | null;
   /**
    * Есть AI-обзор – отметка строки, как у рейтинга, по правилам карточки: у
    * открытого репо – публичный обзор (полный – зрителю с полным Score), у закрытого –
@@ -114,7 +116,7 @@ function rowMarksOf(
   if (row.visibility !== "public" && !full) return { fraudFlag: null, aiOverview: false };
   const flag = marks.flags.get(row.id);
   return {
-    fraudFlag: flag === undefined ? null : { flag: true, factors: flag.factors },
+    fraudFlag: flag === undefined ? null : { flag: true, factors: flag.factors, stale: flag.stale, oldRules: flag.oldRules },
     aiOverview: marks.overview.pub.has(row.id) || (full && marks.overview.any.has(row.id)),
   };
 }
@@ -131,19 +133,22 @@ export interface MyReposResult {
  * не-bad), время и статус – из самого последнего скана.
  * Один хелпер на все записи `listMyRepos`: копия правила быстро разошлась бы.
  */
-function ratingScoreOf(db: Database, org: string, repo: string): { healthcraftIndex: number | null; previousIndex: number | null; lastScanAt: string | null; lastScanStatus: MyRepoEntry["lastScanStatus"] } {
+type RatingScore = Pick<MyRepoEntry, "healthcraftIndex" | "codeEmpty" | "previousIndex" | "lastScanAt" | "lastScanStatus">;
+const NO_SCORE: RatingScore = { healthcraftIndex: null, codeEmpty: false, previousIndex: null, lastScanAt: null, lastScanStatus: null };
+
+function ratingScoreOf(db: Database, org: string, repo: string): RatingScore {
   const row = db.query("SELECT id, visibility FROM repos WHERE org_slug = ? AND repo_slug = ?").get(org, repo) as
     | { id: number; visibility: string }
     | null;
-  if (!row) return { healthcraftIndex: null, previousIndex: null, lastScanAt: null, lastScanStatus: null };
+  if (!row) return NO_SCORE;
   const scoreOf = (pick: string) =>
     db
       .query(
-        `SELECT sc.healthcraft_index AS total FROM scores sc
-         JOIN repos r ON r.id = sc.repo_id
+        `SELECT sc.healthcraft_index AS total, sc.code_empty AS codeEmpty, s.finished_at AS finishedAt, s.started_at AS startedAt
+         FROM scores sc JOIN repos r ON r.id = sc.repo_id JOIN scans s ON s.id = sc.scan_id
          WHERE r.org_slug = ? AND r.repo_slug = ? AND sc.model_version = ? AND sc.scan_id = ${pick}`,
       )
-      .get(org, repo, MODEL_VERSION, MODEL_VERSION) as { total: number | null } | null;
+      .get(org, repo, MODEL_VERSION, MODEL_VERSION) as { total: number | null; codeEmpty: number; finishedAt: string | null; startedAt: string } | null;
   const scored = scoreOf(LAST_ELIGIBLE_SCAN_SQL) ?? (row.visibility !== "public" ? scoreOf(LAST_NOT_BAD_SCAN_SQL) : null);
   const lastScan = db.query("SELECT status, finished_at, started_at FROM scans WHERE repo_id = ? ORDER BY id DESC LIMIT 1").get(row.id) as
     | { status: string; finished_at: string | null; started_at: string }
@@ -162,8 +167,11 @@ function ratingScoreOf(db: Database, org: string, repo: string): { healthcraftIn
   const pair = fromEligible.length > 0 || row.visibility === "public" ? fromEligible : series(false);
   return {
     healthcraftIndex: scored?.total ?? null,
+    codeEmpty: scored?.codeEmpty === 1,
     previousIndex: scored && pair.length === 2 ? pair[1]!.total : null,
-    lastScanAt: lastScan ? (lastScan.finished_at ?? lastScan.started_at) : null,
+    // дата — того анализа, что дал показанную оценку: идущий или сбойный новый
+    // анализ рядом со старым числом выдавал себя за его источник
+    lastScanAt: scored ? (scored.finishedAt ?? scored.startedAt) : lastScan ? (lastScan.finished_at ?? lastScan.started_at) : null,
     lastScanStatus: lastScan ? (lastScan.status as MyRepoEntry["lastScanStatus"]) : null,
   };
 }
@@ -417,7 +425,7 @@ export function tokenRepoEntries(db: Database, userId: number, repos: ScRepoLite
     const inCatalog = catalog[i] !== null;
     // без прав мета (включая логотип и цвет языка) не раскрывается
     const row = mayRead ? (catalog[i] ?? null) : null;
-    const known = mayRead ? ratingScoreOf(db, r.org, r.slug) : { healthcraftIndex: null, previousIndex: null, lastScanAt: null, lastScanStatus: null };
+    const known = mayRead ? ratingScoreOf(db, r.org, r.slug) : NO_SCORE;
     const rowMark = rowMarksOf(db, userId, marks, r.org, r.slug, catalog[i] ?? null, mayRead, {});
     return {
       org: r.org,
@@ -428,6 +436,7 @@ export function tokenRepoEntries(db: Database, userId: number, repos: ScRepoLite
       logoUrl: row?.logo_url ?? null,
       languageColor: row?.language_color ?? null,
       healthcraftIndex: known.healthcraftIndex,
+      codeEmpty: known.codeEmpty,
       previousIndex: known.previousIndex,
       lastScanAt: known.lastScanAt,
       lastScanStatus: known.lastScanStatus,
@@ -480,7 +489,7 @@ export function myRepoEntryOf(db: Database, userId: number | null, org: string, 
   const row = mayRead ? catalogRow : null;
   // одна запись (мутация избранного) – отметки только этого репо
   const rowMark = rowMarksOf(db, userId, marks ?? rowMarks(db, catalogRow === null ? [] : [catalogRow.id]), f.org_slug, f.repo_slug, catalogRow, mayRead, opts);
-  const known = mayRead ? ratingScoreOf(db, f.org_slug, f.repo_slug) : { healthcraftIndex: null, previousIndex: null, lastScanAt: null, lastScanStatus: null };
+  const known = mayRead ? ratingScoreOf(db, f.org_slug, f.repo_slug) : NO_SCORE;
   return {
     org: f.org_slug,
     repo: f.repo_slug,
@@ -490,6 +499,7 @@ export function myRepoEntryOf(db: Database, userId: number | null, org: string, 
     logoUrl: row?.logo_url ?? null,
     languageColor: row?.language_color ?? null,
     healthcraftIndex: known.healthcraftIndex,
+    codeEmpty: known.codeEmpty,
     previousIndex: known.previousIndex,
     lastScanAt: known.lastScanAt,
     lastScanStatus: known.lastScanStatus,

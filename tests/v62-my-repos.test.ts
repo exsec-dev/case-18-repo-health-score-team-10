@@ -314,8 +314,11 @@ describe("шапка организации в «Моих репозитория
   test("сводка: оценено, закрытые, зоны; строка — слаг только при своем названии, без «·»", () => {
     const s = orgSummaryOf([row("private", 80), row("internal", 50), row("public", 20), row("public", null)]);
     expect(s).toEqual({ scored: 3, closed: 2, zones: { success: 1, warning: 1, danger: 1 } });
-    expect(orgMetaText("lct", "ЛЦТ", s)).toBe("lct, 3 оценено, 2 закрытых");
-    expect(orgMetaText("lct", "lct", s)).toBe("3 оценено, 2 закрытых");
+    // аудит 20.10: «оценено: N» — число после подписи, как у остальных счетчиков
+    expect(orgMetaText("lct", "ЛЦТ", s)).toBe("lct, оценено: 3, 2 закрытых");
+    expect(orgMetaText("lct", "lct", s)).toBe("Оценено: 3, 2 закрытых");
+    // репо без кода оценен (0 по правилу методики) — в «оценено» входит, но ни в одну зону
+    expect(orgSummaryOf([row("public", 80), { ...row("public", 0), codeEmpty: true }])).toEqual({ scored: 2, closed: 0, zones: { success: 1, warning: 0, danger: 0 } });
     expect(orgMetaText("lct", undefined, orgSummaryOf([row("public", null)]))).toBe("Еще не оценивались");
     expect(orgMetaText("lct", undefined, orgSummaryOf([row("private", null)]))).toBe("Еще не оценивались, 1 закрытый");
   });

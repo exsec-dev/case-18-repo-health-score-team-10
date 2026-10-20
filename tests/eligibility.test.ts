@@ -266,9 +266,10 @@ describe("«мои репо» и заявка (К-Ф1.1)", () => {
     }
     const out = await listMyRepos(t.db, userId);
     // порядок избранного — по added_at (здесь равны): сортируем по репо
+    // время — анализа, давшего показанную оценку (сбойный новый анализ 11.09 — не ее источник)
     expect(out.entries.sort((a, b) => a.repo.localeCompare(b.repo)).map((e) => [e.repo, e.healthcraftIndex, e.lastScanAt])).toEqual([
       ["open", null, "2026-09-12T00:00:00Z"],
-      ["secret", 44, "2026-09-11T00:00:00Z"],
+      ["secret", 44, "2026-09-10T00:00:00Z"],
     ]);
   });
 

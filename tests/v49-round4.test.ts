@@ -281,8 +281,8 @@ describe("А11: оговорка про обрезанную историю ст
     const appendix = md.slice(md.indexOf("## Приложение"));
     // данные на месте: и дата отсечения, и первый коммит — читатель проверяет сам
     expect(appendix).toContain("| history_truncated_since | 16 авг. 2025 |");
-    // UX 17.10: дата и время — «2 окт. 2025, 10:00 UTC»
-    expect(appendix).toContain("| first | 2 окт. 2025, 10:00 UTC |");
+    // UX 17.10: дата и время; аудит 20.10 — по Москве: 10:00 UTC → «2 окт. 2025, 13:00 МСК»
+    expect(appendix).toContain("| first | 2 окт. 2025, 13:00 МСК |");
     // поле `truncated` стоит «да» у каждого анализа — это форма ответа, и так и подписано
     expect(appendix).toContain("| truncated – поле ответа: сами коммиты в документ не выгружаются, показан итог | да |");
   });
@@ -304,7 +304,7 @@ describe("А12: поля выборки TODO подписаны – «стары
     expect(appendix).toContain("| fixme – пометок FIXME в коде (без файлов тестов) | 1 |");
     expect(appendix).toContain("| older_180d – пометок TODO и FIXME старше 180 дней (из count + fixme) | 2 |");
     // и в разборе итог сходится: 4 + 1 = 5
-    expect(md).toContain("Маркеров TODO/FIXME в коде – 5");
+    expect(md).toContain("Пометок TODO/FIXME в коде – 5");
   });
 });
 
@@ -321,7 +321,7 @@ describe("А13: срок закрытия задач назван ОДНИМ ч�
 describe("А14: язык подписан источником", () => {
   test("null: репозиторий не скачался, а язык есть – потому что он из каталога", () => {
     const { md } = report("null");
-    expect(md).toContain("Репозиторий не удалось прочитать");
+    expect(md).toContain("Репозиторий не удалось скачать");
     expect(md).toContain("| Язык (по каталогу SourceCraft) | C++ |");
     expect(md).not.toContain("| Язык | C++ |");
   });

@@ -76,7 +76,8 @@ describe("П4.2: форма значений — единица, масштаб,
     expect(fmt("cicd.config", { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: true })).toBe("ci.yaml с командами");
     expect(fmt("cicd.config", { paths: [".sourcecraft/ci.yaml"], has_ci_yaml: true, has_steps: false })).toBe("ci.yaml без команд");
     expect(fmt("cicd.config", { paths: [], has_ci_yaml: false, has_steps: false })).toBe("нет ci.yaml");
-    expect(fmt("cicd.pass_rate", 0.95)).toBe("95%");
+    // аудит 20.10: доля взвешена по свежести запусков — так и сказано в значении
+    expect(fmt("cicd.pass_rate", 0.95)).toBe("95% с учетом свежести");
     expect([45, 420, 3600, 3900].map((s) => fmt("cicd.duration", s))).toEqual(["45 с", "7 мин", "1 ч", "1 ч 5 мин"]);
   });
 
@@ -105,7 +106,8 @@ describe("П4.2: форма значений — единица, масштаб,
     // момента скана нет — «—», а не сырая отметка времени
     expect(fmt("activity.fresh", daysAgo(5), { at: null })).toBe(NO_VALUE);
     expect(fmt("activity.freq", 4.333333)).toBe("4,3 в месяц");
-    expect([fmt("activity.contributors", 1), fmt("activity.contributors", 3), fmt("activity.contributors", 12)]).toEqual(["1 автор", "3 автора", "12 авторов"]);
+    // аудит 20.10: название показателя уже говорит «авторов» — значение просто числом
+    expect([fmt("activity.contributors", 1), fmt("activity.contributors", 3), fmt("activity.contributors", 12)]).toEqual(["1", "3", "12"]);
     expect(fmt("activity.mirror_likeness", { sync_share: 0.125, authors: 2, committers: 3 })).toBe("синхронизаций 13%, авторов 2, коммитеров 3");
     expect([fmt("activity.pulls_90d", 3), fmt("activity.releases_12m", 0), fmt("activity.commits_90d", 13), fmt("activity.commits_365d", 40), fmt("activity.sync_bursts", 0)]).toEqual([
       "3",

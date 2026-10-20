@@ -53,7 +53,12 @@ describe("доступность: структура и имена", () => {
     expect(me).toContain("aria-label={`Запустить анализ ${entry.org}/${entry.repo}`}");
     expect(me).toMatch(/aria-label=\{jobs === null \? "Очередь"/);
     expect(web("DocsPage.tsx")).toMatch(/className="rh-docs__anchor"[^>]*aria-hidden="true" tabIndex=\{-1\}/);
-    expect(web("RepoPage.tsx")).toContain("aria-label={`Исходные данные: ${item.label}`}");
+    // аудит 20.10: aria-label Popover uikit до role="dialog" не доходит — окно основания
+    // называет себя через DialogName внутри содержимого, имя различимо по подметрике
+    const repoPage = web("RepoPage.tsx");
+    expect(repoPage).toContain("<DialogName label={`Источник данных: ${item.label}`} />");
+    expect(repoPage).not.toContain("aria-label={`Исходные данные: ${item.label}`}");
+    expect(web("ui.tsx")).toMatch(/export function DialogName[\s\S]{0,300}closest\('\[role="dialog"\]'\)\?\.setAttribute\("aria-label", label\)/);
   });
 
   test("A11Y-18: «К содержимому» — первым, ведет на main", () => {

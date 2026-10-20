@@ -36,6 +36,37 @@ export function compareSlugsOf(search: string): string[] {
   return out;
 }
 
+/**
+ * Что из ссылки сравнения не вошло в набор — тихой строкой над таблицей: без нее
+ * дубль, четвертый репозиторий и неверный адрес пропадали молча. null — все учтено.
+ */
+export function compareSkippedText(search: string): string | null {
+  const raw = new URLSearchParams(search).getAll("r");
+  const seen = new Set<string>();
+  const over = new Set<string>();
+  const bad: string[] = [];
+  for (const r of raw) {
+    const p = parseFavoriteInput(r);
+    if (p === null || r.includes("://")) {
+      bad.push(r);
+      continue;
+    }
+    const slug = `${p.org}/${p.repo}`;
+    // повторы схлопываются молча — и среди учтенных, и среди лишних
+    if (seen.has(slug) || over.has(slug)) continue;
+    if (seen.size >= COMPARE_MAX) over.add(slug);
+    else seen.add(slug);
+  }
+  const extra = over.size;
+  // длинный адрес — с многоточием в самом конце пункта, а не внутри фразы
+  const badText = bad.map((b) => `«${b}»`).join(", ");
+  const parts = [
+    ...(bad.length > 0 ? [`${badText.length > 60 ? `${badText.slice(0, 60)}…` : badText} – неверный адрес`] : []),
+    ...(extra > 0 ? [`еще ${extra} ${plural(extra, "репозиторий", "репозитория", "репозиториев")} – сравнить можно не больше ${COMPARE_MAX}`] : []),
+  ];
+  return parts.length > 0 ? `Из ссылки не учтено: ${parts.join("; ")}.` : null;
+}
+
 /** Адрес раздела для набора: слеш слага остается читаемым. */
 export function compareHref(slugs: string[]): string {
   if (slugs.length === 0) return "/compare";

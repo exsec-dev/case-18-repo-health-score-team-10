@@ -22,7 +22,7 @@ import { ladderFromFacts, type Ladder } from "../score/ladder";
 import { fixTemplateOf, templateFor, type FixFile, type FixRuleId, type FixTemplateMeta, type LicenseId } from "../fix/templates";
 import { rankBadge, type RankBadge } from "./rank-badge";
 import { COHORT_CATEGORIES, buildCohort, type CohortMember, type RepoCohort } from "./cohort";
-import { repoWebUrl } from "./slug-input";
+import { parseFavoriteInput, repoWebUrl } from "./slug-input";
 
 // ---------- общие формы ----------
 
@@ -82,6 +82,8 @@ export interface RatingItem {
   fraud: boolean;
   /** флаг поставлен по прошлому анализу: после проверки был новый скан (карточка пишет «по прошлому анализу») */
   fraudStale: boolean;
+  /** устарел потому, что проверка шла по прежним правилам (подсказка — «по прежним правилам», как на карточке) */
+  fraudOldRules: boolean;
   /** страница репо на SourceCraft – для внешней ссылки в строке */
   webUrl: string;
   /** у репо есть ПУБЛИЧНЫЙ AI-обзор (тот, что видят все) – искра у имени и фильтр «С AI-обзором» */
@@ -397,6 +399,7 @@ function toRatingItem(row: RatingRow): RatingItem {
     rankBadge: null,
     fraud: false,
     fraudStale: false,
+    fraudOldRules: false,
     webUrl: repoWebUrl(row.org_slug, row.repo_slug),
     aiOverview: false,
     org: row.org_slug,
@@ -453,11 +456,19 @@ function compareItems(a: RatingItem, b: RatingItem, sort: SortKey, order: SortOr
   return cmp !== 0 ? cmp : fullName(a).localeCompare(fullName(b));
 }
 
-function matchesQ(item: RatingItem, q: string): boolean {
-  const needle = q.toLowerCase();
+/**
+ * Запрос поиска рейтинга: без пробелов по краям (так вставляется
+ * скопированное), ссылка sourcecraft.dev — как «org/repo».
+ */
+function searchNeedle(q: string): string {
+  const t = q.trim();
+  const link = /^https?:\/\//i.test(t) ? parseFavoriteInput(t) : null;
+  return (link ? `${link.org}/${link.repo}` : t).toLowerCase();
+}
+
+function matchesQ(item: RatingItem, needle: string): boolean {
   return (
-    item.org.toLowerCase().includes(needle) ||
-    item.repo.toLowerCase().includes(needle) ||
+    `${item.org}/${item.repo}`.toLowerCase().includes(needle) ||
     (item.title ?? "").toLowerCase().includes(needle)
   );
 }
@@ -598,10 +609,11 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
 
   // Динамика позиции: базовый снимок читается один раз в Map, без запроса на
   // строку. delta = место в снимке − место сейчас (положительное = вырос).
-  // База – последний снимок ДО текущих UTC-суток: сегодняшний пишется сразу
-  // после ночной волны и совпадает с текущим порядком, сравнение с ним весь
-  // день показывало бы «без изменений».
-  const today = (opts.now ?? new Date()).toISOString().slice(0, 10);
+  // База – последний снимок ДО текущих суток по Москве. Снимок пишется в ночной
+  // фазе (00:00-03:00 МСК, до новой волны) с ключом UTC-даты — это вчерашняя дата
+  // по Москве. По UTC-суткам с ночной волны до 03:00 МСК базой оставался снимок
+  // позапрошлой ночи, и «за сутки» показывало изменение за двое.
+  const today = new Date((opts.now ?? new Date()).getTime() + 3 * 3600_000).toISOString().slice(0, 10);
   const snapDay = (db.query("SELECT MAX(taken_at) AS d FROM rating_snapshots WHERE taken_at < ?").get(today) as { d: string | null }).d;
   if (snapDay !== null) {
     const snapRank = new Map(
@@ -629,12 +641,14 @@ export function listRepos(db: Database, query: ReposQuery, opts: { now?: Date } 
       if (flag === undefined) continue;
       item.fraud = true;
       item.fraudStale = flag.stale;
+      item.fraudOldRules = flag.oldRules;
     }
   }
 
   // фасеты считаются БЕЗ фильтров (иначе выбранный язык схлопнул бы список
   // выбора и из него некуда было бы вернуться), но С учетом поиска
-  const byQ = query.q === undefined ? all : all.filter((i) => matchesQ(i, query.q!));
+  const needle = query.q === undefined ? "" : searchNeedle(query.q);
+  const byQ = needle === "" ? all : all.filter((i) => matchesQ(i, needle));
   const counts = new Map<string | null, number>();
   const colors = new Map<string | null, string | null>();
   // цвет у платформы один на язык; берем известный цвет строки с наименьшим
@@ -828,6 +842,8 @@ export interface CardScore {
   cohort: RepoCohort | null;
   modelVersion: string;
   computedAt: string;
+  /** анализ, по которому посчитана показанная оценка (последний `scan` может быть новее: идет или упал) */
+  scanId: number;
   noData: string[];
   stale: string[];
   categories: Record<CategoryKey, CardCategory>;
@@ -980,6 +996,13 @@ export interface RepoCard {
   viewer?: CardViewer;
   markers: CardMarkers;
   scan: CardScan | null;
+  /**
+   * Анализ показанной оценки, когда последний `scan` — другой (новый идет или
+   * упал): «Данные собраны» и «Запуск» относятся к оценке, а не к новому анализу.
+   * null — оценки нет или последний анализ и дал оценку. Необязательное ради
+   * литералов карточек в тестах.
+   */
+  scoredScan?: CardScan | null;
   /** живая заявка зрителя; аноним или без заявки → null */
   job: CardJob | null;
   score: CardScore | null;
@@ -1154,8 +1177,8 @@ export function overviewRepoIds(db: Database, repoIds?: readonly number[]): { pu
  * правилам – «устарел». Битый JSON – флага нет. Одним запросом на все репо: им
  * пользуются рейтинг и строки кабинета (`repoIds` – только эти репо).
  */
-export function flaggedRepos(db: Database, repoIds?: readonly number[]): Map<number, { stale: boolean; factors: { key: string; note: string }[] }> {
-  const flagged = new Map<number, { stale: boolean; factors: { key: string; note: string }[] }>();
+export function flaggedRepos(db: Database, repoIds?: readonly number[]): Map<number, { stale: boolean; oldRules: boolean; factors: { key: string; note: string }[] }> {
+  const flagged = new Map<number, { stale: boolean; oldRules: boolean; factors: { key: string; note: string }[] }>();
   const only = repoIdFilter(repoIds, "repo_id");
   for (const row of db
     .query(
@@ -1174,8 +1197,10 @@ export function flaggedRepos(db: Database, repoIds?: readonly number[]): Map<num
     const failNewer = row.fail_scan !== null && (row.fail_scan > row.scan_id || (row.fail_scan === row.scan_id && (row.fail_at ?? "") > row.created_at));
     if (failNewer) continue;
     // флаг по прежним правилам — «устарел», как и флаг по прошлому анализу
+    const oldRules = flaggerNoteOldRules(row.charter_version);
     flagged.set(row.repo_id, {
-      stale: (row.latest !== null && row.scan_id < row.latest) || flaggerNoteOldRules(row.charter_version),
+      stale: (row.latest !== null && row.scan_id < row.latest) || oldRules,
+      oldRules,
       factors: note.factors.filter((f): f is { key: string; note: string } => typeof (f as { key?: unknown }).key === "string").map((f) => ({ key: f.key, note: String(f.note ?? "") })),
     });
   }
@@ -1438,6 +1463,7 @@ export function getRepoCard(
     cohort,
     modelVersion: publicRow.model_version,
     computedAt: publicRow.computed_at,
+    scanId: publicRow.scan_id,
     // причины no-data закрытых категорий — тоже данные канала (напр. «config-only cap»)
     noData: [
       ...(JSON.parse(publicRow.no_data) as string[]).filter((raw) => !isChannelCategory(raw.split(":")[0]!)),
@@ -1582,7 +1608,7 @@ export function getRepoCard(
     ciConfigOnlyCap: ciOpen && cicdNoData.includes("прогоны не видны"),
     staleFacts: stale.length > 0,
     codeEmpty,
-    gitLimits: gitLimitsHit(publicFacts) ? gitLimitsOf(opts.limits ?? DEFAULT_SCAN) : null,
+    gitLimits: gitLimitsHit(publicFacts) ? { ...gitLimitsOf(opts.limits ?? DEFAULT_SCAN), timeoutOnly: gitLimitsTimeoutOnly(publicFacts) } : null,
   };
 
   // Зритель с полным Score видит полный AI-текст; зритель без него у
@@ -1593,6 +1619,21 @@ export function getRepoCard(
   // поставит сервер (POST /summary): свой с полными правами – полная, иначе публичная
   const runAudience: AiAudience = viewer.own && fullOpen ? "full" : "public";
   const ai = aiAudiences.length > 0 ? buildCardAi(db, r.id, opts.viewerUserId, summaryCooldownMsOf(opts), aiAudiences, runAudience) : undefined;
+  // последний анализ новее оценки (идет или упал) — сведения оценки из ее анализа
+  const scoredRow =
+    scan !== null && scan.id !== publicRow.scan_id
+      ? (db.query("SELECT id, started_at, finished_at, status, public_status, trigger, status_detail FROM scans WHERE id = ?").get(publicRow.scan_id) as typeof scanRow)
+      : null;
+  const scoredScan: CardScan | null = scoredRow
+    ? {
+        id: scoredRow.id,
+        startedAt: scoredRow.started_at,
+        finishedAt: scoredRow.finished_at,
+        status: scoredRow.public_status ?? scoredRow.status,
+        trigger: scoredRow.trigger,
+        detail: scanDetailOf(scoredRow.status_detail),
+      }
+    : null;
 
   return {
     repo: cardRepo,
@@ -1600,6 +1641,7 @@ export function getRepoCard(
     viewer,
     markers,
     scan,
+    scoredScan,
     job: liveViewerJob(db, org, repo, opts.viewerUserId),
     score,
     derived: publicRow.derived === null ? null : (JSON.parse(publicRow.derived) as DerivedMetrics),
@@ -1996,6 +2038,16 @@ export function channelSources(db: Database, repoId: number): { cicdScanId: numb
  *  (no-data timeline) иначе роняли бы карточку и MD в 500. */
 function gitLimitsHit(facts: FactRow[]): boolean {
   return facts.some((f) => f.source === "git" && f.status === "no-data" && (parseFactValue(f.value) as { reason?: unknown }).reason === "limits");
+}
+
+/** Лимит пробит только по времени: в причине есть таймаут и нет превышения размера («budget»). */
+function gitLimitsTimeoutOnly(facts: FactRow[]): boolean {
+  const details = facts
+    .filter((f) => f.source === "git" && f.status === "no-data")
+    .map((f) => (parseFactValue(f.value) as { reason?: unknown; detail?: unknown }))
+    .filter((v) => v.reason === "limits")
+    .map((v) => (typeof v.detail === "string" ? v.detail : ""));
+  return details.length > 0 && details.every((d) => d.includes("timeout") && !d.includes("budget"));
 }
 
 function gitLimitsOf(scan: ScanConfig): GitLimitsMarker {

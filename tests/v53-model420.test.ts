@@ -51,7 +51,7 @@ describe("М1.2: категория получает число только п�
     const s = score(facts(noGit()));
     expect(s.categories.activity.score).toBeNull();
     // причина – из git-факта: не прочитан (а не «истории нет»)
-    expect(noDataReason("activity", s.categories.activity.no_data)).toContain("Репозиторий не удалось прочитать");
+    expect(noDataReason("activity", s.categories.activity.no_data)).toContain("Репозиторий не удалось скачать");
   });
 
   test("git недоступен (таймаут клона): индекс не считается по одним задачам", () => {

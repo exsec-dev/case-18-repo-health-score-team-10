@@ -233,8 +233,8 @@ export function VisibilityPill({ value, titleSuffix = "" }: { value: string | nu
  * we count it?» у SourceCraft: короткое объяснение на месте, полное — в доке.
  */
 /**
- * Версия методики плашкой: номер без суффикса сборки («4.5.0»), полный номер
- * («4.5.0-hci») — в подсказке. Одна на карточке и в панели рейтинга.
+ * Версия методики плашкой: номер без суффикса сборки («4.5.0»); суффикс наружу не
+ * идет — ни в подсказке, ни скринридеру. Одна на карточке и в панели рейтинга.
  */
 export function ModelVersion({ version }: { version: string }) {
   const [base] = version.split("-");
@@ -245,10 +245,11 @@ export function ModelVersion({ version }: { version: string }) {
   );
   if (base === version) return plate;
   return (
-    <ActionTooltip title={`Полная версия – ${version}`}>
+    // суффикс сборки («-hci») — внутренняя метка: на экране и для скринридера — только номер
+    <ActionTooltip title={`Методика HealthCraft Index, версия ${base}`}>
       <span tabIndex={0} className="rh-chip-fit">
         <span aria-hidden="true">{plate}</span>
-        <span className="rh-sr-only">{`Версия методики ${version}`}</span>
+        <span className="rh-sr-only">{`Версия методики ${base}`}</span>
       </span>
     </ActionTooltip>
   );
@@ -286,14 +287,19 @@ export function MetaItem({ icon, children, title }: { icon?: IconData; children:
  * строка категории 45px): иначе раскладка прыгает в момент загрузки.
  */
 export function SkeletonRows({ rows, height = 44 }: { rows: number; height?: number }) {
+  // блоки размером с карточку — со скруглением карточек (12px), строки — как есть
+  const borderRadius = height >= 40 ? "var(--rh-radius-card)" : undefined;
   return (
     <Flex direction="column" gap={2} aria-busy="true" aria-label="Загрузка">
       {Array.from({ length: rows }, (_, i) => (
-        <Skeleton key={i} style={{ height, width: "100%" }} />
+        <Skeleton key={i} style={{ height, width: "100%", borderRadius }} />
       ))}
     </Flex>
   );
 }
+
+/** Строка списков «Избранного» и «Моих» — 71px (аватар 40, имя, мета); скелетоны берут ее высоту. */
+export const REPO_ROW_HEIGHT = 71;
 
 /**
  * Пустое/служебное состояние в манере платформы: текст слева, иллюстрация
@@ -338,4 +344,64 @@ export function EmptyState({
     />
     </div>
   );
+}
+
+/**
+ * Имя всплывающего окна для скринридера. Popover uikit 7 ставит role="dialog" на
+ * внешний слой, а `aria-label` до него не пропускает (filterDOMProps без labelable) —
+ * окно объявлялось «диалог» без имени. Компонент ставят первым в содержимое окна.
+ */
+export function DialogName({ label }: { label: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    ref.current?.closest('[role="dialog"]')?.setAttribute("aria-label", label);
+  }, [label]);
+  return <span ref={ref} hidden />;
+}
+
+const FOCUSABLE = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/**
+ * Клавиатура в нижнем окне (Sheet uikit фокусом не управляет и Esc не слушает):
+ * при открытии фокус — на первый элемент окна, Tab не уходит на страницу под
+ * затемнением, Esc закрывает, после закрытия фокус возвращается туда, откуда
+ * окно открыли. Обертка ставится внутрь Sheet вокруг содержимого.
+ */
+export function SheetFocus({ open, onClose, children }: { open: boolean; onClose: () => void; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useEffect(() => {
+    if (!open) return;
+    const returnTo = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const items = (): HTMLElement[] => [...(ref.current?.closest('[role="dialog"]') ?? ref.current)?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []];
+    const raf = requestAnimationFrame(() => items()[0]?.focus());
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") {
+        // Esc закрывает сначала открытый внутри окна список (Select), а не все окно
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && (active.closest(".g-popup") || active.getAttribute("aria-expanded") === "true")) return;
+        e.preventDefault();
+        close.current();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const list = items();
+      if (list.length === 0) return;
+      const first = list[0]!;
+      const last = list[list.length - 1]!;
+      const inside = list.includes(document.activeElement as HTMLElement);
+      if (!inside || (e.shiftKey && document.activeElement === first) || (!e.shiftKey && document.activeElement === last)) {
+        e.preventDefault();
+        (e.shiftKey ? last : first).focus();
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      cancelAnimationFrame(raf);
+      document.removeEventListener("keydown", onKey, true);
+      returnTo?.focus();
+    };
+  }, [open]);
+  return <div ref={ref}>{children}</div>;
 }

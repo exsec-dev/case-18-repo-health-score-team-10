@@ -356,7 +356,7 @@ const favoriteRateLimited = (userId: number): Response =>
 
 /** Окно открытий карточки (карточка, MD, PDF) исчерпано — 429 с Retry-After. */
 const cardRateLimited = (userId: number): Response =>
-  rateLimited(`не больше ${config.queue.cardPerMinute ?? 30} открытий карточки в минуту – попробуйте чуть позже`, windowRetryAfterSec(cardViews, userId, 60_000));
+  rateLimited("слишком много карточек открыто за минуту", windowRetryAfterSec(cardViews, userId, 60_000));
 
 /** Предел избранного — 409 без меты репо, чтобы не выдать факт существования приватного. */
 const favoriteLimit = (max: number): Response =>
@@ -981,7 +981,7 @@ const routes = {
           const elapsed = Date.now() - Date.parse(lastSummary.created_at);
           if (Number.isFinite(elapsed) && elapsed < cooldownMs) {
             return Response.json(
-              { error: { code: "cooldown", message: "описание недавно формировалось – следующий запуск будет доступен позже", until: new Date(Date.parse(lastSummary.created_at) + cooldownMs).toISOString() } },
+              { error: { code: "cooldown", message: "AI-обзор недавно формировался – следующий запуск будет доступен позже", until: new Date(Date.parse(lastSummary.created_at) + cooldownMs).toISOString() } },
               { status: 429 },
             );
           }
@@ -1022,7 +1022,7 @@ const routes = {
         }
         if (out.kind === "cooldown") {
           return Response.json(
-            { error: { code: "cooldown", message: "описание недавно формировалось – следующий запуск будет доступен позже", until: out.until } },
+            { error: { code: "cooldown", message: "AI-обзор недавно формировался – следующий запуск будет доступен позже", until: out.until } },
             { status: 429 },
           );
         }

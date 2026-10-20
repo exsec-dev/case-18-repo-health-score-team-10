@@ -93,10 +93,33 @@ export function searchDocs(index: SearchEntry[], query: string, limit = 8): Sear
     if (e.anchor === null && terms.every((t) => page.includes(t))) score += 3;
     const at = terms.map((t) => text.indexOf(t)).filter((i) => i >= 0);
     const first = at.length > 0 ? Math.min(...at) : -1;
-    const snippet = first >= 0 ? e.text.slice(Math.max(0, first - 50), first + 110).replace(/\s+/g, " ").trim() : null;
+    const snippet = first >= 0 ? snippetAt(e.text, first) : null;
     hits.push({ entry: e, score, snippet });
   }
   return hits.sort((a, b) => b.score - a.score).slice(0, limit);
+}
+
+/**
+ * Фрагмент вокруг совпадения — от границы слова: обрезка ровно за 50 знаков до
+ * совпадения начинала фрагмент с середины слова («raft проверяет…»). Начало
+ * сдвигается к началу предложения, если оно рядом, иначе — к ближайшему пробелу.
+ */
+function snippetAt(text: string, first: number): string {
+  let from = Math.max(0, first - 50);
+  if (from > 0) {
+    const sentence = text.lastIndexOf(". ", first);
+    if (sentence >= 0 && first - sentence <= 80) from = sentence + 2;
+    else {
+      const space = text.indexOf(" ", from);
+      from = space >= 0 && space < first ? space + 1 : first;
+    }
+  }
+  let to = Math.min(text.length, first + 110);
+  if (to < text.length) {
+    const space = text.lastIndexOf(" ", to);
+    if (space > first) to = space;
+  }
+  return text.slice(from, to).replace(/\s+/g, " ").trim();
 }
 
 /** Основы слов запроса (слова короче 2 букв не ищутся). */

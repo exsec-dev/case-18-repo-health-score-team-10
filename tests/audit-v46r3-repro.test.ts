@@ -17,12 +17,13 @@ describe("В4.6 круг 3: рейтинг", () => {
     // UX 17.10: на телефоне полосы нет — число цвета зоны; в таблице – полоса 80px и нейтральное число
     expect(whole).toMatch(/if \(narrow && [^)]*\) \{[\s\S]{0,200}scoreColor\(item\.healthcraftIndex\)/);
     const cell = whole.slice(whole.indexOf("if (item.healthcraftIndex === null)"));
-    expect(cell).toContain('<div className="rh-score-cell__bar">');
+    // аудит 20.10: полоса — общий ScoreBar шириной 80px (своей обертки rh-score-cell__bar нет)
+    expect(cell).toContain("<ScoreBar value={item.healthcraftIndex} width={80} />");
     expect(cell).not.toContain("scoreColor(item.healthcraftIndex)");
     expect(cell).toContain('<Flex gap={0} alignItems="center"');
-    expect(css).toMatch(/\.rh-score-cell__bar\s*\{[^}]*flex:\s*0 0 80px[^}]*width:\s*80px/);
+    expect(css).toMatch(/\.rh-score-bar\s*\{[^}]*flex:\s*none/);
     expect(css).toMatch(/\.rh-score-cell__num\s*\{[^}]*font-size:\s*var\(--g-text-body-2-font-size\)[^}]*font-weight:\s*var\(--g-text-accent-font-weight\)/);
-    expect(css).toMatch(/\.rh-score-cell__bar \.g-progress,[\s\S]{0,100}height:\s*8px/);
+    expect(css).toMatch(/\.rh-score-bar \.g-progress,[\s\S]{0,100}height:\s*8px/);
     const categoryCell = rating.slice(rating.indexOf("function CategoryCell"));
     expect(categoryCell).toMatch(/scoreTheme\(value\) === "success"[\s\S]{0,300}rh-cat-plain/);
     expect(categoryCell).toMatch(/scoreLabelTheme\(value\)[\s\S]{0,100}rh-cat-chip/);
@@ -33,7 +34,7 @@ describe("В4.6 круг 3: рейтинг", () => {
   test("поиск, лид, вклад и частота используют утвержденные формулировки", () => {
     const rating = web("Rating.tsx");
     const api = readFileSync(join(import.meta.dir, "..", "src", "api", "repos.ts"), "utf8");
-    expect(rating).toContain("Поиск по владельцу, репозиторию и заголовку");
+    expect(rating).toContain("Поиск по организации и названию репозитория");
     expect(api).toMatch(/function matchesQ[\s\S]{0,300}item\.org[\s\S]{0,150}item\.repo[\s\S]{0,150}item\.title/);
     expect(rating).toContain("HealthCraft Index показывает состояние открытых репозиториев SourceCraft по 4 категориям: документация, активность, задачи и состояние кода.");
     // в подзаголовке – ссылка «Как считается» и строка охвата с числом неоцененных
@@ -101,8 +102,9 @@ describe("В4.6 круг 3: карточка", () => {
     expect(band).not.toContain("Рекомендаций:");
     // основание – по кнопке «Источник данных» (18.10.2026: синий ярлык подметрики
     // спорил с заголовком; 19.10.2026: «Откуда данные» → «Источник данных»),
-    // раскрывается по клику; ключ факта – мелко в поповере
-    expect(repo).toMatch(/content=\{<FactProof item=\{item\} \/>\}[\s\S]{0,200}Источник данных[\s\S]{0,60}<Icon data=\{ChevronDown\}/);
+    // раскрывается по клику; ключ факта – мелко в поповере. Аудит 20.10: имя окна
+    // для скринридера — DialogName внутри содержимого (aria-label Popover не доходит)
+    expect(repo).toMatch(/content=\{\s*<>\s*<DialogName label=\{`Источник данных: \$\{item\.label\}`\} \/>\s*<FactProof item=\{item\} \/>\s*<\/>\s*\}>[\s\S]{0,200}Источник данных[\s\S]{0,60}<Icon data=\{ChevronDown\}/);
     expect(repo).not.toContain("Порядок задан движком правил");
   });
 

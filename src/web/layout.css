@@ -928,14 +928,15 @@ body {
 }
 
 /* заголовок раздела ленты не прижат к содержимому; сверху поле дает карточка */
+/* «заголовок раздела → первое содержимое» — 12px во всех разделах карточки, как у AI-обзора */
 .rh-section__title {
   display: block;
-  margin: 0 0 var(--g-spacing-4);
+  margin: 0 0 var(--g-spacing-3);
 }
 
 /* селектор специфичнее стилей `Text`, которые обнуляют поле у h2 */
 .rh-section-card > .rh-section__title.g-text {
-  margin-block: 0 var(--g-spacing-4);
+  margin-block: 0 var(--g-spacing-3);
 }
 
 /* строка сильных сторон под заголовком «Категории»: отбивка до списка как у заголовка */
@@ -1042,7 +1043,7 @@ body {
 
 .rh-settings__sk.g-skeleton {
   width: 100%;
-  border-radius: 12px;
+  border-radius: var(--rh-radius-card);
 }
 
 /* поле 16px и радиус 12px — как карточка организации у SourceCraft */
@@ -1073,7 +1074,8 @@ body {
   justify-content: center;
   width: 40px;
   height: 40px;
-  border-radius: 10px;
+  /* вложенная плашка — радиус вложенных (8px), карточки — 12px */
+  border-radius: var(--g-border-radius-l);
   background: var(--g-color-base-generic);
   color: var(--g-color-text-secondary);
 }
@@ -1146,9 +1148,10 @@ body {
   min-height: 36px;
   box-sizing: border-box;
   padding: 6px var(--g-spacing-2) 6px var(--g-spacing-3);
+  /* только обводка, как у полей SourceCraft: на серой подложке метки «Проверен» и
+     «Только чтение» в темной теме не добирали контраста (3,7:1 и 2,4:1) */
   border: 1px solid var(--g-color-line-generic);
   border-radius: var(--g-border-radius-l);
-  background: var(--g-color-base-generic);
 }
 
 .rh-token-status__name.g-text {
@@ -1169,7 +1172,7 @@ body {
 .rh-steps > li {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr);
-  gap: 10px;
+  gap: var(--g-spacing-2);
   align-items: start;
   counter-increment: rh-step;
 }
@@ -1185,7 +1188,7 @@ body {
   background: var(--g-color-base-generic-hover);
   color: var(--g-color-text-secondary);
   font-size: var(--g-text-caption-2-font-size);
-  font-weight: 500;
+  font-weight: var(--g-text-accent-font-weight);
 }
 
 /* квота — серой панелью внутри карточки «Лимиты AI»: крупно остаток на сутки с
@@ -1197,7 +1200,7 @@ body {
   box-sizing: border-box;
   min-width: 0;
   padding: var(--g-spacing-3);
-  border-radius: var(--g-border-radius-xl);
+  border-radius: var(--g-border-radius-l);
   background: var(--g-color-base-generic);
 }
 
@@ -1258,7 +1261,7 @@ body {
   flex-direction: column;
   gap: var(--g-spacing-1);
   margin-top: auto;
-  padding-top: 10px;
+  padding-top: var(--g-spacing-3);
   border-top: 1px solid var(--g-color-line-generic);
 }
 
@@ -1335,7 +1338,7 @@ button.rh-category:focus-visible {
 }
 
 .rh-category__bar {
-  margin-top: 5px;
+  margin-top: var(--g-spacing-1);
 }
 
 .rh-category__word {
@@ -1692,17 +1695,6 @@ button.rh-category:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
-.rh-score-cell__bar {
-  flex: 0 0 80px;
-  width: 80px;
-}
-
-.rh-score-cell__bar .g-progress,
-.rh-score-cell__bar .g-progress__stack {
-  height: 8px;
-  line-height: 8px;
-}
-
 .rh-score-figure__value {
   align-items: baseline;
 }
@@ -1928,12 +1920,18 @@ button.rh-category:focus-visible {
     align-items: flex-start;
   }
 
-  /* имя репозитория в шапке карточки переносится, а не срезается */
+  /* имя репозитория в шапке карточки переносится, а не срезается — но не больше
+   * 3 строк: имя из 160 знаков без дефисов занимало 8 строк, и оценка уходила
+   * ниже первого экрана. Полное имя — в title (RepoSlug) */
   .rh-card-head__title .g-text_ellipsis,
   .rh-card-head__title .rh-slug.g-text {
-    overflow: visible;
+    overflow: hidden;
     white-space: normal;
     overflow-wrap: anywhere;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
   }
 
   /* пагинация на узком телефоне переносится, а не режется */
@@ -2120,6 +2118,16 @@ button.rh-category:focus-visible {
   }
 }
 
+/* «уменьшить движение»: вспышка панели и пульс звезды — одна короткая смена без повтора */
+@media (prefers-reduced-motion: reduce) {
+  .rh-page__aside_flash {
+    animation-duration: 0.2s;
+  }
+  .rh-star-glow {
+    animation: rh-star-glow-pulse 0.2s ease-out 1;
+  }
+}
+
 /* ---------- фильтр языка рейтинга: мультивыбор ---------- */
 
 /* Список ограничен по высоте и прокручивается: языков в каталоге десятки.
@@ -2248,18 +2256,19 @@ button.rh-category:focus-visible {
   gap: var(--g-spacing-2);
 }
 
-/* иконки полос — насыщенные базовые тоны (`-heavy`), а не пастельные
-   текстовые: это графика, порог 3:1, а не проза 4,5:1. */
+/* иконки полос — те же тоны зон, что у самих полос (`-medium`, theme.css поднял их
+   до 3:1 в обеих темах): `-heavy` в светлой теме давал 1,2:1 у желтого, и у одной
+   зоны было два разных желтых. Это графика, порог 3:1, а не проза 4,5:1. */
 .rh-band-icon_success {
-  color: var(--g-color-base-positive-heavy);
+  color: var(--g-color-base-positive-medium);
 }
 
 .rh-band-icon_warning {
-  color: var(--g-color-base-warning-heavy);
+  color: var(--g-color-base-warning-medium);
 }
 
 .rh-band-icon_danger {
-  color: var(--g-color-base-danger-heavy);
+  color: var(--g-color-base-danger-medium);
 }
 
 .rh-repo-item__num {
@@ -2278,15 +2287,15 @@ button.rh-category:focus-visible {
 }
 
 .rh-state__icon_danger {
-  color: var(--g-color-base-danger-heavy);
+  color: var(--g-color-base-danger-medium);
 }
 
 .rh-state__icon_warning {
-  color: var(--g-color-base-warning-heavy);
+  color: var(--g-color-base-warning-medium);
 }
 
 .rh-state__icon_success {
-  color: var(--g-color-base-positive-heavy);
+  color: var(--g-color-base-positive-medium);
 }
 
 .rh-busy {
@@ -2487,6 +2496,21 @@ button.rh-category:focus-visible {
     gap: var(--g-spacing-3);
   }
 
+  /* ультраширокий: инструменты шапки — сразу за заголовком, сводка организации — за
+   * ее именем, а не у правого края в 2700-3100px от них */
+  .rh-me-head {
+    justify-content: flex-start;
+  }
+  .rh-me-head__title {
+    flex: 0 1 720px;
+  }
+  .rh-org-group__text {
+    flex: 0 1 720px;
+  }
+  .rh-org-group__zones {
+    margin-inline-end: auto;
+  }
+
   .rh-repo-item,
   .rh-repo-item:last-child {
     border: 1px solid var(--g-color-line-generic);
@@ -2571,7 +2595,7 @@ button.rh-category:focus-visible {
   display: flex;
   align-items: center;
   gap: var(--g-spacing-2);
-  padding: 6px var(--g-spacing-3);
+  padding: var(--g-spacing-2) var(--g-spacing-3);
 }
 
 /* Label обрезает текст, а сжиматься должен слаг: состояние читается целиком */
@@ -2733,8 +2757,8 @@ button.rh-category:focus-visible {
   overflow: hidden;
   box-sizing: border-box;
   border: 1px solid var(--g-color-line-generic);
-  /* 12px — как у Card разделов; поля 16px — та же мера */
-  border-radius: 12px;
+  /* как у Card разделов; поля 16px — та же мера */
+  border-radius: var(--rh-radius-card);
   padding: var(--g-spacing-4);
   background: linear-gradient(90deg, var(--rh-ai-sc-blue) 0%, var(--rh-ai-sc-magenta) 73.08%, var(--rh-ai-sc-pink) 100%);
 }
@@ -2780,11 +2804,6 @@ button.rh-category:focus-visible {
 
 .rh-ai-button-icon {
   color: var(--rh-ai-accent);
-}
-
-.rh-ai-section__label {
-  margin: 0;
-  font: inherit;
 }
 
 /* волна сдвигается на половину слоя: вторая половина повторяет первую, шов не виден */
@@ -2968,7 +2987,7 @@ button.rh-category:focus-visible {
 
 .rh-history__num {
   color: var(--g-color-text-primary);
-  font-weight: 500;
+  font-weight: var(--g-text-accent-font-weight);
   font-variant-numeric: tabular-nums;
 }
 
@@ -3258,9 +3277,10 @@ button.rh-category:focus-visible {
   max-width: 1600px;
 }
 
-/* от описания до таблицы — один шаг раздела, без поля заголовка */
+/* от описания до содержимого — 24px, как у шапок остальных разделов: поле
+   заголовка снято, а шаг колонки (16px) добирается до 24 */
 .rh-cmp-page > .g-flex:first-child {
-  margin-bottom: 0 !important;
+  margin-bottom: var(--g-spacing-2) !important;
 }
 
 /* заглушка растянута по ширине, как в избранном */
@@ -3371,7 +3391,7 @@ button.rh-category:focus-visible {
 .rh-cmp-colcard {
   box-sizing: border-box;
   border: 1px solid var(--g-color-line-generic);
-  border-radius: var(--g-border-radius-xl);
+  border-radius: var(--rh-radius-card);
 }
 
 .rh-cmp-colcard_invite {
@@ -3408,7 +3428,7 @@ button.rh-category:focus-visible {
   z-index: 3;
   box-sizing: border-box;
   padding: var(--g-spacing-3) var(--g-spacing-4);
-  border-radius: var(--g-border-radius-xl) var(--g-border-radius-xl) 0 0;
+  border-radius: var(--rh-radius-card) var(--rh-radius-card) 0 0;
   background: var(--g-color-base-background);
 }
 
@@ -4198,21 +4218,23 @@ button.rh-category:focus-visible {
    остальных колонок, — таблица без горизонтальной прокрутки. Остальные
    колонки по умолчанию (#, индекс, 4 категории, реакции, дата) вместе ~760px
    с полями ячеек; каркас — rail 236 (узкий — 56) и поля страницы 40; правая
-   панель 320 стоит колонкой с 1600 (asideColumnFrom в Rating.tsx). Длинный
-   слаг режется по правилу RepoSlug. */
+   панель 320 стоит колонкой с 1600 (asideColumnFrom в Rating.tsx). Запас 48px:
+   100vw включает полосу прокрутки окна (~16px), а пятизначное место со
+   стрелкой и длинная дата шире колонок по умолчанию — без запаса таблица
+   прокручивалась вбок на 11-40px. Длинный слаг режется по правилу RepoSlug. */
 .rh-rating-repo {
   min-width: 180px;
-  max-width: calc(100vw - 1036px);
+  max-width: calc(100vw - 1084px);
 }
 .rh-rail_compact .rh-rating-repo {
-  max-width: calc(100vw - 856px);
+  max-width: calc(100vw - 904px);
 }
 @media (min-width: 1600px) {
   .rh-rating-repo {
-    max-width: calc(100vw - 1356px);
+    max-width: calc(100vw - 1404px);
   }
   .rh-rail_compact .rh-rating-repo {
-    max-width: calc(100vw - 1176px);
+    max-width: calc(100vw - 1224px);
   }
 }
 
@@ -4236,7 +4258,7 @@ button.rh-category:focus-visible {
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
-  gap: 5px;
+  gap: var(--g-spacing-1);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -4599,6 +4621,21 @@ button.rh-category:focus-visible {
   width: 280px;
 }
 
+/* телефон: поиск занимает остаток строки, а не 280px — вместе с PDF помещается */
+@media (max-width: 767px) {
+  .rh-docs-actions {
+    flex: 1 1 auto;
+    min-width: 0;
+    justify-content: flex-end;
+  }
+  .rh-docs-search {
+    flex: 1 1 auto;
+    width: auto;
+    min-width: 0;
+    max-width: 280px;
+  }
+}
+
 .rh-docs-search__lens {
   margin-left: var(--g-spacing-2);
   color: var(--g-color-text-secondary);
@@ -4738,11 +4775,14 @@ button.rh-category:focus-visible {
   margin-bottom: 0;
 }
 
+/* врезки — с обводкой, как Alert outlined во всем приложении; заливка легкая */
 .rh-docs__note_info {
+  border: 1px solid var(--g-color-line-info);
   background: var(--g-color-base-info-light);
 }
 
 .rh-docs__note_warning {
+  border: 1px solid var(--g-color-line-warning);
   background: var(--g-color-base-warning-light);
 }
 
@@ -4948,6 +4988,9 @@ button.rh-category:focus-visible {
  * ловит фокус; раскрытие показывает сразу. */
 .rh-collapse {
   display: grid;
+  /* колонка не шире контейнера: иначе одно длинное имя без переносов раздвигало
+   * весь список (баллы всех строк уезжали за край) */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 1fr;
   transition: grid-template-rows 220ms cubic-bezier(0.2, 0, 0, 1), visibility 0s;
 }
@@ -5122,15 +5165,15 @@ button.rh-category:focus-visible {
 }
 
 .rh-org-zone__dot_success {
-  background: var(--g-color-base-positive-heavy);
+  background: var(--g-color-base-positive-medium);
 }
 
 .rh-org-zone__dot_warning {
-  background: var(--g-color-base-warning-heavy);
+  background: var(--g-color-base-warning-medium);
 }
 
 .rh-org-zone__dot_danger {
-  background: var(--g-color-base-danger-heavy);
+  background: var(--g-color-base-danger-medium);
 }
 
 .rh-org-group__arrow {
@@ -5877,4 +5920,29 @@ button.rh-category:focus-visible {
 
 .rh-rail [class*="gn-composite-bar-item__title-adornment___"]:has(> .rh-rail-count) {
   margin-inline-start: auto;
+}
+
+/* «Готово» в нижнем окне заготовки — отступ от кнопок «Скопировать»/«Скачать» */
+.rh-tpl-sheet__done {
+  margin-top: var(--g-spacing-3);
+}
+
+/* висячие слова: заголовки — ровными строками, абзацы — без одинокого слова в конце */
+h1,
+h2,
+h3,
+.rh-page .g-placeholder-container__title {
+  text-wrap: balance;
+}
+.rh-page .g-text_variant_body-1,
+.rh-page .g-text_variant_body-2,
+.rh-page .g-placeholder-container__description {
+  text-wrap: pretty;
+}
+
+/* (?) у строк DefinitionList — 14px, как все HelpMark приложения (uikit рисует там 16px) */
+.rh-page .g-definition-list .g-help-mark,
+.rh-page .g-definition-list .g-help-mark svg {
+  width: 14px;
+  height: 14px;
 }

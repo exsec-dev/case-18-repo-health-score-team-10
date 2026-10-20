@@ -257,10 +257,11 @@ describe("В4.8: вёрстка раздела (source-assert)", () => {
     // штриховка — keyframes загрузки кнопки Gravity; движение отключается по prefers-reduced-motion
     expect(css).toMatch(/\.rh-busy \{[^}]*animation: g-loading-animation/);
     expect(css).toMatch(/@media \(prefers-reduced-motion: reduce\) \{\s*\.rh-busy \{\s*animation: none;/);
-    // иконки плиток — насыщенными базовыми тонами графики, не пастельным текстом;
-    // кольца больше нет — его заменила общая полоса
+    // иконки плиток — базовыми тонами графики, не пастельным текстом; аудит 20.10:
+    // тон зоны тот же, что у полос (`-medium`, 3:1 в обеих темах; `-heavy` у желтого
+    // давал 1,2:1); кольца больше нет — его заменила общая полоса
     for (const [band, token] of [["success", "positive"], ["warning", "warning"], ["danger", "danger"]]) {
-      expect(css).toContain(`.rh-band-icon_${band} {\n  color: var(--g-color-base-${token}-heavy);\n}`);
+      expect(css).toContain(`.rh-band-icon_${band} {\n  color: var(--g-color-base-${token}-medium);\n}`);
     }
     expect(css).not.toContain(".rh-ring");
   });

@@ -38,9 +38,13 @@ describe("В5.9 HQ: вид лестницы = поля карточки", () => 
       const shown = v.ladder!.steps;
       expect(shown.slice(0, steps.length).map((s) => s.item.rec.ruleId)).toEqual(steps.map((s) => s.ruleId));
       shown.forEach((s, i) => expect(s.item.n).toBe(i + 1));
-      // 19.10.2026: строка «52 (+5,8)» (поле effect) снята — на экране прирост и индекс после шага отдельно
+      // 19.10.2026: строка «52 (+5,8)» (поле effect) снята — на экране прирост и индекс после шага отдельно.
+      // Аудит 20.10: прирост — разница показанных (округленных) индексов, чтобы видимые
+      // числа складывались (63 → 66 → 70: «+3», «+4»); сырой Δ — только если разница не положительна
       steps.forEach((st, i) => {
-        expect(shown[i]!.gain).toBe(fmtSigned(st.delta));
+        const before = roundScore(i === 0 ? c.ladder!.start : steps[i - 1]!.indexAfter);
+        const d = roundScore(st.indexAfter) - before;
+        expect(shown[i]!.gain).toBe(d > 0 ? `+${d}` : fmtSigned(st.delta));
         expect(shown[i]!.after).toBe(fmtScore(st.indexAfter));
       });
       const extra = shown.slice(steps.length);
@@ -74,9 +78,15 @@ describe("В5.9 HQ: вид лестницы = поля карточки", () => 
     const unView = cardView(un).ladder!;
     const k = un.ladder!.steps.length;
     const head = `${k === 1 ? "Шаг №1 поднимет" : `Шаги №1-${k} поднимут`} индекс до ${lastU}`;
-    // следующий шаг без числа есть — итог говорит, может ли он закрыть разрыв, нет — называет разрыв
+    // следующий шаг без числа есть — итог говорит, может ли он закрыть разрыв, нет — называет разрыв.
+    // Аудит 20.10: «может вывести» — по тому же правилу, что отметка reach шага: округленный
+    // «индекс после последнего шага + потолок» (не больше 100) дотягивает до 70
     const extra = unView.steps[k];
-    if (extra) expect(unView.headline).toBe(`${head}, а №${k + 1} ${extra.item.ceiling! >= 70 - lastU ? "может вывести его в зону «Здоров»" : "приблизит его к зоне «Здоров»"}`);
+    if (extra) {
+      const reach = roundScore(Math.min(100, un.ladder!.steps.at(-1)!.indexAfter + extra.item.ceiling!)) >= 70;
+      expect(extra.reach).toBe(reach);
+      expect(unView.headline).toBe(`${head}, а №${k + 1} ${reach ? "может вывести его в зону «Здоров»" : "приблизит его к зоне «Здоров»"}`);
+    }
     else expect(unView.headline).toBe(`${head} – до зоны «Здоров» не хватит ${70 - lastU}`);
   });
 
