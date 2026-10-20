@@ -50,15 +50,22 @@ function job(db: Database, o: { user: number | null; kind?: string; at: Date; st
     o.unlocked ?? 0,
   );
 }
-const cfg = (over: Partial<AiConfig> = {}): AiConfig => ({ ...DEFAULT_AI, ...over });
+// окна до 20.10.2026 (2/6/30, 5/20/60, потолок пароля 100): на них проверяется механика всех трех слоев
+const LAYERED: Partial<AiConfig> = {
+  overview: { perHour: 2, perDay: 6, globalPerDay: 30 },
+  check: { perHour: 5, perDay: 20, globalPerDay: 60 },
+  unlockedOverviewPerDay: 100,
+  unlockedCheckPerDay: 100,
+};
+const cfg = (over: Partial<AiConfig> = {}): AiConfig => ({ ...DEFAULT_AI, ...LAYERED, ...over });
 
 describe("конфиг AI: дефолт — числа решения §2, автозапуск топа выключен", () => {
-  test("переменные не заданы — лимиты 2/6/30 и 5/20/60, потолок пароля 100, пароля нет, топ выключен", () => {
+  test("переменные не заданы — только суточные 25 и 50, без часа, общего и потолка пароля; пароля нет, топ выключен", () => {
     const c = aiConfigFromEnv({});
-    expect(c.overview).toEqual({ perHour: 2, perDay: 6, globalPerDay: 30 });
-    expect(c.check).toEqual({ perHour: 5, perDay: 20, globalPerDay: 60 });
-    expect(c.unlockedOverviewPerDay).toBe(100);
-    expect(c.unlockedCheckPerDay).toBe(100);
+    expect(c.overview).toEqual({ perHour: null, perDay: 25, globalPerDay: null });
+    expect(c.check).toEqual({ perHour: null, perDay: 50, globalPerDay: null });
+    expect(c.unlockedOverviewPerDay).toBeNull();
+    expect(c.unlockedCheckPerDay).toBeNull();
     expect(c.unlockPassword).toBeNull();
     expect(c.topAuto).toBe(false);
     expect(c.topAutoSize).toBe(10);
@@ -66,7 +73,7 @@ describe("конфиг AI: дефолт — числа решения §2, ав�
   test("переменные читаются; мусор в числе — дефолт; пароль короче 20 — функция выключена", () => {
     const c = aiConfigFromEnv({ AI_OVERVIEW_PER_HOUR: "3", AI_CHECK_GLOBAL_PER_DAY: "abc", AI_UNLOCK_PASSWORD: " s3cret-long-enough-for-us ", AI_TOP_AUTO: "1", APP_SECRET: "k" });
     expect(c.overview.perHour).toBe(3);
-    expect(c.check.globalPerDay).toBe(60);
+    expect(c.check.globalPerDay).toBeNull();
     expect(c.unlockPassword).toBe("s3cret-long-enough-for-us");
     expect(c.unlockStatus).toBe("on");
     expect(c.unlockKey).toBe("k");
@@ -318,11 +325,14 @@ describe("маршруты на живом сервере", () => {
       const quota = (await (await fetch(`${server.base}/api/me/ai-quota`, { headers: h })).json()) as {
         unlockAvailable: boolean;
         unlocked: boolean;
-        check: { hour: { used: number; limit: number } };
+        check: { hour: unknown; day: { used: number; limit: number }; global: unknown };
       };
       expect(quota.unlockAvailable).toBe(true);
       expect(quota.unlocked).toBe(false);
-      expect(quota.check.hour).toEqual({ used: 1, limit: 5 });
+      // по умолчанию — только сутки на человека
+      expect(quota.check.day).toEqual({ used: 1, limit: 50 });
+      expect(quota.check.hour).toBeNull();
+      expect(quota.check.global).toBeNull();
       const wrong = await fetch(`${server.base}/api/me/ai-unlock`, { method: "POST", headers: h, body: JSON.stringify({ password: "nope" }) });
       expect(wrong.status).toBe(403);
       const right = await fetch(`${server.base}/api/me/ai-unlock`, { method: "POST", headers: h, body: JSON.stringify({ password: "correct-horse-battery-staple" }) });
@@ -330,8 +340,8 @@ describe("маршруты на живом сервере", () => {
       const after = (await (await fetch(`${server.base}/api/me/ai-quota`, { headers: h })).json()) as { unlocked: boolean; check: { hour: unknown } };
       expect(after.unlocked).toBe(true);
       expect(after.check.hour).toBeNull();
-      // проверка выше поставлена ДО пароля — в потолок по паролю она не входит
-      expect((after.check as unknown as { global: unknown }).global).toEqual({ used: 0, limit: 100 });
+      // потолка по паролю по умолчанию нет
+      expect((after.check as unknown as { global: unknown }).global).toBeNull();
       const off = await fetch(`${server.base}/api/me/ai-unlock`, { method: "DELETE", headers: h });
       expect(off.status).toBe(200);
       expect(((await (await fetch(`${server.base}/api/me/ai-quota`, { headers: h })).json()) as { unlocked: boolean }).unlocked).toBe(false);

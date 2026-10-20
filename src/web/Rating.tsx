@@ -491,6 +491,8 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
     </Flex>
   );
 
+  const rowsTotal = data ? (view === "scored" ? data.total : data.nulls) : 0;
+
   return (
     <Page
       mode="fill"
@@ -506,20 +508,26 @@ export function Rating({ search: rawSearch, meta, metaFailed = false }: { search
           {toolbar}
         </>
       }
+      // футер: пагинация слева, справа — «Всего: N» строк вкладки с учетом поиска и фильтров
       footer={
-        data && view === "scored" && data.total > data.perPage ? (
-          <Pagination
-            className="rh-pager"
-            page={data.page}
-            pageSize={data.perPage}
-            total={data.total}
-            // 20 — размер по умолчанию, без этой опции к нему не вернуться
-            pageSizeOptions={isPhone ? undefined : [10, 20, 50, 100]}
-            // поле номера страницы: Enter или уход фокуса — переход,
-            // номер больше последнего — последняя страница
-            showInput
-            onUpdate={(page, pageSize) => setParams({ page: String(page), per_page: String(pageSize) }, { keepPage: true })}
-          />
+        rowsTotal > 0 ? (
+          <Flex gap={3} alignItems="center" justifyContent="space-between" wrap className="rh-rating-foot">
+            {data && view === "scored" && data.total > data.perPage && (
+              <Pagination
+                className="rh-pager"
+                page={data.page}
+                pageSize={data.perPage}
+                total={data.total}
+                // 20 — размер по умолчанию, без этой опции к нему не вернуться
+                pageSizeOptions={isPhone ? undefined : [10, 20, 50, 100]}
+                // поле номера страницы: Enter или уход фокуса — переход,
+                // номер больше последнего — последняя страница
+                showInput
+                onUpdate={(page, pageSize) => setParams({ page: String(page), per_page: String(pageSize) }, { keepPage: true })}
+              />
+            )}
+            <Text color="secondary" className="rh-rating-foot__total">{`Всего: ${fmtCount(rowsTotal)}`}</Text>
+          </Flex>
         ) : undefined
       }
     >
@@ -708,10 +716,9 @@ function UnscoredTable({ items, meta, active, search, refreshing, phone = false 
       <EmptyState image={SuccessIllustration} title="Все проанализированные репозитории оценены" description="Данных хватило каждому." />
     );
   }
-  // группа может быть огромной — таблица показывает первые 5, остальное
-  // счетчиком «и еще N»
-  const shown = items.slice(0, 5);
-  const rest = items.length - shown.length;
+  // весь список: сколько в нем строк, говорит «Всего: N» в футере (20.10.2026;
+  // раньше — первые 5 и строка «…и еще N»)
+  const shown = items;
   const failedScan = items.some((i) => i.scanStatus === "bad");
   return (
     <Flex direction="column" gap={3} className={refreshing ? "rh-refreshing" : undefined}>
@@ -756,7 +763,6 @@ function UnscoredTable({ items, meta, active, search, refreshing, phone = false 
       ) : (
         <Table data={shown} columns={columns} width="max" verticalAlign="middle" />
       )}
-      {rest > 0 && <Text color="complementary">…и еще {fmtNumber(rest)} – уточните поиск или фильтры, чтобы сузить список.</Text>}
     </Flex>
   );
 }

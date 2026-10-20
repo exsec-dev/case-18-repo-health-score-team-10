@@ -194,7 +194,7 @@ describe("charters carry the rule with a bad -> good example (versions +1)", () 
     expect(all.activity.version).toBe("13");
     expect(all.cicd.version).toBe("14");
     expect(all.code.version).toBe("17");
-    expect(all.documentation.version).toBe("8");
+    expect(all.documentation.version).toBe("9");
     expect(all.issues.version).toBe("14");
     expect(all.security.version).toBe("10");
     expect(all.overview.version).toBe("18");

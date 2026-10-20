@@ -299,6 +299,51 @@ export function ciStabilityClaim(text: string, facts: FactInput[]): string | nul
 const CI_WORD = /(CI|сборк|пайплайн|автоматизац)/i;
 
 /**
+ * Обязательные файлы: имя на карточке, поле `docs.presence` и описательные
+ * названия, которыми модель их заменяет («правила вклада», «карта владельцев»).
+ */
+const DOC_FILES: { name: string; key: string; named: RegExp; described: RegExp | null }[] = [
+  { name: "README", key: "readme", named: /README/i, described: null },
+  { name: "LICENSE", key: "license", named: /LICENSE|COPYING/i, described: /лиценз/i },
+  { name: "CONTRIBUTING", key: "contributing", named: /CONTRIBUTING/i, described: /правил\S* (?:вклада|участия)|руководств\S* для (?:вкладчиков|участников)/i },
+  { name: "CODEOWNERS", key: "codeowners", named: /CODEOWNERS/i, described: /владельц/i },
+];
+
+const ABSENT = /(?<![а-яё])(?:нет|отсутству\S*|не хватает|недоста[её]т\S*|без)(?![а-яё])/i;
+const PRESENT = /на месте|присутству|име[ею]тся|(?<![а-яё])есть(?![а-яё])/i;
+
+/**
+ * «Нет CODEOWNERS» при `docs.presence.codeowners = true`: 20.10.2026 модель в 2 из 3
+ * прогонов называла отсутствующими файлы, которые есть, — хартия требует пункт
+ * «Пробелы», и при полном наборе она их придумывала. Сверка по частям предложения
+ * (как у CI): «нет LICENSE, а CODEOWNERS на месте» — отсутствие только у LICENSE.
+ * Описательное название засчитывается рядом со словом «файл»/«обязательные»:
+ * «README не описывает правила вклада» — о разделе README, а не о файле.
+ * null — противоречия нет или факта о файлах во входе нет.
+ */
+export function docsAbsenceClaim(text: string, facts: FactInput[]): string | null {
+  const presence = facts.find((f) => f.key === "docs.presence")?.value as Record<string, unknown> | undefined;
+  if (presence === undefined || presence === null || typeof presence !== "object") return null;
+  const wrong = new Set<string>();
+  for (const sentence of text.split(/(?<=[.!?])\s+/)) {
+    // «пробелов нет» / «без пробелов» — о полном наборе, а не об отсутствии файла
+    const said = sentence.replace(/(?<![а-яё])(?:пробел\S* нет|нет пробел\S*|без пробел\S*)/gi, "");
+    for (const part of said.split(/\s*[,;]\s*(?:(?:а|но|однако|зато|хотя)\s+)?|\s+(?:а|но|однако|зато|хотя)\s+/i)) {
+      // «пробелов нет: README, LICENSE … на месте» — отсутствие не у файлов
+      if (!ABSENT.test(part) || PRESENT.test(part)) continue;
+      const aboutFiles = /файл|обязательн/i.test(part);
+      for (const d of DOC_FILES) {
+        if (presence[d.key] !== true) continue;
+        if (d.named.test(part) || (aboutFiles && d.described !== null && d.described.test(part))) wrong.add(d.name);
+      }
+    }
+  }
+  return wrong.size === 0
+    ? null
+    : `текст называет отсутствующими ${[...wrong].join(", ")}, а по факту обязательных файлов они есть – называй отсутствующими только файлы со значением false; если на месте все, так и напиши`;
+}
+
+/**
  * Похвала относится к CI, а не к соседу по предложению: слово о CI и похвала — в
  * одной части между «,», «;» и противительными «а», «но», «однако», «зато», «хотя».
  * «Документация подробная и надежная, а CI проходит в 60% запусков» — похвала
@@ -412,6 +457,8 @@ export function validateOutput(input: ValidateInput): ValidateResult {
 
   const ci = ciStabilityClaim(readerText, input.facts);
   if (ci !== null) reasons.push(ci);
+  const docs = docsAbsenceClaim(readerText, input.facts);
+  if (docs !== null) reasons.push(docs);
 
   return {
     ok: reasons.length === 0,

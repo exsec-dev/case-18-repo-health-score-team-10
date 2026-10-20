@@ -359,7 +359,7 @@ function QuotaPanel({ action, q }: { action: AiAction; q: ActionQuotaView }) {
       <div className="rh-quota">
         {head}
         <Flex direction="column" gap={1}>
-          <Text variant="header-1">Без личных лимитов</Text>
+          <Text variant="header-1">{q.global ? "Без личных лимитов" : "Без лимитов"}</Text>
           <Text color="secondary">Включен доступ по паролю</Text>
         </Flex>
         {q.global && (
@@ -508,8 +508,10 @@ function AiLimitsSections() {
               </Flex>
               <Text color="secondary">
                 {data.unlocked
-                  ? "AI-обзоры и проверки активности не ограничены личными лимитами – действует только потолок по паролю."
-                  : "Пароль выдает администратор сервиса. Он снимает личные лимиты AI."}
+                  ? data.overview.global || data.check.global
+                    ? "AI-обзоры и проверки активности не ограничены личными лимитами – действует только потолок по паролю."
+                    : "AI-обзоры и проверки активности не ограничены."
+                  : "Пароль выдает администратор сервиса. Он снимает лимиты AI."}
               </Text>
             </div>
             {data.unlocked ? (

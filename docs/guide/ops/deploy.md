@@ -70,9 +70,9 @@ HealthCraft разворачивается на 1 виртуальной маш�
 | `MAIN_MODEL` | `yandexgpt` | модель; для `zai` по умолчанию `glm-5.3` |
 | `YAGPT_API_KEY`, `YAGPT_FOLDER_ID` | – | API-ключ сервисного аккаунта и ID каталога Yandex Cloud; без ключа модели AI-обзор недоступен |
 | `ZAI_API_KEY` | – | ключ z.ai, если `LLM_PROVIDER=zai` |
-| `AI_OVERVIEW_PER_HOUR`, `AI_OVERVIEW_PER_DAY` | 2, 6 | AI-обзоров на человека в час и в сутки |
-| `AI_CHECK_PER_HOUR`, `AI_CHECK_PER_DAY` | 5, 20 | проверок активности на человека в час и в сутки |
-| `AI_UNLOCK_PASSWORD` | – | пароль снятия личных лимитов AI, не короче 20 символов; нужен `APP_SECRET` |
+| `AI_OVERVIEW_PER_DAY`, `AI_OVERVIEW_PER_HOUR` | 25, – | AI-обзоров на человека в сутки и в час; пусто – без часового лимита |
+| `AI_CHECK_PER_DAY`, `AI_CHECK_PER_HOUR` | 50, – | проверок активности на человека в сутки и в час; пусто – без часового лимита |
+| `AI_UNLOCK_PASSWORD` | – | пароль снятия лимитов AI, не короче 20 символов; нужен `APP_SECRET` |
 | `AI_TOP_AUTO` | `0` | `1` – готовить обзор и проверку для топа рейтинга после нового анализа |
 | `AI_TOP_AUTO_SIZE` | 10 | сколько первых мест рейтинга входит в этот топ |
 | `QUEUE_USER_SCANS_PER_HOUR`, `QUEUE_USER_ACTIVE_MAX` | 10, 2 | запусков анализа на пользователя в час и одновременно |

@@ -101,7 +101,7 @@ describe("безопасность М3 / надежность М1: списан�
     const now = new Date();
     db.query("INSERT INTO jobs (repo_id, status, user_id, trigger_kind, kind, created_at, error) VALUES (?, 'done', 1, 'user', 'check', ?, ?)").run(repoId, now.toISOString(), AI_CACHED_NOTE);
     db.query("INSERT INTO jobs (repo_id, status, user_id, trigger_kind, kind, created_at) VALUES (?, 'done', 1, 'user', 'check', ?)").run(repoId, now.toISOString());
-    expect(aiQuota(db, 1, "check", DEFAULT_AI, now).hour!.used).toBe(1);
+    expect(aiQuota(db, 1, "check", DEFAULT_AI, now).day!.used).toBe(1);
     const job: ClaimedJob = { id: 9, repoId, slug: "f/cachenote", userId: 1, triggerKind: "user", kind: "check", audience: "public", claimedAt: "t", attempts: 1 };
     const cached = await processCheckJob({ db, config: loadConfig(), serverClient: () => null, runFraudCheck: async () => ({ scanId: 1, ok: true, flag: null, signals: null, cached: true, answered: 0 }) } as never, job);
     expect(cached).toBe(AI_CACHED_NOTE);

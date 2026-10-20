@@ -5,7 +5,8 @@
 // Пользователи с паролем не расходуют общий лимит, у них свой аварийный потолок.
 // Не списываются повтор по тому же скану (заявки нет) и заявки, где модель не
 // расходовала кредиты (сбой до модели, провайдер не ответил); отказ валидатора
-// списывается — вызовы модели уже сделаны.
+// списывается — вызовы модели уже сделаны. Час, общий лимит и потолок пароля
+// необязательны: не заданы в env — окна нет (null).
 import type { Database } from "bun:sqlite";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import type { AiActionLimits, AiConfig } from "../config";
@@ -100,12 +101,12 @@ export function aiQuota(db: Database, userId: number, action: AiAction, cfg: AiC
       unlocked,
       hour: null,
       day: null,
-      global: { used: globalUsed(1), limit: cap },
+      global: cap === null ? null : { used: globalUsed(1), limit: cap },
       hourResetAt: null,
       dayResetAt,
     };
   }
-  const hourUsed = count(db, `user_id = ? AND kind = ? AND created_at > ? AND ${CHARGED}`, userId, kind, hourFrom, rejected, legacy);
+  const hourUsed = limits.perHour === null ? 0 : count(db, `user_id = ? AND kind = ? AND created_at > ? AND ${CHARGED}`, userId, kind, hourFrom, rejected, legacy);
   const oldest =
     hourUsed === 0
       ? null
@@ -115,9 +116,9 @@ export function aiQuota(db: Database, userId: number, action: AiAction, cfg: AiC
   return {
     action,
     unlocked,
-    hour: { used: hourUsed, limit: limits.perHour },
+    hour: limits.perHour === null ? null : { used: hourUsed, limit: limits.perHour },
     day: { used: count(db, `user_id = ? AND kind = ? AND created_at >= ? AND ${CHARGED}`, userId, kind, dayFrom, rejected, legacy), limit: limits.perDay },
-    global: { used: globalUsed(0), limit: limits.globalPerDay },
+    global: limits.globalPerDay === null ? null : { used: globalUsed(0), limit: limits.globalPerDay },
     hourResetAt: oldest === null ? null : new Date(Date.parse(oldest) + HOUR_MS).toISOString(),
     dayResetAt,
   };

@@ -461,6 +461,16 @@ async function runRole(
   ];
   let messages = buildMessages(inputBlocks);
   let blocksDropped = false;
+  // вход роли в лог: каждый факт до 300 знаков (лента коммитов – тысячи), размеры
+  // недоверенных блоков – чтобы сверить текст модели с тем, что она получила
+  deps.log?.(
+    `[summary] ${deps.org}/${deps.repo} role=${role}: вход — ${facts.length} фактов, блоков ${inputBlocks.length} (${inputBlocks.map((b) => `${b.length} зн.`).join(", ") || "–"})\n${facts
+      .map((f) => {
+        const v = JSON.stringify(f.value) ?? "null";
+        return `[summary]   ${f.key}: ${v.length > 300 ? `${v.slice(0, 300)}… (${v.length} зн.)` : v}`;
+      })
+      .join("\n")}`,
+  );
 
   // security живет без файловых инструментов (только данные AppSec), но
   // арифметику долей считает калькулятором, а не в уме
@@ -535,7 +545,9 @@ async function runRole(
     }
     const verdict = validateOutput({ role, text, facts, segments: extraSegments?.segments ?? [] });
     if (verdict.ok) {
-      deps.log?.(`[summary] ${deps.org}/${deps.repo} role=${role}: ok ${ms}ms calls=${calls} tools=${tools} chars=${verdict.clean.length}`);
+      deps.log?.(
+        `[summary] ${deps.org}/${deps.repo} role=${role}: ok ${ms}ms calls=${calls} tools=${tools} chars=${verdict.clean.length}\n[summary] принятый текст: ${JSON.stringify(sanitizeUntrusted(verdict.clean))}`,
+      );
       return { ok: true, text, clean: verdict.clean, refs: verdict.refs, retries, ms, calls, tools };
     }
     const lastTry = attempt === ROLE_ATTEMPTS - 1;

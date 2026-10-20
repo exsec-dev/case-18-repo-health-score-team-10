@@ -501,6 +501,18 @@ body {
   border-top: 1px solid var(--g-color-line-generic);
 }
 
+/* футер рейтинга: «Всего: N» прижат вправо и при переносе пагинации, правым
+ * краем — по данным последней колонки: отступ ячейки (12px) и желоб под
+ * полосу прокрутки таблицы. Желоб резервируется и здесь, и у таблицы: на Windows
+ * он 15px, а при накладных полосах (macOS) — 0, и край совпадает везде */
+.rh-rating-foot__total {
+  margin-inline-start: auto;
+  padding-inline-end: var(--g-spacing-3);
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
+  white-space: nowrap;
+}
+
 .rh-fill__content {
   flex: 1;
   min-height: 0;
@@ -512,6 +524,8 @@ body {
  * Стоковый uikit прячет скроллбар контейнера таблицы — здесь он нужен. */
 .rh-table-fill {
   height: 100%;
+  /* место под полосу прокрутки — всегда: по нему выровнено «Всего» в футере */
+  scrollbar-gutter: stable;
 }
 
 .rh-fill__content:has(> .rh-table-fill) {
@@ -861,6 +875,13 @@ body {
 /* справа — сначала подпись, потом кнопка у самого края */
 .rh-check-card_wide .rh-check-card__foot > .g-button {
   order: 1;
+}
+
+/* причина блокировки — под кнопкой, по ее правому краю, как у AI-обзора: без
+ * порядка строка вставала перед кнопкой и уезжала вверх плашки */
+.rh-check-card_wide .rh-check-card__foot .rh-check-foot__why {
+  order: 2;
+  text-align: end;
 }
 
 /* признаки найдены — без подложки (вариант A1, 19.10.2026): желтый на сером давал
@@ -5213,14 +5234,15 @@ button.rh-category:focus-visible {
   padding-bottom: var(--g-spacing-3);
 }
 
-/* заголовок организации — плашка со скруглением, прилипает сама (без поля фона
- * вокруг) и вплотную к списку. Фон чуть светлее страницы, слоем поверх нее —
- * непрозрачный, строки под плашкой не просвечивают. */
+/* заголовок организации — плашка со скруглением и серой обводкой, прилипает сама
+ * (без поля фона вокруг) и вплотную к списку. Фон чуть светлее страницы, слоем
+ * поверх нее — непрозрачный, строки под плашкой не просвечивают. */
 .rh-org-group__title {
   position: sticky;
   z-index: 2;
   top: 0;
   margin: 0;
+  border: 1px solid var(--g-color-line-generic);
   border-radius: var(--g-border-radius-l);
   background:
     linear-gradient(
@@ -5240,9 +5262,10 @@ button.rh-category:focus-visible {
   box-sizing: border-box;
   width: 100%;
   margin: 0;
-  padding: var(--g-spacing-3);
+  padding: calc(var(--g-spacing-3) - 1px);
   border: 0;
-  border-radius: inherit;
+  /* внутри обводки 1px: подсветка наведения повторяет ее скругление */
+  border-radius: calc(var(--g-border-radius-l) - 1px);
   background: none;
   color: inherit;
   font: inherit;

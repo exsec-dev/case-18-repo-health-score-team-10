@@ -252,23 +252,23 @@ export interface Config {
   scan: ScanConfig;
 }
 
-/** Лимиты одного действия AI. */
+/** Лимиты одного действия AI; null — окна нет. */
 export interface AiActionLimits {
   /** на человека за скользящий час */
-  perHour: number;
+  perHour: number | null;
   /** на человека за сутки (календарные, МСК) */
   perDay: number;
   /** на весь сервис за сутки — пользователи без пароля */
-  globalPerDay: number;
+  globalPerDay: number | null;
 }
 
 export interface AiConfig {
   overview: AiActionLimits;
   check: AiActionLimits;
-  /** аварийный потолок обзоров в сутки для пользователей с паролем (на весь сервис) */
-  unlockedOverviewPerDay: number;
+  /** аварийный потолок обзоров в сутки для пользователей с паролем (на весь сервис); null — нет */
+  unlockedOverviewPerDay: number | null;
   /** то же для проверок оценки */
-  unlockedCheckPerDay: number;
+  unlockedCheckPerDay: number | null;
   /** пароль неограниченного доступа — секрет .env (AI_UNLOCK_PASSWORD); null — функции нет */
   unlockPassword: string | null;
   /** состояние пароля для строки старта: задан / не задан / короче UNLOCK_PASSWORD_MIN (функция выключена) */
@@ -281,11 +281,13 @@ export interface AiConfig {
   topAutoSize: number;
 }
 
+// 20.10.2026: только суточный лимит на человека; часового, общего и потолка
+// по паролю нет, пока их не задали в env
 export const DEFAULT_AI: AiConfig = {
-  overview: { perHour: 2, perDay: 6, globalPerDay: 30 },
-  check: { perHour: 5, perDay: 20, globalPerDay: 60 },
-  unlockedOverviewPerDay: 100,
-  unlockedCheckPerDay: 100,
+  overview: { perHour: null, perDay: 25, globalPerDay: null },
+  check: { perHour: null, perDay: 50, globalPerDay: null },
+  unlockedOverviewPerDay: null,
+  unlockedCheckPerDay: null,
   unlockPassword: null,
   unlockStatus: "off",
   unlockKey: null,
