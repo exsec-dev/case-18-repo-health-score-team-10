@@ -33,6 +33,7 @@ curl https://health-craft.ru/api/v1/repos/<org>/<repo>
   "language": "TypeScript",
   "likes": 14,
   "healthcraftIndex": 61,
+  "codeEmpty": false,
   "indexCoverage": 1,
   "categories": {
     "documentation": 47.95,
@@ -50,6 +51,7 @@ curl https://health-craft.ru/api/v1/repos/<org>/<repo>
 |---|---|
 | `org`, `repo`, `title`, `language`, `likes` | имя, название, язык и оценка реакций из каталога SourceCraft |
 | `healthcraftIndex` | HealthCraft Index, целое 0-100; `null` – оценки нет |
+| `codeEmpty` | `true` – в репозитории нет кода: индекс 0 значит «оценивать нечего», а не зону риска |
 | `indexCoverage` | полнота данных: доля веса категорий с данными, от 0 до 1 |
 | `categories` | баллы Документации, Активности, Задач и Состояния кода без округления; `null` – нет данных |
 | `modelVersion` | версия модели оценки |
@@ -91,7 +93,7 @@ Repo Health Score, CI/CD и Безопасности в публичном API �
 [![HealthCraft Index](https://health-craft.ru/api/v1/repos/<org>/<repo>/badge.svg?show=rank,delta)](https://health-craft.ru/repo/<org>/<repo>)
 ```
 
-Цвет числа зависит от зоны: зеленый для 70-100, желтый для 40-69, красный для 0-39. Если оценки нет, бейдж показывает `n/a` серым, без зоны и динамики. У категории без данных вместо балла стоит `n/a`, а шкала пустая.
+Цвет числа зависит от зоны: зеленый для 70-100, желтый для 40-69, красный для 0-39. Если оценки нет, бейдж показывает `n/a` серым, без зоны и динамики. Если в репозитории нет кода, число 0 тоже серое, а с чипом [[Зона]] вместо зоны стоит «нет кода». У категории без данных вместо балла стоит `n/a`, а шкала пустая.
 
 ### Параметры бейджа {#parametry}
 
