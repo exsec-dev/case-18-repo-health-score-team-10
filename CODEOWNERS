@@ -1,0 +1,54 @@
+# CODEOWNERS – кто отвечает за код HealthCraft и проверяет предложения изменений.
+#
+# Формат строки: шаблон пути, затем владельцы через пробел. Если к файлу подходят
+# несколько строк, действует последняя. Логины – в SourceCraft.
+# Команда MISIS_MSc (ЛЦТ-2026): @ekaterinaprozhirko, @extended2008, @kibitkina-p.
+# Строки по каталогам – по главным авторам изменений в истории git.
+
+# Владельцы по умолчанию – весь репозиторий
+* @ekaterinaprozhirko @extended2008 @kibitkina-p
+
+# Методика оценки: веса, формулы, рекомендации, пересчет; журнал версий модели
+/src/score/ @ekaterinaprozhirko @extended2008
+/docs/guide/method/ @ekaterinaprozhirko @extended2008
+/docs/methodology.md @ekaterinaprozhirko @extended2008
+
+# Сбор фактов: каталог, REST SourceCraft, AppSec, git-клон
+/src/collectors/ @ekaterinaprozhirko @extended2008
+
+# Очередь заявок, планировщик обхода каталога, исполнители
+/src/jobs/ @ekaterinaprozhirko @extended2008
+
+# AI-обзор, проверка на накрутку и инструкции моделям
+/src/summary/ @ekaterinaprozhirko @kibitkina-p
+/prompts/ @ekaterinaprozhirko @kibitkina-p
+
+# Вход через Яндекс ID, сессии, токены пользователей
+/src/auth/ @ekaterinaprozhirko
+
+# HTTP API, сервер, настройки
+/src/api/ @ekaterinaprozhirko @extended2008
+/src/server.ts @ekaterinaprozhirko @extended2008
+/src/config.ts @ekaterinaprozhirko @extended2008
+/.env.example @ekaterinaprozhirko @extended2008
+
+# Интерфейс, отчеты, заготовки файлов, раздел документации
+/src/web/ @ekaterinaprozhirko
+/src/report/ @ekaterinaprozhirko
+/src/fix/ @ekaterinaprozhirko
+/src/docs/ @ekaterinaprozhirko
+/docs/ @ekaterinaprozhirko
+/README.md @ekaterinaprozhirko
+
+# Контейнеры, выкладка, CI
+/deploy/ @ekaterinaprozhirko
+/Dockerfile @ekaterinaprozhirko
+/.sourcecraft/ @ekaterinaprozhirko
+
+# Тесты и служебные скрипты
+/tests/ @ekaterinaprozhirko @extended2008
+/scripts/ @ekaterinaprozhirko @extended2008
+
+# Этот файл и порядок работы меняет вся команда
+/CODEOWNERS @ekaterinaprozhirko @extended2008 @kibitkina-p
+/CONTRIBUTING.md @ekaterinaprozhirko @extended2008 @kibitkina-p

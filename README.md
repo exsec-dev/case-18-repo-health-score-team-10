@@ -342,6 +342,7 @@ bun test --timeout 30000
 | [docs/guide/](docs/guide/) | те же страницы в Markdown, порядок – [toc.md](docs/guide/toc.md): начало работы, руководство пользователя, методика оценки, устройство сервиса, развертывание, ограничения |
 | [docs/guide/method/](docs/guide/method/) | методика оценки: формула и веса, метрики, «нет данных», рекомендации, устойчивость к накрутке; журнал версий модели – [docs/methodology.md](docs/methodology.md) |
 | [.env.example](.env.example) | все переменные окружения с пояснениями |
+| [CONTRIBUTING.md](CONTRIBUTING.md), [CODEOWNERS](CODEOWNERS) | как сообщить об ошибке и предложить изменение, проверки и стиль кода; кто отвечает за каталоги и проверяет изменения |
 | [deploy/compose.yaml](deploy/compose.yaml), [deploy/Caddyfile](deploy/Caddyfile) | топология стенда и настройки прокси |
 | [docs/api-spec/](docs/api-spec/) | спецификации REST API SourceCraft и AppSec API, по которым работают сборщики |
 | [docs/lct-case.md](docs/lct-case.md), [docs/ТЗ-sourcecraft.pdf](docs/ТЗ-sourcecraft.pdf) | описание кейса и техническое задание |
