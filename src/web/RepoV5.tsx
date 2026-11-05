@@ -63,6 +63,7 @@ import { bridgeOf, categoryDetails, categoryPhrase, categoryTitle, changeLine, d
 import { BADGE_CHIPS, SLOT_EMPTY, aiNotesCaption, badgeCode, historyByTime, historyDomain, scoreHistoryView, type BadgeChip, type BadgeFormat } from "./slots";
 import type { AiNoteHistoryItem, AiNotesResponse, HistoryPoint, HistoryResponse, ScoreChange } from "../summary/history-contract";
 import { evolutionTooEarly } from "../summary/history-contract";
+import { DEMO } from "./base";
 
 type Card = RepoCard;
 type CardAi = NonNullable<Card["ai"]>;
@@ -376,7 +377,7 @@ const CHECK_ICON: Record<FraudCheckState["kind"], { data: typeof Shield; color: 
 export function checkCardText(st: FraudCheckState, ai: CardAi, loggedIn: boolean): { title: string; meta: string | null; reason: string | null } {
   switch (st.kind) {
     case "none":
-      return { title: "Не проверялась", meta: loggedIn ? null : "Запускает вошедший пользователь", reason: null };
+      return { title: "Не проверялась", meta: loggedIn ? null : DEMO ? "В демо недоступна" : "Запускает вошедший пользователь", reason: null };
     case "active":
       return { title: "Идет проверка", meta: null, reason: null };
     case "clean":
@@ -616,7 +617,9 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
               ? publicVersion
                 ? "Модель коротко перескажет оценку по 4 открытым категориям. На оценку не влияет."
                 : "Модель коротко перескажет оценку и разберет каждую категорию. На оценку не влияет."
-              : card.repo.visibility === "public"
+              : DEMO
+                ? "В демо AI-обзор недоступен. На оценку не влияет."
+                : card.repo.visibility === "public"
                 ? "Обзор может сформировать любой вошедший пользователь. На оценку не влияет."
                 : "Обзор запускает владелец репозитория. На оценку не влияет."}
           </Text>
@@ -726,7 +729,7 @@ export function AiOverviewSection({ card, org, repo, onChanged, loggedIn, quota,
           </Flex>
         ) : ai === null || (!hasOverview && specialists.length === 0) ? (
           <Text variant="body-1" color="complementary">
-            {canRun ? "Обзора пока нет." : card.repo.visibility === "public" ? "Обзора пока нет – его может сформировать любой вошедший пользователь." : "Обзора пока нет – его запускает владелец репозитория."}
+            {canRun ? "Обзора пока нет." : DEMO ? "Обзора нет – в демо AI-обзор недоступен." : card.repo.visibility === "public" ? "Обзора пока нет – его может сформировать любой вошедший пользователь." : "Обзора пока нет – его запускает владелец репозитория."}
           </Text>
         ) : hasOverview ? (
           <Collapsible resetKey={`${ai.scanId}`}>

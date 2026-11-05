@@ -20,6 +20,10 @@ import "./layout.css";
 // в dev Bun ставит наши файлы ПЕРВЫМИ — рантайм-страховка добавляет их копии в конец
 // <head>; в production она ничего не делает
 import { ourStylesLast } from "./cssOrder";
+import { installBasePath } from "./base";
+
+// под путем сервиса (BASE_PATH) – префикс у fetch, истории и ссылок, до первой отрисовки
+installBasePath();
 
 ourStylesLast();
 

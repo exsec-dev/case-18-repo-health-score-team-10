@@ -93,8 +93,13 @@ import { listSourcecraftRepos, ORG_INFO_MAX, orgInfoOf, tokenRepoEntries } from 
 import { makeTokenRepoCache, membershipIn } from "./api/token-repos";
 import { needsRescore, runStartupRescore, RESCORE_ERROR } from "./score/rescore";
 import index from "./web/index.html";
+import { buildFrontend, underBasePath } from "./frontend-build";
 
 const config = loadConfig();
+// под путем (BASE_PATH) и в демо интерфейс собирается на старте: адреса файлов с путем,
+// в <head> – метки пути и демо (src/frontend-build.ts); иначе – HTML-импорт Bun как раньше
+const basePath = config.basePath ?? "";
+const frontend = basePath !== "" || config.demo === true ? await buildFrontend(basePath, config.demo === true) : null;
 // Скользящие окна лимитов, ключ — id пользователя.
 const patProbes = new Map<number, number[]>();
 const favoriteChecks = new Map<number, number[]>();
@@ -1485,8 +1490,15 @@ const routes = {
     "/api/*": () => notFound("такого адреса нет"),
     // catch-all фронтенда: маршруты /repo/{org}/{repo} живут в History API,
     // прямая ссылка и F5 на карточке должны отдавать тот же бандл
-    "/*": index,
+    "/*": frontend
+      ? () => new Response(frontend.html, { headers: { "content-type": "text/html;charset=utf-8", "cache-control": "no-cache" } })
+      : index,
   } satisfies NonNullable<RoutesTable>;
+// файлы собранного интерфейса: имена с хешем содержимого, кэш навсегда
+const assetRoutes: Record<string, () => Response> = {};
+for (const [path, asset] of frontend?.assets ?? []) {
+  assetRoutes[path] = () => new Response(asset.body, { headers: { "content-type": asset.type, "cache-control": "public, max-age=31536000, immutable" } });
+}
 // Заголовки защиты на HTML-бандл не ставятся: маршрут HTML-импорта Bun не дает
 // управлять ответом (HTMLBundle непрозрачен и из обработчика не возвращается).
 // JSON API закрыт целиком, фрейминг страницы закрывает reverse-proxy стенда.
@@ -1497,7 +1509,7 @@ const server = Bun.serve({
   // живыми запросами (PUT PAT: проба и посев, карточка с PAT, callback) бывают
   // дольше; 120 с — с запасом
   idleTimeout: 120,
-  routes: hardenRoutes(routes),
+  routes: hardenRoutes(underBasePath({ ...assetRoutes, ...routes }, basePath)) as typeof routes,
   fetch() {
     const res = new Response("not found", { status: 404 });
     for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.headers.set(k, v);
@@ -1631,7 +1643,8 @@ function shutdown(signal: string): void {
 process.on("SIGTERM", () => shutdown("SIGTERM"));
 process.on("SIGINT", () => shutdown("SIGINT"));
 
-console.log(`repo-health слушает http://127.0.0.1:${server.port}`);
+console.log(`repo-health слушает http://127.0.0.1:${server.port}${basePath}/`);
+if (config.demo) console.log("  демо: только просмотр – вход, анализы, AI и обращения к SourceCraft выключены");
 console.log(`  llm: ${config.llm.provider} (main=${config.llm.mainModel}, side=${config.llm.sideModel})`);
 console.log(`  sourcecraft token: ${config.sourcecraftToken ? "есть" : "НЕТ (зонд 401)"}`);
 console.log(`  scheduler: интервал ${Math.round(config.scheduler.intervalMs / 60000)} мин, форс-полный ${config.scheduler.fullRescan ? "ВКЛ" : "выкл"}`);

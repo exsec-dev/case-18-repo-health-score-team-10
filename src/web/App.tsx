@@ -17,6 +17,10 @@ import { navigate, useRoute } from "./router";
 import { AppState, useSession } from "./session";
 import { Page, Shell, type Section } from "./Shell";
 import { EmptyState } from "./ui";
+import { DEMO } from "./base";
+import type { Route } from "./router";
+
+const NOT_FOUND: Route = { kind: "not-found" };
 
 /**
  * Сбой отрисовки экрана (неожиданный ответ сервера, поломанные данные) не гасит
@@ -66,7 +70,9 @@ export function App() {
 }
 
 function Routes() {
-  const route = useRoute();
+  const fullRoute = useRoute();
+  // демо: личных разделов нет – их адреса ведут на «не найдена»
+  const route = DEMO && (fullRoute.kind === "me" || fullRoute.kind === "repos" || fullRoute.kind === "settings") ? NOT_FOUND : fullRoute;
   // слаги SourceCraft строчные: адрес с заглавными («/repo/Org/Repo») давал «не найден» —
   // ведем на тот же адрес строчными, без новой записи истории
   const repoOrg = route.kind === "repo" ? route.org : null;

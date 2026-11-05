@@ -3,6 +3,7 @@
 // Состояние фильтров рейтинга живёт в query-строке, поэтому «маршрут» —
 // это pathname + search целиком: ссылкой можно поделиться.
 import { useSyncExternalStore, type MouseEvent } from "react";
+import { currentPath } from "./base";
 
 export type Route =
   | { kind: "rating"; search: string }
@@ -83,7 +84,7 @@ function subscribe(onChange: () => void): () => void {
   };
 }
 
-const snapshot = (): string => `${window.location.pathname}${window.location.search}`;
+const snapshot = (): string => `${currentPath()}${window.location.search}`;
 
 /**
  * Один параметр query как состояние — для таба карточки (`?tab=recommendations`).

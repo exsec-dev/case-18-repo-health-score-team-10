@@ -33,9 +33,10 @@ COPY deploy/entrypoint.sh /usr/local/bin/hc-entrypoint
 RUN chmod 755 /usr/local/bin/hc-entrypoint
 EXPOSE 8418
 # живость процесса, не состояние сервиса: /api/health отвечает 200 и при "ok": false
-# (подробно – в deploy/compose.yaml). PORT у ролей разный, поэтому порт берется из окружения
+# (подробно – в deploy/compose.yaml). PORT у ролей разный, поэтому порт берется из окружения,
+# путь сервиса – из BASE_PATH (демо под /healthcraft)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-  CMD bun -e "fetch('http://127.0.0.1:'+(process.env.PORT||8418)+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD bun -e "fetch('http://127.0.0.1:'+(process.env.PORT||8418)+(process.env.BASE_PATH||'').replace(/\/+$/,'')+'/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 USER bun
 ENTRYPOINT ["/usr/local/bin/hc-entrypoint"]
 CMD ["bun", "run", "src/server.ts"]

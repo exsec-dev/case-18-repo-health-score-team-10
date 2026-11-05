@@ -1,0 +1,35 @@
+# HealthCraft – демо: только просмотр сохраненной базы под путем /healthcraft.
+#
+# Один процесс web без ключей: обхода каталога, анализов, входа и AI нет, в SourceCraft
+# сервис не ходит. HTTPS и домен – у обратного прокси на сервере (deploy/demo/README.md).
+#
+#   HC_DEMO_DIR  – каталог демо на сервере (по умолчанию /srv/healthcraft-demo), база –
+#                  в data/repo-health.db, владелец каталога data – uid 1000
+#   HC_DEMO_PORT – порт на 127.0.0.1 для прокси (по умолчанию 8418)
+#   HC_DEMO_URL  – публичный адрес демо (по умолчанию https://exsec.dev/healthcraft)
+#
+# Запуск из корня репозитория: docker compose -f deploy/demo/compose.yaml up -d --build
+name: healthcraft-demo
+
+services:
+  web:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    image: healthcraft:demo
+    restart: unless-stopped
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      DEMO_MODE: "1"
+      BASE_PATH: /healthcraft
+      PUBLIC_BASE_URL: ${HC_DEMO_URL:-https://exsec.dev/healthcraft}
+      PORT: "8418"
+    volumes:
+      - ${HC_DEMO_DIR:-/srv/healthcraft-demo}/data:/data
+    ports:
+      - "127.0.0.1:${HC_DEMO_PORT:-8418}:8418"
+    # в работе ~200 МБ, на старте до ~420 МБ: интерфейс собирается при запуске
+    mem_limit: 640m
+    cpus: 0.5

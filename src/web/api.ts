@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ApiError, MetaResponse, RatingResponse, RepoCard } from "../api/repos";
 import type { MyRepoEntry, OrgInfo, ScRepoLite, TokenRepoEntry } from "../api/me";
 import { errorText } from "./format";
+import { withBase } from "./base";
 
 export type { MetaResponse, RatingResponse, RepoCard, MyRepoEntry, TokenRepoEntry };
 
@@ -106,7 +107,7 @@ export async function logout(): Promise<void> {
     throw networkError();
   }
   if (!res.ok) throw await errorOf("/auth/logout", res);
-  window.location.assign("/");
+  window.location.assign(withBase("/"));
 }
 
 export async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {

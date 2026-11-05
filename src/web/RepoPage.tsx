@@ -92,6 +92,7 @@ import { repoWebUrl } from "../api/slug-input";
 import { plural } from "../report/submetrics";
 import { AiOverviewSection, BadgeButton, BadgeDialog, type BadgeTarget, CategoryAiGlyph, CategoryAiMark, CategoryAiNote, ActivityCheckCard, HistorySection, OPEN_CATEGORY_EVENT, categoryAiNote, categoryAnchor, useAiQuota } from "./RepoV5";
 import { AsideSection, Collapse, DialogName, EmptyState, SheetFocus, LanguageName, Meta, MetaItem, MethodLink, ModelVersion, RepoAvatar, RepoSlug, ScoreLegend, SkeletonRows, VisibilityPill } from "./ui";
+import { DEMO } from "./base";
 
 type Card = RepoCard;
 type Evidence = Card["evidence"][number];
@@ -2858,6 +2859,8 @@ function FavoriteStar({ org, repo, visibility, doneKey, loggedIn }: { org: strin
         <Icon data={state === "on" ? StarFill : Star} size={14} />
       </Button>
   );
+  // демо без входа: избранного нет
+  if (DEMO) return null;
   return (
     <Flex direction="column" gap={1}>
       {/* выключенная кнопка не получает наведения, и `title` на ней не показывается —

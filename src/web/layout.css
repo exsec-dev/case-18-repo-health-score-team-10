@@ -6120,3 +6120,51 @@ h3,
   width: 14px;
   height: 14px;
 }
+
+/* демо: пометка на месте входа в rail (и в ActionBar на телефоне) */
+.rh-demo-note {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  height: 40px;
+  padding: 0 var(--g-spacing-3);
+  border-radius: var(--g-border-radius-l);
+  background: var(--g-color-base-warning-light);
+  cursor: default;
+}
+
+.rh-demo-note_compact {
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  align-items: center;
+}
+
+.rh-demo-note__badge {
+  font-weight: 500;
+  font-size: var(--g-text-body-1-font-size);
+  line-height: 1.2;
+  color: var(--g-color-text-warning-heavy);
+}
+
+.rh-demo-note_compact .rh-demo-note__badge {
+  font-size: var(--g-text-caption-1-font-size);
+}
+
+.rh-demo-note__text {
+  font-size: var(--g-text-caption-2-font-size);
+  line-height: 1.2;
+  color: var(--g-color-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rh-demo-note__badge_bar {
+  display: inline-block;
+  padding: 2px var(--g-spacing-2);
+  border-radius: var(--g-border-radius-m);
+  background: var(--g-color-base-warning-light);
+}

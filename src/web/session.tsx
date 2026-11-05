@@ -15,6 +15,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import type { MyJob } from "../api/me";
 import { navigate, repoHref } from "./router";
 import { SESSION_LOST, useJson, useLatest, useVisible, type AsyncState, type MeResponse } from "./api";
+import { currentPath } from "./base";
 import {
   expectJob,
   finishedToast,
@@ -205,7 +206,7 @@ function AnalysisState({
           // из тоста итога — сразу к карточке, если зритель еще не на ней
           const [org, repo] = job.slug.split("/");
           const href = org && repo ? repoHref(org, repo) : null;
-          const here = href !== null && window.location.pathname === href;
+          const here = href !== null && currentPath() === href;
           toaster.add({
             name: `analysis-finished:${job.jobId}`,
             theme: t.theme,

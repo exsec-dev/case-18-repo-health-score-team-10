@@ -216,6 +216,14 @@ export function apiBaseFromEnv(env: Record<string, string>, name: string, fallba
 
 export interface Config {
   port: number;
+  /**
+   * Демо (DEMO_MODE=1): только просмотр сохраненной базы. Ключи SourceCraft, Я ID,
+   * сессий и моделей игнорируются, роль процесса – всегда web, интерфейс прячет
+   * вход и личные разделы.
+   */
+  demo?: boolean;
+  /** Путь сервиса под общим доменом без завершающего «/», например `/healthcraft` (BASE_PATH); "" – корень. */
+  basePath?: string;
   /** роль процесса — web | rating | all (очереди разделены) */
   processRole: "web" | "rating" | "all";
   api: ApiConfig;
@@ -452,8 +460,34 @@ export function llmCallTimeoutMsFromEnv(env: Record<string, string | undefined>)
   return envInt(env as Record<string, string>, "LLM_CALL_TIMEOUT_MS") ?? DEFAULT_LLM_CALL_TIMEOUT_MS;
 }
 
+/** Ключи, которые демо не читает: без них нет входа, анализов, AI и обращений к SourceCraft. */
+const DEMO_IGNORED_ENV = [
+  "SOURCECRAFT_TOKEN",
+  "APP_SECRET",
+  "YA_CLIENT_ID",
+  "YA_CLIENT_SECRET",
+  "YAGPT_API_KEY",
+  "YAGPT_FOLDER_ID",
+  "ZAI_API_KEY",
+  "AI_UNLOCK_PASSWORD",
+  "AI_TOP_AUTO",
+] as const;
+
+/** BASE_PATH: `/healthcraft` – путь сервиса под общим доменом; пусто – корень. */
+export function basePathFromEnv(env: Record<string, string | undefined>): string {
+  const raw = (env.BASE_PATH ?? "").trim().replace(/\/+$/, "");
+  if (raw === "") return "";
+  if (!/^(\/[a-z0-9._-]+)+$/i.test(raw)) throw new Error(`BASE_PATH: нужен путь вида /healthcraft – получено «${raw}»`);
+  return raw;
+}
+
 export function loadConfig(): Config {
   const env = { ...envFile(), ...process.env } as Record<string, string>;
+  const demo = envBool(env, "DEMO_MODE") ?? false;
+  if (demo) {
+    for (const key of DEMO_IGNORED_ENV) delete env[key];
+    env.PROCESS_ROLE = "web";
+  }
   const scan = scanFromEnv(env);
   const provider = env.LLM_PROVIDER === "zai" ? "zai" : "yandex";
   // для yandex — Qwen3.6-35B-A3B в Yandex AI Studio, (до 20.10.2026 — yandexgpt)
@@ -467,6 +501,8 @@ export function loadConfig(): Config {
       : appSecretRaw;
   return {
     port: Number(env.PORT) > 0 ? Number(env.PORT) : 8418,
+    demo,
+    basePath: basePathFromEnv(env),
     // как остальные переменные – из .env и окружения процесса (окружение важнее)
     processRole: (["all", "web", "rating"] as const).includes(env.PROCESS_ROLE as "all" | "web" | "rating")
       ? (env.PROCESS_ROLE as "all" | "web" | "rating")

@@ -18,6 +18,7 @@ import { HealthCraftMark, PRODUCT_NAME } from "./logo";
 import { scrollBehavior, useAppTheme, useMediaQuery, useRailCompact, type AppTheme } from "./prefs";
 import { linkProps, loginHref, navigate } from "./router";
 import { COMPARE_SET_EVENT, lastCompareSet } from "./compareReturn";
+import { currentPath, DEMO, withBase } from "./base";
 
 export type Section = "rating" | "repos" | "me" | "compare" | "settings" | "docs" | null;
 
@@ -38,6 +39,9 @@ const SECTIONS: SectionDef[] = [
   { id: "repos", title: "Мои репозитории", href: "/repos", icon: Archive },
   { id: "me", title: "Избранное", href: "/me", icon: Bookmark },
 ];
+
+/** демо без входа: личных разделов нет */
+const VISIBLE_SECTIONS = DEMO ? SECTIONS.filter((s) => s.id !== "repos" && s.id !== "me") : SECTIONS;
 
 const GlobalActionsContext = createContext<ReactNode>(null);
 /** телефон: открыть меню разделов (кнопка в ActionBar страницы); null — меню всегда видно */
@@ -121,7 +125,7 @@ export function Shell({
     }
   });
 
-  const menuItems: AsideHeaderItem[] = SECTIONS.map((s) => {
+  const menuItems: AsideHeaderItem[] = VISIBLE_SECTIONS.map((s) => {
     // у «Сравнения» — сколько репозиториев в наборе: тихой цифрой справа и в подписи узкого rail
     const count = s.id === "compare" && compareCount > 0 ? compareCount : null;
     return {
@@ -144,7 +148,7 @@ export function Shell({
     enableTooltip: false,
     itemWrapper: (params, makeItem, opts) =>
       opts.compact ? (
-        <RailItem id={s.id} title={s.title} count={count} tips={tips} withBackdrop={s.id === SECTIONS[0]!.id}>
+        <RailItem id={s.id} title={s.title} count={count} tips={tips} withBackdrop={s.id === VISIBLE_SECTIONS[0]!.id}>
           {makeItem(params)}
         </RailItem>
       ) : (
@@ -399,16 +403,18 @@ function RailFooter({ me, meLoading, compact, section }: { me: MeResponse | null
         {...tip("Документация")}
         onItemClick={(_item, _collapsed, e) => followLink(e, "/docs")}
       />
-      <FooterItem
-        id="settings"
-        title="Настройки"
-        icon={Gear}
-        href="/settings"
-        current={section === "settings"}
-        regularSize
-        {...tip("Настройки")}
-        onItemClick={(_item, _collapsed, e) => followLink(e, "/settings")}
-      />
+      {!DEMO && (
+        <FooterItem
+          id="settings"
+          title="Настройки"
+          icon={Gear}
+          href="/settings"
+          current={section === "settings"}
+          regularSize
+          {...tip("Настройки")}
+          onItemClick={(_item, _collapsed, e) => followLink(e, "/settings")}
+        />
+      )}
       <FooterItem
         id="theme"
         title={themeTitle}
@@ -440,9 +446,24 @@ function RailFooter({ me, meLoading, compact, section }: { me: MeResponse | null
       )}
       <div className={compact ? "rh-rail-account rh-rail-account_compact" : "rh-rail-account"}>
         {/* пока /api/me не ответил, вошедший видел «Войти», и низ rail перестраивался */}
-        {me?.login ? <RailUser me={me} /> : meLoading ? <Skeleton className="rh-rail-account__skeleton" /> : <LoginButton compact={compact} />}
+        {DEMO ? <DemoNote compact={compact} /> : me?.login ? <RailUser me={me} /> : meLoading ? <Skeleton className="rh-rail-account__skeleton" /> : <LoginButton compact={compact} />}
       </div>
     </>
+  );
+}
+
+const DEMO_TITLE = "Демо с ограниченной функциональностью";
+const DEMO_DESCRIPTION = "Снимок 1000 репозиториев на ноябрь 2026. Вход, анализ по кнопке и AI-обзоры отключены.";
+
+/** Демо: на месте входа в rail – пометка, пояснение в подсказке. */
+function DemoNote({ compact }: { compact: boolean }) {
+  return (
+    <ActionTooltip title={DEMO_TITLE} description={DEMO_DESCRIPTION} placement="right">
+      <div className={compact ? "rh-demo-note rh-demo-note_compact" : "rh-demo-note"} tabIndex={0} aria-label={`${DEMO_TITLE}. ${DEMO_DESCRIPTION}`}>
+        <span className="rh-demo-note__badge">Демо</span>
+        {!compact && <span className="rh-demo-note__text">данные на ноябрь 2026</span>}
+      </div>
+    </ActionTooltip>
   );
 }
 
@@ -452,6 +473,8 @@ function RailFooter({ me, meLoading, compact, section }: { me: MeResponse | null
  * ей ширину по тексту и полную подпись.
  */
 export function LoginButton({ compact, inline = false }: { compact: boolean; inline?: boolean }) {
+  // демо: входа нет
+  if (DEMO) return null;
   const button = (
     <Button
       view="action"
@@ -464,7 +487,7 @@ export function LoginButton({ compact, inline = false }: { compact: boolean; inl
       onClick={(e: MouseEvent<HTMLElement>) => {
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
         e.preventDefault();
-        window.location.assign(loginHref(window.location.pathname, window.location.search));
+        window.location.assign(withBase(loginHref(currentPath(), window.location.search)));
       }}
       aria-label="Войти через Я ID"
       // узкий rail: квадрат 36×36 — ширина не зависит от колонки футера
@@ -725,6 +748,17 @@ export function Page({ crumbs, actions, aside, asideDrawer = false, asideColumnF
               </Breadcrumbs>
             </ActionBar.Item>
           </ActionBar.Group>
+          {DEMO && openMenu !== null && (
+            <ActionBar.Group pull="right">
+              <ActionBar.Item>
+                <ActionTooltip title={DEMO_TITLE} description={DEMO_DESCRIPTION}>
+                  <span className="rh-demo-note__badge rh-demo-note__badge_bar" tabIndex={0} aria-label={`${DEMO_TITLE}. ${DEMO_DESCRIPTION}`}>
+                    Демо
+                  </span>
+                </ActionTooltip>
+              </ActionBar.Item>
+            </ActionBar.Group>
+          )}
           {barActions && (
             <ActionBar.Group pull="right">
               <ActionBar.Item>{barActions}</ActionBar.Item>
