@@ -1,0 +1,50 @@
+# HealthCraft – демо на exsec.dev/healthcraft без Docker: Bun на 127.0.0.1:8418,
+# nginx проксирует /healthcraft (deploy/demo/nginx-healthcraft.conf).
+# Все файлы – в /srv/exsec/healthcraft: bin/bun, app/ (код ветки demo), data/ (база),
+# tmp/. Юнит подключается ссылкой: systemctl link /srv/exsec/healthcraft/app/deploy/demo/healthcraft-demo.service
+[Unit]
+Description=HealthCraft demo
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=deploy
+Group=deploy
+WorkingDirectory=/srv/exsec/healthcraft/app
+Environment=NODE_ENV=production
+Environment=DEMO_MODE=1
+Environment=BASE_PATH=/healthcraft
+Environment=HOST=127.0.0.1
+Environment=PORT=8418
+Environment=PUBLIC_BASE_URL=https://exsec.dev/healthcraft
+Environment=DATA_DIR=/srv/exsec/healthcraft/data
+Environment=TMPDIR=/srv/exsec/healthcraft/tmp
+# кэши Bun – внутри каталога проекта, не в домашнем каталоге
+Environment=HOME=/srv/exsec/healthcraft/tmp
+Environment=BUN_INSTALL_CACHE_DIR=/srv/exsec/healthcraft/tmp/bun-cache
+Environment=BUN_RUNTIME_TRANSPILER_CACHE_PATH=0
+ExecStart=/srv/exsec/healthcraft/bin/bun run src/server.ts
+Restart=always
+RestartSec=5
+# в работе ~200 МБ, на старте больше: интерфейс собирается при запуске
+MemoryMax=600M
+CPUQuota=50%
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/srv/exsec/healthcraft/data /srv/exsec/healthcraft/tmp
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=true
+LockPersonality=true
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

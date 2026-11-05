@@ -216,6 +216,8 @@ export function apiBaseFromEnv(env: Record<string, string>, name: string, fallba
 
 export interface Config {
   port: number;
+  /** адрес, на котором слушает сервер (HOST); по умолчанию – все адреса машины */
+  host?: string;
   /**
    * Демо (DEMO_MODE=1): только просмотр сохраненной базы. Ключи SourceCraft, Я ID,
    * сессий и моделей игнорируются, роль процесса – всегда web, интерфейс прячет
@@ -501,6 +503,7 @@ export function loadConfig(): Config {
       : appSecretRaw;
   return {
     port: Number(env.PORT) > 0 ? Number(env.PORT) : 8418,
+    host: env.HOST && env.HOST.trim() !== "" ? env.HOST.trim() : undefined,
     demo,
     basePath: basePathFromEnv(env),
     // как остальные переменные – из .env и окружения процесса (окружение важнее)

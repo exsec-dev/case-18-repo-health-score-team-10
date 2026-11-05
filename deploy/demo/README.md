@@ -63,6 +63,31 @@
 Обновление – `git pull` в `/srv/healthcraft-demo/app` и та же команда `up -d --build`.
 База не меняется: обхода каталога в демо нет.
 
+## Выкладка без Docker (exsec.dev)
+
+На exsec.dev демо работает без Docker, и все его файлы лежат в `/srv/exsec/healthcraft`:
+
+| Путь | Что там |
+|---|---|
+| `bin/bun` | Bun 1.4.2 для linux-x64 |
+| `app/` | код ветки `demo` и зависимости |
+| `data/repo-health.db` | база демо |
+| `tmp/` | временные файлы и кэш Bun |
+
+Снаружи каталога – только ссылки и nginx:
+- ссылка на юнит [`healthcraft-demo.service`](healthcraft-demo.service) в `/etc/systemd/system`, ее создает `systemctl link`;
+- фрагмент [`nginx-healthcraft.conf`](nginx-healthcraft.conf) в `/etc/nginx/snippets/healthcraft.conf`;
+- строка `include snippets/healthcraft.conf;` в `server` сайта exsec.dev.
+
+Сервис слушает только `127.0.0.1:8418` (`HOST`), работает от пользователя `deploy` с
+лимитами 600 МБ памяти и половины ядра.
+
+Обновление кода с машины разработчика, из корня репозитория:
+
+```bash
+git archive demo | ssh root@exsec.dev 'tar -x -C /srv/exsec/healthcraft/app && chown -R deploy:deploy /srv/exsec/healthcraft/app && systemctl restart healthcraft-demo'
+```
+
 ## Ресурсы
 
 Один процесс Bun: около 200 МБ памяти в работе, до 420 МБ на старте, пока собирается интерфейс.

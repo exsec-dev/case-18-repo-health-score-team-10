@@ -1505,6 +1505,8 @@ for (const [path, asset] of frontend?.assets ?? []) {
 
 const server = Bun.serve({
   port: config.port,
+  // HOST=127.0.0.1 – только для прокси на той же машине (демо за nginx)
+  ...(config.host ? { hostname: config.host } : {}),
   // по умолчанию Bun рвет соединение примерно после 10 с тишины, а хендлеры с
   // живыми запросами (PUT PAT: проба и посев, карточка с PAT, callback) бывают
   // дольше; 120 с — с запасом
