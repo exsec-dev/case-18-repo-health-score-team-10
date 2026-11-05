@@ -1,0 +1,22 @@
+name: check
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # тот же образ, что у Dockerfile: что зелено в CI, то и собирается в контейнер
+    container: oven/bun:1.4.2
+    steps:
+      - name: git для тестов и checkout
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends git ca-certificates
+      - uses: actions/checkout@v4
+      - run: bun install --frozen-lockfile
+      - run: bun run tsc
+      # SQLite тестов без fsync, временные БД в /dev/shm, лимит теста 30 с – см. скрипт
+      - run: sh scripts/ci-test.sh

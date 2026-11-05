@@ -1,8 +1,8 @@
 # Как участвовать в проекте HealthCraft
 
 Спасибо, что хотите помочь проекту. Ниже – порядок работы: как сообщить об ошибке,
-предложить изменение, запустить проверки и оформить код. Репозиторий живет в SourceCraft:
-https://sourcecraft.dev/lct-hackaton-2026/case-18-repo-health-score-team-10
+предложить изменение, запустить проверки и оформить код. Репозиторий живет на GitHub:
+https://github.com/exsec-dev/case-18-repo-health-score-team-10
 
 ## Как сообщить об ошибке
 
@@ -40,8 +40,8 @@ https://sourcecraft.dev/lct-hackaton-2026/case-18-repo-health-score-team-10
 
 Нужны Bun 1.4.2 и git 2.31 или новее. Тестам нужны git, символьные ссылки и `setsid`,
 поэтому запускайте их в Linux или WSL: в macOS команды `setsid` нет, в Windows около
-десятка тестов падает. Те же команды выполняет CI SourceCraft
-([`.sourcecraft/ci.yaml`](.sourcecraft/ci.yaml)) на каждый push и pull request; тесты
+десятка тестов падает. Те же команды выполняет CI GitHub Actions
+([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) на каждый push и pull request; тесты
 там запускает `scripts/ci-test.sh` – тот же `bun test --timeout 30000`, но SQLite без
 fsync и временные БД в `/dev/shm`:
 

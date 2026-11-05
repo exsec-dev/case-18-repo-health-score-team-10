@@ -6,7 +6,7 @@ HealthCraft разворачивается на 1 виртуальной маш�
 
 Для развертывания понадобятся:
 
-- ВМ с Ubuntu 24.04: 4 vCPU, 8 ГБ памяти, SSD 64 ГБ, статический IP. На такой конфигурации работает https://health-craft.ru.
+- ВМ с Ubuntu 24.04: 4 vCPU, 8 ГБ памяти, SSD 64 ГБ, статический IP. На такой конфигурации сервис обслуживал весь каталог SourceCraft.
 - Входящие TCP 22, 80 и 443 в группе безопасности или файрволе.
 - Домен: A-записи основного домена и `www` указывают на IP ВМ.
 - Доступ к ВМ по SSH-ключу.
@@ -67,7 +67,7 @@ HealthCraft разворачивается на 1 виртуальной маш�
 | `YA_REDIRECT_URI` | `http://localhost:8418/auth/ya/callback` | адрес возврата после входа, как в OAuth-приложении |
 | `PUBLIC_BASE_URL` | адрес из `YA_REDIRECT_URI` | публичный адрес сервиса для кода бейджа |
 | `LLM_PROVIDER` | `yandex` | провайдер модели: `yandex` (Yandex AI Studio в Yandex Cloud) или `zai` (z.ai); провайдер один, выбирается этой настройкой |
-| `MAIN_MODEL` | `qwen3.6-35b-a3b` | модель, как на https://health-craft.ru; для `yandex` подходит любая модель AI Studio, например `yandexgpt`; для `zai` по умолчанию `glm-5.3` |
+| `MAIN_MODEL` | `qwen3.6-35b-a3b` | модель; для `yandex` подходит любая модель AI Studio, например `yandexgpt`; для `zai` по умолчанию `glm-5.3` |
 | `YAGPT_API_KEY`, `YAGPT_FOLDER_ID` | – | API-ключ сервисного аккаунта Yandex AI Studio и ID каталога Yandex Cloud; без ключа модели AI-обзор недоступен |
 | `ZAI_API_KEY` | – | ключ z.ai, если `LLM_PROVIDER=zai` |
 | `LLM_BASE_URL` | адрес z.ai | другой OpenAI-совместимый адрес для `zai`, например локальная Ollama; только `https://`, кроме `localhost` и `127.0.0.1` |

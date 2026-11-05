@@ -1,6 +1,6 @@
 # HealthCraft – прокси стенда.
 # SITE_ADDRESS – адреса через запятую (Caddy сам выпускает и продлевает сертификаты
-# Let's Encrypt), например "health-craft.ru, www.health-craft.ru"; ":80" – только HTTP, пока
+# Let's Encrypt), например "example.com, www.example.com"; ":80" – только HTTP, пока
 # домена нет. CANONICAL_HOST – основной хост: остальные адреса переадресуются на него
 # (вход Я ID, cookie и Origin-гард мутаций привязаны к одному origin – YA_REDIRECT_URI).
 

@@ -456,7 +456,7 @@ export function loadConfig(): Config {
   const env = { ...envFile(), ...process.env } as Record<string, string>;
   const scan = scanFromEnv(env);
   const provider = env.LLM_PROVIDER === "zai" ? "zai" : "yandex";
-  // для yandex — Qwen3.6-35B-A3B в Yandex AI Studio, как на стенде health-craft.ru (до 20.10.2026 — yandexgpt)
+  // для yandex — Qwen3.6-35B-A3B в Yandex AI Studio, (до 20.10.2026 — yandexgpt)
   const mainModel = env.MAIN_MODEL ?? (provider === "yandex" ? "qwen3.6-35b-a3b" : "glm-5.3");
   // слишком короткий секрет считается отсутствующим (сессии и хранение PAT
   // выключаются), а не «слабым, но рабочим»; значение в лог не печатается

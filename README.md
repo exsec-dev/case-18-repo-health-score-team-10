@@ -1,16 +1,13 @@
 # HealthCraft – здоровье открытых репозиториев SourceCraft
 
-[![HealthCraft Index](https://health-craft.ru/api/v1/repos/lct-hackaton-2026/case-18-repo-health-score-team-10/badge.svg?show=word,delta&key=Nx3fzg2q9kRvu9-t3t399V)](https://health-craft.ru/repo/lct-hackaton-2026/case-18-repo-health-score-team-10)
-
 HealthCraft оценивает состояние репозиториев SourceCraft по фактам из git, REST API и AppSec:
 ставит оценку 0-100, объясняет, из чего она сложилась, и дает конкретные рекомендации с
 ожидаемым эффектом. Все открытые репозитории платформы собраны в публичный рейтинг.
 
-**Стенд:** https://health-craft.ru
-
 Кейс 18 хакатона «Лидеры цифровой трансформации» 2026, команда 10. Описание кейса от
 организаторов – [docs/lct-case.md](docs/lct-case.md), техническое задание –
-[docs/ТЗ-sourcecraft.pdf](docs/ТЗ-sourcecraft.pdf).
+[docs/ТЗ-sourcecraft.pdf](docs/ТЗ-sourcecraft.pdf). Публичный стенд работал во время хакатона и после
+его окончания выключен; сервис можно запустить у себя – см. [Быстрый старт](#быстрый-старт).
 
 ## Что умеет
 
@@ -27,12 +24,12 @@ HealthCraft оценивает состояние репозиториев Sourc
 | Периодический пересчет | сверка каталога раз в час, повторные анализы изменившихся репозиториев раз в сутки; при смене версии модели история пересчитывается из сохраненных фактов |
 | Вход и свои репозитории | вход через Яндекс ID, разделы «Избранное» и «Мои репозитории» (список по токену), анализ своего репозитория; с персональным токеном SourceCraft – приватные репозитории и полный Repo Health Score |
 | Публичный API и бейдж | JSON с индексом и категориями публичного репозитория без ключей, с CORS; SVG-бейдж для README своего репозитория – индекс и на выбор лига, зона, динамика и шкалы 4 категорий; бейдж закрытого репозитория – по ключу с карточки |
-| Документация | раздел https://health-craft.ru/docs: руководство, методика, устройство сервиса, развертывание; поиск по страницам и PDF-версия |
+| Документация | раздел `/docs` сервиса: руководство, методика, устройство сервиса, развертывание; поиск по страницам и PDF-версия |
 
 ## Как получить оценку
 
-- **Публичный репозиторий** уже в рейтинге: найдите его поиском на https://health-craft.ru или
-  откройте `https://health-craft.ru/repo/<org>/<repo>`. Вход не нужен.
+- **Публичный репозиторий** уже в рейтинге: найдите его поиском или откройте
+  `<адрес сервиса>/repo/<org>/<repo>`. Вход не нужен.
 - **Свой или приватный репозиторий, полный Repo Health Score:**
   1. Войдите через Яндекс ID.
   2. В «Настройках» сохраните персональный токен доступа SourceCraft – по нему сервис проверяет
@@ -68,7 +65,7 @@ HealthCraft оценивает состояние репозиториев Sourc
   участникам репозитория, поэтому в публичный рейтинг они не входят.
 
 Формула, подметрики, «нет данных», рекомендации и защита от накрутки – раздел «Методика оценки»
-документации: https://health-craft.ru/docs, в репозитории – [docs/guide/method/](docs/guide/method/)
+документации (`/docs` сервиса), в репозитории – [docs/guide/method/](docs/guide/method/)
 (модель `4.7.0-hci`).
 
 ## Принципы
@@ -127,7 +124,7 @@ HealthCraft оценивает состояние репозиториев Sourc
 
 **Стек:** Bun 1.4.2 и TypeScript (strict), SQLite (`bun:sqlite`), React 19 и Gravity UI
 (`@gravity-ui/uikit` 7.49.0), pdfmake 0.3.11 для PDF, языковая модель Qwen3.6-35B-A3B в Yandex AI Studio или z.ai – по настройке `LLM_PROVIDER`,
-Docker Compose и Caddy 2.10, ВМ Yandex Cloud, CI SourceCraft.
+Docker Compose и Caddy 2.10, CI GitHub Actions.
 
 ## Быстрый старт
 
@@ -142,10 +139,10 @@ Docker Compose и Caddy 2.10, ВМ Yandex Cloud, CI SourceCraft.
 
 ### Из исходников
 
-Команды – для bash (Linux, macOS, WSL). Клон по SSH требует ключа, добавленного в SourceCraft.
+Команды – для bash (Linux, macOS, WSL).
 
 ```bash
-git clone ssh://ssh.sourcecraft.dev/lct-hackaton-2026/case-18-repo-health-score-team-10.git
+git clone https://github.com/exsec-dev/case-18-repo-health-score-team-10.git
 cd case-18-repo-health-score-team-10
 bun install --frozen-lockfile
 cp .env.example .env        # вписать SOURCECRAFT_TOKEN, остальное по желанию
@@ -229,8 +226,8 @@ docker build -t healthcraft .
 
 ### Тесты
 
-Тесты лежат в `tests/*.test.ts` и запускаются `bun test`. Те же команды выполняет CI SourceCraft на
-каждый push и pull request – [`.sourcecraft/ci.yaml`](.sourcecraft/ci.yaml):
+Тесты лежат в `tests/*.test.ts` и запускаются `bun test`. Те же команды выполняет CI GitHub Actions на
+каждый push и pull request – [`.github/workflows/ci.yml`](.github/workflows/ci.yml):
 
 ```bash
 bun run tsc
@@ -266,7 +263,7 @@ bun scripts/report-goldens.ts
 | `APP_SECRET` | вход | ключ подписи сессий и шифрования токенов пользователей, не короче 32 символов; без него вход выключен |
 | `YA_CLIENT_ID`, `YA_CLIENT_SECRET` | вход | OAuth-приложение Яндекс ID; без них `/auth/ya` отвечает 503 |
 | `YA_REDIRECT_URI` | вход | адрес возврата после входа, по умолчанию `http://localhost:8418/auth/ya/callback` |
-| `LLM_PROVIDER`, `MAIN_MODEL` | AI | провайдер `yandex` – Yandex AI Studio (по умолчанию) или `zai` (ключ – `ZAI_API_KEY`) и модель: по умолчанию `qwen3.6-35b-a3b`, как на стенде; провайдер один, автоматического переключения нет |
+| `LLM_PROVIDER`, `MAIN_MODEL` | AI | провайдер `yandex` – Yandex AI Studio (по умолчанию) или `zai` (ключ – `ZAI_API_KEY`) и модель: по умолчанию `qwen3.6-35b-a3b`; провайдер один, автоматического переключения нет |
 | `YAGPT_API_KEY`, `YAGPT_FOLDER_ID` | AI | API-ключ Yandex AI Studio и каталог Yandex Cloud; без них AI-обзоров нет |
 | `AI_UNLOCK_PASSWORD` | по желанию | пароль снятия лимитов AI, выдает администратор сервиса; не короче 20 символов, требует `APP_SECRET`; пусто – функции нет |
 | `AI_TOP_AUTO` | по желанию | `1` – автоматически готовить AI-обзор и проверку для топа рейтинга после нового скана (выключено по умолчанию) |
@@ -303,10 +300,10 @@ bun scripts/report-goldens.ts
 2. **Секреты** (однократно): `/srv/healthcraft/.env` с правами `600` – переменные из `.env.example`
    плюс адрес стенда:
    ```ini
-   SITE_ADDRESS=health-craft.ru, www.health-craft.ru
-   CANONICAL_HOST=health-craft.ru
-   PUBLIC_BASE_URL=https://health-craft.ru
-   YA_REDIRECT_URI=https://health-craft.ru/auth/ya/callback
+   SITE_ADDRESS=example.com, www.example.com
+   CANONICAL_HOST=example.com
+   PUBLIC_BASE_URL=https://example.com
+   YA_REDIRECT_URI=https://example.com/auth/ya/callback
    ```
    A-записи домена указывают на IP ВМ; `YA_REDIRECT_URI` добавляется в OAuth-приложение Яндекс ID.
 3. **Выкладка** (с машины разработчика, каждый раз):
@@ -320,8 +317,8 @@ bun scripts/report-goldens.ts
 4. **Резервные копии:** [`deploy/backup.sh`](deploy/backup.sh) раз в сутки делает копию
    работающей БД (`VACUUM INTO`), проверяет целостность, сжимает и хранит 3 последние копии в
    `/srv/healthcraft/backups`. Копии лежат на том же диске: от ошибки в данных защищают, от
-   потери диска – нет. Запуск по расписанию – строка в `crontab -e` на ВМ (на стенде – 01:30 UTC,
-   04:30 МСК). Журнал пишется рядом с `backups/`, а не в него: каталог `backups/` создает сам
+   потери диска – нет. Запуск по расписанию – строка в `crontab -e` на ВМ, например в 01:30 UTC
+   (04:30 МСК). Журнал пишется рядом с `backups/`, а не в него: каталог `backups/` создает сам
    скрипт, а оболочка открывает файл журнала раньше:
    ```bash
    30 1 * * * /srv/healthcraft/app/deploy/backup.sh >> /srv/healthcraft/backup.log 2>&1
@@ -350,7 +347,7 @@ bun scripts/report-goldens.ts
 Бейдж в README репозитория (готовый код для своего репозитория дает кнопка на карточке):
 
 ```markdown
-[![HealthCraft Index](https://health-craft.ru/api/v1/repos/<org>/<repo>/badge.svg)](https://health-craft.ru/repo/<org>/<repo>)
+[![HealthCraft Index](https://<адрес сервиса>/api/v1/repos/<org>/<repo>/badge.svg)](https://<адрес сервиса>/repo/<org>/<repo>)
 ```
 
 Интерфейс работает через тот же сервер: `GET /api/repos` (рейтинг),
@@ -385,7 +382,7 @@ bun scripts/report-goldens.ts
 
 | Документ | О чем |
 |---|---|
-| https://health-craft.ru/docs | документация на сайте: поиск по страницам и PDF-версия |
+| `/docs` сервиса | документация на сайте: поиск по страницам и PDF-версия |
 | [docs/guide/](docs/guide/) | те же страницы в Markdown, порядок – [toc.md](docs/guide/toc.md): обзор, начало работы и установка, руководство пользователя, методика оценки, устройство сервиса (включая развертывание), ограничения, план развития, частые вопросы, соответствие ТЗ |
 | [docs/guide/method/](docs/guide/method/) | методика оценки: формула и веса, метрики, «нет данных», рекомендации, устойчивость к накрутке; журнал версий модели – [docs/methodology.md](docs/methodology.md) |
 | [.env.example](.env.example) | все переменные окружения с пояснениями |

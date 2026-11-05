@@ -4,7 +4,7 @@ HealthCraft отдает HealthCraft Index открытого репозитор
 
 ## Маршруты
 
-Адреса – относительно `https://health-craft.ru`.
+Адреса – относительно адреса сервиса, например `http://localhost:8418`.
 
 | Запрос | Ответ |
 |---|---|
@@ -24,7 +24,7 @@ HealthCraft отдает HealthCraft Index открытого репозитор
 Чтобы получить оценку репозитория, выполните:
 
 ```bash
-curl https://health-craft.ru/api/v1/repos/<org>/<repo>
+curl http://localhost:8418/api/v1/repos/<org>/<repo>
 ```
 
 Ответ для выдуманного репозитория `example/tasktracker`, например:
@@ -94,7 +94,7 @@ Repo Health Score, CI/CD и Безопасности в публичном API �
 Код выглядит так, картинка ведет на карточку репозитория:
 
 ```text
-[![HealthCraft Index](https://health-craft.ru/api/v1/repos/<org>/<repo>/badge.svg?show=rank,delta)](https://health-craft.ru/repo/<org>/<repo>)
+[![HealthCraft Index](https://<адрес сервиса>/api/v1/repos/<org>/<repo>/badge.svg?show=rank,delta)](https://<адрес сервиса>/repo/<org>/<repo>)
 ```
 
 Цвет числа зависит от зоны: зеленый для 70-100, желтый для 40-69, красный для 0-39. Если оценки нет, бейдж показывает `n/a` серым, без зоны и динамики. Если в репозитории нет кода, число 0 тоже серое, а с чипом [[Зона]] вместо зоны стоит «нет кода». У категории без данных вместо балла стоит `n/a`, а шкала пустая.
@@ -124,7 +124,7 @@ Repo Health Score, CI/CD и Безопасности в публичном API �
 Ответы `/api/v1` несут заголовок `Access-Control-Allow-Origin: *`, поэтому JSON можно запросить из браузера со страницы любого сайта, например так:
 
 ```js
-const res = await fetch("https://health-craft.ru/api/v1/repos/<org>/<repo>");
+const res = await fetch("http://localhost:8418/api/v1/repos/<org>/<repo>");
 const { healthcraftIndex } = await res.json();
 ```
 
