@@ -6131,7 +6131,7 @@ h3,
   height: 40px;
   padding: 0 var(--g-spacing-3);
   border-radius: var(--g-border-radius-l);
-  background: var(--g-color-base-warning-light);
+  background: var(--g-color-base-generic);
   cursor: default;
 }
 
@@ -6146,7 +6146,7 @@ h3,
   font-weight: 500;
   font-size: var(--g-text-body-1-font-size);
   line-height: 1.2;
-  color: var(--g-color-text-warning-heavy);
+  color: var(--g-color-text-primary);
 }
 
 .rh-demo-note_compact .rh-demo-note__badge {
@@ -6166,5 +6166,5 @@ h3,
   display: inline-block;
   padding: 2px var(--g-spacing-2);
   border-radius: var(--g-border-radius-m);
-  background: var(--g-color-base-warning-light);
+  background: var(--g-color-base-generic);
 }
